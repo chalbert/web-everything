@@ -4,9 +4,12 @@ kind: story
 size: 8
 priority: low
 parent: "2531"
-status: open
+status: resolved
+unresolvedReason: "#2779-incident: PR #2785 (branch lane/2779-session-token-fresh) merged and the drain's resolve-on-land bookkeeping wrongly flipped this unrelated card to resolved off a branch-name coincidence (the branch's leading digits matched an unrelated open PR number, not this card) - nothing for this card was built. See we:scripts/lib/open-pr-items.mjs (deliveredItemNumsFromPr openPrNums guard) and we:scripts/lib/commit-message-safety.mjs for the product fix."
+dateUnresolved: "2026-09-26"
 scope: ["plateau:src/build-runner/"]
 dateOpened: "2026-07-28"
+dateResolved: "2026-09-27"
 tags: []
 ---
 

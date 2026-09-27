@@ -58,11 +58,12 @@ import { getRequiredStatusChecks } from '../lib/required-status-checks.mjs';
 import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { execFileSyncThrottled } from '../lib/gh-throttle.mjs';
+import { readSharedOpenPrs } from '../lib/pr-snapshot.mjs';
 import { readPrsFromFile } from './open-pr-fetch.mjs';
 import { defaultListAgents } from '../operations/dispatch-lane-io.mjs';
 import { listAgentsWithReviewJobs } from '../operations/review-job-store.mjs';
 import { countRearmComments } from './rearm-review.mjs';
-import { planReconcile, DISPATCH_KINDS, REFUSAL_KINDS, markSelfReportedDone, markHungSessions, markAuthExpiredSessions, markIdleFinishedSessions } from './reconcile-core.mjs';
+import { planReconcile, DISPATCH_KINDS, REFUSAL_KINDS, markSelfReportedDone, markHungSessions, markAuthExpiredSessions, markIdleFinishedSessions, markBgIsolationStalls } from './reconcile-core.mjs';
 import { tryReadCompletion } from '../operations/completion-store.mjs';
 import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 // we:backlog/x5uqim1-*.md (#4075/#3383) — the two extra facts `reconcile-core.mjs#isPrCiFailureOwedRerun` needs
@@ -70,8 +71,9 @@ import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 // `we:scripts/merge-ai-prs.mjs` (never re-derived) — the same collapsed-rollup reader every other required-check
 // consumer in this repo already shares.
 import { latestRequiredCheck, isRequiredCheckFailed } from '../merge-ai-prs.mjs';
-import { computeMainRedWindows, DEFAULT_MAIN_WORKFLOW_NAME, DEFAULT_REQUIRED_CHECK } from './main-red-recovery.mjs';
+import { computeMainRedWindows, DEFAULT_MAIN_WORKFLOW_NAME, DEFAULT_REQUIRED_CHECK, DEFAULT_MAIN_RED_ATTRIBUTED_CHECKS, failingRequiredCheckForAttribution, isAnyRequiredCheckFailed } from './main-red-recovery.mjs';
 import { readHungInfo, resolveHungThresholdMs, readClaudeAuthExpiredInfo, readIdleFinishedInfo, resolveIdleFinishedThresholdMs } from './hung-session.mjs';
+import { readBgIsolationStallInfo } from './bg-isolation-stall.mjs';
 
 /**
  * we:scripts/conveyor/reconcile-pass.mjs#PR_LIST_JSON_FIELDS — the `--json` fields this pass reads about each
@@ -93,8 +95,16 @@ import { readHungInfo, resolveHungThresholdMs, readClaudeAuthExpiredInfo, readId
  *                         `defaultBranch` to tell a PR stacked on another lane/PR (the drain will never land it,
  *                         whatever its labels say) apart from an ordinary conflict against `main`. Dropping it
  *                         silently sends every `conflicted` PR back through the pre-#3383 `owed-elsewhere` path.
+ *   `files`             — #x9fbg1x-live-incident (2026-09-27): the PR's own already-changed files, carried on
+ *                         every row (evidence, mirrors `body`) so `reconcile-fix-dispatch.mjs#planFixesFromReconcile`
+ *                         can fence a no-declared-scope fix dispatch off the PR's REAL diff without a second,
+ *                         separate `gh pr diff` call of its own (previously the ONLY way that fallback could
+ *                         read the PR's files — see that file's own docblock for the live PR #2779 this fixes:
+ *                         a genuine, rich diff silently read as empty whenever that separate call failed).
+ *                         Costs nothing extra beyond this one query already paying for connection fields
+ *                         (`labels`/`statusCheckRollup`/`comments`) — `files` is the same shape of field.
  */
-export const PR_LIST_JSON_FIELDS = 'number,headRefName,headRefOid,baseRefName,labels,statusCheckRollup,mergeStateStatus,comments,body';
+export const PR_LIST_JSON_FIELDS = 'number,headRefName,headRefOid,baseRefName,labels,statusCheckRollup,mergeStateStatus,comments,body,files';
 
 /** How many open PRs one pass reads. The board's own `OPEN_LIMIT` is 30; a reconciler that silently stopped at
  *  the default page would leave the overflow unowned, which is this item's defect wearing a smaller hat. */
@@ -107,6 +117,9 @@ export const PR_LIST_LIMIT = 200;
  * @returns {Array<object>}
  */
 export function defaultReadPrs({ exec = execFileSyncThrottled, repo = null } = {}) {
+  // #gh-graphql-budget — read the host-shared open-PR snapshot (one right-sized list per repo per TTL for the
+  // whole fleet) instead of a private `gh pr list`; null = not applicable (tests, cwd repo) → the direct read below.
+  if (exec === execFileSyncThrottled) { const shared = readSharedOpenPrs({ repo, fields: PR_LIST_JSON_FIELDS }); if (shared) return shared; }
   const argv = ['pr', 'list', '--state', 'open', '--limit', String(PR_LIST_LIMIT), '--json', PR_LIST_JSON_FIELDS];
   if (repo) argv.push('--repo', repo);
   // #x5n4zn3 — was bare (no timeout).
@@ -133,11 +146,16 @@ export function defaultReadPrs({ exec = execFileSyncThrottled, repo = null } = {
  * session whose OWN transcript shows the Claude CLI's own auth-failure (see that function's own doc for the
  * full incident) ALSO stops reading as `live-process` — this one catches the failure the INSTANT it shows in
  * the transcript, rather than waiting out the generic hung-transcript threshold.
- * FINALLY runs {@link markIdleFinishedSessions} (#4075/xg7m2wq, live incident PR #2724, 2026-09-26) — a
- * backstop for EVERY kind, not only the ones with a completion-record schema: a session whose last assistant
- * turn has genuinely ENDED (no pending tool call) and has sat idle past a short threshold is treated as
- * finished, in case a brief forgets to report its own completion the way `fix-agent-ci-brief.md` did.
- * @param {{exec?:Function, env?:object, completionFor?:Function, hungInfoFor?:Function, authExpiredInfoFor?:Function, idleFinishedInfoFor?:Function, now?:number, hungThresholdMs?:number, idleFinishedThresholdMs?:number, listJobs?:Function}} [o]
+ * FINALLY (both epic #3383/#4075) runs {@link markIdleFinishedSessions} (live incident PR #2724, 2026-09-26)
+ * — a backstop for EVERY kind, not only the ones with a completion-record schema: a session whose last
+ * assistant turn has genuinely ENDED (no pending tool call) and has sat idle past a short threshold is
+ * treated as finished, in case a brief forgets to report its own completion the way `fix-agent-ci-brief.md`
+ * did — AND {@link markBgIsolationStalls} (#x9fbg1x, live incident `fix-2748`/`fix-2770`, 2026-09-26), which
+ * gives a session `assessLiveness` already reports `awaiting-permission` a MORE SPECIFIC reason when its own
+ * transcript shows Claude Code's own background-session worktree-isolation guard refusal — see
+ * `we:scripts/conveyor/bg-isolation-stall.mjs`'s own header. Cheap: it reads a transcript only for a session
+ * already classified `awaiting-permission`, never for the common live/finished case.
+ * @param {{exec?:Function, env?:object, completionFor?:Function, hungInfoFor?:Function, authExpiredInfoFor?:Function, idleFinishedInfoFor?:Function, bgIsolationStallInfoFor?:Function, now?:number, hungThresholdMs?:number, idleFinishedThresholdMs?:number, listJobs?:Function}} [o]
  *   `listJobs` (x26lw6u) defaults to the live review-job rows; a test injects `() => []` or fakes.
  * @returns {Array<object>}
  */
@@ -146,6 +164,7 @@ export function defaultReadAgents({
   hungInfoFor = readHungInfo, now = Date.now(), hungThresholdMs = resolveHungThresholdMs(env),
   authExpiredInfoFor = readClaudeAuthExpiredInfo,
   idleFinishedInfoFor = readIdleFinishedInfo, idleFinishedThresholdMs = resolveIdleFinishedThresholdMs(env),
+  bgIsolationStallInfoFor = readBgIsolationStallInfo,
   listJobs = undefined,
 } = {}) {
   // x26lw6u — a review now runs as a JOB (`we:scripts/operations/review-job.mjs`), not a `claude --bg` session,
@@ -163,7 +182,11 @@ export function defaultReadAgents({
   // #4075/xg7m2wq, live incident PR #2724, 2026-09-26 — the general backstop for EVERY kind: a session whose
   // last assistant turn has fully ended (no pending tool call) and has sat idle past a short threshold is
   // finished too, in case its own brief forgot to report completion the way `fix-agent-ci-brief.md` did.
-  return markIdleFinishedSessions(authMarked, idleFinishedInfoFor, now, idleFinishedThresholdMs);
+  const idleMarked = markIdleFinishedSessions(authMarked, idleFinishedInfoFor, now, idleFinishedThresholdMs);
+  // #x9fbg1x — LAST: only ever adds a clearer reason to a row already `awaiting-permission`, so running it
+  // after every other pre-pass (which can only ever REMOVE a session from `live-process` contention, never add
+  // `awaiting-permission`) is safe regardless of ordering.
+  return markBgIsolationStalls(idleMarked, bgIsolationStallInfoFor);
 }
 
 /**
@@ -316,26 +339,324 @@ export function defaultReadAheadBy(headSha, { exec = execFileSyncThrottled, repo
  * only `aheadByOnMain` needs a fresh `gh api .../compare` read per failing PR, keyed off `headRefOid`
  * (already fetched by `defaultReadPrs`'s own `PR_LIST_JSON_FIELDS`).
  * @param {Array<object>} prs
- * @param {{readMainRuns?:Function, readAheadBy?:Function, requiredCheck?:string, defaultBranch?:string, repo?:string|null}} [o]
+ * soak-main-red (2026-09-26): judged across EVERY required check (`requiredChecks`, default
+ * `DEFAULT_MAIN_RED_ATTRIBUTED_CHECKS` = test/smoke/daemon-soak), not `test` alone — a PR red only on
+ * `daemon-soak` while `main`'s own soak was red is owed a rebase, never a ci-heal. `requiredCheck` (singular,
+ * legacy) still narrows to exactly that one check when a caller passes it.
+ * @param {Array<object>} prs
+ * @param {{readMainRuns?:Function, readAheadBy?:Function, requiredCheck?:string, requiredChecks?:string[], defaultBranch?:string, repo?:string|null}} [o]
  * @returns {{prs:Array<object>, mainRedWindows:Array<object>}}
  */
 export function enrichPrsWithMainRedFacts(prs, {
   readMainRuns = defaultReadMainRuns, readAheadBy = defaultReadAheadBy,
-  requiredCheck = DEFAULT_REQUIRED_CHECK, defaultBranch = 'main', repo = null,
+  requiredCheck = null, requiredChecks = DEFAULT_MAIN_RED_ATTRIBUTED_CHECKS, defaultBranch = 'main', repo = null,
 } = {}) {
+  const checks = requiredCheck ? [requiredCheck] : requiredChecks;
   const list = Array.isArray(prs) ? prs : [];
-  const failing = list.filter((pr) => isRequiredCheckFailed(pr, requiredCheck));
+  const failing = list.filter((pr) => isAnyRequiredCheckFailed(pr, checks));
   if (!failing.length) return { prs: list, mainRedWindows: [] };
 
   const mainRedWindows = computeMainRedWindows(readMainRuns({ repo, branch: defaultBranch }));
   const failingSet = new Set(failing);
   const enriched = list.map((pr) => {
     if (!failingSet.has(pr)) return pr;
-    const check = latestRequiredCheck(pr, requiredCheck);
+    const check = failingRequiredCheckForAttribution(pr, { requiredChecks: checks, mainRedWindows });
     const aheadBy = pr?.headRefOid ? readAheadBy(pr.headRefOid, { repo, base: defaultBranch }) : null;
-    return { ...pr, requiredCheckCompletedAt: check?.completedAt ?? null, aheadByOnMain: aheadBy };
+    return { ...pr, requiredCheckCompletedAt: check?.completedAt ?? null, requiredCheckName: check?.name ?? null, aheadByOnMain: aheadBy };
   });
   return { prs: enriched, mainRedWindows };
+}
+
+// live incident, chalbert/web-everything PR #2752 (#4034/#2748) — see `we:scripts/lib/already-landed-content.mjs`'s
+// own header for the incident and why per-file BLOB IDENTITY against `main`'s own history is the signal, not a
+// plain merge-tree/current-content diff.
+import { CONFLICT_LABEL } from './conflict-label.mjs';
+import {
+  computeAlreadyLandedVerdict, attributeCarrierPr, parseRawDiffZ, addedContentIntact,
+} from '../lib/already-landed-content.mjs';
+
+/** How many of `main`'s own commits touching one file this pass will scan for a blob match, most-recent-first,
+ *  before giving up on that file (mirrors `we:scripts/backlog-stranded-sweep.mjs#AUTO_SWEEP_LOG_LIMIT`'s own
+ *  "bounded, not silently widened" doctrine). NEVER GUESS past the window: a file whose match sits further back
+ *  simply reads as `matchedCommit: null` for this pass — the safe direction (falls through to the ordinary
+ *  dispatch paths, exactly as if this whole detector did not exist). */
+export const ALREADY_LANDED_LOG_WINDOW = 300;
+
+/** Bare label-name membership test, matching `gh --json labels`'s tolerant `{name}`-or-bare-string shape
+ *  (mirrors `we:scripts/conveyor/duplicate-pr-watch.mjs#hasLabelNamed`, not imported from that file so this
+ *  module never pulls in its unrelated duplicate-PR detection machinery for one boolean check). */
+function hasLabel(labels, name) {
+  return (Array.isArray(labels) ? labels : [])
+    .map((l) => (typeof l === 'string' ? l : l?.name))
+    .filter(Boolean)
+    .includes(name);
+}
+
+/** A full or abbreviated hex commit id — the only shape the git calls below ever put in a revision position. */
+const SHA_RE = /^[0-9a-f]{7,64}$/;
+/** The branch name shape `origin/<defaultBranch>` is built from — never dash-leading, never a range/revspec. */
+const BRANCH_RE = /^[A-Za-z0-9._/-]+$/;
+const isSha = (s) => typeof s === 'string' && SHA_RE.test(s);
+const mainRefFor = (defaultBranch) =>
+  (typeof defaultBranch === 'string' && BRANCH_RE.test(defaultBranch) && !defaultBranch.startsWith('-')
+    ? `origin/${defaultBranch}` : null);
+/** `git --literal-pathspecs`: a changed path is matched as the literal file it names, never as a glob. */
+const GIT_LITERAL = ['--literal-pathspecs'];
+
+/**
+ * we:scripts/conveyor/reconcile-pass.mjs#defaultFetchRef — best-effort fetch of the PR's own head, so a commit
+ * this checkout may never have seen is present locally before it is read. Never throws — a fetch failure just
+ * means the reads below fail closed (never landed).
+ *
+ * KEYED ON THE PR NUMBER, NEVER ON `headRefName` (PR #2769 security review). A PR's branch name is fully
+ * author-controlled, and git accepts a dash-leading one (`--upload-pack=<cmd>`), which the earlier bare
+ * `git fetch origin <headRefName>` would parse as an OPTION — measured to run an arbitrary command against a
+ * local-path remote. The ref fetched here is built from a validated positive integer (`refs/pull/<n>/head`),
+ * behind `--end-of-options`, into an EXPLICIT destination — the same shape
+ * `we:scripts/fetch-parked.mjs#resolveNetDiff` adopted when #2373 banned the bare opportunistic form.
+ * @param {number} prNumber
+ * @param {{exec?:Function, remote?:string}} [o]
+ */
+export function defaultFetchRef(prNumber, { exec = execFileSync, remote = 'origin' } = {}) {
+  const n = Number(prNumber);
+  if (!Number.isInteger(n) || n <= 0 || String(n) !== String(prNumber)) return;
+  try {
+    // A private namespace, not `refs/remotes/…`: never collides with a real upstream branch, and stays out of
+    // every remote-tracking-ref scan the lane tooling runs.
+    exec('git', ['fetch', '--quiet', '--end-of-options', remote, `+refs/pull/${n}/head:refs/already-landed/pr/${n}`], {
+      stdio: ['ignore', 'pipe', 'pipe'], timeout: 30_000,
+    });
+  } catch { /* best-effort — the reads below degrade to null, never to a guess */ }
+}
+
+/**
+ * we:scripts/conveyor/reconcile-pass.mjs#defaultReadMergeBase — the PR head's merge-base with `mainRef`, or
+ * `null`. This is the lower bound of the `<base>..main` search window (see
+ * `we:scripts/lib/already-landed-content.mjs`'s own header for why a pre-base match is never delivery).
+ * @param {string} headSha
+ * @param {string} mainRef
+ * @param {{exec?:Function}} [o]
+ * @returns {string|null}
+ */
+export function defaultReadMergeBase(headSha, mainRef, { exec = execFileSync } = {}) {
+  if (!isSha(headSha) || !mainRef) return null;
+  try {
+    const out = String(exec('git', ['merge-base', '--end-of-options', headSha, mainRef], {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 20_000,
+    }) || '').trim();
+    return isSha(out) ? out : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * we:scripts/conveyor/reconcile-pass.mjs#defaultReadChanges — what the PR changes relative to its merge-base,
+ * with status, destination mode and blob per path (`git diff --raw -z --no-renames`, parsed by
+ * `we:scripts/lib/already-landed-content.mjs#parseRawDiffZ`). Replaces an earlier `gh pr view --json files`
+ * path list, which could not see a rename's source, a mode change, or a deletion (PR #2769 review).
+ * @param {string} base
+ * @param {string} headSha
+ * @param {{exec?:Function}} [o]
+ * @returns {Array<{status:string, path:string, dstMode:string, dstBlob:string}>}
+ */
+export function defaultReadChanges(base, headSha, { exec = execFileSync } = {}) {
+  if (!isSha(base) || !isSha(headSha)) return [];
+  try {
+    const out = exec('git', ['diff', '--raw', '-z', '--no-renames', '--no-abbrev', '--end-of-options', base, headSha], {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 20_000, maxBuffer: 16 * 1024 * 1024,
+    });
+    return parseRawDiffZ(out);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * we:scripts/conveyor/reconcile-pass.mjs#defaultReadEntryAt — the `{mode, blob}` a path holds at a commit
+ * (`git ls-tree`), or `null` when the path does not exist there. Mode travels with the blob so a mode-only
+ * change is never matched by the unchanged blob alone.
+ *
+ * THROWS when the read itself fails (a bad revision, a timeout, a locked repo) — it never returns `null` for
+ * that, because `null` means "absent" and a deletion counts as landed on absence (PR #2769 review, round 2: a
+ * failed tip read once passed for "gone from main"). {@link defaultFindMatchingMainCommit} catches and fails
+ * closed.
+ * @param {string} ref
+ * @param {string} file
+ * @param {{exec?:Function}} [o]
+ * @returns {{mode:string, blob:string}|null}
+ */
+export function defaultReadEntryAt(ref, file, { exec = execFileSync } = {}) {
+  if (!ref || !file) throw new Error('defaultReadEntryAt: ref and file are required');
+  const out = String(exec('git', [...GIT_LITERAL, 'ls-tree', '-z', '--full-tree', '--end-of-options', ref, '--', file], {
+    encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 10_000,
+  }) || '');
+  for (const rec of out.split('\0')) {
+    const m = /^(\d{6}) \w+ ([0-9a-f]{7,64})\t(.*)$/s.exec(rec);
+    if (m && m[3] === file) return { mode: m[1], blob: m[2] };
+  }
+  return null;
+}
+
+const BLOB_READ = { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 20_000, maxBuffer: 16 * 1024 * 1024 };
+
+/**
+ * we:scripts/conveyor/reconcile-pass.mjs#defaultTipCarriesChange — does `main`'s tip blob still carry the PR's
+ * change to one file, when the tip is NOT the PR's exact blob (`main` edited the file after carrying it)?
+ *   - edited file (`baseBlob` set): a real three-way merge — `git merge-file -p --object-id <tip> <base> <pr>` —
+ *     must be conflict-free AND produce the tip byte-for-byte. That is "merging the PR into `main` changes
+ *     nothing": every change the PR made is already there, whatever `main` did around it. It replaced a
+ *     hunk-position check that repeated lines (`}`, blank lines) could fool into calling a revert "preserved"
+ *     (PR #2769 review, round 2 self-review).
+ *   - added file (`baseBlob` null): `we:scripts/lib/already-landed-content.mjs#addedContentIntact` — git's empty
+ *     blob is not guaranteed to exist in the object store, and an add/add merge conflicts on any difference.
+ * A conflict, a binary file, or any git failure (`merge-file --object-id` needs git ≥ 2.44) THROWS or returns
+ * false; the caller fails closed.
+ * @param {string} tipBlob
+ * @param {string|null} baseBlob
+ * @param {string} prBlob
+ * @param {{exec?:Function}} [o]
+ * @returns {boolean}
+ */
+export function defaultTipCarriesChange(tipBlob, baseBlob, prBlob, { exec = execFileSync } = {}) {
+  if (!isSha(tipBlob) || !isSha(prBlob) || (baseBlob !== null && !isSha(baseBlob))) return false;
+  const readBlob = (b) => String(exec('git', ['cat-file', 'blob', '--end-of-options', b], BLOB_READ) ?? '');
+  const tipText = readBlob(tipBlob);
+  if (baseBlob === null) return addedContentIntact(tipText, readBlob(prBlob));
+  // Exits non-zero on a conflict (or a binary file), which execFileSync throws on.
+  const merged = String(exec('git', ['merge-file', '-p', '--object-id', '--end-of-options', tipBlob, baseBlob, prBlob], BLOB_READ) ?? '');
+  return merged === tipText;
+}
+
+/**
+ * we:scripts/conveyor/reconcile-pass.mjs#defaultFindMatchingMainCommit — the commit on `<base>..mainRef` that
+ * delivered this one change to `main`, or `null`. Per status:
+ *   - `A`/`M`: the first commit (most-recent-first, capped at {@link ALREADY_LANDED_LOG_WINDOW}) whose entry for
+ *     the path has the SAME blob AND mode the PR's head has. Robust to a rebase (blob identity ignores graph
+ *     shape) and to later refinement on `main` (the match can sit anywhere in the window, not just at the tip).
+ *     `main`'s tip must still CARRY the change: same mode, and either the PR's exact blob or a later edit that
+ *     left the PR's change intact ({@link defaultTipCarriesChange}).
+ *     A carry that `main` later reverted, or whose PR lines `main` moved on, is not delivery. The log is not
+ *     `--first-parent`, so a side-branch commit merged into `main` can be the match (git's default history
+ *     simplification already drops side branches whose net change to the path is zero).
+ *   - `D`: the path must be absent from `mainRef`'s tip — a SUCCESSFUL read that finds nothing, never a failed
+ *     one — and the deleting commit must sit in the window.
+ *   - anything else (`T`ype change, unmerged, unknown): unsupported → `null`, never a guess.
+ * Any failed git read makes the whole answer `null`. Bounded below by the PR's own merge-base: see
+ * `we:scripts/lib/already-landed-content.mjs`'s header for why a match that predates it (a deliberate
+ * restoration) is never delivery.
+ * @param {{status:string, path:string, dstMode:string, dstBlob:string}} change
+ * @param {{base:string, mainRef:string, exec?:Function, windowLimit?:number, readEntryAt?:Function,
+ *   tipCarriesChange?:Function}} o
+ * @returns {string|null}
+ */
+export function defaultFindMatchingMainCommit(change, {
+  base, mainRef, exec = execFileSync, windowLimit = ALREADY_LANDED_LOG_WINDOW, readEntryAt = defaultReadEntryAt,
+  tipCarriesChange = defaultTipCarriesChange,
+} = {}) {
+  const path = change?.path;
+  if (!path || !isSha(base) || !mainRef) return null;
+  const logWindow = (extra) => {
+    const out = exec('git', [...GIT_LITERAL, 'log', '--format=%H', `-n${windowLimit}`, ...extra, `${base}..${mainRef}`, '--', path], {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 20_000, maxBuffer: 16 * 1024 * 1024,
+    });
+    return String(out || '').split('\n').filter(Boolean);
+  };
+  try {
+    if (change.status === 'D') {
+      if (readEntryAt(mainRef, path, { exec }) !== null) return null; // still alive on main — not delivered
+      return logWindow(['--diff-filter=D'])[0] || null;
+    }
+    if (change.status !== 'A' && change.status !== 'M') return null;
+    if (!change.dstBlob || !change.dstMode) return null;
+    // A match inside the window is not enough if `main` later UNDID it — wholly (a revert, deleting an added
+    // file) or in part (an edit to a line the PR wrote): main's tip must still carry the PR's change.
+    const tip = readEntryAt(mainRef, path, { exec });
+    if (!tip || tip.mode !== change.dstMode) return null;
+    if (tip.blob !== change.dstBlob) {
+      const atBase = change.status === 'M' ? readEntryAt(base, path, { exec }) : null;
+      if (change.status === 'M' && !atBase) return null;
+      if (!tipCarriesChange(tip.blob, atBase ? atBase.blob : null, change.dstBlob, { exec })) return null;
+    }
+    for (const c of logWindow([])) {
+      const e = readEntryAt(c, path, { exec });
+      if (e && e.blob === change.dstBlob && e.mode === change.dstMode) return c;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * we:scripts/conveyor/reconcile-pass.mjs#defaultReadPullsForCommit — the PR number(s) GitHub associates with one
+ * commit (`GET /repos/{o}/{r}/commits/{sha}/pulls`) — the attribution primitive
+ * `we:scripts/lib/already-landed-content.mjs#attributeCarrierPr` needs, one call per DISTINCT matched commit.
+ * @param {string} sha
+ * @param {{exec?:Function, repo?:string|null}} [o]
+ * @returns {number[]}
+ */
+export function defaultReadPullsForCommit(sha, { exec = execFileSyncThrottled, repo = null } = {}) {
+  try {
+    const endpoint = `repos/${repo || '{owner}/{repo}'}/commits/${sha}/pulls`;
+    const out = exec('gh', ['api', endpoint, '--jq', '.[].number'], {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL',
+    });
+    return String(out || '').split('\n').filter(Boolean).map(Number).filter(Number.isInteger);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * we:scripts/conveyor/reconcile-pass.mjs#enrichPrsWithAlreadyLandedFacts — live incident, chalbert/web-everything
+ * PR #2752 (#4034/#2748): attach `alreadyLandedInMain: {carrierPr}` to any open PR whose own content is already,
+ * file-by-file, present on `main` — see `we:scripts/lib/already-landed-content.mjs`'s own header for the full
+ * incident and why this needs blob identity rather than a plain diff.
+ *
+ * PAYS THE EXTRA READS ONLY FOR A PR CARRYING `merge-status:conflicting` — the population
+ * `we:scripts/conveyor/parked-pr-conflict-watch.mjs` already narrows this to (a real merge conflict on a
+ * review-parked PR), and the ONLY phase `reconcile-core.mjs`'s own `isConflictBounce` would otherwise dispatch a
+ * mechanical conflict-fix for. A pass with no such PR (the common case) costs nothing beyond the label scan
+ * `defaultReadPrs` already fetched every field for.
+ * @param {Array<object>} prs
+ * @param {{fetchRef?:Function, readMergeBase?:Function, readChanges?:Function, findMatchingCommit?:Function,
+ *   readPulls?:Function, repo?:string|null, defaultBranch?:string}} [o]
+ * @returns {Array<object>}
+ */
+export function enrichPrsWithAlreadyLandedFacts(prs, {
+  fetchRef = defaultFetchRef, readMergeBase = defaultReadMergeBase, readChanges = defaultReadChanges,
+  findMatchingCommit = defaultFindMatchingMainCommit, readPulls = defaultReadPullsForCommit,
+  repo = null, defaultBranch = 'main',
+} = {}) {
+  const list = Array.isArray(prs) ? prs : [];
+  const mainRef = mainRefFor(defaultBranch);
+  return list.map((pr) => {
+    if (!hasLabel(pr?.labels, CONFLICT_LABEL)) return pr;
+    const prNumber = Number(pr?.number);
+    const headSha = pr?.headRefOid;
+    if (!Number.isInteger(prNumber) || prNumber <= 0 || !isSha(headSha) || !mainRef) return pr;
+
+    fetchRef(prNumber, {});
+    const base = readMergeBase(headSha, mainRef, {});
+    if (!base) return pr; // no common history to bound the search by — never guess
+    const changes = readChanges(base, headSha, {});
+    if (!changes.length) return pr; // could not even read the diff — never guess containment from nothing
+
+    const fileMatches = changes.map((change) => ({
+      file: change.path, matchedCommit: findMatchingCommit(change, { base, mainRef }),
+    }));
+
+    const verdict = computeAlreadyLandedVerdict(fileMatches);
+    if (!verdict.landed) return pr;
+
+    const uniqueCommits = [...new Set(fileMatches.map((m) => m.matchedCommit).filter(Boolean))];
+    const pullsByCommit = {};
+    for (const c of uniqueCommits) pullsByCommit[c] = readPulls(c, { repo });
+    const carrierPr = attributeCarrierPr(fileMatches, pullsByCommit);
+
+    return { ...pr, alreadyLandedInMain: { carrierPr } };
+  });
 }
 
 /**
@@ -375,15 +696,23 @@ export function formatReport({ dispatch = [], refusals = [], notes = [] } = {}) 
 /**
  * we:scripts/conveyor/reconcile-pass.mjs#runReconcilePass — read, decide, return. Every reader is injectable, so
  * the whole shell is exercisable with no network and no credential.
- * @param {{readPrs?:Function, readAgents?:Function, enrich?:Function, enrichMainRed?:Function, now?:number, repo?:string|null, defaultBranch?:string}} [o]
+ * @param {{readPrs?:Function, readAgents?:Function, enrich?:Function, enrichMainRed?:Function,
+ *   enrichAlreadyLanded?:Function, now?:number, repo?:string|null, defaultBranch?:string}} [o]
  * @returns {{dispatch:Array<object>, refusals:Array<object>, notes:Array<object>, prs:number, agents:number}}
  */
 export function runReconcilePass({
   readPrs = defaultReadPrs, readAgents = defaultReadAgents, enrich = enrichAgents,
-  enrichMainRed = enrichPrsWithMainRedFacts, now = Date.now(), repo = null, defaultBranch = 'main',
+  enrichMainRed = enrichPrsWithMainRedFacts, enrichAlreadyLanded = enrichPrsWithAlreadyLandedFacts,
+  now = Date.now(), repo = null, defaultBranch = 'main',
   // #2748 false-red follow-up — injectable so a test can supply a fixture with no network, matching every
   // other reader in this file. Defaults to the live, cached branch-protection read.
   readRequiredChecks = getRequiredStatusChecks,
+  // #2787-live-incident (2026-09-27) — `origin/<defaultBranch>`'s own current tip, read PURELY LOCALLY (no `gh`
+  // call at all): `reconcile-core.mjs#planReconcile`'s conflict-fix cap needs it to tell "the same conflict,
+  // still stuck" apart from "a fresh conflict, main moved on" (see that function's own `mainSha` param).
+  // Best-effort — see {@link defaultResolveMainSha}'s own docblock; a failed read degrades to `null`, which
+  // `planReconcile` already treats as "ref-only comparison", never a hard failure of this whole pass.
+  resolveMainSha = defaultResolveMainSha,
 } = {}) {
   const repoKey = repo == null ? 'we' : repoKeyForSlug(repo);
   if (repoKey === null) throw new Error(`reconcile-pass: --repo ${repo} is not a constellation repo`);
@@ -396,14 +725,46 @@ export function runReconcilePass({
   // we:backlog/x5uqim1-*.md — attach `requiredCheckCompletedAt`/`aheadByOnMain` to any currently-failing
   // PR and read `main`'s own red windows, so `planReconcile` can tell a `ci-red` PR caused by a red `main` apart
   // from the PR's own defect. Costs nothing beyond what `readPrs` already fetched when nothing is `ci:failed`.
-  const { prs, mainRedWindows } = enrichMainRed(rawPrs, { repo: resolvedRepo, defaultBranch });
+  const { prs: redPrs, mainRedWindows } = enrichMainRed(rawPrs, { repo: resolvedRepo, defaultBranch });
+  // live incident, PR #2752 (#4034/#2748) — attach `alreadyLandedInMain` to any PR carrying
+  // `merge-status:conflicting` whose own content is already, file-by-file, present on `main`. Costs nothing
+  // beyond the label scan `readPrs` already fetched every field for when no PR carries that label.
+  const prs = enrichAlreadyLanded(redPrs, { repo: resolvedRepo, defaultBranch });
   const agents = enrich(readAgents({}));
   // A repo this constellation does not know the gh slug for (`resolvedRepo` stays `null`, `gh` infers from cwd)
   // still gets a required set: `getRequiredStatusChecks` degrades to its own cache/fallback chain rather than
   // ever throwing, so this call is safe unconditionally (see that module's own header).
   const { checks: requiredChecks } = readRequiredChecks({ repo: resolvedRepo, branch: defaultBranch });
-  const plan = planReconcile({ repo: repoKey, prs, agents, durableCounts: durableCountsFrom(prs), now, defaultBranch, mainRedWindows, requiredChecks });
+  const mainSha = resolveMainSha(defaultBranch);
+  const plan = planReconcile({
+    repo: repoKey, prs, agents, durableCounts: durableCountsFrom(prs), now, defaultBranch, mainRedWindows,
+    requiredChecks, mainSha,
+  });
   return { ...plan, prs: prs.length, agents: agents.length };
+}
+
+/**
+ * we:scripts/conveyor/reconcile-pass.mjs#defaultResolveMainSha — #2787-live-incident (2026-09-27):
+ * `origin/<ref>`'s own current tip, read with a PLAIN local `git rev-parse` — no `gh`, no network call of its
+ * own beyond whatever fetch already happened this tick (this process's own checkout is kept fresh by the
+ * SAME `assertMainNotStale` staleness guard `reconcile-fix-dispatch.mjs#runReconcileFixDispatch` already runs
+ * before this pass, so `origin/<ref>` is already current by the time this reads it). Best-effort: no local git,
+ * no such ref, any failure at all — degrades to `null`, exactly like every other best-effort reader in this
+ * file (`defaultFetchRef`, `defaultReadMergeBase`) — a lost sha is a strictly smaller loss than failing the
+ * whole reconcile pass over it.
+ * @param {string} ref
+ * @param {{exec?:Function}} [o]
+ * @returns {string|null}
+ */
+export function defaultResolveMainSha(ref, { exec = execFileSync } = {}) {
+  try {
+    const out = String(exec('git', ['rev-parse', `origin/${ref}`], {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 10_000,
+    }) || '').trim();
+    return isSha(out) ? out : null;
+  } catch {
+    return null;
+  }
 }
 
 // ── IO SHELL (runs only as a CLI — the exports above stay side-effect-free on import) ──────────────────────────

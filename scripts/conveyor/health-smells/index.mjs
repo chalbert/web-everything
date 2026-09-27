@@ -7,6 +7,8 @@
  *   (hysteresis), severity, action (alert|investigate|file), optional `diagnose` (a read-only command the shell
  *   runs with a hard timeout when an episode opens).
  */
+import ghCallFailures from './gh-call-failures.mjs';
+import ghGraphqlBudget from './gh-graphql-budget.mjs';
 import daemonSilent from './daemon-silent.mjs';
 import daemonOwedNoDispatch from './daemon-owed-no-dispatch.mjs';
 import cloneStale from './clone-stale.mjs';
@@ -21,8 +23,12 @@ import daemonHeldOnLastGood from './daemon-held-on-last-good.mjs';
 import machineOverload from './machine-overload.mjs';
 import dispatchPermissionStall from './dispatch-permission-stall.mjs';
 import dispatchRefusedStaleClone from './dispatch-refused-stale-clone.mjs';
+import ghShimLanePath from './gh-shim-lane-path.mjs';
+import duplicateLiveSessions from './duplicate-live-sessions.mjs';
+import bgIsolationStall from './bg-isolation-stall.mjs';
 
-export const SMELLS = Object.freeze([
+export const SMELLS = Object.freeze([ghCallFailures, ghGraphqlBudget,
   daemonSilent, daemonOwedNoDispatch, cloneStale, redPrUnattended, badCredentials, laneStarvation, healthTickOverrun, heavyQueueWait, staleClaim,
-  claudeAuthExpired, daemonHeldOnLastGood, machineOverload, dispatchPermissionStall, dispatchRefusedStaleClone,
+  claudeAuthExpired, daemonHeldOnLastGood, machineOverload, dispatchPermissionStall, dispatchRefusedStaleClone, ghShimLanePath,
+  duplicateLiveSessions, bgIsolationStall,
 ]);

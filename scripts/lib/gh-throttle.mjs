@@ -163,9 +163,10 @@
 
 import { execFileSync, spawnSync } from 'node:child_process';
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { homedir } from 'node:os';
+import { join, resolve, basename } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 
 import { tryAcquireSlot, releaseOwnedSlot, admissionStatus, ADMISSION_LEASE_MINUTES } from '../readiness/heavy-admission.mjs';
 import { reserve, releaseLockDir } from '../readiness/file-locks.mjs';
@@ -175,6 +176,7 @@ import { classifyPrOpenFailure } from '../conveyor/infra-blocked.mjs';
 import { writeAllSync } from './write-all-sync.mjs';
 import { retryAfterMs } from '../readiness/model-proposer.mjs';
 import { createTelemetryRecorder } from '../operations/telemetry-store.mjs';
+import { markPrSnapshotDirty, repoFromGhArgs } from './pr-snapshot-store.mjs';
 
 // ── TUNING (env-overridable, mirroring heavy-admission.mjs's own resolve*() convention) ────────────────────
 
@@ -248,11 +250,97 @@ export function resolveGhPointsBudgetPerMin(env = process.env) {
   return Number.isFinite(n) && n >= 1 ? Math.floor(n) : DEFAULT_GH_POINTS_BUDGET_PER_MIN;
 }
 
+/**
+ * Per-minute WRITE-ONLY budget — a THIRD, independent gate ({@link classifyGhWrite} decides membership), never
+ * consulted for a read. #gh-write-burst (live 2026-09-27 03:5x-04:00Z landing freeze): the points budget above
+ * alone did NOT stop that storm — every call in this module defaults to costing 1 point regardless of whether
+ * it reads or writes, so a run of cheap mutations (a label flip, a posted comment) stays well inside a
+ * 300-points-per-minute budget while still hammering GitHub's secondary limit, which is explicitly an ABUSE/
+ * burst detector keyed on repeated MUTATIONS, not on generic REST-point spend (this module's own header, THREE
+ * signals section). Reads and writes are not the same risk, so they get separate ceilings.
+ *
+ * DERIVED from that same incident, not invented: `calls.jsonl`'s own burst breakdown was `pr edit` x~80 + `pr
+ * comment` x~75 in the ten minutes before the freeze (the third op in that burst, `api --method` x152, turned
+ * out on inspection to be `--method GET` reads from `parked-pr-conflict-watch.mjs#computeConflictDisposition`,
+ * NOT mutations — the exact ambiguity {@link classifyGhWrite} exists to resolve for every future read of this
+ * log, not just this one). That is a real, sustained mutation rate of roughly 15/min for ten straight minutes —
+ * `DEFAULT_GH_WRITE_BUDGET_PER_MIN` sits at roughly half that storm rate, well above any single legitimate
+ * multi-PR write burst this repo's own passes produce today (a merge-orphan-sweep landing a handful of PRs back
+ * to back, a label sweep touching a dozen PRs in one tick), while making a repeat of THIS incident's shape queue
+ * instead of hammering GitHub. Overridable via `WE_GH_THROTTLE_WRITE_BUDGET_PER_MIN`.
+ */
+export const DEFAULT_GH_WRITE_BUDGET_PER_MIN = 40;
+
+export function resolveGhWriteBudgetPerMin(env = process.env) {
+  const n = Number(env.WE_GH_THROTTLE_WRITE_BUDGET_PER_MIN);
+  return Number.isFinite(n) && n >= 1 ? Math.floor(n) : DEFAULT_GH_WRITE_BUDGET_PER_MIN;
+}
+
+/**
+ * Classify a `gh` invocation's argv as a MUTATION ("write") or not, for the write-budget gate above — completely
+ * independent of {@link isRateLimitShaped}/the concurrency cap. PURE: argv in, boolean out. Reuses `gh`'s own
+ * documented method-inference rule for `gh api` (an explicit `--method` wins; absent that, `gh` itself switches
+ * to `POST` the instant any `-f`/`-F`/`--field`/`--raw-field`/`--input` flag is present — the exact rule
+ * `we:scripts/lib/review-label-provider.mjs`'s own header already names for `readPrFiles`'s `--method GET`) —
+ * never re-guessed here. Every current `gh api --method ...` call site in this repo passes `GET` (confirmed by
+ * grep, 2026-09-27; see {@link DEFAULT_GH_WRITE_BUDGET_PER_MIN}'s own doc comment) — this classifier is what
+ * keeps that true going forward instead of being an unwritten convention nobody checks.
+ * @param {string[]} args
+ * @returns {boolean}
+ */
+export function classifyGhWrite(args) {
+  const a = Array.isArray(args) ? args : [];
+  const cmd = a[0];
+  const sub = a[1];
+  if (cmd === 'pr') return ['edit', 'comment', 'close', 'merge', 'reopen', 'ready', 'create', 'review'].includes(sub);
+  if (cmd === 'issue') return ['edit', 'comment', 'close', 'reopen', 'create'].includes(sub);
+  if (cmd === 'label') return ['create', 'delete', 'edit'].includes(sub);
+  if (cmd === 'run') return ['cancel', 'rerun'].includes(sub);
+  if (cmd === 'api') {
+    const methodIdx = a.indexOf('--method');
+    const method = methodIdx >= 0 ? String(a[methodIdx + 1] || '').toUpperCase() : null;
+    if (method) return method !== 'GET' && method !== 'HEAD';
+    return a.some((t) => t === '-f' || t === '-F' || t === '--field' || t === '--raw-field' || t === '--input');
+  }
+  return false;
+}
+
+/**
+ * Best-effort caller attribution for a `gh` call, recorded on every `calls.jsonl` line (see {@link
+ * recordGhCallLogEntry}) so the NEXT burst is traceable in one grep instead of the forensic, multi-log,
+ * multi-transcript correlation the 2026-09-27 incident needed. Precedence, most to least specific:
+ *   1. `throttle.caller` — an explicit override a call site passes (tests, a future precise adopter).
+ *   2. `GH_CALLER` env — set by `we:skills-src/conveyor/pass-daemon.mjs` to the exact manifest pass name
+ *      (e.g. "parked-pr-conflict-watch-we") before spawning each daemon+pass's child process; also settable by
+ *      hand for an ad hoc invocation.
+ *   3. `process.argv[1]`'s basename — free attribution for EVERY caller that runs as its OWN node process
+ *      (every mechanical pass spawned by pass-daemon.mjs, and the standalone CLI's own direct invocations):
+ *      `process.argv[1]` in that process IS the pass's own script path, no env needed. Only uninformative for
+ *      one population — the standalone CLI passthrough used by the gh App shim (#4064), where argv[1] is always
+ *      this module itself — which is exactly why (2) exists.
+ *   4. `'unknown'` — never blank; a caller field that could be absent is one nobody greps reliably.
+ * @param {{caller?:string}} throttle
+ * @param {NodeJS.ProcessEnv} env
+ * @returns {string}
+ */
+export function deriveGhCaller(throttle, env) {
+  if (throttle && throttle.caller) return String(throttle.caller);
+  if (env && env.GH_CALLER) return String(env.GH_CALLER);
+  const argv1 = process.argv[1];
+  if (argv1) {
+    const b = basename(argv1);
+    if (b && b !== 'gh-throttle.mjs') return b;
+  }
+  return 'unknown';
+}
+
 const SUBDIR = join('.admission', 'gh');
 const POINTS_BUDGET_LOCK_KEY = 'points-budget';
 const POINTS_BUDGET_LOCK_LEASE_MINUTES = 1; // short — the mutex is held only across one tiny JSON read/write
 const POINTS_BUDGET_STATE_FILENAME = 'points-budget-state.json';
 const CALL_LOG_FILENAME = 'calls.jsonl';
+const WRITE_BUDGET_LOCK_KEY = 'write-budget';
+const WRITE_BUDGET_STATE_FILENAME = 'write-budget-state.json';
 
 export function resolveGhCap(env = process.env) {
   const n = Number(env.WE_GH_THROTTLE_CAP);
@@ -279,11 +367,53 @@ function resolveRetryTuning(env = process.env) {
   };
 }
 
-/** The host-shared lock root for `gh`-call admission — a SIBLING of heavy-admission.mjs's own `.admission/heavy`
- *  root (same `defaultPoolRoot` derivation), never inside it: the two pools are independent caps over the same
- *  proven mechanism, not one cap wearing two names. */
-export function ghThrottleLockRoot(checkoutRoot = process.cwd(), env = process.env) {
-  return join(defaultPoolRoot(checkoutRoot, env), SUBDIR);
+/** Env override for {@link ghThrottleLockRoot} — an absolute path (a leading `~` expands to `$HOME`). */
+export const GH_THROTTLE_LOCK_ROOT_ENV = 'WE_GH_THROTTLE_LOCK_ROOT';
+
+/** The host-shared lock root for `gh`-call admission — `.admission/gh`, never inside heavy-admission.mjs's own
+ *  `.admission/heavy` root: the two pools are independent caps over the same proven mechanism.
+ *
+ *  CWD-INDEPENDENT (live 2026-09-27 ~04:10Z landing freeze): this used to be `defaultPoolRoot(process.cwd())`,
+ *  i.e. derived from whatever directory the CALLER happened to be in. Every `gh` call runs through this module
+ *  (via the gh App shim), so a call made from `/tmp` (a smoke candidate worktree, a scratch dir) derived
+ *  `/private/.lanes/.admission/gh`, hit EACCES on mkdir, and crashed instead of running `gh`. Resolution order:
+ *    1. `WE_GH_THROTTLE_LOCK_ROOT` — explicit host override;
+ *    2. `LANE_POOL_ROOT` — the existing pool override (tests isolate the throttle with it) → `<pool>/.admission/gh`;
+ *    3. `$HOME/workspace/.lanes/.admission/gh` — a fixed host path, the same place the old derivation produced
+ *       for every caller already inside the workspace, so live callers on older code share the SAME semaphore.
+ *  `_checkoutRoot` is accepted for signature compatibility and deliberately ignored. */
+export function ghThrottleLockRoot(_checkoutRoot, env = process.env) {
+  const home = env.HOME || homedir();
+  const expand = (p) => (p && p.startsWith('~') ? join(home, p.slice(1)) : p);
+  const override = expand(String(env[GH_THROTTLE_LOCK_ROOT_ENV] || '').trim());
+  if (override) return resolve(override);
+  if (env.LANE_POOL_ROOT) return join(defaultPoolRoot(home, env), SUBDIR);
+  return join(home, 'workspace', '.lanes', SUBDIR);
+}
+
+let failOpenWarned = false;
+/** Test seam: re-arm the once-per-process fail-open warning. @test-only-export-ok */
+export function resetGhThrottleFailOpenWarning() { failOpenWarned = false; }
+
+/**
+ * FAIL OPEN: run one throttle SETUP step (`mkdir` of the lock root, a points/slot acquire, a slot release). If
+ * it throws, warn once on stderr, best-effort log a `fail_open` line (the `gh-call-failures` health smell reads
+ * it), and return `fallback` — the caller then runs `gh` ungated. A throttle is a courtesy to GitHub's rate
+ * limits; it must never be the reason a `gh` call does not run at all.
+ */
+export function failOpenGate(stage, fn, { fallback, warn, logPath, op } = {}) {
+  try {
+    return fn();
+  } catch (e) {
+    const reason = String((e && e.message) || e).split('\n')[0];
+    if (warn) warn(stage, reason);
+    else if (!failOpenWarned) {
+      failOpenWarned = true;
+      try { process.stderr.write(`⚠ gh-throttle: ${stage} failed (${reason}) — running gh unthrottled (fail-open)\n`); } catch { /* ignore */ }
+    }
+    if (logPath) recordGhCallLogEntry(logPath, { op: op || 'unknown', outcome: 'fail_open', stage, reason });
+    return fallback;
+  }
 }
 
 /** Where the points-budget window state lives — a sibling of the concurrency semaphore's own slot dirs, under
@@ -556,6 +686,181 @@ export function acquireGhPointsSync({
   }
 }
 
+// ── the per-minute WRITE budget (#gh-write-burst) — a SEPARATE gate over MUTATIONS only, never a read ─────────
+
+/** Where the write-budget window state lives — a sibling of the points-budget state file, own lock key, so a
+ *  write-budget wait never blocks (or is blocked by) an ordinary read's points-budget accounting. */
+export function ghWriteBudgetStatePath(lockRoot) {
+  return join(lockRoot, WRITE_BUDGET_STATE_FILENAME);
+}
+
+function readGhWriteBudgetState(lockRoot) {
+  try {
+    const parsed = JSON.parse(readFileSync(ghWriteBudgetStatePath(lockRoot), 'utf8'));
+    if (Number.isFinite(parsed.windowStartMs) && Number.isFinite(parsed.spent)) return parsed;
+  } catch {
+    /* absent or corrupt — decideGhPointsSpend treats a null state as a fresh window */
+  }
+  return null;
+}
+
+function writeGhWriteBudgetState(lockRoot, state) {
+  writeFileSync(ghWriteBudgetStatePath(lockRoot), JSON.stringify(state) + '\n', 'utf8');
+}
+
+/**
+ * Cross-process-safe WRITE-budget gate — the IDENTICAL fixed-window token-bucket shape as {@link
+ * acquireGhPointsSync} (reusing its pure decision core, {@link decideGhPointsSpend}, unchanged: a spend
+ * decision is a spend decision regardless of which ledger it is checked against), over its OWN state file and
+ * lock key so exhausting the write budget never blocks a read and vice versa. A caller QUEUES here (spins,
+ * bounded, injectable `sleep`/`now` for tests) rather than firing — the #gh-write-burst fix's whole point:
+ * a write past budget waits for the window instead of hammering GitHub. FAILS OPEN on timeout, identically to
+ * every other gate in this module. Cost is always 1 per call (write calls are not weighted by REST points —
+ * unlike the points budget, this ledger counts MUTATIONS, not spend).
+ */
+export function acquireGhWriteBudgetSync({
+  lockRoot, budgetPerMin, owner, pid = process.pid,
+  now = () => Date.now(), sleep = sleepSyncMs, pollMs = DEFAULT_ACQUIRE_POLL_MS,
+  timeoutMs = DEFAULT_ACQUIRE_TIMEOUT_MS, windowMs = GH_POINTS_WINDOW_MS,
+}) {
+  mkdirSync(lockRoot, { recursive: true });
+  const startedAt = now();
+  for (;;) {
+    const nowMs = now();
+    const nowIso = new Date(nowMs).toISOString();
+    const locked = reserve(lockRoot, WRITE_BUDGET_LOCK_KEY, owner, nowMs, nowIso, pid, 'unknown', POINTS_BUDGET_LOCK_LEASE_MINUTES);
+    let decision = null;
+    if (locked.ok) {
+      try {
+        decision = decideGhPointsSpend({ state: readGhWriteBudgetState(lockRoot), points: 1, nowMs, budgetPerMin, windowMs });
+        if (decision.allowed) writeGhWriteBudgetState(lockRoot, decision.nextState);
+      } finally {
+        releaseLockDir(lockRoot, WRITE_BUDGET_LOCK_KEY);
+      }
+    }
+    if (decision && decision.allowed) return { ok: true, waitedMs: nowMs - startedAt, timedOut: false };
+    if (nowMs - startedAt >= timeoutMs) return { ok: false, waitedMs: nowMs - startedAt, timedOut: true };
+    sleep(decision ? Math.min(pollMs, Math.max(1, decision.waitMs)) : pollMs);
+  }
+}
+
+// ── the SHARED primary-budget backoff (#gh-graphql-budget) — one exhausted call backs EVERYONE off ──────────────
+//
+// Live 2026-09-27 04:31-05:20Z: the App installation's GraphQL budget (6100 points/hour) hit 0 and every caller
+// kept retrying on its OWN guessed backoff (2s, 4s, 8s, 16s — `retry_exhausted` x21 for the drain's `pr list`
+// alone), none of which can succeed before the hourly reset: GitHub answers "API rate limit ALREADY exceeded"
+// until then. A PRIMARY exhaustion is a fact about the whole identity's bucket, not about one call — so the first
+// caller to see it records the bucket's real reset time (read from the in-band GraphQL `rateLimit` field — NOT
+// the REST `/rate_limit` endpoint, whose `graphql` entry reported 6059/6100 remaining at the same moment the
+// GraphQL bucket itself said 0/6100, with a different reset: a separate, non-authoritative window) and every
+// later call on that identity+resource fails FAST, without touching the network, until then.
+
+/** Fallback block length when the reset time cannot be read (the probe itself failed). */
+export const DEFAULT_BUDGET_BLOCK_FALLBACK_MS = 5 * 60_000;
+/** Ceiling on any recorded block — a primary window is an hour; a bogus reset must never park the fleet longer. */
+export const MAX_BUDGET_BLOCK_MS = 65 * 60_000;
+
+/**
+ * Which GitHub rate-limit RESOURCE a `gh` argv spends — `graphql` (every `gh pr …`/`gh issue …`/`gh repo …`/
+ * `gh project …` subcommand and `gh api graphql`) or `core` (REST: `gh api <path>`, `gh run …`, `gh label …`,
+ * `gh workflow …`, …). PURE. The two are separate buckets, so exhausting one must never block the other.
+ * @param {string[]} args
+ * @returns {'graphql'|'core'}
+ */
+export function classifyGhResource(args) {
+  const a = Array.isArray(args) ? args.map(String) : [];
+  // Not led by 'pr': multi-repo-scan reads any `['pr', …]` literal as gh argv and would flag it as repo-less.
+  if (['issue', 'pr', 'repo', 'project', 'search'].includes(a[0])) return 'graphql';
+  if (a[0] === 'api') {
+    const positional = a.slice(1).filter((t, i, arr) => !t.startsWith('-') && !(i > 0 && /^-(X|H|f|F|q|t|p)$|^--(method|header|field|raw-field|jq|template|input|preview|hostname|cache)$/.test(arr[i - 1])));
+    return positional[0] === 'graphql' ? 'graphql' : 'core';
+  }
+  return 'core';
+}
+
+/**
+ * Is `text` GitHub's PRIMARY (hourly budget) exhaustion — never the secondary/abuse limit, which clears in
+ * seconds and keeps its own retry path — and for which resource? PURE.
+ * @param {string|null|undefined} text
+ * @returns {'graphql'|'core'|null}
+ */
+export function primaryExhaustedResource(text) {
+  const s = String(text ?? '');
+  if (/secondary rate limit|abuse detection/i.test(s)) return null;
+  if (!/API rate limit (already )?exceeded/i.test(s)) return null;
+  return /GraphQL:/i.test(s) ? 'graphql' : 'core';
+}
+
+/** A stable, NON-SECRET label for the auth identity whose bucket a call spends: `app` for a GitHub App
+ *  installation token (`ghs_…`), a short hash for any other explicit token, `default` for gh's own stored login. */
+export function ghAuthIdentity(env = process.env) {
+  const token = String((env && (env.GH_TOKEN || env.GITHUB_TOKEN)) || '');
+  if (!token) return 'default';
+  if (token.startsWith('ghs_')) return 'app';
+  return `t-${createHash('sha256').update(token).digest('hex').slice(0, 12)}`;
+}
+
+export function budgetBlockPath(lockRoot, identity, resource) {
+  return join(lockRoot, `budget-block-${String(identity).replace(/[^A-Za-z0-9_-]/g, '_')}-${resource}.json`);
+}
+
+/** The active block for identity+resource at `nowMs`, or null (absent, corrupt, or already past). Never throws. */
+export function readBudgetBlock(lockRoot, identity, resource, nowMs = Date.now()) {
+  try {
+    const b = JSON.parse(readFileSync(budgetBlockPath(lockRoot, identity, resource), 'utf8'));
+    return Number.isFinite(b?.untilMs) && b.untilMs > nowMs ? b : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Record a block (best-effort, never throws). `untilMs` is clamped to (now, now + MAX_BUDGET_BLOCK_MS]. */
+export function writeBudgetBlock(lockRoot, identity, resource, { untilMs, nowMs = Date.now(), source = 'probe', op = null, caller = null } = {}) {
+  const until = Math.min(nowMs + MAX_BUDGET_BLOCK_MS, Number.isFinite(untilMs) && untilMs > nowMs ? untilMs : nowMs + DEFAULT_BUDGET_BLOCK_FALLBACK_MS);
+  const rec = { identity, resource, untilMs: until, until: new Date(until).toISOString(), detectedAt: new Date(nowMs).toISOString(), source, op, caller };
+  try { mkdirSync(lockRoot, { recursive: true }); writeFileSync(budgetBlockPath(lockRoot, identity, resource), JSON.stringify(rec) + '\n', 'utf8'); } catch { /* best-effort */ }
+  return rec;
+}
+
+/** The argv that reads the bucket's REAL remaining+reset (the GraphQL `rateLimit` field answers even at 0). */
+export function budgetProbeArgs(resource) {
+  return resource === 'graphql'
+    ? ['api', 'graphql', '-f', 'query=query{rateLimit{limit remaining resetAt}}']
+    : ['api', 'rate_limit', '--jq', '.resources.core'];
+}
+
+/** Parse a {@link budgetProbeArgs} response → `{remaining, resetMs}` or null. PURE. */
+export function parseBudgetProbe(resource, stdout) {
+  try {
+    const j = JSON.parse(String(stdout ?? ''));
+    if (resource === 'graphql') {
+      const rl = j?.data?.rateLimit;
+      return rl && typeof rl.remaining === 'number' ? { remaining: rl.remaining, resetMs: Date.parse(rl.resetAt) } : null;
+    }
+    return typeof j?.remaining === 'number' ? { remaining: j.remaining, resetMs: Number(j.reset) * 1000 } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The one-line stderr a budget-blocked call returns instead of calling GitHub — still rate-limit shaped, so
+ *  every existing classifier (`isRateLimitShaped`, the drain's gh-error text) reads it exactly as before. */
+export function budgetBlockedMessage(block) {
+  return `gh-throttle: GitHub ${block.resource} API rate limit exceeded for this identity — shared backoff until ${block.until}, call not sent (#gh-graphql-budget)\n`;
+}
+
+/** Resolve `untilMs` for a primary exhaustion: GitHub's own reset header when the failure carried one, else the
+ *  probe. Returns null when the probe shows budget left (the exhaustion already cleared → no block). */
+function resolveBudgetBlockUntil({ headers, resource, probe }) {
+  const signal = classifyRateLimitSignal(headers);
+  if (signal.kind === 'primary' && Number.isFinite(signal.resetEpochSec)) return { untilMs: signal.resetEpochSec * 1000, source: 'header' };
+  let parsed = null;
+  try { parsed = parseBudgetProbe(resource, probe(budgetProbeArgs(resource))); } catch { parsed = null; }
+  if (parsed && parsed.remaining > 0) return null;
+  if (parsed && Number.isFinite(parsed.resetMs)) return { untilMs: parsed.resetMs, source: 'probe' };
+  return { untilMs: NaN, source: 'fallback' };
+}
+
 // ── call-volume / exhausted-retry recording (#3670) ────────────────────────────────────────────────────────
 
 /**
@@ -564,8 +869,11 @@ export function acquireGhPointsSync({
  * throws past the call. `outcome` is `'call'` for every attempt (success or failure alike — the point is
  * VOLUME, not just failures) or `'retry_exhausted'` for the one extra line appended when a rate-limit-shaped
  * failure gives up after `maxAttempts`.
+ * #gh-write-burst — `caller` (see {@link deriveGhCaller}) and `w` (whether {@link classifyGhWrite} classified
+ * this call as a mutation) are recorded on every line so the NEXT burst is attributable and its write-share
+ * visible directly from `calls.jsonl`, without the multi-log/multi-transcript correlation this incident needed.
  * @param {string} logPath
- * @param {{op:string, attempt:number, points:number, outcome:('call'|'retry_exhausted'), ok?:boolean}} entry
+ * @param {{op:string, attempt:number, points:number, outcome:('call'|'retry_exhausted'|'fail_open'), ok?:boolean, caller?:string, w?:boolean}} entry
  */
 export function recordGhCallLogEntry(logPath, entry) {
   try {
@@ -588,7 +896,7 @@ export function recordGhCallLogEntry(logPath, entry) {
  * @param {object} [opts]           execFileSync options, passed through verbatim, PLUS:
  * @param {object} [opts.throttle]  wrapper-only config, stripped before the real call reaches `execFileSync`:
  *   @param {string} [opts.throttle.owner]           slot-holder identity (default: a fresh random id per call)
- *   @param {string} [opts.throttle.repo]             checkout root used to derive the lock root (default: cwd)
+ *   @param {string} [opts.throttle.repo]             IGNORED for the lock root (now cwd-independent — see ghThrottleLockRoot)
  *   @param {object} [opts.throttle.env]               env bag for the `resolve*` tuning reads (default: process.env)
  *   @param {string} [opts.throttle.lockRoot]         override the derived lock root (tests)
  *   @param {number} [opts.throttle.cap]              override the concurrency cap (tests)
@@ -635,17 +943,37 @@ export function runGhSync(args, opts = {}) {
   const calibrateHeaders = !!throttle.calibrateHeaders;
   const headerCapMs = throttle.headerCapMs != null ? throttle.headerCapMs : resolveHeaderWaitCapMs(env);
   const opLabel = throttle.op || (Array.isArray(args) ? args.slice(0, 2).join(' ') : 'unknown');
+  const gateOpts = { warn: throttle.warn, logPath, op: opLabel };
+  // #gh-write-burst — a THIRD, independent gate over MUTATIONS only (see DEFAULT_GH_WRITE_BUDGET_PER_MIN's own
+  // doc comment), plus best-effort caller attribution recorded on every log line below.
+  const isWrite = classifyGhWrite(args);
+  const writeBudgetPerMin = throttle.writeBudgetPerMin != null ? throttle.writeBudgetPerMin : resolveGhWriteBudgetPerMin(env);
+  const caller = deriveGhCaller(throttle, env);
+  // #gh-graphql-budget — the shared primary-budget backoff (see that section above).
+  const resource = classifyGhResource(args);
+  const identity = ghAuthIdentity((execOpts && execOpts.env) || env);
+  const blocked = readBudgetBlock(lockRoot, identity, resource, now());
+  if (blocked) {
+    recordGhCallLogEntry(logPath, { op: opLabel, attempt: 0, points: 0, outcome: 'budget_blocked', resource, caller, w: isWrite });
+    const e = new Error(budgetBlockedMessage(blocked).trim());
+    e.status = 1; e.stderr = budgetBlockedMessage(blocked); e.stdout = ''; e.budgetBlocked = blocked;
+    throw e;
+  }
 
-  mkdirSync(lockRoot, { recursive: true });
+  // FAIL OPEN (see `failOpenGate`): an unusable lock root means this call runs ungated, never not at all.
+  const gated = failOpenGate('lock-root setup', () => { mkdirSync(lockRoot, { recursive: true }); return true; }, { ...gateOpts, fallback: false, logPath: null });
 
   let attempt = 0;
   for (;;) {
     attempt += 1;
-    // The points-budget gate runs BEFORE the concurrency slot — a call waiting out its budget must not hold a
-    // scarce concurrency slot idle while it waits (same reasoning as releasing the slot before a backoff sleep,
-    // below).
-    acquireGhPointsSync({ lockRoot, points, budgetPerMin, owner, pid, now, sleep, pollMs, timeoutMs: acquireTimeoutMs, windowMs: pointsWindowMs });
-    const acq = acquireGhSlotSync({ lockRoot, cap, owner, pid, pollMs, timeoutMs: acquireTimeoutMs, now, sleep });
+    // The write-budget gate (writes only) and the points-budget gate both run BEFORE the concurrency slot — a
+    // call waiting out either budget must not hold a scarce concurrency slot idle while it waits (same
+    // reasoning as releasing the slot before a backoff sleep, below).
+    const acq = gated ? failOpenGate('acquire', () => {
+      if (isWrite) acquireGhWriteBudgetSync({ lockRoot, budgetPerMin: writeBudgetPerMin, owner, pid, now, sleep, pollMs, timeoutMs: acquireTimeoutMs, windowMs: pointsWindowMs });
+      acquireGhPointsSync({ lockRoot, points, budgetPerMin, owner, pid, now, sleep, pollMs, timeoutMs: acquireTimeoutMs, windowMs: pointsWindowMs });
+      return acquireGhSlotSync({ lockRoot, cap, owner, pid, pollMs, timeoutMs: acquireTimeoutMs, now, sleep });
+    }, { ...gateOpts, fallback: { ok: false } }) : { ok: false };
     // Fail OPEN on an acquire timeout too — proceeding unslotted rather than stranding this `gh` call forever
     // (the residual-risk policy heavy-admission.mjs itself names: a fixed cap bounds concurrency and makes the
     // wait observable, it does not claim to eliminate contention).
@@ -661,10 +989,14 @@ export function runGhSync(args, opts = {}) {
     } catch (e) {
       failure = e;
     } finally {
-      if (acq.ok) releaseGhSlotSync({ lockRoot, cap, owner });
+      if (acq.ok) failOpenGate('release', () => releaseGhSlotSync({ lockRoot, cap, owner }), gateOpts);
     }
-    recordGhCallLogEntry(logPath, { op: opLabel, attempt, points, outcome: 'call', ok: !failure });
-    if (!failure) return result;
+    recordGhCallLogEntry(logPath, { op: opLabel, attempt, points, outcome: 'call', ok: !failure, caller, w: isWrite });
+    if (!failure) {
+      // #gh-graphql-budget — a landed write makes the shared open-PR snapshot stale for that repo.
+      if (isWrite) markPrSnapshotDirty({ repo: repoFromGhArgs(args), env });
+      return result;
+    }
 
     const text = `${failure && failure.stderr ? String(failure.stderr) : ''}\n${failure && failure.message ? String(failure.message) : ''}`;
     if (!isRateLimitShaped(text)) throw failure;
@@ -673,8 +1005,22 @@ export function runGhSync(args, opts = {}) {
     // stderr) beats the guessed backoff — see `calibratedBackoffMs`'s own docblock for the fallback contract.
     const headers = parseGhDebugResponseHeaders(failure && failure.stderr);
 
+    // #gh-graphql-budget — a PRIMARY exhaustion cannot clear before the bucket's reset: record the shared block
+    // and give up NOW instead of spending the retry ladder on calls GitHub will refuse.
+    const exhausted = primaryExhaustedResource(text);
+    if (exhausted) {
+      const probe = throttle.probeBudget || ((probeArgs) => exec(probeArgs, { ...execOpts, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }));
+      const until = resolveBudgetBlockUntil({ headers, resource: exhausted, probe });
+      if (until) {
+        const rec = writeBudgetBlock(lockRoot, identity, exhausted, { untilMs: until.untilMs, nowMs: now(), source: until.source, op: opLabel, caller });
+        recordGhCallLogEntry(logPath, { op: opLabel, attempt, points, outcome: 'budget_exhausted', resource: exhausted, until: rec.until, caller, w: isWrite });
+        recordGhThrottleMetric('gh.throttle.exhausted', 1, { op: opLabel, attempt, source: `primary-${exhausted}` });
+        throw failure;
+      }
+    }
+
     if (attempt >= maxAttempts) {
-      recordGhCallLogEntry(logPath, { op: opLabel, attempt, points, outcome: 'retry_exhausted' });
+      recordGhCallLogEntry(logPath, { op: opLabel, attempt, points, outcome: 'retry_exhausted', caller, w: isWrite });
       recordGhThrottleMetric('gh.throttle.rate_limited', 1, { op: opLabel, attempt, source: classifyRateLimitSignal(headers).kind, outcome: 'exhausted' });
       recordGhThrottleMetric('gh.throttle.exhausted', 1, { op: opLabel, attempt });
       throw failure;
@@ -753,14 +1099,31 @@ export function runGhCliPassthrough(argv, { throttle = {}, spawn = spawnSync, bi
   const logPath = throttle.logPath || ghThrottleLogPath(lockRoot);
   const headerCapMs = throttle.headerCapMs != null ? throttle.headerCapMs : resolveHeaderWaitCapMs(env);
   const opLabel = throttle.op || (Array.isArray(argv) ? argv.slice(0, 2).join(' ') : 'unknown');
+  const gateOpts = { warn: throttle.warn, logPath, op: opLabel };
+  // #gh-write-burst — see runGhSync's identical wiring for the full rationale.
+  const isWrite = classifyGhWrite(argv);
+  const writeBudgetPerMin = throttle.writeBudgetPerMin != null ? throttle.writeBudgetPerMin : resolveGhWriteBudgetPerMin(env);
+  const caller = deriveGhCaller(throttle, env);
+  // #gh-graphql-budget — the shared primary-budget backoff (see runGhSync's identical wiring).
+  const resource = classifyGhResource(argv);
+  const identity = ghAuthIdentity(env);
+  const blocked = readBudgetBlock(lockRoot, identity, resource, now());
+  if (blocked) {
+    recordGhCallLogEntry(logPath, { op: opLabel, attempt: 0, points: 0, outcome: 'budget_blocked', resource, caller, w: isWrite });
+    return { status: 1, stdout: Buffer.alloc(0), stderr: Buffer.from(budgetBlockedMessage(blocked)) };
+  }
 
-  mkdirSync(lockRoot, { recursive: true });
+  // FAIL OPEN (see `failOpenGate`): an unusable lock root means this call runs ungated, never not at all.
+  const gated = failOpenGate('lock-root setup', () => { mkdirSync(lockRoot, { recursive: true }); return true; }, { ...gateOpts, fallback: false, logPath: null });
 
   let attempt = 0;
   for (;;) {
     attempt += 1;
-    acquireGhPointsSync({ lockRoot, points, budgetPerMin, owner, pid, now, sleep, pollMs, timeoutMs: acquireTimeoutMs, windowMs: pointsWindowMs });
-    const acq = acquireGhSlotSync({ lockRoot, cap, owner, pid, pollMs, timeoutMs: acquireTimeoutMs, now, sleep });
+    const acq = gated ? failOpenGate('acquire', () => {
+      if (isWrite) acquireGhWriteBudgetSync({ lockRoot, budgetPerMin: writeBudgetPerMin, owner, pid, now, sleep, pollMs, timeoutMs: acquireTimeoutMs, windowMs: pointsWindowMs });
+      acquireGhPointsSync({ lockRoot, points, budgetPerMin, owner, pid, now, sleep, pollMs, timeoutMs: acquireTimeoutMs, windowMs: pointsWindowMs });
+      return acquireGhSlotSync({ lockRoot, cap, owner, pid, pollMs, timeoutMs: acquireTimeoutMs, now, sleep });
+    }, { ...gateOpts, fallback: { ok: false } }) : { ok: false };
     let r;
     try {
       // This front door NEVER adds `GH_DEBUG` itself (unlike `runGhSync`'s opt-in) — its documented contract
@@ -770,18 +1133,34 @@ export function runGhCliPassthrough(argv, { throttle = {}, spawn = spawnSync, bi
       // nothing here suppresses that; it is simply never the one turning it on.
       r = spawn(bin, argv, { stdio: ['inherit', 'pipe', 'pipe'], maxBuffer });
     } finally {
-      if (acq.ok) releaseGhSlotSync({ lockRoot, cap, owner });
+      if (acq.ok) failOpenGate('release', () => releaseGhSlotSync({ lockRoot, cap, owner }), gateOpts);
     }
     if (r.error) throw r.error; // e.g. `gh` not on PATH — not a `gh`-level failure to retry
     const stderrText = r.stderr ? r.stderr.toString('utf8') : '';
     const failed = typeof r.status === 'number' && r.status !== 0;
-    recordGhCallLogEntry(logPath, { op: opLabel, attempt, points, outcome: 'call', ok: !failed });
+    recordGhCallLogEntry(logPath, { op: opLabel, attempt, points, outcome: 'call', ok: !failed, caller, w: isWrite });
+    if (!failed && isWrite) markPrSnapshotDirty({ repo: repoFromGhArgs(argv), env }); // #gh-graphql-budget
     if (!failed || !isRateLimitShaped(stderrText)) {
       return { status: r.status == null ? (r.signal ? 128 : 1) : r.status, stdout: r.stdout || Buffer.alloc(0), stderr: r.stderr || Buffer.alloc(0) };
     }
     const headers = parseGhDebugResponseHeaders(stderrText); // usually {} here — see the comment above
+    // #gh-graphql-budget — PRIMARY exhaustion → record the shared block and return now (see runGhSync).
+    const exhausted = primaryExhaustedResource(stderrText);
+    if (exhausted) {
+      const probe = throttle.probeBudget || ((probeArgs) => {
+        const pr = spawn(bin, probeArgs, { stdio: ['ignore', 'pipe', 'pipe'], maxBuffer });
+        return pr && pr.status === 0 && pr.stdout ? pr.stdout.toString('utf8') : '';
+      });
+      const until = resolveBudgetBlockUntil({ headers, resource: exhausted, probe });
+      if (until) {
+        const rec = writeBudgetBlock(lockRoot, identity, exhausted, { untilMs: until.untilMs, nowMs: now(), source: until.source, op: opLabel, caller });
+        recordGhCallLogEntry(logPath, { op: opLabel, attempt, points, outcome: 'budget_exhausted', resource: exhausted, until: rec.until, caller, w: isWrite });
+        recordGhThrottleMetric('gh.throttle.exhausted', 1, { op: opLabel, attempt, source: `primary-${exhausted}` });
+        return { status: r.status == null ? 1 : r.status, stdout: r.stdout || Buffer.alloc(0), stderr: r.stderr || Buffer.alloc(0) };
+      }
+    }
     if (attempt >= maxAttempts) {
-      recordGhCallLogEntry(logPath, { op: opLabel, attempt, points, outcome: 'retry_exhausted' });
+      recordGhCallLogEntry(logPath, { op: opLabel, attempt, points, outcome: 'retry_exhausted', caller, w: isWrite });
       recordGhThrottleMetric('gh.throttle.rate_limited', 1, { op: opLabel, attempt, source: classifyRateLimitSignal(headers).kind, outcome: 'exhausted' });
       recordGhThrottleMetric('gh.throttle.exhausted', 1, { op: opLabel, attempt });
       return { status: r.status == null ? (r.signal ? 128 : 1) : r.status, stdout: r.stdout || Buffer.alloc(0), stderr: r.stderr || Buffer.alloc(0) };
@@ -809,7 +1188,11 @@ async function main(argv) {
   const repo = parseThrottleEnvRepo();
   const owner = process.env.WE_GH_THROTTLE_OWNER || `${process.pid}:${randomUUID()}`;
   const bin = parseThrottleEnvBin();
-  const { status, stdout, stderr } = runGhCliPassthrough(argv, { throttle: { repo, owner }, bin });
+  // #gh-write-burst — `argv[1]` for THIS process is always `gh-throttle.mjs` itself (see `deriveGhCaller`), so
+  // the standalone CLI passthrough (the gh App shim's own call path, #4064) is the one population that needs an
+  // explicit caller signal from its invoker rather than getting it for free from its own script path.
+  const caller = process.env.WE_GH_THROTTLE_CALLER || undefined;
+  const { status, stdout, stderr } = runGhCliPassthrough(argv, { throttle: { repo, owner, caller }, bin });
   if (stdout && stdout.length) writeAllSync(1, stdout);
   if (stderr && stderr.length) writeAllSync(2, stderr);
   process.exitCode = status;

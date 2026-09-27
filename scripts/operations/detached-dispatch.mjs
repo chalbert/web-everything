@@ -40,6 +40,13 @@ import { mkdirSync, openSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { markWorkerEnv } from './session-role.mjs';
+// #landing-freeze-2779 — see this function's own doc addition below for the incident this closes: a detached
+// wrapper's own `process.env` is never sanitized before being handed to its child, so a static (daemon-minted,
+// ~1h-lived) `GH_TOKEN`/`GITHUB_TOKEN` rides along unchanged for as long as the wrapper (and whatever it later
+// spawns) lives — which routinely outlives the token. `sanitizeSpawnEnv` is the SAME primitive
+// `dispatch-lane-io.mjs#defaultSpawnAgent`/`spawnAgentToCompletion` already apply to their own spawn's env;
+// this file's own spawn never had it.
+import { sanitizeSpawnEnv } from '../lib/gh-app-shim.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 /** The repo root, resolved by SCRIPT LOCATION and never by cwd — the same reason `dispatch-lane-io.mjs` and
@@ -98,15 +105,43 @@ export function defaultIsPidAlive(pid) {
  * shutdown sends — never reaches it. `.unref()` lets the dispatching process exit without waiting. `stdio` goes
  * to a real file because a detached child with a piped stdio nobody reads blocks on a full pipe, and because
  * the log is the only place a delivery's own narration survives.
+ *
+ * `settingsEnv` (#landing-freeze-2779) — THE FIX for a live landing-freeze incident (ci-heal-2779, 2026-09-26
+ * ~20:55 ET transcript: "the GitHub token (GH_TOKEN) stopped working partway through, so I couldn't post the
+ * CI-heal tally comment (HTTP 401)"). ROOT CAUSE: `dispatch-lane-io.mjs#createDispatchSinks` already computes
+ * the correct per-dispatch env via `resolveSettingsEnv(sessionCwd)` — the gh-App-shim `PATH` override
+ * (`gh-app-shim.mjs#buildGhShimSettingsEnv`) that resolves `gh` to a wrapper reading the shared token cache
+ * FRESH on every call, never a value baked once — and hands it to `provider({..., settingsEnv})` for EVERY
+ * launch kind. But every MECHANICAL provider (`dispatch-providers/*.mjs`) only ever read `pr`/`sessionSlug`/
+ * `num`/`reason`/`cwd` off that request — `settingsEnv` was computed and then silently dropped on the floor.
+ * This detached wrapper process's own `process.env` — inherited unsanitized from whatever process dispatched
+ * it — was the ONLY env any of its own later `claude`/`gh` calls ever saw. On an App-auth-configured host that
+ * env carries a REAL, then-valid `GH_TOKEN` (`github-app-auth-env.mjs#ensureFreshGithubAppEnv` sets it on the
+ * DAEMON's own long-lived process) that is already up to an installation-token's ~1h life old by the time it
+ * was inherited, and this wrapper (plus whatever agent/converge turn it spawns) can itself run for up to an
+ * hour more (`deliver-item-wrapper.mjs`'s own docblock: "56 minutes, for the converge loop ALONE") — so the
+ * token routinely expires mid-session, exactly as ci-heal-2779 hit.
+ *
+ * THE FIX, matching `defaultSpawnAgent`/`spawnAgentToCompletion`'s own already-correct treatment: (a)
+ * `sanitizeSpawnEnv` strips any static `GH_TOKEN`/`GITHUB_TOKEN` from the inherited env before it can ride any
+ * further — a stale value is worse than none; (b) the caller's own `settingsEnv` (when it has one — every
+ * provider now forwards `request.settingsEnv`, see each `dispatch-providers/*.mjs`) is merged on top, so this
+ * wrapper's OWN `process.env` — and thus every child it spawns via a plain `{...process.env, ...}` merge, which
+ * is how every existing spawn site in `deliver-item-wrapper.mjs` already builds its child's env — carries the
+ * shim `PATH` override too. That keeps `gh` on the App identity (never a fallback to the operator's own
+ * personal auth by design elsewhere), just never a static value: every call reads the shared cache fresh.
+ * `settingsEnv` omitted (a caller with nothing to add, or a test) keeps this byte-identical but for the
+ * sanitize — no `--settings`-shaped surprise for anything that never wires one through.
  */
-export function defaultSpawnDetached(argv, { cwd, logPath } = {}, {
+export function defaultSpawnDetached(argv, { cwd, logPath, settingsEnv = null } = {}, {
   spawn = nodeSpawn,
   ensureDir = (d) => mkdirSync(d, { recursive: true }),
   openLog = (p) => openSync(p, 'a'),
 } = {}) {
   ensureDir(dirname(logPath));
   const fd = openLog(logPath);
-  const child = spawn(process.execPath, argv, { cwd, detached: true, stdio: ['ignore', fd, fd], env: markWorkerEnv(process.env) });
+  const env = markWorkerEnv({ ...sanitizeSpawnEnv(process.env), ...(settingsEnv || {}) });
+  const child = spawn(process.execPath, argv, { cwd, detached: true, stdio: ['ignore', fd, fd], env });
   if (typeof child.unref === 'function') child.unref();
   return child;
 }

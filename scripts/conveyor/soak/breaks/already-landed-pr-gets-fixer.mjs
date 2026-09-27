@@ -13,11 +13,14 @@
  * route") — wasted work at best, and at worst a fixer "resolving" the apparent conflict by reverting the carrier
  * PR's later refinements.
  *
- * FIX: PR #2769 (`lane/already-landed-pr-watch`, c796444b3 — NOT merged yet when this scenario was written).
- *   - `scripts/lib/already-landed-content.mjs` (pure): a PR is already landed when, for EVERY file it touches,
- *     the PR head's blob for that path equals the blob some commit on `main`'s own history held for it (blob
- *     identity survives the rebase; matching anywhere in the log survives `main`'s later refinement — a plain
- *     `merge-tree` or tip diff false-negatives on both).
+ * FIX: PR #2769 (`lane/already-landed-pr-watch` — first written against c796444b3; after the rebase and the
+ * review:changes round the fix is 3edeb54b4 (detection) + ff7b78b19 (review fixes), and the soak's fake GitHub
+ * mirrors `refs/pull/<n>/head` for the fetch-by-PR-number read, b37558909).
+ *   - `scripts/lib/already-landed-content.mjs` (pure): a PR is already landed when, for EVERY file it touches
+ *     (mode + blob, renames split into delete + add), the PR head's version equals one some commit in
+ *     `<merge-base>..main` held for it, and `main`'s tip still carries the change (blob identity survives the
+ *     rebase; matching anywhere in that window survives `main`'s later refinement — a plain `merge-tree` or tip
+ *     diff false-negatives on both).
  *   - `reconcile-pass.mjs#enrichPrsWithAlreadyLandedFacts` computes that verdict with real `git`/`gh` reads,
  *     ONLY for PRs carrying `merge-status:conflicting`, and attaches `alreadyLandedInMain: {carrierPr}`.
  *   - `reconcile-core.mjs` refuses `already-landed` ahead of every dispatch branch once that fact is present.
@@ -32,7 +35,7 @@
  *      computeMergeStatus`), and the PR is opened `review:changes` + `merge-status:conflicting` with a reviewer
  *      finding — the live PR's state.
  *   The daemon runs in the sim clone (cwd), whose `origin` is the world's bare remote, so the fix's
- *   `git fetch origin <head>` / `git rev-parse <sha>:<path>` / `git log origin/main -- <path>` all resolve
+ *   `git fetch origin refs/pull/<n>/head` / `git rev-parse <sha>:<path>` / `git log origin/main -- <path>` resolve
  *   against real git. Carrier attribution (`gh api repos/.../commits/<sha>/pulls`) is NOT supported by the
  *   fake gh — it exits 1, `defaultReadPullsForCommit` degrades to `[]`, and the refusal still fires with
  *   `carrierPr: null` (the containment verdict alone refuses; attribution is best-effort by design).
@@ -60,7 +63,7 @@ export default {
   title: 'fix-dispatch sends a mechanical conflict-fix at a conflicting PR whose content already landed on main via another PR',
   card: 'backlog #4034 / PR #2769 (lane/already-landed-pr-watch), live incident PR #2752 (epic #4075)',
   fixedBy: {
-    sha: 'c796444b3',
+    sha: '3edeb54b4,ff7b78b19', // detection + its review:changes round — `red-green.mjs --revert` takes a list
     where: 'lane/already-landed-pr-watch',
     paths: ['scripts/lib/already-landed-content.mjs', 'scripts/conveyor/reconcile-pass.mjs', 'scripts/conveyor/reconcile-core.mjs'],
   },

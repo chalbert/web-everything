@@ -75,3 +75,30 @@ describe('daemon-soak aggregator gate (ci.yml) fails closed', () => {
     expect(runGate({ scopeResult: 'success', run: '', shardResult: 'skipped' })).not.toBe(0);
   });
 });
+
+/** The `if:` line of a top-level ci.yml job. */
+function jobIf(job) {
+  const lines = readFileSync(CI_YML, 'utf8').split('\n');
+  const at = lines.findIndex((l) => l === `  ${job}:`);
+  if (at < 0) throw new Error(`ci.yml: no \`${job}\` job`);
+  const next = lines.findIndex((l, i) => i > at && /^  [\w-]+:\s*$/.test(l));
+  const hit = lines.slice(at + 1, next < 0 ? undefined : next).find((l) => /^    if: /.test(l));
+  return hit ? hit.trim() : null;
+}
+
+// soak-main-red (2026-09-26): the soak ran on PRs only, so a regression that landed on main never turned main
+// red — it showed up as a red `daemon-soak` on every unrelated daemon PR instead. It must run on main pushes.
+describe('daemon-soak runs on main pushes, not only on PRs', () => {
+  it('the scope job and the required aggregator both fire on a push to main', () => {
+    for (const job of ['daemon-soak-scope', 'daemon-soak']) {
+      const cond = jobIf(job);
+      expect(cond, job).toMatch(/github\.event_name == 'push' && github\.ref == 'refs\/heads\/main'/);
+      expect(cond, job).toMatch(/github\.event_name == 'pull_request'/);
+    }
+  });
+
+  it('on a non-PR event the scope step always says run (no path filter on main)', () => {
+    const yml = readFileSync(CI_YML, 'utf8');
+    expect(yml).toContain(`if [ "\${{ github.event_name }}" != "pull_request" ]; then echo "run=true" >> "$GITHUB_OUTPUT"; exit 0; fi`);
+  });
+});

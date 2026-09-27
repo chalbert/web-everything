@@ -22,9 +22,11 @@
  * route around it. Scripted per [we:docs/agent/platform-decisions.md#deterministic-core-thin-judgment] (#2607).
  */
 import { resolve } from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { decideSetLabel, runReviewLabelCli, presentRemoveLabels } from '../review-set-label.mjs';
 import { CONFLICT_FIX_COMMENT_MARKER } from './conflict-fix-round-count.mjs';
 import { isTrustedMarkerAuthor } from '../lib/marker-authorship.mjs';
+import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 
 // we:scripts/conveyor/rearm-review.mjs — re-export the shared narrowing helper on this module's surface so the
 // fix-agent brief's entrypoint and the pinned tests keep importing it from here (it is single-sourced next door).
@@ -83,6 +85,42 @@ export function decideRearm({ currentLabels = [] } = {}) {
   return decideSetLabel({ to: 'rearm', currentLabels });
 }
 
+/**
+ * we:scripts/conveyor/rearm-review.mjs#resolveLocalRefSha — #2787 live incident (2026-09-27): what did an
+ * ORDINARY (main-base) conflict-fix round just resolve against? Reads `origin/<ref>`'s own tip, LOCALLY, off
+ * the CALLER's cwd — this CLI runs inside the fix agent's own lane checkout, which just fetched and merged/
+ * rebased that exact ref to resolve the conflict, so the read costs nothing (no `gh` call, no GraphQL/REST
+ * budget exposure) and is trivially fresh. Best-effort: `execFileSync` throwing (no such ref locally, a
+ * checkout `rearm-review.mjs` is not run from, no git on PATH) degrades to `null` — the comment is then posted
+ * WITHOUT the trailer, exactly as it always was before this existed, never a hard failure of the hand-back
+ * itself (a lost sha is a strictly smaller loss than a lost re-arm).
+ * @param {string} ref
+ * @returns {string|null}
+ */
+export function resolveLocalRefSha(ref) {
+  try {
+    const out = execFileSync('git', ['rev-parse', `origin/${ref}`], {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL',
+    });
+    const sha = String(out || '').trim();
+    return /^[0-9a-f]{7,40}$/i.test(sha) ? sha.toLowerCase() : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * we:scripts/conveyor/rearm-review.mjs#conflictFixTargetTrailer — the OPTIONAL trailer line
+ * {@link CONFLICT_FIX_TARGET_TRAILER_RE} parses back, or `''` when `sha` is unresolvable (no trailer at all —
+ * see {@link resolveLocalRefSha}'s own docblock for why this degrades silently rather than failing the hand-back).
+ * @param {string} ref
+ * @param {string|null} sha
+ * @returns {string}
+ */
+export function conflictFixTargetTrailer(ref, sha) {
+  return sha ? `\n\n<!-- conveyor-conflict-fix-target: ${ref}@${sha} -->` : '';
+}
+
 // we:scripts/conveyor/rearm-review.mjs — allow importing the pure decider without running the CLI (the test file
 // imports this module). The standard main check used across the conveyor scripts.
 const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(new URL(import.meta.url).pathname);
@@ -96,6 +134,10 @@ if (IS_CLI) {
   // mechanical conflict-resolution round needs its own cap rather than sharing `countRearmComments`'s.
   const roundArg = (process.argv.find((a) => a.startsWith('--round=')) || '').slice('--round='.length);
   const isConflictRound = roundArg === 'conflict';
+  // #2787-live-incident — the ordinary conflict-fix round is, by construction, always against the repo's
+  // default branch; `--main-ref=` lets a non-`main`-default repo say so, defaulting to `'main'` (every
+  // constellation repo today) so no existing caller needs to change.
+  const mainRefArg = (process.argv.find((a) => a.startsWith('--main-ref=')) || '').slice('--main-ref='.length) || 'main';
   // we:scripts/conveyor/rearm-review.mjs — the fix-agent re-arm CLI: the shared harness with the three deltas
   // this caller supplies (the comment body, the default --actor, the optional --repo fallback). The re-arm
   // swap + its refusal are the shared pure `decideSetLabel({ to: 'rearm' })` — this file adds no invariant.
@@ -103,7 +145,7 @@ if (IS_CLI) {
     fixedTo: 'rearm',
     defaultActor: 'conveyor fix agent',
     repoOptional: true, // the fix agent runs inside its WE lane clone, so a missing --repo derives from cwd.
-    usage: 'usage: rearm-review.mjs <pr> [--repo=<owner/name>] [--actor=<name>] [--round=conflict]  (pr must be a positive integer)',
+    usage: 'usage: rearm-review.mjs <pr> [--repo=<owner/name>] [--actor=<name>] [--round=conflict] [--main-ref=<name>]  (pr must be a positive integer)',
     // The DURABLE re-arm comment — a readable record that the bounce was repaired and re-armed (not a silent
     // flip), AND the durable tally the matching counter reads back to survive a restart (#2643). Its first line
     // MUST be the matching marker (single-sourced) so posting and counting can never drift.
@@ -122,7 +164,12 @@ if (IS_CLI) {
           '',
           'The fix agent did NOT clear the review — a human `/review` (or the drain AI-review convergence pass) re-verdicts. ' +
             'This round is counted against its OWN, smaller conflict-fix cap (#xkmu3gv), never the ordinary negotiation cap.',
-        ].join('\n')
+          // #2787-live-incident — the trailer below records what this round actually resolved against, so a
+          // LATER round against a NEWER `main` (main moved and created a fresh conflict, the mechanism working
+          // exactly as intended) is not misread as this same round recurring — see
+          // `conflict-fix-round-count.mjs#countStaleConflictFixRounds`'s own docblock. Omitted (no trailer at
+          // all) when the local sha is unresolvable — see `resolveLocalRefSha`'s own docblock.
+        ].join('\n') + conflictFixTargetTrailer(mainRefArg, resolveLocalRefSha(mainRefArg))
       : ({ actor, decision }) => [
           REARM_COMMENT_MARKER,
           '',

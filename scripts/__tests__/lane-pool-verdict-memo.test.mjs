@@ -104,6 +104,33 @@ describe('list --acquirable: an unleased lane holding work is proven once, not o
     expect(list()).toEqual([1, 2, 3]);
   });
 
+  it('a clean that never touches .git (tracked file written back by hand) invalidates the entry', () => {
+    // soak-main-red: the stat-only .git fingerprint cannot see this, so the lane read "holds work" for up to the
+    // 10-minute max age — the live `lane-acquire-under-load` soak break (a freed lane never handed out).
+    dirty(1);
+    expect(list()).toEqual([2, 3]);
+    writeFileSync(join(lanePath(1), 'file.txt'), 'v1\n');
+    expect(list()).toEqual([1, 2, 3]);
+  });
+
+  it('deleting a lane\'s untracked scratch invalidates the entry', () => {
+    writeFileSync(join(lanePath(1), 'scratch-notes.txt'), 'wip\n');
+    expect(list()).toEqual([2, 3]);
+    rmSync(join(lanePath(1), 'scratch-notes.txt'));
+    expect(list()).toEqual([1, 2, 3]);
+  });
+
+  it('a pre-v2 memo (a dirty entry with no path signature) is ignored, never trusted', () => {
+    dirty(1);
+    list();
+    const m = JSON.parse(readFileSync(MEMO(), 'utf8'));
+    expect(m.v).toBe(2);
+    expect(m.lanes['1'].paths).toEqual(['file.txt']);
+    writeFileSync(MEMO(), JSON.stringify({ v: 1, branch: 'main', lanes: { 1: { ...m.lanes['1'], paths: undefined, dirt: undefined } } }));
+    writeFileSync(join(lanePath(1), 'file.txt'), 'v1\n');
+    expect(list()).toEqual([1, 2, 3]);
+  });
+
   it('never memoizes a POSITIVE verdict: a clean lane dirtied later is seen on the next scan', () => {
     expect(list()).toEqual([1, 2, 3]);
     dirty(2);

@@ -121,14 +121,32 @@ export function itemNumsFromPr(headRefName = '', title = '') {
  * Guards 6-8 are additive and fully backward compatible: the 3rd argument defaults to `{ body: '',
  * changedFiles: null }`, under which none of them can ever fire, so every existing call site (and every
  * pre-#3473 test) gets IDENTICAL output to before this change.
+ * #2779-incident (PR #2785, `lane/2779-session-token-fresh`, 03:14Z) — a NINTH guard, found the hard way: this
+ * extractor's lead-segment/trailing-segment RULES (3/4 above) read "the id-bearing position is a grammar", but
+ * that grammar assumes the human/agent who named the branch used the CARD's number. A worker instead named
+ * their branch after PR #2779 (an unrelated, still-open, unmerged bg-isolation fix) — `segs[0] === '2779'`
+ * satisfied the exact same lead-match rule #3441 round 3 documented as safe, with NO manifest, NO title
+ * corroboration, and NO diff evidence, yet the caller auto-committed `drain: resolve #2779 on land`, which (a)
+ * wrongly flipped backlog card #2779 (an unrelated card nothing here built) to `resolved`, and (b) — because
+ * "resolve #2779" is a GitHub closing keyword — CLOSED the real, unmerged PR #2779 as a side effect of the
+ * commit landing. A branch's bare leading/trailing number is NEVER sufficient evidence on its own when that
+ * same number ALSO names a PR that is (or, at land time, still was) open: an open PR number and a backlog card
+ * number share the same numbering, so a leading digit run is fundamentally ambiguous between "the card this PR
+ * builds" and "the PR the worker copied into their own branch name". `openPrNums` — the OTHER currently-open
+ * PR numbers in this repo (never including this PR's own number) — lets the caller name that collision set;
+ * any id this extractor would otherwise credit that also appears in `openPrNums` is dropped from the credited
+ * set entirely (the safe direction per this docstring's own asymmetry: a false negative just re-strands the
+ * item for a human/the stranded sweep to resolve with real evidence; a false positive wrongly resolves an
+ * unrelated card AND, via the closing-keyword commit message, can close someone else's open PR).
  * @param {string} headRefName
  * @param {string} title
- * @param {{body?: string, changedFiles?: (Array<string|{path?: string}>|null)}} [o] - #3473: `body` is the
+ * @param {{body?: string, changedFiles?: (Array<string|{path?: string}>|null), openPrNums?: Iterable<string|number>}} [o] - #3473: `body` is the
  *   PR's own description text (guards 6/8); `changedFiles` is the PR's changed-file list, either plain path
- *   strings or `{path}`-shaped rows as `gh pr view --json files` returns (guard 7). Both default to inert.
+ *   strings or `{path}`-shaped rows as `gh pr view --json files` returns (guard 7). `openPrNums` is the
+ *   #2779-incident guard above. All default to inert.
  * @returns {string[]} zero-padded item ids this PR's ref/title claims to DELIVER (not merely mention)
  */
-export function deliveredItemNumsFromPr(headRefName = '', title = '', { body = '', changedFiles = null } = {}) {
+export function deliveredItemNumsFromPr(headRefName = '', title = '', { body = '', changedFiles = null, openPrNums = null } = {}) {
   const ref = String(headRefName || '');
   if (isNonDeliveryPr(ref, title, { body, changedFiles })) return [];
   // Only a `lane/<slug>` ref is ever a delivery vehicle (matches itemNumsFromPr's own gate above) — a random
@@ -240,7 +258,11 @@ export function deliveredItemNumsFromPr(headRefName = '', title = '', { body = '
   // an unrelated id the same title/ref legitimately delivers.
   const disclaimed = new Set();
   for (const m of String(body || '').matchAll(/\bdoes\s+not\s+resolve\s+#?(\d{2,5})\b/gi)) disclaimed.add(m[1].padStart(3, '0'));
-  return [...nums].map((n) => n.padStart(3, '0')).filter((n) => !disclaimed.has(n));
+  // #2779-incident guard (see docstring) — never credit an id that is itself another currently-open PR's
+  // number: that is exactly the ambiguity a bare branch-name digit run cannot resolve on its own.
+  const openSet = new Set([...(openPrNums || [])].map((n) => String(n).replace(/^0+/, '') || '0'));
+  const isOpenPrNum = (n) => openSet.has(n.replace(/^0+/, '') || '0');
+  return [...nums].map((n) => n.padStart(3, '0')).filter((n) => !disclaimed.has(n) && !isOpenPrNum(n));
 }
 
 // #3916 review round 1 — a citation cue word; paired with a `#NNN` item reference it marks a quoted span as

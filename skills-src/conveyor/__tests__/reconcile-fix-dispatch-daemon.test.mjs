@@ -15,7 +15,7 @@ import {
   runHungCiRecoveryAllRepos, formatHungActionLine,
   runMainRedRebaseAllRepos, formatMainRedRebaseActionLine,
   runMissingRunRecoveryAllRepos, formatMissingRunActionLine,
-  defaultTagDispatchStatus,
+  defaultTagDispatchStatus, withFixDispatchClaimRefresh,
 } from '../reconcile-fix-dispatch-daemon.mjs';
 import { CONSTELLATION_REPOS } from '../../../scripts/lib/constellation-repos.mjs';
 import { assertMainNotStale } from '../../../scripts/lib/main-staleness.mjs';
@@ -577,6 +577,52 @@ describe('buildCliDaemonEffects — onTick logs the exact pause line when authPa
 // mirrors this repo's own established norm for proving a call-site wiring fact inside code that is expensive or
 // unsafe to execute directly in a unit test (see e.g. `merge-ai-prs-ai-detection-and-drain-ordering.test.mjs`'s
 // #984 F2 block, or this fix's sibling `merge-ai-prs-merge-trace-post-confirm.test.mjs`).
+describe('withFixDispatchClaimRefresh — dup-heal-dispatch: refreshes live claims before the wrapped tick runs', () => {
+  it('calls refresh BEFORE delegating to the wrapped tickOnce, and forwards its result', async () => {
+    const order = [];
+    const effects = {
+      tickOnce: async () => { order.push('tick'); return { ok: true }; },
+      other: 'kept-as-is',
+    };
+    const refresh = () => { order.push('refresh'); return { checked: 1, refreshed: [{ repo: 'we', pr: 2784, kind: 'ci-heal', owner: 'A' }] }; };
+    const wrapped = withFixDispatchClaimRefresh(effects, { log: { error: vi.fn() }, refresh });
+    expect(wrapped.other).toBe('kept-as-is'); // every other effect passes through untouched.
+    const result = await wrapped.tickOnce();
+    expect(order).toEqual(['refresh', 'tick']);
+    expect(result).toEqual({ ok: true });
+  });
+
+  it('logs one line per refreshed claim', async () => {
+    const log = { error: vi.fn() };
+    const refresh = () => ({ checked: 1, refreshed: [{ repo: 'we', pr: 2784, kind: 'ci-heal', owner: 'Mac:123' }] });
+    const wrapped = withFixDispatchClaimRefresh({ tickOnce: async () => ({}) }, { log, refresh });
+    await wrapped.tickOnce();
+    expect(log.error).toHaveBeenCalledWith(expect.stringContaining('refreshed live claim ci-heal-2784'));
+  });
+
+  it('a refresh failure is logged, non-fatal — the wrapped tick still runs', async () => {
+    const log = { error: vi.fn() };
+    const refresh = () => { throw new Error('claude agents hiccup'); };
+    let ticked = false;
+    const wrapped = withFixDispatchClaimRefresh({ tickOnce: async () => { ticked = true; return {}; } }, { log, refresh });
+    await wrapped.tickOnce();
+    expect(ticked).toBe(true);
+    expect(log.error).toHaveBeenCalledWith(expect.stringContaining('fix-dispatch claim refresh failed (non-fatal)'));
+  });
+
+  // PR #2789 review (antigravity) — an async refresh must be awaited, never iterate a Promise (TypeError).
+  it('an ASYNC refresh is awaited — its refreshed rows are logged and the tick still runs', async () => {
+    const log = { error: vi.fn() };
+    const refresh = async () => ({ checked: 1, refreshed: [{ repo: 'we', pr: 2784, kind: 'ci-heal', owner: 'A' }] });
+    let ticked = false;
+    const wrapped = withFixDispatchClaimRefresh({ tickOnce: async () => { ticked = true; return {}; } }, { log, refresh });
+    await wrapped.tickOnce();
+    expect(ticked).toBe(true);
+    expect(log.error).toHaveBeenCalledWith(expect.stringContaining('refreshed live claim ci-heal-2784'));
+    expect(log.error).not.toHaveBeenCalledWith(expect.stringContaining('refresh failed'));
+  });
+});
+
 describe('buildCliDaemonEffects — tickOnce is wired to runTickAllRepos, not the old fix-only call (#xngv3vn)', () => {
   const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'reconcile-fix-dispatch-daemon.mjs'), 'utf8');
 

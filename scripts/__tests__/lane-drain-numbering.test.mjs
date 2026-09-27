@@ -802,7 +802,7 @@ describe('finalizeLand under a contended numbering lock (review #2668)', () => {
         lockOpts: { lockRoot, waitMs: 0, sleep: () => {} },
       });
       expect(fin.unqueued).toBe(true);
-      expect(published).toEqual(['drain: unqueue + cleanup #2200 lane manifest post-land (#2175)']); // unqueue went out this pass
+      expect(published).toEqual(['drain: unqueue + cleanup card 2200 lane manifest post-land (#2175)']); // unqueue went out this pass; #2779-incident — `card N`, never `#N`, for the item number (commit-message-safety.mjs)
       expect(fin.pushed).toBe(true);
       expect(fin.numbered).toEqual({ assigned: [], committed: false });
       // The strict contract held: nothing was numbered while another holder owned the section.

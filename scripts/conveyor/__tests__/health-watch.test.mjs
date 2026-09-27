@@ -12,7 +12,8 @@ import { tmpdir } from 'node:os';
 import {
   probeDaemonLogs, probeLeases, probeSelfSync, probeLanePools, tick, healthSectionLines, healthDir,
   probeDaemonStatus, daemonNameForLabel, runTickWithWatchdog, probeAuthExpiredSessions, probeAgents,
-  probePrs, probeStaleState, probeMergedPrs, probeProcesses, probeMachineLoad,
+  probePrs, probeStaleState, probeMergedPrs, probeProcesses, probeMachineLoad, probeGhShimLanes,
+  probeBgIsolationStalls,
 } from '../health-watch.mjs';
 
 let dir;
@@ -103,6 +104,63 @@ describe('probeSelfSync', () => {
   });
 });
 
+// ── probeGhShimLanes ─────────────────────────────────────────────────────────────────────────────────────────
+
+describe('probeGhShimLanes', () => {
+  function writeShim(path, { throttleCli, realGh }) {
+    mkdirSync(join(path, '..'), { recursive: true });
+    writeFileSync(path, [
+      '#!/usr/bin/env node',
+      `const REAL_GH = ${JSON.stringify(realGh)};`,
+      `const GH_THROTTLE_CLI = ${JSON.stringify(throttleCli)};`,
+      '',
+    ].join('\n'));
+  }
+
+  it('flags the legacy shared shim when its GH_THROTTLE_CLI is baked into a lane clone', () => {
+    const root = join(dir, '.claude', 'github-app-token');
+    writeShim(join(root, 'gh-shim', 'gh'), {
+      realGh: '/opt/homebrew/bin/gh',
+      throttleCli: join(dir, 'workspace', '.lanes', 'web-everything', 'lane-22', 'scripts', 'lib', 'gh-throttle.mjs'),
+    });
+    const out = probeGhShimLanes({ home: dir });
+    expect(out).toHaveLength(1);
+    expect(out[0].inLane).toBe(true);
+    expect(out[0].throttleCli).toContain('lane-22');
+  });
+
+  it('scans every per-checkout gh-shim.d/<hash>/gh, not just the legacy shared one', () => {
+    const root = join(dir, '.claude', 'github-app-token');
+    writeShim(join(root, 'gh-shim.d', 'abc123', 'gh'), {
+      realGh: '/opt/homebrew/bin/gh',
+      throttleCli: join(dir, 'workspace', 'webeverything', 'scripts', 'lib', 'gh-throttle.mjs'),
+    });
+    writeShim(join(root, 'gh-shim.d', 'def456', 'gh'), {
+      realGh: '/opt/homebrew/bin/gh',
+      throttleCli: join(dir, 'workspace', '.lanes', 'web-everything', 'lane-9', 'scripts', 'lib', 'gh-throttle.mjs'),
+    });
+    const out = probeGhShimLanes({ home: dir });
+    expect(out).toHaveLength(2);
+    expect(out.find((s) => s.path.includes('abc123')).inLane).toBe(false);
+    expect(out.find((s) => s.path.includes('def456')).inLane).toBe(true);
+  });
+
+  it('never flags a stable primary-checkout path', () => {
+    const root = join(dir, '.claude', 'github-app-token');
+    writeShim(join(root, 'gh-shim.d', 'stable', 'gh'), {
+      realGh: '/opt/homebrew/bin/gh',
+      throttleCli: join(dir, 'workspace', 'webeverything', 'scripts', 'lib', 'gh-throttle.mjs'),
+    });
+    const out = probeGhShimLanes({ home: dir });
+    expect(out).toHaveLength(1);
+    expect(out[0].inLane).toBe(false);
+  });
+
+  it('returns [] when no shim has ever been written', () => {
+    expect(probeGhShimLanes({ home: dir })).toEqual([]);
+  });
+});
+
 // ── probeLanePools ───────────────────────────────────────────────────────────────────────────────────────────
 
 describe('probeLanePools', () => {
@@ -161,6 +219,42 @@ describe('probeAuthExpiredSessions', () => {
   it('probeAgents itself carries cwd/sessionId through — what this probe needs to resolve a transcript', () => {
     const exec = () => JSON.stringify([{ name: 'ci-heal-2711', state: 'blocked', kind: 'background', startedAt: '2026-09-26T10:53:00.000Z', cwd: '/x', sessionId: 's-1' }]);
     expect(probeAgents({ exec })).toEqual([{ name: 'ci-heal-2711', state: 'blocked', kind: 'background', startedAt: '2026-09-26T10:53:00.000Z', cwd: '/x', sessionId: 's-1', status: null, waitingFor: null }]);
+  });
+});
+
+// ── probeBgIsolationStalls — #x9fbg1x, live incident fix-2748/fix-2770, 2026-09-26 ────────────────────────────
+describe('probeBgIsolationStalls', () => {
+  const stuckAgent = (over = {}) => ({
+    name: 'fix-2748', kind: 'background', state: 'blocked', status: 'waiting', waitingFor: 'permission prompt',
+    startedAt: '2026-09-26T18:00:00.000Z', cwd: '/x/dispatch/f6b254c8', sessionId: '03bd61b3-…', ...over,
+  });
+
+  it('confirms a stuck-on-permission-prompt session the injected reader confirms is the EnterWorktree guard', () => {
+    const readInfo = () => ({ stall: true, evidence: 'Call EnterWorktree first…' });
+    const out = probeBgIsolationStalls([stuckAgent()], { readInfo });
+    expect(out).toEqual([{
+      name: 'fix-2748', sessionId: '03bd61b3-…', cwd: '/x/dispatch/f6b254c8',
+      startedAt: Date.parse('2026-09-26T18:00:00.000Z'), evidence: 'Call EnterWorktree first…',
+    }]);
+  });
+
+  it('never flags a session the reader clears, or one that throws', () => {
+    expect(probeBgIsolationStalls([stuckAgent()], { readInfo: () => ({ stall: false, reason: 'no-signal' }) })).toEqual([]);
+    expect(probeBgIsolationStalls([stuckAgent()], { readInfo: () => { throw new Error('unreadable'); } })).toEqual([]);
+    expect(probeBgIsolationStalls([stuckAgent()], { readInfo: () => null })).toEqual([]);
+  });
+
+  it('never even calls the reader for a session not already stuck on a permission prompt — cheap by construction', () => {
+    let called = false;
+    const readInfo = () => { called = true; return { stall: true }; };
+    probeBgIsolationStalls([stuckAgent({ state: 'working', status: 'busy', waitingFor: null })], { readInfo });
+    probeBgIsolationStalls([stuckAgent({ kind: 'interactive' })], { readInfo });
+    expect(called).toBe(false);
+  });
+
+  it('empty/non-array input is never a guess', () => {
+    expect(probeBgIsolationStalls(undefined)).toEqual([]);
+    expect(probeBgIsolationStalls([])).toEqual([]);
   });
 
   // #xrv69j6 — `status`/`waitingFor` carried through too: the real shape `claude agents --json` reports for a

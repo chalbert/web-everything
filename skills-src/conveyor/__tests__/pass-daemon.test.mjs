@@ -4,9 +4,11 @@
  *   no real timer, no real lease): injected effects, mirroring #3870's own `runDaemonLoop` tests.
  */
 import { describe, it, expect, vi } from 'vitest';
+import { EventEmitter } from 'node:events';
+
 import {
   runPassDaemonLoop, passDaemonLeaseKey, realSleep, DEFAULT_HEARTBEAT_INTERVAL_MS,
-  PASS_DAEMON_SELF_SYNC_ENV, passDaemonSelfSyncEnabled, MAIN_ONLY_PASSES,
+  PASS_DAEMON_SELF_SYNC_ENV, passDaemonSelfSyncEnabled, MAIN_ONLY_PASSES, spawnPassOnce,
 } from '../pass-daemon.mjs';
 import { DAEMON_MANIFEST } from '../daemon-manifest.mjs';
 import { withSelfSync, DAEMON_SELF_SYNC_BRANCH_ENV } from '../../../scripts/lib/daemon-self-sync.mjs';
@@ -213,5 +215,33 @@ describe('realSleep — regression, live-caught on the sibling #3870/#3876 daemo
       clearTimeout(captured);
       global.setTimeout = real;
     }
+  });
+});
+
+// #gh-write-burst — the child env every spawned pass runs with. Before this, a spawned pass shared its calls.jsonl
+// lines with every other pass on the box, distinguishable only by argv[1]'s basename (which every per-repo
+// instance of the SAME script, e.g. parked-pr-conflict-watch-we vs -frontierui, shares) — this is what lets
+// `main()` set GH_CALLER=<passName> so the sidecar log attributes precisely.
+describe('spawnPassOnce — env passthrough to the child process (#gh-write-burst)', () => {
+  const fakeChild = () => {
+    const emitter = new EventEmitter();
+    setImmediate(() => emitter.emit('exit', 0, null));
+    return emitter;
+  };
+
+  it('defaults to process.env when no env override is given (unchanged for every existing caller)', async () => {
+    const spawnFn = vi.fn(() => fakeChild());
+    await spawnPassOnce({ script: 'scripts/x.mjs' }, { root: '/repo', spawnFn });
+    const [, , opts] = spawnFn.mock.calls.at(-1);
+    expect(opts.env).toBe(process.env);
+  });
+
+  it('forwards an explicit env override unchanged — this is how GH_CALLER=<passName> reaches the child', async () => {
+    const spawnFn = vi.fn(() => fakeChild());
+    const env = { ...process.env, GH_CALLER: 'parked-pr-conflict-watch-we' };
+    await spawnPassOnce({ script: 'scripts/x.mjs' }, { root: '/repo', env, spawnFn });
+    const [, , opts] = spawnFn.mock.calls.at(-1);
+    expect(opts.env).toBe(env);
+    expect(opts.env.GH_CALLER).toBe('parked-pr-conflict-watch-we');
   });
 });

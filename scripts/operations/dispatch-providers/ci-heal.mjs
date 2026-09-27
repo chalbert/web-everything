@@ -94,7 +94,13 @@ export function ciHealDetachedProvider(request, {
   const deliveryAgent = readDeliveryAgentMarker(num);
   if (deliveryAgent) argv.push(`--provider=${deliveryAgent}`);
 
-  const child = spawnDetached(argv, { cwd: request?.cwd ?? REPO_ROOT, logPath: logPathFor(sessionSlug) });
+  // #landing-freeze-2779 (the live incident this closes — ci-heal-2779, 2026-09-26 ~20:55 ET: "the GitHub
+  // token (GH_TOKEN) stopped working partway through, so I couldn't post the CI-heal tally comment (HTTP
+  // 401)") — forward the request's already-computed gh-App-shim env (fresh-cache PATH override, never a
+  // static token) into the wrapper's OWN process env, so a long-lived ci-heal wrapper (and whatever it later
+  // spawns) never falls back to a static, expiring `GH_TOKEN` inherited from whoever dispatched it. See
+  // `detached-dispatch.mjs#defaultSpawnDetached`'s own docblock for the full mechanism.
+  const child = spawnDetached(argv, { cwd: request?.cwd ?? REPO_ROOT, logPath: logPathFor(sessionSlug), settingsEnv: request?.settingsEnv });
   const pid = Number(child?.pid);
   if (!Number.isInteger(pid) || pid <= 0) {
     // SAME indeterminate shape as an unparseable `claude --bg` confirmation: something may be running and its

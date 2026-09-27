@@ -298,6 +298,35 @@ describe('deliveredItemNumsFromPr (#3441 — the STRICT extractor feeding an aut
       expect(deliveredItemNumsFromPr(ref, title, { body })).toEqual(expected);
     });
   });
+
+  // Incident 2026-09-26 03:14Z — PR #2785, branch `lane/2779-session-token-fresh` (a worker named their own
+  // branch after PR #2779, an unrelated open bg-isolation fix, never a backlog card). RED before the
+  // `openPrNums` guard: the lead-segment rule (round 3 above) matched `segs[0] === '2779'` with no manifest, no
+  // title corroboration, no diff evidence — exactly this shape — and the caller auto-committed `drain: resolve
+  // #2779 on land`, wrongly resolving unrelated card #2779 AND (closing-keyword side effect) closing the real
+  // PR #2779. GREEN after the guard: passing the real open-PR set (#2779 was open at land time) refuses the
+  // credit entirely, the safe direction.
+  describe('#2779-incident — a branch-name digit run that collides with a real open PR number', () => {
+    it('RED (pre-fix) shape reproduced: with no openPrNums the bare lead segment is still credited', () => {
+      expect(deliveredItemNumsFromPr('lane/2779-session-token-fresh', '')).toEqual(['2779']);
+    });
+    it('GREEN: passing the real open-PR set (2779 was an open PR at land time) refuses the credit', () => {
+      expect(deliveredItemNumsFromPr('lane/2779-session-token-fresh', '', { openPrNums: ['2779'] })).toEqual([]);
+    });
+    it('a non-colliding lead segment (2779 is NOT an open PR) is still credited normally', () => {
+      expect(deliveredItemNumsFromPr('lane/2779-session-token-fresh', '', { openPrNums: ['3001', '3002'] })).toEqual(['2779']);
+    });
+    it('the exclusion is leading-zero/type tolerant (a number or a zero-padded string both match)', () => {
+      expect(deliveredItemNumsFromPr('lane/2779-session-token-fresh', '', { openPrNums: [2779] })).toEqual([]);
+      expect(deliveredItemNumsFromPr('lane/2779-session-token-fresh', '', { openPrNums: ['02779'] })).toEqual([]);
+    });
+    it('the same collision on a trailing (batch) segment is refused too', () => {
+      expect(deliveredItemNumsFromPr('lane/batch-2026-07-08-2245-2779', '', { openPrNums: ['2779'] })).toEqual([]);
+    });
+    it('an explicit title marker for a DIFFERENT id is unaffected by an unrelated open-PR collision on the ref id', () => {
+      expect(deliveredItemNumsFromPr('lane/2779-session-token-fresh', 'WE #3441: unrelated subject', { openPrNums: ['2779'] })).toEqual(['3441']);
+    });
+  });
 });
 
 describe('extractItemNums', () => {

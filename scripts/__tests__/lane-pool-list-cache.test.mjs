@@ -86,7 +86,10 @@ beforeEach(() => {
   writeFileSync(
     join(shimDir, 'git'),
     `#!/bin/sh\nprintf '%s\\t%s\\t%s\\n' "$(pwd -P)" "\${GIT_OPTIONAL_LOCKS:-}" "$*" >> "$GIT_TRACE_LOG"\n` +
-      `if [ -n "$GIT_SHIM_SLEEP" ]; then sleep "$GIT_SHIM_SLEEP"; fi\nexec "${REAL_GIT}" "$@"\n`,
+      `if [ -n "$GIT_SHIM_SLEEP" ]; then sleep "$GIT_SHIM_SLEEP"; fi\n` +
+      // One-shot mid-scan hook: the FIRST git call whose cwd is $GIT_SHIM_HOOK_CWD runs $GIT_SHIM_HOOK first.
+      `if [ -n "$GIT_SHIM_HOOK" ] && [ "$(pwd -P)" = "$GIT_SHIM_HOOK_CWD" ] && [ ! -e "$GIT_SHIM_HOOK_DONE" ]; then : > "$GIT_SHIM_HOOK_DONE"; sh -c "$GIT_SHIM_HOOK"; fi\n` +
+      `exec "${REAL_GIT}" "$@"\n`,
   );
   chmodSync(join(shimDir, 'git'), 0o755);
 
@@ -164,6 +167,43 @@ describe('#xn432dz list --acquirable cache', () => {
     expect(list()).toEqual([1, 2]);
     leaseLane(1);
     expect(list()).toEqual([2]);
+  });
+
+  it('an in-place clean of an UNLEASED lane (git checkout -- <path>, rewrites the index) invalidates the cache immediately', () => {
+    // soak-main-red: the cached "lane-2 holds work" answer used to outlive this clean for the full TTL, so an
+    // `acquire --wait-ms` shorter than the TTL never saw the freed lane (break lane-acquire-under-load).
+    provision(2);
+    dirty(2);
+    expect(list()).toEqual([1]);
+    sleep(20); // distinct index mtime even on a coarse-mtime filesystem
+    git(['checkout', '--', 'file.txt'], lanePath(2));
+    expect(list()).toEqual([1, 2]);
+  });
+
+  it('a clean that lands MID-scan, after its lane was already probed, still invalidates the cached answer', () => {
+    // soak-main-red: the fingerprint used to be read AFTER the scan, so it already included this clean and the
+    // stale "lane-1 holds work" answer validated for the full TTL. It is now captured before the first probe.
+    provision(2);
+    dirty(1);
+    list(['--no-cache', '--cache-ttl-ms=0']); // settle: nothing cached
+    rmSync(CACHE(), { force: true });
+    const hook = {
+      GIT_SHIM_HOOK: `sleep 0.05; cd "${realpathSync(lanePath(1))}" && "${REAL_GIT}" checkout -- file.txt`,
+      GIT_SHIM_HOOK_CWD: realpathSync(lanePath(2)), // lane-2 is probed after lane-1
+      GIT_SHIM_HOOK_DONE: join(base, 'hook-done'),
+    };
+    expect(list([], hook)).toEqual([2]); // this scan read lane-1 before the clean
+    expect(existsSync(join(base, 'hook-done'))).toBe(true);
+    expect(list()).toEqual([1, 2]); // the next caller must not be served that stale answer
+  });
+
+  it('scanning never invalidates its own cache (read-only git leaves every unleased index untouched)', () => {
+    provision(2);
+    dirty(2);
+    expect(list()).toEqual([1]);
+    resetTrace();
+    expect(list()).toEqual([1]);
+    expect(laneGitCalls()).toEqual([]); // a cache hit — the first scan's own `git status` did not bust it
   });
 
   it('provision/refresh invalidate the cache (they reset trees with no lease change)', () => {

@@ -55,6 +55,41 @@ describe('deriveReviewStatus', () => {
   it('never matches a different PR number by accident', () => {
     expect(deriveReviewStatus({ pr: 176, agents: [{ name: 'review-1765', state: 'working' }] })).toBeNull();
   });
+
+  // Live gap found 2026-09-26 (epic #4075/#3383): a `ci-heal-<pr>` session had NO representation in this
+  // vocabulary at all — a PR mid-CI-heal carried no `review-status:*` label, indistinguishable from a PR
+  // nothing is touching. `ci-heal` mints via the SAME `mintSessionSlug`/`PR_KINDS` machinery review/fix already
+  // do (`we:scripts/conveyor/session-slug.mjs`), so the gap was purely this module never checking for it.
+  it('healing-ci: a live ci-heal-<pr> session that is actually working', () => {
+    expect(deriveReviewStatus({ pr: 1765, agents: [{ name: 'ci-heal-1765', state: 'working' }] }))
+      .toEqual({ role: 'ci-heal', state: 'healing-ci' });
+  });
+
+  it('ci-heal-stalled: a ci-heal-<pr> session that is blocked, not working', () => {
+    expect(deriveReviewStatus({ pr: 1765, agents: [{ name: 'ci-heal-1765', state: 'blocked' }] }))
+      .toEqual({ role: 'ci-heal', state: 'ci-heal-stalled' });
+  });
+
+  it('a review or fix session takes precedence over a stale ci-heal row for the same PR', () => {
+    const agents = [{ name: 'ci-heal-1765', state: 'working' }, { name: 'fix-1765', state: 'working' }];
+    expect(deriveReviewStatus({ pr: 1765, agents })?.role).toBe('fix');
+  });
+
+  // The exact conflict-bounce fixture reported live at 14:45 ET on `chalbert/web-everything#2741`
+  // (`review:changes` + `review-round:1` + `merge-status:conflicting`, mechanically bounced by
+  // `we:scripts/conveyor/parked-pr-conflict-watch.mjs`) with its real `fix-2741` session, actually `working`.
+  // The status sweep's candidate selection (`we:scripts/conveyor/reconcile-core.mjs#selectStatusCandidates`)
+  // already includes every refusal unconditionally (fixed #4204 for `nothing-owed`, the same unconditional
+  // inclusion covers a `live-process`/conflict-fix refusal here) — this pins that `deriveReviewStatus` itself
+  // correctly derives `fixing` for that exact live session shape, independent of which reconcile branch it
+  // reached this tick.
+  it('fixing: PR #2741\'s real conflict-bounce fixture (review:changes + merge-status:conflicting, live fix-2741)', () => {
+    const currentLabels = [{ name: 'review:changes' }, { name: 'review-round:1' }, { name: 'merge-status:conflicting' }];
+    const agents = [{ name: 'fix-2741', state: 'working', pid: 12345 }];
+    expect(deriveReviewStatus({ pr: 2741, agents })).toEqual({ role: 'fix', state: 'fixing' });
+    expect(planStatusLabelChange({ status: deriveReviewStatus({ pr: 2741, agents }), currentLabels }))
+      .toEqual({ add: 'review-status:fixing', remove: [] });
+  });
 });
 
 describe('planStatusLabelChange', () => {

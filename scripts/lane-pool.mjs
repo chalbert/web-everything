@@ -76,6 +76,13 @@ import { createHash, randomBytes } from 'node:crypto';
 import { homedir, hostname } from 'node:os';
 import { join, basename, resolve, dirname, sep } from 'node:path';
 import { resolveReal } from './guard-lane.mjs';
+// #x9fbg1x — every lane clone this pool hands out gets Claude Code's own background-session worktree-isolation
+// guard turned OFF, via an UNTRACKED (`.gitignore`d) settings.local.json this call writes INTO the clone —
+// never the tracked, repo-wide `.claude/settings.json` (which no longer carries this key; see that file's own
+// diff and `scripts/lib/dispatch-bg-isolation.mjs`'s header for the full incident). A lane clone already IS
+// this repo's own isolation boundary (#2123/#104), so the CLI's guard is redundant for ANY session working in
+// one — dispatched or a human-driven single session alike — without ever touching the primary checkout.
+import { ensureWorktreeIsolationOff } from './lib/dispatch-bg-isolation.mjs';
 import { guardedPoolRoot, referenceArgs } from './lib/lane-pool-paths.mjs';
 import {
   LEASE_FILENAME,
@@ -117,7 +124,7 @@ import { readField } from './backlog/frontmatter.mjs';
 // so a lane can be traced back to the session/card/PR that used it AFTER its lease is released (today nothing
 // records that — see `scripts/lane-whois.mjs`, the reader). Lives in its OWN module (another worker owns this
 // file for PR #2606 concurrently) — the four call sites below are the only hook points.
-import { appendLaneHistory, laneHistoryEntry } from './lib/lane-history.mjs';
+import { appendLaneHistory, laneHistoryEntry, readLaneHistory, lastLaneHistoryEntry } from './lib/lane-history.mjs';
 // #3568 — the shared known-safe-scratch-litter allowlist + cleanup core, reused verbatim by the periodic
 // `we:scripts/conveyor/lane-pool-health-watch.mjs` pass so the two never diverge into two separately-maintained
 // lists. Side-effect-free at import (no top-level dispatch), like every other `./lib/*.mjs` import above.
@@ -133,6 +140,11 @@ import { cleanLaneLitter, planLitterCleanup } from './lib/lane-litter.mjs';
 // import" shape `we:scripts/operations/operator-queue.mjs`'s own header warns about (that warning is about
 // importing `lane-pool.mjs` itself elsewhere — the OPPOSITE direction from this import).
 import { gitStatusSummary, aheadCommits, aheadCommitsPreserved, lanePreservedFileChecker } from './lane-whois.mjs';
+import { guessCardIds } from './lib/lane-whois-core.mjs';
+import {
+  salvageLane, removeLitterWorktrees, listLitterWorktrees, salvageEligibility, readLiveCwds, pidsWithCwdIn,
+  newestContentMtimeMs, resolveSalvageQuietMs, readAgentsStrict, liveAgentInLane,
+} from './lib/lane-salvage.mjs';
 // #x5n4zn3 — the SAME shared budget policy `we:scripts/lib/bounded-child.mjs`'s async `runBounded` rollout
 // uses elsewhere (dispatch-plan.mjs's collectors), reused here for its CONSTANTS only (`resolveChildTimeoutMs`
 // / the `WE_CHILD_TIMEOUT_MS` env knob), NOT its async primitive — see the `git`/`gitQuiet` header comment
@@ -349,6 +361,30 @@ function writeLaneEnv(repo, n) {
   const contents = laneEnvLocal(repo, n);
   if (contents === null) return;
   writeFileSync(join(laneDir(repo, n), '.env.local'), contents);
+}
+
+// #x9fbg1x — same "write AFTER refreshLane's `git clean -fd`" timing as `writeLaneEnv` above, and the same
+// reason: `.claude/settings.local.json` is untracked (`.gitignore`'d), so a plain `git clean -fd` would
+// otherwise remove it right back out from under a lane this call just "provisioned". Idempotent and
+// additive (see `ensureWorktreeIsolationOff`'s own doc) — safe to call on every provision/refresh/acquire,
+// never only once at a lane's first clone, so a lane provisioned BEFORE this fix existed still picks it up
+// the next time it is touched.
+//
+// GATED ON `.claude/` ALREADY EXISTING IN THE CHECKOUT (reproduced live against a from-scratch fixture while
+// building this fix). This repo's own `.claude/` is never empty — `.claude/settings.json` is tracked — so a
+// lane clone of THIS repo always has the directory already, and the new `settings.local.json` lands as its
+// OWN individual `git status --porcelain` line (which the litter allowlist's exact-path entry matches). But a
+// checkout with NO tracked `.claude/` entry at all (a different constellation pool this same lane-pool.mjs
+// also serves — plateau-app, frontierui; confirmed NOT to have this convention yet, we:backlog/3170-*.md) would
+// otherwise get a brand-new, WHOLLY untracked `.claude/` directory the very first time this runs — and git
+// collapses a wholly-untracked directory to ONE porcelain line (`?? .claude/`) that no per-FILE allowlist entry
+// can ever match, misreading the whole lane as dirty. Skipping the write there is strictly narrower than the
+// repo-wide tracked-settings.json approach this card replaces, never broader — and matches #3170's own ruling
+// that a sibling repo's own convention must be confirmed before assuming this repo's applies.
+function writeLaneClaudeSettings(repo, n) {
+  const dir = laneDir(repo, n);
+  if (!existsSync(join(dir, '.claude'))) return;
+  ensureWorktreeIsolationOff({ cwd: dir });
 }
 
 // ── constellation sibling clones for the WE pool (#2166 → #2282 → #2349) ─────────────────────────────
@@ -792,13 +828,34 @@ function cloneLane(repo, n) {
 function laneDirtyOrAhead(dir, branch) {
   const porcelain = tryGit(['status', '--porcelain'], dir);
   const uncommitted = porcelain ? porcelain.split('\n').filter(Boolean).length : 0;
+  const dirtyPaths = porcelain ? porcelainPaths(porcelain) : [];
   const aheadRaw = tryGit(['rev-list', '--count', `origin/${branch}..HEAD`], dir);
   const ahead = aheadRaw === null ? 0 : Number(aheadRaw);
   // #2452 review — this predicate reports the FACT only ("how many commits ahead of the local origin ref").
   // The Gap-1 relaxation used to live here, which silently changed reset/skip semantics for every caller
   // (`refreshLane`'s hard-reset decision, `status`, the board) even though it is justified only for acquire's
   // auto-pick. Policy now lives at that one call site — see `aheadIsProvablyPushed`.
-  return { dirty: uncommitted > 0, uncommitted, ahead };
+  return { dirty: uncommitted > 0, uncommitted, ahead, dirtyPaths };
+}
+
+/**
+ * soak-main-red — the worktree paths a `git status --porcelain` listing names (both sides of a rename; an
+ * untracked directory as the directory itself). `null` when any entry is C-quoted (a path with special
+ * characters) — the caller then has no stat-able list and must not rest a cached verdict on one.
+ */
+function porcelainPaths(porcelain) {
+  const out = [];
+  for (const line of porcelain.split('\n')) {
+    if (!line.trim()) continue;
+    // `tryGit` trims its output, so the FIRST line may have lost the leading space of its "XY " status column
+    // (" M a" arrives as "M a") — match the 1-2 status chars rather than slicing a fixed 3.
+    const m = /^[ MTADRCU?!]{1,2} (.+)$/.exec(line);
+    if (!m) return null;
+    const rest = m[1];
+    if (rest.includes('"')) return null;
+    for (const part of rest.split(' -> ')) out.push(part.replace(/\/$/, ''));
+  }
+  return out;
 }
 
 /**
@@ -1145,6 +1202,7 @@ function provisionLane(repo, n, force) {
   else log(`  lane-${n} exists`);
   const result = refreshLane(repo, n, { force });
   writeLaneEnv(repo, n);
+  writeLaneClaudeSettings(repo, n);
   if (!flags['no-install']) ensureDeps(laneDir(repo, n));
   return result;
 }
@@ -1290,6 +1348,7 @@ function cmdRefresh(repo) {
     const result = refreshLane(repo, n, { force });
     if (!result.skipped) resetLanes.push(n);
     writeLaneEnv(repo, n);
+    writeLaneClaudeSettings(repo, n);
     if (!flags['no-install']) ensureDeps(laneDir(repo, n));
   }
   unmapLanes(repo, resetLanes); // a reset lane no longer renders its old item (#2139); a skipped one still does
@@ -1655,6 +1714,7 @@ function provisionClaimedLane(repo, chosen, targetWasReserved) {
     clearForeignVerifyMarker(dir);
   }
   writeLaneEnv(repo, chosen);
+  writeLaneClaudeSettings(repo, chosen);
   if (!flags['no-install']) ensureDeps(dir);
   return dir;
 }
@@ -2459,15 +2519,50 @@ function invalidateListCache(repo) {
 //
 // SOUNDNESS. Only NEGATIVE verdicts ("work lives here — not acquirable") are memoized, keyed on a STAT-ONLY
 // fingerprint read before the probe (HEAD, the branch tip it names, the local `origin/<branch>` ref, packed-refs,
-// `.git/index`, the lease marker — no git spawned). A reused entry can only under-report capacity, never hand a
+// `.git/index`, the lease marker — no git spawned) plus, for a DIRTY verdict, the stat of every path `git status`
+// named (`dirtSignature` — so a clean that never touches `.git`, e.g. deleting untracked scratch, also misses). A reused entry can only under-report capacity, never hand a
 // lane with work to `acquire` (and `acquire` re-verifies before any reset anyway, #2924). The staleness that
-// remains — work that became pushed/landed on the REMOTE with nothing local changing, or untracked files removed
-// without touching the index — is bounded by `--verdict-memo-max-age-ms` / LANE_POOL_VERDICT_MEMO_MAX_AGE_MS
+// remains — work that became pushed/landed on the REMOTE with nothing local changing, or a file deep inside a
+// reported untracked DIRECTORY removed without the directory itself changing — is bounded by `--verdict-memo-max-age-ms` / LANE_POOL_VERDICT_MEMO_MAX_AGE_MS
 // (default 10 min), staggered per lane so the whole memo never expires in one scan. A verdict computed after the
 // scan deadline (a killed git reads as null) or on a failed `ls-remote` is never recorded. `--no-verdict-memo`
 // disables it; provision/refresh drop it with the list cache.
 const VERDICT_MEMO_FILE = (repo) => join(repo.poolDir, '.acquirable-verdict-memo.json');
 const DEFAULT_VERDICT_MEMO_MAX_AGE_MS = 10 * 60_000;
+// v2 (soak-main-red): a DIRTY entry also carries the stat signature of the very paths that made it dirty. A v1
+// file (dirty entries with no signature) is simply ignored — every lane is re-proven once.
+const VERDICT_MEMO_VERSION = 2;
+const DIRT_SIG_MAX_PATHS = 200;
+// A dirty path modified at/after the probe start could have changed between `git status` and our stat — its
+// signature would then describe a tree the probe never saw. Such a verdict is not memoized (git's own "racily
+// clean" rule). A whole-second mtime (a 1s-granularity filesystem truncates it down) widens the window by 1s.
+const DIRT_SIG_COARSE_MTIME_MARGIN_MS = 1000;
+
+/**
+ * soak-main-red — stat signature (mtime + size, or `-` when gone) of the paths `git status` reported dirty. WHY:
+ * the stat-only fingerprint above sees only `.git` state, but the commonest way an unleased lane's dirt goes
+ * away never touches `.git` at all — an agent deleting its untracked scratch, or an editor/tool writing a
+ * tracked file back to its committed content. Every such clean changes one of these paths' stat, so it now
+ * misses the memo on the very next scan instead of reading "holds work" for up to the memo's 10-minute max age
+ * (live: `lane-acquire-under-load` — a lane freed that way 2s into five callers' 20s acquire waits was never
+ * handed out; red on every daemon PR once sharding made the first scan reach it before the free). `null` = no
+ * trustworthy signature (unparseable listing, too many paths, or a racy mtime) — the verdict is then not memoized.
+ */
+function dirtSignature(dir, paths, probeStartMs = null) {
+  if (!Array.isArray(paths) || paths.length === 0 || paths.length > DIRT_SIG_MAX_PATHS) return null;
+  const parts = [];
+  for (const p of [...paths].sort()) {
+    let sig = '-';
+    try {
+      const st = lstatSync(join(dir, p));
+      const margin = st.mtimeMs % 1000 === 0 ? DIRT_SIG_COARSE_MTIME_MARGIN_MS : 0;
+      if (probeStartMs !== null && st.mtimeMs >= probeStartMs - margin) return null;
+      sig = `${st.mtimeMs}:${st.size}`;
+    } catch { /* gone — '-' */ }
+    parts.push(`${p}=${sig}`);
+  }
+  return parts.join('|');
+}
 const verdictMemoMaxAgeMs = () => numFlagOrEnv('verdict-memo-max-age-ms', 'LANE_POOL_VERDICT_MEMO_MAX_AGE_MS', DEFAULT_VERDICT_MEMO_MAX_AGE_MS);
 
 /** Stat/read-only fingerprint of the lane state a dirty/ahead verdict depends on. `null` when unreadable. */
@@ -2489,7 +2584,7 @@ function readVerdictMemo(repo) {
   if (flags['no-verdict-memo'] || verdictMemoMaxAgeMs() <= 0) return null;
   let m = null;
   try { m = JSON.parse(readFileSync(VERDICT_MEMO_FILE(repo), 'utf8')); } catch { /* none yet */ }
-  const lanes = m && m.v === 1 && m.branch === repo.branch && m.lanes && typeof m.lanes === 'object' ? m.lanes : {};
+  const lanes = m && m.v === VERDICT_MEMO_VERSION && m.branch === repo.branch && m.lanes && typeof m.lanes === 'object' ? m.lanes : {};
   return { lanes, updates: new Map() };
 }
 
@@ -2499,15 +2594,25 @@ function verdictMemoHit(memo, repo, n, nowMs) {
   if (!e || typeof e.at !== 'number' || !e.fp) return false;
   const maxAge = verdictMemoMaxAgeMs() * (0.5 + ((n * 37) % 50) / 100); // staggered: 50%–99% of the max age
   if (nowMs - e.at >= maxAge || e.at > nowMs + 1000) return false;
-  return e.fp === laneVerdictFingerprint(laneDir(repo, n), repo.branch);
+  if (e.fp !== laneVerdictFingerprint(laneDir(repo, n), repo.branch)) return false;
+  // soak-main-red — a dirty verdict also needs its dirty paths untouched (see `dirtSignature`).
+  if (e.dirty) return typeof e.dirt === 'string' && Array.isArray(e.paths) && e.dirt === dirtSignature(laneDir(repo, n), e.paths);
+  return true;
 }
 
-function noteVerdict(memo, n, fp, info, remoteShasBox) {
+function noteVerdict(memo, n, fp, info, remoteShasBox, dir = null, probeStartMs = null) {
   if (!memo) return;
   const doa = info?.dirtyOrAhead;
   const holdsWork = !!doa && (doa.dirty || doa.ahead > 0);
-  const provable = holdsWork && fp && !(doa.ahead > 0 && !doa.dirty && remoteShasBox?.failed);
-  memo.updates.set(n, provable ? { fp, at: Date.now(), dirty: !!doa.dirty, ahead: doa.ahead } : null);
+  let provable = holdsWork && fp && !(doa.ahead > 0 && !doa.dirty && remoteShasBox?.failed);
+  let dirt = null;
+  if (provable && doa.dirty) {
+    dirt = dir ? dirtSignature(dir, doa.dirtyPaths, probeStartMs) : null;
+    if (dirt === null) provable = false; // no trustworthy signature ⇒ re-prove next scan rather than risk a stale "dirty"
+  }
+  memo.updates.set(n, provable
+    ? { fp, at: Date.now(), dirty: !!doa.dirty, ahead: doa.ahead, ...(doa.dirty ? { paths: [...doa.dirtyPaths], dirt } : {}) }
+    : null);
 }
 
 function writeVerdictMemo(repo, memo) {
@@ -2522,17 +2627,32 @@ function writeVerdictMemo(repo, memo) {
       if (e) lanes[n] = e;
       else delete lanes[n];
     }
-    writeFileSync(tmp, JSON.stringify({ v: 1, branch: repo.branch, lanes }) + '\n');
+    writeFileSync(tmp, JSON.stringify({ v: VERDICT_MEMO_VERSION, branch: repo.branch, lanes }) + '\n');
     renameSync(tmp, file);
   } catch { try { rmSync(tmp, { force: true }); } catch { /* ignore */ } }
 }
 // Stat-only fingerprint of the pool's lease state: which lanes exist + each marker's mtime (0 = no marker).
+//
+// soak-main-red (2026-09-26) — for an UNLEASED lane, also its `.git/index` stat. An unleased lane holding work
+// (dirty, or unpushed-ahead) becomes acquirable when that work is cleaned IN PLACE — `git checkout -- <path>` /
+// `git restore` / `git stash` / `reset --hard` / a commit — none of which touch a lease marker, but every one of
+// which rewrites the index. Without this the cached "not acquirable" answer outlived the clean for the full
+// cache TTL (30s): every `acquire --wait-ms=<W>` caller with W < TTL kept reading the same stale `[]` and gave
+// up with "no lane" while a lane sat free — the production (TTL 30s) twin of the per-lane memo bug that turned
+// break `lane-acquire-under-load` red (the soak world itself runs with the list cache off, TTL 0, so the soak
+// caught only the memo half; this half is pinned by lane-pool-list-cache.test.mjs). The scan's own git runs with
+// GIT_OPTIONAL_LOCKS=0, so scanning never rewrites the index itself — no self-invalidation. LEASED lanes are
+// deliberately left out: an agent working inside one churns its index constantly, and a live lease already
+// excludes the lane regardless of its tree, so including it would only thrash the cache for no answer change.
 function leaseFingerprint(repo) {
   return existingLanes(repo)
     .map((n) => {
       let m = 0;
       try { m = statSync(LEASE_MARKER(laneDir(repo, n))).mtimeMs; } catch { /* no marker */ }
-      return `${n}:${m}`;
+      if (m !== 0) return `${n}:${m}`;
+      let idx = '-';
+      try { const s = statSync(join(laneDir(repo, n), '.git', 'index')); idx = `${s.mtimeMs}/${s.size}`; } catch { /* no index */ }
+      return `${n}:0:${idx}`;
     })
     .join(',');
 }
@@ -2553,9 +2673,15 @@ function writeListCache(repo, paths) {
   const file = LIST_CACHE_FILE(repo);
   const tmp = `${file}.${process.pid}.tmp`;
   try {
-    // Fingerprint taken AFTER the scan (the reap may have removed markers during it), then tmp+rename so a
-    // concurrent reader never sees a half-written file.
-    writeFileSync(tmp, JSON.stringify({ v: 1, writtenAt: Date.now(), key: listCacheKey(repo), fingerprint: leaseFingerprint(repo), paths }) + '\n');
+    // soak-main-red — the fingerprint is the one `scanAcquirable` captured right AFTER its reap and BEFORE its
+    // first per-lane probe (`lastScanFingerprint`), never one read after the scan. Read after, a lease released
+    // or a tree cleaned MID-scan — after its lane was already probed as not-acquirable — was folded into the
+    // fingerprint, so the stale answer then validated for the whole TTL. Read before, any such change reads as a
+    // mismatch and the next caller rescans (cheap: the per-lane verdict memo skips every unchanged lane).
+    // Falls back to a fresh read only if no scan ran in this process. Then tmp+rename so a concurrent reader
+    // never sees a half-written file.
+    const fingerprint = lastScanFingerprint ?? leaseFingerprint(repo);
+    writeFileSync(tmp, JSON.stringify({ v: 1, writtenAt: Date.now(), key: listCacheKey(repo), fingerprint, paths }) + '\n');
     renameSync(tmp, file);
   } catch { try { rmSync(tmp, { force: true }); } catch { /* ignore */ } }
 }
@@ -2607,6 +2733,7 @@ function takeOverStaleListLock(repo, staleOwner) {
 // The actual scan. `limit` stops at N acquirable lanes (a truncated answer — never cached). Fails the whole scan,
 // cleanly, if it overruns `scanTimeoutMs` (see `scanDeadlineMs`: a result produced past the deadline may rest on
 // a killed git probe, so it is discarded rather than returned).
+let lastScanFingerprint = null;
 function scanAcquirable(repo, { limit = null, scanTimeoutMs }) {
   const startedMs = Date.now();
   scanDeadlineMs = scanTimeoutMs > 0 ? startedMs + scanTimeoutMs : null;
@@ -2627,6 +2754,7 @@ function scanAcquirable(repo, { limit = null, scanTimeoutMs }) {
     // at most once per cache TTL per pool, not once per caller.)
     reapDeadLeasesInPool(repo, nowMs, ttlMs);
     if (overrun()) overrunFail('during the ghost-lease reap');
+    lastScanFingerprint = leaseFingerprint(repo); // soak-main-red — see writeListCache: post-reap, pre-probe
     // #3383 — ONE shared lazy `ls-remote` for this whole `list --acquirable` pass (see `laneAcquirableInfo`),
     // not one per lane — keeps this a cheap, at-most-one-network-call read, same cost shape as `cmdAcquire`'s
     // own auto-pick.
@@ -2637,10 +2765,11 @@ function scanAcquirable(repo, { limit = null, scanTimeoutMs }) {
       let ok = false;
       if (!verdictMemoHit(memo, repo, n, Date.now())) {
         const fp = memo ? laneVerdictFingerprint(laneDir(repo, n), repo.branch) : null;
+        const probeStartMs = Date.now();
         const info = laneAcquirableInfo(repo, n, remoteShasBox, nowMs, ttlMs);
         ok = isLaneAcquirable(info, nowMs, ttlMs);
         if (overrun()) overrunFail(`at lane-${n}`); // before noteVerdict: a past-deadline verdict may rest on a killed git
-        noteVerdict(memo, n, fp, info, remoteShasBox);
+        noteVerdict(memo, n, fp, info, remoteShasBox, laneDir(repo, n), probeStartMs);
       }
       if (overrun()) overrunFail(`at lane-${n}`);
       if (ok) {
@@ -3327,6 +3456,15 @@ function cmdReclaim(repo) {
   }
 
   const proof = laneReclaimPreservationProof(dir, repo.branch);
+  // SNAPSHOT-THEN-RECLAIM (`--salvage`): content that is NOT provably on a remote ref is saved durably first
+  // (bundle + patch + refs/salvage/*, indexed) and only then reset — see `we:scripts/lib/lane-salvage.mjs`.
+  // Its own liveness gate (no live owner session, no process cwd inside the lane, quiet period) runs here,
+  // fresh, on every call. `--override` stays the separate human-only escape hatch and is never combined.
+  const hasLitterWorktrees = (() => { try { return listLitterWorktrees(dir).length > 0; } catch { return false; } })();
+  if ((!proof.preserved || hasLitterWorktrees) && flags.salvage && !override) {
+    cmdReclaimSalvage(repo, { n, dir, dryRun, lease, proof });
+    return;
+  }
   if (!proof.preserved && !override) {
     log(`  lane-${n}: NOT reclaimed — ${proof.reason}`);
     if (flags.json) process.stdout.write(`${JSON.stringify({ lane: n, path: dir, dryRun, reclaimed: false, ...proof }, null, 2)}\n`);
@@ -3389,6 +3527,96 @@ function cmdReclaim(repo) {
   rmSync(file, { force: true }); // back to the free-pool state — the same end state a normal `release` leaves
   log(`  lane-${n}: reclaimed${overriding ? ' (OVERRIDE, #4139 — operator call)' : ''} — reset to origin/${repo.branch} (${reproof.reason})`);
   if (flags.json) process.stdout.write(`${JSON.stringify({ lane: n, path: dir, dryRun, reclaimed: true, override: overriding, ...reproof }, null, 2)}\n`);
+}
+
+/**
+ * `reclaim --lane=N --salvage [--dry-run]` — the snapshot-then-reclaim path for a lane whose content is NOT
+ * provably preserved (`finished-needs-review` / `unknown-work`). Order: liveness gate → claim the lease
+ * marker → re-check the gate under the hold → salvage (bundle verified to carry every salvage ref) → remove
+ * litter worktrees → reset + clean → release. Any failure before the reset hands the lane back untouched.
+ */
+function cmdReclaimSalvage(repo, { n, dir, dryRun, lease, proof }) {
+  const out = (obj) => { if (flags.json) process.stdout.write(`${JSON.stringify({ lane: n, path: dir, dryRun, ...obj }, null, 2)}\n`); };
+  const gate = () => {
+    const last = lastLaneHistoryEntry(readLaneHistory(dir)) || {};
+    const agents = readAgentsStrict();
+    const cwds = readLiveCwds();
+    if (agents === null || cwds === null) {
+      return { eligible: false, last, reason: `cannot read ${agents === null ? '`claude agents`' : 'live process cwds (lsof)'} — never salvaging blind` };
+    }
+    const liveOwner = liveAgentInLane(agents, dir, [last.ownerSession, last.workerSession, last.session]);
+    const livePids = pidsWithCwdIn(cwds, dir);
+    let newestMtimeMs = null;
+    try { newestMtimeMs = newestContentMtimeMs(dir); } catch { newestMtimeMs = Date.now(); }
+    const verdict = salvageEligibility({
+      leased: false, liveOwner, livePids, newestMtimeMs, nowMs: Date.now(), quietMs: resolveSalvageQuietMs(),
+    });
+    return { ...verdict, last };
+  };
+  const g = gate();
+  if (!g.eligible) {
+    log(`  lane-${n}: KEPT (not salvaged) — ${g.reason}`);
+    out({ reclaimed: false, salvaged: false, kept: true, keptReason: g.reason, ...proof });
+    return;
+  }
+  if (dryRun) {
+    log(`  lane-${n}: WOULD salvage then reclaim — ${proof.reason}`);
+    out({ reclaimed: false, wouldReclaim: true, wouldSalvage: true, ...proof });
+    return;
+  }
+  const file = LEASE_MARKER(dir);
+  const session = `lane-pool-salvage-${process.pid}-${randomBytes(4).toString('hex')}`;
+  const body = `${JSON.stringify(leaseBody({
+    session, purpose: 'lane-pool-salvage', acquiredAt: new Date().toISOString(),
+    host: hostname(), pid: process.pid, ownerSession: process.env.CLAUDE_CODE_SESSION_ID || null,
+  }), null, 2)}\n`;
+  if (lease && !takeMarkerIf(dir, (moved) => sameLease(moved, lease), n)) {
+    fail(`lane-${n}: its lease changed between the read above and the claim attempt — not reclaimed, safe to retry`);
+  }
+  try { writeFileSync(file, body, { flag: 'wx' }); } catch {
+    fail(`lane-${n}: a lease appeared between the read above and the claim attempt — not reclaimed, safe to retry`);
+  }
+  const giveBack = () => takeMarkerIf(dir, (moved) => moved?.session === session, n);
+  const g2 = gate();
+  if (!g2.eligible) {
+    giveBack();
+    log(`  lane-${n}: KEPT (not salvaged) — ${g2.reason} (re-checked under the hold)`);
+    out({ reclaimed: false, salvaged: false, kept: true, keptReason: g2.reason });
+    return;
+  }
+  let salvage;
+  try {
+    salvage = salvageLane({
+      dir, lane: n, pool: basename(repo.poolDir), branchRef: `origin/${repo.branch}`,
+      reason: proof.reason,
+      meta: {
+        lastHolder: g2.last,
+        // The same content-based card guess `lane-whois.mjs` uses (dirty backlog paths, HEAD subject, branch).
+        cards: (() => {
+          try {
+            const { trackedModifiedPaths, untrackedPaths } = gitStatusSummary(dir);
+            // HEAD's subject only names THIS lane's work when HEAD is not already on origin (else it is main's tip).
+            const ahead = Number(execFileSync('git', ['rev-list', '--count', `origin/${repo.branch}..HEAD`], { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()) || 0;
+            const subject = ahead ? execFileSync('git', ['log', '-1', '--format=%s'], { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim() : '';
+            const branch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+            return guessCardIds({ paths: [...trackedModifiedPaths, ...untrackedPaths], commitSubject: subject, branch });
+          } catch { return []; }
+        })(),
+      },
+    });
+  } catch (e) {
+    giveBack();
+    log(`  lane-${n}: KEPT — salvage failed, lane untouched (${String(e?.message || e).split('\n')[0]})`);
+    out({ reclaimed: false, salvaged: false, kept: true, keptReason: `salvage failed: ${String(e?.message || e).split('\n')[0]}` });
+    return;
+  }
+  const removedWorktrees = removeLitterWorktrees(dir, salvage.worktrees);
+  execFileSync('git', ['reset', '--hard', `origin/${repo.branch}`], { cwd: dir, stdio: 'ignore', ...defaultGitTimeoutOpt() });
+  execFileSync('git', ['clean', '-fd'], { cwd: dir, stdio: 'ignore', ...defaultGitTimeoutOpt() });
+  rmSync(file, { force: true });
+  log(`  lane-${n}: salvaged-to ${salvage.bundle || '(nothing unique — patch/index only)'} [${salvage.refs.join(', ') || 'no refs'}]` +
+    `${removedWorktrees.length ? `, removed worktree(s) ${removedWorktrees.join(', ')}` : ''} — reset to origin/${repo.branch}`);
+  out({ reclaimed: true, salvaged: true, salvage: { bundle: salvage.bundle, outDir: salvage.outDir, refs: salvage.refs, cards: salvage.cards, prs: salvage.prs }, removedWorktrees });
 }
 
 // ── keep (#4139) — record "I looked at this queued lane, leave it" so it stops resurfacing ─────────
@@ -3527,7 +3755,7 @@ const KNOWN_FLAGS = new Set([
   'owner-session',
   // #4139 — reclaim's operator override (explicit, logged, never automatic — see cmdReclaim's own docblock),
   // and keep's free-text reason.
-  'override', 'reason',
+  'override', 'reason', 'salvage',
   // #4122 — acquire's free-lane-list fast-path knobs (see `we:scripts/lib/free-lane-list.mjs`'s own header).
   'no-free-list', 'free-list-max-age-ms',
 ]);
@@ -3564,7 +3792,9 @@ if (!cmd || cmd === 'help' || cmd === '--help' || !COMMANDS[cmd]) {
       '  # reclaim --lane=N [--dry-run] [--override] [--json]: reset ONE unleased lane to origin/<branch>, only once this call\'s ' +
       'OWN re-check proves every uncommitted/ahead change is still provably preserved (#3383 gap 2 — the mutation ' +
       'half of lane-whois.mjs\'s finished-reclaimable verdict); --override (#4139) forces past that gate for a ' +
-      'finished-needs-review lane the operator reviewed by eye — explicit, logged, never automatic\n' +
+      'finished-needs-review lane the operator reviewed by eye — explicit, logged, never automatic; --salvage snapshots ' +
+      'unpreserved content (bundle + patch + refs/salvage/*, indexed under ~/.claude/lane-salvage) THEN resets, only ' +
+      'when no live owner/process is in the lane and it has been quiet (WE_LANE_SALVAGE_QUIET_MIN, default 30)\n' +
       '  # keep --lane=N [--reason=<text>] [--json]: record "I looked at this lane, leave it" so operator-queue\'s ' +
       'LANE RECLAIM section excludes it until its content changes (#4139)\n',
   );

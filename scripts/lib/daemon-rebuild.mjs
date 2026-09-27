@@ -73,6 +73,12 @@
  * `state.held` and keeps dispatching from its last-good build (`main-staleness.mjs#assertMainNotStale`,
  * `daemon-last-good.mjs`); the health watch's `daemon-held-on-last-good` sign notifies after 15 min.
  *
+ * fix-rebuild-finalize — A PASSING SMOKE IS NEVER THROWN AWAY. Live 2026-09-26: step 3's lock wait kept losing to
+ * a sibling daemon's tick that started during the unlocked smoke, and every retry re-smoked a new sha. A pass is
+ * now recorded as the clone's ready candidate ({@link readyCandidatePath}) before step 3 tries the lock (which now
+ * waits the longer {@link FINALIZE_LOCK_WAIT_ENV}); the next write-lock holder — a later tick, or the sibling at its
+ * own tick start — adopts it in {@link prepareRebuild} without re-smoking ({@link matchReadyCandidate}).
+ *
  * DRY RUN IS STRICTLY READ-ONLY ON THE REAL CLONE. {@link dryRunRebuild} never calls `git reset`, `git fetch`
  * (against the clone itself — it fetches into a disposable scratch bare repo instead), or anything else that
  * writes an object or moves a ref in `root`. It borrows `root`'s objects via `objects/info/alternates` (so the
@@ -703,6 +709,174 @@ function writeRebuildState(root, state, env = process.env) {
   renameSync(tmp, file);
 }
 
+// ── ready candidate — a PASSED smoke that could not be adopted yet (fix-rebuild-finalize) ─────────────────────
+//
+// Live 2026-09-26 on `wev-review-daemon`: a candidate passed its ~1-4 min off-lock smoke, then `finalizeRebuild`
+// could not take the write lock within 60s because the SIBLING daemon had started a tick (read slot) during the
+// smoke. The pass was thrown away; the next tick re-planned (main had moved — a new sha), re-smoked, and the
+// sibling started another tick during THAT smoke. The build lease it left behind also made the sibling log
+// `rebuild-in-progress` for up to 20 min. Registered overlay fixes were never adopted.
+//
+// Fix: a passing smoke is recorded here (`<cloneKey>.ready.json`, atomic rename, outside the git tree) BEFORE the
+// finalize lock is attempted. Whichever process next holds the write lock — the mover itself on a later tick, or a
+// SIBLING at its own tick start (a tick boundary: it holds no read slot then) — adopts it in `prepareRebuild`
+// without re-smoking, as long as it was verified on top of the clone's CURRENT head. Written without the clone
+// lock on purpose: only a build-lease holder writes it, the record fully describes itself, and every use of it
+// re-checks it against the live HEAD under the write lock.
+
+/** `<stateDir>/<cloneKey>.ready.json`. */
+export function readyCandidatePath(root, env = process.env) {
+  return join(stateDir(env), `${cloneKey(root)}.ready.json`);
+}
+
+/** The recorded ready candidate, or `null` (missing/corrupt reads as none — never throws). */
+export function readReadyCandidate(root, env = process.env) {
+  try {
+    const r = JSON.parse(readFileSync(readyCandidatePath(root, env), 'utf8'));
+    return r && typeof r === 'object' && r.adopt?.finalSha && r.prevHead ? r : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeReadyCandidate(root, record, env = process.env) {
+  try {
+    const file = readyCandidatePath(root, env);
+    mkdirSync(dirname(file), { recursive: true });
+    const tmp = `${file}.tmp-${process.pid}`;
+    writeFileSync(tmp, JSON.stringify(record, null, 2), 'utf8');
+    renameSync(tmp, file);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function clearReadyCandidate(root, env = process.env) {
+  try { unlinkSync(readyCandidatePath(root, env)); } catch { /* already gone */ }
+}
+
+/**
+ * PURE: may the ready candidate `ready` be adopted now, instead of smoking `plan`? Returns
+ * `{adopt, dropRefs, match}` or `{adopt:null, reason}`. Only ever a candidate verified on top of `prevHead` (the
+ * clone's current head — its smoke skipped checks relative to that head, and it is a strict step forward from it).
+ *   - `fallback` (plain main passed after main+overlays failed): only for the SAME failing inputs (`forInputsKey`);
+ *     adopting it also drops the suspect overlays, exactly as the original finalize would have.
+ *   - `candidate`: the same sha (`exact`); a different sha whose TREE is identical — overlay-list churn that does
+ *     not change a single file (`same-tree`, adopts the current plan's commit); or an older build the plan has
+ *     since moved past (`superseded`, adopts the verified build — still newer than HEAD; the newer plan is smoked
+ *     on a later tick), but only while every overlay it carries is still registered or has landed on main, so an
+ *     overlay the operator removed is never brought back.
+ *   - `fallback-main-moved`: a passed fallback whose failing inputs moved ONLY because main advanced — every
+ *     suspect that is still registered is still at the sha that failed (`overlayTip`) — is adopted anyway and
+ *     still drops the suspects, exactly as its own finalize would have.
+ * Every record whose commit is NOT re-derived from the live `plan` (`superseded`, both fallback forms) must also
+ * pass `verifyBuilt` — the record is read from disk, so its `finalSha` is only trusted once it provably is a build
+ * this module could have minted from the current main history and the registered overlay refs
+ * ({@link readyBuildVerified}). Refuses by default.
+ * @param {{ready:object|null, plan:object, prevHead:string, treeOf:(sha:string)=>string|null,
+ *   stillWanted:(ref:string)=>boolean, verifyBuilt?:(adopt:object)=>boolean,
+ *   overlayTip?:(ref:string)=>string|null, registered?:(ref:string)=>boolean, allowFallback?:boolean,
+ *   rejected?:object|null, nowMs:number, maxAgeMs:number}} o — `registered`: still on the overlay list after this
+ *   tick's own edits (defaults to `stillWanted`); `allowFallback: false` (a mainOnly rebuild) refuses any fallback.
+ */
+export function matchReadyCandidate({
+  ready, plan, prevHead, treeOf, stillWanted, verifyBuilt = () => false, overlayTip = () => null,
+  registered = stillWanted, allowFallback = true, rejected = null, nowMs, maxAgeMs,
+}) {
+  if (!ready) return { adopt: null, reason: 'none' };
+  const passedMs = Date.parse(ready.passedAt || '');
+  if (!Number.isFinite(passedMs) || nowMs - passedMs > maxAgeMs) return { adopt: null, reason: 'expired' };
+  if (ready.prevHead !== prevHead) return { adopt: null, reason: 'other-base' };
+  if (ready.adopt.finalSha === prevHead && ready.kind !== 'fallback') return { adopt: null, reason: 'already-head' };
+  if (rejected && rejected.inputsKey === ready.adopt.inputsKey && Date.parse(rejected.at || '') > passedMs) {
+    return { adopt: null, reason: 'rejected-since' };
+  }
+  const carriesOnlyWanted = (ready.adopt.applied || []).every((a) => stillWanted(a.ref));
+  if (ready.kind === 'fallback') {
+    if (!allowFallback) return { adopt: null, reason: 'fallback-not-allowed' };
+    if (!carriesOnlyWanted) return { adopt: null, reason: 'overlay-no-longer-wanted' };
+    if (!verifyBuilt(ready.adopt)) return { adopt: null, reason: 'unverified-build' };
+    if (plan.inputsKey === ready.forInputsKey) {
+      return { adopt: ready.adopt, dropRefs: ready.dropRefs || [], failed: ready.failed || '', match: 'fallback' };
+    }
+    // Main moved: only suspects still registered matter (one that already left needs no drop, and no alert).
+    const dropRefs = (ready.dropRefs || []).filter((s) => registered(s.ref));
+    const suspectMoved = dropRefs.some((s) => !s.sha || overlayTip(s.ref) !== s.sha);
+    return suspectMoved
+      ? { adopt: null, reason: 'fallback-inputs-moved' }
+      : { adopt: ready.adopt, dropRefs, failed: ready.failed || '', match: 'fallback-main-moved' };
+  }
+  if (plan.finalSha === ready.adopt.finalSha) return { adopt: ready.adopt, dropRefs: [], match: 'exact' };
+  const planTree = treeOf(plan.finalSha);
+  if (planTree && ready.tree && planTree === ready.tree) {
+    const adopt = {
+      finalSha: plan.finalSha, inputsKey: plan.inputsKey, mainSha: plan.mainSha, applied: plan.applied,
+    };
+    return { adopt, dropRefs: [], match: 'same-tree' };
+  }
+  if (!carriesOnlyWanted) return { adopt: null, reason: 'overlay-no-longer-wanted' };
+  if (!verifyBuilt(ready.adopt)) return { adopt: null, reason: 'unverified-build' };
+  return { adopt: ready.adopt, dropRefs: [], match: 'superseded' };
+}
+
+/**
+ * Is a ready record's `adopt` provably a build {@link planRebuild} could have minted — never an arbitrary commit
+ * someone wrote into the state file? All of: its `mainSha` is on the current main history (an ancestor of, or
+ * equal to, `mainTip`); walking back from `finalSha`, each carried overlay is exactly one merge commit whose
+ * parents are `[previous step, overlay sha]`, bottoming out at `mainSha` (so an overlay-free record must BE
+ * `mainSha`); and every carried overlay sha is on its registered ref's current remote-tracking tip. Any git
+ * failure reads as unverified — the caller then just smokes the live plan instead.
+ * @param {{git:(args:string[])=>{status:number|null, stdout?:string}, adopt:object, mainTip:string}} o
+ */
+export function readyBuildVerified({
+  git, adopt, mainTip, prevHead,
+}) {
+  const isAncestor = (a, b) => git(['merge-base', '--is-ancestor', a, b]).status === 0;
+  if (!adopt?.finalSha || !adopt.mainSha || !mainTip || !isAncestor(adopt.mainSha, mainTip)) return false;
+  // Never a rollback: the record's main must be at or past the main the current head was built on.
+  const headBase = prevHead ? String(git(['merge-base', prevHead, mainTip]).stdout ?? '').trim() : '';
+  if (!headBase || !isAncestor(headBase, adopt.mainSha)) return false;
+  const applied = Array.isArray(adopt.applied) ? adopt.applied : [];
+  let cur = adopt.finalSha;
+  for (let i = applied.length - 1; i >= 0; i -= 1) {
+    const a = applied[i];
+    if (!a?.ref || !a.sha) return false;
+    const r = git(['rev-list', '--parents', '-n', '1', cur]);
+    if (r.status !== 0) return false;
+    const [self, prev, ov, ...extra] = String(r.stdout ?? '').trim().split(/\s+/);
+    if (!self || !prev || ov !== a.sha || extra.length > 0) return false;
+    // The overlay sha is still on its ref — or, once the branch is gone (merged + auto-deleted), on main.
+    const tip = verifyRev(git, `refs/remotes/origin/${a.ref}^{commit}`);
+    if (tip ? !isAncestor(a.sha, tip) : !isAncestor(a.sha, mainTip)) return false;
+    // The merge's tree is exactly what planRebuild mints for (prev, overlay) — never an arbitrary tree.
+    const mt = git(['merge-tree', '--write-tree', '--no-messages', prev, a.sha]);
+    const minted = mt.status === 0 ? String(mt.stdout ?? '').split('\n')[0].trim() : '';
+    if (!minted || minted !== verifyRev(git, `${cur}^{tree}`)) return false;
+    cur = prev;
+  }
+  return verifyRev(git, `${cur}^{commit}`) === adopt.mainSha;
+}
+
+/** Drop the suspect overlays a passing plain-main fallback proved bad (shared by the direct finalize and by a
+ *  later adoption of the same fallback from its ready record). */
+function dropSuspectOverlays({
+  root, env, suspects, failed, alert,
+}) {
+  for (const s of suspects) {
+    removeOverlay(root, s.ref, { env, why: 'smoke-failed' });
+    appendOverlayEvent(root, {
+      kind: 'dropped-smoke-failed', ref: s.ref, pr: s.pr, reason: failed,
+    }, { env });
+    alert('overlay-dropped-smoke-failed', {
+      ref: s.ref, pr: s.pr, failed, suspects: suspects.length,
+      message: suspects.length > 1
+        ? 'dropped as one of several suspects — plain main passed without them; re-add the good ones'
+        : 'plain main passed without this overlay — it broke the live smoke; fix it, then re-add it',
+    });
+  }
+}
+
 // ── defaultPrState — the CLI's real PR-state lookup ─────────────────────────────────────────────────────────
 
 function slugFromOriginUrl(url) {
@@ -747,6 +921,17 @@ export function isExternalOnlyFailure(failed) {
 /** How long a tick-start rebuild waits for other daemons' ticks (read slots) to drain — env-tunable, see rebuildClone. */
 export const REBUILD_LOCK_WAIT_ENV = 'WE_DAEMON_REBUILD_LOCK_WAIT_MS';
 export const DEFAULT_REBUILD_LOCK_WAIT_MS = 60_000;
+
+/** How long the write-lock wait is once a candidate has PASSED its smoke (or a passed candidate is waiting to be
+ *  adopted) — longer than {@link DEFAULT_REBUILD_LOCK_WAIT_MS}: a passing smoke is expensive to redo, and while
+ *  this process waits, the writer reservation already refuses every NEW read slot, so the wait is bounded by the
+ *  readers' in-flight ticks, never by a fresh one. Env-tunable. */
+export const FINALIZE_LOCK_WAIT_ENV = 'WE_DAEMON_FINALIZE_LOCK_WAIT_MS';
+export const DEFAULT_FINALIZE_LOCK_WAIT_MS = 180_000;
+
+/** A passed-but-not-yet-adopted candidate older than this is ignored (its smoke is no longer fresh evidence). */
+export const READY_MAX_AGE_ENV = 'WE_DAEMON_READY_MAX_AGE_MS';
+export const DEFAULT_READY_MAX_AGE_MS = 2 * 60 * 60_000;
 
 /** A live smoke at least this long raises a `smoke-slow` alert — informational only (xa4qo7n): the smoke runs
  *  against a disposable candidate worktree and holds NO lock, so a slow one no longer starves any daemon's
@@ -1253,7 +1438,81 @@ async function prepareRebuild({
       state.held = null; // x5wbsbc — current again: no longer held on a last-good build
       writeState();
     }
+    clearReadyCandidate(root, stEnv); // current already — nothing a passed-but-unadopted build could add
     return terminal({ moved: false, reason: 'up-to-date', plan });
+  }
+
+  // fix-rebuild-finalize — a candidate that already PASSED its smoke but could not be adopted (a reader was
+  // mid-tick when its finalize tried the lock) is adopted HERE, under the write lock this phase already holds,
+  // instead of being thrown away and re-smoked. Checked before the rejection/backoff short-circuits: a passed
+  // plain-main fallback answers exactly the inputs the reject-cache would otherwise stop at.
+  {
+    const ready = readReadyCandidate(root, stEnv);
+    if (ready) {
+      // Still wanted = registered AFTER this tick's own list edits (a same-tick `pr-closed`/`ref-gone` removal is
+      // NOT wanted), plus overlays that left because main now has them. A mainOnly rebuild wants no overlay.
+      const registeredRefs = new Set((overlaysBefore || []).map((o) => o?.ref));
+      for (const d of plan.decisions) if (d.action === 'remove') registeredRefs.delete(d.ref);
+      const wantedRefs = new Set(mainOnly ? [] : registeredRefs);
+      for (const d of plan.decisions) {
+        if (d.action === 'remove' && (d.reason === 'pr-merged' || d.reason === 'in-main')) wantedRefs.add(d.ref);
+      }
+      const maxAgeMs = Number(env?.[READY_MAX_AGE_ENV]) > 0 ? Number(env[READY_MAX_AGE_ENV]) : DEFAULT_READY_MAX_AGE_MS;
+      const m = matchReadyCandidate({
+        ready,
+        plan,
+        prevHead,
+        treeOf: (sha) => verifyRev(git, `${sha}^{tree}`),
+        stillWanted: (ref) => wantedRefs.has(ref),
+        verifyBuilt: (adopt) => readyBuildVerified({
+          git, adopt, mainTip: plan.mainSha, prevHead,
+        }),
+        overlayTip: (ref) => verifyRev(git, `refs/remotes/origin/${ref}^{commit}`),
+        registered: (ref) => registeredRefs.has(ref),
+        allowFallback: !mainOnly, // a mainOnly rebuild never edits the overlay list, so never drops suspects
+        rejected: state.rejected,
+        nowMs: nowMs(),
+        maxAgeMs,
+      });
+      if (!m.adopt) {
+        clearReadyCandidate(root, stEnv);
+        alert('ready-candidate-discarded', { target: ready.adopt.finalSha, reason: m.reason });
+      } else {
+        const colliding = unsafe.untracked.filter((p) => git(['cat-file', '-e', `${m.adopt.finalSha}:${p}`]).status === 0);
+        if (colliding.length > 0) {
+          clearReadyCandidate(root, stEnv);
+          alert('untracked-collision', { paths: colliding });
+          return terminal({ moved: false, reason: 'untracked-collision', untracked: colliding, plan });
+        }
+        alert('ready-candidate-adopted', {
+          target: m.adopt.finalSha, match: m.match, passedAt: ready.passedAt, passedBy: `${ready.pid ?? '?'}@${ready.host ?? '?'}`,
+          ...(m.dropRefs.length ? { dropping: m.dropRefs.map((s) => s.ref) } : {}),
+        });
+        writeState();
+        const fin = await finalizeRebuild({
+          root,
+          env,
+          log,
+          run,
+          stateOpts,
+          now,
+          plan: m.adopt,
+          prevHead,
+          lease: { token: ready.token ?? null },
+          onAdopted: m.dropRefs.length
+            ? ({ alert: finAlert }) => dropSuspectOverlays({
+              root, env, suspects: m.dropRefs, failed: m.failed, alert: finAlert,
+            })
+            : undefined,
+        });
+        const { alerts: finAlerts = [], ...finResult } = fin;
+        return {
+          terminal: true,
+          result: { ...finResult, ...(finResult.adopted ? { reason: 'ready-adopted', readyMatch: m.match } : {}) },
+          alerts: [...alertsList, ...finAlerts],
+        };
+      }
+    }
   }
   // x5wbsbc — a BROKEN SMOKE HARNESS (every candidate, the last-good build included, fails the same checks) is
   // not re-smoked on every main move: it would cost up to three full smokes per move and every one would fail
@@ -1342,6 +1601,8 @@ async function finalizeRebuild({
     writeState();
     const stale = staleAlertDetail(result, state);
     if (stale) alert('clone-held-stale', stale);
+    // fix-rebuild-finalize — an adopted build leaves nothing passed-but-unadopted behind.
+    if (result.adopted) clearReadyCandidate(root, stEnv);
     // x5wbsbc — runs INSIDE this write-lock hold, only on an adoption (e.g. drop the overlay a fallback proved bad).
     if (result.adopted && typeof onAdopted === 'function') {
       try { onAdopted({ alert }); } catch (e) { alert('on-adopted-failed', { error: String(e?.message || e) }); }
@@ -1470,12 +1731,21 @@ export async function rebuildClone({
     ...lockOpts,
   };
   const stEnv = { ...env, ...(stateOpts?.env || {}) };
+  // fix-rebuild-finalize: once a candidate has passed, the wait for readers is the longer finalize wait — the
+  // writer reservation refuses every NEW read slot meanwhile, so this only outlasts ticks already in flight.
+  const finalizeWaitMs = Number(env?.[FINALIZE_LOCK_WAIT_ENV]) > 0 ? Number(env[FINALIZE_LOCK_WAIT_ENV]) : DEFAULT_FINALIZE_LOCK_WAIT_MS;
+  const finalizeLockOpts = { ...finalLockOpts, waitMs: lockOpts.waitMs ?? Math.max(waitMs, finalizeWaitMs) };
 
   // ── Phase 1 (locked, fast) ───────────────────────────────────────────────────────────────────────────────
+  // A passed candidate waiting on THIS head (an unlocked peek — prepareRebuild re-checks it under the lock) is
+  // adopted by this phase, so it earns the finalize wait: this is the tick boundary the sibling yields at.
+  const pendingReady = readReadyCandidate(root, stEnv);
+  const readyOnHead = !!pendingReady
+    && pendingReady.prevHead === verifyRev(makeGit({ run, cwd: root, env }), 'HEAD');
   const startedMs = now();
   const prep = await withWriteLock(root, () => prepareRebuild({
     root, env, log, run, prState, stateOpts, mainOnly, now,
-  }), finalLockOpts);
+  }), readyOnHead ? finalizeLockOpts : finalLockOpts);
 
   if (!prep.ok) {
     if (prep.reason === 'tick-in-progress') {
@@ -1494,7 +1764,7 @@ export async function rebuildClone({
   try {
     return await smokeAndAdopt({
       root, env, stEnv, log, run, runSmoke, stateOpts, now, plan, prevHead, lease, overlaysBefore, prepAlerts, mainOnly,
-      finalLockOpts,
+      finalLockOpts, finalizeLockOpts,
     });
   } catch (e) {
     // Best-effort: never leave a thrown build's lease on disk to hold a sibling off until it ages out.
@@ -1541,7 +1811,7 @@ export function failsSameChecks(candidateFailed, controlFailed) {
  */
 async function smokeAndAdopt({
   root, env, stEnv, log, run, runSmoke, stateOpts, now, plan, prevHead, lease, overlaysBefore, prepAlerts, mainOnly,
-  finalLockOpts,
+  finalLockOpts, finalizeLockOpts = finalLockOpts,
 }) {
   /** Every state write here happens UNDER the write lock (PR #2731 review: an unlocked write could clobber a
    *  sibling's locked one). `release` also drops our build lease — done by the outcome that ENDS this build,
@@ -1611,13 +1881,28 @@ async function smokeAndAdopt({
     return { smokeResult, threw, ms };
   };
 
-  const finalize = async (p, onAdopted) => {
+  /** Adopt `p`, whose smoke just PASSED. fix-rebuild-finalize: the pass is recorded as the clone's ready candidate
+   *  FIRST, so a lock refusal here never throws it away — the next write-lock holder (this process's next tick, or
+   *  a sibling at its own tick start) adopts it without re-smoking (see prepareRebuild). */
+  const finalize = async (p, onAdopted, readyMeta = { kind: 'candidate' }) => {
+    writeReadyCandidate(root, {
+      ...readyMeta,
+      prevHead,
+      tree: verifyRev(git, `${p.finalSha}^{tree}`),
+      adopt: {
+        finalSha: p.finalSha, inputsKey: p.inputsKey, mainSha: p.mainSha, applied: p.applied,
+      },
+      token: lease.token,
+      pid: process.pid,
+      host: hostname(),
+      passedAt: nowIso(),
+    }, stEnv);
     const fin = await withWriteLock(root, () => finalizeRebuild({
       root, env, log, run, stateOpts, now, plan: p, prevHead, lease, onAdopted,
-    }), finalLockOpts);
+    }), finalizeLockOpts);
     if (!fin.ok) {
       if (fin.reason === 'tick-in-progress') {
-        log.error?.(`daemon-rebuild: could not take the write lock to finalize ${p.finalSha} after a passing smoke (reader ${fin.heldBy ?? '?'} still ticking) — retrying next tick`);
+        log.error?.(`daemon-rebuild: could not take the write lock to finalize ${p.finalSha} after a passing smoke (reader ${fin.heldBy ?? '?'} still ticking) — kept as the ready candidate; the next write-lock holder adopts it without re-smoking`);
       }
       return {
         moved: false, reason: fin.reason, ...(fin.heldBy ? { heldBy: fin.heldBy } : {}), plan: p, alerts: [...prepAlerts, ...alertsList],
@@ -1750,29 +2035,24 @@ async function smokeAndAdopt({
         failed: failedA.map((r) => r.name).join(','), suspects: suspectInfo, target: planB.finalSha,
         message: 'main + overlays failed the live smoke — retrying plain main (pinned overlays only) (x5wbsbc)',
       });
-      const dropSuspects = ({ alert: finAlert }) => {
-        for (const s of suspectInfo) {
-          removeOverlay(root, s.ref, { env, why: 'smoke-failed' });
-          appendOverlayEvent(root, {
-            kind: 'dropped-smoke-failed', ref: s.ref, pr: s.pr, reason: failedA.map((r) => r.name).join(','),
-          }, { env });
-          finAlert('overlay-dropped-smoke-failed', {
-            ref: s.ref, pr: s.pr, failed: failedA.map((r) => r.name).join(','), suspects: suspectInfo.length,
-            message: suspectInfo.length > 1
-              ? 'dropped as one of several suspects — plain main passed without them; re-add the good ones'
-              : 'plain main passed without this overlay — it broke the live smoke; fix it, then re-add it',
-          });
-        }
+      const failedNames = failedA.map((r) => r.name).join(',');
+      const dropSuspects = ({ alert: finAlert }) => dropSuspectOverlays({
+        root, env, suspects: suspectInfo, failed: failedNames, alert: finAlert,
+      });
+      const fallbackReady = {
+        // Each suspect's failing sha rides along, so a later adoption after main moved can tell that the suspect
+        // itself did not (matchReadyCandidate's `fallback-main-moved`).
+        kind: 'fallback', forInputsKey: plan.inputsKey, dropRefs: suspects.map((ap) => ({ ref: ap.ref, pr: ap.pr, sha: ap.sha })), failed: failedNames,
       };
       // Plain main IS the build already running (an overlay was just added onto an otherwise-current clone) and
       // that build is the smoke-verified one: nothing to smoke, just drop the suspect(s).
       if (planB.finalSha === prevHead && adoptedHead === prevHead) {
-        const fin = await finalize(planB, dropSuspects);
+        const fin = await finalize(planB, dropSuspects, fallbackReady);
         return { ...fin, reason: 'fallback-plain-main', fallback: { from: plan.finalSha, to: planB.finalSha, dropped: suspectInfo } };
       }
       const b = await smokeSha(planB.finalSha, changedSince(planB.finalSha), 'plain-main');
       if (!b.worktreeFailed && !b.threw && b.smokeResult?.verdict === 'pass') {
-        const fin = await finalize(planB, dropSuspects);
+        const fin = await finalize(planB, dropSuspects, fallbackReady);
         return { ...fin, reason: 'fallback-plain-main', fallback: { from: plan.finalSha, to: planB.finalSha, dropped: suspectInfo } };
       }
       bFailed = b.smokeResult ? failedRows(b.smokeResult) : null;

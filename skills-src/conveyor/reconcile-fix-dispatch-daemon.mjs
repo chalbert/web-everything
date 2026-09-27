@@ -55,6 +55,7 @@ import { runReconcileCiHealDispatch } from '../../scripts/operations/ci-heal-pr-
 import { resolveLiveQueueBaseline } from '../../scripts/readiness/heavy-admission.mjs'; // card xkyw1x4
 import { createQueueBudget } from '../../scripts/readiness/heavy-queue-projection.mjs'; // card xkyw1x4
 import { runReconcilePass, defaultReadPrs } from '../../scripts/conveyor/reconcile-pass.mjs'; // #4191
+import { refreshLiveFixDispatchClaims } from '../../scripts/conveyor/fix-dispatch-claim.mjs'; // dup-heal-dispatch
 import { planNoteComment, postNoteComment } from '../../scripts/conveyor/reconcile-note-comment.mjs'; // #4191
 import { applyReviewStatus } from '../../scripts/conveyor/review-status-tag.mjs'; // #3383 follow-up — tag at dispatch, see runTickAllRepos
 import { planClaudeAuthDispatchGate } from '../../scripts/conveyor/claude-auth-health.mjs'; // card x5kagse
@@ -755,6 +756,47 @@ export function buildCliDaemonEffects({ owner, intervalMs = DEFAULT_INTERVAL_MS,
   };
 }
 
+/**
+ * we:skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs#withFixDispatchClaimRefresh — dup-heal-dispatch
+ * (#x0jphk5 follow-up, epic #3383). Wraps `effects.tickOnce` (mirrors `we:scripts/lib/github-app-auth-env.mjs
+ * #withGithubAppAuth`'s own "wrap tickOnce, forward args, delegate" shape — the SAME composition idiom `main()`
+ * already chains `withSelfSync(withGithubAppAuth(...))` through) to heartbeat-refresh every live fix-dispatch
+ * claim BEFORE this tick's own `fix`/`ci-heal` dispatch attempts run underneath it —
+ * `we:scripts/conveyor/fix-dispatch-claim.mjs#refreshLiveFixDispatchClaims`'s own docblock has the full "why":
+ * the claim's resource key no longer rotates with a PR's own head sha (the live incident this whole item
+ * fixes), so a session that runs LONGER than `DEFAULT_FIX_DISPATCH_CLAIM_TTL_MINUTES` needs this refresh to
+ * keep its own claim from lapsing out from under it. Kept OUT of {@link buildCliDaemonEffects} itself
+ * (composed here, in `main()`, instead) so that factory's own `tickOnce` stays the exact single-expression
+ * shape `we:skills-src/conveyor/__tests__/reconcile-fix-dispatch-daemon.test.mjs`'s own source-contract test
+ * asserts (`tickOnce: () => runTickAllRepos(...)`) — this wrapper changes WHEN the refresh runs, never that
+ * literal call site.
+ * @param {{tickOnce:Function, [k:string]:*}} effects
+ * @param {{log?:object, refresh?:Function}} [o] - `refresh` is injectable (defaults to the real
+ *   {@link refreshLiveFixDispatchClaims}); a test never wants a real `claude agents --json --all` call.
+ * @returns {object} the SAME effects object, with `tickOnce` wrapped.
+ */
+export function withFixDispatchClaimRefresh(effects, { log = console, refresh = refreshLiveFixDispatchClaims } = {}) {
+  const tick = effects.tickOnce;
+  return {
+    ...effects,
+    tickOnce: async (...args) => {
+      // Best-effort: a refresh failure (a `claude`/fs hiccup) is logged, never fatal to the tick — the plain
+      // TTL still recovers a claim this refresh could not reach.
+      let result = { checked: 0, refreshed: [] };
+      try {
+        // Awaited so an async `refresh` can never hand a Promise to the loop below (PR #2789 review).
+        result = await refresh();
+      } catch (e) {
+        log.error(`reconcile-fix-dispatch-daemon: fix-dispatch claim refresh failed (non-fatal): ${String((e && e.message) || e).split('\n')[0]}`);
+      }
+      for (const r of Array.isArray(result?.refreshed) ? result.refreshed : []) {
+        log.error(`reconcile-fix-dispatch-daemon: refreshed live claim ${r.kind}-${r.pr} (${r.repo}) — still owned by ${r.owner}`);
+      }
+      return tick(...args);
+    },
+  };
+}
+
 async function main() {
   const owner = makeOwner('reconcile-fix-dispatch-daemon');
   const acquired = acquireRunnerLease(RUNNER_LOCK_ROOT, owner, { key: RECONCILE_FIX_DISPATCH_LEASE_KEY });
@@ -783,7 +825,7 @@ async function main() {
     process.exit(0);
   };
   const { stoppedReason } = await runDaemonLoop(
-    withSelfSync(withGithubAppAuth(buildCliDaemonEffects({ owner })), {
+    withSelfSync(withGithubAppAuth(withFixDispatchClaimRefresh(buildCliDaemonEffects({ owner }))), {
       root: selfRoot, onRestart: restartOntoNewCode, hasStaleRefusal: hasStaleMainRefusal,
     }),
   );

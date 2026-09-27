@@ -167,10 +167,17 @@ export function realSleep(ms) { return new Promise((resolve) => { setTimeout(res
 
 /** Spawn one real run of the manifest-resolved script to completion, async (never blocking the event loop
  *  the independent heartbeat relies on — mirrors why `runner.mjs`'s own `runQuietHeartbeating` uses `spawn`,
- *  never `execFileSync`, for anything that can outlast a beat). */
-export function spawnPassOnce({ script, args = [] }, { root = REPO_ROOT, log = console } = {}) {
+ *  never `execFileSync`, for anything that can outlast a beat).
+ *
+ *  #gh-write-burst — `env` defaults to `process.env` (unchanged for every existing caller) but a caller now MAY
+ *  override it; `main()` below sets `GH_CALLER=<passName>` on it so every `gh` call this pass's own process
+ *  makes (in-process, through `we:scripts/lib/gh-throttle.mjs`) is attributed to the exact manifest entry that
+ *  made it — the same precision `process.argv[1]`'s own basename fallback cannot give across this pass's
+ *  per-repo instances (`parked-pr-conflict-watch-we` vs `-frontierui` vs `-plateau-app` all share one script
+ *  path). */
+export function spawnPassOnce({ script, args = [] }, { root = REPO_ROOT, log = console, env = process.env, spawnFn = spawn } = {}) {
   return new Promise((resolve) => {
-    const child = spawn(process.execPath, [join(root, script), ...args], { stdio: ['ignore', 'inherit', 'inherit'] });
+    const child = spawnFn(process.execPath, [join(root, script), ...args], { stdio: ['ignore', 'inherit', 'inherit'], env });
     child.on('exit', (code, signal) => {
       if (code !== 0) log.error(`pass-daemon: ${script} exited ${signal ? `on ${signal}` : `with code ${code}`}`);
       resolve({ code, signal });
@@ -248,11 +255,15 @@ async function main(argv) {
     );
     selfSyncEnv = { ...process.env, [DAEMON_SELF_SYNC_BRANCH_ENV]: '' };
   }
+  // #gh-write-burst — every `gh` call this pass's own process makes is now attributable to THIS exact manifest
+  // entry (see `spawnPassOnce`'s own docblock above for why a per-repo pass needs this and argv[1] alone can't
+  // give it).
+  const passEnv = { ...process.env, GH_CALLER: passName };
   const runPassSelfSynced = passDaemonSelfSyncEnabled()
-    ? withSelfSync({ tickOnce: () => spawnPassOnce(entry) }, {
+    ? withSelfSync({ tickOnce: () => spawnPassOnce(entry, { env: passEnv }) }, {
       root: REPO_ROOT, onRestart: restartOntoNewCode, mainOnly, env: selfSyncEnv,
     }).tickOnce
-    : () => spawnPassOnce(entry);
+    : () => spawnPassOnce(entry, { env: passEnv });
 
   console.error(`pass-daemon: started "${passName}" (${entry.script}) on interval ${intervalMs}ms, heartbeat every ${heartbeatIntervalMs}ms.`);
   const { stoppedReason } = await runPassDaemonLoop({
