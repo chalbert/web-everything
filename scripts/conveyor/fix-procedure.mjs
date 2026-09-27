@@ -353,8 +353,10 @@ if (IS_CLI) {
   for (const a of rest) {
     if (a.startsWith('--')) { const eq = a.indexOf('='); if (eq === -1) flags[a.slice(2)] = true; else flags[a.slice(2, eq)] = a.slice(eq + 1); } else pos.push(a);
   }
-  const out = (o, code = 0) => { process.stdout.write(`${JSON.stringify(o)}\n`); process.exit(code); };
-  const fail = (m) => { process.stderr.write(`✗ fix-procedure: ${m}\n`); process.exit(1); };
+  // Drained writes before every exit (check:standards `emit-then-exit`): a piped stdout must never be truncated.
+  const { writeLineSync } = await import('../lib/write-all-sync.mjs');
+  const out = (o, code = 0) => { writeLineSync(1, JSON.stringify(o)); process.exit(code); };
+  const fail = (m) => { writeLineSync(2, `✗ fix-procedure: ${m}`); process.exit(1); };
   const USAGE = 'usage: fix-procedure.mjs <fix-begin|fix-end|fix-heartbeat|fix-status> <pr> [--repo=<slug|key>] [--who=<session|worker>] [--why=<text>]\n'
     + '       fix-procedure.mjs push-check --branch=<lane/…> [--repo=…]\n'
     + '       fix-procedure.mjs push --branch=<lane/…> [--src=HEAD] [--remote=origin] [--repo=…]';
@@ -383,7 +385,7 @@ if (IS_CLI) {
       if (!branch.startsWith('lane/')) fail('--branch=lane/<name> is required (only lane refs are pushable)');
       const repoKey = typeof flags.repo === 'string' ? repoKeyOf(flags.repo) : repoKeyForCheckout(process.cwd());
       const refusal = pushRefusal({ repo: repoKey, branch, sessionId: id.sessionId, who });
-      if (refusal) { process.stderr.write(`✗ ${refusal.message}\n`); out({ ok: false, ...refusal }, 3); }
+      if (refusal) { writeLineSync(2, `✗ ${refusal.message}`); out({ ok: false, ...refusal }, 3); }
       if (cmd === 'push-check') out({ ok: true, branch, repo: repoKey });
       const src = typeof flags.src === 'string' ? flags.src : 'HEAD';
       const remote = typeof flags.remote === 'string' ? flags.remote : 'origin';
