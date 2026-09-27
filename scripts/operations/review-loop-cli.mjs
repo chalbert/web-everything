@@ -152,6 +152,31 @@ export async function fileItemForPrevention(input, {
 }
 
 /**
+ * Reads `file-item --json`'s payload out of its stdout lines without ever throwing: a warning line (e.g. a Node
+ * deprecation notice) may precede the JSON, which may itself span several lines. Tries each line, then the text
+ * from the first line starting with `{` to the end; returns `{}` when nothing parses.
+ *
+ * @param {string[]} lines
+ * @returns {object}
+ */
+export function parseFiledPayload(lines = []) {
+  const tryParse = (text) => {
+    try {
+      const v = JSON.parse(text);
+      return v && typeof v === 'object' ? v : null;
+    } catch {
+      return null;
+    }
+  };
+  for (const line of lines) {
+    const v = tryParse(line);
+    if (v) return v;
+  }
+  const start = lines.findIndex((l) => l.trimStart().startsWith('{'));
+  return (start === -1 ? null : tryParse(lines.slice(start).join('\n'))) ?? {};
+}
+
+/**
  * DRIVE ONE ROUND, UNATTENDED. The whole file, as a function — mirrors `we:scripts/operations/cli-adapter.mjs
  * #runOperationCli`'s shape closely, on purpose, so the two are easy to read side by side and hard to let
  * drift silently: same parse, same start-or-resume, same render. The differences are exactly the two things
@@ -283,7 +308,9 @@ export async function runReviewLoopOnce({
       };
     }
 
-    const filedPayload = JSON.parse(filed.lines[0] ?? '{}');
+    // The card IS filed (exit 0) — so an unreadable stdout (a Node warning line before the JSON, or no JSON at
+    // all) must never crash the loop, and must never re-park either: the next round would file a duplicate.
+    const filedPayload = parseFiledPayload(filed.lines);
     const filedNum = filedPayload?.verdict?.num ?? null;
     const filedRel = filedPayload?.verdict?.rel ?? null;
 

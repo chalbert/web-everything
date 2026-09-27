@@ -285,7 +285,26 @@ describe('buildPreventionFilingInput — the file-item card the loop files for i
     const gh = buildPreventionFilingInput({
       repo: 'o/r', pr: 1, findings: [{ file: '.github/workflows/ci.yml', prevention: 'x', preventionCaptured: false }],
     });
-    expect(gh.scope.split(',')).toContain('we:.github/workflows/ci.yml');
+    expect(gh.scope.split(',')).toEqual(['we:.github/workflows/ci.yml']);
+  });
+
+  it('adds a `__tests__` sibling only for a JS/TS-family source file — never a phantom one for .yml/.sh/.json/.md', () => {
+    for (const file of ['.github/workflows/ci.yml', 'scripts/run.sh', 'data/state.json', 'docs/agent/x.md']) {
+      const input = buildPreventionFilingInput({
+        repo: 'o/r', pr: 1, findings: [{ file, prevention: 'x', preventionCaptured: false }],
+      });
+      expect(input.scope.split(',')).toEqual([`we:${file}`]);
+    }
+    for (const [file, sibling] of [
+      ['scripts/a.mjs', 'scripts/__tests__/a.test.mjs'],
+      ['scripts/a.js', 'scripts/__tests__/a.test.mjs'],
+      ['src/a.ts', 'src/__tests__/a.test.mjs'],
+    ]) {
+      const input = buildPreventionFilingInput({
+        repo: 'o/r', pr: 1, findings: [{ file, prevention: 'x', preventionCaptured: false }],
+      });
+      expect(input.scope.split(',')).toEqual([`we:${file}`, `we:${sibling}`]);
+    }
   });
 
   it('withholds a juror-authored `file` that is not a plain path (quote/newline/comma could inject frontmatter '

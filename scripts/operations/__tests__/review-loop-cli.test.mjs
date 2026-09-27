@@ -422,6 +422,39 @@ describe('runReviewLoopOnce — property 4, MECHANIZED (#2749 fix, 2026-09-26 sc
     expect(fileItemCalls[0].digest).toContain('naming-convention doc note');
   });
 
+  it('a SUCCESSFUL filing whose stdout carries a non-JSON line before the JSON (a Node warning) still reads the '
+    + 'filed card and accepts — never an uncaught SyntaxError', async () => {
+    const { declaration, registry } = registryFor({});
+    const store = createMemoryRunStore();
+    const out = await runReviewLoopOnce({
+      declaration, registry, argv: BASE_ARGV, store, sinks: recordingSinks([]),
+      makeJudge: cannedJudge(PREVENTION_ANSWER), mintRunId: () => 'r-prevention-noisy-stdout',
+      fileItem: async () => ({
+        code: 0,
+        lines: [
+          '(node:123) [DEP0040] DeprecationWarning: The `punycode` module is deprecated.',
+          JSON.stringify({ verdict: { num: 77, rel: 'backlog/77-x.md' } }, null, 2),
+        ],
+      }),
+    });
+    expect(out.stopped).toBe('complete');
+    expect(out.run.findings.confirm).toBe('accept');
+    expect(out.lines.join('\n')).toMatch(/backlog\/77-x\.md \(#77\)/);
+  });
+
+  it('a SUCCESSFUL filing whose stdout carries no parseable JSON at all still accepts (the card IS filed — '
+    + 're-parking would file a duplicate on the next round), naming the unreadable reference', async () => {
+    const { declaration, registry } = registryFor({});
+    const store = createMemoryRunStore();
+    const out = await runReviewLoopOnce({
+      declaration, registry, argv: BASE_ARGV, store, sinks: recordingSinks([]),
+      makeJudge: cannedJudge(PREVENTION_ANSWER), mintRunId: () => 'r-prevention-garbled-stdout',
+      fileItem: async () => ({ code: 0, lines: ['Warning: something', '{not json'] }),
+    });
+    expect(out.stopped).toBe('complete');
+    expect(out.lines.join('\n')).toMatch(/filed mechanically — \(no path\) \(#\?\)/);
+  });
+
   it('a review:human PR carrying the same verdict is STILL PARKED — its own review:human ceremony is untouched, '
     + 'and file-item is never even called', async () => {
     const { declaration, registry } = registryFor({ labels: ['review:human'] });

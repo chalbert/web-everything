@@ -304,7 +304,10 @@ export function buildPreventionFilingInput({ repo, pr, findings = [], parent = '
     const dir = slash === -1 ? '.' : f.slice(0, slash);
     const base = slash === -1 ? f : f.slice(slash + 1);
     if (/(^|\/)__tests__(\/|$)/.test(dir) || /\.(test|spec)\.[cm]?[jt]s$/.test(base)) return null;
-    const stem = base.replace(/\.mjs$/, '');
+    // Only a JS/TS-family source has a `__tests__/<stem>.test.mjs` sibling — a .yml/.sh/.json/.md cited file
+    // would otherwise get a phantom scope entry that never exists (PR #2767 advisory).
+    if (!/\.[cm]?[jt]s$/.test(base)) return null;
+    const stem = base.replace(/\.[cm]?[jt]s$/, '');
     return `${dir}/__tests__/${stem}.test.mjs`;
   };
   // #883 — EVERY entry, in `scope` AND in the digest's backticked paths, carries the `we:` locus prefix: a
