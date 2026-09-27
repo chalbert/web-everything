@@ -1,0 +1,278 @@
+/**
+ * @file review-set-label.approval-prevention-filing.test.mjs — proof of the APPROVAL-TIME PREVENTION-FILING
+ * DEFAULT (operator, 2026-09-27, "prevention outstanding should be filed by default on approval"), wired into
+ * `runReviewLabelCli` — the single label home every approval path (`--to=accepted`, `--to=clear-human`) passes
+ * through. See `we:scripts/lib/approval-prevention-notice.mjs`'s header for the decision this exercises, and
+ * `we:scripts/review-set-label.mjs`'s own `runApprovalPreventionFiling` for the wiring.
+ */
+import { describe, it, expect } from 'vitest';
+import {
+  derivePreventionParent, fileApprovalPreventionCard, runApprovalPreventionFiling, runReviewLabelCli,
+} from '../review-set-label.mjs';
+
+describe('derivePreventionParent — #4075 default, unless a finding names a better one', () => {
+  it('defaults to 4075 when no finding names a parent', () => {
+    expect(derivePreventionParent([{ prevention: 'add a test' }])).toBe('4075');
+    expect(derivePreventionParent([])).toBe('4075');
+  });
+
+  it('uses an explicitly-named parent/epic/under reference from a finding\'s own prevention text', () => {
+    expect(derivePreventionParent([{ prevention: 'file this under parent #1234' }])).toBe('1234');
+    expect(derivePreventionParent([{ prevention: 'covered by epic #5555 already' }])).toBe('5555');
+    expect(derivePreventionParent([{ prevention: 'tracked under #77' }])).toBe('77');
+  });
+
+  it('does not mistake an unrelated "#N" mention (e.g. a cited PR) for a naming', () => {
+    expect(derivePreventionParent([{ prevention: 'see PR #9999 for context' }])).toBe('4075');
+  });
+
+  it('the FIRST naming across several findings wins, deterministically', () => {
+    expect(derivePreventionParent([
+      { prevention: 'no naming here' },
+      { prevention: 'parent #111' },
+      { prevention: 'epic #222' },
+    ])).toBe('111');
+  });
+});
+
+describe('fileApprovalPreventionCard — the real (injectable) file-item subprocess seam', () => {
+  const input = {
+    title: 't', kind: 'story', size: '3', digest: 'd', scope: 'we:a.mjs', parent: '4075', queue: 'true',
+  };
+
+  it('builds the exact file-item argv and parses its --json payload', () => {
+    const calls = [];
+    const exec = (file, args) => {
+      calls.push([file, args]);
+      return JSON.stringify({ verdict: { num: 4999, rel: 'backlog/4999-x.md' } });
+    };
+    const result = fileApprovalPreventionCard(input, { exec });
+    expect(calls[0][0]).toBe('node');
+    expect(calls[0][1]).toEqual([
+      'scripts/operations/run.mjs', 'file-item',
+      '--title=t', '--kind=story', '--size=3', '--digest=d', '--scope=we:a.mjs',
+      '--parent=4075', '--queue=true', '--json',
+    ]);
+    expect(result).toEqual({ ok: true, num: 4999, rel: 'backlog/4999-x.md', error: null });
+  });
+
+  it('omits --parent when input.parent is empty', () => {
+    const calls = [];
+    const exec = (file, args) => { calls.push(args); return JSON.stringify({ verdict: { num: 1, rel: 'r' } }); };
+    fileApprovalPreventionCard({ ...input, parent: '' }, { exec });
+    expect(calls[0]).not.toContain('--parent=');
+    expect(calls[0].some((a) => a.startsWith('--parent='))).toBe(false);
+  });
+
+  it('tolerates a leading warning line before the JSON payload', () => {
+    const exec = () => '(node:1) DeprecationWarning: x\n' + JSON.stringify({ verdict: { num: 2, rel: 'r2' } });
+    const result = fileApprovalPreventionCard(input, { exec });
+    expect(result).toEqual({ ok: true, num: 2, rel: 'r2', error: null });
+  });
+
+  it('reports a clean failure (never throws) when exec throws', () => {
+    const exec = () => { const e = new Error('boom'); e.stderr = 'file-item: refused\n'; throw e; };
+    const result = fileApprovalPreventionCard(input, { exec });
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/refused/);
+  });
+
+  it('reports a clean failure when exec succeeds but produces no parseable JSON', () => {
+    const exec = () => 'no json here';
+    const result = fileApprovalPreventionCard(input, { exec });
+    expect(result).toMatchObject({ ok: false, num: null, rel: null });
+    expect(result.error).toMatch(/no parseable JSON/);
+  });
+});
+
+describe('runApprovalPreventionFiling — the orchestration, in isolation', () => {
+  function fakeProvider() {
+    const posted = [];
+    return { posted, postComment: (repo, pr, body) => posted.push({ repo, pr, body }) };
+  }
+
+  const OWED_COMMENT = [
+    '**Verdict:** ✅ pass — no blocking findings',
+    '- `scripts/a.mjs:1` — an issue',
+    '  - _Prevention (OWED — file it):_ add a guard',
+  ].join('\n');
+
+  it('does nothing when there is nothing to file (no owed findings)', () => {
+    const provider = fakeProvider();
+    let fileCalls = 0;
+    runApprovalPreventionFiling({
+      to: 'accepted', repo: 'o/r', pr: 1, headSha: 'a'.repeat(40),
+      commentBody: '**Verdict:** ✅ pass — no blocking findings', prComments: [], provider,
+      fileApprovalPrevention: () => { fileCalls += 1; return { ok: true, num: 1, rel: 'r' }; },
+    });
+    expect(fileCalls).toBe(0);
+    expect(provider.posted).toHaveLength(0);
+  });
+
+  it('files the card and posts a marker comment when there IS an owed, non-blocking finding', () => {
+    const provider = fakeProvider();
+    const filedWith = [];
+    runApprovalPreventionFiling({
+      to: 'accepted', repo: 'o/r', pr: 42, headSha: 'deadbeef'.repeat(5),
+      commentBody: OWED_COMMENT, prComments: [], provider,
+      fileApprovalPrevention: (input) => { filedWith.push(input); return { ok: true, num: 5001, rel: 'backlog/5001-x.md' }; },
+    });
+    expect(filedWith).toHaveLength(1);
+    expect(filedWith[0].title).toContain('o/r#42');
+    expect(filedWith[0].parent).toBe('4075');
+    expect(filedWith[0].digest).toContain('APPROVAL');
+    expect(provider.posted).toHaveLength(1);
+    expect(provider.posted[0].body).toContain('approval-prevention-filed:');
+    expect(provider.posted[0].body).toContain('backlog/5001-x.md');
+    expect(provider.posted[0].body).toContain('#5001');
+  });
+
+  it('is idempotent: does not file again when the head already carries the marker', () => {
+    const headSha = 'cafe1234'.repeat(5);
+    const provider = fakeProvider();
+    let fileCalls = 0;
+    runApprovalPreventionFiling({
+      to: 'accepted', repo: 'o/r', pr: 42, headSha,
+      commentBody: OWED_COMMENT,
+      prComments: [{ body: `<!-- approval-prevention-filed:${headSha} -->\nalready filed` }],
+      provider,
+      fileApprovalPrevention: () => { fileCalls += 1; return { ok: true, num: 1, rel: 'r' }; },
+    });
+    expect(fileCalls).toBe(0);
+    expect(provider.posted).toHaveLength(0);
+  });
+
+  it('reports a filing failure to stderr but never throws, and posts no marker', () => {
+    const provider = fakeProvider();
+    const stderrChunks = [];
+    const realWrite = process.stderr.write.bind(process.stderr);
+    process.stderr.write = (s) => { stderrChunks.push(String(s)); return true; };
+    try {
+      expect(() => runApprovalPreventionFiling({
+        to: 'accepted', repo: 'o/r', pr: 7, headSha: 'a'.repeat(40),
+        commentBody: OWED_COMMENT, prComments: [], provider,
+        fileApprovalPrevention: () => ({ ok: false, num: null, rel: null, error: 'boom' }),
+      })).not.toThrow();
+    } finally { process.stderr.write = realWrite; }
+    expect(stderrChunks.join('')).toMatch(/FAILED/);
+    expect(stderrChunks.join('')).toMatch(/UNAFFECTED/);
+    expect(provider.posted).toHaveLength(0);
+  });
+
+  it('reports a marker-post failure to stderr but never throws (the card is already filed)', () => {
+    const stderrChunks = [];
+    const realWrite = process.stderr.write.bind(process.stderr);
+    process.stderr.write = (s) => { stderrChunks.push(String(s)); return true; };
+    const provider = { postComment: () => { throw new Error('gh down'); } };
+    try {
+      expect(() => runApprovalPreventionFiling({
+        to: 'accepted', repo: 'o/r', pr: 7, headSha: 'a'.repeat(40),
+        commentBody: OWED_COMMENT, prComments: [], provider,
+        fileApprovalPrevention: () => ({ ok: true, num: 9, rel: 'backlog/9-x.md' }),
+      })).not.toThrow();
+    } finally { process.stderr.write = realWrite; }
+    expect(stderrChunks.join('')).toMatch(/marker comment failed to post/);
+  });
+
+  it('never fires for clear-human when the underlying source is prevention-outstanding (#2766 owns it)', () => {
+    const provider = fakeProvider();
+    let fileCalls = 0;
+    runApprovalPreventionFiling({
+      to: 'accepted', repo: 'o/r', pr: 1, headSha: 'a'.repeat(40),
+      commentBody: [
+        '**Verdict:** 🚩 prevention outstanding — file the guard before accept',
+        '- `scripts/a.mjs:1` — x',
+        '  - _Prevention (OWED — file it):_ guard it',
+      ].join('\n'),
+      prComments: [], provider,
+      fileApprovalPrevention: () => { fileCalls += 1; return { ok: true, num: 1, rel: 'r' }; },
+    });
+    expect(fileCalls).toBe(0);
+  });
+});
+
+/** Full end-to-end proof, through the real `runReviewLabelCli`, with a stub `gh` provider (#x8xf5rl style). */
+describe('runApprovalPreventionFiling wired end-to-end through runReviewLabelCli', () => {
+  const OWED_BODY = [
+    '**Verdict:** ✅ pass — no blocking findings',
+    '- `scripts/a.mjs:1` — an issue',
+    '  - _Prevention (OWED — file it):_ add a guard',
+  ].join('\n');
+
+  function stubProvider({ labels = [], comments = [] } = {}) {
+    const calls = [];
+    return {
+      calls,
+      name: 'stub',
+      currentRepo: () => 'o/n',
+      readPrState: () => ({
+        labels: labels.map((name) => ({ name })), headRefOid: 'a'.repeat(40), headRefName: 'lane/x',
+        state: 'OPEN', body: '', title: '', comments,
+      }),
+      readLabels: () => labels.map((name) => ({ name })),
+      setLabels: (_r, _p, spec) => { calls.push(['setLabels', spec]); },
+      postComment: (_r, _p, body) => { calls.push(['postComment', body]); },
+    };
+  }
+
+  const run = (provider, argv, config = {}) => {
+    const chunks = [];
+    const realExit = process.exit.bind(process);
+    process.exit = (code) => { const e = new Error('process.exit'); e.exitCode = code; throw e; };
+    let exitCode = 0;
+    try {
+      runReviewLabelCli({
+        defaultActor: 'test',
+        usage: 'usage: test',
+        buildComment: () => OWED_BODY,
+        successResult: (o) => ({ ok: true, ...o }),
+        refusalResult: ({ decision }) => ({ error: decision.reason }),
+        emit: (l) => chunks.push(String(l)),
+        provider, argv, ...config,
+      });
+    } catch (e) { if (typeof e.exitCode === 'number') exitCode = e.exitCode; else throw e; }
+    finally { process.exit = realExit; }
+    return { exitCode, payload: JSON.parse(chunks.join('') || '{}') };
+  };
+
+  it('files a card and posts a marker on an ordinary accept whose rendered comment carries an owed guard', () => {
+    const provider = stubProvider({ labels: ['review:pending'] });
+    const filed = [];
+    run(provider, ['1048', '--repo=o/n', '--to=accepted', '--actor=op'], {
+      fileApprovalPrevention: (input) => { filed.push(input); return { ok: true, num: 6001, rel: 'backlog/6001-x.md' }; },
+    });
+    expect(filed).toHaveLength(1);
+    const markerComments = provider.calls.filter(([kind, body]) => kind === 'postComment' && body.includes('approval-prevention-filed:'));
+    expect(markerComments).toHaveLength(1);
+  });
+
+  it('does not file again on a re-run once the marker for this head is already posted', () => {
+    const marker = `<!-- approval-prevention-filed:${'a'.repeat(40)} -->\nalready filed`;
+    const provider = stubProvider({ labels: ['review:pending'], comments: [{ body: marker }] });
+    let fileCalls = 0;
+    run(provider, ['1048', '--repo=o/n', '--to=accepted', '--actor=op'], {
+      fileApprovalPrevention: () => { fileCalls += 1; return { ok: true, num: 1, rel: 'r' }; },
+    });
+    expect(fileCalls).toBe(0);
+  });
+
+  it('a filing failure does not affect the approval\'s own success/exit code', () => {
+    const provider = stubProvider({ labels: ['review:pending'] });
+    const { exitCode, payload } = run(provider, ['1048', '--repo=o/n', '--to=accepted', '--actor=op'], {
+      fileApprovalPrevention: () => ({ ok: false, num: null, rel: null, error: 'boom' }),
+    });
+    expect(exitCode).toBe(0);
+    expect(payload.ok).toBe(true);
+  });
+
+  it('never runs at all for a --to=changes bounce', () => {
+    const provider = stubProvider({ labels: ['review:pending'] });
+    let fileCalls = 0;
+    run(provider, ['1048', '--repo=o/n', '--to=changes', '--actor=op', '--reason=x'], {
+      buildComment: () => 'RENDERED FINDINGS\n- one',
+      verdictBody: 'RENDERED FINDINGS\n- one',
+      fileApprovalPrevention: () => { fileCalls += 1; return { ok: true, num: 1, rel: 'r' }; },
+    });
+    expect(fileCalls).toBe(0);
+  });
+});

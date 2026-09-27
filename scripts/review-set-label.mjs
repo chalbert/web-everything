@@ -137,6 +137,19 @@ import { writeAllSync } from './lib/write-all-sync.mjs';
 // call. See `we:backlog/3631-migrate-remaining-gh-cli-call-sites-to-the-gh-throttle-wrapp.md` for the tracked
 // item this is one slice of.
 import { execFileSyncThrottled } from './lib/gh-throttle.mjs';
+// #4258-shape (operator, 2026-09-27, "prevention outstanding should be filed by default on approval") — THE
+// APPROVAL-TIME MECHANICAL FILING STEP. `selectApprovalPreventionFindings` decides WHICH owed findings (if any)
+// this approval owes a card for (an advisory note's, or this very accept comment's, non-blocking `Prevention
+// (OWED — file it)` items — never a `prevention-outstanding` VERDICT, which the #2749 review-loop mechanism
+// already owns end to end); `buildApprovalPreventionFilingInput` builds the `file-item` input from them — a
+// SELF-CONTAINED builder, deliberately not a shared import of `review-loop-policy.mjs`'s own #2749 one (that
+// file's header explains why: a real import cycle back through `operations/review-pr.mjs`, and — the more
+// pressing reason today — chalbert/web-everything#2766 is an open, active PR reshaping that exact function).
+// See `runApprovalPreventionFiling` below for the wiring and why THIS seam, not the drain's land step.
+import {
+  selectApprovalPreventionFindings, hasApprovalPreventionMarkerForHead, buildApprovalPreventionMarker,
+  buildApprovalPreventionFilingInput,
+} from './lib/approval-prevention-notice.mjs';
 // #xwp8ioh — the #2953 inert-PR predicate, extracted so `review-pr`'s `read` step enforces the same rule
 // before a juror is paid instead of this site being the only place it is checked.
 import { classifyPrLiveness, inertPrMessage } from './lib/pr-liveness.mjs';
@@ -573,6 +586,130 @@ export function decideRestampHumanClearance({ comments, headSha, headDiff } = {}
   return { actor: clearance ? clearance.actor : 'the operator', sha: humanClearedSha };
 }
 
+// ── APPROVAL-TIME PREVENTION FILING (operator, 2026-09-27) ──────────────────────────────────────────────────
+// "prevention outstanding should be filed by default on approval." See `we:scripts/lib/approval-prevention-
+// notice.mjs`'s header for the full ruling, the three gaps it closes, and why a `prevention-outstanding`
+// VERDICT itself is deliberately out of scope here (#2766 already owns that end to end).
+
+/**
+ * A finding's OWN prevention text can name a BETTER parent than the generic catch-all (#4075, "conveyor
+ * hardening — 2026-09-24 incident follow-ups", the operator's own default for exactly this kind of mechanically-
+ * filed follow-up). PURE. Matched narrowly — "parent #N" / "epic #N" / "under #N", case-insensitive — so an
+ * UNRELATED "#N" the prevention prose happens to cite (a PR number, an issue it references in passing) is never
+ * mistaken for a naming. The FIRST such naming across the findings wins, for a deterministic, single result even
+ * when several findings each name one.
+ *
+ * @param {Array<{prevention?: string}>} findings
+ * @returns {string} a backlog item number, or `'4075'` when none of the findings name a better one.
+ */
+export function derivePreventionParent(findings) {
+  const NAMED_PARENT_RE = /\b(?:parent|epic|under)\s*#(\d+)\b/i;
+  for (const f of (Array.isArray(findings) ? findings : [])) {
+    const m = NAMED_PARENT_RE.exec(String(f?.prevention ?? ''));
+    if (m) return m[1];
+  }
+  return '4075';
+}
+
+/**
+ * THE REAL, SYNCHRONOUS prevention-filing seam — shells `node scripts/operations/run.mjs file-item …`, the same
+ * declared operation `we:scripts/operations/review-loop-cli.mjs#fileItemForPrevention` drives IN PROCESS for
+ * #2766's own mechanism. THIS file cannot do the same in-process call: that binding is `async`
+ * (`resolveOperation`/`runOperationCli` both return promises), and `runReviewLabelCli` is, and must stay,
+ * SYNCHRONOUS — every existing caller (`we:scripts/conveyor/rearm-review.mjs`, `reconcile-finding.mjs`) invokes
+ * it as a plain, non-awaited call, and the function calls `process.exit()` on every exit path. A subprocess is
+ * therefore the correct seam here, not a shortcut around one: `execFileSyncThrottled` is this file's OWN existing
+ * subprocess primitive (already used for `computeNetDiffText`'s `git` calls above); `node` is not a throttled
+ * command (only `file==='gh'` is), so this passes straight through to a plain `execFileSync`.
+ *
+ * RELIES ON THE SAME CWD GUARANTEE `computeNetDiffText`'s own doc comment states above: this process's cwd must
+ * be the named repo's checkout, exactly as every real caller of `runReviewLabelCli` already guarantees. A test
+ * that wants no such guarantee (and no real `file-item` write) injects `fileApprovalPrevention` instead.
+ *
+ * @param {{title:string,kind:string,size:string,digest:string,scope:string,parent:string,queue:string}} input
+ * @param {{exec?: Function}} [o] - `exec` is injectable (same `(args, opts) => string` shape as
+ *   `execFileSyncThrottled` itself) so a test can assert the exact argv without a real `node` subprocess or
+ *   backlog write; production always uses the real one.
+ * @returns {{ok:boolean, num:(number|null), rel:(string|null), error:(string|null)}}
+ */
+export function fileApprovalPreventionCard(input, { exec = execFileSyncThrottled } = {}) {
+  const argv = [
+    'scripts/operations/run.mjs', 'file-item',
+    `--title=${input.title}`,
+    `--kind=${input.kind}`,
+    `--size=${input.size}`,
+    `--digest=${input.digest}`,
+    `--scope=${input.scope}`,
+    ...(input.parent ? [`--parent=${input.parent}`] : []),
+    `--queue=${input.queue}`,
+    '--json',
+  ];
+  try {
+    const out = String(exec('node', argv, { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 }));
+    const lines = out.split('\n');
+    const start = lines.findIndex((l) => l.trimStart().startsWith('{'));
+    const payload = start === -1 ? null : JSON.parse(lines.slice(start).join('\n'));
+    if (!payload) {
+      return { ok: false, num: null, rel: null, error: `file-item produced no parseable JSON: ${out.slice(0, 500)}` };
+    }
+    return { ok: true, num: payload?.verdict?.num ?? null, rel: payload?.verdict?.rel ?? null, error: null };
+  } catch (e) {
+    return { ok: false, num: null, rel: null, error: ghErr(e, 'file-item failed') };
+  }
+}
+
+/**
+ * THE APPROVAL-TIME MECHANICAL FILING STEP ITSELF — called from `runReviewLabelCli`, ONLY for `to === 'accepted'`
+ * or `to === 'clear-human'`, and only AFTER the label swap + durable comment have ALREADY landed (see the call
+ * site): a filing failure here can therefore NEVER cost the approval that already happened. Reported LOUDLY to
+ * stderr on failure (never swallowed silently) — the same posture this file already uses for its ledger write
+ * and its delegation-trial log two blocks below, both of which are also "the approval already happened, this is
+ * a best-effort side record" writes.
+ *
+ * IDEMPOTENT: {@link hasApprovalPreventionMarkerForHead} is checked against `prComments` — the PR's comments AS
+ * OF THE READ AT THE TOP OF THIS RUN — before filing, and {@link buildApprovalPreventionMarker}'s marker is
+ * posted as its own tiny comment after a successful file, so a LATER run (a repeated `--to=clear-human`, an
+ * operator re-running the ceremony, a `restamp`) sees the marker on ITS OWN fresh read and never files twice
+ * for the same head.
+ *
+ * @param {{to:string, repo:string, pr:(number|string), headSha:string, commentBody:string,
+ *   prComments:Array<object>, provider:object, fileApprovalPrevention:(input:object)=>object}} o
+ */
+export function runApprovalPreventionFiling({
+  to, repo, pr, headSha, commentBody, prComments, provider, fileApprovalPrevention,
+}) {
+  const selection = selectApprovalPreventionFindings({ to, commentBody, prComments, headSha });
+  if (!selection) return;
+  if (hasApprovalPreventionMarkerForHead(prComments, headSha)) return;
+  const subject = `${repo}#${pr}`;
+  const input = buildApprovalPreventionFilingInput({
+    repo,
+    pr,
+    findings: selection.findings,
+    parent: derivePreventionParent(selection.findings),
+    source: selection.source,
+  });
+  const filed = fileApprovalPrevention(input);
+  if (!filed.ok) {
+    process.stderr.write(
+      `review-set-label: approval-time prevention filing for ${subject} FAILED (the approval above already `
+      + `landed and is UNAFFECTED) — ${filed.error}\n`,
+    );
+    return;
+  }
+  const marker = buildApprovalPreventionMarker({ headSha });
+  const noteBody = `${marker}\nFiled the prevention guard(s) owed by ${subject}'s independent review, `
+    + `mechanically, on approval (operator rule, 2026-09-27) — ${filed.rel ?? '(no path)'} (#${filed.num ?? '?'}).`;
+  try {
+    provider.postComment(repo, pr, noteBody);
+  } catch (e) {
+    process.stderr.write(
+      `review-set-label: ${subject}'s approval-time prevention card ${filed.rel ?? filed.num} filed OK, but its `
+      + `marker comment failed to post (a LATER run may attempt to re-file) — ${ghErr(e, String(e))}\n`,
+    );
+  }
+}
+
 /**
  * we:scripts/review-set-label.mjs#runReviewLabelCli — the SHARED review-label CLI harness (#2644). Both this
  * file's reviewer-verdict CLI and the conveyor `rearm-review.mjs` run this SAME observe→decide→write→re-read arc
@@ -644,6 +781,10 @@ export function runReviewLabelCli({
   readTrialStore = readStore,
   logTrialFn = logDelegationTrial,
   trialLogIo = {},
+  // #4258-shape — the approval-time prevention-filing seam (see `runApprovalPreventionFiling` above). Injected
+  // for the same reason `provider` is: a test asserts the DECISION (what would be filed, and when) without a
+  // real `file-item` subprocess ever running.
+  fileApprovalPrevention = fileApprovalPreventionCard,
 } = {}) {
   // Shadows the module-level `fail` so EVERY refusal inside this function — there are seventeen — goes to the
   // injected emitter too. Without this the guards print past an in-process caller's collector (#3061); the
@@ -1105,6 +1246,17 @@ export function runReviewLabelCli({
   const acceptanceAlreadyLive = hasReviewLabel(currentLabels, REVIEW_LABELS.accepted);
   const steps = { comment: postComment, swap: applySwap };
   for (const step of writeOrder({ acceptanceAlreadyLive })) { steps[step](); }
+
+  // #4258-shape — THE APPROVAL-TIME PREVENTION-FILING DEFAULT (operator, 2026-09-27). Runs ONLY for the two
+  // targets that just recorded an acceptance above; `changes`/`rearm`/`restamp` never reach it (and
+  // `runApprovalPreventionFiling`'s own `selectApprovalPreventionFindings` call would refuse them too — this
+  // guard just avoids the wasted call). Strictly AFTER the write-order loop above: the approval is already
+  // durable by this line, so nothing below can ever cost it (see that function's own header).
+  if (to === 'accepted' || to === 'clear-human') {
+    runApprovalPreventionFiling({
+      to, repo, pr, headSha, commentBody, prComments, provider, fileApprovalPrevention,
+    });
+  }
 
   // #3949 — fixes three defects the #3867 prep skeptic found in the #3690 v1 cut this replaces:
   //
