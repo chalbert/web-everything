@@ -1625,7 +1625,11 @@ export function planReconcile({
           // that gates it (a reviewed-sha/advisory naming the current head) is exactly what `advisoryCoversHead`
           // just proved absent, so the two can never contradict each other on the same PR.
           const headSha = typeof pr?.headRefOid === 'string' ? pr.headRefOid.trim().toLowerCase() : '';
-          const latest = headSha ? latestAdvisory(pr?.comments) : undefined;
+          // #3383 / PR #2806 review: only a TRUSTED author's advisory counts — `latestAdvisory` itself does no
+          // author check, and WE's PRs are public, so an unfiltered read would let any commenter forge a
+          // `Net basis:` line to suppress this review (naming the live head) or manufacture one (naming another).
+          const trustedComments = Array.isArray(pr?.comments) ? pr.comments.filter(isTrustedMarkerAuthor) : [];
+          const latest = headSha ? latestAdvisory(trustedComments) : undefined;
           const advisoryIsStale = Boolean(latest) && !advisoryCoversHead(latest, headSha);
           if (advisoryIsStale) {
             dispatch.push({
