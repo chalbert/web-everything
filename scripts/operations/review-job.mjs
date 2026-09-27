@@ -86,6 +86,7 @@ import {
 import { assertMainNotStale, dispatchReview, planReviewDispatch } from './review-dispatch.mjs';
 import { runReport } from './completion-cli.mjs';
 import { tryReadCompletion } from './completion-store.mjs';
+import { rateAndRecordReviewJob } from '../conveyor/run-rating.mjs';
 import { recorderFor, setActiveRecorder } from './telemetry-store.mjs';
 import { ACTOR_ENV } from '../lib/review-independence.mjs';
 import { INFRA_RETRY_COOLOFF_MS } from '../conveyor/reconcile-core.mjs';
@@ -570,6 +571,11 @@ if (IS_CLI) {
     try {
       const out = runReviewJob({ pr: flag('pr'), repo: flag('repo') });
       writeAllSync(1, `${JSON.stringify(out)}\n`);
+      // #4075/run-rating slice 1 — mechanical grading for this now-finished job-mode review, read back from
+      // THIS job's own log file (stdout/stderr above were redirected there by `dispatchReviewJob`'s spawn — see
+      // that function's own `openSync(logPath, 'a')`). Best-effort: `rateAndRecordReviewJob` never throws, and
+      // a rating failure must never affect this CLI's own exit code.
+      if (out.sessionSlug) { try { rateAndRecordReviewJob(jobLogPath(out.sessionSlug)); } catch { /* best-effort */ } }
       process.exitCode = out.refused ? 75 : 0;
     } catch (e) {
       writeLineSync(2, `review-job: error: ${String(e?.message ?? e)}`);
