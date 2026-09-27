@@ -37,23 +37,34 @@
  * (an injectable `runJudge` fake stands in) — the shape the operator's own "show me what it would post, don't
  * post" proof needs.
  */
+import { execFileSync } from 'node:child_process';
+import { resolve } from 'node:path';
 import { createGhProvider } from '../lib/review-label-provider.mjs';
 import {
   hasConvertedAdvisoryNote, renderConvertedAdvisoryNote, targetedCheckQuestion,
-  REVIEW_LABELS, hasReviewLabel,
+  REVIEW_LABELS, hasReviewLabel, extractTestGamingPaths, narrowTargetedCheckOutcome,
+  planConvertSupersededVerdict,
 } from '../lib/review-escalation.mjs';
 import { planAdvisoryLabels } from '../lib/advisory-labels.mjs';
 import { judgeSpawn } from '../lib/judge-spawn.mjs';
+import { resolveNetDiffBasis } from '../merge-ai-prs.mjs';
+import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 
 /** The forced JSON shape the targeted-check judge's answer must satisfy (#xconv1). One verdict, one citing
  *  note — never a re-derivation of `review-core.mjs`'s own multi-finding panel shape, because this is
- *  deliberately NOT a panel: one question, one answer. */
+ *  deliberately NOT a panel: one question, one answer.
+ *
+ *  #xconv1-evidence (chalbert/web-everything#2766/#2767 misfire) — `inconclusive` was added as a THIRD allowed
+ *  verdict alongside `accept`/`changes`: the judge must be able to say "I cannot decide this from what I was
+ *  given" without that reading as either a clean clearance or a manufactured finding. See
+ *  `we:scripts/lib/review-escalation.mjs#TARGETED_CHECK_OUTCOMES` for why `inconclusive` deliberately maps to
+ *  NO `advisory:*` label at all. */
 export const TARGETED_CHECK_SHAPE = Object.freeze({
   type: 'object',
   additionalProperties: false,
   required: ['verdict', 'note'],
   properties: {
-    verdict: { enum: ['accept', 'changes'] },
+    verdict: { enum: ['accept', 'changes', 'inconclusive'] },
     note: { type: 'string', minLength: 1 },
   },
 });
@@ -68,7 +79,14 @@ export const TARGETED_CHECK_BUDGET_USD = 0.5;
 
 /** Pure: the mandate (system-prompt suffix) the targeted-check juror receives. Names the question, states the
  *  forced shape, and is explicit that this is NOT a re-review of the whole diff — a tool-free juror judging a
- *  narrow prompt drifting into "let me review everything" is exactly the failure a narrow mandate forecloses. */
+ *  narrow prompt drifting into "let me review everything" is exactly the failure a narrow mandate forecloses.
+ *
+ *  #xconv1-evidence — the OLD text here told the judge that insufficient material is itself a `changes`
+ *  answer ("say so in `note` ... that is a `changes` answer, not a request for more input"). That is what the
+ *  live #2766/#2767 misfire actually did: the judge was given no diff at all, correctly said so in its note,
+ *  and then — per this exact instruction — answered `changes` anyway, which read as a genuine finding and
+ *  burned three advisory-fix rounds on a defect that never existed. The corrected instruction below is the
+ *  opposite: insufficient material is `inconclusive`, never a guess in either direction. */
 export function buildTargetedCheckMandate(escalation) {
   return [
     'You are a narrow, single-question judge (#xconv1). A PR already carries a completed jury verdict that',
@@ -77,47 +95,121 @@ export function buildTargetedCheckMandate(escalation) {
     '',
     targetedCheckQuestion(escalation),
     '',
-    'Answer ONLY the forced JSON shape: `verdict` (`accept` or `changes`) and `note` (one or two sentences,',
-    'citing the specific evidence named in the escalation reason). Do not ask for more material — decide from',
-    'what you are given, and say so in `note` if the material is genuinely insufficient (that is a `changes`',
-    'answer, not a request for more input).',
+    'Answer ONLY the forced JSON shape: `verdict` (`accept`, `changes`, or `inconclusive`) and `note` (one or',
+    'two sentences, citing the specific evidence you were given). Decide from what you are given — do not ask',
+    'for more material. If you ARE given the actual diff for the file(s) the escalation reason names, decide',
+    '`accept` or `changes` from it. If you are NOT given that diff (the material below says so explicitly),',
+    'you MUST answer `inconclusive` — say so plainly in `note`. Never answer `changes` or `accept` as a stand-in',
+    'for "I could not verify this."',
   ].join('\n');
 }
 
-/** Pure: the judged material (stdin) — the escalation's own reason plus the prior (superseded) verdict, quoted
- *  verbatim. Deliberately NOT a fresh diff fetch: the escalation reason already names the specific evidence
- *  (e.g. the removed test file(s)), and re-fetching the diff here would make this the very panel re-run
- *  #xconv1 exists to avoid. */
-export function buildTargetedCheckInput({ acceptComment, escalation } = {}) {
-  return [
-    '## Escalation reason', '',
-    escalation?.reasonText ?? '', '',
+/** Pure: the judged material (stdin) — the escalation's own reason, the named file(s)' OWN net diff when it
+ *  could be fetched (#xconv1-evidence — never the whole-PR diff, only the file(s) the escalation itself names,
+ *  which keeps this a narrow targeted check rather than the panel re-run #xconv1 exists to avoid), and the
+ *  prior (superseded) verdict, quoted verbatim. `evidence` is the diff TEXT (or `''`/omitted when none could be
+ *  fetched) — the caller ({@link resolveTargetedCheckEvidence}) decides fetchability; this function only renders
+ *  whatever it is handed, so it stays a pure string-builder with no IO of its own. */
+export function buildTargetedCheckInput({ acceptComment, escalation, evidence } = {}) {
+  const sections = ['## Escalation reason', '', escalation?.reasonText ?? '', ''];
+  if (typeof evidence === 'string' && evidence.trim().length > 0) {
+    sections.push(
+      "## Net diff of the file(s) the escalation reason names (this PR's own base...head diff, those files only)",
+      '', '```diff', evidence, '```', '',
+    );
+  } else if (escalation && escalation.kind === 'test-gaming') {
+    sections.push(
+      '## Diff evidence', '',
+      'No diff could be fetched for the file(s) the escalation reason names in this run. You do NOT have the',
+      'actual diff — answer `inconclusive`, not `changes` or `accept`, and say so in `note`.', '',
+    );
+  }
+  sections.push(
     '## Prior jury verdict (accepted, now superseded by the escalation above — quoted, not re-run)', '',
     acceptComment?.body ?? '',
-  ].join('\n');
+  );
+  return sections.join('\n');
+}
+
+/**
+ * #xconv1-evidence — IO: fetch the NET diff (base...head, `we:scripts/merge-ai-prs.mjs#resolveNetDiffBasis`'s
+ * same fork-point basis) of ONLY the file(s) named, never the whole PR. Pure given an injected `exec`
+ * (`(cmd, args, opts) => string`, default the real `execFileSync`) — a test fakes `exec` and asserts the exact
+ * argv, the same discipline `computeNetDiffText`/`computeNetDiffPaths` (`merge-ai-prs.mjs`) already use.
+ * `scored:false` (with `text:''`) on ANY failure — an unresolvable basis, a failed `git diff`, no paths given —
+ * so a caller never mistakes "could not fetch" for "the file has no changes".
+ * @param {{exec?:Function, remote?:string, base?:string, rev:string, paths:string[]}} o
+ * @returns {{text:string, scored:boolean, reason?:string}}
+ */
+export function fetchTestGamingDiffEvidence({
+  exec = execFileSync, remote = 'origin', base = 'main', rev, paths = [],
+} = {}) {
+  if (typeof exec !== 'function' || !rev || !Array.isArray(paths) || paths.length === 0) {
+    return { text: '', scored: false, reason: 'no-paths' };
+  }
+  const basis = resolveNetDiffBasis({ exec, remote, base, rev });
+  if (!basis.ok) return { text: '', scored: false, reason: basis.reason };
+  try {
+    const text = String(exec('git', [
+      'diff', '--no-ext-diff', '--end-of-options', basis.diffBase, basis.candidate, '--', ...paths,
+    ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }) || '');
+    return { text, scored: true, base: basis.diffBase, rev: basis.candidate };
+  } catch {
+    return { text: '', scored: false, reason: 'diff-failed' };
+  }
+}
+
+/**
+ * #xconv1-evidence — PURE ORCHESTRATION (given an injected `fetchEvidence`): does this escalation NEED diff
+ * evidence, and if so, could it be fetched? Only `kind:'test-gaming'` requires it (manifest-tamper names the
+ * exact field to re-check, and heal-mutual-exclusivity is a comment-history question — neither needs a diff
+ * fetch; #xconv1's own original design reasoning still holds for those two). Returns
+ * `{required, available, text, note}` — `required && !available` is the ONE shape that must force `inconclusive`
+ * (see {@link dispatchConvertAdvisory}), never a judge guess.
+ * @param {{escalation?: object, headSha?: string, fetchEvidence?: Function}} o
+ * @returns {Promise<{required: boolean, available: boolean, text: string, note?: string}>}
+ */
+export async function resolveTargetedCheckEvidence({ escalation, headSha, fetchEvidence = fetchTestGamingDiffEvidence } = {}) {
+  if (!escalation || escalation.kind !== 'test-gaming') return { required: false, available: false, text: '' };
+  const paths = extractTestGamingPaths(escalation.reasonText);
+  if (paths.length === 0) {
+    return {
+      required: true, available: false, text: '',
+      note: 'no test file path could be parsed from the escalation reason',
+    };
+  }
+  const result = await fetchEvidence({ rev: headSha, paths });
+  const available = !!(result && result.scored && typeof result.text === 'string' && result.text.trim().length > 0);
+  return {
+    required: true, available, text: available ? result.text : '',
+    note: available ? undefined
+      : `no diff evidence could be fetched for ${paths.join(', ')} (${result?.reason || 'no-diff'})`,
+  };
 }
 
 /**
  * Run the ONE targeted-check judge seat. Thin wrapper over `judgeSpawn` — injectable as `judge` so a caller (or
- * a test) substitutes a fake with no subprocess at all. Returns `{verdict, note}`, always one of the two
- * allowed verdicts (`judgeSpawn`'s forced shape already guarantees this; the `=== 'changes'` narrowing is
- * belt-and-braces against a malformed injected fake, never a real disagreement with the CLI's own validation).
- * @param {{acceptComment?: object, escalation?: object, runId?: string, judge?: Function}} o
- * @returns {Promise<{verdict: ('accept'|'changes'), note: string}>}
+ * a test) substitutes a fake with no subprocess at all. Returns `{verdict, note}`, one of the three allowed
+ * verdicts (`judgeSpawn`'s forced shape already guarantees this; {@link narrowTargetedCheckOutcome} is
+ * belt-and-braces against a malformed injected fake, never a real disagreement with the CLI's own validation —
+ * #xconv1-evidence: this used to collapse EVERY non-`changes` value, including a genuine `inconclusive`, into
+ * `accept`; it now preserves all three).
+ * @param {{acceptComment?: object, escalation?: object, runId?: string, evidence?: string, judge?: Function}} o
+ * @returns {Promise<{verdict: ('accept'|'changes'|'inconclusive'), note: string}>}
  */
 export async function runTargetedCheck({
-  acceptComment, escalation, runId, judge = judgeSpawn,
+  acceptComment, escalation, runId, evidence, judge = judgeSpawn,
 } = {}) {
   const result = await judge({
     mandate: buildTargetedCheckMandate(escalation),
-    input: buildTargetedCheckInput({ acceptComment, escalation }),
+    input: buildTargetedCheckInput({ acceptComment, escalation, evidence }),
     shape: TARGETED_CHECK_SHAPE,
     effort: TARGETED_CHECK_EFFORT,
     budget: TARGETED_CHECK_BUDGET_USD,
     runId,
     lens: 'xconv1-targeted-check',
   });
-  const verdict = result?.value?.verdict === 'changes' ? 'changes' : 'accept';
+  const verdict = narrowTargetedCheckOutcome(result?.value?.verdict);
   const note = typeof result?.value?.note === 'string' ? result.value.note : '';
   return { verdict, note };
 }
@@ -152,15 +244,28 @@ export function planConvertAdvisoryEffects({
  *
  * IDEMPOTENT: a head that already carries the converted note (`hasConvertedAdvisoryNote`) is a no-op, checked
  * BEFORE the judge is ever called — a re-tick before the label write lands never re-spawns the judge either.
+ * `force` (default `false`, never set by a production tick) bypasses that idempotency check for exactly one
+ * call — #xconv1-evidence's own repair mechanism: an operator (or a one-off script) explicitly re-running this
+ * for a PR whose EXISTING converted note was produced with no diff evidence (this file's pre-fix behaviour),
+ * to get a corrected note posted through the SAME mechanism rather than by hand-editing the thread.
+ *
+ * #xconv1-evidence — EVIDENCE GATE, ahead of the judge call: for a `kind:'test-gaming'` escalation,
+ * {@link resolveTargetedCheckEvidence} decides whether the named file(s)' own diff could be fetched. When it is
+ * REQUIRED and NOT available, this function never spends a judge call on a question it already knows cannot be
+ * answered — it deterministically records `{verdict:'inconclusive', note}` itself (an `inconclusive` outcome
+ * applies NO `advisory:*` label, `we:scripts/lib/advisory-labels.mjs#labelForOutcome` returning `null` for it —
+ * so this can never manufacture the `advisory:changes` that burned three advisory-fix rounds on #2766/#2767 for
+ * a defect that never existed). `fetchEvidence` is injectable (default {@link fetchTestGamingDiffEvidence}, real
+ * `git` IO) so a test never shells out.
  * @param {{prNumber: number, headSha: string, acceptComment: object, escalation: object}} d - one
  *   `plan.dispatch` entry with `kind:'convert-advisory'`.
- * @param {{repo: string, provider?: object, runJudge?: Function, dryRun?: boolean,
- *   comments?: (Array|null), labels?: (Array|null)}} o
+ * @param {{repo: string, provider?: object, runJudge?: Function, fetchEvidence?: Function, dryRun?: boolean,
+ *   force?: boolean, comments?: (Array|null), labels?: (Array|null)}} o
  * @returns {Promise<object>}
  */
 export async function dispatchConvertAdvisory(d, {
-  repo, provider = createGhProvider(), runJudge = runTargetedCheck, dryRun = false,
-  comments = null, labels = null,
+  repo, provider = createGhProvider(), runJudge = runTargetedCheck, fetchEvidence = fetchTestGamingDiffEvidence,
+  dryRun = false, force = false, comments = null, labels = null,
 } = {}) {
   const prNumber = Number(d?.prNumber);
   // A caller that already read this tick's PR state (the daemon's own #4133 shared-read) hands it in; only a
@@ -170,13 +275,19 @@ export async function dispatchConvertAdvisory(d, {
   const liveComments = comments ?? state?.comments ?? [];
   const liveLabels = labels ?? state?.labels ?? [];
 
-  if (hasConvertedAdvisoryNote(liveComments, d?.headSha)) {
+  if (!force && hasConvertedAdvisoryNote(liveComments, d?.headSha)) {
     return { prNumber, headSha: d?.headSha, skipped: 'already-converted' };
   }
 
-  const targetedCheckAnswer = await runJudge({
-    acceptComment: d?.acceptComment, escalation: d?.escalation, runId: `convert-advisory-${prNumber}`,
+  const evidence = await resolveTargetedCheckEvidence({
+    escalation: d?.escalation, headSha: d?.headSha, fetchEvidence,
   });
+  const targetedCheckAnswer = (evidence.required && !evidence.available)
+    ? { verdict: 'inconclusive', note: evidence.note }
+    : await runJudge({
+      acceptComment: d?.acceptComment, escalation: d?.escalation, runId: `convert-advisory-${prNumber}`,
+      evidence: evidence.text,
+    });
   const plan = planConvertAdvisoryEffects({
     prNumber, repo, headSha: d?.headSha, acceptComment: d?.acceptComment, escalation: d?.escalation,
     targetedCheckAnswer, currentLabels: liveLabels,
@@ -192,4 +303,60 @@ export async function dispatchConvertAdvisory(d, {
     provider.setLabels(repo, prNumber, { add: plan.addLabel || undefined, remove: plan.removeLabels });
   }
   return { prNumber, headSha: d?.headSha, ...plan, targetedCheckAnswer, posted: true };
+}
+
+// ── IO SHELL (runs only as a CLI — every export above stays side-effect-free on import) ───────────────────────
+// #xconv1-evidence — the operator-facing "not by hand" repair path: re-run the whole convert-advisory arc for
+// ONE PR from its LIVE state. `--dry-run` (no `gh` write, shows the exact prompt/answer/plan) is the read-only
+// proof this fix's own evidence needs; `--force` bypasses `hasConvertedAdvisoryNote`'s idempotency for exactly
+// one call, so a PR whose EXISTING converted note was produced with no diff evidence (this file's pre-fix
+// behaviour) gets a CORRECTED note posted through the same mechanism, never by editing the thread by hand.
+// Derives the `kind:'convert-advisory'` dispatch shape itself via `planConvertSupersededVerdict` — the same
+// pure decision `we:scripts/conveyor/reconcile-core.mjs#planReconcile` uses — off one fresh `gh pr view`, so this
+// CLI never needs the whole reconcile pass just to re-check one already-known PR.
+const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(new URL(import.meta.url).pathname);
+if (IS_CLI) {
+  const argv = process.argv.slice(2);
+  const flags = {};
+  const positionals = [];
+  for (const a of argv) {
+    if (a.startsWith('--')) {
+      const eq = a.indexOf('=');
+      if (eq === -1) flags[a.slice(2)] = true;
+      else flags[a.slice(2, eq)] = a.slice(eq + 1);
+    } else positionals.push(a);
+  }
+  const fail = (m) => {
+    process.stderr.write(`✗ ${m}\n`);
+    process.exit(1);
+  };
+  const pr = Number(positionals[0]);
+  if (!Number.isInteger(pr) || pr <= 0 || typeof flags.repo !== 'string') {
+    fail('usage: convert-advisory-dispatch.mjs <pr> --repo=<owner/name> [--dry-run] [--force]');
+  }
+  const repo = flags.repo;
+  let prState;
+  try {
+    const raw = execFileSync('gh', [
+      'pr', 'view', String(pr), '--repo', repo, '--json', 'headRefOid,comments,labels',
+    ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: resolveChildTimeoutMs() });
+    prState = JSON.parse(raw);
+  } catch (e) {
+    fail(`could not read PR #${pr} (${repo}): ${String(e.message || e).split('\n')[0]}`);
+  }
+  const headSha = String(prState.headRefOid || '').toLowerCase();
+  const conversion = planConvertSupersededVerdict({ headSha, reviewedSha: headSha, comments: prState.comments });
+  if (!conversion.convert) {
+    fail(`PR #${pr} is not in the convert-advisory shape right now (no accepted verdict superseded by a later `
+      + 'escalation at this head — nothing for this CLI to re-check)');
+  }
+  const entry = {
+    prNumber: pr, headSha, acceptComment: conversion.acceptComment, escalation: conversion.escalation,
+  };
+  dispatchConvertAdvisory(entry, {
+    repo, dryRun: !!flags['dry-run'], force: !!flags.force,
+    comments: prState.comments, labels: prState.labels,
+  }).then((result) => {
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+  }).catch((e) => fail(String((e && e.message) || e).split('\n')[0]));
 }
