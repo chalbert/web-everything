@@ -75,8 +75,14 @@ const REPO_ROOT = resolve(__dirname, '..', '..');
 // ── DECLARED CONSTANTS ──────────────────────────────────────────────────────────────────────────────────────────
 
 /** Stamped on every row this module writes — bump when the rubric's weights below change (Fork 3 discipline,
- *  same as `run-scorecard-store.mjs`: a rubric change never re-scores old history). */
-export const RUBRIC_VERSION = 'run-rating-mechanical.2';
+ *  same as `run-scorecard-store.mjs`: a rubric change never re-scores old history). `.3`/`.4` are same-day
+ *  correctness bumps, not rubric-philosophy changes — all found and fixed before `.2`'s numbers were ever
+ *  reported anywhere: `.3` fixed `computeTimeShares` losing the leading/trailing gap and the per-demand rollup
+ *  printing an unmeasured total as a bare `$0.00`/`0 tok`; `.4` fixed the backfill script's own review-juror
+ *  join resolving `.operations/runs/` relative to ITS OWN checkout (this lane clone) instead of the daemon
+ *  clone that actually ran the review — silently failing nearly every join in `.3`'s own backfill. Each bump
+ *  exists so corrected numbers are never silently mixed with a prior version's rows in the same store. */
+export const RUBRIC_VERSION = 'run-rating-mechanical.4';
 
 /** The four mechanical criteria {@link toScorecardRow} always evaluates (guard blocks, non-guard tool errors,
  *  repeated identical calls, test/gate reruns) — `criteriaEvaluated` on every row this module appends. */
@@ -284,6 +290,15 @@ export function sessionNameFromLines(lines) {
 /** First and last parseable `timestamp` across every line — the session's own wall-clock span, in ms. `null`
  *  when fewer than two timestamps are found (nothing to measure). */
 export function computeWallMs(lines) {
+  const bounds = sessionTimeBounds(lines);
+  return bounds.startTs !== null && bounds.endTs !== null && bounds.endTs >= bounds.startTs ? bounds.endTs - bounds.startTs : null;
+}
+
+/** The session's own absolute `{startTs, endTs}` (first/last parseable `timestamp` across every line) —
+ *  {@link computeWallMs}'s own scan, exposed separately so a caller (namely {@link rateTranscript}) can hand
+ *  the ABSOLUTE start to {@link computeTimeShares} and correctly bound the leading/trailing gap, not just the
+ *  duration. `null`/`null` with fewer than two timestamps found. */
+export function sessionTimeBounds(lines) {
   let min = null;
   let max = null;
   for (const line of Array.isArray(lines) ? lines : []) {
@@ -292,7 +307,7 @@ export function computeWallMs(lines) {
     if (min === null || ts < min) min = ts;
     if (max === null || ts > max) max = ts;
   }
-  return min !== null && max !== null && max >= min ? max - min : null;
+  return { startTs: min, endTs: max };
 }
 
 /**
@@ -374,7 +389,7 @@ export function classifyToolCall(name, input) {
  * @returns {{testsMs:number, ghMs:number, gitMs:number, editsMs:number, opsMs:number, otherMs:number,
  *   reasoningMs:number, idleMs:number, shares:Record<string, number|null>}}
  */
-export function computeTimeShares(events, turns, wallMs) {
+export function computeTimeShares(events, turns, wallMs, sessionStartTs = null) {
   const byCategory = { 'tests-gates': 0, gh: 0, git: 0, edits: 0, 'platform-ops': 0, other: 0 };
   const known = (Array.isArray(events) ? events : []).filter((e) => typeof e.durationMs === 'number');
   for (const e of known) byCategory[e.category] = (byCategory[e.category] ?? 0) + e.durationMs;
@@ -393,21 +408,36 @@ export function computeTimeShares(events, turns, wallMs) {
   const busyMs = merged.reduce((sum, [s, e]) => sum + (e - s), 0);
   const leftoverMs = typeof wallMs === 'number' ? Math.max(0, wallMs - busyMs) : null;
 
-  // Gaps = the complement of the busy union. For each gap, a real turn with thinkingTokens>0 landing inside it
-  // marks the WHOLE gap as reasoning; otherwise idle. Turns are cheap (usually few) so a linear scan is fine.
+  // Gaps = the complement of the busy union, ACROSS THE WHOLE SESSION SPAN — not just between tool calls.
+  // CONFIRMED review finding (antigravity-review/Logic, PR #2811): the earlier version only ever looked
+  // BETWEEN merged busy intervals, so the gap before the FIRST tool call and after the LAST one (routinely
+  // most of a session's wall time — e.g. a 20-minute session with one 2-minute tool call at the 10-minute
+  // mark loses all 18 remaining minutes) was never counted as either idle or reasoning at all. Fixed by
+  // seeding the walk with the session's own absolute start (`sessionStartTs`, when the caller has it — see
+  // `rateTranscript`) and closing it out with an explicit trailing gap to the session's absolute end.
   let reasoningMs = 0;
   let idleMs = 0;
   if (leftoverMs !== null) {
     const gapBounds = [];
-    let cursor = null;
-    for (const [s, e] of merged) {
-      if (cursor !== null && s > cursor) gapBounds.push([cursor, s]);
-      cursor = cursor === null ? e : Math.max(cursor, e);
+    if (sessionStartTs !== null && typeof wallMs === 'number') {
+      const sessionEndTs = sessionStartTs + wallMs;
+      let cursor = sessionStartTs;
+      for (const [s, e] of merged) {
+        if (s > cursor) gapBounds.push([cursor, s]);
+        cursor = Math.max(cursor, e);
+      }
+      if (cursor < sessionEndTs) gapBounds.push([cursor, sessionEndTs]);
+    } else {
+      // No absolute session bounds given (an older/direct call, or bounds genuinely unavailable) — fall back
+      // to the previous, KNOWN-INCOMPLETE behavior (between-call gaps only, or one bulk gap with no busy
+      // intervals at all) rather than fabricate bounds this function was never given.
+      let cursor = null;
+      for (const [s, e] of merged) {
+        if (cursor !== null && s > cursor) gapBounds.push([cursor, s]);
+        cursor = cursor === null ? e : Math.max(cursor, e);
+      }
+      if (merged.length === 0 && typeof wallMs === 'number') gapBounds.push([null, null]);
     }
-    // No busy intervals at all → the whole wall span is one gap (nothing to bound it with beyond wallMs itself,
-    // which the caller already has — we simply can't locate it on the absolute timeline, so treat it as one
-    // gap covering everything and let the thinkingTokens check below decide reasoning vs idle for all of it).
-    if (merged.length === 0 && typeof wallMs === 'number') gapBounds.push([null, null]);
     const realTurns = (Array.isArray(turns) ? turns : []).filter((t) => t.ts !== null);
     for (const [gs, ge] of gapBounds) {
       const span = gs === null ? leftoverMs : Math.max(0, ge - gs);
@@ -767,8 +797,9 @@ export function rateTranscript(lines, {
 } = {}) {
   const turns = extractTurns(lines);
   const events = pairToolEvents(lines);
-  const wallMs = computeWallMs(lines);
-  const time = computeTimeShares(events, turns, wallMs);
+  const bounds = sessionTimeBounds(lines);
+  const wallMs = bounds.startTs !== null && bounds.endTs !== null && bounds.endTs >= bounds.startTs ? bounds.endTs - bounds.startTs : null;
+  const time = computeTimeShares(events, turns, wallMs, bounds.startTs);
   const guardBlocks = countGuardBlocks(events);
   const errors = countErrors(events);
   const repeatedCalls = countRepeatedCalls(events);
@@ -1124,19 +1155,36 @@ export function rollupByDemand(rows, { sizeForItem = () => null } = {}) {
     const g = groups.get(key);
     g.sessions += 1;
     const phase = phaseForKind(row.dispatchKind ?? row.kind);
-    if (!g.byPhase[phase]) g.byPhase[phase] = { sessions: 0, tokensIn: 0, tokensOut: 0, tokensCacheRead: 0, tokensCacheWrite: 0, costUsd: 0, unknownCost: false };
+    if (!g.byPhase[phase]) {
+      g.byPhase[phase] = {
+        sessions: 0, tokensIn: 0, tokensOut: 0, tokensCacheRead: 0, tokensCacheWrite: 0, costUsd: 0,
+        unknownCost: false, unknownTokens: false, unknownSessions: 0,
+      };
+    }
     const p = g.byPhase[phase];
     p.sessions += 1;
     const t = row.tokens;
     if (t) { p.tokensIn += t.in ?? 0; p.tokensOut += t.out ?? 0; p.tokensCacheRead += t.cacheRead ?? 0; p.tokensCacheWrite += t.cacheWrite ?? 0; }
-    if (typeof row.costUsd === 'number') p.costUsd += row.costUsd; else p.unknownCost = true;
+    else { p.unknownTokens = true; p.unknownSessions += 1; }
+    if (typeof row.costUsd === 'number') p.costUsd += row.costUsd;
+    else p.unknownCost = true;
+    if (row.costUsdPartial === true) p.unknownCost = true;
   }
   return [...groups.values()].map((g) => {
-    const totalTokens = Object.values(g.byPhase).reduce((s, p) => s + p.tokensIn + p.tokensOut + p.tokensCacheRead + p.tokensCacheWrite, 0);
-    const totalCostUsd = Object.values(g.byPhase).reduce((s, p) => s + p.costUsd, 0);
+    const phases = Object.values(g.byPhase);
+    const totalTokens = phases.reduce((s, p) => s + p.tokensIn + p.tokensOut + p.tokensCacheRead + p.tokensCacheWrite, 0);
+    const totalCostUsd = phases.reduce((s, p) => s + p.costUsd, 0);
     const size = g.item ? sizeForItem(g.item) : (g.pr ? sizeForItem(g.pr) : null);
+    // A demand's total is INCOMPLETE (never silently presented as the whole truth) whenever ANY phase
+    // couldn't measure every session's tokens/cost — e.g. a job-log-only review row with no run-record join.
+    // Live-caught in review of this very PR: printing a bare "0 tok, $0.00" for an all-unmeasured demand read
+    // as "this cost nothing", not "this was never measured" — the exact confusion the rest of this module
+    // works hard everywhere else to avoid.
+    const hasUnknownTokens = phases.some((p) => p.unknownTokens);
+    const hasUnknownCost = phases.some((p) => p.unknownCost);
+    const unmeasuredSessions = phases.reduce((s, p) => s + p.unknownSessions, 0);
     return {
-      ...g, totalTokens, totalCostUsd,
+      ...g, totalTokens, totalCostUsd, hasUnknownTokens, hasUnknownCost, unmeasuredSessions,
       size: Number.isFinite(size) && size > 0 ? size : null,
       tokensPerStoryPoint: Number.isFinite(size) && size > 0 ? totalTokens / size : null,
     };
@@ -1346,7 +1394,26 @@ function listJsonlRecursive(dirPath, depth = 0) {
  * straight into {@link rollupByDemand}'s `review` phase.
  * @returns {{claudeRows: object[], nonClaudeRows: object[]}}
  */
-export function scanReviewJurorUsage({ runsDir = resolve(REPO_ROOT, '.operations', 'runs'), sinceMs = null } = {}) {
+/** `~/workspace` (or `WE_WORKSPACE_ROOT` for tests) — the ONE definition of "every checkout this machine might
+ *  have" that {@link scanReviewJurorUsage} and `we:scripts/conveyor/backfill-2026-09-27-run-rating-slice1.mjs`
+ *  both resolve through (that backfill script mirrors this same formula inline; keep them identical). */
+export function defaultWorkspaceRoot(env = process.env) {
+  return env?.WE_WORKSPACE_ROOT || resolve(homedir(), 'workspace');
+}
+
+/** Every checkout under `workspaceRoot` that has its own `.operations/<subdir>` — the multi-clone reality
+ *  `we:scripts/lib/constellation-repos.mjs` already documents: a daemon's run records / review-job logs live
+ *  wherever THAT daemon's clone is, never only under one canonically-named directory. */
+function listWorkspaceOperationsDirs(workspaceRoot, subdir) {
+  let names;
+  try { names = readdirSync(workspaceRoot, { withFileTypes: true }); } catch { return []; }
+  return names
+    .filter((d) => d.isDirectory())
+    .map((d) => join(workspaceRoot, d.name, '.operations', subdir))
+    .filter((p) => existsSync(p));
+}
+
+function readReviewRunsIn(runsDir, sinceMs) {
   let names;
   try { names = readdirSync(runsDir); } catch { return { claudeRows: [], nonClaudeRows: [] }; }
   const claudeRows = [];
@@ -1375,6 +1442,28 @@ export function scanReviewJurorUsage({ runsDir = resolve(REPO_ROOT, '.operations
       };
       (priced ? claudeRows : nonClaudeRows).push(row);
     }
+  }
+  return { claudeRows, nonClaudeRows };
+}
+
+/**
+ * Read every `.operations/runs/review-pr-*.json` judge-panel run record modified since `sinceMs`, ACROSS EVERY
+ * checkout under `workspaceRoot` (not just one directory) — a review's run record lives in whichever daemon
+ * clone actually ran it (same multi-clone reality `we:scripts/conveyor/backfill-2026-09-27-run-rating-slice1.mjs
+ * #candidateReviewJobDirs` already accounts for; live-caught: a single-`runsDir` default here resolved to THIS
+ * module's own checkout and silently found ~none of the real records on any other clone). `runsDirs` (an
+ * explicit array) overrides the whole-workspace scan for a caller — namely `we:scripts/conveyor/run-rating.mjs`
+ * unit tests — that wants one exact directory instead.
+ * @returns {{claudeRows: object[], nonClaudeRows: object[]}}
+ */
+export function scanReviewJurorUsage({ runsDirs = null, workspaceRoot = defaultWorkspaceRoot(), sinceMs = null } = {}) {
+  const dirs = runsDirs ?? listWorkspaceOperationsDirs(workspaceRoot, 'runs');
+  const claudeRows = [];
+  const nonClaudeRows = [];
+  for (const dir of dirs) {
+    const found = readReviewRunsIn(dir, sinceMs);
+    claudeRows.push(...found.claudeRows);
+    nonClaudeRows.push(...found.nonClaudeRows);
   }
   return { claudeRows, nonClaudeRows };
 }
@@ -1552,7 +1641,11 @@ async function main() {
   process.stdout.write('  per-demand tokens:\n');
   for (const d of report.demand) {
     const sp = d.tokensPerStoryPoint !== null ? d.tokensPerStoryPoint.toFixed(0) : 'n/a';
-    process.stdout.write(`    ${d.key}: ${d.totalTokens} tok, $${d.totalCostUsd.toFixed(2)}, ${d.sessions} session(s), tokens/pt=${sp}\n`);
+    // NEVER print a bare total for a demand that couldn't be fully measured — that reads as "this cost
+    // nothing", not "this was never measured" (the confirmed review finding this line exists to fix).
+    const tokLabel = d.hasUnknownTokens ? `${d.totalTokens}+ tok (partial — ${d.unmeasuredSessions} unmeasured session(s))` : `${d.totalTokens} tok`;
+    const costLabel = d.hasUnknownCost ? `$${d.totalCostUsd.toFixed(2)}+ (partial)` : `$${d.totalCostUsd.toFixed(2)}`;
+    process.stdout.write(`    ${d.key}: ${tokLabel}, ${costLabel}, ${d.sessions} session(s), tokens/pt=${sp}\n`);
   }
 }
 

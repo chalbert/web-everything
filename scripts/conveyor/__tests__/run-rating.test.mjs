@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { scrubReasons } from '../../lib/secret-scrub.mjs';
 import {
   RUBRIC_VERSION, GUARD_BLOCKS_TARGET, BASELINE_WALL_MS_BY_KIND, REFERENCE_STORY_SIZE,
-  isSyntheticModel, extractTurns, sessionNameFromLines, computeWallMs, pairToolEvents,
+  isSyntheticModel, extractTurns, sessionNameFromLines, computeWallMs, sessionTimeBounds, pairToolEvents,
   classifyToolCall, computeTimeShares, countGuardBlocks, countErrors, countRepeatedCalls, countTestReruns,
   sumTokens, dominantModel, computeCostUsd, computeCacheHitRatio,
   classifyOutcome, gradeRun, worseGrade, baselineWallMs, outcomeFromTranscriptEvents,
@@ -176,6 +176,44 @@ describe('computeTimeShares', () => {
     const time = computeTimeShares(pairToolEvents(lines), extractTurns(lines), computeWallMs(lines));
     expect(time.idleMs).toBe(1000);
     expect(time.reasoningMs).toBe(0);
+  });
+
+  // Regression (confirmed live review finding, antigravity-review/Logic, PR #2811): the leading gap (before
+  // the first tool call) and trailing gap (after the last one) were never bounded at all without an explicit
+  // `sessionStartTs` — a 20-minute session with one 2-minute tool call at the 10-minute mark lost all 18
+  // other minutes from BOTH idle and reasoning, and every category share silently failed to sum to ~1.0.
+  it('covers the gap BEFORE the first tool call and AFTER the last one when sessionStartTs is given', () => {
+    const t0 = Date.parse('2026-09-27T10:00:00.000Z');
+    const min = 60_000;
+    const lines = [
+      assistantLine({ ts: t0, usage: usage({ thinking: 50 }) }), // 10 min of reasoning before the first call
+      assistantLine({ ts: t0 + 10 * min, content: [toolUse('a', 'Bash', { command: 'ls' })] }),
+      userLine({ ts: t0 + 12 * min, content: [toolResult('a')] }), // the one 2-minute tool call
+      assistantLine({ ts: t0 + 20 * min, usage: usage({ thinking: 0 }) }), // 8 min idle after, to the session end
+    ];
+    const events = pairToolEvents(lines);
+    const turns = extractTurns(lines);
+    const wallMs = computeWallMs(lines);
+    const bounds = sessionTimeBounds(lines);
+    const time = computeTimeShares(events, turns, wallMs, bounds.startTs);
+    expect(time.reasoningMs).toBe(10 * min); // the leading gap, no longer lost
+    expect(time.idleMs).toBe(8 * min); // the trailing gap, no longer lost
+    expect(time.otherMs).toBe(2 * min); // the one Bash call in between
+    const shareSum = Object.values(time.shares).reduce((s, v) => s + (v ?? 0), 0);
+    expect(shareSum).toBeCloseTo(1, 5); // every ms of wallMs now lands in exactly one bucket
+  });
+  it('without sessionStartTs, falls back to the OLD (documented-incomplete) between-calls-only behavior', () => {
+    const t0 = Date.parse('2026-09-27T10:00:00.000Z');
+    const min = 60_000;
+    const lines = [
+      assistantLine({ ts: t0, usage: usage({ thinking: 50 }) }),
+      assistantLine({ ts: t0 + 10 * min, content: [toolUse('a', 'Bash', { command: 'ls' })] }),
+      userLine({ ts: t0 + 12 * min, content: [toolResult('a')] }),
+      assistantLine({ ts: t0 + 20 * min, usage: usage({ thinking: 0 }) }),
+    ];
+    const time = computeTimeShares(pairToolEvents(lines), extractTurns(lines), computeWallMs(lines)); // no 4th arg
+    expect(time.reasoningMs).toBe(0); // the old, known-incomplete behavior — no bound to locate the leading gap
+    expect(time.idleMs).toBe(0);
   });
 });
 
@@ -495,6 +533,26 @@ describe('rollupByDemand', () => {
     const [noSize] = rollupByDemand(rows, { sizeForItem: () => null });
     expect(noSize.tokensPerStoryPoint).toBeNull();
   });
+
+  // Regression (confirmed live review finding, codex-correctness, PR #2811): a demand made ENTIRELY of
+  // job-log-only review rows (tokens:null) printed "0 tok, $0.00" — indistinguishable from "this genuinely
+  // cost nothing". `hasUnknownTokens`/`hasUnknownCost`/`unmeasuredSessions` let a reader (the CLI) tell the
+  // two apart.
+  it('flags hasUnknownTokens/hasUnknownCost rather than silently totalling an unmeasured row as zero', () => {
+    const rows = [{ pr: 99, dispatchKind: 'review', tokens: null, costUsd: null, dataQuality: 'job-log-only' }];
+    const [demand] = rollupByDemand(rows);
+    expect(demand).toMatchObject({ totalTokens: 0, totalCostUsd: 0, hasUnknownTokens: true, hasUnknownCost: true, unmeasuredSessions: 1 });
+  });
+  it('is NOT flagged unknown when every row in the demand was fully measured', () => {
+    const rows = [{ pr: 99, dispatchKind: 'fix', tokens: { in: 1, out: 1, cacheRead: 0, cacheWrite: 0 }, costUsd: 0.01 }];
+    const [demand] = rollupByDemand(rows);
+    expect(demand).toMatchObject({ hasUnknownTokens: false, hasUnknownCost: false, unmeasuredSessions: 0 });
+  });
+  it('flags hasUnknownCost (but not tokens) when a mixed-provider review row carries costUsdPartial', () => {
+    const rows = [{ pr: 99, dispatchKind: 'review', tokens: { in: 10, out: 10, cacheRead: 0, cacheWrite: 0 }, costUsd: 0.1, costUsdPartial: true }];
+    const [demand] = rollupByDemand(rows);
+    expect(demand).toMatchObject({ hasUnknownTokens: false, hasUnknownCost: true });
+  });
 });
 
 describe('flagWaste', () => {
@@ -743,14 +801,23 @@ describe('scanReviewJurorUsage', () => {
         { lens: 'security', model: 'gpt-6-astra', durationMs: 2000, costUsd: 0, usage: { input_tokens: 20, output_tokens: 10, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } },
       ],
     }));
-    const { claudeRows, nonClaudeRows } = scanReviewJurorUsage({ runsDir: root });
+    const { claudeRows, nonClaudeRows } = scanReviewJurorUsage({ runsDirs: [root] });
     expect(claudeRows).toHaveLength(1);
     expect(claudeRows[0]).toMatchObject({ pr: 2670, costUsd: 0.5, dataQuality: 'juror-telemetry' });
     expect(nonClaudeRows).toHaveLength(1);
     expect(nonClaudeRows[0]).toMatchObject({ pr: 2670, costUsd: null, dataQuality: 'juror-telemetry-unpriced' });
   });
-  it('is empty (never throws) when the runs dir does not exist', () => {
-    expect(scanReviewJurorUsage({ runsDir: '/no/such/dir' })).toEqual({ claudeRows: [], nonClaudeRows: [] });
+  it('is empty (never throws) when a runs dir does not exist', () => {
+    expect(scanReviewJurorUsage({ runsDirs: ['/no/such/dir'] })).toEqual({ claudeRows: [], nonClaudeRows: [] });
+  });
+  it('scans EVERY checkout under workspaceRoot, not just one — the multi-clone reality', () => {
+    const root = tmp();
+    mkdirSync(join(root, 'clone-a', '.operations', 'runs'), { recursive: true });
+    mkdirSync(join(root, 'clone-b', '.operations', 'runs'), { recursive: true });
+    writeFileSync(join(root, 'clone-a', '.operations', 'runs', 'review-pr-a.json'), JSON.stringify({ input: { pr: 1 }, telemetry: [{ model: 'sonnet', costUsd: 0.1, usage: {} }] }));
+    writeFileSync(join(root, 'clone-b', '.operations', 'runs', 'review-pr-b.json'), JSON.stringify({ input: { pr: 2 }, telemetry: [{ model: 'sonnet', costUsd: 0.2, usage: {} }] }));
+    const { claudeRows } = scanReviewJurorUsage({ workspaceRoot: root });
+    expect(claudeRows.map((r) => r.pr).sort()).toEqual([1, 2]);
   });
 });
 

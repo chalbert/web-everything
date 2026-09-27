@@ -17,7 +17,7 @@
  * Usage: `node scripts/conveyor/backfill-2026-09-27-run-rating-slice1.mjs [--hours=48] [--dry-run]`
  */
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import { parseSessionSlug } from './session-slug.mjs';
 import {
@@ -114,13 +114,22 @@ function main() {
   }
 
   for (const logPath of listRecentReviewLogs(sinceMs, workspaceRoot)) {
-    const rating = rateReviewJobLog(logPath);
+    // The run record a review-job's own `runId` names lives beside ITS OWN `.operations/review-jobs/` — the
+    // SAME daemon clone's `.operations/runs/`, never this backfill script's own checkout (`run-rating.mjs`'s
+    // default `runsDir` resolves relative to ITS OWN script location, which is this lane clone — almost
+    // always the wrong clone for a review job some OTHER daemon ran). Live-caught: without this, ~all
+    // review-juror joins silently failed the moment the script ran from a lane clone rather than the exact
+    // checkout that ran the review.
+    const runsDir = join(dirname(dirname(logPath)), 'runs');
+    const rating = rateReviewJobLog(logPath, { runsDir });
     if (!rating.ok) { skippedNoEvidence++; continue; }
     const handle = rating.sessionName;
     if (handle && done.has(handle)) { skippedAlready++; continue; }
     if (!dryRun) appendRunRating(rating);
     scored += 1;
     grades[rating.grade] = (grades[rating.grade] ?? 0) + 1;
+    if (typeof rating.costUsd === 'number') costUsdKnown += rating.costUsd;
+    if (rating.tokens) tokensKnown += rating.tokens.in + rating.tokens.out + rating.tokens.cacheRead + rating.tokens.cacheWrite;
     if (handle) done.add(handle);
   }
 
