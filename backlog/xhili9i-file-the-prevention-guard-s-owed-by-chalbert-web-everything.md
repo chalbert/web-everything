@@ -3,7 +3,7 @@ kind: story
 size: 3
 parent: "4075"
 status: open
-scope: ["we:scripts/lib/atomic-json-file.mjs", "we:scripts/lib/__tests__/atomic-json-file.test.mjs", "we:scripts/lib/__tests__/__tests__/atomic-json-file.test.test.mjs"]
+scope: ["we:scripts/lib/atomic-json-file.mjs", "we:scripts/lib/__tests__/atomic-json-file.test.mjs"]
 dateOpened: "2026-09-26"
 tags: []
 ---

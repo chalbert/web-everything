@@ -128,9 +128,13 @@ export function applyUnattendedActorDefault(input, argv = []) {
  *
  * @param {{title:string,kind:string,size:string,digest:string,scope:string,parent:string,queue:string}} input -
  *   {@link module:review-loop-policy.buildPreventionFilingInput}'s own output.
+ * @param {{resolve?: Function, run?: Function, makeStore?: Function}} [deps] - test seams only; production
+ *   always uses the real `resolveOperation`/`runOperationCli`/`createFileRunStore`.
  * @returns {Promise<{code:number, lines:string[]}>}
  */
-export async function fileItemForPrevention(input) {
+export async function fileItemForPrevention(input, {
+  resolve = resolveOperation, run = runOperationCli, makeStore = createFileRunStore,
+} = {}) {
   const argv = [
     `--title=${input.title}`,
     `--kind=${input.kind}`,
@@ -141,9 +145,9 @@ export async function fileItemForPrevention(input) {
     `--queue=${input.queue}`,
     '--json',
   ];
-  const { declaration, registry, sinks } = resolveOperation('file-item', { json: true });
-  return runOperationCli({
-    declaration, argv, registry, store: createFileRunStore(), sinks, newRunId: () => newRunId('file-item'),
+  const { declaration, registry, sinks } = resolve('file-item', { json: true });
+  return run({
+    declaration, argv, registry, store: makeStore(), sinks, newRunId: () => newRunId('file-item'),
   });
 }
 

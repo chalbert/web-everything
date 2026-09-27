@@ -3,7 +3,7 @@ kind: story
 size: 3
 parent: "4075"
 status: open
-scope: ["we:scripts/lib/critical-work.mjs", "we:scripts/lib/__tests__/critical-work.test.mjs", "we:scripts/lib/__tests__/__tests__/critical-work.test.test.mjs"]
+scope: ["we:scripts/lib/critical-work.mjs", "we:scripts/lib/__tests__/critical-work.test.mjs"]
 dateOpened: "2026-09-26"
 tags: []
 ---

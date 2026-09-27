@@ -280,12 +280,30 @@ export function isPreventionOutstandingParked(outcome) {
  * @returns {{title: string, kind: string, size: string, digest: string, scope: string, parent: string, queue: string}}
  */
 export function buildPreventionFilingInput({ repo, pr, findings = [], parent = '', queue = 'true' } = {}) {
-  const owed = (Array.isArray(findings) ? findings : []).filter(hasUncapturedPrevention);
+  // A juror-authored `file` is UNTRUSTED text that ends up in the filed card's YAML `scope:` frontmatter
+  // (`we:scripts/backlog/scaffold.mjs#renderItem` quotes each entry but escapes nothing), so a value carrying a
+  // quote, newline, comma or any other non-path character could inject frontmatter keys or split into bogus
+  // scope entries. Only a plain relative path survives as a file; anything else is withheld from BOTH the
+  // scope and the digest anchor (the guard text itself is still filed). Jurors' ordinary path forms are
+  // normalized FIRST, the same way `we:scripts/lib/jury-core.mjs#corroborationPath` does (a `./` or diff `a/`/`b/`
+  // prefix, a trailing `:line`/`:line:col`), so a legitimate citation is kept rather than withheld. Dot-folders
+  // (`.github/…`) are allowed; a `..` segment is not.
+  const SAFE_PATH = /^(?!.*(?:^|\/)\.\.(?:\/|$))[A-Za-z0-9_.][A-Za-z0-9._/-]*$/;
+  const normalizePath = (p) => String(p).trim().replace(/^\.\//, '').replace(/^[ab]\//, '').replace(/:\d+(?::\d+)?$/, '');
+  const owed = (Array.isArray(findings) ? findings : []).filter(hasUncapturedPrevention).map((f) => {
+    if (!f.file) return f;
+    const file = normalizePath(f.file);
+    return SAFE_PATH.test(file) ? { ...f, file } : { ...f, file: undefined, fileWithheld: true };
+  });
   const files = [...new Set(owed.map((f) => f.file).filter(Boolean))];
+  // `null` for a file that is ALREADY test code (under `__tests__/`, or a `*.test.*`/`*.spec.*` file) — its
+  // own sibling is itself, and appending another `__tests__/…test` produced a nonexistent
+  // `__tests__/__tests__/x.test.test.mjs` path.
   const testSiblingOf = (f) => {
     const slash = f.lastIndexOf('/');
     const dir = slash === -1 ? '.' : f.slice(0, slash);
     const base = slash === -1 ? f : f.slice(slash + 1);
+    if (/(^|\/)__tests__(\/|$)/.test(dir) || /\.(test|spec)\.[cm]?[jt]s$/.test(base)) return null;
     const stem = base.replace(/\.mjs$/, '');
     return `${dir}/__tests__/${stem}.test.mjs`;
   };
@@ -293,11 +311,12 @@ export function buildPreventionFilingInput({ repo, pr, findings = [], parent = '
   // bare path is refused at write time (`lint-locus-prefix.mjs`) for BOTH surfaces (`check-standards.mjs`'s
   // own scope-entry rule cites the identical card, #883, as the scope-lease engine's reason a bare entry is
   // unsafe: unqualified, it reads as repo `null` and never matches an observed `we:`-qualified file).
-  const scope = [...new Set([...files, ...files.map(testSiblingOf)])].map((f) => `${IN_REPO_LOCUS}${f}`).join(',');
+  const scope = [...new Set([...files, ...files.map(testSiblingOf).filter(Boolean)])]
+    .map((f) => `${IN_REPO_LOCUS}${f}`).join(',');
   const digestLines = owed.map((f, i) => {
     const where = f.file
       ? `${IN_REPO_LOCUS}${f.file}${typeof f.line === 'number' ? `:${f.line}` : ''}`
-      : '(no file cited)';
+      : f.fileWithheld ? '(cited file withheld: not a plain path)' : '(no file cited)';
     return `${i + 1}. \`${where}\` — ${f.prevention ?? '(no guard text recorded)'}`;
   });
   const digestRaw = `Filed mechanically by the unattended review loop (#2749) — every finding below reduced `
@@ -309,12 +328,13 @@ export function buildPreventionFilingInput({ repo, pr, findings = [], parent = '
   // prefix). The explicit `file:line` anchor built above is prefixed already; this closes the OTHER surface —
   // free prose — for exactly the files THIS card's own `scope` already names (never a blind scan of arbitrary
   // text for anything extension-shaped, which would risk over-matching unrelated words). A mention already
-  // carrying a locus prefix, or already part of a longer `dir/basename` path, is left alone (the negative
-  // lookbehind on `we:`/`fui:`/`plateau:`/`/`).
+  // carrying a locus prefix, or already part of a longer `dir/basename` or hyphenated `prefix-basename` name,
+  // is left alone (explicit path-character lookarounds, NOT `\b`: `\b` treats `-` as a boundary, so citing
+  // both `foo.mjs` and `prefix-foo.mjs` used to corrupt the latter into `prefix-we:scripts/foo.mjs`).
   const digest = files.reduce((text, f) => {
     const base = f.includes('/') ? f.slice(f.lastIndexOf('/') + 1) : f;
     const escaped = base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    return text.replace(new RegExp(`(?<!we:|fui:|plateau:|/)\\b${escaped}\\b`, 'g'), `${IN_REPO_LOCUS}${f}`);
+    return text.replace(new RegExp(`(?<![\\w./:-])${escaped}(?![\\w-])`, 'g'), `${IN_REPO_LOCUS}${f}`);
   }, digestRaw);
   return {
     title: `File the prevention guard(s) owed by ${repo}#${pr}'s independent review`,

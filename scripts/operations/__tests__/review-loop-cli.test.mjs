@@ -30,7 +30,7 @@ import { createMemoryRunStore } from '../run-store.mjs';
 import { judgeOutcome } from '../cli-adapter.mjs';
 import { REVIEW_EFFECTS, reviewPrOperation } from '../review-pr.mjs';
 import {
-  applyUnattendedActorDefault, runReviewLoopOnce, UNATTENDED_REVIEW_ACTOR,
+  applyUnattendedActorDefault, fileItemForPrevention, runReviewLoopOnce, UNATTENDED_REVIEW_ACTOR,
 } from '../review-loop-cli.mjs';
 import { createReviewPrSinks } from '../review-pr-io.mjs';
 
@@ -672,5 +672,52 @@ describe('#xu2pp2m — the unattended driver attributes its own clears to an age
     expect(applyUnattendedActorDefault({ actor: 'operator' }, ['--pr=1']).actor).toBe(UNATTENDED_REVIEW_ACTOR);
     expect(applyUnattendedActorDefault({ actor: 'operator' }, ['--actor=operator']).actor).toBe('operator');
     expect(applyUnattendedActorDefault({ actor: 'nic' }, ['--actor', 'nic']).actor).toBe('nic');
+  });
+});
+
+describe('fileItemForPrevention — the production `fileItem` binding (#2749)', () => {
+  const input = {
+    title: 'File the prevention guard(s) owed by o/r#1', kind: 'story', size: '3',
+    digest: 'the digest', scope: 'we:scripts/a.mjs,we:scripts/__tests__/a.test.mjs', parent: '', queue: 'true',
+  };
+  const fakeDeps = () => {
+    const calls = [];
+    const stores = [];
+    return {
+      calls, stores,
+      deps: {
+        resolve: (name) => ({ declaration: { name }, registry: 'reg', sinks: {} }),
+        run: async (o) => { calls.push(o); return { code: 0, lines: [] }; },
+        makeStore: () => { const s = { id: stores.length }; stores.push(s); return s; },
+      },
+    };
+  };
+
+  it('drives the declared `file-item` operation with every input mapped to its own flag, plus --json', async () => {
+    const { calls, deps } = fakeDeps();
+    await fileItemForPrevention(input, deps);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].declaration.name).toBe('file-item');
+    expect(calls[0].argv).toEqual([
+      `--title=${input.title}`, '--kind=story', '--size=3', '--digest=the digest',
+      `--scope=${input.scope}`, '--queue=true', '--json',
+    ]);
+    expect(calls[0].newRunId()).toMatch(/file-item/);
+  });
+
+  it('passes --parent only when one is given', async () => {
+    const { calls, deps } = fakeDeps();
+    await fileItemForPrevention({ ...input, parent: '4075' }, deps);
+    expect(calls[0].argv).toContain('--parent=4075');
+  });
+
+  it('uses a FRESH run store per call, never a shared one', async () => {
+    const { calls, stores, deps } = fakeDeps();
+    await fileItemForPrevention(input, deps);
+    await fileItemForPrevention(input, deps);
+    expect(stores).toHaveLength(2);
+    expect(calls[0].store).toBe(stores[0]);
+    expect(calls[1].store).toBe(stores[1]);
+    expect(calls[0].store).not.toBe(calls[1].store);
   });
 });
