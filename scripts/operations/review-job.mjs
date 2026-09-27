@@ -574,8 +574,9 @@ if (IS_CLI) {
       // #4075/run-rating slice 1 — mechanical grading for this now-finished job-mode review, read back from
       // THIS job's own log file (stdout/stderr above were redirected there by `dispatchReviewJob`'s spawn — see
       // that function's own `openSync(logPath, 'a')`). Best-effort: `rateAndRecordReviewJob` never throws, and
-      // a rating failure must never affect this CLI's own exit code.
-      if (out.sessionSlug) { try { rateAndRecordReviewJob(jobLogPath(out.sessionSlug)); } catch { /* best-effort */ } }
+      // a rating failure must never affect this CLI's own exit code. A refused job ran no review — nothing to
+      // rate (`rateReviewJobLog` also skips any summary with no loop timing, the same guard at the pure layer).
+      if (out.sessionSlug && !out.refused) { try { rateAndRecordReviewJob(jobLogPath(out.sessionSlug)); } catch { /* best-effort */ } }
       process.exitCode = out.refused ? 75 : 0;
     } catch (e) {
       writeLineSync(2, `review-job: error: ${String(e?.message ?? e)}`);

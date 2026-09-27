@@ -82,7 +82,9 @@ const REPO_ROOT = resolve(__dirname, '..', '..');
  *  join resolving `.operations/runs/` relative to ITS OWN checkout (this lane clone) instead of the daemon
  *  clone that actually ran the review — silently failing nearly every join in `.3`'s own backfill. Each bump
  *  exists so corrected numbers are never silently mixed with a prior version's rows in the same store. */
-export const RUBRIC_VERSION = 'run-rating-mechanical.4';
+// `.5`: per-model turn pricing (a mixed-model run is no longer priced wholesale at its dominant model), explicit
+// unpriced usage, and refused / no-loop review jobs no longer graded — same-day correctness, same discipline.
+export const RUBRIC_VERSION = 'run-rating-mechanical.5';
 
 /** The four mechanical criteria {@link toScorecardRow} always evaluates (guard blocks, non-guard tool errors,
  *  repeated identical calls, test/gate reruns) — `criteriaEvaluated` on every row this module appends. */
@@ -386,6 +388,9 @@ export function classifyToolCall(name, input) {
  * overlapping parallel tool calls each contribute their own full duration to their own category (so category
  * totals can sum to slightly over 100% of wall time when calls ran in parallel) — documented here rather than
  * built out into a true interval union, which slice 1 does not need.
+ * `sessionStartTs` (from {@link sessionTimeBounds}) anchors the wall span on the absolute timeline so the
+ * lead-in (before the first tool call) and trailing (after the last tool result) gaps are counted too —
+ * invariant: busy union + reasoningMs + idleMs === wallMs. Without it only the between-call gaps are counted.
  * @returns {{testsMs:number, ghMs:number, gitMs:number, editsMs:number, opsMs:number, otherMs:number,
  *   reasoningMs:number, idleMs:number, shares:Record<string, number|null>}}
  */
@@ -417,6 +422,7 @@ export function computeTimeShares(events, turns, wallMs, sessionStartTs = null) 
   // `rateTranscript`) and closing it out with an explicit trailing gap to the session's absolute end.
   let reasoningMs = 0;
   let idleMs = 0;
+  const realTurns = (Array.isArray(turns) ? turns : []).filter((t) => t.ts !== null);
   if (leftoverMs !== null) {
     const gapBounds = [];
     if (sessionStartTs !== null && typeof wallMs === 'number') {
@@ -438,7 +444,6 @@ export function computeTimeShares(events, turns, wallMs, sessionStartTs = null) 
       }
       if (merged.length === 0 && typeof wallMs === 'number') gapBounds.push([null, null]);
     }
-    const realTurns = (Array.isArray(turns) ? turns : []).filter((t) => t.ts !== null);
     for (const [gs, ge] of gapBounds) {
       const span = gs === null ? leftoverMs : Math.max(0, ge - gs);
       const hasThinking = gs === null
@@ -543,6 +548,31 @@ export function computeCostUsd(tokenSums, model) {
     { cacheTier: '1h' },
   );
   return cost5m + cost1h;
+}
+
+/**
+ * USD for a run's turns, each priced at ITS OWN model's rate (a mixed-model session is never priced wholesale at
+ * the dominant model). Usage on a turn whose model has no rate is never guessed: it is counted in
+ * `unpricedTokens`, `costUsdPartial` says the priced sum is a lower bound, and `costUsd` is `null` when nothing
+ * at all could be priced (never a misleading 0).
+ * @returns {{costUsd:number|null, costUsdPartial:boolean, unpricedTokens:number}}
+ */
+export function computeTurnsCost(turns) {
+  const byModel = new Map();
+  for (const t of Array.isArray(turns) ? turns : []) {
+    const key = t.model ?? null;
+    if (!byModel.has(key)) byModel.set(key, []);
+    byModel.get(key).push(t);
+  }
+  let costUsd = null;
+  let unpricedTokens = 0;
+  for (const [model, group] of byModel) {
+    const sums = sumTokens(group);
+    const cost = computeCostUsd(sums, model);
+    if (cost === null) unpricedTokens += sums.in + sums.out + sums.cacheRead + sums.cacheWrite5m + sums.cacheWrite1h;
+    else costUsd = (costUsd ?? 0) + cost;
+  }
+  return { costUsd, costUsdPartial: costUsd !== null && unpricedTokens > 0, unpricedTokens };
 }
 
 /** Of every input token this run needed (fresh + served-from-cache), what share was served from cache —
@@ -806,7 +836,7 @@ export function rateTranscript(lines, {
   const testReruns = countTestReruns(events);
   const tokenSums = sumTokens(turns);
   const model = dominantModel(turns);
-  const costUsd = computeCostUsd(tokenSums, model);
+  const { costUsd, costUsdPartial, unpricedTokens } = computeTurnsCost(turns);
   const cacheHitRatio = computeCacheHitRatio(tokenSums);
   const resolvedRawOutcome = rawOutcome ?? outcomeFromTranscriptEvents(events);
   const outcome = classifyOutcome(resolvedRawOutcome);
@@ -819,7 +849,7 @@ export function rateTranscript(lines, {
     otherMs: time.otherMs, reasoningMs: time.reasoningMs, idleMs: time.idleMs, shares: time.shares,
     guardBlocks, errors, repeatedCalls, testReruns,
     outcome, rawOutcome: resolvedRawOutcome ?? null,
-    tokens, costUsd, cacheHitRatio, grade,
+    tokens, costUsd, costUsdPartial, unpricedTokens, cacheHitRatio, grade,
     dataQuality: 'transcript',
   };
   rating.waste = classifyRunWaste(events, rating);
@@ -991,6 +1021,13 @@ export function rateReviewJobLog(logPath, io = {}) {
     try { summary = JSON.parse(lines[i]); break; } catch { /* keep looking backwards */ }
   }
   if (!summary) return { ok: false, reason: 'no-summary-line', logPath };
+  // A job that never ran a review loop (refused as a duplicate, failed to acquire a lane) did no review work —
+  // skip it rather than append a degenerate, trivially-A row to the scorecard. A loop that CRASHED after taking
+  // a lane (loopMs null, but lanePath set) did cost real work, so it is still rated. `review-job.mjs` always
+  // writes `timings.loopMs` (null until the loop runs), so only an explicit null counts as "no loop ran".
+  if (summary.refused === true || (summary.timings?.loopMs === null && !summary.lanePath)) {
+    return { ok: false, reason: 'no-review-loop-ran', logPath, outcome: summary.outcome ?? null };
+  }
   const rating = rateReviewJobTimings({ pr: summary.pr ?? null, outcome: summary.outcome ?? null, timings: summary.timings ?? {} });
   const telemetry = readReviewRunTelemetry(summary.runId, io);
   if (telemetry) {
@@ -1013,11 +1050,11 @@ export function rateReviewJobLog(logPath, io = {}) {
  * @param {{exec?: typeof execFileSync}} [io]
  * @returns {boolean|null}
  */
-export function resolvePrBouncedViaGh(item, { exec = execFileSync } = {}) {
+export function resolvePrBouncedViaGh(item, { exec = execFileSync, repo = DEFAULT_REPO_SLUG } = {}) {
   if (!item) return null;
   let out;
   try {
-    out = exec('gh', ['pr', 'list', '--search', `head:lane/${item}-`, '--state', 'all', '--json', 'number,labels', '--limit', '5'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    out = exec('gh', ['pr', 'list', '--repo', repo, '--search', `head:lane/${item}-`, '--state', 'all', '--json', 'number,labels', '--limit', '5'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
   } catch { return null; }
   let list;
   try { list = JSON.parse(out); } catch { return null; }
@@ -1068,6 +1105,7 @@ export function toScorecardRow(rating, { provider = 'anthropic' } = {}) {
     testReruns: rating.testReruns ?? 0,
     tokens: rating.tokens ?? null,
     costUsd: rating.costUsd ?? null,
+    unpricedTokens: rating.unpricedTokens ?? 0,
     cacheHitRatio: rating.cacheHitRatio ?? null,
     shares: rating.shares ?? null,
     dataQuality: rating.dataQuality ?? 'transcript',
@@ -1168,6 +1206,7 @@ export function rollupByDemand(rows, { sizeForItem = () => null } = {}) {
     else { p.unknownTokens = true; p.unknownSessions += 1; }
     if (typeof row.costUsd === 'number') p.costUsd += row.costUsd;
     else p.unknownCost = true;
+    // A row priced only in part (some usage on an unpriced model) makes this phase's cost a lower bound too.
     if (row.costUsdPartial === true) p.unknownCost = true;
   }
   return [...groups.values()].map((g) => {
@@ -1232,7 +1271,14 @@ export function flagWaste(rows) {
     byPrHead.set(key, (byPrHead.get(key) ?? []).concat(row));
   }
   for (const [key, group] of byPrHead) {
-    if (group.length > 1) waste.push({ type: 'repeat-review-same-head', key, count: group.length, costUsd: group.reduce((s, r) => s + (r.costUsd ?? 0), 0) });
+    if (group.length > 1) {
+      const priced = group.filter((r) => typeof r.costUsd === 'number');
+      waste.push({
+        type: 'repeat-review-same-head', key, count: group.length,
+        costUsd: priced.length ? priced.reduce((s, r) => s + r.costUsd, 0) : null,
+        costPartial: priced.length > 0 && group.some((r) => typeof r.costUsd !== 'number' || r.costUsdPartial === true),
+      });
+    }
   }
   return waste;
 }
