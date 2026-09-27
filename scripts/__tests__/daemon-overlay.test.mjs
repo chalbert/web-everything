@@ -234,7 +234,7 @@ describe('daemon-overlay.mjs add — the overlay-conflict guard', () => {
     const { originDir, cloneDir, overlayDir, env } = makeFixture();
     const dir = makeAuthorClone(originDir);
     gitOk(dir, ['checkout', '-q', '--orphan', 'lane/unrelated']);
-    gitOk(dir, ['rm', '-rq', '--cached', '.']);
+    gitOk(dir, ['rm', '-rq', '--cached', '--ignore-unmatch', '.']); // the author clone's index can be empty (CI)
     writeFile(dir, 'z.mjs', 'z\n');
     gitOk(dir, ['add', 'z.mjs']);
     gitOk(dir, ['commit', '-q', '-m', 'orphan']);
