@@ -228,10 +228,27 @@ export function repoKeyForScope(scope) {
  * @returns {string|null}
  */
 export function primaryCheckoutForLanePath(lanePath, { home } = {}) {
+  return repoProfileForLanePath(lanePath, { home })?.checkoutPath ?? null;
+}
+
+/**
+ * build-path-codex-isolation-locus — THE FULL PROFILE (not just the checkout path) for a lane clone's own
+ * absolute PATH, given nothing else. Generalizes {@link primaryCheckoutForLanePath}'s own pool-dir-basename
+ * lookup (unchanged — same `repoKeyForDir`/`repoProfile` calls) so a caller that needs the repo's `key` or
+ * `canonicalPrefix` — e.g. `deliver-item-wrapper.mjs#commitBuildTurn`'s commit-subject prefix, which must say
+ * `PLATEAU #<item>` for a plateau-app lane rather than an always-`WE` literal — has one shared lookup to call
+ * instead of re-deriving the pool-dir-basename math a second time. Returns `null` under the exact same
+ * conditions {@link primaryCheckoutForLanePath} already did (an unrecognized pool-dir basename, or no parent
+ * segment at all) — never throws. PURE.
+ * @param {string} lanePath
+ * @param {{home?: string}} [o]
+ * @returns {ReturnType<typeof repoProfile>}
+ */
+export function repoProfileForLanePath(lanePath, { home } = {}) {
   const poolDirBasename = basename(dirname(String(lanePath ?? '')));
   const key = repoKeyForDir(poolDirBasename);
   if (key === null) return null;
-  return repoProfile(key, { home })?.checkoutPath ?? null;
+  return repoProfile(key, { home });
 }
 
 export function briefTokensForRepo(keyOrSlugOrPrefix, { itemNum = null, prNum = null, home, checkoutExists, readPackageJson } = {}) {

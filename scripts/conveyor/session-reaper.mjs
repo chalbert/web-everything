@@ -113,6 +113,10 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { readField } from '../backlog/frontmatter.mjs';
 import { stopSession } from '../operations/dispatch-abort.mjs';
 import { defaultListAgents, normalizeHandle, prListTimeoutMs, dispatchScratchRoot, revokeDispatchTrust } from '../operations/dispatch-lane-io.mjs';
+// #ghost-sessions-inflate-cap — the SAME shared two-signal pid-liveness probe `lease-reaper.mjs`/`tick-core.mjs`
+// already trust; see `makePidDeadResolver`'s own docblock for why this reaper cites it rather than re-deriving
+// a fourth copy of `process.kill(pid, 0)`.
+import { resolvePidAlive, scanPsOutput, defaultIsPidAlive } from './driver-watchdog.mjs';
 import { sleepSyncMs } from '../readiness/drain-lock.mjs';
 import {
   applyCompletionUpdate, completionPath, deleteCompletion, listCompletionSessions, newCompletionRecord, resolveCompletionsDir,
@@ -484,6 +488,7 @@ export function transcriptShowsIntendedBlockedOnInfra(session, {
  *   chatSpawnGuardFor?: ((session:object) => ({blocked:boolean, reason?:string})|null)|null,
  *   authExpiredFor?: ((session:object) => ({authExpired:boolean, reason?:string}|null))|null,
  *   idleFinishedFor?: ((session:object) => ({finished:boolean, reason?:string}|null))|null,
+ *   pidDeadFor?: ((session:object) => ({dead:boolean, reason?:string}|null))|null,
  * }} [opts]
  * @returns {{reap:boolean, reason:string}}
  */
@@ -491,6 +496,7 @@ export function classifySessionReapWithGroundTruth(session, groundTruthFor, opts
   const {
     allowedCwd, neverReapWorking = false, completionFor = null, idleThresholdMs = 0, now = Date.now(),
     hungFor = null, noOutcomeFor = null, chatSpawnGuardFor = null, authExpiredFor = null, idleFinishedFor = null,
+    pidDeadFor = null,
   } = opts || {};
   const base = classifySessionReap(session, { allowedCwd, chatSpawnGuardFor });
   if (base.reap) return base;
@@ -558,6 +564,27 @@ export function classifySessionReapWithGroundTruth(session, groundTruthFor, opts
     if (info && info.finished === true) return { reap: true, reason: `idle-finished:${info.reason || 'turn-ended-idle'}` };
   }
 
+  // Axis PID-DEAD (#ghost-sessions-inflate-cap) — LAST of the cwd-bypassing axes, deliberately: a session whose
+  // OWN process is CONFIRMED gone (the same two-signal `resolvePidAlive`/`scanPsOutput` probe
+  // `lease-reaper.mjs`/`tick-core.mjs`'s durable-build floor already use: the row's own `pid` when present, else
+  // a `ps aux` scan for its full `sessionId`) is independently corroborated evidence, exactly like axes
+  // -1/AUTH/HUNG/IDLE above — it does not depend on `cwd` (a session dispatched from a scratch-dispatcher clone
+  // is legitimately `wrong-cwd` for every daemon's own `allowedCwd`, which is precisely why the axes above
+  // already bypass it) OR on the listing's own `state` (a live incident found 18 `conveyor-NNNN` sessions stuck
+  // `state:'working'` 20-26 DAYS, every one with a confirmed-dead pid, none ever reaped because `wrong-cwd`
+  // short-circuited every other axis too, and this was the one axis missing). Ordered LAST because it is the
+  // COARSEST signal (a dead process proves the session is over, but says nothing about WHY — a hung/hidden-auth-
+  // failure/idle-finished axis above names a more specific, more useful reason for the same underlying session,
+  // when one applies) — the exact same "more specific signal wins" reasoning axis AUTH's own doc gives for
+  // running ahead of axis HUNG. `pidDeadFor` returns `null` (never a guess) when neither signal can answer — a
+  // session with no discoverable pid AND no `ps` snapshot to fall back on is left to the axes below, not
+  // assumed dead.
+  if (typeof pidDeadFor === 'function') {
+    let info = null;
+    try { info = pidDeadFor(session); } catch { info = null; }
+    if (info && info.dead === true) return { reap: true, reason: `pid-dead:${info.reason || 'process-gone'}` };
+  }
+
   // #4149 — neither corroborated axis fired: a `wrong-cwd` session falls through to `classifySessionReap`'s own
   // verdict here, unchanged. `allowedCwd`'s whole purpose (never touch a session that merely shares a name
   // pattern from an unrelated checkout) still holds for every axis below, which has no independent staleness
@@ -616,6 +643,7 @@ export function classifySessionReapWithGroundTruth(session, groundTruthFor, opts
  *   chatSpawnGuardFor?: ((session:object) => ({blocked:boolean, reason?:string})|null)|null,
  *   authExpiredFor?: ((session:object) => ({authExpired:boolean, reason?:string}|null))|null,
  *   idleFinishedFor?: ((session:object) => ({finished:boolean, reason?:string}|null))|null,
+ *   pidDeadFor?: ((session:object) => ({dead:boolean, reason?:string}|null))|null,
  * }} [opts]
  * @returns {{reap:Array, keep:Array}} each entry carries the original row plus its `reason`.
  */
@@ -855,6 +883,42 @@ export function makeIdleFinishedResolver({ thresholdMs = resolveIdleFinishedThre
       return readIdleFinishedInfo(session, now(), thresholdMs);
     } catch {
       return null; // unreadable transcript / bad row shape — unknown, never reap on an unreadable signal
+    }
+  };
+}
+
+/**
+ * Build a `pidDeadFor` resolver for {@link sessionReapPlan} / {@link classifySessionReapWithGroundTruth}
+ * (#ghost-sessions-inflate-cap, live incident: 18 `conveyor-NNNN` sessions, `state:'working'`, 20-26 days old,
+ * every one confirmed dead, none reaped because every one was ALSO `wrong-cwd` for whichever daemon happened to
+ * scan the listing). Reuses `driver-watchdog.mjs#resolvePidAlive` — the SAME two-signal probe (the row's own
+ * `pid` when present, else a `ps aux` scan for its full `sessionId`) `lease-reaper.mjs` and `tick-core.mjs`'s
+ * durable-build floor already trust — never a THIRD, re-derived pid check (this file's own convention of citing
+ * rather than re-deriving a shared primitive, same as {@link makeHungResolver} citing `hung-session.mjs`).
+ *
+ * `psSnapshot` is read ONCE per reaper pass (fresh `ps aux` output), not once per session — resolved lazily on
+ * first use via `scanPsOutput` and memoized for the lifetime of the returned resolver, mirroring
+ * `defaultListAgents`'s own single-listing-per-pass convention elsewhere in this file's IO shell.
+ * @param {{isPidAlive?:(pid:number)=>boolean, scanPs?:()=>string}} [io]
+ * @returns {(session:object) => ({dead:boolean, reason?:string}|null)}
+ */
+export function makePidDeadResolver({ isPidAlive = defaultIsPidAlive, scanPs = scanPsOutput } = {}) {
+  let psSnapshot;
+  let psRead = false;
+  return function pidDeadFor(session) {
+    try {
+      if (!psRead) {
+        try { psSnapshot = scanPs(); } catch { psSnapshot = null; }
+        psRead = true;
+      }
+      const alive = resolvePidAlive(session, { psOutput: psSnapshot, isPidAlive });
+      if (alive === false) {
+        const via = Number.isInteger(Number(session?.pid)) && Number(session?.pid) > 0 ? `pid:${session.pid}` : 'ps-scan';
+        return { dead: true, reason: via };
+      }
+      return null; // alive, or genuinely unknown (no pid, no ps snapshot) — never a guess
+    } catch {
+      return null; // unreadable — unknown, never reap on an unreadable signal
     }
   };
 }
@@ -1994,6 +2058,22 @@ export function runSessionReaperPass({
   // #4075/xg7m2wq (live incident PR #2724, 2026-09-26) — the general idle-turn-ended backstop, default ON like
   // every other axis this epic ships: see `hung-session.mjs#classifyIdleFinished`'s own file header for why.
   idleFinishedFor = makeIdleFinishedResolver(),
+  // #ghost-sessions-inflate-cap — UNLIKE this epic's other axes, `null` (OFF) is this FUNCTION's own default —
+  // deliberately, not an oversight. `makePidDeadResolver()`'s real behavior answers "dead" for ANY session whose
+  // `sessionId` does not appear in a real `ps aux` snapshot, which is true of EVERY synthetic test fixture this
+  // file's own test suite constructs (they never correspond to a real process) — unlike `hungFor`/
+  // `authExpiredFor`/`idleFinishedFor`'s real resolvers, which read a TRANSCRIPT FILE keyed by `cwd`/`id` and
+  // degrade to `null` (unknown) when that file does not exist, this axis has no file to fail to find; it always
+  // gets a definite answer. Defaulting it ON here would make every existing hung/auth/idle-finished test that
+  // does not ALSO override `pidDeadFor` observe `pid-dead:ps-scan` instead of the axis it actually means to
+  // exercise (confirmed live: 3 real test failures the first time this was tried default-ON here). See
+  // {@link defaultReapSessions} (`skills-src/conveyor/review-daemon.mjs`) and this file's own `main()` CLI shell
+  // for the two real production call sites that explicitly pass `pidDeadFor: makePidDeadResolver()` — the
+  // capability ships fully wired for both real entry points; only this pure function's own bare default stays
+  // opt-in, mirroring `backstopCompletion`'s sibling axes' own "riskier blast radius stays explicit" convention
+  // (`runRetention`/`dispatch-scratch-sweep`, both opt-in for the identical reason: a real behavior change a
+  // caller must ask for, not one a bare function call silently acquires).
+  pidDeadFor = null,
   // xbv32pg follow-up (epic #3383) — THE ROOT-CAUSE FIX, not just a detection axis: see
   // {@link planBackstopCompletion}'s own docblock. Default ON, like every other axis this epic ships — a
   // caller that wants the pre-#3383 behavior byte-for-byte passes `backstopCompletion: false`.
@@ -2044,7 +2124,7 @@ export function runSessionReaperPass({
   }
   if (!Array.isArray(sessions)) sessions = [];
 
-  const plan = sessionReapPlan(sessions, { groundTruthFor, completionFor, allowedCwd, neverReapWorking, idleThresholdMs, now, hungFor, noOutcomeFor, chatSpawnGuardFor, authExpiredFor, idleFinishedFor });
+  const plan = sessionReapPlan(sessions, { groundTruthFor, completionFor, allowedCwd, neverReapWorking, idleThresholdMs, now, hungFor, noOutcomeFor, chatSpawnGuardFor, authExpiredFor, idleFinishedFor, pidDeadFor });
   const { keep } = plan;
   let reap = plan.reap;
   let previouslyReaped = 0;
@@ -2242,6 +2322,9 @@ function main(argv) {
   const idleFinishedFor = flags['no-idle-finished-detection']
     ? null
     : makeIdleFinishedResolver(flags['idle-finished-minutes'] !== undefined ? { thresholdMs: Number(flags['idle-finished-minutes']) * 60 * 1000 } : {});
+  // `--no-pid-dead-detection` is the same rollback escape hatch, for the #ghost-sessions-inflate-cap pid-dead
+  // axis — default ON, same convention as every other axis this epic ships.
+  const pidDeadFor = flags['no-pid-dead-detection'] ? null : makePidDeadResolver();
   // `--retention-sweep` OPTS IN to the #4089 retention pass — deliberately OPT-IN, not opt-out like this
   // file's other axes: unlike ground-truth/hung-detection/backstop-completion (which only ever change a STOP
   // decision), the retention sweep DELETES files and calls `claude rm` — a materially different blast radius
@@ -2254,7 +2337,7 @@ function main(argv) {
   // daemon calls {@link runDispatchScratchSweepPass} directly. Shares this CLI's own `--dry-run`.
   const runDispatchScratchSweep = !!flags['dispatch-scratch-sweep'];
 
-  const result = runSessionReaperPass({ groundTruthFor, completionFor, allowedCwd, neverReapWorking, idleThresholdMs, dryRun, hungFor, backstopCompletion, noOutcomeFor, chatSpawnGuardFor, authExpiredFor, idleFinishedFor });
+  const result = runSessionReaperPass({ groundTruthFor, completionFor, allowedCwd, neverReapWorking, idleThresholdMs, dryRun, hungFor, backstopCompletion, noOutcomeFor, chatSpawnGuardFor, authExpiredFor, idleFinishedFor, pidDeadFor });
   const retentionResult = runRetention ? runRetentionSweepPass({ dryRun }) : null;
   const dispatchScratchResult = runDispatchScratchSweep ? runDispatchScratchSweepPass({ dryRun }) : null;
 

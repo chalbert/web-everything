@@ -94,7 +94,8 @@
  *      operator chose to build it ahead of `#3581`'s ratified reviewer-first sequencing gate knowingly.
  */
 import { randomUUID } from 'node:crypto';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
 
 // REAL — every one of these is an existing exported function this session read directly.
 // #3383 — delivery telemetry. `createTelemetryRecorder` mints this dispatch's trace; `setActiveRecorder`
@@ -123,7 +124,7 @@ import { isAllowlistedLitterPath } from '../lib/lane-litter.mjs';
 // `defaultDeliveryDenyPaths()` defaults to ITS OWN module's checkout root, which is always WE (these scripts
 // live only in `we:scripts/operations/`), so a frontierui/plateau-app build denied the wrong repo's primary
 // checkout entirely — the one the deny-map exists to seal off was left wide open to the Codex sandbox.
-import { primaryCheckoutForLanePath } from '../lib/repo-profile.mjs';
+import { primaryCheckoutForLanePath, repoProfileForLanePath, repoKeyForScope, repoProfile } from '../lib/repo-profile.mjs';
 // #3383 mechanical-dispatcher fix (live #3565 trial) — the REAL locus-prefix detector, reused so
 // `sanitizeOwnLocusMentions` below prefixes every bare mention the `lint:locus` pre-commit hook would
 // itself flag, not just mentions of the delivery's own touched paths (see that function's own header).
@@ -135,7 +136,8 @@ import { findUnmarkedLocusRefs } from '../check-standards-rules.mjs';
 // their own behaviour changed, only where they are defined.
 import {
   REPO_ROOT, run, RESTRICTED_PROVIDER_TOOLS, buildRestrictedProviderArgv, createHooksSettingsWriter,
-  persistSpawnFailure, acquireLane, resetStaleVerifyMarker, releaseLane, resolveLanePath, runVerifyOperation,
+  persistSpawnFailure, acquireLane, resetStaleVerifyMarker, releaseLane, releaseAllPools, resolveLanePath,
+  runVerifyOperation,
 } from './minimal-context-provider.mjs';
 // #3580 — the REAL Codex implementation of the `DeliveryAgentProvider` port below. Its own file header carries
 // the full live-verification trail (which flags, which invocation blocks, and what replaces the Claude-only
@@ -302,6 +304,21 @@ export async function deliverItem(launch, provider = CLAUDE_RESTRICTED_PROVIDER,
   const { item, lane, scope, sessionSlug, attemptTag } = launch;
   const claudeSessionId = newSessionId(); // the Claude CLI's own --session-id — see the docblock above.
 
+  // build-path-codex-isolation-locus — WHICH REPO this item's own `scope:` actually names, resolved ONCE, up
+  // front, before anything is acquired. See `resolveDeliveryLocus`'s own docblock for the couple-repo refusal
+  // this can throw.
+  const locus = resolveDeliveryLocus(scope);
+  const implProfile = locus.profile && locus.profile.key !== 'we' ? locus.profile : null;
+  if (locus.multiRepo) {
+    throw new Error(
+      `deliver-item-wrapper: #${item}'s scope spans more than one non-we repo (${locus.keys.join(', ')}) — a `
+      + 'multi-repo "couple" build (as opposed to a single non-we locus, which this wrapper already handles) '
+      + 'is a design decision this wrapper defers rather than guesses at (merge order, which repo\'s gate '
+      + 'governs, one PR or two) — see we:backlog/x83eb25-design-multi-repo-couple-locus-delivery-e-g-we-'
+      + 'plateau-app-2.md. Do not dispatch this item mechanically until that decision is ratified.',
+    );
+  }
+
   // ---- 0. Telemetry (#3383) — the root `dispatch` span for this whole delivery, and the ambient recorder
   // every shared helper below (`acquireLane`, `runVerifyOperation`) emits its own spans into. The trace id is
   // DERIVED from the item, so this delivery, a later fix dispatch against its PR, and the review that lands
@@ -318,6 +335,7 @@ export async function deliverItem(launch, provider = CLAUDE_RESTRICTED_PROVIDER,
     attributes: { item: String(item), lane: String(lane), attemptTag: attemptTag || null, scope: scope || null },
   });
 
+  let implLanePath = null; // build-path-codex-isolation-locus — in scope for the outer catch's release too.
   try {
   // ---- 1. Acquire + claim (REAL CLI surface, verbatim from the live brief's own step 1/2) -----------------
   // `claudeSessionId` threaded through — see `acquireLane`'s own docblock (#3627 secondary finding, live
@@ -325,6 +343,26 @@ export async function deliverItem(launch, provider = CLAUDE_RESTRICTED_PROVIDER,
   // wrapper process itself inherited.
   acquireLane({ lane, sessionSlug, scope, item, claudeSessionId });
   try {
+    // build-path-codex-isolation-locus — a single non-`we` locus (`implProfile` set above) ALSO gets an
+    // implementation lane in ITS OWN repo's own pool — see `acquireImplLane`'s own docblock. This is the fix
+    // for the live #3604 finding: the wrapper used to acquire ONLY the WE lane above, for every item
+    // regardless of locus, so a plateau-app/frontierui-scoped build's own agent turn, gate and PR all ran (or
+    // tried to run) against WE's checkout instead of the repo the item actually edits.
+    //
+    // Refused here, BEFORE the claim, the same shape a saturated NUMBERED acquire would already refuse at —
+    // `acquireLane`'s own unnumbered branch reports pool saturation as an empty string, never a throw (see its
+    // docblock), so this reads that signal explicitly rather than letting a claim happen with nowhere for the
+    // agent to actually work.
+    if (implProfile) {
+      implLanePath = acquireImplLane({ sessionSlug, claudeSessionId, item, profile: implProfile });
+      if (!implLanePath) {
+        releaseClaimAndLane({ item, lane, sessionSlug, best_effort: true });
+        return finish(`blocked-on-infra (no free ${implProfile.key} lane)`, {
+          status: 'error', outcome: 'blocked-on-infra', reason: `no free ${implProfile.key} lane`,
+        });
+      }
+    }
+
     // pre-existing bug found live during the #3565 real-dispatch re-verification, fixed alongside it: the
     // claim must run with the LANE as cwd (see `claimItem`'s own docblock) or `run.mjs claim` resolves the
     // item onto the shared primary checkout and is refused outright.
@@ -351,7 +389,9 @@ export async function deliverItem(launch, provider = CLAUDE_RESTRICTED_PROVIDER,
     const turnCpuStart = process.cpuUsage();
     let report;
     try {
-      report = await runAgentToCompletion({ item, sessionSlug, lane, attemptTag, provider, claudeSessionId });
+      report = await runAgentToCompletion({
+        item, sessionSlug, lane, attemptTag, provider, claudeSessionId, lanePathOverride: implLanePath,
+      });
       turn.ok({
         outcome: report && report.outcome ? String(report.outcome) : 'unreported',
         filesTouched: Array.isArray(report?.filesTouched) ? report.filesTouched.length : 0,
@@ -366,7 +406,7 @@ export async function deliverItem(launch, provider = CLAUDE_RESTRICTED_PROVIDER,
     if (report.outcome === 'blocked' && (!report.filesTouched || report.filesTouched.length === 0)) {
       // Pre-build stop, same shape as today's brief's Escalations case 0 — but decided by the WRAPPER
       // reading the report, never by the agent reasoning about claim/release CLI mechanics.
-      releaseClaimAndLane({ item, lane, sessionSlug });
+      releaseClaimAndLane({ item, lane, sessionSlug, implLanePath });
       return finish(`not-ready (${report.reason})`, { status: 'unset', outcome: 'not-ready', reason: report.reason });
     }
 
@@ -376,7 +416,7 @@ export async function deliverItem(launch, provider = CLAUDE_RESTRICTED_PROVIDER,
       // every existing exit either finishes the build or stops before writing anything. Decide: discard the
       // partial work and release (safest, matches "no PR is opened" bar 0 sets), or open a draft/park PR so
       // the partial diff is not silently lost? Left open for whoever actually specs this out.
-      releaseClaimAndLane({ item, lane, sessionSlug });
+      releaseClaimAndLane({ item, lane, sessionSlug, implLanePath });
       return finish(`blocked-mid-build (${report.reason})`, { status: 'error', outcome: 'blocked-mid-build', reason: report.reason });
     }
 
@@ -384,9 +424,11 @@ export async function deliverItem(launch, provider = CLAUDE_RESTRICTED_PROVIDER,
     // either case: a needs-human-judgment report still needs a green gate before anyone reviews it.
     // (The `verify.gate` span itself is emitted one level down, inside `runVerifyOperation`, so it is
     // captured identically for every wrapper rather than six times over — see that function.)
-    const gate = await runGateWithOneRetry({ lane, item, sessionSlug, attemptTag, provider, claudeSessionId });
+    const gate = await runGateWithOneRetry({
+      lane, item, sessionSlug, attemptTag, provider, claudeSessionId, lanePathOverride: implLanePath,
+    });
     if (gate.status === 'red') {
-      releaseClaimAndLane({ item, lane, sessionSlug });
+      releaseClaimAndLane({ item, lane, sessionSlug, implLanePath });
       return finish('gate-red', { status: 'error', outcome: 'gate-red' });
     }
     if (gate.status === 'gate-blocked') {
@@ -394,7 +436,7 @@ export async function deliverItem(launch, provider = CLAUDE_RESTRICTED_PROVIDER,
       // `runGateWithOneRetry`'s docblock), never collapsed into `gate-red`. Same release shape as a real red
       // gate — this attempt did not produce a landable diff either way — but the reported result names the
       // agent's own reason instead of pretending the gate itself failed.
-      releaseClaimAndLane({ item, lane, sessionSlug });
+      releaseClaimAndLane({ item, lane, sessionSlug, implLanePath });
       return finish(`gate-blocked (${gate.reason || 'no reason reported'})`, { status: 'error', outcome: 'gate-blocked', reason: gate.reason || null });
     }
 
@@ -452,7 +494,7 @@ export async function deliverItem(launch, provider = CLAUDE_RESTRICTED_PROVIDER,
     // A wrapper-side failure (acquire refused, claim refused, gate script itself threw) is NOT the agent's
     // outcome — it never reached the agent, or the agent's own report is irrelevant to it. Release what was
     // acquired and surface the raw error; there is no report to interpret.
-    releaseClaimAndLane({ item, lane, sessionSlug, best_effort: true });
+    releaseClaimAndLane({ item, lane, sessionSlug, best_effort: true, implLanePath });
     throw e;
   }
   } catch (e) {
@@ -524,11 +566,134 @@ export function claimItem({ item, sessionSlug, lanePath } = {}, { run: runFn = r
 // registered operation (only `claim`, its OPEN, is declared — `resolve`/`scaffold` exist but neither is
 // `release`) and `lane-pool` has no registered operation at all (same gap `acquireLane` notes above). Would
 // need one — or two — built first (see #3627 follow-up); out of scope for this hardening pass.
-/** REAL (release flags lifted from the live brief's Escalations case-0 mechanism). */
-function releaseClaimAndLane({ item, lane, sessionSlug, best_effort = false }) {
+/** REAL (release flags lifted from the live brief's Escalations case-0 mechanism).
+ *
+ * build-path-codex-isolation-locus — `implLanePath`, when given, means a NON-`we` locus's implementation lane
+ * was also acquired (`acquireImplLane`, unnumbered) and must also be released on every exit path. That lane
+ * has no NUMBER this file ever learns (the unnumbered acquire returns only its PATH), so there is no
+ * `--lane=<N>` to release it by; `releaseAllPools(sessionSlug)` is the mechanism built for exactly this
+ * (`lane-pool.mjs`'s own `release --all-pools --session=<slug>` sweeps EVERY pool under the pool root for
+ * this session's leases in one call — "cross-locus couple cleanup", its own docstring's words). Best-effort,
+ * always — a release failure here must never mask the real outcome this function's caller already decided. */
+function releaseClaimAndLane({ item, lane, sessionSlug, best_effort = false, implLanePath = null }) {
   const opts = best_effort ? { stdio: 'ignore' } : {};
   try { run('node', ['scripts/backlog.mjs', 'release', String(item), `--session=${sessionSlug}`], opts); } catch { /* best-effort on the failure path */ }
   try { run('node', ['scripts/lane-pool.mjs', 'release', `--lane=${lane}`, `--session=${sessionSlug}`], opts); } catch { /* best-effort on the failure path */ }
+  if (implLanePath) {
+    try { releaseAllPools(sessionSlug); } catch { /* best-effort — see docblock above */ }
+  }
+}
+
+// ================================================================================================
+// 1b. Locus resolution + the implementation-lane acquire — build-path-codex-isolation-locus, the fix for the
+//     live #3604 finding: this wrapper used to acquire ONLY a WE lane for every item, so a plateau-app- or
+//     frontierui-scoped build's agent turn/gate/converge/PR all ran against WE's own checkout instead of the
+//     repo the item actually edits, and Codex (whose OS sandbox confines writes to its own spawn `cwd`, never
+//     a second declared root — see `codex-delivery-provider.mjs`'s own header) reported `blocked`.
+// ================================================================================================
+
+/**
+ * PURE. Resolves the item's own declared `scope:` (the wrapper's `launch.scope` — a comma-joined string of
+ * repo-qualified paths, e.g. `"plateau-app:src/foo.tsx,plateau-app:src/bar.tsx"`, per
+ * `dispatch-lane-io.mjs#deliverItemDetachedProvider`'s own `String(request?.scope ?? '')` join) to exactly one
+ * of three answers:
+ *   - a single repo, `we` — today's only case, unchanged: `{ profile: repoProfile('we'), multiRepo: false }`.
+ *   - a single NON-`we` repo (`frontierui` or `plateau-app`) — the new, single-locus case this file now
+ *     handles: `{ profile: repoProfile(<key>), multiRepo: false }`.
+ *   - TWO OR MORE distinct repos (e.g. a scope mixing `we:`/`plateau-app:` paths, or `frontierui:`/
+ *     `plateau-app:` together) — a genuine multi-repo "couple" build. This wrapper does not guess at merge
+ *     order, which repo's gate governs, or whether one PR or two is correct, so `deliverItem` refuses these
+ *     before acquiring anything; see its own call site. `{ profile: null, multiRepo: true, keys }`.
+ *
+ * An entry whose `<repo>:` prefix is unrecognized (or a scope with no entries at all — `dispatch-lane.mjs`
+ * refuses to dispatch a build with no `scope:` before this ever runs, so this is a defensive default, not a
+ * real path) falls back to `we`, matching this wrapper's behavior before this function existed.
+ *
+ * @param {string} scope
+ * @returns {{profile: ReturnType<typeof repoProfile>|null, multiRepo: boolean, keys?: string[]}}
+ */
+export function resolveDeliveryLocus(scope) {
+  const entries = String(scope ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+  const keys = new Set();
+  for (const entry of entries) keys.add(repoKeyForScope(entry) ?? 'we');
+  if (keys.size === 0) return { profile: repoProfile('we'), multiRepo: false };
+  if (keys.size > 1) return { profile: null, multiRepo: true, keys: [...keys] };
+  return { profile: repoProfile([...keys][0]), multiRepo: false };
+}
+
+/**
+ * REAL — acquires a single-locus item's implementation lane via `acquireLane`'s UNNUMBERED shape (no tick has
+ * ever assigned this item a lane NUMBER in `profile`'s own pool — only WE's tick-planner does that, for the
+ * WE lane every item still also gets), `--repo=<profile.checkoutPath>` picking the right pool. `--item=` is
+ * passed (added to `acquireLane`'s unnumbered branch alongside this fix) so the drain's existing
+ * `lane-pool.mjs release --all-pools --item=<num>` by-item sweep finds and releases THIS lane on land too,
+ * with no further change needed there.
+ *
+ * Returns the acquired lane's real path, or `''` for the pool-saturation signal `acquireLane` already defines
+ * (never throws for that case) — the caller decides what an empty path means (today: refuse before claiming,
+ * exactly as a saturated WE acquire would).
+ *
+ * @param {{sessionSlug: string, claudeSessionId: string, item: string|number, profile: ReturnType<typeof repoProfile>}} o
+ * @param {{run?: Function}} [io]
+ * @returns {string}
+ */
+export function acquireImplLane({ sessionSlug, claudeSessionId, item, profile }, { run: runFn = run } = {}) {
+  return acquireLane({
+    sessionSlug, claudeSessionId, item, purpose: 'conveyor-delivery-impl', repo: profile.checkoutPath,
+  }, { run: runFn });
+}
+
+/**
+ * The delivery-report CLI's own small dependency closure (mirrors `codex-delivery-provider.mjs
+ * #FIX_REPORT_CLI_REL_FILES`'s shape exactly — same problem, same fix, a different CLI) — every file
+ * `delivery-report-cli.mjs` imports at runtime, repo-relative.
+ */
+export const DELIVERY_REPORT_CLI_REL_FILES = Object.freeze([
+  'scripts/operations/delivery-report-cli.mjs',
+  'scripts/operations/delivery-report-store.mjs',
+  'scripts/operations/delivery-report-record.mjs',
+  'scripts/lib/write-all-sync.mjs',
+]);
+
+/**
+ * REAL — stages `delivery-report-cli.mjs` + its closure into a NON-`we` implementation lane, at the EXACT SAME
+ * repo-relative paths the (unparameterized, hardcoded) `delivery-agent-brief-v2.md` already tells the agent to
+ * invoke (`node scripts/operations/delivery-report-cli.mjs report ...`, four call sites, none templated) — so
+ * this fix needs no brief change at all, unlike `codex-delivery-provider.mjs#stageFixReportCliIntoLane`, which
+ * stages into a DEDICATED subdirectory because a fix/ci-heal lane is reconstituted from an EXISTING PR branch
+ * that might predate the CLI's own existence and so cannot safely assume the real path is free. A delivery's
+ * implementation lane has no such history — it is a plain clone of `frontierui`/`plateau-app`, a different
+ * application entirely, which has never had a `scripts/operations/` directory of its own (confirmed by
+ * listing a real lane of each: `we:scripts/` exists in both, `scripts/operations/` in neither) — so staging at
+ * the real path is safe, not a guess, and keeps the agent's own sanctioned report command byte-identical
+ * whichever repo its lane belongs to.
+ *
+ * Required for EVERY foreign-repo delivery: without it, the agent's very first
+ * `delivery-report-cli.mjs report --status=started` call fails outright (`MODULE_NOT_FOUND`) before it ever
+ * reaches the item's own spec, because the impl lane is that OTHER repo's clone and never carried this file to
+ * begin with. Idempotent (plain overwrite) and cheap (four small files with no dependencies of their own
+ * beyond `node:fs`/`node:path`/`node:url`), so re-staging on a gate-failure resume costs nothing.
+ *
+ * @param {string} lanePath - the resolved, absolute implementation-lane clone.
+ * @param {{repoRoot?: string, readFile?: (p: string) => string, ensureDir?: (p: string) => void,
+ *   writeFile?: (p: string, data: string) => void}} [io]
+ */
+export function stageDeliveryReportCliIntoLane(lanePath, {
+  repoRoot = REPO_ROOT,
+  readFile = (p) => readFileSync(p, 'utf8'),
+  ensureDir = (p) => mkdirSync(p, { recursive: true }),
+  writeFile = (p, data) => writeFileSync(p, data),
+} = {}) {
+  if (typeof lanePath !== 'string' || !lanePath.trim()) {
+    throw new TypeError('deliver-item-wrapper: `lanePath` must be a non-empty absolute path');
+  }
+  const root = String(repoRoot).replace(/\/+$/, '');
+  const lane = lanePath.replace(/\/+$/, '');
+  for (const relPath of DELIVERY_REPORT_CLI_REL_FILES) {
+    const dest = `${lane}/${relPath}`;
+    ensureDir(dirname(dest));
+    writeFile(dest, readFile(`${root}/${relPath}`));
+  }
 }
 
 // ================================================================================================
@@ -708,7 +873,15 @@ export const DELIVERY_AGENT_SPAWN_TIMEOUT_MS = 60 * 60 * 1000; // 60 minutes
  * clone's own physical copy of the script it runs — writes to that same directory instead of recomputing its
  * own, different, script-relative default.
  */
-export function buildDeliveryAgentEnv({ sessionSlug, item, lanePath, attemptTag, reportsDir }) {
+// build-path-codex-isolation-locus — `implLane`, when given (a non-`we` locus's implementation lane — see
+// `resolveDeliveryLocus`/`acquireImplLane`), is ALSO `lanePath` here (both providers' `spawn` resolve their
+// cwd to `lanePathOverride ?? resolveLane(lane)`, and `implLane` is threaded through as exactly that same
+// value — see `CLAUDE_RESTRICTED_PROVIDER.spawn`/`CODEX_PROVIDER.spawn`). It rides as its OWN env var, never
+// only folded into `LANE`, so a brief/agent that checks for its presence (the live #3604 finding's own
+// blocked reason named it) sees it set — omitted entirely (never an empty string) when this is an ordinary
+// `we`-locus delivery, so `.toEqual`'s existing exact-shape assertions on this function's output are
+// unaffected by a caller that never passes it.
+export function buildDeliveryAgentEnv({ sessionSlug, item, lanePath, attemptTag, reportsDir, implLane = null }) {
   return {
     WE_DISPATCH_KIND: 'delivery',
     DELIVERY_SESSION: sessionSlug,
@@ -716,6 +889,7 @@ export function buildDeliveryAgentEnv({ sessionSlug, item, lanePath, attemptTag,
     LANE: lanePath,
     ATTEMPT_TAG: attemptTag ?? '',
     OPERATION_DELIVERY_REPORTS_DIR: reportsDir,
+    ...(implLane ? { IMPL_LANE: implLane } : {}),
   };
 }
 
@@ -756,7 +930,11 @@ const CLAUDE_RESTRICTED_PROVIDER = {
   // `resumeAgentWithGateFailure`) pass `{ sessionId, prompt, resumeSessionId?, lane, sessionSlug, item,
   // attemptTag }` — `lane`/`sessionSlug`/`item`/`attemptTag` added by bug 7's fix, below.
   async spawn(
-    { sessionId, prompt, resumeSessionId = null, lane, sessionSlug, item, attemptTag } = {},
+    {
+      sessionId, prompt, resumeSessionId = null, lane, sessionSlug, item, attemptTag,
+      // build-path-codex-isolation-locus — see `runAgentToCompletion`'s own docblock for what sets this.
+      lanePathOverride = null,
+    } = {},
     {
       ensureSettingsFile = ensureDeliveryHooksSettingsFile,
       spawnAgent = spawnAgentToCompletion,
@@ -765,6 +943,7 @@ const CLAUDE_RESTRICTED_PROVIDER = {
       persistFailure = persistDeliverySpawnFailure,
       resolveReportsDir = resolveDeliveryReportsDir,
       recordCpu = recordChildResourceUsage,
+      stageDeliveryReportCli = stageDeliveryReportCliIntoLane,
     } = {},
   ) {
     const settingsFile = ensureSettingsFile();
@@ -777,7 +956,16 @@ const CLAUDE_RESTRICTED_PROVIDER = {
     // "confines the file tools to the working directories"), so a wrong cwd here is not cosmetic: the agent
     // is sandboxed into editing the wrong repo entirely. Confirmed live: the agent correctly diagnosed it had
     // no real `$LANE` to `cd` into and was sandboxed into the wrong directory under this exact model.
-    const lanePath = resolveLane(lane, { run: runFn });
+    // build-path-codex-isolation-locus — `lanePathOverride` wins when given: a non-`we` locus item's whole
+    // agent turn (build + gate + converge + PR, downstream of this spawn) runs against the IMPLEMENTATION
+    // lane, never the WE lane `lane` (a number in WE's own pool) would resolve to. See
+    // `deliverItem`/`resolveDeliveryLocus`'s own docblocks for why.
+    const lanePath = lanePathOverride || resolveLane(lane, { run: runFn });
+    // build-path-codex-isolation-locus — a foreign-repo lane never carried `delivery-report-cli.mjs` (it is a
+    // plain clone of THAT repo, not WE) — stage it at its real repo-relative path before the agent's first
+    // `report --status=started` call needs it. See `stageDeliveryReportCliIntoLane`'s own docblock for why the
+    // real path is safe here (unlike the fix wrapper's dedicated-subdir staging).
+    if (lanePathOverride) stageDeliveryReportCli(lanePath);
     // #3627 bug 9 (live #3371 attempt 4) — resolve the delivery-reports sidecar directory ONCE, in the
     // WRAPPER's OWN process, via the same `resolveDeliveryReportsDir` this file's own `tryReadDeliveryReport`
     // call (`runAgentToCompletion`) uses to read the report back — never leave it to the spawned agent's copy
@@ -801,7 +989,9 @@ const CLAUDE_RESTRICTED_PROVIDER = {
     // #3627 bug 7(b) — REAL env vars (see `buildDeliveryAgentEnv`'s own docblock), not the old text-appended
     // `[env: ...]` footer `fillMinimalBrief` still also appends below (kept — see that function's own comment
     // — the brief's prose reads naturally either way, and real env vars are what the CLI actually needs).
-    const deliveryEnv = buildDeliveryAgentEnv({ sessionSlug, item, lanePath, attemptTag, reportsDir });
+    const deliveryEnv = buildDeliveryAgentEnv({
+      sessionSlug, item, lanePath, attemptTag, reportsDir, implLane: lanePathOverride,
+    });
     try {
       // #3627 bug 6 — explicit `timeout` override, distinct from (and far larger than) dispatch-lane-io.mjs's
       // `SPAWN_TIMEOUT_MS` (60s, correct only for that file's fire-and-forget `claude --bg` caller). Without
@@ -866,7 +1056,11 @@ const CODEX_PROVIDER = {
   // Same `(request, io?)` shape as `CLAUDE_RESTRICTED_PROVIDER.spawn` — `io` exists ONLY so a test can assert
   // what this spawns without a real `codex` process or a real filesystem.
   async spawn(
-    { sessionId, prompt, resumeSessionId = null, lane, sessionSlug, item, attemptTag } = {},
+    {
+      sessionId, prompt, resumeSessionId = null, lane, sessionSlug, item, attemptTag,
+      // build-path-codex-isolation-locus — see `runAgentToCompletion`'s own docblock for what sets this.
+      lanePathOverride = null,
+    } = {},
     {
       spawnAgent = defaultSpawnCodexAgent,
       resolveLane = resolveLanePath,
@@ -878,19 +1072,28 @@ const CODEX_PROVIDER = {
       denyPaths = null,
       recordCpu = recordChildResourceUsage,
       recordScorecard = recordCodexRunScorecard,
+      stageDeliveryReportCli = stageDeliveryReportCliIntoLane,
     } = {},
   ) {
     // Identical resolution order to the Claude provider — the SAME single source of truth for the lane path
     // (#3627 bug 7(a)) and the SAME wrapper-process-resolved reports directory (#3627 bug 9). Both bugs are
     // provider-independent: they are about where the CHILD is and where its report lands, not about which CLI
     // the child is, so re-deriving either here would just be re-introducing them for the second provider.
-    const lanePath = resolveLane(lane, { run: runFn });
+    // build-path-codex-isolation-locus — `lanePathOverride` wins when given, exactly as in the Claude provider
+    // above: THIS is the actual fix for the live #3604 finding — Codex's own OS sandbox extends `:workspace`
+    // from THIS `cwd`, so a non-`we` item MUST spawn with cwd = its own implementation lane, never WE's.
+    const lanePath = lanePathOverride || resolveLane(lane, { run: runFn });
+    // build-path-codex-isolation-locus — see `CLAUDE_RESTRICTED_PROVIDER.spawn`'s identical call for why this
+    // is required (never optional) whenever the agent's cwd is a foreign repo's lane.
+    if (lanePathOverride) stageDeliveryReportCli(lanePath);
     // #3383 mechanical-dispatcher follow-up fix — SAME lane-aware resolution as CLAUDE_RESTRICTED_PROVIDER
     // above (see its own comment for the full root-cause account): `resolveReportsDir()` called with no
     // argument silently named the primary checkout regardless of `lanePath`, which Codex's real sandbox
     // correctly refused (`EPERM`) rather than tolerating like Claude's soft, hook-based one did.
     const reportsDir = resolveReportsDir(lanePath);
-    const deliveryEnv = buildDeliveryAgentEnv({ sessionSlug, item, lanePath, attemptTag, reportsDir });
+    const deliveryEnv = buildDeliveryAgentEnv({
+      sessionSlug, item, lanePath, attemptTag, reportsDir, implLane: lanePathOverride,
+    });
     // xftsbsg — the deny-map must seal off THIS BUILD'S OWN repo's primary checkout, not always WE's (this
     // module's own default `REPO_ROOT`). `primaryCheckoutForLanePath` reads it straight off the already-resolved
     // `lanePath` (`.lanes/<repo-pool-dir>/lane-<N>`), so a frontierui/plateau-app build denies
@@ -1010,7 +1213,15 @@ export function resolveDeliveryAgentProvider(name = DEFAULT_DELIVERY_AGENT_PROVI
  * handed to `provider.spawn` without touching the real filesystem.
  */
 export async function runAgentToCompletion(
-  { item, sessionSlug, lane, attemptTag, provider = CLAUDE_RESTRICTED_PROVIDER, claudeSessionId },
+  {
+    item, sessionSlug, lane, attemptTag, provider = CLAUDE_RESTRICTED_PROVIDER, claudeSessionId,
+    // build-path-codex-isolation-locus — `deliverItem`'s own resolved implementation-lane path for a non-`we`
+    // locus item (`acquireImplLane`'s return value), or `null` for the unchanged `we`-locus case. Threaded
+    // straight through to `provider.spawn` (both providers resolve their cwd as `lanePathOverride ??
+    // resolveLane(lane)` — see either `spawn`'s own docblock) and re-used below so THIS function's own
+    // report-read resolves the SAME directory the spawn actually wrote to.
+    lanePathOverride = null,
+  },
   {
     readBrief = () => readFileSync(`${REPO_ROOT}/skills-src/conveyor/delivery-agent-brief-v2.md`, 'utf8'),
     readReport = tryReadDeliveryReport,
@@ -1026,14 +1237,16 @@ export async function runAgentToCompletion(
   // #3627 bug 7 — `lane`/`sessionSlug`/`item`/`attemptTag` threaded through so the provider can resolve the
   // real lane path (`cwd`) and mint the real env vars the brief needs (`buildDeliveryAgentEnv`) — see
   // `CLAUDE_RESTRICTED_PROVIDER.spawn`'s own docblock.
-  await provider.spawn({ sessionId: claudeSessionId, prompt, lane, sessionSlug, item, attemptTag }); // AWAITS — see DeliveryAgentProvider's own docblock.
+  await provider.spawn({
+    sessionId: claudeSessionId, prompt, lane, sessionSlug, item, attemptTag, lanePathOverride,
+  }); // AWAITS — see DeliveryAgentProvider's own docblock.
 
   // #3383 mechanical-dispatcher fix — read back from the SAME lane-scoped directory the provider itself just
   // resolved and handed to the spawned agent (see `CLAUDE_RESTRICTED_PROVIDER.spawn`/`CODEX_PROVIDER.spawn`),
   // never this process's own script-location default — which is always the primary checkout, not the lane.
   // `resolveLane`/`resolveReportsDir` mirror the exact same seams each provider already uses, so a test can
   // assert on this independently of which provider ran.
-  const lanePath = resolveLane(lane, { run: runFn });
+  const lanePath = lanePathOverride || resolveLane(lane, { run: runFn });
   const reportsDir = resolveReportsDir(lanePath);
   const report = readReport(sessionSlug, reportsDir);
   if (!report || report.status !== 'done') {
@@ -1114,13 +1327,19 @@ export function fillMinimalBrief(template, { item, sessionSlug, lane, attemptTag
  *  `readReport` is injectable (mirrors `runAgentToCompletion`'s own `readReport = tryReadDeliveryReport`
  *  convention) so this second-report branch is testable without a real delivery-report sidecar on disk. */
 export async function runGateWithOneRetry(
-  { lane, item, sessionSlug, attemptTag, provider = CLAUDE_RESTRICTED_PROVIDER, claudeSessionId },
+  {
+    lane, item, sessionSlug, attemptTag, provider = CLAUDE_RESTRICTED_PROVIDER, claudeSessionId,
+    // build-path-codex-isolation-locus — same meaning and same source as `runAgentToCompletion`'s own
+    // `lanePathOverride`: `deliverItem` passes the SAME value to both, so the gate runs against exactly the
+    // lane the agent's turn just edited.
+    lanePathOverride = null,
+  },
   {
     run: runFn = run, readReport = tryReadDeliveryReport, resolveReportsDir = resolveDeliveryReportsDir,
     commitTurn = commitBuildTurn,
   } = {},
 ) {
-  const lanePath = resolveLanePath(lane, { run: runFn });
+  const lanePath = lanePathOverride || resolveLanePath(lane, { run: runFn });
   // #3565 — the WRAPPER commits the agent's OWN build turn here, before the gate ever runs — the agent never
   // touches `.git` itself any more (see `commitBuildTurn`'s own header for the full redesign reasoning).
   commitTurn({ lane: lanePath, item, provider, phase: 'build' }, { run: runFn });
@@ -1137,7 +1356,8 @@ export async function runGateWithOneRetry(
   // agent "your gate failed, fix it" when the true outcome is `unrun` (nothing in its diff to fix) — see
   // `resumeAgentWithGateFailure` below.
   await resumeAgentWithGateFailure({
-    sessionSlug, lane, item, attemptTag, failureOutput: first.detail, gateOutcome: first.outcome, provider, claudeSessionId,
+    sessionSlug, lane, item, attemptTag, failureOutput: first.detail, gateOutcome: first.outcome, provider,
+    claudeSessionId, lanePathOverride,
   }); // SKETCH — see below
   // #3383 mechanical-dispatcher fix — read back from the SAME lane-scoped directory the resume just used
   // (see `runAgentToCompletion`'s own comment for the full root-cause account), never the wrapper's own
@@ -1169,7 +1389,8 @@ export async function runGateWithOneRetry(
  *  `resumeSessionId` set) rather than a second, resume-specific Claude-CLI code path — a provider owns BOTH
  *  its fresh-spawn and its resume shape, so `CODEX_PROVIDER` (once real) would supply both from one place. */
 async function resumeAgentWithGateFailure({
-  sessionSlug, lane, item, attemptTag, failureOutput, gateOutcome = 'fail', provider = CLAUDE_RESTRICTED_PROVIDER, claudeSessionId,
+  sessionSlug, lane, item, attemptTag, failureOutput, gateOutcome = 'fail', provider = CLAUDE_RESTRICTED_PROVIDER,
+  claudeSessionId, lanePathOverride = null,
 }) {
   // #3627 attempt-5 finding — an `unrun` gate gets an HONEST prompt, not "your gate failed, fix it": that
   // wording is nonsensical when the gate never ran at all (a wrapper/environment problem, e.g. the stale
@@ -1196,7 +1417,10 @@ async function resumeAgentWithGateFailure({
   // #3627 bug 7 — this prompt says `$LANE` above, same as the fresh brief, so this resume needs the SAME real
   // cwd/env treatment (`lane`/`sessionSlug`/`item`/`attemptTag` threaded through to the provider) or a resumed
   // agent hits the identical "no real $LANE to cd into" failure the fresh spawn did.
-  await provider.spawn({ sessionId: claudeSessionId, prompt, resumeSessionId: claudeSessionId, lane, sessionSlug, item, attemptTag }); // AWAITS.
+  await provider.spawn({
+    sessionId: claudeSessionId, prompt, resumeSessionId: claudeSessionId, lane, sessionSlug, item, attemptTag,
+    lanePathOverride,
+  }); // AWAITS.
 }
 
 // #xu2pp2m — `resolveLanePath` EXTRACTED to `./minimal-context-provider.mjs` (imported above), unchanged: the
@@ -1657,7 +1881,13 @@ export function commitBuildTurn(
   if (!paths.length) return { committed: false, paths: [] };
   sanitizeOwnLocusMentions(lane, paths, { readFile, writeFile });
   const msgFile = `${lane}/.delivery-commit-msg-${phase}.txt`;
-  const subject = phase === 'gate-fix' ? `WE #${item}: gate-failure fix` : `WE #${item}: delivery build`;
+  // build-path-codex-isolation-locus — `WE #<item>` was hardcoded; a non-`we` implementation lane's own
+  // commits should carry ITS repo's own canonical prefix (`PLATEAU #<item>`, `FUI #<item>`), matching the
+  // convention `repo-profile.mjs#briefTokensForRepo`'s `ATTRIBUTION` field already establishes for fix/ci-heal.
+  // `repoProfileForLanePath` returns `null` for a lane it cannot place (an unrecognized pool-dir basename, or a
+  // synthetic test path) — falls back to `'WE'`, byte-identical to every existing caller/test.
+  const repoTag = repoProfileForLanePath(lane)?.canonicalPrefix?.toUpperCase() ?? 'WE';
+  const subject = phase === 'gate-fix' ? `${repoTag} #${item}: gate-failure fix` : `${repoTag} #${item}: delivery build`;
   const body = phase === 'gate-fix'
     ? "Commits the delivery agent's fix after a red gate resumed it for one retry (#3383/#3565) — the wrapper "
       + "makes this commit on the agent's behalf; the agent itself never runs git.\n"
@@ -1929,7 +2159,19 @@ export function openPr({ item, attemptTag, lane, park, report, slug, delegation 
   const ref = `lane/${item}${attemptTag ?? ''}-${slug}`;
   const bodyFile = writePrBody({ item, lane, report, delegation }); // REAL — was a PLACEHOLDER path nothing wrote.
   const args = [
-    'scripts/operations/run.mjs', 'open-pr', `--ref=${ref}`, '--sha=HEAD', '--base=main',
+    // build-path-codex-isolation-locus — ABSOLUTE, never the bare relative `scripts/operations/run.mjs`. This
+    // call sets `cwd: lane` below so `run.mjs`'s OWN `process.cwd()` (which `pr-land.mjs`'s `REPO =
+    // flags.repo || process.cwd()` reads) names the repo the PR is actually FOR — correct already for a WE
+    // lane, because a WE lane clone happens to ALSO carry a copy of `scripts/operations/run.mjs` at that
+    // relative path. It is NOT correct for a non-`we` implementation lane (`frontierui`/`plateau-app` — a
+    // completely different application, confirmed by listing a real lane of each: neither carries a
+    // `scripts/operations/` directory at all), where the relative path resolves to nothing and this call would
+    // throw `MODULE_NOT_FOUND` before ever reaching `gh pr create`. An absolute path resolves this script's
+    // own real location (WE's checkout) regardless of `cwd`, while `cwd: lane` still makes `pr-land.mjs`
+    // itself operate against whichever repo `lane` is a clone of — the same "script always runs from WE,
+    // target is an argument/cwd, never the calling process's own location" shape `runConverge`/
+    // `runVerifyOperation` already use for the identical reason.
+    `${REPO_ROOT}scripts/operations/run.mjs`, 'open-pr', `--ref=${ref}`, '--sha=HEAD', '--base=main',
     `--bodyFile=${bodyFile}`, '--requireVerified=true', '--json',
   ];
   args.push(park.mode === 'park' ? `--mode=park` : '--mode=label-on-green');

@@ -100,7 +100,7 @@ import { selectStatusCandidates } from '../../scripts/conveyor/reconcile-core.mj
 // and `runReviewTick`'s own return shape is pinned byte-for-byte by many existing exact-equality tests).
 import { dispatchConvertAdvisory } from '../../scripts/conveyor/convert-advisory-dispatch.mjs';
 import { planClaudeAuthDispatchGate } from '../../scripts/conveyor/claude-auth-health.mjs'; // card x5kagse
-import { runSessionReaperPass, makeReapedLedger, REPO_ROOT as SESSION_REAPER_REPO_ROOT, DEFAULT_IDLE_REAP_THRESHOLD_MS } from '../../scripts/conveyor/session-reaper.mjs';
+import { runSessionReaperPass, makeReapedLedger, makePidDeadResolver, REPO_ROOT as SESSION_REAPER_REPO_ROOT, DEFAULT_IDLE_REAP_THRESHOLD_MS } from '../../scripts/conveyor/session-reaper.mjs';
 import { mintSessionSlug } from '../../scripts/conveyor/session-slug.mjs';
 import { freeLaneNumbers } from '../../scripts/conveyor/reconcile-fix-dispatch.mjs';
 import { repoProfile } from '../../scripts/lib/repo-profile.mjs';
@@ -679,6 +679,14 @@ export function defaultReapSessions({ priorityNames = null } = {}) {
     idleThresholdMs: DEFAULT_IDLE_REAP_THRESHOLD_MS,
     reapedLedger: makeReapedLedger(),
     priorityNames,
+    // #ghost-sessions-inflate-cap — explicitly wired ON here: `runSessionReaperPass`'s own bare default is
+    // OFF (see that function's own docblock for why), so the real production reap this daemon owns must ask
+    // for it by name, the same way `retention-sweep`/`dispatch-scratch-sweep` are opt-in at their own call
+    // sites rather than silently inherited. This is what actually reaps a `conveyor-NNNN` (or `review-*`/
+    // `fix-*`) session whose process is confirmed gone, regardless of which checkout dispatched it — the live
+    // incident: 18 such sessions, `state:'working'`, 20-26 days old, none reaped because `allowedCwd` above
+    // (this daemon's own checkout) short-circuited every other axis for every one of them.
+    pidDeadFor: makePidDeadResolver(),
   });
 }
 
