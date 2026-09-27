@@ -78,6 +78,19 @@ describe('reduceCheckState — the empty list is the whole point', () => {
     expect(reduceCheckState([done('failure'), done('failure', 'review-gate')]).state).toBe('red');
   });
 
+  // #2748 false-red follow-up (soak-replay-gate, PR #2775) — `requiredChecks`, when supplied, replaces the
+  // exclusion list with the inverse question: only a check IN that set counts at all. Future-proof against a
+  // brand-new advisory check whose name nobody has added to `CI_TRUTH_EXCLUDED_CHECKS` yet.
+  it('requiredChecks: only a required-set check counts — an unlisted advisory red (soak-replay-gate) is invisible', () => {
+    const required = ['test', 'smoke', 'daemon-soak'];
+    expect(reduceCheckState([done('success', 'test'), done('failure', 'soak-replay-gate')], required).state).toBe('green');
+    expect(reduceCheckState([done('failure', 'soak-replay-gate')], required).state).toBe('unchecked');
+    expect(reduceCheckState([done('success', 'test'), done('failure', 'test')], required).state).toBe('red');
+    // Omitted/empty falls back to the exclusion-list default, unchanged.
+    expect(reduceCheckState([done('success', 'test'), done('failure', 'soak-replay-gate')]).state).toBe('green');
+    expect(reduceCheckState([done('success', 'test'), done('failure', 'soak-replay-gate')], []).state).toBe('green');
+  });
+
   it('only ever answers with a declared state', () => {
     const inputs = [[], [running()], [done('success')], [done('failure')], [done('skipped')], [done(null)]];
     for (const i of inputs) expect(CHECK_STATES).toContain(reduceCheckState(i).state);
