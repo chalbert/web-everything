@@ -137,11 +137,14 @@ describe('planFixesFromReconcile', () => {
       expect(calls).toEqual([]);
     });
 
-    it('isolates a THROWING fallback to a `no-scope` refusal, not a crash of the whole pass', () => {
+    it('isolates a THROWING fallback to a `scope-read-failed` refusal (retried next pass), not a crash of the whole pass', () => {
+      // #x9fbg1x-live-incident — a throwing (or `null`-returning) fallback is UNAMBIGUOUS evidence the read
+      // failed, never that the PR genuinely touched nothing; this refusal kind is now distinct from `no-scope`
+      // so a reader (and the next tick's fresh read) can tell a transient `gh` failure apart from a durable one.
       const entries = [{ kind: 'fix', prNumber: 2220, headRefName: 'lane/3383-host-process-granularity' }];
       const { planned, refusals } = planFixesFromReconcile(entries, findEpicStub, () => [], () => { throw new Error('gh unreachable'); });
       expect(planned).toEqual([]);
-      expect(refusals).toEqual([{ pr: 2220, kind: 'no-scope', why: expect.stringContaining('changed-file fallback found nothing') }]);
+      expect(refusals).toEqual([{ pr: 2220, kind: 'scope-read-failed', why: expect.stringContaining('read failed') }]);
     });
   });
 
@@ -288,7 +291,10 @@ describe('planFixesFromReconcile', () => {
       expect(planned[0].scope).toEqual(['we:scripts/legit.mjs']);
     });
 
-    it('a GENUINE ghost item number — no matching card anywhere in the diff — is still refused `no-scope`, unaffected', () => {
+    it('#x9fbg1x-live-incident — a GENUINE ghost item number, no matching card anywhere in the diff, now fences off the PR\'s OWN real diff (never stamping the unresolvable id) instead of refusing outright', () => {
+      // Converged with the item-less/#xcla4iv precedent (chalbert/web-everything#2779): an item number that
+      // resolves nowhere AND has no card in the diff is exactly as fence-able as a PR with no item name at all —
+      // this used to discard `resolvePrWorkUnit`'s own `attribution:'pr'` scope and refuse `no-scope` outright.
       const entries = [{ kind: 'fix', prNumber: 99, headRefName: 'lane/9999-ghost' }];
       const cardCalls = [];
       const { planned, refusals } = planFixesFromReconcile(
@@ -297,8 +303,42 @@ describe('planFixesFromReconcile', () => {
         (path, ref) => { cardCalls.push({ path, ref }); return ['we:should/not/be/used.mjs']; },
       );
       expect(cardCalls).toEqual([]); // never even attempted — no candidate card path found
+      expect(refusals).toEqual([]);
+      expect(planned).toEqual([{
+        itemNum: null, pr: 99, laneRef: 'lane/9999-ghost', scope: ['we:scripts/unrelated.mjs'],
+        scopeSource: 'pr-diff', isConflict: false, body: null, headRefOid: null,
+      }]);
+    });
+
+    it('#x9fbg1x-live-incident — a genuine ghost item number whose diff is ALSO empty still refuses `no-scope`', () => {
+      const entries = [{ kind: 'fix', prNumber: 100, headRefName: 'lane/10000-ghost' }];
+      const { planned, refusals } = planFixesFromReconcile(
+        entries, () => null, () => [], () => [], 'we', () => [], () => [],
+      );
       expect(planned).toEqual([]);
-      expect(refusals).toEqual([{ pr: 99, kind: 'no-scope', why: expect.stringContaining('no declared scope') }]);
+      expect(refusals).toEqual([{ pr: 100, kind: 'no-scope', why: expect.stringContaining('no declared scope') }]);
+    });
+
+    it('#x9fbg1x-live-incident — trusts `entry.files` (the shared PR-list snapshot) over a live diff read, and never calls the live read at all when present', () => {
+      const entries = [{ kind: 'fix', prNumber: 2779, headRefName: 'lane/x9fbg1x-bg-isolation-scope', files: ['.claude/settings.json', 'scripts/conveyor/reconcile-core.mjs'] }];
+      const diffCalls = [];
+      const { planned, refusals } = planFixesFromReconcile(
+        entries, () => null, () => [], () => [], 'we',
+        () => { diffCalls.push(1); return ['should/not/be/used.mjs']; },
+      );
+      expect(diffCalls).toEqual([]); // entry.files short-circuits the live read entirely
+      expect(refusals).toEqual([]);
+      expect(planned[0].scope).toEqual(['we:.claude/settings.json', 'we:scripts/conveyor/reconcile-core.mjs']);
+      expect(planned[0].itemNum).toBeNull();
+    });
+
+    it('#x9fbg1x-live-incident — a fallback read that FAILS (throws) refuses `scope-read-failed`, never a durable `no-scope`, for the ghost-item path', () => {
+      const entries = [{ kind: 'fix', prNumber: 101, headRefName: 'lane/10001-ghost' }];
+      const { planned, refusals } = planFixesFromReconcile(
+        entries, () => null, () => [], () => [], 'we', () => { throw new Error('rate limited'); }, () => [],
+      );
+      expect(planned).toEqual([]);
+      expect(refusals).toEqual([{ pr: 101, kind: 'scope-read-failed', why: expect.stringContaining('read failed') }]);
     });
   });
 });
@@ -328,9 +368,9 @@ describe('fetchPrDiffScope — #3634\'s real fallback-scope reader', () => {
     expect(fetchPrDiffScope(1, { exec, root: '/repo' })).toEqual(['we:one/file.mjs']);
   });
 
-  it('fails soft to `[]` on any `gh` failure — never throws the whole pass over one bad read', () => {
+  it('fails soft to `null` on any `gh` failure — never throws the whole pass over one bad read (#x9fbg1x-live-incident: `null` is distinct from a genuinely empty `[]`, so a caller can tell "the read broke" apart from "this PR truly changed nothing")', () => {
     const exec = () => { throw new Error('gh: PR not found'); };
-    expect(fetchPrDiffScope(404, { exec, root: '/repo' })).toEqual([]);
+    expect(fetchPrDiffScope(404, { exec, root: '/repo' })).toBeNull();
   });
 });
 
@@ -341,9 +381,9 @@ describe('fetchPrDiffPaths — the un-prefixed read `resolvePrWorkUnit`\'s own `
     expect(fetchPrDiffPaths(49, { exec, root: '/repo' })).toEqual(['src/a.ts', 'src/b.ts']);
   });
 
-  it('fails soft to `[]` on any `gh` failure', () => {
+  it('fails soft to `null` on any `gh` failure (#x9fbg1x-live-incident — see fetchPrDiffScope\'s own updated test)', () => {
     const exec = () => { throw new Error('gh: PR not found'); };
-    expect(fetchPrDiffPaths(404, { exec, root: '/repo' })).toEqual([]);
+    expect(fetchPrDiffPaths(404, { exec, root: '/repo' })).toBeNull();
   });
 });
 

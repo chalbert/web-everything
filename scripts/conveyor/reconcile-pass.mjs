@@ -93,8 +93,16 @@ import { readHungInfo, resolveHungThresholdMs, readClaudeAuthExpiredInfo, readId
  *                         `defaultBranch` to tell a PR stacked on another lane/PR (the drain will never land it,
  *                         whatever its labels say) apart from an ordinary conflict against `main`. Dropping it
  *                         silently sends every `conflicted` PR back through the pre-#3383 `owed-elsewhere` path.
+ *   `files`             — #x9fbg1x-live-incident (2026-09-27): the PR's own already-changed files, carried on
+ *                         every row (evidence, mirrors `body`) so `reconcile-fix-dispatch.mjs#planFixesFromReconcile`
+ *                         can fence a no-declared-scope fix dispatch off the PR's REAL diff without a second,
+ *                         separate `gh pr diff` call of its own (previously the ONLY way that fallback could
+ *                         read the PR's files — see that file's own docblock for the live PR #2779 this fixes:
+ *                         a genuine, rich diff silently read as empty whenever that separate call failed).
+ *                         Costs nothing extra beyond this one query already paying for connection fields
+ *                         (`labels`/`statusCheckRollup`/`comments`) — `files` is the same shape of field.
  */
-export const PR_LIST_JSON_FIELDS = 'number,headRefName,headRefOid,baseRefName,labels,statusCheckRollup,mergeStateStatus,comments,body';
+export const PR_LIST_JSON_FIELDS = 'number,headRefName,headRefOid,baseRefName,labels,statusCheckRollup,mergeStateStatus,comments,body,files';
 
 /** How many open PRs one pass reads. The board's own `OPEN_LIMIT` is 30; a reconciler that silently stopped at
  *  the default page would leave the overflow unowned, which is this item's defect wearing a smaller hat. */
@@ -684,6 +692,12 @@ export function runReconcilePass({
   // #2748 false-red follow-up — injectable so a test can supply a fixture with no network, matching every
   // other reader in this file. Defaults to the live, cached branch-protection read.
   readRequiredChecks = getRequiredStatusChecks,
+  // #2787-live-incident (2026-09-27) — `origin/<defaultBranch>`'s own current tip, read PURELY LOCALLY (no `gh`
+  // call at all): `reconcile-core.mjs#planReconcile`'s conflict-fix cap needs it to tell "the same conflict,
+  // still stuck" apart from "a fresh conflict, main moved on" (see that function's own `mainSha` param).
+  // Best-effort — see {@link defaultResolveMainSha}'s own docblock; a failed read degrades to `null`, which
+  // `planReconcile` already treats as "ref-only comparison", never a hard failure of this whole pass.
+  resolveMainSha = defaultResolveMainSha,
 } = {}) {
   const repoKey = repo == null ? 'we' : repoKeyForSlug(repo);
   if (repoKey === null) throw new Error(`reconcile-pass: --repo ${repo} is not a constellation repo`);
@@ -706,8 +720,36 @@ export function runReconcilePass({
   // still gets a required set: `getRequiredStatusChecks` degrades to its own cache/fallback chain rather than
   // ever throwing, so this call is safe unconditionally (see that module's own header).
   const { checks: requiredChecks } = readRequiredChecks({ repo: resolvedRepo, branch: defaultBranch });
-  const plan = planReconcile({ repo: repoKey, prs, agents, durableCounts: durableCountsFrom(prs), now, defaultBranch, mainRedWindows, requiredChecks });
+  const mainSha = resolveMainSha(defaultBranch);
+  const plan = planReconcile({
+    repo: repoKey, prs, agents, durableCounts: durableCountsFrom(prs), now, defaultBranch, mainRedWindows,
+    requiredChecks, mainSha,
+  });
   return { ...plan, prs: prs.length, agents: agents.length };
+}
+
+/**
+ * we:scripts/conveyor/reconcile-pass.mjs#defaultResolveMainSha — #2787-live-incident (2026-09-27):
+ * `origin/<ref>`'s own current tip, read with a PLAIN local `git rev-parse` — no `gh`, no network call of its
+ * own beyond whatever fetch already happened this tick (this process's own checkout is kept fresh by the
+ * SAME `assertMainNotStale` staleness guard `reconcile-fix-dispatch.mjs#runReconcileFixDispatch` already runs
+ * before this pass, so `origin/<ref>` is already current by the time this reads it). Best-effort: no local git,
+ * no such ref, any failure at all — degrades to `null`, exactly like every other best-effort reader in this
+ * file (`defaultFetchRef`, `defaultReadMergeBase`) — a lost sha is a strictly smaller loss than failing the
+ * whole reconcile pass over it.
+ * @param {string} ref
+ * @param {{exec?:Function}} [o]
+ * @returns {string|null}
+ */
+export function defaultResolveMainSha(ref, { exec = execFileSync } = {}) {
+  try {
+    const out = String(exec('git', ['rev-parse', `origin/${ref}`], {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 10_000,
+    }) || '').trim();
+    return isSha(out) ? out : null;
+  } catch {
+    return null;
+  }
 }
 
 // ── IO SHELL (runs only as a CLI — the exports above stay side-effect-free on import) ──────────────────────────

@@ -118,7 +118,7 @@ import { sessionSlugFor } from '../operations/dispatch-lane.mjs';
 // and an advisory-fix round on a `needs-human` PR carrying `advisory:changes`. Both are true leaves — no fs, no
 // clock, no process, no network — so importing them keeps this file PURE and leaf-light exactly as its own
 // header requires.
-import { countConflictFixComments, CONFLICT_FIX_COMMENT_MARKER } from './conflict-fix-round-count.mjs';
+import { countStaleConflictFixRounds, CONFLICT_FIX_COMMENT_MARKER } from './conflict-fix-round-count.mjs';
 import {
   countAdvisoryFixComments, ADVISORY_FIX_COMMENT_MARKER,
   isLatestAdvisoryFindingAddressed, isAdvisoryMechanismStandDownSuperseded,
@@ -275,14 +275,37 @@ export const CI_HEAL_ROUND_CAP = 3;
 /**
  * we:scripts/conveyor/reconcile-core.mjs#CONFLICT_FIX_ROUND_CAP — the durable cap a MECHANICAL
  * conflict-resolution round binds on (#xkmu3gv). Mirrors {@link CI_HEAL_ROUND_CAP} exactly: its OWN, smaller
- * cap, counted by `we:scripts/conveyor/conflict-fix-round-count.mjs#countConflictFixComments` — never
- * `roundCap`'s shared rearm/advisory counters, and never reduced by however many ordinary negotiation rounds a
+ * cap, counted by `we:scripts/conveyor/conflict-fix-round-count.mjs#countStaleConflictFixRounds` (2026-09-27:
+ * counts only rounds against the CURRENT target, see {@link CONFLICT_FIX_ABSOLUTE_CEILING}'s own docblock for
+ * why a plain per-marker count was wrong) — never `roundCap`'s shared rearm/advisory counters, and never
+ * reduced by however many ordinary negotiation rounds a
  * PR has already spent (CONFIRMED LIVE: `chalbert/web-everything#2549` was already at 5 of 5 ordinary rounds
  * when PR #2577's routing rule newly offered it a conflict fix, and the shared cap refused it before the fixer
  * ever ran — see that leaf's own header for the full incident). A PR that ALSO exhausts three
  * conflict-resolution rounds still needs a person, exactly as an exhausted `roundCap` does.
  */
 export const CONFLICT_FIX_ROUND_CAP = 3;
+
+/**
+ * we:scripts/conveyor/reconcile-core.mjs#CONFLICT_FIX_ABSOLUTE_CEILING — PR #2787 live incident (2026-09-27):
+ * `main` moving fast made THREE mechanical conflict-resolution rounds each genuinely SUCCEED (each posted its
+ * own {@link CONFLICT_FIX_COMMENT_MARKER}) against three DIFFERENT targets in a row (a stacked base rebased
+ * twice, then the base itself landed and the PR retargeted to `main`) — `countConflictFixComments` could not
+ * tell "the same conflict still unresolved" apart from "a fresh conflict against newer work", so
+ * {@link CONFLICT_FIX_ROUND_CAP} (3) was spent on three CLEAN repairs and the fourth, genuinely first-ever
+ * main-base conflict was refused `cap-exhausted` before a fixer ever tried it.
+ * {@link countStaleConflictFixRounds} now counts against `CONFLICT_FIX_ROUND_CAP` only the rounds that resolved
+ * the SAME target this PR is STILL conflicting against (same ref, same sha where known) — a round against a
+ * ref/sha that has since moved on doesn't count, because the mechanism worked; the PR just kept getting new
+ * work under it. That alone would let a PR whose target genuinely never stops moving retry FOREVER, though
+ * (every round would look "fresh" by construction) — this is the hard ceiling that still catches THAT true
+ * loop: the RAW total of conflict-fix rounds ever run (`countStaleConflictFixRounds`'s own `total`), regardless
+ * of staleness, still refuses `cap-exhausted` once it reaches this bound. 3x the per-target cap — generous
+ * enough that a PR legitimately outrunning a fast-moving target for a while is not punished for it, but still
+ * finite: a PR that needed this many rounds, of ANY kind, is exactly the "a person must take it over" case
+ * {@link CONFLICT_FIX_ROUND_CAP} already exists to name.
+ */
+export const CONFLICT_FIX_ABSOLUTE_CEILING = CONFLICT_FIX_ROUND_CAP * 3;
 
 /**
  * we:scripts/conveyor/reconcile-core.mjs#ADVISORY_FIX_ROUND_CAP — the durable cap an ADVISORY-FIX round on a
@@ -1018,6 +1041,12 @@ export function planReconcile({
   // OPTION, never an env read — this file stays pure; a test sets it directly to exercise both sides of the
   // bound with no clock mocking.
   liveSessionOverrunMs = LIVE_SESSION_OVERRUN_MS,
+  // #2787-live-incident (2026-09-27) — `origin/<defaultBranch>`'s own current tip, a CHEAP, purely-local fact
+  // (`reconcile-pass.mjs`'s IO shell resolves it with one `git rev-parse`, piggybacked on the fetch
+  // `assertMainNotStale` already ran this same tick — no extra `gh` call, no GraphQL/REST budget exposure).
+  // `null` (the default, and what every existing test/caller gets unless it opts in) degrades the staleness
+  // comparison below to ref-name-only — see {@link countStaleConflictFixRounds}'s own docblock.
+  mainSha = null,
 } = {}) {
   const dispatch = [];
   const refusals = [];
@@ -1052,6 +1081,20 @@ export function planReconcile({
       // not actually resolve a red-main-caused failure, live-measured on this exact incident.
       requiredCheckCompletedAt: pr?.requiredCheckCompletedAt ?? null,
       aheadByOnMain: Number.isFinite(pr?.aheadByOnMain) ? pr.aheadByOnMain : null,
+      // #x9fbg1x-live-incident (2026-09-27) — the PR's OWN already-changed files, when the IO shell's `gh pr
+      // list` read carried them (`reconcile-pass.mjs#PR_LIST_JSON_FIELDS` now asks for `files`, served for free
+      // off the shared `#gh-graphql-budget` snapshot — see `pr-snapshot.mjs#SNAPSHOT_FIELDS`, which already
+      // fetches this for every open PR). EVIDENCE ONLY here (no decision in THIS file reads it — mirrors
+      // `aheadByOnMain`/`body` above); `reconcile-fix-dispatch.mjs#planFixesFromReconcile` reads it so a
+      // no-declared-scope fix dispatch can fence itself off this PR's real changed files WITHOUT a second,
+      // rate-limit-exposed `gh pr diff` call of its own. Projected to plain repo-relative path strings (the
+      // same shape `fetchDiffPaths` already returns) right here at the pure core's boundary, not left as raw
+      // `{path, additions, deletions}` objects for every consumer to re-derive. `null` (not `[]`) when the
+      // shell's own read did not carry `files` at all (an older caller, or a `--prs-file` snapshot built before
+      // this field existed) — a caller must tell "not fetched" apart from "genuinely no files changed".
+      files: Array.isArray(pr?.files)
+        ? pr.files.map((f) => (typeof f?.path === 'string' ? f.path : String(f ?? ''))).filter(Boolean)
+        : null,
     };
     const refuse = (kind, extra) => { refusals.push({ ...base, kind, ...extra }); };
     // xilx617 (epic #4075/#3383) — EVERY `cap-exhausted` refusal EXCEPT the `ci-red` one above (which already
@@ -1451,12 +1494,22 @@ export function planReconcile({
       const baseRefName = pr?.baseRefName ?? null;
       const isStackedBase = Boolean(baseRefName) && baseRefName !== defaultBranch;
       if (isStackedBase) {
-        const conflictAttempts = countConflictFixComments(pr?.comments);
-        if (conflictAttempts >= conflictFixCap) {
+        // #2787-live-incident — see {@link CONFLICT_FIX_ABSOLUTE_CEILING}'s own docblock: `currentRef` is this
+        // PR's OWN stacked base (never `defaultBranch` here, by construction of `isStackedBase`); a round
+        // resolved against an EARLIER tip of that same base (rebased since, or a wholly different base this PR
+        // once stacked on) does not count against the smaller per-target cap, only the hard ceiling.
+        const { stale: conflictAttempts, total: conflictTotal } = countStaleConflictFixRounds(pr?.comments, {
+          currentRef: baseRefName, currentSha: null,
+        });
+        if (conflictAttempts >= conflictFixCap || conflictTotal >= CONFLICT_FIX_ABSOLUTE_CEILING) {
           refuseCapExhausted({
             ...withPhase, attempts: conflictAttempts, cap: conflictFixCap, capKind: 'stacked-rebase',
-            why: `this PR's own durable conflict-fix count is ${conflictAttempts} against a cap of ${conflictFixCap}` +
-              ` — mechanical rebase against its base \`${baseRefName}\` is exhausted here and a person must take it`,
+            why: conflictTotal >= CONFLICT_FIX_ABSOLUTE_CEILING
+              ? `this PR's own durable conflict-fix count is ${conflictTotal} against the hard ceiling of ` +
+                `${CONFLICT_FIX_ABSOLUTE_CEILING} (${conflictAttempts} against its current target, base ` +
+                `\`${baseRefName}\`) — this PR keeps re-conflicting no matter how many rounds run; a person must take it over`
+              : `this PR's own durable conflict-fix count is ${conflictAttempts} against a cap of ${conflictFixCap}` +
+                ` — mechanical rebase against its base \`${baseRefName}\` is exhausted here and a person must take it`,
           });
         } else {
           dispatch.push({
@@ -1464,7 +1517,8 @@ export function planReconcile({
             attempts: conflictAttempts, cap: conflictFixCap,
             why: `conflicts with its own base \`${baseRefName}\` (not \`${defaultBranch}\`) — a stacked PR the ` +
               'drain will never land regardless of labels, so this is a mechanical rebase against its base, ' +
-              `never a rebase owed to the drain; ${conflictAttempts} of ${conflictFixCap} conflict-fix attempts are spent`,
+              `never a rebase owed to the drain; ${conflictAttempts} of ${conflictFixCap} conflict-fix attempts are spent` +
+              (conflictTotal > conflictAttempts ? ` (${conflictTotal} total rounds ever run, against earlier targets)` : ''),
           });
         }
         continue;
@@ -1532,12 +1586,23 @@ export function planReconcile({
     // rounds ever run). See that constant's own docblock for the full incident.
     const isConflictBounce = phase === 'bounced' && withPhase.labels.includes(CONFLICT_LABEL);
     if (isConflictBounce) {
-      const conflictAttempts = countConflictFixComments(pr?.comments);
-      if (conflictAttempts >= conflictFixCap) {
+      // #2787-live-incident — `currentRef` is `defaultBranch` (this population is, by definition, a main-base
+      // conflict); `mainSha` is `origin/<defaultBranch>`'s own current tip, when the IO shell supplied one (see
+      // {@link CONFLICT_FIX_ABSOLUTE_CEILING}'s own docblock). A round that resolved against an EARLIER main —
+      // main moved and created a genuinely NEW conflict since — does not count against the smaller per-target
+      // cap below, only the hard ceiling.
+      const { stale: conflictAttempts, total: conflictTotal } = countStaleConflictFixRounds(pr?.comments, {
+        currentRef: defaultBranch, currentSha: mainSha,
+      });
+      if (conflictAttempts >= conflictFixCap || conflictTotal >= CONFLICT_FIX_ABSOLUTE_CEILING) {
         refuseCapExhausted({
           ...withPhase, attempts: conflictAttempts, cap: conflictFixCap, capKind: 'conflict-fix',
-          why: `this PR's own durable conflict-fix count is ${conflictAttempts} against a cap of ${conflictFixCap}` +
-            ' — mechanical conflict-resolution is exhausted here and a person must take it',
+          why: conflictTotal >= CONFLICT_FIX_ABSOLUTE_CEILING
+            ? `this PR's own durable conflict-fix count is ${conflictTotal} against the hard ceiling of ` +
+              `${CONFLICT_FIX_ABSOLUTE_CEILING} (${conflictAttempts} against its current target, \`${defaultBranch}\`)` +
+              ' — this PR keeps re-conflicting no matter how many rounds run; a person must take it over'
+            : `this PR's own durable conflict-fix count is ${conflictAttempts} against a cap of ${conflictFixCap}` +
+              ' — mechanical conflict-resolution is exhausted here and a person must take it',
         });
         continue;
       }
@@ -1552,6 +1617,7 @@ export function planReconcile({
         findings, attempts: conflictAttempts, cap: conflictFixCap,
         why: `bounced with ${findings} finding(s) via a mechanical conflict-resolution route (merge-status:conflicting),`
           + ` nothing live is working it, and ${conflictAttempts} of ${conflictFixCap} conflict-fix attempts are spent`
+          + (conflictTotal > conflictAttempts ? ` (${conflictTotal} total rounds ever run, against earlier targets)` : '')
           + (advisoryAlsoPending
             ? ' — this PR also carries an admitted advisory:changes finding, owed its own advisory-fix round once this conflict clears'
             : ''),
