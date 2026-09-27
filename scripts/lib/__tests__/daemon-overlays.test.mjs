@@ -77,7 +77,11 @@ function makeGitClone() {
 function pushRef(originDir, ref) {
   const dir = join(mkdtempSync(join(tmpdir(), 'we-daemon-overlays-author-')), 'w');
   gitOk(dirname(dir), ['clone', '-q', originDir, dir]);
-  gitOk(dir, ['checkout', '-q', '-b', ref]);
+  // Branch from `origin/main` EXPLICITLY, never from the clone's checked-out HEAD: `origin.git` is a bare
+  // `git init` whose HEAD follows the host's `init.defaultBranch` — `master` on a CI runner with no such config
+  // — so a plain clone checks out nothing, `-b` would make an unrelated orphan branch, and the guard's
+  // `merge-tree` would then fail on unrelated histories (CI-only: macOS's system gitconfig sets `main`).
+  gitOk(dir, ['checkout', '-q', '-b', ref, 'origin/main']);
   writeFileSync(join(dir, `${ref.replace(/\//g, '-')}.txt`), 'x\n');
   gitOk(dir, ['add', '.']);
   gitOk(dir, ['commit', '-q', '-m', `overlay: ${ref}`]);
