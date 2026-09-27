@@ -21,8 +21,9 @@ import daemonHeldOnLastGood from './daemon-held-on-last-good.mjs';
 import machineOverload from './machine-overload.mjs';
 import dispatchPermissionStall from './dispatch-permission-stall.mjs';
 import dispatchRefusedStaleClone from './dispatch-refused-stale-clone.mjs';
+import duplicateLiveSessions from './duplicate-live-sessions.mjs';
 
 export const SMELLS = Object.freeze([
   daemonSilent, daemonOwedNoDispatch, cloneStale, redPrUnattended, badCredentials, laneStarvation, healthTickOverrun, heavyQueueWait, staleClaim,
-  claudeAuthExpired, daemonHeldOnLastGood, machineOverload, dispatchPermissionStall, dispatchRefusedStaleClone,
+  claudeAuthExpired, daemonHeldOnLastGood, machineOverload, dispatchPermissionStall, dispatchRefusedStaleClone, duplicateLiveSessions,
 ]);

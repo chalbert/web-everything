@@ -1,13 +1,20 @@
 /**
- * @file scripts/conveyor/__tests__/fix-dispatch-claim.test.mjs — #x0jphk5 (parent #4075, epic #3383).
- * @description Proves the real per-(repo, PR, head sha) claim `reconcile-fix-dispatch-daemon.mjs`'s own header
- *   used to (falsely) claim already existed. Two planes:
+ * @file scripts/conveyor/__tests__/fix-dispatch-claim.test.mjs — #x0jphk5 (parent #4075, epic #3383), corrected
+ *   dup-heal-dispatch (2026-09-27 LIVE INCIDENT).
+ * @description Proves the real per-(repo, kind, PR) claim `reconcile-fix-dispatch-daemon.mjs`'s own header used
+ *   to (falsely) claim already existed. Three planes:
  *     1. The claim primitives themselves (`fix-dispatch-claim.mjs`), against a real temp lock root — atomic
  *        mutual exclusion and TTL-bounded dead-holder reclaim, mirroring `file-locks.test.mjs`'s own style.
  *     2. THE RED→GREEN PROOF: `dispatchFix`, `tryResumeFix` and `dispatchCiHeal` each wired to take this claim
  *        before spawning/resuming — two dispatch attempts for the SAME PR, from two DIFFERENT owners (modeling
  *        two real dispatcher processes racing the 26+s `claude agents --json --all` listing lag these
  *        functions' own docblocks describe), produce EXACTLY ONE spawn.
+ *     3. THE dup-heal-dispatch REGRESSION PROOF: the original design keyed the claim on `(repo, pr, headSha)`,
+ *        so a live session's OWN push (a NEW head sha, same PR, same kind) opened a free, independent slot — a
+ *        second dispatcher reading it during the SAME listing-lag window dispatched a genuine DUPLICATE
+ *        (`ci-heal-2784` x3 / `ci-heal-2783` x3, live 2026-09-26 22:16 ET — see `fix-dispatch-claim.mjs`'s own
+ *        header). The key is now `(repo, kind, pr)`, with `headSha` carried only as diagnostic `meta` — these
+ *        tests prove the SAME head-sha-rotation scenario is now refused.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -15,7 +22,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   DEFAULT_FIX_DISPATCH_CLAIM_TTL_MINUTES, fixDispatchClaimRoot, fixDispatchClaimOwner, fixDispatchResource,
-  acquireFixDispatchClaim, releaseFixDispatchClaim, readFixDispatchClaim,
+  acquireFixDispatchClaim, releaseFixDispatchClaim, readFixDispatchClaim, fixDispatchSessionName,
+  isClaimSessionLive, listFixDispatchClaims, refreshLiveFixDispatchClaims,
 } from '../fix-dispatch-claim.mjs';
 import { dispatchFix, tryResumeFix } from '../reconcile-fix-dispatch.mjs';
 import { dispatchCiHeal } from '../../operations/ci-heal-pr-dispatch.mjs';
@@ -29,19 +37,31 @@ const T0 = Date.parse('2026-09-25T12:00:00.000Z');
 const iso = (ms) => new Date(ms).toISOString();
 
 describe('fixDispatchResource', () => {
-  it('keys on repo + pr + headSha, distinguishing every axis', () => {
-    const a = fixDispatchResource({ repo: 'we', pr: 100, headSha: 'aaa' });
-    const b = fixDispatchResource({ repo: 'plateau-app', pr: 100, headSha: 'aaa' });
-    const c = fixDispatchResource({ repo: 'we', pr: 101, headSha: 'aaa' });
-    const d = fixDispatchResource({ repo: 'we', pr: 100, headSha: 'bbb' });
+  it('keys on repo + kind + pr, distinguishing every axis', () => {
+    const a = fixDispatchResource({ repo: 'we', pr: 100, kind: 'fix' });
+    const b = fixDispatchResource({ repo: 'plateau-app', pr: 100, kind: 'fix' });
+    const c = fixDispatchResource({ repo: 'we', pr: 101, kind: 'fix' });
+    const d = fixDispatchResource({ repo: 'we', pr: 100, kind: 'ci-heal' });
     expect(new Set([a, b, c, d]).size).toBe(4);
   });
-  it('degrades a missing/null head sha to a stable "unknown" slot rather than skipping the claim', () => {
-    expect(fixDispatchResource({ repo: 'we', pr: 5, headSha: null })).toBe(fixDispatchResource({ repo: 'we', pr: 5 }));
+  // dup-heal-dispatch (2026-09-27 LIVE INCIDENT) — THE REGRESSION THIS FIX CLOSES. Before this fix, a
+  // different head sha for the SAME (repo, pr) was a FREE, independent slot — exactly what let a still-live
+  // session's own push (a fresh commit it made mid-task) rotate its own claim out from under it, so a second
+  // dispatcher inside the listing-lag window saw "free" and double-dispatched (`ci-heal-2784`/`ci-heal-2783`,
+  // live tonight). The resource key no longer varies with `headSha` at all — it is metadata only now (see
+  // `acquireFixDispatchClaim`'s own `meta.headSha`).
+  it('a DIFFERENT head sha for the SAME (repo, kind, pr) is the SAME resource — no longer a free slot', () => {
+    const a = fixDispatchResource({ repo: 'we', pr: 100, kind: 'ci-heal' });
+    const b = fixDispatchResource({ repo: 'we', pr: 100, kind: 'ci-heal' }); // headSha isn't even part of the call
+    expect(a).toBe(b);
   });
-  it('rejects a non-string repo or non-integer pr', () => {
+  it('kind defaults to "fix" — every pre-existing caller that never passed one keeps its old resource string', () => {
+    expect(fixDispatchResource({ repo: 'we', pr: 100 })).toBe(fixDispatchResource({ repo: 'we', pr: 100, kind: 'fix' }));
+  });
+  it('rejects a non-string repo, non-integer pr, or empty kind', () => {
     expect(() => fixDispatchResource({ repo: '', pr: 5 })).toThrow(TypeError);
     expect(() => fixDispatchResource({ repo: 'we', pr: 'x' })).toThrow(TypeError);
+    expect(() => fixDispatchResource({ repo: 'we', pr: 5, kind: '' })).toThrow(TypeError);
   });
 });
 
@@ -69,9 +89,16 @@ describe('acquireFixDispatchClaim / releaseFixDispatchClaim — atomic mutual ex
     expect(r2).toMatchObject({ ok: false, reason: 'held', heldBy: 'A' });
   });
 
-  it('a different head sha for the SAME pr is a free, independent slot (a new push is not blocked by the old commit\'s claim)', () => {
-    acquireFixDispatchClaim({ repo: 'we', pr: 100, headSha: 'sha1', owner: 'A', lockRoot: claimRoot, nowMs: T0, nowIso: iso(T0) });
-    const r2 = acquireFixDispatchClaim({ repo: 'we', pr: 100, headSha: 'sha2', owner: 'B', lockRoot: claimRoot, nowMs: T0, nowIso: iso(T0) });
+  // dup-heal-dispatch REGRESSION PROOF — see this file's own header and `fixDispatchResource`'s own test above.
+  it('a DIFFERENT head sha for the SAME (repo, kind, pr) is BLOCKED, not a free slot (the live incident this fixes)', () => {
+    acquireFixDispatchClaim({ repo: 'we', pr: 100, kind: 'ci-heal', headSha: 'sha1', owner: 'A', lockRoot: claimRoot, nowMs: T0, nowIso: iso(T0) });
+    // Models the still-live session's OWN push: a fresh head sha, same PR, same kind, moments later.
+    const r2 = acquireFixDispatchClaim({ repo: 'we', pr: 100, kind: 'ci-heal', headSha: 'sha2', owner: 'B', lockRoot: claimRoot, nowMs: T0 + 60_000, nowIso: iso(T0 + 60_000) });
+    expect(r2).toMatchObject({ ok: false, reason: 'held', heldBy: 'A' });
+  });
+  it('a DIFFERENT kind for the SAME (repo, pr) is a free, independent slot — fix and ci-heal never share one', () => {
+    acquireFixDispatchClaim({ repo: 'we', pr: 100, kind: 'fix', owner: 'A', lockRoot: claimRoot, nowMs: T0, nowIso: iso(T0) });
+    const r2 = acquireFixDispatchClaim({ repo: 'we', pr: 100, kind: 'ci-heal', owner: 'B', lockRoot: claimRoot, nowMs: T0, nowIso: iso(T0) });
     expect(r2.ok).toBe(true);
   });
 
@@ -127,6 +154,66 @@ describe('readFixDispatchClaim — read-only introspection for a dry-run', () =>
     expect(readFixDispatchClaim({ repo: 'we', pr: 7, headSha: 's', lockRoot: claimRoot })).toBeNull();
     acquireFixDispatchClaim({ repo: 'we', pr: 7, headSha: 's', owner: 'A', lockRoot: claimRoot, nowMs: T0, nowIso: iso(T0) });
     expect(readFixDispatchClaim({ repo: 'we', pr: 7, headSha: 's', lockRoot: claimRoot })?.owner).toBe('A');
+  });
+});
+
+describe('fixDispatchSessionName / isClaimSessionLive — the name-based liveness signal the refresh relies on', () => {
+  it('mints the SAME name a real dispatch would (mirrors bindAgents PATH 2)', () => {
+    expect(fixDispatchSessionName({ repo: 'we', pr: 2784, kind: 'ci-heal' })).toBe('ci-heal-2784');
+    expect(fixDispatchSessionName({ repo: 'we', pr: 2783, kind: 'fix' })).toBe('fix-2783');
+  });
+  it('is live when a non-terminal agent carries the exact expected name', () => {
+    const agentsAll = [{ name: 'ci-heal-2784', state: 'working' }];
+    expect(isClaimSessionLive({ repo: 'we', pr: 2784, kind: 'ci-heal', agentsAll })).toBe(true);
+  });
+  it('is NOT live once the session reaches a terminal state', () => {
+    const agentsAll = [{ name: 'ci-heal-2784', state: 'done' }];
+    expect(isClaimSessionLive({ repo: 'we', pr: 2784, kind: 'ci-heal', agentsAll })).toBe(false);
+  });
+  it('is NOT live when no agent carries that name at all (covers the spawn-listing lag)', () => {
+    expect(isClaimSessionLive({ repo: 'we', pr: 2784, kind: 'ci-heal', agentsAll: [] })).toBe(false);
+  });
+});
+
+describe('listFixDispatchClaims / refreshLiveFixDispatchClaims — the tick-time keep-alive', () => {
+  it('lists every held claim with usable meta', () => {
+    acquireFixDispatchClaim({ repo: 'we', pr: 2784, kind: 'ci-heal', headSha: 'sha1', owner: 'A', lockRoot: claimRoot, nowMs: T0, nowIso: iso(T0) });
+    acquireFixDispatchClaim({ repo: 'we', pr: 2783, kind: 'ci-heal', headSha: 'sha2', owner: 'B', lockRoot: claimRoot, nowMs: T0, nowIso: iso(T0) });
+    const claims = listFixDispatchClaims(claimRoot);
+    expect(claims).toHaveLength(2);
+    expect(claims.map((c) => c.meta.pr).sort()).toEqual([2783, 2784]);
+  });
+
+  it('returns [] for a lockRoot that does not exist yet, rather than throwing', () => {
+    expect(listFixDispatchClaims(join(claimRoot, 'does-not-exist'))).toEqual([]);
+  });
+
+  it('refreshes ONLY the claim whose session is confirmed live — a claim near TTL expiry survives a tick while its session is still running', () => {
+    acquireFixDispatchClaim({ repo: 'we', pr: 2784, kind: 'ci-heal', headSha: 'sha1', owner: 'A', lockRoot: claimRoot, nowMs: T0, nowIso: iso(T0), leaseMinutes: 10 });
+    acquireFixDispatchClaim({ repo: 'we', pr: 2783, kind: 'ci-heal', headSha: 'sha2', owner: 'B', lockRoot: claimRoot, nowMs: T0, nowIso: iso(T0), leaseMinutes: 10 });
+
+    // #2784's session is still live; #2783's already finished.
+    const listAgentsAll = () => [{ name: 'ci-heal-2784', state: 'working' }, { name: 'ci-heal-2783', state: 'done' }];
+    const refreshAt = T0 + 9 * 60_000; // just inside the original 10-minute TTL
+    const result = refreshLiveFixDispatchClaims({ lockRoot: claimRoot, listAgentsAll, nowIso: () => iso(refreshAt) });
+    expect(result.checked).toBe(2);
+    expect(result.refreshed).toHaveLength(1);
+    expect(result.refreshed[0]).toMatchObject({ repo: 'we', pr: 2784, kind: 'ci-heal', owner: 'A' });
+
+    // Past the ORIGINAL TTL (T0 + 11min): #2784's claim (refreshed at T0+9min) is still held; #2783's (never
+    // refreshed) is now reclaimable — proving the refresh, not a fluke, is what kept #2784's claim alive.
+    const pastOriginalTtl = T0 + 11 * 60_000;
+    const stillHeld = acquireFixDispatchClaim({ repo: 'we', pr: 2784, kind: 'ci-heal', owner: 'C', lockRoot: claimRoot, nowMs: pastOriginalTtl, nowIso: iso(pastOriginalTtl) });
+    expect(stillHeld.ok).toBe(false);
+    const reclaimed = acquireFixDispatchClaim({ repo: 'we', pr: 2783, kind: 'ci-heal', owner: 'C', lockRoot: claimRoot, nowMs: pastOriginalTtl, nowIso: iso(pastOriginalTtl) });
+    expect(reclaimed).toMatchObject({ ok: true, reason: 'lease-expired' });
+  });
+
+  it('a lock root with no claims at all is a no-op (never calls listAgentsAll unnecessarily)', () => {
+    let called = false;
+    const result = refreshLiveFixDispatchClaims({ lockRoot: join(claimRoot, 'empty'), listAgentsAll: () => { called = true; return []; } });
+    expect(result).toEqual({ checked: 0, refreshed: [] });
+    expect(called).toBe(false);
   });
 });
 
@@ -274,5 +361,25 @@ describe('dispatchCiHeal — two racing dispatchers, one PR: exactly one spawn',
     expect(b).toMatchObject({ held: true, reason: 'held', heldBy: 'dispatcher-A' });
 
     expect(sinkCalls).toHaveLength(1); // ← THE PROOF: the sink (which is what actually spawns) ran once.
+  });
+
+  // dup-heal-dispatch — THE LIVE INCIDENT ITSELF, REPLAYED THROUGH THE REAL DISPATCH FUNCTION: `ci-heal-2784`
+  // dispatched three times tonight because each dispatch's OWN push (a real ci-heal commit) changed the PR's
+  // `headRefOid` before the previous session was confirmed live, and the OLD claim keyed on that head sha let
+  // the second dispatch see a free slot. This models EXACTLY that: dispatcher A dispatches against `headRefOid:
+  // 'sha1'`; dispatcher B, moments later, reads the SAME PR post-push (`headRefOid: 'sha2'`) and tries again —
+  // must be refused, not a second real spawn.
+  it('the SAME PR redispatched after its OWN head sha changed (a live session\'s own push) is refused, not a second spawn', async () => {
+    const { DISPATCH_EFFECT } = await import('../../operations/dispatch-lane.mjs');
+    const sinkCalls = [];
+    const sinks = { [DISPATCH_EFFECT]: async (payload) => { sinkCalls.push(payload); return { handle: 'agent-1' }; } };
+
+    const a = await dispatchCiHeal({ ...planned, headRefOid: 'sha1' }, { readBrief: () => TEMPLATE, sinks, claimRoot, claimOwner: 'dispatcher-A' });
+    expect(a.held).toBeUndefined();
+
+    const b = await dispatchCiHeal({ ...planned, headRefOid: 'sha2' }, { readBrief: () => TEMPLATE, sinks, claimRoot, claimOwner: 'dispatcher-B' });
+    expect(b).toMatchObject({ held: true, reason: 'held', heldBy: 'dispatcher-A' });
+
+    expect(sinkCalls).toHaveLength(1); // ← THE PROOF: tonight's actual duplicate-dispatch shape, now refused.
   });
 });
