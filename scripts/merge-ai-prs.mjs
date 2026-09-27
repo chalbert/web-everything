@@ -3353,6 +3353,19 @@ export function basisTouchesEngineTier(score) {
  * @param {{basisFiles?: string[]}} score - a `scoreEscalation` result
  * @returns {boolean} always `false` until `#3493` unblocks
  */
+/**
+ * The `gh-error` detail for a failed `gh pr list`: the error's first line PLUS gh's own last stderr line.
+ * `execFile`'s message is only "Command failed: gh pr list …" — the actual cause (secondary rate limit, 401,
+ * a crashing wrapper) lives in stderr and was being dropped (live 2026-09-27 ~04:04Z: every drain pass logged a
+ * bare gh-error for 20 minutes and nobody could tell it was a GitHub rate-limit storm).
+ */
+export function ghListErrText(e) {
+  const head = String((e && e.message) || e).split('\n')[0];
+  const lines = String((e && e.stderr) || '').split('\n').map((l) => l.trim()).filter(Boolean);
+  const cause = lines.length ? lines[lines.length - 1].slice(0, 300) : '';
+  return cause && !head.includes(cause) ? `${head} — gh: ${cause}` : head;
+}
+
 export function engineTierForCandidate(score) { // `score` names the real future param — unused until #3493 unblocks
   void score;
   return false; // #3493 (blockedBy #2410) — flip to `basisTouchesEngineTier(score)` once unblocked.
