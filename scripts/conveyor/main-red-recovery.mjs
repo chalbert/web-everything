@@ -739,7 +739,20 @@ export const MISSING_RUN_COMMENT_MARKER = '🚦 conveyor missing-run-recovery';
  * `['test']` would flag a PR that already reported `smoke`; PR #2740 review). Instead fall back to the NARROWER,
  * name-free test: a PR is a candidate only when its rollup has NO entry at all from the CI workflow
  * (`workflowName`) — a PR that reported ANY CI-workflow check is never flagged.
- * @param {Array<object>} prs - as `gh pr list --json number,headRefName,headRefOid,statusCheckRollup` returns.
+ *
+ * A REAL MERGE CONFLICT (`mergeable === 'CONFLICTING'`) IS NEVER A CANDIDATE HERE, whatever its rollup shows —
+ * live incident, chalbert/web-everything#2793 (landing freeze, 2026-09-27): GitHub creates no merge ref for a
+ * conflicting PR, so a `pull_request`-triggered required check can never start, let alone report — the rollup
+ * reads as "missing" FOREVER, not "hasn't happened yet". Before this exclusion, this pass kept re-triggering CI
+ * on #2793 every sweep, burning {@link DEFAULT_MAX_MISSING_RUN_RETRIES_PER_SHA} attempts on a check that could
+ * never possibly start, then refusing it `missing-run-cap-exhausted` — a permanent false-positive cap-burn that
+ * has nothing to do with a real "GitHub hasn't noticed this push yet" gap. Resolving the conflict is
+ * `parked-pr-conflict-watch.mjs`'s job (`we:scripts/conveyor/conflict-fix-round-count.mjs`'s own cap governs
+ * that repair), never this pass's — a conflicting PR falls out of this population entirely, the same direction
+ * {@link buildHungCandidates} already takes for a PR with no rollup at all.
+ * @param {Array<object>} prs - as `gh pr list --json number,headRefName,headRefOid,statusCheckRollup,mergeable`
+ *   returns. `mergeable` is OPTIONAL — its absence (an older caller, a test double) means the conflict exclusion
+ *   is simply inert and every candidate is judged exactly as before this exclusion existed.
  * @param {{requiredContexts?:(string[]|null), workflowName?:string}} [o]
  * @returns {Array<{prNumber:number, headRefName:(string|null), headSha:(string|null), baseRefName:(string|null)}>}
  */
@@ -753,6 +766,9 @@ export function buildMissingRunCandidates(prs, { requiredContexts = DEFAULT_REQU
   for (const pr of Array.isArray(prs) ? prs : []) {
     const prNumber = Number(pr?.number);
     if (!Number.isInteger(prNumber) || prNumber <= 0) continue;
+    // #2793 — a real git conflict can never produce a merge ref, so it can never produce a required-check run
+    // either; leave it entirely to the conflict-resolution path rather than burning this pass's own retry cap.
+    if (String(pr?.mergeable ?? '').toUpperCase() === 'CONFLICTING') continue;
     const roll = Array.isArray(pr?.statusCheckRollup) ? pr.statusCheckRollup : [];
     const allMissing = unknown
       ? !roll.some((c) => c?.workflowName === workflowName)

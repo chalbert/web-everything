@@ -26,9 +26,10 @@ import dispatchRefusedStaleClone from './dispatch-refused-stale-clone.mjs';
 import ghShimLanePath from './gh-shim-lane-path.mjs';
 import duplicateLiveSessions from './duplicate-live-sessions.mjs';
 import bgIsolationStall from './bg-isolation-stall.mjs';
+import prNoOwner from './pr-no-owner.mjs';
 
 export const SMELLS = Object.freeze([ghCallFailures, ghGraphqlBudget,
   daemonSilent, daemonOwedNoDispatch, cloneStale, redPrUnattended, badCredentials, laneStarvation, healthTickOverrun, heavyQueueWait, staleClaim,
   claudeAuthExpired, daemonHeldOnLastGood, machineOverload, dispatchPermissionStall, dispatchRefusedStaleClone, ghShimLanePath,
-  duplicateLiveSessions, bgIsolationStall,
+  duplicateLiveSessions, bgIsolationStall, prNoOwner,
 ]);

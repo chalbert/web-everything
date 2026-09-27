@@ -142,6 +142,7 @@ import { parseMergeTree, manifestConflictDisposition, rebaseDropManifest } from 
 import { planNoteComment, postNoteComment } from './reconcile-note-comment.mjs';
 import { notifyDesktopChecked } from './branch-sync.mjs';
 import { UNOWNED_REBASE_ATTEMPT_MARKER, UNOWNED_REBASE_ATTEMPT_CAP, countUnownedRebaseAttempts } from './unowned-rebase-attempt-count.mjs';
+import { countConflictFixComments, CONFLICT_FIX_COMMENT_MARKER } from './conflict-fix-round-count.mjs';
 // #4118 (c) — the SAME name-based, gh-agents-truth liveness check `review-status-tag.mjs` already uses, and for
 // the identical reason its own docblock states: staying independent of `reconcile-core.mjs#assessLiveness`'s
 // much heavier transitive import graph (`rearm-review.mjs` → `review-set-label.mjs` → `merge-ai-prs.mjs`, which
@@ -505,6 +506,43 @@ export function latestConflictAlertCreatedAtMs(comments) {
   for (const c of comments) {
     const body = typeof c === 'string' ? c : c?.body;
     if (typeof body !== 'string' || !CONFLICT_ALERT_MARKER_RE.test(body.trimStart()) || !isTrustedMarkerAuthor(c)) continue;
+    const ms = Date.parse((typeof c === 'string' ? null : c?.createdAt) ?? '');
+    if (Number.isFinite(ms) && (best === null || ms > best)) best = ms;
+  }
+  return best;
+}
+
+/**
+ * we:scripts/conveyor/parked-pr-conflict-watch.mjs#CONFLICT_FIX_ROUND_CAP — DUPLICATED, not imported, from
+ * `we:scripts/conveyor/reconcile-core.mjs#CONFLICT_FIX_ROUND_CAP` (3) — same value, same reasoning that file's
+ * own docblock gives, mirrored here for the SAME reason `reconcile-core.mjs` itself duplicates rather than
+ * imports `CI_HEAL_ROUND_CAP` from `tick-core.mjs`: importing `reconcile-core.mjs` here would pull its own wide,
+ * heavy import graph (`progress-board.mjs`, `pr-status.mjs`, `jury-core.mjs`, `rearm-review.mjs`, …) into a file
+ * that (per this file's own header) deliberately stays lighter. The two floors move together by hand; a test in
+ * each file pins its own copy so a drift between them fails loud rather than silently diverging. ONE CAP, ONE
+ * POPULATION regardless of which code path is driving the round — {@link watchParkedPrConflicts}'s own
+ * idle-conflict-bounce re-assertion (below) and `reconcile-core.mjs`'s `isConflictBounce` dispatch both bind on
+ * this same number, so a PR can never get more mechanical conflict-resolution attempts by however many times its
+ * ownership ping-pongs between the two passes (landing-freeze fix, chalbert/web-everything#2793, 2026-09-27).
+ */
+export const CONFLICT_FIX_ROUND_CAP = 3;
+
+/**
+ * we:scripts/conveyor/parked-pr-conflict-watch.mjs#latestConflictFixMarkerCreatedAtMs — the MOST RECENT
+ * completed mechanical conflict-fix round's own timestamp (`we:scripts/conveyor/conflict-fix-round-count.mjs
+ * #CONFLICT_FIX_COMMENT_MARKER`, posted by `rearm-review.mjs --round=conflict` the moment a fix agent rearms a
+ * `review:changes` bounce back to `review:pending`). PURE. Used ONLY as the idle-conflict-bounce episode
+ * boundary (see that branch's own docblock in {@link watchParkedPrConflicts}) — mirrors
+ * {@link latestConflictAlertCreatedAtMs}'s own shape exactly, over a different marker.
+ * @param {Array<{body?:string, createdAt?:string, author?:{login?:string}}|string>|null|undefined} comments
+ * @returns {?number}
+ */
+export function latestConflictFixMarkerCreatedAtMs(comments) {
+  if (!Array.isArray(comments)) return null;
+  let best = null;
+  for (const c of comments) {
+    const body = typeof c === 'string' ? c : c?.body;
+    if (typeof body !== 'string' || !body.trimStart().startsWith(CONFLICT_FIX_COMMENT_MARKER) || !isTrustedMarkerAuthor(c)) continue;
     const ms = Date.parse((typeof c === 'string' ? null : c?.createdAt) ?? '');
     if (Number.isFinite(ms) && (best === null || ms > best)) best = ms;
   }
@@ -1466,8 +1504,75 @@ export function watchParkedPrConflicts({
     // so an already-correctly-dispatched or genuinely-still-standing-down PR costs nothing extra per sweep.
     const recheckCandidate = parked && !queued && !plan.add && plan.remove.length === 0
       && hasReviewLabel(pr?.labels, REVIEW_LABELS.human) && hasReviewLabel(pr?.labels, CONFLICT_LABEL);
-    if (!plan.add && plan.remove.length === 0 && !graceDue && !recheckCandidate) continue;
+    // #2793 (landing-freeze fix, 2026-09-27) — THE OTHER already-labelled population `recheckCandidate` above
+    // does not cover: a PARKED PR (NOT `review:human` — an ordinary `review:pending` parked PR) that is ALREADY
+    // labelled, STILL conflicting, and carries NO live `review:changes` bounce right now. Before this, such a PR
+    // was invisible to every sweep after the first (this file's own "IDEMPOTENCY, NO SEPARATE STORE" header rule
+    // — a comment posts only on the absent→present label transition, never again while the label sits on the
+    // PR), while `reconcile-core.mjs`'s `OWED_ELSEWHERE.conflicted` refusal assumes THIS file owns re-attempting
+    // it — a ping-pong with no owner. Confirmed live: `chalbert/web-everything#2793` sat exactly here
+    // (`review:pending` + `review-round:2` + `merge-status:conflicting`, `mergeable: CONFLICTING`, no
+    // `review:changes`) — the finding that once bounced it to `review:changes` had already been rearmed
+    // (`review:changes → review:pending`) by a completed mechanical conflict-fix round that did not actually
+    // clear the conflict (or raced a later push to `main`), and nothing ever re-asserted ownership after that.
+    // Bound on {@link CONFLICT_FIX_ROUND_CAP} — the SAME cap `reconcile-core.mjs`'s own `isConflictBounce`
+    // dispatch binds on — so re-asserting ownership here can never grant a PR more mechanical attempts than one
+    // continuous ping-pong-free episode would have gotten.
+    const idleConflictBounce = parked && !queued && !plan.add && plan.remove.length === 0
+      && !hasReviewLabel(pr?.labels, REVIEW_LABELS.human) && hasReviewLabel(pr?.labels, CONFLICT_LABEL)
+      && !hasReviewLabel(pr?.labels, REVIEW_LABELS.changes);
+    if (!plan.add && plan.remove.length === 0 && !graceDue && !recheckCandidate && !idleConflictBounce) continue;
     const entry = { num: pr?.number, isConflicting, ...plan, commented: false };
+    if (idleConflictBounce && !recheckCandidate && !graceDue) {
+      try {
+        // Same lazy-read discipline as `recheckCandidate` just below — this narrow, otherwise-invisible
+        // population costs nothing extra on every OTHER tick.
+        let comments = [];
+        try { comments = listPrComments({ number: pr?.number, repo }); } catch { comments = []; }
+        const conflictFixRoundsSpent = countConflictFixComments(comments);
+        if (conflictFixRoundsSpent >= CONFLICT_FIX_ROUND_CAP) {
+          // Never loop forever past the shared cap — surface it once via the same reconcile-notes channel the
+          // unowned population's own rebase-attempt cap already uses, then leave it (a person must take it).
+          const note = {
+            kind: 'round-cap-exhausted', prNumber: pr?.number, attempts: conflictFixRoundsSpent, cap: CONFLICT_FIX_ROUND_CAP,
+            capKind: 'conflict-fix',
+            text: `PR #${pr?.number}: mechanical conflict-fix rounds exhausted (${conflictFixRoundsSpent}/${CONFLICT_FIX_ROUND_CAP}) while still conflicting and idle (no live review:changes bounce) — a person must take it over`,
+          };
+          const notePlan = planNoteComment(note, comments);
+          if (!notePlan.alreadyPosted && !dryRun) {
+            if (resolvedRepo == null) resolvedRepo = provider.currentRepo();
+            postNoteComment({ repo: resolvedRepo, pr: pr?.number, body: notePlan.body });
+            try { notifyDesktopChecked({ title: 'Conveyor: conflict-fix cap exhausted', body: note.text }); } catch { /* best-effort */ }
+          }
+          entry.routedTo = 'cap-exhausted (conflict-fix, idle)';
+          entry.conflictFixRoundsSpent = conflictFixRoundsSpent;
+          results.push(entry);
+          continue;
+        }
+        // The episode boundary for THIS narrow population is the last completed conflict-fix round (if any) —
+        // never the label-removal boundary `sinceMs` uses elsewhere in this file, because the label here has
+        // never been removed at all (still conflicting). No prior round at all → `-Infinity` (the function's own
+        // "no boundary, judge the whole window" default), so a first-ever idle bounce (finding never posted, no
+        // rearm either) behaves exactly like a fresh episode.
+        const lastRearmAtMs = latestConflictFixMarkerCreatedAtMs(comments);
+        const sinceMs = Number.isFinite(lastRearmAtMs) ? lastRearmAtMs : -Infinity;
+        if (hasRecentConflictFindingComment(comments, { now, sinceMs })) {
+          // Already re-asserted for this round within the retry window — avoid reposting every tick.
+          entry.routedTo = 'reconcile-finding (idle conflict-bounce, already re-asserted this round)';
+          results.push(entry);
+          continue;
+        }
+        if (resolvedRepo == null) resolvedRepo = provider.currentRepo();
+        if (!dryRun) postFinding({ pr, repo: resolvedRepo });
+        entry.routedTo = 'reconcile-finding (idle conflict-bounce re-asserted — #2793)';
+        entry.conflictFixRoundsSpent = conflictFixRoundsSpent;
+        results.push(entry);
+      } catch (e) {
+        entry.error = String((e && e.message) || e).split('\n')[0];
+        results.push(entry);
+      }
+      continue;
+    }
     if (recheckCandidate && !graceDue) {
       try {
         // `repo` (possibly null) is enough for this READ — `defaultListPrComments` falls back to gh's own
