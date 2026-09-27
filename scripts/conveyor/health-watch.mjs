@@ -58,6 +58,7 @@ import { RUNNER_LOCK_ROOT } from '../../skills-src/conveyor/runner-lock.mjs';
 import { collectDaemonStatus } from '../operations/daemon-status-io.mjs';
 import { assessDaemonStatus } from '../operations/daemon-status.mjs';
 import { readBacklogCards } from '../backlog-stranded-sweep.mjs';
+import { readPrEventsStatuses } from '../lib/pr-events.mjs';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 export const BOOTSTRAP_TAIL_BYTES = 512 * 1024;
@@ -529,6 +530,8 @@ export async function tick(flags = {}) {
   probes.ghCalls = attempt('ghCalls', () => probeGhCalls(flags['gh-calls-log'] ? { logPath: flags['gh-calls-log'] } : {}));
   // `gh-graphql-budget` — every tick (1 GraphQL point): the real bucket + the throttle's shared budget blocks.
   // `--graphql-budget-fixture=FILE` (a `{sample, blocks}` JSON) in tests; skipped under `--no-gh`.
+  // `pr-events-stale` — fs-only, every tick: each event-driven waker's status file (`[]` while WE_PR_EVENTS is off).
+  probes.prEventsStatus = attempt('prEventsStatus', () => readPrEventsStatuses(flags['pr-events-state-dir'] || undefined));
   if (flags['graphql-budget-fixture']) probes.graphqlBudget = attempt('graphqlBudget', () => JSON.parse(readFileSync(flags['graphql-budget-fixture'], 'utf8')));
   else if (!flags['no-gh']) probes.graphqlBudget = attempt('graphqlBudget', () => probeGraphqlBudget());
 
