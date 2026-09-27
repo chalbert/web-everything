@@ -20,6 +20,9 @@
  *   session — the operator (or the reaper) decides what to do with a live duplicate; see this file's own
  *   `recommendationHint` for why stopping either one here would be exactly the wrong default (#3383's own
  *   hard-won "never kill processes you didn't start" rule).
+ *
+ *   Notify scope: listed in `we:scripts/conveyor/health-smells-notify-list.mjs`'s `NOTIFY_EVEN_IN_SHADOW` (the
+ *   Sun 2026-09-27 ~7:40 AM ET operator decision).
  */
 
 /** Same three terminal states `red-pr-unattended.mjs` already excludes — reused so "live" means the same
@@ -54,7 +57,6 @@ export default {
   closeAfter: 1,
   severity: 'high',
   action: 'alert',
-  notifyEvenInShadow: true,
   recommendationHint: 'Two or more LIVE sessions share one dispatched name — a double-dispatch, never '
     + 'legitimate. Do NOT stop either yourself (#3383: never kill a process you did not start) — report it; '
     + 'the dispatcher\'s claim (we:scripts/conveyor/fix-dispatch-claim.mjs) should never let the same '

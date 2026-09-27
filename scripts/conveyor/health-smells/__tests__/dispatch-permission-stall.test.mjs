@@ -8,6 +8,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import dispatchPermissionStall, { stuckOnPermissionPrompt } from '../dispatch-permission-stall.mjs';
+import { NOTIFY_EVEN_IN_SHADOW } from '../../health-smells-notify-list.mjs';
 
 const MINUTE = 60 * 1000;
 const NOW = Date.parse('2026-09-26T17:28:00Z'); // 13:28 ET
@@ -72,8 +73,8 @@ describe('dispatch-permission-stall.evaluate', () => {
     expect(dispatchPermissionStall.evaluate({}, { now: NOW })).toEqual([]);
   });
 
-  it('is wired to alert even in shadow mode, and scoped to the host (not gh-cadenced)', () => {
-    expect(dispatchPermissionStall.notifyEvenInShadow).toBe(true);
+  it('is scoped to the host (not gh-cadenced) and, approved by an earlier operator decision, is wired to notify even in shadow mode (the Sun 2026-09-27 notify-list.mjs addition is additive and carries it forward unchanged)', () => {
+    expect(NOTIFY_EVEN_IN_SHADOW.has(dispatchPermissionStall.id)).toBe(true);
     expect(dispatchPermissionStall.scope).toBe('host');
     expect(dispatchPermissionStall.cadence).toBe('every-tick');
     expect(dispatchPermissionStall.probes).toEqual(['agents']);

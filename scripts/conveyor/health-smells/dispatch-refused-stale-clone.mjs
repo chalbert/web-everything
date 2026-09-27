@@ -10,8 +10,9 @@
  * ticks tagged `s` by `health-watch-core.mjs#foldDaemonMemory`) and, when the self-sync probe ran, names the
  * rebuild's latest blocking alert so the episode says WHY the clone is behind.
  *
- * `notifyEvenInShadow: true` — the same posture as `daemon-held-on-last-good`: a fleet silently refusing all
- * dispatch is exactly what shadow mode's notify-suppression must not swallow.
+ * Notify scope: listed in `we:scripts/conveyor/health-smells-notify-list.mjs`'s `NOTIFY_EVEN_IN_SHADOW` (the
+ * Sun 2026-09-27 ~7:40 AM ET operator decision) — a fleet silently refusing all dispatch is exactly what shadow
+ * mode's notify-suppression must not swallow.
  */
 import { MINUTE, fmtAge } from '../health-watch-core.mjs';
 
@@ -59,7 +60,6 @@ export default {
   closeAfter: 2,
   severity: 'high',
   action: 'alert',
-  notifyEvenInShadow: true,
   minDurationMs: 10 * MINUTE,
   minTicks: 2,
   recommendationHint: 'A daemon refuses every dispatch because its clone is behind origin/main — the gated rebuild is not moving it; the rebuild alert named here is the thing to fix (in the product, never the clone by hand).',

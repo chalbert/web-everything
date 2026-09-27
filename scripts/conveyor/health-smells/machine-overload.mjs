@@ -4,9 +4,9 @@
  * itself, each spawning `node -e 1` in a loop. Machine load hit 293 with 0% idle, the drain's pass took 19 min
  * (normally ~1), and nothing flagged it — a human had to notice "drain slow" and go looking by hand.
  *
- * `notifyEvenInShadow: true` — same opt-in as `claude-auth-expired` (#4077 continuation, PR #2717): a machine
- * pinned at load 293 is exactly the class of "urgent enough that even the observe-only slice should say
- * something", not something to sit on until slice 2's agent investigation exists.
+ * Notify scope: still notifies even in shadow mode — a PREVIOUSLY approved sign, carried forward unchanged by
+ * the Sun 2026-09-27 ~7:40 AM ET operator decision (`we:scripts/conveyor/health-smells-notify-list.mjs`),
+ * which ADDED eight more signs to the notify surface without demoting any sign already approved.
  *
  * `probes: ['processes', 'machineLoad']` — a `ps -Ao pid,ppid,pcpu,etime,command` snapshot
  * ({@link parsePsOutput}, `we:scripts/conveyor/health-watch-core.mjs`) plus `os.loadavg()`/`os.cpus().length`
@@ -105,7 +105,6 @@ export default {
   closeAfter: 2,
   severity: 'high',
   action: 'alert',
-  notifyEvenInShadow: true,
   loadPerCoreThreshold: 3,
   idleFloorPct: 5,
   topN: 3,

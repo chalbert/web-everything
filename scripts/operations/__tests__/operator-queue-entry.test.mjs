@@ -46,6 +46,11 @@ const stage = (root) => {
     copyFileSync(join(dirname(LEAF), '../conveyor', f), join(root, 'conveyor', f));
   }
   copyFileSync(join(dirname(LEAF), 'secret-scrub.mjs'), join(root, 'lib/secret-scrub.mjs'));
+  // #4077 continuation — `health-watch-core.mjs` now imports `./health-smells-notify-list.mjs` (the ONE
+  // declared place for the notify-in-shadow list; a plain data file, no further leaf needs staging) — stage
+  // it too, or the staged copy fails to import and `main()` silently never runs (same failure mode as every
+  // other unstaged import above).
+  copyFileSync(join(dirname(LEAF), '../conveyor/health-smells-notify-list.mjs'), join(root, 'conveyor/health-smells-notify-list.mjs'));
   // health-watch-section.mjs finds the pinned state root via `../lib/daemon-last-good.mjs#daemonConveyorStateRoot`
   // (the SAME shared #4052 helper `run-scorecard-store.mjs` uses — picked deliberately over the much heavier
   // `daemon-rebuild.mjs`, which would drag its whole build/smoke/child_process graph into this leaf; that file

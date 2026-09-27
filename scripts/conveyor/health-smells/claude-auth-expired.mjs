@@ -7,10 +7,9 @@
  * never a Claude-CLI-side login failure, and (before this card) `notify` was never actually wired to send
  * anything in ANY mode (`we:scripts/conveyor/health-watch.mjs`'s "THE MINIMAL NOTIFY PATH" doc).
  *
- * `notifyEvenInShadow: true` — THE ONE OPT-IN EXCEPTION to shadow mode's blanket notify suppression
- * (`health-watch-core.mjs#planActions`). Every minute this sits unnoticed is another daemon burning a session
- * on a login it cannot use; this is exactly the class of "urgent enough that even the observe-only slice
- * should say something" the plan calls for.
+ * Notify scope: still notifies even in shadow mode — a PREVIOUSLY approved sign, carried forward unchanged by
+ * the Sun 2026-09-27 ~7:40 AM ET operator decision (`we:scripts/conveyor/health-smells-notify-list.mjs`),
+ * which ADDED eight more signs to the notify surface without demoting any sign already approved.
  *
  * `probes: ['authExpired']` — `we:scripts/conveyor/health-watch.mjs#probeAuthExpiredSessions`, which reads
  * every BACKGROUND `claude agents --json` row's own transcript via the shared detector
@@ -29,7 +28,6 @@ export default {
   closeAfter: 1,
   severity: 'high',
   action: 'alert',
-  notifyEvenInShadow: true,
   windowMs: 30 * MINUTE,
   minCount: 2,
   recommendationHint: 'The operator\'s Claude login has expired — run `/login`, then let the daemons redispatch.',
