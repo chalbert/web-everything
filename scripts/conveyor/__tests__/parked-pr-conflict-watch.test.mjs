@@ -1976,6 +1976,41 @@ describe('approved PRs that drift into a conflict (x832e2v)', () => {
     expect(provider.calls).toEqual([]); // no second label write, no second comment
   });
 
+  // #gh-write-burst — LIVE 2026-09-27 03:5x-04:00Z: `graceDue`'s generic bounce (the test right above) had NO
+  // re-post guard at all, unlike the sibling `stand-down (after drain grace)` branch's own `alreadyStoodDown`
+  // check. `graceDue` recomputes true on EVERY sweep tick (120s) for as long as a real, non-statute conflict
+  // sits past the drain's grace window, so `postFinding` (→ a fresh `gh pr comment` + a fresh `review:changes`
+  // `gh pr edit`) fired again on EVERY tick, for every PR stuck in this state, in every repo the pass watches —
+  // confirmed against `calls.jsonl`: ~300 `pr edit`/`pr comment`/`api --method` mutations in ten minutes, which
+  // tripped GitHub's secondary rate limit and froze landing for chalbert/web-everything 04:04-04:33Z. This test
+  // runs the SAME PR through two consecutive sweeps (exactly what the mechanical pass does every intervalMs) and
+  // proves the second sweep does not re-post: before the fix, `routed` would contain `[2514, 2514]`.
+  it('#gh-write-burst — a second sweep tick on the SAME stuck-past-grace PR does not re-post the finding', () => {
+    const provider = fakeProvider(); const routed = [];
+    const pr = { number: 2514, mergeable: 'CONFLICTING', labels: L('review:accepted', CONFLICT_LABEL) };
+    const listPrs = () => [pr];
+    const opts = {
+      repo: 'o/n', listPrs, provider, postFinding: (o) => routed.push(o.pr.number), postStandDown: () => routed.push('sd'),
+      labelAgeMs: () => QUEUED_CONFLICT_GRACE_MS + 1000, listPrFiles: () => [{ path: 'scripts/x.mjs' }],
+    };
+    const [first] = watchParkedPrConflicts(opts);
+    expect(first.routedTo).toBe('reconcile-finding (after drain grace)');
+    expect(routed).toEqual([2514]);
+
+    // Second tick: the PR's own state is unchanged (still past grace, still conflicting, label never removed) —
+    // the ONLY new fact is that `postFinding`'s own comment (`defaultPostConflictFinding`, via
+    // `reconcile-finding.mjs`) is now on the thread, exactly as it would be after a real `gh pr comment` landed.
+    const postedComments = [{
+      body: buildConflictFindingBody({ num: 2514 }), createdAt: new Date().toISOString(), author: { login: 'web-everything' },
+    }];
+    const [second] = watchParkedPrConflicts({
+      ...opts, listPrComments: () => postedComments, labelRemovedAtMs: () => 0,
+    });
+    expect(second.routedTo).toBe('reconcile-finding (after drain grace)'); // routing unchanged
+    expect(routed).toEqual([2514]); // NOT re-posted — one finding for the whole episode, not one per tick
+    expect(provider.calls).toEqual([]); // still no label/comment write through the provider either
+  });
+
   // xaer296 (epic #3383) — the FRESH-DETECTION path (first sighting of a conflict, `newlyDetected: true`) never
   // got the #2581 stacked-base check at all — ONLY the `graceDue` (queued, already-flagged) path did. For a
   // QUEUED PR that is unaffected: first sighting already defers to the drain unconditionally (see the "first
