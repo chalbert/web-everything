@@ -9,6 +9,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import duplicateLiveSessions, { findDuplicateLiveSessions, isNonTerminal } from '../duplicate-live-sessions.mjs';
+import { NOTIFY_EVEN_IN_SHADOW } from '../../health-smells-notify-list.mjs';
 
 const agent = (over = {}) => ({
   name: 'ci-heal-2784', state: 'working', sessionId: 'sid-a', cwd: '/lanes/lane-1', ...over,
@@ -103,7 +104,7 @@ describe('duplicate-live-sessions.evaluate', () => {
   });
 
   it('is wired to alert even in shadow mode, host-scoped, every-tick, on the agents probe', () => {
-    expect(duplicateLiveSessions.notifyEvenInShadow).toBe(true);
+    expect(NOTIFY_EVEN_IN_SHADOW.has(duplicateLiveSessions.id)).toBe(true);
     expect(duplicateLiveSessions.scope).toBe('host');
     expect(duplicateLiveSessions.cadence).toBe('every-tick');
     expect(duplicateLiveSessions.probes).toEqual(['agents']);

@@ -311,7 +311,10 @@ describe('smell: claude-auth-expired (live incident, night of 2026-09-25/26 ET)'
     expect(r.transitions.some((t) => t.type === 'opened')).toBe(false);
   });
 
-  it('THE URGENT NOTIFY EXCEPTION: opens with a `notify` action that is NEVER suppressed, even in shadow mode', () => {
+  // Per the Sun 2026-09-27 ~7:40 AM ET operator decision (`health-smells-notify-list.mjs`), `claude-auth-expired`
+  // is not among the eight approved notify-in-shadow signs today — it opens an episode like any other sign, but
+  // stays record-only (shadow) unless a caller passes a `notifySet` that includes it (see `notify-list.test.mjs`).
+  it('opens with a `notify` action that stays record-only (suppressed) in shadow mode, per the current notify-list', () => {
     const state = emptyHealthState();
     const r = runHealthTick(state, { authExpired: [
       { name: 'ci-heal-2711', startedAt: 0 }, { name: 'ci-heal-2712', startedAt: 0 },
@@ -319,7 +322,7 @@ describe('smell: claude-auth-expired (live incident, night of 2026-09-25/26 ET)'
     expect(r.transitions.some((t) => t.type === 'opened')).toBe(true);
     const notify = r.plan.find((p) => p.kind === 'notify' && p.key === 'claude-auth-expired::claude-auth');
     expect(notify).toBeDefined();
-    expect(notify.suppressed).toBeNull();
+    expect(notify.suppressed).toBe('shadow mode');
   });
 
   it('closes after `closeAfter` (1) clean sample once the auth-expired count drops below minCount', () => {
@@ -598,15 +601,16 @@ describe('planActions', () => {
     expect(investigate.suppressed).toMatch(/shadow mode/);
   });
 
-  // #4077 continuation — `claude-auth-expired`'s one opt-in exception to shadow-mode notify suppression.
-  it('a smell with `notifyEvenInShadow: true` is never suppressed, even in shadow mode — every other smell is unaffected', () => {
-    const URGENT = { id: 'u', openAfter: 1, closeAfter: 1, severity: 'high', action: 'alert', notifyEvenInShadow: true };
+  // #4077 continuation — a smell whose `id` is in `notifySet` (default: notify-list.mjs's NOTIFY_EVEN_IN_SHADOW)
+  // is the one opt-in exception to shadow-mode notify suppression.
+  it('a smell whose id is in `notifySet` is never suppressed, even in shadow mode — every other smell is unaffected', () => {
+    const URGENT = { id: 'u', openAfter: 1, closeAfter: 1, severity: 'high', action: 'alert' };
     const ORDINARY = { id: 'd', openAfter: 1, closeAfter: 1, severity: 'high', action: 'alert' };
     const r = stepEpisodes(emptyHealthState(), [
       { smell: URGENT, results: [{ subject: 'p', breach: true }] },
       { smell: ORDINARY, results: [{ subject: 'p', breach: true }] },
     ], 0);
-    const plan = planActions(r.transitions, { u: URGENT, d: ORDINARY }, { mode: 'shadow' });
+    const plan = planActions(r.transitions, { u: URGENT, d: ORDINARY }, { mode: 'shadow', notifySet: new Set(['u']) });
 
     const urgentNotify = plan.find((p) => p.kind === 'notify' && p.key === 'u::p');
     expect(urgentNotify.suppressed).toBeNull();
@@ -615,11 +619,18 @@ describe('planActions', () => {
     expect(ordinaryNotify.suppressed).toBe('shadow mode');
   });
 
-  it('`notifyEvenInShadow` is irrelevant outside shadow mode — never suppressed there either way', () => {
-    const URGENT = { id: 'u', openAfter: 1, closeAfter: 1, severity: 'high', action: 'alert', notifyEvenInShadow: true };
+  it('membership in `notifySet` is irrelevant outside shadow mode — never suppressed there either way', () => {
+    const URGENT = { id: 'u', openAfter: 1, closeAfter: 1, severity: 'high', action: 'alert' };
     const r = stepEpisodes(emptyHealthState(), [{ smell: URGENT, results: [{ subject: 'p', breach: true }] }], 0);
-    const plan = planActions(r.transitions, { u: URGENT }, { mode: 'live' });
+    const plan = planActions(r.transitions, { u: URGENT }, { mode: 'live', notifySet: new Set(['u']) });
     expect(plan.find((p) => p.kind === 'notify' && p.key === 'u::p').suppressed).toBeNull();
+  });
+
+  it('defaults `notifySet` to notify-list.mjs\'s NOTIFY_EVEN_IN_SHADOW when no override is passed', () => {
+    const D = { id: 'daemon-silent', openAfter: 1, closeAfter: 1, severity: 'high', action: 'alert' };
+    const r = stepEpisodes(emptyHealthState(), [{ smell: D, results: [{ subject: 'p', breach: true }] }], 0);
+    const plan = planActions(r.transitions, { 'daemon-silent': D }, { mode: 'shadow' });
+    expect(plan.find((p) => p.kind === 'notify' && p.key === 'daemon-silent::p').suppressed).toBeNull();
   });
 });
 
