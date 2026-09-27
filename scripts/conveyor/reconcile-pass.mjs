@@ -83,6 +83,15 @@ import {
 } from './main-red-recovery.mjs';
 import { readHungInfo, resolveHungThresholdMs, readClaudeAuthExpiredInfo, readIdleFinishedInfo, resolveIdleFinishedThresholdMs } from './hung-session.mjs';
 import { readBgIsolationStallInfo } from './bg-isolation-stall.mjs';
+// #4263 — the pure escalation reader (no fs/network of its own) reconcile-core.mjs already imports; re-scanning
+// comments HERE with the SAME function, never a re-derived copy, is what lets this enrich step find exactly the
+// `systemFixRef` PRs reconcile-core.mjs's own escalation branch will independently re-derive from the same data.
+import { latestCiHealEscalationForHead } from './ci-heal-escalation-mark.mjs';
+// #4263 — the SAME terminal-state classifier `pr-watch.mjs`'s own drain-lane watcher uses (merged/closed/
+// parked/pending), reused rather than re-invented so "has this PR landed" can never drift between the two
+// call sites. Aliased: this file never reconciles a PR's PHASE (that word means something else here — see
+// `classifyPr` imported from `progress-board.mjs` inside `reconcile-core.mjs`).
+import { classifyPr as classifyPrLifecycle } from './pr-watch.mjs';
 
 /**
  * we:scripts/conveyor/reconcile-pass.mjs#PR_LIST_JSON_FIELDS — the `--json` fields this pass reads about each
@@ -113,7 +122,12 @@ import { readBgIsolationStallInfo } from './bg-isolation-stall.mjs';
  *                         Costs nothing extra beyond this one query already paying for connection fields
  *                         (`labels`/`statusCheckRollup`/`comments`) — `files` is the same shape of field.
  */
-export const PR_LIST_JSON_FIELDS = 'number,headRefName,headRefOid,baseRefName,labels,statusCheckRollup,mergeStateStatus,comments,body,files';
+// `isDraft` (draft-first PRs, operator-approved 2026-09-27) — the ONLY field this pass reads to tell a
+// held-for-review draft apart from a ready-for-review one; `reconcile-core.mjs#planReconcile` reads it
+// straight off each row (`pr.isDraft`) to gate review dispatch off drafts and to plan the `promote-draft`
+// effect once a draft's required checks are green. Costs nothing extra beyond this one query, same as `files`
+// above.
+export const PR_LIST_JSON_FIELDS = 'number,headRefName,headRefOid,baseRefName,labels,statusCheckRollup,mergeStateStatus,comments,body,files,isDraft';
 
 /** How many open PRs one pass reads. The board's own `OPEN_LIMIT` is 30; a reconciler that silently stopped at
  *  the default page would leave the overflow unowned, which is this item's defect wearing a smaller hat. */
@@ -805,6 +819,97 @@ export function enrichPrsWithAlreadyLandedFacts(prs, {
 }
 
 /**
+ * we:scripts/conveyor/reconcile-pass.mjs#enrichPrsWithBaseRefFacts — #4265 (PR #2797 review, live incident
+ * 2026-09-27): attach `baseRefSha` — this PR's OWN stacked base ref's CURRENT tip — to every PR whose
+ * `baseRefName` differs from `defaultBranch` (a STACKED PR, per `reconcile-core.mjs`'s own STACKED-BASE CONFLICT
+ * branch). Read PURELY LOCALLY — a plain `git rev-parse origin/<baseRefName>`, the SAME best-effort reader
+ * ({@link defaultResolveMainSha}) the main-base branch's own `mainSha` already uses, just pointed at a different
+ * ref — no `gh` call, no network cost of its own beyond whatever fetch already ran this tick.
+ *
+ * WHY THIS MATTERS: `reconcile-core.mjs`'s stacked-base branch used to hardcode `currentSha: null` for
+ * `countStaleConflictFixRounds`, so its sha-vs-sha comparison never fired and EVERY round matching the base ref
+ * alone counted as "the same conflict" — even across repairs against DIFFERENT, since-rebased tips of that same
+ * stacked base. Three repairs against three different tips of a repeatedly-rebased base exhausted the smaller
+ * per-target cap even though each repair genuinely targeted a NEW tip.
+ *
+ * Resolved ONCE per DISTINCT base ref, never once per PR — several stacked PRs commonly share one lane base. A
+ * PR whose base IS `defaultBranch` (or names none) is untouched, and `baseRefSha` stays absent — exactly the
+ * `null` `reconcile-core.mjs#planReconcile`'s `base.baseRefSha ?? null` already degrades to, the pre-#4265
+ * ref-only comparison, unchanged for every caller that does not run this enrich step.
+ * @param {Array<object>} prs
+ * @param {{resolveRef?:Function, defaultBranch?:string}} [o]
+ * @returns {Array<object>}
+ */
+export function enrichPrsWithBaseRefFacts(prs, { resolveRef = defaultResolveMainSha, defaultBranch = 'main' } = {}) {
+  const list = Array.isArray(prs) ? prs : [];
+  const shaByRef = new Map();
+  return list.map((pr) => {
+    const baseRefName = pr?.baseRefName ?? null;
+    if (!baseRefName || baseRefName === defaultBranch) return pr;
+    if (!shaByRef.has(baseRefName)) shaByRef.set(baseRefName, resolveRef(baseRefName));
+    return { ...pr, baseRefSha: shaByRef.get(baseRefName) ?? null };
+  });
+}
+
+/**
+ * we:scripts/conveyor/reconcile-pass.mjs#defaultReadSystemFixState — #4263: one `gh pr view` read of the fix PR
+ * a `waiting-on-system-fix` ci-heal escalation named, classified through the SAME terminal-state reader
+ * `pr-watch.mjs` uses (never a re-invented merged/closed check). Best-effort: any failure at all (offline, PR
+ * deleted, bad number) degrades to `null` ("unknown — keep the existing refusal standing"), never a hard
+ * failure of the whole pass.
+ * @param {number|string} prNumber
+ * @param {{exec?:Function, repo?:string|null}} [o]
+ * @returns {'merged'|'closed'|'parked'|'pending'|null}
+ */
+export function defaultReadSystemFixState(prNumber, { exec = execFileSyncThrottled, repo = null } = {}) {
+  try {
+    const argv = ['pr', 'view', String(prNumber), '--json', 'state,mergedAt,labels'];
+    if (repo) argv.push('--repo', repo);
+    const out = exec('gh', argv, {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL',
+    });
+    return classifyPrLifecycle(JSON.parse(String(out)));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * we:scripts/conveyor/reconcile-pass.mjs#enrichPrsWithSystemFixFacts — #4263 (PR #2787 review, live incident
+ * 2026-09-27): a `waiting-on-system-fix` ci-heal escalation refuses further healing "until that fix lands or a
+ * new push changes this head" (`reconcile-core.mjs`'s own escalation branch) — but until this fix, NOTHING ever
+ * checked whether the named fix PR actually had landed; the refusal was keyed purely on the escalation's own
+ * head match, so it suppressed healing FOREVER once posted, even after the referenced fix genuinely merged and
+ * CI reran on the SAME (unchanged) head.
+ *
+ * Re-scans each PR's OWN comments with the SAME pure {@link latestCiHealEscalationForHead} reconcile-core.mjs
+ * uses for its decision (never a re-derived copy that could drift), and — ONLY for a live `waiting-on-system-
+ * fix` escalation — independently re-checks the referenced `systemFixRef` PR's own CURRENT state. Attaches
+ * `systemFixLanded: true` when that PR has since merged or closed, so `reconcile-core.mjs`'s escalation branch
+ * can re-arm instead of refusing forever. Every OTHER PR (no escalation, or a `needs-human` one with no PR to
+ * re-check) is untouched — zero extra `gh` cost for the common case.
+ *
+ * Resolved ONCE per DISTINCT `systemFixRef`, never once per PR — several PRs commonly escalate to the same
+ * system-level fix.
+ * @param {Array<object>} prs
+ * @param {{readSystemFixState?:Function, repo?:string|null}} [o]
+ * @returns {Array<object>}
+ */
+export function enrichPrsWithSystemFixFacts(prs, { readSystemFixState = defaultReadSystemFixState, repo = null } = {}) {
+  const list = Array.isArray(prs) ? prs : [];
+  const stateByRef = new Map();
+  return list.map((pr) => {
+    const escalation = latestCiHealEscalationForHead(pr?.comments, pr?.headRefOid);
+    if (!escalation || escalation.outcome !== 'waiting-on-system-fix' || !escalation.systemFixRef) return pr;
+    const ref = escalation.systemFixRef;
+    if (!stateByRef.has(ref)) stateByRef.set(ref, readSystemFixState(ref, { repo }));
+    const state = stateByRef.get(ref);
+    if (state !== 'merged' && state !== 'closed') return pr;
+    return { ...pr, systemFixLanded: true };
+  });
+}
+
+/**
  * we:scripts/conveyor/reconcile-pass.mjs#formatReport — the human half of the output, and it is not decoration.
  *
  * A PASS THAT REFUSES FOUR PRs AND PRINTS ONE LINE HAS REPRODUCED THE ORIGINAL DEFECT ONE LEVEL UP. So every
@@ -842,12 +947,19 @@ export function formatReport({ dispatch = [], refusals = [], notes = [] } = {}) 
  * we:scripts/conveyor/reconcile-pass.mjs#runReconcilePass — read, decide, return. Every reader is injectable, so
  * the whole shell is exercisable with no network and no credential.
  * @param {{readPrs?:Function, readAgents?:Function, enrich?:Function, enrichMainRed?:Function,
- *   enrichAlreadyLanded?:Function, now?:number, repo?:string|null, defaultBranch?:string}} [o]
+ *   enrichAlreadyLanded?:Function, enrichBaseRef?:Function, enrichSystemFix?:Function, now?:number,
+ *   repo?:string|null, defaultBranch?:string}} [o]
  * @returns {{dispatch:Array<object>, refusals:Array<object>, notes:Array<object>, prs:number, agents:number}}
  */
 export function runReconcilePass({
   readPrs = defaultReadPrs, readAgents = defaultReadAgents, enrich = enrichAgents,
   enrichMainRed = enrichPrsWithMainRedFacts, enrichAlreadyLanded = enrichPrsWithAlreadyLandedFacts,
+  // #4265 — the stacked-base conflict-fix cap's own `currentSha` (see {@link enrichPrsWithBaseRefFacts}'s own
+  // docblock). Injectable exactly like every other enrich step above, so a test supplies a fixture with no git.
+  enrichBaseRef = enrichPrsWithBaseRefFacts,
+  // #4263 — re-arms a `waiting-on-system-fix` ci-heal escalation once its named fix PR lands (see
+  // {@link enrichPrsWithSystemFixFacts}'s own docblock). Injectable exactly like every other enrich step above.
+  enrichSystemFix = enrichPrsWithSystemFixFacts,
   now = Date.now(), repo = null, defaultBranch = 'main',
   // #2748 false-red follow-up — injectable so a test can supply a fixture with no network, matching every
   // other reader in this file. Defaults to the live, cached branch-protection read.
@@ -874,7 +986,11 @@ export function runReconcilePass({
   // live incident, PR #2752 (#4034/#2748) — attach `alreadyLandedInMain` to any PR carrying
   // `merge-status:conflicting` whose own content is already, file-by-file, present on `main`. Costs nothing
   // beyond the label scan `readPrs` already fetched every field for when no PR carries that label.
-  const prs = enrichAlreadyLanded(redPrs, { repo: resolvedRepo, defaultBranch });
+  const alreadyLandedPrs = enrichAlreadyLanded(redPrs, { repo: resolvedRepo, defaultBranch });
+  // #4265 — attach each stacked PR's own base ref's current tip, purely locally, no `gh` cost.
+  const baseRefPrs = enrichBaseRef(alreadyLandedPrs, { defaultBranch });
+  // #4263 — re-check any `waiting-on-system-fix` escalation's named fix PR for having since landed.
+  const prs = enrichSystemFix(baseRefPrs, { repo: resolvedRepo });
   const agents = enrich(readAgents({}));
   // A repo this constellation does not know the gh slug for (`resolvedRepo` stays `null`, `gh` infers from cwd)
   // still gets a required set: `getRequiredStatusChecks` degrades to its own cache/fallback chain rather than

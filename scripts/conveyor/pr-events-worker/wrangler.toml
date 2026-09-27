@@ -1,0 +1,26 @@
+# PR-events webhook receiver — a SEPARATE small Worker, not a route on the site Worker (`we:wrangler.toml`).
+#
+# Why separate: the site Worker runs a share-code gate in front of EVERY path (`run_worker_first = ["/*"]`) and
+# is deployed only by `.github/workflows/deploy.yml` after a full cross-repo site build. A webhook receiver needs
+# neither the gate nor the site build, needs its own Durable Object binding, and must be deployable (and
+# roll-back-able) on its own. Keeping it apart means this feature never touches the critical deploy workflow.
+#
+# Deploy is a MANUAL operator step for slice 1 (see the PR body): `npx wrangler deploy` from this directory.
+#
+# Secrets are NOT stored here — set them on this Worker with `npx wrangler secret put <NAME>`:
+#   GITHUB_WEBHOOK_SECRET  — the secret typed into the GitHub webhook form; verifies X-Hub-Signature-256.
+#   PR_EVENTS_READ_TOKEN   — a separate random token the daemons send as `Authorization: Bearer ...` on GET /events.
+
+name = "we-pr-events"
+main = "worker.mjs"
+compatibility_date = "2026-06-19"
+workers_dev = true
+
+[[durable_objects.bindings]]
+name = "PR_EVENT_LOG"
+class_name = "PrEventLog"
+
+# SQLite-backed Durable Object storage (works on the free plan; no pre-created D1/KV resource needed).
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["PrEventLog"]

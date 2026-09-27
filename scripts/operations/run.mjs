@@ -60,6 +60,8 @@ import { daemonStatusOperation, DAEMON_STATUS_OP } from './daemon-status.mjs';
 import { collectDaemonStatus } from './daemon-status-io.mjs';
 import { heavyQueueOperation, HEAVY_QUEUE_OP } from './heavy-queue.mjs';
 import { collectHeavyQueue } from './heavy-queue-io.mjs';
+import { reviewSeatCapsOperation, REVIEW_SEAT_CAPS_OP } from './review-seat-caps.mjs';
+import { readSeatCapUsage } from './review-extra-seats.mjs';
 import { liveStateOperation, LIVE_STATE_OP } from './live-state.mjs';
 import { collectLiveState } from './live-state-io.mjs';
 import { liveWorkOperation, LIVE_WORK_OP } from './live-work.mjs';
@@ -69,7 +71,8 @@ import { createRouteOutcomeReader } from './route-pr-outcome-io.mjs';
 import { createHistoryReader } from './gate-health-io.mjs';
 import { dispatchLaneOperation, DISPATCH_LANE_OP } from './dispatch-lane.mjs';
 import { dispatchEligibilityOperation, DISPATCH_ELIGIBILITY_OP } from './dispatch-eligibility.mjs';
-import { createTickReader, createDispatchSinks, agentArgsFromEnv } from './dispatch-lane-io.mjs';
+import { createTickReader, createDispatchSinks, agentArgsFromEnv, assertDispatcherFresh } from './dispatch-lane-io.mjs';
+import { armSelfReexecOnFastForward } from '../lib/main-staleness.mjs';
 import { claimOperation, CLAIM_OP } from './claim.mjs';
 import { createClaimReader, createClaimSinks } from './claim-io.mjs';
 // ALIASED, and the collision is worth naming: this file already exports `resolveOperation(name)` — the
@@ -275,6 +278,13 @@ export const OPERATIONS = Object.freeze({
   // `ps`/`git` reads are bound here, and ONLY here.
   [HEAVY_QUEUE_OP]: () => ({
     declaration: heavyQueueOperation({ collect: collectHeavyQueue }),
+    sinks: {},
+  }),
+  // Card xn2wf9t (#3383 follow-up) — the operator's "how close is each non-Claude review seat provider to its
+  // own daily call cap" one-liner, `heavy-queue`-style. Read-only, same no-sinks reasoning: every step is
+  // `compute`. The real scorecard-store + reservation-ledger read (`readSeatCapUsage`) is bound here, and ONLY here.
+  [REVIEW_SEAT_CAPS_OP]: () => ({
+    declaration: reviewSeatCapsOperation({ collect: () => readSeatCapUsage() }),
     sinks: {},
   }),
   [GATE_HEALTH_OP]: () => ({
@@ -503,6 +513,22 @@ export function rootUsage() {
   ].join('\n');
 }
 
+/**
+ * build-path-codex-isolation — the per-operation CLI preflight. Today only `dispatch-lane` has one: arm the
+ * self re-exec (so a clean fast-forward of this checkout reloads the new code instead of dispatching with the
+ * old copy in memory) and refuse a stale dispatcher ({@link assertDispatcherFresh}). Every other operation is
+ * untouched. Exported so a test can prove the wiring without spawning the CLI.
+ * @param {string} name
+ * @param {{arm?: Function, assertFresh?: Function}} [io]
+ * @returns {boolean} whether a preflight ran.
+ */
+export function cliPreflight(name, { arm = armSelfReexecOnFastForward, assertFresh = () => assertDispatcherFresh() } = {}) {
+  if (name !== DISPATCH_LANE_OP) return false;
+  arm();
+  assertFresh();
+  return true;
+}
+
 // The standard main check used across `we:scripts` — importing this module (tests do) must not run the CLI.
 const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
 if (IS_CLI) {
@@ -526,6 +552,14 @@ if (IS_CLI) {
   if (rest.includes('--help')) {
     writeAllSync(1, `${buildCliSpec(declaration).usage}\n`);
     process.exit(0);
+  }
+  // build-path-codex-isolation — `dispatch-lane` starts real work, so it gets the SAME stale-code preflight the
+  // review/fix/ci-heal dispatchers already run, BEFORE any run record exists (see `assertDispatcherFresh`).
+  try {
+    cliPreflight(name);
+  } catch (e) {
+    writeAllSync(2, `${String(e?.message ?? e)}\n`);
+    process.exit(1);
   }
   // Only runner-activity promises bounded CLI persistence, including --resume and call logging.
   // stale-state promises zero filesystem writes, including engine bookkeeping.

@@ -71,7 +71,10 @@ import {
   resolveLanePath, runGateWithOneRetry, claimItem, runAgentToCompletion, acquireLane,
   buildDeliveryAgentEnv, DELIVERY_HOOKS_SETTINGS, ensureDeliveryHooksSettingsFile,
   resetStaleVerifyMarker, runVerifyOperation, deliverItem,
+  // build-path-codex-isolation-locus
+  resolveDeliveryLocus, acquireImplLane, stageDeliveryReportCliIntoLane, DELIVERY_REPORT_CLI_REL_FILES,
 } from '../deliver-item-wrapper.mjs';
+import { repoProfile } from '../../lib/repo-profile.mjs';
 
 // A real UUID, hardcoded for deterministic assertions (mirrors `crypto.randomUUID()`'s own output shape). Tests
 // that need "some UUID, any UUID" instead assert against this regex.
@@ -301,6 +304,68 @@ describe('CODEX_PROVIDER.spawn (#3580 — the real second provider)', () => {
     await DELIVERY_AGENT_PROVIDERS.codex.spawn(REQ, o); // a throw here fails the test naturally.
     expect(o.writeThreadId).not.toHaveBeenCalled();
   });
+
+  // ==============================================================================================
+  // build-path-codex-isolation-locus — the live #3604 fix: a non-`we` locus item's Codex spawn must run
+  // with cwd = its OWN implementation lane (`lanePathOverride`, from `acquireImplLane`), never the WE lane
+  // `lane`/`resolveLane` would resolve to. Before this fix, `deliverItem` never passed anything for
+  // `lanePathOverride`, this provider only ever knew `lane` (a WE-pool number), and Codex reported `blocked`
+  // ("IMPL_LANE unset") when dispatched for a plateau-app-scoped card.
+  // ==============================================================================================
+  describe('CODEX_PROVIDER.spawn lanePathOverride (build-path-codex-isolation-locus fix)', () => {
+    const IMPL_LANE_PATH = '/tmp/.lanes/plateau-app/lane-4';
+
+    it('spawns with cwd = the OVERRIDE, never calling resolveLane at all', async () => {
+      const o = io({ stageDeliveryReportCli: vi.fn() });
+      await DELIVERY_AGENT_PROVIDERS.codex.spawn({ ...REQ, lanePathOverride: IMPL_LANE_PATH }, o);
+      expect(o.resolveLane).not.toHaveBeenCalled();
+      const [argv, opts] = o.spawnAgent.mock.calls[0];
+      expect(argv.slice(0, 3)).toEqual(['exec', '-C', IMPL_LANE_PATH]);
+      expect(opts.cwd).toBe(IMPL_LANE_PATH);
+    });
+
+    it('stamps IMPL_LANE (never present for an ordinary we-locus spawn) alongside the unchanged LANE', async () => {
+      const o = io({ stageDeliveryReportCli: vi.fn() });
+      await DELIVERY_AGENT_PROVIDERS.codex.spawn({ ...REQ, lanePathOverride: IMPL_LANE_PATH }, o);
+      expect(o.spawnAgent.mock.calls[0][1].env).toMatchObject({
+        LANE: IMPL_LANE_PATH, IMPL_LANE: IMPL_LANE_PATH,
+      });
+      // the ordinary (no override) spawn from the describe block above never sets IMPL_LANE at all —
+      // asserted there via `.toMatchObject` with no `IMPL_LANE` key; re-asserted here for contrast.
+      const plain = io();
+      await DELIVERY_AGENT_PROVIDERS.codex.spawn(REQ, plain);
+      expect(plain.spawnAgent.mock.calls[0][1].env.IMPL_LANE).toBeUndefined();
+    });
+
+    it('stages delivery-report-cli.mjs\'s closure into the foreign lane BEFORE spawning — required because a '
+      + 'frontierui/plateau-app clone never carried this WE-only CLI to begin with', async () => {
+      const stageDeliveryReportCli = vi.fn();
+      const o = io({ stageDeliveryReportCli });
+      await DELIVERY_AGENT_PROVIDERS.codex.spawn({ ...REQ, lanePathOverride: IMPL_LANE_PATH }, o);
+      expect(stageDeliveryReportCli).toHaveBeenCalledWith(IMPL_LANE_PATH);
+      expect(stageDeliveryReportCli.mock.invocationCallOrder[0])
+        .toBeLessThan(o.spawnAgent.mock.invocationCallOrder[0]);
+    });
+
+    it('never stages anything for an ordinary we-locus spawn (no lanePathOverride)', async () => {
+      const stageDeliveryReportCli = vi.fn();
+      const o = io({ stageDeliveryReportCli });
+      await DELIVERY_AGENT_PROVIDERS.codex.spawn(REQ, o);
+      expect(stageDeliveryReportCli).not.toHaveBeenCalled();
+    });
+
+    it('the deny-map seals off the OVERRIDE lane\'s own primary checkout (plateau-app\'s), not WE\'s', async () => {
+      const o = io({ stageDeliveryReportCli: vi.fn(), denyPaths: null });
+      await DELIVERY_AGENT_PROVIDERS.codex.spawn({
+        ...REQ,
+        lanePathOverride: `${process.env.HOME}/workspace/.lanes/plateau-app/lane-4`,
+      }, o);
+      const argv = o.spawnAgent.mock.calls[0][0];
+      const permissionsArg = argv.find((a) => typeof a === 'string' && a.startsWith('permissions='));
+      expect(permissionsArg).toContain(`${process.env.HOME}/workspace/plateau-app`);
+      expect(permissionsArg).not.toContain(`${process.env.HOME}/workspace/webeverything`);
+    });
+  });
 });
 
 // ================================================================================================
@@ -527,6 +592,54 @@ describe('CLAUDE_RESTRICTED_PROVIDER.spawn real cwd + env (#3627 bug 7)', () => 
     )).rejects.toThrow('resume boom');
     const [, , optsArg] = persistFailure.mock.calls[0];
     expect(optsArg.resumeSessionId).toBe('cccccccc-cccc-4ccc-8ccc-cccccccccccc');
+  });
+
+  // build-path-codex-isolation-locus — the SAME fix as `CODEX_PROVIDER.spawn lanePathOverride`, above, for
+  // the OTHER provider: Claude's `--restricted` mode ALSO confines its file tools to its own spawn cwd (this
+  // file's own `CLAUDE_RESTRICTED_PROVIDER.spawn` docblock, bug 7(a): "confines the file tools to the working
+  // directories"), so a non-`we` locus item needs the identical cwd redirect here too.
+  describe('CLAUDE_RESTRICTED_PROVIDER.spawn lanePathOverride (build-path-codex-isolation-locus fix)', () => {
+    const IMPL_LANE_PATH = '/tmp/.lanes/frontierui/lane-2';
+
+    it('never calls resolveLane at all when an override is given, and cwd is the override', async () => {
+      const io = fakeIo({ stageDeliveryReportCli: vi.fn() });
+      await DELIVERY_AGENT_PROVIDERS['claude-restricted'].spawn(
+        {
+          sessionId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', prompt: 'p', lane: 3, sessionSlug: 'conveyor-2385',
+          item: '2385', attemptTag: '', lanePathOverride: IMPL_LANE_PATH,
+        },
+        io,
+      );
+      expect(io.resolveLane).not.toHaveBeenCalled();
+      const [, opts] = io.spawnAgent.mock.calls[0];
+      expect(opts.cwd).toBe(IMPL_LANE_PATH);
+      expect(opts.env.LANE).toBe(IMPL_LANE_PATH);
+      expect(opts.env.IMPL_LANE).toBe(IMPL_LANE_PATH);
+    });
+
+    it('stages delivery-report-cli.mjs\'s closure into the foreign lane before spawning', async () => {
+      const stageDeliveryReportCli = vi.fn();
+      const io = fakeIo({ stageDeliveryReportCli });
+      await DELIVERY_AGENT_PROVIDERS['claude-restricted'].spawn(
+        {
+          sessionId: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', prompt: 'p', lane: 3, sessionSlug: 's', item: '1',
+          attemptTag: '', lanePathOverride: IMPL_LANE_PATH,
+        },
+        io,
+      );
+      expect(stageDeliveryReportCli).toHaveBeenCalledWith(IMPL_LANE_PATH);
+    });
+
+    it('never stages anything, and never sets IMPL_LANE, for an ordinary we-locus spawn', async () => {
+      const stageDeliveryReportCli = vi.fn();
+      const io = fakeIo({ stageDeliveryReportCli });
+      await DELIVERY_AGENT_PROVIDERS['claude-restricted'].spawn(
+        { sessionId: 'ffffffff-ffff-4fff-8fff-ffffffffffff', prompt: 'p', lane: 3, sessionSlug: 's', item: '1', attemptTag: '' },
+        io,
+      );
+      expect(stageDeliveryReportCli).not.toHaveBeenCalled();
+      expect(io.spawnAgent.mock.calls[0][1].env.IMPL_LANE).toBeUndefined();
+    });
   });
 });
 
@@ -1102,6 +1215,25 @@ describe('commitBuildTurn (#3565 — the wrapper commits the agent\'s OWN turn; 
     const [, message] = writeFile.mock.calls[0];
     expect(message).toMatch(/Co-Authored-By: Claude Sonnet 5 <noreply@anthropic\.com>/);
   });
+
+  // build-path-codex-isolation-locus — a NON-`we` implementation lane's own commit must carry ITS repo's own
+  // canonical prefix, never the hardcoded `WE #`, matching `repo-profile.mjs#briefTokensForRepo`'s
+  // `ATTRIBUTION` convention already used elsewhere for fix/ci-heal. Real `repoProfileForLanePath` (not
+  // injected) reads the pool-dir basename off the given `lane` path, so a REAL plateau-app-shaped path is
+  // needed here (a synthetic `/lane` — every OTHER test in this describe block — correctly falls back to `WE`).
+  it('names a plateau-app implementation lane\'s own commit "PLATEAU #<item>", never "WE #<item>"', () => {
+    const run = vi.fn(() => '');
+    const writeFile = vi.fn();
+    const plateauAppLane = `${process.env.HOME}/workspace/.lanes/plateau-app/lane-4`;
+    const result = commitBuildTurn(
+      { lane: plateauAppLane, item: '3604', provider: { name: 'codex' } },
+      { run, writeFile, touchedFiles: () => ['src/foo.tsx'] },
+    );
+    expect(result).toEqual({ committed: true, paths: ['src/foo.tsx'] });
+    const [, message] = writeFile.mock.calls[0];
+    expect(message).toMatch(/^PLATEAU #3604: delivery build/);
+    expect(message).not.toMatch(/^WE #/);
+  });
 });
 
 describe('runGateWithOneRetry commits the build turn itself (#3565 — before the agent-commit redesign this '
@@ -1618,6 +1750,22 @@ describe('buildDeliveryAgentEnv (#3627 bug 7 helper — the real env vars the br
       sessionSlug: 's', item: '1', lanePath: '/lane', attemptTag: '', reportsDir: '/wrapper/root/.operations/delivery-reports',
     });
     expect(env.OPERATION_DELIVERY_REPORTS_DIR).toBe('/wrapper/root/.operations/delivery-reports');
+  });
+
+  // build-path-codex-isolation-locus — the live #3604 finding's own blocked reason named this env var by
+  // name ("IMPL_LANE unset"); this is where it is actually stamped.
+  it('stamps IMPL_LANE when a cross-locus implementation lane is given', () => {
+    const env = buildDeliveryAgentEnv({
+      sessionSlug: 's', item: '3604', lanePath: '/impl/lane', attemptTag: '', implLane: '/impl/lane',
+    });
+    expect(env.IMPL_LANE).toBe('/impl/lane');
+  });
+
+  it('omits IMPL_LANE entirely (never an empty string) for an ordinary we-locus delivery — the exact same '
+    + 'shape the FIRST test in this describe block already `.toEqual`s exactly, so this is not a new key an '
+    + 'existing caller would see', () => {
+    const env = buildDeliveryAgentEnv({ sessionSlug: 's', item: '1', lanePath: '/lane', attemptTag: '' });
+    expect(Object.hasOwn(env, 'IMPL_LANE')).toBe(false);
   });
 });
 
@@ -2407,6 +2555,109 @@ describe('resetStaleVerifyMarker (#3627 attempt-5 finding — shells verify-lane
 });
 
 // ================================================================================================
+// build-path-codex-isolation-locus — the live #3604 finding: dispatching a plateau-app-scoped card via the
+// mechanical build path reached the Codex wrapper, but the wrapper only ever acquired a WE lane — Codex
+// reported `blocked` ("IMPL_LANE unset", and the plateau-app files were never in any lane it could reach).
+// This section covers the fix's own new pure helpers directly; the provider-level `lanePathOverride` behavior
+// is covered above (`CODEX_PROVIDER.spawn lanePathOverride` / `CLAUDE_RESTRICTED_PROVIDER.spawn
+// lanePathOverride`), and `deliverItem`'s own end-to-end wiring is covered in the final describe block below.
+// ================================================================================================
+describe('resolveDeliveryLocus (build-path-codex-isolation-locus — which repo an item\'s own scope names)', () => {
+  it('defaults to `we` for an empty/no scope — byte-identical to this wrapper\'s behavior before this '
+    + 'function existed', () => {
+    expect(resolveDeliveryLocus('').profile.key).toBe('we');
+    expect(resolveDeliveryLocus('').multiRepo).toBe(false);
+    expect(resolveDeliveryLocus(undefined).profile.key).toBe('we');
+  });
+
+  it('resolves a we-only scope to `we`', () => {
+    const locus = resolveDeliveryLocus('we:scripts/lib/foo.mjs,we:scripts/lib/bar.mjs');
+    expect(locus.profile.key).toBe('we');
+    expect(locus.multiRepo).toBe(false);
+  });
+
+  it('resolves a single non-we locus (the live #3604 shape) to that repo\'s own profile', () => {
+    const locus = resolveDeliveryLocus('plateau-app:src/pages/Foo.tsx,plateau-app:src/pages/Bar.tsx');
+    expect(locus.multiRepo).toBe(false);
+    expect(locus.profile.key).toBe('plateau-app');
+    expect(locus.profile.checkoutPath.endsWith('/workspace/plateau-app')).toBe(true);
+  });
+
+  it('also resolves the legacy `plateau:` scope prefix to the SAME plateau-app profile (repo-profile.mjs\'s '
+    + 'own alias — legacy `plateau` is abandoned, superseded by `plateau-app`)', () => {
+    expect(resolveDeliveryLocus('plateau:src/x.ts').profile.key).toBe('plateau-app');
+  });
+
+  it('resolves a single frontierui locus', () => {
+    expect(resolveDeliveryLocus('fui:packages/x.ts').profile.key).toBe('frontierui');
+    expect(resolveDeliveryLocus('frontierui:packages/x.ts').profile.key).toBe('frontierui');
+  });
+
+  it('refuses to resolve — reports multiRepo:true — when scope spans TWO OR MORE distinct repos, a genuine '
+    + '"couple" build this wrapper defers rather than guesses at (a `we:` + `plateau-app:` mix, e.g. #2662)', () => {
+    const locus = resolveDeliveryLocus('we:backlog/2662-x.md,plateau-app:src/y.tsx');
+    expect(locus.multiRepo).toBe(true);
+    expect(locus.profile).toBe(null);
+    expect(locus.keys.sort()).toEqual(['plateau-app', 'we']);
+  });
+
+  it('also refuses two non-we repos scoped together', () => {
+    const locus = resolveDeliveryLocus('frontierui:a.ts,plateau-app:b.ts');
+    expect(locus.multiRepo).toBe(true);
+    expect(locus.keys.sort()).toEqual(['frontierui', 'plateau-app']);
+  });
+});
+
+describe('acquireImplLane (build-path-codex-isolation-locus)', () => {
+  it('acquires UNNUMBERED, against the profile\'s own checkoutPath, with --item= (so the drain\'s existing '
+    + 'by-item release sweep finds this lane too)', () => {
+    const run = vi.fn(() => '/real/pool-pa/lane-4');
+    const path = acquireImplLane(
+      { sessionSlug: 'conveyor-3604', claudeSessionId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', item: '3604', profile: repoProfile('plateau-app') },
+      { run },
+    );
+    expect(path).toBe('/real/pool-pa/lane-4');
+    const [cmd, args] = run.mock.calls[0];
+    expect(cmd).toBe('node');
+    expect(args).toEqual(expect.arrayContaining([
+      'scripts/lane-pool.mjs', 'acquire', '--purpose=conveyor-delivery-impl',
+      '--session=conveyor-3604', '--item=3604', '--adopt',
+    ]));
+    expect(args.some((a) => a.startsWith('--repo=') && a.endsWith('/workspace/plateau-app'))).toBe(true);
+    expect(args.some((a) => a.startsWith('--lane='))).toBe(false);
+  });
+
+  it('reports pool saturation as an empty string, never a throw — the caller (deliverItem) decides what that means', () => {
+    const run = vi.fn(() => '');
+    const path = acquireImplLane(
+      { sessionSlug: 's', claudeSessionId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', item: '1', profile: repoProfile('frontierui') },
+      { run },
+    );
+    expect(path).toBe('');
+  });
+});
+
+describe('stageDeliveryReportCliIntoLane (build-path-codex-isolation-locus)', () => {
+  it('copies the delivery-report CLI\'s own closure to the SAME repo-relative paths inside the foreign lane '
+    + '— never a dedicated subdir — so the brief\'s hardcoded `node scripts/operations/delivery-report-cli.mjs` '
+    + 'command works completely unmodified whichever repo the lane belongs to', () => {
+    const written = {};
+    const readFile = vi.fn((p) => `// content of ${p}`);
+    const ensureDir = vi.fn();
+    const writeFile = vi.fn((p, data) => { written[p] = data; });
+    stageDeliveryReportCliIntoLane('/impl/lane', { repoRoot: '/we/root', readFile, ensureDir, writeFile });
+    for (const rel of DELIVERY_REPORT_CLI_REL_FILES) {
+      expect(readFile).toHaveBeenCalledWith(`/we/root/${rel}`);
+      expect(written[`/impl/lane/${rel}`]).toBe(`// content of /we/root/${rel}`);
+    }
+  });
+
+  it('refuses an empty lanePath rather than silently staging nowhere', () => {
+    expect(() => stageDeliveryReportCliIntoLane('')).toThrow(/non-empty absolute path/);
+  });
+});
+
+// ================================================================================================
 // #3627 bug 13 — `deliverItem`'s success-path result string read `prResult.number`, but `openPr`'s return
 // should be `open-pr.mjs`'s `classifySubmit` shape, which names the PR `pr`, never `number`. Renaming
 // `.number` to `.pr` was NOT the full fix, though: `run.mjs open-pr --json` does not print `classifySubmit`'s
@@ -2446,7 +2697,7 @@ describe('deliverItem (#3627 bug 13 — the success-path result string names the
         return JSON.stringify({ action: 'land', round: 1, roundCap: 5, verdict: 'land', dismissed: [] });
       }
       if (cmd === 'git') return ''; // decideParkMode's own diff-stats read; empty is a safe, real answer
-      if (cmd === 'node' && a[0] === 'scripts/operations/run.mjs' && a[1] === 'open-pr') {
+      if (cmd === 'node' && String(a[0]).endsWith('scripts/operations/run.mjs') && a[1] === 'open-pr') {
         // the REAL `run.mjs open-pr --json` shape: the full run-outcome envelope, with the actual `pr`/`url`
         // nested at `findings.submit.effects[0].result` — never a flat `{pr, url}` object (that was the exact
         // repro for bug 13 still being live after a first, insufficient fix attempt).
@@ -2497,5 +2748,137 @@ describe('deliverItem (#3627 bug 13 — the success-path result string names the
       { newSessionId: () => 'uuid-fixed' },
     );
     expect(result.result).toBe('PR #4321 (review:pending)');
+  });
+
+  // ==============================================================================================
+  // build-path-codex-isolation-locus — the live #3604 fix, END TO END through the REAL, unmodified
+  // `deliverItem`: a single non-we locus (plateau-app) acquires its OWN implementation lane, spawns the
+  // agent turn AND runs the gate/converge/PR against it — never the WE lane `lane: 7` would resolve to.
+  // ==============================================================================================
+  describe('a single non-we locus (plateau-app) — build-path-codex-isolation-locus', () => {
+    let implLane;
+
+    beforeEach(() => {
+      implLane = mkdtempSync(join(tmpdir(), 'deliver-item-wrapper-impllane-'));
+      findItem.mockReturnValue({ num: '3604', slug: 'plateau-thing', specPath: 'backlog/3604-plateau-thing.md', scope: ['plateau-app:src/foo.tsx'] });
+    });
+
+    afterEach(() => {
+      rmSync(implLane, { recursive: true, force: true });
+    });
+
+    it('acquires the implementation lane, spawns with lanePathOverride, and opens the PR AGAINST IT', async () => {
+      const spawn = vi.fn();
+      execFileSync.mockImplementation((cmd, args = []) => {
+        const a = args || [];
+        if (cmd === 'node' && a[0] === 'scripts/lane-pool.mjs' && a[1] === 'acquire') {
+          return a.includes('--purpose=conveyor-delivery-impl') ? implLane : '';
+        }
+        if (cmd === 'node' && a[0] === 'scripts/lane-pool.mjs' && a[1] === 'status') {
+          return JSON.stringify({ repo: 'web-everything', root: '/pool', lanes: [{ lane: 7, path: lane, exists: true }] });
+        }
+        if (cmd === 'node' && a[0] === 'scripts/verify-lane.mjs') return '{}';
+        if (cmd === 'node' && a[0] === 'scripts/operations/run.mjs' && a[1] === 'claim') return '{}';
+        if (cmd === 'node' && a[0] === 'scripts/operations/run.mjs' && a[1] === 'verify') {
+          return JSON.stringify({
+            runId: 'run-1', op: 'verify', stopped: 'complete', applied: [],
+            verdict: { ok: true, cwd: implLane, suite: 'run', passed: 2, failed: 0, unrun: 0, checks: [], blocking: [] },
+          });
+        }
+        if (cmd === 'node' && a[0] === 'scripts/converge-cli.mjs' && a[1] === 'init') {
+          return JSON.stringify({ action: 'land', round: 1, roundCap: 5, verdict: 'land', dismissed: [] });
+        }
+        if (cmd === 'git') return '';
+        if (cmd === 'node' && String(a[0]).endsWith('scripts/operations/run.mjs') && a[1] === 'open-pr') {
+          return openPrEnvelope({ outcome: 'opened', pr: 5555, url: 'https://example/pr/5555' });
+        }
+        throw new Error(`unexpected execFileSync(${cmd}, ${JSON.stringify(a)})`);
+      });
+      tryReadDeliveryReport.mockReturnValue({ status: 'done', outcome: 'done', filesTouched: ['src/foo.tsx'], reason: 'did it' });
+
+      const result = await deliverItem(
+        { item: '3604', lane: 7, scope: ['plateau-app:src/foo.tsx'], sessionSlug: 'conveyor-3604', attemptTag: '' },
+        { spawn, vendor: 'codex' },
+        { newSessionId: () => 'uuid-fixed' },
+      );
+
+      expect(result.result).toBe('PR #5555 (review:pending)');
+      // the agent's own turn ran with cwd = the impl lane, never the WE lane.
+      expect(spawn.mock.calls[0][0].lanePathOverride).toBe(implLane);
+      // the PR itself opened FROM the impl lane (its own `gh`/git state), not WE's.
+      const openPrCall = execFileSync.mock.calls.find((c) => c[1]?.[1] === 'open-pr');
+      expect(openPrCall[2].cwd).toBe(implLane);
+    });
+
+    it('releases the implementation lane too (via the cross-pool sweep — its lane NUMBER is never learned by '
+      + 'this wrapper) when the agent reports not-ready', async () => {
+      execFileSync.mockImplementation((cmd, args = []) => {
+        const a = args || [];
+        if (cmd === 'node' && a[0] === 'scripts/lane-pool.mjs' && a[1] === 'acquire') {
+          return a.includes('--purpose=conveyor-delivery-impl') ? implLane : '';
+        }
+        if (cmd === 'node' && a[0] === 'scripts/lane-pool.mjs' && a[1] === 'status') {
+          return JSON.stringify({ repo: 'web-everything', root: '/pool', lanes: [{ lane: 7, path: lane, exists: true }] });
+        }
+        if (cmd === 'node' && a[0] === 'scripts/verify-lane.mjs') return '{}';
+        if (cmd === 'node' && a[0] === 'scripts/operations/run.mjs' && a[1] === 'claim') return '{}';
+        if (cmd === 'node' && a[0] === 'scripts/backlog.mjs' && a[1] === 'release') return '';
+        if (cmd === 'node' && a[0] === 'scripts/lane-pool.mjs' && a[1] === 'release') return '';
+        throw new Error(`unexpected execFileSync(${cmd}, ${JSON.stringify(a)})`);
+      });
+      tryReadDeliveryReport.mockReturnValue({ status: 'done', outcome: 'blocked', filesTouched: [], reason: 'blockedBy 1 re-opened' });
+
+      const result = await deliverItem(
+        { item: '3604', lane: 7, scope: ['plateau-app:src/foo.tsx'], sessionSlug: 'conveyor-3604', attemptTag: '' },
+        { spawn: vi.fn(), vendor: 'codex' },
+        { newSessionId: () => 'uuid-fixed' },
+      );
+
+      expect(result.result).toBe('not-ready (blockedBy 1 re-opened)');
+      expect(execFileSync.mock.calls.some((c) => (
+        c[0] === 'node' && c[1][0] === 'scripts/lane-pool.mjs' && c[1][1] === 'release' && c[1].includes('--all-pools')
+      ))).toBe(true);
+    });
+
+    it('a saturated implementation-lane pool refuses BEFORE claiming the item — no free lane means no claim', async () => {
+      const calls = [];
+      execFileSync.mockImplementation((cmd, args = []) => {
+        const a = args || [];
+        calls.push([cmd, a]);
+        if (cmd === 'node' && a[0] === 'scripts/lane-pool.mjs' && a[1] === 'acquire') {
+          return a.includes('--purpose=conveyor-delivery-impl') ? '' : ''; // both empty — WE's own return is unused anyway
+        }
+        if (cmd === 'node' && a[0] === 'scripts/lane-pool.mjs' && a[1] === 'status') {
+          return JSON.stringify({ repo: 'web-everything', root: '/pool', lanes: [{ lane: 7, path: lane, exists: true }] });
+        }
+        if (cmd === 'node' && a[0] === 'scripts/backlog.mjs' && a[1] === 'release') return '';
+        if (cmd === 'node' && a[0] === 'scripts/lane-pool.mjs' && a[1] === 'release') return '';
+        throw new Error(`unexpected execFileSync(${cmd}, ${JSON.stringify(a)})`);
+      });
+
+      const result = await deliverItem(
+        { item: '3604', lane: 7, scope: ['plateau-app:src/foo.tsx'], sessionSlug: 'conveyor-3604', attemptTag: '' },
+        { spawn: vi.fn(), vendor: 'codex' },
+        { newSessionId: () => 'uuid-fixed' },
+      );
+
+      expect(result.result).toBe('blocked-on-infra (no free plateau-app lane)');
+      expect(calls.some((c) => c[0] === 'node' && c[1][0] === 'scripts/operations/run.mjs' && c[1][1] === 'claim')).toBe(false);
+    });
+  });
+
+  it('build-path-codex-isolation-locus — refuses a genuine multi-repo "couple" scope (e.g. #2662, we + '
+    + 'plateau-app together) BEFORE acquiring anything, rather than guessing at merge order', async () => {
+    findItem.mockReturnValue({ num: '2662', slug: 'couple-thing', specPath: 'backlog/2662-couple-thing.md', scope: ['we:backlog/2662-couple-thing.md', 'plateau-app:src/y.tsx'] });
+    execFileSync.mockImplementation((cmd, args = []) => {
+      throw new Error(`unexpected execFileSync — the couple refusal must fire before any acquire (${cmd} ${JSON.stringify(args)})`);
+    });
+
+    await expect(deliverItem(
+      { item: '2662', lane: 7, scope: ['we:backlog/2662-couple-thing.md', 'plateau-app:src/y.tsx'], sessionSlug: 'conveyor-2662', attemptTag: '' },
+      { spawn: vi.fn(), vendor: 'codex' },
+      { newSessionId: () => 'uuid-fixed' },
+    )).rejects.toThrow(/multi-repo "couple" build/);
+    expect(execFileSync).not.toHaveBeenCalled();
   });
 });

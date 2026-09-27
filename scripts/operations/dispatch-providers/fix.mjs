@@ -49,6 +49,7 @@ import {
   REPO_ROOT,
   defaultSpawnDetached,
   deliveryDispatchLogPath,
+  wrapperExecutorFor,
 } from '../detached-dispatch.mjs';
 // mechanical-dispatcher (epic #3383) Part 2 — see `build.mjs`'s own note; identical use here, keyed on the
 // repair's OPTIONAL `num` (the item, when known — see the "ITEM is optional" note below).
@@ -98,6 +99,9 @@ export function fixDetachedProvider(request, {
   // there is a known item to read one from (a repair with no `num` has no backlog card to carry a marker on).
   const deliveryAgent = readDeliveryAgentMarker(num);
   if (deliveryAgent) argv.push(`--provider=${deliveryAgent}`);
+  // build-path-codex-isolation — the run record's ONE executor field comes from here: the vendor this wrapper
+  // is actually told to run, never the router's recommendation (see dispatch-lane-io.mjs#dispatchExecutorFor).
+  request?.reportExecutor?.(wrapperExecutorFor(deliveryAgent));
 
   // #landing-freeze-2779 — forward the request's already-computed gh-App-shim env (fresh-cache PATH override,
   // never a static token) into the wrapper's OWN process env — see `detached-dispatch.mjs#defaultSpawnDetached`'s

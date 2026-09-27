@@ -1,0 +1,428 @@
+#!/usr/bin/env node
+/**
+ * @file skills-src/conveyor/build-dispatch-daemon.mjs
+ * @description #3984 slice 1 — the standalone BUILD-DISPATCH DAEMON. Each tick it asks the tick core
+ *   (we:scripts/conveyor/tick-core.mjs) which cleared, ready items it may launch (`decisions.spawnBuilds`), runs
+ *   the operator's build policy over that answer (we:scripts/conveyor/build-dispatch-policy.mjs — cap, landing
+ *   freeze, scope vs open PRs, hot-file, branch name), and dispatches each survivor MECHANICALLY through the
+ *   existing `dispatch-lane` operation (`run.mjs dispatch-lane --num=N`, with `WE_BUILD_DISPATCH_MODE=mechanical`
+ *   so a card's `deliveryAgent:` marker routes to Codex via deliver-item-run / the wrapper, and the #3906 routing
+ *   table + #4034 critical-work gate decide everything else inside dispatch-lane — this file routes nothing).
+ *
+ * WHAT IT IS NOT. It runs NO other pass: no prepare/fix/ci-heal spawns, no reconcile, no watchers — those have
+ *   their own daemons (review, fix-dispatch, pass-daemons) or stay with runner.mjs. It never edits runner.mjs.
+ *
+ * SAFETY:
+ *   - ONE singleton lease under its own key ({@link BUILD_DISPATCH_DAEMON_LEASE_KEY}, #3877 keyed leases), with
+ *     the independent heartbeat timer the verify daemon uses (#4130).
+ *   - NO DOUBLE DISPATCH ACROSS RESTARTS: a durable per-item claim (we:scripts/conveyor/build-dispatch-claim.mjs,
+ *     the build twin of PR #2789's fix-dispatch claim) is taken BEFORE dispatch-lane runs and is only retired by
+ *     observed progress (a PR delivers the item, or the item left the cleared queue). A restarted daemon has a
+ *     new pid, so it cannot take an old claim, and the claim's stored scope keeps the hot-file rule honest.
+ *   - KILL SWITCH: `WE_BUILD_DAEMON_KILL=1`, or the file `<coordination root>/build-dispatch-daemon.kill`,
+ *     freezes every new dispatch on the next tick (the daemon keeps planning and logging).
+ *   - LIVE IS OPT-IN: without `--live` the daemon refuses to dispatch. `--dry-run` prints what it WOULD
+ *     dispatch now and exits, touching nothing (no lease, no claim, no dispatch).
+ *
+ * PURE-CORE / IO-SHELL: {@link runBuildDispatchTick} and {@link settleBookkeeping} take every effect injected
+ *   and are unit-tested in we:skills-src/conveyor/__tests__/build-dispatch-daemon.test.mjs.
+ */
+
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir, hostname } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import {
+  RUNNER_LOCK_ROOT, makeOwner, acquireRunnerLease, releaseRunnerLeaseIfOwned,
+} from './runner-lock.mjs';
+import { runDaemonLoop, startIndependentHeartbeat, realSleep } from './verify-daemon.mjs';
+import { normNum } from '../../scripts/conveyor/queue-store.mjs';
+import {
+  BUILD_DISPATCH_POLICY, planBuildDispatch, normalizeOpenPrs, prDeliversNum,
+} from '../../scripts/conveyor/build-dispatch-policy.mjs';
+import {
+  acquireBuildDispatchClaim, releaseBuildDispatchClaim, listBuildDispatchClaims,
+} from '../../scripts/conveyor/build-dispatch-claim.mjs';
+import { resolveCoordinationRoot } from '../../scripts/operations/coordination-root.mjs';
+
+export const BUILD_DISPATCH_DAEMON_LEASE_KEY = '<conveyor:build-dispatch-daemon-lease>';
+export const DEFAULT_INTERVAL_MS = 120_000;
+export const KILL_SWITCH_ENV = 'WE_BUILD_DAEMON_KILL';
+export const KILL_SWITCH_FILENAME = 'build-dispatch-daemon.kill';
+
+// ── PURE CORE ────────────────────────────────────────────────────────────────────────────────────────────────
+
+/** Is the kill switch engaged? Pure over its two inputs. */
+export function readKillSwitch({ env = {}, killFileExists = false, killFilePath = '' } = {}) {
+  const v = String(env[KILL_SWITCH_ENV] ?? '').trim().toLowerCase();
+  if (v && v !== '0' && v !== 'false' && v !== 'off') return { engaged: true, reason: `${KILL_SWITCH_ENV}=${env[KILL_SWITCH_ENV]}` };
+  if (killFileExists) return { engaged: true, reason: `kill file ${killFilePath}` };
+  return { engaged: false };
+}
+
+const GUARD_LISTS = ['buildGuards', 'prepareGuards', 'fixGuards', 'ciHealGuards'];
+const guardId = (g) => JSON.stringify([g?.num ?? null, g?.pr ?? null, g?.kind ?? null, g?.spawnedTick ?? null]);
+
+/**
+ * The tick core records a guard for EVERY spawn it surfaces, assuming the caller launches them all. This daemon
+ * launches only the builds that pass its policy, and no prepare/fix/ci-heal at all — so a guard for a spawn it
+ * did not make would hold that item's lane for the guard's TTL as if an agent were starting there. Keep every
+ * guard the previous tick already carried, plus only the new build guards for items actually dispatched.
+ * `launchedNums` is trimmed the same way. Everything else in `nextState` passes through unchanged.
+ */
+export function settleBookkeeping(prev = {}, next = {}, dispatchedNums = []) {
+  if (!next || typeof next !== 'object') return {};
+  const launched = new Set(dispatchedNums.map(normNum));
+  const out = { ...next };
+  for (const list of GUARD_LISTS) {
+    if (!Array.isArray(next[list])) continue;
+    const had = new Set((Array.isArray(prev?.[list]) ? prev[list] : []).map(guardId));
+    out[list] = next[list].filter((g) => had.has(guardId(g)) || (list === 'buildGuards' && launched.has(normNum(g?.num))));
+  }
+  if (Array.isArray(next.launchedNums)) {
+    const hadNums = new Set((Array.isArray(prev?.launchedNums) ? prev.launchedNums : []).map(normNum));
+    out.launchedNums = next.launchedNums.filter((n) => hadNums.has(normNum(n)) || launched.has(normNum(n)));
+  }
+  return out;
+}
+
+/** Find `dispatching` anywhere in dispatch-lane's `--json` output (its verdict nests under the run result). */
+export function readDispatchOutcome(text) {
+  let parsed;
+  try { parsed = JSON.parse(String(text ?? '')); } catch { return { dispatching: false, reason: 'unparseable dispatch-lane output' }; }
+  const seen = new Set();
+  const walk = (v) => {
+    if (!v || typeof v !== 'object' || seen.has(v)) return null;
+    seen.add(v);
+    if (typeof v.dispatching === 'boolean') return v;
+    for (const k of Object.keys(v)) { const r = walk(v[k]); if (r) return r; }
+    return null;
+  };
+  const verdict = walk(parsed);
+  if (!verdict) return { dispatching: false, reason: 'no verdict in dispatch-lane output' };
+  return { dispatching: verdict.dispatching, reason: verdict.reason ?? verdict.why ?? null, lane: verdict.lane ?? null, sessionSlug: verdict.sessionSlug ?? null };
+}
+
+/**
+ * ONE tick. Every effect is injected:
+ *   planTick(bookkeeping) → tick-core `{decisions, nextState}`; fetchOpenPrs() → `[{repo, prs}]`;
+ *   listClaims() → claim entries; releaseClaim({num}); acquireClaim({num, scope}) → `{ok, reason, heldBy}`;
+ *   listRunStoreInFlight() → `[{num, scope, source}]`; killSwitch() → `{engaged, reason}`;
+ *   dispatch({num, bookkeeping}) → `{dispatching, reason}`.
+ * `live:false` plans and reports without retiring, claiming, or dispatching anything.
+ */
+export async function runBuildDispatchTick({ bookkeeping = {}, live = false, policy = BUILD_DISPATCH_POLICY, effects }) {
+  const out = await effects.planTick(bookkeeping);
+  const d = out?.decisions || {};
+  const admission = d.admission || {};
+  const scopeByNum = new Map((admission.queue || []).map((r) => [normNum(r.num), Array.isArray(r.scope) ? r.scope : []]));
+  const clearedNums = new Set((admission.cleared || []).map((r) => normNum(r.num)));
+  const openPrs = normalizeOpenPrs(await effects.fetchOpenPrs());
+
+  // Retire what observable progress has finished: a PR delivers it, or it left the cleared queue.
+  const doneWhy = (num) => {
+    const pr = openPrs.find((p) => prDeliversNum(p, num));
+    if (pr) return `${pr.repo}#${pr.number} delivers it`;
+    // Only trust "left the queue" when the tick actually read a queue — an empty/failed read must never retire
+    // every claim at once (that would reopen the restart double-dispatch this claim exists to close).
+    if (clearedNums.size > 0 && !clearedNums.has(normNum(num))) return 'left the cleared queue';
+    return null;
+  };
+  const retired = [];
+  const inFlight = [];
+  for (const c of effects.listClaims()) {
+    const num = normNum(c.meta?.num);
+    const why = doneWhy(num);
+    if (why) {
+      if (live) effects.releaseClaim({ num });
+      retired.push({ num, why, released: live });
+      continue;
+    }
+    inFlight.push({ num, scope: c.meta?.scope || [], source: `claim ${c.owner}` });
+  }
+  for (const r of effects.listRunStoreInFlight()) {
+    if (!doneWhy(r.num)) inFlight.push(r);
+  }
+
+  const spawn = Array.isArray(d.spawnBuilds) ? d.spawnBuilds : [];
+  const candidates = spawn.map((s) => ({ num: normNum(s.num), lane: s.lane ?? null, scope: scopeByNum.get(normNum(s.num)) || [] }));
+  const externalBuilding = Number(d.counts?.building) || 0;
+  const plan = planBuildDispatch({ candidates, inFlight, openPrs, externalBuilding, killSwitch: effects.killSwitch(), policy });
+
+  const dispatched = [];
+  const failures = [];
+  if (live) {
+    for (const pick of plan.dispatch) {
+      const claim = effects.acquireClaim({ num: pick.num, scope: pick.scope });
+      if (!claim.ok) { failures.push({ num: pick.num, stage: 'claim', reason: `${claim.reason}${claim.heldBy ? ` by ${claim.heldBy}` : ''}` }); continue; }
+      let res;
+      try { res = await effects.dispatch({ num: pick.num, bookkeeping }); } catch (e) { res = { dispatching: false, reason: String(e?.message || e).split('\n')[0] }; }
+      if (res?.dispatching) dispatched.push({ num: pick.num, lane: res.lane ?? pick.lane, sessionSlug: res.sessionSlug ?? null });
+      else { effects.releaseClaim({ num: pick.num }); failures.push({ num: pick.num, stage: 'dispatch', reason: res?.reason ?? 'not dispatched' }); }
+    }
+  }
+  return {
+    live,
+    statusLine: d.statusLine || '',
+    tickCore: { building: externalBuilding, spawnBuilds: spawn, held: admission.held || [], planned: admission.planned || [], queue: admission.queue || [], suppressedBuilds: d.suppressedBuilds || [] },
+    plan,
+    retired,
+    dispatched,
+    failures,
+    nextBookkeeping: settleBookkeeping(bookkeeping, out?.nextState || {}, dispatched.map((x) => x.num)),
+  };
+}
+
+// ── IO SHELL ─────────────────────────────────────────────────────────────────────────────────────────────────
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = resolve(HERE, '..', '..');
+const SCRIPTS = join(REPO_ROOT, 'scripts');
+
+function cliPlanTick(payload) {
+  const text = execFileSync('node', [join(SCRIPTS, 'conveyor', 'tick-core.mjs')], {
+    input: JSON.stringify({ bookkeeping: payload || {} }), encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024,
+  });
+  return JSON.parse(text);
+}
+
+async function cliFetchOpenPrs() {
+  const { defaultFetchOpenPrs } = await import('../../scripts/conveyor/open-pr-fetch.mjs');
+  const { CONSTELLATION_REPOS } = await import('../../scripts/lib/constellation-repos.mjs');
+  const out = [];
+  for (const [key, { slug }] of Object.entries(CONSTELLATION_REPOS)) {
+    out.push({ repo: key, prs: defaultFetchOpenPrs({ repo: slug }) });
+  }
+  return out;
+}
+
+async function cliListRunStoreInFlight({ now = new Date() } = {}) {
+  const { createFileRunStore } = await import('../../scripts/operations/run-store.mjs');
+  const { DISPATCH_EFFECT, dispatchStillHolds } = await import('../../scripts/operations/dispatch-lane.mjs');
+  const store = createFileRunStore();
+  const rows = [];
+  let ids = [];
+  try { ids = store.list().filter((id) => id.startsWith('dispatch-lane')); } catch { return rows; }
+  for (const id of ids) {
+    let run;
+    try { run = store.read(id); } catch { continue; }
+    for (const e of run?.effects || []) {
+      if (e?.status !== 'in-flight' || e.type !== DISPATCH_EFFECT || e.payload?.launchKind !== 'build') continue;
+      if (!dispatchStillHolds(e, now.toISOString())) continue;
+      rows.push({ num: normNum(e.payload.num), scope: e.payload.scope || [], source: `run ${id}` });
+    }
+  }
+  return rows;
+}
+
+function cliDispatch({ num, bookkeeping }) {
+  const dir = mkdtempSync(join(tmpdir(), 'build-dispatch-daemon-'));
+  const file = join(dir, 'bookkeeping.json');
+  try {
+    writeFileSync(file, JSON.stringify({ bookkeeping: bookkeeping || {} }), { mode: 0o600 });
+    const text = execFileSync('node', [join(SCRIPTS, 'operations', 'run.mjs'), 'dispatch-lane', `--num=${num}`, `--bookkeepingFile=${file}`, '--json'], {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 32 * 1024 * 1024, cwd: REPO_ROOT,
+      env: { ...process.env, WE_BUILD_DISPATCH_MODE: process.env.WE_BUILD_DISPATCH_MODE || 'mechanical' },
+    });
+    return readDispatchOutcome(text);
+  } catch (e) {
+    return { dispatching: false, reason: String(e?.stderr || e?.message || e).replace(/\s+/g, ' ').slice(0, 400) };
+  } finally {
+    try { rmSync(dir, { recursive: true, force: true }); } catch { /* best-effort */ }
+  }
+}
+
+function cliKillSwitch() {
+  const killFilePath = join(resolveCoordinationRoot(), KILL_SWITCH_FILENAME);
+  return readKillSwitch({ env: process.env, killFileExists: existsSync(killFilePath), killFilePath });
+}
+
+/** Predict the provider route for the dry run — the SAME `decideDispatchRoute` dispatch-lane calls, with the
+ *  item's `deliveryAgent:` override honoured as the mechanical build mode would. Advisory only: dispatch-lane
+ *  recomputes it at dispatch time. */
+async function cliPredictRoute(num, scope) {
+  try {
+    const { decideDispatchRoute } = await import('../../scripts/lib/dispatch-contracts.mjs');
+    const io = await import('../../scripts/operations/dispatch-lane-io.mjs');
+    const { readItemDeliveryAgentOverride } = await import('../../scripts/operations/delivery-agent-marker.mjs');
+    const { readFileSync, readdirSync } = await import('node:fs');
+    const file = readdirSync(join(REPO_ROOT, 'backlog')).find((f) => f.startsWith(`${num}-`));
+    const text = file ? readFileSync(join(REPO_ROOT, 'backlog', file), 'utf8') : '';
+    const size = Number((/^size:\s*(\d+)/m.exec(text) || [])[1]) || null;
+    const override = readItemDeliveryAgentOverride(num, { root: REPO_ROOT });
+    const r = decideDispatchRoute({
+      kind: 'build', cause: null, scopePaths: scope, size, tags: [],
+      taskKey: { storyRef: num, round: 1, taskId: 'build' }, ...(override || {}),
+    }, {
+      scorecards: io.defaultReadScorecards(), sizePolicy: io.defaultReadSizePolicy({ root: REPO_ROOT }), promotions: io.defaultReadPromotions({ root: REPO_ROOT }),
+    });
+    return {
+      marker: override?.deliveryAgent ?? null,
+      taskType: r?.taskType ?? null,
+      routed: r?.routed ?? null,
+      executed: r?.executed ?? null,
+      model: r?.model ?? null,
+      refusal: r?.refusal ?? null,
+      gate: (r?.auditTrail || []).filter((a) => /critical|gate|override/i.test(JSON.stringify(a))).map((a) => a.detail || a.reason || a.rule || JSON.stringify(a)).slice(0, 2),
+    };
+  } catch (e) {
+    return { error: String(e?.message || e).split('\n')[0] };
+  }
+}
+
+function cliEffects() {
+  return {
+    planTick: cliPlanTick,
+    fetchOpenPrs: cliFetchOpenPrs,
+    listClaims: () => listBuildDispatchClaims(),
+    releaseClaim: ({ num }) => releaseBuildDispatchClaim({ num }),
+    acquireClaim: ({ num, scope }) => acquireBuildDispatchClaim({ num, scope }),
+    listRunStoreInFlight: () => [],
+    killSwitch: cliKillSwitch,
+    dispatch: cliDispatch,
+  };
+}
+
+function parseFlags(argv) {
+  const f = {};
+  for (const a of argv) {
+    if (!a.startsWith('--')) continue;
+    const i = a.indexOf('=');
+    f[i === -1 ? a.slice(2) : a.slice(2, i)] = i === -1 ? true : a.slice(i + 1);
+  }
+  return f;
+}
+
+function policyFrom(flags) {
+  const n = (v, d) => (Number.isFinite(Number(v)) && Number(v) >= 0 ? Number(v) : d);
+  return {
+    ...BUILD_DISPATCH_POLICY,
+    maxConcurrentBuilds: n(flags['max-concurrent'], BUILD_DISPATCH_POLICY.maxConcurrentBuilds),
+    maxOpenPrs: n(flags['max-open-prs'], BUILD_DISPATCH_POLICY.maxOpenPrs),
+  };
+}
+
+/**
+ * The dry-run report: the dispatch plan for the tick core's launchable builds, PLUS the same policy evaluated
+ * over the items the tick core held only for lane capacity — so the operator sees what the daemon would do
+ * with each queued card once a lane frees, and why it holds the rest.
+ */
+async function dryRun(flags) {
+  const policy = policyFrom(flags);
+  const effects = cliEffects();
+  const runStoreRows = await cliListRunStoreInFlight();
+  effects.listRunStoreInFlight = () => runStoreRows;
+  const tick = await runBuildDispatchTick({ bookkeeping: {}, live: false, policy, effects });
+  const core = tick.tickCore;
+  const scopeByNum = new Map((core.queue || []).map((r) => [normNum(r.num), r.scope || []]));
+  const heldByCore = new Map((core.held || []).map((h) => [normNum(h.num), h.reason]));
+  for (const s of core.suppressedBuilds || []) heldByCore.set(normNum(s.num), s.by || 'suppressed');
+  const capacityOnly = [...heldByCore.entries()].filter(([, why]) => /capacity/.test(String(why))).map(([num]) => ({ num, lane: null, scope: scopeByNum.get(num) || [] }));
+  const openPrs = await effects.fetchOpenPrs();
+  const inFlight = [
+    ...listBuildDispatchClaims().map((c) => ({ num: normNum(c.meta.num), scope: c.meta.scope || [], source: `claim ${c.owner}` })),
+    ...runStoreRows,
+  ];
+  const ifFreed = planBuildDispatch({ candidates: [...tick.plan.dispatch, ...tick.plan.hold, ...capacityOnly].map((c) => ({ num: c.num, lane: c.lane, scope: c.scope || scopeByNum.get(normNum(c.num)) || [] })), inFlight, openPrs: normalizeOpenPrs(openPrs), externalBuilding: core.building, killSwitch: cliKillSwitch(), policy });
+  const focus = String(flags.focus || '').split(',').map(normNum).filter(Boolean);
+  const rows = [];
+  const nums = new Set([...ifFreed.dispatch.map((x) => x.num), ...ifFreed.hold.map((x) => x.num)]);
+  for (const num of focus) nums.add(num);
+  for (const num of nums) {
+    if (focus.length && !focus.includes(num)) continue;
+    const coreSpawn = tick.tickCore.spawnBuilds.some((s) => normNum(s.num) === num);
+    const coreWhy = coreSpawn ? 'launchable now' : (heldByCore.get(num) || (scopeByNum.has(num) ? 'not planned' : 'not in the ready build queue'));
+    const pick = ifFreed.dispatch.find((x) => x.num === num);
+    const held = ifFreed.hold.find((x) => x.num === num);
+    const route = await cliPredictRoute(num, scopeByNum.get(num) || []);
+    rows.push({
+      num,
+      tickCore: coreWhy,
+      daemon: pick ? (coreSpawn ? 'WOULD DISPATCH NOW' : 'would dispatch once the tick core frees a lane') : held ? `hold [${held.rule}] ${held.reason}` : 'not a candidate',
+      route,
+    });
+  }
+  const report = {
+    mode: 'dry-run',
+    at: new Date().toISOString(),
+    statusLine: tick.statusLine,
+    policy: { maxConcurrentBuilds: policy.maxConcurrentBuilds, maxOpenPrs: policy.maxOpenPrs, freezeLabels: policy.freezeLabels },
+    killSwitch: cliKillSwitch(),
+    freeze: tick.plan.freeze,
+    openPrs: normalizeOpenPrs(openPrs).map((p) => `${p.repo}#${p.number}`),
+    inFlight: tick.plan.inFlight,
+    wouldDispatchNow: tick.plan.dispatch.map((x) => x.num),
+    wouldRetireClaims: tick.retired,
+    items: rows,
+  };
+  if (flags.json) { process.stdout.write(`${JSON.stringify(report, null, 2)}\n`); return; }
+  const w = (s) => process.stdout.write(`${s}\n`);
+  w(`build-dispatch-daemon DRY RUN @ ${report.at}`);
+  w(`  tick core: ${report.statusLine}`);
+  w(`  policy: cap ${policy.maxConcurrentBuilds} builds · freeze if open PRs > ${policy.maxOpenPrs} or any of [${policy.freezeLabels.join(', ')}]`);
+  w(`  kill switch: ${report.killSwitch.engaged ? `ENGAGED (${report.killSwitch.reason})` : 'off'} · landing freeze: ${report.freeze.frozen ? `ON — ${report.freeze.reasons.join('; ')}` : 'off'}`);
+  w(`  open PRs: ${report.openPrs.join(', ') || 'none'} · durable in-flight builds (claims/run records): ${report.inFlight.map((f) => `#${f.num} (${f.source})`).join(', ') || 'none'} · tick core counts ${core.building} building`);
+  w(`  would dispatch now: ${report.wouldDispatchNow.map((n) => `#${n}`).join(', ') || 'nothing'}`);
+  for (const r of rows) {
+    const rt = r.route?.error ? `route ? (${r.route.error})` : `marker=${r.route.marker ?? '-'} taskType=${r.route.taskType ?? '-'} routed=${r.route.routed ?? '-'} executed=${r.route.executed ?? '-'}${r.route.refusal ? ` REFUSED: ${r.route.refusal}` : ''}`;
+    w(`  #${r.num}: tick-core=${r.tickCore} → ${r.daemon}\n      ${rt}`);
+  }
+}
+
+async function live(flags) {
+  if (flags['self-sync'] !== undefined && flags['self-sync'] !== true) {
+    console.error('build-dispatch-daemon: --self-sync takes no value'); process.exit(1);
+  }
+  const owner = makeOwner('build-dispatch-daemon');
+  const acquired = acquireRunnerLease(RUNNER_LOCK_ROOT, owner, { key: BUILD_DISPATCH_DAEMON_LEASE_KEY });
+  if (!acquired.ok) { console.error(`build-dispatch-daemon: a live instance holds the lease (${acquired.heldBy}) — exiting.`); return; }
+  const { isAlive, stop } = startIndependentHeartbeat({ owner, key: BUILD_DISPATCH_DAEMON_LEASE_KEY,
+    onLost: () => console.error('build-dispatch-daemon: lease lost — stopping after this tick.') });
+  const release = () => { stop(); releaseRunnerLeaseIfOwned(RUNNER_LOCK_ROOT, owner, { key: BUILD_DISPATCH_DAEMON_LEASE_KEY }); };
+  const shutdown = (sig) => { console.error(`build-dispatch-daemon: ${sig} — releasing the lease.`); release(); process.exit(0); };
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
+
+  const policy = policyFrom(flags);
+  const effects = cliEffects();
+  let bookkeeping = {};
+  let tickOnce = async () => {
+    const rows = await cliListRunStoreInFlight();
+    effects.listRunStoreInFlight = () => rows;
+    const r = await runBuildDispatchTick({ bookkeeping, live: true, policy, effects });
+    bookkeeping = r.nextBookkeeping;
+    return r;
+  };
+  if (flags['self-sync'] === true) {
+    const { wireSelfSyncAndAppAuth } = await import('./runner.mjs');
+    tickOnce = wireSelfSyncAndAppAuth({ tickOnce, root: REPO_ROOT, selfSync: true, onRestart: () => { release(); process.exit(0); } });
+  }
+  const intervalMs = Number(flags['interval-ms']) > 0 ? Number(flags['interval-ms']) : DEFAULT_INTERVAL_MS;
+  console.error(`build-dispatch-daemon: live on ${hostname()}:${process.pid}, cap ${policy.maxConcurrentBuilds}, tick every ${intervalMs}ms${flags['self-sync'] ? ', self-sync ON' : ''}.`);
+  const { stoppedReason } = await runDaemonLoop({
+    tickOnce, sleep: realSleep, isAlive, intervalMs, maxTicks: flags.once ? 1 : Infinity,
+    onTick: (r) => {
+      if (!r || !r.plan) { console.error(`build-dispatch-daemon: tick skipped (${r?.reason ?? 'self-sync'})`); return; }
+      process.stdout.write(`${JSON.stringify({ at: new Date().toISOString(), status: r.statusLine, freeze: r.plan.freeze, inFlight: r.plan.inFlight.map((f) => f.num), dispatched: r.dispatched, hold: r.plan.hold, failures: r.failures, retired: r.retired })}\n`);
+    },
+    onTickError: (e) => console.error(`build-dispatch-daemon: tick failed (non-fatal): ${String(e?.message || e).split('\n')[0]}`),
+  });
+  console.error(`build-dispatch-daemon: stopped (${stoppedReason}).`);
+  release();
+}
+
+async function main(argv) {
+  const flags = parseFlags(argv);
+  if (flags['dry-run']) return dryRun(flags);
+  if (flags.live) return live(flags);
+  console.error('usage: build-dispatch-daemon.mjs --dry-run [--json] [--focus=N,M]   (read-only: what it would dispatch now)\n'
+    + '       build-dispatch-daemon.mjs --live [--once] [--self-sync] [--max-concurrent=3] [--max-open-prs=12] [--interval-ms=120000]\n'
+    + `kill switch: ${KILL_SWITCH_ENV}=1 or touch <coordination root>/${KILL_SWITCH_FILENAME}`);
+  process.exit(2);
+}
+
+const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
+if (IS_CLI) {
+  main(process.argv.slice(2)).catch((e) => { console.error(`build-dispatch-daemon: fatal: ${String(e?.stack || e)}`); process.exit(1); });
+}

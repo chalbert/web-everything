@@ -2,9 +2,10 @@
 bornAs: xr27kat
 kind: task
 parent: "4075"
-status: open
+status: resolved
 scope: ["we:scripts/conveyor/already-landed-watch.mjs", "we:scripts/conveyor/reconcile-pass.mjs"]
 dateOpened: "2026-09-27"
+dateResolved: "2026-09-27"
 tags: []
 ---
 
@@ -20,4 +21,8 @@ PREVENTION (from the reviewer, still owed): before trusting containment for an a
 
 ## Done when
 
-1. **Executable** — TODO: a command that fails before this item lands and passes after.
+1. **Executable** — `npx vitest run we:scripts/conveyor/__tests__/already-landed-watch.test.mjs` — the `#4268`
+   cases ("refuses to run at all from a stale local main", "blocks even a bare dry-run report", "a FRESH local
+   main still proceeds") fail on `origin/main` before this item and pass after: `runAlreadyLandedWatch` now runs
+   the SAME `assertMainNotStale` dispatch-chokepoint guard `we:scripts/conveyor/reconcile-fix-dispatch.mjs` uses
+   before trusting anything `readPlan` reports.

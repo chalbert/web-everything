@@ -90,6 +90,31 @@ describe('deriveReviewStatus', () => {
     expect(planStatusLabelChange({ status: deriveReviewStatus({ pr: 2741, agents }), currentLabels }))
       .toEqual({ add: 'review-status:fixing', remove: [] });
   });
+
+  // draft-first PRs (operator-approved 2026-09-27) — a draft PR is never "reviewing"/"fixing"/"healing-ci" by
+  // definition (dispatchReviewRow's own isDraft gate refuses a review dispatch), but it CAN still have a
+  // genuinely live ci-heal session on it (a draft is never exempt from CI healing) — that must still win.
+  it('awaiting-ci: a draft PR with nothing live', () => {
+    expect(deriveReviewStatus({ pr: 1765, agents: [], isDraft: true })).toEqual({ role: 'draft', state: 'awaiting-ci' });
+  });
+
+  it('awaiting-ci: a draft PR even when a STALE (done/idle) session row sits under its name', () => {
+    expect(deriveReviewStatus({ pr: 1765, agents: [{ name: 'review-1765', state: 'done' }], isDraft: true }))
+      .toEqual({ role: 'draft', state: 'awaiting-ci' });
+  });
+
+  it('a genuinely live ci-heal session on a draft PR still reads healing-ci, not awaiting-ci', () => {
+    expect(deriveReviewStatus({ pr: 1765, agents: [{ name: 'ci-heal-1765', state: 'working' }], isDraft: true }))
+      .toEqual({ role: 'ci-heal', state: 'healing-ci' });
+  });
+
+  it('isDraft defaults to false — every pre-existing call site (none of which pass it) is unaffected', () => {
+    expect(deriveReviewStatus({ pr: 1765, agents: [] })).toBeNull();
+  });
+
+  it('a non-draft PR with nothing live is still null, never awaiting-ci', () => {
+    expect(deriveReviewStatus({ pr: 1765, agents: [], isDraft: false })).toBeNull();
+  });
 });
 
 describe('planStatusLabelChange', () => {
@@ -165,6 +190,25 @@ describe('tagReviewStatus — IO shell over injected fakes (no claude/gh process
     const result = tagReviewStatus({ pr: 42, repo: 'chalbert/web-everything', listAgents, provider });
     expect(result).toEqual({ changed: false, label: 'review-status:fixing', removed: [] });
     expect(provider.calls).toEqual([['readLabels', 'chalbert/web-everything', 42]]);
+  });
+
+  // draft-first PRs (operator-approved 2026-09-27)
+  it('tags a draft PR awaiting-ci, even with a stale (done) review row sitting under its name', () => {
+    const provider = fakeProvider([]);
+    const listAgents = () => [{ name: 'review-42', state: 'done' }];
+    const result = tagReviewStatus({ pr: 42, repo: 'chalbert/web-everything', listAgents, provider, isDraft: true });
+    expect(result).toEqual({ changed: true, label: 'review-status:awaiting-ci', removed: [] });
+    expect(provider.calls).toEqual([
+      ['readLabels', 'chalbert/web-everything', 42],
+      ['ensureLabel', 'chalbert/web-everything', 'review-status:awaiting-ci'],
+      ['setLabels', 'chalbert/web-everything', 42, { add: 'review-status:awaiting-ci', remove: [] }],
+    ]);
+  });
+
+  it('isDraft defaults to false — an omitted flag is byte-identical to before this option existed', () => {
+    const provider = fakeProvider([]);
+    const result = tagReviewStatus({ pr: 42, repo: 'chalbert/web-everything', listAgents: () => [], provider });
+    expect(result).toEqual({ changed: false, label: null, removed: [] });
   });
 
   // #4133 (epic #3383/#4075) — a caller with the tick's own already-fetched `claude agents --json` listing and

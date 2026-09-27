@@ -89,7 +89,8 @@ import { buildGhShimSettingsEnv, sanitizeSpawnEnv, ensureSettingsFilePermissions
 // scratch cwd only (never the primary checkout, never a lane clone shared across dispatches) — see that
 // module's own header for the full incident (fix-2748/fix-2770, 2026-09-26) and why the repo-wide tracked
 // `.claude/settings.json` entry this replaces never reached a session once #4174 moved its start cwd to scratch.
-import { DISPATCH_WORKTREE_SETTINGS, ensureWorktreeIsolationOff } from '../lib/dispatch-bg-isolation.mjs';
+import { DISPATCH_WORKTREE_SETTINGS, isolateDispatchSession } from '../lib/dispatch-bg-isolation.mjs';
+import { assertMainNotStale, behindFiles, gitRun, isCodePath } from '../lib/main-staleness.mjs';
 // #xrv69j6 — the pool-dir basenames a lane lives under (`web-everything` / `webeverything`), so the ONE lane
 // a dispatch will use can be resolved to an absolute path the same way `bootstrap-session.mjs#poolRoots`
 // already probes it, without re-deriving that table.
@@ -114,6 +115,11 @@ import { readItemDeliveryAgentOverride } from './delivery-agent-marker.mjs';
 // #3645/#3906 — WHICH LAUNCH KINDS HAVE A MECHANICAL PROVIDER. Every row lands OFF on main (`agent`), see the
 // registry's own header; {@link routeDispatchProvider} below is its only reader here.
 import { DISPATCH_PROVIDER_REGISTRY, dispatchModesFromEnv, dispatchProviderEntry } from './dispatch-provider-registry.mjs';
+// agy-launcher-probation — the probation-worker launcher (Codex / Antigravity-Claude / Antigravity-Gemini) for an
+// opened, non-critical ci-heal. See {@link routeDispatchProvider}.
+import {
+  PROBATION_HEAL_RUN_SCRIPT, probationLaunchDecision, probationLaunchFromEnv, probationWorkerDetachedProvider,
+} from './dispatch-providers/probation-worker.mjs';
 // #3645/#4212 — the detached-wrapper handle primitives. `defaultIsPidAlive`/`detachedHandlePid` let a `pid:<n>`
 // handle (a mechanical build's own PID, not a `claude` session id) answer its own liveness from the KERNEL
 // rather than from `claude agents --json`, which never heard of it; `deliveryDispatchLogPath` names where its
@@ -1157,9 +1163,67 @@ export function assertNotALaneCheckout(root) {
   if (/^lane-\d+$/.test(String(root).split('/').filter(Boolean).pop() || '')) {
     throw notApplied(
       `dispatch-lane: refusing to start a delivery agent from the lane checkout ${root} — the brief's first step `
-      + 'acquires a lane, and acquiring one from inside another nests two checkouts. Run this from the primary checkout.',
+      + 'acquires a lane, and acquiring one from inside another nests two checkouts. Run this from the control clone '
+        + '(<workspace>/wev-control, we:scripts/lib/automation-home.mjs), never the operator\'s primary checkout.',
     );
   }
+}
+
+/**
+ * build-path-codex-isolation — REFUSE TO DISPATCH FROM STALE CODE. `review-dispatch`, `reconcile-fix-dispatch`
+ * and `ci-heal-pr-dispatch` have all run {@link assertMainNotStale} (#3439/#3474) since before this card;
+ * `run.mjs dispatch-lane` — the BUILD path — never did.
+ *
+ * THE LIVE CASE (2026-09-27, #3604): `WE_BUILD_DISPATCH_MODE=mechanical node scripts/operations/run.mjs
+ * dispatch-lane --num=3604` was run from the primary checkout, a DETACHED HEAD 449 commits behind origin/main.
+ * That checkout predated the provider registry (#3645/#3906), the Codex build wrapper (#2753) and the
+ * bg-isolation override (#2779). So `WE_BUILD_DISPATCH_MODE` was an env var nothing read, the codex-marked card
+ * went to `claude --bg`, and that session stalled on "Call EnterWorktree first". Both blockers were one cause:
+ * the dispatcher ran code origin/main had long replaced, and nothing said so.
+ *
+ * Two checks, in order:
+ *   1. {@link assertMainNotStale} — the shared chokepoint guard (fetch, clean fast-forward + self re-exec for an
+ *      armed CLI, managed-clone and last-known-good rules). It measures the LOCAL `main` branch.
+ *   2. When HEAD is NOT on `main` (detached, or another branch), step 1 never looked at the code this process
+ *      actually loaded. So: if origin/main changed any CODE file since HEAD's merge-base with it, refuse. A
+ *      branch that is only AHEAD of origin/main (a clone of an unmerged fix) passes; a stale detached HEAD does not.
+ *
+ * Throws a plain Error (the CLI prints it and exits non-zero) BEFORE any run record exists — it is called from
+ * `run.mjs`'s CLI block, never from inside the sink, because a re-exec or refusal after the executor has written
+ * `in-flight` would leave an indeterminate entry.
+ *
+ * @param {string} [root]
+ * @param {{assertNotStale?: (root: string) => unknown, headBranch?: (root: string) => (string|null),
+ *   behindCodeFiles?: (root: string) => (string[]|null)}} [io]
+ * @returns {{ok: true}}
+ */
+export function assertDispatcherFresh(root = REPO_ROOT, {
+  assertNotStale = (r) => assertMainNotStale(r, undefined, { label: 'dispatch-lane' }),
+  headBranch = (r) => {
+    const h = gitRun(['symbolic-ref', '--short', '-q', 'HEAD'], { cwd: r });
+    return h.status === 0 ? h.stdout.trim() || null : null;
+  },
+  behindCodeFiles = (r) => {
+    const files = behindFiles(r, 'main');
+    return Array.isArray(files) ? files.filter(isCodePath) : null;
+  },
+} = {}) {
+  assertNotStale(root);
+  const branch = headBranch(root);
+  if (branch === 'main') return { ok: true };
+  const code = behindCodeFiles(root);
+  // `null` = the diff could not be read (e.g. no origin/main ref). Step 1 already treated an unreachable remote
+  // as fail-soft; this step follows it rather than blocking every offline dispatch.
+  if (Array.isArray(code) && code.length > 0) {
+    throw new Error(
+      `dispatch-lane: refusing to dispatch — HEAD of ${root} is ${branch ? `on branch ${branch}` : 'DETACHED'} and `
+      + `origin/main has changed ${code.length} code file(s) since it (e.g. ${code.slice(0, 3).join(', ')}), so this `
+      + 'process would route and spawn with STALE code (a dispatch mode it cannot read, a provider it does not '
+      + 'have, a session setting it never writes). Run dispatch-lane from a checkout on main that is current with '
+      + 'origin/main (a daemon clone, or a fresh clone), not from this one.',
+    );
+  }
+  return { ok: true };
 }
 
 /**
@@ -1270,8 +1334,10 @@ export function createDispatchSinks({
   // #3645/#3906 — THE DEFAULT PROVIDER IS THE ROUTER: a kind whose registry row is `mechanical` runs that row's
   // provider; every other kind takes the unchanged `claude --bg` path. A caller supplying its own `provider`
   // bypasses the routing entirely, exactly as before.
+  // agy-launcher-probation — `on`/`off`, read ONCE here like `modes` (see `probationLaunchFromEnv`).
+  probationLaunch = probationLaunchFromEnv(),
   provider = (request) => routeDispatchProvider(request, {
-    modes, registry, scriptExists, agent: (r) => defaultClaudeProvider(r, { spawnAgent }),
+    modes, registry, scriptExists, agent: (r) => defaultClaudeProvider(r, { spawnAgent }), probationLaunch,
   }),
   mintSessionId = () => randomUUID(),
   now = () => new Date(),
@@ -1303,8 +1369,10 @@ export function createDispatchSinks({
   // hosts that configured something). `resolveWorktreeIsolation` is the PURE value; `ensureWorktreeIsolation`
   // the never-throwing durable write into this dispatch's OWN scratch cwd — two seams, mirroring every other
   // pair in this sink, so a test can assert either independently of the real filesystem.
+  // build-path-codex-isolation — both defaults are the ONE shared helper every dispatch path now calls
+  // (`isolateDispatchSession`); the two seams stay so existing tests can assert each half independently.
   resolveWorktreeIsolation = () => DISPATCH_WORKTREE_SETTINGS.worktree,
-  ensureWorktreeIsolation = (cwd) => ensureWorktreeIsolationOff({ cwd }),
+  ensureWorktreeIsolation = (cwd) => isolateDispatchSession(cwd).write,
 } = {}) {
   return {
     [DISPATCH_EFFECT]: async (payload) => {
@@ -1336,9 +1404,13 @@ export function createDispatchSinks({
       // pre-#3857 pass-through behaviour. See {@link workerModelTable}.
       const table = workerModelTable(payload?.routing);
       const modelReason = payload?.modelReason ?? null;
+      // build-path-codex-isolation — WHAT ACTUALLY RAN IT, reported by the provider that started it (see
+      // `dispatchExecutorFor`). `null` until a provider reports; the fallback below covers one that does not.
+      let reportedExecutor = null;
       let handle;
       try {
         handle = await provider({
+          reportExecutor: (v) => { reportedExecutor = v == null ? null : String(v); },
           sessionId,
           cwd: sessionCwd,
           // Salvaged earlier work for this card/PR (see `we:scripts/lib/salvage-index.mjs`): one pointer line.
@@ -1353,6 +1425,10 @@ export function createDispatchSinks({
           scope: payload?.scope,
           pr: payload?.pr,
           reason: payload?.reason,
+          // agy-launcher-probation — the router's probation pick (a ci-heal dispatch carries it directly; a tick
+          // dispatch carries it on its routing record) and the target repo, for `routeDispatchProvider`.
+          probationWorker: payload?.probationWorker ?? payload?.routing?.probationWorker ?? null,
+          repo: payload?.repo,
           extraArgs,
           systemPromptFile: DISPATCHED_AGENT_SYSTEM_PROMPT_FILE,
           // #3857 — see `table` above; `modelReason` is `dispatch-lane.mjs`'s own input, riding the payload.
@@ -1393,21 +1469,28 @@ export function createDispatchSinks({
       const modelDecision = table && route === 'claude-bg'
         ? resolveWorkerModel({ extraArgs, table, modelReason })
         : null;
+      const executor = dispatchExecutorFor({ route, reported: reportedExecutor });
+      // ONE line on stderr naming what runs this dispatch — the dispatch LOG half of the same fact the record
+      // carries below, so an operator reading the CLI output never has to reconcile two provider fields.
+      console.error(`dispatch-lane: #${payload?.num ?? '?'} ${payload?.launchKind ?? 'build'} → executor=${executor} (${route}, handle ${handleText})`);
       return inFlight({
         handle: handleText,
         expectedBy: new Date(now().getTime() + minutes * 60 * 1000).toISOString(),
-        // #3717/#3848/#3857 — THE ROUTE ON THE DURABLE RECORD: what the criteria chose (`routedProvider`),
-        // what actually ran it (`executedProvider`, the routing record's own `executed`, never re-derived),
-        // and the worker model the tier table decided (`workerModel`) — so a trial can be measured against it.
+        // #3717/#3848/#3857 — THE ROUTE ON THE DURABLE RECORD. build-path-codex-isolation: `executor` is the
+        // ONE field that says what actually runs this dispatch (reported by the provider that started it — see
+        // `dispatchExecutorFor`). The old `routedProvider`/`executedProvider` pair is gone: `routed` was the
+        // criteria's recommendation printed beside the executor under a name that read like a second answer
+        // (live: the build-daemon dry run printed `routed=claude executed=codex` for #3604, and the operator
+        // could not tell which one ran). The recommendation survives as `criteriaRecommendation`, named as one.
         dispatch: {
           launchKind: payload?.launchKind ?? 'build',
           route,
+          executor,
           supervisorModel: modelDecision?.model ?? extractModelFlag(extraArgs.map(String)).value,
           workerModel: modelDecision && !modelDecision.refusal
             ? { name: modelDecision.model, tier: modelDecision.tier, source: modelDecision.source, tableTier: modelDecision.tableTier, reason: modelDecision.reason }
             : null,
-          routedProvider: payload?.routing?.routed ?? null,
-          executedProvider: payload?.routing?.executed ?? null,
+          criteriaRecommendation: payload?.routing?.routed ?? null,
           routedTaskType: payload?.routing?.taskType ?? null,
           supervisionLevel: payload?.routing?.supervision ?? null,
           supervisionEnforced: payload?.routing?.supervisionEnforced === true,
@@ -1457,6 +1540,23 @@ function routingTierReason(routing) {
 }
 
 /**
+ * build-path-codex-isolation — THE ONE ANSWER to "what runs this dispatch", for the run record's
+ * `dispatch.executor` and the dispatch log line. PURE.
+ *
+ * The provider that actually started the work reports it (`request.reportExecutor`): `defaultClaudeProvider`
+ * says `claude`; the detached build/fix/ci-heal providers say the vendor they handed their wrapper
+ * (`--provider=<marker>` → `codex`, no marker → `claude`). A provider that reports nothing falls back by route: a
+ * `claude-bg` spawn is Claude by construction; a `detached` wrapper that stayed silent is `unknown`, never a guess.
+ *
+ * @param {{route: 'claude-bg'|'detached', reported?: string|null}} o
+ * @returns {string}
+ */
+export function dispatchExecutorFor({ route, reported = null }) {
+  if (reported) return String(reported);
+  return route === 'claude-bg' ? 'claude' : 'unknown';
+}
+
+/**
  * THE ROUTER (#3645, landed off by #3906) — the default `provider` {@link createDispatchSinks} installs. It has
  * NO per-kind knowledge: it asks {@link ./dispatch-provider-registry.mjs#dispatchProviderEntry} whether this
  * launch kind has a mechanical provider and dispatches to it only when `modes` says `mechanical` for that kind.
@@ -1469,15 +1569,26 @@ function routingTierReason(routing) {
  * flight.
  *
  * @param {object} request - the #3579 port request.
- * @param {{modes?: Record<string, string>, registry?: Record<string, object>, agent: Function, scriptExists?: (p: string) => boolean}} io
+ * @param {{modes?: Record<string, string>, registry?: Record<string, object>, agent: Function, scriptExists?: (p: string) => boolean, probationLaunch?: string, probation?: Function}} io
  */
 export function routeDispatchProvider(request, {
   modes = {},
   registry = DISPATCH_PROVIDER_REGISTRY,
   agent,
   scriptExists = (path) => existsSync(path),
+  // agy-launcher-probation — `off` unless the sink says otherwise, so a direct caller never launches by accident.
+  probationLaunch = 'off',
+  probation = probationWorkerDetachedProvider,
 } = {}) {
   const kind = String(request?.launchKind || 'build');
+  // agy-launcher-probation — FIRST: an opened, non-critical ci-heal the router gave a probation worker runs on that
+  // worker (see `dispatch-providers/probation-worker.mjs#probationLaunchDecision` for every condition).
+  if (probationLaunchDecision(request, probationLaunch).launch) {
+    if (!scriptExists(PROBATION_HEAL_RUN_SCRIPT)) {
+      throw notApplied(`dispatch-lane: the probation launcher ${PROBATION_HEAL_RUN_SCRIPT} is not in this checkout — refusing before any process starts`);
+    }
+    return probation(request);
+  }
   const entry = dispatchProviderEntry(kind, registry);
   if (entry && modes?.[kind] === 'mechanical') {
     if (entry.runScript && !scriptExists(entry.runScript)) {
@@ -1523,6 +1634,8 @@ export function defaultClaudeProvider(request, { spawnAgent = (argv, opts) => de
       try { deleteCompletion(request.sessionSlug); } catch { /* best-effort — see comment above */ }
     }
   }
+  // build-path-codex-isolation — this port implementation always runs Claude; say so on the record.
+  request.reportExecutor?.('claude');
   const argv = buildAgentArgv({
     sessionId: request.sessionId,
     payload: { prompt: request.prompt, sessionSlug: request.sessionSlug, num: request.num },

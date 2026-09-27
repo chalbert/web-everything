@@ -319,6 +319,36 @@ describe('runReviewTick — the per-tick sequence', () => {
       { repo: 'chalbert/web-everything', pr: 2742, spec: { add: 'review-status:healing-ci', remove: ['review-status:fixing'] } },
     ]);
   });
+
+  // draft-first PRs (operator-approved 2026-09-27) — a draft PR's own `isDraft` field, carried on the SAME
+  // `rawPrs` snapshot this tick already reads, must reach `tagStatus` so the operator sees
+  // `review-status:awaiting-ci` instead of no label at all. No dispatch happens (reconcile-core.mjs refuses
+  // `draft`, not owed a review) — this test pins the LABEL WIRING, not reconcile-core's own dispatch logic
+  // (that is `reconcile-core.test.mjs`'s job).
+  it('draft-first PRs: a draft PR refused `draft` gets tagged review-status:awaiting-ci, with no gh re-read of isDraft', () => {
+    const reconcile = vi.fn(() => ({
+      dispatch: [],
+      refusals: [{ kind: 'draft', prNumber: 3001 }],
+    }));
+    const readPrs = () => [{ number: 3001, labels: [{ name: 'review:pending' }], isDraft: true }];
+    const readAgents = () => [];
+    const setLabelsCalls = [];
+    const fakeProvider = {
+      readLabels: () => { throw new Error('must use the shared currentLabels, never re-read'); },
+      ensureLabel: () => {},
+      setLabels: (repo, pr, spec) => setLabelsCalls.push({ repo, pr, spec }),
+    };
+    const tagStatus = (opts) => tagReviewStatus({ ...opts, provider: fakeProvider });
+    const out = runReviewTick({
+      reconcile, readPrs, readAgents, tagStatus,
+      dispatch: () => { throw new Error('a draft PR is never dispatched a review'); },
+      tagRound: () => { throw new Error('no round tag on a non-dispatched PR'); },
+    });
+    expect(out.dispatched).toEqual([]);
+    expect(setLabelsCalls).toEqual([
+      { repo: 'chalbert/web-everything', pr: 3001, spec: { add: 'review-status:awaiting-ci', remove: [] } },
+    ]);
+  });
 });
 
 describe('runReviewTick — #3383 bug 3: dispatch is capped by acquirableLanes, never by reviews owed alone', () => {
@@ -1245,6 +1275,9 @@ describe('defaultReapSessions — wiring, scoped stricter than session-reaper.mj
       idleThresholdMs: DEFAULT_IDLE_REAP_THRESHOLD_MS,
       reapedLedger: expect.objectContaining({ has: expect.any(Function), add: expect.any(Function), save: expect.any(Function) }),
       priorityNames: null, // #3383 follow-up — omitted by every pre-existing caller, forwarded as-is
+      // #ghost-sessions-inflate-cap — explicitly wired ON here (session-reaper.mjs's own bare default is OFF;
+      // see that function's own docblock for why), never left to that default.
+      pidDeadFor: expect.any(Function),
     });
     expect(result).toEqual({ scanned: 0, stopped: 0, alreadyGone: 0, failures: 0, anomalies: 0, kept: 0 });
   });

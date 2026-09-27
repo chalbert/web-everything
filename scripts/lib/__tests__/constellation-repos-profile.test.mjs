@@ -8,7 +8,7 @@
  */
 import { describe, it, expect } from 'vitest';
 
-import { repoProfile, gateFor, briefTokensForRepo, repoKeyForScope, primaryCheckoutForLanePath } from '../repo-profile.mjs';
+import { repoProfile, gateFor, briefTokensForRepo, repoKeyForScope, primaryCheckoutForLanePath, repoProfileForLanePath } from '../repo-profile.mjs';
 
 const HOME = '/home/test';
 
@@ -247,5 +247,22 @@ describe('primaryCheckoutForLanePath', () => {
   it('returns null for an unrecognized pool-dir basename — the caller falls back to its own default', () => {
     expect(primaryCheckoutForLanePath('/some/synthetic/test/path/lane-1')).toBeNull();
     expect(primaryCheckoutForLanePath('')).toBeNull();
+  });
+});
+
+// build-path-codex-isolation-locus — the generalization behind `primaryCheckoutForLanePath` (same lookup,
+// now also exposed for a caller that needs the FULL profile, e.g. `deliver-item-wrapper.mjs#commitBuildTurn`'s
+// repo-aware commit-subject prefix).
+describe('repoProfileForLanePath', () => {
+  it('returns the full plateau-app profile (key, canonicalPrefix, checkoutPath) for a plateau-app lane path', () => {
+    const profile = repoProfileForLanePath('/Users/op/workspace/.lanes/plateau-app/lane-4', { home: '/Users/op' });
+    expect(profile.key).toBe('plateau-app');
+    expect(profile.canonicalPrefix).toBe('plateau');
+    expect(profile.checkoutPath).toBe('/Users/op/workspace/plateau-app');
+  });
+
+  it('is what primaryCheckoutForLanePath is now built from — same null cases', () => {
+    expect(repoProfileForLanePath('/some/synthetic/test/path/lane-1')).toBeNull();
+    expect(repoProfileForLanePath('')).toBeNull();
   });
 });

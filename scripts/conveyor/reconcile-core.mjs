@@ -173,7 +173,15 @@ import { parseReviewedSha, planConvertSupersededVerdict, targetedCheckQuestion }
 // a fresh push — see the ONE-REVIEW-PER-HEAD block below). It converts that verdict into the standing advisory
 // note plus one targeted check on the escalation's own reason, instead of dispatching a whole second panel run
 // (`kind:'review'`) at a head nobody has touched since — see {@link planConvertSupersededVerdict}.
-export const DISPATCH_KINDS = Object.freeze(['fix', 'review', 'ci-heal', 'convert-advisory']);
+// `promote-draft` (draft-first PRs, operator-approved 2026-09-27) — the FIFTH kind: a draft PR (opened by
+// `scripts/pr-land.mjs --park`'s new draft-by-default open, see that flag's own docblock) whose required
+// checks are ALL green. Nothing here spawns an agent for it — the effect is a bare `gh pr ready <pr>`
+// (`scripts/operations/promote-draft-pr-dispatch.mjs`), which is what lets a review dispatch at all: a draft
+// PR never reaches `kind:'review'` regardless of its label (see {@link dispatchReviewRow}'s own `isDraft`
+// gate below), so the review this pass would otherwise dispatch the moment CI finishes is instead HELD until
+// this fires and un-drafts it — closing the "6 of 26 PRs got reviewed before their own first CI run even
+// finished" measurement (operator, 2026-09-27) that motivated this whole feature.
+export const DISPATCH_KINDS = Object.freeze(['fix', 'review', 'ci-heal', 'convert-advisory', 'promote-draft']);
 
 /**
  * we:scripts/conveyor/reconcile-core.mjs#REFUSAL_KINDS — every reason this pass declines to dispatch. Frozen and
@@ -248,6 +256,10 @@ export const REFUSAL_KINDS = Object.freeze([
   // `waiting-on-system-fix` — the red is the tooling/gate's own fault and a system-level fix is already open
   // for it; this PR owes nothing further until that fix lands or its own head changes.
   'ci-heal-escalated', 'waiting-on-system-fix',
+  // `draft` (draft-first PRs, operator-approved 2026-09-27) — the PR is still a GitHub draft: no review is
+  // dispatched, whatever `review:*` label it carries, until the `promote-draft` DISPATCH_KIND (above) has
+  // un-drafted it. See {@link dispatchReviewRow}'s own gate.
+  'draft',
 ]);
 
 /**
@@ -974,6 +986,23 @@ export function assessLiveness(bound) {
 function dispatchReviewRow({
   pr, withPhase, base, attempts, roundCap, refuse, refuseCapExhausted, dispatch, extra = {},
 }) {
+  // ── `draft` (draft-first PRs, operator-approved 2026-09-27) — checked FIRST, ahead of every other refusal
+  // in this function, including `already-reviewed-head`: a draft PR is never owed a review no matter what its
+  // `review:*` label or its comment thread says, because GitHub itself will not surface it for review and
+  // this pass's whole review-dispatch mechanism exists to fill that surface, not to pre-empt it. This closes
+  // the measured incident that motivated the feature: `--park` used to apply the review label the instant the
+  // PR opened, before its OWN first CI run had even finished (6 of 26 PRs, one night) — the review daemon
+  // read the label alone and dispatched anyway. `promote-draft` (see `DISPATCH_KINDS`) is the only path back
+  // out of this refusal: once the PR's required checks are all green, `gh pr ready` un-drafts it and the very
+  // next tick reaches this function with `pr.isDraft` false, same as any other PR.
+  if (pr?.isDraft) {
+    refuse('draft', {
+      ...withPhase, ...extra,
+      why: 'PR is still a draft — no independent review is dispatched until it is promoted to ready for '
+        + 'review, which happens once its required checks are all green (draft-first PRs)',
+    });
+    return;
+  }
   // ── `already-reviewed-head` (#2588) — see {@link planReconcile}'s note ahead of its call for the full incident.
   // Raw-SHA comparison only, as it always was. A mechanically-REBASED accepted PR cannot reach this function
   // with a stale marker: an accept moves the label to `review:accepted`, which the OWED table never owes a review
@@ -1174,6 +1203,12 @@ export function planReconcile({
       // CONFLICT branch reads it, and a reader auditing any other row can see at a glance whether this PR is
       // stacked on another lane/PR at all, with no need to go back to the raw listing.
       baseRefName: pr?.baseRefName ?? null,
+      // #4265 — the STACKED-BASE CONFLICT branch's own `currentSha` for {@link countStaleConflictFixRounds},
+      // mirroring `mainSha` for the main-base branch (both resolved PURELY LOCALLY by `reconcile-pass.mjs`'s IO
+      // shell — this file stays IO-free). `null` for a PR whose base is `defaultBranch` (or unknown) — the
+      // stacked-base branch never reads it there, and every existing test/caller that omits it degrades to the
+      // pre-#4265 ref-only comparison, unchanged.
+      baseRefSha: pr?.baseRefSha ?? null,
       // EVIDENCE ONLY. No decision in this file reads it — see the liveness block in the file docblock.
       transcriptMtimeMs: Number.isFinite(pr?.transcriptMtimeMs) ? pr.transcriptMtimeMs : null,
       // #xu2krte Fork 1 — carried on every row (not just `fix` dispatches) for the same "evidence travels with
@@ -1194,6 +1229,11 @@ export function planReconcile({
       // branch below can ask `isMainGreenFixOwed` about THIS SAME check on main's own latest completed run,
       // never a different one. EVIDENCE ONLY here, same as its two siblings above.
       requiredCheckName: pr?.requiredCheckName ?? null,
+      // #4263 — EVIDENCE ONLY here, same convention as its siblings: whether the fix PR a `waiting-on-
+      // system-fix` ci-heal escalation named has since merged/closed, re-checked (never trusted from the
+      // escalation comment's own stale claim) by `reconcile-pass.mjs#enrichPrsWithSystemFixFacts`. Only the
+      // ci-red escalation branch below reads it.
+      systemFixLanded: pr?.systemFixLanded === true,
       // PR #2793 review — the per-PR proof the green-check path needs (`main-red-recovery.mjs#isMainGreenFixOwed`):
       // does this PR already contain main's latest green commit for that check, and what did the check conclude
       // at this PR's merge base with it. EVIDENCE ONLY, injected by the IO shell; absent reads never excuse.
@@ -1364,6 +1404,28 @@ export function planReconcile({
       continue;
     }
 
+    // ── `promote-draft` (draft-first PRs, operator-approved 2026-09-27) — its OWN branch, ahead of `ci-red`
+    // and everything below it, for a draft PR whose required checks are ALL green (`withPhase.check ===
+    // 'green'`, the SAME `reduceCheckState` verdict the `ci-red` branch right below reads off this identical
+    // PR). A green draft owes exactly one thing — `gh pr ready`, dispatched here as `kind:'promote-draft'` —
+    // and nothing else this loop could plan (a review, a fix, a ci-heal) applies to it: `ci-red` cannot also
+    // be true (checks are green), and {@link dispatchReviewRow}'s own `isDraft` gate would refuse a review
+    // dispatch for it anyway. `continue` is therefore exactly as safe here as it is on `already-landed` above.
+    //
+    // A draft PR whose checks are NOT yet green (`pending`/`unchecked`) or ARE red falls straight through,
+    // deliberately: red-required-check drafts still need `ci-heal` exactly like a ready PR does (a draft is
+    // not exempt from CI healing — only from review), and a still-running draft owes nothing at all yet — both
+    // of those are the existing branches below, unmodified. Only {@link dispatchReviewRow}'s own gate (not this
+    // one) keeps a review from firing for either of those two cases.
+    if (pr?.isDraft && withPhase.check === 'green') {
+      dispatch.push({
+        ...base, ...withPhase, kind: 'promote-draft',
+        why: 'draft PR — every required check is green; promote it to ready for review (draft-first PRs, '
+          + 'operator-approved 2026-09-27) — nothing else is owed this PR until that happens',
+      });
+      continue;
+    }
+
     // ── `ci-red` (multi-repo slice 7) — its OWN branch, ahead of the generic `OWED`/`OWED_ELSEWHERE` table,
     // because it needs neither of that table's two remaining checks: REFUSAL 2 ("no findings, no fixer") does
     // not apply — a red required check IS the finding, there is no reviewer thread to count — and the cap is
@@ -1483,27 +1545,45 @@ export function planReconcile({
       const escalation = latestCiHealEscalationForHead(pr?.comments, base.headRefOid);
       if (escalation) {
         const isSystemFix = escalation.outcome === 'waiting-on-system-fix';
-        const kind = isSystemFix ? 'waiting-on-system-fix' : 'ci-heal-escalated';
-        refuse(kind, {
-          ...withPhase, headSha: escalation.headSha,
-          ...(escalation.reason ? { escalationReason: escalation.reason } : {}),
-          ...(escalation.systemFixRef ? { systemFixRef: escalation.systemFixRef } : {}),
-          why: isSystemFix
-            ? `ci-heal already escalated this exact head (\`${escalation.headSha}\`) as waiting on system fix #${escalation.systemFixRef} — the red is the tooling/gate's own fault, not this PR's; nothing further is owed until that fix lands or a new push changes this head`
-            : `ci-heal already escalated this exact head (\`${escalation.headSha}\`) to a human — re-dispatching would re-ask the identical already-answered question every tick until a new push changes this head`,
-        });
-        // A capped/exhausted ci-red PR is already promoted from a bare refusal to a surfaced `note`
-        // (`ci-heal-exhausted`, above) precisely because it is the one dead end an operator must be pulled in
-        // for — an escalation is the SAME shape of dead end (nothing live, nothing auto-heal can do about it
-        // right now) and gets the identical treatment, once per tick, until a new push or a person clears it.
-        notes.push({
-          kind: 'ci-heal-escalated', prNumber, headSha: escalation.headSha, outcome: escalation.outcome,
-          ...(escalation.systemFixRef ? { systemFixRef: escalation.systemFixRef } : {}),
-          text: isSystemFix
-            ? `PR #${prNumber}: ci-heal escalated on head \`${escalation.headSha}\` — waiting on system fix #${escalation.systemFixRef}; will not re-dispatch until it lands or a new push changes this head`
-            : `PR #${prNumber}: ci-heal escalated on head \`${escalation.headSha}\` — ${escalation.reason || 'needs a human judgment call'}; will not re-dispatch until a new push changes this head`,
-        });
-        continue;
+        // #4263 — a `waiting-on-system-fix` escalation names a fix PR (`escalation.systemFixRef`) and refuses
+        // ONLY until that fix lands; it must not suppress healing FOREVER once the fix PR is actually
+        // merged/closed and CI reruns on this SAME head (no new push to move it). `pr.systemFixLanded` is
+        // EVIDENCE injected by `reconcile-pass.mjs#enrichPrsWithSystemFixFacts` (this file stays IO-free): it
+        // independently re-checks the referenced `systemFixRef` PR's own current state before this refusal is
+        // ever honored. A plain `needs-human` escalation names no PR to re-check and is entirely unaffected —
+        // this only ever gates the `isSystemFix` branch.
+        if (isSystemFix && base.systemFixLanded) {
+          notes.push({
+            kind: 'system-fix-landed', prNumber, headSha: escalation.headSha, systemFixRef: escalation.systemFixRef,
+            text: `PR #${prNumber}: the system fix #${escalation.systemFixRef} this PR's ci-heal escalation was` +
+              ` waiting on has since merged/closed — re-arming healing on head \`${escalation.headSha}\` with no` +
+              ' new push required',
+          });
+          // Falls straight through to the ordinary ci-heal cap/dispatch path below, exactly as if this PR had
+          // never been escalated at all — never a second, separate re-dispatch path to keep in sync with it.
+        } else {
+          const kind = isSystemFix ? 'waiting-on-system-fix' : 'ci-heal-escalated';
+          refuse(kind, {
+            ...withPhase, headSha: escalation.headSha,
+            ...(escalation.reason ? { escalationReason: escalation.reason } : {}),
+            ...(escalation.systemFixRef ? { systemFixRef: escalation.systemFixRef } : {}),
+            why: isSystemFix
+              ? `ci-heal already escalated this exact head (\`${escalation.headSha}\`) as waiting on system fix #${escalation.systemFixRef} — the red is the tooling/gate's own fault, not this PR's; nothing further is owed until that fix lands or a new push changes this head`
+              : `ci-heal already escalated this exact head (\`${escalation.headSha}\`) to a human — re-dispatching would re-ask the identical already-answered question every tick until a new push changes this head`,
+          });
+          // A capped/exhausted ci-red PR is already promoted from a bare refusal to a surfaced `note`
+          // (`ci-heal-exhausted`, above) precisely because it is the one dead end an operator must be pulled in
+          // for — an escalation is the SAME shape of dead end (nothing live, nothing auto-heal can do about it
+          // right now) and gets the identical treatment, once per tick, until a new push or a person clears it.
+          notes.push({
+            kind: 'ci-heal-escalated', prNumber, headSha: escalation.headSha, outcome: escalation.outcome,
+            ...(escalation.systemFixRef ? { systemFixRef: escalation.systemFixRef } : {}),
+            text: isSystemFix
+              ? `PR #${prNumber}: ci-heal escalated on head \`${escalation.headSha}\` — waiting on system fix #${escalation.systemFixRef}; will not re-dispatch until it lands or a new push changes this head`
+              : `PR #${prNumber}: ci-heal escalated on head \`${escalation.headSha}\` — ${escalation.reason || 'needs a human judgment call'}; will not re-dispatch until a new push changes this head`,
+          });
+          continue;
+        }
       }
       const ciHealAttempts = countCiHealComments(pr?.comments);
       if (ciHealAttempts >= ciHealCap) {
@@ -1740,8 +1820,17 @@ export function planReconcile({
         // PR's OWN stacked base (never `defaultBranch` here, by construction of `isStackedBase`); a round
         // resolved against an EARLIER tip of that same base (rebased since, or a wholly different base this PR
         // once stacked on) does not count against the smaller per-target cap, only the hard ceiling.
+        //
+        // #4265 — `currentSha` USED TO BE HARDCODED `null` here, in contrast to the main-base branch below it
+        // (which threads a real, freshly-resolved `mainSha`). With no sha, `countStaleConflictFixRounds`'s
+        // sha-vs-sha comparison never fires, so EVERY recorded round matching the ref alone counted as "the
+        // same conflict" — even across repairs run against DIFFERENT, since-rebased tips of that same stacked
+        // base. Three repairs against three different tips of a repeatedly-rebased stacked base exhausted the
+        // smaller per-target cap even though each repair genuinely targeted a NEW tip. `base.baseRefSha` is
+        // this PR's OWN base ref's current tip, resolved the SAME way (a plain local `git rev-parse`) as
+        // `mainSha` is for the main-base branch — see `reconcile-pass.mjs#enrichPrsWithBaseRefFacts`.
         const { stale: conflictAttempts, total: conflictTotal } = countStaleConflictFixRounds(pr?.comments, {
-          currentRef: baseRefName, currentSha: null,
+          currentRef: baseRefName, currentSha: base.baseRefSha,
         });
         if (conflictAttempts >= conflictFixCap || conflictTotal >= CONFLICT_FIX_ABSOLUTE_CEILING) {
           refuseCapExhausted({

@@ -33,8 +33,16 @@ import { listAgentsWithReviewJobs } from '../operations/review-job-store.mjs';
 import { createGhProvider } from '../lib/review-label-provider.mjs';
 import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
 
-/** Matches this module's own label shape, and only this shape. */
-export const STATUS_LABEL_RE = /^review-status:(reviewing|review-stalled|fixing|fix-stalled|healing-ci|ci-heal-stalled)$/;
+/** Matches this module's own label shape, and only this shape.
+ *
+ *  `awaiting-ci` (draft-first PRs, operator-approved 2026-09-27) — added alongside the five LIVE-agent states
+ *  below, though it is not one: it names a draft PR (`scripts/pr-land.mjs --park`'s new draft-by-default
+ *  open) that no agent is, or should be, working — no review is dispatched for it until `scripts/conveyor/
+ *  reconcile-core.mjs`'s `promote-draft` effect un-drafts it on green CI. Deterministic off the SAME PR
+ *  record this module already reads (`pr.isDraft`), never off a fabricated "idle" guess — the exact bar
+ *  `planStatusLabelChange`'s own docblock already holds every OTHER state here to. This is the operator-
+ *  visible answer to "why hasn't this been reviewed yet" the feature's own build brief asked for. */
+export const STATUS_LABEL_RE = /^review-status:(reviewing|review-stalled|fixing|fix-stalled|healing-ci|ci-heal-stalled|awaiting-ci)$/;
 
 /**
  * `claude agents --json` states this module treats as LIVE — something is currently actioned, or stuck trying
@@ -61,10 +69,10 @@ const LIVE_STATES = Object.freeze({ working: 'reviewing', blocked: 'stalled' });
  * (`we:scripts/conveyor/reconcile-core.mjs#classifyPr`'s `ci-red` phase is its own branch ahead of the
  * `OWED`/`OWED_ELSEWHERE` table), so the ordering is precedence-in-name-only — it never actually shadows a
  * real ci-heal for a PR that also has a stale review/fix session row sitting in `claude agents --json`.
- * @param {{pr:number|string, agents?:Array<{name?:string, state?:string}>}} o
- * @returns {{role:'review'|'fix'|'ci-heal', state:'reviewing'|'review-stalled'|'fixing'|'fix-stalled'|'healing-ci'|'ci-heal-stalled'}|null}
+ * @param {{pr:number|string, agents?:Array<{name?:string, state?:string}>, isDraft?:boolean}} o
+ * @returns {{role:'review'|'fix'|'ci-heal'|'draft', state:'reviewing'|'review-stalled'|'fixing'|'fix-stalled'|'healing-ci'|'ci-heal-stalled'|'awaiting-ci'}|null}
  */
-export function deriveReviewStatus({ pr, agents = [], repo = 'we' } = {}) {
+export function deriveReviewStatus({ pr, agents = [], repo = 'we', isDraft = false } = {}) {
   const reviewName = mintSessionSlug({ kind: 'review', id: pr, repo });
   const fixName = mintSessionSlug({ kind: 'fix', id: pr, repo });
   const ciHealName = mintSessionSlug({ kind: 'ci-heal', id: pr, repo });
@@ -82,6 +90,14 @@ export function deriveReviewStatus({ pr, agents = [], repo = 'we' } = {}) {
   if (fix) return { role: 'fix', state: fix.state === 'working' ? 'fixing' : 'fix-stalled' };
   const ciHeal = liveFor(ciHealName);
   if (ciHeal) return { role: 'ci-heal', state: ciHeal.state === 'working' ? 'healing-ci' : 'ci-heal-stalled' };
+  // draft-first PRs (operator-approved 2026-09-27) — checked LAST, after every live-agent match above: a
+  // ci-heal genuinely healing a red-required-check draft is more informative than a blanket "awaiting-ci" and
+  // must still read `healing-ci`/`ci-heal-stalled` (a draft is never exempt from CI healing — only from
+  // review, see `dispatchReviewRow`'s own `isDraft` gate). Only once NOTHING is live does a draft PR get its
+  // own state at all: "awaiting-ci" — deterministic off the PR record (`pr.isDraft`), never a fabricated idle
+  // guess, and the operator-visible answer to "why hasn't this been reviewed yet" (no `review:*` label match
+  // needed: the label lander already knows this is a draft the moment `isDraft` is true).
+  if (isDraft) return { role: 'draft', state: 'awaiting-ci' };
   return null;
 }
 
@@ -111,17 +127,23 @@ export function planStatusLabelChange({ status, currentLabels = [] } = {}) {
  * (`we:skills-src/conveyor/review-daemon.mjs#runReviewTick`, wired to reuse it) passes it straight through.
  * Omitting either (the default, and every pre-existing caller/test) reads fresh, byte-identical to before
  * these options existed.
- * @param {{pr:number|string, repo:string, listAgents?:Function, provider?:object, agents?:Array<object>, currentLabels?:Array<{name?:string}|string>}} o
+ * @param {{pr:number|string, repo:string, listAgents?:Function, provider?:object, agents?:Array<object>, currentLabels?:Array<{name?:string}|string>, isDraft?:boolean}} o
  * @returns {{changed:boolean, label:string|null, removed:string[]}}
  */
 // x26lw6u — the default listing includes live review JOBS (`we:scripts/operations/review-job.mjs`): a review no
 // longer runs as a `claude --bg` session, so without them every job-run review would read as "nothing live" and
 // never carry `review-status:reviewing`.
-export function tagReviewStatus({ pr, repo, listAgents = () => listAgentsWithReviewJobs(), provider = createGhProvider(), agents: suppliedAgents, currentLabels: suppliedLabels } = {}) {
+export function tagReviewStatus({
+  pr, repo, listAgents = () => listAgentsWithReviewJobs(), provider = createGhProvider(),
+  agents: suppliedAgents, currentLabels: suppliedLabels,
+  // draft-first PRs (operator-approved 2026-09-27) — threaded straight to `deriveReviewStatus`; `false` by
+  // default so every pre-existing caller/test of this function (none of which pass it) is unaffected.
+  isDraft = false,
+} = {}) {
   const repoKey = repo === undefined ? 'we' : repoKeyForSlug(repo);
   if (repoKey === null) throw new Error(`review-status-tag: --repo ${repo} is not a constellation repo`);
   const agents = suppliedAgents ?? listAgents();
-  const status = deriveReviewStatus({ pr, agents, repo: repoKey });
+  const status = deriveReviewStatus({ pr, agents, repo: repoKey, isDraft });
   const currentLabels = suppliedLabels ?? provider.readLabels(repo, pr);
   const plan = planStatusLabelChange({ status, currentLabels });
   if (!plan.add && plan.remove.length === 0) {

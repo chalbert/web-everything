@@ -2,9 +2,10 @@
 bornAs: xhfltwt
 kind: task
 parent: "4075"
-status: open
+status: resolved
 scope: ["we:scripts/conveyor/reconcile-core.mjs"]
 dateOpened: "2026-09-27"
+dateResolved: "2026-09-27"
 tags: []
 ---
 
@@ -20,4 +21,11 @@ PREVENTION (from the reviewer, still owed): resolve a real per-PR base SHA for t
 
 ## Done when
 
-1. **Executable** — TODO: a command that fails before this item lands and passes after.
+1. **Executable** — `npx vitest run we:scripts/conveyor/__tests__/reconcile-core.test.mjs` — the new `#4265`
+   describe block under case 5i (three repairs against three successively older tips of the same repeatedly-
+   rebased stacked base, with a known newer current tip) fails on `origin/main` before this item (`cap-exhausted`
+   fires even though each repair targeted a genuinely new tip) and passes after:
+   `we:scripts/conveyor/reconcile-core.mjs`'s stacked-base branch now threads `base.baseRefSha` — resolved by
+   the new `we:scripts/conveyor/reconcile-pass.mjs#enrichPrsWithBaseRefFacts` (covered separately in
+   `we:scripts/conveyor/__tests__/reconcile-pass.test.mjs`) — into `countStaleConflictFixRounds` instead of a
+   hardcoded `null`.

@@ -2,9 +2,10 @@
 bornAs: xrf9noi
 kind: task
 parent: "4075"
-status: open
+status: resolved
 scope: ["we:skills-src/conveyor/fix-agent-ci-brief.md"]
 dateOpened: "2026-09-27"
+dateResolved: "2026-09-27"
 tags: []
 ---
 
@@ -20,4 +21,9 @@ PREVENTION (from the reviewer, still owed): capture the published head BEFORE di
 
 ## Done when
 
-1. **Executable** — TODO: a command that fails before this item lands and passes after.
+1. **Executable** — `npx vitest run we:scripts/operations/__tests__/dispatch-lane.test.mjs -t "4269"` and
+   `npx vitest run we:scripts/conveyor/__tests__/ci-heal-escalation-mark.test.mjs` — both fail on `origin/main`
+   before this item (every escalation exit in `we:skills-src/conveyor/fix-agent-ci-brief.md` stamps `--head=`
+   from a FRESH, live `gh pr view … headRefOid` read taken at escalation time) and pass after: the brief now
+   captures the head ONCE, at step 0 before diagnosis begins, into `$EXAMINED_HEAD`, and every escalation exit
+   stamps only that captured value.

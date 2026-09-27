@@ -290,6 +290,7 @@ export const MECHANICAL_PASS_NAMES = Object.freeze([
   'operator-notify',
   'reconcile-fix-dispatch',
   'ci-heal-pr-dispatch',
+  'promote-draft-pr-dispatch',
   'ci-queue-watch',
   'parked-pr-conflict-watch',
   'advisory-label-sweep',
@@ -359,6 +360,11 @@ export function makeCliMechanicalPasses({
         // this line nothing in the tree ever called it — every ci-heal-owed PR (live-confirmed: chalbert/
         // web-everything #2635, #2636) sat forever with a correct plan and no dispatcher reading it.
         if (!skip('ci-heal-pr-dispatch')) run('operations/ci-heal-pr-dispatch.mjs', prsArgs, key, slug);
+        // draft-first PRs (operator-approved 2026-09-27) — the SAME reconcile-pass plan above also carries
+        // `kind:'promote-draft'` entries (a draft PR whose required checks just went all-green); this is the
+        // ONLY dispatcher that ever acts on one (`gh pr ready`), mirroring ci-heal-pr-dispatch's own line
+        // right above it exactly.
+        if (!skip('promote-draft-pr-dispatch')) run('operations/promote-draft-pr-dispatch.mjs', prsArgs, key, slug);
         if (!skip('ci-queue-watch')) run('conveyor/ci-queue-watch.mjs', ['sweep'], key, slug);
         // Already runs as its own pass-daemon watcher (skills-src/conveyor/pass-daemon.mjs) — a resident
         // Dispatcher must skip this to avoid double-running it.

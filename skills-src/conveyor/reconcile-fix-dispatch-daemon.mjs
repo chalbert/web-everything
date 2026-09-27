@@ -52,6 +52,7 @@ import {
 } from './runner-lock.mjs';
 import { runReconcileFixDispatch } from '../../scripts/conveyor/reconcile-fix-dispatch.mjs';
 import { runReconcileCiHealDispatch } from '../../scripts/operations/ci-heal-pr-dispatch.mjs';
+import { runReconcilePromoteDraftDispatch } from '../../scripts/operations/promote-draft-pr-dispatch.mjs'; // draft-first PRs, operator-approved 2026-09-27 — see runPromoteDraftDispatchAllRepos below
 import { resolveLiveQueueBaseline } from '../../scripts/readiness/heavy-admission.mjs'; // card xkyw1x4
 import { createQueueBudget } from '../../scripts/readiness/heavy-queue-projection.mjs'; // card xkyw1x4
 import { runReconcilePass, defaultReadPrs } from '../../scripts/conveyor/reconcile-pass.mjs'; // #4191
@@ -67,6 +68,7 @@ import { CONSTELLATION_REPOS } from '../../scripts/lib/constellation-repos.mjs';
 import { forEachRepo } from '../../scripts/lib/for-each-repo.mjs';
 import { withGithubAppAuth } from '../../scripts/lib/github-app-auth-env.mjs';
 import { withSelfSync } from '../../scripts/lib/daemon-self-sync.mjs';
+import { withPrEvents } from '../../scripts/lib/pr-events.mjs';
 import { isStaleMainRefusalMessage } from '../../scripts/lib/main-staleness.mjs';
 
 /** This daemon's own lease key — distinct from the Dispatcher's default sentinel and from the Verify
@@ -200,6 +202,53 @@ export async function runReconcileCiHealDispatchAllRepos({ repos = FIX_DISPATCH_
       perRepo.push({ repo, error: String((e && e.message) || e).split('\n')[0] });
     }
   }
+  const dispatched = [];
+  const refusals = [];
+  const reconcileRefusals = [];
+  for (const entry of perRepo) {
+    if (entry.error) {
+      refusals.push({ repo: entry.repo, prNumber: null, kind: 'tick-failed', why: entry.error });
+      continue;
+    }
+    const { repo, result } = entry;
+    for (const d of (result.dispatched ?? [])) dispatched.push({ ...d, repo });
+    for (const r of (result.refusals ?? [])) refusals.push({ ...r, repo });
+    for (const r of (result.reconcileRefusalDetails ?? [])) reconcileRefusals.push({ ...r, repo });
+  }
+  return {
+    repos: perRepo, dispatched, refusals, reconcileRefusals,
+  };
+}
+
+/**
+ * we:skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs#runPromoteDraftDispatchAllRepos — draft-first PRs
+ * (operator-approved 2026-09-27): `we:scripts/operations/promote-draft-pr-dispatch.mjs#runReconcilePromoteDraftDispatch`
+ * (`gh pr ready` on a draft whose required checks are all green) was originally wired ONLY into
+ * `we:skills-src/conveyor/runner.mjs` — the headless conveyor runner. A same-day review caught that runner has
+ * NO LIVE SINGLETON LEASE on this host today (confirmed by a separate trial worker) — live are only THIS
+ * daemon, the Review daemon, and the drain — so, as first shipped, every agent PR would open draft, get its
+ * review refused while draft ({@link runReconcileCiHealDispatch}'s own sibling
+ * `we:scripts/conveyor/reconcile-core.mjs#dispatchReviewRow` isDraft gate), and then sit forever: nothing live
+ * ever called the ONE thing that un-drafts it. This rides THIS daemon instead — mirrors
+ * {@link runHungCiRecoveryAllRepos}'s own precedent exactly (that docblock's own words: "this pass rides the
+ * ONE daemon already confirmed live and ticking… rather than touch launchd (a separate operational action, not
+ * a code change)"), for the identical reason.
+ *
+ * UNPAUSED BY THE CLAUDE-AUTH GATE, DELIBERATELY (see {@link runTickAllRepos}'s own call site) — `gh pr ready`
+ * spawns no Claude session at all, so a broken operator login (card x5kagse) must never hold a green draft
+ * hostage the way it correctly holds `fix`/`ci-heal` (which DO spawn a session) — same reasoning
+ * `hungCi`/`mainRedRebase`/`missingRun` already document for themselves.
+ *
+ * The runner.mjs wiring is LEFT IN PLACE (harmless — if that runner's lease is ever live again, both sides are
+ * simply idempotent no-ops on whatever the other already promoted).
+ * @param {{repos?:string[], tick?:Function}} [o] - `tick` is injectable (defaults to the real
+ *   `runReconcilePromoteDraftDispatch`); every other option is forwarded to it for EVERY repo except `repo` itself.
+ * @returns {{repos:Array<{repo:string, result?:object, error?:string}>, dispatched:Array<object>,
+ *   refusals:Array<object>, reconcileRefusals:Array<object>}} same shape as
+ *   {@link runReconcileCiHealDispatchAllRepos}'s own return, repo-tagged the same way.
+ */
+export function runPromoteDraftDispatchAllRepos({ repos = FIX_DISPATCH_DAEMON_REPOS, tick = runReconcilePromoteDraftDispatch, ...tickOpts } = {}) {
+  const perRepo = forEachRepo(repos, (repo) => tick({ ...tickOpts, repo }));
   const dispatched = [];
   const refusals = [];
   const reconcileRefusals = [];
@@ -508,7 +557,7 @@ export function runMissingRunRecoveryAllRepos({ repos = FIX_DISPATCH_DAEMON_REPO
  *   unpaused — the login break does not touch them.
  */
 export async function runTickAllRepos({
-  repos = FIX_DISPATCH_DAEMON_REPOS, fixTick, ciHealTick, hungCiTick, mainRedRebaseTick, missingRunTick, notesTick, notesDryRun,
+  repos = FIX_DISPATCH_DAEMON_REPOS, fixTick, ciHealTick, hungCiTick, mainRedRebaseTick, missingRunTick, promoteDraftTick, notesTick, notesDryRun,
   authGateOverride,
   // #3383 follow-up (live-caught 2026-09-26, PR #2771) — apply this daemon's OWN `review-status:*` tag the
   // instant it dispatches a fix/ci-heal session, never waiting on the SEPARATE Review daemon's own tick to
@@ -550,6 +599,11 @@ export async function runTickAllRepos({
   // own docblock for why this daemon, specifically, is where it lives (same reason `hungCi`/`mainRedRebase`
   // already do — the pass's own `daemon-manifest.mjs` entry has no launchd job installed).
   const missingRun = runMissingRunRecoveryAllRepos({ repos, ...(missingRunTick ? { tick: missingRunTick } : {}) });
+  // draft-first PRs (operator-approved 2026-09-27) — the SEVENTH half this daemon now owns: see
+  // {@link runPromoteDraftDispatchAllRepos}'s own docblock for why this daemon, specifically, is where it
+  // lives (same reason `hungCi`/`mainRedRebase`/`missingRun` already do). UNPAUSED by `authGate` — see that
+  // function's own docblock for why (no Claude session is ever spawned by this half).
+  const promoteDraft = runPromoteDraftDispatchAllRepos({ repos, ...(promoteDraftTick ? { tick: promoteDraftTick } : {}) });
   // #4191 (epic #4075/#3383) — the FIFTH half this daemon now owns: surface `planReconcile`'s own `notes`
   // (`ci-heal-exhausted`/`awaiting-permission`) that neither `fix` nor `ci-heal` above ever forwards — see
   // {@link runReconcileNotesAllRepos}'s own docblock for why this is a separate, independent read rather than a
@@ -576,13 +630,14 @@ export async function runTickAllRepos({
   }
   return {
     repos: fix.repos, // same repo list every half ticked — the shape onTick's log already reads from
-    dispatched: [...fix.dispatched, ...ciHeal.dispatched, ...hungCi.dispatched, ...mainRedRebase.dispatched, ...missingRun.dispatched],
-    refusals: [...fix.refusals, ...ciHeal.refusals, ...hungCi.refusals, ...mainRedRebase.refusals, ...missingRun.refusals, ...notes.refusals],
-    reconcileRefusals: [...(fix.reconcileRefusals ?? []), ...(ciHeal.reconcileRefusals ?? [])],
+    dispatched: [...fix.dispatched, ...ciHeal.dispatched, ...hungCi.dispatched, ...mainRedRebase.dispatched, ...missingRun.dispatched, ...promoteDraft.dispatched],
+    refusals: [...fix.refusals, ...ciHeal.refusals, ...hungCi.refusals, ...mainRedRebase.refusals, ...missingRun.refusals, ...promoteDraft.refusals, ...notes.refusals],
+    reconcileRefusals: [...(fix.reconcileRefusals ?? []), ...(ciHeal.reconcileRefusals ?? []), ...(promoteDraft.reconcileRefusals ?? [])],
     ciHeal, // the ci-heal half's own detail, kept available rather than discarded once merged above
     hungCi, // the hung-ci-recovery half's own detail, same reason
     mainRedRebase, // the main-red-rebase half's own detail, same reason
     missingRun, // the missing-run-recovery half's own detail, same reason (xi4od2p, #4075/#3383)
+    promoteDraft, // the promote-draft half's own detail, same reason (draft-first PRs, 2026-09-27)
     authPaused: authGate.paused, // card x5kagse — fix/ci-heal dispatch skipped outright this tick
     authPauseReason: authGate.reason,
     notes: notes.notes, // #4191 — every surfaced note this tick saw, repo-tagged
@@ -824,10 +879,11 @@ async function main() {
     releaseRunnerLeaseIfOwned(RUNNER_LOCK_ROOT, owner, { key: RECONCILE_FIX_DISPATCH_LEASE_KEY });
     process.exit(0);
   };
+  // Webhook-driven wake (flag WE_PR_EVENTS, default OFF → effects unchanged) — see we:scripts/lib/pr-events.mjs.
   const { stoppedReason } = await runDaemonLoop(
-    withSelfSync(withGithubAppAuth(withFixDispatchClaimRefresh(buildCliDaemonEffects({ owner }))), {
+    withPrEvents(withSelfSync(withGithubAppAuth(withFixDispatchClaimRefresh(buildCliDaemonEffects({ owner }))), {
       root: selfRoot, onRestart: restartOntoNewCode, hasStaleRefusal: hasStaleMainRefusal,
-    }),
+    }), { role: 'fix', repos: FIX_DISPATCH_DAEMON_REPOS }),
   );
   if (!stopping) {
     console.error(`reconcile-fix-dispatch-daemon: loop stopped (${stoppedReason}) — releasing the lease and exiting.`);

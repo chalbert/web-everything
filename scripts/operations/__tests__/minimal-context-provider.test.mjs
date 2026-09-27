@@ -260,6 +260,47 @@ describe('acquireLane', () => {
       const [, args] = run.mock.calls[0];
       expect(args.some((a) => a.startsWith('--base='))).toBe(false);
     });
+
+    // build-path-codex-isolation-locus — the new `repo`/`item` support this fix adds, so
+    // `deliver-item-wrapper.mjs#acquireImplLane` can draw a non-`we` locus item's implementation lane from
+    // ITS OWN pool (`--repo=<checkoutPath>`) rather than whatever `resolveRunCwd()` would derive (always WE,
+    // for the mechanical build dispatcher's own process).
+    it('adds --repo=<checkoutPath> when given, so the acquire draws from a DIFFERENT repo\'s pool than the '
+      + 'calling process\'s own cwd would derive', () => {
+      const run = vi.fn(() => '/other-pool/lane-4');
+      acquireLane({
+        sessionSlug: 'conveyor-3604', claudeSessionId: 'id-11', purpose: 'conveyor-delivery-impl',
+        repo: '/home/x/workspace/plateau-app',
+      }, { run });
+      const [, args] = run.mock.calls[0];
+      expect(args).toContain('--repo=/home/x/workspace/plateau-app');
+    });
+
+    it('omits --repo entirely when not given — every existing caller (review dispatch, and every WE-locus '
+      + 'delivery) is byte-for-byte unchanged', () => {
+      const run = vi.fn(() => '/pool/lane-9');
+      acquireLane({ sessionSlug: 'review-42', claudeSessionId: 'id-12', purpose: 'review-loop' }, { run });
+      const [, args] = run.mock.calls[0];
+      expect(args.some((a) => a.startsWith('--repo='))).toBe(false);
+    });
+
+    it('adds --item=<num> when given — so the drain\'s existing by-item release sweep '
+      + '(`lane-pool.mjs release --all-pools --item=<num>`) finds this lane too', () => {
+      const run = vi.fn(() => '/other-pool/lane-4');
+      acquireLane({
+        sessionSlug: 'conveyor-3604', claudeSessionId: 'id-13', purpose: 'conveyor-delivery-impl', item: '3604',
+      }, { run });
+      const [, args] = run.mock.calls[0];
+      expect(args).toContain('--item=3604');
+    });
+
+    it('omits --item entirely when not given — review dispatch never passes one, and its own pinned argv '
+      + '(above) is unaffected', () => {
+      const run = vi.fn(() => '/pool/lane-9');
+      acquireLane({ sessionSlug: 'review-42', claudeSessionId: 'id-14', purpose: 'review-loop' }, { run });
+      const [, args] = run.mock.calls[0];
+      expect(args.some((a) => a.startsWith('--item='))).toBe(false);
+    });
   });
 });
 

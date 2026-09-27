@@ -49,7 +49,8 @@
  *   node scripts/pr-land.mjs --ref=lane/2153-… --base=main --method=merge # method ∈ merge|squash|rebase (default merge; the drain wants --no-ff history)
  *   node scripts/pr-land.mjs --ref=lane/… --label-on-green                 # PRODUCER mode (#2199): open, WAIT for required checks, label ready-to-merge ONLY when green, hand merge to the drain
  *   node scripts/pr-land.mjs --ref=lane/… --no-wait                       # open the PR UNLABELLED, don't wait/merge (CI unconfirmed — the drain won't collect it until labelled)
- *   node scripts/pr-land.mjs --ref=lane/… --park=review:human            # PARK mode (#2622): open the PR WITH the review label already on it and STOP (no wait, no ready-to-merge, no drain) — the first-class held-for-review open, replacing the hash-stranding `gh pr create` bypass
+ *   node scripts/pr-land.mjs --ref=lane/… --park=review:human            # PARK mode (#2622): open the PR WITH the review label already on it and STOP (no wait, no ready-to-merge, no drain) — the first-class held-for-review open, replacing the hash-stranding `gh pr create` bypass. DRAFT BY DEFAULT (draft-first PRs, operator-approved 2026-09-27): the review label sits on it, but nothing dispatches a review until the daemon un-drafts it on green CI (`gh pr ready`, `scripts/conveyor/reconcile-core.mjs`'s `promote-draft`)
+ *   node scripts/pr-land.mjs --ref=lane/… --park=review:human --no-draft # same, but opened READY FOR REVIEW immediately (opt-out for a human-opened or otherwise special-cased park — #2622's original behavior)
  *   node scripts/pr-land.mjs --ref=lane/… --dry-run                       # print the exact gh command sequence, execute nothing
  *   node scripts/pr-land.mjs --ref=lane/… --fallback-git                  # on gh failure / unmergeable, local git-merge + push instead
  *   node scripts/pr-land.mjs --ref=lane/… --no-heal                       # skip the post-land id-collision self-heal (#2071)
@@ -265,6 +266,21 @@ const LABEL_ON_GREEN = !!flags['label-on-green'];
 // honours is logged with actor + reason, and an unstated one would be the sole silently-unaccountable override.
 const FORCE_OPEN = !!flags['force-open'];
 const FORCE_OPEN_REASON = typeof flags.reason === 'string' ? flags.reason : null;
+// draft-first PRs (operator-approved, 2026-09-27) — a `--park`-ed PR (the agent-opened default, #2622) is
+// what applies a review label AT OPEN with no CI confirmed yet — measured live: 6 of 26 PRs opened overnight
+// failed their OWN FIRST CI run, and every one of them still got a full independent review (~12 min each,
+// several re-reviewed after their fix), because the review daemon dispatches off the `review:*` label alone
+// and never asked whether CI had even run yet. `--no-draft` is the explicit opt-out (mirrors `--no-label`/
+// `--no-heal`'s naming) for a human-opened or otherwise special-cased `--park` call that WANTS review to start
+// immediately. Scoped to `park` ONLY (applied where `PLAN.mode === 'park'` below): `land`/`label-on-green`
+// already never apply a review label until AFTER their own green-wait poll loop breaks (see `pollVerdict`'s
+// docblock) — those two modes never had this bug, and `pollVerdict` has no `'DRAFT'` branch, so opening a
+// `land`/`label-on-green` PR as a draft would spin its poll loop to timeout on GitHub's own `mergeStateStatus:
+// 'DRAFT'` (neither `CLEAN`/`UNSTABLE` nor `BEHIND`) instead of ever landing. The daemon (never pr-land) is
+// what un-drafts it: `scripts/conveyor/reconcile-core.mjs`'s new `promote-draft` dispatch calls `gh pr ready`
+// once the PR's required checks are ALL green, which is what lets the review daemon dispatch a review at all
+// (its own new `isDraft` gate in `dispatchReviewRow` refuses one on any draft PR, whatever label it carries).
+const DRAFT_OPT_OUT = !!flags['no-draft'];
 
 // ── PURE helpers (unit-tested in scripts/__tests__/pr-land.test.mjs) ──────────────────────────────────
 
@@ -297,6 +313,24 @@ export function planPrLand({ wait, labelOnGreen, park } = {}) {
  *  labels are valid park targets: `review:human` (a human must clear it) and `review:pending` (an independent
  *  review is owed). Sourced from `REVIEW_LABELS` so the names never drift from the escalation module. */
 export const PARK_LABELS = Object.freeze([REVIEW_LABELS.human, REVIEW_LABELS.pending]);
+
+/**
+ * #draft-first-prs (operator-approved 2026-09-27) — whether THIS create should carry `--draft`. Pure.
+ *
+ * SCOPED TO `park` ONLY, DELIBERATELY. `park` is the ONE mode that applies a `review:*` label at OPEN, before
+ * any CI has run at all (`planPrLand`'s own docblock: "no green-wait, no ready-to-merge") — measured live:
+ * 6 of 26 PRs opened overnight failed their OWN first CI run, and every one still got a full independent
+ * review, because the review daemon dispatches off the label alone. `land`/`label-on-green` never had this
+ * bug: both apply their review-escalation label only AFTER their own green-wait poll loop already broke
+ * (see `pollVerdict`'s own docblock) — CI has always finished by then. Opening either of THOSE as a draft
+ * would additionally break: `pollVerdict` has no `'DRAFT'` branch, so GitHub's own `mergeStateStatus: 'DRAFT'`
+ * would fall to `'wait'` and spin the poll loop to its timeout instead of ever landing.
+ * @param {{mode:string, optOut:boolean}} o
+ * @returns {boolean}
+ */
+export function resolveDraft({ mode, optOut }) {
+  return mode === 'park' && !optOut;
+}
 
 /**
  * #2622 — validate + resolve the `--park=<label>` value. Pure. `--park` opens a PR already carrying a review
@@ -703,7 +737,10 @@ function runCli() {
   // ONE source of truth for the create params — the dry-run render below still needs the built ARGV (via
   // buildCreateArgs directly, nothing is executed there), while the real create goes through the port with
   // these same semantic params so the two never drift apart.
-  const createParams = { base: BASE, head: REF, title: derivedTitle, body: CREATE_BODY };
+  // draft-first PRs — scoped to `park` only; see `DRAFT_OPT_OUT`'s own comment for why `land`/`label-on-green`
+  // are excluded (their poll loop has no `'DRAFT'` branch and would spin to timeout).
+  const DRAFT = resolveDraft({ mode: PLAN.mode, optOut: DRAFT_OPT_OUT });
+  const createParams = { base: BASE, head: REF, title: derivedTitle, body: CREATE_BODY, draft: DRAFT };
   const createArgs = buildCreateArgs(createParams);
 
   if (DRY_RUN) {
@@ -1054,7 +1091,12 @@ function runCli() {
       // parallel-workflow Finalize treats it as a deliberate hold, NOT a `labelApplied:false` un-labelled strand
       // to re-run `pr-land --label-on-green` on (which would stamp the go-ahead onto a held PR — the flip-flop).
       label: null, labelApplied: false, held: true, reviewLabel: parkLabel, reviewLabelApplied: parkApplied,
-      detail: `opened self-approved PR #${prNum} for ${REF} PARKED ${parkLabel} (${parkApplied ? `labelled ${parkLabel}` : 'label apply FAILED — set it by hand'}) — held for review, NOT waited/labelled ready-to-merge/landed; the drain numbers any born-as-hash item at land once a human clears the review`,
+      // draft-first PRs — `draft:true` here means GitHub itself will never surface this for review until the
+      // daemon calls `gh pr ready` on it (`reconcile-core.mjs`'s `promote-draft` dispatch, fired once every
+      // required check is green); `false` means either `--no-draft` opted out or `gh` failed to open it as a
+      // draft (see `detail` for which).
+      draft: DRAFT,
+      detail: `opened self-approved PR #${prNum} for ${REF} PARKED ${parkLabel}${DRAFT ? ' as a DRAFT (promoted by the daemon once required checks are green — draft-first PRs)' : ''} (${parkApplied ? `labelled ${parkLabel}` : 'label apply FAILED — set it by hand'}) — held for review, NOT waited/labelled ready-to-merge/landed; the drain numbers any born-as-hash item at land once a human clears the review`,
     }, 0);
   }
 

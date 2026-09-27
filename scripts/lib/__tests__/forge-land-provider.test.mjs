@@ -46,6 +46,22 @@ describe('GH_ARGV is byte-identical to the pre-port inline calls', () => {
     expect(buildMergeArgs({ pr: 4, method: 'merge' })).toEqual(['pr', 'merge', '4', '--merge', '--delete-branch']);
     expect(buildAddLabelArgs({ pr: 60, label: 'ready-to-merge' })).toEqual(['pr', 'edit', '60', '--add-label', 'ready-to-merge']);
   });
+
+  // draft-first PRs (operator-approved 2026-09-27)
+  it('buildCreateArgs appends --draft only when draft is explicitly true', () => {
+    expect(buildCreateArgs({ base: 'main', head: 'lane/2153-x', draft: true }))
+      .toEqual(['pr', 'create', '--base', 'main', '--head', 'lane/2153-x', '--fill', '--draft']);
+    expect(buildCreateArgs({ base: 'main', head: 'lane/2153-x', draft: false }))
+      .toEqual(['pr', 'create', '--base', 'main', '--head', 'lane/2153-x', '--fill']);
+    expect(buildCreateArgs({ base: 'main', head: 'lane/2153-x' }))
+      .toEqual(['pr', 'create', '--base', 'main', '--head', 'lane/2153-x', '--fill']);
+  });
+
+  it('buildCreateArgs never emits a "--draft=..." valued flag — only the bare presence flag', () => {
+    const args = buildCreateArgs({ base: 'main', head: 'lane/2153-x', title: 't', body: 'b', draft: true });
+    expect(args).toEqual(['pr', 'create', '--base', 'main', '--head', 'lane/2153-x', '--title', 't', '--body', 'b', '--draft']);
+    expect(args.some((a) => a.startsWith('--draft='))).toBe(false);
+  });
 });
 
 describe('the gh adapter', () => {

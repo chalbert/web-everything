@@ -73,14 +73,21 @@ export function mergeMethodFlag(method) {
  *  title is present but no body is given, we pass an explicit empty `--body ""` — never `--fill` (unusable
  *  for a remote-only lane/* head). Result: the create is always non-interactive. (#2332: the CLI create path
  *  now REFUSES a bodyless open upstream via `prCreateBodyGuard`, so this empty-body branch is only ever
- *  reached by the dry-run plan render, never by a real `gh pr create`.) */
-export function buildCreateArgs({ base, head, title, body }) {
+ *  reached by the dry-run plan render, never by a real `gh pr create`.)
+ *
+ *  `draft` (draft-first PRs) — appends `--draft` when true. Omitted (not `--draft=false`) when falsey: `gh`
+ *  reads a bare `--draft` as a presence flag, and there is no `--no-draft` gh accepts on CREATE (a PR is
+ *  opened ready-for-review by default; drafting is opt-in per call, never per-flag-value). See
+ *  `we:scripts/pr-land.mjs`'s own `--park` block for the one call site that sets this — the daemon (never
+ *  pr-land itself) is what flips it back with `gh pr ready` once required checks go green (draft-first PRs). */
+export function buildCreateArgs({ base, head, title, body, draft }) {
   const args = ['pr', 'create', '--base', base, '--head', head];
   if (title != null) args.push('--title', title);
   // A title with no body must still carry a body — otherwise gh prompts interactively (fails headless, #2176).
   if (body != null) args.push('--body', body);
   else if (title != null) args.push('--body', '');
   if (title == null && body == null) args.push('--fill');
+  if (draft === true) args.push('--draft');
   return args;
 }
 

@@ -102,7 +102,7 @@ describe('the refuse rule — never a guess, never a default', () => {
         }
       }
     }
-    expect([...produced].sort()).toEqual(['bugfix', 'build-new-feature', 'conflict-resolution', 'doc-fix']);
+    expect([...produced].sort()).toEqual(['bugfix', 'build-new-feature', 'ci-heal', 'conflict-resolution', 'doc-fix']);
   });
 });
 

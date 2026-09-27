@@ -163,9 +163,11 @@ import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
 import { reviewSessionSlug } from '../conveyor/review-session-slug.mjs';
 // #4194 — the added non-Claude review seats' routing (see `reviewSeatRoutes`).
 import { ADVISORY_LENSES, MANDATE_LENSES } from '../lib/jury-core.mjs';
-import { REVIEW_SEAT_PROVIDERS, selectReviewSeatProvider } from '../lib/provider-routing.mjs';
+import { REVIEW_SEAT_PROVIDERS, selectReviewSeatProvider, AGY_CLAUDE_MODEL_BY_TIER } from '../lib/provider-routing.mjs';
 import { CODEX_MODEL } from '../lib/codex-model-routing.mjs';
 import { ANTIGRAVITY_MODEL } from '../lib/antigravity-judge-spawn.mjs';
+// build-path-codex-isolation — the ONE shared bg-isolation helper every dispatch path calls.
+import { isolateDispatchSession } from '../lib/dispatch-bg-isolation.mjs';
 
 // re-exported so nothing that already imports `reviewSessionSlug` from this file has to change (#3437) — the
 // slug itself now lives in `we:scripts/conveyor/review-session-slug.mjs`, a PURE module both this file and
@@ -190,12 +192,19 @@ export const ROUTED_ADVISORY_LENSES = Object.freeze(ADVISORY_LENSES.filter((l) =
  *  so it can never block or accept). */
 export const EXTRA_JUROR_MANDATE = MANDATE_LENSES.CORRECTNESS;
 
-/** The pinned model + effort per provider for an added seat — never left to a CLI's implicit default. */
+/** The pinned model + effort per provider for an added seat — never left to a CLI's implicit default. Card
+ *  xn2wf9t split the old single `gemini` entry into the `agy` CLI's two real backends (see
+ *  `provider-routing.mjs#REVIEW_SEAT_PROVIDERS`'s own note): `agy-gemini` keeps the exact model/effort the old
+ *  `gemini` entry ran, byte for byte; `agy-claude` is new. */
 export const REVIEW_SEAT_MODELS = Object.freeze({
   codex: Object.freeze({ model: CODEX_MODEL, effort: 'medium' }),
   // `gemini-3.1-pro` offers only `low`/`high` (agy refused `medium` live, 2026-09-26); `low` is the combination
   // the review-pr Antigravity seat already runs (`ANTIGRAVITY_REVIEW_EFFORT`).
-  gemini: Object.freeze({ model: ANTIGRAVITY_MODEL, effort: 'low' }),
+  'agy-gemini': Object.freeze({ model: ANTIGRAVITY_MODEL, effort: 'low' }),
+  // The `agy` CLI running a Claude-family model — untried live at this effort for a review seat, so it starts
+  // at the same effort Codex's own seat runs rather than assuming the Gemini backend's `low`/`high`-only quirk
+  // carries over; the first live runs are the proof either way (see the plist/backlog note this card leaves).
+  'agy-claude': Object.freeze({ model: AGY_CLAUDE_MODEL_BY_TIER.sonnet, effort: 'medium' }),
 });
 
 /** The routing key of one seat — its own subject in the scorecard store (`reviewSeatTaskType`). PURE. */
@@ -463,6 +472,10 @@ export function dispatchReview({
   // never `root` itself) and making that directory real.
   sessionCwdFor = (sessionId) => dispatchSessionCwd(sessionId, { root }),
   ensureSessionCwd = ensureDispatchSessionCwd,
+  // build-path-codex-isolation — the shared bg-isolation helper (writes `<sessionCwd>/.claude/settings.local.json`
+  // and returns the `--settings` worktree patch). Before this, only dispatch-lane's sink applied it, so this
+  // path's sessions hit Claude Code's "Call EnterWorktree first" guard on their first Edit.
+  isolateSession = isolateDispatchSession,
 } = {}) {
   const planned = planReviewDispatch({ pr, repo, checkoutExists, home });
   assertNotALaneCheckout(root);
@@ -509,6 +522,7 @@ export function dispatchReview({
     // `reconcile-fix-dispatch.mjs`'s own call exactly. Written into `<sessionCwd>/.claude/settings.local.json`
     // — the cwd this dispatched review session ACTUALLY starts in, never `root`'s any more.
     settingsEnv: resolveSettingsEnv(sessionCwd),
+    worktreeSettings: isolateSession(sessionCwd).worktreeSettings,
   });
   // #3331 — THE HANDLE COMES BACK OFF STDOUT, it is not the uuid minted above. `claude --bg` DISCARDS
   // `--session-id` (it says so on stderr; measured 3/3 at CLI 2.1.246 by #3331's probe and 2/2 at 2.1.269 with

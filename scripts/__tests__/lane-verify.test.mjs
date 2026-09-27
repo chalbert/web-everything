@@ -605,7 +605,12 @@ describe('#3321 — every pr-land COMMAND STRING the tracked file set ships decl
     const src = srcOf(SELF);
     const programStart = src.indexOf('\nimport ');
     const hits = [...src.matchAll(PR_LAND_CMD)];
-    expect(hits.length).toBe(14);
+    // 15, not 14 (draft-first PRs, operator-approved 2026-09-27) — one new usage-banner line added, documenting
+    // the `--no-draft` opt-out for the new draft-by-default `--park` open. Still above `programStart` (the
+    // usage banner), same as every other hit. (Deliberately NOT quoting the actual command string here: this
+    // FILE is itself part of the tracked set `trackedMentioningPrLand()` scans below, and a quoted flag-carrying
+    // invocation in a comment would itself get harvested as an undeclared-posture hit.)
+    expect(hits.length).toBe(15);
     for (const h of hits) expect(h.index, h[0]).toBeLessThan(programStart);
   });
 

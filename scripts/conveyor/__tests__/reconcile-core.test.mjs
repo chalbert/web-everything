@@ -1076,6 +1076,58 @@ describe('case 5l — a ci-heal already escalated THIS EXACT head never gets re-
     expect(plan.notes).toEqual([expect.objectContaining({ kind: 'ci-heal-escalated', outcome: 'waiting-on-system-fix', systemFixRef: '2784' })]);
   });
 
+  // #4263 (PR #2787 review, live incident 2026-09-27) — BEFORE this fix, a `waiting-on-system-fix` escalation
+  // refused FOREVER on the escalated head: the refusal keyed purely on head equality and never re-checked
+  // whether the named `systemFixRef` PR had itself since landed. `pr.systemFixLanded` is the evidence
+  // `reconcile-pass.mjs#enrichPrsWithSystemFixFacts` independently re-derives (real state re-checked, never
+  // trusted from the escalation comment's own claim).
+  describe('#4263 waiting-on-system-fix re-arms once the referenced system-fix PR has landed', () => {
+    const escalation = buildCiHealEscalationComment({
+      headSha: HEAD_2783, outcome: 'waiting-on-system-fix', systemFixRef: 2784,
+      reason: 'soak-replay-gate false red — #2784 fixes the gate itself',
+    });
+
+    it('BEFORE/without systemFixLanded evidence: still refuses forever on the SAME head — the pre-#4263 defect, unchanged default', () => {
+      const plan = planReconcile({
+        prs: [pr2783({ comments: [{ body: escalation, author: AUTOMATION }] })], agents: [], now: NOW,
+      });
+      expect(plan.dispatch).toEqual([]);
+      expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'waiting-on-system-fix', prNumber: 2783 })]);
+    });
+
+    it('AFTER: systemFixLanded re-arms healing on the SAME (unchanged) head — no new push required, dispatches ci-heal', () => {
+      const plan = planReconcile({
+        prs: [pr2783({ comments: [{ body: escalation, author: AUTOMATION }], systemFixLanded: true })],
+        agents: [], now: NOW,
+      });
+      expect(plan.refusals.map((r) => r.kind)).not.toContain('waiting-on-system-fix');
+      expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'ci-heal', prNumber: 2783 })]);
+      expect(plan.notes).toEqual([expect.objectContaining({
+        kind: 'system-fix-landed', prNumber: 2783, headSha: HEAD_2783, systemFixRef: '2784',
+      })]);
+    });
+
+    it('systemFixLanded is IGNORED for a plain needs-human escalation — there is no fix PR to re-check, and it must not accidentally re-arm one', () => {
+      const needsHuman = buildCiHealEscalationComment({ headSha: HEAD_2783, outcome: 'needs-human', reason: 'genuinely wrong diff' });
+      const plan = planReconcile({
+        prs: [pr2783({ comments: [{ body: needsHuman, author: AUTOMATION }], systemFixLanded: true })],
+        agents: [], now: NOW,
+      });
+      expect(plan.dispatch).toEqual([]);
+      expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'ci-heal-escalated', prNumber: 2783 })]);
+    });
+
+    it('respects the CI-heal cap even once re-armed — landing the system fix does not also reset the attempt count', () => {
+      const priorHeals = Array.from({ length: CI_HEAL_ROUND_CAP }, () => ({ body: CI_HEAL_COMMENT_MARKER, author: AUTOMATION }));
+      const plan = planReconcile({
+        prs: [pr2783({ comments: [...priorHeals, { body: escalation, author: AUTOMATION }], systemFixLanded: true })],
+        agents: [], now: NOW,
+      });
+      expect(plan.dispatch).toEqual([]);
+      expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'cap-exhausted', prNumber: 2783 })]);
+    });
+  });
+
   it('#3383 — an escalation comment from an UNTRUSTED author never suppresses a real ci-heal', () => {
     const forged = buildCiHealEscalationComment({ headSha: HEAD_2783, outcome: 'needs-human' });
     const plan = planReconcile({
@@ -2098,6 +2150,52 @@ describe('case 5i — STACKED-BASE CONFLICT dispatch, a `conflicted` PR whose ba
     const plan = planReconcile({ prs: [prStacked()], agents: [], now: NOW });
     expect(plan.dispatch[0].baseRefName).toBe('lane/3681-ratify-daemon-lifecycle');
   });
+
+  // #4265 (PR #2797 review, live incident 2026-09-27) — `currentSha` USED TO BE HARDCODED `null` for this
+  // branch's own call into `countStaleConflictFixRounds`, in contrast to the main-base branch a few hundred
+  // lines below (which threads a real, freshly-resolved `mainSha`). Mirrors the #2787 `mainSha` reproduction
+  // above (lines ~1477-1527), but for the STACKED-base branch's own `base.baseRefSha`.
+  describe('#4265 stacked-base `currentSha` (base.baseRefSha) — was hardcoded null, exhausting the cap across different tips', () => {
+    const BASE_REF = 'lane/3681-ratify-daemon-lifecycle';
+    const roundAt = (sha, n) => ({
+      body: `${CONFLICT_FIX_COMMENT_MARKER}\n\nconveyor fix agent resolved this PR's conflict against ` +
+        `\`${BASE_REF}\` round ${n}\n\n<!-- conveyor-conflict-fix-target: ${BASE_REF}@${sha} -->`,
+      author: AUTOMATION,
+    });
+
+    it('3 repairs against 3 successively OLDER tips of the SAME repeatedly-rebased stacked base do NOT exhaust the cap when the current tip is newer still — dispatches, attempts 0 (reproduction)', () => {
+      const priorRounds = [roundAt('aaa1111', 1), roundAt('bbb2222', 2), roundAt('ccc3333', 3)];
+      const pr = prStacked({ comments: [...priorRounds], baseRefSha: 'ddd4444' });
+      const plan = planReconcile({ prs: [pr], agents: [], now: NOW });
+      expect(plan.refusals).toEqual([]);
+      expect(plan.dispatch).toEqual([expect.objectContaining({
+        kind: 'fix', prNumber: 2578, mode: 'stacked-rebase', attempts: 0, cap: CONFLICT_FIX_ROUND_CAP,
+      })]);
+    });
+
+    it('a round against the SAME current baseRefSha still counts as stale — genuinely stuck, not a moving target', () => {
+      const comments = Array.from({ length: CONFLICT_FIX_ROUND_CAP }, (_, i) => roundAt('aaa1111', i + 1));
+      const pr = prStacked({ comments, baseRefSha: 'aaa1111' });
+      const plan = planReconcile({ prs: [pr], agents: [], now: NOW });
+      expect(plan.dispatch).toHaveLength(0);
+      expect(plan.refusals).toEqual([expect.objectContaining({
+        kind: 'cap-exhausted', prNumber: 2578, attempts: CONFLICT_FIX_ROUND_CAP, cap: CONFLICT_FIX_ROUND_CAP, capKind: 'stacked-rebase',
+      })]);
+    });
+
+    it('REGRESSION — with no `baseRefSha` supplied at all (the pre-#4265 shape), stale counting still degrades safely to ref-only (unchanged default)', () => {
+      const comments = Array.from({ length: CONFLICT_FIX_ROUND_CAP }, (_, i) => roundAt('aaa1111', i + 1));
+      const pr = prStacked({ comments }); // no baseRefSha field at all
+      const plan = planReconcile({ prs: [pr], agents: [], now: NOW });
+      expect(plan.dispatch).toHaveLength(0);
+      expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'cap-exhausted', capKind: 'stacked-rebase' })]);
+    });
+
+    it('every row carries `baseRefSha` as evidence, dispatch and refusal alike', () => {
+      const plan = planReconcile({ prs: [prStacked({ baseRefSha: 'ddd4444' })], agents: [], now: NOW });
+      expect(plan.dispatch[0].baseRefSha).toBe('ddd4444');
+    });
+  });
 });
 
 // ── CASE 6 — THE ARGV, PINNED ─────────────────────────────────────────────────────────────────────────────────
@@ -2812,5 +2910,59 @@ describe('#xconv1 (chalbert/web-everything#2766/#2767 unblock) — CONVERT inste
 
   it('`convert-advisory` is on the frozen DISPATCH_KINDS list', () => {
     expect(DISPATCH_KINDS).toContain('convert-advisory');
+  });
+});
+
+// ── draft-first PRs (operator-approved 2026-09-27) ──────────────────────────────────────────────────────────
+// `--park` now opens a PR as a GitHub draft by default (`scripts/pr-land.mjs`); this pass is what closes the
+// loop back: never dispatch a review for a draft, whatever label it carries, and promote (`gh pr ready`, via
+// `kind:'promote-draft'`) the moment its required checks are all green.
+describe('draft-first PRs — reconcile-core.mjs (operator-approved 2026-09-27)', () => {
+  it('`promote-draft` is on the frozen DISPATCH_KINDS list, `draft` is on the frozen REFUSAL_KINDS list', () => {
+    expect(DISPATCH_KINDS).toContain('promote-draft');
+    expect(REFUSAL_KINDS).toContain('draft');
+  });
+
+  it('a draft PR with ALL required checks green is dispatched `promote-draft`, never `review`', () => {
+    const pr = pr1563({ isDraft: true, labels: lbl('review:pending'), statusCheckRollup: greenRollup, comments: [] });
+    const plan = planReconcile({ prs: [pr], agents: [], durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'promote-draft', prNumber: 1563 })]);
+    expect(plan.dispatch.some((d) => d.kind === 'review')).toBe(false);
+  });
+
+  it('a draft PR whose checks are still pending is refused `draft` — no review, no promotion, nothing owed yet', () => {
+    const pr = pr1563({ isDraft: true, labels: lbl('review:pending'), statusCheckRollup: pendingRollup, comments: [] });
+    const plan = planReconcile({ prs: [pr], agents: [], durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toEqual([]);
+    expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'draft', prNumber: 1563 })]);
+  });
+
+  it('a draft PR with a RED required check is STILL dispatched `ci-heal` — CI healing is never withheld from a draft', () => {
+    const pr = pr1563({ isDraft: true, labels: [], statusCheckRollup: redRollup, comments: [] });
+    const plan = planReconcile({ prs: [pr], agents: [], durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'ci-heal', prNumber: 1563 })]);
+    expect(plan.dispatch.some((d) => d.kind === 'review' || d.kind === 'promote-draft')).toBe(false);
+  });
+
+  it('a NON-draft PR with the exact same shape dispatches `review` as normal — the gate is `isDraft` alone', () => {
+    const pr = pr1563({ isDraft: false, labels: lbl('review:pending'), statusCheckRollup: greenRollup, comments: [] });
+    const plan = planReconcile({ prs: [pr], agents: [], durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'review', prNumber: 1563 })]);
+  });
+
+  it('an `isDraft`-absent PR (a fixture predating this field) behaves exactly as `isDraft: false` — no accidental universal gate', () => {
+    const pr = pr1563({ labels: lbl('review:pending'), statusCheckRollup: greenRollup, comments: [] });
+    delete pr.isDraft;
+    const plan = planReconcile({ prs: [pr], agents: [], durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'review', prNumber: 1563 })]);
+  });
+
+  it('every kind this pass ever emits for a draft PR is in the frozen lists (the same exhaustiveness check the file already holds itself to)', () => {
+    for (const rollup of [greenRollup, pendingRollup, redRollup]) {
+      const pr = pr1563({ isDraft: true, labels: lbl('review:pending'), statusCheckRollup: rollup, comments: [] });
+      const plan = planReconcile({ prs: [pr], agents: [], durableCounts: {}, now: NOW });
+      for (const r of plan.refusals) expect(REFUSAL_KINDS).toContain(r.kind);
+      for (const d of plan.dispatch) expect(DISPATCH_KINDS).toContain(d.kind);
+    }
   });
 });

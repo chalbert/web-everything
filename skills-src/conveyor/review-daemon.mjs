@@ -100,7 +100,7 @@ import { selectStatusCandidates } from '../../scripts/conveyor/reconcile-core.mj
 // and `runReviewTick`'s own return shape is pinned byte-for-byte by many existing exact-equality tests).
 import { dispatchConvertAdvisory } from '../../scripts/conveyor/convert-advisory-dispatch.mjs';
 import { planClaudeAuthDispatchGate } from '../../scripts/conveyor/claude-auth-health.mjs'; // card x5kagse
-import { runSessionReaperPass, makeReapedLedger, REPO_ROOT as SESSION_REAPER_REPO_ROOT, DEFAULT_IDLE_REAP_THRESHOLD_MS } from '../../scripts/conveyor/session-reaper.mjs';
+import { runSessionReaperPass, makeReapedLedger, makePidDeadResolver, REPO_ROOT as SESSION_REAPER_REPO_ROOT, DEFAULT_IDLE_REAP_THRESHOLD_MS } from '../../scripts/conveyor/session-reaper.mjs';
 import { mintSessionSlug } from '../../scripts/conveyor/session-slug.mjs';
 import { freeLaneNumbers } from '../../scripts/conveyor/reconcile-fix-dispatch.mjs';
 import { repoProfile } from '../../scripts/lib/repo-profile.mjs';
@@ -108,6 +108,7 @@ import { CONSTELLATION_REPOS, repoKeyForSlug } from '../../scripts/lib/constella
 import { forEachRepo } from '../../scripts/lib/for-each-repo.mjs';
 import { withGithubAppAuth } from '../../scripts/lib/github-app-auth-env.mjs';
 import { withSelfSync } from '../../scripts/lib/daemon-self-sync.mjs';
+import { withPrEvents, makeDrainNudgeForward } from '../../scripts/lib/pr-events.mjs';
 import { makePoolExhaustionLogger } from '../../scripts/conveyor/pool-exhaustion.mjs';
 import { isStaleMainRefusalMessage } from '../../scripts/lib/main-staleness.mjs';
 import {
@@ -301,6 +302,10 @@ export function runReviewTick({
   // than asking `gh` again — `undefined` (a PR the tick's own listing somehow missed, a rare open-PR-appeared-
   // mid-tick race) falls through to each helper's own fresh-read default, never a hard failure.
   const labelsByPr = new Map((Array.isArray(rawPrs) ? rawPrs : []).map((p) => [Number(p?.number), p?.labels ?? []]));
+  // draft-first PRs (operator-approved 2026-09-27) — the SAME `rawPrs` snapshot already carries `isDraft`
+  // (`reconcile-pass.mjs#PR_LIST_JSON_FIELDS`); threaded into `tagStatus` below so `review-status:awaiting-ci`
+  // reflects the PR's OWN current draft state, never a second `gh` read.
+  const isDraftByPr = new Map((Array.isArray(rawPrs) ? rawPrs : []).map((p) => [Number(p?.number), !!p?.isDraft]));
   const reviews = (plan.dispatch ?? []).filter((d) => d && d.kind === 'review');
   // Live-caught 2026-09-22, #xli631k: a PR that moved to being owed a FIX (not a review) used to never
   // reach `statusCandidates` at all, so its `review-status:reviewing` label sat stale once its review
@@ -362,7 +367,7 @@ export function runReviewTick({
   const dispatchedThisTick = new Set(dispatched.map((d) => Number(d.prNumber)));
   for (const c of statusCandidates(reviews, plan.refusals ?? [], fixes, ciHeals)) {
     const agents = dispatchedThisTick.has(Number(c.prNumber)) ? undefined : (rawAgents ?? undefined);
-    try { tagStatus({ pr: c.prNumber, repo, agents, currentLabels: labelsByPr.get(Number(c.prNumber)) }); }
+    try { tagStatus({ pr: c.prNumber, repo, agents, currentLabels: labelsByPr.get(Number(c.prNumber)), isDraft: isDraftByPr.get(Number(c.prNumber)) }); }
     catch { /* cosmetic — see review-status-tag.mjs's own header */ }
   }
   return {
@@ -674,6 +679,14 @@ export function defaultReapSessions({ priorityNames = null } = {}) {
     idleThresholdMs: DEFAULT_IDLE_REAP_THRESHOLD_MS,
     reapedLedger: makeReapedLedger(),
     priorityNames,
+    // #ghost-sessions-inflate-cap — explicitly wired ON here: `runSessionReaperPass`'s own bare default is
+    // OFF (see that function's own docblock for why), so the real production reap this daemon owns must ask
+    // for it by name, the same way `retention-sweep`/`dispatch-scratch-sweep` are opt-in at their own call
+    // sites rather than silently inherited. This is what actually reaps a `conveyor-NNNN` (or `review-*`/
+    // `fix-*`) session whose process is confirmed gone, regardless of which checkout dispatched it — the live
+    // incident: 18 such sessions, `state:'working'`, 20-26 days old, none reaped because `allowedCwd` above
+    // (this daemon's own checkout) short-circuited every other axis for every one of them.
+    pidDeadFor: makePidDeadResolver(),
   });
 }
 
@@ -856,10 +869,13 @@ async function main() {
     releaseRunnerLeaseIfOwned(RUNNER_LOCK_ROOT, owner, { key: REVIEW_DAEMON_LEASE_KEY });
     process.exit(0);
   };
+  // Webhook-driven wake (flag WE_PR_EVENTS, default OFF → effects unchanged): a relevant PR event ends the sleep
+  // early; the interval stays as the safety net. This daemon also forwards drain-relevant events to the drain
+  // daemon's localhost POST /nudge — one forwarder, so the drain wakes on events without its own feed client.
   const { stoppedReason } = await runDaemonLoop(
-    withSelfSync(withGithubAppAuth(buildCliDaemonEffects({ owner })), {
+    withPrEvents(withSelfSync(withGithubAppAuth(buildCliDaemonEffects({ owner })), {
       root: selfRoot, onRestart: restartOntoNewCode, hasStaleRefusal: hasStaleMainRefusal,
-    }),
+    }), { role: 'review', repos: REVIEW_DAEMON_REPOS, forward: [makeDrainNudgeForward()] }),
   );
   if (!stopping) {
     console.error(`review-daemon: loop stopped (${stoppedReason}) — releasing the lease and exiting.`);

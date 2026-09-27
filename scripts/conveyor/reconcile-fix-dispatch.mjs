@@ -114,6 +114,8 @@ import { notifyDesktopChecked } from './branch-sync.mjs';
 import {
   QUEUE_CAP_REFUSAL_CAP, buildQueueCapRefusalComment, countQueueCapRefusals,
 } from './queue-cap-refusal-count.mjs';
+// build-path-codex-isolation — the ONE shared bg-isolation helper every dispatch path calls.
+import { isolateDispatchSession } from '../lib/dispatch-bg-isolation.mjs';
 
 /** The template `we:skills-src/conveyor/fix-agent-brief.md` — the SAME brief `dispatch-lane.mjs`'s own
  *  tick-core-driven fix dispatch fills, read fresh per dispatch so an edit takes effect with no restart. */
@@ -854,6 +856,10 @@ export function dispatchFix(planned, {
   // never `root` itself) and making that directory real. See `dispatchSessionCwd`'s own header at the io shell.
   sessionCwdFor = (sessionId) => dispatchSessionCwd(sessionId, { root }),
   ensureSessionCwd = ensureDispatchSessionCwd,
+  // build-path-codex-isolation — the shared bg-isolation helper (writes `<sessionCwd>/.claude/settings.local.json`
+  // and returns the `--settings` worktree patch). Before this, only dispatch-lane's sink applied it, so this
+  // path's sessions hit Claude Code's "Call EnterWorktree first" guard on their first Edit.
+  isolateSession = isolateDispatchSession,
 } = {}) {
   // #x33jgwt multi-repo slice 5 — no repo gate HERE any more (see {@link tryResumeFix}'s own docblock for why):
   // `runReconcileFixDispatch` already refused a repo whose profile lacks the `fix` capability before this ever
@@ -911,6 +917,7 @@ export function dispatchFix(planned, {
       // ACTUALLY starts in, not `root`'s — matching `review-dispatch.mjs#dispatchReview`'s own fix for the
       // identical gap.
       settingsEnv: resolveSettingsEnv(sessionCwd),
+      worktreeSettings: isolateSession(sessionCwd).worktreeSettings,
     });
     // #3331 — READ THE REAL ID BACK OFF STDOUT, exactly as the resume branch above already does. `claude --bg`
     // discards `--session-id` and assigns its own, so the minted uuid addresses nothing; `agentId` is what

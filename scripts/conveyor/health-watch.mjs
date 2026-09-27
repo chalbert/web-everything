@@ -58,6 +58,8 @@ import { RUNNER_LOCK_ROOT } from '../../skills-src/conveyor/runner-lock.mjs';
 import { collectDaemonStatus } from '../operations/daemon-status-io.mjs';
 import { assessDaemonStatus } from '../operations/daemon-status.mjs';
 import { readBacklogCards } from '../backlog-stranded-sweep.mjs';
+import { readPrEventsStatuses } from '../lib/pr-events.mjs';
+import { readSeatCapUsage } from '../operations/review-extra-seats.mjs';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 export const BOOTSTRAP_TAIL_BYTES = 512 * 1024;
@@ -365,13 +367,22 @@ export function probePrs({ exec = run } = {}) {
   const out = [];
   for (const { slug } of Object.values(CONSTELLATION_REPOS)) {
     // #gh-graphql-budget — the host-shared open-PR snapshot when this is the real `run` (never a test's fake exec).
-    const shared = exec === run ? readSharedOpenPrs({ repo: slug, fields: 'number,title,headRefName,labels,statusCheckRollup,updatedAt' }) : null;
-    const rows = shared || JSON.parse(exec('gh', ['pr', 'list', '--repo', slug, '--state', 'open', '--limit', '100', '--json', 'number,title,headRefName,labels,statusCheckRollup,updatedAt']));
+    // `isDraft` (draft-first PRs, operator-approved 2026-09-27) — already part of `SNAPSHOT_FIELDS`, added here
+    // so the `draft-not-promoted` smell can read it; the shared-cache path costs nothing extra for it.
+    const shared = exec === run ? readSharedOpenPrs({ repo: slug, fields: 'number,title,headRefName,labels,statusCheckRollup,updatedAt,isDraft' }) : null;
+    const rows = shared || JSON.parse(exec('gh', ['pr', 'list', '--repo', slug, '--state', 'open', '--limit', '100', '--json', 'number,title,headRefName,labels,statusCheckRollup,updatedAt,isDraft']));
     for (const pr of rows) {
       out.push({
         repo: slug, number: pr.number, title: pr.title, headRefName: pr.headRefName, updatedAt: pr.updatedAt,
+        isDraft: !!pr.isDraft,
         labels: (pr.labels || []).map((l) => ({ name: l.name })),
-        statusCheckRollup: (pr.statusCheckRollup || []).map((c) => ({ name: c.name || c.context, conclusion: c.conclusion, state: c.state, completedAt: c.completedAt })),
+        // `status` (draft-first PRs, operator-approved 2026-09-27) — carried alongside `state`/`conclusion` so
+        // `we:scripts/operations/pr-status.mjs#reduceCheckState` (the `draft-not-promoted` smell's own green
+        // check) reads the SAME completion signal every other CI-truth consumer in this repo does off a raw
+        // `gh pr view --json statusCheckRollup` CheckRun entry (`status`+`conclusion`) — omitting it here would
+        // have every real GitHub-Actions check (CheckRun-shaped, no `.state` at all) read as perpetually
+        // "running" through that function, since it never looks at `.state`.
+        statusCheckRollup: (pr.statusCheckRollup || []).map((c) => ({ name: c.name || c.context, conclusion: c.conclusion, state: c.state, status: c.status, completedAt: c.completedAt })),
       });
     }
   }
@@ -527,8 +538,17 @@ export async function tick(flags = {}) {
     : probeMachineLoad()));
   // `gh-call-failures` — fs-only, every tick: the gh-throttle call log's tail (`--gh-calls-log=FILE` in tests).
   probes.ghCalls = attempt('ghCalls', () => probeGhCalls(flags['gh-calls-log'] ? { logPath: flags['gh-calls-log'] } : {}));
+  // `review-seat-cap-near-limit` (card xn2wf9t) — fs-only, every tick: each non-Claude review seat provider's
+  // OWN daily cap usage, off the SAME scorecard store + reservation ledgers `runExtraSeats`/`runRedTeam` admit
+  // against (`--scorecard-store-fixture=FILE` in tests, so this never touches a real store in the test suite).
+  probes.reviewSeatCaps = attempt('reviewSeatCaps', () => readSeatCapUsage({
+    storePath: flags['scorecard-store-fixture'] || undefined,
+    now,
+  }));
   // `gh-graphql-budget` — every tick (1 GraphQL point): the real bucket + the throttle's shared budget blocks.
   // `--graphql-budget-fixture=FILE` (a `{sample, blocks}` JSON) in tests; skipped under `--no-gh`.
+  // `pr-events-stale` — fs-only, every tick: each event-driven waker's status file (`[]` while WE_PR_EVENTS is off).
+  probes.prEventsStatus = attempt('prEventsStatus', () => readPrEventsStatuses(flags['pr-events-state-dir'] || undefined));
   if (flags['graphql-budget-fixture']) probes.graphqlBudget = attempt('graphqlBudget', () => JSON.parse(readFileSync(flags['graphql-budget-fixture'], 'utf8')));
   else if (!flags['no-gh']) probes.graphqlBudget = attempt('graphqlBudget', () => probeGraphqlBudget());
 
