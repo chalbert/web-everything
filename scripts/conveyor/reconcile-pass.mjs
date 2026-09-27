@@ -49,6 +49,12 @@
  * is killed.
  */
 import { repoKeyForSlug, CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
+// #2748 false-red follow-up (soak-replay-gate, PR #2775) — the repo's REQUIRED status-check names, live +
+// cached (`we:scripts/lib/required-status-checks.mjs`), so `planReconcile`'s `ci-red` branch means a REQUIRED
+// check failed rather than "any check outside a hand-maintained exclusion list" — see that module's own header
+// for the full incident this closes. Anchored at the TOP of the import block (rather than beside the other
+// `reconcile-core.mjs`-adjacent imports below) so it never collides with an overlay editing that region.
+import { getRequiredStatusChecks } from '../lib/required-status-checks.mjs';
 import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { execFileSyncThrottled } from '../lib/gh-throttle.mjs';
@@ -66,11 +72,6 @@ import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 import { latestRequiredCheck, isRequiredCheckFailed } from '../merge-ai-prs.mjs';
 import { computeMainRedWindows, DEFAULT_MAIN_WORKFLOW_NAME, DEFAULT_REQUIRED_CHECK } from './main-red-recovery.mjs';
 import { readHungInfo, resolveHungThresholdMs, readClaudeAuthExpiredInfo, readIdleFinishedInfo, resolveIdleFinishedThresholdMs } from './hung-session.mjs';
-// #2748 false-red follow-up (soak-replay-gate, PR #2775) — the repo's REQUIRED status-check names, live +
-// cached (`we:scripts/lib/required-status-checks.mjs`), so `planReconcile`'s `ci-red` branch means a REQUIRED
-// check failed rather than "any check outside a hand-maintained exclusion list" — see that module's own header
-// for the full incident this closes.
-import { getRequiredStatusChecks } from '../lib/required-status-checks.mjs';
 
 /**
  * we:scripts/conveyor/reconcile-pass.mjs#PR_LIST_JSON_FIELDS — the `--json` fields this pass reads about each
