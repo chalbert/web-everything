@@ -60,6 +60,13 @@
 
 import { latestAdvisory, advisoryCoversHead } from './advisory-labels.mjs';
 import { hasUncapturedPrevention } from './jury-core.mjs';
+// PR #2805 review (security) — WE's PRs are public, so any GitHub account can post a comment shaped like this
+// file's marker or like an advisory note. Every comment-scanned read below runs through the SAME trusted-author
+// gate the repo's other durable markers use (epic #3383, #4140), never a body match alone.
+import { isTrustedMarkerAuthor } from './marker-authorship.mjs';
+
+/** Only the comments a trusted principal (the automation or the operator) posted. PURE. */
+const trustedComments = (comments) => (Array.isArray(comments) ? comments : []).filter(isTrustedMarkerAuthor);
 // #883 — every code-path reference filed into a backlog card's `scope` or BODY prose must carry its `<repo>:`
 // locus prefix (the write-time `lint-locus-prefix.mjs` hook enforces this on every scaffold/file-item write, no
 // exceptions) — reusing the SAME token `citation-check.mjs` already exports rather than re-typing the literal
@@ -151,19 +158,35 @@ export function buildApprovalPreventionMarker({ headSha } = {}) {
 const MARKER_RE = /<!-- approval-prevention-filed:([0-9a-f]{7,40}) -->/gi;
 
 /**
+ * THE CARD-SIDE IDEMPOTENCY KEY — written into the filed card's own body by
+ * {@link buildApprovalPreventionFilingInput}, so the card itself (not only the PR marker comment) records which
+ * approval filed it. PURE. The PR marker is posted AFTER the card is filed; if that post fails, the next approval
+ * attempt finds no marker, and this key is what lets the caller find the card it already filed instead of filing
+ * a second one (PR #2805 review, codex-correctness finding).
+ *
+ * @param {{repo: string, pr: number|string, headSha: string}} o
+ * @returns {string}
+ */
+export function buildApprovalPreventionKey({ repo, pr, headSha } = {}) {
+  const repoKey = String(repo ?? '').toLowerCase(); // GitHub slugs are case-insensitive
+  return `approval-prevention-key:${repoKey}#${String(pr ?? '')}@${String(headSha ?? '').toLowerCase()}`;
+}
+
+/**
  * Has THIS mechanism already filed a card for this exact head? PURE. Scans every comment body for
  * {@link buildApprovalPreventionMarker}'s own marker, tolerant of a short-SHA marker matching a full one (either
  * direction — the same prefix tolerance {@link advisoryCoversHead} already uses, so the two can never disagree
- * about what "the same head" means).
+ * about what "the same head" means). A marker counts only from a trusted author ({@link isTrustedMarkerAuthor}) —
+ * otherwise any commenter could suppress the filing by posting the marker string.
  *
- * @param {Array<{body?: string}>} comments
+ * @param {Array<{body?: string, author?: {login?: string}}>} comments
  * @param {string} headSha
  * @returns {boolean}
  */
 export function hasApprovalPreventionMarkerForHead(comments, headSha) {
   const head = String(headSha ?? '').toLowerCase();
   if (!head) return false;
-  for (const comment of (Array.isArray(comments) ? comments : [])) {
+  for (const comment of trustedComments(comments)) {
     const body = String(comment?.body ?? '');
     for (const m of body.matchAll(MARKER_RE)) {
       const marked = m[1].toLowerCase();
@@ -201,9 +224,12 @@ export function selectApprovalPreventionFindings({ to, commentBody = '', prComme
     const findings = parseOwedPreventionFindings(commentBody);
     return findings.length ? { findings, source: 'verdict-comment' } : null;
   }
-  const advisory = latestAdvisory(prComments);
+  // Trusted authors only: a forged, later advisory-shaped comment must neither hide the real advisory's owed
+  // items nor inject its own. `advisory.index` indexes THIS filtered list, so the lookup below uses it too.
+  const candidates = trustedComments(prComments);
+  const advisory = latestAdvisory(candidates);
   if (!advisory || !advisoryCoversHead(advisory, headSha)) return null;
-  const advisoryComment = (Array.isArray(prComments) ? prComments : [])[advisory.index];
+  const advisoryComment = candidates[advisory.index];
   const body = advisoryComment?.body ?? '';
   if (isPreventionOutstandingVerdictText(body)) return null;
   const findings = parseOwedPreventionFindings(body);
@@ -219,10 +245,13 @@ export function selectApprovalPreventionFindings({ to, commentBody = '', prComme
  *
  * @param {{repo: string, pr: number|string, findings?: Array<object>, parent?: string, source?: string}} o -
  *   `source` is {@link selectApprovalPreventionFindings}'s own `'verdict-comment'|'advisory'` tag, rendered into
- *   the digest's own header so a reader of the filed card knows where the debt was first printed.
+ *   the digest's own header so a reader of the filed card knows where the debt was first printed. `key` is
+ *   {@link buildApprovalPreventionKey}'s value, appended as the digest's last line when given.
  * @returns {{title: string, kind: string, size: string, digest: string, scope: string, parent: string, queue: string}}
  */
-export function buildApprovalPreventionFilingInput({ repo, pr, findings = [], parent = '', source = '' } = {}) {
+export function buildApprovalPreventionFilingInput({
+  repo, pr, findings = [], parent = '', source = '', key = '',
+} = {}) {
   // A juror-authored `file` is UNTRUSTED text that ends up in the filed card's YAML `scope:` frontmatter
   // (`we:scripts/backlog/scaffold.mjs#renderItem` quotes each entry but escapes nothing), so a value carrying a
   // quote, newline, comma or any other non-path character is withheld from BOTH the scope and the digest anchor
@@ -277,7 +306,9 @@ export function buildApprovalPreventionFilingInput({ repo, pr, findings = [], pa
     title: `File the prevention guard(s) owed by ${repo}#${pr}'s independent review`,
     kind: 'story',
     size: '3',
-    digest,
+    // The key is appended AFTER the #883 rewrite so that pass can never alter it (a later lookup matches it byte
+    // for byte).
+    digest: key ? `${digest}\n\nIdempotency key (do not edit): ${key}` : digest,
     scope,
     parent: parent || '',
     queue: 'true',

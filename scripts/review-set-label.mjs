@@ -54,7 +54,7 @@
  * label strings.
  */
 import { basename, dirname, join, resolve, sep } from 'node:path';
-import { readFileSync, realpathSync } from 'node:fs';
+import { readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 // Rebase resolution (2026-08-08): the UNION of both sides. `buildReviewedDiffMarker` is #2979's accept
 // fingerprint, `READY_TO_MERGE_LABEL` is #2832's hold invariant, `buildReviewedContributionMarker` is
@@ -148,7 +148,7 @@ import { execFileSyncThrottled } from './lib/gh-throttle.mjs';
 // See `runApprovalPreventionFiling` below for the wiring and why THIS seam, not the drain's land step.
 import {
   selectApprovalPreventionFindings, hasApprovalPreventionMarkerForHead, buildApprovalPreventionMarker,
-  buildApprovalPreventionFilingInput,
+  buildApprovalPreventionFilingInput, buildApprovalPreventionKey,
 } from './lib/approval-prevention-notice.mjs';
 // #xwp8ioh — the #2953 inert-PR predicate, extracted so `review-pr`'s `read` step enforces the same rule
 // before a juror is paid instead of this site being the only place it is checked.
@@ -659,6 +659,37 @@ export function fileApprovalPreventionCard(input, { exec = execFileSyncThrottled
 }
 
 /**
+ * THE CARD-SIDE IDEMPOTENCY LOOKUP (PR #2805 review, codex-correctness finding) — has an approval already filed
+ * a card carrying `key` ({@link buildApprovalPreventionKey}, written into the card body by the builder)? Scans
+ * `<root>/backlog/*.md`, the directory `file-item` writes into. `root` defaults to this process's cwd — the SAME
+ * checkout {@link fileApprovalPreventionCard}'s `node scripts/operations/run.mjs` subprocess files into, per the
+ * cwd guarantee stated there. Only called on the rare path where a card is owed and no trusted PR marker exists.
+ * Never throws: an unreadable directory or file reads as "not found".
+ *
+ * LIMIT: this sees only THIS checkout's `backlog/` (plus whatever has already reached it from `main`). A retry
+ * run from a different checkout, before the first card has landed on `main`, can still file a second card.
+ *
+ * @param {string} key
+ * @param {{root?: string}} [o]
+ * @returns {{num: (number|string|null), rel: string}|null}
+ */
+export function findApprovalPreventionCardOnDisk(key, { root = process.cwd() } = {}) {
+  if (!key) return null;
+  let names;
+  try { names = readdirSync(join(root, 'backlog')); } catch { return null; }
+  for (const name of names.filter((n) => n.endsWith('.md')).sort()) {
+    let text;
+    try { text = readFileSync(join(root, 'backlog', name), 'utf8'); } catch { continue; }
+    if (text.includes(key)) {
+      // The id before the first `-`: a legacy number (`0101-…`) or a hash id (`x3k9ab2-…`, `backlog/id.mjs`).
+      const id = /^([^-]+)-/.exec(name)?.[1] ?? null;
+      return { num: id && /^\d+$/.test(id) ? Number(id) : id, rel: `backlog/${name}` };
+    }
+  }
+  return null;
+}
+
+/**
  * THE APPROVAL-TIME MECHANICAL FILING STEP ITSELF — called from `runReviewLabelCli`, ONLY for `to === 'accepted'`
  * or `to === 'clear-human'`, and only AFTER the label swap + durable comment have ALREADY landed (see the call
  * site): a filing failure here can therefore NEVER cost the approval that already happened. Reported LOUDLY to
@@ -670,26 +701,35 @@ export function fileApprovalPreventionCard(input, { exec = execFileSyncThrottled
  * OF THE READ AT THE TOP OF THIS RUN — before filing, and {@link buildApprovalPreventionMarker}'s marker is
  * posted as its own tiny comment after a successful file, so a LATER run (a repeated `--to=clear-human`, an
  * operator re-running the ceremony, a `restamp`) sees the marker on ITS OWN fresh read and never files twice
- * for the same head.
+ * for the same head. The marker is the fast path, not the only record: the card body itself also carries
+ * {@link buildApprovalPreventionKey}'s key, and `findFiledApprovalPrevention` looks it up before filing — so when
+ * the marker post failed after a successful file, a retry re-posts the marker for the EXISTING card instead of
+ * filing a second one (PR #2805 review).
  *
  * @param {{to:string, repo:string, pr:(number|string), headSha:string, commentBody:string,
- *   prComments:Array<object>, provider:object, fileApprovalPrevention:(input:object)=>object}} o
+ *   prComments:Array<object>, provider:object, fileApprovalPrevention:(input:object)=>object,
+ *   findFiledApprovalPrevention?:(key:string)=>({num:(number|null), rel:string}|null)}} o
  */
 export function runApprovalPreventionFiling({
   to, repo, pr, headSha, commentBody, prComments, provider, fileApprovalPrevention,
+  findFiledApprovalPrevention = findApprovalPreventionCardOnDisk,
 }) {
   const selection = selectApprovalPreventionFindings({ to, commentBody, prComments, headSha });
   if (!selection) return;
   if (hasApprovalPreventionMarkerForHead(prComments, headSha)) return;
   const subject = `${repo}#${pr}`;
-  const input = buildApprovalPreventionFilingInput({
-    repo,
-    pr,
-    findings: selection.findings,
-    parent: derivePreventionParent(selection.findings),
-    source: selection.source,
-  });
-  const filed = fileApprovalPrevention(input);
+  const key = buildApprovalPreventionKey({ repo, pr, headSha });
+  const existing = findFiledApprovalPrevention(key);
+  const filed = existing
+    ? { ok: true, num: existing.num, rel: existing.rel, error: null }
+    : fileApprovalPrevention(buildApprovalPreventionFilingInput({
+      repo,
+      pr,
+      findings: selection.findings,
+      parent: derivePreventionParent(selection.findings),
+      source: selection.source,
+      key,
+    }));
   if (!filed.ok) {
     process.stderr.write(
       `review-set-label: approval-time prevention filing for ${subject} FAILED (the approval above already `
@@ -785,6 +825,7 @@ export function runReviewLabelCli({
   // for the same reason `provider` is: a test asserts the DECISION (what would be filed, and when) without a
   // real `file-item` subprocess ever running.
   fileApprovalPrevention = fileApprovalPreventionCard,
+  findFiledApprovalPrevention = findApprovalPreventionCardOnDisk,
 } = {}) {
   // Shadows the module-level `fail` so EVERY refusal inside this function — there are seventeen — goes to the
   // injected emitter too. Without this the guards print past an in-process caller's collector (#3061); the
@@ -1254,7 +1295,7 @@ export function runReviewLabelCli({
   // durable by this line, so nothing below can ever cost it (see that function's own header).
   if (to === 'accepted' || to === 'clear-human') {
     runApprovalPreventionFiling({
-      to, repo, pr, headSha, commentBody, prComments, provider, fileApprovalPrevention,
+      to, repo, pr, headSha, commentBody, prComments, provider, fileApprovalPrevention, findFiledApprovalPrevention,
     });
   }
 

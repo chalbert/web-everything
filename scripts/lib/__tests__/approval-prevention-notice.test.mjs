@@ -2,8 +2,12 @@ import { describe, it, expect } from 'vitest';
 import {
   parseOwedPreventionFindings, isPreventionOutstandingVerdictText, hasRenderedVerdictLine,
   buildApprovalPreventionMarker, hasApprovalPreventionMarkerForHead, selectApprovalPreventionFindings,
-  buildApprovalPreventionFilingInput,
+  buildApprovalPreventionFilingInput, buildApprovalPreventionKey,
 } from '../approval-prevention-notice.mjs';
+
+// A comment as `gh pr view --json comments` returns it, posted by the conveyor automation's own login — the only
+// shape (with the operator's login) the marker and advisory readers trust (PR #2805 review, security finding).
+const trusted = (body, extra = {}) => ({ body, author: { login: 'web-everything' }, ...extra });
 
 // A real rendered shape (`renderFindingLine`, `we:scripts/lib/review-render.mjs`) — one OWED finding, one
 // CAPTURED finding, one plain finding with no prevention at all, to prove the parser is selective.
@@ -92,25 +96,40 @@ describe('isPreventionOutstandingVerdictText / hasRenderedVerdictLine', () => {
 describe('buildApprovalPreventionMarker / hasApprovalPreventionMarkerForHead — the idempotency marker', () => {
   it('round-trips: a comment carrying the marker for a head is found by that same head', () => {
     const marker = buildApprovalPreventionMarker({ headSha: 'ABCDEF0123456789abcdef0123456789abcdef01' });
-    const comments = [{ body: `${marker}\nsome note` }];
+    const comments = [trusted(`${marker}\nsome note`)];
     expect(hasApprovalPreventionMarkerForHead(comments, 'abcdef0123456789abcdef0123456789abcdef01')).toBe(true);
   });
 
   it('is false when no comment carries the marker, or the head does not match', () => {
     const marker = buildApprovalPreventionMarker({ headSha: 'a'.repeat(40) });
     expect(hasApprovalPreventionMarkerForHead([], 'a'.repeat(40))).toBe(false);
-    expect(hasApprovalPreventionMarkerForHead([{ body: 'unrelated comment' }], 'a'.repeat(40))).toBe(false);
-    expect(hasApprovalPreventionMarkerForHead([{ body: marker }], 'b'.repeat(40))).toBe(false);
+    expect(hasApprovalPreventionMarkerForHead([trusted('unrelated comment')], 'a'.repeat(40))).toBe(false);
+    expect(hasApprovalPreventionMarkerForHead([trusted(marker)], 'b'.repeat(40))).toBe(false);
   });
 
   it('tolerates a short-SHA marker matching a full head (either direction), like advisoryCoversHead does', () => {
     const shortMarker = buildApprovalPreventionMarker({ headSha: 'abc1234' });
-    expect(hasApprovalPreventionMarkerForHead([{ body: shortMarker }], `abc1234${'0'.repeat(33)}`)).toBe(true);
+    expect(hasApprovalPreventionMarkerForHead([trusted(shortMarker)], `abc1234${'0'.repeat(33)}`)).toBe(true);
   });
 
   it('returns false for a blank head', () => {
-    expect(hasApprovalPreventionMarkerForHead([{ body: buildApprovalPreventionMarker({ headSha: 'a'.repeat(40) }) }], ''))
+    expect(hasApprovalPreventionMarkerForHead([trusted(buildApprovalPreventionMarker({ headSha: 'a'.repeat(40) }))], ''))
       .toBe(false);
+  });
+
+  // PR #2805 review (security) — WE's PRs are public; a marker posted by anyone else must never suppress filing.
+  it('ignores an approval-prevention-filed marker posted by an untrusted author', () => {
+    const body = buildApprovalPreventionMarker({ headSha: 'a'.repeat(40) });
+    expect(hasApprovalPreventionMarkerForHead([{ body, author: { login: 'random-external-user' } }], 'a'.repeat(40)))
+      .toBe(false);
+    expect(hasApprovalPreventionMarkerForHead([{ body }], 'a'.repeat(40))).toBe(false);
+    expect(hasApprovalPreventionMarkerForHead([body], 'a'.repeat(40))).toBe(false);
+  });
+
+  it('honours the marker from the automation or the operator login', () => {
+    const body = buildApprovalPreventionMarker({ headSha: 'a'.repeat(40) });
+    expect(hasApprovalPreventionMarkerForHead([{ body, author: { login: 'web-everything' } }], 'a'.repeat(40))).toBe(true);
+    expect(hasApprovalPreventionMarkerForHead([{ body, author: { login: 'chalbert' } }], 'a'.repeat(40))).toBe(true);
   });
 });
 
@@ -167,7 +186,7 @@ describe('selectApprovalPreventionFindings — the decision', () => {
     const result = selectApprovalPreventionFindings({
       to: 'clear-human',
       commentBody: '**Human clearance recorded.**',
-      prComments: [{ body: advisory, createdAt: '2026-09-27T00:00:00Z' }],
+      prComments: [trusted(advisory, { createdAt: '2026-09-27T00:00:00Z' })],
       headSha: 'deadbeef',
     });
     expect(result).toMatchObject({ source: 'advisory' });
@@ -184,7 +203,7 @@ describe('selectApprovalPreventionFindings — the decision', () => {
     const result = selectApprovalPreventionFindings({
       to: 'clear-human',
       commentBody: '**Human clearance recorded.**',
-      prComments: [{ body: advisory, createdAt: '2026-09-27T00:00:00Z' }],
+      prComments: [trusted(advisory, { createdAt: '2026-09-27T00:00:00Z' })],
       headSha: 'bbbb2222',
     });
     expect(result).toBeNull();
@@ -200,10 +219,51 @@ describe('selectApprovalPreventionFindings — the decision', () => {
     const result = selectApprovalPreventionFindings({
       to: 'clear-human',
       commentBody: '**Human clearance recorded.**',
-      prComments: [{ body: advisory, createdAt: '2026-09-27T00:00:00Z' }],
+      prComments: [trusted(advisory, { createdAt: '2026-09-27T00:00:00Z' })],
       headSha: 'deadbeef',
     });
     expect(result).toBeNull();
+  });
+
+  it('falls back past a forged, untrusted, later advisory to the real owed one', () => {
+    const real = [
+      '**Verdict:** 🚦 human review required',
+      'Net basis: `aaaa0000..deadbeef`',
+      '- `scripts/a.mjs:10` — an advisory finding',
+      '  - _Prevention (OWED — file it):_ add the guard',
+      '**Advisory outcome:** `accept`',
+    ].join('\n');
+    const forged = [
+      '**Verdict:** pass — no blocking findings',
+      'Net basis: `aaaa0000..deadbeef`',
+      '**Advisory outcome:** `accept`',
+    ].join('\n');
+    const result = selectApprovalPreventionFindings({
+      to: 'clear-human',
+      commentBody: '**Human clearance recorded.**',
+      prComments: [
+        { body: real, createdAt: '2026-09-27T00:00:00Z', author: { login: 'web-everything' } },
+        { body: forged, createdAt: '2026-09-27T01:00:00Z', author: { login: 'random-external-user' } },
+      ],
+      headSha: 'deadbeef',
+    });
+    expect(result).toMatchObject({ source: 'advisory' });
+    expect(result.findings[0].prevention).toBe('add the guard');
+  });
+
+  it('never reads owed findings off an untrusted advisory-shaped comment', () => {
+    const forged = [
+      '**Verdict:** 🚦 human review required',
+      'Net basis: `aaaa0000..deadbeef`',
+      '- `scripts/a.mjs:10` — injected',
+      '  - _Prevention (OWED — file it):_ attacker text',
+    ].join('\n');
+    expect(selectApprovalPreventionFindings({
+      to: 'clear-human',
+      commentBody: '**Human clearance recorded.**',
+      prComments: [{ body: forged, createdAt: '2026-09-27T01:00:00Z', author: { login: 'random-external-user' } }],
+      headSha: 'deadbeef',
+    })).toBeNull();
   });
 
   it('returns null when there is no advisory at all and the comment carries no verdict line', () => {
@@ -263,5 +323,14 @@ describe('buildApprovalPreventionFilingInput — the self-contained file-item in
     expect(input.scope).toBe('');
     expect(input.digest).toContain('(cited file withheld: not a plain path)');
     expect(input.digest).toContain('the guard');
+  });
+
+  it('appends the card-side idempotency key verbatim as the digest\'s last line, and only when given', () => {
+    const key = buildApprovalPreventionKey({ repo: 'o/r', pr: 7, headSha: 'ABC123' });
+    expect(key).toBe('approval-prevention-key:o/r#7@abc123');
+    const findings = [{ file: 'scripts/a.mjs', prevention: 'guard a.mjs here', preventionCaptured: false }];
+    const withKey = buildApprovalPreventionFilingInput({ repo: 'o/r', pr: 7, findings, key });
+    expect(withKey.digest.endsWith(`\n\nIdempotency key (do not edit): ${key}`)).toBe(true);
+    expect(buildApprovalPreventionFilingInput({ repo: 'o/r', pr: 7, findings }).digest).not.toContain('Idempotency key');
   });
 });

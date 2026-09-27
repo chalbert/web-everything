@@ -6,9 +6,14 @@
  * `we:scripts/review-set-label.mjs`'s own `runApprovalPreventionFiling` for the wiring.
  */
 import { describe, it, expect } from 'vitest';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
-  derivePreventionParent, fileApprovalPreventionCard, runApprovalPreventionFiling, runReviewLabelCli,
+  derivePreventionParent, fileApprovalPreventionCard, findApprovalPreventionCardOnDisk, runApprovalPreventionFiling,
+  runReviewLabelCli,
 } from '../review-set-label.mjs';
+import { buildApprovalPreventionKey } from '../lib/approval-prevention-notice.mjs';
 
 describe('derivePreventionParent — #4075 default, unless a finding names a better one', () => {
   it('defaults to 4075 when no finding names a parent', () => {
@@ -85,6 +90,39 @@ describe('fileApprovalPreventionCard — the real (injectable) file-item subproc
   });
 });
 
+describe('findApprovalPreventionCardOnDisk — the durable, card-side idempotency lookup', () => {
+  it('finds a backlog card whose body carries the approval key, and nothing else', () => {
+    const root = mkdtempSync(join(tmpdir(), 'approval-prevention-'));
+    try {
+      mkdirSync(join(root, 'backlog'));
+      const key = buildApprovalPreventionKey({ repo: 'o/r', pr: 7, headSha: 'A'.repeat(40) });
+      writeFileSync(join(root, 'backlog', '0100-unrelated.md'), '---\nstatus: open\n---\nnothing here\n');
+      writeFileSync(join(root, 'backlog', '0101-file-the-prevention.md'), `---\nstatus: open\n---\nbody\n${key}\n`);
+      expect(findApprovalPreventionCardOnDisk(key, { root })).toEqual({ num: 101, rel: 'backlog/0101-file-the-prevention.md' });
+      const otherHead = buildApprovalPreventionKey({ repo: 'o/r', pr: 7, headSha: 'b'.repeat(40) });
+      expect(findApprovalPreventionCardOnDisk(otherHead, { root })).toBeNull();
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it('returns a hash-style card id as-is (new cards are named `<hash>-<slug>.md`)', () => {
+    const root = mkdtempSync(join(tmpdir(), 'approval-prevention-'));
+    try {
+      mkdirSync(join(root, 'backlog'));
+      const key = buildApprovalPreventionKey({ repo: 'O/R', pr: 7, headSha: 'a'.repeat(40) });
+      writeFileSync(join(root, 'backlog', 'x3k9ab2-file-the-prevention.md'), `body\n${key}\n`);
+      // Repo case never splits the key (GitHub slugs are case-insensitive).
+      const sameKey = buildApprovalPreventionKey({ repo: 'o/r', pr: 7, headSha: 'a'.repeat(40) });
+      expect(findApprovalPreventionCardOnDisk(sameKey, { root }))
+        .toEqual({ num: 'x3k9ab2', rel: 'backlog/x3k9ab2-file-the-prevention.md' });
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it('returns null (never throws) when the backlog directory is missing', () => {
+    expect(findApprovalPreventionCardOnDisk('approval-prevention-key:o/r#1@abc', { root: join(tmpdir(), 'no-such-root-x') }))
+      .toBeNull();
+  });
+});
+
 describe('runApprovalPreventionFiling — the orchestration, in isolation', () => {
   function fakeProvider() {
     const posted = [];
@@ -134,7 +172,7 @@ describe('runApprovalPreventionFiling — the orchestration, in isolation', () =
     runApprovalPreventionFiling({
       to: 'accepted', repo: 'o/r', pr: 42, headSha,
       commentBody: OWED_COMMENT,
-      prComments: [{ body: `<!-- approval-prevention-filed:${headSha} -->\nalready filed` }],
+      prComments: [{ body: `<!-- approval-prevention-filed:${headSha} -->\nalready filed`, author: { login: 'web-everything' } }],
       provider,
       fileApprovalPrevention: () => { fileCalls += 1; return { ok: true, num: 1, rel: 'r' }; },
     });
@@ -172,6 +210,41 @@ describe('runApprovalPreventionFiling — the orchestration, in isolation', () =
       })).not.toThrow();
     } finally { process.stderr.write = realWrite; }
     expect(stderrChunks.join('')).toMatch(/marker comment failed to post/);
+  });
+
+  // PR #2805 review (codex-correctness) — the card is the durable record, not the marker comment: a marker post
+  // that fails after a successful file must not let the NEXT approval attempt file a second card.
+  it('a marker-post failure followed by a retried approval files exactly one card', () => {
+    const headSha = 'a'.repeat(40);
+    const store = [];
+    const fileApprovalPrevention = (input) => {
+      store.push(input);
+      return { ok: true, num: 9000 + store.length, rel: `backlog/${9000 + store.length}-x.md` };
+    };
+    const findFiledApprovalPrevention = (key) => {
+      const i = store.findIndex((card) => card.digest.includes(key));
+      return i === -1 ? null : { num: 9001 + i, rel: `backlog/${9001 + i}-x.md` };
+    };
+    const realWrite = process.stderr.write.bind(process.stderr);
+    process.stderr.write = () => true;
+    const posted = [];
+    try {
+      runApprovalPreventionFiling({
+        to: 'accepted', repo: 'o/r', pr: 7, headSha, commentBody: OWED_COMMENT, prComments: [],
+        provider: { postComment: () => { throw new Error('gh down'); } },
+        fileApprovalPrevention, findFiledApprovalPrevention,
+      });
+      runApprovalPreventionFiling({
+        to: 'accepted', repo: 'o/r', pr: 7, headSha, commentBody: OWED_COMMENT, prComments: [],
+        provider: { postComment: (_r, _p, body) => posted.push(body) },
+        fileApprovalPrevention, findFiledApprovalPrevention,
+      });
+    } finally { process.stderr.write = realWrite; }
+    expect(store).toHaveLength(1);
+    // The retry heals the missing marker, pointing at the card the first attempt already filed.
+    expect(posted).toHaveLength(1);
+    expect(posted[0]).toContain(`approval-prevention-filed:${headSha}`);
+    expect(posted[0]).toContain('backlog/9001-x.md');
   });
 
   it('never fires for clear-human when the underlying source is prevention-outstanding (#2766 owns it)', () => {
@@ -228,6 +301,8 @@ describe('runApprovalPreventionFiling wired end-to-end through runReviewLabelCli
         successResult: (o) => ({ ok: true, ...o }),
         refusalResult: ({ decision }) => ({ error: decision.reason }),
         emit: (l) => chunks.push(String(l)),
+        // Hermetic: never scan the real checkout's backlog/ for an already-filed card.
+        findFiledApprovalPrevention: () => null,
         provider, argv, ...config,
       });
     } catch (e) { if (typeof e.exitCode === 'number') exitCode = e.exitCode; else throw e; }
@@ -248,7 +323,7 @@ describe('runApprovalPreventionFiling wired end-to-end through runReviewLabelCli
 
   it('does not file again on a re-run once the marker for this head is already posted', () => {
     const marker = `<!-- approval-prevention-filed:${'a'.repeat(40)} -->\nalready filed`;
-    const provider = stubProvider({ labels: ['review:pending'], comments: [{ body: marker }] });
+    const provider = stubProvider({ labels: ['review:pending'], comments: [{ body: marker, author: { login: 'web-everything' } }] });
     let fileCalls = 0;
     run(provider, ['1048', '--repo=o/n', '--to=accepted', '--actor=op'], {
       fileApprovalPrevention: () => { fileCalls += 1; return { ok: true, num: 1, rel: 'r' }; },
