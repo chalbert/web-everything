@@ -38,22 +38,28 @@ import { ADVISORY_NOTE_MARKER } from './advisory-round-count.mjs';
 // {@link isLatestAdvisoryFindingAddressed} returned `false` UNCONDITIONALLY, no matter what a fixer posted
 // afterward, and `we:scripts/conveyor/reconcile-core.mjs`'s advisory-fix branch kept re-dispatching a fixer that
 // could never mechanically prove "addressed" — CONFIRMED as the reason 3 advisory-fix rounds each correctly
-// found nothing to fix and still burned the cap to `cap-exhausted (3/3)`. `isAdvisoryNoteLine` below is the one
+// found nothing to fix and still burned the cap to `cap-exhausted (3/3)`. `isTrustedAdvisoryNote` below is the one
 // place both leading-line checks are widened to accept EITHER marker, so the two counters can never drift apart
 // on which notes exist again.
 import { CONVERTED_ADVISORY_NOTE_MARKER } from '../lib/review-escalation.mjs';
 import { STAND_DOWN_MARKER, isSelfAuthored } from './stand-down.mjs';
 
-/** #xconv1-evidence — pure: is `body`'s leading line EITHER shape of advisory note (a fresh `advise`-step one,
- *  or a converted #xconv1 one)? Single-sourced so {@link isLatestAdvisoryFindingAddressed} and
+/** #xconv1-evidence — pure: is comment `c` a TRUSTED advisory note — its leading line EITHER shape of note (a
+ *  fresh `advise`-step one, or a converted #xconv1 one) AND its author passes `isTrustedMarkerAuthor`?
+ *  Single-sourced so {@link countCompletedAdvisoryEpisodes}, {@link isLatestAdvisoryFindingAddressed} and
  *  {@link isAdvisoryMechanismStandDownSuperseded} can never disagree on what counts as "a note happened here".
- * @param {string} body
+ *  The trust gate lives HERE, not at each call site (PR #2800 advisory finding): when only the episode counter
+ *  gated it, a forged note from any login kept the "addressed" check false forever while every genuine fix
+ *  landed inside an already-completed episode — the cap never fired. A bare string carries no author, so fails.
+ * @param {{body?:string, author?:{login?:string}, viewerDidAuthor?:boolean}|string} c
  * @returns {boolean}
  */
-function isAdvisoryNoteLine(body) {
+function isTrustedAdvisoryNote(c) {
+  const body = typeof c === 'string' ? c : c?.body;
   if (typeof body !== 'string') return false;
   const head = body.trimStart();
-  return head.startsWith(ADVISORY_NOTE_MARKER) || head.startsWith(CONVERTED_ADVISORY_NOTE_MARKER);
+  return (head.startsWith(ADVISORY_NOTE_MARKER) || head.startsWith(CONVERTED_ADVISORY_NOTE_MARKER))
+    && isTrustedMarkerAuthor(c);
 }
 // #3383 — the shared trusted-author gate every marker COUNTER runs a comment through (broader than
 // `isSelfAuthored` above: automation OR the repo operator). `isSelfAuthored` stays in use, unchanged, for the
@@ -112,6 +118,94 @@ export function buildAdvisoryFixComment({ actor = 'conveyor fix agent' } = {}) {
 }
 
 /**
+ * we:scripts/conveyor/advisory-fix-mark.mjs#countCompletedAdvisoryEpisodes — xconv1-evidence follow-up
+ * (chalbert/web-everything#2766/#2767, 2026-09-27): the advisory-fix CAP must count COMPLETED EPISODES (one
+ * advisory note through to the fix that unlocked the NEXT one), never raw fix-mark COMMENTS — a distinction
+ * the lifetime `countAdvisoryFixComments` collapses, exactly the kind of count-vs-something-truer gap
+ * {@link isLatestAdvisoryFindingAddressed} already closed once for the "addressed" question (xaer296/#2549).
+ *
+ * THE BUG THIS CLOSES, CONFIRMED LIVE 2026-09-27. Once the #xconv1-evidence fix landed,
+ * `isLatestAdvisoryFindingAddressed` correctly recognized #2766/#2767's CONVERTED note as "a note" — but by
+ * then the PR's history already held 3 advisory-fix-mark comments, ALL posted back-to-back UNDER the OLD
+ * (broken) code, in response to that SAME ONE converted note, because the old bug meant no review ever
+ * dispatched between them to advance the episode. A later, INDEPENDENT review then posted a brand-new, GENUINE
+ * advisory note — a completely different finding the three prior fixes never touched — and `reconcile-core.mjs`
+ * compared the LIFETIME fix-mark count (3, unchanged forever) against `advisoryFixCap` (3) and refused
+ * `cap-exhausted`, with ZERO attempts ever made against the actual current finding.
+ *
+ * A NAIVE FIX (scope the count to "fix-marks since the latest note", tried and REJECTED here) is UNSAFE: in
+ * the mechanism's own normal, healthy operation, `isLatestAdvisoryFindingAddressed` flips `addressed` true the
+ * MOMENT one fix-mark follows a note, which immediately dispatches the cap-EXEMPT review that posts the NEXT
+ * note — so a "since latest note" count would reset to 0 on every single healthy cycle, making the cap
+ * unenforceable: a PR whose finding is NEVER actually fixed (jury keeps finding it broken, forever) would cycle
+ * fix→review→fix→review with NO limit, exactly the unbounded-flap failure (#2117/#2298) this whole mechanism
+ * exists to prevent. Proven by the pre-existing test this file's own suite already carried ("AT the cap …
+ * still behind the note count) the PR is refused `cap-exhausted`" — that fixture is 3 GENUINE completed
+ * episodes (note→fix→note→fix→note→fix→note), and a "since latest note" count reads it as 0 attempts against
+ * the final note, wrongly allowing a 4th round.
+ *
+ * THE ACTUAL FIX. Count COMPLETED EPISODES, not fix-mark comments: an episode is "one advisory note", and it
+ * is COMPLETE once a (trusted) fix-mark exists anywhere between it and the NEXT note (or, for the latest note,
+ * anywhere after it). This correctly reads the pre-existing test's 3-note/3-fix fixture as 3 completed episodes
+ * (unchanged, cap-exhausted — SAFE, still bounded) — and correctly reads #2766/#2767's history as exactly ONE
+ * completed episode (the 3 fix-marks all landed inside the SAME episode, before the mechanism bug let it ever
+ * advance to a second note), leaving 2 of 3 lifetime episodes still available for the brand-new finding a
+ * later, independent review actually raised. Multiple fixes clustered inside one still-broken episode (the
+ * live shape) can never buy EXTRA tries — they still count as exactly one completed episode toward the SAME
+ * lifetime cap — so this is strictly no less safe than the count it replaces, only fairer to a finding that
+ * has never had a real attempt of its own.
+ * @param {Array<{body?:string}|string>|null|undefined} comments
+ * @returns {number}
+ */
+export function countCompletedAdvisoryEpisodes(comments) {
+  if (!Array.isArray(comments)) return 0;
+  const noteIndices = [];
+  for (let i = 0; i < comments.length; i += 1) {
+    // #2800 advisory finding — a note's position is an episode BOUNDARY feeding the cap, so it takes the same
+    // trusted-author gate as `advisory-round-count.mjs#countAdvisoryComments`: a forged note from any other
+    // login must not split one finding's fix attempts into extra spent episodes.
+    if (isTrustedAdvisoryNote(comments[i])) noteIndices.push(i);
+  }
+  // #2800 advisory finding, Codex advisory follow-up — BOUNDED FALLBACK. GitHub lets a comment be edited or
+  // deleted, so the SOLE advisory note a finding depends on can vanish from the thread entirely while
+  // `advisory:changes` (a separate, sticky LABEL) survives. With `noteIndices` empty, the per-note-episode loop
+  // below never runs and this used to return 0 FOREVER no matter how many trusted advisory-fix marks
+  // accumulated — `isLatestAdvisoryFindingAddressed` independently stays `false` too (no note to postdate), so
+  // `reconcile-core.mjs`'s advisory-fix branch's own `advisoryFixes >= advisoryFixCap` check never tripped and
+  // nothing ever bounded repeated fixer dispatch.
+  //
+  // THE FALLBACK, AND WHY IT SUBTRACTS ONE. Falling back to the raw TRUSTED fix-mark count
+  // (`countAdvisoryFixComments`, the same trust gate every other counter here uses) ties this rare, note-less
+  // case directly back to the real cap — but this file's own PRE-EXISTING pinned coverage (the "forged note
+  // alone" fixture just above this function's own test file) already established, deliberately, that a single
+  // trusted fix-mark with NO trusted note anywhere — the shape a lone forged/untrusted note plus one genuine fix
+  // produces — reads as ZERO completed episodes: one lone, unanchored mark is not on its own proof of a spent
+  // episode (a fixer can legitimately post one mark before the very first review ever runs, e.g. mid-restart
+  // bookkeeping). So this fallback gives that SAME one-mark benefit of the doubt here too (`- 1`, floored at 0)
+  // rather than counting the very first unanchored mark — and then counts every mark AFTER it 1-for-1, so
+  // accumulation still converges on `advisoryFixCap` in a small, FINITE number of further dispatches. This can
+  // only ever OVER-count relative to the normal note-anchored semantics once marks pile up (never under-count
+  // past the first), so it can never let a genuinely-broken finding evade the #2117/#2298 flap-protection cap,
+  // and it never fires at all once even one trusted note is still on the thread (the ordinary, healthy case
+  // below is completely unchanged).
+  if (noteIndices.length === 0) return Math.max(0, countAdvisoryFixComments(comments) - 1);
+  let completed = 0;
+  for (let k = 0; k < noteIndices.length; k += 1) {
+    const start = noteIndices[k] + 1;
+    const end = k + 1 < noteIndices.length ? noteIndices[k + 1] : comments.length;
+    for (let j = start; j < end; j += 1) {
+      const c = comments[j];
+      const body = typeof c === 'string' ? c : c?.body;
+      if (typeof body === 'string' && body.trimStart().startsWith(ADVISORY_FIX_COMMENT_MARKER) && isTrustedMarkerAuthor(c)) {
+        completed += 1;
+        break; // one completed episode per note, however many fix-marks piled up inside it
+      }
+    }
+  }
+  return completed;
+}
+
+/**
  * we:scripts/conveyor/advisory-fix-mark.mjs#isLatestAdvisoryFindingAddressed — xaer296 (epic #3383): has the
  * MOST RECENT advisory note already been addressed by a fix round, ORDER-wise rather than COUNT-wise? Pure.
  *
@@ -149,8 +243,8 @@ export function isLatestAdvisoryFindingAddressed(comments) {
   if (!Array.isArray(comments)) return false;
   let lastNoteIndex = -1;
   for (let i = 0; i < comments.length; i += 1) {
-    const body = typeof comments[i] === 'string' ? comments[i] : comments[i]?.body;
-    if (isAdvisoryNoteLine(body)) lastNoteIndex = i;
+    // #2800 — only a TRUSTED note can be "the latest finding"; a forged one must not pin `addressed` false.
+    if (isTrustedAdvisoryNote(comments[i])) lastNoteIndex = i;
   }
   if (lastNoteIndex === -1) return false;
   for (let j = lastNoteIndex + 1; j < comments.length; j += 1) {
@@ -199,8 +293,7 @@ export function isAdvisoryMechanismStandDownSuperseded(comments, index) {
   const before = comments.slice(0, index);
   let lastNoteIndex = -1;
   for (let i = 0; i < before.length; i += 1) {
-    const b = typeof before[i] === 'string' ? before[i] : before[i]?.body;
-    if (isAdvisoryNoteLine(b)) lastNoteIndex = i;
+    if (isTrustedAdvisoryNote(before[i])) lastNoteIndex = i;
   }
   if (lastNoteIndex === -1) return false;
   for (let j = lastNoteIndex + 1; j < before.length; j += 1) {
