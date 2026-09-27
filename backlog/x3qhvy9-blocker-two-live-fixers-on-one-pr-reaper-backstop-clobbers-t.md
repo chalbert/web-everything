@@ -1,0 +1,160 @@
+---
+kind: story
+size: 8
+priority: high
+tier: pinned
+parent: "4075"
+status: open
+scope: ["we:scripts/conveyor/session-reaper.mjs", "we:scripts/conveyor/reconcile-core.mjs", "we:scripts/conveyor/session-verdicts.mjs", "we:scripts/conveyor/session-verdicts-io.mjs", "we:scripts/operations/completion-record.mjs", "we:scripts/operations/completion-store.mjs", "we:scripts/operations/completion-cli.mjs", "we:scripts/conveyor/__tests__/session-reaper.test.mjs", "we:scripts/conveyor/__tests__/reconcile-core.test.mjs", "we:scripts/conveyor/__tests__/session-verdicts.test.mjs", "we:scripts/operations/__tests__/completion-cli.test.mjs", "we:scripts/operations/__tests__/completion-record.test.mjs", "we:scripts/operations/__tests__/completion-store.test.mjs", "we:scripts/conveyor/soak/breaks/reaper-backstop-clobbers-live-fixer.mjs", "we:scripts/conveyor/soak/breaks/reaper-backstop-clobbers-live-fixer.soak.test.mjs", "we:scripts/conveyor/soak/breaks/index.mjs"]
+dateOpened: "2026-09-27"
+tags: []
+---
+
+# BLOCKER: two live fixers on one PR — reaper backstop clobbers the live fixer's completion record (fix-2821)
+
+Live 2026-09-27: two fix-2821 fixers ran at once on PR 2821. Completion records are keyed by session NAME, which every fixer of a PR shares. The reaper stopped the old, finished fixer and wrote a backstop `done` over the NEW fixer's `started` record (we:scripts/conveyor/session-reaper.mjs#planBackstopCompletion). we:scripts/conveyor/reconcile-core.mjs#markSelfReportedDone then read it as the live fixer's own, so the fix daemon dispatched again; the fix-dispatch claim accepts a same-owner re-acquire, so it did not stop it. Fix: a completion record only ever speaks for the session that wrote it.
+
+## Evidence (read-only investigation, 2026-09-27 17:10–17:45 ET)
+
+Nothing was killed, messaged or touched. Verdict on the three candidate causes:
+
+- **(a) double dispatch — YES, but by ONE dispatcher, not two.** Both live sessions (and a failed third attempt) came from the fix-dispatch daemon's own `fix` pass (daemon pid 51182; its log lives in the review-daemon clone's `.conveyor` folder). Each dispatch tick prints `dispatched 1` then `tagged review-status:fixing at dispatch` for #2821. The parked-PR conflict watch only labels; it spawned nothing.
+- **(b) a finished fixer whose session never exits — the trigger, not the fault.** The previous fixer `a73a8bec` reported `done` (outcome `re-armed`) at about 20:44Z, then its `claude --bg` session stayed open, idle. That is normal. The review daemon's reaper stops such a session once it has been idle past the 10-minute idle-finished threshold. That stop is what exposed the bug (below).
+- **(c) registry/pid mismatch — NO.** Session 71f95af4 runs in pid 54629, a `claude bg-spare` process pre-warmed at 16:09 ET and claimed at dispatch (16:53:21 ET). The ~61-minute `ps` age is the spare's age, not the session's. Same for 72979b75 (spare pid 6048, started 16:53 ET, claimed 16:59 ET).
+
+Timeline (UTC). Record contents are quoted from the two sessions' own transcripts (the `report` tool results):
+
+1. 20:04:27 — `a73a8bec` reports `started`. About 20:44 it reports `done` (`re-armed`). Its turn ends at 20:44:34. It never exits.
+2. 20:53:21 — the fix pass dispatches `71f95af4` (conflict bounce). At 20:53:27 it reports `started`. The existing record was `done`, so the CLI writes a fresh one: `{status: started, startedAt: 20:53:27}`. The name `fix-2821` now points at 71f95af4's record.
+3. About 20:54:34 or a little later (10 minutes after a73a8bec went idle) — the review daemon's reaper logs `wrote backstop completion record for fix-2821 (outcome: unreported-exit) — no self-report was ever recorded … (idle-finished:turn-ended-idle)` and then `stopped a73a8bec`. The message is wrong: a73a8bec had reported. `planBackstopCompletion(session, existingRecord)` only skips an existing `done` record. It found 71f95af4's `started` record under the shared name, used it as its base, and flipped it to `done`.
+4. 20:55:24 — the next fix tick. `markSelfReportedDone` sees `fix-2821` = `done` with `updatedAt` after 71f95af4's listing `startedAt`, and marks the LIVE session finished. `assessLiveness` then finds nothing live. The fix pass dispatches again (dispatch dir `8ecf08e3…`). That spawn failed only on `Workspace not trusted`. No pass logged a `live-process` refusal for #2821 in that tick.
+5. 20:59:06 — the same again, and this time the spawn works: `72979b75`. It reports `started` at 20:59:14 over the backstop `done`. From the next tick on, all three passes refuse #2821 `live-process` again. But two fixers are now live on two lanes (lane-1 and lane-4), both merging `origin/main` into `lane/fix-procedure` and both about to push.
+6. The fix-dispatch claim (`fix-dispatch:we:fix:2821`, owner `Mac:51182`) refused neither re-dispatch. `acquireFixDispatchClaim` accepts a same-owner re-acquire, and the daemon is one long-lived owner.
+
+The daemon instance that ran before 20:44Z carried #2821's own overlay (`lane/fix-procedure`). Its fixer-held `fix-claimed` refusal would have blocked this. That overlay was dropped at rebuild (`overlay-conflict-dropped`) when #2821 conflicted with main, so main's own guard was the only one left.
+
+## Invariant
+
+**At most one live fixer per `(repo, PR)`.** Enforced at dispatch time by `we:scripts/conveyor/reconcile-core.mjs#assessLiveness` (refuse `live-process` while any bound session is live). That check is only as good as the "finished" markers in front of it. This card adds the narrower rule those markers must obey: **a completion record only ever speaks for the session that wrote it.** A record written by or for session A must never make session B look finished, and must never be overwritten on A's behalf once B owns the name.
+
+## Design (decided)
+
+Two independent guards. Either one alone stops this incident. Guard 1 needs no help from the agent.
+
+**Guard 1 — the reaper never writes a backstop that is not its session's to write.** In `we:scripts/conveyor/session-reaper.mjs#planBackstopCompletion`, return `null` (write nothing) when ANY of these holds:
+
+- (a) `existingRecord.sessionId` is set and differs from the reaped session's `sessionId`;
+- (b) the reaper's own listing (it already reads `claude agents --json --all`) shows another same-name session that started after the reaped one — a newer generation owns the name;
+- (c) `existingRecord.status` is `started` and its `startedAt` is later than the reaped session's last transcript activity, which the idle-finished axis already reads. A session cannot have written a record after it went quiet. This covers the ~26-second listing lag in (b).
+
+A plain "record started after the session started" test is NOT used. A session's own `started` report always lands a few seconds after its listing `startedAt`, so that test would wrongly skip its legitimate backstops (independent review finding 1, below).
+
+The backstop write becomes conditional. `writeCompletion(record, dir, {expectPrior})` re-reads the record under a per-name lock and writes only if it still matches what the reaper planned against. So a `started` report that lands between the reaper's read and its write wins. The lock reuses `we:scripts/readiness/file-locks.mjs` (the same primitive the fix-dispatch claim uses), with the key `completion:<name>`. The CLI `report` takes the same lock.
+
+**Guard 2 — a record carries the session that wrote it, and every reader checks it.** Add an optional `sessionId` (string or null) to the completion record. The `report` command of `we:scripts/operations/completion-cli.mjs` fills it from `--session-id`, else from the `CLAUDE_CODE_SESSION_ID` environment variable (present in this preparing session; Task 4 checks it in a `claude --bg` session). The variable is read ONLY in the CLI entry point, never inside `runReport`, so an in-process caller such as `we:scripts/operations/review-job.mjs` (near line 214) keeps writing legacy records even when its own process happens to have the variable set. A test pins this. The reaper's backstop stamps the reaped session's `sessionId`. Readers apply a record to a session row only when `record.sessionId` equals `row.sessionId`. When `record.sessionId` is null (a legacy record, or a review job whose rows have no session id), the reader uses today's rule: `status === 'done'` and `updatedAt >= row.startedAt`. The readers are:
+
+- `we:scripts/conveyor/reconcile-core.mjs#markSelfReportedDone` (the incident path);
+- `we:scripts/conveyor/session-reaper.mjs` — the classifier's `completionFor(session?.name)` call (near line 597) and `makeCompletionResolver`. Today this path has no timestamp check at all, so after the clobber it could also `claude stop` the live new fixer. The call site passes the row, and the resolver applies the rule above;
+- `we:scripts/conveyor/session-verdicts.mjs` (near line 105; it returns `action: 'reap'` near line 183), fed by the completion projection in `we:scripts/conveyor/session-verdicts-io.mjs` (near line 111), which must carry `sessionId` through.
+
+**Ownership rules for the CLI** (`report`), all under the per-name lock:
+
+| existing record | incoming report | result |
+|---|---|---|
+| none, or `done` | `started` | fresh record owned by the reporter |
+| `started`, same `sessionId` (or both null) | `started` | no-op (today's idempotency) |
+| `started`, different `sessionId`, or one side null and the other not | `started` | fresh record owned by the reporter (a new generation) |
+| any, same `sessionId` (or both null) | `done` | update in place (today's behaviour) |
+| legacy (`sessionId` null) | `done` with a non-null id | update in place and stamp the id (the reporter adopts the legacy record) |
+| identified (non-null `sessionId`) | `done` with a different id, or with no id | refuse the write, print why, exit 0 — a late or anonymous `done` must not overwrite the current owner |
+| none | `done` | fresh `done` record owned by the reporter (today's behaviour) |
+
+Not in this card, because the files are being rewritten by open PR #2821 and touching them now guarantees a conflict with the very PR this incident hit: F1 (claim reentrancy) and F2 (resume reset). See Follow-ups.
+
+## Interfaces
+
+- `we:scripts/operations/completion-record.mjs`: `newCompletionRecord({session, kind, pr, item, sessionId = null, now})`. `validateCompletionRecord` accepts `sessionId` as an optional string. No version bump: records without the field stay valid, and unknown keys are already accepted today.
+- `we:scripts/operations/completion-store.mjs`: `writeCompletion(record, dir, {expectPrior} = {})`. With `expectPrior`, it returns `{written:false, reason:'changed'}` instead of writing when the on-disk record no longer matches (compare `status`, `startedAt`, `updatedAt`, `sessionId`). Without it, today's behaviour. New export `withCompletionLock(name, fn, {dir})`.
+- `we:scripts/operations/completion-cli.mjs` `report`: new optional `--session-id=<uuid>`; the ownership table above. Output `{changed, record}` plus `refused: true, why` on the refused-late-done row.
+- `we:scripts/conveyor/session-reaper.mjs`: `planBackstopCompletion(session, existingRecord, now, blockedOnInfra, stalled, authExpired, {newerSameNameListed = false, lastActivityMs = null} = {})`. Returns `null` in cases (a)–(c). `makeCompletionResolver({dir})` returns `completionFor(nameOrRow)`: a string keeps today's behaviour for any other caller; a row `{name, sessionId, startedAt}` gets the binding.
+- `we:scripts/conveyor/reconcile-core.mjs`: `markSelfReportedDone(agents, completionFor, nowMs)`, signature unchanged, `sessionId` check added before the timestamp check.
+- Briefs: no change. The CLI stamps the id itself, so `we:skills-src/conveyor/fix-agent-brief.md`, `we:skills-src/conveyor/fix-agent-ci-brief.md` and `we:skills-src/review/review-agent-brief.md` keep their `report` lines.
+
+## Scope and consumers
+
+Direct edits are in `scope:`. Other consumers of the completion record, from a grep for `tryReadCompletion|writeCompletion|completion-cli` plus the independent review (most callers shell out rather than import):
+
+- writers that go through `runReport` and so get the ownership table for free: `we:scripts/operations/review-job.mjs` (near line 214; its rows carry no session id, so its records stay legacy, which is correct), `we:scripts/operations/probation-heal-run.mjs` (near line 168). No edit expected; the builder confirms with a test run.
+- `we:scripts/operations/dispatch-lane-io.mjs` (near line 1673) DELETES a completion record at build dispatch. Not changed here. Deleting before a fresh generation is compatible with the ownership rules.
+- readers of `status`/`outcome` only, unaffected by an extra optional field: `we:scripts/conveyor/reconcile-pass.mjs#defaultReadAgents` (passes `tryReadCompletion` through), `we:scripts/conveyor/hung-session.mjs`, `we:scripts/conveyor/stand-down.mjs`, `we:scripts/operations/review-dispatch.mjs`, `we:scripts/operations/land-advance-tools.mjs`.
+- `we:scripts/conveyor/run-rating.mjs` (near line 963) can attribute B's outcome to A. Reporting only, not a dispatch path; follow-up F3.
+- `we:scripts/operations/fix-report-cli.mjs` and `we:scripts/operations/delivery-report-cli.mjs` use their own stores; not completion writers.
+- the soak world: the fake completion writer in `we:scripts/conveyor/__tests__/sim/agent-actions.mjs` (near line 93) bypasses the CLI and has no session identity. The new break must write records with `sessionId` itself.
+
+## Risks
+
+- **Premise:** the backstop's exact minute is inferred. The daemon logs have no timestamps, and the reaper ran between 20:54:34 (a73a8bec's idle threshold) and the 20:55:24 dispatch. The mechanism itself is confirmed from code and from the record contents in both transcripts. Task 1 reproduces it in the soak world before any fix is written. If it will not go RED, first suspect the fixture (see the soak notes), then the premise.
+- **`CLAUDE_CODE_SESSION_ID` may be absent or different in a `claude --bg` session** (for example the spare's id, not the claimed session's). Guard 1 does not depend on it and is built first. Task 4 checks it on a real dispatched session. If it turns out absent or not equal to the listing's `sessionId`, the CLI must NOT stamp it: ship Guard 1 plus the reader bindings with legacy records only, and file a follow-up to find a reliable id source. A reader never downgrades a non-null foreign id to legacy; an explicit foreign id always stays foreign.
+- **Lock contention:** the per-name lock is held for one read and one rename. Agents call `report` a few times per session. Negligible. Use a short wait with a clear error, never an unbounded wait.
+- **Blast radius on the reaper:** a skipped backstop means an older session is stopped without a record. That is correct: the newer session's record now speaks for the name, and its PR stays owned by the live session.
+- **Open PRs.** #2821 edits `we:scripts/conveyor/reconcile-core.mjs` in other hunks (imports near line 109, refusal kinds near 260 and 280, `countUnresolvedStandDowns` near 565, `planReconcile` near 1304). This card edits `markSelfReportedDone` near line 640. The independent review confirmed that neighbourhood is untouched on #2821's branch. Re-check with `git merge-tree` at build time. Semantically, #2821's `fix-claimed` refusal runs before liveness, so on a tree with #2821 it can mask this bug. That is fine for safety, but the proof must name which refusal fired (see Proof plan). #2827 changes overlay admission (no shared files). #2828 is cards and memory only. #2824, #2825 and #2826 are merged.
+- **Daemon overlays:** `lane/fix-procedure` (#2821) is still registered on the review-daemon clone. It was dropped at the last rebuild for conflict, but the rebuild does not unregister a dropped entry, so a later rebuild can re-apply it. Test this card on `main` alone AND on the tree composed with `lane/fix-procedure`. Before the live proof, record which build each daemon actually adopted (the daemon-rebuild log lines).
+
+## Test plan (each fails before the fix)
+
+1. `we:scripts/conveyor/__tests__/session-reaper.test.mjs`: `planBackstopCompletion` returns `null` for (a) a foreign `sessionId`, (b) `newerSameNameListed: true`, and (c) a `started` record whose `startedAt` is after the reaped session's `lastActivityMs`. It still backstops the reaped session's OWN `started` record written 3 s after its listing `startedAt` (the case that rules out a plain start-time comparison). A pass-level test drives the real classifier and shows that a foreign `done` record does not stop a working same-name session B, while B's own `done` does. The (a)–(c) cases fail on main today.
+2. `we:scripts/operations/__tests__/completion-store.test.mjs`: `writeCompletion` with `expectPrior` does not write when another writer changed the record between plan and write. That interleaving is simulated inside the lock, deterministically.
+3. `we:scripts/conveyor/__tests__/reconcile-core.test.mjs`: `markSelfReportedDone` with row `{name:'fix-9', sessionId:'B', startedAt:T}` and record `{status:'done', sessionId:'A', updatedAt:T+60s}` leaves the row unmarked. A legacy record (`sessionId` null) keeps today's behaviour. `planReconcile` over that row refuses the PR `live-process` and dispatches nothing.
+4. `we:scripts/operations/__tests__/completion-cli.test.mjs` and `we:scripts/operations/__tests__/completion-record.test.mjs`: every row of the ownership table, the env-var stamping, `--session-id`, and old records still validating.
+5. `we:scripts/conveyor/__tests__/session-verdicts.test.mjs`: a foreign `done` record does not produce `action: 'reap'` for a quiet same-name session.
+6. **Soak break `reaper-backstop-clobbers-live-fixer`** (in `we:scripts/conveyor/soak/breaks/`; breaks are discovered automatically, so the index in `scope:` should need no edit). World: PR P is conflict-bounced and owes a fix. The fake claude store holds OLD `fix-P` (A: reported `done`, then idle past the idle-finished threshold, with a real resolvable transcript whose last entry is an ended turn) and NEW `fix-P` (B: `startedAt` T-2m, a real live sleeper pid, and a `started` record carrying B's `sessionId`, written the way the real CLI writes it). Pin B alive and give it no scripted behaviour. Soak behaviour plans are shared by session NAME, so the two rows must not both run one plan. Run the review daemon (reaper) and the fix-dispatch daemon for 3 rounds, and read the record right after the reaper's round, before any other writer runs. **RED on main:** the reaper writes `done` over B's `started` record (`backstop-clobber`) and the fix daemon spawns a second `fix-P` while B's pid is alive (`two-live-fixers`). **GREEN:** B still owns the record, no second `fix-P` spawns, AND the fix pass's refusal for P is `live-process` naming B's `sessionId` (`scenario-ran` requires exactly this on `main` alone, so a claim, a missing lane or any other refusal cannot pass it by accident). On the tree composed with `lane/fix-procedure`, #2821's `fix-claimed` refusal runs first, so there the GREEN condition is: no second `fix-P`, B still owns the record, and the refusal is `fix-claimed` or `live-process`. Guard 1 and Guard 2 each get a separate unit proof (items 1 and 3), because one soak scenario that both guards cover cannot show that each works alone.
+
+## Tasks
+
+1. Write the soak break. Show it RED on an explicit `origin/main` baseline with only the break's own files applied: `node we:scripts/conveyor/soak/run.mjs break reaper-backstop-clobbers-live-fixer` exits 1 there. Record that baseline sha in the break's header comment. Once the fix is committed, `fixedBy.sha` names the FIX commit (the one `we:scripts/conveyor/soak/red-green.mjs` reverses), never the baseline, and the scenario files stay out of that commit so the reversal keeps them.
+2. Guard 1: the three skip conditions, the `expectPrior` conditional write, and the per-name lock, with tests 1–2. The break's `backstop-clobber` check goes GREEN.
+3. Guard 2: the record field, the CLI ownership table and stamping, and the three reader bindings, with tests 3–5.
+4. Check `CLAUDE_CODE_SESSION_ID` in a real `claude --bg` session. Dispatch one throwaway background session whose only job is to print the variable, compare it with that session's `sessionId` in `claude agents --json`, then stop it by id. Put the two values in the PR body.
+5. Run the break on main alone and on the tree composed with `lane/fix-procedure` (a scratch merge; never the daemon clones). Then gate with the `verify` operation on the lane and open the PR with `open-pr`.
+
+## Delivery shape
+
+One PR, landing incrementally on `main`. Everything is additive and backward compatible: old records validate, legacy records keep today's rule, and a string `completionFor(name)` call still works. No flag, no branch. If it must be split, the seam is Guard 1 (reaper + store; closes this incident alone) first, then Guard 2.
+
+## Proof plan (live, before/after)
+
+- **Before:** the evidence above. Two live `fix-2821` rows in `claude agents --json` with different `sessionId`s on different lanes. Fix-daemon ticks with `dispatched 1` for #2821 while a `fix-2821` session was live. The reaper line `wrote backstop completion record for fix-2821` right after a new generation had started.
+- **After (live):** first record which build each daemon adopted, and whether `lane/fix-procedure` is overlaid. Then watch the next real PR that gets a second fixer generation (any PR bounced twice). Show from the review daemon log that the older same-name session is reaped with the backstop SKIPPED and a reason naming (a), (b) or (c). Show the completion record's `sessionId` equals the live session's. Show the fix-dispatch daemon refusing that PR on every tick until the new fixer reports `done`, with the refusal kind named: `live-process` on main alone, or `fix-claimed` if #2821's overlay is live. Show `claude agents --json` never listing two live `fix-<pr>` rows for it. Add one read-only `we:scripts/conveyor/reconcile-pass.mjs --json` run inside that window.
+
+## Follow-ups (file after #2821 lands)
+
+This card closes the cross-generation hole that caused the incident. The headline invariant (one live fixer per PR) is fully delivered only when F1 and F2 also land. F2 in particular is a known remaining path.
+
+- **F1:** `acquireFixDispatchClaim` refuses a same-owner re-acquire while the prior claim's recorded session is still live. Needs the spawned `agentId` stored in the claim `meta` at dispatch, in the claim store as #2821 reshapes it.
+- **F2:** `tryResumeFix` resumes the same session id and does not reset its completion record, and the resume prompt does not ask for a fresh `started`. A resumed fixer with an old `done` record of its own passes both guards here. The resume path should write `started` for that session before the prompt goes in. The code is in `we:scripts/conveyor/reconcile-fix-dispatch.mjs`, which #2821 rewrites.
+- **F3:** `we:scripts/conveyor/run-rating.mjs` attributes an outcome by name; bind it by `sessionId` once records carry one.
+
+## Independent plan review (Codex, 2026-09-27, read-only)
+
+Codex (a different model family) was run through `we:scripts/codex-direct-task.mjs --review` against the first draft of this card. Its confidence in the first draft was **Low**. Findings and how they were handled:
+
+1. [blocker] The first-draft Guard 1 (skip when the record started after the session started) contradicted its own test and would skip a session's legitimate backstop, since a session's own report always lands seconds after its listing start. **Accepted.** Replaced by skip conditions (a)–(c) above.
+2. [major] The chain is consistent with the code, but other "finished" markers (hung, auth-expired, idle-finished) could also unbind a live fixer, and the draft said the CLI replaces a `started` record, which it does not. **Accepted, then verified:** the transcripts show 71f95af4's `started` report returned `changed: true` over a73a8bec's `done` record (a73a8bec had reported `done`, `re-armed`), so the record was 71f95af4's. The other markers cannot fire within 2–6 minutes of a session that is actively calling tools (30-minute hung threshold, a 10-minute idle threshold that needs an ended turn, and an auth check that needs a synthetic API-error turn). The soak GREEN now requires the refusal to name B, so any other unbinding path shows up as a failure.
+3. [major] CLI ownership transitions were underspecified. **Accepted:** the ownership table.
+4. [major] The reaper's production call site passes a name, so a resolver-only change would do nothing. **Accepted:** the call site is in scope with a pass-level test.
+5. [major] The consumer audit missed `we:scripts/conveyor/session-verdicts.mjs` (a second reap path), the writers `we:scripts/operations/review-job.mjs` and `we:scripts/operations/probation-heal-run.mjs`, the delete in `we:scripts/operations/dispatch-lane-io.mjs`, and `we:scripts/conveyor/run-rating.mjs`, and wrongly listed the fix-report and delivery-report CLIs as writers. **Accepted:** Scope and consumers rewritten; session-verdicts is in scope; run-rating is F3.
+6. [major] `tryResumeFix` leaves a same-session stale-completion hole. **Accepted as follow-up F2**, not in this card: its file is being rewritten by #2821.
+7. [major] Guard 1 was a read-time check with a read-then-write race. **Accepted:** the conditional write under a per-name lock.
+8. [major] The soak shares behaviour plans by session name, and the fake completion writer has no identity. GREEN must prove B's `live-process` refusal. **Accepted:** soak notes and the GREEN condition rewritten.
+9. [major] The Executable line was not runnable as written, and `defineBreakTest` uses `it.fails` while the fix is absent, so a bare vitest run passes when the defect reproduces. **Accepted:** the Executable line now uses the soak CLI, which exits 1 on RED. **Partly rejected:** the `we:` prefix stays in this card. The backlog linter requires it on every code path (#883), and it is the repo's convention for Executable lines. Run the command from the WE repo root without the prefix.
+10. [major] The overlay registry still holds `lane/fix-procedure` and a rebuild can re-apply it; #2821's `fix-claimed` refusal can mask this bug in the proof. **Accepted:** Risks, Task 5 and the Proof plan now cover both trees and name the refusal kind.
+
+Second Codex pass on this revision (same session, read-only): most first-round findings closed. New or remaining items, all **accepted** and folded in above: (1) [blocker] the Risks fallback that downgraded a mismatching id to legacy contradicted Guard 2; replaced by "never stamp an unreliable id; a foreign id stays foreign". (2) [major] mixed null/non-null ownership rows were ambiguous, and `we:scripts/operations/review-job.mjs` calls `runReport` in-process; the table now has explicit mixed rows and the env var is read only in the CLI entry point. (3) [major] the resume hole (F2) leaves the headline invariant partly open; the card now says so and tracks F1/F2 as the remaining delivery. (4) [major] the soak GREEN now has separate expectations for `main` alone and for the tree composed with #2821. (5) [major] `fixedBy` must name the fix commit, not the baseline; Task 1 corrected. Second-pass confidence before these edits: Low; no third pass was run.
+
+## Done when
+
+1. **Executable** — `node we:scripts/conveyor/soak/run.mjs break reaper-backstop-clobbers-live-fixer` exits 1 (RED: `backstop-clobber` and `two-live-fixers` fire) on the pre-fix `origin/main` tree with the break's files applied, and exits 0 on this branch with `scenario-ran` satisfied (P refused `live-process` naming B). Unit tests 1–5 in the Test plan fail before and pass after.
+2. `planBackstopCompletion` never writes a backstop in cases (a)–(c), and the backstop write never overwrites a record that changed after the reaper read it.
+3. `markSelfReportedDone`, the reaper's completion axis and `session-verdicts` never apply a record whose `sessionId` names another session, and never treat a foreign id as legacy.
+4. The CLI follows the ownership table, including refusing a late `done` from an old generation.
+5. The live proof above is posted on the PR: before and after log excerpts, the adopted daemon builds, and the completion record carrying the live session's id.
