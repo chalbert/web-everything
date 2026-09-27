@@ -154,9 +154,11 @@ refinement should read the batch journals directly to drop that coupling; the ex
 
 ## How it works (per pass)
 
-1. Lists the open PRs carrying the `ready-to-merge` label (`gh pr list --label ready-to-merge`) — every
-   producer (`/workflow`, `/pr`, solo `#2123` lanes, batch closeout) applies it (#2196), so this is the single
-   collection point for ALL AI-generated work.
+1. Lists the open PRs carrying the `ready-to-merge` label — `gh pr list --state open --json …,labels`, filtered
+   by label CLIENT-SIDE, never `gh pr list --label …` (that flag is served by GitHub's issue-SEARCH index, a
+   separate and much smaller rate-limit budget than the ordinary list — #no-label-search, 2026-09-27 live
+   incident) — every producer (`/workflow`, `/pr`, solo `#2123` lanes, batch closeout) applies it (#2196), so
+   this is the single collection point for ALL AI-generated work.
 2. For each candidate, reads its `.lane-manifest.json` off its head ref and orders by cross-item `blockedBy` —
    a PR whose blocker is still an open (unlanded) PR **defers** to a later pass (the cascade). Orphan PRs (no
    manifest) are always ready.
