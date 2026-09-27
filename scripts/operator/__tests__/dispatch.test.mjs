@@ -166,6 +166,36 @@ describe('runAgent (converge.py run_agent, ported)', () => {
     }
   });
 
+  // #landing-freeze-2779 — live incident regression guard: this spawn used to build its env straight off raw
+  // `process.env` with no sanitize step, so a static, daemon-minted `GH_TOKEN`/`GITHUB_TOKEN` rode along
+  // unchanged into the spawned `claude` session, however stale it had gotten. See
+  // `../../operations/detached-dispatch.mjs#defaultSpawnDetached`'s own docblock for the full mechanism.
+  it('never carries a static GH_TOKEN/GITHUB_TOKEN inherited from process.env (#landing-freeze-2779)', async () => {
+    const savedGh = process.env.GH_TOKEN;
+    const savedGithub = process.env.GITHUB_TOKEN;
+    process.env.GH_TOKEN = 'stale-static-token';
+    process.env.GITHUB_TOKEN = 'stale-static-token-2';
+    let spawnOpts;
+    let child;
+    const spawnFn = (cmd, argv, opts) => { spawnOpts = opts; child = fakeChild(); return child; };
+    const p = runAgent({
+      prompt: 'x', lane: 5, tag: '1671-fix-r1', repo: '/repo', lanesDir: '/lanes', scratchDir: scratch,
+      execFn: baseExec(), spawnFn,
+      disallowedTools: ['Bash(gh pr merge:*)'],
+    });
+    await new Promise((r) => setTimeout(r, 10));
+    try {
+      expect(spawnOpts.env.GH_TOKEN).toBeUndefined();
+      expect(spawnOpts.env.GITHUB_TOKEN).toBeUndefined();
+    } finally {
+      if (savedGh === undefined) delete process.env.GH_TOKEN; else process.env.GH_TOKEN = savedGh;
+      if (savedGithub === undefined) delete process.env.GITHUB_TOKEN; else process.env.GITHUB_TOKEN = savedGithub;
+      writeFileSync(join(scratch, 'conv-1671-fix-r1.log'), 'x'.repeat(500));
+      child.emit('close', 0);
+      await p;
+    }
+  });
+
   it('ok: exits 0 and wrote enough to the log', async () => {
     let child;
     const spawnFn = () => { child = fakeChild(); return child; };

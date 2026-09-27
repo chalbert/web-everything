@@ -80,6 +80,44 @@ describe('every claude spawn site sets the marker', () => {
     });
     expect(classifySession(seen.env).role).toBe('worker');
   });
+  // #landing-freeze-2779 — live incident regression guard: a detached wrapper (ci-heal-run.mjs et al) used to
+  // inherit `process.env` VERBATIM, so a static, daemon-minted `GH_TOKEN` rode along unsanitized for as long as
+  // the wrapper (and whatever it later spawned) lived — routinely longer than the token's own ~1h life. See
+  // `detached-dispatch.mjs#defaultSpawnDetached`'s own docblock for the full mechanism and incident.
+  describe('defaultSpawnDetached never carries a static GH_TOKEN/GITHUB_TOKEN, and forwards the gh-shim settingsEnv (#landing-freeze-2779)', () => {
+    it('strips a static GH_TOKEN/GITHUB_TOKEN inherited from process.env', () => {
+      const savedGh = process.env.GH_TOKEN;
+      const savedGithub = process.env.GITHUB_TOKEN;
+      process.env.GH_TOKEN = 'stale-static-token';
+      process.env.GITHUB_TOKEN = 'stale-static-token-2';
+      let seen;
+      try {
+        defaultSpawnDetached(['wrapper.mjs'], { cwd: '/x', logPath: '/x/log' }, {
+          spawn: (_cmd, _argv, opts) => { seen = opts; return { unref() {} }; }, ensureDir: () => {}, openLog: () => 3,
+        });
+      } finally {
+        if (savedGh === undefined) delete process.env.GH_TOKEN; else process.env.GH_TOKEN = savedGh;
+        if (savedGithub === undefined) delete process.env.GITHUB_TOKEN; else process.env.GITHUB_TOKEN = savedGithub;
+      }
+      expect(seen.env.GH_TOKEN).toBeUndefined();
+      expect(seen.env.GITHUB_TOKEN).toBeUndefined();
+    });
+    it('merges the caller\'s settingsEnv (the gh-shim PATH override) on top of the sanitized env', () => {
+      let seen;
+      defaultSpawnDetached(['wrapper.mjs'], { cwd: '/x', logPath: '/x/log', settingsEnv: { PATH: '/shim:/usr/bin' } }, {
+        spawn: (_cmd, _argv, opts) => { seen = opts; return { unref() {} }; }, ensureDir: () => {}, openLog: () => 3,
+      });
+      expect(seen.env.PATH).toBe('/shim:/usr/bin');
+      expect(classifySession(seen.env).role).toBe('worker');
+    });
+    it('no settingsEnv (the default) keeps the marked, sanitized env — byte-identical to before but for the strip', () => {
+      let seen;
+      defaultSpawnDetached(['wrapper.mjs'], { cwd: '/x', logPath: '/x/log' }, {
+        spawn: (_cmd, _argv, opts) => { seen = opts; return { unref() {} }; }, ensureDir: () => {}, openLog: () => 3,
+      });
+      expect(seen.env.PATH).toBe(process.env.PATH);
+    });
+  });
   it('the other claude spawn sources route through markWorkerEnv (regression guard for a new site)', () => {
     // #3902 port note — `scripts/lib/judge-spawn.mjs` (a JUROR spawn, not a delivery/dispatch worker) is
     // deliberately EXCLUDED from this list: `scripts/lib/__tests__/judge-spawn.test.mjs` and

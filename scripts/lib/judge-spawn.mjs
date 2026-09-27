@@ -75,6 +75,12 @@ import { createHash } from 'node:crypto';
 import { resolve as resolvePath, dirname, join } from 'node:path';
 import { realpathSync, statSync, existsSync } from 'node:fs';
 import { markWorkerEnv } from '../operations/session-role.mjs';
+// #landing-freeze-2779 — a juror's spawn (below) built its env straight off the caller's `env` (default
+// `process.env`) with no sanitize step, the same gap named in full in
+// `../operations/detached-dispatch.mjs#defaultSpawnDetached`'s own docblock: a static, daemon-minted
+// `GH_TOKEN` riding along until it expires mid-run. A tool-bearing juror (`allowedTools` set) can shell out
+// like any other worker, so it gets the same treatment as every other spawn site.
+import { sanitizeSpawnEnv } from './gh-app-shim.mjs';
 
 /**
  * Are these two paths the SAME DIRECTORY? By inode + device, never by comparing the strings.
@@ -801,7 +807,7 @@ export async function judgeSpawn({
   const { stdout, stderr, code, timedOut } = await new Promise((resolve, reject) => {
     let child;
     try {
-      child = spawnFn(cli, argv, { cwd: spawnCwd, env: markWorkerEnv(env), stdio: ['pipe', 'pipe', 'pipe'] });
+      child = spawnFn(cli, argv, { cwd: spawnCwd, env: markWorkerEnv(sanitizeSpawnEnv(env)), stdio: ['pipe', 'pipe', 'pipe'] });
     } catch (e) {
       reject(new Error(`judge-spawn: could not start \`${cli}\`: ${e.message}`));
       return;

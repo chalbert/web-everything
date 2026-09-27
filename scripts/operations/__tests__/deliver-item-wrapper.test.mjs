@@ -1519,6 +1519,32 @@ describe('runConvergeEdit (#3627 bug 5 — real UUID session id, not the old rea
     expect(opts.env.WE_DISPATCH_KIND).toBe('fix');
   });
 
+  // #landing-freeze-2779 — live incident regression guard (ci-heal-2779, 2026-09-26 ~20:55 ET): this spawn used
+  // to build its env straight off raw `process.env` with no sanitize step, so a static, daemon-minted
+  // `GH_TOKEN`/`GITHUB_TOKEN` inherited by this wrapper's own (long-lived) process rode along unchanged into
+  // every converge-editor round, however stale it had gotten. See
+  // `../detached-dispatch.mjs#defaultSpawnDetached`'s own docblock for the full mechanism this closes.
+  it('never carries a static GH_TOKEN/GITHUB_TOKEN inherited from process.env (#landing-freeze-2779)', () => {
+    const savedGh = process.env.GH_TOKEN;
+    const savedGithub = process.env.GITHUB_TOKEN;
+    process.env.GH_TOKEN = 'stale-static-token';
+    process.env.GITHUB_TOKEN = 'stale-static-token-2';
+    const run = vi.fn(() => JSON.stringify({ result: JSON.stringify({ advanced: true, dismissed: [] }) }));
+    let opts;
+    try {
+      runConvergeEdit(
+        { prompt: 'fix it' },
+        { item: '2779', round: 1, lane: '/real/pool/lane-3', run, ensureSettingsFile: () => '/fake/hooks.json' },
+      );
+      [, , opts] = run.mock.calls[0];
+    } finally {
+      if (savedGh === undefined) delete process.env.GH_TOKEN; else process.env.GH_TOKEN = savedGh;
+      if (savedGithub === undefined) delete process.env.GITHUB_TOKEN; else process.env.GITHUB_TOKEN = savedGithub;
+    }
+    expect(opts.env.GH_TOKEN).toBeUndefined();
+    expect(opts.env.GITHUB_TOKEN).toBeUndefined();
+  });
+
   // mechanical-dispatcher follow-up to #3580 — VISIBILITY, not a real Codex converge editor (see this
   // function's own docblock). Before this, a caller's `provider` was never even threaded through to here, so
   // a Codex-selected build's converge round left no trace anywhere that it had silently run under Claude.
