@@ -34,18 +34,38 @@ export function isAiCommit(commit) {
   return authors.some(isAiAuthor) || bodyHasTrailer;
 }
 
-/** Strip GIT'S OWN auto-appended `# Conflicts:` footer (and the `#\t<path>` lines under it, and blank lines)
- *  from a merge commit body — the boilerplate `git merge`/`git commit` appends listing which paths conflicted,
- *  present whenever a merge is committed non-interactively (`--no-edit`, or a script that never invokes the
- *  edit-time comment-strip) REGARDLESS of whether the conflicts were resolved by a mechanical driver or a human.
- *  Every line git generates here starts with `#` — never authored prose — so it is not evidence of "real
- *  content added", the same direction shape 1's plain empty-body check already reasons from. Pure. */
+/** Rejoin a commit's REAL first line + remaining body from gh's shape. GitHub truncates `messageHeadline` at ~70
+ *  chars with a trailing `…` and moves the rest of the first line into `messageBody`, prefixed `…` (confirmed
+ *  live on PR #2748: `drain: rebase lane/xg790dh-… ont…` + body `…o origin/main, drop transient …`). Without
+ *  rejoining, an exact-shape match on the subject misses a long drain headline and an empty-body check sees the
+ *  continuation as authored body. Pure. */
+function splitCommitMessage(commit) {
+  let subject = String(commit?.messageHeadline || '').trim();
+  let body = String(commit?.messageBody ?? commit?.body ?? '').replace(/\r\n?/g, '\n');
+  if (subject.endsWith('…') && body.startsWith('…')) {
+    const nl = body.indexOf('\n');
+    const rest = nl === -1 ? '' : body.slice(nl + 1);
+    subject = subject.slice(0, -1) + (nl === -1 ? body : body.slice(0, nl)).slice(1);
+    body = rest;
+  }
+  return { subject: subject.trim(), body: body.trim() };
+}
+
+/** Strip GIT'S OWN auto-appended `# Conflicts:` footer from a merge commit body — the boilerplate
+ *  `git merge`/`git commit` appends listing which paths conflicted, present whenever a merge is committed
+ *  non-interactively (`--no-edit`, or a script that never invokes the edit-time comment-strip) REGARDLESS of
+ *  whether the conflicts were resolved by a mechanical driver or a human. It is not evidence of "real content
+ *  added", the same direction shape 1's plain empty-body check already reasons from.
+ *  EXACT shape only (PR #2748 review): a TRAILING block that opens with the literal `# Conflicts:` line and
+ *  holds nothing but git's `#\t<path>` lines (and blank / bare-`#` lines) is removed. Any other `#`-prefixed
+ *  line — a markdown heading or bullet a human wrote, before or after the footer — is authored content and
+ *  stays, so the body stays non-empty. Pure. */
 function stripGitConflictFooter(body) {
-  return String(body ?? '')
-    .split('\n')
-    .filter((line) => line.trim() !== '' && !line.trimStart().startsWith('#'))
-    .join('\n')
-    .trim();
+  const lines = String(body ?? '').replace(/\r\n?/g, '\n').split('\n');
+  const start = lines.findIndex((line) => line.trim() === '# Conflicts:');
+  if (start === -1) return lines.join('\n').trim();
+  const footerOnly = lines.slice(start + 1).every((line) => line.trim() === '' || line.trim() === '#' || /^#\t\S/.test(line));
+  return (footerOnly ? lines.slice(0, start) : lines).join('\n').trim();
 }
 
 /** A mechanical integration commit — either shape below carries no NEW authored content of its own, so neither
@@ -69,8 +89,8 @@ function stripGitConflictFooter(body) {
  *      which disqualified it from the #2421 TOTAL ci-lifecycle reconcile forever (a `ci:failed` label from an
  *      earlier red head never cleared once the current head went green — confirmed live on PR #2685/#2653). */
 export function isMechanicalMergeCommit(commit) {
-  const head = String(commit?.messageHeadline || '').trim();
-  const body = stripGitConflictFooter(commit?.messageBody);
+  const { subject: head, body: rawBody } = splitCommitMessage(commit);
+  const body = stripGitConflictFooter(rawBody);
   if (/^Merge (branch|remote-tracking branch) /i.test(head) && body === '') return true;
   if (/^Merge pull request #\d+ from \S+/i.test(head)) return true;
   return false;
@@ -95,11 +115,29 @@ export function isMechanicalMergeCommit(commit) {
  *  `chalbert/web-everything#2741` carried `review:pending, review-round:1` only — no ci-lifecycle label at all —
  *  while `test`/`daemon-soak` were IN_PROGRESS, entirely because its inherited history carried
  *  `drain: JIT-number …`/`drain: resolve #…` commits from `main` alongside its own genuinely-AI fix commits.
- *  Matched on the shared `drain: ` headline prefix (every drain-authored bookkeeping commit uses it, by
- *  convention — `we:scripts/lane-drain.mjs`, `rebase-drop-*.mjs`, `pr-watch.mjs` alike) rather than an
- *  exhaustive per-shape list, so a future drain bookkeeping commit kind is covered for free. */
+ *  EXACT shapes only (PR #2748 review): the full subject must match one of the drain's own generated templates
+ *  ({@link DRAIN_BOOKKEEPING_SUBJECTS}, one per call site above) AND the body must be empty — every drain call
+ *  site commits a single `-m` line. A bare `drain: ` prefix is NOT enough: `drain: manually patch the flaky
+ *  soak test` with an authored body, or any free-form `drain: …` headline, stays substantive and disqualifies
+ *  a mixed PR exactly as before this fix. A new drain commit kind must add its template here.
+ *  No author check: the drain commits under the host's ambient git identity (on this host the same one agent
+ *  commits use), so there is no fixed drain identity to pin. Residual, stated plainly: git author and message
+ *  are self-declared, so a pusher who copies a template verbatim with an empty body is still read as
+ *  bookkeeping — the same trust level `isAiCommit` already gives a self-declared `Co-Authored-By: Claude`
+ *  trailer, so this does not widen what a branch pusher could already forge. */
+const DRAIN_BOOKKEEPING_SUBJECTS = [
+  /^drain: JIT-number \S+→#\d+(?:, \S+→#\d+)* at land \(#2288\)$/, // lane-drain.mjs
+  /^drain: resolve #\d+ on land \(#2748\)$/, // lane-drain.mjs
+  /^drain: unqueue \+ cleanup #\d+ lane manifest post-land \(#2175\)$/, // lane-drain.mjs
+  /^drain: reopen stranded #\d+ after failed land \(#2175\)$/, // lane-drain.mjs
+  /^drain: resolve epic #?[\w-]+ on last-child #?[\w-]+ land \(#2752\)$/, // conveyor/pr-watch.mjs
+  // lib/rebase-drop-manifest.mjs / lib/rebase-drop-content.mjs
+  /^drain: rebase \S+ onto \S+, (?:drop transient \S+|auto-resolve non-overlapping content conflict\(s\) in [^,]+(?:, [^,]+)*?(?:, drop transient \S+)?)(?:, renumber #\d+→#\d+(?:\/#\d+→#\d+)*)?$/,
+];
+
 export function isDrainBookkeepingCommit(commit) {
-  return /^drain: /i.test(String(commit?.messageHeadline || '').trim());
+  const { subject, body } = splitCommitMessage(commit);
+  return body === '' && DRAIN_BOOKKEEPING_SUBJECTS.some((re) => re.test(subject));
 }
 
 /** A PR is AI-generated ONLY if — ignoring mechanical merge commits and the drain's own bookkeeping commits —

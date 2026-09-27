@@ -88,6 +88,53 @@ describe('merge-ai-prs — AI detection', () => {
     ];
     expect(isAiGeneratedPr({ commits })).toBe(true);
   });
+
+  // PR #2748 review:changes — the mechanical-shape predicates must match the drain's / git's EXACT generated
+  // shapes, never a loose prefix, so authored content that merely LOOKS similar still disqualifies a PR.
+  const drainAuthor = [{ name: 'test', email: 'test@test.com' }];
+  const human = [{ name: 'Some Contributor', email: 'someone@example.com' }];
+
+  it('isDrainBookkeepingCommit matches every real drain-generated headline (empty body)', () => {
+    for (const messageHeadline of [
+      'drain: JIT-number x5wbsbc→#4217, xa4qo7n→#4218 at land (#2288)',
+      'drain: resolve #4216 on land (#2748)',
+      'drain: unqueue + cleanup #4216 lane manifest post-land (#2175)',
+      'drain: reopen stranded #4216 after failed land (#2175)',
+      'drain: resolve epic #4075 on last-child #4216 land (#2752)',
+      'drain: rebase lane/xg790dh-ci-lifecycle-drain-bookkeeping-commits onto origin/main, drop transient .lane-manifest.json',
+      'drain: rebase lane/x-foo onto origin/main, auto-resolve non-overlapping content conflict(s) in a.mjs, b.mjs',
+    ]) expect(isDrainBookkeepingCommit({ messageHeadline, messageBody: '', authors: drainAuthor }), messageHeadline).toBe(true);
+    // gh truncates a long headline with `…` and moves the rest into the body — PR #2748's real captured shape
+    const truncated = { messageHeadline: 'drain: rebase lane/xg790dh-ci-lifecycle-drain-bookkeeping-commits ont…', messageBody: '…o origin/main, drop transient .lane-manifest.json', authors: drainAuthor };
+    expect(isDrainBookkeepingCommit(truncated)).toBe(true);
+    expect(isDrainBookkeepingCommit({ ...truncated, messageBody: `${truncated.messageBody}\n\nand an authored note` })).toBe(false);
+  });
+
+  it('a free-form `drain: `-headlined commit is NOT bookkeeping — authored content cannot hide behind the prefix', () => {
+    const humanDrainPrefixed = { messageHeadline: 'drain: manually patch the flaky soak test', messageBody: 'Rewrote the retry loop.', authors: human };
+    const attacker = { messageHeadline: 'drain: totally not malicious, please ignore', messageBody: '', authors: [{ name: 'x', email: 'attacker@evil.com' }] };
+    // a real drain template, but carrying an authored body — the drain only ever commits a single `-m` line
+    const templateWithBody = { messageHeadline: 'drain: resolve #4216 on land (#2748)', messageBody: 'also fixed the flaky soak test', authors: human };
+    for (const c of [humanDrainPrefixed, attacker, templateWithBody]) {
+      expect(isDrainBookkeepingCommit(c), c.messageHeadline).toBe(false);
+      expect(isAiGeneratedPr({ commits: [claudeCommit(), c] }), c.messageHeadline).toBe(false);
+    }
+  });
+
+  it('only git\'s own trailing `# Conflicts:` block is stripped — `#`-formatted authored merge bodies stay substantive', () => {
+    const merge = (messageBody) => ({ messageHeadline: "Merge branch 'main'", messageBody, authors: human });
+    for (const body of [
+      '# resolved by keeping the health-smells rewrite\n# dropped the old soak logic entirely', // markdown-ish, no footer
+      '# Manually replaced the validation logic', // single markdown heading
+      '# Manually replaced the validation logic\n\n# Conflicts:\n#\tfoo.mjs', // authored markdown BEFORE the footer
+      '# Conflicts:\n#\tfoo.mjs\n# and then I rewrote foo by hand', // authored `#` line AFTER the footer
+    ]) {
+      expect(isMechanicalMergeCommit(merge(body)), body).toBe(false);
+      expect(isAiGeneratedPr({ commits: [claudeCommit(), merge(body)] }), body).toBe(false);
+    }
+    // git's own footer alone (tab-indented paths, CRLF-tolerant) is still mechanical
+    expect(isMechanicalMergeCommit(merge('# Conflicts:\r\n#\ta.mjs\r\n#\tb/c.mjs\r\n'))).toBe(true);
+  });
 });
 
 describe('merge-ai-prs — green gate', () => {
