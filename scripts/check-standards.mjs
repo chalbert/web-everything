@@ -76,6 +76,7 @@ import {
   findTestOnlyExports,
   scanPublishSecrets,
   scanHarnessScaffolding,
+  findHandMaintainedRegistryIndex, REGISTRY_DISCOVERY_INDEX_FILES,
   findGitHookAllFlags,
   gitHookAllFlagError,
   buildTrackedPathIndex, scopeBasenameMismatches, scopeBasenameMismatchMessage,
@@ -1470,6 +1471,28 @@ mark("6f-i. PUBLISH-SEAM secret sweep on the committed corpus (#3015, under #297
 }
 
 mark("6f-i-b. HARNESS-SCAFFOLDING leak sweep on the committed corpus (#3448)");
+// ── 6f-i-c. REGISTRY-DISCOVERY anti-regression guard (#3729-style conflict prevention) ────────────
+// `soak/breaks/index.mjs` and `health-smells/index.mjs` build their registry by discovering every module file
+// in their own directory (`registry-discovery.mjs`) instead of a hand-maintained import list — the fix for the
+// routine merge conflict where every PR adding a break or a smell edited the same few lines. This re-reads both
+// files from the working tree and fails the moment either regresses to a hand-maintained list (a direct
+// `./<id>.mjs` sibling import) or simply stops calling `loadModuleRegistry(...)`. Pure detector lives in
+// `findHandMaintainedRegistryIndex`; the fs read stays here, mirroring the harness-scaffolding sweep above.
+{
+  const registryFiles = [];
+  for (const rel of REGISTRY_DISCOVERY_INDEX_FILES) {
+    const abs = join(ROOT, rel);
+    if (existsSync(abs)) registryFiles.push({ file: rel, content: readFileSync(abs, 'utf8') });
+  }
+  for (const { file, reason } of findHandMaintainedRegistryIndex(registryFiles)) {
+    err(
+      `${file} ${reason} (#3729 — this registry is meant to be DISCOVERED FROM DISK precisely so several PRs ` +
+      `adding a break/smell in the same window never collide on a hand-maintained index again).`,
+      { kind: 'registry-discovery-regression', file },
+    );
+  }
+}
+
 // ── 6f-ii. CITATION-VERIFICATION gate family (#2821, proven subset) ───────────────────────────────
 // "A reference asserted without resolving it against the source it points at" (#2821, the #957 root
 // class). Four deterministic checks, each reproducing a real review-bounce instance the pure core

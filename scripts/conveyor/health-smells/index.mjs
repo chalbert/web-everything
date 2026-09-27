@@ -6,30 +6,25 @@
  *   whose probe did not run this tick is skipped, so its episodes do not move), openAfter/closeAfter
  *   (hysteresis), severity, action (alert|investigate|file), optional `diagnose` (a read-only command the shell
  *   runs with a hard timeout when an episode opens).
+ *
+ * DISCOVERED FROM DISK (#3729-style conflict prevention) — every module file in this directory is picked up
+ * automatically via `registry-discovery.mjs`; nothing is hand-listed here. Dropping in a new `<id>.mjs` is the
+ * whole registration step (no more index-edit merge conflicts when several PRs add a smell in the same window).
+ * See `we:scripts/check-standards-rules.mjs#findHandMaintainedRegistryIndex` for the standing guard against this
+ * file (or `soak/breaks/index.mjs`) regressing back to a hand-maintained import list.
+ *
+ * This file itself stays a thin, EAGER entry point (a top-level `await` builds `SMELLS` once, at import time) —
+ * the discovery/validation logic lives in `../registry-discovery.mjs` (generic, no eager directory scan) and
+ * `../health-smells-shape.mjs` (the smell-specific shape check — deliberately kept OUTSIDE this directory so
+ * directory discovery never mistakes it for a smell module), both importable on their own for tests.
  */
-import ghCallFailures from './gh-call-failures.mjs';
-import ghGraphqlBudget from './gh-graphql-budget.mjs';
-import daemonSilent from './daemon-silent.mjs';
-import daemonOwedNoDispatch from './daemon-owed-no-dispatch.mjs';
-import cloneStale from './clone-stale.mjs';
-import redPrUnattended from './red-pr-unattended.mjs';
-import badCredentials from './bad-credentials.mjs';
-import laneStarvation from './lane-starvation.mjs';
-import healthTickOverrun from './health-tick-overrun.mjs';
-import heavyQueueWait from './heavy-queue-wait.mjs';
-import staleClaim from './stale-claim.mjs';
-import claudeAuthExpired from './claude-auth-expired.mjs';
-import daemonHeldOnLastGood from './daemon-held-on-last-good.mjs';
-import machineOverload from './machine-overload.mjs';
-import dispatchPermissionStall from './dispatch-permission-stall.mjs';
-import dispatchRefusedStaleClone from './dispatch-refused-stale-clone.mjs';
-import ghShimLanePath from './gh-shim-lane-path.mjs';
-import duplicateLiveSessions from './duplicate-live-sessions.mjs';
-import bgIsolationStall from './bg-isolation-stall.mjs';
-import prNoOwner from './pr-no-owner.mjs';
 
-export const SMELLS = Object.freeze([ghCallFailures, ghGraphqlBudget,
-  daemonSilent, daemonOwedNoDispatch, cloneStale, redPrUnattended, badCredentials, laneStarvation, healthTickOverrun, heavyQueueWait, staleClaim,
-  claudeAuthExpired, daemonHeldOnLastGood, machineOverload, dispatchPermissionStall, dispatchRefusedStaleClone, ghShimLanePath,
-  duplicateLiveSessions, bgIsolationStall, prNoOwner,
-]);
+import { fileURLToPath } from 'node:url';
+import { dirname } from 'node:path';
+
+import { loadModuleRegistry } from '../registry-discovery.mjs';
+import { validateSmellShape } from '../health-smells-shape.mjs';
+
+const DIR = dirname(fileURLToPath(import.meta.url));
+
+export const SMELLS = Object.freeze(await loadModuleRegistry(DIR, validateSmellShape));
