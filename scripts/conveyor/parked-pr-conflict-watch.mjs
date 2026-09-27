@@ -120,6 +120,7 @@ import { writeFileSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { execFileSyncThrottled } from '../lib/gh-throttle.mjs';
+import { readSharedOpenPrs } from '../lib/pr-snapshot.mjs';
 import { readPrsFromFile } from './open-pr-fetch.mjs';
 
 import { createGhProvider } from '../lib/review-label-provider.mjs';
@@ -1315,6 +1316,9 @@ function classifyStatuteConflict(files, {
  * @returns {Array<object>}
  */
 export function defaultListParkedPrs({ exec = execFileSyncThrottled, repo = null } = {}) {
+  // #gh-graphql-budget — read the host-shared open-PR snapshot (one right-sized list per repo per TTL for the
+  // whole fleet) instead of a private `gh pr list`; null = not applicable (tests, cwd repo) → the direct read below.
+  if (exec === execFileSyncThrottled) { const shared = readSharedOpenPrs({ repo, fields: 'number,headRefName,baseRefName,mergeable,mergeStateStatus,labels,files' }); if (shared) return shared; }
   // `baseRefName` (#3383) — the queued-grace routing below reads it to tell a STACKED PR (base isn't `main`, the
   // drain will never land it regardless of labels) apart from an ordinary conflict against `main`; costs nothing
   // extra since it comes off the same `gh pr list` call this pass already makes.

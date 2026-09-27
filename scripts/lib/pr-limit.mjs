@@ -25,6 +25,7 @@ import { CONSTELLATION_REPOS, repoKeyForSlug } from './constellation-repos.mjs';
 import { isAiGeneratedPr, hasLabel } from './ai-pr-authorship.mjs'; // the zero-dependency leaf (we:xniq7xs) — never merge-ai-prs.mjs directly, which would drag its whole land/merge/review import graph into this small module's consumers (operator-queue.mjs, dispatch-plan.mjs)
 import { REVIEW_LABELS } from './review-escalation.mjs';
 import { runGhSync } from './gh-throttle.mjs';
+import { readSharedOpenPrs } from './pr-snapshot.mjs';
 import { writeAllSync } from './write-all-sync.mjs';
 
 // ── LIMITS (defaults + per-repo env override) ───────────────────────────────────────────────────────────
@@ -71,6 +72,8 @@ export const EXEMPT_PATH_PREFIXES = Object.freeze([
   'scripts/lib/lane-verify.mjs',
   'scripts/lib/gh-throttle.mjs',
   'scripts/lib/gh-app-shim.mjs',
+  'scripts/lib/pr-snapshot.mjs',
+  'scripts/lib/pr-snapshot-store.mjs',
   'scripts/lib/review-escalation.mjs',
   'scripts/lib/review-core.mjs',
   'scripts/lib/review-independence.mjs',
@@ -124,6 +127,8 @@ export function countBackpressurePrs(prs) {
  *  @returns {Array|null} */
 export function fetchOpenPrs(repoSlug, { exec = runGhSync } = {}) {
   try {
+    // #gh-graphql-budget — the host-shared open-PR snapshot first (null = not applicable → the direct read).
+    if (exec === runGhSync) { const shared = readSharedOpenPrs({ repo: repoSlug, fields: 'number,labels,headRefName' }); if (shared) return shared; }
     const out = exec(
       ['pr', 'list', '--repo', repoSlug, '--state', 'open', '--json', 'number,labels,headRefName', '--limit', '100'],
       { throttle: { op: 'pr list (pr-limit)' }, encoding: 'utf8' },
