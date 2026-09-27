@@ -275,6 +275,7 @@ export function salvageLane({ dir, lane, pool, branchRef, salvageRoot = resolveS
   const record = buildSalvageRecord({
     now, pool, lane, dir, stamp, outDir, bundle, reason, branch, meta: { ...meta, worktreeBranches: [...(meta.worktreeBranches || []), ...worktreeBranches] },
     refs: bundleRefs.map((r) => r.ref),
+    localRefs: snapshots.flatMap((s) => [s.refs.head, s.refs.wip].filter(Boolean)),
     snapshots: snapshots.map((s) => ({ worktree: s.worktree ?? null, headSha: s.headSha, wipSha: s.wipSha, aheadCount: s.aheadCount, dirtyCount: s.dirtyCount })),
     changedFiles: [...changedFiles].sort(),
     patches: snapshots.map((s) => `${s.worktree ? `${prefix}.wt-${String(s.worktree).replace(/[^A-Za-z0-9._-]/g, '_')}` : prefix}.uncommitted.patch`),
@@ -303,7 +304,7 @@ export function deriveSalvageTargets({ purpose = '', holder = '', session = '', 
 }
 
 /** PURE: the index row. `landed:false` until {@link refreshSalvageIndex} proves the content is on main. */
-export function buildSalvageRecord({ now, pool, lane, dir, stamp, outDir, bundle, reason = '', branch = null, meta = {}, refs, snapshots, changedFiles = [], patches = [] }) {
+export function buildSalvageRecord({ now, pool, lane, dir, stamp, outDir, bundle, reason = '', branch = null, meta = {}, refs, localRefs = refs, snapshots, changedFiles = [], patches = [] }) {
   const lh = meta.lastHolder || {};
   const targets = deriveSalvageTargets({
     purpose: lh.purpose, holder: lh.holder, session: lh.session,
@@ -313,7 +314,7 @@ export function buildSalvageRecord({ now, pool, lane, dir, stamp, outDir, bundle
     ts: now.toISOString(), pool, lane, dir, stamp, outDir, bundle, patches, reason,
     lastHolder: { purpose: lh.purpose ?? null, holder: lh.holder ?? null, session: lh.session ?? null },
     branch, head: snapshots[0]?.headSha ?? null, cards: targets.cards, prs: targets.prs,
-    changedFiles, refs, snapshots, landed: false,
+    changedFiles, refs, localRefs, snapshots, landed: false,
     recover: bundle ? `git fetch ${bundle} 'refs/salvage/*:refs/salvage/*'` : null,
   };
 }

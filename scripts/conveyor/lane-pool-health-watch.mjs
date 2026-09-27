@@ -36,7 +36,7 @@
  * same "piggyback on a pass the headless runner already ticks" shape, so pool litter is reclaimed every tick
  * with no new cron/daemon.
  */
-import { resolve, join, dirname } from 'node:path';
+import { resolve, join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import { execFileSync } from 'node:child_process';
@@ -55,6 +55,13 @@ import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 // --acquirable` scan the list is built from (`defaultListAcquirable` below) — publishing it here is additive,
 // no extra git/gh calls.
 import { buildFreeLaneList, resolveFreeLaneListPath, writeFreeLaneListAtomic } from '../lib/free-lane-list.mjs';
+// Salvage retention + pool leftovers (2026-09-27): the salvage index is refreshed (landed / 14-day expiry), hand-made
+// salvage dirs are backfilled into it, and non-lane litter in the pool dir is classified and cleaned every tick.
+import { refreshSalvageIndex, backfillSalvageDir } from '../lib/salvage-index.mjs';
+import { sweepPoolLeftovers } from '../lib/pool-leftovers.mjs';
+import { resolveSalvageRoot, readAgentsStrict } from '../lib/lane-salvage.mjs';
+import { readLaneHistory, lastLaneHistoryEntry } from '../lib/lane-history.mjs';
+import { readdirSync as readdirSyncFs } from 'node:fs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -495,7 +502,7 @@ export function watchLanePoolHealth({
   trimPool = defaultTrimPool, trimMax = null, listAcquirable = defaultListAcquirable,
   listWhois = defaultListWhois, reclaimLane = defaultReclaimLane, reclaimEnabled = true,
   writeFreeLaneList = defaultWriteFreeLaneList, salvageEnabled = false, salvageMax = DEFAULT_SALVAGE_MAX_PER_TICK,
-  lowWater = DEFAULT_LOW_WATER,
+  lowWater = DEFAULT_LOW_WATER, retention = null,
 } = {}) {
   const status = listStatus({ repo, root });
   const lanes = status.lanes.map((l) => (
@@ -547,7 +554,42 @@ export function watchLanePoolHealth({
     reclaim = { verdicts: whois, outcomes };
   }
   const health = summarizeHealth(lanes, plan, reaped, acquirableLaneNumbers);
-  return { health, alert: lowPoolAlert(health, lowWater), plan, reaped, dryRun, trim, reclaim, freeLaneList };
+  const retained = typeof retention === 'function' && status.root
+    ? retention({ poolDir: status.root, pool: basename(status.root), dryRun })
+    : null;
+  return { health, alert: lowPoolAlert(health, lowWater), plan, reaped, dryRun, trim, reclaim, freeLaneList, retention: retained };
+}
+
+/** Presence-checked env knob that turns OFF the retention sub-pass (salvage-index refresh/expiry, backfill,
+ *  pool-leftover sweep). */
+export const RETENTION_DISABLE_ENV_VAR = 'WE_LANE_POOL_RETENTION_DISABLED';
+
+/**
+ * The retention sub-pass. Best-effort: never throws (one bad step never stops the others or the tick).
+ * @returns {{backfilled:number, salvage:object|null, leftovers:object|null, errors:string[]}}
+ */
+export function defaultRetention({ poolDir, pool, dryRun = false, salvageRoot = resolveSalvageRoot(), dispatchRoot = null } = {}) {
+  const errors = [];
+  let backfilled = 0;
+  // Hand-made salvage dirs sit directly under the salvage root as `<YYYYMMDD-HHMM[SS]>/lane-N.bundle`.
+  if (!dryRun && pool === 'web-everything') {
+    try {
+      for (const d of readdirSyncFs(salvageRoot).filter((x) => /^\d{8}-\d{4,6}$/.test(x))) {
+        backfilled += backfillSalvageDir({
+          dir: join(salvageRoot, d), pool, root: salvageRoot,
+          laneDirFor: (n) => join(poolDir, `lane-${n}`),
+          readLastHolder: (n) => { try { return lastLaneHistoryEntry(readLaneHistory(join(poolDir, `lane-${n}`))); } catch { return null; } },
+        }).length;
+      }
+    } catch (e) { if (e?.code !== 'ENOENT') errors.push(`backfill: ${String(e?.message || e).split('\n')[0]}`); }
+  }
+  let salvage = null;
+  try { salvage = refreshSalvageIndex({ root: salvageRoot, dryRun }); } catch (e) { errors.push(`salvage-index: ${String(e?.message || e).split('\n')[0]}`); }
+  let leftovers = null;
+  try {
+    leftovers = sweepPoolLeftovers({ poolDir, pool, dryRun, salvageRoot, dispatchRoot, liveAgents: dispatchRoot ? readAgentsStrict() : null });
+  } catch (e) { errors.push(`leftovers: ${String(e?.message || e).split('\n')[0]}`); }
+  return { backfilled, salvage, leftovers, errors };
 }
 
 /**
@@ -568,7 +610,9 @@ export function runLanePoolHealthWatch({ env = process.env, ...opts } = {}) {
   const salvageMax = Number.isInteger(maxN) && maxN >= 0 ? maxN : DEFAULT_SALVAGE_MAX_PER_TICK;
   const lw = Number(env[LOW_WATER_ENV_VAR]);
   const lowWater = Number.isInteger(lw) && lw >= 0 ? lw : DEFAULT_LOW_WATER;
-  return watchLanePoolHealth({ salvageMax, lowWater, ...opts, reclaimEnabled, salvageEnabled });
+  // Retention is opt-in per caller (the CLI below wires the real one) so no test ever touches the real salvage store.
+  const retention = env[RETENTION_DISABLE_ENV_VAR] === undefined && typeof opts.retention === 'function' ? opts.retention : null;
+  return watchLanePoolHealth({ salvageMax, lowWater, ...opts, reclaimEnabled, salvageEnabled, retention });
 }
 
 const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
@@ -580,7 +624,8 @@ if (IS_CLI) {
   const maxFlag = flag('max');
   const trimMax = maxFlag !== undefined && Number.isInteger(Number(maxFlag)) ? Number(maxFlag) : null;
   try {
-    const result = runLanePoolHealthWatch({ repo, dryRun, trimMax });
+    const retention = (o) => defaultRetention({ ...o, dispatchRoot: join(dirname(REPO_ROOT), '.operations', 'dispatch') });
+    const result = runLanePoolHealthWatch({ repo, dryRun, trimMax, retention });
     if (result.disabled) {
       process.stderr.write(`  lane-pool-health-watch: disabled (${DISABLE_ENV_VAR} set)\n`);
     } else {
@@ -651,6 +696,18 @@ if (IS_CLI) {
             else process.stderr.write(`    lane-${o.lane}: kept — ${o.keptReason || o.reason || 'unknown'}\n`);
           }
         }
+      }
+    }
+    if (!result.disabled && result.retention) {
+      const { backfilled, salvage, leftovers, errors } = result.retention;
+      const mb = (b) => `${(b / 1024 / 1024).toFixed(1)} MB`;
+      process.stderr.write(
+        `  retention: ${backfilled} manual salvage(s) backfilled; salvage index ${salvage ? `${salvage.landed.length} newly landed, ${salvage.expired.length} ${dryRun ? 'would expire' : 'expired'} (${mb(salvage.bytesFreed)})` : 'unavailable'}; ` +
+          `pool leftovers ${leftovers ? `${leftovers.actions.filter((a) => a.action !== 'keep').length} ${dryRun ? 'would be cleaned' : 'cleaned'} (${mb(leftovers.bytesFreed)}), ${leftovers.actions.filter((a) => a.action === 'keep').length} kept, ${leftovers.prunedLanes} lane(s) worktree-pruned, ${leftovers.dispatchRemoved} dispatch scratch dir(s)` : 'unavailable'}` +
+          `${errors.length ? ` — errors: ${errors.join('; ')}` : ''}\n`,
+      );
+      for (const a of leftovers?.actions ?? []) {
+        process.stderr.write(`    ${a.name}: ${a.action}${a.error ? ` FAILED (${a.error})` : ''} — ${a.reason}${a.bytes ? ` [${mb(a.bytes)}]` : ''}\n`);
       }
     }
     process.stdout.write(`${JSON.stringify({ checked: true, ...result })}\n`);
