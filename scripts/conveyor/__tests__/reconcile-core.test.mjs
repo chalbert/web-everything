@@ -1560,6 +1560,38 @@ describe('case 5g — advisory-fix dispatch on a `needs-human` PR carrying `advi
     expect(capped).toEqual(expect.objectContaining({ capKind: 'advisory-fix', attempts: ADVISORY_FIX_ROUND_CAP, cap: ADVISORY_FIX_ROUND_CAP }));
   });
 
+  // #2800 advisory finding, Codex advisory follow-up — a BOUNDED FALLBACK for a rarer but concrete gap the
+  // forged-note-flood test above does not cover: GitHub lets a comment be edited or deleted, so the SOLE
+  // advisory-note comment a finding depends on can vanish from the thread entirely while `advisory:changes` — a
+  // separate, sticky LABEL — survives. With no trusted note left AT ALL (not even a forged one),
+  // `countCompletedAdvisoryEpisodes`'s per-note-episode loop never runs (`noteIndices` is empty) and used to
+  // return 0 FOREVER no matter how many trusted advisory-fix marks piled up; `isLatestAdvisoryFindingAddressed`
+  // independently stays `false` too (no `lastNoteIndex`). Both gates open at once: the `!addressed` branch's own
+  // `advisoryFixes >= advisoryFixCap` check never trips, so nothing bounds this population's fixer redispatch.
+  // Simulated end to end exactly like the forged-note-flood case: no note is ever (re)posted — the deleted-note
+  // shape — only trusted advisory-fix marks accumulate from whatever the planner dispatches.
+  it('#2800 — the sole advisory note is deleted while advisory:changes remains: trusted fix marks still bound the cap (no unlimited fixer dispatch)', () => {
+    // The finding itself survives independently of the note MARKER — e.g. pre-dating the marker convention, or
+    // simply left behind by the same edit/delete that removed the note's leading line. Not a trusted advisory
+    // note (`isTrustedAdvisoryNote` matches neither marker prefix), so it opens no episode — exactly the shape
+    // this fix must still bound.
+    const comments = [{ body: 'security: broken access control in the new handler', author: AUTOMATION }];
+    let capped = null;
+    let fixDispatches = 0;
+    for (let tick = 0; tick < ADVISORY_FIX_ROUND_CAP * 4 && !capped; tick += 1) {
+      const plan = planReconcile({ prs: [prNeedsHuman({ comments: [...comments] })], agents: [], now: NOW });
+      capped = plan.refusals.find((r) => r.kind === 'cap-exhausted') ?? null;
+      const d = plan.dispatch[0];
+      if (d?.kind === 'fix') { fixDispatches += 1; comments.push({ body: buildAdvisoryFixComment({}), author: AUTOMATION }); }
+    }
+    // BOUNDED — the whole point: the loop above runs for a fixed, finite tick ceiling (`ADVISORY_FIX_ROUND_CAP *
+    // 4`) and this asserts `cap-exhausted` was reached WELL before that ceiling — i.e. dispatch genuinely
+    // stopped, rather than cycling `fix` on every single tick the way the pre-fix code did (which would run this
+    // loop to its ceiling with `capped` still `null`, failing the assertion below).
+    expect(capped).toEqual(expect.objectContaining({ capKind: 'advisory-fix', cap: ADVISORY_FIX_ROUND_CAP }));
+    expect(fixDispatches).toBeLessThan(ADVISORY_FIX_ROUND_CAP * 4);
+  });
+
   it('a caller-supplied `advisoryFixCap` overrides the default', () => {
     const plan = planReconcile({ prs: [prNeedsHuman()], agents: [], now: NOW, advisoryFixCap: 0 });
     expect(plan.dispatch).toHaveLength(0);

@@ -166,6 +166,29 @@ export function countCompletedAdvisoryEpisodes(comments) {
     // login must not split one finding's fix attempts into extra spent episodes.
     if (isTrustedAdvisoryNote(comments[i])) noteIndices.push(i);
   }
+  // #2800 advisory finding, Codex advisory follow-up — BOUNDED FALLBACK. GitHub lets a comment be edited or
+  // deleted, so the SOLE advisory note a finding depends on can vanish from the thread entirely while
+  // `advisory:changes` (a separate, sticky LABEL) survives. With `noteIndices` empty, the per-note-episode loop
+  // below never runs and this used to return 0 FOREVER no matter how many trusted advisory-fix marks
+  // accumulated — `isLatestAdvisoryFindingAddressed` independently stays `false` too (no note to postdate), so
+  // `reconcile-core.mjs`'s advisory-fix branch's own `advisoryFixes >= advisoryFixCap` check never tripped and
+  // nothing ever bounded repeated fixer dispatch.
+  //
+  // THE FALLBACK, AND WHY IT SUBTRACTS ONE. Falling back to the raw TRUSTED fix-mark count
+  // (`countAdvisoryFixComments`, the same trust gate every other counter here uses) ties this rare, note-less
+  // case directly back to the real cap — but this file's own PRE-EXISTING pinned coverage (the "forged note
+  // alone" fixture just above this function's own test file) already established, deliberately, that a single
+  // trusted fix-mark with NO trusted note anywhere — the shape a lone forged/untrusted note plus one genuine fix
+  // produces — reads as ZERO completed episodes: one lone, unanchored mark is not on its own proof of a spent
+  // episode (a fixer can legitimately post one mark before the very first review ever runs, e.g. mid-restart
+  // bookkeeping). So this fallback gives that SAME one-mark benefit of the doubt here too (`- 1`, floored at 0)
+  // rather than counting the very first unanchored mark — and then counts every mark AFTER it 1-for-1, so
+  // accumulation still converges on `advisoryFixCap` in a small, FINITE number of further dispatches. This can
+  // only ever OVER-count relative to the normal note-anchored semantics once marks pile up (never under-count
+  // past the first), so it can never let a genuinely-broken finding evade the #2117/#2298 flap-protection cap,
+  // and it never fires at all once even one trusted note is still on the thread (the ordinary, healthy case
+  // below is completely unchanged).
+  if (noteIndices.length === 0) return Math.max(0, countAdvisoryFixComments(comments) - 1);
   let completed = 0;
   for (let k = 0; k < noteIndices.length; k += 1) {
     const start = noteIndices[k] + 1;
