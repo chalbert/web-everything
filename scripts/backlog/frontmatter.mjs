@@ -204,12 +204,21 @@ export function validateCodifiedIn(value) {
  * from the rule" invariant — the cheapest moment to capture orientation is at resolve, with the
  * deliberation fresh.
  *
+ * `unresolve` — #2779-incident (2026-09-26 03:14Z): the drain's resolve-on-land bookkeeping flipped a card to
+ * `resolved` on the strength of a branch-name coincidence, not real delivered work, and no product path
+ * existed to undo it short of hand-editing `main`. `resolved → open` is the counterpart transition: it exists
+ * ONLY for correcting a resolve that should never have happened (an evidence failure, not a status the card
+ * ever legitimately outgrows on its own), so it strips `dateResolved`/`graduatedTo`/`codifiedIn` — none of
+ * those were legitimately earned either — and requires a `reason` (recorded by the caller, never silent).
+ * Always requires the CLI's `--force` (mirrors `release`'s rare-deliberate-abandon gate): reopening a resolved
+ * card is uncommon enough that an unintentional call should have to say so explicitly.
+ *
  * @param {string} content
- * @param {'claim'|'resolve'|'release'} verb
- * @param {{ today: string, graduatedTo?: string, codifiedTo?: string, as?: 'active'|'preparing' }} opts
+ * @param {'claim'|'resolve'|'release'|'unresolve'} verb
+ * @param {{ today: string, graduatedTo?: string, codifiedTo?: string, as?: 'active'|'preparing', reason?: string }} opts
  * @returns {{ content: string } | { error: string }}
  */
-export function applyTransition(content, verb, { today, graduatedTo, codifiedTo, as } = {}) {
+export function applyTransition(content, verb, { today, graduatedTo, codifiedTo, as, reason } = {}) {
   const status = readField(content, 'status');
   const DATE_ANCHORS = ['dateOpened', 'dateStarted', 'dateResolved', 'status', 'blockedBy', 'size', 'kind'];
 
@@ -237,6 +246,18 @@ export function applyTransition(content, verb, { today, graduatedTo, codifiedTo,
   if (verb === 'release') {
     if (status !== 'active' && status !== 'preparing') return { error: `status is "${status}", expected "active" or "preparing" — only an in-flight claim is released` };
     const next = setFrontmatterField(content, 'status', 'open');
+    return next ? { content: next } : { error: 'could not splice frontmatter' };
+  }
+  if (verb === 'unresolve') {
+    if (status !== 'resolved') return { error: `status is "${status}", expected "resolved" — only a resolved item can be unresolved` };
+    if (!reason || !String(reason).trim()) return { error: '`reason` is required — unresolve is a correction, never a silent one (e.g. --reason="resolved without evidence, #2779-incident")' };
+    let next = setFrontmatterField(content, 'status', 'open');
+    // None of these were legitimately earned by a resolve that should never have happened.
+    next = removeFrontmatterField(next, 'dateResolved');
+    next = removeFrontmatterField(next, 'graduatedTo');
+    next = removeFrontmatterField(next, 'codifiedIn');
+    next = setFrontmatterField(next, 'unresolvedReason', quoteScalar(String(reason).trim()), { after: ['status'] });
+    next = setFrontmatterField(next, 'dateUnresolved', quoteDate(today), { after: ['unresolvedReason', 'status'] });
     return next ? { content: next } : { error: 'could not splice frontmatter' };
   }
   return { error: `unknown verb "${verb}"` };

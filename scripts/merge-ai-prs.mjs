@@ -1656,15 +1656,20 @@ export function defaultFetchDiff(c) {
  *      missed exactly that). Both call sites run only on a confirmed merge, so the cost is one call per
  *      merge. The diff fetch (every ride-along signal's evidence) stays gated on `changedFiles` already naming
  *      a backlog card file, numbered or hash-named.
+ * #2779-incident (PR #2785, `lane/2779-session-token-fresh`) — `openPrNums` (the OTHER currently-open PR
+ * numbers in this repo, never this candidate's own `c.num`) is threaded straight into every
+ * `deliveredItemNumsFromPr` call below, so a bare branch-name digit run that collides with a real open PR
+ * number is refused, never credited off ref/title alone. See that function's own docstring in
+ * `./lib/open-pr-items.mjs` for the full incident account and the asymmetry argument for defaulting closed.
  * @param {{hasManifest?:boolean, item?:(number|string|null), repo?:(string|null), headRef?:string, title?:string, num?:(number|string)}} c
- * @param {{isLocalRepo?:function, fetchGuardSignals?:function, resolveHashNumber?:function, fetchDiff?:function}} [o]
+ * @param {{isLocalRepo?:function, fetchGuardSignals?:function, resolveHashNumber?:function, fetchDiff?:function, openPrNums?:Iterable<string|number>}} [o]
  * @returns {Array<number|string>} `asItemId`-keyed ids this candidate's land proves resolved
  */
-export function landedIdsForCandidate(c, { isLocalRepo = () => false, fetchGuardSignals = defaultFetchLandGuardSignals, resolveHashNumber = defaultResolveHashNumber, fetchDiff = defaultFetchDiff } = {}) {
+export function landedIdsForCandidate(c, { isLocalRepo = () => false, fetchGuardSignals = defaultFetchLandGuardSignals, resolveHashNumber = defaultResolveHashNumber, fetchDiff = defaultFetchDiff, openPrNums = null } = {}) {
   if (!c) return [];
   if (c.hasManifest) return c.item != null ? [asItemId(c.item)] : [];
   if (!isLocalRepo(c.repo)) return []; // an impl half never carries the resolve — only its WE carrier does
-  const base = deliveredItemNumsFromPr(c.headRef, c.title);
+  const base = deliveredItemNumsFromPr(c.headRef, c.title, { openPrNums });
   // #3914 — a lane cut for a hash-born card it filed in the SAME PR (`lane/x<6>-…`) names no digits, so `base`
   // is empty and the drain used to JIT-number the card and leave it `active` forever. Credit the HASH; the
   // caller's `planResolveOnLand` re-keys it to the NNN `numberPendingHashes` mints in this same land.
@@ -1678,7 +1683,7 @@ export function landedIdsForCandidate(c, { isLocalRepo = () => false, fetchGuard
     const hash = deliveredHashFromPr(c.headRef, c.title, { body, changedFiles, landedNumberFor: resolveHashNumber });
     if (hash) ids.add(asItemId(hash));
   } else if (base.length) {
-    for (const n of deliveredItemNumsFromPr(c.headRef, c.title, { body, changedFiles })) ids.add(asItemId(n));
+    for (const n of deliveredItemNumsFromPr(c.headRef, c.title, { body, changedFiles, openPrNums })) ids.add(asItemId(n));
   }
   // #xqpqyr2 — ride-along ids ADD to whatever the primary path above found; they never replace it. Every
   // ride-along signal needs the diff (a card's frontmatter status move is the evidence), so its fetch is gated
@@ -4864,6 +4869,23 @@ async function runCli() {
 
   const merged = [];
   const failedMerges = [];
+  // #2779-incident — the OTHER currently-open PR numbers for a candidate's own repo, at pass-start, EXCLUDING
+  // the candidate's own `c.num` and any number already recorded into `merged` THIS pass (a sibling that merged
+  // earlier in this same cascade has already left the open set — the same staleness `liveOpenHeadRefs` already
+  // tolerates for the couple gate). Fed straight into `landedIdsForCandidate`'s `openPrNums`, so a bare
+  // branch-name digit run that only coincidentally matches a real open PR number (PR #2785's
+  // `lane/2779-session-token-fresh` against the then-open, unrelated PR #2779) is refused rather than credited.
+  const otherOpenPrNums = (repo, excludeNum) => {
+    const prs = (openPrContext && openPrContext.prsByRepo instanceof Map) ? (openPrContext.prsByRepo.get(repo) || []) : [];
+    const mergedNums = new Set(merged.filter((m) => (m.repo || null) === (repo || null)).map((m) => String(m.num)));
+    const out = new Set();
+    for (const p of prs) {
+      const n = String(p && p.number);
+      if (n === String(excludeNum) || mergedNums.has(n)) continue;
+      out.add(n);
+    }
+    return out;
+  };
   // xvzc4v4 (merge-safety review, bug 1) — a candidate whose PASS-START `classifyPr` decision no longer holds on
   // a FRESH re-read right before the merge (see `revalidateForMerge`): reported, never silently dropped, and
   // left `skip` so it keeps blocking its dependents and is re-read fresh next pass.
@@ -5000,7 +5022,7 @@ async function runCli() {
           merged.push({ num: c.num, repo: c.repo, headSha: c.headSha ?? null });
           progressed = true;
           remaining = remaining.filter((x) => !sameCand(x, c));
-          for (const id of landedIdsForCandidate(c, { isLocalRepo })) landedThisPass.add(id);
+          for (const id of landedIdsForCandidate(c, { isLocalRepo, openPrNums: otherOpenPrNums(c.repo, c.num) })) landedThisPass.add(id);
           postMergeTrace(); // #xngv3vn — only ever called on a CONFIRMED merge
         };
         try {
@@ -5174,7 +5196,7 @@ async function runCli() {
           // it becomes ready next pass. Keyed on `hasManifest` (NOT an inherited impl PR) so a green impl PR of
           // an otherwise-broken couple never counts the couple "landed" — that alignment with `bornAs` is what
           // keeps the stowaway guard honest.
-          for (const id of landedIdsForCandidate(c, { isLocalRepo })) landedThisPass.add(id);
+          for (const id of landedIdsForCandidate(c, { isLocalRepo, openPrNums: otherOpenPrNums(c.repo, c.num) })) landedThisPass.add(id);
           if (!AS_JSON) process.stderr.write(`  ✓ merged ${repoTag(c.repo)}${c.num}${c.item ? ` (#${c.item})` : ''}\n`);
         } catch (e) {
           const detail = String(e.message || e).split('\n')[0];
