@@ -108,6 +108,7 @@ import { countRearmComments, REARM_COMMENT_MARKER } from './rearm-review.mjs';
 // `#2117`/`#2298` incident this closes.
 import { countAdvisoryComments } from './advisory-round-count.mjs';
 import { countCiHealComments, CI_HEAL_COMMENT_MARKER } from './ci-heal-mark.mjs';
+import { latestCiHealEscalationForHead, CI_HEAL_ESCALATION_MARKER } from './ci-heal-escalation-mark.mjs';
 import { isStandDownSuperseded, STAND_DOWN_MARKER, SUPERSEDE_STAND_DOWN_MARKER } from './stand-down.mjs';
 import { isTrustedMarkerAuthor } from '../lib/marker-authorship.mjs';
 import { reviewSessionSlug } from './review-session-slug.mjs';
@@ -233,6 +234,12 @@ export const REFUSAL_KINDS = Object.freeze([
   'stood-down', 'no-findings', 'cap-exhausted',
   'live-process', 'awaiting-permission', 'liveness-unknown',
   'owed-elsewhere', 'owed-ci-rerun', 'nothing-owed', 'already-reviewed-head', 'already-landed',
+  // we:backlog/heal-wait-for-rerun (landing-freeze fix, 2026-09-27) — a ci-heal already escalated THIS EXACT
+  // head (`ci-heal-escalation-mark.mjs`); see that file's own header for the live incident (#2783, three
+  // sessions in one evening). `ci-heal-escalated` — a genuine judgment call, terminal until a new push.
+  // `waiting-on-system-fix` — the red is the tooling/gate's own fault and a system-level fix is already open
+  // for it; this PR owes nothing further until that fix lands or its own head changes.
+  'ci-heal-escalated', 'waiting-on-system-fix',
 ]);
 
 /**
@@ -249,6 +256,10 @@ export const BOOKKEEPING_MARKERS = Object.freeze([
   // #xkmu3gv — the two new completed-round markers. Neither is a reviewer speaking, so neither may ever count as
   // a finding (`countFindings`) or the pass would read its OWN handback comment as fresh work to fix.
   CONFLICT_FIX_COMMENT_MARKER, ADVISORY_FIX_COMMENT_MARKER,
+  // we:backlog/heal-wait-for-rerun — a ci-heal escalation is this loop's OWN bookkeeping too: a PR whose head
+  // has since moved past a ci-red phase but still carries an old escalation comment in its history must not
+  // have that comment misread as a fresh reviewer finding.
+  CI_HEAL_ESCALATION_MARKER,
 ]);
 
 /**
@@ -1406,6 +1417,42 @@ export function planReconcile({
             extra: { owedCiRerun: true },
           });
         }
+        continue;
+      }
+      // we:backlog/heal-wait-for-rerun (landing-freeze fix, 2026-09-27) — LIVE INCIDENT, PR #2783 (chalbert/
+      // web-everything): three ci-heal sessions in one evening each ended "escalated (needs human — not a CI
+      // break)" for the IDENTICAL reason on the IDENTICAL head, because the brief's escalation exit wrote
+      // nothing durable (a bare one-line RETURN to the calling session) — every tick that followed re-read the
+      // PR as plain `ci-red` with nothing live working it and dispatched ANOTHER heal to re-ask the same
+      // already-answered question. `ci-heal-escalation-mark.mjs` closes it: an escalated heal now posts a
+      // durable, HEAD-SCOPED comment, and this check refuses re-dispatch for as long as the escalation still
+      // names the CURRENT head — a new push moves the head, the old comment stops matching, and the very next
+      // tick plans a fresh heal with no human intervention required. Checked BEFORE the `ci-heal` cap below
+      // (and skips it entirely) for the same reason `owed-ci-rerun` is: an escalation is a DIFFERENT, more
+      // definitive stop than "one more round against the attempt cap".
+      const escalation = latestCiHealEscalationForHead(pr?.comments, base.headRefOid);
+      if (escalation) {
+        const isSystemFix = escalation.outcome === 'waiting-on-system-fix';
+        const kind = isSystemFix ? 'waiting-on-system-fix' : 'ci-heal-escalated';
+        refuse(kind, {
+          ...withPhase, headSha: escalation.headSha,
+          ...(escalation.reason ? { escalationReason: escalation.reason } : {}),
+          ...(escalation.systemFixRef ? { systemFixRef: escalation.systemFixRef } : {}),
+          why: isSystemFix
+            ? `ci-heal already escalated this exact head (\`${escalation.headSha}\`) as waiting on system fix #${escalation.systemFixRef} — the red is the tooling/gate's own fault, not this PR's; nothing further is owed until that fix lands or a new push changes this head`
+            : `ci-heal already escalated this exact head (\`${escalation.headSha}\`) to a human — re-dispatching would re-ask the identical already-answered question every tick until a new push changes this head`,
+        });
+        // A capped/exhausted ci-red PR is already promoted from a bare refusal to a surfaced `note`
+        // (`ci-heal-exhausted`, above) precisely because it is the one dead end an operator must be pulled in
+        // for — an escalation is the SAME shape of dead end (nothing live, nothing auto-heal can do about it
+        // right now) and gets the identical treatment, once per tick, until a new push or a person clears it.
+        notes.push({
+          kind: 'ci-heal-escalated', prNumber, headSha: escalation.headSha, outcome: escalation.outcome,
+          ...(escalation.systemFixRef ? { systemFixRef: escalation.systemFixRef } : {}),
+          text: isSystemFix
+            ? `PR #${prNumber}: ci-heal escalated on head \`${escalation.headSha}\` — waiting on system fix #${escalation.systemFixRef}; will not re-dispatch until it lands or a new push changes this head`
+            : `PR #${prNumber}: ci-heal escalated on head \`${escalation.headSha}\` — ${escalation.reason || 'needs a human judgment call'}; will not re-dispatch until a new push changes this head`,
+        });
         continue;
       }
       const ciHealAttempts = countCiHealComments(pr?.comments);

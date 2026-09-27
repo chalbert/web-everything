@@ -465,6 +465,51 @@ export function isRequiredCheckFailed(pr, requiredCheck = 'test') {
 }
 
 /**
+ * we:backlog/heal-wait-for-rerun (landing-freeze fix, 2026-09-27) — the THIRD member of the {@link
+ * isRequiredCheckGreen}/{@link isRequiredCheckFailed} pair: is the required check PRESENT on this head but not
+ * yet concluded either way? "Not green" is NOT the same claim as "failed" — a check GitHub has not finished
+ * running yet is neither, and a caller that folds "not green" into "must still be failed" misreads a check
+ * still in flight on the CURRENT head as a concluded failure.
+ *
+ * LIVE INCIDENT this closes, 2026-09-26/27 (chalbert/web-everything): `main` went red then green, the
+ * mechanical rebase (`we:scripts/conveyor/ci-red-recovery-watch.mjs`) rebased each stuck PR onto the new tip
+ * and re-triggered CI, and every one of them still carried a STALE `ci:failed` label from before the rebase.
+ * `we:scripts/progress-board.mjs#classifyPr`'s own `ci:failed`-label fallback branch read
+ * `!isRequiredCheckGreen(pr)` as license to trust that stale label — true for BOTH "concluded failed" AND
+ * "restarted after the rebase, not concluded yet" — so a PR whose new run was still `pending` (or had already
+ * gone green by the time a ci-heal session actually looked) got a wasted Opus/Sonnet ci-heal dispatched against
+ * it anyway. Of ~10 ci-heal sessions dispatched inside one hour, 7 (PRs #2782/#2778/#2772/#2779/…) ended "no
+ * change needed" for exactly this reason.
+ *
+ * A MISSING check (never reported at all — {@link latestRequiredCheck} returns `null`) is deliberately NOT
+ * pending either: that is silence, not evidence, and a caller's own empty-rollup fallback (see
+ * `isRequiredCheckFailed`'s own docblock for the identical distinction on the failed side, and `classifyPr`'s
+ * `xx6kg3f` history for why a degraded read must still trust a stale label rather than silently clearing it)
+ * keeps doing whatever it already did with that case — this function only ever narrows a caller's `ci:failed`
+ * trust, never widens it. Reads the LATEST run (#xkfv491), same as its two siblings — never re-derived.
+ *
+ * "Pending" is read POSITIVELY off an in-flight state, never as "neither green nor failed" (PR #2787 review):
+ * a check that CONCLUDED `SKIPPED`/`NEUTRAL`/`STALE` is terminal and will never re-run, so treating it as
+ * in flight would suppress a stale `ci:failed` forever and let the PR read `queued` with a check that never
+ * passed. Any non-empty conclusion is terminal; otherwise the CheckRun `status` (or legacy StatusContext
+ * `state`) must name an in-flight value.
+ * @param {object} pr
+ * @param {string} [requiredCheck]
+ * @returns {boolean}
+ */
+export function isRequiredCheckPending(pr, requiredCheck = 'test') {
+  const check = latestRequiredCheck(pr, requiredCheck);
+  if (!check) return false;
+  if (String(check.conclusion || '').trim()) return false;
+  const phase = String(check.status || check.state || '').toUpperCase();
+  return IN_FLIGHT_CHECK_STATES.has(phase);
+}
+
+/** CheckRun `status` values (QUEUED…REQUESTED) and StatusContext `state` values (PENDING, EXPECTED) that mean
+ *  "this run has not concluded yet" — the only states {@link isRequiredCheckPending} reads as pending. */
+const IN_FLIGHT_CHECK_STATES = new Set(['QUEUED', 'IN_PROGRESS', 'WAITING', 'PENDING', 'REQUESTED', 'EXPECTED']);
+
+/**
  * #2421 — the ratified ci-lifecycle label taxonomy (#2281 Fork 2: `ci:failed` opens a deterministic `ci:*`
  * state family; `blocked` stays bare to match its bare sibling `ready-to-merge`). Keyed by the semantic state
  * name so callers never hand-spell the label string. `ready` reuses the EXISTING `ready-to-merge` label

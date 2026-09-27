@@ -52,6 +52,25 @@ check needs), get the gate green, **re-push HEAD to the same `lane/*` ref**, **p
 then **EXIT WITHOUT MERGING** — and **NEVER touch the review label** (`review:human` / `review:pending` /
 `review:changes` stay exactly as they were; only CI is repaired).
 
+## If you escalate — WHY a second command beyond the completion record (read once, before you need it)
+
+we:backlog/heal-wait-for-rerun (landing-freeze fix, 2026-09-27) — LIVE INCIDENT, PR #2783 (chalbert/web-everything):
+three ci-heal sessions in one evening each escalated for the IDENTICAL reason on the IDENTICAL head. The
+`completion-cli.mjs report --outcome=escalated-*` calls throughout this arc are session bookkeeping (they key off
+`{{SESSION_SLUG}}`, which is the SAME `ci-heal-{{PR_NUM}}` slug every future dispatch for this PR reuses — a NEW
+session's own `started` report overwrites that record, per that CLI's own docblock, so nothing survives across
+dispatch GENERATIONS). They tell the reconciler "this session is no longer live"; they do NOT tell it "the next
+session would just re-ask the same already-answered question" — so every tick kept re-dispatching a fresh heal.
+
+`ci-heal-escalation-mark.mjs` closes that gap with a comment ON THE PR ITSELF, keyed to the exact head it was
+posted against — durable across dispatch generations, and auto-re-arming the instant a new push moves the head
+(no human needs to clear anything for that to happen). Every escalation exit below that names a genuine "a person
+must look at this, and it will look identical on a retry" fact (lane ref gone, conflict with main, not a CI
+break) now posts BOTH the completion record (session bookkeeping) and this marker (PR-durable, head-scoped) — in
+that order. `blocked-on-infra` and `gate-red` are deliberately NOT part of this: both are meant to retry (a
+transient tool/permission denial clears; a different repair attempt might pass the gate a genuinely-broken one
+did not), so neither gets a marker that would stop that retry.
+
 ## The arc — one command per transition
 
 ### 0. Report `started` — BEFORE anything else (#3436, #4075/xg7m2wq)
@@ -89,6 +108,15 @@ LANE=$(node "{{WE_ROOT}}/scripts/lane-pool.mjs" acquire --repo={{LANE_REPO}} --l
   ```bash
   node "{{WE_ROOT}}/scripts/operations/completion-cli.mjs" report --repo={{REPO}} --session={{SESSION_SLUG}} --status=done --outcome=not-applicable
   ```
+  A gone ref will still be gone on the very next tick's re-dispatch — post the durable, head-scoped escalation
+  marker too (we:backlog/heal-wait-for-rerun; see the callout right after this arc for the FULL outcome-choice
+  guidance) so the conveyor stops re-dispatching a heal that will only fail identically again, until a human
+  intervenes or a new push resolves it:
+  ```bash
+  node "{{WE_ROOT}}/scripts/conveyor/ci-heal-escalation-mark.mjs" {{PR_NUM}} --repo={{REPO}} \
+    --head="$(gh pr view {{PR_NUM}} --repo {{REPO}} --json headRefOid --jq .headRefOid)" \
+    --outcome=needs-human --reason="lane ref gone — {{LANE_REF}} no longer resolves"
+  ```
 - **`cd "$LANE"` just left WE's own checkout.** `{{LANE_REF}}` can belong to any constellation repo, so from
   here on your cwd may hold no `scripts/` directory at all — every remaining tool call in this brief is
   qualified with `{{WE_ROOT}}` for exactly that reason. Never drop the `{{WE_ROOT}}/` qualifier for a bare
@@ -104,13 +132,21 @@ git rebase origin/main
 
 Resolve any conflict the `/finish` way: **regenerate derived / generated artifacts** rather than hand-merging them,
 and **take-main for coordination JSON** (`claims.json`, registries). If it is a genuine same-line CODE overlap you
-cannot safely resolve, report the completion record and stop and report `#{{ITEM_NUM}} → ci-heal escalated
-(conflict with main)` — leave the PR as it is (do NOT force-push a bad rebase). A clean rebase alone often fixes a
-BEHIND `test` failure.
+cannot safely resolve, `git rebase --abort` (leave the PR as it is — do NOT force-push a bad rebase), report the
+completion record, and stop and report `#{{ITEM_NUM}} → ci-heal escalated (conflict with main)`. A clean rebase
+alone often fixes a BEHIND `test` failure.
 
 ```bash
+git rebase --abort
 node "{{WE_ROOT}}/scripts/operations/completion-cli.mjs" report --repo={{REPO}} --session={{SESSION_SLUG}} --status=done --outcome=escalated-conflict
+node "{{WE_ROOT}}/scripts/conveyor/ci-heal-escalation-mark.mjs" {{PR_NUM}} --repo={{REPO}} \
+  --head="$(gh pr view {{PR_NUM}} --repo {{REPO}} --json headRefOid --jq .headRefOid)" --outcome=needs-human --reason="conflict with main during rebase"
 ```
+
+(`git rebase --abort` FIRST, so you never leave a half-rebased tree behind. `--head` is ALWAYS the PR's
+PUBLISHED head read off GitHub — never `git rev-parse HEAD`: after a clean rebase that you have not pushed,
+the local `HEAD` is a commit GitHub never saw, the marker would never match `pr.headRefOid`, and the next tick
+would dispatch the same heal again. See the callout right after this arc for what the marker does and why.)
 
 ### 3. Diagnose + repair the failing required check (repair ONLY the CI break)
 
@@ -127,13 +163,42 @@ gh run view <run-id> --log-failed --repo {{REPO}} # the failing step's log (opti
   `$LANE`, on the lane's **current branch** (its local `main` — do **NOT** `git checkout -b`; the single-branch
   hook blocks branch creation even in a lane clone). Keep scope within `{{SCOPE}}`. **Do NOT weaken or delete a
   test to go green**, and do NOT fold in unrelated work.
-- If the required check is red for a reason that is NOT a CI/rebase break — the diff itself is genuinely wrong and
-  needs a design call — do **NOT** guess: report the completion record and stop and report `#{{ITEM_NUM}} →
-  ci-heal escalated (needs human — not a CI break)`. The review gate (if any) still owes a human verdict; a human
-  handles it via `/finish`.
+- **Before escalating, check for a metadata-only fix.** Some required-check-adjacent gates read the PR's own
+  DESCRIPTION rather than its diff — the soak-replay-gate's waiver (`soak-waiver: <reason>` in the PR body,
+  `we:scripts/lib/soak-replay-gate.mjs`) is the current example. If `gh pr checks`'s failing-check summary (or
+  its log) says it is reading the PR body, not the code, and adding a plain `soak-waiver: <reason>` line
+  genuinely applies (the change really IS soak-safe — never invent a reason that is not true), add it and
+  continue the normal arc (step 4 onward) instead of escalating:
   ```bash
-  node "{{WE_ROOT}}/scripts/operations/completion-cli.mjs" report --repo={{REPO}} --session={{SESSION_SLUG}} --status=done --outcome=escalated-needs-human
+  gh pr view {{PR_NUM}} --repo {{REPO}} --json body --jq .body > <bodyfile>
+  printf '\n\nsoak-waiver: <the genuine reason>\n' >> <bodyfile>
+  node "{{WE_ROOT}}/scripts/pr-body-edit.mjs" --pr={{PR_NUM}} --repo={{REPO}} --body-file=<bodyfile>
   ```
+  (never a raw `gh pr edit --body` — it drops the PR's own authorship stamp; see that script's own header.)
+- If the required check is red for a reason that is NOT a CI/rebase break and NOT a metadata fix — do **NOT**
+  guess which of the two outcomes below applies without checking; picking the wrong one either hides a real
+  defect from the operator or wastes their attention on tooling that already has a fix in flight:
+  - **Almost always `needs-human`** — the diff itself is genuinely wrong and needs a design call, or you are
+    simply unsure. Report and stop:
+    ```bash
+    node "{{WE_ROOT}}/scripts/operations/completion-cli.mjs" report --repo={{REPO}} --session={{SESSION_SLUG}} --status=done --outcome=escalated-needs-human
+    node "{{WE_ROOT}}/scripts/conveyor/ci-heal-escalation-mark.mjs" {{PR_NUM}} --repo={{REPO}} \
+      --head="$(gh pr view {{PR_NUM}} --repo {{REPO}} --json headRefOid --jq .headRefOid)" --outcome=needs-human --reason="not a CI break — <name the actual finding>"
+    ```
+    Then report `#{{ITEM_NUM}} → ci-heal escalated (needs human — not a CI break)`. The review gate (if any) still
+    owes a human verdict; a human handles it via `/finish`.
+  - **`waiting-on-system-fix` — narrow, and ONLY when BOTH hold:** (1) the red is caused by the CI TOOLING/GATE
+    ITSELF, not this PR's own diff (the SAME advisory check misbehaving the SAME way on more than one unrelated
+    PR is the tell), AND (2) a system-level fix for that exact tooling bug is ALREADY OPEN (e.g. `#2784` fixed
+    the soak-replay-gate's own false-red; if you hit that identical shape again before #2784 has landed, use
+    this outcome with `--system-fix=2784`). This PR did nothing wrong and does not need the operator's attention:
+    ```bash
+    node "{{WE_ROOT}}/scripts/operations/completion-cli.mjs" report --repo={{REPO}} --session={{SESSION_SLUG}} --status=done --outcome=escalated-needs-human
+    node "{{WE_ROOT}}/scripts/conveyor/ci-heal-escalation-mark.mjs" {{PR_NUM}} --repo={{REPO}} \
+      --head="$(gh pr view {{PR_NUM}} --repo {{REPO}} --json headRefOid --jq .headRefOid)" --outcome=waiting-on-system-fix --system-fix=<n> \
+      --reason="<name the tooling bug and the PR fixing it>"
+    ```
+    Then report `#{{ITEM_NUM}} → ci-heal waiting on system fix #<n> (PR #{{PR_NUM}} did nothing wrong)`.
 
 **If applying an otherwise-CLEAR repair is denied by a permission or tool-use guard, that is INFRASTRUCTURE
 FRICTION, not a judgment call.** The failing check still says exactly what to fix; only the *mechanism* to fix it

@@ -12,7 +12,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { labelOnGreenVerdict, isRequiredCheckGreen, isRequiredCheckFailed, hasLabel, classifyPr, isRebaseDropCandidate, needsManifestStripBeforeMerge, restampAcceptance, spawnReviewSetLabel, isStackedWeCoupleHalf, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, pushNumberingOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, drainReasonMarker, buildDrainReasonComment, buildHeldReviewHoldReason, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON, MERGE_TRACE_KIND, buildMergeTraceReason, CI_LIFECYCLE_LABELS, CI_LIFECYCLE_LABEL_META, lifecycleLabelFromCiTruth, planCiLifecycleLabelUpdate, hasStaleReviewPendingBesideAccept, remoteManifestApiArgs, landedIdsForCandidate, isAiGeneratedPr, isMechanicalMergeCommit } from '../merge-ai-prs.mjs';
+import { labelOnGreenVerdict, isRequiredCheckGreen, isRequiredCheckFailed, isRequiredCheckPending, hasLabel, classifyPr, isRebaseDropCandidate, needsManifestStripBeforeMerge, restampAcceptance, spawnReviewSetLabel, isStackedWeCoupleHalf, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, pushNumberingOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, drainReasonMarker, buildDrainReasonComment, buildHeldReviewHoldReason, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON, MERGE_TRACE_KIND, buildMergeTraceReason, CI_LIFECYCLE_LABELS, CI_LIFECYCLE_LABEL_META, lifecycleLabelFromCiTruth, planCiLifecycleLabelUpdate, hasStaleReviewPendingBesideAccept, remoteManifestApiArgs, landedIdsForCandidate, isAiGeneratedPr, isMechanicalMergeCommit } from '../merge-ai-prs.mjs';
 import { REVIEW_LABELS, READY_TO_MERGE_LABEL } from '../lib/review-escalation.mjs';
 import { claudeCommit, humanCommit, greenRollup, aiPr } from './fixtures/merge-ai-prs-fixtures.mjs';
 
@@ -131,6 +131,59 @@ describe('isRequiredCheckFailed (#2421 — the ci:failed twin of isRequiredCheck
     expect(isRequiredCheckFailed({ statusCheckRollup: [{ name: 'test', conclusion: '' }] })).toBe(false); // pending
     expect(isRequiredCheckFailed({ statusCheckRollup: [] })).toBe(false); // not yet reported at all
     expect(isRequiredCheckFailed({ statusCheckRollup: [{ name: 'cla', conclusion: 'FAILURE' }] })).toBe(false); // non-required
+  });
+});
+
+// we:backlog/heal-wait-for-rerun (landing-freeze fix, 2026-09-27) — the third member of the green/failed pair.
+describe('isRequiredCheckPending (heal-wait-for-rerun — the third state green/failed leave out)', () => {
+  it('a check present but not yet concluded (CheckRun in flight, or a legacy StatusContext PENDING state) → pending', () => {
+    expect(isRequiredCheckPending({ statusCheckRollup: [{ name: 'test', conclusion: '', status: 'IN_PROGRESS' }] })).toBe(true);
+    expect(isRequiredCheckPending({ statusCheckRollup: [{ name: 'test', state: 'PENDING' }] })).toBe(true);
+  });
+  it('a concluded check, either way → NOT pending', () => {
+    expect(isRequiredCheckPending(aiPr())).toBe(false); // SUCCESS
+    expect(isRequiredCheckPending({ statusCheckRollup: [{ name: 'test', conclusion: 'FAILURE' }] })).toBe(false);
+  });
+  it('a check never reported at all → NOT pending either (silence, not evidence — a caller\'s own empty-rollup fallback owns that case)', () => {
+    expect(isRequiredCheckPending({ statusCheckRollup: [] })).toBe(false);
+  });
+  it('a non-required check in flight is ignored, exactly like its green/failed siblings', () => {
+    expect(isRequiredCheckPending({ statusCheckRollup: [{ name: 'cla', conclusion: '', status: 'IN_PROGRESS' }] })).toBe(false);
+  });
+
+  // PR #2787 review finding — exhaustiveness over every real GitHub state. "Pending" means NOT YET CONCLUDED,
+  // never "neither green nor failed": a SKIPPED/NEUTRAL/STALE conclusion is terminal and will never re-run.
+  // Invariant: at most one of green/failed/pending holds, and pending holds ONLY for an in-flight state.
+  const at = (row) => ({ statusCheckRollup: [{ name: 'test', ...row }] });
+  const states = (p) => [isRequiredCheckGreen(p), isRequiredCheckFailed(p), isRequiredCheckPending(p)];
+  it.each([
+    ['SUCCESS', [true, false, false]],
+    ['FAILURE', [false, true, false]],
+    ['CANCELLED', [false, true, false]],
+    ['TIMED_OUT', [false, true, false]],
+    ['ACTION_REQUIRED', [false, true, false]],
+    ['STARTUP_FAILURE', [false, true, false]],
+    ['NEUTRAL', [false, false, false]],
+    ['SKIPPED', [false, false, false]],
+    ['STALE', [false, false, false]],
+  ])('CheckRun COMPLETED with conclusion %s → [green, failed, pending] = %j', (conclusion, expected) => {
+    expect(states(at({ __typename: 'CheckRun', status: 'COMPLETED', conclusion }))).toEqual(expected);
+  });
+  it.each(['QUEUED', 'IN_PROGRESS', 'WAITING', 'PENDING', 'REQUESTED'])('CheckRun status %s (no conclusion yet) → pending only', (status) => {
+    expect(states(at({ __typename: 'CheckRun', status, conclusion: '' }))).toEqual([false, false, true]);
+    expect(states(at({ __typename: 'CheckRun', status, conclusion: null }))).toEqual([false, false, true]);
+  });
+  it.each([
+    ['SUCCESS', [true, false, false]],
+    ['FAILURE', [false, true, false]],
+    ['ERROR', [false, true, false]],
+    ['PENDING', [false, false, true]],
+    ['EXPECTED', [false, false, true]],
+  ])('StatusContext state %s → [green, failed, pending] = %j', (state, expected) => {
+    expect(states({ statusCheckRollup: [{ __typename: 'StatusContext', context: 'test', state }] })).toEqual(expected);
+  });
+  it('a COMPLETED CheckRun with an empty conclusion is NOT pending (it finished — never wait forever on it)', () => {
+    expect(isRequiredCheckPending(at({ status: 'COMPLETED', conclusion: '' }))).toBe(false);
   });
 });
 
