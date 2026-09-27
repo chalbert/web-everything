@@ -94,6 +94,17 @@ afterEach(() => {
   if (testCoordinationRoot) rmSync(testCoordinationRoot, { recursive: true, force: true });
 });
 
+// ci-heal PR #2794: keep every test off the host's REAL `gh`-throttle semaphore. `ghThrottleLockRoot` is
+// cwd-independent (falls back to `$HOME/workspace/.lanes/.admission/gh` when neither `WE_GH_THROTTLE_LOCK_ROOT`
+// nor `LANE_POOL_ROOT` is set), so any test running a `gh` call through `gh-throttle.mjs` in-process, or a child
+// that inherits this env, would otherwise create that real directory — caught in CI, where it tripped the
+// scenario simulator's real-state isolation check (`sim-scenario-lane-starvation.test.mjs`). Set in BOTH tiers
+// (outside the sandbox block): the integration tier proves real `gh`, never the host's real throttle state.
+// Tests of the resolution itself pass an explicit `env`, so this default never reaches them.
+if (process.env.WE_GH_THROTTLE_LOCK_ROOT === undefined) {
+  process.env.WE_GH_THROTTLE_LOCK_ROOT = mkdtempSync(join(tmpdir(), 'we-gh-throttle-test-'));
+}
+
 // #3383 bugfix: default the delivery-telemetry recorder OFF for the whole unit/integration test run, so
 // wrapper tests (`deliver-item-wrapper.test.mjs` and siblings, plus the real-subprocess integration suite)
 // that exercise the real dispatch wrappers through `createTelemetryRecorder()`/`recorderFor()` — with
