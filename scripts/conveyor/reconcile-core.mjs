@@ -133,7 +133,7 @@ import {
   isPrCiFailureOwedRerun, countRebaseOntoMainComments, DEFAULT_MAX_REBASE_RETRIES_PER_SHA,
   // landing-freeze fix (2026-09-27) — used only to word the `owed-ci-rerun` refusal's `why` accurately when
   // THIS path (not the red-window one) is what actually granted it; see that function's own docblock.
-  isMainLatestCheckGreen,
+  classifyCiFailureAttribution,
 } from './main-red-recovery.mjs';
 // #2588/review-loops (epic #3383/#4075) — read-only reuse of the drain's OWN reviewed-sha marker (never a
 // second derivation): `parseReviewedSha` recovers the head an ACCEPT-shaped verdict (`accepted`/`clear-human`/
@@ -1049,9 +1049,15 @@ export function planReconcile({
       aheadByOnMain: Number.isFinite(pr?.aheadByOnMain) ? pr.aheadByOnMain : null,
       // landing-freeze fix (2026-09-27) — WHICH required check is the one currently failing (`reconcile-
       // pass.mjs#enrichPrsWithMainRedFacts`'s own `failingRequiredCheckForAttribution` result), so the `ci-red`
-      // branch below can ask `isMainLatestCheckGreen` about THIS SAME check on main's own latest completed run,
+      // branch below can ask `isMainGreenFixOwed` about THIS SAME check on main's own latest completed run,
       // never a different one. EVIDENCE ONLY here, same as its two siblings above.
       requiredCheckName: pr?.requiredCheckName ?? null,
+      // PR #2793 review — the per-PR proof the green-check path needs (`main-red-recovery.mjs#isMainGreenFixOwed`):
+      // does this PR already contain main's latest green commit for that check, and what did the check conclude
+      // at this PR's merge base with it. EVIDENCE ONLY, injected by the IO shell; absent reads never excuse.
+      prContainsMainGreenSha: typeof pr?.prContainsMainGreenSha === 'boolean' ? pr.prContainsMainGreenSha : null,
+      mergeBaseCheckRuns: Array.isArray(pr?.mergeBaseCheckRuns) ? pr.mergeBaseCheckRuns : null,
+      mergeBaseRunConclusion: typeof pr?.mergeBaseRunConclusion === 'string' ? pr.mergeBaseRunConclusion : null,
     };
     const refuse = (kind, extra) => { refusals.push({ ...base, kind, ...extra }); };
     // xilx617 (epic #4075/#3383) — EVERY `cap-exhausted` refusal EXCEPT the `ci-red` one above (which already
@@ -1226,8 +1232,13 @@ export function planReconcile({
         mainRedWindows,
         failingCheckName: base.requiredCheckName,
         mainLatestCheckRuns,
+        prContainsMainGreenSha: base.prContainsMainGreenSha,
+        mergeBaseCheckRuns: base.mergeBaseCheckRuns,
+        mergeBaseRunConclusion: base.mergeBaseRunConclusion,
       })) {
-        const viaMainGreen = isMainLatestCheckGreen({ failingCheckName: base.requiredCheckName, mainLatestCheckRuns });
+        const viaMainGreen = classifyCiFailureAttribution({
+          failureCompletedAt: base.requiredCheckCompletedAt, mainRedWindows,
+        }) !== 'main-red';
         refuse('owed-ci-rerun', {
           ...withPhase,
           why: viaMainGreen

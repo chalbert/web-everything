@@ -275,6 +275,65 @@ export function isMainLatestCheckGreen({ failingCheckName = null, mainLatestChec
 }
 
 /**
+ * we:scripts/conveyor/main-red-recovery.mjs#mainLatestGreenShaForCheck — the commit `main`'s own latest green
+ * result for `failingCheckName` was built on (the check-run's own `head_sha`), or `null` when the check is not
+ * green there or the row names no sha. PURE. The IO shell uses it to ask "does this PR already contain it?".
+ * @param {{failingCheckName?:(string|null), mainLatestCheckRuns?:(Array<object>|null)}} [o]
+ * @returns {string|null}
+ */
+export function mainLatestGreenShaForCheck({ failingCheckName = null, mainLatestCheckRuns = null } = {}) {
+  if (!isMainLatestCheckGreen({ failingCheckName, mainLatestCheckRuns })) return null;
+  return collapseMainCheckRunsToLatestPerName(mainLatestCheckRuns).get(failingCheckName)?.head_sha || null;
+}
+
+/**
+ * we:scripts/conveyor/main-red-recovery.mjs#isMainGreenFixOwed — the landing-freeze-fix green-check excuse,
+ * with the evidence that `main` (not this PR) was actually responsible. PURE.
+ *
+ * PR #2793 review (CONFIRMED): "the check is green on main's latest run" alone is the ORDINARY state of a
+ * healthy `main` — it excused almost any PR-owned failure behind main as `owed-ci-rerun`, starving `ci-heal`.
+ * ALL of these must hold:
+ *   1. {@link isMainLatestCheckGreen} — the check passes on main's own latest completed run.
+ *   2. `prContainsMainGreenSha === false` — the PR does NOT already contain the commit that green run built
+ *      (read off `compare`, not `aheadBy`, which measures main's CURRENT tip and can be newer than the last
+ *      green run while CI is pending). `true` means main's fix is already in this PR; `null` (read failed) is
+ *      no evidence. Either falls through to `ci-heal`.
+ *   3. POSITIVE evidence `main` was broken for this check at this PR's merge base with that green commit
+ *      (`mergeBaseCheckRuns`, the check's own runs there): either the check concluded red there
+ *      ({@link MERGE_BASE_RED_CONCLUSIONS}), or it has no real result there (absent, or `skipped` — PR #2748's
+ *      `pull_request`-only `daemon-soak`) while that commit's own `CI` push run FINISHED un-cancelled
+ *      (`mergeBaseRunConclusion` `success`/`failure`) — i.e. main's CI ran and simply never tested it.
+ *      `success` there means main was fine when the PR branched: the failure is the PR's own. `cancelled`,
+ *      `neutral`, in-progress, or a base run that was cancelled / never read is NO evidence — main's CI cancels
+ *      superseded runs (`cancel-in-progress`), so a cancelled base is routine, not proof (repair self-review).
+ * Bounded: once a rebase lands, the PR contains that green commit (2 fails), and against any LATER green
+ * commit its merge base is the main commit it was rebased onto — where a cancelled or passing run is not
+ * evidence (3 fails) unless main's CI really ran it red or never ran the check at all.
+ * @param {{failingCheckName?:(string|null), mainLatestCheckRuns?:(Array<object>|null),
+ *   prContainsMainGreenSha?:(boolean|null), mergeBaseCheckRuns?:(Array<object>|null),
+ *   mergeBaseRunConclusion?:(string|null)}} [o]
+ * @returns {boolean}
+ */
+export function isMainGreenFixOwed({
+  failingCheckName = null, mainLatestCheckRuns = null, prContainsMainGreenSha = null, mergeBaseCheckRuns = null,
+  mergeBaseRunConclusion = null,
+} = {}) {
+  if (!isMainLatestCheckGreen({ failingCheckName, mainLatestCheckRuns })) return false;
+  if (prContainsMainGreenSha !== false) return false;
+  if (!Array.isArray(mergeBaseCheckRuns)) return false;
+  const atBase = collapseMainCheckRunsToLatestPerName(mergeBaseCheckRuns).get(failingCheckName);
+  const conclusion = String(atBase?.conclusion || '').toLowerCase();
+  if (MERGE_BASE_RED_CONCLUSIONS.includes(conclusion)) return true;
+  if (atBase && conclusion !== 'skipped') return false; // success, cancelled, neutral, in-progress — no proof.
+  return MERGE_BASE_FINISHED_RUN_CONCLUSIONS.includes(String(mergeBaseRunConclusion || '').toLowerCase());
+}
+
+/** Check conclusions at a PR's merge base that prove `main` was red for that check there. */
+export const MERGE_BASE_RED_CONCLUSIONS = Object.freeze(['failure', 'timed_out']);
+/** `CI` push-run conclusions that mean main's CI really FINISHED at a commit (never `cancelled`). */
+export const MERGE_BASE_FINISHED_RUN_CONCLUSIONS = Object.freeze(['success', 'failure']);
+
+/**
  * we:scripts/conveyor/main-red-recovery.mjs#isPrCiFailureOwedRerun — THE gate `reconcile-core.mjs` consults to
  * decide `owed-ci-rerun` (never a `ci-heal`) for a `ci-red` PR. PURE.
  *
@@ -311,20 +370,26 @@ export function isMainLatestCheckGreen({ failingCheckName = null, mainLatestChec
  * `main`-side regression, and point 1 alone stays permanently blind to it. When {@link isMainLatestCheckGreen}
  * says `failingCheckName` now passes on `main`'s own latest completed run, that is the SAME "this is not this
  * PR's own code" proof point 1 already accepts, reached a different way — so it grants the same verdict, gated
- * by the identical "not yet refreshed" test from point 2. `failingCheckName`/`mainLatestCheckRuns` omitted
+ * by the identical "not yet refreshed" test from point 2 — AND by the per-PR evidence {@link isMainGreenFixOwed}
+ * requires (PR #2793 review: a green `main` alone is the normal state, not proof). Any of those facts omitted
  * (a caller that never reads them) makes this new path always `false` — byte-identical to before it existed.
  * @param {{requiredCheckCompletedAt?:(string|null), aheadBy?:(number|null), mainRedWindows?:Array<object>,
- *   failingCheckName?:(string|null), mainLatestCheckRuns?:(Array<object>|null)}} o
+ *   failingCheckName?:(string|null), mainLatestCheckRuns?:(Array<object>|null),
+ *   prContainsMainGreenSha?:(boolean|null), mergeBaseCheckRuns?:(Array<object>|null),
+ *   mergeBaseRunConclusion?:(string|null)}} o
  * @returns {boolean}
  */
 export function isPrCiFailureOwedRerun({
   requiredCheckCompletedAt, aheadBy, mainRedWindows, failingCheckName = null, mainLatestCheckRuns = null,
+  prContainsMainGreenSha = null, mergeBaseCheckRuns = null, mergeBaseRunConclusion = null,
 } = {}) {
   const behind = Number.isFinite(aheadBy) ? aheadBy : null;
   if (behind === 0) return false; // already current — neither path below can still owe a rerun (point 2).
   const attribution = classifyCiFailureAttribution({ failureCompletedAt: requiredCheckCompletedAt, mainRedWindows });
   if (attribution === 'main-red') return true;
-  return isMainLatestCheckGreen({ failingCheckName, mainLatestCheckRuns });
+  return isMainGreenFixOwed({
+    failingCheckName, mainLatestCheckRuns, prContainsMainGreenSha, mergeBaseCheckRuns, mergeBaseRunConclusion,
+  });
 }
 
 /**
@@ -348,15 +413,16 @@ export function isPrCiFailureOwedRerun({
  *      `action:'current'` short-circuit once this pass has already refreshed a PR once.
  *   5. Otherwise → `rebase-onto-main` dispatch.
  *
- * LANDING-FREEZE FIX (2026-09-27) — check 1 now ALSO admits a candidate whose `failingCheckName` is
- * {@link isMainLatestCheckGreen} on `main`'s own latest completed run, even when `mainRedWindows` attribution
+ * LANDING-FREEZE FIX (2026-09-27) — check 1 now ALSO admits a candidate that {@link isMainGreenFixOwed} excuses
+ * (its `failingCheckName` green on `main`'s own latest completed run, the PR lacking that green commit, and the
+ * check not already green at the PR's merge base — PR #2793 review), even when `mainRedWindows` attribution
  * says `own-failure`/`unknown` (see {@link isPrCiFailureOwedRerun}'s own docblock for why: a check that never
  * ran on `main` during the regression window opens no red window to attribute against, retroactively, however
  * red it really was). Checked 2 (`main-still-red`) still applies UNCHANGED to this admitted population — a
  * DIFFERENT required check still failing on `main`'s own latest run means `main` is not actually safe to
  * rebase onto yet, whatever this ONE check's own conclusion says.
  * @param {object} o
- * @param {Array<{prNumber:number, headRefName?:(string|null), aheadBy?:(number|null), failureCompletedAt?:(string|null), failingCheckName?:(string|null)}>} [o.candidates]
+ * @param {Array<{prNumber:number, headRefName?:(string|null), aheadBy?:(number|null), failureCompletedAt?:(string|null), failingCheckName?:(string|null), prContainsMainGreenSha?:(boolean|null), mergeBaseCheckRuns?:(Array<object>|null), mergeBaseRunConclusion?:(string|null)}>} [o.candidates]
  * @param {Array<{start:string, end:(string|null)}>} [o.mainRedWindows]
  * @param {Array<object>} [o.mainLatestCheckRuns] - `main`'s own latest completed run's per-check conclusions
  *   (`GET /repos/.../commits/<sha>/check-runs`'s `check_runs`); defaults to `[]` — a caller that never reads it
@@ -382,9 +448,13 @@ export function planMainRedRebases({
       failingCheckName: c?.failingCheckName ?? null,
     };
     const attribution = classifyCiFailureAttribution({ failureCompletedAt: base.failureCompletedAt, mainRedWindows });
-    // landing-freeze fix — see this function's own docblock and `isMainLatestCheckGreen`'s.
-    const mainGreenForCheck = attribution !== 'main-red'
-      && isMainLatestCheckGreen({ failingCheckName: base.failingCheckName, mainLatestCheckRuns });
+    // landing-freeze fix — see this function's own docblock and `isMainGreenFixOwed`'s (PR #2793 review: main
+    // green alone is not proof; the candidate must carry the per-PR merge-base / containment evidence too).
+    const mainGreenForCheck = attribution !== 'main-red' && isMainGreenFixOwed({
+      failingCheckName: base.failingCheckName, mainLatestCheckRuns,
+      prContainsMainGreenSha: c?.prContainsMainGreenSha ?? null, mergeBaseCheckRuns: c?.mergeBaseCheckRuns ?? null,
+      mergeBaseRunConclusion: c?.mergeBaseRunConclusion ?? null,
+    });
 
     if (attribution !== 'main-red' && !mainGreenForCheck) {
       refusals.push({

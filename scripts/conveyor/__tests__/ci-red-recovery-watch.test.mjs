@@ -90,15 +90,48 @@ describe('ci-red-recovery-watch — a daemon-soak-only red PR with NO red window
       { __typename: 'CheckRun', name: 'daemon-soak', status: 'COMPLETED', conclusion: 'FAILURE', completedAt: '2026-09-27T02:36:03Z' },
     ],
   };
-  const mainLatestCheckRuns = [{ name: 'daemon-soak', conclusion: 'success', status: 'completed', completed_at: '2026-09-27T03:56:55Z' }];
+  const mainLatestCheckRuns = [{ name: 'daemon-soak', conclusion: 'success', status: 'completed', completed_at: '2026-09-27T03:56:55Z', head_sha: 'green-sha' }];
+  // #2748's merge base never ran daemon-soak on `main` (pull_request-only job) and lacks main's green commit.
+  const noSoakAtBase = () => ({ prContainsMainGreenSha: false, mergeBaseCheckRuns: [], mergeBaseRunConclusion: 'success' });
 
   it('dispatches rebase-onto-main even with an EMPTY mainRedWindows history, once main\'s own latest run shows daemon-soak green', () => {
+    const readMainGreenFixFacts = vi.fn(noSoakAtBase);
     const result = sweepCiRedRecovery({
       readOpenPrs: () => [stuckPr], readMainRuns: () => [], readAheadBy: () => 5, readComments: () => [],
       readRequiredContexts: () => ['test', 'smoke', 'daemon-soak'], readMainLatestCheckRuns: () => mainLatestCheckRuns,
-      refresh: vi.fn(),
+      readMainGreenFixFacts, refresh: vi.fn(),
     });
     expect(result.dispatch).toEqual([expect.objectContaining({ prNumber: 2748, kind: 'rebase-onto-main', aheadBy: 5 })]);
+    expect(readMainGreenFixFacts).toHaveBeenCalledWith('dfb57d0', expect.objectContaining({ greenSha: 'green-sha', checkName: 'daemon-soak' }));
+  });
+
+  // PR #2793 review — the acting pass must not rebase a plain PR-owned failure behind a healthy main.
+  it('refuses own-failure (no rebase, no comment read) when daemon-soak was already green at the PR\'s merge base', () => {
+    const readComments = vi.fn(() => []);
+    const result = sweepCiRedRecovery({
+      readOpenPrs: () => [stuckPr], readMainRuns: () => [], readAheadBy: () => 5, readComments,
+      readRequiredContexts: () => ['test', 'smoke', 'daemon-soak'], readMainLatestCheckRuns: () => mainLatestCheckRuns,
+      readMainGreenFixFacts: () => ({
+        prContainsMainGreenSha: false,
+        mergeBaseCheckRuns: [{ name: 'daemon-soak', conclusion: 'success', status: 'completed', completed_at: '2026-09-26T00:00:00Z' }],
+      }),
+      refresh: vi.fn(),
+    });
+    expect(result.refusals).toEqual([expect.objectContaining({ prNumber: 2748, kind: 'own-failure' })]);
+    expect(result.dispatch).toEqual([]);
+    expect(readComments).not.toHaveBeenCalled();
+  });
+
+  it('reads main\'s run list ONCE and hands it to readMainLatestCheckRuns (no second gh run list)', () => {
+    const readMainRuns = vi.fn(() => []);
+    const readMainLatestCheckRuns = vi.fn(() => mainLatestCheckRuns);
+    sweepCiRedRecovery({
+      readOpenPrs: () => [stuckPr], readMainRuns, readAheadBy: () => 5, readComments: () => [],
+      readRequiredContexts: () => ['test', 'smoke', 'daemon-soak'], readMainLatestCheckRuns,
+      readMainGreenFixFacts: noSoakAtBase, refresh: vi.fn(),
+    });
+    expect(readMainRuns).toHaveBeenCalledTimes(1);
+    expect(readMainLatestCheckRuns).toHaveBeenCalledWith(expect.objectContaining({ mainRuns: [] }));
   });
 
   it('still refuses own-failure when main\'s own latest run never reported daemon-soak at all — never a guess', () => {

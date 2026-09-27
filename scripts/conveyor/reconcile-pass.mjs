@@ -77,6 +77,8 @@ import {
   // `main`'s own latest completed run's headSha, so the IO shell can fetch THAT commit's own per-check
   // conclusions. See `main-red-recovery.mjs`'s own "LANDING-FREEZE FIX" section header for the incident.
   latestCompletedMainRun,
+  // PR #2793 review — the per-PR evidence the green-check path now also requires (see `isMainGreenFixOwed`).
+  mainLatestGreenShaForCheck,
 } from './main-red-recovery.mjs';
 import { readHungInfo, resolveHungThresholdMs, readClaudeAuthExpiredInfo, readIdleFinishedInfo, resolveIdleFinishedThresholdMs } from './hung-session.mjs';
 
@@ -298,25 +300,103 @@ export function defaultReadMainRuns({
  * ANY failure (no run has completed yet, no `gh`, a network hiccup) degrades to `[]` — never thrown — so one
  * bad read cannot break the whole pass; `isMainLatestCheckGreen` already treats an empty/absent list as "no
  * evidence" (never a guess in either direction).
- * @param {{exec?:Function, repo?:string|null, branch?:string, workflowName?:string, readMainRuns?:Function}} [o]
+ *
+ * `mainRuns` (PR #2793 review) — `main`'s run list the caller ALREADY fetched for `mainRedWindows`; passed in,
+ * no second `gh run list` is made. `?per_page=100` (same review): the endpoint's default page is 30 check-runs,
+ * and a busy commit can carry more — a check pushed to page 2 would silently read as "never reported".
+ * @param {{exec?:Function, repo?:string|null, branch?:string, workflowName?:string, readMainRuns?:Function,
+ *   mainRuns?:(Array<object>|null)}} [o]
  * @returns {Array<object>}
  */
 export function defaultReadMainLatestCheckRuns({
   exec = execFileSyncThrottled, repo = null, branch = 'main', workflowName = DEFAULT_MAIN_WORKFLOW_NAME,
-  readMainRuns = defaultReadMainRuns,
+  readMainRuns = defaultReadMainRuns, mainRuns = null,
 } = {}) {
   if (!repo) return [];
   try {
-    const latest = latestCompletedMainRun(readMainRuns({ exec, repo, branch, workflowName }));
+    const runs = Array.isArray(mainRuns) ? mainRuns : readMainRuns({ exec, repo, branch, workflowName });
+    const latest = latestCompletedMainRun(runs);
     if (!latest?.headSha) return [];
-    const out = exec('gh', ['api', `repos/${repo}/commits/${latest.headSha}/check-runs`, '--jq', '.check_runs'], {
-      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 16 * 1024 * 1024,
-      timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL',
-    });
-    const parsed = JSON.parse(String(out || '[]'));
-    return Array.isArray(parsed) ? parsed : [];
+    return readCommitCheckRuns(latest.headSha, { exec, repo });
   } catch {
     return [];
+  }
+}
+
+// One commit's check-runs (`GET /repos/.../commits/<sha>/check-runs`), 100 per page, optionally narrowed to one
+// check name. THROWS on failure — each caller decides what "unread" means for it.
+function readCommitCheckRuns(sha, { exec, repo, checkName = null }) {
+  const query = checkName ? `?check_name=${encodeURIComponent(checkName)}&per_page=100` : '?per_page=100';
+  const out = exec('gh', ['api', `repos/${repo}/commits/${sha}/check-runs${query}`, '--jq', '.check_runs'], {
+    encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 16 * 1024 * 1024,
+    timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL',
+  });
+  const parsed = JSON.parse(String(out || '[]'));
+  return Array.isArray(parsed) ? parsed : [];
+}
+
+/**
+ * we:scripts/conveyor/reconcile-pass.mjs#defaultReadMainGreenFixFacts — PR #2793 review: the per-PR evidence
+ * `main-red-recovery.mjs#isMainGreenFixOwed` needs before "green on main now" may excuse a failure:
+ *   - `prContainsMainGreenSha` — does `headSha` already contain `greenSha` (`compare/<greenSha>...<headSha>`'s
+ *     own `behind_by === 0`)?
+ *   - `mergeBaseCheckRuns` — `checkName`'s check-runs at that compare's `merge_base_commit` (only read when the
+ *     PR does NOT contain `greenSha`; otherwise the answer is already "not owed").
+ *   - `mergeBaseRunConclusion` — the merge base's own `CI` push-run conclusion, read only when the check has no
+ *     real result there (absent / `skipped`), so a cancelled run is never mistaken for "main never ran it".
+ * Best-effort: no repo/sha/name, or ANY failure, yields `null` for what could not be read — which
+ * `isMainGreenFixOwed` treats as no evidence, so ci-heal keeps the PR. Never thrown.
+ * @param {string} headSha
+ * @param {{exec?:Function, repo?:string|null, greenSha?:string|null, checkName?:string|null, workflowName?:string}} [o]
+ * @returns {{prContainsMainGreenSha:(boolean|null), mergeBaseCheckRuns:(Array<object>|null), mergeBaseRunConclusion:(string|null)}}
+ */
+export function defaultReadMainGreenFixFacts(headSha, {
+  exec = execFileSyncThrottled, repo = null, greenSha = null, checkName = null, workflowName = DEFAULT_MAIN_WORKFLOW_NAME,
+} = {}) {
+  const none = { prContainsMainGreenSha: null, mergeBaseCheckRuns: null, mergeBaseRunConclusion: null };
+  if (!repo || !headSha || !greenSha || !checkName) return none;
+  let behindBy;
+  let mergeBase;
+  try {
+    const out = exec('gh', [
+      'api', '--method', 'GET', `repos/${repo}/compare/${greenSha}...${headSha}`,
+      '--jq', '{behind_by: .behind_by, merge_base: .merge_base_commit.sha}',
+    ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL' });
+    const parsed = JSON.parse(String(out || '{}'));
+    behindBy = Number(parsed?.behind_by);
+    mergeBase = parsed?.merge_base || null;
+  } catch {
+    return none;
+  }
+  if (!Number.isFinite(behindBy)) return none;
+  if (behindBy === 0) return { ...none, prContainsMainGreenSha: true };
+  if (!mergeBase) return { ...none, prContainsMainGreenSha: false };
+  let mergeBaseCheckRuns;
+  try {
+    mergeBaseCheckRuns = readCommitCheckRuns(mergeBase, { exec, repo, checkName });
+  } catch {
+    return { ...none, prContainsMainGreenSha: false };
+  }
+  // No real result for the check at the base (absent / `skipped`) only counts if main's own CI push run there
+  // FINISHED un-cancelled — read only in that case (`isMainGreenFixOwed` point 3).
+  const hasRealResult = mergeBaseCheckRuns.some((c) => c?.name === checkName && String(c?.conclusion || '').toLowerCase() !== 'skipped');
+  const mergeBaseRunConclusion = hasRealResult ? null : readMainCiRunConclusion(mergeBase, { exec, repo, workflowName });
+  return { prContainsMainGreenSha: false, mergeBaseCheckRuns, mergeBaseRunConclusion };
+}
+
+// The newest COMPLETED `workflowName` push run's conclusion at `sha`, or `null` (none completed / read failed).
+function readMainCiRunConclusion(sha, { exec, repo, workflowName }) {
+  try {
+    const out = exec('gh', [
+      'api', '--method', 'GET', `repos/${repo}/actions/runs?head_sha=${sha}&event=push&per_page=100`, '--jq', '.workflow_runs',
+    ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 16 * 1024 * 1024, timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL' });
+    const runs = JSON.parse(String(out || '[]'));
+    const completed = (Array.isArray(runs) ? runs : [])
+      .filter((r) => r?.name === workflowName && String(r?.status).toLowerCase() === 'completed')
+      .sort((a, b) => Date.parse(b?.updated_at || 0) - Date.parse(a?.updated_at || 0));
+    return completed[0]?.conclusion ?? null;
+  } catch {
+    return null;
   }
 }
 
@@ -370,12 +450,17 @@ export function defaultReadAheadBy(headSha, { exec = execFileSyncThrottled, repo
  * (`mainLatestCheckRuns`, {@link defaultReadMainLatestCheckRuns}), gated on the SAME "at least one PR needs it"
  * condition as `mainRedWindows` — the second, retrospection-independent fact `isPrCiFailureOwedRerun`'s new
  * green-check path needs. See `main-red-recovery.mjs`'s own "LANDING-FREEZE FIX" section header for the incident.
- * @param {{readMainRuns?:Function, readAheadBy?:Function, readMainLatestCheckRuns?:Function, requiredCheck?:string, requiredChecks?:string[], defaultBranch?:string, repo?:string|null}} [o]
+ * PR #2793 review: `main`'s run list is read ONCE and handed to `readMainLatestCheckRuns` (no second `gh run
+ * list`), and a failing PR whose check IS green on main's latest run also gets `prContainsMainGreenSha` /
+ * `mergeBaseCheckRuns` ({@link defaultReadMainGreenFixFacts}) — the evidence that main, not the PR, was at fault.
+ * @param {{readMainRuns?:Function, readAheadBy?:Function, readMainLatestCheckRuns?:Function,
+ *   readMainGreenFixFacts?:Function, requiredCheck?:string, requiredChecks?:string[], defaultBranch?:string,
+ *   repo?:string|null}} [o]
  * @returns {{prs:Array<object>, mainRedWindows:Array<object>, mainLatestCheckRuns:Array<object>}}
  */
 export function enrichPrsWithMainRedFacts(prs, {
   readMainRuns = defaultReadMainRuns, readAheadBy = defaultReadAheadBy,
-  readMainLatestCheckRuns = defaultReadMainLatestCheckRuns,
+  readMainLatestCheckRuns = defaultReadMainLatestCheckRuns, readMainGreenFixFacts = defaultReadMainGreenFixFacts,
   requiredCheck = null, requiredChecks = DEFAULT_MAIN_RED_ATTRIBUTED_CHECKS, defaultBranch = 'main', repo = null,
 } = {}) {
   const checks = requiredCheck ? [requiredCheck] : requiredChecks;
@@ -383,14 +468,23 @@ export function enrichPrsWithMainRedFacts(prs, {
   const failing = list.filter((pr) => isAnyRequiredCheckFailed(pr, checks));
   if (!failing.length) return { prs: list, mainRedWindows: [], mainLatestCheckRuns: [] };
 
-  const mainRedWindows = computeMainRedWindows(readMainRuns({ repo, branch: defaultBranch }));
-  const mainLatestCheckRuns = readMainLatestCheckRuns({ repo, branch: defaultBranch });
+  const mainRuns = readMainRuns({ repo, branch: defaultBranch });
+  const mainRedWindows = computeMainRedWindows(mainRuns);
+  const mainLatestCheckRuns = readMainLatestCheckRuns({ repo, branch: defaultBranch, mainRuns });
   const failingSet = new Set(failing);
   const enriched = list.map((pr) => {
     if (!failingSet.has(pr)) return pr;
     const check = failingRequiredCheckForAttribution(pr, { requiredChecks: checks, mainRedWindows });
     const aheadBy = pr?.headRefOid ? readAheadBy(pr.headRefOid, { repo, base: defaultBranch }) : null;
-    return { ...pr, requiredCheckCompletedAt: check?.completedAt ?? null, requiredCheckName: check?.name ?? null, aheadByOnMain: aheadBy };
+    const greenSha = mainLatestGreenShaForCheck({ failingCheckName: check?.name ?? null, mainLatestCheckRuns });
+    const greenFix = greenSha && aheadBy !== 0
+      ? readMainGreenFixFacts(pr.headRefOid, { repo, greenSha, checkName: check.name })
+      : null;
+    return {
+      ...pr, requiredCheckCompletedAt: check?.completedAt ?? null, requiredCheckName: check?.name ?? null, aheadByOnMain: aheadBy,
+      prContainsMainGreenSha: greenFix?.prContainsMainGreenSha ?? null, mergeBaseCheckRuns: greenFix?.mergeBaseCheckRuns ?? null,
+      mergeBaseRunConclusion: greenFix?.mergeBaseRunConclusion ?? null,
+    };
   });
   return { prs: enriched, mainRedWindows, mainLatestCheckRuns };
 }

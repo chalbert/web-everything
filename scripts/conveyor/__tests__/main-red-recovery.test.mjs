@@ -179,9 +179,11 @@ describe('main-red-recovery — isPrCiFailureOwedRerun, the landing-freeze-fix g
   ];
 
   it('true for a daemon-soak failure outside every red window, when daemon-soak is green on main\'s own latest run and the PR is behind (PR #2748\'s real shape)', () => {
+    // #2748's base never ran daemon-soak on `main` at all (the job was pull_request-only) — no result there.
     expect(isPrCiFailureOwedRerun({
       requiredCheckCompletedAt: '2026-09-27T02:36:03Z', aheadBy: 5, mainRedWindows: [],
-      failingCheckName: 'daemon-soak', mainLatestCheckRuns,
+      failingCheckName: 'daemon-soak', mainLatestCheckRuns, prContainsMainGreenSha: false, mergeBaseCheckRuns: [],
+      mergeBaseRunConclusion: 'success',
     })).toBe(true);
   });
 
@@ -201,6 +203,78 @@ describe('main-red-recovery — isPrCiFailureOwedRerun, the landing-freeze-fix g
 
   it('omitting failingCheckName/mainLatestCheckRuns entirely never grants this path — byte-identical to before it existed', () => {
     expect(isPrCiFailureOwedRerun({ requiredCheckCompletedAt: '2026-09-27T02:36:03Z', aheadBy: 5, mainRedWindows: [] })).toBe(false);
+  });
+
+  // PR #2793 review (correctness, CONFIRMED): "main's latest run is green for this check" is the ordinary state
+  // of a healthy `main`, not proof `main` caused this failure. The green-check path must NOT fire for a plain
+  // PR-owned failure — a PR whose own base commit already had this check green, i.e. `main` was never broken for
+  // it from this PR's point of view.
+  it('false for a plain PR-owned failure: no red window, main green, and the check was ALREADY green at the PR\'s merge base', () => {
+    expect(isPrCiFailureOwedRerun({
+      requiredCheckCompletedAt: '2026-01-01T00:00:00Z', aheadBy: 3, mainRedWindows: [],
+      failingCheckName: 'test', mainLatestCheckRuns: [{ name: 'test', conclusion: 'success', status: 'completed', completed_at: '2026-09-27T04:00:10Z', head_sha: 'green' }],
+      prContainsMainGreenSha: false,
+      mergeBaseCheckRuns: [{ name: 'test', conclusion: 'success', status: 'completed', completed_at: '2025-12-31T00:00:00Z' }],
+    })).toBe(false);
+  });
+
+  it('false with the reviewer\'s exact shape (no merge-base / containment evidence at all) — absence of evidence never excuses', () => {
+    expect(isPrCiFailureOwedRerun({
+      requiredCheckCompletedAt: '2026-01-01T00:00:00Z', aheadBy: 3, mainRedWindows: [],
+      failingCheckName: 'test', mainLatestCheckRuns: [{ name: 'test', conclusion: 'success', status: 'completed', completed_at: '2026-09-27T04:00:10Z', head_sha: 'green' }],
+    })).toBe(false);
+  });
+
+  // PR #2793 review (codex-correctness, CONFIRMED): `aheadBy` is measured against main's CURRENT tip, which can
+  // be newer (CI still pending) than the commit main's latest GREEN run built. A PR that already contains that
+  // green commit has already received main's fix — still red is its own failure.
+  it('does not excuse a PR containing the green run SHA when main has newer pending commits', () => {
+    expect(isPrCiFailureOwedRerun({
+      requiredCheckCompletedAt: '2026-09-27T02:36:03Z', aheadBy: 2, mainRedWindows: [],
+      failingCheckName: 'daemon-soak', mainLatestCheckRuns,
+      prContainsMainGreenSha: true, mergeBaseCheckRuns: null,
+    })).toBe(false);
+  });
+
+  it('false when whether the PR contains the green SHA is unknown (the compare read failed) — never a guess', () => {
+    expect(isPrCiFailureOwedRerun({
+      requiredCheckCompletedAt: '2026-09-27T02:36:03Z', aheadBy: 5, mainRedWindows: [],
+      failingCheckName: 'daemon-soak', mainLatestCheckRuns, prContainsMainGreenSha: null, mergeBaseCheckRuns: [],
+      mergeBaseRunConclusion: 'success',
+    })).toBe(false);
+  });
+
+  // Repair self-review (HIGH): main's CI cancels superseded runs (`cancel-in-progress`), so a cancelled / in-
+  // progress / neutral result at the merge base is routine — never proof main was broken.
+  it.each([
+    ['cancelled check at the base', [{ name: 'daemon-soak', conclusion: 'cancelled', status: 'completed', completed_at: 'x' }], 'cancelled'],
+    ['in-progress check at the base', [{ name: 'daemon-soak', conclusion: null, status: 'in_progress', completed_at: null }], null],
+    ['neutral check at the base', [{ name: 'daemon-soak', conclusion: 'neutral', status: 'completed', completed_at: 'x' }], 'success'],
+    ['skipped check, base CI run cancelled', [{ name: 'daemon-soak', conclusion: 'skipped', status: 'completed', completed_at: 'x' }], 'cancelled'],
+    ['absent check, base CI run never completed', [], null],
+  ])('false for %s — no evidence main was broken', (_label, mergeBaseCheckRuns, mergeBaseRunConclusion) => {
+    expect(isPrCiFailureOwedRerun({
+      requiredCheckCompletedAt: '2026-09-27T02:36:03Z', aheadBy: 5, mainRedWindows: [],
+      failingCheckName: 'daemon-soak', mainLatestCheckRuns, prContainsMainGreenSha: false,
+      mergeBaseCheckRuns, mergeBaseRunConclusion,
+    })).toBe(false);
+  });
+
+  it('true for a skipped check at the base when the base\'s CI push run FINISHED (the live pre-#2790 shape)', () => {
+    expect(isPrCiFailureOwedRerun({
+      requiredCheckCompletedAt: '2026-09-27T02:36:03Z', aheadBy: 5, mainRedWindows: [],
+      failingCheckName: 'daemon-soak', mainLatestCheckRuns, prContainsMainGreenSha: false,
+      mergeBaseCheckRuns: [{ name: 'daemon-soak', conclusion: 'skipped', status: 'completed', completed_at: 'x' }],
+      mergeBaseRunConclusion: 'success',
+    })).toBe(true);
+  });
+
+  it('true when the check was RED at the PR\'s merge base (main ran it and it failed there), and is green on main now', () => {
+    expect(isPrCiFailureOwedRerun({
+      requiredCheckCompletedAt: '2026-09-27T02:36:03Z', aheadBy: 5, mainRedWindows: [],
+      failingCheckName: 'daemon-soak', mainLatestCheckRuns, prContainsMainGreenSha: false,
+      mergeBaseCheckRuns: [{ name: 'daemon-soak', conclusion: 'failure', status: 'completed', completed_at: '2026-09-27T01:00:00Z' }],
+    })).toBe(true);
   });
 });
 
@@ -276,7 +350,25 @@ describe('main-red-recovery — planMainRedRebases, the landing-freeze-fix green
   const candidate2748 = {
     prNumber: 2748, headRefName: 'lane/xg790dh-ci-lifecycle-drain-bookkeeping-commits', headSha: 'dfb57d0',
     aheadBy: 5, failureCompletedAt: '2026-09-27T02:36:03Z', failingCheckName: 'daemon-soak',
+    prContainsMainGreenSha: false, mergeBaseCheckRuns: [], mergeBaseRunConclusion: 'success',
   };
+
+  // PR #2793 review — the acting pass must not rebase a plain PR-owned failure either.
+  it('refuses own-failure when the check was already green at the PR\'s merge base (a plain PR-owned failure behind a healthy main)', () => {
+    const plan = planMainRedRebases({
+      candidates: [{ ...candidate2748, mergeBaseCheckRuns: [{ name: 'daemon-soak', conclusion: 'success', status: 'completed', completed_at: '2026-09-26T00:00:00Z' }] }],
+      mainRedWindows: [], mainLatestCheckRuns,
+    });
+    expect(plan.refusals).toEqual([expect.objectContaining({ prNumber: 2748, kind: 'own-failure' })]);
+    expect(plan.dispatch).toEqual([]);
+  });
+
+  it('refuses own-failure when the PR already contains main\'s green run sha', () => {
+    const plan = planMainRedRebases({
+      candidates: [{ ...candidate2748, prContainsMainGreenSha: true, mergeBaseCheckRuns: null }], mainRedWindows: [], mainLatestCheckRuns,
+    });
+    expect(plan.refusals).toEqual([expect.objectContaining({ prNumber: 2748, kind: 'own-failure' })]);
+  });
 
   it('dispatches rebase-onto-main for a daemon-soak failure with NO red window at all, once main\'s own latest run shows it green (PR #2748\'s real shape)', () => {
     const plan = planMainRedRebases({ candidates: [candidate2748], mainRedWindows: [], mainLatestCheckRuns });

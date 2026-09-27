@@ -1207,7 +1207,32 @@ describe('case 5i — landing-freeze fix: owed-ci-rerun via main\'s own latest-r
   const pr2748 = (over = {}) => pr1563({
     number: 2748, labels: [], statusCheckRollup: redRollup, comments: [],
     requiredCheckCompletedAt: '2026-09-27T02:36:03Z', aheadByOnMain: 5, requiredCheckName: 'daemon-soak',
+    // #2748's merge base never ran daemon-soak on `main` (pull_request-only job), and it lacks main's green sha.
+    prContainsMainGreenSha: false, mergeBaseCheckRuns: [], mergeBaseRunConclusion: 'success',
     ...over,
+  });
+
+  // PR #2793 review (correctness, CONFIRMED) — the reviewer's end-to-end shape: an ordinary CLEAN PR whose OWN
+  // code broke `test`, behind a healthy `main` whose `test` was already green at this PR's own merge base. Main
+  // being green now is the normal state, not evidence main caused this — ci-heal owns it.
+  it('falls through to ci-heal for a plain PR-owned failure behind a healthy main (check already green at the merge base)', () => {
+    const plan = planReconcile({
+      prs: [pr2748({
+        requiredCheckCompletedAt: '2026-01-01T00:00:00Z', aheadByOnMain: 3, requiredCheckName: 'test',
+        mergeBaseCheckRuns: [{ name: 'test', conclusion: 'success', status: 'completed', completed_at: '2025-12-31T00:00:00Z' }],
+      })],
+      agents: [], now: NOW, mainRedWindows: [], mainLatestCheckRuns,
+    });
+    expect(plan.refusals.some((r) => r.kind === 'owed-ci-rerun')).toBe(false);
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'ci-heal', prNumber: 2748 })]);
+  });
+
+  it('falls through to ci-heal when the PR already contains main\'s green run sha, even though main\'s tip moved on (aheadBy > 0)', () => {
+    const plan = planReconcile({
+      prs: [pr2748({ prContainsMainGreenSha: true, mergeBaseCheckRuns: null })],
+      agents: [], now: NOW, mainRedWindows: [], mainLatestCheckRuns,
+    });
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'ci-heal', prNumber: 2748 })]);
   });
 
   it('refuses owed-ci-rerun (never ci-heal), with EMPTY mainRedWindows — main\'s own latest run alone is enough', () => {
