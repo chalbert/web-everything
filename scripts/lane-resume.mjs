@@ -884,7 +884,11 @@ function discover(asJson, { repos = null, singleRepo = false, windowDays = 7 } =
     const repoFlag = repo ? ['--repo', repo] : [];
     // #2396 — `labels` too: a `review:changes` bounce is a broken stacked LINK (like a red `test`), so its
     // overlap-descendants must be re-bucketed behind it, not attempted this pass.
-    const prs = shJSON('gh', ['pr', 'list', ...repoFlag, '--label', READY_LABEL, '--state', 'open', '--json', 'number,mergeable,mergeStateStatus,headRefName,statusCheckRollup,labels', '--limit', '200'], []);
+    // #no-label-search (2026-09-27 live incident) — `--label` on `gh pr list` is search-backed (a separate,
+    // much smaller budget than the ordinary GraphQL list this call already is) and rate-limits independently
+    // of the real GraphQL budget. `labels` is already requested below, so filter by READY_LABEL client-side.
+    const allOpenPrs = shJSON('gh', ['pr', 'list', ...repoFlag, '--state', 'open', '--json', 'number,mergeable,mergeStateStatus,headRefName,statusCheckRollup,labels', '--limit', '200'], []);
+    const prs = allOpenPrs.filter((p) => hasReviewLabel(p.labels, READY_LABEL));
     for (const p of prs) {
       const man = readManifest(p.headRefName, { repo: isLocal ? null : repo }) || { item: null, repos: [], blockedBy: [], stackParents: [] };
       const lane = classifyLane({

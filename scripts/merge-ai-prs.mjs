@@ -3929,8 +3929,17 @@ async function runCli() {
     const listArgs = ['pr', 'list', ...repoFlag(repo), '--state', 'open', '--limit', '100',
       '--json', 'number,title,body,headRefName,headRefOid,baseRefName,mergeable,mergeStateStatus,statusCheckRollup,labels'];
     if (base) listArgs.push('--base', base);
-    if (label) listArgs.push('--label', label);
-    try { const { stdout } = await execFileP('gh', listArgs, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }); return { repo, prs: JSON.parse(stdout.trim() || '[]') }; }
+    // #no-label-search (2026-09-27 live incident) — `gh pr list --label` is served by GitHub's issue-SEARCH
+    // index, a separate, much smaller budget than the ordinary GraphQL list this call already is. The drain
+    // failed every pass on "API rate limit already exceeded" from THAT bucket while the real GraphQL budget
+    // still had 2000+ points left. `labels` is already requested in --json above, so filter client-side
+    // instead of passing `--label` — identical candidate set, no search-backed call at all.
+    try {
+      const { stdout } = await execFileP('gh', listArgs, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+      const all = JSON.parse(stdout.trim() || '[]');
+      const prs = label ? all.filter((p) => hasLabel(p, label)) : all;
+      return { repo, prs };
+    }
     catch (e) { return { repo, err: describeGhListError(e) }; }
   };
   const resolveDefaultBranch = async (repo) => {

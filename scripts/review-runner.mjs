@@ -15,7 +15,8 @@
  * ratified step (#2572 part 2).
  *
  * WHAT IT DOES (all read-only against GitHub):
- *   1. DISCOVER the `review:pending` parked PRs (`gh pr list --label review:pending`), or look up an explicit
+ *   1. DISCOVER the `review:pending` parked PRs (`gh pr list --state open`, filtered client-side by label —
+ *      never `--label`, which is search-backed and rate-limits separately; #no-label-search), or look up an explicit
  *      set, and re-read each one's CURRENT labels — then `partitionRunnerPRs` drops every `review:human` /
  *      label-unverifiable PR fail-closed (INVARIANT 2 / #2439). It never trusts caller-asserted labels.
  *   2. For each clearable PR, OBTAIN its converged jury LEDGER. The #2639 loop persists its ledger to the durable
@@ -100,14 +101,20 @@ function parseFlags(argv) {
  *  partial/guessed set. */
 function discoverPending(repoSlug, repoKey) {
   try {
+    // #no-label-search (2026-09-27 live incident) — `--label` on `gh pr list` is served by GitHub's issue-SEARCH
+    // index, a separate, much smaller budget than the ordinary GraphQL list this call already is; filtering
+    // server-side by label routinely tripped "API rate limit already exceeded" even with GraphQL budget to
+    // spare. `labels` is already requested below, so filter client-side instead of passing `--label`.
     const out = execFileSync('gh', [
-      'pr', 'list', '--repo', repoSlug, '--label', 'review:pending', '--state', 'open',
+      'pr', 'list', '--repo', repoSlug, '--state', 'open',
       '--json', 'number,labels', '--limit', '200',
     ], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
     const rows = JSON.parse(out);
-    return (Array.isArray(rows) ? rows : []).map((r) => ({
-      pr: r.number, repo: repoKey, labels: labelNamesOf(r.labels),
-    }));
+    return (Array.isArray(rows) ? rows : [])
+      .filter((r) => labelNamesOf(r.labels).includes('review:pending'))
+      .map((r) => ({
+        pr: r.number, repo: repoKey, labels: labelNamesOf(r.labels),
+      }));
   } catch {
     return null;
   }
