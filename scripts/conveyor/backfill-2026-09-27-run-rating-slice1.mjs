@@ -138,6 +138,8 @@ function main() {
     scored += 1;
     grades[rating.grade] = (grades[rating.grade] ?? 0) + 1;
     if (typeof rating.costUsd === 'number') costUsdKnown += rating.costUsd;
+    if (rating.costUsdPartial) costPartialRows += 1;
+    unpricedTokens += rating.unpricedTokens ?? 0;
     if (rating.tokens) tokensKnown += rating.tokens.in + rating.tokens.out + rating.tokens.cacheRead + rating.tokens.cacheWrite;
     if (handle) done.add(handle);
   }
