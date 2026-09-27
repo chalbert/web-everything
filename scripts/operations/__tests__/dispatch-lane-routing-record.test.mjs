@@ -371,7 +371,7 @@ describe('(d) end to end: readTick → dispatch-lane → createDispatchSinks', (
     return { run: outcome.run, spawned };
   }
 
-  it('a build spawn carries --model sonnet exactly once, and the run record carries the routed/executed/workerModel triple', async () => {
+  it('a build spawn carries --model sonnet exactly once, and the run record carries the executor, the criteria recommendation and the workerModel', async () => {
     const tick = {
       decisions: {
         spawnBuilds: [{ num: '9002', lane: 4 }], spawnPrepareScope: [], spawnPrepareDecision: [],
@@ -392,8 +392,8 @@ describe('(d) end to end: readTick → dispatch-lane → createDispatchSinks', (
 
     const effect = run.effects.find((e) => e.type === DISPATCH_EFFECT);
     expect(effect.dispatch.workerModel).toMatchObject({ name: 'sonnet', tier: 'sonnet', source: 'table' });
-    expect(effect.dispatch.routedProvider).toBe('claude');
-    expect(effect.dispatch.executedProvider).toBe('claude');
+    expect(effect.dispatch.criteriaRecommendation).toBe('claude');
+    expect(effect.dispatch.executor).toBe('claude');
   });
 });
 

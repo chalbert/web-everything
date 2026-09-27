@@ -84,6 +84,26 @@ export function ensureWorktreeIsolationOff({
   }
 }
 
+/**
+ * THE ONE SHARED CALL every dispatch path makes for a FRESH `claude --bg` session (build/fix/ci-heal/prepare via
+ * `dispatch-lane-io.mjs#createDispatchSinks`, the conveyor fix path `reconcile-fix-dispatch.mjs`, the review path
+ * `review-dispatch.mjs`, and `stuck-pr-inspect-dispatch.mjs`). Before build-path-codex-isolation only the
+ * dispatch-lane sink applied the override: every other dispatcher spawned into a bare scratch cwd with no
+ * `worktree` setting at all, so its session hit the "Call EnterWorktree first" guard on its first Edit.
+ *
+ * Does BOTH halves of the two-delivery-path pattern in one call, so no caller can apply one and forget the other:
+ * the durable `<cwd>/.claude/settings.local.json` write ({@link ensureWorktreeIsolationOff}, never throws), and
+ * the value the caller folds into `buildAgentArgv`'s `worktreeSettings` (the `--settings` flag).
+ *
+ * @param {string} cwd - the session's own scratch cwd (never the primary checkout — see this file's header).
+ * @param {{ensure?: (o: {cwd: string}) => object}} [io]
+ * @returns {{worktreeSettings: {bgIsolation: 'none'}, write: object}}
+ */
+export function isolateDispatchSession(cwd, { ensure = ensureWorktreeIsolationOff } = {}) {
+  const write = ensure({ cwd });
+  return { worktreeSettings: DISPATCH_WORKTREE_SETTINGS.worktree, write };
+}
+
 /** True iff `dir` already has the override on disk (best-effort read, never throws) — used only for
  *  diagnostics/tests; nothing in the real dispatch/lane-provision path needs to check before writing, since
  *  {@link ensureWorktreeIsolationOff} is already idempotent and additive. */

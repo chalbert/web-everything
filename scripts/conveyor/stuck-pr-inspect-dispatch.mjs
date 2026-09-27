@@ -37,6 +37,8 @@ import {
 } from '../operations/dispatch-lane-io.mjs';
 import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
 import { mintSessionSlug } from './session-slug.mjs';
+// build-path-codex-isolation — the ONE shared bg-isolation helper every dispatch path calls.
+import { isolateDispatchSession } from '../lib/dispatch-bg-isolation.mjs';
 
 /** The inspection-side twin of `we:scripts/operations/dispatch-lane-io.mjs#DISPATCHED_AGENT_SYSTEM_PROMPT_FILE`
  *  / `we:scripts/operations/review-dispatch.mjs#REVIEW_DISPATCH_SYSTEM_PROMPT_FILE` — a DEDICATED file (not a
@@ -263,6 +265,10 @@ export function dispatchInspection({
   // never `root` itself) and making that directory real.
   sessionCwdFor = (sessionId) => dispatchSessionCwd(sessionId, { root }),
   ensureSessionCwd = ensureDispatchSessionCwd,
+  // build-path-codex-isolation — the shared bg-isolation helper (writes `<sessionCwd>/.claude/settings.local.json`
+  // and returns the `--settings` worktree patch). Before this, only dispatch-lane's sink applied it, so this
+  // path's sessions hit Claude Code's "Call EnterWorktree first" guard on their first Edit.
+  isolateSession = isolateDispatchSession,
 } = {}) {
   // Everything before the spawn is pre-spawn: a throw here PROVES no agent exists (see noInspectionStarted).
   const prepare = () => {
@@ -287,6 +293,7 @@ export function dispatchInspection({
       systemPromptFile: INSPECT_DISPATCH_SYSTEM_PROMPT_FILE,
       extraArgs: [...inspectDispatchDisallowedToolsArgs(), ...extraArgs],
       settingsEnv: resolveSettingsEnv(sessionCwd),
+      worktreeSettings: isolateSession(sessionCwd).worktreeSettings,
     });
     return { planned, prompt, unknownTokens, sessionId, argv, sessionCwd };
   };

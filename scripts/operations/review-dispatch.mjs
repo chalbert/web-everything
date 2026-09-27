@@ -166,6 +166,8 @@ import { ADVISORY_LENSES, MANDATE_LENSES } from '../lib/jury-core.mjs';
 import { REVIEW_SEAT_PROVIDERS, selectReviewSeatProvider } from '../lib/provider-routing.mjs';
 import { CODEX_MODEL } from '../lib/codex-model-routing.mjs';
 import { ANTIGRAVITY_MODEL } from '../lib/antigravity-judge-spawn.mjs';
+// build-path-codex-isolation — the ONE shared bg-isolation helper every dispatch path calls.
+import { isolateDispatchSession } from '../lib/dispatch-bg-isolation.mjs';
 
 // re-exported so nothing that already imports `reviewSessionSlug` from this file has to change (#3437) — the
 // slug itself now lives in `we:scripts/conveyor/review-session-slug.mjs`, a PURE module both this file and
@@ -463,6 +465,10 @@ export function dispatchReview({
   // never `root` itself) and making that directory real.
   sessionCwdFor = (sessionId) => dispatchSessionCwd(sessionId, { root }),
   ensureSessionCwd = ensureDispatchSessionCwd,
+  // build-path-codex-isolation — the shared bg-isolation helper (writes `<sessionCwd>/.claude/settings.local.json`
+  // and returns the `--settings` worktree patch). Before this, only dispatch-lane's sink applied it, so this
+  // path's sessions hit Claude Code's "Call EnterWorktree first" guard on their first Edit.
+  isolateSession = isolateDispatchSession,
 } = {}) {
   const planned = planReviewDispatch({ pr, repo, checkoutExists, home });
   assertNotALaneCheckout(root);
@@ -509,6 +515,7 @@ export function dispatchReview({
     // `reconcile-fix-dispatch.mjs`'s own call exactly. Written into `<sessionCwd>/.claude/settings.local.json`
     // — the cwd this dispatched review session ACTUALLY starts in, never `root`'s any more.
     settingsEnv: resolveSettingsEnv(sessionCwd),
+    worktreeSettings: isolateSession(sessionCwd).worktreeSettings,
   });
   // #3331 — THE HANDLE COMES BACK OFF STDOUT, it is not the uuid minted above. `claude --bg` DISCARDS
   // `--session-id` (it says so on stderr; measured 3/3 at CLI 2.1.246 by #3331's probe and 2/2 at 2.1.269 with
