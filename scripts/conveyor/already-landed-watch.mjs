@@ -44,6 +44,13 @@ import { execFileSyncThrottled } from '../lib/gh-throttle.mjs';
 import { runReconcilePass } from './reconcile-pass.mjs';
 import { laneRefItemNum } from './lease-reaper.mjs';
 import { resolveLandedItem } from '../lane-drain.mjs';
+// #4268 — the SAME dispatch-chokepoint staleness guard `reconcile-fix-dispatch.mjs` runs before it will act:
+// this watch reads main PURELY LOCALLY (via `reconcile-pass.mjs#enrichPrsWithAlreadyLandedFacts`, no fetch of
+// its own) and is invoked as its OWN standalone CLI/watch, never through `reconcile-fix-dispatch.mjs`, so it
+// never inherited that guard. A stale local `origin/main` here can find a PR "already landed" against a main
+// that has since moved on; `--apply` then closes a still-needed PR and resolves its card out from under it.
+import { assertMainNotStale } from '../operations/review-dispatch.mjs';
+import { REPO_ROOT } from '../operations/dispatch-lane-io.mjs';
 
 /** The name of THIS pass, for attribution on anything it posts (mirrors `duplicate-pr-watch.mjs#AGENT_NAME`). */
 export const AGENT_NAME = 'already-landed-watch';
@@ -131,13 +138,19 @@ export function defaultClosePr(prNumber, { exec = execFileSyncThrottled, repo = 
  * we:scripts/conveyor/already-landed-watch.mjs#runAlreadyLandedWatch — read (via the reconcile pass), decide
  * (via {@link planAlreadyLandedCloses}), and — only under `--apply` — act. Dry-run by default.
  * @param {{repo?:string|null, apply?:boolean, readPlan?:Function, postComment?:Function, closePr?:Function,
- *   resolveItem?:Function, cwd?:string}} [o]
+ *   resolveItem?:Function, cwd?:string, root?:string, checkStaleness?:Function}} [o]
  * @returns {{planned:Array<object>, applied:Array<object>}}
  */
 export function runAlreadyLandedWatch({
   repo = null, apply = false, readPlan = runReconcilePass, postComment = defaultPostComment,
   closePr = defaultClosePr, resolveItem = resolveLandedItem, cwd = process.cwd(),
+  root = REPO_ROOT, checkStaleness,
 } = {}) {
+  // #4268 — refuse (or auto-fast-forward, exactly like `reconcile-fix-dispatch.mjs`'s own dispatch chokepoint)
+  // BEFORE trusting anything `readPlan` reports: `readPlan`'s already-landed containment check reads local
+  // `origin/main` with no fetch/staleness guard of its own (see the import above), and this watch never runs
+  // through `reconcile-fix-dispatch.mjs`, so it must run the guard itself.
+  assertMainNotStale(root, checkStaleness, { label: AGENT_NAME });
   const plan = readPlan({ repo });
   const planned = planAlreadyLandedCloses(plan);
   const applied = [];

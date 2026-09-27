@@ -354,6 +354,151 @@ it('enrichPrsWithAlreadyLandedFacts never guesses containment with no merge-base
   expect(readMergeBase).not.toHaveBeenCalled();
 });
 
+// #4265 (PR #2797 review, live incident 2026-09-27) — the stacked-base conflict-fix cap's own `currentSha` used
+// to be hardcoded `null` in `reconcile-core.mjs`, so repairs against different, since-rebased tips of the same
+// stacked base all counted as "the same conflict" and exhausted the smaller per-target cap. This attaches
+// `baseRefSha` — the SAME purely-local `git rev-parse origin/<ref>` read `defaultResolveMainSha` already does
+// for `mainSha`, just pointed at each stacked PR's own base ref — so `reconcile-core.mjs` can tell a stale
+// repeat apart from a fresh tip.
+describe('enrichPrsWithBaseRefFacts (#4265)', () => {
+  it('attaches baseRefSha for a PR whose base differs from defaultBranch, resolved via the injected reader', async () => {
+    const { enrichPrsWithBaseRefFacts } = await import('../reconcile-pass.mjs');
+    const resolveRef = vi.fn(() => 'ddd4444');
+    const pr = { number: 2578, baseRefName: 'lane/3681-ratify-daemon-lifecycle' };
+    const out = enrichPrsWithBaseRefFacts([pr], { resolveRef });
+    expect(out[0].baseRefSha).toBe('ddd4444');
+    expect(resolveRef).toHaveBeenCalledWith('lane/3681-ratify-daemon-lifecycle');
+  });
+
+  it('resolves each DISTINCT base ref only once, even when several PRs share the same stacked base', async () => {
+    const { enrichPrsWithBaseRefFacts } = await import('../reconcile-pass.mjs');
+    const resolveRef = vi.fn(() => 'ddd4444');
+    const prs = [
+      { number: 1, baseRefName: 'lane/shared-base' },
+      { number: 2, baseRefName: 'lane/shared-base' },
+    ];
+    const out = enrichPrsWithBaseRefFacts(prs, { resolveRef });
+    expect(out.every((pr) => pr.baseRefSha === 'ddd4444')).toBe(true);
+    expect(resolveRef).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaves a PR whose base IS defaultBranch, or names none, untouched — never calls resolveRef for it', async () => {
+    const { enrichPrsWithBaseRefFacts } = await import('../reconcile-pass.mjs');
+    const resolveRef = vi.fn(() => 'ddd4444');
+    const prs = [{ number: 1, baseRefName: 'main' }, { number: 2 }, { number: 3, baseRefName: null }];
+    const out = enrichPrsWithBaseRefFacts(prs, { resolveRef });
+    expect(out.map((pr) => pr.baseRefSha)).toEqual([undefined, undefined, undefined]);
+    expect(resolveRef).not.toHaveBeenCalled();
+  });
+
+  it('a failed/unresolvable ref (resolveRef returns null) degrades to baseRefSha: null, never throws', async () => {
+    const { enrichPrsWithBaseRefFacts } = await import('../reconcile-pass.mjs');
+    const out = enrichPrsWithBaseRefFacts([{ number: 1, baseRefName: 'lane/gone' }], { resolveRef: () => null });
+    expect(out[0].baseRefSha).toBeNull();
+  });
+
+  it('a caller-supplied defaultBranch overrides "main" — a PR based on the repo\'s actual default is not "stacked"', async () => {
+    const { enrichPrsWithBaseRefFacts } = await import('../reconcile-pass.mjs');
+    const resolveRef = vi.fn(() => 'ddd4444');
+    const out = enrichPrsWithBaseRefFacts([{ number: 1, baseRefName: 'trunk' }], { resolveRef, defaultBranch: 'trunk' });
+    expect(out[0].baseRefSha).toBeUndefined();
+    expect(resolveRef).not.toHaveBeenCalled();
+  });
+});
+
+// #4265 — `runReconcilePass` must thread `enrichBaseRef`'s own output into `planReconcile` so a stacked PR's
+// `baseRefSha` evidence ever reaches `reconcile-core.mjs` at all (a wiring gap here would silently degrade every
+// caller back to the pre-#4265 ref-only comparison even with `enrichPrsWithBaseRefFacts` itself correct).
+it('runReconcilePass threads enrichBaseRef\'s output through to planReconcile (#4265)', async () => {
+  const { runReconcilePass } = await import('../reconcile-pass.mjs');
+  const stackedPr = { number: 2578, baseRefName: 'lane/3681-ratify-daemon-lifecycle', comments: [] };
+  const enrichBaseRef = vi.fn((prs) => prs.map((pr) => ({ ...pr, baseRefSha: 'ddd4444' })));
+  runReconcilePass({
+    readPrs: () => [stackedPr], readAgents: () => [], enrich: (a) => a,
+    enrichMainRed: (prs) => ({ prs, mainRedWindows: [] }), enrichAlreadyLanded: (prs) => prs,
+    enrichBaseRef,
+  });
+  expect(enrichBaseRef).toHaveBeenCalledWith([stackedPr], { defaultBranch: 'main' });
+});
+
+// #4263 (PR #2787 review, live incident 2026-09-27) — a `waiting-on-system-fix` ci-heal escalation refuses
+// until the referenced fix PR lands, but nothing ever re-checked whether it actually had — the refusal keyed
+// purely on the escalation's own head match and suppressed healing FOREVER even after the fix genuinely
+// merged. This re-scans each PR's own comments with the SAME pure `latestCiHealEscalationForHead` reader
+// `reconcile-core.mjs` uses, and independently re-checks the named `systemFixRef` PR's own current state.
+describe('enrichPrsWithSystemFixFacts (#4263)', () => {
+  it('attaches systemFixLanded:true when the named systemFixRef PR has since MERGED', async () => {
+    const { enrichPrsWithSystemFixFacts } = await import('../reconcile-pass.mjs');
+    const { buildCiHealEscalationComment } = await import('../ci-heal-escalation-mark.mjs');
+    const escalation = buildCiHealEscalationComment({ headSha: 'aaa1111', outcome: 'waiting-on-system-fix', systemFixRef: 2784 });
+    const pr = { number: 2783, headRefOid: 'aaa1111', comments: [{ body: escalation, author: { login: 'web-everything' } }] };
+    const readSystemFixState = vi.fn(() => 'merged');
+    const out = enrichPrsWithSystemFixFacts([pr], { readSystemFixState });
+    expect(out[0].systemFixLanded).toBe(true);
+    expect(readSystemFixState).toHaveBeenCalledWith('2784', { repo: null });
+  });
+
+  it('attaches systemFixLanded:true when the named systemFixRef PR has since CLOSED (abandoned, not merged)', async () => {
+    const { enrichPrsWithSystemFixFacts } = await import('../reconcile-pass.mjs');
+    const { buildCiHealEscalationComment } = await import('../ci-heal-escalation-mark.mjs');
+    const escalation = buildCiHealEscalationComment({ headSha: 'aaa1111', outcome: 'waiting-on-system-fix', systemFixRef: 2784 });
+    const pr = { number: 2783, headRefOid: 'aaa1111', comments: [{ body: escalation, author: { login: 'web-everything' } }] };
+    const out = enrichPrsWithSystemFixFacts([pr], { readSystemFixState: () => 'closed' });
+    expect(out[0].systemFixLanded).toBe(true);
+  });
+
+  it('leaves the PR untouched (no systemFixLanded field) while the referenced fix PR is still open/pending', async () => {
+    const { enrichPrsWithSystemFixFacts } = await import('../reconcile-pass.mjs');
+    const { buildCiHealEscalationComment } = await import('../ci-heal-escalation-mark.mjs');
+    const escalation = buildCiHealEscalationComment({ headSha: 'aaa1111', outcome: 'waiting-on-system-fix', systemFixRef: 2784 });
+    const pr = { number: 2783, headRefOid: 'aaa1111', comments: [{ body: escalation, author: { login: 'web-everything' } }] };
+    const out = enrichPrsWithSystemFixFacts([pr], { readSystemFixState: () => 'pending' });
+    expect(out[0].systemFixLanded).toBeUndefined();
+  });
+
+  it('never touches a PR with no escalation, or a plain needs-human escalation — zero extra IO', async () => {
+    const { enrichPrsWithSystemFixFacts } = await import('../reconcile-pass.mjs');
+    const { buildCiHealEscalationComment } = await import('../ci-heal-escalation-mark.mjs');
+    const needsHuman = buildCiHealEscalationComment({ headSha: 'aaa1111', outcome: 'needs-human' });
+    const readSystemFixState = vi.fn();
+    const prs = [
+      { number: 1, headRefOid: 'aaa1111', comments: [] },
+      { number: 2, headRefOid: 'aaa1111', comments: [{ body: needsHuman, author: { login: 'web-everything' } }] },
+    ];
+    const out = enrichPrsWithSystemFixFacts(prs, { readSystemFixState });
+    expect(out.map((pr) => pr.systemFixLanded)).toEqual([undefined, undefined]);
+    expect(readSystemFixState).not.toHaveBeenCalled();
+  });
+
+  it('resolves each DISTINCT systemFixRef only once, even when several PRs escalate to the same fix', async () => {
+    const { enrichPrsWithSystemFixFacts } = await import('../reconcile-pass.mjs');
+    const { buildCiHealEscalationComment } = await import('../ci-heal-escalation-mark.mjs');
+    const escalation = buildCiHealEscalationComment({ headSha: 'aaa1111', outcome: 'waiting-on-system-fix', systemFixRef: 2784 });
+    const prs = [
+      { number: 1, headRefOid: 'aaa1111', comments: [{ body: escalation, author: { login: 'web-everything' } }] },
+      { number: 2, headRefOid: 'aaa1111', comments: [{ body: escalation, author: { login: 'web-everything' } }] },
+    ];
+    const readSystemFixState = vi.fn(() => 'merged');
+    const out = enrichPrsWithSystemFixFacts(prs, { readSystemFixState });
+    expect(out.every((pr) => pr.systemFixLanded === true)).toBe(true);
+    expect(readSystemFixState).toHaveBeenCalledTimes(1);
+  });
+});
+
+// #4263 — `runReconcilePass` must thread `enrichSystemFix`'s own output into `planReconcile`, mirroring the
+// `enrichBaseRef` wiring test above — a gap here would silently degrade every caller back to refusing forever.
+it('runReconcilePass threads enrichSystemFix\'s output through to planReconcile (#4263)', async () => {
+  const { runReconcilePass } = await import('../reconcile-pass.mjs');
+  const escalatedPr = { number: 2783, headRefOid: 'aaa1111', comments: [] };
+  const enrichSystemFix = vi.fn((prs) => prs.map((pr) => ({ ...pr, systemFixLanded: true })));
+  runReconcilePass({
+    readPrs: () => [escalatedPr], readAgents: () => [], enrich: (a) => a,
+    enrichMainRed: (prs) => ({ prs, mainRedWindows: [] }), enrichAlreadyLanded: (prs) => prs,
+    enrichBaseRef: (prs) => prs, enrichSystemFix,
+  });
+  expect(enrichSystemFix).toHaveBeenCalledWith([escalatedPr], { repo: null });
+});
+
 it('defaultFetchRef fetches refs/pull/<n>/head behind --end-of-options into an explicit destination — never the branch name (PR #2769 security review)', async () => {
   const { defaultFetchRef } = await import('../reconcile-pass.mjs');
   const exec = vi.fn();

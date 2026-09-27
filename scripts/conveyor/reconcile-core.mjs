@@ -1174,6 +1174,12 @@ export function planReconcile({
       // CONFLICT branch reads it, and a reader auditing any other row can see at a glance whether this PR is
       // stacked on another lane/PR at all, with no need to go back to the raw listing.
       baseRefName: pr?.baseRefName ?? null,
+      // #4265 — the STACKED-BASE CONFLICT branch's own `currentSha` for {@link countStaleConflictFixRounds},
+      // mirroring `mainSha` for the main-base branch (both resolved PURELY LOCALLY by `reconcile-pass.mjs`'s IO
+      // shell — this file stays IO-free). `null` for a PR whose base is `defaultBranch` (or unknown) — the
+      // stacked-base branch never reads it there, and every existing test/caller that omits it degrades to the
+      // pre-#4265 ref-only comparison, unchanged.
+      baseRefSha: pr?.baseRefSha ?? null,
       // EVIDENCE ONLY. No decision in this file reads it — see the liveness block in the file docblock.
       transcriptMtimeMs: Number.isFinite(pr?.transcriptMtimeMs) ? pr.transcriptMtimeMs : null,
       // #xu2krte Fork 1 — carried on every row (not just `fix` dispatches) for the same "evidence travels with
@@ -1194,6 +1200,11 @@ export function planReconcile({
       // branch below can ask `isMainGreenFixOwed` about THIS SAME check on main's own latest completed run,
       // never a different one. EVIDENCE ONLY here, same as its two siblings above.
       requiredCheckName: pr?.requiredCheckName ?? null,
+      // #4263 — EVIDENCE ONLY here, same convention as its siblings: whether the fix PR a `waiting-on-
+      // system-fix` ci-heal escalation named has since merged/closed, re-checked (never trusted from the
+      // escalation comment's own stale claim) by `reconcile-pass.mjs#enrichPrsWithSystemFixFacts`. Only the
+      // ci-red escalation branch below reads it.
+      systemFixLanded: pr?.systemFixLanded === true,
       // PR #2793 review — the per-PR proof the green-check path needs (`main-red-recovery.mjs#isMainGreenFixOwed`):
       // does this PR already contain main's latest green commit for that check, and what did the check conclude
       // at this PR's merge base with it. EVIDENCE ONLY, injected by the IO shell; absent reads never excuse.
@@ -1483,27 +1494,45 @@ export function planReconcile({
       const escalation = latestCiHealEscalationForHead(pr?.comments, base.headRefOid);
       if (escalation) {
         const isSystemFix = escalation.outcome === 'waiting-on-system-fix';
-        const kind = isSystemFix ? 'waiting-on-system-fix' : 'ci-heal-escalated';
-        refuse(kind, {
-          ...withPhase, headSha: escalation.headSha,
-          ...(escalation.reason ? { escalationReason: escalation.reason } : {}),
-          ...(escalation.systemFixRef ? { systemFixRef: escalation.systemFixRef } : {}),
-          why: isSystemFix
-            ? `ci-heal already escalated this exact head (\`${escalation.headSha}\`) as waiting on system fix #${escalation.systemFixRef} — the red is the tooling/gate's own fault, not this PR's; nothing further is owed until that fix lands or a new push changes this head`
-            : `ci-heal already escalated this exact head (\`${escalation.headSha}\`) to a human — re-dispatching would re-ask the identical already-answered question every tick until a new push changes this head`,
-        });
-        // A capped/exhausted ci-red PR is already promoted from a bare refusal to a surfaced `note`
-        // (`ci-heal-exhausted`, above) precisely because it is the one dead end an operator must be pulled in
-        // for — an escalation is the SAME shape of dead end (nothing live, nothing auto-heal can do about it
-        // right now) and gets the identical treatment, once per tick, until a new push or a person clears it.
-        notes.push({
-          kind: 'ci-heal-escalated', prNumber, headSha: escalation.headSha, outcome: escalation.outcome,
-          ...(escalation.systemFixRef ? { systemFixRef: escalation.systemFixRef } : {}),
-          text: isSystemFix
-            ? `PR #${prNumber}: ci-heal escalated on head \`${escalation.headSha}\` — waiting on system fix #${escalation.systemFixRef}; will not re-dispatch until it lands or a new push changes this head`
-            : `PR #${prNumber}: ci-heal escalated on head \`${escalation.headSha}\` — ${escalation.reason || 'needs a human judgment call'}; will not re-dispatch until a new push changes this head`,
-        });
-        continue;
+        // #4263 — a `waiting-on-system-fix` escalation names a fix PR (`escalation.systemFixRef`) and refuses
+        // ONLY until that fix lands; it must not suppress healing FOREVER once the fix PR is actually
+        // merged/closed and CI reruns on this SAME head (no new push to move it). `pr.systemFixLanded` is
+        // EVIDENCE injected by `reconcile-pass.mjs#enrichPrsWithSystemFixFacts` (this file stays IO-free): it
+        // independently re-checks the referenced `systemFixRef` PR's own current state before this refusal is
+        // ever honored. A plain `needs-human` escalation names no PR to re-check and is entirely unaffected —
+        // this only ever gates the `isSystemFix` branch.
+        if (isSystemFix && base.systemFixLanded) {
+          notes.push({
+            kind: 'system-fix-landed', prNumber, headSha: escalation.headSha, systemFixRef: escalation.systemFixRef,
+            text: `PR #${prNumber}: the system fix #${escalation.systemFixRef} this PR's ci-heal escalation was` +
+              ` waiting on has since merged/closed — re-arming healing on head \`${escalation.headSha}\` with no` +
+              ' new push required',
+          });
+          // Falls straight through to the ordinary ci-heal cap/dispatch path below, exactly as if this PR had
+          // never been escalated at all — never a second, separate re-dispatch path to keep in sync with it.
+        } else {
+          const kind = isSystemFix ? 'waiting-on-system-fix' : 'ci-heal-escalated';
+          refuse(kind, {
+            ...withPhase, headSha: escalation.headSha,
+            ...(escalation.reason ? { escalationReason: escalation.reason } : {}),
+            ...(escalation.systemFixRef ? { systemFixRef: escalation.systemFixRef } : {}),
+            why: isSystemFix
+              ? `ci-heal already escalated this exact head (\`${escalation.headSha}\`) as waiting on system fix #${escalation.systemFixRef} — the red is the tooling/gate's own fault, not this PR's; nothing further is owed until that fix lands or a new push changes this head`
+              : `ci-heal already escalated this exact head (\`${escalation.headSha}\`) to a human — re-dispatching would re-ask the identical already-answered question every tick until a new push changes this head`,
+          });
+          // A capped/exhausted ci-red PR is already promoted from a bare refusal to a surfaced `note`
+          // (`ci-heal-exhausted`, above) precisely because it is the one dead end an operator must be pulled in
+          // for — an escalation is the SAME shape of dead end (nothing live, nothing auto-heal can do about it
+          // right now) and gets the identical treatment, once per tick, until a new push or a person clears it.
+          notes.push({
+            kind: 'ci-heal-escalated', prNumber, headSha: escalation.headSha, outcome: escalation.outcome,
+            ...(escalation.systemFixRef ? { systemFixRef: escalation.systemFixRef } : {}),
+            text: isSystemFix
+              ? `PR #${prNumber}: ci-heal escalated on head \`${escalation.headSha}\` — waiting on system fix #${escalation.systemFixRef}; will not re-dispatch until it lands or a new push changes this head`
+              : `PR #${prNumber}: ci-heal escalated on head \`${escalation.headSha}\` — ${escalation.reason || 'needs a human judgment call'}; will not re-dispatch until a new push changes this head`,
+          });
+          continue;
+        }
       }
       const ciHealAttempts = countCiHealComments(pr?.comments);
       if (ciHealAttempts >= ciHealCap) {
@@ -1740,8 +1769,17 @@ export function planReconcile({
         // PR's OWN stacked base (never `defaultBranch` here, by construction of `isStackedBase`); a round
         // resolved against an EARLIER tip of that same base (rebased since, or a wholly different base this PR
         // once stacked on) does not count against the smaller per-target cap, only the hard ceiling.
+        //
+        // #4265 — `currentSha` USED TO BE HARDCODED `null` here, in contrast to the main-base branch below it
+        // (which threads a real, freshly-resolved `mainSha`). With no sha, `countStaleConflictFixRounds`'s
+        // sha-vs-sha comparison never fires, so EVERY recorded round matching the ref alone counted as "the
+        // same conflict" — even across repairs run against DIFFERENT, since-rebased tips of that same stacked
+        // base. Three repairs against three different tips of a repeatedly-rebased stacked base exhausted the
+        // smaller per-target cap even though each repair genuinely targeted a NEW tip. `base.baseRefSha` is
+        // this PR's OWN base ref's current tip, resolved the SAME way (a plain local `git rev-parse`) as
+        // `mainSha` is for the main-base branch — see `reconcile-pass.mjs#enrichPrsWithBaseRefFacts`.
         const { stale: conflictAttempts, total: conflictTotal } = countStaleConflictFixRounds(pr?.comments, {
-          currentRef: baseRefName, currentSha: null,
+          currentRef: baseRefName, currentSha: base.baseRefSha,
         });
         if (conflictAttempts >= conflictFixCap || conflictTotal >= CONFLICT_FIX_ABSOLUTE_CEILING) {
           refuseCapExhausted({

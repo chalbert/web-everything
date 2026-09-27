@@ -2,9 +2,10 @@
 bornAs: xehzruu
 kind: task
 parent: "4075"
-status: open
+status: resolved
 scope: ["we:scripts/conveyor/reconcile-core.mjs"]
 dateOpened: "2026-09-27"
+dateResolved: "2026-09-27"
 tags: []
 ---
 
@@ -20,4 +21,10 @@ PREVENTION (from the reviewer, still owed): add a deterministic reconciliation t
 
 ## Done when
 
-1. **Executable** — TODO: a command that fails before this item lands and passes after.
+1. **Executable** — `npx vitest run we:scripts/conveyor/__tests__/reconcile-core.test.mjs` — the new `#4263`
+   describe block ("waiting-on-system-fix re-arms once the referenced system-fix PR has landed") fails on
+   `origin/main` before this item (a `systemFixLanded` PR still refuses `waiting-on-system-fix` forever) and
+   passes after: `we:scripts/conveyor/reconcile-core.mjs`'s ci-heal escalation branch now re-arms on
+   `base.systemFixLanded`, injected by the new `we:scripts/conveyor/reconcile-pass.mjs#enrichPrsWithSystemFixFacts`
+   (covered separately in `we:scripts/conveyor/__tests__/reconcile-pass.test.mjs`), which independently re-checks
+   the referenced `systemFixRef` PR's own current merged/closed state.
