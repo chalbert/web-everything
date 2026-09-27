@@ -33,6 +33,9 @@ const LIST_CMD_RE = /(['"])(pr|issue)\1\s*,\s*(['"])list\3/;
  * Find every `--label`/`--search`/`--author` flag literal in `content` that sits inside (or immediately after)
  * a `gh pr list` / `gh issue list` argv construction. PURE — text in, findings out. A finding is `{flag,
  * index, line}` (1-based line number of the flag itself, for a readable error message).
+ * @test-only-export-ok: this IS the guard — its own test
+ *   (scripts/lib/__tests__/no-search-backed-pr-list.test.mjs) is the sole intended consumer, exercising the
+ *   pure scan function directly rather than shelling a CLI wrapper.
  * @param {string} content
  * @returns {{flag:string, index:number, line:number}[]}
  */
