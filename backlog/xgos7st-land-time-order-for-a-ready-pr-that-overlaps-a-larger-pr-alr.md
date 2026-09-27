@@ -1,7 +1,11 @@
 ---
 kind: decision
-status: open
+status: resolved
 dateOpened: "2026-09-27"
+dateResolved: "2026-09-27"
+codifiedIn: "docs/agent/platform-decisions.md#drain-overlap-yield-landing-order"
+preparedDate: "2026-09-27"
+preparedAgainstSha: "37c35df4bc6cacf09fb279169ef50899b709338a"
 tags: []
 ---
 
@@ -9,7 +13,7 @@ tags: []
 
 Large daemon PRs keep drifting into conflict with main because smaller overlapping PRs land ahead of them while they sit in review (PR 2821, 20 files, conflicted twice on 2026-09-27; each conflict cost a fixer round, CI and a re-review). The drain (we:scripts/merge-ai-prs.mjs) lands whatever is ready, in item order, with no notion of an open overlapping PR still in review. Forks: should the drain briefly hold a ready PR that overlaps a larger PR in review (bounded yield), and, separately, may a PR keep its review after a clean mechanical rebase?
 
-**Status: filed, NOT yet prepared.** The forks below carry options, tradeoffs and a proposed bold default from the preparation of the build card (xnfj1tp). There is no `/research/` topic and no skeptic pass yet, so `/prepare` must finish this item before anyone rules on it. An independent Codex review of the build card (recorded on xnfj1tp) already reshaped these forks: it added the status-quo and eligible-only options, split review carry-over into its own fork, and showed an overlap-only size order can cycle.
+**Status: RATIFIED (Fork 1 + Fork 3), Fork 2 split out.** See the ruling block at the end. The forks below carry options, tradeoffs and a bold default that already survived an independent Codex review of the build card (recorded on xnfj1tp): it added the status-quo and eligible-only options, split review carry-over into its own fork, and showed an overlap-only size order can cycle — all folded in below. Fork 2 (review carry-over after a mechanical rebase) is **not** ruled here; it is carved out to its own decision, [xf6sp7r](/backlog/xf6sp7r-may-a-pr-keep-its-review-after-a-clean-mechanical-rebase-or/), per the repo convention that one decision card carries one ruling — status quo is its default meanwhile.
 
 ## Context
 
@@ -26,23 +30,32 @@ Large daemon PRs keep drifting into conflict with main because smaller overlappi
 - **D. GitHub merge queue.** Rejected: #2138 and #2153 ruled the deferred drain as the landing transport, and a merge queue orders by enqueue time, not by overlap.
 - **E. Smaller slices only.** Not a land-time option. Authoring guidance already says to split anything over size 8, and #2821 still happened. It stays upstream advice.
 
-**Proposed default: A.** It is the only option that would have protected #2821 without coupling two PRs' fates. The per-X budget keeps its worst case bounded.
+**Ratified default: A.** It is the only option that would have protected #2821 without coupling two PRs' fates. The per-X budget keeps its worst case bounded. **Operator framing (2026-09-27):** this is a conflict-**COST** strategy — deciding who pays for the reconciliation, and stopping repeated knock-backs of a big PR — not a conflict-**reduction** strategy. Dispatch-time overlap avoidance (#4295 / x3bt7x7) is the reduction layer; the two compose (x3bt7x7 prevents some overlaps from being dispatched at all, A decides land order for whatever overlaps still occur).
+
+**Skeptic:** attacked on merit (does A actually help vs. status quo / A′ / stacking?) and on statute-overlap (does this collide with #2138/#2153's deferred-drain-as-transport ruling, or with the #4295 dispatch-time coordination?). Survives: A is strictly narrower than #4295 (land-time, actual-files, every open PR vs. dispatch-time, declared-scope, daemon-claimed work only) and doesn't touch the sole-writer-drain transport ([#pr-flow-rollout-mechanism](docs/agent/platform-decisions.md#pr-flow-rollout-mechanism)) — it only reorders what that one writer lands next. A′ is rejected on the record (#2821 was in review, not ready, when #2826 landed, so A′ would not have helped); stacking (C) is rejected for coupling X to Y's unreviewed fate. No collision found.
+**Screen:** clear — this rules an observable drain-ordering *policy*, not an implementation detail (any drain impl could realize "yield" differently), and a real merit difference survives even with both branches "free to build": A protects #2821-shaped incidents, status quo does not.
 
 ## Fork 2 — may a rebased PR keep its review? (independent of Fork 1)
 
 This is a separate axis, not an alternative to A: it changes what a conflict COSTS, whatever the order.
 
-- **Keep today's rule.** Any conflict resolution sends the PR back through a fixer, CI and a fresh review round.
-- **B. Keep the review after a mechanical rebase.** When the rebase onto the new main is textually clean, or resolves with both sides kept verbatim, the PR keeps its review state and goes straight back to CI. Tradeoff: a reviewer approved a diff that no longer exists byte for byte, and "both sides kept" can still be wrong (two edits to one function). It needs its own trust rule and red-team.
-
-**Proposed default: keep today's rule here, and prepare B as its own item.** B's trust question deserves its own research and skeptic pass.
+**NOT ruled here.** Split out to its own decision, [xf6sp7r](/backlog/xf6sp7r-may-a-pr-keep-its-review-after-a-clean-mechanical-rebase-or/) (operator ruling, 2026-09-27) — this repo's convention is one ruling per decision card, and Fork 2's trust/red-team question is a materially separate research task from Fork 1's ordering question. **Default meanwhile: status quo** (any conflict resolution, however it arose, sends the PR through a fresh review round) — unchanged by this ruling.
 
 ## Fork 3 — making A mechanical
 
-- "Larger": total changed lines of the PR (sum of per-file counts), then lower PR number. **Proposed default.** It is a total order, so it cannot cycle. An overlap-only measure is more precise but can cycle across three PRs.
-- "Final review": Y is open, not a draft, on the same base as X, not `review:changes`, and carries `review:pending` or `review:accepted`; and Y does not depend on X. **Proposed default.**
-- Budget: 45 minutes per X from its own ready label. **Proposed starting value.** It rests on one incident (the #2821 conflict took 44 minutes end to end), so it is a flag, logged, and revisited from the first week of yields.
+- "Larger": total changed lines of the PR (sum of per-file counts), then lower PR number. **Ratified default.** It is a total order, so it cannot cycle. An overlap-only measure is more precise but can cycle across three PRs.
+- "Final review": Y is open, not a draft, on the same base as X, not `review:changes`, and carries `review:pending` or `review:accepted`; and Y does not depend on X. **Ratified default.**
+- Budget: 45 minutes per X from its own ready label, **non-renewable** (X yields at most once per ready-label epoch; once its budget elapses it never yields again until its head changes and it is re-labelled). **Ratified as a trial starting value**, not a settled constant. It rests on one incident (the #2821 conflict took 44 minutes end to end), so it ships as a **setting** (below), is logged on every yield, and is revisited after the first week of live yield data.
 
-## Proposed ruling — NOT READY (needs /prepare, then explicit ratification)
+**Skeptic:** attacked on cycle-safety (does the global order + non-renewable budget actually bound every PR's wait?) — survives: rule 3's total order (never a per-pair overlap measure) plus rule 6's per-X budget counted from X's own ready label (never from Y's review round) together rule out both a cycle and an unbounded wait, per xnfj1tp's own build-time proof plan (tests 1 and the "chain of blockers" case).
+**Screen:** clear — "which fields define larger/final-review/budget" is a mechanical parameterization of the Fork 1 policy, not a second merit fork in disguise, and a real difference in outcome (cyclable vs. not) separates the ratified default from an overlap-only measure.
 
-Fork 1 A; Fork 2 keep today's rule and prepare B separately; Fork 3 as defaulted above. The build card is xnfj1tp.
+## Ruling — RATIFIED (operator, 2026-09-27, ~18:00 ET, given in chat)
+
+1. **Fork 1 → A (bounded yield), as designed on xnfj1tp.** A small ready PR yields to a larger overlapping PR in final review, for one non-renewable 45-minute budget counted from the small PR's own `ready-to-merge` label, ranked by the global size order in Fork 3, with exemptions for blockers/dependencies/an unknown file list (xnfj1tp rules 4–5).
+2. **Must be configurable by settings — not just a CLI flag.** Both the window length and an on/off switch live in the repo's normal settings/config mechanism (a git-ignored, defaults-in-code JSON config file beside the affected script, the same pattern `we:scripts/build-queue-config.json` already uses for the build queue's own scoring weights — never only a `--overlap-yield-window` CLI flag or an env var read at process start). Concretely: `we:scripts/drain-overlap-yield-config.json` (not committed; absent ⇒ the defaults below), `{ "enabled": boolean, "windowMinutes": number }`, read by the drain at plan time, edited only through a sanctioned CLI verb (mirroring `we:scripts/backlog.mjs weights`), never hand-edited. The existing CLI flags/env var (xnfj1tp's Interfaces section) may remain as a one-off override *on top of* the settings file, but the settings file is the durable, discoverable knob — a flag nobody remembers to pass is not "configurable."
+3. **Activated (on) by default, for now, as a trial.** `enabled: true`, `windowMinutes: 45` are the shipped defaults. Log every yield (which PR yielded, to which, the computed rank, the release time/reason) so the trial has real data. Revisit the window value after a week of live yields — this is a starting value anchored to one incident, not a measured optimum (Fork 3).
+4. **Framing, for anyone re-deriving this later:** this ruling is a conflict-**cost** strategy (who pays for reconciling an unavoidable overlap, and ending the repeated knock-backs of one large PR), never a conflict-**reduction** strategy. Dispatch-time overlap avoidance (#4295 / x3bt7x7) is the reduction layer and composes with this rather than duplicating it.
+5. **Fork 2 (review carry-over after a mechanical rebase) is NOT ruled.** Split to [xf6sp7r](/backlog/xf6sp7r-may-a-pr-keep-its-review-after-a-clean-mechanical-rebase-or/); status quo (always re-review) stands as its default until that item is prepared and ratified separately.
+
+Codified in [drain-overlap-yield-landing-order](docs/agent/platform-decisions.md#drain-overlap-yield-landing-order). Build card: xnfj1tp (re-checked against this exact ruling before it is stamped prepared).

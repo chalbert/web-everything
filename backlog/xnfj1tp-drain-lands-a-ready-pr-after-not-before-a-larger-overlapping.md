@@ -3,8 +3,7 @@ kind: story
 size: 8
 parent: "4075"
 status: open
-blockedBy: ["xgos7st"]
-scope: ["we:scripts/conveyor/land-overlap-yield.mjs", "we:scripts/conveyor/__tests__/land-overlap-yield.test.mjs", "we:scripts/merge-ai-prs.mjs", "we:scripts/__tests__/merge-ai-prs-overlap-yield.test.mjs", "we:scripts/conveyor/soak/breaks/small-pr-lands-over-large-in-review.mjs", "we:scripts/conveyor/soak/breaks/small-pr-lands-over-large-in-review.soak.test.mjs", "we:scripts/conveyor/soak/breaks/index.mjs"]
+scope: ["we:scripts/conveyor/land-overlap-yield.mjs", "we:scripts/conveyor/__tests__/land-overlap-yield.test.mjs", "we:scripts/merge-ai-prs.mjs", "we:scripts/__tests__/merge-ai-prs-overlap-yield.test.mjs", "we:scripts/conveyor/soak/breaks/small-pr-lands-over-large-in-review.mjs", "we:scripts/conveyor/soak/breaks/small-pr-lands-over-large-in-review.soak.test.mjs", "we:scripts/conveyor/soak/breaks/index.mjs", "we:scripts/backlog.mjs", "we:scripts/__tests__/backlog-cli-snapshot.test.mjs"]
 dateOpened: "2026-09-27"
 tags: []
 ---
@@ -13,7 +12,7 @@ tags: []
 
 PR 2821 (20 files) conflicted with main twice on 2026-09-27 because smaller PRs touching the same files (2826 in we:scripts/conveyor/review-status-tag.mjs; earlier 2819 in we:scripts/operations/ci-heal-pr-dispatch.mjs) landed while it was in review. Each conflict cost a fixer round, CI and a re-review. #4295 coordinates overlapping work at DISPATCH, through the daemons' claim stores; nothing looks at overlap at LAND time, and work outside those claim stores is never coordinated. This card adds a pure land-time planner to the drain (we:scripts/merge-ai-prs.mjs) that holds a ready PR for a bounded time while a larger overlapping PR is in final review.
 
-**Blocked by decision xgos7st, which is filed but NOT prepared.** It chooses whether the drain holds a ready PR that overlaps a larger PR in review at all. This card is prepared for that decision's proposed default (Fork 1 A, bounded yield). If the ruling is different, this card is re-prepared, not built as written. An independent review rated it **not build-ready yet** (see the end); the design below already folds in that review's findings.
+**Decision xgos7st's Fork 1 was ratified 2026-09-27 (operator) as A (bounded yield), exactly as designed below**, with two additions this card now carries: (1) the window + on/off switch must be **settings-driven**, not only a CLI flag/env var (see Window + Interfaces below), and (2) it ships **activated (on) by default, as a trial** — log every yield and revisit the window after a week. Codified: [drain-overlap-yield-landing-order](docs/agent/platform-decisions.md#drain-overlap-yield-landing-order). Fork 2 (review carry-over after a mechanical rebase) was **not** ruled and does not affect this card — split to its own decision, xf6sp7r. This card itself is still **unbuilt** (open, not yet dispatched): an independent Codex review rated an earlier draft **not build-ready yet** (see the end); the design below folds in that review's findings, re-checked against this exact ruling.
 
 ## Evidence
 
@@ -43,7 +42,7 @@ PR 2821 (20 files) conflicted with main twice on 2026-09-27 because smaller PRs 
 
 **Data.** No new top-level listing fields. Per-file `additions`/`deletions` already come in `files`, so the shared snapshot contract is unchanged and the cache sharing keeps working. The only new read is the `ready-to-merge` label time for a candidate that would actually yield, from the PR's timeline events. Cache it per `(PR, headSha)`, so a watch re-reads it only when the head changes.
 
-**Window.** Starting value 45 minutes. That is a guess anchored on one incident (the #2821 conflict took 44 minutes end to end), not a measured optimum. Make it a flag, log every yield, and revisit it from the first week of yields.
+**Window + on/off switch — settings-driven (ruled on xgos7st).** Both the window length and an enable/disable switch live in a repo-tracked **settings file**, not only a CLI flag or an env var: `we:scripts/drain-overlap-yield-config.json` (git-ignored, defaults-in-code — absent ⇒ the shipped defaults below), shaped `{ "enabled": boolean, "windowMinutes": number }`, mirroring how `we:scripts/build-queue-config.json` already holds the build queue's own scoring weights. Edited only through a sanctioned CLI verb (mirroring `we:scripts/backlog.mjs weights`), never hand-edited; the existing `--overlap-yield-window`/`WE_DRAIN_OVERLAP_YIELD` flag/env-var stay as one-off overrides *on top of* the settings file for a single run, not the durable knob. Shipped defaults, **activated as a trial**: `enabled: true`, `windowMinutes: 45` — a starting value anchored on one incident (the #2821 conflict took 44 minutes end to end), not a measured optimum. Log every yield (which PR yielded, to which, the computed rank, the release time/reason) and revisit the window after the first week of live yields.
 
 **What it does and does not buy.** The same incompatible edits must be reconciled whichever PR lands second. Yielding does not shrink the conflict. What it changes is WHICH PR pays: the smaller PR X re-lands with a smaller re-review and CI scope than the 20-file PR would. That is a hypothesis this card measures (Proof plan), not a given.
 
@@ -51,7 +50,8 @@ PR 2821 (20 files) conflicted with main twice on 2026-09-27 because smaller PRs 
 
 - New pure module `we:scripts/conveyor/land-overlap-yield.mjs`: `overlapYieldWaits({candidates, openPrs, nowMs, windowMs}) → Map<candidateNum, {yieldTo, files, untilMs}>`. No fs, no network, no clock. `candidates` and `openPrs` both use the snapshot row shape (`number`, `repo`, `baseRefName`, `isDraft`, `labels`, `files: [{path, additions, deletions}]`, plus `filesComplete`, `readyAtMs`, `item`, `exempt`, `dependsOn: Set`).
 - `planLabelDrain(candidates, {..., overlapContext = null, nowMs})`: when `overlapContext` is null (every current caller and test), behaviour is unchanged.
-- Drain CLI: `--no-overlap-yield`, `--overlap-yield-window=<minutes>`, and env `WE_DRAIN_OVERLAP_YIELD=0`.
+- **Settings file (ruled on xgos7st):** `we:scripts/drain-overlap-yield-config.json` (git-ignored; absent ⇒ `{enabled: true, windowMinutes: 45}`), read once per drain invocation. A new `we:scripts/backlog.mjs`-adjacent CLI verb (or a `overlap-yield-config` sibling of `weights`) is the only sanctioned writer — same lane-gated-write-guard shape as `we:scripts/backlog.mjs weights`/`BUILD_QUEUE_CONFIG_PATH`.
+- Drain CLI (one-off overrides only, layered on top of the settings file, not a replacement for it): `--no-overlap-yield`, `--overlap-yield-window=<minutes>`, and env `WE_DRAIN_OVERLAP_YIELD=0`.
 - The deferred entry keeps today's shape and adds `overlapYield: {pr, repo, files, untilMs}`.
 
 ## Scope and consumers
@@ -78,7 +78,7 @@ PR 2821 (20 files) conflicted with main twice on 2026-09-27 because smaller PRs 
 
 ## Tasks
 
-1. After xgos7st is prepared and ratified: confirm the ruling matches this card; if not, stop and re-prepare.
+1. ~~After xgos7st is prepared and ratified: confirm the ruling matches this card.~~ **Done** — xgos7st ratified 2026-09-27 (Fork 1 → A, exactly as designed here), plus the settings-driven config + on-by-default-trial requirement folded into Window/Interfaces above. Build against this revision.
 2. Write the soak break. Show it RED on an `origin/main` baseline with only the break's own files applied: `node we:scripts/conveyor/soak/run.mjs break small-pr-lands-over-large-in-review` exits 1. Record the baseline sha in the break's header; `fixedBy` later names the change commit.
 3. The pure module and its unit tests.
 4. Wire it into `planLabelDrain`/`replan`, the CLI flags, the deferred field and the idle accounting, with test 2.
