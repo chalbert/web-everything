@@ -1652,6 +1652,30 @@ export function watchParkedPrConflicts({
           if (!dryRun) postStandDown({ pr, repo: resolvedRepo });
           entry.routedTo = 'stand-down (after drain grace)';
         } else {
+          // #gh-write-burst (live 2026-09-27 03:5x-04:00Z) — the SAME episode-scoped re-post dedup the
+          // fresh-detection path already applies to its own identical three branches (`hasRecentConflictFindingComment`,
+          // used just below at line ~1493/1496/1501) was MISSING here for all three. `graceDue` recomputes true on
+          // EVERY sweep for as long as a real (non-manifest), non-statute-tier conflict sits past the drain's grace
+          // window (`stand-down.mjs` makes no label change, so nothing here ever went false on its own) — so, unlike
+          // the `alreadyStoodDown`-guarded stand-down branch just above, these three calls fired `postFinding`
+          // UNCONDITIONALLY on every 120s tick, for as long as the PR stayed stuck: a fresh `review:changes` label
+          // write (`gh pr edit`) PLUS a fresh finding comment (`gh pr comment`) every tick, per stuck PR, per repo.
+          // Confirmed live: `calls.jsonl` shows ~300 `pr edit`/`pr comment`/`api --method` mutations in the ten
+          // minutes before GitHub's secondary rate limit tripped and froze landing for 04:04-04:33Z. Read the
+          // thread ONCE (mirrors the fresh-detection path's own `#4118` "read once, both dedups share it" note)
+          // so a genuinely NEW episode (label removed and re-applied since the last finding) still gets posted —
+          // this is a re-post GUARD, not a permanent silence.
+          let graceComments = [];
+          try { graceComments = listPrComments({ number: pr?.number, repo: resolvedRepo }); } catch { graceComments = []; }
+          let graceSinceMs = -Infinity;
+          if (Array.isArray(graceComments) && graceComments.length) {
+            let removedAt = null;
+            try { removedAt = labelRemovedAtMs({ pr, repo: resolvedRepo }); } catch { removedAt = null; }
+            graceSinceMs = Number.isFinite(removedAt) ? removedAt : Infinity;
+          }
+          const graceMarkerScope = { now, sinceMs: graceSinceMs };
+          const alreadyBounced = hasRecentConflictFindingComment(graceComments, graceMarkerScope);
+
           // Dispatch to the fixer. The bounce strips review:accepted + ready-to-merge, so this PR is no longer a
           // queued target next sweep — which is why, on THIS path, the supersede goes FIRST (#xconflres1 review
           // round 1). Finding-first would strand the PR if the supersede then failed: the old stand-down would
@@ -1661,9 +1685,12 @@ export function watchParkedPrConflicts({
           // as superseded) posts just the finding. `supersededStandDown` is only reported once it really posted.
           // #xconflres1 — includes the "no longer statute-tier at all" outcome (the false-positive stand-down this
           // whole card exists to unblock, e.g. `chalbert/web-everything#2772`).
+          // #gh-write-burst — only the finding is skipped when `alreadyBounced`; the supersede needs no guard of its
+          // own (`priorWatcherStandDown` already reads false once a supersede is on the thread).
           if (!dryRun) {
             if (priorWatcherStandDown) postSupersedeComment({ pr, repo: resolvedRepo, provider });
-            if (isStatuteTier && appendOnlyStatute) postFinding({ pr, repo: resolvedRepo, appendOnlyStatute: true });
+            if (alreadyBounced) { /* this episode's finding is already on the thread — never re-post */ }
+            else if (isStatuteTier && appendOnlyStatute) postFinding({ pr, repo: resolvedRepo, appendOnlyStatute: true });
             else if (isStatuteTier) postFinding({ pr, repo: resolvedRepo, reviewHumanFixable: true });
             else postFinding({ pr, repo: resolvedRepo });
           }

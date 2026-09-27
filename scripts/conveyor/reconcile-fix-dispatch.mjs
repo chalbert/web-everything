@@ -171,8 +171,18 @@ export function defaultConfirmWait(ms) {
  *   paths if the card itself declares none. THIS is the one sub-case where the diff-derived fence IS filtered
  *   here (`scopeSource:'diff'` — untrusted, PR-author-controlled filenames), unlike a genuinely resolved item's
  *   own frontmatter scope (`scopeSource` absent/`'card'` — trusted, never filtered). A number with NO matching
- *   card anywhere in the diff is unaffected — still the ghost case just above, still `no-scope`.
- * @param {Array<{kind:string, prNumber:number, headRefName?:string|null, headRefOid?:string|null, labels?:string[], body?:string|null}>} dispatchEntries -
+ *   card anywhere in the diff falls to the GHOST case just above — as of #x9fbg1x-live-incident (2026-09-27),
+ *   THAT case is also no longer an outright `no-scope`: see this docblock's own "no-scope" section above, third
+ *   bullet, and the ghost-handling code below (`else if (!item)`) for the fix — `chalbert/web-everything#2779`
+ *   is the live PR this closes.
+ *
+ * #x9fbg1x-live-incident ALSO fixes WHERE the diff itself comes from: every scope-fallback read below now
+ * prefers `entry.files` (the PR's already-changed files, carried on the dispatch row for free by
+ * `reconcile-pass.mjs#PR_LIST_JSON_FIELDS` once it asks `gh pr list` for `files`) before ever firing a SEPARATE
+ * `gh pr diff`/`gh api` call, AND tells a read that FAILED (`null`, {@link fetchPrDiffPaths}'s updated contract)
+ * apart from a diff that is genuinely empty (`[]`) — a failed read now refuses `scope-read-failed` (retried
+ * fresh next pass) rather than being silently folded into a durable `no-scope`.
+ * @param {Array<{kind:string, prNumber:number, headRefName?:string|null, headRefOid?:string|null, labels?:string[], body?:string|null, files?:string[]|null}>} dispatchEntries -
  *   `reconcile-pass.mjs`'s own `dispatch` array (see `we:scripts/conveyor/reconcile-core.mjs#planReconcile`).
  * @param {(key:string, loadItems:Function)=>({num:string,slug:string,specPath:string,scope:string[]}|null)} findItemFn
  * @param {Function} loadItems
@@ -201,6 +211,33 @@ export function planFixesFromReconcile(dispatchEntries, findItemFn, loadItems, r
     const pr = Number(entry.prNumber);
     const headRefName = entry.headRefName ?? null;
     const itemNum = laneRefItemNum(headRefName);
+    // #x9fbg1x-live-incident (2026-09-27) — PER-ENTRY scope readers that (1) trust `entry.files` — this PR's
+    // OWN already-changed files, when `reconcile-pass.mjs#PR_LIST_JSON_FIELDS` carried them (see that field's
+    // own docblock) — BEFORE ever firing a second, separate `gh pr diff`/`gh api` call for the exact same
+    // question, and (2) tell a READ THAT FAILED apart from a diff that is GENUINELY empty, so a transient `gh`
+    // failure (rate limit, timeout, `gh` briefly unavailable) is never silently read as "this PR touches
+    // nothing" and folded into a permanent `no-scope` refusal — see {@link fetchPrDiffPaths}'s own updated
+    // contract (`null` = failed, `[]` = genuinely empty). LIVE case this closes: `chalbert/web-everything#2779`
+    // (branch `lane/x9fbg1x-bg-isolation-scope`) — a real, 19-file PR — refused `no-scope` on every tick because
+    // its own item number never resolved (no backlog card anywhere) and the separate diff-read fallback kept
+    // coming back empty.
+    let diffReadFailed = false;
+    const entryFiles = Array.isArray(entry.files) ? entry.files.filter((p) => typeof p === 'string' && p) : null;
+    const fetchDiffPathsForEntry = (prNum) => {
+      if (entryFiles) return entryFiles; // trusted — already fetched, possibly genuinely empty.
+      let out;
+      try { out = fetchItemlessDiffPaths(prNum); } catch { diffReadFailed = true; return []; }
+      if (out === null) { diffReadFailed = true; return []; }
+      return Array.isArray(out) ? out : [];
+    };
+    const prefix = (repoProfile(repo) || {}).canonicalPrefix || repo;
+    const resolveFallbackScopeForEntry = (prNum, itemKey) => {
+      if (entryFiles) return entryFiles.map((p) => `${prefix}:${p}`);
+      let out;
+      try { out = resolveFallbackScope(prNum, itemKey); } catch { diffReadFailed = true; return []; }
+      if (out === null) { diffReadFailed = true; return []; }
+      return Array.isArray(out) ? out : [];
+    };
     if (!itemNum) {
       // #xmtbdgs multi-repo slice 6 — a PR whose head ref names no conveyor item is NO LONGER refused outright
       // (ratified `#conveyor-multi-repo-model` clause 3: "a PR with no backlog item is fixed with the PR as the
@@ -213,11 +250,16 @@ export function planFixesFromReconcile(dispatchEntries, findItemFn, loadItems, r
         repo,
         pr: { number: pr, headRefName },
         findItem: (key) => findItemFn(key, loadItems),
-        fetchDiffPaths: fetchItemlessDiffPaths,
+        fetchDiffPaths: fetchDiffPathsForEntry,
       });
       const itemlessScope = (Array.isArray(unit?.scope) ? unit.scope : []).filter(isSafeFallbackScopeEntry);
       if (!itemlessScope.length) {
-        refusals.push({ pr, kind: 'no-scope', why: `PR #${pr} names no backlog item, and its own changed-file diff found nothing to fence with either — refusing to dispatch a fix agent with no fence` });
+        // #x9fbg1x-live-incident — a read that FAILED must retry later, never be read as a durable "no files".
+        // This tick still can't dispatch (no fence either way), but it is reported distinctly so a reader (and
+        // the next tick's fresh read) can tell the two apart.
+        refusals.push(diffReadFailed
+          ? { pr, kind: 'scope-read-failed', why: `PR #${pr} names no backlog item, and the changed-file diff read failed (transient \`gh\` error) — retrying next pass rather than treating this as no files` }
+          : { pr, kind: 'no-scope', why: `PR #${pr} names no backlog item, and its own changed-file diff found nothing to fence with either — refusing to dispatch a fix agent with no fence` });
         continue;
       }
       const isConflictItemless = Array.isArray(entry.labels) && entry.labels.includes(CONFLICT_LABEL);
@@ -233,27 +275,36 @@ export function planFixesFromReconcile(dispatchEntries, findItemFn, loadItems, r
     // branch's own card (`xHASH → NNNN`, #2288) is now found automatically — `findItemFn` itself matches
     // the rename's `bornAs` record — with zero extra code here.
     //
-    // ONLY the resolver's `attribution:'item'` result is trusted for scope. Its `attribution:'pr'` branch
-    // (item not found anywhere — not on `main`, not as a card in this PR's own diff either) is DELIBERATELY
-    // not used to fall back to the PR's own diff here: a genuine ghost/deleted item number must still refuse
-    // `no-scope` outright — using the PR's diff as fence AND stamping `WE #<n>:` with a number naming no item
-    // would be precisely the "honest-looking but WRONG attribution" this file's own history already ruled
-    // unsafe (see this function's own top-of-file docblock).
+    // ONLY the resolver's `attribution:'item'` result is trusted for its DECLARED scope (a resolved item's own
+    // frontmatter, or its card-in-diff twin) — that part is unchanged: a genuine ghost/deleted item number must
+    // never have `WE #<n>:` stamped in its brief with a number naming no real item (the "honest-looking but
+    // WRONG attribution" this file's own history already ruled unsafe).
     //
-    // #xcla4iv — `fetchDiffPaths` is now the REAL `fetchItemlessDiffPaths` binding (it used to be a hard
-    // `() => []` stub here, deliberately, to keep the resolver from ever offering a diff-based fallback for
-    // this branch at all). That is now SAFE to lift: `resolvePrWorkUnit` itself only ever uses the diff to
-    // look for `backlog/<itemNum>-*.md` — the standard file-item-in-PR shape, where the card and the code
-    // that delivers it land in the SAME PR, so the card is real but not yet on `main` — and falls straight
-    // through to the SAME `attribution:'pr'` (ghost) outcome for every other diff shape, changing nothing
-    // for a true ghost. `fetchCardScopeAtRef` lets it read that card's own OWN committed `scope:` at the
-    // PR's head instead of trusting raw diff paths, mirroring the "declared scope wins over diff" preference
-    // this file already applies everywhere else.
+    // #x9fbg1x-live-incident (2026-09-27) — WHAT CHANGED: a genuine ghost (no card anywhere in the diff either)
+    // used to be refused `no-scope` OUTRIGHT here, discarding `resolvePrWorkUnit`'s own `attribution:'pr'`
+    // scope (the PR's real changed files) even when it was non-empty — this file's own top-of-file docblock
+    // already named this population as one of the three "same safe fallback" cases (#3634's own "Scope,
+    // narrowed" section), but the code never actually wired it, only the item-less (`!itemNum`) and card-in-diff
+    // (#xcla4iv) populations were. LIVE: `chalbert/web-everything#2779` (branch `lane/x9fbg1x-bg-isolation-scope`)
+    // — item `x9fbg1x` resolves nowhere (no backlog card, ever) and carries no card in its own diff either, yet
+    // the PR itself is a real, 19-file change. Converged with the ALREADY-SAFE item-less handling above: a
+    // genuine ghost now gets the identical treatment an item-less PR always has — the PR's own diff as fence,
+    // `itemNum: null` (NEVER the unresolvable hash/number — no false attribution), `scopeSource: 'pr-diff'`.
+    // This is not a widening of what a resolved item can do (an item WITH a real declared scope, or a real
+    // card-in-diff scope, is completely unaffected — this branch is reached only when NEITHER exists at all),
+    // only of what "nothing else to go on" now safely falls back to, matching the item-less/#xcla4iv precedent.
+    //
+    // #xcla4iv — `fetchDiffPaths` prefers `entry.files` (see this function's own top-of-loop comment) before
+    // ever firing a live `gh pr diff` read; `resolvePrWorkUnit` itself only ever uses the diff to look for
+    // `backlog/<itemNum>-*.md` (the card-in-diff shape) or, failing that, as this ghost population's own fence.
+    // `fetchCardScopeAtRef` lets it read that card's own OWN committed `scope:` at the PR's head instead of
+    // trusting raw diff paths, mirroring the "declared scope wins over diff" preference this file already
+    // applies everywhere else.
     const unit = resolvePrWorkUnit({
       repo,
       pr: { number: pr, headRefName, headRefOid: entry.headRefOid ?? null },
       findItem: (key) => findItemFn(key, loadItems),
-      fetchDiffPaths: fetchItemlessDiffPaths,
+      fetchDiffPaths: fetchDiffPathsForEntry,
       fetchCardScopeAtRef: resolveCardScopeAtRef,
     });
     const item = unit && unit.attribution === 'item' ? { scope: unit.scope, scopeSource: unit.scopeSource ?? null } : null;
@@ -269,25 +320,38 @@ export function planFixesFromReconcile(dispatchEntries, findItemFn, loadItems, r
     // never a behavior change for a caller: filtering an already-filtered array is idempotent.
     let scope = item ? (item.scopeSource ? item.scope.filter(isSafeFallbackScopeEntry) : item.scope) : [];
     let scopeSource = item?.scopeSource === 'diff' ? 'pr-diff' : 'item';
+    let itemNumOut = itemNum;
     if (item && !scope.length) {
       // `#3634` — a RESOLVED item with no scope of its own (an epic, typically). Try the PR's own
       // already-changed files before refusing outright; see this function's own docblock for why that fallback is
       // safe (never a looser fence than a declared scope would have been). Gated on `item` being non-null: an
       // UNRESOLVABLE item number (a ghost/deleted card, a PR number in the branch name, or a transient
-      // `loadItems` failure that `findItem` swallows into null) stays the `no-scope` refusal it was before — the
-      // fallback must not widen what gets dispatched, and must not stamp `WE #<n>:` with a number naming no item.
-      let fallback = [];
-      try { fallback = resolveFallbackScope(pr, itemNum) || []; } catch { fallback = []; }
-      // The filenames are PR-author-controlled and `dispatchFix` joins `scope` with ',' into the agent's brief,
-      // so keep only entries that cannot smuggle extra fence entries or brief text (see isSafeFallbackScopeEntry).
-      fallback = Array.isArray(fallback) ? fallback.filter(isSafeFallbackScopeEntry) : [];
+      // `loadItems` failure that `findItem` swallows into null) is handled by the GHOST branch below instead —
+      // the fallback must not widen what gets dispatched, and must not stamp `WE #<n>:` with a number naming no
+      // item, so it stays gated here on a real resolved item.
+      const fallback = resolveFallbackScopeForEntry(pr, itemNum).filter(isSafeFallbackScopeEntry);
       if (fallback.length) {
         scope = fallback;
         scopeSource = 'pr-diff';
       }
+    } else if (!item) {
+      // #x9fbg1x-live-incident — the GHOST case (see the comment above `resolvePrWorkUnit`'s own call): no
+      // resolved item, no card anywhere in the diff. `unit.scope` here is `resolvePrWorkUnit`'s own
+      // `attribution:'pr'` fence (the PR's real changed files, repo-prefixed) — already filtered at its own
+      // shared choke point, re-filtered here (idempotent) for the same defense-in-depth reason as the card-in-
+      // diff branch above.
+      const ghostScope = (Array.isArray(unit?.scope) ? unit.scope : []).filter(isSafeFallbackScopeEntry);
+      if (ghostScope.length) {
+        scope = ghostScope;
+        scopeSource = 'pr-diff';
+        itemNumOut = null; // NEVER stamp the unresolvable id — same honesty rule the item-less branch keeps.
+      }
     }
     if (!scope.length) {
-      refusals.push({ pr, kind: 'no-scope', why: `item #${itemNum} (PR #${pr}) has no declared scope, and the PR's own changed-file fallback found nothing to fence with either — refusing to dispatch a fix agent with no fence` });
+      // #x9fbg1x-live-incident — a read that FAILED must retry later, never be read as a durable "no files".
+      refusals.push(diffReadFailed
+        ? { pr, kind: 'scope-read-failed', why: `item #${itemNum} (PR #${pr}) has no declared scope, and the changed-file fallback read failed (transient \`gh\` error) — retrying next pass rather than treating this as no files` }
+        : { pr, kind: 'no-scope', why: `item #${itemNum} (PR #${pr}) has no declared scope, and the PR's own changed-file fallback found nothing to fence with either — refusing to dispatch a fix agent with no fence` });
       continue;
     }
     // #xu2krte Fork 1 — a `fix` dispatch caused by the parked-PR conflict watch still carries the
@@ -297,7 +361,7 @@ export function planFixesFromReconcile(dispatchEntries, findItemFn, loadItems, r
     // as it always has.
     const isConflict = Array.isArray(entry.labels) && entry.labels.includes(CONFLICT_LABEL);
     planned.push({
-      itemNum, pr, laneRef: headRefName, scope, scopeSource, isConflict, body: entry.body ?? null,
+      itemNum: itemNumOut, pr, laneRef: headRefName, scope, scopeSource, isConflict, body: entry.body ?? null,
       // #xu2krte security review finding — needed by `tryResumeFix` to confirm a resume CANDIDATE actually
       // belongs to THIS pr before trusting it (see that function's own docblock).
       headRefOid: entry.headRefOid ?? null,
@@ -317,8 +381,11 @@ export { isSafeFallbackScopeEntry };
  * `gh pr diff <pr> --name-only` call, reduced to the `we:`-prefixed path list {@link planFixesFromReconcile}'s
  * `resolveFallbackScope` wants (the SAME repo-qualified form the canonical loader already produces for a
  * declared `scope:` — see `dispatch-lane-io.mjs#findItem`'s own comment). Best-effort: any `gh` failure (no
- * `gh` on PATH, the PR vanished, a network hiccup) degrades to `[]` — the caller then reports `no-scope` exactly
- * as it did before this fallback existed, never throws the whole pass over one bad read.
+ * `gh` on PATH, the PR vanished, a network hiccup) degrades to `null` (#x9fbg1x-live-incident, 2026-09-27 — SEE
+ * {@link fetchPrDiffPaths}'s OWN updated contract: this used to degrade to `[]`, indistinguishable from a real
+ * PR that genuinely changed nothing; `planFixesFromReconcile` now needs to tell the two apart so a transient
+ * failure retries instead of being read as a durable "no files") — the caller then reports the failure
+ * distinctly, never throws the whole pass over one bad read.
  * @param {number} pr
  * @param {{exec?:Function, root?:string, repo?:string|null}} [o] - `repo` (an `owner/name` slug, or any other
  *   vocabulary {@link repoProfile} accepts) pins the `gh` call to that repo, the same
@@ -328,12 +395,13 @@ export { isSafeFallbackScopeEntry };
  *   {@link runReconcileFixDispatch} only reaches this for `repo === 'we'` — see its own `unsupported-repo`
  *   early return — but a latent bug slices 5-6 would otherwise have inherited unnoticed). `repo == null`
  *   (today's only reachable case) still resolves to `'we'`, so existing callers see byte-identical output.
- * @returns {string[]}
+ * @returns {string[]|null} `null` on a failed read (see above); `[]` only for a genuinely empty diff.
  */
 export function fetchPrDiffScope(pr, { exec = execFileSyncThrottled, root = REPO_ROOT, repo = null } = {}) {
   const profile = repoProfile(repo ?? 'we');
   const prefix = profile ? profile.canonicalPrefix : 'we';
-  return fetchPrDiffPaths(pr, { exec, root, repo }).map((p) => `${prefix}:${p}`);
+  const paths = fetchPrDiffPaths(pr, { exec, root, repo });
+  return paths === null ? null : paths.map((p) => `${prefix}:${p}`);
 }
 
 /**
@@ -346,7 +414,15 @@ export function fetchPrDiffScope(pr, { exec = execFileSyncThrottled, root = REPO
  * @param {number} pr
  * @param {{exec?:Function, root?:string, repo?:string|null}} [o] - see {@link fetchPrDiffScope}'s own docblock;
  *   `repo` here only pins the `gh --repo` flag, since there is no prefix left for this function to add.
- * @returns {string[]}
+ * @returns {string[]|null} `null` on a failed read — #x9fbg1x-live-incident (2026-09-27): this USED TO degrade
+ *   to `[]`, the exact same shape a genuinely empty diff returns, so `planFixesFromReconcile` could not tell
+ *   "this PR truly changed nothing" apart from "the read broke" and folded a transient `gh` failure straight
+ *   into a durable `no-scope` refusal (LIVE: `chalbert/web-everything#2779`, a real 19-file PR, refused
+ *   `no-scope` on every tick). Every caller of this function (and of {@link fetchPrDiffScope}) MUST treat `null`
+ *   distinctly from `[]` from here on — `resolvePrWorkUnit`'s own `fetchDiffPaths(prNumber) || []` already does
+ *   (a `null` degrades to the pre-existing safe `[]` there, UNCHANGED for that shared resolver's own callers);
+ *   `planFixesFromReconcile`'s own per-entry wrappers are what actually SURFACE the distinction to a refusal
+ *   kind (`scope-read-failed` vs `no-scope`) instead of merely swallowing it one level deeper.
  */
 export function fetchPrDiffPaths(pr, { exec = execFileSyncThrottled, root = REPO_ROOT, repo = null } = {}) {
   try {
@@ -359,7 +435,7 @@ export function fetchPrDiffPaths(pr, { exec = execFileSyncThrottled, root = REPO
     });
     return String(out || '').split('\n').map((s) => s.trim()).filter(Boolean);
   } catch {
-    return [];
+    return null;
   }
 }
 

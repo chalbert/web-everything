@@ -32,6 +32,7 @@ import { resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 import { CONFLICT_FIX_COMMENT_MARKER } from './conflict-fix-round-count.mjs';
+import { resolveLocalRefSha, conflictFixTargetTrailer } from './rearm-review.mjs';
 
 export { CONFLICT_FIX_COMMENT_MARKER };
 
@@ -39,10 +40,15 @@ export { CONFLICT_FIX_COMMENT_MARKER };
  * we:scripts/conveyor/conflict-fix-mark.mjs#buildConflictFixMarkComment — the durable comment body a completed
  * STACKED-BASE mechanical rebase round posts. Its FIRST line MUST be {@link CONFLICT_FIX_COMMENT_MARKER}
  * (single-sourced, shared with the ordinary conflict-fix round) so posting and counting can never drift. Pure.
- * @param {{ actor?:string, baseRefName?:string|null }} o
+ * @param {{ actor?:string, baseRefName?:string|null, baseSha?:string|null }} o - #2787-live-incident:
+ *   `baseSha` (the base's own tip at the time this round resolved, read locally — see
+ *   `rearm-review.mjs#resolveLocalRefSha`'s own docblock) rides an OPTIONAL trailer so a LATER round against
+ *   that same base's NEWER tip (rebased again since) is not misread as this round recurring — see
+ *   `conflict-fix-round-count.mjs#countStaleConflictFixRounds`. Omitted (no trailer) when `baseRefName` or
+ *   `baseSha` is unknown — exactly today's behaviour before this param existed.
  * @returns {string}
  */
-export function buildConflictFixMarkComment({ actor = 'conveyor fix agent', baseRefName = null } = {}) {
+export function buildConflictFixMarkComment({ actor = 'conveyor fix agent', baseRefName = null, baseSha = null } = {}) {
   const base = baseRefName ? `\`${baseRefName}\`` : 'its own base branch';
   return [
     CONFLICT_FIX_COMMENT_MARKER,
@@ -55,7 +61,7 @@ export function buildConflictFixMarkComment({ actor = 'conveyor fix agent', base
       'label — there was nothing to re-arm, since the PR was never bounced. If GitHub has since RETARGETED this ' +
       'PR to `main` (its stacked base merged and was deleted — the normal path), the NEXT conflict on this PR is ' +
       'handled by the ordinary main-base conflict-fix flow instead, unaffected by this marker.',
-  ].join('\n');
+  ].join('\n') + (baseRefName ? conflictFixTargetTrailer(baseRefName, baseSha) : '');
 }
 
 // ── IO SHELL (runs only as a CLI — the pure exports above stay side-effect-free on import) ────────────────────────
@@ -77,11 +83,17 @@ if (IS_CLI) {
   };
   const pr = Number(positionals[0]);
   if (!Number.isInteger(pr) || pr <= 0) {
-    fail('usage: conflict-fix-mark.mjs <pr> [--repo=<owner/name>] [--actor=<name>] [--base-ref=<name>]  (pr must be a positive integer)');
+    fail('usage: conflict-fix-mark.mjs <pr> [--repo=<owner/name>] [--actor=<name>] [--base-ref=<name>] [--base-sha=<sha>]  (pr must be a positive integer)');
   }
+  const baseRefName = typeof flags['base-ref'] === 'string' ? flags['base-ref'] : null;
+  // #2787-live-incident — prefer an explicit `--base-sha=`; else self-derive it locally off `origin/<base-ref>`
+  // (this CLI runs inside the fix agent's own lane, which just rebased against exactly this ref) rather than
+  // leave the round's target trailer off whenever the caller doesn't pass one explicitly.
+  const baseSha = typeof flags['base-sha'] === 'string' ? flags['base-sha'] : (baseRefName ? resolveLocalRefSha(baseRefName) : null);
   const body = buildConflictFixMarkComment({
     actor: typeof flags.actor === 'string' ? flags.actor : undefined,
-    baseRefName: typeof flags['base-ref'] === 'string' ? flags['base-ref'] : null,
+    baseRefName,
+    baseSha,
   });
   const args = ['pr', 'comment', String(pr), '--body', body];
   if (typeof flags.repo === 'string') args.push(`--repo=${flags.repo}`); // the fix agent runs in its WE lane clone; a missing --repo derives from cwd.

@@ -51,3 +51,50 @@ describe('gh-call-failures', () => {
     expect(ghCallFailures.evaluate({ ghCalls: old }, { now: NOW })[0].breach).toBe(false);
   });
 });
+
+// #gh-write-burst — the write-RATE breach, independent of any failure signal: the live 2026-09-27 03:5xZ burst
+// itself preceded every failure (the rate limit did not trip until 04:00Z), so a smell keyed only on failures
+// would have stayed quiet through the whole run-up that caused it.
+function writeBurst({ writesPerMin, spreadMinutes = 10, caller = 'parked-pr-conflict-watch-we' } = {}) {
+  // summarizeGhCalls averages over the smell's own 15-minute window, so the TOTAL entry count that yields a
+  // given writesPerMin is writesPerMin * 15 — spread across `spreadMinutes` distinct timestamps (all still
+  // inside the 15-minute window) so this reads as a sustained rate, not one instant.
+  const out = [];
+  const totalWrites = Math.round(writesPerMin * 15);
+  for (let i = 0; i < totalWrites; i += 1) {
+    out.push({ ts: at(i % spreadMinutes), op: i % 2 === 0 ? 'pr edit' : 'pr comment', attempt: 1, points: 1, outcome: 'call', ok: true, w: true, caller });
+  }
+  return out;
+}
+
+describe('gh-call-failures — write-rate spike (#gh-write-burst)', () => {
+  it('stays quiet on an ordinary, low write rate (all calls succeed, no rate-limit signal)', () => {
+    const ghCalls = [...healthy(), ...writeBurst({ writesPerMin: 3 })];
+    const [r] = ghCallFailures.evaluate({ ghCalls }, { now: NOW });
+    expect(r.breach).toBe(false);
+  });
+
+  it('breaches when the write rate alone reaches the write-budget fraction, even with zero failures', () => {
+    // gh-throttle's own DEFAULT_GH_WRITE_BUDGET_PER_MIN is 40; maxWriteBudgetFraction is 0.8 → breach at >=32/min.
+    const ghCalls = writeBurst({ writesPerMin: 35 });
+    const [r] = ghCallFailures.evaluate({ ghCalls }, { now: NOW });
+    expect(r.breach).toBe(true);
+    expect(r.measure.writesPerMin).toBeCloseTo(35, 0);
+    expect(r.measure.writeBudgetPerMin).toBe(40);
+    expect(r.summary).toMatch(/writes 35\/min of a 40\/min budget/);
+    expect(r.summary).toMatch(/parked-pr-conflict-watch-we/);
+    expect(r.recommendation).toMatch(/non-idempotent per-tick write loop/);
+  });
+
+  it('names the top write CALLER — the exact attribution the 2026-09-27 incident needed and calls.jsonl lacked', () => {
+    const ghCalls = [
+      ...writeBurst({ writesPerMin: 30, caller: 'parked-pr-conflict-watch-we' }),
+      ...writeBurst({ writesPerMin: 5, caller: 'review-round-tag' }),
+    ];
+    const [r] = ghCallFailures.evaluate({ ghCalls }, { now: NOW });
+    expect(r.breach).toBe(true);
+    expect(r.measure.writesByCaller['parked-pr-conflict-watch-we']).toBe(450);
+    expect(r.measure.writesByCaller['review-round-tag']).toBe(75);
+    expect(r.recommendation).toMatch(/parked-pr-conflict-watch-we×450/);
+  });
+});

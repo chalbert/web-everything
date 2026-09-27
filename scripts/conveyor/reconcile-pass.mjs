@@ -62,7 +62,7 @@ import { readPrsFromFile } from './open-pr-fetch.mjs';
 import { defaultListAgents } from '../operations/dispatch-lane-io.mjs';
 import { listAgentsWithReviewJobs } from '../operations/review-job-store.mjs';
 import { countRearmComments } from './rearm-review.mjs';
-import { planReconcile, DISPATCH_KINDS, REFUSAL_KINDS, markSelfReportedDone, markHungSessions, markAuthExpiredSessions, markIdleFinishedSessions } from './reconcile-core.mjs';
+import { planReconcile, DISPATCH_KINDS, REFUSAL_KINDS, markSelfReportedDone, markHungSessions, markAuthExpiredSessions, markIdleFinishedSessions, markBgIsolationStalls } from './reconcile-core.mjs';
 import { tryReadCompletion } from '../operations/completion-store.mjs';
 import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 // we:backlog/x5uqim1-*.md (#4075/#3383) — the two extra facts `reconcile-core.mjs#isPrCiFailureOwedRerun` needs
@@ -72,6 +72,7 @@ import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 import { latestRequiredCheck, isRequiredCheckFailed } from '../merge-ai-prs.mjs';
 import { computeMainRedWindows, DEFAULT_MAIN_WORKFLOW_NAME, DEFAULT_REQUIRED_CHECK, DEFAULT_MAIN_RED_ATTRIBUTED_CHECKS, failingRequiredCheckForAttribution, isAnyRequiredCheckFailed } from './main-red-recovery.mjs';
 import { readHungInfo, resolveHungThresholdMs, readClaudeAuthExpiredInfo, readIdleFinishedInfo, resolveIdleFinishedThresholdMs } from './hung-session.mjs';
+import { readBgIsolationStallInfo } from './bg-isolation-stall.mjs';
 
 /**
  * we:scripts/conveyor/reconcile-pass.mjs#PR_LIST_JSON_FIELDS — the `--json` fields this pass reads about each
@@ -93,8 +94,16 @@ import { readHungInfo, resolveHungThresholdMs, readClaudeAuthExpiredInfo, readId
  *                         `defaultBranch` to tell a PR stacked on another lane/PR (the drain will never land it,
  *                         whatever its labels say) apart from an ordinary conflict against `main`. Dropping it
  *                         silently sends every `conflicted` PR back through the pre-#3383 `owed-elsewhere` path.
+ *   `files`             — #x9fbg1x-live-incident (2026-09-27): the PR's own already-changed files, carried on
+ *                         every row (evidence, mirrors `body`) so `reconcile-fix-dispatch.mjs#planFixesFromReconcile`
+ *                         can fence a no-declared-scope fix dispatch off the PR's REAL diff without a second,
+ *                         separate `gh pr diff` call of its own (previously the ONLY way that fallback could
+ *                         read the PR's files — see that file's own docblock for the live PR #2779 this fixes:
+ *                         a genuine, rich diff silently read as empty whenever that separate call failed).
+ *                         Costs nothing extra beyond this one query already paying for connection fields
+ *                         (`labels`/`statusCheckRollup`/`comments`) — `files` is the same shape of field.
  */
-export const PR_LIST_JSON_FIELDS = 'number,headRefName,headRefOid,baseRefName,labels,statusCheckRollup,mergeStateStatus,comments,body';
+export const PR_LIST_JSON_FIELDS = 'number,headRefName,headRefOid,baseRefName,labels,statusCheckRollup,mergeStateStatus,comments,body,files';
 
 /** How many open PRs one pass reads. The board's own `OPEN_LIMIT` is 30; a reconciler that silently stopped at
  *  the default page would leave the overflow unowned, which is this item's defect wearing a smaller hat. */
@@ -133,11 +142,16 @@ export function defaultReadPrs({ exec = execFileSyncThrottled, repo = null } = {
  * session whose OWN transcript shows the Claude CLI's own auth-failure (see that function's own doc for the
  * full incident) ALSO stops reading as `live-process` — this one catches the failure the INSTANT it shows in
  * the transcript, rather than waiting out the generic hung-transcript threshold.
- * FINALLY runs {@link markIdleFinishedSessions} (#4075/xg7m2wq, live incident PR #2724, 2026-09-26) — a
- * backstop for EVERY kind, not only the ones with a completion-record schema: a session whose last assistant
- * turn has genuinely ENDED (no pending tool call) and has sat idle past a short threshold is treated as
- * finished, in case a brief forgets to report its own completion the way `fix-agent-ci-brief.md` did.
- * @param {{exec?:Function, env?:object, completionFor?:Function, hungInfoFor?:Function, authExpiredInfoFor?:Function, idleFinishedInfoFor?:Function, now?:number, hungThresholdMs?:number, idleFinishedThresholdMs?:number, listJobs?:Function}} [o]
+ * FINALLY (both epic #3383/#4075) runs {@link markIdleFinishedSessions} (live incident PR #2724, 2026-09-26)
+ * — a backstop for EVERY kind, not only the ones with a completion-record schema: a session whose last
+ * assistant turn has genuinely ENDED (no pending tool call) and has sat idle past a short threshold is
+ * treated as finished, in case a brief forgets to report its own completion the way `fix-agent-ci-brief.md`
+ * did — AND {@link markBgIsolationStalls} (#x9fbg1x, live incident `fix-2748`/`fix-2770`, 2026-09-26), which
+ * gives a session `assessLiveness` already reports `awaiting-permission` a MORE SPECIFIC reason when its own
+ * transcript shows Claude Code's own background-session worktree-isolation guard refusal — see
+ * `we:scripts/conveyor/bg-isolation-stall.mjs`'s own header. Cheap: it reads a transcript only for a session
+ * already classified `awaiting-permission`, never for the common live/finished case.
+ * @param {{exec?:Function, env?:object, completionFor?:Function, hungInfoFor?:Function, authExpiredInfoFor?:Function, idleFinishedInfoFor?:Function, bgIsolationStallInfoFor?:Function, now?:number, hungThresholdMs?:number, idleFinishedThresholdMs?:number, listJobs?:Function}} [o]
  *   `listJobs` (x26lw6u) defaults to the live review-job rows; a test injects `() => []` or fakes.
  * @returns {Array<object>}
  */
@@ -146,6 +160,7 @@ export function defaultReadAgents({
   hungInfoFor = readHungInfo, now = Date.now(), hungThresholdMs = resolveHungThresholdMs(env),
   authExpiredInfoFor = readClaudeAuthExpiredInfo,
   idleFinishedInfoFor = readIdleFinishedInfo, idleFinishedThresholdMs = resolveIdleFinishedThresholdMs(env),
+  bgIsolationStallInfoFor = readBgIsolationStallInfo,
   listJobs = undefined,
 } = {}) {
   // x26lw6u — a review now runs as a JOB (`we:scripts/operations/review-job.mjs`), not a `claude --bg` session,
@@ -163,7 +178,11 @@ export function defaultReadAgents({
   // #4075/xg7m2wq, live incident PR #2724, 2026-09-26 — the general backstop for EVERY kind: a session whose
   // last assistant turn has fully ended (no pending tool call) and has sat idle past a short threshold is
   // finished too, in case its own brief forgot to report completion the way `fix-agent-ci-brief.md` did.
-  return markIdleFinishedSessions(authMarked, idleFinishedInfoFor, now, idleFinishedThresholdMs);
+  const idleMarked = markIdleFinishedSessions(authMarked, idleFinishedInfoFor, now, idleFinishedThresholdMs);
+  // #x9fbg1x — LAST: only ever adds a clearer reason to a row already `awaiting-permission`, so running it
+  // after every other pre-pass (which can only ever REMOVE a session from `live-process` contention, never add
+  // `awaiting-permission`) is safe regardless of ordering.
+  return markBgIsolationStalls(idleMarked, bgIsolationStallInfoFor);
 }
 
 /**
@@ -684,6 +703,12 @@ export function runReconcilePass({
   // #2748 false-red follow-up — injectable so a test can supply a fixture with no network, matching every
   // other reader in this file. Defaults to the live, cached branch-protection read.
   readRequiredChecks = getRequiredStatusChecks,
+  // #2787-live-incident (2026-09-27) — `origin/<defaultBranch>`'s own current tip, read PURELY LOCALLY (no `gh`
+  // call at all): `reconcile-core.mjs#planReconcile`'s conflict-fix cap needs it to tell "the same conflict,
+  // still stuck" apart from "a fresh conflict, main moved on" (see that function's own `mainSha` param).
+  // Best-effort — see {@link defaultResolveMainSha}'s own docblock; a failed read degrades to `null`, which
+  // `planReconcile` already treats as "ref-only comparison", never a hard failure of this whole pass.
+  resolveMainSha = defaultResolveMainSha,
 } = {}) {
   const repoKey = repo == null ? 'we' : repoKeyForSlug(repo);
   if (repoKey === null) throw new Error(`reconcile-pass: --repo ${repo} is not a constellation repo`);
@@ -706,8 +731,36 @@ export function runReconcilePass({
   // still gets a required set: `getRequiredStatusChecks` degrades to its own cache/fallback chain rather than
   // ever throwing, so this call is safe unconditionally (see that module's own header).
   const { checks: requiredChecks } = readRequiredChecks({ repo: resolvedRepo, branch: defaultBranch });
-  const plan = planReconcile({ repo: repoKey, prs, agents, durableCounts: durableCountsFrom(prs), now, defaultBranch, mainRedWindows, requiredChecks });
+  const mainSha = resolveMainSha(defaultBranch);
+  const plan = planReconcile({
+    repo: repoKey, prs, agents, durableCounts: durableCountsFrom(prs), now, defaultBranch, mainRedWindows,
+    requiredChecks, mainSha,
+  });
   return { ...plan, prs: prs.length, agents: agents.length };
+}
+
+/**
+ * we:scripts/conveyor/reconcile-pass.mjs#defaultResolveMainSha — #2787-live-incident (2026-09-27):
+ * `origin/<ref>`'s own current tip, read with a PLAIN local `git rev-parse` — no `gh`, no network call of its
+ * own beyond whatever fetch already happened this tick (this process's own checkout is kept fresh by the
+ * SAME `assertMainNotStale` staleness guard `reconcile-fix-dispatch.mjs#runReconcileFixDispatch` already runs
+ * before this pass, so `origin/<ref>` is already current by the time this reads it). Best-effort: no local git,
+ * no such ref, any failure at all — degrades to `null`, exactly like every other best-effort reader in this
+ * file (`defaultFetchRef`, `defaultReadMergeBase`) — a lost sha is a strictly smaller loss than failing the
+ * whole reconcile pass over it.
+ * @param {string} ref
+ * @param {{exec?:Function}} [o]
+ * @returns {string|null}
+ */
+export function defaultResolveMainSha(ref, { exec = execFileSync } = {}) {
+  try {
+    const out = String(exec('git', ['rev-parse', `origin/${ref}`], {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 10_000,
+    }) || '').trim();
+    return isSha(out) ? out : null;
+  } catch {
+    return null;
+  }
 }
 
 // ── IO SHELL (runs only as a CLI — the exports above stay side-effect-free on import) ──────────────────────────

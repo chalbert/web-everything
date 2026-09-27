@@ -76,6 +76,13 @@ import { createHash, randomBytes } from 'node:crypto';
 import { homedir, hostname } from 'node:os';
 import { join, basename, resolve, dirname, sep } from 'node:path';
 import { resolveReal } from './guard-lane.mjs';
+// #x9fbg1x — every lane clone this pool hands out gets Claude Code's own background-session worktree-isolation
+// guard turned OFF, via an UNTRACKED (`.gitignore`d) settings.local.json this call writes INTO the clone —
+// never the tracked, repo-wide `.claude/settings.json` (which no longer carries this key; see that file's own
+// diff and `scripts/lib/dispatch-bg-isolation.mjs`'s header for the full incident). A lane clone already IS
+// this repo's own isolation boundary (#2123/#104), so the CLI's guard is redundant for ANY session working in
+// one — dispatched or a human-driven single session alike — without ever touching the primary checkout.
+import { ensureWorktreeIsolationOff } from './lib/dispatch-bg-isolation.mjs';
 import { guardedPoolRoot, referenceArgs } from './lib/lane-pool-paths.mjs';
 import {
   LEASE_FILENAME,
@@ -354,6 +361,30 @@ function writeLaneEnv(repo, n) {
   const contents = laneEnvLocal(repo, n);
   if (contents === null) return;
   writeFileSync(join(laneDir(repo, n), '.env.local'), contents);
+}
+
+// #x9fbg1x — same "write AFTER refreshLane's `git clean -fd`" timing as `writeLaneEnv` above, and the same
+// reason: `.claude/settings.local.json` is untracked (`.gitignore`'d), so a plain `git clean -fd` would
+// otherwise remove it right back out from under a lane this call just "provisioned". Idempotent and
+// additive (see `ensureWorktreeIsolationOff`'s own doc) — safe to call on every provision/refresh/acquire,
+// never only once at a lane's first clone, so a lane provisioned BEFORE this fix existed still picks it up
+// the next time it is touched.
+//
+// GATED ON `.claude/` ALREADY EXISTING IN THE CHECKOUT (reproduced live against a from-scratch fixture while
+// building this fix). This repo's own `.claude/` is never empty — `.claude/settings.json` is tracked — so a
+// lane clone of THIS repo always has the directory already, and the new `settings.local.json` lands as its
+// OWN individual `git status --porcelain` line (which the litter allowlist's exact-path entry matches). But a
+// checkout with NO tracked `.claude/` entry at all (a different constellation pool this same lane-pool.mjs
+// also serves — plateau-app, frontierui; confirmed NOT to have this convention yet, we:backlog/3170-*.md) would
+// otherwise get a brand-new, WHOLLY untracked `.claude/` directory the very first time this runs — and git
+// collapses a wholly-untracked directory to ONE porcelain line (`?? .claude/`) that no per-FILE allowlist entry
+// can ever match, misreading the whole lane as dirty. Skipping the write there is strictly narrower than the
+// repo-wide tracked-settings.json approach this card replaces, never broader — and matches #3170's own ruling
+// that a sibling repo's own convention must be confirmed before assuming this repo's applies.
+function writeLaneClaudeSettings(repo, n) {
+  const dir = laneDir(repo, n);
+  if (!existsSync(join(dir, '.claude'))) return;
+  ensureWorktreeIsolationOff({ cwd: dir });
 }
 
 // ── constellation sibling clones for the WE pool (#2166 → #2282 → #2349) ─────────────────────────────
@@ -1171,6 +1202,7 @@ function provisionLane(repo, n, force) {
   else log(`  lane-${n} exists`);
   const result = refreshLane(repo, n, { force });
   writeLaneEnv(repo, n);
+  writeLaneClaudeSettings(repo, n);
   if (!flags['no-install']) ensureDeps(laneDir(repo, n));
   return result;
 }
@@ -1316,6 +1348,7 @@ function cmdRefresh(repo) {
     const result = refreshLane(repo, n, { force });
     if (!result.skipped) resetLanes.push(n);
     writeLaneEnv(repo, n);
+    writeLaneClaudeSettings(repo, n);
     if (!flags['no-install']) ensureDeps(laneDir(repo, n));
   }
   unmapLanes(repo, resetLanes); // a reset lane no longer renders its old item (#2139); a skipped one still does
@@ -1681,6 +1714,7 @@ function provisionClaimedLane(repo, chosen, targetWasReserved) {
     clearForeignVerifyMarker(dir);
   }
   writeLaneEnv(repo, chosen);
+  writeLaneClaudeSettings(repo, chosen);
   if (!flags['no-install']) ensureDeps(dir);
   return dir;
 }
