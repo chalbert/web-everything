@@ -144,6 +144,7 @@ export const AGY_CLAUDE_MODEL_BY_TIER = Object.freeze({
 });
 
 /** When and against which agy build {@link AGY_CLAUDE_MODEL_BY_TIER} was last checked against `agy models`. */
+// @test-only-export-ok: a dated provenance record for the operator and the next re-check, pinned by its own test
 export const AGY_MODEL_CATALOG_CHECK = Object.freeze({ agyVersion: '1.2.12', checkedOn: '2026-09-27' });
 
 /**
