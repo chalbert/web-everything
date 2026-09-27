@@ -1222,6 +1222,29 @@ describe('landedIdsForCandidate (#3441 — resolve-on-land for a plain single-lo
     expect(landedIdsForCandidate({ hasManifest: false, item: null, repo: null, headRef: 'lane/3412-resolve-fix', title: '' }, { fetchGuardSignals: noSignals, fetchDiff: () => '' })).toEqual([]);
   });
 
+  // Incident 2026-09-26 03:14Z — PR #2785 (`chalbert/web-everything`, branch `lane/2779-session-token-fresh`,
+  // no manifest, no title marker, no body). At land time PR #2779 (the real, unmerged bg-isolation fix) was
+  // still open. RED: with no `openPrNums` (the pre-fix call shape — production never actually wired this
+  // through before this fix), the bare branch-name lead segment wrongly credited card #2779. GREEN: the fixed
+  // call site always passes the real open-PR set, and #2785's own real data — reproduced here verbatim —
+  // resolves nothing, leaving #2779 untouched for a human/the stranded sweep with real evidence.
+  describe('#2779-incident — PR #2785 real branch/title end-to-end', () => {
+    const pr2785 = { hasManifest: false, item: null, repo: null, headRef: 'lane/2779-session-token-fresh', title: 'session token freshness check' };
+
+    it('RED (pre-fix call shape, no openPrNums) — reproduces the incident: card #2779 wrongly credited', () => {
+      expect(landedIdsForCandidate(pr2785, { isLocalRepo, fetchGuardSignals: noSignals, fetchDiff: () => '' })).toEqual([2779]);
+    });
+
+    it('GREEN (fixed call shape) — #2779 was an open PR at land time, so it is refused, not credited', () => {
+      expect(landedIdsForCandidate(pr2785, { isLocalRepo, fetchGuardSignals: noSignals, fetchDiff: () => '', openPrNums: ['2779'] })).toEqual([]);
+    });
+
+    it('a later, unrelated PR on the SAME branch-naming convention still resolves normally once #2779 is no longer open', () => {
+      // Proves the guard is scoped to the live collision, not a blanket ban on numeric-lead branches.
+      expect(landedIdsForCandidate(pr2785, { isLocalRepo, fetchGuardSignals: noSignals, fetchDiff: () => '', openPrNums: ['3001'] })).toEqual([2779]);
+    });
+  });
+
   // #3473's lazy fetch skipped this call when the ref/title base was empty; PR #2724's review relaxed that
   // (a body-only ride-along of a no-id PR was missed), so the body IS read — and with no signal, credits nothing.
   it('#3473 / PR #2724 — an empty ref/title base still reads the body once, and neutral signals credit nothing', () => {

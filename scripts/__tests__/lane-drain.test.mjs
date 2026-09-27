@@ -419,6 +419,54 @@ describe('lane-drain on-land cleanup contract guard (source-level, #2748)', () =
   });
 });
 
+// #2779-incident (2026-09-26 03:14Z) — PR #2785 (`lane/2779-session-token-fresh`) merged; the drain's
+// resolve-on-land commit `drain: resolve #2779 on land (#2748)` then auto-closed the real, unmerged PR #2779
+// as a GitHub closing-keyword side effect. Every drain-authored commit message must (a) be wrapped in the
+// runtime guard (`assertNoClosingKeywordRef`, `./lib/commit-message-safety.mjs`) and (b) never actually contain
+// the dangerous shape in the first place — both proved here at the source level, since spinning up a full
+// `scripts/backlog.mjs`-backed throwaway repo to drive `resolveLandedItem` end-to-end is out of proportion to
+// what a source scrape already proves deterministically (this file's own established style for the drain's
+// git-writing internals — see the two `describe` blocks just above).
+describe('lane-drain commit messages never carry a GitHub closing-keyword + #N (#2779-incident)', () => {
+  const src = readFileSync(resolve(process.cwd(), 'scripts/lane-drain.mjs'), 'utf8');
+
+  it('imports the runtime guard', () => {
+    expect(src).toMatch(/import \{ assertNoClosingKeywordRef \} from '\.\/lib\/commit-message-safety\.mjs'/);
+  });
+
+  it('every `drain: …` commit-message TEMPLATE literal is wrapped in the guard before reaching `git commit -m`', () => {
+    // Every commit call whose message template starts with the literal `drain:` prefix (i.e. every one of
+    // these four sites — resolve-on-land, JIT-number, unqueue, reopen-stranded) must pass through
+    // `assertNoClosingKeywordRef(...)` rather than a bare template literal, so a future edit that reintroduces
+    // a closing-keyword shape throws at the write, not just fails a future test run of this file.
+    const drainMessageCalls = (src.match(/\['commit', '-m', [\s\S]{0,20}(?:assertNoClosingKeywordRef\(`drain:|`drain:)/g) || []);
+    expect(drainMessageCalls.length).toBeGreaterThanOrEqual(4); // resolve-on-land, JIT-number, unqueue, reopen-stranded
+    for (const call of drainMessageCalls) expect(call).toMatch(/assertNoClosingKeywordRef\(`drain:/);
+  });
+
+  it('the fixed resolve-on-land template refers to the card by bare number ("card N"), never "#N" (the incident shape)', () => {
+    expect(src).toMatch(/`drain: mark card \$\{num\} resolved on land \(#2748\)`/);
+    // scoped to the actual CODE line (not the incident comment right above it, which deliberately quotes the
+    // old dangerous shape for the historical record) — the commit call itself must never carry it.
+    const codeLines = src.split('\n').filter((l) => !l.trim().startsWith('//') && !l.trim().startsWith('*'));
+    const commitLine = codeLines.find((l) => l.includes("const committed = quietGit(CWD, ['commit'"));
+    expect(commitLine).toBeTruthy();
+    expect(commitLine).not.toMatch(/`drain: resolve #\$\{num\}/);
+  });
+
+  it('every drain: commit-message template, rendered with representative values, is actually safe (hasClosingKeywordRef false)', async () => {
+    const { hasClosingKeywordRef } = await import('../lib/commit-message-safety.mjs');
+    const num = '2779'; // the incident's own card number, chosen deliberately: also a plausible open-PR number
+    const renderedTemplates = [
+      `drain: mark card ${num} resolved on land (#2748)`,
+      `drain: JIT-number xabc123→#${num} at land (#2288)`,
+      `drain: unqueue + cleanup card ${num} lane manifest post-land (#2175)`,
+      `drain: reopen stranded card ${num} after failed land (#2175)`,
+    ];
+    for (const msg of renderedTemplates) expect(hasClosingKeywordRef(msg)).toBe(false);
+  });
+});
+
 describe('lane-drain whole-process lease heartbeat (#2453 — per-couple, not just per-pass)', () => {
   const src = readFileSync(resolve(process.cwd(), 'scripts/lane-drain.mjs'), 'utf8');
   it('heartbeats the lease inside the per-couple drain loop, not only at the top of a watch pass', () => {

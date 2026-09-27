@@ -18,6 +18,7 @@
  *   node scripts/backlog.mjs resolve <NNN> [--graduated-to=X] [--codified-to=Y] [--force]  # active → resolved + dateResolved=today (+ graduatedTo); a kind:decision REQUIRES --codified-to=<doc#anchor|one-off> (#911 gate); an epic with open children is refused unless --force (#658 no-open-slice guard)
  *   node scripts/backlog.mjs resolve-parent <childNNN> [--json]  # #2752 drain-side ON-LAND pass: if <childNNN>'s parent EPIC now has every parent:-edge child resolved AND no judgment marker, splice it resolved+graduatedTo=none (mechanizes /resolve-on-last-child); a blocked/untriaged tail ESCALATEs (never auto-closes); a standing program / open-children / non-epic is a no-op. EDIT-ONLY — the caller lands + publishes it
  *   node scripts/backlog.mjs release <NNN>                       # active|preparing → open (abandon/redirect; stamps untouched)
+ *   node scripts/backlog.mjs unresolve <NNN> --reason=<why> --force  # resolved → open, dropping dateResolved/graduatedTo/codifiedIn (#2779-incident: correcting a resolve-on-land false positive — evidence failure, never a routine reopen; --force + --reason both required)
  *   node scripts/backlog.mjs retype  <NNN> [--to=<kind>] [--size=N] [--status=parked]  # SANCTIONED pack-phase flag-fix — retype a mis-flagged item / bump size / park it through the CLI instead of a raw primary-tree Edit (no LANE_GUARD_OFF). Frontmatter-only (#2123)
  *   node scripts/backlog.mjs yield    <NNN-slug>                 # move a LOCAL-ONLY NNN collision to the next free number (the guard's "a new item takes the next free number; yield this one"). Refuses a git-tracked file — NNN is immutable
  *   node scripts/backlog.mjs scaffold --kind=story --size=3 --title="..." [--digest="..."] [--blocked-by=NNN,NNN] [--parent=NNN] [--session=<slug>]   # --kind ∈ story|epic|task|decision|feature (#466/#487/#2691). --session ⇒ born `active`+`scaffoldedBy` (owned until settle, #670); without it, born `open` (default)
@@ -292,6 +293,13 @@ function transition(v) {
   // the #2072 closeout reconcile's active→open flip). Read the LOCAL queued token OFFLINE (Rule #105 — no
   // tree read, no ls-remote) and refuse: a queued item is not abandoned. `--force` overrides for the rare
   // deliberate case (e.g. abandoning a stuck queue entry).
+  // #2779-incident — `unresolve` (resolved → open) exists to CORRECT a resolve that should never have
+  // happened (evidence failure, e.g. the drain's branch-name-coincidence bug), never as a routine reopen —
+  // always requires --force, mirroring release's rare-deliberate-abandon gate just below, and a --reason
+  // (applyTransition itself refuses without one; this is the fast, readable failure before that point).
+  if (v === 'unresolve' && !argv.includes('--force')) {
+    die(`unresolve #${idFromName(file)} refused — reopening a RESOLVED card is a correction, not a routine transition; pass --force and --reason="<why>" to confirm this resolve should never have happened.`);
+  }
   if (v === 'release' && !argv.includes('--force')) {
     const num = idFromName(file);
     if (isQueued(loadQueued(), num)) {
@@ -341,7 +349,7 @@ function transition(v) {
         console.error(`${YEL}warning:${RST} ${DIM}--force: resolving #${idFromName(file)} over ${offending.length} undeclared presentation surface(s): ${offending.join(', ')}${RST}`);
     }
   }
-  const res = applyTransition(before, v, { today: today(), graduatedTo: flag('graduated-to'), codifiedTo: flag('codified-to') });
+  const res = applyTransition(before, v, { today: today(), graduatedTo: flag('graduated-to'), codifiedTo: flag('codified-to'), reason: flag('reason') });
   if (res.error) die(`#${idFromName(file)} — ${res.error}`);
   writeBacklogMd(abs, rel, res.content);
   const id = file.replace(/\.md$/, '');
@@ -350,6 +358,11 @@ function transition(v) {
     const c = flag('codified-to');
     ok({ verb: v, id, file: rel, status: 'resolved', graduatedTo: g, codifiedIn: c },
       `${GRN}✓ resolved${RST} ${id} ${DIM}→ resolved (dateResolved ${today()}${g ? `, graduatedTo ${g}` : ''}${c ? `, codifiedIn ${c}` : ''})${RST}${g ? '' : `\n${YEL}note:${RST} ${DIM}no --graduated-to set; if a resolved idea spawned no entity, set graduatedTo=none by hand${RST}`}`);
+  }
+  if (v === 'unresolve') {
+    const reason = flag('reason');
+    ok({ verb: v, id, file: rel, status: 'open', unresolvedReason: reason },
+      `${GRN}✓ unresolved${RST} ${id} ${DIM}→ open (dateUnresolved ${today()}, reason: ${reason})${RST}`);
   }
   ok({ verb: v, id, file: rel, status: 'open' }, `${GRN}✓ released${RST} ${id} ${DIM}→ open${RST}`);
 }
@@ -1268,7 +1281,7 @@ switch (verb) {
   // #3034 — `claim` routes through the declared operation (`we:scripts/operations/claim.mjs`); it is async, so
   // it manages its own `ok()`/`die()` exit rather than returning to fall through this synchronous switch.
   case 'claim': claimViaOperation().catch((e) => die(`claim: unexpected error — ${String(e?.message ?? e)}`)); break;
-  case 'resolve': case 'release': transition(verb); break;
+  case 'resolve': case 'release': case 'unresolve': transition(verb); break;
   case 'resolve-parent': resolveParent(); break;
   case 'number-stranded': numberStranded(); break;
   case 'retype': retype(); break;
@@ -1297,6 +1310,7 @@ switch (verb) {
       `  ${GRN}resolve${RST} <NNN> [--graduated-to=X] [--codified-to=Y] [--force]   active → resolved + dateResolved (decision REQUIRES --codified-to=<doc#anchor|one-off>; an epic with open children is refused unless --force)\n` +
       `  ${GRN}resolve-parent${RST} <childNNN>   #2752 on-land: auto-resolve the child's parent EPIC iff every parent:-edge child is resolved + no judgment marker (else escalate/no-op); EDIT-ONLY\n` +
       `  ${GRN}release${RST} <NNN>               active|preparing → open\n` +
+      `  ${GRN}unresolve${RST} <NNN> --reason=<why> --force   resolved → open, dropping dateResolved/graduatedTo/codifiedIn (#2779-incident correction path — a resolve that should never have happened, never a routine reopen)\n` +
       `  ${GRN}retype${RST} <NNN> [--to=story|epic|task|decision|feature] [--size=N] [--status=parked]   sanctioned pack-phase flag-fix (no LANE_GUARD_OFF); frontmatter-only\n` +
       `  ${GRN}prioritize${RST} <NNN> [--to=low|--clear]   set or clear the item's \`priority\` frontmatter (the field readiness/batch ranks by); frontmatter-only\n` +
       `  ${GRN}tier${RST} <NNN> --to=pinned|normal|someday|won't [--clear]   set the build-queue TIER (#2528, the coarse ordering bucket); frontmatter-only\n` +

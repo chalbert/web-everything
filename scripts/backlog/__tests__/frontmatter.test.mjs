@@ -114,6 +114,62 @@ describe('applyTransition — legal from-status enforced', () => {
   });
 });
 
+// #2779-incident (2026-09-26 03:14Z) — PR #2785's branch (`lane/2779-session-token-fresh`) wrongly resolved
+// backlog card #2779 on `main`, and no product path existed to undo a `resolved` status short of hand-editing
+// `main`. `unresolve` is that path. RED (before this fix): no `unresolve` verb existed at all — `release` only
+// accepts `active`/`preparing`, so `applyTransition(resolvedCard, 'release', {})` on a wrongly-resolved card
+// like #2779 (which was plain `open`, never even claimed, before the false resolve) errors `expected "active"
+// or "preparing"` and cannot get it back to `open`. GREEN (this fix): `unresolve` accepts exactly `resolved`,
+// requires a `reason` (never a silent correction), and drops the fields a real resolve would have earned but
+// this one never did.
+describe('applyTransition — unresolve (#2779-incident correction path: resolved → open)', () => {
+  const RESOLVED_2779 = [
+    '---',
+    'kind: story',
+    'size: 3',
+    'status: resolved',
+    'dateOpened: "2026-08-01"',
+    'dateResolved: "2026-09-26"',
+    '---',
+    '',
+    '# reliable per-build cost metering attribution model tier policy',
+    '',
+  ].join('\n');
+
+  it('RED (pre-fix shape): release refuses a resolved card — there was no way back to open', () => {
+    expect(applyTransition(RESOLVED_2779, 'release', {}).error).toMatch(/expected "active" or "preparing"/);
+  });
+
+  it('GREEN: unresolve flips resolved → open, drops dateResolved, and requires + records a reason', () => {
+    const r = applyTransition(RESOLVED_2779, 'unresolve', { today: '2026-09-26', reason: '#2779-incident — resolved on a branch-name coincidence, nothing built' });
+    expect(r.error).toBeUndefined();
+    expect(readField(r.content, 'status')).toBe('open');
+    expect(readField(r.content, 'dateResolved')).toBeUndefined();
+    expect(readField(r.content, 'unresolvedReason')).toBe('#2779-incident — resolved on a branch-name coincidence, nothing built');
+    expect(readField(r.content, 'dateUnresolved')).toBe('2026-09-26');
+    // dateOpened (legitimately earned, long before the false resolve) is left untouched.
+    expect(readField(r.content, 'dateOpened')).toBe('2026-08-01');
+  });
+
+  it('unresolve without --reason is refused — never a silent correction', () => {
+    expect(applyTransition(RESOLVED_2779, 'unresolve', { today: '2026-09-26' }).error).toMatch(/reason.*required/);
+  });
+
+  it('unresolve refuses anything that is not resolved (never reopens a card that is already open/active)', () => {
+    expect(applyTransition(ITEM, 'unresolve', { today: '2026-09-26', reason: 'x' }).error).toMatch(/expected "resolved"/);
+  });
+
+  it('also drops graduatedTo/codifiedIn — neither was legitimately earned by a resolve that should never have happened', () => {
+    const withGrad = [
+      '---', 'kind: story', 'status: resolved', 'dateResolved: "2026-09-26"',
+      'graduatedTo: "intent:something"', 'codifiedIn: "docs/x#anchor"', '---', '', '# X', '',
+    ].join('\n');
+    const r = applyTransition(withGrad, 'unresolve', { today: '2026-09-26', reason: 'incident correction' });
+    expect(readField(r.content, 'graduatedTo')).toBeUndefined();
+    expect(readField(r.content, 'codifiedIn')).toBeUndefined();
+  });
+});
+
 describe('applyTransition — codification gate on kind:decision (#911)', () => {
   const DECISION = [
     '---', 'kind: decision', 'status: active',
