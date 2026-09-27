@@ -62,7 +62,7 @@ import { execFileSyncThrottled } from '../lib/gh-throttle.mjs';
 import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
 import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 import { countTrustedLeadingMarker } from '../lib/marker-authorship.mjs';
-import { latestRequiredCheck, isRequiredCheckFailed, CI_LIFECYCLE_LABELS } from '../merge-ai-prs.mjs';
+import { latestRequiredCheck, isRequiredCheckFailed, collapseRollupToLatestPerName, CI_LIFECYCLE_LABELS } from '../merge-ai-prs.mjs';
 import {
   computeMainRedWindows, planMainRedRebases, DEFAULT_MAIN_WORKFLOW_NAME, DEFAULT_REQUIRED_CHECK,
   buildHungCandidates, planHungCiRecoveries, DEFAULT_HUNG_THRESHOLD_MS, DEFAULT_MAX_HUNG_RETRIES_PER_SHA,
@@ -70,6 +70,7 @@ import {
   DEFAULT_MAX_REBASE_RETRIES_PER_SHA,
   DEFAULT_REQUIRED_CONTEXTS, DEFAULT_MISSING_RUN_THRESHOLD_MS, DEFAULT_MAX_MISSING_RUN_RETRIES_PER_SHA,
   buildMissingRunCandidates, planMissingRunRecoveries, countMissingRunComments, buildMissingRunComment,
+  DEFAULT_MAIN_RED_ATTRIBUTED_CHECKS, failingRequiredCheckForAttribution, isAnyRequiredCheckFailed,
 } from './main-red-recovery.mjs';
 import { defaultReadMainRuns, defaultReadAheadBy } from './reconcile-pass.mjs';
 import { rebaseDropManifest } from '../lib/rebase-drop-manifest.mjs';
@@ -109,14 +110,19 @@ export function defaultReadOpenPrs({ exec = execFileSyncThrottled, repo = null, 
  * @returns {Array<{prNumber:number, headRefName:(string|null), aheadBy:(number|null), failureCompletedAt:(string|null)}>}
  */
 export function buildCandidates(prs, {
-  requiredCheck = DEFAULT_REQUIRED_CHECK, readAheadBy = defaultReadAheadBy, repo = null, defaultBranch = 'main',
+  requiredCheck = null, requiredChecks = DEFAULT_MAIN_RED_ATTRIBUTED_CHECKS, mainRedWindows = [],
+  readAheadBy = defaultReadAheadBy, repo = null, defaultBranch = 'main',
 } = {}) {
+  // soak-main-red — EVERY required check (test/smoke/daemon-soak), not `test` alone: a PR red only on
+  // `daemon-soak` inside a red-`main` window is exactly as owed a refresh onto main as a `test`-red one.
+  // `requiredCheck` (singular, legacy) narrows to that one check when passed.
+  const checks = requiredCheck ? [requiredCheck] : requiredChecks;
   const out = [];
   for (const pr of Array.isArray(prs) ? prs : []) {
-    if (!isRequiredCheckFailed(pr, requiredCheck)) continue;
+    if (!isAnyRequiredCheckFailed(pr, checks)) continue;
     const prNumber = Number(pr?.number);
     if (!Number.isInteger(prNumber) || prNumber <= 0) continue;
-    const check = latestRequiredCheck(pr, requiredCheck);
+    const check = failingRequiredCheckForAttribution(pr, { requiredChecks: checks, mainRedWindows });
     const aheadBy = pr?.headRefOid ? readAheadBy(pr.headRefOid, { repo, base: defaultBranch }) : null;
     out.push({
       prNumber, headRefName: pr?.headRefName ?? null, headSha: pr?.headRefOid ?? null, aheadBy,
@@ -172,18 +178,27 @@ export function defaultPostRebaseComment(prNumber, {
  * @returns {{dispatch:Array<object>, refusals:Array<object>, applied:Array<object>, mainRedWindows:Array<object>}}
  */
 export function sweepCiRedRecovery({
-  repo = null, apply = false, requiredCheck = DEFAULT_REQUIRED_CHECK, defaultBranch = 'main',
+  repo = null, apply = false, requiredCheck = null, defaultBranch = 'main',
   readOpenPrs = defaultReadOpenPrs, readMainRuns = defaultReadMainRuns, readAheadBy = defaultReadAheadBy,
+  readRequiredContexts = defaultReadRequiredContexts,
   readComments = defaultReadPrComments, refresh = refreshOntoMain, postComment = defaultPostRebaseComment,
   maxRebaseRetriesPerSha = DEFAULT_MAX_REBASE_RETRIES_PER_SHA,
 } = {}) {
   const prs = readOpenPrs({ repo });
-  const rawCandidates = buildCandidates(prs, { requiredCheck, readAheadBy, repo, defaultBranch });
-  // The `gh run list --branch main` read only matters when there is at least one candidate to judge against it
-  // — mirrors `reconcile-pass.mjs#enrichPrsWithMainRedFacts`'s own "pay for it only when needed" discipline.
-  const mainRedWindows = rawCandidates.length
+  // soak-main-red — judge every REQUIRED check (live branch-protection list when readable, else
+  // DEFAULT_MAIN_RED_ATTRIBUTED_CHECKS), so a `daemon-soak`-only red PR is refreshed like a `test`-red one.
+  // The branch-protection read is paid only when some open PR has ANY failing check at all.
+  const prList = Array.isArray(prs) ? prs : [];
+  const anyRed = prList.some((pr) => collapseRollupToLatestPerName(pr?.statusCheckRollup).some((c) => isRequiredCheckFailed(pr, c?.name || c?.context)));
+  const checks = requiredCheck ? [requiredCheck]
+    : ((anyRed ? readRequiredContexts({ repo, branch: defaultBranch }) : null) ?? DEFAULT_MAIN_RED_ATTRIBUTED_CHECKS);
+  // The `gh run list --branch main` read only matters when at least one PR has a failing required check to
+  // judge against it — mirrors `reconcile-pass.mjs#enrichPrsWithMainRedFacts`'s own "pay for it only when needed".
+  const needWindows = prList.some((pr) => isAnyRequiredCheckFailed(pr, checks));
+  const mainRedWindows = needWindows
     ? computeMainRedWindows(readMainRuns({ repo, branch: defaultBranch, workflowName: DEFAULT_MAIN_WORKFLOW_NAME }))
     : [];
+  const rawCandidates = buildCandidates(prs, { requiredChecks: checks, mainRedWindows, readAheadBy, repo, defaultBranch });
   // x5uqim1 follow-up (#4075/#3383) — the durable per-sha rebase-attempt count (`rebaseAttemptsForSha`,
   // {@link DEFAULT_MAX_REBASE_RETRIES_PER_SHA}'s own safety net) only matters for a candidate that would
   // otherwise actually be dispatched: attributable to a red-`main` window AND still `aheadBy > 0`. Reading a

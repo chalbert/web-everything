@@ -792,13 +792,34 @@ function cloneLane(repo, n) {
 function laneDirtyOrAhead(dir, branch) {
   const porcelain = tryGit(['status', '--porcelain'], dir);
   const uncommitted = porcelain ? porcelain.split('\n').filter(Boolean).length : 0;
+  const dirtyPaths = porcelain ? porcelainPaths(porcelain) : [];
   const aheadRaw = tryGit(['rev-list', '--count', `origin/${branch}..HEAD`], dir);
   const ahead = aheadRaw === null ? 0 : Number(aheadRaw);
   // #2452 review — this predicate reports the FACT only ("how many commits ahead of the local origin ref").
   // The Gap-1 relaxation used to live here, which silently changed reset/skip semantics for every caller
   // (`refreshLane`'s hard-reset decision, `status`, the board) even though it is justified only for acquire's
   // auto-pick. Policy now lives at that one call site — see `aheadIsProvablyPushed`.
-  return { dirty: uncommitted > 0, uncommitted, ahead };
+  return { dirty: uncommitted > 0, uncommitted, ahead, dirtyPaths };
+}
+
+/**
+ * soak-main-red — the worktree paths a `git status --porcelain` listing names (both sides of a rename; an
+ * untracked directory as the directory itself). `null` when any entry is C-quoted (a path with special
+ * characters) — the caller then has no stat-able list and must not rest a cached verdict on one.
+ */
+function porcelainPaths(porcelain) {
+  const out = [];
+  for (const line of porcelain.split('\n')) {
+    if (!line.trim()) continue;
+    // `tryGit` trims its output, so the FIRST line may have lost the leading space of its "XY " status column
+    // (" M a" arrives as "M a") — match the 1-2 status chars rather than slicing a fixed 3.
+    const m = /^[ MTADRCU?!]{1,2} (.+)$/.exec(line);
+    if (!m) return null;
+    const rest = m[1];
+    if (rest.includes('"')) return null;
+    for (const part of rest.split(' -> ')) out.push(part.replace(/\/$/, ''));
+  }
+  return out;
 }
 
 /**
@@ -2459,15 +2480,50 @@ function invalidateListCache(repo) {
 //
 // SOUNDNESS. Only NEGATIVE verdicts ("work lives here — not acquirable") are memoized, keyed on a STAT-ONLY
 // fingerprint read before the probe (HEAD, the branch tip it names, the local `origin/<branch>` ref, packed-refs,
-// `.git/index`, the lease marker — no git spawned). A reused entry can only under-report capacity, never hand a
+// `.git/index`, the lease marker — no git spawned) plus, for a DIRTY verdict, the stat of every path `git status`
+// named (`dirtSignature` — so a clean that never touches `.git`, e.g. deleting untracked scratch, also misses). A reused entry can only under-report capacity, never hand a
 // lane with work to `acquire` (and `acquire` re-verifies before any reset anyway, #2924). The staleness that
-// remains — work that became pushed/landed on the REMOTE with nothing local changing, or untracked files removed
-// without touching the index — is bounded by `--verdict-memo-max-age-ms` / LANE_POOL_VERDICT_MEMO_MAX_AGE_MS
+// remains — work that became pushed/landed on the REMOTE with nothing local changing, or a file deep inside a
+// reported untracked DIRECTORY removed without the directory itself changing — is bounded by `--verdict-memo-max-age-ms` / LANE_POOL_VERDICT_MEMO_MAX_AGE_MS
 // (default 10 min), staggered per lane so the whole memo never expires in one scan. A verdict computed after the
 // scan deadline (a killed git reads as null) or on a failed `ls-remote` is never recorded. `--no-verdict-memo`
 // disables it; provision/refresh drop it with the list cache.
 const VERDICT_MEMO_FILE = (repo) => join(repo.poolDir, '.acquirable-verdict-memo.json');
 const DEFAULT_VERDICT_MEMO_MAX_AGE_MS = 10 * 60_000;
+// v2 (soak-main-red): a DIRTY entry also carries the stat signature of the very paths that made it dirty. A v1
+// file (dirty entries with no signature) is simply ignored — every lane is re-proven once.
+const VERDICT_MEMO_VERSION = 2;
+const DIRT_SIG_MAX_PATHS = 200;
+// A dirty path modified at/after the probe start could have changed between `git status` and our stat — its
+// signature would then describe a tree the probe never saw. Such a verdict is not memoized (git's own "racily
+// clean" rule). A whole-second mtime (a 1s-granularity filesystem truncates it down) widens the window by 1s.
+const DIRT_SIG_COARSE_MTIME_MARGIN_MS = 1000;
+
+/**
+ * soak-main-red — stat signature (mtime + size, or `-` when gone) of the paths `git status` reported dirty. WHY:
+ * the stat-only fingerprint above sees only `.git` state, but the commonest way an unleased lane's dirt goes
+ * away never touches `.git` at all — an agent deleting its untracked scratch, or an editor/tool writing a
+ * tracked file back to its committed content. Every such clean changes one of these paths' stat, so it now
+ * misses the memo on the very next scan instead of reading "holds work" for up to the memo's 10-minute max age
+ * (live: `lane-acquire-under-load` — a lane freed that way 2s into five callers' 20s acquire waits was never
+ * handed out; red on every daemon PR once sharding made the first scan reach it before the free). `null` = no
+ * trustworthy signature (unparseable listing, too many paths, or a racy mtime) — the verdict is then not memoized.
+ */
+function dirtSignature(dir, paths, probeStartMs = null) {
+  if (!Array.isArray(paths) || paths.length === 0 || paths.length > DIRT_SIG_MAX_PATHS) return null;
+  const parts = [];
+  for (const p of [...paths].sort()) {
+    let sig = '-';
+    try {
+      const st = lstatSync(join(dir, p));
+      const margin = st.mtimeMs % 1000 === 0 ? DIRT_SIG_COARSE_MTIME_MARGIN_MS : 0;
+      if (probeStartMs !== null && st.mtimeMs >= probeStartMs - margin) return null;
+      sig = `${st.mtimeMs}:${st.size}`;
+    } catch { /* gone — '-' */ }
+    parts.push(`${p}=${sig}`);
+  }
+  return parts.join('|');
+}
 const verdictMemoMaxAgeMs = () => numFlagOrEnv('verdict-memo-max-age-ms', 'LANE_POOL_VERDICT_MEMO_MAX_AGE_MS', DEFAULT_VERDICT_MEMO_MAX_AGE_MS);
 
 /** Stat/read-only fingerprint of the lane state a dirty/ahead verdict depends on. `null` when unreadable. */
@@ -2489,7 +2545,7 @@ function readVerdictMemo(repo) {
   if (flags['no-verdict-memo'] || verdictMemoMaxAgeMs() <= 0) return null;
   let m = null;
   try { m = JSON.parse(readFileSync(VERDICT_MEMO_FILE(repo), 'utf8')); } catch { /* none yet */ }
-  const lanes = m && m.v === 1 && m.branch === repo.branch && m.lanes && typeof m.lanes === 'object' ? m.lanes : {};
+  const lanes = m && m.v === VERDICT_MEMO_VERSION && m.branch === repo.branch && m.lanes && typeof m.lanes === 'object' ? m.lanes : {};
   return { lanes, updates: new Map() };
 }
 
@@ -2499,15 +2555,25 @@ function verdictMemoHit(memo, repo, n, nowMs) {
   if (!e || typeof e.at !== 'number' || !e.fp) return false;
   const maxAge = verdictMemoMaxAgeMs() * (0.5 + ((n * 37) % 50) / 100); // staggered: 50%–99% of the max age
   if (nowMs - e.at >= maxAge || e.at > nowMs + 1000) return false;
-  return e.fp === laneVerdictFingerprint(laneDir(repo, n), repo.branch);
+  if (e.fp !== laneVerdictFingerprint(laneDir(repo, n), repo.branch)) return false;
+  // soak-main-red — a dirty verdict also needs its dirty paths untouched (see `dirtSignature`).
+  if (e.dirty) return typeof e.dirt === 'string' && Array.isArray(e.paths) && e.dirt === dirtSignature(laneDir(repo, n), e.paths);
+  return true;
 }
 
-function noteVerdict(memo, n, fp, info, remoteShasBox) {
+function noteVerdict(memo, n, fp, info, remoteShasBox, dir = null, probeStartMs = null) {
   if (!memo) return;
   const doa = info?.dirtyOrAhead;
   const holdsWork = !!doa && (doa.dirty || doa.ahead > 0);
-  const provable = holdsWork && fp && !(doa.ahead > 0 && !doa.dirty && remoteShasBox?.failed);
-  memo.updates.set(n, provable ? { fp, at: Date.now(), dirty: !!doa.dirty, ahead: doa.ahead } : null);
+  let provable = holdsWork && fp && !(doa.ahead > 0 && !doa.dirty && remoteShasBox?.failed);
+  let dirt = null;
+  if (provable && doa.dirty) {
+    dirt = dir ? dirtSignature(dir, doa.dirtyPaths, probeStartMs) : null;
+    if (dirt === null) provable = false; // no trustworthy signature ⇒ re-prove next scan rather than risk a stale "dirty"
+  }
+  memo.updates.set(n, provable
+    ? { fp, at: Date.now(), dirty: !!doa.dirty, ahead: doa.ahead, ...(doa.dirty ? { paths: [...doa.dirtyPaths], dirt } : {}) }
+    : null);
 }
 
 function writeVerdictMemo(repo, memo) {
@@ -2522,17 +2588,32 @@ function writeVerdictMemo(repo, memo) {
       if (e) lanes[n] = e;
       else delete lanes[n];
     }
-    writeFileSync(tmp, JSON.stringify({ v: 1, branch: repo.branch, lanes }) + '\n');
+    writeFileSync(tmp, JSON.stringify({ v: VERDICT_MEMO_VERSION, branch: repo.branch, lanes }) + '\n');
     renameSync(tmp, file);
   } catch { try { rmSync(tmp, { force: true }); } catch { /* ignore */ } }
 }
 // Stat-only fingerprint of the pool's lease state: which lanes exist + each marker's mtime (0 = no marker).
+//
+// soak-main-red (2026-09-26) — for an UNLEASED lane, also its `.git/index` stat. An unleased lane holding work
+// (dirty, or unpushed-ahead) becomes acquirable when that work is cleaned IN PLACE — `git checkout -- <path>` /
+// `git restore` / `git stash` / `reset --hard` / a commit — none of which touch a lease marker, but every one of
+// which rewrites the index. Without this the cached "not acquirable" answer outlived the clean for the full
+// cache TTL (30s): every `acquire --wait-ms=<W>` caller with W < TTL kept reading the same stale `[]` and gave
+// up with "no lane" while a lane sat free — the production (TTL 30s) twin of the per-lane memo bug that turned
+// break `lane-acquire-under-load` red (the soak world itself runs with the list cache off, TTL 0, so the soak
+// caught only the memo half; this half is pinned by lane-pool-list-cache.test.mjs). The scan's own git runs with
+// GIT_OPTIONAL_LOCKS=0, so scanning never rewrites the index itself — no self-invalidation. LEASED lanes are
+// deliberately left out: an agent working inside one churns its index constantly, and a live lease already
+// excludes the lane regardless of its tree, so including it would only thrash the cache for no answer change.
 function leaseFingerprint(repo) {
   return existingLanes(repo)
     .map((n) => {
       let m = 0;
       try { m = statSync(LEASE_MARKER(laneDir(repo, n))).mtimeMs; } catch { /* no marker */ }
-      return `${n}:${m}`;
+      if (m !== 0) return `${n}:${m}`;
+      let idx = '-';
+      try { const s = statSync(join(laneDir(repo, n), '.git', 'index')); idx = `${s.mtimeMs}/${s.size}`; } catch { /* no index */ }
+      return `${n}:0:${idx}`;
     })
     .join(',');
 }
@@ -2553,9 +2634,15 @@ function writeListCache(repo, paths) {
   const file = LIST_CACHE_FILE(repo);
   const tmp = `${file}.${process.pid}.tmp`;
   try {
-    // Fingerprint taken AFTER the scan (the reap may have removed markers during it), then tmp+rename so a
-    // concurrent reader never sees a half-written file.
-    writeFileSync(tmp, JSON.stringify({ v: 1, writtenAt: Date.now(), key: listCacheKey(repo), fingerprint: leaseFingerprint(repo), paths }) + '\n');
+    // soak-main-red — the fingerprint is the one `scanAcquirable` captured right AFTER its reap and BEFORE its
+    // first per-lane probe (`lastScanFingerprint`), never one read after the scan. Read after, a lease released
+    // or a tree cleaned MID-scan — after its lane was already probed as not-acquirable — was folded into the
+    // fingerprint, so the stale answer then validated for the whole TTL. Read before, any such change reads as a
+    // mismatch and the next caller rescans (cheap: the per-lane verdict memo skips every unchanged lane).
+    // Falls back to a fresh read only if no scan ran in this process. Then tmp+rename so a concurrent reader
+    // never sees a half-written file.
+    const fingerprint = lastScanFingerprint ?? leaseFingerprint(repo);
+    writeFileSync(tmp, JSON.stringify({ v: 1, writtenAt: Date.now(), key: listCacheKey(repo), fingerprint, paths }) + '\n');
     renameSync(tmp, file);
   } catch { try { rmSync(tmp, { force: true }); } catch { /* ignore */ } }
 }
@@ -2607,6 +2694,7 @@ function takeOverStaleListLock(repo, staleOwner) {
 // The actual scan. `limit` stops at N acquirable lanes (a truncated answer — never cached). Fails the whole scan,
 // cleanly, if it overruns `scanTimeoutMs` (see `scanDeadlineMs`: a result produced past the deadline may rest on
 // a killed git probe, so it is discarded rather than returned).
+let lastScanFingerprint = null;
 function scanAcquirable(repo, { limit = null, scanTimeoutMs }) {
   const startedMs = Date.now();
   scanDeadlineMs = scanTimeoutMs > 0 ? startedMs + scanTimeoutMs : null;
@@ -2627,6 +2715,7 @@ function scanAcquirable(repo, { limit = null, scanTimeoutMs }) {
     // at most once per cache TTL per pool, not once per caller.)
     reapDeadLeasesInPool(repo, nowMs, ttlMs);
     if (overrun()) overrunFail('during the ghost-lease reap');
+    lastScanFingerprint = leaseFingerprint(repo); // soak-main-red — see writeListCache: post-reap, pre-probe
     // #3383 — ONE shared lazy `ls-remote` for this whole `list --acquirable` pass (see `laneAcquirableInfo`),
     // not one per lane — keeps this a cheap, at-most-one-network-call read, same cost shape as `cmdAcquire`'s
     // own auto-pick.
@@ -2637,10 +2726,11 @@ function scanAcquirable(repo, { limit = null, scanTimeoutMs }) {
       let ok = false;
       if (!verdictMemoHit(memo, repo, n, Date.now())) {
         const fp = memo ? laneVerdictFingerprint(laneDir(repo, n), repo.branch) : null;
+        const probeStartMs = Date.now();
         const info = laneAcquirableInfo(repo, n, remoteShasBox, nowMs, ttlMs);
         ok = isLaneAcquirable(info, nowMs, ttlMs);
         if (overrun()) overrunFail(`at lane-${n}`); // before noteVerdict: a past-deadline verdict may rest on a killed git
-        noteVerdict(memo, n, fp, info, remoteShasBox);
+        noteVerdict(memo, n, fp, info, remoteShasBox, laneDir(repo, n), probeStartMs);
       }
       if (overrun()) overrunFail(`at lane-${n}`);
       if (ok) {

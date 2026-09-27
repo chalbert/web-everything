@@ -84,6 +84,21 @@ it('enrichPrsWithMainRedFacts attaches requiredCheckCompletedAt/aheadByOnMain on
   expect(out.mainRedWindows).toEqual([{ start: '2026-09-25T01:30:55Z', end: '2026-09-25T02:31:25Z' }]);
 });
 
+it('enrichPrsWithMainRedFacts also enriches a PR red only on daemon-soak (soak-main-red: not test alone)', async () => {
+  const { enrichPrsWithMainRedFacts } = await import('../reconcile-pass.mjs');
+  const soakRed = {
+    number: 2783, headRefOid: 'cec3090bc6e4342642295723c3f87f0d9216eb41', statusCheckRollup: [
+      { __typename: 'CheckRun', name: 'test', status: 'COMPLETED', conclusion: 'SUCCESS', completedAt: '2026-09-27T02:03:00Z' },
+      { __typename: 'CheckRun', name: 'daemon-soak', status: 'COMPLETED', conclusion: 'FAILURE', completedAt: '2026-09-27T02:11:30Z' },
+    ],
+  };
+  const readMainRuns = vi.fn(() => [{ status: 'completed', conclusion: 'failure', updatedAt: '2026-09-27T02:00:00Z', workflowName: 'CI' }]);
+  const out = enrichPrsWithMainRedFacts([soakRed], { readMainRuns, readAheadBy: () => 2 });
+  expect(readMainRuns).toHaveBeenCalledTimes(1);
+  expect(out.prs[0]).toMatchObject({ requiredCheckName: 'daemon-soak', requiredCheckCompletedAt: '2026-09-27T02:11:30Z', aheadByOnMain: 2 });
+  expect(out.mainRedWindows).toEqual([{ start: '2026-09-27T02:00:00Z', end: null }]);
+});
+
 it('defaultReadMainRuns filters to the CI workflow and passes the exact pinned argv', async () => {
   const { execFileSync } = await import('node:child_process');
   execFileSync.mockReturnValueOnce(JSON.stringify([

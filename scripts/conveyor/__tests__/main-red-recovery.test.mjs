@@ -574,3 +574,40 @@ describe('main-red-recovery — countMissingRunComments / buildMissingRunComment
     expect(buildMissingRunComment({ ok: false, action: 'workflow-dispatch', error: 'boom' })).toContain('boom');
   });
 });
+
+// soak-main-red (2026-09-26): a PR red only on `daemon-soak` while main's own soak was red must be attributable
+// to main exactly like a `test`-red one — it used to be judged on `test` alone, so it read as the PR's own.
+describe('failingRequiredCheckForAttribution — every required check, not test alone', async () => {
+  const { failingRequiredCheckForAttribution, isAnyRequiredCheckFailed, DEFAULT_MAIN_RED_ATTRIBUTED_CHECKS } = await import('../main-red-recovery.mjs');
+  const WINDOWS = [{ start: '2026-09-27T02:00:00Z', end: null }];
+  const row = (name, conclusion, completedAt) => ({ __typename: 'CheckRun', name, status: 'COMPLETED', conclusion, completedAt });
+  const pr = (...rows) => ({ number: 2783, statusCheckRollup: rows });
+
+  it('defaults to the required contexts test / smoke / daemon-soak', () => {
+    expect(DEFAULT_MAIN_RED_ATTRIBUTED_CHECKS).toEqual(['test', 'smoke', 'daemon-soak']);
+  });
+
+  it('a daemon-soak-only red PR is failing, and its daemon-soak failure is the one judged', () => {
+    const p = pr(row('test', 'SUCCESS', '2026-09-27T02:03:00Z'), row('daemon-soak', 'FAILURE', '2026-09-27T02:11:30Z'));
+    expect(isAnyRequiredCheckFailed(p)).toBe(true);
+    expect(failingRequiredCheckForAttribution(p, { mainRedWindows: WINDOWS })).toEqual({ name: 'daemon-soak', completedAt: '2026-09-27T02:11:30Z' });
+    expect(classifyCiFailureAttribution({ failureCompletedAt: '2026-09-27T02:11:30Z', mainRedWindows: WINDOWS })).toBe('main-red');
+  });
+
+  it('a non-required check (soak-shard (2)) failing alone is not a required failure', () => {
+    const p = pr(row('soak-shard (2)', 'FAILURE', '2026-09-27T02:11:25Z'), row('daemon-soak', 'SUCCESS', '2026-09-27T02:11:30Z'));
+    expect(isAnyRequiredCheckFailed(p)).toBe(false);
+    expect(failingRequiredCheckForAttribution(p, { mainRedWindows: WINDOWS })).toBeNull();
+  });
+
+  it('with several failing, one failure main cannot explain wins — the PR owns it', () => {
+    const p = pr(row('test', 'FAILURE', '2026-09-27T01:00:00Z'), row('daemon-soak', 'FAILURE', '2026-09-27T02:11:30Z'));
+    expect(failingRequiredCheckForAttribution(p, { mainRedWindows: WINDOWS })).toEqual({ name: 'test', completedAt: '2026-09-27T01:00:00Z' });
+  });
+
+  it('an explicit empty required list means nothing is required, so nothing is failing', () => {
+    const p = pr(row('daemon-soak', 'FAILURE', '2026-09-27T02:11:30Z'));
+    expect(isAnyRequiredCheckFailed(p, [])).toBe(false);
+    expect(failingRequiredCheckForAttribution(p, { requiredChecks: [], mainRedWindows: WINDOWS })).toBeNull();
+  });
+});
