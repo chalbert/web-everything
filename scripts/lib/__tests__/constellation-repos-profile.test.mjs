@@ -14,8 +14,12 @@ const HOME = '/home/test';
 
 describe('repoProfile', () => {
   const EXPECT = {
+    // Landing-freeze fix (lane-leftover-reclaim) — `we`'s `lanePoolRepo` used to be the literal `.`; it is now
+    // ALWAYS `checkoutPath` (an absolute path, real for `we` — see the dedicated `.` → absolute test below and
+    // its own docblock for why). Left out of this static map (unlike every other field here) because the real
+    // value is machine-dependent; asserted separately.
     we: {
-      slug: 'chalbert/web-everything', slugTag: '', lanePoolRepo: '.',
+      slug: 'chalbert/web-everything', slugTag: '',
       scopePrefixes: ['we', 'webeverything'], canonicalPrefix: 'we',
       capabilities: { review: true, fix: true, ciHeal: true, build: 'direct' },
     },
@@ -47,7 +51,9 @@ describe('repoProfile', () => {
         expect(profile.key).toBe(key);
         expect(profile.slug).toBe(EXPECT[key].slug);
         expect(profile.slugTag).toBe(EXPECT[key].slugTag);
-        expect(profile.lanePoolRepo).toBe(EXPECT[key].lanePoolRepo);
+        // `lanePoolRepo` is ALWAYS `checkoutPath` now (see the dedicated `we` test below) — for a sibling repo
+        // that is still the exact `$HOME`-expanded literal this map pins.
+        expect(profile.lanePoolRepo).toBe(key === 'we' ? profile.checkoutPath : EXPECT[key].lanePoolRepo);
         expect(profile.scopePrefixes).toEqual(EXPECT[key].scopePrefixes);
         expect(profile.canonicalPrefix).toBe(EXPECT[key].canonicalPrefix);
         expect(profile.capabilities).toEqual(EXPECT[key].capabilities);
@@ -65,10 +71,12 @@ describe('repoProfile', () => {
     expect(profile.checkoutPath).toBe(`${HOME}/workspace/frontierui`);
   });
 
-  it('checkoutPath for `we` is an absolute path (this checkout\'s own root), and matches lanePoolRepo\'s `.` semantics', () => {
+  it('checkoutPath for `we` is an absolute path (this checkout\'s own root), and `lanePoolRepo` is the SAME '
+    + 'absolute path (landing-freeze fix — was the literal `.`, broken for any caller not running from that '
+    + 'root, e.g. a dispatched brief\'s scratch cwd; see repo-profile.mjs\'s own docblock)', () => {
     const profile = repoProfile('we', { home: HOME });
     expect(profile.checkoutPath.startsWith('/')).toBe(true);
-    expect(profile.lanePoolRepo).toBe('.');
+    expect(profile.lanePoolRepo).toBe(profile.checkoutPath);
   });
 
   it('defaults `home` to the real homedir() when not injected', () => {
@@ -135,20 +143,26 @@ describe('briefTokensForRepo', () => {
   const WE_PACKAGE_JSON = JSON.stringify({ scripts: { 'test:unit': 'vitest run', 'check:standards': 'node scripts/check-standards.mjs' } });
   const PLATEAU_PACKAGE_JSON = JSON.stringify({ scripts: { test: 'vitest run' } });
 
-  it('for `we`, reproduces exactly what the pre-#3960 briefs hardcoded', () => {
+  it('for `we`, reproduces exactly what the pre-#3960 briefs hardcoded ({{GATE_COMMAND}}/{{ATTRIBUTION}}) — '
+    + 'except {{LANE_REPO}}, which the landing-freeze fix changed from `.` to an absolute path (see '
+    + 'repo-profile.mjs\'s own docblock: `.` from a dispatched brief\'s scratch cwd resolved to the WRONG repo)', () => {
     const tokens = briefTokensForRepo('we', {
       itemNum: '3960', prNum: 743,
       checkoutExists: () => true, readPackageJson: () => WE_PACKAGE_JSON,
     });
     expect(tokens).toEqual({
       REPO: 'chalbert/web-everything',
-      LANE_REPO: '.',
+      LANE_REPO: expect.any(String),
       GATE_COMMAND: expect.stringMatching(/\/scripts\/verify-lane\.mjs run --repo=\.$/),
       WE_ROOT: expect.any(String),
       ATTRIBUTION: 'WE #3960',
     });
-    // `WE_ROOT` is THIS checkout's own root, not injected — it must be absolute either way.
+    // `WE_ROOT` is THIS checkout's own root, not injected — it must be absolute either way. `LANE_REPO` for
+    // `we` is now the SAME absolute path (both derive from the one real checkout root) — this is the
+    // consistency the fix establishes: whatever `--repo=` a dispatched agent passes to `acquire`, it now
+    // resolves to the exact checkout `{{WE_ROOT}}` already qualifies every OTHER tool call with.
     expect(tokens.WE_ROOT.startsWith('/')).toBe(true);
+    expect(tokens.LANE_REPO).toBe(tokens.WE_ROOT);
   });
 
   it('ATTRIBUTION falls back to `PR #<n>` when there is no item (an item-less fix, slice 6)', () => {

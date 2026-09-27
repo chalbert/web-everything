@@ -1562,6 +1562,27 @@ function restoreLeaseAfterRefusedClaim(dir, preExisting) {
 }
 
 /**
+ * Landing-freeze fix (lane-leftover-reclaim) — logs the commit(s) a patch-equivalence-based reclaim is about
+ * to drop. Only ever called once `provablyPushed` (or an operator's explicit `--force`) already cleared this
+ * lane, so nothing here is a NEW decision — it exists purely so the reclaim is auditable after the fact, the
+ * same way every other destructive step in this file logs what it is about to do. Best-effort: a `git log`
+ * failure never blocks the reclaim itself, it just means fewer details in the log line.
+ * @param {string} dir
+ * @param {string} branch
+ * @param {number} n
+ */
+function logReclaimedAheadCommits(dir, branch, n) {
+  const out = tryGit(['log', '--oneline', `origin/${branch}..HEAD`], dir);
+  const lines = out ? out.split('\n').filter(Boolean) : [];
+  if (lines.length === 0) return;
+  log(
+    `  lane-${n}: reclaiming ${lines.length} local commit(s), already patch-equivalent to work pushed elsewhere ` +
+      `(no unique content — safe to drop):`,
+  );
+  for (const line of lines) log(`    ${line}`);
+}
+
+/**
  * #3407 — land a JUST-CLAIMED lane on `origin/<branch>` (or `--base`) and ready its deps, exactly as a
  * provisioned lane would be. Extracted out of `cmdAcquire` so BOTH claim paths can share one implementation
  * while handling a failure here differently: explicit-lane (its only caller before this split) still fails
@@ -1604,6 +1625,13 @@ function provisionClaimedLane(repo, chosen, targetWasReserved) {
             `or investigate/salvage the tree first.`,
         );
       }
+      // Landing-freeze fix (lane-leftover-reclaim) — a reclaim reached ONLY via the patch-equivalence
+      // relaxation just above (never via a genuinely clean lane, where `ahead` is already 0) drops real local
+      // commits, even though none of them carry unique content. Log exactly what is being dropped, same spirit
+      // as every other destructive step in this file, so the reclaim is auditable after the fact rather than a
+      // silent disappearance — shared by BOTH claim routes (explicit `--lane=N` and auto-pick), since both
+      // funnel through this one reset.
+      if (ahead > 0) logReclaimedAheadCommits(dir, repo.branch, chosen);
     }
     const baseRef = flags.base ? resolveBaseRef(dir, flags.base, chosen) : `origin/${repo.branch}`;
     // #2419 — `checkout -B <branch> <baseRef>`, NOT `reset --hard <baseRef>`. A bare reset moves whatever
@@ -1737,11 +1765,23 @@ function cmdAcquire(repo) {
       const { uncommitted, ahead } = laneDirtyOrAhead(dir, repo.branch);
       // #3383 — litter-only "dirty" (known-safe agent scratch, `we:scripts/lib/lane-litter.mjs`'s allowlist)
       // must not force an explicit `--lane=N` acquire into `--force` any more than it forces auto-pick to
-      // skip the lane (auto-pick applies the identical relaxation). `ahead` deliberately stays the RAW fact
-      // here — #2452's provably-pushed relaxation is scoped to auto-pick only; an explicit target that is
-      // genuinely ahead still needs `--force`.
+      // skip the lane (auto-pick applies the identical relaxation).
       const dirty = litterAdjustedDirty(dir, uncommitted > 0);
-      if (dirty || ahead > 0) {
+      // Landing-freeze fix (lane-leftover-reclaim) — `ahead` USED to stay the raw fact here ("#2452's
+      // provably-pushed relaxation is scoped to auto-pick only"), on the reasoning that an explicit target is
+      // deliberately named, so it should always demand `--force` if genuinely ahead. Live incident, 2026-09-26
+      // (ci-heal-2783): a fix/ci-heal dispatch brief NAMES its lane explicitly (picked by `list --acquirable`,
+      // which already applies this exact relaxation via `effectiveDirtyOrAhead`/`aheadIsProvablyPushed`) —
+      // `--repo=<LANE_REPO> --lane=<LANE>` in `skills-src/conveyor/fix-agent-brief.md` /
+      // `fix-agent-ci-brief.md`. That mismatch — the picker says free, the picked path demands `--force` — left
+      // a dispatched session needing `--force` (denied by the auto-mode classifier as "Interfere With
+      // Workloads"/"Modify Shared Resources") just to take a lane the pool's own scan already vouched for.
+      // `provisionClaimedLane`'s own post-fetch re-verify (below, #2924) already applies this SAME relaxation
+      // for both claim routes — this pre-claim guard was the one place still out of step. Only `ahead` is
+      // relaxed here, never `dirty`: a patch-equivalent commit is PROVABLY already safe on origin (nothing is
+      // lost by dropping it); uncommitted/untracked tree state has no such proof and still needs `--force`.
+      const provablyPushed = ahead === 0 || aheadIsProvablyPushed(dir, localRemoteShas(dir), repo.branch);
+      if (dirty || !provablyPushed) {
         // #3383 — a refusal hands the lane back: the claim above already wrote OUR lease, and leaving it would hold
         // a lane nobody is using until its TTL (found live 2026-09-24: two refused acquires held lane-1 and lane-11).
         restoreLeaseAfterRefusedClaim(dir, preExisting);

@@ -91,14 +91,21 @@ describe('#3407 — a refused acquire never leaves the lane held by the failed r
     const lane = join(poolRoot, 'refused', 'lane-1');
     git(['fetch', '--quiet', 'origin'], lane);
 
-    // Explicit-lane's OWN pre-fetch dirty/ahead guard (#3390) checks the RAW ahead count with no
-    // provably-pushed relaxation (unlike auto-pick) — so simply being ahead of origin/trunk, with no lie
-    // needed at all, refuses here before the #2924 re-verify (below) is ever reached.
+    // Landing-freeze fix (lane-leftover-reclaim) — explicit-lane's pre-fetch guard (#3390) now applies the
+    // SAME provably-pushed relaxation auto-pick's own candidate check and the #2924 re-verify below already
+    // apply (mirrors `list --acquirable`'s own verdict — a dispatched fix/ci-heal brief names a lane explicitly
+    // that the scan already vouched for; see the sibling
+    // `lane-pool-acquire-explicit-lane-patch-equivalent.test.mjs`). This test's own setup — a stale, not-yet-
+    // pruned local `refs/remotes/origin/lane/landed` still pointing at the just-deleted ref — is now exactly
+    // the case the pre-claim guard's OWN relaxation looks "pushed", so it no longer refuses here; the refusal
+    // now comes from the #2924 re-verify instead, right after `fetchOriginPruneWithRetry` prunes that stale ref
+    // for real. Same outcome this test exists to prove either way: refused, and the lease it just claimed is
+    // released, never left held.
     setUpDanglingAheadCommit(lane);
 
     const acquire = runPool(['acquire', '--lane=1', ...poolArgs(), '--session=picker']);
     expect(acquire.code).not.toBe(0);
-    expect(acquire.err).toMatch(/would destroy that work via its reset-to-origin step/);
+    expect(acquire.err).toMatch(/no longer provably safe to reset as of this fetch/);
     expect(existsSync(leaseMarker(lane))).toBe(false);
 
     // And the lane is genuinely free again — a totally different session can now acquire it.
