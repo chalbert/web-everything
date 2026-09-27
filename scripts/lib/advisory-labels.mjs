@@ -87,7 +87,8 @@ export function planAdvisoryLabels({ outcome, currentLabels = [] } = {}) {
  * that predates that line it falls back to the legacy reading (a `changes` mention in the verdict line).
  *
  * @param {Array<{body?: string, createdAt?: string}>} comments as `gh pr view --json comments` returns them.
- * @returns {Array<{outcome: 'accept'|'changes', verdictLine: string, head: string, time: number, index: number}>}
+ * @returns {Array<{outcome: string, verdictLine: string, head: string, time: number, index: number}>} `outcome`
+ *   is `accept`/`changes`, or any other stated value verbatim (lowercased) — a caller treats those as neither.
  */
 export function parseAdvisories(comments) {
   const advisories = (Array.isArray(comments) ? comments : []).flatMap((comment, index) => {
@@ -95,7 +96,10 @@ export function parseAdvisories(comments) {
     const verdictLine = body.match(/^\*\*Verdict:\*\*[^\r\n]*/m)?.[0];
     const basis = body.match(/^Net basis: `([a-f0-9]+)\.\.([a-f0-9]+)`/im);
     if (!verdictLine || !basis) return [];
-    const stated = body.match(/^\*\*Advisory outcome:\*\*\s*`?(accept|changes)`?/im)?.[1]?.toLowerCase();
+    // Any stated word is returned AS STATED (e.g. a converted note's `inconclusive`) — only a comment with NO
+    // outcome line falls back to the verdict line. A new outcome value is never misread as a clearing `accept`
+    // (PR #2781 review, round 4).
+    const stated = body.match(/^\*\*Advisory outcome:\*\*\s*`?([a-z-]+)`?/im)?.[1]?.toLowerCase();
     const outcome = stated ?? (/changes/i.test(verdictLine) ? ADVISORY_OUTCOMES.CHANGES : ADVISORY_OUTCOMES.ACCEPT);
     return [{ outcome, verdictLine, head: basis[2], time: Date.parse(comment?.createdAt) || 0, index }];
   });
