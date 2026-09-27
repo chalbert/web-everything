@@ -44,6 +44,7 @@ import reaperRestopsFinishedSessions from './reaper-restops-finished-sessions.mj
 import coupleSplitByUnrelatedMerge from './couple-split-by-unrelated-merge.mjs';
 import ciHealLoopStaleLabelReviewGate from './ci-heal-loop-stale-label-review-gate.mjs';
 import alreadyLandedPrGetsFixer from './already-landed-pr-gets-fixer.mjs';
+import rebuildFinalizeStarved from './rebuild-finalize-starved.mjs';
 import largeReapBacklogStarvesDispatch from './large-reap-backlog-starves-dispatch.mjs';
 
 export const BREAKS = Object.freeze([
@@ -72,6 +73,7 @@ export const BREAKS = Object.freeze([
   coupleSplitByUnrelatedMerge,
   ciHealLoopStaleLabelReviewGate,
   alreadyLandedPrGetsFixer,
+  rebuildFinalizeStarved,
   largeReapBacklogStarvesDispatch,
 ]);
 
