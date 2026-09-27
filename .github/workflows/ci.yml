@@ -225,12 +225,35 @@ jobs:
   # invariants (clone clean, <=1 main move behind, tick bounded, no onTick crash, owed work dispatched) checked
   # after EVERY tick — plus one regression scenario per live daemon break (scripts/conveyor/soak/breaks/). Minutes,
   # not seconds, so it runs ONLY on PRs that touch daemon code (the path check below; a PR outside it passes this
-  # job in seconds) and on a manual dispatch. WE-only: no FUI sibling needed. Not a required check today — adding
-  # it to branch protection is a repo-admin action.
-  daemon-soak:
+  # job in seconds) and on a manual dispatch. WE-only: no FUI sibling needed. `daemon-soak` (the aggregator job
+  # below) IS a required branch-protection check today — `gh api repos/.../branches/main/protection --jq
+  # .required_status_checks.contexts` → `["test","smoke","daemon-soak"]` — and the drain's own required-context
+  # reads (`scripts/conveyor/ci-red-recovery-watch.mjs`, `scripts/conveyor/main-red-recovery.mjs`) read that same
+  # live list, never a hardcoded one, so the exact name `daemon-soak` must keep resolving across this split.
+  #
+  # SHARDED (mirrors the unit suite's test-shard/test split above) because this used to be ONE job running the
+  # 50-tick baseline PLUS all 18 break scenarios serially: 10-12min when daemon code changed — the slowest job in
+  # CI (`test` runs 4-6min) — and growing by one scenario every time a new live daemon break gets a regression
+  # test. Now three jobs:
+  #   job `daemon-soak-scope` — the path-touch check, run ONCE (not per-shard) so the ~10s no-daemon-code skip
+  #                 stays exactly as cheap as it was in the single-job version.
+  #   job `soak-shard`  — a 4-way matrix (`scripts/conveyor/soak/shard-files.mjs`): shard 1 is ALWAYS the 50-tick
+  #                 baseline alone (it dwarfs any one break scenario, so a blind file-count split would strand it
+  #                 next to a handful of breaks in one shard while the rest sit idle); shards 2-4 round-robin the
+  #                 `breaks/*.soak.test.mjs` files by filename, discovered from disk — a new break scenario (one
+  #                 new file) lands in a shard automatically, no shard-list to hand-maintain, so wall time stays
+  #                 flat as scenarios grow instead of creeping back up. A matrix job, so its own check names are
+  #                 `soak-shard (1..4)`, NOT required (mirrors `test-shard`'s non-required matrix checks).
+  #   job `daemon-soak` — THE required aggregating check, name UNCHANGED: skips in ~10s when `daemon-soak-scope`
+  #                 found no daemon code touched (identical observable behavior to before the split), red if the
+  #                 scope job itself failed (fail closed), otherwise red unless EVERY shard succeeded. Full coverage is preserved — sharding only changes WHERE
+  #                 each scenario runs, never WHETHER it runs; every scenario still runs on every daemon PR.
+  daemon-soak-scope:
     if: ${{ github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 5
+    outputs:
+      run: ${{ steps.scope.outputs.run }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -250,19 +273,66 @@ jobs:
             echo "run=false" >> "$GITHUB_OUTPUT"
           fi
 
+  # One shard of the soak: shard 1 is the 50-tick baseline alone, shards 2-4 each get a slice of the break
+  # scenarios (`scripts/conveyor/soak/shard-files.mjs`'s round-robin — see that module's own header for why a
+  # blind vitest `--shard` split doesn't work here). `fail-fast: false` mirrors `test-shard`: one shard's break
+  # failing must not hide a sibling shard's own result.
+  soak-shard:
+    needs: daemon-soak-scope
+    if: needs.daemon-soak-scope.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    # No measured per-shard p95 yet (this split is new) — sized generously pending a first-run sample, same
+    # ~3x-p95 method `test-shard` used once IT had data (see that job's own timeout comment above).
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
-        if: steps.scope.outputs.run == 'true'
         with:
           node-version: 22
           cache: npm
 
       - name: Install
-        if: steps.scope.outputs.run == 'true'
         run: npm ci
 
-      - name: Daemon soak (50 ticks + one scenario per live break)
-        if: steps.scope.outputs.run == 'true'
-        run: npm run test:soak
+      - name: Soak shard ${{ matrix.shard }}/${{ strategy.job-total }}
+        run: npm run test:soak:shard -- --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+
+  # THE required `daemon-soak` check (name unchanged from before the split — see the header above for why that
+  # matters). Skips green in ~10s when `daemon-soak-scope` SUCCEEDED and found no daemon code touched, same as the
+  # single-job version; red if the scope job itself failed (fail closed — test: soak/__tests__/daemon-soak-gate);
+  # otherwise red unless every `soak-shard` matrix entry succeeded — a `soak-shard` that got SKIPPED
+  # (its `needs` dep failing, or the matrix simply not running) is not `success`, so a broken shard can never
+  # silently read as satisfied, same guard the `test` aggregator above uses for `test-shard`.
+  daemon-soak:
+    needs: [daemon-soak-scope, soak-shard]
+    if: ${{ (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch') && !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Gate on shard results
+        run: |
+          # Fail CLOSED on the scope job itself: a crashed `daemon-soak-scope` leaves `outputs.run` empty, and an
+          # empty value must never read as "no daemon code touched" (that would green the required check with the
+          # soak never run). Only an explicit `run=false` from a SUCCESSFUL scope job skips the soak.
+          if [ "${{ needs.daemon-soak-scope.result }}" != "success" ]; then
+            echo "daemon-soak-scope did not succeed (result: ${{ needs.daemon-soak-scope.result }}) — cannot tell whether daemon code was touched."
+            exit 1
+          fi
+          case "${{ needs.daemon-soak-scope.outputs.run }}" in
+            false) echo "No daemon code touched — soak not needed."; exit 0 ;;
+            true) ;;
+            *) echo "daemon-soak-scope emitted no usable run output (got: '${{ needs.daemon-soak-scope.outputs.run }}')."; exit 1 ;;
+          esac
+          if [ "${{ needs.soak-shard.result }}" != "success" ]; then
+            echo "One or more soak shards did not succeed (soak-shard result: ${{ needs.soak-shard.result }})."
+            exit 1
+          fi
+          echo "All soak shards succeeded."
 
   # Deploy-smoke + deterministic interaction lane. Split OUT of `test` so the fast correctness
   # lane (coverage + gate) no longer waits on the ~25s docs build and the ~54s Playwright install +
