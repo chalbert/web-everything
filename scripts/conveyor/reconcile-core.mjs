@@ -125,7 +125,10 @@ import {
   isLatestAdvisoryFindingAddressed, isAdvisoryMechanismStandDownSuperseded,
 } from './advisory-fix-mark.mjs';
 import { CONFLICT_LABEL } from './conflict-label.mjs';
-import { ADVISORY_LABELS } from '../lib/advisory-labels.mjs';
+// advisory-after-cap (chalbert/web-everything#2766 live incident, 2026-09-27) — see the ADVISORY-FIX
+// cap-exhausted branch below for why the "is a fresh review owed on a stale advisory note" check reuses these
+// two, never a second reimplementation of "does the newest advisory comment name this PR's CURRENT head".
+import { ADVISORY_LABELS, latestAdvisory, advisoryCoversHead } from '../lib/advisory-labels.mjs';
 // we:backlog/x5uqim1-*.md (parent #4075, epic #3383) — LIVE INCIDENT 2026-09-25: a `ci-red` PR whose required
 // check failed only because `origin/main`'s own CI was red at that moment must never be handed to `ci-heal`,
 // which would "repair" code that was never broken. `isPrCiFailureOwedRerun` is the PURE leaf that decides this
@@ -1588,6 +1591,57 @@ export function planReconcile({
           continue;
         }
         if (advisoryFixes >= advisoryFixCap) {
+          // advisory-after-cap (chalbert/web-everything#2766, live-caught 2026-09-27): the cap above is right to
+          // stop ANOTHER FIXER — but it must never ALSO block the one fresh review a head that moved AFTER the
+          // last advisory note is still owed. Live shape: a fixer (a merge-conflict resolution, `main` merged in
+          // to clear a stale `mergeStateStatus`) pushed a new head — posting its OWN, different marker
+          // (`CONFLICT_FIX_COMMENT_MARKER`, never `ADVISORY_FIX_COMMENT_MARKER`) — AFTER the advisory-fix cap had
+          // already tripped. `addressed` stays correctly `false` (no advisory-fix mark exists to postdate the
+          // note), so this cap fired — but the operator's own rule (`we:lib/advisory-labels.mjs`'s file header)
+          // is "no look until the PR carries an advisory for its CURRENT head", and every advisory note on this
+          // thread was posted against an OLDER head. Refusing outright leaves a human staring at a `cap-exhausted`
+          // PR with nothing current to read and no way for the mechanism to ever hand them one.
+          //
+          // THE FIX: reuse the SAME "does the newest advisory cover this head" test the stale-label sweep already
+          // trusts (`advisory-label-sweep.mjs`) — `latestAdvisory`/`advisoryCoversHead`
+          // (`we:scripts/lib/advisory-labels.mjs`) — rather than inventing a second one. When it says the newest
+          // advisory does NOT name the PR's live `headRefOid` (a head the mechanism has literally never seen),
+          // dispatch ONE `review`, never a `fix` — the cap still binds every further FIX attempt, permanently.
+          // When it DOES cover the current head (nothing has moved since that verdict — the ordinary "genuinely
+          // unfixable" case every pre-existing test in this file pins), this stays a plain `cap-exhausted` refusal,
+          // byte-identical to before. `latestAdvisory` requires a REAL, parseable advisory comment (its own
+          // `**Verdict:**` + `Net basis: <base>..<head>` lines) to return anything at all — a PR with no such
+          // comment (every fixture predating this item; a real advisory note ALWAYS carries both lines, per
+          // `we:scripts/operations/review-pr.mjs#renderAdvisoryNote`) yields `undefined` here, and `undefined`
+          // is treated as "no evidence either way" (stays capped) rather than "obviously stale" (a blank read
+          // must never manufacture a review dispatch it cannot justify).
+          //
+          // SELF-LIMITING, same shape as the `addressed` exemption a few lines below: the moment this review
+          // actually runs, `review-pr.mjs`'s `advise` step posts a FRESH advisory note against the CURRENT head
+          // unconditionally — which flips `advisoryCoversHead` back to `true` for the next tick, so this path
+          // fires AT MOST ONCE per head movement. #2588's own one-review-per-head guard sits ahead of the
+          // ordinary `OWED`-table review dispatch, never this one (this branch dispatches directly, exactly like
+          // the `addressed` branch below it already does) — but it needs no restating here: the SAME evidence
+          // that gates it (a reviewed-sha/advisory naming the current head) is exactly what `advisoryCoversHead`
+          // just proved absent, so the two can never contradict each other on the same PR.
+          const headSha = typeof pr?.headRefOid === 'string' ? pr.headRefOid.trim().toLowerCase() : '';
+          // #3383 / PR #2806 review: only a TRUSTED author's advisory counts — `latestAdvisory` itself does no
+          // author check, and WE's PRs are public, so an unfiltered read would let any commenter forge a
+          // `Net basis:` line to suppress this review (naming the live head) or manufacture one (naming another).
+          const trustedComments = Array.isArray(pr?.comments) ? pr.comments.filter(isTrustedMarkerAuthor) : [];
+          const latest = headSha ? latestAdvisory(trustedComments) : undefined;
+          const advisoryIsStale = Boolean(latest) && !advisoryCoversHead(latest, headSha);
+          if (advisoryIsStale) {
+            dispatch.push({
+              ...base, ...withPhase, kind: 'review', findings: advisoryFindingsHere,
+              attempts: advisoryFixes, cap: advisoryFixCap,
+              why: `the advisory-fix cap is exhausted (${advisoryFixes} of ${advisoryFixCap}) so no further fixer` +
+                ` is dispatched, but the newest advisory (reviewed head \`${latest.head}\`) does not cover this` +
+                ` PR's current head \`${headSha}\` — a fresh review is owed so the operator has a current` +
+                ' advisory to act on, never another auto-repair attempt',
+            });
+            continue;
+          }
           refuseCapExhausted({
             ...withPhase, attempts: advisoryFixes, cap: advisoryFixCap, capKind: 'advisory-fix',
             why: `this PR's own durable advisory-fix count is ${advisoryFixes} against a cap of ${advisoryFixCap}` +
