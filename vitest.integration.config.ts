@@ -74,6 +74,7 @@ export default defineConfig({
       'scripts/__tests__/lane-pool-squash-merge-and-litter-acquirable.test.mjs',
       'scripts/__tests__/lane-pool-ahead-patch-equivalent-bounded-spawn.test.mjs',
       'scripts/__tests__/lane-pool-list-cache.test.mjs',
+      'scripts/__tests__/lane-pool-verdict-memo.test.mjs',
       'scripts/__tests__/lane-pool-acquire-shares-scan-cache.test.mjs',
       'scripts/__tests__/lane-pool-acquire-scan-wait-decouple.test.mjs',
       // #xj2k2pp — same tier: real throwaway origin/pool, a PATH git shim (a per-call sleep), real spawned

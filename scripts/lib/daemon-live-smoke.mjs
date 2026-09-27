@@ -75,7 +75,7 @@
 
 import { randomUUID, createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { homedir, loadavg } from 'node:os';
 import { join } from 'node:path';
 import { runBounded, resolveChildTimeoutMs, resolveLaneAcquireTimeoutMs } from './bounded-child.mjs';
 import { buildGhShimSettingsEnv, sanitizeSpawnEnv } from './gh-app-shim.mjs';
@@ -593,6 +593,7 @@ export function decideSmokeVerdict(results) {
 export async function runLiveSmoke({
   root, env = process.env, repos = Object.values(CONSTELLATION_REPOS).map((r) => r.slug),
   runChild = runBounded, now = Date.now(), changedFiles = null, closureOf = collectImportClosure,
+  clock = Date.now,
 } = {}) {
   if (isSmokeGateDisabled(env)) return { pass: true, disabled: true, results: [], sessionSlug: null };
   const budgets = resolveSmokeBudgets(env);
@@ -612,7 +613,7 @@ export async function runLiveSmoke({
   const ctx = { root, budgets, repos, sessionSlug, env, ghChildEnv, runChild, beforePorcelain };
   const results = [];
   for (const check of SMOKE_CHECKS) {
-    const startedAt = Date.now();
+    const startedAt = clock();
     let result;
     if (checkCodeUnchanged({ check, changedFiles, root, closureOf })) {
       results.push({
@@ -626,7 +627,7 @@ export async function runLiveSmoke({
     } catch (e) {
       result = { ok: false, detail: `threw: ${firstLine(e)}` };
     }
-    results.push({ name: check.name, ms: Date.now() - startedAt, ...result, mayBeTransient: check.mayBeTransient !== false });
+    results.push({ name: check.name, ms: clock() - startedAt, ...result, mayBeTransient: check.mayBeTransient !== false });
   }
   return { pass: decideSmokeVerdict(results), disabled: false, results, sessionSlug };
 }
@@ -724,7 +725,11 @@ const defaultSleep = (ms) => new Promise((resolve) => { setTimeout(resolve, ms);
  * rebuild raises as a `github-auth-broken` alert and holds on, without a reject record.
  * @param {{root:string, env?:NodeJS.ProcessEnv, runChild?:typeof runBounded, sleep?:(ms:number)=>Promise<void>,
  *   retries?:number, backoffMs?:number, refreshAuth?:typeof refreshSmokeGithubEnv}} o
- * @returns {Promise<{verdict:'pass'|'transient'|'code'|'auth-broken', attempts?:number, smoke?:object,
+ *
+ * ENVIRONMENT TIMEOUT (see {@link isEnvTimeoutFailureSet}): a `'code'` verdict whose failures are all "ran out of
+ * time" (measured by the gate's own `clock`) is retried ONCE with every budget widened
+ * ({@link widenSmokeBudgetsEnv}); still timing out → `'env-timeout'` with `envTimeout` (rows, load average).
+ * @returns {Promise<{verdict:'pass'|'transient'|'code'|'auth-broken'|'env-timeout', attempts?:number, smoke?:object,
  *   disabled?:boolean, auth?:{probe:string, refresh:string|null, retried:boolean}}>}
  */
 export async function runLiveSmokeWithRetry({
@@ -733,6 +738,8 @@ export async function runLiveSmokeWithRetry({
   backoffMs = envMs(env, SMOKE_RETRY_BACKOFF_MS_ENV, 15_000),
   changedFiles = null,
   refreshAuth = refreshSmokeGithubEnv,
+  clock = Date.now,
+  loadAvg = () => loadavg(),
 } = {}) {
   if (isSmokeGateDisabled(env)) return { verdict: 'pass', disabled: true };
   let smoke;
@@ -741,13 +748,31 @@ export async function runLiveSmokeWithRetry({
   let forceRefresh = false;
   let authRetried = false;
   let auth = null;
+  let attemptEnv = env; // widened once, for the env-timeout retry below
+  let envTimeout = null;
+  const minElapsedMs = envMs(env, SMOKE_ENV_TIMEOUT_MIN_ELAPSED_MS_ENV, DEFAULT_ENV_TIMEOUT_MIN_ELAPSED_MS);
   for (;;) {
     attempts += 1;
     // Fresh token for EVERY attempt, the same way the daemon's own tick gets one (see refreshSmokeGithubEnv).
-    const { env: runEnv, refresh } = await refreshAuth({ env, force: forceRefresh });
+    const { env: runEnv, refresh } = await refreshAuth({ env: attemptEnv, force: forceRefresh });
     forceRefresh = false;
-    smoke = await runLiveSmoke({ root, env: runEnv, runChild, changedFiles });
+    smoke = await runLiveSmoke({ root, env: runEnv, runChild, changedFiles, clock });
     verdict = classifySmokeFailure(smoke.results);
+    // ENVIRONMENT TIMEOUT (live 2026-09-26 22:37Z) — see {@link isEnvTimeoutFailureSet}. Retry ONCE with every
+    // budget widened; still timing out → `'env-timeout'` (held, never a reject record, never an overlay suspect).
+    if (verdict === 'code' && isEnvTimeoutFailureSet(smoke.results, { minElapsedMs })) {
+      const rows = smoke.results.filter((r) => !r.ok).map((r) => ({ name: r.name, ms: r.ms, detail: r.detail }));
+      if (!envTimeout) {
+        const factor = envMs(env, SMOKE_ENV_TIMEOUT_BUDGET_FACTOR_ENV, DEFAULT_ENV_TIMEOUT_BUDGET_FACTOR);
+        envTimeout = { first: rows, budgetFactor: factor, loadAvg: safeLoadAvg(loadAvg) };
+        attemptEnv = widenSmokeBudgetsEnv(env, factor);
+        continue;
+      }
+      envTimeout.retry = rows;
+      envTimeout.loadAvgAfter = safeLoadAvg(loadAvg);
+      verdict = 'env-timeout';
+      break;
+    }
     if (verdict !== 'pass' && hasGithubAuthSignature(smoke.results)) {
       const probe = await probeGithubAuth({ env: runEnv, runChild, budgets: resolveSmokeBudgets(env) });
       auth = { probe: probe.detail, refresh: refresh?.reason ?? null, retried: authRetried };
@@ -763,10 +788,68 @@ export async function runLiveSmokeWithRetry({
       }
       // The probe authenticated fine with the same env — the tree's own 401 is its own; classify as usual.
     }
-    if (verdict !== 'transient' || attempts > retries + (authRetried ? 1 : 0)) break;
+    if (verdict !== 'transient' || attempts > retries + (authRetried ? 1 : 0) + (envTimeout ? 1 : 0)) break;
     await sleep(backoffMs);
   }
-  return { verdict, attempts, smoke, ...(auth ? { auth } : {}) };
+  return { verdict, attempts, smoke, ...(auth ? { auth } : {}), ...(envTimeout ? { envTimeout } : {}) };
+}
+
+// ── Timed out under load is ENVIRONMENT, never code (live 2026-09-26 22:36-22:37Z, `wev-review-daemon`) ─────
+// Host load ~25, 133 pool entries: `lane-pool-list` spent 120905ms and failed with lane-pool's own "scan exceeded
+// its 120000ms budget at lane-47 … refusing to return a partial/unsound answer". The row is `mayBeTransient:false`
+// (tree code), so it read as `'code'`: a rejection was recorded, the non-pinned overlay (#2773) was named a
+// suspect and DROPPED, and the clone stayed on its old build — for a fault plain main hits identically. A check
+// that ran out of TIME is evidence about the host, not the tree.
+//
+// NO LAUNDERING (PR #2625's rule): a timeout signature counts only when the gate's OWN clock shows the row really
+// spent at least `WE_SMOKE_ENV_TIMEOUT_MIN_ELAPSED_MS` (default 30s) — a tree that merely PRINTS "exceeded its
+// budget" fails fast and stays `'code'`. And `'env-timeout'` never ADOPTS anything: it holds on last-good, so a
+// genuine performance regression is still kept off the daemon (it is just not blamed on an overlay).
+
+/** Signatures of "ran out of time". The first is `runBounded`'s own kill (external); the rest are lane-pool's
+ *  bounded-scan give-ups (tree text — hence the elapsed-time floor in {@link isEnvTimeoutRow}). */
+export const ENV_TIMEOUT_PATTERNS = Object.freeze([
+  /^[^:]+ failed: timed out after \d+ms \(process group killed\)$/,
+  /scan exceeded its \d+ms budget/,
+  /gave up waiting for the shared acquirability-scan lock/,
+]);
+export const SMOKE_ENV_TIMEOUT_MIN_ELAPSED_MS_ENV = 'WE_SMOKE_ENV_TIMEOUT_MIN_ELAPSED_MS';
+export const DEFAULT_ENV_TIMEOUT_MIN_ELAPSED_MS = 30_000;
+/** How much wider every budget is on the one env-timeout retry. */
+export const SMOKE_ENV_TIMEOUT_BUDGET_FACTOR_ENV = 'WE_SMOKE_ENV_TIMEOUT_BUDGET_FACTOR';
+export const DEFAULT_ENV_TIMEOUT_BUDGET_FACTOR = 2.5;
+const LANE_POOL_SCAN_TIMEOUT_ENV = 'LANE_POOL_LIST_SCAN_TIMEOUT_MS';
+const LANE_POOL_DEFAULT_SCAN_TIMEOUT_MS = 120_000;
+
+/** PURE: did this failed row run out of time (signature AND the gate's own measured elapsed time)? */
+export function isEnvTimeoutRow(row, { minElapsedMs = DEFAULT_ENV_TIMEOUT_MIN_ELAPSED_MS } = {}) {
+  if (!row || row.ok) return false;
+  const detail = String(row.detail ?? '');
+  return ENV_TIMEOUT_PATTERNS.some((re) => re.test(detail)) && Number(row.ms) >= minElapsedMs;
+}
+
+/** PURE: is this a failure set the environment explains — at least one {@link isEnvTimeoutRow}, and every other
+ *  failure is ordinary transient noise from a check allowed to be transient? One code-shaped row ⇒ false. */
+export function isEnvTimeoutFailureSet(results, opts = {}) {
+  const failures = (Array.isArray(results) ? results : []).filter((r) => !r.ok);
+  if (!failures.some((r) => isEnvTimeoutRow(r, opts))) return false;
+  return failures.every((r) => isEnvTimeoutRow(r, opts) || (r.mayBeTransient !== false && isTransientDetail(r.detail)));
+}
+
+/** A COPY of `env` with every smoke budget, and lane-pool's own scan budget, multiplied by `factor`. The
+ *  lane-pool-list child budget always leaves 30s over the scan budget, so the scan's own give-up is what fires. */
+export function widenSmokeBudgetsEnv(env = process.env, factor = DEFAULT_ENV_TIMEOUT_BUDGET_FACTOR) {
+  const out = { ...env };
+  const budgets = resolveSmokeBudgets(env);
+  for (const [key, name] of Object.entries(SMOKE_BUDGET_ENV)) out[name] = String(Math.round(budgets[key] * factor));
+  const scan = Math.round(envMs(env, LANE_POOL_SCAN_TIMEOUT_ENV, LANE_POOL_DEFAULT_SCAN_TIMEOUT_MS) * factor);
+  out[LANE_POOL_SCAN_TIMEOUT_ENV] = String(scan);
+  out[SMOKE_BUDGET_ENV.lanePoolListMs] = String(Math.max(Number(out[SMOKE_BUDGET_ENV.lanePoolListMs]), scan + 30_000));
+  return out;
+}
+
+function safeLoadAvg(fn) {
+  try { return fn().map((x) => Math.round(x * 100) / 100); } catch { return null; }
 }
 
 // ── GitHub auth is ENVIRONMENT, never code (live 2026-09-26 21:22Z, `wev-review-daemon`) ─────────────────────
@@ -911,7 +994,7 @@ export function rollbackToSha({ root, sha, run = gitRun }) {
  * @param {{root:string, preMergeSha:string|null, mergedIdentitySha?:string|null, env?:NodeJS.ProcessEnv,
  *   runChild?:typeof runBounded, run?:typeof gitRun, log?:Console}} o
  * @returns {Promise<{adopt:boolean, reason:'kill-switch-disabled'|'still-rejected'|'smoke-pass'|
- *   'smoke-transient'|'github-auth-broken'|'smoke-fail', smoke?:object, rollback?:object, quarantine?:true}>}
+ *   'smoke-transient'|'github-auth-broken'|'smoke-env-timeout'|'smoke-fail', smoke?:object, rollback?:object, quarantine?:true}>}
  */
 export async function gateMergedCommit({
   root, preMergeSha, mergedIdentitySha = null, env = process.env, runChild = runBounded, run = gitRun, log = console,
@@ -935,7 +1018,7 @@ export async function gateMergedCommit({
     return { adopt: true, reason: disabled ? 'kill-switch-disabled' : 'smoke-pass', smoke };
   }
 
-  if (verdict === 'transient' || verdict === 'auth-broken') {
+  if (verdict === 'transient' || verdict === 'auth-broken' || verdict === 'env-timeout') {
     // 'auth-broken': GitHub rejected the environment's credential even after a forced re-mint — an
     // environment fault, handled exactly like transient noise below (never a reject record).
     // Env/infra noise (a 401, a busy lane pool, a network blip) survived every retry — roll back so the
@@ -947,7 +1030,8 @@ export async function gateMergedCommit({
       `daemon-live-smoke: TRANSIENT live smoke failure (env/infra noise, not recording a rejection — #3383 Module D) `
       + `after retry; ${rollback.ok ? `rolled back to ${preMergeSha}` : `ROLLBACK FAILED (${rollback.reason}) — clone may be left mid-move, needs a hand \`git reset --hard ${preMergeSha}\``}`,
     );
-    const result = { adopt: false, reason: verdict === 'auth-broken' ? 'github-auth-broken' : 'smoke-transient', smoke, rollback };
+    const reason = { 'auth-broken': 'github-auth-broken', 'env-timeout': 'smoke-env-timeout' }[verdict] ?? 'smoke-transient';
+    const result = { adopt: false, reason, smoke, rollback };
     if (!rollback.ok) result.quarantine = true;
     return result;
   }

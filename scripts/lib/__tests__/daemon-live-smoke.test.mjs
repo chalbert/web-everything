@@ -34,6 +34,7 @@ import {
   TRANSIENT_FAILURE_PATTERNS, classifySmokeFailure, runLiveSmokeWithRetry,
   SMOKE_TRANSIENT_RETRIES_ENV, SMOKE_RETRY_BACKOFF_MS_ENV,
   refreshSmokeGithubEnv, probeGithubAuth, hasGithubAuthSignature,
+  isEnvTimeoutRow, isEnvTimeoutFailureSet, widenSmokeBudgetsEnv,
   DISPATCH_DRY_RUN_SCRIPT, DISPATCH_DRY_RUN_CODE_ENTRIES,
 } from '../daemon-live-smoke.mjs';
 
@@ -1149,5 +1150,117 @@ describe('GitHub auth in the smoke — fresh token per attempt; a probed 401 is 
     const r = await refreshSmokeGithubEnv({ env: { GH_TOKEN: STALE } });
     expect(r.env.GH_TOKEN).toBe(STALE);
     expect(r.refresh.reason).toBe('not-configured');
+  });
+});
+
+describe('a check that ran out of TIME under load is environment, never code (live 2026-09-26 22:37Z)', () => {
+  // The exact detail the wev-review-daemon recorded at 22:37:48Z (smoke-rejected → fallback-plain-main → #2773
+  // named a suspect and dropped). lane-pool-list had spent 120905ms.
+  const RECORDED_2237Z = 'lane-pool list --acquirable failed: exited 1: ✗ list --acquirable scan exceeded its 120000ms budget at lane-47 (pool "web-everything" under /Users/nicolasgilbert/workspace/.lanes/web-everything) — refusing to return a partial/unsound answer. Raise --scan-timeout-ms / LANE_POOL_LIST_SCAN_TIMEOUT_MS, or check for a hung git (#xn432dz)';
+  const noAuth = async ({ env }) => ({ env: { ...env }, refresh: null });
+
+  /** A fake host: the lane-pool list child "takes" `listMs[attempt]` of virtual time and fails with the recorded
+   *  scan-budget detail while it is over `scanOkBelowMs`; everything else passes instantly. */
+  function overloadedHost({ listMs, listFails, listDetail = RECORDED_2237Z.replace(/^lane-pool list --acquirable failed: /, '') }) {
+    let t = 0;
+    let attempt = -1;
+    const seenEnv = [];
+    const runChild = withNewCheckDefaults(async (cmd, args, opts = {}) => {
+      if (cmd === 'node' && args[1] === 'list') {
+        attempt += 1;
+        seenEnv.push(opts.env || {});
+        t += listMs[Math.min(attempt, listMs.length - 1)];
+        if (listFails[Math.min(attempt, listFails.length - 1)]) throw new Error(listDetail);
+        return '[]';
+      }
+      if (args[1] === 'acquire') return JSON.stringify({ lane: 1 });
+      return '';
+    });
+    return { runChild, clock: () => t, seenEnv };
+  }
+
+  it('REPLAY: the recorded 22:37Z row is an env-timeout row (the gate measured 120905ms)', () => {
+    const row = { name: 'lane-pool-list', ok: false, ms: 120905, mayBeTransient: false, detail: RECORDED_2237Z };
+    expect(classifySmokeFailure([row])).toBe('code'); // the old verdict — what blamed #2773
+    expect(isEnvTimeoutRow(row)).toBe(true);
+    expect(isEnvTimeoutFailureSet([row, { name: 'gh-api-repo', ok: true }])).toBe(true);
+  });
+
+  it('REPLAY end-to-end: times out twice (budgets widened on the retry) → verdict env-timeout, never code', async () => {
+    const host = overloadedHost({ listMs: [120905, 300900], listFails: [true, true] });
+    const r = await runLiveSmokeWithRetry({
+      root: '/x', env: {}, runChild: host.runChild, clock: host.clock, sleep: async () => {}, refreshAuth: noAuth, loadAvg: () => [25.18, 25.76, 26.25],
+    });
+    expect(r.verdict).toBe('env-timeout');
+    expect(r.attempts).toBe(2);
+    expect(r.envTimeout.first[0]).toMatchObject({ name: 'lane-pool-list', ms: 120905 });
+    expect(r.envTimeout.loadAvg).toEqual([25.18, 25.76, 26.25]);
+    // the retry really ran with the wider budgets — lane-pool's own scan budget included
+    expect(host.seenEnv[0].LANE_POOL_LIST_SCAN_TIMEOUT_MS).toBeUndefined();
+    expect(Number(host.seenEnv[1].LANE_POOL_LIST_SCAN_TIMEOUT_MS)).toBe(300000);
+  });
+
+  it('a slow first attempt that fits the widened budget on the retry → pass', async () => {
+    const host = overloadedHost({ listMs: [120905, 150000], listFails: [true, false] });
+    const r = await runLiveSmokeWithRetry({ root: '/x', env: {}, runChild: host.runChild, clock: host.clock, sleep: async () => {}, refreshAuth: noAuth });
+    expect(r.verdict).toBe('pass');
+    expect(r.attempts).toBe(2);
+  });
+
+  it('NO LAUNDERING: a tree that PRINTS the budget text but fails fast stays code, and is not retried', async () => {
+    const host = overloadedHost({ listMs: [40], listFails: [true] });
+    const r = await runLiveSmokeWithRetry({ root: '/x', env: {}, runChild: host.runChild, clock: host.clock, sleep: async () => {}, refreshAuth: noAuth });
+    expect(r.verdict).toBe('code');
+    expect(r.attempts).toBe(1);
+  });
+
+  it('a real code failure next to a timeout keeps the whole verdict code (no retry)', async () => {
+    let t = 0;
+    const runChild = withNewCheckDefaults(async (cmd, args) => {
+      if (cmd === 'node' && args[1] === 'list') { t += 120905; throw new Error(RECORDED_2237Z); }
+      if (args[0] === 'scripts/conveyor/reconcile-pass.mjs') throw new Error('exited 1: TypeError: x is not a function');
+      if (args[1] === 'acquire') return JSON.stringify({ lane: 1 });
+      return '';
+    });
+    const r = await runLiveSmokeWithRetry({ root: '/x', env: {}, runChild, clock: () => t, sleep: async () => {}, refreshAuth: noAuth });
+    expect(r.verdict).toBe('code');
+    expect(r.attempts).toBe(1);
+  });
+
+  it("runBounded's own hard-timeout kill counts too (external), a timeout that fails fast does not", () => {
+    const killed = 'lane-pool acquire --purpose=smoke failed: timed out after 240000ms (process group killed)';
+    expect(isEnvTimeoutRow({ ok: false, ms: 240010, detail: killed, mayBeTransient: false })).toBe(true);
+    expect(isEnvTimeoutRow({ ok: false, ms: 12, detail: killed, mayBeTransient: false })).toBe(false);
+    expect(isEnvTimeoutRow({ ok: false, ms: 99999, detail: 'SyntaxError: Unexpected token', mayBeTransient: false })).toBe(false);
+    expect(isEnvTimeoutRow({ ok: true, ms: 99999, detail: RECORDED_2237Z })).toBe(false);
+  });
+
+  it('widenSmokeBudgetsEnv: every budget ×factor, and the list child outlives the scan by 30s', () => {
+    const w = widenSmokeBudgetsEnv({ LANE_POOL_LIST_SCAN_TIMEOUT_MS: '200000' }, 2);
+    const b = resolveSmokeBudgets({});
+    expect(Number(w.WE_SMOKE_GH_API_MS)).toBe(b.ghApiMs * 2);
+    expect(Number(w.LANE_POOL_LIST_SCAN_TIMEOUT_MS)).toBe(400000);
+    expect(Number(w.WE_SMOKE_LANE_POOL_LIST_MS)).toBeGreaterThanOrEqual(430000);
+  });
+
+  it('gateMergedCommit: env-timeout rolls back, records NO rejection, reason smoke-env-timeout', async () => {
+    const stateDir = mkdtempSync(join(tmpdir(), 'gate-state-'));
+    try {
+      const env = { WE_DAEMON_SMOKE_STATE_DIR: stateDir, [SMOKE_BUDGET_ENV.lanePoolListMs]: '1' };
+      const resetCalls = [];
+      const run = (args) => { if (args[0] === 'reset') resetCalls.push(args); return { status: 0, stdout: '' }; };
+      const runChild = withNewCheckDefaults(async (cmd, args) => {
+        if (cmd === 'node' && args[1] === 'list') { await new Promise((res) => { setTimeout(res, 30); }); throw new Error(RECORDED_2237Z); }
+        if (args[1] === 'acquire') return JSON.stringify({ lane: 1 });
+        return '';
+      });
+      const verdict = await gateMergedCommit({
+        root: '/x', preMergeSha: 'pre', mergedIdentitySha: 'slow-sha', env: { ...env, WE_SMOKE_ENV_TIMEOUT_MIN_ELAPSED_MS: '20' }, runChild, run,
+      });
+      expect(verdict.adopt).toBe(false);
+      expect(verdict.reason).toBe('smoke-env-timeout');
+      expect(resetCalls).toContainEqual(['reset', '--hard', 'pre']);
+      expect(readRejectedSha('/x', env)).toBeNull();
+    } finally { rmSync(stateDir, { recursive: true, force: true }); }
   });
 });
