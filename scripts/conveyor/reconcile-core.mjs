@@ -173,7 +173,15 @@ import { parseReviewedSha, planConvertSupersededVerdict, targetedCheckQuestion }
 // a fresh push — see the ONE-REVIEW-PER-HEAD block below). It converts that verdict into the standing advisory
 // note plus one targeted check on the escalation's own reason, instead of dispatching a whole second panel run
 // (`kind:'review'`) at a head nobody has touched since — see {@link planConvertSupersededVerdict}.
-export const DISPATCH_KINDS = Object.freeze(['fix', 'review', 'ci-heal', 'convert-advisory']);
+// `promote-draft` (draft-first PRs, operator-approved 2026-09-27) — the FIFTH kind: a draft PR (opened by
+// `scripts/pr-land.mjs --park`'s new draft-by-default open, see that flag's own docblock) whose required
+// checks are ALL green. Nothing here spawns an agent for it — the effect is a bare `gh pr ready <pr>`
+// (`scripts/operations/promote-draft-pr-dispatch.mjs`), which is what lets a review dispatch at all: a draft
+// PR never reaches `kind:'review'` regardless of its label (see {@link dispatchReviewRow}'s own `isDraft`
+// gate below), so the review this pass would otherwise dispatch the moment CI finishes is instead HELD until
+// this fires and un-drafts it — closing the "6 of 26 PRs got reviewed before their own first CI run even
+// finished" measurement (operator, 2026-09-27) that motivated this whole feature.
+export const DISPATCH_KINDS = Object.freeze(['fix', 'review', 'ci-heal', 'convert-advisory', 'promote-draft']);
 
 /**
  * we:scripts/conveyor/reconcile-core.mjs#REFUSAL_KINDS — every reason this pass declines to dispatch. Frozen and
@@ -248,6 +256,10 @@ export const REFUSAL_KINDS = Object.freeze([
   // `waiting-on-system-fix` — the red is the tooling/gate's own fault and a system-level fix is already open
   // for it; this PR owes nothing further until that fix lands or its own head changes.
   'ci-heal-escalated', 'waiting-on-system-fix',
+  // `draft` (draft-first PRs, operator-approved 2026-09-27) — the PR is still a GitHub draft: no review is
+  // dispatched, whatever `review:*` label it carries, until the `promote-draft` DISPATCH_KIND (above) has
+  // un-drafted it. See {@link dispatchReviewRow}'s own gate.
+  'draft',
 ]);
 
 /**
@@ -974,6 +986,23 @@ export function assessLiveness(bound) {
 function dispatchReviewRow({
   pr, withPhase, base, attempts, roundCap, refuse, refuseCapExhausted, dispatch, extra = {},
 }) {
+  // ── `draft` (draft-first PRs, operator-approved 2026-09-27) — checked FIRST, ahead of every other refusal
+  // in this function, including `already-reviewed-head`: a draft PR is never owed a review no matter what its
+  // `review:*` label or its comment thread says, because GitHub itself will not surface it for review and
+  // this pass's whole review-dispatch mechanism exists to fill that surface, not to pre-empt it. This closes
+  // the measured incident that motivated the feature: `--park` used to apply the review label the instant the
+  // PR opened, before its OWN first CI run had even finished (6 of 26 PRs, one night) — the review daemon
+  // read the label alone and dispatched anyway. `promote-draft` (see `DISPATCH_KINDS`) is the only path back
+  // out of this refusal: once the PR's required checks are all green, `gh pr ready` un-drafts it and the very
+  // next tick reaches this function with `pr.isDraft` false, same as any other PR.
+  if (pr?.isDraft) {
+    refuse('draft', {
+      ...withPhase, ...extra,
+      why: 'PR is still a draft — no independent review is dispatched until it is promoted to ready for '
+        + 'review, which happens once its required checks are all green (draft-first PRs)',
+    });
+    return;
+  }
   // ── `already-reviewed-head` (#2588) — see {@link planReconcile}'s note ahead of its call for the full incident.
   // Raw-SHA comparison only, as it always was. A mechanically-REBASED accepted PR cannot reach this function
   // with a stale marker: an accept moves the label to `review:accepted`, which the OWED table never owes a review
@@ -1371,6 +1400,28 @@ export function planReconcile({
           : `every file this PR touches is already byte-identical to a commit on \`${defaultBranch}\`, though the` +
             ' PR that carried it there could not be attributed with confidence. Nothing to fix or review; it' +
             ' should be closed and its backlog card resolved, never dispatched.',
+      });
+      continue;
+    }
+
+    // ── `promote-draft` (draft-first PRs, operator-approved 2026-09-27) — its OWN branch, ahead of `ci-red`
+    // and everything below it, for a draft PR whose required checks are ALL green (`withPhase.check ===
+    // 'green'`, the SAME `reduceCheckState` verdict the `ci-red` branch right below reads off this identical
+    // PR). A green draft owes exactly one thing — `gh pr ready`, dispatched here as `kind:'promote-draft'` —
+    // and nothing else this loop could plan (a review, a fix, a ci-heal) applies to it: `ci-red` cannot also
+    // be true (checks are green), and {@link dispatchReviewRow}'s own `isDraft` gate would refuse a review
+    // dispatch for it anyway. `continue` is therefore exactly as safe here as it is on `already-landed` above.
+    //
+    // A draft PR whose checks are NOT yet green (`pending`/`unchecked`) or ARE red falls straight through,
+    // deliberately: red-required-check drafts still need `ci-heal` exactly like a ready PR does (a draft is
+    // not exempt from CI healing — only from review), and a still-running draft owes nothing at all yet — both
+    // of those are the existing branches below, unmodified. Only {@link dispatchReviewRow}'s own gate (not this
+    // one) keeps a review from firing for either of those two cases.
+    if (pr?.isDraft && withPhase.check === 'green') {
+      dispatch.push({
+        ...base, ...withPhase, kind: 'promote-draft',
+        why: 'draft PR — every required check is green; promote it to ready for review (draft-first PRs, '
+          + 'operator-approved 2026-09-27) — nothing else is owed this PR until that happens',
       });
       continue;
     }

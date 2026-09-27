@@ -7,7 +7,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { mergeMethodFlag, buildCreateArgs, prCreateBodyGuard, buildMergeArgs, buildRenumberHealArgs, buildRegenArgs, buildAddLabelArgs, classifyChecks, planPrLand, pollVerdict, isPostLandTreeDirty, postLandSkips, postLandReport, scopeHealChangedPaths, resolveProducerReviewLabel, resolveRosterReconcile, resolveParkLabel, withAuthorStamp, composePrBody, PARK_LABELS, decideHoldReadyStrip } from '../pr-land.mjs';
+import { mergeMethodFlag, buildCreateArgs, prCreateBodyGuard, buildMergeArgs, buildRenumberHealArgs, buildRegenArgs, buildAddLabelArgs, classifyChecks, planPrLand, pollVerdict, isPostLandTreeDirty, postLandSkips, postLandReport, scopeHealChangedPaths, resolveProducerReviewLabel, resolveRosterReconcile, resolveParkLabel, withAuthorStamp, composePrBody, PARK_LABELS, decideHoldReadyStrip, resolveDraft } from '../pr-land.mjs';
 import { REVIEW_LABELS, REVIEW_LABEL_META, READY_TO_MERGE_LABEL, scoreEscalation } from '../lib/review-escalation.mjs';
 import { buildAuthorActorMarker, parseAuthorActorId } from '../lib/review-independence.mjs';
 import { PANEL_LENSES } from '../lib/review-core.mjs';
@@ -446,6 +446,39 @@ describe('resolveParkLabel + planPrLand park mode — #2622 held-for-review open
     expect(planPrLand({ wait: true, labelOnGreen: false, park: null }).mode).toBe('land');
     expect(planPrLand({ wait: true, labelOnGreen: true, park: null }).mode).toBe('label-on-green');
     expect(planPrLand({ wait: false, labelOnGreen: false, park: null }).mode).toBe('open-only');
+  });
+});
+
+// ── draft-first PRs (operator-approved 2026-09-27) — `--park` opens a draft by default; `--no-draft` opts out ──
+describe('resolveDraft — draft-first PRs, scoped to park mode only', () => {
+  it('park mode, no opt-out → draft', () => {
+    expect(resolveDraft({ mode: 'park', optOut: false })).toBe(true);
+  });
+  it('park mode WITH --no-draft → not a draft (human-opened/special-cased escape hatch)', () => {
+    expect(resolveDraft({ mode: 'park', optOut: true })).toBe(false);
+  });
+  it('land / label-on-green / open-only are NEVER drafted, opt-out or not — their poll loop has no DRAFT branch', () => {
+    for (const mode of ['land', 'label-on-green', 'open-only']) {
+      expect(resolveDraft({ mode, optOut: false })).toBe(false);
+      expect(resolveDraft({ mode, optOut: true })).toBe(false);
+    }
+  });
+  it('buildCreateArgs threaded through resolveDraft carries --draft exactly when park+no-opt-out', () => {
+    const draft = resolveDraft({ mode: 'park', optOut: false });
+    expect(buildCreateArgs({ base: 'main', head: 'lane/x', title: 't', body: 'b', draft }))
+      .toEqual(['pr', 'create', '--base', 'main', '--head', 'lane/x', '--title', 't', '--body', 'b', '--draft']);
+  });
+});
+
+describe('pr-land.mjs source wiring — draft-first PRs applied at the park create call (operator-approved 2026-09-27)', () => {
+  const src = readFileSync(resolve(process.cwd(), 'scripts/pr-land.mjs'), 'utf8');
+  it('the create params carry `draft` computed via resolveDraft, threaded from PLAN.mode and the --no-draft flag', () => {
+    expect(src).toMatch(/const DRAFT_OPT_OUT = !!flags\['no-draft'\];/);
+    expect(src).toMatch(/const DRAFT = resolveDraft\(\{ mode: PLAN\.mode, optOut: DRAFT_OPT_OUT \}\);/);
+    expect(src).toMatch(/const createParams = \{ base: BASE, head: REF, title: derivedTitle, body: CREATE_BODY, draft: DRAFT \};/);
+  });
+  it('the parked emit result surfaces `draft` for observability', () => {
+    expect(src).toMatch(/draft: DRAFT,/);
   });
 });
 

@@ -122,7 +122,12 @@ import { classifyPr as classifyPrLifecycle } from './pr-watch.mjs';
  *                         Costs nothing extra beyond this one query already paying for connection fields
  *                         (`labels`/`statusCheckRollup`/`comments`) — `files` is the same shape of field.
  */
-export const PR_LIST_JSON_FIELDS = 'number,headRefName,headRefOid,baseRefName,labels,statusCheckRollup,mergeStateStatus,comments,body,files';
+// `isDraft` (draft-first PRs, operator-approved 2026-09-27) — the ONLY field this pass reads to tell a
+// held-for-review draft apart from a ready-for-review one; `reconcile-core.mjs#planReconcile` reads it
+// straight off each row (`pr.isDraft`) to gate review dispatch off drafts and to plan the `promote-draft`
+// effect once a draft's required checks are green. Costs nothing extra beyond this one query, same as `files`
+// above.
+export const PR_LIST_JSON_FIELDS = 'number,headRefName,headRefOid,baseRefName,labels,statusCheckRollup,mergeStateStatus,comments,body,files,isDraft';
 
 /** How many open PRs one pass reads. The board's own `OPEN_LIMIT` is 30; a reconciler that silently stopped at
  *  the default page would leave the overflow unowned, which is this item's defect wearing a smaller hat. */

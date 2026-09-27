@@ -617,6 +617,7 @@ describe('makeCliMechanicalPasses — invokes the exact set of mechanical passes
       'node /scripts/operations/operator-notify.mjs --once --repo=chalbert/web-everything',
       'node /scripts/conveyor/reconcile-fix-dispatch.mjs --repo=chalbert/web-everything',
       'node /scripts/operations/ci-heal-pr-dispatch.mjs --repo=chalbert/web-everything',
+      'node /scripts/operations/promote-draft-pr-dispatch.mjs --repo=chalbert/web-everything',
       'node /scripts/conveyor/ci-queue-watch.mjs sweep --repo=chalbert/web-everything',
       'node /scripts/conveyor/parked-pr-conflict-watch.mjs sweep --repo=chalbert/web-everything',
       'node /scripts/conveyor/advisory-label-sweep.mjs sweep --repo=chalbert/web-everything',
@@ -697,7 +698,7 @@ describe('one open-PR snapshot per mechanical tick', () => {
     const fetches = calls.filter(([cmd, ...args]) => cmd === 'gh' && args[0] === 'pr' && args[1] === 'list');
     expect(fetches).toEqual([['gh', 'pr', 'list', '--state', 'open', '--limit', '200', '--json', OPEN_PR_LIST_FIELDS, '--repo', 'chalbert/web-everything']]);
     const consumed = consumerCalls(calls);
-    for (const call of calls.filter(([cmd, script]) => cmd === 'node' && !consumers[script.split('/').pop()] && !script.endsWith('/reconcile-fix-dispatch.mjs') && !script.endsWith('/ci-heal-pr-dispatch.mjs'))) {
+    for (const call of calls.filter(([cmd, script]) => cmd === 'node' && !consumers[script.split('/').pop()] && !script.endsWith('/reconcile-fix-dispatch.mjs') && !script.endsWith('/ci-heal-pr-dispatch.mjs') && !script.endsWith('/promote-draft-pr-dispatch.mjs'))) {
       expect(call.some((a) => a.startsWith('--prs-file='))).toBe(false);
     }
     expect(consumed.map((c) => c[1].split('/').pop())).toEqual(Object.keys(consumers));

@@ -302,6 +302,10 @@ export function runReviewTick({
   // than asking `gh` again — `undefined` (a PR the tick's own listing somehow missed, a rare open-PR-appeared-
   // mid-tick race) falls through to each helper's own fresh-read default, never a hard failure.
   const labelsByPr = new Map((Array.isArray(rawPrs) ? rawPrs : []).map((p) => [Number(p?.number), p?.labels ?? []]));
+  // draft-first PRs (operator-approved 2026-09-27) — the SAME `rawPrs` snapshot already carries `isDraft`
+  // (`reconcile-pass.mjs#PR_LIST_JSON_FIELDS`); threaded into `tagStatus` below so `review-status:awaiting-ci`
+  // reflects the PR's OWN current draft state, never a second `gh` read.
+  const isDraftByPr = new Map((Array.isArray(rawPrs) ? rawPrs : []).map((p) => [Number(p?.number), !!p?.isDraft]));
   const reviews = (plan.dispatch ?? []).filter((d) => d && d.kind === 'review');
   // Live-caught 2026-09-22, #xli631k: a PR that moved to being owed a FIX (not a review) used to never
   // reach `statusCandidates` at all, so its `review-status:reviewing` label sat stale once its review
@@ -363,7 +367,7 @@ export function runReviewTick({
   const dispatchedThisTick = new Set(dispatched.map((d) => Number(d.prNumber)));
   for (const c of statusCandidates(reviews, plan.refusals ?? [], fixes, ciHeals)) {
     const agents = dispatchedThisTick.has(Number(c.prNumber)) ? undefined : (rawAgents ?? undefined);
-    try { tagStatus({ pr: c.prNumber, repo, agents, currentLabels: labelsByPr.get(Number(c.prNumber)) }); }
+    try { tagStatus({ pr: c.prNumber, repo, agents, currentLabels: labelsByPr.get(Number(c.prNumber)), isDraft: isDraftByPr.get(Number(c.prNumber)) }); }
     catch { /* cosmetic — see review-status-tag.mjs's own header */ }
   }
   return {
