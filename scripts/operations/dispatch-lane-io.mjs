@@ -1241,6 +1241,37 @@ export function isPreSpawnRefusal(error) {
 }
 
 /**
+ * #4174 follow-up (live-caught 2026-09-27, 17 occurrences over `we:backlog/xrv69j6-*.md`'s own dispatch path —
+ * PRs #2766/#2767/#2800/#2803/#2822 all refused `dispatch-failed` with this exact text) — `claude --bg`'s OWN
+ * refusal text for a cwd its trust check does not recognise: *"Workspace not trusted. Run \`claude\` in <dir>
+ * once and accept the trust prompt, then retry."* This is PRE-SPAWN PROOF exactly like ENOENT/EACCES above — the
+ * CLI prints this and exits before a single tool call, let alone an agent turn, has happened — but it carries no
+ * `.code` `isPreSpawnRefusal` recognises, so before this it fell all the way through to the INDETERMINATE branch
+ * and every one of those 17 refusals was logged "whether an agent started is UNKNOWN" even though the CLI's own
+ * stderr proves the answer is "no". Matched against `error.stderr` ONLY — the CLI's own output stream, which is
+ * where this text lives. NEVER `error.message`: `execFileSync` builds it as `Command failed: claude <argv…>\n
+ * <stderr>`, and the argv carries the dispatch PROMPT (PR/card text), so an unrelated failure whose prompt merely
+ * mentions the phrase would be retried and reclassified out of the INDETERMINATE bucket (PR #2824 review).
+ *
+ * WHY THIS KEEPS HAPPENING despite `grantDispatchTrust` already granting trust right before every spawn
+ * ({@link ensureDispatchSessionCwd}, #4174, plus the `withFileLock` hardening of #4188): the lock only
+ * serializes THIS module's own two writers (grant vs. {@link revokeDispatchTrust}) against each other. It does
+ * nothing against a concurrent, uncooperative writer — a DIFFERENT already-running `claude` process (another
+ * dispatched session, or an interactive one) doing its OWN unrelated, unlocked read-modify-write of the same
+ * `~/.claude.json` for its own bookkeeping. If that external write's read snapshot predates our grant and its
+ * write lands after, our just-added trust entry is silently clobbered — a lost update our lock cannot see,
+ * because the other side never takes it. Several daemon ticks running as separate OS processes concurrently
+ * (the `Mac:<pid>` markers in the daemon's own log) make that window real, not theoretical, and it is exactly
+ * why the refusal is INTERMITTENT rather than constant: it only bites when another `claude` process's write
+ * straddles the grant-to-spawn gap for this one session's fresh, never-reused scratch cwd.
+ * @param {{stderr?: string}} error
+ */
+const TRUST_REFUSAL_PATTERN = /Workspace not trusted/;
+export function isTrustRefusal(error) {
+  return TRUST_REFUSAL_PATTERN.test(String(error?.stderr ?? ''));
+}
+
+/**
  * THE SINK — the one thing in this repo that starts a delivery agent.
  *
  * THE HANDLE IS THE ONE THE CLI PRINTS BACK — NOT A MINTED ONE. CORRECTED 2026-09-11 (#3331); this paragraph
@@ -1450,6 +1481,17 @@ export function createDispatchSinks({
         if (e && e.notApplied) throw e;
         if (isPreSpawnRefusal(e)) {
           throw notApplied(`claude could not be started (${String(e.code)}) — no agent exists`, { sessionId });
+        }
+        // #4174 follow-up — see {@link isTrustRefusal}'s own header. `defaultSpawnAgent` already retried once
+        // with a fresh grant before this catch is ever reached (see there), so an error that STILL carries this
+        // text proves the retry also lost the race (or trust genuinely could not be granted, e.g. an unreadable
+        // `~/.claude.json`) — either way the CLI's own stderr proves no agent started, exactly like ENOENT/EACCES
+        // above, and this is definite-not-started/retryable, never the UNKNOWN bucket a human has to close out.
+        if (isTrustRefusal(e)) {
+          throw notApplied(
+            `claude could not be started (workspace not trusted for ${sessionCwd}) — no agent exists`,
+            { sessionId },
+          );
         }
         // INDETERMINATE. The entry stays `in-flight` with a NULL handle: something may be running and cannot be
         // observed. The replay guard refuses it and `inFlightEntries` reports it under `unknown`, which is
@@ -1661,13 +1703,27 @@ export function defaultClaudeProvider(request, { spawnAgent = (argv, opts) => de
  * TIMEOUT it sets is the whole point of the option bag, and while it lived inside a default parameter that
  * every test overrode, deleting it left the suite green (PR #1211 review, F5).
  *
+ * #4174 follow-up (live-caught 2026-09-27, see {@link isTrustRefusal}'s own header for the full race) — VERIFY
+ * AND RE-GRANT RIGHT HERE, at the one moment closest to the actual spawn, rather than only back at
+ * {@link ensureDispatchSessionCwd} (seconds earlier, across several more synchronous fs writes —
+ * `grantLanePermission`, `ensureWorktreeIsolation` — any of which is another window for a concurrent `claude`
+ * process to clobber the grant). On a trust refusal specifically: re-grant `opts.cwd` (closing the race for
+ * THIS retry — a concurrent writer would have to lose the race twice in a row) and retry the exact same spawn
+ * exactly once. `grantTrust`/`retryDelayMs` are injectable so a test can assert the retry happened without
+ * touching the real filesystem or a real clock. NEVER retries for any OTHER failure — a real ENOENT/EACCES or a
+ * genuine CLI error is unrelated to trust and re-granting cannot fix it; retrying it would only double a
+ * failure that already proves nothing started, or worse, double a request that might already be in flight.
+ * If the retry ALSO throws a trust refusal, that final error still carries the same text — `isTrustRefusal`
+ * classifies it at the call site as definite-not-started/retryable, never as UNKNOWN.
+ *
  * @param {string[]} argv
  * @param {object} [opts]
- * @param {{exec?: Function}} [io] - injected ONLY so the opts can be asserted.
+ * @param {{exec?: Function, grantTrust?: (dir: string) => void}} [io] - injected ONLY so the opts (and the
+ *   retry) can be asserted.
  * @returns {string}
  */
-export function defaultSpawnAgent(argv, opts = {}, { exec = execFileSync } = {}) {
-  return exec('claude', argv, {
+export function defaultSpawnAgent(argv, opts = {}, { exec = execFileSync, grantTrust = grantDispatchTrust } = {}) {
+  const execOpts = {
     encoding: 'utf8', maxBuffer: 8 * 1024 * 1024, timeout: SPAWN_TIMEOUT_MS, killSignal: 'SIGKILL',
     // #x8mpubm follow-up (live-caught 2026-09-24) — this call inherits `process.env` unless told otherwise,
     // and this DAEMON's own process may carry a `GH_TOKEN` `github-app-auth-env.mjs` set for ITS OWN gh/git
@@ -1682,7 +1738,14 @@ export function defaultSpawnAgent(argv, opts = {}, { exec = execFileSync } = {})
     // session-role.mjs). Composed with `sanitizeSpawnEnv` (PR #2600) rather than replacing it: the stripped-
     // GH_TOKEN env `sanitizeSpawnEnv` returns is what gets marked, so neither guard undoes the other's work.
     env: markWorkerEnv(sanitizeSpawnEnv(opts.env || process.env)),
-  });
+  };
+  try {
+    return exec('claude', argv, execOpts);
+  } catch (e) {
+    if (!opts.cwd || !isTrustRefusal(e)) throw e;
+    try { grantTrust(opts.cwd); } catch { /* grantDispatchTrust itself never throws; belt-and-suspenders */ }
+    return exec('claude', argv, execOpts);
+  }
 }
 
 /**
