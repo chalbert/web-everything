@@ -3,8 +3,13 @@
  * @file scripts/operations/review-loop-cli.mjs
  * @description #3072's REMAINING SLICE, MADE CALLABLE — drives ONE `review-pr` run unattended, using
  * `we:scripts/lib/review-loop-policy.mjs`'s ratified confirm policy, and files a notification either way the
- * policy leaves a debt behind: the queued-accept notice when it DECLINES an accept (`review:human`), or the
- * filed-prevention notice when it ANSWERS accept over an unfiled prevention guard (#3442, `review:pending`).
+ * policy leaves a debt behind: the queued-accept notice when it DECLINES a clean `accept` (`review:human`) — or,
+ * since the #2749 fix (2026-09-26), MECHANICALLY FILES the owed prevention guard(s) as a real backlog card
+ * through the declared `file-item` operation and resumes the SAME run with `accept` itself, when the verdict is
+ * `prevention-outstanding` on the agent-addressed (`review:pending`) tier. That second case is NEVER surfaced to
+ * a human (2026-09-26 scope ruling: filing the follow-up is not a decision an operator needs to make) — see
+ * `review-loop-policy.mjs`'s header for the full account of why `#3442`'s old mechanical-accept-without-filing
+ * was reversed and replaced rather than merely reverted.
  *
  *   node scripts/operations/review-loop-cli.mjs --pr=1234 --repo=chalbert/web-everything --cwd=<a lane>
  *   node scripts/operations/review-loop-cli.mjs --resume=<run-id> --repo=chalbert/web-everything --pr=1234
@@ -20,12 +25,14 @@
  * mode of `run.mjs`.
  *
  * WHAT THIS FILE OWNS, AND ONLY THIS: wiring `driveRun`'s generic `autoConfirm` seam to the CONCRETE policy,
- * and — the one genuinely new behaviour — filing the queued-accept notification when that policy declines an
- * accept. Everything else is reused, not re-derived: `run.mjs`'s own operation table (`resolveOperation`,
- * `createCliJudgeFactory`) builds the exact same declaration/registry/sinks/judge the human CLI uses, and
- * `we:scripts/operations/cli-adapter.mjs`'s own `parseOperationArgv` / `renderOutcome` / `restartCommand`
- * render every stop this shares with the human path — so a bug fixed in either place is fixed here too, and
- * the two callers can never quietly drift on what a stop MEANS.
+ * filing the queued-accept notification when that policy declines a clean accept, and — the #2749 addition —
+ * mechanically filing the owed prevention card + auto-resuming to accept when the policy declines a
+ * `prevention-outstanding` verdict. Everything else is reused, not re-derived: `run.mjs`'s own operation table
+ * (`resolveOperation`, `createCliJudgeFactory`) builds the exact same declaration/registry/sinks/judge the human
+ * CLI uses (for BOTH `review-pr` and, now, the nested `file-item` call), and
+ * `we:scripts/operations/cli-adapter.mjs`'s own `parseOperationArgv` / `renderOutcome` / `runOperationCli` /
+ * `restartCommand` render every stop this shares with the human path — so a bug fixed in either place is fixed
+ * here too, and the two callers can never quietly drift on what a stop MEANS.
  *
  * THE ROUND CAP NEEDS NOTHING NEW HERE (see `review-loop-policy.mjs`'s header for the full account): by the
  * time this file sees a run, `run.verdict.loop` is already `converged` / `in-progress` / `exhausted` /
@@ -38,26 +45,30 @@
  * cap is FOR — round N+1 exists only once the diff has actually changed (a fix landed), which happens in a
  * different process entirely. So this script drives exactly one read→judge→judgeSecurity→reduce→confirm
  * [→record] pass and exits; the loop ACROSS rounds is realized by re-invoking it once the PR's diff moves —
- * `#3279`'s dispatched session's job every time it runs, never a `while` loop inside this file.
+ * `#3279`'s dispatched session's job every time it runs, never a `while` loop inside this file. The ONE
+ * exception is the mechanized prevention-filing branch below, which resumes the SAME run a second time within
+ * THIS SAME invocation — that is not a second round (the diff has not changed), it is completing the ONE round
+ * that was already decided, the same way a human's own `--answer=accept` resume would.
  *
- * IMPURE: spawns jurors (via the injected judge), writes run records, and — only on a queued accept — appends
- * one line to the learnings pool. Everything DECISION-shaped is imported from a pure module (`review-loop-
- * policy.mjs`); nothing here decides, it only wires and reports.
+ * IMPURE: spawns jurors (via the injected judge), writes run records, files a real backlog card through
+ * `file-item` on a `prevention-outstanding` verdict, and — only on a queued clean accept — appends one line to
+ * the learnings pool. Everything DECISION-shaped is imported from a pure module (`review-loop-policy.mjs`);
+ * nothing here decides, it only wires and reports.
  */
 
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
-  cwdFlagValue, driveRun, hasJsonFlag, outcomePayload, parseOperationArgv, renderOutcome,
+  cwdFlagValue, driveRun, hasJsonFlag, outcomePayload, parseOperationArgv, renderOutcome, runOperationCli,
 } from './cli-adapter.mjs';
 import { startRun, runStatus } from './engine.mjs';
 import { createFileRunStore, newRunId } from './run-store.mjs';
 import { resolveOperation, createCliJudgeFactory } from './run.mjs';
 import { appendEntry } from '../conveyor/learnings-drop.mjs';
 import {
-  acceptResumeCommand, buildAcceptQueueEntry, buildPreventionQueueEntry, isPreventionOutstandingClear,
-  isQueuedAcceptStop, reviewLoopAutoConfirm,
+  acceptResumeCommand, buildAcceptQueueEntry, buildPreventionFilingInput, buildPreventionQueueEntry,
+  isPreventionOutstandingClear, isPreventionOutstandingParked, isQueuedAcceptStop, reviewLoopAutoConfirm,
 } from '../lib/review-loop-policy.mjs';
 import { hasUncapturedPrevention } from '../lib/jury-core.mjs';
 import { writeAllSync } from '../lib/write-all-sync.mjs';
@@ -102,6 +113,41 @@ export function applyUnattendedActorDefault(input, argv = []) {
 }
 
 /**
+ * THE PRODUCTION `fileItem` BINDING (#2749) — drives the declared `file-item` operation to completion, IN
+ * PROCESS, exactly the way `run.mjs file-item --json --title=… …` would from a terminal (same
+ * `resolveOperation`/`runOperationCli` this file already uses for `review-pr` itself), so filing the owed
+ * prevention card reuses the SAME declaration/effects/refusals a human's own `file-item` invocation gets,
+ * never a re-derived shortcut. `file-item` has no `confirm`/`judge` step (every step is `compute`/`effect`), so
+ * this always settles in ONE `driveRun` sweep — no `makeJudge`, no resume.
+ *
+ * A FRESH `createFileRunStore()` PER CALL, not the caller's own `review-pr` store: `file-item` is a DIFFERENT
+ * operation with its own run-record namespace (`we:scripts/operations/run-store.mjs` keys records by run id,
+ * which `newRunId(declaration.name)` already scopes per-operation) — reusing the review-pr store would work by
+ * accident (`driveRun` starts a fresh run either way) but would mix two operations' records under one store
+ * instance for no reason. `.operations/runs/` is gitignored, so this leaves no stray file in the diff.
+ *
+ * @param {{title:string,kind:string,size:string,digest:string,scope:string,parent:string,queue:string}} input -
+ *   {@link module:review-loop-policy.buildPreventionFilingInput}'s own output.
+ * @returns {Promise<{code:number, lines:string[]}>}
+ */
+export async function fileItemForPrevention(input) {
+  const argv = [
+    `--title=${input.title}`,
+    `--kind=${input.kind}`,
+    `--size=${input.size}`,
+    `--digest=${input.digest}`,
+    `--scope=${input.scope}`,
+    ...(input.parent ? [`--parent=${input.parent}`] : []),
+    `--queue=${input.queue}`,
+    '--json',
+  ];
+  const { declaration, registry, sinks } = resolveOperation('file-item', { json: true });
+  return runOperationCli({
+    declaration, argv, registry, store: createFileRunStore(), sinks, newRunId: () => newRunId('file-item'),
+  });
+}
+
+/**
  * DRIVE ONE ROUND, UNATTENDED. The whole file, as a function — mirrors `we:scripts/operations/cli-adapter.mjs
  * #runOperationCli`'s shape closely, on purpose, so the two are easy to read side by side and hard to let
  * drift silently: same parse, same start-or-resume, same render. The differences are exactly the two things
@@ -120,11 +166,14 @@ export function applyUnattendedActorDefault(input, argv = []) {
  * @param {(entry: object, opts: object) => {record: object, path: string}} [o.appendLearning] - injected so a
  *   test never touches the real pool file; the real caller always passes `learnings-drop.mjs#appendEntry`.
  * @param {string} [o.session] - the learnings-pool session slug the queued-accept entry files under.
+ * @param {(input: object) => Promise<{code: number, lines: string[]}>} [o.fileItem] - #2749: files the owed
+ *   prevention card through the declared `file-item` operation. Injected so a test never touches the real
+ *   backlog/queue files; the real caller always passes {@link fileItemForPrevention}.
  * @returns {Promise<{code: number, lines: string[], run: (object|null), stopped: string}>}
  */
 export async function runReviewLoopOnce({
   declaration, registry, argv, store, sinks, makeJudge, mintRunId, autoConfirm = reviewLoopAutoConfirm,
-  appendLearning = appendEntry, session = 'review-loop',
+  appendLearning = appendEntry, session = 'review-loop', fileItem = fileItemForPrevention,
 } = {}) {
   const parsed = parseOperationArgv(declaration, argv);
   if (parsed.control.help) {
@@ -189,10 +238,82 @@ export async function runReviewLoopOnce({
     run, registry, store, sinks, judge: activeJudge, resume, autoConfirm, attemptedBy: 'agent',
   });
 
+  // ── THE MECHANIZED PREVENTION-FILING BRANCH (#2749 fix, 2026-09-26 scope ruling) ─────────────────────────
+  // `reviewLoopAutoConfirm` DECLINES a `prevention-outstanding` verdict (it must — filing a card is impure
+  // I/O, and the policy stays pure). Filing the owed guard(s) is NOT a decision for an operator, so this is
+  // NEVER surfaced as a queued-for-a-human notice: the loop files ONE real backlog card itself, through the
+  // declared `file-item` operation (`buildPreventionFilingInput` — pure — derives its input from the SAME
+  // findings the verdict already carries), cleared to the conveyor, and — only once that filing actually
+  // succeeds — resumes THIS SAME run with the `accept` the policy would not answer itself. The debt is now
+  // TRACKED (a real card, not a notice nobody is obligated to act on), so the #2823 "blocks a clean accept
+  // until filed" gate is satisfied by construction. A FAILED filing does the opposite of the accept path: it
+  // leaves the run parked EXACTLY as it was (nothing recorded) and reports the failure loudly — never
+  // swallowed, and never advances to a mechanical accept over a debt that, this time, genuinely went unfiled.
+  if (isPreventionOutstandingParked(outcome)) {
+    const { pr, repo } = outcome.run.input;
+    const filingInput = buildPreventionFilingInput({ repo, pr, findings: outcome.run.verdict.findings });
+    let filed;
+    let filingError = null;
+    try {
+      filed = await fileItem(filingInput);
+      if (filed.code !== 0) filingError = `file-item refused: ${filed.lines.join(' / ')}`;
+    } catch (e) {
+      filingError = String(e?.message ?? e);
+    }
+
+    if (filingError) {
+      const rendered = renderOutcome({ outcome, json: parsed.control.json, declaration });
+      if (parsed.control.json) {
+        const payload = { ...JSON.parse(rendered.lines[0]), preventionFilingError: filingError };
+        return { code: 1, lines: [JSON.stringify(payload, null, 2)], run: outcome.run, stopped: outcome.stopped };
+      }
+      return {
+        code: 1,
+        lines: [
+          ...rendered.lines, '',
+          `FAILED to file the owed prevention card mechanically: ${filingError}`,
+          'The run stays parked — nothing was recorded, and this verdict is never auto-cleared unfiled.',
+        ],
+        run: outcome.run,
+        stopped: outcome.stopped,
+      };
+    }
+
+    const filedPayload = JSON.parse(filed.lines[0] ?? '{}');
+    const filedNum = filedPayload?.verdict?.num ?? null;
+    const filedRel = filedPayload?.verdict?.rel ?? null;
+
+    // THE CARD IS FILED AND TRACKED — resume THIS SAME run with the mechanical `accept` the policy itself
+    // declined to answer, so the label swap + durable comment apply exactly as a clean accept's would.
+    const acceptResume = { step: outcome.run.pending.step, value: 'accept' };
+    const acceptedOutcome = await driveRun({
+      run: outcome.run, registry, store, sinks, judge: activeJudge, resume: acceptResume, autoConfirm, attemptedBy: 'agent',
+    });
+    const rendered = renderOutcome({ outcome: acceptedOutcome, json: parsed.control.json, declaration });
+    if (parsed.control.json) {
+      const payload = {
+        ...JSON.parse(rendered.lines[0]),
+        preventionFiled: { num: filedNum, path: filedRel },
+      };
+      return { code: rendered.code, lines: [JSON.stringify(payload, null, 2)], run: acceptedOutcome.run, stopped: acceptedOutcome.stopped };
+    }
+    return {
+      code: rendered.code,
+      lines: [
+        ...rendered.lines, '',
+        `prevention guard(s) filed mechanically — ${filedRel ?? '(no path)'} (#${filedNum ?? '?'}), cleared to `
+        + 'the conveyor; no human was asked.',
+      ],
+      run: acceptedOutcome.run,
+      stopped: acceptedOutcome.stopped,
+    };
+  }
+
   // ── THE QUEUED-ACCEPT BRANCH — the one behaviour `runOperationCli` does not have ──────────────────────────
-  // The policy already declined (see `review-loop-policy.mjs`); this only decides whether to FILE the
-  // notification and say so, or fall through to the SAME rendering the human CLI would give an ordinary
-  // confirm stop (which still happens — a `review:human` PR still parks exactly as it always has).
+  // The policy already declined a CLEAN accept on a `review:human` PR (see `review-loop-policy.mjs`); this
+  // only decides whether to FILE the notification and say so, or fall through to the SAME rendering the
+  // human CLI would give an ordinary confirm stop. `prevention-outstanding` NEVER reaches this branch — see
+  // the mechanized branch above, which handles that verdict before this one is ever consulted.
   //
   // #x100grep — EVERY EXIT OF THIS FUNCTION CARRIES `run.verdict.loop` THROUGH UNMODIFIED, this branch
   // included. A future caller (the reconcile/runner wiring this item deliberately does not build, or a human)
@@ -242,11 +363,13 @@ export async function runReviewLoopOnce({
     };
   }
 
-  // ── THE PREVENTION-FILED BRANCH (#3442, #3434's second ratified item) — the run already auto-cleared to
-  // `accept` (see `reviewLoopAutoConfirm`'s `PREVENTION_OUTSTANDING` branch): unlike the queued-accept branch
-  // above, nothing is parked here — this only files the named guard(s) as the notification a human still
-  // needs, mirroring that branch's file-then-notify shape, then falls through to the ordinary rendering below
-  // (an `accept` outcome, same as a genuinely clean verdict would render) with the filing result spliced in.
+  // ── THE PREVENTION-FILED BRANCH — reachable only via a HUMAN's manual `--answer=accept` resume of a
+  // previously-parked `prevention-outstanding` run (`#3442`'s automatic version, answered by `reviewLoopAutoConfirm`
+  // itself, was REVERSED by the #2749 fix above — see that function's doc). A human who read the queued notice,
+  // decided to file (or already had) the named guard(s), and resumed with `--answer=accept` still gets this
+  // same file-then-notify treatment: the accept already recorded (a human answered it), so this only files the
+  // named guard(s) as the notification, then falls through to the ordinary rendering below (an `accept`
+  // outcome, same as a genuinely clean verdict would render) with the filing result spliced in.
   if (isPreventionOutstandingClear(outcome)) {
     const { pr, repo } = outcome.run.input;
     // PER-FINDING, NOT PER-RUN (review, finding 1). `buildPreventionQueueEntry` REFUSES rather than truncates
