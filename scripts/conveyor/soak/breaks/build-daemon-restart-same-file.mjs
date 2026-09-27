@@ -29,7 +29,7 @@ export default {
   fixedBy: { sha: '2aa2058ee', where: 'lane/build-daemon-slice1', paths: ['scripts/conveyor/build-dispatch-claim.mjs', 'skills-src/conveyor/build-dispatch-daemon.mjs'] },
   fixPresent(root) {
     const p = join(root, 'skills-src/conveyor/build-dispatch-daemon.mjs');
-    return existsSync(p) && /BUILD_DAEMON_DURABLE_CLAIM/.test(readFileSync(p, 'utf8'));
+    return existsSync(p) && /acquireBuildDispatchClaim\(/.test(readFileSync(p, 'utf8'));
   },
   async run({ log } = {}) {
     const dir = mkdtempSync(join(tmpdir(), 'soak-build-daemon-'));

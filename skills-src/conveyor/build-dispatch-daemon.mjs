@@ -50,8 +50,6 @@ export const BUILD_DISPATCH_DAEMON_LEASE_KEY = '<conveyor:build-dispatch-daemon-
 export const DEFAULT_INTERVAL_MS = 120_000;
 export const KILL_SWITCH_ENV = 'WE_BUILD_DAEMON_KILL';
 export const KILL_SWITCH_FILENAME = 'build-dispatch-daemon.kill';
-/** Marker the soak break checks for (`fixPresent`). */
-export const BUILD_DAEMON_DURABLE_CLAIM = 'build-dispatch-claim';
 
 // ── PURE CORE ────────────────────────────────────────────────────────────────────────────────────────────────
 
