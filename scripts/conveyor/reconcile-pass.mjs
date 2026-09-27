@@ -66,6 +66,11 @@ import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 import { latestRequiredCheck, isRequiredCheckFailed } from '../merge-ai-prs.mjs';
 import { computeMainRedWindows, DEFAULT_MAIN_WORKFLOW_NAME, DEFAULT_REQUIRED_CHECK } from './main-red-recovery.mjs';
 import { readHungInfo, resolveHungThresholdMs, readClaudeAuthExpiredInfo, readIdleFinishedInfo, resolveIdleFinishedThresholdMs } from './hung-session.mjs';
+// #2748 false-red follow-up (soak-replay-gate, PR #2775) — the repo's REQUIRED status-check names, live +
+// cached (`we:scripts/lib/required-status-checks.mjs`), so `planReconcile`'s `ci-red` branch means a REQUIRED
+// check failed rather than "any check outside a hand-maintained exclusion list" — see that module's own header
+// for the full incident this closes.
+import { getRequiredStatusChecks } from '../lib/required-status-checks.mjs';
 
 /**
  * we:scripts/conveyor/reconcile-pass.mjs#PR_LIST_JSON_FIELDS — the `--json` fields this pass reads about each
@@ -375,6 +380,9 @@ export function formatReport({ dispatch = [], refusals = [], notes = [] } = {}) 
 export function runReconcilePass({
   readPrs = defaultReadPrs, readAgents = defaultReadAgents, enrich = enrichAgents,
   enrichMainRed = enrichPrsWithMainRedFacts, now = Date.now(), repo = null, defaultBranch = 'main',
+  // #2748 false-red follow-up — injectable so a test can supply a fixture with no network, matching every
+  // other reader in this file. Defaults to the live, cached branch-protection read.
+  readRequiredChecks = getRequiredStatusChecks,
 } = {}) {
   const repoKey = repo == null ? 'we' : repoKeyForSlug(repo);
   if (repoKey === null) throw new Error(`reconcile-pass: --repo ${repo} is not a constellation repo`);
@@ -389,7 +397,11 @@ export function runReconcilePass({
   // from the PR's own defect. Costs nothing beyond what `readPrs` already fetched when nothing is `ci:failed`.
   const { prs, mainRedWindows } = enrichMainRed(rawPrs, { repo: resolvedRepo, defaultBranch });
   const agents = enrich(readAgents({}));
-  const plan = planReconcile({ repo: repoKey, prs, agents, durableCounts: durableCountsFrom(prs), now, defaultBranch, mainRedWindows });
+  // A repo this constellation does not know the gh slug for (`resolvedRepo` stays `null`, `gh` infers from cwd)
+  // still gets a required set: `getRequiredStatusChecks` degrades to its own cache/fallback chain rather than
+  // ever throwing, so this call is safe unconditionally (see that module's own header).
+  const { checks: requiredChecks } = readRequiredChecks({ repo: resolvedRepo, branch: defaultBranch });
+  const plan = planReconcile({ repo: repoKey, prs, agents, durableCounts: durableCountsFrom(prs), now, defaultBranch, mainRedWindows, requiredChecks });
   return { ...plan, prs: prs.length, agents: agents.length };
 }
 
