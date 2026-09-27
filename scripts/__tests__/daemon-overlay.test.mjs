@@ -179,4 +179,70 @@ describe('daemon-overlay.mjs add — the overlay-conflict guard', () => {
     const state = overlayStateFile(overlayDir, cloneDir);
     expect(state?.overlays ?? []).toEqual([]);
   });
+
+  // ── PR #2827 review findings ──────────────────────────────────────────────────────────────────────────────
+
+  it('a stuck PINNED overlay (now conflicting with main) does not block an unrelated, clean add', () => {
+    const { originDir, cloneDir, overlayDir, env } = makeFixture();
+    advanceMain(originDir, (dir) => writeFile(dir, 'shared.mjs', 'export const X = 1;\n'));
+    pushBranch(originDir, 'lane/pinned-thing', (dir) => writeFile(dir, 'shared.mjs', 'export const X = 2;\n'));
+    expect(runCli(['add', `--clone=${cloneDir}`, '--ref=lane/pinned-thing', '--pinned'], env).status).toBe(0);
+    advanceMain(originDir, (dir) => writeFile(dir, 'shared.mjs', 'export const X = 9;\n')); // pinned now conflicts
+    pushBranch(originDir, 'lane/unrelated', (dir) => writeFile(dir, 'other.mjs', 'o\n'));
+
+    const r = runCli(['add', `--clone=${cloneDir}`, '--ref=lane/unrelated'], env);
+    expect(r.status).toBe(0);
+    expect(r.stderr).toMatch(/lane\/pinned-thing/); // the stuck overlay is NAMED, not swallowed
+    expect(r.stderr).toMatch(/pinned-overlay-conflict/);
+    const state = overlayStateFile(overlayDir, cloneDir);
+    expect(state.overlays.map((o) => o.ref)).toEqual(['lane/pinned-thing', 'lane/unrelated']);
+  });
+
+  it('two CONCURRENT adds of mutually-conflicting refs register at most one of them', async () => {
+    const { originDir, cloneDir, overlayDir, env } = makeFixture();
+    advanceMain(originDir, (dir) => writeFile(dir, 'shared.mjs', 'export const X = 1;\n'));
+    pushBranch(originDir, 'lane/a', (dir) => writeFile(dir, 'shared.mjs', 'export const X = 2;\n'));
+    pushBranch(originDir, 'lane/b', (dir) => writeFile(dir, 'shared.mjs', 'export const X = 3;\n'));
+
+    const { spawn } = await import('node:child_process');
+    const run = (ref) => new Promise((res) => {
+      const p = spawn(process.execPath, [CLI, 'add', `--clone=${cloneDir}`, `--ref=${ref}`], { env });
+      let stderr = '';
+      p.stderr.on('data', (d) => { stderr += d; });
+      p.on('close', (status) => res({ status, stderr }));
+    });
+    const results = await Promise.all([run('lane/a'), run('lane/b')]);
+
+    expect(results.map((x) => x.status).sort()).toEqual([0, 3]);
+    const state = overlayStateFile(overlayDir, cloneDir);
+    expect(state.overlays).toHaveLength(1);
+  }, 60_000);
+
+  it('--check against a corrupt overlay store fails (exit 1, wouldRegister:false) — never a false "would register"', () => {
+    const { originDir, cloneDir, overlayDir, env } = makeFixture();
+    pushBranch(originDir, 'lane/solo', (dir) => writeFile(dir, 'c.mjs', 'c\n'));
+    expect(runCli(['add', `--clone=${cloneDir}`, '--ref=lane/solo'], env).status).toBe(0);
+    const file = readdirSync(overlayDir).find((n) => n.endsWith('.json'));
+    writeFileSync(join(overlayDir, file), '{not json');
+
+    const r = runCli(['add', `--clone=${cloneDir}`, '--ref=lane/solo', '--check', '--json'], env);
+    expect(r.status).toBe(1);
+    expect(JSON.parse(r.stdout).wouldRegister).toBe(false);
+  });
+
+  it('a merge-tree execution error is refused even with --allow-conflict (it is not a confirmed conflict)', () => {
+    const { originDir, cloneDir, overlayDir, env } = makeFixture();
+    const dir = makeAuthorClone(originDir);
+    gitOk(dir, ['checkout', '-q', '--orphan', 'lane/unrelated']);
+    gitOk(dir, ['rm', '-rq', '--cached', '.']);
+    writeFile(dir, 'z.mjs', 'z\n');
+    gitOk(dir, ['add', 'z.mjs']);
+    gitOk(dir, ['commit', '-q', '-m', 'orphan']);
+    gitOk(dir, ['push', '-q', 'origin', 'HEAD:refs/heads/lane/unrelated']);
+
+    const r = runCli(['add', `--clone=${cloneDir}`, '--ref=lane/unrelated', '--allow-conflict', '--reason=try it'], env);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(/merge-tree-failed/);
+    expect(overlayStateFile(overlayDir, cloneDir)?.overlays ?? []).toEqual([]);
+  });
 });

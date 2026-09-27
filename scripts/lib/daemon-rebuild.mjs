@@ -2239,10 +2239,12 @@ function parseMergeTreeConflictFiles(output) {
  * refuse to register at all.
  * @param {{root:string, ref:string, pr?:number|null, existingOverlays:Array<{ref:string,pr?:number|null}>,
  *   env?:NodeJS.ProcessEnv, originUrl?:string, run?:typeof gitRun}} o
- * @returns {Promise<{ok:true, clean:true, mainSha:string, cur:string, candSha:string}
+ * `setAside` (every result) lists already-registered PINNED overlays that no longer fold onto main and were
+ * left out of the check — the caller must surface them, since a real rebuild refuses until they are fixed.
+ * @returns {Promise<{ok:true, clean:true, mainSha:string, cur:string, candSha:string, setAside:Array<object>}
  *   |{ok:true, clean:false, mainSha:string, cur:string, candSha:string, files:string[],
- *      conflicting:Array<{ref:string,pr:number|null}>}
- *   |{ok:false, reason:string, detail?:object}>}
+ *      conflicting:Array<{ref:string,pr:number|null}>, setAside:Array<object>}
+ *   |{ok:false, reason:string, detail?:object, setAside?:Array<object>}>}
  */
 export async function previewOverlayConflict({
   root, ref, pr = null, existingOverlays, env = process.env, originUrl, run = gitRun,
@@ -2284,11 +2286,27 @@ export async function previewOverlayConflict({
 
     // 1. Fold every ALREADY-registered overlay, in list order — the SAME `planRebuild` a real rebuild runs —
     // to compute `cur`, the exact tree the candidate would land on top of (never re-derived by hand here).
-    const planExisting = await planRebuild({
-      git: scratchGit, headSha: mainSha, mainRef: 'origin/main', overlays: existingOverlays,
-      prState: (p) => defaultPrState({ pr: p, root }),
-    });
-    if (!planExisting.ok) return { ok: false, reason: 'existing-overlays-unresolved', detail: planExisting };
+    // A PINNED overlay that no longer folds (it conflicts with main, or its PR/ref is gone) makes `planRebuild`
+    // refuse the whole plan, naming that overlay. That is a problem with the EXISTING list, not with the
+    // candidate — so set it aside, re-plan without it, and REPORT it (`setAside`), rather than refusing every
+    // unrelated add until someone repairs the stuck overlay (PR #2827 review). Any other plan failure still
+    // fails closed.
+    const setAside = [];
+    let folding = existingOverlays;
+    let planExisting;
+    for (;;) {
+      planExisting = await planRebuild({
+        git: scratchGit, headSha: mainSha, mainRef: 'origin/main', overlays: folding,
+        prState: (p) => defaultPrState({ pr: p, root }),
+      });
+      const stuckRef = !planExisting.ok && /^pinned-overlay-/.test(planExisting.reason) ? planExisting.detail?.ref : null;
+      if (!stuckRef || !folding.some((o) => o.ref === stuckRef)) break;
+      setAside.push({
+        ref: stuckRef, pr: planExisting.detail.pr ?? null, reason: planExisting.reason, dropReason: planExisting.detail.dropReason,
+      });
+      folding = folding.filter((o) => o.ref !== stuckRef);
+    }
+    if (!planExisting.ok) return { ok: false, reason: 'existing-overlays-unresolved', detail: planExisting, setAside };
     const cur = planExisting.finalSha;
 
     // 2. The candidate's own tip (already fetched above).
@@ -2298,9 +2316,18 @@ export async function previewOverlayConflict({
     // 3. THE CHECK — deliberately WITH messages (unlike planRebuild's own internal folds), so a real conflict
     // names its file(s) for the refusal/`--allow-conflict` print.
     const mt = scratchGit(['merge-tree', '--write-tree', cur, candSha]);
-    if (mt.status === 0) return { ok: true, clean: true, mainSha, cur, candSha };
+    if (mt.status === 0) return { ok: true, clean: true, mainSha, cur, candSha, setAside };
 
-    const files = parseMergeTreeConflictFiles(mt.stdout);
+    // Only status 1 is merge-tree's documented "merge had conflicts". Anything else (unrelated histories, a
+    // missing object, a crash) proves nothing about mergeability — it must fail closed as `ok:false`, never read
+    // as a confirmed conflict that `--allow-conflict` could then override (PR #2827 review).
+    const files = mt.status === 1 ? parseMergeTreeConflictFiles(mt.stdout) : [];
+    if (files.length === 0) {
+      return {
+        ok: false, reason: 'merge-tree-failed', setAside,
+        detail: { status: mt.status, stderr: String(mt.stderr ?? '').trim().slice(0, 500) },
+      };
+    }
 
     // 4. Attribute: which already-registered overlay(s) ALSO touch one of the conflicting files, off the SAME
     // object data (a `git diff --name-only` against main), never a guess at intent.
@@ -2314,7 +2341,7 @@ export async function previewOverlayConflict({
       if (files.some((f) => touched.has(f))) conflicting.push({ ref: o.ref, pr: o.pr ?? null });
     }
 
-    return { ok: true, clean: false, mainSha, cur, candSha, files, conflicting };
+    return { ok: true, clean: false, mainSha, cur, candSha, files, conflicting, setAside };
   } finally {
     rmSync(scratchDir, { recursive: true, force: true });
   }

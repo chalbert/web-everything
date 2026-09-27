@@ -1204,6 +1204,46 @@ describe('previewOverlayConflict — the overlay-conflict guard', () => {
     const check = await previewOverlayConflict({ root: cloneDir, ref: 'lane/does-not-exist', existingOverlays: [], env });
     expect(check).toEqual({ ok: false, reason: 'ref-unresolved' });
   });
+
+  // PR #2827 review: only merge-tree's documented conflict status (1) is a CONFIRMED conflict. Any other failure
+  // (here: an unrelated-history candidate, which merge-tree refuses with 128) proves nothing about mergeability,
+  // so it must be `ok:false` — never `clean:false`, which `--allow-conflict` would then let register.
+  it('a merge-tree execution error (unrelated histories) is ok:false, never an overridable "conflict"', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    const dir = makeAuthorClone(originDir);
+    gitOk(dir, ['checkout', '-q', '--orphan', 'lane/unrelated']);
+    gitOk(dir, ['rm', '-rq', '--cached', '.']);
+    writeFile(dir, 'z.mjs', 'z\n');
+    gitOk(dir, ['add', 'z.mjs']);
+    gitOk(dir, ['commit', '-q', '-m', 'orphan']);
+    gitOk(dir, ['push', '-q', 'origin', 'HEAD:refs/heads/lane/unrelated']);
+
+    const check = await previewOverlayConflict({ root: cloneDir, ref: 'lane/unrelated', existingOverlays: [], env });
+    expect(check.ok).toBe(false);
+    expect(check.reason).toBe('merge-tree-failed');
+  });
+
+  // PR #2827 review: an already-registered PINNED overlay that no longer folds onto main (it conflicts, so a
+  // real rebuild refuses) must not make every unrelated candidate unverifiable. The stuck overlay is set aside
+  // and REPORTED; the candidate is still checked against main + every overlay that does fold.
+  it('sets aside (and reports) a pinned overlay that no longer folds, and still checks the candidate', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    advanceMain(originDir, (dir) => writeFile(dir, 'shared.mjs', 'export const X = 1;\n'));
+    pushBranch(originDir, 'lane/pinned-thing', (dir) => writeFile(dir, 'shared.mjs', 'export const X = 2;\n'));
+    advanceMain(originDir, (dir) => writeFile(dir, 'shared.mjs', 'export const X = 9;\n'));
+    pushBranch(originDir, 'lane/normal', (dir) => writeFile(dir, 'n.mjs', 'n = 1\n'));
+    pushBranch(originDir, 'lane/unrelated', (dir) => writeFile(dir, 'other.mjs', 'o\n'));
+    pushBranch(originDir, 'lane/clashes-normal', (dir) => writeFile(dir, 'n.mjs', 'n = 2\n'));
+    const existingOverlays = [{ ref: 'lane/pinned-thing', pr: null, pinned: true }, { ref: 'lane/normal', pr: null }];
+
+    const clean = await previewOverlayConflict({ root: cloneDir, ref: 'lane/unrelated', existingOverlays, env });
+    expect(clean).toMatchObject({ ok: true, clean: true });
+    expect(clean.setAside).toEqual([expect.objectContaining({ ref: 'lane/pinned-thing', reason: 'pinned-overlay-conflict' })]);
+
+    const clash = await previewOverlayConflict({ root: cloneDir, ref: 'lane/clashes-normal', existingOverlays, env });
+    expect(clash).toMatchObject({ ok: true, clean: false, files: ['n.mjs'] });
+    expect(clash.conflicting).toEqual([{ ref: 'lane/normal', pr: null }]);
+  });
 });
 
 describe('findUnsafeLocalState / planRebuild (pure core)', () => {
