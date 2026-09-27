@@ -245,7 +245,7 @@ it('defaultReadMergeBase / defaultReadChanges guard their revisions and degrade 
 // a direct default-parameter reference to the bare `execFileSync` binding inside a freshly-added function here
 // was measured, live, to bypass it and run REAL git — explicit injection is the reliable, established way this
 // codebase asserts an exact argv with no dependence on that mock's own quirks.
-it('defaultReadEntryAt reads {mode, blob} for exactly the named path via ls-tree, degrading to null on any failure', async () => {
+it('defaultReadEntryAt reads {mode, blob} for exactly the named path via ls-tree; null only for a clean absence, THROWS on a failed read', async () => {
   const { defaultReadEntryAt } = await import('../reconcile-pass.mjs');
   const exec = vi.fn(() => `100755 blob 774a24d2703ada7a5c3bec4ced8696b13a5f6026\tscripts/run.sh\0`);
   expect(defaultReadEntryAt('253d75c2b', 'scripts/run.sh', { exec })).toEqual({ mode: '100755', blob: '774a24d2703ada7a5c3bec4ced8696b13a5f6026' });
@@ -253,7 +253,31 @@ it('defaultReadEntryAt reads {mode, blob} for exactly the named path via ls-tree
     '--literal-pathspecs', 'ls-tree', '-z', '--full-tree', '--end-of-options', '253d75c2b', '--', 'scripts/run.sh',
   ], expect.any(Object));
   expect(defaultReadEntryAt('253d75c2b', 'missing.mjs', { exec: () => '' })).toBeNull();
-  expect(defaultReadEntryAt('deadbeef', 'x.mjs', { exec: () => { throw new Error('fatal: bad revision'); } })).toBeNull();
+  // A failed read is NOT absence — `null` would let a deletion pass for landed (PR #2769 review, round 2).
+  expect(() => defaultReadEntryAt('deadbeef', 'x.mjs', { exec: () => { throw new Error('fatal: bad revision'); } })).toThrow(/bad revision/);
+});
+
+it('defaultReadBlobHunks diffs two blobs with -U0; a null source reads the added blob as one all-lines hunk', async () => {
+  const { defaultReadBlobHunks } = await import('../reconcile-pass.mjs');
+  const OLD = 'a'.repeat(40);
+  const exec = vi.fn(() => 'diff --git a/x b/x\n@@ -2 +2 @@\n-old\n+new\n@@ -5,0 +6,2 @@\n+x\n+y\n');
+  expect(defaultReadBlobHunks(OLD, BLOB, { exec })).toEqual([
+    { oldStart: 2, oldCount: 1, newStart: 2, newCount: 1 },
+    { oldStart: 5, oldCount: 0, newStart: 6, newCount: 2 },
+  ]);
+  expect(exec).toHaveBeenCalledWith('git', [
+    'diff', '-U0', '--no-color', '--no-ext-diff', '--no-textconv', '--end-of-options', OLD, BLOB,
+  ], expect.any(Object));
+  // binary: content but no hunk header → null, never "no change".
+  expect(defaultReadBlobHunks(OLD, BLOB, { exec: () => 'Binary files a/x and b/x differ\n' })).toBeNull();
+  // an added file: never diffed against git's empty blob (not guaranteed to exist) — its lines are counted.
+  const cat = vi.fn(() => 'l1\nl2\nl3\n');
+  expect(defaultReadBlobHunks(null, BLOB, { exec: cat })).toEqual([{ oldStart: 0, oldCount: 0, newStart: 1, newCount: 3 }]);
+  expect(cat).toHaveBeenCalledWith('git', ['cat-file', 'blob', '--end-of-options', BLOB], expect.any(Object));
+  expect(defaultReadBlobHunks(null, BLOB, { exec: () => 'no-trailing-newline' })).toEqual([{ oldStart: 0, oldCount: 0, newStart: 1, newCount: 1 }]);
+  expect(defaultReadBlobHunks(null, BLOB, { exec: () => '' })).toEqual([{ oldStart: 0, oldCount: 0, newStart: 0, newCount: 0 }]);
+  expect(defaultReadBlobHunks(null, BLOB, { exec: () => 'a\0b' })).toBeNull();
+  expect(defaultReadBlobHunks('--upload-pack=x', BLOB, { exec })).toBeNull();
 });
 
 describe('defaultFindMatchingMainCommit — searches only `<merge-base>..main`, per change status (PR #2769 review)', () => {
@@ -265,7 +289,7 @@ describe('defaultFindMatchingMainCommit — searches only `<merge-base>..main`, 
     const exec = vi.fn(() => 'commitA\ncommitB\ncommitC\n');
     const readEntryAt = vi.fn((ref) => {
       if (ref === base) return null; // an added file: absent at the PR's base
-      return ref === 'commitB' ? { mode: '100644', blob: BLOB } : { mode: '100644', blob: 'c'.repeat(40) };
+      return ref === 'commitB' || ref === mainRef ? { mode: '100644', blob: BLOB } : { mode: '100644', blob: 'c'.repeat(40) };
     });
     const change = { status: 'A', path: 'scripts/lib/critical-work.mjs', dstMode: '100644', dstBlob: BLOB };
     expect(defaultFindMatchingMainCommit(change, { base, mainRef, exec, readEntryAt })).toBe('commitB');
@@ -291,10 +315,49 @@ describe('defaultFindMatchingMainCommit — searches only `<merge-base>..main`, 
     // modified by a carrier, then reverted: the tip holds the base version again.
     const mod = { status: 'M', path: 'm.mjs', dstMode: '100644', dstBlob: BLOB };
     const entry = (ref) => (ref === 'carrier' ? { mode: '100644', blob: BLOB } : { mode: '100644', blob: OLD });
-    expect(defaultFindMatchingMainCommit(mod, { base, mainRef, exec, readEntryAt: entry })).toBeNull();
-    // refined after the carry (tip differs from base and from the PR) — still landed.
-    const refined = (ref) => (ref === 'carrier' ? { mode: '100644', blob: BLOB } : ref === base ? { mode: '100644', blob: OLD } : { mode: '100644', blob: 'd'.repeat(40) });
-    expect(defaultFindMatchingMainCommit(mod, { base, mainRef, exec, readEntryAt: refined })).toBe('carrier');
+    expect(defaultFindMatchingMainCommit(mod, { base, mainRef, exec, readEntryAt: entry, readBlobHunks: realisticHunks })).toBeNull();
+  });
+
+  // The PR (base → BLOB) rewrote line 2. `main` held BLOB at `carrier`, then moved to TIP.
+  const OLD = 'a'.repeat(40);
+  const TIP = 'd'.repeat(40);
+  const prHunk = { oldStart: 2, oldCount: 1, newStart: 2, newCount: 1 };
+  const realisticHunks = (from, to) => (from === OLD && to === BLOB ? [prHunk]
+    : from === BLOB && to === OLD ? [{ ...prHunk }] : null);
+  const refinedEntry = (ref) => (ref === 'carrier' ? { mode: '100644', blob: BLOB }
+    : ref === base ? { mode: '100644', blob: OLD } : { mode: '100644', blob: TIP });
+  const mod = { status: 'M', path: 'm.mjs', dstMode: '100644', dstBlob: BLOB };
+
+  it('A/M: refined after the carry is landed only when main left every line the PR wrote untouched (PR #2769 review, round 2)', async () => {
+    const { defaultFindMatchingMainCommit } = await import('../reconcile-pass.mjs');
+    const exec = () => 'carrier\n';
+    const withMainEdit = (mainHunks) => (from, to) => (from === OLD ? [prHunk] : from === BLOB && to === TIP ? mainHunks : null);
+    // main edited line 6 only — the PR's line 2 survives: landed.
+    const elsewhere = withMainEdit([{ oldStart: 6, oldCount: 1, newStart: 6, newCount: 1 }]);
+    expect(defaultFindMatchingMainCommit(mod, { base, mainRef, exec, readEntryAt: refinedEntry, readBlobHunks: elsewhere })).toBe('carrier');
+    // the transient-carry shape: main held BLOB once, then changed the PR's own line 2 again — NOT landed.
+    const samePrLine = withMainEdit([{ oldStart: 2, oldCount: 1, newStart: 2, newCount: 1 }]);
+    expect(defaultFindMatchingMainCommit(mod, { base, mainRef, exec, readEntryAt: refinedEntry, readBlobHunks: samePrLine })).toBeNull();
+    // revert of the PR's line 2 + an unrelated edit to line 6 (tip matches neither BLOB nor base) — NOT landed.
+    const revertPlusEdit = withMainEdit([prHunk, { oldStart: 6, oldCount: 1, newStart: 6, newCount: 1 }]);
+    expect(defaultFindMatchingMainCommit(mod, { base, mainRef, exec, readEntryAt: refinedEntry, readBlobHunks: revertPlusEdit })).toBeNull();
+    // an unreadable / binary diff never counts as preserved.
+    expect(defaultFindMatchingMainCommit(mod, { base, mainRef, exec, readEntryAt: refinedEntry, readBlobHunks: () => null })).toBeNull();
+    // a failed diff read fails closed.
+    expect(defaultFindMatchingMainCommit(mod, { base, mainRef, exec, readEntryAt: refinedEntry, readBlobHunks: () => { throw new Error('git died'); } })).toBeNull();
+  });
+
+  it('A/M: the tip must keep the PR\'s mode, and an added file is read as "from nothing" (null source)', async () => {
+    const { defaultFindMatchingMainCommit } = await import('../reconcile-pass.mjs');
+    const exec = () => 'carrier\n';
+    const modeFlipped = (ref) => (ref === mainRef ? { mode: '100755', blob: BLOB } : refinedEntry(ref));
+    expect(defaultFindMatchingMainCommit(mod, { base, mainRef, exec, readEntryAt: modeFlipped, readBlobHunks: () => [] })).toBeNull();
+    const add = { status: 'A', path: 'n.mjs', dstMode: '100644', dstBlob: BLOB };
+    const readBlobHunks = vi.fn((from) => (from === null ? [{ oldStart: 0, oldCount: 0, newStart: 1, newCount: 2 }] : [{ oldStart: 2, oldCount: 0, newStart: 3, newCount: 1 }]));
+    const addEntry = (ref) => (ref === base ? null : refinedEntry(ref));
+    // main appended after the PR's two lines: landed (the soak shape).
+    expect(defaultFindMatchingMainCommit(add, { base, mainRef, exec, readEntryAt: addEntry, readBlobHunks })).toBe('carrier');
+    expect(readBlobHunks).toHaveBeenCalledWith(null, BLOB, expect.any(Object));
   });
 
   it('D: landed only when the path is gone from main\'s tip AND an in-window commit deleted it', async () => {
@@ -311,6 +374,18 @@ describe('defaultFindMatchingMainCommit — searches only `<merge-base>..main`, 
     expect(exec2).not.toHaveBeenCalled();
     // gone from the tip but no in-window deletion (it was deleted before the PR's base) — never landed.
     expect(defaultFindMatchingMainCommit(change, { base, mainRef, exec: () => '', readEntryAt: () => null })).toBeNull();
+  });
+
+  it('D: a FAILED tip read is not absence — main deleted then re-added the path, the tip ls-tree times out (PR #2769 review, round 2)', async () => {
+    const { defaultFindMatchingMainCommit, defaultReadEntryAt } = await import('../reconcile-pass.mjs');
+    const change = { status: 'D', path: 'dead.mjs', dstMode: '000000', dstBlob: '0'.repeat(40) };
+    // Real reader, injected exec: the ls-tree fails, the log would find the earlier in-window deletion.
+    const exec = vi.fn((cmd, args) => {
+      if (args.includes('ls-tree')) throw new Error('ETIMEDOUT');
+      return 'olddelete\n';
+    });
+    expect(defaultFindMatchingMainCommit(change, { base, mainRef, exec, readEntryAt: defaultReadEntryAt })).toBeNull();
+    expect(exec.mock.calls.some(([, args]) => args.includes('log'))).toBe(false);
   });
 
   it('an unsupported status (type change, unmerged) never matches', async () => {

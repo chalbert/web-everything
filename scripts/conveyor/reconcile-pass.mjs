@@ -342,7 +342,9 @@ export function enrichPrsWithMainRedFacts(prs, {
 // own header for the incident and why per-file BLOB IDENTITY against `main`'s own history is the signal, not a
 // plain merge-tree/current-content diff.
 import { CONFLICT_LABEL } from './conflict-label.mjs';
-import { computeAlreadyLandedVerdict, attributeCarrierPr, parseRawDiffZ } from '../lib/already-landed-content.mjs';
+import {
+  computeAlreadyLandedVerdict, attributeCarrierPr, parseRawDiffZ, parseUnifiedHunks, tipPreservesChange,
+} from '../lib/already-landed-content.mjs';
 
 /** How many of `main`'s own commits touching one file this pass will scan for a blob match, most-recent-first,
  *  before giving up on that file (mirrors `we:scripts/backlog-stranded-sweep.mjs#AUTO_SWEEP_LOG_LIMIT`'s own
@@ -443,27 +445,56 @@ export function defaultReadChanges(base, headSha, { exec = execFileSync } = {}) 
 
 /**
  * we:scripts/conveyor/reconcile-pass.mjs#defaultReadEntryAt — the `{mode, blob}` a path holds at a commit
- * (`git ls-tree`), or `null` when the path does not exist there / the commit is unreachable. Mode travels with
- * the blob so a mode-only change is never matched by the unchanged blob alone.
+ * (`git ls-tree`), or `null` when the path does not exist there. Mode travels with the blob so a mode-only
+ * change is never matched by the unchanged blob alone.
+ *
+ * THROWS when the read itself fails (a bad revision, a timeout, a locked repo) — it never returns `null` for
+ * that, because `null` means "absent" and a deletion counts as landed on absence (PR #2769 review, round 2: a
+ * failed tip read once passed for "gone from main"). {@link defaultFindMatchingMainCommit} catches and fails
+ * closed.
  * @param {string} ref
  * @param {string} file
  * @param {{exec?:Function}} [o]
  * @returns {{mode:string, blob:string}|null}
  */
 export function defaultReadEntryAt(ref, file, { exec = execFileSync } = {}) {
-  if (!ref || !file) return null;
-  try {
-    const out = String(exec('git', [...GIT_LITERAL, 'ls-tree', '-z', '--full-tree', '--end-of-options', ref, '--', file], {
-      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 10_000,
-    }) || '');
-    for (const rec of out.split('\0')) {
-      const m = /^(\d{6}) \w+ ([0-9a-f]{7,64})\t(.*)$/s.exec(rec);
-      if (m && m[3] === file) return { mode: m[1], blob: m[2] };
-    }
-    return null;
-  } catch {
-    return null;
+  if (!ref || !file) throw new Error('defaultReadEntryAt: ref and file are required');
+  const out = String(exec('git', [...GIT_LITERAL, 'ls-tree', '-z', '--full-tree', '--end-of-options', ref, '--', file], {
+    encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 10_000,
+  }) || '');
+  for (const rec of out.split('\0')) {
+    const m = /^(\d{6}) \w+ ([0-9a-f]{7,64})\t(.*)$/s.exec(rec);
+    if (m && m[3] === file) return { mode: m[1], blob: m[2] };
   }
+  return null;
+}
+
+/**
+ * we:scripts/conveyor/reconcile-pass.mjs#defaultReadBlobHunks — the `git diff -U0` hunks between two blobs,
+ * parsed by `we:scripts/lib/already-landed-content.mjs#parseUnifiedHunks` (`null` for a binary diff). A `null`
+ * `fromBlob` means "from nothing" (a file the PR adds): one hunk spanning every line of `toBlob`, read directly —
+ * git's empty blob is not guaranteed to exist in the object store, so it is never diffed against. Throws when git
+ * fails; the caller fails closed.
+ * @param {string|null} fromBlob
+ * @param {string} toBlob
+ * @param {{exec?:Function}} [o]
+ * @returns {Array<object>|null}
+ */
+export function defaultReadBlobHunks(fromBlob, toBlob, { exec = execFileSync } = {}) {
+  if (!isSha(toBlob) || (fromBlob !== null && !isSha(fromBlob))) return null;
+  if (fromBlob === null) {
+    const text = String(exec('git', ['cat-file', 'blob', '--end-of-options', toBlob], {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 20_000, maxBuffer: 16 * 1024 * 1024,
+    }) || '');
+    if (text.includes('\0')) return null; // binary — never reasoned about line by line
+    const lines = text.length ? text.split('\n').length - (text.endsWith('\n') ? 1 : 0) : 0;
+    // An empty added file is a zero-width change at line 0, so any content `main` put in it clashes.
+    return [{ oldStart: 0, oldCount: 0, newStart: lines ? 1 : 0, newCount: lines }];
+  }
+  const out = exec('git', ['diff', '-U0', '--no-color', '--no-ext-diff', '--no-textconv', '--end-of-options', fromBlob, toBlob], {
+    encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 20_000, maxBuffer: 16 * 1024 * 1024,
+  });
+  return parseUnifiedHunks(out);
 }
 
 /**
@@ -472,20 +503,25 @@ export function defaultReadEntryAt(ref, file, { exec = execFileSync } = {}) {
  *   - `A`/`M`: the first commit (most-recent-first, capped at {@link ALREADY_LANDED_LOG_WINDOW}) whose entry for
  *     the path has the SAME blob AND mode the PR's head has. Robust to a rebase (blob identity ignores graph
  *     shape) and to later refinement on `main` (the match can sit anywhere in the window, not just at the tip).
- *     `main`'s tip must still hold the path and must differ from the PR's base version — a carry that `main`
- *     later reverted is not delivery. The log is not `--first-parent`, so a side-branch commit merged into
- *     `main` can be the match (git's default history simplification already drops side branches whose net
- *     change to the path is zero).
- *   - `D`: the path must be absent from `mainRef`'s tip, and the deleting commit must sit in the window.
+ *     `main`'s tip must still CARRY the change: same mode, and either the PR's exact blob or a later edit that
+ *     left every line the PR wrote untouched (`we:scripts/lib/already-landed-content.mjs#tipPreservesChange`).
+ *     A carry that `main` later reverted, or whose PR lines `main` moved on, is not delivery. The log is not
+ *     `--first-parent`, so a side-branch commit merged into `main` can be the match (git's default history
+ *     simplification already drops side branches whose net change to the path is zero).
+ *   - `D`: the path must be absent from `mainRef`'s tip — a SUCCESSFUL read that finds nothing, never a failed
+ *     one — and the deleting commit must sit in the window.
  *   - anything else (`T`ype change, unmerged, unknown): unsupported → `null`, never a guess.
- * Bounded below by the PR's own merge-base: see `we:scripts/lib/already-landed-content.mjs`'s header for why a
- * match that predates it (a deliberate restoration) is never delivery.
+ * Any failed git read makes the whole answer `null`. Bounded below by the PR's own merge-base: see
+ * `we:scripts/lib/already-landed-content.mjs`'s header for why a match that predates it (a deliberate
+ * restoration) is never delivery.
  * @param {{status:string, path:string, dstMode:string, dstBlob:string}} change
- * @param {{base:string, mainRef:string, exec?:Function, windowLimit?:number, readEntryAt?:Function}} o
+ * @param {{base:string, mainRef:string, exec?:Function, windowLimit?:number, readEntryAt?:Function,
+ *   readBlobHunks?:Function}} o
  * @returns {string|null}
  */
 export function defaultFindMatchingMainCommit(change, {
   base, mainRef, exec = execFileSync, windowLimit = ALREADY_LANDED_LOG_WINDOW, readEntryAt = defaultReadEntryAt,
+  readBlobHunks = defaultReadBlobHunks,
 } = {}) {
   const path = change?.path;
   if (!path || !isSha(base) || !mainRef) return null;
@@ -502,12 +538,17 @@ export function defaultFindMatchingMainCommit(change, {
     }
     if (change.status !== 'A' && change.status !== 'M') return null;
     if (!change.dstBlob || !change.dstMode) return null;
-    // A match inside the window is not enough if `main` later UNDID it (a revert back to base, or deleting an
-    // added file): main's tip must still hold the path, and not the PR's own base version of it.
+    // A match inside the window is not enough if `main` later UNDID it — wholly (a revert, deleting an added
+    // file) or in part (an edit to a line the PR wrote): main's tip must still carry the PR's change.
     const tip = readEntryAt(mainRef, path, { exec });
-    if (!tip) return null;
-    const atBase = readEntryAt(base, path, { exec });
-    if (atBase && atBase.blob === tip.blob && atBase.mode === tip.mode) return null;
+    if (!tip || tip.mode !== change.dstMode) return null;
+    if (tip.blob !== change.dstBlob) {
+      const atBase = change.status === 'M' ? readEntryAt(base, path, { exec }) : null;
+      if (change.status === 'M' && !atBase) return null;
+      const prHunks = readBlobHunks(atBase ? atBase.blob : null, change.dstBlob, { exec });
+      const mainHunks = readBlobHunks(change.dstBlob, tip.blob, { exec });
+      if (!tipPreservesChange(prHunks, mainHunks)) return null;
+    }
     for (const c of logWindow([])) {
       const e = readEntryAt(c, path, { exec });
       if (e && e.blob === change.dstBlob && e.mode === change.dstMode) return c;
