@@ -295,6 +295,17 @@ export function computeWallMs(lines) {
   return min !== null && max !== null && max >= min ? max - min : null;
 }
 
+/** The earliest parseable timestamp (epoch ms) — where {@link computeWallMs}'s span starts on the absolute
+ *  timeline, so {@link computeTimeShares} can locate the lead-in / trailing gaps around tool calls. */
+export function computeWallStartMs(lines) {
+  let min = null;
+  for (const line of Array.isArray(lines) ? lines : []) {
+    const ts = Date.parse(line?.timestamp ?? '');
+    if (Number.isFinite(ts) && (min === null || ts < min)) min = ts;
+  }
+  return min;
+}
+
 /**
  * Every `tool_use`/`tool_result` pair, joined by `tool_use_id`. A `tool_use` with no matching result (the
  * session is still running, or the transcript was truncated) is still reported, with `endTs`/`durationMs: null`
@@ -371,10 +382,13 @@ export function classifyToolCall(name, input) {
  * overlapping parallel tool calls each contribute their own full duration to their own category (so category
  * totals can sum to slightly over 100% of wall time when calls ran in parallel) — documented here rather than
  * built out into a true interval union, which slice 1 does not need.
+ * `wallStartMs` (from {@link computeWallStartMs}) anchors the wall span on the absolute timeline so the lead-in
+ * (before the first tool call) and trailing (after the last tool result) gaps are counted too — invariant:
+ * busy union + reasoningMs + idleMs === wallMs. Without it the earliest tool/turn timestamp is used as the start.
  * @returns {{testsMs:number, ghMs:number, gitMs:number, editsMs:number, opsMs:number, otherMs:number,
  *   reasoningMs:number, idleMs:number, shares:Record<string, number|null>}}
  */
-export function computeTimeShares(events, turns, wallMs) {
+export function computeTimeShares(events, turns, wallMs, wallStartMs = null) {
   const byCategory = { 'tests-gates': 0, gh: 0, git: 0, edits: 0, 'platform-ops': 0, other: 0 };
   const known = (Array.isArray(events) ? events : []).filter((e) => typeof e.durationMs === 'number');
   for (const e of known) byCategory[e.category] = (byCategory[e.category] ?? 0) + e.durationMs;
@@ -397,18 +411,26 @@ export function computeTimeShares(events, turns, wallMs) {
   // marks the WHOLE gap as reasoning; otherwise idle. Turns are cheap (usually few) so a linear scan is fine.
   let reasoningMs = 0;
   let idleMs = 0;
+  const realTurns = (Array.isArray(turns) ? turns : []).filter((t) => t.ts !== null);
   if (leftoverMs !== null) {
     const gapBounds = [];
-    let cursor = null;
-    for (const [s, e] of merged) {
-      if (cursor !== null && s > cursor) gapBounds.push([cursor, s]);
-      cursor = cursor === null ? e : Math.max(cursor, e);
+    if (merged.length > 0) {
+      // Anchor the wall span: prefer the caller's absolute start; else the earliest turn/tool timestamp we have.
+      const start = Number.isFinite(wallStartMs)
+        ? wallStartMs
+        : realTurns.reduce((m, t) => Math.min(m, t.ts), merged[0][0]);
+      const end = start + wallMs;
+      let cursor = start;
+      for (const [s, e] of merged) {
+        if (s > cursor) gapBounds.push([cursor, s]);
+        cursor = Math.max(cursor, e);
+      }
+      if (end > cursor) gapBounds.push([cursor, end]);
     }
     // No busy intervals at all → the whole wall span is one gap (nothing to bound it with beyond wallMs itself,
     // which the caller already has — we simply can't locate it on the absolute timeline, so treat it as one
     // gap covering everything and let the thinkingTokens check below decide reasoning vs idle for all of it).
     if (merged.length === 0 && typeof wallMs === 'number') gapBounds.push([null, null]);
-    const realTurns = (Array.isArray(turns) ? turns : []).filter((t) => t.ts !== null);
     for (const [gs, ge] of gapBounds) {
       const span = gs === null ? leftoverMs : Math.max(0, ge - gs);
       const hasThinking = gs === null
@@ -513,6 +535,31 @@ export function computeCostUsd(tokenSums, model) {
     { cacheTier: '1h' },
   );
   return cost5m + cost1h;
+}
+
+/**
+ * USD for a run's turns, each priced at ITS OWN model's rate (a mixed-model session is never priced wholesale at
+ * the dominant model). Usage on a turn whose model has no rate is never guessed: it is counted in
+ * `unpricedTokens`, `costUsdPartial` says the priced sum is a lower bound, and `costUsd` is `null` when nothing
+ * at all could be priced (never a misleading 0).
+ * @returns {{costUsd:number|null, costUsdPartial:boolean, unpricedTokens:number}}
+ */
+export function computeTurnsCost(turns) {
+  const byModel = new Map();
+  for (const t of Array.isArray(turns) ? turns : []) {
+    const key = t.model ?? null;
+    if (!byModel.has(key)) byModel.set(key, []);
+    byModel.get(key).push(t);
+  }
+  let costUsd = null;
+  let unpricedTokens = 0;
+  for (const [model, group] of byModel) {
+    const sums = sumTokens(group);
+    const cost = computeCostUsd(sums, model);
+    if (cost === null) unpricedTokens += sums.in + sums.out + sums.cacheRead + sums.cacheWrite5m + sums.cacheWrite1h;
+    else costUsd = (costUsd ?? 0) + cost;
+  }
+  return { costUsd, costUsdPartial: costUsd !== null && unpricedTokens > 0, unpricedTokens };
 }
 
 /** Of every input token this run needed (fresh + served-from-cache), what share was served from cache —
@@ -768,14 +815,14 @@ export function rateTranscript(lines, {
   const turns = extractTurns(lines);
   const events = pairToolEvents(lines);
   const wallMs = computeWallMs(lines);
-  const time = computeTimeShares(events, turns, wallMs);
+  const time = computeTimeShares(events, turns, wallMs, computeWallStartMs(lines));
   const guardBlocks = countGuardBlocks(events);
   const errors = countErrors(events);
   const repeatedCalls = countRepeatedCalls(events);
   const testReruns = countTestReruns(events);
   const tokenSums = sumTokens(turns);
   const model = dominantModel(turns);
-  const costUsd = computeCostUsd(tokenSums, model);
+  const { costUsd, costUsdPartial, unpricedTokens } = computeTurnsCost(turns);
   const cacheHitRatio = computeCacheHitRatio(tokenSums);
   const resolvedRawOutcome = rawOutcome ?? outcomeFromTranscriptEvents(events);
   const outcome = classifyOutcome(resolvedRawOutcome);
@@ -788,7 +835,7 @@ export function rateTranscript(lines, {
     otherMs: time.otherMs, reasoningMs: time.reasoningMs, idleMs: time.idleMs, shares: time.shares,
     guardBlocks, errors, repeatedCalls, testReruns,
     outcome, rawOutcome: resolvedRawOutcome ?? null,
-    tokens, costUsd, cacheHitRatio, grade,
+    tokens, costUsd, costUsdPartial, unpricedTokens, cacheHitRatio, grade,
     dataQuality: 'transcript',
   };
   rating.waste = classifyRunWaste(events, rating);
@@ -960,6 +1007,13 @@ export function rateReviewJobLog(logPath, io = {}) {
     try { summary = JSON.parse(lines[i]); break; } catch { /* keep looking backwards */ }
   }
   if (!summary) return { ok: false, reason: 'no-summary-line', logPath };
+  // A job that never ran a review loop (refused as a duplicate, failed to acquire a lane) did no review work —
+  // skip it rather than append a degenerate, trivially-A row to the scorecard. A loop that CRASHED after taking
+  // a lane (loopMs null, but lanePath set) did cost real work, so it is still rated. `review-job.mjs` always
+  // writes `timings.loopMs` (null until the loop runs), so only an explicit null counts as "no loop ran".
+  if (summary.refused === true || (summary.timings?.loopMs === null && !summary.lanePath)) {
+    return { ok: false, reason: 'no-review-loop-ran', logPath, outcome: summary.outcome ?? null };
+  }
   const rating = rateReviewJobTimings({ pr: summary.pr ?? null, outcome: summary.outcome ?? null, timings: summary.timings ?? {} });
   const telemetry = readReviewRunTelemetry(summary.runId, io);
   if (telemetry) {
@@ -982,11 +1036,11 @@ export function rateReviewJobLog(logPath, io = {}) {
  * @param {{exec?: typeof execFileSync}} [io]
  * @returns {boolean|null}
  */
-export function resolvePrBouncedViaGh(item, { exec = execFileSync } = {}) {
+export function resolvePrBouncedViaGh(item, { exec = execFileSync, repo = DEFAULT_REPO_SLUG } = {}) {
   if (!item) return null;
   let out;
   try {
-    out = exec('gh', ['pr', 'list', '--search', `head:lane/${item}-`, '--state', 'all', '--json', 'number,labels', '--limit', '5'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    out = exec('gh', ['pr', 'list', '--repo', repo, '--search', `head:lane/${item}-`, '--state', 'all', '--json', 'number,labels', '--limit', '5'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
   } catch { return null; }
   let list;
   try { list = JSON.parse(out); } catch { return null; }
@@ -1037,6 +1091,7 @@ export function toScorecardRow(rating, { provider = 'anthropic' } = {}) {
     testReruns: rating.testReruns ?? 0,
     tokens: rating.tokens ?? null,
     costUsd: rating.costUsd ?? null,
+    unpricedTokens: rating.unpricedTokens ?? 0,
     cacheHitRatio: rating.cacheHitRatio ?? null,
     shares: rating.shares ?? null,
     dataQuality: rating.dataQuality ?? 'transcript',
@@ -1124,23 +1179,49 @@ export function rollupByDemand(rows, { sizeForItem = () => null } = {}) {
     const g = groups.get(key);
     g.sessions += 1;
     const phase = phaseForKind(row.dispatchKind ?? row.kind);
-    if (!g.byPhase[phase]) g.byPhase[phase] = { sessions: 0, tokensIn: 0, tokensOut: 0, tokensCacheRead: 0, tokensCacheWrite: 0, costUsd: 0, unknownCost: false };
+    if (!g.byPhase[phase]) {
+      g.byPhase[phase] = {
+        sessions: 0, tokensIn: 0, tokensOut: 0, tokensCacheRead: 0, tokensCacheWrite: 0, costUsd: 0,
+        knownTokenRows: 0, knownCostRows: 0, unknownTokens: false, unknownCost: false,
+      };
+    }
     const p = g.byPhase[phase];
     p.sessions += 1;
     const t = row.tokens;
-    if (t) { p.tokensIn += t.in ?? 0; p.tokensOut += t.out ?? 0; p.tokensCacheRead += t.cacheRead ?? 0; p.tokensCacheWrite += t.cacheWrite ?? 0; }
-    if (typeof row.costUsd === 'number') p.costUsd += row.costUsd; else p.unknownCost = true;
+    if (t) {
+      p.tokensIn += t.in ?? 0; p.tokensOut += t.out ?? 0; p.tokensCacheRead += t.cacheRead ?? 0; p.tokensCacheWrite += t.cacheWrite ?? 0;
+      p.knownTokenRows += 1;
+    } else p.unknownTokens = true;
+    if (typeof row.costUsd === 'number') { p.costUsd += row.costUsd; p.knownCostRows += 1; } else p.unknownCost = true;
+    // A row priced only in part (some usage on an unpriced model) makes this phase's cost a lower bound too.
+    if (row.costUsdPartial === true) p.unknownCost = true;
   }
   return [...groups.values()].map((g) => {
-    const totalTokens = Object.values(g.byPhase).reduce((s, p) => s + p.tokensIn + p.tokensOut + p.tokensCacheRead + p.tokensCacheWrite, 0);
-    const totalCostUsd = Object.values(g.byPhase).reduce((s, p) => s + p.costUsd, 0);
+    const phases = Object.values(g.byPhase);
+    // Unknown is never summed as zero: a total is `null` when NO row knew it, and `*Partial` when some didn't.
+    const anyTokens = phases.some((p) => p.knownTokenRows > 0);
+    const anyCost = phases.some((p) => p.knownCostRows > 0);
+    const totalTokens = anyTokens ? phases.reduce((s, p) => s + p.tokensIn + p.tokensOut + p.tokensCacheRead + p.tokensCacheWrite, 0) : null;
+    const totalCostUsd = anyCost ? phases.reduce((s, p) => s + p.costUsd, 0) : null;
+    const tokensPartial = anyTokens && phases.some((p) => p.unknownTokens);
+    const costPartial = anyCost && phases.some((p) => p.unknownCost);
     const size = g.item ? sizeForItem(g.item) : (g.pr ? sizeForItem(g.pr) : null);
+    const hasSize = Number.isFinite(size) && size > 0;
     return {
-      ...g, totalTokens, totalCostUsd,
-      size: Number.isFinite(size) && size > 0 ? size : null,
-      tokensPerStoryPoint: Number.isFinite(size) && size > 0 ? totalTokens / size : null,
+      ...g, totalTokens, totalCostUsd, tokensPartial, costPartial,
+      size: hasSize ? size : null,
+      tokensPerStoryPoint: hasSize && totalTokens !== null ? totalTokens / size : null,
     };
   });
+}
+
+/** One report line for a {@link rollupByDemand} group — an unknown total prints `unknown`, a partial one prints
+ *  as a `≥` lower bound marked `(partial)`, so an unmeasured review never reads as free. */
+export function formatDemandLine(d) {
+  const tok = d.totalTokens === null ? 'unknown tok' : `${d.tokensPartial ? '≥' : ''}${d.totalTokens} tok${d.tokensPartial ? ' (partial)' : ''}`;
+  const usd = d.totalCostUsd === null ? '$unknown' : `${d.costPartial ? '≥' : ''}$${d.totalCostUsd.toFixed(2)}${d.costPartial ? ' (partial)' : ''}`;
+  const sp = d.tokensPerStoryPoint !== null ? `${d.tokensPartial ? '≥' : ''}${d.tokensPerStoryPoint.toFixed(0)}` : 'n/a';
+  return `${d.key}: ${tok}, ${usd}, ${d.sessions} session(s), tokens/pt=${sp}`;
 }
 
 /** Default `sizeForItem` — reads `backlog/<num>-*.md`'s `size:` frontmatter field via the canonical reader
@@ -1184,7 +1265,14 @@ export function flagWaste(rows) {
     byPrHead.set(key, (byPrHead.get(key) ?? []).concat(row));
   }
   for (const [key, group] of byPrHead) {
-    if (group.length > 1) waste.push({ type: 'repeat-review-same-head', key, count: group.length, costUsd: group.reduce((s, r) => s + (r.costUsd ?? 0), 0) });
+    if (group.length > 1) {
+      const priced = group.filter((r) => typeof r.costUsd === 'number');
+      waste.push({
+        type: 'repeat-review-same-head', key, count: group.length,
+        costUsd: priced.length ? priced.reduce((s, r) => s + r.costUsd, 0) : null,
+        costPartial: priced.length > 0 && group.some((r) => typeof r.costUsd !== 'number' || r.costUsdPartial === true),
+      });
+    }
   }
   return waste;
 }
@@ -1550,10 +1638,7 @@ async function main() {
   const c = report.coverage;
   process.stdout.write(`  coverage: ${c.totalTokens} tok observed fleet-wide — attributed ${c.attributed.pct?.toFixed(1) ?? 'n/a'}%, orchestration-overhead ${c.orchestrationOverhead.pct?.toFixed(1) ?? 'n/a'}%, operator/interactive ${c.operatorInteractive.pct?.toFixed(1) ?? 'n/a'}%, non-claude-judge ${c.nonClaudeJudge.pct?.toFixed(1) ?? 'n/a'}% (${c.unattributedFileCount} file(s) unreadable)\n`);
   process.stdout.write('  per-demand tokens:\n');
-  for (const d of report.demand) {
-    const sp = d.tokensPerStoryPoint !== null ? d.tokensPerStoryPoint.toFixed(0) : 'n/a';
-    process.stdout.write(`    ${d.key}: ${d.totalTokens} tok, $${d.totalCostUsd.toFixed(2)}, ${d.sessions} session(s), tokens/pt=${sp}\n`);
-  }
+  for (const d of report.demand) process.stdout.write(`    ${formatDemandLine(d)}\n`);
 }
 
 const isMain = (() => {

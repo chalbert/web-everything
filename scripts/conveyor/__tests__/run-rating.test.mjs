@@ -6,14 +6,14 @@ import { tmpdir } from 'node:os';
 import { scrubReasons } from '../../lib/secret-scrub.mjs';
 import {
   RUBRIC_VERSION, GUARD_BLOCKS_TARGET, BASELINE_WALL_MS_BY_KIND, REFERENCE_STORY_SIZE,
-  isSyntheticModel, extractTurns, sessionNameFromLines, computeWallMs, pairToolEvents,
+  isSyntheticModel, extractTurns, sessionNameFromLines, computeWallMs, computeWallStartMs, pairToolEvents,
   classifyToolCall, computeTimeShares, countGuardBlocks, countErrors, countRepeatedCalls, countTestReruns,
   sumTokens, dominantModel, computeCostUsd, computeCacheHitRatio,
   classifyOutcome, gradeRun, worseGrade, baselineWallMs, outcomeFromTranscriptEvents,
   gradeReviewJob, resolveReviewGrade, classifyRunWaste, topWasteCauses,
   rateTranscript, rateReviewJobTimings,
   findTranscriptPath, readTranscriptLines, rateSession, rateReviewJobLog,
-  toScorecardRow, rollupKey, phaseForKind, rollupByDemand, flagWaste,
+  toScorecardRow, rollupKey, phaseForKind, rollupByDemand, flagWaste, formatDemandLine,
   scanClaudeProjectsCoverage, scanReviewJurorUsage, scanNonClaudeJudgeTranscripts, buildCoverageReport,
   orchestratorProjectDirName,
 } from '../run-rating.mjs';
@@ -783,5 +783,136 @@ describe('buildCoverageReport', () => {
     const report = buildCoverageReport({ sinceMs: Date.now() }); // an impossible "since" — every real bucket empty
     expect(report.totalTokens).toBe(0);
     expect(report.attributed.pct).toBeNull(); // 0/0 — never a fabricated percentage
+  });
+});
+
+// ── review:changes round 1 on PR #2811 — regression tests for the reviewer's findings ─────────────────────────────
+
+describe('computeTimeShares — wall-time accounting invariant', () => {
+  const sumAll = (t) => t.testsMs + t.ghMs + t.gitMs + t.editsMs + t.opsMs + t.otherMs + t.reasoningMs + t.idleMs;
+  it('accounts for leading and trailing gaps around tool calls (categories sum to wallMs)', () => {
+    const lines = fixtureTranscript();
+    const time = computeTimeShares(pairToolEvents(lines), extractTurns(lines), computeWallMs(lines), computeWallStartMs(lines));
+    expect(sumAll(time)).toBe(10 * 60_000);
+    expect(time.reasoningMs).toBe(1 * 60_000); // lead-in: the thinking turn at t0
+    expect(time.idleMs).toBe(5 * 60_000); // trailing: only a synthetic turn after the last tool result
+  });
+  it('rateTranscript itself (the real call path) reports reasoning + idle for the lead-in / trailing gaps', () => {
+    const rating = rateTranscript(fixtureTranscript(), { kind: 'fix' });
+    expect(sumAll(rating)).toBe(rating.wallMs);
+  });
+  it('busy union + reasoning + idle equals wallMs even when tool calls overlap', () => {
+    const lines = [
+      assistantLine({ ts: 0, usage: usage({ thinking: 10 }), content: [toolUse('a', 'Bash', { command: 'echo a' })] }),
+      assistantLine({ ts: 1000, usage: usage(), content: [toolUse('b', 'Bash', { command: 'echo b' })] }),
+      userLine({ ts: 3000, content: [toolResult('a')] }),
+      userLine({ ts: 4000, content: [toolResult('b')] }),
+      assistantLine({ ts: 9000, usage: usage() }),
+    ];
+    const time = computeTimeShares(pairToolEvents(lines), extractTurns(lines), computeWallMs(lines), computeWallStartMs(lines));
+    const busyUnion = 4000; // [0,3000] ∪ [1000,4000]
+    expect(busyUnion + time.reasoningMs + time.idleMs).toBe(9000);
+    expect(time.idleMs).toBe(5000);
+  });
+});
+
+describe('rateTranscript — mixed-model pricing', () => {
+  it('prices mixed-model turns separately (cost = sum of per-model pricing), not all at the dominant model', () => {
+    const lines = [
+      assistantLine({ ts: 0, model: 'claude-sonnet-5', usage: usage({ inTok: 1000, outTok: 1000 }) }),
+      assistantLine({ ts: 1000, model: 'claude-sonnet-5', usage: usage({ inTok: 1000, outTok: 1000 }) }),
+      assistantLine({ ts: 2000, model: 'claude-opus-5-5', usage: usage({ inTok: 1_000_000, outTok: 1_000_000 }) }),
+    ];
+    const rating = rateTranscript(lines, { kind: 'fix' });
+    const sonnet = computeCostUsd(sumTokens(extractTurns(lines.slice(0, 2))), 'claude-sonnet-5');
+    const opus = computeCostUsd(sumTokens(extractTurns(lines.slice(2))), 'claude-opus-5-5');
+    expect(rating.costUsd).toBeCloseTo(sonnet + opus, 6);
+    expect(rating.costUsdPartial).toBe(false);
+  });
+  it('preserves unknown-priced usage explicitly instead of silently pricing it at the dominant model', () => {
+    const lines = [
+      assistantLine({ ts: 0, model: 'claude-sonnet-5', usage: usage({ inTok: 1000 }) }),
+      assistantLine({ ts: 1000, model: 'claude-sonnet-5', usage: usage({ inTok: 1000 }) }),
+      assistantLine({ ts: 2000, model: 'some-unknown-model', usage: usage({ inTok: 500, outTok: 0 }) }),
+    ];
+    const rating = rateTranscript(lines, { kind: 'fix' });
+    expect(rating.costUsdPartial).toBe(true);
+    expect(rating.unpricedTokens).toBe(500);
+    expect(rating.costUsd).toBeCloseTo(computeCostUsd(sumTokens(extractTurns(lines.slice(0, 2))), 'claude-sonnet-5'), 6);
+    expect(toScorecardRow(rating)).toMatchObject({ costUsdPartial: true, unpricedTokens: 500 });
+  });
+  it('is null (never 0) when no turn could be priced at all', () => {
+    const lines = [assistantLine({ ts: 0, model: 'some-unknown-model', usage: usage({ inTok: 10 }) })];
+    expect(rateTranscript(lines, { kind: 'fix' }).costUsd).toBeNull();
+  });
+});
+
+describe('rollupByDemand / report — unknown vs partial totals', () => {
+  it('reports an all-unknown demand as null totals, never an apparent zero', () => {
+    const rows = [{ pr: 7, dispatchKind: 'review', tokens: null, costUsd: null, dataQuality: 'job-log-only' }];
+    const [d] = rollupByDemand(rows);
+    expect(d.totalTokens).toBeNull();
+    expect(d.totalCostUsd).toBeNull();
+    expect(d.tokensPerStoryPoint).toBeNull();
+    const line = formatDemandLine(d);
+    expect(line).not.toMatch(/\b0 tok\b/);
+    expect(line).not.toMatch(/\$0\.00/);
+    expect(line).toMatch(/unknown tok/);
+  });
+  it('marks a partially-known demand as partial for both tokens and cost', () => {
+    const rows = [
+      { pr: 8, dispatchKind: 'fix', tokens: { in: 100, out: 0, cacheRead: 0, cacheWrite: 0 }, costUsd: 0.5 },
+      { pr: 8, dispatchKind: 'review', tokens: null, costUsd: null, dataQuality: 'job-log-only' },
+    ];
+    const [d] = rollupByDemand(rows);
+    expect(d).toMatchObject({ totalTokens: 100, tokensPartial: true, totalCostUsd: 0.5, costPartial: true });
+    expect(formatDemandLine(d)).toMatch(/≥100 tok \(partial\).*≥\$0\.50 \(partial\)/);
+  });
+  it('treats a row with costUsdPartial as a partial cost for its demand', () => {
+    const rows = [{ pr: 9, dispatchKind: 'fix', tokens: { in: 1, out: 0, cacheRead: 0, cacheWrite: 0 }, costUsd: 0.1, costUsdPartial: true }];
+    const [d] = rollupByDemand(rows);
+    expect(d).toMatchObject({ tokensPartial: false, costPartial: true });
+  });
+  it('a fully-known demand is not flagged partial', () => {
+    const rows = [{ pr: 10, dispatchKind: 'fix', tokens: { in: 1, out: 0, cacheRead: 0, cacheWrite: 0 }, costUsd: 0.1 }];
+    const [d] = rollupByDemand(rows);
+    expect(d).toMatchObject({ tokensPartial: false, costPartial: false });
+    expect(formatDemandLine(d)).toMatch(/: 1 tok, \$0\.10,/);
+  });
+});
+
+describe('rateReviewJobLog — a job that ran no review loop', () => {
+  it('skips a refused-live-job summary (no review ran) instead of grading it A', () => {
+    const root = tmp();
+    const file = join(root, 'review-2811.log');
+    writeFileSync(file, `${JSON.stringify({ pr: 2811, sessionSlug: 'review-2811', outcome: 'refused-live-job', refused: true, timings: { acquireMs: null, loopMs: null, totalMs: 12 } })}\n`);
+    expect(rateReviewJobLog(file)).toMatchObject({ ok: false, reason: 'no-review-loop-ran' });
+  });
+  it('skips any summary whose loopMs is null (e.g. an acquire failure) the same way', () => {
+    const root = tmp();
+    const file = join(root, 'review-2812.log');
+    writeFileSync(file, `${JSON.stringify({ pr: 2812, sessionSlug: 'review-2812', outcome: 'acquire-failed', timings: { acquireMs: 40, loopMs: null, totalMs: 50 } })}\n`);
+    expect(rateReviewJobLog(file)).toMatchObject({ ok: false, reason: 'no-review-loop-ran' });
+  });
+  it('still rates a loop that crashed after taking a lane (real work was spent)', () => {
+    const root = tmp();
+    const file = join(root, 'review-2813.log');
+    writeFileSync(file, `${JSON.stringify({ pr: 2813, sessionSlug: 'review-2813', lanePath: '/lanes/lane-3', outcome: 'blocked-on-infra', timings: { acquireMs: 40, loopMs: null, totalMs: 90_000 } })}\n`);
+    expect(rateReviewJobLog(file)).toMatchObject({ ok: true, sessionName: 'review-2813', wallMs: 90_000 });
+  });
+});
+
+describe('flagWaste — repeat-review-same-head cost', () => {
+  it('reports an all-unknown repeat-review cost as null and a mixed one as partial, never an apparent $0', () => {
+    const unknown = flagWaste([
+      { dispatchKind: 'review', pr: 1, headSha: 'a', costUsd: null },
+      { dispatchKind: 'review', pr: 1, headSha: 'a', costUsd: null },
+    ]).find((w) => w.type === 'repeat-review-same-head');
+    expect(unknown).toMatchObject({ costUsd: null, costPartial: false });
+    const mixed = flagWaste([
+      { dispatchKind: 'review', pr: 2, headSha: 'b', costUsd: 0.4 },
+      { dispatchKind: 'review', pr: 2, headSha: 'b', costUsd: null },
+    ]).find((w) => w.type === 'repeat-review-same-head');
+    expect(mixed).toMatchObject({ costUsd: 0.4, costPartial: true });
   });
 });

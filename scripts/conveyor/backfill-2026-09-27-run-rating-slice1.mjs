@@ -77,12 +77,16 @@ function main() {
   const sinceMs = Date.now() - hours * 3600_000;
   const workspaceRoot = join(defaultProjectsRoot(), '..', '..', 'workspace');
 
-  const done = new Set(dryRun ? [] : alreadyScoredHandles());
+  // Reading the store is read-only, so a --dry-run checks it too — its preview must report what is already covered.
+  const done = alreadyScoredHandles();
   const grades = { A: 0, B: 0, C: 0, D: 0 };
   let scored = 0;
   let skippedAlready = 0;
   let skippedNoEvidence = 0;
+  let skippedNoReviewRan = 0;
   let costUsdKnown = 0;
+  let costPartialRows = 0;
+  let unpricedTokens = 0;
   let tokensKnown = 0;
 
   for (const path of listRecentTranscripts(sinceMs)) {
@@ -109,13 +113,18 @@ function main() {
     scored += 1;
     grades[rating.grade] = (grades[rating.grade] ?? 0) + 1;
     if (typeof rating.costUsd === 'number') costUsdKnown += rating.costUsd;
+    if (rating.costUsdPartial) costPartialRows += 1;
+    unpricedTokens += rating.unpricedTokens ?? 0;
     if (rating.tokens) tokensKnown += rating.tokens.in + rating.tokens.out + rating.tokens.cacheRead + rating.tokens.cacheWrite;
     done.add(name);
   }
 
   for (const logPath of listRecentReviewLogs(sinceMs, workspaceRoot)) {
     const rating = rateReviewJobLog(logPath);
-    if (!rating.ok) { skippedNoEvidence++; continue; }
+    if (!rating.ok) {
+      if (rating.reason === 'no-review-loop-ran') skippedNoReviewRan++; else skippedNoEvidence++;
+      continue;
+    }
     const handle = rating.sessionName;
     if (handle && done.has(handle)) { skippedAlready++; continue; }
     if (!dryRun) appendRunRating(rating);
@@ -126,8 +135,9 @@ function main() {
 
   const summary = {
     hours, sinceIso: new Date(sinceMs).toISOString(), dryRun,
-    scored, skippedAlreadyScored: skippedAlready, skippedNoEvidence,
-    grades, costUsdKnown: Number(costUsdKnown.toFixed(4)), tokensKnown,
+    scored, skippedAlreadyScored: skippedAlready, skippedNoEvidence, skippedNoReviewRan,
+    // costUsdKnown is a lower bound whenever costPartialRows > 0 (unpricedTokens had no model rate).
+    grades, costUsdKnown: Number(costUsdKnown.toFixed(4)), costPartialRows, unpricedTokens, tokensKnown,
   };
   process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
 }
