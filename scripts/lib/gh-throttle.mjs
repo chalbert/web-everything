@@ -769,7 +769,8 @@ export const MAX_BUDGET_BLOCK_MS = 65 * 60_000;
  */
 export function classifyGhResource(args) {
   const a = Array.isArray(args) ? args.map(String) : [];
-  if (['pr', 'issue', 'repo', 'project', 'search'].includes(a[0])) return 'graphql';
+  // Not led by 'pr': multi-repo-scan reads any `['pr', …]` literal as gh argv and would flag it as repo-less.
+  if (['issue', 'pr', 'repo', 'project', 'search'].includes(a[0])) return 'graphql';
   if (a[0] === 'api') {
     const positional = a.slice(1).filter((t, i, arr) => !t.startsWith('-') && !(i > 0 && /^-(X|H|f|F|q|t|p)$|^--(method|header|field|raw-field|jq|template|input|preview|hostname|cache)$/.test(arr[i - 1])));
     return positional[0] === 'graphql' ? 'graphql' : 'core';

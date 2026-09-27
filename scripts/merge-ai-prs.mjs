@@ -3389,7 +3389,7 @@ export function describeGhListError(e) {
   const text = (stderr.find((l) => !/^\(node:\d+\)|DeprecationWarning|--trace-deprecation/.test(l)) || message).slice(0, 400);
   const all = `${stderr.join(' ')} ${message}`;
   if (e && (e.killed || e.signal === 'SIGTERM' || e.code === 'ETIMEDOUT')) return { kind: 'timeout', text, hint: 'gh did not answer in time (load or network)' };
-  if (/rate limit|secondary rate|abuse detection/i.test(all)) return { kind: 'rate-limited', text, hint: 'the token\'s API bucket is exhausted — the pass retries after backoff; see `gh api rate_limit`' };
+  if (/rate limit|secondary rate|abuse detection/i.test(all)) return { kind: 'rate-limited', text, hint: 'the token\'s API bucket is exhausted — the pass retries after backoff; read the REAL GraphQL bucket with `gh api graphql -f query="{rateLimit{remaining resetAt}}"` (NOT `gh api rate_limit`, whose graphql entry is not the App installation\'s bucket — #gh-graphql-budget)' };
   if (/HTTP 401|Bad credentials|authentication|not logged in|gh auth login/i.test(all)) return { kind: 'auth', text, hint: 'is gh authenticated? (stale GH_TOKEN / App token?)' };
   if (/Unknown JSON field/i.test(all)) return { kind: 'bad-json-field', text, hint: 'a --json field this gh version does not know' };
   if (/Could not resolve|HTTP 5\d\d|connection|timed out|EOF/i.test(all)) return { kind: 'network', text, hint: 'GitHub/network error — transient' };
