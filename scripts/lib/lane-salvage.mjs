@@ -229,7 +229,7 @@ export function snapshotWorkTree(dir, { refs, branchRef }) {
  * a lane whose salvage did not verify. Does NOT remove worktrees or reset (see {@link removeLitterWorktrees}).
  * @returns {{stamp:string, outDir:string, bundle:(string|null), refs:string[], snapshots:object[], worktrees:object[]}}
  */
-export function salvageLane({ dir, lane, pool, branchRef, salvageRoot = resolveSalvageRoot(), now = new Date(), reason = '', meta = {} }) {
+export function salvageLane({ dir, lane, pool, branchRef, salvageRoot = resolveSalvageRoot(), now = new Date(), reason = '', meta = {}, includeLocalBranches = false }) {
   const stamp = salvageStamp(now);
   const outDir = join(salvageRoot, pool, stamp);
   mkdirSync(outDir, { recursive: true });
@@ -244,6 +244,21 @@ export function salvageLane({ dir, lane, pool, branchRef, salvageRoot = resolveS
   for (const s of snapshots) {
     if (s.aheadCount > 0) bundleRefs.push({ ref: s.refs.head, sha: s.headSha });
     if (s.refs.wip) bundleRefs.push({ ref: s.refs.wip, sha: s.wipSha });
+  }
+  // A clone about to be DELETED (not just reset) also carries every local branch / stash with commits no remote
+  // ref has — those die with the directory otherwise.
+  if (includeLocalBranches) {
+    const { head } = salvageRefNames({ lane, stamp });
+    const base = head.replace(/-head$/, '');
+    for (const line of git(dir, ['for-each-ref', '--format=%(objectname) %(refname)', 'refs/heads', 'refs/stash']).split('\n').filter(Boolean)) {
+      const [sha, ref] = line.split(' ');
+      let unique = 0;
+      try { unique = Number(git(dir, ['rev-list', '--count', sha, '--not', '--remotes']).trim()) || 0; } catch { unique = 0; }
+      if (!unique || bundleRefs.some((r) => r.sha === sha)) continue;
+      const salvRef = `${base}-ref-${ref.replace(/^refs\//, '').replace(/[^A-Za-z0-9._-]/g, '_')}`;
+      git(dir, ['update-ref', salvRef, sha]);
+      bundleRefs.push({ ref: salvRef, sha });
+    }
   }
   const prefix = join(outDir, `lane-${lane}`);
   let bundle = null;

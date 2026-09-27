@@ -49,8 +49,10 @@ const tryGit = (dir, args) => { try { return execFileSync('git', args, { cwd: di
 function newestMtime(path, isDir, isGit) {
   let m = lstatSync(path).mtimeMs;
   const bump = (p) => { try { m = Math.max(m, statSync(p).mtimeMs); } catch { /* absent */ } };
-  if (isDir && isGit) { bump(join(path, '.git', 'index')); bump(join(path, '.git', 'logs', 'HEAD')); }
-  if (isDir) { try { for (const c of readdirSync(path)) bump(join(path, c)); } catch { /* unreadable */ } }
+  // A read-only `git status` rewrites `.git/index` (and the `.git` dir's mtime), so neither counts as activity —
+  // only the HEAD reflog (a commit/checkout/reset) and the working tree's own top-level entries do.
+  if (isDir && isGit) { m = 0; bump(join(path, '.git', 'logs', 'HEAD')); }
+  if (isDir) { try { for (const c of readdirSync(path)) if (c !== '.git') bump(join(path, c)); } catch { /* unreadable */ } }
   return m;
 }
 
@@ -98,7 +100,7 @@ export function sweepPoolLeftovers({
           prs: [], changedFiles: [], refs: [], snapshots: [], landed: false, poolLeftover: name,
         });
       } else if (cls.action === 'salvage-then-delete') {
-        salvageLane({ dir: path, lane: name, pool, branchRef, salvageRoot, now: new Date(nowMs), reason: `stray clone in the pool dir (${name})` });
+        salvageLane({ dir: path, lane: name, pool, branchRef, salvageRoot, now: new Date(nowMs), reason: `stray clone in the pool dir (${name})`, includeLocalBranches: true });
       }
       rmSync(path, { recursive: true, force: true });
       row.done = true;

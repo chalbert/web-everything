@@ -114,6 +114,14 @@ describe('salvageLane (real git)', () => {
     expect(existsSync(join(lane, '.claude', 'worktrees', 'fix-2777'))).toBe(false);
   });
 
+  it('includeLocalBranches (a clone about to be deleted) also bundles a non-HEAD branch no remote has', () => {
+    git(lane, 'checkout', '-qb', 'side-work'); writeFileSync(join(lane, 's.txt'), 'side\n'); git(lane, 'add', 's.txt'); git(lane, 'commit', '-qm', 'side only');
+    git(lane, 'checkout', '-q', 'main');
+    const rec = salvageLane({ dir: lane, lane: 'stray', pool: 'p', branchRef: 'origin/main', salvageRoot, now: new Date('2026-09-27T02:00:00Z'), includeLocalBranches: true });
+    expect(rec.refs).toEqual(['refs/salvage/lane-stray-20260927-020000-ref-heads_side-work']);
+    expect(git(lane, 'bundle', 'list-heads', rec.bundle)).toMatch(/ref-heads_side-work/);
+  });
+
   it('a lane with nothing unique writes no bundle (nothing to lose)', () => {
     const rec = salvageLane({ dir: lane, lane: 5, pool: 'p', branchRef: 'origin/main', salvageRoot, now: new Date('2026-09-27T02:00:00Z') });
     expect(rec.bundle).toBeNull();
