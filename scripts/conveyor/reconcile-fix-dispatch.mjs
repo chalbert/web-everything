@@ -97,6 +97,7 @@ import { laneRefItemNum } from './lease-reaper.mjs';
 import {
   acquireFixDispatchClaim, releaseFixDispatchClaim, readFixDispatchClaim, fixDispatchClaimOwner,
 } from './fix-dispatch-claim.mjs';
+import { readLiveFixClaim, withAltBranchHint } from './fix-procedure.mjs';
 import { runReconcilePass, resolveLaneHead } from './reconcile-pass.mjs';
 import { readUnsupported, recordUnsupported } from './unsupported-repo.mjs';
 import { readPrsFromFile } from './open-pr-fetch.mjs';
@@ -268,6 +269,7 @@ export function planFixesFromReconcile(dispatchEntries, findItemFn, loadItems, r
       planned.push({
         itemNum: null, pr, laneRef: headRefName, scope: itemlessScope, scopeSource: 'pr-diff',
         isConflict: isConflictItemless, body: entry.body ?? null, headRefOid: entry.headRefOid ?? null,
+        ...(entry.altBranch ? { altBranch: entry.altBranch } : {}), // fix procedure — a saved repair to recover first.
       });
       continue;
     }
@@ -367,6 +369,8 @@ export function planFixesFromReconcile(dispatchEntries, findItemFn, loadItems, r
       // #xu2krte security review finding — needed by `tryResumeFix` to confirm a resume CANDIDATE actually
       // belongs to THIS pr before trusting it (see that function's own docblock).
       headRefOid: entry.headRefOid ?? null,
+      // fix procedure — the saved alt branch of a concurrent-author pause this PR re-armed from, if any.
+      ...(entry.altBranch ? { altBranch: entry.altBranch } : {}),
     });
   }
   return { planned, refusals };
@@ -860,6 +864,8 @@ export function dispatchFix(planned, {
   // and returns the `--settings` worktree patch). Before this, only dispatch-lane's sink applied it, so this
   // path's sessions hit Claude Code's "Call EnterWorktree first" guard on their first Edit.
   isolateSession = isolateDispatchSession,
+  // fix procedure — injectable live fix-claim read (`fix-procedure.mjs#readLiveFixClaim`); a test stubs it.
+  readFixClaim = ({ repo: r, pr }) => readLiveFixClaim({ repo: r, pr, ...(claimRoot ? { lockRoot: claimRoot } : {}) }),
 } = {}) {
   // #x33jgwt multi-repo slice 5 — no repo gate HERE any more (see {@link tryResumeFix}'s own docblock for why):
   // `runReconcileFixDispatch` already refused a repo whose profile lacks the `fix` capability before this ever
@@ -869,6 +875,16 @@ export function dispatchFix(planned, {
   // #x0jphk5 — see this function's own docblock: acquire BEFORE building anything, refuse loud (never throw)
   // when another dispatcher already holds this exact `(repo, kind, pr)` — `kind: 'fix'` explicit (dup-heal-
   // dispatch: `headSha` no longer part of the claim's identity, only carried as diagnostic `meta`).
+  // fix procedure (operator-approved 2026-09-27) — a live FIX CLAIM (`fix-procedure.mjs`) means another fixer
+  // owns this PR's repair right now; never spawn a second one. The planner already refuses `fix-claimed`; this
+  // is the dispatch-time re-check for a claim taken between the plan read and this spawn.
+  const fixClaim = readFixClaim({ repo, pr: planned.pr });
+  if (fixClaim) {
+    return {
+      held: true, reason: 'fix-claimed', heldBy: fixClaim.meta?.who ?? fixClaim.owner ?? null,
+      pr: planned.pr, itemNum: planned.itemNum, lane: planned.lane,
+    };
+  }
   const claim = acquireClaim({
     repo, pr: planned.pr, kind: 'fix', headSha: planned.headRefOid, owner: claimOwner, lockRoot: claimRoot,
   });
@@ -905,7 +921,8 @@ export function dispatchFix(planned, {
     const sessionCwd = ensureSessionCwd(sessionCwdFor(sessionId));
     const argv = buildAgentArgv({
       sessionId,
-      payload: { prompt: withSalvageHint(prompt, { cards: [planned.itemNum], prs: [planned.pr] }), sessionSlug },
+      // fix procedure — a re-armed concurrent-author pause hands the next fixer the saved alt branch to start from.
+      payload: { prompt: withAltBranchHint(withSalvageHint(prompt, { cards: [planned.itemNum], prs: [planned.pr] }), planned.altBranch), sessionSlug },
       // #3606 — see this function's own docblock: without this the fix agent reads a correctly-filled brief as an
       // unfilled template and self-aborts (3/3 live).
       systemPromptFile: DISPATCHED_AGENT_SYSTEM_PROMPT_FILE,
@@ -1293,7 +1310,7 @@ export function recordQueueCapRefusal({
  * we:scripts/conveyor/reconcile-fix-dispatch.mjs#planFixDispatchClaimStatus — #x0jphk5 READ-ONLY DRY RUN. Reads
  * the exact SAME plan {@link runReconcileFixDispatch} would dispatch against (reused, not re-derived), but
  * never spawns, resumes, acquires, or releases anything — for each planned `fix` entry it only asks
- * {@link ../conveyor/fix-dispatch-claim.mjs#readFixDispatchClaim} whether that PR's `(repo, pr, headRefOid)`
+ * {@link ../conveyor/fix-claim-store.mjs#readFixDispatchClaim} whether that PR's `(repo, pr, headRefOid)`
  * claim is currently free or already held, and by whom. This is the live introspection this item's own proof
  * needs (a `--dry-run` before/after showing a claim taken, then refused for a duplicate, with zero side
  * effects on the real system) and a genuine standing tool: an operator — or a future health-daemon check — can

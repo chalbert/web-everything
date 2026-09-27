@@ -43,11 +43,14 @@
  *       `repos/{o}/{r}`, `repos/{o}/{r}/pulls/{n}`, `repos/{o}/{r}/pulls/{n}/files`,
  *       `repos/{o}/{r}/issues/{n}/events`, `repos/{o}/{r}/issues/{n}/timeline`,
  *       `repos/{o}/{r}/issues/{n}/comments`, `repos/{o}/{r}/compare/{a}...{b}`,
- *       `repos/{o}/{r}/contents/{path}?ref={sha}`
+ *       `repos/{o}/{r}/contents/{path}?ref={sha}`,
+ *       `repos/{o}/{r}/commits/{sha}/check-runs` (only for an open PR's current head sha)
  *   - Fields produced with GitHub's real shape (camelCase for `--json`, snake_case for `api`'s REST JSON) —
  *     see `fake-gh.mjs`'s `buildPrGraphqlView` / `restEvent` / `listChangedFilesRest`.
  *
- * NOT SUPPORTED, ON PURPOSE (a fixture gap, loud, per this task's brief): anything else — e.g. `pr ready`,
+ *   - `pr ready <n> [--repo R] [--undo]`                                     (draft-first promotion / fix-begin)
+ *
+ * NOT SUPPORTED, ON PURPOSE (a fixture gap, loud, per this task's brief): anything else — e.g.
  * `pr edit --add-reviewer`, `run list` (ci-queue-watch's own call site is a DIFFERENT fake in that file's own
  * test, not this one), `issue` commands. An unmatched verb/field/path prints `fake-gh: unsupported …` to
  * stderr and exits 1 rather than guessing — see this file's own `unsupported` responses below.
@@ -181,15 +184,17 @@ function guarded(fn) {
   }
 }
 
-function pipeJq(json, expr) {
-  const res = spawnSync('jq', ['-r', expr], { input: json, encoding: 'utf8' });
+// `compact` mirrors real non-TTY `gh --jq`, which prints each emitted object on ONE line (callers such as
+// `pr-status-io.mjs#parseJsonLines` split on newlines). Opt-in per route so existing routes keep their output.
+function pipeJq(json, expr, { compact = false } = {}) {
+  const res = spawnSync('jq', [compact ? '-rc' : '-r', expr], { input: json, encoding: 'utf8' });
   if (res.status !== 0) throw new Error(`jq failed on ${expr}: ${res.stderr}`);
   return res.stdout;
 }
 
-function jsonResult(value, jq) {
+function jsonResult(value, jq, opts) {
   const json = JSON.stringify(value);
-  return { stdout: jq ? pipeJq(json, jq) : `${json}\n` };
+  return { stdout: jq ? pipeJq(json, jq, opts) : `${json}\n` };
 }
 
 // -------------------------------------------------------------------------------------------------------
@@ -336,6 +341,20 @@ function handlePrClose(store, rest) {
   });
 }
 
+// fix procedure (2026-09-27) — `pr ready <n> [--repo R] [--undo]`: the draft-first promotion (`gh pr ready`) and
+// the fix claim's back-to-draft (`gh pr ready --undo`). Flips the stored `isDraft`, which every PR view already
+// serves; a closed PR is refused like real `gh`.
+function handlePrReady(store, rest) {
+  return guarded(() => {
+    const number = Number(rest.find((a) => /^\d+$/.test(a)));
+    const slug = resolveRepoSlug(store, flagValue(rest, '--repo'));
+    const pr = requirePr(requireRepo(store, slug), number);
+    if (pr.state !== 'OPEN') return { stderr: `fake-gh: PR #${number} is not open\n`, exitCode: 1 };
+    pr.isDraft = rest.includes('--undo');
+    return { stdout: `${pr.isDraft ? 'converted to draft' : 'marked ready'} #${number}\n` };
+  });
+}
+
 function handlePrReopen(store, rest) {
   return guarded(() => {
     const number = Number(rest[0]);
@@ -468,6 +487,29 @@ function handleApi(store, rest) {
       const repoState = requireRepo(store, slug); const pr = requirePr(repoState, num);
       return jsonResult(pr.comments.map((c) => ({ id: c.id, user: c.author, body: c.body, created_at: c.createdAt })), jq);
     }
+    // Soak harness gap (PR #2821 ci-heal) — `promote-draft-pr-dispatch.mjs#defaultReadHeadCheckState` re-reads a
+    // draft's checks for its EXACT head sha (`pr-status-io.mjs#checksArgv`) right before `gh pr ready`. Without
+    // this route every promotion refused `stale-check-unreadable` in the simulator. Checks live per PR here (not
+    // per commit, and a push does not reset them — same limitation as `pr view`'s rollup), so a sha is answered
+    // with the checks of the open PR whose CURRENT head it is. Any other sha (e.g. a main commit) stays
+    // UNSUPPORTED, exactly as before this route existed, so main-side readers keep their "no evidence" path.
+    // `?check_name=X` filters by name, as real GitHub does.
+    if ((m = path.match(/^repos\/([^/]+)\/([^/]+)\/commits\/([0-9a-f]{7,40})\/check-runs(?:\?(.*))?$/))) {
+      const slug = `${m[1]}/${m[2]}`; const sha = m[3];
+      const checkName = new URLSearchParams(m[4] ?? '').get('check_name');
+      const repoState = requireRepo(store, slug);
+      const pr = Object.values(repoState.prs ?? {}).find((p) => {
+        if (p.state !== 'OPEN') return false;
+        const oid = resolveDiffOids(repoState, p).headOid;
+        return oid && oid.startsWith(sha);
+      });
+      if (!pr) return { stderr: `fake-gh: unsupported api path ${path} (no open PR has head ${sha})\n`, exitCode: 1 };
+      const runs = (pr.checks ?? []).filter((c) => !checkName || c.name === checkName).map((c) => ({
+        name: c.name, status: String(c.status).toLowerCase(), conclusion: c.conclusion ? String(c.conclusion).toLowerCase() : null,
+        started_at: c.startedAt, completed_at: c.completedAt, head_sha: sha,
+      }));
+      return jsonResult({ total_count: runs.length, check_runs: runs }, jq, { compact: true });
+    }
     if ((m = path.match(/^repos\/([^/]+)\/([^/]+)\/compare\/(.+)\.\.\.(.+)$/))) {
       const slug = `${m[1]}/${m[2]}`; const a = m[3]; const b = m[4];
       const repoState = requireRepo(store, slug);
@@ -516,6 +558,7 @@ function dispatch(store) {
     if (sub === 'merge') return handlePrMerge(store, rest);
     if (sub === 'close') return handlePrClose(store, rest);
     if (sub === 'reopen') return handlePrReopen(store, rest);
+    if (sub === 'ready') return handlePrReady(store, rest);
     if (sub === 'checks') return handlePrChecks(store, rest);
   }
   if (argv[0] === 'run' && argv[1] === 'list') return handleRunList(store, argv.slice(2));

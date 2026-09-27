@@ -2759,7 +2759,7 @@ function globMatch(tokens, s) {
   return t === tokens.length;
 }
 
-export function reason(segment, { primaryCwd = false, staleBehind = 0, foreignLiveLease = false, markedLeaseSlug = null, contestedHolderSlug = null, dispatchKind = null, cwd = null, daemonCloneRoots = [] } = {}) {
+export function reason(segment, { primaryCwd = false, staleBehind = 0, foreignLiveLease = false, markedLeaseSlug = null, contestedHolderSlug = null, dispatchKind = null, cwd = null, daemonCloneRoots = [], fixClaimedBranches = [], pushTargets = [] } = {}) {
   const s = segment.trim();
   if (!s) return null;
 
@@ -2981,6 +2981,22 @@ export function reason(segment, { primaryCwd = false, staleBehind = 0, foreignLi
     const targetsLane = /lane\//.test(rest);
     if (targetsMain || !targetsLane)
       return 'direct push to `main` is blocked (strict lane-only enforcement, #2203). Push to a `lane/*` ref and land via a PR so CI gates it: `git push origin HEAD:refs/heads/lane/<name>` then `pr-land`. Sanctioned override (rare): prefix `MAIN_PUSH_OK=1`.';
+  }
+
+  // fix procedure (operator-approved 2026-09-27, live incident PR #2811) — a push to a `lane/*` ref whose PR
+  // someone ELSE holds the live fix claim on (`we:scripts/conveyor/fix-procedure.mjs`). `fixClaimedBranches` is
+  // computed by the IO shell (claims NOT held by this caller, in the repo of the remote PUSHED TO) — empty
+  // everywhere else, so this arm is inert for every caller that does not pass it. `pushTargets` is the IO shell's
+  // resolution of what the push updates, including the IMPLICIT target of a bare `git push` that names no ref
+  // (`fix-procedure.mjs#resolvePushDestination`). No override: wait for the holder's `fix-end`.
+  // `canonicalGitOp` also reads `git -C <dir> push` / `git -c k=v push`, which agents use constantly. A `*`
+  // target (from `--all` / `--mirror` / a glob refspec) matches every claimed branch (fail-closed).
+  const pushHeads = [...heads, canonicalGitOp(s)];
+  const pushHead = pushHeads.find((h) => /^git\s+push\b/.test(h));
+  if (fixClaimedBranches.length && pushHead) {
+    const targets = [...[...pushHead.matchAll(/(?:refs\/heads\/)?(lane\/[^\s:'"]+)/g)].map((m) => m[1]), ...pushTargets];
+    const hit = fixClaimedBranches.find((c) => targets.includes(c.branch) || targets.includes('*'));
+    if (hit) return hit.message;
   }
 
   // A raw `gh pr merge` or its REST equivalent bypasses `pr-merge-gate.mjs`'s `assertMayMerge` — the ONE
@@ -3668,6 +3684,8 @@ if (IS_CLI) {
   let agentSession = false;
   let effectiveCwd = null;
   let daemonRoots = [];
+  let fixClaimedBranches = [];
+  let hookSessionId = null;
   try {
     const ev = JSON.parse(readFileSync(0, 'utf8'));
     cmd = (ev.tool_input || {}).command || '';
@@ -3693,6 +3711,7 @@ if (IS_CLI) {
     // due to a string-source mismatch (r2 correctness fix). The hook payload's `session_id` is only a secondary
     // cross-check/fallback for the rare call where the env is unset. Used to tell my own lease from a peer's.
     const mySessionId = process.env.CLAUDE_CODE_SESSION_ID || ev.session_id || null;
+    hookSessionId = mySessionId;
     // #2302 — the Bash cwd decides primary-vs-lane. Derive the constellation primary roots from THIS script's
     // location (<workspace>/<repo>/scripts/guard-bash.mjs) and realpath both sides so a symlinked workspace
     // still matches. Fail-OPEN (leave primaryCwd=false) on any error — a guard bug must never wedge the agent.
@@ -3716,7 +3735,30 @@ if (IS_CLI) {
     // something that LOOKS like a destructive git op. Every other Bash call skips it entirely.
     if (!primaryCwd && isLaneCwd(cwd) && hasDestructiveLaneOp(cmd)) ({ markedLeaseSlug, contestedHolderSlug, foreignLiveLease } = laneLeaseGuardCtx(cwd, mySessionId));
   } catch { process.exit(0); }
-  const guardCtx = { primaryCwd, staleBehind, foreignLiveLease, markedLeaseSlug, contestedHolderSlug, runInBackground, dispatchKind, agentSession, cwd: effectiveCwd, daemonCloneRoots: daemonRoots };
+  // fix procedure — only pay for the claim-store read when the command could be a `git push` (a bare one names
+  // no lane ref, so the gate cannot key on `lane/`). Loaded lazily so every other Bash call keeps this hook's
+  // import graph unchanged; the git reads run only when some claim is live. Fail-OPEN on any error.
+  let pushTargets = [];
+  if (/\bgit\b/.test(cmd) && /\bpush\b/.test(cmd)) {
+    try {
+      const fp = await import('./conveyor/fix-procedure.mjs');
+      const caller = { sessionId: hookSessionId, who: process.env.WE_FIX_WHO || null, token: process.env.WE_FIX_TOKEN || null };
+      const live = fp.listLiveFixClaims().filter((e) => !fp.isClaimHolder(e, caller));
+      if (live.length) {
+        // The repo is the one the push GOES TO (its remote, or a URL), never assumed `origin`; the targets
+        // include what a bare push updates implicitly.
+        const dest = fp.resolvePushDestination(cmd, { cwd: effectiveCwd || process.cwd() });
+        const repoKey = dest?.repoKey ?? null;
+        pushTargets = dest?.branches ?? [];
+        fixClaimedBranches = live.filter((e) => e.meta?.branch && (repoKey == null || e.meta.repo === repoKey)).map((e) => ({
+          branch: e.meta.branch,
+          message: fp.pushRefusal({ repo: e.meta.repo, branch: e.meta.branch, ...caller })?.message
+            ?? `push to ${e.meta.branch} refused: another fixer holds the fix claim on PR #${e.meta.pr}`,
+        }));
+      }
+    } catch { fixClaimedBranches = []; pushTargets = []; }
+  }
+  const guardCtx = { primaryCwd, staleBehind, foreignLiveLease, markedLeaseSlug, contestedHolderSlug, runInBackground, dispatchKind, agentSession, cwd: effectiveCwd, daemonCloneRoots: daemonRoots, fixClaimedBranches, pushTargets };
   const r = decide(cmd, guardCtx);
   if (r) {
     // #3311 — the deny is ALL-OR-NOTHING, so name the state-producing steps it takes down with it. Computed
