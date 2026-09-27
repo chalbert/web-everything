@@ -1,0 +1,3 @@
+# local wrangler state and dev-only secrets never belong in git
+.wrangler/
+.dev.vars

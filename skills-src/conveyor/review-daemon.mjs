@@ -108,6 +108,7 @@ import { CONSTELLATION_REPOS, repoKeyForSlug } from '../../scripts/lib/constella
 import { forEachRepo } from '../../scripts/lib/for-each-repo.mjs';
 import { withGithubAppAuth } from '../../scripts/lib/github-app-auth-env.mjs';
 import { withSelfSync } from '../../scripts/lib/daemon-self-sync.mjs';
+import { withPrEvents, makeDrainNudgeForward } from '../../scripts/lib/pr-events.mjs';
 import { makePoolExhaustionLogger } from '../../scripts/conveyor/pool-exhaustion.mjs';
 import { isStaleMainRefusalMessage } from '../../scripts/lib/main-staleness.mjs';
 import {
@@ -856,10 +857,13 @@ async function main() {
     releaseRunnerLeaseIfOwned(RUNNER_LOCK_ROOT, owner, { key: REVIEW_DAEMON_LEASE_KEY });
     process.exit(0);
   };
+  // Webhook-driven wake (flag WE_PR_EVENTS, default OFF → effects unchanged): a relevant PR event ends the sleep
+  // early; the interval stays as the safety net. This daemon also forwards drain-relevant events to the drain
+  // daemon's localhost POST /nudge — one forwarder, so the drain wakes on events without its own feed client.
   const { stoppedReason } = await runDaemonLoop(
-    withSelfSync(withGithubAppAuth(buildCliDaemonEffects({ owner })), {
+    withPrEvents(withSelfSync(withGithubAppAuth(buildCliDaemonEffects({ owner })), {
       root: selfRoot, onRestart: restartOntoNewCode, hasStaleRefusal: hasStaleMainRefusal,
-    }),
+    }), { role: 'review', repos: REVIEW_DAEMON_REPOS, forward: [makeDrainNudgeForward()] }),
   );
   if (!stopping) {
     console.error(`review-daemon: loop stopped (${stoppedReason}) — releasing the lease and exiting.`);
