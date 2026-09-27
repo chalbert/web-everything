@@ -2,7 +2,7 @@
 kind: decision
 status: open
 dateOpened: "2026-09-27"
-crossRef: ["xgos7st"]
+crossRef: { url: /backlog/xgos7st-land-time-order-for-a-ready-pr-that-overlaps-a-larger-pr-alr/, label: "xgos7st — land-time order for an overlapping PR (ratified)" }
 tags: []
 ---
 
