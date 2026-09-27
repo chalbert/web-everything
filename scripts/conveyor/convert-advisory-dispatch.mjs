@@ -150,6 +150,19 @@ export function renderCommentHistory(comments) {
   return kept.join('\n\n');
 }
 
+/** Pure: wrap untrusted text (a PR diff, a comment) in a fence it can never close from the inside. The fence is
+ *  one character LONGER than the longest run of that character in `text` (and at least `min`), so no line of
+ *  the text — not even an indented one, which CommonMark accepts as a closer — can end the block early and
+ *  smuggle forged headings or instructions into the judge's prompt (PR #2781 review, round 3). The text itself
+ *  is left byte-exact: a judge reading a diff must see the diff as it is. */
+export function fenceUntrustedText(text, { info = '', char = '`', min = 3 } = {}) {
+  const s = String(text ?? '');
+  const runs = s.match(char === '~' ? /~+/g : /`+/g) || [];
+  const longest = runs.reduce((n, r) => Math.max(n, r.length), 0);
+  const fence = char.repeat(Math.max(min, longest + 1));
+  return `${fence}${info}\n${s}\n${fence}`;
+}
+
 /** Pure: the judged material (stdin) — the escalation's own reason, the named file(s)' OWN net diff when it
  *  could be fetched (#xconv1-evidence — never the whole-PR diff, only the file(s) the escalation itself names,
  *  which keeps this a narrow targeted check rather than the panel re-run #xconv1 exists to avoid), and the
@@ -161,7 +174,7 @@ export function buildTargetedCheckInput({ acceptComment, escalation, evidence } 
   const kind = escalation?.kind;
   if (typeof evidence === 'string' && evidence.trim().length > 0) {
     const heading = EVIDENCE_HEADINGS[kind] || '## Evidence';
-    if (kind === 'test-gaming') sections.push(heading, '', '```diff', evidence, '```', '');
+    if (kind === 'test-gaming') sections.push(heading, '', fenceUntrustedText(evidence, { info: 'diff' }), '');
     else sections.push(heading, '', evidence, '');
   } else if (kind === 'test-gaming') {
     sections.push(
@@ -365,6 +378,61 @@ export function planConvertLabels({ outcome, currentLabels = [] } = {}) {
   return { addLabel: labelPlan.add, removeLabels };
 }
 
+/** IO (real `gh`): the PR's `labeled`/`unlabeled` timeline events for `advisory:*` labels — read ONLY on the
+ *  label-mismatch path of {@link dispatchConvertAdvisory} (a converted head whose `advisory:*` label differs
+ *  from the recorded outcome — which, for a PR a human deliberately overrode, is every tick that re-emits it;
+ *  one paginated read per such PR per tick), never for a matching or unconverted PR. Throws on a read
+ *  failure; the caller treats that as "unverified" and repairs nothing.
+ * @returns {Array<{event: string, label: string, createdAt: string}>} */
+export function readAdvisoryLabelEvents(repo, prNumber, { exec = execFileSync } = {}) {
+  const out = exec('gh', [
+    'api', '--paginate', '-X', 'GET', '-F', 'per_page=100', `repos/${repo}/issues/${Number(prNumber)}/timeline`,
+    '--jq', '.[] | select((.event=="labeled" or .event=="unlabeled") and ((.label.name // "") | startswith("advisory:")))'
+      + ' | {event: .event, label: .label.name, createdAt: (.created_at // "")} | @json',
+  ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: resolveChildTimeoutMs(), maxBuffer: 16 * 1024 * 1024 });
+  return String(out || '').split('\n').map((l) => l.trim()).filter(Boolean).map((l) => JSON.parse(l));
+}
+
+/** Pure: why a write planned for `headSha` must not happen against this FRESH PR state — the head moved, or
+ *  the PR is no longer open — or `null` when it may. */
+function staleWriteReason(fresh, headSha) {
+  const wantHead = String(headSha || '').trim().toLowerCase();
+  const liveHead = String(fresh?.headRefOid || '').trim().toLowerCase();
+  if (!liveHead || liveHead !== wantHead) return { skipped: 'head-moved', liveHeadSha: liveHead || null };
+  if (fresh?.state && String(fresh.state).toUpperCase() !== 'OPEN') return { skipped: 'pr-not-open', state: fresh.state };
+  return null;
+}
+
+/** Pure: `createdAt` of the LATEST trusted converted note for this head that RECORDS an outcome — the same
+ *  note {@link readConvertedAdvisoryOutcome} reads the outcome from — or `null`. */
+function latestConvertedNoteAt(comments, headSha) {
+  let at = null;
+  for (const c of Array.isArray(comments) ? comments : []) {
+    if (hasConvertedAdvisoryNote([c], headSha) && readConvertedAdvisoryOutcome([c], headSha)) at = c.createdAt || null;
+  }
+  return at;
+}
+
+/** `true` when nobody OVERRODE the recorded outcome after `noteAt` — no event after the note added the opposite
+ *  advisory label or removed the wanted one — so the mismatch is the note's own write, lost or half-applied
+ *  (`gh pr edit` adds and removes in separate steps: the add can land while the remove fails, leaving both
+ *  labels). This write's OWN add of the wanted label is not an override. `false` when an override happened;
+ *  `null` when that cannot be told (no note time, or the timeline read failed) — the caller repairs nothing. */
+function advisoryLabelsUntouchedSinceNote({ noteAt, wanted, repo, prNumber, readLabelEvents }) {
+  const noteMs = Date.parse(noteAt || '');
+  if (!Number.isFinite(noteMs)) return null;
+  let events;
+  try {
+    events = readLabelEvents(repo, prNumber);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(events)) return null;
+  const opposite = wanted === ADVISORY_LABELS.ACCEPTED ? ADVISORY_LABELS.CHANGES : ADVISORY_LABELS.ACCEPTED;
+  return !events.some((e) => !(Date.parse(e?.createdAt || '') < noteMs)
+    && ((e?.event === 'labeled' && e?.label === opposite) || (e?.event === 'unlabeled' && e?.label === wanted)));
+}
+
 /**
  * THE IO SHELL: convert ONE `kind:'convert-advisory'` dispatch entry (as `we:scripts/conveyor/
  * reconcile-core.mjs#planReconcile` produces it — carries `prNumber`, `headSha`, `acceptComment`, `escalation`)
@@ -375,7 +443,10 @@ export function planConvertLabels({ outcome, currentLabels = [] } = {}) {
  * IDEMPOTENT: a head that already carries the converted note (`hasConvertedAdvisoryNote`) never re-posts or
  * re-asks the judge — checked BEFORE the judge is ever called. Its only possible effect is a LABEL REPAIR: the
  * outcome the note recorded (`readConvertedAdvisoryOutcome`) is re-applied when the labels do not match it
- * (a label write that failed after the comment landed), and nothing at all once they do.
+ * (a label write that failed after the comment landed), and nothing at all once they do — including when the lost
+ * write was REPLACING an older `advisory:*` label, told apart from a later override by the PR's label timeline.
+ * Before any write, the PR is re-read: a head that moved (or a PR that closed, or a note another tick posted)
+ * while the judge ran gets no comment and no label (PR #2781 review, round 3).
  * `force` (default `false`, never set by a production tick) bypasses that idempotency check for exactly one
  * call — #xconv1-evidence's own repair mechanism: an operator (or a one-off script) explicitly re-running this
  * for a PR whose EXISTING converted note was produced with no diff evidence (this file's pre-fix behaviour),
@@ -397,7 +468,7 @@ export function planConvertLabels({ outcome, currentLabels = [] } = {}) {
  */
 export async function dispatchConvertAdvisory(d, {
   repo, provider = createGhProvider(), runJudge = runTargetedCheck, fetchEvidence = fetchTestGamingDiffEvidence,
-  dryRun = false, force = false, comments = null, labels = null,
+  readLabelEvents = readAdvisoryLabelEvents, dryRun = false, force = false, comments = null, labels = null,
 } = {}) {
   const prNumber = Number(d?.prNumber);
   // A caller that already read this tick's PR state (the daemon's own #4133 shared-read) hands it in; only a
@@ -412,17 +483,39 @@ export async function dispatchConvertAdvisory(d, {
     // lost forever. Re-apply the outcome the note RECORDED (no judge call, no second comment); a no-op once the
     // labels already match.
     //
-    // ONLY the exact "comment landed, label write failed" shape is repaired: a clearing/blocking outcome was
-    // recorded and NO `advisory:*` label is on the PR at all. Any `advisory:*` label present means someone (a
-    // human override, a later fresh advisory) already decided the label for this head — never fight it; the
-    // planner re-emits this entry every tick, so a looser check would undo that decision on every tick.
+    // ONLY the "comment landed, label write failed" shape is repaired — never a label someone set AFTER the note
+    // (a human override, a later fresh advisory): the planner re-emits this entry every tick, so a looser check
+    // would undo that decision on every tick. Two shapes tell the two apart:
+    //   - NO `advisory:*` label on the PR at all → the write was lost (nothing else ever set one).
+    //   - the WRONG `advisory:*` label → it may be the one the lost write was REPLACING (PR #2781 review, round
+    //     3), or a later override. The PR's label timeline decides: any `advisory:*` label event after the note
+    //     was posted means someone decided since — leave it. An unreadable timeline fails closed (no repair).
     const recorded = readConvertedAdvisoryOutcome(liveComments, d?.headSha);
     const names = new Set(labelNames(liveLabels));
-    const labelWriteLost = (recorded === 'accept' || recorded === 'changes')
-      && !names.has(ADVISORY_LABELS.ACCEPTED) && !names.has(ADVISORY_LABELS.CHANGES);
+    const wanted = recorded === 'accept' ? ADVISORY_LABELS.ACCEPTED
+      : recorded === 'changes' ? ADVISORY_LABELS.CHANGES : null;
+    const hasAdvisory = names.has(ADVISORY_LABELS.ACCEPTED) || names.has(ADVISORY_LABELS.CHANGES);
+    const mismatched = wanted && hasAdvisory
+      && (!names.has(wanted) || names.has(wanted === ADVISORY_LABELS.ACCEPTED ? ADVISORY_LABELS.CHANGES : ADVISORY_LABELS.ACCEPTED));
+    let labelWriteLost = Boolean(wanted) && !hasAdvisory;
+    if (mismatched) {
+      const verdict = advisoryLabelsUntouchedSinceNote({
+        noteAt: latestConvertedNoteAt(liveComments, d?.headSha), wanted, repo, prNumber, readLabelEvents,
+      });
+      if (verdict === null) return { prNumber, headSha: d?.headSha, skipped: 'already-converted', labelRepairUnverified: true };
+      labelWriteLost = verdict;
+    }
     if (labelWriteLost) {
-      const labelPlan = planConvertLabels({ outcome: recorded, currentLabels: liveLabels });
-      if (dryRun) return { prNumber, headSha: d?.headSha, skipped: 'already-converted', wouldRepairLabels: true, ...labelPlan, dryRun: true };
+      if (dryRun) {
+        const labelPlan = planConvertLabels({ outcome: recorded, currentLabels: liveLabels });
+        return { prNumber, headSha: d?.headSha, skipped: 'already-converted', wouldRepairLabels: true, ...labelPlan, dryRun: true };
+      }
+      // The repair writes too, so it revalidates like the first write below: a snapshot handed in may be a tick
+      // old, and the recorded outcome must never land on a head it did not judge.
+      const fresh = provider.readPrState(repo, prNumber);
+      const block = staleWriteReason(fresh, d?.headSha);
+      if (block) return { prNumber, headSha: d?.headSha, ...block };
+      const labelPlan = planConvertLabels({ outcome: recorded, currentLabels: fresh?.labels ?? [] });
       provider.setLabels(repo, prNumber, { add: labelPlan.addLabel || undefined, remove: labelPlan.removeLabels });
       return { prNumber, headSha: d?.headSha, skipped: 'already-converted', repairedLabels: true, ...labelPlan };
     }
@@ -438,12 +531,29 @@ export async function dispatchConvertAdvisory(d, {
       acceptComment: d?.acceptComment, escalation: d?.escalation, runId: `convert-advisory-${prNumber}`,
       evidence: evidence.text,
     });
+  if (dryRun) {
+    const plan = planConvertAdvisoryEffects({
+      prNumber, repo, headSha: d?.headSha, acceptComment: d?.acceptComment, escalation: d?.escalation,
+      targetedCheckAnswer, currentLabels: liveLabels,
+    });
+    return { prNumber, headSha: d?.headSha, ...plan, targetedCheckAnswer, dryRun: true };
+  }
+
+  // REVALIDATE BEFORE ANY WRITE (PR #2781 review, round 3). The evidence fetch and the judge are slow and
+  // async; the state read above may be a whole tick old. A push in that window makes this answer one about a
+  // head the PR no longer has, so it must never be posted or labelled as if it covered the new head. One fresh
+  // read, then: same head, still open, and no converted note for this head posted meanwhile (a racing tick).
+  // The labels planned below are the FRESH ones too. A failed read throws — no write on a guess.
+  const fresh = provider.readPrState(repo, prNumber);
+  const block = staleWriteReason(fresh, d?.headSha);
+  if (block) return { prNumber, headSha: d?.headSha, ...block, targetedCheckAnswer };
+  if (!force && hasConvertedAdvisoryNote(fresh?.comments ?? [], d?.headSha)) {
+    return { prNumber, headSha: d?.headSha, skipped: 'already-converted', targetedCheckAnswer };
+  }
   const plan = planConvertAdvisoryEffects({
     prNumber, repo, headSha: d?.headSha, acceptComment: d?.acceptComment, escalation: d?.escalation,
-    targetedCheckAnswer, currentLabels: liveLabels,
+    targetedCheckAnswer, currentLabels: fresh?.labels ?? [],
   });
-
-  if (dryRun) return { prNumber, headSha: d?.headSha, ...plan, targetedCheckAnswer, dryRun: true };
 
   // COMMENT FIRST (mirrors `review-label-provider.mjs#writeOrder`'s "not already accepted" branch — an orphan
   // comment is inert; an orphan label swap ahead of it is not, since `hasConvertedAdvisoryNote` itself reads

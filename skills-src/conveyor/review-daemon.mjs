@@ -542,6 +542,7 @@ export async function runConvertAdvisoryTick({
           prNumber: d.prNumber, reason: result.skipped,
           ...(result.repairedLabels ? { repairedLabels: true } : {}),
           ...(result.wouldRepairLabels ? { wouldRepairLabels: true } : {}),
+          ...(result.labelRepairUnverified ? { labelRepairUnverified: true } : {}),
         });
       }
       else {
@@ -818,7 +819,7 @@ export function buildCliDaemonEffects({
       const ca = result.convertAdvisory;
       if (ca) {
         for (const p of (ca.posted ?? [])) log.error(`review-daemon: ${p.repo}#${p.prNumber} convert-advisory posted (targeted check: ${p.outcome ?? '?'})`);
-        for (const s of (ca.skipped ?? [])) log.error(`review-daemon: ${s.repo}#${s.prNumber} convert-advisory skipped — ${s.reason}${s.repairedLabels ? ' (labels repaired from the recorded outcome)' : ''}`);
+        for (const s of (ca.skipped ?? [])) log.error(`review-daemon: ${s.repo}#${s.prNumber} convert-advisory skipped — ${s.reason}${s.repairedLabels ? ' (labels repaired from the recorded outcome)' : ''}${s.labelRepairUnverified ? ' (advisory label disagrees with the recorded outcome, and the label timeline could not be read to tell a lost write from an override — not repaired)' : ''}`);
         for (const f of (ca.failed ?? [])) log.error(`review-daemon: ${f.repo}#${f.prNumber ?? '?'} convert-advisory failed (non-fatal): ${f.error}`);
         for (const rf of (ca.reconcileFailed ?? [])) log.error(`review-daemon: ${rf.repo} convert-advisory reconcile failed (non-fatal, other repos unaffected): ${rf.error}`);
       }

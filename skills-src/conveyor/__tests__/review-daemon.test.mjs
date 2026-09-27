@@ -868,6 +868,13 @@ describe('runConvertAdvisoryTick', () => {
     expect(out.skipped).toEqual([{ prNumber: 2766, reason: 'already-converted', repairedLabels: true }]);
   });
 
+  it('PR #2781 review, round 3 — an UNVERIFIED label repair (timeline unreadable) is surfaced too', async () => {
+    const reconcile = vi.fn(() => convertPlan([entry(2766)]));
+    const convertAdvisory = vi.fn(async () => ({ skipped: 'already-converted', labelRepairUnverified: true }));
+    const out = await runConvertAdvisoryTick({ reconcile, convertAdvisory });
+    expect(out.skipped).toEqual([{ prNumber: 2766, reason: 'already-converted', labelRepairUnverified: true }]);
+  });
+
   it('one bad entry never aborts the rest — a convertAdvisory throw lands in `failed`, siblings still run', async () => {
     const reconcile = vi.fn(() => convertPlan([entry(1), entry(2)]));
     const convertAdvisory = vi.fn(async ({ prNumber }) => {
