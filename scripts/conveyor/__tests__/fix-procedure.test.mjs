@@ -306,12 +306,12 @@ describe('fixBegin / fixEnd — the IO shell', () => {
     };
   };
 
-  it('fix-begin: claim → `gh pr ready --undo` → fixing label (stood-down removed) → marker; fix-end leaves it draft', async () => {
+  it('fix-begin DEFAULT (operator ruling 2026-09-27, draft-only-on-withdrawal): claim → NO draft → fixing label (stood-down removed) → marker; fix-end never relies on draft-first promotion', async () => {
     const { gh, calls } = fakeGh({ headRefName: BRANCH, headRefOid: 'a'.repeat(40), isDraft: false, state: 'OPEN', labels: [{ name: STOOD_DOWN_LABEL }] });
     const labels = fakeLabels();
     const r = await fixBegin({ repo: 'we', pr: 2811, who: 'fix-2811', why: 'address review', gh, labels, lockRoot: root, nowMs: T0 });
-    expect(r).toMatchObject({ ok: true, branch: BRANCH, steps: ['draft', 'label', 'comment'] });
-    expect(calls).toContainEqual(['pr', 'ready', '2811', '--repo', 'chalbert/web-everything', '--undo']);
+    expect(r).toMatchObject({ ok: true, branch: BRANCH, draft: false, reason: null, steps: ['label', 'comment'] });
+    expect(calls.filter((a) => a[1] === 'ready')).toHaveLength(0); // default never drafts
     expect(labels.log).toContainEqual(['set', { add: FIXING_LABEL, remove: [STOOD_DOWN_LABEL] }]);
     expect(labels.log).toContainEqual(['comment', FIX_BEGIN_MARKER]);
 
@@ -319,18 +319,59 @@ describe('fixBegin / fixEnd — the IO shell', () => {
     expect(other).toMatchObject({ ok: false, reason: 'held' });
 
     const end = await fixEnd({ repo: 'we', pr: 2811, who: 'fix-2811', gh, labels, lockRoot: root });
-    expect(end).toMatchObject({ ok: true });
-    expect(calls.filter((a) => a[1] === 'ready')).toHaveLength(1); // fix-end never un-drafts
+    expect(end).toMatchObject({ ok: true, draft: false });
+    expect(calls.filter((a) => a[1] === 'ready')).toHaveLength(0); // never drafted, so fix-end has nothing to un-draft
     expect(labels.log).toContainEqual(['set', { remove: [FIXING_LABEL] }]);
     expect(labels.log).toContainEqual(['comment', FIX_END_MARKER]);
     expect(readLiveFixClaim({ repo: 'we', pr: 2811, lockRoot: root, nowMs: T0 + 2 * MIN })).toBeNull();
   });
 
-  it('fix-begin releases the claim and fails when the PR cannot be turned back to draft', async () => {
+  it('fix-begin --draft --reason=scope-change: claim → `gh pr ready --undo` → draft-scope-change label → marker; fix-end leaves it draft (relies on draft-first promotion)', async () => {
+    const { gh, calls } = fakeGh({ headRefName: BRANCH, headRefOid: 'a'.repeat(40), isDraft: false, state: 'OPEN', labels: [] });
+    const labels = fakeLabels();
+    const r = await fixBegin({ repo: 'we', pr: 2812, who: 'fix-2812', why: 'scope changed mid-review', draft: true, reason: 'scope-change', gh, labels, lockRoot: root, nowMs: T0 });
+    expect(r).toMatchObject({ ok: true, draft: true, reason: 'scope-change', steps: ['draft', 'label', 'comment'] });
+    expect(calls).toContainEqual(['pr', 'ready', '2812', '--repo', 'chalbert/web-everything', '--undo']);
+    expect(labels.log).toContainEqual(['set', { add: 'review-status:draft-scope-change', remove: [] }]);
+
+    const end = await fixEnd({ repo: 'we', pr: 2812, who: 'fix-2812', gh, labels, lockRoot: root });
+    expect(end).toMatchObject({ ok: true, draft: true, reason: 'scope-change' });
+    expect(calls.filter((a) => a[1] === 'ready')).toHaveLength(1); // fix-end never un-drafts
+    expect(labels.log).toContainEqual(['set', { remove: ['review-status:draft-scope-change'] }]);
+  });
+
+  it('fix-begin --draft --reason=withdrawn is mutually exclusive with the ordinary fixing label (removed on switch)', async () => {
+    const { gh } = fakeGh({ headRefName: BRANCH, headRefOid: 'a'.repeat(40), isDraft: false, state: 'OPEN', labels: [{ name: FIXING_LABEL }] });
+    const labels = fakeLabels();
+    const r = await fixBegin({ repo: 'we', pr: 2813, who: 'fix-2813', draft: true, reason: 'withdrawn', gh, labels, lockRoot: root, nowMs: T0 });
+    expect(r).toMatchObject({ ok: true, draft: true, reason: 'withdrawn' });
+    expect(labels.log).toContainEqual(['set', { add: 'review-status:draft-withdrawn', remove: [FIXING_LABEL] }]);
+  });
+
+  it('fix-begin refuses --draft with no valid --reason, and --reason with no --draft — before any IO', async () => {
+    const { gh, calls } = fakeGh({ headRefName: BRANCH, isDraft: false, state: 'OPEN' });
+    const noReason = await fixBegin({ repo: 'we', pr: 9001, who: 'w', draft: true, gh, labels: fakeLabels(), lockRoot: root, nowMs: T0 });
+    expect(noReason).toMatchObject({ ok: false, reason: 'draft-reason-required' });
+    const badReason = await fixBegin({ repo: 'we', pr: 9001, who: 'w', draft: true, reason: 'because', gh, labels: fakeLabels(), lockRoot: root, nowMs: T0 });
+    expect(badReason).toMatchObject({ ok: false, reason: 'draft-reason-required' });
+    const reasonNoDraft = await fixBegin({ repo: 'we', pr: 9001, who: 'w', reason: 'scope-change', gh, labels: fakeLabels(), lockRoot: root, nowMs: T0 });
+    expect(reasonNoDraft).toMatchObject({ ok: false, reason: 'reason-without-draft' });
+    expect(calls).toHaveLength(0); // refused before the `gh pr view` read
+    expect(readLiveFixClaim({ repo: 'we', pr: 9001, lockRoot: root, nowMs: T0 })).toBeNull();
+  });
+
+  it('fix-begin --draft releases the claim and fails when the PR cannot be turned back to draft', async () => {
     const gh = async (args) => { if (args[1] === 'ready') throw new Error('gh: boom'); return JSON.stringify({ headRefName: BRANCH, isDraft: false, state: 'OPEN' }); };
-    const r = await fixBegin({ repo: 'we', pr: 5, who: 'w', gh, labels: fakeLabels(), lockRoot: root, nowMs: T0 });
+    const r = await fixBegin({ repo: 'we', pr: 5, who: 'w', draft: true, reason: 'withdrawn', gh, labels: fakeLabels(), lockRoot: root, nowMs: T0 });
     expect(r).toMatchObject({ ok: false, reason: 'draft-failed' });
     expect(readLiveFixClaim({ repo: 'we', pr: 5, lockRoot: root, nowMs: T0 })).toBeNull();
+  });
+
+  it('a plain (no-draft) fix-begin never converts an already-ready PR, and never un-drafts an already-draft one either', async () => {
+    const { gh, calls } = fakeGh({ headRefName: BRANCH, isDraft: true, state: 'OPEN', labels: [] });
+    const r = await fixBegin({ repo: 'we', pr: 6, who: 'w', gh, labels: fakeLabels(), lockRoot: root, nowMs: T0 });
+    expect(r).toMatchObject({ ok: true, draft: false });
+    expect(calls.filter((a) => a[1] === 'ready')).toHaveLength(0); // no-draft fix-begin never touches the draft bit either way
   });
 });
 

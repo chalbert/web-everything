@@ -11,20 +11,32 @@
  * same-line conflict with main"). No label showed it, and the reconcile planner then refused the PR forever.
  *
  * THE PROCEDURE.
- *   1. `fix-begin <pr> --who=<session|worker> --why=<…>` — take the claim, convert the PR back to DRAFT
- *      (`gh pr ready --undo`, through the gh throttle), set `review-status:fixing`, and post a marker comment
- *      naming who and why.
+ *   1. `fix-begin <pr> --who=<session|worker> --why=<…>` — take the claim, set `review-status:fixing`, and post
+ *      a marker comment naming who and why. **The PR stays READY by default** — a normal repair loop (a review-
+ *      findings fix, a ci-heal, a mechanical conflict repair, a mechanical rebase/CI-rerun) never touches the
+ *      draft bit; the claim itself is the lock (refusal 2 below), so draft was never load-bearing for merge
+ *      safety (`merge-ai-prs.mjs#decideReviewGate`/`acceptanceCoversHead` re-verifies the accepted sha against
+ *      the LIVE head independently of any label). Draft is owed ONLY for `--draft --reason=scope-change` (a
+ *      scope-change request reached the fixer mid-review) or `--draft --reason=withdrawn` (review finds the PR
+ *      does not do what the card asked at all) — each converts the PR to draft (`gh pr ready --undo`, through
+ *      the gh throttle) and applies its own `review-status:draft-scope-change` / `review-status:draft-withdrawn`
+ *      label instead of `fixing`, mutually exclusive with it and with each other. Operator ruling 2026-09-27,
+ *      codified in `we:docs/agent/platform-decisions.md#fix-claim-draft-only-on-withdrawal`.
  *   2. While the claim is live: the reconcile planner refuses every dispatch for the PR (review, advisory,
  *      fix, ci-heal, promote-draft — `reconcile-core.mjs` `fix-claimed`), a second `fix-begin` by anyone else
  *      is refused, and a PUSH to the PR's branch by anyone but the holder is refused ({@link pushRefusal} —
  *      wired into `pr-land.mjs`, the `push` helper below, and `guard-bash.mjs` for a raw `git push`).
- *   3. `fix-end <pr>` — after the push: release the claim, drop `review-status:fixing`, and LEAVE THE PR DRAFT.
- *      The draft-first promotion (`reconcile-core.mjs` `promote-draft`, run by the live fix daemon) marks it
- *      ready once required CI is green on the new head, and review re-runs from there.
+ *   3. `fix-end <pr>` — after the push: release the claim and drop whichever label `fix-begin` applied
+ *      (`fixing`, `draft-scope-change`, or `draft-withdrawn`). A claim that was NEVER drafted leaves the PR
+ *      exactly as it was — ready — and owes nothing further; `fix-end` does not rely on the draft-first
+ *      promotion for it. A claim that WAS drafted (scope-change/withdrawn) still leaves the PR draft: the
+ *      draft-first promotion (`reconcile-core.mjs` `promote-draft`, run by the live fix daemon) marks it ready
+ *      once required CI is green on the new head, and review re-runs from there.
  *   The claim is heartbeat-refreshed while the fixer lives (`fix-heartbeat`, and the fix daemon's own
  *   `refreshLiveFixDispatchClaims` sweep for a claim whose `who` names a live session). A crashed fixer's claim
- *   expires on its TTL; the PR is then a plain draft, which the planner promotes (green) or heals (red), and the
- *   `draft-not-promoted` health smell covers anything stuck past that.
+ *   expires on its TTL; a claim that HAD drafted the PR then leaves a plain draft, which the planner promotes
+ *   (green) or heals (red), and the `draft-not-promoted` health smell covers anything stuck past that. A claim
+ *   that never drafted leaves a plain ready PR, unaffected by that promotion path at all.
  *
  * THE CLAIM STORE IS REUSED, NOT REINVENTED. This is `fix-dispatch-claim.mjs`'s own `(repo, kind, pr)` store
  * (#2789) with `kind: 'fixing'`. The owner string is `fixer:<who>` — stable across the several short CLI calls
@@ -60,9 +72,21 @@ export const FIXING_LABEL = 'review-status:fixing';
 /** The visible label a TERMINAL stand-down applies (`stand-down.mjs`), removed again by the next `fix-begin`. */
 export const STOOD_DOWN_LABEL = 'review-status:stood-down';
 
+/** The two — and only two — reasons `fix-begin --draft` accepts (operator ruling 2026-09-27,
+ *  `we:docs/agent/platform-decisions.md#fix-claim-draft-only-on-withdrawal`). Every other repair loop stays
+ *  ready; see the `@file` header above. */
+export const FIX_DRAFT_REASONS = Object.freeze(['scope-change', 'withdrawn']);
+
+/** The label named at `fix-begin --draft --reason=<r>` time, one per {@link FIX_DRAFT_REASONS}. Mutually
+ *  exclusive with {@link FIXING_LABEL} and with each other — `fix-begin` applies exactly one. */
+export const FIX_DRAFT_LABEL = Object.freeze({
+  'scope-change': 'review-status:draft-scope-change',
+  withdrawn: 'review-status:draft-withdrawn',
+});
+
 /** Stable first lines of the two marker comments. Treat as fixed once shipped. */
-export const FIX_BEGIN_MARKER = '🔒 conveyor fix-begin — fix claim held, PR back to draft';
-export const FIX_END_MARKER = '🔓 conveyor fix-end — fix claim released, PR stays draft until required CI is green';
+export const FIX_BEGIN_MARKER = '🔒 conveyor fix-begin — fix claim held';
+export const FIX_END_MARKER = '🔓 conveyor fix-end — fix claim released';
 
 /** Normalize a repo slug or key to the claim store's repo KEY (`we`, `frontierui`, …). Throws on an unknown one. */
 export function repoKeyOf(repo) {
@@ -139,7 +163,7 @@ function liveForeignDispatch({ repo, pr, who, lockRoot, nowMs }) {
  * @returns {{ok:boolean, reason:string, heldBy?:string|null, entry?:object, resource:string}}
  */
 export function acquireFixClaim({
-  repo, pr, who, why = '', sessionId = null, branch = null, headSha = null,
+  repo, pr, who, why = '', sessionId = null, branch = null, headSha = null, draft = false, reason = null,
   lockRoot = fixDispatchClaimRoot(), nowMs = Date.now(), ttlMinutes = DEFAULT_FIX_CLAIM_TTL_MINUTES, host = hostname(),
 } = {}) {
   const repoKey = repoKeyOf(repo);
@@ -163,6 +187,10 @@ export function acquireFixClaim({
     branch: branch ? normalizeBranch(branch) : (own ? prior.meta?.branch ?? null : null),
     headSha: headSha ?? (own ? prior.meta?.headSha ?? null : null),
     claimedAt: own ? prior.meta?.claimedAt ?? nowIso : nowIso,
+    // The CURRENT hold's draft state — always the latest `fix-begin` call's own values, never merged forward
+    // from a prior reentrant hold: a fixer may discover a scope-change mid-hold and re-`fix-begin --draft` the
+    // SAME claim, and the newer call's intent must win.
+    draft: Boolean(draft), reason: draft ? (reason ?? null) : null,
     ttlMinutes, host,
   };
   const result = reserve(lockRoot, resource, owner, nowMs, nowIso, null, 'unknown', ttlMinutes, meta);
@@ -220,12 +248,15 @@ export function pushRefusal({
   for (const entry of claims) {
     if (isClaimHolder(entry, { sessionId, who })) continue;
     const holder = entry.meta.who;
+    // Draft is no longer a given (operator ruling 2026-09-27, draft-only-on-withdrawal): only say "the PR is
+    // draft" when this held claim actually drafted it.
+    const draftNote = entry.meta.draft ? ' (the PR is draft until then)' : '';
     return {
       refused: true, pr: entry.meta.pr, repo: entry.meta.repo, holder,
       why: entry.meta.why || '',
       message: `push to ${b} refused: ${holder} holds the fix claim on PR #${entry.meta.pr} (${entry.meta.repo})`
         + `${entry.meta.why ? ` — ${entry.meta.why}` : ''}. Only the claim holder may push while it is live. Wait `
-        + `for its \`fix-end\` (the PR is draft until then), or coordinate with ${holder}. `
+        + `for its \`fix-end\`${draftNote}, or coordinate with ${holder}. `
         + 'See we:scripts/conveyor/fix-procedure.mjs.',
     };
   }
@@ -254,7 +285,17 @@ export function repoKeyForCheckout(cwd, { remote = 'origin', exec = execFileSync
 
 // ── marker comments (pure) ────────────────────────────────────────────────────────────────────────────────────
 
-export function buildFixBeginComment({ who, why = '', branch = null, headSha = null, ttlMinutes = DEFAULT_FIX_CLAIM_TTL_MINUTES }) {
+export function buildFixBeginComment({
+  who, why = '', branch = null, headSha = null, ttlMinutes = DEFAULT_FIX_CLAIM_TTL_MINUTES, draft = false, reason = null,
+}) {
+  const statusLine = draft
+    ? `The PR is now **draft** (\`${reason}\`) — `
+      + (reason === 'withdrawn'
+        ? 'review found this PR does not do what the card asked at all.'
+        : 'a scope-change request reached this fix mid-review.')
+      + ' It stays draft until required CI is green on a new head (draft-first promotion), and review re-runs from there.'
+    : 'The PR stays **ready for review** — a normal repair loop never drafts it; the fix claim itself is the '
+      + 'lock, so no review/fix/ci-heal races it and no push from anyone else lands while it is live.';
   return [
     FIX_BEGIN_MARKER,
     '',
@@ -262,19 +303,24 @@ export function buildFixBeginComment({ who, why = '', branch = null, headSha = n
     `**Why:** ${why || '(not stated)'}`,
     branch ? `**Branch:** \`${branch}\`${headSha ? ` at \`${String(headSha).slice(0, 9)}\`` : ''}` : null,
     '',
+    statusLine,
+    '',
     `While this claim is live (${ttlMinutes}-minute TTL, heartbeat-refreshed while the fixer runs): no review or `
       + 'advisory is dispatched, no other fixer starts, and pushes to this branch by anyone but the holder are '
-      + 'refused. The PR is a draft until the fixer runs `fix-end` and required CI is green again.',
+      + 'refused. See we:docs/agent/platform-decisions.md#fix-claim-draft-only-on-withdrawal.',
     `<!-- fix-claim who=${who} -->`,
   ].filter((l) => l !== null).join('\n');
 }
 
-export function buildFixEndComment({ who, headSha = null }) {
+export function buildFixEndComment({ who, headSha = null, draft = false }) {
+  const tail = draft
+    ? 'The PR stays a draft; the fix daemon marks it ready once required CI is green, and review re-runs from there.'
+    : 'The PR was never drafted for this claim — it stays ready; nothing further is owed here, and dispatch '
+      + '(review/ci-heal) resumes normally on the next tick.';
   return [
     FIX_END_MARKER,
     '',
-    `\`${who}\` released the fix claim${headSha ? ` at \`${String(headSha).slice(0, 9)}\`` : ''}. The PR stays a `
-      + 'draft; the fix daemon marks it ready once required CI is green, and review re-runs from there.',
+    `\`${who}\` released the fix claim${headSha ? ` at \`${String(headSha).slice(0, 9)}\`` : ''}. ${tail}`,
   ].join('\n');
 }
 
@@ -310,46 +356,69 @@ async function labelProviderDefault() {
 }
 
 /**
- * `fix-begin`: claim → draft → label → marker comment. A failure to convert to draft RELEASES the claim and
- * fails: a claim on a still-ready PR would let review race the fix, which is the thing this procedure prevents.
+ * `fix-begin`: claim → (draft, only for an explicit reason) → label → marker comment. Default (operator ruling
+ * 2026-09-27, draft-only-on-withdrawal): NO draft — the PR stays ready, `review-status:fixing` is the visible
+ * signal, and the claim itself is the lock. Pass `draft: true` with `reason: 'scope-change'|'withdrawn'` to also
+ * convert the PR to draft with its own reason label; a failure to convert RELEASES the claim and fails (a claim
+ * on a still-ready PR when a draft WAS requested would let review race the fix). `draft` requires a valid
+ * `reason`, and `reason` requires `draft: true` — anything else is refused before any IO happens.
  */
 export async function fixBegin({
   repo, pr, who, why = '', sessionId = callerIdentity().sessionId, gh = ghDefault, labels = null,
   lockRoot = fixDispatchClaimRoot(), nowMs = Date.now(), ttlMinutes = DEFAULT_FIX_CLAIM_TTL_MINUTES,
+  draft = false, reason = null,
 } = {}) {
   const repoKey = repoKeyOf(repo);
+  if (draft && !FIX_DRAFT_REASONS.includes(reason)) {
+    return { ok: false, reason: 'draft-reason-required', pr: Number(pr), detail: `--draft needs --reason=${FIX_DRAFT_REASONS.join('|')}` };
+  }
+  if (!draft && reason != null) {
+    return { ok: false, reason: 'reason-without-draft', pr: Number(pr), detail: '--reason is only valid with --draft' };
+  }
   const slug = CONSTELLATION_REPOS[repoKey].slug;
   const view = JSON.parse(String(await gh(['pr', 'view', String(pr), '--repo', slug, '--json', 'headRefName,headRefOid,isDraft,state,labels'])));
   if (view.state && view.state !== 'OPEN') return { ok: false, reason: 'not-open', pr: Number(pr) };
   const claim = acquireFixClaim({
     repo: repoKey, pr, who, why, sessionId, branch: view.headRefName, headSha: view.headRefOid, lockRoot, nowMs, ttlMinutes,
+    draft, reason,
   });
   if (!claim.ok) return { ok: false, reason: claim.reason, heldBy: claim.heldBy, pr: Number(pr) };
   const steps = [];
   try {
-    if (!view.isDraft) { await gh(['pr', 'ready', String(pr), '--repo', slug, '--undo']); steps.push('draft'); }
+    if (draft && !view.isDraft) { await gh(['pr', 'ready', String(pr), '--repo', slug, '--undo']); steps.push('draft'); }
   } catch (e) {
     releaseFixClaim({ repo: repoKey, pr, who, sessionId, lockRoot });
     return { ok: false, reason: 'draft-failed', detail: String(e?.message ?? e).split('\n')[0], pr: Number(pr) };
   }
   // Label + comment are the human-visible half: best-effort, reported, never a reason to drop the claim.
   const provider = labels ?? await labelProviderDefault();
+  const wantLabel = draft ? FIX_DRAFT_LABEL[reason] : FIXING_LABEL;
+  // Every OTHER label in this claim's family is stale the moment one is applied — mutually exclusive by design.
+  const familyLabels = [FIXING_LABEL, ...Object.values(FIX_DRAFT_LABEL)].filter((l) => l !== wantLabel);
   try {
-    provider.ensureLabel(slug, FIXING_LABEL, { color: 'c5def5', description: 'informative: a reviewer/fixer is currently working this PR, or stuck (auto-managed)' });
+    provider.ensureLabel(slug, wantLabel, { color: 'c5def5', description: 'informative: a reviewer/fixer is currently working this PR, or stuck (auto-managed)' });
     const present = (view.labels ?? []).map((l) => (typeof l === 'string' ? l : l?.name));
-    provider.setLabels(slug, Number(pr), { add: FIXING_LABEL, remove: present.includes(STOOD_DOWN_LABEL) ? [STOOD_DOWN_LABEL] : [] });
+    const toRemove = [STOOD_DOWN_LABEL, ...familyLabels].filter((l) => present.includes(l));
+    provider.setLabels(slug, Number(pr), { add: wantLabel, remove: toRemove });
     steps.push('label');
   } catch (e) { steps.push(`label-failed: ${String(e?.message ?? e).split('\n')[0]}`); }
   if (claim.reason !== 'own') {
     try {
-      provider.postComment(slug, Number(pr), buildFixBeginComment({ who, why, branch: view.headRefName, headSha: view.headRefOid, ttlMinutes }));
+      provider.postComment(slug, Number(pr), buildFixBeginComment({ who, why, branch: view.headRefName, headSha: view.headRefOid, ttlMinutes, draft, reason }));
       steps.push('comment');
     } catch (e) { steps.push(`comment-failed: ${String(e?.message ?? e).split('\n')[0]}`); }
   }
-  return { ok: true, pr: Number(pr), repo: repoKey, who, branch: view.headRefName, headSha: view.headRefOid, reentrant: claim.reason === 'own', steps };
+  return { ok: true, pr: Number(pr), repo: repoKey, who, branch: view.headRefName, headSha: view.headRefOid, draft, reason: draft ? reason : null, reentrant: claim.reason === 'own', steps };
 }
 
-/** `fix-end`: release → drop the `fixing` label → marker comment. The PR is deliberately LEFT DRAFT. */
+/**
+ * `fix-end`: release → drop whichever label `fix-begin` applied → marker comment. A claim that never drafted
+ * the PR (the default, operator ruling 2026-09-27) leaves it exactly as it was — READY — and owes nothing
+ * further: this does NOT rely on the draft-first promotion, because there was never a draft to promote out of.
+ * A claim that DID draft the PR (`--draft --reason=scope-change|withdrawn`) is deliberately LEFT DRAFT — that
+ * half still relies on the draft-first promotion (`reconcile-core.mjs` `promote-draft`) to mark it ready once
+ * required CI is green.
+ */
 export async function fixEnd({
   repo, pr, who, sessionId = callerIdentity().sessionId, gh = ghDefault, labels = null, lockRoot = fixDispatchClaimRoot(),
 } = {}) {
@@ -357,13 +426,16 @@ export async function fixEnd({
   const slug = CONSTELLATION_REPOS[repoKey].slug;
   const rel = releaseFixClaim({ repo: repoKey, pr, who, sessionId, lockRoot });
   if (!rel.released) return { ok: false, reason: rel.reason, heldBy: rel.heldBy ?? null, pr: Number(pr) };
+  const wasDraft = Boolean(rel.entry?.meta?.draft);
+  const draftReason = rel.entry?.meta?.reason ?? null;
+  const heldLabel = wasDraft && FIX_DRAFT_LABEL[draftReason] ? FIX_DRAFT_LABEL[draftReason] : FIXING_LABEL;
   const steps = [];
   let headSha = null;
   try { headSha = JSON.parse(String(await gh(['pr', 'view', String(pr), '--repo', slug, '--json', 'headRefOid']))).headRefOid ?? null; } catch { headSha = null; }
   const provider = labels ?? await labelProviderDefault();
-  try { provider.setLabels(slug, Number(pr), { remove: [FIXING_LABEL] }); steps.push('unlabel'); } catch (e) { steps.push(`unlabel-failed: ${String(e?.message ?? e).split('\n')[0]}`); }
-  try { provider.postComment(slug, Number(pr), buildFixEndComment({ who, headSha })); steps.push('comment'); } catch (e) { steps.push(`comment-failed: ${String(e?.message ?? e).split('\n')[0]}`); }
-  return { ok: true, pr: Number(pr), repo: repoKey, who, headSha, steps };
+  try { provider.setLabels(slug, Number(pr), { remove: [heldLabel] }); steps.push('unlabel'); } catch (e) { steps.push(`unlabel-failed: ${String(e?.message ?? e).split('\n')[0]}`); }
+  try { provider.postComment(slug, Number(pr), buildFixEndComment({ who, headSha, draft: wasDraft })); steps.push('comment'); } catch (e) { steps.push(`comment-failed: ${String(e?.message ?? e).split('\n')[0]}`); }
+  return { ok: true, pr: Number(pr), repo: repoKey, who, headSha, draft: wasDraft, reason: draftReason, steps };
 }
 
 // ── CLI ───────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -380,6 +452,7 @@ if (IS_CLI) {
   const out = (o, code = 0) => { writeLineSync(1, JSON.stringify(o)); process.exit(code); };
   const fail = (m) => { writeLineSync(2, `✗ fix-procedure: ${m}`); process.exit(1); };
   const USAGE = 'usage: fix-procedure.mjs <fix-begin|fix-end|fix-heartbeat|fix-status> <pr> --repo=<slug|key> [--who=<session|worker>] [--why=<text>]\n'
+    + '                                    [fix-begin only] [--draft --reason=scope-change|withdrawn]\n'
     + '       fix-procedure.mjs push-check --branch=<lane/…> [--repo=…]\n'
     + '       fix-procedure.mjs push --branch=<lane/…> [--src=HEAD] [--remote=origin] [--repo=…]';
   const id = callerIdentity();
@@ -389,16 +462,23 @@ if (IS_CLI) {
     if (cmd === 'fix-begin' || cmd === 'fix-end' || cmd === 'fix-heartbeat' || cmd === 'fix-status') {
       const pr = Number(pos[0]);
       if (!Number.isInteger(pr) || pr <= 0) fail(USAGE);
-      // A PR number means nothing without its repo: defaulting to `we` claimed (and drafted) an unrelated WE PR
-      // for a frontierui repair. So the repo is REQUIRED here — never guessed.
+      // A PR number means nothing without its repo: defaulting to `we` claimed an unrelated WE PR for a
+      // frontierui repair. So the repo is REQUIRED here — never guessed.
       if (typeof flags.repo !== 'string' || !flags.repo) fail(`${cmd} needs --repo=<slug|key> — a PR number is only unique within its repo`);
       if (cmd === 'fix-status') {
         const e = readLiveFixClaim({ repo, pr });
-        out({ pr, claimed: Boolean(e), who: e?.meta?.who ?? null, why: e?.meta?.why ?? null, branch: e?.meta?.branch ?? null, heartbeatAt: e?.heartbeatAt ?? null });
+        out({
+          pr, claimed: Boolean(e), who: e?.meta?.who ?? null, why: e?.meta?.why ?? null, branch: e?.meta?.branch ?? null,
+          draft: e?.meta?.draft ?? false, draftReason: e?.meta?.reason ?? null, heartbeatAt: e?.heartbeatAt ?? null,
+        });
       }
       if (!who) fail(`${cmd} needs --who=<session|worker> (or WE_FIX_WHO)`);
       if (cmd === 'fix-begin') {
-        const r = await fixBegin({ repo, pr, who, why: typeof flags.why === 'string' ? flags.why : '' });
+        // Default: no draft — the PR stays ready (operator ruling 2026-09-27, draft-only-on-withdrawal).
+        // `--draft` needs `--reason=scope-change|withdrawn`; `fixBegin` itself refuses any other combination.
+        const draft = flags.draft === true || flags.draft === 'true';
+        const draftReason = typeof flags.reason === 'string' ? flags.reason : null;
+        const r = await fixBegin({ repo, pr, who, why: typeof flags.why === 'string' ? flags.why : '', draft, reason: draftReason });
         out(r, r.ok ? 0 : 3);
       }
       if (cmd === 'fix-end') { const r = await fixEnd({ repo, pr, who, sessionId: id.sessionId }); out(r, r.ok ? 0 : 3); }
