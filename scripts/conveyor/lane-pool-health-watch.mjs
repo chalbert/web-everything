@@ -385,13 +385,17 @@ export function defaultListWhois({ exec = execFileSync, repo = null, root = REPO
  * @param {{exec?:Function, repo?:string|null, root?:string, lane:number, dryRun?:boolean}} o
  * @returns {{reclaimed:boolean, wouldReclaim?:boolean, preserved:boolean, reason:string}|null}
  */
-export function defaultReclaimLane({ exec = execFileSync, repo = null, root = REPO_ROOT, lane, dryRun = false }) {
+export function defaultReclaimLane({ exec = execFileSync, repo = null, root = REPO_ROOT, lane, dryRun = false, salvage = false }) {
   const argv = [join(root, 'scripts', 'lane-pool.mjs'), 'reclaim', `--lane=${lane}`, '--json'];
   const repoPath = resolveLanePoolRepoPath(repo);
   if (repoPath) argv.push(`--repo=${repoPath}`);
   if (dryRun) argv.push('--dry-run');
+  if (salvage) argv.push('--salvage');
   try {
-    const out = exec('node', argv, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 4 * 1024 * 1024, timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL' });
+    // A salvage writes + verifies a git bundle first — give it a real budget (a kill mid-salvage leaves the lane
+    // untouched: the reset only ever runs after the bundle verified).
+    const timeout = salvage ? Math.max(resolveChildTimeoutMs(), 5 * 60_000) : resolveChildTimeoutMs();
+    const out = exec('node', argv, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 4 * 1024 * 1024, timeout, killSignal: 'SIGKILL' });
     const parsed = JSON.parse(String(out || 'null'));
     return parsed && typeof parsed === 'object' ? parsed : null;
   } catch {
@@ -410,7 +414,7 @@ export function defaultReclaimLane({ exec = execFileSync, repo = null, root = RE
  * @param {{whois:{lanes:Array<object>}|null, reclaimLane:Function, dryRun:boolean}} o
  * @returns {Array<{lane:number, reclaimed:boolean, wouldReclaim?:boolean, reason?:string}>}
  */
-export function reclaimFinishedLanes({ whois, reclaimLane, dryRun }) {
+export function reclaimFinishedLanes({ whois, reclaimLane, dryRun, salvageEnabled = false, salvageMax = DEFAULT_SALVAGE_MAX_PER_TICK }) {
   if (!whois || !Array.isArray(whois.lanes)) return [];
   const candidates = whois.lanes.filter((row) => row && row.exists && row.verdict === 'finished-reclaimable');
   const outcomes = [];
@@ -420,7 +424,45 @@ export function reclaimFinishedLanes({ whois, reclaimLane, dryRun }) {
       ? { lane: row.lane, ...result }
       : { lane: row.lane, reclaimed: false, reason: 'reclaim call unavailable this tick' });
   }
+  // SNAPSHOT-THEN-RECLAIM (2026-09-27 pool starvation: 74 of 90 lanes unleased-but-dirty, 0 acquirable). A
+  // `finished-needs-review` / `unknown-work` lane with no lease, no live owner and no operator `keep` is
+  // handed to `reclaim --salvage`, which re-checks liveness itself (live agent/process in the lane, quiet
+  // period), saves every unpreserved change durably (verified bundle + patch + index) and only then resets.
+  if (salvageEnabled) {
+    const salvageCandidates = planSalvageCandidates(whois.lanes).slice(0, Math.max(0, salvageMax));
+    for (const row of salvageCandidates) {
+      const result = reclaimLane({ lane: row.lane, dryRun, salvage: true });
+      outcomes.push(result
+        ? { lane: row.lane, salvageCandidate: true, ...result }
+        : { lane: row.lane, salvageCandidate: true, reclaimed: false, reason: 'salvage-reclaim call unavailable this tick' });
+    }
+  }
   return outcomes;
+}
+
+/** Env knobs for the salvage sub-pass: presence-disables, and a per-tick cap (each salvage writes a bundle). */
+export const SALVAGE_DISABLE_ENV_VAR = 'WE_LANE_POOL_SALVAGE_DISABLED';
+export const SALVAGE_MAX_ENV_VAR = 'WE_LANE_POOL_SALVAGE_MAX_PER_TICK';
+export const DEFAULT_SALVAGE_MAX_PER_TICK = 20;
+/** Below this many acquirable lanes, the tick raises a low-pool ALERT line (env override). */
+export const LOW_WATER_ENV_VAR = 'WE_LANE_POOL_LOW_WATER';
+export const DEFAULT_LOW_WATER = 5;
+
+/** PURE: which whois rows the salvage sub-pass may try — unleased, not live-owned, not operator-kept, and
+ *  carrying content the plain reclaim path refuses. Oldest-numbered first (deterministic). */
+export function planSalvageCandidates(rows) {
+  return (Array.isArray(rows) ? rows : [])
+    .filter((row) => row && row.exists && !row.lease && !row.liveOwner && !row.holderAlive && !row.kept
+      && !(row.lastHolder && row.lastHolder.liveOwner)
+      && (row.verdict === 'finished-needs-review' || row.verdict === 'unknown-work'))
+    .sort((a, b) => a.lane - b.lane);
+}
+
+/** PURE: the low-pool alert line, or `null` when the pool has at least `lowWater` acquirable lanes. */
+export function lowPoolAlert(health, lowWater = DEFAULT_LOW_WATER) {
+  if (!health || !(health.acquirable < lowWater)) return null;
+  return `ALERT: lane pool low — ${health.acquirable} acquirable (< ${lowWater}) of ${health.total}: ` +
+    `${health.leased} leased, ${health.dirtyUnleased} dirty unleased`;
 }
 
 /**
@@ -452,7 +494,8 @@ export function watchLanePoolHealth({
   reap = cleanLaneLitter, isLeasedNow = defaultIsLeasedNow, dryRun = false,
   trimPool = defaultTrimPool, trimMax = null, listAcquirable = defaultListAcquirable,
   listWhois = defaultListWhois, reclaimLane = defaultReclaimLane, reclaimEnabled = true,
-  writeFreeLaneList = defaultWriteFreeLaneList,
+  writeFreeLaneList = defaultWriteFreeLaneList, salvageEnabled = false, salvageMax = DEFAULT_SALVAGE_MAX_PER_TICK,
+  lowWater = DEFAULT_LOW_WATER,
 } = {}) {
   const status = listStatus({ repo, root });
   const lanes = status.lanes.map((l) => (
@@ -500,10 +543,11 @@ export function watchLanePoolHealth({
   let reclaim = null;
   if (reclaimEnabled) {
     const whois = listWhois({ repo, root });
-    const outcomes = reclaimFinishedLanes({ whois, reclaimLane: (o) => reclaimLane({ repo, root, dryRun, ...o }), dryRun });
+    const outcomes = reclaimFinishedLanes({ whois, reclaimLane: (o) => reclaimLane({ repo, root, dryRun, ...o }), dryRun, salvageEnabled, salvageMax });
     reclaim = { verdicts: whois, outcomes };
   }
-  return { health: summarizeHealth(lanes, plan, reaped, acquirableLaneNumbers), plan, reaped, dryRun, trim, reclaim, freeLaneList };
+  const health = summarizeHealth(lanes, plan, reaped, acquirableLaneNumbers);
+  return { health, alert: lowPoolAlert(health, lowWater), plan, reaped, dryRun, trim, reclaim, freeLaneList };
 }
 
 /**
@@ -519,7 +563,12 @@ export function runLanePoolHealthWatch({ env = process.env, ...opts } = {}) {
   // silently run anyway, contradicting the "any value" contract documented on `DISABLE_ENV_VAR` above.
   if (env[DISABLE_ENV_VAR] !== undefined) return { disabled: true };
   const reclaimEnabled = env[RECLAIM_DISABLE_ENV_VAR] === undefined && opts.reclaimEnabled !== false;
-  return watchLanePoolHealth({ ...opts, reclaimEnabled });
+  const salvageEnabled = reclaimEnabled && env[SALVAGE_DISABLE_ENV_VAR] === undefined && opts.salvageEnabled !== false;
+  const maxN = Number(env[SALVAGE_MAX_ENV_VAR]);
+  const salvageMax = Number.isInteger(maxN) && maxN >= 0 ? maxN : DEFAULT_SALVAGE_MAX_PER_TICK;
+  const lw = Number(env[LOW_WATER_ENV_VAR]);
+  const lowWater = Number.isInteger(lw) && lw >= 0 ? lw : DEFAULT_LOW_WATER;
+  return watchLanePoolHealth({ salvageMax, lowWater, ...opts, reclaimEnabled, salvageEnabled });
 }
 
 const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
@@ -535,11 +584,12 @@ if (IS_CLI) {
     if (result.disabled) {
       process.stderr.write(`  lane-pool-health-watch: disabled (${DISABLE_ENV_VAR} set)\n`);
     } else {
-      const { health, plan, reaped, trim, reclaim, freeLaneList } = result;
+      const { health, plan, reaped, trim, reclaim, freeLaneList, alert } = result;
       process.stderr.write(
         `  pool health: ${health.acquirable} acquirable · ${health.dirtyUnleased} dirty(unleased) · ` +
           `${health.leased} leased · ${health.total} total\n`,
       );
+      if (alert) process.stderr.write(`  ${alert}\n`);
       // #4122 — `null` covers three different ticks (dry-run, real-read-unavailable, a write failure); this
       // report line does not need to tell them apart (each already logs its own signal above/below), only
       // whether `acquire` has a fresh list to read after this tick.
@@ -576,17 +626,28 @@ if (IS_CLI) {
       } else if (!reclaim.verdicts) {
         process.stderr.write('  lane reclaim: whois scan unavailable this tick (best-effort — see any error above)\n');
       } else {
-        const done = reclaim.outcomes.filter((o) => o.reclaimed);
-        const would = reclaim.outcomes.filter((o) => o.wouldReclaim);
-        const refused = reclaim.outcomes.filter((o) => !o.reclaimed && !o.wouldReclaim);
+        const plain = reclaim.outcomes.filter((o) => !o.salvageCandidate);
+        const done = plain.filter((o) => o.reclaimed);
+        const would = plain.filter((o) => o.wouldReclaim);
+        const refused = plain.filter((o) => !o.reclaimed && !o.wouldReclaim);
         process.stderr.write(
-          `  lane reclaim: ${reclaim.outcomes.length} finished-reclaimable candidate(s) → ` +
+          `  lane reclaim: ${plain.length} finished-reclaimable candidate(s) → ` +
             `${dryRun ? `${would.length} would reclaim` : `${done.length} reclaimed`}` +
             `${refused.length ? `, ${refused.length} refused (preservation re-check failed)` : ''}\n`,
         );
-        for (const o of reclaim.outcomes) {
+        for (const o of plain) {
           if (o.reclaimed || o.wouldReclaim) continue;
           process.stderr.write(`    lane-${o.lane}: NOT reclaimed — ${o.reason}\n`);
+        }
+        const salv = reclaim.outcomes.filter((o) => o.salvageCandidate);
+        if (salv.length) {
+          const ok = salv.filter((o) => (dryRun ? o.wouldSalvage || o.wouldReclaim : o.reclaimed));
+          process.stderr.write(`  lane salvage: ${salv.length} candidate(s) → ${ok.length} ${dryRun ? 'would be salvaged+reset' : 'salvaged+reset'}, ${salv.length - ok.length} kept\n`);
+          for (const o of salv) {
+            if (o.salvaged) process.stderr.write(`    lane-${o.lane}: salvaged-to ${o.salvage?.bundle || o.salvage?.outDir || '?'} → reset\n`);
+            else if (o.wouldSalvage || (dryRun && o.wouldReclaim)) process.stderr.write(`    lane-${o.lane}: would salvage → reset (${o.reason || ''})\n`);
+            else process.stderr.write(`    lane-${o.lane}: kept — ${o.keptReason || o.reason || 'unknown'}\n`);
+          }
         }
       }
     }
