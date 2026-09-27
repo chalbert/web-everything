@@ -84,10 +84,12 @@ it('maps repo slugs before binding and refuses unknown repos before IO', async (
 it('enrichPrsWithMainRedFacts skips the extra main-run read entirely when nothing is ci-failed', async () => {
   const { enrichPrsWithMainRedFacts } = await import('../reconcile-pass.mjs');
   const readMainRuns = vi.fn();
+  const readMainLatestCheckRuns = vi.fn();
   const prs = [{ number: 1, statusCheckRollup: [] }];
-  const out = enrichPrsWithMainRedFacts(prs, { readMainRuns });
+  const out = enrichPrsWithMainRedFacts(prs, { readMainRuns, readMainLatestCheckRuns });
   expect(readMainRuns).not.toHaveBeenCalled();
-  expect(out).toEqual({ prs, mainRedWindows: [] });
+  expect(readMainLatestCheckRuns).not.toHaveBeenCalled();
+  expect(out).toEqual({ prs, mainRedWindows: [], mainLatestCheckRuns: [] });
 });
 
 it('enrichPrsWithMainRedFacts attaches requiredCheckCompletedAt/aheadByOnMain only to the failing PR (PR #2635\'s real shape)', async () => {
@@ -126,6 +128,126 @@ it('enrichPrsWithMainRedFacts also enriches a PR red only on daemon-soak (soak-m
   expect(out.mainRedWindows).toEqual([{ start: '2026-09-27T02:00:00Z', end: null }]);
 });
 
+// landing-freeze fix (2026-09-27) — PR #2790 fixed a `daemon-soak` regression that never ran on `main` at all
+// during its own window (see `main-red-recovery.mjs`'s own "LANDING-FREEZE FIX" section header), so
+// `mainRedWindows` alone can never attribute #2748/#2783/#2784/#2788/#2789's identical failures to `main`.
+// `mainLatestCheckRuns` is the second, retrospection-independent fact `isPrCiFailureOwedRerun`'s green-check
+// path needs, read under the SAME "only when something is failing" gate as `mainRedWindows`.
+it('enrichPrsWithMainRedFacts also reads mainLatestCheckRuns, under the same pay-only-when-needed gate as mainRedWindows', async () => {
+  const { enrichPrsWithMainRedFacts } = await import('../reconcile-pass.mjs');
+  const soakRed = {
+    number: 2748, headRefOid: 'dfb57d0', statusCheckRollup: [
+      { __typename: 'CheckRun', name: 'test', status: 'COMPLETED', conclusion: 'SUCCESS', completedAt: '2026-09-27T02:32:41Z' },
+      { __typename: 'CheckRun', name: 'daemon-soak', status: 'COMPLETED', conclusion: 'FAILURE', completedAt: '2026-09-27T02:36:03Z' },
+    ],
+  };
+  const readMainLatestCheckRuns = vi.fn(() => [{ name: 'daemon-soak', conclusion: 'success', status: 'completed', completed_at: '2026-09-27T03:56:55Z' }]);
+  const out = enrichPrsWithMainRedFacts([soakRed], {
+    readMainRuns: () => [], readAheadBy: () => 5, readMainLatestCheckRuns,
+  });
+  expect(readMainLatestCheckRuns).toHaveBeenCalledTimes(1);
+  expect(out.mainLatestCheckRuns).toEqual([{ name: 'daemon-soak', conclusion: 'success', status: 'completed', completed_at: '2026-09-27T03:56:55Z' }]);
+});
+
+// PR #2793 review — one `gh run list` per pass (not two), and the per-PR green-fix evidence attached.
+it('enrichPrsWithMainRedFacts reads main\'s run list once, and attaches the green-fix evidence for a check green on main', async () => {
+  const { enrichPrsWithMainRedFacts } = await import('../reconcile-pass.mjs');
+  const soakRed = {
+    number: 2748, headRefOid: 'dfb57d0', statusCheckRollup: [
+      { __typename: 'CheckRun', name: 'daemon-soak', status: 'COMPLETED', conclusion: 'FAILURE', completedAt: '2026-09-27T02:36:03Z' },
+    ],
+  };
+  const mainRuns = [{ status: 'completed', conclusion: 'success', updatedAt: '2026-09-27T04:00:00Z', headSha: 'green-sha', workflowName: 'CI' }];
+  const readMainRuns = vi.fn(() => mainRuns);
+  const readMainLatestCheckRuns = vi.fn(() => [{ name: 'daemon-soak', conclusion: 'success', status: 'completed', completed_at: '2026-09-27T03:56:55Z', head_sha: 'green-sha' }]);
+  const readMainGreenFixFacts = vi.fn(() => ({ prContainsMainGreenSha: false, mergeBaseCheckRuns: [] }));
+  const out = enrichPrsWithMainRedFacts([soakRed], { readMainRuns, readAheadBy: () => 5, readMainLatestCheckRuns, readMainGreenFixFacts });
+  expect(readMainRuns).toHaveBeenCalledTimes(1);
+  expect(readMainLatestCheckRuns).toHaveBeenCalledWith(expect.objectContaining({ mainRuns }));
+  expect(readMainGreenFixFacts).toHaveBeenCalledWith('dfb57d0', expect.objectContaining({ greenSha: 'green-sha', checkName: 'daemon-soak' }));
+  expect(out.prs[0]).toMatchObject({ prContainsMainGreenSha: false, mergeBaseCheckRuns: [] });
+});
+
+it('enrichPrsWithMainRedFacts skips the green-fix read when the check is not green on main', async () => {
+  const { enrichPrsWithMainRedFacts } = await import('../reconcile-pass.mjs');
+  const soakRed = {
+    number: 2748, headRefOid: 'dfb57d0', statusCheckRollup: [
+      { __typename: 'CheckRun', name: 'daemon-soak', status: 'COMPLETED', conclusion: 'FAILURE', completedAt: '2026-09-27T02:36:03Z' },
+    ],
+  };
+  const readMainGreenFixFacts = vi.fn();
+  const out = enrichPrsWithMainRedFacts([soakRed], {
+    readMainRuns: () => [], readAheadBy: () => 5, readMainLatestCheckRuns: () => [], readMainGreenFixFacts,
+  });
+  expect(readMainGreenFixFacts).not.toHaveBeenCalled();
+  expect(out.prs[0]).toMatchObject({ prContainsMainGreenSha: null, mergeBaseCheckRuns: null });
+});
+
+it('defaultReadMainGreenFixFacts: contains-green short-circuits; otherwise reads the merge base\'s check-runs; any failure is null', async () => {
+  const { defaultReadMainGreenFixFacts } = await import('../reconcile-pass.mjs');
+  const o = { repo: 'chalbert/web-everything', greenSha: 'green-sha', checkName: 'daemon-soak' };
+
+  const containsExec = vi.fn(() => JSON.stringify({ behind_by: 0, merge_base: 'green-sha' }));
+  expect(defaultReadMainGreenFixFacts('pr-head', { ...o, exec: containsExec })).toEqual({ prContainsMainGreenSha: true, mergeBaseCheckRuns: null, mergeBaseRunConclusion: null });
+  expect(containsExec).toHaveBeenCalledTimes(1);
+  expect(containsExec.mock.calls[0][1]).toEqual(expect.arrayContaining(['repos/chalbert/web-everything/compare/green-sha...pr-head']));
+
+  const baseRuns = [{ name: 'daemon-soak', conclusion: 'success', status: 'completed', completed_at: 'x' }];
+  const behindExec = vi.fn()
+    .mockReturnValueOnce(JSON.stringify({ behind_by: 4, merge_base: 'base-sha' }))
+    .mockReturnValueOnce(JSON.stringify(baseRuns));
+  // A real result at the base → no run-conclusion read (2 calls only).
+  expect(defaultReadMainGreenFixFacts('pr-head', { ...o, exec: behindExec })).toEqual({ prContainsMainGreenSha: false, mergeBaseCheckRuns: baseRuns, mergeBaseRunConclusion: null });
+  expect(behindExec).toHaveBeenCalledTimes(2);
+  expect(behindExec.mock.calls[1][1]).toEqual([
+    'api', 'repos/chalbert/web-everything/commits/base-sha/check-runs?check_name=daemon-soak&per_page=100', '--jq', '.check_runs',
+  ]);
+
+  // No result at the base (PR #2748's shape) → reads the base's own CI push run; newest COMPLETED `CI` wins.
+  const skippedExec = vi.fn()
+    .mockReturnValueOnce(JSON.stringify({ behind_by: 4, merge_base: 'base-sha' }))
+    .mockReturnValueOnce(JSON.stringify([{ name: 'daemon-soak', conclusion: 'skipped', status: 'completed', completed_at: 'x' }]))
+    .mockReturnValueOnce(JSON.stringify([
+      { name: 'CI', status: 'completed', conclusion: 'cancelled', updated_at: '2026-09-26T01:00:00Z' },
+      { name: 'CI', status: 'completed', conclusion: 'success', updated_at: '2026-09-26T02:00:00Z' },
+      { name: 'CI', status: 'in_progress', conclusion: null, updated_at: '2026-09-26T03:00:00Z' },
+      { name: 'release-please', status: 'completed', conclusion: 'failure', updated_at: '2026-09-26T04:00:00Z' },
+    ]));
+  expect(defaultReadMainGreenFixFacts('pr-head', { ...o, exec: skippedExec }).mergeBaseRunConclusion).toBe('success');
+  expect(skippedExec.mock.calls[2][1][3]).toBe('repos/chalbert/web-everything/actions/runs?head_sha=base-sha&event=push&per_page=100');
+
+  const none = { prContainsMainGreenSha: null, mergeBaseCheckRuns: null, mergeBaseRunConclusion: null };
+  const throwingExec = vi.fn(() => { throw new Error('gh: not found'); });
+  expect(defaultReadMainGreenFixFacts('pr-head', { ...o, exec: throwingExec })).toEqual(none);
+  const noRepoExec = vi.fn();
+  expect(defaultReadMainGreenFixFacts('pr-head', { ...o, repo: null, exec: noRepoExec })).toEqual(none);
+  expect(noRepoExec).not.toHaveBeenCalled();
+});
+
+it('defaultReadMainLatestCheckRuns never calls exec at all with no repo — the safe no-op default (mirrors defaultReadRequiredContexts)', async () => {
+  const { defaultReadMainLatestCheckRuns } = await import('../reconcile-pass.mjs');
+  const exec = vi.fn();
+  expect(defaultReadMainLatestCheckRuns({ exec, repo: null })).toEqual([]);
+  expect(exec).not.toHaveBeenCalled();
+});
+
+it('defaultReadMainLatestCheckRuns reads main\'s latest completed run\'s own check-runs, and degrades to [] on any failure', async () => {
+  const { defaultReadMainLatestCheckRuns } = await import('../reconcile-pass.mjs');
+  const readMainRuns = vi.fn(() => [
+    { status: 'completed', updatedAt: '2026-09-27T04:00:00Z', headSha: 'main-tip-sha', workflowName: 'CI' },
+  ]);
+  const exec = vi.fn(() => JSON.stringify([{ name: 'daemon-soak', conclusion: 'success', status: 'completed', completed_at: '2026-09-27T03:56:55Z' }]));
+  const out = defaultReadMainLatestCheckRuns({ exec, repo: 'chalbert/web-everything', readMainRuns });
+  expect(out).toEqual([{ name: 'daemon-soak', conclusion: 'success', status: 'completed', completed_at: '2026-09-27T03:56:55Z' }]);
+  expect(exec).toHaveBeenCalledWith('gh', [
+    // PR #2793 review — `per_page=100`: the default page of 30 can push the failing check off page one.
+    'api', 'repos/chalbert/web-everything/commits/main-tip-sha/check-runs?per_page=100', '--jq', '.check_runs',
+  ], expect.any(Object));
+
+  const throwingExec = vi.fn(() => { throw new Error('gh: not found'); });
+  expect(defaultReadMainLatestCheckRuns({ exec: throwingExec, repo: 'chalbert/web-everything', readMainRuns })).toEqual([]);
+});
+
 it('defaultReadMainRuns filters to the CI workflow and passes the exact pinned argv', async () => {
   const { execFileSync } = await import('node:child_process');
   execFileSync.mockReturnValueOnce(JSON.stringify([
@@ -136,7 +258,7 @@ it('defaultReadMainRuns filters to the CI workflow and passes the exact pinned a
   const runs = defaultReadMainRuns({});
   expect(runs).toEqual([{ databaseId: 1, workflowName: 'CI', status: 'completed', conclusion: 'success', createdAt: 'a', updatedAt: 'b' }]);
   expect(execFileSync).toHaveBeenCalledWith('gh', [
-    'run', 'list', '--branch', 'main', '--limit', '100', '--json', 'databaseId,conclusion,status,createdAt,updatedAt,workflowName',
+    'run', 'list', '--branch', 'main', '--limit', '100', '--json', 'databaseId,conclusion,status,createdAt,updatedAt,workflowName,headSha',
   ], expect.any(Object));
 });
 
