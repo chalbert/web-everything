@@ -164,7 +164,7 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join, resolve, basename } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { randomUUID } from 'node:crypto';
 
@@ -249,11 +249,97 @@ export function resolveGhPointsBudgetPerMin(env = process.env) {
   return Number.isFinite(n) && n >= 1 ? Math.floor(n) : DEFAULT_GH_POINTS_BUDGET_PER_MIN;
 }
 
+/**
+ * Per-minute WRITE-ONLY budget — a THIRD, independent gate ({@link classifyGhWrite} decides membership), never
+ * consulted for a read. #gh-write-burst (live 2026-09-27 03:5x-04:00Z landing freeze): the points budget above
+ * alone did NOT stop that storm — every call in this module defaults to costing 1 point regardless of whether
+ * it reads or writes, so a run of cheap mutations (a label flip, a posted comment) stays well inside a
+ * 300-points-per-minute budget while still hammering GitHub's secondary limit, which is explicitly an ABUSE/
+ * burst detector keyed on repeated MUTATIONS, not on generic REST-point spend (this module's own header, THREE
+ * signals section). Reads and writes are not the same risk, so they get separate ceilings.
+ *
+ * DERIVED from that same incident, not invented: `calls.jsonl`'s own burst breakdown was `pr edit` x~80 + `pr
+ * comment` x~75 in the ten minutes before the freeze (the third op in that burst, `api --method` x152, turned
+ * out on inspection to be `--method GET` reads from `parked-pr-conflict-watch.mjs#computeConflictDisposition`,
+ * NOT mutations — the exact ambiguity {@link classifyGhWrite} exists to resolve for every future read of this
+ * log, not just this one). That is a real, sustained mutation rate of roughly 15/min for ten straight minutes —
+ * `DEFAULT_GH_WRITE_BUDGET_PER_MIN` sits at roughly half that storm rate, well above any single legitimate
+ * multi-PR write burst this repo's own passes produce today (a merge-orphan-sweep landing a handful of PRs back
+ * to back, a label sweep touching a dozen PRs in one tick), while making a repeat of THIS incident's shape queue
+ * instead of hammering GitHub. Overridable via `WE_GH_THROTTLE_WRITE_BUDGET_PER_MIN`.
+ */
+export const DEFAULT_GH_WRITE_BUDGET_PER_MIN = 40;
+
+export function resolveGhWriteBudgetPerMin(env = process.env) {
+  const n = Number(env.WE_GH_THROTTLE_WRITE_BUDGET_PER_MIN);
+  return Number.isFinite(n) && n >= 1 ? Math.floor(n) : DEFAULT_GH_WRITE_BUDGET_PER_MIN;
+}
+
+/**
+ * Classify a `gh` invocation's argv as a MUTATION ("write") or not, for the write-budget gate above — completely
+ * independent of {@link isRateLimitShaped}/the concurrency cap. PURE: argv in, boolean out. Reuses `gh`'s own
+ * documented method-inference rule for `gh api` (an explicit `--method` wins; absent that, `gh` itself switches
+ * to `POST` the instant any `-f`/`-F`/`--field`/`--raw-field`/`--input` flag is present — the exact rule
+ * `we:scripts/lib/review-label-provider.mjs`'s own header already names for `readPrFiles`'s `--method GET`) —
+ * never re-guessed here. Every current `gh api --method ...` call site in this repo passes `GET` (confirmed by
+ * grep, 2026-09-27; see {@link DEFAULT_GH_WRITE_BUDGET_PER_MIN}'s own doc comment) — this classifier is what
+ * keeps that true going forward instead of being an unwritten convention nobody checks.
+ * @param {string[]} args
+ * @returns {boolean}
+ */
+export function classifyGhWrite(args) {
+  const a = Array.isArray(args) ? args : [];
+  const cmd = a[0];
+  const sub = a[1];
+  if (cmd === 'pr') return ['edit', 'comment', 'close', 'merge', 'reopen', 'ready', 'create', 'review'].includes(sub);
+  if (cmd === 'issue') return ['edit', 'comment', 'close', 'reopen', 'create'].includes(sub);
+  if (cmd === 'label') return ['create', 'delete', 'edit'].includes(sub);
+  if (cmd === 'run') return ['cancel', 'rerun'].includes(sub);
+  if (cmd === 'api') {
+    const methodIdx = a.indexOf('--method');
+    const method = methodIdx >= 0 ? String(a[methodIdx + 1] || '').toUpperCase() : null;
+    if (method) return method !== 'GET' && method !== 'HEAD';
+    return a.some((t) => t === '-f' || t === '-F' || t === '--field' || t === '--raw-field' || t === '--input');
+  }
+  return false;
+}
+
+/**
+ * Best-effort caller attribution for a `gh` call, recorded on every `calls.jsonl` line (see {@link
+ * recordGhCallLogEntry}) so the NEXT burst is traceable in one grep instead of the forensic, multi-log,
+ * multi-transcript correlation the 2026-09-27 incident needed. Precedence, most to least specific:
+ *   1. `throttle.caller` — an explicit override a call site passes (tests, a future precise adopter).
+ *   2. `GH_CALLER` env — set by `we:skills-src/conveyor/pass-daemon.mjs` to the exact manifest pass name
+ *      (e.g. "parked-pr-conflict-watch-we") before spawning each daemon+pass's child process; also settable by
+ *      hand for an ad hoc invocation.
+ *   3. `process.argv[1]`'s basename — free attribution for EVERY caller that runs as its OWN node process
+ *      (every mechanical pass spawned by pass-daemon.mjs, and the standalone CLI's own direct invocations):
+ *      `process.argv[1]` in that process IS the pass's own script path, no env needed. Only uninformative for
+ *      one population — the standalone CLI passthrough used by the gh App shim (#4064), where argv[1] is always
+ *      this module itself — which is exactly why (2) exists.
+ *   4. `'unknown'` — never blank; a caller field that could be absent is one nobody greps reliably.
+ * @param {{caller?:string}} throttle
+ * @param {NodeJS.ProcessEnv} env
+ * @returns {string}
+ */
+export function deriveGhCaller(throttle, env) {
+  if (throttle && throttle.caller) return String(throttle.caller);
+  if (env && env.GH_CALLER) return String(env.GH_CALLER);
+  const argv1 = process.argv[1];
+  if (argv1) {
+    const b = basename(argv1);
+    if (b && b !== 'gh-throttle.mjs') return b;
+  }
+  return 'unknown';
+}
+
 const SUBDIR = join('.admission', 'gh');
 const POINTS_BUDGET_LOCK_KEY = 'points-budget';
 const POINTS_BUDGET_LOCK_LEASE_MINUTES = 1; // short — the mutex is held only across one tiny JSON read/write
 const POINTS_BUDGET_STATE_FILENAME = 'points-budget-state.json';
 const CALL_LOG_FILENAME = 'calls.jsonl';
+const WRITE_BUDGET_LOCK_KEY = 'write-budget';
+const WRITE_BUDGET_STATE_FILENAME = 'write-budget-state.json';
 
 export function resolveGhCap(env = process.env) {
   const n = Number(env.WE_GH_THROTTLE_CAP);
@@ -599,6 +685,64 @@ export function acquireGhPointsSync({
   }
 }
 
+// ── the per-minute WRITE budget (#gh-write-burst) — a SEPARATE gate over MUTATIONS only, never a read ─────────
+
+/** Where the write-budget window state lives — a sibling of the points-budget state file, own lock key, so a
+ *  write-budget wait never blocks (or is blocked by) an ordinary read's points-budget accounting. */
+export function ghWriteBudgetStatePath(lockRoot) {
+  return join(lockRoot, WRITE_BUDGET_STATE_FILENAME);
+}
+
+function readGhWriteBudgetState(lockRoot) {
+  try {
+    const parsed = JSON.parse(readFileSync(ghWriteBudgetStatePath(lockRoot), 'utf8'));
+    if (Number.isFinite(parsed.windowStartMs) && Number.isFinite(parsed.spent)) return parsed;
+  } catch {
+    /* absent or corrupt — decideGhPointsSpend treats a null state as a fresh window */
+  }
+  return null;
+}
+
+function writeGhWriteBudgetState(lockRoot, state) {
+  writeFileSync(ghWriteBudgetStatePath(lockRoot), JSON.stringify(state) + '\n', 'utf8');
+}
+
+/**
+ * Cross-process-safe WRITE-budget gate — the IDENTICAL fixed-window token-bucket shape as {@link
+ * acquireGhPointsSync} (reusing its pure decision core, {@link decideGhPointsSpend}, unchanged: a spend
+ * decision is a spend decision regardless of which ledger it is checked against), over its OWN state file and
+ * lock key so exhausting the write budget never blocks a read and vice versa. A caller QUEUES here (spins,
+ * bounded, injectable `sleep`/`now` for tests) rather than firing — the #gh-write-burst fix's whole point:
+ * a write past budget waits for the window instead of hammering GitHub. FAILS OPEN on timeout, identically to
+ * every other gate in this module. Cost is always 1 per call (write calls are not weighted by REST points —
+ * unlike the points budget, this ledger counts MUTATIONS, not spend).
+ */
+export function acquireGhWriteBudgetSync({
+  lockRoot, budgetPerMin, owner, pid = process.pid,
+  now = () => Date.now(), sleep = sleepSyncMs, pollMs = DEFAULT_ACQUIRE_POLL_MS,
+  timeoutMs = DEFAULT_ACQUIRE_TIMEOUT_MS, windowMs = GH_POINTS_WINDOW_MS,
+}) {
+  mkdirSync(lockRoot, { recursive: true });
+  const startedAt = now();
+  for (;;) {
+    const nowMs = now();
+    const nowIso = new Date(nowMs).toISOString();
+    const locked = reserve(lockRoot, WRITE_BUDGET_LOCK_KEY, owner, nowMs, nowIso, pid, 'unknown', POINTS_BUDGET_LOCK_LEASE_MINUTES);
+    let decision = null;
+    if (locked.ok) {
+      try {
+        decision = decideGhPointsSpend({ state: readGhWriteBudgetState(lockRoot), points: 1, nowMs, budgetPerMin, windowMs });
+        if (decision.allowed) writeGhWriteBudgetState(lockRoot, decision.nextState);
+      } finally {
+        releaseLockDir(lockRoot, WRITE_BUDGET_LOCK_KEY);
+      }
+    }
+    if (decision && decision.allowed) return { ok: true, waitedMs: nowMs - startedAt, timedOut: false };
+    if (nowMs - startedAt >= timeoutMs) return { ok: false, waitedMs: nowMs - startedAt, timedOut: true };
+    sleep(decision ? Math.min(pollMs, Math.max(1, decision.waitMs)) : pollMs);
+  }
+}
+
 // ── call-volume / exhausted-retry recording (#3670) ────────────────────────────────────────────────────────
 
 /**
@@ -607,8 +751,11 @@ export function acquireGhPointsSync({
  * throws past the call. `outcome` is `'call'` for every attempt (success or failure alike — the point is
  * VOLUME, not just failures) or `'retry_exhausted'` for the one extra line appended when a rate-limit-shaped
  * failure gives up after `maxAttempts`.
+ * #gh-write-burst — `caller` (see {@link deriveGhCaller}) and `w` (whether {@link classifyGhWrite} classified
+ * this call as a mutation) are recorded on every line so the NEXT burst is attributable and its write-share
+ * visible directly from `calls.jsonl`, without the multi-log/multi-transcript correlation this incident needed.
  * @param {string} logPath
- * @param {{op:string, attempt:number, points:number, outcome:('call'|'retry_exhausted'), ok?:boolean}} entry
+ * @param {{op:string, attempt:number, points:number, outcome:('call'|'retry_exhausted'|'fail_open'), ok?:boolean, caller?:string, w?:boolean}} entry
  */
 export function recordGhCallLogEntry(logPath, entry) {
   try {
@@ -679,6 +826,11 @@ export function runGhSync(args, opts = {}) {
   const headerCapMs = throttle.headerCapMs != null ? throttle.headerCapMs : resolveHeaderWaitCapMs(env);
   const opLabel = throttle.op || (Array.isArray(args) ? args.slice(0, 2).join(' ') : 'unknown');
   const gateOpts = { warn: throttle.warn, logPath, op: opLabel };
+  // #gh-write-burst — a THIRD, independent gate over MUTATIONS only (see DEFAULT_GH_WRITE_BUDGET_PER_MIN's own
+  // doc comment), plus best-effort caller attribution recorded on every log line below.
+  const isWrite = classifyGhWrite(args);
+  const writeBudgetPerMin = throttle.writeBudgetPerMin != null ? throttle.writeBudgetPerMin : resolveGhWriteBudgetPerMin(env);
+  const caller = deriveGhCaller(throttle, env);
 
   // FAIL OPEN (see `failOpenGate`): an unusable lock root means this call runs ungated, never not at all.
   const gated = failOpenGate('lock-root setup', () => { mkdirSync(lockRoot, { recursive: true }); return true; }, { ...gateOpts, fallback: false, logPath: null });
@@ -686,10 +838,11 @@ export function runGhSync(args, opts = {}) {
   let attempt = 0;
   for (;;) {
     attempt += 1;
-    // The points-budget gate runs BEFORE the concurrency slot — a call waiting out its budget must not hold a
-    // scarce concurrency slot idle while it waits (same reasoning as releasing the slot before a backoff sleep,
-    // below).
+    // The write-budget gate (writes only) and the points-budget gate both run BEFORE the concurrency slot — a
+    // call waiting out either budget must not hold a scarce concurrency slot idle while it waits (same
+    // reasoning as releasing the slot before a backoff sleep, below).
     const acq = gated ? failOpenGate('acquire', () => {
+      if (isWrite) acquireGhWriteBudgetSync({ lockRoot, budgetPerMin: writeBudgetPerMin, owner, pid, now, sleep, pollMs, timeoutMs: acquireTimeoutMs, windowMs: pointsWindowMs });
       acquireGhPointsSync({ lockRoot, points, budgetPerMin, owner, pid, now, sleep, pollMs, timeoutMs: acquireTimeoutMs, windowMs: pointsWindowMs });
       return acquireGhSlotSync({ lockRoot, cap, owner, pid, pollMs, timeoutMs: acquireTimeoutMs, now, sleep });
     }, { ...gateOpts, fallback: { ok: false } }) : { ok: false };
@@ -710,7 +863,7 @@ export function runGhSync(args, opts = {}) {
     } finally {
       if (acq.ok) failOpenGate('release', () => releaseGhSlotSync({ lockRoot, cap, owner }), gateOpts);
     }
-    recordGhCallLogEntry(logPath, { op: opLabel, attempt, points, outcome: 'call', ok: !failure });
+    recordGhCallLogEntry(logPath, { op: opLabel, attempt, points, outcome: 'call', ok: !failure, caller, w: isWrite });
     if (!failure) return result;
 
     const text = `${failure && failure.stderr ? String(failure.stderr) : ''}\n${failure && failure.message ? String(failure.message) : ''}`;
@@ -721,7 +874,7 @@ export function runGhSync(args, opts = {}) {
     const headers = parseGhDebugResponseHeaders(failure && failure.stderr);
 
     if (attempt >= maxAttempts) {
-      recordGhCallLogEntry(logPath, { op: opLabel, attempt, points, outcome: 'retry_exhausted' });
+      recordGhCallLogEntry(logPath, { op: opLabel, attempt, points, outcome: 'retry_exhausted', caller, w: isWrite });
       recordGhThrottleMetric('gh.throttle.rate_limited', 1, { op: opLabel, attempt, source: classifyRateLimitSignal(headers).kind, outcome: 'exhausted' });
       recordGhThrottleMetric('gh.throttle.exhausted', 1, { op: opLabel, attempt });
       throw failure;
@@ -801,6 +954,10 @@ export function runGhCliPassthrough(argv, { throttle = {}, spawn = spawnSync, bi
   const headerCapMs = throttle.headerCapMs != null ? throttle.headerCapMs : resolveHeaderWaitCapMs(env);
   const opLabel = throttle.op || (Array.isArray(argv) ? argv.slice(0, 2).join(' ') : 'unknown');
   const gateOpts = { warn: throttle.warn, logPath, op: opLabel };
+  // #gh-write-burst — see runGhSync's identical wiring for the full rationale.
+  const isWrite = classifyGhWrite(argv);
+  const writeBudgetPerMin = throttle.writeBudgetPerMin != null ? throttle.writeBudgetPerMin : resolveGhWriteBudgetPerMin(env);
+  const caller = deriveGhCaller(throttle, env);
 
   // FAIL OPEN (see `failOpenGate`): an unusable lock root means this call runs ungated, never not at all.
   const gated = failOpenGate('lock-root setup', () => { mkdirSync(lockRoot, { recursive: true }); return true; }, { ...gateOpts, fallback: false, logPath: null });
@@ -809,6 +966,7 @@ export function runGhCliPassthrough(argv, { throttle = {}, spawn = spawnSync, bi
   for (;;) {
     attempt += 1;
     const acq = gated ? failOpenGate('acquire', () => {
+      if (isWrite) acquireGhWriteBudgetSync({ lockRoot, budgetPerMin: writeBudgetPerMin, owner, pid, now, sleep, pollMs, timeoutMs: acquireTimeoutMs, windowMs: pointsWindowMs });
       acquireGhPointsSync({ lockRoot, points, budgetPerMin, owner, pid, now, sleep, pollMs, timeoutMs: acquireTimeoutMs, windowMs: pointsWindowMs });
       return acquireGhSlotSync({ lockRoot, cap, owner, pid, pollMs, timeoutMs: acquireTimeoutMs, now, sleep });
     }, { ...gateOpts, fallback: { ok: false } }) : { ok: false };
@@ -826,13 +984,13 @@ export function runGhCliPassthrough(argv, { throttle = {}, spawn = spawnSync, bi
     if (r.error) throw r.error; // e.g. `gh` not on PATH — not a `gh`-level failure to retry
     const stderrText = r.stderr ? r.stderr.toString('utf8') : '';
     const failed = typeof r.status === 'number' && r.status !== 0;
-    recordGhCallLogEntry(logPath, { op: opLabel, attempt, points, outcome: 'call', ok: !failed });
+    recordGhCallLogEntry(logPath, { op: opLabel, attempt, points, outcome: 'call', ok: !failed, caller, w: isWrite });
     if (!failed || !isRateLimitShaped(stderrText)) {
       return { status: r.status == null ? (r.signal ? 128 : 1) : r.status, stdout: r.stdout || Buffer.alloc(0), stderr: r.stderr || Buffer.alloc(0) };
     }
     const headers = parseGhDebugResponseHeaders(stderrText); // usually {} here — see the comment above
     if (attempt >= maxAttempts) {
-      recordGhCallLogEntry(logPath, { op: opLabel, attempt, points, outcome: 'retry_exhausted' });
+      recordGhCallLogEntry(logPath, { op: opLabel, attempt, points, outcome: 'retry_exhausted', caller, w: isWrite });
       recordGhThrottleMetric('gh.throttle.rate_limited', 1, { op: opLabel, attempt, source: classifyRateLimitSignal(headers).kind, outcome: 'exhausted' });
       recordGhThrottleMetric('gh.throttle.exhausted', 1, { op: opLabel, attempt });
       return { status: r.status == null ? (r.signal ? 128 : 1) : r.status, stdout: r.stdout || Buffer.alloc(0), stderr: r.stderr || Buffer.alloc(0) };
@@ -860,7 +1018,11 @@ async function main(argv) {
   const repo = parseThrottleEnvRepo();
   const owner = process.env.WE_GH_THROTTLE_OWNER || `${process.pid}:${randomUUID()}`;
   const bin = parseThrottleEnvBin();
-  const { status, stdout, stderr } = runGhCliPassthrough(argv, { throttle: { repo, owner }, bin });
+  // #gh-write-burst — `argv[1]` for THIS process is always `gh-throttle.mjs` itself (see `deriveGhCaller`), so
+  // the standalone CLI passthrough (the gh App shim's own call path, #4064) is the one population that needs an
+  // explicit caller signal from its invoker rather than getting it for free from its own script path.
+  const caller = process.env.WE_GH_THROTTLE_CALLER || undefined;
+  const { status, stdout, stderr } = runGhCliPassthrough(argv, { throttle: { repo, owner, caller }, bin });
   if (stdout && stdout.length) writeAllSync(1, stdout);
   if (stderr && stderr.length) writeAllSync(2, stderr);
   process.exitCode = status;
