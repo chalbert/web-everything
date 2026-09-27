@@ -108,7 +108,7 @@
 // are re-exported ONLY (mirrors `pr-land.mjs`'s own `forge-land-provider.mjs` split of used-here vs.
 // re-exported-only names) — every existing importer of THIS file keeps resolving all five unchanged.
 import { isAiGeneratedPr, hasLabel } from './lib/ai-pr-authorship.mjs';
-export { isAiAuthor, isAiCommit, isMechanicalMergeCommit } from './lib/ai-pr-authorship.mjs';
+export { isAiAuthor, isAiCommit, isMechanicalMergeCommit, isDrainBookkeepingCommit } from './lib/ai-pr-authorship.mjs';
 export { isAiGeneratedPr, hasLabel };
 import { execFileSync, execFile, spawnSync } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -1656,15 +1656,20 @@ export function defaultFetchDiff(c) {
  *      missed exactly that). Both call sites run only on a confirmed merge, so the cost is one call per
  *      merge. The diff fetch (every ride-along signal's evidence) stays gated on `changedFiles` already naming
  *      a backlog card file, numbered or hash-named.
+ * #2779-incident (PR #2785, `lane/2779-session-token-fresh`) — `openPrNums` (the OTHER currently-open PR
+ * numbers in this repo, never this candidate's own `c.num`) is threaded straight into every
+ * `deliveredItemNumsFromPr` call below, so a bare branch-name digit run that collides with a real open PR
+ * number is refused, never credited off ref/title alone. See that function's own docstring in
+ * `./lib/open-pr-items.mjs` for the full incident account and the asymmetry argument for defaulting closed.
  * @param {{hasManifest?:boolean, item?:(number|string|null), repo?:(string|null), headRef?:string, title?:string, num?:(number|string)}} c
- * @param {{isLocalRepo?:function, fetchGuardSignals?:function, resolveHashNumber?:function, fetchDiff?:function}} [o]
+ * @param {{isLocalRepo?:function, fetchGuardSignals?:function, resolveHashNumber?:function, fetchDiff?:function, openPrNums?:Iterable<string|number>}} [o]
  * @returns {Array<number|string>} `asItemId`-keyed ids this candidate's land proves resolved
  */
-export function landedIdsForCandidate(c, { isLocalRepo = () => false, fetchGuardSignals = defaultFetchLandGuardSignals, resolveHashNumber = defaultResolveHashNumber, fetchDiff = defaultFetchDiff } = {}) {
+export function landedIdsForCandidate(c, { isLocalRepo = () => false, fetchGuardSignals = defaultFetchLandGuardSignals, resolveHashNumber = defaultResolveHashNumber, fetchDiff = defaultFetchDiff, openPrNums = null } = {}) {
   if (!c) return [];
   if (c.hasManifest) return c.item != null ? [asItemId(c.item)] : [];
   if (!isLocalRepo(c.repo)) return []; // an impl half never carries the resolve — only its WE carrier does
-  const base = deliveredItemNumsFromPr(c.headRef, c.title);
+  const base = deliveredItemNumsFromPr(c.headRef, c.title, { openPrNums });
   // #3914 — a lane cut for a hash-born card it filed in the SAME PR (`lane/x<6>-…`) names no digits, so `base`
   // is empty and the drain used to JIT-number the card and leave it `active` forever. Credit the HASH; the
   // caller's `planResolveOnLand` re-keys it to the NNN `numberPendingHashes` mints in this same land.
@@ -1678,7 +1683,7 @@ export function landedIdsForCandidate(c, { isLocalRepo = () => false, fetchGuard
     const hash = deliveredHashFromPr(c.headRef, c.title, { body, changedFiles, landedNumberFor: resolveHashNumber });
     if (hash) ids.add(asItemId(hash));
   } else if (base.length) {
-    for (const n of deliveredItemNumsFromPr(c.headRef, c.title, { body, changedFiles })) ids.add(asItemId(n));
+    for (const n of deliveredItemNumsFromPr(c.headRef, c.title, { body, changedFiles, openPrNums })) ids.add(asItemId(n));
   }
   // #xqpqyr2 — ride-along ids ADD to whatever the primary path above found; they never replace it. Every
   // ride-along signal needs the diff (a card's frontmatter status move is the evidence), so its fetch is gated
@@ -3348,22 +3353,29 @@ export function basisTouchesEngineTier(score) {
  * @param {{basisFiles?: string[]}} score - a `scoreEscalation` result
  * @returns {boolean} always `false` until `#3493` unblocks
  */
-/**
- * The `gh-error` detail for a failed `gh pr list`: the error's first line PLUS gh's own last stderr line.
- * `execFile`'s message is only "Command failed: gh pr list …" — the actual cause (secondary rate limit, 401,
- * a crashing wrapper) lives in stderr and was being dropped (live 2026-09-27 ~04:04Z: every drain pass logged a
- * bare gh-error for 20 minutes and nobody could tell it was a GitHub rate-limit storm).
- */
-export function ghListErrText(e) {
-  const head = String((e && e.message) || e).split('\n')[0];
-  const lines = String((e && e.stderr) || '').split('\n').map((l) => l.trim()).filter(Boolean);
-  const cause = lines.length ? lines[lines.length - 1].slice(0, 300) : '';
-  return cause && !head.includes(cause) ? `${head} — gh: ${cause}` : head;
-}
-
 export function engineTierForCandidate(score) { // `score` names the real future param — unused until #3493 unblocks
   void score;
   return false; // #3493 (blockedBy #2410) — flip to `basisTouchesEngineTier(score)` once unblocked.
+}
+
+/**
+ * PURE: turn a failed `gh pr list` exec error into `{kind, text, hint}`. `gh`'s own STDERR is the reason; the
+ * error's `message` is only "Command failed: gh pr list …". Live-caught 2026-09-27: four drain passes in a row
+ * logged just that first line (the old `.split('\n')[0]`), so the real cause — installation GraphQL rate
+ * limit, a stale token, a timeout — was lost and every failure read "is gh authenticated?".
+ * @param {{stderr?:string|Buffer, message?:string, killed?:boolean, signal?:string, code?:any}|string} e
+ */
+export function describeGhListError(e) {
+  const stderr = String((e && e.stderr) || '').split('\n').map((l) => l.trim()).filter(Boolean);
+  const message = String((e && e.message) || e || '').split('\n')[0];
+  const text = (stderr.find((l) => !/^\(node:\d+\)|DeprecationWarning|--trace-deprecation/.test(l)) || message).slice(0, 400);
+  const all = `${stderr.join(' ')} ${message}`;
+  if (e && (e.killed || e.signal === 'SIGTERM' || e.code === 'ETIMEDOUT')) return { kind: 'timeout', text, hint: 'gh did not answer in time (load or network)' };
+  if (/rate limit|secondary rate|abuse detection/i.test(all)) return { kind: 'rate-limited', text, hint: 'the token\'s API bucket is exhausted — the pass retries after backoff; see `gh api rate_limit`' };
+  if (/HTTP 401|Bad credentials|authentication|not logged in|gh auth login/i.test(all)) return { kind: 'auth', text, hint: 'is gh authenticated? (stale GH_TOKEN / App token?)' };
+  if (/Unknown JSON field/i.test(all)) return { kind: 'bad-json-field', text, hint: 'a --json field this gh version does not know' };
+  if (/Could not resolve|HTTP 5\d\d|connection|timed out|EOF/i.test(all)) return { kind: 'network', text, hint: 'GitHub/network error — transient' };
+  return { kind: 'unknown', text, hint: 'is gh authenticated?' };
 }
 
 // ── CLI boundary ───────────────────────────────────────────────────────────────────────────────────────
@@ -3919,7 +3931,7 @@ async function runCli() {
     if (base) listArgs.push('--base', base);
     if (label) listArgs.push('--label', label);
     try { const { stdout } = await execFileP('gh', listArgs, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }); return { repo, prs: JSON.parse(stdout.trim() || '[]') }; }
-    catch (e) { return { repo, err: ghListErrText(e) }; }
+    catch (e) { return { repo, err: describeGhListError(e) }; }
   };
   const resolveDefaultBranch = async (repo) => {
     if (defaultBranchByRepo.has(repo)) return;
@@ -3933,7 +3945,7 @@ async function runCli() {
   };
   const [listings] = await __t.timeAsync('listing', () => Promise.all([mapWithConcurrency(REPOS, REPOS.length, listOne), Promise.all(REPOS.map(resolveDefaultBranch))]));
   const listErr = listings.find((l) => l.err);
-  if (listErr) fail('gh-error', `gh pr list${listErr.repo ? ` --repo ${listErr.repo}` : ''} failed (${listErr.err}) — is gh authenticated?`, 4);
+  if (listErr) fail('gh-error', `gh pr list${listErr.repo ? ` --repo ${listErr.repo}` : ''} failed [${listErr.err.kind}]: ${listErr.err.text}${listErr.err.hint ? ` — ${listErr.err.hint}` : ''}`, 4);
   // #2683 — the `--only` target is repo-scoped (see `matchesOnlyTarget`): `--only-repo=<slug>` names the repo;
   // a single-repo sweep (`--this-repo` / `--repos=<one>` — the legacy `/pr`+`/finish` callers) matches its one
   // repo; a multi-repo default sweep with no `--only-repo` disambiguates to the LOCAL repo. This narrows the
@@ -4877,6 +4889,23 @@ async function runCli() {
 
   const merged = [];
   const failedMerges = [];
+  // #2779-incident — the OTHER currently-open PR numbers for a candidate's own repo, at pass-start, EXCLUDING
+  // the candidate's own `c.num` and any number already recorded into `merged` THIS pass (a sibling that merged
+  // earlier in this same cascade has already left the open set — the same staleness `liveOpenHeadRefs` already
+  // tolerates for the couple gate). Fed straight into `landedIdsForCandidate`'s `openPrNums`, so a bare
+  // branch-name digit run that only coincidentally matches a real open PR number (PR #2785's
+  // `lane/2779-session-token-fresh` against the then-open, unrelated PR #2779) is refused rather than credited.
+  const otherOpenPrNums = (repo, excludeNum) => {
+    const prs = (openPrContext && openPrContext.prsByRepo instanceof Map) ? (openPrContext.prsByRepo.get(repo) || []) : [];
+    const mergedNums = new Set(merged.filter((m) => (m.repo || null) === (repo || null)).map((m) => String(m.num)));
+    const out = new Set();
+    for (const p of prs) {
+      const n = String(p && p.number);
+      if (n === String(excludeNum) || mergedNums.has(n)) continue;
+      out.add(n);
+    }
+    return out;
+  };
   // xvzc4v4 (merge-safety review, bug 1) — a candidate whose PASS-START `classifyPr` decision no longer holds on
   // a FRESH re-read right before the merge (see `revalidateForMerge`): reported, never silently dropped, and
   // left `skip` so it keeps blocking its dependents and is re-read fresh next pass.
@@ -5013,7 +5042,7 @@ async function runCli() {
           merged.push({ num: c.num, repo: c.repo, headSha: c.headSha ?? null });
           progressed = true;
           remaining = remaining.filter((x) => !sameCand(x, c));
-          for (const id of landedIdsForCandidate(c, { isLocalRepo })) landedThisPass.add(id);
+          for (const id of landedIdsForCandidate(c, { isLocalRepo, openPrNums: otherOpenPrNums(c.repo, c.num) })) landedThisPass.add(id);
           postMergeTrace(); // #xngv3vn — only ever called on a CONFIRMED merge
         };
         try {
@@ -5187,7 +5216,7 @@ async function runCli() {
           // it becomes ready next pass. Keyed on `hasManifest` (NOT an inherited impl PR) so a green impl PR of
           // an otherwise-broken couple never counts the couple "landed" — that alignment with `bornAs` is what
           // keeps the stowaway guard honest.
-          for (const id of landedIdsForCandidate(c, { isLocalRepo })) landedThisPass.add(id);
+          for (const id of landedIdsForCandidate(c, { isLocalRepo, openPrNums: otherOpenPrNums(c.repo, c.num) })) landedThisPass.add(id);
           if (!AS_JSON) process.stderr.write(`  ✓ merged ${repoTag(c.repo)}${c.num}${c.item ? ` (#${c.item})` : ''}\n`);
         } catch (e) {
           const detail = String(e.message || e).split('\n')[0];

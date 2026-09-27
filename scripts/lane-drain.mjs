@@ -79,6 +79,12 @@ import { HASH_PATH_CITE_SOURCE, findHashPathCitesInGrepLines } from './lib/citat
 // never loose over the whole body. `readField` parses only the first `---`…`---` block.
 import { readField } from './backlog/frontmatter.mjs';
 import { writeAllSync } from './lib/write-all-sync.mjs';
+// #2779-incident (2026-09-26 03:14Z) — every drain-authored commit message is wrapped in this runtime guard
+// (belt, alongside the unit-test suspenders in commit-message-safety.test.mjs): a template edit that
+// reintroduces a GitHub closing-keyword + #N shape (`resolve #N`, `fixes #N`, …) throws HERE, at the point of
+// the write, rather than silently landing on `main` and auto-closing whatever #N happens to name. See that
+// module's own docstring for the full incident account.
+import { assertNoClosingKeywordRef } from './lib/commit-message-safety.mjs';
 import { withNumberingLock, lockResultOr, acquireDrainLease, heartbeatDrainLease, releaseDrainLease, drainLeaseStatus, drainOwner, DRAIN_LOCK_ROOT, localRepoSlug } from './readiness/drain-lock.mjs'; // #2391 dual-lock: numbering mutex + whole-process drain lease (#3440 localRepoSlug keys it per-repo); lockResultOr (#xuqk1vp) safely reads a lock outcome that may have refused to run
 
 // ── flag parsing (mirrors pr-land.mjs / lane-review.mjs) ──────────────────────────────────────────────
@@ -931,7 +937,7 @@ export function numberPendingHashes(CWD, { dryRun = false } = {}) {
   quietGit(CWD, ['add', '--', ...new Set(toAdd)]); // stage rewrites + new renamed files (deletions already staged by git rm; ledger stays untracked)
   const paths = [...new Set(commitPaths)];
   const summary = assigned.map((a) => `${a.hash}→#${a.nnn}`).join(', ');
-  const committed = quietGit(CWD, ['commit', '-m', `drain: JIT-number ${summary} at land (#2288)`, '--', ...paths]) != null;
+  const committed = quietGit(CWD, ['commit', '-m', assertNoClosingKeywordRef(`drain: JIT-number ${summary} at land (#2288)`, 'JIT-number commit message'), '--', ...paths]) != null;
   return { assigned, committed, unresolvedReferences, renamed: [...renames, ...livePathRenames].map((r) => r.to), changedPaths: paths };
 }
 
@@ -1040,7 +1046,7 @@ export function finalizeLand(CWD, num, { unqueue = unqueueViaBacklog, publish = 
   // `git rm` deletion + the unqueue edit), ignoring the rest of the index — never `git add -A`.
   const commitPaths = manifestDeleted ? [QUEUED_REL, MANIFEST_FILENAME] : [QUEUED_REL];
   let pushed = false;
-  const unqueueCommitted = quietGit(CWD, ['commit', '-m', `drain: unqueue + cleanup #${num} lane manifest post-land (#2175)`, '--', ...commitPaths]) != null;
+  const unqueueCommitted = quietGit(CWD, ['commit', '-m', assertNoClosingKeywordRef(`drain: unqueue + cleanup card ${num} lane manifest post-land (#2175)`, 'unqueue commit message'), '--', ...commitPaths]) != null;
   // JIT numbering (#2288): AFTER unqueue (so the ledger-reset check sees the emptied queue), number every
   // provisional hash file the couple landed — the couple's own hash AND any leftover items scaffolded in
   // its lane during close-out. A couple that carried no hash files (a legacy numeric item) is a no-op. The
@@ -1091,7 +1097,7 @@ function reopenStrandedItem(CWD, num) {
   if (path) {
     // Scope the commit to ONLY this item's backlog file (explicit `-- <path>`) — never a bare commit that would
     // absorb a foreign staged hunk (the shared-index commit race).
-    if (quietGit(CWD, ['commit', '-m', `drain: reopen stranded #${num} after failed land (#2175)`, '--', path]) != null) pushed = publishMain(CWD);
+    if (quietGit(CWD, ['commit', '-m', assertNoClosingKeywordRef(`drain: reopen stranded card ${num} after failed land (#2175)`, 'reopen commit message'), '--', path]) != null) pushed = publishMain(CWD);
   }
   return { reopened: true, pushed };
 }
@@ -1169,7 +1175,12 @@ export function resolveLandedItem(CWD, num, { sync = true, publish = true } = {}
   // untouched on main — a silent false success on the sole writer to main, which is the exact failure class
   // #2899 was filed to close. An un-committed splice is a FAILURE: the working tree carries an edit nobody
   // asked for and main is unchanged, so the caller must be able to see it and say so.
-  const committed = quietGit(CWD, ['commit', '-m', `drain: resolve #${num} on land (#2748)`, '--', path]) != null;
+  // #2779-incident — this WAS `drain: resolve #${num} on land (#2748)`. "resolve #N" is a GitHub
+  // closing-keyword reference (see commit-message-safety.mjs), so pushing this exact commit for PR #2785's
+  // (mis-derived) card 2779 auto-closed the real, unmerged PR #2779 as a side effect. `card ${num}` (no `#`
+  // sigil on the item number) reads identically to a human and stays fully grep-able, but carries none of
+  // GitHub's auto-close grammar. `assertNoClosingKeywordRef` is the runtime backstop against this recurring.
+  const committed = quietGit(CWD, ['commit', '-m', assertNoClosingKeywordRef(`drain: mark card ${num} resolved on land (#2748)`, 'resolve-on-land commit message'), '--', path]) != null;
   if (committed && publish) publishMain(CWD);
   return { flipped: committed, alreadyResolved: false, committed, ...(committed ? {} : { reason: 'commit-failed' }) };
 }

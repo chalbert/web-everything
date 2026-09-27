@@ -172,7 +172,7 @@ describe('runReviewTick — the per-tick sequence', () => {
     const statusCandidates = vi.fn((r, ref) => [...r, ...ref]);
     const tagStatus = vi.fn();
     runReviewTick({ reconcile, dispatch: () => ({ agentId: 'a' }), tagRound: () => {}, tagStatus, statusCandidates });
-    expect(statusCandidates).toHaveBeenCalledWith(reviews, refusals, []);
+    expect(statusCandidates).toHaveBeenCalledWith(reviews, refusals, [], []);
     expect(tagStatus).toHaveBeenCalledTimes(2);
   });
 
@@ -184,7 +184,18 @@ describe('runReviewTick — the per-tick sequence', () => {
     const reconcile = vi.fn(() => owedPlan([...reviews, ...fixes], []));
     const statusCandidates = vi.fn(() => []);
     runReviewTick({ reconcile, dispatch: () => ({ agentId: 'a' }), tagRound: () => {}, tagStatus: () => {}, statusCandidates });
-    expect(statusCandidates).toHaveBeenCalledWith(reviews, [], fixes);
+    expect(statusCandidates).toHaveBeenCalledWith(reviews, [], fixes, []);
+  });
+
+  // Live-caught 2026-09-26, PR #2742, card xg790dh: same shape as the fix-owed miss above — a PR owed a
+  // CI-HEAL (not a fix) used to never reach statusCandidates at all either.
+  it('ci-heal-kind dispatch entries reach statusCandidates as its own fourth argument, not silently dropped', () => {
+    const reviews = [{ kind: 'review', prNumber: 10, attempts: 0 }];
+    const ciHeals = [{ kind: 'ci-heal', prNumber: 2742, attempts: 0 }];
+    const reconcile = vi.fn(() => owedPlan([...reviews, ...ciHeals], []));
+    const statusCandidates = vi.fn(() => []);
+    runReviewTick({ reconcile, dispatch: () => ({ agentId: 'a' }), tagRound: () => {}, tagStatus: () => {}, statusCandidates });
+    expect(statusCandidates).toHaveBeenCalledWith(reviews, [], [], ciHeals);
   });
 
   it('an agent id missing from the dispatch result records null, not undefined or a throw', () => {
@@ -239,6 +250,73 @@ describe('runReviewTick — the per-tick sequence', () => {
     expect(out.dispatched).toEqual([]);
     expect(setLabelsCalls).toEqual([
       { repo: 'chalbert/web-everything', pr: 2711, spec: { add: undefined, remove: ['review-status:reviewing'] } },
+    ]);
+  });
+
+  // Live-caught 2026-09-26, PR chalbert/web-everything#2742, card xg790dh — END-TO-END with #2742's REAL label
+  // sequence and the REAL `selectStatusCandidates`/`tagReviewStatus` (only the `gh` provider is faked): #2742's
+  // `fix-2742` session finished (`state: 'done'`, idle 11+ min) and its re-push then went CI-red (`ci:failed`),
+  // so `reconcile-pass.mjs`'s real `runReconcilePass` now dispatches a `kind:'ci-heal'` entry for it — NOT a
+  // review/fix dispatch, and (before this fix) `kind:'ci-heal'` matched neither `reviews` nor `fixes` in
+  // `runReviewTick`'s own filters, so it never reached `selectStatusCandidates` at all.
+  // `review-status:fixing` (added while the fix was genuinely live) sat stale — the operator read "fixing" on a
+  // PR nothing was actually touching.
+  it('#2742: a PR that just went from fix-owed to ci-heal-owed gets review-status:fixing cleared (no ci-heal session live yet)', () => {
+    const pr2742Labels = [
+      { name: 'review:pending' }, { name: 'ci:failed' },
+      { name: 'review-round:1' }, { name: 'review-status:fixing' },
+    ];
+    const reconcile = vi.fn(() => ({
+      dispatch: [{ kind: 'ci-heal', prNumber: 2742, attempts: 0 }],
+      refusals: [],
+    }));
+    const readPrs = () => [{ number: 2742, labels: pr2742Labels }];
+    // The fix session finished (`state: 'done'`) — not live, and no `ci-heal-2742` session has started yet.
+    const readAgents = () => [{ name: 'fix-2742', state: 'done' }];
+    const setLabelsCalls = [];
+    const fakeProvider = {
+      readLabels: () => { throw new Error('must use the shared currentLabels, never re-read'); },
+      ensureLabel: () => {},
+      setLabels: (repo, pr, spec) => setLabelsCalls.push({ repo, pr, spec }),
+    };
+    const tagStatus = (opts) => tagReviewStatus({ ...opts, provider: fakeProvider });
+    const out = runReviewTick({
+      reconcile, readPrs, readAgents, tagStatus,
+      dispatch: () => { throw new Error('runReviewTick never dispatches a ci-heal itself'); },
+      tagRound: () => { throw new Error('no round tag on a non-review dispatch'); },
+    });
+    expect(out.reviewsOwed).toBe(0);
+    expect(out.dispatched).toEqual([]);
+    expect(setLabelsCalls).toEqual([
+      { repo: 'chalbert/web-everything', pr: 2742, spec: { add: undefined, remove: ['review-status:fixing'] } },
+    ]);
+  });
+
+  it('#2742 follow-on: once a live ci-heal-2742 session actually starts, the status flips straight to healing-ci', () => {
+    const pr2742Labels = [
+      { name: 'review:pending' }, { name: 'ci:failed' },
+      { name: 'review-round:1' }, { name: 'review-status:fixing' },
+    ];
+    const reconcile = vi.fn(() => ({
+      dispatch: [{ kind: 'ci-heal', prNumber: 2742, attempts: 0 }],
+      refusals: [],
+    }));
+    const readPrs = () => [{ number: 2742, labels: pr2742Labels }];
+    const readAgents = () => [{ name: 'fix-2742', state: 'done' }, { name: 'ci-heal-2742', state: 'working' }];
+    const setLabelsCalls = [];
+    const fakeProvider = {
+      readLabels: () => { throw new Error('must use the shared currentLabels, never re-read'); },
+      ensureLabel: () => {},
+      setLabels: (repo, pr, spec) => setLabelsCalls.push({ repo, pr, spec }),
+    };
+    const tagStatus = (opts) => tagReviewStatus({ ...opts, provider: fakeProvider });
+    runReviewTick({
+      reconcile, readPrs, readAgents, tagStatus,
+      dispatch: () => { throw new Error('runReviewTick never dispatches a ci-heal itself'); },
+      tagRound: () => { throw new Error('no round tag on a non-review dispatch'); },
+    });
+    expect(setLabelsCalls).toEqual([
+      { repo: 'chalbert/web-everything', pr: 2742, spec: { add: 'review-status:healing-ci', remove: ['review-status:fixing'] } },
     ]);
   });
 });

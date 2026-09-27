@@ -101,6 +101,16 @@ It parks by default (`review:pending` — an independent review is owed), becaus
 1. **Pick a `lane/*` ref name** — the #1934 guard carve-out only allows pushing to `lane/*` (never a
    local branch, never `main` directly). Use a descriptive slug: `lane/<short-slug>` for an ad-hoc
    change, or `lane/<NNN>-<slug>` when it closes a backlog item.
+
+   **The leading `<NNN>` must be the backlog CARD this PR builds — never any other number, and never a
+   guess.** The drain's resolve-on-land bookkeeping reads a bare leading/trailing digit run in the ref as a
+   claim that this PR delivers that card (`scripts/lib/open-pr-items.mjs`'s `deliveredItemNumsFromPr`), and
+   auto-commits the flip once this PR merges. Naming a branch after an OPEN PR NUMBER instead of a card — even
+   coincidentally — feeds that same heuristic a false claim (incident 2026-09-26 03:14Z, #2779: PR #2785 on
+   `lane/2779-session-token-fresh` wrongly resolved unrelated card #2779, whose number the worker had copied
+   from a different open PR, not a card). If this PR closes no specific card, leave the number off entirely
+   (`lane/<short-slug>`) rather than putting an unrelated number in the lead position — a numberless ref simply
+   resolves nothing on land, the safe default, whereas a wrong number resolves someone else's card.
 2. **Dry-run first** to show the user the exact `gh` sequence, execute nothing. **Pass the SAME `--mode` you
    will pass in step 4** — a rehearsal that previews a different mode is worse than no rehearsal, because it
    shows the user a plan that is not the one about to run. The operation defaults to `park`, which is NOT the

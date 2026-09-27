@@ -22,7 +22,8 @@ const FAKE_GH = `#!/usr/bin/env node
 const a = process.argv.slice(2);
 if (a[0] === 'repo' && a[1] === 'view') { process.stdout.write('main'); process.exit(0); }
 if (a[0] === 'pr' && a[1] === 'list') {
-  if (process.env.GH_FAIL_LIST === '1') { process.stderr.write('gh: rate limit exceeded\\n'); process.exit(1); }
+  if (process.env.GH_FAIL_LIST === '1') { process.stderr.write('GraphQL: API rate limit already exceeded for installation ID 1.\\n'); process.exit(1); }
+  if (process.env.GH_FAIL_LIST === 'auth') { process.stderr.write('HTTP 401: Bad credentials (https://api.github.com/graphql)\\n'); process.exit(1); }
   process.stdout.write('[]');
   process.exit(0);
 }
@@ -66,9 +67,19 @@ describe('merge-ai-prs CLI — #3383 gh-error exit code split from the dup-id tr
     const payload = JSON.parse(r.stdout.trim());
     expect(payload).toMatchObject({ ok: false, reason: 'gh-error' });
     expect(payload.detail).toMatch(/gh pr list/);
+    // 2026-09-27 — the drain logged only "Command failed: gh pr list …" for 4 passes in a row: gh's own stderr
+    // (the actual reason) was cut by `.split('\n')[0]`. The detail must carry it, classified.
+    expect(payload.detail).toMatch(/API rate limit already exceeded for installation ID 1/);
+    expect(payload.detail).toMatch(/rate-limited/);
+    expect(payload.detail).not.toMatch(/is gh authenticated\?/);
+  });
+
+  it('an auth failure keeps the "is gh authenticated?" hint and carries gh\'s own stderr', () => {
+    const r = runCli({ GH_FAIL_LIST: 'auth' });
+    expect(r.status).toBe(4);
+    const payload = JSON.parse(r.stdout.trim());
+    expect(payload.detail).toMatch(/HTTP 401: Bad credentials/);
     expect(payload.detail).toMatch(/is gh authenticated\?/);
-    // gh's own stderr cause reaches the detail (2026-09-27 freeze: a bare "Command failed" hid a rate-limit storm).
-    expect(payload.detail).toMatch(/gh: gh: rate limit exceeded/);
   });
 
   it('a clean gh listing (no error) exits 0 when the backlog carries no duplicate ids', () => {

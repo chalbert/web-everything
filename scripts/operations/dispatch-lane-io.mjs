@@ -44,6 +44,7 @@
 // answer to that is #3118's question of where headless spawning finally lives, not a split of the io shell
 // underneath it. Added by #3165, which grew the file from 792 to 826 code lines past the 800 line.
 
+import { withSalvageHint } from '../lib/salvage-index.mjs';
 import { execFile, execFileSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -1322,7 +1323,8 @@ export function createDispatchSinks({
         handle = await provider({
           sessionId,
           cwd: sessionCwd,
-          prompt: payload?.prompt,
+          // Salvaged earlier work for this card/PR (see `we:scripts/lib/salvage-index.mjs`): one pointer line.
+          prompt: withSalvageHint(payload?.prompt, { cards: [payload?.num], prs: [payload?.pr] }),
           sessionSlug: payload?.sessionSlug,
           num: payload?.num,
           // #3645/#3640 — WHICH KIND, WHICH LANE UNDER WHAT SCOPE, and (repairs) WHICH PR AND WHY. Already on

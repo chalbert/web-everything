@@ -101,6 +101,7 @@ import { CONSTELLATION_REPOS, repoKeyForSlug } from '../../scripts/lib/constella
 import { forEachRepo } from '../../scripts/lib/for-each-repo.mjs';
 import { withGithubAppAuth } from '../../scripts/lib/github-app-auth-env.mjs';
 import { withSelfSync } from '../../scripts/lib/daemon-self-sync.mjs';
+import { makePoolExhaustionLogger } from '../../scripts/conveyor/pool-exhaustion.mjs';
 import { isStaleMainRefusalMessage } from '../../scripts/lib/main-staleness.mjs';
 import {
   RUNNER_LOCK_ROOT, makeOwner,
@@ -209,6 +210,10 @@ export function runReviewTick({
   statusCandidates = selectStatusCandidates,
   holdReconcile = sweepReviewHoldLabels,
   acquirableLanes = () => Infinity,
+  // Pool-exhaustion reporting: `{exhausted({repo, deferred}), recovered(repo)}` (see
+  // `we:scripts/conveyor/pool-exhaustion.mjs`). `null` (the default) keeps every existing test byte-identical;
+  // the real daemon wires a logger that says WHY the pool is empty once per episode, never a silent skip.
+  poolExhaustion = null,
   repo = WE_SLUG,
   // #4133 (epic #3383/#4075) — audit `we:reports/2026-09-24-daemon-blocking-antipatterns.md` finding R2: the
   // tick's OWN single `gh pr list` / `claude agents --json` reads, taken ONCE here and reused two ways —
@@ -295,6 +300,13 @@ export function runReviewTick({
   // session finished (PR #2472, ~2 hours stale). `selectStatusCandidates` now takes fix-owed entries as a
   // real third source, included below the same unconditional way `reviews` already is.
   const fixes = (plan.dispatch ?? []).filter((d) => d && d.kind === 'fix');
+  // Live-caught 2026-09-26, PR #2742, card xg790dh: a PR that moves from being owed a FIX to being owed a
+  // CI-HEAL (its fix session finished, its re-push then went CI-red) used to fall out of `statusCandidates`
+  // just the same — `kind:'ci-heal'` matched neither `reviews` nor `fixes` above, and a ci-heal-owed PR is a
+  // real `dispatch` entry (not a refusal) whenever its cap is unspent. `review-status:fixing` (added while the
+  // fix was genuinely live) sat stale indefinitely. `selectStatusCandidates` now takes ci-heal-owed entries as
+  // a real fourth source, included below the same unconditional way `reviews`/`fixes` already are.
+  const ciHeals = (plan.dispatch ?? []).filter((d) => d && d.kind === 'ci-heal');
   // #3383 bug 3 — cap THIS TICK's dispatch batch by how many lanes are actually acquirable right now, never
   // by `reviews.length` alone. A deferred review is NOT lost: it stays owed (still counted in `reviewsOwed`
   // and still fed to `statusCandidates` below, unchanged, since no session was ever bound to it), and simply
@@ -309,6 +321,12 @@ export function runReviewTick({
   const dispatchable = reviews.slice(0, Math.min(reviews.length, acquirable));
   const deferredForLanes = paused ? 0 : reviews.length - dispatchable.length;
   const deferredForAuth = paused ? reviews.length - dispatchable.length : 0;
+  if (poolExhaustion && !paused) {
+    try {
+      if (acquirable === 0 && deferredForLanes > 0) poolExhaustion.exhausted({ repo, lanePoolRepo: poolExhaustionLanePoolRepo(repo), deferred: deferredForLanes });
+      else if (acquirable > 0) poolExhaustion.recovered(repo);
+    } catch { /* reporting only — never fails the tick */ }
+  }
   const dispatched = [];
   const failed = [];
   // x26lw6u — NOT named `skipped`: `withSelfSync` already returns `{skipped: true}` for a whole skipped tick,
@@ -335,7 +353,7 @@ export function runReviewTick({
   // already exists (`dispatchReviewJob` writes it before returning) — reusing the snapshot would tag it "nothing
   // live" and strip its `review-status:reviewing` until the next tick. Those PRs read fresh (`undefined`).
   const dispatchedThisTick = new Set(dispatched.map((d) => Number(d.prNumber)));
-  for (const c of statusCandidates(reviews, plan.refusals ?? [], fixes)) {
+  for (const c of statusCandidates(reviews, plan.refusals ?? [], fixes, ciHeals)) {
     const agents = dispatchedThisTick.has(Number(c.prNumber)) ? undefined : (rawAgents ?? undefined);
     try { tagStatus({ pr: c.prNumber, repo, agents, currentLabels: labelsByPr.get(Number(c.prNumber)) }); }
     catch { /* cosmetic — see review-status-tag.mjs's own header */ }
@@ -479,6 +497,14 @@ export function defaultAcquirableLaneCount({ repo }) {
   return freeLaneNumbers({ lanePoolRepo: repoProfile(repo).lanePoolRepo }).length;
 }
 
+/** The lane-pool repo path for `repo` (the same derivation {@link defaultAcquirableLaneCount} uses). */
+function poolExhaustionLanePoolRepo(repo) {
+  try { return repoProfile(repo).lanePoolRepo ?? null; } catch { return null; }
+}
+
+/** One logger per daemon process — its once-per-episode memory must survive across ticks. */
+const DAEMON_POOL_EXHAUSTION = makePoolExhaustionLogger({ log: (line) => console.error(`review-daemon: ${line}`) });
+
 // ── IO SHELL (runs only as a CLI — owns the real lease + the real reconcile/dispatch/tag calls) ─────────────
 
 // Live-caught bug (this daemon's own first launchd-managed run, and the sibling #3870/pass-daemon.mjs
@@ -554,7 +580,8 @@ export function buildCliDaemonEffects({
   // `defaultReadPrs`/`defaultReadAgents` through; `runReviewTick`'s own default stays `null` (see that
   // function's own doc for why) so every pre-existing test of it is unaffected here too.
   runReview = (opts) => runReviewTickAllRepos({
-    acquirableLanes: defaultAcquirableLaneCount, readPrs: defaultReadPrs, readAgents: defaultReadAgents, ...opts,
+    acquirableLanes: defaultAcquirableLaneCount, readPrs: defaultReadPrs, readAgents: defaultReadAgents,
+    poolExhaustion: DAEMON_POOL_EXHAUSTION, ...opts,
   }),
 } = {}) {
   // #3383 follow-up (live-caught 2026-09-26) — carries the LAST tick's own `liveProcessPrs` across the
