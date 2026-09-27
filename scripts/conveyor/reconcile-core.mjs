@@ -133,7 +133,7 @@ import { isPrCiFailureOwedRerun, countRebaseOntoMainComments, DEFAULT_MAX_REBASE
 // #2588/review-loops (epic #3383/#4075) — read-only reuse of the drain's OWN reviewed-sha marker (never a
 // second derivation): `parseReviewedSha` recovers the head an ACCEPT-shaped verdict (`accepted`/`clear-human`/
 // `restamp`) covered. See {@link planReconcile}'s ONE-REVIEW-PER-HEAD refusal for why this pass needs it too.
-import { parseReviewedSha } from '../lib/review-escalation.mjs';
+import { parseReviewedSha, planConvertSupersededVerdict, targetedCheckQuestion } from '../lib/review-escalation.mjs';
 // live incident, chalbert/web-everything PR #2752 (#4034/#2748) — a PR whose own content is ALREADY on `main`,
 // carried there by a different PR that stacked on its branch and merged first, never owes a fix or a review.
 // The verdict itself (`pr.alreadyLandedInMain`, per-file blob-identity evidence) is computed by the IO shell
@@ -159,7 +159,12 @@ import { parseReviewedSha } from '../lib/review-escalation.mjs';
  * being re-planned, and the cap is the SAME durable floor (`countCiHealComments`) either path would read off
  * the PR, never two independent counters.
  */
-export const DISPATCH_KINDS = Object.freeze(['fix', 'review', 'ci-heal']);
+// #xconv1 (chalbert/web-everything#2766/#2767 unblock) — `convert-advisory` is the FOURTH kind: a `needs-human`
+// PR whose CURRENT head already completed an independent jury review that a LATER escalation superseded (never
+// a fresh push — see the ONE-REVIEW-PER-HEAD block below). It converts that verdict into the standing advisory
+// note plus one targeted check on the escalation's own reason, instead of dispatching a whole second panel run
+// (`kind:'review'`) at a head nobody has touched since — see {@link planConvertSupersededVerdict}.
+export const DISPATCH_KINDS = Object.freeze(['fix', 'review', 'ci-heal', 'convert-advisory']);
 
 /**
  * we:scripts/conveyor/reconcile-core.mjs#REFUSAL_KINDS — every reason this pass declines to dispatch. Frozen and
@@ -208,8 +213,13 @@ export const DISPATCH_KINDS = Object.freeze(['fix', 'review', 'ci-heal']);
  *                          A review already ran against this exact commit; dispatching another risks a second,
  *                          contradicting verdict landing on a commit nobody has touched since (the live #2588
  *                          incident this refusal closes: 3 review sessions in 16 minutes on one head, "changes"
- *                          then "accepted" 5 minutes apart).
- *   `already-landed`     — live incident, chalbert/web-everything PR #2752 (#4034/#2748): every file this PR
+ *                          then "accepted" 5 minutes apart). #xconv1 (chalbert/web-everything#2766/#2767
+ *                          unblock) carved out ONE exception: a `needs-human` PR in this exact shape whose
+ *                          comments also carry a LATER escalation (test-gaming/manifest-tamper park, or the
+ *                          #2773 mutual-exclusivity heal) is not this risk at all — `review:human` already
+ *                          forbids a second ACCEPT — so that shape dispatches `kind:'convert-advisory'` instead
+ *                          of refusing here; see `planConvertSupersededVerdict` and {@link dispatchReviewRow}.
+ *   `already-landed`    — live incident, chalbert/web-everything PR #2752 (#4034/#2748): every file this PR
  *                          touches is byte-identical to some commit already on `main` — its own content was
  *                          carried there by a DIFFERENT PR (often one stacked on its branch that merged first)
  *                          while THIS PR's ref was separately rebased and drifted into an apparent conflict.
@@ -950,6 +960,31 @@ function dispatchReviewRow({
   const headSha = typeof pr?.headRefOid === 'string' ? pr.headRefOid.trim().toLowerCase() : '';
   const reviewedSha = headSha ? parseReviewedSha(pr?.comments) : null;
   if (headSha && reviewedSha && reviewedSha === headSha) {
+    // #xconv1 (chalbert/web-everything#2766/#2767 unblock, epic #3383/#4075) — a `needs-human` PR in this
+    // EXACT shape (accepted, then escalated — never a fresh push, or `reviewedSha` would no longer equal
+    // `headSha`) is NOT the #2588 risk this refusal exists for: `review-pr.mjs`'s own `confirm` step
+    // already refuses a second ACCEPT on a `review:human` PR (we:skills-src/review/SKILL.md, "A
+    // `review:human` PR is never agent-cleared"), so dispatching here can never land the contradicting
+    // verdict #2588 lived. What IS owed is CONVERTING the superseded verdict into the standing advisory
+    // note plus one targeted check on the escalation's own reason — never re-running the whole panel.
+    // Checked ONLY for `needs-human`: a `needs-review` PR in this shape is the genuine #2588 race (no
+    // escalation ever posted there — the label would have moved off `needs-review` the moment
+    // `review:accepted` landed), so it keeps the ORIGINAL, unconditional refusal below.
+    const conversion = withPhase?.phase === 'needs-human'
+      ? planConvertSupersededVerdict({ headSha, reviewedSha, comments: pr?.comments })
+      : { convert: false };
+    if (conversion.convert) {
+      dispatch.push({
+        ...base, ...withPhase, kind: 'convert-advisory', headSha, reviewedSha, ...extra,
+        acceptComment: conversion.acceptComment, escalation: conversion.escalation,
+        targetedCheckQuestion: targetedCheckQuestion(conversion.escalation),
+        why: `this head (\`${headSha}\`) already completed an independent jury review, superseded by a ` +
+          `later ${conversion.escalation.kind} escalation, not by any defect the panel found — convert ` +
+          'that verdict into the standing advisory note (plus one targeted check on the escalation ' +
+          'reason) instead of re-running the whole panel (#xconv1)',
+      });
+      return;
+    }
     refuse('already-reviewed-head', {
       ...withPhase, headSha, reviewedSha, ...extra,
       why: `this exact head (\`${headSha}\`) already carries a \`reviewed-sha\` accept marker from a prior` +

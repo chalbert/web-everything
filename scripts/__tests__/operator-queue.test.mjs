@@ -89,6 +89,11 @@ describe('evaluatePr', () => {
     expect(evaluatePr(fixture({ labels: [HUMAN, CHANGES], comments: [advisoryWithOutcome('changes')] })))
       .toEqual({ ready: false, reasons: ['changes requested'], transient: false });
   });
+
+  it('an `inconclusive` advisory on this head is never ready and never reads as a label/comment disagreement (PR #2781 review, round 4)', () => {
+    expect(evaluatePr(fixture({ labels: [HUMAN], comments: [advisoryWithOutcome('inconclusive')] })))
+      .toEqual({ ready: false, reasons: ['advisory is inconclusive on this head (a human must confirm the escalation)'], transient: false });
+  });
 });
 
 // THE LABEL GATE. NEEDS YOU requires `review:human` + `advisory:accepted` and NEITHER `review:pending` NOR
