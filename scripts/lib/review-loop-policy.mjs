@@ -298,7 +298,8 @@ export function buildPreventionFilingInput({ repo, pr, findings = [], parent = '
     // PR #2766 advisory (antigravity): a test file is its own test sibling — never `__tests__/__tests__/x.test.test.mjs`.
     if (/\.test\.[cm]?[jt]s$/.test(base) || dir.endsWith('__tests__')) return f;
     const stem = base.replace(/\.mjs$/, '');
-    return `${dir}/__tests__/${stem}.test.mjs`;
+    // PR #2766 advisory (antigravity): a top-level file's sibling is `__tests__/…`, never `./__tests__/…`.
+    return `${dir === '.' ? '' : `${dir}/`}__tests__/${stem}.test.mjs`;
   };
   // #883 — EVERY entry, in `scope` AND in the digest's backticked paths, carries the `we:` locus prefix: a
   // bare path is refused at write time (`lint-locus-prefix.mjs`) for BOTH surfaces (`check-standards.mjs`'s
@@ -324,8 +325,9 @@ export function buildPreventionFilingInput({ repo, pr, findings = [], parent = '
     const base = f.includes('/') ? f.slice(f.lastIndexOf('/') + 1) : f;
     const escaped = base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     // `-`/`.` in the lookarounds too (PR #2766 self-review): `\b` alone treats `-` as a boundary, so citing
-    // `lane.mjs` used to splice a prefix into the middle of `guard-lane.mjs`.
-    return text.replace(new RegExp(`(?<!we:|fui:|plateau:)(?<![\\w/.-])${escaped}(?![\\w-])`, 'g'), `${IN_REPO_LOCUS}${f}`);
+    // `lane.mjs` used to splice a prefix into the middle of `guard-lane.mjs`. A `.` only ends the name when no
+    // word follows it (PR #2766 advisory): `lane.mjs.bak` is a longer name, `…fix lane.mjs.` ends a sentence.
+    return text.replace(new RegExp(`(?<!we:|fui:|plateau:)(?<![\\w/.-])${escaped}(?![\\w-]|\\.\\w)`, 'g'), `${IN_REPO_LOCUS}${f}`);
   }, digestRaw);
   // PR #2766 advisory (codex-correctness, reproduced) — the basename pass above deliberately skips a name that
   // is already part of a longer `dir/basename` path, so a FULL bare path in juror prose (a test file, or a file

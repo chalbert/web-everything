@@ -293,6 +293,29 @@ describe('buildPreventionFilingInput — the file-item card the loop files for i
     expect(input.digest).not.toMatch(/-we:/);
   });
 
+  it('PR #2766 advisory (antigravity): never splices a cited path into a LONGER name that only adds an '
+    + 'extension, and still qualifies a cited name that ends a sentence', () => {
+    const input = buildPreventionFilingInput({
+      repo: 'o/r', pr: 1,
+      findings: [{
+        file: 'scripts/lane.mjs', line: 3, preventionCaptured: false,
+        prevention: 'ignore lane.mjs.bak here, and fix lane.mjs.',
+      }],
+    });
+    expect(input.digest).not.toContain('we:scripts/lane.mjs.bak');
+    expect(input.digest).toContain('and fix we:scripts/lane.mjs.');
+    expect(findUnmarkedLocusRefs(input.digest)).toEqual([]);
+  });
+
+  it('PR #2766 advisory (antigravity): a TOP-LEVEL file\'s test sibling is `__tests__/<stem>.test.mjs`, never '
+    + 'a `./`-led path', () => {
+    const input = buildPreventionFilingInput({
+      repo: 'o/r', pr: 1,
+      findings: [{ file: 'index.mjs', line: 1, prevention: 'pin it', preventionCaptured: false }],
+    });
+    expect(input.scope.split(',')).toEqual(['we:index.mjs', 'we:__tests__/index.test.mjs']);
+  });
+
   it('PR #2766: names the reviewed head in the digest when given (the stable duplicate key), and nothing when not', () => {
     const head = 'c'.repeat(40);
     const withHead = buildPreventionFilingInput({ repo: 'o/r', pr: 1, findings, head });
