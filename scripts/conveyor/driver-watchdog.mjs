@@ -66,7 +66,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 
-import { parseQueue, normNum } from './queue-store.mjs';
+import { parseQueue, normNum, resolveQueuePath, resolveQueueSource } from './queue-store.mjs';
 import { readDriverMode, driverModePath, DEFAULT_DRIVER_MODE } from './driver-mode.mjs';
 import { gitRun, notifyDesktop, decideEscalation, defaultAppendLog, DEFAULT_RENAG_MS } from './branch-sync.mjs';
 import { resolveRunnerCheckout } from './resolve-runner-checkout.mjs';
@@ -445,7 +445,10 @@ export const WATCHDOG_REPO_ROOT = resolve(HERE, '..', '..');
 export const lastKnownGoodPath = (checkout) => join(checkout, '.conveyor', 'last-known-good.json');
 export const alertPath = (checkout) => join(checkout, '.conveyor', 'watchdog-alert.json');
 export const logPath = (checkout) => join(checkout, '.conveyor', 'watchdog.log');
-export const queueSidecarPath = (checkout) => join(checkout, '.conveyor', 'queue.json');
+/** The cleared queue is NOT under the driver's checkout any more: it is the ONE state-home file every runner and
+ *  daemon reads (decouple-primary-checkout, epic #4075) — including its one-release fallback to the primary's
+ *  old sidecar (`queue-store.mjs#resolveQueueSource`). `checkout` is accepted and ignored. */
+export const queueSidecarPath = (_checkout) => resolveQueueSource(resolveQueuePath()).path;
 export const dispatchLogPath = (checkout) => join(checkout, '.conveyor', 'dispatch-log.json');
 export const runsDirPath = (checkout) => join(checkout, '.operations', 'runs');
 /** Re-exported so a caller/test has ONE spelling of the marker's location, the writer's own. */
