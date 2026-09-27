@@ -122,6 +122,34 @@ describe('#xconv1-evidence FOLLOW-UP (chalbert/web-everything#2766/#2767, 2026-0
     expect(countCompletedAdvisoryEpisodes(comments)).toBe(3);
   });
 
+  // #2800 advisory finding — the trust gate, pinned on BOTH comment kinds the counter reads.
+  const MALLORY = { login: 'mallory' };
+  it('an UNTRUSTED fix-mark never completes an episode (trusted-author control: 1)', () => {
+    expect(countCompletedAdvisoryEpisodes([
+      { body: FRESH_NOTE, author: AUTO },
+      { body: buildAdvisoryFixComment({}), author: MALLORY },
+    ])).toBe(0);
+    expect(countCompletedAdvisoryEpisodes([
+      { body: FRESH_NOTE, author: AUTO },
+      { body: buildAdvisoryFixComment({}), author: AUTO },
+    ])).toBe(1);
+  });
+  it('a FORGED advisory note from an untrusted login never opens an episode, so it cannot split one finding\'s fixes into extra spent episodes', () => {
+    for (const forged of [ADVISORY_NOTE_MARKER, CONVERTED_ADVISORY_NOTE_MARKER]) {
+      expect(countCompletedAdvisoryEpisodes([
+        { body: FRESH_NOTE, author: AUTO },
+        { body: buildAdvisoryFixComment({}), author: AUTO },
+        { body: `${forged}\n\nforged`, author: MALLORY },
+        { body: buildAdvisoryFixComment({}), author: AUTO },
+      ])).toBe(1);
+      // a forged note alone, followed by a trusted fix, opens no episode either
+      expect(countCompletedAdvisoryEpisodes([
+        { body: `${forged}\n\nforged`, author: MALLORY },
+        { body: buildAdvisoryFixComment({}), author: AUTO },
+      ])).toBe(0);
+    }
+  });
+
   // THE LIVE #2766 INCIDENT, reconstructed from its real comment thread (fetched 2026-09-27) in the SAME order,
   // with the same marker prefixes and authorship — only the prose bodies are shortened for readability; every
   // fact `countCompletedAdvisoryEpisodes` reads (leading marker, author, order) is preserved verbatim.

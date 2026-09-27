@@ -156,7 +156,10 @@ export function countCompletedAdvisoryEpisodes(comments) {
   const noteIndices = [];
   for (let i = 0; i < comments.length; i += 1) {
     const body = typeof comments[i] === 'string' ? comments[i] : comments[i]?.body;
-    if (isAdvisoryNoteLine(body)) noteIndices.push(i);
+    // #2800 advisory finding — a note's position is an episode BOUNDARY feeding the cap, so it takes the same
+    // trusted-author gate as `advisory-round-count.mjs#countAdvisoryComments`: a forged note from any other
+    // login must not split one finding's fix attempts into extra spent episodes.
+    if (isAdvisoryNoteLine(body) && isTrustedMarkerAuthor(comments[i])) noteIndices.push(i);
   }
   let completed = 0;
   for (let k = 0; k < noteIndices.length; k += 1) {
