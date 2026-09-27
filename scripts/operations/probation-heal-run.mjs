@@ -34,6 +34,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { appendScorecard as appendScorecardRow } from '../conveyor/run-scorecard-store.mjs';
+import { CONSTELLATION_REPOS, DEFAULT_REPO_KEY } from '../lib/constellation-repos.mjs';
 import {
   buildCheckerArgv, buildCheckerTask, buildCiHealTask, buildHealCommitMessage, buildWorkerArgv,
   healDiffWithinEnvelope, launchScorecardRow, newUntrackedPaths, parseCheckerVerdict, summarizeNumstat, workerNeeded,
@@ -42,7 +43,7 @@ import {
 const HERE = dirname(fileURLToPath(import.meta.url));
 /** The WE checkout every tool is resolved from — by script location, never cwd. */
 export const WE_ROOT = resolve(HERE, '..', '..');
-const REPO_SLUG = 'chalbert/web-everything';
+const REPO_SLUG = CONSTELLATION_REPOS[DEFAULT_REPO_KEY].slug;
 const GATE_TIMEOUT_MS = 20 * 60 * 1000;
 
 /** Parse `--k=v` flags. PURE. */
