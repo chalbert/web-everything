@@ -1,4 +1,5 @@
 ---
+bornAs: x34h6a2
 kind: story
 size: 3
 status: open
