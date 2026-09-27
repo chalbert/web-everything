@@ -17,7 +17,7 @@
  *   module's own shared lock instead of the lane pool).
  */
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync, chmodSync, readFileSync, existsSync, statSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, chmodSync, readFileSync, existsSync, statSync, mkdirSync, realpathSync } from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -78,6 +78,40 @@ describe('checkoutShimDir — one shim per checkout, never the machine-wide file
     const dir = checkoutShimDir({ ghThrottleCliPath: '/w/wev-review-daemon/scripts/lib/gh-throttle.mjs' });
     expect(out.PATH).toBe(`${dir}:/opt/homebrew/bin`);
     expect(writeFile.mock.calls[0][0]).toBe(join(dir, 'gh'));
+  });
+});
+
+describe('defaultGhThrottleCliPath — resolved through primaryCheckout, never wherever this module happens to run (gh-shim-stable-path)', () => {
+  it('resolves through the injected primaryCheckout inputs to a checkout OUTSIDE a lane, even when `root` names one', () => {
+    const laneRoot = '/w/.lanes/web-everything/lane-22';
+    // `exists` answers true for the PRIMARY checkout dir itself (what `primaryCheckout`'s own alias probe
+    // checks) AND its `gh-throttle.mjs` (what this function checks next) — never anything under the lane — so
+    // a correct implementation can only return the primary path; the wrong (old) behavior would bake `root`'s
+    // own sibling-of-this-file path in instead and never even consult `exists` this way.
+    const exists = (p) => p === '/w/webeverything' || p === '/w/webeverything/scripts/lib/gh-throttle.mjs';
+    const path = defaultGhThrottleCliPath({ root: laneRoot, exists, realpath: (p) => p });
+    expect(path).toBe('/w/webeverything/scripts/lib/gh-throttle.mjs');
+    expect(path).not.toContain('.lanes');
+    expect(path).not.toContain('lane-22');
+  });
+
+  it('canonicalizes through a symlink alias — gh-throttle.mjs\'s own CLI entry check compares against the REAL path', () => {
+    // Live bug this guards: the primary checkout is reachable through two names on this host (`webeverything`,
+    // the real dir, and `web-everything`, a symlink CONSTELLATION_REPOS also lists). If `primaryCheckout` probes
+    // the symlink name first, baking THAT string in makes gh-throttle.mjs's own
+    // `import.meta.url === pathToFileURL(process.argv[1])` entry check silently false (Node's loader reports
+    // import.meta.url through the REAL path) — main() never runs, the CLI exits 0 having printed nothing, and
+    // every gh call routed through it looks like a no-op success.
+    const exists = (p) => p === '/w/web-everything/scripts/lib/gh-throttle.mjs';
+    const realpath = (p) => (p === '/w/web-everything/scripts/lib/gh-throttle.mjs' ? '/w/webeverything/scripts/lib/gh-throttle.mjs' : p);
+    const path = defaultGhThrottleCliPath({ root: '/w/.lanes/web-everything/lane-5', exists, realpath });
+    expect(path).toBe('/w/webeverything/scripts/lib/gh-throttle.mjs');
+  });
+
+  it('falls back to this module\'s own sibling path when no primary checkout can be found on disk at all', () => {
+    const path = defaultGhThrottleCliPath({ root: '/nowhere', exists: () => false });
+    expect(path).toMatch(/\/scripts\/lib\/gh-throttle\.mjs$/);
+    expect(path).not.toBe('/nowhere/scripts/lib/gh-throttle.mjs');
   });
 });
 
@@ -205,6 +239,110 @@ describe('renderGhShimScript — pure text, and REALLY RUN against a fake real g
         const out = JSON.parse(r.stdout);
         expect(out.argv).toEqual(['api', 'repos/x/y']);
         expect(out.ghToken).toBe('ghs_live_fresh'); // still on the App token — only the pacing hop is skipped
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    // #4200-ish (gh-shim-stable-path) — the missing-CLI fallback now warns on stderr instead of degrading
+    // silently, so a fallback that WOULD have gone unnoticed shows up in the dispatched session's own output.
+    it('a missing GH_THROTTLE_CLI degrades to direct gh AND prints a visible stderr warning naming the missing path', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'we-gh-shim-live-'));
+      try {
+        const realGh = join(dir, 'real-gh');
+        writeFileSync(realGh, '#!/usr/bin/env node\nconsole.log(JSON.stringify({ ok: true }));\n');
+        chmodSync(realGh, 0o755);
+        const cachePath = join(dir, 'cache.json');
+        const shimPath = join(dir, 'gh');
+        const goneCli = join(dir, 'lane-that-was-deleted', 'scripts', 'lib', 'gh-throttle.mjs');
+        writeFileSync(shimPath, renderGhShimScript({ realGhPath: realGh, cachePath, ghThrottleCliPath: goneCli }), 'utf8');
+        chmodSync(shimPath, 0o755);
+        const r = spawnSync(shimPath, ['api', 'repos/x/y'], { encoding: 'utf8' });
+        expect(r.status).toBe(0);
+        expect(JSON.parse(r.stdout)).toEqual({ ok: true });
+        expect(r.stderr).toContain('gh-shim:');
+        expect(r.stderr).toContain(goneCli);
+        expect(r.stderr).toContain('falling back to direct, unthrottled gh');
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    // #4200-ish — GH_THROTTLE_CLI itself can exist while one of ITS OWN sibling imports has been stranded by a
+    // lane reset elsewhere (the entry file survives; a module it imports does not). The OLD detection only
+    // matched "Cannot find module" text that also contained GH_THROTTLE_CLI's own path, which this case does
+    // NOT produce (the missing path is the SIBLING's, not the entry file's) — so it used to crash the whole
+    // gh call instead of degrading. Broadened detection must catch this too.
+    it('GH_THROTTLE_CLI present but with a stranded sibling import still degrades to direct gh, never crashes', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'we-gh-shim-live-'));
+      try {
+        const realGh = join(dir, 'real-gh');
+        writeFileSync(realGh, '#!/usr/bin/env node\nconsole.log(JSON.stringify({ ok: true, via: "real-gh" }));\n');
+        chmodSync(realGh, 0o755);
+        const brokenCliDir = join(dir, 'broken-throttle-checkout');
+        mkdirSync(brokenCliDir, { recursive: true });
+        const brokenCli = join(brokenCliDir, 'gh-throttle.mjs');
+        // The entry file itself exists and is valid — it just imports a sibling that isn't there, exactly the
+        // shape a partial lane reset leaves behind.
+        writeFileSync(brokenCli, "import './a-sibling-that-was-stranded-by-a-lane-reset.mjs';\n", 'utf8');
+        const cachePath = join(dir, 'cache.json');
+        const shimPath = join(dir, 'gh');
+        writeFileSync(shimPath, renderGhShimScript({ realGhPath: realGh, cachePath, ghThrottleCliPath: brokenCli }), 'utf8');
+        chmodSync(shimPath, 0o755);
+        const r = spawnSync(shimPath, ['api', 'repos/x/y'], { encoding: 'utf8' });
+        expect(r.status).toBe(0);
+        expect(JSON.parse(r.stdout)).toEqual({ ok: true, via: 'real-gh' });
+        expect(r.stderr).toContain('gh-shim:');
+        expect(r.stderr).toContain('falling back to direct, unthrottled gh');
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    // PR #2772 review:changes — the throttle CLI relays the REAL gh's stderr byte-for-byte, so a genuine gh
+    // failure (a Node-based extension, a broken Node git hook) whose OWN stderr says "Cannot find module" must
+    // never be mistaken for the throttle CLI failing to load: that would re-run the SAME, possibly mutating,
+    // command a second time via the direct fallback. The throttle CLI here loads fine and runs gh exactly once.
+    it('does not replay a real gh failure whose own relayed stderr contains "Cannot find module" — the mutating call runs exactly once', () => {
+      // realpath'd: macOS's tmpdir is a symlink (/var → /private/var), which would make the relay CLI's own
+      // entry-point guard below silently false — the same trap defaultGhThrottleCliPath realpaths against.
+      const dir = realpathSync(mkdtempSync(join(tmpdir(), 'we-gh-shim-live-')));
+      try {
+        const counter = join(dir, 'invocations');
+        const realGh = join(dir, 'real-gh');
+        // A mutating "real gh": records the invocation, then fails for a reason UNRELATED to the throttle CLI.
+        writeFileSync(
+          realGh,
+          '#!/usr/bin/env node\n'
+            + `require('node:fs').appendFileSync(${JSON.stringify(counter)}, 'x');\n`
+            + "process.stderr.write(\"Error: Cannot find module '/some/unrelated/hook.js'\\n\");\n"
+            + 'process.exitCode = 1;\n',
+          'utf8',
+        );
+        chmodSync(realGh, 0o755);
+        // A healthy throttle CLI that transparently relays the real gh (the same contract gh-throttle.mjs's own
+        // runGhCliPassthrough keeps), guarded like the real one so importing it has no side effect.
+        const relayCli = join(dir, 'healthy-throttle', 'gh-throttle.mjs');
+        mkdirSync(join(dir, 'healthy-throttle'), { recursive: true });
+        writeFileSync(
+          relayCli,
+          "import { spawnSync } from 'node:child_process';\n"
+            + "import { pathToFileURL } from 'node:url';\n"
+            + "if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {\n"
+            + "  const r = spawnSync(process.env.WE_GH_THROTTLE_GH_BIN, process.argv.slice(2), { stdio: ['inherit', 'pipe', 'pipe'] });\n"
+            + '  process.stdout.write(r.stdout); process.stderr.write(r.stderr); process.exitCode = r.status;\n'
+            + '}\n',
+          'utf8',
+        );
+        const cachePath = join(dir, 'cache.json');
+        const shimPath = join(dir, 'gh');
+        writeFileSync(shimPath, renderGhShimScript({ realGhPath: realGh, cachePath, ghThrottleCliPath: relayCli }), 'utf8');
+        chmodSync(shimPath, 0o755);
+        const r = spawnSync(shimPath, ['pr', 'comment', '1', '--body', 'x'], { encoding: 'utf8', env: { ...process.env, GH_TOKEN: undefined } });
+        expect(readFileSync(counter, 'utf8')).toBe('x'); // exactly one real invocation — never a silent replay
+        expect(r.status).toBe(1); // the genuine failure is preserved, not masked by a fallback's result
+        expect(r.stderr).toContain("Cannot find module '/some/unrelated/hook.js'");
+        expect(r.stderr).not.toContain('gh-shim:');
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }

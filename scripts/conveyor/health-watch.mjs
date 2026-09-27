@@ -235,6 +235,39 @@ export function probeSelfSync(dir) {
   });
 }
 
+/**
+ * #4200-ish (gh-shim-lane-path) — every generated `gh` shim under `~/.claude/github-app-token/` (the legacy
+ * shared `gh-shim/gh` plus each per-checkout `gh-shim.d/<hash>/gh` — see `scripts/lib/gh-app-shim.mjs`), scanned
+ * for a baked `GH_THROTTLE_CLI`/`REAL_GH` path pointing INTO a lane clone (`.lanes/`). The lane pool resets,
+ * recycles and deletes lane clones the moment their own PR lands — a shim baked with a lane path breaks EVERY
+ * gh call routed through it the instant that lane goes away, silently, with no warning until something tries
+ * to call `gh` (live: a shim found hard-coding `.../.lanes/web-everything/lane-22/scripts/lib/gh-throttle.mjs`).
+ * This smell exists to catch that BEFORE the lane resets, not after. READ-ONLY toward the token store: reads
+ * only the generated shim SCRIPTS themselves (baked-in paths, never a secret) — never `web-everything.json`
+ * (the token cache) alongside them.
+ */
+export function probeGhShimLanes({ home = homedir(), exists = existsSync, readdir = readdirSync, readFile = readFileSync } = {}) {
+  const root = join(home, '.claude', 'github-app-token');
+  const shimPaths = [];
+  const legacy = join(root, 'gh-shim', 'gh');
+  if (exists(legacy)) shimPaths.push(legacy);
+  const dDir = join(root, 'gh-shim.d');
+  if (exists(dDir)) {
+    for (const entry of readdir(dDir)) {
+      const p = join(dDir, entry, 'gh');
+      if (exists(p)) shimPaths.push(p);
+    }
+  }
+  const laneLike = (v) => typeof v === 'string' && /\/\.lanes\//.test(v);
+  return shimPaths.map((p) => {
+    let src = '';
+    try { src = readFile(p, 'utf8'); } catch { /* unreadable — reports as no baked path found, never throws */ }
+    const throttleCli = src.match(/const GH_THROTTLE_CLI = "([^"]*)"/)?.[1] ?? null;
+    const realGh = src.match(/const REAL_GH = "([^"]*)"/)?.[1] ?? null;
+    return { path: p, throttleCli, realGh, inLane: laneLike(throttleCli) || laneLike(realGh) };
+  });
+}
+
 /** The last `{"checked":true,"health":{…}}` line each lane-pool-health-watch log printed. */
 export function probeLanePools(logsDir) {
   const out = [];
@@ -387,6 +420,8 @@ export async function tick(flags = {}) {
     : (attempt('daemonStatus', () => probeDaemonStatus()) ?? attempt('leases', leaseScan));
   probes.selfSync = attempt('selfSync', () => probeSelfSync(flags['self-sync-dir'] || defaultSelfSyncDir()));
   probes.lanePools = attempt('lanePools', () => probeLanePools(logsDir));
+  // #4200-ish — cheap, fs-only, every tick: catches a shim baked with a lane-clone path BEFORE that lane resets.
+  probes.ghShimLanes = attempt('ghShimLanes', () => probeGhShimLanes());
   probes.appStatus = attempt('appStatus', () => readGithubAppStatus()) ?? null;
   // The declared heavy-command admission read (cap, held slots, waiters with requestedAt) — a fixture file in tests.
   probes.heavyQueue = attempt('heavyQueue', () => (flags['heavy-status-file']
