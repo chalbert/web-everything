@@ -742,7 +742,9 @@ export function sweepMissingRunRecovery({
   clearLabel = clearStaleCheckingLabel, thresholdMs = DEFAULT_MISSING_RUN_THRESHOLD_MS,
   maxRetriesPerSha = DEFAULT_MAX_MISSING_RUN_RETRIES_PER_SHA, now = Date.now(),
 } = {}) {
-  const prs = readOpenPrs({ repo, extraFields: ['labels', 'baseRefName'] });
+  // #2793 — `mergeable` added so {@link buildMissingRunCandidates} can exclude a real merge conflict (never a
+  // "missing run", a conflicting PR can produce no `pull_request` run at all — see that function's own docblock).
+  const prs = readOpenPrs({ repo, extraFields: ['labels', 'baseRefName', 'mergeable'] });
   // `null` (UNKNOWN — the protection read failed, as it does for the daemon's App token) is passed through as-is:
   // {@link buildMissingRunCandidates} then uses its narrower "no CI-workflow check at all" test rather than a
   // guessed name set (PR #2740 review).

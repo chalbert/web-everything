@@ -49,7 +49,10 @@ import {
   firstRearmDeferredCreatedAtMs,
   narrowToConflictingFiles,
   isWatcherMarkerAlreadySuperseded,
+  CONFLICT_FIX_ROUND_CAP,
+  latestConflictFixMarkerCreatedAtMs,
 } from '../parked-pr-conflict-watch.mjs';
+import { CONFLICT_FIX_COMMENT_MARKER } from '../conflict-fix-round-count.mjs';
 import {
   STAND_DOWN_MARKER, WATCHER_STAND_DOWN_ACTOR, SUPERSEDE_STAND_DOWN_MARKER, buildStandDownComment,
 } from '../stand-down.mjs';
@@ -2801,6 +2804,133 @@ describe('unowned PRs that conflict with no review-workflow label at all (#xs81o
       expect(postNoteComment.mock.calls[0][0]).toMatchObject({ repo: 'chalbert/web-everything', pr: 2709 });
       expect(notifyDesktopChecked).toHaveBeenCalledTimes(1);
     });
+  });
+});
+
+// Landing-freeze fix, chalbert/web-everything#2793, 2026-09-27 — a ping-pong-with-no-owner: this file's own
+// "IDEMPOTENCY, NO SEPARATE STORE" header rule (a comment posts only on the absent→present label transition,
+// never again while the label already sits on the PR) left a PARKED-but-not-`review:human` PR that drifted back
+// into conflict after a rearm invisible to every later sweep, while `reconcile-core.mjs`'s own
+// `OWED_ELSEWHERE.conflicted` refusal assumed THIS file would keep re-attempting it. Real shape captured live
+// via `gh pr view 2793 --json baseRefName,headRefName,headRefOid,labels,mergeable,mergeStateStatus`:
+// `review:pending` + `review-round:2` + `merge-status:conflicting`, `mergeable: CONFLICTING`, no `review:changes`.
+describe('watchParkedPrConflicts — idle conflict-bounce re-assertion (landing-freeze fix, #2793)', () => {
+  const L = (...n) => n.map((name) => ({ name }));
+  const fakeProvider = () => {
+    const calls = [];
+    return {
+      calls,
+      ensureLabel: (repo, name) => { calls.push(['ensureLabel', repo, name]); },
+      setLabels: (repo, pr, spec) => { calls.push(['setLabels', repo, pr, spec]); },
+      postComment: (repo, pr, body) => { calls.push(['postComment', repo, pr]); },
+      currentRepo: () => 'chalbert/web-everything',
+    };
+  };
+  // The exact real shape (see the describe-level comment above), already carrying `merge-status:conflicting`
+  // from an earlier detection sweep — `plan.add` is false, `plan.remove` is empty (still conflicting).
+  const PR_2793 = {
+    number: 2793, baseRefName: 'main', headRefName: 'lane/rerun-after-main-fix',
+    headRefOid: '8be3bce0e51990837b7f9c016b407ec0f1657a1c', mergeable: 'CONFLICTING', mergeStateStatus: 'DIRTY',
+    labels: L('review:pending', 'review-round:2', 'merge-status:conflicting'),
+  };
+
+  it('was previously invisible: not `recheckCandidate` (no review:human) and not `graceDue` (not queued) — no entry at all without the fix\'s new predicate', () => {
+    // Pins the exact PRE-FIX gap: neither existing recheck path covers this shape, so with the fix's own
+    // `idleConflictBounce` predicate forced off (by adding `review:human`, which routes it through the narrower,
+    // UNCHANGED `recheckCandidate` path instead — a Y-shaped control, not a revert), the PR is silently skipped
+    // whenever there is no watcher stand-down marker to re-examine (`findWatcherStandDownComment` finds none).
+    const provider = fakeProvider();
+    const results = watchParkedPrConflicts({
+      repo: 'chalbert/web-everything', listPrs: () => [{ ...PR_2793, labels: L('review:human', 'merge-status:conflicting') }],
+      provider, listPrComments: () => [], postFinding: () => {},
+    });
+    expect(results).toEqual([]); // `recheckCandidate` finds no watcher marker and bails — nothing this pass does
+  });
+
+  it('GREEN — #2793\'s real shape (review:pending, idle, 0 conflict-fix rounds spent) is re-routed to reconcile-finding', () => {
+    const provider = fakeProvider();
+    const routed = [];
+    const results = watchParkedPrConflicts({
+      repo: 'chalbert/web-everything', listPrs: () => [PR_2793], provider,
+      postFinding: (o) => routed.push(o.pr.number), listPrComments: () => [],
+    });
+    expect(results).toEqual([expect.objectContaining({
+      num: 2793, routedTo: 'reconcile-finding (idle conflict-bounce re-asserted — #2793)', conflictFixRoundsSpent: 0,
+    })]);
+    expect(routed).toEqual([2793]);
+    // Never touches the review label or the (already-present) conflict label itself — resolving the git-level
+    // conflict is still entirely the fixer's job, never this file's.
+    expect(provider.calls).toEqual([]);
+  });
+
+  it('a PR still carrying a LIVE `review:changes` bounce is left alone — a fix cycle may genuinely be in flight', () => {
+    const provider = fakeProvider();
+    const postFinding = vi.fn();
+    const results = watchParkedPrConflicts({
+      repo: 'chalbert/web-everything',
+      listPrs: () => [{ ...PR_2793, labels: L('review:changes', 'merge-status:conflicting') }],
+      provider, postFinding, listPrComments: () => [],
+    });
+    expect(results).toEqual([]);
+    expect(postFinding).not.toHaveBeenCalled();
+  });
+
+  it('does not re-post within the retry window once already re-asserted for the CURRENT round', () => {
+    const provider = fakeProvider();
+    const postFinding = vi.fn();
+    const alreadyReasserted = [{
+      body: buildConflictFindingBody({ num: 2793, headRefName: PR_2793.headRefName }),
+      createdAt: '2026-09-27T05:00:00Z', author: { login: 'web-everything' },
+    }];
+    const results = watchParkedPrConflicts({
+      repo: 'chalbert/web-everything', listPrs: () => [PR_2793], provider, postFinding,
+      listPrComments: () => alreadyReasserted, now: Date.parse('2026-09-27T05:10:00Z'),
+    });
+    expect(results).toEqual([expect.objectContaining({ routedTo: 'reconcile-finding (idle conflict-bounce, already re-asserted this round)' })]);
+    expect(postFinding).not.toHaveBeenCalled();
+  });
+
+  it('re-asserts again once a NEW conflict-fix round completes after that finding (a fresh rearm postdating it)', () => {
+    const provider = fakeProvider();
+    const postFinding = vi.fn();
+    const thread = [
+      { body: buildConflictFindingBody({ num: 2793, headRefName: PR_2793.headRefName }), createdAt: '2026-09-27T02:00:00Z', author: { login: 'web-everything' } },
+      { body: `${CONFLICT_FIX_COMMENT_MARKER}\n\nround 2`, createdAt: '2026-09-27T04:00:00Z', author: { login: 'web-everything' } },
+    ];
+    const results = watchParkedPrConflicts({
+      repo: 'chalbert/web-everything', listPrs: () => [PR_2793], provider, postFinding,
+      listPrComments: () => thread, now: Date.parse('2026-09-27T05:50:00Z'),
+    });
+    expect(results).toEqual([expect.objectContaining({
+      routedTo: 'reconcile-finding (idle conflict-bounce re-asserted — #2793)', conflictFixRoundsSpent: 1,
+    })]);
+    expect(postFinding).toHaveBeenCalledTimes(1);
+  });
+
+  it('AT the shared CONFLICT_FIX_ROUND_CAP: never re-posts a finding again — surfaces a round-cap-exhausted note instead, exactly once', () => {
+    postNoteComment.mockClear();
+    notifyDesktopChecked.mockClear();
+    const provider = fakeProvider();
+    const postFinding = vi.fn();
+    const atCap = Array.from({ length: CONFLICT_FIX_ROUND_CAP }, (_, i) => ({
+      body: `${CONFLICT_FIX_COMMENT_MARKER}\n\nround ${i + 1}`, createdAt: `2026-09-27T0${i + 1}:00:00Z`, author: { login: 'web-everything' },
+    }));
+    const results = watchParkedPrConflicts({
+      repo: 'chalbert/web-everything', listPrs: () => [PR_2793], provider, postFinding,
+      listPrComments: () => atCap, now: Date.parse('2026-09-27T05:50:00Z'),
+    });
+    expect(results).toEqual([expect.objectContaining({
+      routedTo: 'cap-exhausted (conflict-fix, idle)', conflictFixRoundsSpent: CONFLICT_FIX_ROUND_CAP,
+    })]);
+    expect(postFinding).not.toHaveBeenCalled();
+    expect(postNoteComment).toHaveBeenCalledTimes(1);
+    expect(postNoteComment.mock.calls[0][0]).toMatchObject({ repo: 'chalbert/web-everything', pr: 2793 });
+    expect(postNoteComment.mock.calls[0][0].body).toContain(`mechanical conflict-fix rounds exhausted (${CONFLICT_FIX_ROUND_CAP}/${CONFLICT_FIX_ROUND_CAP})`);
+    expect(notifyDesktopChecked).toHaveBeenCalledTimes(1);
+  });
+
+  it('never grants MORE than the shared cap regardless of which pass drove each round — reconcile-core.mjs#isConflictBounce and this file bind on the identical CONFLICT_FIX_ROUND_CAP', () => {
+    expect(CONFLICT_FIX_ROUND_CAP).toBe(3);
   });
 });
 
