@@ -3,10 +3,11 @@ bornAs: xee72b2
 kind: story
 size: 3
 parent: "3383"
-status: active
+status: resolved
 scope: ["we:scripts/operations/pr-ownership.mjs", "we:scripts/operations/pr-ownership-io.mjs", "we:scripts/conveyor/reconcile-core.mjs"]
 dateOpened: "2026-09-24"
 dateStarted: "2026-09-28"
+dateResolved: "2026-09-28"
 relatedReport: reports/2026-09-24-plateau-observability-review.md
 tags: []
 ---
