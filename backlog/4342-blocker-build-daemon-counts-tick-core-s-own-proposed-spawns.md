@@ -3,9 +3,10 @@ bornAs: x0jgunh
 kind: story
 size: 3
 priority: high
-status: open
+status: resolved
 scope: ["we:scripts/conveyor/tick-core.mjs", "we:skills-src/conveyor/build-dispatch-daemon.mjs", "we:scripts/conveyor/__tests__/tick-core.test.mjs", "we:skills-src/conveyor/__tests__/build-dispatch-daemon.test.mjs"]
 dateOpened: "2026-09-28"
+dateResolved: "2026-09-28"
 preparedDate: "2026-09-28"
 preparedAgainstSha: "c7e4fd628fd6ee4436b82103f7d1ce35ca7fd8a7"
 tags: []
