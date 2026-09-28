@@ -3,6 +3,8 @@ bornAs: x1qxgif
 kind: story
 size: 3
 priority: high
+tier: pinned
+rank: i
 status: open
 scaffoldedBy: "investigate-dispatch-noop-lane-3-d65b5d9a"
 dateScaffolded: "2026-09-28"
