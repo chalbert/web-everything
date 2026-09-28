@@ -1,4 +1,5 @@
 ---
+bornAs: xkk4lv7
 kind: story
 size: 5
 status: open
@@ -24,7 +25,7 @@ Live 2026-09-27 ~6:55pm ET: node we:scripts/operations/run.mjs dispatch-lane --n
 - we:scripts/lane-pool.mjs — wire the SAME exported helper into `deadLeasePlan` (~we:scripts/lane-pool.mjs:1540),
   which already imports `itemNumFromSession`/`prNumFromSession`/`classifyReap`/`reapPlan`/`prStatesFromList`/
   `prStatesByPrNumber` straight from we:scripts/conveyor/lease-reaper.mjs (we:scripts/lane-pool.mjs:121) so the two reapers stay
-  single-sourced — the exact discipline #x5wm9ot's docblock in we:scripts/conveyor/lease-reaper.mjs already establishes for this
+  single-sourced — the exact discipline #4113's docblock in we:scripts/conveyor/lease-reaper.mjs already establishes for this
   file; a second, independent regex here would silently re-fork the two reapers.
 - we:scripts/conveyor/__tests__/lease-reaper.test.mjs — the failing-before + post-fix fixtures (see Test plan).
 
@@ -283,7 +284,7 @@ testing at the CLI/fixture level `we:scripts/conveyor/__tests__/lease-reaper.tes
 5. **Regression**: existing item-kind (`conveyor-<num>`) and PR-kind (`fix-`/`review-`/`ci-heal-`/`inspect-<PR>`)
    session fixtures in we:scripts/conveyor/__tests__/lease-reaper.test.mjs still resolve identically.
 6. **Hash-branch case**: note (per the light review) that `matchLaneRef` accepts a hash id
-   (`lane/x9ylkp7-*`) that `parseSessionSlug` deliberately never does — the branch fallback therefore makes a
+   (`lane/3095-*`) that `parseSessionSlug` deliberately never does — the branch fallback therefore makes a
    previously-unreachable hash-keyed PR state usable for reaping for the first time. Add an explicit fixture for
    it rather than leaving it as an untested side effect of reusing `matchLaneRef`.
 7. **Acquire-time TTL preserved**: a fixture proving we:scripts/lane-pool.mjs's `deadLeasePlan` still requires
