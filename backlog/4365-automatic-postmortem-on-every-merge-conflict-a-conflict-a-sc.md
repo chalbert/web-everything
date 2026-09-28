@@ -334,40 +334,47 @@ already-designed follow-up, never silently dropped):
 2. **Multi-opponent-per-file evidence — FOLLOW-UP, not MVP-blocking.** The MVP cut above states the single
    aggregate `opposingPrNumbers`/`prBScope` comparison as an explicit, honest limitation, not a claim of
    per-(file, opponent) precision. Filed as a follow-up slice (a per-(file, opponent) evidence shape).
-3. **Concurrent-write data loss on the whole-document store — MVP-BLOCKING, per this rule's own "harm: data
-   loss" bar; this session's own re-review correctly rejected treating an existing precedent as an exemption
-   for a NEW store's stated guarantee.** Real, bounded MVP fix, resolved directly (not deferred): `appendConflictPostmortem`
-   calls `we:scripts/conveyor/infra-blocked.mjs#withInfraLock` with a store-specific `timeoutMs` (30 000ms) far
-   above `withInfraLock`'s own 5 000ms default (`we:scripts/conveyor/infra-blocked.mjs:389`) — this write is rare
-   (once per resolved conflict episode, not a hot per-tick path, unlike every existing 5s-default caller), so it
-   can afford to actually WAIT for the lock rather than degrading to unlocked on the very first contended
-   holder. Combined with the existing dedupe-on-read (a retried write for the SAME `episodeId` is already a
-   no-op), this converts the realistic failure mode from "silent loss under ordinary contention" to "loss only
-   under contention sustained past 30 seconds" — vanishingly unlikely for a write this infrequent. The store's
-   own docstring states the residual bound HONESTLY rather than claiming "never lost data": "a write can still
-   be lost only under lock contention outlasting 30s; it is never silently corrupted, and dedupe-on-read makes a
-   retried write safe." Hardening further (CAS / one-row-per-file-append, closing the bound to zero) is filed as
-   a follow-up slice, per this rule's own point that a REAL fix is preferred to an accepted risk when one is
-   cheaply buildable — this one is.
+3. **[BLOCKER, OPEN after this session's round cap] Concurrent-write data loss on the whole-document store.**
+   Per this rule's own "harm: data loss" bar, this is MVP-blocking regardless of precedent (round 1's own
+   correction). Round 1's proposed fix — a 30s store-specific `timeoutMs` on
+   `we:scripts/conveyor/infra-blocked.mjs#withInfraLock` — does NOT actually establish the claimed bound: round
+   2's own re-review verified the real function (`we:scripts/conveyor/infra-blocked.mjs:389`) has TWO other
+   unlocked-proceed paths a longer `timeoutMs` never touches — its 15s STALE-lock rule can steal a still-running
+   writer's lock out from under it, and a non-`EEXIST` fs error proceeds unlocked immediately, both regardless of
+   `timeoutMs`. Confirmed live against the actual function, not merely argued from its docstring. **Not resolved
+   this session** (both this session's permitted rounds are spent) — a real fix (compare-and-swap, one-row-
+   per-file-append, or a NEW lock primitive without the stale-steal/error-passthrough escape hatches) is owed
+   before this specific MVP-Must is met; naming a longer timeout is not that fix.
 
-## Independent plan review — MVP re-review (Codex, read-only, 2026-09-28)
+## Independent plan review — MVP re-review, round 1 (Codex, read-only, 2026-09-28)
 
-This session's own one permitted re-review round, confined to the MVP cut + classification above. **2 blockers
-found, both resolved directly above (folded into the MVP cut / classification text, not left open):**
+This session's first re-review round, confined to the MVP cut + classification above. **2 blockers found:**
 
-1. **[blocker, resolved above]** The MVP's classification contract was not actually defined by declared scope
-   alone (it also needs losing-side identity, dispatch-window overlap, and hot-file history, all retained in the
-   5-way enum), and "single aggregate comparison" for multiple opponents named no concrete rule. **Resolved**:
-   the MVP cut's Task 2 bullet now states the exact aggregation (AND-of-card-existence, UNION-of-scope,
+1. **[blocker]** The MVP's classification contract was not actually defined by declared scope alone (it also
+   needs losing-side identity, dispatch-window overlap, and hot-file history, all retained in the 5-way enum),
+   and "single aggregate comparison" for multiple opponents named no concrete rule. **Resolved**: the MVP cut's
+   Task 2 bullet now states the exact aggregation (AND-of-card-existence, UNION-of-scope,
    agree-or-`unclassified` for losing-side/overlap) and an inline hot-file count against the store's own rows
-   (no separate rollup reader needed for the flag itself).
-2. **[blocker, resolved above]** Classifying the concurrent-write risk as NOT-AN-ISSUE via precedent was
-   rejected — the rule's own "harm: data loss" bar blocks regardless of an existing store accepting the same
-   risk. **Resolved**: `appendConflictPostmortem` now uses a 30s store-specific lock timeout (vs. the shared
-   primitive's 5s default), narrowing the residual loss window from "ordinary contention" to "contention
-   sustained past 30s," with the store's own docstring stating the honest (now much narrower) bound rather than
-   an over-claim.
+   (no separate rollup reader needed for the flag itself). Confirmed resolved in round 2, below.
+2. **[blocker]** Classifying the concurrent-write risk as NOT-AN-ISSUE via precedent was rejected — the rule's
+   own "harm: data loss" bar blocks regardless of an existing store accepting the same risk. Proposed fix: a 30s
+   store-specific lock timeout. **Round 2 found this fix does NOT actually work** — see the classification
+   above and round 2 below; STILL OPEN.
 3. **[scope-growth, confirmed correct]** The stacked-rebase exclusion (old Blocker 1) needed no further change —
    the MVP genuinely never touches that path.
 
-**MVP has no remaining blocker.** `node we:scripts/backlog.mjs prepare-stamp 4365` is appropriate.
+## Independent plan review — MVP re-review, round 2 (Codex, read-only, 2026-09-28 — this session's cap)
+
+Confirmation-only pass against round 1's own fixes. **Finding 1 confirmed resolved. Finding 2 confirmed
+UNRESOLVED**: verified live against the real `we:scripts/conveyor/infra-blocked.mjs#withInfraLock` that a longer
+`timeoutMs` does not close the gap — its 15s stale-lock-steal path and its non-`EEXIST`-error-proceeds-unlocked
+path both bypass `timeoutMs` entirely. Folded into the classification above as OPEN.
+
+**This session's two permitted review rounds are both spent. One real MVP-blocker remains** (the concurrent-write
+data-loss gap on the shared store) — **this card's MVP is NOT stamped.** Per this session's own new prepare
+rule (point 6: "after [the round cap], if no MVP-Must blocker remains, stamp... and file the rest as
+follow-ups" — the converse holding here: a real MVP-Must blocker DOES remain, so the card stays `status: open`,
+`preparedDate` withheld, exactly as the rule intends), a follow-up prep pass is owed: a real store-level fix
+(compare-and-swap, one-row-per-file-append, or a lock primitive with no stale-steal/error-passthrough escape
+hatch) before this MVP is build-ready. Everything else above (the MVP cut itself, the aggregation rule, Blocker
+1's classification) stands as prepared and does not need re-doing next pass.

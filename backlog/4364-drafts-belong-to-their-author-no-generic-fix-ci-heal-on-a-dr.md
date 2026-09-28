@@ -356,6 +356,10 @@ Done-when, no further round taken):
    after" promotion — reconciled to "the tick after" throughout. The pre-existing "left the cleared queue" branch
    caveat is now stated honestly in Design as an out-of-scope, unchanged behavior.
 
+**Round 2 (this session's cap, confirmation-only) result: confirmed resolved.** Design/Interfaces/Tasks/
+Done-when consistently gate refresh on `pr && pr.isDraft === true`; a no-PR claim keeps ordinary TTL expiry; the
+ownership re-check is named; retirement consistently reads "the tick after" promotion throughout.
+
 **This card's blocker is resolved; the MVP-cut rule does not apply here** (this card was never split — its
 one blocker is fixed directly, not narrowed). `node we:scripts/backlog.mjs prepare-stamp 4364` is appropriate.
 

@@ -424,7 +424,9 @@ silently dropped):
 1. **Working-tree-vs-published-commit binding — MVP-BLOCKING for `check:standards`, resolved directly (this
    session's own re-review correctly caught this session's own first-draft classification as FALSE: `we:check-standards.mjs`
    reads checkout files straight off disk (`readFileSync`, no `--base-sha`/`--head-sha` mode at all —
-   verified against the real script, which takes only `--json`/`--local`/`--files=` flags) — it is NOT
+   verified against the real script, whose flags are `--json`/`--local`/`--files=` plus `--scope=`/`--mine=`
+   — a same-machine SESSION-ownership partition of the SAME whole-checkout read, not a commit-scoped diff mode)
+   — it is NOT
    git-diff-scoped the way the soak-replay-gate CLI is; only that ONE of the two MVP checks was ever safe from
    this gap.** Real, honest fix (not deferred): the preflight IO shell checks `git status --porcelain` is empty
    (working tree matches HEAD) before running `check:standards`; when clean, the check gives FULL coverage of
@@ -460,6 +462,11 @@ found, resolved directly above:**
    from the MVP — confirmed they name no risk reaching the two-check preflight itself.
 3. **[not-an-issue, confirmed]** No technical dependency between the MVP and `#4365`'s shared store — confirmed
    against Interfaces (the MVP's `preflight`/`ci-red` refusal path never reads or writes that store).
+
+**Round 2 (this session's cap, confirmation-only) result: confirmed resolved**, with one minor factual
+correction folded in above (`we:check-standards.mjs` also accepts `--scope=`/`--mine=`, a same-machine
+session-ownership partition of the same whole-checkout read — not a commit-scoped diff mode, so the core
+finding stands; only the "only three flags" phrasing was incomplete).
 
 **MVP has no remaining blocker.** `node we:scripts/backlog.mjs prepare-stamp 4366` is appropriate.
 `blockedBy: ["4365"]` stays as-is at the card level (the card's full design, Could items included, still needs
