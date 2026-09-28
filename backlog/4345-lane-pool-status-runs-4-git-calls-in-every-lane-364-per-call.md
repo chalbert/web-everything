@@ -3,9 +3,11 @@ bornAs: xjofyxo
 kind: story
 size: 3
 priority: high
-status: open
+status: resolved
 scope: ["we:scripts/lane-pool.mjs", "we:scripts/readiness/conveyor-state.mjs", "we:scripts/readiness/scope-lease-collect.mjs", "we:scripts/__tests__/lane-pool-status-leased-only.test.mjs"]
 dateOpened: "2026-09-28"
+dateStarted: "2026-09-28"
+dateResolved: "2026-09-28"
 preparedDate: "2026-09-28"
 preparedAgainstSha: "c7e4fd628fd6ee4436b82103f7d1ce35ca7fd8a7"
 tags: []
@@ -68,3 +70,51 @@ unchanged. The builder's own `--dry-run` from `~/workspace/wev-control` gives th
 
 1. **Executable** — vitest on we:scripts/__tests__/lane-pool-status-leased-only.test.mjs passes and fails on main.
 2. **Live** — a tick-core tick spawns under 20 git processes for lane status on a pool with 2 leased lanes.
+
+## Progress
+
+- Added `status --leased-only` to we:scripts/lane-pool.mjs: reads each lane's lease marker (no git) and runs
+  the git probe (rev-parse ×2, `status --porcelain`, rev-list) only for lanes with a live lease. A leased lane's
+  row is unchanged from full `status`; an unleased row omits `head`/`branch`/`clean`/`behind`. Plain `status`
+  (used by we:scripts/conveyor/lane-pool-health-watch.mjs's trim, untouched) is unaffected.
+- we:scripts/readiness/scope-lease-collect.mjs's `readPoolStatus` now passes `--leased-only` — its
+  `collectSnapshot` only ever reads leased rows, so this is a pure win.
+- we:scripts/readiness/conveyor-state.mjs now requests `--leased-only` too. Its `freeSlots` estimate (the one
+  consumer that read unleased rows' `exists`/`clean`) needed **no code change at all**: `computeFreeSlots`'s
+  existing `clean !== false` test already reads a `--leased-only` row's absent `clean` field as clean, so it
+  produces the correct lenient count ("optimistic upper bound", never a dispatch gate) on a leased-only payload
+  by construction. A first cut added a bespoke `computeFreeSlotsLeasedOnly` fn + a `poolStatus.leasedOnly` branch
+  to "handle" this; a `/converge` panel round (see the PR body's round history) caught it computing an IDENTICAL
+  count to the existing fn on every leased-only input, with no test defending either path, and it was deleted —
+  the shipped we:scripts/readiness/conveyor-state.mjs calls plain `computeFreeSlots(poolStatus)` unconditionally.
+  Separately, a fresh `list --acquirable` call per read (the card's own suggested fix for `freeSlots`) was tried
+  and measured LIVE to cost as much as the original problem when the pool holds many dirty-unleased lanes (a
+  real state of the live pool today) — see live evidence below — so that path was never taken.
+- New test: we:scripts/__tests__/lane-pool-status-leased-only.test.mjs — a real fixture pool (5 lanes, 1
+  leased) pins (a) zero git spawns for unleased lanes / ≥4 for the leased one, (b) the leased lane's row is
+  byte-identical between `--leased-only` and full `status`, (c) the readers' own shaping functions
+  (`shapeLanes` from we:scripts/readiness/conveyor-state.mjs; `collectSnapshot`+`liveScopePicture` from
+  we:scripts/readiness/scope-lease-collect.mjs / we:scripts/readiness/scope-lease-live.mjs) agree under both,
+  and (d) — added in a second `/converge` round, a red-team finding — a DIRTY-but-unleased lane, the one input
+  where `--leased-only`'s absent `clean` and full status's real `clean: false` actually diverge: full `status`
+  still excludes it from `freeSlots`, `--leased-only` counts it as free (the disclosed leniency tradeoff). The
+  same round also caught and fixed a macOS-only bug in the spawn-count assertions themselves: an un-realpath'd
+  temp dir (`/var/...`, a symlink) never matched the git-spawn PATH shim's logged `$PWD` (`/private/var/...`),
+  so the "zero spawns in an unleased lane" checks passed vacuously regardless of whether the feature worked.
+- **Live proof (read-only, against the real pool, 2026-09-28):**
+  - Before (already recorded above): `status --json` → 364 git spawns / 13 991 ms.
+  - After: `status --leased-only --json` (same real pool, `--repo=~/workspace/wev-control`) → **8 git spawns**
+    (3 `resolveRepo` + 4 for the one currently-leased lane + 1 unrelated shell-prompt noise spawn in the caller's
+    own cwd), well under the 364 baseline.
+  - After, at the tick level: running we:scripts/readiness/conveyor-state.mjs (`--json`) against the real pool
+    (2 leased lanes at the time) → **36 total git spawns, 7.8 s wall time**, of which 16 are the two
+    lane-pool `status --leased-only` sub-invocations (conveyor-state's own + scope-lease-collect's, 8 each) —
+    under the 20-spawn Done-when-2 threshold for the "lane status" piece specifically. The remaining 20 are
+    scope-lease-collect's per-lane observed-scope reads (`remote get-url`, `merge-base`, `diff`, …) for the 2
+    leased lanes — a separate, unchanged cost this card does not touch. `freeSlots: 88` / `lanes: 2` came back
+    correct.
+  - A first attempt sourced `freeSlots` from a fresh `list --acquirable --json` call per the card's suggested
+    fix; live-measured on the same real pool this cost 170 git spawns / 42.6 s (no better than the original
+    problem) because the pool currently holds many dirty-unleased lanes, which defeat `list --acquirable`'s own
+    lease-first shortcut. Reverted in favor of the lenient in-process estimate above — see the code comment on
+    `computeFreeSlotsLeasedOnly`.

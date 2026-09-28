@@ -470,9 +470,12 @@ function parsePlanFlag(value) {
   }
 }
 
-/** Run `lane-pool.mjs status --json` (passing through the repo/name selector) and parse the payload. */
+/** Run `lane-pool.mjs status --leased-only --json` (passing through the repo/name selector) and parse the
+ *  payload. #4345 — `collectSnapshot` below only ever consumes LEASED rows (`l.leased === true`, filtered
+ *  before any other field is read), so `--leased-only` is a pure win here: the git probe (rev-parse ×2,
+ *  `status --porcelain`, rev-list) is skipped for every lane this collector was going to discard anyway. */
 function readPoolStatus(flags) {
-  const args = [LANE_POOL_CLI, 'status', '--json'];
+  const args = [LANE_POOL_CLI, 'status', '--leased-only', '--json'];
   if (typeof flags.repo === 'string') args.push(`--repo=${flags.repo}`);
   if (typeof flags.name === 'string') args.push(`--name=${flags.name}`);
   let out;
