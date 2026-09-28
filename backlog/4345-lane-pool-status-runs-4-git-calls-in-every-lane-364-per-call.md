@@ -1,4 +1,5 @@
 ---
+bornAs: xjofyxo
 kind: story
 size: 3
 priority: high
@@ -15,9 +16,9 @@ tags: []
 we:scripts/lane-pool.mjs `status --json` checks every one of the 90 lanes with 2 `rev-parse`, 1 `status
 --porcelain` and 1 `rev-list`. That is 364 git processes and about 14 s per call. The conveyor's readers
 (we:scripts/readiness/conveyor-state.mjs and we:scripts/readiness/scope-lease-collect.mjs) only use the LEASED
-lanes, and today 1–2 of 90 are leased. The lease-first shortcut from #xn432dz skips git for leased lanes only. It
+lanes, and today 1–2 of 90 are leased. The lease-first shortcut from #4012 skips git for leased lanes only. It
 assumed most lanes are leased, which is now the opposite of reality, so every status call hits the worst case.
-This is not a direct dispatch blocker. It is a main source of the fork storm behind load-cap (card x45rs01), and it
+This is not a direct dispatch blocker. It is a main source of the fork storm behind load-cap (card 4343), and it
 makes each tick slow (a fresh tick-core took 73.8 s, conveyor-state 42.7 s).
 
 ## Evidence (read-only, 2026-09-28)
@@ -28,7 +29,7 @@ makes each tick slow (a fresh tick-core took 73.8 s, conveyor-state 42.7 s).
     `remote` 1, `symbolic-ref` 1).
   - `list --acquirable --json` → 7 587 ms, 4 git spawns.
 - Tight `ps` sampling, 45 s, 2371 short-lived processes: a pool `status` call was the immediate parent of 544
-  (the wip-publisher's `live-state`, see card xvgqaqg) + 339 (build-dispatch-daemon, through conveyor-state) + 58
+  (the wip-publisher's `live-state`, see card 4346) + 339 (build-dispatch-daemon, through conveyor-state) + 58
   (scope-lease-collect) + 43 + 41 (health-watch for frontierui and plateau-app) of them. That is about 43% of all
   caught spawns.
 - One tick-core tick calls status at least twice: conveyor-state L842 calls it directly, and

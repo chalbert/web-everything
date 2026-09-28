@@ -1,4 +1,5 @@
 ---
+bornAs: x0jgunh
 kind: story
 size: 3
 priority: high
@@ -74,7 +75,7 @@ Before (captured above): the dry run shows `would dispatch now: nothing`, with e
 rerun we:skills-src/conveyor/build-dispatch-daemon.mjs `--dry-run` from `~/workspace/wev-control`. It must show
 `tick core counts 0 building` (or only real in-flight builds), and `would dispatch now:` must list items up to
 the cap. Then confirm that the live daemon log shows a tick with a non-empty `dispatched`. If load-cap (card
-x45rs01) is holding at that moment, the dry run shows 0 `spawnBuilds`. In that case rerun once
+4343) is holding at that moment, the dry run shows 0 `spawnBuilds`. In that case rerun once
 we:scripts/readiness/heavy-admission.mjs `load-status` reports `held:false`.
 
 ## Done when

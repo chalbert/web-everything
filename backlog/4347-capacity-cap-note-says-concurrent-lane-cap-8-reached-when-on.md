@@ -1,4 +1,5 @@
 ---
+bornAs: xz62k70
 kind: story
 size: 1
 priority: medium
@@ -15,7 +16,7 @@ tags: []
 With 2 lanes active and a cap of 8, tick-core has room for 6. It assigns 6 free lanes and then writes one note
 per remaining free lane: "⏸ lane-N available but withheld — concurrent-lane cap (8) reached". That was 68 notes
 on 2026-09-28. The text reads as "8 lanes are busy". It led the 08:30 ET investigation to hunt for 8 phantom
-active lanes, when the real holds were load-cap (card x45rs01) and the build daemon's own cap (card x0jgunh). This
+active lanes, when the real holds were load-cap (card 4343) and the build daemon's own cap (card 4342). This
 is a diagnostic defect, not a blocker.
 
 ## Evidence (read-only, 2026-09-28)

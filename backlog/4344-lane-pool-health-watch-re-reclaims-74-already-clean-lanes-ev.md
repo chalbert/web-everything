@@ -1,4 +1,5 @@
 ---
+bornAs: xbcny9p
 kind: story
 size: 3
 priority: high
@@ -17,7 +18,7 @@ we:scripts/lane-whois.mjs `--json` over the whole pool. It then runs we:scripts/
 for every lane verdicted `finished-reclaimable`. That verdict also covers a lane with no lease, no uncommitted
 files and no commits ahead, which is already clean. So the same ~74 clean lanes are "reclaimed" again every pass.
 Each reclaim is a node process plus about 10 git processes (status, reset, clean and more). This is the largest
-single source of the host's fork storm, which drives sys time and the load-cap holds (card x45rs01). It is not a
+single source of the host's fork storm, which drives sys time and the load-cap holds (card 4343). It is not a
 direct dispatch blocker.
 
 ## Evidence (read-only, 2026-09-28 08:46–09:00 ET)

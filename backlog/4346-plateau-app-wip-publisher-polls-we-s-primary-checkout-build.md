@@ -1,4 +1,5 @@
 ---
+bornAs: xvgqaqg
 kind: story
 size: 2
 priority: high
@@ -16,9 +17,9 @@ The `com.plateau.wip-publisher` launchd job runs `npm run wip:publish` in `~/wor
 plateau-app:scripts/wip-publish.ts under vite-node. It starts a publish cycle every 30 s. Each cycle runs WE
 operations from the PRIMARY checkout `~/workspace/webeverything`: we:scripts/backlog.mjs `build-queue --json`, and
 the `runner-activity` and `live-state` operations through we:scripts/operations/run.mjs. `live-state` calls the
-pool's `status --json`, which is 364 git processes (card xjofyxo). This answers the question "who runs
+pool's `status --json`, which is 364 git processes (card 4345). This answers the question "who runs
 build-queue from the primary checkout?": it is this publisher, not a WE daemon. It is the largest single CPU tree
-on the host. It is not a direct dispatch blocker, but it feeds the sys time behind load-cap (card x45rs01).
+on the host. It is not a direct dispatch blocker, but it feeds the sys time behind load-cap (card 4343).
 
 ## Evidence (read-only, 2026-09-28 08:46–09:00 ET)
 
@@ -39,7 +40,7 @@ on the host. It is not a direct dispatch blocker, but it feeds the sys time behi
 
 1. plateau-app:src/wip/wip-source.ts L20: raise `PUBLISH_EVERY_MS` to 120 s. The page's evidence ages over
    minutes, not seconds.
-2. Once card xjofyxo lands, have `live-state` use the pool's `status --leased-only`. That change lives in WE's
+2. Once card 4345 lands, have `live-state` use the pool's `status --leased-only`. That change lives in WE's
    live-state operation, so track it there if it is out of scope here.
 3. Follow-up, not in this card: read the conveyor's own last tick output instead of recomputing `build-queue` each
    cycle.

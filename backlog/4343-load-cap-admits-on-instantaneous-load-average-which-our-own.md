@@ -1,4 +1,5 @@
 ---
+bornAs: x45rs01
 kind: story
 size: 3
 priority: high
@@ -14,8 +15,8 @@ tags: []
 
 Tick-core's `load-cap` (#4076) holds every build and every prepare/fix/ci-heal lane when ONE host-sampler
 reading of `load1 / cores` is above 1.5 (load1 > 18 on this 12-core host). On macOS the load average counts
-runnable threads. Our own daemons start about 400 short-lived processes per second (cards xbcny9p, xjofyxo,
-xvgqaqg). That pushes load1 into the 20s–60s while about 45% of CPU sits idle and memory is never under pressure.
+runnable threads. Our own daemons start about 400 short-lived processes per second (cards 4344, 4345,
+4346). That pushes load1 into the 20s–60s while about 45% of CPU sits idle and memory is never under pressure.
 So the gate holds dispatch because of our own polling, not because the host lacks capacity.
 
 ## Evidence (read-only, 2026-09-28)
@@ -55,14 +56,14 @@ Replace the load1 ratio with a decision over the last ~2 minutes of samples the 
   2026-09-07 cascade (34.95/12 ≈ 2.9) would still have shown up through idle%.
 - A missing sample still fails open, as today. Keep `WE_LOAD_ADMISSION=off`. Add env knobs
   `WE_LOAD_ADMISSION_MIN_IDLE_PCT` (default 15) and `WE_LOAD_ADMISSION_WINDOW` (default 4).
-- The heavy-admission queue's projected wait is already its own gate (`queue-cap`, card xkyw1x4). Leave it
+- The heavy-admission queue's projected wait is already its own gate (`queue-cap`, card 4200). Leave it
   separate.
 - Update `loadCapReading` so the note names the real signal, for example `cpu idle 12% (<15%)`.
 
 ## Risks
 
 - Idle% ignores I/O stalls. Memory pressure covers swap. This host has shown no disk I/O problem.
-- If the load1 gate goes but the fork storm stays (cards xbcny9p/xjofyxo/xvgqaqg), dispatch runs on top of 39% sys.
+- If the load1 gate goes but the fork storm stays (cards 4344/4345/4346), dispatch runs on top of 39% sys.
   That is still fine while idle stays at 40% or more.
 
 ## Test plan (each fails before the fix)
@@ -79,7 +80,7 @@ Before: when `load-status --json` reports `held:true` with load1 > 18, capture t
 idle_pct (expected about 30–45%) and tick-core's `load-cap` notes. After landing, at a comparable load1,
 we:scripts/readiness/heavy-admission.mjs `load-status --json` reports `held:false` and shows the idle reading. The
 builder's own `--dry-run` from `~/workspace/wev-control` then shows a non-empty tick-core `spawnBuilds`. Once card
-x0jgunh has landed, the same dry run also lists items under `would dispatch now`.
+4342 has landed, the same dry run also lists items under `would dispatch now`.
 
 ## Done when
 
