@@ -3,9 +3,13 @@ bornAs: xp47hpd
 kind: story
 size: 3
 priority: high
-status: open
+status: resolved
 scope: ["we:scripts/operations/deliver-item-wrapper.mjs", "we:scripts/converge-cli.mjs", "we:scripts/guard-bash.mjs"]
 dateOpened: "2026-09-28"
+dateStarted: "2026-09-28"
+dateResolved: "2026-09-28"
+preparedDate: "2026-09-28"
+preparedAgainstSha: "7b014e355619cd456edb582b4a5582f0edc39ac9"
 tags: ["build-dispatch", "converge"]
 ---
 
@@ -36,3 +40,29 @@ Orchestration state (the converge-state bookkeeping file) that we:scripts/operat
 ## Done when
 
 1. **Executable** — a regression test that runs (or fakes) `runConverge`'s loop with an injected `run` that deletes the lane's converge-state file partway through (e.g. right after the red-team step's `step` call, before the edit action), and asserts the loop surfaces a clear, attributed failure (naming the missing state file and the round/action it happened after) rather than a raw `Command failed` exception — fails today (throws the raw child-process error), passes once (1) lands. A second test on we:scripts/converge-cli.mjs step (or the relocated-state design from (2)) proving the state file is never physically inside the lane's own working tree, once that fix lands, closes the loop.
+
+## Progress
+
+Both fix-design items (1) self-heal/fail-clearly and (2) relocate-the-bookkeeping landed together — with (2)
+fully done, item (3)'s guard-bash deny-rule fallback is moot and was not built.
+
+- `we:scripts/operations/deliver-item-wrapper.mjs`: new `convergeScratchDir`/`resetConvergeScratchDir` helpers
+  relocate the WHOLE `.converge-*` bookkeeping family (state, obs, material, panel, red-team, invite,
+  commit-message — not just the one file the incident surfaced) to a sibling directory of the lane
+  (`dirname(lane)/.converge-scratch/<lane-basename>/`), wiped and recreated fresh at the start of every
+  `runConverge` run so a recycled lane slot never inherits a previous item's leftover scratch. A validated,
+  shared path resolver (`resolveConvergeScratchDir`) refuses an unsafe `lane` (missing/empty/filesystem-root)
+  rather than risking the destructive reset collapsing onto an ancestor directory.
+- `runConverge`'s loop now checks the state file's existence immediately before every `step` call and throws a
+  clear, attributed error (naming the item, round, and the action that just ran) instead of letting a raw
+  child-process failure bubble up unexplained — the defensive backstop item (1) asked for, now rarely needed
+  given (2).
+- Test suite (`we:scripts/operations/__tests__/deliver-item-wrapper.test.mjs`): existing tests updated for the
+  new file locations; new regression tests reproduce the #4055 failure shape (state file deleted by the
+  editor turn mid-round) and assert the clear/attributed message (confirmed RED without the fix, GREEN with
+  it — see PR body), assert every bookkeeping file kind resolves outside the lane, assert a stale file from a
+  recycled lane slot gets swept, and assert the unsafe-lane-path refusal.
+- Converged via `/converge` (elevated care) against the real diff, two rounds: round 1's red-team surfaced a
+  real security-impact gap (an unvalidated, unconditional recursive delete) and a missing-coverage gap (no
+  test for the reset), both fixed in-loop; round 2 accepted with only cosmetic simplicity findings (a dead
+  defensive branch, comment verbosity), also trimmed. Final verdict: land.

@@ -94,8 +94,8 @@
  *      operator chose to build it ahead of `#3581`'s ratified reviewer-first sequencing gate knowingly.
  */
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, basename, join, resolve as resolvePath } from 'node:path';
 
 // REAL — every one of these is an existing exported function this session read directly.
 // #3383 — delivery telemetry. `createTelemetryRecorder` mints this dispatch's trace; `setActiveRecorder`
@@ -1554,6 +1554,85 @@ function writeJsonFile(path, value) {
 }
 
 /**
+ * #4356 — WHERE CONVERGE BOOKKEEPING LIVES, AND WHY NOT IN THE LANE. Every `.converge-*` scratch file this
+ * loop writes (state, obs, material, panel, red-team, invite, per-round commit message) used to live at
+ * `${lane}/.converge-*` — inside the exact working tree `runConvergeEdit` hands a full Bash+Edit+Write agent
+ * turn (`cwd: lane`) every round, with no hook protecting any of those paths from that turn. Live evidence:
+ * on #4055/lane-4, three successive `converge-cli.mjs step` calls against `.converge-state.json` succeeded;
+ * the fourth failed immediately after `runConvergeEdit` ran, `mustExist` reporting the file gone. #4348 hit
+ * the same class of bug on a sibling file in this family.
+ *
+ * The fix relocates the whole family to a SIBLING of the lane (`dirname(lane)/.converge-scratch/
+ * <lane-basename>/`), never a subdirectory of `lane` — the same "transient orchestration state belongs in a
+ * sidecar, never inside the tree an autonomous turn can reach" principle
+ * `we:docs/agent/platform-decisions.md#state-lives-where-its-nature-dictates` already states for
+ * `run-store.mjs#runsDir`. Resolved from `lane` itself, never this module's `REPO_ROOT` or `process.cwd()`:
+ * `REPO_ROOT` does not resolve reliably inside a bundled/transformed module graph (confirmed live against
+ * this file's own test suite), where `lane` is always a real, already-resolved absolute path.
+ *
+ * NOT A HARD SANDBOX BOUNDARY. The editor turn keeps its `Bash` tool, which is not confined to `cwd` — it can
+ * still reach a sibling directory via `../` or an absolute path. What relocation actually buys: these files
+ * are no longer sitting in the one directory the editor turn is handed and already operating in every round,
+ * so a plain `ls`/`git status` inside the lane or a lane-wide cleanup sweep never touches them — no
+ * path-based REASON to see or sweep them, not a guarantee they are unreachable. The `existsSync` check before
+ * every `step` call (below) is the real backstop for the residual case; relocation just makes that backstop's
+ * job rare instead of routine — the same principle `converge-daemon-pass.mjs`'s own `assertCloneNotInUse`
+ * guard applies to a different clone-safety hazard.
+ *
+ * Exported so tests can compute the exact same path a real run would use, rather than re-deriving it.
+ */
+export function convergeScratchDir(lane) {
+  const dir = resolveConvergeScratchDir(lane);
+  mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+/**
+ * A lane slot (e.g. `lane-39`) recycled for a later, unrelated item would otherwise find whatever
+ * `.converge-obs-*`/`.converge-material-*`/etc. the PREVIOUS item's run left behind still sitting in its
+ * scratch dir — `init` always overwrites `.converge-state.json` fresh, so the state itself was never at risk
+ * of going stale, but the round-scoped siblings restart their numbering at 1/0 every run and so accumulate
+ * forever on a reused slot. Called ONCE, at the very start of a `runConverge` run (never per-write-site —
+ * {@link convergeScratchDir} keeps doing that for every individual write), this wipes and recreates the
+ * lane's scratch dir so a run never inherits anything from a previous occupant of the same slot.
+ */
+export function resetConvergeScratchDir(lane) {
+  const dir = resolveConvergeScratchDir(lane);
+  rmSync(dir, { recursive: true, force: true });
+  mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+/**
+ * `resetConvergeScratchDir` runs an unconditional recursive+force `rmSync` on whatever this resolves to, so it
+ * must refuse a `lane` it cannot prove safe rather than trust every future caller. `resolvePath` normalizes
+ * away a trailing `/..` or `/.` before `basename` ever sees the value (`resolvePath('/tmp/x/..')` is `/tmp`,
+ * a normal basename — never a literal `..`), so the one shape that can still reach here is a missing/
+ * non-string/empty/whitespace-only `lane` (which would otherwise silently resolve against `process.cwd()`) or
+ * one that resolves to the filesystem root itself (`/`, whose basename is `''`). Every real caller hands in an
+ * already-resolved absolute path (`lane-pool.mjs status --json`'s own `path` field, or a real `mkdtempSync`
+ * result in tests), so this has never fired live — it is a backstop, not a reachable-today path.
+ */
+function resolveConvergeScratchDir(lane) {
+  if (typeof lane !== 'string' || !lane.trim()) {
+    throw new Error(
+      `deliver-item-wrapper: refusing to resolve a converge scratch dir for an unsafe lane path (${JSON.stringify(lane)}) `
+      + '— lane must be a non-empty path string; a missing one would silently resolve against process.cwd().',
+    );
+  }
+  const resolvedLane = resolvePath(lane);
+  const laneName = basename(resolvedLane);
+  if (!laneName) {
+    throw new Error(
+      `deliver-item-wrapper: refusing to resolve a converge scratch dir for an unsafe lane path (${JSON.stringify(lane)} `
+      + `→ resolved ${JSON.stringify(resolvedLane)}) — its basename is empty (the filesystem root), which would `
+      + 'make the scratch dir collapse onto an ancestor directory.',
+    );
+  }
+  return join(dirname(resolvedLane), '.converge-scratch', laneName);
+}
+
+/**
  * Seat one headless panel over the round's material, through `panel-fanout.mjs` (REAL — verified against that
  * file's own `panelFanout`/`panelJurors` source: payload is `{subject, subjectNoun, round, materialFile,
  * jurors:[{id, lens, mandate}]}`, the result's `seats` array carries `{lens, ok, findings, ...}` per seat).
@@ -1573,9 +1652,10 @@ function runConvergePanel(panelEntries, { lane, item, round, material, run: runF
     }
   }
   if (!jurors.length) return { lensResults: groundingOnly };
-  const materialFile = `${lane}/.converge-material-r${round}.txt`;
+  const scratchDir = convergeScratchDir(lane);
+  const materialFile = `${scratchDir}/.converge-material-r${round}.txt`;
   writeFileSync(materialFile, material ?? '');
-  const payloadFile = writeFile(`${lane}/.converge-panel-r${round}.json`, {
+  const payloadFile = writeFile(`${scratchDir}/.converge-panel-r${round}.json`, {
     subject: 'pr-diff', subjectNoun: 'diff', round, materialFile, jurors,
   });
   // #3627 follow-up — raw script call, not routed through `run.mjs`: no `panel-fanout`/`jury` operation is
@@ -1599,10 +1679,11 @@ function runConvergePanel(panelEntries, { lane, item, round, material, run: runF
 function runConvergeRedTeam(redTeam, { lane, item, round, material, run: runFn, writeFile = writeJsonFile }) {
   const jury = (redTeam && Array.isArray(redTeam.jury)) ? redTeam.jury : [];
   if (!jury.length) return { ran: false, findings: [] };
-  const materialFile = `${lane}/.converge-material-r${round}.txt`;
+  const scratchDir = convergeScratchDir(lane);
+  const materialFile = `${scratchDir}/.converge-material-r${round}.txt`;
   writeFileSync(materialFile, material ?? '');
   const jurors = jury.map((j) => ({ id: `${j.lens}#redteam`, lens: j.lens, mandate: j.prompt }));
-  const payloadFile = writeFile(`${lane}/.converge-redteam-r${round}.json`, {
+  const payloadFile = writeFile(`${scratchDir}/.converge-redteam-r${round}.json`, {
     subject: 'pr-diff', subjectNoun: 'diff', round, materialFile, jurors,
   });
   // #3627 follow-up — raw script call, not routed through `run.mjs`: no `panel-fanout`/`jury` operation is
@@ -1733,7 +1814,7 @@ export function runConvergeEdit(
  *  crashed/unparseable answer reports back as `null` — exactly what the SKILL says to do ("Report
  *  `inviteEcho: null` if the invite agent crashed"), extended here to any answer this driver could not parse. */
 function runConvergeInvite(invite, { lane, round, careLevel, seatedLenses, jurorsPerLens, run: runFn, writeFile = writeJsonFile }) {
-  const payloadFile = writeFile(`${lane}/.converge-invite-r${round}.json`, {
+  const payloadFile = writeFile(`${convergeScratchDir(lane)}/.converge-invite-r${round}.json`, {
     careLevel, seatedLenses, jurorsPerLens, invitedLens: invite.lens, citedFinding: invite.citedFinding,
   });
   // #3627 follow-up — raw script call, not routed through `run.mjs`: no `review-core-cli`/`invite` operation
@@ -1748,17 +1829,20 @@ function runConvergeInvite(invite, { lane, round, careLevel, seatedLenses, juror
 
 /**
  * BUG-14 FIX. The real, live-diffed touched-file list for ONE converge round's commit — `git status
- * --porcelain` in the lane, filtered to drop this wrapper's OWN `.converge-*` bookkeeping (the
- * `.converge-state.json` / `.converge-material-r*.txt` / `.converge-panel-r*.json` / `.converge-redteam-r*.json`
- * / `.converge-invite-r*.json` / `.converge-obs-*-*.json` / `.converge-commit-msg-r*.txt` files this SAME file
- * writes into the lane every round, above), this wrapper's OWN `.delivery-commit-msg-<phase>.txt` bookkeeping
- * (see #3383 fix note below), and the known lane-release scratch litter
- * (`we:scripts/lib/lane-litter.mjs#LANE_RELEASE_LITTER_ALLOWLIST` — `.pr-body.md`/`.commit-msg.txt`/etc, in
- * case any already exist in the lane at converge time). None of these is a real edit the editor/agent made —
- * committing any of them would bury the round's actual diff in wrapper noise, and the `.converge-*` files
- * churn every round (a fresh `.converge-obs-<round>-<i>.json` per step), which would otherwise produce a
- * spurious "changed" file on every single round even when the editor touched nothing. `run` is injectable for
- * tests, same pattern as {@link computeLaneDiffStats}.
+ * --porcelain` in the lane, filtered to drop this wrapper's OWN `.converge-*` bookkeeping, this wrapper's OWN
+ * `.delivery-commit-msg-<phase>.txt` bookkeeping (see #3383 fix note below), and the known lane-release
+ * scratch litter (`we:scripts/lib/lane-litter.mjs#LANE_RELEASE_LITTER_ALLOWLIST` — `.pr-body.md`/
+ * `.commit-msg.txt`/etc, in case any already exist in the lane at converge time). None of these is a real
+ * edit the editor/agent made — committing any of them would bury the round's actual diff in wrapper noise.
+ * `run` is injectable for tests, same pattern as {@link computeLaneDiffStats}.
+ *
+ * #4356 — the `.converge-*` family (`.converge-state.json` / `.converge-material-r*.txt` /
+ * `.converge-panel-r*.json` / `.converge-redteam-r*.json` / `.converge-invite-r*.json` /
+ * `.converge-obs-*-*.json` / `.converge-commit-msg-r*.txt`) no longer gets WRITTEN into the lane at all (see
+ * {@link convergeScratchDir}) — it lives in a per-lane sidecar outside the working tree. The `.converge-*`
+ * exclusion below is kept as a defensive backstop (a lane recycled from before this fix, or anything else
+ * that happens to drop a same-shaped file in the lane, must still never get committed as a real edit), not
+ * because this file writes them there any more.
  *
  * #3383 mechanical-dispatcher fix (live #3564 trial, 2026-09-13): `.delivery-commit-msg-build.txt` — the
  * message file {@link commitBuildTurn}'s OWN first (`phase: 'build'`) call writes to the lane, deliberately
@@ -1817,7 +1901,7 @@ export function commitConvergeRound(
 ) {
   const paths = touchedFiles(lane, { run: runFn });
   if (!paths.length) return { committed: false, paths: [] };
-  const msgFile = `${lane}/.converge-commit-msg-r${round}.txt`;
+  const msgFile = `${convergeScratchDir(lane)}/.converge-commit-msg-r${round}.txt`;
   const message = `WE #${item}: converge round ${round} revision\n\n`
     + 'Commits the accepted editor findings from this round of the #3627 delivery-pipeline converge loop '
     + '(runConvergeEdit reported advanced:true) before the loop continues and before the PR opens.\n';
@@ -2007,7 +2091,10 @@ export function runConverge(
     provider = CLAUDE_RESTRICTED_PROVIDER,
   } = {},
 ) {
-  const state = `${lane}/.converge-state.json`;
+  // #4356 — state/obs bookkeeping lives OUTSIDE the lane; see `convergeScratchDir`'s own docblock for why.
+  // `resetConvergeScratchDir` (never plain `convergeScratchDir`) runs ONCE here, at the very top of a run, so
+  // a lane slot recycled from a previous item's converge run never inherits its leftover scratch files.
+  const state = `${resetConvergeScratchDir(lane)}/.converge-state.json`;
   // #3627 follow-up — raw script call, not routed through `run.mjs`: no `converge` operation is registered
   // yet. Would need one built first (see #3627 follow-up); out of scope for this hardening pass. Same for the
   // `step` call further down this loop.
@@ -2063,7 +2150,21 @@ export function runConverge(
       throw new Error(`deliver-item-wrapper: converge-cli reported an action this loop does not know how to run: ${JSON.stringify(step.action)}`);
     }
 
-    const obsPath = writeJsonFile(`${lane}/.converge-obs-${step.round}-${i}.json`, obs);
+    const obsPath = writeJsonFile(`${convergeScratchDir(lane)}/.converge-obs-${step.round}-${i}.json`, obs);
+    // #4356 — fail CLEARLY and ATTRIBUTED, not with a raw child-process `Command failed` bubbling up from
+    // `converge-cli.mjs step`'s own `mustExist` check. This is a defensive backstop, not the primary fix
+    // (relocating the state file OUTSIDE the lane, above, is): even outside the lane, SOMETHING could still
+    // remove this exact path (a stray `rm`, a scratch-dir recycle) between the action that just ran and this
+    // call, and a bare `Command failed: node scripts/converge-cli.mjs step ...` gives an operator no way to
+    // tell "the state vanished" from "the CLI itself is broken" without re-deriving it from a log timestamp.
+    if (!existsSync(state)) {
+      throw new Error(
+        `deliver-item-wrapper: converge state file vanished for item #${item} after round ${step.round} `
+        + `action '${step.action}' (before the next step call) — expected it at ${state}. This should not `
+        + 'happen now that converge bookkeeping lives outside the lane\'s own working tree (#4356); treat as '
+        + 'a bug in whatever removed it, not a normal converge outcome.',
+      );
+    }
     const stepOut = JSON.parse(runFn('node', ['scripts/converge-cli.mjs', 'step', `--state=${state}`, `--obs=${obsPath}`]));
     if (Array.isArray(stepOut.lenses)) seatedLenses = stepOut.lenses;
     if (Number.isFinite(stepOut.jurorsPerLens)) jurorsPerLens = stepOut.jurorsPerLens;
