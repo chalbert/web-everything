@@ -45,7 +45,7 @@ describe('trial conversion', () => {
   it('refuses non-landed or mismatched trials and permits Claude authors', () => {
     expect(trial(execution({ status: 'blocked', evidence: {} }), verdict(), { now }).reason).toContain('landed');
     expect(trial(execution(), verdict({ attempt: 2 }), { now }).reason).toContain('does not match');
-    expect(trial(execution({ provider: 'claude', model: 'claude-sonnet-5', executor: 'claude-subagent' }), verdict({ verifiedBy: 'other' }), { now }).ok).toBe(true);
+    expect(trial(execution({ provider: 'claude', model: 'claude-sonnet-5-5', executor: 'claude-subagent' }), verdict({ verifiedBy: 'other' }), { now }).ok).toBe(true);
   });
   it('denies secret-shaped model and findings without redacting or leaking them', () => {
     const secret = 'AKIAABCDEFGHIJKLMNOP';
@@ -90,7 +90,7 @@ describe('ground truth and graduation', () => {
     expect(c.isGraduationGrade(execution(), verdict({ verifiedBy: 'other' }), groundTruth())).toBe(true);
     expect(c.isGraduationGrade(execution(), verdict({ mode: 'shadow' }), groundTruth())).toBe(false);
     for (const sources of [[{ kind: 'ci', outcome: 'clean', actorRef: 'ci' }], [{ ...groundTruth().sources[0], verifiedBy: 'other' }]]) expect(c.isGraduationGrade(execution(), verdict(), groundTruth({ sources }))).toBe(false);
-    expect(c.isGraduationGrade(execution({ provider: 'claude', model: 'claude-sonnet-5', executor: 'claude-subagent' }), verdict(), groundTruth())).toBe(true);
+    expect(c.isGraduationGrade(execution({ provider: 'claude', model: 'claude-sonnet-5-5', executor: 'claude-subagent' }), verdict(), groundTruth())).toBe(true);
   });
   it('requires distinct processes for every independent signal', () => {
     for (const actorRef of ['author', 'supervisor']) expect(c.isGraduationGrade(execution(), verdict(), groundTruth({ sources: [...groundTruth().sources, { kind: 'ci', actorRef, outcome: 'clean' }] }))).toBe(false);
@@ -133,5 +133,18 @@ describe('ground truth and graduation', () => {
     }
     expect(refused).toBe(18);
     expect(c.routeDispatch(profile(), { stage: 'task', scorecards: [] }).supervision).toBe('full');
+  });
+});
+
+// #4359 — the sonnet-tier pin, asserted against the REAL constant rather than a fixture literal. Every other
+// `'claude-sonnet-5-5'` in this file's fixtures is a hard-coded string that would stay green whether or not the
+// constant itself changed; this is the one test that actually reads `CLAUDE_NATIVE_MODEL_BY_TIER` and would
+// fail if the pin regressed to the old id (found by /converge's red-team, #4359).
+describe('sonnet-tier dispatch pin', () => {
+  it('CLAUDE_NATIVE_MODEL_BY_TIER.sonnet and the matching SUPERVISOR_CANDIDATES entry name the current sonnet id', () => {
+    expect(c.CLAUDE_NATIVE_MODEL_BY_TIER.sonnet).toBe('claude-sonnet-5-5');
+    const entry = c.SUPERVISOR_CANDIDATES.find((s) => s.backend === 'claude-native' && s.tier === 'sonnet');
+    expect(entry.id).toBe('claude-sonnet-5-5');
+    expect(entry.model).toBe(c.CLAUDE_NATIVE_MODEL_BY_TIER.sonnet);
   });
 });

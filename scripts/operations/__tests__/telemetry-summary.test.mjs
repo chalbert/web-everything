@@ -362,7 +362,7 @@ describe('real-mechanism fidelity (#2949 fidelity qualifier) — against a real 
 
       writeFileSync(join(collectorDir, `${todayUtc}.jsonl`), `${JSON.stringify({
         receivedAt: now.toISOString(), name: 'claude_code.cost.usage', unit: 'USD', value: 1.5,
-        attributes: { model: 'claude-sonnet-5', query_source: 'main' },
+        attributes: { model: 'claude-sonnet-5-5', query_source: 'main' },
       })}\n`);
       // An EARLY sample (hour 0) plus enough padding that a small tail bound cannot reach it — this is the
       // exact real-data shape that motivated `scanFileForMetric`: a real run against the actual laptop found
@@ -551,7 +551,7 @@ describe('the assembled snapshot', () => {
     const records = Array.from({ length: 500 }, (_, i) => ({
       receivedAt: new Date(Date.now() - i * 3600_000).toISOString(),
       name: 'claude_code.cost.usage', unit: 'USD', value: 0.5,
-      attributes: { model: 'claude-sonnet-5', query_source: 'main' },
+      attributes: { model: 'claude-sonnet-5-5', query_source: 'main' },
     }));
     const { run } = runTelemetrySummary(baseFacts({ usage: { records } }));
     const bytes = Buffer.byteLength(JSON.stringify(run.findings.snapshot), 'utf8');

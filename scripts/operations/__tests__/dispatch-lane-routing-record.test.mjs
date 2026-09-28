@@ -482,7 +482,7 @@ describe('(e) buildAgentArgv with a table, and resolveWorkerModel\'s own shape',
 
 describe('(f) workerModelTable', () => {
   it('a routed record whose model is a native Claude id → that id and its tier', () => {
-    expect(workerModelTable({ outcome: 'routed', model: 'claude-sonnet-5', tier: 'sonnet' }))
+    expect(workerModelTable({ outcome: 'routed', model: 'claude-sonnet-5-5', tier: 'sonnet' }))
       .toMatchObject({ tier: 'sonnet', model: 'sonnet' });
     expect(workerModelTable({ outcome: 'routed', model: 'claude-opus-5', tier: 'opus' }))
       .toMatchObject({ tier: 'opus', model: 'opus' });

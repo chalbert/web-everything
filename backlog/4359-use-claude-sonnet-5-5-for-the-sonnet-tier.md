@@ -5,9 +5,13 @@ size: 2
 priority: high
 tier: pinned
 rank: y
-status: open
-scope: ["we:scripts/lib/dispatch-contracts.mjs", "we:scripts/lib/__tests__/dispatch-contracts-trial.test.mjs", "we:scripts/lib/__tests__/judge-spawn.test.mjs"]
+status: resolved
+scope: ["we:scripts/lib/dispatch-contracts.mjs", "we:scripts/lib/__tests__/dispatch-contracts-trial.test.mjs", "we:scripts/lib/__tests__/judge-spawn.test.mjs", "we:scripts/conveyor/__tests__/concurrent-baseline-comparison.test.mjs", "we:scripts/conveyor/__tests__/run-rating.test.mjs", "we:scripts/__tests__/telemetry.test.mjs", "we:scripts/__tests__/telemetry-summary.test.mjs", "we:scripts/operations/__tests__/telemetry-summary.test.mjs", "we:scripts/operations/__tests__/agent-usage-report.test.mjs", "we:scripts/operations/__tests__/dispatch-lane-routing-record.test.mjs", "we:scripts/usage-report/__tests__/usage-report.test.mjs"]
 dateOpened: "2026-09-28"
+dateStarted: "2026-09-28"
+dateResolved: "2026-09-28"
+preparedDate: "2026-09-28"
+preparedAgainstSha: "7b014e355619cd456edb582b4a5582f0edc39ac9"
 tags: []
 ---
 

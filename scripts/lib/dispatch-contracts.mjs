@@ -524,7 +524,7 @@ function validTimestamp(value) {
     && (zone === 'Z' || (Number(zone.slice(1, 3)) <= 23 && Number(zone.slice(4)) < 60));
 }
 // @test-only-export-ok: contract for the G2 dispatcher wiring (no runtime caller in slice G1)
-export const CLAUDE_NATIVE_MODEL_BY_TIER = Object.freeze({ haiku: 'claude-haiku-4-5-20251001', sonnet: 'claude-sonnet-5', opus: 'claude-opus-5' });
+export const CLAUDE_NATIVE_MODEL_BY_TIER = Object.freeze({ haiku: 'claude-haiku-4-5-20251001', sonnet: 'claude-sonnet-5-5', opus: 'claude-opus-5' });
 // @test-only-export-ok: contract for the G2 dispatcher wiring (no runtime caller in slice G1)
 export const TASK_LIFECYCLE = Object.freeze(['planned', 'dispatched', 'landed', 'blocked', 'failed', 'validated', 'reworked']);
 // @test-only-export-ok: contract for the G2 dispatcher wiring (no runtime caller in slice G1)
@@ -617,7 +617,7 @@ export function verifiedByFromGroundTruth(gt) {
 export const SUPERVISOR_CANDIDATES = Object.freeze([
   { id: 'agy-sonnet-4-6', backend: 'agy', provider: 'antigravity', model: AGY_CLAUDE_MODEL_BY_TIER.sonnet, tier: 'sonnet' },
   { id: 'codex-astra', backend: 'codex', provider: 'codex', model: CODEX_MODEL, tier: null },
-  { id: 'claude-sonnet-5', backend: 'claude-native', provider: 'claude', model: CLAUDE_NATIVE_MODEL_BY_TIER.sonnet, tier: 'sonnet' },
+  { id: 'claude-sonnet-5-5', backend: 'claude-native', provider: 'claude', model: CLAUDE_NATIVE_MODEL_BY_TIER.sonnet, tier: 'sonnet' },
   { id: 'agy-opus-4-6', backend: 'agy', provider: 'antigravity', model: AGY_CLAUDE_MODEL_BY_TIER.opus, tier: 'opus' },
   { id: 'claude-opus-5', backend: 'claude-native', provider: 'claude', model: CLAUDE_NATIVE_MODEL_BY_TIER.opus, tier: 'opus' },
 ].map(Object.freeze));
