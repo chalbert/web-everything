@@ -1285,6 +1285,23 @@ export function buildReviewAdvisoryJudgeRequest({ read, aim = '' }) {
     budget: JUDGE_BUDGET_USD,
     // #xqa9ttq — PINS THIS SEAT TO CODEX, independent of the run's `--provider` flag. See `createDefaultJudge`.
     providerName: 'codex',
+    // #x5s8b47 — THIS SEAT MAY BE SKIPPED, NEVER LET TO CRASH THE RUN. Measured live (card x5s8b47, PRs
+    // #2865/#2867/#2873/#2874/#2875): Codex's own quota gauge going exhausted made this seat's spawn fail with
+    // no graceful path at all, and the failure was never contained — it crashed the whole `review-loop-cli`
+    // process, leaving the run permanently suspended at THIS step (a fresh dispatch always starts a new run
+    // from `read`, so it never resumes the orphaned one — it just re-hits the identical wall). `judgeAdvisory`
+    // is ALREADY structurally non-blocking (`ADVISORY_JUDGE_LENS` is drawn from `ADVISORY_LENSES`, never
+    // `MANDATORY_LENSES` — see this file's own `ADVISORY_JUDGE_SEAT` docblock), so "the provider was
+    // unavailable" is honestly a SKIP, not a run failure: the two mandatory seats (`judge`/`judgeSecurity`)
+    // still judge and the panel still reduces to a real verdict. `createDefaultJudge` (`cli-adapter.mjs`) reads
+    // this flag to: (a) check Codex's quota-hold state (`review-extra-seats.mjs#quotaHold`, the SAME reader its
+    // own bonus-seat path already applies — REUSED, not restated) before spawning at all, falling back to the
+    // `antigravity` provider when Codex is held and antigravity is not; and (b) wrap the actual spawn so ANY
+    // thrown error becomes a recorded, logged skip instead of an uncaught crash. Either way the seat's answer
+    // still carries a non-empty `summary` (`reduce`'s own silent-juror refusal, just above in this file,
+    // requires one), so a skip reads as an ordinary — if uninformative — juror answer to every downstream
+    // consumer, never as `unrun`.
+    gracefulOnUnavailable: true,
   };
 }
 

@@ -2868,6 +2868,9 @@ describe('#xqa9ttq — the opt-in Codex advisory seat (judgeAdvisory)', () => {
     expect(request.providerName).toBe('codex');
     expect(request.allowedTools).toBeUndefined();
     expect(request.model).toBeUndefined();
+    // card x5s8b47 — this seat may be skipped by `createDefaultJudge` (cli-adapter.mjs) rather than crash the
+    // run when Codex is unavailable; see that flag's own docblock on `buildReviewAdvisoryJudgeRequest`.
+    expect(request.gracefulOnUnavailable).toBe(true);
     // The two EXISTING seats are UNTOUCHED — still tool-bearing, still no `providerName` (they use whatever
     // provider the RUN's own `--provider`/factory default is).
     expect(requests[JUDGE_STEPS[0]].allowedTools).toEqual(REVIEW_JUROR_TOOLS);
@@ -2972,6 +2975,28 @@ describe('#xqa9ttq — the opt-in Codex advisory seat (judgeAdvisory)', () => {
       expect(floor.mandatorySeated).toEqual([DEFAULT_LENS, SECURITY_LENS]);
       expect(floor.advisorySeated).toContain(ADVISORY_JUDGE_LENS);
       expect(floor.seatsFloor).toBe(true);
+    });
+
+    it('card x5s8b47 — a Codex-quota-held run reaches `reduce` with `judgeAdvisory` recorded as SKIPPED, not suspended, and the mandatory-seat verdict is unaffected', () => {
+      // `createDefaultJudge`'s graceful-degradation path (cli-adapter.mjs) turns "Codex is quota-held" into
+      // exactly this answer shape — a non-empty `summary`, zero `findings`, a `skipped` marker — never a
+      // suspended/crashed run. This proves `reduce` (this file) accepts that shape via the IDENTICAL path a
+      // real `codexAdvisory: false` run already takes (a seat contributing nothing to `verdictAdmitted`), per
+      // the card's own Done-when #1.
+      const { registry } = registryFor({}, { codexAdvisory: true });
+      const SKIPPED_ANSWER = {
+        summary: 'skipped: quota exhausted on its last seat call; sitting out until 2026-10-03T17:11:11.000Z',
+        findings: [],
+        skipped: { provider: 'codex', reason: 'quota exhausted on its last seat call; sitting out until 2026-10-03T17:11:11.000Z' },
+      };
+      const { run } = atConfirm({
+        registry, input: BASE_INPUT, id: 'run-codex-advisory-quota-skipped',
+        answers: { [JUDGE_STEPS[0]]: CLEAN_ANSWER, [JUDGE_STEPS[1]]: CLEAN_ANSWER, judgeAdvisory: SKIPPED_ANSWER },
+      });
+      // Reached `reduce` at all (not stuck at `judgeAdvisory` forever) with a real, unaffected verdict.
+      expect(run.verdict.verdict).toBe('accept');
+      expect(run.verdict.lensVerdicts[ADVISORY_JUDGE_LENS]).toBe('accept');
+      expect(run.verdict.lenses).toEqual([DEFAULT_LENS, SECURITY_LENS, ADVISORY_JUDGE_LENS]);
     });
   });
 });

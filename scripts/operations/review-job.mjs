@@ -176,6 +176,30 @@ export function parseReviewLoopStdout(stdout) {
 }
 
 /**
+ * PURE — the crash label when the loop's stdout held no parseable JSON at all (card x5s8b47's second, narrower
+ * defect, distinct from its quota-hold fix). `review-loop-cli.mjs`'s own top-level `.catch` DELIBERATELY writes
+ * `error: <real message>` to STDOUT (fd 1, not stderr — see its `IS_CLI` block) specifically so a crash still
+ * says something a caller can read. That was being thrown away: the caller preferred `loop.stderr` whenever it
+ * was non-empty (`loop.stderr || loop.stdout`), and stderr routinely carries content that has nothing to do
+ * with the crash — confirmed LIVE (2026-09-28, this very lane's own `lane-pool.mjs acquire` run): a bare Node
+ * `[DEP0040] DeprecationWarning: The \`punycode\` module is deprecated` line, emitted lazily during process
+ * teardown by some dependency, landing on stderr well after (and unrelated to) whatever actually failed. That
+ * is exactly what the card measured: "only a stray Node deprecation-warning line survives... as if it were the
+ * explanation."
+ *
+ * Prefers stdout's OWN deliberate `error: ` line when present; falls back to the previous stderr-then-stdout
+ * order otherwise, so a crash that happens BEFORE that catch handler even runs (an import-time throw, a raw
+ * segfault, a kill) is no worse off than before this fix.
+ * @param {{stdout?: string, stderr?: string}} loop
+ * @returns {string}
+ */
+export function crashLabelFromLoop({ stdout, stderr } = {}) {
+  const out = String(stdout ?? '').trim();
+  if (out.startsWith('error: ')) return out;
+  return String(stderr || stdout || '');
+}
+
+/**
  * PURE — the outcome of THIS no-lane deferral, counting the previous ones off the prior completion record.
  * @returns {{count:number, outcome:string, label:string}}
  */
@@ -446,7 +470,7 @@ function runReviewArc({
     } else {
       classified = {
         outcome: BLOCKED_ON_INFRA, verdict: null, loopOutcome: null, runId: null,
-        label: `review-loop exit ${loop.status}: ${tail(loop.stderr || loop.stdout, 300)}`.slice(0, 500),
+        label: `review-loop exit ${loop.status}: ${tail(crashLabelFromLoop(loop), 300)}`.slice(0, 500),
       };
     }
     try {

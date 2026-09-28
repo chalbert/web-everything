@@ -134,3 +134,76 @@ describe('#3370 createDefaultJudge drives a hand-written JudgeProvider', () => {
     expect(telemetry.transcriptFile).toBeUndefined();
   });
 });
+
+describe('card x5s8b47 — `gracefulOnUnavailable`: an advisory seat degrades, it never crashes the run', () => {
+  const REQUEST = {
+    mandate: 'judge the diff', input: 'the diff text', shape: { type: 'object' },
+    lens: 'simplicity', providerName: 'codex', gracefulOnUnavailable: true,
+  };
+
+  it('FAILS BEFORE THE FIX: a request with no graceful opt-in still lets a spawn failure propagate uncaught', async () => {
+    // Pins the OLD behaviour for the two mandatory seats, which never set `gracefulOnUnavailable` — a real
+    // crash there must still be a real crash; this fix must not soften it.
+    const judgeFn = createDefaultJudge({ resolveProvider: () => async () => { throw new Error('codex ENOENT'); } });
+    await expect(judgeFn({ mandate: 'm', input: 'i', shape: { type: 'object' }, providerName: 'codex' }))
+      .rejects.toThrow('codex ENOENT');
+  });
+
+  it('Codex quota-held, no fallback usable → skips gracefully with a structured marker; the spawn is NEVER attempted', async () => {
+    let spawnCalls = 0;
+    const provider = async () => { spawnCalls += 1; return { value: {} }; };
+    const judgeFn = createDefaultJudge({
+      resolveProvider: () => provider,
+      checkProviderHold: async (name) => (name === 'codex' ? 'quota exhausted; sitting out until 2026-10-03T17:11:11.000Z' : 'antigravity also unavailable'),
+      now: () => 1_700_000_000_000,
+    });
+    const returned = await judgeFn(REQUEST);
+    const { value } = unwrapJudgeOutcome(returned);
+    expect(spawnCalls).toBe(0);
+    expect(value.skipped).toMatchObject({ provider: 'codex' });
+    expect(value.skipped.reason).toMatch(/quota exhausted/);
+    expect(value.findings).toEqual([]);
+    expect(value.summary).toMatch(/^skipped: /); // reduce's silent-juror refusal requires a non-empty summary
+  });
+
+  it('Codex quota-held, antigravity available → falls back to antigravity instead of skipping', async () => {
+    const calls = [];
+    const resolveProvider = (name) => async (request) => { calls.push({ name, request }); return { value: { summary: 'antigravity judged it', findings: [] } }; };
+    const judgeFn = createDefaultJudge({
+      resolveProvider,
+      checkProviderHold: async (name) => (name === 'codex' ? 'quota exhausted' : null),
+      now: () => 1_700_000_000_000,
+    });
+    const returned = await judgeFn(REQUEST);
+    const { value } = unwrapJudgeOutcome(returned);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].name).toBe('antigravity');
+    expect(value).toEqual({ summary: 'antigravity judged it', findings: [] });
+  });
+
+  it('Codex usable, but the spawn itself throws → recorded as a skipped seat, never a crash, with the real error logged', async () => {
+    const logged = [];
+    const judgeFn = createDefaultJudge({
+      resolveProvider: () => async () => { throw new Error('codex exec: unexpected EOF on stdout'); },
+      checkProviderHold: async () => null,
+      logGracefulOutcome: (line) => logged.push(line),
+    });
+    const returned = await judgeFn(REQUEST);
+    const { value } = unwrapJudgeOutcome(returned);
+    expect(value.skipped).toMatchObject({ provider: 'codex', crashed: true });
+    expect(value.skipped.reason).toMatch(/codex exec: unexpected EOF on stdout/);
+    expect(value.findings).toEqual([]);
+    expect(logged.some((l) => l.includes('codex exec: unexpected EOF on stdout'))).toBe(true);
+  });
+
+  it('every provider unavailable (no fallback configured) → skips with a reason naming that', async () => {
+    const judgeFn = createDefaultJudge({
+      resolveProvider: () => async () => ({ value: {} }),
+      checkProviderHold: async (name) => `${name} down`,
+    });
+    const returned = await judgeFn({ ...REQUEST, providerName: 'antigravity' });
+    const { value } = unwrapJudgeOutcome(returned);
+    expect(value.skipped.provider).toBe('antigravity');
+    expect(value.skipped.reason).toMatch(/no fallback provider configured/);
+  });
+});

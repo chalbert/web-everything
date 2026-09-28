@@ -9,9 +9,9 @@ import { join } from 'node:path';
 
 import {
   BLOCKED_ON_INFRA, DEFERRED_NO_LANE, MAX_LANE_DEFERRALS, REVIEW_JOB_KIND,
-  classifyReviewLoopOutcome, decideJobClaim, dispatchReviewByMode, dispatchReviewJob, jobRecordToAgentRow,
-  laneCooloffActive, listAgentsWithReviewJobs, listReviewJobAgents, nextLaneDeferral, parseReviewLoopStdout,
-  readJobRecord, resolveReviewDispatchMode, runReviewJob, writeJobRecord,
+  classifyReviewLoopOutcome, crashLabelFromLoop, decideJobClaim, dispatchReviewByMode, dispatchReviewJob,
+  jobRecordToAgentRow, laneCooloffActive, listAgentsWithReviewJobs, listReviewJobAgents, nextLaneDeferral,
+  parseReviewLoopStdout, readJobRecord, resolveReviewDispatchMode, runReviewJob, writeJobRecord,
 } from '../review-job.mjs';
 import { assessLiveness, bindAgents } from '../../conveyor/reconcile-core.mjs';
 import { deriveReviewStatus, tagReviewStatus } from '../../conveyor/review-status-tag.mjs';
@@ -51,6 +51,23 @@ describe('parseReviewLoopStdout', () => {
     expect(parseReviewLoopStdout(`notice: something\n${JSON.stringify(payload, null, 2)}\n`)).toEqual(payload);
     expect(parseReviewLoopStdout('error: boom')).toBeNull();
     expect(parseReviewLoopStdout('')).toBeNull();
+  });
+});
+
+describe('crashLabelFromLoop — card x5s8b47\'s second defect: the real crash message was losable to stderr noise', () => {
+  it('prefers stdout\'s own deliberate `error: ` line over ANY stderr content, noise or not', () => {
+    // FAILS BEFORE THE FIX: the old `loop.stderr || loop.stdout` picked stderr whenever it was non-empty,
+    // discarding the real message `review-loop-cli.mjs`'s own catch handler deliberately wrote to stdout.
+    expect(crashLabelFromLoop({
+      stdout: 'error: judgeAdvisory spawn failed — codex quota exhausted',
+      stderr: '(node:12345) [DEP0040] DeprecationWarning: The `punycode` module is deprecated.\n(Use `node --trace-deprecation ...` to show where the warning was created)',
+    })).toBe('error: judgeAdvisory spawn failed — codex quota exhausted');
+  });
+
+  it('falls back to stderr, then stdout, when stdout carries no deliberate `error: ` line — unchanged from before', () => {
+    expect(crashLabelFromLoop({ stdout: '', stderr: 'a real stderr crash' })).toBe('a real stderr crash');
+    expect(crashLabelFromLoop({ stdout: 'some other stdout, no error prefix', stderr: '' })).toBe('some other stdout, no error prefix');
+    expect(crashLabelFromLoop({})).toBe('');
   });
 });
 
@@ -200,6 +217,24 @@ describe('runReviewJob — the arc, no Claude wrapper session', () => {
     expect(out.outcome).toBe(BLOCKED_ON_INFRA);
     expect(calls.filter((c) => c[0] === 'report')[1][2]).toMatchObject({ status: 'done', outcome: BLOCKED_ON_INFRA, label: 'spawn EAGAIN' });
     expect(calls.slice(-2)).toEqual([['release', 'review-10'], ['unclaim', 'review-10', 99]]);
+  });
+
+  it('card x5s8b47 — a child-process crash with unparseable stdout persists the REAL error, not stderr noise', () => {
+    // Reproduces the measured incident: `review-loop-cli.mjs` exits 1 having written its own `error: ` line to
+    // STDOUT, while stderr carries only an unrelated Node deprecation warning. FAILS BEFORE THE FIX (the label
+    // used to be the deprecation-warning noise); PASSES AFTER (the label is the real error).
+    const { io, calls } = fakeIo({
+      runLoop: () => ({
+        status: 1,
+        stdout: 'error: review-pr.reduce: the `simplicity` juror (`judgeAdvisory` step) crashed: spawn codex ENOENT',
+        stderr: '(node:12345) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.\n(Use `node --trace-deprecation ...` to show where the warning was created)',
+      }),
+    });
+    const out = runReviewJob({ pr: 10, repo: REPO, pid: 99 }, io);
+    expect(out.outcome).toBe(BLOCKED_ON_INFRA);
+    expect(out.label).toContain('spawn codex ENOENT');
+    expect(out.label).not.toContain('DeprecationWarning');
+    expect(calls.filter((c) => c[0] === 'report')[1][2].label).toContain('spawn codex ENOENT');
   });
 });
 
