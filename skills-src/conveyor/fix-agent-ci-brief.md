@@ -93,7 +93,7 @@ EXAMINED_HEAD="$(gh pr view {{PR_NUM}} --repo {{REPO}} --json headRefOid --jq .h
 node "{{WE_ROOT}}/scripts/operations/completion-cli.mjs" report --repo={{REPO}} --session={{SESSION_SLUG}} --kind=ci-heal --pr={{PR_NUM}} --item={{ITEM_NUM}} --status=started
 ```
 
-### 0b. Take the fix claim — `fix-begin` (the fix procedure, operator-approved 2026-09-27)
+### 0b. Take the fix claim — `fix-begin` (the fix procedure, operator-approved 2026-09-27; draft-only-on-withdrawal, `we:docs/agent/platform-decisions.md#fix-claim-draft-only-on-withdrawal`)
 
 One author changes a PR's branch at a time — a CI-heal included. Take the PR's fix claim before anything else:
 
@@ -102,11 +102,14 @@ node "{{WE_ROOT}}/scripts/conveyor/fix-procedure.mjs" fix-begin {{PR_NUM}} --rep
   --why="conveyor ci-heal: {{REASON}}"
 ```
 
-It turns the PR back to **draft** and refuses pushes to its branch by anyone but you. If it is **refused**
-(exit 3), another fixer owns the PR right now: report `--status=done --outcome=not-applicable` and RETURN
-`#{{ITEM_NUM}} → ci-heal not-applicable (fix claim held by <holder>)`. **Every exit from here on releases the
-claim with `fix-end`** (the blocks below carry the line). `fix-end` leaves the PR draft; the fix daemon marks it
-ready once required CI is green on your new head.
+**A ci-heal is a normal repair loop, so this stays READY by default — never draft.** It labels the PR
+`review-status:fixing` and refuses pushes to its branch by anyone but you; the claim itself is the lock. If it
+is **refused** (exit 3), another fixer owns the PR right now: report `--status=done --outcome=not-applicable`
+and RETURN `#{{ITEM_NUM}} → ci-heal not-applicable (fix claim held by <holder>)`. **Every exit from here on
+releases the claim with `fix-end`** (the blocks below carry the line). A plain (never-drafted) claim leaves the
+PR ready with nothing further owed; `fix-end` does not rely on the draft-first promotion for it. (A ci-heal
+does not itself add `--draft` — that pair of reasons, `scope-change`/`withdrawn`, only ever applies to a
+review-findings fix that discovers one mid-review; see the ordinary fix brief's step 0b.)
 
 ### 1. Reconstitute the PR's work in a lane clone (reuse the ref — never rebuild from scratch)
 

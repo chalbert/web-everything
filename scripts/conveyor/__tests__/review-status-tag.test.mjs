@@ -5,7 +5,7 @@
  */
 import { describe, it, expect } from 'vitest';
 
-import { deriveReviewStatus, planStatusLabelChange, tagReviewStatus, applyReviewStatus } from '../review-status-tag.mjs';
+import { deriveReviewStatus, planStatusLabelChange, tagReviewStatus, applyReviewStatus, STATUS_LABEL_RE } from '../review-status-tag.mjs';
 
 describe('deriveReviewStatus', () => {
   it('null when no agent is bound to this PR by name', () => {
@@ -173,6 +173,64 @@ describe('deriveReviewStatus', () => {
 
   it('a non-draft PR with nothing live is still null, never awaiting-ci', () => {
     expect(deriveReviewStatus({ pr: 1765, agents: [], isDraft: false })).toBeNull();
+  });
+
+  // `fixing-conflict` (#2826 — a mechanical conflict-resolution round reads as more than the generic `fixing`;
+  // merged here alongside the fix-claim states below since both PRs touch the same STATUS_LABEL_RE family).
+  it('fixing-conflict: a live fix-<pr> session on a merge-conflicted PR', () => {
+    expect(deriveReviewStatus({ pr: 1765, agents: [{ name: 'fix-1765', state: 'working' }], mergeConflicted: true }))
+      .toEqual({ role: 'fix', state: 'fixing-conflict' });
+  });
+
+  it('fixing-conflict-stalled: a blocked fix-<pr> session on a merge-conflicted PR', () => {
+    expect(deriveReviewStatus({ pr: 1765, agents: [{ name: 'fix-1765', state: 'blocked' }], mergeConflicted: true }))
+      .toEqual({ role: 'fix', state: 'fixing-conflict-stalled' });
+  });
+
+  it('mergeConflicted defaults to false — every pre-existing call site is unaffected', () => {
+    expect(deriveReviewStatus({ pr: 1765, agents: [{ name: 'fix-1765', state: 'working' }] }))
+      .toEqual({ role: 'fix', state: 'fixing' });
+  });
+
+  // draft-only-on-withdrawal (backlog `xyfvtfz`) — a LIVE fix claim that drafted the PR reads back its OWN
+  // recorded reason, so this reconciler's periodic pass matches exactly what `fix-begin` just applied and
+  // never fights it (the sticky-label problem: without this, the next tick would see `fixClaim` truthy, derive
+  // plain `fixing`, and `planStatusLabelChange` would strip `draft-scope-change`/`draft-withdrawn` as stale).
+  it('draft-scope-change: a live fix claim recorded as drafted for scope-change', () => {
+    expect(deriveReviewStatus({ pr: 2812, agents: [], fixClaim: { meta: { who: 'fix-2812', draft: true, reason: 'scope-change' } } }))
+      .toEqual({ role: 'fix', state: 'draft-scope-change' });
+  });
+
+  it('draft-withdrawn: a live fix claim recorded as drafted for withdrawn', () => {
+    expect(deriveReviewStatus({ pr: 2813, agents: [], fixClaim: { meta: { who: 'fix-2813', draft: true, reason: 'withdrawn' } } }))
+      .toEqual({ role: 'fix', state: 'draft-withdrawn' });
+  });
+
+  it('a live fix claim with no recorded draft reason still reads plain fixing (or fixing-conflict)', () => {
+    expect(deriveReviewStatus({ pr: 2811, agents: [], fixClaim: { meta: { who: 'rubric-worker', draft: false, reason: null } } }))
+      .toEqual({ role: 'fix', state: 'fixing' });
+    expect(deriveReviewStatus({ pr: 2811, agents: [], fixClaim: { meta: { who: 'rubric-worker', draft: false, reason: null } }, mergeConflicted: true }))
+      .toEqual({ role: 'fix', state: 'fixing-conflict' });
+  });
+
+  it('an unrecognized reason on a drafted claim never fabricates a state — falls back to plain fixing', () => {
+    expect(deriveReviewStatus({ pr: 2812, agents: [], fixClaim: { meta: { who: 'fix-2812', draft: true, reason: 'bogus' } } }))
+      .toEqual({ role: 'fix', state: 'fixing' });
+  });
+});
+
+describe('STATUS_LABEL_RE — the label family this module and fix-procedure.mjs both write to', () => {
+  it('matches every state deriveReviewStatus can produce, plus the two draft-reason labels fix-begin applies directly', () => {
+    const states = [
+      'reviewing', 'review-stalled', 'fixing', 'fix-stalled', 'fixing-conflict', 'fixing-conflict-stalled',
+      'healing-ci', 'ci-heal-stalled', 'awaiting-ci', 'draft-scope-change', 'draft-withdrawn',
+    ];
+    for (const s of states) expect(`review-status:${s}`).toMatch(STATUS_LABEL_RE);
+  });
+
+  it('does not match an unrelated label', () => {
+    expect('review:pending').not.toMatch(STATUS_LABEL_RE);
+    expect('review-status:bogus').not.toMatch(STATUS_LABEL_RE);
   });
 });
 
