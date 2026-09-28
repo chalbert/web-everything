@@ -5829,6 +5829,50 @@ mechanical-accept path this ruling does not touch) and does not amend it.
 
 ---
 
+### The local lane-verify gate never runs the full suite by default — GitHub CI's sharded run is the sole full-suite authority, and a full local run is an explicit opt-in, never the default {#local-gate-never-full-suite-by-default}
+
+**Ratified 2026-09-28 (operator ruling, in-conversation).** The gate that marks a lane `verified` —
+`we:scripts/verify-lane.mjs` / `we:scripts/lib/verify-lane-gate.mjs`, and the finish-guard
+`we:scripts/pr-land.mjs` reads before landing (#3321, "verification is mandatory before a lane lands") — runs
+ONLY the diff-driven selected tests (`vitest related` on the actual diff, #3372/#4157) plus `check:standards`
+(scoped per `we:scripts/lib/verify-lane-gate.mjs`'s own `canScopeCheckStandards`). It never falls back to the
+unscoped full `npm run test:unit && npm run check:standards` as its default behavior. **GitHub CI's required
+`test`/`test-shard` jobs (`.github/workflows/ci.yml`, 4 shards) are the only full-suite run** a landing PR
+depends on — `we:scripts/lib/verify-lane-gate.mjs`'s own header already states this distinction (a local
+false-green costs, at worst, a wasted round-trip that bounces at the real CI gate; it can never merge a
+regression, since `pr-land`/the drain independently require CI's own green `test` check).
+
+**The full local run stays available, but only as an explicit opt-in** — `we:scripts/verify-lane.mjs --gate="npm
+run test:unit && npm run check:standards"` (or an equivalent hand-written `--gate=` override) — for the narrow
+case where CI genuinely cannot run (a sibling-repo checkout with no CI wiring, an offline/detached working
+session, or a caller that has a specific reason to distrust the diff-driven selection for one run).
+`we:scripts/push-if-green.mjs`'s own default full-suite gate is an existing, correctly-scoped example of this
+opt-in shape — it publishes a MERGED tree directly to `origin/main` with no CI in the loop first, which is
+exactly the "CI can't run yet" case this ruling carves out, not a counter-example to it.
+
+**Why now.** Live evidence, same day: lane-16's verify ran the full `npm run test:unit && npm run
+check:standards` (~15–20 minutes under load) while lane-13's ran the diff-driven `vitest related` selection on
+a comparable change, and three delivery agents sat roughly 45 minutes total waiting on the resulting serial
+verify runs. Draft-first PRs (#2813) now keep a red-CI PR out of review before a human ever looks at it, which
+is what #3321's original local-green-before-land requirement existed to protect against — so the local gate no
+longer needs to *itself* be the full suite to guard that outcome; CI is. **Open follow-up, not settled by this
+ruling:** why lane-16's run took the unscoped path at all (an explicit `--gate=` override somewhere in its
+dispatch path, or a diff that hit `we:scripts/lib/verify-lane-gate.mjs`'s own stated full-suite-fallback
+triggers — `backlog/`, a gate-self/policy-core path, package/lockfile, `*.config.*`, shared test
+helpers/fixtures, a deleted source file) is exactly the kind of case this ruling's own wording does not resolve
+by itself and is left to the item below.
+
+**Composes with** [#heavy-command-admission-queue](#heavy-command-admission-queue) (the capacity semaphore both
+the scoped AND the full-suite opt-in run through unchanged) and the existing #3372/#4157 diff-driven-selection
+defaults (this ruling does not change their mechanism — it states that no caller may bypass them as this gate's
+*default*, only as a named, deliberate override).
+
+**Lineage:** operator ruling, 2026-09-28, folded into [Workers run affected tests while working, the full gate
+once after the final commit](/backlog/4294-workers-run-affected-tests-while-working-the-full-gate-once/)
+(`bornAs` `x000pcl`) — read that item for current implementation status, never re-derive it here.
+
+---
+
 ## Standing process & method rules (codified in the topical docs — pointers)
 
 These are already enforced/written elsewhere; listed here so the platform's rules are findable from
