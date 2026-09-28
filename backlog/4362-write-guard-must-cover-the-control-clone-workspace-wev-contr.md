@@ -1,4 +1,5 @@
 ---
+bornAs: xaqg28x
 kind: story
 size: 3
 priority: high
@@ -11,7 +12,7 @@ tags: []
 
 # Write guard must cover the control clone ~/workspace/wev-control like other daemon clones
 
-Evidence (2026-09-28): (a) a worker's file-item wrote a card into wev-control and no guard stopped it; (b) the orchestrator ran we:scripts/review-set-label.mjs with --to=clear-human for PR #2831 and #2854 with cwd in wev-control, and the approval-prevention filer (we:scripts/review-set-label.mjs#fileApprovalPreventionCard) wrote x21soye (staged A) and xx604u2 (untracked) there; (c) the dirty clone made the build daemon's self-sync refuse to rebuild ("rebuild did not move the clone (dirty)"), so the builder ran stale code (without the #2857 unfreeze fix) until a labelled emergency cleanup at ~4:05 PM ET on 2026-09-28. we:scripts/lib/daemon-clone-registry.mjs's DAEMON_CLONE_SEED omits wev-control entirely, so we:scripts/guard-lane.mjs and we:scripts/guard-bash.mjs never recognize it as a daemon/control clone and never block writes into it. Fix: register wev-control with the daemon-clone write guard, make approval/prevention filers (we:scripts/review-set-label.mjs#fileApprovalPreventionCard) refuse to write into any daemon or control clone, and add a health smell (alongside we:scripts/conveyor/health-smells/clone-stale.mjs) for a dirty control clone.
+Evidence (2026-09-28): (a) a worker's file-item wrote a card into wev-control and no guard stopped it; (b) the orchestrator ran we:scripts/review-set-label.mjs with --to=clear-human for PR #2831 and #2854 with cwd in wev-control, and the approval-prevention filer (we:scripts/review-set-label.mjs#fileApprovalPreventionCard) wrote x21soye (staged A) and 4363 (untracked) there; (c) the dirty clone made the build daemon's self-sync refuse to rebuild ("rebuild did not move the clone (dirty)"), so the builder ran stale code (without the #2857 unfreeze fix) until a labelled emergency cleanup at ~4:05 PM ET on 2026-09-28. we:scripts/lib/daemon-clone-registry.mjs's DAEMON_CLONE_SEED omits wev-control entirely, so we:scripts/guard-lane.mjs and we:scripts/guard-bash.mjs never recognize it as a daemon/control clone and never block writes into it. Fix: register wev-control with the daemon-clone write guard, make approval/prevention filers (we:scripts/review-set-label.mjs#fileApprovalPreventionCard) refuse to write into any daemon or control clone, and add a health smell (alongside we:scripts/conveyor/health-smells/clone-stale.mjs) for a dirty control clone.
 
 ## Risks
 
@@ -60,7 +61,7 @@ Evidence (2026-09-28): (a) a worker's file-item wrote a card into wev-control an
 ## Proof plan (live, before/after)
 
 - BEFORE: Test plan #1–#3 fail (a write into `wev-control` succeeds unguarded, exactly as it did on
-  2026-09-28 for both `x21soye`/#4314 and `xx604u2`); Test plan #4's smell fixture reports no episode for a
+  2026-09-28 for both `x21soye`/#4314 and `4363`); Test plan #4's smell fixture reports no episode for a
   dirty control clone.
 - AFTER: the same tests pass, and the new smell fires red against a fixture dirty `wev-control` and green once
   it is clean — both runnable via `npm run check:standards`/`vitest` with no manual clone surgery.
