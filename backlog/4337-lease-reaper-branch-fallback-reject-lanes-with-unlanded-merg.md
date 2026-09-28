@@ -1,4 +1,5 @@
 ---
+bornAs: xz3i1y2
 kind: story
 size: 5
 priority: high
@@ -28,7 +29,7 @@ we:scripts/conveyor/lease-reaper.mjs#defaultGitIsAncestor's squash/rebase fallba
 
 1. Extend `we:scripts/conveyor/lease-reaper.mjs#defaultGitIsAncestor`'s `git cherry` fallback to detect when HEAD's history includes a merge commit not present verbatim in `sha`'s history (e.g. via `git rev-list --merges` bounded to the HEAD..sha / sha..HEAD range) and treat that as "unaccounted for" — `false`, never a guess.
 2. Add the real-git regression from Test plan #1.
-3. Cross-check against the sibling xzvaya6-derived prevention card (approval-prevention-key:chalbert/web-everything#2835) filed in the same PR as this card — that card asks for the regression test; this card is the production fix it depends on.
+3. Cross-check against the sibling 4339-derived prevention card (approval-prevention-key:chalbert/web-everything#2835) filed in the same PR as this card — that card asks for the regression test; this card is the production fix it depends on.
 
 ## Proof plan (live, before/after)
 
