@@ -4,6 +4,8 @@ kind: story
 size: 5
 status: open
 priority: high
+tier: pinned
+rank: v
 scope: ["we:scripts/conveyor/build-dispatch-policy.mjs", "we:skills-src/conveyor/build-dispatch-daemon.mjs", "we:scripts/conveyor/__tests__/build-dispatch-policy.test.mjs", "we:skills-src/conveyor/__tests__/build-dispatch-daemon.test.mjs"]
 dateOpened: "2026-09-28"
 preparedDate: "2026-09-28"
