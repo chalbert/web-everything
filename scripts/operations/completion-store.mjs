@@ -20,6 +20,8 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 
 import { assertCompletionRecord, isValidSessionSlug, parseCompletionRecord, serializeCompletionRecord } from './completion-record.mjs';
+import { reserve, releaseLockDir } from '../readiness/file-locks.mjs';
+import { sleepSyncMs } from '../readiness/drain-lock.mjs';
 
 export {
   COMPLETION_KINDS,
@@ -27,6 +29,7 @@ export {
   COMPLETION_STATUSES,
   applyCompletionUpdate,
   assertCompletionRecord,
+  isForeignCompletionSessionId,
   isValidSessionSlug,
   newCompletionRecord,
   parseCompletionRecord,
@@ -52,6 +55,64 @@ export function resolveCompletionsDir() {
 export function completionPath(session, dir = resolveCompletionsDir()) {
   if (!isValidSessionSlug(session)) throw new TypeError(`operations: invalid completion session slug ${JSON.stringify(session)}`);
   return join(dir, `${session}.json`);
+}
+
+/**
+ * #4306 (epic #3383/#4075) — the per-completion-NAME lock root, NESTED inside the completions dir itself (never
+ * a sibling of it, and never `we:scripts/operations/coordination-root.mjs`'s cross-checkout root — a completion
+ * record is checkout-local, see this file's own header) so it always resolves under whichever `dir` is active —
+ * the real sidecar, or a TEST's own `OPERATION_COMPLETIONS_DIR` override, which mints a fresh unique directory
+ * per test; a sibling-of-`dir` root would instead collapse to the shared OS temp root for every test process,
+ * risking a real cross-test lock collision on a session name two suites happen to share. `listCompletionSessions`
+ * already filters by `.json` extension, so this subdirectory is never mistaken for a stray completion record.
+ */
+export function completionLockRoot(dir = resolveCompletionsDir()) {
+  return join(dir, '.locks');
+}
+
+/** Bounded wait before {@link withCompletionLock} gives up — "a short wait with a clear error, never an
+ *  unbounded wait" (`we:backlog/4306-*.md`'s own Risks section: lock contention here is negligible — one read
+ *  and one rename, a few `report` calls per session). */
+export const COMPLETION_LOCK_WAIT_MS = 5_000;
+export const COMPLETION_LOCK_POLL_MS = 25;
+
+/**
+ * we:scripts/operations/completion-store.mjs#withCompletionLock — THE PRIMITIVE REUSED, NOT REINVENTED: the
+ * same `we:scripts/readiness/file-locks.mjs` O_EXCL-mkdir / heartbeat-TTL-lease design
+ * `we:scripts/conveyor/fix-dispatch-claim.mjs#acquireFixDispatchClaim` already uses for its own synthetic
+ * resource key, here keyed `completion:<name>` — a completion record's NAME, never a real file on disk.
+ * Guards the read-decide-write critical section every writer of one session's completion record must share:
+ * the CLI `report` command wraps its WHOLE existing/decide/write sequence in this (so two concurrent `started`
+ * reports for the same name never race), and {@link writeCompletion}'s own `expectPrior` conditional write
+ * takes it internally so the reaper's single backstop write is equally race-free without its caller needing to
+ * know the lock exists at all.
+ * @param {string} name - the completion-record session slug (the lock key, not validated here — a caller with
+ *   an invalid slug will fail at `completionPath` regardless).
+ * @param {() => *} fn - the critical section; its return value is this function's own return value.
+ * @param {{dir?:string, lockRoot?:string, waitMs?:number, pollMs?:number, now?:() => number, sleep?:(ms:number) => void}} [o]
+ * @returns {*} whatever `fn()` returns.
+ */
+export function withCompletionLock(name, fn, {
+  dir = resolveCompletionsDir(), lockRoot = completionLockRoot(dir),
+  waitMs = COMPLETION_LOCK_WAIT_MS, pollMs = COMPLETION_LOCK_POLL_MS, now = Date.now, sleep = sleepSyncMs,
+} = {}) {
+  const resource = `completion:${name}`;
+  const owner = `${process.pid}:${now()}:${Math.random().toString(36).slice(2)}`;
+  const deadline = now() + waitMs;
+  const tryOnce = () => reserve(lockRoot, resource, owner, now(), new Date(now()).toISOString());
+  let acq = tryOnce();
+  while (!acq.ok && now() < deadline) {
+    sleep(pollMs);
+    acq = tryOnce();
+  }
+  if (!acq.ok) {
+    throw new Error(`operations: could not acquire completion lock for ${JSON.stringify(name)} within ${waitMs}ms (held by ${acq.heldBy ?? 'unknown'})`);
+  }
+  try {
+    return fn();
+  } finally {
+    releaseLockDir(lockRoot, resource);
+  }
 }
 
 /**
@@ -102,33 +163,64 @@ export function readCompletion(session, dir = resolveCompletionsDir()) {
  * {@link ../conveyor/reconcile-core.mjs#markSelfReportedDone} is the reader: it uses the persisted
  * `infraStreak` to decide between {@link ../conveyor/reconcile-core.mjs#INFRA_RETRY_COOLOFF_MS} and
  * {@link ../conveyor/reconcile-core.mjs#INFRA_RETRY_CAPPED_COOLOFF_MS}.
+ *
+ * #4306 (epic #3383/#4075) — `{expectPrior}` is the OPT-IN conditional-write guard: when given (even
+ * `expectPrior: null`, meaning "I planned this against no existing record at all"), the write happens under
+ * {@link withCompletionLock} and only proceeds if a FRESH re-read of the on-disk record still matches
+ * `expectPrior` on `status`/`startedAt`/`updatedAt`/`sessionId` — otherwise nothing is written and this
+ * returns `{written:false, reason:'changed'}` instead. This is what lets a `started` report that lands between
+ * the reaper's read and its write WIN: the reaper plans its backstop against the record it read, and the
+ * conditional write refuses to clobber a DIFFERENT record that landed in between. Omitting `expectPrior`
+ * (every pre-existing caller) is BYTE-IDENTICAL to before this option existed — no lock, no compare, the bare
+ * on-disk `path` returned exactly as always.
+ * @param {object} record
+ * @param {string} [dir]
+ * @param {{expectPrior?:object|null}} [o]
+ * @returns {string|{written:boolean, path?:string, reason?:string}}
  */
-export function writeCompletion(record, dir = resolveCompletionsDir()) {
+export function writeCompletion(record, dir = resolveCompletionsDir(), { expectPrior } = {}) {
   assertCompletionRecord(record, 'completion record being written');
-  const path = completionPath(record.session, dir);
-  mkdirSync(dir, { recursive: true });
+  const conditional = expectPrior !== undefined;
 
-  let prev = null;
-  try { prev = tryReadCompletion(record.session, dir); } catch { prev = null; }
-  const prevStreak = Number.isInteger(prev?.infraStreak) && prev.infraStreak > 0 ? prev.infraStreak : 0;
-
-  let toWrite = record;
-  if (record.status === 'done') {
-    if (record.outcome === 'blocked-on-infra') {
-      const since = prevStreak > 0 && prev?.infraStreakSince ? prev.infraStreakSince : record.updatedAt;
-      toWrite = { ...record, infraStreak: prevStreak + 1, infraStreakSince: since };
-    } else if (prevStreak > 0) {
-      const { infraStreak, infraStreakSince, ...rest } = record;
-      toWrite = rest;
+  const doWrite = () => {
+    const path = completionPath(record.session, dir);
+    let prev = null;
+    try { prev = tryReadCompletion(record.session, dir); } catch { prev = null; }
+    if (conditional && !completionRecordMatches(prev, expectPrior)) {
+      return { written: false, reason: 'changed' };
     }
-  } else if (prevStreak > 0) {
-    toWrite = { ...record, infraStreak: prevStreak, infraStreakSince: prev.infraStreakSince ?? prev.updatedAt };
-  }
+    mkdirSync(dir, { recursive: true });
+    const prevStreak = Number.isInteger(prev?.infraStreak) && prev.infraStreak > 0 ? prev.infraStreak : 0;
 
-  const tmp = `${path}.${process.pid}.${Date.now()}.tmp`;
-  writeFileSync(tmp, serializeCompletionRecord(toWrite));
-  renameSync(tmp, path);
-  return path;
+    let toWrite = record;
+    if (record.status === 'done') {
+      if (record.outcome === 'blocked-on-infra') {
+        const since = prevStreak > 0 && prev?.infraStreakSince ? prev.infraStreakSince : record.updatedAt;
+        toWrite = { ...record, infraStreak: prevStreak + 1, infraStreakSince: since };
+      } else if (prevStreak > 0) {
+        const { infraStreak, infraStreakSince, ...rest } = record;
+        toWrite = rest;
+      }
+    } else if (prevStreak > 0) {
+      toWrite = { ...record, infraStreak: prevStreak, infraStreakSince: prev.infraStreakSince ?? prev.updatedAt };
+    }
+
+    const tmp = `${path}.${process.pid}.${Date.now()}.tmp`;
+    writeFileSync(tmp, serializeCompletionRecord(toWrite));
+    renameSync(tmp, path);
+    return conditional ? { written: true, path } : path;
+  };
+
+  return conditional ? withCompletionLock(record.session, doWrite, { dir }) : doWrite();
+}
+
+/** Do two completion-record snapshots (or `null`s) agree on the four fields {@link writeCompletion}'s
+ *  `expectPrior` guard cares about? Pure. `null`/`null` matches (both "nothing was ever written"). */
+function completionRecordMatches(a, b) {
+  if (!a && !b) return true;
+  if (!a || !b) return false;
+  return a.status === b.status && a.startedAt === b.startedAt && a.updatedAt === b.updatedAt
+    && (a.sessionId ?? null) === (b.sessionId ?? null);
 }
 
 /** Every session slug with a completion record on disk (sorted). Temp files and stray names are ignored. */

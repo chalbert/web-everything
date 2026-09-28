@@ -7,6 +7,7 @@ import {
   COMPLETION_RECORD_VERSION,
   applyCompletionUpdate,
   assertCompletionRecord,
+  isForeignCompletionSessionId,
   isValidSessionSlug,
   newCompletionRecord,
   parseCompletionRecord,
@@ -20,7 +21,7 @@ describe('newCompletionRecord', () => {
   it('produces exactly the documented `started` shape', () => {
     expect(newCompletionRecord({ session: 'review-701', kind: 'review', pr: 701, now: fixedNow })).toEqual({
       v: COMPLETION_RECORD_VERSION, session: 'review-701', kind: 'review', pr: '701', item: null,
-      status: 'started', outcome: null, verdict: null, label: null, runId: null,
+      status: 'started', outcome: null, verdict: null, label: null, runId: null, sessionId: null,
       startedAt: '2026-09-03T00:00:00.000Z', updatedAt: '2026-09-03T00:00:00.000Z',
     });
   });
@@ -40,7 +41,7 @@ describe('newCompletionRecord', () => {
   it('accepts `ci-heal` (#4075/xg7m2wq — live incident PR #2724, 2026-09-26)', () => {
     expect(newCompletionRecord({ session: 'ci-heal-2724', kind: 'ci-heal', pr: 2724, now: fixedNow })).toEqual({
       v: COMPLETION_RECORD_VERSION, session: 'ci-heal-2724', kind: 'ci-heal', pr: '2724', item: null,
-      status: 'started', outcome: null, verdict: null, label: null, runId: null,
+      status: 'started', outcome: null, verdict: null, label: null, runId: null, sessionId: null,
       startedAt: '2026-09-03T00:00:00.000Z', updatedAt: '2026-09-03T00:00:00.000Z',
     });
   });
@@ -87,6 +88,31 @@ describe('validateCompletionRecord', () => {
 describe('assertCompletionRecord', () => {
   it('throws carrying the errors', () => {
     expect(() => assertCompletionRecord({}, 'thing')).toThrow(/operations: thing is invalid — /);
+  });
+});
+
+// #4306 (independent panel review, correctness lens) — the ONE shared predicate every reader/writer of a
+// completion record's `sessionId` binds through, so `reconcile-core.mjs#markSelfReportedDone`,
+// `session-reaper.mjs#makeCompletionResolver`/`planBackstopCompletion` and `session-verdicts.mjs
+// #finishedEvidence` can never silently diverge on what "foreign" means again.
+describe('isForeignCompletionSessionId', () => {
+  it('both sides null (or the row unknown) — never foreign, the legacy rule', () => {
+    expect(isForeignCompletionSessionId(null, null)).toBe(false);
+    expect(isForeignCompletionSessionId(undefined, null)).toBe(false);
+  });
+  it('a legacy record (no sessionId at all) is never foreign, whatever the row carries', () => {
+    expect(isForeignCompletionSessionId('A', null)).toBe(false);
+    expect(isForeignCompletionSessionId(null, null)).toBe(false);
+  });
+  it('same sessionId on both sides — never foreign', () => {
+    expect(isForeignCompletionSessionId('A', 'A')).toBe(false);
+  });
+  it('different sessionIds on both sides — foreign', () => {
+    expect(isForeignCompletionSessionId('A', 'B')).toBe(true);
+  });
+  it('the ROW carrying no sessionId is NOT an excuse to accept a record that names someone else — foreign', () => {
+    expect(isForeignCompletionSessionId(null, 'B')).toBe(true);
+    expect(isForeignCompletionSessionId(undefined, 'B')).toBe(true);
   });
 });
 
