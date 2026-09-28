@@ -955,6 +955,36 @@ describe('planTick — composes the tick and threads nextState', () => {
     expect(out.decisions.statusLine).toContain('1 building');
   });
 
+  it('card x0jgunh — counts.buildingInFlight excludes THIS tick\'s own proposed spawns, unlike counts.building', () => {
+    // 2 lanes are leased for unrelated work (num:null — e.g. a soak-break/review session, not a build) and 6
+    // items are launchable with empty bookkeeping (no prior-tick guards at all). Before the fix, a consumer
+    // reading `counts.building` here would see 6 "already in flight" and cap out immediately, even though
+    // NOTHING was in flight before this tick proposed these 6 spawns.
+    const queue = Array.from({ length: 6 }, (_, i) => ({ num: 100 + i, buildQueued: true }));
+    const out = planTick({
+      state: { queue, lanes: [{ num: null }, { num: null }], prs: [] },
+      plan: { launch: queue.map((q, i) => ({ num: q.num, lane: i + 1 })) },
+      freeLanes: [1, 2, 3, 4, 5, 6],
+      bookkeeping: {},
+    });
+    expect(out.decisions.spawnBuilds.length).toBe(6);
+    expect(out.decisions.counts.buildingInFlight).toBe(0);
+    // `counts.building` is unchanged — it DOES count this tick's own spawns (right for the conveyor, which
+    // launches every spawn it is handed).
+    expect(out.decisions.counts.building).toBe(6);
+  });
+
+  it('card x0jgunh — a prior-tick build already holding a leased lane counts 1 in buildingInFlight, not 0 and not double-counted', () => {
+    const out = planTick({
+      state: { queue: [{ num: 50, buildQueued: true }], lanes: [{ num: 50, lane: 7 }], prs: [] },
+      plan: { launch: [] },
+      freeLanes: [],
+      bookkeeping: { tick: 5, buildGuards: [{ num: 50, lane: 7, spawnedTick: 3 }] },
+    });
+    expect(out.decisions.counts.buildingInFlight).toBe(1);
+    expect(out.decisions.counts.building).toBe(1);
+  });
+
   it('shares the free-lane pool across builds and prepares — a prepare never takes a build lane this tick', () => {
     const out = planTick({
       state: { queue: [{ num: 10, buildQueued: true }], unshaped: [{ num: 20 }], lanes: [], prs: [] },
@@ -1665,7 +1695,7 @@ describe('planTick — loadAdmission (#4076): a SECOND, ORTHOGONAL gate beside t
       plan: { launch: [{ num: 10, lane: 4 }] },
       freeLanes: [4, 5],
       bookkeeping: { tick: 0 },
-      loadAdmission: { held: false, load1: 3, cores: 12, perCore: 0.25, maxPerCore: 1.5 },
+      loadAdmission: { held: false, idlePct: 45, minIdlePct: 15, pressureLevel: 1, load1: 3, cores: 12, perCore: 0.25, backstopPerCore: 4 },
     });
     expect(outExplicitFalse.decisions.spawnBuilds).toEqual([{ num: 10, lane: 4 }]);
     expect(outExplicitFalse.decisions.spawnPrepareScope).toEqual([{ num: 20, lane: 5 }]);
@@ -1679,12 +1709,12 @@ describe('planTick — loadAdmission (#4076): a SECOND, ORTHOGONAL gate beside t
       freeLanes: [4],
       bookkeeping: { tick: 0 },
       config: { maxConcurrentLanes: 50 }, // plenty of room under the fixed ceiling
-      loadAdmission: { held: true, load1: 20, cores: 12, perCore: 1.6667, maxPerCore: 1.5 },
+      loadAdmission: { held: true, idlePct: 12, minIdlePct: 15, pressureLevel: 1, load1: 20, cores: 12, perCore: 1.6667, backstopPerCore: 4, reason: 'cpu idle 12% (<15%)' },
     });
     expect(out.decisions.spawnBuilds).toEqual([]);
     expect(out.decisions.suppressedBuilds).toEqual(expect.arrayContaining([{ num: 10, lane: 4, by: 'load-cap' }]));
     expect(out.decisions.notes).toEqual(expect.arrayContaining([
-      expect.objectContaining({ kind: 'load-cap', num: 10, text: expect.stringContaining('20.00/12 cores (1.67 > 1.5)') }),
+      expect.objectContaining({ kind: 'load-cap', num: 10, text: expect.stringContaining('cpu idle 12% (<15%)') }),
     ]));
     // never mislabeled as the fixed-ceiling reason — the two gates are distinct, the fix differs
     expect(out.decisions.notes.some((n) => n.kind === 'capacity-cap')).toBe(false);
@@ -1696,14 +1726,14 @@ describe('planTick — loadAdmission (#4076): a SECOND, ORTHOGONAL gate beside t
       plan: { launch: [] },
       freeLanes: [4, 5],
       bookkeeping: { tick: 0 },
-      loadAdmission: { held: true, load1: 30, cores: 12, perCore: 2.5, maxPerCore: 1.5 },
+      loadAdmission: { held: true, idlePct: 8, minIdlePct: 15, pressureLevel: 1, load1: 30, cores: 12, perCore: 2.5, backstopPerCore: 4, reason: 'cpu idle 8% (<15%)' },
     });
     expect(out.decisions.spawnPrepareScope).toEqual([]);
     expect(out.decisions.notes.some((n) => n.kind === 'load-cap' && n.lane != null)).toBe(true);
     // both withheld free lanes are named, each with the real reading embedded
     const laneNotes = out.decisions.notes.filter((n) => n.kind === 'load-cap' && n.lane != null);
     expect(laneNotes.map((n) => n.lane).sort()).toEqual([4, 5]);
-    expect(laneNotes[0].text).toContain('30.00/12 cores (2.50 > 1.5)');
+    expect(laneNotes[0].text).toContain('cpu idle 8% (<15%)');
   });
 
   it('is ORTHOGONAL to the fixed lane ceiling: both gates can fire in the SAME tick, on DIFFERENT survivors', () => {
@@ -1713,7 +1743,7 @@ describe('planTick — loadAdmission (#4076): a SECOND, ORTHOGONAL gate beside t
       freeLanes: [4, 5],
       bookkeeping: { tick: 0 },
       config: { maxConcurrentLanes: 1 }, // capacity-cap trims #11 first
-      loadAdmission: { held: true, load1: 20, cores: 12, perCore: 1.6667, maxPerCore: 1.5 }, // load-cap then trims the survivor, #10
+      loadAdmission: { held: true, idlePct: 12, minIdlePct: 15, pressureLevel: 1, load1: 20, cores: 12, perCore: 1.6667, backstopPerCore: 4, reason: 'cpu idle 12% (<15%)' }, // load-cap then trims the survivor, #10
     });
     expect(out.decisions.spawnBuilds).toEqual([]);
     expect(out.decisions.suppressedBuilds).toEqual(expect.arrayContaining([
@@ -1730,7 +1760,7 @@ describe('planTick — loadAdmission (#4076): a SECOND, ORTHOGONAL gate beside t
       plan: { launch: [] },
       freeLanes: [],
       bookkeeping: { tick: 0 },
-      loadAdmission: { held: true, load1: 20, cores: 12, perCore: 1.6667, maxPerCore: 1.5 },
+      loadAdmission: { held: true, idlePct: 12, minIdlePct: 15, pressureLevel: 1, load1: 20, cores: 12, perCore: 1.6667, backstopPerCore: 4, reason: 'cpu idle 12% (<15%)' },
     });
     expect(out.decisions.spawnBuilds).toEqual([]);
     expect(out.decisions.notes.some((n) => n.kind === 'load-cap')).toBe(false);
@@ -1742,7 +1772,7 @@ describe('planTick — loadAdmission (#4076): a SECOND, ORTHOGONAL gate beside t
       plan: { launch: [{ num: 10, lane: 4 }] },
       freeLanes: [4],
       bookkeeping: { tick: 0 },
-      loadAdmission: { held: true }, // no load1/cores/perCore/maxPerCore at all
+      loadAdmission: { held: true }, // no idlePct/pressureLevel/load1/cores/perCore/reason at all
     });
     expect(out.decisions.spawnBuilds).toEqual([]);
     expect(out.decisions.notes.some((n) => n.kind === 'load-cap' && n.num === 10)).toBe(true);

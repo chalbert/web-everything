@@ -90,6 +90,88 @@ describe('lane-whois — AFTER', () => {
     expect(report.lanes[0].holderAlive).toBe(false);
   });
 
+  // #4344 — `headSha`/`branch`/`branchTipSha` are what lets a caller (`lane-pool-health-watch.mjs`) tell
+  // "already at the pool branch tip" apart from "clean, but still behind it" with no git of its own.
+  it('exposes headSha/branch/branchTipSha at the top level, and they agree for a lane genuinely at the tip', () => {
+    const r = runWhois(['--lane=1', '--json', `--repo=${referenceDir}`, '--name=whoispool', `--pool-root=${poolRoot}`]);
+    expect(r.code).toBe(0);
+    const row = JSON.parse(r.out).lanes[0];
+    const originTip = git(['rev-parse', 'origin/main'], referenceDir);
+    expect(row.branch).toBe('main');
+    expect(row.headSha).toBe(originTip);
+    expect(row.branchTipSha).toBe(originTip);
+    expect(row.headSha).toBe(row.branchTipSha); // this lane was never advanced past the tip — genuinely clean
+  });
+
+  // A lane can be clean-relative-to-HEAD (no dirty files, no local commits ahead of `origin/main`) yet still
+  // sit BEHIND the tip — nothing has fast-forwarded it since `origin/main` moved on. `ahead.count` alone (0)
+  // cannot tell these apart; `headSha` vs `branchTipSha` can.
+  it('reports headSha != branchTipSha for a lane that is clean but genuinely behind the tip', () => {
+    // Push a NEW commit to origin/main from a second clone, WITHOUT touching lane-1 at all — it stays exactly
+    // where `provision` first put it: clean (no dirty files, no ahead commits), but now behind the moved tip.
+    const secondClone = join(base, 'second-clone');
+    git(['clone', '--quiet', originDir, secondClone]);
+    writeFileSync(join(secondClone, 'later.txt'), 'landed after lane-1 was provisioned\n');
+    git(['add', 'later.txt'], secondClone);
+    git(['-c', 'user.email=t@t.com', '-c', 'user.name=t', 'commit', '--quiet', '-m', 'later work'], secondClone);
+    git(['push', '--quiet', 'origin', 'main'], secondClone);
+    // lane-1's own clone must see the new tip on its remote-tracking ref for this comparison to mean anything
+    // (mirrors what a real pool lane already does via its own periodic fetch) — this is a read, not a reset.
+    git(['fetch', '--quiet', 'origin'], lanePath(1));
+
+    const r = runWhois(['--lane=1', '--json', `--repo=${referenceDir}`, '--name=whoispool', `--pool-root=${poolRoot}`]);
+    const row = JSON.parse(r.out).lanes[0];
+    expect(row.uncommitted.trackedModified + row.uncommitted.untracked).toBe(0);
+    expect(row.ahead.count).toBe(0);
+    expect(row.verdict).toBe('finished-reclaimable'); // classifyLaneVerdict's own rule is unchanged by #4344
+    expect(row.headSha).not.toBe(row.branchTipSha); // but genuinely behind — a caller must still reclaim it
+  });
+
+  // #4344 — the two ends of this contract (the report's real, untouched `--json` shape, and
+  // `reclaimFinishedLanes`'s consumption of it) are otherwise only ever proven against hand-built fixtures on
+  // EITHER side, never wired together. This closes that gap with the REAL `--json` output, no fixture in
+  // between, over the same lane the two tests above already prove `headSha`/`branch`/`branchTipSha` on.
+  it('wiring: a REAL whois --json report feeds reclaimFinishedLanes correctly — at-tip skipped, behind-tip reclaimed, stray-branch reclaimed', async () => {
+    const { reclaimFinishedLanes } = await import('../conveyor/lane-pool-health-watch.mjs');
+
+    // lane-1: untouched since `provision` — genuinely at the pool branch tip.
+    const atTip = JSON.parse(runWhois(['--lane=1', '--json', `--repo=${referenceDir}`, '--name=whoispool', `--pool-root=${poolRoot}`]).out);
+    // The branch-name guard's own input actually exists on a REAL report, on both ends — not just asserted by
+    // the outcome below, which would pass identically if `branch` were absent everywhere.
+    expect(atTip.branch).toMatch(/^origin\//);
+    expect(atTip.lanes[0].branch).toBe('main');
+    const calls1 = [];
+    const outcomes1 = reclaimFinishedLanes({ whois: atTip, reclaimLane: (o) => { calls1.push(o); return { reclaimed: true }; }, dryRun: false });
+    expect(calls1).toEqual([]);
+    expect(outcomes1).toEqual([{ lane: 1, reclaimed: false, alreadyClean: true, reason: 'already clean at the pool branch tip — nothing to reclaim' }]);
+
+    // lane-2: origin/main moves on from a second clone, lane-2 fetches but is never reset — clean, but behind.
+    const secondClone = join(base, 'second-clone-wiring');
+    git(['clone', '--quiet', originDir, secondClone]);
+    writeFileSync(join(secondClone, 'later2.txt'), 'landed after lane-2 was provisioned\n');
+    git(['add', 'later2.txt'], secondClone);
+    git(['-c', 'user.email=t@t.com', '-c', 'user.name=t', 'commit', '--quiet', '-m', 'later work 2'], secondClone);
+    git(['push', '--quiet', 'origin', 'main'], secondClone);
+    git(['fetch', '--quiet', 'origin'], lanePath(2));
+
+    const behindTip = JSON.parse(runWhois(['--lane=2', '--json', `--repo=${referenceDir}`, '--name=whoispool', `--pool-root=${poolRoot}`]).out);
+    const calls2 = [];
+    const outcomes2 = reclaimFinishedLanes({ whois: behindTip, reclaimLane: (o) => { calls2.push(o); return { reclaimed: true }; }, dryRun: false });
+    expect(calls2).toEqual([{ lane: 2, dryRun: false }]); // never silently skipped — reclaim still has real work to do
+    expect(outcomes2).toEqual([{ lane: 2, reclaimed: true }]);
+
+    // lane-3: exact tip sha, but checked out on a stray LOCAL branch (never touches origin at all) — the
+    // branch-name guard must still send this one to a real reclaim, not skip it as already-clean.
+    git(['checkout', '--quiet', '-b', 'some-stray-branch'], lanePath(3));
+    const strayBranch = JSON.parse(runWhois(['--lane=3', '--json', `--repo=${referenceDir}`, '--name=whoispool', `--pool-root=${poolRoot}`]).out);
+    expect(strayBranch.lanes[0].branch).toBe('some-stray-branch');
+    expect(strayBranch.lanes[0].headSha).toBe(strayBranch.lanes[0].branchTipSha); // exact tip sha — only the branch is wrong
+    const calls3 = [];
+    const outcomes3 = reclaimFinishedLanes({ whois: strayBranch, reclaimLane: (o) => { calls3.push(o); return { reclaimed: true }; }, dryRun: false });
+    expect(calls3).toEqual([{ lane: 3, dryRun: false }]); // branch-name guard: never skipped on a stray branch
+    expect(outcomes3).toEqual([{ lane: 3, reclaimed: true }]);
+  });
+
   it('a live-leased lane reports in-use, regardless of content', () => {
     expect(runPool(['acquire', '--lane=1', '--session=sess-a', ...poolArgs()]).code).toBe(0);
     const r = runWhois(['--lane=1', '--json', `--repo=${referenceDir}`, '--name=whoispool', `--pool-root=${poolRoot}`]);
@@ -214,6 +296,33 @@ describe('lane-whois — AFTER', () => {
     writeFileSync(join(lanePath(2), 'new-file.txt'), 'fresh, never reviewed\n');
     const stale = JSON.parse(runWhois(['--lane=2', '--json', `--repo=${referenceDir}`, '--name=whoispool', `--pool-root=${poolRoot}`]).out);
     expect(stale.lanes[0].kept).toBe(false);
+  });
+
+  // #4344 review (security juror) — the whole safety argument for skipping a reclaim on an at-local-tip lane
+  // rests on `lane-pool.mjs reclaim` never fetching (see `isLaneAlreadyClean`'s own docblock). That was a prose
+  // claim about ANOTHER file with no test pinning it — this is that test: real origin advances via a SECOND
+  // clone (never fetched into lane-1), then a REAL `reclaim` runs on lane-1, and the proof is that its HEAD
+  // stays exactly where it was — reclaim reset it to its own stale local knowledge of `origin/main`, not the
+  // real remote tip, because it never fetched to learn the remote had moved.
+  it('reclaim never fetches — it resets an at-tip lane to its OWN locally-known origin/main, not a fresher remote tip', () => {
+    const beforeSha = git(['rev-parse', 'HEAD'], lanePath(1));
+
+    const secondClone = join(base, 'second-clone-reclaim-no-fetch');
+    git(['clone', '--quiet', originDir, secondClone]);
+    writeFileSync(join(secondClone, 'moved-on.txt'), 'origin/main advances; lane-1 never fetches this\n');
+    git(['add', 'moved-on.txt'], secondClone);
+    git(['-c', 'user.email=t@t.com', '-c', 'user.name=t', 'commit', '--quiet', '-m', 'origin moved on'], secondClone);
+    git(['push', '--quiet', 'origin', 'main'], secondClone);
+    const remoteTipSha = git(['rev-parse', 'main'], secondClone);
+    expect(remoteTipSha).not.toBe(beforeSha); // the real remote tip genuinely moved
+
+    const r = runPool(['reclaim', '--lane=1', '--json', ...poolArgs()]);
+    expect(r.code).toBe(0);
+    expect(JSON.parse(r.out).reclaimed).toBe(true); // clean + unleased — "nothing to lose", reclaimed as expected
+
+    const afterSha = git(['rev-parse', 'HEAD'], lanePath(1));
+    expect(afterSha).toBe(beforeSha); // unchanged — reclaim reset to its own stale knowledge, never fetched
+    expect(afterSha).not.toBe(remoteTipSha); // proof it did NOT pick up the real remote tip
   });
 
   it('#3383-perf: a lane with MANY genuinely-unpushed ahead commits is scanned in bounded time (speed regression guard)', () => {

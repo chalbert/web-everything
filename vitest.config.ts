@@ -172,6 +172,9 @@ export default defineConfig({
       'scripts/__tests__/lane-pool-reserve.test.mjs',
       'scripts/__tests__/lane-pool-cross-pool.test.mjs',
       'scripts/__tests__/lane-pool-reap-on-acquire.test.mjs',
+      // #xkk4lv7 — same tier: real throwaway origin/reference/pool, real spawned `lane-pool.mjs acquire`
+      // children, a fake `gh` on PATH — proves the branch-based item-resolution fallback in `deadLeasePlan`.
+      'scripts/__tests__/lane-pool-reap-branch-fallback.test.mjs',
       'scripts/__tests__/lane-pool-siblings.test.mjs',
       'scripts/__tests__/lane-pool-acquirable.test.mjs',
       'scripts/__tests__/lane-pool-reap-on-list-acquirable.test.mjs',

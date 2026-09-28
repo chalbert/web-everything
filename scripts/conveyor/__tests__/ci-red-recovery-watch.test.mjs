@@ -15,8 +15,9 @@ import {
   HUNG_CI_COMMENT_MARKER, buildHungCiComment, countHungCiComments, countHungCiCommentsByJob, bodyHasExactLine,
   cancelAndRerunHungRun, cancelHungRun, describeExecError, redactTokenShapes, sweepHungCiRecovery, formatHungReport,
   defaultReadRequiredContexts, defaultReadHeadCommittedAt, triggerCiForPr, clearStaleCheckingLabel,
-  sweepMissingRunRecovery, formatMissingRunReport,
+  sweepMissingRunRecovery, formatMissingRunReport, reconcileAcceptanceAfterRebase, defaultReadPrLabels,
 } from '../ci-red-recovery-watch.mjs';
+import { REVIEW_LABELS } from '../../lib/review-escalation.mjs';
 
 const failingCheck = (completedAt) => ({ __typename: 'CheckRun', name: 'test', status: 'COMPLETED', conclusion: 'FAILURE', completedAt });
 const greenCheck = { __typename: 'CheckRun', name: 'test', status: 'COMPLETED', conclusion: 'SUCCESS', completedAt: '2026-09-25T01:00:00Z' };
@@ -178,7 +179,12 @@ describe('ci-red-recovery-watch — sweepCiRedRecovery (dry run, apply: false by
     expect(refresh).toHaveBeenCalledTimes(1);
     // `root` defaults to WE's own checkout (no `repo` given) — see this pass's own multi-repo docblock.
     expect(refresh).toHaveBeenCalledWith('lane/xdzl6mb', expect.objectContaining({ base: 'origin/main' }));
-    expect(result.applied).toEqual([{ prNumber: 2635, headRefName: 'lane/xdzl6mb', ok: true, action: 'rebased' }]);
+    // #2811 — `acceptance` is always present (the restamp-or-rearm outcome), but this fake `refresh` returns no
+    // `newCommit`, so nothing was attempted (there is no authoritative new head to reconcile against yet).
+    expect(result.applied).toEqual([{
+      prNumber: 2635, headRefName: 'lane/xdzl6mb', ok: true, action: 'rebased',
+      acceptance: { attempted: false, restamped: false, rearmed: false },
+    }]);
     expect(postComment).toHaveBeenCalledWith(2635, expect.objectContaining({
       headRefName: 'lane/xdzl6mb', ok: true, action: 'rebased',
     }));
@@ -261,13 +267,14 @@ describe('ci-red-recovery-watch — sweepCiRedRecovery (dry run, apply: false by
 describe('ci-red-recovery-watch — refreshOntoMain', () => {
   it('delegates to rebaseDropManifest and reports its action verbatim on success', () => {
     const rebase = vi.fn(() => ({ action: 'rebased', newCommit: 'abc123' }));
-    expect(refreshOntoMain('lane/xdzl6mb', { root: '/repo', base: 'origin/main', rebase })).toEqual({ ok: true, action: 'rebased' });
+    // #2811 — `newCommit` now threaded through verbatim (the apply loop's own re-verify/re-arm step needs it).
+    expect(refreshOntoMain('lane/xdzl6mb', { root: '/repo', base: 'origin/main', rebase })).toEqual({ ok: true, action: 'rebased', newCommit: 'abc123' });
     expect(rebase).toHaveBeenCalledWith({ laneRef: 'lane/xdzl6mb', base: 'origin/main', cwd: '/repo' });
   });
 
   it('reports action:"current" as ok — rebaseDropManifest\'s own idempotency short-circuit, not a failure', () => {
     const rebase = vi.fn(() => ({ action: 'current', newCommit: 'abc123' }));
-    expect(refreshOntoMain('lane/x', { rebase })).toEqual({ ok: true, action: 'current' });
+    expect(refreshOntoMain('lane/x', { rebase })).toEqual({ ok: true, action: 'current', newCommit: 'abc123' });
   });
 
   it('surfaces a real conflict (action:"skip") and a hard failure (action:"error") as not-ok, never force-resolved', () => {
@@ -275,6 +282,96 @@ describe('ci-red-recovery-watch — refreshOntoMain', () => {
       .toEqual({ ok: false, action: 'skip', error: 'real conflict beyond .lane-manifest.json' });
     expect(refreshOntoMain('lane/x', { rebase: () => ({ action: 'error', reason: 'push failed' }) }))
       .toEqual({ ok: false, action: 'error', error: 'push failed' });
+  });
+});
+
+// #2811 (chalbert/web-everything PR #2811 live incident) — this watcher's own mechanical rebase moves the head
+// exactly like a ci-heal's re-push does, so a live `review:accepted` it finds is stale for the same reason.
+describe('ci-red-recovery-watch — reconcileAcceptanceAfterRebase (#2811)', () => {
+  const readLabels = (labels) => () => labels;
+
+  it('does nothing at all when the PR carries no review:accepted — no restamp, no rearm, no gh write', () => {
+    const restamp = vi.fn();
+    const rearm = vi.fn();
+    const out = reconcileAcceptanceAfterRebase({
+      prNumber: 2635, newHead: 'abc123', repo: null, root: '/repo',
+      readLabels: readLabels([{ name: 'review:pending' }]), restamp, rearm,
+    });
+    expect(out).toEqual({ attempted: false, restamped: false, rearmed: false });
+    expect(restamp).not.toHaveBeenCalled();
+    expect(rearm).not.toHaveBeenCalled();
+  });
+
+  it('a content-preserving rebase RESTAMPS (carries the acceptance forward) and never also rearms', () => {
+    const restamp = vi.fn(() => ({ ok: true }));
+    const rearm = vi.fn();
+    const out = reconcileAcceptanceAfterRebase({
+      prNumber: 2635, newHead: 'a19e50b56', repo: 'chalbert/web-everything', root: '/repo',
+      readLabels: readLabels([{ name: REVIEW_LABELS.accepted }]), restamp, rearm,
+    });
+    expect(out).toEqual({ attempted: true, restamped: true, rearmed: false });
+    expect(restamp).toHaveBeenCalledWith({ pr: 2635, repo: 'chalbert/web-everything', newHead: 'a19e50b56', cwd: '/repo' });
+    expect(rearm).not.toHaveBeenCalled(); // THE LOAD-BEARING GUARD: a successful restamp is never followed by a rearm.
+  });
+
+  it('a REFUSED restamp (content genuinely changed) falls back to rearm, reverting to review:pending', () => {
+    const restamp = vi.fn(() => ({ ok: false, reason: 'reviewed diff no longer matches' }));
+    const rearm = vi.fn(() => ({ ok: true }));
+    const out = reconcileAcceptanceAfterRebase({
+      prNumber: 2811, newHead: 'a19e50b56', repo: 'chalbert/web-everything', root: '/repo',
+      readLabels: readLabels([{ name: REVIEW_LABELS.accepted }]), restamp, rearm,
+    });
+    expect(out).toEqual({ attempted: true, restamped: false, rearmed: true });
+    expect(rearm).toHaveBeenCalledWith(expect.objectContaining({ pr: 2811, repo: 'chalbert/web-everything', cwd: '/repo' }));
+  });
+
+  it('defaultReadPrLabels asks gh pr view --json labels for the exact PR, --repo included when given', () => {
+    const calls = [];
+    const exec = (bin, argv) => { calls.push(argv); return '{"labels":[{"name":"review:accepted"}]}'; };
+    expect(defaultReadPrLabels(2811, { exec, repo: 'chalbert/web-everything' })).toEqual([{ name: 'review:accepted' }]);
+    expect(calls[0]).toEqual(['pr', 'view', '2811', '--json', 'labels', '--repo', 'chalbert/web-everything']);
+  });
+
+  it('never throws — a label-read failure reports attempted:false rather than sinking the pass', () => {
+    const out = reconcileAcceptanceAfterRebase({
+      prNumber: 2635, newHead: 'x', readLabels: () => { throw new Error('gh rate limited'); },
+      restamp: vi.fn(), rearm: vi.fn(),
+    });
+    expect(out).toEqual({ attempted: false, restamped: false, rearmed: false });
+  });
+});
+
+describe('ci-red-recovery-watch — sweepCiRedRecovery wires reconcileAcceptanceAfterRebase (#2811)', () => {
+  it('calls it once per successfully-rebased PR that minted a new head, and reports its outcome on the applied row', () => {
+    const readOpenPrs = () => [PR_2635];
+    const readMainRuns = () => MAIN_RUNS;
+    const readAheadBy = () => 33;
+    const readComments = () => [];
+    const refresh = vi.fn(() => ({ ok: true, action: 'rebased', newCommit: 'a19e50b56' }));
+    const reconcileAcceptance = vi.fn(() => ({ attempted: true, restamped: false, rearmed: true }));
+    const result = sweepCiRedRecovery({
+      readOpenPrs, readMainRuns, readAheadBy, readComments, refresh, postComment: vi.fn(),
+      reconcileAcceptance, apply: true,
+    });
+    expect(reconcileAcceptance).toHaveBeenCalledTimes(1);
+    expect(reconcileAcceptance).toHaveBeenCalledWith(expect.objectContaining({ prNumber: 2635, newHead: 'a19e50b56' }));
+    expect(result.applied).toEqual([expect.objectContaining({
+      prNumber: 2635, action: 'rebased', acceptance: { attempted: true, restamped: false, rearmed: true },
+    })]);
+  });
+
+  it('never calls it when the rebase reports action:"current" — nothing new was minted to reconcile against', () => {
+    const readOpenPrs = () => [PR_2635];
+    const readMainRuns = () => MAIN_RUNS;
+    const readAheadBy = () => 33;
+    const readComments = () => [];
+    const refresh = vi.fn(() => ({ ok: true, action: 'current', newCommit: 'already-there' }));
+    const reconcileAcceptance = vi.fn();
+    sweepCiRedRecovery({
+      readOpenPrs, readMainRuns, readAheadBy, readComments, refresh, postComment: vi.fn(),
+      reconcileAcceptance, apply: true,
+    });
+    expect(reconcileAcceptance).not.toHaveBeenCalled();
   });
 });
 

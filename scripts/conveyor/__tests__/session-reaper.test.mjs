@@ -8,7 +8,7 @@
  *   plus the `kind !== 'background'` guard against ever touching an interactive session, AND the new proof
  *   that a `working`/`blocked` session is reaped once — and ONLY once — its own target is confirmed done.
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   classifySessionReap,
   classifySessionReapWithGroundTruth,
@@ -36,6 +36,7 @@ import {
   makeIdleFinishedResolver,
   makePidDeadResolver,
   planBackstopCompletion,
+  resolveLastActivityMs,
   UNREPORTED_EXIT_OUTCOME,
   BLOCKED_ON_INFRA_OUTCOME,
   STALLED_OUTCOME,
@@ -75,7 +76,7 @@ import {
 import { OUTCOME_UNREADABLE } from '../hung-session.mjs';
 import { newCompletionRecord, applyCompletionUpdate, writeCompletion } from '../../operations/completion-store.mjs';
 import { newDeliveryReport, writeDeliveryReport } from '../../operations/delivery-report-store.mjs';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -1112,6 +1113,156 @@ describe('planBackstopCompletion — the root-cause fix, not just detection (xbv
     expect(planBackstopCompletion({ name: 'fix-2647' }, null, now)).toMatchObject({ outcome: UNREPORTED_EXIT_OUTCOME, label: null });
     expect(planBackstopCompletion({ name: 'fix-2647' }, null, now, false, false, false)).toMatchObject({ outcome: UNREPORTED_EXIT_OUTCOME, label: null });
   });
+
+  it('stamps the reaped session\'s own sessionId onto a freshly-minted backstop', () => {
+    const rec = planBackstopCompletion({ name: 'review-2599', sessionId: 'A' }, null, () => '2026-09-24T21:00:00.000Z');
+    expect(rec).toMatchObject({ sessionId: 'A' });
+  });
+
+  it('a freshly-minted backstop with no `sessionId` on the session row stamps `sessionId: null` — byte-identical to before this card for a caller with no identity to give', () => {
+    const rec = planBackstopCompletion({ name: 'review-2599' }, null, () => '2026-09-24T21:00:00.000Z');
+    expect(rec).toMatchObject({ sessionId: null });
+  });
+});
+
+// #4306 (epic #3383/#4075, BLOCKER fix-2821) — GUARD 1: "the reaper never writes a backstop that is not its
+// session's to write." Reproduces the live incident's own root cause directly against `planBackstopCompletion`:
+// the reaper's backstop for the FINISHED old fixer A must not land on the LIVE new fixer B's own `started`
+// record, under any of the three independent skip conditions (a)/(b)/(c).
+describe('planBackstopCompletion Guard 1 (#4306) — (a)/(b)/(c) skip conditions, BLOCKER fix-2821', () => {
+  const bStarted = {
+    v: 1, session: 'fix-2821', kind: 'fix', pr: '2821', item: null, status: 'started', outcome: null,
+    verdict: null, label: null, runId: null, sessionId: 'B', startedAt: '2026-09-27T20:53:27.000Z', updatedAt: '2026-09-27T20:53:27.000Z',
+  };
+
+  it('(a) refuses when the existing record\'s sessionId is FOREIGN to the reaped session — the exact clobber the incident hit', () => {
+    // The reaper is reaping the OLD, finished fixer A; the on-disk record under the shared name is B's.
+    const rec = planBackstopCompletion({ name: 'fix-2821', sessionId: 'A' }, bStarted, () => '2026-09-27T20:54:34.000Z');
+    expect(rec).toBeNull();
+  });
+
+  it('(a) still backstops when the existing record carries the SAME sessionId as the reaped session — never over-refuses', () => {
+    const aStarted = { ...bStarted, sessionId: 'A', startedAt: '2026-09-27T20:04:30.000Z', updatedAt: '2026-09-27T20:04:30.000Z' };
+    const rec = planBackstopCompletion({ name: 'fix-2821', sessionId: 'A' }, aStarted, () => '2026-09-27T20:54:34.000Z');
+    expect(rec).toMatchObject({ status: 'done', sessionId: 'A' });
+  });
+
+  it('(b) refuses whenever `newerSameNameListed` is true — independent of whether a record exists at all', () => {
+    expect(planBackstopCompletion(
+      { name: 'fix-2821', sessionId: 'A' }, null, () => '2026-09-27T20:54:34.000Z', false, false, false,
+      { newerSameNameListed: true },
+    )).toBeNull();
+    const aStarted = { ...bStarted, sessionId: 'A' };
+    expect(planBackstopCompletion(
+      { name: 'fix-2821', sessionId: 'A' }, aStarted, () => '2026-09-27T20:54:34.000Z', false, false, false,
+      { newerSameNameListed: true },
+    )).toBeNull();
+  });
+
+  it('(c) refuses when the existing `started` record\'s own startedAt is AFTER the reaped session\'s last transcript activity — it cannot be this session\'s own report', () => {
+    // a73a8bec's last confirmed activity was ~20:44Z, well BEFORE 71f95af4's 20:53:27 record.
+    const lastActivityMs = Date.parse('2026-09-27T20:44:34.000Z');
+    const rec = planBackstopCompletion(
+      { name: 'fix-2821', sessionId: 'A' }, bStarted, () => '2026-09-27T20:54:34.000Z', false, false, false,
+      { lastActivityMs },
+    );
+    expect(rec).toBeNull();
+  });
+
+  // Independent Codex review finding 1 (`we:backlog/4306-*.md`): a PLAIN "record started after the session
+  // started" comparison is wrong — a session's own genuine `started` report always lands a few seconds after
+  // its OWN listing `startedAt`, so that naive test would wrongly skip its own legitimate backstop too.
+  // `lastActivityMs` (transcript activity, not listing start) does not have this false positive.
+  it('(c) does NOT skip a session\'s own legitimate backstop just because its record started a few seconds after its OWN listing startedAt', () => {
+    const ownRecord = {
+      ...bStarted, sessionId: 'A', startedAt: '2026-09-27T20:04:30.000Z', updatedAt: '2026-09-27T20:04:30.000Z',
+    }; // written 3s after a listing startedAt of 20:04:27
+    const lastActivityMs = Date.parse('2026-09-27T20:40:00.000Z'); // it worked for a while before going quiet
+    const rec = planBackstopCompletion(
+      { name: 'fix-2821', sessionId: 'A' }, ownRecord, () => '2026-09-27T20:54:34.000Z', false, false, false,
+      { lastActivityMs },
+    );
+    expect(rec).toMatchObject({ status: 'done', sessionId: 'A' });
+  });
+
+  it('an unresolvable `lastActivityMs` (null) never fires (c) on its own — unknown is never a guess', () => {
+    const rec = planBackstopCompletion(
+      { name: 'fix-2821', sessionId: 'A' }, { ...bStarted, sessionId: 'A' }, () => '2026-09-27T20:54:34.000Z',
+      false, false, false, { lastActivityMs: null },
+    );
+    expect(rec).toMatchObject({ status: 'done', sessionId: 'A' });
+  });
+});
+
+// #4306 (independent panel review, standards-conformance lens) — a DIRECT unit test of the IO helper
+// Guard-1(c) actually reads, not just the pure `planBackstopCompletion` decision fed a pre-computed number.
+describe('resolveLastActivityMs — Guard 1(c)\'s own IO (#4306)', () => {
+  const jsonl = (entries) => entries.map((e) => JSON.stringify(e)).join('\n') + '\n';
+  const textEntry = (ts, text = 'x') => ({ type: 'assistant', timestamp: ts, message: { content: [{ type: 'text', text }] } });
+
+  it('returns null when the session carries no cwd/sessionId — never a guess', () => {
+    expect(resolveLastActivityMs(null)).toBeNull();
+    expect(resolveLastActivityMs({ cwd: '/c' })).toBeNull();
+    expect(resolveLastActivityMs({ sessionId: 's1' })).toBeNull();
+  });
+
+  it('returns null when no transcript can be resolved', () => {
+    const result = resolveLastActivityMs({ cwd: '/c', sessionId: 's1' }, {
+      resolveTranscript: () => { throw new Error('not found'); },
+    });
+    expect(result).toBeNull();
+  });
+
+  it('returns null when the transcript tail cannot be read', () => {
+    const result = resolveLastActivityMs({ cwd: '/c', sessionId: 's1' }, {
+      resolveTranscript: () => '/fake/path.jsonl',
+      tailLinesFn: () => { throw new Error('unreadable'); },
+    });
+    expect(result).toBeNull();
+  });
+
+  it('returns the NEWEST parseable `ts` among the tail lines, not the first or the last-in-file', () => {
+    const lines = jsonl([
+      textEntry('2026-09-27T20:00:00.000Z'),
+      textEntry('2026-09-27T20:44:34.000Z'), // the newest
+      textEntry('2026-09-27T20:10:00.000Z'),
+    ]).split('\n').filter(Boolean);
+    const result = resolveLastActivityMs({ cwd: '/c', sessionId: 's1' }, {
+      resolveTranscript: () => '/fake/path.jsonl',
+      tailLinesFn: () => ({ lines }),
+      summarizeEntryFn: (raw) => { const o = JSON.parse(raw); return { kind: o.type, ts: o.timestamp, blocks: [] }; },
+    });
+    expect(result).toBe(Date.parse('2026-09-27T20:44:34.000Z'));
+  });
+
+  it('falls back to the transcript file\'s own mtime when no line carries a parseable `ts`', () => {
+    const result = resolveLastActivityMs({ cwd: '/c', sessionId: 's1' }, {
+      resolveTranscript: () => '/fake/path.jsonl',
+      tailLinesFn: () => ({ lines: ['not json'] }),
+      summarizeEntryFn: () => { throw new Error('unparseable'); },
+      statFn: () => ({ mtimeMs: 123456 }),
+    });
+    expect(result).toBe(123456);
+  });
+
+  it('returns null when the mtime fallback itself is unreadable', () => {
+    const result = resolveLastActivityMs({ cwd: '/c', sessionId: 's1' }, {
+      resolveTranscript: () => '/fake/path.jsonl',
+      tailLinesFn: () => ({ lines: ['not json'] }),
+      summarizeEntryFn: () => { throw new Error('unparseable'); },
+      statFn: () => { throw new Error('ENOENT'); },
+    });
+    expect(result).toBeNull();
+  });
+
+  it('one unparseable line never aborts the scan — the other lines still resolve a timestamp', () => {
+    const result = resolveLastActivityMs({ cwd: '/c', sessionId: 's1' }, {
+      resolveTranscript: () => '/fake/path.jsonl',
+      tailLinesFn: () => ({ lines: ['not json', JSON.stringify({ type: 'assistant', timestamp: '2026-09-27T20:44:34.000Z' })] }),
+      summarizeEntryFn: (raw) => { if (raw === 'not json') throw new Error('bad'); const o = JSON.parse(raw); return { kind: o.type, ts: o.timestamp, blocks: [] }; },
+    });
+    expect(result).toBe(Date.parse('2026-09-27T20:44:34.000Z'));
+  });
 });
 
 describe('transcriptShowsIntendedBlockedOnInfra — reading the crashed session\'s own last words (PR #2647/#2625, 2026-09-25)', () => {
@@ -1227,6 +1378,86 @@ describe('runSessionReaperPass — the backstop-completion write (xbv32pg follow
     expect(written).toHaveLength(0);
   });
 
+  // #4306 (independent panel review, standards-conformance lens) — a PASS-LEVEL proof that Guard 1(b)'s own
+  // WIRING (computing `newerSameNameListed` from the real `sessions` listing via `normalizeHandle`/
+  // `startedAtMs`) refuses the backstop, not just the pure `planBackstopCompletion` fed a pre-computed flag.
+  it('Guard 1(b): two REAL rows sharing one name in the listing (older reaped, newer live) refuse the backstop — the wiring itself, not a pre-computed flag', () => {
+    const written = [];
+    const now = Date.now();
+    const older = {
+      id: 'old1', sessionId: 'A', cwd: '/scratch/old', kind: 'background', state: 'done', name: 'fix-9', startedAt: now - 40 * 60_000,
+    };
+    const newer = {
+      id: 'new1', sessionId: 'B', cwd: '/scratch/new', kind: 'background', state: 'working', name: 'fix-9', startedAt: now - 5 * 60_000,
+    };
+    const existingRecord = {
+      v: 1, session: 'fix-9', kind: 'fix', pr: '9', item: null, status: 'started', outcome: null, verdict: null,
+      label: null, runId: null, sessionId: 'B', startedAt: '2026-09-27T20:53:27.000Z', updatedAt: '2026-09-27T20:53:27.000Z',
+    };
+    const result = runSessionReaperPass({
+      listAgents: () => [older, newer],
+      groundTruthFor: () => null,
+      completionFor: () => null,
+      stop: ({ handle }) => ({ stopped: true, alreadyGone: false, output: `stopped ${handle}` }),
+      readCompletionRecord: () => existingRecord,
+      writeCompletionRecord: (rec) => { written.push(rec); },
+      log: () => {},
+    });
+    expect(result.stopped).toBe(1); // the OLD, terminal row is still reaped …
+    expect(written).toHaveLength(0); // … but Guard 1(b)'s own listing scan refuses the backstop over it
+  });
+
+  // #4306 (independent panel review, red-team standards-conformance) — a PASS-LEVEL proof that Guard 1(c)'s
+  // own WIRING (the real `resolveLastActivityMs(session)` call inside `runSessionReaperPass`, reading a REAL
+  // transcript file) refuses the backstop, not just `planBackstopCompletion` fed a pre-computed
+  // `lastActivityMs` number. `CLAUDE_PROJECTS_DIR` must be re-stubbed AND the module re-imported fresh
+  // (`vi.resetModules()`) because `agent-health.mjs#PROJECTS_DIR` is a module-level constant computed once at
+  // first import — the same technique `hung-session.test.mjs`'s own `readHungInfo` IO-shell tests already use.
+  it('Guard 1(c): the REAL wiring reads a REAL transcript file and refuses the backstop — not a pre-computed lastActivityMs', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'session-reaper-guard1c-wiring-'));
+    const projects = join(root, 'projects');
+    const cwd = '/scratch/fix-2821-lane';
+    const sessionId = 'sess-A-guard1c';
+    const slug = cwd.replaceAll('/', '-');
+    mkdirSync(join(projects, slug), { recursive: true });
+    const transcriptFile = join(projects, slug, `${sessionId}.jsonl`);
+    // The session's own last confirmed activity was 20 minutes ago — well before the on-disk record's own
+    // `startedAt` (now), so Guard 1(c) must conclude that record cannot be this session's own report.
+    const staleTs = new Date(Date.now() - 20 * 60_000).toISOString();
+    writeFileSync(transcriptFile, `${JSON.stringify({ type: 'assistant', timestamp: staleTs, message: { content: [{ type: 'text', text: 'done, re-armed' }] } })}\n`);
+
+    const previousProjectsDir = process.env.CLAUDE_PROJECTS_DIR;
+    vi.stubEnv('CLAUDE_PROJECTS_DIR', projects);
+    vi.resetModules();
+    try {
+      const { runSessionReaperPass: freshRunSessionReaperPass } = await import('../session-reaper.mjs');
+      const written = [];
+      const existingRecord = {
+        v: 1, session: 'fix-2821', kind: 'fix', pr: '2821', item: null, status: 'started', outcome: null,
+        verdict: null, label: null, runId: null, sessionId: 'A',
+        startedAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+      };
+      const result = freshRunSessionReaperPass({
+        listAgents: () => [{
+          id: 'a1', sessionId, cwd, kind: 'background', state: 'done', name: 'fix-2821',
+        }],
+        groundTruthFor: () => null,
+        completionFor: () => null,
+        stop: ({ handle }) => ({ stopped: true, alreadyGone: false, output: `stopped ${handle}` }),
+        readCompletionRecord: () => existingRecord,
+        writeCompletionRecord: (rec) => { written.push(rec); },
+        log: () => {},
+      });
+      expect(result.stopped).toBe(1);
+      expect(written).toHaveLength(0); // Guard 1(c) refused via the REAL transcript read, not a pre-computed flag
+    } finally {
+      vi.unstubAllEnvs();
+      if (previousProjectsDir === undefined) delete process.env.CLAUDE_PROJECTS_DIR;
+      else process.env.CLAUDE_PROJECTS_DIR = previousProjectsDir;
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('`backstopCompletion: false` is a full rollback escape hatch — never calls writeCompletionRecord at all', () => {
     let readCalls = 0;
     const written = [];
@@ -1272,6 +1503,37 @@ describe('runSessionReaperPass — the backstop-completion write (xbv32pg follow
     });
     expect(result.backstopWritten).toBe(0);
     expect(result.stopped).toBe(1); // the stop itself still proceeds — the backstop write is a side concern
+  });
+
+  // #4306 (independent panel review, correctness lens) — every OTHER test in this describe block injects
+  // `readCompletionRecord`/`writeCompletionRecord`; this one exercises the REAL production defaults
+  // (`tryReadCompletion`/`writeCompletion`, never overridden) end to end, proving the conditional-write wiring
+  // (`{expectPrior}`) the reaper's own call site passes actually reaches the real store and lands a real file —
+  // not just a test double that happens to forward the third argument faithfully.
+  it('the REAL default writeCompletionRecord/readCompletionRecord (never injected) write a real backstop file end to end', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'we-session-reaper-real-backstop-'));
+    const previous = process.env.OPERATION_COMPLETIONS_DIR;
+    process.env.OPERATION_COMPLETIONS_DIR = dir;
+    try {
+      const result = runSessionReaperPass({
+        listAgents: () => [{
+          id: 'd1', sessionId: 'A', kind: 'background', state: 'done', name: 'review-1862',
+        }],
+        groundTruthFor: () => null,
+        completionFor: () => null,
+        stop: ({ handle }) => ({ stopped: true, alreadyGone: false, output: `stopped ${handle}` }),
+        log: () => {},
+      });
+      expect(result.backstopWritten).toBe(1);
+      const onDisk = JSON.parse(readFileSync(join(dir, 'review-1862.json'), 'utf8'));
+      expect(onDisk).toMatchObject({
+        session: 'review-1862', status: 'done', outcome: UNREPORTED_EXIT_OUTCOME, sessionId: 'A',
+      });
+    } finally {
+      if (previous === undefined) delete process.env.OPERATION_COMPLETIONS_DIR;
+      else process.env.OPERATION_COMPLETIONS_DIR = previous;
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   // Live incident fix (PR #2647/#2625, 2026-09-25) — the outcome the backstop write carries actually reflects
@@ -1400,6 +1662,79 @@ describe('makeCompletionResolver — the IO helper over completion-store.mjs (#3
       const session = { name: 'review-2588', kind: 'background', state: 'blocked', cwd: '/repo' };
       const verdict = classifySessionReapWithGroundTruth(session, () => null, { completionFor });
       expect(verdict).toEqual({ reap: true, reason: 'completion-record-done' });
+    });
+  });
+
+  // #4306 (epic #3383/#4075, BLOCKER fix-2821) — GUARD 2: "a completion record only ever speaks for the
+  // session that wrote it." A ROW (not a bare name) lets this resolver bind the record it reads to the session
+  // asking about it.
+  describe('#4306 Guard 2 — row binding: a foreign sessionId never speaks for this row, a matching/legacy one still does', () => {
+    let dir;
+    beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'we-session-reaper-ownership-')); });
+    afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
+
+    it('a bare STRING name keeps the pre-#4306 behavior byte-identical — no binding applied', () => {
+      const rec = applyCompletionUpdate(
+        newCompletionRecord({ session: 'fix-2821', kind: 'fix', pr: '2821', sessionId: 'A', now: () => '2026-09-27T20:04:27.000Z' }),
+        { status: 'done', outcome: 'unreported-exit' },
+        () => '2026-09-27T20:54:34.000Z',
+      );
+      writeCompletion(rec, dir);
+      const resolver = makeCompletionResolver({ dir });
+      expect(resolver('fix-2821')).toEqual({ done: true }); // a plain string never binds — same as always
+    });
+
+    it('a ROW with a matching sessionId still reads done: true', () => {
+      const rec = applyCompletionUpdate(
+        newCompletionRecord({ session: 'fix-2821', kind: 'fix', pr: '2821', sessionId: 'A', now: () => '2026-09-27T20:04:27.000Z' }),
+        { status: 'done', outcome: 'unreported-exit' },
+        () => '2026-09-27T20:54:34.000Z',
+      );
+      writeCompletion(rec, dir);
+      const resolver = makeCompletionResolver({ dir });
+      expect(resolver({ name: 'fix-2821', sessionId: 'A' })).toEqual({ done: true });
+    });
+
+    it('a ROW with a DIFFERENT (foreign) sessionId never reads done: true, however the on-disk status reads — never downgraded to legacy', () => {
+      const rec = applyCompletionUpdate(
+        newCompletionRecord({ session: 'fix-2821', kind: 'fix', pr: '2821', sessionId: 'A', now: () => '2026-09-27T20:53:27.000Z' }),
+        { status: 'done', outcome: 'unreported-exit' },
+        () => '2026-09-27T20:54:34.000Z',
+      );
+      writeCompletion(rec, dir); // the reaper's own backstop for OLD generation A, clobbering the name
+      const resolver = makeCompletionResolver({ dir });
+      expect(resolver({ name: 'fix-2821', sessionId: 'B' })).toEqual({ done: false }); // B is still live — never told it's done
+    });
+
+    it('a legacy record (no sessionId at all) keeps today\'s plain status rule for a ROW too', () => {
+      const rec = newCompletionRecord({ session: 'fix-2821', kind: 'fix', pr: '2821', now: () => '2026-09-27T20:04:27.000Z' });
+      writeCompletion({ ...rec, status: 'done', outcome: 'accepted' }, dir);
+      const resolver = makeCompletionResolver({ dir });
+      expect(resolver({ name: 'fix-2821', sessionId: 'B' })).toEqual({ done: true });
+    });
+
+    // THE PASS-LEVEL PROOF (Test plan item 1's own last sentence): drive the REAL classifier end to end. A
+    // foreign `done` record must not stop a working same-name session B; B's own `done` record must.
+    it('classifySessionReapWithGroundTruth: a foreign done record does not reap a live same-name session B; B\'s own done record does', () => {
+      const foreign = applyCompletionUpdate(
+        newCompletionRecord({ session: 'fix-2821', kind: 'fix', pr: '2821', sessionId: 'A', now: () => '2026-09-27T20:04:27.000Z' }),
+        { status: 'done', outcome: 'unreported-exit' },
+        () => '2026-09-27T20:54:34.000Z',
+      );
+      writeCompletion(foreign, dir);
+      const completionFor = makeCompletionResolver({ dir });
+      const sessionB = {
+        name: 'fix-2821', sessionId: 'B', kind: 'background', state: 'working', cwd: '/repo',
+      };
+      // B is `state: working` and its own name's on-disk record is foreign — never reaped on this axis.
+      expect(classifySessionReapWithGroundTruth(sessionB, () => null, { completionFor }).reap).toBe(false);
+
+      // Now B reports its OWN done — the SAME name, B's OWN sessionId.
+      const ownRecord = applyCompletionUpdate(foreign, { status: 'done', outcome: 'accepted', sessionId: 'B' }, () => '2026-09-27T21:00:00.000Z');
+      writeCompletion(ownRecord, dir);
+      const blockedSessionB = { ...sessionB, state: 'blocked' };
+      expect(classifySessionReapWithGroundTruth(blockedSessionB, () => null, { completionFor }))
+        .toEqual({ reap: true, reason: 'completion-record-done' });
     });
   });
 });

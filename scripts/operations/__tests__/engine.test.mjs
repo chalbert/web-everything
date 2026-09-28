@@ -31,8 +31,8 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 describe('the engine performs no io — structurally, not by habit', () => {
   it('the engine\'s import graph reaches nothing that can act', () => {
     const { files, external } = importGraph(resolve(HERE, '..', 'engine.mjs'));
-    // The whole pure core: the engine, the declaration, the vocabulary, the record.
-    expect(files.map((f) => f.split('/').pop())).toEqual(['engine.mjs', 'registry.mjs', 'run-record.mjs', 'step-kinds.mjs']);
+    // The whole pure core: the engine, the declaration, the vocabulary, the record (and its job block, #4125).
+    expect(files.map((f) => f.split('/').pop())).toEqual(['engine.mjs', 'job-record.mjs', 'registry.mjs', 'run-record.mjs', 'step-kinds.mjs']);
     // No `node:fs`, no `node:child_process`, no `node:http`, no anything.
     expect(external).toEqual([]);
   });

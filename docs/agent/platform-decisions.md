@@ -3800,6 +3800,64 @@ a deferred `classifyPr` "no-check vs red" reporting split, and authoring the mis
 
 ---
 
+### A ready PR yields, for a bounded non-renewable window, to a larger overlapping PR already in final review — a conflict-COST strategy, settings-driven, on by default as a trial {#drain-overlap-yield-landing-order}
+
+**Ratified 2026-09-27 (operator, in conversation; #4307, decision card).** Large daemon PRs kept drifting
+into conflict with `main` because smaller overlapping PRs landed ahead of them while they sat in review
+(#2821, 20 files, conflicted twice in one day; each conflict cost a fixer round, a full CI run and a fresh
+review round). `we:scripts/merge-ai-prs.mjs#planLabelDrain` lands ready PRs in `blockedBy`/item/PR-number
+order and has no notion of an open PR still in review.
+
+1. **The rule.** A ready PR X yields to a larger overlapping PR Y that is in final review, for **one
+   non-renewable budget counted from X's own `ready-to-merge` label** (never from Y's review clock) — so X's
+   total wait is bounded whatever happens to Y. "Larger" is a single **global total order** (total changed
+   lines, then PR number) — never a per-pair overlap measure, which can cycle across three PRs. "Final
+   review" means Y is open, not a draft, on X's base, not `review:changes`, carries `review:pending` or
+   `review:accepted`, and does not itself depend on X. Blockers, hard dependencies, and a PR whose file list
+   is unknown (hit a listing cap) are exempt and never yield. Full mechanical shape (the exact fields, the
+   drain plumbing, the idle-accounting treatment): `we:scripts/conveyor/land-overlap-yield.mjs` per the
+   #4308 build card.
+2. **This is a conflict-COST strategy, not a conflict-reduction one.** It decides **who pays** for reconciling
+   an overlap that already exists (the smaller PR re-lands with less to re-review than the larger one would),
+   and stops the repeated knock-back of one large PR — it does not shrink the underlying edit collision.
+   Dispatch-time overlap **avoidance** (#4295 / 4295, coordinating daemon-claimed work before it is even
+   dispatched) is the reduction layer; the two compose rather than duplicate: 4295 prevents some overlaps
+   from being dispatched at all, this rule decides land order for whatever overlaps still occur — including
+   work dispatched outside the daemons' claim stores, which 4295 never sees.
+3. **Configurable by SETTINGS, not only a CLI flag.** Both the on/off switch and the window length live in
+   the repo's normal settings/config mechanism — a **tracked, committed**, defaults-in-code JSON config file
+   beside the affected script (`we:scripts/drain-overlap-yield-config.json`), edited only through a sanctioned
+   CLI verb mirroring `we:scripts/backlog.mjs weights`, never hand-edited, and landed via lane→PR like any
+   other repo change. It copies the CLI-verb/write-guard shape of `we:scripts/build-queue-config.json` but
+   **not** its git-ignored status: the resident drain daemon self-updates from `main` and never sees a local
+   uncommitted file ([resident-daemon-reload-lifecycle](#resident-daemon-reload-lifecycle)), so a git-ignored
+   copy would silently strand an operator's edit. A `--overlap-yield-window`/env-var override may exist *on top of* the settings file for
+   a one-off run, but the settings file is the durable, discoverable knob — a flag nobody remembers to pass is
+   not "configurable."
+4. **Activated (on) by default, for now, as a trial.** Shipped defaults: `enabled: true`,
+   `windowMinutes: 45` (a starting value anchored to one incident — the #2821 conflict ran 44 minutes end to
+   end — not a measured optimum). Every yield is logged (which PR yielded, to which, the computed rank, the
+   release time/reason). **Revisit the window after a week of live yield data.**
+5. **What was explicitly left open.** A second, independent axis — may a PR keep its review state after a
+   clean mechanical rebase, instead of always resetting to a fresh review round — was raised during
+   preparation and is **NOT ruled by this entry**. It is its own decision card
+   ([4310](/backlog/4310-may-a-pr-keep-its-review-after-a-clean-mechanical-rebase-or/)), status quo
+   (always re-review) standing as its default until it is separately prepared and ratified. This repo's
+   convention is one ruling per decision card, so a second axis surfaced mid-prep is split out rather than
+   folded into an existing ruling.
+
+**Lineage:** #4307 (ratified 2026-09-27, operator, in conversation), forks and mechanical design authored
+during the preparation of its build card #4308, reshaped once by an independent Codex review (added the
+status-quo and eligible-only alternatives, split off the review-carry-over axis, showed an overlap-only size
+order can cycle). Build tracked on #4308. Composes with
+[#4295](../../backlog/4295/)
+(dispatch-time reduction layer, distinct axis) and does not alter
+[#pr-flow-rollout-mechanism](#pr-flow-rollout-mechanism) (the drain stays the sole `main` writer; this rule
+only reorders what it lands next). Open follow-on: [4310](/backlog/4310-may-a-pr-keep-its-review-after-a-clean-mechanical-rebase-or/)
+(review carry-over after a mechanical rebase, unruled).
+
+---
+
 ### The drain never auto-resolves a card carrying a `## Slice ` heading — an explicit TEMPORARY fix, not the final delivery-strategy design {#drain-multi-slice-card-interim-hold}
 
 **Ratified 2026-09-21 (operator, in conversation; #3820, decision card; explicitly ratified as a temporary
@@ -5707,6 +5765,125 @@ sleep-detection rule and snapshot-store eviction went into 4125's acceptance). B
 4126, 4124, 4132 under epic 4075. Composes with
 [#conveyor-session-lifecycle-policy](#conveyor-session-lifecycle-policy) (bot-session jobs are relaunched,
 never resumed) and [#automated-health-daemon](#automated-health-daemon) clauses 1–2.
+
+---
+
+### A PR under repair stays ready-for-review by default; only a scope-change or a withdrawn-shape miss earns draft, and merge safety never depended on the draft bit {#fix-claim-draft-only-on-withdrawal}
+
+**Ratified 2026-09-27** (operator, in session, live incident chalbert/web-everything PR #2811). PR #2811's
+fix claim (`fix-begin`/`fix-end`, `we:scripts/conveyor/fix-procedure.mjs`, landing via #2821) converted the
+PR to draft on every hold, unconditionally — a ci-heal repairing red CI, a mechanical rebase, an ordinary
+`review:changes` bounce fix, all read to a human glancing at the PR list as "withdrawn". That reading is
+false for every one of those: none of them means the PR no longer does what the card asked, and holding the
+fix claim (a lock other dispatch already refuses under, see below) already prevents a foreign review/fix/
+push race with no need to also hide the PR behind GitHub's own draft bit.
+
+**The rule:**
+- **Normal repair loops stay READY, never draft.** A fixer addressing review findings, a ci-heal repairing a
+  red required check, a mechanical conflict repair, a mechanical rebase/CI-rerun with no agent judgment and
+  no code edit — none of these converts the PR to draft. The fix claim alone holds the lock: while it is
+  live, no review/fix/ci-heal is dispatched for the PR and no push from anyone but the claim holder is
+  accepted (`fix-procedure.mjs`'s own `fix-claimed` reconcile refusal and `pushRefusal`, landing via #2821).
+  The visible signal is a `review-status:*` label naming the reason (`fixing` / `fixing-conflict` /
+  `healing-ci` — see [#2811-verdict-reset](#fix-claim-verdict-reset-on-head-move) below for the paired label
+  fix), never the draft bit.
+- **Draft ONLY when the PR is found genuinely incomplete or effectively withdrawn** — two narrow reasons,
+  both requiring an explicit, stated cause on the SAME `fix-begin` call, default **no draft**:
+  - `scope-change` — a scope-change request reaches the worker (the operator or an orchestrator asks for
+    more/different changes) while the PR is mid-review. The PR is now known-incomplete against a moving
+    target.
+  - `withdrawn` — review finds the PR does not do what the card asked at all (a fundamental miss, not a
+    fixable finding). This is effectively a withdraw-and-resubmit, not a repair.
+  Each carries its own `review-status:draft-scope-change` / `review-status:draft-withdrawn` label so the
+  reason is visible at a glance, mutually exclusive with the ordinary repair labels above and with
+  `awaiting-ci` (a fresh draft-first PR is unaffected by this ruling — different population, different
+  reason, unchanged).
+- **Merge safety never depended on the draft bit, and this ruling changes none of it** — verified, not
+  assumed, against the live gate: `we:scripts/merge-ai-prs.mjs`'s own `decideReviewGate` reads
+  `acceptanceCoversHead` (`we:scripts/lib/review-escalation.mjs`) FIRST, and that check independently
+  re-verifies the recorded `reviewed-sha` (or its content fingerprint) against the PR's LIVE head immediately
+  before a merge — a stale `review:accepted` (the label, whatever it says) never merges an unreviewed head.
+  That file's own comment on the point, quoted verbatim: *"What stops the merge is the GATE'S VERDICT, not
+  the label state."* Draft was never the safety mechanism; it was only ever a visibility signal, and this
+  ruling makes that signal accurate (ready = "in the normal reviewer↔author conversation", draft = "known
+  incomplete or withdrawn") instead of overloading it with every kind of hold.
+
+**Composes with** <a id="fix-claim-verdict-reset-on-head-move"></a>the #2811 **verdict-reset** fix (same
+incident, shipped ahead of this doc entry, `lane/promote-stale-green`): a `review:accepted` verdict is a claim
+about one specific head, so a ci-heal re-push or a non-content-preserving mechanical rebase now re-arms it to
+`review:pending` (`we:scripts/review-set-label.mjs#decideSetLabel`'s `rearm` target, widened to accept a live
+`review:accepted` as well as `review:changes`) — a content-*preserving* rebase still restamps the acceptance
+forward instead (`restampAcceptance`, unchanged, #3200), so a genuinely-safe rebase is never penalized.
+
+**Build status lives on the tracking item, per #2854 — this anchor states only the rule above.**
+`fix-procedure.mjs` (PR #2821, `lane/fix-procedure`) is the fix-begin/fix-end mechanism this rule governs;
+mechanizing the draft-only-on-withdrawal default onto it is filed as backlog `4302` (parent epic #4075,
+chalbert/web-everything #2811 cross-ref) — read that item for current status, never re-derive it here.
+
+**Lineage:** operator decision, 2026-09-27, live incident PR #2811 (chalbert/web-everything). Grounds the
+draft-first feature `fix-procedure.mjs` (#2821) is expected to ship against; the verdict-reset half already
+shipped in `we:scripts/review-set-label.mjs`, `we:scripts/conveyor/ci-heal-mark.mjs`,
+`we:scripts/conveyor/ci-red-recovery-watch.mjs` (`lane/promote-stale-green`). Composes with
+[#review-pending-clean-verdict-mechanical-accept](#review-pending-clean-verdict-mechanical-accept) (the
+mechanical-accept path this ruling does not touch) and does not amend it.
+
+---
+
+### No caller may explicitly configure the local lane-verify gate to the unscoped full suite as its default — GitHub CI's sharded run is the sole full-suite authority {#local-gate-never-full-suite-by-default}
+
+**Ratified 2026-09-28 (operator ruling, in-conversation).** The gate that marks a lane `verified` —
+`we:scripts/verify-lane.mjs` / `we:scripts/lib/verify-lane-gate.mjs`, and the finish-guard
+`we:scripts/pr-land.mjs` reads before landing (#3321, "verification is mandatory before a lane lands") — must
+never be pointed, by a caller's own explicit `--gate=`/dispatch configuration, at the unscoped full
+`npm run test:unit && npm run check:standards` as its DEFAULT invocation. **GitHub CI's required `test`/
+`test-shard` jobs (`.github/workflows/ci.yml`, 4 shards) remain the sole full-suite AUTHORITY** a landing PR
+depends on — `we:scripts/lib/verify-lane-gate.mjs`'s own header already states this distinction (a local
+false-green costs, at worst, a wasted round-trip that bounces at the real CI gate; it can never merge a
+regression, since `pr-land`/the drain independently require CI's own green `test` check).
+
+**This rule governs deliberate caller configuration — it does NOT reach into, or narrow, the selection engine's
+own sound automatic fallback to full.** `we:scripts/readiness/test-selection.mjs#decideLocalSelection` already,
+correctly, falls back to the full vitest suite on its own when the diff shape cannot be soundly narrowed by the
+module graph — a config/dependency/shared-test-helper change, a deleted source file, an empty/unreadable diff,
+or `WE_DIFF_TEST_SELECTION=0` — and `we:scripts/lib/verify-lane-gate.mjs#resolveDefaultGate` likewise defaults to
+a bare `npm test`/full command for a checkout with no `test:unit` script. **Those are the selector correctly
+declining to guess, not an instance of this rule being violated** — this ruling was found, on review, to
+initially conflate the two (see the amendment folded into #4294 below), and states the correction: the rule
+targets a CALLER choosing the full suite as a matter of course (a hardcoded `--gate=` override, a brief that
+always names the full command), never the engine's own documented, safety-motivated automatic fallback.
+
+**The full local run stays available as an explicit, deliberate override** — `we:scripts/verify-lane.mjs
+--gate="npm run test:unit && npm run check:standards"` — for a caller with a specific reason to distrust the
+diff-driven selection for one run, or a checkout CI cannot reach. `we:scripts/push-if-green.mjs`'s own default
+full-suite gate is an existing, correctly-scoped example of this shape — it publishes a MERGED tree directly to
+`origin/main` with no CI in the loop first.
+
+**Why now.** Live evidence, same day: lane-16's verify ran the full `npm run test:unit && npm run
+check:standards` (~15–20 minutes under load) while lane-13's ran the diff-driven `vitest related` selection on
+a comparable change, and three delivery agents sat roughly 45 minutes total waiting on the resulting serial
+verify runs. Draft-first PRs (#2813) now keep a red-CI PR out of review before a human ever looks at it, which
+is what #3321's original local-green-before-land requirement existed to protect against — so a caller no longer
+needs to reach for the full suite by default to guard that outcome; CI already does. **Open follow-up, left to
+#4294 to root-cause:** whether lane-16's run reflects a caller's own explicit override (this rule's real target)
+or `decideLocalSelection`'s own sound fallback firing correctly on a diff shape it cannot narrow (not a
+violation) — #4294 must read the actual dispatch path and diff before concluding either way, and this ruling is
+not settled on that question until it does.
+
+**Build status and the remaining fallback-trigger inventory live on the tracking item, per the established
+convention — this anchor states only the rule above.** [Workers run affected tests while working, the full gate
+once after the final commit](/backlog/4294-workers-run-affected-tests-while-working-the-full-gate-once/)
+(`bornAs` `4294`) is the mechanism this rule governs; read that item for current status (including its own
+Codex-review correction), never re-derive it here.
+
+**Composes with** [#heavy-command-admission-queue](#heavy-command-admission-queue) (the capacity semaphore both
+the scoped run AND a deliberate full-suite override run through unchanged) and the existing #3372/#4157
+diff-driven-selection defaults (this ruling does not change their mechanism — it states that no caller may
+reach for the full suite as this gate's *default configuration*, only as a named, deliberate override; the
+engine's own automatic fallback is untouched).
+
+**Lineage:** operator ruling, 2026-09-28, folded into #4294 (`bornAs` `4294`); corrected same-day per a
+read-only Codex plan review (`node scripts/codex-direct-task.mjs --review`) that found the initial wording
+conflated the engine's sound automatic fallback with a caller's deliberate override.
 
 ---
 

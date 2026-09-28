@@ -43,6 +43,7 @@ import {
 } from '../../scripts/conveyor/build-dispatch-policy.mjs';
 import {
   acquireBuildDispatchClaim, releaseBuildDispatchClaim, listBuildDispatchClaims,
+  listBuildDispatchHolds,
 } from '../../scripts/conveyor/build-dispatch-claim.mjs';
 import { resolveCoordinationRoot } from '../../scripts/operations/coordination-root.mjs';
 
@@ -110,6 +111,13 @@ export function readDispatchOutcome(text) {
  *   listClaims() → claim entries; releaseClaim({num}); acquireClaim({num, scope}) → `{ok, reason, heldBy}`;
  *   listRunStoreInFlight() → `[{num, scope, source}]`; killSwitch() → `{engaged, reason}`;
  *   dispatch({num, bookkeeping}) → `{dispatching, reason}`.
+ *   #4349 — listSettledBuilds() → `[{num, outcome}]` (a settled, non-PR terminal outcome a wrapper itself
+ *     wrote — the claim-retirement signal a stale `pid:` handle used to give nothing for) and
+ *     listHolds() → `[{num, reason}]` (a non-PR terminal-outcome cooldown — `not-ready`, `gate-red`, … —
+ *     excluded from THIS tick's candidates entirely, so the item is not offered for dispatch again until the
+ *     hold lapses). Both optional — an
+ *     `effects` stub that predates #4349 (an existing test fixture) simply supplies neither and nothing
+ *     about this tick's behaviour changes for it.
  * `live:false` plans and reports without retiring, claiming, or dispatching anything.
  */
 export async function runBuildDispatchTick({ bookkeeping = {}, live = false, policy = BUILD_DISPATCH_POLICY, effects }) {
@@ -119,21 +127,52 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
   const scopeByNum = new Map((admission.queue || []).map((r) => [normNum(r.num), Array.isArray(r.scope) ? r.scope : []]));
   const clearedNums = new Set((admission.cleared || []).map((r) => normNum(r.num)));
   const openPrs = normalizeOpenPrs(await effects.fetchOpenPrs());
+  const runStoreInFlight = effects.listRunStoreInFlight();
+  // A claim retires on a SETTLED non-PR outcome, but never over a run-store row that is CURRENTLY in-flight
+  // for the same item: only one claim ever exists per `num` at a time (the daemon's own `acquireClaim` is a
+  // mutex on that resource), so a lingering settled record from an OLDER, already-retired attempt must never
+  // be read as "this brand-new dispatch is also done" — it would both retire the wrong (live) claim and hide
+  // that attempt's own in-flight row from the loop below.
+  const inFlightNums = new Set(runStoreInFlight.map((r) => normNum(r.num)));
+  // Newest attempt per item wins — never "whichever row the source returned last". `startedAt` is the settling
+  // attempt's own dispatch-start time (see `cliListSettledBuilds`'s own note); a row with no timestamp at all
+  // (an older effects stub, or a test) is kept only when nothing with a real timestamp has claimed the slot.
+  const settledByNum = new Map();
+  for (const r of effects.listSettledBuilds?.() ?? []) {
+    const n = normNum(r.num);
+    const prev = settledByNum.get(n);
+    if (!prev || (typeof r.startedAt === 'string' && r.startedAt > (prev.startedAt || ''))) settledByNum.set(n, r);
+  }
+  const heldNums = new Set((effects.listHolds?.() ?? []).map((h) => normNum(h.num)));
 
-  // Retire what observable progress has finished: a PR delivers it, or it left the cleared queue.
-  const doneWhy = (num) => {
-    const pr = openPrs.find((p) => prDeliversNum(p, num));
+  // Retire what observable progress has finished: a PR delivers it, it left the cleared queue, or the
+  // dispatch's OWN wrapper already settled it with a definite non-PR outcome.
+  //
+  // `claimedAt`, when given, ties a settled row to THIS specific claim: the row's own `startedAt` must be AT OR
+  // AFTER the claim's `claimedAt`, or it is some OLDER, already-superseded attempt's leftover record, not this
+  // one's. This matters because a brand-new attempt whose own effect has not yet gone `in-flight` (still
+  // `declared`) is invisible to `inFlightNums` — without this check, a stale prior attempt's settled row would
+  // retire the fresh claim outright. Skipped when either timestamp is missing (an older claim/effects stub, or
+  // a test) — `inFlightNums` is still the floor in that case, same as before this check existed.
+  const doneWhy = (num, { claimedAt = null } = {}) => {
+    const n = normNum(num);
+    const pr = openPrs.find((p) => prDeliversNum(p, n));
     if (pr) return `${pr.repo}#${pr.number} delivers it`;
+    const settled = settledByNum.get(n);
+    if (settled && settled.outcome !== 'pr-opened' && !inFlightNums.has(n)) {
+      const stale = claimedAt && typeof settled.startedAt === 'string' && settled.startedAt !== '' && settled.startedAt < claimedAt;
+      if (!stale) return `run record settled: ${settled.outcome}`;
+    }
     // Only trust "left the queue" when the tick actually read a queue — an empty/failed read must never retire
     // every claim at once (that would reopen the restart double-dispatch this claim exists to close).
-    if (clearedNums.size > 0 && !clearedNums.has(normNum(num))) return 'left the cleared queue';
+    if (clearedNums.size > 0 && !clearedNums.has(n)) return 'left the cleared queue';
     return null;
   };
   const retired = [];
   const inFlight = [];
   for (const c of effects.listClaims()) {
     const num = normNum(c.meta?.num);
-    const why = doneWhy(num);
+    const why = doneWhy(num, { claimedAt: c.meta?.claimedAt || null });
     if (why) {
       if (live) effects.releaseClaim({ num });
       retired.push({ num, why, released: live });
@@ -141,13 +180,23 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
     }
     inFlight.push({ num, scope: c.meta?.scope || [], source: `claim ${c.owner}` });
   }
-  for (const r of effects.listRunStoreInFlight()) {
+  for (const r of runStoreInFlight) {
     if (!doneWhy(r.num)) inFlight.push(r);
   }
 
   const spawn = Array.isArray(d.spawnBuilds) ? d.spawnBuilds : [];
-  const candidates = spawn.map((s) => ({ num: normNum(s.num), lane: s.lane ?? null, scope: scopeByNum.get(normNum(s.num)) || [] }));
-  const externalBuilding = Number(d.counts?.building) || 0;
+  // #4349 — a held item (a recent non-PR terminal-outcome cooldown) is dropped from candidates entirely, same
+  // as if the tick core had never surfaced it — this is the actual fix for the re-dispatch loop the
+  // settle/release above would otherwise tighten rather than close.
+  const candidates = spawn
+    .filter((s) => !heldNums.has(normNum(s.num)))
+    .map((s) => ({ num: normNum(s.num), lane: s.lane ?? null, scope: scopeByNum.get(normNum(s.num)) || [] }));
+  const held = spawn.filter((s) => heldNums.has(normNum(s.num))).map((s) => normNum(s.num));
+  // Card x0jgunh — `counts.building` includes THIS tick's own freshly-proposed spawns (right for the
+  // interactive conveyor, which launches every spawn it is handed; wrong here, since this daemon only
+  // dispatches a SUBSET up to its own cap). `counts.buildingInFlight` excludes them; fall back to `building`
+  // for a `planTick` stub (tests, older callers) that has not been updated to emit it.
+  const externalBuilding = Number(d.counts?.buildingInFlight ?? d.counts?.building) || 0;
   const plan = planBuildDispatch({ candidates, inFlight, openPrs, externalBuilding, killSwitch: effects.killSwitch(), policy });
 
   const dispatched = [];
@@ -168,6 +217,10 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
     tickCore: { building: externalBuilding, spawnBuilds: spawn, held: admission.held || [], planned: admission.planned || [], queue: admission.queue || [], suppressedBuilds: d.suppressedBuilds || [] },
     plan,
     retired,
+    // #4349 — items dropped from THIS tick's candidates by a non-PR terminal-outcome cooldown (never the tick
+    // core's own `tickCore.held`, a different, capacity/supervision-driven concept) — visible so a `--dry-run`
+    // or the live status line can say WHY an otherwise-cleared item was not offered.
+    dispatchHolds: held,
     dispatched,
     failures,
     nextBookkeeping: settleBookkeeping(bookkeeping, out?.nextState || {}, dispatched.map((x) => x.num)),
@@ -214,6 +267,46 @@ async function cliListRunStoreInFlight({ now = new Date() } = {}) {
     }
   }
   return rows;
+}
+
+/**
+ * Every SETTLED (`applied`/`failed` — the only two terminal {@link EFFECT_STATUSES}, never merely "not
+ * `in-flight`", which would also match a pre-dispatch `declared`/`pending` entry with no result at all) `build`
+ * dispatch effect on disk, `{num, outcome, source, startedAt}`. `outcome` is `result?.outcome` when the wrapper
+ * settled it (`deliver-item-settle.mjs`), or the literal string `'wrapper-failed'` for a `failed` entry with no
+ * `result` (an exception the wrapper caught but could not further classify) — either way, `'pr-opened'` is the
+ * one outcome `doneWhy` above treats as NOT a reason to retire the claim on its own (the PR-observed path
+ * already owns that). `startedAt` is the ATTEMPT's own dispatch time (stamped once per run by
+ * `effect-executor.mjs` when the effect goes in-flight) — the ordering key `doneWhy` uses to tell a fresh
+ * attempt's own settle apart from an older, already-superseded one for the same item. EXPORTED so a test can
+ * drive this against real on-disk run-store state, not just a hand-fed stub.
+ */
+export async function cliListSettledBuilds() {
+  const { createFileRunStore } = await import('../../scripts/operations/run-store.mjs');
+  const { DISPATCH_EFFECT } = await import('../../scripts/operations/dispatch-lane.mjs');
+  const store = createFileRunStore();
+  const rows = [];
+  let ids = [];
+  try { ids = store.list().filter((id) => id.startsWith('dispatch-lane')); } catch { return rows; }
+  for (const id of ids) {
+    let run;
+    try { run = store.read(id); } catch { continue; }
+    for (const e of run?.effects || []) {
+      if (e.type !== DISPATCH_EFFECT || e.payload?.launchKind !== 'build') continue;
+      if (e.status !== 'applied' && e.status !== 'failed') continue;
+      const outcome = e.result?.outcome ?? (e.status === 'failed' ? 'wrapper-failed' : null);
+      if (!outcome) continue;
+      const startedAt = typeof e.startedAt === 'string' ? e.startedAt : '';
+      rows.push({ num: normNum(e.payload.num), outcome, source: `run ${id}`, startedAt });
+    }
+  }
+  return rows;
+}
+
+/** Every live non-PR-terminal-outcome cooldown (`not-ready`, `gate-red`, …; see `build-dispatch-claim.mjs`'s
+ *  own header). EXPORTED so a test can drive this against a real hold, not just a hand-fed stub. */
+export function cliListHolds() {
+  return listBuildDispatchHolds().map((h) => ({ num: normNum(h.meta.num), reason: h.meta.reason ?? null }));
 }
 
 function cliDispatch({ num, bookkeeping }) {
@@ -279,6 +372,13 @@ function cliEffects() {
     releaseClaim: ({ num }) => releaseBuildDispatchClaim({ num }),
     acquireClaim: ({ num, scope }) => acquireBuildDispatchClaim({ num, scope }),
     listRunStoreInFlight: () => [],
+    // #4349 — `listSettledBuilds` is ASYNC (a run-store scan) so it gets the SAME "placeholder default,
+    // overwritten with a fresh read before use" treatment `listRunStoreInFlight` above already has — see
+    // `dryRun`/`live`'s own wiring below. `listHolds` is synchronous and cheap, so it is wired to the real
+    // reader directly; an `effects` object built straight from `cliEffects()` (rather than through
+    // `dryRun`/`live`) still reads real holds.
+    listSettledBuilds: () => [],
+    listHolds: cliListHolds,
     killSwitch: cliKillSwitch,
     dispatch: cliDispatch,
   };
@@ -313,6 +413,8 @@ async function dryRun(flags) {
   const effects = cliEffects();
   const runStoreRows = await cliListRunStoreInFlight();
   effects.listRunStoreInFlight = () => runStoreRows;
+  const settledRows = await cliListSettledBuilds(); // #4349
+  effects.listSettledBuilds = () => settledRows;
   const tick = await runBuildDispatchTick({ bookkeeping: {}, live: false, policy, effects });
   const core = tick.tickCore;
   const scopeByNum = new Map((core.queue || []).map((r) => [normNum(r.num), r.scope || []]));
@@ -354,6 +456,7 @@ async function dryRun(flags) {
     inFlight: tick.plan.inFlight,
     wouldDispatchNow: tick.plan.dispatch.map((x) => x.num),
     wouldRetireClaims: tick.retired,
+    dispatchHolds: tick.dispatchHolds, // #4349 — items excluded this tick by a non-PR terminal-outcome cooldown
     items: rows,
   };
   if (flags.json) { process.stdout.write(`${JSON.stringify(report, null, 2)}\n`); return; }
@@ -390,6 +493,8 @@ async function live(flags) {
   let tickOnce = async () => {
     const rows = await cliListRunStoreInFlight();
     effects.listRunStoreInFlight = () => rows;
+    const settledRows = await cliListSettledBuilds(); // #4349
+    effects.listSettledBuilds = () => settledRows;
     const r = await runBuildDispatchTick({ bookkeeping, live: true, policy, effects });
     bookkeeping = r.nextBookkeeping;
     return r;
@@ -404,7 +509,7 @@ async function live(flags) {
     tickOnce, sleep: realSleep, isAlive, intervalMs, maxTicks: flags.once ? 1 : Infinity,
     onTick: (r) => {
       if (!r || !r.plan) { console.error(`build-dispatch-daemon: tick skipped (${r?.reason ?? 'self-sync'})`); return; }
-      process.stdout.write(`${JSON.stringify({ at: new Date().toISOString(), status: r.statusLine, freeze: r.plan.freeze, inFlight: r.plan.inFlight.map((f) => f.num), dispatched: r.dispatched, hold: r.plan.hold, failures: r.failures, retired: r.retired })}\n`);
+      process.stdout.write(`${JSON.stringify({ at: new Date().toISOString(), status: r.statusLine, freeze: r.plan.freeze, inFlight: r.plan.inFlight.map((f) => f.num), dispatched: r.dispatched, hold: r.plan.hold, dispatchHolds: r.dispatchHolds, failures: r.failures, retired: r.retired })}\n`);
     },
     onTickError: (e) => console.error(`build-dispatch-daemon: tick failed (non-fatal): ${String(e?.message || e).split('\n')[0]}`),
   });

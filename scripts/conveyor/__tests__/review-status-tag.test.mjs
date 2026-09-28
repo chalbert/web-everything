@@ -32,6 +32,25 @@ describe('deriveReviewStatus', () => {
       .toEqual({ role: 'fix', state: 'fix-stalled' });
   });
 
+  // `fixing-conflict` (draft reason at a glance, operator ask 2026-09-27, #2811 follow-up) — the ONE case a
+  // `fix-<pr>` session's label gets a more specific name, deterministic off `mergeConflicted` (the caller's own
+  // `pr.mergeStateStatus === 'DIRTY'` read — the SAME field `reconcile-core.mjs#classifyPr`'s `conflicted`
+  // phase reads), never a fabricated guess at what the fixer is doing.
+  it('fixing-conflict: a live fix-<pr> session on a PR GitHub itself reports as conflicting', () => {
+    expect(deriveReviewStatus({ pr: 1765, agents: [{ name: 'fix-1765', state: 'working' }], mergeConflicted: true }))
+      .toEqual({ role: 'fix', state: 'fixing-conflict' });
+  });
+
+  it('fixing-conflict-stalled: same, but the session is blocked, not working', () => {
+    expect(deriveReviewStatus({ pr: 1765, agents: [{ name: 'fix-1765', state: 'blocked' }], mergeConflicted: true }))
+      .toEqual({ role: 'fix', state: 'fixing-conflict-stalled' });
+  });
+
+  it('mergeConflicted defaults to false — every pre-existing call site (none of which pass it) still reads plain "fixing"', () => {
+    expect(deriveReviewStatus({ pr: 1765, agents: [{ name: 'fix-1765', state: 'working' }] }))
+      .toEqual({ role: 'fix', state: 'fixing' });
+  });
+
   it('null for a `done` session — claude agents --json never prunes finished ones, and "done" is not "stuck"', () => {
     expect(deriveReviewStatus({ pr: 1765, agents: [{ name: 'review-1765', state: 'done' }] })).toBeNull();
     expect(deriveReviewStatus({ pr: 1765, agents: [{ name: 'fix-1765', state: 'done' }] })).toBeNull();

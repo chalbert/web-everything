@@ -8,7 +8,7 @@
  *   that ONLY a trusted author (automation or the repo operator) counts at all.
  */
 import { describe, it, expect } from 'vitest';
-import { countCiHealComments, buildCiHealComment, CI_HEAL_COMMENT_MARKER } from '../ci-heal-mark.mjs';
+import { countCiHealComments, buildCiHealComment, CI_HEAL_COMMENT_MARKER, spawnCiHealRearm } from '../ci-heal-mark.mjs';
 
 const AUTOMATION = { login: 'web-everything' };
 
@@ -57,5 +57,38 @@ describe('buildCiHealComment — the durable comment body (#2666)', () => {
     const body = buildCiHealComment({ reason: 'behind' });
     expect(body).toContain('review:human');
     expect(body.toLowerCase()).toContain('not touched');
+  });
+});
+
+// #2811 — a CI-heal rebases and re-pushes the head, so a live `review:accepted` it finds is now stale. This
+// hand-back re-arms it through the EXISTING `rearm-review.mjs` swap (never a second, hand-rolled label write).
+describe('spawnCiHealRearm — hand a stale review:accepted back through rearm-review.mjs (#2811)', () => {
+  const spy = (status = 0, stdout = '') => {
+    const calls = [];
+    const spawn = (cmd, argv, opts) => { calls.push({ cmd, argv, opts }); return { status, stdout, stderr: '' }; };
+    return { calls, spawn };
+  };
+
+  it('shells THIS checkout\'s rearm-review.mjs with the pr, actor, and repo', () => {
+    const { calls, spawn } = spy();
+    const out = spawnCiHealRearm({ pr: 2811, repo: 'chalbert/web-everything', cwd: '/ws/we', spawn });
+    expect(out).toEqual({ ok: true });
+    expect(calls).toHaveLength(1);
+    expect(calls[0].argv[0]).toMatch(/scripts\/conveyor\/rearm-review\.mjs$/);
+    expect(calls[0].argv).toContain('2811');
+    expect(calls[0].argv).toContain('--actor=conveyor CI-heal agent');
+    expect(calls[0].argv).toContain('--repo=chalbert/web-everything');
+    expect(calls[0].opts.cwd).toBe('/ws/we');
+  });
+
+  it('a refused re-arm (nothing to re-arm — the common, no-accepted-label case) is reported, not thrown', () => {
+    const { spawn } = spy(1, JSON.stringify({ ok: false, pr: 2811, reason: 'neither review:changes nor review:accepted is live' }));
+    const out = spawnCiHealRearm({ pr: 2811, repo: 'chalbert/web-everything', spawn });
+    expect(out.ok).toBe(false);
+  });
+
+  it('a spawn failure never throws — reported as {ok:false, reason}', () => {
+    const thrower = () => { throw new Error('spawn ENOENT'); };
+    expect(spawnCiHealRearm({ pr: 2811, repo: 'chalbert/web-everything', spawn: thrower })).toEqual({ ok: false, reason: 'spawn ENOENT' });
   });
 });

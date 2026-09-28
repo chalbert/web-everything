@@ -23,6 +23,10 @@
  * clone's writer lock" from the live incident. `scripts/daemon-overlay.mjs add` then runs as a REAL child
  * process (the actual CLI an operator/automation runs) and must succeed near-instantly, with the ref actually
  * registered in the overlay store — never refused, never waiting on the writer.
+ *
+ * PR #2827 added an overlay-conflict guard to `add` (it resolves the ref and merge-tree-checks it against main,
+ * off a scratch repo — never the clone's lock), so the ref this scenario registers must now really exist on the
+ * world's origin: an unresolvable ref is correctly refused by that guard, which is not what this break tests.
  */
 
 import { existsSync, readFileSync } from 'node:fs';
@@ -32,6 +36,7 @@ import { fileURLToPath } from 'node:url';
 import { runSoak } from '../soak.mjs';
 
 const FIXTURE = fileURLToPath(new URL('./fixtures/hold-clone-lock.mjs', import.meta.url));
+const OVERLAY_REF = 'lane/overlay-lock-wait-fixture';
 const HOLD_MS = 10_000; // comfortably longer than the near-instant add this scenario expects.
 const MAX_ADD_MS = 5_000; // generous ceiling for a plain metadata write; a lock-bound wait would blow well past this.
 
@@ -76,6 +81,8 @@ export default {
         log,
         setup(w) {
           w.env.WE_DAEMON_CLONE_LOCK_ROOT = join(w.root, 'clone-lock');
+          // Keep the registration in this world, never the operator's real `~/.claude/daemon-overlays` store.
+          w.env.WE_DAEMON_OVERLAY_DIR = join(w.root, 'daemon-overlays');
           return {};
         },
         async perRound(w, round, ctx, api) {
@@ -85,6 +92,8 @@ export default {
           if (!existsSync(overlayCliPath) || !existsSync(lockModulePath)) {
             throw new Error('daemon-overlay-lock-wait: requires scripts/daemon-overlay.mjs and scripts/lib/daemon-clone-lock.mjs — not present on this tree');
           }
+
+          w.git.createBranch('we', OVERLAY_REF, { from: 'main', files: { 'soak/overlay-lock-wait.md': '# overlay fixture\n' } });
 
           const readyMarker = join(w.root, 'holder-ready');
           holder = spawn(process.execPath, [
@@ -96,7 +105,7 @@ export default {
 
           const startedAt = Date.now();
           const res = spawnSync(process.execPath, [
-            overlayCliPath, 'add', `--clone=${w.simCloneRoot}`, '--ref=lane/does-not-need-to-exist', '--pr=2760', '--json',
+            overlayCliPath, 'add', `--clone=${w.simCloneRoot}`, `--ref=${OVERLAY_REF}`, '--pr=2760', '--json',
           ], {
             env: w.env,
             encoding: 'utf8',
@@ -111,7 +120,7 @@ export default {
           if (res.status !== 0) {
             api.violation('overlay-add-refused-by-writer-lock', `daemon-overlay.mjs add exited ${res.status} while the clone's writer lock was held (stderr: ${(res.stderr || '').trim()}) — register-only add must succeed regardless of the clone's lock state`);
           }
-          if (!/"ref":"lane\/does-not-need-to-exist"/.test(res.stdout || '')) {
+          if (!(res.stdout || '').includes(`"ref":"${OVERLAY_REF}"`)) {
             api.violation('overlay-add-not-registered', `daemon-overlay.mjs add did not report the ref registered in its JSON output: ${(res.stdout || '').trim()}`);
           }
         },

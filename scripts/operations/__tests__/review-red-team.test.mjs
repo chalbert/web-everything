@@ -8,7 +8,7 @@ import { describe, it, expect } from 'vitest';
 import {
   runRedTeam, redTeamEnabled, redTeamMarker, redTeamCommentPosted, redTeamAlreadyRan, resolveBuilder,
   buildRedTeamTask, buildRecheckRequest, applyRecheck, buildMissRows, renderRedTeamComment, replayPayload,
-  reserveSeatCalls, RED_TEAM_ENV, EXTRA_SEATS_ENV, DAILY_CAP_ENV, RED_TEAM_SEAT, RED_TEAM_MODELS,
+  reserveSeatCalls, RED_TEAM_ENV, EXTRA_SEATS_ENV, DAILY_CAP_ENV, PROVIDER_CAP_ENV, RED_TEAM_SEAT, RED_TEAM_MODELS,
   RED_TEAM_MISS_DISPATCH_KIND, ACCEPTING_SEAT_MODEL,
 } from '../review-extra-seats.mjs';
 import { runReviewJob, summarizeRedTeam } from '../review-job.mjs';
@@ -44,16 +44,16 @@ function fakeIo(over = {}) {
   const calls = [];
   const rows = [];
   const trials = [];
-  const ledgerBox = { value: null };
+  const ledgerBox = {};
   const io = {
     now: () => NOW,
     newId: (() => { let n = 0; return () => `call-${++n}`; })(),
     log: (l) => calls.push(['log', l]),
     readRecords: () => [],
-    reserveCalls: ({ want, dailyCap, now }) => {
-      const r = reserveSeatCalls({ ledger: ledgerBox.value, records: io.readRecords(), want, dailyCap, now, newId: io.newId });
-      ledgerBox.value = r.ledger;
-      calls.push(['reserve', want, r.callIds.length]);
+    reserveCalls: ({ provider, want, dailyCap, now }) => {
+      const r = reserveSeatCalls({ ledger: ledgerBox[provider] ?? null, records: io.readRecords(), want, dailyCap, now, newId: io.newId, provider });
+      ledgerBox[provider] = r.ledger;
+      calls.push(['reserve', provider, want, r.callIds.length]);
       return r;
     },
     append: (row) => {
@@ -82,7 +82,7 @@ describe('x00g3tt — the red team fires on ACCEPT only', () => {
     const r = await runRedTeam({ pr: 5, repo: REPO, lanePath: '/lane', loopPayload: payload('accept'), env: {} }, io);
     const seats = calls.filter((c) => c[0] === 'seat');
     expect(seats).toHaveLength(1);
-    expect(['codex', 'gemini']).toContain(seats[0][1].provider);
+    expect(['codex', 'agy-claude', 'agy-gemini']).toContain(seats[0][1].provider);
     expect(seats[0][1]).toMatchObject({ model: RED_TEAM_MODELS[seats[0][1].provider].model, effort: 'high' });
     expect(r.status).toBe('ran');
   });
@@ -104,12 +104,25 @@ describe('x00g3tt — the red team fires on ACCEPT only', () => {
     expect(calls).toEqual([]);
   });
 
-  it('shares the added seats\' daily cap: with the day spent it launches nothing', async () => {
-    const spent = [{ dispatchKind: REVIEW_SEAT_DISPATCH_KIND, provider: 'codex', callId: 'old-1', scoredAt: new Date(NOW).toISOString(), status: 'ok' }];
+  it('shares the added seats\' PER-PROVIDER cap: with every provider\'s day spent it launches nothing', async () => {
+    const spentRow = (provider) => ({ dispatchKind: REVIEW_SEAT_DISPATCH_KIND, provider, callId: `old-${provider}`, scoredAt: new Date(NOW).toISOString(), status: 'ok' });
+    const spent = ['codex', 'agy-claude', 'agy-gemini'].map(spentRow);
     const { io, calls } = fakeIo({ readRecords: () => spent });
-    const r = await runRedTeam({ pr: 5, repo: REPO, lanePath: '/lane', loopPayload: payload('accept'), env: { [DAILY_CAP_ENV]: '1' } }, io);
+    const env = { [PROVIDER_CAP_ENV.codex]: '1', [PROVIDER_CAP_ENV['agy-claude']]: '1', [PROVIDER_CAP_ENV['agy-gemini']]: '1' };
+    const r = await runRedTeam({ pr: 5, repo: REPO, lanePath: '/lane', loopPayload: payload('accept'), env }, io);
     expect(r).toMatchObject({ status: 'skipped', reason: expect.stringMatching(/daily-cap/) });
     expect(calls.some((c) => c[0] === 'seat')).toBe(false);
+  });
+
+  it('card xn2wf9t — codex AT ITS OWN CAP still runs the red team, falling back to an antigravity backend (never "no seat")', async () => {
+    const spent = [{ dispatchKind: REVIEW_SEAT_DISPATCH_KIND, provider: 'codex', callId: 'old-1', scoredAt: new Date(NOW).toISOString(), status: 'ok' }];
+    const { io, calls } = fakeIo({ readRecords: () => spent });
+    const r = await runRedTeam({ pr: 5, repo: REPO, lanePath: '/lane', loopPayload: payload('accept'), env: { [PROVIDER_CAP_ENV.codex]: '1' } }, io);
+    expect(r.status).toBe('ran');
+    expect(['agy-claude', 'agy-gemini']).toContain(r.provider);
+    const seats = calls.filter((c) => c[0] === 'seat');
+    expect(seats).toHaveLength(1);
+    expect(seats[0][1].provider).not.toBe('codex');
   });
 
   it('never runs twice for the same head once a clean row exists', async () => {
@@ -237,7 +250,7 @@ describe('x00g3tt — evidence, Claude re-check and confirmed misses', () => {
   it('resuming a red-team pass (a prior clean row already exists) carries the prior row\'s changedFiles forward, not a fresh diff', async () => {
     const prior = {
       dispatchKind: REVIEW_SEAT_DISPATCH_KIND, seat: RED_TEAM_SEAT.seat, status: 'ok',
-      provider: 'gemini', model: RED_TEAM_MODELS.gemini.model, callId: 'call-1', rev: REV,
+      provider: 'agy-gemini', model: RED_TEAM_MODELS['agy-gemini'].model, callId: 'call-1', rev: REV,
       pr: 5, findings: [{ ...BREAK, confirmedByRecheck: true }], builder: { provider: 'claude', model: 'claude-opus-5.5', source: 'co-authored-by' },
       recheckStatus: 'ok', foldedVerdict: 'changes', changedFiles: ['prior/scope.mjs'],
     };

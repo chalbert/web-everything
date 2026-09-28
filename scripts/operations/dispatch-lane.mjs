@@ -125,6 +125,10 @@ export const BRIEF_PLACEHOLDERS = Object.freeze([
   // design C"). See {@link briefTokensForRepo} (`we:scripts/lib/repo-profile.mjs`) for how the four
   // repo-derived ones are computed together from ONE profile.
   'REPO', 'LANE_REPO', 'GATE_COMMAND', 'WE_ROOT', 'ATTRIBUTION',
+  // #4078 — the HEALTH-INVESTIGATE-ONLY pair (see {@link HEALTH_INVESTIGATE_KIND}): which health episode the
+  // diagnose-only agent investigates, and which smell opened it. Registered here, not in a private list, so a
+  // `{{ episode id }}` typo in ANY brief is caught by the same {@link canonicalPlaceholder} scan as every other name.
+  'EPISODE_ID', 'SMELL',
 ]);
 
 /**
@@ -175,7 +179,29 @@ export const BRIEF_REQUIRED_BY_KIND = Object.freeze({
   // yet turned on) can belong to any constellation repo, so the brief must never hardcode WE for either kind.
   fix: ['ITEM_NUM', 'PR_NUM', 'LANE_REF', 'LANE', 'SESSION_SLUG', 'SCOPE', 'REPO', 'LANE_REPO', 'GATE_COMMAND', 'WE_ROOT', 'ATTRIBUTION'],
   'ci-heal': ['ITEM_NUM', 'PR_NUM', 'LANE_REF', 'LANE', 'SESSION_SLUG', 'SCOPE', 'REASON', 'REPO', 'LANE_REPO', 'GATE_COMMAND', 'WE_ROOT', 'ATTRIBUTION'],
+  // #4078 — a health investigation targets an EPISODE, not an item or a PR, and holds no lane: it needs only the
+  // episode, its smell, its own session slug and the absolute WE root its declared reads run from.
+  'health-investigate': ['EPISODE_ID', 'SMELL', 'SESSION_SLUG', 'WE_ROOT'],
 });
+
+/**
+ * #4078 — THE HEALTH DAEMON'S DIAGNOSE-ONLY INVESTIGATION, a kind on this operation that the TICK never launches.
+ *
+ * Ruling #4065 clause 2 says the health agent "is launched as a kind on the declared `dispatch-lane` operation"
+ * ([#conveyor-dispatch-calls-the-declared-operation](../../docs/agent/platform-decisions.md#conveyor-dispatch-calls-the-declared-operation)
+ * clause 1: widening dispatch to a new kind of work extends the declared operation, it does not fork a spawner).
+ * So its brief is filled by {@link fillBrief} against {@link BRIEF_REQUIRED_BY_KIND}'s row for it, its session
+ * name comes from {@link sessionSlugFor}, and it is started by this operation's one sink
+ * (`dispatch-lane-io.mjs#createDispatchSinks`) — exactly the shape `ci-heal-pr-dispatch.mjs` already uses for a
+ * ci-heal the tick did not plan.
+ *
+ * DELIBERATELY NOT A MEMBER OF {@link LAUNCH_KINDS}. That list is "which of the tick core's launch lists a `--num`
+ * came out of", and every member targets a backlog item in a leased lane. A health episode is neither: its caller
+ * is the health watch (`we:scripts/conveyor/health-investigate-dispatch.mjs`), which owns its own budget, and the
+ * agent acquires no lane. Adding it there would make `shapeDispatchRead` accept a kind with no item, no lane and
+ * no tick list behind it.
+ */
+export const HEALTH_INVESTIGATE_KIND = 'health-investigate';
 
 /**
  * #3168 — WHICH KIND'S BRIEF SELF-ADOPTS (`lane-pool.mjs acquire --adopt`) BEFORE it ever edits, versus which
@@ -458,6 +484,8 @@ export const REPO_AWARE_VALUE_PATTERNS = Object.freeze({
 export function sessionSlugFor(num, kind = 'build', pr = null, attempt = '', repo = 'we') {
   const id = `${String(num).trim()}${attempt}`;
   if (kind === 'investigate') return `investigate-${id}`;
+  // #4078 — keyed on the health EPISODE id (`<date>-<smell>-<subject>-<HHMM>`, already slug-safe), never an item.
+  if (kind === HEALTH_INVESTIGATE_KIND) return `health-${id}`;
   return mintSessionSlug({ kind: kind === 'build' ? 'conveyor' : kind,
     id: PR_KINDS.includes(kind) ? pr ?? num : num, attempt, repo });
 }

@@ -43,6 +43,7 @@
  */
 
 import { allowedToolsArg } from '../operations/land-advance-tools.mjs';
+import { isForeignCompletionSessionId } from '../operations/completion-record.mjs';
 
 /** The closed verdict set. Adding one is a deliberate edit here, never an emergent string elsewhere. */
 export const VERDICTS = Object.freeze([
@@ -101,8 +102,17 @@ function finishedEvidence(agent, evidence) {
   for (const f of evidence?.resultFiles ?? []) {
     if (finite(f?.mtimeMs) && f.mtimeMs >= started) return `result file ${f.path ?? 'present'}`;
   }
+  // #4306 (epic #3383/#4075) — "a completion record only ever speaks for the session that wrote it": a record
+  // whose `sessionId` is set and differs from THIS agent's own `sessionId` is a different generation's and is
+  // never treated as proof this session finished, however its `status`/`updatedAt` read. `sessionId: null`
+  // (legacy, or a writer with no session identity) keeps today's rule unchanged.
   const c = evidence?.completion;
-  if (c && c.status === 'done' && (ms(c.updatedAt) ?? ms(c.startedAt)) >= started) return 'completion record done';
+  // #4306 review finding (correctness) — sourced from the ONE shared predicate every reader/writer of a
+  // completion record's `sessionId` binds through (`we:scripts/operations/completion-record.mjs
+  // #isForeignCompletionSessionId`); the row having no `sessionId` of its own is never an excuse to accept a
+  // record naming a different session.
+  const foreignCompletion = Boolean(c) && isForeignCompletionSessionId(agent?.sessionId, c.sessionId);
+  if (c && !foreignCompletion && c.status === 'done' && (ms(c.updatedAt) ?? ms(c.startedAt)) >= started) return 'completion record done';
   // A review/fix session's ground truth is its PR: a new `review:*` label or verdict comment after it started.
   const grammar = dispatchGrammar(agent?.name);
   if (grammar && (grammar.kind === 'review' || grammar.kind === 'fix') && finite(evidence?.prSignal?.reviewSignalAtMs)

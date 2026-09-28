@@ -286,6 +286,324 @@ export function laneRefAttemptTag(headRef) {
   return matchLaneRef(headRef)?.tag ?? null;
 }
 
+// ── #xkk4lv7 — the branch-based item-resolution FALLBACK (capacity-cap root cause) ─────────────────────────────
+// A lease acquired via a bare `lane-pool.mjs acquire --purpose=<slug>` with no dispatcher-recognizable
+// `--session=` (`defaultSession()`'s `hostname():ppid` shape, or a one-off mechanical slug like `build-<num>`
+// that doesn't match `session-slug.mjs`'s grammar — see this file's own header) resolves to `null` on BOTH
+// `itemNumFromSession` and `prNumFromSession`, so it is invisible to the PR-terminal axis and to
+// `sessionGoneForLease`'s recognized-name gate alike — reclaimable only by the 4-hour TTL backstop even once
+// its PR has objectively merged (live evidence: lane-2/lane-9, #xkk4lv7's own root-cause writeup). The fallback
+// below resolves the SAME `lane/<num>-*` grammar {@link matchLaneRef} already trusts for a PR's `headRefName`,
+// this time off the lane's own checked-out branch — but ONLY once corroborated (see {@link laneQuietSincePr}),
+// per the two blockers a light plan review found in the naive one-line design (this card's own Risks 8-9):
+// Fork 1 — never invoked when EITHER `itemNumFromSession` OR `prNumFromSession` already resolves something
+// (a correctly-resolved PR-kind lookup must never be silently overridden by an unrelated branch-derived item);
+// Fork 2 — a bare branch name naming a merged/closed PR is NEVER, by itself, sufficient to reap (a lease can
+// legitimately retain an OLD branch while doing genuinely NEW, live work in the same lane) — trusted only once
+// corroborated by a clean/contained tree AND a conservative quiet window anchored to the LATER of the PR's own
+// `mergedAt` and this lease's own `acquiredAt` (a fresh holder of an old-merged branch always gets its own full
+// grace period, never an instant reap off a stale `mergedAt` alone).
+
+/** Default {@link laneBranchItemNum} git reader: the lane's own checked-out branch name, or `null` on any
+ *  failure (detached HEAD, mid-rebase, an unreadable/missing dir) — never throws, mirrors this file's other
+ *  fail-closed git readers (`readLease`, `fetchPrStatesForRepo`). */
+function defaultGitSymbolicRef(dir) {
+  try {
+    return execFileSync('git', ['symbolic-ref', '--short', 'HEAD'], {
+      cwd: dir,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: resolveChildTimeoutMs(),
+      killSignal: 'SIGKILL',
+    }).trim();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The item id a lane's OWN checked-out branch encodes, via the SAME `lane/<num>-*`/`lane/x[a-z0-9]{5,7}-*`
+ * grammar {@link matchLaneRef} already matches a PR's `headRefName` against — never a second, divergently-tuned
+ * parser (this card's Risk 1). `null` on a detached HEAD, a branch outside the grammar (e.g. the lane's local
+ * `main`, the byte-for-byte common case for a lane worked through the standard delivery-agent brief, where the
+ * item lives only in the `--session=` slug, never the branch), or any git-read failure — never guess.
+ * @param {string} dir - the lane's working-tree path.
+ * @param {{git?:(dir:string)=>(string|null)}} [o] - `git` is injectable (a unit test never spawns real git).
+ * @returns {string|null}
+ */
+export function laneBranchItemNum(dir, { git = defaultGitSymbolicRef } = {}) {
+  let branch;
+  try {
+    branch = git(dir);
+  } catch {
+    return null;
+  }
+  if (typeof branch !== 'string' || !branch) return null;
+  return matchLaneRef(branch)?.num ?? null;
+}
+
+/** Default {@link laneQuietSincePr} clean-tree reader: raw `git status --porcelain` output, or `null` on any
+ *  failure (unreadable dir) — the caller then treats "can't confirm clean" as unknown, never as clean. */
+function defaultGitStatusPorcelain(dir) {
+  try {
+    return execFileSync('git', ['status', '--porcelain'], {
+      cwd: dir,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: resolveChildTimeoutMs(),
+      killSignal: 'SIGKILL',
+    });
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Default {@link laneQuietSincePr} containment reader: is the lane's HEAD already fully reflected in `sha` —
+ * either a literal ancestor-or-equal (`git merge-base --is-ancestor HEAD <sha>`, exit 0 — the common case for
+ * this repo's own landing transport, `pr-land.mjs`'s default `--method=merge --no-ff`, a REAL merge commit
+ * whose second parent IS the lane's own tip) OR patch-equivalent to it (round-1 convergence correctness
+ * finding, #xkk4lv7): a squash or rebase merge reports a merge commit with NO ancestry relationship to the
+ * original branch's own commits at all, even though the PR is genuinely, fully landed — the identical problem
+ * `lane-pool.mjs`'s own `aheadIsProvablyPushed`/`cherryAllPatchEquivalent` already solve for the mirror-image
+ * direction (a lane's own commit vs. MANY remote heads) — MIRRORS that file's `git cherry <upstream> <head>`
+ * first tier (round-3 convergence, simplicity finding: this is NOT an import, and the claim below is corrected
+ * from an earlier draft that overstated it as one). It cannot be a real import: `lane-pool.mjs` already imports
+ * FROM `lease-reaper.mjs` (this file), so the reverse would cycle, and `cherryAllPatchEquivalent` is private to
+ * that file besides. A genuinely shared primitive would need extracting BOTH call sites into a third module
+ * neither file owns — worth doing if a THIRD caller ever needs this exact check, not worth touching
+ * `lane-pool.mjs`'s stable, already-tested ahead-detection code today for one small (3-line) duplicated parse
+ * of `git cherry`'s output (tracked as a follow-up: #xuyjss1). `false` only on the DEFINITIVE negative (HEAD
+ * carries commits beyond `sha`, proven both ways); `null` (unknown) on anything else (an unresolvable `sha`, a
+ * git-read failure) — never guess "contained" from an inconclusive read.
+ *
+ * ONE SUCH "unresolvable `sha`" CASE, NAMED EXPLICITLY (round-4 convergence, correctness finding): `sha`
+ * (a merged PR's own `mergeCommit.oid`, from a live `gh pr list` read) is a claim about GitHub's own state, not
+ * a proof the object has been `git fetch`ed into THIS lane's (or its `--reference`d) local object database yet
+ * — `gh` and `git` are two independent systems that can race. Both `merge-base --is-ancestor` and `git cherry`
+ * fail loudly (a non-zero, non-"1" exit) on a `sha` they cannot resolve locally, which this function already
+ * reads as `null` (never a guess) — so a fetch-lag race degrades to the SAME safe "don't corroborate yet, ride
+ * the TTL backstop" outcome the closed-without-merge case above deliberately accepts, never a false reap. No
+ * fetch is attempted here on purpose: this file already shares one pool-wide `gh pr list` read per pass
+ * (`fetchPrStatesForRepo`) specifically to avoid a per-candidate network call, and a per-candidate `git fetch`
+ * would reintroduce exactly that cost for a race that self-heals within one quiet window either way (this pool
+ * fetches routinely via `acquire`/`refresh`/`provision`, all independent of this reap pass).
+ *
+ * #4337 — THE CHERRY FALLBACK'S OWN BLIND SPOT: `git cherry` is a per-commit patch-id comparison, and a merge
+ * commit simply never surfaces in its output as a distinguishable patch (neither `+` nor `-`) — so a HEAD whose
+ * *non-merge* commits are all independently patch-equivalent upstream, but whose HEAD is ALSO a merge commit
+ * carrying unique conflict-resolution content `sha` never received, reads as empty/all-`-` — falsely
+ * "contained" (CONFIRMED live on PR #2835). An empty/all-`-` cherry read is therefore necessary but not
+ * sufficient: before trusting it, this function also vetoes on any merge commit reachable from HEAD but NOT
+ * from `sha` (`git rev-list --merges`, bounded to that range) — existence alone is disqualifying, since a
+ * merge's unique content can't be represented as a `cherry`-comparable patch at all. This veto can only ever
+ * turn a would-be `true` into `false`/`null`, never the reverse: it runs strictly AFTER cherry already read
+ * "contained", and a read failure there (an unresolvable `sha`, a timeout) is — per this function's own
+ * contract — `null` (unknown), never a guess in either direction.
+ *
+ * DELIBERATE, DISCLOSED OVER-REJECTION (round-1 convergence, correctness finding): this vetoes on a merge
+ * commit's mere EXISTENCE in the unaccounted range, not on detecting whether that specific merge carries unique
+ * content — a routine, content-free `git merge main` a lane runs purely to stay fresh trips the SAME veto as a
+ * real conflict-resolution merge, even though it adds nothing of its own. Distinguishing the two would mean
+ * trusting some per-commit "this merge's diff is trivial" heuristic — exactly the kind of inference that let
+ * the original bug through `cherry` in the first place. Given the choice, this stays on the safe side: a false
+ * "not contained" costs a delayed reclaim (self-heals: the TTL backstop and every other reap axis still apply);
+ * a false "contained" costs real, lost work. See the `#4337 — a routine, CONTENT-FREE merge …` fixture in
+ * `__tests__/lease-reaper.test.mjs` for this exact tradeoff pinned as an intentional test, not an unnoticed
+ * side effect.
+ */
+export function defaultGitIsAncestor(dir, sha, { exec = execFileSync } = {}) {
+  try {
+    // #xkk4lv7 — round-5 convergence (security finding): `sha` is DATA (a live `gh pr list` read's
+    // `mergeCommit.oid`), never a caller-typed literal like `'HEAD'` — the trailing `--` is git's own
+    // universal options/revisions separator, so a `sha` value that happened to start with `-` (a malformed
+    // API response, or any future caller feeding this untrusted input) can never be misread as a flag.
+    exec('git', ['merge-base', '--is-ancestor', '--', 'HEAD', sha], {
+      cwd: dir,
+      stdio: ['ignore', 'ignore', 'ignore'],
+      timeout: resolveChildTimeoutMs(),
+      killSignal: 'SIGKILL',
+    });
+    return true;
+  } catch (e) {
+    if (!(e && typeof e.status === 'number')) return null; // spawn/timeout failure — never guess
+    if (e.status !== 1) return null; // per git's own contract, anything but exit 1 is an ERROR, not "not an ancestor"
+    // #xkk4lv7 — the squash/rebase-merge fallback: `git cherry <sha> HEAD` lists every commit HEAD carries
+    // that `sha`'s own history lacks, prefixed `-` when an equivalent patch already exists in `sha`'s history,
+    // `+` when it does not. Empty (or all `-`) means every one of HEAD's own commits is already reflected in
+    // the merge, patch-for-patch — "already landed" even with zero shared ancestry.
+    let cherryContained;
+    try {
+      const out = exec('git', ['cherry', '--', sha, 'HEAD'], {
+        cwd: dir,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+        timeout: resolveChildTimeoutMs(),
+        killSignal: 'SIGKILL',
+      });
+      const lines = out.split('\n').filter(Boolean);
+      cherryContained = lines.length === 0 || lines.every((l) => l.startsWith('-'));
+    } catch {
+      // #xkk4lv7 — round-2 convergence (standards-conformance finding): this function's own docblock promises
+      // `null` (unknown, never guess) for an inconclusive read — `cherry` itself throwing (a timeout, an
+      // unresolvable `sha`) is exactly that, NOT the definitive negative the ancestor check's own exit-1 means.
+      // Was `false`; harmless today (the one caller, `laneQuietSincePr`, treats `false`/`null` identically —
+      // both mean "not reaped") but wrong per the documented three-way contract, and a future caller that
+      // DOES distinguish "proven not contained" from "unknown" deserves the honest answer.
+      return null;
+    }
+    if (!cherryContained) return false; // cherry itself already proved a genuine, unmatched `+` commit
+    // #4337 — cherry read "contained", but that alone is not proof: veto if HEAD's history holds a merge
+    // commit `sha`'s history lacks. `--max-count=1` — existence is all that matters, not the full list.
+    // `--end-of-options` (never a bare `--` ahead of the range) keeps this a REVISION range, not a pathspec —
+    // `rev-list`, unlike `merge-base --is-ancestor`/`cherry` above, treats anything after a bare `--` as a
+    // path, so this exact separator choice is load-bearing, not cosmetic; the trailing `--` with nothing after
+    // it is the explicit, standard "no path filter" spelling.
+    try {
+      const mergeOut = exec(
+        'git',
+        ['rev-list', '--merges', '--max-count=1', '--end-of-options', `${sha}..HEAD`, '--'],
+        {
+          cwd: dir,
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'pipe'],
+          timeout: resolveChildTimeoutMs(),
+          killSignal: 'SIGKILL',
+        },
+      );
+      return mergeOut.trim().length === 0; // a hit is an unaccounted-for merge commit — never "contained"
+    } catch {
+      return null; // inconclusive range read (unresolvable sha, timeout) — never guess, same contract as above
+    }
+  }
+}
+
+/** Fork 2/Option C's conservative quiet window (this card's Decided design) — well short of the existing
+ *  4-hour {@link DEFAULT_LEASE_TTL_MINUTES} TTL, since this axis has NO positive liveness signal at all for its
+ *  population (see {@link laneQuietSincePr}'s own doc) and can only ever bound the exposure window, never prove
+ *  the holder is gone. */
+export const DEFAULT_QUIET_MS = 30 * 60_000;
+
+/**
+ * Fork 2/Option C's safety gate (this card's Decided design, round-3 final shape): may a branch-derived
+ * `pr-merged`/`pr-closed` verdict be TRUSTED for a lease whose `session` names no dispatcher grammar at all
+ * (the sole population {@link laneBranchItemNum} exists for)? `true` only when ALL of:
+ *   1. the lane's working tree is CLEAN (`git status --porcelain` empty) — a dirty tree is a live worker's own
+ *      uncommitted change, never reapable;
+ *   2. HEAD is an ancestor-or-equal of the PR's own merge commit — HEAD carrying commits BEYOND the merge is
+ *      live, un-landed work in the same lane, never reapable (rules out the "old branch, new work" shape #9's
+ *      light-review round found);
+ *   3. `nowMs` is at least `quietMs` past the LATER of the PR's own `mergedAt` and this lease's own
+ *      `acquiredAt` — anchoring to the LATER of the two (never `mergedAt` alone) is what closes round 3's gap:
+ *      a lease acquired FRESH against an old-merged branch always gets its own full quiet window from
+ *      `acquiredAt`, regardless of how long ago the PR merged.
+ * `null` (never a guess) on any git-read failure, or when `prMergeSha`/`prMergedAt`/`leaseAcquiredAt` is
+ * missing or unparseable — mirrors every other axis in this file's fail-closed contract. This can only ever
+ * SHRINK the reap-exposure window (from "up to 4 hours" down to "up to ~`quietMs` since whichever of merge-or-
+ * acquire happened last") — it never claims to prove the holder is gone, since this population has no positive
+ * liveness signal at all (today's `sessionGoneForLease`/`pidAliveForLease` are BOTH gated on a recognized
+ * dispatcher-minted session name, which is precisely what this lease lacks).
+ * @param {string} dir - the lane's working-tree path.
+ * @param {{prMergeSha:string|null, prMergedAt:string|null, leaseAcquiredAt:string|null, nowMs:number,
+ *   quietMs?:number, statusPorcelain?:(dir:string)=>(string|null), isAncestor?:(dir:string,sha:string)=>(boolean|null)}} o
+ * @returns {boolean|null}
+ */
+export function laneQuietSincePr(dir, {
+  prMergeSha,
+  prMergedAt,
+  leaseAcquiredAt,
+  nowMs,
+  quietMs = DEFAULT_QUIET_MS,
+  statusPorcelain = defaultGitStatusPorcelain,
+  isAncestor = defaultGitIsAncestor,
+} = {}) {
+  if (typeof prMergeSha !== 'string' || !prMergeSha) return null;
+  if (typeof nowMs !== 'number') return null;
+  const mergedAtMs = Date.parse(prMergedAt);
+  const acquiredAtMs = Date.parse(leaseAcquiredAt);
+  if (Number.isNaN(mergedAtMs) || Number.isNaN(acquiredAtMs)) return null; // missing/unparseable — never guess
+  const porcelain = statusPorcelain(dir);
+  if (porcelain === null) return null; // unreadable tree — can't confirm clean, never guess
+  if (porcelain.trim() !== '') return false; // dirty — a live worker's own uncommitted change, never reap
+  const ancestor = isAncestor(dir, prMergeSha);
+  if (ancestor === null) return null; // unresolvable — never guess
+  if (ancestor === false) return false; // HEAD carries new commits beyond the merge — live, un-landed work
+  return nowMs - Math.max(mergedAtMs, acquiredAtMs) >= quietMs;
+}
+
+/**
+ * THE COMPOSED resolver (this card's Interfaces section) — `itemNumFromSession`/`prNumFromSession` first,
+ * consulting the branch fallback ONLY when NEITHER resolves anything (Fork 1: a correctly-resolved PR-kind
+ * lookup, e.g. `fix-900`, must never be silently overridden by an unrelated branch-derived item), and trusting
+ * a terminal branch-derived verdict only once Fork 2/Option C's corroboration holds (an open branch PR needs
+ * no extra corroboration — "open wins" already protects it, same as every other axis in this file). The ONE
+ * seam both `main()`'s `signalsFor` (below) and `lane-pool.mjs`'s `deadLeasePlan` drive — never a second,
+ * independently-maintained copy of this order (this card's Risk 5).
+ *
+ * NOTE ON `'closed'` PRs (round-2/round-3 convergence, correctness + standards-conformance + claim-accuracy):
+ * a PR closed WITHOUT merging carries no `mergeCommit` at all (`sha` is `null` in `repoStates.detailsByItem`),
+ * so `laneQuietSincePr` — which requires a merge sha to check containment against — can never corroborate it:
+ * `corroborated` is always `false`, so `itemNum` and `itemNumSource` both stay their initial `null` (NEVER
+ * `'branch-uncorroborated'` — that tier is reserved for an OPEN PR or no PR at all, where "open wins" already
+ * makes an uncorroborated guess harmless; a bare 'closed' guess earns no trust at all, not even the weaker
+ * uncorroborated tier — pinned by this file's own `__tests__/lease-reaper.test.mjs`). This is a DELIBERATE,
+ * DOCUMENTED gap, not a silent one: a lease whose branch names a closed-but-unmerged PR rides the pre-existing
+ * TTL backstop, precisely as it did before this fix existed — this card's own live evidence (lane-2/lane-9) was
+ * exclusively the MERGED shape, and inventing an unproven containment story for the merge-less closed case is
+ * worse than leaving it exactly where it already was.
+ * @param {object|null} lease
+ * @param {string} dir - the lane's working-tree path.
+ * @param {{repoStates?:{byItem?:Map, byPr?:Map, detailsByItem?:Map}|null, nowMs:number,
+ *   quietMs?:number, git?:Function, statusPorcelain?:Function, isAncestor?:Function}} o
+ * @returns {{itemNum:string|null, prNum:string|null, itemNumSource:('session'|'branch-corroborated'|'branch-uncorroborated'|null)}}
+ */
+export function resolveLeaseItemNum(lease, dir, { repoStates = null, nowMs, quietMs = DEFAULT_QUIET_MS, git, statusPorcelain, isAncestor } = {}) {
+  let itemNum = itemNumFromSession(lease?.session);
+  const prNum = prNumFromSession(lease?.session);
+  // #xkk4lv7 — round-1 convergence (standards-conformance + claim-accuracy, independently) — `itemNumSource`
+  // tells a downstream caller HOW `itemNum` was resolved, because not every use is equally safe for every
+  // consumer: `'session'` is a dispatcher-minted slug (always trustworthy — today's pre-existing contract).
+  // `'branch-corroborated'` is a branch-derived guess whose merged/closed PR was ALSO corroborated by Fork
+  // 2/Option C (clean tree + contained HEAD + quiet window) — safe for a PR-terminal lookup. `'branch-
+  // uncorroborated'` is a branch-derived guess backed by an OPEN PR or NO PR AT ALL — "open wins" already makes
+  // this harmless for the PR-terminal axis alone (an open/absent PR state never reaps anything), but it carries
+  // ZERO tree-cleanliness/containment/quiet-window proof. `lane-pool.mjs`'s `deadLeasePlan` ALSO feeds `itemNum`
+  // into a SECOND, independent terminal signal (`itemResolvedOnMain` — an offline backlog-card check that has
+  // no corroboration story of its own), and reusing an uncorroborated branch guess there would let a lease on
+  // a `lane/2500b-*` retry branch doing genuinely new work get reaped just because item 2500's ORIGINAL,
+  // already-landed backlog card reads `resolved` — exactly the "old branch, new work" hazard Fork 2/Option C
+  // exists to rule out, reached through a side door. `null` when `itemNum` is `null` (nothing resolved at all).
+  let itemNumSource = itemNum != null ? 'session' : null;
+  if (itemNum == null && prNum == null) {
+    const branchNum = laneBranchItemNum(dir, { git });
+    if (branchNum != null) {
+      const branchDetail = repoStates?.detailsByItem?.get(branchNum) ?? null;
+      if (branchDetail && (branchDetail.state === 'merged' || branchDetail.state === 'closed')) {
+        const corroborated = laneQuietSincePr(dir, {
+          prMergeSha: branchDetail.sha,
+          prMergedAt: branchDetail.mergedAt,
+          leaseAcquiredAt: lease?.acquiredAt,
+          nowMs,
+          quietMs,
+          statusPorcelain,
+          isAncestor,
+        }) === true;
+        if (corroborated) {
+          itemNum = branchNum;
+          itemNumSource = 'branch-corroborated';
+        }
+      } else {
+        // no PR at all, or a still-open one — "open wins" already protects the PR-terminal axis (an open/
+        // absent PR state never reaps anything either way) — but NEVER treat this as corroborated for any
+        // OTHER terminal signal a caller might drive off the same itemNum.
+        itemNum = branchNum;
+        itemNumSource = 'branch-uncorroborated';
+      }
+    }
+  }
+  return { itemNum, prNum, itemNumSource };
+}
+
 /**
  * The DETERMINISTIC reap verdict for ONE lease — pure, same signals → same verdict. A lease is reaped when it
  * is not reserved AND any axis fires; the reason names the axis (PR-terminal wins, then session-gone, then TTL,
@@ -333,10 +651,16 @@ export function classifyReap(lease, { nowMs, ttlMs = DEFAULT_LEASE_TTL_MINUTES *
  */
 const PR_STATE_RANK = { open: 3, merged: 2, closed: 1 };
 
-/** The one terminal-state reduction both `prStatesFromList` (keyed by item num) and `prStatesByPrNumber` (keyed
- *  by the PR's OWN number) share — same "open wins, then merged over closed" priority, different key function,
- *  never two separately-maintained copies of the same rank table. */
-function reduceTerminalStates(prs, keyFor) {
+/** The one terminal-state-PLUS-detail reduction every keyed-by-X PR Map in this file shares (state-only
+ *  `prStatesFromList`/`prStatesByPrNumber`, AND the detail-carrying `prDetailsFromList`, #xkk4lv7) — same
+ *  "open wins, then merged over closed" priority, different key function, never two
+ *  separately-maintained copies of the same rank table. Each entry carries `{state, sha, mergedAt}`: `sha` is
+ *  the PR's merge commit (`null` for an open/closed-unmerged PR, or when `gh` didn't fetch `mergeCommit`) and
+ *  `mergedAt` is its raw ISO string (or `null`) — both needed ONLY by {@link laneQuietSincePr}'s corroboration,
+ *  never by the ordinary state-only lookups, which keep reading a plain state string via the thin wrappers
+ *  below (byte-identical Map shape to before this file added the branch-fallback — no existing caller changes).
+ */
+function reduceDetails(prs, keyFor) {
   const byKey = new Map();
   for (const pr of Array.isArray(prs) ? prs : []) {
     const key = keyFor(pr);
@@ -344,13 +668,37 @@ function reduceTerminalStates(prs, keyFor) {
     const s = String(pr?.state || '').toUpperCase();
     const state = pr?.mergedAt || s === 'MERGED' ? 'merged' : s === 'CLOSED' ? 'closed' : 'open';
     const prev = byKey.get(key);
-    if (!prev || PR_STATE_RANK[state] > PR_STATE_RANK[prev]) byKey.set(key, state); // open wins; then merged over closed
+    if (!prev || PR_STATE_RANK[state] > PR_STATE_RANK[prev.state]) {
+      // open wins; then merged over closed — same rank table every reduction here shares
+      byKey.set(key, { state, sha: pr?.mergeCommit?.oid ?? null, mergedAt: pr?.mergedAt ?? null });
+    }
   }
   return byKey;
 }
 
+/** State-only VIEW over {@link reduceDetails} — the pre-#xkk4lv7 return shape (`Map<string,'open'|'merged'|
+ *  'closed'>`), kept byte-identical so `prStatesFromList`/`prStatesByPrNumber` never change under any existing
+ *  caller or test. */
+function reduceTerminalStates(prs, keyFor) {
+  const details = reduceDetails(prs, keyFor);
+  return new Map([...details].map(([k, v]) => [k, v.state]));
+}
+
 export function prStatesFromList(prs) {
   return reduceTerminalStates(prs, (pr) => laneRefItemNum(pr?.headRefName));
+}
+
+/**
+ * #xkk4lv7 — {@link prStatesFromList}'s DETAIL-carrying twin: same item-num key (a PR's head ref `lane/<num>-*`),
+ * same open/merged/closed priority, but each entry is `{state, sha, mergedAt}` rather than a bare state string.
+ * The ONLY consumer today is {@link laneQuietSincePr}'s corroboration via {@link resolveLeaseItemNum} — a
+ * branch-derived item guess needs the PR's own merge commit sha (to check HEAD is contained in it) and its
+ * `mergedAt` (to anchor the quiet window), neither of which the state-only Map ever carried.
+ * @param {Array<{headRefName?:string, state?:string, mergedAt?:string|null, mergeCommit?:{oid?:string}}>} prs
+ * @returns {Map<string,{state:'open'|'merged'|'closed', sha:string|null, mergedAt:string|null}>}
+ */
+export function prDetailsFromList(prs) {
+  return reduceDetails(prs, (pr) => laneRefItemNum(pr?.headRefName));
 }
 
 /**
@@ -696,7 +1044,10 @@ export function fetchPrStatesForRepo(repoKey, flags, { exec = execFileSync } = {
   if (flags['no-check-prs']) return null;
   const slug = repoKey === 'we' && typeof flags['pr-repo'] === 'string' ? flags['pr-repo'] : CONSTELLATION_REPOS[repoKey]?.slug;
   if (!slug) return null; // an unrecognized repo key has no gh slug to scope the read to — axis off for it
-  const args = ['pr', 'list', '--state', 'all', '--limit', String(Number(flags['pr-limit']) || 400), '--json', 'number,state,mergedAt,headRefName', '--repo', slug];
+  // #xkk4lv7 — `mergeCommit` (its `.oid`) ADDED to the field list: the branch-fallback's Fork 2/Option C
+  // corroboration (`laneQuietSincePr`, via `resolveLeaseItemNum`) needs a merged PR's own merge-commit sha to
+  // check containment against, which the pre-existing `number,state,mergedAt,headRefName` fields never carried.
+  const args = ['pr', 'list', '--state', 'all', '--limit', String(Number(flags['pr-limit']) || 400), '--json', 'number,state,mergedAt,headRefName,mergeCommit', '--repo', slug];
   let prs;
   try {
     // #x5n4zn3 — was bare (no timeout).
@@ -705,7 +1056,17 @@ export function fetchPrStatesForRepo(repoKey, flags, { exec = execFileSync } = {
     log(`  ⚠ gh pr list (${slug}) failed — PR-terminal reap axis OFF for ${repoKey} this run (TTL-stale still applies): ${String(e?.message || e).split('\n')[0]}`);
     return null;
   }
-  return { byItem: prStatesFromList(prs), byPr: prStatesByPrNumber(prs) }; // pure "open wins" reductions — one fetch, two keyspaces
+  // pure "open wins" reductions — one fetch, THREE keyspaces: the pre-existing state-only pair (byItem/byPr,
+  // unchanged shape, every existing caller/test untouched) plus the #xkk4lv7 detail-carrying `detailsByItem`
+  // `resolveLeaseItemNum`'s branch fallback needs. NO `detailsByPr` twin: Fork 1 (this file's own header)
+  // guarantees the branch fallback never even runs for a PR_KIND session (`prNumFromSession` resolving
+  // non-null short-circuits it first), so a PR-number-keyed detail Map would have no consumer — round-4
+  // convergence (simplicity finding) caught this as dead surface before it shipped.
+  return {
+    byItem: prStatesFromList(prs),
+    byPr: prStatesByPrNumber(prs),
+    detailsByItem: prDetailsFromList(prs),
+  };
 }
 
 /**
@@ -816,9 +1177,11 @@ function main(argv) {
     // number; a PR_KIND session (`review-`/`fix-`/`ci-heal-`/`inspect-`) checks `byPr` by its OWN PR number —
     // never the other Map with the other kind's number (the exact bug this split fixes; see `matchSessionSlug`
     // and `fetchPrStatesForRepo`'s own docblocks).
-    const itemNum = itemNumFromSession(c.lease?.session);
-    const prNum = prNumFromSession(c.lease?.session);
+    // #xkk4lv7 — `resolveLeaseItemNum` widens this to a THIRD population: a lease whose `session` matches
+    // NEITHER namespace (a bare `acquire --purpose=` with no dispatcher-recognizable `--session=`) falls
+    // through to the lane's own checked-out branch, corroborated per Fork 2/Option C — see its own docblock.
     const repoStates = c.repoKey ? prStatesByRepo.get(c.repoKey) : null;
+    const { itemNum, prNum } = resolveLeaseItemNum(c.lease, c.dir, { repoStates, nowMs });
     const prState = repoStates
       ? (itemNum != null ? repoStates.byItem.get(itemNum) : prNum != null ? repoStates.byPr.get(prNum) : null) ?? null
       : null;

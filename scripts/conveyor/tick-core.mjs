@@ -134,15 +134,17 @@
  *   `cleared-but-not-ready`, and (defense-in-depth; unreachable via the production shell per dispatch-plan.mjs)
  *   `blocked` — had NO other surface at all before this.
  *
- * LOAD ADMISSION (#4076) — a SECOND admission axis, ORTHOGONAL to `config.maxConcurrentLanes` (#xupukxa, above):
- *   that ceiling is a fixed, hardware-blind lane COUNT; this gate reads the host-sampler's actual `host.cpu.load1`
- *   sample (via the IO shell's `loadAdmission` input, resolved by `../readiness/heavy-admission.mjs#resolveLoadAdmission`
- *   — this pure core never touches fs itself) and withholds EVERY new dispatched-session launch this tick —
- *   builds AND the free-lane pool prepare/fix/ci-heal spawns draw from — when the per-core ratio crosses a
- *   threshold, beside whatever the fixed ceiling separately admits. Surfaced as `load-cap` notes (distinct from
- *   `capacity-cap` — the fix differs: wait for load to drop vs. raise the cap / free a lane). Already-running
- *   lanes/guards/watchers are untouched, mirroring `dispatchPaused`'s own posture. See `loadCapReading` and the
- *   `loadHeld` branches in `planTick` for the mechanism.
+ * LOAD ADMISSION (#4076, revised #4343) — a SECOND admission axis, ORTHOGONAL to `config.maxConcurrentLanes`
+ *   (#xupukxa, above): that ceiling is a fixed, hardware-blind lane COUNT; this gate reads the host-sampler's
+ *   actual CPU idle% + memory pressure (via the IO shell's `loadAdmission` input, resolved by
+ *   `../readiness/heavy-admission.mjs#resolveLoadAdmission` — this pure core never touches fs itself) and
+ *   withholds EVERY new dispatched-session launch this tick — builds AND the free-lane pool prepare/fix/ci-heal
+ *   spawns draw from — when the host reads as genuinely saturated (idle% low, or memory pressure elevated, or a
+ *   much-higher-ratio `load1/cores` runaway backstop), beside whatever the fixed ceiling separately admits.
+ *   Surfaced as `load-cap` notes (distinct from `capacity-cap` — the fix differs: wait for load to drop vs.
+ *   raise the cap / free a lane). Already-running lanes/guards/watchers are untouched, mirroring
+ *   `dispatchPaused`'s own posture. See `loadCapReading` and the `loadHeld` branches in `planTick` for the
+ *   mechanism.
  */
 
 import { mintSessionSlug } from './session-slug.mjs';
@@ -193,13 +195,16 @@ function laneNumFromOverlapReason(reason) {
   return m ? Number(m[1]) : null;
 }
 
-/** Human-readable load reading for a #4076 `load-cap` note's `text` — e.g. `"host load 8.50/12 cores (0.71 >
- *  1.5)"`. Falls back to a bare threshold mention when the IO shell's `loadAdmission` carries no numeric
- *  reading (e.g. a bypass reason, or a caller that only ever sets `held:true` directly in a test). Pure. */
+/** Human-readable load reading for a #4076/#4343 `load-cap` note's `text` — e.g. `"cpu idle 12% (<15%)"`,
+ *  `"mem pressure 2 (>=2)"`, or `"load1 60.00/12 cores (5.00 > backstop 4)"`. `../readiness/heavy-admission.mjs
+ *  #loadAdmissionDecision` already names the exact condition that held in its own `reason` field — this simply
+ *  surfaces it rather than re-deriving the same decision a second time. Falls back to a bare threshold mention
+ *  when the IO shell's `loadAdmission` carries no `reason` at all (e.g. a bypass reason, or a caller that only
+ *  ever sets `held:true` directly in a test). Pure. */
 function loadCapReading(loadAdmission) {
-  const { load1, cores, perCore, maxPerCore } = loadAdmission || {};
-  if (load1 == null || cores == null || perCore == null) return `host load above threshold (max ${maxPerCore ?? '?'}/core)`;
-  return `host load ${Number(load1).toFixed(2)}/${cores} cores (${Number(perCore).toFixed(2)} > ${maxPerCore})`;
+  const { reason, minIdlePct } = loadAdmission || {};
+  if (typeof reason === 'string' && reason && reason !== 'no-sample') return reason;
+  return `host load above threshold (min idle ${minIdlePct ?? '?'}%)`;
 }
 
 /**
@@ -1097,9 +1102,11 @@ export function buildStatusLine({ queue = [], lanes = [], prs = [], health = {},
  *                                      // names, checked one by one against `TICK_SPAWN_KINDS` — e.g.
  *                                      // `['build','prepare','prepare-decision','investigate']` stops all NEW
  *                                      // item dispatch while `fix`/`ci-heal` keep working already-open PRs.
- *   loadAdmission?: { held?:boolean, load1?:number|null, cores?:number|null, perCore?:number|null, maxPerCore?:number },
- *                                      // #4076 — the load-admission gate's live verdict, resolved by the IO
- *                                      // shell via `heavy-admission.mjs#resolveLoadAdmission` (this pure core
+ *   loadAdmission?: { held?:boolean, idlePct?:number|null, minIdlePct?:number, pressureLevel?:number|null,
+ *                                      //   load1?:number|null, cores?:number|null, perCore?:number|null,
+ *                                      //   backstopPerCore?:number, reason?:string },
+ *                                      // #4076/#4343 — the load-admission gate's live verdict, resolved by the
+ *                                      // IO shell via `heavy-admission.mjs#resolveLoadAdmission` (this pure core
  *                                      // has no fs of its own). ORTHOGONAL to `config.maxConcurrentLanes`
  *                                      // above — never replaces it, a tick can be held by capacity-cap,
  *                                      // load-cap, both, or neither. `held:true` withholds EVERY new
@@ -1293,9 +1300,15 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
   // reported as "building" — the same "only count once genuinely claimed, let the TTL backstop cover a guard
   // that never gets claimed" shape #3454 already established for the fix guard, applied here to the ONE guard
   // kind (the durable floor) whose synthesis previously had no TTL of its own to inherit.
-  const countableBuildGuards = liveBuildGuards.filter(
-    (g) => g.lane != null || !guardTtlElapsed({ ...g, spawnedTick: Number.isFinite(g.spawnedTick) ? g.spawnedTick : tick }, { tick, now, ttlTicks: cfg.buildTtlTicks }),
-  );
+  const isCountableBuildGuard = (g) => g.lane != null || !guardTtlElapsed({ ...g, spawnedTick: Number.isFinite(g.spawnedTick) ? g.spawnedTick : tick }, { tick, now, ttlTicks: cfg.buildTtlTicks });
+  const countableBuildGuards = liveBuildGuards.filter(isCountableBuildGuard);
+  // Card x0jgunh — the SAME TTL filter, applied to `buildLive` (guards that existed BEFORE this tick's own
+  // spawns) instead of `liveBuildGuards` (which also carries this tick's `newBuildGuards`). A consumer that
+  // dispatches only a SUBSET of `launched.spawn` — the build cap in
+  // skills-src/conveyor/build-dispatch-daemon.mjs — needs a count that excludes its OWN just-proposed
+  // candidates, or it double-counts them as both "busy" and "candidates" (the bug: cap holds every build
+  // forever once the tick proposes >= cap spawns). See `counts.buildingInFlight` below.
+  const countableBuildLiveGuards = buildLive.filter(isCountableBuildGuard);
 
   // 3. The free lanes a prepare/fix may take = free lanes MINUS this tick's build launches MINUS every live
   //    guard's lane (build + prepare + fix) — mirror the build guard's lane exclusion so nothing races a lane.
@@ -1536,6 +1549,14 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
   const counts = computeTickCounts({
     queue, lanes, prs, health, liveBuildGuards: countableBuildGuards, livePrepareGuards, liveFixGuards, liveCiHealGuards, launchedNums,
   });
+  // Card x0jgunh — `counts.building` (above) counts THIS tick's own freshly-proposed spawns, which is right for
+  // the interactive conveyor (it launches every spawn it is handed) but wrong for a consumer that only picks a
+  // SUBSET, like the build-dispatch daemon's cap. `buildingInFlight` is the same tally computed from guards
+  // live BEFORE this tick's spawns (`countableBuildLiveGuards`) plus leased build lanes (already folded in by
+  // `computeTickCounts` via `lanes`) — i.e. builds genuinely already in flight, never this tick's candidates.
+  const buildingInFlight = computeTickCounts({
+    queue, lanes, prs, health, liveBuildGuards: countableBuildLiveGuards, livePrepareGuards, liveFixGuards, liveCiHealGuards, launchedNums,
+  }).building;
 
   const decisionsOut = {
     // Carry the planner's evidence verbatim; a reporter must never reconstruct its gates.
@@ -1548,7 +1569,7 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
       traces: Array.isArray(plan.admission) ? plan.admission : [],
       prepare: prep.admission ?? [],
     },
-    counts,
+    counts: { ...counts, buildingInFlight },
     spawnBuilds: launched.spawn,
     suppressedBuilds: launched.suppressed,
     spawnPrepareScope: prep.scopeSpawns,

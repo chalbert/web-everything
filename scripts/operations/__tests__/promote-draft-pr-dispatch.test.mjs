@@ -5,9 +5,13 @@
  *   shelled — `reconcile` and `provider` are injected, mirroring `ci-heal-pr-dispatch.test.mjs`'s own shape.
  */
 import { describe, it, expect } from 'vitest';
-import { runReconcilePromoteDraftDispatch } from '../promote-draft-pr-dispatch.mjs';
+import { runReconcilePromoteDraftDispatch, defaultReadHeadCheckState } from '../promote-draft-pr-dispatch.mjs';
 
 const FRESH = () => ({ fresh: true, behind: 0 });
+// Every pre-existing test in this file promotes cleanly, so it pins a fresh re-read that always says green —
+// the #2811 race itself (a fresh read that disagrees with the plan) gets its OWN describe block below.
+const ALWAYS_GREEN = () => ({ state: 'green', why: 'all required checks succeeded', counts: {} });
+const NOOP_STATUS = () => {};
 
 describe('runReconcilePromoteDraftDispatch (draft-first PRs)', () => {
   it('calls provider.ready for every promote-draft entry, and nothing else', async () => {
@@ -16,15 +20,17 @@ describe('runReconcilePromoteDraftDispatch (draft-first PRs)', () => {
       root: '/repo',
       reconcile: () => ({
         dispatch: [
-          { kind: 'promote-draft', prNumber: 101 },
+          { kind: 'promote-draft', prNumber: 101, headRefOid: 'a'.repeat(40) },
           { kind: 'review', prNumber: 102 },
           { kind: 'ci-heal', prNumber: 103 },
-          { kind: 'promote-draft', prNumber: 104 },
+          { kind: 'promote-draft', prNumber: 104, headRefOid: 'b'.repeat(40) },
         ],
         refusals: [],
       }),
       provider: { ready: (pr) => { readyCalls.push(pr); } },
       checkStaleness: FRESH,
+      readHeadCheckState: ALWAYS_GREEN,
+      clearAwaitingCi: NOOP_STATUS,
     });
     expect(readyCalls).toEqual([101, 104]);
     expect(result.dispatched).toEqual([{ pr: 101, kind: 'promote-draft' }, { pr: 104, kind: 'promote-draft' }]);
@@ -36,6 +42,8 @@ describe('runReconcilePromoteDraftDispatch (draft-first PRs)', () => {
       root: '/repo', reconcile: () => ({ dispatch: [], refusals: [] }),
       provider: { ready: () => { throw new Error('must not be called'); } },
       checkStaleness: FRESH,
+      readHeadCheckState: () => { throw new Error('must not be called'); },
+      clearAwaitingCi: NOOP_STATUS,
     });
     expect(result).toEqual({ dispatched: [], refusals: [], reconcileRefusals: 0, reconcileRefusalDetails: [] });
   });
@@ -45,7 +53,10 @@ describe('runReconcilePromoteDraftDispatch (draft-first PRs)', () => {
     const result = runReconcilePromoteDraftDispatch({
       root: '/repo',
       reconcile: () => ({
-        dispatch: [{ kind: 'promote-draft', prNumber: 55 }, { kind: 'promote-draft', prNumber: 56 }],
+        dispatch: [
+          { kind: 'promote-draft', prNumber: 55, headRefOid: 'c'.repeat(40) },
+          { kind: 'promote-draft', prNumber: 56, headRefOid: 'd'.repeat(40) },
+        ],
         refusals: [],
       }),
       provider: {
@@ -55,6 +66,8 @@ describe('runReconcilePromoteDraftDispatch (draft-first PRs)', () => {
         },
       },
       checkStaleness: FRESH,
+      readHeadCheckState: ALWAYS_GREEN,
+      clearAwaitingCi: NOOP_STATUS,
     });
     expect(readyCalls).toEqual([55, 56]);
     expect(result.dispatched).toEqual([{ pr: 56, kind: 'promote-draft' }]);
@@ -67,6 +80,8 @@ describe('runReconcilePromoteDraftDispatch (draft-first PRs)', () => {
       reconcile: () => ({ dispatch: [], refusals: [{ kind: 'draft', prNumber: 9 }] }),
       provider: { ready: () => {} },
       checkStaleness: FRESH,
+      readHeadCheckState: ALWAYS_GREEN,
+      clearAwaitingCi: NOOP_STATUS,
     });
     expect(result.reconcileRefusals).toBe(1);
     expect(result.reconcileRefusalDetails).toEqual([{ kind: 'draft', prNumber: 9 }]);
@@ -78,6 +93,8 @@ describe('runReconcilePromoteDraftDispatch (draft-first PRs)', () => {
       reconcile: () => { throw new Error('must not be called'); },
       provider: { ready: () => { throw new Error('must not be called'); } },
       checkStaleness: FRESH,
+      readHeadCheckState: () => { throw new Error('must not be called'); },
+      clearAwaitingCi: NOOP_STATUS,
     })).toThrow(/not a constellation repo/);
   });
 
@@ -88,7 +105,122 @@ describe('runReconcilePromoteDraftDispatch (draft-first PRs)', () => {
       reconcile: (opts) => { seenReadPrs = typeof opts.readPrs; return { dispatch: [], refusals: [] }; },
       provider: { ready: () => {} },
       checkStaleness: FRESH,
+      readHeadCheckState: ALWAYS_GREEN,
+      clearAwaitingCi: NOOP_STATUS,
     });
     expect(seenReadPrs).toBe('function');
+  });
+});
+
+describe('runReconcilePromoteDraftDispatch — stale-green re-verification (#2811)', () => {
+  const HEAD = 'e52307860'.padEnd(40, '0');
+
+  it('refuses to promote when a fresh per-sha read disagrees with the plan\'s own (stale) green read', () => {
+    const readyCalls = [];
+    const seenArgs = [];
+    const result = runReconcilePromoteDraftDispatch({
+      root: '/repo',
+      reconcile: () => ({ dispatch: [{ kind: 'promote-draft', prNumber: 2811, headRefOid: HEAD }], refusals: [] }),
+      provider: { ready: (pr) => { readyCalls.push(pr); } },
+      checkStaleness: FRESH,
+      readHeadCheckState: (o) => { seenArgs.push(o); return { state: 'red', why: '1 of 1 check(s) concluded failing', counts: {} }; },
+      clearAwaitingCi: NOOP_STATUS,
+    });
+    // THE WHOLE POINT: `gh pr ready` is never called once the fresh read disagrees.
+    expect(readyCalls).toEqual([]);
+    expect(result.dispatched).toEqual([]);
+    expect(result.refusals).toEqual([{
+      pr: 2811, kind: 'stale-check-refused', headSha: HEAD, checkState: 'red',
+      why: expect.stringContaining('stale-green read'),
+    }]);
+    // Re-verified for the EXACT head sha the plan carried, never re-derived from the PR number.
+    expect(seenArgs).toEqual([{ repoSlug: 'chalbert/web-everything', sha: HEAD }]);
+  });
+
+  it('still refuses on a fresh `pending` read — only a completed, all-succeeded read promotes', () => {
+    const result = runReconcilePromoteDraftDispatch({
+      root: '/repo',
+      reconcile: () => ({ dispatch: [{ kind: 'promote-draft', prNumber: 2812, headRefOid: HEAD }], refusals: [] }),
+      provider: { ready: () => { throw new Error('must not be called'); } },
+      checkStaleness: FRESH,
+      readHeadCheckState: () => ({ state: 'pending', why: '1 of 2 check(s) still running', counts: {} }),
+      clearAwaitingCi: NOOP_STATUS,
+    });
+    expect(result.dispatched).toEqual([]);
+    expect(result.refusals).toEqual([expect.objectContaining({ pr: 2812, kind: 'stale-check-refused', checkState: 'pending' })]);
+  });
+
+  it('promotes normally once the fresh re-read confirms green', () => {
+    const readyCalls = [];
+    const result = runReconcilePromoteDraftDispatch({
+      root: '/repo',
+      reconcile: () => ({ dispatch: [{ kind: 'promote-draft', prNumber: 2813, headRefOid: HEAD }], refusals: [] }),
+      provider: { ready: (pr) => { readyCalls.push(pr); } },
+      checkStaleness: FRESH,
+      readHeadCheckState: () => ({ state: 'green', why: 'all required checks succeeded', counts: {} }),
+      clearAwaitingCi: NOOP_STATUS,
+    });
+    expect(readyCalls).toEqual([2813]);
+    expect(result.dispatched).toEqual([{ pr: 2813, kind: 'promote-draft' }]);
+    expect(result.refusals).toEqual([]);
+  });
+
+  it('a re-read that cannot be performed at all refuses rather than promoting on the stale plan alone', () => {
+    const result = runReconcilePromoteDraftDispatch({
+      root: '/repo',
+      reconcile: () => ({ dispatch: [{ kind: 'promote-draft', prNumber: 2814, headRefOid: HEAD }], refusals: [] }),
+      provider: { ready: () => { throw new Error('must not be called'); } },
+      checkStaleness: FRESH,
+      readHeadCheckState: () => { throw new Error('gh api rate limited'); },
+      clearAwaitingCi: NOOP_STATUS,
+    });
+    expect(result.dispatched).toEqual([]);
+    expect(result.refusals).toEqual([expect.objectContaining({ pr: 2814, kind: 'stale-check-unreadable' })]);
+  });
+
+  it('clears the now-stale review-status:awaiting-ci label the instant a draft promotes (#2821)', () => {
+    const statusCalls = [];
+    const result = runReconcilePromoteDraftDispatch({
+      root: '/repo',
+      reconcile: () => ({ dispatch: [{ kind: 'promote-draft', prNumber: 2821, headRefOid: HEAD }], refusals: [] }),
+      provider: { ready: () => {} },
+      checkStaleness: FRESH,
+      readHeadCheckState: () => ({ state: 'green', why: 'ok', counts: {} }),
+      clearAwaitingCi: (o) => statusCalls.push(o),
+    });
+    expect(result.dispatched).toEqual([{ pr: 2821, kind: 'promote-draft' }]);
+    expect(statusCalls).toEqual([{ pr: 2821, repo: 'chalbert/web-everything', state: null }]);
+  });
+
+  describe('defaultReadHeadCheckState — the real per-sha re-read (gh/getRequiredStatusChecks injected)', () => {
+    it('asks the commit-statuses endpoint for the exact sha and reduces it against the required set', () => {
+      const seenArgv = [];
+      const runGh = (argv) => { seenArgv.push(argv); return '{"name":"test","status":"COMPLETED","conclusion":"SUCCESS"}\n'; };
+      const getRequiredChecks = () => ({ checks: ['test'], source: 'live' });
+      const out = defaultReadHeadCheckState({ repoSlug: 'chalbert/web-everything', sha: HEAD, runGh, getRequiredChecks });
+      expect(out.state).toBe('green');
+      expect(seenArgv[0]).toEqual(expect.arrayContaining(['api', `repos/chalbert/web-everything/commits/${HEAD}/check-runs`]));
+    });
+
+    it('reads red off a completed-failure run', () => {
+      const runGh = () => '{"name":"test","status":"COMPLETED","conclusion":"FAILURE"}\n';
+      const out = defaultReadHeadCheckState({
+        repoSlug: 'chalbert/web-everything', sha: HEAD, runGh, getRequiredChecks: () => ({ checks: ['test'], source: 'live' }),
+      });
+      expect(out.state).toBe('red');
+    });
+  });
+
+  it('a clearAwaitingCi failure is best-effort and never turns a successful promotion into a refusal', () => {
+    const result = runReconcilePromoteDraftDispatch({
+      root: '/repo',
+      reconcile: () => ({ dispatch: [{ kind: 'promote-draft', prNumber: 2822, headRefOid: HEAD }], refusals: [] }),
+      provider: { ready: () => {} },
+      checkStaleness: FRESH,
+      readHeadCheckState: () => ({ state: 'green', why: 'ok', counts: {} }),
+      clearAwaitingCi: () => { throw new Error('gh hiccup'); },
+    });
+    expect(result.dispatched).toEqual([{ pr: 2822, kind: 'promote-draft' }]);
+    expect(result.refusals).toEqual([]);
   });
 });

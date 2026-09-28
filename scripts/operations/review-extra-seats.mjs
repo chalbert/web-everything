@@ -72,9 +72,38 @@ const REPO_ROOT = resolve(dirname(THIS_FILE), '..', '..');
 
 /** Kill switch: `0` (or `off`/`false`) turns every added seat off. Unset = on. */
 export const EXTRA_SEATS_ENV = 'WE_REVIEW_EXTRA_SEATS';
-/** Per-day cap on non-Claude seat CALLS (one call = one provider's shared prompt for one review). */
+/** LEGACY — the old SHARED per-day cap on non-Claude seat CALLS, counted across every provider together. Card
+ *  xn2wf9t (2026-09-27) replaced it with a cap PER PROVIDER ({@link PROVIDER_CAP_ENV}): Codex's own weekly
+ *  allowance is comparatively tight while both antigravity backends are separate and generous, so one shared
+ *  number let Codex's use starve antigravity's (474 seat calls skipped in one day on `daily-cap`, all three
+ *  providers still well under their own real budget). Kept, for ONE release only, as Codex's OWN fallback when
+ *  {@link PROVIDER_CAP_ENV}`.codex` is unset — see {@link resolveProviderCap} — so an operator who only ever set
+ *  this env var keeps exactly today's Codex behavior until they move to the new name. */
 export const DAILY_CAP_ENV = 'WE_REVIEW_EXTRA_SEATS_DAILY_CAP';
 export const DEFAULT_DAILY_CAP = 40;
+/** The per-PROVIDER daily call cap env var, one per {@link REVIEW_SEAT_PROVIDERS} entry. */
+export const PROVIDER_CAP_ENV = Object.freeze({
+  codex: 'WE_REVIEW_SEAT_CAP_CODEX',
+  'agy-claude': 'WE_REVIEW_SEAT_CAP_AGY_CLAUDE',
+  'agy-gemini': 'WE_REVIEW_SEAT_CAP_AGY_GEMINI',
+});
+/** The default cap per provider when its own env var (and, for codex only, the legacy shared one) is unset.
+ *  Codex's default (80) matches the shared cap the operator had already raised the daemon plist to; both
+ *  antigravity backends default far higher (300) — the operator's own "never below 90%" reading of both
+ *  allowances, "use and see how it goes". */
+export const PROVIDER_CAP_DEFAULT = Object.freeze({ codex: 80, 'agy-claude': 300, 'agy-gemini': 300 });
+/** The daily call cap for ONE provider: its own env var, else (codex only) the legacy shared env var, else its
+ *  own default. Never throws; an unparseable or negative value is treated as unset. PURE. */
+export function resolveProviderCap(provider, env = process.env) {
+  const ownName = PROVIDER_CAP_ENV[provider];
+  const own = ownName ? Number(env?.[ownName]) : Number.NaN;
+  if (Number.isInteger(own) && own >= 0) return own;
+  // codex's OWN env unset: fall back to the legacy shared one — reusing `resolveDailyCap` itself (rather than
+  // re-parsing inline) so a garbage legacy value degrades to ITS OWN default (40, `DEFAULT_DAILY_CAP`), not
+  // codex's new one — the one existing behavior this fallback is pinned to keep byte-identical for a release.
+  if (provider === 'codex' && env?.[DAILY_CAP_ENV] !== undefined) return resolveDailyCap(env);
+  return PROVIDER_CAP_DEFAULT[provider] ?? DEFAULT_DAILY_CAP;
+}
 /** Wall per seat call. Gemini gets half per attempt, since its script may resume once. */
 export const SEAT_TIMEOUT_ENV = 'WE_REVIEW_EXTRA_SEAT_TIMEOUT_MS';
 export const DEFAULT_SEAT_TIMEOUT_MS = 12 * 60 * 1000;
@@ -125,15 +154,57 @@ export function isPinnedRev(rev) {
 
 const seatRows = (records) => (Array.isArray(records) ? records : []).filter((r) => r && r.dispatchKind === REVIEW_SEAT_DISPATCH_KIND);
 
-const callIdsToday = (records, day) => {
+/** `provider` omitted → every provider's rows (the pre-split shared pool); given → that provider's rows only. */
+const callIdsToday = (records, day, provider = undefined) => {
   const ids = new Set();
-  for (const r of seatRows(records)) if (capDay(r.scoredAt) === day) ids.add(r.callId ?? `${r.scoredAt}:${r.provider}`);
+  for (const r of seatRows(records)) {
+    if (provider !== undefined && r.provider !== provider) continue;
+    if (capDay(r.scoredAt) === day) ids.add(r.callId ?? `${r.scoredAt}:${r.provider}`);
+  }
   return ids;
 };
 
-/** Distinct seat calls recorded on `now`'s day. PURE. */
+/** A ledger reservation belongs to `provider` — an untagged one predates the per-provider split (card xn2wf9t)
+ *  and lived in codex's ledger, so it reads as codex's own. `provider` omitted is the shared pool (codex's file). */
+const reservationIsFor = (r, provider) => (r?.provider ?? 'codex') === (provider ?? 'codex');
+
+/** Today's distinct seat calls for one provider: its stored rows' ids ∪ its outstanding same-day reservations (a
+ *  reservation whose row has landed shares its id, so it counts once). The ONE count both admission
+ *  ({@link reserveSeatCalls}) and reporting ({@link reviewSeatCapUsage}) use. PURE. */
+const providerCallIdsToday = (records, ledger, day, provider) => {
+  const ids = callIdsToday(records, day, provider);
+  for (const r of Array.isArray(ledger?.reservations) ? ledger.reservations : []) {
+    if (r && capDay(r.at) === day && reservationIsFor(r, provider)) ids.add(r.callId);
+  }
+  return ids;
+};
+
+/** Distinct seat calls recorded on `now`'s day, across every provider. PURE. Kept for the legacy shared-cap
+ *  reading; a per-provider caller wants {@link callsUsedTodayForProvider}. */
 export function callsUsedToday(records, now) {
   return callIdsToday(records, capDay(now)).size;
+}
+
+/** Distinct seat calls recorded on `now`'s day for ONE provider only. PURE. */
+export function callsUsedTodayForProvider(records, now, provider) {
+  return callIdsToday(records, capDay(now), provider).size;
+}
+
+/**
+ * Card xn2wf9t — every provider's today usage against its own cap, in one call: the SAME numbers both the
+ * health watch's `review-seat-cap-near-limit` smell and the `review-seat-caps` report read. Counted exactly as
+ * admission counts it ({@link reserveSeatCalls}): the scorecard store's rows PLUS each provider's outstanding
+ * reservations from `ledgers` (`{[provider]: ledger}` — omit it and only completed rows count). PURE; the
+ * real reads live in {@link readSeatCapUsage}.
+ * @returns {Record<string, {usedToday:number, cap:number, fraction:(number|null)}>}
+ */
+export function reviewSeatCapUsage(records, now, env = process.env, ledgers = {}) {
+  const day = capDay(now);
+  return Object.fromEntries(REVIEW_SEAT_PROVIDERS.map((p) => {
+    const cap = resolveProviderCap(p, env);
+    const usedToday = providerCallIdsToday(records, ledgers?.[p] ?? null, day, p).size;
+    return [p, { usedToday, cap, fraction: cap > 0 ? Math.round((usedToday / cap) * 1000) / 1000 : null }];
+  }));
 }
 
 /**
@@ -143,18 +214,28 @@ export function callsUsedToday(records, now) {
  * reservation whose row has landed shares its id, so it counts once). The caller holds a cross-process lock around
  * read → this → write. A reservation whose call never writes a row still counts: the budget errs toward spending
  * less. Earlier days' reservations are dropped. PURE.
- * @param {{ledger:(object|null), records:Array<object>, want:number, dailyCap:number, now:number, newId:Function}} o
- * @returns {{callIds:string[], used:number, ledger:{version:number, reservations:Array<{callId:string, at:string}>}}}
+ * `provider`, when given, scopes BOTH sides of the count to that one provider: only stored rows whose
+ * `r.provider` matches count (callers pass the whole unfiltered store), and only ITS OWN reservations in the
+ * ledger are kept/matched (an untagged reservation, from before providers were split, reads as codex's; one made
+ * for a different provider never counts against or extends this provider's grant). Omitted (`undefined`), it
+ * behaves exactly as before the split — one shared pool.
+ * @param {{ledger:(object|null), records:Array<object>, want:number, dailyCap:number, now:number, newId:Function, provider?:(string|undefined)}} o
+ * @returns {{callIds:string[], used:number, ledger:{version:number, reservations:Array<{callId:string, at:string, provider?:string}>}}}
  */
-export function reserveSeatCalls({ ledger, records, want, dailyCap, now, newId }) {
+export function reserveSeatCalls({ ledger, records, want, dailyCap, now, newId, provider = undefined }) {
   const day = capDay(now);
-  const kept = (Array.isArray(ledger?.reservations) ? ledger.reservations : []).filter((r) => r && capDay(r.at) === day);
-  const ids = callIdsToday(records, day);
-  for (const r of kept) ids.add(r.callId);
+  const sameProvider = (r) => reservationIsFor(r, provider);
+  const kept = (Array.isArray(ledger?.reservations) ? ledger.reservations : []).filter((r) => r && capDay(r.at) === day && sameProvider(r));
+  const ids = providerCallIdsToday(records, ledger, day, provider);
   const grant = Math.max(0, Math.min(Number(want) || 0, dailyCap - ids.size));
   const callIds = Array.from({ length: grant }, () => newId());
   const at = new Date(now).toISOString();
-  return { callIds, used: ids.size, ledger: { version: 1, reservations: [...kept, ...callIds.map((callId) => ({ callId, at }))] } };
+  const fresh = callIds.map((callId) => (provider === undefined ? { callId, at } : { callId, at, provider }));
+  // Reservations for OTHER providers already in the ledger (carried in `ledger.reservations` but filtered out of
+  // `kept` above by `sameProvider`) must survive this write too — each provider's own grant call only ever adds
+  // to the shared ledger file, never drops another provider's outstanding entries.
+  const otherProviders = (Array.isArray(ledger?.reservations) ? ledger.reservations : []).filter((r) => r && capDay(r.at) === day && !sameProvider(r));
+  return { callIds, used: ids.size, ledger: { version: 1, reservations: [...otherProviders, ...kept, ...fresh] } };
 }
 
 /**
@@ -201,10 +282,11 @@ const lensDescription = (seat) => {
 /** How much PR text an INLINE brief carries (the tool-free Gemini seat cannot open a file for the rest). */
 export const INLINE_DIFF_MAX = 200_000;
 export const INLINE_BODY_MAX = 20_000;
-/** Which providers' seats get an INLINE brief. A Gemini seat judging untrusted PR text runs with agy's shell and
- *  writes denied (`gemini-direct-task.mjs#REVIEW_MODE_SUFFIX`), so it reads the PR from the brief itself; Codex runs
- *  under its own OS-enforced `-s read-only` sandbox, so it reads the checked-out head. */
-export const INLINE_BRIEF_PROVIDERS = Object.freeze(['gemini']);
+/** Which providers' seats get an INLINE brief. Both antigravity backends run through the SAME `agy` CLI call
+ *  (`gemini-direct-task.mjs`, a generic passthrough over `--model`) judging untrusted PR text with its shell and
+ *  writes denied (`gemini-direct-task.mjs#REVIEW_MODE_SUFFIX`), so each reads the PR from the brief itself;
+ *  Codex runs under its own OS-enforced `-s read-only` sandbox, so it reads the checked-out head. */
+export const INLINE_BRIEF_PROVIDERS = Object.freeze(['agy-claude', 'agy-gemini']);
 
 const capText = (text, max) => {
   const s = String(text ?? '');
@@ -436,38 +518,64 @@ export async function runExtraSeats({ pr, repo, lanePath, loopPayload, env = pro
     const now = io.now();
     let records = [];
     try { records = io.readRecords(); } catch (e) { io.log(`added seats: could not read the scorecard store (${e.message}) — treating it as empty`); }
-    const dailyCap = resolveDailyCap(env);
-    const used = callsUsedToday(records, now);
-    const available = [];
+    // Card xn2wf9t — PER-PROVIDER caps, counted and reserved separately (see `resolveProviderCap`/
+    // `callsUsedTodayForProvider`): a provider at its own cap is treated exactly like a quota hold or a missing
+    // CLI — excluded from `available` — so `reviewSeatRoutes` naturally falls the seat back to whichever OTHER
+    // provider still has budget, never to "no seat" while at least one provider does.
+    const caps = Object.fromEntries(REVIEW_SEAT_PROVIDERS.map((p) => [p, resolveProviderCap(p, env)]));
+    const usedByProvider = Object.fromEntries(REVIEW_SEAT_PROVIDERS.map((p) => [p, callsUsedTodayForProvider(records, now, p)]));
+    let available = [];
     const unavailable = [];
     for (const p of REVIEW_SEAT_PROVIDERS) {
       if (!io.cliAvailable(p)) { unavailable.push({ provider: p, reason: `${p} CLI not found on PATH` }); continue; }
       const hold = quotaHold(records, p, now);
       if (hold) { unavailable.push({ provider: p, reason: hold }); continue; }
+      if (usedByProvider[p] >= caps[p]) { unavailable.push({ provider: p, reason: `daily-cap: ${usedByProvider[p]}/${caps[p]} non-Claude seat calls already used today for ${p}` }); continue; }
       available.push(p);
     }
     for (const u of unavailable) io.log(`added seats: skipping ${u.provider} — ${u.reason}`);
-    let plan = reviewSeatRoutes({ available, scorecards: records, callsRemaining: dailyCap - used });
-    // The snapshot above is advisory: RESERVE the calls under the ledger's lock before launching any, so
-    // concurrent reviews can never together spend past the cap. A short grant re-plans onto that many providers.
-    const wanted = [...new Set(plan.routes.map((r) => r.provider))];
-    let reservation = { callIds: [], used };
-    if (wanted.length) {
-      try {
-        reservation = io.reserveCalls({ want: wanted.length, dailyCap, now });
-      } catch (e) {
-        return { status: 'skipped', reason: `could not reserve the daily seat budget (${String(e?.message ?? e).slice(0, 200)}) — no call launched`, skipped: [], callsUsedToday: used, dailyCap };
+    const remainingCalls = (list) => list.reduce((sum, p) => sum + Math.max(0, caps[p] - usedByProvider[p]), 0);
+    let plan = reviewSeatRoutes({ available, scorecards: records, callsRemaining: remainingCalls(available) });
+
+    // RESERVE each distinct provider's ONE call under ITS OWN cap, before launching anything, so concurrent
+    // reviews can never together overspend any one provider's budget. A provider that cannot be granted (another
+    // review just took its last slot) is dropped from `available` and the plan is rebuilt on whoever is left —
+    // bounded to the provider count, so this can never loop forever.
+    const callIdOf = new Map();
+    for (let attempt = 0; attempt <= REVIEW_SEAT_PROVIDERS.length && plan.routes.length; attempt += 1) {
+      const wantedProviders = [...new Set(plan.routes.map((r) => r.provider))].filter((p) => !callIdOf.has(p));
+      if (!wantedProviders.length) break;
+      let anyDenied = false;
+      for (const p of wantedProviders) {
+        let reservation;
+        try {
+          reservation = io.reserveCalls({ provider: p, want: 1, dailyCap: caps[p], now });
+        } catch (e) {
+          return {
+            status: 'skipped',
+            reason: `could not reserve the daily seat budget for ${p} (${String(e?.message ?? e).slice(0, 200)}) — no call launched`,
+            skipped: [], callsUsedToday: usedByProvider[p], dailyCap: caps[p],
+          };
+        }
+        usedByProvider[p] = reservation.used;
+        if (reservation.callIds.length) { callIdOf.set(p, reservation.callIds[0]); } else { anyDenied = true; available = available.filter((x) => x !== p); }
       }
-      if (reservation.callIds.length < wanted.length) {
-        plan = reviewSeatRoutes({ available, scorecards: records, callsRemaining: reservation.callIds.length });
-      }
+      if (!anyDenied) break;
+      plan = reviewSeatRoutes({ available, scorecards: records, callsRemaining: remainingCalls(available) });
     }
-    const callIdOf = new Map([...new Set(plan.routes.map((r) => r.provider))].map((p, i) => [p, reservation.callIds[i]]));
+    const providerUsage = Object.fromEntries(REVIEW_SEAT_PROVIDERS.map((p) => [p, { usedToday: usedByProvider[p] + (callIdOf.has(p) ? 1 : 0), cap: caps[p] }]));
+    const totalUsedToday = Object.values(providerUsage).reduce((sum, u) => sum + u.usedToday, 0);
+    const totalDailyCap = Object.values(providerUsage).reduce((sum, u) => sum + u.cap, 0);
     const skipped = plan.skipped.map((s) => ({
       seat: s.seat, lens: s.lens,
       reason: available.length ? s.reason : `${s.reason} (${unavailable.map((u) => `${u.provider}: ${u.reason}`).join('; ')})`,
     }));
-    if (!plan.routes.length) return { status: 'skipped', reason: skipped[0]?.reason ?? 'nothing routed', skipped, callsUsedToday: reservation.used, dailyCap };
+    if (!plan.routes.length) {
+      return {
+        status: 'skipped', reason: skipped[0]?.reason ?? 'nothing routed', skipped,
+        callsUsedToday: totalUsedToday, dailyCap: totalDailyCap, providerUsage,
+      };
+    }
 
     const claudeFindings = claudeFindingsFromLoop(loopPayload);
     const claudeVerdict = loopPayload?.verdict?.verdict ?? null;
@@ -515,7 +623,7 @@ export async function runExtraSeats({ pr, repo, lanePath, loopPayload, env = pro
     } finally {
       if (scratch) { try { io.removeScratch(scratch); } catch { /* a stray temp dir is harmless */ } }
     }
-    return { status: 'ran', seats, skipped, callsUsedToday: reservation.used + callIdOf.size, dailyCap, rowsWritten };
+    return { status: 'ran', seats, skipped, callsUsedToday: totalUsedToday, dailyCap: totalDailyCap, providerUsage, rowsWritten };
   } catch (e) {
     return { status: 'error', reason: String(e?.message ?? e).slice(0, MAX_TEXT) };
   }
@@ -542,18 +650,44 @@ export function seatCallArgv({ provider, taskFile, dir, model, effort, timeoutMs
     return [join(root, 'scripts', 'codex-direct-task.mjs'), `--task-file=${taskFile}`, `--dir=${dir}`, '--review', '--json',
       '--no-stream', `--model=${model}`, `--effort=${effort}`, `--timeout-ms=${timeoutMs}`, '--clear-rollout-after-run'];
   }
-  if (provider === 'gemini') {
-    // The script may resume ONCE after a timeout, each attempt with the full budget — so half each.
+  if (provider === 'agy-claude' || provider === 'agy-gemini') {
+    // The script may resume ONCE after a timeout, each attempt with the full budget — so half each. Both
+    // antigravity backends run through this SAME script (a generic `agy` passthrough); only `model` differs.
     return [join(root, 'scripts', 'gemini-direct-task.mjs'), `--task-file=${taskFile}`, `--dir=${dir}`, '--review', '--json',
       `--model=${model}`, `--effort=${effort}`, `--timeout-ms=${Math.floor(timeoutMs / 2)}`];
   }
   throw new Error(`review-extra-seats: no seat CLI for provider ${JSON.stringify(provider)}`);
 }
 
-const CLI_BIN = Object.freeze({ codex: 'codex', gemini: 'agy' });
+const CLI_BIN = Object.freeze({ codex: 'codex', 'agy-claude': 'agy', 'agy-gemini': 'agy' });
 
-/** The reservation ledger's file, beside the scorecard store it budgets against. */
+/** The reservation ledger's file, beside the scorecard store it budgets against. LEGACY name — kept as-is
+ *  (rather than renamed) so any reservation made under the old, single shared cap in the minutes before this
+ *  deploy is still honored: this file is now specifically CODEX's own ledger (see {@link reservationLedgerFileFor}),
+ *  the one provider the old shared cap and this file's name both already meant in practice. */
 export const RESERVATION_LEDGER_FILE = 'review-seat-reservations.json';
+
+/** Which ledger FILE one provider's reservations live in — codex keeps the legacy shared name (see
+ *  {@link RESERVATION_LEDGER_FILE}); each other provider gets its OWN file, so a provider's cap can never be
+ *  spent by another provider's concurrent reservation. PURE. */
+export function reservationLedgerFileFor(provider) {
+  return provider === 'codex' || provider == null ? RESERVATION_LEDGER_FILE : `review-seat-reservations-${provider}.json`;
+}
+
+/**
+ * {@link reviewSeatCapUsage} off the REAL files: the scorecard store plus every provider's reservation ledger
+ * beside it — so the report and the health smell see in-flight reservations exactly as admission does. Read
+ * without the ledger lock (a report tolerates a millisecond-stale ledger); a corrupt ledger THROWS, as it does
+ * for admission, rather than under-reporting. `storePath` pins the store (tests/fixtures); default is the shared one.
+ */
+export function readSeatCapUsage({ env = process.env, storePath, now = Date.now() } = {}) {
+  const stateDir = dirname(storePath ?? resolveScorecardStorePath());
+  const ledgers = Object.fromEntries(REVIEW_SEAT_PROVIDERS.map((p) => {
+    const path = join(stateDir, reservationLedgerFileFor(p));
+    return [p, existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : null];
+  }));
+  return reviewSeatCapUsage(readStore(storePath ? { path: storePath } : {}).records, now, env, ledgers);
+}
 
 /** How long a reservation waits for the ledger lock before giving up (and launching nothing). */
 export const LEDGER_LOCK_TIMEOUT_MS = 10_000;
@@ -605,7 +739,8 @@ export function withLedgerLock(path, fn, { timeoutMs = LEDGER_LOCK_TIMEOUT_MS, s
 /** @param {{env?:object, root?:string, storePath?:string, lockTimeoutMs?:number}} [o] — `storePath` pins the store (tests); default is the shared one. */
 export function createExtraSeatsIo({ env = process.env, root = REPO_ROOT, storePath, lockTimeoutMs = LEDGER_LOCK_TIMEOUT_MS } = {}) {
   const storeIo = storePath ? { path: storePath } : {};
-  const ledgerPath = join(dirname(storePath ?? resolveScorecardStorePath()), RESERVATION_LEDGER_FILE);
+  const stateDir = dirname(storePath ?? resolveScorecardStorePath());
+  const ledgerPathFor = (provider) => join(stateDir, reservationLedgerFileFor(provider));
   const newId = () => randomUUID();
   return {
     now: () => Date.now(),
@@ -616,14 +751,21 @@ export function createExtraSeatsIo({ env = process.env, root = REPO_ROOT, storeP
     // Read → reserve → write under a FAIL-CLOSED lock: a lock not taken in time THROWS, and so does an unreadable
     // ledger (rather than being overwritten, which would forget today's outstanding reservations). Either way the
     // run launches nothing.
-    reserveCalls: ({ want, dailyCap, now }) => withLedgerLock(ledgerPath, () => {
-      const ledger = existsSync(ledgerPath) ? JSON.parse(readFileSync(ledgerPath, 'utf8')) : null;
-      const r = reserveSeatCalls({ ledger, records: readStore(storeIo).records, want, dailyCap, now, newId });
-      const tmp = `${ledgerPath}.${process.pid}.tmp`;
-      writeFileSync(tmp, `${JSON.stringify(r.ledger, null, 2)}\n`);
-      renameSync(tmp, ledgerPath);
-      return r;
-    }, { timeoutMs: lockTimeoutMs }),
+    // `provider` picks which ledger FILE this reservation lives in (each provider's own — see
+    // `reservationLedgerFileFor`), so two providers' reservations can never contend for the same lock or
+    // accidentally spend one another's budget. Omitted, it defaults to codex's legacy file (back-compat for a
+    // caller that has not been updated to pass one — e.g. an older test).
+    reserveCalls: ({ provider, want, dailyCap, now }) => {
+      const ledgerPath = ledgerPathFor(provider);
+      return withLedgerLock(ledgerPath, () => {
+        const ledger = existsSync(ledgerPath) ? JSON.parse(readFileSync(ledgerPath, 'utf8')) : null;
+        const r = reserveSeatCalls({ ledger, records: readStore(storeIo).records, want, dailyCap, now, newId, provider });
+        const tmp = `${ledgerPath}.${process.pid}.tmp`;
+        writeFileSync(tmp, `${JSON.stringify(r.ledger, null, 2)}\n`);
+        renameSync(tmp, ledgerPath);
+        return r;
+      }, { timeoutMs: lockTimeoutMs });
+    },
     cliAvailable: (provider) => {
       const r = spawnSync(CLI_BIN[provider], ['--version'], { env, encoding: 'utf8', timeout: 20_000, stdio: ['ignore', 'pipe', 'pipe'] });
       return r.status === 0;
@@ -703,7 +845,8 @@ export const RED_TEAM_MISS_DISPATCH_KIND = 'red-team-miss';
 /** The red team digs deeper than an advisory lens, so it runs at the higher effort each provider offers. */
 export const RED_TEAM_MODELS = Object.freeze({
   codex: Object.freeze({ model: REVIEW_SEAT_MODELS.codex.model, effort: 'high' }),
-  gemini: Object.freeze({ model: REVIEW_SEAT_MODELS.gemini.model, effort: 'high' }),
+  'agy-claude': Object.freeze({ model: REVIEW_SEAT_MODELS['agy-claude'].model, effort: 'high' }),
+  'agy-gemini': Object.freeze({ model: REVIEW_SEAT_MODELS['agy-gemini'].model, effort: 'high' }),
 });
 /** The Claude re-check: a fresh, tool-free juror (same model as review-pr's mandatory seats). */
 export const RECHECK_MODEL = 'sonnet';
@@ -1055,26 +1198,39 @@ export async function runRedTeam({ pr, repo, lanePath, loopPayload, env = proces
     const recording = record !== false && loopPayload?.replay !== true;
     const prior = priorRedTeamRow(records, pr, rev);
     if (prior) return await resumeRedTeam({ pr, repo, rev, title: read.title, prior, records, post, record: recording }, io);
-    const available = [];
+    // Card xn2wf9t — each provider's OWN cap, same treatment as `runExtraSeats`: a provider already at its cap is
+    // excluded from `available` up front, so `selectReviewSeatProvider` picks whichever else has budget rather
+    // than the pass giving up outright. The reservation loop below still guards the rare RACE (a concurrent pass
+    // takes the picked provider's last slot between this snapshot and the reserve) by retrying on the next-best
+    // available provider — bounded to the provider count.
+    let available = [];
     const unavailable = [];
+    const caps = Object.fromEntries(REVIEW_SEAT_PROVIDERS.map((p) => [p, resolveProviderCap(p, env)]));
+    const usedByProvider = Object.fromEntries(REVIEW_SEAT_PROVIDERS.map((p) => [p, callsUsedTodayForProvider(records, now, p)]));
     for (const p of REVIEW_SEAT_PROVIDERS) {
       if (!io.cliAvailable(p)) { unavailable.push(`${p}: CLI not found on PATH`); continue; }
       const hold = quotaHold(records, p, now);
       if (hold) { unavailable.push(`${p}: ${hold}`); continue; }
+      if (usedByProvider[p] >= caps[p]) { unavailable.push(`${p}: daily-cap: ${usedByProvider[p]}/${caps[p]} non-Claude seat calls already used today`); continue; }
       available.push(p);
     }
-    const pick = selectReviewSeatProvider({ lens: RED_TEAM_SEAT.key, available, scorecards: records });
-    if (!pick.provider) return { status: 'skipped', reason: `${pick.reasoning}${unavailable.length ? ` (${unavailable.join('; ')})` : ''}` };
-    const dailyCap = resolveDailyCap(env);
-    let reservation;
-    try {
-      reservation = io.reserveCalls({ want: 1, dailyCap, now });
-    } catch (e) {
-      return { status: 'skipped', reason: `could not reserve the daily seat budget (${String(e?.message ?? e).slice(0, 200)}) — no call launched` };
+    let provider = null;
+    let callId = null;
+    let lastReason = null;
+    for (let attempt = 0; attempt <= REVIEW_SEAT_PROVIDERS.length && available.length && !callId; attempt += 1) {
+      const pick = selectReviewSeatProvider({ lens: RED_TEAM_SEAT.key, available, scorecards: records });
+      if (!pick.provider) { lastReason = pick.reasoning; break; }
+      let reservation;
+      try {
+        reservation = io.reserveCalls({ provider: pick.provider, want: 1, dailyCap: caps[pick.provider], now });
+      } catch (e) {
+        return { status: 'skipped', reason: `could not reserve the daily seat budget for ${pick.provider} (${String(e?.message ?? e).slice(0, 200)}) — no call launched` };
+      }
+      usedByProvider[pick.provider] = reservation.used;
+      if (reservation.callIds.length) { provider = pick.provider; callId = reservation.callIds[0]; }
+      else { lastReason = `daily-cap: ${reservation.used}/${caps[pick.provider]} non-Claude seat calls used today for ${pick.provider}`; available = available.filter((x) => x !== pick.provider); }
     }
-    if (!reservation.callIds.length) return { status: 'skipped', reason: `daily-cap: ${reservation.used}/${dailyCap} non-Claude seat calls used today`, callsUsedToday: reservation.used, dailyCap };
-    const callId = reservation.callIds[0];
-    const { provider } = pick;
+    if (!callId) return { status: 'skipped', reason: `${lastReason ?? 'no provider available'}${unavailable.length ? ` (${unavailable.join('; ')})` : ''}` };
     const { model, effort } = RED_TEAM_MODELS[provider];
     const claudeFindings = claudeFindingsFromLoop(loopPayload);
     const timeoutMs = resolveSeatTimeoutMs(env);
@@ -1160,7 +1316,7 @@ export async function runRedTeam({ pr, repo, lanePath, loopPayload, env = proces
 
     return {
       status: 'ran', provider, model, effort, callId, rev, seat: row, findings, recheckStatus, confirmedMissCount: confirmed.length,
-      foldedVerdict, builder, delegationTrial, comment, rowsWritten, callsUsedToday: reservation.used + 1, dailyCap,
+      foldedVerdict, builder, delegationTrial, comment, rowsWritten, callsUsedToday: usedByProvider[provider] + 1, dailyCap: caps[provider],
     };
   } catch (e) {
     return { status: 'error', reason: String(e?.message ?? e).slice(0, MAX_TEXT) };

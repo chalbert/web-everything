@@ -125,6 +125,18 @@ import { isAllowlistedLitterPath } from '../lib/lane-litter.mjs';
 // live only in `we:scripts/operations/`), so a frontierui/plateau-app build denied the wrong repo's primary
 // checkout entirely — the one the deny-map exists to seal off was left wide open to the Codex sandbox.
 import { primaryCheckoutForLanePath, repoProfileForLanePath, repoKeyForScope, repoProfile } from '../lib/repo-profile.mjs';
+// #4349 — settle this delivery's OWN run-store effect on exit (see that file's own header for why this is
+// the thin seam, not a new store) and release/hold the build-dispatch claim a finished no-op dispatch used to
+// leave stranded for hours (`we:scripts/conveyor/build-dispatch-claim.mjs`'s own #4349 note).
+import { settleDispatchEffect } from './deliver-item-settle.mjs';
+import { releaseBuildDispatchClaim, placeBuildDispatchHold } from '../conveyor/build-dispatch-claim.mjs';
+
+/** The positional `outcome` always wins over anything `result` supplies — merge order enforces it rather than
+ *  relying on every call site's convention of never putting `outcome` in `result` itself. Exported as its own
+ *  pure function so that guarantee is directly testable without needing a real call site to break convention. */
+export function mergeSettleResult(outcome, result) {
+  return { ...(result || {}), outcome };
+}
 // #3383 mechanical-dispatcher fix (live #3565 trial) — the REAL locus-prefix detector, reused so
 // `sanitizeOwnLocusMentions` below prefixes every bare mention the `lint:locus` pre-commit hook would
 // itself flag, not just mentions of the delivery's own touched paths (see that function's own header).
@@ -301,7 +313,49 @@ export const ensureDeliveryHooksSettingsFile = createHooksSettingsWriter(
  *   deterministic value instead of a fresh random UUID every run.
  */
 export async function deliverItem(launch, provider = CLAUDE_RESTRICTED_PROVIDER, { newSessionId = randomUUID } = {}) {
-  const { item, lane, scope, sessionSlug, attemptTag } = launch;
+  // `runId`/`effectKey` name this delivery's own run-store dispatch effect, threaded through from the daemon's
+  // dispatch sink. Either absent — an older dispatch, a hand-built test launch, a resumed dispatch that
+  // predates this — and `settleTerminal` below just skips the run-store settle; it still releases/holds the
+  // real build-dispatch claim this process took, because that claim exists whether or not a run-store row does.
+  const { item, lane, scope, sessionSlug, attemptTag, runId, effectKey } = launch;
+
+  // Every terminal exit funnels through here (alongside `finish()`, never instead of it): settle this
+  // delivery's own run-store effect with the outcome just produced, and — for a non-PR outcome only — release
+  // the build-dispatch claim the daemon took before this process started. A PR outcome leaves the claim alone:
+  // `build-dispatch-daemon.mjs#doneWhy`'s own PR-observed retirement owns "did this actually deliver the item",
+  // not this wrapper. BEST-EFFORT throughout, like `releaseClaimAndLane` below — a run-store or claim-file
+  // hiccup must never mask the real delivery outcome.
+  //
+  // FIRES AT MOST ONCE per delivery (`settledOnce`). Not just for the run-store settle, which is idempotent on
+  // its own — claim release and the hold are NOT: `placeBuildDispatchHold` deletes+recreates the lock, so a
+  // second call would overwrite an earlier, more specific hold reason, and a second release could free a claim
+  // an earlier call deliberately left held (e.g. `pr-opened`). The outer catch below calls this unconditionally
+  // on ANY escape, including a throw that lands after an earlier branch already settled — this guard is what
+  // keeps that safe.
+  //
+  // `outcome` (the positional argument) always wins over `result` — see {@link mergeSettleResult}.
+  let settledOnce = false;
+  const settleTerminal = (outcome, { result = null, error = null, releaseClaim = false, hold = null } = {}) => {
+    if (settledOnce) return;
+    settledOnce = true;
+    try {
+      settleDispatchEffect({
+        runId, key: effectKey, status: error ? 'failed' : 'applied', result: mergeSettleResult(outcome, result), error,
+      });
+    } catch { /* best-effort — never mask the real outcome */ }
+    // Hold BEFORE release (red-team, round 2): a hold is what actually excludes the item from the daemon's
+    // next-tick candidates (`build-dispatch-daemon.mjs`'s `heldNums` filter) — the claim's own absence is not
+    // itself a re-dispatch guard. Releasing first opened a window (a crash between the two calls, or simply
+    // the two calls straddling a tick) where the claim was gone and nothing yet excluded the item, so a tick
+    // landing in that gap could re-dispatch it. Placing the hold first closes that window: from the moment
+    // this line returns, the item is excluded even if the release below never runs.
+    if (hold) {
+      try { placeBuildDispatchHold({ num: item, reason: hold }); } catch { /* best-effort */ }
+    }
+    if (releaseClaim) {
+      try { releaseBuildDispatchClaim({ num: item }); } catch { /* best-effort */ }
+    }
+  };
   const claudeSessionId = newSessionId(); // the Claude CLI's own --session-id — see the docblock above.
 
   // build-path-codex-isolation-locus — WHICH REPO this item's own `scope:` actually names, resolved ONCE, up
@@ -357,6 +411,11 @@ export async function deliverItem(launch, provider = CLAUDE_RESTRICTED_PROVIDER,
       implLanePath = acquireImplLane({ sessionSlug, claudeSessionId, item, profile: implProfile });
       if (!implLanePath) {
         releaseClaimAndLane({ item, lane, sessionSlug, best_effort: true });
+        settleTerminal('blocked-on-infra', {
+          result: { reason: `no free ${implProfile.key} lane` },
+          releaseClaim: true,
+          hold: `no free ${implProfile.key} lane`,
+        });
         return finish(`blocked-on-infra (no free ${implProfile.key} lane)`, {
           status: 'error', outcome: 'blocked-on-infra', reason: `no free ${implProfile.key} lane`,
         });
@@ -407,6 +466,14 @@ export async function deliverItem(launch, provider = CLAUDE_RESTRICTED_PROVIDER,
       // Pre-build stop, same shape as today's brief's Escalations case 0 — but decided by the WRAPPER
       // reading the report, never by the agent reasoning about claim/release CLI mechanics.
       releaseClaimAndLane({ item, lane, sessionSlug, implLanePath });
+      // A `not-ready` outcome is a KNOWN, RECURRING failure shape (a re-opened `blockedBy`, a stale/superseded
+      // spec, …) — settling the effect and releasing the claim ALONE would leave the item eligible again on
+      // the very next daemon tick (~2 minutes), tighter than the accidental ~90-120 minute gap this replaces.
+      // The hold is what actually stops the loop (see `build-dispatch-claim.mjs`'s own note for the mechanism,
+      // and `build-dispatch-daemon.mjs`'s tick for where it is read); `report.reason` can be empty for a
+      // `not-ready` the agent reported with no detail, so it falls back to the outcome name itself rather than
+      // placing a hold with no reason at all. EVERY non-PR terminal outcome below places the same kind of hold.
+      settleTerminal('not-ready', { result: { reason: report.reason }, releaseClaim: true, hold: report.reason || 'not-ready' });
       return finish(`not-ready (${report.reason})`, { status: 'unset', outcome: 'not-ready', reason: report.reason });
     }
 
@@ -417,6 +484,7 @@ export async function deliverItem(launch, provider = CLAUDE_RESTRICTED_PROVIDER,
       // partial work and release (safest, matches "no PR is opened" bar 0 sets), or open a draft/park PR so
       // the partial diff is not silently lost? Left open for whoever actually specs this out.
       releaseClaimAndLane({ item, lane, sessionSlug, implLanePath });
+      settleTerminal('blocked-mid-build', { result: { reason: report.reason }, releaseClaim: true, hold: report.reason || 'blocked-mid-build' });
       return finish(`blocked-mid-build (${report.reason})`, { status: 'error', outcome: 'blocked-mid-build', reason: report.reason });
     }
 
@@ -429,6 +497,7 @@ export async function deliverItem(launch, provider = CLAUDE_RESTRICTED_PROVIDER,
     });
     if (gate.status === 'red') {
       releaseClaimAndLane({ item, lane, sessionSlug, implLanePath });
+      settleTerminal('gate-red', { releaseClaim: true, hold: 'gate-red' });
       return finish('gate-red', { status: 'error', outcome: 'gate-red' });
     }
     if (gate.status === 'gate-blocked') {
@@ -437,6 +506,7 @@ export async function deliverItem(launch, provider = CLAUDE_RESTRICTED_PROVIDER,
       // gate — this attempt did not produce a landable diff either way — but the reported result names the
       // agent's own reason instead of pretending the gate itself failed.
       releaseClaimAndLane({ item, lane, sessionSlug, implLanePath });
+      settleTerminal('gate-blocked', { result: { reason: gate.reason || null }, releaseClaim: true, hold: gate.reason || 'gate-blocked' });
       return finish(`gate-blocked (${gate.reason || 'no reason reported'})`, { status: 'error', outcome: 'gate-blocked', reason: gate.reason || null });
     }
 
@@ -487,6 +557,12 @@ export async function deliverItem(launch, provider = CLAUDE_RESTRICTED_PROVIDER,
     // was still reading past a field that was never there, off the wrong object. Confirmed live on real PR
     // #2109 ("PR #undefined" printed even though the PR opened correctly) and reproduced by actually running
     // `run.mjs open-pr --json` (bug 13; see `extractSubmitResult`'s own docblock for the full story).
+    // #4349 — settle the effect on a real, opened PR too (never leave it `in-flight` for the waker to find
+    // hours later), but the build-dispatch CLAIM is deliberately left alone here: an open PR can still be
+    // closed/superseded before it merges, and `build-dispatch-daemon.mjs#doneWhy`'s own PR-observed retirement
+    // already owns "is this PR the thing that actually delivers the item" — racing ahead of it with our own
+    // "opened" signal would be trusting less information to save at most one ~2-minute tick.
+    settleTerminal('pr-opened', { result: { pr: prResult.pr ?? null, park: parkDecision.label } });
     return finish(`PR #${prResult.pr} (${parkDecision.label})`, {
       status: 'ok', outcome: 'pr-opened', pr: prResult.pr ?? null, park: parkDecision.label,
     });
@@ -498,9 +574,19 @@ export async function deliverItem(launch, provider = CLAUDE_RESTRICTED_PROVIDER,
     throw e;
   }
   } catch (e) {
-    // #3383 — the root span closes `error` on ANY escape, including the rethrow above. This is the outer of
-    // two catches on purpose: the inner one owns the real release/cleanup contract and is left untouched, so
-    // telemetry cannot alter what a failure does, only record that it happened.
+    // #3383 — the root span closes `error` on ANY escape, including the rethrow above; this is the outer of
+    // two catches so telemetry never alters what a failure does, only records that it happened.
+    //
+    // Settle + release/hold live HERE, not beside the inner catch's `releaseClaimAndLane`: `acquireLane` (a few
+    // lines into the outer `try`) can itself throw before the inner `try` ever opens, so settling only there
+    // would miss that case. This also runs on the RE-THROW from the inner catch above — `settleTerminal`'s own
+    // `settledOnce` guard is what keeps a second call here from re-releasing or re-holding anything.
+    //
+    // `wrapper-threw` means a definite, caught-by-us failure — never the genuinely-unknown "killed with no
+    // trace" case #3073's fail-closed rule protects (that case runs no JS at all). It gets a hold like every
+    // other non-PR outcome: a deterministic throw is exactly as re-dispatch-loop-prone as `not-ready`, with no
+    // finer-grained reason available than the outcome name itself.
+    settleTerminal('wrapper-threw', { error: String(e?.message ?? e), releaseClaim: true, hold: 'wrapper-threw' });
     root.fail(e, { outcome: 'wrapper-threw' });
     throw e;
   } finally {

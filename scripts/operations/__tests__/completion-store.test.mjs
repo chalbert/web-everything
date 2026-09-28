@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, it, expect } from 'vitest';
 
 import { newCompletionRecord } from '../completion-record.mjs';
 import {
+  completionLockRoot,
   completionPath,
   completionsDir,
   createFileCompletionStore,
@@ -16,8 +17,10 @@ import {
   readCompletion,
   resolveCompletionsDir,
   tryReadCompletion,
+  withCompletionLock,
   writeCompletion,
 } from '../completion-store.mjs';
+import { reserve } from '../../readiness/file-locks.mjs';
 
 let dir;
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'we-op-completions-')); });
@@ -77,6 +80,74 @@ describe('the fs shell', () => {
 
   it('refuses a session slug that could escape the completions directory', () => {
     expect(() => completionPath('../escape', dir)).toThrow(/invalid completion session slug/);
+  });
+});
+
+describe('writeCompletion with `expectPrior` (#4306) — the conditional backstop write', () => {
+  it('omitting `expectPrior` is byte-identical to before this option existed — no lock dir, bare path returned', () => {
+    const path = writeCompletion(sample(), dir);
+    expect(path).toBe(completionPath('review-701', dir));
+    expect(readdirSync(dir)).toEqual(['review-701.json']); // no `.locks` subdirectory ever created
+  });
+
+  it('writes and returns {written:true, path} when the on-disk record still matches what was planned against', () => {
+    writeCompletion(sample(), dir);
+    const plannedAgainst = tryReadCompletion('review-701', dir);
+    const next = { ...sample(), status: 'done', outcome: 'gate-red', updatedAt: '2026-09-03T00:10:00.000Z' };
+    const result = writeCompletion(next, dir, { expectPrior: plannedAgainst });
+    expect(result).toEqual({ written: true, path: completionPath('review-701', dir) });
+    expect(tryReadCompletion('review-701', dir).status).toBe('done');
+  });
+
+  it('refuses (writes nothing) when a DIFFERENT record landed between the plan read and this write — the exact race a fresh `started` report must win', () => {
+    writeCompletion(sample(), dir);
+    const plannedAgainst = tryReadCompletion('review-701', dir); // the reaper's own snapshot, taken at plan time
+    // A fresh generation's `started` report lands in between — same session NAME, different generation.
+    const interloper = { ...sample(), sessionId: 'session-B', updatedAt: '2026-09-03T00:05:00.000Z' };
+    writeCompletion(interloper, dir);
+    const backstop = { ...sample(), status: 'done', outcome: 'unreported-exit', updatedAt: '2026-09-03T00:10:00.000Z' };
+    const result = writeCompletion(backstop, dir, { expectPrior: plannedAgainst });
+    expect(result).toEqual({ written: false, reason: 'changed' });
+    expect(tryReadCompletion('review-701', dir)).toEqual(interloper); // untouched — the interloper's record wins
+  });
+
+  it('`expectPrior: null` means "planned against nothing on disk" — refuses once something has appeared', () => {
+    const first = writeCompletion(sample(), dir, { expectPrior: null });
+    expect(first).toEqual({ written: true, path: completionPath('review-701', dir) });
+    const second = writeCompletion({ ...sample(), status: 'done' }, dir, { expectPrior: null });
+    expect(second).toEqual({ written: false, reason: 'changed' });
+  });
+});
+
+describe('withCompletionLock (#4306) — the per-name critical section, reusing file-locks.mjs', () => {
+  it('runs `fn` and returns its value, releasing the lock afterward', () => {
+    const result = withCompletionLock('fix-9', () => 'the critical section ran', { dir });
+    expect(result).toBe('the critical section ran');
+    // released — a second acquisition for the SAME name succeeds immediately, no timeout needed.
+    expect(withCompletionLock('fix-9', () => 'again', { dir, waitMs: 50 })).toBe('again');
+  });
+
+  it('releases the lock even when `fn` throws', () => {
+    expect(() => withCompletionLock('fix-9', () => { throw new Error('boom'); }, { dir })).toThrow('boom');
+    expect(withCompletionLock('fix-9', () => 'still free', { dir, waitMs: 50 })).toBe('still free');
+  });
+
+  it('gives up with a clear, bounded-wait error when another owner already holds the same name', () => {
+    const lockRoot = completionLockRoot(dir);
+    const heldAt = Date.now();
+    reserve(lockRoot, 'completion:fix-9', 'someone-else', heldAt, new Date(heldAt).toISOString());
+    const start = Date.now();
+    expect(() => withCompletionLock('fix-9', () => 'should never run', {
+      dir, waitMs: 60, pollMs: 10, sleep: () => {},
+    })).toThrow(/could not acquire completion lock for "fix-9"/);
+    expect(Date.now() - start).toBeLessThan(2000); // bounded, never an unbounded wait
+  });
+
+  it('a DIFFERENT name is never blocked by another name\'s held lock', () => {
+    const lockRoot = completionLockRoot(dir);
+    const heldAt = Date.now();
+    reserve(lockRoot, 'completion:fix-9', 'someone-else', heldAt, new Date(heldAt).toISOString());
+    expect(withCompletionLock('fix-10', () => 'unrelated', { dir, waitMs: 50 })).toBe('unrelated');
   });
 });
 

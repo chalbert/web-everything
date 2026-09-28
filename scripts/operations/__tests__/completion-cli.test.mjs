@@ -9,11 +9,15 @@
  */
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { execFileSync } from 'node:child_process';
 import { afterEach, beforeEach, describe, it, expect } from 'vitest';
 
-import { planDoneReport, runReport, runShow, sessionSlugForCompletion } from '../completion-cli.mjs';
+import { planDoneOwnership, planDoneReport, runReport, runShow, sessionSlugForCompletion } from '../completion-cli.mjs';
 import { tryReadCompletion } from '../completion-store.mjs';
+
+const CLI_PATH = join(dirname(fileURLToPath(import.meta.url)), '..', 'completion-cli.mjs');
 
 let dir;
 let previousDir;
@@ -125,6 +129,105 @@ describe('a crashed dispatched agent still leaves a completion record (done-when
     expect(record.status).toBe('done');
     expect(record.outcome).toBe('blocked-on-infra');
     expect(record.startedAt).toBe('2026-09-03T02:00:00.000Z');
+  });
+});
+
+// #4306 (epic #3383/#4075, BLOCKER fix-2821) — "a completion record only ever speaks for the session that
+// wrote it": the ownership table `--session-id` drives on `report`.
+describe('report --session-id (#4306 ownership table)', () => {
+  it('started: a same-owner re-report onto its own started record is a no-op, exactly like the un-identified case', () => {
+    const first = runReport({ session: 'fix-11', kind: 'fix', status: 'started', 'session-id': 'A' });
+    expect(first.changed).toBe(true);
+    expect(first.record.sessionId).toBe('A');
+    const second = runReport({ session: 'fix-11', kind: 'fix', status: 'started', 'session-id': 'A' });
+    expect(second).toEqual({ changed: false, record: first.record });
+  });
+
+  it('started: a DIFFERENT sessionId onto an existing started record is a NEW generation — fresh record, never merged onto the old', () => {
+    runReport({ session: 'fix-11', kind: 'fix', status: 'started', 'session-id': 'A' });
+    const gen2 = runReport({ session: 'fix-11', kind: 'fix', status: 'started', 'session-id': 'B' });
+    expect(gen2.changed).toBe(true);
+    expect(gen2.record.sessionId).toBe('B');
+    expect(gen2.record.status).toBe('started');
+  });
+
+  it('started: an identified existing record + an UN-identified started report is also a new generation (one side null, the other not)', () => {
+    runReport({ session: 'fix-11', kind: 'fix', status: 'started', 'session-id': 'A' });
+    const anon = runReport({ session: 'fix-11', kind: 'fix', status: 'started' });
+    expect(anon.changed).toBe(true);
+    expect(anon.record.sessionId).toBeNull();
+  });
+
+  it('done: same sessionId (or both null) updates in place — today\'s behaviour, unaffected by this card', () => {
+    runReport({ session: 'fix-11', kind: 'fix', status: 'started', 'session-id': 'A' });
+    const done = runReport({ session: 'fix-11', status: 'done', outcome: 'accepted', 'session-id': 'A' });
+    expect(done.changed).toBe(true);
+    expect(done.record.status).toBe('done');
+    expect(done.record.sessionId).toBe('A');
+  });
+
+  it('done: a legacy (no-sessionId) record adopts a non-null incoming id', () => {
+    runReport({ session: 'fix-11', kind: 'fix', status: 'started' }); // no --session-id: legacy
+    const done = runReport({ session: 'fix-11', status: 'done', outcome: 'accepted', 'session-id': 'B' });
+    expect(done.changed).toBe(true);
+    expect(done.record.sessionId).toBe('B');
+  });
+
+  it('done: an identified record refuses a done report from a DIFFERENT id — exit-0 refusal, not a throw, the record is left untouched', () => {
+    runReport({ session: 'fix-11', kind: 'fix', status: 'started', 'session-id': 'A' });
+    const result = runReport({ session: 'fix-11', status: 'done', outcome: 'unreported-exit', 'session-id': 'B' });
+    expect(result).toEqual({ changed: false, refused: true, why: expect.stringMatching(/owned by session A/) });
+    const onDisk = tryReadCompletion('fix-11');
+    expect(onDisk.status).toBe('started'); // untouched — never overwritten by the refused report
+    expect(onDisk.sessionId).toBe('A');
+  });
+
+  it('done: an identified record refuses an ANONYMOUS (no-id) done report too — this is exactly the live-incident backstop shape', () => {
+    runReport({ session: 'fix-11', kind: 'fix', status: 'started', 'session-id': 'B' }); // the LIVE new fixer
+    const result = runReport({ session: 'fix-11', status: 'done', outcome: 'unreported-exit' }); // an old-generation backstop, no id
+    expect(result.refused).toBe(true);
+    expect(tryReadCompletion('fix-11').status).toBe('started'); // B's own record survives
+  });
+
+  it('planDoneOwnership: the pure core matches the table exactly', () => {
+    expect(planDoneOwnership({ existing: null, incomingSessionId: 'A' })).toEqual({ refuse: false, sessionId: 'A' });
+    expect(planDoneOwnership({ existing: { sessionId: null }, incomingSessionId: null })).toEqual({ refuse: false, sessionId: null });
+    expect(planDoneOwnership({ existing: { sessionId: null }, incomingSessionId: 'A' })).toEqual({ refuse: false, sessionId: 'A' });
+    expect(planDoneOwnership({ existing: { sessionId: 'A' }, incomingSessionId: 'A' })).toEqual({ refuse: false, sessionId: 'A' });
+    expect(planDoneOwnership({ existing: { sessionId: 'A' }, incomingSessionId: 'B' }).refuse).toBe(true);
+    expect(planDoneOwnership({ existing: { sessionId: 'A' }, incomingSessionId: null }).refuse).toBe(true);
+  });
+});
+
+// #4306 (independent panel review, standards-conformance/red-team) — the CLAUDE_CODE_SESSION_ID auto-fill
+// lives ENTIRELY inside the `IS_CLI` guard (see completion-cli.mjs's own header comment for why), which only
+// ever runs when this file is invoked as a real subprocess — every other test in this file calls `runReport`
+// in-process and so never exercises that branch. This is the one test that actually spawns the CLI.
+describe('the real CLI subprocess auto-fills --session-id from CLAUDE_CODE_SESSION_ID (#4306)', () => {
+  it('a `report --status=started` run as a real subprocess with CLAUDE_CODE_SESSION_ID set stamps the record with it', () => {
+    execFileSync(process.execPath, [CLI_PATH, 'report', '--session=fix-777', '--kind=fix', '--pr=777', '--status=started'], {
+      env: { ...process.env, OPERATION_COMPLETIONS_DIR: dir, CLAUDE_CODE_SESSION_ID: 'sess-real-cli-subprocess' },
+      encoding: 'utf8',
+    });
+    const record = tryReadCompletion('fix-777', dir);
+    expect(record.sessionId).toBe('sess-real-cli-subprocess');
+  });
+
+  it('an explicit --session-id on the command line wins over the environment variable', () => {
+    execFileSync(process.execPath, [CLI_PATH, 'report', '--session=fix-778', '--kind=fix', '--pr=778', '--status=started', '--session-id=explicit-id'], {
+      env: { ...process.env, OPERATION_COMPLETIONS_DIR: dir, CLAUDE_CODE_SESSION_ID: 'sess-should-be-ignored' },
+      encoding: 'utf8',
+    });
+    const record = tryReadCompletion('fix-778', dir);
+    expect(record.sessionId).toBe('explicit-id');
+  });
+
+  it('with no CLAUDE_CODE_SESSION_ID in the subprocess env, the record stays legacy (sessionId: null)', () => {
+    const env = { ...process.env, OPERATION_COMPLETIONS_DIR: dir };
+    delete env.CLAUDE_CODE_SESSION_ID;
+    execFileSync(process.execPath, [CLI_PATH, 'report', '--session=fix-779', '--kind=fix', '--pr=779', '--status=started'], { env, encoding: 'utf8' });
+    const record = tryReadCompletion('fix-779', dir);
+    expect(record.sessionId).toBeNull();
   });
 });
 

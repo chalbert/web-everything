@@ -61,6 +61,11 @@ export default defineConfig({
       'scripts/__tests__/lane-pool-reserve.test.mjs',
       'scripts/__tests__/lane-pool-cross-pool.test.mjs',
       'scripts/__tests__/lane-pool-reap-on-acquire.test.mjs',
+      // #xkk4lv7 — same tier/sibling: real throwaway origin/reference/pool, real spawned `lane-pool.mjs
+      // acquire` children, a fake `gh` on PATH — proves the branch-based item-resolution fallback in
+      // `deadLeasePlan` (the capacity-cap root cause: a non-dispatcher-session lease reclaimed via its lane's
+      // own checked-out branch, with the pre-existing acquire-time TTL gate preserved).
+      'scripts/__tests__/lane-pool-reap-branch-fallback.test.mjs',
       'scripts/__tests__/lane-pool-siblings.test.mjs',
       'scripts/__tests__/lane-pool-acquirable.test.mjs',
       'scripts/__tests__/lane-pool-reap-on-list-acquirable.test.mjs',
@@ -150,6 +155,10 @@ export default defineConfig({
       // `reapDeadLeasesInPool` function through the identical real-subprocess TTL-backdating +
       // item-resolved-axis pattern as its sibling above, so the same contention risk applies by construction.
       ['scripts/__tests__/lane-pool-reap-on-list-acquirable.test.mjs', 'forks'],
+      // #xkk4lv7 — a seventh join, pre-emptively, for the same reason: it drives `deadLeasePlan`'s NEW
+      // branch-based fallback through the identical real-subprocess TTL-backdating pattern as its two siblings
+      // above, so the same contention-induced flake risk applies by construction.
+      ['scripts/__tests__/lane-pool-reap-branch-fallback.test.mjs', 'forks'],
     ],
     // #x1jcikc: default `threads` pool cap (see vitest.shared.ts#maxTestWorkers) — the handful of files
     // above are pinned to the SEPARATE `forks` pool's `singleFork: true` for a correctness reason (flaky

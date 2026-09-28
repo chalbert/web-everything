@@ -108,7 +108,10 @@ export function makeEvidenceResolver({
     evidence.resultFiles = [...new Set(paths)].map((path) => ({ path, mtimeMs: mtime(path) })).filter((f) => f.mtimeMs != null);
 
     if (typeof name === 'string' && isValidSessionSlug(name)) {
-      try { const c = readCompletionFn(name); if (c) evidence.completion = { status: c.status, startedAt: c.startedAt, updatedAt: c.updatedAt }; } catch { /* corrupt/unreadable = unknown */ }
+      // #4306 — `sessionId` rides through so the classifier (`session-verdicts.mjs#finishedEvidence`) can bind
+      // this record to the row it belongs to and refuse a foreign one, exactly like `reconcile-core.mjs
+      // #markSelfReportedDone` / `session-reaper.mjs#makeCompletionResolver` already do for their own readers.
+      try { const c = readCompletionFn(name); if (c) evidence.completion = { status: c.status, startedAt: c.startedAt, updatedAt: c.updatedAt, sessionId: c.sessionId ?? null }; } catch { /* corrupt/unreadable = unknown */ }
     }
 
     if (typeof session?.sessionId === 'string' && /^[\w-]+$/.test(session.sessionId)) {

@@ -25,8 +25,14 @@ describe('makeEvidenceResolver', () => {
   });
   it('reads the completion record, and a corrupt one is unknown', () => {
     const rec = { status: 'done', startedAt: 'a', updatedAt: 'b' };
-    expect(makeEvidenceResolver({ statFn: statMap({}), readCompletionFn: () => rec })(session).completion).toEqual(rec);
+    // #4306 — `sessionId` rides through (null when the record carries none) so the classifier can bind a
+    // record to the row it belongs to; see `session-verdicts.mjs#finishedEvidence`'s own foreign-record check.
+    expect(makeEvidenceResolver({ statFn: statMap({}), readCompletionFn: () => rec })(session).completion).toEqual({ ...rec, sessionId: null });
     expect(makeEvidenceResolver({ statFn: statMap({}), readCompletionFn: () => { throw new Error('corrupt'); } })(session).completion).toBeUndefined();
+  });
+  it('#4306 — a record that DOES carry a sessionId rides it through unchanged', () => {
+    const rec = { status: 'done', startedAt: 'a', updatedAt: 'b', sessionId: 'sess-A' };
+    expect(makeEvidenceResolver({ statFn: statMap({}), readCompletionFn: () => rec })(session).completion).toEqual(rec);
   });
   it('redispatchAttempts counts prior launches for the same target+kind in the ledger', () => {
     const followUps = [

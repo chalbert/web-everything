@@ -53,6 +53,36 @@ vi.mock('node:fs', async (importOriginal) => {
   const mocked = { ...actual, readFileSync };
   return { ...mocked, default: mocked };
 });
+// #4349 finding #7 — a way to inject a throw AFTER the root span's own `ok()` close, i.e. after a terminal
+// branch already called `settleTerminal` and is on its way out through `finish()`. Everything else about
+// telemetry stays real; only the root `dispatch` span's `ok()` is wrapped, and only fires once per flag set.
+const telemetryFaults = vi.hoisted(() => ({ throwOnNextRootOk: false }));
+vi.mock('../telemetry-store.mjs', async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    recorderFor: (...args) => {
+      const rec = actual.recorderFor(...args);
+      return {
+        ...rec,
+        startSpan: (name, opts) => {
+          const span = rec.startSpan(name, opts);
+          if (name !== 'dispatch') return span;
+          return {
+            ...span,
+            ok: (extra) => {
+              if (telemetryFaults.throwOnNextRootOk) {
+                telemetryFaults.throwOnNextRootOk = false;
+                throw new Error('injected: telemetry root.ok threw after settle');
+              }
+              return span.ok(extra);
+            },
+          };
+        },
+      };
+    },
+  };
+});
 
 import { execFileSync } from 'node:child_process';
 import { SPAWN_TIMEOUT_MS, findItem } from '../dispatch-lane-io.mjs';
@@ -73,8 +103,13 @@ import {
   resetStaleVerifyMarker, runVerifyOperation, deliverItem,
   // build-path-codex-isolation-locus
   resolveDeliveryLocus, acquireImplLane, stageDeliveryReportCliIntoLane, DELIVERY_REPORT_CLI_REL_FILES,
+  mergeSettleResult,
 } from '../deliver-item-wrapper.mjs';
 import { repoProfile } from '../../lib/repo-profile.mjs';
+// #4349 — real (never mocked) run-store + build-dispatch-claim reads, driven through a temp `OPERATION_RUNS_DIR`
+// / `WE_COORDINATION_ROOT` in the new describe block below.
+import { createFileRunStore, newRunRecord } from '../run-store.mjs';
+import { acquireBuildDispatchClaim, listBuildDispatchClaims, listBuildDispatchHolds } from '../../conveyor/build-dispatch-claim.mjs';
 
 // A real UUID, hardcoded for deterministic assertions (mirrors `crypto.randomUUID()`'s own output shape). Tests
 // that need "some UUID, any UUID" instead assert against this regex.
@@ -2880,5 +2915,434 @@ describe('deliverItem (#3627 bug 13 — the success-path result string names the
       { newSessionId: () => 'uuid-fixed' },
     )).rejects.toThrow(/multi-repo "couple" build/);
     expect(execFileSync).not.toHaveBeenCalled();
+  });
+});
+
+describe('mergeSettleResult (the positional `outcome` always wins over anything `result` supplies)', () => {
+  it('overrides a same-named `outcome` field inside `result`', () => {
+    expect(mergeSettleResult('not-ready', { outcome: 'pr-opened', reason: 'x' })).toEqual({ outcome: 'not-ready', reason: 'x' });
+  });
+  it('merges every other field from `result` through untouched', () => {
+    expect(mergeSettleResult('gate-blocked', { reason: 'r', pr: 42 })).toEqual({ outcome: 'gate-blocked', reason: 'r', pr: 42 });
+  });
+  it('tolerates a missing/null `result`', () => {
+    expect(mergeSettleResult('gate-red')).toEqual({ outcome: 'gate-red' });
+    expect(mergeSettleResult('gate-red', null)).toEqual({ outcome: 'gate-red' });
+  });
+});
+
+// ================================================================================================
+// #4349 — a finished delivery wrapper never settled its own run-store effect or released the build-dispatch
+// claim, so a no-op dispatch held one of the daemon's cap slots for hours and re-dispatched into the same
+// failure. `deliverItem` now settles (`deliver-item-settle.mjs`) and releases/holds the claim
+// (`build-dispatch-claim.mjs`) on every terminal exit when its `launch` carries `runId`/`effectKey` (threaded
+// from `effect-executor.mjs`'s own per-sink `ctx`, see `dispatch-lane-io.mjs`/`dispatch-providers/build.mjs`/
+// `deliver-item-run.mjs`'s own #4349 notes). Drives the REAL, unmodified `deliverItem` end to end against REAL
+// on-disk run-store + build-dispatch-claim files (temp dirs, never the repo's own `.operations/` state) — the
+// same "mock only execFileSync/fs's one read, everything else real" discipline the rest of this file uses.
+// ================================================================================================
+describe('deliverItem (#4349 — settles its run-store effect + releases/holds the build-dispatch claim)', () => {
+  let lane;
+  let runsDir;
+  let coordRoot;
+
+  beforeEach(() => {
+    lane = mkdtempSync(join(tmpdir(), 'deliver-item-wrapper-settle-'));
+    runsDir = mkdtempSync(join(tmpdir(), 'deliver-item-wrapper-settle-runs-'));
+    coordRoot = mkdtempSync(join(tmpdir(), 'deliver-item-wrapper-settle-coord-'));
+    process.env.OPERATION_RUNS_DIR = runsDir;
+    // `releaseBuildDispatchClaim`/`placeBuildDispatchHold` inside `deliverItem` call the claim module with NO
+    // injected `lockRoot` (by design — that is the real production call shape), so they resolve their root via
+    // `resolveCoordinationRoot()`. Pointing THAT at a throwaway temp dir via its own env override, rather than
+    // mocking the module, lets this test drive the real, unmodified call graph end to end while never touching
+    // the host's actual coordination root.
+    process.env.WE_COORDINATION_ROOT = coordRoot;
+    findItem.mockReturnValue({ num: '9001', slug: 'settle-thing', specPath: 'backlog/9001-settle-thing.md', scope: [] });
+  });
+
+  afterEach(() => {
+    delete process.env.OPERATION_RUNS_DIR;
+    delete process.env.WE_COORDINATION_ROOT;
+    rmSync(lane, { recursive: true, force: true });
+    rmSync(runsDir, { recursive: true, force: true });
+    rmSync(coordRoot, { recursive: true, force: true });
+    findItem.mockClear();
+    tryReadDeliveryReport.mockReset();
+    execFileSync.mockReset();
+  });
+
+  /** Seeds a schema-valid, `in-flight` `dispatch-lane` run record — the exact shape `applyPendingEffects`
+   *  leaves behind before its sink ever reports back. */
+  function seedInFlightRun(id) {
+    const store = createFileRunStore(runsDir);
+    const run = {
+      ...newRunRecord({ id, op: 'dispatch-lane' }),
+      pending: { kind: 'effect', step: 'dispatch', stepIndex: 0 },
+      effects: [{
+        key: 'dispatch:0:0', type: 'conveyor.dispatch-delivery-agent', stepIndex: 0, index: 0, status: 'in-flight',
+        handle: 'pid:424242', expectedBy: new Date(Date.now() + 90 * 60_000).toISOString(),
+        payload: { num: '9001', launchKind: 'build' }, result: null, error: null,
+      }],
+    };
+    store.write(run);
+    return store;
+  }
+
+  it('Done-when 1 — a `not-ready` finish settles the effect `applied` with `result.outcome === "not-ready"` '
+    + 'and releases the build-dispatch claim', async () => {
+    const store = seedInFlightRun('dispatch-lane-9001a');
+    acquireBuildDispatchClaim({ num: '9001', scope: [] });
+    expect(listBuildDispatchClaims().map((c) => c.meta.num)).toEqual(['9001']);
+
+    tryReadDeliveryReport.mockReturnValue({ status: 'done', outcome: 'blocked', filesTouched: [], reason: 'blockedBy 1 re-opened' });
+    execFileSync.mockImplementation((cmd, args = []) => {
+      const a = args || [];
+      if (cmd === 'node' && a[0] === 'scripts/lane-pool.mjs' && a[1] === 'acquire') return '';
+      if (cmd === 'node' && a[0] === 'scripts/lane-pool.mjs' && a[1] === 'status') {
+        return JSON.stringify({ repo: 'web-everything', root: '/pool', lanes: [{ lane: 7, path: lane, exists: true }] });
+      }
+      if (cmd === 'node' && a[0] === 'scripts/operations/run.mjs' && a[1] === 'claim') return '{}';
+      if (cmd === 'node' && a[0] === 'scripts/backlog.mjs' && a[1] === 'release') return '';
+      if (cmd === 'node' && a[0] === 'scripts/lane-pool.mjs' && a[1] === 'release') return '';
+      throw new Error(`unexpected execFileSync(${cmd}, ${JSON.stringify(a)})`);
+    });
+
+    const result = await deliverItem(
+      {
+        item: '9001', lane: 7, scope: [], sessionSlug: 'conveyor-9001', attemptTag: '',
+        runId: 'dispatch-lane-9001a', effectKey: 'dispatch:0:0',
+      },
+      { spawn: vi.fn() },
+      { newSessionId: () => 'uuid-fixed' },
+    );
+
+    expect(result.result).toBe('not-ready (blockedBy 1 re-opened)');
+    const settledEntry = store.read('dispatch-lane-9001a').effects[0];
+    expect(settledEntry.status).toBe('applied');
+    expect(settledEntry.result).toEqual({ outcome: 'not-ready', reason: 'blockedBy 1 re-opened' });
+    expect(listBuildDispatchClaims()).toEqual([]);
+    // This IS the actual guarantee that stops the re-dispatch loop: assert the hold itself, not just the
+    // settle + claim release (both of which would stay green even if `hold: report.reason` were dropped
+    // from the `not-ready` `settleTerminal` call).
+    expect(listBuildDispatchHolds().map((h) => h.meta.num)).toEqual(['9001']);
+    expect(listBuildDispatchHolds()[0].meta.reason).toBe('blockedBy 1 re-opened');
+  });
+
+  it('a `gate-red` finish also settles the run-store effect + releases the build-dispatch claim — a '
+    + 'DIFFERENT terminal outcome than the `not-ready` test above reaching the same settle/release call', async () => {
+    seedInFlightRun('dispatch-lane-9001b');
+    acquireBuildDispatchClaim({ num: '9001', scope: [] });
+    tryReadDeliveryReport.mockReturnValue({ status: 'done', outcome: 'done', filesTouched: ['a.mjs'], reason: 'did it' });
+    execFileSync.mockImplementation((cmd, args = []) => {
+      const a = args || [];
+      if (cmd === 'node' && a[0] === 'scripts/lane-pool.mjs' && a[1] === 'acquire') return '';
+      if (cmd === 'node' && a[0] === 'scripts/lane-pool.mjs' && a[1] === 'status') {
+        return JSON.stringify({ repo: 'web-everything', root: '/pool', lanes: [{ lane: 7, path: lane, exists: true }] });
+      }
+      if (cmd === 'node' && a[0] === 'scripts/operations/run.mjs' && a[1] === 'claim') return '{}';
+      if (cmd === 'node' && a[0] === 'scripts/verify-lane.mjs') return '{}';
+      if (cmd === 'node' && a[0] === 'scripts/operations/run.mjs' && a[1] === 'verify') {
+        return JSON.stringify({
+          runId: 'run-1', op: 'verify', stopped: 'complete', applied: [],
+          verdict: { ok: false, cwd: lane, suite: 'run', passed: 1, failed: 1, unrun: 0, checks: [], blocking: [{ name: 'unit' }] },
+        });
+      }
+      if (cmd === 'node' && a[0] === 'scripts/backlog.mjs' && a[1] === 'release') return '';
+      if (cmd === 'node' && a[0] === 'scripts/lane-pool.mjs' && a[1] === 'release') return '';
+      if (cmd === 'git') return ''; // decideParkMode/commitBuildTurn's own diff-stats reads
+      throw new Error(`unexpected execFileSync(${cmd}, ${JSON.stringify(a)})`);
+    });
+
+    const result = await deliverItem(
+      {
+        item: '9001', lane: 7, scope: [], sessionSlug: 'conveyor-9001', attemptTag: '',
+        runId: 'dispatch-lane-9001b', effectKey: 'dispatch:0:0',
+      },
+      { spawn: vi.fn() },
+      { newSessionId: () => 'uuid-fixed' },
+    );
+
+    expect(result.result).toBe('gate-red');
+    const store = createFileRunStore(runsDir);
+    expect(store.read('dispatch-lane-9001b').effects[0].status).toBe('applied');
+    expect(store.read('dispatch-lane-9001b').effects[0].result).toEqual({ outcome: 'gate-red' });
+    expect(listBuildDispatchClaims()).toEqual([]);
+    // `gate-red` is a non-`not-ready` terminal outcome, and the whole point of generalizing the hold is that
+    // it fires here too, not only on `not-ready`.
+    expect(listBuildDispatchHolds().map((h) => h.meta.num)).toEqual(['9001']);
+    expect(listBuildDispatchHolds()[0].meta.reason).toBe('gate-red');
+  });
+
+  it('a `gate-blocked` finish (the resumed agent\'s own honest `blocked` self-diagnosis, a DIFFERENT terminal '
+    + 'outcome than `gate-red`) also places a hold, keyed by the agent\'s own reason', async () => {
+    seedInFlightRun('dispatch-lane-9001g');
+    acquireBuildDispatchClaim({ num: '9001', scope: [] });
+    tryReadDeliveryReport
+      .mockReturnValueOnce({ status: 'done', outcome: 'done', filesTouched: ['a.mjs'], reason: 'did it' })
+      .mockReturnValueOnce({ status: 'done', outcome: 'blocked', reason: 'stale verify marker for an unrelated sha' });
+    execFileSync.mockImplementation((cmd, args = []) => {
+      const a = args || [];
+      if (cmd === 'node' && a[0] === 'scripts/lane-pool.mjs' && a[1] === 'acquire') return '';
+      if (cmd === 'node' && a[0] === 'scripts/lane-pool.mjs' && a[1] === 'status') {
+        return JSON.stringify({ repo: 'web-everything', root: '/pool', lanes: [{ lane: 7, path: lane, exists: true }] });
+      }
+      if (cmd === 'node' && a[0] === 'scripts/operations/run.mjs' && a[1] === 'claim') return '{}';
+      if (cmd === 'node' && a[0] === 'scripts/verify-lane.mjs') return '{}';
+      if (cmd === 'node' && a[0] === 'scripts/operations/run.mjs' && a[1] === 'verify') {
+        return JSON.stringify({
+          runId: 'run-1', op: 'verify', stopped: 'complete', applied: [],
+          verdict: {
+            ok: false, cwd: lane, suite: 'run', passed: 0, failed: 0, unrun: 1, checks: [],
+            blocking: [{ check: 'verify-lane', why: 'did-not-run', detail: 'usage/git error (exit 3): superseded' }],
+          },
+        });
+      }
+      if (cmd === 'node' && a[0] === 'scripts/backlog.mjs' && a[1] === 'release') return '';
+      if (cmd === 'node' && a[0] === 'scripts/lane-pool.mjs' && a[1] === 'release') return '';
+      if (cmd === 'git') return '';
+      throw new Error(`unexpected execFileSync(${cmd}, ${JSON.stringify(a)})`);
+    });
+
+    const result = await deliverItem(
+      {
+        item: '9001', lane: 7, scope: [], sessionSlug: 'conveyor-9001', attemptTag: '',
+        runId: 'dispatch-lane-9001g', effectKey: 'dispatch:0:0',
+      },
+      { spawn: vi.fn() },
+      { newSessionId: () => 'uuid-fixed' },
+    );
+
+    expect(result.result).toBe('gate-blocked (stale verify marker for an unrelated sha)');
+    expect(listBuildDispatchClaims()).toEqual([]);
+    expect(listBuildDispatchHolds().map((h) => h.meta.num)).toEqual(['9001']);
+    expect(listBuildDispatchHolds()[0].meta.reason).toBe('stale verify marker for an unrelated sha');
+  });
+
+  it('a `blocked-mid-build` finish (real work already in the lane, a runtime blocker mid-build) also places '
+    + 'a hold, keyed by the agent\'s own reason', async () => {
+    seedInFlightRun('dispatch-lane-9001h');
+    acquireBuildDispatchClaim({ num: '9001', scope: [] });
+    tryReadDeliveryReport.mockReturnValue({
+      status: 'done', outcome: 'blocked', filesTouched: ['a.mjs'], reason: 'infra hiccup mid-build',
+    });
+    execFileSync.mockImplementation((cmd, args = []) => {
+      const a = args || [];
+      if (cmd === 'node' && a[0] === 'scripts/lane-pool.mjs' && a[1] === 'acquire') return '';
+      if (cmd === 'node' && a[0] === 'scripts/lane-pool.mjs' && a[1] === 'status') {
+        return JSON.stringify({ repo: 'web-everything', root: '/pool', lanes: [{ lane: 7, path: lane, exists: true }] });
+      }
+      if (cmd === 'node' && a[0] === 'scripts/operations/run.mjs' && a[1] === 'claim') return '{}';
+      if (cmd === 'node' && a[0] === 'scripts/backlog.mjs' && a[1] === 'release') return '';
+      if (cmd === 'node' && a[0] === 'scripts/lane-pool.mjs' && a[1] === 'release') return '';
+      throw new Error(`unexpected execFileSync(${cmd}, ${JSON.stringify(a)})`);
+    });
+
+    const result = await deliverItem(
+      {
+        item: '9001', lane: 7, scope: [], sessionSlug: 'conveyor-9001', attemptTag: '',
+        runId: 'dispatch-lane-9001h', effectKey: 'dispatch:0:0',
+      },
+      { spawn: vi.fn() },
+      { newSessionId: () => 'uuid-fixed' },
+    );
+
+    expect(result.result).toBe('blocked-mid-build (infra hiccup mid-build)');
+    expect(listBuildDispatchClaims()).toEqual([]);
+    expect(listBuildDispatchHolds().map((h) => h.meta.num)).toEqual(['9001']);
+    expect(listBuildDispatchHolds()[0].meta.reason).toBe('infra hiccup mid-build');
+  });
+
+  it('a `blocked-on-infra` finish (no free implementation lane for a non-we locus) also places a hold, so a '
+    + 'saturated pool does not get re-tried every ~2 minutes either', async () => {
+    seedInFlightRun('dispatch-lane-9002i');
+    acquireBuildDispatchClaim({ num: '9002', scope: [] });
+    findItem.mockReturnValue({ num: '9002', slug: 'plateau-thing', specPath: 'backlog/9002-plateau-thing.md', scope: ['plateau-app:src/foo.tsx'] });
+    execFileSync.mockImplementation((cmd, args = []) => {
+      const a = args || [];
+      if (cmd === 'node' && a[0] === 'scripts/lane-pool.mjs' && a[1] === 'acquire') return ''; // saturated
+      if (cmd === 'node' && a[0] === 'scripts/lane-pool.mjs' && a[1] === 'status') {
+        return JSON.stringify({ repo: 'web-everything', root: '/pool', lanes: [{ lane: 7, path: lane, exists: true }] });
+      }
+      if (cmd === 'node' && a[0] === 'scripts/backlog.mjs' && a[1] === 'release') return '';
+      if (cmd === 'node' && a[0] === 'scripts/lane-pool.mjs' && a[1] === 'release') return '';
+      throw new Error(`unexpected execFileSync(${cmd}, ${JSON.stringify(a)})`);
+    });
+
+    const result = await deliverItem(
+      {
+        item: '9002', lane: 7, scope: ['plateau-app:src/foo.tsx'], sessionSlug: 'conveyor-9002', attemptTag: '',
+        runId: 'dispatch-lane-9002i', effectKey: 'dispatch:0:0',
+      },
+      { spawn: vi.fn(), vendor: 'codex' },
+      { newSessionId: () => 'uuid-fixed' },
+    );
+
+    expect(result.result).toBe('blocked-on-infra (no free plateau-app lane)');
+    expect(listBuildDispatchClaims()).toEqual([]);
+    expect(listBuildDispatchHolds().map((h) => h.meta.num)).toEqual(['9002']);
+    expect(listBuildDispatchHolds()[0].meta.reason).toBe('no free plateau-app lane');
+  });
+
+  it('a `pr-opened` finish settles the effect but leaves the claim HELD and places NO hold — an opened PR is '
+    + 'not a failure the daemon should cool down on', async () => {
+    seedInFlightRun('dispatch-lane-9003j');
+    acquireBuildDispatchClaim({ num: '9003', scope: [] });
+    findItem.mockReturnValue({ num: '9003', slug: 'pr-thing', specPath: 'backlog/9003-pr-thing.md', scope: [] });
+    tryReadDeliveryReport.mockReturnValue({ status: 'done', outcome: 'done', filesTouched: ['a.mjs'], reason: 'did it' });
+    execFileSync.mockImplementation((cmd, args = []) => {
+      const a = args || [];
+      if (cmd === 'node' && a[0] === 'scripts/lane-pool.mjs' && a[1] === 'acquire') return '';
+      if (cmd === 'node' && a[0] === 'scripts/lane-pool.mjs' && a[1] === 'status') {
+        return JSON.stringify({ repo: 'web-everything', root: '/pool', lanes: [{ lane: 7, path: lane, exists: true }] });
+      }
+      if (cmd === 'node' && a[0] === 'scripts/verify-lane.mjs') return '{}';
+      if (cmd === 'node' && a[0] === 'scripts/operations/run.mjs' && a[1] === 'claim') return '{}';
+      if (cmd === 'node' && a[0] === 'scripts/operations/run.mjs' && a[1] === 'verify') {
+        return JSON.stringify({
+          runId: 'run-1', op: 'verify', stopped: 'complete', applied: [],
+          verdict: { ok: true, cwd: lane, suite: 'run', passed: 2, failed: 0, unrun: 0, checks: [], blocking: [] },
+        });
+      }
+      if (cmd === 'node' && a[0] === 'scripts/converge-cli.mjs' && a[1] === 'init') {
+        return JSON.stringify({ action: 'land', round: 1, roundCap: 5, verdict: 'land', dismissed: [] });
+      }
+      if (cmd === 'git') return '';
+      if (cmd === 'node' && String(a[0]).endsWith('scripts/operations/run.mjs') && a[1] === 'open-pr') {
+        return openPrEnvelope({ outcome: 'opened', pr: 9876, url: 'https://example/pr/9876' });
+      }
+      throw new Error(`unexpected execFileSync(${cmd}, ${JSON.stringify(a)})`);
+    });
+
+    const result = await deliverItem(
+      {
+        item: '9003', lane: 7, scope: [], sessionSlug: 'conveyor-9003', attemptTag: '',
+        runId: 'dispatch-lane-9003j', effectKey: 'dispatch:0:0',
+      },
+      { spawn: vi.fn(), vendor: 'claude' },
+      { newSessionId: () => 'uuid-fixed' },
+    );
+
+    expect(result.result).toContain('PR #9876');
+    const store = createFileRunStore(runsDir);
+    expect(store.read('dispatch-lane-9003j').effects[0].status).toBe('applied');
+    // the claim is deliberately left ALONE on a PR outcome — `build-dispatch-daemon.mjs#doneWhy`'s own
+    // PR-observed retirement owns this, not the wrapper racing ahead of it.
+    expect(listBuildDispatchClaims().map((c) => c.meta.num)).toEqual(['9003']);
+    expect(listBuildDispatchHolds()).toEqual([]);
+  });
+
+  it('finding #7 — a throw AFTER an earlier `settleTerminal` already ran (here, `finish()` itself blowing up '
+    + 'right after the `pr-opened` branch settled) never re-fires: the outer catch\'s `wrapper-threw` settle '
+    + 'must not release the claim `pr-opened` deliberately left held, nor place a `wrapper-threw` hold over it',
+  async () => {
+    seedInFlightRun('dispatch-lane-9003k');
+    acquireBuildDispatchClaim({ num: '9003', scope: [] });
+    findItem.mockReturnValue({ num: '9003', slug: 'pr-thing', specPath: 'backlog/9003-pr-thing.md', scope: [] });
+    tryReadDeliveryReport.mockReturnValue({ status: 'done', outcome: 'done', filesTouched: ['a.mjs'], reason: 'did it' });
+    execFileSync.mockImplementation((cmd, args = []) => {
+      const a = args || [];
+      if (cmd === 'node' && a[0] === 'scripts/lane-pool.mjs' && a[1] === 'acquire') return '';
+      if (cmd === 'node' && a[0] === 'scripts/lane-pool.mjs' && a[1] === 'status') {
+        return JSON.stringify({ repo: 'web-everything', root: '/pool', lanes: [{ lane: 7, path: lane, exists: true }] });
+      }
+      if (cmd === 'node' && a[0] === 'scripts/verify-lane.mjs') return '{}';
+      if (cmd === 'node' && a[0] === 'scripts/operations/run.mjs' && a[1] === 'claim') return '{}';
+      if (cmd === 'node' && a[0] === 'scripts/operations/run.mjs' && a[1] === 'verify') {
+        return JSON.stringify({
+          runId: 'run-1', op: 'verify', stopped: 'complete', applied: [],
+          verdict: { ok: true, cwd: lane, suite: 'run', passed: 2, failed: 0, unrun: 0, checks: [], blocking: [] },
+        });
+      }
+      if (cmd === 'node' && a[0] === 'scripts/converge-cli.mjs' && a[1] === 'init') {
+        return JSON.stringify({ action: 'land', round: 1, roundCap: 5, verdict: 'land', dismissed: [] });
+      }
+      if (cmd === 'git') return '';
+      if (cmd === 'node' && String(a[0]).endsWith('scripts/operations/run.mjs') && a[1] === 'open-pr') {
+        return openPrEnvelope({ outcome: 'opened', pr: 9877, url: 'https://example/pr/9877' });
+      }
+      throw new Error(`unexpected execFileSync(${cmd}, ${JSON.stringify(a)})`);
+    });
+
+    telemetryFaults.throwOnNextRootOk = true;
+    await expect(deliverItem(
+      {
+        item: '9003', lane: 7, scope: [], sessionSlug: 'conveyor-9003', attemptTag: '',
+        runId: 'dispatch-lane-9003k', effectKey: 'dispatch:0:0',
+      },
+      { spawn: vi.fn(), vendor: 'claude' },
+      { newSessionId: () => 'uuid-fixed' },
+    )).rejects.toThrow(/telemetry root\.ok threw after settle/);
+
+    const store = createFileRunStore(runsDir);
+    // the run-store settle from the FIRST (`pr-opened`) call stands — the outer catch's own settle attempt is
+    // a no-op and must not overwrite it with `wrapper-threw`.
+    expect(store.read('dispatch-lane-9003k').effects[0].result).toEqual({ outcome: 'pr-opened', pr: 9877, park: expect.any(String) });
+    // the claim `pr-opened` deliberately left HELD must still be held — not released by the later throw.
+    expect(listBuildDispatchClaims().map((c) => c.meta.num)).toEqual(['9003']);
+    // and no `wrapper-threw` hold was placed over the (correctly absent) `pr-opened` non-hold.
+    expect(listBuildDispatchHolds()).toEqual([]);
+  });
+
+  it('with no `runId`/`effectKey`, ONLY the run-store settle is a no-op — the claim release and hold still '
+    + 'fire, because a hand-run CLI invocation with no dispatch-lane run behind it still took a real claim and '
+    + 'should still have it released/held like any other attempt; every existing caller/test in this file that '
+    + 'predates #4349 keeps working unchanged either way', async () => {
+    acquireBuildDispatchClaim({ num: '9001', scope: [] });
+    tryReadDeliveryReport.mockReturnValue({ status: 'done', outcome: 'blocked', filesTouched: [], reason: 'stale/superseded' });
+    execFileSync.mockImplementation((cmd, args = []) => {
+      const a = args || [];
+      if (cmd === 'node' && a[0] === 'scripts/lane-pool.mjs' && a[1] === 'acquire') return '';
+      if (cmd === 'node' && a[0] === 'scripts/lane-pool.mjs' && a[1] === 'status') {
+        return JSON.stringify({ repo: 'web-everything', root: '/pool', lanes: [{ lane: 7, path: lane, exists: true }] });
+      }
+      if (cmd === 'node' && a[0] === 'scripts/operations/run.mjs' && a[1] === 'claim') return '{}';
+      if (cmd === 'node' && a[0] === 'scripts/backlog.mjs' && a[1] === 'release') return '';
+      if (cmd === 'node' && a[0] === 'scripts/lane-pool.mjs' && a[1] === 'release') return '';
+      throw new Error(`unexpected execFileSync(${cmd}, ${JSON.stringify(a)})`);
+    });
+
+    const result = await deliverItem(
+      { item: '9001', lane: 7, scope: [], sessionSlug: 'conveyor-9001', attemptTag: '' },
+      { spawn: vi.fn() },
+      { newSessionId: () => 'uuid-fixed' },
+    );
+
+    expect(result.result).toBe('not-ready (stale/superseded)');
+    expect(listBuildDispatchClaims()).toEqual([]);
+    expect(listBuildDispatchHolds().map((h) => h.meta.num)).toEqual(['9001']);
+    expect(listBuildDispatchHolds()[0].meta.reason).toBe('stale/superseded');
+  });
+
+  // `acquireLane` itself sits OUTSIDE the inner try/catch; settlement must still fire on that early a refusal,
+  // not just on a failure from inside the inner try.
+  it('settles `failed` + releases the claim even when `acquireLane` itself throws, BEFORE the inner '
+    + 'try/catch (and therefore before `releaseClaimAndLane` ever runs)', async () => {
+    const store = seedInFlightRun('dispatch-lane-9001c');
+    acquireBuildDispatchClaim({ num: '9001', scope: [] });
+    execFileSync.mockImplementation((cmd, args = []) => {
+      const a = args || [];
+      if (cmd === 'node' && a[0] === 'scripts/lane-pool.mjs' && a[1] === 'acquire') {
+        throw new Error('lane pool exhausted');
+      }
+      throw new Error(`unexpected execFileSync(${cmd}, ${JSON.stringify(a)})`);
+    });
+
+    await expect(deliverItem(
+      {
+        item: '9001', lane: 7, scope: [], sessionSlug: 'conveyor-9001', attemptTag: '',
+        runId: 'dispatch-lane-9001c', effectKey: 'dispatch:0:0',
+      },
+      { spawn: vi.fn() },
+      { newSessionId: () => 'uuid-fixed' },
+    )).rejects.toThrow(/lane pool exhausted/);
+
+    const settledEntry = store.read('dispatch-lane-9001c').effects[0];
+    expect(settledEntry.status).toBe('failed');
+    expect(settledEntry.error).toContain('lane pool exhausted');
+    expect(listBuildDispatchClaims()).toEqual([]);
+    // `wrapper-threw` is exactly as re-dispatch-loop-prone as `not-ready` (a deterministic throw would
+    // otherwise get re-tried every ~2 minutes with no cooldown at all).
+    expect(listBuildDispatchHolds().map((h) => h.meta.num)).toEqual(['9001']);
+    expect(listBuildDispatchHolds()[0].meta.reason).toBe('wrapper-threw');
   });
 });

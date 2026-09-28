@@ -3,10 +3,12 @@ bornAs: xjz3gof
 kind: story
 size: 5
 parent: "4075"
-status: open
+status: resolved
 blockedBy: ["4120"]
 scope: ["we:scripts/lib/daemon-jobs.mjs", "we:scripts/operations/run-store.mjs", "we:scripts/operations/run-record.mjs"]
 dateOpened: "2026-09-24"
+dateStarted: "2026-09-28"
+dateResolved: "2026-09-28"
 tags: []
 ---
 
@@ -42,3 +44,50 @@ The ruling fixes the shape above in these ways:
 2. **Live** — `kill -9` a daemon while a no-op test job runs, restart it, and show the job finished once and
    was not started twice; freeze a job (SIGSTOP) and show it is killed and relaunched once. Record timelines
    in the PR.
+
+## Progress
+
+- **Records** — a job is a run record with `op: job:<kind>` and a `job` block
+  (we:scripts/operations/job-record.mjs, validated by we:scripts/operations/run-record.mjs). Handle is
+  `host:pid:procStart`; a bare pid is refused at construction and on read.
+- **Where records live (settled here)** — `~/.claude/daemon-jobs/<daemon>/` (`WE_DAEMON_JOBS_ROOT` moves the
+  parent; we:scripts/operations/run-store.mjs `daemonJobsDir`). The daemon passes that folder to each child
+  as `OPERATION_RUNS_DIR`.
+- **Policy** (we:scripts/lib/daemon-jobs.mjs, pure): classify live / stalled / dead / launching / foreign;
+  reattach plan (stalled → stop first; dead → resume from checkpoint; 3 attempts with doubling backoff, then
+  fail visibly; `resumable: false` kinds restart from step 0); per-daemon cap plus one serial lane; sleep
+  rule = wall-clock gap minus monotonic gap between ticks > 10 s skips the staleness check on that tick
+  only; snapshot eviction (referenced stores kept, at most 2 in total).
+- **Runtime** (we:scripts/lib/daemon-jobs-runtime.mjs): `ps -o lstart=` liveness, a per-record file lock on
+  every read-modify-write, detached launch, SIGTERM+SIGCONT → SIGKILL → confirm gone, `reattachTick` /
+  `startJobLoop` for daemons, `runJob` for the child (claims only its own launch attempt, refuses a finished
+  job, stops writing once superseded).
+- **Snapshots** (we:scripts/lib/daemon-job-snapshots.mjs): `git archive` code snapshot per `codeSha`,
+  `node_modules` store keyed by lockfile hash and symlinked in; both built in a temp dir and renamed in.
+  `mutates-tree` kinds must supply `prepareWorktree` (no default — the adopter slices decide the tree and
+  the clone's shared hold).
+- **Tests** — we:scripts/lib/__tests__/daemon-jobs.test.mjs, we:scripts/lib/__tests__/daemon-jobs-runtime.test.mjs,
+  we:scripts/lib/__tests__/daemon-job-snapshots.test.mjs, we:scripts/operations/__tests__/job-record.test.mjs
+  (50 tests; real `ps`, signals, detached spawn, git).
+- **Live proof** — `node we:scripts/operations/daemon-jobs-proof/run-proof.mjs all` (2026-09-28, ALL PASS).
+  The first live run caught a real bug: `launchedAt` was stamped before a 15 s snapshot build, so the next
+  tick read a healthy launch as dead. The child's claim guard refused the duplicate, so no step ran twice.
+  The bug is fixed, with a regression test.
+  - `kill -9` the daemon mid-job, then restart it: launched 1×, started 1×, finished 1×, each step ran once
+    in one process (pid 87950).
+    ```
+    17:39:32.632Z queued · 17:39:37.206Z launched attempt 1 · 17:39:37.418Z started pid 87950
+    17:39:37.465Z daemon 86500 kill -9 (job still alive) · 17:39:38.216Z daemon 88329 boots, reattaches, leaves it
+    17:39:38.924Z step 1 · 17:39:40.428Z step 2 · 17:39:41.930Z step 3 · 17:39:41.931Z finished
+    ```
+  - SIGSTOP the job after step 1: stopped 1× (SIGTERM after SIGCONT), relaunched 1×, resumed from step 1,
+    finished 1×; the frozen pid is gone.
+    ```
+    17:39:47.291Z started pid 91998 · 17:39:48.804Z step 1 · (SIGSTOP)
+    17:39:52.039Z stopped SIGTERM · 17:39:52.041Z requeued (heartbeat stale on a live pid)
+    17:39:53.061Z launched attempt 2 · 17:39:53.267Z started pid 94717 fromStep 1
+    17:39:54.775Z step 2 · 17:39:56.277Z step 3 · 17:39:56.281Z finished
+    ```
+  - **Not yet proven live: a real host sleep/wake.** That needs the machine put to sleep, which an agent
+    should not do on the operator's laptop. The rule has unit coverage (clock gaps, skip only when it
+    fires), and the live-but-stuck half is the SIGSTOP run above.

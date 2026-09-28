@@ -45,9 +45,13 @@ import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
  *  visible answer to "why hasn't this been reviewed yet" the feature's own build brief asked for.
  *
  *  `fixing-conflict` / `fixing-conflict-stalled` (draft reason at a glance, operator ask 2026-09-27, #2811
- *  follow-up, #2826) — a live `fix-<pr>` session is not always the same repair: a MECHANICAL conflict-
- *  resolution round reads as more than the generic `fixing`. Deterministic off the SAME PR record every
- *  other state here already reads (`pr.mergeStateStatus === 'DIRTY'`).
+ *  follow-up, #2826) — a live `fix-<pr>` session is not always the SAME repair: `we:scripts/conveyor/
+ *  rearm-review.mjs` already distinguishes a MECHANICAL conflict-resolution round (`--round=conflict`) from an
+ *  ordinary review:changes bounce fix at the marker-comment layer, but nothing said so on the label a human
+ *  glances at — both read as the same generic `fixing`. Deterministic off the SAME PR record every other
+ *  state here already reads (`pr.mergeStateStatus === 'DIRTY'`, the identical field `reconcile-core.mjs
+ *  #classifyPr`'s `conflicted` phase reads), never a fabricated guess: a live fixer working a PR GitHub
+ *  itself reports as conflicting IS resolving that conflict, whatever else it might also be doing.
  *
  *  `draft-scope-change` / `draft-withdrawn` (fix-claim draft-only-on-withdrawal, operator ruling 2026-09-27,
  *  `we:docs/agent/platform-decisions.md#fix-claim-draft-only-on-withdrawal`, backlog `xyfvtfz`) — the two
@@ -82,10 +86,10 @@ const LIVE_STATES = Object.freeze({ working: 'reviewing', blocked: 'stalled' });
  * (`we:scripts/conveyor/reconcile-core.mjs#classifyPr`'s `ci-red` phase is its own branch ahead of the
  * `OWED`/`OWED_ELSEWHERE` table), so the ordering is precedence-in-name-only — it never actually shadows a
  * real ci-heal for a PR that also has a stale review/fix session row sitting in `claude agents --json`.
- * @param {{pr:number|string, agents?:Array<{name?:string, state?:string}>, isDraft?:boolean, fixClaim?:object|null, mergeConflicted?:boolean}} o
+ * @param {{pr:number|string, agents?:Array<{name?:string, state?:string}>, isDraft?:boolean, mergeConflicted?:boolean, fixClaim?:object|null}} o
  * @returns {{role:'review'|'fix'|'ci-heal'|'draft', state:'reviewing'|'review-stalled'|'fixing'|'fix-stalled'|'fixing-conflict'|'fixing-conflict-stalled'|'healing-ci'|'ci-heal-stalled'|'awaiting-ci'|'draft-scope-change'|'draft-withdrawn'}|null}
  */
-export function deriveReviewStatus({ pr, agents = [], repo = 'we', isDraft = false, fixClaim = null, mergeConflicted = false } = {}) {
+export function deriveReviewStatus({ pr, agents = [], repo = 'we', isDraft = false, mergeConflicted = false, fixClaim = null } = {}) {
   const reviewName = mintSessionSlug({ kind: 'review', id: pr, repo });
   const fixName = mintSessionSlug({ kind: 'fix', id: pr, repo });
   const ciHealName = mintSessionSlug({ kind: 'ci-heal', id: pr, repo });
@@ -158,7 +162,7 @@ export function planStatusLabelChange({ status, currentLabels = [] } = {}) {
  * (`we:skills-src/conveyor/review-daemon.mjs#runReviewTick`, wired to reuse it) passes it straight through.
  * Omitting either (the default, and every pre-existing caller/test) reads fresh, byte-identical to before
  * these options existed.
- * @param {{pr:number|string, repo:string, listAgents?:Function, provider?:object, agents?:Array<object>, currentLabels?:Array<{name?:string}|string>, isDraft?:boolean, mergeConflicted?:boolean}} o
+ * @param {{pr:number|string, repo:string, listAgents?:Function, provider?:object, agents?:Array<object>, currentLabels?:Array<{name?:string}|string>, isDraft?:boolean, mergeConflicted?:boolean, readFixClaim?:Function}} o
  * @returns {{changed:boolean, label:string|null, removed:string[]}}
  */
 // x26lw6u — the default listing includes live review JOBS (`we:scripts/operations/review-job.mjs`): a review no
@@ -181,7 +185,7 @@ export function tagReviewStatus({
   const agents = suppliedAgents ?? listAgents();
   let fixClaim = null;
   try { fixClaim = readFixClaim({ repo: repoKey, pr: Number(pr) }); } catch { fixClaim = null; }
-  const status = deriveReviewStatus({ pr, agents, repo: repoKey, isDraft, fixClaim, mergeConflicted });
+  const status = deriveReviewStatus({ pr, agents, repo: repoKey, isDraft, mergeConflicted, fixClaim });
   const currentLabels = suppliedLabels ?? provider.readLabels(repo, pr);
   const plan = planStatusLabelChange({ status, currentLabels });
   if (!plan.add && plan.remove.length === 0) {

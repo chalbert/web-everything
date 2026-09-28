@@ -55,11 +55,15 @@ import { createStaleStateReader } from './stale-state-io.mjs';
 import { prReconcileOperation, PR_RECONCILE_OP } from './pr-reconcile.mjs';
 import { createPrReconcileReader } from './pr-status-io.mjs';
 import { runnerActivityOperation, RUNNER_ACTIVITY_OP } from './runner-activity.mjs';
+import { prOwnershipOperation, PR_OWNERSHIP_OP } from './pr-ownership.mjs';
+import { createPrOwnershipReader } from './pr-ownership-io.mjs';
 import { createRunnerActivityReader, createRunnerActivityCliStores } from './runner-activity-io.mjs';
 import { daemonStatusOperation, DAEMON_STATUS_OP } from './daemon-status.mjs';
 import { collectDaemonStatus } from './daemon-status-io.mjs';
 import { heavyQueueOperation, HEAVY_QUEUE_OP } from './heavy-queue.mjs';
 import { collectHeavyQueue } from './heavy-queue-io.mjs';
+import { reviewSeatCapsOperation, REVIEW_SEAT_CAPS_OP } from './review-seat-caps.mjs';
+import { readSeatCapUsage } from './review-extra-seats.mjs';
 import { liveStateOperation, LIVE_STATE_OP } from './live-state.mjs';
 import { collectLiveState } from './live-state-io.mjs';
 import { liveWorkOperation, LIVE_WORK_OP } from './live-work.mjs';
@@ -259,6 +263,13 @@ export const OPERATIONS = Object.freeze({
     declaration: runnerActivityOperation({ readActivity: createRunnerActivityReader() }),
     sinks: {},
   }),
+  // #4056 (under #3383) — who owns each open PR's next move, and is that owner alive. Read-only, same no-sinks
+  // reasoning as `runner-activity`/`stale-state`: every step is `compute`, and the reconcile pass it calls
+  // plans without dispatching.
+  [PR_OWNERSHIP_OP]: () => ({
+    declaration: prOwnershipOperation({ readOwnership: createPrOwnershipReader() }),
+    sinks: {},
+  }),
   [AGENT_ACTIVITY_OP]: () => ({
     declaration: agentActivityOperation({ readActivity: createAgentActivityReader() }),
     sinks: {},
@@ -276,6 +287,13 @@ export const OPERATIONS = Object.freeze({
   // `ps`/`git` reads are bound here, and ONLY here.
   [HEAVY_QUEUE_OP]: () => ({
     declaration: heavyQueueOperation({ collect: collectHeavyQueue }),
+    sinks: {},
+  }),
+  // Card xn2wf9t (#3383 follow-up) — the operator's "how close is each non-Claude review seat provider to its
+  // own daily call cap" one-liner, `heavy-queue`-style. Read-only, same no-sinks reasoning: every step is
+  // `compute`. The real scorecard-store + reservation-ledger read (`readSeatCapUsage`) is bound here, and ONLY here.
+  [REVIEW_SEAT_CAPS_OP]: () => ({
+    declaration: reviewSeatCapsOperation({ collect: () => readSeatCapUsage() }),
     sinks: {},
   }),
   [GATE_HEALTH_OP]: () => ({

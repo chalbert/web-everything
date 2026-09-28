@@ -72,7 +72,13 @@ const REQUIRED_FLAGS = Object.freeze(['num', 'lane', 'session']);
  * `provider` (#3580) is optional too and is parsed, NOT validated, here — this function stays PURE argv→shape;
  * the name check and the env fallback belong to `selectDeliveryAgentProvider` below, which owns both.
  *
- * @returns {{item: string, lane: string, scope: string, sessionSlug: string, attemptTag: string, provider: string}}
+ * `--run-id=`/`--effect-key=` (#4349, both optional) identify the run-store effect this exact dispatch is —
+ * threaded all the way from `effect-executor.mjs`'s per-sink `ctx` (see `dispatch-lane-io.mjs#createDispatchSinks`
+ * and `dispatch-providers/build.mjs#deliverItemDetachedProvider`) so `deliverItem` can settle it on exit. Either
+ * absent (an older dispatch, a hand-run CLI invocation) is a clean no-op downstream, never a guess.
+ *
+ * @returns {{item: string, lane: string, scope: string, sessionSlug: string, attemptTag: string, provider: string,
+ *   runId: string, effectKey: string}}
  */
 export function parseDeliverItemRunArgv(argv = []) {
   const flags = {};
@@ -96,6 +102,8 @@ export function parseDeliverItemRunArgv(argv = []) {
     sessionSlug: String(flags.session).trim(),
     attemptTag: String(flags.attempt ?? '').trim(),
     provider: String(flags.provider ?? '').trim(),
+    runId: String(flags['run-id'] ?? '').trim(),
+    effectKey: String(flags['effect-key'] ?? '').trim(),
   };
 }
 

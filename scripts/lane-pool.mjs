@@ -23,7 +23,7 @@
  * Usage:
  *   node scripts/lane-pool.mjs provision --count=N [--acquirable] [--no-install] [--force]   # ensure N lanes exist (clone missing) + refresh all + ensure deps + ensure the WE pool's FUI render-sibling (#2166); --acquirable grows PAST foreign-leased lanes so N ACQUIRABLE ones result (#2426)
  *   node scripts/lane-pool.mjs refresh           [--no-install] [--force]     # fetch + hard-reset existing lanes to origin/main (no creation)
- *   node scripts/lane-pool.mjs status  [--json]                     # per-lane: path / head / clean / behind origin/main / deps / lease
+ *   node scripts/lane-pool.mjs status  [--json] [--leased-only]     # per-lane: path / head / clean / behind origin/main / deps / lease. #4345: --leased-only reads only the lease marker (no git) for a lane with no LIVE lease, and runs the full git probe only for lanes that ARE leased — for a reader that only ever consumes leased rows (conveyor-state.mjs / scope-lease-collect.mjs); an unleased row's git-derived fields (head/branch/clean/behind) are simply absent. Keep plain `status` for operator use and for anything needing dirty-unleased info (lane-pool-health-watch.mjs's trim).
  *   node scripts/lane-pool.mjs list    [--json] [--acquirable [--limit=N] [--no-cache] [--cache-ttl-ms=N] [--scan-timeout-ms=N]]  # existing lane paths (for the orchestrator to dispatch into); --acquirable filters out foreign-leased / busy lanes (#2426); #xn432dz: lease-first (no git in a live-leased lane), SINGLE-FLIGHT + cached for --cache-ttl-ms (env LANE_POOL_LIST_CACHE_TTL_MS, default 30000; 0 disables) so concurrent callers share one scan, --no-cache forces a fresh one, --limit=N stops at N (never cached), and the scan fails cleanly past --scan-timeout-ms (env LANE_POOL_LIST_SCAN_TIMEOUT_MS, default 120000)
  *   node scripts/lane-pool.mjs path    --lane=N                     # print one lane's absolute path
  *   node scripts/lane-pool.mjs acquire [--purpose=<slug>] [--session=<slug>] [--lane=N] [--item=NNN[,NNN…]] [--ttl-minutes=N] [--no-reset] [--no-reap] [--base=<ref>] [--scope=<repo:path,...>] [--reserve] [--wait-ms=N] [--no-free-list] [--free-list-max-age-ms=N] [--json]  # #2275 lease a free lane (exclusive) + reset to origin/main (or, with #2386 --base=<ref>, to a predecessor lane's pushed tip); stdout = its path. #4122: auto-pick tries `we:scripts/conveyor/lane-pool-health-watch.mjs`'s pre-computed free-lane list FIRST (near-zero git) when it exists and is fresh (< --free-list-max-age-ms / LANE_POOL_FREE_LIST_MAX_AGE_MS, default 10min) — every candidate is still atomically claimed + re-verified fresh before it's ever handed out, so a stale entry costs at most a lost race, never a clobbered lane; --no-free-list opts out. Falls back to today's shared, single-flight, cached full-pool scan (#xn432dz/#3383) unchanged, only when the list is missing, stale or exhausted. #x3jmao3: auto-pick (no --lane) OPT-IN bounded retry — --wait-ms=<total> polls (ACQUIRE_POLL_MS spacing, no busy-wait) for up to that many ms before the "no free lane" failure, instead of failing on the very first full-pool reading (omitted ⇒ today's instant-fail, unchanged); a genuinely-exhausted pool still fails with the identical message once the bound elapses. #2748: BEFORE selecting, a reaper backstop reclaims any PROVABLY-DEAD ghost lease in the pool (item resolved on main, or PR merged/closed) so a finished-but-unreleased lane never blocks a fresh dispatch — the pool ACTS on the ghost the board only flags; --no-reap opts out. #2413: --purpose=workflow-lane MARKS the lease (workflowLane:true) → the guard requires a sibling to assert its minted slug before a destructive op. #2560: --scope=<repo:path,...> declares this lane's ADVISORY predicted file-scope — persisted into the marker (the live scope-lease collector reads it) + warns on overlap, but NEVER gates the acquire (the whole-clone lease is the real lock). #2616: --item=NNN records this lane's item → lane in the lane-ports registry (same as `map`) so conveyor-state's health-stall scan can flag a genuinely stalled lane — the self-serve population a conveyor delivery agent needs (nothing else calls `map` for it). #2350: --reserve (requires --lane=N) mints a PERMANENT reserved lane — no TTL, never stale, off-limits to acquire/refresh/provision (even --force); dropped only by `release --release-reserved`. #2997: EVERY acquire now mints a per-holder `holder` slug into the lease and prints it (stderr + --json `holder`) — the one signal that separates this holder from a SIBLING agent of the same session, which `ownerSession` cannot; assert it as `--session=<slug>` (release) or `LANE_SESSION=<slug>` (a destructive git op) whenever a sibling of your session also holds a live lane. #2997 r2: --adopt also stamps YOU as the lane's OCCUPANT (`workerSession`) — pass it when the process running this acquire is the one that will work in the lane, omit it when you are leasing on someone else's behalf (they run `adopt` instead).
@@ -118,7 +118,10 @@ import { sleepSyncMs } from './readiness/drain-lock.mjs';
 // fork its logic). Importing lease-reaper is side-effect-free — its IO shell is gated on the main-module check —
 // and forms no cycle (lease-reaper imports only `lib/lane-lease.mjs`, never lane-pool). `readField` reads the
 // frontmatter-strict `status:` for the offline item-resolved reap axis (#2603 spoof-safe reader).
-import { classifyReap, reapPlan, prStatesFromList, prStatesByPrNumber, itemNumFromSession, prNumFromSession } from './conveyor/lease-reaper.mjs';
+// #xkk4lv7 — `prDetailsFromList`/`resolveLeaseItemNum` ADDED: the SAME branch-based item-resolution fallback
+// (+ its Fork 2/Option C safety gate) `lease-reaper.mjs`'s own resident pass now drives, imported rather than
+// re-derived (this card's Risk 5 — the two reapers must stay single-sourced).
+import { classifyReap, reapPlan, prStatesFromList, prStatesByPrNumber, prDetailsFromList, itemNumFromSession, prNumFromSession, resolveLeaseItemNum } from './conveyor/lease-reaper.mjs';
 import { readField } from './backlog/frontmatter.mjs';
 // #3383 — the lane-history ledger (`<lane>/.git/lane-history.jsonl`): one line per acquire/adopt/release/reap,
 // so a lane can be traced back to the session/card/PR that used it AFTER its lease is released (today nothing
@@ -1119,15 +1122,41 @@ function refreshLane(repo, n, { force = false } = {}) {
   return { skipped: false, dirty: false, uncommitted: 0, ahead: 0 };
 }
 
-function laneStatus(repo, n) {
+/**
+ * #4345 — `{ leasedOnly: true }` (from `status --leased-only`) skips every git call for a lane with no LIVE
+ * lease: the lease marker itself (a plain fs read, `readLease`) already answers "is anything here worth a git
+ * probe" for a reader that only ever consumes leased rows (conveyor-state.mjs / scope-lease-collect.mjs both
+ * filter `leased === true` before touching any other field — #4345's own evidence). A LEASED lane still gets the
+ * exact same 4 git calls (rev-parse ×2, `status --porcelain`, rev-list) and the exact same row shape as full
+ * `status` — this is a skip, never a different answer, for the ONE row a caller actually needs. `deps` stays
+ * cheap either way (fs-only, no git) so it is always computed.
+ * @param {*} repo
+ * @param {number} n
+ * @param {{leasedOnly?: boolean}} [opts]
+ */
+function laneStatus(repo, n, { leasedOnly = false } = {}) {
   const dir = laneDir(repo, n);
   if (!existsSync(dir)) return { lane: n, path: dir, exists: false };
+  let readError;
+  const lease = readLease(dir, (error) => { readError = error.message; });
+  // #2275 — surface the hold so a picker can filter (and a human sees who owns a lane). `leased` is only
+  // true for a LIVE lease; a stale marker reads as free (reclaimable), matching acquire's own logic.
+  const leased = lease ? !isLeaseStale(lease, Date.now(), ttlMsFromFlags()) : false;
+  if (leasedOnly && !leased) {
+    return {
+      lane: n,
+      path: dir,
+      exists: true,
+      deps: depsReady(dir),
+      lease: lease || null,
+      ...(readError ? { readError } : {}),
+      leased: false,
+    };
+  }
   const head = tryGit(['rev-parse', '--short', 'HEAD'], dir);
   const branch = tryGit(['rev-parse', '--abbrev-ref', 'HEAD'], dir);
   const porcelain = tryGit(['status', '--porcelain'], dir);
   const behind = tryGit(['rev-list', '--count', `HEAD..origin/${repo.branch}`], dir);
-  let readError;
-  const lease = readLease(dir, (error) => { readError = error.message; });
   return {
     lane: n,
     path: dir,
@@ -1137,11 +1166,9 @@ function laneStatus(repo, n) {
     clean: porcelain === '',
     behind: behind === null ? '?' : Number(behind),
     deps: depsReady(dir),
-    // #2275 — surface the hold so a picker can filter (and a human sees who owns a lane). `leased` is only
-    // true for a LIVE lease; a stale marker reads as free (reclaimable), matching acquire's own logic.
     lease: lease || null,
     ...(readError ? { readError } : {}),
-    leased: lease ? !isLeaseStale(lease, Date.now(), ttlMsFromFlags()) : false,
+    leased,
   };
 }
 
@@ -1518,9 +1545,12 @@ function deadLeasePlan(repo, nowMs, ttlMs) {
     // it degrades the PR axis to OFF (the offline item-resolved axis + TTL still apply), never blocks.
     // #x5n4zn3 — already had `timeout` (reconciled, not double-wrapped); added `killSignal` for the same
     // fail-fast certainty every other call site here now gets.
-    const out = execFileSync('gh', ['pr', 'list', '--state', 'all', '--limit', '400', '--json', 'number,state,mergedAt,headRefName'], { cwd: repo.referencePath, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 20_000, killSignal: 'SIGKILL' });
+    // #xkk4lv7 — `mergeCommit` ADDED: the branch-fallback's Fork 2/Option C corroboration (`laneQuietSincePr`,
+    // via `resolveLeaseItemNum`) needs a merged PR's own merge-commit sha, which the pre-existing field list
+    // never carried (mirrors the identical addition to `lease-reaper.mjs#fetchPrStatesForRepo`).
+    const out = execFileSync('gh', ['pr', 'list', '--state', 'all', '--limit', '400', '--json', 'number,state,mergedAt,headRefName,mergeCommit'], { cwd: repo.referencePath, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 20_000, killSignal: 'SIGKILL' });
     const prs = JSON.parse(out);
-    prStates = { byItem: prStatesFromList(prs), byPr: prStatesByPrNumber(prs) };
+    prStates = { byItem: prStatesFromList(prs), byPr: prStatesByPrNumber(prs), detailsByItem: prDetailsFromList(prs) };
   } catch { prStates = null; }
   // Item-resolved axis (OFFLINE): read the pool's origin/<branch> backlog listing ONCE, then answer
   // "is item <num>'s card status:resolved?" frontmatter-strict. No fetch — a stale read is safe (monotonic).
@@ -1533,12 +1563,6 @@ function deadLeasePlan(repo, nowMs, ttlMs) {
     return body != null && readField(body, 'status') === 'resolved';
   };
   const signalsFor = (c) => {
-    // #x5wm9ot — an item-kind lease (conveyor-/prepare-/prepare-decision-) checks `byItem`; a PR_KIND lease
-    // (review-/fix-/ci-heal-/inspect-) checks `byPr` by its OWN PR number. `itemResolvedOnMain` stays
-    // item-number-only (a backlog card lookup) — it must never be asked about a PR_KIND lease's PR number,
-    // which could coincidentally name an unrelated backlog item and misread as "resolved".
-    const itemNum = itemNumFromSession(c.lease?.session);
-    const prNum = prNumFromSession(c.lease?.session);
     // #3283 — A TERMINAL SIGNAL ABOUT THE ITEM IS NECESSARY BUT NOT SUFFICIENT. "This lane's item is finished"
     // — its PR merged, or its card resolved on main — answers *is there unlanded work here?* It never answers
     // *is anyone holding this lease?*, and this pass used the first as a proxy for the second. The proxy is
@@ -1553,13 +1577,37 @@ function deadLeasePlan(repo, nowMs, ttlMs) {
     // a liveness test. This NARROWS #2748 rather than undoing it: a TTL-stale lease whose item is terminal is
     // still reaped HERE, pre-TTL-reclaim and pool-wide, which is the ghost #2748 was built for.
     const holderPresumedGone = isLeaseStale(c.lease, nowMs, ttlMs);
+    // #xkk4lv7 — the branch-based fallback (`resolveLeaseItemNum`, imported from `lease-reaper.mjs` rather than
+    // re-derived, this card's Risk 5) only matters once the lease already looks TTL-stale: a FRESH lease's item
+    // attribution is never consumed below (both `prState` and `itemResolvedOnMain` stay behind the SAME
+    // `holderPresumedGone` gate this pass already had), so skip its extra git spawns entirely otherwise — this
+    // pass's existing TTL gate on both signals is UNCHANGED, never widened by this fix (per the light plan
+    // review's own confirmation that `deadLeasePlan` is already TTL-gated on both).
+    const { itemNum, prNum, itemNumSource } = holderPresumedGone
+      ? resolveLeaseItemNum(c.lease, c.dir, { repoStates: prStates, nowMs })
+      : { itemNum: itemNumFromSession(c.lease?.session), prNum: prNumFromSession(c.lease?.session), itemNumSource: null };
     let prState = null;
     if (holderPresumedGone && prStates) {
+      // #x5wm9ot — an item-kind lease (conveyor-/prepare-/prepare-decision-, OR now a branch-attributed one)
+      // checks `byItem`; a PR_KIND lease (review-/fix-/ci-heal-/inspect-) checks `byPr` by its OWN PR number.
       prState = itemNum != null ? (prStates.byItem.get(itemNum) ?? null) : prNum != null ? (prStates.byPr.get(prNum) ?? null) : null;
     }
     // Item-resolved is a terminal death signal too — but NEVER override a live (open) PR, mirroring the
     // reaper's "open wins" safety (a same-number retry PR still in flight must not be reaped, #2267).
-    if (holderPresumedGone && prState !== 'open' && prState !== 'merged' && prState !== 'closed' && itemResolvedOnMain(itemNum)) prState = 'merged';
+    // `itemResolvedOnMain` stays item-number-only (a backlog card lookup) — it must never be asked about a
+    // PR_KIND lease's PR number, which could coincidentally name an unrelated backlog item and misread as
+    // "resolved".
+    //
+    // #xkk4lv7 — round-1 convergence (standards-conformance + claim-accuracy, independently): `itemNum` is
+    // ONLY safe to feed into this SECOND, independent terminal signal when it came from a dispatcher-minted
+    // session OR a branch match Fork 2/Option C already corroborated (`itemNumSource` — see
+    // `resolveLeaseItemNum`'s own doc). A `'branch-uncorroborated'` guess (an open PR, or no PR at all) carries
+    // NO clean-tree/contained-HEAD/quiet-window proof — feeding it here would let a lease on a
+    // `lane/2500b-*` retry branch doing genuinely NEW work get reaped just because item 2500's ORIGINAL,
+    // already-landed card reads `resolved`, reaching the exact "old branch, new work" hazard this fix's own
+    // safety gate exists to rule out through a side door.
+    const itemNumTrustedForOfflineAxis = itemNumSource === 'session' || itemNumSource === 'branch-corroborated';
+    if (holderPresumedGone && itemNumTrustedForOfflineAxis && prState !== 'open' && prState !== 'merged' && prState !== 'closed' && itemResolvedOnMain(itemNum)) prState = 'merged';
     return { prState, pidAlive: null }; // the pid axis is dormant under today's lease schema (see lease-reaper.pidAliveForLease)
   };
   return reapPlan(candidates, { nowMs, ttlMs, signalsFor });
@@ -2443,17 +2491,25 @@ function cmdRelease(repo) {
 }
 
 function printStatus(repo) {
-  const rows = existingLanes(repo).map((n) => laneStatus(repo, n));
+  // #4345 — `--leased-only`: skip the per-lane git probe for every lane with no live lease (a reader that only
+  // consumes leased rows, e.g. conveyor-state.mjs / scope-lease-collect.mjs). A leased lane's row is byte-for-
+  // byte identical to a full `status` call; an unleased lane's row just omits the git-derived fields.
+  const leasedOnly = !!flags['leased-only'];
+  const rows = existingLanes(repo).map((n) => laneStatus(repo, n, { leasedOnly }));
   if (flags.json) {
-    process.stdout.write(JSON.stringify({ repo: repo.name, root: repo.poolDir, lanes: rows }, null, 2) + '\n');
+    process.stdout.write(JSON.stringify({ repo: repo.name, root: repo.poolDir, leasedOnly, lanes: rows }, null, 2) + '\n');
     return;
   }
   if (rows.length === 0) {
     log(`(no lanes provisioned for "${repo.name}" under ${repo.poolDir})`);
     return;
   }
-  log(`pool "${repo.name}" @ ${repo.poolDir} (integration branch: origin/${repo.branch})`);
+  log(`pool "${repo.name}" @ ${repo.poolDir} (integration branch: origin/${repo.branch})${leasedOnly ? ' — leased-only (git-probed rows below only)' : ''}`);
   for (const r of rows) {
+    if (leasedOnly && !r.leased) {
+      log(`  lane-${r.lane}: (unleased — skipped, --leased-only) · deps ${r.deps}`);
+      continue;
+    }
     log(
       `  lane-${r.lane}: ${r.head} [${r.branch}] ${r.clean ? 'clean' : 'DIRTY'}` +
         ` · ${r.behind === 0 ? 'up-to-date' : `${r.behind} behind`} · deps ${r.deps}` +
@@ -3758,6 +3814,9 @@ const KNOWN_FLAGS = new Set([
   'override', 'reason', 'salvage',
   // #4122 — acquire's free-lane-list fast-path knobs (see `we:scripts/lib/free-lane-list.mjs`'s own header).
   'no-free-list', 'free-list-max-age-ms',
+  // #4345 — status --leased-only: skip the 4 git calls per UNLEASED lane (rev-parse ×2, status --porcelain,
+  // rev-list) for a reader that only consumes leased rows (conveyor-state.mjs / scope-lease-collect.mjs).
+  'leased-only',
 ]);
 
 // ── dispatch ──────────────────────────────────────────────────────────────────────────────────────
@@ -3784,7 +3843,8 @@ if (!cmd || cmd === 'help' || cmd === '--help' || !COMMANDS[cmd]) {
     'usage: lane-pool.mjs <provision|refresh|status|list|path|acquire|adopt|release|remove|trim|reclaim|keep|map|unmap> [--count=N] [--lane=N] [--all] [--all-pools] [--acquirable] [--max-new=N] ' +
       '[--item=NNN[,NNN…]] [--purpose=<slug>] [--session=<slug>] [--adopt] [--base=<ref>] [--scope=<repo:path,...>] [--reserve] [--release-reserved] [--ttl-minutes=N] [--no-reset] [--no-reap] [--limit=N] [--no-cache] [--cache-ttl-ms=N] [--scan-timeout-ms=N] [--repo=<path>] [--pool=<name>] [--origin=<url>] ' +
       '[--reference=<path>] [--name=<slug>] [--branch=<ref>] [--no-install] [--force] [--json] [--max=N] [--dry-run] [--override] [--reason=<text>] ' +
-      '[--no-free-list] [--free-list-max-age-ms=N]  # trim: shrink a pool to --max lanes (default per-repo cap; env LANE_POOL_TRIM_MAX)\n' +
+      '[--no-free-list] [--free-list-max-age-ms=N] [--leased-only]  # trim: shrink a pool to --max lanes (default per-repo cap; env LANE_POOL_TRIM_MAX)\n' +
+      '  # status --leased-only (#4345): skip git for every unleased lane, keep the full probe only for leased ones\n' +
       '  # acquire (auto-pick, no --lane): on a full pool, grows it by up to --growth-max-new=N new lanes (default 4, env ' +
       'LANE_POOL_ACQUIRE_GROWTH_MAX_NEW) up to a --hard-max=N ceiling (default 90 for web-everything/30 for siblings, env LANE_POOL_HARD_MAX) ' +
       'before failing — refuses to grow on a live remote-probe failure (#3383)\n' +

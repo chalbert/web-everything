@@ -323,6 +323,16 @@ export function attachLaneInfra(lanes, infraByNum) {
  * for `"no free lane"` — confirmed live, 2026-08-29 (all 41 lanes on one host: 10 leased, 17 dirty, and the
  * remaining 14 "clean" ones every one of them AHEAD) — `dispatch-plan.mjs`'s own hold reason is authoritative
  * for whether a specific dispatch can actually launch; `freeSlots` is a cheap status-line estimate only.
+ *
+ * #4345 — a `status --leased-only` read never sets `clean` on an unleased row (no git ran there), and this fn's
+ * `clean !== false` test reads that missing field as clean (`undefined !== false` is `true`) — so it needs NO
+ * special-casing for a leased-only payload: an unleased row is simply never excluded on the `clean` test, which
+ * is exactly the (documented, already-tolerated) lenient behavior this card wants. Asserted directly — this fn
+ * called on both a `--leased-only` and a full `status` payload of the same fixture, same count — in
+ * we:scripts/__tests__/lane-pool-status-leased-only.test.mjs (a first cut added a separate
+ * `computeFreeSlotsLeasedOnly` fn + a branch to "handle" this; a `/converge` panel round caught it computing the
+ * identical count with no test defending either path, so both the fn and the branch were removed — #4345 round
+ * 1 — and this assertion was added in their place).
  * @param {{lanes?:object[]}|null|undefined} poolStatus
  * @returns {number}
  */
@@ -612,6 +622,8 @@ export function assembleConveyorState({
     // drive each by its `prepared` state: UNPREPARED → prepare-decision agent; PREPARED → present its forks (#2647).
     decisions: deriveDecisions(buildQueue, clearedNums),
     lanes,
+    // #4345 — unchanged: `computeFreeSlots`'s own `clean !== false` test already reads a `--leased-only` read's
+    // missing `clean` on an unleased row as clean (see that fn's docblock), so no branch is needed here.
     freeSlots: computeFreeSlots(poolStatus),
     prs: shapePrs(prList),
     daemon: shapeDaemon(daemonReport),
@@ -839,7 +851,15 @@ async function main(argv) {
     poolStatus = { lanes: [] };
     scopePicture = { leases: [] };
   } else {
-    const poolArgs = ['status', '--json'];
+    // #4345 — `--leased-only`: `shapeLanes` below and `computeFreeSlots`'s free-slot count only ever need LEASED
+    // rows (the latter by construction — its `clean !== false` test already reads a missing `clean` as clean),
+    // so the git probe (rev-parse ×2, `status --porcelain`, rev-list) is wasted on the ~88/90 lanes that are NOT
+    // leased on a typical tick — skipping it there cuts ~364 git spawns/tick to a handful (measured live: 8).
+    // Deliberately NOT switched to also fetch `list --acquirable` for a stricter freeSlots count: that read is
+    // its own, separately-scanned cost (its own single-flight cache, #xn432dz), and folding it into EVERY
+    // conveyor-state.mjs call (not just inside a tick-core tick, where a nearby call already pays it) would trade
+    // this card's whole saving right back — live-measured at 170 git spawns / 42.6s on the real pool when tried.
+    const poolArgs = ['status', '--leased-only', '--json'];
     if (typeof flags.repo === 'string') poolArgs.push(`--repo=${flags.repo}`);
     if (typeof flags.name === 'string') poolArgs.push(`--name=${flags.name}`);
     poolStatus = await runJson('node', [LANE_POOL_CLI, ...poolArgs], { errors, label: 'lane-pool status' });
