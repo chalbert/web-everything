@@ -5,7 +5,7 @@ size: 5
 parent: "4075"
 status: active
 blockedBy: ["4120"]
-scope: ["we:scripts/lib/daemon-jobs.mjs", "we:scripts/operations/run-store.mjs", "we:scripts/operations/run-record.mjs"]
+scope: ["we:scripts/lib/daemon-jobs.mjs", "we:scripts/lib/daemon-jobs-io.mjs", "we:scripts/lib/daemon-jobs-workdir.mjs", "we:scripts/lib/daemon-jobs-proof.mjs", "we:scripts/lib/daemon-job-runner.mjs", "we:scripts/lib/daemon-job-kinds/noop.mjs", "we:scripts/operations/run-store.mjs", "we:scripts/operations/run-record.mjs"]
 dateOpened: "2026-09-24"
 dateStarted: "2026-09-28"
 tags: []

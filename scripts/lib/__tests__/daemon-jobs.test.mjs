@@ -52,6 +52,8 @@ describe('the job record is a run-store record kind', () => {
     expect(() => store.write({ ...job(), op: 'job:other-kind' })).toThrow(/op must be/);
     expect(() => store.write(withJob(job(), { module: '../../etc/x.mjs' }))).toThrow(/repo-relative/);
     expect(() => store.write(withJob(job(), { codeMode: 'anywhere' }))).toThrow(/codeMode/);
+    expect(() => store.write(withJob(job(), { workdir: 'relative/dir' }))).toThrow(/job.workdir/);
+    expect(() => store.write(withJob(job(), { workdir: '/x/worktrees/../../home' }))).toThrow(/job.workdir/);
     store.write(job());
     expect(store.read('job-a').job.status).toBe('queued');
   });

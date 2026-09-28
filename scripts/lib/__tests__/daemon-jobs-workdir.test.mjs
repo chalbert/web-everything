@@ -13,7 +13,8 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 import {
-  ensureSnapshot, ensureStore, ensureWorktree, evictUnreferenced, lockfileHash, releaseWorktree, resolveCodeSha,
+  createWorkdirs, ensureSnapshot, ensureStore, ensureWorktree, evictUnreferenced, lockfileHash, ownWorktree, releaseWorktree,
+  resolveCodeSha,
 } from '../daemon-jobs-workdir.mjs';
 import { daemonJobPaths } from '../daemon-jobs-io.mjs';
 import { newJobRecord, withJob } from '../daemon-jobs.mjs';
@@ -146,6 +147,30 @@ describe('mutates-tree: the job gets its own worktree, never the clone', () => {
     releaseWorktree({ repoRoot: repo, dir: wt2.dir });
     expect(existsSync(wt2.dir)).toBe(false);
     expect(git(repo, 'worktree', 'list')).not.toContain('job-1');
+  });
+});
+
+describe('terminal cleanup only ever removes the job\'s own worktree', () => {
+  it('releaseWorkdir refuses a recorded workdir that is not <worktrees>/<id>, and leaves that directory alone', () => {
+    const repo = makeRepo();
+    const paths = daemonJobPaths('t', mkTmp('dj-root-'));
+    const victim = mkTmp('dj-victim-');
+    writeFileSync(join(victim, 'keep.txt'), 'x');
+    const rec = (id, workdir) => withJob(newJobRecord({
+      id, kind: 'noop-test', daemon: 't', module: 'm.mjs', codeMode: 'mutates-tree', codeSha: 'abc1234', now: new Date().toISOString(),
+    }), { status: 'succeeded', workdir });
+    const { releaseWorkdir } = createWorkdirs({ repoRoot: repo, paths });
+    expect(() => releaseWorkdir(rec('job-1', victim))).toThrow(/not this job's own worktree/);
+    expect(() => releaseWorkdir(rec('job-1', join(paths.worktrees, 'job-2')))).toThrow(/not this job's own worktree/);
+    expect(existsSync(join(victim, 'keep.txt'))).toBe(true);
+    expect(ownWorktree(paths, rec('job-1', join(paths.worktrees, 'job-1')))).toBe(join(paths.worktrees, 'job-1'));
+  });
+
+  it('a worktree is never made from a traversal id', () => {
+    const repo = makeRepo();
+    const paths = daemonJobPaths('t', mkTmp('dj-root-'));
+    expect(() => ensureWorktree({ repoRoot: repo, codeSha: resolveCodeSha(repo), worktreesDir: paths.worktrees, storesDir: paths.stores, id: '../escape' }))
+      .toThrow(/invalid job id/);
   });
 });
 

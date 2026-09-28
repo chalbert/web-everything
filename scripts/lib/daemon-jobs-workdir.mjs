@@ -25,8 +25,9 @@ import { createHash } from 'node:crypto';
 import {
   existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync,
 } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 
+import { isValidRunId } from '../operations/run-record.mjs';
 import { STORE_KEEP, planStoreEviction, referencedStores } from './daemon-jobs.mjs';
 
 const COMPLETE = '.complete';
@@ -143,6 +144,7 @@ export function ensureSnapshot({ repoRoot, codeSha, snapshotsDir, storesDir, run
  */
 export function ensureWorktree({ repoRoot, codeSha, worktreesDir, storesDir, id, runFn = run }) {
   if (!/^[0-9a-f]{7,64}$/.test(codeSha ?? '')) throw new Error(`daemon-jobs: a mutates-tree job needs a codeSha, got ${JSON.stringify(codeSha)}`);
+  if (!isValidRunId(id)) throw new TypeError(`daemon-jobs: invalid job id ${JSON.stringify(id)}`);
   const dir = join(worktreesDir, id);
   mkdirSync(worktreesDir, { recursive: true });
   if (existsSync(dir)) {
@@ -200,6 +202,20 @@ export function evictUnreferenced({ paths, records, keep = STORE_KEEP, nowMs = D
 }
 
 /**
+ * The job's recorded workdir, only if it is exactly the worktree {@link ensureWorktree} made for it —
+ * `<worktrees>/<id>`. The terminal-job cleanup deletes this path, so a torn or edited record that names any
+ * other directory is refused rather than removed.
+ */
+export function ownWorktree(paths, record) {
+  const expected = isValidRunId(record?.id) ? join(paths.worktrees, record.id) : null;
+  const dir = typeof record?.job?.workdir === 'string' ? resolve(record.job.workdir) : null;
+  if (!expected || dir !== expected) {
+    throw new Error(`daemon-jobs: refusing to remove ${JSON.stringify(record?.job?.workdir)} — not this job's own worktree under ${paths.worktrees}`);
+  }
+  return dir;
+}
+
+/**
  * The daemon-side wiring: `prepareWorkdir`/`releaseWorkdir`/`evictStores` for {@link createJobDaemon}.
  * @param {{repoRoot:string, paths:object}} o
  */
@@ -208,7 +224,7 @@ export function createWorkdirs({ repoRoot, paths }) {
     prepareWorkdir: async (record) => (record.job.codeMode === 'mutates-tree'
       ? ensureWorktree({ repoRoot, codeSha: record.job.codeSha, worktreesDir: paths.worktrees, storesDir: paths.stores, id: record.id })
       : ensureSnapshot({ repoRoot, codeSha: record.job.codeSha, snapshotsDir: paths.snapshots, storesDir: paths.stores })),
-    releaseWorkdir: (record) => releaseWorktree({ repoRoot, dir: record.job.workdir }),
+    releaseWorkdir: (record) => releaseWorktree({ repoRoot, dir: ownWorktree(paths, record) }),
     evictStores: (records) => evictUnreferenced({ paths, records }),
   };
 }

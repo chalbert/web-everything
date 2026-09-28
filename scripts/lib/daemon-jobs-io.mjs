@@ -31,7 +31,7 @@ import { closeSync, mkdirSync, openSync } from 'node:fs';
 import { homedir, hostname } from 'node:os';
 import { join, resolve } from 'node:path';
 
-import { createFileRunStore } from '../operations/run-store.mjs';
+import { createFileRunStore, isValidRunId } from '../operations/run-store.mjs';
 import { withFileLock } from './atomic-json-file.mjs';
 import {
   BACKOFF_BASE_MS, DEFAULT_LAUNCH_GRACE_MS, DEFAULT_MAX_ATTEMPTS, DEFAULT_STALE_MS, SLEEP_GAP_THRESHOLD_MS,
@@ -77,7 +77,11 @@ export function daemonJobPaths(daemon, root = daemonJobsRoot()) {
 export function openJobStore(jobsDir, { lockTimeoutMs = 10_000 } = {}) {
   const runs = createFileRunStore(jobsDir);
   mkdirSync(jobsDir, { recursive: true });
-  const locked = (id, fn) => withFileLock(join(jobsDir, `${id}.lock`), fn, { timeoutMs: lockTimeoutMs });
+  // The id names the lock file, so it is checked here — before the lock — not left to the run store's write.
+  const locked = (id, fn) => {
+    if (!isValidRunId(id)) throw new TypeError(`daemon-jobs: invalid job id ${JSON.stringify(id)}`);
+    return withFileLock(join(jobsDir, `${id}.lock`), fn, { timeoutMs: lockTimeoutMs });
+  };
   return {
     dir: jobsDir,
     read: (id) => runs.read(id),
@@ -254,8 +258,6 @@ export async function launchJob({
       env: {
         ...env,
         OPERATION_RUNS_DIR: paths.runs,
-        DAEMON_JOB_ID: id,
-        DAEMON_JOB_DIR: store.dir,
         ...(workdir.cloneRoot ? { DAEMON_JOB_CLONE_ROOT: workdir.cloneRoot } : {}),
       },
     });

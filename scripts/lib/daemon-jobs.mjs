@@ -171,6 +171,12 @@ export function validateJobBlock(job, op) {
   if (job.codeSha !== null && !(typeof job.codeSha === 'string' && /^[0-9a-f]{7,64}$/.test(job.codeSha))) {
     errors.push('job.codeSha must be a hex sha or null');
   }
+  // A workdir is only ever deleted by the terminal-job cleanup, so a record may name nothing but an absolute,
+  // `..`-free path; the daemon side also checks it is the job's own worktree before removing it.
+  if (job.workdir !== null && job.workdir !== undefined
+    && !(typeof job.workdir === 'string' && job.workdir.startsWith('/') && !job.workdir.split('/').includes('..'))) {
+    errors.push('job.workdir must be null or an absolute path without `..`');
+  }
   if (job.handle !== null && !parseHandle(job.handle)) errors.push(`job.handle ${JSON.stringify(job.handle)} is not host:pid:procStart`);
   if (job.status === 'running' && job.handle === null) {
     errors.push('a running job must carry its handle');

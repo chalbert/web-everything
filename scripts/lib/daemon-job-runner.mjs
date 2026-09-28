@@ -11,7 +11,8 @@
  *   1. CLAIM. Under the record lock: the record must still be attempt `n` in `launching`/`running` with no
  *      other handle — else this child is stale (the daemon gave up on attempt `n`) and exits without running
  *      anything. On success it writes its own `host:pid:procStart` handle and `status: running`.
- *   2. HOLD. A `mutates-tree` job takes the daemon clone's shared (read) hold for as long as it runs.
+ *   2. HOLD. A `mutates-tree` job takes the daemon clone's shared (read) hold for as long as it runs. A hold
+ *      still refused after `DAEMON_JOB_HOLD_WAIT_MS` (default 120s) records `errored` and exits 1.
  *   3. BEAT. A heartbeat every `DAEMON_JOB_HEARTBEAT_MS` (default 10s). A beat that finds the record no longer
  *      carries this handle is FENCED: the daemon relaunched the job, so this process exits at once.
  *   4. RUN. `import(<job.module>)` and `await run({input, checkpoint, saveCheckpoint, log})`. The kind resumes
@@ -37,6 +38,8 @@ function arg(name) {
 }
 
 const RESULT_MAX_CHARS = 4_000;
+/** How long a `mutates-tree` child waits for the clone's shared hold (`DAEMON_JOB_HOLD_WAIT_MS` overrides). */
+const DEFAULT_HOLD_WAIT_MS = 120_000;
 
 /** Keep the result small: it lives in a record written on every heartbeat. */
 function boundedResult(value) {
@@ -71,10 +74,11 @@ export async function runJob({ dir, id, attempt, env = process.env, exit = (code
   const cloneRoot = claimed.job.codeMode === 'mutates-tree' ? env.DAEMON_JOB_CLONE_ROOT : null;
   const holdOwner = `${hostname()}:${pid}`;
   if (cloneRoot) {
-    const deadline = Date.now() + 120_000;
+    const holdWaitMs = Number(env.DAEMON_JOB_HOLD_WAIT_MS) > 0 ? Number(env.DAEMON_JOB_HOLD_WAIT_MS) : DEFAULT_HOLD_WAIT_MS;
+    const deadline = Date.now() + holdWaitMs;
     let held = acquireRead(cloneRoot, { owner: holdOwner, pid });
     while (!held.ok && Date.now() < deadline) {
-      await new Promise((r) => setTimeout(r, 2_000));
+      await new Promise((r) => setTimeout(r, Math.min(2_000, Math.max(10, holdWaitMs / 4))));
       held = acquireRead(cloneRoot, { owner: holdOwner, pid });
     }
     if (!held.ok) {

@@ -6,14 +6,15 @@
  *   this checkout itself (the snapshot/worktree builders have their own suite, `daemon-jobs-workdir.test.mjs`).
  */
 import { describe, it, expect, afterEach } from 'vitest';
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { hostname, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import { createJobDaemon, handleOf, killStalledJob, openJobStore, probeHandle, readProcStart } from '../daemon-jobs-io.mjs';
 import { formatHandle, parseHandle, withJob } from '../daemon-jobs.mjs';
+import { acquireWrite, releaseWrite } from '../daemon-clone-lock.mjs';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const RUNNER = join(REPO_ROOT, 'scripts/lib/daemon-job-runner.mjs');
@@ -23,6 +24,7 @@ const KINDS = {
   'noop-mutates': { module: 'scripts/lib/daemon-job-kinds/noop.mjs', codeMode: 'mutates-tree' },
 };
 const SHA = 'abc1234';
+const HANDLE_X = 'mac:4242:Mon Sep 28 11:02:12 2026';
 
 const tmp = [];
 const pids = new Set();
@@ -118,6 +120,122 @@ describe('launch: the job runs detached and the tick never waits on it', () => {
     const b = d.enqueue({ id: 'same', kind: 'noop-test', codeSha: SHA, input: { steps: 99 } });
     expect(b.input).toEqual(a.input);
     expect(() => d.enqueue({ id: 'x', kind: 'not-a-kind' })).toThrow(/unknown job kind/);
+  });
+});
+
+describe('the job id is a path component, so it is checked before anything touches the disk', () => {
+  it('create/update/enqueue refuse a traversal id and leave no lock file outside the jobs dir', () => {
+    const root = mkTmp('dj-root-');
+    const d = mkDaemon(root);
+    expect(() => d.enqueue({ id: '../../escape', kind: 'noop-test', codeSha: SHA })).toThrow(/invalid job id/);
+    expect(() => d.store.update('../escape', (c) => c)).toThrow(/invalid job id/);
+    expect(existsSync(join(root, 'escape.lock'))).toBe(false);
+    expect(existsSync(join(root, 'test-daemon', 'escape.lock'))).toBe(false);
+    expect(readdirSync(root).sort()).toEqual(['test-daemon']);
+  });
+});
+
+/** A job record put straight into a given state, for tick tests that never launch a process. */
+function seed(d, id, patch, kind = 'noop-test') {
+  d.enqueue({ id, kind, codeSha: SHA });
+  return d.store.update(id, (c) => withJob(c, patch));
+}
+const noLaunch = async () => ({ launched: false });
+const OLD_START = 'Thu Jan  1 00:00:00 1970';
+
+describe('the tick survives what it cannot run', () => {
+  it('a corrupt record is reported and alerted; every other job is still reattached and launched', async () => {
+    const root = mkTmp('dj-root-');
+    const launched = [];
+    const d = mkDaemon(root, { launch: async ({ id }) => { launched.push(id); return { launched: true }; } });
+    d.enqueue({ id: 'good', kind: 'noop-test', codeSha: SHA });
+    writeFileSync(join(d.paths.jobs, 'torn.json'), '{"v":1,"id":"torn",');
+    const s = await d.tick();
+    expect(s.corrupt).toEqual(['torn']);
+    expect(d.alerts.some((a) => /corrupt job record torn/.test(a))).toBe(true);
+    expect(launched).toEqual(['good']);
+    expect(existsSync(join(d.paths.jobs, 'torn.json'))).toBe(true); // reported, never deleted
+  });
+
+  it('a job of a kind this daemon does not know is failed and alerted, not left queued', async () => {
+    const root = mkTmp('dj-root-');
+    mkDaemon(root).enqueue({ id: 'orphan', kind: 'throws-test', codeSha: SHA });
+    const fewer = Object.fromEntries(Object.entries(KINDS).filter(([k]) => k !== 'throws-test'));
+    const d = mkDaemon(root, { kinds: fewer, launch: noLaunch });
+    const s = await d.tick();
+    expect(s.failed).toEqual(['orphan']);
+    expect(d.store.read('orphan').job).toMatchObject({ status: 'failed', lastError: expect.stringMatching(/unknown job kind throws-test/) });
+    expect(d.alerts.some((a) => /orphan FAILED: unknown kind throws-test/.test(a))).toBe(true);
+  });
+});
+
+describe('a terminal mutates-tree job gives its worktree back', () => {
+  it('the tick releases the workdir once and records workdir: null', async () => {
+    const root = mkTmp('dj-root-');
+    const released = [];
+    const d = mkDaemon(root, { launch: noLaunch, releaseWorkdir: (r) => released.push(r.job.workdir) });
+    const wt = join(d.paths.worktrees, 'done');
+    seed(d, 'done', { status: 'succeeded', workdir: wt }, 'noop-mutates');
+    seed(d, 'done-ro', { status: 'succeeded', workdir: join(d.paths.snapshots, SHA) });
+    await d.tick();
+    await d.tick();
+    expect(released).toEqual([wt]); // once, and never for a readonly-tree job's shared snapshot
+    const rec = d.store.read('done');
+    expect(rec.job.workdir).toBeNull();
+    expect(events(rec)).toContain('workdir-released');
+  });
+
+  it('a release that fails is alerted and the workdir kept on the record for the next tick', async () => {
+    const root = mkTmp('dj-root-');
+    const d = mkDaemon(root, { launch: noLaunch, releaseWorkdir: () => { throw new Error('refused'); } });
+    const wt = join(d.paths.worktrees, 'stuck');
+    seed(d, 'stuck', { status: 'failed', workdir: wt }, 'noop-mutates');
+    await d.tick();
+    expect(d.store.read('stuck').job.workdir).toBe(wt);
+    expect(d.alerts.some((a) => /could not release workdir of stuck: refused/.test(a))).toBe(true);
+  });
+});
+
+describe('the tick\'s writes are compare-and-set on the attempt it judged', () => {
+  it('a child that finishes between the probe and the requeue is not requeued', async () => {
+    const root = mkTmp('dj-root-');
+    const handle = formatHandle({ host: hostname(), pid: 999_999, procStart: OLD_START });
+    let d;
+    const probe = () => {
+      // the child writes its own `succeeded` while the daemon is still judging it
+      d.store.update('racer', (c) => withJob(c, { status: 'succeeded', handle: null, finishedAt: new Date().toISOString() }));
+      return 'dead';
+    };
+    d = mkDaemon(root, { launch: noLaunch, probe });
+    seed(d, 'racer', { status: 'running', attempts: 1, handle, pid: 999_999, heartbeatAt: new Date().toISOString() });
+    const s = await d.tick();
+    expect(s.decisions[0]).toMatchObject({ id: 'racer', action: 'requeue' });
+    const rec = d.store.read('racer');
+    expect(rec.job.status).toBe('succeeded');
+    expect(events(rec)).not.toContain('requeued');
+  });
+});
+
+describe('a daemon boot counts as a wake', () => {
+  it('a live job whose heartbeat is older than the stale window is left alone at boot, and killed a window later', async () => {
+    const root = mkTmp('dj-root-');
+    let nowMs = Date.now();
+    const clock = { wall: () => nowMs, mono: () => nowMs };
+    const killed = [];
+    const d = mkDaemon(root, {
+      clock, launch: noLaunch, probe: () => 'alive',
+      killStalled: async (h) => { killed.push(h); return { gone: false, signals: [] }; },
+    });
+    const handle = formatHandle({ host: hostname(), pid: 999_999, procStart: OLD_START });
+    seed(d, 'napper', { status: 'running', attempts: 1, handle, pid: 999_999, heartbeatAt: new Date(nowMs - 3_600_000).toISOString() });
+    const boot = await d.tick();
+    expect(boot.booting).toBe(true);
+    expect(boot.decisions[0]).toMatchObject({ id: 'napper', action: 'leave' });
+    expect(killed).toEqual([]);
+    nowMs += 2_000; // past the 1.5s stale window, measured from the boot
+    const later = await d.tick();
+    expect(later.decisions[0]).toMatchObject({ id: 'napper', action: 'kill-stalled' });
+    expect(killed).toEqual([handle]);
   });
 });
 
@@ -226,6 +344,31 @@ describe('the handle probe uses the real ps', () => {
     expect(readProcStart(pid)).toBeNull();
   });
 
+  it('a zombie (exited, not yet reaped) reads as dead; a failed probe concludes nothing', () => {
+    const ps = (stdout, status = 0) => () => ({ status, stdout });
+    expect(readProcStart(4242, { spawnSyncFn: ps('Z    Mon Sep 28 11:02:12 2026\n') })).toBeNull();
+    expect(readProcStart(4242, { spawnSyncFn: ps('Z+   Mon Sep 28 11:02:12 2026\n') })).toBeNull();
+    expect(readProcStart(4242, { spawnSyncFn: ps('S    Mon Sep 28 11:02:12 2026\n') })).toBe('Mon Sep 28 11:02:12 2026');
+    expect(readProcStart(4242, { spawnSyncFn: ps('', 1) })).toBeNull();
+    expect(readProcStart(4242, { spawnSyncFn: () => ({ error: new Error('EAGAIN') }) })).toBeUndefined();
+  });
+
+  it('killStalledJob escalates to SIGKILL, but not once the pid has been reused after the SIGTERM', async () => {
+    const run = async (verdicts) => {
+      const sent = [];
+      let i = 0;
+      const out = await killStalledJob(HANDLE_X, {
+        termGraceMs: 300, killGraceMs: 300, pollMs: 100, sleep: async () => {},
+        probe: () => verdicts[Math.min(i++, verdicts.length - 1)], signal: (p, sig) => sent.push(sig),
+      });
+      return { ...out, sent };
+    };
+    // never dies: TERM, then KILL, and the kill is reported as not confirmed
+    expect(await run(['alive'])).toMatchObject({ gone: false, sent: ['SIGTERM', 'SIGKILL'] });
+    // the pid is reused by another process during the TERM grace: that process is never sent the KILL
+    expect(await run(['alive', 'alive', 'alive', 'reused'])).toMatchObject({ gone: true, sent: ['SIGTERM'] });
+  });
+
   it('killStalledJob never signals a pid whose start time no longer matches', async () => {
     const h = handleOf(process.pid);
     const { host, pid } = parseHandle(h);
@@ -244,9 +387,9 @@ describe('the runner fences a stale attempt', () => {
     d.store.update('fence', (c) => withJob(c, { status: 'launching', attempts: 1, launchedAt: new Date().toISOString() }));
     return { store: openJobStore(d.store.dir), dir: d.store.dir };
   }
-  function runRunner(dir, attempt) {
+  function runRunner(dir, attempt, env = {}) {
     const child = spawn(process.execPath, [RUNNER, `--dir=${dir}`, '--id=fence', `--attempt=${attempt}`], {
-      cwd: REPO_ROOT, env: { ...process.env, DAEMON_JOB_HEARTBEAT_MS: '100' }, stdio: 'ignore',
+      cwd: REPO_ROOT, env: { ...process.env, DAEMON_JOB_HEARTBEAT_MS: '100', ...env }, stdio: 'ignore',
     });
     pids.add(child.pid);
     return new Promise((res) => child.on('exit', (code) => res(code)));
@@ -267,6 +410,44 @@ describe('the runner fences a stale attempt', () => {
     await waitRecord(store, 'fence', (r) => r.job.status === 'running');
     store.update('fence', (c) => withJob(c, { handle: formatHandle({ host: 'elsewhere', pid: 1, procStart: 'Thu Jan  1 00:00:00 1970' }) }));
     expect(await exit).toBe(3);
+  }, 20_000);
+
+  it('with no heartbeat due, the next checkpoint save is what fences the child — the step never lands', async () => {
+    const root = mkTmp('dj-root-');
+    const { store, dir } = prepare(root, { steps: 100, stepMs: 150 });
+    const exit = runRunner(dir, 1, { DAEMON_JOB_HEARTBEAT_MS: '600000' });
+    const running = await waitRecord(store, 'fence', (r) => r.job.status === 'running' && r.job.checkpoint?.step >= 1);
+    const other = formatHandle({ host: 'elsewhere', pid: 1, procStart: 'Thu Jan  1 00:00:00 1970' });
+    const fencedAt = store.update('fence', (c) => withJob(c, { handle: other })).job.checkpoint.step;
+    expect(await exit).toBe(3);
+    const after = store.read('fence');
+    expect(after.job.checkpoint.step).toBe(fencedAt);
+    expect(after.job.handle).toBe(other);
+    expect(running.job.status).toBe('running');
+  }, 20_000);
+
+  it('a mutates-tree child that cannot get the clone hold records errored and exits 1, without running', async () => {
+    const root = mkTmp('dj-root-');
+    const traceFile = join(root, 'trace.jsonl');
+    const lockRoot = mkTmp('dj-locks-');
+    const clone = mkTmp('dj-clone-');
+    const d = mkDaemon(root);
+    d.enqueue({ id: 'fence', kind: 'noop-mutates', codeSha: SHA, input: { steps: 1, stepMs: 10, traceFile } });
+    d.store.update('fence', (c) => withJob(c, { status: 'launching', attempts: 1, launchedAt: new Date().toISOString() }));
+    const prevRoot = process.env.WE_DAEMON_CLONE_LOCK_ROOT;
+    process.env.WE_DAEMON_CLONE_LOCK_ROOT = lockRoot;
+    try {
+      expect(await acquireWrite(clone, { owner: 'test-writer', waitMs: 0 })).toEqual({ ok: true });
+      const code = await runRunner(d.store.dir, 1, {
+        WE_DAEMON_CLONE_LOCK_ROOT: lockRoot, DAEMON_JOB_CLONE_ROOT: clone, DAEMON_JOB_HOLD_WAIT_MS: '100',
+      });
+      expect(code).toBe(1);
+      expect(d.store.read('fence').job).toMatchObject({ status: 'errored', lastError: expect.stringMatching(/clone hold refused: writer-active/) });
+      expect(traceEvents(traceFile)).toEqual([]); // the kind never ran
+    } finally {
+      releaseWrite(clone, { owner: 'test-writer' });
+      if (prevRoot === undefined) delete process.env.WE_DAEMON_CLONE_LOCK_ROOT; else process.env.WE_DAEMON_CLONE_LOCK_ROOT = prevRoot;
+    }
   }, 20_000);
 });
 
