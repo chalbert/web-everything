@@ -523,19 +523,27 @@ export function countFindings(comments) {
  * session that happens to satisfy both paths is stored once, not twice, with no separate dedup check needed —
  * a second `.set()` on the same key simply overwrites with the same value), and pass through the SAME liveness
  * assessment below — the union widens WHAT can bind, it does not change what a bind MEANS.
+ *
+ * `transcriptAgeMs` (#4056) rides along as EVIDENCE only — how long ago the bound session's own transcript last
+ * moved, copied off the agent row when an IO shell has already measured it (`pr-ownership-io.mjs`), else `null`.
+ * It never participates in the bind decision; the `pr-ownership` read uses it to flag a stale binding (#3951).
  * @param {{headRefOid?:string, number?:number|string}} pr
  * @param {Array<object>} agents
- * @returns {Array<{agent:object, cwd:string, sha:string}>}
+ * @returns {Array<{agent:object, cwd:string, sha:string, transcriptAgeMs:number|null}>}
  */
 export function bindAgents(pr, agents, repo = 'we') {
   const sha = String(pr?.headRefOid ?? '');
   const list = Array.isArray(agents) ? agents : [];
   const bound = new Map();
+  const row = (a) => ({
+    agent: a, cwd: String(a.cwd ?? ''), sha,
+    transcriptAgeMs: Number.isFinite(a.transcriptAgeMs) ? a.transcriptAgeMs : null,
+  });
 
   if (sha) {
     for (const a of list) {
       if (a && String(a.laneHeadOid ?? '') && String(a.laneHeadOid) === sha) {
-        bound.set(a, { agent: a, cwd: String(a.cwd ?? ''), sha });
+        bound.set(a, row(a));
       }
     }
   }
@@ -556,7 +564,7 @@ export function bindAgents(pr, agents, repo = 'we') {
     ];
     for (const a of list) {
       if (a && slugs.includes(String(a.name ?? ''))) {
-        bound.set(a, { agent: a, cwd: String(a.cwd ?? ''), sha });
+        bound.set(a, row(a));
       }
     }
   }

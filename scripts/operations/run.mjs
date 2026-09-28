@@ -55,6 +55,8 @@ import { createStaleStateReader } from './stale-state-io.mjs';
 import { prReconcileOperation, PR_RECONCILE_OP } from './pr-reconcile.mjs';
 import { createPrReconcileReader } from './pr-status-io.mjs';
 import { runnerActivityOperation, RUNNER_ACTIVITY_OP } from './runner-activity.mjs';
+import { prOwnershipOperation, PR_OWNERSHIP_OP } from './pr-ownership.mjs';
+import { createPrOwnershipReader } from './pr-ownership-io.mjs';
 import { createRunnerActivityReader, createRunnerActivityCliStores } from './runner-activity-io.mjs';
 import { daemonStatusOperation, DAEMON_STATUS_OP } from './daemon-status.mjs';
 import { collectDaemonStatus } from './daemon-status-io.mjs';
@@ -259,6 +261,13 @@ export const OPERATIONS = Object.freeze({
   }),
   [RUNNER_ACTIVITY_OP]: () => ({
     declaration: runnerActivityOperation({ readActivity: createRunnerActivityReader() }),
+    sinks: {},
+  }),
+  // #4056 (under #3383) — who owns each open PR's next move, and is that owner alive. Read-only, same no-sinks
+  // reasoning as `runner-activity`/`stale-state`: every step is `compute`, and the reconcile pass it calls
+  // plans without dispatching.
+  [PR_OWNERSHIP_OP]: () => ({
+    declaration: prOwnershipOperation({ readOwnership: createPrOwnershipReader() }),
     sinks: {},
   }),
   [AGENT_ACTIVITY_OP]: () => ({
