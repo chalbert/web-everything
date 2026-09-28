@@ -13,7 +13,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { LEASE_FILENAME } from '../lib/lane-lease.mjs';
@@ -157,6 +157,101 @@ describe('verify-lane request (#3105) — stamp the marker, run nothing, return 
     expect(kept.sha).toBe(OTHER_SHA);
     expect(kept.status).toBe('green');
   });
+});
+
+describe('verify-lane check --wait= (#4358) — a bounded internal wait, one CLI call per settle', () => {
+  /** Run `check --wait=…` (plus any extra args) in the temp repo; returns {code, json, stderr}. Uses `spawnSync`
+   *  (not `execFileSync`) specifically so stderr is captured on the SUCCESS path too (a clamp warning prints on
+   *  stderr even when the call itself exits 0) — `execFileSync` only surfaces stderr via the thrown error on a
+   *  non-zero exit, which would silently drop it here. */
+  function runCheckWait(waitArg, extraArgs = []) {
+    const r = spawnSync('node', [VERIFY_LANE, 'check', ...(waitArg != null ? [`--wait=${waitArg}`] : []), '--json', ...extraArgs], { cwd: dir, encoding: 'utf8' });
+    return {
+      code: r.status,
+      json: (() => { try { return JSON.parse(String(r.stdout).trim().split('\n').pop()); } catch { return null; } })(),
+      stderr: String(r.stderr || ''),
+    };
+  }
+
+  it('an already-GREEN marker settles on the very first poll — no waiting out the ceiling', () => {
+    runVerify('true'); // records a green marker for HEAD
+    const { code, json } = runCheckWait(60_000);
+    expect(code).toBe(0);
+    expect(json).toMatchObject({ status: 'green', ok: true, settled: true });
+    expect(json.sha).toBe(headSha());
+    expect(json.waited.polls).toBe(1);
+  });
+
+  it('a marker that never settles times out at the ceiling — a bounded "still pending", not a hang', () => {
+    runRequestOnly(); // stamps `running` and returns — nothing ever finishes it
+    const { code, json } = runCheckWait(200); // short real ceiling keeps this test fast
+    expect(code).toBe(2);
+    expect(json).toMatchObject({ status: 'timeout', reason: 'wait-timeout', ok: false, settled: false });
+    expect(json.lastStatus).toBe('running');
+    expect(json.waited.ms).toBeGreaterThanOrEqual(200);
+  });
+
+  it('rejects a non-positive/non-numeric --wait as a usage error (exit 3), never a silent 0ms wait', () => {
+    for (const bad of ['0', '-5', 'nope']) {
+      const { code, json } = runCheckWait(bad);
+      expect(code, bad).toBe(3);
+      expect(json?.reason, bad).toBe('bad-wait');
+    }
+  });
+
+  it('rejects a BARE --wait (no =<ms>) as a usage error too — never the silent ~1ms wait Number(true) would give', () => {
+    // #4358 — the arg parser turns a bare `--wait` into the boolean `true`, and `Number(true) === 1` would
+    // otherwise sail past the finite/positive check and run a real (near-instant) wait instead of flagging the
+    // likely typo.
+    const r = spawnSync('node', [VERIFY_LANE, 'check', '--wait', '--json'], { cwd: dir, encoding: 'utf8' });
+    expect(r.status).toBe(3);
+    const json = JSON.parse(String(r.stdout).trim().split('\n').pop());
+    expect(json.reason).toBe('bad-wait');
+  });
+
+  it('clamps an outsized --wait to the safe ceiling (warns on stderr) rather than blocking for the full ask', () => {
+    runVerify('true'); // already green — settles on poll 1, so this proves the CLAMP fires, not a long wait
+    const { code, json, stderr } = runCheckWait(10_000_000);
+    expect(code).toBe(0);
+    expect(json.status).toBe('green');
+    expect(stderr).toMatch(/clamped/);
+  });
+
+  it('the CLI passes the CLAMPED ceiling to waitForVerifySettle, not the raw --wait= it was given', () => {
+    // #4358 — the stderr-warning test above proves a warning PRINTS, not that the value actually handed to the
+    // wait core is the clamped one. `resolveWaitCeilingMs` is unit-tested in isolation (lane-verify.test.mjs);
+    // this pins the WIRING at the one call site that matters, by source inspection — a live 90s-vs-10,000,000ms
+    // timing race would prove the same thing far more slowly.
+    const src = readFileSync(VERIFY_LANE, 'utf8');
+    const waitCallBlock = src.slice(src.indexOf('await waitForVerifySettle({'), src.indexOf('await waitForVerifySettle({') + 300);
+    expect(waitCallBlock).toMatch(/\bceilingMs\b/);
+    expect(waitCallBlock).not.toMatch(/\brequestedMs\b/);
+    // and ceilingMs itself is assigned from the clamp helper, not a bare `Math.min` re-derived at the call site.
+    expect(src).toMatch(/const ceilingMs = resolveWaitCeilingMs\(requestedMs\);/);
+  });
+
+  it('the DEFAULT posture (no --require-verified flag at all, exactly the brief\'s own example) already requires verification', () => {
+    // #4358 — #3321 flipped the bare default to requireVerified:true, so the brief's plain `check --wait=…`
+    // example (no flag) needs no `--require-verified` to get a fast, honest `absent` for a forgotten `request` —
+    // it is NOT the permissive `untracked`/ok:true path, which needs an EXPLICIT opt-out this example never gives.
+    const { code, json } = runCheckWait(500); // no --require-verified, no WE_REQUIRE_VERIFIED env — the bare default
+    expect(code).toBe(2);
+    expect(json).toMatchObject({ status: 'absent', reason: 'unverified', ok: false, settled: false });
+  });
+
+  it('bare `check` (no --wait) is completely unchanged — one fast, non-blocking read', () => {
+    runRequestOnly();
+    const { code, json } = runCheckWait(null);
+    expect(code).toBe(2);
+    expect(json.status).toBe('running');
+    expect(json.waited).toBeUndefined(); // the non-wait path never adds wait bookkeeping
+  });
+
+  /** `request` with a gate that would never actually run (a plain no-op if it did) — a plain in-flight
+   *  `running` marker for HEAD that nothing here ever finishes. */
+  function runRequestOnly() {
+    execFileSync('node', [VERIFY_LANE, 'request', '--gate=true', '--json'], { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  }
 });
 
 describe('verify-lane reset (x4jcqm4) — clearing a stale marker without a lease to protect', () => {

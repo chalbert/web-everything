@@ -21,6 +21,9 @@ import {
   normalizeVerifyRecord,
   resolveVerifyOptions,
   keepMarkerAfterReset,
+  waitForVerifySettle,
+  resolveWaitCeilingMs,
+  MAX_SAFE_WAIT_MS,
 } from '../lib/lane-verify.mjs';
 
 const SHA = 'a'.repeat(40);
@@ -753,5 +756,197 @@ describe('keepMarkerAfterReset — an acquire drops the previous holder\'s verif
     expect(keepMarkerAfterReset({ sha: 'old', status: 'red' }, 'abc')).toBe(false);
     expect(keepMarkerAfterReset({ corrupt: true }, 'abc')).toBe(false);
     expect(keepMarkerAfterReset(null, 'abc')).toBe(false);
+  });
+});
+
+/**
+ * waitForVerifySettle (#4358) — the bounded, internally-pollable wait `verify-lane.mjs check --wait=<ms>` is
+ * built on. Everything here uses a FAKE clock/sleep (a shared counter `t`, advanced only by `sleep`, never a
+ * real timer) so the whole suite runs instantly regardless of the simulated ceilings/intervals it exercises —
+ * exactly the "fake clock, fake marker reads" shape the card's own test plan (item 1) asks for.
+ */
+describe('waitForVerifySettle — bounded wait for the marker to settle (#4358)', () => {
+  const gateFor = (sha) => ({
+    running: verifyStartBody({ sha, suites: 'gate', startedAt: new Date(T0).toISOString() }),
+    green: verifyFinishBody(verifyStartBody({ sha, suites: 'gate', startedAt: new Date(T0).toISOString() }), { finishedAt: new Date(T0).toISOString(), exitCode: 0 }),
+  });
+
+  /** A fake clock: `now()` reads a shared counter that only `sleep()` ever advances — no real timers, so a
+   *  simulated multi-poll wait resolves in real-test-time ~0ms regardless of how many virtual ms it spans. */
+  function fakeClock() {
+    let t = 0;
+    return { now: () => t, sleep: async (ms) => { t += ms; } };
+  }
+
+  it('settles as soon as the marker goes green — returns on the poll it settles, not the full ceiling', async () => {
+    const { running, green } = gateFor(SHA);
+    let calls = 0;
+    const readRecord = () => { calls += 1; return calls < 4 ? running : green; }; // green on the 4th poll
+    const { now, sleep } = fakeClock();
+
+    const result = await waitForVerifySettle({
+      readRecord, readHead: () => SHA, headSha: SHA,
+      ceilingMs: 60_000, pollIntervalMs: 2_000, now, sleep,
+    });
+
+    expect(result).toMatchObject({ status: 'green', ok: true, settled: true });
+    expect(result.waited.polls).toBe(4);
+    // 3 sleeps of 2s each elapsed before the 4th (settling) poll — nowhere near the 60s ceiling.
+    expect(result.waited.ms).toBe(6_000);
+  });
+
+  it('a bounded "still pending" result at the ceiling — never waits past it, and is clearly UNSETTLED', async () => {
+    const { running } = gateFor(SHA);
+    const { now, sleep } = fakeClock();
+
+    const result = await waitForVerifySettle({
+      readRecord: () => running, readHead: () => SHA, headSha: SHA,
+      ceilingMs: 10_000, pollIntervalMs: 2_000, now, sleep,
+    });
+
+    expect(result.settled).toBe(false);
+    expect(result.status).toBe('timeout');
+    expect(result.reason).toBe('wait-timeout');
+    expect(result.ok).toBe(false);
+    expect(result.waited.ms).toBe(10_000); // stops AT the ceiling, never beyond it
+    expect(result.lastStatus).toBe('running'); // the last real read is preserved for diagnosis…
+    expect(result.status).not.toBe('running'); // …but never SUBSTITUTES for the honest "timeout" verdict
+  });
+
+  it('break-glass ends the wait immediately (a constant override — more waiting could never change it)', async () => {
+    const { running } = gateFor(SHA);
+    const { now, sleep } = fakeClock();
+
+    const result = await waitForVerifySettle({
+      readRecord: () => running, readHead: () => SHA, headSha: SHA, breakGlass: true,
+      ceilingMs: 60_000, pollIntervalMs: 2_000, now, sleep,
+    });
+
+    expect(result).toMatchObject({ status: 'break-glass', ok: true });
+    // #4358 risk: an ok:true verdict that is NOT a verified result must never read as "settled".
+    expect(result.settled).toBe(false);
+    expect(result.waited.polls).toBe(1);
+    expect(result.waited.ms).toBe(0); // no sleep needed — decided on the very first poll
+  });
+
+  it('a corrupt marker ends the wait with an explicit error, never a silent retry', async () => {
+    const { now, sleep } = fakeClock();
+
+    const result = await waitForVerifySettle({
+      readRecord: () => ({ corrupt: true }), readHead: () => SHA, headSha: SHA,
+      ceilingMs: 60_000, pollIntervalMs: 2_000, now, sleep,
+    });
+
+    expect(result).toMatchObject({ status: 'corrupt', reason: 'verify-corrupt', ok: false, settled: false });
+    expect(result.waited.polls).toBe(1); // no retry loop
+  });
+
+  it('untracked (ok:true, but not a verified result) does NOT settle the wait — ends immediately, unsettled', async () => {
+    // requireVerified:false + no record for this head ⇒ verifyGateDecision's `untracked` (ok:true) — the exact
+    // #4358 risk: this must not be read as "done" just because ok is true. It ends the wait right away (nothing
+    // will ever write a marker for this head without an explicit request/verify), not after burning the ceiling.
+    const { now, sleep } = fakeClock();
+
+    const result = await waitForVerifySettle({
+      readRecord: () => null, readHead: () => SHA, headSha: SHA, requireVerified: false,
+      ceilingMs: 6_000, pollIntervalMs: 2_000, now, sleep,
+    });
+
+    expect(result).toMatchObject({ status: 'untracked', ok: true, settled: false });
+    expect(result.waited.polls).toBe(1);
+    expect(result.waited.ms).toBe(0); // no sleep — decided on the very first poll, not at the ceiling
+  });
+
+  it('absent (requireVerified:true, no marker for this head) ends the wait immediately — never burns the full ceiling', async () => {
+    // #4358 — nothing but an explicit request/verify ever writes this head's marker, so waiting longer here
+    // cannot help; pins the fix for an earlier cut that lumped `absent` in with `running` (see the backlog
+    // card's Progress section for the review history).
+    const { now, sleep } = fakeClock();
+
+    const result = await waitForVerifySettle({
+      readRecord: () => null, readHead: () => SHA, headSha: SHA, requireVerified: true,
+      ceilingMs: 60_000, pollIntervalMs: 2_000, now, sleep,
+    });
+
+    expect(result).toMatchObject({ status: 'absent', reason: 'unverified', ok: false, settled: false });
+    expect(result.waited.polls).toBe(1);
+    expect(result.waited.ms).toBe(0);
+  });
+
+  it('a STALE marker (recorded for a DIFFERENT, already-superseded sha) also ends the wait immediately, same as absent', async () => {
+    const { green } = gateFor(OTHER); // a real green record, but for the WRONG head
+    const { now, sleep } = fakeClock();
+
+    const result = await waitForVerifySettle({
+      readRecord: () => green, readHead: () => SHA, headSha: SHA, requireVerified: true,
+      ceilingMs: 60_000, pollIntervalMs: 2_000, now, sleep,
+    });
+
+    expect(result).toMatchObject({ status: 'absent', reason: 'unverified', ok: false, settled: false });
+    expect(result.waited.polls).toBe(1);
+  });
+
+  it('a HEAD move mid-wait is reported distinctly from "still pending" — never folded into a timeout', async () => {
+    const { running } = gateFor(SHA);
+    const { now, sleep } = fakeClock();
+    let polls = 0;
+    // HEAD matches for the first 2 polls, then a new commit lands (the tracked sha is no longer HEAD).
+    const readHead = () => { polls += 1; return polls <= 2 ? SHA : OTHER; };
+
+    const result = await waitForVerifySettle({
+      readRecord: () => running, readHead, headSha: SHA,
+      ceilingMs: 60_000, pollIntervalMs: 2_000, now, sleep,
+    });
+
+    expect(result).toMatchObject({ status: 'head-moved', reason: 'head-moved', ok: false, settled: false });
+    expect(result.detail).toMatch(new RegExp(OTHER.slice(0, 8)));
+    // caught on the 3rd poll — well before the 60s ceiling would otherwise have been reached.
+    expect(result.waited.polls).toBe(3);
+    expect(result.waited.ms).toBe(4_000);
+  });
+
+  it('a red result also settles the wait (both requireVerified arms) — only green/red are terminal-settled', async () => {
+    const redFor = (sha) => verifyFinishBody(verifyStartBody({ sha, suites: 'gate', startedAt: 't' }), { finishedAt: 'u', exitCode: 2 });
+    const { now, sleep } = fakeClock();
+
+    const strict = await waitForVerifySettle({
+      readRecord: () => redFor(SHA), readHead: () => SHA, headSha: SHA, requireVerified: true,
+      ceilingMs: 10_000, pollIntervalMs: 2_000, now, sleep,
+    });
+    expect(strict).toMatchObject({ status: 'red', reason: 'verify-red', ok: false, settled: true });
+
+    const { now: now2, sleep: sleep2 } = fakeClock();
+    const optOut = await waitForVerifySettle({
+      readRecord: () => redFor(SHA), readHead: () => SHA, headSha: SHA, requireVerified: false,
+      ceilingMs: 10_000, pollIntervalMs: 2_000, now: now2, sleep: sleep2,
+    });
+    expect(optOut).toMatchObject({ status: 'red', reason: 'red-ci-gated', ok: true, settled: true });
+  });
+
+  it('a ceiling that is NOT an exact multiple of the poll interval still stops EXACTLY at the ceiling, never past it', async () => {
+    // #4358 — a ceiling/interval pair that divides evenly (10_000 / 2_000, used above) can't tell a correct
+    // final-sleep clamp apart from one that simply overshoots by up to one interval. 7_000 / 2_000 does not
+    // divide evenly: an unclamped final sleep would land at 8_000, not 7_000.
+    const { running } = gateFor(SHA);
+    const { now, sleep } = fakeClock();
+
+    const result = await waitForVerifySettle({
+      readRecord: () => running, readHead: () => SHA, headSha: SHA,
+      ceilingMs: 7_000, pollIntervalMs: 2_000, now, sleep,
+    });
+
+    expect(result.status).toBe('timeout');
+    expect(result.waited.ms).toBe(7_000); // exactly the ceiling — the last sleep was clamped to 1_000, not 2_000
+  });
+});
+
+describe('resolveWaitCeilingMs — the SAME clamp verify-lane.mjs applies to a requested --wait= (#4358)', () => {
+  it('passes a requested value through unchanged when it is within the safe ceiling', () => {
+    expect(resolveWaitCeilingMs(1_000)).toBe(1_000);
+    expect(resolveWaitCeilingMs(MAX_SAFE_WAIT_MS)).toBe(MAX_SAFE_WAIT_MS); // exactly at the bound — not clamped down
+  });
+  it('clamps a requested value ABOVE the safe ceiling down to it', () => {
+    expect(resolveWaitCeilingMs(MAX_SAFE_WAIT_MS + 1)).toBe(MAX_SAFE_WAIT_MS);
+    expect(resolveWaitCeilingMs(10_000_000)).toBe(MAX_SAFE_WAIT_MS);
   });
 });

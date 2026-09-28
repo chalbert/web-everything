@@ -349,6 +349,13 @@ describe('guard-bash — a dispatched agent may not run the gate directly, only 
     expect(dispatchedAgentVerificationReason('node scripts/verify-lane.mjs check --require-verified', 'fix')).toBeNull();
     expect(dispatchedAgentVerificationReason('node scripts/verify-lane.mjs reset', 'ci-heal')).toBeNull();
   });
+  it('#4358 — `check --wait=<ms>` (a FLAG on the same sanctioned `check` subcommand) is allowed too, any spelling', () => {
+    // SANCTIONED_VERIFY_LANE_QUERY matches on the subcommand WORD, not what follows it, so adding a flag to an
+    // already-allowed subcommand needed no guard change — pinned here as a regression test, not just prose.
+    expect(dispatchedAgentVerificationReason('node scripts/verify-lane.mjs check --wait=60000', 'delivery')).toBeNull();
+    expect(dispatchedAgentVerificationReason('node scripts/verify-lane.mjs check --wait=60000 --json', 'delivery')).toBeNull();
+    expect(dispatchedAgentVerificationReason('node we:scripts/verify-lane.mjs check --wait=90000', 'delivery')).toBeNull();
+  });
   it('a bare (default-mode) verify-lane.mjs invocation still denies — only request/check/reset are exempt', () => {
     expect(dispatchedAgentVerificationReason('node scripts/verify-lane.mjs', 'build')).toMatch(/#3105/);
     expect(dispatchedAgentVerificationReason('node scripts/verify-lane.mjs --gate="npm run test:unit"', 'build')).toMatch(/#3105/);

@@ -209,8 +209,8 @@ A WE item's gate is `npm run check:standards`. For a cross-locus item, run **tha
 gate is a hard stop (see *Escalations*). **Do NOT `resolve` the card here** — the card is resolved in step 8, once
 the diff has converged (steps 6–7) and just before the one commit, so the flip rides the PR (see step 8):
 
-**You cannot run the gate yourself — request it, then poll (#3105).** The gate legitimately takes 150–350s,
-well past this tool's ~120s foreground window: a direct run (foreground OR backgrounded) gets silently
+**You cannot run the gate yourself — request it, then WAIT for it (#3105/#4358).** The gate legitimately takes
+150–350s, well past this tool's ~120s foreground window: a direct run (foreground OR backgrounded) gets silently
 auto-backgrounded by the tool itself, and you stall with no error — the exact #2833 shape, just reached without
 ever typing `&`. This is not just guidance: a `PreToolUse(Bash)` guard (`we:scripts/guard-bash.mjs`, #3105)
 **DENIES** a dispatched agent from running the verification set (`verify-lane` / `run.mjs verify` /
@@ -219,17 +219,27 @@ turn's window) runs the gate for you:
 
 ```bash
 node scripts/verify-lane.mjs request              # returns almost instantly — nothing has run yet — @operation-home-ok: #xab3jh7 — request has no operation-level equivalent yet; folding it in is #xab3jh7
-# … on a LATER turn (the runner picks it up on its own tick, ~120s cadence) …
-node scripts/verify-lane.mjs check --json          # fast marker read; repeat across turns until it settles — @operation-home-ok: #xab3jh7 — check has no operation-level equivalent yet; folding it in is #xab3jh7
+# … on a LATER turn …
+node scripts/verify-lane.mjs check --wait=60000 --json   # BLOCKS internally (bounded — well under this tool's foreground window), returns the instant the marker settles — @operation-home-ok: #xab3jh7 — check has no operation-level equivalent yet; folding it in is #xab3jh7
 ```
 
-`check`'s `status` is `running` while your request is still pending or in flight (poll again next turn),
-`green`/`red` once the runner has actually run it. Only `green` lets you go on to step 6.
+`--wait=<ms>` (#4358) polls the marker **internally** and returns the FIRST result that is genuinely final —
+never the old "one bare `check`, then come back and ask again next turn" loop. `running` is the ONLY status it
+actually spends the ceiling waiting out (the one status a background process can still move off of); every
+other status ends the wait **immediately** instead of burning the ceiling on something more waiting cannot
+change (see the status table below for what each one means and what to do about it). Requesting more than one
+wait in a row (across turns, if the gate outruns a single ceiling) is normal and expected — each call still
+costs far less than the old per-turn poll loop, because one call now absorbs however many internal polls the
+wait actually took.
 
-**Read `check`'s `status`/`ok`, never just its exit code.** `{sha, status, reason, ok, detail}` — `status` is
-`green` (ok) / `red` (ok:false, a real gate failure) / `running` (not yet settled — poll again, this is NOT a
-failure) / `corrupt` (ok:false — the marker itself is torn; `request` again) / `absent` (ok:false — nothing was
-ever requested for this HEAD; `request` it). Only `green` may satisfy this gate.
+**Read `check`'s `status`/`ok`, never just its exit code — and never read `ok:true` alone as "settled".**
+`{sha, status, reason, ok, detail}` — `status` is `green` (ok — the only one that satisfies this gate) / `red`
+(ok:false, a real gate failure) / `running` (not yet settled — this is NOT a failure) / `corrupt` (ok:false — the
+marker itself is torn; `request` again) / `absent` (ok:false — nothing was ever requested for this HEAD, or the
+marker is for an older commit; `request` it, don't just re-`check --wait=`) / `break-glass` (`ok:true`, but an
+OVERRIDE, not a verified result — only relevant if `WE_LAND_UNVERIFIED=1` is set) / `timeout` (ok:false,
+`--wait=` only — the ceiling elapsed while still `running`; call `check --wait=` again) / `head-moved` (ok:false,
+`--wait=` only — a new commit landed on the lane mid-wait; re-`request` for the new HEAD).
 
 ### 6. Converge your diff — run `/converge` against the lane clone (BEFORE the PR)
 
@@ -349,13 +359,15 @@ printf '%s\n' "WE #{{ITEM_NUM}}: <one-line summary>" "" \
   "Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>" > <msgfile>
 git commit -F <msgfile> <explicit-paths>
 
-# #2833/#3105 — verify the FINAL HEAD you are about to land, keyed to this exact commit. Same request-then-poll
-# shape as step 5 — you cannot run this yourself (guard-bash denies it); request it and poll `check` across
-# your own turns until it settles GREEN. Do NOT interpret a lingering `running` status as a failure: it means
-# the runner has not picked it up yet (or is still running it), not that anything went wrong — keep polling.
+# #2833/#3105/#4358 — verify the FINAL HEAD you are about to land, keyed to this exact commit. Same
+# request-then-WAIT shape as step 5 — you cannot run this yourself (guard-bash denies it); request it, then let
+# `check --wait=` block (bounded, internally-polling) until it settles GREEN. Do NOT interpret a `timeout` or a
+# lingering `running` status as a failure: it means the runner hasn't finished yet (or hasn't picked it up), not
+# that anything went wrong — call `check --wait=` again. A `head-moved` result means the commit below is no
+# longer HEAD (something else moved it) — re-`request` for the new HEAD before re-checking.
 node scripts/verify-lane.mjs request              # targets HEAD as of the commit you just made — @operation-home-ok: #xab3jh7 — request has no operation-level equivalent yet; folding it in is #xab3jh7
-# … poll on later turns …
-node scripts/verify-lane.mjs check --json          # proceed ONLY once status is `green`; `red` is a hard stop (see *Escalations*) — @operation-home-ok: #xab3jh7 — check has no operation-level equivalent yet; folding it in is #xab3jh7
+# … wait on later turns, repeating if the gate outruns one ceiling …
+node scripts/verify-lane.mjs check --wait=60000 --json   # proceed ONLY once status is `green`; `red` is a hard stop (see *Escalations*) — @operation-home-ok: #xab3jh7 — check has no operation-level equivalent yet; folding it in is #xab3jh7
 
 node scripts/operations/run.mjs open-pr --ref=lane/{{ITEM_NUM}}{{ATTEMPT_TAG}}-<slug> --sha=HEAD --base={{DELIVERY_BASE}} \
   --bodyFile=<pr-body> --mode=label-on-green --requireVerified=true --json
