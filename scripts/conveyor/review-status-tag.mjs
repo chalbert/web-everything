@@ -25,6 +25,7 @@
  * `we:scripts/operations/dispatch-lane.mjs`'s own `fix-${id}` mint), rather than sharing that binding.
  */
 import { mintSessionSlug } from './session-slug.mjs';
+import { readLiveFixClaim } from './fix-procedure.mjs';
 import { repoKeyForSlug } from '../lib/constellation-repos.mjs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -78,10 +79,10 @@ const LIVE_STATES = Object.freeze({ working: 'reviewing', blocked: 'stalled' });
  * (`we:scripts/conveyor/reconcile-core.mjs#classifyPr`'s `ci-red` phase is its own branch ahead of the
  * `OWED`/`OWED_ELSEWHERE` table), so the ordering is precedence-in-name-only — it never actually shadows a
  * real ci-heal for a PR that also has a stale review/fix session row sitting in `claude agents --json`.
- * @param {{pr:number|string, agents?:Array<{name?:string, state?:string}>, isDraft?:boolean, mergeConflicted?:boolean}} o
+ * @param {{pr:number|string, agents?:Array<{name?:string, state?:string}>, isDraft?:boolean, mergeConflicted?:boolean, fixClaim?:object|null}} o
  * @returns {{role:'review'|'fix'|'ci-heal'|'draft', state:'reviewing'|'review-stalled'|'fixing'|'fix-stalled'|'fixing-conflict'|'fixing-conflict-stalled'|'healing-ci'|'ci-heal-stalled'|'awaiting-ci'}|null}
  */
-export function deriveReviewStatus({ pr, agents = [], repo = 'we', isDraft = false, mergeConflicted = false } = {}) {
+export function deriveReviewStatus({ pr, agents = [], repo = 'we', isDraft = false, mergeConflicted = false, fixClaim = null } = {}) {
   const reviewName = mintSessionSlug({ kind: 'review', id: pr, repo });
   const fixName = mintSessionSlug({ kind: 'fix', id: pr, repo });
   const ciHealName = mintSessionSlug({ kind: 'ci-heal', id: pr, repo });
@@ -95,6 +96,10 @@ export function deriveReviewStatus({ pr, agents = [], repo = 'we', isDraft = fal
   };
   const review = liveFor(reviewName);
   if (review) return { role: 'review', state: review.state === 'working' ? 'reviewing' : 'review-stalled' };
+  // fix procedure (operator-approved 2026-09-27) — a LIVE fix claim (`fix-procedure.mjs`) is `fixing` whoever
+  // holds it: an orchestrator worker is not a `fix-<pr>` session, and without this the tagger would strip the
+  // `review-status:fixing` label `fix-begin` just set on the very next tick.
+  if (fixClaim) return { role: 'fix', state: 'fixing' };
   const fix = liveFor(fixName);
   if (fix) {
     // `fixing-conflict` (see STATUS_LABEL_RE's own doc) — the ONE case a `fix-<pr>` session's generic label
@@ -141,7 +146,7 @@ export function planStatusLabelChange({ status, currentLabels = [] } = {}) {
  * (`we:skills-src/conveyor/review-daemon.mjs#runReviewTick`, wired to reuse it) passes it straight through.
  * Omitting either (the default, and every pre-existing caller/test) reads fresh, byte-identical to before
  * these options existed.
- * @param {{pr:number|string, repo:string, listAgents?:Function, provider?:object, agents?:Array<object>, currentLabels?:Array<{name?:string}|string>, isDraft?:boolean, mergeConflicted?:boolean}} o
+ * @param {{pr:number|string, repo:string, listAgents?:Function, provider?:object, agents?:Array<object>, currentLabels?:Array<{name?:string}|string>, isDraft?:boolean, mergeConflicted?:boolean, readFixClaim?:Function}} o
  * @returns {{changed:boolean, label:string|null, removed:string[]}}
  */
 // x26lw6u — the default listing includes live review JOBS (`we:scripts/operations/review-job.mjs`): a review no
@@ -156,11 +161,15 @@ export function tagReviewStatus({
   // `fixing-conflict` (draft reason at a glance, operator ask 2026-09-27) — same "false by default, no existing
   // caller affected" convention as `isDraft` above.
   mergeConflicted = false,
+  // fix procedure — the live fix-claim read (a local file read, no `gh`); injectable so a test stays hermetic.
+  readFixClaim = ({ repo: r, pr: p }) => readLiveFixClaim({ repo: r, pr: p }),
 } = {}) {
   const repoKey = repo === undefined ? 'we' : repoKeyForSlug(repo);
   if (repoKey === null) throw new Error(`review-status-tag: --repo ${repo} is not a constellation repo`);
   const agents = suppliedAgents ?? listAgents();
-  const status = deriveReviewStatus({ pr, agents, repo: repoKey, isDraft, mergeConflicted });
+  let fixClaim = null;
+  try { fixClaim = readFixClaim({ repo: repoKey, pr: Number(pr) }); } catch { fixClaim = null; }
+  const status = deriveReviewStatus({ pr, agents, repo: repoKey, isDraft, mergeConflicted, fixClaim });
   const currentLabels = suppliedLabels ?? provider.readLabels(repo, pr);
   const plan = planStatusLabelChange({ status, currentLabels });
   if (!plan.add && plan.remove.length === 0) {

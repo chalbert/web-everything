@@ -93,6 +93,21 @@ EXAMINED_HEAD="$(gh pr view {{PR_NUM}} --repo {{REPO}} --json headRefOid --jq .h
 node "{{WE_ROOT}}/scripts/operations/completion-cli.mjs" report --repo={{REPO}} --session={{SESSION_SLUG}} --kind=ci-heal --pr={{PR_NUM}} --item={{ITEM_NUM}} --status=started
 ```
 
+### 0b. Take the fix claim — `fix-begin` (the fix procedure, operator-approved 2026-09-27)
+
+One author changes a PR's branch at a time — a CI-heal included. Take the PR's fix claim before anything else:
+
+```bash
+node "{{WE_ROOT}}/scripts/conveyor/fix-procedure.mjs" fix-begin {{PR_NUM}} --repo={{REPO}} --who={{SESSION_SLUG}} \
+  --why="conveyor ci-heal: {{REASON}}"
+```
+
+It turns the PR back to **draft** and refuses pushes to its branch by anyone but you. If it is **refused**
+(exit 3), another fixer owns the PR right now: report `--status=done --outcome=not-applicable` and RETURN
+`#{{ITEM_NUM}} → ci-heal not-applicable (fix claim held by <holder>)`. **Every exit from here on releases the
+claim with `fix-end`** (the blocks below carry the line). `fix-end` leaves the PR draft; the fix daemon marks it
+ready once required CI is green on your new head.
+
 ### 1. Reconstitute the PR's work in a lane clone (reuse the ref — never rebuild from scratch)
 
 The work is intact on the `{{LANE_REF}}` ref (the pushed PR head). Acquire a free lane reset **to that ref**, so
@@ -114,6 +129,7 @@ LANE=$(node "{{WE_ROOT}}/scripts/lane-pool.mjs" acquire --repo={{LANE_REPO}} --l
   report the completion record and stop and report `#{{ITEM_NUM}} → ci-heal not-applicable (lane ref gone)`:
   ```bash
   node "{{WE_ROOT}}/scripts/operations/completion-cli.mjs" report --repo={{REPO}} --session={{SESSION_SLUG}} --status=done --outcome=not-applicable
+  node "{{WE_ROOT}}/scripts/conveyor/fix-procedure.mjs" fix-end {{PR_NUM}} --repo={{REPO}} --who={{SESSION_SLUG}}
   ```
   A gone ref will still be gone on the very next tick's re-dispatch — post the durable, head-scoped escalation
   marker too (we:backlog/heal-wait-for-rerun; see the callout right after this arc for the FULL outcome-choice
@@ -146,6 +162,7 @@ alone often fixes a BEHIND `test` failure.
 ```bash
 git rebase --abort
 node "{{WE_ROOT}}/scripts/operations/completion-cli.mjs" report --repo={{REPO}} --session={{SESSION_SLUG}} --status=done --outcome=escalated-conflict
+node "{{WE_ROOT}}/scripts/conveyor/fix-procedure.mjs" fix-end {{PR_NUM}} --repo={{REPO}} --who={{SESSION_SLUG}}
 node "{{WE_ROOT}}/scripts/conveyor/ci-heal-escalation-mark.mjs" {{PR_NUM}} --repo={{REPO}} \
   --head="$EXAMINED_HEAD" --outcome=needs-human --reason="conflict with main during rebase"
 ```
@@ -192,6 +209,7 @@ gh run view <run-id> --log-failed --repo {{REPO}} # the failing step's log (opti
     simply unsure. Report and stop:
     ```bash
     node "{{WE_ROOT}}/scripts/operations/completion-cli.mjs" report --repo={{REPO}} --session={{SESSION_SLUG}} --status=done --outcome=escalated-needs-human
+    node "{{WE_ROOT}}/scripts/conveyor/fix-procedure.mjs" fix-end {{PR_NUM}} --repo={{REPO}} --who={{SESSION_SLUG}}
     node "{{WE_ROOT}}/scripts/conveyor/ci-heal-escalation-mark.mjs" {{PR_NUM}} --repo={{REPO}} \
       --head="$EXAMINED_HEAD" --outcome=needs-human --reason="not a CI break — <name the actual finding>"
     ```
@@ -204,6 +222,7 @@ gh run view <run-id> --log-failed --repo {{REPO}} # the failing step's log (opti
     this outcome with `--system-fix=2784`). This PR did nothing wrong and does not need the operator's attention:
     ```bash
     node "{{WE_ROOT}}/scripts/operations/completion-cli.mjs" report --repo={{REPO}} --session={{SESSION_SLUG}} --status=done --outcome=escalated-needs-human
+    node "{{WE_ROOT}}/scripts/conveyor/fix-procedure.mjs" fix-end {{PR_NUM}} --repo={{REPO}} --who={{SESSION_SLUG}}
     node "{{WE_ROOT}}/scripts/conveyor/ci-heal-escalation-mark.mjs" {{PR_NUM}} --repo={{REPO}} \
       --head="$EXAMINED_HEAD" --outcome=waiting-on-system-fix --system-fix=<n> \
       --reason="<name the tooling bug and the PR fixing it>"
@@ -217,6 +236,7 @@ to clear (`we:scripts/conveyor/reconcile-core.mjs#INFRA_RETRY_COOLOFF_MS`):
 
 ```bash
 node "{{WE_ROOT}}/scripts/operations/completion-cli.mjs" report --repo={{REPO}} --session={{SESSION_SLUG}} --status=done --outcome=blocked-on-infra
+node "{{WE_ROOT}}/scripts/conveyor/fix-procedure.mjs" fix-end {{PR_NUM}} --repo={{REPO}} --who={{SESSION_SLUG}}
 ```
 
 Then report `#{{ITEM_NUM}} → blocked-on-infra (tool/permission denial applying an otherwise-clear CI heal on PR
@@ -257,6 +277,7 @@ ci-heal gate-red`:
 
 ```bash
 node "{{WE_ROOT}}/scripts/operations/completion-cli.mjs" report --repo={{REPO}} --session={{SESSION_SLUG}} --status=done --outcome=gate-red
+node "{{WE_ROOT}}/scripts/conveyor/fix-procedure.mjs" fix-end {{PR_NUM}} --repo={{REPO}} --who={{SESSION_SLUG}}
 ```
 
 ### 5. Converge before re-push — self-review the heal (proportionate to the change)
@@ -293,6 +314,7 @@ a comment, **NOT** a label change:
 ```bash
 node "{{WE_ROOT}}/scripts/conveyor/ci-heal-mark.mjs" {{PR_NUM}} --repo={{REPO}} --reason={{REASON}} && \
   node "{{WE_ROOT}}/scripts/operations/completion-cli.mjs" report --repo={{REPO}} --session={{SESSION_SLUG}} --status=done --outcome=<no-change|healed>
+  node "{{WE_ROOT}}/scripts/conveyor/fix-procedure.mjs" fix-end {{PR_NUM}} --repo={{REPO}} --who={{SESSION_SLUG}}
 ```
 
 `ci-heal-mark.mjs` posts one comment whose leading line is the CI-heal marker. The conveyor counts those comments

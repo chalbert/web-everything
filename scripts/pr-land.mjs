@@ -108,6 +108,7 @@ import { classifyPrOpenFailure, recordInfraBlockIO, infraStorePath, primaryRootF
 import { decideOpenPr, countOpenPrsForRepo, isGlobalOffLive, isBranchAllowedLive } from './lib/pr-limit.mjs'; // we:xniq7xs — the open-PR backpressure limit's pre-create refusal
 import { repoKeyForSlug } from './lib/constellation-repos.mjs'; // we:xniq7xs — map this checkout's origin slug to the internal repo key the limit is keyed by
 import { join } from 'node:path';
+import { pushRefusal, callerIdentity, repoKeyForCheckout } from './conveyor/fix-procedure.mjs'; // fix procedure — refuse a push to a branch another fixer holds the fix claim on
 import { writeAllSync } from './lib/write-all-sync.mjs';
 import { admittedArgv } from './readiness/heavy-admission.mjs'; // xaipsbs — the heal's check:standards waits for a heavy-command slot
 import { verifyGateDecision, readVerifyMarker, resolveVerifyOptions } from './lib/lane-verify.mjs'; // #2833 — the lane-verification finish-guard: refuse to land a HEAD whose synchronous suite run never finished (or, under --require-verified, was never recorded green). readVerifyMarker/resolveVerifyOptions are the SHARED marker reader + option resolver (findings 2/5) both this gate and verify-lane use, so the two can never drift (readVerifyMarker owns the VERIFY_FILENAME path — no bare JSON.parse of the marker here).
@@ -832,6 +833,15 @@ function runCli() {
   catch (e) {
     if (e && e.status === 2) emit({ repo: REPO, merged: false, reason: 'locus-prefix', detail: `bare code-path ref(s) without a <repo>: prefix in this lane's corpus changes (#883/#2331 — the #2170 review-append leak) — prefix them (e.g. "foo.ts" → "we:foo.ts"), \`git commit --amend\`, and re-run; refusing to open a PR CI would fail` }, 3);
     if (!AS_JSON) process.stderr.write(`pr-land [${REPO}] · locus-prefix range sweep DID NOT RUN over ${LOCUS_RANGE} in ${REPO} — this lane's corpus changes were NOT checked here (${String(e.message || e).split('\n')[0]}); CI still backstops it\n`);
+  }
+
+  // 1d. fix procedure (operator-approved 2026-09-27, live incident PR #2811) — refuse to push to a lane ref
+  //     whose PR another fixer holds the LIVE fix claim on (`we:scripts/conveyor/fix-procedure.mjs`). Only the
+  //     claim holder (same Claude session, or the same `WE_FIX_WHO` + `WE_FIX_TOKEN`) may push until its `fix-end`.
+  {
+    // `REPO` is the resolved checkout PATH (never a slug); read the URL of the remote this run actually pushes to.
+    const refusal = pushRefusal({ repo: repoKeyForCheckout(REPO, { remote: REMOTE }), branch: REF, ...callerIdentity() });
+    if (refusal) emit({ repo: REPO, merged: false, reason: 'fix-claimed', ref: REF, pr: refusal.pr, holder: refusal.holder, detail: refusal.message }, 3);
   }
 
   // 2. Publish the source commit to the lane ref on origin (guard-safe: lane/*). Never force, no local branch.

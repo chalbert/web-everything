@@ -1,11 +1,11 @@
 ---
 name: mechanical-delivery-doctrine
-description: The twelve standing operating rules for driving epic #3383's mechanical dispatcher — kanban-style fix-it-don't-ask, dispatch on the card + the generic brief never a bespoke prompt, the orchestrating session never edits/commits directly (always delegates to a subsession in a lane), a prototype-branch bug fix skips ceremony but a main-code fix takes the full pipeline, every review:human PR gets an independent AI review pass before the human ceremony, the operator's in-conversation "I approve <PR>" naming a PR IS the clearance instruction, resume the branch's continuous runner loop as the primary delivery mechanism, a reproducible tool failure is not proof of a genuine external limitation, a mechanism-bug fix found during delivery still delegates the FIX to a subsession, a long-lived divergent branch is a DECLARED delivery mode (a "POC branch"), N of them may stand at once, and landing inside one skips review entirely — tests only, with the real review deferred to graduation — a one-off action that relieves a symptom is never reported as the fix: landing requires the real root cause found and a durable fix verified — and default to routing filing/building/investigating through the conveyor itself (`file-item` + `tier --to=pinned` for urgency) rather than a hand-dispatched subagent, wherever the conveyor's own dispatch already covers that work kind. Use when driving, orchestrating, or resuming work on #3383's dispatcher/runner/supervisor, or when the operator asks "what's the standing doctrine for the dispatcher" / "check the delivery doctrine" / "how should this session be operating right now". Read this BEFORE taking any action as the session driving that epic's machinery — it is meant to be followed immediately, not summarized further. NOT `/conveyor` (#2612/#2613) — that is a separate, older interim delivery mechanism (a swimlane-progression loop run live from an interactive session); the two have not been unified yet.
+description: The thirteen standing operating rules for driving epic #3383's mechanical dispatcher — kanban-style fix-it-don't-ask, dispatch on the card + the generic brief never a bespoke prompt, the orchestrating session never edits/commits directly (always delegates to a subsession in a lane), a prototype-branch bug fix skips ceremony but a main-code fix takes the full pipeline, every review:human PR gets an independent AI review pass before the human ceremony, the operator's in-conversation "I approve <PR>" naming a PR IS the clearance instruction, resume the branch's continuous runner loop as the primary delivery mechanism, a reproducible tool failure is not proof of a genuine external limitation, a mechanism-bug fix found during delivery still delegates the FIX to a subsession, a long-lived divergent branch is a DECLARED delivery mode (a "POC branch"), N of them may stand at once, and landing inside one skips review entirely — tests only, with the real review deferred to graduation — a one-off action that relieves a symptom is never reported as the fix: landing requires the real root cause found and a durable fix verified — and default to routing filing/building/investigating through the conveyor itself (`file-item` + `tier --to=pinned` for urgency) rather than a hand-dispatched subagent, wherever the conveyor's own dispatch already covers that work kind — and any worker that pushes to an EXISTING PR's branch takes the fix claim first (`fix-begin`/`fix-end`, `we:scripts/conveyor/fix-procedure.mjs`). Use when driving, orchestrating, or resuming work on #3383's dispatcher/runner/supervisor, or when the operator asks "what's the standing doctrine for the dispatcher" / "check the delivery doctrine" / "how should this session be operating right now". Read this BEFORE taking any action as the session driving that epic's machinery — it is meant to be followed immediately, not summarized further. NOT `/conveyor` (#2612/#2613) — that is a separate, older interim delivery mechanism (a swimlane-progression loop run live from an interactive session); the two have not been unified yet.
 ---
 
 # Mechanical-delivery doctrine — epic #3383's standing operating rules
 
-Twelve rules accumulated while building and live-firing `#3383`'s own machinery (the background
+Thirteen rules accumulated while building and live-firing `#3383`'s own machinery (the background
 mechanical dispatcher that replaces an interactive session as delivery supervisor). Each rule below
 is enough to act on without reading further — the full evidence and reasoning for each sits in the
 named section of `#3383`'s own card
@@ -166,6 +166,21 @@ history. If a rule itself changes, edit it here first, then note the change on t
     it. The gap was concrete enough to spawn its own follow-on decision, filed that night, on
     distinguishing conveyor-origin throughput from a "session-driven burst (like the one that filed
     this very card)" (`#3383`'s dispatch-origin-attribution decision).
+
+13. **Any worker that changes an EXISTING PR's branch follows the fix procedure — `fix-begin` first,
+    `fix-end` after the push.** An orchestrator worker (not a daemon session) is no exception: before its
+    first commit to a PR's `lane/*` ref it runs
+    `node scripts/conveyor/fix-procedure.mjs fix-begin <pr> --repo=<the PR's repo slug> --who=<its session or worker name> --why="<one line>"`
+    (takes the per-PR fix claim, turns the PR back to draft, labels it `review-status:fixing`), pushes only
+    while holding it (`git push` / `pr-land` / `fix-procedure.mjs push` refuse anyone else), and finishes with
+    `node scripts/conveyor/fix-procedure.mjs fix-end <pr> --repo=<same> --who=<same>` (`--repo` is required: a PR
+    number is only unique within its repo). The PR stays draft; the fix daemon
+    promotes it on green required CI and review re-runs. If `fix-begin` is REFUSED, another fixer owns the PR
+    right now — wait for its `fix-end` or coordinate; never push around it. A worker without a Claude session
+    sets `WE_FIX_WHO=<name>` and `WE_FIX_TOKEN=<the token fix-begin printed>` so its pushes are recognized as
+    the holder's (the claim is bound to the token: `--who` is public, and two workers may share a name). Grounded 2026-09-27, PR #2811: a
+    worker pushed rubric commits onto a branch the daemon fixer `fix-2811` was mid-repair on; the fixer stood
+    down and the planner held the PR forever.
 
 ## Not `/conveyor`, on purpose
 

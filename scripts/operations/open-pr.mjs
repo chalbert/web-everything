@@ -287,6 +287,9 @@ export const HOME_REASONS = Object.freeze({
   // we:xniq7xs — the open-PR backpressure limit refused a NEW pr-land open over the per-repo cap (the ref
   // stays pushed): a guard answered, same as `check-red`/`behind` — land/review the existing PRs, or override.
   'pr-limit': 'refused',
+  // fix procedure (2026-09-27) — another fixer holds the live fix claim on this branch's PR (`fix-procedure.mjs`):
+  // a guard answered — wait for its `fix-end`.
+  'fix-claimed': 'refused',
   // …and the #2833 verify refusals, which come from `lib/lane-verify.mjs`'s own `verifyGateDecision`
   // rather than from pr-land's argv parsing. THESE ARE THE ONES THAT MATTER: they are the guard the
   // bypass skipped, and every one of them must reach the caller as an answer, never as a shrug.

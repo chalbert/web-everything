@@ -3800,6 +3800,64 @@ a deferred `classifyPr` "no-check vs red" reporting split, and authoring the mis
 
 ---
 
+### A ready PR yields, for a bounded non-renewable window, to a larger overlapping PR already in final review — a conflict-COST strategy, settings-driven, on by default as a trial {#drain-overlap-yield-landing-order}
+
+**Ratified 2026-09-27 (operator, in conversation; #4307, decision card).** Large daemon PRs kept drifting
+into conflict with `main` because smaller overlapping PRs landed ahead of them while they sat in review
+(#2821, 20 files, conflicted twice in one day; each conflict cost a fixer round, a full CI run and a fresh
+review round). `we:scripts/merge-ai-prs.mjs#planLabelDrain` lands ready PRs in `blockedBy`/item/PR-number
+order and has no notion of an open PR still in review.
+
+1. **The rule.** A ready PR X yields to a larger overlapping PR Y that is in final review, for **one
+   non-renewable budget counted from X's own `ready-to-merge` label** (never from Y's review clock) — so X's
+   total wait is bounded whatever happens to Y. "Larger" is a single **global total order** (total changed
+   lines, then PR number) — never a per-pair overlap measure, which can cycle across three PRs. "Final
+   review" means Y is open, not a draft, on X's base, not `review:changes`, carries `review:pending` or
+   `review:accepted`, and does not itself depend on X. Blockers, hard dependencies, and a PR whose file list
+   is unknown (hit a listing cap) are exempt and never yield. Full mechanical shape (the exact fields, the
+   drain plumbing, the idle-accounting treatment): `we:scripts/conveyor/land-overlap-yield.mjs` per the
+   #4308 build card.
+2. **This is a conflict-COST strategy, not a conflict-reduction one.** It decides **who pays** for reconciling
+   an overlap that already exists (the smaller PR re-lands with less to re-review than the larger one would),
+   and stops the repeated knock-back of one large PR — it does not shrink the underlying edit collision.
+   Dispatch-time overlap **avoidance** (#4295 / 4295, coordinating daemon-claimed work before it is even
+   dispatched) is the reduction layer; the two compose rather than duplicate: 4295 prevents some overlaps
+   from being dispatched at all, this rule decides land order for whatever overlaps still occur — including
+   work dispatched outside the daemons' claim stores, which 4295 never sees.
+3. **Configurable by SETTINGS, not only a CLI flag.** Both the on/off switch and the window length live in
+   the repo's normal settings/config mechanism — a **tracked, committed**, defaults-in-code JSON config file
+   beside the affected script (`we:scripts/drain-overlap-yield-config.json`), edited only through a sanctioned
+   CLI verb mirroring `we:scripts/backlog.mjs weights`, never hand-edited, and landed via lane→PR like any
+   other repo change. It copies the CLI-verb/write-guard shape of `we:scripts/build-queue-config.json` but
+   **not** its git-ignored status: the resident drain daemon self-updates from `main` and never sees a local
+   uncommitted file ([resident-daemon-reload-lifecycle](#resident-daemon-reload-lifecycle)), so a git-ignored
+   copy would silently strand an operator's edit. A `--overlap-yield-window`/env-var override may exist *on top of* the settings file for
+   a one-off run, but the settings file is the durable, discoverable knob — a flag nobody remembers to pass is
+   not "configurable."
+4. **Activated (on) by default, for now, as a trial.** Shipped defaults: `enabled: true`,
+   `windowMinutes: 45` (a starting value anchored to one incident — the #2821 conflict ran 44 minutes end to
+   end — not a measured optimum). Every yield is logged (which PR yielded, to which, the computed rank, the
+   release time/reason). **Revisit the window after a week of live yield data.**
+5. **What was explicitly left open.** A second, independent axis — may a PR keep its review state after a
+   clean mechanical rebase, instead of always resetting to a fresh review round — was raised during
+   preparation and is **NOT ruled by this entry**. It is its own decision card
+   ([4310](/backlog/4310-may-a-pr-keep-its-review-after-a-clean-mechanical-rebase-or/)), status quo
+   (always re-review) standing as its default until it is separately prepared and ratified. This repo's
+   convention is one ruling per decision card, so a second axis surfaced mid-prep is split out rather than
+   folded into an existing ruling.
+
+**Lineage:** #4307 (ratified 2026-09-27, operator, in conversation), forks and mechanical design authored
+during the preparation of its build card #4308, reshaped once by an independent Codex review (added the
+status-quo and eligible-only alternatives, split off the review-carry-over axis, showed an overlap-only size
+order can cycle). Build tracked on #4308. Composes with
+[#4295](../../backlog/4295/)
+(dispatch-time reduction layer, distinct axis) and does not alter
+[#pr-flow-rollout-mechanism](#pr-flow-rollout-mechanism) (the drain stays the sole `main` writer; this rule
+only reorders what it lands next). Open follow-on: [4310](/backlog/4310-may-a-pr-keep-its-review-after-a-clean-mechanical-rebase-or/)
+(review carry-over after a mechanical rebase, unruled).
+
+---
+
 ### The drain never auto-resolves a card carrying a `## Slice ` heading — an explicit TEMPORARY fix, not the final delivery-strategy design {#drain-multi-slice-card-interim-hold}
 
 **Ratified 2026-09-21 (operator, in conversation; #3820, decision card; explicitly ratified as a temporary
