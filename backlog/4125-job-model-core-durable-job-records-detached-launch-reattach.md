@@ -3,11 +3,12 @@ bornAs: xjz3gof
 kind: story
 size: 5
 parent: "4075"
-status: active
+status: resolved
 blockedBy: ["4120"]
 scope: ["we:scripts/lib/daemon-jobs.mjs", "we:scripts/operations/run-store.mjs", "we:scripts/operations/run-record.mjs"]
 dateOpened: "2026-09-24"
 dateStarted: "2026-09-28"
+dateResolved: "2026-09-28"
 tags: []
 ---
 
