@@ -132,16 +132,26 @@ describe('routeDispatchProvider — the probation branch', () => {
   });
 });
 
-/** A fake io: a rebased lane whose gate result, worker diff and checker answer the test chooses. */
-function fakeIo({ gate = [false, true], rebaseOk = true, moved = true, numstat = '2\t1\tscripts/a.mjs', checker = 'APPROVE', pushOk = true, state = 'OPEN' } = {}) {
+/** A fake io: a rebased lane whose gate result, worker diff and checker answer the test chooses.
+ *  x55dojc — `resetHookSurface`/`snapshotHookSurface` default to a clean, never-tampered lane; pass
+ *  `hookResetClean: false` (refused before any worker) or `hookTampered: true` (changed while the worker ran)
+ *  to exercise those refusal paths without a real fs/git dependency. */
+function fakeIo({
+  gate = [false, true], rebaseOk = true, moved = true, numstat = '2\t1\tscripts/a.mjs', checker = 'APPROVE',
+  pushOk = true, state = 'OPEN', hookResetClean = true, hookTampered = false,
+} = {}) {
   const calls = [];
   const gates = [...gate];
   let head = 'examined';
+  const cleanSnapshot = { configHash: 'clean', files: {} };
+  const tamperedSnapshot = { configHash: 'clean', files: { 'pre-commit': 'planted' } };
   const io = {
     log: () => {},
     completion: (c) => calls.push(['completion', c.status, c.outcome]),
     prHead: () => ({ state, headRefOid: 'examined', headRefName: 'lane/x' }),
     acquireLane: () => '/lanes/9',
+    resetHookSurface: (d) => { calls.push(['reset-hooks', d]); return { clean: hookResetClean, leftover: hookResetClean ? [] : ['pre-commit'], snapshot: cleanSnapshot }; },
+    snapshotHookSurface: (d) => { calls.push(['snapshot-hooks', d]); return hookTampered ? tamperedSnapshot : cleanSnapshot; },
     rebaseOntoMain: () => { if (rebaseOk && moved) head = 'rebased'; return rebaseOk; },
     headSha: () => head,
     runGate: () => ({ pass: gates.length ? gates.shift() : true, output: 'gate out' }),
@@ -239,5 +249,29 @@ describe('runProbationHeal — the arc', () => {
     const { io, calls } = fakeIo({ state: 'MERGED' });
     expect((await runProbationHeal(args(), io)).outcome).toBe('not-applicable');
     expect(calls.some((c) => c[0] === 'worker')).toBe(false);
+  });
+
+  // x55dojc — hardening against a worker planting a git hook.
+  it('refuses before any rebase/worker when the lane\'s git-hook baseline cannot be cleaned', async () => {
+    const { io, calls } = fakeIo({ hookResetClean: false });
+    const r = await runProbationHeal(args(), io);
+    expect(r).toMatchObject({ outcome: 'escalated-needs-human', executor: 'none' });
+    expect(r.detail).toMatch(/clean git-hook baseline/);
+    expect(calls.some((c) => c[0] === 'worker')).toBe(false);
+    expect(calls.filter((c) => c[0] === 'reset-hooks')).toEqual([['reset-hooks', '/lanes/9']]);
+    expect(calls.find((c) => c[0] === 'escalate')[1]).toMatch(/git-hook surface/);
+  });
+
+  it('a worker that changes the lane\'s git-hook surface is refused, discarded, and never committed/pushed', async () => {
+    const { io, calls } = fakeIo({ hookTampered: true });
+    const r = await runProbationHeal(args(), io);
+    expect(r).toMatchObject({ outcome: 'escalated-needs-human', executor: 'antigravity' });
+    expect(r.detail).toMatch(/\.git\/hooks\/ changed/);
+    expect(calls.some((c) => c[0] === 'commit')).toBe(false);
+    expect(calls.some((c) => c[0] === 'push')).toBe(false);
+    expect(calls.some((c) => c[0] === 'discard')).toBe(true);
+    expect(calls.filter((c) => c[0] === 'reset-hooks').length).toBeGreaterThanOrEqual(2); // baseline + post-tamper cleanup
+    expect(calls.find((c) => c[0] === 'escalate')[1]).toMatch(/git-hook surface changed during the worker/);
+    expect(calls.find((c) => c[0] === 'scorecard')).toEqual(['scorecard', 'escalated-needs-human', 'antigravity', null, null]);
   });
 });

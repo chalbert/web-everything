@@ -35,15 +35,19 @@ function fakeIo({
   lane = '/lanes/22', item = { path: 'backlog/4291-probation-launcher.md', slug: 'probation-launcher', title: 'Probation launcher', spec: '## Done when\n\n1. it works.', raw: ITEM_RAW },
   claimOk = true, numstat = '1\t20\tbacklog-docs/probation.md', gate = true, resolveOk = true, openPr: openPrResult = { ok: true, pr: 9001, url: 'https://x/9001' },
   throwOn = null, postWorkerSpec = null, postWorkerRaw = null, claimTamperedRaw = null, runWorkerOk = true,
-  headShaSequence = null,
+  headShaSequence = null, hookResetClean = true, hookTampered = false,
 } = {}) {
   const calls = [];
   const boom = (name) => { if (throwOn === name) throw new Error(`${name} exploded`); };
   let findItemCalls = 0;
   let headShaCalls = 0;
+  const cleanSnapshot = { configHash: 'clean', files: {} };
+  const tamperedSnapshot = { configHash: 'clean', files: { 'pre-commit': 'planted' } };
   const io = {
     log: () => {},
     acquireLane: (o) => { calls.push(['acquireLane', o.lane, o.scope]); return lane; },
+    resetHookSurface: (d) => { boom('resetHookSurface'); calls.push(['reset-hooks', d]); return { clean: hookResetClean, leftover: hookResetClean ? [] : ['pre-commit'], snapshot: cleanSnapshot }; },
+    snapshotHookSurface: (d) => { boom('snapshotHookSurface'); calls.push(['snapshot-hooks', d]); return hookTampered ? tamperedSnapshot : cleanSnapshot; },
     findItem: () => {
       findItemCalls += 1;
       // Call 1 is the very first read, before claim. Call 2 is the post-claim consistency check — normally a
@@ -336,6 +340,26 @@ describe('runProbationBuild — the arc', () => {
     expect(r.outcome).toBe('escalated-needs-human');
     expect(r.detail).toMatch(/unexpected error: commit exploded/);
     expect(calls.some((c) => c[0] === 'discard')).toBe(true);
+  });
+
+  // x55dojc — hardening against a worker planting a git hook.
+  it('refuses before any claim/worker when the lane\'s git-hook baseline cannot be cleaned', async () => {
+    const { io, calls } = fakeIo({ hookResetClean: false });
+    const r = await runProbationBuild(args(), io);
+    expect(r).toMatchObject({ outcome: 'escalated-needs-human', executor: 'none' });
+    expect(r.detail).toMatch(/clean git-hook baseline/);
+    expect(calls.some((c) => c[0] === 'claim' || c[0] === 'worker')).toBe(false);
+  });
+
+  it('a worker that changes the lane\'s git-hook surface is refused, discarded, and never committed/PR-opened', async () => {
+    const { io, calls } = fakeIo({ hookTampered: true });
+    const r = await runProbationBuild(args(), io);
+    expect(r).toMatchObject({ outcome: 'escalated-needs-human', executor: 'codex' });
+    expect(r.detail).toMatch(/refused:/);
+    expect(calls.some((c) => c[0] === 'commit')).toBe(false);
+    expect(calls.some((c) => c[0] === 'openPr')).toBe(false);
+    expect(calls.some((c) => c[0] === 'discard')).toBe(true);
+    expect(calls.filter((c) => c[0] === 'reset-hooks').length).toBeGreaterThanOrEqual(2); // baseline + post-tamper cleanup
   });
 
   it('refuses with no num, session or worker', async () => {

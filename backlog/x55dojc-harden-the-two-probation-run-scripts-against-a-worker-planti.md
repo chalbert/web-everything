@@ -1,8 +1,11 @@
 ---
 kind: task
-status: open
+status: resolved
 scope: ["we:scripts/operations/probation-heal-run.mjs", "we:scripts/operations/probation-build-run.mjs", "we:scripts/codex-direct-task.mjs", "we:scripts/gemini-direct-task.mjs"]
 dateOpened: "2026-09-28"
+dateResolved: "2026-09-28"
+preparedDate: "2026-09-28"
+preparedAgainstSha: "93ccc0db51367ee26f2c92ebb85a9a093f1eb401"
 tags: []
 ---
 
@@ -12,4 +15,15 @@ we:scripts/operations/probation-heal-run.mjs and we:scripts/operations/probation
 
 ## Done when
 
-1. **Executable** — TODO: a command that fails before this item lands and passes after.
+1. **Executable** — `node we:scripts/readiness/heavy-admission.mjs run -- npx vitest run we:scripts/lib/__tests__/git-hook-surface.test.mjs we:scripts/operations/__tests__/probation-heal-run.test.mjs we:scripts/operations/__tests__/probation-build-run.test.mjs` fails before this item lands (a real planted `.git/hooks/pre-commit` executes on a plain `git commit`, and both run scripts' fake-io arc tests reach `opened-pr`/`healed` even when the lane's git-hook surface cannot be cleaned or was tampered with mid-run) and passes after (the planted hook is inert once the process env is `withHooksDisabled`, and both arcs refuse — discard, never commit/push/open a PR — on an unclean baseline or a detected tamper). `npm run check:standards` stays green.
+
+## Follow-ups filed rather than folded in here
+
+- `we:backlog/xnygz00-cover-git-config-controlled-execution-paths-beyond-core-hook.md` — this fix is scoped to
+  the traditional hooks mechanism (`.git/hooks/<name>`, `core.hooksPath`) only; a 2026-09-28 Codex plan review
+  flagged `core.fsmonitor`, `clean`/`smudge`/`textconv` filters, and the newer `hook.<name>.command`/`.event`
+  config-hooks as separate, broader config-controlled execution paths worth a dedicated pass.
+- `we:backlog/x3j03qu-we-scripts-operations-probation-heal-run-mjs-s-arc-has-no-to.md` — found incidentally:
+  unlike `we:scripts/operations/probation-build-run.mjs`, `we:scripts/operations/probation-heal-run.mjs`'s arc
+  has no top-level try/catch, so an unexpected thrown error (e.g. from a lane a worker corrupted) propagates
+  uncaught instead of escalating cleanly.

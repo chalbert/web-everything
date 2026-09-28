@@ -64,6 +64,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { appendScorecard as appendScorecardRow } from '../conveyor/run-scorecard-store.mjs';
 import { CONSTELLATION_REPOS, DEFAULT_REPO_KEY } from '../lib/constellation-repos.mjs';
+import { hookSurfaceChanged, resetHookSurface, snapshotHookSurface, withHooksDisabled } from '../lib/git-hook-surface.mjs';
 import { PROVEN_TASK_ENVELOPES } from '../lib/provider-routing.mjs';
 import { isDocScopePath } from '../lib/dispatch-task-type.mjs';
 import {
@@ -188,6 +189,15 @@ export async function runProbationBuild(args, io) {
     lanePath = io.acquireLane({ lane: args.lane, session, scope: args.scope });
     if (!lanePath) return finish('not-applicable', 'none', 'could not acquire a lane for this build');
 
+    // x55dojc — force a known-clean git-hook baseline BEFORE any claim/worker/commit runs in this lane, so a
+    // PREVIOUS dispatch's leftovers in a reused pooled lane are never silently inherited. A cleanup that
+    // cannot fully complete means no safe baseline exists — refuse outright before running any worker.
+    const hookReset = io.resetHookSurface(lanePath);
+    if (!hookReset.clean) {
+      log(`SECURITY: could not establish a clean git-hook baseline in ${lanePath} (leftover: ${hookReset.leftover.join(', ') || '(config write failed)'}) — refusing before any git command runs`);
+      return finish('escalated-needs-human', 'none', 'refused: could not establish a clean git-hook baseline in the lane');
+    }
+
     const item = io.findItem(num, lanePath);
     if (!item) return finish('not-applicable', 'none', `no backlog/${num}-*.md file in this checkout`);
 
@@ -253,9 +263,20 @@ export async function runProbationBuild(args, io) {
 
     const task = buildDocFixTask({ num, title: item.title, spec: item.spec, scope: args.scope });
     const taskFile = io.writeTaskFile(lanePath, 'probation-build-task.md', task);
+    const preHookSurface = hookReset.snapshot;
     log(`running ${worker.launcher} --model=${worker.model}`);
     const run = io.runWorker(buildWorkerArgv({ worker, weRoot: WE_ROOT, dir: lanePath, taskFile }));
     workerRan = true;
+    // x55dojc — checked BEFORE the `run.ok` gate below on purpose: even a worker that crashed or timed out
+    // could have planted a hook before it did, so this must never be skipped just because the run itself
+    // failed.
+    const postHookSurface = io.snapshotHookSurface(lanePath);
+    const hookCheck = hookSurfaceChanged(preHookSurface, postHookSurface);
+    if (hookCheck.changed) {
+      log(`SECURITY: the worker's own run changed the lane's git-hook surface — refusing, discarding, never committing/pushing: ${hookCheck.reason}`);
+      io.resetHookSurface(lanePath);
+      return abandon('escalated-needs-human', `refused: ${hookCheck.reason}`, {});
+    }
     // #4291 plan-review finding (correctness, round 2) — a worker that crashed or timed out but still left a
     // partial, envelope-sized diff must never be treated as a clean build: a resolved item + an opened PR would
     // credit a failed run as a success. `run.ok` (not just "did it change anything") gates everything after it.
@@ -298,6 +319,17 @@ export async function runProbationBuild(args, io) {
 
     const resolved = io.resolveItem(num, lanePath);
     if (!resolved.ok) return abandon('escalated-needs-human', `resolve refused: ${resolved.reason}`, { diff: diffRow });
+
+    // x55dojc — re-checked immediately before the ONE commit this arc ever makes: `resolveItem` is its own
+    // subprocess (`run.mjs resolve`) between the post-worker snapshot above and here, so this is not a
+    // redundant re-read of the same window.
+    const preCommitHookSurface = io.snapshotHookSurface(lanePath);
+    const preCommitCheck = hookSurfaceChanged(postHookSurface, preCommitHookSurface);
+    if (preCommitCheck.changed) {
+      log(`SECURITY: the lane's git-hook surface changed during resolve — refusing, discarding, never committing/pushing: ${preCommitCheck.reason}`);
+      io.resetHookSurface(lanePath);
+      return abandon('escalated-needs-human', `refused: ${preCommitCheck.reason}`, { diff: diffRow });
+    }
 
     io.commit(lanePath, [...summary.paths, item.path], buildDocFixCommitMessage({ num, worker }));
 
@@ -362,9 +394,12 @@ export function openPrArgv({ num, attemptTag, slug, bodyFile }) {
   ];
 }
 
-/** The real `io` for {@link runProbationBuild}. Every call is bounded and never throws past its own contract. */
+/** The real `io` for {@link runProbationBuild}. Every call is bounded and never throws past its own contract.
+ *  x55dojc — `laneEnv` disables git hooks (see `../lib/git-hook-surface.mjs`) for EVERY subprocess spawned in
+ *  the lane, the worker's own launcher process included, so a planted hook can never fire regardless of which
+ *  of these calls happens to run it. */
 export function realIo({ session, env = process.env } = {}) {
-  const laneEnv = { ...env, LANE_SESSION: session };
+  const laneEnv = withHooksDisabled({ ...env, LANE_SESSION: session });
   return {
     log: (m) => console.error(m),
     acquireLane: ({ lane, session: s, scope }) => {
@@ -376,6 +411,8 @@ export function realIo({ session, env = process.env } = {}) {
       const last = r.out.trim().split('\n').filter(Boolean).at(-1) ?? '';
       return last.startsWith('/') ? last : null;
     },
+    resetHookSurface: (dir) => resetHookSurface(dir),
+    snapshotHookSurface: (dir) => snapshotHookSurface(dir),
     // The item's own backlog file, resolved by listing `backlog/` for `<num>-*.md` — never a hand-rolled loader
     // of `src/_data/backlog.js` (that loader's own consumer, `dispatch-lane-io.mjs#findItem`, is what handed
     // THIS dispatch its `num` in the first place; re-deriving the same fact a second way risks disagreeing
@@ -395,7 +432,7 @@ export function realIo({ session, env = process.env } = {}) {
       return { path, slug: name.slice(String(n).length + 1, -3), title: titleMatch ? titleMatch[1].trim() : '', spec: body, raw: text };
     },
     claim: (n, s, dir) => node('scripts/backlog.mjs', ['claim', String(n), `--session=${s}`], { cwd: dir, env: laneEnv }).ok,
-    headSha: (dir) => sh('git', ['-C', dir, 'rev-parse', 'HEAD']).trim(),
+    headSha: (dir) => sh('git', ['-C', dir, 'rev-parse', 'HEAD'], { env: laneEnv }).trim(),
     writeTaskFile: (dir, name, text) => {
       // Inside `.git`, so the task text never shows up in the build diff.
       const p = join(dir, '.git', name);
@@ -405,14 +442,15 @@ export function realIo({ session, env = process.env } = {}) {
     },
     runWorker: (argv) => {
       // SYNCHRONOUS on purpose: both launchers block until the model's turn ends (see their own headers).
-      const r = trySh(process.execPath, argv, { env, timeout: 70 * 60 * 1000 });
+      // x55dojc: `laneEnv` (not the bare `env`) so the worker's own git use, if any, inherits hooks-disabled.
+      const r = trySh(process.execPath, argv, { env: laneEnv, timeout: 70 * 60 * 1000 });
       return { ok: r.ok, out: r.out.slice(-4000) };
     },
-    untracked: (dir) => sh('git', ['-C', dir, 'ls-files', '--others', '--exclude-standard']).split('\n').filter(Boolean),
+    untracked: (dir) => sh('git', ['-C', dir, 'ls-files', '--others', '--exclude-standard'], { env: laneEnv }).split('\n').filter(Boolean),
     diffNumstat: (dir, base, exclude = []) => {
-      const created = newUntrackedPaths(exclude, sh('git', ['-C', dir, 'ls-files', '--others', '--exclude-standard']).split('\n').filter(Boolean));
-      if (created.length) trySh('git', ['-C', dir, 'add', '--intent-to-add', '--', ...created]);
-      if (exclude.length) trySh('git', ['-C', dir, 'reset', '-q', '--', ...exclude]);
+      const created = newUntrackedPaths(exclude, sh('git', ['-C', dir, 'ls-files', '--others', '--exclude-standard'], { env: laneEnv }).split('\n').filter(Boolean));
+      if (created.length) trySh('git', ['-C', dir, 'add', '--intent-to-add', '--', ...created], { env: laneEnv });
+      if (exclude.length) trySh('git', ['-C', dir, 'reset', '-q', '--', ...exclude], { env: laneEnv });
       // #4291 plan-review finding (security, round 8) — `--no-renames`, explicit and unconditional: with rename
       // detection on (a local `diff.renames` config, not this repo's own default), a renamed file's numstat
       // line reads `old => new` (or `{old => new}`) as ONE path string, which `summarizeNumstat` would then
@@ -421,7 +459,7 @@ export function realIo({ session, env = process.env } = {}) {
       // not by design. Forcing rename detection off makes a rename report as a plain delete + add — two
       // ordinary paths the allowlist checks exactly like any other change — so the safety no longer depends on
       // arithmetic on an opaque `a => b` string ever failing to match.
-      return sh('git', ['-C', dir, 'diff', '--no-renames', '--numstat', base]);
+      return sh('git', ['-C', dir, 'diff', '--no-renames', '--numstat', base], { env: laneEnv });
     },
     // Undo ALL of this run's own changes back to `base` (the claim's stamp, any uncommitted diff, and a commit
     // already made alike — see the file docblock for why this, not `backlog.mjs release`, is the one undo this
@@ -430,10 +468,10 @@ export function realIo({ session, env = process.env } = {}) {
     // deliberately: this is the LAST-RESORT cleanup `abandon` calls from inside a `catch`, so a git hiccup here
     // must degrade (best-effort) rather than throw past it and skip the scorecard row / final report entirely.
     discardChanges: (dir, base, preexisting = []) => {
-      const listed = trySh('git', ['-C', dir, 'ls-files', '--others', '--exclude-standard']);
+      const listed = trySh('git', ['-C', dir, 'ls-files', '--others', '--exclude-standard'], { env: laneEnv });
       const created = listed.ok ? newUntrackedPaths(preexisting, listed.out.split('\n').filter(Boolean)) : [];
-      trySh('git', ['-C', dir, 'reset', '--hard', base]);
-      if (created.length) trySh('git', ['-C', dir, 'clean', '-f', '--', ...created]);
+      trySh('git', ['-C', dir, 'reset', '--hard', base], { env: laneEnv });
+      if (created.length) trySh('git', ['-C', dir, 'clean', '-f', '--', ...created], { env: laneEnv });
     },
     resolveItem: (n, dir) => {
       const r = node('scripts/operations/run.mjs', ['resolve', `--ref=${n}`, '--json'], { cwd: dir, env: laneEnv });
@@ -445,7 +483,7 @@ export function realIo({ session, env = process.env } = {}) {
     commit: (dir, paths, message) => {
       const msgFile = join(dir, '.git', 'probation-build-commit-msg.txt');
       writeFileSync(msgFile, message);
-      sh('git', ['-C', dir, 'add', '--', ...paths]);
+      sh('git', ['-C', dir, 'add', '--', ...paths], { env: laneEnv });
       sh('git', ['-C', dir, 'commit', '-F', msgFile, '--', ...paths], { env: laneEnv });
     },
     runGate: (dir) => {
