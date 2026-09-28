@@ -5829,47 +5829,61 @@ mechanical-accept path this ruling does not touch) and does not amend it.
 
 ---
 
-### The local lane-verify gate never runs the full suite by default — GitHub CI's sharded run is the sole full-suite authority, and a full local run is an explicit opt-in, never the default {#local-gate-never-full-suite-by-default}
+### No caller may explicitly configure the local lane-verify gate to the unscoped full suite as its default — GitHub CI's sharded run is the sole full-suite authority {#local-gate-never-full-suite-by-default}
 
 **Ratified 2026-09-28 (operator ruling, in-conversation).** The gate that marks a lane `verified` —
 `we:scripts/verify-lane.mjs` / `we:scripts/lib/verify-lane-gate.mjs`, and the finish-guard
-`we:scripts/pr-land.mjs` reads before landing (#3321, "verification is mandatory before a lane lands") — runs
-ONLY the diff-driven selected tests (`vitest related` on the actual diff, #3372/#4157) plus `check:standards`
-(scoped per `we:scripts/lib/verify-lane-gate.mjs`'s own `canScopeCheckStandards`). It never falls back to the
-unscoped full `npm run test:unit && npm run check:standards` as its default behavior. **GitHub CI's required
-`test`/`test-shard` jobs (`.github/workflows/ci.yml`, 4 shards) are the only full-suite run** a landing PR
+`we:scripts/pr-land.mjs` reads before landing (#3321, "verification is mandatory before a lane lands") — must
+never be pointed, by a caller's own explicit `--gate=`/dispatch configuration, at the unscoped full
+`npm run test:unit && npm run check:standards` as its DEFAULT invocation. **GitHub CI's required `test`/
+`test-shard` jobs (`.github/workflows/ci.yml`, 4 shards) remain the sole full-suite AUTHORITY** a landing PR
 depends on — `we:scripts/lib/verify-lane-gate.mjs`'s own header already states this distinction (a local
 false-green costs, at worst, a wasted round-trip that bounces at the real CI gate; it can never merge a
 regression, since `pr-land`/the drain independently require CI's own green `test` check).
 
-**The full local run stays available, but only as an explicit opt-in** — `we:scripts/verify-lane.mjs --gate="npm
-run test:unit && npm run check:standards"` (or an equivalent hand-written `--gate=` override) — for the narrow
-case where CI genuinely cannot run (a sibling-repo checkout with no CI wiring, an offline/detached working
-session, or a caller that has a specific reason to distrust the diff-driven selection for one run).
-`we:scripts/push-if-green.mjs`'s own default full-suite gate is an existing, correctly-scoped example of this
-opt-in shape — it publishes a MERGED tree directly to `origin/main` with no CI in the loop first, which is
-exactly the "CI can't run yet" case this ruling carves out, not a counter-example to it.
+**This rule governs deliberate caller configuration — it does NOT reach into, or narrow, the selection engine's
+own sound automatic fallback to full.** `we:scripts/readiness/test-selection.mjs#decideLocalSelection` already,
+correctly, falls back to the full vitest suite on its own when the diff shape cannot be soundly narrowed by the
+module graph — a config/dependency/shared-test-helper change, a deleted source file, an empty/unreadable diff,
+or `WE_DIFF_TEST_SELECTION=0` — and `we:scripts/lib/verify-lane-gate.mjs#resolveDefaultGate` likewise defaults to
+a bare `npm test`/full command for a checkout with no `test:unit` script. **Those are the selector correctly
+declining to guess, not an instance of this rule being violated** — this ruling was found, on review, to
+initially conflate the two (see the amendment folded into #4294 below), and states the correction: the rule
+targets a CALLER choosing the full suite as a matter of course (a hardcoded `--gate=` override, a brief that
+always names the full command), never the engine's own documented, safety-motivated automatic fallback.
+
+**The full local run stays available as an explicit, deliberate override** — `we:scripts/verify-lane.mjs
+--gate="npm run test:unit && npm run check:standards"` — for a caller with a specific reason to distrust the
+diff-driven selection for one run, or a checkout CI cannot reach. `we:scripts/push-if-green.mjs`'s own default
+full-suite gate is an existing, correctly-scoped example of this shape — it publishes a MERGED tree directly to
+`origin/main` with no CI in the loop first.
 
 **Why now.** Live evidence, same day: lane-16's verify ran the full `npm run test:unit && npm run
 check:standards` (~15–20 minutes under load) while lane-13's ran the diff-driven `vitest related` selection on
 a comparable change, and three delivery agents sat roughly 45 minutes total waiting on the resulting serial
 verify runs. Draft-first PRs (#2813) now keep a red-CI PR out of review before a human ever looks at it, which
-is what #3321's original local-green-before-land requirement existed to protect against — so the local gate no
-longer needs to *itself* be the full suite to guard that outcome; CI is. **Open follow-up, not settled by this
-ruling:** why lane-16's run took the unscoped path at all (an explicit `--gate=` override somewhere in its
-dispatch path, or a diff that hit `we:scripts/lib/verify-lane-gate.mjs`'s own stated full-suite-fallback
-triggers — `backlog/`, a gate-self/policy-core path, package/lockfile, `*.config.*`, shared test
-helpers/fixtures, a deleted source file) is exactly the kind of case this ruling's own wording does not resolve
-by itself and is left to the item below.
+is what #3321's original local-green-before-land requirement existed to protect against — so a caller no longer
+needs to reach for the full suite by default to guard that outcome; CI already does. **Open follow-up, not
+settled by this ruling, and NOT yet root-caused:** whether lane-16's run reflects a caller's own explicit
+override (this rule's real target) or `decideLocalSelection`'s own sound fallback firing correctly on a diff
+shape it cannot narrow (not a violation) — left to #4294, which must read the actual dispatch path and diff
+before concluding either way.
+
+**Build status and the remaining fallback-trigger inventory live on the tracking item, per the established
+convention — this anchor states only the rule above.** [Workers run affected tests while working, the full gate
+once after the final commit](/backlog/4294-workers-run-affected-tests-while-working-the-full-gate-once/)
+(`bornAs` `x000pcl`) is the mechanism this rule governs; read that item for current status (including its own
+Codex-review correction), never re-derive it here.
 
 **Composes with** [#heavy-command-admission-queue](#heavy-command-admission-queue) (the capacity semaphore both
-the scoped AND the full-suite opt-in run through unchanged) and the existing #3372/#4157 diff-driven-selection
-defaults (this ruling does not change their mechanism — it states that no caller may bypass them as this gate's
-*default*, only as a named, deliberate override).
+the scoped run AND a deliberate full-suite override run through unchanged) and the existing #3372/#4157
+diff-driven-selection defaults (this ruling does not change their mechanism — it states that no caller may
+reach for the full suite as this gate's *default configuration*, only as a named, deliberate override; the
+engine's own automatic fallback is untouched).
 
-**Lineage:** operator ruling, 2026-09-28, folded into [Workers run affected tests while working, the full gate
-once after the final commit](/backlog/4294-workers-run-affected-tests-while-working-the-full-gate-once/)
-(`bornAs` `x000pcl`) — read that item for current implementation status, never re-derive it here.
+**Lineage:** operator ruling, 2026-09-28, folded into #4294 (`bornAs` `x000pcl`); corrected same-day per a
+read-only Codex plan review (`node scripts/codex-direct-task.mjs --review`) that found the initial wording
+conflated the engine's sound automatic fallback with a caller's deliberate override.
 
 ---
 
