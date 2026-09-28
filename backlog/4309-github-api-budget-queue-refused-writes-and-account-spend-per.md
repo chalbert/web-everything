@@ -5,10 +5,11 @@ size: 3
 priority: high
 tier: pinned
 parent: "4075"
-status: active
+status: resolved
 scope: ["we:scripts/lib/gh-throttle.mjs", "we:scripts/lib/gh-write-queue.mjs", "we:scripts/conveyor/gh-write-replay.mjs", "we:scripts/lib/gh-spend.mjs", "we:scripts/lib/gh-app-shim.mjs", "we:scripts/conveyor/ci-heal-mark.mjs", "we:scripts/conveyor/ci-heal-escalation-mark.mjs", "we:scripts/conveyor/advisory-fix-mark.mjs", "we:scripts/conveyor/health-watch.mjs", "we:scripts/conveyor/health-smells/gh-graphql-budget.mjs", "we:scripts/conveyor/health-smells/gh-write-queue.mjs", "we:skills-src/conveyor/daemon-manifest.mjs", "we:skills-src/conveyor/com.we.conveyor-pass-daemon.gh-write-replay.plist.example", "we:scripts/lib/daemon-clone-registry.mjs", "we:scripts/lib/__tests__/gh-write-queue.test.mjs", "we:scripts/lib/__tests__/gh-throttle.budget-block.test.mjs", "we:scripts/lib/__tests__/gh-throttle.fidelity.test.mjs", "we:scripts/lib/__tests__/gh-spend.test.mjs", "we:scripts/lib/__tests__/gh-app-shim.test.mjs", "we:scripts/conveyor/__tests__/gh-write-replay.test.mjs", "we:scripts/conveyor/__tests__/ci-heal-mark.test.mjs", "we:scripts/conveyor/__tests__/ci-heal-escalation-mark.test.mjs", "we:scripts/conveyor/__tests__/advisory-fix-mark.test.mjs", "we:scripts/conveyor/__tests__/health-watch.test.mjs", "we:scripts/conveyor/health-smells/__tests__/gh-graphql-budget.test.mjs", "we:scripts/conveyor/health-smells/__tests__/gh-write-queue.test.mjs", "we:skills-src/conveyor/__tests__/daemon-manifest.test.mjs"]
 dateOpened: "2026-09-27"
 dateStarted: "2026-09-28"
+dateResolved: "2026-09-28"
 preparedDate: "2026-09-28"
 preparedAgainstSha: "787f3988a8e5eeed78bd8d994ad9d513d489423b"
 tags: []
