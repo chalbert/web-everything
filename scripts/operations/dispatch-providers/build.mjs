@@ -114,6 +114,12 @@ export function deliverItemDetachedProvider(request, {
     `--scope=${String(request?.scope ?? '')}`,
     `--attempt=${attemptTag}`,
   ];
+  // #4349 — forwarded so the detached child can settle its OWN run-store effect on exit
+  // (`deliver-item-wrapper.mjs#deliverItem`'s `finish()`/catch, via `deliver-item-settle.mjs`). Omitted
+  // entirely when the sink didn't have one to give (an older caller, a hand-built request in a test) — the
+  // settle call is a documented no-op without both, never a guess.
+  if (request?.runId) argv.push(`--run-id=${request.runId}`);
+  if (request?.effectKey) argv.push(`--effect-key=${request.effectKey}`);
   // mechanical-dispatcher (epic #3383) Part 2 — THE DRIVER'S ONLY provider-selection logic, and it is
   // deliberately not a judgment call: honour item #`num`'s own `deliveryAgent:` frontmatter marker, verbatim,
   // when it has one. No automatic "should this item use Codex" reasoning lives here — see
