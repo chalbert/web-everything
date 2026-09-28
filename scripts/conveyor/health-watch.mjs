@@ -9,7 +9,9 @@
  * READ-ONLY toward the fleet: it reads daemon logs, lease files, self-sync alerts, the lane-pool health lines,
  * `gh pr list` and `claude agents --json`, and runs only declared read-only diagnoses. It never dispatches,
  * notifies, files or edits anything but its own state dir. Ships in SHADOW mode (4065): what it WOULD notify /
- * dispatch is written into each report under "Held back".
+ * dispatch is written into each report under "Held back". The ONE exception, off by default (#4078): with config
+ * `investigateDispatch: true` it dispatches a diagnose-only investigation agent per episode and stops it at its
+ * wall clock — see we:scripts/conveyor/health-investigate-dispatch.mjs.
  *
  * State lives under the pinned daemon state root (#4052, `health-watch-section.mjs#healthDir`, the ONE shared
  *   resolver every reader goes through — see that file's own header): `.conveyor/health/`
@@ -26,6 +28,7 @@
  *   node scripts/conveyor/health-watch.mjs tick    [--json] [--force-gh] [--no-gh] [--dry-run] [--state-root=DIR]
  *                                                  [--logs-dir=DIR] [--lock-root=DIR] [--self-sync-dir=DIR]
  *                                                  [--ps-fixture=FILE] [--machine-load-fixture=FILE]  # machine-overload's inputs, real by default
+ *                                                  [--no-investigate]  # skip the #4078 investigation pass entirely
  *   node scripts/conveyor/health-watch.mjs section [--state-root=DIR]      # the HEALTH section (operator queue)
  *   node scripts/conveyor/health-watch.mjs silence --smell=ID [--subject=S] --card=NNN [--hours=72]
  *   node scripts/conveyor/health-watch.mjs unsilence --smell=ID [--subject=S]
@@ -43,6 +46,7 @@ import {
 } from './health-watch-core.mjs';
 import { SMELLS } from './health-smells/index.mjs';
 import { healthDir, healthSectionLines } from './health-watch-section.mjs';
+import { runInvestigations } from './health-investigate-dispatch.mjs';
 
 export { healthDir, healthSectionLines };
 import { CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
@@ -625,6 +629,16 @@ export async function tick(flags = {}) {
     diagnoses.push({ key: p.key, command: d.command, code: d.code });
   }
 
+  // #4078 — the diagnose-only investigation agent: stop what is due, dispatch what the budget clears (nothing
+  // unless config `investigateDispatch` is on), and put each episode's investigation status + findings on the
+  // episode so the reports written below carry them. Its own failure is a probe error, never a failed tick.
+  let investigations = null;
+  if (!flags['no-investigate']) {
+    try {
+      investigations = await runInvestigations({ dir, state, smells: SMELLS, config, now, dryRun: !!flags['dry-run'] });
+    } catch (e) { probeErrors.investigate = scrubText(String(e?.message || e).split('\n')[0]); }
+  }
+
   // Real desktop notifications — THE MINIMAL NOTIFY PATH (#4077 slice 1 shipped with none: every `notify` plan
   // entry was only ever reported as "Held back" in a report, never actually sent, in ANY mode — see
   // `health-watch-core.mjs#planActions`'s own doc). Only entries `planActions` did NOT mark `suppressed` reach
@@ -673,7 +687,7 @@ export async function tick(flags = {}) {
   return scrubDeep({
     now: new Date(now).toISOString(), durationMs, mode: config.mode, stateDir: dir, ghSampled: !!probes.prs,
     ghSpend: ghSpend ?? null, probeErrors, transitions: result.transitions.map((t) => ({ type: t.type, key: t.key })),
-    plan: result.plan.map(({ diagnose, ...rest }) => rest), diagnoses, notifications, reports: written,
+    plan: result.plan.map(({ diagnose, ...rest }) => rest), diagnoses, notifications, investigations, reports: written,
     section: renderHealthSection(state, { now, reportDir }),
     skipped: result.evaluations.filter((e) => !e.results).map((e) => ({ smell: e.smell.id, missing: e.skipped, error: e.error })),
   });
