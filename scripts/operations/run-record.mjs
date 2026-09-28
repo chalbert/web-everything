@@ -27,6 +27,8 @@
  * PURE. No fs, no clock, no process, no randomness, no network.
  */
 
+import { JOB_OP_PREFIX, newJobBlock, validateJobBlock } from './job-record.mjs';
+
 /** Schema version stamped on every record. A reader refuses a version it does not know. */
 export const RUN_RECORD_VERSION = 1;
 
@@ -100,6 +102,18 @@ export function newRunRecord({ id, op, input = {} } = {}) {
     stepTimings: [],
     pending: null,
   };
+}
+
+/**
+ * A fresh, queued JOB record (#4125): a run record with `op: job:<kind>` and a `job` block. See
+ * {@link ./job-record.mjs} for the block's fields.
+ *
+ * @param {{id: string, kind: string, input?: object, codeMode?: string, maxAttempts?: number, codeSha?: string|null}} spec
+ * @returns {object}
+ */
+export function newJobRunRecord({ id, kind, input = {}, codeMode, maxAttempts, codeSha } = {}) {
+  const job = newJobBlock({ kind, codeMode, maxAttempts, codeSha });
+  return { ...newRunRecord({ id, op: `${JOB_OP_PREFIX}${kind}`, input }), job };
 }
 
 /**
@@ -501,6 +515,12 @@ export function validateRunRecord(record) {
         }
       });
     }
+  }
+  // THE JOB BLOCK (#4125, statute #daemon-jobs) — a job is a run record with `op: job:<kind>` and a `job`
+  // block. Tolerated when absent (every non-job run); validated when present, and required on a `job:` op so
+  // a record claiming to be a job can never be read without the fields reattach decides on.
+  if (record.job !== undefined || (typeof record.op === 'string' && record.op.startsWith(JOB_OP_PREFIX))) {
+    for (const e of validateJobBlock(record.job)) errors.push(e);
   }
   if (record.pending !== null && !isPlainObject(record.pending)) {
     errors.push('`pending` must be null or an object');
