@@ -22,6 +22,7 @@
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
+import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 
@@ -33,6 +34,7 @@ export {
   assertRunRecord,
   effectKey,
   isValidRunId,
+  newJobRunRecord,
   newRunRecord,
   parseRunRecord,
   serializeRunRecord,
@@ -54,6 +56,30 @@ export function runsDir(root = RUNS_ROOT) {
 export function resolveRunsDir() {
   const env = process.env.OPERATION_RUNS_DIR;
   return env && env.trim() ? resolve(env.trim()) : runsDir();
+}
+
+/**
+ * WHERE DAEMON JOB RECORDS LIVE (#4125 — the open detail statute `#daemon-jobs` left to this slice, settled
+ * here as the ratify-time suggestion): ONE parent folder, `~/.claude/daemon-jobs/<daemon>/`, so the health
+ * daemon scans one place instead of each daemon's scattered state folder. `WE_DAEMON_JOBS_ROOT` moves the
+ * parent (tests, a VM with a different home). Outside every git tree on purpose — a job record must survive
+ * the clone rebuild that `reset --hard`s the daemon's own tree.
+ *
+ * The daemon passes this directory to each job child as `OPERATION_RUNS_DIR`, so the child's run store
+ * ({@link resolveRunsDir}) resolves to the same folder with no job-specific lookup.
+ */
+export const DAEMON_JOBS_ROOT_ENV = 'WE_DAEMON_JOBS_ROOT';
+
+/** `<WE_DAEMON_JOBS_ROOT || ~/.claude/daemon-jobs>` — the parent of every daemon's job folder. */
+export function daemonJobsRoot(env = process.env) {
+  const v = env?.[DAEMON_JOBS_ROOT_ENV];
+  return v && String(v).trim() ? resolve(String(v).trim()) : join(homedir(), '.claude', 'daemon-jobs');
+}
+
+/** `<daemonJobsRoot>/<daemon>` — one daemon's job records. Refuses a daemon name that is not filename-safe. */
+export function daemonJobsDir(daemon, env = process.env) {
+  if (!isValidRunId(daemon)) throw new TypeError(`operations: invalid daemon name ${JSON.stringify(daemon)}`);
+  return join(daemonJobsRoot(env), daemon);
 }
 
 /** The on-disk path of one run. Refuses an id that is not filename-safe. */
