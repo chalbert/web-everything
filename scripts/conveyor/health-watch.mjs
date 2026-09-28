@@ -52,6 +52,7 @@ export { healthDir, healthSectionLines };
 import { CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
 import { readGithubAppStatus } from '../lib/github-app-auth-env.mjs';
 import { ghThrottleLockRoot, ghThrottleLogPath, budgetProbeArgs } from '../lib/gh-throttle.mjs';
+import { persistSpendHours } from '../lib/gh-spend.mjs';
 import { readSharedOpenPrs } from '../lib/pr-snapshot.mjs';
 import { readClaudeAuthExpiredInfo } from './hung-session.mjs';
 import { readBgIsolationStallInfo } from './bg-isolation-stall.mjs';
@@ -350,6 +351,12 @@ export function probeGhCalls({ logPath = ghThrottleLogPath(ghThrottleLockRoot())
 /** `gh-graphql-budget`'s input: the App installation's REAL GraphQL bucket (the in-band `rateLimit` field — never
  *  the REST `/rate_limit` endpoint, whose `graphql` entry disagreed with it live) plus the throttle's active
  *  shared budget-block records. 1 GraphQL point per tick. */
+/** #4309 — the hourly GitHub-spend persistence step `tick` runs alongside {@link probeGhCalls}: rolls every fully
+ *  closed hour of `calls.jsonl` into `spend-hourly.jsonl` (next to the log) through gh-spend.mjs's own cursor. */
+export function persistGhSpend({ logPath = ghThrottleLogPath(ghThrottleLockRoot()), now = Date.now(), persist = persistSpendHours } = {}) {
+  return persist({ logPath, now });
+}
+
 export function probeGraphqlBudget({ exec = run, lockRoot = ghThrottleLockRoot(), nowMs = Date.now() } = {}) {
   let sample = null;
   try {
@@ -542,6 +549,13 @@ export async function tick(flags = {}) {
     : probeMachineLoad()));
   // `gh-call-failures` — fs-only, every tick: the gh-throttle call log's tail (`--gh-calls-log=FILE` in tests).
   probes.ghCalls = attempt('ghCalls', () => probeGhCalls(flags['gh-calls-log'] ? { logPath: flags['gh-calls-log'] } : {}));
+  // #4309 — alongside (never replacing) the 2 MB tail above: persist every fully closed hour of GitHub spend once,
+  // through gh-spend.mjs's OWN byte cursor, so hours survive log rotation and the tail never loses a window.
+  // A fixture tick (`--lock-root` with no `--gh-calls-log`) never persists: that would WRITE the real throttle
+  // dir's cursor and hourly rows from a test run (PR #2851 review).
+  const spendFixtureOnly = flags['lock-root'] && !flags['gh-calls-log'];
+  const ghSpend = spendFixtureOnly ? null
+    : attempt('ghSpend', () => persistGhSpend({ ...(flags['gh-calls-log'] ? { logPath: flags['gh-calls-log'] } : {}), now }));
   // `review-seat-cap-near-limit` (card xn2wf9t) — fs-only, every tick: each non-Claude review seat provider's
   // OWN daily cap usage, off the SAME scorecard store + reservation ledgers `runExtraSeats`/`runRedTeam` admit
   // against (`--scorecard-store-fixture=FILE` in tests, so this never touches a real store in the test suite).
@@ -676,7 +690,7 @@ export async function tick(flags = {}) {
   // The whole summary goes through the scrub too (the last choke point before stdout).
   return scrubDeep({
     now: new Date(now).toISOString(), durationMs, mode: config.mode, stateDir: dir, ghSampled: !!probes.prs,
-    probeErrors, transitions: result.transitions.map((t) => ({ type: t.type, key: t.key })),
+    ghSpend: ghSpend ?? null, probeErrors, transitions: result.transitions.map((t) => ({ type: t.type, key: t.key })),
     plan: result.plan.map(({ diagnose, ...rest }) => rest), diagnoses, notifications, investigations, reports: written,
     section: renderHealthSection(state, { now, reportDir }),
     skipped: result.evaluations.filter((e) => !e.results).map((e) => ({ smell: e.smell.id, missing: e.skipped, error: e.error })),
