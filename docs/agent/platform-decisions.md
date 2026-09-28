@@ -5863,11 +5863,11 @@ check:standards` (~15–20 minutes under load) while lane-13's ran the diff-driv
 a comparable change, and three delivery agents sat roughly 45 minutes total waiting on the resulting serial
 verify runs. Draft-first PRs (#2813) now keep a red-CI PR out of review before a human ever looks at it, which
 is what #3321's original local-green-before-land requirement existed to protect against — so a caller no longer
-needs to reach for the full suite by default to guard that outcome; CI already does. **Open follow-up, not
-settled by this ruling, and NOT yet root-caused:** whether lane-16's run reflects a caller's own explicit
-override (this rule's real target) or `decideLocalSelection`'s own sound fallback firing correctly on a diff
-shape it cannot narrow (not a violation) — left to #4294, which must read the actual dispatch path and diff
-before concluding either way.
+needs to reach for the full suite by default to guard that outcome; CI already does. **Open follow-up, left to
+#4294 to root-cause:** whether lane-16's run reflects a caller's own explicit override (this rule's real target)
+or `decideLocalSelection`'s own sound fallback firing correctly on a diff shape it cannot narrow (not a
+violation) — #4294 must read the actual dispatch path and diff before concluding either way, and this ruling is
+not settled on that question until it does.
 
 **Build status and the remaining fallback-trigger inventory live on the tracking item, per the established
 convention — this anchor states only the rule above.** [Workers run affected tests while working, the full gate
