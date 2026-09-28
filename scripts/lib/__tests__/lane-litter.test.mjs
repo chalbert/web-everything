@@ -364,3 +364,80 @@ describe('cleanLaneLitter — isLeasedNow (the last gate, right before the mutat
     expect(result).toEqual({ removed: ['.commit-msg.txt'], leaveDirty: [], skipped: false, complete: true });
   });
 });
+
+// #xl5xhmj fork 2 — `isLeasedNow`'s sibling for LIVE OWNERSHIP: an UNLEASED lane (no lease at all — the whole
+// point of this gate) can still have a live worker sitting in it. Before this fix, `cleanLaneLitter` had no
+// such gate — only `isLeasedNow` — so a live worker's own scratch files (`.pr-body.md`, `.commit-msg.txt`)
+// were deleted out from under it the moment its lease dropped (the 2026-09-28 lane-18 evidence).
+describe('cleanLaneLitter — isLiveNow (#xl5xhmj fork 2)', () => {
+  let dir;
+  function git(args, cwd) {
+    return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
+  }
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'lane-litter-isLivenow-'));
+    git(['init', '--quiet'], dir);
+    git(['config', 'user.email', 't@t.com'], dir);
+    git(['config', 'user.name', 't'], dir);
+    writeFileSync(join(dir, 'file.txt'), 'v1\n');
+    git(['add', 'file.txt'], dir);
+    git(['commit', '--quiet', '-m', 'v1'], dir);
+    writeFileSync(join(dir, '.commit-msg.txt'), 'litter\n');
+  });
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('a true isLiveNow cancels the removal — nothing is deleted, skipped:true, complete:false, even with NO lease', () => {
+    const result = cleanLaneLitter(dir, { isLiveNow: () => true });
+    expect(result).toEqual({ removed: [], leaveDirty: [], skipped: true, complete: false });
+    expect(existsSync(join(dir, '.commit-msg.txt'))).toBe(true);
+  });
+
+  it('a false isLiveNow proceeds normally — skipped:false, complete:true', () => {
+    const result = cleanLaneLitter(dir, { isLiveNow: () => false });
+    expect(result).toEqual({ removed: ['.commit-msg.txt'], leaveDirty: [], skipped: false, complete: true });
+    expect(existsSync(join(dir, '.commit-msg.txt'))).toBe(false);
+  });
+
+  it('re-checks isLiveNow on EVERY file, not once up front — a mid-loop live-owner stops further removal', () => {
+    writeFileSync(join(dir, '.pr-body.md'), 'litter 2\n');
+    let calls = 0;
+    const isLiveNow = () => { calls += 1; return calls >= 2; };
+    const result = cleanLaneLitter(dir, { isLiveNow });
+    expect(result.removed).toHaveLength(1);
+    expect(result.skipped).toBe(true);
+    expect(result.complete).toBe(false);
+    expect(calls).toBeGreaterThanOrEqual(2);
+  });
+
+  it('isLiveNow is never called when there is nothing to remove (already clean of litter)', () => {
+    rmSync(join(dir, '.commit-msg.txt'));
+    let called = false;
+    cleanLaneLitter(dir, { isLiveNow: () => { called = true; return true; } });
+    expect(called).toBe(false);
+  });
+
+  it('omitting isLiveNow entirely behaves exactly as before — no live-ownership gate at all', () => {
+    const result = cleanLaneLitter(dir);
+    expect(result).toEqual({ removed: ['.commit-msg.txt'], leaveDirty: [], skipped: false, complete: true });
+  });
+
+  it('isLeasedNow and isLiveNow compose — either alone is enough to cancel the removal', () => {
+    const result = cleanLaneLitter(dir, { isLeasedNow: () => false, isLiveNow: () => true });
+    expect(result.skipped).toBe(true);
+    expect(existsSync(join(dir, '.commit-msg.txt'))).toBe(true);
+  });
+
+  // Red-team finding — `isLiveNow` ALONE (no `isLeasedNow` at all) must ALSO trip the up-front
+  // `leaveDirty.length > 0` pre-check, not just its own per-file loop check. Without this test, reverting the
+  // guard from `(isLeasedNow || isLiveNow) && leaveDirty.length > 0` back to `isLeasedNow &&` would leave every
+  // other test in this file green.
+  it('isLiveNow ALONE also refuses when real (non-litter) dirt sits alongside litter — the leaveDirty pre-check', () => {
+    writeFileSync(join(dir, 'notes.txt'), 'real work, not litter\n');
+    const result = cleanLaneLitter(dir, { isLiveNow: () => false });
+    expect(result).toEqual({ removed: [], leaveDirty: ['notes.txt'], skipped: true, complete: false });
+    expect(existsSync(join(dir, '.commit-msg.txt'))).toBe(true); // never partially reaped alongside real dirt
+    expect(existsSync(join(dir, 'notes.txt'))).toBe(true);
+  });
+});

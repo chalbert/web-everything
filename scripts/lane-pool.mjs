@@ -145,8 +145,7 @@ import { cleanLaneLitter, planLitterCleanup } from './lib/lane-litter.mjs';
 import { gitStatusSummary, aheadCommits, aheadCommitsPreserved, lanePreservedFileChecker } from './lane-whois.mjs';
 import { guessCardIds } from './lib/lane-whois-core.mjs';
 import {
-  salvageLane, removeLitterWorktrees, listLitterWorktrees, salvageEligibility, readLiveCwds, pidsWithCwdIn,
-  newestContentMtimeMs, resolveSalvageQuietMs, readAgentsStrict, liveAgentInLane,
+  salvageLane, removeLitterWorktrees, listLitterWorktrees, laneLivenessGate,
 } from './lib/lane-salvage.mjs';
 // #x5n4zn3 — the SAME shared budget policy `we:scripts/lib/bounded-child.mjs`'s async `runBounded` rollout
 // uses elsewhere (dispatch-plan.mjs's collectors), reused here for its CONSTANTS only (`resolveChildTimeoutMs`
@@ -3526,6 +3525,32 @@ function cmdReclaim(repo) {
     if (flags.json) process.stdout.write(`${JSON.stringify({ lane: n, path: dir, dryRun, reclaimed: false, ...proof }, null, 2)}\n`);
     return;
   }
+
+  // #xl5xhmj — content being PRESERVED (already pushed) never by itself proves the lane is done: its live
+  // worker can be mid-verify or mid-PR, having just pushed, with its own lease already gone (see #xbk2is9). The
+  // ONLY guard this direct-reset path ran before was the live-LEASE check above — this is the SAME liveness
+  // gate `cmdReclaimSalvage` always ran (live owner session / live process cwd / quiet period), now run here
+  // too, for EVERY non-override reclaim, preserved or not (one gate, one place). Skipped only under
+  // `--override`: that flag is the operator's own explicit, logged "I looked at this lane myself" call, and it
+  // already reuses every OTHER guard unchanged — never re-litigated per guard.
+  // Shared by BOTH liveness-gate call sites below (the initial read here, and the "under the hold" re-check
+  // after the claim), so the two KEPT reports (identical log/JSON shape, differing only in the
+  // `(re-checked under the hold)` suffix and whether a just-claimed marker needs releasing) can never quietly
+  // drift apart. Reports + returns `true` on an ineligible gate; a caller does `if (reportKept(...)) return;`.
+  const reportKept = (gate, extra, { underHold, ownSession } = {}) => {
+    if (gate.eligible) return false;
+    if (underHold) takeMarkerIf(dir, (moved) => moved?.session === ownSession, n);
+    log(`  lane-${n}: KEPT (not reset) — ${gate.reason}${underHold ? ' (re-checked under the hold)' : ''}`);
+    if (flags.json) {
+      process.stdout.write(`${JSON.stringify({ lane: n, path: dir, dryRun, reclaimed: false, kept: true, keptReason: gate.reason, ...extra }, null, 2)}\n`);
+    }
+    return true;
+  };
+  if (!override) {
+    const liveness = laneLivenessGate({ dir });
+    if (reportKept(liveness, proof)) return;
+  }
+
   const overriding = !proof.preserved && override; // explicit + logged (#4139) — never silent, never automatic
   if (overriding) {
     log(`  lane-${n}: OVERRIDE (#4139, operator call) — proceeding despite: ${proof.reason}`);
@@ -3578,6 +3603,13 @@ function cmdReclaim(repo) {
     if (flags.json) process.stdout.write(`${JSON.stringify({ lane: n, path: dir, dryRun, reclaimed: false, override: overriding, ...reproof }, null, 2)}\n`);
     return;
   }
+  // #xl5xhmj — re-check liveness UNDER the hold too, closing the same tiny race the preservation reproof above
+  // already closes: a live session could start (or resume) in the window between the initial gate read and
+  // this claim. Skipped only under `--override`, matching the initial gate above.
+  if (!override) {
+    const relive = laneLivenessGate({ dir }); // fresh ledger read too — catches a NEW entry since the first gate
+    if (reportKept(relive, reproof, { underHold: true, ownSession: session })) return;
+  }
   execFileSync('git', ['reset', '--hard', `origin/${repo.branch}`], { cwd: dir, stdio: 'ignore', ...defaultGitTimeoutOpt() });
   execFileSync('git', ['clean', '-fd'], { cwd: dir, stdio: 'ignore', ...defaultGitTimeoutOpt() });
   rmSync(file, { force: true }); // back to the free-pool state — the same end state a normal `release` leaves
@@ -3593,21 +3625,12 @@ function cmdReclaim(repo) {
  */
 function cmdReclaimSalvage(repo, { n, dir, dryRun, lease, proof }) {
   const out = (obj) => { if (flags.json) process.stdout.write(`${JSON.stringify({ lane: n, path: dir, dryRun, ...obj }, null, 2)}\n`); };
+  // #xl5xhmj — the SAME shared gate `cmdReclaim`'s own direct-reset path now also runs
+  // (`lib/lane-salvage.mjs#laneLivenessGate`), never a second hand-rolled read — the two had drifted apart
+  // before this fix (only this salvage path checked liveness at all).
   const gate = () => {
     const last = lastLaneHistoryEntry(readLaneHistory(dir)) || {};
-    const agents = readAgentsStrict();
-    const cwds = readLiveCwds();
-    if (agents === null || cwds === null) {
-      return { eligible: false, last, reason: `cannot read ${agents === null ? '`claude agents`' : 'live process cwds (lsof)'} — never salvaging blind` };
-    }
-    const liveOwner = liveAgentInLane(agents, dir, [last.ownerSession, last.workerSession, last.session]);
-    const livePids = pidsWithCwdIn(cwds, dir);
-    let newestMtimeMs = null;
-    try { newestMtimeMs = newestContentMtimeMs(dir); } catch { newestMtimeMs = Date.now(); }
-    const verdict = salvageEligibility({
-      leased: false, liveOwner, livePids, newestMtimeMs, nowMs: Date.now(), quietMs: resolveSalvageQuietMs(),
-    });
-    return { ...verdict, last };
+    return { ...laneLivenessGate({ dir, lastHolder: last }), last };
   };
   const g = gate();
   if (!g.eligible) {

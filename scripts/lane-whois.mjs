@@ -49,6 +49,7 @@ import { guardedPoolRoot } from './lib/lane-pool-paths.mjs';
 import { LEASE_FILENAME, isLeaseStale, describeLease, laneHolderSlug, DEFAULT_LEASE_TTL_MINUTES } from './lib/lane-lease.mjs';
 import { readLaneHistory, lastLaneHistoryEntry } from './lib/lane-history.mjs';
 import { claudeProjectsRoot, scanLaneTranscripts, summarizeLaneTouches } from './lib/lane-transcript-attribution.mjs';
+import { liveAgentInLane } from './lib/lane-salvage.mjs';
 import {
   guessCardIds, classifyLaneVerdict, holderPresumedAlive, prsMatchingCard, keepMarkerApplies,
 } from './lib/lane-whois-core.mjs';
@@ -374,11 +375,18 @@ export function whoisForLane({
 
   const lease = readLease(dir);
   const leaseTtlAlive = holderPresumedAlive(lease, isLeaseStale, nowMs, ttlMs);
-  const liveOwner = !!lease && isSessionAlive(lease.ownerSession, dir, agents);
-  const holderAlive = leaseTtlAlive || liveOwner;
 
   const history = readLaneHistory(dir);
   const last = lastLaneHistoryEntry(history);
+  // #xl5xhmj fork 3 — the SAME `liveAgentInLane` read `we:scripts/lane-pool.mjs`'s own reclaim liveness gate
+  // uses, NOT gated on a live LEASE existing: an unleased lane (its lease already dropped — #xbk2is9) can
+  // still have a live worker sitting in it, by cwd or by the last ledger entry's ownerSession/workerSession/
+  // session. The old `!!lease && isSessionAlive(...)` read always answered `false` for an unleased lane no
+  // matter how live it actually was — exactly the disagreement that let `planSalvageCandidates`
+  // (`lane-pool-health-watch.mjs`) select a live lane as a salvage candidate while the reclaim gate itself
+  // correctly saw it as live (2026-09-28 evidence, lane-18).
+  const liveOwner = liveAgentInLane(agents, dir, [lease?.ownerSession, last?.ownerSession, last?.workerSession, last?.session]);
+  const holderAlive = leaseTtlAlive || liveOwner;
 
   const { trackedModifiedPaths, untrackedPaths } = gitStatusSummary(dir);
   const dirtyPaths = [...trackedModifiedPaths, ...untrackedPaths];

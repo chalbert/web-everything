@@ -59,7 +59,7 @@ import { buildFreeLaneList, resolveFreeLaneListPath, writeFreeLaneListAtomic } f
 // salvage dirs are backfilled into it, and non-lane litter in the pool dir is classified and cleaned every tick.
 import { refreshSalvageIndex, backfillSalvageDir } from '../lib/salvage-index.mjs';
 import { sweepPoolLeftovers } from '../lib/pool-leftovers.mjs';
-import { resolveSalvageRoot, readAgentsStrict } from '../lib/lane-salvage.mjs';
+import { resolveSalvageRoot, readAgentsStrict, laneLivenessGate } from '../lib/lane-salvage.mjs';
 import { readLaneHistory, lastLaneHistoryEntry } from '../lib/lane-history.mjs';
 // #4344 — the PURE predicate that tells "already at the pool branch tip, nothing to reclaim" apart from
 // "clean, but still behind it" (reclaim must still run for the latter — see that function's own docblock).
@@ -323,6 +323,25 @@ export function defaultIsLeasedNow(dir) {
 }
 
 /**
+ * #xl5xhmj fork 2 — `defaultIsLeasedNow`'s sibling for LIVE OWNERSHIP rather than a lease: an unleased lane
+ * (its lease already dropped — #xbk2is9) can still have a live worker sitting in it. Passed as
+ * `lib/lane-litter.mjs#cleanLaneLitter`'s `isLiveNow` so the litter-reap pass never deletes a live worker's own
+ * scratch files (its `.pr-body.md`/`.commit-msg.txt`) just because the lane read unleased (2026-09-28 lane-18
+ * evidence). Reuses the SAME `laneLivenessGate` the reclaim path (`lane-pool.mjs#cmdReclaim`) runs — one gate,
+ * one place — never a third hand-rolled liveness read. Fails toward "still live" (never toward "safe to reap")
+ * on any read it cannot verify, matching that gate's own fail-closed contract.
+ * @param {string} dir
+ * @returns {boolean}
+ */
+export function defaultIsLiveNow(dir) {
+  try {
+    return !laneLivenessGate({ dir }).eligible; // omitting lastHolder lets the gate derive its own ledger read
+  } catch {
+    return true;
+  }
+}
+
+/**
  * #4025 — the live pool-TRIM call, shelling `node lane-pool.mjs trim --json [--repo=] [--max=N] [--dry-run]`,
  * the SAME command an operator runs by hand (see that file's own `trim` section header). `exec` is injectable
  * so the argv is assertable with no real subprocess. `provision --acquirable` grows a pool whenever nothing
@@ -535,7 +554,7 @@ export function lowPoolAlert(health, lowWater = DEFAULT_LOW_WATER) {
  */
 export function watchLanePoolHealth({
   repo = null, root = REPO_ROOT, listStatus = defaultListLaneStatus, readPorcelain = defaultReadPorcelain,
-  reap = cleanLaneLitter, isLeasedNow = defaultIsLeasedNow, dryRun = false,
+  reap = cleanLaneLitter, isLeasedNow = defaultIsLeasedNow, isLiveNow = defaultIsLiveNow, dryRun = false,
   trimPool = defaultTrimPool, trimMax = null, listAcquirable = defaultListAcquirable,
   listWhois = defaultListWhois, reclaimLane = defaultReclaimLane, reclaimEnabled = true,
   writeFreeLaneList = defaultWriteFreeLaneList, salvageEnabled = false, salvageMax = DEFAULT_SALVAGE_MAX_PER_TICK,
@@ -551,7 +570,7 @@ export function watchLanePoolHealth({
     for (const p of plan) {
       if (p.action !== 'reap') continue;
       try {
-        const outcome = reap(p.path, { isLeasedNow });
+        const outcome = reap(p.path, { isLeasedNow, isLiveNow });
         // `outcome.complete` — never a length comparison against this tick's OWN (possibly stale) `p.toRemove`
         // snapshot, which would misjudge a lane whose real litter set changed size between the snapshot and
         // this call. `cleanLaneLitter` judges completeness against its own fresh read; trust that instead.

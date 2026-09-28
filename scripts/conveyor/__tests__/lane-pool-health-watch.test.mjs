@@ -6,9 +6,10 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, existsSync, chmodSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { cleanLaneLitter } from '../../lib/lane-litter.mjs';
 
 import {
   DISABLE_ENV_VAR,
@@ -18,6 +19,7 @@ import {
   defaultListAcquirable,
   defaultReadPorcelain,
   defaultIsLeasedNow,
+  defaultIsLiveNow,
   defaultTrimPool,
   watchLanePoolHealth,
   runLanePoolHealthWatch,
@@ -498,6 +500,29 @@ describe('watchLanePoolHealth — IO shell over injected fakes', () => {
     const result = watchLanePoolHealth({ listStatus, readPorcelain, reap, trimPool: () => null, listAcquirable: () => null, listWhois: () => null });
     expect(result.reaped).toEqual([2]);
   });
+
+  // #xl5xhmj fork 2 — the litter-reap pass must gate on LIVE OWNERSHIP, not just the lease, so it never
+  // deletes a live worker's own scratch files just because the lane read unleased.
+  it('forwards isLeasedNow AND isLiveNow into every reap call, defaulting to defaultIsLeasedNow/defaultIsLiveNow', () => {
+    const listStatus = () => ({ lanes: [{ lane: 1, path: '/pool/lane-1', exists: true, leased: false }] });
+    const readPorcelain = () => '?? .commit-msg.txt\n';
+    let captured;
+    const reap = (dir, opts) => { captured = opts; return { removed: ['.commit-msg.txt'], leaveDirty: [], skipped: false, complete: true }; };
+    watchLanePoolHealth({ listStatus, readPorcelain, reap, trimPool: () => null, listAcquirable: () => null, listWhois: () => null });
+    expect(captured.isLeasedNow).toBe(defaultIsLeasedNow);
+    expect(captured.isLiveNow).toBe(defaultIsLiveNow);
+  });
+
+  it('a custom isLiveNow reaching `true` is honored by the injected reap fake — the pass never second-guesses it', () => {
+    const listStatus = () => ({ lanes: [{ lane: 1, path: '/pool/lane-1', exists: true, leased: false }] });
+    const readPorcelain = () => '?? .commit-msg.txt\n';
+    const isLiveNow = (dir) => dir === '/pool/lane-1'; // a live worker is sitting in this exact lane
+    const reap = (dir, opts) => (opts.isLiveNow(dir)
+      ? { removed: [], leaveDirty: [], skipped: true, complete: false }
+      : { removed: ['.commit-msg.txt'], leaveDirty: [], skipped: false, complete: true });
+    const result = watchLanePoolHealth({ listStatus, readPorcelain, reap, isLiveNow, trimPool: () => null, listAcquirable: () => null, listWhois: () => null });
+    expect(result.reaped).toEqual([]); // gated live — nothing counted as reaped
+  });
 });
 
 // #4025 — the trim wiring: watchLanePoolHealth calls trimPool once, forwards repo/root/max/dryRun, and merges
@@ -563,18 +588,18 @@ describe('runLanePoolHealthWatch — the entrypoint', () => {
 });
 
 describe('watchLanePoolHealth — TOCTOU guard (#3568)', () => {
-  // `isLeasedNow` is now passed straight INTO `reap` (`cleanLaneLitter`'s own last-gate check), never checked
-  // separately by this function beforehand — see `cleanLaneLitter`'s own docblock for why. This describe block
-  // pins the PASS-THROUGH contract; `cleanLaneLitter`'s own real behavior for `isLeasedNow` is pinned in
+  // `isLeasedNow`/`isLiveNow` are now passed straight INTO `reap` (`cleanLaneLitter`'s own last-gate checks),
+  // never checked separately by this function beforehand — see `cleanLaneLitter`'s own docblock for why. This
+  // describe block pins the PASS-THROUGH contract; `cleanLaneLitter`'s own real behavior for both is pinned in
   // `we:scripts/lib/__tests__/lane-litter.test.mjs`.
-  it('passes isLeasedNow straight into reap, for every action:"reap" lane', () => {
+  it('passes isLeasedNow straight into reap, for every action:"reap" lane (alongside the default isLiveNow, #xl5xhmj)', () => {
     const listStatus = () => ({ lanes: [{ lane: 1, path: '/pool/lane-1', exists: true, leased: false }] });
     const readPorcelain = () => '?? .commit-msg.txt\n';
     const isLeasedNow = () => false;
     let capturedArgs;
     const reap = (path, opts) => { capturedArgs = [path, opts]; return { removed: ['.commit-msg.txt'], leaveDirty: [], skipped: false, complete: true }; };
     const result = watchLanePoolHealth({ listStatus, readPorcelain, reap, isLeasedNow, trimPool: () => null, listAcquirable: () => null, listWhois: () => null });
-    expect(capturedArgs).toEqual(['/pool/lane-1', { isLeasedNow }]);
+    expect(capturedArgs).toEqual(['/pool/lane-1', { isLeasedNow, isLiveNow: defaultIsLiveNow }]);
     expect(result.reaped).toEqual([1]);
   });
 
@@ -639,6 +664,90 @@ describe('defaultIsLeasedNow — real lease-marker read', () => {
   });
 });
 
+// #xl5xhmj — `defaultIsLiveNow`'s OWN behavior, not just its identity. Every existing reference to it
+// (`toBe(defaultIsLiveNow)` above, or a caller-supplied fake standing in for it) exercises no production code
+// inside its body: neither its fail-closed `catch { return true }` nor its `!eligible` inversion of the real
+// gate. A flipped catch (`return false`) or a dropped `!` would pass the whole suite unchanged before these
+// tests existed. Faked `claude`/`lsof` on PATH (same technique `lane-pool-reclaim.test.mjs` uses) + a zeroed
+// quiet period make the REAL `laneLivenessGate` this function calls behave deterministically, without this
+// unit test depending on the real host's own live sessions/processes.
+describe('defaultIsLiveNow — real gate behavior, not just identity (#xl5xhmj)', () => {
+  let dir;
+  let binDir;
+  let prevPath;
+  let prevQuiet;
+
+  const fakeExe = (name, script) => {
+    const p = join(binDir, name);
+    writeFileSync(p, script);
+    chmodSync(p, 0o755);
+  };
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'lane-pool-health-watch-livenow-'));
+    execFileSync('git', ['init', '--quiet'], { cwd: dir });
+    execFileSync('git', ['config', 'user.email', 't@t.com'], { cwd: dir });
+    execFileSync('git', ['config', 'user.name', 't'], { cwd: dir });
+    writeFileSync(join(dir, 'file.txt'), 'v1\n');
+    execFileSync('git', ['add', 'file.txt'], { cwd: dir });
+    execFileSync('git', ['commit', '--quiet', '-m', 'v1'], { cwd: dir });
+
+    binDir = mkdtempSync(join(tmpdir(), 'lane-pool-health-watch-livenow-bin-'));
+    prevPath = process.env.PATH;
+    process.env.PATH = `${binDir}:${prevPath}`;
+    // The gate's quiet-period half defaults to 30 minutes — zeroed here so a lane this test JUST wrote reads as
+    // quiet immediately (the real 30-minute default gets its OWN dedicated end-to-end coverage in
+    // `we:scripts/__tests__/lane-pool-reclaim.test.mjs`, through `cmdReclaim`, not here).
+    prevQuiet = process.env.WE_LANE_SALVAGE_QUIET_MIN;
+    process.env.WE_LANE_SALVAGE_QUIET_MIN = '0';
+    fakeExe('lsof', '#!/bin/sh\nexit 0\n');
+  });
+
+  afterEach(() => {
+    process.env.PATH = prevPath;
+    if (prevQuiet === undefined) delete process.env.WE_LANE_SALVAGE_QUIET_MIN;
+    else process.env.WE_LANE_SALVAGE_QUIET_MIN = prevQuiet;
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(binDir, { recursive: true, force: true });
+  });
+
+  it('inverts a genuinely-eligible gate (quiet, no live owner/pid) to NOT live', () => {
+    fakeExe('claude', "#!/bin/sh\necho '[]'\n");
+    expect(defaultIsLiveNow(dir)).toBe(false);
+  });
+
+  it('inverts an ineligible gate (a live owner session in this lane) to LIVE', () => {
+    fakeExe('claude', `#!/bin/sh\necho '[{"sessionId":"s","state":"working","cwd":"${dir}"}]'\n`);
+    expect(defaultIsLiveNow(dir)).toBe(true);
+  });
+
+  it('fails CLOSED (still "live") when the underlying read throws, never toward "safe to reap"', () => {
+    // A non-string dir makes `readLaneHistory`'s own `join(dir, ...)` throw synchronously, hitting
+    // `defaultIsLiveNow`'s own try/catch (its docblock's fail-closed promise) rather than any of
+    // `laneLivenessGate`'s internal, already-caught failure paths.
+    expect(defaultIsLiveNow(undefined)).toBe(true);
+  });
+
+  // Red-team finding — every OTHER test either exercises `defaultIsLiveNow` directly (above) or wires a FAKE
+  // `isLiveNow` into `cleanLaneLitter` (`lane-litter.test.mjs`) — none combines the REAL `defaultIsLiveNow`
+  // with REAL litter on disk through the REAL `cleanLaneLitter`, the exact composition the litter-reap pass
+  // actually runs in production.
+  it('the REAL defaultIsLiveNow, wired into the REAL cleanLaneLitter, refuses to reap a lane a live agent is sitting in', () => {
+    writeFileSync(join(dir, '.commit-msg.txt'), 'litter\n');
+    fakeExe('claude', `#!/bin/sh\necho '[{"sessionId":"s","state":"working","cwd":"${dir}"}]'\n`);
+    const result = cleanLaneLitter(dir, { isLiveNow: defaultIsLiveNow });
+    expect(result).toEqual({ removed: [], leaveDirty: [], skipped: true, complete: false });
+    expect(existsSync(join(dir, '.commit-msg.txt'))).toBe(true);
+  });
+
+  it('the REAL defaultIsLiveNow, wired into the REAL cleanLaneLitter, reaps normally once no one is home', () => {
+    writeFileSync(join(dir, '.commit-msg.txt'), 'litter\n');
+    fakeExe('claude', "#!/bin/sh\necho '[]'\n");
+    const result = cleanLaneLitter(dir, { isLiveNow: defaultIsLiveNow });
+    expect(result).toEqual({ removed: ['.commit-msg.txt'], leaveDirty: [], skipped: false, complete: true });
+  });
+});
+
 // ── Real-git integration: the same shared `cleanLaneLitter` core actually reaps on disk ──────────────────────
 describe('watchLanePoolHealth — real git integration (proves the SAME shared cleanup fn is reused, not re-derived)', () => {
   let dir;
@@ -665,7 +774,11 @@ describe('watchLanePoolHealth — real git integration (proves the SAME shared c
     writeFileSync(join(dir, 'review-3568-output.json'), '{}\n');
 
     const listStatus = () => ({ lanes: [{ lane: 1, path: dir, exists: true, leased: false }] });
-    const result = watchLanePoolHealth({ listStatus, readPorcelain: defaultReadPorcelain, trimPool: () => null, listAcquirable: () => null, listWhois: () => null });
+    // #xl5xhmj — `isLiveNow` now defaults to the REAL `defaultIsLiveNow` (real `claude agents --json` + `lsof`
+    // + a 30-minute quiet period), which this in-process unit test has no business depending on — a file this
+    // test JUST wrote reads as "not quiet yet" against the real clock. Faked false here (this test is about the
+    // shared `cleanLaneLitter` core, not the liveness gate — that gate has its own dedicated coverage).
+    const result = watchLanePoolHealth({ listStatus, readPorcelain: defaultReadPorcelain, isLiveNow: () => false, trimPool: () => null, listAcquirable: () => null, listWhois: () => null });
 
     expect(result.reaped).toEqual([1]);
     expect(existsSync(join(dir, '.commit-msg.txt'))).toBe(false);

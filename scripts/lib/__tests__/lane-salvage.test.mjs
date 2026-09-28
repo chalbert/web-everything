@@ -5,13 +5,14 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync, existsSync, utimesSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 import {
   salvageStamp, salvageRefNames, isWorktreeLitterPath, parseLsofCwds, pidsWithCwdIn, salvageEligibility,
-  liveAgentInLane, deriveSalvageTargets, salvageLane, removeLitterWorktrees, listLitterWorktrees,
+  liveAgentInLane, deriveSalvageTargets, salvageLane, removeLitterWorktrees, listLitterWorktrees, laneLivenessGate,
+  newestContentMtimeMs,
 } from '../lane-salvage.mjs';
 
 describe('lane-salvage pure core', () => {
@@ -48,10 +49,127 @@ describe('lane-salvage pure core', () => {
     expect(salvageEligibility({ ...base, newestMtimeMs: 50 * 60_000 }).reason).toMatch(/quiet period/);
   });
 
+  // #xl5xhmj — this is a PURE unit test of `salvageEligibility`'s own clamp math, with a synthetic
+  // `quietMs: 0` chosen ONLY to isolate that arithmetic — it is NOT a description of `cmdReclaim`'s own
+  // production gate, which always runs at the REAL 30-minute default (`resolveSalvageQuietMs()`;
+  // `cmdReclaim` never passes a `quietMs` override at all — see `we:scripts/lane-pool.mjs`). That real-default
+  // path gets its own dedicated end-to-end coverage in `we:scripts/__tests__/lane-pool-reclaim.test.mjs`'s
+  // "quiet period at the REAL 30-minute default" describe block, via `runPoolWithEnv` with the env var UNSET.
+  // The clamp itself defends a file's on-disk mtime landing a few ms AFTER `nowMs` was sampled (mtime/clock
+  // granularity, or git's own background housekeeping touching `.git/logs/HEAD` a moment after the visible
+  // commit/push returned). An unclamped negative "elapsed" wrongly read as "not yet quiet" even at
+  // `quietMs: 0`, where ANY elapsed time (including ~0) must trivially satisfy the threshold.
+  it('a newestMtimeMs slightly AHEAD of nowMs (clock/mtime skew) never reads as "not quiet" at quietMs:0', () => {
+    const g = salvageEligibility({
+      leased: false, liveOwner: false, livePids: [], newestMtimeMs: 1_000_014, nowMs: 1_000_000, quietMs: 0,
+    });
+    expect(g).toEqual({ eligible: true, reason: 'unleased, no live owner or process, quiet' });
+  });
+
+  it('the same skew still correctly refuses when quietMs is genuinely not yet satisfied', () => {
+    const g = salvageEligibility({
+      leased: false, liveOwner: false, livePids: [], newestMtimeMs: 1_000_014, nowMs: 1_000_000, quietMs: 60_000,
+    });
+    expect(g.eligible).toBe(false);
+    expect(g.reason).toMatch(/0 min ago/); // clamped to 0, never a negative minute count
+  });
+
   it('derives PR numbers and card ids from lease purpose/holder and branch names', () => {
     expect(deriveSalvageTargets({ holder: 'conveyor-ci-heal-lane-2-201b', purpose: 'fix-2748', branches: ['lane/4229-slug', 'worktree-fix-2769'] }))
       .toEqual({ cards: ['4229'], prs: [2748, 2769] });
     expect(deriveSalvageTargets({ session: 'build-x9fbg1x' }).cards).toEqual(['x9fbg1x']);
+  });
+});
+
+// #xl5xhmj — `laneLivenessGate` is the ONE liveness read `lane-pool.mjs#cmdReclaim`'s direct-reset path and
+// `lane-pool-health-watch.mjs`'s litter-reap pass now both share, extracted from what used to be
+// `cmdReclaimSalvage`'s own inline `gate()` closure (only that ONE path ever ran it before this fix).
+describe('laneLivenessGate (#xl5xhmj)', () => {
+  it('a live owner (by cwd) refuses, even with no matching sessionId supplied', () => {
+    const readAgents = () => [{ state: 'working', cwd: '/pool/lane-9', sessionId: 'unrelated' }];
+    const readCwds = () => [];
+    const g = laneLivenessGate({ dir: '/pool/lane-9', readAgents, readCwds, quietMs: 0 });
+    expect(g.eligible).toBe(false);
+    expect(g.reason).toMatch(/live/i);
+  });
+
+  it('a live owner by lastHolder sessionId (agent cwd elsewhere) also refuses', () => {
+    const readAgents = () => [{ state: 'working', cwd: '/elsewhere', sessionId: 's1' }];
+    const readCwds = () => [];
+    const g = laneLivenessGate({ dir: '/pool/lane-9', lastHolder: { workerSession: 's1' }, readAgents, readCwds, quietMs: 0 });
+    expect(g.eligible).toBe(false);
+  });
+
+  it('a live process cwd (no matching agent) also refuses', () => {
+    const readAgents = () => [];
+    const readCwds = () => [{ pid: 123, cwd: '/pool/lane-9' }];
+    const g = laneLivenessGate({ dir: '/pool/lane-9', readAgents, readCwds, quietMs: 0 });
+    expect(g.eligible).toBe(false);
+    expect(g.reason).toMatch(/pid 123/);
+  });
+
+  it('no live owner, no live pid, quiet period satisfied — eligible', () => {
+    const readAgents = () => [];
+    const readCwds = () => [];
+    const g = laneLivenessGate({ dir: '/pool/lane-9', readAgents, readCwds, quietMs: 0 });
+    expect(g).toEqual({ eligible: true, reason: 'unleased, no live owner or process, quiet' });
+  });
+
+  it('fails CLOSED when `claude agents` cannot be read — never treats an unreadable lane as safe', () => {
+    const g = laneLivenessGate({ dir: '/pool/lane-9', readAgents: () => null, readCwds: () => [], quietMs: 0 });
+    expect(g.eligible).toBe(false);
+    expect(g.reason).toMatch(/claude agents/);
+  });
+
+  it('fails CLOSED when live process cwds cannot be read (lsof unavailable)', () => {
+    const g = laneLivenessGate({ dir: '/pool/lane-9', readAgents: () => [], readCwds: () => null, quietMs: 0 });
+    expect(g.eligible).toBe(false);
+    expect(g.reason).toMatch(/lsof/);
+  });
+});
+
+// Red-team finding — `newestContentMtimeMs` deliberately never stats `.git/index` at all (see that function's
+// own docblock for why an ordering fix inside this ONE function could not close the race: an EARLIER, unrelated
+// `git status` elsewhere in the same call chain — `laneReclaimPreservationProof`'s own `gitStatusSummary` in
+// `cmdReclaim` — races the index just as much as this function's own call would). These tests prove BOTH halves
+// still hold without it: a staged/working-tree DELETION (no file left to stat) still reads as fresh via the
+// unstatable-path fallback, and a genuinely quiet lane still reads as quiet.
+describe('newestContentMtimeMs (real git, #xl5xhmj)', () => {
+  let dir;
+  const git = (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'newest-mtime-'));
+    git('init', '-q');
+    git('config', 'user.email', 't@t.com');
+    git('config', 'user.name', 't');
+    writeFileSync(join(dir, 'a.txt'), 'base\n');
+    writeFileSync(join(dir, 'b.txt'), 'base\n');
+    git('add', '.');
+    git('commit', '-qm', 'base');
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it('a STAGED DELETION (the tracked path no longer exists on disk) still reads as recent, via the unstatable-path fallback', () => {
+    // Back-date logs/HEAD first so the ONLY fresh signal left is the deletion itself — `bump` cannot stat a
+    // path `git rm` already removed from the working tree, so this pins the fallback, not logs/HEAD.
+    const old = new Date(Date.now() - 60 * 60_000);
+    utimesSync(join(dir, '.git', 'logs', 'HEAD'), old, old);
+    git('rm', '-q', 'a.txt'); // staged deletion — a.txt no longer exists on disk to stat
+    const before = Date.now();
+    const newest = newestContentMtimeMs(dir);
+    expect(newest).not.toBeNull();
+    expect(newest).toBeGreaterThanOrEqual(before - 5_000); // recent (within a few seconds), not the back-dated hour
+  });
+
+  it('a genuinely quiet lane (nothing staged, HEAD reflog old) still reads as old — the original racy-index bug stays fixed', () => {
+    const old = new Date(Date.now() - 60 * 60_000);
+    utimesSync(join(dir, '.git', 'logs', 'HEAD'), old, old);
+    // `git status` (what `dirtyPaths` shells) may itself rewrite `.git/index` here — the exact race this
+    // function's docblock describes. Never stat-ing the index at all is what this test pins.
+    const newest = newestContentMtimeMs(dir);
+    expect(newest).not.toBeNull();
+    expect(Date.now() - newest).toBeGreaterThan(55 * 60_000); // still reads as ~an hour old, not "just now"
   });
 });
 
