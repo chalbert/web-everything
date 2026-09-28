@@ -670,6 +670,33 @@ describe('planActions', () => {
     expect(investigate.suppressed).toMatch(/shadow mode/);
   });
 
+  // #4078 — agent dispatch is its own operator switch (4065 clause 6), independent of `mode`.
+  it('investigate is unsuppressed only when config `investigateDispatch` is on — in any mode — and runHealthTick passes it', () => {
+    const D = { id: 'd', openAfter: 1, closeAfter: 1, severity: 'medium', action: 'investigate', evaluate: () => [{ subject: 'p', breach: true }] };
+    const r = stepEpisodes(emptyHealthState(), [{ smell: D, results: [{ subject: 'p', breach: true }] }], 0);
+    const inv = (opts) => planActions(r.transitions, { d: D }, opts).find((p) => p.kind === 'investigate');
+    expect(inv({ mode: 'shadow' }).suppressed).toMatch(/shadow mode.*investigateDispatch/);
+    expect(inv({ mode: 'live' }).suppressed).toMatch(/dispatch is off/);
+    expect(inv({ mode: 'shadow', investigateDispatch: true }).suppressed).toBeNull();
+    expect(DEFAULT_HEALTH_CONFIG.investigateDispatch).toBe(false);
+    const tick = runHealthTick(emptyHealthState(), {}, [D], 0, { config: { investigateDispatch: true } });
+    expect(tick.plan.find((p) => p.kind === 'investigate').suppressed).toBeNull();
+  });
+
+  it('the report renders an investigation status and scrubbed findings, and nothing when none was considered', () => {
+    const ep = { key: 'd::p', smell: 'd', subject: 'p', status: 'open', severity: 'medium', openedAt: 0, lastBreachAt: 0 };
+    expect(renderEpisodeReport(ep, { now: 0 })).not.toContain('Agent investigation');
+    const md = renderEpisodeReport({
+      ...ep,
+      investigationStatus: { status: 'finished', reason: 'findings recorded; session stopped', session: 'health-x' },
+      investigation: { recordedAt: 't', evidence: [{ command: 'c', output: 'token ghp_abcdefghijklmnopqrstuvwxyz0123' }], recommendation: { whatIsWrong: 'w', productChange: 'p', nextStep: 'n' } },
+    }, { now: 0 });
+    expect(md).toContain('## Agent investigation');
+    expect(md).toContain('health-x');
+    expect(md).toContain('**Next step:** n');
+    expect(md).not.toContain('ghp_abcdef');
+  });
+
   // #4077 continuation — a smell whose `id` is in `notifySet` (default: notify-list.mjs's NOTIFY_EVEN_IN_SHADOW)
   // is the one opt-in exception to shadow-mode notify suppression.
   it('a smell whose id is in `notifySet` is never suppressed, even in shadow mode — every other smell is unaffected', () => {
