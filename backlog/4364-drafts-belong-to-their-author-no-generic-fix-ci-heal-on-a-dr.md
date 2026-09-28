@@ -1,4 +1,5 @@
 ---
+bornAs: x7qre1u
 kind: story
 size: 8
 priority: high
@@ -21,7 +22,7 @@ red CI itself: it MAY delegate to a specialist fixer through a **local request m
 session** path (the same pattern `we:scripts/verify-lane.mjs`'s own `request` mode already uses: an interactive
 session drops a `request`-stamped marker, and a separate mechanical pass — there, `we:scripts/conveyor/verify-dispatch.mjs` —
 picks it up on its next tick and runs it to completion; the specialist-role delegation card the operator named,
-`xs57vx3`, is the general form of this same shape) — **never through the fix/ci-heal daemon's `we:reconcile-core.mjs`
+`4361`, is the general form of this same shape) — **never through the fix/ci-heal daemon's `we:reconcile-core.mjs`
 path**, which is heavier (an independent agent dispatch, a claim, a review-adjacent comment thread) for a case
 that is really "the builder's own next step, possibly handed to a cheaper specialist." The signal that a draft's
 CI went red should come from the webhook/PR-events feed (`we:scripts/lib/pr-events.mjs`, #2812) or the verify
@@ -58,11 +59,11 @@ defense-in-depth layer — a planning refusal that the execution layer could sti
 
 **The delegation path a builder MAY use instead of fixing it personally**, modeled on `we:scripts/verify-lane.mjs`'s
 `request`/`check` shape: the builder (or its wrapper) drops a request marker naming the role needed (e.g.
-`ci-fix`) on its OWN lane; a dispatcher (the mechanism `xs57vx3` declares) picks it up and launches a specialist
+`ci-fix`) on its OWN lane; a dispatcher (the mechanism `4361` declares) picks it up and launches a specialist
 session scoped to that one fix, cheaper and less `gh`-heavy than a full reconcile-core round because it never
 re-derives review status, never posts a review-adjacent comment thread, and works directly in the builder's own
 lane rather than a fresh clone. This card wires reconcile-core's draft branches to STOP short-circuiting into
-`kind: 'ci-heal'`/`kind: 'fix'` for a draft, but does not itself build the dispatcher — that is `xs57vx3`'s job,
+`kind: 'ci-heal'`/`kind: 'fix'` for a draft, but does not itself build the dispatcher — that is `4361`'s job,
 named here as a hard prerequisite (`blockedBy`).
 
 **The author's claim survives its own draft.** `we:scripts/conveyor/build-dispatch-claim.mjs` retires a claim
@@ -125,8 +126,8 @@ the author's-own-status the operator's exception names) but applies no OTHER lab
 6. Confirm `we:review-status-tag.mjs` never emits a non-`awaiting-ci` state for a draft (likely already true per its
    existing `isDraft` gate — a confirming test, not a behavior change, unless one is found).
 7. Wire the actual delegation call (builder drops the request marker instead of doing nothing when it wants to
-   hand off a red-draft fix), once `xs57vx3`'s dispatcher exists to receive it — the last of these seven tasks
-   to land, by ordering rather than a recorded edge. NOT a formal `blockedBy` here: `xs57vx3` does not yet
+   hand off a red-draft fix), once `4361`'s dispatcher exists to receive it — the last of these seven tasks
+   to land, by ordering rather than a recorded edge. NOT a formal `blockedBy` here: `4361` does not yet
    resolve to an existing item in this checkout (born this session, not yet synced/landed) and
    `check:standards` refuses an edge that cannot verify its target — add the edge by hand once that card is
    confirmed present.
@@ -135,13 +136,13 @@ the author's-own-status the operator's exception names) but applies no OTHER lab
 
 Lands incrementally, in the Task order above: each of 1-6 is independently useful and safe behind `main` (a
 pure additional refusal/exclusion, never a removal of an existing correct decision). Task 7 is gated on
-`xs57vx3` and may land as its own follow-up PR once that dependency ships, rather than holding this whole card
+`4361` and may land as its own follow-up PR once that dependency ships, rather than holding this whole card
 open.
 
 ## Independent review
 
 Not yet run — this card was filed and iteratively refined against operator rulings in the same session as
-x9my7an/xdm775e, whose ONE scheduled Codex plan-review pass had already completed before this card's third and
+4365/4366, whose ONE scheduled Codex plan-review pass had already completed before this card's third and
 fourth refinements arrived. Per instruction it is filed **unstamped** (`preparedDate` withheld) rather than
 delayed for a second review round; a follow-up read-only plan review is owed before this is build-ready.
 
@@ -156,5 +157,5 @@ delayed for a second review round; a follow-up read-only plan review is owed bef
 3. A build-dispatch claim for a draft PR is still held one tick after the PR opens (where today's retirement
    predicate would already have released it) and is retired at the SAME tick `we:promote-draft-pr-dispatch.mjs`
    un-drafts it — proven by a fixture test, not by inspection.
-4. Once `xs57vx3` lands, a builder's dropped request marker reaches a specialist session for a red-draft fix
+4. Once `4361` lands, a builder's dropped request marker reaches a specialist session for a red-draft fix
    without ever touching `we:reconcile-core.mjs`'s `ci-heal`/`fix` dispatch paths.

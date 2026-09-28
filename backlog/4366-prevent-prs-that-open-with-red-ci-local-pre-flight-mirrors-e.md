@@ -1,8 +1,9 @@
 ---
+bornAs: xdm775e
 kind: story
 size: 8
 status: open
-blockedBy: ["x9my7an"]
+blockedBy: ["4365"]
 scope: ["we:scripts/operations/open-pr.mjs", "we:scripts/operations/open-pr-io.mjs", "we:scripts/operations/__tests__/open-pr.test.mjs", "we:scripts/operations/preflight-ci-mirror.mjs", "we:scripts/operations/__tests__/preflight-ci-mirror.test.mjs", "we:scripts/conveyor/ci-red-on-open-classify.mjs", "we:scripts/conveyor/__tests__/ci-red-on-open-classify.test.mjs", "we:scripts/conveyor/conflict-postmortem-store.mjs", "we:scripts/progress-board.mjs", "we:.github/workflows/ci.yml", "we:.github/workflows/soak-replay-gate.yml", "we:.github/workflows/review-gate.yml"]
 dateOpened: "2026-09-28"
 tags: []
@@ -10,7 +11,7 @@ tags: []
 
 # Prevent PRs that open with red CI: local pre-flight mirrors every non-test CI check
 
-PRs open red on CI repeatedly this week (#2835/#2839/#2843/#2845/#2852/#2854, #4309's build) because nothing mirrors CI locally before push. The local gate must never default to the unscoped full suite (just ratified, we:docs/agent/platform-decisions.md#local-gate-never-full-suite-by-default), so we:scripts/operations/open-pr.mjs needs a NARROW pre-flight instead: the real non-test required checks (we:scripts/soak-replay-gate-cli.mjs, we:scripts/check-standards.mjs, review-gate) plus affected tests (we:scripts/readiness/test-selection.mjs), refusing with the exact fix on any failure. Red-on-open CI is classified and shares x9my7an's postmortem store; the rate becomes a delivery KPI.
+PRs open red on CI repeatedly this week (#2835/#2839/#2843/#2845/#2852/#2854, #4309's build) because nothing mirrors CI locally before push. The local gate must never default to the unscoped full suite (just ratified, we:docs/agent/platform-decisions.md#local-gate-never-full-suite-by-default), so we:scripts/operations/open-pr.mjs needs a NARROW pre-flight instead: the real non-test required checks (we:scripts/soak-replay-gate-cli.mjs, we:scripts/check-standards.mjs, review-gate) plus affected tests (we:scripts/readiness/test-selection.mjs), refusing with the exact fix on any failure. Red-on-open CI is classified and shares 4365's postmortem store; the rate becomes a delivery KPI.
 
 ## Evidence
 
@@ -62,7 +63,7 @@ never a generic "CI would fail."
 3. `flaky` — an immediate CI re-run of the SAME commit, no code change, passes. Requires the re-run signal; never asserted from a single red run.
 4. `environment` — a re-run fails again but for a load/capacity/resource reason (timeout under concurrent load, OOM, disk) rather than a deterministic assertion failure — #4309's build is this class, distinguished from `flaky` by the FAILURE SHAPE (timeout/resource vs. a repeatable-then-not assertion), not by re-run alone.
 
-**Shared storage.** `classifyRedOnOpen`'s verdict is appended to x9my7an's `we:scripts/conveyor/conflict-postmortem-store.mjs` store as a row with `mode: 'ci-red-on-open'` (a THIRD `mode` value alongside that item's `main-base`/`stacked-rebase`) — the operator's own instruction to share storage, and consistent with that item's `Row` shape already carrying a `mode` discriminator built to be extended, not a parallel store. `classifyRedOnOpen` recurring on the SAME job feeds the CI inventory table above the same way x9my7an's roll-up feeds the prepare checklist: a class recurring past threshold is a candidate pre-flight ADDITION (a job with no mirror today that keeps failing red-on-open earns one), read off the roll-up, never auto-applied.
+**Shared storage.** `classifyRedOnOpen`'s verdict is appended to 4365's `we:scripts/conveyor/conflict-postmortem-store.mjs` store as a row with `mode: 'ci-red-on-open'` (a THIRD `mode` value alongside that item's `main-base`/`stacked-rebase`) — the operator's own instruction to share storage, and consistent with that item's `Row` shape already carrying a `mode` discriminator built to be extended, not a parallel store. `classifyRedOnOpen` recurring on the SAME job feeds the CI inventory table above the same way 4365's roll-up feeds the prepare checklist: a class recurring past threshold is a candidate pre-flight ADDITION (a job with no mirror today that keeps failing red-on-open earns one), read off the roll-up, never auto-applied.
 
 **Red-on-open KPI on the plan page.** `we:scripts/progress-board.mjs` already classifies every open/recent PR into one bucket via `classifyPr`, including `ci-red` — but that is a LIVE snapshot (re-read every refresh), not a durable "was this PR red the MOMENT it opened" fact, which can flip to green after a fix before anyone looks. The KPI therefore reads the DURABLE `mode: 'ci-red-on-open'` rows from the shared store (this card, not `classifyPr`'s live read) over a trailing window, reported as `redOnOpenRate = redOnOpenCount / totalOpenedCount` for the same window, added as one more DERIVED (live, free) line in the board's existing derived section — no hand-maintained number, matching that file's own "never hand-typed" discipline.
 
@@ -74,7 +75,7 @@ never a generic "CI would fail."
 - `we:scripts/operations/open-pr.mjs` — new refusal reason `'ci-red'` in `SUBMIT_OUTCOMES`'s refusal table (alongside the existing `check-red`, `empty-body`, etc.), reads `planPreflight`'s `allGreen` before the push step; message includes the first failing `CheckResult.fix` verbatim.
 - `we:scripts/conveyor/ci-red-on-open-classify.mjs`
   - `classifyRedOnOpen({job, preflightRan, preflightPassed, rerunPassed, failureShape})` → PURE, `'missing-pre-flight-check' | 'test-not-selected' | 'flaky' | 'environment'`.
-  - Writes through x9my7an's `appendConflictPostmortem` with `mode: 'ci-red-on-open'`, `class` taking one of the four values above (that item's `Row.class` enum is widened to accept these four alongside its own four — a single `class: string` field, discriminated by `mode`, never two parallel enums).
+  - Writes through 4365's `appendConflictPostmortem` with `mode: 'ci-red-on-open'`, `class` taking one of the four values above (that item's `Row.class` enum is widened to accept these four alongside its own four — a single `class: string` field, discriminated by `mode`, never two parallel enums).
 - `we:scripts/progress-board.mjs` — one new derived line, `redOnOpenRate`, computed from the shared store's `mode: 'ci-red-on-open'` rows over the board's existing trailing window, alongside the existing PR-status and output-mix derived sections.
 
 ## Tasks
@@ -82,13 +83,13 @@ never a generic "CI would fail."
 1. `we:scripts/operations/preflight-ci-mirror.mjs` (pure planner) + tests: each of the four checks reported pass/fail/skipped correctly from injected results; `allGreen` false when any check fails; the CI-inventory table's own N/A rows (review-gate, deploy, etc.) never appear as checks.
 2. The IO shell that actually runs the four local commands (check:standards, the soak-replay-gate CLI with the real merge-base diff, `build:docs`, the scoped test-selection command), each with a bounded timeout.
 3. Wire `we:scripts/operations/open-pr.mjs`'s new `ci-red` refusal ahead of its push step; test that a failing preflight refuses with the exact `fix` text and pushes nothing.
-4. `we:scripts/conveyor/ci-red-on-open-classify.mjs` + tests for all four classes, plus the shared-store write (`mode: 'ci-red-on-open'`) reusing x9my7an's `appendConflictPostmortem` — this task is `blockedBy` x9my7an landing first (the store/record module must exist before this item's write can compile against it).
+4. `we:scripts/conveyor/ci-red-on-open-classify.mjs` + tests for all four classes, plus the shared-store write (`mode: 'ci-red-on-open'`) reusing 4365's `appendConflictPostmortem` — this task is `blockedBy` 4365 landing first (the store/record module must exist before this item's write can compile against it).
 5. Triage this week's #2835/#2839/#2843/#2845 through the built classifier as its first real fixture batch (not asserted by hand above), plus #2852/#2854/#4309 as known-answer regression fixtures.
 6. `we:scripts/progress-board.mjs`'s new `redOnOpenRate` derived line + a test that it reads the shared store, never `classifyPr`'s live snapshot.
 
 ## Delivery shape
 
-Two PRs in practice, one item here: this card is `blockedBy` x9my7an (the shared store must land first). Within this card, land incrementally — the preflight planner and `open-pr` wiring first (useful standalone, gates every PR regardless of classification), then the classifier + shared-store write, then the progress-board KPI last (purely additive, reads a store that may still be empty).
+Two PRs in practice, one item here: this card is `blockedBy` 4365 (the shared store must land first). Within this card, land incrementally — the preflight planner and `open-pr` wiring first (useful standalone, gates every PR regardless of classification), then the classifier + shared-store write, then the progress-board KPI last (purely additive, reads a store that may still be empty).
 
 ## Proof plan (live, before/after)
 
@@ -144,12 +145,12 @@ Confidence **High**, build-ready **No**. Not stamped `preparedDate`. Corrections
    finish before the PR exists). The pre-flight table already marks it N/A for mirroring; the KPI computation in
    Interfaces needs the same explicit exclusion, not just the table note. Corrected in the Interfaces section's
    intent above; the actual KPI query still needs to encode this filter when built.
-7. **[blocker] The shared-storage design with x9my7an is under-specified.** Card 1's row needs two PRs, colliding
+7. **[blocker] The shared-storage design with 4365 is under-specified.** Card 1's row needs two PRs, colliding
    files, hot-file state, and conflict-shaped cost; this card's row needs one PR, failed job identity, and
    preflight/rerun evidence — "widen `mode` and `class`" does not by itself define which fields apply to which
    `mode` or how the rollup avoids blending a CI-red row into a conflict hot-file count (the exact
-   cross-subject blending x9my7an's own design says must never happen). **Open — needs an actual discriminated
-   union spec, and x9my7an's rollup needs a `mode`-scoped filter before this card's rows can land in the same
+   cross-subject blending 4365's own design says must never happen). **Open — needs an actual discriminated
+   union spec, and 4365's rollup needs a `mode`-scoped filter before this card's rows can land in the same
    store without corrupting its aggregates.**
 8. **[major] The classifier's four classes are not exhaustive nor fully supported by their stated inputs.**
    `missing-pre-flight-check` needs real coverage/diff evidence; `test-not-selected` needs the selected vs. failed
@@ -161,7 +162,7 @@ Confidence **High**, build-ready **No**. Not stamped `preparedDate`. Corrections
 **Handling:** item 1 and the `review-gate` KPI-exclusion intent (item 6) and the `check-red`/`ci-red` naming
 (item 4's naming half) are corrected directly in the sections above. The rest (2, 3, 5, 7, 8, and item 4's
 submission-boundary half) are real open design work, not fold-in edits — this card stays `status: open`,
-un-prepared (`preparedDate` withheld), `blockedBy` x9my7an unchanged, until a second design pass closes them and
+un-prepared (`preparedDate` withheld), `blockedBy` 4365 unchanged, until a second design pass closes them and
 a follow-up independent review confirms it.
 
 ## Done when

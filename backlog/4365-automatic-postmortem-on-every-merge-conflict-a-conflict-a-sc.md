@@ -1,4 +1,5 @@
 ---
+bornAs: x9my7an
 kind: story
 size: 8
 status: open
@@ -9,13 +10,13 @@ tags: []
 
 # Automatic postmortem on every merge conflict (a conflict = a scoping failure)
 
-Every merge conflict on an open PR is handled as an unrelated one-off — we:scripts/conveyor/parked-pr-conflict-watch.mjs alerts and dispatches a fix, we:scripts/conveyor/reconcile-core.mjs's STACKED-BASE CONFLICT branch repairs a rebase, we:scripts/conveyor/conflict-fix-mark.mjs posts the durable marker — but nothing classifies WHY it happened, tallies its cost, or rolls the pattern up. #4301 (xggt9mp)'s could-this-have-been-prevented question and #4308's land-time yield both assume this data exists; it doesn't. This item records one classified postmortem per resolved conflict plus a weekly roll-up.
+Every merge conflict on an open PR is handled as an unrelated one-off — we:scripts/conveyor/parked-pr-conflict-watch.mjs alerts and dispatches a fix, we:scripts/conveyor/reconcile-core.mjs's STACKED-BASE CONFLICT branch repairs a rebase, we:scripts/conveyor/conflict-fix-mark.mjs posts the durable marker — but nothing classifies WHY it happened, tallies its cost, or rolls the pattern up. #4301 (4301)'s could-this-have-been-prevented question and #4308's land-time yield both assume this data exists; it doesn't. This item records one classified postmortem per resolved conflict plus a weekly roll-up.
 
 ## Evidence
 
 - **#2821** (`lane/fix-procedure`) conflicted twice on 2026-09-27: with **#2819** in `we:scripts/operations/ci-heal-pr-dispatch.mjs` (merged 18:13Z, ahead of #2821), then with **#2826** in `we:scripts/conveyor/review-status-tag.mjs` (merged 20:30Z while #2821 sat in review). Each conflict cost a fixer round, a full CI run, and a fresh review round — #4308's own evidence section times the second one at 44 minutes end to end (label at 20:32Z, cleared 21:16Z).
 - Nobody classified either collision: was `we:review-status-tag.mjs`/`we:ci-heal-pr-dispatch.mjs` in #2821's OR #2826/#2819's declared `scope:`? Did both cards claim the same file concurrently (the exact gap #4295 is built to close at DISPATCH time), or did one side lack a card entirely? Nobody knows, because nothing recorded it — this item is the read that answers that question for every future conflict, not just this one.
-- **#4301** (`xggt9mp`, parent #4075) asks "could this have been prevented" for every `review:changes` bounce and flags a recurring cause class for a system fix. It never fires for a conflict: `we:parked-pr-conflict-watch.mjs`'s bounce is `merge-status:conflicting`, a DIFFERENT population from the ordinary reviewer-finding bounce #4301 classifies. This item is #4301's conflict-shaped sibling, not a duplicate — sharing its "recurring class → system fix" spirit, never its store or its cause-class enum (a conflict's causes are structurally different: scoping/overlap/process, not review-quality).
+- **#4301** (`4301`, parent #4075) asks "could this have been prevented" for every `review:changes` bounce and flags a recurring cause class for a system fix. It never fires for a conflict: `we:parked-pr-conflict-watch.mjs`'s bounce is `merge-status:conflicting`, a DIFFERENT population from the ordinary reviewer-finding bounce #4301 classifies. This item is #4301's conflict-shaped sibling, not a duplicate — sharing its "recurring class → system fix" spirit, never its store or its cause-class enum (a conflict's causes are structurally different: scoping/overlap/process, not review-quality).
 - **#4308** (prepared 2026-09-27, `preparedAgainstSha: f1c0fee1d`) adds a LAND-TIME yield so a smaller ready PR waits out a larger in-review overlap instead of forcing it to conflict. Its own "What it does and does not buy" section says plainly: yielding does not shrink the conflict, it only moves which PR pays. This item is the read that tells #4308's operator whether the yield actually reduced total conflict cost, and — via the weekly roll-up below — whether #4308's own dispatch-time sibling #4295 is actually closing the `concurrent-overlap` class or not.
 
 ## Design

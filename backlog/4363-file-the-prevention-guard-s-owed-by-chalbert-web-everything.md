@@ -4,7 +4,7 @@ kind: story
 size: 3
 parent: "4075"
 status: open
-scope: ["we:backlog/4294-workers-run-affected-tests-while-working-the-full-gate-once.md", "we:backlog/xuyqu42-verify-daemon-runs-checks-in-parallel-up-to-the-heavy-admiss.md"]
+scope: ["we:backlog/4294-workers-run-affected-tests-while-working-the-full-gate-once.md", "we:backlog/4360-verify-daemon-runs-checks-in-parallel-up-to-the-heavy-admiss.md"]
 dateOpened: "2026-09-28"
 tags: []
 ---
