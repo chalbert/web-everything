@@ -65,10 +65,18 @@ function isOptionalString(v) {
  * @param {'review'|'fix'} spec.kind
  * @param {number|string|null} [spec.pr]
  * @param {number|string|null} [spec.item]
+ * @param {string|null} [spec.sessionId] - #4306 (epic #3383/#4075) — the WRITER's own `sessionId` (a
+ *   `claude agents --json` UUID), when known. `null` (the default) mints a LEGACY record, byte-identical to
+ *   before this field existed — every existing caller that never passes this is unaffected. See this file's
+ *   own `validateCompletionRecord` and `we:scripts/conveyor/session-reaper.mjs#planBackstopCompletion` /
+ *   `we:scripts/conveyor/reconcile-core.mjs#markSelfReportedDone` for why this exists: "a completion record
+ *   only ever speaks for the session that wrote it" (`we:backlog/4306-*.md`).
  * @param {() => string} [spec.now] - injectable clock, ISO-8601 string.
  * @returns {object} a new completion record.
  */
-export function newCompletionRecord({ session, kind, pr = null, item = null, now = () => new Date().toISOString() } = {}) {
+export function newCompletionRecord({
+  session, kind, pr = null, item = null, sessionId = null, now = () => new Date().toISOString(),
+} = {}) {
   if (!isValidSessionSlug(session)) throw new TypeError(`operations: invalid completion session slug ${JSON.stringify(session)}`);
   if (!COMPLETION_KINDS.includes(kind)) throw new TypeError(`operations: completion record kind must be one of ${COMPLETION_KINDS.join('/')}, got ${JSON.stringify(kind)}`);
   const ts = now();
@@ -83,6 +91,7 @@ export function newCompletionRecord({ session, kind, pr = null, item = null, now
     verdict: null,
     label: null,
     runId: null,
+    sessionId: sessionId === undefined ? null : sessionId,
     startedAt: ts,
     updatedAt: ts,
   };
@@ -92,13 +101,13 @@ export function newCompletionRecord({ session, kind, pr = null, item = null, now
  * PURE merge of a `patch` onto an existing record — bumps `updatedAt`, never touches `session`/`kind`/`pr`/
  * `item`/`startedAt`/`v`. Used by the io shell's "report done" path so a caller need only name what changed.
  * @param {object} record
- * @param {{status?:string, outcome?:string|null, verdict?:string|null, label?:string|null, runId?:string|null}} patch
+ * @param {{status?:string, outcome?:string|null, verdict?:string|null, label?:string|null, runId?:string|null, sessionId?:string|null}} patch
  * @param {() => string} [now]
  * @returns {object}
  */
 export function applyCompletionUpdate(record, patch = {}, now = () => new Date().toISOString()) {
   const next = { ...record, updatedAt: now() };
-  for (const key of ['status', 'outcome', 'verdict', 'label', 'runId']) {
+  for (const key of ['status', 'outcome', 'verdict', 'label', 'runId', 'sessionId']) {
     if (Object.hasOwn(patch, key)) next[key] = patch[key];
   }
   return next;
@@ -119,12 +128,35 @@ export function validateCompletionRecord(record) {
   if (!isOptionalString(record.pr)) errors.push('`pr` must be a string or null');
   if (!isOptionalString(record.item)) errors.push('`item` must be a string or null');
   if (!COMPLETION_STATUSES.includes(record.status)) errors.push(`\`status\` must be one of ${COMPLETION_STATUSES.join('/')}`);
-  for (const key of ['outcome', 'verdict', 'label', 'runId']) {
+  for (const key of ['outcome', 'verdict', 'label', 'runId', 'sessionId']) {
     if (!isOptionalString(record[key])) errors.push(`\`${key}\` must be a string or null`);
   }
   if (typeof record.startedAt !== 'string' || Number.isNaN(Date.parse(record.startedAt))) errors.push('missing or unparseable `startedAt`');
   if (typeof record.updatedAt !== 'string' || Number.isNaN(Date.parse(record.updatedAt))) errors.push('missing or unparseable `updatedAt`');
   return { ok: errors.length === 0, errors };
+}
+
+/**
+ * we:scripts/operations/completion-record.mjs#isForeignCompletionSessionId — #4306 (independent panel review,
+ * correctness lens): THE ONE shared predicate every reader of a completion record's `sessionId` binds through,
+ * so `reconcile-core.mjs#markSelfReportedDone`, `session-reaper.mjs#makeCompletionResolver` and
+ * `session-verdicts.mjs#finishedEvidence` can never silently diverge on what "foreign" means — the exact gap
+ * the review found: two of the three readers only flagged a record foreign when BOTH sides carried a
+ * `sessionId`, so a row reaching them with no `sessionId` of its own (unknown, not "no session identity by
+ * design") would still accept a DIFFERENT session's record as its own, reopening this card's own headline hole
+ * behind a narrower precondition.
+ *
+ * A record speaks for `rowSessionId` UNLESS `recordSessionId` is set and differs from it. The row itself
+ * having no id (`rowSessionId == null`) is never treated as an excuse to accept a record that names someone
+ * else — only a record with NO id at all (`recordSessionId == null`, genuinely legacy or written by a caller
+ * with no session identity) is unconditionally legacy-compatible, per every reader's own existing rule for
+ * that case.
+ * @param {string|null|undefined} rowSessionId
+ * @param {string|null|undefined} recordSessionId
+ * @returns {boolean}
+ */
+export function isForeignCompletionSessionId(rowSessionId, recordSessionId) {
+  return recordSessionId != null && recordSessionId !== (rowSessionId ?? null);
 }
 
 /** Throws (carrying every error) unless `record` validates. @param {*} record @param {string} [label] */

@@ -81,6 +81,32 @@ describe('one case per verdict', () => {
   it('finished-unreaped: a `started`-only completion record proves nothing', () => {
     expect(classify(review148, live({ transcriptMtimeMs: NOW - 107 * MIN, completion: { status: 'started', startedAt: new Date(review148.startedAt).toISOString(), updatedAt: new Date(review148.startedAt).toISOString() } })).verdict).toBe('stalled');
   });
+  // #4306 (epic #3383/#4075, BLOCKER fix-2821) — "a completion record only ever speaks for the session that
+  // wrote it": a `done` record whose `sessionId` names a DIFFERENT session never proves THIS quiet session
+  // finished, however its `status`/`updatedAt` read — it stays `stalled`, never `finished-unreaped`.
+  it('finished-unreaped: a FOREIGN `done` completion record (a different session\'s sessionId) proves nothing for this quiet same-name session', () => {
+    const foreign = {
+      status: 'done', sessionId: 'a-different-session-id',
+      startedAt: new Date(review148.startedAt).toISOString(), updatedAt: new Date(review148.startedAt + 5 * MIN).toISOString(),
+    };
+    const r = classify(review148, live({ transcriptMtimeMs: NOW - 107 * MIN, completion: foreign }));
+    expect(r).toMatchObject({ verdict: 'stalled' });
+  });
+  it('finished-unreaped: a `done` completion record whose `sessionId` MATCHES this session still reaps it', () => {
+    const own = {
+      status: 'done', sessionId: review148.sessionId,
+      startedAt: new Date(review148.startedAt).toISOString(), updatedAt: new Date(review148.startedAt + 5 * MIN).toISOString(),
+    };
+    const r = classify(review148, live({ transcriptMtimeMs: NOW - 107 * MIN, completion: own }));
+    expect(r).toMatchObject({ verdict: 'finished-unreaped', action: 'reap' });
+  });
+  it('finished-unreaped: a legacy `done` completion record (no sessionId at all) keeps today\'s rule unchanged', () => {
+    const legacy = {
+      status: 'done', startedAt: new Date(review148.startedAt).toISOString(), updatedAt: new Date(review148.startedAt + 5 * MIN).toISOString(),
+    };
+    const r = classify(review148, live({ transcriptMtimeMs: NOW - 107 * MIN, completion: legacy }));
+    expect(r).toMatchObject({ verdict: 'finished-unreaped', action: 'reap' });
+  });
   it('finished-unreaped: a review:* label / verdict comment after the session started finishes a review session (ground truth is the PR)', () => {
     const r = classify(review148, live({ transcriptMtimeMs: NOW - 107 * MIN, prSignal: { reviewSignalAtMs: review148.startedAt + 20 * MIN, what: 'label review:accepted' } }));
     expect(r).toMatchObject({ verdict: 'finished-unreaped', action: 'reap' });

@@ -5,11 +5,13 @@ size: 8
 priority: high
 tier: pinned
 parent: "4075"
-status: open
-scope: ["we:scripts/conveyor/session-reaper.mjs", "we:scripts/conveyor/reconcile-core.mjs", "we:scripts/conveyor/session-verdicts.mjs", "we:scripts/conveyor/session-verdicts-io.mjs", "we:scripts/operations/completion-record.mjs", "we:scripts/operations/completion-store.mjs", "we:scripts/operations/completion-cli.mjs", "we:scripts/conveyor/__tests__/session-reaper.test.mjs", "we:scripts/conveyor/__tests__/reconcile-core.test.mjs", "we:scripts/conveyor/__tests__/session-verdicts.test.mjs", "we:scripts/operations/__tests__/completion-cli.test.mjs", "we:scripts/operations/__tests__/completion-record.test.mjs", "we:scripts/operations/__tests__/completion-store.test.mjs", "we:scripts/conveyor/soak/breaks/reaper-backstop-clobbers-live-fixer.mjs", "we:scripts/conveyor/soak/breaks/reaper-backstop-clobbers-live-fixer.soak.test.mjs", "we:scripts/conveyor/soak/breaks/index.mjs"]
+status: resolved
+scope: ["we:scripts/conveyor/session-reaper.mjs", "we:scripts/conveyor/reconcile-core.mjs", "we:scripts/conveyor/session-verdicts.mjs", "we:scripts/conveyor/session-verdicts-io.mjs", "we:scripts/operations/completion-record.mjs", "we:scripts/operations/completion-store.mjs", "we:scripts/operations/completion-cli.mjs", "we:scripts/conveyor/__tests__/session-reaper.test.mjs", "we:scripts/conveyor/__tests__/reconcile-core.test.mjs", "we:scripts/conveyor/__tests__/session-verdicts.test.mjs", "we:scripts/conveyor/__tests__/session-verdicts-io.test.mjs", "we:scripts/operations/__tests__/completion-cli.test.mjs", "we:scripts/operations/__tests__/completion-record.test.mjs", "we:scripts/operations/__tests__/completion-store.test.mjs", "we:scripts/conveyor/soak/breaks/reaper-backstop-clobbers-live-fixer.mjs", "we:scripts/conveyor/soak/breaks/reaper-backstop-clobbers-live-fixer.soak.test.mjs", "we:scripts/conveyor/soak/breaks/index.mjs"]
 dateOpened: "2026-09-27"
 preparedDate: "2026-09-27"
 preparedAgainstSha: "f1c0fee1dd6dc21b3eb8bbe23e4f7eb06f25e74d"
+dateStarted: "2026-09-27"
+dateResolved: "2026-09-27"
 tags: []
 ---
 
