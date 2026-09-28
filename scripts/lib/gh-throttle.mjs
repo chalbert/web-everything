@@ -312,6 +312,108 @@ export function classifyGhWrite(args) {
   return false;
 }
 
+// ── the short-term gh READ/App-WRITE identity split (we:backlog/xhcgdce) ───────────────────────────────────
+//
+// The whole fleet's `gh` calls authenticate as ONE GitHub App installation, sharing its 5,000-point/hour
+// GraphQL budget — exhausted fleet-wide 3+ times in one day. The operator's own `gh` CLI login is a SEPARATE
+// GitHub identity with its own separate 5,000/hour allowance. {@link classifyGhRead} below is a CONSERVATIVE
+// allowlist (unknown/ambiguous always resolves to `false` — a write, staying on the App) used by
+// {@link runGhCliPassthrough} to route a classified read onto that personal identity instead, while every
+// write stays on the App exactly as before. See the card for the full design/MVP-cut/sunset.
+
+/**
+ * Global `gh` flags that can appear BEFORE the subcommand and would otherwise shift `args[0]`/`args[1]` out
+ * of position for a positional classifier (`gh -R owner/repo pr list`, `gh --hostname ghe.example.com pr
+ * view`). Stripped defensively; an UNRECOGNIZED leading flag stops the strip rather than guessing past it —
+ * the caller then sees the ORIGINAL `args[0]` (not a subcommand), which {@link classifyGhRead} already treats
+ * as "unknown" (never a read — the safety direction only ever runs one way).
+ * @param {string[]} args
+ * @returns {string[]}
+ */
+const GH_GLOBAL_FLAGS_WITH_VALUE = new Set(['-R', '--repo', '--hostname']);
+export function stripLeadingGhGlobalFlags(args) {
+  const out = Array.isArray(args) ? args.slice() : [];
+  while (out.length && String(out[0]).startsWith('-')) {
+    const flag = String(out[0]);
+    if (GH_GLOBAL_FLAGS_WITH_VALUE.has(flag)) { out.shift(); out.shift(); continue; }
+    if (/^(?:-R|--repo|--hostname)=/.test(flag)) { out.shift(); continue; }
+    break; // an unrecognized leading flag — stop rather than guess past it (see doc comment above)
+  }
+  return out;
+}
+
+/**
+ * `gh api`'s effective HTTP method, however it was spelled — `--method X`, `--method=X`, `-X X`, or the
+ * squashed `-XX` short form (`gh` itself accepts all of these; a classifier that reads only one shape is
+ * exactly how a real mutation could slip past a read allowlist — review-2026-09-28's finding on this card).
+ * `null` when no method flag is present at all (gh's own default is GET).
+ * @param {string[]} args
+ * @returns {string|null}
+ */
+export function extractGhApiMethod(args) {
+  const a = Array.isArray(args) ? args : [];
+  for (let i = 0; i < a.length; i++) {
+    const t = String(a[i]);
+    if (t === '--method' || t === '-X') return String(a[i + 1] || '').toUpperCase() || null;
+    if (t.startsWith('--method=')) return t.slice('--method='.length).toUpperCase() || null;
+    if (t.startsWith('-X') && t.length > 2) return t.slice(2).toUpperCase();
+  }
+  return null;
+}
+
+/**
+ * Is a `gh api` payload flag (`-f`/`-F`/`--field`/`--raw-field`/`--input`, any spelling incl. `--field=x`)
+ * present? These are `gh`'s own trigger for inferring a mutating POST (see {@link classifyGhWrite}) UNLESS an
+ * explicit `--method GET`/`HEAD` is also present, in which case `gh` itself treats `-f`/`-F` as URL query
+ * parameters, not a body — a real, common shape (`we:scripts/lib/review-label-provider.mjs`'s own `readPrFiles`
+ * uses `--method GET … -F per_page=…`). {@link classifyGhRead}'s own allowlist is DELIBERATELY more
+ * conservative than that distinction — see its doc comment — so this helper's result is used unconditionally
+ * there, not only when the method is unknown.
+ * @param {string[]} args
+ * @returns {boolean}
+ */
+export function hasGhApiPayloadFlag(args) {
+  const a = Array.isArray(args) ? args : [];
+  return a.some((t) => {
+    const s = String(t);
+    return s === '-f' || s === '-F' || s === '--field' || s === '--raw-field' || s === '--input'
+      || s.startsWith('--field=') || s.startsWith('--raw-field=');
+  });
+}
+
+/**
+ * A CONSERVATIVE read allowlist for routing a `gh` call onto the operator's PERSONAL GitHub identity instead
+ * of the shared App installation (we:backlog/xhcgdce). UNKNOWN OR AMBIGUOUS ALWAYS RESOLVES TO `false`
+ * (write/App) — a bug in this list can only strand a read on the shared budget, never route a mutation to
+ * the wrong identity.
+ *
+ * DELIBERATELY NARROWER than {@link classifyGhWrite}'s own inverse would be: `gh api --method GET … -F
+ * per_page=100` (used by `readPrFiles`) IS a real, safe read (`gh` treats `-f`/`-F` as query params under an
+ * explicit GET), but this allowlist still says `false` for it, because the card names the boundary literally
+ * as "`api` GET without `--method`/`-X`/`-f`/`-F`" — expanding it to parse GET-vs-payload intent is exactly
+ * the kind of judgment call a conservative allowlist is written to avoid at MVP. Likewise `gh api graphql -f
+ * query='...'` (a GraphQL QUERY, not a mutation) also resolves `false` here — distinguishing a query from a
+ * mutation needs parsing the query text itself, which this MVP does not attempt. Both are documented,
+ * deliberate false negatives (stay on the App), named in the card's "Explicit MVP cut", never a false
+ * positive.
+ * @param {string[]} argvRaw
+ * @returns {boolean}
+ */
+export function classifyGhRead(argvRaw) {
+  const args = stripLeadingGhGlobalFlags(Array.isArray(argvRaw) ? argvRaw.map(String) : []);
+  const cmd = args[0];
+  const sub = args[1];
+  if (cmd === 'pr') return ['list', 'view', 'checks'].includes(sub);
+  if (cmd === 'run') return ['list', 'view'].includes(sub);
+  if (cmd === 'search') return true;
+  if (cmd === 'api') {
+    const method = extractGhApiMethod(args);
+    if (method && method !== 'GET' && method !== 'HEAD') return false;
+    return !hasGhApiPayloadFlag(args);
+  }
+  return false;
+}
+
 /**
  * Best-effort caller attribution for a `gh` call, recorded on every `calls.jsonl` line (see {@link
  * recordGhCallLogEntry}) so the NEXT burst is traceable in one grep instead of the forensic, multi-log,
@@ -903,6 +1005,76 @@ export function ghAuthIdentity(env = process.env) {
   return `t-${createHash('sha256').update(token).digest('hex').slice(0, 12)}`;
 }
 
+/** Env keys that, per `gh`'s own documented precedence, make `gh auth token` echo back an EXPLICIT env token
+ *  instead of reading the operator's stored CLI login — stripped before the real-gh shell-out below, or it
+ *  would just hand back whatever token this process already has (typically the App token) instead of the
+ *  operator's own personal one. */
+const GH_TOKEN_ENV_KEYS = ['GH_TOKEN', 'GITHUB_TOKEN'];
+
+let personalTokenCache; // undefined = not yet resolved this process; a resolved value (incl. null) is cached
+/** Test seam: re-arm {@link personalGhToken}'s per-process cache. @test-only-export-ok */
+export function resetPersonalGhTokenCacheForTest() { personalTokenCache = undefined; }
+
+/**
+ * The operator's OWN `gh` CLI login token (we:backlog/xhcgdce) — read straight from `gh`'s local credential
+ * store via the REAL `gh` binary (`bin`, resolved the same way {@link runGhCliPassthrough} already resolves
+ * the real binary — see {@link parseThrottleEnvBin} — so this can never recurse back through the App shim
+ * that shadows a bare `gh` on `PATH`), with {@link GH_TOKEN_ENV_KEYS} stripped from that ONE child's env
+ * first.
+ *
+ * NEVER THROWS, NEVER LOGS THE TOKEN. Any failure (gh missing, not logged in, empty output) resolves to
+ * `null` so a caller can fall back to the shared App identity transparently — the "missing personal token"
+ * half of this card's stated fallback contract. Cached for the lifetime of THIS process (one real, local,
+ * no-network `gh auth token` shell-out per process, not per `gh` call).
+ * @param {{bin?:string, exec?:Function}} [o]
+ * @returns {string|null}
+ */
+export function personalGhToken({ bin = 'gh', exec = execFileSync } = {}) {
+  if (personalTokenCache !== undefined) return personalTokenCache;
+  let token = null;
+  try {
+    const cleanEnv = { ...process.env };
+    for (const k of GH_TOKEN_ENV_KEYS) delete cleanEnv[k];
+    const out = exec(bin, ['auth', 'token'], { env: cleanEnv, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    const trimmed = String(out == null ? '' : out).trim();
+    token = trimmed || null;
+  } catch {
+    token = null;
+  }
+  personalTokenCache = token;
+  return token;
+}
+
+/**
+ * Is `text` shaped like GitHub rejecting a TOKEN (not a rate limit)? The SAME regex
+ * `~/.claude/github-app-token/gh-shim/gh`'s generated shim already uses for its own App-token fallback
+ * (`looksLikeAppTokenAuthFailure`), named here rather than re-derived so the two can never drift into
+ * different opinions about what "the token itself is bad" looks like. Used by {@link runGhCliPassthrough} to
+ * fall back from a REJECTED personal token to the App identity — the "invalid personal token" half of this
+ * card's fallback contract (a MISSING token is handled earlier, by {@link personalGhToken} simply returning
+ * `null`, so this is never reached for that case).
+ * @param {string|null|undefined} text
+ * @returns {boolean}
+ */
+export function looksLikeGhAuthFailure(text) {
+  const s = String(text ?? '');
+  return /HTTP 401/.test(s) || /Bad credentials/i.test(s);
+}
+
+/**
+ * Env kill-switch / opt-in for routing a classified read onto the operator's personal identity (see
+ * {@link runGhCliPassthrough}) — OFF BY DEFAULT. Unlike this module's other `WE_GH_THROTTLE_*` tuning (which
+ * only adjusts an already-active behavior), this changes WHICH GitHub account a call authenticates as, so it
+ * stays inert until explicitly turned on (`WE_GH_THROTTLE_PERSONAL_ROUTE=1`) — every existing caller/test, and
+ * every host that has not opted in, sees byte-identical behavior to before this card landed.
+ * @param {NodeJS.ProcessEnv} env
+ * @returns {boolean}
+ */
+export function resolvePersonalRouteEnabled(env = process.env) {
+  const v = String((env && env.WE_GH_THROTTLE_PERSONAL_ROUTE) ?? '').trim().toLowerCase();
+  return v === '1' || v === 'true' || v === 'on' || v === 'yes';
+}
+
 export function budgetBlockPath(lockRoot, identity, resource) {
   return join(lockRoot, `budget-block-${String(identity).replace(/[^A-Za-z0-9_-]/g, '_')}-${resource}.json`);
 }
@@ -1212,32 +1384,65 @@ export function runGhCliPassthrough(argv, { throttle = {}, spawn = spawnSync, bi
   const caller = deriveGhCaller(throttle, env);
   // #gh-graphql-budget — the shared primary-budget backoff (see runGhSync's identical wiring).
   const resource = classifyGhResource(argv);
-  const identity = ghAuthIdentity(env);
+
+  // we:backlog/xhcgdce — route a CLASSIFIED READ onto the operator's personal GitHub identity instead of the
+  // shared App installation, so it spends a SEPARATE 5,000/hr budget. OFF BY DEFAULT (see
+  // {@link resolvePersonalRouteEnabled}) — an explicit `throttle.personalRoute` always wins (tests), else the
+  // env kill-switch decides. ELIGIBILITY is checked against the ORIGINAL env's identity, never the personal
+  // one: a caller that already passed its own explicit non-App, non-default token (identity is neither `app`
+  // nor `default`) is left completely alone (review-2026-09-28 finding). `callEnv` is a FRESH object built
+  // only for this one child process; `process.env` itself is never mutated, and the token is never logged.
+  const personalRouteEnabled = throttle.personalRoute != null ? !!throttle.personalRoute : resolvePersonalRouteEnabled(env);
+  const originalIdentity = ghAuthIdentity(env);
+  const isRead = classifyGhRead(argv);
+  const eligibleForPersonalRoute = personalRouteEnabled && isRead && (originalIdentity === 'app' || originalIdentity === 'default');
+  let callEnv = env;
+  let usedPersonalToken = false;
+  if (eligibleForPersonalRoute) {
+    const personal = throttle.personalToken !== undefined ? throttle.personalToken : personalGhToken({ bin, exec: throttle.personalTokenExec });
+    if (personal) {
+      callEnv = { ...env, GH_TOKEN: personal };
+      delete callEnv.GITHUB_TOKEN;
+      usedPersonalToken = true;
+    }
+  }
+  let identity = ghAuthIdentity(callEnv);
   const blocked = readBudgetBlock(lockRoot, identity, resource, now());
   if (blocked) {
-    recordGhCallLogEntry(logPath, { op: opLabel, attempt: 0, points: 0, outcome: 'budget_blocked', resource, caller, w: isWrite });
+    recordGhCallLogEntry(logPath, { op: opLabel, attempt: 0, points: 0, outcome: 'budget_blocked', resource, caller, w: isWrite, id: identity });
     return { status: 1, stdout: Buffer.alloc(0), stderr: Buffer.from(budgetBlockedMessage(blocked)) };
   }
 
   // FAIL OPEN (see `failOpenGate`): an unusable lock root means this call runs ungated, never not at all.
   const gated = failOpenGate('lock-root setup', () => { mkdirSync(lockRoot, { recursive: true }); return true; }, { ...gateOpts, fallback: false, logPath: null });
 
-  // #4309 — cost-header capture. The child inherits `process.env` (no `env` option), so THAT is where a caller's
+  // #4309 — cost-header capture. The child's env is `callEnv` (identical to a bare `process.env` inherit
+  // unless the read-routing above just swapped in the operator's personal token), so THAT is where a caller's
   // own `GH_DEBUG` would be: when set, it is left alone and relayed untouched (never stripped). Otherwise this
   // turns `GH_DEBUG=api` on, reads the free `X-Ratelimit-*` headers, and strips ONLY its own trace back out.
   const capture = resolveCostHeaderCapture(env) && !process.env.GH_DEBUG;
-  // The trace echoes every request and response body, pretty-printed, into stderr — so a payload that fits
-  // `maxBuffer` can still overflow it through stderr alone and fail a call that succeeds without capture
-  // (PR #2851 review). The child gets headroom for the trace; stdout's own cap is re-applied after the spawn.
-  const spawnOpts = capture
-    ? { stdio: ['inherit', 'pipe', 'pipe'], maxBuffer: maxBuffer * DEBUG_CAPTURE_BUFFER_FACTOR, env: { ...process.env, GH_DEBUG: 'api' } }
-    : { stdio: ['inherit', 'pipe', 'pipe'], maxBuffer };
   const inv = randomUUID().slice(0, 12);
   const outer = env[GH_OUTER_INV_ENV] || process.env[GH_OUTER_INV_ENV] || null;
 
   let attempt = 0;
+  let authFallbackTried = false;
   for (;;) {
     attempt += 1;
+    // The trace echoes every request and response body, pretty-printed, into stderr — so a payload that fits
+    // `maxBuffer` can still overflow it through stderr alone and fail a call that succeeds without capture
+    // (PR #2851 review). The child gets headroom for the trace; stdout's own cap is re-applied after the spawn.
+    // Recomputed every attempt (not hoisted, as before we:backlog/xhcgdce) because `callEnv` can change
+    // mid-loop — the one auth-fallback retry below reverts it from the personal token back to the original
+    // env. The non-capture branch omits an explicit `env` key entirely (byte-identical to every call this
+    // module made before this card — proven by `gh-throttle.fidelity.test.mjs`'s own `env` assertions) UNLESS
+    // `callEnv` actually diverges from `env` (i.e. a classified read just swapped in the personal token) —
+    // an unconditional explicit `env: callEnv` would otherwise change what every OTHER caller's mocked
+    // `spawn` sees, even when nothing about its own call changed.
+    const spawnOpts = capture
+      ? { stdio: ['inherit', 'pipe', 'pipe'], maxBuffer: maxBuffer * DEBUG_CAPTURE_BUFFER_FACTOR, env: { ...callEnv, GH_DEBUG: 'api' } }
+      : (callEnv === env
+        ? { stdio: ['inherit', 'pipe', 'pipe'], maxBuffer }
+        : { stdio: ['inherit', 'pipe', 'pipe'], maxBuffer, env: callEnv });
     const acq = gated ? failOpenGate('acquire', () => {
       if (isWrite) acquireGhWriteBudgetSync({ lockRoot, budgetPerMin: writeBudgetPerMin, owner, pid, now, sleep, pollMs, timeoutMs: acquireTimeoutMs, windowMs: pointsWindowMs });
       acquireGhPointsSync({ lockRoot, points, budgetPerMin, owner, pid, now, sleep, pollMs, timeoutMs: acquireTimeoutMs, windowMs: pointsWindowMs });
@@ -1259,6 +1464,26 @@ export function runGhCliPassthrough(argv, { throttle = {}, spawn = spawnSync, bi
     // Byte-for-byte: the original buffer is relayed whenever nothing was stripped (no utf8 round trip).
     const stderrOut = stripped && stripped.stderr !== rawStderrText ? Buffer.from(stripped.stderr, 'utf8') : (r.stderr || Buffer.alloc(0));
     const failed = typeof r.status === 'number' && r.status !== 0;
+
+    // we:backlog/xhcgdce — the personal token is PRESENT but REJECTED (a MISSING token is handled earlier —
+    // {@link personalGhToken} just returns `null` and this branch is never reached for that case). Fall back
+    // to the original (App) identity ONCE, transparently — but check that identity's own budget block FIRST,
+    // so a personal-token rejection can never turn into a second, doomed call against an App bucket already
+    // known exhausted (review-2026-09-28 finding).
+    if (failed && usedPersonalToken && !authFallbackTried && looksLikeGhAuthFailure(stderrText)) {
+      authFallbackTried = true;
+      recordGhCallLogEntry(logPath, { op: opLabel, attempt, points: 0, outcome: 'personal_token_rejected', caller, w: isWrite, resource, id: identity, inv, ...(outer ? { outer } : {}) });
+      callEnv = env;
+      usedPersonalToken = false;
+      identity = ghAuthIdentity(callEnv);
+      const appBlocked = readBudgetBlock(lockRoot, identity, resource, now());
+      if (appBlocked) {
+        recordGhCallLogEntry(logPath, { op: opLabel, attempt, points: 0, outcome: 'budget_blocked', resource, caller, w: isWrite, id: identity });
+        return { status: 1, stdout: Buffer.alloc(0), stderr: Buffer.from(budgetBlockedMessage(appBlocked)) };
+      }
+      continue; // re-loop and retry the SAME call under the reverted (App) identity
+    }
+
     recordGhCallLogEntry(logPath, {
       op: opLabel, attempt, points, outcome: 'call', ok: !failed && !stdoutOverflow, caller, w: isWrite, resource, id: identity, inv,
       ...(outer ? { outer } : {}), ...(stripped ? { rl: rateLimitRecords(stripped.responses) } : {}),
@@ -1274,19 +1499,22 @@ export function runGhCliPassthrough(argv, { throttle = {}, spawn = spawnSync, bi
     const exhausted = primaryExhaustedResource(stderrText);
     if (exhausted) {
       const probe = throttle.probeBudget || ((probeArgs) => {
-        const pr = spawn(bin, probeArgs, { stdio: ['ignore', 'pipe', 'pipe'], maxBuffer });
+        const probeOpts = callEnv === env
+          ? { stdio: ['ignore', 'pipe', 'pipe'], maxBuffer }
+          : { stdio: ['ignore', 'pipe', 'pipe'], maxBuffer, env: callEnv };
+        const pr = spawn(bin, probeArgs, probeOpts);
         return pr && pr.status === 0 && pr.stdout ? pr.stdout.toString('utf8') : '';
       });
       const until = resolveBudgetBlockUntil({ headers, resource: exhausted, probe });
       if (until) {
         const rec = writeBudgetBlock(lockRoot, identity, exhausted, { untilMs: until.untilMs, nowMs: now(), source: until.source, op: opLabel, caller });
-        recordGhCallLogEntry(logPath, { op: opLabel, attempt, points, outcome: 'budget_exhausted', resource: exhausted, until: rec.until, caller, w: isWrite });
+        recordGhCallLogEntry(logPath, { op: opLabel, attempt, points, outcome: 'budget_exhausted', resource: exhausted, until: rec.until, caller, w: isWrite, id: identity });
         recordGhThrottleMetric('gh.throttle.exhausted', 1, { op: opLabel, attempt, source: `primary-${exhausted}` });
         return { status: r.status == null ? 1 : r.status, stdout: r.stdout || Buffer.alloc(0), stderr: stderrOut };
       }
     }
     if (attempt >= maxAttempts) {
-      recordGhCallLogEntry(logPath, { op: opLabel, attempt, points, outcome: 'retry_exhausted', caller, w: isWrite });
+      recordGhCallLogEntry(logPath, { op: opLabel, attempt, points, outcome: 'retry_exhausted', caller, w: isWrite, id: identity });
       recordGhThrottleMetric('gh.throttle.rate_limited', 1, { op: opLabel, attempt, source: classifyRateLimitSignal(headers).kind, outcome: 'exhausted' });
       recordGhThrottleMetric('gh.throttle.exhausted', 1, { op: opLabel, attempt });
       return { status: r.status == null ? (r.signal ? 128 : 1) : r.status, stdout: r.stdout || Buffer.alloc(0), stderr: stderrOut };
