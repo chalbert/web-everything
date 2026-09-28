@@ -3,9 +3,11 @@ bornAs: x45rs01
 kind: story
 size: 3
 priority: high
-status: open
+status: resolved
 scope: ["we:scripts/readiness/heavy-admission.mjs", "we:scripts/conveyor/tick-core.mjs", "we:scripts/readiness/__tests__/heavy-admission.test.mjs", "we:scripts/conveyor/__tests__/tick-core.test.mjs"]
 dateOpened: "2026-09-28"
+dateStarted: "2026-09-28"
+dateResolved: "2026-09-28"
 preparedDate: "2026-09-28"
 preparedAgainstSha: "c7e4fd628fd6ee4436b82103f7d1ce35ca7fd8a7"
 tags: []
@@ -86,3 +88,28 @@ builder's own `--dry-run` from `~/workspace/wev-control` then shows a non-empty 
 
 1. **Executable** — vitest on we:scripts/readiness/__tests__/heavy-admission.test.mjs passes with the cases above, which fail on main.
 2. **Live** — `load-status` stays `held:false` through a load1 > 18 spike while idle_pct stays at 15 or more.
+
+## Progress
+
+- Replaced the `load1/cores` primary threshold with a 3-condition decision in `loadAdmissionDecision`: idle%
+  (median over the last 4 `host.cpu.busy_pct` samples, floor 15%), memory pressure (latest sample, `>= 2`), and
+  `load1/cores` demoted to a runaway backstop — now ALSO a median over the same window (a review round caught
+  that an unwindowed backstop at the new, higher ratio could itself still spuriously hold on an ordinary
+  fork-storm burst, reintroducing this card's own bug at a higher threshold).
+- New env knobs: `WE_LOAD_ADMISSION_MIN_IDLE_PCT` (15), `WE_LOAD_ADMISSION_WINDOW` (4),
+  `WE_LOAD_ADMISSION_MIN_PRESSURE_LEVEL` (2). The backstop ratio's env var was renamed to
+  `WE_LOAD_ADMISSION_BACKSTOP_PER_CORE` (default 4) rather than reusing the old `WE_LOAD_ADMISSION_MAX_PER_CORE`
+  — that name meant the old, much-lower primary threshold (1.5), and reusing it would let an existing low
+  override silently reintroduce this bug on any machine that still has it set.
+- `we:scripts/conveyor/tick-core.mjs`'s `loadCapReading` now surfaces the decision's own `reason` string (e.g.
+  `cpu idle 12% (<15%)`) instead of a bare load1 ratio.
+- Converged via the real `/converge` loop (panel → editor → red-team) across several rounds; findings fixed
+  along the way: a CLI `NaN`/out-of-range override bypass on all four knobs (garbage or `0`/`1`-style values
+  silently disabled a check instead of falling back to its default), the same bypass class on direct JS-caller
+  params to `resolveLoadAdmission`, the backstop-windowing gap above, and several test-coverage gaps (window
+  round-trip, mem-pressure latest-sample-only, decision precedence when multiple conditions hold at once, the
+  plain-text CLI branch). Remaining panel findings were cosmetic style preferences or a tool-free reviewer's
+  structural inability to see the card's own (undiffed) Evidence section — both dismissed with a stated reason.
+- Live proof (2026-09-28, this host): `load-status --json` → `{"held":false,"idlePct":16,"load1":28.55,
+  "cores":12,"perCore":2.38,...}` — load1 well over 18 (and over the OLD 1.5/core threshold, which would have
+  held at 2.38), idle_pct at 16 (>= the 15 floor), gate ADMITS. Satisfies Done-when #2.

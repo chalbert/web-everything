@@ -111,11 +111,14 @@
  * of {@link acquireSlotBlocking} itself, before it ever touches the lock root, so any direct caller of the
  * blocking primitive (not just `run`) gets the escape hatch too.
  *
- * THE LOAD-ADMISSION GATE (#4076) — a SECOND, DIFFERENT admission axis this module now also hosts, gating NEW
- * DISPATCHED SESSIONS (not heavy commands) by the host's actual load. See the "LOAD ADMISSION" section further
- * down ({@link loadAdmissionDecision}, {@link readLatestLoad}, {@link resolveLoadAdmission}, the `load-status`
- * CLI mode) for the full reasoning — it is orthogonal to both this module's own heavy-command semaphore above
- * and `lane-concurrency.mjs`'s fixed lane-count ceiling, and `tick-core.mjs#planTick` is its one consumer.
+ * THE LOAD-ADMISSION GATE (#4076, revised #4343) — a SECOND, DIFFERENT admission axis this module now also
+ * hosts, gating NEW DISPATCHED SESSIONS (not heavy commands) by the host's ACTUAL capacity — CPU idle% and
+ * memory pressure, with a much-higher-ratio `load1/cores` kept only as a runaway backstop (a bare load1 ratio
+ * alone, #4343's finding, is inflated by our OWN fork-storm daemons independent of real host capacity). See the
+ * "LOAD ADMISSION" section further down ({@link loadAdmissionDecision}, {@link readLatestLoad}, {@link
+ * resolveLoadAdmission}, the `load-status` CLI mode) for the full reasoning — it is orthogonal to both this
+ * module's own heavy-command semaphore above and `lane-concurrency.mjs`'s fixed lane-count ceiling, and
+ * `tick-core.mjs#planTick` is its one consumer.
  *
  * ADMISSION BY PROJECTED QUEUE TIME + A FAST LANE (card xkyw1x4, epic #4075) — a THIRD axis, looking ahead rather
  * than at the present. The pure formulas live in `./heavy-queue-projection.mjs` (re-exported here); this module
@@ -145,7 +148,7 @@ import { defaultPoolRoot, guardedPoolRoot } from '../lib/lane-pool-paths.mjs';
 import { writeAllSync } from '../lib/write-all-sync.mjs';
 import { execContainerized, containerCliAvailable, containerImageAvailable, resolveContainerImage, resolveNodeModulesVolume, nodeModulesVolumeAvailable } from '../lib/container-exec.mjs'; // #3621 sequencing note (tracked on #3383) — the heavy-command-pool container POC; see that module's own header for proven scope (check:standards + test:unit)
 import { resolveHostRoot, readHostToday, extractSamplesByName, utcDayKey } from '../operations/telemetry-summary-io.mjs'; // #4076 — REUSE the host-sampler's own root-resolution + tail-read + metric-extraction primitives (never reimplemented — see loadAdmissionDecision's section header below)
-import { latestValue } from '../lib/telemetry-machine.mjs'; // #4076 — the SAME "latest sample wins" reducer telemetry-machine.mjs#computeMachineNow already uses for host.cpu.busy_pct etc.
+import { latestValue, median } from '../lib/telemetry-machine.mjs'; // #4076/#4343 — the SAME "latest sample wins" reducer + median telemetry-machine.mjs already uses/exports — never a second implementation
 import {
   classifyCommandKind, normalizeKind, queueLaneOf, typicalMinutes, classifyDispatchKind, dispatchDemandMinutes,
   queueBacklog, laneProjection, resolveFastSlots, slotOrderFor, DEFAULT_QUEUE_MAX_WAIT_MINUTES, QUEUE_MAX_WAIT_ENV,
@@ -238,51 +241,132 @@ export function isAdmissionOff(env = process.env) {
   return /^(?:off|0|false|no)$/i.test(String(env[ADMISSION_SWITCH_ENV] || ''));
 }
 
-// ── LOAD ADMISSION (#4076) — a SECOND, per-core-normalized dispatch gate ────────────────────────────────
+// ── LOAD ADMISSION (#4076, revised #4343) — a SECOND dispatch gate on ACTUAL host capacity ─────────────
 //
 // Orthogonal to BOTH existing admission points: this module's own heavy-command semaphore above (a fixed
 // COUNT of concurrent `check:standards`/`test:unit`/Playwright runs, oblivious to how loaded the host already
 // is) and `../lib/lane-concurrency.mjs`'s fixed lane-COUNT ceiling (#3612 — its own header calls it "fixed,
-// conservative, hardware-blind by design"). Neither reads the host's actual load. This gate closes that gap
-// for NEW DISPATCHED SESSIONS — `tick-core.mjs#planTick`'s build / prepare / fix / ci-heal spawns — holding
-// EVERY new launch this tick when the host-sampler's latest `host.cpu.load1` sample, normalized by logical
-// core count, crosses a threshold. It sits BESIDE the fixed lane ceiling, never replacing it: a tick can be
-// held by capacity-cap, load-cap, both, or neither, independently.
+// conservative, hardware-blind by design"). This gate closes that gap for NEW DISPATCHED SESSIONS —
+// `tick-core.mjs#planTick`'s build / prepare / fix / ci-heal spawns — holding EVERY new launch this tick when
+// the host reads as genuinely saturated. It sits BESIDE the fixed lane ceiling, never replacing it: a tick can
+// be held by capacity-cap, load-cap, both, or neither, independently.
 //
-// PER-CORE, NOT ABSOLUTE — the opposite choice from `lane-concurrency.mjs`, deliberately: a bare load1 number
-// means something different on a 4-core laptop and a 64-core server, so the threshold is a RATIO (load1 ÷
-// logical cores) compared against `DEFAULT_LOAD_ADMISSION_MAX_PER_CORE`. The 2026-09-07 cascade (#xupukxa)
-// reached 34.95 / 12 ≈ 2.9 — the default here (1.5) sits comfortably below that incident ratio while staying
-// above this machine's own normal several-lanes-running range (observed ~0.5–0.9 on 2026-09-25 with the
-// conveyor actively dispatching — see `readLatestLoad`'s own doc comment for a live reading), so ordinary
-// operation is never held. Overridable via `WE_LOAD_ADMISSION_MAX_PER_CORE`, mirroring every resolver above.
-// `WE_LOAD_ADMISSION=off` (mirroring `WE_HEAVY_ADMISSION`'s own switch) is the explicit escape hatch.
+// #4343 — NOT `load1/cores` ALONE ANY MORE. macOS `load1` counts RUNNABLE THREADS, and our own daemons
+// (cards 4344/4345/4346) start ~400 short-lived processes per second — a fork storm that inflates `load1` into
+// the 20s–60s on this 12-core host while CPU idle sits at 25–65% and memory is never under pressure (live
+// evidence on #4343's own card: 08:30 ET held on "load 21.24/12 (1.77 > 1.5)" while `top` read 29.6% idle).
+// The gate was holding dispatch on ITS OWN polling, not on real host saturation. The PRIMARY signal is now the
+// host-sampler's own `host.cpu.busy_pct` sample's `idle_pct` ATTRIBUTE (see `telemetry.mjs`'s own header: the
+// metric's `value` IS busy_pct, `user_pct`/`sys_pct`/`idle_pct`/... ride as `attributes` of that SAME sample) —
+// a MEDIAN over the last {@link DEFAULT_LOAD_ADMISSION_WINDOW} samples, so a brief dip from a burst of forked
+// children never trips it, but sustained saturation still does. `host.mem.pressure_level >= 2` (macOS "warn" —
+// {@link DEFAULT_LOAD_ADMISSION_MIN_PRESSURE_LEVEL}) holds independently, checked on the LATEST sample only
+// (never windowed like idle% — the card's own evidence found pressure steady at "1 (normal)" across all 3239
+// samples of its evidence day, none of the fork-storm flapping idle%/load1 show, so there is nothing to smooth;
+// see {@link loadAdmissionDecision}'s own doc comment for why this is a deliberate asymmetry, not an oversight).
+// `load1/cores` is KEPT, but only as a much higher-ratio RUNAWAY BACKSTOP ({@link
+// DEFAULT_LOAD_ADMISSION_BACKSTOP_PER_CORE}, default 4 — the 2026-09-07 cascade, #xupukxa, hit ~2.9, which is
+// PLAUSIBLY consistent with idle% having caught it too, though no idle%-telemetry was captured that day to
+// confirm it directly) for a saturation shape idle% alone might miss (a true CPU-bound compute storm with
+// little forking). `load1` here is ALSO the median over the SAME window as idle% ({@link readLatestLoad}'s own
+// doc comment) — an earlier draft read a single instantaneous sample, which the card's own evidence (fork-storm
+// `load1` reaching the 20s–60s range on this 12-core host, i.e. up to ~5/core) shows can itself spuriously
+// cross even this much-higher backstop threshold during an ordinary burst, reintroducing this very card's own
+// bug at a higher bar rather than closing it. The backstop's env var is its OWN new name
+// (`WE_LOAD_ADMISSION_BACKSTOP_PER_CORE`), never the OLD `WE_LOAD_ADMISSION_MAX_PER_CORE`: that name meant a
+// much LOWER primary threshold (1.5) before #4343, and silently reinterpreting an existing low override under
+// the same name as the new, much-higher backstop would reintroduce this very card's own bug on any machine that
+// still has it set. (The `load-status` CLI flag `--max-per-core=` keeps its pre-#4343 SPELLING for operator
+// continuity — a one-shot invocation flag carries no persisted-config collision risk the way an env var does —
+// but is wired to this new env var underneath; see the CLI mode's own comment.) See {@link
+// loadAdmissionDecision}'s own doc comment for the full three-condition decision.
 //
 // READS, NEVER REIMPLEMENTS the host-sampler's own tail-read (`telemetry-summary-io.mjs#readHostToday`, the
-// SAME bounded read `telemetry-machine.mjs#computeMachineNow` uses for `host.cpu.busy_pct`/etc.) and its
-// "latest sample wins" reducer (`telemetry-machine.mjs#latestValue`) — this module only adds the ONE new
-// metric pair it needs (`host.cpu.load1`, `host.cpu.count`) and the threshold decision on top.
+// SAME bounded read `telemetry-machine.mjs#computeMachineNow` uses) and its "latest sample wins" reducer
+// (`telemetry-machine.mjs#latestValue`) / median (`telemetry-machine.mjs#median`) — this module only adds the
+// metric names/attributes it needs (`host.cpu.busy_pct`'s `idle_pct` attribute, `host.mem.pressure_level`,
+// `host.cpu.load1`, `host.cpu.count`) and the threshold decision on top.
 //
 // A MISSING OR UNREADABLE SAMPLE FAILS OPEN (admits) — the same posture {@link admissionBypassReason} already
-// takes when the lane-pool root doesn't exist: a sampler outage must never itself wedge new dispatch.
+// takes when the lane-pool root doesn't exist: a sampler outage must never itself wedge new dispatch. Each of
+// the three conditions below contributes ONLY when its own data is present; `reason:'no-sample'` fires only
+// when NONE of the three had anything to decide on.
 
-/** Conservative default ratio — see the section header above for why 1.5 (below the #xupukxa incident's ~2.9,
- *  above this machine's own normal operating range). Overridable via `WE_LOAD_ADMISSION_MAX_PER_CORE`. */
-export const DEFAULT_LOAD_ADMISSION_MAX_PER_CORE = 1.5;
+/** Hold when the median `idle_pct` over the last {@link DEFAULT_LOAD_ADMISSION_WINDOW} `host.cpu.busy_pct`
+ *  samples is below this. The observed baseline idle% p5 (across 3239 samples — see the card's own "## Evidence"
+ *  section, `backlog/4343-load-cap-admits-on-instantaneous-load-average-which-our-own.md`) is 25.8, so 15 sits
+ *  below every normal reading and above real saturation. Overridable via `WE_LOAD_ADMISSION_MIN_IDLE_PCT`. */
+export const DEFAULT_LOAD_ADMISSION_MIN_IDLE_PCT = 15;
 
-/** The env var a machine overrides the default ratio with (mirrors `WE_HEAVY_ADMISSION_CAP`). */
-export const LOAD_ADMISSION_MAX_PER_CORE_ENV = 'WE_LOAD_ADMISSION_MAX_PER_CORE';
+/** The env var a machine overrides {@link DEFAULT_LOAD_ADMISSION_MIN_IDLE_PCT} with. */
+export const LOAD_ADMISSION_MIN_IDLE_PCT_ENV = 'WE_LOAD_ADMISSION_MIN_IDLE_PCT';
+
+/** How many of the most recent `host.cpu.busy_pct` samples the idle-median is taken over. A 2-minute median
+ *  (the host-sampler's own ~30s cadence × 4) absorbs a brief fork-storm dip without smoothing away real
+ *  sustained saturation (per the card's own "## Evidence" section: a 2-minute median of `idle_pct < 15` held on
+ *  0.7% of samples, vs. 7.5%–20% for the old single-sample `load1` rule). Overridable via
+ *  `WE_LOAD_ADMISSION_WINDOW`. */
+export const DEFAULT_LOAD_ADMISSION_WINDOW = 4;
+
+/** The env var a machine overrides {@link DEFAULT_LOAD_ADMISSION_WINDOW} with. */
+export const LOAD_ADMISSION_WINDOW_ENV = 'WE_LOAD_ADMISSION_WINDOW';
+
+/** Hold when the LATEST `host.mem.pressure_level` sample is at or above this (macOS "warn" is `2`). Checked on
+ *  the single latest sample, never windowed like idle% — deliberately, not an oversight: unlike `load1`/idle%,
+ *  which our own fork-storm daemons visibly flap, the card's own evidence found pressure steady at "1 (normal)"
+ *  across every one of 3239 samples on its evidence day, so there is no observed noise here to smooth, and a
+ *  real jump to "warn" or worse is exactly the kind of signal that should hold immediately rather than wait out
+ *  a median. Overridable via `WE_LOAD_ADMISSION_MIN_PRESSURE_LEVEL`. */
+export const DEFAULT_LOAD_ADMISSION_MIN_PRESSURE_LEVEL = 2;
+
+/** The env var a machine overrides {@link DEFAULT_LOAD_ADMISSION_MIN_PRESSURE_LEVEL} with. */
+export const LOAD_ADMISSION_MIN_PRESSURE_LEVEL_ENV = 'WE_LOAD_ADMISSION_MIN_PRESSURE_LEVEL';
+
+/** The runaway BACKSTOP ratio (`load1 / cores`) — #4343's own, NEW knob, never the OLD `WE_LOAD_ADMISSION_
+ *  MAX_PER_CORE` name (that name meant a much LOWER primary threshold, 1.5, before #4343 — reusing it here would
+ *  let any machine that already has it set near 1.5 silently keep holding on ordinary fork-storm-inflated
+ *  `load1`, reintroducing this very card's own bug for that one machine). Default 4: the #xupukxa cascade
+ *  (~2.9) would already have shown up through idle% dropping, so this only needs to catch a saturation shape
+ *  idle% alone might miss. Overridable via `WE_LOAD_ADMISSION_BACKSTOP_PER_CORE`. */
+export const DEFAULT_LOAD_ADMISSION_BACKSTOP_PER_CORE = 4;
+
+/** The env var a machine overrides the backstop ratio with — its OWN name, deliberately distinct from the
+ *  pre-#4343 `WE_LOAD_ADMISSION_MAX_PER_CORE` (see {@link DEFAULT_LOAD_ADMISSION_BACKSTOP_PER_CORE}'s own doc
+ *  comment for why reusing that name would be unsafe). */
+export const LOAD_ADMISSION_BACKSTOP_PER_CORE_ENV = 'WE_LOAD_ADMISSION_BACKSTOP_PER_CORE';
 
 /** The off switch: `WE_LOAD_ADMISSION=off` (or `0`/`false`/`no`) makes this gate always admit. Mirrors
  *  {@link ADMISSION_SWITCH_ENV} / {@link isAdmissionOff} exactly. */
 export const LOAD_ADMISSION_SWITCH_ENV = 'WE_LOAD_ADMISSION';
 
-/** Resolve the per-core load threshold from env, clamped to a sane minimum > 0 (a 0/negative ratio would hold
- *  every tick unconditionally, which is a config bug, not a valid "always hold" policy — the explicit
+/** Resolve the minimum idle% threshold from env, clamped to a sane range (0, 100] — a 0/negative/>100 value
+ *  would hold never/always regardless of reality, a config bug, not a valid policy. Mirrors {@link resolveCap}. */
+export function resolveLoadAdmissionMinIdlePct(env = process.env) {
+  const n = Number(env?.[LOAD_ADMISSION_MIN_IDLE_PCT_ENV]);
+  return Number.isFinite(n) && n > 0 && n <= 100 ? n : DEFAULT_LOAD_ADMISSION_MIN_IDLE_PCT;
+}
+
+/** Resolve the idle-median sample window from env, clamped to a sane minimum of 1 sample. */
+export function resolveLoadAdmissionWindow(env = process.env) {
+  const n = Number(env?.[LOAD_ADMISSION_WINDOW_ENV]);
+  return Number.isInteger(n) && n >= 1 ? n : DEFAULT_LOAD_ADMISSION_WINDOW;
+}
+
+/** Resolve the minimum memory-pressure level from env, clamped to a sane integer minimum of 2 — macOS's own
+ *  "normal" rung is `1`, and holding on `>= 1` would hold UNCONDITIONALLY (every sample is at least "normal"),
+ *  which is a config bug, not a valid policy, so an override of exactly `1` is rejected back to the default
+ *  (`2`, "warn") rather than honored. */
+export function resolveLoadAdmissionMinPressureLevel(env = process.env) {
+  const n = Number(env?.[LOAD_ADMISSION_MIN_PRESSURE_LEVEL_ENV]);
+  return Number.isInteger(n) && n > 1 ? n : DEFAULT_LOAD_ADMISSION_MIN_PRESSURE_LEVEL;
+}
+
+/** Resolve the per-core load BACKSTOP ratio from env, clamped to a sane minimum > 0 (a 0/negative ratio would
+ *  hold every tick unconditionally, which is a config bug, not a valid "always hold" policy — the explicit
  *  `WE_LOAD_ADMISSION=off` switch is the real way to disable this gate). Mirrors {@link resolveCap}. */
-export function resolveLoadAdmissionMaxPerCore(env = process.env) {
-  const n = Number(env?.[LOAD_ADMISSION_MAX_PER_CORE_ENV]);
-  return Number.isFinite(n) && n > 0 ? n : DEFAULT_LOAD_ADMISSION_MAX_PER_CORE;
+export function resolveLoadAdmissionBackstopPerCore(env = process.env) {
+  const n = Number(env?.[LOAD_ADMISSION_BACKSTOP_PER_CORE_ENV]);
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_LOAD_ADMISSION_BACKSTOP_PER_CORE;
 }
 
 /** True when the explicit escape hatch is set. Mirrors {@link isAdmissionOff} exactly, own env var. */
@@ -291,50 +375,115 @@ export function isLoadAdmissionOff(env = process.env) {
 }
 
 /**
- * PURE decision: given the latest sampled `load1` and logical `cores`, decide whether NEW dispatched-session
- * launches should be held this tick. A missing/non-finite `load1`/`cores`, or a non-positive `cores` (a bad
- * sample, never a real zero-core host), FAILS OPEN (`held:false`, `reason:'no-sample'`) rather than guessing.
- * @param {{load1?:number|null, cores?:number|null, maxPerCore?:number}} [o]
- * @returns {{held:boolean, load1:number|null, cores:number|null, perCore:number|null, maxPerCore:number, reason?:string}}
+ * PURE decision (#4343): THREE INDEPENDENT conditions, each contributing only when its own data is present —
+ * a signal with no data never fabricates a hold:
+ *   1. **idle-low** — the MEDIAN of `idlePctSamples` (the last {@link DEFAULT_LOAD_ADMISSION_WINDOW} `idle_pct`
+ *      readings) is below `minIdlePct` (default {@link DEFAULT_LOAD_ADMISSION_MIN_IDLE_PCT}).
+ *   2. **mem-pressure** — the LATEST `pressureLevel` is `>= minPressureLevel` (default
+ *      {@link DEFAULT_LOAD_ADMISSION_MIN_PRESSURE_LEVEL}, macOS "warn"). Checked on the single latest sample,
+ *      never windowed like idle% — see {@link DEFAULT_LOAD_ADMISSION_MIN_PRESSURE_LEVEL}'s own doc comment for
+ *      why that asymmetry is deliberate.
+ *   3. **load-backstop** — `load1 / cores` is, on its own, above `backstopPerCore` (default
+ *      {@link DEFAULT_LOAD_ADMISSION_BACKSTOP_PER_CORE}) — a much higher ratio than the OLD primary threshold,
+ *      kept only as a runaway safety net idle% alone might miss.
+ * Checked in that order; `reason` names whichever condition actually held (never more than one). When NONE of
+ * the three had any data to decide on, this FAILS OPEN — `held:false`, `reason:'no-sample'` — the same posture
+ * the old code took on a missing `load1`/`cores` reading, rather than ever guessing. The idle% reading embedded
+ * in a held `reason` is FLOORED, never rounded — `Math.round` could display e.g. "15%" for a true 14.99% (which
+ * reads as self-contradictory next to "(<15%)"); `Math.floor(x) <= x` always, so a floored display can never
+ * read as satisfying the threshold it just failed.
+ * @param {{idlePctSamples?:number[], pressureLevel?:number|null, load1?:number|null, cores?:number|null, minIdlePct?:number, minPressureLevel?:number, backstopPerCore?:number}} [o]
+ * @returns {{held:boolean, idlePct:number|null, minIdlePct:number, pressureLevel:number|null, minPressureLevel:number, load1:number|null, cores:number|null, perCore:number|null, backstopPerCore:number, reason?:string}}
  */
-export function loadAdmissionDecision({ load1 = null, cores = null, maxPerCore = DEFAULT_LOAD_ADMISSION_MAX_PER_CORE } = {}) {
+export function loadAdmissionDecision({
+  idlePctSamples = [], pressureLevel = null, load1 = null, cores = null,
+  minIdlePct = DEFAULT_LOAD_ADMISSION_MIN_IDLE_PCT, minPressureLevel = DEFAULT_LOAD_ADMISSION_MIN_PRESSURE_LEVEL,
+  backstopPerCore = DEFAULT_LOAD_ADMISSION_BACKSTOP_PER_CORE,
+} = {}) {
+  const idleNums = (Array.isArray(idlePctSamples) ? idlePctSamples : []).map(Number).filter(Number.isFinite);
+  const idlePct = idleNums.length ? median(idleNums) : null;
   // `Number(null)` is `0`, not "absent" — a bare `Number()` coercion would turn a genuinely missing sample into
-  // a false reading of zero load/cores (mirrors telemetry-machine.mjs#computeMachineNow's own `fallbackCores`
-  // guard, same reasoning). `== null` catches both `null` and `undefined`.
+  // a false reading of zero (mirrors telemetry-machine.mjs#computeMachineNow's own `fallbackCores` guard).
+  // `== null` catches both `null` and `undefined`.
+  const pLevel = pressureLevel == null ? NaN : Number(pressureLevel);
   const l = load1 == null ? NaN : Number(load1);
   const c = cores == null ? NaN : Number(cores);
-  if (!Number.isFinite(l) || !Number.isFinite(c) || c <= 0) {
-    return {
-      held: false,
-      load1: Number.isFinite(l) ? l : null,
-      cores: Number.isFinite(c) && c > 0 ? c : null,
-      perCore: null,
-      maxPerCore,
-      reason: 'no-sample',
-    };
+  const perCore = (Number.isFinite(l) && Number.isFinite(c) && c > 0) ? l / c : null;
+  const base = {
+    idlePct, minIdlePct,
+    pressureLevel: Number.isFinite(pLevel) ? pLevel : null,
+    minPressureLevel,
+    load1: Number.isFinite(l) ? l : null,
+    cores: (Number.isFinite(c) && c > 0) ? c : null,
+    perCore, backstopPerCore,
+  };
+  if (idlePct != null && idlePct < minIdlePct) {
+    return { held: true, ...base, reason: `cpu idle ${Math.floor(idlePct)}% (<${minIdlePct}%)` };
   }
-  const perCore = l / c;
-  return { held: perCore > maxPerCore, load1: l, cores: c, perCore, maxPerCore };
+  if (Number.isFinite(pLevel) && pLevel >= minPressureLevel) {
+    return { held: true, ...base, reason: `mem pressure ${pLevel} (>=${minPressureLevel})` };
+  }
+  if (perCore != null && perCore > backstopPerCore) {
+    return { held: true, ...base, reason: `load1 ${l.toFixed(2)}/${c} cores (${perCore.toFixed(2)} > backstop ${backstopPerCore})` };
+  }
+  if (idlePct == null && !Number.isFinite(pLevel) && perCore == null) {
+    return { held: false, ...base, reason: 'no-sample' };
+  }
+  return { held: false, ...base };
 }
 
 /**
- * Read the host-sampler's LATEST `host.cpu.load1` + `host.cpu.count` samples — a bounded tail read of today's
- * (UTC-keyed) day file, exactly like `telemetry-summary-io.mjs#readHostToday` already does for `machine.now`.
- * Live reading, 2026-09-25T13:04Z on this 12-logical-core machine with the conveyor actively dispatching:
- * `load1` ≈ 8.50, `cores` = 12, `perCore` ≈ 0.71 — comfortably under {@link DEFAULT_LOAD_ADMISSION_MAX_PER_CORE}.
- * A day with no host-sampler file yet (fresh checkout, sampler not running) reads as `{load1:null, cores:null}`
- * — {@link loadAdmissionDecision} then fails open, never a read error. `root` defaults to the REAL shared
- * telemetry root ({@link resolveHostRoot}) but is overridable — the same "injectable seam, real default"
- * shape `readHostToday` itself already has — so a test can point this at a fixture day-file instead of the
- * live shared workspace store.
- * @param {{root?:string, now?:Date}} [o]
- * @returns {{load1:number|null, cores:number|null}}
+ * Read the host-sampler's LATEST load-admission inputs — a bounded tail read of today's (UTC-keyed) day file,
+ * exactly like `telemetry-summary-io.mjs#readHostToday` already does for `machine.now`. `idle_pct` rides as an
+ * ATTRIBUTE of `host.cpu.busy_pct` records (`telemetry.mjs`'s own header: the metric's `value` IS busy_pct,
+ * `idle_pct`/`user_pct`/`sys_pct`/... are attributes of that SAME sample) — so this reads FULL records off the
+ * tail, never just `{timestamp,value}` the way {@link extractSamplesByName} does, and takes the last `window`
+ * of them by timestamp. A record whose `attributes.idle_pct` is absent (an older sampler build) falls back to
+ * `100 - value` (value IS busy_pct) rather than being dropped.
+ *
+ * `load1` is ALSO the MEDIAN over the same `window`, never a single instantaneous sample — deliberately, not an
+ * oversight (#4343 review finding): the card's own evidence is that the fork-storm daemons this fix targets
+ * push `load1` into the 20s–60s range on a 12-core host, i.e. up to ~5/core — ABOVE the new backstop's default
+ * ratio (4) — so an unwindowed backstop reading could still spuriously hold on the exact burst this card exists
+ * to stop admitting on, even while idle%/pressure are comfortable. Medianing it exactly like idle% closes that
+ * gap: a brief fork-storm spike is absorbed, a SUSTAINED runaway (the #xupukxa cascade this backstop exists to
+ * catch) still shows up. `cores` is read as the single latest sample — a machine's logical core count does not
+ * fluctuate sample to sample, so windowing it would add cost with no signal.
+ *
+ * A day with no host-sampler file yet reads as all-null/empty — {@link loadAdmissionDecision} then fails open,
+ * never a read error. `root` defaults to the REAL shared telemetry root ({@link resolveHostRoot}) but is
+ * overridable, same "injectable seam, real default" shape `readHostToday` itself already has.
+ * @param {{root?:string, now?:Date, window?:number}} [o]
+ * @returns {{idlePctSamples:number[], pressureLevel:number|null, load1:number|null, cores:number|null}}
  */
-export function readLatestLoad({ root = resolveHostRoot(), now = new Date() } = {}) {
+export function readLatestLoad({ root = resolveHostRoot(), now = new Date(), window = DEFAULT_LOAD_ADMISSION_WINDOW } = {}) {
   const dayKey = utcDayKey(now);
   const { records } = readHostToday(root, dayKey);
+  // A non-positive/non-integer `window` (never produced by `resolveLoadAdmissionWindow`'s own clamp, but this
+  // function is exported and callable directly) falls back to the documented default rather than reading as
+  // "no windowing" — an UNBOUNDED `slice(-0)` would silently take the WHOLE day's samples, surprising for what
+  // reads as a numeric sample-count.
+  const effectiveWindow = Number.isInteger(window) && window >= 1 ? window : DEFAULT_LOAD_ADMISSION_WINDOW;
+  // ONE shared windowing step — sort oldest-to-newest by timestamp, keep only the last `effectiveWindow` — for
+  // BOTH sample streams below, rather than two near-identical sort+slice call sites that could silently drift
+  // apart (e.g. one keeping the window clamp, the other losing it in a future edit).
+  const lastByWindow = (arr) => [...arr].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()).slice(-effectiveWindow);
+  const recentBusy = lastByWindow((Array.isArray(records) ? records : []).filter((r) => r && r.name === 'host.cpu.busy_pct'));
+  const idlePctSamples = recentBusy
+    .map((r) => {
+      const fromAttr = Number(r?.attributes?.idle_pct);
+      if (Number.isFinite(fromAttr)) return fromAttr;
+      const busyVal = Number(r?.value);
+      return Number.isFinite(busyVal) ? 100 - busyVal : NaN;
+    })
+    .filter(Number.isFinite);
+  const load1Samples = lastByWindow(extractSamplesByName(records, 'host.cpu.load1'))
+    .map((s) => Number(s.value))
+    .filter(Number.isFinite);
   return {
-    load1: latestValue(extractSamplesByName(records, 'host.cpu.load1')),
+    idlePctSamples,
+    pressureLevel: latestValue(extractSamplesByName(records, 'host.mem.pressure_level')),
+    load1: load1Samples.length ? median(load1Samples) : null,
     cores: latestValue(extractSamplesByName(records, 'host.cpu.count')),
   };
 }
@@ -344,15 +493,38 @@ export function readLatestLoad({ root = resolveHostRoot(), now = new Date() } = 
  * else read-and-decide via {@link readLatestLoad} + {@link loadAdmissionDecision}. The one function
  * `tick-core.mjs`'s IO shell needs to shell (via the `load-status` CLI mode below) to get a load-admission
  * verdict — the pure core itself never touches fs/env directly (see tick-core.mjs's own pure/shell split).
- * @param {{env?:NodeJS.ProcessEnv, maxPerCore?:number, root?:string, now?:Date}} [o]
- * @returns {{held:boolean, load1:number|null, cores:number|null, perCore:number|null, maxPerCore:number, reason?:string, bypassed?:string}}
+ * A `minIdlePct`/`minPressureLevel`/`backstopPerCore`/`window` param OVERRIDES its env var for this one call —
+ * but is validated through the EXACT SAME `resolveLoadAdmission*` clamp its env var would be, never a bare
+ * `param ?? resolver(env)` passthrough: that shape lets a caller-supplied `NaN` (or an out-of-range-but-finite
+ * value the resolver would reject from an env var) bypass the clamp entirely, silently disabling the check it
+ * overrides instead of falling back to the default — exactly the bug class the `load-status` CLI's own
+ * `--min-idle-pct=`/etc. overrides were fixed for (#4343 review). Routing a param through a COPY of `env` under
+ * its real var name, then calling the one resolver that already owns that clamp, means there is exactly one
+ * place per knob that decides what counts as valid, for BOTH an env var and a direct JS caller's param.
+ * @param {{env?:NodeJS.ProcessEnv, minIdlePct?:number, minPressureLevel?:number, backstopPerCore?:number, window?:number, root?:string, now?:Date}} [o]
+ * @returns {{held:boolean, idlePct:number|null, minIdlePct:number, pressureLevel:number|null, minPressureLevel:number, load1:number|null, cores:number|null, perCore:number|null, backstopPerCore:number, reason?:string, bypassed?:string}}
  */
-export function resolveLoadAdmission({ env = process.env, maxPerCore, root, now = new Date() } = {}) {
-  const cap = maxPerCore ?? resolveLoadAdmissionMaxPerCore(env);
-  if (isLoadAdmissionOff(env)) return { held: false, load1: null, cores: null, perCore: null, maxPerCore: cap, bypassed: 'off' };
-  if (/^(?:true|1)$/i.test(String(env.CI || ''))) return { held: false, load1: null, cores: null, perCore: null, maxPerCore: cap, bypassed: 'ci' };
-  const { load1, cores } = readLatestLoad(root != null ? { root, now } : { now });
-  return loadAdmissionDecision({ load1, cores, maxPerCore: cap });
+export function resolveLoadAdmission({ env = process.env, minIdlePct, minPressureLevel, backstopPerCore, window, root, now = new Date() } = {}) {
+  const effectiveEnv = { ...env };
+  if (minIdlePct !== undefined) effectiveEnv[LOAD_ADMISSION_MIN_IDLE_PCT_ENV] = String(minIdlePct);
+  if (minPressureLevel !== undefined) effectiveEnv[LOAD_ADMISSION_MIN_PRESSURE_LEVEL_ENV] = String(minPressureLevel);
+  if (backstopPerCore !== undefined) effectiveEnv[LOAD_ADMISSION_BACKSTOP_PER_CORE_ENV] = String(backstopPerCore);
+  if (window !== undefined) effectiveEnv[LOAD_ADMISSION_WINDOW_ENV] = String(window);
+  const minIdle = resolveLoadAdmissionMinIdlePct(effectiveEnv);
+  const minPressure = resolveLoadAdmissionMinPressureLevel(effectiveEnv);
+  const backstop = resolveLoadAdmissionBackstopPerCore(effectiveEnv);
+  const win = resolveLoadAdmissionWindow(effectiveEnv);
+  const bypassed = (reason) => ({
+    held: false, idlePct: null, minIdlePct: minIdle, pressureLevel: null, minPressureLevel: minPressure,
+    load1: null, cores: null, perCore: null, backstopPerCore: backstop, bypassed: reason,
+  });
+  // The off/CI escape hatches read the REAL env only — never `effectiveEnv` — so a caller cannot accidentally
+  // arm/disarm them by passing a knob param; those two switches have their own dedicated params were one ever
+  // needed, deliberately not folded into this generic override list.
+  if (isLoadAdmissionOff(env)) return bypassed('off');
+  if (/^(?:true|1)$/i.test(String(env.CI || ''))) return bypassed('ci');
+  const { idlePctSamples, pressureLevel, load1, cores } = readLatestLoad(root != null ? { root, now, window: win } : { now, window: win });
+  return loadAdmissionDecision({ idlePctSamples, pressureLevel, load1, cores, minIdlePct: minIdle, minPressureLevel: minPressure, backstopPerCore: backstop });
 }
 
 /** The host-shared lock root for a checkout (lane or primary) — a sibling of every lane clone, never inside
@@ -1128,19 +1300,46 @@ async function main(argv) {
     return;
   }
   if (mode === 'load-status') {
-    // #4076 — the load-admission gate's live decision. A DIFFERENT axis from `status` above (that reads the
-    // heavy-command semaphore's held slots); this reads the host-sampler's latest load1/cores and decides
-    // whether NEW dispatched-session launches should be held this tick. `tick-core.mjs`'s IO shell shells this
-    // exact mode. `--max-per-core=` overrides `WE_LOAD_ADMISSION_MAX_PER_CORE` for one call (mirrors `--cap=`).
-    // `--load-root=` points at a fixture telemetry root instead of the real shared workspace store — a test seam
-    // (mirrors `--repo=` for the lock root above), never used by a live caller.
-    const maxPerCore = flags['max-per-core'] != null ? Number(flags['max-per-core']) : undefined;
+    // #4076/#4343 — the load-admission gate's live decision. A DIFFERENT axis from `status` above (that reads
+    // the heavy-command semaphore's held slots); this reads the host-sampler's latest idle%/mem-pressure (plus
+    // load1/cores as a backstop) and decides whether NEW dispatched-session launches should be held this tick.
+    // `tick-core.mjs`'s IO shell shells this exact mode. `--min-idle-pct=` overrides
+    // `WE_LOAD_ADMISSION_MIN_IDLE_PCT`, `--window=` overrides `WE_LOAD_ADMISSION_WINDOW`, `--min-pressure-level=`
+    // overrides `WE_LOAD_ADMISSION_MIN_PRESSURE_LEVEL`, `--max-per-core=` overrides the backstop ratio's OWN env
+    // var `WE_LOAD_ADMISSION_BACKSTOP_PER_CORE` (mirrors `--cap=`; the flag keeps its pre-#4343 name for CLI
+    // continuity — only the underlying env var was renamed, per the module header's own reasoning). `--load-root=`
+    // points at a fixture telemetry root instead of the real shared workspace store — a test seam (mirrors
+    // `--repo=` for the lock root above), never used by a live caller.
+    //
+    // Pass each flag straight through as a `resolveLoadAdmission` PARAM (never `undefined` when the flag is
+    // absent, so its own env var / default still applies) — it validates a param through the EXACT SAME clamp
+    // an env var goes through (see its own doc comment for why: a raw CLI value can be garbage or out-of-range,
+    // and a bare passthrough would silently defeat the check it overrides instead of falling back to the
+    // default, the bug class #4343's review fixed). `--max-per-core=` keeps its pre-#4343 SPELLING for operator
+    // continuity but maps to the backstop's OWN param (never the old, differently-scaled env var — see the
+    // module header for why that name must stay inert for this purpose).
+    const numOrUndef = (name) => (flags[name] != null ? Number(flags[name]) : undefined);
     const loadRoot = typeof flags['load-root'] === 'string' ? flags['load-root'] : undefined;
-    const decision = resolveLoadAdmission({ maxPerCore, root: loadRoot });
+    const decision = resolveLoadAdmission({
+      minIdlePct: numOrUndef('min-idle-pct'),
+      minPressureLevel: numOrUndef('min-pressure-level'),
+      backstopPerCore: numOrUndef('max-per-core'),
+      window: numOrUndef('window'),
+      root: loadRoot,
+    });
     if (asJson) { emit(decision); return; }
-    const reading = decision.load1 != null
-      ? `load1 ${decision.load1.toFixed(2)} / ${decision.cores} cores = ${decision.perCore.toFixed(2)} (max ${decision.maxPerCore})`
-      : `no sample${decision.bypassed ? ` (${decision.bypassed})` : ''}`;
+    // Plain-text fallback (no `--json`) when `decision.reason` is absent (an ADMITTED tick has none — see
+    // `loadAdmissionDecision`'s own doc comment). Report whichever real reading is actually available, in the
+    // SAME idle → backstop → no-sample priority the decision itself checks — reporting a flat "no sample" when
+    // idle-telemetry is merely absent but a real load1/cores reading exists (and was admitted) would misreport
+    // an ordinary admit as a sampler outage.
+    const reading = decision.reason && decision.reason !== 'no-sample'
+      ? decision.reason
+      : decision.idlePct != null
+        ? `cpu idle ${decision.idlePct.toFixed(1)}% (min ${decision.minIdlePct}%)`
+        : decision.perCore != null
+          ? `load1 ${decision.load1.toFixed(2)}/${decision.cores} cores (${decision.perCore.toFixed(2)}, backstop ${decision.backstopPerCore})`
+          : `no sample${decision.bypassed ? ` (${decision.bypassed})` : ''}`;
     process.stdout.write(`${decision.held ? 'HELD' : 'admitted'} — ${reading}\n`);
     return;
   }
@@ -1237,7 +1436,7 @@ async function main(argv) {
     const { exitCode } = await runUnderAdmission(runOpts);
     process.exit(exitCode);
   }
-  process.stderr.write(`usage: heavy-admission.mjs <status|load-status|queue-status|acquire|release|run|reap> [--apply] [--ttl-minutes=] [--repo=] [--cap=] [--max-per-core=] [--owner=] [--lane=] [--num=] [--json] [--ceiling-ms=] [-- <command…>]\n`);
+  process.stderr.write(`usage: heavy-admission.mjs <status|load-status|queue-status|acquire|release|run|reap> [--apply] [--ttl-minutes=] [--repo=] [--cap=] [--max-per-core=] [--min-idle-pct=] [--min-pressure-level=] [--window=] [--owner=] [--lane=] [--num=] [--json] [--ceiling-ms=] [-- <command…>]\n`);
   process.exit(3);
 }
 

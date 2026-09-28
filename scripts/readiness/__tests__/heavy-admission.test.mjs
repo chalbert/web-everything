@@ -19,8 +19,13 @@ import {
   runUnderAdmission, shellQuoteWord,
   WAITING_TTL_MINUTES, ADMISSION_HELD_ENV, classifyWaiter, reapStaleWaiters, reapHistory, waiterRepo,
   admissionBypassReason, poolRootOf, admittedArgv, admittedShellCommand, HEAVY_ADMISSION_CLI,
-  DEFAULT_LOAD_ADMISSION_MAX_PER_CORE, LOAD_ADMISSION_MAX_PER_CORE_ENV, LOAD_ADMISSION_SWITCH_ENV,
-  resolveLoadAdmissionMaxPerCore, isLoadAdmissionOff, loadAdmissionDecision, readLatestLoad, resolveLoadAdmission,
+  DEFAULT_LOAD_ADMISSION_BACKSTOP_PER_CORE, LOAD_ADMISSION_BACKSTOP_PER_CORE_ENV, LOAD_ADMISSION_SWITCH_ENV,
+  DEFAULT_LOAD_ADMISSION_MIN_IDLE_PCT, LOAD_ADMISSION_MIN_IDLE_PCT_ENV,
+  DEFAULT_LOAD_ADMISSION_WINDOW, LOAD_ADMISSION_WINDOW_ENV,
+  DEFAULT_LOAD_ADMISSION_MIN_PRESSURE_LEVEL, LOAD_ADMISSION_MIN_PRESSURE_LEVEL_ENV,
+  resolveLoadAdmissionBackstopPerCore, resolveLoadAdmissionMinIdlePct, resolveLoadAdmissionWindow,
+  resolveLoadAdmissionMinPressureLevel,
+  isLoadAdmissionOff, loadAdmissionDecision, readLatestLoad, resolveLoadAdmission,
 } from '../heavy-admission.mjs';
 import { utcDayKey } from '../../operations/telemetry-summary-io.mjs';
 import { readLockEntry } from '../file-locks.mjs';
@@ -704,56 +709,118 @@ describe('stale-waiter reap (xaipsbs)', () => {
   });
 });
 
-// ── #4076: the load-admission gate — a SECOND, per-core admission axis for NEW dispatched sessions ──────────
+// ── #4343 (was #4076): the load-admission gate — idle%/mem-pressure PRIMARY, load1/cores a runaway backstop ──
+// #4076's original single-sample `load1/cores` ratio is what #4343 replaces: our OWN fork-storm daemons
+// (cards 4344/4345/4346) inflate `load1` independent of real host capacity (macOS counts runnable THREADS, and
+// a burst of sub-second child processes counts for the whole burst). The cases below are exactly #4343's own
+// "Test plan (each fails before the fix)" bullets.
 
 describe('loadAdmissionDecision (pure)', () => {
-  it('admits when load1/cores is at or below the threshold', () => {
-    expect(loadAdmissionDecision({ load1: 6, cores: 12, maxPerCore: 1.5 })).toEqual({ held: false, load1: 6, cores: 12, perCore: 0.5, maxPerCore: 1.5 });
-    expect(loadAdmissionDecision({ load1: 18, cores: 12, maxPerCore: 1.5 }).held).toBe(false); // exactly at the threshold — not OVER it
+  it('admits when idle stays comfortably above the floor, pressure is normal, and load1/cores sits under the backstop (#4343 test-plan case 1)', () => {
+    const d = loadAdmissionDecision({ idlePctSamples: [29.6, 31, 35, 40], pressureLevel: 1, load1: 27.7, cores: 12 });
+    expect(d.held).toBe(false);
+    expect(d.idlePct).toBeCloseTo(33, 5); // median of [29.6,31,35,40] sorted [29.6,31,35,40] -> (31+35)/2
+    expect(d.perCore).toBeCloseTo(2.3083, 3); // well under the default backstop (4) — the whole point of raising it
   });
 
-  it('holds once load1/cores is STRICTLY above the threshold — the exact "admission is held above threshold, admitted when it drops" contract', () => {
-    const held = loadAdmissionDecision({ load1: 18.01, cores: 12, maxPerCore: 1.5 });
-    expect(held.held).toBe(true);
-    expect(held.perCore).toBeCloseTo(1.5008, 3);
-    // the SAME reading, dropped back to the threshold, is admitted again — nothing sticky about the decision.
-    const admitted = loadAdmissionDecision({ load1: 18, cores: 12, maxPerCore: 1.5 });
-    expect(admitted.held).toBe(false);
-  });
-
-  it('mirrors the #xupukxa incident ratio (34.95/12 ≈ 2.91) against the module default — well past it', () => {
-    const d = loadAdmissionDecision({ load1: 34.95, cores: 12 });
-    expect(d.maxPerCore).toBe(DEFAULT_LOAD_ADMISSION_MAX_PER_CORE);
+  it('holds once the idle MEDIAN drops below the floor — the reason names idle% (#4343 test-plan case 2)', () => {
+    const d = loadAdmissionDecision({ idlePctSamples: [10, 12, 14, 30] });
     expect(d.held).toBe(true);
+    expect(d.idlePct).toBe(13); // median of [10,12,14,30] sorted -> (12+14)/2
+    expect(d.reason).toMatch(/idle/i);
   });
 
-  it('fails OPEN (admits) on a missing load1, missing cores, or non-positive cores — never a guess', () => {
-    expect(loadAdmissionDecision({ load1: null, cores: 12 })).toMatchObject({ held: false, load1: null, cores: 12, reason: 'no-sample' });
-    expect(loadAdmissionDecision({ load1: 20, cores: null })).toMatchObject({ held: false, load1: 20, cores: null, reason: 'no-sample' });
-    expect(loadAdmissionDecision({ load1: 20, cores: 0 })).toMatchObject({ held: false, reason: 'no-sample' });
-    expect(loadAdmissionDecision({})).toMatchObject({ held: false, load1: null, cores: null, perCore: null, reason: 'no-sample' });
+  it('holds on elevated memory pressure alone, even with comfortable idle (#4343 test-plan case 3)', () => {
+    const d = loadAdmissionDecision({ idlePctSamples: [50], pressureLevel: 2 });
+    expect(d.held).toBe(true);
+    expect(d.reason).toMatch(/pressure/i);
   });
 
-  it('a genuinely missing `null` reading is never coerced to a false zero (Number(null) === 0 trap)', () => {
+  it('the load1/cores BACKSTOP still holds a genuine runaway even with no idle/pressure data (#4343 test-plan case 4)', () => {
+    const d = loadAdmissionDecision({ load1: 60, cores: 12 });
+    expect(d.perCore).toBe(5);
+    expect(d.held).toBe(true);
+    expect(d.reason).toMatch(/backstop/i);
+  });
+
+  it('fails OPEN (admits) with reason no-sample when NONE of idle/pressure/load1-cores has any data (#4343 test-plan case 5, "no busy_pct samples")', () => {
+    expect(loadAdmissionDecision({})).toMatchObject({ held: false, idlePct: null, pressureLevel: null, load1: null, cores: null, perCore: null, reason: 'no-sample' });
+    expect(loadAdmissionDecision({ idlePctSamples: [], pressureLevel: null, load1: null, cores: null })).toMatchObject({ held: false, reason: 'no-sample' });
+  });
+
+  it('the #xupukxa incident ratio (34.95/12 ≈ 2.91) sits UNDER the new, higher backstop on its own — a HYPOTHETICAL low-idle reading alongside it demonstrates idle% would independently catch a similar saturation (no idle%-telemetry exists from that actual 2026-09-07 day to replay, so this is illustrative, not a historical replay)', () => {
+    const backstopOnly = loadAdmissionDecision({ load1: 34.95, cores: 12 });
+    expect(backstopOnly.backstopPerCore).toBe(DEFAULT_LOAD_ADMISSION_BACKSTOP_PER_CORE);
+    expect(backstopOnly.held).toBe(false); // 2.91 < 4 — the backstop alone does NOT catch this incident
+    // A HYPOTHETICAL low idle% alongside the SAME load1/cores reading — illustrating that idle% is a second,
+    // independent detector for this class of saturation, NOT a replay of the actual (untracked) idle% that day.
+    const withIdle = loadAdmissionDecision({ load1: 34.95, cores: 12, idlePctSamples: [8, 9, 10, 11] });
+    expect(withIdle.held).toBe(true);
+    expect(withIdle.reason).toMatch(/idle/i);
+  });
+
+  it('idle exactly AT the floor is NOT held; one hundredth below it IS — "held above, admitted at/above" contract', () => {
+    expect(loadAdmissionDecision({ idlePctSamples: [15, 15, 15, 15] }).held).toBe(false);
+    expect(loadAdmissionDecision({ idlePctSamples: [14.99, 14.99, 14.99, 14.99] }).held).toBe(true);
+  });
+
+  it('perCore exactly AT the backstop is NOT held; strictly over IS', () => {
+    expect(loadAdmissionDecision({ load1: 48, cores: 12 }).held).toBe(false); // 48/12 = 4, not over
+    expect(loadAdmissionDecision({ load1: 48.01, cores: 12 }).held).toBe(true);
+  });
+
+  it('a genuinely missing `null` load1/cores reading is never coerced to a false zero (Number(null) === 0 trap)', () => {
     // regression: an earlier draft coerced `load1`/`cores` through a bare `Number(...)`, which turns `null` into
     // `0` (a FINITE number) rather than "absent" — this would have reported `load1: 0` for "no data" and, worse,
-    // could report `held:false` off a fabricated 0/0 reading instead of the honest `no-sample` fail-open.
+    // could fabricate a 0/0 backstop reading instead of leaving `perCore` honestly `null`.
     const d = loadAdmissionDecision({ load1: null, cores: null });
     expect(d.load1).toBeNull();
     expect(d.cores).toBeNull();
+    expect(d.perCore).toBeNull();
+  });
+
+  it('cores <= 0 is treated as no cores reading, never a divide-by-zero', () => {
+    expect(loadAdmissionDecision({ load1: 20, cores: 0 }).perCore).toBeNull();
+    expect(loadAdmissionDecision({ load1: 20, cores: 0 }).cores).toBeNull();
   });
 });
 
-describe('resolveLoadAdmissionMaxPerCore / isLoadAdmissionOff (env resolution)', () => {
-  it('defaults, and clamps a non-positive/garbage override back to the default', () => {
-    expect(resolveLoadAdmissionMaxPerCore({})).toBe(DEFAULT_LOAD_ADMISSION_MAX_PER_CORE);
-    expect(resolveLoadAdmissionMaxPerCore({ [LOAD_ADMISSION_MAX_PER_CORE_ENV]: '0' })).toBe(DEFAULT_LOAD_ADMISSION_MAX_PER_CORE);
-    expect(resolveLoadAdmissionMaxPerCore({ [LOAD_ADMISSION_MAX_PER_CORE_ENV]: '-1' })).toBe(DEFAULT_LOAD_ADMISSION_MAX_PER_CORE);
-    expect(resolveLoadAdmissionMaxPerCore({ [LOAD_ADMISSION_MAX_PER_CORE_ENV]: 'nope' })).toBe(DEFAULT_LOAD_ADMISSION_MAX_PER_CORE);
+describe('resolveLoadAdmissionMinIdlePct / resolveLoadAdmissionWindow / resolveLoadAdmissionBackstopPerCore / isLoadAdmissionOff (env resolution)', () => {
+  it('resolveLoadAdmissionMinIdlePct defaults to 15 and clamps a non-positive/>100/garbage override back to the default', () => {
+    expect(resolveLoadAdmissionMinIdlePct({})).toBe(DEFAULT_LOAD_ADMISSION_MIN_IDLE_PCT);
+    expect(DEFAULT_LOAD_ADMISSION_MIN_IDLE_PCT).toBe(15);
+    expect(resolveLoadAdmissionMinIdlePct({ [LOAD_ADMISSION_MIN_IDLE_PCT_ENV]: '0' })).toBe(DEFAULT_LOAD_ADMISSION_MIN_IDLE_PCT);
+    expect(resolveLoadAdmissionMinIdlePct({ [LOAD_ADMISSION_MIN_IDLE_PCT_ENV]: '-5' })).toBe(DEFAULT_LOAD_ADMISSION_MIN_IDLE_PCT);
+    expect(resolveLoadAdmissionMinIdlePct({ [LOAD_ADMISSION_MIN_IDLE_PCT_ENV]: '150' })).toBe(DEFAULT_LOAD_ADMISSION_MIN_IDLE_PCT);
+    expect(resolveLoadAdmissionMinIdlePct({ [LOAD_ADMISSION_MIN_IDLE_PCT_ENV]: 'nope' })).toBe(DEFAULT_LOAD_ADMISSION_MIN_IDLE_PCT);
+    expect(resolveLoadAdmissionMinIdlePct({ [LOAD_ADMISSION_MIN_IDLE_PCT_ENV]: '25' })).toBe(25);
   });
 
-  it('honors a real override', () => {
-    expect(resolveLoadAdmissionMaxPerCore({ [LOAD_ADMISSION_MAX_PER_CORE_ENV]: '0.25' })).toBe(0.25);
+  it('resolveLoadAdmissionWindow defaults to 4 and clamps a non-integer/sub-1 override back to the default', () => {
+    expect(resolveLoadAdmissionWindow({})).toBe(DEFAULT_LOAD_ADMISSION_WINDOW);
+    expect(DEFAULT_LOAD_ADMISSION_WINDOW).toBe(4);
+    expect(resolveLoadAdmissionWindow({ [LOAD_ADMISSION_WINDOW_ENV]: '0' })).toBe(DEFAULT_LOAD_ADMISSION_WINDOW);
+    expect(resolveLoadAdmissionWindow({ [LOAD_ADMISSION_WINDOW_ENV]: '2.5' })).toBe(DEFAULT_LOAD_ADMISSION_WINDOW);
+    expect(resolveLoadAdmissionWindow({ [LOAD_ADMISSION_WINDOW_ENV]: 'nope' })).toBe(DEFAULT_LOAD_ADMISSION_WINDOW);
+    expect(resolveLoadAdmissionWindow({ [LOAD_ADMISSION_WINDOW_ENV]: '8' })).toBe(8);
+  });
+
+  it('resolveLoadAdmissionBackstopPerCore (the backstop ratio) defaults to 4 — #4343 raised it from the old primary threshold (1.5) — and clamps a non-positive/garbage override', () => {
+    expect(resolveLoadAdmissionBackstopPerCore({})).toBe(DEFAULT_LOAD_ADMISSION_BACKSTOP_PER_CORE);
+    expect(DEFAULT_LOAD_ADMISSION_BACKSTOP_PER_CORE).toBe(4);
+    expect(resolveLoadAdmissionBackstopPerCore({ [LOAD_ADMISSION_BACKSTOP_PER_CORE_ENV]: '0' })).toBe(DEFAULT_LOAD_ADMISSION_BACKSTOP_PER_CORE);
+    expect(resolveLoadAdmissionBackstopPerCore({ [LOAD_ADMISSION_BACKSTOP_PER_CORE_ENV]: '-1' })).toBe(DEFAULT_LOAD_ADMISSION_BACKSTOP_PER_CORE);
+    expect(resolveLoadAdmissionBackstopPerCore({ [LOAD_ADMISSION_BACKSTOP_PER_CORE_ENV]: 'nope' })).toBe(DEFAULT_LOAD_ADMISSION_BACKSTOP_PER_CORE);
+    expect(resolveLoadAdmissionBackstopPerCore({ [LOAD_ADMISSION_BACKSTOP_PER_CORE_ENV]: '6' })).toBe(6);
+  });
+
+  it('resolveLoadAdmissionMinPressureLevel defaults to 2 and clamps a sub-2/garbage override back to the default', () => {
+    expect(resolveLoadAdmissionMinPressureLevel({})).toBe(DEFAULT_LOAD_ADMISSION_MIN_PRESSURE_LEVEL);
+    expect(DEFAULT_LOAD_ADMISSION_MIN_PRESSURE_LEVEL).toBe(2);
+    expect(resolveLoadAdmissionMinPressureLevel({ [LOAD_ADMISSION_MIN_PRESSURE_LEVEL_ENV]: '1' })).toBe(DEFAULT_LOAD_ADMISSION_MIN_PRESSURE_LEVEL);
+    expect(resolveLoadAdmissionMinPressureLevel({ [LOAD_ADMISSION_MIN_PRESSURE_LEVEL_ENV]: '2.5' })).toBe(DEFAULT_LOAD_ADMISSION_MIN_PRESSURE_LEVEL);
+    expect(resolveLoadAdmissionMinPressureLevel({ [LOAD_ADMISSION_MIN_PRESSURE_LEVEL_ENV]: 'nope' })).toBe(DEFAULT_LOAD_ADMISSION_MIN_PRESSURE_LEVEL);
+    expect(resolveLoadAdmissionMinPressureLevel({ [LOAD_ADMISSION_MIN_PRESSURE_LEVEL_ENV]: '4' })).toBe(4);
   });
 
   it('isLoadAdmissionOff mirrors isAdmissionOff\'s own switch values, own env var', () => {
@@ -763,13 +830,65 @@ describe('resolveLoadAdmissionMaxPerCore / isLoadAdmissionOff (env resolution)',
   });
 });
 
+describe('loadAdmissionDecision — the mem-pressure floor is configurable, and the held idle% reading is FLOORED not rounded', () => {
+  it('a raised minPressureLevel admits a pressure reading the default would have held on', () => {
+    const held = loadAdmissionDecision({ idlePctSamples: [50], pressureLevel: 2 });
+    expect(held.held).toBe(true);
+    const admitted = loadAdmissionDecision({ idlePctSamples: [50], pressureLevel: 2, minPressureLevel: 3 });
+    expect(admitted.held).toBe(false);
+    expect(admitted.minPressureLevel).toBe(3);
+  });
+
+  it('a held idle% reading is FLOORED, never rounded — "cpu idle 15% (<15%)" would read as self-contradictory', () => {
+    // regression: an earlier draft used Math.round, so a true 14.99% (held) displayed as "15%" next to "(<15%)",
+    // which reads as though 15 were not below 15. Math.floor(x) <= x always, so this can never happen.
+    const d = loadAdmissionDecision({ idlePctSamples: [14.99, 14.99, 14.99, 14.99] });
+    expect(d.held).toBe(true);
+    expect(d.reason).toBe('cpu idle 14% (<15%)'); // floored to 14, never rounded up to a self-contradictory "15%"
+  });
+
+  it('PRECEDENCE: when idle-low AND mem-pressure-high are BOTH true, idle wins and the reason never mentions pressure', () => {
+    const d = loadAdmissionDecision({ idlePctSamples: [5, 5, 5, 5], pressureLevel: 4 });
+    expect(d.held).toBe(true);
+    expect(d.reason).toMatch(/idle/i);
+    expect(d.reason).not.toMatch(/pressure/i);
+  });
+
+  it('PRECEDENCE: when idle-low AND the load1/cores backstop are BOTH true, idle wins and the reason never mentions the backstop', () => {
+    const d = loadAdmissionDecision({ idlePctSamples: [5, 5, 5, 5], load1: 60, cores: 12 });
+    expect(d.held).toBe(true);
+    expect(d.reason).toMatch(/idle/i);
+    expect(d.reason).not.toMatch(/backstop/i);
+  });
+
+  it('PRECEDENCE: when comfortable idle but mem-pressure-high AND the backstop are BOTH true, pressure wins and the reason never mentions the backstop', () => {
+    const d = loadAdmissionDecision({ idlePctSamples: [50, 50, 50, 50], pressureLevel: 4, load1: 60, cores: 12 });
+    expect(d.held).toBe(true);
+    expect(d.reason).toMatch(/pressure/i);
+    expect(d.reason).not.toMatch(/backstop/i);
+  });
+});
+
 /** Write one host-sampler-shaped metric record — the same `{event:'metric', name, value, timestamp}` shape
  *  `telemetry-summary-io.mjs#readHostToday` filters for. */
 function metricLine(name, value, timestamp) {
   return JSON.stringify({ event: 'metric', name, value, timestamp }) + '\n';
 }
 
-describe('readLatestLoad + resolveLoadAdmission (real fixture fs, injectable root — #4076)', () => {
+/** Write one `host.cpu.busy_pct` record carrying `idle_pct` as an ATTRIBUTE of the same sample — the shape
+ *  `telemetry.mjs`'s own `METRIC_NAMES` comment documents for this metric (`value` IS busy_pct, `idle_pct`/
+ *  `user_pct`/`sys_pct`/... ride as `attributes` of that SAME record, never a separate metric name), and the
+ *  same shape the card's own live evidence-day capture (`load-status --json` returning a real `idle_pct`
+ *  reading) confirms end to end. The ACTUAL producer (`host-sampler.mjs`) is a host-level daemon outside this
+ *  repo, not something a unit test here can invoke — `telemetry.mjs`'s comment is the in-repo contract for its
+ *  wire shape, and this fixture mirrors that contract rather than asserting against the daemon directly.
+ *  `busyValue` defaults to the arithmetic complement so a fixture with no explicit busy value is still
+ *  internally consistent. */
+function busyLine(idlePct, timestamp, busyValue = 100 - idlePct) {
+  return JSON.stringify({ event: 'metric', name: 'host.cpu.busy_pct', value: busyValue, timestamp, attributes: { idle_pct: idlePct } }) + '\n';
+}
+
+describe('readLatestLoad + resolveLoadAdmission (real fixture fs, injectable root — #4343)', () => {
   let telemetryRoot;
   let dayKey;
   const NOW = new Date('2026-09-25T13:00:00.000Z');
@@ -780,41 +899,154 @@ describe('readLatestLoad + resolveLoadAdmission (real fixture fs, injectable roo
   });
   afterEach(() => { rmSync(telemetryRoot, { recursive: true, force: true }); });
 
-  it('reads the LATEST sample of each metric — later timestamp wins even if it appears earlier in the file', () => {
+  it('reads idle_pct off the busy_pct ATTRIBUTE, truncated to the last `window` samples by timestamp — an older 5th sample outside the window is excluded', () => {
     const file = join(telemetryRoot, `${dayKey}.jsonl`);
     writeFileSync(file, [
-      metricLine('host.cpu.load1', 20, '2026-09-25T13:00:30.000Z'), // later timestamp, written FIRST
-      metricLine('host.cpu.load1', 5, '2026-09-25T13:00:00.000Z'),
+      busyLine(5, '2026-09-25T12:58:30.000Z'), // oldest — outside a window of 4
+      busyLine(40, '2026-09-25T12:59:00.000Z'),
+      busyLine(41, '2026-09-25T12:59:30.000Z'),
+      busyLine(42, '2026-09-25T13:00:00.000Z'),
+      busyLine(43, '2026-09-25T13:00:30.000Z'),
+      metricLine('host.cpu.load1', 20, '2026-09-25T13:00:30.000Z'),
       metricLine('host.cpu.count', 12, '2026-09-25T13:00:00.000Z'),
-      metricLine('host.cpu.busy_pct', 90, '2026-09-25T13:00:30.000Z'), // a different metric — must not leak in
+      metricLine('host.mem.pressure_level', 1, '2026-09-25T13:00:00.000Z'),
     ].join(''));
-    expect(readLatestLoad({ root: telemetryRoot, now: NOW })).toEqual({ load1: 20, cores: 12 });
+    const r = readLatestLoad({ root: telemetryRoot, now: NOW, window: 4 });
+    expect(r.idlePctSamples.slice().sort((a, b) => a - b)).toEqual([40, 41, 42, 43]); // the 5th (oldest, idle=5) is excluded
+    expect(r.load1).toBe(20);
+    expect(r.cores).toBe(12);
+    expect(r.pressureLevel).toBe(1);
   });
 
-  it('a missing day file reads as {load1:null, cores:null} — not a read error', () => {
-    expect(readLatestLoad({ root: telemetryRoot, now: NOW })).toEqual({ load1: null, cores: null });
-  });
-
-  it('THE LIVE BEFORE/AFTER CONTRACT: the SAME real sampled load1/cores reading is admitted under one threshold and held under another — proves the gate reacts to the actual numbers, not a canned verdict', () => {
+  it('load1 is ALSO the MEDIAN over the window, never a single instantaneous sample — a brief fork-storm spike surrounded by normal readings must not alone cross the backstop (#4343 review finding)', () => {
     const file = join(telemetryRoot, `${dayKey}.jsonl`);
-    // A real reading captured off this machine's own host-sampler on 2026-09-25 (see readLatestLoad's own doc
-    // comment) — not a synthetic round number, so this is the SAME shape of number the live CLI proof uses.
     writeFileSync(file, [
-      metricLine('host.cpu.load1', 8.5009765625, '2026-09-25T13:04:57.144Z'),
-      metricLine('host.cpu.count', 12, '2026-09-25T13:04:57.144Z'),
+      metricLine('host.cpu.load1', 8, '2026-09-25T12:59:00.000Z'),
+      metricLine('host.cpu.load1', 60, '2026-09-25T12:59:30.000Z'), // one brief burst — a fork storm, not a real cascade
+      metricLine('host.cpu.load1', 9, '2026-09-25T13:00:00.000Z'),
+      metricLine('host.cpu.load1', 10, '2026-09-25T13:00:30.000Z'),
+      metricLine('host.cpu.count', 12, '2026-09-25T13:00:30.000Z'),
     ].join(''));
-    const before = resolveLoadAdmission({ env: {}, root: telemetryRoot, now: NOW }); // default threshold (1.5/core)
-    expect(before).toMatchObject({ held: false, load1: 8.5009765625, cores: 12 });
-    expect(before.perCore).toBeCloseTo(0.7084, 3);
-    // AFTER: the identical real reading, only the threshold config changed (a machine dialing WE_LOAD_ADMISSION_
-    // MAX_PER_CORE down past today's own real ratio) — now HELD, off the exact same numbers.
-    const after = resolveLoadAdmission({ env: { [LOAD_ADMISSION_MAX_PER_CORE_ENV]: '0.5' }, root: telemetryRoot, now: NOW });
-    expect(after).toMatchObject({ held: true, load1: 8.5009765625, cores: 12, maxPerCore: 0.5 });
+    const r = readLatestLoad({ root: telemetryRoot, now: NOW, window: 4 });
+    expect(r.load1).toBe(9.5); // median of [8,60,9,10] sorted [8,9,10,60] -> (9+10)/2
+    const d = loadAdmissionDecision({ load1: r.load1, cores: r.cores });
+    expect(d.held).toBe(false); // 9.5/12 ≈ 0.79 — well under the backstop; the single 60 spike never surfaces alone
+  });
+
+  it('a non-positive/non-integer `window` falls back to the documented default, never reading as "no windowing" (an unbounded whole-day read)', () => {
+    const file = join(telemetryRoot, `${dayKey}.jsonl`);
+    writeFileSync(file, [
+      busyLine(5, '2026-09-25T12:58:30.000Z'), // outside the DEFAULT window (4) — must still be excluded
+      busyLine(40, '2026-09-25T12:59:00.000Z'),
+      busyLine(41, '2026-09-25T12:59:30.000Z'),
+      busyLine(42, '2026-09-25T13:00:00.000Z'),
+      busyLine(43, '2026-09-25T13:00:30.000Z'),
+    ].join(''));
+    for (const badWindow of [0, -1, 2.5, NaN]) {
+      const r = readLatestLoad({ root: telemetryRoot, now: NOW, window: badWindow });
+      expect(r.idlePctSamples.slice().sort((a, b) => a - b)).toEqual([40, 41, 42, 43]);
+    }
+  });
+
+  it('falls back to 100 - value when a busy_pct record carries no idle_pct attribute (an older sampler build)', () => {
+    const file = join(telemetryRoot, `${dayKey}.jsonl`);
+    writeFileSync(file, [metricLine('host.cpu.busy_pct', 63, '2026-09-25T13:00:00.000Z')].join(''));
+    expect(readLatestLoad({ root: telemetryRoot, now: NOW }).idlePctSamples).toEqual([37]);
+  });
+
+  it('reads `attributes.idle_pct` itself, never just the `100 - value` arithmetic complement — a record whose attribute deliberately DISAGREES with its own value proves the attribute wins', () => {
+    // regression: every OTHER fixture in this file sets `busyLine`'s busyValue to its own default (`100 -
+    // idlePct`), so the attribute path and the fallback path always agreed and no test could tell which one the
+    // code actually used. Here `value` (busy_pct=70, i.e. "30% idle" if you only look at `value`) deliberately
+    // disagrees with `attributes.idle_pct` (5) — only reading the ATTRIBUTE, not deriving from `value`, explains
+    // the result.
+    const file = join(telemetryRoot, `${dayKey}.jsonl`);
+    writeFileSync(file, [busyLine(5, '2026-09-25T13:00:00.000Z', /* busyValue */ 70)].join(''));
+    expect(readLatestLoad({ root: telemetryRoot, now: NOW }).idlePctSamples).toEqual([5]);
+  });
+
+  it('host.mem.pressure_level reads the LATEST sample only, never a median across the window — unlike idle_pct, an earlier "warn" reading must not linger once a later sample says "normal" again', () => {
+    const file = join(telemetryRoot, `${dayKey}.jsonl`);
+    writeFileSync(file, [
+      metricLine('host.mem.pressure_level', 1, '2026-09-25T12:59:00.000Z'),
+      metricLine('host.mem.pressure_level', 2, '2026-09-25T12:59:30.000Z'), // a transient "warn" blip
+      metricLine('host.mem.pressure_level', 1, '2026-09-25T13:00:00.000Z'), // back to "normal" — this is the latest
+    ].join(''));
+    expect(readLatestLoad({ root: telemetryRoot, now: NOW }).pressureLevel).toBe(1);
+  });
+
+  it('a missing day file reads as all-null/empty — not a read error', () => {
+    expect(readLatestLoad({ root: telemetryRoot, now: NOW })).toEqual({ idlePctSamples: [], pressureLevel: null, load1: null, cores: null });
+  });
+
+  it('THE LIVE BEFORE/AFTER CONTRACT: the SAME real sampled idle% reading is admitted under one floor and held under a stricter one — proves the gate reacts to the actual numbers, not a canned verdict', () => {
+    const file = join(telemetryRoot, `${dayKey}.jsonl`);
+    writeFileSync(file, [
+      busyLine(31, '2026-09-25T12:59:00.000Z'),
+      busyLine(30, '2026-09-25T12:59:30.000Z'),
+      busyLine(33, '2026-09-25T13:00:00.000Z'),
+      busyLine(32, '2026-09-25T13:00:30.000Z'),
+    ].join(''));
+    const before = resolveLoadAdmission({ env: {}, root: telemetryRoot, now: NOW }); // default floor (15%)
+    expect(before).toMatchObject({ held: false, idlePct: 31.5 }); // median of [30,31,32,33] -> (31+32)/2
+    // AFTER: the identical real reading, only the floor config changed (a machine dialing WE_LOAD_ADMISSION_
+    // MIN_IDLE_PCT up past today's own real idle%) — now HELD, off the exact same numbers.
+    const after = resolveLoadAdmission({ env: { [LOAD_ADMISSION_MIN_IDLE_PCT_ENV]: '40' }, root: telemetryRoot, now: NOW });
+    expect(after).toMatchObject({ held: true, idlePct: 31.5, minIdlePct: 40 });
+  });
+
+  it('a DIRECT JS-caller param (not just a CLI flag) is ALSO validated through the resolver\'s own clamp — a NaN/out-of-range param falls back to the default instead of bypassing the check', () => {
+    const file = join(telemetryRoot, `${dayKey}.jsonl`);
+    writeFileSync(file, [busyLine(10, '2026-09-25T13:00:00.000Z')].join(''));
+    // regression: an earlier draft's `param ?? resolver(env)` let a caller-supplied NaN (or an out-of-range-but-
+    // finite value like `0`) pass straight through unclamped — idle=10 is below the default floor (15), so a
+    // correctly-falling-back NaN/0 override must still HOLD; a bypassed one would silently admit instead.
+    for (const badMinIdlePct of [NaN, 0, -5, 200]) {
+      const r = resolveLoadAdmission({ env: {}, minIdlePct: badMinIdlePct, root: telemetryRoot, now: NOW });
+      expect(r).toMatchObject({ held: true, idlePct: 10, minIdlePct: DEFAULT_LOAD_ADMISSION_MIN_IDLE_PCT });
+    }
+    for (const badBackstop of [NaN, 0, -1]) {
+      const r = resolveLoadAdmission({ env: {}, backstopPerCore: badBackstop, root: telemetryRoot, now: NOW });
+      expect(r.backstopPerCore).toBe(DEFAULT_LOAD_ADMISSION_BACKSTOP_PER_CORE);
+    }
+  });
+
+  it('a DIRECT JS-caller minPressureLevel/window param is ALSO validated — the same guarantee proven above for minIdlePct/backstopPerCore, closing the last two knobs', () => {
+    const file = join(telemetryRoot, `${dayKey}.jsonl`);
+    writeFileSync(file, [metricLine('host.mem.pressure_level', 2, '2026-09-25T13:00:00.000Z')].join(''));
+    for (const badMinPressureLevel of [NaN, 1, 0, -1]) {
+      const r = resolveLoadAdmission({ env: {}, minPressureLevel: badMinPressureLevel, root: telemetryRoot, now: NOW });
+      // pressure=2 held against the DEFAULT floor (2) — a bypassed bad override (e.g. 1) would instead admit.
+      expect(r).toMatchObject({ held: true, pressureLevel: 2, minPressureLevel: DEFAULT_LOAD_ADMISSION_MIN_PRESSURE_LEVEL });
+    }
+    writeFileSync(join(telemetryRoot, `${dayKey}.jsonl`), [
+      busyLine(5, '2026-09-25T12:58:30.000Z'), // oldest — outside the DEFAULT window (4); a passthrough NaN/0
+      // `window` would read ALL 5 samples instead (via `readLatestLoad`'s own `window > 0` guard, absent the
+      // fallback), dragging this outlier back into the median.
+      busyLine(40, '2026-09-25T12:59:00.000Z'),
+      busyLine(41, '2026-09-25T12:59:30.000Z'),
+      busyLine(42, '2026-09-25T13:00:00.000Z'),
+      busyLine(43, '2026-09-25T13:00:30.000Z'),
+    ].join(''));
+    for (const badWindow of [NaN, 0, -1, 2.5]) {
+      const r = resolveLoadAdmission({ env: {}, window: badWindow, root: telemetryRoot, now: NOW });
+      // Falls back to the DEFAULT window (4) — median of [40,41,42,43], the oldest outlier (5) excluded.
+      expect(r.idlePct).toBeCloseTo(41.5, 5);
+    }
   });
 
   it('WE_LOAD_ADMISSION=off bypasses the read entirely (admits, no fixture file needed)', () => {
     const r = resolveLoadAdmission({ env: { [LOAD_ADMISSION_SWITCH_ENV]: 'off' }, root: telemetryRoot, now: NOW });
-    expect(r).toEqual({ held: false, load1: null, cores: null, perCore: null, maxPerCore: DEFAULT_LOAD_ADMISSION_MAX_PER_CORE, bypassed: 'off' });
+    expect(r).toEqual({ held: false, idlePct: null, minIdlePct: DEFAULT_LOAD_ADMISSION_MIN_IDLE_PCT, pressureLevel: null, minPressureLevel: DEFAULT_LOAD_ADMISSION_MIN_PRESSURE_LEVEL, load1: null, cores: null, perCore: null, backstopPerCore: DEFAULT_LOAD_ADMISSION_BACKSTOP_PER_CORE, bypassed: 'off' });
+  });
+
+  it('a knob param can never arm/disarm the off/CI bypass switches — the switches read the REAL env only, ignoring any param passed alongside them', () => {
+    const file = join(telemetryRoot, `${dayKey}.jsonl`);
+    writeFileSync(file, [busyLine(5, '2026-09-25T13:00:00.000Z')].join('')); // idle=5 — would HOLD if the bypass did not fire
+    const offDespiteKnob = resolveLoadAdmission({ env: { [LOAD_ADMISSION_SWITCH_ENV]: 'off' }, minIdlePct: 50, root: telemetryRoot, now: NOW });
+    expect(offDespiteKnob).toMatchObject({ held: false, bypassed: 'off' });
+    const ciDespiteKnob = resolveLoadAdmission({ env: { CI: 'true' }, minIdlePct: 50, root: telemetryRoot, now: NOW });
+    expect(ciDespiteKnob).toMatchObject({ held: false, bypassed: 'ci' });
   });
 
   it('CI=true bypasses the read entirely (admits — a CI runner is its own machine)', () => {
@@ -824,8 +1056,47 @@ describe('readLatestLoad + resolveLoadAdmission (real fixture fs, injectable roo
   });
 });
 
-describe('the `load-status` CLI mode as a real process (#4076)', () => {
-  it('prints the admitted/held verdict as JSON, driven entirely by --load-root + --max-per-core (no shared pool needed)', () => {
+describe('the `load-status` CLI mode as a real process (#4343)', () => {
+  it('prints the admitted/held verdict as JSON, driven by --load-root + --min-idle-pct (the idle% path)', () => {
+    const telemetryRoot = mkdtempSync(join(tmpdir(), 'load-admission-cli-test-'));
+    try {
+      const dayKey = utcDayKey(new Date());
+      writeFileSync(join(telemetryRoot, `${dayKey}.jsonl`), [busyLine(20, new Date().toISOString())].join(''));
+      const env = { ...process.env }; delete env.CI; delete env.WE_LOAD_ADMISSION;
+      const admitted = JSON.parse(execFileSync(process.execPath, [CLI, 'load-status', '--json', `--load-root=${telemetryRoot}`, '--min-idle-pct=10'], { encoding: 'utf8', env }));
+      expect(admitted).toMatchObject({ held: false, idlePct: 20, minIdlePct: 10 });
+      const held = JSON.parse(execFileSync(process.execPath, [CLI, 'load-status', '--json', `--load-root=${telemetryRoot}`, '--min-idle-pct=25'], { encoding: 'utf8', env }));
+      expect(held).toMatchObject({ held: true, idlePct: 20, minIdlePct: 25, reason: expect.stringMatching(/idle/i) });
+    } finally {
+      rmSync(telemetryRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('--window= round-trips through the real CLI child process with a VALID value — narrowing the window to the single latest sample flips the verdict', () => {
+    const telemetryRoot = mkdtempSync(join(tmpdir(), 'load-admission-cli-test-'));
+    try {
+      const dayKey = utcDayKey(new Date());
+      const base = Date.parse('2026-09-25T13:00:00.000Z');
+      // Three OLD, low-idle samples followed by one recent, comfortable one.
+      writeFileSync(join(telemetryRoot, `${dayKey}.jsonl`), [
+        busyLine(8, new Date(base - 90_000).toISOString()),
+        busyLine(8, new Date(base - 60_000).toISOString()),
+        busyLine(8, new Date(base - 30_000).toISOString()),
+        busyLine(50, new Date(base).toISOString()),
+      ].join(''));
+      const env = { ...process.env }; delete env.CI; delete env.WE_LOAD_ADMISSION;
+      // window=4 (the default): median of [8,8,8,50] is 8 — below the default 15% floor — HELD.
+      const wide = JSON.parse(execFileSync(process.execPath, [CLI, 'load-status', '--json', `--load-root=${telemetryRoot}`, '--window=4'], { encoding: 'utf8', env }));
+      expect(wide).toMatchObject({ held: true, idlePct: 8 });
+      // window=1: the flag actually narrowed the read to ONLY the latest sample (50) — now ADMITTED.
+      const narrow = JSON.parse(execFileSync(process.execPath, [CLI, 'load-status', '--json', `--load-root=${telemetryRoot}`, '--window=1'], { encoding: 'utf8', env }));
+      expect(narrow).toMatchObject({ held: false, idlePct: 50 });
+    } finally {
+      rmSync(telemetryRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('the load1/cores BACKSTOP still fires via the CLI when there is no idle/pressure sample at all', () => {
     const telemetryRoot = mkdtempSync(join(tmpdir(), 'load-admission-cli-test-'));
     try {
       const dayKey = utcDayKey(new Date());
@@ -835,9 +1106,91 @@ describe('the `load-status` CLI mode as a real process (#4076)', () => {
       ].join(''));
       const env = { ...process.env }; delete env.CI; delete env.WE_LOAD_ADMISSION;
       const admitted = JSON.parse(execFileSync(process.execPath, [CLI, 'load-status', '--json', `--load-root=${telemetryRoot}`, '--max-per-core=3'], { encoding: 'utf8', env }));
-      expect(admitted).toEqual({ held: false, load1: 10, cores: 4, perCore: 2.5, maxPerCore: 3 });
+      expect(admitted).toMatchObject({ held: false, load1: 10, cores: 4, perCore: 2.5, backstopPerCore: 3 });
       const held = JSON.parse(execFileSync(process.execPath, [CLI, 'load-status', '--json', `--load-root=${telemetryRoot}`, '--max-per-core=2'], { encoding: 'utf8', env }));
-      expect(held).toEqual({ held: true, load1: 10, cores: 4, perCore: 2.5, maxPerCore: 2 });
+      expect(held).toMatchObject({ held: true, load1: 10, cores: 4, perCore: 2.5, backstopPerCore: 2, reason: expect.stringMatching(/backstop/i) });
+    } finally {
+      rmSync(telemetryRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('a GARBAGE override value falls back to the documented default instead of silently disabling the check (NaN bypass regression)', () => {
+    // regression: `Number('garbage')` is `NaN`, which is neither `null` nor `undefined` — a naive `flagValue ??
+    // resolver(env)` would pass `NaN` straight through as if it were a real override, and `x < NaN` / `NaN > 0`
+    // are always `false`, which silently disables the idle-check / widens the window to the whole day instead
+    // of falling back to the default the way an OMITTED flag does.
+    const telemetryRoot = mkdtempSync(join(tmpdir(), 'load-admission-cli-test-'));
+    try {
+      const dayKey = utcDayKey(new Date());
+      writeFileSync(join(telemetryRoot, `${dayKey}.jsonl`), [busyLine(10, new Date().toISOString())].join(''));
+      const env = { ...process.env }; delete env.CI; delete env.WE_LOAD_ADMISSION;
+      const r = JSON.parse(execFileSync(process.execPath, [CLI, 'load-status', '--json', `--load-root=${telemetryRoot}`, '--min-idle-pct=garbage', '--window=garbage', '--max-per-core=garbage'], { encoding: 'utf8', env }));
+      // idle=10 is below the DEFAULT floor (15) — a garbage override must fall back to it, not disable the check.
+      expect(r).toMatchObject({ held: true, idlePct: 10, minIdlePct: DEFAULT_LOAD_ADMISSION_MIN_IDLE_PCT, backstopPerCore: DEFAULT_LOAD_ADMISSION_BACKSTOP_PER_CORE });
+    } finally {
+      rmSync(telemetryRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('an OUT-OF-RANGE-but-finite override (0, or 1 for pressure) also falls back to the default, matching what the resolver itself would reject from an env var', () => {
+    // regression: `0`/`1` are FINITE, so a bare `Number.isFinite` guard alone is not enough — each override must
+    // be re-checked against the SAME predicate its own resolver applies, or an out-of-range CLI value would
+    // silently disable the check (`idlePct < 0` never holds) instead of falling back the way env does.
+    const telemetryRoot = mkdtempSync(join(tmpdir(), 'load-admission-cli-test-'));
+    try {
+      const dayKey = utcDayKey(new Date());
+      writeFileSync(join(telemetryRoot, `${dayKey}.jsonl`), [busyLine(10, new Date().toISOString())].join(''));
+      const env = { ...process.env }; delete env.CI; delete env.WE_LOAD_ADMISSION;
+      const r = JSON.parse(execFileSync(process.execPath, [CLI, 'load-status', '--json', `--load-root=${telemetryRoot}`, '--min-idle-pct=0', '--min-pressure-level=1', '--max-per-core=0'], { encoding: 'utf8', env }));
+      expect(r).toMatchObject({ held: true, idlePct: 10, minIdlePct: DEFAULT_LOAD_ADMISSION_MIN_IDLE_PCT, minPressureLevel: DEFAULT_LOAD_ADMISSION_MIN_PRESSURE_LEVEL, backstopPerCore: DEFAULT_LOAD_ADMISSION_BACKSTOP_PER_CORE });
+    } finally {
+      rmSync(telemetryRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('the OLD pre-#4343 env var name (WE_LOAD_ADMISSION_MAX_PER_CORE) is INERT for the backstop — proves the rename actually took, never silently reinterpreting an old low-value override as the new, much-higher backstop', () => {
+    const telemetryRoot = mkdtempSync(join(tmpdir(), 'load-admission-cli-test-'));
+    try {
+      const dayKey = utcDayKey(new Date());
+      // A comfortably-idle, no-pressure reading with a load1/cores ratio (2.5) that sits BETWEEN the old primary
+      // threshold (1.5) and the new backstop default (4) — held under the old semantics, admitted under the new.
+      writeFileSync(join(telemetryRoot, `${dayKey}.jsonl`), [
+        busyLine(50, new Date().toISOString()),
+        metricLine('host.cpu.load1', 10, new Date().toISOString()),
+        metricLine('host.cpu.count', 4, new Date().toISOString()),
+      ].join(''));
+      const env = { ...process.env, WE_LOAD_ADMISSION_MAX_PER_CORE: '1.5' }; // the OLD name, an OLD-style low value
+      delete env.CI; delete env.WE_LOAD_ADMISSION;
+      const r = JSON.parse(execFileSync(process.execPath, [CLI, 'load-status', '--json', `--load-root=${telemetryRoot}`], { encoding: 'utf8', env }));
+      expect(r).toMatchObject({ held: false, backstopPerCore: DEFAULT_LOAD_ADMISSION_BACKSTOP_PER_CORE, perCore: 2.5 }); // NOT held — the old var never reached the backstop
+    } finally {
+      rmSync(telemetryRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('the PLAIN-TEXT (non --json) mode reports the real reading, in the idle → backstop → no-sample priority — never a flat "no sample" when a load1/cores reading exists and was merely admitted', () => {
+    const telemetryRoot = mkdtempSync(join(tmpdir(), 'load-admission-cli-test-'));
+    try {
+      const dayKey = utcDayKey(new Date());
+      const env = { ...process.env }; delete env.CI; delete env.WE_LOAD_ADMISSION;
+
+      // 1. idle-held: the reason string flows straight through.
+      writeFileSync(join(telemetryRoot, `${dayKey}.jsonl`), [busyLine(5, new Date().toISOString())].join(''));
+      const idleHeld = execFileSync(process.execPath, [CLI, 'load-status', `--load-root=${telemetryRoot}`], { encoding: 'utf8', env });
+      expect(idleHeld).toMatch(/^HELD — cpu idle 5% \(<15%\)/);
+
+      // 2. no idle/pressure sample, but a real load1/cores reading exists and is ADMITTED — must report that
+      //    reading, never a flat "no sample" (the #4343 review finding this test locks in).
+      writeFileSync(join(telemetryRoot, `${dayKey}.jsonl`), [
+        metricLine('host.cpu.load1', 4, new Date().toISOString()),
+        metricLine('host.cpu.count', 4, new Date().toISOString()),
+      ].join(''));
+      const admittedBackstop = execFileSync(process.execPath, [CLI, 'load-status', `--load-root=${telemetryRoot}`], { encoding: 'utf8', env });
+      expect(admittedBackstop).toMatch(/^admitted — load1 4\.00\/4 cores \(1\.00, backstop 4\)/);
+
+      // 3. genuinely nothing sampled at all — the true "no sample" case.
+      const noSample = execFileSync(process.execPath, [CLI, 'load-status', `--load-root=${mkdtempSync(join(tmpdir(), 'load-admission-empty-'))}`], { encoding: 'utf8', env });
+      expect(noSample).toMatch(/^admitted — no sample\n$/);
     } finally {
       rmSync(telemetryRoot, { recursive: true, force: true });
     }
