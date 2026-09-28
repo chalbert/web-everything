@@ -2,10 +2,11 @@
 bornAs: x34h6a2
 kind: story
 size: 3
-status: active
+status: resolved
 scope: ["we:scripts/lib/model-probation.mjs"]
 dateOpened: "2026-09-27"
 dateStarted: "2026-09-28"
+dateResolved: "2026-09-28"
 tags: []
 ---
 
