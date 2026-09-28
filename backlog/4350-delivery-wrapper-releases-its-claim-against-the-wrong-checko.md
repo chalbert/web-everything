@@ -1,4 +1,5 @@
 ---
+bornAs: xwgnold
 kind: story
 size: 2
 priority: high
