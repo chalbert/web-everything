@@ -13,7 +13,7 @@ import { spawnSync, spawn as spawnProcess, execFileSync } from 'node:child_proce
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { laneNeedsVerifyDispatch, spawnGateBounded, GATE_STARTED_MARKER } from '../verify-dispatch.mjs';
+import { laneNeedsVerifyDispatch, spawnGateBounded, runVerifyDispatch, GATE_STARTED_MARKER } from '../verify-dispatch.mjs';
 import { heldSlots, admissionLockRoot } from '../../readiness/heavy-admission.mjs';
 
 describe('laneNeedsVerifyDispatch — the pure dispatch decision', () => {
@@ -57,18 +57,24 @@ function runVerifyLane(args, cwd) {
   return { code: r.status ?? 1, out: String(r.stdout || ''), err: String(r.stderr || '') };
 }
 
-let base, poolRoot, laneDir;
+/** Init + first commit for one lane dir — factored out so multi-lane tests (#4360) can stamp several lanes
+ *  without repeating the same five git calls. */
+function makeLane(dir) {
+  mkdirSync(dir, { recursive: true });
+  git(['init', '--quiet', '--initial-branch=main', dir]);
+  writeFileSync(join(dir, 'f.txt'), 'a\n');
+  git(['add', 'f.txt'], dir);
+  git(['-c', 'user.email=t@t.com', '-c', 'user.name=t', 'commit', '--quiet', '-m', 'v1'], dir);
+  return dir;
+}
+
+let base, poolRoot, poolDir, laneDir;
 
 beforeEach(() => {
   base = mkdtempSync(join(tmpdir(), 'verify-dispatch-'));
   poolRoot = join(base, 'pool');
-  const poolDir = join(poolRoot, 'flagtest');
-  laneDir = join(poolDir, 'lane-1');
-  mkdirSync(poolDir, { recursive: true });
-  git(['init', '--quiet', '--initial-branch=main', laneDir]);
-  writeFileSync(join(laneDir, 'f.txt'), 'a\n');
-  git(['add', 'f.txt'], laneDir);
-  git(['-c', 'user.email=t@t.com', '-c', 'user.name=t', 'commit', '--quiet', '-m', 'v1'], laneDir);
+  poolDir = join(poolRoot, 'flagtest');
+  laneDir = makeLane(join(poolDir, 'lane-1'));
 });
 
 afterEach(() => {
@@ -267,6 +273,33 @@ describe('spawnGateBounded — gate-only timing (Skeptic-review fix, epic #3383)
   });
 });
 
+// #4360 — `onGateStarted`'s two documented guarantees (see the JSDoc at `spawnGateBounded`'s definition),
+// exercised against the REAL function and a real fixture child (never a fake `spawnGate`) — the concurrent-
+// dispatch tests below use a fake `spawnGate` entirely, so they never touch this hook's own implementation.
+describe('spawnGateBounded — onGateStarted hook (#4360)', () => {
+  it('fires onGateStarted exactly once, the instant GATE_STARTED_MARKER is seen on stderr', async () => {
+    const script = writeFixtureGate(base, { queueDelayMs: 50, gateDurationMs: 100 });
+    let calls = 0;
+    await expect(
+      spawnGateBounded([script], { queueCeilingMs: 5000, gateCeilingMs: 5000, onGateStarted: () => { calls += 1; } }),
+    ).resolves.toBeTruthy();
+    expect(calls).toBe(1);
+  });
+
+  it('swallows a throwing onGateStarted — the gate run still resolves normally, never rejects because of it', async () => {
+    const script = writeFixtureGate(base, { queueDelayMs: 50, gateDurationMs: 100 });
+    // A logging hook's own bug (or a full disk, a broken stream, etc.) must never be able to turn a healthy
+    // gate run into a reported dispatch failure — the hook is an observer, never a participant.
+    await expect(
+      spawnGateBounded([script], {
+        queueCeilingMs: 5000,
+        gateCeilingMs: 5000,
+        onGateStarted: () => { throw new Error('logging hook exploded'); },
+      }),
+    ).resolves.toBeTruthy();
+  });
+});
+
 describe('verify-dispatch CLI — real admission-queue contention does not trip the gate ceiling (integration)', () => {
   // A REAL holder occupies the (capped-to-1) heavy-admission slot for `HOLD_MS` using the actual production
   // `heavy-admission.mjs run` CLI — not a bespoke fixture — so `verify-lane.mjs`'s own `acquireSlotBlocking`
@@ -332,4 +365,68 @@ describe('verify-dispatch CLI — real admission-queue contention does not trip 
 
     await new Promise((res) => holder.on('exit', res));
   }, 30_000);
+});
+
+// ── #4360: dispatch up to the heavy-admission cap concurrently, never one-at-a-time ────────────────────────
+// `runVerifyDispatch`'s `spawnGate` (and `poolRoot`) injection points exist ONLY so these tests can prove the
+// loop's own timing/failure-isolation behavior deterministically, against a controllable fake — never a real
+// `verify-lane.mjs` child (that round trip is already covered by the CLI-level tests above). A production call
+// never passes either override; both default to the real thing.
+describe('runVerifyDispatch — concurrent dispatch, never awaiting between lanes (#4360)', () => {
+  it('fires spawnGate for a SECOND pending lane before the FIRST lane\'s promise has resolved (no await between lanes)', async () => {
+    const lane2Dir = makeLane(join(poolDir, 'lane-2'));
+    expect(runVerifyLane(['request', `--repo=${laneDir}`, '--gate=true', '--json'], laneDir).code).toBe(0);
+    expect(runVerifyLane(['request', `--repo=${lane2Dir}`, '--gate=true', '--json'], lane2Dir).code).toBe(0);
+
+    const calls = [];
+    const releasers = [];
+    const spawnGate = (args) => {
+      calls.push(args[1]); // `--repo=<dir>`
+      return new Promise((resolvePromise) => releasers.push(() => resolvePromise({ pid: 1 })));
+    };
+
+    const runPromise = runVerifyDispatch({ poolRoot, spawnGate });
+
+    // The synchronous scan + `pending.map(...)` call BOTH lanes' `spawnGate` before `runVerifyDispatch`'s own
+    // first `await` ever yields — so both calls have already happened by this point, with NEITHER promise told
+    // to resolve yet. The old serial loop could never reach lane 2's call until lane 1's promise settled.
+    expect(calls).toHaveLength(2);
+    expect(calls.some((c) => c.includes('lane-1'))).toBe(true);
+    expect(calls.some((c) => c.includes('lane-2'))).toBe(true);
+
+    releasers.forEach((release) => release());
+    const result = await runPromise;
+    expect(result.dispatched).toHaveLength(2);
+  });
+
+  it('one lane\'s spawnGate rejection does not block another lane\'s own dispatched/failures entry (Promise.allSettled, not Promise.all)', async () => {
+    const lane2Dir = makeLane(join(poolDir, 'lane-2'));
+    expect(runVerifyLane(['request', `--repo=${laneDir}`, '--gate=true', '--json'], laneDir).code).toBe(0);
+    expect(runVerifyLane(['request', `--repo=${lane2Dir}`, '--gate=true', '--json'], lane2Dir).code).toBe(0);
+
+    const spawnGate = (args) => {
+      if (args[1].includes('lane-1')) {
+        const e = new Error('verify-lane exceeded the gate-phase ceiling');
+        e.timedOutPhase = 'gate';
+        return Promise.reject(e);
+      }
+      return Promise.resolve({ pid: 2 });
+    };
+
+    const result = await runVerifyDispatch({ poolRoot, spawnGate });
+    // Had the loop used `Promise.all`, lane 1's rejection would have rejected the whole batch and lost lane 2's
+    // entry entirely — both must be present.
+    expect(result.failures).toHaveLength(1);
+    expect(result.failures[0]).toMatchObject({ pool: 'flagtest', lane: 1, timedOut: true, timedOutPhase: 'gate' });
+    expect(result.dispatched).toHaveLength(1);
+    expect(result.dispatched[0]).toMatchObject({ pool: 'flagtest', lane: 2 });
+  });
+
+  // NOTE: an earlier revision had a third test here ("dispatches each pending lane exactly once per sweep")
+  // that only asserted `calls.length === 2` and `new Set(calls).size === 2` against a fake `spawnGate` — an
+  // assertion the OLD serial `await`-in-a-loop code would have satisfied identically, so it defended nothing
+  // about THIS change. The "once per lane" invariant it was trying to cover is already proven, for real, by
+  // the first test above: its `expect(calls).toHaveLength(2)` plus the per-lane-name assertions ARE the
+  // exactly-once-per-lane check, taken at the point both calls have already fired concurrently. Removed rather
+  // than kept as dead weight.
 });

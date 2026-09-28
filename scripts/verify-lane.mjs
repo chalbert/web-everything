@@ -243,6 +243,13 @@ if (MODE === 'request') {
 //    and `test:unit` (this GATE) are named members of the closed heavy-command set, so this is the invocation-time
 //    (never lane-acquire-time) chokepoint the semaphore gates. Fails OPEN on a queuing timeout (proceeds unslotted
 //    with a stderr warning) — the residual-risk tradeoff `heavy-admission.mjs`'s own header names.
+//
+// #4360 — THIS `acquireSlotBlocking` CALL IS THE SOLE ADMISSION CHOKEPOINT FOR THE WHOLE DISPATCH PATH,
+// including `scripts/conveyor/verify-dispatch.mjs`'s daemon-side dispatch of several lanes' gates at once. The
+// daemon spawns this file as a plain child and lets EACH child queue on this SAME semaphore — it must NEVER
+// also acquire a slot itself before spawning, since that would either double-acquire (two slots consumed per
+// lane) or stall a child behind a slot its own parent is holding. If a future change ever needs the daemon to
+// reason about admission before spawning, that reasoning belongs here, not as a second chokepoint upstream.
 const ADMISSION_LOCK_ROOT = admissionLockRoot(REPO, process.env);
 const ADMISSION_CAP = resolveCap(process.env);
 const ADMISSION_TIMEOUT_MS = resolveTimeoutMs(process.env);

@@ -5,9 +5,11 @@ size: 5
 priority: high
 tier: pinned
 rank: x
-status: open
+status: resolved
 scope: ["we:skills-src/conveyor/verify-daemon.mjs", "we:scripts/conveyor/verify-dispatch.mjs", "we:scripts/readiness/heavy-admission.mjs", "we:scripts/conveyor/__tests__/verify-dispatch.test.mjs"]
 dateOpened: "2026-09-28"
+dateStarted: "2026-09-28"
+dateResolved: "2026-09-28"
 preparedDate: "2026-09-28"
 preparedAgainstSha: "d0ca633fdd77999f8e9ac61e0ee330544ab494eb"
 tags: []
@@ -115,6 +117,42 @@ The Scope/Risks/Test plan/Tasks/Proof plan below are rewritten against this corr
 - **After:** the same two-lane scenario, using the newly-added gate-start log line, shows both lanes' gates
   starting with overlapping wall-clock, and both lanes reaching a terminal marker sooner in total than the
   serial baseline — record the real before/after timestamps as the live evidence.
+
+## Progress
+
+All five Tasks implemented as specified:
+
+1. `we:scripts/conveyor/verify-dispatch.mjs`'s `runVerifyDispatch` loop now does a synchronous scan to collect
+   every pending lane, then fires each one's `spawnGateBounded` (through a `spawnGate` injection point,
+   default-unchanged) without awaiting between them, and settles them together with `Promise.allSettled` —
+   never `Promise.all` — so one lane's rejection can never swallow another lane's own `dispatched`/`failures`
+   entry.
+2. `we:scripts/verify-lane.mjs`'s admission call site now carries an explicit `#4360` comment stating it is the
+   SOLE admission chokepoint for this whole path, and that the daemon must never acquire a second one upstream.
+3. `spawnGateBounded` (`we:scripts/conveyor/verify-dispatch.mjs`) gained an `onGateStarted` hook, fired the
+   instant the existing gate-started stderr marker is seen; the dispatch loop uses it to log a real per-lane
+   gate-start timestamp.
+4. `we:scripts/conveyor/__tests__/verify-dispatch.test.mjs` gained a new describe block (2 tests, revised in
+   review-round 1) covering the unit-level Test-plan items: concurrent firing before either promise resolves,
+   and `allSettled` failure isolation — via the new `spawnGate`/`poolRoot` injection points, a controllable
+   fake, never a real subprocess. (A third test asserting "each pending lane dispatched exactly once" was
+   removed in review-round 1: it passed identically against the pre-change serial code, so it defended nothing
+   new; that invariant is already proven by the first test's own call-count/lane-name assertions.) A separate
+   new describe block exercises `onGateStarted`'s two documented guarantees — fires exactly once when
+   `GATE_STARTED_MARKER` is seen, and a throwing callback is swallowed without rejecting the gate promise —
+   against the REAL `spawnGateBounded` and a real fixture child via the existing `writeFixtureGate` helper,
+   never a fake `spawnGate`.
+5. Live proof (item 4 of the Test plan) gathered by hand against two throwaway git fixture lanes (outside the
+   repo, never committed), each stamped with a `request` marker and a `sleep 3 && echo …` fixture gate:
+   - **Before** (pre-fix code, via `git stash`): one `we:scripts/conveyor/verify-dispatch.mjs` sweep over both
+     lanes took **6.475s** real wall-clock (two 3s gates run back-to-back) — no overlap possible, matching the
+     old serial `await`.
+   - **After** (this fix): the same two-lane sweep took **3.301s** real wall-clock, with both lanes' new
+     gate-started log lines only 6ms apart (`2026-09-28T20:14:07.932Z` and `…07.938Z`) — genuine overlapping
+     execution, both lanes finishing green.
+
+Read-only per Scope: `we:scripts/readiness/heavy-admission.mjs` untouched; `we:scripts/verify-lane.mjs` touched
+only for the task-2 comment (its own admission call unchanged).
 
 ---
 ## Superseded original plan (kept for the record — do not implement as written)
