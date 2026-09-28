@@ -3,6 +3,8 @@ bornAs: xuyqu42
 kind: story
 size: 5
 priority: high
+tier: pinned
+rank: x
 status: open
 scope: ["we:skills-src/conveyor/verify-daemon.mjs", "we:scripts/conveyor/verify-dispatch.mjs", "we:scripts/readiness/heavy-admission.mjs", "we:scripts/conveyor/__tests__/verify-dispatch.test.mjs"]
 dateOpened: "2026-09-28"
