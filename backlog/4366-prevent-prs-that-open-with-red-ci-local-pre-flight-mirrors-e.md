@@ -6,6 +6,8 @@ status: open
 blockedBy: ["4365"]
 scope: ["we:scripts/operations/open-pr.mjs", "we:scripts/operations/open-pr-io.mjs", "we:scripts/operations/__tests__/open-pr.test.mjs", "we:scripts/operations/preflight-ci-mirror.mjs", "we:scripts/operations/__tests__/preflight-ci-mirror.test.mjs", "we:scripts/conveyor/ci-red-on-open-classify.mjs", "we:scripts/conveyor/__tests__/ci-red-on-open-classify.test.mjs", "we:scripts/conveyor/ci-red-on-open-watch.mjs", "we:scripts/conveyor/__tests__/ci-red-on-open-watch.test.mjs", "we:scripts/conveyor/conflict-postmortem-store.mjs", "we:scripts/lib/verify-lane-gate.mjs", "we:scripts/lib/pr-events.mjs", "we:scripts/lib/soak-gate-merge-base-diff.mjs", "we:scripts/progress-board.mjs", "we:.github/workflows/ci.yml", "we:.github/workflows/soak-replay-gate.yml", "we:.github/workflows/review-gate.yml"]
 dateOpened: "2026-09-28"
+preparedDate: "2026-09-28"
+preparedAgainstSha: "1b6fc1381a3132a8df2d16526ba537f40527a317"
 tags: []
 ---
 

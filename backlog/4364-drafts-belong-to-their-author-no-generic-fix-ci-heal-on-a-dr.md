@@ -6,6 +6,8 @@ priority: high
 status: open
 scope: ["we:scripts/conveyor/reconcile-core.mjs", "we:scripts/operations/ci-heal-pr-dispatch.mjs", "we:scripts/conveyor/review-status-tag.mjs", "we:skills-src/conveyor/build-dispatch-daemon.mjs", "we:scripts/conveyor/build-dispatch-policy.mjs", "we:scripts/conveyor/build-dispatch-claim.mjs", "we:scripts/conveyor/fix-dispatch-claim.mjs", "we:scripts/operations/deliver-item-wrapper.mjs", "we:scripts/operations/promote-draft-pr-dispatch.mjs", "we:scripts/merge-ai-prs.mjs", "we:scripts/conveyor/parked-pr-conflict-watch.mjs", "we:scripts/lib/pr-snapshot.mjs", "we:scripts/lib/pr-events.mjs", "we:scripts/verify-lane.mjs", "we:scripts/conveyor/__tests__/reconcile-core.test.mjs", "we:scripts/operations/__tests__/ci-heal-pr-dispatch.test.mjs", "we:skills-src/conveyor/__tests__/build-dispatch-daemon.test.mjs", "we:scripts/conveyor/__tests__/build-dispatch-policy.test.mjs", "we:scripts/__tests__/merge-ai-prs-draft-invisible.test.mjs"]
 dateOpened: "2026-09-28"
+preparedDate: "2026-09-28"
+preparedAgainstSha: "1b6fc1381a3132a8df2d16526ba537f40527a317"
 tags: []
 ---
 
