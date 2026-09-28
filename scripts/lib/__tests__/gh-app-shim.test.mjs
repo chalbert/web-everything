@@ -577,13 +577,16 @@ describe('renderGhShimScript — sets WE_GH_THROTTLE_CALLER on the throttle CLI 
     return { dir, shimPath, env };
   }
   const callerOf = (r) => JSON.parse(r.stdout).caller;
+  // Each case starts 4-5 real processes (caller, shim, `ps`, relay, fake gh): ~1s idle, far more under a loaded
+  // full-suite run — so these get an explicit budget instead of vitest's 5s default.
+  const SPAWN_TIMEOUT_MS = 30_000;
 
   it('GH_CALLER wins', () => {
     const { dir, shimPath, env } = setup();
     try {
       expect(callerOf(spawnSync(shimPath, ['pr', 'view', '1'], { encoding: 'utf8', env: { ...env, GH_CALLER: 'parked-pr-conflict-watch-we' } }))).toBe('parked-pr-conflict-watch-we');
     } finally { rmSync(dir, { recursive: true, force: true }); }
-  });
+  }, SPAWN_TIMEOUT_MS);
 
   it('else the parent process\'s script (a node script shelling a bare gh)', () => {
     const { dir, shimPath, env } = setup();
@@ -593,7 +596,7 @@ describe('renderGhShimScript — sets WE_GH_THROTTLE_CALLER on the throttle CLI 
       const r = spawnSync(process.execPath, [script], { encoding: 'utf8', env: { ...env, CLAUDE_CODE_SESSION_ID: 'must-not-win' } });
       expect(callerOf(r)).toBe('ci-heal-mark.mjs');
     } finally { rmSync(dir, { recursive: true, force: true }); }
-  });
+  }, SPAWN_TIMEOUT_MS);
 
   it('else the Claude session id (a shell -c parent, the agent Bash tool shape)', () => {
     const { dir, shimPath, env } = setup();
@@ -602,7 +605,7 @@ describe('renderGhShimScript — sets WE_GH_THROTTLE_CALLER on the throttle CLI 
       const r = spawnSync('/bin/sh', ['-c', `${JSON.stringify(shimPath)} pr view 1; true`], { encoding: 'utf8', env: { ...env, CLAUDE_CODE_SESSION_ID: '0123456789abcdef' } });
       expect(callerOf(r)).toBe('session:01234567');
     } finally { rmSync(dir, { recursive: true, force: true }); }
-  });
+  }, SPAWN_TIMEOUT_MS);
 
   it('else the parent\'s command name — never left blank', () => {
     const { dir, shimPath, env } = setup();
@@ -610,7 +613,7 @@ describe('renderGhShimScript — sets WE_GH_THROTTLE_CALLER on the throttle CLI 
       const r = spawnSync('/bin/sh', ['-c', `${JSON.stringify(shimPath)} pr view 1; true`], { encoding: 'utf8', env });
       expect(callerOf(r)).toBe('sh');
     } finally { rmSync(dir, { recursive: true, force: true }); }
-  });
+  }, SPAWN_TIMEOUT_MS);
 });
 
 describe('ensureGhShim — the one real write, best-effort, never throws', () => {

@@ -733,7 +733,7 @@ describe('tick() — gh spend persistence (#4309)', () => {
     const noon = byHour('2026-09-28T12:00:00.000Z')[0];
     expect(noon).toMatchObject({ unknown: false, bucketUsed: 4, attributed: 4, estimated: 0, unattributed: 0, requests: 2, responses: 2 });
     expect(noon.byCaller['session:abcd1234'].attributed).toBe(4); // never 4 + 7: the fresh window's first `used` is no cost
-  });
+  }, 30_000); // three real ticks, each spawning probe subprocesses — explicit budget for a loaded full-suite run
 
   it('persistGhSpend defaults to the throttle\'s own call log and delegates to gh-spend.mjs', () => {
     const seen = [];
