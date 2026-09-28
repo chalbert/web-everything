@@ -1,4 +1,5 @@
 ---
+bornAs: xm40bs2
 kind: story
 size: 3
 tier: pinned
