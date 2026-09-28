@@ -29,6 +29,7 @@ import {
   laneRefAttemptTag,
   prStatesFromList,
   prStatesByPrNumber,
+  prDetailsFromList,
   pidAliveForLease,
   sessionStateByName,
   sessionStatesForReap,
@@ -38,6 +39,10 @@ import {
   repoKeyForPool,
   fetchPrStatesForRepo,
   detachedWrapperPidsBySession,
+  laneBranchItemNum,
+  laneQuietSincePr,
+  DEFAULT_QUIET_MS,
+  resolveLeaseItemNum,
 } from '../lease-reaper.mjs';
 import { DEFAULT_LEASE_TTL_MINUTES } from '../../lib/lane-lease.mjs';
 import { DISPATCH_GUARD_LISTING_GRACE_MINUTES } from '../../operations/dispatch-lane.mjs';
@@ -881,5 +886,218 @@ describe('#xr4ygg7 — the collision hazard the per-repo split closes: same NUMB
     // since itemNumFromSession('fix-49') is null post-fix) up nowhere, or, pre-fix, have used '49' as an ITEM
     // number and wrongly read item 181's unrelated 'open' state (or nothing at all).
     expect(reap.map((c) => `${c.pool}/lane-${c.lane}:${c.reason}`)).toEqual(['web-everything/lane-9:pr-merged']);
+  });
+});
+
+// #xkk4lv7 — CAPACITY-CAP ROOT CAUSE: a lease whose `session` names NO dispatcher grammar at all (a bare
+// `lane-pool.mjs acquire --purpose=<slug>` with no recognizable `--session=`) is invisible to BOTH
+// `itemNumFromSession`/`prNumFromSession`-keyed axes, so it rode the 4-hour TTL backstop even once its PR had
+// objectively merged — live evidence: lane-2 (`soak-gate-merge-base`, PR #2825 MERGED) and lane-9
+// (`promote-stale-green`, PR #2826 MERGED) both sat leased well past their PR's merge. `laneBranchItemNum` /
+// `laneQuietSincePr` / `resolveLeaseItemNum` below close that gap; three light plan review rounds each found a
+// prior shape of the fix unsafe (Risks 8-9 in the card), so every regression they surfaced has its own case.
+describe('#xkk4lv7 — laneBranchItemNum: the lane\'s own checked-out branch, via the SAME lane/<num>-* grammar matchLaneRef already trusts for a PR head ref', () => {
+  it('resolves a digit item id from lane/<num>-<slug>', () => {
+    expect(laneBranchItemNum('/x/lane-2', { git: () => 'lane/2825-soak-gate-merge-base' })).toBe('2825');
+  });
+  it('resolves (and lower-cases) a HASH id from lane/x<hash>-<slug> — matchLaneRef accepts a shape parseSessionSlug deliberately never does (test plan #6)', () => {
+    expect(laneBranchItemNum('/x/lane-3', { git: () => 'lane/X9YLKP7-some-slug' })).toBe('x9ylkp7');
+  });
+  it('a retry suffix still collapses to the base number, same as the PR-headRef grammar', () => {
+    expect(laneBranchItemNum('/x/lane-4', { git: () => 'lane/2500b-retry-slug' })).toBe('2500');
+  });
+  it('null for the lane\'s own integration branch — the byte-for-byte common case for a lane worked through the standard delivery-agent brief, where the item lives only in --session, never the branch', () => {
+    expect(laneBranchItemNum('/x/lane-5', { git: () => 'main' })).toBeNull();
+  });
+  it('null on a detached HEAD / mid-rebase / any git-read failure — never guess, never throw', () => {
+    expect(laneBranchItemNum('/x/lane-6', { git: () => null })).toBeNull();
+    expect(laneBranchItemNum('/x/lane-7', { git: () => { throw new Error('fatal: not a git repository'); } })).toBeNull();
+  });
+});
+
+describe('#xkk4lv7 — laneQuietSincePr: Fork 2/Option C\'s safety gate — a branch-derived merged/closed verdict is corroborated, NEVER trusted bare', () => {
+  const QUIET = DEFAULT_QUIET_MS;
+  const old = (msAgo) => new Date(NOW - msAgo).toISOString();
+
+  it('ALL THREE hold (clean, contained HEAD, both merge AND acquire older than the quiet window) → true — test plan #4, case 4', () => {
+    expect(laneQuietSincePr('/x/lane-2', {
+      prMergeSha: 'deadbeef', prMergedAt: old(QUIET + 3600_000), leaseAcquiredAt: old(QUIET + 7200_000), nowMs: NOW,
+      statusPorcelain: () => '', isAncestor: () => true,
+    })).toBe(true);
+  });
+
+  it('a dirty tree → false, never reap (a live worker\'s own uncommitted change) — test plan #4, case 1', () => {
+    expect(laneQuietSincePr('/x/lane-2', {
+      prMergeSha: 'deadbeef', prMergedAt: old(QUIET + 3600_000), leaseAcquiredAt: old(QUIET + 3600_000), nowMs: NOW,
+      statusPorcelain: () => ' M scripts/some-file.mjs\n', isAncestor: () => true,
+    })).toBe(false);
+  });
+
+  it('HEAD carries commits beyond the merge (not an ancestor) → false, never reap — live, un-landed work in the same lane — test plan #4, case 1 (commits variant)', () => {
+    expect(laneQuietSincePr('/x/lane-2', {
+      prMergeSha: 'deadbeef', prMergedAt: old(QUIET + 3600_000), leaseAcquiredAt: old(QUIET + 3600_000), nowMs: NOW,
+      statusPorcelain: () => '', isAncestor: () => false,
+    })).toBe(false);
+  });
+
+  it('round-2 shape — clean + contained HEAD, but the PR merged only 5 minutes ago (lease acquired long ago) → false: the quiet window hasn\'t elapsed — test plan #4, case 2', () => {
+    expect(laneQuietSincePr('/x/lane-2', {
+      prMergeSha: 'deadbeef', prMergedAt: old(5 * 60_000), leaseAcquiredAt: old(10 * 24 * 3600_000), nowMs: NOW,
+      statusPorcelain: () => '', isAncestor: () => true,
+    })).toBe(false);
+  });
+
+  it('round-3 shape — the PR merged long ago, but THIS lease was acquired FRESH 5 minutes ago → false: anchored to the LATER of mergedAt/acquiredAt, never mergedAt alone — test plan #4, case 3', () => {
+    expect(laneQuietSincePr('/x/lane-2', {
+      prMergeSha: 'deadbeef', prMergedAt: old(10 * 24 * 3600_000), leaseAcquiredAt: old(5 * 60_000), nowMs: NOW,
+      statusPorcelain: () => '', isAncestor: () => true,
+    })).toBe(false);
+  });
+
+  it('missing/unparseable prMergeSha, prMergedAt, or leaseAcquiredAt → null, never a guess', () => {
+    const base = { prMergedAt: old(QUIET + 3600_000), leaseAcquiredAt: old(QUIET + 3600_000), nowMs: NOW, statusPorcelain: () => '', isAncestor: () => true };
+    expect(laneQuietSincePr('/x/lane-2', { ...base, prMergeSha: null })).toBeNull();
+    expect(laneQuietSincePr('/x/lane-2', { ...base, prMergeSha: 'deadbeef', prMergedAt: 'not-a-date' })).toBeNull();
+    expect(laneQuietSincePr('/x/lane-2', { ...base, prMergeSha: 'deadbeef', leaseAcquiredAt: undefined })).toBeNull();
+  });
+
+  it('an unreadable working tree (git status failure) → null, never a guess', () => {
+    expect(laneQuietSincePr('/x/lane-2', {
+      prMergeSha: 'deadbeef', prMergedAt: old(QUIET + 3600_000), leaseAcquiredAt: old(QUIET + 3600_000), nowMs: NOW,
+      statusPorcelain: () => null, isAncestor: () => true,
+    })).toBeNull();
+  });
+
+  it('an unresolvable ancestry check (git failure, not the ordinary "not an ancestor" exit) → null, never a guess', () => {
+    expect(laneQuietSincePr('/x/lane-2', {
+      prMergeSha: 'deadbeef', prMergedAt: old(QUIET + 3600_000), leaseAcquiredAt: old(QUIET + 3600_000), nowMs: NOW,
+      statusPorcelain: () => '', isAncestor: () => null,
+    })).toBeNull();
+  });
+});
+
+describe('#xkk4lv7 — resolveLeaseItemNum + reapPlan through the REAL resolution path (fetchPrStatesForRepo + resolveLeaseItemNum + reapPlan) — test plan #1/#2', () => {
+  const QUIET = DEFAULT_QUIET_MS;
+  const old = (msAgo) => new Date(NOW - msAgo).toISOString();
+  // The exact production composition `main()`'s own `signalsFor` drives — reused here so this test exercises
+  // the REAL resolution path, never a hand-picked `classifyReap` call (the light plan review's own framing:
+  // the original #1/#2 pair was a characterization test against `classifyReap` directly, not a real regression).
+  const buildSignalsFor = (repoStates, resolverOpts = {}) => (c) => {
+    const { itemNum, prNum } = resolveLeaseItemNum(c.lease, c.dir, { repoStates, nowMs: NOW, ...resolverOpts });
+    const prState = repoStates
+      ? (itemNum != null ? repoStates.byItem.get(itemNum) : prNum != null ? repoStates.byPr.get(prNum) : null) ?? null
+      : null;
+    return { prState, sessionGone: null, pidAlive: null };
+  };
+
+  it('test plan #1/#2 — the lane-2/lane-9 shape: a non-dispatcher session (`Mac:12345`, the defaultSession() shape) whose lane branch matches a MERGED PR with a matching headRefName → reaped, `reason: pr-merged`, once corroborated', () => {
+    const exec = () => JSON.stringify([{
+      number: 500, headRefName: 'lane/2825-soak-gate-merge-base', state: 'MERGED',
+      mergedAt: old(QUIET + 3600_000), mergeCommit: { oid: 'deadbeef' },
+    }]);
+    const repoStates = fetchPrStatesForRepo('we', {}, { exec });
+    const lease = { session: 'Mac:12345', acquiredAt: old(QUIET + 7200_000), ttlMinutes: DEFAULT_LEASE_TTL_MINUTES };
+    const candidates = [{ pool: 'web-everything', lane: 2, dir: '/x/web-everything/lane-2', lease, repoKey: 'we' }];
+    const resolverOpts = { git: () => 'lane/2825-soak-gate-merge-base', statusPorcelain: () => '', isAncestor: () => true };
+    const { reap, keep } = reapPlan(candidates, { nowMs: NOW, ttlMs: TTL_MS, signalsFor: buildSignalsFor(repoStates, resolverOpts) });
+    expect(reap.map((c) => `${c.pool}/lane-${c.lane}:${c.reason}`)).toEqual(['web-everything/lane-2:pr-merged']);
+    expect(keep).toHaveLength(0);
+  });
+
+  it('the SAME shape but NOT YET corroborated (PR merged 5 minutes ago) → kept, not reaped (the quiet window is the whole point)', () => {
+    const exec = () => JSON.stringify([{
+      number: 500, headRefName: 'lane/2825-soak-gate-merge-base', state: 'MERGED',
+      mergedAt: old(5 * 60_000), mergeCommit: { oid: 'deadbeef' },
+    }]);
+    const repoStates = fetchPrStatesForRepo('we', {}, { exec });
+    const lease = { session: 'Mac:12345', acquiredAt: old(QUIET + 7200_000), ttlMinutes: DEFAULT_LEASE_TTL_MINUTES };
+    const candidates = [{ pool: 'web-everything', lane: 9, dir: '/x/web-everything/lane-9', lease, repoKey: 'we' }];
+    const resolverOpts = { git: () => 'lane/2825-soak-gate-merge-base', statusPorcelain: () => '', isAncestor: () => true };
+    const { reap, keep } = reapPlan(candidates, { nowMs: NOW, ttlMs: TTL_MS, signalsFor: buildSignalsFor(repoStates, resolverOpts) });
+    expect(reap).toHaveLength(0);
+    expect(keep).toHaveLength(1);
+  });
+
+  it('test plan #3 (Fork 1, REQUIRED) — namespace-conflict: a fix-900 session (PR #900 OPEN) whose lane branch happens to be tied to a DIFFERENT, already-merged item — the branch fallback NEVER fires because prNumFromSession already resolved something', () => {
+    const exec = () => JSON.stringify([
+      { number: 900, headRefName: 'lane/900-fixer-target', state: 'OPEN', mergedAt: null, mergeCommit: null },
+      { number: 501, headRefName: 'lane/7777-unrelated-merged-item', state: 'MERGED', mergedAt: old(QUIET + 3600_000), mergeCommit: { oid: 'cafef00d' } },
+    ]);
+    const repoStates = fetchPrStatesForRepo('we', {}, { exec });
+    const lease = { session: 'fix-900', acquiredAt: old(QUIET + 7200_000), ttlMinutes: DEFAULT_LEASE_TTL_MINUTES };
+    const candidates = [{ pool: 'web-everything', lane: 12, dir: '/x/web-everything/lane-12', lease, repoKey: 'we' }];
+    // Even if the git reader below fired, it would resolve '7777' — proving Fork 1 by showing the reap plan
+    // stays 'keep' regardless of what the branch names, because prNumFromSession('fix-900') already answered.
+    const resolverOpts = { git: () => 'lane/7777-unrelated-merged-item', statusPorcelain: () => '', isAncestor: () => true };
+    const { reap, keep } = reapPlan(candidates, { nowMs: NOW, ttlMs: TTL_MS, signalsFor: buildSignalsFor(repoStates, resolverOpts) });
+    expect(reap).toHaveLength(0);
+    expect(keep).toHaveLength(1);
+    expect(keep[0].reason).toBeNull(); // PR #900 open — no axis fires
+  });
+
+  it('test plan #6 — the hash-branch case: a lane/x<hash>-* branch resolves a PR state UNREACHABLE via itemNumFromSession (parseSessionSlug never accepts a hash-shaped item), and reaps once corroborated', () => {
+    const exec = () => JSON.stringify([{
+      number: 777, headRefName: 'lane/x9ylkp7-some-slug', state: 'MERGED',
+      mergedAt: old(QUIET + 3600_000), mergeCommit: { oid: 'ba5eba11' },
+    }]);
+    const repoStates = fetchPrStatesForRepo('we', {}, { exec });
+    const lease = { session: 'Mac:99999', acquiredAt: old(QUIET + 7200_000), ttlMinutes: DEFAULT_LEASE_TTL_MINUTES };
+    const candidates = [{ pool: 'web-everything', lane: 21, dir: '/x/web-everything/lane-21', lease, repoKey: 'we' }];
+    const resolverOpts = { git: () => 'lane/X9YLKP7-some-slug', statusPorcelain: () => '', isAncestor: () => true };
+    const { reap } = reapPlan(candidates, { nowMs: NOW, ttlMs: TTL_MS, signalsFor: buildSignalsFor(repoStates, resolverOpts) });
+    expect(reap.map((c) => `${c.pool}/lane-${c.lane}:${c.reason}`)).toEqual(['web-everything/lane-21:pr-merged']);
+  });
+
+  it('test plan addendum — the live `build-4306` shape: itemNumFromSession(\'build-4306\') is null (no `build` alternative in the grammar), but the branch fallback resolves item 4306 for as long as its PR is open, then reaps once that PR merges and the quiet window elapses', () => {
+    const dispatchedSession = { session: 'build-4306', acquiredAt: old(60_000), ttlMinutes: DEFAULT_LEASE_TTL_MINUTES };
+    const candidates = [{ pool: 'web-everything', lane: 10, dir: '/x/web-everything/lane-10', lease: dispatchedSession, repoKey: 'we' }];
+    const resolverOpts = { git: () => 'lane/4306-some-slug', statusPorcelain: () => '', isAncestor: () => true };
+
+    // Phase 1 — PR still open: the branch fallback resolves the item (proving it is reachable at all — the
+    // "for scope/overlap purposes" half of the addendum), but nothing reaps (open PR, and the lease is fresh).
+    const openExec = () => JSON.stringify([{ number: 4306, headRefName: 'lane/4306-some-slug', state: 'OPEN', mergedAt: null, mergeCommit: null }]);
+    const openRepoStates = fetchPrStatesForRepo('we', {}, { exec: openExec });
+    const { itemNum } = resolveLeaseItemNum(dispatchedSession, '/x/web-everything/lane-10', { repoStates: openRepoStates, nowMs: NOW, ...resolverOpts });
+    expect(itemNum).toBe('4306');
+    const { reap: reapWhileOpen, keep: keepWhileOpen } = reapPlan(candidates, { nowMs: NOW, ttlMs: TTL_MS, signalsFor: buildSignalsFor(openRepoStates, resolverOpts) });
+    expect(reapWhileOpen).toHaveLength(0);
+    expect(keepWhileOpen).toHaveLength(1);
+
+    // Phase 2 — the SAME lease, PR now merged long enough ago (and the lease itself old enough) → reaps via
+    // the branch-based lookup, proving the fallback generalizes beyond the soak-gate-merge-base/promote-stale-
+    // green shape the primary fixture above uses.
+    const mergedExec = () => JSON.stringify([{ number: 4306, headRefName: 'lane/4306-some-slug', state: 'MERGED', mergedAt: old(QUIET + 3600_000), mergeCommit: { oid: 'f00dcafe' } }]);
+    const mergedRepoStates = fetchPrStatesForRepo('we', {}, { exec: mergedExec });
+    const staleLease = { session: 'build-4306', acquiredAt: old(QUIET + 7200_000), ttlMinutes: DEFAULT_LEASE_TTL_MINUTES };
+    const staleCandidates = [{ pool: 'web-everything', lane: 10, dir: '/x/web-everything/lane-10', lease: staleLease, repoKey: 'we' }];
+    const { reap: reapAfterMerge } = reapPlan(staleCandidates, { nowMs: NOW, ttlMs: TTL_MS, signalsFor: buildSignalsFor(mergedRepoStates, resolverOpts) });
+    expect(reapAfterMerge.map((c) => `${c.pool}/lane-${c.lane}:${c.reason}`)).toEqual(['web-everything/lane-10:pr-merged']);
+  });
+
+  it('test plan #5 — regression: existing item-kind/PR-kind session fixtures still resolve identically through resolveLeaseItemNum (the branch fallback never fires when the session already resolves)', () => {
+    const exec = () => JSON.stringify([{ number: 1, headRefName: 'lane/2667-x', state: 'MERGED', mergedAt: old(QUIET + 3600_000), mergeCommit: { oid: 'abc' } }]);
+    const repoStates = fetchPrStatesForRepo('we', {}, { exec });
+    // A poisoned `git` that would resolve to a totally different item if it were ever consulted — proving it
+    // truly never is, for a session the ordinary namespaces already resolve.
+    const resolverOpts = { git: () => { throw new Error('must not be called — session already resolved'); } };
+    const itemKind = resolveLeaseItemNum({ session: 'conveyor-2667' }, '/x/lane-a', { repoStates, nowMs: NOW, ...resolverOpts });
+    expect(itemKind).toEqual({ itemNum: '2667', prNum: null, itemNumSource: 'session' });
+  });
+
+  // #xkk4lv7 — round-2 convergence (correctness + claim-accuracy, independently): a PR CLOSED WITHOUT merging
+  // carries no `mergeCommit` at all, so `laneQuietSincePr` can never corroborate it (it requires a merge sha to
+  // check containment against) — a DELIBERATE, documented gap (see `resolveLeaseItemNum`'s own doc), not a
+  // silent one. This pins the exact end-to-end shape: `itemNumSource` stays `null` (never
+  // `'branch-uncorroborated'` — that state is reserved for an OPEN PR or no PR at all, where "open wins"
+  // already makes the PR axis harmless; a bare, uncorroborated 'closed' guess earns no trust at all, not even
+  // the weaker uncorroborated tier), so neither this axis nor any downstream offline-axis consumer ever acts
+  // on it — the lease simply rides the pre-existing TTL backstop, exactly as it did before this fix existed.
+  it('round-2 convergence — a branch matching a CLOSED-but-never-merged PR (no mergeCommit) resolves to NO itemNum at all, never a false attribution', () => {
+    const exec = () => JSON.stringify([{ number: 42, headRefName: 'lane/8100-abandoned-attempt', state: 'CLOSED', mergedAt: null, mergeCommit: null }]);
+    const repoStates = fetchPrStatesForRepo('we', {}, { exec });
+    const lease = { session: 'Mac:12345', acquiredAt: old(QUIET + 7200_000) };
+    const resolverOpts = { git: () => 'lane/8100-abandoned-attempt' };
+    const result = resolveLeaseItemNum(lease, '/x/lane-b', { repoStates, nowMs: NOW, ...resolverOpts });
+    expect(result).toEqual({ itemNum: null, prNum: null, itemNumSource: null });
   });
 });

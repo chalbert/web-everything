@@ -118,7 +118,10 @@ import { sleepSyncMs } from './readiness/drain-lock.mjs';
 // fork its logic). Importing lease-reaper is side-effect-free — its IO shell is gated on the main-module check —
 // and forms no cycle (lease-reaper imports only `lib/lane-lease.mjs`, never lane-pool). `readField` reads the
 // frontmatter-strict `status:` for the offline item-resolved reap axis (#2603 spoof-safe reader).
-import { classifyReap, reapPlan, prStatesFromList, prStatesByPrNumber, itemNumFromSession, prNumFromSession } from './conveyor/lease-reaper.mjs';
+// #xkk4lv7 — `prDetailsFromList`/`resolveLeaseItemNum` ADDED: the SAME branch-based item-resolution fallback
+// (+ its Fork 2/Option C safety gate) `lease-reaper.mjs`'s own resident pass now drives, imported rather than
+// re-derived (this card's Risk 5 — the two reapers must stay single-sourced).
+import { classifyReap, reapPlan, prStatesFromList, prStatesByPrNumber, prDetailsFromList, itemNumFromSession, prNumFromSession, resolveLeaseItemNum } from './conveyor/lease-reaper.mjs';
 import { readField } from './backlog/frontmatter.mjs';
 // #3383 — the lane-history ledger (`<lane>/.git/lane-history.jsonl`): one line per acquire/adopt/release/reap,
 // so a lane can be traced back to the session/card/PR that used it AFTER its lease is released (today nothing
@@ -1518,9 +1521,12 @@ function deadLeasePlan(repo, nowMs, ttlMs) {
     // it degrades the PR axis to OFF (the offline item-resolved axis + TTL still apply), never blocks.
     // #x5n4zn3 — already had `timeout` (reconciled, not double-wrapped); added `killSignal` for the same
     // fail-fast certainty every other call site here now gets.
-    const out = execFileSync('gh', ['pr', 'list', '--state', 'all', '--limit', '400', '--json', 'number,state,mergedAt,headRefName'], { cwd: repo.referencePath, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 20_000, killSignal: 'SIGKILL' });
+    // #xkk4lv7 — `mergeCommit` ADDED: the branch-fallback's Fork 2/Option C corroboration (`laneQuietSincePr`,
+    // via `resolveLeaseItemNum`) needs a merged PR's own merge-commit sha, which the pre-existing field list
+    // never carried (mirrors the identical addition to `lease-reaper.mjs#fetchPrStatesForRepo`).
+    const out = execFileSync('gh', ['pr', 'list', '--state', 'all', '--limit', '400', '--json', 'number,state,mergedAt,headRefName,mergeCommit'], { cwd: repo.referencePath, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 20_000, killSignal: 'SIGKILL' });
     const prs = JSON.parse(out);
-    prStates = { byItem: prStatesFromList(prs), byPr: prStatesByPrNumber(prs) };
+    prStates = { byItem: prStatesFromList(prs), byPr: prStatesByPrNumber(prs), detailsByItem: prDetailsFromList(prs) };
   } catch { prStates = null; }
   // Item-resolved axis (OFFLINE): read the pool's origin/<branch> backlog listing ONCE, then answer
   // "is item <num>'s card status:resolved?" frontmatter-strict. No fetch — a stale read is safe (monotonic).
@@ -1533,12 +1539,6 @@ function deadLeasePlan(repo, nowMs, ttlMs) {
     return body != null && readField(body, 'status') === 'resolved';
   };
   const signalsFor = (c) => {
-    // #x5wm9ot — an item-kind lease (conveyor-/prepare-/prepare-decision-) checks `byItem`; a PR_KIND lease
-    // (review-/fix-/ci-heal-/inspect-) checks `byPr` by its OWN PR number. `itemResolvedOnMain` stays
-    // item-number-only (a backlog card lookup) — it must never be asked about a PR_KIND lease's PR number,
-    // which could coincidentally name an unrelated backlog item and misread as "resolved".
-    const itemNum = itemNumFromSession(c.lease?.session);
-    const prNum = prNumFromSession(c.lease?.session);
     // #3283 — A TERMINAL SIGNAL ABOUT THE ITEM IS NECESSARY BUT NOT SUFFICIENT. "This lane's item is finished"
     // — its PR merged, or its card resolved on main — answers *is there unlanded work here?* It never answers
     // *is anyone holding this lease?*, and this pass used the first as a proxy for the second. The proxy is
@@ -1553,13 +1553,37 @@ function deadLeasePlan(repo, nowMs, ttlMs) {
     // a liveness test. This NARROWS #2748 rather than undoing it: a TTL-stale lease whose item is terminal is
     // still reaped HERE, pre-TTL-reclaim and pool-wide, which is the ghost #2748 was built for.
     const holderPresumedGone = isLeaseStale(c.lease, nowMs, ttlMs);
+    // #xkk4lv7 — the branch-based fallback (`resolveLeaseItemNum`, imported from `lease-reaper.mjs` rather than
+    // re-derived, this card's Risk 5) only matters once the lease already looks TTL-stale: a FRESH lease's item
+    // attribution is never consumed below (both `prState` and `itemResolvedOnMain` stay behind the SAME
+    // `holderPresumedGone` gate this pass already had), so skip its extra git spawns entirely otherwise — this
+    // pass's existing TTL gate on both signals is UNCHANGED, never widened by this fix (per the light plan
+    // review's own confirmation that `deadLeasePlan` is already TTL-gated on both).
+    const { itemNum, prNum, itemNumSource } = holderPresumedGone
+      ? resolveLeaseItemNum(c.lease, c.dir, { repoStates: prStates, nowMs })
+      : { itemNum: itemNumFromSession(c.lease?.session), prNum: prNumFromSession(c.lease?.session), itemNumSource: null };
     let prState = null;
     if (holderPresumedGone && prStates) {
+      // #x5wm9ot — an item-kind lease (conveyor-/prepare-/prepare-decision-, OR now a branch-attributed one)
+      // checks `byItem`; a PR_KIND lease (review-/fix-/ci-heal-/inspect-) checks `byPr` by its OWN PR number.
       prState = itemNum != null ? (prStates.byItem.get(itemNum) ?? null) : prNum != null ? (prStates.byPr.get(prNum) ?? null) : null;
     }
     // Item-resolved is a terminal death signal too — but NEVER override a live (open) PR, mirroring the
     // reaper's "open wins" safety (a same-number retry PR still in flight must not be reaped, #2267).
-    if (holderPresumedGone && prState !== 'open' && prState !== 'merged' && prState !== 'closed' && itemResolvedOnMain(itemNum)) prState = 'merged';
+    // `itemResolvedOnMain` stays item-number-only (a backlog card lookup) — it must never be asked about a
+    // PR_KIND lease's PR number, which could coincidentally name an unrelated backlog item and misread as
+    // "resolved".
+    //
+    // #xkk4lv7 — round-1 convergence (standards-conformance + claim-accuracy, independently): `itemNum` is
+    // ONLY safe to feed into this SECOND, independent terminal signal when it came from a dispatcher-minted
+    // session OR a branch match Fork 2/Option C already corroborated (`itemNumSource` — see
+    // `resolveLeaseItemNum`'s own doc). A `'branch-uncorroborated'` guess (an open PR, or no PR at all) carries
+    // NO clean-tree/contained-HEAD/quiet-window proof — feeding it here would let a lease on a
+    // `lane/2500b-*` retry branch doing genuinely NEW work get reaped just because item 2500's ORIGINAL,
+    // already-landed card reads `resolved`, reaching the exact "old branch, new work" hazard this fix's own
+    // safety gate exists to rule out through a side door.
+    const itemNumTrustedForOfflineAxis = itemNumSource === 'session' || itemNumSource === 'branch-corroborated';
+    if (holderPresumedGone && itemNumTrustedForOfflineAxis && prState !== 'open' && prState !== 'merged' && prState !== 'closed' && itemResolvedOnMain(itemNum)) prState = 'merged';
     return { prState, pidAlive: null }; // the pid axis is dormant under today's lease schema (see lease-reaper.pidAliveForLease)
   };
   return reapPlan(candidates, { nowMs, ttlMs, signalsFor });
