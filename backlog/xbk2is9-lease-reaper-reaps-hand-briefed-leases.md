@@ -27,7 +27,8 @@ second acquire. Blocker: it strips protection from live work on every hand-brief
 - Same shape, same ~10–12 min gap, today: lane-5 (`conveyor-4337` 14:17→14:28Z), lane-12 (`conveyor-4349`
   17:11→17:22Z), lane-13 (`conveyor-4344` 17:12→17:24Z), lane-14 (`conveyor-4345` 17:38→17:49Z), lane-16
   (`conveyor-4290` 17:36→17:47Z), lane-17 (`conveyor-4360` → 20:16:58Z), lane-20 (`conveyor-4317` → 20:21Z),
-  lane-22 (`conveyor-4291` → 20:33Z). This explains the 1:30 PM `lane-pool status` showing no leases while
+  lane-22 (`conveyor-4291` → 20:33Z). lane-21 (`conveyor-4347`, PR #2862) was reaped FOUR times as its worker
+  kept re-acquiring: 20:09→20:21, 20:22→20:33, 20:35→20:46, 20:46→20:59Z (reaper log lines 3582–3606). This explains the 1:30 PM `lane-pool status` showing no leases while
   workers were active in 12/13/14/16.
 - Leases acquired under a non-dispatcher name (e.g. lane-8 `pin-and-role-card`, lane-12 `rescope-gh-budget`)
   were NOT reaped — `sessionGoneForLease` returns `null` for them.

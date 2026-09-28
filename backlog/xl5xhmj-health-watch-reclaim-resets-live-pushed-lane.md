@@ -29,6 +29,9 @@ mid-verify or mid-PR.
 - Lines 76501/76546: verdict `unknown-work` (PR #2861 OPEN), `preserved: true`, outcome `reclaimed: true`,
   log `lane-18: reset — content already on a remote ref, nothing to salvage`. No liveness check on this path;
   the same owner session was live one tick earlier.
+- Recurred on lane-21 (#4347, PR #2862): reflog `16:47:24 commit 5df278597` → `17:00:14 reset: moving to
+  origin/main`; health-watch log line 76768 `lane-21: reset — content already on a remote ref`. The worker
+  restored HEAD by hand at 17:07:41; its untracked scratch files were lost and one reset raced its open-pr.
 - Code: `cmdReclaim` enters `cmdReclaimSalvage` only when `(!proof.preserved || hasLitterWorktrees) && flags.salvage`;
   otherwise it falls through to the reset with only a lease check.
 - `planSalvageCandidates` in `we:scripts/conveyor/lane-pool-health-watch.mjs` filters on whois
