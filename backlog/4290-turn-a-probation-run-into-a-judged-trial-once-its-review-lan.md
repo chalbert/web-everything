@@ -2,9 +2,10 @@
 bornAs: x34h6a2
 kind: story
 size: 3
-status: open
+status: active
 scope: ["we:scripts/lib/model-probation.mjs"]
 dateOpened: "2026-09-27"
+dateStarted: "2026-09-28"
 tags: []
 ---
 
@@ -14,4 +15,12 @@ Probation runs already write a scorecard row (executor=antigravity|codex) via we
 
 ## Done when
 
-1. **Executable** — TODO: a command that fails before this item lands and passes after.
+1. **Executable** — `npx vitest run we:scripts/lib/__tests__/model-probation-trials.test.mjs` (fails before: the conversion does not exist; passes after).
+
+## Progress
+
+- we:scripts/lib/model-probation.mjs: `pendingProbationLaunches` (pushed heals with a PR and no trial yet), `trialOutcomeFromPr` (merged → landed, closed → rejected, open + `review:changes` → reworked, else wait), `judgedTrialRow` (a `probation-trial.1` row, `verifiedBy: independent-claude`, `informative: false` never inferred, PR changed files as `filesTouched`, `criticalMiss` stamped via we:scripts/lib/critical-work.mjs `isCriticalMiss`), and the idempotent `judgePendingTrials` sweep. A failed PR lookup leaves the launch pending.
+- New CLI: `node we:scripts/lib/model-probation.mjs judge [--dry-run] [--store=<path>]` reads each pending PR via `gh` and appends trial rows to the shared scorecard store. It never writes the registry, so promotion stays a human decision.
+- The report's `launched … awaiting review` count now leaves out launches that already have a judged trial.
+- Test: we:scripts/lib/__tests__/model-probation-trials.test.mjs goes launcher row → real store (temp file) → sweep → `graduationProgress`.
+- Follow-on (outside this scope): nothing calls `judge` on a schedule yet. It needs a trigger, e.g. a daemon tick or a hook after a `review:changes` or merge.
