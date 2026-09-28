@@ -8,6 +8,7 @@ import {
 import {
   acquireBuildDispatchClaim, releaseBuildDispatchClaim, listBuildDispatchClaims,
 } from '../../../scripts/conveyor/build-dispatch-claim.mjs';
+import { BUILD_DISPATCH_POLICY } from '../../../scripts/conveyor/build-dispatch-policy.mjs';
 
 /** A tick-core answer: both items cleared + queued, both launchable, both on the SAME file. */
 function sameFileTick(prev = {}) {
@@ -117,6 +118,59 @@ describe('runBuildDispatchTick', () => {
     const r = await runBuildDispatchTick({ live: true, effects: effectsFor({ lockRoot, pid: 1, dispatches }) });
     expect(r.nextBookkeeping.buildGuards.map((g) => g.num)).toEqual(['3827']);
     expect(r.nextBookkeeping.launchedNums).toEqual(['3827']);
+  });
+
+  /** A fake tick-core answer with `n` freshly-proposed spawns and a caller-supplied `counts`. */
+  function manySpawnsTick(n, counts) {
+    const spawnBuilds = Array.from({ length: n }, (_, i) => ({ num: String(200 + i), lane: i + 1 }));
+    // Each candidate needs its OWN, disjoint scope — an empty scope is held `scope-vs-open-prs` (unprovable
+    // disjointness from open PRs) before the cap is ever reached, which would mask the count this test targets.
+    const scopeFor = (num) => [`plateau-app:src/scratch-${num}.ts`];
+    return {
+      decisions: {
+        statusLine: 'test',
+        counts,
+        spawnBuilds,
+        admission: {
+          queue: spawnBuilds.map((s) => ({ num: s.num, scope: scopeFor(s.num) })),
+          cleared: spawnBuilds.map((s) => ({ num: s.num, ready: true })),
+        },
+      },
+      nextState: {},
+    };
+  }
+  const noInFlightEffects = (planTick) => ({
+    planTick,
+    fetchOpenPrs: () => [{ repo: 'plateau-app', prs: [] }],
+    listClaims: () => [],
+    releaseClaim: () => {},
+    acquireClaim: () => ({ ok: true }),
+    listRunStoreInFlight: () => [],
+    killSwitch: () => ({ engaged: false }),
+    dispatch: () => ({ dispatching: true, lane: 1 }),
+  });
+
+  it('card x0jgunh — reads counts.buildingInFlight (not counts.building) for the cap: 6 freshly-proposed spawns with buildingInFlight:0 still admit up to the cap', async () => {
+    const policy = { ...BUILD_DISPATCH_POLICY, maxConcurrentBuilds: 3 };
+    const r = await runBuildDispatchTick({
+      live: false,
+      policy,
+      effects: noInFlightEffects(() => manySpawnsTick(6, { building: 6, buildingInFlight: 0 })),
+    });
+    // Before the fix, `externalBuilding` read `counts.building` (6) and the cap (3) held ALL 6 candidates —
+    // `plan.dispatch.length` was 0. With `buildingInFlight` (0 — nothing was ACTUALLY in flight before this
+    // tick's own proposals), the daemon admits up to its own cap instead.
+    expect(r.plan.dispatch.length).toBe(3);
+  });
+
+  it('control: an older planTick stub with no counts.buildingInFlight still falls back to counts.building (unchanged behavior for a caller that has not been updated)', async () => {
+    const policy = { ...BUILD_DISPATCH_POLICY, maxConcurrentBuilds: 3 };
+    const r = await runBuildDispatchTick({
+      live: false,
+      policy,
+      effects: noInFlightEffects(() => manySpawnsTick(6, { building: 6 })),
+    });
+    expect(r.plan.dispatch.length).toBe(0);
   });
 });
 

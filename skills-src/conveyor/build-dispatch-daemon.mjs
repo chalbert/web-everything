@@ -147,7 +147,11 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
 
   const spawn = Array.isArray(d.spawnBuilds) ? d.spawnBuilds : [];
   const candidates = spawn.map((s) => ({ num: normNum(s.num), lane: s.lane ?? null, scope: scopeByNum.get(normNum(s.num)) || [] }));
-  const externalBuilding = Number(d.counts?.building) || 0;
+  // Card x0jgunh — `counts.building` includes THIS tick's own freshly-proposed spawns (right for the
+  // interactive conveyor, which launches every spawn it is handed; wrong here, since this daemon only
+  // dispatches a SUBSET up to its own cap). `counts.buildingInFlight` excludes them; fall back to `building`
+  // for a `planTick` stub (tests, older callers) that has not been updated to emit it.
+  const externalBuilding = Number(d.counts?.buildingInFlight ?? d.counts?.building) || 0;
   const plan = planBuildDispatch({ candidates, inFlight, openPrs, externalBuilding, killSwitch: effects.killSwitch(), policy });
 
   const dispatched = [];

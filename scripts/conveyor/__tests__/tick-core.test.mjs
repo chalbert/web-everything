@@ -955,6 +955,36 @@ describe('planTick — composes the tick and threads nextState', () => {
     expect(out.decisions.statusLine).toContain('1 building');
   });
 
+  it('card x0jgunh — counts.buildingInFlight excludes THIS tick\'s own proposed spawns, unlike counts.building', () => {
+    // 2 lanes are leased for unrelated work (num:null — e.g. a soak-break/review session, not a build) and 6
+    // items are launchable with empty bookkeeping (no prior-tick guards at all). Before the fix, a consumer
+    // reading `counts.building` here would see 6 "already in flight" and cap out immediately, even though
+    // NOTHING was in flight before this tick proposed these 6 spawns.
+    const queue = Array.from({ length: 6 }, (_, i) => ({ num: 100 + i, buildQueued: true }));
+    const out = planTick({
+      state: { queue, lanes: [{ num: null }, { num: null }], prs: [] },
+      plan: { launch: queue.map((q, i) => ({ num: q.num, lane: i + 1 })) },
+      freeLanes: [1, 2, 3, 4, 5, 6],
+      bookkeeping: {},
+    });
+    expect(out.decisions.spawnBuilds.length).toBe(6);
+    expect(out.decisions.counts.buildingInFlight).toBe(0);
+    // `counts.building` is unchanged — it DOES count this tick's own spawns (right for the conveyor, which
+    // launches every spawn it is handed).
+    expect(out.decisions.counts.building).toBe(6);
+  });
+
+  it('card x0jgunh — a prior-tick build already holding a leased lane counts 1 in buildingInFlight, not 0 and not double-counted', () => {
+    const out = planTick({
+      state: { queue: [{ num: 50, buildQueued: true }], lanes: [{ num: 50, lane: 7 }], prs: [] },
+      plan: { launch: [] },
+      freeLanes: [],
+      bookkeeping: { tick: 5, buildGuards: [{ num: 50, lane: 7, spawnedTick: 3 }] },
+    });
+    expect(out.decisions.counts.buildingInFlight).toBe(1);
+    expect(out.decisions.counts.building).toBe(1);
+  });
+
   it('shares the free-lane pool across builds and prepares — a prepare never takes a build lane this tick', () => {
     const out = planTick({
       state: { queue: [{ num: 10, buildQueued: true }], unshaped: [{ num: 20 }], lanes: [], prs: [] },
