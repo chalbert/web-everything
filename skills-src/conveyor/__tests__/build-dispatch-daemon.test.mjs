@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   runBuildDispatchTick, settleBookkeeping, readKillSwitch, readDispatchOutcome, KILL_SWITCH_ENV,
-  cliListSettledBuilds, cliListHolds,
+  cliListSettledBuilds, cliListHolds, policyFrom,
 } from '../build-dispatch-daemon.mjs';
 import {
   acquireBuildDispatchClaim, releaseBuildDispatchClaim, listBuildDispatchClaims,
@@ -175,6 +175,28 @@ describe('runBuildDispatchTick', () => {
       effects: noInFlightEffects(() => manySpawnsTick(6, { building: 6 })),
     });
     expect(r.plan.dispatch.length).toBe(0);
+  });
+
+  // #4353 — open-item WIP cap wiring: the CLI flag → policy, and the tick's real pipeline surfacing `plan.openItems`.
+  it('policyFrom threads --max-open-items into the policy the same mechanical way --max-concurrent/--max-open-prs already do', () => {
+    const policy = policyFrom({ 'max-concurrent': '4', 'max-open-prs': '20', 'max-open-items': '9' });
+    expect(policy.maxConcurrentBuilds).toBe(4);
+    expect(policy.maxOpenPrs).toBe(20);
+    expect(policy.maxOpenItems).toBe(9);
+    // an omitted flag falls back to the declared policy default, same as the pre-existing two flags
+    expect(policyFrom({}).maxOpenItems).toBe(BUILD_DISPATCH_POLICY.maxOpenItems);
+  });
+
+  it('runBuildDispatchTick surfaces plan.openItems from real openPrs, and holds a fresh candidate once it is full — naming which item fills it', async () => {
+    const dispatches = [];
+    const openPrs = [{ number: 50, headRefName: 'lane/500-x', labels: [], files: [] }];
+    const policy = { ...BUILD_DISPATCH_POLICY, maxOpenItems: 1 };
+    const r = await runBuildDispatchTick({ live: false, policy, effects: effectsFor({ lockRoot, pid: 1, dispatches, openPrs }) });
+    expect(r.plan.openItems).toEqual({ count: 1, cap: 1, nums: ['500'] });
+    expect(r.plan.hold.filter((h) => h.rule === 'wip-cap').map((h) => h.num)).toEqual(['3827', '2662']);
+    expect(r.plan.hold.find((h) => h.rule === 'wip-cap').reason).toMatch(/500/);
+    // this card must never touch the pre-existing display-only field — still the raw durable in-flight list.
+    expect(r.plan.inFlight).toEqual([]);
   });
 });
 

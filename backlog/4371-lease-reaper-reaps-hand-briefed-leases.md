@@ -2,10 +2,11 @@
 bornAs: xbk2is9
 kind: story
 size: 3
-status: open
+status: resolved
 priority: high
 scope: ["we:scripts/conveyor/lease-reaper.mjs", "we:skills-src/conveyor/delivery-agent-brief.md"]
 dateOpened: "2026-09-28"
+dateResolved: "2026-09-28"
 preparedDate: "2026-09-28"
 tags: ["blocker", "lane-pool", "lease-reaper"]
 ---
