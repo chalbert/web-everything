@@ -235,8 +235,21 @@ export function dispatchPausedHint(pausedKinds = null) {
 /** The operator-facing gloss for a `capacity-cap` hold (#xupukxa) — surfaced beside the token so a held item
  *  always tells the operator WHY it differs from `no free lane`: a lane physically exists, but launching it
  *  would exceed `maxConcurrentLanes`. Nothing to reconcile or clear — either raise `WE_MAX_CONCURRENT_LANES`
- *  (a deliberate, per-machine judgment call) or wait for an active lane to free up. */
-export const CAPACITY_CAP_HINT = 'a free lane exists but launching it would exceed the concurrent-lane cap — raise WE_MAX_CONCURRENT_LANES or wait for a lane to free up';
+ *  (a deliberate, per-machine judgment call) or wait for an active lane to free up.
+ *  #4347 — naming the real active-lease count and the room actually left under the cap, so the CLI's printed
+ *  hold reason never reads as "N lanes are active" when N is really "the cap minus however many ARE active"
+ *  (the exact misread that sent the 08:30 ET on-call hunting phantom active lanes). Held items themselves stay
+ *  `{ num, reason: 'capacity-cap' }` — unchanged shape for `queue-report.mjs`'s exact-string classifier and
+ *  every other consumer — only the human-facing CLI line grows the count. Replaces the old static
+ *  `CAPACITY_CAP_HINT` string constant (removed — nothing else imported it; verified by repo-wide grep). */
+export function capacityCapHint(activeCount, cap) {
+  // Clamp once and DISPLAY the clamped value too (#4347 review round 2, standards-conformance) — printing the
+  // raw `activeCount` while computing `room` from the clamped one let a non-numeric/negative input produce
+  // inconsistent text (e.g. "undefined active, room 8 of cap 8").
+  const active = Math.max(0, Math.floor(activeCount) || 0);
+  const room = Math.max(0, Math.floor(cap) - active);
+  return `${active} active, room ${room} of cap ${cap} — raise WE_MAX_CONCURRENT_LANES or wait for a lane to free up`;
+}
 
 /** The operator-facing gloss for a `pr-limit` hold (we:xniq7xs) — surfaced beside the token so a held item
  *  always tells the operator WHY: too many open, agent-authored, not-yet-`review:accepted` PRs already sit
@@ -1023,7 +1036,7 @@ async function main(argv) {
           : h.reason === 'needs-decision' ? ` (${NEEDS_DECISION_HINT})`
             : h.reason === 'already-done' ? ` (${ALREADY_DONE_HINT}${h.alreadyDonePr?.url ? ` — ${h.alreadyDonePr.url}` : ''})`
               : h.reason === 'branch-drift-blocked' ? ` (${BRANCH_DRIFT_BLOCKED_HINT})`
-              : h.reason === 'capacity-cap' ? ` (${CAPACITY_CAP_HINT})`
+              : h.reason === 'capacity-cap' ? ` (${capacityCapHint(leases.length, maxConcurrentLanes)})`
                 : h.reason === 'dispatch-paused' ? ` (${dispatchPausedHint(dispatchPausedKinds)})`
                   : h.reason === 'pr-limit' ? ` (${PR_LIMIT_HINT})`
                     : '';

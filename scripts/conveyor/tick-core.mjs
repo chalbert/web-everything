@@ -1337,8 +1337,25 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
   availableLanes = loadHeld ? [] : capacityBudget.admitted;
   // `notes` is declared further down (step 9) — stash these here and splice them in there, rather than reorder
   // the whole function around one early-arriving note kind.
-  const capacityCapNotes = capacityBudget.overflow.map((l) =>
-    ({ kind: 'capacity-cap', lane: l, text: `⏸ lane-${l} available but withheld — concurrent-lane cap (${cfg.maxConcurrentLanes}) reached` }));
+  // #4347 — ONE summary note for the whole withheld batch, never one per withheld lane. A real tick can have
+  // dozens of free lanes sitting idle behind a small cap (68 on 2026-09-28, cap 8, only 2 lanes actually
+  // active) — a note per lane reads as "N lanes are ACTIVE", not "N lanes are unused because room ran out",
+  // and sent the 08:30 ET on-call hunting 8 phantom active lanes instead of the two real holds (load-cap,
+  // the build daemon's own cap). `lanes` keeps every withheld id (nothing is lost), the text instead names the
+  // real active count and the real room so the reader never has to reverse-engineer either from a note count.
+  const capacityCapActiveCount = lanes.length + launched.spawn.length;
+  // `capacityBudget.admitted.length` is used ONCE, as "room" — whenever this note fires (overflow non-empty),
+  // `admitted.length` already equals the room the ceiling left (capToConcurrency admits exactly `room` lanes
+  // once the candidate list is longer than that), so restating it a second time as "N admitted this tick"
+  // said the identical number twice for no added information (#4347 review round 2, simplicity).
+  const capacityCapNotes = capacityBudget.overflow.length > 0
+    ? [{
+        kind: 'capacity-cap',
+        lanes: [...capacityBudget.overflow],
+        text: `⏸ ${capacityBudget.overflow.length} free lane${capacityBudget.overflow.length === 1 ? '' : 's'} unused — `
+          + `room ${capacityBudget.admitted.length} of cap ${cfg.maxConcurrentLanes} (${capacityCapActiveCount} active)`,
+      }]
+    : [];
   const loadCapNotes = (loadHeld ? capacityBudget.admitted : []).map((l) =>
     ({ kind: 'load-cap', lane: l, text: `⏸ lane-${l} available but withheld — ${loadCapReading(loadAdmission)}` }));
 

@@ -1675,6 +1675,56 @@ describe('planTick — maxConcurrentLanes (#xupukxa, live incident 2026-09-07: 1
     expect(out.decisions.spawnPrepareScope).toEqual([{ num: 20, lane: 5 }]);
     expect(out.decisions.notes.some((n) => n.kind === 'capacity-cap')).toBe(false);
   });
+
+  it('#4347 — collapses every withheld free lane into ONE summary note naming the real active count and room, not one note per lane (live incident 2026-09-28: 68 per-lane notes read as "8 lanes active" when only 2 were)', () => {
+    const out = planTick({
+      state: {
+        queue: [],
+        unshaped: Array.from({ length: 6 }, (_, i) => ({ num: 20 + i })), // 6 launchable prepare-scope items
+        lanes: [{ lane: 1, num: 1 }, { lane: 2, num: 2 }], // 2 leased lanes already active
+        prs: [],
+      },
+      plan: { launch: [] },
+      freeLanes: Array.from({ length: 20 }, (_, i) => 10 + i), // 20 free lanes, only 6 fit under room
+      bookkeeping: { tick: 0 },
+      config: { maxConcurrentLanes: 8 }, // room = 8 - 2 = 6
+    });
+    // all 6 launchable items got a lane — the fix must never shrink what actually gets assigned
+    expect(out.decisions.spawnPrepareScope).toHaveLength(6);
+    // Filter on `kind` ALONE (never also on `lanes`) — this is what actually defends the "ONE note, not one
+    // per lane" guarantee. A regression back to a `lane`-per-entry shape must fail this assertion, not slip
+    // past it because the filter only ever looked at the new shape (#4347 review round 1).
+    const capNotes = out.decisions.notes.filter((n) => n.kind === 'capacity-cap');
+    expect(capNotes).toHaveLength(1); // exactly ONE note, never one per withheld lane
+    expect(Array.isArray(capNotes[0].lanes)).toBe(true);
+    // Full boundaries, never a bare number — `toContain('2 active')` would also pass on "12 active" and
+    // `toContain('room 6')` on "room 60" (#4347 review round 2 red-team, standards-conformance).
+    expect(capNotes[0].text).toContain('(2 active)');
+    expect(capNotes[0].text).toContain('room 6 of cap 8');
+    expect(capNotes[0].lanes).toHaveLength(14); // 20 free - 6 assigned = 14 withheld, still named (nothing lost)
+  });
+
+  it('#4347 — the note\'s active count folds in THIS tick\'s own build launches, not only already-leased lanes (review round 2, standards-conformance: the prior case alone never exercised `launched.spawn.length` > 0)', () => {
+    const out = planTick({
+      state: {
+        queue: [{ num: 10, buildQueued: true }], // 1 build launches THIS tick
+        unshaped: Array.from({ length: 6 }, (_, i) => ({ num: 20 + i })),
+        lanes: [{ lane: 1, num: 1 }], // only 1 lane already active BEFORE this tick
+        prs: [],
+      },
+      plan: { launch: [{ num: 10, lane: 4 }] },
+      freeLanes: [4, ...Array.from({ length: 20 }, (_, i) => 10 + i)], // lane 4 for the build + 20 for prepare
+      bookkeeping: { tick: 0 },
+      config: { maxConcurrentLanes: 8 }, // active = 1 leased + 1 build launch = 2 → room = 8 - 2 = 6
+    });
+    expect(out.decisions.spawnBuilds).toEqual([{ num: 10, lane: 4 }]);
+    const capNotes = out.decisions.notes.filter((n) => n.kind === 'capacity-cap');
+    expect(capNotes).toHaveLength(1);
+    // "2 active" here is 1 pre-existing lease + 1 build THIS tick — a note that dropped `launched.spawn.length`
+    // would read "(1 active)" and "room 7" instead, and these full-boundary assertions would catch it.
+    expect(capNotes[0].text).toContain('(2 active)');
+    expect(capNotes[0].text).toContain('room 6 of cap 8');
+  });
 });
 
 describe('planTick — loadAdmission (#4076): a SECOND, ORTHOGONAL gate beside the fixed lane ceiling', () => {
