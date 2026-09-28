@@ -62,6 +62,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import matter from 'gray-matter';
 import { appendScorecard as appendScorecardRow } from '../conveyor/run-scorecard-store.mjs';
 import { CONSTELLATION_REPOS, DEFAULT_REPO_KEY } from '../lib/constellation-repos.mjs';
 import { hookSurfaceChanged, resetHookSurface, snapshotHookSurface, withHooksDisabled } from '../lib/git-hook-surface.mjs';
@@ -213,14 +214,17 @@ export async function runProbationBuild(args, io) {
     // Captured right after the claim succeeds, BEFORE this run's own commit ever exists — see the file
     // docblock for why a plain `git reset --hard` back to this sha (never `backlog.mjs release`) is what
     // `abandon` uses to undo the claim along with everything after it, in one step.
-    baseSha = io.headSha(lanePath);
+    // #4291 advisory finding (codex-correctness) — `baseSha` is set to the KNOWN pre-claim sha BEFORE the
+    // post-claim re-read, so a throw from that re-read (the claim already succeeded) still reaches the catch
+    // with a base to reset to, and the claim is undone rather than left `active` in the lane.
+    baseSha = preClaimSha;
+    const postClaimSha = io.headSha(lanePath);
     // #4291 plan review, round 4 (claim-accuracy) — verified LIVE, not just asserted: if `claim` ever committed
-    // (moving HEAD), `baseSha` just captured would be that commit, not a true pre-claim state, and every
-    // `abandon` path's `git reset --hard` would silently stop being the full undo the file docblock promises.
-    if (baseSha !== preClaimSha) {
-      const moved = baseSha;
-      baseSha = null; // nothing was legitimately captured — `abandon` must not reset to an unexplained HEAD.
-      return abandon('escalated-needs-human', `claim moved HEAD (${preClaimSha} → ${moved}) — refusing before running any worker, because this launcher's undo assumes claim never commits`, {}, 'none');
+    // (moving HEAD), the pre-claim sha is no longer the lane's own state, and every `abandon` path's
+    // `git reset --hard` would silently stop being the full undo the file docblock promises.
+    if (postClaimSha !== preClaimSha) {
+      baseSha = null; // `abandon` must not reset across an unexplained commit.
+      return abandon('escalated-needs-human', `claim moved HEAD (${preClaimSha} → ${postClaimSha}) — refusing before running any worker, because this launcher's undo assumes claim never commits`, {}, 'none');
     }
     // Snapshot what is untracked BEFORE the worker runs, so only files it creates can join the build.
     preexisting = io.untracked(lanePath);
@@ -249,7 +253,12 @@ export async function runProbationBuild(args, io) {
     // capability this loses so much as a precondition this launcher was always going to need anyway — and it
     // closes the whole class of "the denylist didn't name X" findings at once, rather than growing the list
     // forever.
-    const scopeEntries = declaredScopePaths(args.scope);
+    // #4291 advisory finding (codex-correctness) — the allowlist is the CARD's own `scope:` as read in this
+    // lane, never the dispatch's `--scope` argument: a stale or overridden dispatch scope must not widen what
+    // the worker may touch. `--scope` is what the lane LEASED, so a touched path must fall inside BOTH: the card
+    // grants the edit, the lease keeps it off files a sibling lane may hold.
+    const scopeEntries = declaredScopePaths(item.scope);
+    const leasedEntries = declaredScopePaths(args.scope);
     if (!scopeEntries.length) {
       return abandon('not-applicable', 'the item declares no scope: — refusing before running any worker; a doc-fix build needs a declared scope to bound what the worker may touch', {}, 'none');
     }
@@ -261,7 +270,7 @@ export async function runProbationBuild(args, io) {
     // once.
     const excludeFromDiff = [...preexisting, item.path];
 
-    const task = buildDocFixTask({ num, title: item.title, spec: item.spec, scope: args.scope });
+    const task = buildDocFixTask({ num, title: item.title, spec: item.spec, scope: item.scope });
     const taskFile = io.writeTaskFile(lanePath, 'probation-build-task.md', task);
     const preHookSurface = hookReset.snapshot;
     log(`running ${worker.launcher} --model=${worker.model}`);
@@ -299,7 +308,7 @@ export async function runProbationBuild(args, io) {
     // fallback that no longer exists — see the "no declared scope" refusal above). The ALLOWLIST is the item's
     // own declared `scope:`, guaranteed non-empty by that refusal: the worker may touch ONLY the paths the item
     // itself names.
-    const outOfScopePaths = summary.paths.filter((p) => !pathInScope(p, scopeEntries));
+    const outOfScopePaths = summary.paths.filter((p) => !pathInScope(p, scopeEntries) || !pathInScope(p, leasedEntries));
     if (outOfScopePaths.length) {
       return abandon('gate-red', `not built: touched path(s) outside the item's own declared scope — a doc-fix worker may edit only what the item names: ${outOfScopePaths.join(', ')}`, { diff: diffRow });
     }
@@ -429,7 +438,10 @@ export function realIo({ session, env = process.env } = {}) {
       // `raw` — the file's whole text, unmodified — is what `frontmatterTamperedBeyondClaim` compares a later
       // re-read against (#4291 plan review): `spec` alone (the body) cannot see a worker that rewrites a
       // frontmatter FIELD (`scope:`, `blockedBy:`, …) rather than the body.
-      return { path, slug: name.slice(String(n).length + 1, -3), title: titleMatch ? titleMatch[1].trim() : '', spec: body, raw: text };
+      // `scope` — the card's own declared `scope:` (the build's edit allowlist); anything but a list reads as none.
+      let scope = [];
+      try { const s = matter(text).data?.scope; if (Array.isArray(s)) scope = s.filter((p) => typeof p === 'string' && p.trim()).map((p) => p.trim()); } catch { /* unparseable frontmatter → no scope → refused */ }
+      return { path, slug: name.slice(String(n).length + 1, -3), title: titleMatch ? titleMatch[1].trim() : '', spec: body, raw: text, scope };
     },
     claim: (n, s, dir) => node('scripts/backlog.mjs', ['claim', String(n), `--session=${s}`], { cwd: dir, env: laneEnv }).ok,
     headSha: (dir) => sh('git', ['-C', dir, 'rev-parse', 'HEAD'], { env: laneEnv }).trim(),

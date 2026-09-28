@@ -10,8 +10,25 @@
  * ever pushed on a failure path, so a plain `git reset --hard` back to the pre-claim HEAD undoes the claim
  * along with everything after it in one step; there is no separate "release the claim" call at all.
  */
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { openPrArgv, parseArgs, runProbationBuild } from '../probation-build-run.mjs';
+import { openPrArgv, parseArgs, realIo, runProbationBuild } from '../probation-build-run.mjs';
+
+describe('realIo().findItem — the card\'s own scope is what the arc allowlists (#4291 advisory finding)', () => {
+  const withCard = (text, fn) => {
+    const dir = mkdtempSync(join(tmpdir(), 'probation-build-find-'));
+    try { mkdirSync(join(dir, 'backlog')); writeFileSync(join(dir, 'backlog', '4291-x.md'), text); return fn(realIo({ session: 's' }).findItem('4291', dir)); } finally { rmSync(dir, { recursive: true, force: true }); }
+  };
+  it('reads an inline-array scope', () => withCard('---\nstatus: open\nscope: ["we:docs/a.md"]\n---\n\n# X\n', (item) => expect(item.scope).toEqual(['we:docs/a.md'])));
+  it('reads a block-list scope', () => withCard('---\nstatus: open\nscope:\n  - we:docs/a.md\n  - we:docs/b/\n---\n\n# X\n', (item) => expect(item.scope).toEqual(['we:docs/a.md', 'we:docs/b/'])));
+  it('no scope, or a non-list scope, reads as none', () => {
+    withCard('---\nstatus: open\n---\n\n# X\n', (item) => expect(item.scope).toEqual([]));
+    withCard('---\nstatus: open\nscope: we:docs/a.md\n---\n\n# X\n', (item) => expect(item.scope).toEqual([]));
+    withCard('---\nstatus: open\nscope: ["", "  ", null]\n---\n\n# X\n', (item) => expect(item.scope).toEqual([]));
+  });
+});
 
 describe('openPrArgv — every probation build PR is parked review:pending, never label-on-green (#4291 plan review round 3)', () => {
   it('carries --mode=park --parkLabel=review:pending --requireVerified=true, never label-on-green', () => {
@@ -29,13 +46,16 @@ describe('openPrArgv — every probation build PR is parked review:pending, neve
 const codex = { id: 'codex', provider: 'codex', model: 'gpt-6-astra', executor: 'codex', launcher: 'scripts/codex-direct-task.mjs', checker: null, taskType: 'doc-fix' };
 
 /** A fake io: a claimed item whose worker diff, gate and PR-open result the test chooses. */
-const ITEM_RAW = '---\nstatus: open\nscope: ["we:a.md"]\n---\n\n## Done when\n\n1. it works.';
+// The card's own `scope:` (in `raw` AND the parsed `scope`) is what bounds the worker — kept consistent with
+// the happy-path numstat below, never only the dispatch's `--scope` argument (#4291 advisory finding).
+const ITEM_RAW = '---\nstatus: open\nscope: ["we:backlog-docs/probation.md"]\n---\n\n## Done when\n\n1. it works.';
 
 function fakeIo({
-  lane = '/lanes/22', item = { path: 'backlog/4291-probation-launcher.md', slug: 'probation-launcher', title: 'Probation launcher', spec: '## Done when\n\n1. it works.', raw: ITEM_RAW },
+  itemScope = ['we:backlog-docs/probation.md'],
+  lane = '/lanes/22', item = { path: 'backlog/4291-probation-launcher.md', slug: 'probation-launcher', title: 'Probation launcher', spec: '## Done when\n\n1. it works.', raw: ITEM_RAW, scope: itemScope },
   claimOk = true, numstat = '1\t20\tbacklog-docs/probation.md', gate = true, resolveOk = true, openPr: openPrResult = { ok: true, pr: 9001, url: 'https://x/9001' },
   throwOn = null, postWorkerSpec = null, postWorkerRaw = null, claimTamperedRaw = null, runWorkerOk = true,
-  headShaSequence = null, hookResetClean = true, hookTampered = false,
+  headShaSequence = null, throwOnHeadShaCall = null, hookResetClean = true, hookTampered = false,
 } = {}) {
   const calls = [];
   const boom = (name) => { if (throwOn === name) throw new Error(`${name} exploded`); };
@@ -60,12 +80,13 @@ function fakeIo({
     claim: () => { calls.push(['claim']); return claimOk; },
     // Call 1 is pre-claim, call 2 is post-claim — `headShaSequence` (e.g. `['a', 'b']`) simulates `claim`
     // itself moving HEAD (a commit), which every `abandon` path's undo assumes never happens.
-    headSha: () => { boom('headSha'); headShaCalls += 1; return headShaSequence ? headShaSequence[headShaCalls - 1] ?? headShaSequence.at(-1) : 'base-sha'; },
+    // `throwOnHeadShaCall` (e.g. `2`) throws on that ONE call only — the post-claim read after a successful claim.
+    headSha: () => { boom('headSha'); headShaCalls += 1; if (headShaCalls === throwOnHeadShaCall) throw new Error('headSha exploded'); return headShaSequence ? headShaSequence[headShaCalls - 1] ?? headShaSequence.at(-1) : 'base-sha'; },
     writeTaskFile: (_d, name, text) => { calls.push(['task', name, text.length > 0]); return `/lanes/22/.git/${name}`; },
     runWorker: (argv) => { boom('runWorker'); calls.push(['worker', argv[0], argv.find((a) => a.startsWith('--model='))]); return { ok: runWorkerOk, out: runWorkerOk ? '' : 'timed out' }; },
     untracked: () => ['node_modules'],
     diffNumstat: (_d, _base, exclude) => { calls.push(['numstat', exclude]); return numstat; },
-    discardChanges: () => calls.push(['discard']),
+    discardChanges: (_d, base) => calls.push(['discard', base]),
     resolveItem: () => { boom('resolveItem'); calls.push(['resolve']); return resolveOk ? { ok: true } : { ok: false, reason: 'open-children' }; },
     commit: (_d, paths, msg) => { boom('commit'); calls.push(['commit', paths, msg.split('\n')[0]]); },
     runGate: () => { calls.push(['gate']); return { pass: gate, output: 'gate out' }; },
@@ -174,12 +195,12 @@ describe('runProbationBuild — the arc', () => {
       expect(r.outcome).toBe('opened-pr');
     });
     it('a scope entry ending in `/` is a DIRECTORY prefix — every file under it is in scope (#4291 plan review round 9)', async () => {
-      const { io } = fakeIo({ numstat: '1\t20\tbacklog-docs/guides/anything.md' });
+      const { io } = fakeIo({ numstat: '1\t20\tbacklog-docs/guides/anything.md', itemScope: ['we:backlog-docs/guides/'] });
       const r = await runProbationBuild(args(codex, { scope: 'we:backlog-docs/guides/' }), io);
       expect(r.outcome).toBe('opened-pr');
     });
     it('a cross-repo scope entry (e.g. `frontierui:docs/a.md`) never allowlists a same-named WE path — this launcher only ever builds in the WE lane (#4291 plan review round 10)', async () => {
-      const { io, calls } = fakeIo({ numstat: '1\t2\tdocs/a.md' });
+      const { io, calls } = fakeIo({ numstat: '1\t2\tdocs/a.md', itemScope: ['frontierui:docs/a.md'] });
       const r = await runProbationBuild(args(codex, { scope: 'frontierui:docs/a.md' }), io);
       expect(r.outcome).toBe('not-applicable'); // stripped to nothing → no declared (WE) scope → refused
       expect(r.detail).toMatch(/declares no scope/);
@@ -203,8 +224,44 @@ describe('runProbationBuild — the arc', () => {
     });
   });
 
+  it('a dispatch --scope broader than the card\'s own declared scope never widens the allowlist — the card governs (#4291 advisory finding)', async () => {
+    // The dispatch argument allows `backlog-docs/probation.md`; the card (read in the lane) declares only `a.md`.
+    const { io, calls } = fakeIo({ itemScope: ['we:backlog-docs/a.md'] });
+    const r = await runProbationBuild(args(), io);
+    expect(r.outcome).toBe('gate-red');
+    expect(r.detail).toMatch(/outside the item's own declared scope.*: backlog-docs\/probation\.md$/);
+    expect(calls.some((c) => c[0] === 'resolve')).toBe(false);
+    expect(calls.some((c) => c[0] === 'discard')).toBe(true);
+  });
+
+  it('a card scope WIDER than the leased dispatch --scope never lets the worker edit an unleased path (#4291 advisory repair review)', async () => {
+    const { io, calls } = fakeIo({ itemScope: ['we:backlog-docs/'], numstat: '1\t2\tbacklog-docs/other.md' });
+    const r = await runProbationBuild(args(), io); // leased only backlog-docs/probation.md
+    expect(r.outcome).toBe('gate-red');
+    expect(r.detail).toMatch(/outside the item's own declared scope.*: backlog-docs\/other\.md$/);
+    expect(calls.some((c) => c[0] === 'resolve')).toBe(false);
+  });
+
+  it('a card with no declared scope is refused even when the dispatch passed a --scope (#4291 advisory finding)', async () => {
+    const { io, calls } = fakeIo({ itemScope: [] });
+    const r = await runProbationBuild(args(), io);
+    expect(r.outcome).toBe('not-applicable');
+    expect(r.detail).toMatch(/declares no scope/);
+    expect(calls.some((c) => c[0] === 'worker')).toBe(false);
+  });
+
+  it('a HEAD read that throws AFTER a successful claim still undoes the claim, resetting to the known pre-claim sha (#4291 advisory finding)', async () => {
+    const { io, calls } = fakeIo({ throwOnHeadShaCall: 2 });
+    const r = await runProbationBuild(args(), io);
+    expect(r.outcome).toBe('escalated-needs-human');
+    expect(r.detail).toMatch(/unexpected error: headSha exploded/);
+    expect(calls.some((c) => c[0] === 'claim')).toBe(true);
+    expect(calls.find((c) => c[0] === 'discard')).toEqual(['discard', 'base-sha']);
+    expect(calls.some((c) => c[0] === 'worker')).toBe(false);
+  });
+
   it('an item with no declared scope is refused before any worker runs (#4291 plan review round 7)', async () => {
-    const { io, calls } = fakeIo();
+    const { io, calls } = fakeIo({ itemScope: [] });
     const r = await runProbationBuild(args(codex, { scope: '' }), io);
     expect(r.outcome).toBe('not-applicable');
     expect(r.detail).toMatch(/declares no scope/);
@@ -232,7 +289,7 @@ describe('runProbationBuild — the arc', () => {
   });
 
   it('a worker forging `graduatedTo:`/`codifiedIn:` directly is caught as tamper too — this launcher never sets those itself, so they are NOT in its own allowlist even though the shared default permits them (#4291 plan review round 8)', async () => {
-    const { io, calls } = fakeIo({ postWorkerRaw: '---\nstatus: open\nscope: ["we:a.md"]\ngraduatedTo: "some-standard"\n---\n\n## Done when\n\n1. it works.' });
+    const { io, calls } = fakeIo({ postWorkerRaw: '---\nstatus: open\nscope: ["we:backlog-docs/probation.md"]\ngraduatedTo: "some-standard"\n---\n\n## Done when\n\n1. it works.' });
     const r = await runProbationBuild(args(), io);
     expect(r.outcome).toBe('escalated-needs-human');
     expect(r.detail).toMatch(/edited the item's own backlog card/);
