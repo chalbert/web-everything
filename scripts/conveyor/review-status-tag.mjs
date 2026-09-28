@@ -87,11 +87,28 @@ export function deriveReviewStatus({ pr, agents = [], repo = 'we', isDraft = fal
   const fixName = mintSessionSlug({ kind: 'fix', id: pr, repo });
   const ciHealName = mintSessionSlug({ kind: 'ci-heal', id: pr, repo });
   const list = Array.isArray(agents) ? agents : [];
+  // Live incident 2026-09-28 (we#2852): `we:scripts/conveyor/reconcile-core.mjs`'s own `markSelfReportedDone`/
+  // `markAuthExpiredSessions`/`markIdleFinishedSessions` already stamp a FINISHED verdict onto these SAME agent
+  // rows (wired in by `we:scripts/conveyor/reconcile-pass.mjs#defaultReadAgents`, which the review daemon feeds
+  // straight into this function via `tagReviewStatus`'s `agents` param) — but this module used to look at
+  // nothing except the raw `claude agents --json` `state`, so a ci-heal session that had genuinely finished
+  // (its own completion record said `done`, its dispatch claim was released) still read as `blocked` here
+  // forever — the CLI never prunes a finished row — and got tagged `ci-heal-stalled`, which
+  // `we:scripts/conveyor/build-dispatch-policy.mjs` then read as a landing freeze on EVERY queued build. A row
+  // bearing any of these three markers is finished — exclude it from `LIVE_STATES` matching regardless of its
+  // raw `state`, mirroring `reconcile-core.mjs#assessLiveness`'s own `isFinished`.
+  //
+  // DELIBERATELY NOT excluding `hung: true` here, unlike `assessLiveness` (which treats `hung` as finished too,
+  // because ITS job is "may I redispatch a fresh session" — a hung session must not block that). This module's
+  // job is the opposite: surfacing to a human that a session may be stuck (the 211-hour permission-block hazard
+  // its own header names) — a transcript that has gone stale with no self-report is exactly that hazard, not
+  // evidence of a clean finish, so it must keep reading as `-stalled`.
+  const isFinishedOverride = (a) => a?.selfReportedDone === true || a?.authExpired === true || a?.idleFinished === true;
   // Prefer a `working` match over a `blocked` one for the SAME name (several historical rows can share a
   // name) — a session actually making progress right now is more informative than a stuck sibling. A `done`/
   // other row is simply not a candidate at all — see LIVE_STATES.
   const liveFor = (name) => {
-    const matches = list.filter((a) => a?.name === name && Object.hasOwn(LIVE_STATES, a.state));
+    const matches = list.filter((a) => a?.name === name && Object.hasOwn(LIVE_STATES, a.state) && !isFinishedOverride(a));
     return matches.find((a) => a.state === 'working') ?? matches[0] ?? null;
   };
   const review = liveFor(reviewName);

@@ -351,7 +351,13 @@ async function dryRun(flags) {
     mode: 'dry-run',
     at: new Date().toISOString(),
     statusLine: tick.statusLine,
-    policy: { maxConcurrentBuilds: policy.maxConcurrentBuilds, maxOpenPrs: policy.maxOpenPrs, freezeLabels: policy.freezeLabels },
+    policy: {
+      maxConcurrentBuilds: policy.maxConcurrentBuilds, maxOpenPrs: policy.maxOpenPrs,
+      // #3383 continuation, live incident 2026-09-28 — `globalFreezeLabels` is what actually freezes every
+      // candidate now; the three per-PR `*-stalled` labels only hold a scope-overlapping build (`freezeLabels`
+      // still lists all four for anything reading the historical shape, kept alongside, not replaced).
+      globalFreezeLabels: policy.globalFreezeLabels ?? policy.freezeLabels, freezeLabels: policy.freezeLabels,
+    },
     killSwitch: cliKillSwitch(),
     freeze: tick.plan.freeze,
     openPrs: normalizeOpenPrs(openPrs).map((p) => `${p.repo}#${p.number}`),
@@ -364,7 +370,7 @@ async function dryRun(flags) {
   const w = (s) => process.stdout.write(`${s}\n`);
   w(`build-dispatch-daemon DRY RUN @ ${report.at}`);
   w(`  tick core: ${report.statusLine}`);
-  w(`  policy: cap ${policy.maxConcurrentBuilds} builds · freeze if open PRs > ${policy.maxOpenPrs} or any of [${policy.freezeLabels.join(', ')}]`);
+  w(`  policy: cap ${policy.maxConcurrentBuilds} builds · GLOBAL freeze if open PRs > ${policy.maxOpenPrs} or any of [${(policy.globalFreezeLabels ?? policy.freezeLabels).join(', ')}] · a per-PR *-stalled label only holds a scope-overlapping build (scope-vs-open-prs)`);
   w(`  kill switch: ${report.killSwitch.engaged ? `ENGAGED (${report.killSwitch.reason})` : 'off'} · landing freeze: ${report.freeze.frozen ? `ON — ${report.freeze.reasons.join('; ')}` : 'off'}`);
   w(`  open PRs: ${report.openPrs.join(', ') || 'none'} · durable in-flight builds (claims/run records): ${report.inFlight.map((f) => `#${f.num} (${f.source})`).join(', ') || 'none'} · tick core counts ${core.building} building`);
   w(`  would dispatch now: ${report.wouldDispatchNow.map((n) => `#${n}`).join(', ') || 'nothing'}`);
