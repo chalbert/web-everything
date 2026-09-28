@@ -174,6 +174,34 @@ leftover work as new backlog items (`scaffold` with `blockedBy` + a digest) rath
   And never echo the item's own title or slice name back as a completion claim ("closes X") in a commit or
   PR unless the diff truly closes it end-to-end — say what you actually closed instead.
 
+**Mid-work check — a targeted sanity check while you iterate, never the full gate (#4294).** Step 5's
+`verify-lane.mjs request`/`check` cycle is the only terminal, landing-eligible signal, and it runs once, after
+your work is done. That does not mean you fly blind between now and then: while you are still iterating
+mid-task, sanity-check the files you have actually touched so far with a **targeted, admission-queued `vitest
+related` pass**, instead of guessing or reaching for the full suite:
+
+```bash
+node scripts/readiness/heavy-admission.mjs run -- npx vitest related <touched-file-1> <touched-file-2> … --run --passWithNoTests
+```
+
+**Keep `--run --passWithNoTests` on it, always.** Without `--run`, `vitest` can drop into watch mode on a TTY
+shell and hang inside the admission wrapper. Without `--passWithNoTests`, a touch-set with no covering tests at
+all (a doc, a config, a helper nothing tests directly) exits non-zero — a false red on a harmless case, not a
+real failure.
+
+This is the **admitted-wrapper** shape `we:scripts/guard-bash.mjs` already sanctions for a dispatched agent — its
+head is `node heavy-admission.mjs run`, never the raw `npx vitest …` head `dispatchedAgentVerificationReason`
+denies (only `verify-lane.mjs request`/`check`/`reset` are the other members of that allowlist, #3105) — so,
+unlike a bare `node scripts/verify-lane.mjs run`, it is **not denied** to a mechanically-dispatched agent. It
+also queues through the host's heavy-admission pool rather than skipping it (#3461). See
+`scripts/__tests__/guard-bash.test.mjs`'s *"the admitted wrapper form of a targeted `vitest related` is NOT
+denied to a dispatched agent, any kind"* test (sibling to the pre-existing one covering the `vitest run`
+spelling) for the guard's own proof of this exact shape.
+`vitest related <files>` runs only the tests that actually cover the source files you list — narrower and much
+faster than `verify-lane.mjs`'s own diff-driven default, appropriate for a quick mid-work loop. Run it as often
+as useful while you work; it is advisory only and **never** substitutes for step 5's terminal gate, `pr-land`'s
+finish-guard, or CI's `test` check — none of which it satisfies.
+
 ### 5. Run the gate GREEN (in the item's own locus)
 
 A WE item's gate is `npm run check:standards`. For a cross-locus item, run **that** locus's gate

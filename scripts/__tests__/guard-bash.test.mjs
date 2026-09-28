@@ -170,6 +170,17 @@ describe('guard-bash — the raw heavy spellings join the verification set (xaip
     expect(isHeavyRawRun(c)).toBe(false);
     expect(dispatchedAgentVerificationReason(c, 'build')).toBeNull();
   });
+  // #4294 — the generic delivery brief's mid-work check uses `vitest related`, not `vitest run`; prove the
+  // same admitted-wrapper exemption holds for that spelling too, for every dispatch kind a delivery agent
+  // can carry (never just 'build').
+  it('the admitted wrapper form of a targeted `vitest related` is NOT denied to a dispatched agent, any kind', () => {
+    const c = 'node scripts/readiness/heavy-admission.mjs run -- npx vitest related scripts/guard-bash.mjs scripts/lib/verify-lane-gate.mjs --run --passWithNoTests';
+    expect(isAdmittedWrapperRun(c)).toBe(true);
+    expect(isHeavyRawRun(c)).toBe(false);
+    for (const kind of ['build', 'fix', 'ci-heal']) {
+      expect(dispatchedAgentVerificationReason(c, kind)).toBeNull();
+    }
+  });
   it('an interactive session is never denied a foreground raw run, but may not background it (raw or wrapped)', () => {
     // xxna58l (#3383) — a subset of RAW is now ALSO denied in the foreground, for the unrelated reason that it
     // skips the #3461 admission queue entirely (a raw whole-suite `vitest run`, or any raw `playwright test`
