@@ -21,13 +21,20 @@ PRs open red on CI repeatedly this week (#2835/#2839/#2843/#2845/#2852/#2854, #4
 
 ## CI inventory — which checks are non-test, and the local command for each
 
-Read live from `we:.github/workflows/` (the only three that trigger on `pull_request`; `we:apply-review-request.yml`/`we:deploy.yml`/`we:publish-contracts.yml`/`we:release-please.yml`/`we:stage-pr-view.yml`/`we:update-visual-baselines.yml` all trigger on `push`-to-a-named-branch or `workflow_dispatch` only and never run against an open PR at all — out of scope, not "can't mirror," genuinely N/A):
+Read live from `we:.github/workflows/` (only three trigger on the PR's own `pull_request` event — `we:ci.yml`,
+`we:soak-replay-gate.yml`, `we:review-gate.yml`. The rest are never triggered by the PR's own commits landing, though
+not all are bare pushes: `we:apply-review-request.yml`/`we:stage-pr-view.yml` trigger on push to a named ops
+branch with a request-path filter — PR-related automation, not a gate on the PR's own diff; `we:deploy.yml`
+triggers on a COMPLETED `CI` workflow run against `main` (`workflow_run`) plus manual dispatch;
+`we:publish-contracts.yml` triggers on a `contracts-v*` tag push plus manual; `we:release-please.yml` triggers
+on push to `main`; `we:update-visual-baselines.yml` is manual-only. None of the six is a gate CI evaluates
+against an open PR's own commits — out of scope, not "can't mirror," genuinely N/A):
 
 | CI job (`we:.github/workflows/ci.yml` unless noted) | Kind | Local mirror |
 | --- | --- | --- |
 | Repo health gate (`test` job) | non-test | `npm run check:standards` (already includes the statute lint, #2854's own gap) |
 | `we:.github/workflows/soak-replay-gate.yml` | non-test | `node we:scripts/soak-replay-gate-cli.mjs --files-status=$(git diff -M --name-status <merge-base> HEAD)`, merge-base computed exactly as `we:scripts/lib/soak-gate-merge-base-diff.mjs` does it — the same fix #4264/#4292 already made for CI's own false-positive |
-| `we:.github/workflows/review-gate.yml` | non-test | N/A on a fresh PR — it reads `github.event.pull_request.labels`, which starts empty; documented, not run |
+| `we:.github/workflows/review-gate.yml` | non-test | N/A, and EXCLUDED from the red-on-open KPI, not merely un-mirrored — `open-pr` defaults a fresh PR to `review:pending` and this check deliberately fails on any review hold, so it is EXPECTED red the moment a PR opens (requiring it green before opening would be circular: review cannot finish before the PR exists) |
 | `test-shard`/`test`, `daemon-soak-scope`/`soak-shard`/`daemon-soak`, `visual` | test | excluded by design — mirroring these IS the unscoped full suite `we:docs/agent/platform-decisions.md#local-gate-never-full-suite-by-default` just forbade as a default |
 | `smoke`'s "Build WE docs" step | non-test | `npm run build:docs` — cheap, catches a broken 11ty template before CI does |
 | `smoke`'s Playwright interaction lane | test | excluded, same reason as the shard jobs |
@@ -41,7 +48,13 @@ Read live from `we:.github/workflows/` (the only three that trigger on `pull_req
 
 `we:scripts/operations/preflight-ci-mirror.mjs#planPreflight({changedFiles, mergeBaseSha, headSha, title, body})` → `{checks: [{name, command, status: 'pass'|'fail'|'skipped', reason?, fix?}], allGreen: boolean}`. PURE decision over INJECTED results — this module decides which checks apply and how to report them; it does not itself shell anything (mirrors `we:scripts/operations/scaffold.mjs`'s own pure-plan/impure-io split). The IO shell (`we:preflight-ci-mirror-io.mjs`, follow-up naming TBD at build time, same split as every other operation here) actually runs `check:standards`, the soak-replay-gate CLI, `build:docs`, and the scoped test-selection command, and feeds their pass/fail + stdout tail back in.
 
-`we:scripts/operations/open-pr.mjs` gains a new refusal reason `check-red`-sibling `ci-red` (distinct from the EXISTING `check-red`, which is `verify`'s own gate marker check — this is a NEW, separate signal, not a rename) in its refusal table, firing before the push step, reporting the FIRST failing check's `name` + `fix` text verbatim so the caller acts on the exact command that failed, never a generic "CI would fail."
+`we:scripts/operations/open-pr.mjs` gains a new refusal reason `ci-red`, distinct in MEANING from the existing
+`check-red` (which already means a required CI check went red AFTER the PR opened — this card's new reason
+covers a check that would have gone red BEFORE the PR is ever submitted). The exact seam is still open (see the
+Independent plan review below): `we:open-pr.mjs` has no push step of its own — its IO shell submits through
+`we:pr-land.mjs` — so the refusal must gate that submission call, not a step that does not exist today. Reports
+the FIRST failing check's `name` + `fix` text verbatim so the caller acts on the exact command that failed,
+never a generic "CI would fail."
 
 **Classification of a red-on-open result** — `we:scripts/conveyor/ci-red-on-open-classify.mjs`, a pure function `classifyRedOnOpen({job, preflightRan, preflightPassed, rerunPassed, loadSignal})`:
 1. `missing-pre-flight-check` — the failing CI job has a local mirror in the table above and `preflightRan` is false OR the mirror's own coverage did not include the failing file (a mirror that exists but was not run, or was run against the wrong diff base). #2852 and #2854 are this class.
@@ -82,10 +95,79 @@ Two PRs in practice, one item here: this card is `blockedBy` x9my7an (the shared
 **Before:** #2852/#2854/#4309, each red-on-open with no local mirror run first (Evidence above).
 **After:** the next PR whose diff would have failed `check:standards`, the soak-replay-gate, or `build:docs` is refused by `open-pr` locally, before push, with the exact fix line — recorded in this item's own update note with the refused command and the PR that would have gone red. If no such case turns up within a week, re-run #2852's and #2854's own diffs (reconstructed via `git show`) through the built preflight and show it would have refused each, labelled as a reconstruction.
 
+## Independent plan review (Codex, read-only, 2026-09-28)
+
+Confidence **High**, build-ready **No**. Not stamped `preparedDate`. Corrections and open gaps:
+
+1. **[correction, folded in above] The CI-inventory table's trigger claims were wrong beyond the PR-triggered
+   three.** Verified against the actual `on:` blocks: `we:deploy.yml` triggers on a completed `CI` workflow run on
+   `main` (`workflow_run`) plus manual dispatch, not a bare push; `we:publish-contracts.yml` triggers on
+   `contracts-v*` tag pushes plus manual; `we:apply-review-request.yml`/`we:stage-pr-view.yml` trigger on push to their
+   named ops branch WITH a request-path filter (they do PR-related work, just never via the `pull_request` event
+   itself). The conclusion — none of the six is a gate CI evaluates against an open PR's own commits — still
+   holds and needed no design change, but the table's phrasing ("never run against an open PR at all") overstated
+   it; corrected to "never triggered by the PR's own `pull_request` event" above.
+2. **[blocker] The "affected tests" step does not actually run affected tests as designed.** `we:scripts/readiness/test-selection.mjs`
+   exports `decideLocalSelection`, but its own CLI entry point (`we:test-selection.mjs:531`) calls `selectTests`
+   (the separate CI-policy path) and only PRINTS a decision — it does not execute the selected tests. Treating
+   that command's exit code as "tests passed" would be a false green; following its CI-policy branch instead of
+   the local gate could reintroduce a broad run, the exact regression `we:docs/agent/platform-decisions.md#local-gate-never-full-suite-by-default`
+   forbids by default. **The INTENDED policy (exclude coverage enforcement, keep the sound automatic-fallback
+   path) is still correct and unchanged** — what's missing is the actual executable seam: which existing local
+   gate machinery runs the selected tests and enforces their exit code, including deleted-file inputs. Open.
+3. **[blocker] The soak-replay-gate mirror command in the table is unsafe as literally written.** It omits
+   `--title`/`--body`; the CLI defaults both to empty, which the evaluator can read as "no bug-fix signal" for a
+   daemon-scoped change — the mirror could pass the exact case (#2852) it exists to catch. The unquoted
+   `--files-status=$(git diff …)` also loses the tab-separated structure `we:soak-replay-gate-cli.mjs:93`'s
+   parser expects. **Open — needs a structured argv (effective PR title/body, intact name-status data) or the
+   CLI's base/head-sha mode, plus a decision on whether the gate code itself is read from the candidate branch or
+   trusted `main` the way CI's own workflow does.**
+4. **[major] `open-pr`'s refusal-table naming is wrong, and there is no push step to gate.** `SUBMIT_OUTCOMES` is
+   the three-element outcome array, not the refusal-reason map (that's a different table, per `we:open-pr.mjs`
+   line 277
+   context); the EXISTING `check-red` means a required CI check went red AFTER the PR opened, not a verify-marker
+   failure — this card's Design section had that backwards and is corrected above (the new refusal is `ci-red`,
+   distinct in meaning from the existing `check-red`, not a "sibling" of it in the sense first written).
+   `we:open-pr.mjs` itself has no push step — its IO shell submits to `we:pr-land.mjs`. **Open — the preflight
+   effect and its refusal need to be defined against that actual submission boundary, and against `open-pr`'s
+   existing inputs (explicit `sha`, non-main `base`, `dryRun`), before this is buildable.**
+5. **[blocker] Nothing in the design names what actually OBSERVES a red-on-open CI result or calls the
+   classifier.** A pure `classifyRedOnOpen` cannot discover a CI failure, capture the initial-head check
+   conclusions, get rerun evidence, or append a row on its own — no task names the poller/webhook/recovery path
+   that feeds it, or defines "red-on-open" precisely (the PR's INITIAL head's check conclusions, as opposed to a
+   later synchronized head). The KPI's denominator (every PR opened in the window, including ones later closed)
+   and its per-PR dedupe rule (multiple failed jobs on one PR) are also undefined; an empty store reporting `0/0`
+   is not yet distinguishable from "never observed." **Open.**
+6. **[major] `review-gate` red is EXPECTED for an ordinary just-opened PR and must be excluded from the KPI, not
+   merely noted as N/A.** `open-pr` defaults a fresh PR to `review:pending`, and `we:review-gate.yml` deliberately
+   fails on any review hold — requiring it green before a PR can open is a logical impossibility (review cannot
+   finish before the PR exists). The pre-flight table already marks it N/A for mirroring; the KPI computation in
+   Interfaces needs the same explicit exclusion, not just the table note. Corrected in the Interfaces section's
+   intent above; the actual KPI query still needs to encode this filter when built.
+7. **[blocker] The shared-storage design with x9my7an is under-specified.** Card 1's row needs two PRs, colliding
+   files, hot-file state, and conflict-shaped cost; this card's row needs one PR, failed job identity, and
+   preflight/rerun evidence — "widen `mode` and `class`" does not by itself define which fields apply to which
+   `mode` or how the rollup avoids blending a CI-red row into a conflict hot-file count (the exact
+   cross-subject blending x9my7an's own design says must never happen). **Open — needs an actual discriminated
+   union spec, and x9my7an's rollup needs a `mode`-scoped filter before this card's rows can land in the same
+   store without corrupting its aggregates.**
+8. **[major] The classifier's four classes are not exhaustive nor fully supported by their stated inputs.**
+   `missing-pre-flight-check` needs real coverage/diff evidence; `test-not-selected` needs the selected vs. failed
+   test identities, neither of which the signature carries. `loadSignal` (Design) and `failureShape` (Interfaces)
+   name the same thing inconsistently. Several real cases (deterministic failure after a passing mirror; a
+   failure never rerun; a non-test failure with no mirror) have no defined outcome. **Open — needs one
+   consistent signature, an explicit precedence order, and an honest `unclassified` outcome.**
+
+**Handling:** item 1 and the `review-gate` KPI-exclusion intent (item 6) and the `check-red`/`ci-red` naming
+(item 4's naming half) are corrected directly in the sections above. The rest (2, 3, 5, 7, 8, and item 4's
+submission-boundary half) are real open design work, not fold-in edits — this card stays `status: open`,
+un-prepared (`preparedDate` withheld), `blockedBy` x9my7an unchanged, until a second design pass closes them and
+a follow-up independent review confirms it.
+
 ## Done when
 
 1. **Executable** — `we:scripts/operations/preflight-ci-mirror.mjs`'s planner fails (reports `allGreen: false`) against a fixture reconstructing #2852's diff (no soak-break scenario, no waiver) and against #2854's diff (the flagged statute wording), and passes against a clean fixture — before this item lands there is no such planner to run at all.
 2. `open-pr` refuses to push when any mirrored check fails, reporting the exact local command to re-run; it still opens cleanly when every mirrored check passes, proven by a test for each of the four checks failing individually.
 3. `classifyRedOnOpen` correctly classifies #2852 → `missing-pre-flight-check`, #2854 → `missing-pre-flight-check`, and a synthetic load-timeout fixture modeled on #4309 → `environment`, and a same-commit-passes-on-rerun fixture → `flaky`.
 4. `we:scripts/progress-board.mjs` reports a non-fabricated `redOnOpenRate` sourced from the shared store, `0/0` (not a crash, not a fabricated 0%) when the store is empty.
-5. No change to `we:review-gate.yml`/`we:deploy.yml`/etc. — this item only adds a NEW local pre-flight step and a NEW classifier; it does not touch or re-trigger any existing CI workflow.
+5. No change to `we:review-gate.yml`/`we:deploy.yml`/etc — this item only adds a NEW local pre-flight step and a NEW classifier; it does not touch or re-trigger any existing CI workflow.

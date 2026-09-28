@@ -70,6 +70,54 @@ One PR, landing incrementally: the store and record module land first (`recordRe
 **Before:** #2821's two undocumented conflicts (Evidence above) — no record exists of either.
 **After:** on the next live conflict this repo hits, record its classified postmortem and post the row (repo, files, class, cost) in this item's own update note. If none lands within a week, run the #2821 fixture reconstruction (Task 5) through the real classifier and rollup and post that, labelled as a reconstruction rather than a live case.
 
+## Independent plan review (Codex, read-only, 2026-09-28)
+
+Confidence **High**, build-ready **No**. Not stamped `preparedDate` — real design gaps remain, listed here so the
+next pass (build or re-prep) starts from them rather than re-discovering them:
+
+1. **[blocker] The classifier is contradictory and incomplete.** `hot-file` is both a primary enum member and an
+   orthogonal flag; if only a flag, there are three primary classes, not four. Uncovered cases exist: both cards
+   declared the file but their dispatch windows never overlapped, or only the LOSING side under-declared while
+   the winner did not. `classifyConflict`'s signature has neither a dispatch-window input nor an explicit
+   losing-side identifier. **Open — needs an exhaustive table + matching signature before build, not resolved
+   here.**
+2. **[blocker] Resolution-time evidence is not actually available when the design assumes it is.** The watch can
+   see the colliding paths while the conflict is live; after repair those paths are not trivially recoverable
+   from the resulting merge state, `main` may carry contributions from several PRs (so "prB" is not automatically
+   one identifiable opponent), and neither completion hook (the watch's self-heal, `we:conflict-fix-mark.mjs`'s
+   comment) is handed the opposing PR, historical scope, or the pre-repair head/base shas. "Known at detection"
+   does not mean "durably available at resolution." **Open — the design's "write once, at resolution" choice
+   needs a real capture-at-detection mechanism (store a minimal detection-time snapshot keyed by an episode id,
+   read it back at resolution) before it is buildable, not the bare label-timeline read this card currently
+   proposes.**
+3. **[blocker] The append is not actually exactly-once as designed.** The watch removes the conflict label after
+   rearming (`we:parked-pr-conflict-watch.mjs:2064`); appending after that point risks losing the record on a
+   crash, appending before risks a duplicate on retry, and there is no episode id or dedupe. The stacked-rebase
+   path can double-observe the same repair from both `we:conflict-fix-mark.mjs` and the watch. `withInfraLock` is
+   best-effort (can proceed unlocked after contention), so citing it does not itself guarantee a lossless write.
+   **Open — needs an episode id + idempotent append (or a dedupe-on-read reconciliation) named explicitly.**
+4. **[major] The cost sources are misdescribed.** `countStaleConflictFixRounds` (`we:conflict-fix-round-count.mjs:149`)
+   returns `{stale, total}` keyed by target ref/sha across ALL trusted markers — it does not scope to one
+   conflict episode, so "fixRounds" needs an explicit episode filter, not a bare call. The scorecard store
+   records scoring data keyed by item/handle, not a PR number, so the proposed direct PR-number join to
+   `tokensUsd` is unsupported as written — either add a real join key or drop the field to always-null with an
+   honest note. Commits pushed ≠ CI runs ≠ push timestamps; `ciRuns`/timing proxies need honest names.
+5. **[major] Aggregation and the operator-facing consumer are undecided.** "One row per resolved conflict" (Done
+   when #1) conflicts with "one row per file when files disagree in class" (Interfaces) — without a shared
+   episode id, `rollupConflictPostmortems`'s `totalConflicts` and repeated cost fields can double-count a
+   multi-file conflict split across rows. The classifier's hot-file threshold window (30 days) and the rollup's
+   default window (7 days) are never explicitly reconciled in one call path. The rollup has no named CLI,
+   scheduled caller, or operator-facing surface — "report-only" needs a landing spot, not just a pure function.
+6. **[minor] `scope:` omits its own call-site test files** (a fixture-driven test at each of the two wiring
+   points is promised in Tasks/Done-when but not listed in `scope:`) and both cards state size 8 with no basis
+   sentence — add one at prep time.
+
+**Handling:** none of the above is resolved in this pass — deliberately, since resolving 1–5 is a real second
+design pass (an episode-id-keyed capture model, an exhaustive classification table, a named aggregation
+consumer), not a fold-in edit. This card stays `status: open`, un-prepared (`preparedDate` withheld) until that
+pass runs and a follow-up independent review confirms it. Item 6 is cheap and should be applied whenever this
+card is next touched.
+
 ## Done when
 
 1. **Executable** — a fixture reconstructing #2821's two 2026-09-27 conflicts against `we:scripts/conveyor/conflict-postmortem-record.mjs` produces two rows: one classified from the #2819/#2821 collision, one from the #2826/#2821 collision, each with a non-null `class` and a `cost.fixRounds` matching the marker-comment count on the real PRs.
