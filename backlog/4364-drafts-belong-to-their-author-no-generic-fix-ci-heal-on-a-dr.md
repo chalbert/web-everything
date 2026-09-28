@@ -110,6 +110,35 @@ was never buildable. Retirement instead rides the SAME self-clearing pattern
 tick's `doneWhy` naturally retires the claim on its own — `we:scripts/operations/promote-draft-pr-dispatch.mjs`
 needs no NEW coupling to the build claim at all.
 
+**Closing the TTL gap the re-review found: the daemon's own tick refreshes a still-legitimate claim's
+heartbeat, mirroring the EXISTING sibling mechanism `we:scripts/conveyor/fix-dispatch-claim.mjs#refreshLiveFixDispatchClaims`
+already uses for the fix-dispatch daemon** (that file's own header: called once per daemon tick, before that
+tick's own dispatch attempts, it heartbeat-refreshes every held claim whose session is confirmed still live —
+"THE FIX for a claim outliving a genuinely still-working session past its own TTL" — so its TTL never lapses
+while the work is real; a claim whose session is not confirmed live is left to the plain TTL, dead-holder
+recovery unchanged). `we:scripts/conveyor/build-dispatch-claim.mjs`'s `DEFAULT_BUILD_DISPATCH_CLAIM_TTL_MINUTES`
+(240, `:42`) stays UNCHANGED — it remains the dead-daemon recovery floor the file's own header already
+documents, never a ceiling on how long a REAL draft may be owned. What closes the gap is a new
+`refreshBuildDispatchClaim` (a thin wrapper over `we:scripts/readiness/file-locks.mjs#heartbeat`, the exact
+primitive `refreshLiveFixDispatchClaims` itself calls), invoked from INSIDE
+`we:skills-src/conveyor/build-dispatch-daemon.mjs#runBuildDispatchTick`'s own retire loop (`:171-182`) — the
+loop that already computes `doneWhy(num, {claimedAt})` for every live claim, every tick (~2 minutes, per this
+file's own header, "the VERY NEXT daemon tick"): when `why` is `null` (the claim is not being retired — no PR
+delivers it yet, or its PR is open but still draft, once this card's `!pr.isDraft` fix lands), the SAME
+iteration that currently just pushes the claim onto `inFlight` also heartbeat-refreshes it (`live` only,
+mirroring the `if (live) effects.releaseClaim(...)` guard the retire branch two lines above already applies).
+**No new liveness probe is needed, unlike the fix-dispatch sibling**: a build claim's "is this still real"
+signal is not an agent-session check (`isClaimSessionLive`/`we:scripts/conveyor/hung-session.mjs`) — it is
+exactly the `doneWhy` predicate this loop already computes for retirement, so refresh and retire read one
+shared signal, never two. **No ceiling is added either** (unlike `refreshLiveFixDispatchClaims`'s own
+`MAX_FIX_DISPATCH_CLAIM_REFRESH_MS`, a 4-hour backstop against a hung-but-listed session): the operator's
+ruling is that ownership lasts the WHOLE draft window, however long that runs — an artificial ceiling here
+would silently reintroduce the exact bug this re-review flagged. The safety property this preserves: if the
+daemon genuinely dies or restarts, heartbeats stop, and the abandoned claim still expires on the plain
+240-minute TTL floor exactly as `we:build-dispatch-claim.mjs`'s own header already documents ("the daemon
+restarting is expected... PID liveness is never used") — refresh only ever EXTENDS a claim a live daemon keeps
+re-confirming, it never invents aliveness a dead process never had.
+
 **Signal source: push, not poll.** Any NEW code this card adds that needs to know "did this draft's CI just go
 red" reads it from `we:scripts/lib/pr-events.mjs`'s webhook feed (the daemon-side client already built for
 #2812) or from the builder's own `we:scripts/verify-lane.mjs` result — never a new `gh pr list` poll loop. This
@@ -148,6 +177,17 @@ the author's-own-status the operator's exception names) but applies no OTHER lab
   `we:scripts/operations/promote-draft-pr-dispatch.mjs` — retirement rides the daemon's own next-tick re-read of
   live `isDraft`, the same self-clearing pattern `we:scripts/operations/promote-draft-pr-dispatch.mjs`'s own
   header already documents for the review daemon.
+- `we:scripts/conveyor/build-dispatch-claim.mjs` — new `refreshBuildDispatchClaim({repo, num, owner, pid, nowIso,
+  lockRoot})`, a thin wrapper over `we:scripts/readiness/file-locks.mjs#heartbeat` (mirroring
+  `we:scripts/conveyor/fix-dispatch-claim.mjs#refreshLiveFixDispatchClaims`'s own heartbeat call), re-writing the
+  SAME `meta` (including `claimedAt`) so the ordering key `doneWhy`'s staleness check depends on is unchanged —
+  only `heartbeatAt` moves. `DEFAULT_BUILD_DISPATCH_CLAIM_TTL_MINUTES` (240, unchanged) stays the dead-daemon
+  floor; no new TTL constant, no refresh ceiling (unlike the fix-dispatch sibling's own
+  `MAX_FIX_DISPATCH_CLAIM_REFRESH_MS`) — see Design for why neither is needed here.
+- `we:skills-src/conveyor/build-dispatch-daemon.mjs#runBuildDispatchTick` — its existing retire loop (`:171-182`)
+  calls `refreshBuildDispatchClaim` for every claim whose `doneWhy` is `null` (still legitimately in flight),
+  `live` only — no new function signature, no new param on `runBuildDispatchTick` itself; the SAME iteration,
+  the SAME signal the retirement check already computes.
 - `we:scripts/conveyor/review-status-tag.mjs` — `awaiting-ci` (the author's-own-status) is the ONLY state a
   draft PR may carry from this module; every other label path is gated on `!isDraft` same as today's review gate.
 
@@ -162,10 +202,15 @@ the author's-own-status the operator's exception names) but applies no OTHER lab
    `SNAPSHOT_FIELDS`); wire the new `readDraftState` fresh-read seam into
    `we:scripts/operations/ci-heal-pr-dispatch.mjs#dispatchCiHeal`'s execution entry point.
 3. Widen `we:scripts/conveyor/build-dispatch-policy.mjs#normalizeOpenPrs`'s projected shape to carry `isDraft`;
-   fix `we:skills-src/conveyor/build-dispatch-daemon.mjs#doneWhy`'s retirement predicate; test that a claim for
-   a draft PR survives past the point a ready-PR claim would already be retired, and IS retired on the tick
-   after promotion flips `isDraft` false (no new coupling in `we:scripts/operations/promote-draft-pr-dispatch.mjs`
-   needed — confirm with a test, not a behavior change there).
+   fix `we:skills-src/conveyor/build-dispatch-daemon.mjs#doneWhy`'s retirement predicate; add
+   `we:scripts/conveyor/build-dispatch-claim.mjs#refreshBuildDispatchClaim` and wire it into
+   `runBuildDispatchTick`'s retire loop (refresh whenever `doneWhy` is `null`, `live` only); test that a claim
+   for a draft PR (a) survives past the point a ready-PR claim would already be retired, (b) survives PAST the
+   240-minute TTL across repeated simulated ticks — advancing the clock, re-running the tick loop, asserting
+   `isLeaseExpired` stays false throughout — for as long as `doneWhy` keeps returning `null`, and (c) is retired
+   on the tick after promotion flips `isDraft` false (no new coupling in
+   `we:scripts/operations/promote-draft-pr-dispatch.mjs` needed — confirm with a test, not a behavior change
+   there).
 4. Exclude drafts from `we:scripts/merge-ai-prs.mjs`'s comment/label-writing step and from
    `we:scripts/conveyor/parked-pr-conflict-watch.mjs`'s detection loop; regression test against PR #2835's own
    reconstructed shape (draft, red `test` check, BLOCKED merge state) showing zero `gh` writes where today's
@@ -185,9 +230,9 @@ the author's-own-status the operator's exception names) but applies no OTHER lab
 ## Delivery shape
 
 Lands incrementally, in the Task order above: each of 1-5 is independently useful and safe behind `main` (a
-pure additional refusal/exclusion, never a removal of an existing correct decision). Task 6 is gated on
-`4361` and may land as its own follow-up PR once that dependency ships, rather than holding this whole card
-open.
+pure additional refusal/exclusion, never a removal of an existing correct decision). Task 6 is SEQUENCED after
+`4361` (not a card-level `blockedBy` — see Task 6 above) and may land as its own follow-up PR once that
+dependency ships, rather than holding this whole card open.
 
 ## Independent plan review (Codex, read-only, 2026-09-28)
 
@@ -226,21 +271,25 @@ the first pass for this specific card.
 
 Confidence **High**, build-ready **No** — **1 blocker remains**, found against the fixes above:
 
-1. **[blocker, OPEN]** The corrected retirement predicate (`doneWhy` gains `&& !pr.isDraft`) does not by itself
-   preserve a claim through the WHOLE draft window: `we:scripts/conveyor/build-dispatch-claim.mjs`'s
+1. **[blocker, resolved above]** The corrected retirement predicate (`doneWhy` gains `&& !pr.isDraft`) does not
+   by itself preserve a claim through the WHOLE draft window: `we:scripts/conveyor/build-dispatch-claim.mjs`'s
    `DEFAULT_BUILD_DISPATCH_CLAIM_TTL_MINUTES` is 240 minutes (`:42`), and an EXPIRED claim disappears from
    `listBuildDispatchClaims`'s own output (`:100`) before `doneWhy` ever gets a chance to apply the corrected
    `!pr.isDraft` check — a draft that sits open past 240 minutes still loses its claim regardless of this
-   card's fix. **Not resolved in this session** (the session's one re-review round is spent) — a real design
-   choice is owed here (e.g. a longer TTL specifically for the draft-owned window, or an explicit
-   refresh-on-tick for a still-draft claim nearing its TTL) before this is build-ready.
+   card's fix. **Resolved in Design's "Closing the TTL gap..." paragraph and Interfaces/Tasks/Done-when above**:
+   a daemon-tick heartbeat refresh, mirroring the EXISTING sibling mechanism
+   `we:scripts/conveyor/fix-dispatch-claim.mjs#refreshLiveFixDispatchClaims` already uses for the fix-dispatch
+   daemon, keyed to the SAME `doneWhy` signal the retire loop already computes (no new liveness probe) — the TTL
+   constant itself is untouched (still the dead-daemon recovery floor) and no refresh ceiling is added (unlike
+   the fix-dispatch sibling's own `MAX_FIX_DISPATCH_CLAIM_REFRESH_MS`), per the operator's ruling that ownership
+   lasts the whole draft window.
 
-MINOR (also open): Task/Delivery-shape prose still reads as though `4361` is a hard `blockedBy` in one spot
-(`:87`) while the corrected Task 6 (`:179`) says explicit sequencing, not a card-level edge — reconcile the
-wording at the next touch.
+MINOR: **[resolved above]** the Delivery-shape line ("Task 6 is gated on `4361`") is reworded to "SEQUENCED
+after `4361` (not a card-level `blockedBy`...)", matching Task 6's own already-correct wording — the two no
+longer disagree.
 
-**This card stays `status: open`, `preparedDate` withheld** — one real blocker remains after this session's one
-permitted re-review round; a follow-up prep pass is owed before build.
+This card is now presented for a fresh, targeted read-only Codex re-review confined to this fix (this
+session's one permitted round); see the section below for that outcome.
 
 ## Done when
 
@@ -251,7 +300,9 @@ permitted re-review round; a follow-up prep pass is owed before build.
    from `we:merge-ai-prs.mjs`'s drain pass and zero label/comment from `we:parked-pr-conflict-watch.mjs` — both fail
    today.
 3. A build-dispatch claim for a draft PR is still held one tick after the PR opens (where today's retirement
-   predicate would already have released it) and is retired at the SAME tick `we:promote-draft-pr-dispatch.mjs`
-   un-drafts it — proven by a fixture test, not by inspection.
+   predicate would already have released it), survives repeated ticks PAST the 240-minute TTL floor for as long
+   as the daemon keeps ticking and `doneWhy` keeps returning `null` (proving the heartbeat refresh actually
+   closes the re-review's TTL gap, not merely the single-tick case), and is retired at the SAME tick
+   `we:promote-draft-pr-dispatch.mjs` un-drafts it — proven by a fixture test, not by inspection.
 4. Once `4361` lands, a builder's dropped request marker reaches a specialist session for a red-draft fix
    without ever touching `we:reconcile-core.mjs`'s `ci-heal`/`fix` dispatch paths.

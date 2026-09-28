@@ -169,6 +169,38 @@ disappearing with no trace, while the label removal / rearm the failure sits bes
 
 One PR, landing incrementally: the store and record module land first (`recordResolvedConflict` inert until wired), then the two call-site wirings, then the rollup reader — each step keeps `main` green and every existing test passing, so no branch/flag is needed to hide half-built state (same incremental-behind-`main` shape #4308 uses for its own `overlapContext: null` default).
 
+## MVP cut
+
+Per the operator's prepare-rule ruling (full design stays above; only the MVP builds now): **the MVP is a
+one-line classified record per conflict, from declared-scope comparison** — the MAIN-BASE path only.
+
+**Must (MVP):**
+- Task 1 (`we:scripts/conveyor/conflict-postmortem-store.mjs` + tests) — unchanged, the MVP needs the store.
+- Task 2 (`we:scripts/conveyor/conflict-postmortem-record.mjs`), narrowed: `classifyConflict`'s full 5-way
+  exhaustive enum (`no-card`/`under-declared-scope`/`concurrent-overlap`/`declared-no-overlap`/`unclassified`)
+  + the `hotFile` flag, decided purely from DECLARED `scope:` comparison (both sides' cards, both sides'
+  `scope:` arrays) — this is the "declared-scope comparison" the MVP name itself states. `recordResolvedConflict`
+  ships with a SINGLE aggregate `opposingPrNumbers`/`prBScope` comparison (not the per-(file, opponent) mapping
+  Blocker 2 below asks for) — an honest, stated MVP limitation, not a silently-dropped requirement.
+- Task 3, MAIN-BASE call site only: `we:scripts/conveyor/parked-pr-conflict-watch.mjs`'s self-heal branch wired
+  to `recordResolvedConflict({mode: 'main-base', ...})`. The `we:scripts/conveyor/conflict-fix-mark.mjs`
+  (stacked-rebase) call site is CUT from the MVP — see Blocker 1 below.
+- Task 5, narrowed to the main-base half of #2821's own evidence (both of #2821's real 2026-09-27 collisions
+  were main-base conflicts per the Evidence section above, so the MVP's own proof case is unaffected).
+
+**Could (follow-up, already designed above — not built now):**
+- The stacked-rebase call site (`we:conflict-fix-mark.mjs`) and its evidence-transport fix (Blocker 1 below).
+- The per-(file, opponent) evidence shape (Blocker 2 below).
+- Task 4, `we:scripts/conveyor/conflict-postmortem-rollup.mjs` + the `we:scripts/progress-board.mjs` KPI line —
+  the roll-up/reporting layer is genuinely useful but not what "one classified record per conflict" requires;
+  it reads the SAME store the MVP already writes, so it is pure upside added later, never a rework.
+- Hardening the append's concurrency bound (compare-and-swap or one-row-per-file-append) past the honest bound
+  Blocker 3 below states.
+
+**Size:** the MVP is 2 of the original 5 modules/call-sites (store + record, main-base wiring only) — roughly
+2–3 on the same Fibonacci scale this card's own size-8 basis used for all five; well under the ~1.5× budget
+this rule sets, no further split needed.
+
 ## Proof plan (live, before/after)
 
 **Before:** #2821's two undocumented conflicts (Evidence above) — no record exists of either.
@@ -276,7 +308,29 @@ MAJOR (also open): Interfaces still describes `classifyConflict` as called "once
 `recordResolvedConflict`'s own prose (this pass's per-file correction lives in the Design section only) —
 reconcile the two before this is re-read.
 
-**This card stays `status: open`, `preparedDate` withheld** — three real blockers remain after this session's
-one permitted re-review round; a follow-up prep pass (a real transport change through
-`we:scripts/conveyor/reconcile-fix-dispatch.mjs`, a per-opponent evidence shape, and an honest concurrency bound
-or a real fix) is owed before build.
+## MVP-blocking classification (per the operator's prepare-rule ruling)
+
+Per this repo's new prepare rule (full design stays above; a plan-review finding blocks the stamp ONLY when it
+breaks an MVP Must or names real harm — data loss/security/gate break — everything else is SCOPE-GROWTH, an
+already-designed follow-up, never silently dropped):
+
+1. **Stacked-rebase evidence transport — FOLLOW-UP, not MVP-blocking.** The MVP cut above excludes the
+   stacked-rebase call site entirely (`we:conflict-fix-mark.mjs` is not wired this pass); this finding applies
+   only to that excluded path. Filed as a follow-up slice (wire `we:scripts/conveyor/reconcile-fix-dispatch.mjs`'s
+   dispatch payload to carry the evidence snapshot through to `we:conflict-fix-mark.mjs`'s CLI).
+2. **Multi-opponent-per-file evidence — FOLLOW-UP, not MVP-blocking.** The MVP cut above states the single
+   aggregate `opposingPrNumbers`/`prBScope` comparison as an explicit, honest limitation, not a claim of
+   per-(file, opponent) precision. Filed as a follow-up slice (a per-(file, opponent) evidence shape).
+3. **Concurrent-write data loss on the whole-document store — NOT-AN-ISSUE for the MVP, on precedent.** The
+   read-replace-whole-document append pattern the MVP's store mirrors is the SAME pattern
+   `we:scripts/conveyor/run-scorecard-store.mjs` already ships in production with the identical documented risk
+   (that file's own header, `:216`/`:336`) — this is an accepted, bounded, already-precedented risk (a rare race
+   under contention can lose a row, never corrupt one), not a NEW harm this card introduces. The finding's own
+   corrected wording ("duplicate, never silently corrupted, but a genuine concurrent write CAN lose a row") is
+   folded into the store's own docstring as the honest bound; hardening it (CAS / one-row-per-file-append) is
+   filed as a follow-up slice, per this rule's own "harm" bar (data loss here is rare+bounded+precedented, not
+   the kind of harm the rule reserves BLOCKER for).
+
+**MVP has no remaining blocker.** `node we:scripts/backlog.mjs prepare-stamp` is appropriate once this
+session's own fresh Codex re-review (confined to the MVP cut above) confirms nothing new — see the section
+below for that outcome.
