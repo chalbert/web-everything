@@ -27,6 +27,8 @@
  * PURE. No fs, no clock, no process, no randomness, no network.
  */
 
+import { validateJobBlock } from '../lib/daemon-jobs.mjs';
+
 /** Schema version stamped on every record. A reader refuses a version it does not know. */
 export const RUN_RECORD_VERSION = 1;
 
@@ -502,6 +504,9 @@ export function validateRunRecord(record) {
       });
     }
   }
+  // A DAEMON JOB is a run record kind (#4125, statute `#daemon-jobs`): the optional `job` block is validated by
+  // the job model's own pure core, so a torn job record is refused by the same reader every run goes through.
+  if (record.job !== undefined) errors.push(...validateJobBlock(record.job, record.op));
   if (record.pending !== null && !isPlainObject(record.pending)) {
     errors.push('`pending` must be null or an object');
   } else if (isPlainObject(record.pending)) {

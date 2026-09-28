@@ -31,8 +31,9 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 describe('the engine performs no io — structurally, not by habit', () => {
   it('the engine\'s import graph reaches nothing that can act', () => {
     const { files, external } = importGraph(resolve(HERE, '..', 'engine.mjs'));
-    // The whole pure core: the engine, the declaration, the vocabulary, the record.
-    expect(files.map((f) => f.split('/').pop())).toEqual(['engine.mjs', 'registry.mjs', 'run-record.mjs', 'step-kinds.mjs']);
+    // The whole pure core: the engine, the declaration, the vocabulary, the record — and the daemon-job block
+    // the record validates (#4125), itself a pure leaf.
+    expect(files.map((f) => f.split('/').pop())).toEqual(['daemon-jobs.mjs', 'engine.mjs', 'registry.mjs', 'run-record.mjs', 'step-kinds.mjs']);
     // No `node:fs`, no `node:child_process`, no `node:http`, no anything.
     expect(external).toEqual([]);
   });
@@ -40,6 +41,7 @@ describe('the engine performs no io — structurally, not by habit', () => {
   it('the step vocabulary and the record core are leaves too', () => {
     expect(importGraph(resolve(HERE, '..', 'step-kinds.mjs')).external).toEqual([]);
     expect(importGraph(resolve(HERE, '..', 'run-record.mjs')).external).toEqual([]);
+    expect(importGraph(resolve(HERE, '..', '..', 'lib', 'daemon-jobs.mjs')).external).toEqual([]);
   });
 
   it('the effect EXECUTOR imports no fs or child_process either — its store and sinks are injected', () => {

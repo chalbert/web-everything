@@ -26,6 +26,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 
 import { assertRunRecord, isValidRunId, parseRunRecord, serializeRunRecord } from './run-record.mjs';
+import { isJobRecord, isTerminalJob } from '../lib/daemon-jobs.mjs';
 
 export {
   EFFECT_STATUSES,
@@ -137,6 +138,8 @@ export function isRunRecordTerminal(record) {
   if (!record || typeof record !== 'object') return false;
   if (record.pending !== null && record.pending !== undefined) return false;
   if (!Array.isArray(record.effects)) return false;
+  // #4125 — a daemon job record has no pending effects while it runs; its own status says whether it is done.
+  if (isJobRecord(record) && !isTerminalJob(record)) return false;
   return !record.effects.some((e) => e && (e.status === 'pending' || e.status === 'in-flight'));
 }
 
