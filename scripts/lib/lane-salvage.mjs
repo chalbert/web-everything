@@ -22,15 +22,31 @@
  * is snapshotted the same way (`...-wt-<name>-head/-wip`) into the SAME bundle, then removed with
  * `git worktree remove --force` + `git worktree prune` — never an `rm -rf`.
  *
- * Recover: `git fetch <bundle> 'refs/salvage/*:refs/salvage/*'` in any WE clone, or `git apply` the patch.
+ * #4273 — an ORDINARY (non-git) file or directory sitting directly under `.claude/worktrees/` WITHOUT ever
+ * having been registered via `git worktree add` is invisible to all of the above: it is not a dirty path
+ * (`isWorktreeLitterPath` deliberately excludes the whole prefix, on the assumption registered-worktree
+ * scanning already covers it) and it is not a registered worktree, so `git clean -fd` deletes it outright on
+ * reclaim with nothing ever having captured it. {@link listUnregisteredWorktreeLitter} finds exactly that
+ * content (including a file/dir sitting BESIDE a registered worktree, deeper in the tree — the mixed-ancestor
+ * case), {@link newestContentMtimeMs} now folds its mtimes into the quiet-period check, and {@link salvageLane}
+ * copies each item verbatim (never dereferencing a symlink) into `<prefix>.wt-litter/<relative-path>` —
+ * mirroring the original layout under `.claude/worktrees/` exactly, so distinct items can never collide on a
+ * shared destination — before the caller's `git clean -fd` runs. The copy is recorded on the salvage record's
+ * `litter` array so it is indexed and findable exactly like the bundle/patches are.
+ *
+ * Recover: `git fetch <bundle> 'refs/salvage/*:refs/salvage/*'` in any WE clone, or `git apply` the patch, or
+ * (for `litter` entries) just read/copy back the plain file(s) at each entry's `dest`.
  *
  * PURE CORE / IO SHELL: {@link salvageStamp}, {@link salvageRefNames}, {@link salvageEligibility},
- * {@link parseLsofCwds} and {@link isWorktreeLitterPath} are pure. Everything else shells git/lsof.
+ * {@link parseLsofCwds} and {@link isWorktreeLitterPath} are pure. Everything else shells git/lsof/fs.
  */
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, appendFileSync, statSync, existsSync, realpathSync } from 'node:fs';
+import {
+  mkdtempSync, rmSync, mkdirSync, writeFileSync, appendFileSync, statSync, existsSync, realpathSync,
+  readdirSync, lstatSync, cpSync,
+} from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
-import { join, resolve, sep } from 'node:path';
+import { join, resolve, sep, dirname } from 'node:path';
 
 /** Env override for where salvage lands; default `~/.claude/lane-salvage` (the operator's manual location). */
 export const SALVAGE_DIR_ENV = 'WE_LANE_SALVAGE_DIR';
@@ -180,7 +196,75 @@ export function listLitterWorktrees(dir) {
     .map((w) => ({ path: w.path, name: w.path.slice(root.length + 1) }));
 }
 
-/** Newest mtime (ms) across the lane's dirty paths, its index/HEAD reflog, and each litter worktree's own. */
+/** Does `dirAbs` (a real, absolute path) have any registered worktree root somewhere beneath it? PURE-ish
+ *  (no IO — `registered` is a Set of already-resolved worktree paths). */
+function containsRegisteredDescendant(dirAbs, registered) {
+  const prefix = dirAbs + sep;
+  for (const r of registered) if (r.startsWith(prefix)) return true;
+  return false;
+}
+
+/**
+ * Ordinary (non-git-worktree) content sitting directly under `<dir>/.claude/worktrees/`, or nested beside a
+ * registered worktree deeper in that tree — content that was never `git worktree add`-ed, so
+ * {@link listLitterWorktrees} never sees it, and `isWorktreeLitterPath` keeps it out of `dirtyPaths()` too
+ * (on the — here false — assumption registered-worktree scanning already covers it). #4273.
+ *
+ * Returns the SHALLOWEST unregistered path at each spot: a whole directory when none of its descendants is a
+ * registered worktree root (so a caller can copy it whole), or, when a directory MIXES an unregistered sibling
+ * with a registered worktree root ANYWHERE beneath it, descends into it (recursively, to whatever depth the
+ * mixing actually occurs at — not just one level) to still catch that sibling. Uses `lstatSync` throughout
+ * (never follows a symlink) so a symlinked entry is treated as one leaf item, never dereferenced into — no
+ * loops, and no copying content the symlink merely points at. Each item's `rel` is its path relative to
+ * `.claude/worktrees/`, stable regardless of the lane's raw vs. real path.
+ *
+ * Only a genuinely absent `.claude/worktrees/` (no worktree/isolation feature ever touched this lane) returns
+ * `[]`; any OTHER read failure (permission, a path that vanished mid-walk) propagates — this must never read
+ * as "nothing here" the way a lost race could.
+ */
+export function listUnregisteredWorktreeLitter(dir) {
+  let root = resolve(dir, '.claude', 'worktrees');
+  try { root = join(realpathSync(dir), '.claude', 'worktrees'); } catch { /* keep the resolved path */ }
+  // `existsSync` alone would swallow ANY stat failure (a permission error partway up the path, a dangling
+  // symlink) and read it as "absent" — exactly the "unreadable silently looks like nothing here" outcome this
+  // function must never produce (#4273 review). Only a genuine ENOENT means "no worktree/isolation feature
+  // ever touched this lane"; anything else propagates.
+  try { lstatSync(root); } catch (e) { if (e && e.code === 'ENOENT') return []; throw e; }
+  const registered = new Set(listLitterWorktrees(dir).map((w) => w.path));
+  const out = [];
+  const walk = (abs, rel) => {
+    for (const name of readdirSync(abs)) {
+      const p = join(abs, name);
+      const r = rel ? join(rel, name) : name;
+      if (registered.has(p)) continue; // exactly a registered worktree root — handled elsewhere
+      const st = lstatSync(p);
+      if (st.isDirectory() && containsRegisteredDescendant(p, registered)) walk(p, r); // mixed ancestor — descend
+      else out.push({ path: p, rel: r });
+    }
+  };
+  walk(root, '');
+  return out;
+}
+
+/** Newest mtime (ms) across a set of paths, recursing into real directories only (never a symlink). No
+ *  try/catch: an unreadable entry must never be silently treated as absent/quiet (#4273) — it propagates to
+ *  the caller instead. (`we:scripts/lane-pool.mjs`'s salvage gate, at the time of writing, wraps its own call
+ *  to {@link newestContentMtimeMs} in a try/catch that treats any thrown error as "changed just now" —
+ *  fail-closed — but that is that OTHER file's contract, unverified by any test in THIS one; read it there
+ *  rather than trusting this comment alone.) */
+function newestLitterMtimeMs(items) {
+  let newest = null;
+  const visit = (p) => {
+    const st = lstatSync(p);
+    if (newest === null || st.mtimeMs > newest) newest = st.mtimeMs;
+    if (st.isDirectory()) for (const name of readdirSync(p)) visit(join(p, name));
+  };
+  for (const it of items) visit(it.path);
+  return newest;
+}
+
+/** Newest mtime (ms) across the lane's dirty paths, its index/HEAD reflog, each litter worktree's own, and
+ *  (#4273) any UNREGISTERED content under `.claude/worktrees/` too — a lane touched only there is not quiet. */
 export function newestContentMtimeMs(dir) {
   let newest = null;
   const bump = (p) => { try { const m = statSync(p).mtimeMs; if (newest === null || m > newest) newest = m; } catch { /* gone */ } };
@@ -192,6 +276,8 @@ export function newestContentMtimeMs(dir) {
   };
   scan(dir);
   for (const w of listLitterWorktrees(dir)) { try { scan(w.path); } catch { /* broken worktree — its salvage will say so */ } }
+  const litterNewest = newestLitterMtimeMs(listUnregisteredWorktreeLitter(dir));
+  if (litterNewest !== null && (newest === null || litterNewest > newest)) newest = litterNewest;
   return newest;
 }
 
@@ -224,16 +310,19 @@ export function snapshotWorkTree(dir, { refs, branchRef }) {
 }
 
 /**
- * Salvage a whole lane: snapshot the lane + every litter worktree, write bundle/patch/unpushed files, VERIFY the
- * bundle carries every salvage ref, and append an index line. Throws on any failure — the caller must not reset
- * a lane whose salvage did not verify. Does NOT remove worktrees or reset (see {@link removeLitterWorktrees}).
- * @returns {{stamp:string, outDir:string, bundle:(string|null), refs:string[], snapshots:object[], worktrees:object[]}}
+ * Salvage a whole lane: snapshot the lane + every litter worktree, copy every UNREGISTERED
+ * `.claude/worktrees/` item verbatim (#4273 — it cannot be captured as a git ref; it isn't one), write
+ * bundle/patch/unpushed files, VERIFY the bundle carries every salvage ref, and append an index line. Throws
+ * on any failure — the caller must not reset a lane whose salvage did not verify. Does NOT remove worktrees
+ * or reset (see {@link removeLitterWorktrees}).
+ * @returns {{stamp:string, outDir:string, bundle:(string|null), refs:string[], snapshots:object[], worktrees:object[], litter:object[]}}
  */
 export function salvageLane({ dir, lane, pool, branchRef, salvageRoot = resolveSalvageRoot(), now = new Date(), reason = '', meta = {}, includeLocalBranches = false }) {
   const stamp = salvageStamp(now);
   const outDir = join(salvageRoot, pool, stamp);
   mkdirSync(outDir, { recursive: true });
   const worktrees = listLitterWorktrees(dir);
+  const litter = listUnregisteredWorktreeLitter(dir);
   const snapshots = [snapshotWorkTree(dir, { refs: salvageRefNames({ lane, stamp }), branchRef })];
   for (const w of worktrees) {
     snapshots.push({ worktree: w.name, ...snapshotWorkTree(w.path, { refs: salvageRefNames({ lane, stamp, worktree: w.name }), branchRef }) });
@@ -261,6 +350,20 @@ export function salvageLane({ dir, lane, pool, branchRef, salvageRoot = resolveS
     }
   }
   const prefix = join(outDir, `lane-${lane}`);
+  // #4273 — copy every unregistered `.claude/worktrees/` item BEFORE the caller's `git clean -fd` can delete
+  // it. Mirrors each item's own relative path under `.claude/worktrees/` (never a sanitized/collapsed name),
+  // so distinct items can never collide on a shared destination. `dereference:false` + `verbatimSymlinks:true`
+  // copy a symlink as itself, never following it (no loops, no silently including a link's target content).
+  // `errorOnExist:true` + `force:false` refuse to silently clobber — a genuine failure here throws, aborting
+  // the whole salvage exactly like a failed bundle-verify does (this function's existing throw-on-any-failure
+  // contract; the caller must never reset/clean a lane whose salvage did not fully succeed).
+  const litterDestRoot = `${prefix}.wt-litter`;
+  const litterCopies = litter.map((item) => {
+    const dest = join(litterDestRoot, item.rel);
+    mkdirSync(dirname(dest), { recursive: true });
+    cpSync(item.path, dest, { recursive: true, dereference: false, verbatimSymlinks: true, errorOnExist: true, force: false });
+    return { rel: item.rel, dest };
+  });
   let bundle = null;
   if (bundleRefs.length) {
     bundle = `${prefix}.bundle`;
@@ -294,6 +397,7 @@ export function salvageLane({ dir, lane, pool, branchRef, salvageRoot = resolveS
     snapshots: snapshots.map((s) => ({ worktree: s.worktree ?? null, headSha: s.headSha, wipSha: s.wipSha, aheadCount: s.aheadCount, dirtyCount: s.dirtyCount })),
     changedFiles: [...changedFiles].sort(),
     patches: snapshots.map((s) => `${s.worktree ? `${prefix}.wt-${String(s.worktree).replace(/[^A-Za-z0-9._-]/g, '_')}` : prefix}.uncommitted.patch`),
+    litter: litterCopies,
   });
   appendSalvageIndex(salvageRoot, record);
   return { ...record, worktrees };
@@ -318,8 +422,11 @@ export function deriveSalvageTargets({ purpose = '', holder = '', session = '', 
   return { cards: [...cardIds], prs: [...prNumbers] };
 }
 
-/** PURE: the index row. `landed:false` until {@link refreshSalvageIndex} proves the content is on main. */
-export function buildSalvageRecord({ now, pool, lane, dir, stamp, outDir, bundle, reason = '', branch = null, meta = {}, refs, localRefs = refs, snapshots, changedFiles = [], patches = [] }) {
+/** PURE: the index row. `landed:false` until {@link refreshSalvageIndex} proves the content is on main.
+ *  `litter` (#4273) is the `{rel, dest}` list of unregistered `.claude/worktrees/` content copied verbatim
+ *  (never a git ref — it isn't git content), so a later audit / recovery can find it the same way as the
+ *  bundle/patches. */
+export function buildSalvageRecord({ now, pool, lane, dir, stamp, outDir, bundle, reason = '', branch = null, meta = {}, refs, localRefs = refs, snapshots, changedFiles = [], patches = [], litter = [] }) {
   const lh = meta.lastHolder || {};
   const targets = deriveSalvageTargets({
     purpose: lh.purpose, holder: lh.holder, session: lh.session,
@@ -328,7 +435,7 @@ export function buildSalvageRecord({ now, pool, lane, dir, stamp, outDir, bundle
     prs: [...(meta.prs || []), ...(lh.pr ? [lh.pr] : [])],
   });
   return {
-    ts: now.toISOString(), pool, lane, dir, stamp, outDir, bundle, patches, reason,
+    ts: now.toISOString(), pool, lane, dir, stamp, outDir, bundle, patches, litter, reason,
     lastHolder: { purpose: lh.purpose ?? null, holder: lh.holder ?? null, session: lh.session ?? null, item: lh.item ?? null, pr: lh.pr ?? null },
     branch, head: snapshots[0]?.headSha ?? null, cards: targets.cards, prs: targets.prs,
     changedFiles, refs, localRefs, snapshots, landed: false,

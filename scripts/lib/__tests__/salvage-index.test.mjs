@@ -5,13 +5,13 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync, mkdirSync, symlinkSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 import {
   salvageEntriesFor, salvageHintLine, withSalvageHint, refreshSalvageIndex, readSalvageIndex, parseSalvageStamp,
-  backfillSalvageDir,
+  backfillSalvageDir, isUnderSalvageRoot,
 } from '../salvage-index.mjs';
 import { salvageLane, appendSalvageIndex } from '../lane-salvage.mjs';
 import { classifyPoolLeftover } from '../pool-leftovers.mjs';
@@ -82,6 +82,181 @@ describe('refreshSalvageIndex + backfill (real git)', () => {
     expect(existsSync(rec.bundle)).toBe(false);
     expect(readSalvageIndex(salvageRoot)).toEqual([]);
     expect(git(lane, 'for-each-ref', 'refs/salvage')).toBe('');
+  });
+
+  it('#4273 — expiry removes a DIRECTORY-shaped litter artifact (lane-N.wt-litter/) cleanly, and counts its EXACT nested size (no double-count from also listing litter[].dest)', () => {
+    mkdirSync(join(lane, '.claude', 'worktrees', 'stray'), { recursive: true });
+    writeFileSync(join(lane, '.claude', 'worktrees', 'stray', 'f.txt'), 'x'.repeat(100));
+    const now = new Date('2026-09-27T02:00:00Z');
+    const rec = salvageLane({ dir: lane, lane: 3, pool: 'p', branchRef: 'origin/main', salvageRoot, now });
+    expect(rec.litter).toHaveLength(1);
+    expect(existsSync(rec.litter[0].dest)).toBe(true); // a real directory, not a file
+    expect(rec.bundle).toBeNull(); // nothing dirty/ahead in this test — only the .uncommitted.patch/.unpushed.txt
+    // (both written empty) and the litter dir end up in outDir, so the EXACT expected freed size is the
+    // litter file's own 100 bytes — an exact assertion (not >=) catches BOTH a reverted `pathSize` (would read
+    // only the directory's own dirent size) and a re-introduced double-count (would read ~200).
+
+    const later = now.getTime() + 15 * DAY;
+    const dry = refreshSalvageIndex({ root: salvageRoot, nowMs: later, dryRun: true });
+    expect(dry.expired).toHaveLength(1);
+    expect(dry.bytesFreed).toBe(100);
+
+    const real = refreshSalvageIndex({ root: salvageRoot, nowMs: later }); // must not throw on the directory
+    expect(real.expired).toHaveLength(1);
+    expect(real.bytesFreed).toBe(100);
+    expect(existsSync(rec.litter[0].dest)).toBe(false);
+    expect(readSalvageIndex(salvageRoot)).toEqual([]);
+  });
+
+  it('#4273 review — bytesFreed is not DOUBLE-COUNTED for `bundle` (which the lane-N. glob also matches, now that entryFiles returns two sets)', () => {
+    writeFileSync(join(lane, 'a.txt'), 'work\n'); // an uncommitted change ⇒ a real, non-trivial bundle gets written
+    const now = new Date('2026-09-27T02:00:00Z');
+    const rec = salvageLane({ dir: lane, lane: 3, pool: 'p', branchRef: 'origin/main', salvageRoot, now });
+    expect(rec.bundle).not.toBeNull();
+    const bundleSize = statSync(rec.bundle).size;
+    expect(bundleSize).toBeGreaterThan(0); // a real bundle, not the empty-file case the exact-100 test used
+    // rec.patches always includes the (here non-empty, since the change is uncommitted) `.uncommitted.patch` —
+    // that file's own bytes are correctly counted once; only `bundle`'s double-count is what this test guards.
+    const patchSize = rec.patches.reduce((sum, p) => sum + statSync(p).size, 0);
+
+    const later = now.getTime() + 15 * DAY;
+    const r = refreshSalvageIndex({ root: salvageRoot, nowMs: later });
+    expect(r.expired).toHaveLength(1);
+    expect(r.bytesFreed).toBe(bundleSize + patchSize); // bundle counted exactly once — a regression here would add bundleSize again
+  });
+
+  it('#4273 review — expiry NEVER deletes a path a (tampered/corrupt) index row points OUTSIDE the salvage root', () => {
+    const victimDir = join(root, 'victim'); // a sibling of salvageRoot, never inside it
+    mkdirSync(victimDir, { recursive: true });
+    const victim = join(victimDir, 'precious.txt');
+    writeFileSync(victim, 'x'.repeat(12345)); // a large, distinctive size — would dominate bytesFreed if walked
+    appendSalvageIndex(salvageRoot, {
+      ts: '2026-01-01T00:00:00Z', pool: 'p', lane: 99, dir: null, stamp: '20260101-000000',
+      outDir: join(salvageRoot, 'p', '20260101-000000'), // a normal, empty, in-root outDir — nothing to glob
+      bundle: victim, // the tampered field — an index-supplied path OUTSIDE salvageRoot entirely
+      patches: [], litter: [], reason: 'tampered', lastHolder: {}, branch: null, head: null,
+      cards: [], prs: [], changedFiles: [], refs: [], localRefs: [], snapshots: [], landed: false,
+    });
+    const later = Date.parse('2026-01-01T00:00:00Z') + 15 * DAY;
+    const r = refreshSalvageIndex({ root: salvageRoot, nowMs: later });
+    expect(r.expired).toHaveLength(1); // the row is still dropped from the index (retention still applies)...
+    expect(existsSync(victim)).toBe(true); // ...but the out-of-root content it pointed at survives untouched
+    expect(r.bytesFreed).toBe(0); // ...and its (large) size is never even walked into bytesFreed
+  });
+
+  it('#4273 review — a SELF-REFERENTIAL symlink inside a litter copy never gets followed for size accounting (no ELOOP recursion, no inflated bytesFreed)', () => {
+    mkdirSync(join(lane, '.claude', 'worktrees', 'stray'), { recursive: true });
+    writeFileSync(join(lane, '.claude', 'worktrees', 'stray', 'real.txt'), 'x'.repeat(50));
+    symlinkSync('.', join(lane, '.claude', 'worktrees', 'stray', 'self-loop')); // points AT ITS OWN DIRECTORY
+    const now = new Date('2026-09-27T02:00:00Z');
+    salvageLane({ dir: lane, lane: 3, pool: 'p', branchRef: 'origin/main', salvageRoot, now });
+
+    const later = now.getTime() + 15 * DAY;
+    const start = Date.now();
+    const dry = refreshSalvageIndex({ root: salvageRoot, nowMs: later, dryRun: true });
+    expect(Date.now() - start).toBeLessThan(5000); // never recurses into the loop
+    // Only `real.txt` (50 bytes) plus the symlink's own tiny (never-followed) size — nowhere near what
+    // recursing through the loop (or into the directory it points back at) would accumulate.
+    expect(dry.bytesFreed).toBeGreaterThanOrEqual(50);
+    expect(dry.bytesFreed).toBeLessThan(60);
+  });
+
+  // A mutation check (temporarily hardcoding `isUnderSalvageRoot` to always return `true`) proved that testing
+  // it only BEHAVIORALLY, through `refreshSalvageIndex`, is not enough for two shapes: "bundle equals the
+  // root" is independently saved by `deleteEntryArtifacts`'s own EISDIR-catch (a non-recursive `rmSync` on a
+  // directory always throws, caught, regardless of containment), and "a glob-matched entry is itself a
+  // symlink" is saved by `rmSync`'s OWN never-follow-a-symlink semantics (removing a symlink unlinks the link
+  // itself; it never enters what it points at) — so a test built only around those two shapes can pass with
+  // the guard deleted. `isUnderSalvageRoot` is exported and unit-tested DIRECTLY below instead — the honest way
+  // to pin exactly what it decides, independent of every OTHER protection that happens to also save the same
+  // scenario. The behavioral test right after it covers a shape neither incidental protection saves: an
+  // ancestor directory reached only via a symlink.
+  it('isUnderSalvageRoot: strictly inside the root only — never the root itself, never outside it, and never fooled by a symlink along the way', () => {
+    mkdirSync(join(salvageRoot, 'p'), { recursive: true });
+    writeFileSync(join(salvageRoot, 'p', 'x'), 'real, ordinary in-root file\n');
+    expect(isUnderSalvageRoot(join(salvageRoot, 'p', 'x'), salvageRoot)).toBe(true);
+    expect(isUnderSalvageRoot(salvageRoot, salvageRoot)).toBe(false); // the root itself — NOT "inside" it
+    expect(isUnderSalvageRoot(join(root, 'elsewhere'), salvageRoot)).toBe(false); // a genuinely unrelated path
+
+    // A path that is LEXICALLY under salvageRoot but whose real location — reached by following a symlinked
+    // ANCESTOR directory — is actually outside it. A lexical-only `resolve()` comparison would wrongly call
+    // this "inside"; `isUnderSalvageRoot`'s `realOrResolved` must not be fooled. (The referenced leaf must
+    // actually EXIST for `realpathSync` to resolve the full chain — an absent leaf falls back to a plain
+    // lexical resolve, which is fine in practice: nothing that doesn't exist is ever actually deleted or sized.)
+    const victimDir = join(root, 'victim3');
+    mkdirSync(victimDir, { recursive: true });
+    writeFileSync(join(victimDir, 'lane-1.bundle'), 'reached only via the symlinked ancestor\n');
+    const linkedAncestor = join(salvageRoot, 'p', 'linked-stamp'); // looks like an ordinary in-root outDir...
+    symlinkSync(victimDir, linkedAncestor); // ...but is actually a symlink to somewhere OUTSIDE the root
+    expect(isUnderSalvageRoot(join(linkedAncestor, 'lane-1.bundle'), salvageRoot)).toBe(false);
+  });
+
+  it('#4273 review — deleteEntryArtifacts leaves the salvage root, and a symlinked-litter TARGET, intact against a tampered "bundle equals root" row and a tampered symlink-as-litter-item row (defense in depth: EISDIR-catch + rmSync\'s own never-follow-a-symlink semantics — independent of isUnderSalvageRoot, which the mutation check just above proved neither of these two scenarios actually exercises)', () => {
+    appendSalvageIndex(salvageRoot, {
+      ts: '2026-01-01T00:00:00Z', pool: 'p', lane: 98, dir: null, stamp: '20260101-000001',
+      outDir: join(salvageRoot, 'p', '20260101-000001'), // never created — nothing for the glob to find
+      bundle: salvageRoot, // the tampered field — literally the root itself, not merely inside it
+      patches: [], litter: [], reason: 'tampered', lastHolder: {}, branch: null, head: null,
+      cards: [], prs: [], changedFiles: [], refs: [], localRefs: [], snapshots: [], landed: false,
+    });
+    writeFileSync(join(salvageRoot, 'sentinel.txt'), 'must survive\n');
+
+    const victimDir = join(root, 'victim2');
+    mkdirSync(victimDir, { recursive: true });
+    const victim = join(victimDir, 'precious2.txt');
+    writeFileSync(victim, 'not salvage content\n');
+    const outDir = join(salvageRoot, 'p', '20260101-000002');
+    mkdirSync(outDir, { recursive: true });
+    symlinkSync(victimDir, join(outDir, 'lane-97.wt-litter')); // matches the glob prefix, but escapes via a symlink
+    appendSalvageIndex(salvageRoot, {
+      ts: '2026-01-01T00:00:00Z', pool: 'p', lane: 97, dir: null, stamp: '20260101-000002',
+      outDir, bundle: null, patches: [], litter: [], reason: 'tampered', lastHolder: {}, branch: null, head: null,
+      cards: [], prs: [], changedFiles: [], refs: [], localRefs: [], snapshots: [], landed: false,
+    });
+
+    const later = Date.parse('2026-01-01T00:00:00Z') + 15 * DAY;
+    const r = refreshSalvageIndex({ root: salvageRoot, nowMs: later });
+    expect(r.expired).toHaveLength(2); // both rows still dropped from the index...
+    expect(existsSync(salvageRoot)).toBe(true); // ...but the root itself is never `rmSync`-ed away
+    expect(existsSync(join(salvageRoot, 'sentinel.txt'))).toBe(true);
+    expect(existsSync(victim)).toBe(true); // ...and the symlink's OUT-OF-ROOT target survives untouched
+  });
+
+  it('#4273 review — containment resolves through a symlinked ANCESTOR: an outDir reached via a symlink that resolves outside the root is refused — the case a lexical-only check would wrongly approve', () => {
+    const victimDir = join(root, 'victim4');
+    mkdirSync(victimDir, { recursive: true });
+    const victim = join(victimDir, 'lane-95.precious.txt'); // matches the `lane-${lane}.` glob prefix
+    writeFileSync(victim, 'reached only by following a symlinked ancestor\n');
+    mkdirSync(join(salvageRoot, 'p'), { recursive: true });
+    const outDir = join(salvageRoot, 'p', '20260101-000004'); // LEXICALLY in-root...
+    symlinkSync(victimDir, outDir); // ...but the directory ITSELF is a symlink to somewhere outside the root
+    appendSalvageIndex(salvageRoot, {
+      ts: '2026-01-01T00:00:00Z', pool: 'p', lane: 95, dir: null, stamp: '20260101-000004',
+      outDir, bundle: null, patches: [], litter: [], reason: 'tampered', lastHolder: {}, branch: null, head: null,
+      cards: [], prs: [], changedFiles: [], refs: [], localRefs: [], snapshots: [], landed: false,
+    });
+    const later = Date.parse('2026-01-01T00:00:00Z') + 15 * DAY;
+    const r = refreshSalvageIndex({ root: salvageRoot, nowMs: later });
+    expect(r.expired).toHaveLength(1);
+    expect(existsSync(victim)).toBe(true); // never deleted — realpath resolution caught the ancestor symlink
+  });
+
+  it('#4273 review — `bundle`/`patches` (the "plain" set) are removed NON-recursively: an in-root directory masquerading as `bundle` survives, rather than the whole tree being wiped', () => {
+    const outDir = join(salvageRoot, 'p', '20260101-000003');
+    mkdirSync(outDir, { recursive: true });
+    const fakeBundleDir = join(outDir, 'not-really-a-bundle');
+    mkdirSync(fakeBundleDir, { recursive: true });
+    writeFileSync(join(fakeBundleDir, 'inner.txt'), 'must survive — bundle is never rmSync-ed recursively\n');
+    appendSalvageIndex(salvageRoot, {
+      ts: '2026-01-01T00:00:00Z', pool: 'p', lane: 96, dir: null, stamp: '20260101-000003',
+      outDir, bundle: fakeBundleDir, // in-root, but a DIRECTORY where salvageLane always writes a plain file
+      patches: [], litter: [], reason: 'tampered', lastHolder: {}, branch: null, head: null,
+      cards: [], prs: [], changedFiles: [], refs: [], localRefs: [], snapshots: [], landed: false,
+    });
+    const later = Date.parse('2026-01-01T00:00:00Z') + 15 * DAY;
+    const r = refreshSalvageIndex({ root: salvageRoot, nowMs: later });
+    expect(r.expired).toHaveLength(1); // the row is still dropped from the index...
+    expect(existsSync(join(fakeBundleDir, 'inner.txt'))).toBe(true); // ...but the "bundle" directory survives whole
   });
 
   it('backfills a hand-made salvage dir once (idempotent), deriving the PR from the last lease purpose', () => {
