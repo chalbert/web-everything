@@ -1,4 +1,5 @@
 ---
+bornAs: xlou1je
 kind: story
 size: 8
 status: open
