@@ -3,11 +3,12 @@ bornAs: x61epyr
 kind: story
 size: 5
 parent: "4075"
-status: active
+status: resolved
 blockedBy: ["4065", "4077"]
 scope: ["we:scripts/conveyor/health-investigate-dispatch.mjs", "we:skills-src/conveyor/health-investigate-brief.md", "we:scripts/conveyor/health-watch-core.mjs", "we:scripts/operations/dispatch-lane.mjs"]
 dateOpened: "2026-09-24"
 dateStarted: "2026-09-28"
+dateResolved: "2026-09-28"
 tags: [health-daemon]
 ---
 
