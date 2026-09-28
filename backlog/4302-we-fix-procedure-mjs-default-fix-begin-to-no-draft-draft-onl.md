@@ -3,9 +3,10 @@ bornAs: xyfvtfz
 kind: story
 size: 3
 parent: "4075"
-status: open
+status: resolved
 scope: ["we:scripts/conveyor/fix-procedure.mjs", "we:skills-src/conveyor/fix-agent-brief.md", "we:skills-src/conveyor/fix-agent-ci-brief.md", "we:skills-src/finish/SKILL.md", "we:skills-src/mechanical-delivery-doctrine/SKILL.md", "we:scripts/conveyor/review-status-tag.mjs"]
 dateOpened: "2026-09-27"
+dateResolved: "2026-09-28"
 tags: []
 ---
 

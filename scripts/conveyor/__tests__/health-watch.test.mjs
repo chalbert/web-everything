@@ -13,7 +13,7 @@ import {
   probeDaemonLogs, probeLeases, probeSelfSync, probeLanePools, tick, healthSectionLines, healthDir,
   probeDaemonStatus, daemonNameForLabel, runTickWithWatchdog, probeAuthExpiredSessions, probeAgents,
   probePrs, probeStaleState, probeMergedPrs, probeProcesses, probeMachineLoad, probeGhShimLanes,
-  probeBgIsolationStalls, probeUntrackedBacklogCards,
+  probeBgIsolationStalls, probeUntrackedBacklogCards, persistGhSpend,
 } from '../health-watch.mjs';
 
 let dir;
@@ -733,3 +733,78 @@ describe('tick() — review-seat-cap-near-limit: reads the scorecard store, open
     expect(summary.section.join('\n')).toMatch(/codex.*8[1-9]%|codex.*65\/80/);
   });
 });
+
+// ── #4309 — hourly GitHub-spend persistence, wired into the tick alongside the unchanged probeGhCalls ──────────
+describe('tick() — gh spend persistence (#4309)', () => {
+  const H = (iso) => Date.parse(iso);
+  const W1 = H('2026-09-28T12:20:00Z') / 1000; // one GitHub window spanning 11:20 → 12:20
+  const W2 = H('2026-09-28T13:15:00Z') / 1000; // the next one, first seen 12:15
+  const shim = (iso, used, reset) => ({ ts: iso, op: 'pr view', outcome: 'call', ok: true, caller: 'session:abcd1234', resource: 'graphql', id: 'app', inv: `${iso}-${used}`, rl: [{ used, rem: 5000 - used, limit: 5000, reset, res: 'graphql' }] });
+  const flagsFor = (logPath, now) => {
+    const lockRoot = join(dir, 'locks-spend'); mkdirSync(lockRoot, { recursive: true });
+    const syncDir = join(dir, 'sync-spend'); mkdirSync(syncDir, { recursive: true });
+    return {
+      'lock-root': lockRoot, 'self-sync-dir': syncDir, 'no-gh': true, 'no-diagnose': true, 'state-root': join(dir, 'state-spend'),
+      'logs-dir': join(dir, 'logs-spend'), 'gh-calls-log': logPath, now,
+    };
+  };
+
+  it('persists closed hours: zero-observation hours as UNKNOWN, the baseline carried across the persistence boundary and a fresh window', async () => {
+    const ghDir = join(dir, 'gh'); mkdirSync(ghDir, { recursive: true });
+    const logPath = join(ghDir, 'calls.jsonl');
+    const lines = [
+      { ts: '2026-09-28T10:05:00.000Z', op: 'pr list', outcome: 'call', ok: true, caller: 'review-daemon.mjs' }, // pre-#4309: no rl
+      { ts: '2026-09-28T10:06:00.000Z', op: 'pr list', outcome: 'call', ok: true, caller: 'review-daemon.mjs', resource: 'graphql', id: 'app', inv: 'd1' },
+      shim('2026-09-28T11:50:00.000Z', 100, W1), // the window's first observation: a baseline, not "100 points"
+    ];
+    writeFileSync(logPath, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
+    const first = await tick(flagsFor(logPath, '2026-09-28T12:30:00.000Z'));
+    expect(first.probeErrors.ghCalls).toBeUndefined(); // probeGhCalls still ran, unchanged
+    expect(first.probeErrors.ghSpend).toBeUndefined();
+    expect(first.ghSpend.rowsWritten).toBe(3); // 10:00 (two identities) + 11:00
+
+    // 12:10 closes a 4-point gap against the 11:50 baseline persisted in the cursor; 12:15 opens a NEW window.
+    appendFileSync(logPath, [shim('2026-09-28T12:10:00.000Z', 104, W1), shim('2026-09-28T12:15:00.000Z', 7, W2)].map((l) => JSON.stringify(l)).join('\n') + '\n');
+    const second = await tick(flagsFor(logPath, '2026-09-28T13:05:00.000Z'));
+    expect(second.ghSpend.rowsWritten).toBe(1);
+    const again = await tick(flagsFor(logPath, '2026-09-28T13:06:00.000Z'));
+    expect(again.ghSpend.rowsWritten).toBe(0); // idempotent
+
+    const rows = readFileSync(join(ghDir, 'spend-hourly.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    const byHour = (h) => rows.filter((r) => r.hour === h);
+    for (const r of byHour('2026-09-28T10:00:00.000Z')) {
+      expect(r.unknown).toBe(true);
+      expect([r.bucketUsed, r.attributed, r.estimated, r.unattributed]).toEqual([null, null, null, null]);
+      expect(r.unknownRequests).toBe(1);
+    }
+    expect(byHour('2026-09-28T11:00:00.000Z')[0]).toMatchObject({ unknown: true, attributed: null, requests: 1 });
+    const noon = byHour('2026-09-28T12:00:00.000Z')[0];
+    expect(noon).toMatchObject({ unknown: false, bucketUsed: 4, attributed: 4, estimated: 0, unattributed: 0, requests: 2, responses: 2 });
+    expect(noon.byCaller['session:abcd1234'].attributed).toBe(4); // never 4 + 7: the fresh window's first `used` is no cost
+  }, 30_000); // three real ticks, each spawning probe subprocesses — explicit budget for a loaded full-suite run
+
+  it('persistGhSpend defaults to the throttle\'s own call log and delegates to gh-spend.mjs', () => {
+    const seen = [];
+    persistGhSpend({ now: 1, persist: (o) => { seen.push(o); return { rowsWritten: 0 }; } });
+    expect(seen[0].logPath).toMatch(/calls\.jsonl$/);
+    expect(seen[0].now).toBe(1);
+  });
+
+  it('a fixture tick (--lock-root, no --gh-calls-log) never writes spend files into the real throttle dir (PR #2851 review)', async () => {
+    // Stand-in for the operator's real ~/workspace/.lanes/gh-throttle: the default path tick() would resolve.
+    const realThrottle = join(dir, 'real-gh-throttle'); mkdirSync(realThrottle, { recursive: true });
+    writeFileSync(join(realThrottle, 'calls.jsonl'), JSON.stringify({ ts: '2020-01-01T10:05:00.000Z', op: 'pr list', outcome: 'call', ok: true, caller: 'x' }) + '\n');
+    const prev = process.env.WE_GH_THROTTLE_LOCK_ROOT;
+    process.env.WE_GH_THROTTLE_LOCK_ROOT = realThrottle;
+    try {
+      const lockRoot = join(dir, 'locks-fixture'); mkdirSync(lockRoot, { recursive: true });
+      const syncDir = join(dir, 'sync-fixture'); mkdirSync(syncDir, { recursive: true });
+      const summary = await tick({ 'lock-root': lockRoot, 'self-sync-dir': syncDir, 'no-gh': true, 'no-diagnose': true, 'state-root': join(dir, 'state-fixture'), 'logs-dir': join(dir, 'logs-fixture') });
+      expect(readdirSync(realThrottle).sort()).toEqual(['calls.jsonl']);
+      expect(summary.ghSpend).toBeNull();
+    } finally {
+      if (prev === undefined) delete process.env.WE_GH_THROTTLE_LOCK_ROOT; else process.env.WE_GH_THROTTLE_LOCK_ROOT = prev;
+    }
+  });
+});
+

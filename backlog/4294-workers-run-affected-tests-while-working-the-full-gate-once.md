@@ -2,9 +2,11 @@
 bornAs: x000pcl
 kind: story
 size: 3
-status: open
+status: resolved
 scope: ["we:skills-src/conveyor/delivery-agent-brief-v2.md", "we:skills-src/conveyor/delivery-agent-brief.md", "we:skills-src/conveyor/fix-agent-brief.md", "we:skills-src/conveyor/fix-agent-ci-brief.md", "we:scripts/verify-lane.mjs", "we:scripts/lib/verify-lane-gate.mjs"]
 dateOpened: "2026-09-27"
+dateStarted: "2026-09-28"
+dateResolved: "2026-09-28"
 preparedDate: "2026-09-28"
 preparedAgainstSha: "d0ca633fdd77999f8e9ac61e0ee330544ab494eb"
 tags: []
@@ -98,3 +100,141 @@ plan. Folded corrections:
    `decideLocalSelection` saw at request time (not the downstream `--gate=` value alone, per the Codex
    correction above) — record whether it was a caller default (this ruling's real target) or the selector's own
    sound fallback (not a violation), in this item.
+
+## Progress (2026-09-28, delivery build)
+
+### Converge (step 6)
+
+Ran `/converge` (`care=elevated`) against the lane's real diff. Round 1's panel (correctness, security,
+simplicity, standards-conformance, claim-accuracy) surfaced two real, cheap-to-fix issues, both fixed in this
+same diff before red-team: the documented mid-work command was missing `--run --passWithNoTests` (now added,
+matching the live-proof command and the guard test), and a timing claim ("two orders of magnitude" / "~14
+minutes") was imprecise (now "~15–35×" / "~80×" against the actual `.lane-verify` timestamps). A second panel
+pass on the corrected diff came back clean except one cosmetic simplicity carve-out (the mid-work paragraph
+carries guard-internals rationale a dispatched agent doesn't strictly need — left as-is, consistent with this
+brief's existing dense, issue-linked style elsewhere). The red-team round (same five lenses) found no blocker —
+every finding was `worseThanBase: false` / `parallelizable: true`, i.e. a carve-out, not a break — but converged
+on one recurring, genuinely useful idea across four of the five lenses: nothing mechanically ties the brief's
+documented command to the guard test that defends it, so the two can drift silently. Filed as **#4368**
+(`we:backlog/4368-assert-the-delivery-brief-s-mid-work-command-against-the-gua.md`) rather than built here —
+it is a real coverage gap, not a blocker on this item's own Done-when. **Verdict: `land`** — accept on every
+lens, red-team failed to break it.
+
+### Done-when 1 — mid-work step added to the live brief
+
+Added a **"Mid-work check"** block to `we:skills-src/conveyor/delivery-agent-brief.md`, inside step 4 ("Build it
+to spec"), right before step 5's terminal gate:
+
+```bash
+node scripts/readiness/heavy-admission.mjs run -- npx vitest related <touched-file-1> <touched-file-2> … --run --passWithNoTests
+```
+
+This is the **admitted-wrapper** shape (`ADMISSION_WRAPPER_HEAD` in `we:scripts/guard-bash.mjs`) — its head is
+`node we:scripts/readiness/heavy-admission.mjs run`, never a raw `npx vitest …` head, so `isHeavyRawRun`/`isVerificationRun` both read
+`false` for it and `dispatchedAgentVerificationReason` never fires, unlike a bare `we:scripts/verify-lane.mjs
+run` (the Codex-flagged gap in the fix briefs' own `GATE_COMMAND`, which IS denied — see "Left for follow-up"
+below). Confirmed both halves of Done-when 1:
+
+- **Grep before/after**:
+  ```bash
+  grep -c "heavy-admission.mjs run -- npx vitest related" we:skills-src/conveyor/delivery-agent-brief.md
+  ```
+  → `0` at this item's base commit, `1` after this change.
+- **Guard non-denial**: added a new test to `we:scripts/__tests__/guard-bash.test.mjs` — *"the admitted wrapper
+  form of a targeted `vitest related` is NOT denied to a dispatched agent, any kind"* — asserting
+  `dispatchedAgentVerificationReason(cmd, kind)` is `null` for `kind` in `build`/`fix`/`ci-heal` for exactly the
+  command shape the brief now documents. This sits alongside the pre-existing sibling test for the `vitest run`
+  spelling, which already proved the same exemption for that variant.
+
+### Done-when 2 — v2 explicitly EXCLUDED from this item's scope (design call)
+
+`we:skills-src/conveyor/delivery-agent-brief-v2.md` is a non-live PROTOTYPE whose entire design premise is that
+**the agent never runs any gate command itself, in any form** — not the terminal gate, and not a mid-work one
+either. Per its own text: *"Do NOT run `git commit`… do not run any gate command yourself. The wrapper does all
+of that once you report."* The only verification touchpoint in v2 is the wrapper running the gate once, after
+the agent's single `done` report, with the wrapper resuming the agent only if that comes back red.
+
+There is no mid-work iteration loop in v2 for a step like this to attach to — the agent does not iterate against
+its own gate feedback at all under v2; it builds once, reports once, and the wrapper owns everything gate-shaped
+from there. Adding a "run this targeted check yourself while you work" step would reintroduce exactly the
+direct-gate-running v2's cutover exists to remove, defeating the design it is prototyping. **Decision: v2 is
+explicitly excluded from this item's scope.** No change is made to
+`we:skills-src/conveyor/delivery-agent-brief-v2.md`.
+
+### Done-when 3 — live proof (this very build, a generic non-fix delivery lane)
+
+This delivery agent IS a generic (non-fix) delivery lane running `we:skills-src/conveyor/delivery-agent-brief.md`
+verbatim — so the mid-work iteration was run for real, on this item's own touch-set, mid-task:
+
+```
+node scripts/readiness/heavy-admission.mjs run -- npx vitest related scripts/__tests__/guard-bash.test.mjs --run --passWithNoTests
+  → Test Files  1 passed (1) / Tests  900 passed (900) — wall time ~10.1s
+```
+
+(A second run against the more widely-imported `we:scripts/guard-bash.mjs` + its test file pulled in 126 of the
+repo's 756 test files — still a real shrink — in ~66s wall time.)
+
+**Before/after**: this brief's own step 5 documents the terminal full gate at **150–350s** (roughly **15–35×**
+the 10.1s targeted run), and this item's own Amendment section above already recorded lane-16's REAL full-suite
+run at **~13.5 minutes / ~808s** (18:24:32.838Z–18:38:00.348Z, `.lane-verify` marker quoted just below — roughly
+**80×** the targeted run). Either way, a live, not merely theoretical, demonstration of the targeted step doing
+its job.
+
+### Done-when 4 — lane-16 root-caused: the selector's own SOUND fallback, not a caller default
+
+Read lane-16's actual `.lane-verify` marker (`<lane>/.git/.lane-verify`) rather than any downstream `--gate=`
+value:
+
+```json
+{
+  "sha": "663762a27fcec0cc8893420a50074557d636132c",
+  "status": "red",
+  "startedAt": "2026-09-28T18:24:32.838Z",
+  "finishedAt": "2026-09-28T18:38:00.348Z",
+  "suites": "npm run test:unit && npm run check:standards"
+}
+```
+
+That `sha` is a real merge commit still present in the lane-16 clone's object store (`git cat-file -t` resolves
+it): *"Merge origin/main into lane/4309-gate-red-recovered work"*, i.e. lane-16 was building **#4309** (a
+GitHub-API budget queue). Reconstructing the ACTUAL diff `decideLocalSelection` would have seen — the net
+changed set against the pinned merge-base (`git merge-base origin/main <sha>` → the second parent,
+`999c22e3d…`; `git diff --name-only <mergeBase> <sha>`) — gives the real 17-file touch-set for #4309, including
+six newly-**added** files:
+
+```
+A  scripts/lib/__tests__/fixtures/gh-debug/api-rate-limit-rest.debug.stderr
+A  scripts/lib/__tests__/fixtures/gh-debug/pr-list-paginated.debug.stderr
+A  scripts/lib/__tests__/fixtures/gh-debug/pr-view-404.debug.stderr
+A  scripts/lib/__tests__/fixtures/gh-debug/pr-view-404.plain.stderr
+A  scripts/lib/__tests__/fixtures/gh-debug/pr-view-git-resolve.debug.stderr
+A  scripts/lib/__tests__/fixtures/gh-debug/pr-view-success.debug.stderr
+```
+
+`we:scripts/readiness/test-selection.mjs#isLocalFullSuiteTrigger` flags a path as a full-suite trigger when
+`SHARED_TEST_DIRS` (`/(^|\/)(__tests__|__fixtures__|__mocks__|test-utils|test-helpers)\//`) matches AND the path
+is not itself a test file. Each of the six new fixtures lives under `scripts/lib/__tests__/fixtures/gh-debug/` —
+inside a `__tests__/` directory component — and is a `.debug.stderr`/`.plain.stderr` data file, not a
+`*.test.*`/`*.spec.*` file, so every one of them independently matched the trigger (confirmed by running the
+actual regexes from `we:scripts/readiness/test-selection.mjs` against these exact paths). That forced
+`decideLocalSelection` to `mode: 'full'` with reason *"config / setup / dependency / shared-test-helper file(s)
+changed… the module graph cannot scope these"* — the full suite ran because the selector correctly could not
+trace which tests consume opaque fixture data added under a `__tests__/` tree, not because any caller
+configured or defaulted to `full`.
+
+**Verdict: the selector's own sound, deliberate fallback — NOT a violation of the amendment's ruling**, exactly
+the Codex-review-flagged class of case ("the selector correctly declining to guess on a diff shape it cannot
+narrow"). Nothing in `we:scripts/lib/verify-lane-gate.mjs`/`we:scripts/readiness/test-selection.mjs` needs to
+change for this instance; #4309's own full-suite run mid-task was the sound, intended behavior given what it
+actually changed.
+
+### Left for follow-up (not built here — kept out to avoid scope creep on this item)
+
+While root-causing Done-when 1's Codex correction, confirmed that `we:skills-src/conveyor/fix-agent-brief.md`'s
+own `{{GATE_COMMAND}}` resolves to `we:scripts/verify-lane.mjs run --repo=.` — a bare `run` invocation, the exact
+shape `we:scripts/guard-bash.mjs#dispatchedAgentVerificationReason` denies for a mechanically-dispatched `fix`
+agent (only `request`/`check`/`reset` are exempt). This item's own scope and Done-when never named the fix
+briefs' `GATE_COMMAND` itself as something to change (only "mirroring" it as inspiration for the generic briefs'
+new step, which Done-when 1 explicitly redirects to a guard-permitted shape instead) — fixing the fix briefs' own
+pre-existing gap is a separate, real bug worth its own card rather than folding into this one's diff. Filed as
+**#4369** (`we:backlog/4369-fix-briefs-mid-work-gate-command-is-a-bare-verify-lane-invoc.md`).

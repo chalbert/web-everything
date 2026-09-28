@@ -1,0 +1,536 @@
+* Request at 2026-09-28 12:15:40.718299 -0400 EDT m=+0.018982335
+* Request to https://api.github.com/graphql
+> POST /graphql HTTP/1.1
+> Host: api.github.com
+> Accept: application/vnd.github.merge-info-preview+json, application/vnd.github.nebula-preview
+> Authorization: token ████████████████████
+> Content-Length: 845
+> Content-Type: application/json; charset=utf-8
+> Graphql-Features: merge_queue
+> Time-Zone: America/Toronto
+> User-Agent: GitHub CLI 2.95.0 Agent/claude-code_2-1-283_agent
+> X-Github-Api-Version: 2022-11-28
+
+GraphQL query:
+fragment pr on PullRequest{number}
+    query PullRequestList(
+      $owner: String!,
+      $repo: String!,
+      $limit: Int!,
+      $endCursor: String,
+      $baseBranch: String,
+      $headBranch: String,
+      $state: [PullRequestState!] = OPEN
+    ) {
+      repository(owner: $owner, name: $repo) {
+        pullRequests(
+          states: $state,
+          baseRefName: $baseBranch,
+          headRefName: $headBranch,
+          first: $limit,
+          after: $endCursor,
+          orderBy: {field: CREATED_AT, direction: DESC}
+        ) {
+          totalCount
+          nodes {
+            ...pr
+          }
+          pageInfo {
+            hasNextPage
+            endCursor
+          }
+        }
+      }
+    }
+GraphQL variables: {"limit":100,"owner":"chalbert","repo":"web-everything","state":["MERGED"]}
+
+< HTTP/2.0 200 OK
+< Access-Control-Allow-Origin: *
+< Access-Control-Expose-Headers: ETag, Link, Location, Retry-After, X-GitHub-OTP, X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Used, X-RateLimit-Resource, X-RateLimit-Reset, X-OAuth-Scopes, X-Accepted-OAuth-Scopes, X-Poll-Interval, X-GitHub-Media-Type, X-GitHub-SSO, X-GitHub-Request-Id, Deprecation, Sunset, Warning
+< Content-Security-Policy: default-src 'none'
+< Content-Type: application/json; charset=utf-8
+< Date: Mon, 28 Sep 2026 16:15:41 GMT
+< Referrer-Policy: origin-when-cross-origin, strict-origin-when-cross-origin
+< Server: github.com
+< Strict-Transport-Security: max-age=31536000; includeSubdomains; preload
+< Vary: Accept-Encoding, Accept, X-Requested-With
+< X-Accepted-Oauth-Scopes: repo
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: deny
+< X-Github-Edge-Region: iad
+< X-Github-Media-Type: github.v4; param=merge-info-preview.nebula-preview; format=json
+< X-Github-Request-Id: REDACTED
+< X-Oauth-Client-Id: 178c6fc778ccc68e1d6a
+< X-Oauth-Scopes: gist, read:org, repo, workflow
+< X-Ratelimit-Limit: 5000
+< X-Ratelimit-Remaining: 4962
+< X-Ratelimit-Reset: 1790615715
+< X-Ratelimit-Resource: graphql
+< X-Ratelimit-Used: 38
+< X-Xss-Protection: 0
+
+{
+  "data": {
+    "repository": {
+      "pullRequests": {
+        "totalCount": 2734,
+        "nodes": [
+          {
+            "number": 2844
+          },
+          {
+            "number": 2843
+          },
+          {
+            "number": 2842
+          },
+          {
+            "number": 2841
+          },
+          {
+            "number": 2840
+          },
+          {
+            "number": 2839
+          },
+          {
+            "number": 2838
+          },
+          {
+            "number": 2837
+          },
+          {
+            "number": 2836
+          },
+          {
+            "number": 2835
+          },
+          {
+            "number": 2834
+          },
+          {
+            "number": 2833
+          },
+          {
+            "number": 2832
+          },
+          {
+            "number": 2831
+          },
+          {
+            "number": 2829
+          },
+          {
+            "number": 2828
+          },
+          {
+            "number": 2827
+          },
+          {
+            "number": 2826
+          },
+          {
+            "number": 2825
+          },
+          {
+            "number": 2824
+          },
+          {
+            "number": 2823
+          },
+          {
+            "number": 2822
+          },
+          {
+            "number": 2821
+          },
+          {
+            "number": 2820
+          },
+          {
+            "number": 2819
+          },
+          {
+            "number": 2818
+          },
+          {
+            "number": 2817
+          },
+          {
+            "number": 2816
+          },
+          {
+            "number": 2815
+          },
+          {
+            "number": 2814
+          },
+          {
+            "number": 2813
+          },
+          {
+            "number": 2812
+          },
+          {
+            "number": 2811
+          },
+          {
+            "number": 2810
+          },
+          {
+            "number": 2809
+          },
+          {
+            "number": 2808
+          },
+          {
+            "number": 2807
+          },
+          {
+            "number": 2806
+          },
+          {
+            "number": 2805
+          },
+          {
+            "number": 2804
+          },
+          {
+            "number": 2803
+          },
+          {
+            "number": 2802
+          },
+          {
+            "number": 2801
+          },
+          {
+            "number": 2800
+          },
+          {
+            "number": 2799
+          },
+          {
+            "number": 2798
+          },
+          {
+            "number": 2797
+          },
+          {
+            "number": 2796
+          },
+          {
+            "number": 2795
+          },
+          {
+            "number": 2794
+          },
+          {
+            "number": 2793
+          },
+          {
+            "number": 2792
+          },
+          {
+            "number": 2791
+          },
+          {
+            "number": 2790
+          },
+          {
+            "number": 2789
+          },
+          {
+            "number": 2788
+          },
+          {
+            "number": 2787
+          },
+          {
+            "number": 2786
+          },
+          {
+            "number": 2785
+          },
+          {
+            "number": 2784
+          },
+          {
+            "number": 2783
+          },
+          {
+            "number": 2782
+          },
+          {
+            "number": 2781
+          },
+          {
+            "number": 2780
+          },
+          {
+            "number": 2779
+          },
+          {
+            "number": 2778
+          },
+          {
+            "number": 2777
+          },
+          {
+            "number": 2776
+          },
+          {
+            "number": 2775
+          },
+          {
+            "number": 2774
+          },
+          {
+            "number": 2773
+          },
+          {
+            "number": 2772
+          },
+          {
+            "number": 2771
+          },
+          {
+            "number": 2770
+          },
+          {
+            "number": 2769
+          },
+          {
+            "number": 2768
+          },
+          {
+            "number": 2767
+          },
+          {
+            "number": 2766
+          },
+          {
+            "number": 2765
+          },
+          {
+            "number": 2764
+          },
+          {
+            "number": 2763
+          },
+          {
+            "number": 2762
+          },
+          {
+            "number": 2761
+          },
+          {
+            "number": 2760
+          },
+          {
+            "number": 2759
+          },
+          {
+            "number": 2758
+          },
+          {
+            "number": 2757
+          },
+          {
+            "number": 2756
+          },
+          {
+            "number": 2755
+          },
+          {
+            "number": 2754
+          },
+          {
+            "number": 2753
+          },
+          {
+            "number": 2752
+          },
+          {
+            "number": 2751
+          },
+          {
+            "number": 2750
+          },
+          {
+            "number": 2749
+          },
+          {
+            "number": 2748
+          },
+          {
+            "number": 2747
+          },
+          {
+            "number": 2746
+          },
+          {
+            "number": 2745
+          },
+          {
+            "number": 2744
+          }
+        ],
+        "pageInfo": {
+          "hasNextPage": true,
+          "endCursor": "Y3Vyc29yOnYyOpK0MjAyNi0wOS0yNlQxODoyMToyN1rPAAAAARUXUFM="
+        }
+      }
+    }
+  }
+}
+
+* Request took 535.699541ms
+* Request at 2026-09-28 12:15:41.255301 -0400 EDT m=+0.555983085
+* Request to https://api.github.com/graphql
+> POST /graphql HTTP/1.1
+> Host: api.github.com
+> Accept: application/vnd.github.merge-info-preview+json, application/vnd.github.nebula-preview
+> Authorization: token ████████████████████
+> Content-Length: 915
+> Content-Type: application/json; charset=utf-8
+> Graphql-Features: merge_queue
+> Time-Zone: America/Toronto
+> User-Agent: GitHub CLI 2.95.0 Agent/claude-code_2-1-283_agent
+> X-Github-Api-Version: 2022-11-28
+
+GraphQL query:
+fragment pr on PullRequest{number}
+    query PullRequestList(
+      $owner: String!,
+      $repo: String!,
+      $limit: Int!,
+      $endCursor: String,
+      $baseBranch: String,
+      $headBranch: String,
+      $state: [PullRequestState!] = OPEN
+    ) {
+      repository(owner: $owner, name: $repo) {
+        pullRequests(
+          states: $state,
+          baseRefName: $baseBranch,
+          headRefName: $headBranch,
+          first: $limit,
+          after: $endCursor,
+          orderBy: {field: CREATED_AT, direction: DESC}
+        ) {
+          totalCount
+          nodes {
+            ...pr
+          }
+          pageInfo {
+            hasNextPage
+            endCursor
+          }
+        }
+      }
+    }
+GraphQL variables: {"endCursor":"Y3Vyc29yOnYyOpK0MjAyNi0wOS0yNlQxODoyMToyN1rPAAAAARUXUFM=","limit":20,"owner":"chalbert","repo":"web-everything","state":["MERGED"]}
+
+< HTTP/2.0 200 OK
+< Access-Control-Allow-Origin: *
+< Access-Control-Expose-Headers: ETag, Link, Location, Retry-After, X-GitHub-OTP, X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Used, X-RateLimit-Resource, X-RateLimit-Reset, X-OAuth-Scopes, X-Accepted-OAuth-Scopes, X-Poll-Interval, X-GitHub-Media-Type, X-GitHub-SSO, X-GitHub-Request-Id, Deprecation, Sunset, Warning
+< Content-Security-Policy: default-src 'none'
+< Content-Type: application/json; charset=utf-8
+< Date: Mon, 28 Sep 2026 16:15:41 GMT
+< Referrer-Policy: origin-when-cross-origin, strict-origin-when-cross-origin
+< Server: github.com
+< Strict-Transport-Security: max-age=31536000; includeSubdomains; preload
+< Vary: Accept-Encoding, Accept, X-Requested-With
+< X-Accepted-Oauth-Scopes: repo
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: deny
+< X-Github-Edge-Region: iad
+< X-Github-Media-Type: github.v4; param=merge-info-preview.nebula-preview; format=json
+< X-Github-Request-Id: REDACTED
+< X-Oauth-Client-Id: 178c6fc778ccc68e1d6a
+< X-Oauth-Scopes: gist, read:org, repo, workflow
+< X-Ratelimit-Limit: 5000
+< X-Ratelimit-Remaining: 4961
+< X-Ratelimit-Reset: 1790615715
+< X-Ratelimit-Resource: graphql
+< X-Ratelimit-Used: 39
+< X-Xss-Protection: 0
+
+{
+  "data": {
+    "repository": {
+      "pullRequests": {
+        "totalCount": 2734,
+        "nodes": [
+          {
+            "number": 2743
+          },
+          {
+            "number": 2742
+          },
+          {
+            "number": 2741
+          },
+          {
+            "number": 2740
+          },
+          {
+            "number": 2739
+          },
+          {
+            "number": 2738
+          },
+          {
+            "number": 2737
+          },
+          {
+            "number": 2736
+          },
+          {
+            "number": 2735
+          },
+          {
+            "number": 2734
+          },
+          {
+            "number": 2733
+          },
+          {
+            "number": 2732
+          },
+          {
+            "number": 2730
+          },
+          {
+            "number": 2729
+          },
+          {
+            "number": 2726
+          },
+          {
+            "number": 2725
+          },
+          {
+            "number": 2724
+          },
+          {
+            "number": 2723
+          },
+          {
+            "number": 2722
+          },
+          {
+            "number": 2720
+          }
+        ],
+        "pageInfo": {
+          "hasNextPage": true,
+          "endCursor": "Y3Vyc29yOnYyOpK0MjAyNi0wOS0yNlQxMjo0MToyMFrPAAAAART8uiI="
+        }
+      }
+    }
+  }
+}
+
+* Request took 253.301541ms

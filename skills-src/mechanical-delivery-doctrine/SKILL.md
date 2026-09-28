@@ -171,11 +171,19 @@ history. If a rule itself changes, edit it here first, then note the change on t
     `fix-end` after the push.** An orchestrator worker (not a daemon session) is no exception: before its
     first commit to a PR's `lane/*` ref it runs
     `node scripts/conveyor/fix-procedure.mjs fix-begin <pr> --repo=<the PR's repo slug> --who=<its session or worker name> --why="<one line>"`
-    (takes the per-PR fix claim, turns the PR back to draft, labels it `review-status:fixing`), pushes only
-    while holding it (`git push` / `pr-land` / `fix-procedure.mjs push` refuse anyone else), and finishes with
+    (takes the per-PR fix claim, labels it `review-status:fixing`), pushes only while holding it (`git push` /
+    `pr-land` / `fix-procedure.mjs push` refuse anyone else), and finishes with
     `node scripts/conveyor/fix-procedure.mjs fix-end <pr> --repo=<same> --who=<same>` (`--repo` is required: a PR
-    number is only unique within its repo). The PR stays draft; the fix daemon
-    promotes it on green required CI and review re-runs. If `fix-begin` is REFUSED, another fixer owns the PR
+    number is only unique within its repo). **Draft-only-on-withdrawal (operator ruling 2026-09-27,
+    `docs/agent/platform-decisions.md#fix-claim-draft-only-on-withdrawal`): the PR stays READY by default —
+    a normal repair loop (review fix, ci-heal, mechanical conflict repair, mechanical rebase/CI-rerun) never
+    touches the draft bit; the fix claim itself is the lock.** `fix-end` mirrors that: a never-drafted claim
+    leaves the PR ready with nothing further owed, never relying on the draft-first promotion. Draft is owed
+    ONLY for `--draft --reason=scope-change` (a scope-change request reaches the worker mid-review) or
+    `--draft --reason=withdrawn` (review finds the PR does not do what the card asked at all) on the SAME
+    `fix-begin` call, each naming its own label (`review-status:draft-scope-change` /
+    `review-status:draft-withdrawn`) — only then does the PR stay draft until the fix daemon promotes it on
+    green required CI and review re-runs. If `fix-begin` is REFUSED, another fixer owns the PR
     right now — wait for its `fix-end` or coordinate; never push around it. A worker without a Claude session
     sets `WE_FIX_WHO=<name>` and `WE_FIX_TOKEN=<the token fix-begin printed>` so its pushes are recognized as
     the holder's (the claim is bound to the token: `--who` is public, and two workers may share a name). Grounded 2026-09-27, PR #2811: a

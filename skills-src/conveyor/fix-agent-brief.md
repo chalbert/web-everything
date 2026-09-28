@@ -76,7 +76,7 @@ already applies to a fixer's own escalation marker.
 node "{{WE_ROOT}}/scripts/operations/completion-cli.mjs" report --repo={{REPO}} --session={{SESSION_SLUG}} --kind=fix --pr={{PR_NUM}} --item={{ITEM_NUM}} --status=started
 ```
 
-### 0b. Take the fix claim — `fix-begin` (the fix procedure, operator-approved 2026-09-27)
+### 0b. Take the fix claim — `fix-begin` (the fix procedure, operator-approved 2026-09-27; draft-only-on-withdrawal, `we:docs/agent/platform-decisions.md#fix-claim-draft-only-on-withdrawal`)
 
 One author repairs a PR at a time. Take the PR's durable fix claim before touching anything:
 
@@ -85,17 +85,26 @@ node "{{WE_ROOT}}/scripts/conveyor/fix-procedure.mjs" fix-begin {{PR_NUM}} --rep
   --why="conveyor fix: address review on PR #{{PR_NUM}}"
 ```
 
-It turns the PR back to **draft**, labels it `review-status:fixing`, and posts a marker naming you. While you hold
-it, no review or other fixer is dispatched for this PR and **pushes to its branch by anyone else are refused** —
-yours are allowed. If it is **refused** (exit 3, `reason` names who holds it), another fixer owns this PR right
-now: report `--status=done --outcome=not-applicable` and RETURN `#{{ITEM_NUM}} → fix not-applicable (fix claim held
-by <holder>)`. Do not work around it.
+**Default: the PR stays READY, never draft.** This normal repair loop (an ordinary review-findings fix) labels
+it `review-status:fixing` and posts a marker naming you — the claim itself is the lock, so draft is not needed
+for merge safety. While you hold it, no review or other fixer is dispatched for this PR and **pushes to its
+branch by anyone else are refused** — yours are allowed. If it is **refused** (exit 3, `reason` names who holds
+it), another fixer owns this PR right now: report `--status=done --outcome=not-applicable` and RETURN
+`#{{ITEM_NUM}} → fix not-applicable (fix claim held by <holder>)`. Do not work around it.
+
+**Draft ONLY when you discover one of two things mid-review** — add `--draft --reason=scope-change` (a
+scope-change request reaches you mid-review) or `--draft --reason=withdrawn` (review finds the PR does not do
+what the card asked at all, a fundamental miss, not a fixable finding) to the SAME `fix-begin` call. Each
+applies its own visible label (`review-status:draft-scope-change` / `review-status:draft-withdrawn`) instead of
+`fixing`. Do not pass `--draft` for an ordinary repair — it no longer defaults on and should not be forced on.
 
 **Every exit from here on — hand-back, stand-down, not-applicable — releases the claim with `fix-end`** (the
 blocks below carry the line). During a long gate run, refresh it now and then with
 `node "{{WE_ROOT}}/scripts/conveyor/fix-procedure.mjs" fix-heartbeat {{PR_NUM}} --repo={{REPO}} --who={{SESSION_SLUG}}`
-(the fix daemon also refreshes it while your session is live). `fix-end` leaves the PR **draft**: the fix daemon
-marks it ready once required CI is green on your new head, and review re-runs from there.
+(the fix daemon also refreshes it while your session is live). `fix-end` mirrors whatever `fix-begin` did: a
+plain (never-drafted) claim leaves the PR ready with nothing further owed; a drafted claim leaves the PR
+**draft** — the fix daemon marks it ready once required CI is green on your new head, and review re-runs from
+there.
 
 ### 1. Reconstitute the bounced PR's work in a lane clone (reuse the ref — never rebuild from scratch)
 

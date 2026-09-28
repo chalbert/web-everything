@@ -25,7 +25,7 @@
  * `we:scripts/operations/dispatch-lane.mjs`'s own `fix-${id}` mint), rather than sharing that binding.
  */
 import { mintSessionSlug } from './session-slug.mjs';
-import { readLiveFixClaim } from './fix-procedure.mjs';
+import { readLiveFixClaim, FIX_DRAFT_REASONS } from './fix-procedure.mjs';
 import { repoKeyForSlug } from '../lib/constellation-repos.mjs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -45,14 +45,21 @@ import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
  *  visible answer to "why hasn't this been reviewed yet" the feature's own build brief asked for.
  *
  *  `fixing-conflict` / `fixing-conflict-stalled` (draft reason at a glance, operator ask 2026-09-27, #2811
- *  follow-up) — a live `fix-<pr>` session is not always the SAME repair: `we:scripts/conveyor/rearm-review.mjs`
- *  already distinguishes a MECHANICAL conflict-resolution round (`--round=conflict`) from an ordinary
- *  review:changes bounce fix at the marker-comment layer, but nothing said so on the label a human glances at —
- *  both read as the same generic `fixing`. Deterministic off the SAME PR record every other state here already
- *  reads (`pr.mergeStateStatus === 'DIRTY'`, the identical field `reconcile-core.mjs#classifyPr`'s `conflicted`
- *  phase reads), never a fabricated guess: a live fixer working a PR GitHub itself reports as conflicting IS
- *  resolving that conflict, whatever else it might also be doing. */
-export const STATUS_LABEL_RE = /^review-status:(reviewing|review-stalled|fixing|fix-stalled|fixing-conflict|fixing-conflict-stalled|healing-ci|ci-heal-stalled|awaiting-ci)$/;
+ *  follow-up, #2826) — a live `fix-<pr>` session is not always the SAME repair: `we:scripts/conveyor/
+ *  rearm-review.mjs` already distinguishes a MECHANICAL conflict-resolution round (`--round=conflict`) from an
+ *  ordinary review:changes bounce fix at the marker-comment layer, but nothing said so on the label a human
+ *  glances at — both read as the same generic `fixing`. Deterministic off the SAME PR record every other
+ *  state here already reads (`pr.mergeStateStatus === 'DIRTY'`, the identical field `reconcile-core.mjs
+ *  #classifyPr`'s `conflicted` phase reads), never a fabricated guess: a live fixer working a PR GitHub
+ *  itself reports as conflicting IS resolving that conflict, whatever else it might also be doing.
+ *
+ *  `draft-scope-change` / `draft-withdrawn` (fix-claim draft-only-on-withdrawal, operator ruling 2026-09-27,
+ *  `we:docs/agent/platform-decisions.md#fix-claim-draft-only-on-withdrawal`, backlog `xyfvtfz`) — the two
+ *  reasons `fix-procedure.mjs#fixBegin` ever converts a PR to draft, each with its own label named at
+ *  `fix-begin` time (mutually exclusive with `fixing`/each other and with `awaiting-ci` — see
+ *  {@link deriveReviewStatus}'s own `fixClaim` branch for how a LIVE claim's recorded reason is read back so
+ *  this reconciler's own periodic pass never fights `fix-begin`'s freshly-applied label). */
+export const STATUS_LABEL_RE = /^review-status:(reviewing|review-stalled|fixing|fix-stalled|fixing-conflict|fixing-conflict-stalled|healing-ci|ci-heal-stalled|awaiting-ci|draft-scope-change|draft-withdrawn)$/;
 
 /**
  * `claude agents --json` states this module treats as LIVE — something is currently actioned, or stuck trying
@@ -80,18 +87,35 @@ const LIVE_STATES = Object.freeze({ working: 'reviewing', blocked: 'stalled' });
  * `OWED`/`OWED_ELSEWHERE` table), so the ordering is precedence-in-name-only — it never actually shadows a
  * real ci-heal for a PR that also has a stale review/fix session row sitting in `claude agents --json`.
  * @param {{pr:number|string, agents?:Array<{name?:string, state?:string}>, isDraft?:boolean, mergeConflicted?:boolean, fixClaim?:object|null}} o
- * @returns {{role:'review'|'fix'|'ci-heal'|'draft', state:'reviewing'|'review-stalled'|'fixing'|'fix-stalled'|'fixing-conflict'|'fixing-conflict-stalled'|'healing-ci'|'ci-heal-stalled'|'awaiting-ci'}|null}
+ * @returns {{role:'review'|'fix'|'ci-heal'|'draft', state:'reviewing'|'review-stalled'|'fixing'|'fix-stalled'|'fixing-conflict'|'fixing-conflict-stalled'|'healing-ci'|'ci-heal-stalled'|'awaiting-ci'|'draft-scope-change'|'draft-withdrawn'}|null}
  */
 export function deriveReviewStatus({ pr, agents = [], repo = 'we', isDraft = false, mergeConflicted = false, fixClaim = null } = {}) {
   const reviewName = mintSessionSlug({ kind: 'review', id: pr, repo });
   const fixName = mintSessionSlug({ kind: 'fix', id: pr, repo });
   const ciHealName = mintSessionSlug({ kind: 'ci-heal', id: pr, repo });
   const list = Array.isArray(agents) ? agents : [];
+  // Live incident 2026-09-28 (we#2852): `we:scripts/conveyor/reconcile-core.mjs`'s own `markSelfReportedDone`/
+  // `markAuthExpiredSessions`/`markIdleFinishedSessions` already stamp a FINISHED verdict onto these SAME agent
+  // rows (wired in by `we:scripts/conveyor/reconcile-pass.mjs#defaultReadAgents`, which the review daemon feeds
+  // straight into this function via `tagReviewStatus`'s `agents` param) — but this module used to look at
+  // nothing except the raw `claude agents --json` `state`, so a ci-heal session that had genuinely finished
+  // (its own completion record said `done`, its dispatch claim was released) still read as `blocked` here
+  // forever — the CLI never prunes a finished row — and got tagged `ci-heal-stalled`, which
+  // `we:scripts/conveyor/build-dispatch-policy.mjs` then read as a landing freeze on EVERY queued build. A row
+  // bearing any of these three markers is finished — exclude it from `LIVE_STATES` matching regardless of its
+  // raw `state`, mirroring `reconcile-core.mjs#assessLiveness`'s own `isFinished`.
+  //
+  // DELIBERATELY NOT excluding `hung: true` here, unlike `assessLiveness` (which treats `hung` as finished too,
+  // because ITS job is "may I redispatch a fresh session" — a hung session must not block that). This module's
+  // job is the opposite: surfacing to a human that a session may be stuck (the 211-hour permission-block hazard
+  // its own header names) — a transcript that has gone stale with no self-report is exactly that hazard, not
+  // evidence of a clean finish, so it must keep reading as `-stalled`.
+  const isFinishedOverride = (a) => a?.selfReportedDone === true || a?.authExpired === true || a?.idleFinished === true;
   // Prefer a `working` match over a `blocked` one for the SAME name (several historical rows can share a
   // name) — a session actually making progress right now is more informative than a stuck sibling. A `done`/
   // other row is simply not a candidate at all — see LIVE_STATES.
   const liveFor = (name) => {
-    const matches = list.filter((a) => a?.name === name && Object.hasOwn(LIVE_STATES, a.state));
+    const matches = list.filter((a) => a?.name === name && Object.hasOwn(LIVE_STATES, a.state) && !isFinishedOverride(a));
     return matches.find((a) => a.state === 'working') ?? matches[0] ?? null;
   };
   const review = liveFor(reviewName);
@@ -99,7 +123,16 @@ export function deriveReviewStatus({ pr, agents = [], repo = 'we', isDraft = fal
   // fix procedure (operator-approved 2026-09-27) — a LIVE fix claim (`fix-procedure.mjs`) is `fixing` whoever
   // holds it: an orchestrator worker is not a `fix-<pr>` session, and without this the tagger would strip the
   // `review-status:fixing` label `fix-begin` just set on the very next tick.
-  if (fixClaim) return { role: 'fix', state: 'fixing' };
+  //
+  // draft-only-on-withdrawal (backlog `xyfvtfz`) — a claim that drafted the PR recorded WHY on the claim
+  // itself (`fixBegin`'s own `draft`/`reason` meta, read back here via `fixClaim.meta`): read that back
+  // verbatim rather than re-deriving it, so this reconciler's own periodic pass never fights the label
+  // `fix-begin` just applied for the SAME reason `awaiting-ci` doesn't fight a draft-first PR's label.
+  if (fixClaim) {
+    const meta = fixClaim.meta ?? fixClaim;
+    if (meta?.draft && FIX_DRAFT_REASONS.includes(meta.reason)) return { role: 'fix', state: `draft-${meta.reason}` };
+    return { role: 'fix', state: mergeConflicted ? 'fixing-conflict' : 'fixing' };
+  }
   const fix = liveFor(fixName);
   if (fix) {
     // `fixing-conflict` (see STATUS_LABEL_RE's own doc) — the ONE case a `fix-<pr>` session's generic label
@@ -158,8 +191,8 @@ export function tagReviewStatus({
   // draft-first PRs (operator-approved 2026-09-27) — threaded straight to `deriveReviewStatus`; `false` by
   // default so every pre-existing caller/test of this function (none of which pass it) is unaffected.
   isDraft = false,
-  // `fixing-conflict` (draft reason at a glance, operator ask 2026-09-27) — same "false by default, no existing
-  // caller affected" convention as `isDraft` above.
+  // `fixing-conflict` (draft reason at a glance, operator ask 2026-09-27, #2826) — same "false by default, no
+  // existing caller affected" convention as `isDraft` above.
   mergeConflicted = false,
   // fix procedure — the live fix-claim read (a local file read, no `gh`); injectable so a test stays hermetic.
   readFixClaim = ({ repo: r, pr: p }) => readLiveFixClaim({ repo: r, pr: p }),

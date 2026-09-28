@@ -31,14 +31,26 @@ import { normNum } from './queue-store.mjs';
 export const BUILD_DISPATCH_POLICY = Object.freeze({
   maxConcurrentBuilds: 3,
   maxOpenPrs: 12,
-  // A PR stuck because a daemon did not move it. The three `*-stalled` labels are applied by
-  // we:scripts/conveyor/review-status-tag.mjs today; `blocked:daemon-bug` is the operator's manual freeze.
+  // Live incident 2026-09-28 (we#2852): ONE PR mislabelled `review-status:ci-heal-stalled` (a ci-heal session
+  // that had actually finished — see we:scripts/conveyor/review-status-tag.mjs's own fix for that bug) froze
+  // EVERY queued build, unrelated scope or not, because these three per-PR labels used to feed the SAME global
+  // `frozen` gate as the operator's manual `blocked:daemon-bug`. They are informative/derived
+  // (we:scripts/conveyor/review-status-tag.mjs), not an operator decision, and a single stuck PR must never
+  // freeze work that does not touch its files — that is exactly what `scope-vs-open-prs` below already proves
+  // per candidate against EVERY open PR unconditionally (stalled or not), so a stalled PR still correctly holds
+  // an overlapping build without a separate freeze clause. Only `blocked:daemon-bug` — the operator's own manual
+  // signal, never auto-applied — still freezes the whole queue; see `globalFreezeLabels` below.
   freezeLabels: Object.freeze([
     'review-status:fix-stalled',
     'review-status:ci-heal-stalled',
     'review-status:review-stalled',
     'blocked:daemon-bug',
   ]),
+  // The subset of `freezeLabels` that holds EVERY candidate regardless of scope — see the docblock just above
+  // for why the three per-PR `*-stalled` labels were removed from this set (#3383 continuation, live incident
+  // 2026-09-28). `freezeLabels` itself is kept, unchanged, purely for status/dry-run display
+  // (we:skills-src/conveyor/build-dispatch-daemon.mjs) — `planBuildDispatch` reads `globalFreezeLabels` only.
+  globalFreezeLabels: Object.freeze(['blocked:daemon-bug']),
   rules: Object.freeze([
     { id: 'cap', text: 'at most maxConcurrentBuilds builds in flight', enforcedBy: 'build-dispatch-policy.mjs' },
     { id: 'landing-freeze', text: 'no new build while open PRs > maxOpenPrs or any open PR carries a freeze label', enforcedBy: 'build-dispatch-policy.mjs' },
@@ -161,7 +173,12 @@ export function planBuildDispatch({
   const freezeReasons = [];
   if (killSwitch?.engaged) freezeReasons.push(`kill switch engaged${killSwitch.reason ? ` (${killSwitch.reason})` : ''}`);
   if (openPrs.length > policy.maxOpenPrs) freezeReasons.push(`${openPrs.length} open PRs > maxOpenPrs ${policy.maxOpenPrs}`);
-  const freezeSet = new Set(policy.freezeLabels || []);
+  // GLOBAL freeze set — `blocked:daemon-bug` only (#3383 continuation, live incident 2026-09-28). A per-PR
+  // `*-stalled` label never reaches this set any more; it is still an ordinary open PR below, so the
+  // `scope-vs-open-prs` loop still holds any candidate whose scope overlaps ITS files. Falls back to the full
+  // `freezeLabels` only for a caller passing a policy object that predates `globalFreezeLabels` (defensive, not
+  // expected in this codebase — every caller here uses `BUILD_DISPATCH_POLICY`).
+  const freezeSet = new Set(policy.globalFreezeLabels ?? policy.freezeLabels ?? []);
   for (const pr of openPrs) {
     const hit = pr.labels.find((l) => freezeSet.has(l));
     if (hit) freezeReasons.push(`${pr.repo}#${pr.number} is labelled ${hit}`);
