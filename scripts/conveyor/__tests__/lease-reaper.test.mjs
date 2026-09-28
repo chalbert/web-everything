@@ -18,7 +18,7 @@
  *   `sessionGoneForLease`'s new `pidAlive` input are exercised directly, proving a listed-but-dead session now
  *   reaps even while its recorded state is still `working`/`blocked` and its lease is nowhere near TTL.
  */
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import {
   classifyReap,
   reapPlan,
@@ -43,9 +43,14 @@ import {
   laneQuietSincePr,
   DEFAULT_QUIET_MS,
   resolveLeaseItemNum,
+  defaultGitIsAncestor,
 } from '../lease-reaper.mjs';
 import { DEFAULT_LEASE_TTL_MINUTES } from '../../lib/lane-lease.mjs';
 import { DISPATCH_GUARD_LISTING_GRACE_MINUTES } from '../../operations/dispatch-lane.mjs';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 const NOW = Date.parse('2026-07-26T12:00:00Z');
 const TTL_MS = DEFAULT_LEASE_TTL_MINUTES * 60_000;
@@ -973,6 +978,218 @@ describe('#xkk4lv7 — laneQuietSincePr: Fork 2/Option C\'s safety gate — a br
       prMergeSha: 'deadbeef', prMergedAt: old(QUIET + 3600_000), leaseAcquiredAt: old(QUIET + 3600_000), nowMs: NOW,
       statusPorcelain: () => '', isAncestor: () => null,
     })).toBeNull();
+  });
+});
+
+// #4337 — real-git integration coverage of `defaultGitIsAncestor` itself (the `laneQuietSincePr` cases above
+// all inject a MOCKED `isAncestor`, so none of them ever exercise the real `git merge-base`/`git cherry`/
+// `git rev-list` fallback this function actually runs in production — confirmed absent before this card).
+// Each fixture below is a REAL git repo (no mocked readers at all — `laneQuietSincePr` is called with only
+// `dir`/`prMergeSha`/`prMergedAt`/`leaseAcquiredAt`/`nowMs`, so it falls through to the real
+// `defaultGitIsAncestor` + `defaultGitStatusPorcelain`).
+describe('#4337 — defaultGitIsAncestor (via laneQuietSincePr, real git, no mocked readers): the merge-commit blind spot', () => {
+  const QUIET = DEFAULT_QUIET_MS;
+  const old = (msAgo) => new Date(NOW - msAgo).toISOString();
+  // Anchor both `mergedAt` and `acquiredAt` well past the quiet window so the ONLY thing under test is the
+  // containment axis itself — a clean tree, quiet long enough, the sole variable is `prMergeSha`'s containment.
+  const quietTimestamps = { prMergedAt: old(QUIET + 3600_000), leaseAcquiredAt: old(QUIET + 3600_000), nowMs: NOW };
+
+  const git = (args, cwd) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  const initRepo = (dir) => {
+    mkdirSync(dir, { recursive: true });
+    git(['init', '-q', '-b', 'main'], dir);
+    git(['config', 'user.email', 'test@example.com'], dir);
+    git(['config', 'user.name', 'Test'], dir);
+  };
+
+  let root;
+  beforeAll(() => { root = mkdtempSync(join(tmpdir(), 'we-lease-reaper-ancestor-')); });
+  afterAll(() => { rmSync(root, { recursive: true, force: true }); });
+
+  it('a literal --no-ff merge landing (sha IS the merge commit, HEAD is its own parent) → true — the common, untouched fast path', () => {
+    const dir = join(root, 'literal-ancestor');
+    initRepo(dir);
+    writeFileSync(join(dir, 'f.txt'), 'v0\n');
+    git(['add', 'f.txt'], dir);
+    git(['commit', '-q', '-m', 'C0'], dir);
+    git(['checkout', '-q', '-b', 'lane'], dir);
+    writeFileSync(join(dir, 'lane-only.txt'), 'lane\n');
+    git(['add', 'lane-only.txt'], dir);
+    git(['commit', '-q', '-m', 'C1: lane work'], dir);
+    const laneHead = git(['rev-parse', 'HEAD'], dir).trim();
+    // land it: a real merge commit on `main`, --no-ff, whose second parent IS the lane's own HEAD.
+    git(['checkout', '-q', 'main'], dir);
+    git(['merge', '--no-ff', '-q', '-m', 'land lane', 'lane'], dir);
+    const mergeSha = git(['rev-parse', 'HEAD'], dir).trim();
+    // re-checkout the lane's OWN tip as the working tree under test (the lane clone never advances past its
+    // own HEAD just because `main` landed it) — `laneQuietSincePr` reads THIS dir's HEAD, not `main`'s.
+    git(['checkout', '-q', laneHead], dir);
+    expect(laneQuietSincePr(dir, { ...quietTimestamps, prMergeSha: mergeSha })).toBe(true);
+  });
+
+  it('squash/rebase patch-equivalence (single lane commit, no merge commit anywhere) → true — the existing round-1 finding, unmodified', () => {
+    const dir = join(root, 'squash-equivalent');
+    initRepo(dir);
+    writeFileSync(join(dir, 'f.txt'), 'v0\n');
+    git(['add', 'f.txt'], dir);
+    git(['commit', '-q', '-m', 'C0'], dir);
+    git(['checkout', '-q', '-b', 'lane'], dir);
+    writeFileSync(join(dir, 'lane-only.txt'), 'lane\n');
+    git(['add', 'lane-only.txt'], dir);
+    git(['commit', '-q', '-m', 'C1: lane work'], dir);
+    // `sha`: a DIFFERENT commit, same diff (patch-equivalent), reached by an unrelated path — no shared
+    // ancestry with `lane` beyond C0, and NO merge commit anywhere in either history.
+    git(['checkout', '-q', '-b', 'landed', 'main'], dir);
+    writeFileSync(join(dir, 'lane-only.txt'), 'lane\n');
+    git(['add', 'lane-only.txt'], dir);
+    git(['commit', '-q', '-m', 'squash-landed: same diff, different commit'], dir);
+    const landedSha = git(['rev-parse', 'HEAD'], dir).trim();
+    git(['checkout', '-q', 'lane'], dir);
+    // sanity: NOT a literal ancestor either way (git's own exit-1 contract — merge-base throws on "not an
+    // ancestor", so a clean throw here is exactly the fallback-to-cherry path this fixture means to exercise).
+    expect(() => git(['merge-base', '--is-ancestor', 'HEAD', landedSha], dir)).toThrow();
+    expect(laneQuietSincePr(dir, { ...quietTimestamps, prMergeSha: landedSha })).toBe(true);
+  });
+
+  it('THE BUG (#4337, live on PR #2835): a merge commit carrying unique conflict-resolution content, unreachable from `sha`, while every non-merge commit IS patch-equivalent upstream → false, never falsely "contained"', () => {
+    const dir = join(root, 'unaccounted-merge');
+    initRepo(dir);
+    writeFileSync(join(dir, 'conflict.txt'), 'v0\n');
+    git(['add', 'conflict.txt'], dir);
+    git(['commit', '-q', '-m', 'C0: base'], dir);
+
+    // lane: ONE non-merge commit, touching a file disjoint from the eventual conflict — this is the commit
+    // that must end up patch-equivalent upstream (so cherry alone reads "contained").
+    git(['checkout', '-q', '-b', 'lane'], dir);
+    writeFileSync(join(dir, 'lane-only.txt'), 'lane-only\n');
+    git(['add', 'lane-only.txt'], dir);
+    git(['commit', '-q', '-m', 'C1: lane-only file'], dir);
+    const laneC1 = git(['rev-parse', 'HEAD'], dir).trim();
+
+    // other: represents progress already landed upstream, independent of the lane's own commit.
+    git(['checkout', '-q', '-b', 'other', 'main'], dir);
+    writeFileSync(join(dir, 'conflict.txt'), 'other-v\n');
+    git(['add', 'conflict.txt'], dir);
+    git(['commit', '-q', '-m', 'C2: other change (already upstream)'], dir);
+
+    // merge other into lane (clean auto-merge: disjoint files so far), then extend the merge commit itself
+    // with unique resolution content — content that exists ONLY in the merge commit's own tree, never as an
+    // independently cherry-pickable patch (exactly what a real conflict resolution adds beyond the mechanical
+    // union of its two parents).
+    git(['checkout', '-q', 'lane'], dir);
+    git(['merge', '--no-ff', '-q', '-m', 'M: merge other into lane', 'other'], dir);
+    writeFileSync(join(dir, 'conflict.txt'), 'other-v\nresolved-unique-content\n');
+    git(['add', 'conflict.txt'], dir);
+    git(['commit', '-q', '--amend', '-m', 'M: merge other into lane (unique resolution)'], dir);
+    const laneHead = git(['rev-parse', 'HEAD'], dir).trim();
+    expect(laneHead).not.toBe(laneC1); // sanity: HEAD really is the merge commit, not C1
+
+    // `sha`: what's "already landed" — other's own change, plus a SEPARATE, patch-equivalent recreation of
+    // lane's C1 (a different commit id, same diff) — but NEVER the merge commit or its unique resolution.
+    git(['checkout', '-q', '-b', 'landed', 'other'], dir);
+    git(['cherry-pick', laneC1], dir);
+    const landedSha = git(['rev-parse', 'HEAD'], dir).trim();
+
+    git(['checkout', '-q', 'lane'], dir);
+    // Ground the fixture: cherry alone (pre-fix logic) reads this as fully contained — every non-merge commit
+    // patch-equivalent, the merge commit invisible to it either way.
+    const cherryOut = git(['cherry', '--', landedSha, 'HEAD'], dir);
+    const cherryLines = cherryOut.split('\n').filter(Boolean);
+    expect(cherryLines.length === 0 || cherryLines.every((l) => l.startsWith('-'))).toBe(true);
+    // The merge commit really is reachable from HEAD and NOT from `sha` — the exact condition the fix vetoes on.
+    const unaccountedMerges = git(['rev-list', '--merges', '--end-of-options', `${landedSha}..HEAD`, '--'], dir).trim();
+    expect(unaccountedMerges.length).toBeGreaterThan(0);
+
+    // BEFORE this card's fix: this returned `true` (falsely "contained", the lease reclaimable — PR #2835).
+    // AFTER: `false` — the merge's unique content is never accounted for, so the lane is correctly retained.
+    expect(laneQuietSincePr(dir, { ...quietTimestamps, prMergeSha: landedSha })).toBe(false);
+  });
+
+  it('a routine, CONTENT-FREE merge (a lane merging `main` into itself to stay fresh, no unique resolution content at all) is STILL vetoed → false, never `true` — the fix is deliberately conservative on EXISTENCE alone, not just on merges carrying unique content (this is the intended, documented tradeoff, not a narrower one)', () => {
+    const dir = join(root, 'benign-merge');
+    initRepo(dir);
+    writeFileSync(join(dir, 'f.txt'), 'v0\n');
+    git(['add', 'f.txt'], dir);
+    git(['commit', '-q', '-m', 'C0: base'], dir);
+
+    git(['checkout', '-q', '-b', 'lane'], dir);
+    writeFileSync(join(dir, 'lane-only.txt'), 'lane-only\n');
+    git(['add', 'lane-only.txt'], dir);
+    git(['commit', '-q', '-m', 'C1: lane-only file'], dir);
+    const laneC1 = git(['rev-parse', 'HEAD'], dir).trim();
+
+    // other: unrelated upstream progress, disjoint file — merging it into lane is a routine "stay fresh" sync,
+    // introducing NO unique content of its own (a clean, mechanical union — no amend, no manual resolution).
+    git(['checkout', '-q', '-b', 'other', 'main'], dir);
+    writeFileSync(join(dir, 'other-only.txt'), 'other-only\n');
+    git(['add', 'other-only.txt'], dir);
+    git(['commit', '-q', '-m', 'C2: other change (already upstream)'], dir);
+
+    git(['checkout', '-q', 'lane'], dir);
+    git(['merge', '--no-ff', '-q', '-m', 'routine sync merge (no unique content)', 'other'], dir);
+    const laneHead = git(['rev-parse', 'HEAD'], dir).trim();
+    expect(laneHead).not.toBe(laneC1); // sanity: HEAD really is the merge commit
+
+    // `sha`: other's own change, plus a patch-equivalent recreation of lane's C1 — same shape as the bug
+    // fixture above, but this merge commit adds NOTHING beyond the trivial union of its two parents.
+    git(['checkout', '-q', '-b', 'landed', 'other'], dir);
+    git(['cherry-pick', laneC1], dir);
+    const landedSha = git(['rev-parse', 'HEAD'], dir).trim();
+
+    git(['checkout', '-q', 'lane'], dir);
+    const unaccountedMerges = git(['rev-list', '--merges', '--end-of-options', `${landedSha}..HEAD`, '--'], dir).trim();
+    expect(unaccountedMerges.length).toBeGreaterThan(0); // the routine merge commit itself is still unaccounted for
+
+    // Vetoed anyway: the fix disqualifies on the merge commit's mere EXISTENCE in the unaccounted range, not on
+    // detecting unique content within it (detecting "this merge's diff really is trivial" would require trusting
+    // the same kind of per-commit patch reasoning that caused the original bug) — a deliberate, documented
+    // false-negative bias (Risks: "must stay conservative in the SAFE direction only"), pinned here so it reads
+    // as an intentional test, not an unnoticed side effect.
+    expect(laneQuietSincePr(dir, { ...quietTimestamps, prMergeSha: landedSha })).toBe(false);
+  });
+});
+
+// #4337 — the new `git rev-list --merges` veto's OWN inconclusive-read path, pinned directly (an injected fake
+// `exec`, mirroring how every other axis in this file already tests its git-read failure contract) since
+// forcing a real `git rev-list` call to fail — while the two calls ahead of it in the SAME function (`git
+// merge-base`, `git cherry`) both succeed against the very same `sha` — has no honest real-git construction.
+describe('#4337 — defaultGitIsAncestor: the new rev-list veto\'s own catch branch, never a guess on failure', () => {
+  it('merge-base "not an ancestor" + cherry "contained" + rev-list THROWS (timeout / unresolvable range) → null, never true or false', () => {
+    const calls = [];
+    const exec = (bin, args) => {
+      calls.push(args[0]);
+      if (args[0] === 'merge-base') { const e = new Error('not an ancestor'); e.status = 1; throw e; }
+      if (args[0] === 'cherry') return ''; // empty — cherry reads "contained"
+      if (args[0] === 'rev-list') throw new Error('spawn ETIMEDOUT'); // the new veto's own read fails
+      throw new Error(`unexpected git subcommand in test: ${args[0]}`);
+    };
+    expect(defaultGitIsAncestor('/x/lane-9', 'deadbeef', { exec })).toBeNull();
+    expect(calls).toEqual(['merge-base', 'cherry', 'rev-list']); // proves the veto's OWN call actually ran
+  });
+
+  it('merge-base "not an ancestor" + cherry "contained" + rev-list finds a merge → false (the paired success path, same fixture shape)', () => {
+    const exec = (bin, args) => {
+      if (args[0] === 'merge-base') { const e = new Error('not an ancestor'); e.status = 1; throw e; }
+      if (args[0] === 'cherry') return '';
+      if (args[0] === 'rev-list') return 'deadbeefcafe\n';
+      throw new Error(`unexpected git subcommand in test: ${args[0]}`);
+    };
+    expect(defaultGitIsAncestor('/x/lane-9', 'deadbeef', { exec })).toBe(false);
+  });
+
+  it('a dash-prefixed `sha` (malformed/untrusted API data) is never misread as a flag by the new rev-list call — mirrors the round-5 security property already relied on for merge-base/cherry, now pinned for rev-list too', () => {
+    const revListArgs = [];
+    const exec = (bin, args) => {
+      if (args[0] === 'merge-base') { const e = new Error('not an ancestor'); e.status = 1; throw e; }
+      if (args[0] === 'cherry') return '';
+      if (args[0] === 'rev-list') { revListArgs.push(args); return ''; }
+      throw new Error(`unexpected git subcommand in test: ${args[0]}`);
+    };
+    defaultGitIsAncestor('/x/lane-9', '-malicious-looking-sha', { exec });
+    expect(revListArgs).toHaveLength(1);
+    // `--end-of-options` sits immediately before the range, and the range string is passed as ONE argv entry
+    // (never shell-interpolated) — so a leading `-` in `sha` can never be parsed as a flag by git.
+    expect(revListArgs[0]).toEqual(['rev-list', '--merges', '--max-count=1', '--end-of-options', '-malicious-looking-sha..HEAD', '--']);
   });
 });
 
