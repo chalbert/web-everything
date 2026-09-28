@@ -89,6 +89,46 @@ describe('deriveReviewStatus', () => {
       .toEqual({ role: 'ci-heal', state: 'ci-heal-stalled' });
   });
 
+  // LIVE INCIDENT, we#2852, 2026-09-28: ci-heal-2852 genuinely finished (fix-end recorded, completion record
+  // status:done, dispatch claim released) but `claude agents --json` still listed it `blocked` — the CLI never
+  // prunes a finished row. `we:scripts/conveyor/reconcile-pass.mjs#defaultReadAgents` already stamps
+  // `selfReportedDone: true` onto that exact row before handing it to this function; this pins that
+  // `deriveReviewStatus` now honors that upstream fact instead of re-deriving liveness from the stale raw
+  // `state` alone (mirroring `reconcile-core.mjs#assessLiveness`'s own `isFinished`).
+  it('null (not stalled): a ci-heal-<pr> session marked selfReportedDone, even though its raw state is still blocked', () => {
+    expect(deriveReviewStatus({ pr: 2852, agents: [{ name: 'ci-heal-2852', state: 'blocked', selfReportedDone: true }] }))
+      .toBeNull();
+  });
+
+  it('null (not stalled): the same self-reported-done exclusion applies to a review/fix session, not only ci-heal', () => {
+    expect(deriveReviewStatus({ pr: 1765, agents: [{ name: 'review-1765', state: 'blocked', selfReportedDone: true }] }))
+      .toBeNull();
+    expect(deriveReviewStatus({ pr: 1765, agents: [{ name: 'fix-1765', state: 'blocked', selfReportedDone: true }] }))
+      .toBeNull();
+  });
+
+  it('null (not stalled): authExpired / idleFinished are the same upstream-fact exclusion as selfReportedDone', () => {
+    expect(deriveReviewStatus({ pr: 1765, agents: [{ name: 'fix-1765', state: 'working', authExpired: true }] }))
+      .toBeNull();
+    expect(deriveReviewStatus({ pr: 1765, agents: [{ name: 'ci-heal-1765', state: 'blocked', idleFinished: true }] }))
+      .toBeNull();
+  });
+
+  it('a working sibling row for the SAME name still wins over a self-reported-done one, exactly like a done row', () => {
+    const agents = [{ name: 'ci-heal-1765', state: 'blocked', selfReportedDone: true }, { name: 'ci-heal-1765', state: 'working' }];
+    expect(deriveReviewStatus({ pr: 1765, agents })).toEqual({ role: 'ci-heal', state: 'healing-ci' });
+  });
+
+  it('a merely BLOCKED session with no self-report/authExpired/idleFinished marker still reads -stalled — the fix is upstream-fact-only, never a blanket "blocked is fine" change', () => {
+    expect(deriveReviewStatus({ pr: 1765, agents: [{ name: 'ci-heal-1765', state: 'blocked' }] }))
+      .toEqual({ role: 'ci-heal', state: 'ci-heal-stalled' });
+  });
+
+  it('DELIBERATE non-exclusion: a hung session still reads -stalled — this label exists to surface exactly that hazard to a human, unlike assessLiveness (whose job is "may I redispatch")', () => {
+    expect(deriveReviewStatus({ pr: 1765, agents: [{ name: 'fix-1765', state: 'blocked', hung: true }] }))
+      .toEqual({ role: 'fix', state: 'fix-stalled' });
+  });
+
   it('a review or fix session takes precedence over a stale ci-heal row for the same PR', () => {
     const agents = [{ name: 'ci-heal-1765', state: 'working' }, { name: 'fix-1765', state: 'working' }];
     expect(deriveReviewStatus({ pr: 1765, agents })?.role).toBe('fix');

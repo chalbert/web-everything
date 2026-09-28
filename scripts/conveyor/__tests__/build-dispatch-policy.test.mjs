@@ -54,12 +54,47 @@ describe('planBuildDispatch', () => {
     const r = planBuildDispatch({ candidates: [cand('1', ['we:a']), cand('2', ['we:b'])], externalBuilding: 2 });
     expect(r.dispatch.map((x) => x.num)).toEqual(['1']);
   });
-  it('freezes on too many open PRs or a freeze label', () => {
+  it('freezes on too many open PRs or the operator\'s manual daemon-bug flag', () => {
     const many = Array.from({ length: 13 }, (_, i) => pr('we', i + 1));
     expect(planBuildDispatch({ candidates: [cand('1', ['we:a'])], openPrs: many }).hold[0].rule).toBe('landing-freeze');
-    const stuck = planBuildDispatch({ candidates: [cand('1', ['we:a'])], openPrs: [pr('we', 5, [], ['review-status:fix-stalled'])] });
+    const stuck = planBuildDispatch({ candidates: [cand('1', ['we:a'])], openPrs: [pr('we', 5, [], ['blocked:daemon-bug'])] });
     expect(stuck.freeze.frozen).toBe(true);
-    expect(stuck.hold[0].reason).toMatch(/we#5 is labelled review-status:fix-stalled/);
+    expect(stuck.hold[0].reason).toMatch(/we#5 is labelled blocked:daemon-bug/);
+  });
+
+  // LIVE INCIDENT, we#2852, 2026-09-28: a single PR mislabelled `review-status:ci-heal-stalled` (root cause:
+  // we:scripts/conveyor/review-status-tag.mjs read a genuinely FINISHED ci-heal session as stalled) froze EVERY
+  // queued build via this exact `freezeSet`/`frozen` gate, unrelated scope or not — `build-dispatch-daemon.mjs
+  // --dry-run` showed `dispatch: []` for candidates with disjoint scope from #2852. A per-PR `*-stalled` label
+  // (fix/ci-heal/review) must never freeze the whole queue: it is informative/derived, not an operator decision
+  // (`blocked:daemon-bug`, tested above, is the only label that still does). This pins the RED/GREEN shape of
+  // that fix: a disjoint-scope candidate dispatches, an overlapping one still correctly waits — via the ordinary
+  // `scope-vs-open-prs` rule, which already runs per-candidate against every open PR unconditionally.
+  it('a per-PR *-stalled label never freezes the whole queue — only scope-vs-open-prs holds an overlapping candidate', () => {
+    const stalledPr = pr('we', 2852, ['scripts/conveyor/build-dispatch-policy.mjs'], ['review-status:ci-heal-stalled']);
+    const r = planBuildDispatch({
+      candidates: [cand('4360', ['we:scripts/conveyor/review-status-tag.mjs']), cand('4361', ['we:scripts/conveyor/build-dispatch-policy.mjs'])],
+      openPrs: [stalledPr],
+    });
+    expect(r.freeze.frozen).toBe(false);
+    expect(r.dispatch.map((x) => x.num)).toEqual(['4360']);
+    expect(r.hold.find((h) => h.num === '4361')).toMatchObject({ rule: 'scope-vs-open-prs' });
+    expect(r.hold.find((h) => h.num === '4361').reason).toMatch(/we#2852/);
+  });
+
+  it('review-stalled and fix-stalled are the same non-freezing shape as ci-heal-stalled', () => {
+    for (const label of ['review-status:review-stalled', 'review-status:fix-stalled']) {
+      const r = planBuildDispatch({ candidates: [cand('1', ['we:unrelated.mjs'])], openPrs: [pr('we', 9, ['other/file.ts'], [label])] });
+      expect(r.freeze.frozen).toBe(false);
+      expect(r.dispatch.map((x) => x.num)).toEqual(['1']);
+    }
+  });
+
+  it('globalFreezeLabels declares exactly blocked:daemon-bug — the three *-stalled labels stay in freezeLabels only for display', () => {
+    expect(BUILD_DISPATCH_POLICY.globalFreezeLabels).toEqual(['blocked:daemon-bug']);
+    expect(BUILD_DISPATCH_POLICY.freezeLabels).toEqual([
+      'review-status:fix-stalled', 'review-status:ci-heal-stalled', 'review-status:review-stalled', 'blocked:daemon-bug',
+    ]);
   });
   it('the kill switch freezes everything', () => {
     const r = planBuildDispatch({ candidates: [cand('1', ['we:a'])], killSwitch: { engaged: true, reason: 'test' } });
