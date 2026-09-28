@@ -22,6 +22,7 @@ import {
   watchLanePoolHealth,
   runLanePoolHealthWatch,
   resolveLanePoolRepoPath,
+  reclaimFinishedLanes,
 } from '../lane-pool-health-watch.mjs';
 
 describe('planLaneReap — pure', () => {
@@ -69,6 +70,141 @@ describe('planLaneReap — pure', () => {
   it('tolerant of a null/undefined lanes list', () => {
     expect(planLaneReap(null)).toEqual([]);
     expect(planLaneReap(undefined)).toEqual([]);
+  });
+});
+
+// #4344 — `reclaimFinishedLanes` re-reclaimed EVERY already-clean lane on EVERY pass (a full `reclaimLane`
+// process tree apiece), because "finished-reclaimable" alone does not distinguish "already at rest" from
+// "clean, but still behind the pool branch tip" (that second case still needs a real reclaim). These fixtures
+// mirror the item's own 3-lane test plan: clean-at-tip (skip), clean-but-behind-tip (still reclaim), and
+// dirty-unpreserved (never a candidate at all, unrelated to this fix).
+describe('reclaimFinishedLanes — pure decision (#4344 already-clean skip)', () => {
+  const wrap = (lanes) => ({ branch: 'origin/main', lanes });
+  const recordingReclaim = (calls, result = { reclaimed: true }) => (o) => { calls.push(o); return result; };
+
+  it('a lane with no uncommitted/ahead content, sitting AT the pool branch tip, is skipped — reported already-clean, reclaimLane never called', () => {
+    const whois = wrap([{
+      lane: 10, exists: true, verdict: 'finished-reclaimable',
+      uncommitted: { trackedModified: 0, untracked: 0 }, ahead: { count: 0 },
+      headSha: 'tip-sha', branchTipSha: 'tip-sha', branch: 'main',
+    }]);
+    const calls = [];
+    const outcomes = reclaimFinishedLanes({ whois, reclaimLane: recordingReclaim(calls), dryRun: false });
+    expect(calls).toEqual([]);
+    expect(outcomes).toEqual([{ lane: 10, reclaimed: false, alreadyClean: true, reason: 'already clean at the pool branch tip — nothing to reclaim' }]);
+  });
+
+  it('a lane with no uncommitted/ahead content but BEHIND the tip still gets a real reclaim call — never silently skipped', () => {
+    const whois = wrap([{
+      lane: 11, exists: true, verdict: 'finished-reclaimable',
+      uncommitted: { trackedModified: 0, untracked: 0 }, ahead: { count: 0 },
+      headSha: 'old-sha', branchTipSha: 'tip-sha', branch: 'main',
+    }]);
+    const calls = [];
+    const outcomes = reclaimFinishedLanes({
+      whois, reclaimLane: recordingReclaim(calls, { reclaimed: true, preserved: true, reason: 'ok' }), dryRun: false,
+    });
+    expect(calls).toEqual([{ lane: 11, dryRun: false }]);
+    expect(outcomes).toEqual([{ lane: 11, reclaimed: true, preserved: true, reason: 'ok' }]);
+  });
+
+  it('a dirty-unpreserved lane never becomes a candidate at all — its verdict already excludes it (unrelated to this fix)', () => {
+    const whois = wrap([{
+      lane: 12, exists: true, verdict: 'finished-needs-review',
+      uncommitted: { trackedModified: 1, untracked: 0 }, ahead: { count: 0 },
+      headSha: 'x', branchTipSha: 'x', branch: 'main',
+    }]);
+    const calls = [];
+    const outcomes = reclaimFinishedLanes({ whois, reclaimLane: recordingReclaim(calls), dryRun: false });
+    expect(calls).toEqual([]);
+    expect(outcomes).toEqual([]);
+  });
+
+  it('the item\'s own 3-lane fixture in one pass: clean-at-tip skipped, clean-behind-tip reclaimed, dirty-unpreserved untouched', () => {
+    const whois = wrap([
+      { lane: 10, exists: true, verdict: 'finished-reclaimable', uncommitted: { trackedModified: 0, untracked: 0 }, ahead: { count: 0 }, headSha: 'tip-sha', branchTipSha: 'tip-sha', branch: 'main' },
+      { lane: 11, exists: true, verdict: 'finished-reclaimable', uncommitted: { trackedModified: 0, untracked: 0 }, ahead: { count: 0 }, headSha: 'old-sha', branchTipSha: 'tip-sha', branch: 'main' },
+      { lane: 12, exists: true, verdict: 'finished-needs-review', uncommitted: { trackedModified: 1, untracked: 0 }, ahead: { count: 0 }, headSha: 'x', branchTipSha: 'x', branch: 'main' },
+    ]);
+    const calls = [];
+    const outcomes = reclaimFinishedLanes({ whois, reclaimLane: recordingReclaim(calls), dryRun: false });
+    expect(calls.map((c) => c.lane)).toEqual([11]);
+    expect(outcomes).toEqual([
+      { lane: 10, reclaimed: false, alreadyClean: true, reason: 'already clean at the pool branch tip — nothing to reclaim' },
+      { lane: 11, reclaimed: true },
+    ]);
+  });
+
+  it('a clean lane at the right sha but on a STRAY branch still gets a real reclaim call (branch-name guard)', () => {
+    const whois = wrap([{
+      lane: 13, exists: true, verdict: 'finished-reclaimable',
+      uncommitted: { trackedModified: 0, untracked: 0 }, ahead: { count: 0 },
+      headSha: 'tip-sha', branchTipSha: 'tip-sha', branch: 'some-stray-branch',
+    }]);
+    const calls = [];
+    reclaimFinishedLanes({ whois, reclaimLane: recordingReclaim(calls), dryRun: false });
+    expect(calls).toEqual([{ lane: 13, dryRun: false }]);
+  });
+
+  it('a second pass over the SAME lane after it was reclaimed makes zero reclaimLane calls — it is now already-clean', () => {
+    const firstPass = wrap([{
+      lane: 11, exists: true, verdict: 'finished-reclaimable',
+      uncommitted: { trackedModified: 0, untracked: 0 }, ahead: { count: 0 },
+      headSha: 'old-sha', branchTipSha: 'tip-sha', branch: 'main',
+    }]);
+    const calls1 = [];
+    reclaimFinishedLanes({ whois: firstPass, reclaimLane: recordingReclaim(calls1), dryRun: false });
+    expect(calls1.length).toBe(1); // the reclaim actually ran
+
+    // The next pass's whois re-reads this SAME lane fresh: the reclaim reset it, so HEAD now IS the tip.
+    const secondPass = wrap([{
+      lane: 11, exists: true, verdict: 'finished-reclaimable',
+      uncommitted: { trackedModified: 0, untracked: 0 }, ahead: { count: 0 },
+      headSha: 'tip-sha', branchTipSha: 'tip-sha', branch: 'main',
+    }]);
+    const calls2 = [];
+    const outcomes2 = reclaimFinishedLanes({ whois: secondPass, reclaimLane: recordingReclaim(calls2), dryRun: false });
+    expect(calls2).toEqual([]);
+    expect(outcomes2).toEqual([{ lane: 11, reclaimed: false, alreadyClean: true, reason: 'already clean at the pool branch tip — nothing to reclaim' }]);
+  });
+
+  it('a missing/malformed whois.branch fails CLOSED — always reclaims, never skips on an unenforceable branch guard', () => {
+    const whois = { lanes: [{
+      lane: 14, exists: true, verdict: 'finished-reclaimable',
+      uncommitted: { trackedModified: 0, untracked: 0 }, ahead: { count: 0 },
+      headSha: 'tip-sha', branchTipSha: 'tip-sha', branch: 'main',
+    }] }; // no top-level `branch` field at all
+    const calls = [];
+    const outcomes = reclaimFinishedLanes({ whois, reclaimLane: recordingReclaim(calls), dryRun: false });
+    expect(calls).toEqual([{ lane: 14, dryRun: false }]); // never silently skipped just because the guard can't run
+    expect(outcomes).toEqual([{ lane: 14, reclaimed: true }]);
+  });
+
+  // #4344 review — `|| 0` on `row.uncommitted`/`row.ahead` would make "field missing" indistinguishable from
+  // "field is zero", fail OPEN toward skipping a reclaim this predicate was never shown was safe on a
+  // malformed/truncated row. This must fail CLOSED — same standard as the sha half, which already refuses a
+  // missing headSha/branchTipSha.
+  it('a row with `uncommitted`/`ahead` entirely MISSING (a malformed/truncated whois row) fails closed — always still reclaimed, never silently skipped', () => {
+    const whois = wrap([{
+      lane: 15, exists: true, verdict: 'finished-reclaimable',
+      // no `uncommitted` / `ahead` at all — headSha/branchTipSha DO match, which is exactly the trap case
+      headSha: 'tip-sha', branchTipSha: 'tip-sha', branch: 'main',
+    }]);
+    const calls = [];
+    const outcomes = reclaimFinishedLanes({ whois, reclaimLane: recordingReclaim(calls), dryRun: false });
+    expect(calls).toEqual([{ lane: 15, dryRun: false }]); // never treated as already-clean on malformed input
+    expect(outcomes).toEqual([{ lane: 15, reclaimed: true }]);
+  });
+
+  it('a row whose `ahead.count` alone is non-numeric (malformed, not just absent) also fails closed', () => {
+    const whois = wrap([{
+      lane: 16, exists: true, verdict: 'finished-reclaimable',
+      uncommitted: { trackedModified: 0, untracked: 0 }, ahead: { count: 'not-a-number' },
+      headSha: 'tip-sha', branchTipSha: 'tip-sha', branch: 'main',
+    }]);
+    const calls = [];
+    reclaimFinishedLanes({ whois, reclaimLane: recordingReclaim(calls), dryRun: false });
+    expect(calls).toEqual([{ lane: 16, dryRun: false }]);
   });
 });
 

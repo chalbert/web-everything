@@ -3,9 +3,11 @@ bornAs: xbcny9p
 kind: story
 size: 3
 priority: high
-status: open
+status: resolved
 scope: ["we:scripts/conveyor/lane-pool-health-watch.mjs", "we:scripts/lib/lane-whois-core.mjs", "we:scripts/conveyor/__tests__/lane-pool-health-watch.test.mjs"]
 dateOpened: "2026-09-28"
+dateStarted: "2026-09-28"
+dateResolved: "2026-09-28"
 preparedDate: "2026-09-28"
 preparedAgainstSha: "c7e4fd628fd6ee4436b82103f7d1ce35ca7fd8a7"
 tags: []
@@ -80,3 +82,36 @@ holds.
 
 1. **Executable** — vitest on we:scripts/conveyor/__tests__/lane-pool-health-watch.test.mjs passes with the new cases, which fail on main.
 2. **Live** — a resident `we` pass reclaims 0 lanes that were already clean at tip.
+
+## Progress
+
+- **Built.** `reclaimFinishedLanes` (we:scripts/conveyor/lane-pool-health-watch.mjs) now skips a
+  `finished-reclaimable` candidate WITHOUT calling `reclaimLane` only when the new pure predicate
+  `isLaneAlreadyClean` (we:scripts/lib/lane-whois-core.mjs) confirms it is genuinely at rest — zero
+  uncommitted/ahead content AND `HEAD` literally at the pool branch's own current tip on the expected branch —
+  recording it as `{ reclaimed: false, alreadyClean: true }` instead. A lane that is clean-relative-to-HEAD but
+  still BEHIND the tip (or on a stray branch) still gets a real reclaim, per the item's own Risks section.
+- we:scripts/lane-whois.mjs now exposes `headSha` / `branch` / `branchTipSha` at the top level of each row (all
+  three were already read internally — `branchTipSha` is the one genuinely new, single, cheap `git rev-parse
+  <branchRef>` read per lane — negligible next to the ~10-process `reclaim` tree it lets a caller skip).
+  `classifyLaneVerdict`'s own verdict rule is intentionally UNCHANGED (still "nothing to lose" ⇒
+  `finished-reclaimable`, tip or not) — the distinct-verdict follow-up the spec calls "cleaner" stays a
+  separate, optional future item.
+- Went slightly beyond the declared `scope:` (added we:scripts/lane-whois.mjs) because the fix cannot be made
+  safely without it — the risk the item itself names ("a lane can be clean but checked out at an old commit…
+  keep reclaiming when HEAD is not the pool branch tip") is not decidable from data
+  we:scripts/conveyor/lane-pool-health-watch.mjs already had; it needed whois to expose the tip comparison.
+- Tests: we:scripts/lib/__tests__/lane-whois-core.test.mjs (pure `isLaneAlreadyClean` cases),
+  we:scripts/conveyor/__tests__/lane-pool-health-watch.test.mjs (the item's own 3-lane fixture — clean-at-tip
+  skipped / clean-behind-tip reclaimed / dirty-unpreserved untouched — plus the second-pass-zero-calls case and
+  a branch-name-guard case), and a real-git integration addition to we:scripts/__tests__/lane-whois.test.mjs
+  proving the new fields are exposed and disagree exactly when a lane is clean-but-behind. All new cases
+  verified red against pre-fix source, green after.
+- Done-when #2 (**Live**) is proven in the PR body via the card's own before/after live-proof plan, not here.
+- `/converge` (care: elevated, 1 round, panel + independent red-team) — **land, verdict accept**, all 5 lenses
+  (correctness/security/simplicity/standards-conformance/claim-accuracy) accept. Findings surfaced and fixed
+  along the way: `isLaneAlreadyClean` and its call site now fail CLOSED (a real reclaim, never a silent skip) on
+  a malformed/absent `uncommitted`/`ahead`/`branch` shape, instead of defaulting it to "clean"; added a real-git
+  regression test proving we:scripts/lane-pool.mjs `reclaim` genuinely never fetches (the invariant this whole
+  fix's safety argument depends on); and the wiring test in we:scripts/__tests__/lane-whois.test.mjs now also
+  covers a real stray-branch lane, not just at-tip/behind-tip.

@@ -160,3 +160,58 @@ export function keepMarkerApplies(marker, fingerprint) {
     && sameArray(m.dirtyPaths, fingerprint.dirtyPaths)
     && sameArray(m.aheadShas, fingerprint.aheadShas);
 }
+
+/**
+ * #4344 — PURE: is a `finished-reclaimable` lane genuinely ALREADY CLEAN — nothing a `reclaim` would actually
+ * change? `classifyLaneVerdict` above calls a lane `finished-reclaimable` the instant it has zero uncommitted/
+ * ahead content ("nothing to lose"), with no check that the checkout is actually SITTING at the pool branch's
+ * current tip on the right branch. That verdict is still correct as far as it goes — resetting such a lane
+ * destroys nothing — but a periodic sweep that reclaims it ANYWAY every single pass (the exact bug this
+ * function exists to let a caller avoid) burns a real git-reset process tree for genuinely nothing, every 120s,
+ * across every already-idle lane in the pool.
+ *
+ * NARROWER than "finished-reclaimable": a lane can be clean-relative-to-HEAD (no uncommitted files, no local
+ * commits ahead of `origin/<branch>`) yet still be BEHIND the tip — checked out at an old commit because
+ * nothing has fast-forwarded it since `origin/<branch>` last moved — or sitting on a stray branch entirely.
+ * `reclaim` still does real, useful work on either of those (its `git reset --hard origin/<branch>` actually
+ * MOVES `HEAD`), so this must return `false` for them; only an EXACT head-sha match against the pool branch's
+ * own current tip, on the expected branch, counts as "already clean" here. `expectedBranch` is optional (a
+ * caller that only ever runs one branch pool can omit it) — omitting it just skips the branch-name check
+ * rather than failing it.
+ *
+ * NOT A NEW STALENESS RISK (#4344): `branchTipSha` is
+ * this lane's own LOCALLY-known `origin/<branch>` (no fetch of its own — see its call site in `lane-whois.mjs`).
+ * That sounds like it could regress a lane whose local tracking ref is stale (real `origin/<branch>` has moved,
+ * but this clone hasn't fetched). It does not: `we:scripts/lane-pool.mjs#cmdReclaim` — the ONLY thing that used
+ * to run on this exact candidate set — itself resets to `origin/<branch>` with NO fetch of its own either (read
+ * its body; there is no `git fetch` anywhere in `cmdReclaim`). So for a lane already sitting at ITS OWN clone's
+ * locally-known tip, calling `reclaim` was ALREADY a no-op `git reset --hard` to the identical commit it is
+ * already on — this predicate only removes the wasted process tree for that no-op, it changes no resulting git
+ * state versus before #4344. Neither this fix nor `reclaim` refreshes a lane's knowledge of `origin/<branch>` —
+ * that stays owned by `we:scripts/lane-pool.mjs#cmdRefresh` / an explicit fetch elsewhere, exactly as before.
+ * FAILS CLOSED on malformed/missing input, on EVERY field (#4344 review): a `null`/non-numeric count, a missing
+ * sha, or (at `reclaimFinishedLanes`'s call site in `we:scripts/conveyor/lane-pool-health-watch.mjs` — see that
+ * function) a missing `expectedBranch`
+ * all read as "not already clean" (falls through to a real reclaim), never as "assume clean". Omitting a count
+ * is deliberately NOT the same as passing `0` — a caller that forgets to supply it must never silently pass.
+ * @param {object} p
+ * @param {number} [p.uncommittedCount] - required to be a real, finite number to pass at all; anything else
+ *   (omitted, `null`, `NaN`, a string) fails closed.
+ * @param {number} [p.aheadCount] - same requirement as `uncommittedCount`.
+ * @param {string|null} [p.headSha] - this lane's current `HEAD` sha.
+ * @param {string|null} [p.branchTipSha] - the pool branch's tip sha, as read from THIS lane's own clone (never
+ *   a fresh fetch — the same locally-known ref `aheadCount` was already computed against).
+ * @param {string|null} [p.branch] - this lane's current branch name (short form, e.g. `main`).
+ * @param {string|null} [p.expectedBranch] - the pool's own branch name (short form); omitted skips this check
+ *   (a deliberate opt-out for a caller that never cares about branch name — never use this to mean "unknown").
+ * @returns {boolean}
+ */
+export function isLaneAlreadyClean({
+  uncommittedCount = null, aheadCount = null, headSha = null, branchTipSha = null, branch = null, expectedBranch = null,
+} = {}) {
+  if (!Number.isFinite(uncommittedCount) || !Number.isFinite(aheadCount)) return false;
+  if (uncommittedCount > 0 || aheadCount > 0) return false;
+  if (!headSha || !branchTipSha || headSha !== branchTipSha) return false;
+  if (expectedBranch != null && branch !== expectedBranch) return false;
+  return true;
+}

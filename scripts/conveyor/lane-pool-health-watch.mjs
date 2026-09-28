@@ -61,6 +61,9 @@ import { refreshSalvageIndex, backfillSalvageDir } from '../lib/salvage-index.mj
 import { sweepPoolLeftovers } from '../lib/pool-leftovers.mjs';
 import { resolveSalvageRoot, readAgentsStrict } from '../lib/lane-salvage.mjs';
 import { readLaneHistory, lastLaneHistoryEntry } from '../lib/lane-history.mjs';
+// #4344 — the PURE predicate that tells "already at the pool branch tip, nothing to reclaim" apart from
+// "clean, but still behind it" (reclaim must still run for the latter — see that function's own docblock).
+import { isLaneAlreadyClean } from '../lib/lane-whois-core.mjs';
 import { readdirSync as readdirSyncFs } from 'node:fs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -418,14 +421,48 @@ export function defaultReclaimLane({ exec = execFileSync, repo = null, root = RE
  * existing `--with-lanes` "needs your decision" feed already surfaces (#3383's own original spec; unchanged by
  * this file). PURE-ish shell: takes the already-computed whois report in, calls `reclaimLane` once per
  * candidate, returns the outcomes — no fs/git of its own beyond what `reclaimLane` does.
- * @param {{whois:{lanes:Array<object>}|null, reclaimLane:Function, dryRun:boolean}} o
- * @returns {Array<{lane:number, reclaimed:boolean, wouldReclaim?:boolean, reason?:string}>}
+ *
+ * #4344 — a `finished-reclaimable` verdict also covers a lane with NO uncommitted/ahead content at all, which
+ * is trivially "nothing to lose" — but every ALREADY-clean lane (no lease, no dirt, sitting right at the pool
+ * branch tip) was being handed to `reclaimLane` again on every single pass regardless, each one costing a real
+ * `node` + ~10 `git` process tree for a lane that had nothing left to reset. {@link isLaneAlreadyClean} (the
+ * pure predicate this now calls first, per candidate) is the NARROWER check that also confirms the checkout is
+ * genuinely at rest — HEAD at the pool branch's own current tip, on the right branch — so a lane that is clean
+ * but still BEHIND the tip (or on a stray branch) still gets a real reclaim, exactly as before; only the
+ * provably-already-at-rest subset is skipped, recorded as `alreadyClean: true` instead of calling `reclaimLane`.
+ * Not a new staleness risk — see {@link isLaneAlreadyClean}'s own docblock in `lib/lane-whois-core.mjs` for why.
+ * @param {{whois:{lanes:Array<object>, branch?:string}|null, reclaimLane:Function, dryRun:boolean}} o
+ * @returns {Array<{lane:number, reclaimed:boolean, wouldReclaim?:boolean, alreadyClean?:boolean, reason?:string}>}
  */
 export function reclaimFinishedLanes({ whois, reclaimLane, dryRun, salvageEnabled = false, salvageMax = DEFAULT_SALVAGE_MAX_PER_TICK }) {
   if (!whois || !Array.isArray(whois.lanes)) return [];
   const candidates = whois.lanes.filter((row) => row && row.exists && row.verdict === 'finished-reclaimable');
+  // #4344 — the pool's own branch name (short form). Deliberately fails CLOSED here (unlike
+  // `isLaneAlreadyClean`'s own optional `expectedBranch`, whose omission is a caller's on-purpose opt-out): THIS
+  // call site always means to enforce the branch-name guard, so a missing/malformed `whois.branch` must never
+  // silently turn that guard off — `expectedBranch === null` below means "always reclaim", never "skip anyway".
+  const expectedBranch = typeof whois.branch === 'string' ? whois.branch.replace(/^origin\//, '') : null;
   const outcomes = [];
   for (const row of candidates) {
+    // Sum the two dirty-path counts ONLY when both are genuinely finite numbers — `null + 5` is `5` and
+    // `null + null` is `0` in JS, so a naive `?? null` sum here would silently coerce a missing sub-field back
+    // into a "clean" number and defeat `isLaneAlreadyClean`'s own fail-closed guard below.
+    const trackedModified = row.uncommitted?.trackedModified;
+    const untracked = row.uncommitted?.untracked;
+    const uncommittedCount = Number.isFinite(trackedModified) && Number.isFinite(untracked) ? trackedModified + untracked : null;
+    // `isLaneAlreadyClean` already fails closed on a malformed/absent count or sha; `expectedBranch !== null`
+    // is this call site's OWN fail-closed requirement (see above) — both must hold before a reclaim is skipped.
+    if (expectedBranch !== null && isLaneAlreadyClean({
+      uncommittedCount,
+      aheadCount: row.ahead?.count ?? null,
+      headSha: row.headSha ?? null,
+      branchTipSha: row.branchTipSha ?? null,
+      branch: row.branch ?? null,
+      expectedBranch,
+    })) {
+      outcomes.push({ lane: row.lane, reclaimed: false, alreadyClean: true, reason: 'already clean at the pool branch tip — nothing to reclaim' });
+      continue;
+    }
     const result = reclaimLane({ lane: row.lane, dryRun });
     outcomes.push(result
       ? { lane: row.lane, ...result }
