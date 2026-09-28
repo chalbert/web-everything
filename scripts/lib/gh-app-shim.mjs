@@ -217,6 +217,32 @@ export function looksLikeAppTokenAuthFailure(stderrText) {
 }
 
 /**
+ * PURE (#4309): the calling SCRIPT's basename from a `ps -o command=` line — `node /x/ci-heal-mark.mjs 2821` →
+ * `ci-heal-mark.mjs`; a directly-run script (`/x/tool.py …`) → `tool.py`. `null` for anything that is not an
+ * interpreter running a script file: a shell's `-c` command line (an agent session's Bash tool runs
+ * `zsh -c source …snapshot.sh && eval '…'` — that `.sh` is NOT the caller), `node -e`, or a bare binary.
+ * Inlined into the rendered shim via `Function#toString`, so it must stay self-contained (no outer references).
+ * @param {string} command
+ * @returns {string|null}
+ */
+export function shimCallerScriptFromCommand(command) {
+  const toks = String(command || '').trim().split(/\s+/).filter(Boolean);
+  if (!toks.length) return null;
+  const base = (p) => p.slice(p.lastIndexOf('/') + 1);
+  const isScript = (name) => /\.(m?[jt]s|cjs|py|sh|rb|pl)$/.test(name);
+  const exe = base(toks[0]);
+  if (!/^(node|nodejs|bun|deno|tsx|python[0-9.]*|ruby|perl|bash|sh|zsh)$/.test(exe)) return isScript(exe) ? exe : null;
+  for (let i = 1; i < toks.length; i++) {
+    const t = toks[i];
+    if (t === '-c' || t === '-e' || t === '--eval' || t === '-p' || t === '--print') return null;
+    if (/^(--import|--require|-r|--loader|--experimental-loader)$/.test(t)) { i += 1; continue; }
+    if (t.startsWith('-') || t === 'run') continue;
+    return isScript(base(t)) ? base(t) : null;
+  }
+  return null;
+}
+
+/**
  * PURE: the shim script's own source text — a standalone, dependency-free CommonJS Node script (no repo
  * import reaches it; see the module header for why). Reads `cachePath` fresh on every invocation, applies
  * `GH_TOKEN` only when the cached token is not within `SHIM_REFRESH_BUFFER_MS` of its own expiry, then execs
@@ -319,6 +345,25 @@ function throttleCliMissing(result, env) {
   // module graph; the fallback fires only when THAT fails to load too — i.e. gh was never reached.
   return throttleCliFailsToLoad(env);
 }
+// #4309: name the caller on every throttled call (WE_GH_THROTTLE_CALLER), so calls.jsonl stops reading "unknown"
+// for every agent-session gh call. Precedence: GH_CALLER; else the parent process's script (local \`ps\`, no API);
+// else the Claude session id; else the parent's command name. Best-effort — never fails the gh call.
+${shimCallerScriptFromCommand.toString()}
+function deriveCaller(env) {
+  if (env.GH_CALLER) return String(env.GH_CALLER);
+  let command = '';
+  try {
+    const ps = spawnSync('ps', ['-o', 'command=', '-p', String(process.ppid)], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 2000 });
+    if (ps.status === 0) command = String(ps.stdout || '').trim();
+  } catch { /* best-effort */ }
+  const script = shimCallerScriptFromCommand(command);
+  if (script) return script;
+  if (env.CLAUDE_CODE_SESSION_ID) return 'session:' + String(env.CLAUDE_CODE_SESSION_ID).slice(0, 8);
+  const first = command.split(' ')[0] || '';
+  return first.slice(first.lastIndexOf('/') + 1) || null;
+}
+const CALLER = deriveCaller(process.env);
+
 function runThrottled(argv, env) {
   if (!existsSync(GH_THROTTLE_CLI)) {
     warnFallback('throttle CLI not found at ' + GH_THROTTLE_CLI);
@@ -326,7 +371,7 @@ function runThrottled(argv, env) {
   }
   const result = spawnSync(process.execPath, [GH_THROTTLE_CLI, ...argv], {
     stdio: ['inherit', 'pipe', 'pipe'],
-    env: Object.assign({}, env, { WE_GH_THROTTLE_GH_BIN: REAL_GH }),
+    env: Object.assign({}, env, { WE_GH_THROTTLE_GH_BIN: REAL_GH }, CALLER ? { WE_GH_THROTTLE_CALLER: CALLER } : {}),
     // Same "never truncate a real gh payload" contract as the direct-exec path this replaces (PR #2600 review)
     // — gh-throttle.mjs's own internal capture is ALSO sized to this same cap (#4064), so neither hop clips it.
     maxBuffer: ${JSON.stringify(SHIM_CAPTURE_MAX_BUFFER)},
