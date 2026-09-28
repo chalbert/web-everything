@@ -3,9 +3,10 @@ bornAs: xee72b2
 kind: story
 size: 3
 parent: "3383"
-status: open
+status: active
 scope: ["we:scripts/operations/pr-ownership.mjs", "we:scripts/operations/pr-ownership-io.mjs", "we:scripts/conveyor/reconcile-core.mjs"]
 dateOpened: "2026-09-24"
+dateStarted: "2026-09-28"
 relatedReport: reports/2026-09-24-plateau-observability-review.md
 tags: []
 ---
@@ -32,3 +33,16 @@ One read-only declared operation that answers 'who owns this PR right now and is
 
 1. **Executable** — `npx vitest run we:scripts/operations/__tests__/pr-ownership.test.mjs` passes with one fixture per shape: owned and healthy, stale binding (a `blocked` session whose transcript is 3 hours old, the #3951 live shape), orphan stacked PR (base not main, the #4030 shape), owner daemon down, and owed-not-dispatched. Fails before this lands (the operation does not exist).
 2. **Live** — `node we:scripts/operations/run.mjs pr-ownership --json > <file>` on the laptop lists every open PR the reconcile dry-run lists across the constellation repos, each with an owner or a flag.
+
+## Progress
+
+- 2026-09-28 — Built. `we:scripts/operations/pr-ownership.mjs` is the declaring module and imports only `registry`/`step-kinds`. It holds the fixed phase→owner table, the three flags, and the thresholds in `PR_OWNERSHIP_THRESHOLDS`. `we:scripts/operations/pr-ownership-io.mjs` runs one `runReconcilePass` per constellation repo, with its readers wrapped only to keep the enriched PRs, agents and required checks it already read. Phase comes from `classifyPr`, binding from `bindAgents`, transcript age from `we:scripts/conveyor/hung-session.mjs#readHungInfo`, lanes from `lane-pool status --json`, and daemon liveness from runner-activity. Time in phase is the PR timeline's latest label or commit event. Registered in `we:scripts/operations/run.mjs` and added to the http-adapter read-only pin.
+- `bindAgents` now carries `transcriptAgeMs` on each bound row as evidence only. Binding decisions are unchanged.
+- Shared PR→card map: `we:scripts/operations/pr-ownership-io.mjs#buildPrToCardMap`, keyed `${repo}:${pr}` — the exact shape `agent-activity`'s `prToCard` input takes. It is not yet passed into the `agent-activity`/`live-work` callers, which still pass `{}`.
+- Owner-table calls made while building:
+  - `needs-human` → `human`, not an orphan.
+  - A draft in `needs-review`/`open` → fix-dispatch `promote-draft`. A draft is never reviewed; this showed up live on PR #2840.
+  - `ci-red` → fix-dispatch `ci-heal`.
+  - A stacked PR is owned (by stacked-rebase) only while conflicted. Once queued, it is an orphan.
+  - `drain` is not a runner-activity daemon, so its liveness reads `unknown` and never raises `orphan`.
+- Done-when 1: `we:scripts/operations/__tests__/pr-ownership.test.mjs` passes 16/16, with one fixture per shape run through the real reconcile pass. Done-when 2: the live `pr-ownership --json` run through `we:scripts/operations/run.mjs` took ~47s and listed the one open PR (#2840) with no gaps.
