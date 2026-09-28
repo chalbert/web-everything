@@ -2,9 +2,10 @@
 bornAs: xkk4lv7
 kind: story
 size: 5
-status: open
+status: resolved
 scope: ["we:scripts/conveyor/lease-reaper.mjs", "we:scripts/lane-pool.mjs", "we:scripts/conveyor/session-slug.mjs", "we:scripts/readiness/dispatch-plan.mjs", "we:scripts/conveyor/tick-core.mjs", "we:scripts/lib/lane-concurrency.mjs", "we:scripts/conveyor/build-dispatch-policy.mjs", "we:skills-src/conveyor/build-dispatch-daemon.mjs"]
 dateOpened: "2026-09-27"
+dateResolved: "2026-09-28"
 preparedDate: "2026-09-27"
 preparedAgainstSha: "109fd1b0d3fcbcbaeb8376aa98d55ee9ee882402"
 tags: []
