@@ -35,6 +35,7 @@
  *   node scripts/lib/gh-spend.mjs report [--hours=24] [--by=caller|op|caller+op] [--json] [--log=PATH]
  */
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, renameSync, statSync, writeFileSync, appendFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -75,6 +76,15 @@ export function hourStart(ms, hourMs = HOUR_MS) {
   return Math.floor(ms / hourMs) * hourMs;
 }
 
+/** A map keyed by log data (caller, op, resource names) — no prototype, so `__proto__` or `constructor` is an
+ *  ordinary key and never reaches `Object.prototype` (PR #2851 review). Serializes like `{}`. */
+function dict() { return Object.create(null); }
+
+/** One rate-limit response a window can be diffed on: a numeric `used` and `reset`, and a named bucket. */
+function isObservation(r) {
+  return !!r && Number.isFinite(r.used) && !!r.res && Number.isFinite(r.reset);
+}
+
 /** Group `call` lines into invocations (retries share `inv`; a nested record joins its `outer`). */
 function groupInvocations(entries) {
   const groups = new Map();
@@ -93,16 +103,18 @@ function groupInvocations(entries) {
     const head = (g.records.find((r) => !r.e.outer) || g.records[0]).e;
     const ts = Math.max(...g.records.map((r) => r.t));
     const responses = [];
-    let measured = false;
     for (const r of g.records) {
       if (!Array.isArray(r.e.rl)) continue;
-      measured = true;
       for (const x of r.e.rl) responses.push({ ...x, t: r.t });
     }
+    // MEASURED means at least one usable header observation — an empty or malformed `rl` is as unmeasured as an
+    // absent one (PR #2851 review), never an "attributed" invocation that silently costs zero.
+    const observations = responses.filter(isObservation).length;
     const idRec = g.records.find((r) => r.e.id) || g.records[0];
     out.push({
       key: g.key, ts, id: idRec.e.id || '?', resource: entryResource(head), caller: head.caller || 'unknown',
-      op: String(head.op || '?'), measured, responses, attributedByRes: {}, baselineOnly: 0, kind: null, estimated: 0, estimateRaw: 0,
+      op: String(head.op || '?'), measured: observations > 0, observations, responses, attributedByRes: dict(),
+      baselineOnly: 0, kind: null, estimated: 0, estimateRaw: 0,
     });
   }
   return out;
@@ -138,7 +150,7 @@ export function attributeSpend(entries, { baselines = {}, learnedOpCost = {}, no
   const windows = new Map();
   for (const inv of invocations) {
     for (const r of inv.responses) {
-      if (!Number.isFinite(r.used) || !r.res || !Number.isFinite(r.reset)) continue;
+      if (!isObservation(r)) continue;
       const wk = `${inv.id}|${r.res}|${r.reset}`;
       if (!windows.has(wk)) windows.set(wk, []);
       windows.get(wk).push({ used: r.used, t: r.t, res: r.res, inv });
@@ -162,10 +174,10 @@ export function attributeSpend(entries, { baselines = {}, learnedOpCost = {}, no
     const last = obs[obs.length - 1];
     baselinesOut[wk] = { used: last.used, t: last.t };
   }
-  // 2. Measured invocations are attributed (unless every response they carried was a window's first, bare baseline).
+  // 2. Measured invocations are attributed (unless every observation they carried was a window's first, bare baseline).
   for (const inv of invocations) {
     if (!inv.measured) continue;
-    inv.kind = inv.responses.length && inv.baselineOnly === inv.responses.length ? 'unknown' : 'attributed';
+    inv.kind = inv.baselineOnly === inv.observations ? 'unknown' : 'attributed';
   }
   // 3. Unmeasured invocations get an estimate ONLY inside an observed gap's residual (same identity, resource
   //    and hour), scaled down to fit; anything outside every observed gap is UNKNOWN.
@@ -213,9 +225,10 @@ export function attributeSpend(entries, { baselines = {}, learnedOpCost = {}, no
 }
 
 function emptyDim() { return { attributed: 0, estimated: 0, unknown: 0, requests: 0, responses: 0 }; }
+/** `map` must be a {@link dict} (or a JSON-parsed row map, where `__proto__` is already an own key). */
 function bump(map, key, patch) {
   const d = map[key] || (map[key] = emptyDim());
-  for (const [k, v] of Object.entries(patch)) d[k] += v;
+  for (const k of Object.keys(emptyDim())) if (k in patch) d[k] += patch[k];
 }
 
 /**
@@ -238,7 +251,7 @@ export function rollupSpendDetailed(entries, { hourMs = HOUR_MS, ...rest } = {})
       rows.set(k, {
         hour: new Date(hourMs0).toISOString(), identity: id, resource: res, unknown: true,
         bucketUsed: 0, attributed: 0, unattributed: 0, estimated: 0, unknownRequests: 0, requests: 0, responses: 0,
-        byCaller: {}, byOp: {}, byCallerOp: {}, measuredByOp: {},
+        byCaller: dict(), byOp: dict(), byCallerOp: dict(), measuredByOp: dict(),
       });
     }
     return rows.get(k);
@@ -331,9 +344,32 @@ export function readSpendRows(hourlyPath, { maxBytes = 4 * 1024 * 1024 } = {}) {
 function readCursor(cursorPath) {
   try {
     const c = JSON.parse(readFileSync(cursorPath, 'utf8'));
-    if (c && Number.isFinite(c.offset)) return { offset: c.offset, baselines: c.baselines || {} };
+    if (c && Number.isFinite(c.offset)) return { offset: c.offset, baselines: c.baselines || {}, file: c.file || null };
   } catch { /* absent or torn — start fresh */ }
-  return { offset: null, baselines: {} };
+  return { offset: null, baselines: {}, file: null };
+}
+
+/** How many leading bytes of the log identify it (every line starts with its own `ts`, so a new file differs). */
+const FILE_HEAD_BYTES = 256;
+
+/** The log's identity for the cursor: its inode plus a hash of its first bytes (PR #2851 review). */
+function logFileIdentity(logPath, st, headLen = Math.min(st.size, FILE_HEAD_BYTES)) {
+  const head = createHash('sha1').update(readTailBuf(logPath, 0, headLen)).digest('hex');
+  return { ino: st.ino, headLen, head };
+}
+
+/**
+ * Where to resume reading `logPath`: the cursor's offset only while it still points into the SAME file. A file
+ * that shrank, has a different inode (renamed into place), or whose first bytes changed (truncated and
+ * rewritten) is a rotation — read it from byte 0, whatever its size. A cursor with no recorded identity (written
+ * before this check existed) falls back to the size test alone.
+ */
+function resumeOffset(logPath, st, cursor) {
+  if (cursor.offset == null || cursor.offset > st.size) return 0;
+  const f = cursor.file;
+  if (!f) return cursor.offset;
+  if (f.ino !== st.ino || st.size < f.headLen) return 0;
+  return logFileIdentity(logPath, st, f.headLen).head === f.head ? cursor.offset : 0;
 }
 
 export function spendPaths(logPath) {
@@ -352,9 +388,10 @@ export function spendPaths(logPath) {
 export function persistSpendHours({ logPath = ghThrottleLogPath(ghThrottleLockRoot()), now = Date.now(), maxBytes = 8 * 1024 * 1024, graceMs = PERSIST_GRACE_MS, hourMs = HOUR_MS } = {}) {
   const { hourlyPath, cursorPath } = spendPaths(logPath);
   if (!existsSync(logPath)) return { rowsWritten: 0, consumedLines: 0, offset: 0 };
-  const size = statSync(logPath).size;
+  const st = statSync(logPath);
+  const { size } = st;
   const cursor = readCursor(cursorPath);
-  let offset = cursor.offset != null && cursor.offset <= size ? cursor.offset : 0; // shrunk → rotated → from 0
+  let offset = resumeOffset(logPath, st, cursor); // rotated (shrunk, renamed, or rewritten) → from 0
   let skipFirstPartial = false;
   if (size - offset > maxBytes) { offset = size - maxBytes; skipFirstPartial = true; } // bootstrap / long outage
   const lines = completeLines(readTailBuf(logPath, offset, size), offset, { skipFirstPartial });
@@ -378,7 +415,8 @@ export function persistSpendHours({ logPath = ghThrottleLogPath(ghThrottleLockRo
   // Keep only baselines for windows that can still be open (GitHub windows are an hour long).
   const live = Object.fromEntries(Object.entries(baselines).filter(([wk]) => Number(wk.split('|')[2]) * 1000 > now - 2 * hourMs));
   const tmp = `${cursorPath}.tmp-${process.pid}`;
-  writeFileSync(tmp, JSON.stringify({ v: 1, offset: end, baselines: live, updatedAt: new Date(now).toISOString() }) + '\n', 'utf8');
+  const file = logFileIdentity(logPath, st);
+  writeFileSync(tmp, JSON.stringify({ v: 1, offset: end, file, baselines: live, updatedAt: new Date(now).toISOString() }) + '\n', 'utf8');
   renameSync(tmp, cursorPath);
   return { rowsWritten: fresh.length, consumedLines: consumed.length, offset: end };
 }
@@ -391,9 +429,10 @@ export function collectSpendRows({ logPath = ghThrottleLogPath(ghThrottleLockRoo
   const keys = new Set(persisted.map(spendRowKey));
   let live = [];
   if (existsSync(logPath)) {
-    const size = statSync(logPath).size;
+    const st = statSync(logPath);
+    const { size } = st;
     const cursor = readCursor(cursorPath);
-    let offset = cursor.offset != null && cursor.offset <= size ? cursor.offset : 0;
+    let offset = resumeOffset(logPath, st, cursor);
     let skipFirstPartial = false;
     if (size - offset > maxBytes) { offset = size - maxBytes; skipFirstPartial = true; }
     const entries = completeLines(readTailBuf(logPath, offset, size), offset, { skipFirstPartial }).map((l) => l.entry).filter(Boolean);
@@ -411,7 +450,7 @@ export function summarizeSpendRows(rows, { by = 'caller' } = {}) {
   for (const r of rows) {
     const k = `${r.identity}|${r.resource}`;
     if (!sections.has(k)) {
-      sections.set(k, { identity: r.identity, resource: r.resource, hours: 0, unknownHours: 0, bucketUsed: 0, attributed: 0, estimated: 0, unattributed: 0, unknownRequests: 0, requests: 0, responses: 0, dims: {} });
+      sections.set(k, { identity: r.identity, resource: r.resource, hours: 0, unknownHours: 0, bucketUsed: 0, attributed: 0, estimated: 0, unattributed: 0, unknownRequests: 0, requests: 0, responses: 0, dims: dict() });
     }
     const s = sections.get(k);
     s.hours += 1;

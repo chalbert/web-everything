@@ -97,3 +97,40 @@ describe('gh-graphql-budget', () => {
   });
 });
 
+
+// ── PR #2851 review round 1 ────────────────────────────────────────────────────────────────────────────────────
+describe('gh-graphql-budget — PR #2851 review', () => {
+  const RESET2 = Date.parse('2026-09-27T06:19:57Z') / 1000;
+  const m = (minAgo, used, caller, extra = {}) => ({
+    ts: at(minAgo), op: 'pr view', outcome: 'call', ok: true, caller, resource: 'graphql', id: 'app', inv: `${caller}-${used}-${minAgo}`,
+    rl: [{ used, rem: 6100 - used, limit: 6100, reset: RESET2, res: 'graphql' }], ...extra,
+  });
+
+  it('a hostile caller name (__proto__) never writes onto Object.prototype', () => {
+    const s = summarizeGraphqlSpend([m(20, 5000, '__proto__'), m(19, 5010, '__proto__'), { ts: at(5), op: 'pr list', outcome: 'call', ok: true, caller: '__proto__' }], { now: NOW });
+    expect(({}).points).toBeUndefined();
+    expect(({}).requests).toBeUndefined();
+    expect(Object.prototype.hasOwnProperty.call(s.byCaller, '__proto__')).toBe(true);
+  });
+
+  it('an empty rl keeps the fallback estimate and counts as unknown (never an attributed zero)', () => {
+    const s = summarizeGraphqlSpend([{ ts: at(5), op: 'pr list', outcome: 'call', ok: true, caller: 'x.mjs', resource: 'graphql', id: 'app', inv: 'e1', rl: [] }], { now: NOW });
+    expect(s.unknownInvocations).toBe(1);
+    expect(s.byCaller['x.mjs']).toBe(3);
+  });
+
+  it('the summary breakdown sums to the reported total (unknown-call estimates included)', () => {
+    const entries = [
+      m(40, 4990, 'a.mjs'), m(39, 5000, 'a.mjs'), // a gap
+      { ts: at(38.5), op: 'pr list', outcome: 'call', ok: true, caller: 'd.mjs', resource: 'graphql', id: 'app', inv: 'g1' }, // estimated in the gap
+      m(38, 5100, 'b.mjs'), // closes: 50 attributed + residual
+      { ts: at(5), op: 'pr list', outcome: 'call', ok: true, caller: 'u.mjs' }, // outside every gap → unknown
+    ];
+    const [r] = smell.evaluate({ graphqlBudget: { sample: { remaining: 900, limit: 6100, resetAt: '2026-09-27T06:19:57Z' }, blocks: [] }, ghCalls: entries }, { now: NOW });
+    const total = Number(r.summary.match(/logged spend ~([\d.]+) pts/)[1]);
+    const parts = r.summary.match(/header-attributed ([\d.]+) \+ estimated ([\d.]+) \+ unknown-call estimate ([\d.]+)/);
+    expect(parts).not.toBeNull();
+    expect(Math.round((Number(parts[1]) + Number(parts[2]) + Number(parts[3])) * 10) / 10).toBe(total);
+    expect(r.measure.unknownEstimated).toBeGreaterThan(0);
+  });
+});

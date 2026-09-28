@@ -36,15 +36,21 @@ export function summarizeGraphqlSpend(entries, { now, windowMs = 60 * MINUTE } =
     if (e.outcome === 'call') inWindow.push(e);
   }
   const { invocations, gaps } = attributeSpend(inWindow, { now });
-  const callers = {};
-  const ops = {};
+  // Keyed by the log's own caller names — no prototype, so `__proto__` is an ordinary key (PR #2851 review).
+  const callers = Object.create(null);
+  const ops = Object.create(null);
   let unknownInvocations = 0;
+  let unknownRaw = 0;
   for (const inv of invocations) {
     const attributed = inv.attributedByRes.graphql || 0;
     const onGraphql = inv.resource === 'graphql';
     let estimated = 0;
     if (onGraphql && inv.kind === 'estimated') estimated = inv.estimated;
-    if (onGraphql && inv.kind === 'unknown') { estimated = inv.measured ? staticPointsEstimate(inv, 'graphql') : inv.estimateRaw; unknownInvocations += 1; }
+    if (onGraphql && inv.kind === 'unknown') {
+      estimated = inv.measured ? staticPointsEstimate(inv, 'graphql') : inv.estimateRaw;
+      unknownInvocations += 1;
+      unknownRaw += estimated;
+    }
     const pts = attributed + estimated;
     if (!pts && !(onGraphql && inv.kind === 'attributed')) continue;
     for (const [map, key] of [[callers, inv.caller], [ops, `${inv.caller} ${inv.op}`]]) {
@@ -57,14 +63,19 @@ export function summarizeGraphqlSpend(entries, { now, windowMs = 60 * MINUTE } =
   const rank = (m) => Object.entries(m).sort((a, b) => b[1].points - a[1].points || b[1].requests - a[1].requests);
   const round = (n) => Math.round(n * 10) / 10;
   const sum = (k) => round(gaps.filter((g) => g.res === 'graphql').reduce((s, g) => s + g[k], 0));
-  const total = round(Object.values(callers).reduce((s, c) => s + c.points, 0));
+  const attributed = sum('attributed');
+  const estimated = sum('estimated');
+  const unknownEstimated = round(unknownRaw);
+  // `total` = what the callers were charged = attributed + estimated + the unknown calls' own fallback estimate.
+  // Built from the ROUNDED parts, so the summary's breakdown always adds up to it exactly (PR #2851 review).
+  const total = round(attributed + estimated + unknownEstimated);
   const byCaller = Object.fromEntries(rank(callers).map(([k, c]) => [k, round(c.points)]));
   const top = rank(callers).slice(0, 5).map(([k, c]) => [k, round(c.points)]);
   const topOps = rank(ops).slice(0, 5).map(([k, c]) => ({ name: k, points: round(c.points), estimate: c.estimate, requests: c.requests }));
   const topCallers = rank(callers).slice(0, 5).map(([k, c]) => ({ name: k, points: round(c.points), estimate: c.estimate, requests: c.requests }));
   return {
     total, byCaller, top, topCallers, topOps, snapshotHits, blocked, unknownInvocations,
-    attributed: sum('attributed'), estimated: sum('estimated'), unattributed: sum('unattributed'),
+    attributed, estimated, unknownEstimated, unattributed: sum('unattributed'),
   };
 }
 
@@ -108,12 +119,15 @@ export default {
         remainingFraction: fraction == null ? null : Math.round(fraction * 1000) / 1000,
         blockedUntil: block?.until ?? null, loggedPointsEstimate: spend.total, unloggedPointsEstimate: unlogged,
         topCallers: Object.fromEntries(spend.top), snapshotHits: spend.snapshotHits, budgetBlockedCalls: spend.blocked,
-        attributed: spend.attributed, estimated: spend.estimated, unattributed: spend.unattributed,
-        unknownInvocations: spend.unknownInvocations, topOps: spend.topOps,
+        attributed: spend.attributed, estimated: spend.estimated, unknownEstimated: spend.unknownEstimated,
+        unattributed: spend.unattributed, unknownInvocations: spend.unknownInvocations, topOps: spend.topOps,
       },
+      // The breakdown adds up to the total; `unattributed` is bucket change NO logged call was charged, so it is
+      // reported beside the total, never inside it (PR #2851 review).
       summary: `GraphQL budget: ${sample ? `${sample.remaining}/${sample.limit} left, resets ${sample.resetAt}` : 'not sampled'}`
         + `${block ? `; BLOCKED until ${block.until}` : ''}; logged spend ~${spend.total} pts this window`
-        + ` (header-attributed ${spend.attributed}, estimated ${spend.estimated}, unattributed ${spend.unattributed})`
+        + ` (header-attributed ${spend.attributed} + estimated ${spend.estimated} + unknown-call estimate ${spend.unknownEstimated};`
+        + ` a further ${spend.unattributed} observed but unattributed)`
         + `${unlogged != null ? ` (+~${unlogged} from callers that bypass gh-throttle)` : ''}${topText ? `; top: ${topText}` : ''}.`,
       recommendation: breach
         ? `The App installation's GraphQL budget is ${block ? 'exhausted' : 'nearly exhausted'} — top spenders: ${topText || 'none logged'}`

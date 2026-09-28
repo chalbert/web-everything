@@ -513,6 +513,21 @@ export function resolveCostHeaderCapture(env = process.env) {
   return String(env[GH_COST_HEADERS_ENV] ?? '').trim() !== '0';
 }
 
+/** Capture headroom: the `GH_DEBUG=api` trace repeats each request and response body (pretty-printed) on stderr,
+ *  so a capturing spawn gets this multiple of the caller's `maxBuffer`. Memory is only used as output arrives. */
+export const DEBUG_CAPTURE_BUFFER_FACTOR = 8;
+
+/** The error a capturing spawn raises when stdout alone exceeds the caller's own `maxBuffer` — the same
+ *  `ENOBUFS` shape a non-capturing spawn would have thrown, so the widened child buffer never loosens that cap. */
+function captureStdoutOverflow(bin, argv) {
+  const err = new Error(`spawnSync ${bin} ENOBUFS (stdout exceeded maxBuffer)`);
+  err.code = 'ENOBUFS';
+  err.syscall = `spawnSync ${bin}`;
+  err.path = bin;
+  err.spawnargs = argv;
+  return err;
+}
+
 /** The `[git remote -v]`-shaped line gh prints for every git subprocess it runs while `GH_DEBUG` is set. */
 const GH_DEBUG_GIT_LINE = /^\[(\S*\/)?git( [^\n]*)?\]$/;
 
@@ -1211,8 +1226,11 @@ export function runGhCliPassthrough(argv, { throttle = {}, spawn = spawnSync, bi
   // own `GH_DEBUG` would be: when set, it is left alone and relayed untouched (never stripped). Otherwise this
   // turns `GH_DEBUG=api` on, reads the free `X-Ratelimit-*` headers, and strips ONLY its own trace back out.
   const capture = resolveCostHeaderCapture(env) && !process.env.GH_DEBUG;
+  // The trace echoes every request and response body, pretty-printed, into stderr — so a payload that fits
+  // `maxBuffer` can still overflow it through stderr alone and fail a call that succeeds without capture
+  // (PR #2851 review). The child gets headroom for the trace; stdout's own cap is re-applied after the spawn.
   const spawnOpts = capture
-    ? { stdio: ['inherit', 'pipe', 'pipe'], maxBuffer, env: { ...process.env, GH_DEBUG: 'api' } }
+    ? { stdio: ['inherit', 'pipe', 'pipe'], maxBuffer: maxBuffer * DEBUG_CAPTURE_BUFFER_FACTOR, env: { ...process.env, GH_DEBUG: 'api' } }
     : { stdio: ['inherit', 'pipe', 'pipe'], maxBuffer };
   const inv = randomUUID().slice(0, 12);
   const outer = env[GH_OUTER_INV_ENV] || process.env[GH_OUTER_INV_ENV] || null;
@@ -1232,6 +1250,7 @@ export function runGhCliPassthrough(argv, { throttle = {}, spawn = spawnSync, bi
       if (acq.ok) failOpenGate('release', () => releaseGhSlotSync({ lockRoot, cap, owner }), gateOpts);
     }
     if (r.error) throw r.error; // e.g. `gh` not on PATH — not a `gh`-level failure to retry
+    const stdoutOverflow = capture && r.stdout && r.stdout.length > maxBuffer;
     const rawStderrText = r.stderr ? r.stderr.toString('utf8') : '';
     // Classify on the STRIPPED text (what the caller would have seen without debug): the raw trace includes
     // response bodies, and a PR title saying "API rate limit exceeded" must never trigger a retry or a block.
@@ -1241,9 +1260,11 @@ export function runGhCliPassthrough(argv, { throttle = {}, spawn = spawnSync, bi
     const stderrOut = stripped && stripped.stderr !== rawStderrText ? Buffer.from(stripped.stderr, 'utf8') : (r.stderr || Buffer.alloc(0));
     const failed = typeof r.status === 'number' && r.status !== 0;
     recordGhCallLogEntry(logPath, {
-      op: opLabel, attempt, points, outcome: 'call', ok: !failed, caller, w: isWrite, resource, id: identity, inv,
+      op: opLabel, attempt, points, outcome: 'call', ok: !failed && !stdoutOverflow, caller, w: isWrite, resource, id: identity, inv,
       ...(outer ? { outer } : {}), ...(stripped ? { rl: rateLimitRecords(stripped.responses) } : {}),
     });
+    // The call ran and spent points, so it is logged above before the overflow is raised.
+    if (stdoutOverflow) throw captureStdoutOverflow(bin, argv);
     if (!failed && isWrite) markPrSnapshotDirty({ repo: repoFromGhArgs(argv), env }); // #gh-graphql-budget
     if (!failed || !isRateLimitShaped(stderrText)) {
       return { status: r.status == null ? (r.signal ? 128 : 1) : r.status, stdout: r.stdout || Buffer.alloc(0), stderr: stderrOut };

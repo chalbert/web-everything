@@ -741,5 +741,22 @@ describe('tick() — gh spend persistence (#4309)', () => {
     expect(seen[0].logPath).toMatch(/calls\.jsonl$/);
     expect(seen[0].now).toBe(1);
   });
+
+  it('a fixture tick (--lock-root, no --gh-calls-log) never writes spend files into the real throttle dir (PR #2851 review)', async () => {
+    // Stand-in for the operator's real ~/workspace/.lanes/gh-throttle: the default path tick() would resolve.
+    const realThrottle = join(dir, 'real-gh-throttle'); mkdirSync(realThrottle, { recursive: true });
+    writeFileSync(join(realThrottle, 'calls.jsonl'), JSON.stringify({ ts: '2020-01-01T10:05:00.000Z', op: 'pr list', outcome: 'call', ok: true, caller: 'x' }) + '\n');
+    const prev = process.env.WE_GH_THROTTLE_LOCK_ROOT;
+    process.env.WE_GH_THROTTLE_LOCK_ROOT = realThrottle;
+    try {
+      const lockRoot = join(dir, 'locks-fixture'); mkdirSync(lockRoot, { recursive: true });
+      const syncDir = join(dir, 'sync-fixture'); mkdirSync(syncDir, { recursive: true });
+      const summary = await tick({ 'lock-root': lockRoot, 'self-sync-dir': syncDir, 'no-gh': true, 'no-diagnose': true, 'state-root': join(dir, 'state-fixture'), 'logs-dir': join(dir, 'logs-fixture') });
+      expect(readdirSync(realThrottle).sort()).toEqual(['calls.jsonl']);
+      expect(summary.ghSpend).toBeNull();
+    } finally {
+      if (prev === undefined) delete process.env.WE_GH_THROTTLE_LOCK_ROOT; else process.env.WE_GH_THROTTLE_LOCK_ROOT = prev;
+    }
+  });
 });
 

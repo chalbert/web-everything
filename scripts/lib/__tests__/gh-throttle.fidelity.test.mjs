@@ -25,7 +25,7 @@ import { describe, it, expect, beforeAll, afterEach, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { runGhSync, runGhCliPassthrough, stripGhDebug, rateLimitRecords, ghThrottleLogPath } from '../gh-throttle.mjs';
 
@@ -241,5 +241,57 @@ describe('runGhCliPassthrough — cost-header capture (#4309)', () => {
     expect(exec).toHaveBeenCalledWith(['pr', 'list'], { encoding: 'utf8' });
     expect(readLog(lockRoot)[0]).toMatchObject({ resource: 'graphql', id: expect.any(String), inv: expect.any(String) });
     expect(readLog(lockRoot)[0].rl).toBeUndefined(); // runGhSync's exec is unchanged — estimate-only
+  });
+});
+
+// ── PR #2851 review — the debug trace must never overflow a capture sized for the plain payload ───────────────
+describe('runGhCliPassthrough — debug capture preserves successful large-payload commands (PR #2851 review)', () => {
+  // A REAL subprocess standing in for gh: prints `size` bytes of stdout, and — only when GH_DEBUG=api — a trace
+  // that echoes the response body pretty-printed (3× the payload), exactly the shape gh's `api` debug prints.
+  const fakeGh = (dir) => {
+    const bin = join(dir, 'fake-gh');
+    writeFileSync(bin, [
+      '#!/usr/bin/env node',
+      'const size = Number(process.env.FAKE_SIZE);',
+      'const body = "x".repeat(size);',
+      'if (process.env.GH_DEBUG === "api") {',
+      '  process.stderr.write("* Request at 2026-09-28\\n* Request to https://api.github.com/graphql\\n< HTTP/2.0 200 OK\\n");',
+      '  process.stderr.write("< X-Ratelimit-Used: 7\\n< X-Ratelimit-Resource: graphql\\n< X-Ratelimit-Reset: 1790615715\\n\\n");',
+      '  process.stderr.write(body.replace(/x{80}/g, (m) => "  " + m + "\\n").repeat(3) + "\\n* Request took 1ms\\n");',
+      '}',
+      'process.stdout.write(body);',
+    ].join('\n'), 'utf8');
+    chmodSync(bin, 0o755);
+    return bin;
+  };
+  const run = (size) => {
+    const dir = mkdtempSync(join(tmpdir(), 'gh-cap-buf-'));
+    const bin = fakeGh(dir);
+    process.env.FAKE_SIZE = String(size);
+    try {
+      return runGhCliPassthrough(['api', 'graphql'], { bin, throttle: { lockRoot: join(dir, 'locks'), cap: 2, sleep: () => {}, maxBuffer: 64 * 1024 } });
+    } finally { delete process.env.FAKE_SIZE; }
+  };
+
+  it('a payload that fits the allowance succeeds even though its debug trace alone would not', () => {
+    const r = run(40 * 1024);
+    expect(r.status).toBe(0);
+    expect(r.stdout.length).toBe(40 * 1024);
+    expect(r.stderr.toString('utf8')).toBe('');
+  });
+
+  it('a payload that does NOT fit the allowance still fails the same way it did before capture existed', () => {
+    expect(() => run(80 * 1024)).toThrow(/ENOBUFS|maxBuffer/);
+  });
+
+  it('an over-cap payload under capture is still LOGGED (it ran and spent points) before the overflow is raised', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'gh-cap-log-'));
+    const bin = fakeGh(dir);
+    process.env.FAKE_SIZE = String(80 * 1024);
+    try {
+      expect(() => runGhCliPassthrough(['api', 'graphql'], { bin, throttle: { lockRoot: join(dir, 'locks'), cap: 2, sleep: () => {}, maxBuffer: 64 * 1024 } })).toThrow(/ENOBUFS/);
+    } finally { delete process.env.FAKE_SIZE; }
+    const [line] = readFileSync(ghThrottleLogPath(join(dir, 'locks')), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    expect(line).toMatchObject({ outcome: 'call', ok: false, rl: [{ used: 7, res: 'graphql' }] });
   });
 });

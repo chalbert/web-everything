@@ -199,6 +199,13 @@ describe('renderGhShimScript — pure text, and REALLY RUN against a fake real g
     expect(src).toMatch(/^#!\/usr\/bin\/env node/);
   });
 
+  it('every spawnSync target in the rendered shim is an absolute path or process.execPath — never a PATH lookup (PR #2851 review)', () => {
+    const src = renderGhShimScript({ realGhPath: '/opt/homebrew/bin/gh', cachePath: '/home/op/.claude/github-app-token/web-everything.json' });
+    const targets = [...src.matchAll(/spawnSync\(\s*([^,)]+)[,)]/g)].map((m) => m[1].trim());
+    expect(targets.length).toBeGreaterThan(0);
+    for (const t of targets) expect([t, t === 'REAL_GH' || t === 'process.execPath' || /^['"]\//.test(t)]).toEqual([t, true]);
+  });
+
   // THE LIVE PROOF (mirrors dispatch-spawn-live.test.mjs's own reasoning: a textual assertion on the rendered
   // source could not catch a real runtime bug — a typo in the freshness check, a broken argv passthrough, a
   // wrong exit code). This actually renders, writes, chmods and EXECUTES the shim as a real child process.

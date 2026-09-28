@@ -353,7 +353,8 @@ function deriveCaller(env) {
   if (env.GH_CALLER) return String(env.GH_CALLER);
   let command = '';
   try {
-    const ps = spawnSync('ps', ['-o', 'command=', '-p', String(process.ppid)], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 2000 });
+    // Absolute, never a PATH lookup: a writable earlier PATH entry must not run inside the shim (PR #2851 review).
+    const ps = spawnSync('/bin/ps', ['-o', 'command=', '-p', String(process.ppid)], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 2000 });
     if (ps.status === 0) command = String(ps.stdout || '').trim();
   } catch { /* best-effort */ }
   const script = shimCallerScriptFromCommand(command);

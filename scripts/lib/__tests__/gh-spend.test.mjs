@@ -6,7 +6,7 @@
  *   calls counted once; hourly persistence idempotent and cursor-safe.
  */
 import { describe, it, expect } from 'vitest';
-import { appendFileSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdtempSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -191,5 +191,89 @@ describe('persistSpendHours — hourly persistence, idempotent and cursor-safe',
   it('rollupSpendDetailed hands back the last `used` per window for the next pass', () => {
     const { baselines } = rollupSpendDetailed([shim(1, 100), shim(2, 104)], { now: T0 + HOURS(1) });
     expect(baselines[`app|graphql|${RESET}`].used).toBe(104);
+  });
+});
+
+// ── PR #2851 review round 1 ────────────────────────────────────────────────────────────────────────────────────
+describe('hostile caller/op keys never write onto Object.prototype (PR #2851 review)', () => {
+  it.each(['__proto__', 'constructor', 'toString'])('caller %s is an ordinary own key', (name) => {
+    const entries = [shim(1, 100, { caller: name }), daemon(2, 'pr list', { caller: name }), shim(3, 110, { caller: name, op: name })];
+    const rows = rollupSpend(entries, { now: T0 + HOURS(1) });
+    const sections = summarizeSpendRows(rows, { by: 'caller' });
+    summarizeSpendRows(rows, { by: 'op' });
+    expect(({}).requests).toBeUndefined();
+    expect(({}).attributed).toBeUndefined();
+    expect(Object.prototype.hasOwnProperty.call(rows[0].byCaller, name)).toBe(true);
+    expect(rows[0].byCaller[name].requests).toBe(3);
+    expect(sections[0].dims.find((d) => d.name === name).requests).toBe(3);
+  });
+});
+
+describe('an rl with no usable observation is never "attributed zero" (PR #2851 review)', () => {
+  const cases = {
+    absent: {},
+    empty: { rl: [] },
+    invalid: { rl: [{ used: null, rem: null, limit: null, reset: null, res: 'graphql' }] },
+  };
+  it.each(Object.keys(cases))('%s rl outside every gap is UNKNOWN', (k) => {
+    const { invocations } = attributeSpend([shim(1, 0, { rl: undefined, ...cases[k] })], { now: T0 + HOURS(1) });
+    expect(invocations[0].kind).toBe('unknown');
+    const [row] = rollupSpend([shim(1, 0, { rl: undefined, ...cases[k] })], { now: T0 + HOURS(1) });
+    expect(row.unknownRequests).toBe(1);
+  });
+  it.each(Object.keys(cases))('%s rl inside an observed gap is ESTIMATED from the residual', (k) => {
+    const entries = [shim(1, 100), shim(2, 0, { inv: 'mid', rl: undefined, ...cases[k] }), shim(3, 200)];
+    const { invocations } = attributeSpend(entries, { now: T0 + HOURS(1) });
+    expect(invocations.find((i) => i.key === 'inv:mid').kind).toBe('estimated');
+  });
+  it('a baseline-only rl stays UNKNOWN', () => {
+    const { invocations } = attributeSpend([shim(1, 100)], { now: T0 + HOURS(1) });
+    expect(invocations[0].kind).toBe('unknown');
+  });
+});
+
+describe('the persistence cursor detects rotation by file identity, not size alone (PR #2851 review)', () => {
+  const setup = () => {
+    const dir = mkdtempSync(join(tmpdir(), 'gh-spend-rot-'));
+    const logPath = join(dir, 'calls.jsonl');
+    return { dir, logPath, ...spendPaths(logPath) };
+  };
+  const lines = (entries) => entries.map((e) => JSON.stringify(e)).join('\n') + '\n';
+  it.each([['equal-sized', 0], ['larger', 3]])('a %s replacement log is read from byte 0', (_label, extra) => {
+    const { logPath, hourlyPath } = setup();
+    const old = [shim(10, 100), shim(20, 103), shim(30, 104)];
+    writeFileSync(logPath, lines(old));
+    persistSpendHours({ logPath, now: T0 + 90 * 60_000 });
+    // The replacement: a new hour (12:00) whose first lines sit BEFORE the old cursor offset.
+    const fresh = [shim(125, 300), shim(126, 305), shim(127, 309)];
+    for (let i = 0; i < extra; i += 1) fresh.push(shim(128 + i, 310 + i));
+    let text = lines(fresh);
+    const oldSize = Buffer.byteLength(lines(old));
+    if (Buffer.byteLength(text) < oldSize) text = text + ' '.repeat(oldSize - Buffer.byteLength(text) - 1) + '\n';
+    writeFileSync(`${logPath}.new`, text);
+    renameSync(`${logPath}.new`, logPath);
+    persistSpendHours({ logPath, now: T0 + 181 * 60_000 });
+    const row = readSpendRows(hourlyPath).find((r) => r.hour === '2026-09-28T12:00:00.000Z');
+    expect(row).toBeDefined();
+    expect(row.requests).toBe(fresh.length);
+    const live = collectSpendRows({ logPath, hours: 24, now: T0 + 181 * 60_000 });
+    expect(live.find((r) => r.hour === '2026-09-28T12:00:00.000Z').requests).toBe(fresh.length);
+  });
+  it('an in-place truncate-and-rewrite (same inode) past the old offset is detected too', () => {
+    const { logPath, hourlyPath } = setup();
+    writeFileSync(logPath, lines([shim(10, 100), shim(20, 103)]));
+    persistSpendHours({ logPath, now: T0 + 90 * 60_000 });
+    writeFileSync(logPath, lines([shim(125, 300), shim(126, 305), shim(127, 309), shim(128, 310)]));
+    persistSpendHours({ logPath, now: T0 + 181 * 60_000 });
+    expect(readSpendRows(hourlyPath).find((r) => r.hour === '2026-09-28T12:00:00.000Z').requests).toBe(4);
+  });
+  it('a plain append keeps the cursor (no re-read)', () => {
+    const { logPath } = setup();
+    writeFileSync(logPath, lines([shim(10, 100), shim(20, 103)]));
+    const first = persistSpendHours({ logPath, now: T0 + 90 * 60_000 });
+    appendFileSync(logPath, lines([shim(125, 300)]));
+    const second = persistSpendHours({ logPath, now: T0 + 181 * 60_000 });
+    expect(second.consumedLines).toBe(1);
+    expect(second.offset).toBeGreaterThan(first.offset);
   });
 });

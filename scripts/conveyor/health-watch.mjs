@@ -551,7 +551,11 @@ export async function tick(flags = {}) {
   probes.ghCalls = attempt('ghCalls', () => probeGhCalls(flags['gh-calls-log'] ? { logPath: flags['gh-calls-log'] } : {}));
   // #4309 — alongside (never replacing) the 2 MB tail above: persist every fully closed hour of GitHub spend once,
   // through gh-spend.mjs's OWN byte cursor, so hours survive log rotation and the tail never loses a window.
-  const ghSpend = attempt('ghSpend', () => persistGhSpend({ ...(flags['gh-calls-log'] ? { logPath: flags['gh-calls-log'] } : {}), now }));
+  // A fixture tick (`--lock-root` with no `--gh-calls-log`) never persists: that would WRITE the real throttle
+  // dir's cursor and hourly rows from a test run (PR #2851 review).
+  const spendFixtureOnly = flags['lock-root'] && !flags['gh-calls-log'];
+  const ghSpend = spendFixtureOnly ? null
+    : attempt('ghSpend', () => persistGhSpend({ ...(flags['gh-calls-log'] ? { logPath: flags['gh-calls-log'] } : {}), now }));
   // `review-seat-cap-near-limit` (card xn2wf9t) — fs-only, every tick: each non-Claude review seat provider's
   // OWN daily cap usage, off the SAME scorecard store + reservation ledgers `runExtraSeats`/`runRedTeam` admit
   // against (`--scorecard-store-fixture=FILE` in tests, so this never touches a real store in the test suite).
