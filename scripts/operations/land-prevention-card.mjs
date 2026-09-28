@@ -1,0 +1,315 @@
+#!/usr/bin/env node
+/**
+ * @file scripts/operations/land-prevention-card.mjs
+ * @description #4317 — THE DETACHED LANDING JOB for an approval-time prevention card. Spawned by
+ *   `we:scripts/review-set-label.mjs#fileApprovalPreventionCard` (detached, unref'd — see
+ *   `./detached-dispatch.mjs`), NEVER run inline: that caller runs inside `runApprovalPreventionFiling`,
+ *   itself invoked synchronously right after an approval's own label swap + comment have ALREADY landed, so
+ *   nothing here may cost or delay that approval — see that file's own docblock for the "can therefore NEVER
+ *   cost the approval that already happened" invariant this whole design preserves.
+ *
+ * THE BUG THIS CLOSES. The prior code shelled `file-item` directly in WHATEVER checkout was reviewing the
+ * PR — routinely a read-only daemon clone (`we:scripts/lib/daemon-clone-registry.mjs`), which is never
+ * committed to and never pushes. The card it wrote sat there as an untracked `backlog/x*.md` file FOREVER:
+ * the daemon rebuild's own dirty check reads `git status --untracked-files=no` BY DESIGN (an untracked
+ * sidecar must never block a rebuild — `we:scripts/lib/daemon-rebuild.mjs` line ~415), so nothing ever
+ * surfaced or landed it. Live 2026-09-28: 22 such orphans in `wev-review-daemon`, 1 in `wev-control`, dating
+ * to PR #2807.
+ *
+ * WHAT THIS RUNS, IN ORDER — reusing the SAME lane + file-item/verify/open-pr sequence
+ * `we:scripts/operations/file-item.mjs`'s own header names as the standard filing sequence, never a second
+ * writer:
+ *   1. `lane-pool.mjs acquire` — a REAL, writable lane clone (never the daemon clone that spawned this).
+ *   2. `run.mjs file-item`, IN that lane — writes the card, exactly as the synchronous path used to.
+ *   3. `git add` + `git commit` the one new card file, in the lane.
+ *   4. `run.mjs verify --mode=run` — the lane's own gate, run for REAL. This process has no foreground-turn
+ *      timeout to respect (unlike a dispatched agent's Bash tool) — `we:scripts/verify-lane.mjs`'s
+ *      request/poll dance exists ONLY for that constraint, so a detached background process calls the home
+ *      directly through `mode=run` and simply waits.
+ *   5. `run.mjs open-pr --mode=label-on-green` — opens the PR, waits for the required check, labels it
+ *      `ready-to-merge` on green. The resident drain daemon lands it; this process never merges.
+ *   6. `lane-pool.mjs release` — the lane clone itself is no longer needed once its content is pushed to the
+ *      `lane/*` ref (`pr-land`, underneath `open-pr`, publishes HEAD there) — releasing frees the pool slot.
+ *
+ * EVERY OPERATION CALL (2, 4, 5) RUNS THE ACQUIRED LANE'S OWN `run.mjs`, NEVER THIS SCRIPT'S OWN
+ * (codex plan review, 2026-09-28 — a real, live-caught defect in this file's first cut): `file-item`'s IO shell
+ * (`scaffold-io.mjs#REPO_ROOT`) and its siblings resolve their own repo root by SCRIPT LOCATION, never by
+ * `cwd`. Running THIS script's own `run.mjs` with `cwd: lane` would still have written the card into THIS
+ * checkout's `backlog/` — the exact bug this file exists to fix, just one hop further out. See
+ * `landPreventionCard`'s `laneRunMjs` below.
+ *
+ * BEST-EFFORT, LOGGED, NEVER RETRIED FROM HERE. A failure at any step releases the lane (best-effort) and
+ * exits non-zero; its narration lands in this process's own log file — the CALLER (`review-set-label.mjs
+ * #fileApprovalPreventionCard`) picks that path, via `preventionCardLandingLogPath`, NEVER this file's own
+ * default (see that function's own docblock for why: codex plan review, 2026-09-28, found the earlier default
+ * — `./detached-dispatch.mjs#deliveryDispatchLogPath`'s in-checkout path — writing into the very daemon clone
+ * this whole redesign exists to stop writing into). The `untracked-backlog-card` health smell
+ * (`we:scripts/conveyor/health-smells/untracked-backlog-card.mjs`) is the defense-in-depth safety net for the
+ * CLASS of failure this file exists to prevent: something writing an untracked backlog card straight into a
+ * daemon clone again, by whatever future path.
+ *
+ * KNOWN RESIDUAL, FILED — not a silent gap. `we:backlog/xxe5jvs-a-partial-failure-in-the-detached-prevention-
+ * card-landing-jo.md` (codex plan-review + converge red-team, both 2026-09-28, `blockedBy` this card):
+ * `runApprovalPreventionFiling` posts its head-keyed idempotency marker on a successful SPAWN (a pid exists),
+ * not a successful LAND, and this job has no `repo`/`pr`/`gh` handle to retract or complement that marker —
+ * so a partial failure here (lane exhaustion, a red gate, a refused PR) permanently suppresses every later
+ * filing attempt for that exact PR head, with the guard silently lost. The SAME root cause also lets a
+ * marker-post failure racing a second approval spawn a DUPLICATE landing job for the same guard (the on-disk
+ * idempotency lookup that used to catch that, `findApprovalPreventionCardOnDisk`, no longer sees a card that
+ * is still landing in a lane) — that follow-up card covers both shapes. A SEPARATE, unrelated follow-up,
+ * `we:backlog/xc5q9jn-approval-time-prevention-cards-land-with-unsanitized-review.md`, tracks that the card's
+ * own title/digest/scope content (ultimately reviewer/PR-derived text) is neither sanitized nor length-capped
+ * before it lands with no human gate (`--mode=label-on-green`).
+ *
+ * Usage:
+ *   node scripts/operations/land-prevention-card.mjs --title=<t> --kind=<k> --size=<n> --digest=<d> \
+ *     --scope=<s> [--parent=<NNN>] --queue=<true|false> --session=<slug>
+ */
+import { execFileSync } from 'node:child_process';
+import { writeFileSync, mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import { extractSubmitResult } from './open-pr.mjs';
+
+const HERE = resolve(fileURLToPath(import.meta.url), '..');
+export const REPO_ROOT = resolve(HERE, '..', '..');
+// `LANE_POOL_CLI` is deliberately THIS checkout's copy — `lane-pool.mjs` resolves its own pool root from `cwd`
+// (never script location), so running it with `cwd: REPO_ROOT` against a real, `origin`-bearing checkout is
+// correct even when that checkout is a read-only-by-convention daemon clone. There is NO equivalent
+// `RUN_MJS` constant: `file-item`/`verify`/`open-pr` all resolve their OWN repo root by script location
+// (`scaffold-io.mjs#REPO_ROOT`, `verify-io.mjs`, …), so every one of those calls below builds the ACQUIRED
+// LANE's own `run.mjs` path instead — see `landPreventionCard`'s `laneRunMjs`.
+export const LANE_POOL_CLI = join(REPO_ROOT, 'scripts', 'lane-pool.mjs');
+
+/** Refused rather than defaulted: a landing job with no card content or session has nothing to file. */
+const REQUIRED_FLAGS = Object.freeze(['title', 'kind', 'size', 'digest', 'scope', 'queue', 'session']);
+
+/**
+ * PURE. `--k=v` argv → the flat flag map this script acts on. Mirrors `deliver-item-run.mjs`'s own parser
+ * (`parseDeliverItemRunArgv`) — same shape, same "throw on a missing required flag, by name" contract.
+ * @param {string[]} argv
+ * @returns {{title:string, kind:string, size:string, digest:string, scope:string, parent:string, queue:string, session:string}}
+ */
+export function parseLandPreventionCardArgv(argv = []) {
+  const flags = {};
+  for (const a of Array.isArray(argv) ? argv : []) {
+    if (typeof a !== 'string' || !a.startsWith('--')) continue;
+    const eq = a.indexOf('=');
+    if (eq === -1) flags[a.slice(2)] = 'true';
+    else flags[a.slice(2, eq)] = a.slice(eq + 1);
+  }
+  const missing = REQUIRED_FLAGS.filter((name) => !String(flags[name] ?? '').trim());
+  if (missing.length) {
+    throw new TypeError(
+      `land-prevention-card: missing required flag(s) ${missing.map((m) => `--${m}=`).join(', ')} — a card `
+      + 'cannot be filed with no content and no session slug',
+    );
+  }
+  return {
+    title: String(flags.title),
+    kind: String(flags.kind),
+    size: String(flags.size),
+    digest: String(flags.digest),
+    scope: String(flags.scope),
+    parent: String(flags.parent ?? ''),
+    queue: String(flags.queue),
+    session: String(flags.session),
+  };
+}
+
+/** Best-effort parse of a `run.mjs <op> --json` invocation's stdout, tolerant of a leading warning line — the
+ *  local copy of the same tolerance `review-set-label.mjs` used to need for its own (now-deleted) synchronous
+ *  `file-item` call; this file's own `file-item`/`verify`/`open-pr` calls all print the same envelope shape.
+ *  `null` on no parseable `{…}`. */
+export function parseRunJsonTail(out) {
+  const text = String(out ?? '');
+  const lines = text.split('\n');
+  const start = lines.findIndex((l) => l.trimStart().startsWith('{'));
+  if (start === -1) return null;
+  try { return JSON.parse(lines.slice(start).join('\n')); } catch { return null; }
+}
+
+/** Generous but bounded: this process has no foreground-turn window, but a wedged child must still die
+ *  eventually rather than hold a lane and a pool slot forever. Mirrors `verify-io.mjs#verifySpawnTimeoutMs`'s
+ *  own reasoning (heavy-admission queueing + the suites themselves can legitimately run long). */
+export const ACQUIRE_TIMEOUT_MS = 3 * 60_000;
+export const FILE_ITEM_TIMEOUT_MS = 2 * 60_000;
+export const VERIFY_TIMEOUT_MS = 70 * 60_000;
+export const OPEN_PR_TIMEOUT_MS = 45 * 60_000;
+
+/**
+ * THE ORCHESTRATION, INJECTABLE FOR TESTS. `exec` has the SAME `(cmd, args, opts) => string` shape as
+ * `execFileSync` (throttled or not) elsewhere in this repo — a test hands it a scripted stub, never a real
+ * subprocess. `write` is where narration goes (real stdout in production, captured in a test). `mkTmp`/
+ * `writeFile` are the two fs calls this function makes directly (a scratch dir for the commit message + PR
+ * body), also injectable so a test never touches a real filesystem.
+ *
+ * RETURNS a structured outcome for every step this function can itself name a reason for (acquire refused,
+ * file-item refused, the gate red, the PR refused) rather than throwing — the CLI wrapper below still exits
+ * non-zero for any `ok:false`, but a caller (a test, or a future richer caller) gets a shape it can act on.
+ *
+ * THE LANE IS ALWAYS RELEASED, on every exit path once one was acquired — best-effort (a release failure is
+ * narrated, never thrown), because a landing job that leaks its lane on a downstream failure would slowly
+ * starve the pool for every OTHER item. The ENTIRE post-acquire sequence (codex plan review, 2026-09-28) runs
+ * under one enclosing try/catch, not just the steps that already had their own — an unexpected throw (a full
+ * disk during the PR-body write, say) must still release the lane and return a clean failure, never leak or
+ * propagate an unhandled rejection out of this async function.
+ *
+ * @param {{title:string,kind:string,size:string,digest:string,scope:string,parent:string,queue:string,
+ *   session:string}} input
+ * @returns {Promise<{ok:boolean, step:string, num:(number|string|null), rel:(string|null), pr:(number|null),
+ *   url:(string|null), reason:(string|null)}>}
+ */
+export async function landPreventionCard(input, {
+  exec = (cmd, args, opts = {}) => String(execFileSync(cmd, args, { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, ...opts })),
+  write = (line) => process.stdout.write(line),
+  mkTmp = () => mkdtempSync(join(tmpdir(), 'land-prevention-card-')),
+  writeFile = writeFileSync,
+} = {}) {
+  let laneNum = null;
+  const release = () => {
+    if (laneNum == null) return;
+    try {
+      exec('node', [LANE_POOL_CLI, 'release', `--lane=${laneNum}`, `--session=${input.session}`], { cwd: REPO_ROOT, timeout: ACQUIRE_TIMEOUT_MS });
+    } catch (e) {
+      write(`land-prevention-card: lane-${laneNum} release failed (non-fatal, will age out on its own TTL) — ${String(e?.message || e)}\n`);
+    }
+  };
+  const fail = (step, reason, extra = {}) => {
+    release();
+    write(`land-prevention-card: FAILED at ${step} — ${reason}\n`);
+    return { ok: false, step, num: extra.num ?? null, rel: extra.rel ?? null, pr: extra.pr ?? null, url: extra.url ?? null, reason };
+  };
+
+  let acquired;
+  try {
+    write(`land-prevention-card: acquiring a lane (session ${input.session})…\n`);
+    acquired = parseRunJsonTail(exec('node', [
+      LANE_POOL_CLI, 'acquire', '--purpose=prevention-card', `--session=${input.session}`, '--json',
+    ], { cwd: REPO_ROOT, timeout: ACQUIRE_TIMEOUT_MS }));
+  } catch (e) {
+    return fail('acquire', String(e?.message || e).split('\n')[0]);
+  }
+  const lane = acquired?.path ?? null;
+  laneNum = acquired?.lane ?? null;
+  if (!lane) return fail('acquire', 'lane-pool acquire produced no usable lane path');
+  // THE #4317-REVIEW FIX (codex plan review, 2026-09-28): every operation from here on must run the ACQUIRED
+  // LANE's OWN `run.mjs`, never a `run.mjs` resolved from wherever THIS script itself lives (the checkout that
+  // spawned this job, e.g. a daemon clone). `scaffold-io.mjs#REPO_ROOT` (and its siblings) resolve their own
+  // repo root by SCRIPT LOCATION, not by `cwd` — so running the CALLER's `run.mjs` with `cwd: lane` would still
+  // have written the card into the CALLER's own `backlog/`, the exact bug this whole file exists to fix, just
+  // one hop further out. A real delivery agent avoids this by `cd $LANE` + a RELATIVE `scripts/...` path; this
+  // does the equivalent by building the lane's own absolute path explicitly.
+  const laneRunMjs = join(lane, 'scripts', 'operations', 'run.mjs');
+
+  // EVERYTHING BELOW THIS LINE, ONCE A LANE IS HELD, RUNS UNDER ONE ENCLOSING try/catch — the #4317-review
+  // fix for the "PR-body prep throws and leaks the lane" gap: `mkTmp()`/`writeFile()` (and any other step that
+  // is not its own already-labelled failure mode below) must still release the lane and return a clean
+  // failure, never propagate an unhandled rejection out of this async function.
+  try {
+    write(`land-prevention-card: filing the card in ${lane}…\n`);
+    const fileArgv = [
+      laneRunMjs, 'file-item', `--title=${input.title}`, `--kind=${input.kind}`, `--size=${input.size}`,
+      `--digest=${input.digest}`, `--scope=${input.scope}`,
+      ...(input.parent ? [`--parent=${input.parent}`] : []),
+      `--queue=${input.queue}`, '--json',
+    ];
+    let filed;
+    try {
+      filed = parseRunJsonTail(exec('node', fileArgv, { cwd: lane, timeout: FILE_ITEM_TIMEOUT_MS }));
+    } catch (e) {
+      filed = parseRunJsonTail(e?.stdout);
+      if (!filed) return fail('file-item', String(e?.message || e).split('\n')[0]);
+    }
+    const num = filed?.verdict?.num ?? null;
+    const rel = filed?.verdict?.rel ?? null;
+    if (!rel) return fail('file-item', filed?.error || 'file-item produced no card path', { num });
+
+    write(`land-prevention-card: committing ${rel}…\n`);
+    try {
+      exec('git', ['-C', lane, 'add', '--', rel], {});
+      const msgPath = join(mkTmp(), 'commit-msg.txt');
+      writeFile(msgPath, `WE #${num ?? '?'}: file the prevention guard(s) owed by an independent review\n\n`
+        + 'Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>\n', 'utf8');
+      exec('git', ['-C', lane, 'commit', '-F', msgPath], {});
+    } catch (e) {
+      return fail('commit', String(e?.message || e).split('\n')[0], { num, rel });
+    }
+
+    write('land-prevention-card: running the gate…\n');
+    let verified;
+    try {
+      verified = parseRunJsonTail(exec('node', [laneRunMjs, 'verify', `--checkout=${lane}`, '--mode=run', '--json'], { cwd: lane, timeout: VERIFY_TIMEOUT_MS }));
+    } catch (e) {
+      verified = parseRunJsonTail(e?.stdout);
+    }
+    if (!verified?.verdict?.ok) {
+      return fail('verify', `gate not green: ${JSON.stringify(verified?.verdict?.blocking ?? verified?.error ?? 'unrun')}`, { num, rel });
+    }
+
+    write('land-prevention-card: opening the PR…\n');
+    const bodyPath = join(mkTmp(), 'pr-body.md');
+    writeFile(bodyPath, `Mechanically filed by the approval-time prevention filer (#4317).\n\n${input.digest}\n`, 'utf8');
+    const ref = `lane/${num ?? 'x'}-prevention-card`;
+    let opened;
+    try {
+      opened = parseRunJsonTail(exec('node', [
+        laneRunMjs, 'open-pr', `--ref=${ref}`, '--base=main', `--bodyFile=${bodyPath}`,
+        '--mode=label-on-green', '--requireVerified=true', '--json',
+      ], { cwd: lane, timeout: OPEN_PR_TIMEOUT_MS }));
+    } catch (e) {
+      opened = parseRunJsonTail(e?.stdout);
+      if (!opened) return fail('open-pr', String(e?.message || e).split('\n')[0], { num, rel });
+    }
+    const submit = extractSubmitResult(opened || {});
+    release();
+    if (submit?.outcome !== 'opened') {
+      write(`land-prevention-card: FAILED at open-pr — ${submit?.reason ?? 'PR was not opened'}\n`);
+      return { ok: false, step: 'open-pr', num, rel, pr: submit?.pr ?? null, url: submit?.url ?? null, reason: submit?.reason ?? 'PR was not opened' };
+    }
+    write(`land-prevention-card: landed — PR #${submit.pr} (${submit.url})\n`);
+    return { ok: true, step: 'done', num, rel, pr: submit.pr ?? null, url: submit.url ?? null, reason: null };
+  } catch (e) {
+    return fail('unexpected', String(e?.message || e));
+  }
+}
+
+/**
+ * THE CLI, AS A FUNCTION — same reason `we:scripts/operations/deliver-item-run.mjs#runDeliverItemCli` is
+ * extracted: the argv parse, the exit-code mapping and the failure text are all reachable from a test with no
+ * subprocess. Exit 0 iff `landPreventionCard` reports `ok:true`; every named failure (a bad argv, a refused
+ * acquire, a red gate, a refused PR) is exit 1 with the reason on stderr — this process's own log file is the
+ * durable record (see the file header), there is no caller polling it.
+ * @param {string[]} argv
+ * @param {{land?: Function, write?: Function, writeErr?: Function}} [io]
+ * @returns {Promise<{code:number, result:object|null}>}
+ */
+export async function runLandPreventionCardCli(argv = [], {
+  land = landPreventionCard,
+  write = (line) => process.stdout.write(line),
+  writeErr = (line) => process.stderr.write(line),
+} = {}) {
+  let input;
+  try {
+    input = parseLandPreventionCardArgv(argv);
+  } catch (e) {
+    writeErr(`error: ${String(e?.message ?? e)}\n`);
+    return { code: 1, result: null };
+  }
+  write(`land-prevention-card: starting (session ${input.session}) — pid ${process.pid}\n`);
+  const result = await land(input, { write });
+  if (!result.ok) {
+    writeErr(`land-prevention-card: did not land — ${result.step}: ${result.reason}\n`);
+    return { code: 1, result };
+  }
+  write(`land-prevention-card: done — PR #${result.pr}\n`);
+  return { code: 0, result };
+}
+
+const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
+if (IS_CLI) {
+  const { code } = await runLandPreventionCardCli(process.argv.slice(2));
+  process.exitCode = code;
+}

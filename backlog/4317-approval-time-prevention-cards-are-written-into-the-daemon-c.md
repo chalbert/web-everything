@@ -4,9 +4,13 @@ kind: story
 size: 5
 priority: high
 parent: "4075"
-status: open
-scope: ["we:scripts/review-set-label.mjs", "we:scripts/lib/approval-prevention-notice.mjs", "we:scripts/operations/file-item.mjs", "we:scripts/conveyor/health-smells/index.mjs", "we:scripts/conveyor/health-smells/clone-stale.mjs"]
+status: resolved
+scope: ["we:scripts/review-set-label.mjs", "we:scripts/operations/land-prevention-card.mjs", "we:scripts/conveyor/health-watch.mjs", "we:scripts/conveyor/health-smells/untracked-backlog-card.mjs"]
 dateOpened: "2026-09-28"
+dateStarted: "2026-09-28"
+dateResolved: "2026-09-28"
+preparedDate: "2026-09-28"
+preparedAgainstSha: "7653faa8cb56432c04228ae554bd20c1ef5d12bd"
 tags: []
 ---
 

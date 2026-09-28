@@ -13,7 +13,7 @@ import {
   probeDaemonLogs, probeLeases, probeSelfSync, probeLanePools, tick, healthSectionLines, healthDir,
   probeDaemonStatus, daemonNameForLabel, runTickWithWatchdog, probeAuthExpiredSessions, probeAgents,
   probePrs, probeStaleState, probeMergedPrs, probeProcesses, probeMachineLoad, probeGhShimLanes,
-  probeBgIsolationStalls,
+  probeBgIsolationStalls, probeUntrackedBacklogCards,
 } from '../health-watch.mjs';
 
 let dir;
@@ -158,6 +158,54 @@ describe('probeGhShimLanes', () => {
 
   it('returns [] when no shim has ever been written', () => {
     expect(probeGhShimLanes({ home: dir })).toEqual([]);
+  });
+});
+
+// ── probeUntrackedBacklogCards ───────────────────────────────────────────────────────────────────────────────
+
+describe('probeUntrackedBacklogCards (#4317)', () => {
+  const NOW = Date.parse('2026-09-28T12:00:00Z');
+  const AGED_MTIME = NOW - 30 * 60_000; // 30 min ago — past the default 15-min agedMs
+  const FRESH_MTIME = NOW - 2 * 60_000; // 2 min ago — still inside a normal filing pipeline's own commit window
+
+  it('flags an aged untracked hash-id backlog card in a known clone root', () => {
+    const root = join(dir, 'wev-review-daemon');
+    const exec = (cmd, args) => {
+      expect(args).toEqual(['-C', root, 'status', '--porcelain', '--untracked-files=all', '--', 'backlog']);
+      return '?? backlog/x3u9t41-file-the-prevention-guard.md\n';
+    };
+    const stat = () => ({ mtimeMs: AGED_MTIME });
+    const out = probeUntrackedBacklogCards({ roots: [root], exec, stat, now: NOW });
+    expect(out).toEqual([{ cloneRoot: root, rel: 'backlog/x3u9t41-file-the-prevention-guard.md', mtimeMs: AGED_MTIME }]);
+  });
+
+  it('does NOT flag a card younger than agedMs — a normal filing pipeline is still mid-commit', () => {
+    const root = join(dir, 'wev-review-daemon');
+    const exec = () => '?? backlog/x3u9t41-file-the-prevention-guard.md\n';
+    const stat = () => ({ mtimeMs: FRESH_MTIME });
+    expect(probeUntrackedBacklogCards({ roots: [root], exec, stat, now: NOW })).toEqual([]);
+  });
+
+  it('ignores a TRACKED or MODIFIED backlog entry — only an untracked (`??`) hash-id card counts', () => {
+    const root = join(dir, 'wev-review-daemon');
+    const exec = () => ' M backlog/0100-something.md\n?? backlog/not-a-hash-id.md\n';
+    const stat = () => ({ mtimeMs: AGED_MTIME });
+    expect(probeUntrackedBacklogCards({ roots: [root], exec, stat, now: NOW })).toEqual([]);
+  });
+
+  it('skips a clone root that is gone or not a real git checkout, never throwing', () => {
+    const exec = () => { throw new Error('fatal: not a git repository'); };
+    expect(probeUntrackedBacklogCards({ roots: [join(dir, 'gone')], exec, now: NOW })).toEqual([]);
+  });
+
+  it('scans every known clone root independently', () => {
+    const rootA = join(dir, 'wev-review-daemon');
+    const rootB = join(dir, 'wev-merge-daemon');
+    const exec = (cmd, args) => (args[1] === rootA ? '?? backlog/x1111a1-a.md\n' : '?? backlog/x2222b2-b.md\n');
+    const stat = () => ({ mtimeMs: AGED_MTIME });
+    const out = probeUntrackedBacklogCards({ roots: [rootA, rootB], exec, stat, now: NOW });
+    expect(out).toHaveLength(2);
+    expect(out.map((c) => c.cloneRoot).sort()).toEqual([rootA, rootB].sort());
   });
 });
 
