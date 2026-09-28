@@ -1293,9 +1293,15 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
   // reported as "building" — the same "only count once genuinely claimed, let the TTL backstop cover a guard
   // that never gets claimed" shape #3454 already established for the fix guard, applied here to the ONE guard
   // kind (the durable floor) whose synthesis previously had no TTL of its own to inherit.
-  const countableBuildGuards = liveBuildGuards.filter(
-    (g) => g.lane != null || !guardTtlElapsed({ ...g, spawnedTick: Number.isFinite(g.spawnedTick) ? g.spawnedTick : tick }, { tick, now, ttlTicks: cfg.buildTtlTicks }),
-  );
+  const isCountableBuildGuard = (g) => g.lane != null || !guardTtlElapsed({ ...g, spawnedTick: Number.isFinite(g.spawnedTick) ? g.spawnedTick : tick }, { tick, now, ttlTicks: cfg.buildTtlTicks });
+  const countableBuildGuards = liveBuildGuards.filter(isCountableBuildGuard);
+  // Card x0jgunh — the SAME TTL filter, applied to `buildLive` (guards that existed BEFORE this tick's own
+  // spawns) instead of `liveBuildGuards` (which also carries this tick's `newBuildGuards`). A consumer that
+  // dispatches only a SUBSET of `launched.spawn` — the build cap in
+  // skills-src/conveyor/build-dispatch-daemon.mjs — needs a count that excludes its OWN just-proposed
+  // candidates, or it double-counts them as both "busy" and "candidates" (the bug: cap holds every build
+  // forever once the tick proposes >= cap spawns). See `counts.buildingInFlight` below.
+  const countableBuildLiveGuards = buildLive.filter(isCountableBuildGuard);
 
   // 3. The free lanes a prepare/fix may take = free lanes MINUS this tick's build launches MINUS every live
   //    guard's lane (build + prepare + fix) — mirror the build guard's lane exclusion so nothing races a lane.
@@ -1536,6 +1542,14 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
   const counts = computeTickCounts({
     queue, lanes, prs, health, liveBuildGuards: countableBuildGuards, livePrepareGuards, liveFixGuards, liveCiHealGuards, launchedNums,
   });
+  // Card x0jgunh — `counts.building` (above) counts THIS tick's own freshly-proposed spawns, which is right for
+  // the interactive conveyor (it launches every spawn it is handed) but wrong for a consumer that only picks a
+  // SUBSET, like the build-dispatch daemon's cap. `buildingInFlight` is the same tally computed from guards
+  // live BEFORE this tick's spawns (`countableBuildLiveGuards`) plus leased build lanes (already folded in by
+  // `computeTickCounts` via `lanes`) — i.e. builds genuinely already in flight, never this tick's candidates.
+  const buildingInFlight = computeTickCounts({
+    queue, lanes, prs, health, liveBuildGuards: countableBuildLiveGuards, livePrepareGuards, liveFixGuards, liveCiHealGuards, launchedNums,
+  }).building;
 
   const decisionsOut = {
     // Carry the planner's evidence verbatim; a reporter must never reconstruct its gates.
@@ -1548,7 +1562,7 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
       traces: Array.isArray(plan.admission) ? plan.admission : [],
       prepare: prep.admission ?? [],
     },
-    counts,
+    counts: { ...counts, buildingInFlight },
     spawnBuilds: launched.spawn,
     suppressedBuilds: launched.suppressed,
     spawnPrepareScope: prep.scopeSpawns,
