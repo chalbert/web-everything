@@ -5,7 +5,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import {
-  guessCardIds, classifyLaneVerdict, holderPresumedAlive, prsMatchingCard, keepMarkerApplies,
+  guessCardIds, classifyLaneVerdict, holderPresumedAlive, prsMatchingCard, keepMarkerApplies, isLaneAlreadyClean,
 } from '../lane-whois-core.mjs';
 
 describe('guessCardIds', () => {
@@ -151,5 +151,58 @@ describe('keepMarkerApplies', () => {
   it('a new ahead commit landed since the marker was recorded → stale', () => {
     const marker = { fingerprint: { ...fp, aheadShas: ['sha1', 'sha2', 'sha3'] } };
     expect(keepMarkerApplies(marker, fp)).toBe(false);
+  });
+});
+
+// #4344 — the narrower "genuinely nothing left to reclaim" check `lane-pool-health-watch.mjs` now runs before
+// calling `reclaimLane` on a `finished-reclaimable` candidate: clean-relative-to-HEAD is NOT enough on its own,
+// unlike `classifyLaneVerdict`'s own "nothing to lose" case above — the checkout must also be AT the tip.
+describe('isLaneAlreadyClean', () => {
+  const atTip = { uncommittedCount: 0, aheadCount: 0, headSha: 'tip-sha', branchTipSha: 'tip-sha', branch: 'main', expectedBranch: 'main' };
+
+  it('clean, at tip, right branch → already clean', () => {
+    expect(isLaneAlreadyClean(atTip)).toBe(true);
+  });
+
+  it('any uncommitted content → never already clean, regardless of sha', () => {
+    expect(isLaneAlreadyClean({ ...atTip, uncommittedCount: 1 })).toBe(false);
+  });
+
+  it('any ahead commit → never already clean, regardless of sha', () => {
+    expect(isLaneAlreadyClean({ ...atTip, aheadCount: 1 })).toBe(false);
+  });
+
+  it('clean but BEHIND the tip (different head/tip shas) → NOT already clean — reclaim still has real work to do', () => {
+    expect(isLaneAlreadyClean({ ...atTip, headSha: 'old-sha' })).toBe(false);
+  });
+
+  it('clean and at the right sha, but on a STRAY branch → not already clean when a branch is expected', () => {
+    expect(isLaneAlreadyClean({ ...atTip, branch: 'some-stray-branch' })).toBe(false);
+  });
+
+  it('omitting expectedBranch skips the branch-name check entirely', () => {
+    expect(isLaneAlreadyClean({ ...atTip, branch: 'some-stray-branch', expectedBranch: null })).toBe(true);
+  });
+
+  it('a missing headSha or branchTipSha (a git read failed) fails closed — never already clean', () => {
+    expect(isLaneAlreadyClean({ ...atTip, headSha: null })).toBe(false);
+    expect(isLaneAlreadyClean({ ...atTip, branchTipSha: null })).toBe(false);
+  });
+
+  it('defaults every field with no args — a bare call is not already clean (fails closed)', () => {
+    expect(isLaneAlreadyClean()).toBe(false);
+  });
+
+  // #4344 review — the count half must fail closed exactly like the sha half: a caller that OMITS the counts
+  // (never passes `0`, just forgets the field) must never be treated as "clean". Matching shas + branch alone
+  // is not enough.
+  it('matching shas and branch, but the counts entirely OMITTED, is NOT already clean (counts fail closed too)', () => {
+    expect(isLaneAlreadyClean({ headSha: 'a', branchTipSha: 'a' })).toBe(false);
+  });
+
+  it('a non-numeric or NaN count (not just a missing one) also fails closed', () => {
+    expect(isLaneAlreadyClean({ ...atTip, uncommittedCount: null })).toBe(false);
+    expect(isLaneAlreadyClean({ ...atTip, uncommittedCount: 'x' })).toBe(false);
+    expect(isLaneAlreadyClean({ ...atTip, aheadCount: NaN })).toBe(false);
   });
 });

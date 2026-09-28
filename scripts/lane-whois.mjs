@@ -25,6 +25,9 @@
  *     which Claude session(s) actually wrote the files sitting uncommitted in this lane, with timestamps;
  *   - an uncommitted/ahead summary, and for every ahead commit whether it is provably on a remote branch or
  *     patch-equivalent already in `origin/<branch>`;
+ *   - `headSha` / `branch` / `branchTipSha` (#4344): this lane's own HEAD sha and branch, and the pool
+ *     branch's tip sha as this lane's own clone currently knows it — lets a caller (`lane-pool-health-watch.mjs`)
+ *     tell "already sitting at the tip" apart from "clean, but still behind it" with no git of its own;
  *   - for every guessed card: its `status` on `origin/<branch>`'s backlog;
  *   - for every PR found for those cards (`gh pr list --search <card>`, throttled via `lib/gh-throttle.mjs`):
  *     its state;
@@ -394,6 +397,12 @@ export function whoisForLane({
   const kept = keepMarkerApplies(keepMarker, {
     headSha, dirtyPaths: [...dirtyPaths].sort(), aheadShas: commits.map((c) => c.sha).sort(),
   });
+  // #4344 — the pool branch's tip sha, AS THIS LANE'S OWN CLONE ALREADY KNOWS IT (no fresh fetch — the same
+  // locally-known `branchRef` `aheadCommits` above was already read against). Lets a caller tell "clean at the
+  // tip" apart from "clean but behind it" with exactly one more cheap plumbing read, never a new heavy git call
+  // — see `isLaneAlreadyClean` in `lib/lane-whois-core.mjs` for the full reasoning (incl. why this is not a new
+  // staleness risk).
+  const branchTipSha = tryGit(dir, ['rev-parse', branchRef]) || null;
 
   // Transcript attribution — the strongest inference signal when the ledger has nothing (a lane worked on
   // before this card wired up history-recording). Ranked by which session's edited-file set matches this
@@ -442,6 +451,12 @@ export function whoisForLane({
       liveOwner: attributionLiveOwner,
     } : null),
     inference: last ? null : { headSubject, branch, cardIds, transcriptAttribution: attribution },
+    // #4344 — exposed at the top level (not just buried in `inference`, which is `null` once a ledger entry
+    // exists) so a caller can tell "already at the pool branch tip" apart from "clean but behind it" without
+    // any git of its own — see `isLaneAlreadyClean` in `lib/lane-whois-core.mjs`.
+    branch,
+    headSha,
+    branchTipSha,
     uncommitted: { trackedModified: trackedModifiedPaths.length, untracked: untrackedPaths.length, trackedModifiedPaths, untrackedPaths },
     ahead: { count: commits.length, commits: commits.map((c) => ({ ...c, preserved: !!commitPreserved.get(c.sha) })) },
     cards: cardIds.map((id) => ({ id, status: cardStatusById[id] })),
