@@ -5,9 +5,10 @@ size: 3
 priority: high
 tier: pinned
 parent: "4075"
-status: open
+status: active
 scope: ["we:scripts/lib/gh-throttle.mjs", "we:scripts/lib/gh-write-queue.mjs", "we:scripts/conveyor/gh-write-replay.mjs", "we:scripts/lib/gh-spend.mjs", "we:scripts/lib/gh-app-shim.mjs", "we:scripts/conveyor/ci-heal-mark.mjs", "we:scripts/conveyor/ci-heal-escalation-mark.mjs", "we:scripts/conveyor/advisory-fix-mark.mjs", "we:scripts/conveyor/health-watch.mjs", "we:scripts/conveyor/health-smells/gh-graphql-budget.mjs", "we:scripts/conveyor/health-smells/gh-write-queue.mjs", "we:skills-src/conveyor/daemon-manifest.mjs", "we:skills-src/conveyor/com.we.conveyor-pass-daemon.gh-write-replay.plist.example", "we:scripts/lib/daemon-clone-registry.mjs", "we:scripts/lib/__tests__/gh-write-queue.test.mjs", "we:scripts/lib/__tests__/gh-throttle.budget-block.test.mjs", "we:scripts/lib/__tests__/gh-throttle.fidelity.test.mjs", "we:scripts/lib/__tests__/gh-spend.test.mjs", "we:scripts/lib/__tests__/gh-app-shim.test.mjs", "we:scripts/conveyor/__tests__/gh-write-replay.test.mjs", "we:scripts/conveyor/__tests__/ci-heal-mark.test.mjs", "we:scripts/conveyor/__tests__/ci-heal-escalation-mark.test.mjs", "we:scripts/conveyor/__tests__/advisory-fix-mark.test.mjs", "we:scripts/conveyor/__tests__/health-watch.test.mjs", "we:scripts/conveyor/health-smells/__tests__/gh-graphql-budget.test.mjs", "we:scripts/conveyor/health-smells/__tests__/gh-write-queue.test.mjs", "we:skills-src/conveyor/__tests__/daemon-manifest.test.mjs"]
 dateOpened: "2026-09-27"
+dateStarted: "2026-09-28"
 preparedDate: "2026-09-28"
 preparedAgainstSha: "787f3988a8e5eeed78bd8d994ad9d513d489423b"
 tags: []
@@ -95,6 +96,26 @@ Direct edits: `we:scripts/lib/gh-throttle.mjs` (the strip function + passthrough
 3. `we:scripts/lib/gh-spend.mjs`; the budget smell upgrade. Tests 2 and 4.
 4. Wire hourly persistence into `we:scripts/conveyor/health-watch.mjs`'s tick. Test 5.
 5. Gate with the `verify` operation; open with `open-pr`; run the proof plan below.
+
+## Progress
+
+- **Tasks 1–4 built (2026-09-28, conveyor-4309).** Task 5 (gate, PR, live proof) is the wrapper's job.
+- **Strip + capture (task 1).** `stripGhDebug` and cost-header capture are in `runGhCliPassthrough` only. `runGhSync`'s exec is unchanged apart from passing `WE_GH_THROTTLE_OUTER_INV` down, and only when it uses the real exec (an injected exec still sees its options unchanged). Both entry points log `id`, `inv` and `resource`; passthrough lines also carry `rl` and, when nested, `outer`. Kill switch: `WE_GH_THROTTLE_COST_HEADERS=0`. Capture ships ON: every fixture shape stripped cleanly, so the Risks fallback was not needed.
+- **Evidence correction from the fixtures.** On the real gh 2.95.0, `GH_DEBUG=api` DOES print the response body (pretty-printed JSON) inside each block, and it also prints `[git …]` lines for repo resolution. So the strip removes whole `* Request at` … `* Request took` blocks plus those git lines. Rate-limit and budget classification now run on the STRIPPED text, so a response body quoting "API rate limit exceeded" can never trigger a retry or a block.
+- **Fixtures.** Captured from `/opt/homebrew/bin/gh` into `we:scripts/lib/__tests__/fixtures/gh-debug/`, with Authorization and request-id redacted: success, 404 (plus its no-debug stderr as the oracle), paginated `pr list`, REST, and git-resolving. The rate-limit, multi-request, signal-kill and buffer-overflow shapes are derived from those real traces, because running them live would spend or mutate the account.
+- **`rl` scope.** `rl` holds one record per response that carries rate-limit headers, for every resource (`core` too, not only GraphQL). The rollup keys on `res`, so each bucket gets its own row.
+- **Attribution (task 2).** The rendered shim sets `WE_GH_THROTTLE_CALLER` from, in order: `GH_CALLER`; the parent process's script (local `ps`); `session:<8>`; the parent's command name. A shell's `-c` line is never read as a script, so the agent Bash tool's shell-snapshot script is not the caller. **Shim rebuild is automatic:** `buildGhShimSettingsEnv` → `ensureGhShim` re-renders the per-checkout shim on every dispatch.
+- **Rollup (task 3).** `we:scripts/lib/gh-spend.mjs` builds the three counts as designed. Refinements:
+  - The learned per-op average is taken only from "clean" gaps, meaning no other logged call fell between the two observations. A gap shared with other traffic over-attributes to the response that closes it, and learning from it inflated every estimate.
+  - Estimates only fill gaps in the same hour. A gap that straddles an hour boundary counts its earlier-hour calls as `unknown`.
+  - A window's first observation is a bare baseline: its own cost is unknown and it is not charged `used`.
+  - The report prints `—`, not `0`, for a caller whose calls are all unknown.
+- **Smell (task 3).** `gh-graphql-budget` uses attributed points where `rl` is present and the learned or static estimate otherwise. `measure` gains `attributed`/`estimated`/`unattributed`/`unknownInvocations`/`topOps`. The breach text names the top 3 callers as `name [~]points pts/requests req`, where `~` marks an estimate.
+- **Health-watch (task 4).** `tick` calls `persistGhSpend`, which wraps `persistSpendHours`, alongside the unchanged `probeGhCalls`. That writes the hourly rows plus their byte cursor next to `calls.jsonl`, and the tick summary gains `ghSpend`.
+- **Verified locally.**
+  - The in-scope suites plus all health smells pass: 381 passed. The 6 skipped are the live-`gh` fidelity cases, which need an authenticated `gh` and the test sandbox has none.
+  - End to end through the throttle CLI with the real binary: a failing `api graphql` call's stderr is byte-identical to raw `gh`, `rl` is logged, and the spend report shows the parts adding up to the bucket change.
+  - `npm run check:standards` was NOT run here (delivery agents are blocked from it); it is left to the gate.
 
 ## Delivery shape
 

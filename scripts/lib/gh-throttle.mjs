@@ -158,6 +158,13 @@
  * give-up) via `operations/telemetry-store.mjs`'s existing recorder, tagged with WHICH signal source calibrated
  * the wait — so a later capacity read can tell "we backed off using GitHub's own told wait" from "we were still
  * guessing," across every adopter of this module, not just the one call site with headers turned on.
+ *
+ * #4309 — SPEND ACCOUNTING. The CLI passthrough ({@link runGhCliPassthrough}, the path every agent session's `gh`
+ * takes via the gh App shim) now turns `GH_DEBUG=api` on by default, reads each response's free `X-Ratelimit-*`
+ * headers into the `calls.jsonl` line's `rl` field, and strips its own trace back out ({@link stripGhDebug})
+ * before relaying stderr — a caller that set its own `GH_DEBUG` is never stripped. Kill switch:
+ * `WE_GH_THROTTLE_COST_HEADERS=0`. {@link runGhSync}'s own exec is unchanged (its lines stay estimate-only);
+ * both entry points log `id` (auth identity), `inv` (invocation id) and `resource`. `gh-spend.mjs` rolls it up.
  * ================================================================================================
  */
 
@@ -495,6 +502,87 @@ export function parseGhDebugResponseHeaders(text) {
   }
   return headers;
 }
+
+// ── cost-header capture (#4309) — free `X-Ratelimit-*` headers via `GH_DEBUG=api`, stripped before relay ────────
+
+/** Kill switch for {@link runGhCliPassthrough}'s cost-header capture: `WE_GH_THROTTLE_COST_HEADERS=0` turns it
+ *  off (the call then runs with no `GH_DEBUG` and logs no `rl`; `gh-spend.mjs` falls back to estimates). */
+export const GH_COST_HEADERS_ENV = 'WE_GH_THROTTLE_COST_HEADERS';
+
+export function resolveCostHeaderCapture(env = process.env) {
+  return String(env[GH_COST_HEADERS_ENV] ?? '').trim() !== '0';
+}
+
+/** The `[git remote -v]`-shaped line gh prints for every git subprocess it runs while `GH_DEBUG` is set. */
+const GH_DEBUG_GIT_LINE = /^\[(\S*\/)?git( [^\n]*)?\]$/;
+
+/**
+ * Remove the trace `GH_DEBUG=api` adds to a `gh` invocation's stderr, and return the response headers it
+ * carried. PURE. Shapes observed on the real binary (gh 2.95.0, fixtures in `__tests__/fixtures/gh-debug/`):
+ *   - one block per HTTP request: `* Request at …`, `* Request to …`, `> ` request headers, a blank line, the
+ *     request body (the GraphQL query), a blank line, `< HTTP/2.0 <status>`, `< ` response headers, a blank line,
+ *     the response BODY (pretty-printed JSON), a blank line, `* Request took …`. A block is everything from its
+ *     `* Request at` line through its `* Request took` line, inclusive;
+ *   - a paginated or multi-request command prints several blocks back to back;
+ *   - `[git …]` lines, one per git subprocess gh runs (repo resolution) — also debug-only, also stripped;
+ *   - gh's own real stderr (e.g. `GraphQL: Could not resolve …`) comes after the last block and is kept.
+ * An UNCLOSED block (gh died mid-request: a signal, a spawn-side buffer overflow) is stripped only through its
+ * last `< `/`> ` header line plus one blank line; everything after that is kept, so a partial error is never lost.
+ * @param {string|null|undefined} text
+ * @returns {{stderr:string, responses:Array<{status:number, headers:Record<string,string>}>}}
+ */
+export function stripGhDebug(text) {
+  const lines = String(text ?? '').split('\n');
+  const kept = [];
+  const responses = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (GH_DEBUG_GIT_LINE.test(line)) { i += 1; continue; }
+    if (!line.startsWith('* Request at ')) { kept.push(line); i += 1; continue; }
+    let end = -1;
+    for (let j = i + 1; j < lines.length; j++) {
+      if (lines[j].startsWith('* Request took ')) { end = j; break; }
+      if (lines[j].startsWith('* Request at ')) break;
+    }
+    const blockEnd = end === -1 ? lines.length - 1 : end;
+    let status = null;
+    let headers = null;
+    let lastHeaderLine = i;
+    for (let j = i + 1; j <= blockEnd; j++) {
+      const l = lines[j];
+      const m = l.match(/^<\s*HTTP\/\S+\s+(\d+)/);
+      if (m) { status = Number(m[1]); headers = {}; lastHeaderLine = j; continue; }
+      if (l.startsWith('< ') || l.startsWith('> ')) {
+        lastHeaderLine = j;
+        const h = headers && l.startsWith('< ') ? l.match(/^<\s*([A-Za-z0-9-]+):\s*(.*)$/) : null;
+        if (h) headers[h[1].toLowerCase()] = h[2].trim();
+      }
+    }
+    if (status != null) responses.push({ status, headers });
+    if (end !== -1) { i = end + 1; continue; }
+    i = lastHeaderLine + 1;
+    if (i < lines.length && lines[i] === '' && i < lines.length - 1) i += 1;
+  }
+  return { stderr: kept.join('\n'), responses };
+}
+
+/** The compact per-response record a `calls.jsonl` line carries in `rl` — one per response with rate-limit
+ *  headers (about 80 bytes). `res` is GitHub's own `X-Ratelimit-Resource` (`graphql`, `core`, …). */
+export function rateLimitRecords(responses) {
+  const out = [];
+  for (const r of responses || []) {
+    const h = r && r.headers;
+    if (!h || h['x-ratelimit-used'] == null) continue;
+    const num = (k) => (h[k] != null && Number.isFinite(Number(h[k])) ? Number(h[k]) : null);
+    out.push({ used: num('x-ratelimit-used'), rem: num('x-ratelimit-remaining'), limit: num('x-ratelimit-limit'), reset: num('x-ratelimit-reset'), res: h['x-ratelimit-resource'] || null });
+  }
+  return out;
+}
+
+/** Env var {@link runGhSync} sets on its real `gh` child so a nested passthrough (the gh App shim → this CLI)
+ *  records `outer: <inv>` and the pair counts as ONE invocation, not two. */
+export const GH_OUTER_INV_ENV = 'WE_GH_THROTTLE_OUTER_INV';
 
 /**
  * Extract a GraphQL response body's IN-BAND `rateLimit` field — GitHub attaches it only when the query itself
@@ -931,7 +1019,10 @@ export function runGhSync(args, opts = {}) {
   const now = throttle.now || (() => Date.now());
   const pid = throttle.pid || process.pid;
   const owner = throttle.owner || `${pid}:${randomUUID()}`;
-  const exec = throttle.exec || ((a, o) => execFileSync('gh', a, o));
+  // #4309 — one invocation id across every retry of this call. Only the REAL exec passes it down (so a nested
+  // shim → passthrough record says `outer: <inv>`); an injected test exec still sees `opts` byte-unchanged.
+  const inv = randomUUID().slice(0, 12);
+  const exec = throttle.exec || ((a, o) => execFileSync('gh', a, { ...o, env: { ...(o.env || process.env), [GH_OUTER_INV_ENV]: inv } }));
   const points = throttle.points != null ? throttle.points : 1;
   const budgetPerMin = throttle.budgetPerMin != null ? throttle.budgetPerMin : resolveGhPointsBudgetPerMin(env);
   const pointsWindowMs = throttle.pointsWindowMs != null ? throttle.pointsWindowMs : GH_POINTS_WINDOW_MS;
@@ -991,7 +1082,7 @@ export function runGhSync(args, opts = {}) {
     } finally {
       if (acq.ok) failOpenGate('release', () => releaseGhSlotSync({ lockRoot, cap, owner }), gateOpts);
     }
-    recordGhCallLogEntry(logPath, { op: opLabel, attempt, points, outcome: 'call', ok: !failure, caller, w: isWrite });
+    recordGhCallLogEntry(logPath, { op: opLabel, attempt, points, outcome: 'call', ok: !failure, caller, w: isWrite, resource, id: identity, inv });
     if (!failure) {
       // #gh-graphql-budget — a landed write makes the shared open-PR snapshot stale for that repo.
       if (isWrite) markPrSnapshotDirty({ repo: repoFromGhArgs(args), env });
@@ -1116,6 +1207,16 @@ export function runGhCliPassthrough(argv, { throttle = {}, spawn = spawnSync, bi
   // FAIL OPEN (see `failOpenGate`): an unusable lock root means this call runs ungated, never not at all.
   const gated = failOpenGate('lock-root setup', () => { mkdirSync(lockRoot, { recursive: true }); return true; }, { ...gateOpts, fallback: false, logPath: null });
 
+  // #4309 — cost-header capture. The child inherits `process.env` (no `env` option), so THAT is where a caller's
+  // own `GH_DEBUG` would be: when set, it is left alone and relayed untouched (never stripped). Otherwise this
+  // turns `GH_DEBUG=api` on, reads the free `X-Ratelimit-*` headers, and strips ONLY its own trace back out.
+  const capture = resolveCostHeaderCapture(env) && !process.env.GH_DEBUG;
+  const spawnOpts = capture
+    ? { stdio: ['inherit', 'pipe', 'pipe'], maxBuffer, env: { ...process.env, GH_DEBUG: 'api' } }
+    : { stdio: ['inherit', 'pipe', 'pipe'], maxBuffer };
+  const inv = randomUUID().slice(0, 12);
+  const outer = env[GH_OUTER_INV_ENV] || process.env[GH_OUTER_INV_ENV] || null;
+
   let attempt = 0;
   for (;;) {
     attempt += 1;
@@ -1126,24 +1227,28 @@ export function runGhCliPassthrough(argv, { throttle = {}, spawn = spawnSync, bi
     }, { ...gateOpts, fallback: { ok: false } }) : { ok: false };
     let r;
     try {
-      // This front door NEVER adds `GH_DEBUG` itself (unlike `runGhSync`'s opt-in) — its documented contract
-      // is full-process byte-for-byte transparency, and turning debug tracing on would leak into a caller's
-      // own relayed stderr. It still reads real headers OPPORTUNISTICALLY (below) when an operator's own
-      // ambient `GH_DEBUG=api` happens to be set — `spawn` inherits `process.env` unless overridden, so
-      // nothing here suppresses that; it is simply never the one turning it on.
-      r = spawn(bin, argv, { stdio: ['inherit', 'pipe', 'pipe'], maxBuffer });
+      r = spawn(bin, argv, spawnOpts);
     } finally {
       if (acq.ok) failOpenGate('release', () => releaseGhSlotSync({ lockRoot, cap, owner }), gateOpts);
     }
     if (r.error) throw r.error; // e.g. `gh` not on PATH — not a `gh`-level failure to retry
-    const stderrText = r.stderr ? r.stderr.toString('utf8') : '';
+    const rawStderrText = r.stderr ? r.stderr.toString('utf8') : '';
+    // Classify on the STRIPPED text (what the caller would have seen without debug): the raw trace includes
+    // response bodies, and a PR title saying "API rate limit exceeded" must never trigger a retry or a block.
+    const stripped = capture ? stripGhDebug(rawStderrText) : null;
+    const stderrText = stripped ? stripped.stderr : rawStderrText;
+    // Byte-for-byte: the original buffer is relayed whenever nothing was stripped (no utf8 round trip).
+    const stderrOut = stripped && stripped.stderr !== rawStderrText ? Buffer.from(stripped.stderr, 'utf8') : (r.stderr || Buffer.alloc(0));
     const failed = typeof r.status === 'number' && r.status !== 0;
-    recordGhCallLogEntry(logPath, { op: opLabel, attempt, points, outcome: 'call', ok: !failed, caller, w: isWrite });
+    recordGhCallLogEntry(logPath, {
+      op: opLabel, attempt, points, outcome: 'call', ok: !failed, caller, w: isWrite, resource, id: identity, inv,
+      ...(outer ? { outer } : {}), ...(stripped ? { rl: rateLimitRecords(stripped.responses) } : {}),
+    });
     if (!failed && isWrite) markPrSnapshotDirty({ repo: repoFromGhArgs(argv), env }); // #gh-graphql-budget
     if (!failed || !isRateLimitShaped(stderrText)) {
-      return { status: r.status == null ? (r.signal ? 128 : 1) : r.status, stdout: r.stdout || Buffer.alloc(0), stderr: r.stderr || Buffer.alloc(0) };
+      return { status: r.status == null ? (r.signal ? 128 : 1) : r.status, stdout: r.stdout || Buffer.alloc(0), stderr: stderrOut };
     }
-    const headers = parseGhDebugResponseHeaders(stderrText); // usually {} here — see the comment above
+    const headers = parseGhDebugResponseHeaders(rawStderrText); // the LAST response block's headers, pre-strip
     // #gh-graphql-budget — PRIMARY exhaustion → record the shared block and return now (see runGhSync).
     const exhausted = primaryExhaustedResource(stderrText);
     if (exhausted) {
@@ -1156,14 +1261,14 @@ export function runGhCliPassthrough(argv, { throttle = {}, spawn = spawnSync, bi
         const rec = writeBudgetBlock(lockRoot, identity, exhausted, { untilMs: until.untilMs, nowMs: now(), source: until.source, op: opLabel, caller });
         recordGhCallLogEntry(logPath, { op: opLabel, attempt, points, outcome: 'budget_exhausted', resource: exhausted, until: rec.until, caller, w: isWrite });
         recordGhThrottleMetric('gh.throttle.exhausted', 1, { op: opLabel, attempt, source: `primary-${exhausted}` });
-        return { status: r.status == null ? 1 : r.status, stdout: r.stdout || Buffer.alloc(0), stderr: r.stderr || Buffer.alloc(0) };
+        return { status: r.status == null ? 1 : r.status, stdout: r.stdout || Buffer.alloc(0), stderr: stderrOut };
       }
     }
     if (attempt >= maxAttempts) {
       recordGhCallLogEntry(logPath, { op: opLabel, attempt, points, outcome: 'retry_exhausted', caller, w: isWrite });
       recordGhThrottleMetric('gh.throttle.rate_limited', 1, { op: opLabel, attempt, source: classifyRateLimitSignal(headers).kind, outcome: 'exhausted' });
       recordGhThrottleMetric('gh.throttle.exhausted', 1, { op: opLabel, attempt });
-      return { status: r.status == null ? (r.signal ? 128 : 1) : r.status, stdout: r.stdout || Buffer.alloc(0), stderr: r.stderr || Buffer.alloc(0) };
+      return { status: r.status == null ? (r.signal ? 128 : 1) : r.status, stdout: r.stdout || Buffer.alloc(0), stderr: stderrOut };
     }
     const backoff = calibratedBackoffMs({ headers, attempt, tuning: retryTuning, nowMs: now(), headerCapMs });
     recordGhThrottleMetric('gh.throttle.rate_limited', 1, { op: opLabel, attempt, source: backoff.source, outcome: 'retry' });

@@ -24,7 +24,7 @@ import { join } from 'node:path';
 import {
   defaultShimDir, shimGhPath, resolveRealGhBinary, renderGhShimScript, ensureGhShim, ghShimPathOverride,
   buildGhShimSettingsEnv, looksLikeAppTokenAuthFailure, ensureSettingsFileEnv, ensureSettingsFilePermissions, sanitizeSpawnEnv,
-  defaultGhThrottleCliPath, checkoutShimDir,
+  defaultGhThrottleCliPath, checkoutShimDir, shimCallerScriptFromCommand,
 } from '../gh-app-shim.mjs';
 
 const CONFIGURED_ENV = {
@@ -536,6 +536,80 @@ describe('renderGhShimScript — pure text, and REALLY RUN against a fake real g
         rmSync(dir, { recursive: true, force: true });
       }
     });
+  });
+});
+
+// #4309 — every agent-session gh call used to log `caller: "unknown"`: the throttle CLI's own argv[1] is always
+// gh-throttle.mjs, and the shim never said who called it. The rendered shim now sets WE_GH_THROTTLE_CALLER.
+describe('shimCallerScriptFromCommand — pure, the calling script from a `ps -o command=` line (#4309)', () => {
+  it('names an interpreter-run script, skipping flags and flag values', () => {
+    expect(shimCallerScriptFromCommand('node /w/scripts/conveyor/ci-heal-mark.mjs 2821 --repo=x')).toBe('ci-heal-mark.mjs');
+    expect(shimCallerScriptFromCommand('/opt/homebrew/bin/node --import /w/loader.mjs /w/review-daemon.mjs')).toBe('review-daemon.mjs');
+    expect(shimCallerScriptFromCommand('python3 -u /w/tool.py')).toBe('tool.py');
+    expect(shimCallerScriptFromCommand('/w/bin/sync.sh --fast')).toBe('sync.sh');
+  });
+  it('never mistakes a shell -c line (an agent Bash tool call), node -e, or a bare binary for a script', () => {
+    expect(shimCallerScriptFromCommand("/bin/zsh -c -l source /Users/o/.claude/shell-snapshots/snapshot-zsh-1.sh && eval 'gh pr view 1'")).toBeNull();
+    expect(shimCallerScriptFromCommand('node -e "require(1)"')).toBeNull();
+    expect(shimCallerScriptFromCommand('/usr/local/bin/claude --bg')).toBeNull();
+    expect(shimCallerScriptFromCommand('')).toBeNull();
+  });
+});
+
+describe('renderGhShimScript — sets WE_GH_THROTTLE_CALLER on the throttle CLI (#4309, live)', () => {
+  function setup() {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), 'we-gh-shim-caller-')));
+    // The fake "real gh" reports the caller the throttle hop would log.
+    const realGh = join(dir, 'real-gh');
+    writeFileSync(realGh, '#!/usr/bin/env node\nconsole.log(JSON.stringify({ caller: process.env.WE_GH_THROTTLE_CALLER || null }));\n');
+    chmodSync(realGh, 0o755);
+    // A relay standing in for gh-throttle.mjs's CLI (same contract: exec WE_GH_THROTTLE_GH_BIN, inherit env).
+    const relayCli = join(dir, 'throttle', 'gh-throttle.mjs');
+    mkdirSync(join(dir, 'throttle'), { recursive: true });
+    writeFileSync(relayCli, "import { spawnSync } from 'node:child_process';\nimport { pathToFileURL } from 'node:url';\n"
+      + "if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {\n"
+      + "  const r = spawnSync(process.env.WE_GH_THROTTLE_GH_BIN, process.argv.slice(2), { stdio: ['inherit', 'pipe', 'pipe'] });\n"
+      + '  process.stdout.write(r.stdout); process.stderr.write(r.stderr); process.exitCode = r.status;\n}\n');
+    const shimPath = join(dir, 'gh');
+    writeFileSync(shimPath, renderGhShimScript({ realGhPath: realGh, cachePath: join(dir, 'cache.json'), ghThrottleCliPath: relayCli }));
+    chmodSync(shimPath, 0o755);
+    const env = { ...process.env, GH_TOKEN: undefined, GH_CALLER: undefined, CLAUDE_CODE_SESSION_ID: undefined };
+    return { dir, shimPath, env };
+  }
+  const callerOf = (r) => JSON.parse(r.stdout).caller;
+
+  it('GH_CALLER wins', () => {
+    const { dir, shimPath, env } = setup();
+    try {
+      expect(callerOf(spawnSync(shimPath, ['pr', 'view', '1'], { encoding: 'utf8', env: { ...env, GH_CALLER: 'parked-pr-conflict-watch-we' } }))).toBe('parked-pr-conflict-watch-we');
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('else the parent process\'s script (a node script shelling a bare gh)', () => {
+    const { dir, shimPath, env } = setup();
+    try {
+      const script = join(dir, 'ci-heal-mark.mjs');
+      writeFileSync(script, `import { spawnSync } from 'node:child_process';\nconst r = spawnSync(${JSON.stringify(shimPath)}, ['pr', 'comment', '1'], { encoding: 'utf8' });\nprocess.stdout.write(r.stdout);\n`);
+      const r = spawnSync(process.execPath, [script], { encoding: 'utf8', env: { ...env, CLAUDE_CODE_SESSION_ID: 'must-not-win' } });
+      expect(callerOf(r)).toBe('ci-heal-mark.mjs');
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('else the Claude session id (a shell -c parent, the agent Bash tool shape)', () => {
+    const { dir, shimPath, env } = setup();
+    try {
+      // `; true` keeps sh from exec-replacing itself, so the shim's parent really is the `sh -c` process.
+      const r = spawnSync('/bin/sh', ['-c', `${JSON.stringify(shimPath)} pr view 1; true`], { encoding: 'utf8', env: { ...env, CLAUDE_CODE_SESSION_ID: '0123456789abcdef' } });
+      expect(callerOf(r)).toBe('session:01234567');
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('else the parent\'s command name — never left blank', () => {
+    const { dir, shimPath, env } = setup();
+    try {
+      const r = spawnSync('/bin/sh', ['-c', `${JSON.stringify(shimPath)} pr view 1; true`], { encoding: 'utf8', env });
+      expect(callerOf(r)).toBe('sh');
+    } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 });
 

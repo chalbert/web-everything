@@ -11,12 +11,23 @@
  * SKIPS CLEANLY (never fails red) when `gh` is not on PATH or not authenticated — this proves fidelity when the
  * real tool is available; it is not a substitute for the mocked semaphore/backoff unit proof in
  * `gh-throttle.test.mjs`, which needs neither.
+ *
+ * #4309 — the passthrough now turns `GH_DEBUG=api` on to read GitHub's free `X-Ratelimit-*` headers, and strips
+ * its own trace before relaying stderr. That strip is proven here against GOLDEN FIXTURES captured from the
+ * pinned real binary (`/opt/homebrew/bin/gh`, gh 2.95.0, 2026-09-28 — never the shim on PATH), in
+ * `fixtures/gh-debug/`: a success, a 404 (with its plain, no-debug stderr as the oracle), a paginated `pr list`,
+ * a REST call, and a repo-resolving call that also prints `[git …]` lines. The rate-limit, multi-request,
+ * signal-kill and buffer-overflow shapes are DERIVED from those real traces (a live rate-limit or `pr create`
+ * would spend or mutate the real account) — each derivation is spelled out at its test. Only credential-bearing
+ * lines were redacted from the captures (`Authorization`, `X-Github-Request-Id`).
  */
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterEach, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { runGhSync } from '../gh-throttle.mjs';
+import { mkdtempSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { runGhSync, runGhCliPassthrough, stripGhDebug, rateLimitRecords, ghThrottleLogPath } from '../gh-throttle.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const WRAPPER = join(HERE, '..', 'gh-throttle.mjs');
@@ -97,5 +108,138 @@ d('real side-by-side pass-through fidelity against the actual gh binary', () => 
     expect(wrapperErr).not.toBeNull();
     expect(wrapperErr.status).toBe(rawErr.status);
     expect(String(wrapperErr.stderr).trim()).toBe(String(rawErr.stderr).trim());
+  });
+});
+
+// ── #4309 — stripGhDebug over golden fixtures from the real binary ───────────────────────────────────────────
+const FIX = join(HERE, 'fixtures', 'gh-debug');
+const fx = (name) => readFileSync(join(FIX, name), 'utf8');
+
+describe('stripGhDebug — golden fixtures from the pinned real gh binary (#4309)', () => {
+  it('a 404: the stripped stderr is byte-identical to the SAME call run without GH_DEBUG (the oracle)', () => {
+    const { stderr, responses } = stripGhDebug(fx('pr-view-404.debug.stderr'));
+    expect(stderr).toBe(fx('pr-view-404.plain.stderr'));
+    expect(responses).toHaveLength(1);
+    expect(responses[0].status).toBe(200); // GraphQL NOT_FOUND is an HTTP 200 with an `errors` body
+    expect(rateLimitRecords(responses)).toEqual([{ used: 37, rem: 4963, limit: 5000, reset: 1790615715, res: 'graphql' }]);
+  });
+
+  it('a success: nothing of the trace survives, one GraphQL response captured', () => {
+    const { stderr, responses } = stripGhDebug(fx('pr-view-success.debug.stderr'));
+    expect(stderr).toBe('');
+    expect(rateLimitRecords(responses)).toEqual([{ used: 36, rem: 4964, limit: 5000, reset: 1790615715, res: 'graphql' }]);
+  });
+
+  it('a paginated `pr list`: two request blocks, both stripped, one rl record per HTTP response', () => {
+    const { stderr, responses } = stripGhDebug(fx('pr-list-paginated.debug.stderr'));
+    expect(stderr).toBe('');
+    expect(responses).toHaveLength(2);
+    expect(rateLimitRecords(responses).every((r) => r.res === 'graphql')).toBe(true);
+  });
+
+  it('a REST call records `res: core`; a repo-resolving call\'s `[git …]` debug lines are stripped too', () => {
+    expect(rateLimitRecords(stripGhDebug(fx('api-rate-limit-rest.debug.stderr')).responses)[0].res).toBe('core');
+    const local = fx('pr-view-git-resolve.debug.stderr');
+    expect(local).toMatch(/^\[git remote -v\]$/m);
+    expect(stripGhDebug(local).stderr).toBe('');
+  });
+
+  it('a multi-request command (DERIVED: blocks back to back, as `pr create` prints them) with a real warning between', () => {
+    const text = fx('pr-view-success.debug.stderr') + 'Warning: 1 uncommitted change\n' + fx('api-rate-limit-rest.debug.stderr') + fx('pr-view-404.debug.stderr');
+    const { stderr, responses } = stripGhDebug(text);
+    expect(stderr).toBe('Warning: 1 uncommitted change\n' + fx('pr-view-404.plain.stderr'));
+    expect(rateLimitRecords(responses).map((r) => r.res)).toEqual(['graphql', 'core', 'graphql']);
+  });
+
+  it('a rate-limit error (DERIVED from the real 404 trace: remaining 0, GitHub\'s exhaustion message) keeps the error, reads the headers', () => {
+    const text = fx('pr-view-404.debug.stderr')
+      .replace('X-Ratelimit-Remaining: 4963', 'X-Ratelimit-Remaining: 0')
+      .replace(/^GraphQL: .*$/m, 'GraphQL: API rate limit already exceeded for installation ID 1234. (rateLimit)');
+    const { stderr, responses } = stripGhDebug(text);
+    expect(stderr).toBe('GraphQL: API rate limit already exceeded for installation ID 1234. (rateLimit)\n');
+    expect(rateLimitRecords(responses)[0].rem).toBe(0);
+  });
+
+  it('an UNCLOSED block (DERIVED: gh killed / its output cut mid-body) is stripped only through its last header line + one blank', () => {
+    const full = fx('pr-view-success.debug.stderr');
+    const cut = full.slice(0, full.indexOf('"repository"')); // headers complete, body cut mid-way
+    const { stderr, responses } = stripGhDebug(cut);
+    expect(stderr.startsWith('{\n  "data": {')).toBe(true); // the partial body is KEPT, never silently dropped
+    expect(stderr).not.toMatch(/^[<>*] /m);
+    expect(responses).toHaveLength(1);
+    // cut before any response: the request headers go, the rest stays
+    const reqOnly = full.slice(0, full.indexOf('GraphQL query:')) + 'error connecting to api.github.com\n';
+    expect(stripGhDebug(reqOnly).stderr).toBe('error connecting to api.github.com\n');
+  });
+
+  it('text with no trace at all (a spawn error, a caller\'s plain stderr) passes through unchanged', () => {
+    expect(stripGhDebug('')).toEqual({ stderr: '', responses: [] });
+    expect(stripGhDebug('gh: pull request #9 already exists\n').stderr).toBe('gh: pull request #9 already exists\n');
+  });
+});
+
+// ── #4309 — the passthrough's capture, with an INJECTED spawn replaying the real traces ─────────────────────────
+describe('runGhCliPassthrough — cost-header capture (#4309)', () => {
+  const readLog = (lockRoot) => readFileSync(ghThrottleLogPath(lockRoot), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  afterEach(() => { vi.unstubAllEnvs(); });
+
+  it('turns GH_DEBUG=api on, relays the SAME stderr a no-debug call would, and logs rl/id/inv/resource', () => {
+    const spawn = vi.fn(() => ({ status: 1, stdout: Buffer.alloc(0), stderr: Buffer.from(fx('pr-view-404.debug.stderr')), error: null }));
+    const lockRoot = mkdtempSync(join(tmpdir(), 'gh-cost-'));
+    const r = runGhCliPassthrough(['pr', 'view', '999999999'], { throttle: { lockRoot, cap: 2, sleep: () => {}, env: { GH_TOKEN: 'ghs_x' } }, spawn });
+    expect(spawn.mock.calls[0][2].env.GH_DEBUG).toBe('api');
+    expect(r.status).toBe(1);
+    expect(r.stderr.toString('utf8')).toBe(fx('pr-view-404.plain.stderr'));
+    const [line] = readLog(lockRoot);
+    expect(line).toMatchObject({ outcome: 'call', resource: 'graphql', id: 'app', rl: [{ used: 37, rem: 4963, limit: 5000, reset: 1790615715, res: 'graphql' }] });
+    expect(line.inv).toMatch(/^[0-9a-f-]{12}$/);
+    expect(line.outer).toBeUndefined();
+  });
+
+  it('a caller-set GH_DEBUG is never overridden and its trace is relayed UNTOUCHED (no strip, no rl)', () => {
+    vi.stubEnv('GH_DEBUG', 'api');
+    const raw = Buffer.from(fx('pr-view-404.debug.stderr'));
+    const spawn = vi.fn(() => ({ status: 1, stdout: Buffer.alloc(0), stderr: raw, error: null }));
+    const lockRoot = mkdtempSync(join(tmpdir(), 'gh-cost-'));
+    const r = runGhCliPassthrough(['pr', 'view', '999999999'], { throttle: { lockRoot, cap: 2, sleep: () => {} }, spawn });
+    expect(spawn.mock.calls[0][2].env).toBeUndefined();
+    expect(r.stderr).toBe(raw);
+    expect(readLog(lockRoot)[0].rl).toBeUndefined();
+  });
+
+  it('kill switch WE_GH_THROTTLE_COST_HEADERS=0: no GH_DEBUG, no strip, no rl', () => {
+    const spawn = vi.fn(() => ({ status: 0, stdout: Buffer.from('ok'), stderr: Buffer.from('warn\n'), error: null }));
+    const lockRoot = mkdtempSync(join(tmpdir(), 'gh-cost-'));
+    runGhCliPassthrough(['pr', 'view', '1'], { throttle: { lockRoot, cap: 2, sleep: () => {}, env: { WE_GH_THROTTLE_COST_HEADERS: '0' } }, spawn });
+    expect(spawn.mock.calls[0][2].env).toBeUndefined();
+    expect(readLog(lockRoot)[0].rl).toBeUndefined();
+  });
+
+  it('classifies on the STRIPPED text: a response BODY that mentions "API rate limit exceeded" never triggers a retry', () => {
+    // `replace` hits the FIRST occurrence only — the JSON response BODY's `message`, not gh's final error line.
+    const trace = fx('pr-view-404.debug.stderr').replace('Could not resolve to a PullRequest', 'API rate limit exceeded');
+    expect(trace).toMatch(/"message": "API rate limit exceeded/);
+    const spawn = vi.fn(() => ({ status: 1, stdout: Buffer.alloc(0), stderr: Buffer.from(trace), error: null }));
+    const lockRoot = mkdtempSync(join(tmpdir(), 'gh-cost-'));
+    const r = runGhCliPassthrough(['pr', 'view', '999999999'], { throttle: { lockRoot, cap: 2, sleep: () => {}, maxAttempts: 3 }, spawn });
+    expect(spawn).toHaveBeenCalledTimes(1);
+    expect(r.stderr.toString()).toBe(fx('pr-view-404.plain.stderr'));
+  });
+
+  it('a nested call (runGhSync → shim → this CLI) records `outer: <inv>` from WE_GH_THROTTLE_OUTER_INV', () => {
+    const spawn = vi.fn(() => ({ status: 0, stdout: Buffer.from('{}'), stderr: Buffer.from(fx('pr-view-success.debug.stderr')), error: null }));
+    const lockRoot = mkdtempSync(join(tmpdir(), 'gh-cost-'));
+    const r = runGhCliPassthrough(['pr', 'view', '2828'], { throttle: { lockRoot, cap: 2, sleep: () => {}, env: { WE_GH_THROTTLE_OUTER_INV: 'outer-abc' } }, spawn });
+    expect(r.stderr.length).toBe(0);
+    expect(readLog(lockRoot)[0].outer).toBe('outer-abc');
+  });
+
+  it('runGhSync logs id/inv/resource too, and an injected exec still sees its opts UNCHANGED', () => {
+    const exec = vi.fn(() => 'ok');
+    const lockRoot = mkdtempSync(join(tmpdir(), 'gh-cost-'));
+    runGhSync(['pr', 'list'], { encoding: 'utf8', throttle: { lockRoot, cap: 2, sleep: () => {}, exec } });
+    expect(exec).toHaveBeenCalledWith(['pr', 'list'], { encoding: 'utf8' });
+    expect(readLog(lockRoot)[0]).toMatchObject({ resource: 'graphql', id: expect.any(String), inv: expect.any(String) });
+    expect(readLog(lockRoot)[0].rl).toBeUndefined(); // runGhSync's exec is unchanged — estimate-only
   });
 });

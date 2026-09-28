@@ -59,4 +59,41 @@ describe('gh-graphql-budget', () => {
     const [r] = smell.evaluate({ graphqlBudget, ghCalls: calls() }, { now: NOW });
     expect(r.breach).toBe(false);
   });
+
+  // #4309 — lines the throttle passthrough logged with GitHub's own X-Ratelimit headers (`rl`).
+  const RESET = Date.parse('2026-09-27T06:19:57Z') / 1000;
+  const measured = (minAgo, used, caller, op = 'pr view') => ({
+    ts: at(minAgo), op, outcome: 'call', ok: true, caller, resource: 'graphql', id: 'app', inv: `${caller}-${used}`,
+    rl: [{ used, rem: 6100 - used, limit: 6100, reset: RESET, res: 'graphql' }],
+  });
+
+  it('attributed points beat the static estimate where a line carries rl; the rest stays estimated', () => {
+    const entries = [
+      measured(20, 5000, 'session:aaaa1111'), // bare baseline
+      measured(19, 5040, 'session:aaaa1111', 'pr list'), // +40: a `pr list` the static table would call 3
+      { ts: at(18.5), op: 'pr list', outcome: 'call', ok: true, caller: 'review-daemon.mjs', resource: 'graphql', id: 'app' },
+      measured(18, 5100, 'drain-daemon.mjs', 'pr list'), // +60 → 50 attributed (cap), 10 residual for the daemon's estimate
+    ];
+    const s = summarizeGraphqlSpend(entries, { now: NOW });
+    expect(s.byCaller['session:aaaa1111']).toBe(41); // 40 attributed + ~1 for the bare-baseline call's own unknown cost
+    expect(s.byCaller['drain-daemon.mjs']).toBe(50);
+    expect(s.attributed).toBe(90);
+    expect(s.estimated).toBeGreaterThan(0);
+    expect(s.attributed + s.estimated + s.unattributed).toBe(100); // the bucket's observed `used` change
+    expect(s.topCallers.find((c) => c.name === 'review-daemon.mjs').estimate).toBe(true);
+    expect(s.topCallers.find((c) => c.name === 'drain-daemon.mjs').estimate).toBe(false);
+  });
+
+  it('measure carries attributed / estimated / unattributed / topOps, and the breach text names the top 3 callers with points and requests', () => {
+    const entries = [...calls(), measured(20, 5000, 'session:aaaa1111'), measured(10, 5030, 'session:aaaa1111', 'pr view')];
+    const graphqlBudget = { sample: { remaining: 900, limit: 6100, resetAt: '2026-09-27T06:19:57Z' }, blocks: [] };
+    const [r] = smell.evaluate({ graphqlBudget, ghCalls: entries }, { now: NOW });
+    expect(r.breach).toBe(true);
+    expect(r.measure).toMatchObject({ attributed: 30, estimated: expect.any(Number), unattributed: expect.any(Number) });
+    expect(r.measure.topOps[0]).toMatchObject({ name: 'reconcile-fix-dispatch-daemon.mjs pr list', points: 270, estimate: true, requests: 90 });
+    expect(r.summary).toMatch(/top: reconcile-fix-dispatch-daemon\.mjs ~270 pts\/90 req, review-daemon\.mjs ~120 pts\/40 req, session:aaaa1111 ~31 pts\/2 req\./);
+    expect(r.summary).toMatch(/header-attributed 30/);
+    expect(r.recommendation).toMatch(/delta-based estimates/);
+  });
 });
+
