@@ -47,6 +47,19 @@ export const DEFAULT_HEALTH_CONFIG = Object.freeze({
   silenceDefaultMs: 72 * HOUR,
   healthStaleAfterMs: 15 * MINUTE,
   historyKeep: 100,
+  // #4078 — the diagnose-only investigation agent (slice 2). OFF until the operator turns it on (4065 clause 6:
+  // agent dispatch is its own settings change, independent of `mode`). The budget is 4078's own numbers.
+  investigateDispatch: false,
+  investigateMaxRunning: 1,
+  investigateMaxPerWindow: 6,
+  investigateWindowMs: 24 * HOUR,
+  // "no fourth investigation on a (smell, subject) within 7 days"
+  investigateSubjectMax: 3,
+  investigateSubjectWindowMs: 7 * 24 * HOUR,
+  investigateWallClockMs: 20 * MINUTE,
+  // A running investigation is stopped on the first tick within this much of its wall clock, so a 5-minute tick
+  // cadence still stops it AT OR BEFORE the clock, never up to one tick after it.
+  investigateReapLeadMs: 5 * MINUTE,
 });
 
 // ── 1. Daemon log parsing ────────────────────────────────────────────────────────────────────────────────────
@@ -420,9 +433,15 @@ export function stepEpisodes(state, evaluations, now, { config = DEFAULT_HEALTH_
  * that named the whole surface). Injectable so a caller (a test, a future per-operator override) never has to
  * mutate the real registry to see a different notify surface. A smell whose id is NOT in the set is completely
  * unaffected — its `notify` entries stay suppressed in shadow exactly as before this mechanism existed. Never
- * applies to `investigate`/`file` (still slice-2/slice-5 work, not shipped).
+ * applies to `investigate`/`file`.
+ *
+ * `investigateDispatch` (#4078) — `investigate` is suppressed unless the operator turned agent dispatch on
+ * (`config.investigateDispatch: true`), in any mode. An unsuppressed entry is only a candidate: the budget
+ * (one per episode, one running, the rolling caps, inhibiting episodes) is decided by
+ * `we:scripts/conveyor/health-investigate-dispatch.mjs#planInvestigations`, which reads every open episode —
+ * not only this tick's transitions — so an episode refused for "one already running" is picked up once the slot frees.
  */
-export function planActions(transitions, smellsById, { mode = 'shadow', notifySet = NOTIFY_EVEN_IN_SHADOW } = {}) {
+export function planActions(transitions, smellsById, { mode = 'shadow', notifySet = NOTIFY_EVEN_IN_SHADOW, investigateDispatch = false } = {}) {
   const plan = [];
   for (const t of transitions) {
     const ep = t.episode;
@@ -432,7 +451,10 @@ export function planActions(transitions, smellsById, { mode = 'shadow', notifySe
     if (t.type === 'opened' || t.type === 'flapping') {
       if (smell.diagnose) plan.push({ kind: 'diagnose', key: t.key, diagnose: smell.diagnose });
       if (ep.severity === 'high' && !ep.tracked) plan.push({ kind: 'notify', key: t.key, suppressed: shadowSuppressed ? 'shadow mode' : null });
-      if (smell.action === 'investigate') plan.push({ kind: 'investigate', key: t.key, suppressed: mode === 'shadow' ? 'shadow mode (agent investigation is slice 2, #4078)' : 'not built yet (slice 2, #4078)' });
+      if (smell.action === 'investigate') {
+        const off = mode === 'shadow' ? 'shadow mode (agent investigation dispatch is off — config `investigateDispatch`)' : 'agent investigation dispatch is off (config `investigateDispatch`)';
+        plan.push({ kind: 'investigate', key: t.key, suppressed: investigateDispatch === true ? null : off });
+      }
       if (smell.action === 'file') plan.push({ kind: 'file', key: t.key, suppressed: mode === 'shadow' ? 'shadow mode' : 'not built yet (slice 5)' });
     } else if (t.type === 'reminder' || t.type === 'silence-expired') {
       plan.push({ kind: 'notify', key: t.key, reason: t.type, suppressed: shadowSuppressed ? 'shadow mode' : null });
@@ -514,6 +536,36 @@ export function fmtAge(ms) {
   return h < 48 ? `${h}h${String(m % 60).padStart(2, '0')}m` : `${Math.floor(h / 24)}d`;
 }
 
+/**
+ * PURE (#4078): the "Agent investigation" section of an episode report — `[]` when no investigation was ever
+ * considered. `ep.investigationStatus` is the dispatcher's own line (running / held / stopped); `ep.investigation`
+ * is the agent's findings, already privacy-scrubbed when recorded
+ * (`health-investigate-dispatch.mjs#recordFindings`) and scrubbed once more here as the last choke point.
+ */
+export function renderInvestigationSection(ep) {
+  const st = ep?.investigationStatus;
+  const inv = ep?.investigation;
+  if (!st && !inv) return [];
+  const lines = ['## Agent investigation', ''];
+  if (st) {
+    const who = st.session ? ` · session \`${st.session}\`` : '';
+    lines.push(`- ${st.status}${st.reason ? ` — ${scrubText(st.reason)}` : ''}${who}`, '');
+  }
+  if (!inv) return lines;
+  const rec = inv.recommendation || {};
+  lines.push(
+    `Recorded ${inv.recordedAt || '?'}. Diagnose-only: nothing below was applied.`, '',
+    `- **What is wrong:** ${scrubText(rec.whatIsWrong || '—')}`,
+    `- **Product change that fixes it:** ${scrubText(rec.productChange || '—')}`,
+    `- **Next step:** ${scrubText(rec.nextStep || '—')}`,
+    '',
+  );
+  for (const ev of Array.isArray(inv.evidence) ? inv.evidence : []) {
+    lines.push(`Evidence — \`${scrubText(ev.command)}\``, '', '```', scrubText(ev.output), '```', '');
+  }
+  return lines;
+}
+
 /** PURE: the durable per-episode report (markdown). */
 export function renderEpisodeReport(ep, { now, smell, diagnosis = null, plan = [], mode = 'shadow' } = {}) {
   const lines = [
@@ -536,6 +588,7 @@ export function renderEpisodeReport(ep, { now, smell, diagnosis = null, plan = [
   if (diagnosis) {
     lines.push('## Deterministic diagnosis', '', `\`${diagnosis.command}\` → exit ${diagnosis.code}${diagnosis.timedOut ? ' (timed out)' : ''}`, '', '```', scrubText(diagnosis.output || '').slice(0, 4000), '```', '');
   }
+  lines.push(...renderInvestigationSection(ep));
   const suppressed = plan.filter((p) => p.key === ep.key && p.suppressed);
   if (suppressed.length) {
     lines.push('## Held back', '', ...suppressed.map((p) => `- ${p.kind}: ${p.suppressed}`), '');
@@ -616,6 +669,6 @@ export function runHealthTick(prevState, probes, smells, now, { config = {}, act
   });
   const stepped = stepEpisodes({ ...state, daemons, probeErrors: errs, heavyHeldSince }, evaluations, now, { config: cfg, activeCards });
   const smellsById = Object.fromEntries(smells.map((s) => [s.id, s]));
-  const plan = planActions(stepped.transitions, smellsById, { mode: cfg.mode });
+  const plan = planActions(stepped.transitions, smellsById, { mode: cfg.mode, investigateDispatch: cfg.investigateDispatch });
   return { state: stepped.state, transitions: stepped.transitions, plan, evaluations };
 }
