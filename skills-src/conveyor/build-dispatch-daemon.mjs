@@ -39,7 +39,7 @@ import {
 import { runDaemonLoop, startIndependentHeartbeat, realSleep } from './verify-daemon.mjs';
 import { normNum } from '../../scripts/conveyor/queue-store.mjs';
 import {
-  BUILD_DISPATCH_POLICY, planBuildDispatch, normalizeOpenPrs, prDeliversNum,
+  BUILD_DISPATCH_POLICY, planBuildDispatch, normalizeOpenPrs, prDeliversNum, reportOpenItems,
 } from '../../scripts/conveyor/build-dispatch-policy.mjs';
 import {
   acquireBuildDispatchClaim, releaseBuildDispatchClaim, listBuildDispatchClaims,
@@ -394,12 +394,15 @@ function parseFlags(argv) {
   return f;
 }
 
-function policyFrom(flags) {
+/** EXPORTED (#4353) so a test can assert `--max-open-items` flows into the policy the same mechanical way
+ *  `--max-concurrent`/`--max-open-prs` already do, without going through the full CLI/IO shell. */
+export function policyFrom(flags) {
   const n = (v, d) => (Number.isFinite(Number(v)) && Number(v) >= 0 ? Number(v) : d);
   return {
     ...BUILD_DISPATCH_POLICY,
     maxConcurrentBuilds: n(flags['max-concurrent'], BUILD_DISPATCH_POLICY.maxConcurrentBuilds),
     maxOpenPrs: n(flags['max-open-prs'], BUILD_DISPATCH_POLICY.maxOpenPrs),
+    maxOpenItems: n(flags['max-open-items'], BUILD_DISPATCH_POLICY.maxOpenItems),
   };
 }
 
@@ -450,7 +453,7 @@ async function dryRun(flags) {
     at: new Date().toISOString(),
     statusLine: tick.statusLine,
     policy: {
-      maxConcurrentBuilds: policy.maxConcurrentBuilds, maxOpenPrs: policy.maxOpenPrs,
+      maxConcurrentBuilds: policy.maxConcurrentBuilds, maxOpenPrs: policy.maxOpenPrs, maxOpenItems: policy.maxOpenItems,
       // #3383 continuation, live incident 2026-09-28 — `globalFreezeLabels` is what actually freezes every
       // candidate now; the three per-PR `*-stalled` labels only hold a scope-overlapping build (`freezeLabels`
       // still lists all four for anything reading the historical shape, kept alongside, not replaced).
@@ -460,6 +463,9 @@ async function dryRun(flags) {
     freeze: tick.plan.freeze,
     openPrs: normalizeOpenPrs(openPrs).map((p) => `${p.repo}#${p.number}`),
     inFlight: tick.plan.inFlight,
+    // #4353 — {inFlight} ∪ {delivered-by-open-PR}, the cap this card adds. `filling` names which nums fill it
+    // (never just a count) so a full-cap dry-run says WHY, not only THAT.
+    openItems: reportOpenItems(tick.plan.openItems),
     wouldDispatchNow: tick.plan.dispatch.map((x) => x.num),
     wouldRetireClaims: tick.retired,
     dispatchHolds: tick.dispatchHolds, // #4349 — items excluded this tick by a non-PR terminal-outcome cooldown
@@ -472,6 +478,7 @@ async function dryRun(flags) {
   w(`  policy: cap ${policy.maxConcurrentBuilds} builds · GLOBAL freeze if open PRs > ${policy.maxOpenPrs} or any of [${(policy.globalFreezeLabels ?? policy.freezeLabels).join(', ')}] · a per-PR *-stalled label only holds a scope-overlapping build (scope-vs-open-prs)`);
   w(`  kill switch: ${report.killSwitch.engaged ? `ENGAGED (${report.killSwitch.reason})` : 'off'} · landing freeze: ${report.freeze.frozen ? `ON — ${report.freeze.reasons.join('; ')}` : 'off'}`);
   w(`  open PRs: ${report.openPrs.join(', ') || 'none'} · durable in-flight builds (claims/run records): ${report.inFlight.map((f) => `#${f.num} (${f.source})`).join(', ') || 'none'} · tick core counts ${core.building} building`);
+  w(`  open items ${report.openItems.count}/${report.openItems.cap}${report.openItems.filling.length ? ` (${report.openItems.filling.map((n) => `#${n}`).join(', ')})` : ''}`);
   w(`  would dispatch now: ${report.wouldDispatchNow.map((n) => `#${n}`).join(', ') || 'nothing'}`);
   for (const r of rows) {
     const rt = r.route?.error ? `route ? (${r.route.error})` : `marker=${r.route.marker ?? '-'} taskType=${r.route.taskType ?? '-'} routed=${r.route.routed ?? '-'} executed=${r.route.executed ?? '-'}${r.route.refusal ? ` REFUSED: ${r.route.refusal}` : ''}`;
@@ -515,7 +522,7 @@ async function live(flags) {
     tickOnce, sleep: realSleep, isAlive, intervalMs, maxTicks: flags.once ? 1 : Infinity,
     onTick: (r) => {
       if (!r || !r.plan) { console.error(`build-dispatch-daemon: tick skipped (${r?.reason ?? 'self-sync'})`); return; }
-      process.stdout.write(`${JSON.stringify({ at: new Date().toISOString(), status: r.statusLine, freeze: r.plan.freeze, inFlight: r.plan.inFlight.map((f) => f.num), dispatched: r.dispatched, hold: r.plan.hold, dispatchHolds: r.dispatchHolds, failures: r.failures, retired: r.retired })}\n`);
+      process.stdout.write(`${JSON.stringify({ at: new Date().toISOString(), status: r.statusLine, freeze: r.plan.freeze, inFlight: r.plan.inFlight.map((f) => f.num), openItems: reportOpenItems(r.plan.openItems), dispatched: r.dispatched, hold: r.plan.hold, dispatchHolds: r.dispatchHolds, failures: r.failures, retired: r.retired })}\n`);
     },
     onTickError: (e) => console.error(`build-dispatch-daemon: tick failed (non-fatal): ${String(e?.message || e).split('\n')[0]}`),
   });
@@ -528,7 +535,7 @@ async function main(argv) {
   if (flags['dry-run']) return dryRun(flags);
   if (flags.live) return live(flags);
   console.error('usage: build-dispatch-daemon.mjs --dry-run [--json] [--focus=N,M]   (read-only: what it would dispatch now)\n'
-    + '       build-dispatch-daemon.mjs --live [--once] [--self-sync] [--max-concurrent=3] [--max-open-prs=12] [--interval-ms=120000]\n'
+    + '       build-dispatch-daemon.mjs --live [--once] [--self-sync] [--max-concurrent=3] [--max-open-prs=12] [--max-open-items=7] [--interval-ms=120000]\n'
     + `kill switch: ${KILL_SWITCH_ENV}=1 or touch <coordination root>/${KILL_SWITCH_FILENAME}`);
   process.exit(2);
 }
