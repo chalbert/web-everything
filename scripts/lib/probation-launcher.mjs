@@ -1,7 +1,9 @@
 /**
  * @file scripts/lib/probation-launcher.mjs
  * @description THE PURE HALF OF THE PROBATION LAUNCHER (agy-launcher-probation, operator 2026-09-27) — every
- *   decision `we:scripts/operations/probation-heal-run.mjs` makes, as data in, data out. No fs, no spawn, no clock.
+ *   decision `we:scripts/operations/probation-heal-run.mjs` (`ci-heal`) and
+ *   `we:scripts/operations/probation-build-run.mjs` (`doc-fix`, #4291) make, as data in, data out. No fs, no
+ *   spawn, no clock.
  *
  * WHAT IT LAUNCHES. A {@link ./provider-routing.mjs#selectProbationWorker} pick — Codex, Antigravity-Claude or
  * Antigravity-Gemini — through the two synchronous launcher scripts that already exist and already block until
@@ -10,10 +12,18 @@
  * only ever edits files in its lane.
  *
  * THE CHECKS AROUND THE MODEL (deterministic core, thin judgment):
- *   - {@link healDiffWithinEnvelope} — the heal's own diff must fit `PROVEN_TASK_ENVELOPES['ci-heal']`, or it is
- *     not pushed (the router cannot bound a heal up front; this bounds it after the run).
+ *   - {@link healDiffWithinEnvelope} — a launch's own diff must fit its taskType's row in `PROVEN_TASK_ENVELOPES`
+ *     (`'ci-heal'` for a heal, `'doc-fix'` for a doc-fix build, #4291), or it is not pushed (the router cannot
+ *     bound the diff up front; this bounds it after the run).
  *   - {@link parseCheckerVerdict} — a worker with a `checker` (Antigravity-Gemini, #3922) is pushed only when the
  *     checker's first line is `APPROVE`. Anything else — silence, a parse failure, `REJECT` — blocks the push.
+ *
+ * #4291 (doc-fix launcher) ADDS {@link buildDocFixTask} and {@link buildDocFixCommitMessage} beside the ci-heal
+ * pair {@link buildCiHealTask}/{@link buildHealCommitMessage} — same shape, same rules (no commit/push/PR from
+ * the worker, stay in scope, never weaken a test), aimed at BUILDING a backlog item to spec instead of REPAIRING
+ * a red check. Every other helper here (`buildWorkerArgv`, `summarizeNumstat`, `newUntrackedPaths`,
+ * `healDiffWithinEnvelope`, `launchScorecardRow`, `coAuthorTrailerForWorker`) is already generic over taskType
+ * and is reused as-is by both run scripts.
  */
 
 import { PROVEN_TASK_ENVELOPES } from './provider-routing.mjs';
@@ -112,6 +122,107 @@ export function buildCheckerTask({ pr, reason, diff, failingChecks = '' }) {
     '## The repair diff',
     d.length > 20000 ? `${d.slice(0, 20000)}\n…(clipped)` : d,
   ].join('\n');
+}
+
+/**
+ * The task text a worker gets for one doc-fix probation BUILD (#4291). PURE. Mirrors {@link buildCiHealTask}'s
+ * shape (name the surface, state the rules, forbid commit/push/PR, hand over what the worker needs) for a
+ * BUILD rather than a REPAIR: the worker has no brief of its own, so the item's own spec text is the whole task.
+ * @param {{num: string|number, title?: string, spec: string, scope?: string[]}} o
+ * @returns {string}
+ */
+export function buildDocFixTask({ num, title = '', spec, scope = [] }) {
+  if (!num) throw new TypeError('probation-launcher: num is required');
+  if (typeof spec !== 'string' || !spec.trim()) throw new TypeError('probation-launcher: spec is required');
+  return [
+    `# Build backlog item #${num}${title ? `: ${title}` : ''} (doc-fix probation launch)`,
+    '',
+    'This working directory is a fresh lane clone, freshly reset onto the current `main`. Build the item below',
+    'to spec — every `## Done when` clause it states must hold when you are finished.',
+    '',
+    'Rules:',
+    '- This is a `doc-fix` task: touch ONLY documentation/prose files. Do not change source code, tests, or config.',
+    `- Stay inside the item's own scope: ${scope.length ? scope.join(', ') : '(no declared scope — stay inside documentation paths only)'}.`,
+    '- Keep the change small: at most 2 files and about 100 changed lines (the proven `doc-fix` envelope). A bigger',
+    '  change than that is not a doc-fix — stop and say so in your final message rather than exceeding it.',
+    '- Never weaken, skip or delete a test.',
+    '- If the item is not buildable as written (the spec is unclear, contradictory, or already done), change',
+    '  nothing and say so in your final message.',
+    '- Do not commit, push, open a pull request, resolve the backlog item, or touch any label — the launcher',
+    '  that started you does all of those once your change is verified.',
+    '',
+    '## The item\'s own spec',
+    spec.trim(),
+    '',
+  ].join('\n');
+}
+
+/**
+ * The commit message for a probation doc-fix build (#4291). PURE. Mirrors {@link buildHealCommitMessage}: the
+ * trailers name who did the work, so the review and the trial record can tell a probation build from a Claude
+ * one.
+ * @param {{num: string|number, worker: object}} o
+ */
+export function buildDocFixCommitMessage({ num, worker }) {
+  return [
+    `WE #${num}: doc-fix build on probation (${worker.executor}/${worker.model})`,
+    '',
+    `Built by the ${worker.id} probation worker (agy-launcher-probation, #4291); the launcher claimed the item,`,
+    'ran the gate, resolved it, and committed. Full review and a run rating are owed on this change.',
+    '',
+    `Probation-Worker: ${worker.id}`,
+    `Executor: ${worker.executor}`,
+    `Model: ${worker.model}`,
+    coAuthorTrailerForWorker(worker),
+    '',
+  ].join('\n');
+}
+
+/**
+ * Frontmatter keys the SANCTIONED item-lifecycle scripts (`claim`/`resolve`/`prepare-stamp`) are allowed to
+ * write. Anything else changing in the item's frontmatter means something other than that bookkeeping touched
+ * it (#4291 plan review — a doc-fix worker directly tampering with `scope:`/`blockedBy:`/etc., which a
+ * body-only check would miss).
+ *
+ * Ground-truthed against `we:scripts/backlog/frontmatter.mjs#applyTransition` and `we:scripts/backlog.mjs`'s
+ * `prepareStamp`, not guessed: `claim` writes only `status`+`dateStarted`; `resolve` writes `status`+
+ * `dateResolved` and, only for a `kind: decision`, `graduatedTo`/`codifiedIn` (the field IS `codifiedIn` — the
+ * CLI flag that sets it is spelled `--codified-to`, a distinct name for a distinct thing); `release` writes only
+ * `status`; `prepare-stamp` writes `status`+`preparedDate`+`preparedAgainstSha`.
+ */
+export const CLAIM_OWNED_FRONTMATTER_KEYS = Object.freeze([
+  'status', 'dateStarted', 'dateResolved', 'preparedDate', 'preparedAgainstSha', 'graduatedTo', 'codifiedIn',
+]);
+
+/** The `---\n...\n---\n` frontmatter block's own text (no delimiters), or `''` if the file has none. PURE. */
+function frontmatterBlock(raw) {
+  const m = /^---\n([\s\S]*?)\n---\n/.exec(String(raw ?? ''));
+  return m ? m[1] : '';
+}
+
+/**
+ * Did an item's frontmatter change anywhere OTHER than an ALLOWED key's line, between two reads of the same
+ * file? PURE. `true` means something besides the caller's own sanctioned bookkeeping edited the frontmatter —
+ * a worker directly rewriting `scope:`, `blockedBy:`, or any other field.
+ *
+ * `allowedKeys` defaults to the FULL {@link CLAIM_OWNED_FRONTMATTER_KEYS} table, but a caller that only ever
+ * runs a SUBSET of the lifecycle verbs should narrow it to just the keys ITS OWN calls can legitimately
+ * produce (#4291 plan-review finding, round 8): a doc-fix build only ever calls plain `claim`/`resolve` (never
+ * `prepare-stamp`, never `resolve --graduated-to=`/`--codified-to=`), so treating `preparedDate`/
+ * `preparedAgainstSha`/`graduatedTo`/`codifiedIn` as "always fine to change" there would let a worker forge one
+ * of those directly and have it ride into the commit unnoticed — those keys legitimately change only through a
+ * DIFFERENT verb this caller never invokes, so for THIS caller a change to any of them IS tamper.
+ * @param {string} before - the file's raw text before.
+ * @param {string} after - the file's raw text after.
+ * @param {readonly string[]} [allowedKeys]
+ * @returns {boolean}
+ */
+export function frontmatterTamperedBeyondClaim(before, after, allowedKeys = CLAIM_OWNED_FRONTMATTER_KEYS) {
+  const strip = (raw) => frontmatterBlock(raw)
+    .split('\n')
+    .filter((line) => !allowedKeys.some((k) => line.startsWith(`${k}:`)))
+    .join('\n');
+  return strip(before) !== strip(after);
 }
 
 /**

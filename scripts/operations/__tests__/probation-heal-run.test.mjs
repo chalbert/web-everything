@@ -4,13 +4,15 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 import {
-  PROBATION_HEAL_RUN_SCRIPT, probationLaunchDecision, probationLaunchFromEnv, probationWorkerDetachedProvider,
+  PROBATION_BUILD_RUN_SCRIPT, PROBATION_HEAL_RUN_SCRIPT, probationLaunchDecision, probationLaunchFromEnv,
+  probationWorkerDetachedProvider,
 } from '../dispatch-providers/probation-worker.mjs';
 import { routeDispatchProvider } from '../dispatch-lane-io.mjs';
 import { parseArgs, runProbationHeal } from '../probation-heal-run.mjs';
 
 const agyClaude = { id: 'antigravity-claude', provider: 'antigravity', model: 'claude-sonnet-4-6', executor: 'antigravity', launcher: 'scripts/gemini-direct-task.mjs', checker: null, taskType: 'ci-heal' };
 const agyGemini = { ...agyClaude, id: 'antigravity-gemini', model: 'gemini-3.8-flash-high', checker: 'codex' };
+const docFixWorker = { id: 'codex', provider: 'codex', model: 'gpt-6-astra', executor: 'codex', launcher: 'scripts/codex-direct-task.mjs', checker: null, taskType: 'doc-fix' };
 
 describe('probationLaunchFromEnv', () => {
   it('unset → on in production, off under the test runner; an explicit value wins; a typo throws', () => {
@@ -27,9 +29,25 @@ describe('probationLaunchDecision', () => {
   it('launches a WE ci-heal with a worker when on', () => expect(probationLaunchDecision(req, 'on').launch).toBe(true));
   it('never without a worker, for another kind, another repo, or when off', () => {
     expect(probationLaunchDecision({ ...req, probationWorker: null }, 'on').launch).toBe(false);
+    // A `ci-heal`-taskType worker offered under a `build` request is recorded, never launched (#4291) — `build`
+    // launches a `doc-fix` worker only.
     expect(probationLaunchDecision({ ...req, launchKind: 'build' }, 'on').launch).toBe(false);
     expect(probationLaunchDecision({ ...req, repo: 'frontierui' }, 'on').launch).toBe(false);
     expect(probationLaunchDecision(req, 'off').launch).toBe(false);
+  });
+
+  // #4291 — the doc-fix build launcher: `build` + a `doc-fix` worker launches; `build` + any other taskType
+  // (or `ci-heal` + a `doc-fix` worker) does not.
+  const buildReq = { launchKind: 'build', repo: 'we', probationWorker: docFixWorker };
+  it('launches a WE doc-fix build with a doc-fix worker when on', () => expect(probationLaunchDecision(buildReq, 'on').launch).toBe(true));
+  it('never for the wrong taskType, another repo, or when off', () => {
+    expect(probationLaunchDecision({ ...buildReq, probationWorker: agyClaude }, 'on').launch).toBe(false);
+    expect(probationLaunchDecision({ launchKind: 'ci-heal', repo: 'we', probationWorker: docFixWorker }, 'on').launch).toBe(false);
+    expect(probationLaunchDecision({ ...buildReq, repo: 'frontierui' }, 'on').launch).toBe(false);
+    expect(probationLaunchDecision(buildReq, 'off').launch).toBe(false);
+  });
+  it('an unregistered kind is recorded but never launched', () => {
+    expect(probationLaunchDecision({ launchKind: 'fix', repo: 'we', probationWorker: docFixWorker }, 'on').launch).toBe(false);
   });
 });
 
@@ -54,6 +72,43 @@ describe('probationWorkerDetachedProvider', () => {
     for (const bad of [{ sessionSlug: 's', probationWorker: agyClaude }, { pr: 1, probationWorker: agyClaude }, { pr: 1, sessionSlug: 's' }]) {
       expect(() => probationWorkerDetachedProvider(bad, { spawnDetached })).toThrow();
     }
+    expect(spawnDetached).not.toHaveBeenCalled();
+  });
+
+  // #4291 — the `build` kind is ITEM-keyed (`--num=`), never PR-keyed, and starts the doc-fix build run script.
+  it('a `build` launch spawns the doc-fix run script, keyed to the item, with an optional attempt tag', () => {
+    const spawned = [];
+    const reportExecutor = vi.fn();
+    const handle = probationWorkerDetachedProvider(
+      { launchKind: 'build', num: '4291', sessionSlug: 'probation-4291', attemptTag: 'b', lane: 22, scope: ['we:a.mjs'], probationWorker: docFixWorker, reportExecutor, cwd: '/scratch' },
+      { spawnDetached: (argv, o) => { spawned.push({ argv, o }); return { pid: 555 }; }, logPathFor: () => '/dev/null' },
+    );
+    expect(handle).toBe('pid:555');
+    expect(reportExecutor).toHaveBeenCalledWith('codex');
+    const { argv, o } = spawned[0];
+    expect(argv[0]).toBe(PROBATION_BUILD_RUN_SCRIPT);
+    expect(argv).toEqual(expect.arrayContaining(['--num=4291', '--session=probation-4291', '--attempt=b', '--lane=22', '--scope=we:a.mjs']));
+    expect(argv.some((a) => a.startsWith('--pr=') || a.startsWith('--reason='))).toBe(false);
+    expect(JSON.parse(argv.find((a) => a.startsWith('--worker=')).slice(9))).toEqual(docFixWorker);
+    expect(o.cwd).toBe('/scratch');
+  });
+  it('a `build` launch refuses before any process with no item number', () => {
+    const spawnDetached = vi.fn();
+    expect(() => probationWorkerDetachedProvider(
+      { launchKind: 'build', sessionSlug: 'probation-4291', probationWorker: docFixWorker },
+      { spawnDetached },
+    )).toThrow(/no item number/);
+    expect(spawnDetached).not.toHaveBeenCalled();
+  });
+  // #4291 plan review round 2 — closes the coverage gap the standards-conformance/claim-accuracy lenses named:
+  // a THIRD registered kind must refuse explicitly, never silently fall through to the PR-keyed `ci-heal` argv
+  // shape (the provider itself, not only `probationLaunchDecision`, must reject an unknown kind).
+  it('an unrecognised kind refuses before any process — never silently falls through to the ci-heal (PR-keyed) argv shape', () => {
+    const spawnDetached = vi.fn();
+    expect(() => probationWorkerDetachedProvider(
+      { launchKind: 'fix', sessionSlug: 'probation-4291', probationWorker: docFixWorker },
+      { spawnDetached },
+    )).toThrow(/no argv shape for it/);
     expect(spawnDetached).not.toHaveBeenCalled();
   });
 });
