@@ -3,6 +3,8 @@ bornAs: xtpvwlv
 kind: story
 size: 2
 priority: high
+tier: pinned
+rank: y
 status: open
 scope: ["we:scripts/lib/dispatch-contracts.mjs", "we:scripts/lib/__tests__/dispatch-contracts-trial.test.mjs", "we:scripts/lib/__tests__/judge-spawn.test.mjs"]
 dateOpened: "2026-09-28"
