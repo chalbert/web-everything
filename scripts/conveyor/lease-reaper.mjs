@@ -388,14 +388,37 @@ function defaultGitStatusPorcelain(dir) {
  * (`fetchPrStatesForRepo`) specifically to avoid a per-candidate network call, and a per-candidate `git fetch`
  * would reintroduce exactly that cost for a race that self-heals within one quiet window either way (this pool
  * fetches routinely via `acquire`/`refresh`/`provision`, all independent of this reap pass).
+ *
+ * #4337 — THE CHERRY FALLBACK'S OWN BLIND SPOT: `git cherry` is a per-commit patch-id comparison, and a merge
+ * commit simply never surfaces in its output as a distinguishable patch (neither `+` nor `-`) — so a HEAD whose
+ * *non-merge* commits are all independently patch-equivalent upstream, but whose HEAD is ALSO a merge commit
+ * carrying unique conflict-resolution content `sha` never received, reads as empty/all-`-` — falsely
+ * "contained" (CONFIRMED live on PR #2835). An empty/all-`-` cherry read is therefore necessary but not
+ * sufficient: before trusting it, this function also vetoes on any merge commit reachable from HEAD but NOT
+ * from `sha` (`git rev-list --merges`, bounded to that range) — existence alone is disqualifying, since a
+ * merge's unique content can't be represented as a `cherry`-comparable patch at all. This veto can only ever
+ * turn a would-be `true` into `false`/`null`, never the reverse: it runs strictly AFTER cherry already read
+ * "contained", and a read failure there (an unresolvable `sha`, a timeout) is — per this function's own
+ * contract — `null` (unknown), never a guess in either direction.
+ *
+ * DELIBERATE, DISCLOSED OVER-REJECTION (round-1 convergence, correctness finding): this vetoes on a merge
+ * commit's mere EXISTENCE in the unaccounted range, not on detecting whether that specific merge carries unique
+ * content — a routine, content-free `git merge main` a lane runs purely to stay fresh trips the SAME veto as a
+ * real conflict-resolution merge, even though it adds nothing of its own. Distinguishing the two would mean
+ * trusting some per-commit "this merge's diff is trivial" heuristic — exactly the kind of inference that let
+ * the original bug through `cherry` in the first place. Given the choice, this stays on the safe side: a false
+ * "not contained" costs a delayed reclaim (self-heals: the TTL backstop and every other reap axis still apply);
+ * a false "contained" costs real, lost work. See the `#4337 — a routine, CONTENT-FREE merge …` fixture in
+ * `__tests__/lease-reaper.test.mjs` for this exact tradeoff pinned as an intentional test, not an unnoticed
+ * side effect.
  */
-function defaultGitIsAncestor(dir, sha) {
+export function defaultGitIsAncestor(dir, sha, { exec = execFileSync } = {}) {
   try {
     // #xkk4lv7 — round-5 convergence (security finding): `sha` is DATA (a live `gh pr list` read's
     // `mergeCommit.oid`), never a caller-typed literal like `'HEAD'` — the trailing `--` is git's own
     // universal options/revisions separator, so a `sha` value that happened to start with `-` (a malformed
     // API response, or any future caller feeding this untrusted input) can never be misread as a flag.
-    execFileSync('git', ['merge-base', '--is-ancestor', '--', 'HEAD', sha], {
+    exec('git', ['merge-base', '--is-ancestor', '--', 'HEAD', sha], {
       cwd: dir,
       stdio: ['ignore', 'ignore', 'ignore'],
       timeout: resolveChildTimeoutMs(),
@@ -409,8 +432,9 @@ function defaultGitIsAncestor(dir, sha) {
     // that `sha`'s own history lacks, prefixed `-` when an equivalent patch already exists in `sha`'s history,
     // `+` when it does not. Empty (or all `-`) means every one of HEAD's own commits is already reflected in
     // the merge, patch-for-patch — "already landed" even with zero shared ancestry.
+    let cherryContained;
     try {
-      const out = execFileSync('git', ['cherry', '--', sha, 'HEAD'], {
+      const out = exec('git', ['cherry', '--', sha, 'HEAD'], {
         cwd: dir,
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -418,7 +442,7 @@ function defaultGitIsAncestor(dir, sha) {
         killSignal: 'SIGKILL',
       });
       const lines = out.split('\n').filter(Boolean);
-      return lines.length === 0 || lines.every((l) => l.startsWith('-'));
+      cherryContained = lines.length === 0 || lines.every((l) => l.startsWith('-'));
     } catch {
       // #xkk4lv7 — round-2 convergence (standards-conformance finding): this function's own docblock promises
       // `null` (unknown, never guess) for an inconclusive read — `cherry` itself throwing (a timeout, an
@@ -427,6 +451,29 @@ function defaultGitIsAncestor(dir, sha) {
       // both mean "not reaped") but wrong per the documented three-way contract, and a future caller that
       // DOES distinguish "proven not contained" from "unknown" deserves the honest answer.
       return null;
+    }
+    if (!cherryContained) return false; // cherry itself already proved a genuine, unmatched `+` commit
+    // #4337 — cherry read "contained", but that alone is not proof: veto if HEAD's history holds a merge
+    // commit `sha`'s history lacks. `--max-count=1` — existence is all that matters, not the full list.
+    // `--end-of-options` (never a bare `--` ahead of the range) keeps this a REVISION range, not a pathspec —
+    // `rev-list`, unlike `merge-base --is-ancestor`/`cherry` above, treats anything after a bare `--` as a
+    // path, so this exact separator choice is load-bearing, not cosmetic; the trailing `--` with nothing after
+    // it is the explicit, standard "no path filter" spelling.
+    try {
+      const mergeOut = exec(
+        'git',
+        ['rev-list', '--merges', '--max-count=1', '--end-of-options', `${sha}..HEAD`, '--'],
+        {
+          cwd: dir,
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'pipe'],
+          timeout: resolveChildTimeoutMs(),
+          killSignal: 'SIGKILL',
+        },
+      );
+      return mergeOut.trim().length === 0; // a hit is an unaccounted-for merge commit — never "contained"
+    } catch {
+      return null; // inconclusive range read (unresolvable sha, timeout) — never guess, same contract as above
     }
   }
 }

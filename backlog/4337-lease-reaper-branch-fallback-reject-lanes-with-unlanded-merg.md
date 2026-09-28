@@ -4,9 +4,13 @@ kind: story
 size: 5
 priority: high
 parent: "4075"
-status: open
+status: resolved
 scope: ["we:scripts/conveyor/lease-reaper.mjs", "we:scripts/conveyor/__tests__/lease-reaper.test.mjs"]
 dateOpened: "2026-09-28"
+dateStarted: "2026-09-28"
+dateResolved: "2026-09-28"
+preparedDate: "2026-09-28"
+preparedAgainstSha: "27256138a30d5dae9a9153f21a9dbbe8b1825878"
 tags: []
 ---
 
