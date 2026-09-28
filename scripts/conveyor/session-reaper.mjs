@@ -120,8 +120,8 @@ import { defaultListAgents, normalizeHandle, prListTimeoutMs, dispatchScratchRoo
 import { resolvePidAlive, scanPsOutput, defaultIsPidAlive } from './driver-watchdog.mjs';
 import { sleepSyncMs } from '../readiness/drain-lock.mjs';
 import {
-  applyCompletionUpdate, completionPath, deleteCompletion, listCompletionSessions, newCompletionRecord, resolveCompletionsDir,
-  tryReadCompletion, writeCompletion,
+  applyCompletionUpdate, completionPath, deleteCompletion, isForeignCompletionSessionId, listCompletionSessions, newCompletionRecord,
+  resolveCompletionsDir, tryReadCompletion, writeCompletion,
 } from '../operations/completion-store.mjs';
 import {
   deleteDeliveryReport, deliveryReportPath, listDeliveryReportSessions, resolveDeliveryReportsDir,
@@ -135,6 +135,10 @@ import {
 } from './hung-session.mjs';
 import { resolveSessionTranscript } from '../operations/agent-usage-report.mjs';
 import { tailLines, summarizeEntry } from '../../skills-src/inspect-agent-health/agent-health.mjs';
+// #4306 — the SAME `startedAt` parser `reconcile-core.mjs#markSelfReportedDone` uses, reused (never re-derived)
+// so "which generation started later" means the same thing in both files. No cycle: `reconcile-core.mjs` does
+// not import this file.
+import { startedAtMs } from './reconcile-core.mjs';
 // #4149 (epic #3383/#4075) — this file no longer reads `INFRA_RETRY_COOLOFF_MS` itself: `makeCompletionResolver`
 // now stops a `blocked-on-infra` session's process as soon as its record says `done`, regardless of the cool-off
 // (see that function's own doc). `reconcile-core.mjs#markSelfReportedDone`/`#assessLiveness` still enforce the
@@ -292,9 +296,37 @@ const BACKSTOP_COMPLETION_KINDS = new Set(['review', 'fix', 'inspect', 'ci-heal'
  * self-report or an earlier backstop write — is left exactly alone; a backstop write only ever fills a GAP, it
  * never clobbers a fact. A session whose name matches no known PR-kind grammar, or whose kind has no
  * completion-record schema at all ({@link BACKSTOP_COMPLETION_KINDS}), is left alone too — never a guess.
- * @param {{name?:string}|null|undefined} session
- * @param {{status?:string}|null} existingRecord - {@link ../operations/completion-store.mjs#tryReadCompletion}'s
- *   own return shape, or `null` when nothing is on disk yet.
+ *
+ * #4306 (epic #3383/#4075, BLOCKER fix-2821, live 2026-09-27) — GUARD 1: "a completion record only ever speaks
+ * for the session that wrote it." A session name (`fix-<pr>`/`review-<pr>`/…) is SHARED across every dispatch
+ * generation for that PR — a fixer re-dispatched after a bounce writes to the SAME file the previous fixer did.
+ * Two live generations under one name (a finished-but-not-yet-reaped OLD fixer A, and a freshly dispatched NEW
+ * fixer B) means a backstop write planned FOR A can land on B's own `started` record instead — this reaper does
+ * not itself know which generation `existingRecord` belongs to unless told. Returns `null` (writes nothing, the
+ * reap itself still proceeds — see this function's own callers) when ANY of these holds:
+ *   (a) `existingRecord.sessionId` is set and differs from the reaped `session`'s own `sessionId` — a foreign
+ *       record; whoever wrote it is not this session, so this session never gets to overwrite it as `done`.
+ *   (b) `newerSameNameListed` — the reaper's OWN listing (it already reads `claude agents --json --all`) shows
+ *       ANOTHER same-name session that started after this one: a newer generation already owns the name, even
+ *       before its own `started` report has necessarily landed (closes the ~26s listing-lag window).
+ *   (c) `existingRecord.status === 'started'` and its `startedAt` is LATER than `lastActivityMs` — the reaped
+ *       session's own last confirmed transcript activity (the SAME fact the idle-finished axis already reads,
+ *       injected here rather than re-derived). A session cannot have written a record after it went quiet, so a
+ *       `started` record timestamped after that is provably not its own. A PLAIN comparison against the
+ *       session's LISTING `startedAt` is deliberately NOT used instead: a session's own genuine `started` report
+ *       always lands a few seconds after its process starts, which would wrongly skip ITS OWN legitimate
+ *       backstop (independent Codex review finding 1, `we:backlog/4306-*.md`) — `lastActivityMs` (which trails
+ *       the session's actual work, not merely its process start) does not have that false-positive.
+ * (a) and (c) can never fire when `existingRecord` is `null` (nothing on disk to be foreign, or stale relative
+ * to) — those two only ever narrow an EXISTING-record backstop. (b) is the one exception: it is checked
+ * UNCONDITIONALLY, independent of `existingRecord`, precisely because "a newer generation already owns the
+ * name" is true whether or not anything has been written under it yet — a fresh mint can be blocked too
+ * (independent panel review finding, `we:backlog/4306-*.md`; this line previously claimed otherwise).
+ *
+ * @param {{name?:string, sessionId?:string|null}|null|undefined} session
+ * @param {{status?:string, sessionId?:string|null, startedAt?:string}|null} existingRecord - {@link
+ *   ../operations/completion-store.mjs#tryReadCompletion}'s own return shape, or `null` when nothing is on disk
+ *   yet.
  * @param {() => string} [now] - injectable ISO-8601 clock (mirrors every other pure-ish constructor in this
  *   codebase's completion-record family).
  * @param {boolean} [blockedOnInfra] - live incident (PR #2647/#2625, 2026-09-25): a session can crash AFTER
@@ -320,17 +352,36 @@ const BACKSTOP_COMPLETION_KINDS = new Set(['review', 'fix', 'inspect', 'ci-heal'
  *   in and retries make sense again), plus {@link CLAUDE_AUTH_OUTCOME_LABEL} so a reader can tell WHICH kind of
  *   infra outage this was. Never overrides `stalled` (see above); outranks a bare `blockedOnInfra` when both are
  *   somehow true, since this axis is a literal transcript-content match, not a heuristic phrase scan.
+ * @param {{newerSameNameListed?:boolean, lastActivityMs?:number|null}} [o] - #4306 Guard-1 inputs, see (b)/(c)
+ *   above. Both default to the pre-#4306 behavior (neither condition ever fires) so every existing caller that
+ *   does not pass this option is unaffected.
  * @returns {object|null} the completion record to write, or `null` when nothing is owed.
  */
-export function planBackstopCompletion(session, existingRecord, now = () => new Date().toISOString(), blockedOnInfra = false, stalled = false, authExpired = false) {
+export function planBackstopCompletion(session, existingRecord, now = () => new Date().toISOString(), blockedOnInfra = false, stalled = false, authExpired = false, { newerSameNameListed = false, lastActivityMs = null } = {}) {
   if (existingRecord && existingRecord.status === 'done') return null; // a real terminal record — never touch it
   const parsed = parseSessionSlug(session?.name);
   if (!parsed || parsed.itemKind) return null; // no grammar match, or an item-kind session (conveyor-*/prepare-*
   //                                               / prepare-decision-*) — those never carry a completion record.
   if (!BACKSTOP_COMPLETION_KINDS.has(parsed.kind)) return null; // e.g. `ci-heal` — no completion-record kind exists
+  // #4306 Guard 1 — see this function's own doc above for (a)/(b)/(c).
+  if (newerSameNameListed) return null; // (b) — independent of whether a record exists yet
+  if (existingRecord) {
+    // #4306 review finding (correctness) — sourced from the ONE shared predicate every reader/writer of a
+    // completion record's `sessionId` binds through now (`we:scripts/operations/completion-record.mjs
+    // #isForeignCompletionSessionId`), so this guard can never silently diverge from `makeCompletionResolver`'s
+    // own (below) or `reconcile-core.mjs#markSelfReportedDone`'s.
+    if (isForeignCompletionSessionId(session?.sessionId, existingRecord.sessionId)) return null; // (a)
+    if (existingRecord.status === 'started') {
+      const recStartedMs = Date.parse(existingRecord.startedAt ?? '');
+      if (Number.isFinite(recStartedMs) && Number.isFinite(lastActivityMs) && recStartedMs > lastActivityMs) return null; // (c)
+    }
+  }
   const base = existingRecord ?? newCompletionRecord({ session: session.name, kind: parsed.kind, pr: parsed.id, now });
   const outcome = stalled ? STALLED_OUTCOME : ((authExpired || blockedOnInfra) ? BLOCKED_ON_INFRA_OUTCOME : UNREPORTED_EXIT_OUTCOME);
-  const patch = { status: 'done', outcome };
+  // #4306 Guard 2 — the backstop stamps the REAPED session's own sessionId, so downstream readers
+  // (`reconcile-core.mjs#markSelfReportedDone`, this file's own `makeCompletionResolver`, `session-verdicts.mjs`)
+  // can tell this record apart from a future generation's, the same way a genuine self-report already would.
+  const patch = { status: 'done', outcome, sessionId: session?.sessionId ?? existingRecord?.sessionId ?? null };
   if (!stalled && authExpired) patch.label = CLAUDE_AUTH_OUTCOME_LABEL;
   return applyCompletionUpdate(base, patch, now);
 }
@@ -416,6 +467,54 @@ export function transcriptShowsIntendedBlockedOnInfra(session, {
 }
 
 /**
+ * we:scripts/conveyor/session-reaper.mjs#resolveLastActivityMs — #4306 Guard-1(c)'s own IO: the reaped
+ * session's own last CONFIRMED transcript activity, in epoch ms, or `null` when it cannot be determined
+ * (no `cwd`/`sessionId`, no transcript found, an unreadable file — never a guess). Reuses the exact same
+ * tail-read + newest-entry-timestamp shape `hung-session.mjs#readIdleFinishedInfo`/`readHungInfo` already use
+ * (falling back to the transcript file's own mtime when no entry carries a parseable `ts`, same as those two),
+ * kept local here (rather than a THIRD near-identical copy of the same dozen lines) since `planBackstopCompletion`
+ * needs the raw milliseconds, not a threshold-relative verdict — those functions only ever return the latter.
+ * @param {{cwd?:string, sessionId?:string}|null|undefined} session
+ * @returns {number|null}
+ */
+export function resolveLastActivityMs(session, {
+  resolveTranscript = resolveSessionTranscript,
+  tailLinesFn = tailLines,
+  summarizeEntryFn = summarizeEntry,
+  statFn = statSync,
+} = {}) {
+  const cwd = session?.cwd, sessionId = session?.sessionId;
+  if (!cwd || !sessionId) return null;
+  let file;
+  try {
+    file = resolveTranscript({ session: String(sessionId), cwd: String(cwd) });
+  } catch {
+    return null; // no transcript found — never guess
+  }
+  let lines;
+  try {
+    ({ lines } = tailLinesFn(file, BLOCKED_ON_INFRA_TAIL_LINES, BLOCKED_ON_INFRA_MAX_BYTES));
+  } catch {
+    return null; // unreadable transcript — never guess
+  }
+  let lastActivityMs = null;
+  for (const raw of lines) {
+    let entry;
+    try {
+      entry = summarizeEntryFn(raw, BLOCKED_ON_INFRA_FIELD_MAX);
+    } catch {
+      continue; // one unparseable line never aborts the scan
+    }
+    const t = Date.parse(entry?.ts ?? '');
+    if (Number.isFinite(t) && (lastActivityMs === null || t > lastActivityMs)) lastActivityMs = t;
+  }
+  if (lastActivityMs === null) {
+    try { return statFn(file).mtimeMs; } catch { return null; }
+  }
+  return lastActivityMs;
+}
+
+/**
  * {@link classifySessionReap}'s verdict, UPGRADED to `reap:true` when the base verdict is `not-terminal` AND
  * one of THREE independent axes confirms the session is actually done, tried in this order:
  *
@@ -481,7 +580,7 @@ export function transcriptShowsIntendedBlockedOnInfra(session, {
  * @param {{
  *   allowedCwd?: string,
  *   neverReapWorking?: boolean,
- *   completionFor?: ((name:string) => ({done:boolean}|null))|null,
+ *   completionFor?: ((nameOrRow:string|{name:string, sessionId?:string|null}) => ({done:boolean}|null))|null,
  *   idleThresholdMs?: number,
  *   now?: number,
  *   hungFor?: ((session:object) => ({hung:boolean, reason?:string}|null))|null,
@@ -595,8 +694,11 @@ export function classifySessionReapWithGroundTruth(session, groundTruthFor, opts
   if (neverReapWorking && session?.state === 'working') return base; // strictly-stricter mode — see doc above
 
   // Axis 1 — the session's own completion record (see doc above for why this is tried first).
+  // #4306 — passes the ROW (never just the bare name) so a real `completionFor` (`makeCompletionResolver`) can
+  // bind a `sessionId`-carrying record to THIS session and refuse to speak for a same-name foreign one; a mock
+  // `completionFor` in an existing test that ignores its argument is unaffected either way.
   if (typeof completionFor === 'function') {
-    const record = completionFor(session?.name);
+    const record = completionFor(session);
     if (record && record.done === true) return { reap: true, reason: 'completion-record-done' };
   }
 
@@ -636,7 +738,7 @@ export function classifySessionReapWithGroundTruth(session, groundTruthFor, opts
  *   groundTruthFor?: ((target:{kind:'item'|'pr', id:string}) => ({resolved:boolean, evidence?:string}|null))|null,
  *   allowedCwd?: string,
  *   neverReapWorking?: boolean,
- *   completionFor?: ((name:string) => ({done:boolean}|null))|null,
+ *   completionFor?: ((nameOrRow:string|{name:string, sessionId?:string|null}) => ({done:boolean}|null))|null,
  *   idleThresholdMs?: number,
  *   now?: number,
  *   hungFor?: ((session:object) => ({hung:boolean, reason?:string}|null))|null,
@@ -810,15 +912,32 @@ export function makeGroundTruthResolver({
  * that window elapses — via `assessLiveness`'s own `awaitingInfraCooloff` flag (see that file), which now keys
  * the cool-off off the RECORD, never off whether a process happens to still be listed. Cool-offs and retries key
  * off the record; a live process is never required to enforce one.
+ * #4306 (epic #3383/#4075) — GUARD 2, the reader half of "a completion record only ever speaks for the
+ * session that wrote it." `completionFor` now also accepts a ROW `{name, sessionId, startedAt}` in place of a
+ * bare `name` string — a STRING keeps this resolver's ENTIRE pre-#4306 behavior byte-identical (every caller
+ * that only ever passes a name, e.g. a hand-authored test, is unaffected); a ROW additionally BINDS the answer
+ * to that row's own `sessionId`: a record whose `sessionId` is set and does not match the row's never answers
+ * `done: true`, however its `status` reads — a foreign record never speaks for this session, and is NEVER
+ * silently treated as a legacy (`sessionId: null`) one just because the mismatch check didn't fire. A record
+ * with no `sessionId` (a genuinely legacy record, predating this card, or written by a caller with no session
+ * identity — `we:scripts/operations/review-job.mjs`) keeps today's plain `status === 'done'` rule unchanged.
  * @param {{dir?:string}} [io]
- * @returns {(name:string) => ({done:boolean}|null)}
+ * @returns {(nameOrRow:string|{name:string, sessionId?:string|null}) => ({done:boolean}|null)}
  */
 export function makeCompletionResolver({ dir } = {}) {
-  return function completionFor(name) {
+  return function completionFor(nameOrRow) {
+    const isRow = nameOrRow !== null && typeof nameOrRow === 'object';
+    const name = isRow ? nameOrRow.name : nameOrRow;
     if (typeof name !== 'string' || !name) return null;
     try {
       const record = tryReadCompletion(name, dir);
       if (!record) return null;
+      // #4306 review finding (correctness) — the row having no `sessionId` of its own is NOT an excuse to
+      // accept a record that names someone else; sourced from the same shared predicate `planBackstopCompletion`
+      // (above) and `reconcile-core.mjs#markSelfReportedDone` bind through, so all three can never diverge.
+      if (isRow && isForeignCompletionSessionId(nameOrRow.sessionId, record.sessionId)) {
+        return { done: false }; // foreign record — never speaks for this row's session, never downgraded to legacy
+      }
       return { done: record.status === 'done' };
     } catch {
       return null; // invalid slug / unreadable record — unknown, never reap on an unreadable signal
@@ -2007,7 +2126,7 @@ export function makeReapedLedger({
  * @param {{
  *   listAgents?: () => unknown[],
  *   groundTruthFor?: ((target:object) => object|null)|null,
- *   completionFor?: ((name:string) => object|null)|null,
+ *   completionFor?: ((nameOrRow:string|{name:string, sessionId?:string|null}) => object|null)|null,
  *   allowedCwd?: string,
  *   neverReapWorking?: boolean,
  *   idleThresholdMs?: number,
@@ -2187,6 +2306,7 @@ export function runSessionReaperPass({
     // {@link planBackstopCompletion}'s own doc. A read/parse failure (corrupt record, invalid slug) is treated
     // exactly like every other resolver in this file: unknown, so skip the backstop this tick rather than guess.
     let backstopRecord = null;
+    let backstopExpectPrior = null;
     if (backstopCompletion) {
       try {
         // #4090 — a no-outcome reap is THIS reaper's own definite verdict (see STALLED_OUTCOME's own doc for
@@ -2202,7 +2322,28 @@ export function runSessionReaperPass({
         if (!stalled && !authExpired && typeof blockedOnInfraFor === 'function') {
           try { blockedOnInfra = blockedOnInfraFor(session) === true; } catch { blockedOnInfra = false; }
         }
-        backstopRecord = planBackstopCompletion(session, readCompletionRecord(session?.name), undefined, blockedOnInfra, stalled, authExpired);
+        // #4306 Guard 1(b) — does THIS tick's own listing already show a DIFFERENT same-name session that
+        // started after this one? A newer generation owns the name even before its own `started` report has
+        // necessarily landed (the ~26s listing-lag window `fix-dispatch-claim.mjs`'s own header documents).
+        // Compared by `id` (never `sessionId` — see this file's own "WHY `id`, NOT `sessionId`" header section)
+        // so two rows for the SAME real session are never mistaken for two generations.
+        const thisStartedMs = startedAtMs(session?.startedAt);
+        const newerSameNameListed = (Array.isArray(sessions) ? sessions : []).some((other) => (
+          other && other !== session && other.name === session.name
+          && normalizeHandle(other.id) !== normalizeHandle(session.id)
+          && Number.isFinite(thisStartedMs) && startedAtMs(other?.startedAt) > thisStartedMs
+        ));
+        // #4306 Guard 1(c) — the reaped session's own last CONFIRMED transcript activity, never its listing
+        // `startedAt` (see {@link planBackstopCompletion}'s own doc for why a plain start-time comparison is
+        // wrong here). Best-effort: `null` (unknown) never blocks the backstop on its own — only a RESOLVABLE
+        // later timestamp does.
+        let lastActivityMs = null;
+        try { lastActivityMs = resolveLastActivityMs(session); } catch { lastActivityMs = null; }
+        backstopExpectPrior = readCompletionRecord(session?.name);
+        backstopRecord = planBackstopCompletion(
+          session, backstopExpectPrior, undefined, blockedOnInfra, stalled, authExpired,
+          { newerSameNameListed, lastActivityMs },
+        );
       } catch { backstopRecord = null; }
     }
     // `id` (the SHORT form), never `sessionId` (the full UUID `claude stop` does not match on) — see the file
@@ -2230,9 +2371,17 @@ export function runSessionReaperPass({
     }
     if (backstopRecord) {
       try {
-        writeCompletionRecord(backstopRecord);
-        backstopWritten++;
-        logFn(`  ⚑ wrote backstop completion record for ${session.name} (outcome: ${backstopRecord.outcome}) — no self-report was ever recorded before this reaper concluded it was done (${reason})`);
+        // #4306 — `expectPrior` (the SAME record `planBackstopCompletion` planned against) makes this write
+        // CONDITIONAL: `writeCompletion` re-checks it under the per-name lock immediately before writing, so a
+        // `started` report that lands between our read (above) and this write wins — the on-disk record no
+        // longer matches what this plan assumed, and nothing is written over it.
+        const writeResult = writeCompletionRecord(backstopRecord, undefined, { expectPrior: backstopExpectPrior });
+        if (writeResult && typeof writeResult === 'object' && writeResult.written === false) {
+          logFn(`  ⚑ skipped backstop completion record for ${session.name} — the on-disk record changed since this reaper planned the write (${writeResult.reason}); a fresher report already owns it`);
+        } else {
+          backstopWritten++;
+          logFn(`  ⚑ wrote backstop completion record for ${session.name} (outcome: ${backstopRecord.outcome}) — no self-report was ever recorded before this reaper concluded it was done (${reason})`);
+        }
       } catch (e) {
         logFn(`  ⚠ ${session.name}: failed to write backstop completion record: ${String(e?.message || e).split('\n')[0]}`);
       }

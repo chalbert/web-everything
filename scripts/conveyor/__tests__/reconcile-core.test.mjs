@@ -2407,6 +2407,42 @@ describe('markSelfReportedDone + assessLiveness — self-reported completion (xp
   });
 });
 
+// #4306 (epic #3383/#4075, BLOCKER fix-2821) — GUARD 2: "a completion record only ever speaks for the session
+// that wrote it." Live 2026-09-27: two fix-2821 fixers (A finished, B still live) shared one completion-record
+// name; the reaper's backstop for A clobbered B's own `started` record with a `done` A never wrote. This is the
+// READER half of the fix — `markSelfReportedDone` must never apply a FOREIGN session's record to a different,
+// still-live row.
+describe('markSelfReportedDone Guard-2 sessionId binding (#4306) — a foreign record never unbinds a live session', () => {
+  const T0 = Date.parse('2026-09-27T20:53:27Z');
+  const listedB = { name: 'review-2513', state: 'blocked', status: 'idle', startedAt: T0, pid: 9999, sessionId: 'B' };
+
+  it('a record whose sessionId is FOREIGN to the row never marks it self-reported-done, however its status/updatedAt read', () => {
+    const foreignDone = { status: 'done', outcome: 'unreported-exit', sessionId: 'A', updatedAt: '2026-09-27T21:30:00Z' };
+    const [a] = markSelfReportedDone([listedB], () => foreignDone, Date.parse('2026-09-27T22:00:00Z'));
+    expect(a).toBe(listedB); // untouched — same "left exactly alone" contract as no-record/not-done above
+  });
+
+  it('a record whose sessionId matches the row still marks it done — unchanged from before this card', () => {
+    const ownDone = { status: 'done', outcome: 'accepted', sessionId: 'B', updatedAt: '2026-09-27T21:30:00Z' };
+    const [a] = markSelfReportedDone([listedB], () => ownDone, Date.parse('2026-09-27T22:00:00Z'));
+    expect(a.selfReportedDone).toBe(true);
+  });
+
+  it('a legacy record (sessionId null) keeps today\'s rule unchanged, even for a row that DOES carry a sessionId', () => {
+    const legacyDone = { status: 'done', outcome: 'accepted', sessionId: null, updatedAt: '2026-09-27T21:30:00Z' };
+    const [a] = markSelfReportedDone([listedB], () => legacyDone, Date.parse('2026-09-27T22:00:00Z'));
+    expect(a.selfReportedDone).toBe(true);
+  });
+
+  it('end to end: a PR bound to a still-live session B stays refused `live-process` even though a FOREIGN done record exists under the shared name — planReconcile dispatches nothing, the exact two-live-fixers incident this card closes', () => {
+    const pr = pr1563({ number: 2513, labels: lbl('review:pending'), comments: [] });
+    const foreignDone = { status: 'done', outcome: 'unreported-exit', sessionId: 'A', updatedAt: '2026-09-27T21:30:00Z' };
+    const agents = markSelfReportedDone([listedB], () => foreignDone, Date.parse('2026-09-27T22:00:00Z'));
+    const plan = planReconcile({ prs: [pr], agents, durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toHaveLength(0);
+  });
+});
+
 // ── #3383 continuation — a session whose OWN transcript went stale is finished too, self-report or not ───────
 describe('markHungSessions + assessLiveness — hung-transcript detection (epic #3383 continuation, live 2026-09-24)', () => {
   const T0 = Date.parse('2026-09-24T18:40:37.475Z'); // review-2599's real startedAt/updatedAt, measured live.

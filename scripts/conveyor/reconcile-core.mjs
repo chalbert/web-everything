@@ -102,6 +102,7 @@
  */
 import { classifyPr } from '../progress-board.mjs';
 import { reduceCheckState } from '../operations/pr-status.mjs';
+import { isForeignCompletionSessionId } from '../operations/completion-record.mjs';
 import { NEGOTIATION_ROUND_CAP } from '../lib/jury-core.mjs';
 import { countRearmComments, REARM_COMMENT_MARKER } from './rearm-review.mjs';
 // #3383 — see this module's own REFUSAL 3 note below, and `advisory-round-count.mjs`'s header for the
@@ -632,8 +633,14 @@ export const LIVE_SESSION_OVERRUN_MS = 90 * 60 * 1000;
  * finished, available for redispatch", REGARDLESS of whether the listing's own `state` already reads `'stopped'`
  * (which it now typically will, immediately, rather than staying `blocked`/`working` for the cool-off's
  * duration).
+ * #4306 (epic #3383/#4075, BLOCKER fix-2821) — "a completion record only ever speaks for the session that
+ * wrote it": when `rec.sessionId` is set and differs from this row's OWN `a.sessionId`, the record is a
+ * DIFFERENT generation's (a still-live one, in the incident that named this card) — never treated as this
+ * row's completion, however its `status`/`updatedAt` read, and NEVER downgraded to the legacy (no-`sessionId`)
+ * rule just because the mismatch check ran. A record with no `sessionId` (predating this card, or written by a
+ * caller with no session identity, e.g. `we:scripts/operations/review-job.mjs`) keeps today's rule unchanged.
  * @param {Array<object>} agents - the `claude agents --json` rows
- * @param {(name:string)=>({status?:string, outcome?:string, updatedAt?:string}|null)} completionFor
+ * @param {(name:string)=>({status?:string, outcome?:string, updatedAt?:string, sessionId?:string|null}|null)} completionFor
  * @param {number} nowMs
  * @returns {Array<object>} the same rows; finished ones gain `selfReportedDone: true` and `selfReportedOutcome`;
  *   a row still inside its own `blocked-on-infra` cool-off gains `awaitingInfraCooloff: true` instead
@@ -645,6 +652,12 @@ export function markSelfReportedDone(agents, completionFor, nowMs) {
     let rec = null;
     try { rec = completionFor(String(name)); } catch { rec = null; }
     if (!rec || rec.status !== 'done') return a;
+    // #4306 — foreign-`sessionId` check, BEFORE the timestamp check below (see this function's own doc above).
+    // Sourced from the ONE shared predicate every reader/writer binds through now
+    // (`we:scripts/operations/completion-record.mjs#isForeignCompletionSessionId`) — this was previously the
+    // strictest of the three inline checks; an independent review found the other two more lenient (accepting
+    // a foreign record when the ROW carried no `sessionId` of its own), which this shared predicate closes.
+    if (isForeignCompletionSessionId(a?.sessionId, rec.sessionId)) return a;
     const updatedMs = Date.parse(rec.updatedAt ?? '');
     const startedMs = startedAtMs(a?.startedAt);
     if (!Number.isFinite(updatedMs) || !Number.isFinite(startedMs) || updatedMs < startedMs) return a;
