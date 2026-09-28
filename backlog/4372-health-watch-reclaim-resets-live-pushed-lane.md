@@ -1,4 +1,5 @@
 ---
+bornAs: xl5xhmj
 kind: story
 size: 3
 status: open
@@ -16,7 +17,7 @@ lane, quiet period) inside `cmdReclaimSalvage`, and only enters it when content 
 change is already on a remote ref, `reclaim --salvage` skips the gate and runs `git reset --hard origin/main`
 plus `git clean -fd` straight away. So an unleased lane whose live worker has just pushed is reset under it.
 The health watch's litter reap also deletes the worker's commit-message and PR-body scratch files from such a
-lane. Blocker: any lane that loses its lease (see #xbk2is9) is reset the moment its work is pushed,
+lane. Blocker: any lane that loses its lease (see #4371) is reset the moment its work is pushed,
 mid-verify or mid-PR.
 
 ## Evidence (2026-09-28, lane-18, #4294)

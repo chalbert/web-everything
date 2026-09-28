@@ -1,4 +1,5 @@
 ---
+bornAs: x6j6hp9
 kind: story
 size: 5
 status: open
@@ -21,7 +22,7 @@ timeline; health smells flag the two failure shapes; Plateau /wip shows it (daem
 
 ## Why — what the 2026-09-28 lane-18 / lane-21 investigation needed and could not get
 
-Root causes are #xbk2is9 (reaper reaps hand-briefed leases) and #xl5xhmj (reclaim resets a live pushed lane).
+Root causes are #4371 (reaper reaps hand-briefed leases) and #4372 (reclaim resets a live pushed lane).
 Finding them took a manual join of five sources, because none records the whole story:
 
 1. **Who reset the tree, and when.** Only `git reflog` had the time (`16:49:34 reset: moving to origin/main`),

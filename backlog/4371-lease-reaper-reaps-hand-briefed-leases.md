@@ -1,4 +1,5 @@
 ---
+bornAs: xbk2is9
 kind: story
 size: 3
 status: open
@@ -16,7 +17,7 @@ A delivery agent started by hand (an in-process Agent-tool subagent, not `claude
 matches the dispatcher grammar, so `we:scripts/conveyor/lease-reaper.mjs#sessionGoneForLease` looks it up in
 `claude agents --json --all`. An in-process subagent is never listed there. Once the 10-minute grace passes,
 the reaper reads "never listed" as "gone" and releases the lease while the agent is still working. The lane
-is then unleased with live work in it, which exposes it to the health-watch reset (see #xl5xhmj) and to a
+is then unleased with live work in it, which exposes it to the health-watch reset (see #4372) and to a
 second acquire. Blocker: it strips protection from live work on every hand-briefed dispatch.
 
 ## Evidence (2026-09-28, measured)
