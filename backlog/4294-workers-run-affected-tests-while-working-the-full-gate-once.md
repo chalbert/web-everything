@@ -115,8 +115,8 @@ carries guard-internals rationale a dispatched agent doesn't strictly need — l
 brief's existing dense, issue-linked style elsewhere). The red-team round (same five lenses) found no blocker —
 every finding was `worseThanBase: false` / `parallelizable: true`, i.e. a carve-out, not a break — but converged
 on one recurring, genuinely useful idea across four of the five lenses: nothing mechanically ties the brief's
-documented command to the guard test that defends it, so the two can drift silently. Filed as **#x3zp8nf**
-(`we:backlog/x3zp8nf-assert-the-delivery-brief-s-mid-work-command-against-the-gua.md`) rather than built here —
+documented command to the guard test that defends it, so the two can drift silently. Filed as **#4368**
+(`we:backlog/4368-assert-the-delivery-brief-s-mid-work-command-against-the-gua.md`) rather than built here —
 it is a real coverage gap, not a blocker on this item's own Done-when. **Verdict: `land`** — accept on every
 lens, red-team failed to break it.
 
@@ -237,4 +237,4 @@ agent (only `request`/`check`/`reset` are exempt). This item's own scope and Don
 briefs' `GATE_COMMAND` itself as something to change (only "mirroring" it as inspiration for the generic briefs'
 new step, which Done-when 1 explicitly redirects to a guard-permitted shape instead) — fixing the fix briefs' own
 pre-existing gap is a separate, real bug worth its own card rather than folding into this one's diff. Filed as
-**#x89yzuj** (`we:backlog/x89yzuj-fix-briefs-mid-work-gate-command-is-a-bare-verify-lane-invoc.md`).
+**#4369** (`we:backlog/4369-fix-briefs-mid-work-gate-command-is-a-bare-verify-lane-invoc.md`).
