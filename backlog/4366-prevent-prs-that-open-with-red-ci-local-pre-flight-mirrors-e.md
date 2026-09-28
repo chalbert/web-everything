@@ -214,7 +214,10 @@ Per the operator's prepare-rule ruling (full design stays above; only the MVP bu
   `check:standards` and the soak-replay-gate CLI's `--base-sha`/`--head-sha` mode (with the effective-title
   derivation and structured argv fixes already folded into Design above) — never the `build:docs` or scoped-test
   checks (Could, below).
-- The IO shell running those two commands with a bounded timeout (Task 2, narrowed).
+- The IO shell running those two commands with a bounded timeout (Task 2, narrowed); before running
+  `check:standards` specifically, it checks `git status --porcelain` and attaches an honest `scopeCaveat` to
+  that `CheckResult` when the tree is dirty (see the MVP-blocking classification below — `check:standards`, unlike
+  the soak-replay-gate CLI, has no `--base-sha`/`--head-sha` mode of its own).
 - `we:scripts/operations/open-pr.mjs`'s new `preflight` effect step + `planOpen`'s `ci-red` refusal (Task 3,
   unchanged — the refusal wiring is check-count-agnostic).
 - Fixtures: #2852 (no soak-break scenario) and #2854 (statute-lint miss) both refused locally, matching Task 1's
@@ -418,12 +421,19 @@ Per this repo's new prepare rule (full design stays above; a plan-review finding
 breaks an MVP Must or names real harm — everything else is SCOPE-GROWTH, an already-designed follow-up, never
 silently dropped):
 
-1. **Working-tree-vs-published-commit binding — FOLLOW-UP, not MVP-blocking.** This gap is specific to the
-   scoped-TEST check (`we:scripts/lib/verify-lane-gate.mjs`'s selected gate runs the working tree, while
-   `we:pr-land.mjs` publishes the resolved source commit) — the MVP cut above drops the scoped-test check
-   entirely. `check:standards` and the soak-replay-gate CLI both take explicit `--base-sha`/`--head-sha` git-diff
-   arguments, not a live working-tree read, so this specific binding gap does not apply to either MVP check.
-   Filed as a follow-up slice, scoped to the scoped-test check once it is built.
+1. **Working-tree-vs-published-commit binding — MVP-BLOCKING for `check:standards`, resolved directly (this
+   session's own re-review correctly caught this session's own first-draft classification as FALSE: `we:check-standards.mjs`
+   reads checkout files straight off disk (`readFileSync`, no `--base-sha`/`--head-sha` mode at all —
+   verified against the real script, which takes only `--json`/`--local`/`--files=` flags) — it is NOT
+   git-diff-scoped the way the soak-replay-gate CLI is; only that ONE of the two MVP checks was ever safe from
+   this gap.** Real, honest fix (not deferred): the preflight IO shell checks `git status --porcelain` is empty
+   (working tree matches HEAD) before running `check:standards`; when clean, the check gives FULL coverage of
+   what `we:pr-land.mjs` will actually publish (no gap — HEAD is what's checked and what ships); when dirty, the
+   `CheckResult` for `check:standards` carries the SAME `scopeCaveat` field the card's own Design already defined
+   for the explicit-`sha` path ("ran against the working tree, which has uncommitted changes not reflected in
+   the published commit"), never silently claiming full coverage. The ordinary case this repo's own lane
+   workflow produces (commit, then verify/open-pr) is unaffected — the caveat fires only on a genuinely dirty
+   tree, an honest, cheap, already-buildable check, not a follow-up.
 2. **`we:scripts/lib/pr-events.mjs#withPrEvents` has no per-event delivery — FOLLOW-UP, not MVP-blocking.** This
    applies only to the `ci-red-on-open` OBSERVER, entirely cut from the MVP above. Filed as a follow-up slice
    (name the real integration point before building the observer).
@@ -433,7 +443,25 @@ silently dropped):
 4. **`failureShape` has no check-run id to read by — FOLLOW-UP, not MVP-blocking.** Same classifier, same cut.
    Filed as a follow-up slice (capture a check-run id in `we:scripts/conveyor/pr-events-worker/core.mjs#parseGithubEvent`).
 
-**MVP has no remaining blocker.** `node we:scripts/backlog.mjs prepare-stamp` is appropriate once this
-session's own fresh Codex re-review (confined to the MVP cut above) confirms nothing new — see the section
-below for that outcome. `blockedBy: ["4365"]` is unaffected by the MVP cut (the MVP does not touch 4365's
-shared store at all — no dependency to relax or tighten).
+## Independent plan review — MVP re-review (Codex, read-only, 2026-09-28)
+
+This session's own one permitted re-review round, confined to the MVP cut + classification above. **1 blocker
+found, resolved directly above:**
+
+1. **[blocker, resolved above]** This session's own first-draft classification claimed `check:standards` takes
+   an explicit `--base-sha`/`--head-sha` mode like the soak-replay-gate CLI does — verified FALSE against the
+   real `we:check-standards.mjs` (reads checkout files directly, no diff-scoped mode at all). **Resolved**: the
+   preflight now checks `git status --porcelain` before running `check:standards` and attaches an honest
+   `scopeCaveat` on a dirty tree, mirroring the caveat mechanism the card's own Design already built for the
+   explicit-`sha`/non-`main`-`base` path — the ordinary clean-tree case (this repo's own commit-then-verify lane
+   workflow) is unaffected and gets full coverage.
+2. **[scope-growth, confirmed correct]** All three remaining findings (pr-events delivery, gap-recovery
+   denominator, missing check-run id) concern only the `ci-red-on-open` observer/classifier/KPI, entirely cut
+   from the MVP — confirmed they name no risk reaching the two-check preflight itself.
+3. **[not-an-issue, confirmed]** No technical dependency between the MVP and `#4365`'s shared store — confirmed
+   against Interfaces (the MVP's `preflight`/`ci-red` refusal path never reads or writes that store).
+
+**MVP has no remaining blocker.** `node we:scripts/backlog.mjs prepare-stamp 4366` is appropriate.
+`blockedBy: ["4365"]` stays as-is at the card level (the card's full design, Could items included, still needs
+4365's store) — a caveat worth a human's attention if this card is ever dispatched for its MVP slice alone
+before 4365 lands, since the MVP itself has no real dependency.
