@@ -86,6 +86,9 @@ import { dirname, join } from 'node:path';
 import { homedir, hostname } from 'node:os';
 import { isLeaseStale, isReservedLease, LEASE_FILENAME, DEFAULT_LEASE_TTL_MINUTES } from '../lib/lane-lease.mjs';
 import { defaultListAgents } from '../operations/dispatch-lane-io.mjs';
+// #xbk2is9 — REUSE, never reimplement, the reclaim `--salvage` gate's own "is this lease's owning agent live"
+// check (`liveAgentInLane`, `lib/lane-salvage.mjs`) — see {@link ownerSessionAliveForLease}'s own docblock.
+import { liveAgentInLane } from '../lib/lane-salvage.mjs';
 // #3903 — a mechanical dispatch's detached wrapper holds its lease; its `pid:<n>` handle lives in the run store.
 import { detachedHandlePid } from '../operations/detached-dispatch.mjs';
 import { createFileRunStore } from '../operations/run-store.mjs';
@@ -804,6 +807,66 @@ export function sessionPidAliveByName(sessions, { psOutput = null, isPidAlive = 
 }
 
 /**
+ * #xbk2is9 — is the lease's DECLARED OCCUPANT (`workerSession` — the session actually working the lane, stamped
+ * by `--adopt`/`adopt`, #2997 r2) confirmed ALIVE in the SAME `claude agents --json --all` listing
+ * {@link sessionGoneForLease}'s other axes already read? THE INCIDENT: a delivery agent started BY HAND (an
+ * in-process Agent-tool subagent, `we:skills-src/conveyor/delivery-agent-brief.md`, never `claude --bg`) still
+ * acquires with `--session=conveyor-<N>` — a name {@link sessionGoneForLease} looks up in the listing, but an
+ * in-process subagent is never listed under its own manufactured name, so past the grace window this read as
+ * "never listed → gone" (measured across ~10 lanes, this card's Evidence section). This brief's own step 1
+ * (`acquire ... --adopt`) stamps `workerSession` to the CALLING session's own id (the subagent runs IN-PROCESS,
+ * so it has no session identity distinct from its parent) — a real, live, listed row this function can find.
+ *
+ * ONLY `workerSession` IS CHECKED — narrower than the reclaim salvage gate's own
+ * {@link liveAgentInLane}(agents, dir, [ownerSession, workerSession, session]) (`cmdReclaim --salvage`), which
+ * first confirmed this exact lease's liveness and which this card's own Fork 1 text names checking alongside it.
+ * `ownerSession` (whoever ran `acquire`, #2997) is excluded ON PURPOSE (round-4 convergence, correctness finding):
+ * in the PRODUCTION dispatch path the DISPATCHER leases the lane itself (no `--adopt`) and the delivery agent
+ * adopts it separately once spawned, so `ownerSession` is the dispatcher's own long-lived, essentially
+ * ALWAYS-alive id — checking it would read nearly every held lease as "alive" regardless of whether the actual
+ * delivery agent is, silently neutering this axis for the everyday `claude --bg` population it exists to catch.
+ * The reclaim gate can afford that breadth because it answers a DIFFERENTLY-RISKED question ("safe to reset?",
+ * where a false "someone's here" only delays a reset); a false "alive" here actively suppresses a real reap, the
+ * opposite risk direction. `session` (the lease's own dispatcher-grammar name) is excluded too: a `conveyor-<N>`
+ * slug never coincidentally collides with a real `sessionId`, so checking it adds no coverage.
+ *
+ * KNOWN, ACCEPTED TRADE-OFFS (this card's own Fork 1 rejected the alternatives that would close any of these):
+ *   - `workerSession` ITSELF can still be shared: for a hand-briefed subagent it IS the parent interactive
+ *     session's id, and one interactive session may dispatch several subagents (several leases) at once, or
+ *     stay open long after any one of them finishes — so this check can read a genuinely finished subagent's
+ *     lease as "alive" as long as its parent session is. Narrower than the `ownerSession` breadth above (a
+ *     dispatcher juggles orders of magnitude more leases than one interactive session's own subagents), but the
+ *     same shape, not a different one — {@link sessionGoneForLease} restricts this check to its absence branch
+ *     for exactly this reason, so a real terminal-state/`pidAlive` read is never overridden by it.
+ *   - A lease never `adopt`ed (`workerSession` absent) has no signal here at all → `null`, falling through to
+ *     the pre-existing absence/age logic UNCHANGED — the safe default when there is no reliable worker signal.
+ *   - {@link liveAgentInLane}'s `cwd` fallback (below) counts ANY live, non-terminal row whose `cwd` is this lane
+ *     as alive, even with no matching `sessionId` — real evidence, and the dispatcher's own cwd is never the
+ *     individual worker's lane dir, so it doesn't reintroduce the `ownerSession` breadth problem above.
+ *   Closing any of these fully would need a durable per-delivery-agent liveness signal this schema does not have
+ *   (the same gap `pidAliveForLease`'s own docblock names for `lease.pid`) — out of scope for this fix.
+ *
+ * `null` (never guess) when the lease carries no `workerSession` at all, or when `agents` isn't an array (the
+ * listing was unavailable this pass — same fail-closed contract every other axis in this file already shares).
+ * Otherwise defers entirely to {@link liveAgentInLane}'s own contract: `true` only when a listed, NON-terminal
+ * row's `sessionId` is `workerSession` OR its `cwd` is this lane — never a guess in either direction.
+ *
+ * @param {object|null} lease
+ * @param {Array<object>|null} agents - a `claude agents --json --all` listing (background AND interactive rows
+ *   alike — unlike {@link sessionStateByName}, this deliberately does NOT filter to `kind === 'background'`,
+ *   since the whole point is to find the OWNING INTERACTIVE session a hand-briefed subagent's own listing row
+ *   can never carry).
+ * @param {string} dir - the lane's working-tree path (for {@link liveAgentInLane}'s cwd fallback).
+ * @returns {boolean|null}
+ */
+export function ownerSessionAliveForLease(lease, agents, dir) {
+  const workerSession = lease && typeof lease.workerSession === 'string' ? lease.workerSession : null;
+  if (!workerSession) return null; // no declared occupant recorded on this lease — nothing to check
+  if (!Array.isArray(agents)) return null; // listing unavailable this pass — unknown, never guess
+  return liveAgentInLane(agents, dir, [workerSession]);
+}
+
+/**
  * Is the delivery agent a lease's own `session` names CONFIRMED gone? THE FIX for the 2026-09-04/05 incident
  * (`conveyor-3466` on lane-38, `conveyor-2412`/`conveyor-2412c` on lane-40): both sessions died/disappeared
  * ENTIRELY from `claude agents --json` — not merely reported `done`/`failed`, simply no longer listed at all,
@@ -870,10 +933,18 @@ export function sessionPidAliveByName(sessions, { psOutput = null, isPidAlive = 
  *   unknown age); `graceMs` defaults to {@link DISPATCH_GUARD_LISTING_GRACE_MINUTES}; `pidAlive` (#3383) = this
  *   session's REAL process-liveness read from {@link sessionPidAliveByName} (`null` when not supplied/unknown —
  *   exact back-compat with every pre-#3383 caller); `wrapperAlive` (#3903) = whether a DETACHED delivery
- *   wrapper the dispatcher started for this session is still running (see {@link detachedWrapperPidsBySession}).
+ *   wrapper the dispatcher started for this session is still running (see {@link detachedWrapperPidsBySession});
+ *   `ownerAlive` (#xbk2is9) = whether the lease's declared occupant (`workerSession`) is confirmed alive in the
+ *   same listing (see {@link ownerSessionAliveForLease}) — `null` when not supplied or unknown (back-compat with
+ *   every pre-#xbk2is9 caller). Consulted ONLY in the absence branch below, and ONLY there: it can never override
+ *   a REAL, direct death signal about this lease's own TRACKED session — `pidAlive === false`, or the session
+ *   listed in a terminal state — because those are positive evidence about the actual worker, while
+ *   `ownerAlive` is a proxy (`workerSession`) that can legitimately outlive the one delivery agent a lease was
+ *   minted for — see {@link ownerSessionAliveForLease}'s own "known, accepted trade-offs" note
+ *   for what this narrowing does and does not close.
  * @returns {boolean|null}
  */
-export function sessionGoneForLease(lease, sessionStates, { nowMs, graceMs = DISPATCH_GUARD_LISTING_GRACE_MINUTES * 60_000, pidAlive = null, wrapperAlive = null } = {}) {
+export function sessionGoneForLease(lease, sessionStates, { nowMs, graceMs = DISPATCH_GUARD_LISTING_GRACE_MINUTES * 60_000, pidAlive = null, wrapperAlive = null, ownerAlive = null } = {}) {
   const session = lease && typeof lease.session === 'string' ? lease.session : null;
   // #3903 — A MECHANICAL DISPATCH'S LEASE IS HELD BY A DETACHED WRAPPER PROCESS, NOT A `claude --bg` SESSION.
   // `deliver-item-run.mjs` acquires the lane under the dispatcher's session slug and then runs its agent (Codex,
@@ -891,9 +962,15 @@ export function sessionGoneForLease(lease, sessionStates, { nowMs, graceMs = DIS
   if (!(sessionStates instanceof Map)) return null; // listing unavailable/all-empty this pass — axis off
   // #3383 — a REAL, direct death signal wins outright: no grace window (it is not an inference from silence),
   // and it fires even when the row is LISTED with a non-terminal state (the phantom shape neither branch below
-  // can see — see the docblock above).
+  // can see — see the docblock above). Deliberately checked BEFORE `ownerAlive` — see the `ownerAlive` @param
+  // doc above for why.
   if (pidAlive === false) return true;
   if (!sessionStates.has(session)) {
+    // #xbk2is9 — A HAND-BRIEFED (in-process Agent-tool) DELIVERY AGENT'S LEASE IS HELD BY AN INTERACTIVE
+    // SESSION, NOT A `claude --bg` ONE, so this exact `session` name is never separately listed even though it
+    // matches the dispatcher grammar — see {@link ownerSessionAliveForLease}'s own doc for the incident and the
+    // id set checked. This is the ONLY branch `ownerAlive` applies in (see the `ownerAlive` @param doc above).
+    if (ownerAlive === true) return false;
     // Absence alone is ambiguous until the lease has outlived the listing's own visibility lag.
     if (typeof nowMs !== 'number') return null; // can't judge age — never guess
     const acquiredAtMs = Date.parse(lease?.acquiredAt);
@@ -901,6 +978,8 @@ export function sessionGoneForLease(lease, sessionStates, { nowMs, graceMs = DIS
     if (nowMs - acquiredAtMs < graceMs) return null; // too young — not yet listed is not the same as gone
     return true; // aged past the grace window and still never listed — gone
   }
+  // A listed row — terminal or not — is a DIRECT, positive observation about THIS session's own process,
+  // never overridden by `ownerAlive` (same reasoning as the `pidAlive` ordering above).
   return AGENT_GONE_STATES.has(sessionStates.get(session));
 }
 
@@ -1084,23 +1163,33 @@ export function fetchPrStatesForRepo(repoKey, flags, { exec = execFileSync } = {
  * finding on #1921 — indistinguishable from a bad read) degrades that axis off too, not just a hard throw. The
  * ONE `ps aux` scan behind `pidAlive` ({@link scanPsOutput}, driver-watchdog.mjs's own probe) is skipped entirely
  * when nothing was listed — no rows, nothing to probe — mirroring that file's own discipline.
+ *
+ * #xbk2is9 — ALSO returns the RAW listing (`agents`) unfiltered by `kind`, for {@link ownerSessionAliveForLease}:
+ * unlike `states`/`pidAlive` (background rows only — a hand-briefed lease's own owning row is `kind:
+ * 'interactive'` and would be invisible through either), the owner-alive check needs the whole listing. `agents`
+ * is `null` when the `claude` call itself failed, `--no-check-sessions` was set, or the call succeeded but its
+ * output did not parse to an array — never a guess from a listing that never arrived, in whole or in shape. It
+ * does NOT share `states`'s zero-background-rows degrade: a listing with interactive rows
+ * but no background ones is a perfectly real read for `agents`' own purpose (there may be no background session
+ * to find, while a hand-briefed lease's owning interactive row is still right there) — only `states`/`pidAlive`
+ * (whose #1921 concern is specifically about the background-only population) degrade on that shape.
  */
-function fetchSessionSignals(flags) {
-  if (flags['no-check-sessions']) return { states: null, pidAlive: new Map() };
+export function fetchSessionSignals(flags, { exec = execFileSync } = {}) {
+  if (flags['no-check-sessions']) return { states: null, pidAlive: new Map(), agents: null };
   let sessions;
   try {
-    sessions = defaultListAgents({ exec: execFileSync, all: true });
+    sessions = defaultListAgents({ exec, all: true });
   } catch (e) {
     log(`  ⚠ \`claude agents --json --all\` failed — session-gone reap axis OFF this run (TTL-stale still applies): ${String(e?.message || e).split('\n')[0]}`);
-    return { states: null, pidAlive: new Map() };
+    return { states: null, pidAlive: new Map(), agents: null };
   }
   const states = sessionStatesForReap(sessions);
   if (!states) log('  ⚠ `claude agents --json --all` listed zero background session(s) — session-gone reap axis OFF this run (indistinguishable from a bad read; TTL-stale still applies)');
   // #3383 — ONE `ps aux` scan for the whole batch (never one subprocess per row), only when something was
   // listed at all; `scanPsOutput` itself never throws (best-effort, returns null on failure).
-  const psOutput = Array.isArray(sessions) && sessions.length ? scanPsOutput({ exec: execFileSync }) : null;
+  const psOutput = Array.isArray(sessions) && sessions.length ? scanPsOutput({ exec }) : null;
   const pidAlive = sessionPidAliveByName(sessions, { psOutput });
-  return { states, pidAlive };
+  return { states, pidAlive, agents: Array.isArray(sessions) ? sessions : null };
 }
 
 /** #3903 — the io half of {@link detachedWrapperPidsBySession}: read every run record once, never throwing. */
@@ -1146,7 +1235,7 @@ function main(argv) {
   const ttlMs = ttlMinutes * 60_000;
   const nowMs = Date.now();
 
-  const { states: sessionStates, pidAlive: sessionPidAlive } = fetchSessionSignals(flags); // states null when off
+  const { states: sessionStates, pidAlive: sessionPidAlive, agents: sessionAgents } = fetchSessionSignals(flags); // states null on zero background rows too; agents null only on a failed/no-array read (see fetchSessionSignals's own doc)
   // #3903 — ONE read of the run store for every in-flight detached-wrapper pid. Best-effort: an unreadable
   // store or record leaves the map empty/partial, which only means the old (listing-only) behaviour applies.
   const wrapperPids = readDetachedWrapperPids();
@@ -1192,9 +1281,12 @@ function main(argv) {
     // #3903 — a detached delivery wrapper's own pid (see `detachedWrapperPidsBySession`).
     const wrapperPid = c.lease?.session ? wrapperPids.get(c.lease.session) : undefined;
     const wrapperAlive = wrapperPid === undefined ? null : Boolean(defaultIsPidAlive(wrapperPid));
+    // #xbk2is9 — the lease's declared occupant (`workerSession`), read off the SAME listing
+    // `sessionStates`/`sessionPidAlive` were reduced from — see `ownerSessionAliveForLease`'s own doc.
+    const ownerAlive = ownerSessionAliveForLease(c.lease, sessionAgents, c.dir);
     return {
       prState,
-      sessionGone: sessionGoneForLease(c.lease, sessionStates, { nowMs, pidAlive: sessionPidAliveNow, wrapperAlive }),
+      sessionGone: sessionGoneForLease(c.lease, sessionStates, { nowMs, pidAlive: sessionPidAliveNow, wrapperAlive, ownerAlive }),
       pidAlive: pidAliveForLease(c.lease),
     };
   };
