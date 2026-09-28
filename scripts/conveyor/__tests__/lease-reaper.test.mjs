@@ -34,6 +34,7 @@ import {
   sessionStateByName,
   sessionStatesForReap,
   sessionGoneForLease,
+  ownerSessionAliveForLease,
   sessionPidAliveByName,
   AGENT_GONE_STATES,
   repoKeyForPool,
@@ -44,6 +45,7 @@ import {
   DEFAULT_QUIET_MS,
   resolveLeaseItemNum,
   defaultGitIsAncestor,
+  fetchSessionSignals,
 } from '../lease-reaper.mjs';
 import { DEFAULT_LEASE_TTL_MINUTES } from '../../lib/lane-lease.mjs';
 import { DISPATCH_GUARD_LISTING_GRACE_MINUTES } from '../../operations/dispatch-lane.mjs';
@@ -647,6 +649,150 @@ describe('sessionGoneForLease — THE FIX: is the lease\'s own delivery-agent se
   });
 });
 
+// ── #xbk2is9 (2026-09-28) — A HAND-BRIEFED (in-process Agent-tool) DELIVERY AGENT'S LEASE IS HELD BY AN ─────────
+// INTERACTIVE SESSION, NOT A `claude --bg` ONE — so its `--session=conveyor-<N>` name is NEVER separately
+// listed, and the absence branch above wrongly read that as session-gone once the grace window passed (live
+// incident: lane-18/lane-5/lane-12/lane-13/lane-14/lane-16/lane-17/lane-20/lane-21/lane-22, this card's own
+// Evidence). THE FIX reuses the reclaim `--salvage` gate's own `liveAgentInLane` to check the lease's declared
+// occupant, `workerSession` — a REAL `CLAUDE_CODE_SESSION_ID` — against the SAME listing's `kind: 'interactive'`
+// rows, which the reclaim gate independently already found live for this exact lease. `ownerSession` (whoever
+// ran `acquire`) is deliberately NOT checked — see `ownerSessionAliveForLease`'s own doc for why.
+describe('ownerSessionAliveForLease — #xbk2is9 the reclaim salvage gate\'s own liveAgentInLane, reused for the reaper', () => {
+  it('workerSession IS listed (interactive, non-terminal) → true (alive)', () => {
+    const agents = [{ kind: 'interactive', sessionId: 'bd616854-owner', state: undefined, cwd: '/elsewhere' }];
+    const lease = { session: 'conveyor-4294', workerSession: 'bd616854-owner' };
+    expect(ownerSessionAliveForLease(lease, agents, '/pool/lane-18')).toBe(true);
+  });
+  it('the liveAgentInLane cwd fallback: a live row whose cwd IS the lane, with no matching sessionId at all, still reads alive', () => {
+    const agents = [{ kind: 'interactive', sessionId: 'some-unrelated-session', state: 'working', cwd: '/pool/lane-18' }];
+    const lease = { session: 'conveyor-4294', workerSession: 'bd616854-owner' }; // no sessionId in `agents` matches this
+    expect(ownerSessionAliveForLease(lease, agents, '/pool/lane-18')).toBe(true);
+    // A sibling cwd (a `.claude/worktrees/<x>` under the lane) also counts — liveAgentInLane's own contract.
+    const wtAgents = [{ kind: 'interactive', sessionId: 'some-unrelated-session', cwd: '/pool/lane-18/.claude/worktrees/fix-9' }];
+    expect(ownerSessionAliveForLease(lease, wtAgents, '/pool/lane-18')).toBe(true);
+    // An UNRELATED cwd with no matching sessionId either → false, never a guess.
+    const elsewhereAgents = [{ kind: 'interactive', sessionId: 'some-unrelated-session', cwd: '/pool/lane-99' }];
+    expect(ownerSessionAliveForLease(lease, elsewhereAgents, '/pool/lane-18')).toBe(false);
+  });
+  it('round-4 convergence correctness finding: `ownerSession` is deliberately NOT checked, even alone — a lease never adopted has no reliable "who is the actual worker" signal, so this is null, never a guess off the (possibly ever-alive dispatcher) ownerSession', () => {
+    const agents = [{ kind: 'interactive', sessionId: 'bd616854-owner', cwd: '/elsewhere' }];
+    const lease = { session: 'conveyor-4294', ownerSession: 'bd616854-owner' }; // no workerSession — never adopted
+    expect(ownerSessionAliveForLease(lease, agents, '/pool/lane-18')).toBe(null);
+  });
+  it('ownerSession being alive does NOT suppress reap when workerSession points to someone else entirely dead — only the declared occupant matters', () => {
+    const agents = [{ kind: 'interactive', sessionId: 'long-lived-dispatcher', state: 'busy', cwd: '/dispatcher/root' }];
+    const lease = { session: 'conveyor-4294', ownerSession: 'long-lived-dispatcher', workerSession: 'dead-delivery-agent' };
+    expect(ownerSessionAliveForLease(lease, agents, '/pool/lane-18')).toBe(false);
+  });
+  it('workerSession is ALSO absent from the listing → false (liveAgentInLane finds no match)', () => {
+    const agents = [{ kind: 'interactive', sessionId: 'some-other-session', cwd: '/elsewhere' }];
+    const lease = { session: 'conveyor-4294', workerSession: 'bd616854-owner' };
+    expect(ownerSessionAliveForLease(lease, agents, '/pool/lane-18')).toBe(false);
+  });
+  it('workerSession listed but in a terminal state → false (liveAgentInLane\'s own DONE set)', () => {
+    const agents = [{ kind: 'interactive', sessionId: 'bd616854-owner', state: 'done', cwd: '/elsewhere' }];
+    const lease = { session: 'conveyor-4294', workerSession: 'bd616854-owner' };
+    expect(ownerSessionAliveForLease(lease, agents, '/pool/lane-18')).toBe(false);
+  });
+  it('the lease\'s own dispatcher-grammar `session` name is NOT checked (deliberately narrower than the reclaim gate — see the function\'s own doc) — a row whose sessionId happens to equal it does NOT count, even when workerSession is present and simply unmatched', () => {
+    // A real workerSession IS present (so the early guard doesn't short-circuit this to null) but matches
+    // nothing in the listing; the ONLY live row's sessionId equals the lease's own `session` name instead.
+    const lease = { session: 'conveyor-4294', workerSession: 'dead-worker' };
+    const matchingAgents = [{ kind: 'interactive', sessionId: 'conveyor-4294', cwd: '/elsewhere' }];
+    expect(ownerSessionAliveForLease(lease, matchingAgents, '/pool/lane-18')).toBe(false); // not true — `session` is never a checked id
+  });
+  it('a lease with NO session id at all (degenerate) → null (nothing to check, never guess)', () => {
+    const agents = [{ kind: 'interactive', sessionId: 'bd616854-owner', cwd: '/elsewhere' }];
+    expect(ownerSessionAliveForLease({}, agents, '/pool/lane-18')).toBe(null);
+  });
+  it('listing unavailable (not an array) → null (axis off, never guess)', () => {
+    const lease = { session: 'conveyor-4294', workerSession: 'bd616854-owner' };
+    expect(ownerSessionAliveForLease(lease, null, '/pool/lane-18')).toBe(null);
+    expect(ownerSessionAliveForLease(lease, undefined, '/pool/lane-18')).toBe(null);
+  });
+  it('degenerate lease → null', () => {
+    expect(ownerSessionAliveForLease(null, [], '/pool/lane-18')).toBe(null);
+    expect(ownerSessionAliveForLease(undefined, [], '/pool/lane-18')).toBe(null);
+  });
+});
+
+describe('sessionGoneForLease — #xbk2is9 THE FIX end to end: ownerAlive overrides a hand-briefed lease\'s own unlisted `session` name', () => {
+  it("Done-when #1 (this card): session absent from the listing, acquired 30 min ago, whose workerSession IS listed and live → NOT true", () => {
+    // The exact shape the card names: a lease with `session: conveyor-4294`, acquired well past the grace
+    // window, absent from the background listing (never `claude --bg`, so never separately listed) — but its
+    // `workerSession` IS a live, listed interactive session.
+    const states = sessionStateByName([{ kind: 'background', name: 'conveyor-9999', state: 'working' }]);
+    const agents = [{ kind: 'interactive', sessionId: 'bd616854-owner', cwd: '/elsewhere' }];
+    const lease = {
+      session: 'conveyor-4294',
+      workerSession: 'bd616854-owner',
+      acquiredAt: new Date(NOW - 30 * 60_000).toISOString(),
+    };
+    const ownerAlive = ownerSessionAliveForLease(lease, agents, '/pool/lane-18');
+    expect(sessionGoneForLease(lease, states, { nowMs: NOW, ownerAlive })).not.toBe(true);
+    expect(sessionGoneForLease(lease, states, { nowMs: NOW, ownerAlive })).toBe(false);
+    // classifyReap agrees: this lease is NOT reaped on the session-gone axis.
+    expect(classifyReap(lease, { nowMs: NOW, sessionGone: sessionGoneForLease(lease, states, { nowMs: NOW, ownerAlive }) }).reap).toBe(false);
+  });
+
+  it('Done-when #1 (this card): the SAME lease with its workerSession also absent from the listing → true (gone, as before the fix)', () => {
+    const states = sessionStateByName([{ kind: 'background', name: 'conveyor-9999', state: 'working' }]);
+    const agents = [{ kind: 'interactive', sessionId: 'some-unrelated-session', cwd: '/elsewhere' }];
+    const lease = {
+      session: 'conveyor-4294',
+      workerSession: 'bd616854-owner',
+      acquiredAt: new Date(NOW - 30 * 60_000).toISOString(),
+    };
+    const ownerAlive = ownerSessionAliveForLease(lease, agents, '/pool/lane-18');
+    expect(sessionGoneForLease(lease, states, { nowMs: NOW, ownerAlive })).toBe(true);
+  });
+
+  it('ownerAlive=true wins even for a lease acquired moments ago — no grace window needed (a direct positive read, mirrors wrapperAlive)', () => {
+    const states = sessionStateByName([{ kind: 'background', name: 'conveyor-9999', state: 'working' }]);
+    const justAcquired = { session: 'conveyor-5001', workerSession: 'bd616854-owner', acquiredAt: new Date(NOW - 5_000).toISOString() };
+    expect(sessionGoneForLease(justAcquired, states, { nowMs: NOW, ownerAlive: true })).toBe(false);
+  });
+
+  it('ownerAlive: false / null / omitted change nothing — a genuinely dead hand-briefed lease still reaps as before this fix', () => {
+    const states = sessionStateByName([{ kind: 'background', name: 'conveyor-9999', state: 'working' }]);
+    const lease = { session: 'conveyor-5002', acquiredAt: new Date(NOW - (GRACE_MS + 5 * 60_000)).toISOString() };
+    expect(sessionGoneForLease(lease, states, { nowMs: NOW, ownerAlive: false })).toBe(true);
+    expect(sessionGoneForLease(lease, states, { nowMs: NOW, ownerAlive: null })).toBe(true);
+    expect(sessionGoneForLease(lease, states, { nowMs: NOW })).toBe(true); // default omitted entirely
+  });
+
+  // ── PRECEDENCE ────────────────────────────────────────────────────────────────────────────────────────────
+  // `ownerAlive` must NEVER override a REAL, direct death signal about this lease's OWN tracked session
+  // (`pidAlive === false`, or the session listed in a terminal state) — those are positive evidence about the
+  // actual worker, whereas `workerSession` is a proxy that can legitimately outlive the one
+  // delivery agent a lease was minted for (a long-lived interactive/dispatcher session routinely acquires MANY
+  // leases over its own lifetime). `ownerAlive` is scoped to the ABSENCE branch only.
+  it('ownerAlive=true does NOT override pidAlive=false — a real, direct death signal about THIS session wins', () => {
+    const states = sessionStateByName([{ kind: 'background', name: 'conveyor-5100', state: 'working' }]);
+    const lease = { session: 'conveyor-5100', workerSession: 'long-lived-owner' };
+    expect(sessionGoneForLease(lease, states, { pidAlive: false, ownerAlive: true })).toBe(true);
+  });
+  it('ownerAlive=true does NOT override a session listed in a terminal state (done/failed/stopped)', () => {
+    const states = sessionStateByName([{ kind: 'background', name: 'conveyor-5101', state: 'done' }]);
+    const lease = { session: 'conveyor-5101', workerSession: 'long-lived-owner' };
+    expect(sessionGoneForLease(lease, states, { nowMs: NOW, ownerAlive: true })).toBe(true);
+  });
+  it('ownerAlive=true does NOT change a session listed and still working/blocked (already false — this pins it stays false, not accidentally null)', () => {
+    const states = sessionStateByName([{ kind: 'background', name: 'conveyor-5102', state: 'working' }]);
+    const lease = { session: 'conveyor-5102', workerSession: 'long-lived-owner' };
+    expect(sessionGoneForLease(lease, states, { nowMs: NOW, ownerAlive: true })).toBe(false);
+  });
+  it('ownerAlive=true DOES apply in the absence branch — the one shape a hand-briefed subagent\'s own row can ever take', () => {
+    const states = sessionStateByName([{ kind: 'background', name: 'conveyor-9999', state: 'working' }]);
+    const lease = {
+      session: 'conveyor-5103',
+      workerSession: 'long-lived-owner',
+      acquiredAt: new Date(NOW - (GRACE_MS + 5 * 60_000)).toISOString(),
+    };
+    expect(sessionGoneForLease(lease, states, { nowMs: NOW, ownerAlive: true })).toBe(false);
+  });
+});
+
 describe('sessionPidAliveByName — #3383 real process-liveness per session, reusing driver-watchdog\'s own probe', () => {
   it('a row with its own pid uses the direct kill(pid,0) probe, never the ps scan', () => {
     const isPidAlive = vi.fn((pid) => pid === 111);
@@ -680,6 +826,40 @@ describe('sessionPidAliveByName — #3383 real process-liveness per session, reu
     expect(sessionPidAliveByName([null, {}, { kind: 'background' }]).size).toBe(0);
     expect(sessionPidAliveByName([]).size).toBe(0);
     expect(sessionPidAliveByName(null).size).toBe(0);
+  });
+});
+
+describe('fetchSessionSignals — #xbk2is9 the three-way `agents` null contract (round-6 convergence standards-conformance finding: this was previously undefended)', () => {
+  it('a failed `claude` call → states/agents both null, pidAlive empty', () => {
+    const exec = () => { throw new Error('claude: command not found'); };
+    const result = fetchSessionSignals({}, { exec });
+    expect(result.states).toBe(null);
+    expect(result.agents).toBe(null);
+    expect(result.pidAlive.size).toBe(0);
+  });
+  it('--no-check-sessions disables the axis with no exec call at all — states/agents both null', () => {
+    const exec = () => { throw new Error('must not be called'); };
+    const result = fetchSessionSignals({ 'no-check-sessions': true }, { exec });
+    expect(result.states).toBe(null);
+    expect(result.agents).toBe(null);
+  });
+  it('a valid listing with interactive rows but ZERO background rows → `states` degrades to null (#1921), but `agents` is the REAL array — the whole reason this function returns both', () => {
+    const exec = (cmd) => {
+      if (cmd === 'claude') return JSON.stringify([{ kind: 'interactive', sessionId: 'owner-1', cwd: '/somewhere' }]);
+      if (cmd === 'ps') return ''; // scanPsOutput's own `ps aux` read — irrelevant here, just must not throw
+      throw new Error(`unexpected exec: ${cmd}`);
+    };
+    const result = fetchSessionSignals({}, { exec });
+    expect(result.states).toBe(null); // #1921 — indistinguishable from a bad read, for the background-only axis
+    expect(Array.isArray(result.agents)).toBe(true); // but the raw listing IS real and IS returned
+    expect(result.agents).toHaveLength(1);
+    expect(result.agents[0].sessionId).toBe('owner-1');
+  });
+  it('a `claude` call that succeeds but returns non-array JSON → agents null too (never a guess at a malformed read)', () => {
+    const exec = (cmd) => (cmd === 'claude' ? JSON.stringify({ not: 'an array' }) : '');
+    const result = fetchSessionSignals({}, { exec });
+    expect(result.states).toBe(null);
+    expect(result.agents).toBe(null);
   });
 });
 

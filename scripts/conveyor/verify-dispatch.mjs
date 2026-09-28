@@ -20,11 +20,40 @@
  * recovery case where a prior runner process died mid-run, stranding the marker: the next tick's dispatch just
  * re-runs it, same as a human would).
  *
- * ONE REQUEST PER TICK, HANDLED TO COMPLETION BEFORE THE NEXT IS CONSIDERED. The runner is a SINGLETON (only
- * one live instance), so there is no risk of two dispatches racing the same lane's marker — this pass simply
- * never starts a second `verify-lane.mjs` run until the current one's terminal marker is written. Concurrent
- * lanes each still contend for host CPU exactly as a directly-run `npm run test:unit` always has (#3372
- * already shrinks the common case); this file changes WHO runs the gate, not how expensive it is.
+ * OFFERS EVERY PENDING LANE TO THE ADMISSION SEMAPHORE AT ONCE — THIS FILE DOES NOT ITSELF BOUND CONCURRENCY
+ * (#4360). Earlier revisions of this file `await`ed each lane's `spawnGateBounded` call before starting the
+ * next one, which serialized every dispatch to ONE lane at a time even though `heavy-admission.mjs`'s own cap
+ * (2 heavy + 1 fast by default) already lets that many gates run at once safely. The fix is entirely in this
+ * file's own loop: collect every pending lane's `spawnGateBounded` promise WITHOUT awaiting between them, then
+ * `Promise.allSettled` them together (never `Promise.all` — one lane's timeout/non-zero exit must never sink
+ * another lane's `dispatched`/`failures` bookkeeping). NO NEW ADMISSION LOGIC LIVES HERE, BY DESIGN (card
+ * #4360's own corrected plan, argued at length there): `verify-lane.mjs`'s own `acquireSlotBlocking` call
+ * remains the SOLE chokepoint (see the comment at that call site) — this file must NEVER also acquire a slot
+ * itself before spawning, which would either double-admit (two slots consumed per lane) or stall a child
+ * behind a slot its own parent holds. What actually bounds REAL CONCURRENT GATE EXECUTION at the cap is each
+ * spawned child's own wait on that ONE shared semaphore — this loop merely stops artificially limiting itself
+ * to offering one candidate at a time; it names no cap and enforces none.
+ *
+ * TWO REAL BEHAVIORAL DELTAS FROM THE OLD SERIAL LOOP, STATED PLAINLY RATHER THAN GLOSSED OVER:
+ *   (a) `acquireSlotBlocking` FAILS OPEN on its own queuing timeout (`heavy-admission.mjs`'s own documented
+ *       residual-risk tradeoff, unchanged by this file) — a lane that waits that long proceeds UNSLOTTED. With
+ *       several lanes now offered at once instead of one, a backlog larger than the cap makes that fail-open
+ *       path reachable in a way the old serial loop's near-always-empty queue rarely hit; when it fires, more
+ *       gates run concurrently than the cap names.
+ *   (b) each pending lane's OWN `QUEUE_PHASE_CEILING_MS` timer (below) now starts AT SPAWN — i.e. ALL of them
+ *       at once — rather than one at a time the way the old serial loop gave each lane a fresh, uncontended
+ *       queue budget. A lane queued behind the cap now spends real time waiting on siblings' admission before
+ *       its own gate starts, counted against ITS OWN ceiling from the moment this loop offered it; if that wait
+ *       outlasts the ceiling, the lane is killed with `timedOutPhase:'queue'` and retried next tick — new
+ *       contention the serial loop never created for itself, though `QUEUE_PHASE_CEILING_MS` is set well above
+ *       `heavy-admission.mjs`'s own hard give-up ceiling specifically so a lane that is merely queued, not
+ *       stuck, is not expected to trip it in the ordinary case.
+ * THE RUNNER IS STILL A SINGLETON (only one live daemon dispatches at all, #3878's runner-lock lease) and a
+ * single sweep still walks each lane AT MOST ONCE (`laneIndicesIn` never repeats a directory), so no same-lane
+ * double-dispatch is possible — there is no per-lane lock to add, only this invariant to keep true. Concurrent
+ * lanes still contend for host CPU exactly as directly-run `npm run test:unit` calls always have (#3372 already
+ * shrinks the common case); this file changes how MANY gates it may OFFER to the semaphore at once, not how
+ * many the semaphore actually admits, and not how expensive any one of them is.
  *
  * CORRECTION (#3878, epic #3383). The paragraph above states the intended safety property, but confirmed by
  * direct read (grep over `we:skills-src/conveyor/runner.mjs` turns up zero references to this file), this
@@ -194,12 +223,14 @@ function laneIndicesIn(poolDir) {
     .sort((a, b) => a - b);
 }
 
-/** Pool names under POOL_ROOT that hold lanes — mirrors lease-reaper.mjs's `poolsToScan` (no `--pool` filter
- *  here: unlike the reaper, a delivery agent may request verification from any pool this runner drives). */
-function poolsToScan() {
-  if (!existsSync(POOL_ROOT)) return [];
-  return readdirSync(POOL_ROOT)
-    .filter((name) => laneIndicesIn(join(POOL_ROOT, name)).length > 0)
+/** Pool names under `poolRoot` that hold lanes — mirrors lease-reaper.mjs's `poolsToScan` (no `--pool` filter
+ *  here: unlike the reaper, a delivery agent may request verification from any pool this runner drives).
+ *  Defaults to the module-level {@link POOL_ROOT}; a caller only ever overrides it in a test (#4360), never in
+ *  production. */
+function poolsToScan(poolRoot = POOL_ROOT) {
+  if (!existsSync(poolRoot)) return [];
+  return readdirSync(poolRoot)
+    .filter((name) => laneIndicesIn(join(poolRoot, name)).length > 0)
     .sort();
 }
 
@@ -242,13 +273,17 @@ function parseFlags(argv) {
  * its own process group so a timeout kill reaches `verify-lane.mjs` → its own `execSync`'d shell → the real
  * test runner as a unit, never orphaning the grandchild (the same failure mode the original ceiling PR fixed).
  * @param {string[]} args        argv for `node` (the target script path first, mirrors `execFileSync`'s usage)
- * @param {{queueCeilingMs:number, gateCeilingMs:number}} ceilings
+ * @param {{queueCeilingMs:number, gateCeilingMs:number, onGateStarted?:() => void}} ceilings `onGateStarted`
+ *   (#4360) fires exactly once, synchronously, the instant {@link GATE_STARTED_MARKER} is seen — the caller's
+ *   one hook for recording a real per-lane gate-start timestamp (the live proof this card's Proof plan needs),
+ *   never used to alter timing or control flow here. A throwing callback is swallowed — a logging hook must
+ *   never be able to break the gate run it is only observing.
  * @returns {Promise<{pid:number}>} resolves on a clean (possibly non-zero, non-timeout) exit
  * @throws {Error & {status:number|null, signal:string|null, pid:number, timedOutPhase?:'queue'|'gate'}}
  *   shaped like `execFileSync`'s own timeout/non-zero errors, plus `timedOutPhase` so the caller can log which
  *   ceiling actually fired.
  */
-export function spawnGateBounded(args, { queueCeilingMs, gateCeilingMs }) {
+export function spawnGateBounded(args, { queueCeilingMs, gateCeilingMs, onGateStarted } = {}) {
   return new Promise((resolvePromise, rejectPromise) => {
     const child = spawn('node', args, { stdio: ['ignore', 'pipe', 'pipe'], detached: true });
     let stderrTail = '';
@@ -274,6 +309,13 @@ export function spawnGateBounded(args, { queueCeilingMs, gateCeilingMs }) {
         markerSeen = true;
         clearTimeout(timer);
         timer = setTimeout(onTimeout('gate'), gateCeilingMs);
+        if (typeof onGateStarted === 'function') {
+          try {
+            onGateStarted();
+          } catch {
+            // A logging hook's own failure must never take down the gate run it is only observing.
+          }
+        }
       }
     });
     // Drain stdout so a full pipe buffer can never back-pressure/stall the child — this file never reads it
@@ -312,10 +354,20 @@ export function spawnGateBounded(args, { queueCeilingMs, gateCeilingMs }) {
  * `process.exit` — this is the one thing #3878's standalone Verify daemon
  * (`we:skills-src/conveyor/verify-daemon.mjs`) ticks directly, and `main()` below is now a thin CLI shell over
  * it (exit code + `--json`/plain formatting only).
- * @param {{dryRun?:boolean}} [o]
+ *
+ * CONCURRENT DISPATCH (#4360). The scan below (walking pools/lanes, reading each one's marker/branch) is
+ * synchronous and unchanged — it still visits each lane AT MOST ONCE per sweep, which is the whole "no
+ * same-lane double-dispatch" invariant (see file header). What changed is what happens with the lanes that
+ * actually need a gate: every one of them is handed to `spawnGate` WITHOUT awaiting the previous one, and all
+ * of their promises are settled together via `Promise.allSettled` — never `Promise.all` — so one lane's
+ * rejection can never swallow another lane's own `dispatched`/`failures` entry.
+ * @param {{dryRun?:boolean, spawnGate?:typeof spawnGateBounded, poolRoot?:string}} [o] `spawnGate` and
+ *   `poolRoot` (#4360) default to the real {@link spawnGateBounded} and the module-level {@link POOL_ROOT} — the
+ *   ONLY reason either is ever overridden is a test that needs a controllable fake and an isolated fixture pool
+ *   to prove lanes are dispatched concurrently, never a production caller.
  * @returns {Promise<{dryRun:boolean, dispatched:Array<object>, failures:Array<object>, skippedOutOfScope:Array<object>}>}
  */
-export async function runVerifyDispatch({ dryRun = false } = {}) {
+export async function runVerifyDispatch({ dryRun = false, spawnGate = spawnGateBounded, poolRoot = POOL_ROOT } = {}) {
   const dispatched = [];
   const failures = [];
   // epic #3383 — read ONCE per run, never per lane. Both reads are cheap, but the marker/queue pair must be a
@@ -327,8 +379,11 @@ export async function runVerifyDispatch({ dryRun = false } = {}) {
     log(`⊂ queue-scoped: verify-dispatch will run the gate only for lanes on ${scopeIds.length ? scopeIds.join(', ') : '(nothing — the queue is empty)'}`);
   }
 
-  for (const pool of poolsToScan()) {
-    const poolDir = join(POOL_ROOT, pool);
+  // 1. The synchronous scan — decide WHICH lanes need a gate this sweep. Nothing here spawns anything, so this
+  //    walk is exactly as serial as it always was; only the dispatch step below (2) goes concurrent.
+  const pending = [];
+  for (const pool of poolsToScan(poolRoot)) {
+    const poolDir = join(poolRoot, pool);
     for (const lane of laneIndicesIn(poolDir)) {
       const dir = join(poolDir, `lane-${lane}`);
       const headSha = tryGit(['rev-parse', 'HEAD'], dir);
@@ -351,42 +406,67 @@ export async function runVerifyDispatch({ dryRun = false } = {}) {
         continue;
       }
 
-      log(`  dispatching verify for ${pool}/lane-${lane} @ ${String(headSha).slice(0, 8)} (suites: ${marker.suites || 'default'})…`);
-      try {
-        const args = [VERIFY_LANE_CLI, `--repo=${dir}`, '--json'];
-        if (marker.suites) args.push(`--gate=${marker.suites}`);
-        await spawnGateBounded(args, { queueCeilingMs: QUEUE_PHASE_CEILING_MS, gateCeilingMs: VERIFY_DISPATCH_TIMEOUT_MS });
-        dispatched.push({ pool, lane, sha: headSha });
-      } catch (e) {
-        // A red gate is a NORMAL, expected exit (verify-lane exits 2 on red) — it already recorded the red
-        // marker correctly; this is not a dispatch failure. Only a THROW verify-lane itself did not turn into
-        // a marker write (a spawn error, an unexpected non-{0,2} exit) counts as one, and is logged, never
-        // fatal to the rest of this pass — one bad lane must not block dispatching the others.
-        const status = Number.isFinite(e && e.status) ? e.status : null;
-        // Trust `e.timedOutPhase` directly — it is `spawnGateBounded`'s OWN authoritative record of whether
-        // ONE OF OUR TWO TIMERS actually fired, set only inside its own `onTimeout` handler. A prior version
-        // of this check re-derived "timed out" from the exit shape alone (`status === null && signal present`)
-        // — but that shape is NOT unique to our own kill: an external actor (an operator's `kill -9`, an OS
-        // OOM-kill, a host restart) killing the spawned `verify-lane.mjs` process produces the exact same
-        // `status:null, signal:<sig>` pair, and the re-derived check would then misattribute that external
-        // kill as "exceeded the queue/gate ceiling" — misleading during exactly the incident investigation
-        // this ceiling exists to support (found in review, epic #3383). Functionally harmless either way (the
-        // lane lands in `failures` and gets retried next tick regardless), but the LABEL must be accurate.
-        const timedOut = !!(e && e.timedOutPhase);
-        if (timedOut) {
-          const phase = e.timedOutPhase || 'gate';
-          const ceilingMs = phase === 'queue' ? QUEUE_PHASE_CEILING_MS : VERIFY_DISPATCH_TIMEOUT_MS;
-          log(`  ⚠ ${pool}/lane-${lane}: verify-lane exceeded the ${ceilingMs}ms ${phase}-phase ceiling — killed (tree included). Marker is left running/stranded; the next tick re-runs it, same as any other killed-mid-run recovery.`);
-          failures.push({ pool, lane, sha: headSha, timedOut: true, timedOutPhase: phase });
-        } else if (status === 2) {
-          dispatched.push({ pool, lane, sha: headSha, red: true });
-        } else {
-          log(`  ⚠ ${pool}/lane-${lane}: verify-lane dispatch failed (non-fatal): ${String(e?.message || e).split('\n')[0]}`);
-          failures.push({ pool, lane, sha: headSha });
-        }
-      }
+      pending.push({ pool, lane, dir, headSha, suites: marker.suites });
     }
   }
+
+  if (pending.length === 0) return { dryRun, dispatched, failures, skippedOutOfScope };
+
+  // 2. The concurrent dispatch — fire every pending lane's gate without awaiting between them (#4360). No new
+  //    admission logic lives here: each spawned `verify-lane.mjs` child queues on `heavy-admission.mjs`'s OWN
+  //    capacity semaphore via its own `acquireSlotBlocking` call (the sole chokepoint — see the comment at that
+  //    call site), so offering several candidates at once here is sufficient to bound real concurrent gate
+  //    execution at the cap.
+  const results = await Promise.allSettled(
+    pending.map(({ pool, lane, dir, headSha, suites }) => {
+      log(`  dispatching verify for ${pool}/lane-${lane} @ ${String(headSha).slice(0, 8)} (suites: ${suites || 'default'})…`);
+      const args = [VERIFY_LANE_CLI, `--repo=${dir}`, '--json'];
+      if (suites) args.push(`--gate=${suites}`);
+      return spawnGate(args, {
+        queueCeilingMs: QUEUE_PHASE_CEILING_MS,
+        gateCeilingMs: VERIFY_DISPATCH_TIMEOUT_MS,
+        // #4360 — the live proof this card's Proof plan needs: a real per-lane timestamp for when the gate
+        // actually started (as opposed to when it was merely offered to the semaphore), so two lanes' overlap
+        // can be shown from real evidence rather than assumed from the code shape.
+        onGateStarted: () => log(`  ▶ gate started for ${pool}/lane-${lane} @ ${String(headSha).slice(0, 8)} — ${new Date().toISOString()}`),
+      });
+    }),
+  );
+
+  results.forEach((result, i) => {
+    const { pool, lane, headSha } = pending[i];
+    if (result.status === 'fulfilled') {
+      dispatched.push({ pool, lane, sha: headSha });
+      return;
+    }
+    // A red gate is a NORMAL, expected exit (verify-lane exits 2 on red) — it already recorded the red
+    // marker correctly; this is not a dispatch failure. Only a THROW verify-lane itself did not turn into
+    // a marker write (a spawn error, an unexpected non-{0,2} exit) counts as one, and is logged, never
+    // fatal to the rest of this pass — one bad lane must not block dispatching the others.
+    const e = result.reason;
+    const status = Number.isFinite(e && e.status) ? e.status : null;
+    // Trust `e.timedOutPhase` directly — it is `spawnGateBounded`'s OWN authoritative record of whether
+    // ONE OF OUR TWO TIMERS actually fired, set only inside its own `onTimeout` handler. A prior version
+    // of this check re-derived "timed out" from the exit shape alone (`status === null && signal present`)
+    // — but that shape is NOT unique to our own kill: an external actor (an operator's `kill -9`, an OS
+    // OOM-kill, a host restart) killing the spawned `verify-lane.mjs` process produces the exact same
+    // `status:null, signal:<sig>` pair, and the re-derived check would then misattribute that external
+    // kill as "exceeded the queue/gate ceiling" — misleading during exactly the incident investigation
+    // this ceiling exists to support (found in review, epic #3383). Functionally harmless either way (the
+    // lane lands in `failures` and gets retried next tick regardless), but the LABEL must be accurate.
+    const timedOut = !!(e && e.timedOutPhase);
+    if (timedOut) {
+      const phase = e.timedOutPhase || 'gate';
+      const ceilingMs = phase === 'queue' ? QUEUE_PHASE_CEILING_MS : VERIFY_DISPATCH_TIMEOUT_MS;
+      log(`  ⚠ ${pool}/lane-${lane}: verify-lane exceeded the ${ceilingMs}ms ${phase}-phase ceiling — killed (tree included). Marker is left running/stranded; the next tick re-runs it, same as any other killed-mid-run recovery.`);
+      failures.push({ pool, lane, sha: headSha, timedOut: true, timedOutPhase: phase });
+    } else if (status === 2) {
+      dispatched.push({ pool, lane, sha: headSha, red: true });
+    } else {
+      log(`  ⚠ ${pool}/lane-${lane}: verify-lane dispatch failed (non-fatal): ${String(e?.message || e).split('\n')[0]}`);
+      failures.push({ pool, lane, sha: headSha });
+    }
+  });
 
   return { dryRun, dispatched, failures, skippedOutOfScope };
 }

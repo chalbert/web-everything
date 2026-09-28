@@ -2,12 +2,14 @@
 bornAs: xzefyn4
 kind: story
 size: 5
-status: open
+status: resolved
 priority: high
 tier: pinned
 rank: v
 scope: ["we:scripts/conveyor/build-dispatch-policy.mjs", "we:skills-src/conveyor/build-dispatch-daemon.mjs", "we:scripts/conveyor/__tests__/build-dispatch-policy.test.mjs", "we:skills-src/conveyor/__tests__/build-dispatch-daemon.test.mjs"]
 dateOpened: "2026-09-28"
+dateStarted: "2026-09-28"
+dateResolved: "2026-09-28"
 preparedDate: "2026-09-28"
 preparedAgainstSha: "787f3988a8e5eeed78bd8d994ad9d513d489423b"
 tags: []
@@ -64,3 +66,35 @@ An open item is one backlog card with either (a) durable in-flight build evidenc
 
 1. **Executable** — `we:scripts/conveyor/__tests__/build-dispatch-policy.test.mjs` and `we:skills-src/conveyor/__tests__/build-dispatch-daemon.test.mjs` fail on `main` today (new cases) and pass after this lands; `npm run check:standards` passes.
 2. **Observable** — `we:skills-src/conveyor/build-dispatch-daemon.mjs --dry-run` shows "open items N/7" (or the confirmed live cap) and holds new builds once full, naming which open items fill it, per the proof plan.
+
+## Progress
+
+- Task 1 — the LIVE daemon (launchd `com.we.build-dispatch-daemon.plist`, confirmed via `ps`/plist
+  ProgramArguments) runs `--max-concurrent=2` today — neither the "3" coded default nor the operator's reported
+  "5". The implementation does not hardcode either guess; `maxOpenItems` is its own independent field.
+- Task 2 — read `we:scripts/conveyor/build-dispatch-claim.mjs` in full: the "release claim on detected terminal
+  build failure" path already exists, landed same-day by #4349 (`a538d4510`, "settle the delivery wrapper's run
+  record + build-dispatch claim on every terminal exit") — `deliverItem` now settles/releases on every exit, not
+  just a PR-delivered one. Nothing to wire; the stated 240-minute TTL is now only the floor for a wrapper that
+  itself never terminates.
+- Task 3 — `maxOpenItems` (default 7) + `wip-cap` rule added to `we:scripts/conveyor/build-dispatch-policy.mjs`'s
+  `planBuildDispatch`, built from the union of `inFlightByNum` keys and `openPrs` filtered through a new
+  `prDeliveredNum` helper (refactored out of the existing `prDeliversNum`, same regex, no duplicated logic).
+  Decrements a working `Set` copy inside the per-candidate loop exactly like the existing `cap` rule's `slots`,
+  so multiple candidates in one tick are correctly bounded (see the new boundary test).
+- Task 4 — checked LIVE `openPrs` data (`gh pr list` across all 3 constellation repos, 2026-09-28): 3 open PRs,
+  all in `we`; 2 match the `lane/<num>-slug` delivery shape, 1 (`lane/investigate-lane-reset`) does not. This
+  confirms the `maxOpenPrs`/`maxOpenItems` divergence the Risks section flagged is real, not hypothetical — kept
+  both thresholds, documented the distinct purpose in the policy file's header comment.
+- Task 5 — `--max-open-items=N` threaded through `policyFrom` (now exported for direct unit testing) in
+  `we:skills-src/conveyor/build-dispatch-daemon.mjs`, the dry-run JSON report (`policy.maxOpenItems`, new
+  `openItems: {count, cap, filling}`), the dry-run text summary line, and the live daemon's per-tick status-line
+  JSON. `tick.plan.inFlight` (the display-only field) is untouched — pinned by a test.
+- Live proof (2026-09-28, `--dry-run --json`): BEFORE this change, the report has no `openItems` field and
+  `policy` lists only `maxConcurrentBuilds`/`maxOpenPrs`. AFTER, `policy.maxOpenItems: 7` and
+  `openItems: {count: 5, cap: 7, filling: ["4108","4317","4347","4360","xvgqaqg"]}` — matching the union of
+  durable in-flight builds and delivering PRs, correctly excluding the non-delivering PR.
+- Red-then-green: the new test cases were run against the pre-fix source (via a scoped `git stash` on just the
+  two implementation files) and failed for the stated reason (missing `openItems`/`wip-cap`/`policyFrom`); after
+  restoring the fix, the full targeted `vitest related` run (57 tests across both test files plus a sibling
+  suite) is green.

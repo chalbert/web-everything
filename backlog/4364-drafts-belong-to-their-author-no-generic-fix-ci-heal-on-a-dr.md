@@ -4,7 +4,7 @@ kind: story
 size: 8
 priority: high
 status: open
-scope: ["we:scripts/conveyor/reconcile-core.mjs", "we:scripts/operations/ci-heal-pr-dispatch.mjs", "we:scripts/conveyor/review-status-tag.mjs", "we:scripts/conveyor/build-dispatch-claim.mjs", "we:scripts/conveyor/fix-dispatch-claim.mjs", "we:scripts/operations/deliver-item-wrapper.mjs", "we:scripts/operations/promote-draft-pr-dispatch.mjs", "we:scripts/merge-ai-prs.mjs", "we:scripts/conveyor/parked-pr-conflict-watch.mjs", "we:scripts/lib/pr-events.mjs", "we:scripts/verify-lane.mjs", "we:scripts/conveyor/__tests__/reconcile-core.test.mjs", "we:scripts/operations/__tests__/ci-heal-pr-dispatch.test.mjs", "we:scripts/__tests__/merge-ai-prs-draft-invisible.test.mjs"]
+scope: ["we:scripts/conveyor/reconcile-core.mjs", "we:scripts/operations/ci-heal-pr-dispatch.mjs", "we:scripts/conveyor/review-status-tag.mjs", "we:skills-src/conveyor/build-dispatch-daemon.mjs", "we:scripts/conveyor/build-dispatch-policy.mjs", "we:scripts/conveyor/build-dispatch-claim.mjs", "we:scripts/conveyor/fix-dispatch-claim.mjs", "we:scripts/operations/deliver-item-wrapper.mjs", "we:scripts/operations/promote-draft-pr-dispatch.mjs", "we:scripts/merge-ai-prs.mjs", "we:scripts/conveyor/parked-pr-conflict-watch.mjs", "we:scripts/lib/pr-snapshot.mjs", "we:scripts/lib/pr-events.mjs", "we:scripts/verify-lane.mjs", "we:scripts/conveyor/__tests__/reconcile-core.test.mjs", "we:scripts/operations/__tests__/ci-heal-pr-dispatch.test.mjs", "we:skills-src/conveyor/__tests__/build-dispatch-daemon.test.mjs", "we:scripts/conveyor/__tests__/build-dispatch-policy.test.mjs", "we:scripts/__tests__/merge-ai-prs-draft-invisible.test.mjs"]
 dateOpened: "2026-09-28"
 tags: []
 ---
@@ -48,14 +48,34 @@ Design) must not be applied to a draft either.
 daemon this card touches gates on this SAME `pr.isDraft` field already threaded through `we:reconcile-core.mjs`
 (see `deriveReviewStatus`'s existing `isDraft` param) — no new draft-detection is invented.
 
-**Generic fix/ci-heal refuses a draft, mirroring the EXISTING review refusal exactly.**
+**Generic fix/ci-heal refuses a draft, mirroring the EXISTING review refusal exactly — every dispatch branch,
+not only three of them (first-pass gap: the advisory-fix and ordinary bounced-review-fix branches were missed).**
 `we:scripts/conveyor/reconcile-core.mjs`'s `dispatchReviewRow` already refuses review on `pr?.isDraft` FIRST,
-ahead of every other check (around line 1063: `if (pr?.isDraft) refuse('draft', ...)`). The ci-heal branch
-(`phase === 'ci-red'`, lines ~1532-1709) and the two conflict-fix branches (stacked-rebase ~1930-1940, main-base
-~2040) get the IDENTICAL refusal shape, checked first, for the same reason: a draft's red check or conflict is
-the author's own problem to resolve or delegate, not the daemon's. `we:scripts/operations/ci-heal-pr-dispatch.mjs`
-(the execution-side operation, which today has ZERO mention of `draft` anywhere) gets the same guard as a second,
-defense-in-depth layer — a planning refusal that the execution layer could still race past on a stale plan.
+ahead of every other check (around line 1063: `if (pr?.isDraft) refuse('draft', ...)`). FIVE branches get the
+IDENTICAL refusal shape, checked first, for the same reason a draft's red check or conflict is the author's own
+problem to resolve or delegate, not the daemon's: the ci-heal branch (`phase === 'ci-red'`, lines ~1532-1709),
+the two conflict-fix branches (stacked-rebase ~1930-1940, main-base ~2040), the **advisory-fix branch**
+(`phase === 'needs-human'` + `advisory:changes`, `we:scripts/conveyor/reconcile-core.mjs:1750`, `dispatch.push({
+kind: 'fix', mode: 'advisory-fix', ... })`), and the **ordinary bounced-review fix branch** (the ELSE arm after
+`dispatchReviewRow` at `we:scripts/conveyor/reconcile-core.mjs:2078`, `dispatch.push({ kind: 'fix', ... })` with
+no mode qualifier) — neither of the last two is protected by `dispatchReviewRow`'s own refusal (that function is
+only called for the REVIEW half, `we:scripts/conveyor/reconcile-core.mjs:1985`), so a withdrawn draft with
+findings already on its thread could still reach either fix path today.
+
+**Execution-side guard needs REAL draft data, which does not exist at three real boundaries today (first-pass
+gap: guards tested only against injected `{isDraft: true}` fixtures would still pass while production writes to
+or heals drafts).** `pr.isDraft` is already in `we:scripts/lib/pr-snapshot.mjs`'s `SNAPSHOT_FIELDS` (the shared
+open-PR snapshot supports it), but nothing REQUESTS it at the call sites this card touches:
+`we:scripts/merge-ai-prs.mjs`'s own direct `gh pr list --json` call (`:4018`) omits `isDraft` from its field
+list; `we:scripts/conveyor/parked-pr-conflict-watch.mjs#defaultListParkedPrs` (`:1359`) omits it from BOTH the
+shared-snapshot field request and the direct `gh pr list --json` fallback. Both gain `isDraft` in their existing
+field lists — a one-line addition at each, not a new read. `we:scripts/operations/ci-heal-pr-dispatch.mjs`'s
+execution-side `planned` object (`:273`, built from `entry`/`resolveWorkUnit`) carries no `isDraft` field at all
+and has no fresh reader of its own — the "defense-in-depth" layer the first pass promised did not actually exist
+yet. `dispatchCiHeal` (`we:scripts/operations/ci-heal-pr-dispatch.mjs:65`) gains an injectable
+`readDraftState = ({repo, pr}) => ...` seam (mirroring its own existing `readFixClaim`/`readBrief` injection
+pattern) that re-reads `isDraft` fresh, at dispatch time, straight off `gh pr view` — never trusting the
+planning-time snapshot alone, which is the actual race the "second layer" was meant to close.
 
 **The delegation path a builder MAY use instead of fixing it personally**, modeled on `we:scripts/verify-lane.mjs`'s
 `request`/`check` shape: the builder (or its wrapper) drops a request marker naming the role needed (e.g.
@@ -63,18 +83,32 @@ defense-in-depth layer — a planning refusal that the execution layer could sti
 session scoped to that one fix, cheaper and less `gh`-heavy than a full reconcile-core round because it never
 re-derives review status, never posts a review-adjacent comment thread, and works directly in the builder's own
 lane rather than a fresh clone. This card wires reconcile-core's draft branches to STOP short-circuiting into
-`kind: 'ci-heal'`/`kind: 'fix'` for a draft, but does not itself build the dispatcher — that is `4361`'s job,
-named here as a hard prerequisite (`blockedBy`).
+`kind: 'ci-heal'`/`kind: 'fix'` for a draft, but does not itself build the dispatcher — that is `4361`'s job.
+Task 6 below sequences the delegation call after `4361` explicitly; no card-level `blockedBy` (Tasks 1-5 need
+nothing from it).
 
-**The author's claim survives its own draft.** `we:scripts/conveyor/build-dispatch-claim.mjs` retires a claim
-"when an open PR delivers the item" (its own header, lines 14-15) — today that fires the INSTANT the PR opens,
-draft or not, which is exactly how PR #2855's claim went stale while the author was still actively pushing to
-it. The retirement condition becomes "an open PR delivers the item AND that PR is not a draft" — the claim
-survives the whole author-owned window and is retired at the SAME promotion tick that flips ownership to the
-review/fix daemons, never earlier. `we:scripts/operations/deliver-item-wrapper.mjs` (the delivery agent's own
-process) is the other half: it must refresh/hold this claim for as long as it keeps pushing to its own draft, and
-release it only at real exit — the same terminal-outcome discipline #4349 is already building for this exact
-claim's settlement, reused rather than duplicated.
+**The author's claim survives its own draft (first-pass gap: this pointed at the wrong module and the wrong
+mechanism).** `we:scripts/conveyor/build-dispatch-claim.mjs` is only the acquire/release PRIMITIVE (lock-dir
+mkdir/TTL) — it holds no "PR delivers it" logic at all. The actual retirement predicate is `doneWhy` in
+`we:skills-src/conveyor/build-dispatch-daemon.mjs` (`:157`: `const pr = openPrs.find((p) => prDeliversNum(p,
+n)); if (pr) return ...`), fed by `we:scripts/conveyor/build-dispatch-policy.mjs#normalizeOpenPrs` (`:136`),
+which today projects `{repo, number, headRefName, labels, files}` — **`isDraft` is discarded before `doneWhy`
+ever sees it**, so PR #2855's claim went stale not because the predicate ignored draft state, but because the
+data never reached the predicate at all. The real fix: `normalizeOpenPrs` widens its projected shape to include
+`isDraft` (reading it off the SAME `gh pr list`/webhook payload its caller already has, once #2812/pr-events or
+the daemon's own PR read carries it), and `doneWhy`'s check becomes `if (pr && !pr.isDraft) return ...` — the
+claim survives the whole author-owned window without any SEPARATE hold/refresh mechanism, because a draft PR
+simply never satisfies "delivers it" in the first place. **No wrapper-side refresh/hold is needed and none is
+added**: the first pass proposed `we:scripts/operations/deliver-item-wrapper.mjs` must "refresh/hold this claim
+for as long as it keeps pushing to its own draft, release only at real exit" — but the wrapper settles and exits
+right after opening the PR (`we:scripts/operations/deliver-item-wrapper.mjs:560`), well before the draft is
+promoted, so a design that depended on the ORIGINAL wrapper process staying alive across the whole draft window
+was never buildable. Retirement instead rides the SAME self-clearing pattern
+`we:scripts/operations/promote-draft-pr-dispatch.mjs`'s own header already documents for the review daemon
+(`we:scripts/operations/promote-draft-pr-dispatch.mjs:13`: "the review daemon's OWN next tick reads
+`pr.isDraft: false` off the SAME PR"): the moment promotion flips `isDraft` false, the very next build-dispatch
+tick's `doneWhy` naturally retires the claim on its own — `we:scripts/operations/promote-draft-pr-dispatch.mjs`
+needs no NEW coupling to the build claim at all.
 
 **Signal source: push, not poll.** Any NEW code this card adds that needs to know "did this draft's CI just go
 red" reads it from `we:scripts/lib/pr-events.mjs`'s webhook feed (the daemon-side client already built for
@@ -93,58 +127,120 @@ the author's-own-status the operator's exception names) but applies no OTHER lab
 ## Interfaces
 
 - `we:scripts/conveyor/reconcile-core.mjs` — new refusal reason `'draft'` (reusing the SAME string
-  `dispatchReviewRow` already uses) added to the ci-heal branch and both conflict-fix branches, each checked
-  FIRST in that branch, each producing the same `{ role, reason: 'draft', why }` shape review's own refusal
-  already emits — one shared helper, not three copies.
-- `we:scripts/operations/ci-heal-pr-dispatch.mjs` — the same `isDraft` guard at its own entry point, refusing
-  before any repair attempt.
-- `we:scripts/conveyor/build-dispatch-claim.mjs` — the retirement predicate gains `&& !pr.isDraft` (or
-  equivalent) alongside "an open PR delivers the item"; unaffected: TTL expiry, "item left the cleared queue",
-  and explicit release on dispatch failure.
-- `we:scripts/operations/deliver-item-wrapper.mjs` — holds/refreshes its own build-dispatch claim across pushes
-  to its own draft; releases it on real terminal exit (shares #4349's settlement work, does not re-derive it).
-- `we:scripts/merge-ai-prs.mjs` — a draft PR is excluded before `planLabelDrain`'s comment/label-writing step
-  runs for it, not merely reported as a "skip" with a written reason.
-- `we:scripts/conveyor/parked-pr-conflict-watch.mjs` — an `isDraft` exclusion at the top of its detection loop,
-  before any label/comment decision.
+  `dispatchReviewRow` already uses) added to FIVE branches: ci-heal, both conflict-fix branches, the
+  advisory-fix branch (`:1750`), and the ordinary bounced-review fix branch (`:2078`) — each checked FIRST in
+  its branch, each producing the same `{ role, reason: 'draft', why }` shape review's own refusal already
+  emits — one shared helper, not five copies.
+- `we:scripts/operations/ci-heal-pr-dispatch.mjs` — a new injectable `readDraftState` seam at `dispatchCiHeal`'s
+  entry (mirroring its existing `readFixClaim` injection), re-reading `isDraft` FRESH at dispatch time; refuses
+  before any repair attempt. Never trusts `planned.isDraft` alone (the planning-time value the reconcile-core
+  refusal above already caught) — this is the real second, race-closing layer.
+- `we:scripts/lib/pr-snapshot.mjs` — no change to `SNAPSHOT_FIELDS` (`isDraft` is already declared there); the
+  two callers below simply start requesting it.
+- `we:scripts/merge-ai-prs.mjs` / `we:scripts/conveyor/parked-pr-conflict-watch.mjs` — both add `isDraft` to
+  their existing `gh pr list --json`/shared-snapshot field lists (`:4018` and `:1359` respectively).
+- `we:scripts/conveyor/build-dispatch-policy.mjs#normalizeOpenPrs` — widens its projected PR shape to include
+  `isDraft` (currently `{repo, number, headRefName, labels, files}`).
+- `we:skills-src/conveyor/build-dispatch-daemon.mjs#doneWhy` — the retirement predicate (NOT
+  `we:scripts/conveyor/build-dispatch-claim.mjs`, which holds no such logic) gains `&& !pr.isDraft` alongside
+  "an open PR delivers the item"; unaffected: TTL expiry, "item left the cleared queue", and explicit release on
+  dispatch failure. No change to `we:scripts/operations/deliver-item-wrapper.mjs` or
+  `we:scripts/operations/promote-draft-pr-dispatch.mjs` — retirement rides the daemon's own next-tick re-read of
+  live `isDraft`, the same self-clearing pattern `we:scripts/operations/promote-draft-pr-dispatch.mjs`'s own
+  header already documents for the review daemon.
 - `we:scripts/conveyor/review-status-tag.mjs` — `awaiting-ci` (the author's-own-status) is the ONLY state a
   draft PR may carry from this module; every other label path is gated on `!isDraft` same as today's review gate.
 
 ## Tasks
 
-1. Add the shared `isDraft` refusal to `we:reconcile-core.mjs`'s ci-heal and conflict-fix branches; fixture-driven
-   tests reconstructing PR #2855's shape (draft, red soak-replay-gate, real soak break present) prove NO
-   `ci-heal`/`fix` dispatch is planned.
-2. Add the same guard to `we:ci-heal-pr-dispatch.mjs`'s execution entry point.
-3. Fix `we:build-dispatch-claim.mjs`'s retirement predicate; test that a claim for a draft PR survives past the
-   point a ready-PR claim would already be retired, and IS retired at promotion.
-4. Wire `we:deliver-item-wrapper.mjs` to hold/refresh its claim across its own pushes and release only at real exit
-   (coordinate with #4349's settlement work rather than re-deriving it).
-5. Exclude drafts from `we:merge-ai-prs.mjs`'s comment/label-writing step and from `we:parked-pr-conflict-watch.mjs`'s
-   detection loop; regression test against PR #2835's own reconstructed shape (draft, red `test` check, BLOCKED
-   merge state) showing zero `gh` writes where today's behavior would post `drain-skip-reason`.
-6. Confirm `we:review-status-tag.mjs` never emits a non-`awaiting-ci` state for a draft (likely already true per its
-   existing `isDraft` gate — a confirming test, not a behavior change, unless one is found).
-7. Wire the actual delegation call (builder drops the request marker instead of doing nothing when it wants to
-   hand off a red-draft fix), once `4361`'s dispatcher exists to receive it — the last of these seven tasks
-   to land, by ordering rather than a recorded edge. NOT a formal `blockedBy` here: `4361` does not yet
-   resolve to an existing item in this checkout (born this session, not yet synced/landed) and
-   `check:standards` refuses an edge that cannot verify its target — add the edge by hand once that card is
-   confirmed present.
+1. Add the shared `isDraft` refusal to `we:scripts/conveyor/reconcile-core.mjs`'s ci-heal, both conflict-fix,
+   advisory-fix, and ordinary bounced-review-fix branches (five call sites); fixture-driven tests reconstructing
+   PR #2855's shape (draft, red soak-replay-gate, real soak break present) prove NO `ci-heal`/`fix` dispatch is
+   planned from any of the five.
+2. Add `isDraft` to `we:scripts/merge-ai-prs.mjs`'s and `we:scripts/conveyor/parked-pr-conflict-watch.mjs`'s own
+   `gh pr list --json`/snapshot field requests (both already support the field, per `we:scripts/lib/pr-snapshot.mjs`'s
+   `SNAPSHOT_FIELDS`); wire the new `readDraftState` fresh-read seam into
+   `we:scripts/operations/ci-heal-pr-dispatch.mjs#dispatchCiHeal`'s execution entry point.
+3. Widen `we:scripts/conveyor/build-dispatch-policy.mjs#normalizeOpenPrs`'s projected shape to carry `isDraft`;
+   fix `we:skills-src/conveyor/build-dispatch-daemon.mjs#doneWhy`'s retirement predicate; test that a claim for
+   a draft PR survives past the point a ready-PR claim would already be retired, and IS retired on the tick
+   after promotion flips `isDraft` false (no new coupling in `we:scripts/operations/promote-draft-pr-dispatch.mjs`
+   needed — confirm with a test, not a behavior change there).
+4. Exclude drafts from `we:scripts/merge-ai-prs.mjs`'s comment/label-writing step and from
+   `we:scripts/conveyor/parked-pr-conflict-watch.mjs`'s detection loop; regression test against PR #2835's own
+   reconstructed shape (draft, red `test` check, BLOCKED merge state) showing zero `gh` writes where today's
+   behavior would post `drain-skip-reason`.
+5. Confirm `we:scripts/conveyor/review-status-tag.mjs` never emits a non-`awaiting-ci` state for a draft — NOT
+   already true as first written: `we:scripts/conveyor/review-status-tag.mjs:121,131,143,152` show live
+   review/fix/ci-heal-match and draft-reason branches returning OTHER states before the final draft fallback;
+   this task is a real behavior change (gate every one of those branches on `!isDraft` first), not merely a
+   confirming test.
+6. Wire the actual delegation call (builder drops the request marker instead of doing nothing when it wants to
+   hand off a red-draft fix), once `we:backlog/4361-specialist-agent-roles-a-role-registry-with-narrow-briefs-ro.md`'s
+   dispatcher (its Phase 2) exists to receive it — the last of these six tasks to land, SEQUENCED after `4361`
+   rather than a card-level `blockedBy` (Tasks 1-5 need nothing from `4361` and land independently per Delivery
+   shape below). `4361` (`xs57vx3`) now resolves to an existing, open card in this checkout — the first pass's
+   "does not yet exist" note is stale and corrected here.
 
 ## Delivery shape
 
-Lands incrementally, in the Task order above: each of 1-6 is independently useful and safe behind `main` (a
-pure additional refusal/exclusion, never a removal of an existing correct decision). Task 7 is gated on
+Lands incrementally, in the Task order above: each of 1-5 is independently useful and safe behind `main` (a
+pure additional refusal/exclusion, never a removal of an existing correct decision). Task 6 is gated on
 `4361` and may land as its own follow-up PR once that dependency ships, rather than holding this whole card
 open.
 
-## Independent review
+## Independent plan review (Codex, read-only, 2026-09-28)
 
-Not yet run — this card was filed and iteratively refined against operator rulings in the same session as
-4365/4366, whose ONE scheduled Codex plan-review pass had already completed before this card's third and
-fourth refinements arrived. Per instruction it is filed **unstamped** (`preparedDate` withheld) rather than
-delayed for a second review round; a follow-up read-only plan review is owed before this is build-ready.
+Confidence **High**, build-ready **No** — real design gaps found on this card's FIRST review pass (combined
+with 4365/4366), resolved directly in Design/Interfaces/Tasks/`scope:` above rather than left open:
+
+1. **[blocker, resolved above]** The claim-retirement change targeted the wrong module
+   (`we:scripts/conveyor/build-dispatch-claim.mjs`, which holds only the acquire/release primitive) and lacked
+   the data it needed. Corrected: the real predicate is `doneWhy` in
+   `we:skills-src/conveyor/build-dispatch-daemon.mjs`, fed by `we:scripts/conveyor/build-dispatch-policy.mjs#normalizeOpenPrs`,
+   which discards `isDraft` today — both are now named and in `scope:`.
+2. **[blocker, resolved above]** The proposed draft guards lacked real draft data at `we:scripts/merge-ai-prs.mjs`,
+   `we:scripts/conveyor/parked-pr-conflict-watch.mjs`, and `we:scripts/operations/ci-heal-pr-dispatch.mjs` — none
+   of the three actually carries `isDraft` through to where a guard would read it. Corrected: `isDraft` added to
+   both `gh`/snapshot field requests, and a new `readDraftState` fresh-read seam added to `dispatchCiHeal`.
+3. **[blocker, resolved above]** The enumerated reconcile guards missed the advisory-fix and ordinary
+   bounced-review-fix dispatch branches (`we:scripts/conveyor/reconcile-core.mjs:1750` and `:2078`), neither
+   protected by the review refusal. Corrected: all five dispatch branches now get the same `'draft'` refusal.
+4. **[major, resolved above]** The ownership lifecycle assumed `we:scripts/operations/deliver-item-wrapper.mjs`
+   stays alive and refreshes the claim across the whole draft window, but it settles and exits right after
+   opening the PR. Corrected: retirement needs no wrapper-side hold at all — it rides the daemon's own
+   next-tick re-read of live `isDraft`, the same self-clearing pattern
+   `we:scripts/operations/promote-draft-pr-dispatch.mjs` already uses for the review daemon.
+5. **[major, resolved above]** The dependency note on Task 7 (now Task 6) was stale — `4361` (`xs57vx3`) exists
+   in this checkout; Task 6 is now explicitly sequenced after it (a card-level `blockedBy` would incorrectly
+   hold Tasks 1-5 too, which need nothing from `4361`).
+6. **[minor, resolved above]** Task 6's (now Task 5's) "likely already true" claim about
+   `we:scripts/conveyor/review-status-tag.mjs` was false — corrected to name it a real behavior change with the
+   specific lines that return other states before the draft fallback.
+
+This card is now presented for the ONE combined read-only Codex re-review this session runs across
+4364/4365/4366 together — its first review and its re-review both fold into this same section, since this was
+the first pass for this specific card.
+
+## Independent plan review — re-review (Codex, read-only, 2026-09-28)
+
+Confidence **High**, build-ready **No** — **1 blocker remains**, found against the fixes above:
+
+1. **[blocker, OPEN]** The corrected retirement predicate (`doneWhy` gains `&& !pr.isDraft`) does not by itself
+   preserve a claim through the WHOLE draft window: `we:scripts/conveyor/build-dispatch-claim.mjs`'s
+   `DEFAULT_BUILD_DISPATCH_CLAIM_TTL_MINUTES` is 240 minutes (`:42`), and an EXPIRED claim disappears from
+   `listBuildDispatchClaims`'s own output (`:100`) before `doneWhy` ever gets a chance to apply the corrected
+   `!pr.isDraft` check — a draft that sits open past 240 minutes still loses its claim regardless of this
+   card's fix. **Not resolved in this session** (the session's one re-review round is spent) — a real design
+   choice is owed here (e.g. a longer TTL specifically for the draft-owned window, or an explicit
+   refresh-on-tick for a still-draft claim nearing its TTL) before this is build-ready.
+
+MINOR (also open): Task/Delivery-shape prose still reads as though `4361` is a hard `blockedBy` in one spot
+(`:87`) while the corrected Task 6 (`:179`) says explicit sequencing, not a card-level edge — reconcile the
+wording at the next touch.
+
+**This card stays `status: open`, `preparedDate` withheld** — one real blocker remains after this session's one
+permitted re-review round; a follow-up prep pass is owed before build.
 
 ## Done when
 

@@ -19,6 +19,8 @@ import {
   dispatchPausedHint, DISPATCH_PAUSED_HINT,
   // we:xniq7xs — the open-PR backpressure limit's intake hold.
   PR_LIMIT_HINT,
+  // #4347 — the capacity-cap operator gloss, naming the real active count and room.
+  capacityCapHint,
 } from '../dispatch-plan.mjs';
 import { PAUSABLE_KINDS } from '../dispatch-pause.mjs';
 import { normNum } from '../../conveyor/queue-store.mjs';
@@ -906,6 +908,19 @@ describe('dispatchPlan — maxConcurrentLanes (#xupukxa, live incident 2026-09-0
     });
     expect(plan.launch).toEqual([{ num: 1, lane: 10 }, { num: 2, lane: 11 }]);
     expect(plan.held).toEqual([]);
+  });
+});
+
+describe('capacityCapHint (#4347) — the capacity-cap CLI gloss names the real active count and room', () => {
+  it('names the active count and the room left under the cap', () => {
+    expect(capacityCapHint(2, 8)).toBe(
+      '2 active, room 6 of cap 8 — raise WE_MAX_CONCURRENT_LANES or wait for a lane to free up',
+    );
+  });
+
+  it('floors a cap already exhausted (or exceeded) by active leases at room 0, never negative', () => {
+    expect(capacityCapHint(8, 8)).toContain('room 0 of cap 8');
+    expect(capacityCapHint(10, 8)).toContain('room 0 of cap 8');
   });
 });
 
