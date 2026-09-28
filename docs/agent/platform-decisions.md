@@ -5872,7 +5872,7 @@ not settled on that question until it does.
 **Build status and the remaining fallback-trigger inventory live on the tracking item, per the established
 convention — this anchor states only the rule above.** [Workers run affected tests while working, the full gate
 once after the final commit](/backlog/4294-workers-run-affected-tests-while-working-the-full-gate-once/)
-(`bornAs` `x000pcl`) is the mechanism this rule governs; read that item for current status (including its own
+(`bornAs` `4294`) is the mechanism this rule governs; read that item for current status (including its own
 Codex-review correction), never re-derive it here.
 
 **Composes with** [#heavy-command-admission-queue](#heavy-command-admission-queue) (the capacity semaphore both
@@ -5881,7 +5881,7 @@ diff-driven-selection defaults (this ruling does not change their mechanism — 
 reach for the full suite as this gate's *default configuration*, only as a named, deliberate override; the
 engine's own automatic fallback is untouched).
 
-**Lineage:** operator ruling, 2026-09-28, folded into #4294 (`bornAs` `x000pcl`); corrected same-day per a
+**Lineage:** operator ruling, 2026-09-28, folded into #4294 (`bornAs` `4294`); corrected same-day per a
 read-only Codex plan review (`node scripts/codex-direct-task.mjs --review`) that found the initial wording
 conflated the engine's sound automatic fallback with a caller's deliberate override.
 
