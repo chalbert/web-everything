@@ -1406,7 +1406,12 @@ export function createDispatchSinks({
   ensureWorktreeIsolation = (cwd) => isolateDispatchSession(cwd).write,
 } = {}) {
   return {
-    [DISPATCH_EFFECT]: async (payload) => {
+    // #4349 — `ctx` (`{key, runId, ...}`, from `effect-executor.mjs#applyPendingEffects`'s per-sink call) was
+    // already documented on this function's own `@returns` above, but never actually accepted — the sink took
+    // only `payload`. A detached `build` dispatch needs its OWN run id + effect key to settle itself later
+    // (`deliver-item-wrapper.mjs#deliverItem`'s `finish()`); every OTHER launch kind's provider simply ignores
+    // the two new `request` fields below, so this is additive-only.
+    [DISPATCH_EFFECT]: async (payload, ctx = {}) => {
       assertNotALaneCheckout(root);
       // #3168 — the loudest point in the whole path: right before the agent is actually spawned into the
       // fail-open lane, printed to THIS process's own stderr rather than left to surface only in the eventual
@@ -1448,6 +1453,13 @@ export function createDispatchSinks({
           prompt: withSalvageHint(payload?.prompt, { cards: [payload?.num], prs: [payload?.pr] }),
           sessionSlug: payload?.sessionSlug,
           num: payload?.num,
+          // #4349 — the SAME identifiers the executor just handed this sink in `ctx`, forwarded onto the
+          // request so a MECHANICAL provider (a wrapper, not an agent reading a brief) can settle its own
+          // effect once it knows its outcome. `undefined` for every non-`build` kind's provider (none of them
+          // read these fields) and for any caller that still calls this sink with one argument (a test) —
+          // `deliverItemDetachedProvider` below already treats an absent value as "omit the flag".
+          runId: ctx?.runId,
+          effectKey: ctx?.key,
           // #3645/#3640 — WHICH KIND, WHICH LANE UNDER WHAT SCOPE, and (repairs) WHICH PR AND WHY. Already on
           // the effect payload; part of the port's request because a MECHANICAL provider (a wrapper, not an
           // agent reading a brief) needs them as data. The `claude --bg` path ignores all five.

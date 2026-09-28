@@ -11,21 +11,23 @@ import {
 } from '../deliver-item-run.mjs';
 
 describe('parseDeliverItemRunArgv', () => {
-  it('parses the required flags plus optional scope/attempt/provider', () => {
+  it('parses the required flags plus optional scope/attempt/provider/run-id/effect-key', () => {
     const launch = parseDeliverItemRunArgv([
       '--num=3645', '--lane=2', '--session=conveyor-3645', '--scope=we:scripts/foo.mjs', '--attempt=b',
-      '--provider=codex',
+      '--provider=codex', '--run-id=dispatch-lane-abc', '--effect-key=dispatch',
     ]);
     expect(launch).toEqual({
       item: '3645', lane: '2', sessionSlug: 'conveyor-3645', scope: 'we:scripts/foo.mjs', attemptTag: 'b',
-      provider: 'codex',
+      provider: 'codex', runId: 'dispatch-lane-abc', effectKey: 'dispatch',
     });
   });
 
-  it('defaults scope/attempt/provider to empty strings when absent', () => {
+  // #4349 — `--run-id=`/`--effect-key=` let `deliverItem` settle its own run-store effect on exit
+  // (`deliver-item-settle.mjs`); both are optional so an older/hand-run dispatch still parses cleanly.
+  it('defaults scope/attempt/provider/run-id/effect-key to empty strings when absent', () => {
     const launch = parseDeliverItemRunArgv(['--num=1', '--lane=2', '--session=s']);
     expect(launch).toEqual({
-      item: '1', lane: '2', sessionSlug: 's', scope: '', attemptTag: '', provider: '',
+      item: '1', lane: '2', sessionSlug: 's', scope: '', attemptTag: '', provider: '', runId: '', effectKey: '',
     });
   });
 
