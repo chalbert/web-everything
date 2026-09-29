@@ -27,7 +27,7 @@ Third slice of 4065: add the daemon-code smells seen on 2026-09-24 to the regist
 
 - **Already covered before this slice (no new smell):** clone behind origin/main and live smoke-gate failure —
   `clone-stale` (held/rejected/`smoke-rejected` with the failing check) and `daemon-held-on-last-good` (frozen on
-  the last-good build after a failed smoke), both pulled forward from slice 1 / x5wbsbc.
+  the last-good build after a failed smoke), both pulled forward from slice 1 / 4217.
 - **New smells** (we:scripts/conveyor/health-smells/):
   - `self-sync-conflict` — `daemon-self-sync: … behind … but NOT syncing (conflict|dirty|not-on-branch)` lines in
     a daemon's log since the last tick (plain + POC shapes), and a recent `pinned-overlay-conflict` rebuild alert.
