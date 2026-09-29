@@ -53,7 +53,7 @@ export default {
   action: 'alert',
   thresholdMs: 10 * MINUTE,
   recommendationHint: 'A dispatched background session is stuck on an unanswerable permission prompt — '
-    + 'nobody is there to click yes. Grant its lane rather than waiting it out; see we:backlog/xrv69j6-*.md.',
+    + 'nobody is there to click yes. Grant its lane rather than waiting it out; see #4238.',
   evaluate({ agents }, { now }) {
     return stuckOnPermissionPrompt(agents).map((a) => {
       const startedAt = typeof a.startedAt === 'number' ? a.startedAt : Date.parse(a.startedAt ?? '');
@@ -68,7 +68,7 @@ export default {
         recommendation: `Grant its lane directly (\`<cwd>/.claude/settings.local.json\`'s `
           + '`permissions.additionalDirectories`/`allow`) and resume it, or redispatch — going forward '
           + '`we:scripts/operations/dispatch-lane-io.mjs` grants the lane at spawn, so a fresh dispatch should '
-          + 'not hit this at all. See we:backlog/xrv69j6-*.md.',
+          + 'not hit this at all. See #4238.',
       };
     });
   },

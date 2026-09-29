@@ -1251,7 +1251,7 @@ export function isPreSpawnRefusal(error) {
 }
 
 /**
- * #4174 follow-up (live-caught 2026-09-27, 17 occurrences over `we:backlog/xrv69j6-*.md`'s own dispatch path —
+ * #4174 follow-up (live-caught 2026-09-27, 17 occurrences over `#4238`'s own dispatch path —
  * PRs #2766/#2767/#2800/#2803/#2822 all refused `dispatch-failed` with this exact text) — `claude --bg`'s OWN
  * refusal text for a cwd its trust check does not recognise: *"Workspace not trusted. Run \`claude\` in <dir>
  * once and accept the trust prompt, then retry."* This is PRE-SPAWN PROOF exactly like ENOENT/EACCES above — the
