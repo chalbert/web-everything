@@ -66,9 +66,9 @@ notification concern → `plateau:` (or the existing WIP relay) once the panel e
 per credential, reusing the inventory's output as data. **Reminders (follow-up):** notify before expiry
 (reuses the existing WIP relay / notification path once it exists).
 
-**Relationship to x8x0ris** (CI mints short-lived GitHub App tokens, in flight): that card's goal is
+**Relationship to 4382** (CI mints short-lived GitHub App tokens, in flight): that card's goal is
 *eliminating* static tokens where possible; this card's inventory is how you'd know which credentials are
-still static and therefore in x8x0ris's target list — this card does not block on x8x0ris, and x8x0ris does
+still static and therefore in 4382's target list — this card does not block on 4382, and 4382 does
 not block on this card, but the inventory's "static vs. minted" column is the natural handoff between them.
 
 ## MVP cut
@@ -91,7 +91,7 @@ not block on this card, but the inventory's "static vs. minted" column is the na
   CLI login status (Codex/Antigravity/Claude), and the WIP relay token — the fuller inventory rows.
 - The Plateau `/wip`/settings credentials panel (`plateau:` — a served, credential-status-holding UI surface).
 - Expiry reminders (notification delivery).
-- Cross-reference into x8x0ris's static-token list.
+- Cross-reference into 4382's static-token list.
 
 **Size:** the MVP is one new script + one new health smell + tests, comparable to the existing
 `we:scripts/conveyor/health-smells/pr-events-stale.mjs` precedent — within this card's own declared `size: 8`
@@ -106,5 +106,5 @@ to a size-5 slice of it).
    threshold) secret and the `Bad credentials` CI-failure pattern; both have unit tests; `npm run
    check:standards` passes.
 2. **Could** — the Plateau `/wip`/settings credentials panel, expiry reminders, PAT-header/App-key/local-file/
-   Worker-secret/CLI-login inventory rows, and the x8x0ris cross-reference are filed as follow-up work when
+   Worker-secret/CLI-login inventory rows, and the 4382 cross-reference are filed as follow-up work when
    picked up, not required for this card to resolve.
