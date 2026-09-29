@@ -4,13 +4,15 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 import {
-  PROBATION_HEAL_RUN_SCRIPT, probationLaunchDecision, probationLaunchFromEnv, probationWorkerDetachedProvider,
+  PROBATION_BUILD_RUN_SCRIPT, PROBATION_HEAL_RUN_SCRIPT, probationLaunchDecision, probationLaunchFromEnv,
+  probationWorkerDetachedProvider,
 } from '../dispatch-providers/probation-worker.mjs';
 import { routeDispatchProvider } from '../dispatch-lane-io.mjs';
 import { parseArgs, runProbationHeal } from '../probation-heal-run.mjs';
 
 const agyClaude = { id: 'antigravity-claude', provider: 'antigravity', model: 'claude-sonnet-4-6', executor: 'antigravity', launcher: 'scripts/gemini-direct-task.mjs', checker: null, taskType: 'ci-heal' };
 const agyGemini = { ...agyClaude, id: 'antigravity-gemini', model: 'gemini-3.8-flash-high', checker: 'codex' };
+const docFixWorker = { id: 'codex', provider: 'codex', model: 'gpt-6-astra', executor: 'codex', launcher: 'scripts/codex-direct-task.mjs', checker: null, taskType: 'doc-fix' };
 
 describe('probationLaunchFromEnv', () => {
   it('unset → on in production, off under the test runner; an explicit value wins; a typo throws', () => {
@@ -27,9 +29,25 @@ describe('probationLaunchDecision', () => {
   it('launches a WE ci-heal with a worker when on', () => expect(probationLaunchDecision(req, 'on').launch).toBe(true));
   it('never without a worker, for another kind, another repo, or when off', () => {
     expect(probationLaunchDecision({ ...req, probationWorker: null }, 'on').launch).toBe(false);
+    // A `ci-heal`-taskType worker offered under a `build` request is recorded, never launched (#4291) — `build`
+    // launches a `doc-fix` worker only.
     expect(probationLaunchDecision({ ...req, launchKind: 'build' }, 'on').launch).toBe(false);
     expect(probationLaunchDecision({ ...req, repo: 'frontierui' }, 'on').launch).toBe(false);
     expect(probationLaunchDecision(req, 'off').launch).toBe(false);
+  });
+
+  // #4291 — the doc-fix build launcher: `build` + a `doc-fix` worker launches; `build` + any other taskType
+  // (or `ci-heal` + a `doc-fix` worker) does not.
+  const buildReq = { launchKind: 'build', repo: 'we', probationWorker: docFixWorker };
+  it('launches a WE doc-fix build with a doc-fix worker when on', () => expect(probationLaunchDecision(buildReq, 'on').launch).toBe(true));
+  it('never for the wrong taskType, another repo, or when off', () => {
+    expect(probationLaunchDecision({ ...buildReq, probationWorker: agyClaude }, 'on').launch).toBe(false);
+    expect(probationLaunchDecision({ launchKind: 'ci-heal', repo: 'we', probationWorker: docFixWorker }, 'on').launch).toBe(false);
+    expect(probationLaunchDecision({ ...buildReq, repo: 'frontierui' }, 'on').launch).toBe(false);
+    expect(probationLaunchDecision(buildReq, 'off').launch).toBe(false);
+  });
+  it('an unregistered kind is recorded but never launched', () => {
+    expect(probationLaunchDecision({ launchKind: 'fix', repo: 'we', probationWorker: docFixWorker }, 'on').launch).toBe(false);
   });
 });
 
@@ -56,6 +74,43 @@ describe('probationWorkerDetachedProvider', () => {
     }
     expect(spawnDetached).not.toHaveBeenCalled();
   });
+
+  // #4291 — the `build` kind is ITEM-keyed (`--num=`), never PR-keyed, and starts the doc-fix build run script.
+  it('a `build` launch spawns the doc-fix run script, keyed to the item, with an optional attempt tag', () => {
+    const spawned = [];
+    const reportExecutor = vi.fn();
+    const handle = probationWorkerDetachedProvider(
+      { launchKind: 'build', num: '4291', sessionSlug: 'probation-4291', attemptTag: 'b', lane: 22, scope: ['we:a.mjs'], probationWorker: docFixWorker, reportExecutor, cwd: '/scratch' },
+      { spawnDetached: (argv, o) => { spawned.push({ argv, o }); return { pid: 555 }; }, logPathFor: () => '/dev/null' },
+    );
+    expect(handle).toBe('pid:555');
+    expect(reportExecutor).toHaveBeenCalledWith('codex');
+    const { argv, o } = spawned[0];
+    expect(argv[0]).toBe(PROBATION_BUILD_RUN_SCRIPT);
+    expect(argv).toEqual(expect.arrayContaining(['--num=4291', '--session=probation-4291', '--attempt=b', '--lane=22', '--scope=we:a.mjs']));
+    expect(argv.some((a) => a.startsWith('--pr=') || a.startsWith('--reason='))).toBe(false);
+    expect(JSON.parse(argv.find((a) => a.startsWith('--worker=')).slice(9))).toEqual(docFixWorker);
+    expect(o.cwd).toBe('/scratch');
+  });
+  it('a `build` launch refuses before any process with no item number', () => {
+    const spawnDetached = vi.fn();
+    expect(() => probationWorkerDetachedProvider(
+      { launchKind: 'build', sessionSlug: 'probation-4291', probationWorker: docFixWorker },
+      { spawnDetached },
+    )).toThrow(/no item number/);
+    expect(spawnDetached).not.toHaveBeenCalled();
+  });
+  // #4291 plan review round 2 — closes the coverage gap the standards-conformance/claim-accuracy lenses named:
+  // a THIRD registered kind must refuse explicitly, never silently fall through to the PR-keyed `ci-heal` argv
+  // shape (the provider itself, not only `probationLaunchDecision`, must reject an unknown kind).
+  it('an unrecognised kind refuses before any process — never silently falls through to the ci-heal (PR-keyed) argv shape', () => {
+    const spawnDetached = vi.fn();
+    expect(() => probationWorkerDetachedProvider(
+      { launchKind: 'fix', sessionSlug: 'probation-4291', probationWorker: docFixWorker },
+      { spawnDetached },
+    )).toThrow(/no argv shape for it/);
+    expect(spawnDetached).not.toHaveBeenCalled();
+  });
 });
 
 describe('routeDispatchProvider — the probation branch', () => {
@@ -77,16 +132,26 @@ describe('routeDispatchProvider — the probation branch', () => {
   });
 });
 
-/** A fake io: a rebased lane whose gate result, worker diff and checker answer the test chooses. */
-function fakeIo({ gate = [false, true], rebaseOk = true, moved = true, numstat = '2\t1\tscripts/a.mjs', checker = 'APPROVE', pushOk = true, state = 'OPEN' } = {}) {
+/** A fake io: a rebased lane whose gate result, worker diff and checker answer the test chooses.
+ *  x55dojc — `resetHookSurface`/`snapshotHookSurface` default to a clean, never-tampered lane; pass
+ *  `hookResetClean: false` (refused before any worker) or `hookTampered: true` (changed while the worker ran)
+ *  to exercise those refusal paths without a real fs/git dependency. */
+function fakeIo({
+  gate = [false, true], rebaseOk = true, moved = true, numstat = '2\t1\tscripts/a.mjs', checker = 'APPROVE',
+  pushOk = true, state = 'OPEN', hookResetClean = true, hookTampered = false, tamperRestoreClean = true,
+} = {}) {
   const calls = [];
   const gates = [...gate];
   let head = 'examined';
+  const cleanSnapshot = { configHash: 'clean', files: {} };
+  const tamperedSnapshot = { configHash: 'clean', files: { 'pre-commit': 'planted' } };
   const io = {
     log: () => {},
     completion: (c) => calls.push(['completion', c.status, c.outcome]),
     prHead: () => ({ state, headRefOid: 'examined', headRefName: 'lane/x' }),
     acquireLane: () => '/lanes/9',
+    resetHookSurface: (d, baseline) => { calls.push(baseline ? ['reset-hooks', d, baseline] : ['reset-hooks', d]); return { clean: baseline ? tamperRestoreClean : hookResetClean, leftover: hookResetClean ? [] : ['pre-commit'], snapshot: cleanSnapshot }; },
+    snapshotHookSurface: (d) => { calls.push(['snapshot-hooks', d]); return hookTampered ? tamperedSnapshot : cleanSnapshot; },
     rebaseOntoMain: () => { if (rebaseOk && moved) head = 'rebased'; return rebaseOk; },
     headSha: () => head,
     runGate: () => ({ pass: gates.length ? gates.shift() : true, output: 'gate out' }),
@@ -184,5 +249,37 @@ describe('runProbationHeal — the arc', () => {
     const { io, calls } = fakeIo({ state: 'MERGED' });
     expect((await runProbationHeal(args(), io)).outcome).toBe('not-applicable');
     expect(calls.some((c) => c[0] === 'worker')).toBe(false);
+  });
+
+  // x55dojc — hardening against a worker planting a git hook.
+  it('refuses before any rebase/worker when the lane\'s git-hook baseline cannot be cleaned', async () => {
+    const { io, calls } = fakeIo({ hookResetClean: false });
+    const r = await runProbationHeal(args(), io);
+    expect(r).toMatchObject({ outcome: 'escalated-needs-human', executor: 'none' });
+    expect(r.detail).toMatch(/clean git-hook baseline/);
+    expect(calls.some((c) => c[0] === 'worker')).toBe(false);
+    expect(calls.filter((c) => c[0] === 'reset-hooks')).toEqual([['reset-hooks', '/lanes/9']]);
+    expect(calls.find((c) => c[0] === 'escalate')[1]).toMatch(/git-hook surface/);
+  });
+
+  it('a worker that changes the lane\'s git-hook surface is refused, discarded, and never committed/pushed', async () => {
+    const { io, calls } = fakeIo({ hookTampered: true });
+    const r = await runProbationHeal(args(), io);
+    expect(r).toMatchObject({ outcome: 'escalated-needs-human', executor: 'antigravity' });
+    expect(r.detail).toMatch(/\.git\/hooks\/ changed/);
+    expect(calls.some((c) => c[0] === 'commit')).toBe(false);
+    expect(calls.some((c) => c[0] === 'push')).toBe(false);
+    expect(calls.some((c) => c[0] === 'discard')).toBe(true);
+    expect(calls.filter((c) => c[0] === 'reset-hooks').length).toBeGreaterThanOrEqual(2); // baseline + post-tamper cleanup
+    // #4291 advisory finding (security) — the cleanup restores the PRE-worker config, before `discard` runs git.
+    const cleanupAt = calls.findIndex((c) => c[0] === 'reset-hooks' && c[2]);
+    expect(calls[cleanupAt][2]).toEqual({ configHash: 'clean', files: {} });
+    expect(cleanupAt).toBeLessThan(calls.findIndex((c) => c[0] === 'discard'));
+    const failed = fakeIo({ hookTampered: true, tamperRestoreClean: false });
+    const r2 = await runProbationHeal(args(), failed.io);
+    expect(r2.detail).toMatch(/NOT discarded; quarantine it/);
+    expect(failed.calls.some((c) => c[0] === 'discard' || c[0] === 'commit' || c[0] === 'push')).toBe(false);
+    expect(calls.find((c) => c[0] === 'escalate')[1]).toMatch(/git-hook surface changed during the worker/);
+    expect(calls.find((c) => c[0] === 'scorecard')).toEqual(['scorecard', 'escalated-needs-human', 'antigravity', null, null]);
   });
 });
