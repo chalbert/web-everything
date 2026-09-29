@@ -420,6 +420,40 @@ describe('openPrsByItem (the PR identity the Decision Docket lists under each it
 });
 
 describe('deliveredHashFromPr (#3914 — a card filed AND delivered in the same hash-led lane PR)', () => {
+  describe('title-lead hash fallback (#4477)', () => {
+    it('credits the title-lead hash with a descriptive lane ref (PR #2924)', () => {
+      expect(deliveredHashFromPr('lane/builder-cap-own-builds', 'WE #x3vs6tu: builder cap counts only its own builds')).toBe('x3vs6tu');
+    });
+
+    it('keeps the ref-lead hash when the title names a different hash', () => {
+      expect(deliveredHashFromPr('lane/xaaaaaa-slug', 'WE #xbbbbbb: subject')).toBe('xaaaaaa');
+    });
+
+    it('resolves the title-lead hash through landedNumberFor (PR #2924)', () => {
+      const landedNumberFor = (h) => (h === 'x3vs6tu' ? '4464' : null);
+      expect(deliveredHashFromPr('lane/builder-cap-own-builds', 'WE #x3vs6tu: builder cap counts only its own builds',
+        { landedNumberFor })).toBe('4464');
+    });
+
+    it('never credits a hash merely cited later in the title', () => {
+      expect(deliveredHashFromPr('lane/builder-cap-own-builds', 'WE #4200: fix, related to x3vs6tu')).toBeNull();
+    });
+
+    // #4477 round-1 correctness finding — the prior negative test above never actually exercised the `^`
+    // anchor (its hash has no leading `#`, so it would return null with or without the anchor). This one
+    // puts a hash-shaped `#<hash>:` token in a NON-lead position, which the anchor must reject.
+    it('never credits a hash-shaped "#<hash>:" token that is not in the lead position', () => {
+      expect(deliveredHashFromPr('lane/builder-cap-own-builds', 'fix: see #x3vs6tu: more context')).toBeNull();
+    });
+
+    // #4477 round-1 red-team finding — the whole-PR guards (`isNonDeliveryPr`) must still apply on the
+    // title-lead path exactly as they already do on the ref-lead path; nothing exempted this new branch.
+    it('still refuses a non-delivery PR (all-.md diff) even with a title-lead hash', () => {
+      expect(deliveredHashFromPr('lane/builder-cap-own-builds', 'WE #x3vs6tu: builder cap counts only its own builds',
+        { changedFiles: ['backlog/4464-builder-cap.md'] })).toBeNull();
+    });
+  });
+
   it('credits the lane-ref LEAD hash (the real #3459/#3492/#3638 refs)', () => {
     expect(deliveredHashFromPr('lane/xaa7r2n-itemnumfromref-attempt-tag', '')).toBe('xaa7r2n');
     expect(deliveredHashFromPr('lane/x3jmao3-review-dispatch-wait-ms', 'WE #x3jmao3: bounded retry')).toBe('x3jmao3');

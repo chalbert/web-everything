@@ -1,19 +1,46 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+// #4465 review — `cliRouteHeldItems`'s (a)/(b) routes ultimately call `cliSpawnHoldLand`, which spawns a REAL
+// detached `node` process via `defaultSpawnDetached`. A wiring test that exercises the real reserve/spawn
+// path (rather than just `typeof cliRouteHeldItems === 'function'`) must not actually spawn that process —
+// mock ONLY this one module, so `cliSpawnHoldLand`'s own argv construction and the REAL `reserveHoldRoute`/
+// `appendHoldFinding` primitives underneath it are still exercised for real. `vi.hoisted` is required here
+// (not a plain top-level `const`) because `vi.mock` itself is hoisted above every other statement in this
+// file, including ordinary `const` declarations — a factory that closes over an un-hoisted variable would
+// see it as `undefined` at mock-registration time.
+const { spawnCalls, fakeDetachedResult } = vi.hoisted(() => ({
+  spawnCalls: [],
+  fakeDetachedResult: { spawned: true, pid: 4242, logPath: '/tmp/fake-hold-route.log' },
+}));
+vi.mock('../../../scripts/operations/detached-dispatch.mjs', async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    defaultSpawnDetached: (argv, opts) => { spawnCalls.push({ argv, opts }); return fakeDetachedResult; },
+    deliveryDispatchLogPath: (slug) => `/tmp/fake-hold-route-${slug}.log`,
+  };
+});
+
 import {
   runBuildDispatchTick, settleBookkeeping, readKillSwitch, readDispatchOutcome, KILL_SWITCH_ENV,
-  cliListSettledBuilds, cliListHolds, policyFrom,
+  cliListSettledBuilds, cliListRunStoreInFlight, cliListHolds, policyFrom,
   // #4348-open-pr-retry
   primaryInfraStoreEnv, cliRetryInfraBlocked,
   // #4464 builder-cap-machine-wide
   cliPlanTick, BUILD_DAEMON_LANE_CAP_EXEMPT_VALUE,
   // #4517 — infra-retry call bound
   INFRA_RETRY_TIMEOUT_MS, DEFAULT_INTERVAL_MS,
+  // #4465 build-dispatch-hold-router
+  cliRouteHeldItems, cliSpawnHoldLand,
+  // xovjhwh — the shared attribution derivation `runBuildDispatchTick` and `dryRun` both call
+  deriveDispatchedByBuilder,
 } from '../build-dispatch-daemon.mjs';
+import { listHoldFindings } from '../../../scripts/conveyor/build-dispatch-hold-router.mjs';
 import { MAX_CONCURRENT_LANES_ENV } from '../../../scripts/lib/lane-concurrency.mjs';
 import {
   acquireBuildDispatchClaim, releaseBuildDispatchClaim, listBuildDispatchClaims,
@@ -45,8 +72,10 @@ function sameFileTick(prev = {}) {
   };
 }
 
-/** Real claim module over a temp lock root; `pid` stands in for the daemon process (a restart = new pid). */
-function effectsFor({ lockRoot, pid, dispatches, openPrs = [] }) {
+/** Real claim module over a temp lock root; `pid` stands in for the daemon process (a restart = new pid).
+ *  `runStoreInFlight`/`settledBuilds` (xovjhwh) are THIS builder's own durable dispatch-lane run records —
+ *  `runBuildDispatchTick` derives `dispatchedByBuilder` from exactly these two reads. */
+function effectsFor({ lockRoot, pid, dispatches, openPrs = [], runStoreInFlight = [], settledBuilds = [] }) {
   const owner = `testhost:${pid}`;
   return {
     planTick: (bk) => sameFileTick(bk),
@@ -54,7 +83,8 @@ function effectsFor({ lockRoot, pid, dispatches, openPrs = [] }) {
     listClaims: () => listBuildDispatchClaims({ lockRoot }),
     releaseClaim: ({ num }) => releaseBuildDispatchClaim({ num, lockRoot }),
     acquireClaim: ({ num, scope }) => acquireBuildDispatchClaim({ num, scope, owner, pid, lockRoot }),
-    listRunStoreInFlight: () => [],
+    listRunStoreInFlight: () => runStoreInFlight,
+    listSettledBuilds: () => settledBuilds,
     killSwitch: () => ({ engaged: false }),
     dispatch: ({ num }) => { dispatches.push({ num, pid }); return { dispatching: true, lane: 13 }; },
   };
@@ -205,12 +235,62 @@ describe('runBuildDispatchTick', () => {
     const dispatches = [];
     const openPrs = [{ number: 50, headRefName: 'lane/500-x', labels: [], files: [] }];
     const policy = { ...BUILD_DISPATCH_POLICY, maxOpenItems: 1 };
-    const r = await runBuildDispatchTick({ live: false, policy, effects: effectsFor({ lockRoot, pid: 1, dispatches, openPrs }) });
+    // xovjhwh — #500's open PR only fills the wip-cap because THIS builder's own settled dispatch-lane record
+    // shows it dispatched #500 (its build finished with the PR still open, #4349's own `pr-opened` outcome).
+    const settledBuilds = [{ num: '500', outcome: 'pr-opened', startedAt: '2026-01-01T00:00:00Z' }];
+    const r = await runBuildDispatchTick({ live: false, policy, effects: effectsFor({ lockRoot, pid: 1, dispatches, openPrs, settledBuilds }) });
     expect(r.plan.openItems).toEqual({ count: 1, cap: 1, nums: ['500'] });
     expect(r.plan.hold.filter((h) => h.rule === 'wip-cap').map((h) => h.num)).toEqual(['3827', '2662']);
     expect(r.plan.hold.find((h) => h.rule === 'wip-cap').reason).toMatch(/500/);
     // this card must never touch the pre-existing display-only field — still the raw durable in-flight list.
     expect(r.plan.inFlight).toEqual([]);
+  });
+
+  // xovjhwh (operator decision 2026-09-29) — the real end-to-end wiring: `runBuildDispatchTick` must derive
+  // `dispatchedByBuilder` from its OWN `listRunStoreInFlight`/`listSettledBuilds` reads and thread it into
+  // `planBuildDispatch`, not just the pure planner in isolation. Live incident this closes: openItems read 7/7
+  // filled by six hand-dispatched worker PRs, so wip-cap held the builder's own cleared items and it built
+  // nothing. (The REAL reader's own fail-open behaviour on an actual read error is pinned separately, against
+  // the real `cliListSettledBuilds`/`cliListRunStoreInFlight`, in the "real readers" describe block below —
+  // converge round 2, correctness/security/claim-accuracy: this planner-level test alone does not exercise
+  // that catch path and was previously miscited as if it did.)
+  it('a hand-dispatched worker\'s open PR (no run-store/settled record from THIS builder) never fills the wip-cap — a builder-dispatched one still does', async () => {
+    const dispatches = [];
+    const openPrs = [
+      { number: 50, headRefName: 'lane/500-x', labels: [], files: [] }, // a worker's PR — this builder has no run record for #500 at all
+      { number: 51, headRefName: 'lane/600-x', labels: [], files: [] }, // this builder's own dispatch, already settled
+    ];
+    const settledBuilds = [{ num: '600', outcome: 'pr-opened', startedAt: '2026-01-01T00:00:00Z' }];
+    const policy = { ...BUILD_DISPATCH_POLICY, maxOpenItems: 1 };
+    const r = await runBuildDispatchTick({ live: false, policy, effects: effectsFor({ lockRoot, pid: 1, dispatches, openPrs, settledBuilds }) });
+    // #500 (worker) is excluded; #600 (builder) alone fills the cap.
+    expect(r.plan.openItems).toEqual({ count: 1, cap: 1, nums: ['600'] });
+    expect(r.plan.hold.filter((h) => h.rule === 'wip-cap').map((h) => h.num)).toEqual(['3827', '2662']);
+  });
+});
+
+// xovjhwh converge round 1 (simplicity/standards-conformance finding) — `runBuildDispatchTick` and `dryRun`
+// both derived `dispatchedByBuilder` inline from the same two reads, which could silently drift if either copy
+// were edited alone. Pulled into `deriveDispatchedByBuilder` and pinned directly here, once, so both call sites
+// stay provably identical without a live-daemon test having to exercise `dryRun` itself.
+describe('deriveDispatchedByBuilder (xovjhwh) — the single derivation runBuildDispatchTick and dryRun both call', () => {
+  it('unions the in-flight run-store nums with the settled-build nums, deduped', () => {
+    const runStoreRows = [{ num: '1' }, { num: '2' }];
+    const settledRows = [{ num: '2', outcome: 'pr-opened' }, { num: '3', outcome: 'gate-red' }];
+    expect(deriveDispatchedByBuilder(runStoreRows, settledRows)).toEqual(new Set(['1', '2', '3']));
+  });
+
+  it('is empty when both reads are empty — no builder-own attribution at all', () => {
+    expect(deriveDispatchedByBuilder([], [])).toEqual(new Set());
+  });
+
+  it('defaults both args to empty arrays and normalizes nums the same way `normNum` does elsewhere', () => {
+    expect(deriveDispatchedByBuilder()).toEqual(new Set());
+    expect(deriveDispatchedByBuilder([{ num: '#042' }], [])).toEqual(new Set(['42']));
+  });
+
+  it('ignores a row with no num rather than adding a falsy/undefined entry', () => {
+    expect(deriveDispatchedByBuilder([{ num: '' }, { num: '7' }], [{}])).toEqual(new Set(['7']));
   });
 });
 
@@ -320,6 +400,198 @@ describe('runBuildDispatchTick — #4131/#4382 build-orphan-adopt', () => {
     const r = await runBuildDispatchTick({ live: true, effects });
     expect(r.orphanAdoption).toEqual({ error: 'orphan-adopt: run-store unreadable' });
     expect(r.dispatched.length).toBeGreaterThan(0);
+  });
+});
+
+// #4465 — a held item's own route is classified EVERY tick (pure, cheap — visible on `--dry-run` too), and
+// acted on only when `live` — same optional-effect / best-effort posture as #4131/#4382's `adoptOrphans` and
+// #4348's `retryInfraBlocked` above, so asserted the same way.
+describe('runBuildDispatchTick — #4465 build-dispatch-hold-router wiring', () => {
+  let lockRoot;
+  beforeEach(() => { lockRoot = mkdtempSync(join(tmpdir(), 'bdd-claims-holdroute-')); });
+  afterEach(() => { rmSync(lockRoot, { recursive: true, force: true }); });
+
+  it('classifies every live hold into `holdRouting` on BOTH a dry-run and a live tick', async () => {
+    const dispatches = [];
+    const effects = {
+      ...effectsFor({ lockRoot, pid: 1, dispatches }),
+      listHolds: () => [
+        { num: '4295', reason: 'spec not buildable as written within declared scope: re-shaping needed' },
+        { num: '4380', reason: 'spec already done on main: commit b93d13e29 — card just needs resolving' },
+        { num: '9001', reason: 'wrapper-threw' },
+      ],
+    };
+    const dry = await runBuildDispatchTick({ live: false, effects });
+    const live = await runBuildDispatchTick({ live: true, effects });
+    for (const r of [dry, live]) {
+      expect(r.holdRouting).toEqual([
+        { num: '4295', route: 'out-of-scope', commit: null, reason: expect.stringContaining('not buildable') },
+        { num: '4380', route: 'already-done', commit: 'b93d13e29', reason: expect.stringContaining('already done') },
+        { num: '9001', route: 'other', commit: null, reason: 'wrapper-threw' },
+      ]);
+    }
+  });
+
+  it('a LIVE tick calls effects.routeHeldItems(holdRouting) exactly once; a DRY-RUN tick never calls it', async () => {
+    const dispatches = [];
+    let calls = 0;
+    let seenPlan = null;
+    const effects = {
+      ...effectsFor({ lockRoot, pid: 1, dispatches }),
+      listHolds: () => [{ num: '4380', reason: 'spec already done on main: commit b93d13e29' }],
+      routeHeldItems: async (plan) => { calls += 1; seenPlan = plan; return [{ num: '4380', route: 'already-done', action: 'landing-spawned' }]; },
+    };
+    const dry = await runBuildDispatchTick({ live: false, effects });
+    expect(calls).toBe(0);
+    expect(dry.holdRoutingResult).toBeNull();
+
+    const live = await runBuildDispatchTick({ live: true, effects });
+    expect(calls).toBe(1);
+    expect(seenPlan).toEqual([{ num: '4380', route: 'already-done', commit: 'b93d13e29', reason: 'spec already done on main: commit b93d13e29' }]);
+    expect(live.holdRoutingResult).toEqual([{ num: '4380', route: 'already-done', action: 'landing-spawned' }]);
+  });
+
+  // PR #2967 review (correctness) — routes (a)/(b) open self-merging PRs, so they obey the kill switch and the
+  // landing freeze exactly as `adoptOrphans` does; route (c) is a ledger append and still runs.
+  it('withholds the landable routes (never passed on, so no lease is spent) while the kill switch or a landing '
+    + 'freeze is on; route "other" still runs', async () => {
+    const dispatches = [];
+    const seen = [];
+    const base = {
+      ...effectsFor({ lockRoot, pid: 1, dispatches }),
+      listHolds: () => [
+        { num: '4295', reason: 'spec not buildable as written' },
+        { num: '4380', reason: 'spec already done on main: commit b93d13e29' },
+        { num: '9001', reason: 'wrapper-threw' },
+      ],
+      routeHeldItems: async (plan) => { seen.push(plan.map((p) => p.num)); return plan.map((p) => ({ num: p.num, route: p.route, action: 'x' })); },
+    };
+    const tooManyPrs = Array.from({ length: BUILD_DISPATCH_POLICY.maxOpenPrs + 1 }, (_, i) => ({ number: 9000 + i, labels: [], files: [], headRefName: `x-${i}` }));
+
+    await runBuildDispatchTick({ live: true, effects: base });
+    const killed = await runBuildDispatchTick({ live: true, effects: { ...base, killSwitch: () => ({ engaged: true, reason: 'operator' }) } });
+    const frozen = await runBuildDispatchTick({ live: true, effects: { ...base, fetchOpenPrs: async () => [{ repo: 'we', prs: tooManyPrs }] } });
+
+    expect(seen).toEqual([['4295', '4380', '9001'], ['9001'], ['9001']]);
+    for (const [r, why] of [[killed, /kill switch/], [frozen, /maxOpenPrs/]]) {
+      const withheld = r.holdRoutingResult.filter((o) => o.action === 'withheld-frozen');
+      expect(withheld.map((o) => o.num)).toEqual(['4295', '4380']);
+      expect(withheld[0].reason).toMatch(why);
+    }
+  });
+
+  it('an OLDER effects stub with no `routeHeldItems` at all behaves exactly as before this card — no call, no throw', async () => {
+    const dispatches = [];
+    const effects = { ...effectsFor({ lockRoot, pid: 1, dispatches }), listHolds: () => [{ num: '4380', reason: 'x' }] };
+    const r = await runBuildDispatchTick({ live: true, effects });
+    expect(r.holdRoutingResult).toBeNull();
+    expect(r.holdRouting).toEqual([{ num: '4380', route: 'other', commit: null, reason: 'x' }]);
+  });
+
+  it('a THROWING routing pass never fails this tick\'s own build-dispatch plan — best-effort, captured as `{error}`', async () => {
+    const dispatches = [];
+    const effects = {
+      ...effectsFor({ lockRoot, pid: 1, dispatches }),
+      listHolds: () => [{ num: '4380', reason: 'spec already done on main: commit b93d13e29' }],
+      routeHeldItems: async () => { throw new Error('hold-router: coordination root unreadable'); },
+    };
+    const r = await runBuildDispatchTick({ live: true, effects });
+    expect(r.holdRoutingResult).toEqual({ error: 'hold-router: coordination root unreadable' });
+    expect(r.dispatched.length).toBeGreaterThan(0);
+  });
+});
+
+// #4465 review — the ORIGINAL version of this describe block asserted only `typeof cliRouteHeldItems ===
+// 'function'`: it would stay green even if the wiring passed the wrong effect, or `cliSpawnHoldLand` built a
+// broken argv (wrong script path, missing `--commit`). These tests instead drive `cliRouteHeldItems` against
+// the REAL `reserveHoldRoute`/`appendHoldFinding` primitives (over a real temp coordination root) and the
+// REAL `cliSpawnHoldLand`, with only the one un-runnable-in-a-test step — the actual detached `node`
+// spawn — faked (see the `vi.mock` of `detached-dispatch.mjs` above).
+describe('cliRouteHeldItems (#4465 real IO wiring) — the real reserve/spawn/finding effects, not a stub', () => {
+  let coordRoot;
+  beforeEach(() => {
+    coordRoot = mkdtempSync(join(tmpdir(), 'bdd-holdroute-coord-'));
+    process.env.WE_COORDINATION_ROOT = coordRoot;
+    spawnCalls.length = 0;
+  });
+  afterEach(() => {
+    delete process.env.WE_COORDINATION_ROOT;
+    rmSync(coordRoot, { recursive: true, force: true });
+  });
+
+  it('is exported as an async function', () => {
+    expect(typeof cliRouteHeldItems).toBe('function');
+    expect(cliRouteHeldItems.constructor.name).toBe('AsyncFunction');
+  });
+
+  it("route 'other': really appends to the REAL JSON ledger under the real coordination root (never a stub) "
+    + 'and never touches spawnLand', async () => {
+    const outcomes = await cliRouteHeldItems([{ num: 'x9001', route: 'other', commit: null, reason: 'wrapper-threw' }]);
+    expect(outcomes).toEqual([{ num: 'x9001', route: 'other', action: 'finding-recorded' }]);
+    expect(listHoldFindings()).toEqual([expect.objectContaining({ num: 'x9001', reason: 'wrapper-threw' })]);
+    expect(spawnCalls).toHaveLength(0);
+  });
+
+  it("route 'already-done': really reserves the dedup lease through the REAL reserveHoldRoute (not a stub "
+    + 'that no-ops) before spawning the REAL cliSpawnHoldLand — the lease is actually persisted, with the '
+    + 'right resource key and route metadata, under the real coordination root', async () => {
+    const outcomes = await cliRouteHeldItems([{ num: 'x9002', route: 'already-done', commit: 'b93d13e29', reason: 'x' }]);
+    expect(outcomes).toEqual([{ num: 'x9002', route: 'already-done', action: 'landing-spawned' }]);
+    expect(spawnCalls).toHaveLength(1);
+    const { readLockEntry } = await import('../../../scripts/readiness/file-locks.mjs');
+    const { holdRouteLockRoot } = await import('../../../scripts/conveyor/build-dispatch-hold-router.mjs');
+    const entry = readLockEntry(holdRouteLockRoot(), 'we:x9002:already-done');
+    expect(entry?.meta).toMatchObject({ num: 'x9002', route: 'already-done' });
+    // A second reserve for the SAME item — even with an explicitly DIFFERENT owner string — finds this lease
+    // already held and is refused, proving it is a genuine reservation, not a no-op stub. `reserveHoldRoute`'s
+    // own DEFAULT owner is a fresh `randomUUID()` per call (#4465 review round 2 fix), so this daemon's own
+    // real long-lived-process call above and this contender's call are already two distinct owners by
+    // construction — no explicit override is even needed to prove dedup, but one is passed anyway for
+    // clarity.
+    const { reserveHoldRoute } = await import('../../../scripts/conveyor/build-dispatch-hold-router.mjs');
+    const contender = reserveHoldRoute({ num: 'x9002', route: 'already-done', owner: 'some-other-host:99999' });
+    expect(contender.ok).toBe(false);
+  });
+
+  it("route 'out-of-scope': also reserves + spawns through the real primitives", async () => {
+    const outcomes = await cliRouteHeldItems([{ num: 'x9003', route: 'out-of-scope', commit: null, reason: 'spec not buildable' }]);
+    expect(outcomes).toEqual([{ num: 'x9003', route: 'out-of-scope', action: 'landing-spawned' }]);
+    expect(spawnCalls).toHaveLength(1);
+    expect(spawnCalls[0].argv).toEqual(expect.arrayContaining(['--num=x9003', '--route=out-of-scope', '--reason=spec not buildable']));
+  });
+});
+
+// #4465 review — `cliSpawnHoldLand` itself had no test at all before this. These pin its argv construction —
+// the exact thing a wiring mistake (wrong script path, a dropped `--commit`) would break silently, since
+// nothing else reddens for it.
+describe('cliSpawnHoldLand (#4465) — the detached-landing argv construction', () => {
+  beforeEach(() => { spawnCalls.length = 0; });
+
+  it('always includes the land script\'s own path, --num and --route, and omits --commit/--reason when absent', async () => {
+    await cliSpawnHoldLand({ num: '4380', route: 'already-done', commit: null, reason: null });
+    expect(spawnCalls).toHaveLength(1);
+    const { argv } = spawnCalls[0];
+    expect(argv[0]).toMatch(/build-dispatch-hold-route-land\.mjs$/);
+    expect(argv).toEqual(expect.arrayContaining(['--num=4380', '--route=already-done']));
+    expect(argv.some((a) => a.startsWith('--commit='))).toBe(false);
+    expect(argv.some((a) => a.startsWith('--reason='))).toBe(false);
+  });
+
+  it('adds --commit=<sha> only when the routed entry carries one (route "already-done")', async () => {
+    await cliSpawnHoldLand({ num: '4380', route: 'already-done', commit: 'b93d13e29', reason: null });
+    expect(spawnCalls[0].argv).toEqual(expect.arrayContaining(['--commit=b93d13e29']));
+  });
+
+  it('adds --reason=<text> only when the routed entry carries one (route "out-of-scope")', async () => {
+    await cliSpawnHoldLand({ num: '4295', route: 'out-of-scope', commit: null, reason: 'spec not buildable as written' });
+    expect(spawnCalls[0].argv).toEqual(expect.arrayContaining(['--reason=spec not buildable as written']));
+  });
+
+  it('returns whatever defaultSpawnDetached reports, and passes a real cwd + logPath through', async () => {
+    const result = await cliSpawnHoldLand({ num: '4380', route: 'already-done', commit: 'b93d13e29', reason: null });
+    expect(result).toBe(fakeDetachedResult);
+    expect(typeof spawnCalls[0].opts.cwd).toBe('string');
+    expect(spawnCalls[0].opts.logPath).toBe('/tmp/fake-hold-route-hold-route-4380.log');
   });
 });
 
@@ -785,6 +1057,25 @@ describe('cliListSettledBuilds / cliListHolds (the real readers, not a stub)', (
 
   it('cliListHolds is empty with no holds placed', () => {
     expect(cliListHolds()).toEqual([]);
+  });
+
+  // xovjhwh converge round 2 (correctness/security/standards-conformance) — `deriveDispatchedByBuilder`'s own
+  // docblock claims these two readers "degrade to `[]` on their own read error... never throw." The
+  // pure-planner tests can only feed already-degraded empty arrays; this drives an ACTUAL read failure through
+  // the REAL readers — `OPERATION_RUNS_DIR` pointed at a plain FILE, so the real store's `readdirSync` throws
+  // ENOTDIR — and pins that both catch it rather than propagating.
+  it('cliListSettledBuilds returns [] rather than throwing when the run-store read genuinely errors (dir is a file)', async () => {
+    const filePath = join(runsDir, 'not-a-directory');
+    writeFileSync(filePath, 'x');
+    process.env.OPERATION_RUNS_DIR = filePath;
+    await expect(cliListSettledBuilds()).resolves.toEqual([]);
+  });
+
+  it('cliListRunStoreInFlight returns [] rather than throwing when the run-store read genuinely errors (dir is a file)', async () => {
+    const filePath = join(runsDir, 'not-a-directory');
+    writeFileSync(filePath, 'x');
+    process.env.OPERATION_RUNS_DIR = filePath;
+    await expect(cliListRunStoreInFlight()).resolves.toEqual([]);
   });
 });
 
