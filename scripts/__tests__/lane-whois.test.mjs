@@ -50,12 +50,21 @@ beforeEach(() => {
   binDir = join(base, 'bin');
   mkdirSync(binDir);
   // Fake `gh` (no PRs anywhere) and `claude agents --json` (no live sessions) so the report never touches the
-  // network or a real Claude Code session listing.
+  // network or a real Claude Code session listing. `lsof` is faked too (#xl5xhmj) — `reclaim`'s direct-reset
+  // path now ALSO runs the liveness gate (`lib/lane-salvage.mjs#laneLivenessGate`), which shells `lsof` for
+  // live process cwds; faking it keeps this file hermetic rather than depending on the real host's `lsof`.
   writeFileSync(join(binDir, 'gh'), '#!/bin/sh\necho "[]"\n');
   chmodSync(join(binDir, 'gh'), 0o755);
   writeFileSync(join(binDir, 'claude'), '#!/bin/sh\necho "[]"\n');
   chmodSync(join(binDir, 'claude'), 0o755);
-  env = { ...process.env, LANE_POOL_ROOT: poolRoot, PATH: `${binDir}:${process.env.PATH}`, HOME: base };
+  writeFileSync(join(binDir, 'lsof'), '#!/bin/sh\nexit 0\n');
+  chmodSync(join(binDir, 'lsof'), 0o755);
+  env = {
+    ...process.env, LANE_POOL_ROOT: poolRoot, PATH: `${binDir}:${process.env.PATH}`, HOME: base,
+    // #xl5xhmj — the SAME gate's quiet-period half defaults to 30 minutes; zeroed here so this file's one
+    // `reclaim` call (a clean, just-provisioned lane) reads as quiet immediately, unrelated to what it tests.
+    WE_LANE_SALVAGE_QUIET_MIN: '0',
+  };
 
   git(['init', '--quiet', '--bare', '--initial-branch=main', originDir]);
   git(['clone', '--quiet', originDir, referenceDir]);
@@ -179,6 +188,56 @@ describe('lane-whois — AFTER', () => {
     expect(report.lanes[0].verdict).toBe('in-use');
     expect(report.lanes[0].holderAlive).toBe(true);
     expect(report.lanes[0].lease.session).toBe('sess-a');
+  });
+
+  // #xl5xhmj fork 3 — the old `liveOwner = !!lease && isSessionAlive(...)` read was ALWAYS false for an
+  // UNLEASED lane, no matter how live its worker actually was, which is exactly the shape a dropped/expired
+  // lease leaves (see #xbk2is9). `liveOwner` must answer "is a live agent sitting in this lane" independent of
+  // whether a lease still exists — the SAME `liveAgentInLane` read `lane-pool.mjs`'s own reclaim gate uses.
+  it('an UNLEASED lane with a live agent still sitting in it (cwd match) reports liveOwner:true, holderAlive:true (#xl5xhmj)', () => {
+    expect(runPool(['acquire', '--lane=1', '--session=sess-b', ...poolArgs()]).code).toBe(0);
+    expect(runPool(['release', '--lane=1', '--session=sess-b', ...poolArgs()]).code).toBe(0);
+    // Its lease is gone (released), but its own process is STILL live, sitting in the lane's directory —
+    // `claude agents --json` still lists it (the exact #xl5xhmj shape: a lease dropped out from under a live
+    // worker that has already pushed).
+    writeFileSync(join(binDir, 'claude'), `#!/bin/sh\necho '[{"sessionId":"sess-b","state":"working","cwd":"${lanePath(1)}"}]'\n`);
+    chmodSync(join(binDir, 'claude'), 0o755);
+
+    const r = runWhois(['--lane=1', '--json', `--repo=${referenceDir}`, '--name=whoispool', `--pool-root=${poolRoot}`]);
+    expect(r.code).toBe(0);
+    const report = JSON.parse(r.out);
+    expect(report.lanes[0].lease).toBeNull();
+    expect(report.lanes[0].liveOwner).toBe(true);
+    expect(report.lanes[0].holderAlive).toBe(true);
+  });
+
+  // Red-team finding — the ONLY existing test above pins the cwd-match half of the multi-signal read this
+  // comment promises ("by cwd or by the last ledger entry's ownerSession/workerSession/session"); the
+  // session-id-via-ledger half (an agent whose OWN cwd is elsewhere, matched only by session id) had no test of
+  // its own, so dropping `last?.session` (etc.) from the array passed to `liveAgentInLane` would leave every
+  // other whois test green.
+  it('an UNLEASED lane with a live agent whose cwd is ELSEWHERE, matched only via the ledger session id, still reports liveOwner:true (#xl5xhmj)', () => {
+    expect(runPool(['acquire', '--lane=1', '--session=sess-d', ...poolArgs()]).code).toBe(0);
+    expect(runPool(['release', '--lane=1', '--session=sess-d', ...poolArgs()]).code).toBe(0);
+    // The agent's cwd is a DIFFERENT lane entirely — only its session id matches this lane's last ledger entry.
+    writeFileSync(join(binDir, 'claude'), `#!/bin/sh\necho '[{"sessionId":"sess-d","state":"working","cwd":"${lanePath(2)}"}]'\n`);
+    chmodSync(join(binDir, 'claude'), 0o755);
+
+    const r = runWhois(['--lane=1', '--json', `--repo=${referenceDir}`, '--name=whoispool', `--pool-root=${poolRoot}`]);
+    expect(r.code).toBe(0);
+    const report = JSON.parse(r.out);
+    expect(report.lanes[0].lastHolder.session).toBe('sess-d');
+    expect(report.lanes[0].liveOwner).toBe(true);
+    expect(report.lanes[0].holderAlive).toBe(true);
+  });
+
+  it('an UNLEASED lane with NO live agent reports liveOwner:false (unchanged default)', () => {
+    expect(runPool(['acquire', '--lane=1', '--session=sess-c', ...poolArgs()]).code).toBe(0);
+    expect(runPool(['release', '--lane=1', '--session=sess-c', ...poolArgs()]).code).toBe(0);
+    const r = runWhois(['--lane=1', '--json', `--repo=${referenceDir}`, '--name=whoispool', `--pool-root=${poolRoot}`]);
+    const report = JSON.parse(r.out);
+    expect(report.lanes[0].liveOwner).toBe(false);
+    expect(report.lanes[0].holderAlive).toBe(false);
   });
 
   it('reads the last holder off the lane-history ledger once one exists', () => {

@@ -218,18 +218,26 @@ const tryGit = (args, cwd) => {
  *
  * `isLeasedNow` (optional; `cmdRelease` omits it, `we:scripts/conveyor/lane-pool-health-watch.mjs` passes its
  * `defaultIsLeasedNow`) is the ONE knob for "no live occupant vouches for this lane, so be conservative" —
- * its mere presence ALSO requires `leaveDirty` to be EMPTY (the health-watch pass's own plan is built from an
- * earlier snapshot, and real dirty state can appear before this call runs; gating on this call's own fresh
- * read, not a separate caller pre-check, keeps read-then-act one atomic step). When given, it is additionally
- * re-checked before EVERY `git clean` call, not once up front — `toRemove` can hold several entries, and a
- * lane's status read alone cannot tell "old abandoned litter" from "a file a brand-new occupant just wrote",
- * so ownership must be re-verified as close to each mutation as possible. A `true` result stops the loop,
- * keeping whatever was already removed.
+ * its mere presence (alongside `isLiveNow`'s — see below) ALSO requires `leaveDirty` to be EMPTY (the
+ * health-watch pass's own plan is built from an earlier snapshot, and real dirty state can appear before this
+ * call runs; gating on this call's own fresh read, not a separate caller pre-check, keeps read-then-act one
+ * atomic step). When given, it is additionally re-checked before EVERY `git clean` call, not once up front —
+ * `toRemove` can hold several entries, and a lane's status read alone cannot tell "old abandoned litter" from
+ * "a file a brand-new occupant just wrote", so ownership must be re-verified as close to each mutation as
+ * possible. A `true` result stops the loop, keeping whatever was already removed.
+ *
+ * `isLiveNow` (#xl5xhmj fork 2; optional, `cmdRelease` omits it, `lane-pool-health-watch.mjs` passes a
+ * liveness check built on `lib/lane-salvage.mjs#laneLivenessGate`) is `isLeasedNow`'s sibling for a LANE'S
+ * LIVE OWNER rather than its lease: an unleased lane can still have a live worker sitting in it (its lease
+ * already dropped — #xbk2is9), and the litter-reap pass previously deleted a live worker's own scratch files
+ * (its `.pr-body.md`/`.commit-msg.txt`) purely because the lane read unleased — the live-2026-09-28 lane-18
+ * evidence this item closes. Shares the SAME `leaveDirty`-empty pre-check and the SAME per-file re-check
+ * `isLeasedNow` gets — either knob alone is enough to refuse the whole reap, never a partial one.
  * @param {string} dir - the lane's working tree.
- * @param {{allowlist?: string[], isLeasedNow?: ((dir: string) => boolean)|null}} [o]
+ * @param {{allowlist?: string[], isLeasedNow?: ((dir: string) => boolean)|null, isLiveNow?: ((dir: string) => boolean)|null}} [o]
  * @returns {{removed: string[], leaveDirty: string[], skipped: boolean, complete: boolean}}
  */
-export function cleanLaneLitter(dir, { allowlist = LANE_RELEASE_LITTER_ALLOWLIST, isLeasedNow = null } = {}) {
+export function cleanLaneLitter(dir, { allowlist = LANE_RELEASE_LITTER_ALLOWLIST, isLeasedNow = null, isLiveNow = null } = {}) {
   const porcelain = tryGit(['status', '--porcelain'], dir);
   // A `null` porcelain means the status read itself FAILED (dir vanished, permission fault, …) — this must
   // never be conflated with "verified clean, nothing to remove" (`planLitterCleanup(null)` would otherwise
@@ -241,17 +249,20 @@ export function cleanLaneLitter(dir, { allowlist = LANE_RELEASE_LITTER_ALLOWLIST
     return { removed: [], leaveDirty: [], skipped: true, complete: false };
   }
   const { toRemove, leaveDirty } = planLitterCleanup(porcelain, allowlist);
-  if (isLeasedNow && leaveDirty.length > 0) {
+  if ((isLeasedNow || isLiveNow) && leaveDirty.length > 0) {
     return { removed: [], leaveDirty, skipped: true, complete: false };
   }
   const removed = [];
   for (const path of toRemove) {
     // Re-checked on EVERY iteration, not once before the loop: a multi-entry `toRemove` spans several
     // sequential `git clean` spawns, and checking only once up front would leave every removal AFTER the
-    // first one unguarded if a lease were acquired mid-loop. A trip here is a DECLINE, not a partial success
-    // — `complete` must read false, never derived from comparing against a caller's own (possibly stale)
-    // count of what it expected to remove.
+    // first one unguarded if a lease were acquired (or a live owner showed up) mid-loop. A trip here is a
+    // DECLINE, not a partial success — `complete` must read false, never derived from comparing against a
+    // caller's own (possibly stale) count of what it expected to remove.
     if (isLeasedNow && isLeasedNow(dir)) {
+      return { removed, leaveDirty, skipped: true, complete: false };
+    }
+    if (isLiveNow && isLiveNow(dir)) {
       return { removed, leaveDirty, skipped: true, complete: false };
     }
     // `:(literal)` forces git's pathspec parser to match this LITERAL string, not a glob — without it, a

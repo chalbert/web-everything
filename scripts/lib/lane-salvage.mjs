@@ -31,6 +31,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, appendFileSync, statSync, existsSync, realpathSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
+import { readLaneHistory, lastLaneHistoryEntry } from './lane-history.mjs';
 
 /** Env override for where salvage lands; default `~/.claude/lane-salvage` (the operator's manual location). */
 export const SALVAGE_DIR_ENV = 'WE_LANE_SALVAGE_DIR';
@@ -125,9 +126,21 @@ export function salvageEligibility({ leased, liveOwner, livePids = [], newestMti
   if (leased) return { eligible: false, reason: 'lane is leased — never salvaged under a live holder' };
   if (liveOwner) return { eligible: false, reason: 'owning session is still live (claude agents)' };
   if (livePids.length) return { eligible: false, reason: `live process(es) have cwd in the lane: pid ${livePids.join(', ')}` };
-  if (Number.isFinite(newestMtimeMs) && nowMs - newestMtimeMs < quietMs) {
-    const mins = Math.round((nowMs - newestMtimeMs) / 60_000);
-    return { eligible: false, reason: `lane content changed ${mins} min ago (< ${Math.round(quietMs / 60_000)} min quiet period)` };
+  if (Number.isFinite(newestMtimeMs)) {
+    // #xl5xhmj — CLAMPED to 0: a file's on-disk mtime can land a few ms AFTER `nowMs` was sampled (ordinary
+    // mtime/clock granularity between the write and the later `Date.now()` read — no specific file needs to be
+    // implicated for this to happen). An unclamped negative "elapsed" is nonsensical: a NEGATIVE number
+    // and a CLAMPED zero read identically (both < any positive `quietMs`) at every quiet period big enough to
+    // dwarf a few ms of skew — the real 30-minute production default (`lane-pool.mjs#cmdReclaim` never overrides
+    // `quietMs`) among them, so the clamp changes no production verdict there. It matters at `quietMs: 0` — an
+    // immediate-reset caller, which today is only THIS ITEM'S OWN test suite
+    // (`lane-pool-reclaim.test.mjs`'s `WE_LANE_SALVAGE_QUIET_MIN=0`) — where a negative elapsed would wrongly
+    // refuse a lane that is, at a zero threshold, trivially already quiet.
+    const elapsedMs = Math.max(0, nowMs - newestMtimeMs);
+    if (elapsedMs < quietMs) {
+      const mins = Math.round(elapsedMs / 60_000);
+      return { eligible: false, reason: `lane content changed ${mins} min ago (< ${Math.round(quietMs / 60_000)} min quiet period)` };
+    }
   }
   return { eligible: true, reason: 'unleased, no live owner or process, quiet' };
 }
@@ -180,19 +193,91 @@ export function listLitterWorktrees(dir) {
     .map((w) => ({ path: w.path, name: w.path.slice(root.length + 1) }));
 }
 
-/** Newest mtime (ms) across the lane's dirty paths, its index/HEAD reflog, and each litter worktree's own. */
+/**
+ * Newest mtime (ms) across the lane's dirty paths, its HEAD reflog, and each litter worktree's own.
+ *
+ * #xl5xhmj — deliberately does NOT stat `.git/index`. A plain, read-only `git status` can itself REWRITE
+ * `.git/index` on disk (git's own "racy index" cache refresh, opportunistically re-recording each entry's
+ * cached stat data), bumping the index's own mtime to "now" with no real content change involved — live-
+ * verified (`we:scripts/__tests__/lane-pool-reclaim.test.mjs`'s "genuinely quiet" test reddened intermittently,
+ * ~2 of 3 runs, from exactly this). Reading the index before THIS function's own `dirtyPaths` call cannot close
+ * that race: `laneLivenessGate` is reached from `cmdReclaim` AFTER `laneReclaimPreservationProof` has ALREADY
+ * run its own `git status` (`gitStatusSummary`, `we:scripts/lane-whois.mjs`) moments earlier in the same call —
+ * so ANY ordering local to this one function still reads an index an EARLIER, unrelated status call may have
+ * just rewritten. The race lives in "a status call ran somewhere in the surrounding pipeline", which no
+ * ordering within this one function can bound.
+ *
+ * Coverage this still keeps for a STAGED/WORKING-TREE DELETION (a path `dirtyPaths` reports as dirty that no
+ * longer exists on disk to `stat`, e.g. `git rm`, or a plain `rm` of a tracked file): rather than reach for the
+ * index's own unreliable mtime, an unstatable dirty path is itself treated as maximally fresh (`Date.now()`) —
+ * git's porcelain reporting a path as dirty IS the fresh-activity signal; a missing mtime on that path is not
+ * evidence of nothing having happened, it is only evidence the CONTENT itself is gone. `.git/logs/HEAD` needs
+ * no such fallback: it is only ever written by a REAL ref-moving operation (commit/reset/checkout/merge), never
+ * as a side effect of a read-only status call, so its own mtime is trustworthy exactly as read.
+ */
 export function newestContentMtimeMs(dir) {
   let newest = null;
-  const bump = (p) => { try { const m = statSync(p).mtimeMs; if (newest === null || m > newest) newest = m; } catch { /* gone */ } };
+  const bump = (m) => { if (Number.isFinite(m) && (newest === null || m > newest)) newest = m; };
+  const statMtime = (p) => { try { return statSync(p).mtimeMs; } catch { return null; } };
   const scan = (d) => {
-    for (const p of dirtyPaths(d)) bump(join(d, p));
+    for (const p of dirtyPaths(d)) {
+      const m = statMtime(join(d, p));
+      bump(m === null ? Date.now() : m); // unstatable (gone) dirty path — treat as freshly changed, never skipped
+    }
     const gitDir = resolve(d, git(d, ['rev-parse', '--git-dir']).trim());
-    bump(join(gitDir, 'index'));
-    bump(join(gitDir, 'logs', 'HEAD'));
+    bump(statMtime(join(gitDir, 'logs', 'HEAD')));
   };
   scan(dir);
   for (const w of listLitterWorktrees(dir)) { try { scan(w.path); } catch { /* broken worktree — its salvage will say so */ } }
   return newest;
+}
+
+/**
+ * THE ONE liveness gate — "is it safe to act on this unleased lane RIGHT NOW, or does something still call it
+ * home?" (#xl5xhmj). Originally inline in `we:scripts/lane-pool.mjs#cmdReclaimSalvage`'s own `gate()`, extracted
+ * here so every caller that resets/reaps an UNLEASED lane shares the identical read — never a second
+ * hand-rolled liveness check that can silently drift from this one (the exact #xl5xhmj bug: a lane whose
+ * content was already pushed skipped this gate entirely and went straight to `git reset --hard`, because only
+ * the SALVAGE path called it).
+ *
+ * Fails CLOSED like every read it composes: an unreadable `claude agents` or `lsof` never reads as "safe" —
+ * see {@link salvageEligibility}'s own contract (itself hardened by this same item — see its own docblock for
+ * the mtime-skew clamp, and {@link newestContentMtimeMs}'s for the `.git/index` racy-read fix). `lastHolder` is
+ * the lane's own history-ledger entry; its `ownerSession`/`workerSession`/`session` are checked ALONGSIDE a live
+ * process cwd inside `dir` — the same two-signal read (`liveAgentInLane` + `pidsWithCwdIn`) `cmdReclaimSalvage`
+ * always used, now shared here (that COMPOSITION is unchanged; the primitives it calls were separately
+ * hardened, above). `lastHolder` is OPTIONAL — omit it and the gate derives it itself
+ * (`lastLaneHistoryEntry(readLaneHistory(dir))`) rather than making every caller repeat that read; pass it
+ * explicitly only when the caller ALSO needs the entry for something else (`cmdReclaimSalvage`'s `gate()` does,
+ * to build its own salvage metadata). The unreadable-gate message text below is reworded from "never salvaging
+ * blind" to name what THIS gate is used for beyond salvage — nothing else in the tree matches the old string.
+ * @param {{dir:string, lastHolder?:object, readAgents?:Function, readCwds?:Function, quietMs?:number, nowMs?:number}} o
+ * @returns {{eligible:boolean, reason:string}}
+ */
+export function laneLivenessGate({
+  dir, lastHolder, readAgents = readAgentsStrict, readCwds = readLiveCwds,
+  quietMs = resolveSalvageQuietMs(), nowMs = Date.now(),
+} = {}) {
+  // #xl5xhmj (simplicity round) — `lastHolder` is OPTIONAL: every caller that has no extra use for the ledger
+  // entry beyond feeding it here (`cmdReclaim`'s two call sites, `defaultIsLiveNow`) now simply omits it and
+  // lets the gate derive it itself, rather than each one repeating
+  // `lastLaneHistoryEntry(readLaneHistory(dir)) || {}`. A caller that DOES need the entry for something else too
+  // (`cmdReclaimSalvage`'s `gate()`, which also returns it as `last` for its own salvage metadata) still passes
+  // it explicitly — that explicit value always wins, `undefined` is the only trigger for self-derivation.
+  const holder = lastHolder !== undefined ? lastHolder : (lastLaneHistoryEntry(readLaneHistory(dir)) || {});
+  const agents = readAgents();
+  const cwds = readCwds();
+  if (agents === null || cwds === null) {
+    return {
+      eligible: false,
+      reason: `cannot read ${agents === null ? '\`claude agents\`' : 'live process cwds (lsof)'} — never treating a lane as safe to act on blind`,
+    };
+  }
+  const liveOwner = liveAgentInLane(agents, dir, [holder?.ownerSession, holder?.workerSession, holder?.session]);
+  const livePids = pidsWithCwdIn(cwds, dir);
+  let newestMtimeMs = null;
+  try { newestMtimeMs = newestContentMtimeMs(dir); } catch { newestMtimeMs = nowMs; }
+  return salvageEligibility({ leased: false, liveOwner, livePids, newestMtimeMs, nowMs, quietMs });
 }
 
 /**
