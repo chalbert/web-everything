@@ -122,25 +122,30 @@ export function readDispatchOutcome(text) {
  *     about this tick's behaviour changes for it.
  * `live:false` plans and reports without retiring, claiming, or dispatching anything.
  *
- * #4131/#4382 build-orphan-adopt — `adoptOrphans()` (optional, LIVE ONLY, best-effort) runs FIRST, before the
- * retire loop below ever reads `effects.listClaims()`: a claim it releases this same tick is then simply
+ * #4131/#4382 build-orphan-adopt — `adoptOrphans({allowResume, frozenReason})` (optional, LIVE ONLY,
+ * best-effort) runs before the retire loop below ever reads `effects.listClaims()`, with `allowResume` false
+ * while the kill switch or a landing freeze is on: a claim it releases this same tick is then simply
  * absent from that read, freeing the item for THIS tick's own dispatch decision rather than waiting a full
  * cycle. See `scripts/conveyor/build-dispatch-orphan-adopt.mjs`'s own header for the mechanism this closes —
  * a claim whose recorded dispatch died with none of `doneWhy`'s three retirement signals ever becoming true.
  * Optional-chained so an older test stub (every fixture that predates this) behaves exactly as before.
  */
 export async function runBuildDispatchTick({ bookkeeping = {}, live = false, policy = BUILD_DISPATCH_POLICY, effects }) {
-  let orphanAdoption = null;
-  if (live && typeof effects.adoptOrphans === 'function') {
-    try { orphanAdoption = await effects.adoptOrphans(); }
-    catch (e) { orphanAdoption = { error: String(e?.message || e).split('\n')[0] }; }
-  }
   const out = await effects.planTick(bookkeeping);
   const d = out?.decisions || {};
   const admission = d.admission || {};
   const scopeByNum = new Map((admission.queue || []).map((r) => [normNum(r.num), Array.isArray(r.scope) ? r.scope : []]));
   const clearedNums = new Set((admission.cleared || []).map((r) => normNum(r.num)));
   const openPrs = normalizeOpenPrs(await effects.fetchOpenPrs());
+  // PR #2921 review — a resume spawns real gate/converge/PR work, so it obeys the SAME kill switch and landing
+  // freeze a fresh dispatch does (`planBuildDispatch`'s own freeze rule, computed here with no candidates).
+  // Still before this tick's own `listClaims()` read, so a claim released here frees its item this same tick.
+  let orphanAdoption = null;
+  if (live && typeof effects.adoptOrphans === 'function') {
+    const { freeze } = planBuildDispatch({ openPrs, killSwitch: effects.killSwitch(), policy });
+    try { orphanAdoption = await effects.adoptOrphans({ allowResume: !freeze.frozen, frozenReason: freeze.reasons.join('; ') }); }
+    catch (e) { orphanAdoption = { error: String(e?.message || e).split('\n')[0] }; }
+  }
   const runStoreInFlight = effects.listRunStoreInFlight();
   // A claim retires on a SETTLED non-PR outcome, but never over a run-store row that is CURRENTLY in-flight
   // for the same item: only one claim ever exists per `num` at a time (the daemon's own `acquireClaim` is a
@@ -475,7 +480,7 @@ function cliEffects() {
     retryInfraBlocked: cliRetryInfraBlocked,
     // #4131/#4382 build-orphan-adopt — only called by `runBuildDispatchTick` when `live`, and BEFORE this same
     // tick's own claim retirement read — see that function's own docblock.
-    adoptOrphans: () => adoptOrphanedBuildClaims(),
+    adoptOrphans: (o) => adoptOrphanedBuildClaims(o),
   };
 }
 

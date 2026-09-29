@@ -33,7 +33,8 @@ describe('laneHasCommitAhead', () => {
   it('true when the lane has at least one commit ahead of its base', () => {
     const run = vi.fn(() => '3\n');
     expect(laneHasCommitAhead({ lane: '/fake/lane-9', run })).toBe(true);
-    expect(run).toHaveBeenCalledWith('git', ['rev-list', '--count', 'main..HEAD'], { cwd: '/fake/lane-9' });
+    // PR #2921 review — `origin/main`, never local `main`: a pool lane's working branch IS its local `main`.
+    expect(run).toHaveBeenCalledWith('git', ['rev-list', '--count', 'origin/main..HEAD'], { cwd: '/fake/lane-9' });
   });
 
   it('false when the lane has zero commits ahead', () => {

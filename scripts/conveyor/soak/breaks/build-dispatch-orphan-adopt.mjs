@@ -44,22 +44,27 @@ function realDeadPid() {
   return r.pid;
 }
 
-/** A minimal, real git lane: `main` at one base commit; when `ahead` is true, checked out onto a delivery
- *  branch one commit further, matching the shape a real dispatch's lane is in when its agent finished. */
-function makeLane({ ahead }) {
+/** A minimal, real git lane in the SHAPE a real pool lane has (PR #2921 review — the old fixture committed on a
+ *  side branch, which hid that a real lane's working branch IS its local `main`): `origin/main` at one base
+ *  commit, the local `main` checked out on it, and — when `ahead` — ONE build commit on that same local `main`
+ *  carrying the agent's work plus the wrapper's own claim edit to the item's backlog card. */
+function makeLane({ ahead, num = '4131' }) {
   const lane = mkdtempSync(join(tmpdir(), 'soak-orphan-lane-'));
   const git = (args) => execFileSync('git', args, { cwd: lane, encoding: 'utf8' });
   git(['init', '-q', '-b', 'main']);
   git(['config', 'user.email', 'soak@test']);
   git(['config', 'user.name', 'soak']);
+  mkdirSync(join(lane, 'backlog'));
   writeFileSync(join(lane, 'README.md'), 'base\n');
+  writeFileSync(join(lane, 'backlog', `${num}-orphan-thing.md`), 'status: open\n');
   git(['add', '.']);
   git(['commit', '-q', '-m', 'base']);
+  git(['update-ref', 'refs/remotes/origin/main', 'HEAD']);
   if (ahead) {
-    git(['checkout', '-q', '-b', 'lane/orphan-4131']);
     writeFileSync(join(lane, 'agent-work.txt'), 'the agent\'s own finished work\n');
+    writeFileSync(join(lane, 'backlog', `${num}-orphan-thing.md`), 'status: active\n');
     git(['add', '.']);
-    git(['commit', '-q', '-m', 'agent work']);
+    git(['commit', '-q', '-m', `WE #${num}: delivery build`]);
   }
   return lane;
 }
@@ -138,8 +143,14 @@ export default {
     acquireBuildDispatchClaim({ num: '4382', scope: [], lockRoot: claimRoot });
     const rowB = writeInFlightRow('4382', { lane: 11, sessionSlug: 'conveyor-4382', deadPid });
 
+    // ── PR #2921 review shape: a LIVE re-dispatch whose item still has a STALE resume marker (bound to an older
+    // attempt, dead pid) → must be LEFT; the stale marker must never make the live build look dead ──────────
+    acquireBuildDispatchClaim({ num: '4400', scope: [], lockRoot: claimRoot });
+    const rowC = writeInFlightRow('4400', { lane: 11, sessionSlug: 'conveyor-4400', deadPid: process.pid }); // this soak process: alive
+    markBuildDispatchResume({ num: '4400', pid: deadPid, runId: 'dispatch-lane-OLDER-ATTEMPT', rowKey: 'step:1:0', lockRoot: resumeRoot });
+
     const laneByLaneNum = { 9: resumableLane, 11: emptyLane };
-    const rowByNum = { 4131: rowA, 4382: rowB };
+    const rowByNum = { 4131: rowA, 4382: rowB, 4400: rowC };
 
     let results;
     try {
@@ -149,12 +160,12 @@ export default {
         readResumeMarker: (num) => readBuildDispatchResume({ num, lockRoot: resumeRoot }),
         // REAL checkResumable — real `tryReadDeliveryReport`/`laneHasCommitAhead` (real git), only the
         // lane-pool path lookup is short-circuited (no real lane-pool state on this host).
-        resolveResumability: ({ lane, sessionSlug }) => checkResumable({ lane, sessionSlug, resolveLane: () => laneByLaneNum[Number(lane)] }),
+        resolveResumability: (o) => checkResumable({ ...o, resolveLane: () => laneByLaneNum[Number(o.lane)] }),
         releaseClaim: ({ num }) => releaseBuildDispatchClaim({ num, lockRoot: claimRoot }),
         releaseResumeMarker: ({ num }) => releaseBuildDispatchResume({ num, lockRoot: resumeRoot }),
         settleRow,
         spawnResume: (o) => { spawnedResumeWith = o; return 424242; }, // FAKE — never a real agent in a soak sandbox.
-        markResume: ({ num, pid }) => markBuildDispatchResume({ num, pid, lockRoot: resumeRoot }),
+        markResume: (o) => markBuildDispatchResume({ ...o, lockRoot: resumeRoot }),
       });
     } catch (e) {
       violations.push({ invariant: 'crash', detail: String(e?.stack || e) });
@@ -175,8 +186,19 @@ export default {
     if (!claimsAfter.includes('4131')) {
       violations.push({ invariant: 'claim-lost-during-resume', detail: '#4131\'s claim must stay held while its resume runs — it was released instead' });
     }
-    if (!readBuildDispatchResume({ num: '4131', lockRoot: resumeRoot })) {
+    const markerA = readBuildDispatchResume({ num: '4131', lockRoot: resumeRoot });
+    if (!markerA) {
       violations.push({ invariant: 'resume-not-marked', detail: 'no resume marker recorded for #4131 after a resume dispatch' });
+    } else if (markerA.meta?.runId !== rowA || markerA.meta?.rowKey !== 'step:1:0') {
+      violations.push({ invariant: 'resume-marker-unbound', detail: `#4131's resume marker is not bound to its row: ${JSON.stringify(markerA.meta)}` });
+    }
+    if (!spawnedResumeWith || spawnedResumeWith.runId !== rowA || spawnedResumeWith.effectKey !== 'step:1:0') {
+      violations.push({ invariant: 'resume-cannot-settle-row', detail: `resume not handed the original row's run-id/effect-key: ${JSON.stringify(spawnedResumeWith)}` });
+    }
+
+    // PR #2921 review — a stale marker must never get a LIVE build released.
+    if (byNum['4400']?.action !== 'leave' || !claimsAfter.includes('4400')) {
+      violations.push({ invariant: 'stale-marker-killed-live-build', detail: `#4400 (live re-dispatch, stale marker) got ${JSON.stringify(byNum['4400'])}; claim held: ${claimsAfter.includes('4400')}` });
     }
 
     // #4382 — THE ACTUAL BUG THIS CARD FIXES: RELEASED (never stuck forever occupying a builder slot).

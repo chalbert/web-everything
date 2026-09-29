@@ -78,6 +78,14 @@ describe('build-dispatch resume marker (#4131/#4382 build-orphan-adopt)', () => 
     expect(marker).toMatchObject({ pid: 12345, meta: expect.objectContaining({ num: '4131', kind: 'resume', pid: 12345 }) });
   });
 
+  it('PR #2921 review — records the row it is bound to, its attempt count, and a PENDING (pid-less) shape '
+    + 'written before the spawn', () => {
+    markBuildDispatchResume({ num: '4131', pid: null, runId: 'dispatch-lane-a', rowKey: 'step:1:0', attempts: 2, lockRoot });
+    expect(readBuildDispatchResume({ num: '4131', lockRoot }).meta).toMatchObject({
+      pid: null, runId: 'dispatch-lane-a', rowKey: 'step:1:0', attempts: 2,
+    });
+  });
+
   it('refreshes (never refuses) a second resume marker for the same item — a re-adoption after the first '
     + 'resume itself died, not a mutex', () => {
     markBuildDispatchResume({ num: '4131', pid: 111, lockRoot });

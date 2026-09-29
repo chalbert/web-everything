@@ -273,6 +273,22 @@ describe('runBuildDispatchTick — #4131/#4382 build-orphan-adopt', () => {
     expect(order[0]).toBe('adopt'); // adoption runs before the tick's own claim read.
   });
 
+  it('PR #2921 review — resume is allowed only when neither the kill switch nor a landing freeze is on', async () => {
+    const dispatches = [];
+    const seen = [];
+    const base = effectsFor({ lockRoot, pid: 1, dispatches });
+    const adoptOrphans = async (o) => { seen.push(o); return []; };
+
+    await runBuildDispatchTick({ live: true, effects: { ...base, adoptOrphans } });
+    await runBuildDispatchTick({ live: true, effects: { ...base, adoptOrphans, killSwitch: () => ({ engaged: true, reason: 'operator' }) } });
+    const tooManyPrs = Array.from({ length: BUILD_DISPATCH_POLICY.maxOpenPrs + 1 }, (_, i) => ({ number: 9000 + i, labels: [], files: [], headRefName: `x-${i}` }));
+    await runBuildDispatchTick({ live: true, effects: { ...base, adoptOrphans, fetchOpenPrs: async () => [{ repo: 'we', prs: tooManyPrs }] } });
+
+    expect(seen.map((o) => o?.allowResume)).toEqual([true, false, false]);
+    expect(seen[1].frozenReason).toMatch(/kill switch/);
+    expect(seen[2].frozenReason).toMatch(/maxOpenPrs/);
+  });
+
   it('a DRY-RUN tick (live:false) never calls it — a dry run must touch nothing', async () => {
     const dispatches = [];
     let calls = 0;
