@@ -1,4 +1,5 @@
 ---
+bornAs: xo9j1o7
 kind: task
 status: open
 scope: ["we:scripts/lib/rebase-drop-content.mjs", "we:scripts/lib/rebase-drop-manifest.mjs", "we:scripts/lib/nnn-collision-heal.mjs", "we:scripts/operations/review-prep-io.mjs", "we:scripts/conveyor/fix-procedure.mjs", "we:scripts/lib/__tests__/rebase-drop-content.test.mjs", "we:scripts/lib/__tests__/rebase-drop-manifest.test.mjs", "we:scripts/lib/__tests__/nnn-collision-heal.test.mjs", "we:scripts/operations/__tests__/review-prep-io.test.mjs", "we:scripts/conveyor/__tests__/fix-procedure.test.mjs", "we:scripts/conveyor/soak/breaks/"]
