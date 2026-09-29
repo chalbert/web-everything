@@ -432,6 +432,10 @@ const REVIEW_CODE_PATH_FILES = new Set([
   'scripts/lib/advisory-labels.mjs', 'scripts/lib/model-probation.mjs', 'scripts/lib/pr-liveness.mjs',
   'scripts/conveyor/advisory-round-count.mjs', 'scripts/conveyor/learnings-drop.mjs',
   'scripts/conveyor/run-scorecard-store.mjs',
+  // #4493 — review-loop-cli's own mechanized prevention filing now spawns the shared detached landing job
+  // (the same one review-set-label.mjs's approval-time filing already used) instead of driving `file-item`
+  // in-process; a new direct import of the review-loop-cli entry file.
+  'scripts/lib/prevention-landing-job.mjs',
 ]);
 
 /** #4387 (PR #2916 review, round 2) — direct imports are not enough: the credential sandbox lives one level

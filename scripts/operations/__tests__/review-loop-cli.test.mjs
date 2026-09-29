@@ -36,10 +36,28 @@ import { fileItemOperation } from '../file-item.mjs';
 import { REVIEW_EFFECTS, reviewPrOperation } from '../review-pr.mjs';
 import { buildPreventionFilingInput } from '../../lib/review-loop-policy.mjs';
 import {
-  applyUnattendedActorDefault, buildFileItemArgv, fileItemForPrevention, findFiledPreventionCard, runReviewLoopOnce,
-  UNATTENDED_REVIEW_ACTOR,
+  applyUnattendedActorDefault, buildFileItemArgv, fileItemForPrevention, fileItemForPreventionViaLandingJob,
+  findFiledPreventionCard, runReviewLoopOnce, UNATTENDED_REVIEW_ACTOR,
 } from '../review-loop-cli.mjs';
 import { createReviewPrSinks } from '../review-pr-io.mjs';
+import { spawnPreventionLandingJob } from '../../lib/prevention-landing-job.mjs';
+
+// #4493 converge round-1 (4 of 5 jurors, independently): every existing `runReviewLoopOnce` test injects its own
+// `fileItem`, so nothing ever exercised the PRODUCTION DEFAULT wiring — the exact one-line swap
+// (`fileItem = fileItemForPreventionViaLandingJob`) this item's whole point is. Mocking only the bottom-most
+// seam (`defaultSpawnDetached`, in `../detached-dispatch.mjs`, which `prevention-landing-job.mjs` imports) lets a
+// test call `runReviewLoopOnce` with NO override at any layer and still prove no real subprocess/write happens.
+const { spawnDetachedCalls } = vi.hoisted(() => ({ spawnDetachedCalls: [] }));
+vi.mock('../detached-dispatch.mjs', async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    defaultSpawnDetached: (argv, opts) => {
+      spawnDetachedCalls.push({ argv, opts });
+      return { pid: 99999, on: () => {} };
+    },
+  };
+});
 
 const NET_PATHS = ['scripts/operations/review-pr.mjs'];
 
@@ -975,5 +993,124 @@ describe('fileItemForPrevention — the production `fileItem` binding (#2749)', 
     expect(calls[0].store).toBe(stores[0]);
     expect(calls[1].store).toBe(stores[1]);
     expect(calls[0].store).not.toBe(calls[1].store);
+  });
+});
+
+// #4493 — the review daemon's OWN copy of #4317's orphaned-card bug: `fileItemForPrevention` above writes the
+// filed card into `file-item`'s own root, wherever THIS process's checkout is — routinely a read-only clone
+// (`~/workspace/wev-review-daemon`) that never commits or pushes. `fileItemForPreventionViaLandingJob` is now
+// `runReviewLoopOnce`'s production default instead; these tests pin that it never drives `file-item` in
+// process, and that `runReviewLoopOnce`'s own mechanized branch renders the "queued for landing" case correctly.
+describe('fileItemForPreventionViaLandingJob — routes through the shared detached landing job (#4493), never '
+  + 'file-item in-process', () => {
+  const input = {
+    title: 'chalbert/web-everything#1234', kind: 'story', size: '3', digest: 'd', scope: 'we:a.mjs', parent: '',
+    queue: 'true',
+  };
+
+  it('spawns the SAME detached landing job #4317 already uses, tagged with its own sessionPrefix, and '
+    + 'synthesizes a `file-item`-shaped queued payload — no real card number yet', async () => {
+    const spawnCalls = [];
+    const spawnJob = (jobInput, opts) => {
+      spawnCalls.push({ jobInput, opts });
+      return { ok: true, num: null, rel: null, error: null, handle: 'pid:999', session: 'review-loop-prevention-xyz' };
+    };
+    const out = await fileItemForPreventionViaLandingJob(input, { spawnJob });
+    expect(spawnCalls).toHaveLength(1);
+    expect(spawnCalls[0].jobInput).toBe(input);
+    expect(spawnCalls[0].opts).toEqual({ sessionPrefix: 'review-loop-prevention' });
+    expect(out.code).toBe(0);
+    const payload = JSON.parse(out.lines[0]);
+    expect(payload).toEqual({
+      verdict: { num: null, rel: null }, queued: true, handle: 'pid:999', session: 'review-loop-prevention-xyz',
+    });
+  });
+
+  it('a failed spawn reports a non-zero code and the spawn error, never throws', async () => {
+    const spawnJob = () => ({ ok: false, num: null, rel: null, error: 'could not spawn the landing job: ENOENT' });
+    const out = await fileItemForPreventionViaLandingJob(input, { spawnJob });
+    expect(out).toEqual({ code: 1, lines: ['could not spawn the landing job: ENOENT'] });
+  });
+
+  it('the shared leaf itself (called directly, stubbing only `spawnDetached`) writes NOTHING into a fixture '
+    + '"daemon clone" checkout — the regression #4493 exists to close (the full default-wiring proof, with no '
+    + 'layer injected at all, is the separate test below)', () => {
+    const root = mkdtempSync(join(tmpdir(), 'review-loop-prevention-daemon-clone-'));
+    mkdirSync(join(root, 'backlog'));
+    try {
+      const before = readdirSync(root, { recursive: true }).sort();
+      const spawnCalls = [];
+      const spawnDetached = (argv, opts) => { spawnCalls.push({ argv, opts }); return { pid: 4242, on: () => {} }; };
+      const result = spawnPreventionLandingJob(input, { spawnDetached, root, logPathFor: () => '/dev/null' });
+      expect(readdirSync(root, { recursive: true }).sort()).toEqual(before);
+      expect(spawnCalls[0].opts.cwd).toBe(root);
+      expect(spawnCalls[0].argv[0]).toMatch(/land-prevention-card\.mjs$/);
+      expect(result.ok).toBe(true);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+});
+
+describe('runReviewLoopOnce — the mechanized branch renders a QUEUED landing job correctly (#4493)', () => {
+  const stubViaLandingJob = (handle = 'pid:999', session = 'review-loop-prevention-xyz') => async (i) => (
+    fileItemForPreventionViaLandingJob(i, { spawnJob: () => ({ ok: true, handle, session }) })
+  );
+
+  it('accepts mechanically on a queued (not-yet-numbered) filing, and says so in plain text', async () => {
+    const { declaration, registry } = registryFor({});
+    const store = createMemoryRunStore();
+    const seen = [];
+    const out = await runReviewLoopOnce({
+      declaration, registry, argv: BASE_ARGV, store, sinks: recordingSinks(seen),
+      makeJudge: cannedJudge(PREVENTION_ANSWER), mintRunId: () => 'r-prevention-queued',
+      appendLearning: () => { throw new Error('must not be called — never surfaced to a human'); },
+      fileItem: stubViaLandingJob(),
+    });
+    expect(out.code).toBe(0);
+    expect(out.stopped).toBe('complete');
+    expect(out.run.findings.confirm).toBe('accept');
+    expect(seen.map((s) => s.type)).toContain(REVIEW_EFFECTS.LABEL);
+    expect(out.lines.join('\n')).toMatch(/prevention guard\(s\) queued for landing via a lane \(tracking pid:999\)/);
+    expect(out.lines.join('\n')).toMatch(/no human was asked/);
+    expect(out.lines.join('\n')).not.toMatch(/filed mechanically/);
+  });
+
+  it('carries `preventionFiled` with `queued: true` + the handle in --json, num/path both null', async () => {
+    const { declaration, registry } = registryFor({});
+    const store = createMemoryRunStore();
+    const out = await runReviewLoopOnce({
+      declaration, registry, argv: [...BASE_ARGV, '--json'], store, sinks: recordingSinks([]),
+      makeJudge: cannedJudge(PREVENTION_ANSWER), mintRunId: () => 'r-prevention-queued-json',
+      fileItem: stubViaLandingJob('pid:555', 'review-loop-prevention-abc'),
+    });
+    const payload = JSON.parse(out.lines[0]);
+    expect(payload.preventionFiled).toEqual({ num: null, path: null, queued: true, handle: 'pid:555' });
+  });
+
+  // #4493 converge round-1 finding (correctness/simplicity/standards-conformance/claim-accuracy, independently):
+  // the wiring itself — `runReviewLoopOnce`'s DEFAULT `fileItem`, un-overridden — was the one thing no existing
+  // test exercised. NO layer is injected here: `fileItem`, `spawnJob` and `logPathFor`/`resolveSettingsEnv` all
+  // resolve to their real production defaults; only `defaultSpawnDetached` (the actual `child_process.spawn`
+  // call) is mocked, at the module boundary declared above. This is the regression #4493 exists to close: if
+  // `runReviewLoopOnce`'s default ever reverts to `fileItemForPrevention` (the in-process binding), this test
+  // reddens because NOTHING would reach `defaultSpawnDetached` at all.
+  it('with NO fileItem override anywhere, the real production wiring reaches the shared detached landing job — '
+    + 'never `file-item` in process', async () => {
+    spawnDetachedCalls.length = 0;
+    const { declaration, registry } = registryFor({});
+    const store = createMemoryRunStore();
+    const seen = [];
+    const out = await runReviewLoopOnce({
+      declaration, registry, argv: BASE_ARGV, store, sinks: recordingSinks(seen),
+      makeJudge: cannedJudge(PREVENTION_ANSWER), mintRunId: () => 'r-prevention-real-default',
+      appendLearning: () => { throw new Error('must not be called — never surfaced to a human'); },
+      // fileItem intentionally OMITTED — this is the point of the test.
+    });
+    expect(out.code).toBe(0);
+    expect(out.stopped).toBe('complete');
+    expect(out.run.findings.confirm).toBe('accept');
+    expect(spawnDetachedCalls).toHaveLength(1);
+    expect(spawnDetachedCalls[0].argv[0]).toMatch(/land-prevention-card\.mjs$/);
+    expect(spawnDetachedCalls[0].argv.some((a) => a.startsWith('--session=review-loop-prevention-'))).toBe(true);
+    expect(out.lines.join('\n')).toMatch(/prevention guard\(s\) queued for landing via a lane \(tracking pid:99999\)/);
   });
 });
