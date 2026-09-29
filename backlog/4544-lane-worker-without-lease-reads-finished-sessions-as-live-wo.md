@@ -26,7 +26,7 @@ npx vitest run scripts/__tests__/lane-whois.test.mjs scripts/conveyor/health-sme
 
 ## Premise check (against origin/main, 2026-09-29)
 
-Still true. `we:scripts/lane-whois.mjs:405` sets `liveOwner = liveAgentInLane(agents, dir, [lease?.ownerSession, last?.ownerSession, last?.workerSession, last?.session])`. `liveAgentInLane` (`we:scripts/lib/lane-salvage.mjs:103`) treats any listed `claude agents --json` entry as live unless its `state` is one of `done/failed/stopped/completed/killed` — an entry with no state, or an idle one, counts as live, and a match by cwd or by the last holder's session id is enough. `workersWithoutLease` (`we:scripts/conveyor/lane-pool-health-watch.mjs:468`) then flags every unleased lane whose `liveOwner === true`. Not done: no commit references #4544 / `xx0x4zv` beyond the JIT-number drain commit. Scope is right: the three files the card names are the whole touch-set, plus their two test files.
+Still true. `we:scripts/lane-whois.mjs:405` sets `liveOwner = liveAgentInLane(agents, dir, [lease?.ownerSession, last?.ownerSession, last?.workerSession, last?.session])`. `liveAgentInLane` (`we:scripts/lib/lane-salvage.mjs:103`) treats any listed `claude agents --json` entry as live unless its `state` is one of `done/failed/stopped/completed/killed` — an entry with no state, or an idle one, counts as live, and a match by cwd or by the last holder's session id is enough. `workersWithoutLease` (`we:scripts/conveyor/lane-pool-health-watch.mjs:468`) then flags every unleased lane whose `liveOwner === true`. Not done: no commit references #4544 / `4544` beyond the JIT-number drain commit. Scope is right: the three files the card names are the whole touch-set, plus their two test files.
 
 ## Design
 
@@ -49,10 +49,10 @@ Musts only: (0) FIRST, before any code, capture the real `claude agents --json` 
 - `state: "working"` with NO timestamp in the listing → `liveWorker:true` (chosen behaviour: recency only applies when the listing exposes it).
 - Every new whois test title contains the literal `liveWorker` so the Done-when `-t` filter matches them.
 - The existing `we:lane-journal-smells.test.mjs` case "workersWithoutLease picks unleased lanes with a live owner only" is REWRITTEN to feed `liveWorker` (its current `liveOwner`-only rows would otherwise return `[]` and fail).
-- If the shared match helper refactors `liveAgentInLane`, the existing `we:lane-salvage` and #xl5xhmj whois tests stay green unchanged (behaviour-identical for reclaim/salvage callers).
+- If the shared match helper refactors `liveAgentInLane`, the existing `we:lane-salvage` and #4372 whois tests stay green unchanged (behaviour-identical for reclaim/salvage callers).
 - The smell's `summary` string and header comment say "running worker"..
 - `we:lane-journal-smells.test.mjs`: `workersWithoutLease` given rows `{lease:null, liveOwner:true, liveWorker:false}` → `[]`; `{liveWorker:true}` → `[lane]`. Red before: the first returns the lane.
-- Regression: the existing #xl5xhmj tests (unleased lane with a live agent ⇒ `liveOwner:true`, `holderAlive:true`) stay green unchanged.
+- Regression: the existing #4372 tests (unleased lane with a live agent ⇒ `liveOwner:true`, `holderAlive:true`) stay green unchanged.
 
 ## Proof plan
 
