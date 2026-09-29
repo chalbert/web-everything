@@ -5,27 +5,28 @@
  * `build-dispatch-daemon.mjs#doneWhy`'s three claim-retirement signals ever becoming true — no PR opened, the
  * item still sitting in the cleared queue, no settled run-store row (only the wrapper's own exit path ever
  * settles one, and it never ran). The claim sat "in flight" forever, occupying a builder slot, while the
- * agent's own finished work — a real commit, already pushed into the lane — was silently abandoned. #4131's
- * own claim (owner `Mac:74142`, the daemon's 06:41 ET boot pid, confirmed dead by the time the claim was
- * read) is exactly this shape: the agent's transcript says it finished and reported done, the branch/lane
- * held the commit, and no PR ever opened. #4382 is the sibling shape with nothing resumable at all (the
- * owning daemon was killed by the operator for a cap change, run f4166fa3883080a9's own dispatch never
- * settled).
+ * agent's own finished work — a real commit, already pushed into the lane — was silently abandoned.
+ *
+ * FIVE real shapes, all reproduced in one run:
+ *   - #4131-A: an in-flight row, dead pid, report says done, lane still has the commit → RESUME.
+ *   - #4382: an in-flight row, dead pid, nothing resumable at all → RELEASE, no hold.
+ *   - #4400 (PR #2921 review): a LIVE re-dispatch (its own pid alive) whose item still carries a STALE resume
+ *     marker bound to an OLDER attempt (a dead pid) → must be LEFT; the stale marker must never make a live
+ *     build look dead.
+ *   - #4468 (the ACTUAL live #4131 shape): the wrapper settled `applied` as `{outcome:'pr-opened', pr:null}` —
+ *     no in-flight row at all to find, and the lane has since been recycled to a DIFFERENT session → RELEASE
+ *     (never resumed off a lane that belongs to someone else now).
+ *   - #4469 (the ACTUAL live #4382 shape): NO run-store row was ever found at all (killed before it ever
+ *     reached `in-flight`) — only the claim's own dead OWNER pid says anything → RELEASE.
  *
  * Fix: `scripts/conveyor/build-dispatch-orphan-adopt.mjs#adoptOrphanedBuildClaims`, wired into
  * `skills-src/conveyor/build-dispatch-daemon.mjs`'s own live tick (`effects.adoptOrphans`, called before the
  * tick's own claim-retirement read).
  *
- * Scenario, BOTH shapes in one run: a REAL claim (`build-dispatch-claim.mjs`, real lock files on a temp root)
- * plus a REAL run-store row (`run-store.mjs`, a real JSON file) whose `pid:` handle names a process that has
- * GENUINELY exited — spawned and waited out for real, never guessed — pointing at a REAL git lane.
- *   - #4131 shape: the lane has one real commit ahead of `main` and a REAL `done` delivery report
- *     (`delivery-report-store.mjs`) for the matching session slug sits on disk.
- *   - #4382 shape: same dead handle, but NO report and NO lane commit at all — nothing resumable.
- * `adoptOrphanedBuildClaims()` runs for real over both; only the actual detached resume SPAWN is faked (this
- * soak sandbox cannot run a real agent) and the lane-pool path lookup is short-circuited straight to the temp
- * lane (no real `lane-pool.mjs` state on this host to shell out to) — every other read/write in the pass is
- * the genuine on-disk primitive.
+ * `adoptOrphanedBuildClaims()` runs for real over REAL claims/run-store rows/git lanes/delivery reports; only
+ * the actual detached resume SPAWN is faked (this soak sandbox cannot run a real agent) and the lane-pool
+ * reads (lease-currency + path lookup) are short-circuited to the fixture lanes (no real `lane-pool.mjs` state
+ * on this host to shell out to) — every other read/write in the pass is the genuine on-disk primitive.
  */
 import {
   mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync,
@@ -44,22 +45,27 @@ function realDeadPid() {
   return r.pid;
 }
 
-/** A minimal, real git lane: `main` at one base commit; when `ahead` is true, checked out onto a delivery
- *  branch one commit further, matching the shape a real dispatch's lane is in when its agent finished. */
-function makeLane({ ahead }) {
+/** A minimal, real git lane in the SHAPE a real pool lane has (PR #2921 review — the old fixture committed on a
+ *  side branch, which hid that a real lane's working branch IS its local `main`): `origin/main` at one base
+ *  commit, the local `main` checked out on it, and — when `ahead` — ONE build commit on that same local `main`
+ *  carrying the agent's work plus the wrapper's own claim edit to the item's backlog card. */
+function makeLane({ ahead, num = '4131' }) {
   const lane = mkdtempSync(join(tmpdir(), 'soak-orphan-lane-'));
   const git = (args) => execFileSync('git', args, { cwd: lane, encoding: 'utf8' });
   git(['init', '-q', '-b', 'main']);
   git(['config', 'user.email', 'soak@test']);
   git(['config', 'user.name', 'soak']);
+  mkdirSync(join(lane, 'backlog'));
   writeFileSync(join(lane, 'README.md'), 'base\n');
+  writeFileSync(join(lane, 'backlog', `${num}-orphan-thing.md`), 'status: open\n');
   git(['add', '.']);
   git(['commit', '-q', '-m', 'base']);
+  git(['update-ref', 'refs/remotes/origin/main', 'HEAD']);
   if (ahead) {
-    git(['checkout', '-q', '-b', 'lane/orphan-4131']);
     writeFileSync(join(lane, 'agent-work.txt'), 'the agent\'s own finished work\n');
+    writeFileSync(join(lane, 'backlog', `${num}-orphan-thing.md`), 'status: active\n');
     git(['add', '.']);
-    git(['commit', '-q', '-m', 'agent work']);
+    git(['commit', '-q', '-m', `WE #${num}: delivery build`]);
   }
   return lane;
 }
@@ -112,7 +118,7 @@ export default {
       return runId;
     }
 
-/** Write a real SETTLED (`applied`) `build` dispatch effect for `num` — the exact #4131 live shape: the
+    /** Write a real SETTLED (`applied`) `build` dispatch effect for `num` — the exact #4131 live shape: the
      *  wrapper's own exit path settled it as `pr-opened`, but the PR number came back null. No `handle`/pid at
      *  all is relevant here — settled rows are read by `outcome`/`pr`, never probed for liveness. */
     function writeSettledPrOpenedNullRow(num, { lane, sessionSlug }) {
@@ -129,6 +135,7 @@ export default {
     }
 
     function settleRow({ runId, key }) {
+      if (!runId || !key) return; // #4469 shape — no row was ever found; a clean no-op, same as the real one.
       const run = store.read(runId);
       const entry = (run.effects || []).find((e) => e.key === key);
       if (!entry || entry.status !== 'in-flight') return;
@@ -138,7 +145,7 @@ export default {
     const deadPid = realDeadPid();
 
     // ── #4131-A shape: an IN-FLIGHT row, dead pid, report says done, lane still has the commit → RESUME ──────
-    const resumableLane = makeLane({ ahead: true });
+    const resumableLane = makeLane({ ahead: true, num: '4131' });
     writeDeliveryReport(
       applyDeliveryUpdate(newDeliveryReport({ session: 'conveyor-4131', item: '4131' }), {
         status: 'done', outcome: 'done', filesTouched: ['agent-work.txt'],
@@ -150,30 +157,37 @@ export default {
     let spawnedResumeWith = null;
 
     // ── #4382 shape: an IN-FLIGHT row, dead pid, nothing resumable at all → RELEASE, no hold ─────────────────
-    const emptyLane = makeLane({ ahead: false });
+    const emptyLane = makeLane({ ahead: false, num: '4382' });
     acquireBuildDispatchClaim({ num: '4382', scope: [], lockRoot: claimRoot });
     const rowB = writeInFlightRow('4382', { lane: 11, sessionSlug: 'conveyor-4382', deadPid });
 
-    // ── #4131-B shape (the ACTUAL live #4131): SETTLED `pr-opened` with a NULL pr, lane already recycled to a
-    // different session → RELEASE (the lane-lease-currency check refuses to trust a lane that has moved on;
-    // see `checkResumable`'s own docblock). This is the exact gap `findLatestBuildRow` closed — the OLD
-    // in-flight-only lookup never even saw this row at all. ─────────────────────────────────────────────────
-    const recycledLane = makeLane({ ahead: true }); // has SOME commit, but it belongs to whoever holds it NOW.
-    acquireBuildDispatchClaim({ num: '4468', scope: [], lockRoot: claimRoot });
-    const rowC = writeSettledPrOpenedNullRow('4468', { lane: 30, sessionSlug: 'conveyor-4468' });
+    // ── #4400 shape (PR #2921 review): a LIVE re-dispatch whose item still carries a STALE resume marker
+    // (bound to an OLDER attempt, dead pid) → must be LEFT; the stale marker must never make a live build
+    // look dead. ──────────────────────────────────────────────────────────────────────────────────────────
+    acquireBuildDispatchClaim({ num: '4400', scope: [], lockRoot: claimRoot });
+    const rowC = writeInFlightRow('4400', { lane: 11, sessionSlug: 'conveyor-4400', deadPid: process.pid }); // this soak process: alive
+    markBuildDispatchResume({ num: '4400', pid: deadPid, runId: 'dispatch-lane-OLDER-ATTEMPT', rowKey: 'step:1:0', lockRoot: resumeRoot });
 
-    // ── #4382-EXACT shape (the ACTUAL live #4382): NO run-store row was ever found at all (killed before it
-    // ever reached `in-flight`) — only the claim's own OWNER pid (dead) says anything at all → RELEASE. ──────
+    // ── #4468 shape (the ACTUAL live #4131): SETTLED `pr-opened` with a NULL pr, lane already recycled to a
+    // DIFFERENT session → RELEASE (the lane-lease-currency check refuses to trust a lane that has moved on —
+    // see `checkResumable`'s own docblock). This is the exact gap `findLatestBuildRow` closed: the OLD
+    // in-flight-only lookup never even saw this row at all. ───────────────────────────────────────────────
+    const recycledLane = makeLane({ ahead: true, num: '4468' }); // has SOME commit, but it belongs to whoever holds it NOW.
+    acquireBuildDispatchClaim({ num: '4468', scope: [], lockRoot: claimRoot });
+    const rowD = writeSettledPrOpenedNullRow('4468', { lane: 30, sessionSlug: 'conveyor-4468' });
+
+    // ── #4469 shape (the ACTUAL live #4382): NO run-store row was ever found at all (killed before it ever
+    // reached `in-flight`) — only the claim's own OWNER pid (dead) says anything at all → RELEASE. ─────────
     acquireBuildDispatchClaim({ num: '4469', scope: [], lockRoot: claimRoot, pid: deadPid });
 
     const laneByLaneNum = { 9: resumableLane, 11: emptyLane, 30: recycledLane };
-    // The lane-lease-currency check ({@link checkResumable}'s own safety fix) needs to see #4131's lane (9)
-    // as STILL leased under its own matching session — this soak sandbox has no real lane-pool state, so the
+    // The lane-lease-currency check ({@link checkResumable}'s own safety fix) needs to see #4131's lane (9) as
+    // STILL leased under its own matching session — this soak sandbox has no real lane-pool state, so the
     // read is faked to the exact shape a real, still-current lease would answer. Lane 30 is faked as
     // currently leased to a DIFFERENT session (`conveyor-9999`) — a later item that recycled it, exactly as
     // #4131's own real lane (8) was recycled twice before this fix landed.
     const sessionByLaneNum = { 9: 'conveyor-4131', 11: 'conveyor-4382', 30: 'conveyor-9999' };
-    const rowByNum = { 4131: rowA, 4382: rowB, 4468: rowC };
+    const rowByNum = { 4131: rowA, 4382: rowB, 4400: rowC, 4468: rowD };
 
     let results;
     try {
@@ -184,16 +198,16 @@ export default {
         // REAL checkResumable — real `tryReadDeliveryReport`/`laneHasCommitAhead` (real git), only the
         // lane-pool reads (lease-currency + path lookup) are short-circuited (no real lane-pool state on this
         // host).
-        resolveResumability: ({ lane, sessionSlug }) => checkResumable({
-          lane, sessionSlug,
-          currentLaneSession: () => sessionByLaneNum[Number(lane)],
-          resolveLane: () => laneByLaneNum[Number(lane)],
+        resolveResumability: (o) => checkResumable({
+          ...o,
+          currentLaneSession: () => sessionByLaneNum[Number(o.lane)],
+          resolveLane: () => laneByLaneNum[Number(o.lane)],
         }),
         releaseClaim: ({ num }) => releaseBuildDispatchClaim({ num, lockRoot: claimRoot }),
         releaseResumeMarker: ({ num }) => releaseBuildDispatchResume({ num, lockRoot: resumeRoot }),
         settleRow,
         spawnResume: (o) => { spawnedResumeWith = o; return 424242; }, // FAKE — never a real agent in a soak sandbox.
-        markResume: ({ num, pid }) => markBuildDispatchResume({ num, pid, lockRoot: resumeRoot }),
+        markResume: (o) => markBuildDispatchResume({ ...o, lockRoot: resumeRoot }),
       });
     } catch (e) {
       violations.push({ invariant: 'crash', detail: String(e?.stack || e) });
@@ -202,6 +216,7 @@ export default {
     log?.(JSON.stringify(results));
 
     const byNum = Object.fromEntries(results.map((r) => [r.num, r]));
+    const claimsAfter = listBuildDispatchClaims({ lockRoot: claimRoot, ignoreExpiry: true }).map((c) => c.meta.num);
 
     // #4131 — RESUMED, never released, never left stuck.
     if (byNum['4131']?.action !== 'resume') {
@@ -210,12 +225,17 @@ export default {
     if (!spawnedResumeWith || String(spawnedResumeWith.sessionSlug) !== 'conveyor-4131') {
       violations.push({ invariant: 'resume-wrong-session', detail: `resume spawned with ${JSON.stringify(spawnedResumeWith)}` });
     }
-    const claimsAfter = listBuildDispatchClaims({ lockRoot: claimRoot }).map((c) => c.meta.num);
     if (!claimsAfter.includes('4131')) {
       violations.push({ invariant: 'claim-lost-during-resume', detail: '#4131\'s claim must stay held while its resume runs — it was released instead' });
     }
-    if (!readBuildDispatchResume({ num: '4131', lockRoot: resumeRoot })) {
+    const markerA = readBuildDispatchResume({ num: '4131', lockRoot: resumeRoot });
+    if (!markerA) {
       violations.push({ invariant: 'resume-not-marked', detail: 'no resume marker recorded for #4131 after a resume dispatch' });
+    } else if (markerA.meta?.runId !== rowA || markerA.meta?.rowKey !== 'step:1:0') {
+      violations.push({ invariant: 'resume-marker-unbound', detail: `#4131's resume marker is not bound to its row: ${JSON.stringify(markerA.meta)}` });
+    }
+    if (!spawnedResumeWith || spawnedResumeWith.runId !== rowA || spawnedResumeWith.effectKey !== 'step:1:0') {
+      violations.push({ invariant: 'resume-cannot-settle-row', detail: `resume not handed the original row's run-id/effect-key: ${JSON.stringify(spawnedResumeWith)}` });
     }
 
     // #4382 — THE ACTUAL BUG THIS CARD FIXES: RELEASED (never stuck forever occupying a builder slot).
@@ -224,6 +244,11 @@ export default {
     }
     if (claimsAfter.includes('4382')) {
       violations.push({ invariant: 'claim-stuck-forever', detail: '#4382\'s claim is STILL held after adoption — this is the exact live bug: a dead-wrapper claim never retired, permanently occupying a builder slot' });
+    }
+
+    // #4400 (PR #2921 review) — a stale marker must never get a LIVE build released.
+    if (byNum['4400']?.action !== 'leave' || !claimsAfter.includes('4400')) {
+      violations.push({ invariant: 'stale-marker-killed-live-build', detail: `#4400 (live re-dispatch, stale marker) got ${JSON.stringify(byNum['4400'])}; claim held: ${claimsAfter.includes('4400')}` });
     }
 
     // #4468 (the ACTUAL live #4131 shape) — settled `pr-opened` with a null pr, lane already recycled to a

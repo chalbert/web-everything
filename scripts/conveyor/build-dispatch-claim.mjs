@@ -192,28 +192,39 @@ export function listBuildDispatchHolds({
 // either the claim or the hold.
 // ================================================================================================
 
-/** A resume attempt is the SAME order of magnitude as a fresh build (gate + converge + PR, never the agent
- *  turn) — long enough that a resume genuinely still running is never mistaken for an abandoned one, short
- *  enough that a marker whose owner really did die does not block a re-adoption for hours. */
-export const DEFAULT_BUILD_DISPATCH_RESUME_TTL_MINUTES = 120;
+/** As long as the claim it shadows (PR #2921 review): a shorter marker could lapse while its resume is still
+ *  running — the pass would then read the original row's dead pid and resume a second time — and would reset
+ *  the `attempts` count the resume cap relies on. A liveness answer comes from the marker's own pid long
+ *  before this TTL matters; the TTL only bounds an UNCONFIRMED marker, and the claim lapses at the same time. */
+export const DEFAULT_BUILD_DISPATCH_RESUME_TTL_MINUTES = DEFAULT_BUILD_DISPATCH_CLAIM_TTL_MINUTES;
 
 export function buildDispatchResumeRoot(root = resolveCoordinationRoot()) {
   return join(root, 'build-dispatch-resumes');
 }
 
 /** Record a fresh resume attempt for one item, owned by the resume process's own pid — the kernel-probeable
- *  handle {@link listBuildDispatchResumes} (and a later tick's own orphan-adopt read) checks liveness against,
- *  exactly the way a claim's `pid:` dispatch handle already is. Unconditional, like `placeBuildDispatchHold` —
- *  a resume marker that already exists for this item (an earlier resume that itself died) is simply refreshed. */
+ *  handle a later tick's own orphan-adopt read checks liveness against, exactly the way a claim's `pid:`
+ *  dispatch handle already is. Unconditional, like `placeBuildDispatchHold` — a resume marker that already
+ *  exists for this item (an earlier resume that itself died) is simply refreshed.
+ *
+ *  PR #2921 review — the marker is BOUND to the run-store row it resumes (`runId` + `rowKey`): a marker left
+ *  over from an older attempt never answers the liveness question for a NEWER dispatch of the same item.
+ *  `attempts` counts resume spawns for that row, so the orphan-adopt pass can stop respawning after a cap.
+ *  `pid: null` is a PENDING marker — written BEFORE the spawn, so a crash between the spawn and the pid write
+ *  still leaves a marker: the orphan-adopt pass reads it as "starting" for a short grace, then as UNCONFIRMED
+ *  and leaves it alone until this TTL — it never spawns a second resume beside one it cannot probe.
+ *  `spawnFailed` records a spawn that threw (known not running). The lease's own pid is the writer's pid for a
+ *  pending marker; only `meta.pid` names the resume process. */
 export function markBuildDispatchResume({
-  repo = 'we', num, pid, owner = buildDispatchClaimOwner({ pid }),
+  repo = 'we', num, pid = null, runId = null, rowKey = null, attempts = 1, spawnFailed = false,
+  owner = buildDispatchClaimOwner({ pid: pid ?? process.pid }),
   nowMs = Date.now(), nowIso = new Date(nowMs).toISOString(),
   ttlMinutes = DEFAULT_BUILD_DISPATCH_RESUME_TTL_MINUTES, lockRoot = buildDispatchResumeRoot(),
 } = {}) {
   const resource = buildDispatchResource({ repo, num });
-  const meta = { repo, num: normNum(num), kind: 'resume', pid, resumedAt: nowIso };
+  const meta = { repo, num: normNum(num), kind: 'resume', pid, runId, rowKey, attempts, spawnFailed: Boolean(spawnFailed), resumedAt: nowIso };
   try { releaseLockDir(lockRoot, resource); } catch { /* absent — nothing to clear */ }
-  const result = reserve(lockRoot, resource, owner, nowMs, nowIso, pid, 'unknown', ttlMinutes, meta);
+  const result = reserve(lockRoot, resource, owner, nowMs, nowIso, pid ?? process.pid, 'unknown', ttlMinutes, meta);
   return { ...result, resource, lockRoot };
 }
 

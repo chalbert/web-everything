@@ -3419,6 +3419,47 @@ describe('deliverItem (#4349 — settles its run-store effect + releases/holds t
     return store;
   }
 
+  it('PR #2921 review — a RESUMED delivery re-leases its lane with --no-reset, never re-claims the (already '
+    + 'active) item, reuses the prior done report, and settles the ORIGINAL row from its own outcome — never '
+    + '`wrapper-threw`', async () => {
+    const store = seedInFlightRun('dispatch-lane-9001r');
+    acquireBuildDispatchClaim({ num: '9001', scope: [] });
+    tryReadDeliveryReport.mockReturnValue({ status: 'done', outcome: 'blocked', filesTouched: ['x.mjs'], reason: 'blockedBy 1 re-opened' });
+    const acquires = [];
+    execFileSync.mockImplementation((cmd, args = []) => {
+      const a = args || [];
+      if (cmd === 'node' && a[0] === 'scripts/lane-pool.mjs' && a[1] === 'acquire') { acquires.push(a); return ''; }
+      if (cmd === 'node' && a[0] === 'scripts/lane-pool.mjs' && a[1] === 'status') {
+        return JSON.stringify({ repo: 'web-everything', root: '/pool', lanes: [{ lane: 7, path: lane, exists: true }] });
+      }
+      if (cmd === 'node' && a[0] === 'scripts/operations/run.mjs' && a[1] === 'claim') {
+        throw new Error('claim: status is "active", expected "open" — a resume must never re-claim');
+      }
+      if (cmd === 'git' && a[0] === 'rev-list') return '1\n';
+      if (cmd === 'node' && a[0] === 'scripts/backlog.mjs' && a[1] === 'release') return '';
+      if (cmd === 'node' && a[0] === 'scripts/lane-pool.mjs' && a[1] === 'release') return '';
+      throw new Error(`unexpected execFileSync(${cmd}, ${JSON.stringify(a)})`);
+    });
+    const spawn = vi.fn();
+
+    const result = await deliverItem(
+      {
+        item: '9001', lane: 7, scope: [], sessionSlug: 'conveyor-9001', attemptTag: '',
+        runId: 'dispatch-lane-9001r', effectKey: 'dispatch:0:0', resume: true,
+      },
+      { spawn },
+      { newSessionId: () => 'uuid-fixed' },
+    );
+
+    expect(acquires).toEqual([expect.arrayContaining(['--lane=7', '--no-reset'])]);
+    expect(spawn).not.toHaveBeenCalled(); // no fresh agent turn on a resume
+    // The prior report's OWN outcome drives the finish (blocked with files touched → blocked-mid-build).
+    expect(result.result).toMatch(/^blocked-mid-build \(blockedBy 1 re-opened/);
+    const settledEntry = store.read('dispatch-lane-9001r').effects[0];
+    expect(settledEntry.status).toBe('applied');
+    expect(settledEntry.result.outcome).toBe('blocked-mid-build');
+  });
+
   it('Done-when 1 — a `not-ready` finish settles the effect `applied` with `result.outcome === "not-ready"` '
     + 'and releases the build-dispatch claim', async () => {
     const store = seedInFlightRun('dispatch-lane-9001a');

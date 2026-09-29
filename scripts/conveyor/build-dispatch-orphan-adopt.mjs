@@ -24,29 +24,40 @@
  * releases/holds the claim. `build-dispatch-daemon.mjs#doneWhy` retires a claim on exactly three signals — a
  * PR delivering the item, the item leaving the tick core's cleared queue, or a run-store row SETTLED to a
  * non-PR outcome — and a wrapper that died before any of those three became true leaves the claim
- * PERMANENTLY "in flight", occupying a builder slot until its 240-minute TTL lapses, with the agent's own
- * finished work (a real commit, already in the lane) simply abandoned. Confirmed live for #4131 (claim owner
- * `Mac:74142` — the DAEMON's own pid from its 06:41 ET boot line — long dead by the time the claim was read;
- * the agent's own transcript says it finished and reported done; no PR, no hold, no settled run-store row)
- * and #4382 (claim owner `Mac:98761`, the daemon the operator killed at 09:54 ET for a cap change).
+ * PERMANENTLY "in flight", occupying a builder slot, with the agent's own finished work (a real commit,
+ * already in the lane) simply abandoned.
+ *
+ * FOUR REAL SHAPES, all confirmed live (2026-09-29):
+ *   - a detached wrapper killed mid-flight, leaving a real `in-flight` run-store row with a `pid:` handle the
+ *     kernel now confirms dead;
+ *   - the wrapper reached its LAST step and settled `applied` as `{outcome: 'pr-opened', pr: null}` — the PR
+ *     number came back empty (a separate, real bug in `openPr()`/`extractSubmitResult`, not fixed here), and
+ *     `doneWhy` deliberately never revisits a `pr-opened` settle, so with no real PR ever opening nothing
+ *     retires the claim (#4131's own exact shape);
+ *   - killed so early the dispatch never even reached `in-flight` — NO run-store row exists at all, and only
+ *     the claim's own dead OWNER pid (the dispatching daemon's pid at claim time) says anything (#4382's own
+ *     exact shape);
+ *   - a claim aged out of the ORDINARY (TTL-filtered) claim read while the daemon was down for hours on an
+ *     unrelated bug — invisible to both retirement and adoption until this pass reads past its TTL too.
  *
  * THE FIX CHOSEN (of the two the card offered): DAEMON-SIDE ADOPTION, not hardening the detached spawn
- * against every possible kill vector. Every tick, for each live build claim whose recorded dispatch's `pid:`
- * handle the KERNEL confirms is dead (`detached-dispatch.mjs#defaultIsPidAlive` — never a listing, never a
- * guess):
- *   - RESUME — the prior attempt's own delivery report says `done` AND the lane still holds a commit ahead of
- *     its delivery base (`scripts/operations/minimal-context-provider.mjs#laneHasCommitAhead`): spawn ONE
- *     fresh, detached `deliver-item-run.mjs --resume` process, reusing the SAME lane and session slug, which
+ * against every possible kill vector. Every tick, for each build claim whose dispatch is confirmed DEAD:
+ *   - RESUME — the prior attempt's own delivery report says `done`, names THIS item, was written at or after
+ *     this dispatch started, and the lane is STILL, CURRENTLY leased under the exact matching session with a
+ *     commit ahead of its base whose changed files are all ones the report claims: spawn ONE fresh, detached
+ *     `deliver-item-run.mjs --resume` process, reusing the SAME lane and session slug, which
  *     `deliver-item-wrapper.mjs#runAgentToCompletion`'s own `resume` branch reads straight through to
- *     gate → converge → PR — never a rebuild, never a second agent turn. A {@link markBuildDispatchResume}
- *     marker (same lease primitive as the claim/hold, `build-dispatch-claim.mjs`) records the resume
- *     attempt's own pid so a LATER tick does not spawn a second, racing resume while the first is genuinely
- *     still running.
- *   - RELEASE — nothing resumable (no report, no lane, no surviving commit): release the claim outright, with
- *     NO hold, so the very next tick can offer the item for a completely fresh dispatch — a hold is for a
- *     known, recurring failure reason; "the prior attempt's own evidence is gone" is not one.
- *   - LEAVE — the handle's pid is confirmed alive, OR there is no in-flight run-store row for this claim at
- *     all yet (too early to judge here — the ordinary claim/hold machinery already covers both cases).
+ *     gate → converge → PR — never a rebuild, never a second agent turn. A resume marker, BOUND to the exact
+ *     run-store row it resumes, records the attempt's own pid so a later tick neither races a second resume
+ *     while the first is genuinely still running nor mistakes an older attempt's leftover marker for this
+ *     one; a resume that keeps dying without settling anything is capped (`MAX_RESUME_ATTEMPTS`) and released
+ *     WITH a hold instead of respawned forever.
+ *   - RELEASE — nothing resumable: release the claim outright, with NO hold, so the very next tick can offer
+ *     the item for a completely fresh dispatch — a hold is for a known, recurring failure reason; "the prior
+ *     attempt's own evidence is gone or belongs to someone else now" is not one.
+ *   - LEAVE — the dispatch (or its resume) is confirmed alive, kill-switch/landing-freeze holds a resumable
+ *     claim for a later tick, or there is simply no evidence at all yet to judge by (too early — the ordinary
+ *     claim/hold machinery already covers that case).
  *
  * OUT OF SCOPE, STATED RATHER THAN GUESSED AT (mirrors this codebase's own convention, e.g.
  * `build-dispatch-claim.mjs#releaseBuildDispatchClaim`'s own docblock): re-attaching to a delivery agent
@@ -60,6 +71,7 @@
  * PURE CORE / IO SHELL, the same split as `build-dispatch-daemon.mjs`.
  */
 
+import { execFileSync } from 'node:child_process';
 import { normNum } from './queue-store.mjs';
 import { DISPATCH_EFFECT } from '../operations/dispatch-lane.mjs';
 // Through the REGISTRY, never `dispatch-providers/build.mjs` directly: `detached-dispatch.mjs` imports the
@@ -75,7 +87,7 @@ import {
   REPO_ROOT, defaultIsPidAlive, defaultSpawnDetached, deliveryDispatchLogPath, detachedHandlePid,
 } from '../operations/detached-dispatch.mjs';
 import {
-  listBuildDispatchClaims, releaseBuildDispatchClaim,
+  listBuildDispatchClaims, releaseBuildDispatchClaim, placeBuildDispatchHold,
   markBuildDispatchResume, readBuildDispatchResume, releaseBuildDispatchResume,
 } from './build-dispatch-claim.mjs';
 
@@ -114,64 +126,105 @@ export function findLatestBuildRow(runs, num) {
   return best ? { runId: best.runId, entry: best.entry } : null;
 }
 
-/** Back-compat alias — the pre-2026-09-29 name, kept for any external caller that still imports it. */
+/** Back-compat alias — the pre-2026-09-29 name, kept for any caller (this file's own orchestrator included)
+ *  that still spells it this way; it is the SAME any-status lookup, never the old in-flight-only one. */
 export const findLatestInFlightBuildRow = findLatestBuildRow;
+
+/** How many resumes one dispatch row gets before the pass stops respawning and releases with a hold instead
+ *  (PR #2921 review). A resume that keeps dying without settling anything is a recurring failure, not bad luck —
+ *  exactly what a hold is for. */
+export const MAX_RESUME_ATTEMPTS = 3;
+
+/** How long a PENDING resume marker (written just before the spawn, no pid yet) reads as "a resume is being
+ *  started". Far longer than a spawn takes. Past it, a pending marker is UNCONFIRMED — the daemon may have died
+ *  after spawning but before recording the pid, so a resume may be running that nothing can probe. It is left
+ *  alone until the marker's own TTL lapses, never respawned: a second resume racing a live one on the same lane
+ *  is worse than a claim held a little longer. (A spawn that THREW is known not to be running and is recorded
+ *  as `spawnFailed`, which reads dead at once.) */
+export const RESUME_SPAWN_GRACE_MS = 5 * 60_000;
+
+/** Does this resume marker belong to THIS dispatch row? A marker carries the `runId`/`rowKey` it resumed; one
+ *  bound to any other row (an older attempt of the same item) — or bound to nothing at all — never answers the
+ *  liveness question for `row`. PURE. */
+export function resumeMarkerBindsRow(marker, row) {
+  const meta = marker?.meta || {};
+  if (!marker || !row || !meta.runId || !meta.rowKey) return false;
+  return meta.runId === row.runId && meta.rowKey === row.entry?.key;
+}
 
 /**
  * Is this claim's own dispatch confirmed DEAD — by the kernel wherever a pid handle exists to ask, or by
  * inference where none does? PURE over injected `isPidAlive`.
  *
- * FOUR SHAPES, in priority order:
- *   1. A LIVE resume marker (a prior adoption already under way) — its own pid is the one liveness question
- *      that matters now; the original row's dead pid is expected and no longer news.
- *   2. A row whose status is a SETTLED terminal (`applied`/`failed`) with a NON-`pr-opened` outcome — this is
+ * FIVE SHAPES, in priority order:
+ *   1. No row at all (nothing was ever found in the run store for this claim) — the ONLY liveness signal left
+ *      is the CLAIM's own recorded owner pid (`ownerPid`, the dispatching daemon's pid at claim time): dead →
+ *      DEAD (#4382's own exact shape — nobody is watching this claim at all); alive → `no-record` (the claim
+ *      may simply have been taken a moment ago, its own bookkeeping not yet written).
+ *   2. A resume marker BOUND to this row (a prior adoption already under way — see {@link resumeMarkerBindsRow})
+ *      takes precedence over the row's own handle: once a resume has been spawned, its own pid is the one
+ *      liveness question that matters — the original row's dead pid is expected and no longer news. A bound
+ *      marker with no pid yet is PENDING: `alive` inside {@link RESUME_SPAWN_GRACE_MS}, `unconfirmed` after it
+ *      (left alone, never respawned); one recorded `spawnFailed` is `dead` at once. A marker bound to a
+ *      DIFFERENT row is stale and ignored entirely (the caller clears it) — this function never even sees it.
+ *   3. A row whose status is a SETTLED terminal (`applied`/`failed`) with a NON-`pr-opened` outcome — this is
  *      `doneWhy`'s own job (a PR/queue/settle signal it already reads); reported `'settled-elsewhere'` so the
  *      caller leaves it alone rather than fighting over the same claim.
- *   3. A row settled `applied` with `outcome === 'pr-opened'` but NO confirmed real PR (`result.pr` falsy) —
+ *   4. A row settled `applied` with `outcome === 'pr-opened'` but NO confirmed real PR (`result.pr` falsy) —
  *      the exact #4131 shape (see {@link findLatestBuildRow}'s own docblock): treated as DEAD, since nothing
  *      is actually delivered and nothing else will ever revisit it.
- *   4. Anything else with a `pid:` handle (an `in-flight` row, most commonly) — the kernel decides.
- *   5. No handle to check AT ALL — a row stuck `declared`/`pending` (killed before ever going `in-flight`), or
- *      no row found for this claim whatsoever. Neither can be OBSERVED, so liveness falls back to the CLAIM's
- *      own recorded owner pid (`ownerPid` — the dispatching daemon's pid at claim time): if IT is also
- *      confirmed dead, nobody is watching this claim at all → DEAD. If it is still alive, the claim may simply
- *      have been taken a moment ago with its own bookkeeping not yet written → `'no-record'` (too early to
- *      judge; the caller leaves it for a later tick).
+ *   5. Anything else: a `pid:` handle (an `in-flight` row, most commonly) — the kernel decides — or NO handle
+ *      at all (a row stuck `declared`/`pending`, killed before ever going `in-flight`), which falls back to the
+ *      claim's own owner pid exactly like shape 1.
  *
- * @param {{row: {runId:string, entry:object}|null, resumeMarker: {pid?:number, meta?:{pid?:number}}|null,
- *   ownerPid: number|null, isPidAlive: Function}} o
- * @returns {{status: 'alive'|'dead'|'no-record'|'settled-elsewhere', row: {runId:string, entry:object}|null}}
+ * @param {{row: {runId:string, entry:object}|null, resumeMarker: {meta?:object}|null, ownerPid?: number|null,
+ *   isPidAlive?: Function, nowMs?: number}} o
+ * @returns {{status: 'alive'|'dead'|'unconfirmed'|'no-record'|'settled-elsewhere',
+ *   row: {runId:string, entry:object}|null, marker: object|null}}
  */
-export function classifyClaimLiveness({ row, resumeMarker, ownerPid = null, isPidAlive = defaultIsPidAlive }) {
-  if (resumeMarker) {
-    const pid = Number(resumeMarker.pid ?? resumeMarker.meta?.pid);
-    if (Number.isInteger(pid) && pid > 0) {
-      return { status: isPidAlive(pid) ? 'alive' : 'dead', row };
-    }
+export function classifyClaimLiveness({
+  row, resumeMarker, ownerPid = null, isPidAlive = defaultIsPidAlive, nowMs = Date.now(),
+}) {
+  const byOwnerPid = () => (Number.isInteger(ownerPid) && ownerPid > 0
+    ? { status: isPidAlive(ownerPid) ? 'no-record' : 'dead', row, marker: null }
+    : { status: 'no-record', row, marker: null });
+
+  if (!row) return byOwnerPid();
+
+  if (resumeMarkerBindsRow(resumeMarker, row)) {
+    const marker = resumeMarker;
+    const pid = Number(marker.meta?.pid);
+    if (Number.isInteger(pid) && pid > 0) return { status: isPidAlive(pid) ? 'alive' : 'dead', row, marker };
+    if (marker.meta?.spawnFailed) return { status: 'dead', row, marker };
+    const at = Date.parse(marker.meta?.resumedAt || '');
+    const pending = Number.isFinite(at) && nowMs - at < RESUME_SPAWN_GRACE_MS;
+    return { status: pending ? 'alive' : 'unconfirmed', row, marker };
   }
-  const entry = row?.entry;
+
+  const entry = row.entry;
   if (entry && (entry.status === 'applied' || entry.status === 'failed')) {
     const outcome = entry.result?.outcome ?? null;
-    if (outcome !== 'pr-opened') return { status: 'settled-elsewhere', row };
-    if (entry.result?.pr) return { status: 'settled-elsewhere', row }; // a REAL pr — doneWhy's own PR-observed path owns it.
-    return { status: 'dead', row }; // pr-opened, but no confirmed pr — nothing was actually delivered.
+    if (outcome !== 'pr-opened') return { status: 'settled-elsewhere', row, marker: null };
+    if (entry.result?.pr) return { status: 'settled-elsewhere', row, marker: null }; // a REAL pr — doneWhy's own PR-observed path owns it.
+    return { status: 'dead', row, marker: null }; // pr-opened, but no confirmed pr — nothing was actually delivered.
   }
-  const pid = row ? detachedHandlePid(entry?.handle) : null;
-  if (pid != null) return { status: isPidAlive(pid) ? 'alive' : 'dead', row };
-  // No pid to probe at all (a handle-less declared/pending row, or no row found for this claim whatsoever) —
-  // fall back to the CLAIM's own owner pid, the one other liveness signal available.
-  if (Number.isInteger(ownerPid) && ownerPid > 0) {
-    return { status: isPidAlive(ownerPid) ? 'no-record' : 'dead', row };
-  }
-  return { status: 'no-record', row };
+
+  const pid = detachedHandlePid(entry?.handle);
+  if (pid == null) return byOwnerPid(); // no handle to probe — same fallback as "no row at all".
+  return { status: isPidAlive(pid) ? 'alive' : 'dead', row, marker: null };
 }
 
-/** Decide what to do with a DEAD claim, given whether its lane/report proved resumable. PURE. Never called for
- *  a `liveness.status !== 'dead'` claim — the caller leaves those alone before this is reached. */
-export function decideOrphanAction({ resumable }) {
-  return resumable
-    ? { action: 'resume', reason: 'dead wrapper — resumable done report + lane commit found' }
-    : { action: 'release', reason: 'dead wrapper — nothing resumable (no report, no lane, or no surviving commit)' };
+/** Decide what to do with a DEAD claim. PURE. Never called for a `liveness.status !== 'dead'` claim — the
+ *  caller leaves those alone before this is reached.
+ *  - not resumable → `release` (no hold — the evidence is simply gone);
+ *  - resumable but `attempts` already spent → `exhausted` (release + HOLD — the resume itself keeps dying);
+ *  - resumable while `allowResume` is false (kill switch / landing freeze) → `leave` for a later tick;
+ *  - otherwise → `resume`. */
+export function decideOrphanAction({ resumable, attempts = 0, maxAttempts = MAX_RESUME_ATTEMPTS, allowResume = true, frozenReason = '' }) {
+  if (!resumable) return { action: 'release', reason: 'dead wrapper — nothing resumable (no report, no lane, or no surviving commit)' };
+  if (attempts >= maxAttempts) return { action: 'exhausted', reason: `dead wrapper — ${attempts} resume attempt(s) already died; releasing with a hold` };
+  if (!allowResume) return { action: 'leave', reason: `resumable, but resume frozen${frozenReason ? ` (${frozenReason})` : ''}` };
+  return { action: 'resume', reason: 'dead wrapper — resumable done report + lane commit found' };
 }
 
 // ── IO SHELL ─────────────────────────────────────────────────────────────────────────────────────────────────
@@ -187,11 +240,6 @@ function listAllRuns(store) {
     try { out.push({ id, record: store.read(id) }); } catch { /* skip unreadable */ }
   }
   return out;
-}
-
-/** Default `findRow(num)` — reads the real on-disk run store. */
-function defaultFindRow(num, store = createFileRunStore()) {
-  return findLatestBuildRow(listAllRuns(store), num);
 }
 
 /** The `session` currently leasing lane `lane`, or `null` — reads the SAME `lane-pool.mjs status --json`
@@ -210,30 +258,73 @@ export function defaultCurrentLaneSession(lane, { run: runFn = run } = {}) {
   }
 }
 
+/** Every file the lane's commits add or modify against `base` (merge-base diff), or `null` when git cannot tell.
+ *  Deletions are left out (`--diff-filter=d`) — an agent rarely lists a file it removed — and paths are never
+ *  quoted (`core.quotePath=false`), so they compare as plain text. */
+export function defaultListLaneChangedFiles({ lane, base = 'origin/main' }) {
+  try {
+    const out = execFileSync('git', ['-c', 'core.quotePath=false', 'diff', '--name-only', '--diff-filter=d', `${base}...HEAD`], {
+      cwd: lane, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    return out.split('\n').map((s) => s.trim()).filter(Boolean);
+  } catch {
+    return null;
+  }
+}
+
+/** A `filesTouched` entry as a plain repo-relative path: drops a leading `./` and a `we:`-style locus prefix. */
+function plainPath(p) {
+  return String(p).trim().replace(/^[a-z][a-z0-9-]*:/i, '').replace(/^\.\//, '');
+}
+
+/** Paths the WRAPPER itself commits into the lane, never the agent: the item's own backlog card (`claimItem`
+ *  sets `status: active` on it inside the lane, and the build commit picks that edit up). */
+function isWrapperOwnedPath(path, num) {
+  return num != null && new RegExp(`^backlog/${String(normNum(num)).replace(/[^a-z0-9]/gi, '')}-[^/]*\\.md$`, 'i').test(path);
+}
+
+/** Does `scope` name any repo other than `we`? Such a build works in ITS OWN repo's lane, not `payload.lane`. */
+function scopeLeavesWe(scope) {
+  const entries = Array.isArray(scope) ? scope : String(scope ?? '').split(',');
+  return entries.some((s) => {
+    const m = /^([a-z][a-z0-9-]*):/i.exec(String(s).trim());
+    return m && m[1].toLowerCase() !== 'we';
+  });
+}
+
 /**
- * Is `{lane, sessionSlug}`'s prior attempt resumable? THREE conditions, all required:
+ * Is `{lane, sessionSlug}`'s prior attempt resumable? Every check is required — see this file's own header
+ * for why a report or a commit alone is not enough evidence.
  *
- *   1. The lane is STILL, CURRENTLY leased under this exact session. A lane number is a SHARED, reused
- *      resource (`lane-pool.mjs`'s own pool) — once a lease moves on (released, or handed to a completely
- *      different dispatch), whatever git state sits in that lane belongs to WHOEVER holds it now, never to
- *      the attempt this claim remembers. Live incident 2026-09-29: #4131's own lane (8) was recycled twice
- *      (once for a later item's build, once for unrelated investigation work) in the hours between its
- *      wrapper settling and this module's own fix landing — trusting "lane 8 has a commit ahead of main"
- *      without this check would have resumed from a COMPLETELY UNRELATED occupant's in-progress work. Checked
- *      FIRST, before any git read, so a moved-on lease never even reaches one.
- *   2. A `done` delivery report exists for `sessionSlug`.
- *   3. The lane still holds a commit ahead of its delivery base.
- *
- * See this file's own header for why (2) and (3) are both required — either alone is not enough evidence a
- * prior attempt actually finished with something real to continue from.
+ *   0. (build-orphan-adopt safety fix, live 2026-09-29) The lane is STILL, CURRENTLY leased under this exact
+ *      session. A lane number is a SHARED, reused resource (`lane-pool.mjs`'s own pool) — once a lease moves
+ *      on (released, or handed to a completely different dispatch), whatever git state sits in that lane
+ *      belongs to WHOEVER holds it now, never to the attempt this claim remembers. Live incident: #4131's own
+ *      lane (8) was recycled twice (once for a later item's build, once for unrelated investigation work) in
+ *      the hours between its wrapper settling and this fix landing — trusting "lane 8 has a commit ahead of
+ *      main" without this check would have resumed from a COMPLETELY UNRELATED occupant's in-progress work.
+ *      Checked FIRST (after the cheap scope check), before any other git read, so a moved-on lease never even
+ *      reaches one.
+ *   1. `scope` never leaves `we` — such a build works in its own repo's own lane, which this row does not
+ *      record (released, rebuilt fresh, rather than guessed at).
+ *   2. A `done` delivery report exists for `sessionSlug`, naming THIS item, written at or after this dispatch
+ *      row started (never an older attempt's leftover) (PR #2921 review).
+ *   3. The lane still holds a commit ahead of its delivery base (`origin/main`, never the local `main` — a
+ *      pool lane's own working branch IS its local `main`).
+ *   4. Every file the lane's commits (against that same base) touch is one the report's own `filesTouched`
+ *      names — the item's own backlog card excepted (the wrapper, not the agent, edits it). A foreign file
+ *      means a lane reused by someone else (or a report that under-lists its own work); either way, "not
+ *      resumable" is the safe side (PR #2921 review).
  * @returns {{resumable: boolean, reason: string, lanePath?: string}}
  */
 export function checkResumable({
-  lane, sessionSlug, base = 'main', resolveLane = resolveLanePath,
+  lane, sessionSlug, num = null, rowStartedAt = null, scope = null, base = 'origin/main', resolveLane = resolveLanePath,
   readReport = tryReadDeliveryReport, resolveReportsDir = resolveDeliveryReportsDir,
-  isLaneCommitAhead = laneHasCommitAhead, currentLaneSession = defaultCurrentLaneSession,
+  isLaneCommitAhead = laneHasCommitAhead, listLaneChangedFiles = defaultListLaneChangedFiles,
+  currentLaneSession = defaultCurrentLaneSession,
 } = {}) {
   if (!lane || !sessionSlug) return { resumable: false, reason: 'no-lane-or-session' };
+  if (scopeLeavesWe(scope)) return { resumable: false, reason: 'non-we-locus' };
   let leaseSession;
   try { leaseSession = currentLaneSession(lane); } catch { leaseSession = null; }
   if (leaseSession !== sessionSlug) return { resumable: false, reason: 'lane-lease-moved-on' };
@@ -242,14 +333,26 @@ export function checkResumable({
   if (!lanePath) return { resumable: false, reason: 'lane-path-unresolved' };
   const report = readReport(sessionSlug, resolveReportsDir(lanePath));
   if (!report || report.status !== 'done') return { resumable: false, reason: 'no-done-report', lanePath };
+  if (num != null && normNum(report.item) !== normNum(num)) return { resumable: false, reason: 'report-item-mismatch', lanePath };
+  if (typeof rowStartedAt === 'string' && rowStartedAt !== ''
+    && !(typeof report.updatedAt === 'string' && report.updatedAt >= rowStartedAt)) {
+    return { resumable: false, reason: 'report-predates-dispatch', lanePath };
+  }
   if (!isLaneCommitAhead({ lane: lanePath, base })) return { resumable: false, reason: 'no-commit-ahead', lanePath };
+  const changed = listLaneChangedFiles({ lane: lanePath, base });
+  if (!Array.isArray(changed)) return { resumable: false, reason: 'lane-diff-unreadable', lanePath };
+  const claimed = new Set((report.filesTouched || []).map(plainPath));
+  if (claimed.size === 0) return { resumable: false, reason: 'report-lists-no-files', lanePath };
+  const foreign = changed.map(plainPath).filter((f) => !claimed.has(f) && !isWrapperOwnedPath(f, num));
+  if (foreign.length > 0) return { resumable: false, reason: 'lane-commits-not-this-item', lanePath };
   return { resumable: true, lanePath };
 }
 
-/** Best-effort: mark a stale, dead-wrapper run-store row settled (`failed`, outcome `orphan-released`) so it
- *  is never read as "still in flight" again. Never touched on the RESUME path — a resume's own liveness is
- *  tracked by the resume marker, not by rewriting the original attempt's history. */
-function settleOrphanRow({ runId, key }, store = createFileRunStore()) {
+/** Best-effort: mark a stale, dead-wrapper run-store row settled (`failed`, with `outcome`) so it is never read
+ *  as "still in flight" again. Never touched on the RESUME path — the resumed wrapper settles the row itself
+ *  (it is handed `--run-id`/`--effect-key`). A no-op when `row` gave no `runId`/`key` at all (the #4382 shape —
+ *  nothing was ever found to settle). */
+function settleOrphanRow({ runId, key, outcome = 'orphan-released' }, store = createFileRunStore()) {
   if (!runId || !key) return;
   try {
     const run = store.read(runId);
@@ -258,8 +361,8 @@ function settleOrphanRow({ runId, key }, store = createFileRunStore()) {
     if (!entry || entry.status !== 'in-flight') return;
     const next = resolveInFlight(run, key, {
       status: 'failed',
-      result: { outcome: 'orphan-released' },
-      error: 'build-dispatch-orphan-adopt: wrapper pid confirmed dead by the kernel, nothing resumable',
+      result: { outcome },
+      error: `build-dispatch-orphan-adopt: wrapper pid confirmed dead by the kernel (${outcome})`,
     });
     store.write(next);
   } catch { /* best-effort — never mask the release this settles alongside */ }
@@ -268,11 +371,13 @@ function settleOrphanRow({ runId, key }, store = createFileRunStore()) {
 /** Spawn ONE fresh, detached resume process for `num` — the SAME shape
  *  `dispatch-providers/build.mjs#deliverItemDetachedProvider` uses for a fresh dispatch, plus `--resume` and
  *  minus a fresh attempt tag (a resume is not a new attempt at building; it continues the one that already
- *  finished). Returns the spawned pid. */
-export function spawnResumeDelivery({ num, lane, scope, sessionSlug }, { spawnDetached = defaultSpawnDetached, logPathFor = deliveryDispatchLogPath } = {}) {
+ *  finished). `runId`/`effectKey` name the ORIGINAL dispatch row, so the resumed wrapper settles that row on
+ *  exit instead of leaving it in-flight forever (PR #2921 review). Returns the spawned pid. */
+export function spawnResumeDelivery({ num, lane, scope, sessionSlug, runId = null, effectKey = null }, { spawnDetached = defaultSpawnDetached, logPathFor = deliveryDispatchLogPath } = {}) {
   const argv = [
     String(dispatchProviderEntry('build').runScript),
     `--num=${num}`, `--lane=${lane}`, `--session=${sessionSlug}`, `--scope=${String(scope ?? '')}`, '--resume',
+    ...(runId && effectKey ? [`--run-id=${runId}`, `--effect-key=${effectKey}`] : []),
   ];
   const child = spawnDetached(argv, { cwd: REPO_ROOT, logPath: logPathFor(sessionSlug) });
   const pid = Number(child?.pid);
@@ -287,53 +392,99 @@ export function spawnResumeDelivery({ num, lane, scope, sessionSlug }, { spawnDe
  * every other one untouched. Every effect is injected — see the parameter defaults for what each does; a live
  * daemon tick calls this with no arguments at all.
  *
- * @returns {Promise<Array<{num: string, action: 'leave'|'resume'|'release', reason: string, pid?: number}>>}
+ * HARDENING (PR #2921 review, plus this fix's own two live shapes):
+ *   - `listClaims` reads PAST the claim's own TTL by default (`ignoreExpiry: true`) — a claim aging out of the
+ *     ordinary read while the daemon was down for hours is not evidence anything resolved itself; this pass's
+ *     own positive liveness evidence (a kernel pid probe, a settled outcome, the claim's own owner pid) is what
+ *     decides, never a clock.
+ *   - the claim's own OWNER pid (`ownerPid`, from `claim.pid`) is the liveness fallback whenever no run-store
+ *     row (or no handle within one) exists to answer instead — closes the exact #4382 shape.
+ *   - `allowResume: false` (the daemon passes it while its kill switch or a landing freeze is on) never spawns
+ *     a resume — a resumable claim is left for a later tick. Releasing a dead, non-resumable claim is
+ *     bookkeeping, not new work, so it still happens.
+ *   - the run store is read ONCE per pass (`listRuns`), never once per claim.
+ *   - one claim that throws is reported as `action: 'error'` and never stops the claims after it.
+ *   - the resume marker is written PENDING before the spawn and completed with the pid after it, bound to the
+ *     row it resumes, counting attempts — see {@link markBuildDispatchResume} and {@link decideOrphanAction}.
+ *
+ * @returns {Promise<Array<{num: string, action: 'leave'|'resume'|'release'|'exhausted'|'error', reason: string, pid?: number}>>}
  */
 export async function adoptOrphanedBuildClaims({
-  // #4131 (live 2026-09-29) — a claim's TTL (`DEFAULT_BUILD_DISPATCH_CLAIM_TTL_MINUTES`, 240 min) is a DEAD-
-  // HOLDER FLOOR, not evidence the underlying problem resolved itself: the daemon crash-looped for hours on an
-  // unrelated boot bug, and by the time it recovered, #4131's claim had already aged out of the ORDINARY
-  // `listBuildDispatchClaims()` read — invisible to this pass, and to the tick-core admission that would
-  // otherwise have kept excluding it, so it was offered for a completely fresh (wasteful) rebuild instead of
-  // being adopted. `ignoreExpiry: true` reads every claim still ON DISK regardless of TTL — this pass is a
-  // POSITIVE liveness decision (kernel pid probes, settled-outcome reads), never a "assume it's fine" guess,
-  // so an expired-but-still-real claim deserves the SAME adoption chance a fresh one gets.
+  allowResume = true,
+  frozenReason = '',
+  maxAttempts = MAX_RESUME_ATTEMPTS,
+  now = () => Date.now(),
+  // #4131 (live 2026-09-29) — see this function's own docblock: a claim's TTL is a dead-holder floor, not
+  // evidence the underlying problem resolved itself.
   listClaims = () => listBuildDispatchClaims({ ignoreExpiry: true }),
   isPidAlive = defaultIsPidAlive,
-  findRow = (num) => defaultFindRow(num),
+  listRuns = () => listAllRuns(createFileRunStore()),
+  findRow = (num, runs) => findLatestBuildRow(runs(), num),
   readResumeMarker = (num) => readBuildDispatchResume({ num }),
   resolveResumability = (o) => checkResumable(o),
   releaseClaim = ({ num }) => releaseBuildDispatchClaim({ num }),
   releaseResumeMarker = ({ num }) => releaseBuildDispatchResume({ num }),
   settleRow = (o) => settleOrphanRow(o),
+  placeHold = ({ num, reason }) => placeBuildDispatchHold({ num, reason }),
   spawnResume = (o) => spawnResumeDelivery(o),
-  markResume = ({ num, pid }) => markBuildDispatchResume({ num, pid }),
+  markResume = (o) => markBuildDispatchResume(o),
 } = {}) {
+  let runsCache = null;
+  const runs = () => (runsCache ??= listRuns());
+  const clearMarker = (num) => { try { releaseResumeMarker({ num }); } catch { /* best-effort — see build-dispatch-claim.mjs's own posture */ } };
   const results = [];
   for (const claim of listClaims()) {
     if (claim.meta?.kind !== 'build') continue;
     const num = normNum(claim.meta?.num);
-    const row = findRow(num);
-    const resumeMarker = readResumeMarker(num);
-    const ownerPid = Number.isInteger(claim.pid) ? claim.pid : null;
-    const liveness = classifyClaimLiveness({ row, resumeMarker, ownerPid, isPidAlive });
-    if (liveness.status !== 'dead') { results.push({ num, action: 'leave', reason: liveness.status }); continue; }
-    // `row` may be null here (no run-store trace was ever found — #4382's own shape: killed before it ever
-    // reached `in-flight`) — there is nothing to resume FROM in that case (no lane, no sessionSlug), so
-    // resumability resolves to `no-lane-or-session` and this always falls straight to RELEASE. `settleRow`
-    // guards its own `runId`/`key` presence, so it is a clean no-op when `row` is null.
-    const payload = row?.entry?.payload || {};
-    const resumability = resolveResumability({ lane: payload.lane, sessionSlug: payload.sessionSlug });
-    const decision = decideOrphanAction({ resumable: resumability.resumable });
-    if (decision.action === 'resume') {
-      const pid = spawnResume({ num, lane: payload.lane, scope: payload.scope, sessionSlug: payload.sessionSlug });
-      markResume({ num, pid });
-      results.push({ num, action: 'resume', reason: decision.reason, pid });
-    } else {
-      releaseClaim({ num });
-      try { releaseResumeMarker({ num }); } catch { /* best-effort — see build-dispatch-claim.mjs's own posture */ }
-      if (row) settleRow({ runId: row.runId, key: row.entry?.key });
-      results.push({ num, action: 'release', reason: `${decision.reason} (${resumability.reason})` });
+    try {
+      const row = findRow(num, runs);
+      const resumeMarker = readResumeMarker(num);
+      const ownerPid = Number.isInteger(claim.pid) ? claim.pid : null;
+      const liveness = classifyClaimLiveness({ row, resumeMarker, ownerPid, isPidAlive, nowMs: now() });
+      // A marker bound to some OLDER row (or to none at all) is stale — it must never answer for this claim
+      // again.
+      if (resumeMarker && !liveness.marker) clearMarker(num);
+      if (liveness.status !== 'dead') { results.push({ num, action: 'leave', reason: liveness.status }); continue; }
+      // `row` may be null here (no run-store trace was ever found — #4382's own shape: killed before it ever
+      // reached `in-flight`) — there is nothing to resume FROM in that case (no lane, no sessionSlug), so
+      // resumability resolves to `no-lane-or-session` and this always falls straight to RELEASE.
+      const payload = row?.entry?.payload || {};
+      const attempts = Number(liveness.marker?.meta?.attempts) || 0;
+      const resumability = resolveResumability({
+        num, lane: payload.lane, sessionSlug: payload.sessionSlug, scope: payload.scope ?? null,
+        rowStartedAt: row?.entry?.startedAt ?? null,
+      });
+      const decision = decideOrphanAction({ resumable: resumability.resumable, attempts, maxAttempts, allowResume, frozenReason });
+      if (decision.action === 'leave') {
+        results.push({ num, action: 'leave', reason: decision.reason });
+      } else if (decision.action === 'resume') {
+        const binding = { runId: row.runId, rowKey: row.entry?.key, attempts: attempts + 1 };
+        markResume({ num, pid: null, ...binding });
+        let pid;
+        try {
+          pid = spawnResume({
+            num, lane: payload.lane, scope: payload.scope, sessionSlug: payload.sessionSlug,
+            runId: row.runId, effectKey: row.entry?.key,
+          });
+        } catch (e) {
+          // Known NOT running — record it so the next pass counts this attempt dead at once, not after a TTL.
+          try { markResume({ num, pid: null, ...binding, spawnFailed: true }); } catch { /* the pending marker still bounds it */ }
+          throw e;
+        }
+        markResume({ num, pid, ...binding });
+        results.push({ num, action: 'resume', reason: decision.reason, pid });
+      } else {
+        const exhausted = decision.action === 'exhausted';
+        // Hold BEFORE release (the wrapper's own `settleTerminal` order): a crash between the two must never
+        // leave the item unheld and free to re-dispatch into the same failure.
+        if (exhausted) placeHold({ num, reason: `orphan-adopt: ${attempts} resume attempt(s) died without settling` });
+        releaseClaim({ num });
+        clearMarker(num);
+        settleRow({ runId: row?.runId, key: row?.entry?.key, outcome: exhausted ? 'orphan-resume-exhausted' : 'orphan-released' });
+        results.push({ num, action: decision.action, reason: exhausted ? decision.reason : `${decision.reason} (${resumability.reason})` });
+      }
+    } catch (e) {
+      results.push({ num, action: 'error', reason: String(e?.message || e).split('\n')[0] });
     }
   }
   return results;

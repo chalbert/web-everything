@@ -401,7 +401,10 @@ export async function deliverItem(launch, provider = CLAUDE_RESTRICTED_PROVIDER,
   // `claudeSessionId` threaded through — see `acquireLane`'s own docblock (#3627 secondary finding, live
   // #3371 attempt 4) for why `--adopt` needs the delivery agent's own future session id, not whatever this
   // wrapper process itself inherited.
-  acquireLane({ lane, sessionSlug, scope, item, claudeSessionId });
+  // PR #2921 review — a resume re-leases the SAME lane without resetting it (the reset would wipe the finished
+  // commit being resumed), and skips the item claim below (the item is already `active` from the attempt being
+  // resumed; re-claiming it is refused and would settle this resume as `wrapper-threw`).
+  acquireLane({ lane, sessionSlug, scope, item, claudeSessionId, noReset: resume });
   try {
     // build-path-codex-isolation-locus — a single non-`we` locus (`implProfile` set above) ALSO gets an
     // implementation lane in ITS OWN repo's own pool — see `acquireImplLane`'s own docblock. This is the fix
@@ -432,7 +435,9 @@ export async function deliverItem(launch, provider = CLAUDE_RESTRICTED_PROVIDER,
     // claim must run with the LANE as cwd (see `claimItem`'s own docblock) or `run.mjs claim` resolves the
     // item onto the shared primary checkout and is refused outright.
     const claimLanePath = resolveLanePath(lane, { run });
-    spanAround('item.claim', { attributes: { item: String(item) } }, () => claimItem({ item, sessionSlug, lanePath: claimLanePath }));
+    if (!resume) {
+      spanAround('item.claim', { attributes: { item: String(item) } }, () => claimItem({ item, sessionSlug, lanePath: claimLanePath }));
+    }
 
     // ---- 2. Spawn the MINIMAL agent, wait for its structured report (SKETCH) -----------------------------
     // THE EXPENSIVE SPAN. This is the single longest phase in the system (capped at 60 minutes by
