@@ -93,6 +93,16 @@ import { liveAgentInLane } from '../lib/lane-salvage.mjs';
 import { detachedHandlePid } from '../operations/detached-dispatch.mjs';
 import { createFileRunStore } from '../operations/run-store.mjs';
 import { DISPATCH_GUARD_LISTING_GRACE_MINUTES } from '../operations/dispatch-lane.mjs';
+// #4415 — live incident 2026-09-29: this file's own `gh pr list --state all` (below) was a bare `execFileSync`,
+// invisible to `gh-throttle.mjs`'s attribution log AND paid out of the small GraphQL bucket — one call per
+// constellation repo with a held lease, EVERY tick of the resident `lease-reaper` launchd daemon (ThrottleInterval
+// 60s, but re-armed instantly under `KeepAlive`, so effectively every pass-daemon interval). Measured live: this
+// was the single largest UNATTRIBUTED slice of the app's GraphQL spend (`gh-spend.mjs report`'s own bucket total
+// minus every row it could explain). Converted to the SAME REST + ETag-conditional path #4351 already built for
+// `build-dispatch-daemon.mjs`'s own top-spender fix (`../lib/gh-rest-read.mjs#ghRestGetPaged`, via the shared
+// throttle) — spends the separate `core` bucket instead of `graphql`, is attributed by caller+op, and an
+// unchanged page (the common case between reaps) costs nothing at all (a cached 304).
+import { ghRestGetPaged } from '../lib/gh-rest-read.mjs';
 import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 // #xr4ygg7 (multi-repo slice 9, we:reports/2026-09-23-conveyor-multi-repo-gap-map.md) — the constellation table,
 // so a lease's POOL (ground truth) and a `fix-<tag>-<id>` session's own tag both resolve through the ONE source
@@ -654,6 +664,29 @@ export function classifyReap(lease, { nowMs, ttlMs = DEFAULT_LEASE_TTL_MINUTES *
  */
 const PR_STATE_RANK = { open: 3, merged: 2, closed: 1 };
 
+/**
+ * #4415 — normalize one `GET /repos/{o}/{r}/pulls` REST list item into the shape {@link reduceDetails} (and its
+ * `prStatesFromList`/`prStatesByPrNumber`/`prDetailsFromList` callers) already read: REST nests the branch name
+ * under `head.ref` (not a top-level `headRefName`) and reports the merge commit as a flat `merge_commit_sha`
+ * string (not a nested `mergeCommit.oid`). `state`/`mergedAt`/`number` are already the same field names/shapes
+ * REST and the old `gh pr list --json` GraphQL read both use, so they pass through unchanged.
+ * TOLERANT of the pre-existing GraphQL-shaped fixtures every test in this file already hand-builds
+ * (`headRefName`/`mergeCommit.oid` top-level, no `head`/`merge_commit_sha` at all) — `??` falls through to those
+ * fields when the REST ones are absent, so this mapper is purely additive and no existing fixture needed to
+ * change. PURE.
+ * @param {object} p
+ * @returns {{number:*, state:*, headRefName:string, mergedAt:string|null, mergeCommit:{oid:string}|null}}
+ */
+export function restPullToPrStateShape(p) {
+  return {
+    number: p?.number,
+    state: p?.state,
+    headRefName: p?.headRefName ?? p?.head?.ref ?? '',
+    mergedAt: p?.mergedAt ?? p?.merged_at ?? null,
+    mergeCommit: p?.mergeCommit ?? (p?.merge_commit_sha ? { oid: p.merge_commit_sha } : null),
+  };
+}
+
 /** The one terminal-state-PLUS-detail reduction every keyed-by-X PR Map in this file shares (state-only
  *  `prStatesFromList`/`prStatesByPrNumber`, AND the detail-carrying `prDetailsFromList`, #xkk4lv7) — same
  *  "open wins, then merged over closed" priority, different key function, never two
@@ -1115,22 +1148,31 @@ export function pidAliveForLease(lease) {
  *   overrides the WE slug ONLY (its historical pin, e.g. a fork/mirror) — a sibling repo always reads its own
  *   real constellation slug, never the override.
  * @param {{exec?:Function}} [o] - `exec` is injectable (mirrors `reconcile-fix-dispatch.mjs#freeLaneNumbers`'s
- *   own convention) so a unit test can assert the exact `--repo` argument without touching real `gh`.
+ *   own convention) so a unit test can assert the exact call without touching real `gh`. Defaults to
+ *   {@link ghRestGetPaged}'s own default (`execFileSyncThrottled`, #4415) — never a bare, unattributed
+ *   `execFileSync` — so this axis's spend is both attributed (caller+op) AND on the `core` REST bucket, not the
+ *   shared `graphql` one.
  * @returns {{byItem:Map<string,string>, byPr:Map<string,string>}|null} null = axis off for this repo this run
  *   (gh failed, `--no-check-prs`, or `repoKey` has no known slug).
  */
-export function fetchPrStatesForRepo(repoKey, flags, { exec = execFileSync } = {}) {
+export function fetchPrStatesForRepo(repoKey, flags, { exec } = {}) {
   if (flags['no-check-prs']) return null;
   const slug = repoKey === 'we' && typeof flags['pr-repo'] === 'string' ? flags['pr-repo'] : CONSTELLATION_REPOS[repoKey]?.slug;
   if (!slug) return null; // an unrecognized repo key has no gh slug to scope the read to — axis off for it
-  // #xkk4lv7 — `mergeCommit` (its `.oid`) ADDED to the field list: the branch-fallback's Fork 2/Option C
-  // corroboration (`laneQuietSincePr`, via `resolveLeaseItemNum`) needs a merged PR's own merge-commit sha to
-  // check containment against, which the pre-existing `number,state,mergedAt,headRefName` fields never carried.
-  const args = ['pr', 'list', '--state', 'all', '--limit', String(Number(flags['pr-limit']) || 400), '--json', 'number,state,mergedAt,headRefName,mergeCommit', '--repo', slug];
+  // #4415 — was `gh pr list --state all --json …,mergeCommit` (a bare, unattributed, GraphQL-backed
+  // `execFileSync`). Now the shared REST + ETag-conditional path (#4351): `restPullToPrStateShape` below
+  // reshapes REST's `head.ref`/`merged_at`/`merge_commit_sha` into the exact fields
+  // `prStatesFromList`/`prStatesByPrNumber`/`prDetailsFromList` already read.
   let prs;
   try {
-    // #x5n4zn3 — was bare (no timeout).
-    prs = JSON.parse(exec('gh', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL' }));
+    const pulls = ghRestGetPaged(`repos/${slug}/pulls?state=all`, {
+      ...(exec ? { exec } : {}),
+      context: slug,
+      op: 'rest pr-list (lease-reaper)',
+      maxItems: Number(flags['pr-limit']) || 400,
+      execOpts: { timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL' },
+    });
+    prs = pulls.map(restPullToPrStateShape);
   } catch (e) {
     log(`  ⚠ gh pr list (${slug}) failed — PR-terminal reap axis OFF for ${repoKey} this run (TTL-stale still applies): ${String(e?.message || e).split('\n')[0]}`);
     return null;
