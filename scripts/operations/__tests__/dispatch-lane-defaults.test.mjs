@@ -14,6 +14,9 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 
 import {
   BRIEF_PLACEHOLDERS,
@@ -34,6 +37,9 @@ import {
   TICK_TIMEOUT_MS,
   createDispatchObservers,
   createDispatchSinks,
+  defaultCheckAlreadyDone,
+  defaultCheckAlreadyDoneAsync,
+  defaultLaneRefForPr,
   defaultListAgents,
   defaultListPrs,
   defaultRunNode,
@@ -42,6 +48,9 @@ import {
   prListTimeoutMs,
   readTick,
 } from '../dispatch-lane-io.mjs';
+import { execFileSyncThrottled } from '../../lib/gh-throttle.mjs';
+
+const IO_SOURCE = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'dispatch-lane-io.mjs'), 'utf8');
 
 /** An `execFileSync`-shaped spy that records its call and answers with `out`. */
 function spyExec(out = '[]') {
@@ -388,5 +397,74 @@ describe('#3332 — readTick reaches the REAL `laneRefForPr` default for a fix/c
       exec,
       runNode: () => JSON.stringify({ decisions: { spawnFixes: [{ num: '3037', lane: 8, pr: 701 }] }, nextState: { fixGuards: [] } }),
     })).toThrow(/not authenticated/);
+  });
+});
+
+// ── #4415 round 2 — LIVE INCIDENT, 2026-09-29: EXACTLY the defect this file's own header warns about ─────────
+//
+// Every test above (and every test in every OTHER file covering these functions) hands its own `exec`/
+// `execFileFn` override — which proves the ARGV each default BUILDS, but proves nothing at all about what the
+// DEFAULT actually reaches when NO caller overrides it. That gap is precisely how `defaultCheckAlreadyDone`,
+// `defaultCheckAlreadyDoneAsync`, `defaultListPrs`, `createDispatchObservers`'s `exec`, `readTick`'s `exec`,
+// and `defaultLaneRefForPr` all defaulted to a bare, unattributed `execFileSync`/promisified-`execFile` for as
+// long as they did: every test in this codebase already injects its own fake, so nothing ever exercised the
+// real default at all — until `dispatch-plan.mjs`'s `Promise.all`-driven already-done pass ran it live,
+// unbounded, and ~80-100 of these `gh pr list --search … --state merged` calls fired SIMULTANEOUSLY, none of
+// them logged anywhere (6365.2 of 8943 graphql-bucket points that hour were UNATTRIBUTED,
+// `gh-spend.mjs report --hours=1 --by=caller`).
+//
+// SOURCE-SCAN, not a spy: the whole point is to pin what the DEFAULT PARAMETER literally is, so a future edit
+// that quietly reverts one back to a bare `execFileSync` fails HERE, in under a millisecond, with no process
+// started — mirroring `no-search-backed-pr-list.mjs`'s own scanning-guard technique in this same codebase.
+describe('#4415 round 2 — every gh-touching default in this module is execFileSyncThrottled, never a bare execFileSync/execFile', () => {
+  it('defaultCheckAlreadyDone defaults exec to execFileSyncThrottled', () => {
+    expect(IO_SOURCE).toMatch(/export function defaultCheckAlreadyDone\(num, \{ exec = execFileSyncThrottled,/);
+  });
+  it('defaultCheckAlreadyDoneAsync defaults execFileFn to the throttled async wrapper, never the bare promisified execFile', () => {
+    expect(IO_SOURCE).toMatch(/export async function defaultCheckAlreadyDoneAsync\(num, \{ execFileFn = execFileThrottledAsync,/);
+    // The bare promisified `execFile` this replaces must be gone ENTIRELY, not just unused as a default —
+    // its own presence (even dead) is what let the regression happen unnoticed in the first place.
+    expect(IO_SOURCE).not.toMatch(/promisify\(execFile\)/);
+    expect(IO_SOURCE).not.toMatch(/^import \{ execFile,/m);
+  });
+  it('defaultListPrs defaults exec to execFileSyncThrottled', () => {
+    expect(IO_SOURCE).toMatch(/export function defaultListPrs\(\{ exec = execFileSyncThrottled,/);
+  });
+  it('defaultLaneRefForPr defaults exec to execFileSyncThrottled', () => {
+    expect(IO_SOURCE).toMatch(/export function defaultLaneRefForPr\(pr, \{ exec = execFileSyncThrottled,/);
+  });
+  it('createDispatchObservers defaults exec to execFileSyncThrottled', () => {
+    expect(IO_SOURCE).toMatch(/export function createDispatchObservers\(\{\n\s*exec = execFileSyncThrottled,/);
+  });
+  it('readTick defaults exec to execFileSyncThrottled — the ONE seam checkAlreadyDone/laneRefForPr/listAgents all inherit', () => {
+    expect(IO_SOURCE).toMatch(/exec = execFileSyncThrottled,\n\s*runNode = \(argv, opts\) => defaultRunNode/);
+  });
+
+  // ── a real, behavioral proof beside the source scan: the default genuinely reaches gh-throttle's own log ──
+  it('defaultCheckAlreadyDone, called with NO exec override at all, is attributed in gh-throttle\'s own call log', async () => {
+    const { mkdtempSync, writeFileSync, chmodSync, readFileSync: rf } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join: j } = await import('node:path');
+    const { execFileSync: realExecFileSync } = await import('node:child_process');
+    const { ghThrottleLockRoot, ghThrottleLogPath } = await import('../../lib/gh-throttle.mjs');
+    const dir = mkdtempSync(j(tmpdir(), 'dispatch-lane-io-defaults-'));
+    const bin = mkdtempSync(j(tmpdir(), 'dispatch-lane-io-defaults-gh-'));
+    writeFileSync(j(bin, 'gh'), '#!/bin/sh\necho \'[]\'\n');
+    chmodSync(j(bin, 'gh'), 0o755);
+    const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, WE_GH_THROTTLE_LOCK_ROOT: dir };
+    const orig = process.env.PATH;
+    process.env.PATH = env.PATH;
+    process.env.WE_GH_THROTTLE_LOCK_ROOT = dir;
+    try {
+      const result = defaultCheckAlreadyDone('999999', {}); // NO `exec` key at all — the real production default
+      expect(result).toEqual({ done: false, pr: null, checked: true });
+    } finally {
+      process.env.PATH = orig;
+      delete process.env.WE_GH_THROTTLE_LOCK_ROOT;
+    }
+    const logPath = ghThrottleLogPath(ghThrottleLockRoot(undefined, env));
+    const lines = rf(logPath, 'utf8').trim().split('\n').filter(Boolean);
+    expect(lines.length).toBeGreaterThan(0); // the call left a trace — unlike the bare execFileSync it replaced
+    void realExecFileSync; // referenced only to document what this proves is NOT being called
   });
 });
