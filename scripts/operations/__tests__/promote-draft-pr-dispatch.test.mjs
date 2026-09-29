@@ -4,7 +4,7 @@
  *   `reconcile-core.mjs` planned `kind:'promote-draft'` for. No process is started and no real `gh` is
  *   shelled — `reconcile` and `provider` are injected, mirroring `ci-heal-pr-dispatch.test.mjs`'s own shape.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { runReconcilePromoteDraftDispatch, defaultReadHeadCheckState } from '../promote-draft-pr-dispatch.mjs';
 
 const FRESH = () => ({ fresh: true, behind: 0 });
@@ -208,6 +208,64 @@ describe('runReconcilePromoteDraftDispatch — stale-green re-verification (#281
         repoSlug: 'chalbert/web-everything', sha: HEAD, runGh, getRequiredChecks: () => ({ checks: ['test'], source: 'live' }),
       });
       expect(out.state).toBe('red');
+    });
+  });
+
+  describe('cwd-inferred-repo fix (we:backlog/x4ua3v8) — the DEFAULT (un-injected) provider', () => {
+    // Modeled on the real live incident: chalbert/plateau-app PR #187, headRefOid c4b00de8… — the daemon runs
+    // from the WE checkout (`root`), so before this fix `gh pr ready 187` resolved against
+    // `chalbert/web-everything` instead of `chalbert/plateau-app` and refused
+    // ("Command failed: gh pr ready 187"). This test does NOT inject `provider` — it exercises the REAL
+    // default construction (`createDraftPromoteProvider`), mocking only the underlying `runGhSync` transport
+    // so no real `gh` is ever shelled.
+    const PLATEAU_HEAD = 'c4b00de87f80f3b459211191d2a619b2026c87cd';
+
+    it('FAILS before the fix / PASSES after: the real default provider calls gh with --repo chalbert/plateau-app for a non-WE entry', async () => {
+      const ghThrottle = await import('../../lib/gh-throttle.mjs');
+      const runGhSyncSpy = vi.spyOn(ghThrottle, 'runGhSync').mockReturnValue('');
+      try {
+        const result = runReconcilePromoteDraftDispatch({
+          root: '/repo',
+          repo: 'chalbert/plateau-app',
+          reconcile: () => ({
+            dispatch: [{ kind: 'promote-draft', prNumber: 187, headRefOid: PLATEAU_HEAD }],
+            refusals: [],
+          }),
+          checkStaleness: FRESH,
+          readHeadCheckState: ALWAYS_GREEN,
+          clearAwaitingCi: NOOP_STATUS,
+        });
+        expect(result.dispatched).toEqual([{ pr: 187, kind: 'promote-draft' }]);
+        expect(result.refusals).toEqual([]);
+        // THE FIX: the real `gh` transport was called with an explicit `--repo chalbert/plateau-app` — before
+        // this fix it was called as `['pr', 'ready', '187']` with no `--repo`, relying on `cwd` inference,
+        // which (run from the WE checkout `root`) silently targeted `chalbert/web-everything` instead.
+        const readyCall = runGhSyncSpy.mock.calls.find((c) => c[0][0] === 'pr' && c[0][1] === 'ready');
+        expect(readyCall[0]).toEqual(['pr', 'ready', '187', '--repo', 'chalbert/plateau-app']);
+      } finally {
+        runGhSyncSpy.mockRestore();
+      }
+    });
+
+    it('the WE-default path stays byte-identical (no --repo) — unchanged by this fix', async () => {
+      const ghThrottle = await import('../../lib/gh-throttle.mjs');
+      const runGhSyncSpy = vi.spyOn(ghThrottle, 'runGhSync').mockReturnValue('');
+      try {
+        runReconcilePromoteDraftDispatch({
+          root: '/repo',
+          reconcile: () => ({
+            dispatch: [{ kind: 'promote-draft', prNumber: 999, headRefOid: 'f'.repeat(40) }],
+            refusals: [],
+          }),
+          checkStaleness: FRESH,
+          readHeadCheckState: ALWAYS_GREEN,
+          clearAwaitingCi: NOOP_STATUS,
+        });
+        const readyCall = runGhSyncSpy.mock.calls.find((c) => c[0][0] === 'pr' && c[0][1] === 'ready');
+        expect(readyCall[0]).toEqual(['pr', 'ready', '999']);
+      } finally {
+        runGhSyncSpy.mockRestore();
+      }
     });
   });
 
