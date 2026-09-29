@@ -1383,6 +1383,17 @@ export function buildReviewCorrectnessAdvisoryJudgeRequest({ read, aim = '' }) {
     // #x8n4crp — PINS THIS SEAT TO CODEX, independent of the run's `--provider` flag, exactly like the existing
     // third seat. See `createDefaultJudge`.
     providerName: 'codex',
+    // #2883 follow-up (card x5s8b47) — LIVE INCIDENT, 2026-09-28: this seat is the SECOND Codex advisory seat,
+    // and it was left out of the `gracefulOnUnavailable` fix `buildReviewAdvisoryJudgeRequest` (the THIRD seat,
+    // just above) got for the identical reason — see that seat's own docblock for the full account. Runs
+    // #2865/#2867/#2871/#2873/#2875 were all measured suspended at `pending.step: 'judgeCorrectnessAdvisory'`
+    // with Codex quota-held, because THIS seat still spawned unconditionally and crashed the whole
+    // `review-loop-cli` process exactly the way the third seat used to. This seat is advisory too
+    // (`CORRECTNESS_ADVISORY_LENS` is not a `MANDATORY_LENSES` member — see this seat's own docblock above), so
+    // "the provider was unavailable" is honestly a SKIP here as well, never a run failure. Same
+    // `createDefaultJudge` (`cli-adapter.mjs`) graceful path the third seat already exercises — reused, not
+    // reimplemented.
+    gracefulOnUnavailable: true,
   };
 }
 
