@@ -165,20 +165,25 @@ describe('runBuildDispatchTick', () => {
       policy,
       effects: noInFlightEffects(() => manySpawnsTick(6, { building: 6, buildingInFlight: 0 })),
     });
-    // Before the fix, `externalBuilding` read `counts.building` (6) and the cap (3) held ALL 6 candidates —
-    // `plan.dispatch.length` was 0. With `buildingInFlight` (0 — nothing was ACTUALLY in flight before this
-    // tick's own proposals), the daemon admits up to its own cap instead.
+    // With `buildingInFlight` 0 (nothing ACTUALLY in flight before this tick's own proposals), the daemon
+    // admits up to its own cap.
     expect(r.plan.dispatch.length).toBe(3);
   });
 
-  it('control: an older planTick stub with no counts.buildingInFlight still falls back to counts.building (unchanged behavior for a caller that has not been updated)', async () => {
+  // Card x3vs6tu, live 2026-09-29: `externalBuilding` (fed from `counts.buildingInFlight ?? counts.building`)
+  // is now NEVER folded into the cap at all — only this builder's own durable in-flight builds are. So an
+  // older `planTick` stub that only ever reports `counts.building` (no `buildingInFlight`) behaves exactly the
+  // SAME as one that reports the honest `buildingInFlight` — both admit up to the plain cap. Before this card,
+  // this exact case (a machine-wide count with none of it this builder's own work) was the live incident: 6
+  // "building" read at cap 6 held every candidate for 30+ minutes while 116 items queued.
+  it('a planTick stub reporting only counts.building (no buildingInFlight) still admits up to the cap — that count no longer gates this builder at all', async () => {
     const policy = { ...BUILD_DISPATCH_POLICY, maxConcurrentBuilds: 3 };
     const r = await runBuildDispatchTick({
       live: false,
       policy,
       effects: noInFlightEffects(() => manySpawnsTick(6, { building: 6 })),
     });
-    expect(r.plan.dispatch.length).toBe(0);
+    expect(r.plan.dispatch.length).toBe(3);
   });
 
   // #4353 — open-item WIP cap wiring: the CLI flag → policy, and the tick's real pipeline surfacing `plan.openItems`.

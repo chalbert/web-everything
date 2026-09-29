@@ -179,10 +179,19 @@ export function normalizeOpenPrs(byRepo) {
  * @param {Array<{num:string, lane?:number, scope:string[]}>} o.candidates  in tick-core order
  * @param {Array<{num:string, scope:string[], source:string}>} o.inFlight   durable in-flight builds
  * @param {Array<{repo:string, number:number, files:Array, labels:string[], headRefName:string}>} o.openPrs
- * @param {number} [o.externalBuilding]  builds the tick core itself counts in flight (leased build lanes + live
- *   conveyor sessions). They carry no scope here — the tick core's own lane scope arbitration covers them — but
- *   they DO count toward the cap: `max(durable in-flight, externalBuilding)`, so the daemon's own builds (which
- *   also lease lanes) are never counted twice.
+ * @param {number} [o.externalBuilding]  the conveyor's machine-wide "building" count — hand-dispatched workers,
+ *   fix workers, ci-heal workers, stranded claims, AND this daemon's own builds, all folded into one tally with
+ *   no way to tell them apart. Operator decision (2026-09-29, card x3vs6tu): this cap bounds ONLY the builder's
+ *   own concurrent builds; machine-wide load is the separate load guard's job (#4076) and the heavy-admission
+ *   slots', not this cap's. So `externalBuilding` is NEVER folded into `busy` any more — see the live incident
+ *   below. It still rides through to the return value (`externalBuilding` field) purely as a logged signal, so
+ *   the daemon's dry-run/status line can keep showing it even though it no longer gates anything here.
+ *
+ *   Live incident, 2026-09-29 ~10:35 AM ET: with 2 stranded claims + 4 hand-dispatched workers, this builder
+ *   read "6 building" at its own cap of 6 (0 of its own builds actually making progress) and dispatched NOTHING
+ *   for 30+ minutes while 116 items sat queued — the old `max(durable in-flight, externalBuilding)` math let a
+ *   machine-wide count that had nothing to do with this builder's own concurrency hold every candidate. At the
+ *   operator's chosen cap of 3 the builder would never build at all while ANY other worker ran anywhere.
  * @param {{engaged:boolean, reason?:string}} [o.killSwitch]
  * @param {object} [o.policy]
  * @returns {{freeze:{frozen:boolean, reasons:string[]}, slots:number, dispatch:Array<object>, hold:Array<object>,
@@ -218,7 +227,10 @@ export function planBuildDispatch({
     inFlightByNum.set(k, prev ? { ...prev, scope: [...new Set([...(prev.scope || []), ...(f.scope || [])])], source: `${prev.source}+${f.source}` } : { ...f, num: k });
   }
   const running = [...inFlightByNum.values()];
-  const busy = Math.max(running.length, Number(externalBuilding) > 0 ? Number(externalBuilding) : 0);
+  // Card x3vs6tu (2026-09-29): the cap counts ONLY this builder's own durable in-flight builds — never
+  // `externalBuilding` (machine-wide "building", not attributable to this builder). Kept as a logged signal
+  // below (`externalBuilding` on the return value), never folded into `busy`/`slots` any more.
+  const busy = running.length;
   let slots = Math.max(0, policy.maxConcurrentBuilds - busy);
   const picked = [];
   // #4353 — a policy object missing `maxOpenItems` (a caller predating this field) must never silently disable
@@ -280,6 +292,9 @@ export function planBuildDispatch({
   }
   return {
     freeze: { frozen, reasons: freezeReasons }, inFlight: running, busy, slots, dispatch, hold,
+    // Card x3vs6tu — logged signal only (never gates `busy`/`slots` above): the machine-wide "building" count
+    // the tick core passed in, visible to a dry-run/status line even though this cap no longer reads it.
+    externalBuilding: Number(externalBuilding) || 0,
     openItems: { count: openItemsInitial.size, cap: maxOpenItems, nums: [...openItemsInitial].sort() },
   };
 }
