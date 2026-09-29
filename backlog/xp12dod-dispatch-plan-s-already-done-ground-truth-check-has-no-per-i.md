@@ -2,10 +2,11 @@
 kind: story
 size: 5
 parent: "3861"
-status: open
-scope: ["we:scripts/readiness/dispatch-plan.mjs", "we:scripts/readiness/already-done-cache.mjs", "we:scripts/readiness/__tests__/already-done-cache.test.mjs", "we:scripts/readiness/__tests__/dispatch-plan-already-done-bounded-spawn.test.mjs", "we:scripts/conveyor/soak/breaks/already-done-recheck-burst-no-cooldown.mjs"]
+status: resolved
+scope: ["we:scripts/readiness/dispatch-plan.mjs", "we:scripts/readiness/already-done-cache.mjs", "we:scripts/readiness/__tests__/already-done-cache.test.mjs", "we:scripts/readiness/__tests__/dispatch-plan-already-done-bounded-spawn.test.mjs", "we:scripts/conveyor/soak/breaks/already-done-recheck-burst-no-cooldown.mjs", "we:scripts/conveyor/soak/breaks/already-done-recheck-burst-no-cooldown.soak.test.mjs", "we:scripts/conveyor/soak/breaks/fixtures/already-done-recheck-burst-no-cooldown.mjs"]
 dateOpened: "2026-09-29"
 dateStarted: "2026-09-29"
+dateResolved: "2026-09-29"
 preparedDate: "2026-09-29"
 preparedAgainstSha: "6d1e54cb86731a98c190aeb908ab58ce94bbef2d"
 tags: []
@@ -42,6 +43,11 @@ stays unchanged). New pure module `we:scripts/readiness/already-done-cache.mjs`,
 - `--no-already-done-cache` CLI flag (mirrors the existing `--no-ground-truth` rollback escape hatch) forces a
   full recheck sweep, bypassing the cache read/write for one run — for an operator who needs a fresh sweep
   without waiting out the cooldown.
+- The cache WRITE is wrapped in a `try/catch` (best-effort) — a `.conveyor` that's unwritable (read-only
+  checkout, full disk, permissions) must never crash a whole dispatch-plan tick just because it could not
+  persist a cooldown hint; the read already fails open, and the write now fails soft the same way (added during
+  this item's own `/converge` pass, per a real, cheap-to-fix finding four of five review lenses raised
+  independently — see the Test plan below for its dedicated coverage).
 
 ## MVP (Musts only)
 
@@ -74,6 +80,13 @@ stays unchanged). New pure module `we:scripts/readiness/already-done-cache.mjs`,
 - `already-done-recheck-burst-no-cooldown` soak break — `fixPresent(root)` is false against today's tree, so the
   break runs EXPECTED-FAIL (reproducing the violation: second tick still spawns N calls); flips to a required
   GREEN pass the moment the fix lands.
+- Three additional bounded-spawn cases, added during `/converge` to close a coverage gap the review found (the
+  cache-HIT `done:true` replay path, the `--no-already-done-cache` bypass, and the unwritable-store fail-soft
+  path, were all exercised only at the pure-module level before this): a cached `done:true` verdict replays
+  `alreadyDonePr` end to end on a second run with zero extra `gh` calls for that id; `--no-already-done-cache`
+  spends the full N calls on EVERY run (never a bypass-that-reads-an-empty-cache-and-still-looks-like-a-skip);
+  and an unwritable cache store (a file where the store's directory should be) never crashes the tick and never
+  materializes a cache file, still spending the full N calls. All three fail before this item's fix exists.
 
 ## Proof plan (live before/after)
 
@@ -101,6 +114,13 @@ stays unchanged). New pure module `we:scripts/readiness/already-done-cache.mjs`,
   a real state change.
 - The sibling card filed from the same 2026-09-29 trace, `we:backlog/xh2341j` (gh-throttle logs a hardcoded
   default GraphQL cost per call instead of GitHub's real reported cost) is a SEPARATE item, not folded in here.
+- The cache store is never pruned (a `/converge` red-team finding, carved out as parallelizable/non-blocking):
+  an id that leaves the queue (resolved, dropped, or moved off the age gate) keeps its entry in
+  `we:.conveyor/already-done-cache.json` forever, and the whole file is rewritten every tick regardless of size.
+  In practice this stays small (bounded by "items ever seen past the 2h age gate", not by history), but a
+  follow-up could prune entries for ids no longer in the live queue on each write. Not needed for THIS item's
+  correctness or its proof (the live before/after numbers), so left as a separate card if the file's size ever
+  becomes a real operational concern.
 
 ## Done when
 
