@@ -50,9 +50,15 @@ async function main(argv) {
     process.stdout.write(`break ${b.id}: ${b.title}\n  card: ${b.card}; fixed by ${b.fixedBy.sha} on ${b.fixedBy.where}; fix present in this tree: ${b.fixPresent(REPO_ROOT)}\n`);
     const report = await b.run({});
     const problems = b.judge(report);
+    // Pre-existing bug (found proving #4348-open-pr-retry's own RED/GREEN, reproduces identically on the
+    // long-merged `build-daemon-restart-same-file` break too — never specific to one break): this assumed
+    // EVERY break's `run()` returns a `runSoak()`-shaped report with a `.ticks` array, but a break scenario
+    // that drives one function call directly (never `runSoak`) reports its own ad hoc shape instead — crashing
+    // this GREEN message outright (`Cannot read properties of undefined (reading 'length')`), which made
+    // `red-green.mjs`'s GREEN side always fail regardless of whether the fix actually worked.
     process.stdout.write(problems.length
       ? `RED — break ${b.id} reproduced:\n${problems.map((p) => `  - ${p}`).join('\n')}\n`
-      : `GREEN — break ${b.id} did not reproduce (${report.ticks.length} ticks, invariants held)\n`);
+      : `GREEN — break ${b.id} did not reproduce${Array.isArray(report.ticks) ? ` (${report.ticks.length} ticks, invariants held)` : ' (invariants held)'}\n`);
     return problems.length ? 1 : 0;
   }
   process.stderr.write('usage: run.mjs soak [--rounds=N --seed=N --main-every=N] | break <id> | list\n');
