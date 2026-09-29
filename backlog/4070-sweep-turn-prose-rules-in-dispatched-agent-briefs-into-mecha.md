@@ -3,10 +3,11 @@ bornAs: xf8kork
 kind: story
 size: 5
 parent: "4075"
-status: active
+status: resolved
 scope: ["we:skills-src/conveyor/", "we:skills-src/review/"]
 dateOpened: "2026-09-24"
 dateStarted: "2026-09-29"
+dateResolved: "2026-09-29"
 tags: []
 ---
 
