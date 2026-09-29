@@ -1,4 +1,5 @@
 ---
+bornAs: xp12dod
 kind: story
 size: 5
 parent: "3861"
@@ -112,7 +113,7 @@ stays unchanged). New pure module `we:scripts/readiness/already-done-cache.mjs`,
   second invalidation axis now would add correctness surface (comparing item state at cache-write time vs.
   read time) for a case not observed. File if a live case later shows the cache holding a stale answer across
   a real state change.
-- The sibling card filed from the same 2026-09-29 trace, `we:backlog/xh2341j` (gh-throttle logs a hardcoded
+- The sibling card filed from the same 2026-09-29 trace, `we:backlog/4497` (gh-throttle logs a hardcoded
   default GraphQL cost per call instead of GitHub's real reported cost) is a SEPARATE item, not folded in here.
 - The cache store is never pruned (a `/converge` red-team finding, carved out as parallelizable/non-blocking):
   an id that leaves the queue (resolved, dropped, or moved off the age gate) keeps its entry in
