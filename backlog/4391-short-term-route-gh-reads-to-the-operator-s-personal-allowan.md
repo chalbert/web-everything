@@ -3,10 +3,11 @@ bornAs: xhcgdce
 kind: story
 size: 3
 tier: pinned
-status: active
+status: resolved
 scope: ["we:scripts/lib/gh-throttle.mjs"]
 dateOpened: "2026-09-28"
 dateStarted: "2026-09-28"
+dateResolved: "2026-09-28"
 tags: []
 ---
 
