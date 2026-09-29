@@ -535,11 +535,13 @@ export function cliDispatch({ num, bookkeeping, launchKind = 'build' }, { exec =
   const file = join(dir, 'bookkeeping.json');
   try {
     // dispatch-lane re-reads the tick for this num and infers prepare-item from spawnPrepareItems.
+    // Keep the re-read under the same lane-cap policy as cliPlanTick; otherwise a planned
+    // prepare can disappear and be reported as the build-only needs-prepare hold.
     // Its model override travels in JSON argv plus a recorded reason, not a run.mjs control flag.
     writeFileSync(file, JSON.stringify({ bookkeeping: bookkeeping || {} }), { mode: 0o600 });
     const text = exec('node', [join(SCRIPTS, 'operations', 'run.mjs'), 'dispatch-lane', `--num=${num}`, `--bookkeepingFile=${file}`, '--json', ...(launchKind === 'prepare-item' ? ['--modelReason=automatic item preparation uses sonnet'] : [])], {
       encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 32 * 1024 * 1024, cwd: REPO_ROOT,
-      env: { ...process.env, WE_BUILD_DISPATCH_MODE: process.env.WE_BUILD_DISPATCH_MODE || 'mechanical', ...(launchKind === 'prepare-item' ? { WE_DISPATCH_AGENT_ARGS: JSON.stringify([...JSON.parse(process.env.WE_DISPATCH_AGENT_ARGS || '[]'), '--model', 'sonnet']) } : {}) },
+      env: { ...process.env, [MAX_CONCURRENT_LANES_ENV]: BUILD_DAEMON_LANE_CAP_EXEMPT_VALUE, WE_BUILD_DISPATCH_MODE: process.env.WE_BUILD_DISPATCH_MODE || 'mechanical', ...(launchKind === 'prepare-item' ? { WE_DISPATCH_AGENT_ARGS: JSON.stringify([...JSON.parse(process.env.WE_DISPATCH_AGENT_ARGS || '[]'), '--model', 'sonnet']) } : {}) },
     });
     return readDispatchOutcome(text);
   } catch (e) {

@@ -579,7 +579,9 @@ export function dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, drif
     //    this is a FORMAT check on self-attested frontmatter, not a verified/signed claim — it catches a missing
     //    or malformed stamp, never a stale or hand-typed one on an otherwise-unprepared card. Stronger provenance
     //    (cross-checking `preparedAgainstSha`) is a possible future hardening, not this MVP's job.
-    if (preparePolicy?.requirePreparedDate && !sizeExempt && !(typeof item.preparedDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(item.preparedDate))) {
+    //    A prepare-item launch creates this stamp: exempt ONLY that kind from this gate,
+    //    leaving size, overlap, pause and lane admission unchanged.
+    if (preparePolicy?.requirePreparedDate && item.kind !== 'prepare-item' && !sizeExempt && !(typeof item.preparedDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(item.preparedDate))) {
       held.push({ num, reason: 'needs-prepare' });
       continue;
     }

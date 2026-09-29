@@ -370,6 +370,16 @@ uses the existing memory run store and omits the optional call logger to honor i
 All child git reads inherit `GIT_OPTIONAL_LOCKS=0` so status does not refresh an index. Cleanup stays
 with supported manual lifecycle commands; never edit lease/claim files by hand.
 
+## Builder prepare admission probes
+
+The builder's `cliPlanTick` and `cliDispatch` must pass the same
+`WE_MAX_CONCURRENT_LANES` override to their tick subprocesses. Otherwise the
+second read can lose a planned prepare to capacity and report the original
+build's `needs-prepare` hold. Probe both through `planTick`, `readTick`, and
+`shapeDispatchRead` without applying dispatch effects. A refused prepare must
+release its claim and discard its proposed guard so the next tick can retry;
+only a claimed prepare guard's TTL retirement consumes the prepare retry budget.
+
 ## Dispatch eligibility reports
 
 When the runner is alive but an item does not move, use

@@ -752,6 +752,30 @@ describe('dispatchPlan — the NO-SIZE admission hold (#3801 Fork 4 (b), #3849 a
 describe('dispatchPlan — the NEEDS-PREPARE readiness hold (card #4470, PREPARE = full design + explicit MVP cut)', () => {
   const REQUIRE = { requirePreparedDate: true };
 
+  it.each(['build', 'story', 'prepare', 'prepare-decision', 'prepare-item'])('only prepare-item gains the preparation exemption (%s)', (kind) => {
+    const plan = dispatchPlan({
+      queue: [{ num: 1, kind, scope: ['src/a/'], size: 3 }],
+      leases: [], freeLanes: [2], preparePolicy: REQUIRE,
+    });
+    expect(plan.launch).toEqual(kind === 'prepare-item' ? [{ num: 1, lane: 2 }] : []);
+    expect(plan.held).toEqual(kind === 'prepare-item' ? [] : [{ num: 1, reason: 'needs-prepare' }]);
+  });
+
+  it.each([
+    [{ leases: [{ lane: 9, scope: ['src/a/'] }] }, 'overlaps lane-9'],
+    [{ freeLanes: [] }, 'no free lane'],
+    [{ dispatchPaused: true }, 'dispatch-paused'],
+    [{ driftBlockedScope: ['src/a/'] }, 'branch-drift-blocked'],
+    [{ sizePolicy: { unsizedCardPolicy: 'block' } }, 'no-size'],
+  ])('prepare-item still respects other planner holds: %s', (inputs, reason) => {
+    const plan = dispatchPlan({
+      queue: [{ num: 1, kind: 'prepare-item', scope: ['src/a/'] }],
+      leases: [], freeLanes: [2], preparePolicy: REQUIRE, ...inputs,
+    });
+    expect(plan.launch).toEqual([]);
+    expect(plan.held).toEqual([{ num: 1, reason }]);
+  });
+
   it('`preparePolicy` omitted (the default) — an unprepared scoped item launches exactly as before this card', () => {
     const plan = dispatchPlan({ queue: [{ num: 1, kind: 'story', scope: ['src/a/'] }], leases: [], freeLanes: [2] });
     expect(plan.launch).toEqual([{ num: 1, lane: 2 }]);
