@@ -2,9 +2,12 @@
 bornAs: x4ua3v8
 kind: task
 tier: pinned
-status: open
+status: resolved
 scope: ["we:scripts/lib/draft-promote-provider.mjs", "we:scripts/operations/promote-draft-pr-dispatch.mjs"]
 dateOpened: "2026-09-28"
+dateStarted: "2026-09-29"
+dateResolved: "2026-09-29"
+graduatedTo: 467349c87,bc5693278
 tags: []
 ---
 
@@ -57,4 +60,46 @@ after).
 
 ## Done when
 
-1. **Executable** — TODO: a command that fails before this item lands and passes after.
+1. **Executable** — this card resolves with `graduatedTo` naming the two commits that already shipped
+   the fix + its owed soak break (no new code in this PR); verify both are on `main` and the unit test
+   covering the `--repo` fix still passes:
+
+   ```
+   git merge-base --is-ancestor 467349c87 origin/main && git merge-base --is-ancestor bc5693278 origin/main
+   npx vitest run scripts/lib/__tests__/draft-promote-provider.test.mjs
+   ```
+
+   Both commands exit 0 on `main` today. The soak break itself lives at `we:scripts/conveyor/soak/breaks/promote-draft-cross-repo.mjs`
+   and runs under `npm run test:soak` (`we:vitest.soak.config.ts`) — CI's own `daemon-soak` job on PRs
+   that touch daemon code, not this resolve-only PR, which touches no code. This is NOT a fresh
+   red-before/green-after run of the fix itself — that proof already happened at `bc5693278`'s own
+   authoring time; this criterion only re-confirms the shipped fix is still on `main` and its unit test
+   still passes, which is all a resolve-only card (no new code) can assert.
+
+## Progress
+
+**Premise check (2026-09-29, conveyor-4379): already done on `main` before this card was JIT-numbered.**
+This card was born as `x4ua3v8`. The fix it describes landed directly under that hash-id, in two
+commits already on `main` — no `--repo` code change was needed here:
+
+- `467349c87` — `we:backlog/x4ua3v8 - promote-draft-pr-dispatch: pass --repo explicitly (fix
+  cwd-inferred cross-repo PR bug)`. Added `buildReadyArgs(pr, repo)` / threaded `repo` through
+  `createDraftPromoteProvider` (`we:scripts/lib/draft-promote-provider.mjs`) and
+  `runReconcilePromoteDraftDispatch` (`we:scripts/operations/promote-draft-pr-dispatch.mjs`) — the exact
+  `## Fix` this card describes (confirmed by reading both files on this lane's fresh `main`: `graduatedTo`
+  above is `git merge-base --is-ancestor`-verified reachable from it). The extended
+  `we:scripts/lib/__tests__/draft-promote-provider.test.mjs` on `main` covers the same two cases this
+  card's `## Tests` section describes (the `--repo`-appending case and the byte-identical omitted case).
+- `bc5693278` — `we:backlog/x4ua3v8 - promote-draft-cross-repo: add the owed soak break (author
+  continuation, PR #2880)`. Closed the daemon-behaviour-change soak-break obligation the mocked unit
+  tests alone didn't cover (added `we:scripts/conveyor/soak/breaks/promote-draft-cross-repo.mjs`, proven
+  red-before/green-after against the real live-incident failure text).
+
+A later drain JIT-numbering pass (`ce5648e62`) assigned this hash the number `#4379` but never flipped
+the card's `status:` — it stayed `open` on `main` while the code (and its soak break) were already
+resolved. Re-confirmed against this lane's own fresh `main` (base of this lane clone): both commits are
+ancestors of `HEAD`, `buildReadyArgs`/`createDraftPromoteProvider` already carry the `repo` param, and
+`runReconcilePromoteDraftDispatch` already threads `repo: repoKey === 'we' ? undefined : repoSlug` — no
+`blockedBy` edges, nothing stale, nothing to build. Resolved with `graduatedTo: 467349c87,bc5693278`
+(the fix commit and the soak-break commit that together close this card's `## Done when`) rather than
+building anything new.
