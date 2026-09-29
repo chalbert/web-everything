@@ -274,3 +274,74 @@ describe('planBuildDispatch — wip-cap (#4353)', () => {
     expect(r.dispatch.map((x) => x.num)).toEqual(['2']); // not held — the non-delivering PR is invisible to the union
   });
 });
+
+// xovjhwh (operator decision 2026-09-29): `maxOpenItems` counts only the builder's OWN open-PR deliveries, not
+// every open PR whose branch merely names a card. Live incident: openItems read 7/7 filled by six worker PRs
+// (fix/ci-heal/hand-dispatched), so wip-cap held the builder's own cleared items and it built nothing.
+describe('planBuildDispatch — wip-cap counts only the builder\'s own items (xovjhwh)', () => {
+  it('a worker-dispatched item with an open PR (num absent from dispatchedByBuilder) is NOT counted toward maxOpenItems', () => {
+    const r = planBuildDispatch({
+      candidates: [cand('2', ['we:b'])],
+      openPrs: [pr('we', 1, [], [], 'lane/1-x')], // a hand-dispatched worker's PR — the builder never dispatched #1
+      dispatchedByBuilder: new Set(), // this builder has no run record for #1 at all
+      policy: { ...BUILD_DISPATCH_POLICY, maxConcurrentBuilds: 10, maxOpenItems: 1 },
+    });
+    expect(r.openItems).toEqual({ count: 0, cap: 1, nums: [] });
+    expect(r.dispatch.map((x) => x.num)).toEqual(['2']); // not held — a worker PR never fills the cap
+  });
+
+  it('a builder-dispatched item with an open PR (num present in dispatchedByBuilder) IS counted, unchanged from today', () => {
+    const r = planBuildDispatch({
+      candidates: [cand('2', ['we:b'])],
+      openPrs: [pr('we', 1, [], [], 'lane/1-x')],
+      dispatchedByBuilder: new Set(['1']), // the builder's own run records show it dispatched #1
+      policy: { ...BUILD_DISPATCH_POLICY, maxConcurrentBuilds: 10, maxOpenItems: 1 },
+    });
+    expect(r.openItems).toEqual({ count: 1, cap: 1, nums: ['1'] });
+    expect(r.hold).toEqual([expect.objectContaining({ num: '2', rule: 'wip-cap' })]);
+  });
+
+  it('dedupes against inFlight: a builder item that is both currently in-flight and has an open PR from the same '
+    + 'dispatch counts once, not twice, once dispatchedByBuilder is supplied', () => {
+    const r = planBuildDispatch({
+      candidates: [cand('99', ['we:z'])],
+      inFlight: [{ num: '1', scope: ['we:a'] }],
+      openPrs: [pr('we', 1, [], [], 'lane/1-x')], // same num #1 — already in-flight AND already has an open PR
+      dispatchedByBuilder: new Set(['1']),
+      policy: { ...BUILD_DISPATCH_POLICY, maxConcurrentBuilds: 10, maxOpenItems: 2 },
+    });
+    expect(r.openItems).toEqual({ count: 1, cap: 2, nums: ['1'] });
+    expect(r.dispatch.map((x) => x.num)).toEqual(['99']); // #1 counts once, so there is still room for one more
+  });
+
+  it('maxOpenPrs and the hot-file scope-overlap hold are unaffected: a worker PR excluded from maxOpenItems still '
+    + 'counts toward maxOpenPrs and still blocks a scope-overlapping builder dispatch', () => {
+    const manyWorkerPrs = Array.from({ length: 13 }, (_, i) => pr('we', 500 + i, [], [], `lane/${900 + i}-x`));
+    const frozen = planBuildDispatch({
+      candidates: [cand('1', ['we:a'])],
+      openPrs: manyWorkerPrs, // 13 open PRs, none the builder's own — still trips maxOpenPrs (12)
+      dispatchedByBuilder: new Set(),
+      policy: BUILD_DISPATCH_POLICY,
+    });
+    expect(frozen.hold[0]).toEqual(expect.objectContaining({ rule: 'landing-freeze' }));
+
+    const hotFile = planBuildDispatch({
+      candidates: [cand('2', ['we:scripts/conveyor/shared.mjs'])],
+      openPrs: [pr('we', 1, ['scripts/conveyor/shared.mjs'], [], 'lane/9-x')], // a worker PR touching the same file
+      dispatchedByBuilder: new Set(), // excluded from maxOpenItems, but its files still block scope-vs-open-prs
+      policy: { ...BUILD_DISPATCH_POLICY, maxOpenItems: 7 },
+    });
+    expect(hotFile.openItems).toEqual({ count: 0, cap: 7, nums: [] }); // confirms #9 is excluded from the wip-cap
+    expect(hotFile.hold).toEqual([expect.objectContaining({ num: '2', rule: 'scope-vs-open-prs' })]);
+  });
+
+  it('omitting dispatchedByBuilder entirely keeps the OLD unfiltered union — every pre-existing caller/test sees no change', () => {
+    const r = planBuildDispatch({
+      candidates: [cand('2', ['we:b'])],
+      openPrs: [pr('we', 1, [], [], 'lane/1-x')],
+      policy: { ...BUILD_DISPATCH_POLICY, maxConcurrentBuilds: 10, maxOpenItems: 1 },
+    });
+    expect(r.openItems).toEqual({ count: 1, cap: 1, nums: ['1'] });
+    expect(r.hold).toEqual([expect.objectContaining({ num: '2', rule: 'wip-cap' })]);
+  });
+});
