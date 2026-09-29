@@ -175,4 +175,14 @@ describe('frontmatterTamperedBeyondClaim — a doc-fix worker rewriting a field 
     expect(frontmatterTamperedBeyondClaim(before, after)).toBe(false); // fine under the full default allowlist
     expect(frontmatterTamperedBeyondClaim(before, after, ['status', 'dateStarted', 'dateResolved'])).toBe(true); // tamper under a narrower one
   });
+  it('a CRLF-saved card is not blind to tamper (#4395): a changed `scope:` is still caught with \\r\\n line endings', () => {
+    const beforeCrlf = before.replace(/\n/g, '\r\n');
+    const afterCrlf = '---\r\nstatus: open\r\nscope: ["we:evil.mjs"]\r\ndateOpened: "2026-09-27"\r\n---\r\n\r\nbody text';
+    expect(frontmatterTamperedBeyondClaim(beforeCrlf, afterCrlf)).toBe(true);
+  });
+  it('a CRLF-saved card is also not FALSELY flagged (#4395): only an owned key changing is still not tamper', () => {
+    const beforeCrlf = before.replace(/\n/g, '\r\n');
+    const afterCrlf = '---\r\nstatus: active\r\nscope: ["we:a.md"]\r\ndateOpened: "2026-09-27"\r\ndateStarted: "2026-09-28"\r\n---\r\n\r\nbody text';
+    expect(frontmatterTamperedBeyondClaim(beforeCrlf, afterCrlf)).toBe(false);
+  });
 });

@@ -194,9 +194,13 @@ export const CLAIM_OWNED_FRONTMATTER_KEYS = Object.freeze([
   'status', 'dateStarted', 'dateResolved', 'preparedDate', 'preparedAgainstSha', 'graduatedTo', 'codifiedIn',
 ]);
 
-/** The `---\n...\n---\n` frontmatter block's own text (no delimiters), or `''` if the file has none. PURE. */
+/**
+ * The `---\n...\n---\n` frontmatter block's own text (no delimiters), or `''` if the file has none. PURE.
+ * Accepts CRLF (`\r\n`) as well as LF line endings at both delimiters (#4395) — a card saved with CRLF
+ * previously failed to match at all, so its frontmatter went invisible to every caller instead of parsed.
+ */
 function frontmatterBlock(raw) {
-  const m = /^---\n([\s\S]*?)\n---\n/.exec(String(raw ?? ''));
+  const m = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/.exec(String(raw ?? ''));
   return m ? m[1] : '';
 }
 
@@ -218,8 +222,11 @@ function frontmatterBlock(raw) {
  * @returns {boolean}
  */
 export function frontmatterTamperedBeyondClaim(before, after, allowedKeys = CLAIM_OWNED_FRONTMATTER_KEYS) {
+  // Split on \r?\n (#4395), not '\n' alone: a plain '\n' split leaves a trailing '\r' on every CRLF line but
+  // the block's last one, so removing/adding an allowed-key line shifts WHICH lines carry that stray '\r' and
+  // strip(before) !== strip(after) even when only an allowed key changed — a false positive, not a real tamper.
   const strip = (raw) => frontmatterBlock(raw)
-    .split('\n')
+    .split(/\r?\n/)
     .filter((line) => !allowedKeys.some((k) => line.startsWith(`${k}:`)))
     .join('\n');
   return strip(before) !== strip(after);
