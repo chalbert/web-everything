@@ -45,6 +45,9 @@ import {
   acquireBuildDispatchClaim, releaseBuildDispatchClaim, listBuildDispatchClaims,
   listBuildDispatchHolds,
 } from '../../scripts/conveyor/build-dispatch-claim.mjs';
+// #4465 — a held item's own route (already-done / out-of-scope / other) and the live sweep that acts on it.
+// See that file's own header for the three routes and why this daemon owns the sweep.
+import { planHoldRouting, routeHeldItems, reserveHoldRoute, appendHoldFinding } from '../../scripts/conveyor/build-dispatch-hold-router.mjs';
 import { resolveCoordinationRoot } from '../../scripts/operations/coordination-root.mjs';
 // #4131/#4382 build-orphan-adopt — see that module's own header for the mechanism this closes.
 import { adoptOrphanedBuildClaims } from '../../scripts/conveyor/build-dispatch-orphan-adopt.mjs';
@@ -165,7 +168,20 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
     const prev = settledByNum.get(n);
     if (!prev || (typeof r.startedAt === 'string' && r.startedAt > (prev.startedAt || ''))) settledByNum.set(n, r);
   }
-  const heldNums = new Set((effects.listHolds?.() ?? []).map((h) => normNum(h.num)));
+  const holds = effects.listHolds?.() ?? [];
+  const heldNums = new Set(holds.map((h) => normNum(h.num)));
+  // #4465 — classify every LIVE hold (pure, cheap, every tick — never gated on `live`, so it is visible on a
+  // `--dry-run` tick too) and, LIVE only, act on it (best-effort — a routing hiccup must never fail this
+  // tick's own build-dispatch plan). Optional-chained so an older test stub that predates this field behaves
+  // exactly as before (no call, no throw). See `scripts/conveyor/build-dispatch-hold-router.mjs`'s own header
+  // for the three routes and why this sweeps EVERY hold each tick rather than hooking the wrapper that first
+  // placed it — it catches a hold from before this fix existed exactly the same as a fresh one.
+  const holdRouting = planHoldRouting(holds);
+  let holdRoutingResult = null;
+  if (live && typeof effects.routeHeldItems === 'function') {
+    try { holdRoutingResult = await effects.routeHeldItems(holdRouting); }
+    catch (e) { holdRoutingResult = { error: String(e?.message || e).split('\n')[0] }; }
+  }
 
   // Retire what observable progress has finished: a PR delivers it, it left the cleared queue, or the
   // dispatch's OWN wrapper already settled it with a definite non-PR outcome.
@@ -266,6 +282,10 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
     // per live claim), or an `{error}` on a best-effort failure, `null` on a dry-run tick or an older effects
     // stub with no such call.
     orphanAdoption,
+    // #4465 — `planHoldRouting`'s own plan (always present, pure) plus `routeHeldItems`'s outcome array (or an
+    // `{error}` on a best-effort failure), `null` on a dry-run tick or an older effects stub with no such call.
+    holdRouting,
+    holdRoutingResult,
     nextBookkeeping: settleBookkeeping(bookkeeping, out?.nextState || {}, dispatched.map((x) => x.num)),
   };
 }
@@ -467,6 +487,41 @@ export function cliRetryInfraBlocked({ exec = execFileSync, env = process.env, h
   }
 }
 
+/**
+ * #4465 — spawn ONE detached landing attempt for a routed hold (`already-done`/`out-of-scope`), the same
+ * `setsid`+`.unref()` shape a `build` dispatch's own delivery wrapper already uses
+ * (`scripts/operations/detached-dispatch.mjs#defaultSpawnDetached`) — a lane-acquire→edit→PR arc is minutes,
+ * far longer than this daemon's own tick, so it must never run inline here. Logs go beside the daemon's own
+ * dispatch logs so a stuck landing is discoverable the same way a stuck build dispatch already is.
+ */
+export async function cliSpawnHoldLand(entry) {
+  const { defaultSpawnDetached, deliveryDispatchLogPath } = await import('../../scripts/operations/detached-dispatch.mjs');
+  const argv = [
+    join(SCRIPTS, 'operations', 'build-dispatch-hold-route-land.mjs'),
+    `--num=${entry.num}`, `--route=${entry.route}`,
+  ];
+  if (entry.commit) argv.push(`--commit=${entry.commit}`);
+  if (entry.reason) argv.push(`--reason=${entry.reason}`);
+  const logPath = deliveryDispatchLogPath(`hold-route-${entry.num}`, REPO_ROOT);
+  return defaultSpawnDetached(argv, { cwd: REPO_ROOT, logPath });
+}
+
+/** #4465 — the real IO wiring for `runBuildDispatchTick`'s `effects.routeHeldItems`: dedup via
+ *  `reserveHoldRoute`, spawn a detached landing for (a)/(b), record a finding for (c). Deliberately wires no
+ *  release effect at all — see `routeHeldItems`'s own docblock (we:scripts/conveyor/build-dispatch-hold-router.mjs)
+ *  for why every route leaves the build-dispatch hold (and, for (a)/(b), the dedup lease) to self-expire on
+ *  its own TTL rather than being released the moment this call returns. ASYNC — `routeHeldItems` awaits
+ *  `spawnLand` internally, so a rejected detached-spawn promise is captured per-item, never left as an
+ *  unhandled rejection that could kill this resident daemon; `runBuildDispatchTick` already `await`s this. */
+export async function cliRouteHeldItems(plan) {
+  return routeHeldItems({
+    plan,
+    reserveRoute: reserveHoldRoute,
+    spawnLand: cliSpawnHoldLand,
+    recordFinding: appendHoldFinding,
+  });
+}
+
 /** Predict the provider route for the dry run — the SAME `decideDispatchRoute` dispatch-lane calls, with the
  *  item's `deliveryAgent:` override honoured as the mechanical build mode would. Advisory only: dispatch-lane
  *  recomputes it at dispatch time. */
@@ -522,6 +577,8 @@ function cliEffects() {
     // #4131/#4382 build-orphan-adopt — only called by `runBuildDispatchTick` when `live`, and BEFORE this same
     // tick's own claim retirement read — see that function's own docblock.
     adoptOrphans: (o) => adoptOrphanedBuildClaims(o),
+    // #4465 — only called by `runBuildDispatchTick` when `live` (never on a `--dry-run` tick).
+    routeHeldItems: (plan) => cliRouteHeldItems(plan),
   };
 }
 
@@ -610,6 +667,9 @@ async function dryRun(flags) {
     wouldDispatchNow: tick.plan.dispatch.map((x) => x.num),
     wouldRetireClaims: tick.retired,
     dispatchHolds: tick.dispatchHolds, // #4349 — items excluded this tick by a non-PR terminal-outcome cooldown
+    // #4465 — every LIVE hold's classified route (`already-done`/`out-of-scope`/`other`), read-only here: a
+    // `--dry-run` tick never calls `effects.routeHeldItems`, so this is purely informational.
+    holdRouting: tick.holdRouting,
     items: rows,
   };
   if (flags.json) { process.stdout.write(`${JSON.stringify(report, null, 2)}\n`); return; }
@@ -621,6 +681,7 @@ async function dryRun(flags) {
   w(`  open PRs: ${report.openPrs.join(', ') || 'none'} · durable in-flight builds (claims/run records): ${report.inFlight.map((f) => `#${f.num} (${f.source})`).join(', ') || 'none'} · tick core counts ${core.building} building`);
   w(`  open items ${report.openItems.count}/${report.openItems.cap}${report.openItems.filling.length ? ` (${report.openItems.filling.map((n) => `#${n}`).join(', ')})` : ''}`);
   w(`  would dispatch now: ${report.wouldDispatchNow.map((n) => `#${n}`).join(', ') || 'nothing'}`);
+  w(`  held items, routed: ${report.holdRouting.map((h) => `#${h.num}→${h.route}${h.commit ? `(${h.commit})` : ''}`).join(', ') || 'none'}`);
   for (const r of rows) {
     const rt = r.route?.error ? `route ? (${r.route.error})` : `marker=${r.route.marker ?? '-'} taskType=${r.route.taskType ?? '-'} routed=${r.route.routed ?? '-'} executed=${r.route.executed ?? '-'}${r.route.refusal ? ` REFUSED: ${r.route.refusal}` : ''}`;
     w(`  #${r.num}: tick-core=${r.tickCore} → ${r.daemon}\n      ${rt}`);
@@ -663,7 +724,7 @@ async function live(flags) {
     tickOnce, sleep: realSleep, isAlive, intervalMs, maxTicks: flags.once ? 1 : Infinity,
     onTick: (r) => {
       if (!r || !r.plan) { console.error(`build-dispatch-daemon: tick skipped (${r?.reason ?? 'self-sync'})`); return; }
-      process.stdout.write(`${JSON.stringify({ at: new Date().toISOString(), status: r.statusLine, freeze: r.plan.freeze, inFlight: r.plan.inFlight.map((f) => f.num), openItems: reportOpenItems(r.plan.openItems), dispatched: r.dispatched, hold: r.plan.hold, dispatchHolds: r.dispatchHolds, failures: r.failures, retired: r.retired, infraRetry: r.infraRetry, orphanAdoption: r.orphanAdoption })}\n`);
+      process.stdout.write(`${JSON.stringify({ at: new Date().toISOString(), status: r.statusLine, freeze: r.plan.freeze, inFlight: r.plan.inFlight.map((f) => f.num), openItems: reportOpenItems(r.plan.openItems), dispatched: r.dispatched, hold: r.plan.hold, dispatchHolds: r.dispatchHolds, failures: r.failures, retired: r.retired, infraRetry: r.infraRetry, orphanAdoption: r.orphanAdoption, holdRouting: r.holdRouting, holdRoutingResult: r.holdRoutingResult })}\n`);
     },
     onTickError: (e) => console.error(`build-dispatch-daemon: tick failed (non-fatal): ${String(e?.message || e).split('\n')[0]}`),
   });

@@ -1,0 +1,299 @@
+#!/usr/bin/env node
+/**
+ * @file scripts/operations/build-dispatch-hold-route-land.mjs
+ * @description #4465 — THE LANE-BOUND LANDING PASS for a build-dispatch hold's routed action, planned by
+ * we:scripts/conveyor/build-dispatch-hold-router.mjs#planHoldRouting. Mirrors the established shape
+ * we:scripts/operations/health-file-request-land.mjs already uses for the SAME "acquire a lane, make one
+ * small mechanical edit, commit, verify, open a self-labelled PR, release the lane" arc — the resident
+ * build-dispatch daemon (we:skills-src/conveyor/build-dispatch-daemon.mjs) is NEVER touched by this: every
+ * write below happens inside the freshly-acquired lane this pass gets back from `lane-pool.mjs acquire`.
+ *
+ * TWO ROUTES LAND HERE (route 'other' never does — it is a synchronous JSON-ledger append only, no lane, no
+ * PR, no hold release; see the router module for why the hold is left to self-expire on its own TTL):
+ *   'already-done'  — `backlog.mjs resolve <num> --graduated-to=<commit>` (the sanctioned resolve verb).
+ *   'out-of-scope'  — clear the card's `scope:` (making it "unshaped" — the EXISTING dispatch-plan
+ *       auto-prepare then re-scopes it on its own) and append the agent's finding to the card body.
+ *
+ * IDEMPOTENCY — same mechanism as health-file-request-land.mjs: a STABLE ref (`refFor(num)`) fixed for the
+ * item's whole routing life, so a retried `open-pr` targets the SAME PR (`we:scripts/pr-land.mjs`'s own
+ * same-`--ref` idempotency guarantee, not re-derived here).
+ *
+ * Usage:
+ *   node scripts/operations/build-dispatch-hold-route-land.mjs --num=<n> --route=<already-done|out-of-scope>
+ *     [--commit=<sha>] [--reason=<text>] [--json]
+ */
+import { execFileSync } from 'node:child_process';
+import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import { resolveChildTimeoutMs, resolveLaneAcquireTimeoutMs } from '../lib/bounded-child.mjs';
+import { localToday } from '../lib/local-date.mjs';
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+export const REPO_ROOT = join(HERE, '..', '..');
+const VERIFY_TIMEOUT_MS = 30 * 60 * 1000;
+// Same generous ceiling we:skills-src/conveyor/delivery-agent-brief.md step 8 gives a foreground `open-pr
+// --mode=label-on-green` caller — it blocks until the required `test` check settles.
+const OPEN_PR_TIMEOUT_MS = 10 * 60 * 1000;
+
+// ── pure ─────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/** PURE. A stable ref, fixed for this item's whole routing life. */
+export function refFor(num) { return `lane/hold-route-${num}`; }
+
+/** PURE. Find the backlog card's filename for `num` among the names `readdirSync('backlog')` returned —
+ *  injected list so this needs no disk access to test. `null` when no card starts with `<num>-`. */
+export function findCardFileName(names, num) {
+  return (Array.isArray(names) ? names : []).find((f) => f.startsWith(`${num}-`)) ?? null;
+}
+
+/** PURE. Escape every regex metacharacter in `s` — #4465 review round 3 (live security finding):
+ *  `commitReferencesItem` builds a `RegExp` straight out of an id read from an UNTRUSTED card file
+ *  (`bornAs:`); an unescaped id containing metacharacters (e.g. a card whose `bornAs` was somehow set to
+ *  `.*`) would make the "references this card" check match almost any commit message at all, or throw on an
+ *  invalid pattern (e.g. a lone `(`). */
+function escapeRegExp(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** PURE. Does a commit message reference ANY of the given item ids, in the `#<id>` shape this repo's own
+ *  commit convention already uses everywhere ("WE #4465: ...", "backlog: resolve #4464", "…, #x5s8b47")?
+ *  `ids` should carry BOTH the card's numeric id and its `bornAs` hash — a card lands with a numeric id only
+ *  at JIT-numbering time (`we:AGENTS.md`'s own drain convention), so a commit that predates that (as any
+ *  already-landed "this already does it" citation necessarily does) names the `bornAs` hash instead, never
+ *  the number. Used to require that an already-done citation's commit is not merely SOME real commit on main
+ *  (any old ancestor sha would pass an ancestry check alone) but one that actually names THIS card — a much
+ *  narrower bar for an untrusted, agent-supplied citation to clear. Every id is regex-escaped (see
+ *  `escapeRegExp` above) since `bornAs` is untrusted, card-file-supplied text, never a literal this module
+ *  controls. */
+export function commitReferencesItem(message, ids) {
+  const text = String(message ?? '');
+  const list = (Array.isArray(ids) ? ids : [ids]).map((id) => String(id ?? '').trim()).filter(Boolean);
+  return list.some((id) => new RegExp(`#${escapeRegExp(id)}\\b`).test(text));
+}
+
+/** PURE. Extract a card's `bornAs:` hash from its frontmatter text, or `null` if absent/unparseable. */
+export function extractBornAs(cardText) {
+  const m = /^bornAs:\s*(\S+)/m.exec(String(cardText ?? ''));
+  return m ? m[1] : null;
+}
+
+/** PURE. Does this commit's OWN changed-file list include at least one path outside `backlog/`? #4465 review
+ *  round 3 (live security finding): naming THIS card in a commit message is a weak bar on its own — a purely
+ *  mechanical, bookkeeping commit ("backlog: file #4380", a drain resolve-splice, a JIT-numbering commit)
+ *  also names the card without ever implementing its spec, so `commitReferencesItem` passing alone is not
+ *  enough to trust "this commit already lands the spec". Every genuine implementation commit in this repo's
+ *  own convention touches real source alongside (or instead of) the card file; a commit whose ENTIRE change
+ *  is under `backlog/` is exactly the shape a pure filing/resolve/JIT-number commit has and an implementation
+ *  commit does not. `files` is the commit's own changed-path list (`git show --name-only`, one per line) —
+ *  injected as plain text/array so this needs no disk access to test. */
+export function commitTouchesNonBacklogFile(files) {
+  const list = Array.isArray(files) ? files : String(files ?? '').split('\n');
+  return list.map((f) => f.trim()).filter(Boolean).some((f) => !f.startsWith('backlog/'));
+}
+
+/** PURE. Clear a card's `scope:` line (making it "unshaped" for dispatch-plan's own existing auto-prepare)
+ *  and append the routing agent's finding as a new section — text in, text out, no IO. */
+export function clearScopeAndAppendFinding(cardText, { num, reason, today = localToday() } = {}) {
+  const cleared = String(cardText ?? '').replace(/^scope:\s*\[[^\]]*\]\s*$/m, 'scope: []');
+  const section = [
+    '',
+    `## Held finding — auto-routed by #4465 (${today})`,
+    '',
+    `The build-dispatch daemon held #${num} with:`,
+    '',
+    `> ${String(reason ?? '(no reason recorded)').replace(/\n/g, '\n> ')}`,
+    '',
+    "`scope:` was cleared above so this card is picked up by the existing unshaped-item auto-prepare path;",
+    'a prepare pass re-scopes it against the finding.',
+    '',
+  ].join('\n');
+  return `${cleared.replace(/\n+$/, '')}\n${section}`;
+}
+
+// ── IO shell ─────────────────────────────────────────────────────────────────────────────────────────────────
+
+export function runCmd(cmd, args, cwd, { timeoutMs = resolveChildTimeoutMs() } = {}) {
+  return execFileSync(cmd, args, {
+    cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024, timeout: timeoutMs, killSignal: 'SIGKILL',
+  });
+}
+
+export function acquireLane(runFn = runCmd) {
+  return JSON.parse(runFn('node', [join(REPO_ROOT, 'scripts', 'lane-pool.mjs'), 'acquire', '--purpose=build-dispatch-hold-route', '--json'], REPO_ROOT, { timeoutMs: resolveLaneAcquireTimeoutMs() }));
+}
+
+export function releaseLane(acq, runFn = runCmd) {
+  return runFn('node', [join(REPO_ROOT, 'scripts', 'lane-pool.mjs'), 'release', `--lane=${acq.lane}`, `--session=${acq.holder}`], REPO_ROOT);
+}
+
+export function parseOpenPrResult(out) {
+  try {
+    const parsed = JSON.parse(out);
+    const effects = parsed?.findings?.submit?.effects;
+    const applied = Array.isArray(effects) ? effects.find((e) => e?.type === 'open-pr.submit' && e?.status === 'applied') : null;
+    const result = applied?.result;
+    return { pr: result?.pr ?? null, url: result?.url ?? null };
+  } catch { return { pr: null, url: null }; }
+}
+
+function renderPrBody({ num, route, commit, reason }) {
+  const lines = [
+    '## Build-dispatch hold, auto-routed (#4465)', '',
+    `Card #${num} was held by the build-dispatch daemon; this PR is the router's own routed fix, landed`,
+    'mechanically — no agent turn, no judgment beyond the classification already recorded on the card.', '',
+  ];
+  if (route === 'already-done') {
+    lines.push(`Route: **already-done**. Resolved with \`graduatedTo=${commit}\` — the cited commit already`, 'lands the spec.', '');
+  } else {
+    lines.push('Route: **out-of-scope / superseded**. `scope:` cleared and the agent\'s finding appended to', 'the card body so the existing unshaped-item auto-prepare path re-scopes it.', '');
+  }
+  lines.push('Original hold reason:', '', `> ${String(reason ?? '').replace(/\n/g, '\n> ')}`, '');
+  return lines.join('\n');
+}
+
+/**
+ * Land ONE routed item. Every effect goes through `runFn`/`acquireFn`/`releaseFn` (defaults above) so a test
+ * can substitute recording fakes and assert every `(cmd, args, cwd)` triple used the LANE path, never
+ * `REPO_ROOT`/the daemon clone's own cwd (beyond the two lane-pool calls, legitimately run from `REPO_ROOT` —
+ * acquiring/releasing a lane is the pool's own bookkeeping, not "editing the daemon clone").
+ * @returns {{status:'landed'|'failed', pr?, prUrl?, error?}}
+ */
+export function landOne({ num, route, commit = null, reason = null }, {
+  runFn = runCmd, acquireFn = acquireLane, releaseFn = releaseLane,
+  readFile = readFileSync, writeFile = writeFileSync, listCardNames = (lane) => readdirSync(join(lane, 'backlog')),
+} = {}) {
+  if (route !== 'already-done' && route !== 'out-of-scope') {
+    return { status: 'failed', error: `landOne: unroutable route '${route}' — only 'already-done'/'out-of-scope' land here` };
+  }
+  let acq = null;
+  try {
+    acq = acquireFn(runFn);
+    const lane = acq.path;
+    let msg;
+    if (route === 'already-done') {
+      if (!commit) throw new Error('landOne: already-done route requires a cited commit');
+      // Never trust the build agent's free-text citation blind — it is untrusted input (an agent can
+      // hallucinate a sha, or be steered by prompt-injected card content). Refresh this lane's view of main,
+      // then run THREE independent checks, ALL required:
+      //  (1) the cited commit is a REAL ancestor of `origin/main` — `merge-base --is-ancestor` fails on BOTH
+      //      an unknown/hallucinated sha and a real sha that never reached main (e.g. a throwaway branch);
+      //  (2) #4465 review round 2 (live security finding) — ancestry ALONE is not enough: a real, unrelated
+      //      old commit on main is also a valid ancestor, so (1) alone would let an agent close an unbuilt
+      //      card as done by citing any real sha at all. Require the commit's OWN message to reference THIS
+      //      card (`commitReferencesItem`, above) — this repo's own commit convention already names the card
+      //      on every commit ("WE #4465: ...", "backlog: resolve #4464"), so a commit that genuinely lands
+      //      this spec passes for free, and an unrelated-but-real ancestor almost never does;
+      //  (3) #4465 review round 3 (live security finding) — (2) ALONE is still not enough: a purely
+      //      mechanical bookkeeping commit ("backlog: file #4380", a drain resolve-splice, a JIT-numbering
+      //      commit) also names the card without ever implementing its spec. Require the commit to touch at
+      //      least one file OUTSIDE `backlog/` (`commitTouchesNonBacklogFile`, above) — every genuine
+      //      implementation commit in this repo's convention touches real source, a pure card-bookkeeping
+      //      commit never does.
+      // A failure on ANY check refuses the auto-resolve entirely — no partial edit, no PR — rather than
+      // closing an unbuilt card as done on an unverified claim.
+      runFn('git', ['fetch', 'origin', 'main'], lane);
+      try {
+        runFn('git', ['merge-base', '--is-ancestor', commit, 'origin/main'], lane);
+      } catch {
+        throw new Error(`landOne: cited commit ${commit} is not a verified ancestor of origin/main — refusing to auto-resolve on an unverified citation`);
+      }
+      const commitMessage = runFn('git', ['log', '-1', '--format=%B', commit], lane);
+      // Best-effort: the bornAs lookup is a BONUS second candidate id, never a reason to fail the whole check
+      // if the card can't be read for some unrelated reason — the primary `#<num>` match still applies.
+      let bornAs = null;
+      try {
+        const cardFileForBornAs = findCardFileName(listCardNames(lane), num);
+        if (cardFileForBornAs) bornAs = extractBornAs(readFile(join(lane, 'backlog', cardFileForBornAs), 'utf8'));
+      } catch { /* best-effort — fall through with bornAs: null */ }
+      if (!commitReferencesItem(commitMessage, [num, bornAs])) {
+        throw new Error(`landOne: cited commit ${commit} is on main but its own message never references #${num}${bornAs ? ` or #${bornAs}` : ''} — refusing to auto-resolve on an unrelated-but-real citation`);
+      }
+      const commitFiles = runFn('git', ['show', '--name-only', '--format=', commit], lane);
+      if (!commitTouchesNonBacklogFile(commitFiles)) {
+        throw new Error(`landOne: cited commit ${commit} references #${num} but touches only backlog/ files — refusing to auto-resolve on a bookkeeping-only citation`);
+      }
+      runFn('node', [join(lane, 'scripts', 'backlog.mjs'), 'resolve', String(num), `--graduated-to=${commit}`], lane);
+      msg = `WE #${num}: auto-resolve — build-dispatch hold cited commit ${commit} as already landing the spec\n\nRouted by #4465's hold router; no agent turn.\n`;
+    } else {
+      const cardFile = findCardFileName(listCardNames(lane), num);
+      if (!cardFile) throw new Error(`landOne: no backlog card found for #${num}`);
+      const cardPath = join(lane, 'backlog', cardFile);
+      const text = readFile(cardPath, 'utf8');
+      writeFile(cardPath, clearScopeAndAppendFinding(text, { num, reason }));
+      msg = `WE #${num}: auto-route to prepare — build-dispatch hold found the spec out of scope / superseded\n\nRouted by #4465's hold router; scope cleared for auto-prepare, finding attached to the card.\n`;
+    }
+    runFn('git', ['add', '--', 'backlog'], lane);
+    runFn('git', ['commit', '-m', msg], lane);
+    const ref = refFor(num);
+    runFn('git', ['push', '--force', 'origin', `HEAD:refs/heads/${ref}`], lane);
+    runFn('node', [join(lane, 'scripts', 'operations', 'run.mjs'), 'verify', `--checkout=${lane}`], lane, { timeoutMs: VERIFY_TIMEOUT_MS });
+    const bodyFile = join(lane, '.git', 'hold-route-body.md');
+    writeFile(bodyFile, renderPrBody({ num, route, commit, reason }));
+    const out = runFn('node', [
+      join(lane, 'scripts', 'operations', 'run.mjs'), 'open-pr',
+      `--ref=${ref}`, '--sha=HEAD', '--base=main', `--bodyFile=${bodyFile}`, '--mode=label-on-green', '--json',
+    ], lane, { timeoutMs: OPEN_PR_TIMEOUT_MS });
+    const { pr, url } = parseOpenPrResult(out);
+    return { status: 'landed', pr, prUrl: url };
+  } catch (e) {
+    return { status: 'failed', error: String(e?.stderr || e?.message || e).trim().split('\n')[0] };
+  } finally {
+    if (acq) { try { releaseFn(acq, runFn); } catch { /* the lease reaper reclaims it once unpaused */ } }
+  }
+}
+
+/** The full routed landing — this is the entry point run inside the DETACHED process
+ *  we:skills-src/conveyor/build-dispatch-daemon.mjs#cliSpawnHoldLand starts, so its own outcome (landed OR
+ *  failed) is invisible to the daemon's own tick; there is no run-store/settle channel back to it the way
+ *  we:scripts/operations/deliver-item-settle.mjs gives the `build` dispatch path. Deliberately does NOT
+ *  release the build-dispatch hold or the router's own dedup lease, on EITHER outcome:
+ *   - `landOne` reaching `'landed'` means only that the PR OPENED, not that it merged, so the card edit is
+ *     not yet on main — releasing either would let the very next tick dispatch a fresh build agent onto a
+ *     card whose scope/status has not actually changed yet.
+ *   - a `'failed'` result (the citation checks refused it, no card file found, `verify` failed, …) is a
+ *     KNOWN, ACCEPTED MVP GAP (#4465 review round 3), not a retried case: with no feedback channel to the
+ *     daemon, nothing here can trigger a prompt retry — the item simply rides out the lease TTL and then the
+ *     (shorter) hold TTL, falling back to ordinary build dispatch. Only a spawn that never even STARTS (the
+ *     detached process itself failing to launch) is retried promptly, one level up in
+ *     we:scripts/conveyor/build-dispatch-hold-router.mjs#routeHeldItems, which DOES observe that failure and
+ *     releases the lease for it — see that function's own docblock.
+ *  Both leases self-expire on their own TTL either way
+ *  (`we:scripts/conveyor/build-dispatch-hold-router.mjs#DEFAULT_ROUTE_LEASE_MINUTES` and
+ *  `we:scripts/conveyor/build-dispatch-claim.mjs#DEFAULT_BUILD_DISPATCH_HOLD_MINUTES`). Named separately from
+ *  `landOne` (even though it is currently a plain passthrough) as the stable "this is the routed-landing
+ *  entry point" name `main()` and every test call through, independent of `landOne`'s own internal shape. */
+export function landRoute(args, deps = {}) {
+  return landOne(args, deps);
+}
+
+function parseFlags(argv) {
+  const f = {};
+  for (const a of argv) {
+    if (!a.startsWith('--')) continue;
+    const i = a.indexOf('=');
+    f[i === -1 ? a.slice(2) : a.slice(2, i)] = i === -1 ? true : a.slice(i + 1);
+  }
+  return f;
+}
+
+async function main() {
+  const flags = parseFlags(process.argv.slice(2));
+  if (!flags.num || !flags.route) {
+    process.stderr.write('usage: build-dispatch-hold-route-land.mjs --num=<n> --route=<already-done|out-of-scope> [--commit=<sha>] [--reason=<text>] [--json]\n');
+    process.exitCode = 2;
+    return;
+  }
+  const result = landRoute({ num: String(flags.num), route: String(flags.route), commit: flags.commit ? String(flags.commit) : null, reason: flags.reason ? String(flags.reason) : null });
+  // No `process.exit` after this write — nothing else runs after `main()` returns, so `process.exitCode` alone
+  // ends the process with this output fully drained (never truncated, unlike an explicit `exit()` right after
+  // a write — we:scripts/lib/write-all-sync.mjs's own header on this exact footgun).
+  if (flags.json) process.stdout.write(`${JSON.stringify(result)}\n`);
+  else process.stdout.write(`${result.status}${result.pr ? ` PR #${result.pr}` : ''}${result.error ? ` — ${result.error}` : ''}\n`);
+  process.exitCode = result.status === 'landed' ? 0 : 1;
+}
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main();
+}
