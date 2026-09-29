@@ -345,15 +345,17 @@ describe('salvageLane (real git)', () => {
   });
 
   // This test and its `locked`-directory sibling below deliberately chmod a real directory to 0o000 for a
-  // few synchronous statements. A prior CI run (test-shard (1), run 36509203076) crashed the whole vitest
-  // worker (SIGABRT, exit 134) when something native SHARING that worker process's SAME OS thread pool
-  // (another test file's own directory walk) hit the unreadable dir mid-window and threw an uncaught
-  // `std::filesystem::filesystem_error` — no JS try/finally can catch a different thread's uncaught C++
-  // exception, so restoring permissions quickly (below) narrows the window but can't fully close it by
-  // itself. `vitest.config.ts` now pins this whole FILE to its own isolated single-fork process
-  // (`poolMatchGlobs`), so no other test file's native activity ever shares a process with these two —
-  // removing the contention the crash needed to happen at all. Keep the revoke-then-restore window here
-  // as tight as it already is regardless; it's cheap insurance, not the primary fix.
+  // few synchronous statements. Two CI runs (test-shard (1), runs 36509203076 and 36516127216) crashed the
+  // whole vitest worker (SIGABRT, exit 134) on this fixture with an uncaught
+  // `std::filesystem::filesystem_error` — root cause CONFIRMED (reproduced live, non-root, on
+  // node:22.23.2-bookworm/Linux, CI's exact Node version): `salvageLane`'s own `fs.cpSync({recursive:true})`
+  // call (NOT cross-file contention — an earlier per-file `poolMatchGlobs` isolation attempt did not stop the
+  // second crash) throws that uncaught native exception when its native directory walk meets a
+  // permission-denied directory. Fixed at the source in `we:scripts/lib/lane-salvage.mjs`
+  // (`copyLitterTreeSync` — see its docblock) by replacing that native recursive copy with a hand-rolled walk
+  // over plain libuv-backed calls, every one of which throws an ordinary catchable JS error instead. These
+  // two tests exercising the unreadable-directory path are what proves that fix; the tight revoke-then-
+  // restore window here is just cheap insurance, not the mechanism the crash actually needed.
   it('#4273 review — listUnregisteredWorktreeLitter propagates when .claude/worktrees ITSELF is unstattable for a reason OTHER than absence (never silently reads that as "[]" the way a bare existsSync would)', () => {
     if (process.getuid && process.getuid() === 0) return; // root ignores POSIX perms — chmod can't deny it
     mkdirSync(join(lane, '.claude', 'worktrees'), { recursive: true });

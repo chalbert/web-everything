@@ -25,25 +25,10 @@ export default defineConfig({
     // rationale) — otherwise the ~2000-file suite defaults to one thread per CPU core, which is how two
     // concurrently-admitted `test:unit` runs oversubscribe a 12-core host.
     pool: 'threads',
-    // #4273 CI crash (run 36509203076, `test-shard (1)`, exit 134): `lane-salvage.test.mjs` deliberately
-    // chmods a real directory to 0o000 for a few synchronous statements (proving the salvage walk
-    // propagates EACCES rather than reading it as absent/quiet) — see that file's two `chmodSync(..., 0o000)`
-    // cases. Something native sharing the SAME `threads`-pool worker process (a file watcher or another
-    // test's own directory walk) hit that directory mid-window and threw an UNCAUGHT
-    // `std::filesystem::filesystem_error`, which aborts the whole process (SIGABRT), not just the one test —
-    // no JS try/catch can stop that, so shrinking the exposed window alone can't fully close it. Pinning this
-    // ONE file to its own single, isolated `forks` process (the identical `poolMatchGlobs` +
-    // `singleFork: true` idiom `vitest.integration.config.ts` already uses for "flaky under real contention"
-    // files) guarantees no other test file's native activity ever shares a process with it, which removes the
-    // contention this crash needed to happen at all.
-    poolMatchGlobs: [['scripts/lib/__tests__/lane-salvage.test.mjs', 'forks']],
     poolOptions: {
       threads: {
         maxThreads: maxTestWorkers,
         minThreads: 1,
-      },
-      forks: {
-        singleFork: true,
       },
     },
     coverage: {

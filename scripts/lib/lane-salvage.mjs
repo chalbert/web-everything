@@ -43,7 +43,7 @@
 import { execFileSync } from 'node:child_process';
 import {
   mkdtempSync, rmSync, mkdirSync, writeFileSync, appendFileSync, statSync, existsSync, realpathSync,
-  readdirSync, lstatSync, cpSync,
+  readdirSync, lstatSync, copyFileSync, symlinkSync, readlinkSync, constants as fsConstants,
 } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { join, resolve, sep, dirname } from 'node:path';
@@ -395,6 +395,42 @@ export function snapshotWorkTree(dir, { refs, branchRef }) {
 }
 
 /**
+ * #4273 (CI run 36516127216, `test-shard (1)`, exit 134) — copies one litter item (file, dir, or symlink,
+ * any depth) using ONLY plain libuv-backed `fs` calls, never `fs.cpSync({recursive:true, ...})`. LIVE
+ * REPRODUCED root cause, not a hypothesis: on Node 22.23.2 (the exact version `actions/setup-node@v4`
+ * resolved `node-version: 22` to at the time, Linux x64 — reproduced with `docker run node:22.23.2-bookworm`
+ * as a NON-root user, since root ignores the POSIX permission bits this needs), `cpSync`'s own native
+ * recursive directory walk throws an UNCAUGHT `std::filesystem::filesystem_error` when it meets a
+ * permission-denied subdirectory — `terminate called after throwing …`, `Aborted (core dumped)`, exit 134 —
+ * not a catchable JS error, a process-aborting SIGABRT that takes the whole test-shard worker down with it.
+ * Isolating `lane-salvage.test.mjs` into its own fork (an earlier commit on this PR) did NOT fix this: the
+ * SAME crash recurred (CI run 36516127216) because the abort was never cross-file contention, it was this
+ * function's own `cpSync` call meeting the test's `locked/` fixture in-process. A REAL lane whose litter
+ * happened to contain a permission-denied directory (e.g. a half-torn-down worktree) would take the whole
+ * reclaim daemon process down with it exactly the same way — this is a live product bug, not a test-only one.
+ *
+ * `readdirSync`/`lstatSync`/`copyFileSync`/`symlinkSync`/`mkdirSync` are ordinary libuv wrappers: every one
+ * throws a normal, catchable JS `Error` (e.g. EACCES) on failure, never a native abort. This preserves the
+ * exact contract `salvageLane` relies on from the old `cpSync` options: a symlink is copied AS a symlink,
+ * verbatim target, never dereferenced (`readlinkSync` + `symlinkSync`, which never follow a link on their
+ * own — the old `dereference:false`+`verbatimSymlinks:true`). Copying onto an EXISTING regular file or
+ * symlink throws rather than silently clobbering it (`COPYFILE_EXCL` / `symlinkSync`'s own natural `EEXIST`
+ * — the old `errorOnExist:true`+`force:false`); an existing DIRECTORY merges instead — not a special case
+ * here, `mkdirSync(dest, {recursive:true})` is itself already a silent no-op when `dest` already exists,
+ * exactly matching `cpSync`'s own documented directory-merge behavior.
+ */
+function copyLitterTreeSync(src, dest) {
+  const st = lstatSync(src);
+  if (st.isSymbolicLink()) { symlinkSync(readlinkSync(src), dest); return; }
+  if (st.isDirectory()) {
+    mkdirSync(dest, { recursive: true });
+    for (const name of readdirSync(src)) copyLitterTreeSync(join(src, name), join(dest, name));
+    return;
+  }
+  copyFileSync(src, dest, fsConstants.COPYFILE_EXCL);
+}
+
+/**
  * Salvage a whole lane: snapshot the lane + every litter worktree, copy every UNREGISTERED
  * `.claude/worktrees/` item verbatim (#4273 — it cannot be captured as a git ref; it isn't one), write
  * bundle/patch/unpushed files, VERIFY the bundle carries every salvage ref, and append an index line. Throws
@@ -437,16 +473,18 @@ export function salvageLane({ dir, lane, pool, branchRef, salvageRoot = resolveS
   const prefix = join(outDir, `lane-${lane}`);
   // #4273 — copy every unregistered `.claude/worktrees/` item BEFORE the caller's `git clean -fd` can delete
   // it. Mirrors each item's own relative path under `.claude/worktrees/` (never a sanitized/collapsed name),
-  // so distinct items can never collide on a shared destination. `dereference:false` + `verbatimSymlinks:true`
-  // copy a symlink as itself, never following it (no loops, no silently including a link's target content).
-  // `errorOnExist:true` + `force:false` refuse to silently clobber — a genuine failure here throws, aborting
-  // the whole salvage exactly like a failed bundle-verify does (this function's existing throw-on-any-failure
-  // contract; the caller must never reset/clean a lane whose salvage did not fully succeed).
+  // so distinct items can never collide on a shared destination. A symlink is copied as itself, never
+  // followed (no loops, no silently including a link's target content). Copying onto an existing regular
+  // file or symlink refuses to silently clobber — a genuine failure here throws, aborting the whole salvage
+  // exactly like a failed bundle-verify does (this function's existing throw-on-any-failure contract; the
+  // caller must never reset/clean a lane whose salvage did not fully succeed). See `copyLitterTreeSync`'s own
+  // docblock for why this is a hand-rolled walk rather than `fs.cpSync({recursive:true})` — a real, live-
+  // reproduced crash, not a style preference.
   const litterDestRoot = `${prefix}.wt-litter`;
   const litterCopies = litter.map((item) => {
     const dest = join(litterDestRoot, item.rel);
     mkdirSync(dirname(dest), { recursive: true });
-    cpSync(item.path, dest, { recursive: true, dereference: false, verbatimSymlinks: true, errorOnExist: true, force: false });
+    copyLitterTreeSync(item.path, dest);
     return { rel: item.rel, dest };
   });
   let bundle = null;
