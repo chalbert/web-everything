@@ -41,7 +41,7 @@ const COUNT = 20;
 
 export default {
   id: 'already-done-burst-unattributed',
-  title: 'dispatch-plan\'s already-done pass ran an UNBOUNDED Promise.all burst of gh pr list --search calls, defaulted to a bare promisified execFile — invisible to gh-spend.mjs, the top drain of the shared graphql bucket a second time',
+  title: 'dispatch-plan\'s already-done pass ran an UNBOUNDED Promise.all burst of PR-list searches, defaulted to a bare promisified execFile — invisible to gh-spend.mjs, the top drain of the shared graphql bucket a second time',
   card: 'we:backlog/4415',
   fixedBy: { sha: 'bc0c364a2', where: 'lane/graphql-unattributed-spender-2', paths: ['scripts/operations/dispatch-lane-io.mjs'] },
   fixPresent(root) {
