@@ -205,9 +205,22 @@ export function writeCompletion(record, dir = resolveCompletionsDir(), { expectP
       toWrite = { ...record, infraStreak: prevStreak, infraStreakSince: prev.infraStreakSince ?? prev.updatedAt };
     }
 
+    // #4314 (prevention guard owed by chalbert/web-everything#2831's independent review, finding 4) —
+    // the write is temp-file-then-rename for atomicity, but a failure between the two (a real EISDIR/ENOTDIR
+    // from a corrupted or concurrently-modified completions dir, a full disk, a permission error) used to leave
+    // the `.tmp` file on disk forever: nothing else in this module, or any reader (`listCompletionSessions`),
+    // ever reaps it. The `finally` block is the cleanup guard: on ANY throw from the write-then-rename pair, the
+    // temp file is removed (best effort — a failure to remove it must never mask the ORIGINAL error) before the
+    // original error propagates.
     const tmp = `${path}.${process.pid}.${Date.now()}.tmp`;
-    writeFileSync(tmp, serializeCompletionRecord(toWrite));
-    renameSync(tmp, path);
+    let renamed = false;
+    try {
+      writeFileSync(tmp, serializeCompletionRecord(toWrite));
+      renameSync(tmp, path);
+      renamed = true;
+    } finally {
+      if (!renamed) { try { rmSync(tmp, { force: true }); } catch { /* best effort; the original error wins */ } }
+    }
     return conditional ? { written: true, path } : path;
   };
 

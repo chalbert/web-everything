@@ -35,6 +35,23 @@ describe('the fs shell', () => {
     expect(JSON.parse(readFileSync(join(dir, 'review-701.json'), 'utf8'))).toEqual(sample());
   });
 
+  // #4314 (prevention guard owed by chalbert/web-everything#2831's independent review, finding 4: "a lint rule
+  // enforcing `finally` cleanup blocks for temp file handles, or a property-based test that asserts directory
+  // size remains constant after simulated concurrent accesses"). writeCompletion's temp-file-then-rename write
+  // had no cleanup on a failed rename: a real (not mocked) EISDIR — renaming the temp file onto a path that is
+  // itself a directory, which is exactly the shape a corrupted/concurrently-modified completions dir can take —
+  // left the `.tmp` file behind forever (`listCompletionSessions`/`readdirSync` never reap it; nothing else
+  // does either). The directory-size property this guards: after ANY writeCompletion call, successful or not,
+  // the completions directory holds no `.tmp` file.
+  it('leaves no temp file behind when the write fails partway through (a real rename failure, not a mock)', () => {
+    const record = sample();
+    const path = completionPath(record.session, dir);
+    mkdirSync(path); // makes the destination itself a directory, so renameSync(tmp, path) throws EISDIR
+    expect(() => writeCompletion(record, dir)).toThrow();
+    const leftoverTemps = readdirSync(dir).filter((f) => f.endsWith('.tmp'));
+    expect(leftoverTemps).toEqual([]);
+  });
+
   it('round-trips through the file store handle', () => {
     const store = createFileCompletionStore(dir);
     store.write(sample());
