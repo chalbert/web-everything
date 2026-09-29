@@ -3,6 +3,7 @@ bornAs: xri0853
 kind: story
 size: 5
 priority: high
+tier: pinned
 status: open
 blockedBy: ["4309"]
 scope: ["we:scripts/lib/gh-spend.mjs", "we:scripts/lib/gh-throttle.mjs", "we:scripts/lib/review-label-provider.mjs", "we:scripts/conveyor/pr-watch.mjs", "we:scripts/conveyor/ci-queue-watch.mjs", "we:scripts/conveyor/parked-pr-conflict-watch.mjs", "we:scripts/wait-green.mjs"]
