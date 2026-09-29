@@ -6,7 +6,7 @@ import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import {
-  AGY_CLI, AGY_RESUME_PROMPT, DEFAULT_TIMEOUT_MS, buildAgyDirectTaskArgv, buildAgyPrompt, buildAgyStdinLine,
+  AGY_CLI, AGY_RESUME_PROMPT, AGY_EFFORT_UNSUPPORTED_MODELS, DEFAULT_TIMEOUT_MS, buildAgyDirectTaskArgv, buildAgyPrompt, buildAgyStdinLine,
   buildScratchCloneArgv, planDepsInstall, parseJsonlLine, parseJsonlEvents, summarizeAgyEvents,
   defaultExecFn,
   setupScratchClone, captureDiff, runGate, runAgyDirectExec, geminiDirectTask, parseFlags, main, formatReport,
@@ -300,8 +300,34 @@ describe('buildAgyDirectTaskArgv — observed stdin route, no invented flags or 
   it.each(['low', 'medium', 'high'])('forwards effort %s with no model pin', (effort) => {
     expect(buildAgyDirectTaskArgv({ effort })).toEqual([...BASE, '--effort', effort, '--print', '']);
   });
-  it('leaves model/effort compatibility to agy, without a hardcoded catalogue', () => {
-    expect(buildAgyDirectTaskArgv({ model: 'claude-sonnet-4-6', effort: 'low' })).toContain('low');
+  it('names only the two known Claude backends as effort exceptions', () => {
+    expect(AGY_EFFORT_UNSUPPORTED_MODELS).toEqual(['claude-sonnet-4-6', 'claude-opus-4-6-thinking']);
+  });
+  it.each(['claude-sonnet-4-6', 'claude-opus-4-6-thinking'].flatMap((model) =>
+    ['low', 'medium', 'high'].map((effort) => [model, effort])))('omits effort for %s with %s', (model, effort) => {
+    const argv = buildAgyDirectTaskArgv({ model, effort });
+    expect(argv).not.toContain('--effort');
+    expect(argv).toEqual([...BASE, '--model', model, '--print', '']);
+  });
+  it('still forwards --effort for a non-Claude model paired with an explicit effort', () => {
+    expect(buildAgyDirectTaskArgv({ model: 'future-model', effort: 'medium' }))
+      .toEqual([...BASE, '--model', 'future-model', '--effort', 'medium', '--print', '']);
+  });
+  it('recognizes a Claude model after trimming whitespace', () => {
+    expect(buildAgyDirectTaskArgv({ model: ' claude-sonnet-4-6 ', effort: 'medium' }))
+      .toEqual([...BASE, '--model', 'claude-sonnet-4-6', '--print', '']);
+  });
+  it.each(['claude-sonnet-4-6', 'claude-opus-4-6-thinking'].flatMap((model) =>
+    ['constructor', 'ultra'].map((effort) => [model, effort])))('rejects malformed effort for %s with %s', (model, effort) => {
+    expect(() => buildAgyDirectTaskArgv({ model, effort })).toThrow(TypeError);
+  });
+  it('omits effort when resuming a Claude conversation', () => {
+    const resumeConversationId = 'afa6b941-eb5d-4652-9471-4bae369c1cbd';
+    const argv = buildAgyDirectTaskArgv({ resumeConversationId, model: 'claude-sonnet-4-6', effort: 'high' });
+    expect(argv).not.toContain('--effort');
+    expect(argv).toEqual(['--input-format', 'text', '--output-format', 'stream-json',
+      '--disable-slash-commands', '--dangerously-skip-permissions', '--model', 'claude-sonnet-4-6',
+      '--conversation', resumeConversationId, '--print', AGY_RESUME_PROMPT]);
   });
   it('resumes an explicit conversation in text print mode with the same execution options', () => {
     expect(buildAgyDirectTaskArgv({ resumeConversationId: 'afa6b941-eb5d-4652-9471-4bae369c1cbd',
