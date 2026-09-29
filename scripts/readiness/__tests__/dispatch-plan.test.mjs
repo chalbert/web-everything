@@ -1217,6 +1217,8 @@ describe('dispatchPausedHint — the operator gloss narrows to a scoped pause (e
     expect(dispatchPausedHint(null)).toBe(DISPATCH_PAUSED_HINT);
     expect(dispatchPausedHint()).toBe(DISPATCH_PAUSED_HINT);
     expect(dispatchPausedHint([])).toBe(DISPATCH_PAUSED_HINT);
+    // #4504 — a legacy all-kinds scope (pre-prepare-item) is blanket, so the hint says so too.
+    expect(dispatchPausedHint(['build', 'prepare', 'prepare-decision', 'investigate', 'fix', 'ci-heal'])).toBe(DISPATCH_PAUSED_HINT);
   });
   it('a scope naming EVERY kind reads as blanket too', () => {
     expect(dispatchPausedHint([...PAUSABLE_KINDS])).toBe(DISPATCH_PAUSED_HINT);

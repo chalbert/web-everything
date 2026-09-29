@@ -78,7 +78,7 @@ import { writeAllSync } from '../lib/write-all-sync.mjs';
  *
  * `review-dispatch` is absent ON PURPOSE — it is a separate mechanical pass, never gated by this lever.
  */
-export const PAUSABLE_KINDS = Object.freeze(['build', 'prepare', 'prepare-decision', 'investigate', 'fix', 'ci-heal']);
+export const PAUSABLE_KINDS = Object.freeze(['build', 'prepare', 'prepare-decision', 'prepare-item', 'investigate', 'fix', 'ci-heal']);
 
 /**
  * Normalize a raw `pausedKinds` value → a non-empty array of kind names, or `null` for "no scope declared"
@@ -113,8 +113,21 @@ export function normalizePausedKinds(value) {
 export function resolvePausedKinds(state) {
   if (!state || typeof state !== 'object' || state.paused !== true) return [];
   const kinds = normalizePausedKinds(state.pausedKinds);
-  return kinds == null ? [...PAUSABLE_KINDS] : kinds;
+  if (kinds == null) return [...PAUSABLE_KINDS];
+  // #4504 — a scope naming EVERY kind of an earlier, complete kind set was written to mean "everything"; it
+  // stays blanket, so a kind added later (e.g. `prepare-item`) never slips through a pause the operator
+  // believes is total.
+  if (LEGACY_FULL_KIND_SETS.some((set) => set.every((k) => kinds.includes(k)))) return [...PAUSABLE_KINDS];
+  return kinds;
 }
+
+/**
+ * Every EARLIER complete {@link PAUSABLE_KINDS} list, oldest first. When a kind is added, append the list as
+ * it stood before, so a persisted scope that named all of it keeps meaning "everything" (#4504).
+ */
+export const LEGACY_FULL_KIND_SETS = Object.freeze([
+  Object.freeze(['build', 'prepare', 'prepare-decision', 'investigate', 'fix', 'ci-heal']),
+]);
 
 /**
  * Is THIS spawn kind held right now? The per-kind question every `dispatchPaused` check became once the pause

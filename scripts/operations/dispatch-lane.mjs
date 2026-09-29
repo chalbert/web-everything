@@ -171,6 +171,7 @@ export const BRIEF_REQUIRED_BY_KIND = Object.freeze({
   build: ['ITEM_NUM', 'ITEM_SPEC_PATH', 'LANE', 'SESSION_SLUG', 'SCOPE', 'ATTEMPT_TAG', 'DELIVERY_BASE', 'WE_ROOT'],
   prepare: ['ITEM_NUM', 'ITEM_SPEC_PATH', 'LANE', 'SESSION_SLUG', 'SCOPE', 'WE_ROOT'],
   'prepare-decision': ['ITEM_NUM', 'ITEM_SPEC_PATH', 'LANE', 'SESSION_SLUG', 'SCOPE', 'WE_ROOT'],
+  'prepare-item': ['ITEM_NUM', 'ITEM_SPEC_PATH', 'LANE', 'SESSION_SLUG', 'SCOPE', 'WE_ROOT'],
   // `investigate` (#3567) fills the SAME names as the two prepare kinds — it targets an ITEM (not an
   // existing PR), same as `prepare`/`prepare-decision`, so it has no `PR_NUM`/`LANE_REF` to give either.
   investigate: ['ITEM_NUM', 'ITEM_SPEC_PATH', 'LANE', 'SESSION_SLUG', 'SCOPE', 'WE_ROOT'],
@@ -229,6 +230,7 @@ export const KIND_DECLARES_OCCUPANCY_ON_DISPATCH = Object.freeze({
   build: true,
   prepare: false,
   'prepare-decision': false,
+  'prepare-item': false,
   investigate: true,
   fix: false,
   'ci-heal': false,
@@ -244,6 +246,7 @@ const BRIEF_FILE_BY_LAUNCH_KIND_DISPLAY = Object.freeze({
   build: 'delivery-agent-brief.md',
   prepare: 'prepare-scope-agent-brief.md',
   'prepare-decision': 'prepare-decision-agent-brief.md',
+  'prepare-item': 'prepare-item-agent-brief.md',
   investigate: 'investigation-agent-brief.md',
   fix: 'fix-agent-brief.md',
   'ci-heal': 'fix-agent-ci-brief.md',
@@ -293,7 +296,7 @@ const deliveryBaseFor = (item) => {
  * first-match-wins, and is stated as data for the same reason: two files agreeing on the order by coincidence
  * is how they stop agreeing.
  */
-export const LAUNCH_KINDS = Object.freeze(['build', 'prepare', 'prepare-decision', 'investigate', 'fix', 'ci-heal']);
+export const LAUNCH_KINDS = Object.freeze(['build', 'prepare', 'prepare-decision', 'prepare-item', 'investigate', 'fix', 'ci-heal']);
 
 /**
  * How long an in-flight dispatch record whose agent's LIVENESS CANNOT BE ESTABLISHED keeps holding its item

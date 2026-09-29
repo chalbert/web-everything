@@ -85,7 +85,7 @@ import { capToConcurrency, resolveMaxConcurrentLanes } from '../lib/lane-concurr
 // The kind-scoped pause's PURE half (epic #3383). `dispatch-pause.mjs`'s fs helpers stay out of this pure core
 // — only the pure predicate/normalizer come in, so "is THIS kind held" is decided in ONE place rather than
 // re-derived here and again in `tick-core.mjs`.
-import { PAUSABLE_KINDS, normalizePausedKinds, resolvePausedKinds } from './dispatch-pause.mjs';
+import { PAUSABLE_KINDS, resolvePausedKinds } from './dispatch-pause.mjs';
 import { isExemptChangeset } from '../lib/pr-limit.mjs'; // we:xniq7xs — the pr-limit gate's exemption predicate (single source, shared with pr-land.mjs)
 import { driftDefaults, findPocBranch, readRegistry } from '../lib/poc-branches.mjs';
 
@@ -236,8 +236,9 @@ export const DISPATCH_PAUSED_HINT = 'manual dispatch-pause is set — clear it (
  * @returns {string}
  */
 export function dispatchPausedHint(pausedKinds = null) {
-  const kinds = normalizePausedKinds(pausedKinds);
-  if (kinds == null || kinds.length === PAUSABLE_KINDS.length) return DISPATCH_PAUSED_HINT;
+  // Resolved, not just normalized: a legacy all-kinds scope reads as blanket here too (#4504).
+  const kinds = resolvePausedKinds({ paused: true, pausedKinds });
+  if (kinds.length === PAUSABLE_KINDS.length) return DISPATCH_PAUSED_HINT;
   return `manual dispatch-pause is set for ${kinds.join(', ')} — clear it (dispatch-pause.mjs clear) to resume new launches`;
 }
 

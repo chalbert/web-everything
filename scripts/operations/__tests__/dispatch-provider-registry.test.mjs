@@ -45,8 +45,9 @@ import { PREPARE_DECISION_RUN_SCRIPT, prepareDecisionDetachedProvider } from '..
 import { routeDispatchProvider } from '../dispatch-lane-io.mjs';
 import { LAUNCH_KINDS } from '../dispatch-lane.mjs';
 
-/** The launch kind with no registry row at all (its brief-driven agent dispatches its own lease/verify/PR). */
-const UNREGISTERED_KINDS = ['investigate'];
+/** The launch kinds with no registry row at all (each one's brief-driven agent dispatches its own
+ *  lease/verify/PR) — `prepare-item` (#4504) joins `investigate` here for the same reason. */
+const UNREGISTERED_KINDS = ['prepare-item', 'investigate'];
 
 /** The provider module each registered kind's row wraps, and its own exported RUN_SCRIPT constant — read off
  *  the provider FILE, never restated as a literal, so a script rename has exactly one place to change and

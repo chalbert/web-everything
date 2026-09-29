@@ -177,6 +177,7 @@ const BRIEF_BY_KIND = Object.freeze({
   build: 'delivery-agent-brief.md',
   prepare: 'prepare-scope-agent-brief.md',
   'prepare-decision': 'prepare-decision-agent-brief.md',
+  'prepare-item': 'prepare-item-agent-brief.md',
   // #3567 — the investigation dispatch's own brief, parallel to the two prepare briefs above.
   investigate: 'investigation-agent-brief.md',
   fix: 'fix-agent-brief.md',
@@ -401,6 +402,7 @@ export function readTick({
     ['build', decisions.spawnBuilds],
     ['prepare', decisions.spawnPrepareScope],
     ['prepare-decision', decisions.spawnPrepareDecision],
+    ['prepare-item', decisions.spawnPrepareItems],
     ['investigate', decisions.spawnInvestigations],
     ['fix', decisions.spawnFixes],
     ['ci-heal', decisions.spawnCiHeals],
