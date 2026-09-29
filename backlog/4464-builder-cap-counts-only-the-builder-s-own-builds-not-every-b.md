@@ -1,4 +1,5 @@
 ---
+bornAs: x3vs6tu
 kind: story
 size: 2
 tier: pinned
