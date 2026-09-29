@@ -1,4 +1,5 @@
 ---
+bornAs: xdgzgn5
 kind: epic
 tier: pinned
 status: open
@@ -60,7 +61,7 @@ Every provider spawn today — we:scripts/operations/review-pr.mjs's judgeAdviso
 3. **Per-job-kind fallback chains declared as policy data** — e.g. `advisory: codex → agy-gemini → agy-claude →
    skip-with-note`; required seats (the mandatory Claude-backed `judge`/`judgeSecurity` seats in
    `we:scripts/operations/review-pr.mjs`) never wait on an optional provider. This is the same "named dimension, not a rule scattered
-   across files" shape `we:backlog/xv0h3mp` (delivery policy as configurable dimensions, parent `#4305`)
+   across files" shape `we:backlog/4376` (delivery policy as configurable dimensions, parent `#4305`)
    argues for generally — a fallback chain here is naturally one more policy dimension in that epic's eventual
    schema, though this epic does not depend on that one landing first (see MVP cut).
 4. **Health smell** when a provider is out or near-out, surfaced on the plan page and later Plateau.
@@ -95,7 +96,7 @@ Every provider spawn today — we:scripts/operations/review-pr.mjs's judgeAdviso
   identity split).
 - The health smell surfaced on the plan page, and later Plateau.
 - Auto-recovery when a benched provider's allowance returns.
-- Cross-wiring this epic's fallback-chain policy data into `we:backlog/xv0h3mp`'s eventual policy schema, once
+- Cross-wiring this epic's fallback-chain policy data into `we:backlog/4376`'s eventual policy schema, once
   that epic's own standard/schema slice lands — not a dependency of this MVP.
 
 **Review gate:** a plan-review finding blocks only when it breaks an MVP Must above or names real harm (a
