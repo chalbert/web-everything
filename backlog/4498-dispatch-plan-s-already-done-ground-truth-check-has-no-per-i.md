@@ -3,9 +3,10 @@ bornAs: xp12dod
 kind: story
 size: 5
 parent: "3861"
-status: open
+status: resolved
 scope: ["we:scripts/readiness/dispatch-plan.mjs", "we:scripts/operations/dispatch-lane-io.mjs", "we:scripts/conveyor/soak/breaks/already-done-burst-unattributed.mjs"]
 dateOpened: "2026-09-29"
+dateResolved: "2026-09-29"
 tags: []
 ---
 
