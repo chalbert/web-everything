@@ -200,6 +200,29 @@ describe('evaluateSoakReplayGate — synthetic cases', () => {
     expect(v.waiver).toBe('pure config typo, no daemon behavior changed');
   });
 
+  // backlog/4292 — PR #2822's exact shape: a backlog-only diff (four new cards) whose PR body PROSE uses
+  // daemon/fix/break vocabulary to describe FUTURE work. Once the diff is merge-base-correct (backlog/4264 —
+  // `soak-gate-merge-base-diff.mjs`), no daemon-soak-scope path is in it, so the fix-shaped prose must never be
+  // reached and no `soak-waiver:` line is needed.
+  it('does not apply to a backlog-only PR whose body prose reads fix-shaped (PR #2822) — no waiver needed', () => {
+    const body =
+      '## Problem\nThe daemon broke on a regression: the fix-dispatch bug lets a stale lane break the next ' +
+      'rebuild.\n\nThese cards describe the future daemon fix; no code changed here.';
+    expect(isLikelyDaemonBugFix({ title: 'backlog: file 4 gate-efficiency cards', body })).toBe(true);
+    const v = evaluateSoakReplayGate({
+      title: 'backlog: file 4 gate-efficiency cards',
+      body,
+      files: [
+        { path: 'backlog/4288-daemon-rebuild-starves-on-stale-lane.md', changeType: 'ADDED' },
+        { path: 'backlog/4289-fix-dispatch-retries-a-broken-lane.md', changeType: 'ADDED' },
+        { path: 'backlog/4290-soak-break-for-lane-pool-drift.md', changeType: 'ADDED' },
+        { path: 'backlog/4291-daemon-health-watch-misses-a-break.md', changeType: 'ADDED' },
+      ],
+    });
+    expect(v).toEqual({ applicable: false, ok: true, reason: 'no daemon-soak-scope file touched — rule does not apply' });
+    expect(v.waiver).toBeUndefined();
+  });
+
   it('fails when the soak-waiver line is present but empty', () => {
     const v = evaluateSoakReplayGate({
       title: 'fix(daemon-rebuild): stop losing a passing candidate',
