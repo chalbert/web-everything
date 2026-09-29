@@ -32,7 +32,7 @@ export default {
   id: 'builder-cap-counts-machine-wide-building',
   title: "the builder's own cap folded in the machine-wide \"building\" count (hand/fix/ci-heal workers, stranded claims), so it dispatched nothing while making zero progress of its own",
   card: 'we:backlog/x3vs6tu',
-  fixedBy: { sha: 'PENDING', where: 'lane/builder-cap-own-builds', paths: ['scripts/conveyor/build-dispatch-policy.mjs'] },
+  fixedBy: { sha: '1e7a47fe7', where: 'lane/builder-cap-own-builds', paths: ['scripts/conveyor/build-dispatch-policy.mjs'] },
   fixPresent(root) {
     const p = join(root, 'scripts/conveyor/build-dispatch-policy.mjs');
     if (!existsSync(p)) return false;
