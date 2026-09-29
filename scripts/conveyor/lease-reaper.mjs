@@ -108,6 +108,7 @@ import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 // so a lease's POOL (ground truth) and a `fix-<tag>-<id>` session's own tag both resolve through the ONE source
 // every other conveyor script already keys off, never a private re-derivation here.
 import { CONSTELLATION_REPOS, repoKeyForDir } from '../lib/constellation-repos.mjs';
+import { isCherryOutputAllPatchEquivalent } from '../lib/git-patch-equivalence.mjs';
 // #3383 (this incident, 2026-09-14) — REUSE, never reimplement, the real PID-liveness probe `driver-watchdog.mjs`
 // just built for the IDENTICAL gap in a different place: a `claude agents --json` row can be a PHANTOM — still
 // LISTED (present, in some non-terminal state like `working`/`blocked`), with NO backing OS process at all (that
@@ -383,10 +384,10 @@ function defaultGitStatusPorcelain(dir) {
  * first tier (round-3 convergence, simplicity finding: this is NOT an import, and the claim below is corrected
  * from an earlier draft that overstated it as one). It cannot be a real import: `lane-pool.mjs` already imports
  * FROM `lease-reaper.mjs` (this file), so the reverse would cycle, and `cherryAllPatchEquivalent` is private to
- * that file besides. A genuinely shared primitive would need extracting BOTH call sites into a third module
- * neither file owns — worth doing if a THIRD caller ever needs this exact check, not worth touching
- * `lane-pool.mjs`'s stable, already-tested ahead-detection code today for one small (3-line) duplicated parse
- * of `git cherry`'s output (tracked as a follow-up: #xuyjss1). `false` only on the DEFINITIVE negative (HEAD
+ * that file besides. #4313 extracted the shared OUTPUT-PARSE primitive both files now import
+ * (`../lib/git-patch-equivalence.mjs#isCherryOutputAllPatchEquivalent`) — each file still runs its own `git
+ * cherry` spawn (this file's own `null`/`false` contract and `--` separator are unchanged), only the "every
+ * line is `-`, or there are none" parse is single-sourced. `false` only on the DEFINITIVE negative (HEAD
  * carries commits beyond `sha`, proven both ways); `null` (unknown) on anything else (an unresolvable `sha`, a
  * git-read failure) — never guess "contained" from an inconclusive read.
  *
@@ -454,8 +455,8 @@ export function defaultGitIsAncestor(dir, sha, { exec = execFileSync } = {}) {
         timeout: resolveChildTimeoutMs(),
         killSignal: 'SIGKILL',
       });
-      const lines = out.split('\n').filter(Boolean);
-      cherryContained = lines.length === 0 || lines.every((l) => l.startsWith('-'));
+      // #4313 — the parse below is the shared primitive; the spawn above (options, `--` separator) stays local.
+      cherryContained = isCherryOutputAllPatchEquivalent(out);
     } catch {
       // #xkk4lv7 — round-2 convergence (standards-conformance finding): this function's own docblock promises
       // `null` (unknown, never guess) for an inconclusive read — `cherry` itself throwing (a timeout, an
