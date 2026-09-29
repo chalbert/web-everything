@@ -49,12 +49,12 @@ NOT MVP-blocking (filed as natural follow-ons, not solved here): applying the sa
 
 ## Premise check (2026-09-29) — already done, resolved without new code
 
-Re-read against fresh `main` at claim time (conveyor-4380, lane-17): this item's own `bornAs` (`x5s8b47`)
+Re-read against fresh `main` at claim time (conveyor-4380, lane-17): this item's own `bornAs` (`4380`)
 already shipped, landed, and merged before this dispatch picked the card up.
 
 - `git log --all` on the WE control checkout surfaces `b93d13e29 fix(review-pr): judgeAdvisory
-  quota-holds/degrades instead of crashing the run (#x5s8b47)` and its same-day follow-up
-  `466605269 WE #x5s8b47 follow-up: judgeCorrectnessAdvisory quota-holds/degrades too`, both merged to
+  quota-holds/degrades instead of crashing the run (#4380)` and its same-day follow-up
+  `466605269 WE #4380 follow-up: judgeCorrectnessAdvisory quota-holds/degrades too`, both merged to
   `main` via PR #2883 (`82b19d95e`). `git merge-base --is-ancestor` confirms both are ancestors of the
   fresh `main` this lane forked from.
 - The diff matches this card's MVP cut exactly: `createDefaultJudge` (`we:scripts/operations/cli-adapter.mjs`)
