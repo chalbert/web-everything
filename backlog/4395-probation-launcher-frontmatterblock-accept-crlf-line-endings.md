@@ -81,7 +81,7 @@ reason and output trimmed into the PR body.
 
 ## Follow-ups
 
-One filed: **we:backlog/x9yqqc2** — a lone-CR (`\r`-only, old-Mac-style) line ending inside an allowed-key
+One filed: **we:backlog/4510** — a lone-CR (`\r`-only, old-Mac-style) line ending inside an allowed-key
 line still slips past `frontmatterTamperedBeyondClaim` uncaught. Pre-existing (predates this PR; neither
 introduced nor worsened by it — surfaced live by this PR's own converge red-team, security lens, carve-out
 disposition), and out of this item's MVP (CRLF only). Everything else stays fully contained to
