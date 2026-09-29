@@ -59,7 +59,7 @@
  * marker written) / `reset` refused because a FOREIGN lease is live (own live lease no longer refuses, #3378).
  */
 import { execSync } from 'node:child_process';
-import { writeFileSync, renameSync, existsSync, readFileSync, readdirSync, unlinkSync } from 'node:fs';
+import { writeFileSync, renameSync, existsSync, readFileSync, readdirSync, unlinkSync, lstatSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -292,7 +292,7 @@ if (preStart && !preStart.corrupt && (preStart.status === 'green' || preStart.st
 // weaker `--gate=` override (e.g. `--gate=true`) must never satisfy a LATER request for a different/stronger
 // gate on the same unchanged tree — that would silently skip the real verification the caller actually asked
 // for. Only a green produced by the SAME gate command can answer a cache hit.
-const currentTreeHash = MODE === 'run' ? null : computeWorkingTreeHash({ runGit: git });
+const currentTreeHash = MODE === 'run' ? null : computeWorkingTreeHash({ runGit: git, fileMode: (f) => lstatSync(join(REPO, f)).mode });
 const cacheHit = MODE !== 'run' && preStart && !preStart.corrupt
   && preStart.status === 'green'
   && preStart.sha === headSha
@@ -399,10 +399,14 @@ if (onDisk && !onDisk.corrupt && onDisk.sha && onDisk.sha !== headSha) {
 const startBody = onDisk && !onDisk.corrupt && onDisk.sha === headSha
   ? onDisk
   : verifyStartBody({ sha: headSha, suites: GATE, startedAt: null });
+// PR #2982 review — the cache key is bound to the tree THIS run verified, never re-read off the shared marker: an
+// overlapping `request` (a worker edits, then re-requests mid-gate) re-stamps the marker with a NEWER tree's
+// hash, and inheriting that would record green for a tree the gate never saw.
 const finished = verifyFinishBody(startBody, {
   finishedAt: new Date().toISOString(),
   exitCode,
   sha: headSha,
+  treeHash: currentTreeHash,
 });
 writeMarker(finished);
 

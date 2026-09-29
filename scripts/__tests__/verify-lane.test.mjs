@@ -12,7 +12,7 @@
  *   sibling run B would claim the marker.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, chmodSync } from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -576,6 +576,80 @@ describe('verify-lane request/verify — a RED marker is NEVER cache-hit, even o
     } finally {
       rmSync(spyDir, { recursive: true, force: true });
     }
+  });
+});
+
+/**
+ * #4473 review round 2 (PR #2982) — the cache KEY must describe the tree the gate actually ran on, and must see
+ * every property of an untracked file the gate can observe:
+ *  - an OVERLAPPING `request` (a worker edits + re-requests while the daemon's `verify` is mid-gate) rewrites the
+ *    shared marker with a NEWER tree's hash; the finish write must never inherit that hash onto its green, or the
+ *    worker's next `request` is served a cached green for a tree that was never verified;
+ *  - an untracked executable that loses its execute bit (same content, same `hash-object`) must invalidate the key;
+ *  - an untracked path `git` would C-quote (non-ASCII) must still hash, not fail closed and disable the cache.
+ */
+describe('verify-lane — the cache key is bound to the tree THIS run verified (#4473 review round 2)', () => {
+  beforeEach(() => {
+    execFileSync('git', ['branch', 'origin/main'], { cwd: dir });
+  });
+
+  function runRequest(gate) {
+    try {
+      const out = execFileSync('node', [VERIFY_LANE, 'request', `--gate=${gate}`, '--json'], { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+      return { code: 0, json: JSON.parse(out.trim().split('\n').pop()) };
+    } catch (e) {
+      return { code: e.status ?? null, json: (() => { try { return JSON.parse(String(e.stdout).trim().split('\n').pop()); } catch { return null; } })() };
+    }
+  }
+
+  it('an overlapping `request` on an edited tree mid-gate never lets the finish write record green for that newer tree', () => {
+    const spyDir = mkdtempSync(join(tmpdir(), 'verify-lane-spy-'));
+    try {
+      // The gate itself plays the worker: mid-run it edits the tree (a new untracked file) and re-`request`s with
+      // the SAME gate command — which re-stamps the shared marker `running` with the NEWER tree's hash.
+      const gateScript = join(spyDir, 'overlap.mjs');
+      const gateCmd = `node ${gateScript}`;
+      writeFileSync(gateScript, [
+        "import { writeFileSync } from 'node:fs';",
+        "import { execFileSync } from 'node:child_process';",
+        `writeFileSync(${JSON.stringify(join(dir, 'edited-mid-gate.txt'))}, 'never verified\\n');`,
+        `execFileSync('node', [${JSON.stringify(VERIFY_LANE)}, 'request', ${JSON.stringify(`--gate=${gateCmd}`)}, '--json'], { cwd: ${JSON.stringify(dir)}, stdio: 'ignore' });`,
+        'process.exit(0);',
+        '',
+      ].join('\n'));
+
+      expect(runVerify(gateCmd).json.status).toBe('green');
+
+      // The worker's next `request` on the (unchanged since) edited tree must NOT be answered from cache.
+      const { code, json } = runRequest(gateCmd);
+      expect(code).toBe(0);
+      expect(json.status).toBe('requested');
+      expect(JSON.parse(readFileSync(marker(), 'utf8')).status).toBe('running');
+    } finally {
+      rmSync(spyDir, { recursive: true, force: true });
+    }
+  });
+
+  it('an untracked executable that loses its execute bit (same content) invalidates the cached green — the gate re-runs and fails', () => {
+    const tool = join(dir, 'tool.sh');
+    writeFileSync(tool, '#!/bin/sh\nexit 0\n');
+    chmodSync(tool, 0o755);
+    expect(runVerify('./tool.sh').json.status).toBe('green');
+
+    chmodSync(tool, 0o644); // content (and `git hash-object`) unchanged — only the mode moved
+
+    const second = runVerify('./tool.sh');
+    expect(second.json.reason).not.toBe('cached');
+    expect(second.json.status).toBe('red'); // the gate really ran, and a non-executable tool.sh really fails
+  });
+
+  it('an untracked file with a non-ASCII name (C-quoted by `git ls-files`) still hashes, so an unchanged tree IS a cache hit', () => {
+    writeFileSync(join(dir, 'café.txt'), 'accented\n');
+    expect(runVerify('true').json.status).toBe('green');
+
+    const { code, json } = runRequest('true');
+    expect(code).toBe(0);
+    expect(json.status).toBe('cached');
   });
 });
 

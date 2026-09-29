@@ -215,6 +215,13 @@ describe('verifyFinishBody stamps the sha the run verified, never the on-disk ma
     const start = verifyStartBody({ sha: SHA, suites: 'gate', startedAt: 't' });
     expect(verifyFinishBody(start, { finishedAt: 'u', exitCode: 0 }).sha).toBe(SHA);
   });
+  // PR #2982 review — same rule for the cache key: an overlapping `request` re-stamped `prev` with a NEWER tree.
+  it('an explicit treeHash (including null) wins over prev.treeHash; prev.treeHash is only the legacy fallback', () => {
+    const moved = verifyStartBody({ sha: SHA, suites: 'gate', startedAt: 't', treeHash: 'newer-unverified-tree' });
+    expect(verifyFinishBody(moved, { finishedAt: 'u', exitCode: 0, sha: SHA, treeHash: 'verified-tree' }).treeHash).toBe('verified-tree');
+    expect(verifyFinishBody(moved, { finishedAt: 'u', exitCode: 0, sha: SHA, treeHash: null }).treeHash).toBeNull();
+    expect(verifyFinishBody(moved, { finishedAt: 'u', exitCode: 0, sha: SHA }).treeHash).toBe('newer-unverified-tree');
+  });
 });
 
 describe('verifyGateDecision decision table — red is conditional on requireVerified (#2833 finding 2)', () => {

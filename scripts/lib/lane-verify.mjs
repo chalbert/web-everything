@@ -260,7 +260,7 @@ export function verifyStartBody({ sha, suites, startedAt, treeHash }) {
  *  green for a tree it never verified — the exact false-green this guard exists to kill. So `sha` is passed
  *  explicitly and wins. `prev` supplies only `startedAt`/`suites` (audit fields); `base.sha` is a fallback for
  *  legacy callers that pass their own start body as `prev`. */
-export function verifyFinishBody(prev, { finishedAt, exitCode, sha } = {}) {
+export function verifyFinishBody(prev, { finishedAt, exitCode, sha, treeHash } = {}) {
   const base = prev && typeof prev === 'object' ? prev : {};
   const green = Number(exitCode) === 0;
   return {
@@ -270,13 +270,11 @@ export function verifyFinishBody(prev, { finishedAt, exitCode, sha } = {}) {
     finishedAt: finishedAt || null,
     suites: base.suites ?? null,
     exitCode: Number.isFinite(Number(exitCode)) ? Number(exitCode) : null,
-    // #4473 — carried through from the START body unchanged; this function never recomputes it. Accuracy is a
-    // CALLER contract, not something this pure function can enforce: `verify-lane.mjs` recomputes the hash fresh
-    // and re-writes the start body on every path that actually goes on to run the gate (bare `verify`, including
-    // when it picks up a `request`-stamped marker), immediately before admission-queueing and `execSync`, so by
-    // the time this finish write runs, `base.treeHash` is the one taken right before the gate executed — the
-    // same timing window `GATE` (the command string) itself already has, not a new one.
-    treeHash: base.treeHash ?? null,
+    // #4473 — the cache key. Like `sha`, an explicit `treeHash` (the hash the run itself captured) WINS over
+    // `base.treeHash` (PR #2982 review): `base` is usually re-read off the shared on-disk marker, which an
+    // overlapping `request` can have re-stamped with a NEWER, unverified tree's hash — inheriting it would publish
+    // a cacheable green for that tree. `verify-lane.mjs` always passes it; `base.treeHash` is a legacy fallback.
+    treeHash: treeHash !== undefined ? treeHash : (base.treeHash ?? null),
   };
 }
 

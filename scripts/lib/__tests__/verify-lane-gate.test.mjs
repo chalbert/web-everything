@@ -398,12 +398,13 @@ describe('laneRelevantChangeSince (#4296) — keys marker validity to what chang
 /** A synthetic git runner for {@link computeWorkingTreeHash} (#4473): `merge-base` resolves to a fixed sha;
  *  `diff <sha> --` returns the tracked-diff PATCH TEXT (content, not just names); `ls-files --others
  *  --exclude-standard` the untracked file list; `hash-object -- <file>` each untracked file's own content hash
- *  (keyed off a simple in-memory map, standing in for the real git object hash). No real git process. */
+ *  (keyed off a simple in-memory map, standing in for the real git object hash). No real git process.
+ *  `ls-files` answers NUL-separated, as the real `-z` form does. */
 function fakeTreeGit({ mergeBase = 'deadbeef', trackedDiff = '', untracked = [], untrackedHashes = {} } = {}) {
   return (args) => {
     if (args[0] === 'merge-base') return mergeBase;
     if (args[0] === 'diff') return trackedDiff;
-    if (args[0] === 'ls-files') return untracked.join('\n');
+    if (args[0] === 'ls-files') return untracked.join('\0');
     if (args[0] === 'hash-object') {
       const file = args[args.length - 1];
       return untrackedHashes[file] ?? `hash-of-${file}`;
@@ -413,33 +414,56 @@ function fakeTreeGit({ mergeBase = 'deadbeef', trackedDiff = '', untracked = [],
 }
 
 describe('computeWorkingTreeHash (#4473) — a content hash of the working tree against the pinned merge-base', () => {
+  const regularFile = () => 0o100644;
+  const treeHash = (opts, fileMode = regularFile) => computeWorkingTreeHash({ runGit: fakeTreeGit(opts), fileMode });
+
   it('is deterministic: the same tracked diff + untracked content hashes the same across two calls', () => {
-    const git = fakeTreeGit({ trackedDiff: 'diff --git a/x b/x\n+hi\n', untracked: ['scratch.txt'] });
-    expect(computeWorkingTreeHash({ runGit: git })).toBe(computeWorkingTreeHash({ runGit: git }));
+    const opts = { trackedDiff: 'diff --git a/x b/x\n+hi\n', untracked: ['scratch.txt'] };
+    expect(treeHash(opts)).toBe(treeHash(opts));
   });
 
   it('changes when the TRACKED diff changes (an edit to an already-tracked file)', () => {
-    const before = computeWorkingTreeHash({ runGit: fakeTreeGit({ trackedDiff: 'diff A\n' }) });
-    const after = computeWorkingTreeHash({ runGit: fakeTreeGit({ trackedDiff: 'diff B\n' }) });
-    expect(after).not.toBe(before);
+    expect(treeHash({ trackedDiff: 'diff B\n' })).not.toBe(treeHash({ trackedDiff: 'diff A\n' }));
   });
 
   it('changes when an UNTRACKED file is added', () => {
-    const before = computeWorkingTreeHash({ runGit: fakeTreeGit({ untracked: [] }) });
-    const after = computeWorkingTreeHash({ runGit: fakeTreeGit({ untracked: ['new.txt'] }) });
-    expect(after).not.toBe(before);
+    expect(treeHash({ untracked: ['new.txt'] })).not.toBe(treeHash({ untracked: [] }));
   });
 
   it('changes when an untracked file\'s own CONTENT changes (its hash-object result differs), same filename', () => {
-    const before = computeWorkingTreeHash({ runGit: fakeTreeGit({ untracked: ['scratch.txt'], untrackedHashes: { 'scratch.txt': 'aaa' } }) });
-    const after = computeWorkingTreeHash({ runGit: fakeTreeGit({ untracked: ['scratch.txt'], untrackedHashes: { 'scratch.txt': 'bbb' } }) });
+    const before = treeHash({ untracked: ['scratch.txt'], untrackedHashes: { 'scratch.txt': 'aaa' } });
+    const after = treeHash({ untracked: ['scratch.txt'], untrackedHashes: { 'scratch.txt': 'bbb' } });
     expect(after).not.toBe(before);
   });
 
   it('is insensitive to the ON-DISK ORDER `ls-files` happens to return untracked files in (sorted before hashing)', () => {
-    const a = computeWorkingTreeHash({ runGit: fakeTreeGit({ untracked: ['b.txt', 'a.txt'] }) });
-    const b = computeWorkingTreeHash({ runGit: fakeTreeGit({ untracked: ['a.txt', 'b.txt'] }) });
-    expect(a).toBe(b);
+    expect(treeHash({ untracked: ['b.txt', 'a.txt'] })).toBe(treeHash({ untracked: ['a.txt', 'b.txt'] }));
+  });
+
+  // PR #2982 review — `hash-object` is content-only, so the execute bit / file type must enter the key separately.
+  it('changes when an untracked file loses its EXECUTE bit (same content, same hash-object)', () => {
+    const opts = { untracked: ['tool.sh'] };
+    expect(treeHash(opts, () => 0o100644)).not.toBe(treeHash(opts, () => 0o100755));
+    // only the OWNER loses x (group/other keep it) — the owner running the gate now gets EACCES
+    expect(treeHash(opts, () => 0o100655)).not.toBe(treeHash(opts, () => 0o100755));
+  });
+
+  it('changes when an untracked path turns into a SYMLINK (same hash-object)', () => {
+    const opts = { untracked: ['link'] };
+    expect(treeHash(opts, () => 0o120777)).not.toBe(treeHash(opts, () => 0o100755));
+  });
+
+  it('returns null (fail closed) with an untracked file but no `fileMode` reader — never a mode-blind key', () => {
+    expect(computeWorkingTreeHash({ runGit: fakeTreeGit({ untracked: ['tool.sh'] }) })).toBeNull();
+    expect(computeWorkingTreeHash({ runGit: fakeTreeGit({ untracked: [] }) })).not.toBeNull();
+  });
+
+  it('passes a non-ASCII / newline-bearing untracked path to hash-object verbatim (NUL-split, never C-quoted)', () => {
+    const seen = [];
+    const git = fakeTreeGit({ untracked: ['café.txt', 'a\nb.txt'] });
+    const spy = (args) => { if (args[0] === 'hash-object') seen.push(args[args.length - 1]); return git(args); };
+    expect(computeWorkingTreeHash({ runGit: spy, fileMode: regularFile })).not.toBeNull();
+    expect(seen.sort()).toEqual(['a\nb.txt', 'café.txt']);
   });
 
   it('returns null (unknown — fail closed) when there is no computable merge-base', () => {

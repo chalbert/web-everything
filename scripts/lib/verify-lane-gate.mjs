@@ -214,22 +214,31 @@ export function localChangedSet({ base = 'origin/main', runGit }) {
  *
  * Returns `null` when git cannot answer (no computable merge-base, or a git failure) — the caller MUST treat
  * `null` as unknown, never as a fixed/comparable value (fail closed, same posture as {@link localChangedSet}).
- * @param {{base?: string, runGit: (args: string[]) => string}} args
+ *
+ * `fileMode` (PR #2982 review) reads an untracked path's `lstat` mode. The tracked diff already carries mode
+ * changes (`old mode`/`new mode`), but `git hash-object` is content-only, so an untracked executable that loses
+ * its execute bit would otherwise hash identically while the gate running it now fails. Omitted ⇒ `null` (fail
+ * closed) whenever there is an untracked file, so a caller can never silently get a mode-blind key.
+ * @param {{base?: string, runGit: (args: string[]) => string, fileMode?: (path: string) => number}} args
  * @returns {string|null}
  */
-export function computeWorkingTreeHash({ base = 'origin/main', runGit }) {
+export function computeWorkingTreeHash({ base = 'origin/main', runGit, fileMode }) {
   const mergeBase = pinnedMergeBase({ base, runGit });
   if (!mergeBase) return null;
   try {
     // The tracked diff (staged + unstaged) against the merge-base — the same shape `localChangedSet`'s
     // `tracked` derives, but the full patch text (content), not just names.
     const trackedDiff = runGit(['diff', mergeBase, '--']);
-    const untracked = String(runGit(['ls-files', '--others', '--exclude-standard']))
-      .split('\n').map((s) => s.trim()).filter(Boolean).sort();
-    // Each untracked file's OWN content hash (`git hash-object`, deterministic and reads the file itself) —
-    // never the file's mtime/size, which can change with no content change and would hash-flap.
+    // `-z`: NUL-separated and never C-quoted, so a non-ASCII / newline-bearing path reaches `hash-object` as the
+    // real filename instead of a quoted string it cannot find (which used to fail the whole hash closed).
+    const untracked = String(runGit(['ls-files', '-z', '--others', '--exclude-standard']))
+      .split('\0').filter(Boolean).sort();
+    if (untracked.length && typeof fileMode !== 'function') return null;
+    // Each untracked file's OWN content hash (`git hash-object`, deterministic and reads the file itself) plus
+    // its file type + full permission bits (any x bit alone would miss 755 → 655, which the owner can no longer
+    // execute) — never mtime/size, which can change with no content change and hash-flap.
     const untrackedDigest = untracked
-      .map((f) => `${f}:${String(runGit(['hash-object', '--', f])).trim()}`)
+      .map((f) => `${f}:${(fileMode(f) & 0o177777).toString(8)}:${String(runGit(['hash-object', '--', f])).trim()}`)
       .join('\n');
     return createHash('sha256').update(trackedDiff).update('\u0000').update(untrackedDigest).digest('hex');
   } catch {
