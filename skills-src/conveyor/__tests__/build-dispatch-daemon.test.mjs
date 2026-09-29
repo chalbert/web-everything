@@ -6,7 +6,7 @@ import {
   runBuildDispatchTick, settleBookkeeping, readKillSwitch, readDispatchOutcome, KILL_SWITCH_ENV,
   cliListSettledBuilds, cliListHolds, policyFrom,
   // #4348-open-pr-retry
-  primaryInfraStoreEnv,
+  primaryInfraStoreEnv, cliRetryInfraBlocked,
 } from '../build-dispatch-daemon.mjs';
 import {
   acquireBuildDispatchClaim, releaseBuildDispatchClaim, listBuildDispatchClaims,
@@ -275,6 +275,46 @@ describe('primaryInfraStoreEnv (#4348-open-pr-retry)', () => {
     } finally {
       rmSync(altRoot, { recursive: true, force: true });
     }
+  });
+
+  it('an EXPLICIT CONVEYOR_INFRA_FILE is never overridden, even when the default layout exists', () => {
+    mkdirSync(join(home, 'workspace', 'webeverything', '.conveyor'), { recursive: true });
+    writeFileSync(join(home, 'workspace', 'webeverything', '.conveyor', 'infra-blocked.json'), '[]');
+    expect(primaryInfraStoreEnv({ env: { CONVEYOR_INFRA_FILE: '/custom/path.json' }, home })).toEqual({});
+  });
+});
+
+// Review finding (PR #2899): the env wiring in the CLI shell IS the live #4348 fix — drop it and every retry
+// silently reads the daemon checkout's empty store. Drive the shell with a stubbed exec and assert the child env.
+describe('cliRetryInfraBlocked — passes the primary store path to the child retry pass (#4348-open-pr-retry)', () => {
+  let home;
+  beforeEach(() => { home = mkdtempSync(join(tmpdir(), 'bdd-home-')); });
+  afterEach(() => { rmSync(home, { recursive: true, force: true }); });
+
+  it('the child env carries CONVEYOR_INFRA_FILE = the primary checkout\'s store, and the JSON result is returned', () => {
+    const file = join(home, 'workspace', 'webeverything', '.conveyor', 'infra-blocked.json');
+    mkdirSync(join(home, 'workspace', 'webeverything', '.conveyor'), { recursive: true });
+    writeFileSync(file, '[]');
+    const calls = [];
+    const exec = (cmd, args, opts) => { calls.push({ cmd, args, opts }); return '{"retried":["7"]}'; };
+    const r = cliRetryInfraBlocked({ exec, env: { PATH: '/bin' }, home });
+    expect(r).toEqual({ retried: ['7'] });
+    expect(calls).toHaveLength(1);
+    expect(calls[0].args.slice(-1)).toEqual(['retry']);
+    expect(calls[0].opts.env).toMatchObject({ PATH: '/bin', CONVEYOR_INFRA_FILE: file });
+  });
+
+  it('an explicit CONVEYOR_INFRA_FILE in the daemon env reaches the child unchanged', () => {
+    mkdirSync(join(home, 'workspace', 'webeverything', '.conveyor'), { recursive: true });
+    writeFileSync(join(home, 'workspace', 'webeverything', '.conveyor', 'infra-blocked.json'), '[]');
+    const calls = [];
+    cliRetryInfraBlocked({ exec: (c, a, o) => { calls.push(o); return '{}'; }, env: { CONVEYOR_INFRA_FILE: '/custom/path.json' }, home });
+    expect(calls[0].env.CONVEYOR_INFRA_FILE).toBe('/custom/path.json');
+  });
+
+  it('a throwing exec is captured as `{error}`, never thrown', () => {
+    const r = cliRetryInfraBlocked({ exec: () => { throw new Error('boom'); }, env: {}, home });
+    expect(r.error).toMatch(/boom/);
   });
 });
 

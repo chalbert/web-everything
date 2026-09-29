@@ -753,6 +753,15 @@ describe('#3321 — every pr-land COMMAND STRING the tracked file set ships decl
   it('infra-blocked.mjs\'s resumeOpen builds its argv as an ARRAY too, and that array declares the posture', () => {
     expect(srcOf(INFRA_RESUME)).toMatch(/const args = \[prLand,[^\]]*'--no-require-verified'/);
   });
+  // PR #2899 review — the opt-out is only sound for the commit that was actually verified, so this caller must
+  // pin `--sha` to the RECORDED sha (checked against the live tip by `resumeShaDecision`), never to the
+  // moving `origin/<ref>` tip.
+  it('infra-blocked.mjs\'s resumeOpen pins --sha to the recorded sha, never the moving origin/<ref> tip', () => {
+    const src = srcOf(INFRA_RESUME);
+    expect(src).toMatch(/const args = \[prLand,[^\]]*`--sha=\$\{pin\.sha\}`/);
+    expect(src).not.toMatch(/`--sha=origin\//);
+    expect(src).toMatch(/const pin = resumeShaDecision\(\{ recordedSha: entry\.sha,/);
+  });
   it('RED/GREEN — resumeOpen\'s REAL argv shape: WITHOUT the flag it is refused unverified (the live bug); '
     + 'WITH it (this fix) it is untracked/ok, the same posture the drain and workflow producer already have', () => {
     // The exact command resumeOpen builds (mirrored here as a string so the SAME `parseArgv`/`resolveVerifyOptions`/

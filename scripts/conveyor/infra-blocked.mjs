@@ -65,6 +65,12 @@ export const DEFAULT_FACTOR = 2;
 export const DEFAULT_CAP_MS = 30 * 60_000;
 /** Attempt cap: after this many FAILED open attempts, stop auto-retrying and SURFACE to the operator. */
 export const DEFAULT_MAX_ATTEMPTS = 6;
+/** Refusal wait: a FIXED interval between resumes that a guard REFUSED (no doubling — waiting does not fix a
+ *  refusal, this only stops a zero-delay loop against git/GitHub). */
+export const DEFAULT_REFUSAL_INTERVAL_MS = 5 * 60_000;
+/** Refusal cap: after this many consecutive refusals (~1h at the interval above), SURFACE to the operator. Its
+ *  own budget, separate from {@link DEFAULT_MAX_ATTEMPTS} — see {@link markRefusedAttempt}. */
+export const DEFAULT_MAX_REFUSALS = 12;
 
 // ── PURE CORE (no fs / clock / gh / network — every input is injected) ────────────────────────────────────────
 
@@ -199,6 +205,7 @@ export function parseInfraStore(text) {
       cause: e.cause != null ? String(e.cause) : 'infra',
       body: typeof e.body === 'string' ? e.body : null,
       attempt: Number.isFinite(Number(e.attempt)) ? Math.max(1, Math.floor(Number(e.attempt))) : 1,
+      refusals: Number.isFinite(Number(e.refusals)) ? Math.max(0, Math.floor(Number(e.refusals))) : 0,
       firstFailedAt: e.firstFailedAt != null ? String(e.firstFailedAt) : null,
       lastAttemptAt: e.lastAttemptAt != null ? String(e.lastAttemptAt) : null,
       nextRetryAt: e.nextRetryAt != null ? String(e.nextRetryAt) : null,
@@ -225,7 +232,18 @@ export function infraHas(store, num) {
 export function recordInfraBlock(store, { num, ref, sha = null, base = 'main', repo = null, cause = 'infra', body = null } = {}, now = Date.now(), backoff = {}) {
   const s = Array.isArray(store) ? store : [];
   if (normNum(num) === '' || !ref) return s;
-  if (infraHas(s, num)) return s; // idempotent — already tracked; the retry loop owns its progression
+  if (infraHas(s, num)) {
+    // idempotent — already tracked; the retry loop owns its progression. EXCEPT a re-record carrying a NEW
+    // verified sha (the lane was rebuilt + re-pushed, and that open failed too): the resume pins to the recorded
+    // sha (`resumeShaDecision`), so keeping the old one would refuse `sha-moved` until the refusal cap. Take the
+    // new handle and clear the refusal count; the infra attempt budget is left alone.
+    const key = normNum(num);
+    const cur = s.find((e) => normNum(e?.num) === key);
+    if (sha == null || String(sha) === String(cur?.sha ?? '')) return s;
+    return s.map((e) => (normNum(e?.num) === key
+      ? { ...e, ref: String(ref), sha: String(sha), body: typeof body === 'string' ? body : e.body, refusals: 0 }
+      : e));
+  }
   const nowMs = toMs(now) || Number(now) || Date.now();
   const entry = {
     num: String(num),
@@ -236,6 +254,7 @@ export function recordInfraBlock(store, { num, ref, sha = null, base = 'main', r
     cause: String(cause || 'infra'),
     body: typeof body === 'string' ? body : null,
     attempt: 1,
+    refusals: 0,
     firstFailedAt: iso(nowMs),
     lastAttemptAt: iso(nowMs),
     nextRetryAt: iso(nowMs + backoffMs(1, backoff)),
@@ -259,6 +278,7 @@ export function markRetryAttempt(store, num, now = Date.now(), { cause, backoff 
       ...e,
       cause: cause != null ? String(cause) : e.cause,
       attempt,
+      refusals: 0, // the refusal cap counts CONSECUTIVE refusals — an infra failure in between breaks the run
       lastAttemptAt: iso(nowMs),
       nextRetryAt: iso(nowMs + backoffMs(attempt, backoff)),
     };
@@ -267,26 +287,31 @@ export function markRetryAttempt(store, num, now = Date.now(), { cause, backoff 
 
 /**
  * #4348-open-pr-retry addendum — advance an entry after a resume was REFUSED (a guard answered — `unverified`,
- * `check-red`, `bad-ref`, …), NOT after an infra failure. Unlike {@link markRetryAttempt}, `attempt` and
- * `nextRetryAt` are left UNCHANGED: only the passage of time (or a genuine outside-dependency recovery) ever
- * resolves an infra block, which is what the attempt cap + exponential backoff exist to bound, but NOTHING
- * about waiting resolves a refusal — only a code or data change does, and that can land at any moment. Reusing
- * the SAME budget for both meant a handful of refusals (a bug like #4348's own missing `--no-require-verified`)
- * could burn the entire cap and permanently strand a build whose lane ref was already pushed and whose only
- * problem was a fixable bug, not a still-down GitHub — confirmed live: #4348 hit `attempt: 6` and surfaced while
- * `unverified` was the true, and only, cause every single time. Leaving `nextRetryAt` unchanged means the entry
- * stays immediately due, so the very next retry pass tries it again — cheap, because pr-land's own guards
- * refuse most of these BEFORE any push/gh call, so a refusal never touches the GitHub API budget the backoff
- * exists to protect. Only `lastAttemptAt` and `cause` (the refusal's own reason, replacing the original infra
- * cause) are updated, for observability. A no-op if `num` is absent. Returns a new array. `now` injected.
+ * `check-red`, `bad-ref`, …), NOT after an infra failure. Unlike {@link markRetryAttempt}, `attempt` is left
+ * UNCHANGED: only the passage of time (or a genuine outside-dependency recovery) ever resolves an infra block,
+ * which is what the attempt cap + exponential backoff exist to bound, but NOTHING about waiting resolves a
+ * refusal — only a code or data change does. Reusing the SAME budget for both meant a handful of refusals (a bug
+ * like #4348's own missing `--no-require-verified`) could burn the entire cap and strand a build whose lane ref
+ * was already pushed — confirmed live: #4348 hit `attempt: 6` and surfaced while `unverified` was the true, and
+ * only, cause every single time.
+ *
+ * A refusal is still BOUNDED, by its own budget (PR #2899 review): `refusals += 1` and `nextRetryAt = now +
+ * refusalIntervalMs` (a FIXED wait, no doubling). A refused resume is not free — every one does a `git fetch`
+ * and spawns pr-land, and several refusal reasons (`check-red`, `pr-limit`, `behind`, `conflict`) answer only
+ * after a gh call — so a zero-delay retry would loop against git/GitHub every tick. After
+ * {@link DEFAULT_MAX_REFUSALS} consecutive refusals {@link retryDecision} surfaces the entry (`refusal-cap`)
+ * for the operator, exactly as the attempt cap does; `rearm` clears both counters. `cause` becomes the refusal's
+ * own reason, for observability. A no-op if `num` is absent. Returns a new array. `now` injected.
  * @returns {Array<object>}
  */
-export function markRefusedAttempt(store, num, now = Date.now(), { reason = 'refused' } = {}) {
+export function markRefusedAttempt(store, num, now = Date.now(), { reason = 'refused', refusalIntervalMs = DEFAULT_REFUSAL_INTERVAL_MS } = {}) {
   const key = normNum(num);
   const nowMs = toMs(now) || Number(now) || Date.now();
-  return (Array.isArray(store) ? store : []).map((e) => (
-    normNum(e?.num) === key ? { ...e, cause: String(reason || 'refused'), lastAttemptAt: iso(nowMs) } : e
-  ));
+  return (Array.isArray(store) ? store : []).map((e) => {
+    if (normNum(e?.num) !== key) return e;
+    const refusals = Math.max(0, Math.floor(Number(e.refusals) || 0)) + 1;
+    return { ...e, cause: String(reason || 'refused'), refusals, lastAttemptAt: iso(nowMs), nextRetryAt: iso(nowMs + refusalIntervalMs) };
+  });
 }
 
 /** Update only the `cause` of an entry (a correlation refinement that did not consume a retry). Pure. */
@@ -319,7 +344,7 @@ export function rearmInfraBlock(store, num, now = Date.now()) {
   const s = Array.isArray(store) ? store : [];
   if (key === '' || !infraHas(s, key)) return s;
   const nowMs = toMs(now) || Number(now) || Date.now();
-  return s.map((e) => (normNum(e?.num) === key ? { ...e, attempt: 1, lastAttemptAt: iso(nowMs), nextRetryAt: iso(nowMs) } : e));
+  return s.map((e) => (normNum(e?.num) === key ? { ...e, attempt: 1, refusals: 0, lastAttemptAt: iso(nowMs), nextRetryAt: iso(nowMs) } : e));
 }
 
 /** Serialize the store back to `.conveyor/infra-blocked.json` text (a bare JSON array, newline-terminated). */
@@ -331,15 +356,17 @@ export function serializeInfraStore(store) {
  * The retry decision for ONE entry, given the clock. Pure state machine:
  *   • `attempt >= maxAttempts` → **surface** — the attempt cap is hit; STOP auto-retrying and hand to the
  *     operator (never loop a doomed resume forever).
+ *   • `refusals >= maxRefusals` → **surface** — a guard kept refusing the resume; same hand-off, own budget.
  *   • `now >= nextRetryAt`     → **retry** — the backoff has elapsed; attempt a resume-open this pass.
  *   • otherwise                → **wait**  — still backing off; `waitMs` is how long remains.
- * @param {{attempt?:number, nextRetryAt?:string}} entry
- * @param {{now?:number, maxAttempts?:number}} o
+ * @param {{attempt?:number, refusals?:number, nextRetryAt?:string}} entry
+ * @param {{now?:number, maxAttempts?:number, maxRefusals?:number}} o
  * @returns {{action:'surface'|'retry'|'wait', reason?:string, waitMs?:number}}
  */
-export function retryDecision(entry, { now = Date.now(), maxAttempts = DEFAULT_MAX_ATTEMPTS } = {}) {
+export function retryDecision(entry, { now = Date.now(), maxAttempts = DEFAULT_MAX_ATTEMPTS, maxRefusals = DEFAULT_MAX_REFUSALS } = {}) {
   const attempt = Math.max(1, Math.floor(Number(entry?.attempt) || 1));
   if (attempt >= maxAttempts) return { action: 'surface', reason: 'attempt-cap' };
+  if (Math.floor(Number(entry?.refusals) || 0) >= maxRefusals) return { action: 'surface', reason: 'refusal-cap' };
   const nowMs = toMs(now) || Number(now) || Date.now();
   const dueMs = toMs(entry?.nextRetryAt);
   if (nowMs >= dueMs) return { action: 'retry' };
@@ -347,9 +374,37 @@ export function retryDecision(entry, { now = Date.now(), maxAttempts = DEFAULT_M
 }
 
 /**
+ * Which sha a resume may open (PR #2899 review). The resume runs with pr-land's verify gate OFF
+ * (`--no-require-verified`), which is only sound for the EXACT commit the original build verified — the one
+ * recorded in `entry.sha`. So the resume pins `--sha` to that recorded sha, and refuses (a guard answer, via
+ * {@link markRefusedAttempt}) when the lane ref's current tip is not it:
+ *   • tip unresolvable      → `bad-ref`         (the ref is gone from origin);
+ *   • no recorded sha       → `no-recorded-sha` (nothing verified to pin to — resume by hand);
+ *   • tip ≠ recorded sha    → `sha-moved`       (someone pushed since; never open an unverified newer tip).
+ * A short recorded sha (at least {@link MIN_SHA_PREFIX} hex chars) matches its full tip by prefix; the answer
+ * is always the FULL tip sha it was checked against. Pure.
+ * @param {{recordedSha?:string|null, tipSha?:string|null, ref?:string}} o
+ * @returns {{ok:true, sha:string} | {ok:false, refused:true, reason:string, detail:string}}
+ */
+export function resumeShaDecision({ recordedSha, tipSha, ref } = {}) {
+  const rec = String(recordedSha || '').trim().toLowerCase();
+  const tip = String(tipSha || '').trim().toLowerCase();
+  if (!tip) return { ok: false, refused: true, reason: 'bad-ref', detail: `lane ref ${ref} does not resolve on origin` };
+  if (!new RegExp(`^[0-9a-f]{${MIN_SHA_PREFIX},40}$`).test(rec)) {
+    return { ok: false, refused: true, reason: 'no-recorded-sha', detail: `record for ${ref} carries no usable verified sha to pin the resume to` };
+  }
+  if (!tip.startsWith(rec)) {
+    return { ok: false, refused: true, reason: 'sha-moved', detail: `lane ref ${ref} moved to ${tip.slice(0, 9)} since the recorded ${rec.slice(0, 9)} — not resuming an unverified tip` };
+  }
+  return { ok: true, sha: tip };
+}
+/** The shortest recorded sha {@link resumeShaDecision} accepts as a prefix (git's own default abbreviation). */
+export const MIN_SHA_PREFIX = 7;
+
+/**
  * Derive the per-item infra detail the tick view attaches to lanes (`{ [normNum]: { cause, attempt,
  * nextRetrySec, capped } }`) — the shape `status-board.mjs`'s `infraOf` reads for its ⊘ marker + OUTAGE banner
- * (#2660). `capped` is true once the attempt cap is reached (auto-retry exhausted → the board tells the
+ * (#2660). `capped` is true once the attempt cap or the refusal cap is reached (auto-retry exhausted → the board tells the
  * operator to resume by hand, not "retrying"); `nextRetrySec` is the countdown to the next retry (null when
  * capped). `now` injected (determinism). Pure.
  * @param {Array<object>} store
@@ -357,14 +412,14 @@ export function retryDecision(entry, { now = Date.now(), maxAttempts = DEFAULT_M
  * @param {{maxAttempts?:number}} o
  * @returns {Record<string, {cause:string, attempt:number, nextRetrySec:(number|null), capped:boolean}>}
  */
-export function deriveInfraByNum(store, now = Date.now(), { maxAttempts = DEFAULT_MAX_ATTEMPTS } = {}) {
+export function deriveInfraByNum(store, now = Date.now(), { maxAttempts = DEFAULT_MAX_ATTEMPTS, maxRefusals = DEFAULT_MAX_REFUSALS } = {}) {
   const nowMs = toMs(now) || Number(now) || Date.now();
   const out = {};
   for (const e of Array.isArray(store) ? store : []) {
     const key = normNum(e?.num);
     if (key === '') continue;
     const attempt = Math.max(1, Math.floor(Number(e.attempt) || 1));
-    const capped = attempt >= maxAttempts;
+    const capped = attempt >= maxAttempts || Math.floor(Number(e.refusals) || 0) >= maxRefusals;
     out[key] = {
       cause: String(e.cause || 'infra'),
       attempt,
@@ -581,7 +636,19 @@ function resumeOpen(entry, { cwd = INFRA_ROOT, localSlug = null } = {}) {
   // <sha>:<ref> is a local no-op and the create has a head to point at.
   // #x5n4zn3 — was bare (no timeout): a real network fetch.
   try { execFileSync('git', ['fetch', 'origin', `+refs/heads/${ref}:refs/remotes/origin/${ref}`], { cwd, stdio: ['ignore', 'ignore', 'pipe'], timeout: 10 * 60_000, killSignal: 'SIGKILL' }); }
-  catch { /* best-effort — origin already carries the ref; pr-land re-pushes idempotently */ }
+  catch (e) {
+    // An OUTAGE during the fetch is an infra failure (the attempt/backoff budget), never a refusal — otherwise
+    // the tip check below would read "no ref" and burn the refusal budget under a misleading `bad-ref`. Any
+    // other fetch error (e.g. the ref is gone) falls through to that check.
+    const text = `${String(e?.message || e)}\n${String(e?.stderr || '')}`;
+    if (e?.signal === 'SIGKILL' || classifyPrOpenFailure(text).infra) return { ok: false, detail: `fetch of ${ref} failed (${text.split('\n')[0]})` };
+  }
+  // PR #2899 review — pin the resume to the RECORDED (verified) sha, and refuse if the ref moved since.
+  let tipSha = null;
+  try { tipSha = execFileSync('git', ['rev-parse', '--verify', '--quiet', `refs/remotes/origin/${ref}^{commit}`], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 60_000 }).trim() || null; }
+  catch { tipSha = null; }
+  const pin = resumeShaDecision({ recordedSha: entry.sha, tipSha, ref });
+  if (!pin.ok) return { ok: false, refused: true, reason: pin.reason, detail: pin.detail };
   // Re-open with the recorded body (so nothing is lost). Write it to a temp file for --body-file (robust to
   // multi-line bodies). pr-land refuses a bodyless create, so a missing body is surfaced as a resume failure.
   let bodyFile = null;
@@ -603,8 +670,10 @@ function resumeOpen(entry, { cwd = INFRA_ROOT, localSlug = null } = {}) {
   // PR's required CI check gates the actual merge (the drain never merges directly either), and the ORIGINAL
   // build already ran its own synchronous gate before the open ever failed — this call is not skipping
   // verification, it is re-opening a PR for work that was already verified once, from a checkout structurally
-  // unable to prove that itself. Pinned by `we:scripts/__tests__/lane-verify.test.mjs`'s caller sweep.
-  const args = [prLand, `--ref=${ref}`, `--sha=origin/${ref}`, `--base=${base}`, '--label-on-green', '--no-require-verified', '--json'];
+  // unable to prove that itself. Pinned by `we:scripts/__tests__/lane-verify.test.mjs`'s caller sweep. That
+  // argument holds only for the verified commit itself, so `--sha` is the RECORDED sha (`pin.sha`, checked
+  // above against the live tip) — never `origin/<ref>`, which could be a newer, unverified push.
+  const args = [prLand, `--ref=${ref}`, `--sha=${pin.sha}`, `--base=${base}`, '--label-on-green', '--no-require-verified', '--json'];
   if (bodyFile) args.push(`--body-file=${bodyFile}`);
   // Parse pr-land's LAST JSON line whether it exited 0 or non-zero (execFileSync throws on non-zero, with the
   // stdout on `e.stdout`). A PR NUMBER in the result means the PR now EXISTS — the open SUCCEEDED, even if the
@@ -707,7 +776,7 @@ async function main(argv) {
       const refined = correlateCause(entry.cause, status);
       if (refined !== entry.cause) mutateInfraStore((s) => updateCause(s, entry.num, refined), { path });
       const decision = retryDecision({ ...entry, cause: refined }, { now: Date.now(), maxAttempts });
-      if (decision.action === 'surface') { surfaced.push({ num: entry.num, cause: refined, attempt: entry.attempt }); continue; }
+      if (decision.action === 'surface') { surfaced.push({ num: entry.num, cause: refined, attempt: entry.attempt, reason: decision.reason }); continue; }
       if (decision.action === 'wait') { waiting.push({ num: entry.num, waitSec: Math.round((decision.waitMs || 0) / 1000) }); continue; }
       // action === 'retry' → attempt a resume-open (never a local merge). The resume itself is UNLOCKED (it can
       // block for minutes on pr-land's green-wait); only the short store mutation after it takes the lock.
@@ -716,12 +785,11 @@ async function main(argv) {
       if (r.skip) { surfaced.push({ num: entry.num, cause: refined, attempt: entry.attempt, reason: 'cross-repo' }); log(`  ⊘ #${entry.num} ${r.detail}`); continue; }
       if (r.ok) { mutateInfraStore((s) => removeInfraBlock(s, entry.num), { path }); resumed.push({ num: entry.num, pr: r.prNumber ?? null }); continue; }
       if (r.refused) {
-        // NEVER the infra attempt/backoff budget — see `markRefusedAttempt`'s own docblock. Still retried next
-        // pass (the entry stays immediately due): a refusal this cheap (pr-land's own guard, before any
-        // push/gh call for most reasons) never needs a backoff at all, and only a code/data change fixes it.
+        // NEVER the infra attempt/backoff budget — its OWN refusal counter + fixed interval instead (see
+        // `markRefusedAttempt`); `retryDecision` surfaces it once that refusal cap is hit.
         mutateInfraStore((s) => markRefusedAttempt(s, entry.num, Date.now(), { reason: r.reason }), { path });
-        failed.push({ num: entry.num, detail: r.detail, refused: true });
-        log(`  ⊘ #${entry.num} resume REFUSED (${r.detail}) — a guard answered, not an infra outage; retrying every pass, never counted toward the attempt cap`);
+        failed.push({ num: entry.num, detail: r.detail, refused: true, reason: r.reason ?? null });
+        log(`  ⊘ #${entry.num} resume REFUSED (${r.detail}) — a guard answered, not an infra outage; retrying on the refusal interval, surfaced at the refusal cap`);
         continue;
       }
       mutateInfraStore((s) => markRetryAttempt(s, entry.num, Date.now(), { cause: refined }), { path });

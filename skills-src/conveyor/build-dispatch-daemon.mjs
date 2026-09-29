@@ -368,6 +368,8 @@ function cliKillSwitch() {
  * default (today's behaviour, unchanged).
  */
 export function primaryInfraStoreEnv({ env = process.env, home = homedir() } = {}) {
+  // An EXPLICIT `CONVEYOR_INFRA_FILE` is the operator's choice — never override it with the default layout.
+  if ((env.CONVEYOR_INFRA_FILE || '').trim()) return {};
   const root = (env.WE_PRIMARY_CHECKOUT || '').trim() || join(home, 'workspace', 'webeverything');
   const file = join(root, '.conveyor', 'infra-blocked.json');
   return existsSync(file) ? { CONVEYOR_INFRA_FILE: file } : {};
@@ -379,12 +381,13 @@ export function primaryInfraStoreEnv({ env = process.env, home = homedir() } = {
  * backoff/attempt-cap/resume state machine (#2659) rather than re-deriving any of it here. Best-effort: a
  * malformed/unparseable result or a spawn failure never throws past this function — {@link runBuildDispatchTick}
  * already wraps its own call in try/catch, but this stays defensive on its own too, matching every other
- * `cli*` shell function in this file. */
-export function cliRetryInfraBlocked() {
+ * `cli*` shell function in this file. `exec`/`env`/`home` are injectable so a test can assert the child env
+ * really carries the primary store path (that env line IS the #4348 fix). */
+export function cliRetryInfraBlocked({ exec = execFileSync, env = process.env, home = homedir() } = {}) {
   try {
-    const text = execFileSync('node', [join(SCRIPTS, 'conveyor', 'infra-blocked.mjs'), 'retry'], {
+    const text = exec('node', [join(SCRIPTS, 'conveyor', 'infra-blocked.mjs'), 'retry'], {
       encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 16 * 1024 * 1024, cwd: REPO_ROOT,
-      env: { ...process.env, ...primaryInfraStoreEnv() },
+      env: { ...env, ...primaryInfraStoreEnv({ env, home }) },
     });
     return JSON.parse(text || '{}');
   } catch (e) {
