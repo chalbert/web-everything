@@ -71,7 +71,7 @@ retry, not just the happy-path retry.
 3. `we:scripts/operations/__tests__/dispatch-lane.test.mjs`: execution-counter assertion on the
    repeated-refusal test (guard 2).
 4. Fix the 5 stale glob citations a manual audit (while building the gate) found, all naming the id
-   `xrv69j6` — which graduated to `#4238` — instead of the current id: re-point them to `#4238` in
+   `4238` — which graduated to `#4238` — instead of the current id: re-point them to `#4238` in
    `we:scripts/operations/dispatch-lane-io.mjs`, `we:scripts/conveyor/health-smells/dispatch-permission-stall.mjs`
    (×2), `we:scripts/conveyor/health-smells/dispatch-trust-refused.mjs`, and
    `we:scripts/operations/__tests__/dispatch-lane.test.mjs` (×1). (Per the correction above, the new gate does
@@ -98,17 +98,17 @@ against this real tree's full `git grep` hit set for the wildcard-glob pattern, 
 file: **one** genuine zero-resolution finding — `we:scripts/conveyor/reconcile-core.mjs` citing id `x9wz0ir`,
 which matches no `num` and no `bornAs` anywhere on the tree. That is the gate's real "before" catch; it is
 filed separately (see Follow-ups) rather than fixed in this PR (outside this item's declared scope).
-Separately, a manual `git grep` for the specific id `xrv69j6` found 5 STALE citations (see MVP item 4) — that
+Separately, a manual `git grep` for the specific id `4238` found 5 STALE citations (see MVP item 4) — that
 id resolves via `#4238`'s `bornAs`, so the new gate does not flag them, but the citation itself names an id
 that no longer matches any file, which is worth fixing as hygiene. After the fix: re-running the same
 `git grep` for that specific id, restricted to non-test source files, returns zero hits.
 
 ## Follow-ups
 
-- `we:backlog/x1xbq6u-*.md` — fix the one citation the new gate actually flags today
+- `we:backlog/4482-*.md` — fix the one citation the new gate actually flags today
   (`we:scripts/conveyor/reconcile-core.mjs`, id `x9wz0ir`, resolves to nothing) — filed rather than fixed here
   since it's an unrelated file outside this item's declared scope.
-- `we:backlog/x6xwpps-*.md` — `we:scripts/conveyor/health-smells/dispatch-trust-refused.mjs` has no unit test
+- `we:backlog/4483-*.md` — `we:scripts/conveyor/health-smells/dispatch-trust-refused.mjs` has no unit test
   at all, unlike its sibling `we:scripts/conveyor/health-smells/dispatch-permission-stall.mjs` — a real but
   unrelated coverage gap, filed rather than folded in here.
 
@@ -117,6 +117,6 @@ that no longer matches any file, which is worth fixing as hygiene. After the fix
 1. **Executable** — a `vitest related` pass over the touched files (`we:scripts/lib/citation-check.mjs`,
    `we:scripts/check-standards.mjs` — drop the `we:` locus prefix when actually typing the shell command,
    it is a citation form, not a filesystem path) is green with the new `findDanglingBacklogGlobCite` tests
-   included, and `git grep -n 'backlog/xrv69j6-\*\.md' -- . ':!backlog' ':!*.test.mjs'` exits 1 (no matches
-   — the 5 stale glob citations the build's own audit found are fixed; a bare `#xrv69j6` cross-ref is fine
+   included, and `git grep -n 'backlog/4238-\*\.md' -- . ':!backlog' ':!*.test.mjs'` exits 1 (no matches
+   — the 5 stale glob citations the build's own audit found are fixed; a bare `#4238` cross-ref is fine
    and expected to remain, since it always resolves via `#4238`'s `bornAs` regardless of rename).
