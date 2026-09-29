@@ -33,3 +33,8 @@ No soak break applies to the ruling itself (no code path to break/fix) — the p
 
 - Re-run this same scorecard pull once the companion wiring card (story, this PR) lands and has produced real doc-fix/ci-heal trials — that is the direct trigger to revisit fork (a) with actual data instead of zero.
 - If fork (b) or (c) is chosen instead, file the `PROBATION_ROSTER`/gate update as its own small follow-up story rather than editing the constant by hand outside a lane.
+
+## Operator ruling (2026-09-29 ~4:12 PM ET, partial)
+
+- **`bugfix` opens to Codex only, on probation** — non-critical work only, full review on every result. Basis: Codex delivered 4 of 4 builds correctly on 2026-09-29 (#2966, #2975, #2969, #2988), with only thin edge-case tests to fix. Applied in the same PR as this note (`we:scripts/lib/provider-routing.mjs`: `openForNonCritical.bugfix = true`, `PROBATION_ROSTER.bugfix = ['codex']`).
+- agy for `bugfix` and `conflict-resolution` for anyone stay closed until agy has build data (first agy build: #2990, clean). This card stays open for that part.

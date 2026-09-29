@@ -32,6 +32,7 @@ import {
   EXTERNAL_WORKER_CANDIDATES,
   externalTierEquivalent,
   CRITICAL_WORK_GATE,
+  PROBATION_ROSTER,
 } from '../provider-routing.mjs';
 import { CODEX_MODEL } from '../codex-model-routing.mjs';
 
@@ -1313,14 +1314,15 @@ describe('EXTERNAL_WORKER_CANDIDATES, externalTierEquivalent and the critical-wo
     expect(externalTierEquivalent('gemini', 'gemini-3.1-pro')).toBeNull();
   });
 
-  it('CRITICAL_WORK_GATE holds exactly build, fix and ci-heal, basis #4034; only doc-fix and ci-heal are open (probation, 2026-09-27)', () => {
+  it('CRITICAL_WORK_GATE holds exactly build, fix and ci-heal, basis #4034; doc-fix, ci-heal and bugfix are open (probation, 2026-09-29)', () => {
     expect(CRITICAL_WORK_GATE.kinds).toEqual(['build', 'fix', 'ci-heal']);
     expect(CRITICAL_WORK_GATE.basis).toBe('#4034');
     const rows = CRITICAL_WORK_GATE.openForNonCritical;
     expect(Object.keys(rows).sort()).toEqual(['bugfix', 'build-new-feature', 'ci-heal', 'conflict-resolution', 'doc-fix'].sort());
-    expect(Object.entries(rows).filter(([, v]) => v === true).map(([k]) => k).sort()).toEqual(['ci-heal', 'doc-fix']);
-    // bugfix is the NEXT step — it stays closed.
-    expect(rows.bugfix).toBe(false);
+    expect(Object.entries(rows).filter(([, v]) => v === true).map(([k]) => k).sort()).toEqual(['bugfix', 'ci-heal', 'doc-fix']);
+    expect(PROBATION_ROSTER.bugfix).toEqual(['codex']);
+    expect(rows['build-new-feature']).toBe(false);
+    expect(rows['conflict-resolution']).toBe(false);
   });
 
   it('a gated kind (build/fix/ci-heal) recommends claude despite a clean Codex track record, auditing a critical-work-gate entry', () => {
@@ -1379,7 +1381,7 @@ describe('EXTERNAL_WORKER_CANDIDATES, externalTierEquivalent and the critical-wo
 });
 
 describe('the critical-work gate opens per taskType for non-critical work only (#4034)', () => {
-  // Opens ONLY the bugfix row — every other taskType stays closed, exactly like the operator would flip one row.
+  // Explicitly opens bugfix, which now also has a Codex-only probation roster.
   const openBugfix = { ...CRITICAL_WORK_GATE, openForNonCritical: { ...CRITICAL_WORK_GATE.openForNonCritical, bugfix: true } };
   // One clean claude-subagent codex bugfix trial, well within the proven envelope (same shape as cleanCodexContext above).
   const baseContext = (extra = {}) => ({
@@ -1391,22 +1393,28 @@ describe('the critical-work gate opens per taskType for non-critical work only (
     ...extra,
   });
 
-  it('opened + not critical + no vetoes recommends codex, audited open-non-critical', () => {
+  it('opened + not critical + no vetoes recommends claude with Codex on probation, audited open-non-critical', () => {
     const task = { taskType: 'bugfix' };
     const context = { ...baseContext(), kind: 'fix', criticalWorkGate: openBugfix, criticalWork: { critical: false, reasons: [] }, criticalMisses: [] };
     const res = selectProvider(task, context);
-    expect(res.recommendation).toBe(RECOMMENDATIONS.CODEX);
+    expect(res.recommendation).toBe(RECOMMENDATIONS.CLAUDE);
+    expect(res.probationWorker?.id).toBe('codex');
     const gateEntry = res.auditTrail.find((a) => a.criterion === 'critical-work-gate');
     expect(gateEntry.result).toBe('open-non-critical');
   });
 
-  it('the same context with the DEFAULT gate (no criticalWorkGate supplied) stays on claude, audited claude-only', () => {
+  it('the DEFAULT gate offers Codex probation for bugfix while build-new-feature stays closed', () => {
     const task = { taskType: 'bugfix' };
     const context = { ...baseContext(), kind: 'fix', criticalWork: { critical: false, reasons: [] }, criticalMisses: [] };
     const res = selectProvider(task, context);
     expect(res.recommendation).toBe(RECOMMENDATIONS.CLAUDE);
     const gateEntry = res.auditTrail.find((a) => a.criterion === 'critical-work-gate');
-    expect(gateEntry.result).toBe('claude-only');
+    expect(gateEntry.result).toBe('open-non-critical');
+    expect(res.probationWorker?.id).toBe('codex');
+    const closed = selectProvider({ taskType: 'build-new-feature' }, context);
+    expect(closed.recommendation).toBe(RECOMMENDATIONS.CLAUDE);
+    expect(closed.probationWorker).toBeNull();
+    expect(closed.auditTrail.find((a) => a.criterion === 'critical-work-gate').result).toBe('claude-only');
   });
 
   it('opened but critical work stays on claude, and the gate reasoning names the proxy', () => {
@@ -1447,19 +1455,22 @@ describe('the critical-work gate opens per taskType for non-critical work only (
     expect(codexAudit.reasoning.startsWith('Hard veto')).toBe(true);
   });
 
-  it('a veto on a different taskType or a different model does not block codex', () => {
+  it('a veto on a different taskType or a different model does not block Codex probation', () => {
     const task = { taskType: 'bugfix' };
     const diffTaskType = { ...baseContext(), kind: 'fix', criticalWorkGate: openBugfix, criticalWork: { critical: false, reasons: [] }, criticalMisses: [{ provider: 'codex', model: CODEX_MODEL, taskType: 'doc-fix' }] };
-    expect(selectProvider(task, diffTaskType).recommendation).toBe(RECOMMENDATIONS.CODEX);
+    expect(selectProvider(task, diffTaskType)).toMatchObject({ recommendation: RECOMMENDATIONS.CLAUDE, probationWorker: { id: 'codex' } });
     const diffModel = { ...baseContext(), kind: 'fix', criticalWorkGate: openBugfix, criticalWork: { critical: false, reasons: [] }, criticalMisses: [{ provider: 'codex', model: 'some-other-model', taskType: 'bugfix' }] };
-    expect(selectProvider(task, diffModel).recommendation).toBe(RECOMMENDATIONS.CODEX);
+    expect(selectProvider(task, diffModel)).toMatchObject({ recommendation: RECOMMENDATIONS.CLAUDE, probationWorker: { id: 'codex' } });
   });
 
   it('a gate opened only for doc-fix leaves a bugfix fix dispatch on claude', () => {
-    const openDocFix = { ...CRITICAL_WORK_GATE, openForNonCritical: { ...CRITICAL_WORK_GATE.openForNonCritical, 'doc-fix': true } };
+    const openDocFix = { ...CRITICAL_WORK_GATE, openForNonCritical: { 'doc-fix': true } };
     const task = { taskType: 'bugfix' };
     const context = { ...baseContext(), kind: 'fix', criticalWorkGate: openDocFix, criticalWork: { critical: false, reasons: [] }, criticalMisses: [] };
-    expect(selectProvider(task, context).recommendation).toBe(RECOMMENDATIONS.CLAUDE);
+    const res = selectProvider(task, context);
+    expect(res.recommendation).toBe(RECOMMENDATIONS.CLAUDE);
+    expect(res.probationWorker).toBeNull();
+    expect(res.auditTrail.find((a) => a.criterion === 'critical-work-gate').result).toBe('claude-only');
   });
 
   it('opened, not critical, thin history (codex trial is reworked as most recent) never falls to both — recommends claude', () => {
@@ -1485,7 +1496,8 @@ describe('the critical-work gate opens per taskType for non-critical work only (
       const task = { taskType: 'bugfix' };
       const context = { ...baseContext(), kind, criticalWorkGate: openBugfix, criticalWork: { critical: false, reasons: [] }, criticalMisses: [] };
       const res = selectProvider(task, context);
-      expect(res.recommendation).toBe(RECOMMENDATIONS.CODEX);
+      expect(res.recommendation).toBe(RECOMMENDATIONS.CLAUDE);
+      expect(res.probationWorker?.id).toBe('codex');
       const gateEntry = res.auditTrail.find((a) => a.criterion === 'critical-work-gate');
       expect(gateEntry.result).toBe('open-non-critical');
     }

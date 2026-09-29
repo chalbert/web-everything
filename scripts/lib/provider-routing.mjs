@@ -270,7 +270,8 @@ export function externalTierEquivalent(provider, model) {
  * takes the Claude tier table — UNLESS every one of these holds:
  *
  *   1. the task's `taskType` row in `openForNonCritical` is `true` (an explicit, per-taskType operator switch;
- *      `doc-fix` and `ci-heal` are open on probation since 2026-09-27, every other row is `false`);
+ *      `doc-fix` and `ci-heal` are open on probation since 2026-09-27, `bugfix` (Codex only) since 2026-09-29,
+ *      every other row is `false`);
  *   2. the caller supplied the critical-work verdict (`context.criticalWork`, from
  *      `we:scripts/lib/critical-work.mjs#criticalWorkVerdict`) and it says NOT critical — a missing verdict
  *      fails closed;
@@ -293,10 +294,11 @@ export const CRITICAL_WORK_GATE = Object.freeze({
   kinds: Object.freeze(['build', 'fix', 'ci-heal']),
   // agy-launcher-probation (operator, 2026-09-27): `doc-fix` and the new `ci-heal` taskType are opened ON
   // PROBATION — non-critical work only, one of the PROBATION_ROSTER workers, full review on every result.
-  // `bugfix` stays closed; it is the next step, once these two have data.
+  // `bugfix` opened ON PROBATION to Codex only (operator, 2026-09-29, #4519): Codex delivered 4 of 4 builds
+  // correctly that day; same supervision — non-critical only, full review on every result.
   openForNonCritical: Object.freeze({
     'build-new-feature': false,
-    'bugfix': false,
+    'bugfix': true,
     'conflict-resolution': false,
     'doc-fix': true,
     'ci-heal': true,
@@ -356,6 +358,7 @@ export const PROBATION_WORKERS = Object.freeze({
 export const PROBATION_ROSTER = Object.freeze({
   'doc-fix': Object.freeze(['antigravity-claude', 'codex']),
   'ci-heal': Object.freeze(['antigravity-claude', 'codex', 'antigravity-gemini']),
+  'bugfix': Object.freeze(['codex']),
 });
 
 /**
