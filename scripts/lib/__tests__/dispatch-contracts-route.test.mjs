@@ -339,7 +339,7 @@ describe('the model-tier table (#3857)', () => {
 // bugfix envelope is 250 LOC / 4 files (`PROVEN_TASK_ENVELOPES.bugfix`); `size: 2` -> 80 LOC, comfortably inside
 // it for every scope below (at most 3 files), so envelope fit is never what is under test here.
 describe('#4034 — routeDispatch wires the critical-work verdict and critical-miss vetoes', () => {
-  // Opens ONLY the bugfix row of the default gate — every other taskType stays closed.
+  // Explicitly opens bugfix; its Codex-only probation roster keeps Claude as the recommendation.
   const openBugfix = { ...CRITICAL_WORK_GATE, openForNonCritical: { ...CRITICAL_WORK_GATE.openForNonCritical, bugfix: true } };
   const cleanCodexBugfixTrials = () => [
     record({ provider: 'codex', model: 'gpt-6-astra', taskType: 'bugfix', verifiedBy: 'claude-subagent', outcome: 'landed', scoredAt: '2026-09-10T00:00:00Z' }),
@@ -356,19 +356,24 @@ describe('#4034 — routeDispatch wires the critical-work verdict and critical-m
     ...extra,
   });
 
-  it('#4081 (non-critical, gate open, clean codex track record) routes to codex, executed stays claude', () => {
+  it('#4081 (non-critical, gate open, clean codex track record) offers Codex probation, routed and executed stay claude', () => {
     const out = c.decideDispatchRoute(dispatch4081(), { scorecards: cleanCodexBugfixTrials(), criticalWorkGate: openBugfix });
-    expect(out).toMatchObject({ routed: 'codex', executed: 'claude' });
+    expect(out).toMatchObject({ routed: 'claude', executed: 'claude', probationWorker: { id: 'codex', review: 'full' } });
   });
 
   it('#4124 (critical scope) stays on claude despite the gate being open and a clean codex track record', () => {
     const out = c.decideDispatchRoute(dispatch4124(), { scorecards: cleanCodexBugfixTrials(), criticalWorkGate: openBugfix });
     expect(out.routed).toBe('claude');
+    expect(out.probationWorker).toBeNull();
   });
 
-  it('#4081 with the DEFAULT gate (bugfix not opened) stays on claude', () => {
+  it('#4081 with the DEFAULT gate offers Codex probation; build-new-feature stays closed', () => {
     const out = c.decideDispatchRoute(dispatch4081(), { scorecards: cleanCodexBugfixTrials() });
-    expect(out.routed).toBe('claude');
+    expect(out).toMatchObject({ routed: 'claude', probationWorker: { id: 'codex', review: 'full' } });
+    expect(out.auditTrail.find((a) => a.criterion === 'critical-work-gate').result).toBe('open-non-critical');
+    const closed = c.decideDispatchRoute(dispatch4081({ kind: 'build' }), { scorecards: cleanCodexBugfixTrials() });
+    expect(closed).toMatchObject({ taskType: 'build-new-feature', routed: 'claude', probationWorker: null });
+    expect(closed.auditTrail.find((a) => a.criterion === 'critical-work-gate').result).toBe('claude-only');
   });
 
   it('#4081 with a reworked codex bugfix row for the same model and NO filesTouched (legacy shape) fails closed to claude', () => {
@@ -378,9 +383,10 @@ describe('#4034 — routeDispatch wires the critical-work verdict and critical-m
     ];
     const out = c.decideDispatchRoute(dispatch4081(), { scorecards, criticalWorkGate: openBugfix });
     expect(out.routed).toBe('claude');
+    expect(out.probationWorker).toBeNull();
   });
 
-  it('the same reworked row carrying filesTouched (a non-critical scope) AND a later clean landed row (most recent is clean) routes to codex', () => {
+  it('the same reworked row carrying filesTouched (a non-critical scope) AND a later clean landed row (most recent is clean) offers Codex probation', () => {
     const scorecards = [
       ...cleanCodexBugfixTrials(),
       record({
@@ -390,6 +396,6 @@ describe('#4034 — routeDispatch wires the critical-work verdict and critical-m
       record({ provider: 'codex', model: 'gpt-6-astra', taskType: 'bugfix', verifiedBy: 'claude-subagent', outcome: 'landed', scoredAt: '2026-09-25T00:00:00Z' }),
     ];
     const out = c.decideDispatchRoute(dispatch4081(), { scorecards, criticalWorkGate: openBugfix });
-    expect(out.routed).toBe('codex');
+    expect(out).toMatchObject({ routed: 'claude', probationWorker: { id: 'codex', review: 'full' } });
   });
 });
