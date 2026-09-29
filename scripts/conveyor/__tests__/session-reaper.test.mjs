@@ -1263,6 +1263,20 @@ describe('resolveLastActivityMs — Guard 1(c)\'s own IO (#4306)', () => {
     });
     expect(result).toBe(Date.parse('2026-09-27T20:44:34.000Z'));
   });
+
+  it('an unparseable line still tolerated regardless of position — this consumer never reads entries, so a dropped newest line changes nothing it cares about (#4312 converge review)', () => {
+    // Unlike readHungInfo/readIdleFinishedInfo (hung-session.test.mjs), resolveLastActivityMs never derives a
+    // pending-tool-call verdict from `entries`, so it has no reason to refuse a partial read. It stays exactly
+    // as tolerant as it was before #4312's extraction, whichever position the bad line sits at.
+    const result = resolveLastActivityMs({ cwd: '/c', sessionId: 's1' }, {
+      resolveTranscript: () => '/fake/path.jsonl',
+      // The GOOD line is FIRST (older); the BAD line is LAST (the tail's own newest).
+      tailLinesFn: () => ({ lines: [JSON.stringify({ type: 'assistant', timestamp: '2026-09-27T20:44:34.000Z' }), 'not json'] }),
+      summarizeEntryFn: (raw) => { if (raw === 'not json') throw new Error('bad'); const o = JSON.parse(raw); return { kind: o.type, ts: o.timestamp, blocks: [] }; },
+      statFn: () => { throw new Error('must not be reached — an older real timestamp already exists'); },
+    });
+    expect(result).toBe(Date.parse('2026-09-27T20:44:34.000Z'));
+  });
 });
 
 describe('transcriptShowsIntendedBlockedOnInfra — reading the crashed session\'s own last words (PR #2647/#2625, 2026-09-25)', () => {

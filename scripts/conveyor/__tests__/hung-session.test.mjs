@@ -17,7 +17,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, mkdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { classifyHungSession, resolveHungThresholdMs, DEFAULT_HUNG_THRESHOLD_MS, PENDING_CALL_GRACE_MULTIPLIER } from '../hung-session.mjs';
+import { classifyHungSession, resolveHungThresholdMs, DEFAULT_HUNG_THRESHOLD_MS, PENDING_CALL_GRACE_MULTIPLIER, readTranscriptTailActivity } from '../hung-session.mjs';
 import { classifyIdleFinished, resolveIdleFinishedThresholdMs, DEFAULT_IDLE_FINISHED_THRESHOLD_MS } from '../hung-session.mjs';
 import {
   NO_OUTCOME_KINDS, resolveNoOutcomeWindowMs, resolveNoOutcomeCeilingMs, classifyNoOutcomeStall, OUTCOME_UNREADABLE,
@@ -243,6 +243,124 @@ describe('readHungInfo — the IO shell, against a REAL temp project store', () 
     const info = readHungInfo({ cwd, sessionId: 'no-such-session' }, Date.now(), 30 * 60_000);
     expect(info).toEqual({ hung: false, reason: 'no-signal', ageMs: null });
   });
+
+  it('ANY unparseable line refuses the whole read, wherever it sits in the tail — no-signal, never a partial guess (#4312 converge review)', () => {
+    // `null` is valid JSON but not an object — `summarizeEntry` throws reading `.type` off it. The shared
+    // primitive itself would tolerate this (skip the line, use the fresh timestamp) — but this caller cannot:
+    // a dropped line's `entries` slot is gone, and `detectBlockedOnChild`'s pending-tool-call check has no way
+    // to tell "this line never had a tool call" apart from "this line had one and we lost it". So readHungInfo
+    // refuses the whole read on ANY parse failure, matching its shape before #4312's extraction, regardless of
+    // whether the bad line is older or newer than the good one.
+    const now = Date.now();
+    const fresh = entryLine('assistant', new Date(now - 30_000).toISOString(), [{ type: 'text', text: 'ok' }]);
+    writeFileSync(transcriptFile, `null\n${fresh}\n`);
+    expect(readHungInfo({ cwd, sessionId }, now, 30 * 60_000)).toEqual({ hung: false, reason: 'no-signal', ageMs: null });
+
+    const staleTs = new Date(now - 45 * 60_000).toISOString();
+    const stale = entryLine('assistant', staleTs, [{ type: 'text', text: 'old' }]);
+    writeFileSync(transcriptFile, `${stale}\nnull\n`);
+    expect(readHungInfo({ cwd, sessionId }, now, 30 * 60_000)).toEqual({ hung: false, reason: 'no-signal', ageMs: null });
+  });
+});
+
+// ── SHARED TRANSCRIPT-TAIL PRIMITIVE (#4312) — the one implementation readHungInfo/readIdleFinishedInfo above
+// and session-reaper.mjs#resolveLastActivityMs all delegate to ────────────────────────────────────────────────
+describe('readTranscriptTailActivity — the shared IO primitive, injected IO (mirrors resolveLastActivityMs\'s own tests)', () => {
+  it('degenerate input never throws', () => {
+    expect(readTranscriptTailActivity(null)).toBeNull();
+    expect(readTranscriptTailActivity({ cwd: '/c' })).toBeNull();
+    expect(readTranscriptTailActivity({ sessionId: 's1' })).toBeNull();
+  });
+
+  it('an unresolvable transcript answers null, never a guess', () => {
+    const result = readTranscriptTailActivity({ cwd: '/c', sessionId: 's1' }, {
+      tailLines: 15, maxBytes: 400_000, fieldMax: 200,
+      resolveTranscript: () => { throw new Error('not found'); },
+    });
+    expect(result).toBeNull();
+  });
+
+  it('an unreadable tail answers null, never a guess', () => {
+    const result = readTranscriptTailActivity({ cwd: '/c', sessionId: 's1' }, {
+      tailLines: 15, maxBytes: 400_000, fieldMax: 200,
+      resolveTranscript: () => '/fake/path.jsonl',
+      tailLinesFn: () => { throw new Error('unreadable'); },
+    });
+    expect(result).toBeNull();
+  });
+
+  it('a malformed tailLinesFn result (no array `lines`) answers null — NEVER throws (#4312 converge review)', () => {
+    // Old readHungInfo/readIdleFinishedInfo ran `lines.map(...)` INSIDE the same try/catch as the tailLines()
+    // call, so a non-array `lines` was already covered by that catch. This primitive's own try/catch must
+    // cover the identical case, or every caller's "NEVER throws" contract breaks on a malformed IO result.
+    expect(readTranscriptTailActivity({ cwd: '/c', sessionId: 's1' }, {
+      tailLines: 15, maxBytes: 400_000, fieldMax: 200,
+      resolveTranscript: () => '/fake/path.jsonl',
+      tailLinesFn: () => ({}), // no `lines` at all
+    })).toBeNull();
+    expect(readTranscriptTailActivity({ cwd: '/c', sessionId: 's1' }, {
+      tailLines: 15, maxBytes: 400_000, fieldMax: 200,
+      resolveTranscript: () => '/fake/path.jsonl',
+      tailLinesFn: () => ({ lines: 'not-an-array' }),
+    })).toBeNull();
+  });
+
+  it('one unparseable line never aborts the scan — the other lines still resolve a timestamp, and hadUnparseableLine reports it', () => {
+    const result = readTranscriptTailActivity({ cwd: '/c', sessionId: 's1' }, {
+      tailLines: 15, maxBytes: 400_000, fieldMax: 200,
+      resolveTranscript: () => '/fake/path.jsonl',
+      tailLinesFn: () => ({ lines: ['not json', JSON.stringify({ type: 'assistant', timestamp: '2026-09-27T20:44:34.000Z' })] }),
+      summarizeEntryFn: (raw, fieldMax) => { if (raw === 'not json') throw new Error('bad'); const o = JSON.parse(raw); return { kind: o.type, ts: o.timestamp, blocks: [] }; },
+    });
+    expect(result.lastActivityMs).toBe(Date.parse('2026-09-27T20:44:34.000Z'));
+    expect(result.entries).toHaveLength(1);
+    expect(result.hadUnparseableLine).toBe(true);
+  });
+
+  it('hadUnparseableLine is false when every line in the tail parses cleanly', () => {
+    const result = readTranscriptTailActivity({ cwd: '/c', sessionId: 's1' }, {
+      tailLines: 15, maxBytes: 400_000, fieldMax: 200,
+      resolveTranscript: () => '/fake/path.jsonl',
+      tailLinesFn: () => ({ lines: [JSON.stringify({ type: 'assistant', timestamp: '2026-09-27T20:44:34.000Z' })] }),
+      summarizeEntryFn: (raw, fieldMax) => { const o = JSON.parse(raw); return { kind: o.type, ts: o.timestamp, blocks: [] }; },
+    });
+    expect(result.hadUnparseableLine).toBe(false);
+  });
+
+  it('hadUnparseableLine is true regardless of WHERE the bad line sits — position never matters to the primitive itself (#4312 converge review)', () => {
+    const oldest = JSON.stringify({ type: 'assistant', timestamp: '2026-09-27T20:44:34.000Z' });
+    const result = readTranscriptTailActivity({ cwd: '/c', sessionId: 's1' }, {
+      tailLines: 15, maxBytes: 400_000, fieldMax: 200,
+      resolveTranscript: () => '/fake/path.jsonl',
+      // The GOOD line is FIRST (older); the BAD line is LAST (the tail's own newest) — the primitive still
+      // tolerates it and still reports the older timestamp; only the DESTRUCTIVE callers (readHungInfo/
+      // readIdleFinishedInfo) refuse to act on a partial `entries` list, not this primitive.
+      tailLinesFn: () => ({ lines: [oldest, 'not json'] }),
+      summarizeEntryFn: (raw, fieldMax) => { if (raw === 'not json') throw new Error('bad'); const o = JSON.parse(raw); return { kind: o.type, ts: o.timestamp, blocks: [] }; },
+    });
+    expect(result.lastActivityMs).toBe(Date.parse('2026-09-27T20:44:34.000Z'));
+    expect(result.hadUnparseableLine).toBe(true);
+  });
+
+  it('falls back to mtime when nothing in the tail carries a parseable timestamp, and answers null if that fails too', () => {
+    const okResult = readTranscriptTailActivity({ cwd: '/c', sessionId: 's1' }, {
+      tailLines: 15, maxBytes: 400_000, fieldMax: 200,
+      resolveTranscript: () => '/fake/path.jsonl',
+      tailLinesFn: () => ({ lines: ['not json'] }),
+      summarizeEntryFn: () => { throw new Error('unparseable'); },
+      statFn: () => ({ mtimeMs: 12345 }),
+    });
+    expect(okResult.lastActivityMs).toBe(12345);
+
+    const failResult = readTranscriptTailActivity({ cwd: '/c', sessionId: 's1' }, {
+      tailLines: 15, maxBytes: 400_000, fieldMax: 200,
+      resolveTranscript: () => '/fake/path.jsonl',
+      tailLinesFn: () => ({ lines: ['not json'] }),
+      summarizeEntryFn: () => { throw new Error('unparseable'); },
+      statFn: () => { throw new Error('ENOENT'); },
+    });
+    expect(failResult).toBeNull();
+  });
 });
 
 // ── IDLE-TURN-ENDED BACKSTOP — #4075/xg7m2wq, live incident PR #2724, 2026-09-26 ───────────────────────────────
@@ -326,6 +444,20 @@ describe('readIdleFinishedInfo — the IO shell, against a REAL temp project sto
   it('missing cwd/sessionId, or no transcript on disk, answers no-signal, never a guess', () => {
     expect(readIdleFinishedInfo({}, Date.now(), 10 * 60_000)).toEqual({ finished: false, reason: 'no-signal', ageMs: null });
     expect(readIdleFinishedInfo({ cwd, sessionId: 'no-such-session' }, Date.now(), 10 * 60_000)).toEqual({ finished: false, reason: 'no-signal', ageMs: null });
+  });
+
+  it('ANY unparseable line refuses the whole read, wherever it sits in the tail — no-signal, never a partial guess (#4312 converge review)', () => {
+    // Same rule as readHungInfo's own test above, and for the identical reason: a dropped line's `entries`
+    // slot is gone, and this axis's pending-tool-call check cannot tell "never had a call" from "had one and
+    // we lost it". Position in the tail (older or newest) makes no difference — either way, no-signal.
+    const now = Date.now();
+    const staleTs = new Date(now - 20 * 60_000).toISOString();
+    const idle = entryLine('assistant', staleTs, [{ type: 'text', text: 'done' }]);
+    writeFileSync(transcriptFile, `null\n${idle}\n`);
+    expect(readIdleFinishedInfo({ cwd, sessionId }, now, 10 * 60_000)).toEqual({ finished: false, reason: 'no-signal', ageMs: null });
+
+    writeFileSync(transcriptFile, `${idle}\nnull\n`);
+    expect(readIdleFinishedInfo({ cwd, sessionId }, now, 10 * 60_000)).toEqual({ finished: false, reason: 'no-signal', ageMs: null });
   });
 });
 

@@ -129,6 +129,7 @@ import {
 import { pruneTerminalRuns } from '../operations/run-store.mjs';
 import {
   readHungInfo, resolveHungThresholdMs, readClaudeAuthExpiredInfo, readIdleFinishedInfo, resolveIdleFinishedThresholdMs,
+  readTranscriptTailActivity,
 } from './hung-session.mjs';
 import {
   NO_OUTCOME_KINDS, resolveNoOutcomeWindowMs, resolveNoOutcomeCeilingMs, classifyNoOutcomeStall, OUTCOME_UNREADABLE,
@@ -469,11 +470,19 @@ export function transcriptShowsIntendedBlockedOnInfra(session, {
 /**
  * we:scripts/conveyor/session-reaper.mjs#resolveLastActivityMs — #4306 Guard-1(c)'s own IO: the reaped
  * session's own last CONFIRMED transcript activity, in epoch ms, or `null` when it cannot be determined
- * (no `cwd`/`sessionId`, no transcript found, an unreadable file — never a guess). Reuses the exact same
- * tail-read + newest-entry-timestamp shape `hung-session.mjs#readIdleFinishedInfo`/`readHungInfo` already use
- * (falling back to the transcript file's own mtime when no entry carries a parseable `ts`, same as those two),
- * kept local here (rather than a THIRD near-identical copy of the same dozen lines) since `planBackstopCompletion`
- * needs the raw milliseconds, not a threshold-relative verdict — those functions only ever return the latter.
+ * (no `cwd`/`sessionId`, no transcript found, an unreadable file, or a failed `mtime` fallback — never a
+ * guess). Delegates to `we:scripts/conveyor/hung-session.mjs#readTranscriptTailActivity` (#4312) — the ONE
+ * shared tail-read + newest-entry-timestamp + mtime-fallback primitive `readIdleFinishedInfo`/`readHungInfo`
+ * also call, so this is no longer a third near-identical copy of the same dozen lines. Kept as its own
+ * exported function (rather than callers reaching into the primitive directly) since `planBackstopCompletion`
+ * needs the raw milliseconds, not a threshold-relative verdict — the primitive's other two callers only ever
+ * need the latter. Every injectable IO option here is forwarded straight through, unchanged in name or
+ * default, and this function ignores the primitive's `hadUnparseableLine` flag entirely — unlike
+ * `readHungInfo`/`readIdleFinishedInfo` (#4312 converge review), this caller never reads `entries` for
+ * anything, so a skipped bad line changes nothing it cares about. The same tolerant behavior this function
+ * had before #4312's extraction, with one strictly-safer addition inherited from the shared primitive: a
+ * malformed `tailLinesFn` result (a non-array `lines`) now answers `null` instead of throwing a `TypeError`
+ * out of this function — the primitive's own doc covers that case.
  * @param {{cwd?:string, sessionId?:string}|null|undefined} session
  * @returns {number|null}
  */
@@ -483,35 +492,16 @@ export function resolveLastActivityMs(session, {
   summarizeEntryFn = summarizeEntry,
   statFn = statSync,
 } = {}) {
-  const cwd = session?.cwd, sessionId = session?.sessionId;
-  if (!cwd || !sessionId) return null;
-  let file;
-  try {
-    file = resolveTranscript({ session: String(sessionId), cwd: String(cwd) });
-  } catch {
-    return null; // no transcript found — never guess
-  }
-  let lines;
-  try {
-    ({ lines } = tailLinesFn(file, BLOCKED_ON_INFRA_TAIL_LINES, BLOCKED_ON_INFRA_MAX_BYTES));
-  } catch {
-    return null; // unreadable transcript — never guess
-  }
-  let lastActivityMs = null;
-  for (const raw of lines) {
-    let entry;
-    try {
-      entry = summarizeEntryFn(raw, BLOCKED_ON_INFRA_FIELD_MAX);
-    } catch {
-      continue; // one unparseable line never aborts the scan
-    }
-    const t = Date.parse(entry?.ts ?? '');
-    if (Number.isFinite(t) && (lastActivityMs === null || t > lastActivityMs)) lastActivityMs = t;
-  }
-  if (lastActivityMs === null) {
-    try { return statFn(file).mtimeMs; } catch { return null; }
-  }
-  return lastActivityMs;
+  const tail = readTranscriptTailActivity(session, {
+    tailLines: BLOCKED_ON_INFRA_TAIL_LINES,
+    maxBytes: BLOCKED_ON_INFRA_MAX_BYTES,
+    fieldMax: BLOCKED_ON_INFRA_FIELD_MAX,
+    resolveTranscript,
+    tailLinesFn,
+    summarizeEntryFn,
+    statFn,
+  });
+  return tail ? tail.lastActivityMs : null;
 }
 
 /**
