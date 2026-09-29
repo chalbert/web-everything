@@ -266,7 +266,12 @@ describe('probeAuthExpiredSessions', () => {
 
   it('probeAgents itself carries cwd/sessionId through — what this probe needs to resolve a transcript', () => {
     const exec = () => JSON.stringify([{ name: 'ci-heal-2711', state: 'blocked', kind: 'background', startedAt: '2026-09-26T10:53:00.000Z', cwd: '/x', sessionId: 's-1' }]);
-    expect(probeAgents({ exec })).toEqual([{ name: 'ci-heal-2711', state: 'blocked', kind: 'background', startedAt: '2026-09-26T10:53:00.000Z', cwd: '/x', sessionId: 's-1', status: null, waitingFor: null }]);
+    expect(probeAgents({ exec })).toEqual([{ name: 'ci-heal-2711', state: 'blocked', kind: 'background', startedAt: '2026-09-26T10:53:00.000Z', cwd: '/x', sessionId: 's-1', status: null, waitingFor: null, pid: null }]);
+  });
+
+  it('probeAgents carries an integer pid through (#4068 live-process-stale-transcript), never a non-integer', () => {
+    const exec = () => JSON.stringify([{ name: 'a', kind: 'background', pid: 4242 }, { name: 'b', kind: 'background', pid: '17' }]);
+    expect(probeAgents({ exec }).map((a) => a.pid)).toEqual([4242, null]);
   });
 });
 

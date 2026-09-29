@@ -43,7 +43,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
-  DEFAULT_HEALTH_CONFIG, emptyHealthState, runHealthTick, renderEpisodeReport, renderHealthSection, summarizeDiagnosisOutput, scrubText, scrubDeep, parsePsOutput, MINUTE,
+  DEFAULT_HEALTH_CONFIG, emptyHealthState, runHealthTick, renderEpisodeReport, renderHealthSection, summarizeDiagnosisOutput, scrubText, scrubDeep, parsePsOutput, MINUTE, HOUR,
 } from './health-watch-core.mjs';
 import { SMELLS } from './health-smells/index.mjs';
 import { healthDir, healthSectionLines } from './health-watch-section.mjs';
@@ -63,7 +63,9 @@ import { resolvePrLimit, readLimitState, isGlobalOffNow } from '../lib/pr-limit.
 import { ghThrottleLockRoot, ghThrottleLogPath, budgetProbeArgs } from '../lib/gh-throttle.mjs';
 import { persistSpendHours } from '../lib/gh-spend.mjs';
 import { readSharedOpenPrs } from '../lib/pr-snapshot.mjs';
-import { readClaudeAuthExpiredInfo } from './hung-session.mjs';
+import { readClaudeAuthExpiredInfo, readHungInfo } from './hung-session.mjs';
+import { readJsonlTail } from '../operations/land-advance-io.mjs';
+import { defaultDrainHistoryPath } from '../operations/live-state-io.mjs';
 import { readBgIsolationStallInfo } from './bg-isolation-stall.mjs';
 import { stuckOnPermissionPrompt } from './health-smells/dispatch-permission-stall.mjs';
 import { notifyDesktopChecked } from './branch-sync.mjs';
@@ -498,7 +500,79 @@ export function probeAgents({ exec = run } = {}) {
   return arr.map((a) => ({
     name: a.name, state: a.state, kind: a.kind, startedAt: a.startedAt, cwd: a.cwd, sessionId: a.sessionId,
     status: a.status ?? null, waitingFor: a.waitingFor ?? null,
+    // #4068 — `pid` carried through (additive) for the `live-process-stale-transcript` probe below.
+    pid: Number.isInteger(a.pid) ? a.pid : null,
   }));
+}
+
+/** #4068 — a PR-bound dispatcher session name (`fix-2735`, `ci-heal-2711`, `review-2911`) → its PR number. Other
+ *  kinds (`conveyor-<item>`, `prepare-<item>`) end in a BACKLOG number, not a PR, and are never PR-bound. */
+export function prBoundSessionPr(name) {
+  const m = /^(?:fix|ci-heal|review)-(\d+)$/.exec(String(name ?? ''));
+  return m ? Number(m[1]) : null;
+}
+
+/**
+ * #4068 — the `live-process-stale-transcript` sign's input: everything that can hold a PR as `live-process` in
+ * `reconcile-core.mjs#assessLiveness`, each with its last-activity age. Two sources, matching
+ * `reconcile-pass.mjs#defaultReadAgents`' own merged listing:
+ *   - REVIEW JOBS (x26lw6u) — `<clone>/.operations/review-jobs/<slug>.json` records whose pid is alive, in this
+ *     checkout and every daemon clone. The reconcile pass reads no transcript for these at all: a live pid holds
+ *     the PR "however stale its transcript looks". Activity = the newest mtime of the job's own `<slug>.*` files
+ *     (its log, its loop output). READ-ONLY: a dead record is skipped, never pruned (`listReviewJobAgents` prunes;
+ *     the health watch never writes into a daemon clone).
+ *   - PR-BOUND CLAUDE SESSIONS ({@link prBoundSessionPr}) the listing still shows unfinished — activity = their
+ *     transcript's last entry via the reaper's own {@link readHungInfo}. (The reconcile pass already frees a
+ *     session whose transcript crosses the hung threshold; one pending on a tool call can still hold its PR.)
+ * A row whose activity cannot be read is kept with `lastActivityAgeMs: null` — never guessed stale.
+ * @returns {Array<{pr:number, repo:string|null, name:string, source:'review-job'|'session', pid:number|null, lastActivityAgeMs:number|null, reason:string|null}>}
+ */
+export function probeLiveBindings(agents, {
+  roots = [REPO_ROOT, ...daemonCloneRoots(workspaceOf(REPO_ROOT))],
+  readInfo = readHungInfo, isAlive = pidAlive, nowMs = Date.now(), thresholdMs = 30 * MINUTE,
+  readdir = readdirSync, readFile = readFileSync, stat = statSync,
+} = {}) {
+  const out = [];
+  for (const dir of [...new Set(roots.map((r) => join(r, '.operations', 'review-jobs')))]) {
+    let names;
+    try { names = readdir(dir); } catch { continue; }
+    for (const f of names.filter((n) => /^[A-Za-z0-9][A-Za-z0-9_-]*\.json$/.test(n))) {
+      let rec;
+      try { rec = JSON.parse(readFile(join(dir, f), 'utf8')); } catch { continue; }
+      const pr = Number(rec?.pr);
+      if (!Number.isInteger(rec?.pid) || !Number.isInteger(pr) || !isAlive(rec.pid)) continue;
+      const slug = f.slice(0, -'.json'.length);
+      let newest = null;
+      for (const g of names.filter((n) => n.startsWith(`${slug}.`))) {
+        try { const m = stat(join(dir, g)).mtimeMs; if (newest == null || m > newest) newest = m; } catch { /* vanished */ }
+      }
+      out.push({ pr, repo: rec.repo ?? null, name: String(rec.slug ?? slug), source: 'review-job', pid: rec.pid, lastActivityAgeMs: newest == null ? null : Math.max(0, nowMs - newest), reason: null });
+    }
+  }
+  for (const a of Array.isArray(agents) ? agents : []) {
+    const pr = prBoundSessionPr(a?.name);
+    const state = String(a?.state ?? '').toLowerCase();
+    if (pr == null || a?.kind !== 'background' || state === 'done' || state === 'stopped') continue;
+    if (Number.isInteger(a.pid) && !isAlive(a.pid)) continue; // probed dead — reconcile frees that PR itself
+    let info = null;
+    try { info = readInfo(a, nowMs, thresholdMs); } catch { info = null; }
+    out.push({ pr, repo: null, name: a.name, source: 'session', pid: Number.isInteger(a.pid) ? a.pid : null, lastActivityAgeMs: Number.isFinite(info?.ageMs) ? info.ageMs : null, reason: info?.reason ?? null });
+  }
+  return out;
+}
+
+/**
+ * #4068 — the drain daemon's own per-pass `history.jsonl` (`{at, ms, exit, considered, merged, deferred,
+ * failed}` per pass — the same file `live-state` reads), trimmed to the last `windowMs` and to the fields the
+ * `drain-pass-over-budget`/`drain-merge-rate-drop` signs read. `null` when the file is absent (a host with no
+ * resident drain — the smells then have nothing to say, rather than reading "zero merges").
+ */
+export function probeDrainHistory({ path = defaultDrainHistoryPath(), nowMs = Date.now(), windowMs = 7 * HOUR, read = readJsonlTail } = {}) {
+  if (!existsSync(path)) return null;
+  const { entries } = read(path, { maxBytes: 4 * 1024 * 1024 });
+  return entries
+    .map((e) => ({ at: Date.parse(e?.at || ''), ms: e?.ms, exit: e?.exit, considered: e?.considered ?? 0, merged: e?.merged ?? 0, deferred: e?.deferred ?? 0, failed: e?.failed ?? 0 }))
+    .filter((e) => Number.isFinite(e.at) && e.at <= nowMs && nowMs - e.at <= windowMs);
 }
 
 /**
@@ -669,6 +743,11 @@ export async function tick(flags = {}) {
   probes.restBudget = flags['rest-budget-fixture']
     ? attempt('restBudget', () => JSON.parse(readFileSync(flags['rest-budget-fixture'], 'utf8'))) ?? null
     : (flags['no-gh'] ? null : attempt('restBudget', () => probeRestBudget()) ?? null);
+  // #4068 `drain-pass-over-budget` / `drain-merge-rate-drop` — fs-only, every tick: the resident drain's own
+  // per-pass history (`--drain-history=FILE` in tests). A fixture tick (`--lock-root` with no `--drain-history`)
+  // never reads the host's real file, same rule as `appToken` below.
+  probes.drainHistory = flags['lock-root'] && !flags['drain-history'] ? null
+    : attempt('drainHistory', () => probeDrainHistory({ ...(flags['drain-history'] ? { path: flags['drain-history'] } : {}), nowMs: now }));
   // #4066 `open-prs-over-limit` — fs/env only; pairs with the gh-cadenced `prs` read below.
   probes.prLimit = attempt('prLimit', () => probePrLimit());
 
@@ -690,6 +769,9 @@ export async function tick(flags = {}) {
     // #x9fbg1x — same cadence/gating reasoning as `authExpired` just above: needs only the same `agents`
     // listing, independent of whether `prs` also succeeded this tick.
     if (agents) probes.bgIsolationStalls = attempt('bgIsolationStalls', () => probeBgIsolationStalls(agents));
+    // #4068 — same `agents` listing, same gating: what can hold a PR as `live-process` (review jobs + PR-bound
+    // sessions) and how long since each last did anything.
+    if (agents) probes.liveBindings = attempt('liveBindings', () => probeLiveBindings(agents, { nowMs: now }));
     // stale-claim's two probes ride the same 'gh' cadence (both are gh/git-heavy reads); independent of the
     // prs/agents pairing above — one failing never blocks the other.
     const staleState = attempt('staleState', () => probeStaleState());
