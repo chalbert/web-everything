@@ -1,0 +1,76 @@
+{
+  "_note": "#4351 shape-equivalence pair, captured live 2026-09-29 for the SAME three PRs (merged/open/closed): `rest` from `gh api repos/chalbert/web-everything/pulls?state=all` (trimmed to the fields a converted reader uses + a few it ignores), `graphql` from the same pullRequests connection gh pr list --json number,state,title,headRefName,body reads. Bodies cut to 300 chars on BOTH sides.",
+  "rest": [
+    {
+      "number": 2895,
+      "state": "closed",
+      "title": "backlog: file 5 follow-ups from the PR #2867 take-over",
+      "body": "Files five follow-up cards from the 2026-09-29 (~12:30 AM ET) take-over of PR #2867. Cards only; no code.\n\n- **xsaj6u9:** the fix daemon's round-cap-exhausted take-over note only ran in dry-run mode, so #2867 sat idle for over an hour. Post it for real, once per head, and open a health finding.\n- **",
+      "draft": false,
+      "merged_at": "2026-09-29T04:46:48Z",
+      "closed_at": "2026-09-29T04:46:48Z",
+      "head": {
+        "ref": "lane/file-cards-0929-2867-followups",
+        "sha": "504b4049b6283a9d2f411437412d07c616538daa"
+      },
+      "base": {
+        "ref": "main"
+      }
+    },
+    {
+      "number": 2894,
+      "state": "open",
+      "title": "WE #4358: fix the review<->ci-heal deadlock (stale rerun + escalation outcome)",
+      "body": "## Live deadlock this closes\n\nPR #2878 (chalbert/web-everything, WE #4358, `review:pending`, idle since 2026-09-29 00:32Z):\n\n1. Its only red check was `review-gate`, red *because* the PR is `review:pending` (all CI — test, shards,\n   soak, smoke — was green).\n2. The fix/ci-heal daemon nonetheless di",
+      "draft": false,
+      "merged_at": null,
+      "closed_at": null,
+      "head": {
+        "ref": "lane/fix-review-ciheal-deadlock",
+        "sha": "d4506712559e2db22385ba7b3bc9966290cdadf6"
+      },
+      "base": {
+        "ref": "main"
+      }
+    },
+    {
+      "number": 2889,
+      "state": "closed",
+      "title": "backlog: file xg8t1yo — route gh reads through REST with conditional requests",
+      "body": "Files card **xg8t1yo**: route `gh` reads through REST with ETag conditional requests (304s cost no rate limit), keeping GraphQL only for GraphQL-only mutations (draft→ready, auto-merge).\n\nWhy: on 2026-09-28 at 9:11 PM ET the App installation's GraphQL bucket ran out and the drain stopped (pass exit ",
+      "draft": true,
+      "merged_at": null,
+      "closed_at": "2026-09-29T01:23:37Z",
+      "head": {
+        "ref": "lane/file-xg8t1yo-rest-reads",
+        "sha": "c4190f6dae9132c2c4bd2051896c5e63beefcc98"
+      },
+      "base": {
+        "ref": "main"
+      }
+    }
+  ],
+  "graphql": [
+    {
+      "number": 2895,
+      "state": "MERGED",
+      "title": "backlog: file 5 follow-ups from the PR #2867 take-over",
+      "headRefName": "lane/file-cards-0929-2867-followups",
+      "body": "Files five follow-up cards from the 2026-09-29 (~12:30 AM ET) take-over of PR #2867. Cards only; no code.\n\n- **xsaj6u9:** the fix daemon's round-cap-exhausted take-over note only ran in dry-run mode, so #2867 sat idle for over an hour. Post it for real, once per head, and open a health finding.\n- **"
+    },
+    {
+      "number": 2894,
+      "state": "OPEN",
+      "title": "WE #4358: fix the review<->ci-heal deadlock (stale rerun + escalation outcome)",
+      "headRefName": "lane/fix-review-ciheal-deadlock",
+      "body": "## Live deadlock this closes\n\nPR #2878 (chalbert/web-everything, WE #4358, `review:pending`, idle since 2026-09-29 00:32Z):\n\n1. Its only red check was `review-gate`, red *because* the PR is `review:pending` (all CI — test, shards,\n   soak, smoke — was green).\n2. The fix/ci-heal daemon nonetheless di"
+    },
+    {
+      "number": 2889,
+      "state": "CLOSED",
+      "title": "backlog: file xg8t1yo — route gh reads through REST with conditional requests",
+      "headRefName": "lane/file-xg8t1yo-rest-reads",
+      "body": "Files card **xg8t1yo**: route `gh` reads through REST with ETag conditional requests (304s cost no rate limit), keeping GraphQL only for GraphQL-only mutations (draft→ready, auto-merge).\n\nWhy: on 2026-09-28 at 9:11 PM ET the App installation's GraphQL bucket ran out and the drain stopped (pass exit "
+    }
+  ]
+}
