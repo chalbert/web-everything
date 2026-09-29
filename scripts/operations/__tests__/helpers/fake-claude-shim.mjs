@@ -257,6 +257,7 @@ export function parseBgArgv(argv) {
   let settingsRaw = null;
   let systemPromptFile = null;
   let resumeId = null;
+  let model = null;
   const disallowedTools = [];
   const operands = [];
   for (let i = 0; i < argv.length; i += 1) {
@@ -268,10 +269,13 @@ export function parseBgArgv(argv) {
     if (a === '--resume') { resumeId = argv[i += 1]; continue; }
     if (a === '--disallowedTools') { disallowedTools.push(...String(argv[i += 1] ?? '').split(',').filter(Boolean)); continue; }
     if (a.startsWith('--disallowedTools=')) { disallowedTools.push(...a.slice('--disallowedTools='.length).split(',').filter(Boolean)); continue; }
+    // #3857 / risk-based review tier — `buildAgentArgv` injects the table's `--model <id>`; a real CLI flag.
+    if (a === '--model' || a === '-m') { model = argv[i += 1]; continue; }
+    if (a.startsWith('--model=')) { model = a.slice('--model='.length); continue; }
     if (a.startsWith('-')) return { error: `unknown option ${a}` };
     operands.push(a);
   }
-  return { bg, name, settingsRaw, systemPromptFile, resumeId, disallowedTools, prompt: operands.join(' ') };
+  return { bg, name, settingsRaw, systemPromptFile, resumeId, model, disallowedTools, prompt: operands.join(' ') };
 }
 
 function parseSettingsEnv(settingsRaw) {
@@ -397,7 +401,7 @@ export function main(argv, env) {
   const cwd = process.cwd();
 
   if (parsed.resumeId) {
-    const extraFlagCount = [parsed.name, parsed.settingsRaw, parsed.systemPromptFile, parsed.disallowedTools.length ? 1 : null]
+    const extraFlagCount = [parsed.name, parsed.settingsRaw, parsed.systemPromptFile, parsed.model, parsed.disallowedTools.length ? 1 : null]
       .filter((x) => x !== null && x !== undefined).length;
     const existing = readStoreSnapshot(storePath);
     const match = findSessionIn(existing, parsed.resumeId);

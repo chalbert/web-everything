@@ -102,6 +102,19 @@ describe('runDaemonLoop — the pure control flow', () => {
 describe('runReviewTick — the per-tick sequence', () => {
   const owedPlan = (entries, refusals = []) => ({ dispatch: entries, refusals });
 
+  it('forwards the PR snapshot escalation and statute paths to the review session launcher', () => {
+    const dispatch = vi.fn(() => ({ agentId: 'review-agent' }));
+    runReviewTick({
+      readAgents: () => [],
+      readPrs: () => [{ number: 10, body: '## Escalation reason\n\n- statute',
+        files: [{ path: 'docs/agent/platform-decisions.md' }] }],
+      reconcile: () => owedPlan([{ kind: 'review', prNumber: 10 }]),
+      dispatch, tagRound: vi.fn(), tagStatus: vi.fn(), statusCandidates: () => [],
+    });
+    expect(dispatch).toHaveBeenCalledWith({ pr: 10, repo: 'chalbert/web-everything',
+      escalationReason: ['statute'], scopePaths: ['docs/agent/platform-decisions.md'] });
+  });
+
   it('dispatches every review-kind entry, tags its round, and ignores non-review kinds', () => {
     const reconcile = vi.fn(() => owedPlan([
       { kind: 'review', prNumber: 10, attempts: 1 },
@@ -112,7 +125,7 @@ describe('runReviewTick — the per-tick sequence', () => {
     const tagStatus = vi.fn();
     const out = runReviewTick({ reconcile, dispatch, tagRound, tagStatus, statusCandidates: () => [] });
     expect(dispatch).toHaveBeenCalledTimes(1);
-    expect(dispatch).toHaveBeenCalledWith({ pr: 10, repo: 'chalbert/web-everything' });
+    expect(dispatch).toHaveBeenCalledWith({ pr: 10, repo: 'chalbert/web-everything', escalationReason: [], scopePaths: [] });
     expect(tagRound).toHaveBeenCalledWith({ pr: 10, repo: expect.any(String), round: 2 }); // attempts+1
     expect(out).toEqual({
       reviewsOwed: 1, dispatched: [{ prNumber: 10, agentId: 'agent-10' }], failed: [], notStarted: [], refusals: 0,
@@ -371,8 +384,8 @@ describe('runReviewTick — #3383 bug 3: dispatch is capped by acquirableLanes, 
       statusCandidates: () => [], acquirableLanes,
     });
     expect(dispatch).toHaveBeenCalledTimes(2);
-    expect(dispatch).toHaveBeenCalledWith({ pr: 100, repo: expect.any(String) });
-    expect(dispatch).toHaveBeenCalledWith({ pr: 101, repo: expect.any(String) });
+    expect(dispatch).toHaveBeenCalledWith({ pr: 100, repo: expect.any(String), escalationReason: [], scopePaths: [] });
+    expect(dispatch).toHaveBeenCalledWith({ pr: 101, repo: expect.any(String), escalationReason: [], scopePaths: [] });
     expect(out.reviewsOwed).toBe(5); // still owed — a deferral is not a loss
     expect(out.dispatched).toHaveLength(2);
     expect(out.deferredForLanes).toBe(3);

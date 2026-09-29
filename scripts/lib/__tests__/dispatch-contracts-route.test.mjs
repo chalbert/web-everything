@@ -306,9 +306,12 @@ describe('the model-tier table (#3857)', () => {
     expect(out.tier).toBe('opus');
   });
 
-  it('a scope on scripts/operations/dispatch-lane-io.mjs is opus', () => {
-    const out = c.decideDispatchRoute({ kind: 'build', scopePaths: ['we:scripts/operations/dispatch-lane-io.mjs'], size: 3 });
-    expect(out.tier).toBe('opus');
+  it.each(['build', 'fix'])('normal-risk dispatch machinery %s is sonnet; high risk is opus', (kind) => {
+    const dispatch = { kind, scopePaths: ['we:scripts/operations/dispatch-lane-io.mjs'], size: 3 };
+    expect(c.decideDispatchRoute(dispatch).tier).toBe('sonnet');
+    const high = c.decideDispatchRoute({ ...dispatch, risk: 'high' });
+    expect(high.tier).toBe('opus');
+    expect(high.auditTrail.some(a => a.reasoning === 'high-risk work')).toBe(true);
   });
 
   it('a security-tagged card is opus', () => {

@@ -36,7 +36,13 @@ it('normalises a bare repo KEY (e.g. --repo=we) to its gh owner/name slug before
   // #4501 — `enrichMainRed` now also receives the live-fetched `requiredChecks` (here degraded to the
   // FALLBACK_REQUIRED_STATUS_CHECKS default, since `execFileSync` is mocked with no real `gh` behind it) —
   // this test's own concern (repo-key normalisation) is unaffected.
-  expect(enrichMainRed).toHaveBeenCalledWith([], { repo: 'chalbert/web-everything', defaultBranch: 'main', requiredChecks: ['test', 'smoke', 'daemon-soak'] });
+  // The live required-checks read goes through a host-level cache, so on a machine whose cache already holds the
+  // real branch-protection list (e.g. with `soak-replay-gate`) the list is a SUPERSET of the fallback — assert the
+  // fallback checks are present rather than pinning the exact host-dependent list.
+  expect(enrichMainRed).toHaveBeenCalledWith([], {
+    repo: 'chalbert/web-everything', defaultBranch: 'main',
+    requiredChecks: expect.arrayContaining(['test', 'smoke', 'daemon-soak']),
+  });
 });
 
 // #2748 false-red follow-up (soak-replay-gate, PR #2775) — `runReconcilePass` is the ONE call site wired

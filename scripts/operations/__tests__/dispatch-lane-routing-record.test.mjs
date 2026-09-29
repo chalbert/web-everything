@@ -73,13 +73,13 @@ const ITEM = { num: '9001', slug: 'route-check', scope: ['we:scripts/operations/
 
 /** Drive `readTick` directly (the io shell), fully hermetic: no `gh`, no `claude`, no real scorecard store, no
  *  real backlog file. Every process/fs boundary the shell reaches is stubbed. */
-function runReadTick(launchKind, { scorecards = [], deliveryAgentOverride = null, dispatchModes = () => ({}) } = {}) {
+function runReadTick(launchKind, { item = ITEM, scorecards = [], deliveryAgentOverride = null, dispatchModes = () => ({}) } = {}) {
   return readTick({
     num: ITEM.num,
     root: PRIMARY,
     runNode: () => JSON.stringify(tickFor(launchKind, ITEM.num)),
     readText: () => '# brief\n',
-    loadItems: () => [ITEM],
+    loadItems: () => [item],
     listInFlightDispatches: () => ({ runs: [], unreadable: 0 }),
     listAgents: () => [],
     recordLiveness: (s) => s,
@@ -109,6 +109,17 @@ const CODEX_TRIALS = ['bugfix', 'build-new-feature', 'doc-fix'].flatMap((taskTyp
 
 describe('(a) the no-op proof — critical-work gate keeps build/fix/ci-heal on Claude', () => {
   describe('with NO scorecards at all', () => {
+    it.each(['build', 'fix'])('%s carries card risk through to the explicit spawn model', (kind) => {
+      for (const [risk, model] of [['low', 'sonnet'], ['medium', 'sonnet'], ['high', 'opus']]) {
+        const read = runReadTick(kind, { item: { ...ITEM, risk,
+          scope: ['we:scripts/operations/dispatch-lane-io.mjs'] } });
+        expect(read.routing.risk).toBe(risk);
+        expect(read.plannedWorkerModel).toMatchObject({ model });
+        const argv = buildAgentArgv({ payload: { prompt: 'build it', num: ITEM.num }, table: read.plannedWorkerModel });
+        expect(argv[argv.indexOf('--model') + 1]).toBe(model);
+      }
+    });
+
     it('build → routed/executed claude, tier sonnet, plannedWorkerModel sonnet (alias)', () => {
       const read = runReadTick('build');
       expect(read.routing.outcome).toBe('routed');

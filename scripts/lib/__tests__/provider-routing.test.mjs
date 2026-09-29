@@ -1250,12 +1250,15 @@ describe('workerTierFor — the checked-in model-tier table (#3857)', () => {
     expect(workerTierFor({ kind: 'fix', tags: ['other-tag'] }).tier).toBe(CLAUDE_TIERS.SONNET);
   });
 
-  it('a scope path in DISPATCH_MACHINERY_PATHS, or kind dispatch-machinery, is opus: wide-blast-radius dispatch machinery', () => {
+  it('dispatch machinery defaults to sonnet and only high risk raises it to opus', () => {
     for (const p of DISPATCH_MACHINERY_PATHS) {
-      expect(workerTierFor({ kind: 'build', scopePaths: [p] }).tier).toBe(CLAUDE_TIERS.OPUS);
+      for (const risk of [undefined, 'low', 'medium']) {
+        expect(workerTierFor({ kind: 'build', scopePaths: [p], risk }).tier).toBe(CLAUDE_TIERS.SONNET);
+      }
+      expect(workerTierFor({ kind: 'build', scopePaths: [p], risk: 'high' }))
+        .toEqual({ tier: CLAUDE_TIERS.OPUS, reason: 'high-risk work' });
     }
-    expect(workerTierFor({ kind: 'build', scopePaths: DISPATCH_MACHINERY_PATHS }).reason).toBe('wide-blast-radius dispatch machinery');
-    expect(workerTierFor({ kind: 'dispatch-machinery' }).tier).toBe(CLAUDE_TIERS.OPUS);
+    expect(workerTierFor({ kind: 'dispatch-machinery' }).tier).toBe(CLAUDE_TIERS.SONNET);
     expect(DISPATCH_MACHINERY_PATHS).toEqual([
       'scripts/operations/dispatch-lane-io.mjs',
       'scripts/operations/dispatch-task.mjs',

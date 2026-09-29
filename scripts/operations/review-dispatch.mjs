@@ -164,7 +164,8 @@ import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
 import { reviewSessionSlug } from '../conveyor/review-session-slug.mjs';
 // #4194 — the added non-Claude review seats' routing (see `reviewSeatRoutes`).
 import { ADVISORY_LENSES, MANDATE_LENSES } from '../lib/jury-core.mjs';
-import { REVIEW_SEAT_PROVIDERS, selectReviewSeatProvider, AGY_CLAUDE_MODEL_BY_TIER } from '../lib/provider-routing.mjs';
+import { REVIEW_SEAT_PROVIDERS, selectReviewSeatProvider, workerTierFor, AGY_CLAUDE_MODEL_BY_TIER } from '../lib/provider-routing.mjs';
+import { careLevelFromReasons } from '../lib/review-core.mjs';
 import { CODEX_MODEL } from '../lib/codex-model-routing.mjs';
 import { ANTIGRAVITY_MODEL } from '../lib/antigravity-judge-spawn.mjs';
 // build-path-codex-isolation — the ONE shared bg-isolation helper every dispatch path calls.
@@ -509,6 +510,9 @@ export function planReviewDispatch({ pr, repo, checkoutExists = existsSync, home
  * @param {string} [o.root] - the cwd the dispatched session starts in (never a lane — it acquires its own).
  * @param {(root?: string) => string} [o.readBrief] - injectable brief-template reader.
  * @param {() => string} [o.mintSessionId] - injectable UUID minter.
+ * @param {string} [o.careLevel] - high selects Opus; other care bands default to Sonnet.
+ * @param {string[]} [o.escalationReason] - existing review-core reasons; high care raises to Opus.
+ * @param {string[]} [o.scopePaths] - touched paths; statute-tier paths raise to Opus.
  * @param {Function} [o.spawnAgent] - injectable `(argv, opts) => stdout`; the default shells `claude`.
  * @param {string[]} [o.extraArgs] - forwarded to `buildAgentArgv`, exactly like `dispatch-lane-io.mjs`'s own.
  * @param {(root: string) => ReturnType<typeof checkMainStaleness>} [o.checkStaleness] - injectable staleness
@@ -531,6 +535,7 @@ export function dispatchReview({
   extraArgs = [],
   checkStaleness,
   judgeProvider = 'claude',
+  careLevel = 'none', escalationReason = [], scopePaths = [],
   checkoutExists = existsSync, home = homedir(),
   // #x8mpubm follow-up (live-caught 2026-09-24, review-2591/2593/2600/2599/2594/2582) — THIS FUNCTION NEVER
   // WIRED THE GH-APP-SHIM AT ALL. `dispatch-lane-io.mjs#createDispatchSinks` resolves it for the conveyor's
@@ -585,7 +590,11 @@ export function dispatchReview({
   // #3433 — the mandatory deny list comes FIRST, ahead of any caller-supplied `extraArgs`: it is baked into
   // every dispatch regardless of what an operator's WE_DISPATCH_AGENT_ARGS sets, not something a caller opts
   // into. See `REVIEW_DISPATCH_DISALLOWED_TOOLS`'s own header for what it denies and why.
+  // Operator 2026-09-29: review sessions select an explicit tier before spawning.
+  const tierDecision = workerTierFor({ kind: 'review', scopePaths,
+    risk: careLevel === 'high' || careLevelFromReasons(escalationReason) === 'high' ? 'high' : undefined });
   const argv = buildAgentArgv({
+    table: { ...tierDecision, model: tierDecision.tier },
     sessionId,
     payload: { prompt, sessionSlug: planned.sessionSlug },
     systemPromptFile: REVIEW_DISPATCH_SYSTEM_PROMPT_FILE,
@@ -651,7 +660,7 @@ if (IS_CLI) {
       // applies when the flag is omitted, so `flag('judge-provider')` returning `undefined` here is the ordinary
       // case, not a gap.
       const result = dispatchReview({
-        pr: flag('pr'), repo: flag('repo'), extraArgs: agentArgsFromEnv(), judgeProvider: flag('judge-provider'),
+        pr: flag('pr'), repo: flag('repo'), extraArgs: agentArgsFromEnv(), judgeProvider: flag('judge-provider'), careLevel: flag('care-level'),
       });
       // #3331 — PRINT THE ID THAT ACTUALLY ADDRESSES THE SESSION. This used to print the minted uuid and tell the
       // operator to grep for it; that grep can never match (see `dispatchReview`), which is how a working
