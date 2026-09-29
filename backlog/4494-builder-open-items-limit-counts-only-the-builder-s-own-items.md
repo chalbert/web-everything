@@ -14,7 +14,7 @@ tags: []
 
 # Builder open-items limit counts only the builder's own items
 
-Operator decision 2026-09-29 ~1:40 PM ET: the builder's open-items cap (wip-cap, #4353, maxOpenItems=7) must count only the builder's own items, not items built by hand-dispatched workers. Live 2026-09-29T17:26:28Z, we:scripts/conveyor/build-dispatch-policy.mjs's planBuildDispatch (~lines 241-283) built the WIP set as {inFlight} union {delivered-by-open-PR}, where the PR side is every open PR whose branch names a card (prDeliveredNum); openItems read 7/7 filled by 4293, 4304, 4312, 4314, 4318, 4321, x4mfp16 -- six worker PRs [seven listed; a miscount in the original operator note, left uncorrected in their own words above, flagged by /converge round 2's claim-accuracy lens] -- so wip-cap held 4382, 4131, 4319 and the builder built nothing. Same shape as the #4464 cap fix (PR #2924), which made maxConcurrentBuilds count only the builder's own builds.
+Operator decision 2026-09-29 ~1:40 PM ET: the builder's open-items cap (wip-cap, #4353, maxOpenItems=7) must count only the builder's own items, not items built by hand-dispatched workers. Live 2026-09-29T17:26:28Z, we:scripts/conveyor/build-dispatch-policy.mjs's planBuildDispatch (~lines 241-283) built the WIP set as {inFlight} union {delivered-by-open-PR}, where the PR side is every open PR whose branch names a card (prDeliveredNum); openItems read 7/7 filled by 4293, 4304, 4312, 4314, 4318, 4321, 4484 -- six worker PRs [seven listed; a miscount in the original operator note, left uncorrected in their own words above, flagged by /converge round 2's claim-accuracy lens] -- so wip-cap held 4382, 4131, 4319 and the builder built nothing. Same shape as the #4464 cap fix (PR #2924), which made maxConcurrentBuilds count only the builder's own builds.
 
 ## Prepare verification (2026-09-29, re-checked against fresh `main`)
 
@@ -37,9 +37,9 @@ via the shared `deriveDispatchedByBuilder(runStoreInFlight, settledRows)` helper
 independently-drifting copies), and threads the result into `planBuildDispatch` as a new, optional
 parameter.
 
-This card was JIT-numbered #4494 (`bornAs: xovjhwh`) by the drain while this lane was already
+This card was JIT-numbered #4494 (`bornAs: 4494`) by the drain while this lane was already
 mid-build against the hash-named file; this numbered file supersedes and replaces
-`we:backlog/xovjhwh-builder-open-items-limit-counts-only-the-builder-s-own-items.md` (removed in the
+`we:backlog/4494-builder-open-items-limit-counts-only-the-builder-s-own-items.md` (removed in the
 same commit) — same content, same claim, one canonical file.
 
 ## Design
@@ -58,7 +58,7 @@ Those same worker PRs still count toward `maxOpenPrs` (unchanged — a separate 
 volume, not builder attribution) and still participate in scope-overlap holds (`hot-file`,
 unchanged — a worker's in-flight scope must still block a conflicting builder dispatch). Only the
 `wip-cap` (`maxOpenItems`) arithmetic changes. This mirrors the shape of the `maxConcurrentBuilds`
-fix (x3vs6tu/#4464, PR #2924): that fix made the *build-slot* cap count only the builder's own
+fix (4464/#4464, PR #2924): that fix made the *build-slot* cap count only the builder's own
 in-flight builds instead of every machine-wide "building" signal; this fix makes the *open-items*
 cap count only the builder's own open-PR deliveries instead of every open PR that merely names a
 card.
@@ -92,24 +92,24 @@ card.
 - **Soak break** (`we:scripts/conveyor/soak/breaks/wip-cap-counts-worker-prs.mjs`, discovered by
   `we:scripts/conveyor/soak/breaks/index.mjs`): reproduces the live incident's own numbers directly
   against `planBuildDispatch` — cap 7, the same 7 worker-delivered nums
-  (4293/4304/4312/4314/4318/4321/x4mfp16), zero of them the builder's own dispatch, and the 3 held
+  (4293/4304/4312/4314/4318/4321/4484), zero of them the builder's own dispatch, and the 3 held
   candidates (4382/4131/4319). `node we:scripts/conveyor/soak/red-green.mjs
   --break=wip-cap-counts-worker-prs --revert=HEAD` proved RED before the fix (all 3 candidates held
   `wip-cap`) and GREEN with it (all 3 dispatch) — run live in this lane, verbatim output on the PR.
 - **Live dry-run before/after**, `node we:skills-src/conveyor/build-dispatch-daemon.mjs --dry-run
   --json`, run from this lane (final, post-rebase) against the SAME live open-PR set both times (7
   open PRs, unchanged between the two calls: we#2978/2977/2976/2975/2974/2972/2967 —
-  `lane/xvprtq3-prevention-card` / `xupbp7k-prevention-card` / `agy-cards-xao7080-xpse6qy` /
-  `xcm15dy-agy-claude-effort-argv-fix` / `4108-dedupe-listing` / `xt3rawp-prevention-card` /
+  `lane/4514-prevention-card` / `4513-prevention-card` / `agy-cards-4518-4519` /
+  `4516-agy-claude-effort-argv-fix` / `4108-dedupe-listing` / `4520-prevention-card` /
   `4465-hold-router`). **Before** (fix reverted, `git checkout <pre-fix commit> --` the two touched
-  files): `openItems` read `{"count":7,"cap":7,"filling":["4108","4382","4465","xcm15dy","xt3rawp","xupbp7k","xvprtq3"]}`
+  files): `openItems` read `{"count":7,"cap":7,"filling":["4108","4382","4465","4516","4520","4513","4514"]}`
   — AT THE CAP, matching the live incident's own shape: `4382` is this builder's own durable
   in-flight build (unconditionally counted either way), and the other SIX (`4108`, `4465`,
-  `xcm15dy`, `xt3rawp`, `xupbp7k`, `xvprtq3`) are every one of the worker-authored PRs above whose
+  `4516`, `4520`, `4513`, `4514`) are every one of the worker-authored PRs above whose
   branch matches the delivery-ref shape — none of them this builder's own dispatch, all counted
   anyway. **After** (fix restored): the SAME 7 open PRs produced
   `{"count":1,"cap":7,"filling":["4382"]}` — only the builder's own in-flight item counts; all six
-  worker PRs dropped out. (`we#2976`'s `agy-cards-xao7080-xpse6qy` branch never matched the
+  worker PRs dropped out. (`we#2976`'s `agy-cards-4518-4519` branch never matched the
   delivery-ref shape at all, so it correctly appears in neither list, before or after — it already
   only counted toward `maxOpenPrs`, unchanged.) This is a clean, same-inputs before/after: the ONLY
   thing that changed between the two calls is the code, and the wip-cap went from AT CAPACITY
@@ -134,7 +134,7 @@ card.
   but a future card could make either read fail CLOSED (fall back to the old unfiltered union on a
   read error) if that bound proves insufficient live.
 - **A check:standards rule for two backlog files sharing one `bornAs`** (converge round 1,
-  claim-accuracy finding): this card itself hit a JIT-numbering collision mid-build (`xovjhwh` →
+  claim-accuracy finding): this card itself hit a JIT-numbering collision mid-build (`4494` →
   `#4494`, reconciled by hand in this same PR) — a mechanical guard that flags two files with the
   same `bornAs` would catch a future case where the hash-named file was NOT correctly removed.
 
