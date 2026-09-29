@@ -7,6 +7,7 @@
  * declared operation that does it for every lane in a pool, read-only, in one pass:
  *
  *   node scripts/lane-whois.mjs [--lane=N] [--json] [--repo=<checkout>] [--branch=<ref>] [--pool-root=<path>]
+ *   node scripts/lane-whois.mjs --history <N> [--json] [--pool-root=<path>]   # #4370 lane N's lifecycle journal
  *
  * READ-ONLY, ALWAYS: every git/gh call this file makes is a read (`status`, `log`, `rev-list`, `cherry`,
  * `show`, `branch -r --contains`, `gh pr list`) or a listing (`claude agents --json`). It never resets,
@@ -47,11 +48,11 @@ import { pathToFileURL } from 'node:url';
 
 import { guardedPoolRoot } from './lib/lane-pool-paths.mjs';
 import { LEASE_FILENAME, isLeaseStale, describeLease, laneHolderSlug, DEFAULT_LEASE_TTL_MINUTES } from './lib/lane-lease.mjs';
-import { readLaneHistory, lastLaneHistoryEntry } from './lib/lane-history.mjs';
+import { readLaneHistory, lastLaneHistoryEntry, readLaneJournal } from './lib/lane-history.mjs';
 import { claudeProjectsRoot, scanLaneTranscripts, summarizeLaneTouches } from './lib/lane-transcript-attribution.mjs';
 import { liveAgentInLane } from './lib/lane-salvage.mjs';
 import {
-  guessCardIds, classifyLaneVerdict, holderPresumedAlive, prsMatchingCard, keepMarkerApplies,
+  guessCardIds, classifyLaneVerdict, holderPresumedAlive, prsMatchingCard, keepMarkerApplies, formatLaneTimeline,
 } from './lib/lane-whois-core.mjs';
 import { readField } from './backlog/frontmatter.mjs';
 import { execFileSyncThrottled } from './lib/gh-throttle.mjs';
@@ -589,11 +590,34 @@ function printReport(report) {
   }
 }
 
+/**
+ * #4370 — `lane-whois --history <lane>` (also `--history=<lane>`): print lane N's lifecycle journal timeline
+ * (every lease write/delete, reset, clean, reclaim, litter deletion — with its actor and reason). Read-only; no
+ * git, no `gh`, no agents scan. `--json` prints the raw entries.
+ */
+export function laneHistoryReport({ poolDir, lane }) {
+  const n = Number(lane);
+  if (!Number.isInteger(n) || n < 1) throw new Error('--history needs a lane number (e.g. `--history 18` or `--history=18`)');
+  const entries = readLaneJournal(poolDir, { lane: n });
+  return { poolDir, lane: n, entries, lines: formatLaneTimeline(entries, { lane: n }) };
+}
+
 export function main(argv = process.argv.slice(2)) {
   const flags = {};
+  const positional = [];
   for (const a of argv) {
     const m = /^--([^=]+)=(.*)$/.exec(a) || /^--(.+)$/.exec(a);
     if (m) flags[m[1]] = m[2] === undefined ? true : m[2];
+    else positional.push(a);
+  }
+  if (flags.history !== undefined) {
+    const { poolDir } = resolvePool({
+      checkoutRoot: flags.repo || process.cwd(), poolRootOverride: flags['pool-root'], poolName: flags.name,
+    });
+    const report = laneHistoryReport({ poolDir, lane: flags.history === true ? (flags.lane ?? positional[0]) : flags.history });
+    if (flags.json) process.stdout.write(`${JSON.stringify({ poolDir: report.poolDir, lane: report.lane, entries: report.entries }, null, 2)}\n`);
+    else console.log(report.lines.join('\n'));
+    return;
   }
   const { poolDir, branch } = resolvePool({
     checkoutRoot: flags.repo || process.cwd(),

@@ -135,6 +135,11 @@ import { readField } from './backlog/frontmatter.mjs';
 // records that — see `scripts/lane-whois.mjs`, the reader). Lives in its OWN module (another worker owns this
 // file for PR #2606 concurrently) — the four call sites below are the only hook points.
 import { appendLaneHistory, laneHistoryEntry, readLaneHistory, lastLaneHistoryEntry } from './lib/lane-history.mjs';
+// #4370 — the per-POOL lifecycle audit journal (`<poolDir>/.lane-journal.jsonl`): every lease write/delete and
+// every reset/clean below appends one line naming its ACTOR, reason, HEAD before→after and the dirty/ahead/
+// unpushed state it found. `check:standards` (`findUnjournaledLaneMutations`) flags a new mutation point here
+// that forgets to call `journalLaneEvent`.
+import { journalLaneEvent, laneStateSnapshot, destructiveActionVerdict } from './lib/lane-history.mjs';
 // #3568 — the shared known-safe-scratch-litter allowlist + cleanup core, reused verbatim by the periodic
 // `we:scripts/conveyor/lane-pool-health-watch.mjs` pass so the two never diverge into two separately-maintained
 // lists. Side-effect-free at import (no top-level dispatch), like every other `./lib/*.mjs` import above.
@@ -526,6 +531,7 @@ function ensureOneSibling(repo, name, { force = false } = {}) {
   }
 
   tryGit(['checkout', '--quiet', '-B', branch, `origin/${branch}`], dest);
+  // journal-exempt: a pool-root constellation SIBLING clone, not a `lane-N` (the journal is per lane).
   tryGit(['reset', '--hard', `origin/${branch}`, '--quiet'], dest);
   tryGit(['clean', '-fd', '--quiet'], dest);
   buildSibling(dest, name);
@@ -1125,8 +1131,16 @@ function refreshLane(repo, n, { force = false } = {}) {
       return { skipped: true, dirty, uncommitted, ahead };
     }
   }
+  // #4370 — `refresh --force` is an operator's explicit override of the dirty/ahead guard, so it may destroy
+  // unpushed work; it is never refused here, but it is journalled LOUD when it does (never silent).
+  const before = laneStateSnapshot(dir, `origin/${repo.branch}`);
+  const verdict = destructiveActionVerdict({ unpushed: before.unpushed, override: force });
   git(['reset', '--hard', `origin/${repo.branch}`, '--quiet'], dir);
   git(['clean', '-fd', '--quiet'], dir); // remove untracked, KEEP ignored (node_modules) — no -x
+  journalLaneEvent(dir, {
+    action: 'refresh-reset', before, headAfter: laneStateSnapshot(dir, `origin/${repo.branch}`).head,
+    reason: force ? `refresh --force (${verdict.reason})` : 'refresh — clean lane fast-forwarded', loud: verdict.loud || undefined,
+  });
   return { skipped: false, dirty: false, uncommitted: 0, ahead: 0 };
 }
 
@@ -1497,6 +1511,11 @@ function tryClaimLane(dir, session, nowMs, ttlMs) {
     const laneNum = /lane-(\d+)$/.exec(dir)?.[1] ?? '?';
     acquireReclaimTestBarrier();
     if (!takeMarkerIf(dir, (moved) => sameLease(moved, existing), laneNum)) return null;
+    // #4370 — the dead holder's lease EXPIRED and was dropped here; the new lease is journalled by the acquire.
+    journalLaneEvent(dir, {
+      action: 'lease-expire', reason: `stale lease taken over by acquire (${describeLease(existing)})`,
+      leaseSession: existing?.session, leaseOwnerSession: existing?.ownerSession || undefined,
+    });
     // A reclaim is a NEW hold by a NEW holder, so it mints a fresh slug — the dead owner's slug must not carry
     // over, or a returning zombie would still assert its way past the guard. The dead owner's declared
     // OCCUPANCY is dropped for the same reason (only `--adopt` re-declares it for the new holder).
@@ -1654,6 +1673,10 @@ function reapDeadLeasesInPool(repo, nowMs, ttlMs) {
         event: 'reap', session: c.lease?.session, ownerSession: c.lease?.ownerSession || null,
         holder: laneHolderSlug(c.lease), item: itemNumFromSession(c.lease?.session), reason: c.reason,
       }));
+      journalLaneEvent(c.dir, {
+        action: 'reap', reason: c.reason, before: laneStateSnapshot(c.dir, `origin/${repo.branch}`),
+        leaseSession: c.lease?.session, leaseOwnerSession: c.lease?.ownerSession || undefined,
+      });
       unmapLanes(repo, [c.lane]); // a reaped ghost no longer renders its dead item (#2139)
       log(`  reaped lane-${c.lane} before acquire (${c.reason}; was ${describeLease(c.lease)}) — ghost lease reclaimed (#2748)`);
       reaped.push(c.lane);
@@ -1682,6 +1705,7 @@ function clearForeignVerifyMarker(dir) {
 function restoreLeaseAfterRefusedClaim(dir, preExisting) {
   try {
     if (preExisting && !isLeaseStale(preExisting, Date.now(), ttlMsFromFlags())) writeLeaseAtomic(LEASE_MARKER(dir), JSON.stringify(preExisting, null, 2) + '\n');
+    // journal-exempt: drops only the claim THIS refused acquire just wrote — the lane never changed hands.
     else rmSync(LEASE_MARKER(dir), { force: true });
   } catch { /* the refusal still stands; a stale lease ages out on its own */ }
 }
@@ -1722,6 +1746,10 @@ function logReclaimedAheadCommits(dir, branch, n) {
  * @param {boolean} targetWasReserved - skip the reset entirely (an idempotent re-reserve)
  * @returns {string} the lane's directory
  */
+/** #4370 — the pre-reset state `provisionClaimedLane` found, per lane, so `cmdAcquire`'s own journal line can
+ *  report HEAD before→after across the whole acquire (one process only ever acquires one lane). */
+const acquireResetSnapshots = new Map();
+
 function provisionClaimedLane(repo, chosen, targetWasReserved) {
   const dir = laneDir(repo, chosen);
   if (!flags['no-reset'] && !targetWasReserved) {
@@ -1774,8 +1802,16 @@ function provisionClaimedLane(repo, chosen, targetWasReserved) {
     // reset on tree cleanliness (unlike `refreshLane`'s explicit `laneDirtyOrAhead` guard) — it must
     // unconditionally reclaim a lane regardless of stray edits left by a prior crashed/interrupted session, so
     // `--force` restores that same never-refuses guarantee `reset --hard` always gave it.
+    const before = laneStateSnapshot(dir, `origin/${repo.branch}`);
+    acquireResetSnapshots.set(chosen, before);
     git(['checkout', '-B', repo.branch, baseRef, '--quiet', '--force'], dir);
     git(['clean', '-fd', '--quiet'], dir);
+    // #4370 — the reset gets its own journal line NOW (a later deps/registry failure must not lose it).
+    journalLaneEvent(dir, {
+      action: 'acquire-reset', before, headAfter: laneStateSnapshot(dir, `origin/${repo.branch}`).head,
+      reason: `acquire → ${baseRef}${flags.force ? ' (--force)' : ''}`, session: flags.session || process.env.LANE_SESSION || undefined,
+      loud: before.unpushed ? true : undefined,
+    });
     unmapLanes(repo, [chosen]); // a reset lane no longer renders its old item (#2139)
     clearForeignVerifyMarker(dir);
   }
@@ -2260,6 +2296,15 @@ function cmdAcquire(repo) {
     item: flags.item,
     holder: holderSlug,
   }));
+  {
+    const now = laneStateSnapshot(dir, `origin/${repo.branch}`);
+    const before = acquireResetSnapshots.get(chosen) || now;
+    journalLaneEvent(dir, {
+      action: flags.reserve ? 'reserve' : 'acquire', before, headAfter: now.head,
+      reason: flags.purpose ? `acquire --purpose=${flags.purpose}` : 'acquire', session, holder: holderSlug,
+      item: flags.item !== undefined ? String(flags.item) : undefined, workerSession: occupant || undefined,
+    });
+  }
   if (occupant) log(`  occupant: ${occupant} (--adopt) — Edit/Write from any OTHER session is now refused (#2997)`);
   else log(`  occupant: NOT declared — hand this lane off with \`node scripts/lane-pool.mjs adopt --lane=${chosen}\` run BY the agent that will work in it (or re-run acquire with --adopt if that is you); until then the Edit/Write guard stays fail-open for this lane`);
   if (flags.json) process.stdout.write(JSON.stringify({ lane: chosen, path: dir, session, holder: holderSlug, workerSession: occupant, purpose: flags.purpose || null, branch: repo.branch, base: flags.base || null, reserved: !!flags.reserve }, null, 2) + '\n');
@@ -2382,6 +2427,10 @@ function cmdReleaseAllPools(repo) {
         continue;
       }
       rmSync(LEASE_MARKER(dir), { force: true });
+      journalLaneEvent(dir, {
+        action: 'release', reason: typeof flags.reason === 'string' ? flags.reason : `release --all-pools (${selectorLabel})`,
+        before: laneStateSnapshot(dir, 'origin/HEAD'), leaseSession: lease.session, leaseOwnerSession: lease.ownerSession || undefined,
+      });
       log(`  released ${name}/lane-${n} (was ${describeLease(lease)})`);
       lanes.push(n);
       released++;
@@ -2480,7 +2529,15 @@ function cmdRelease(repo) {
     // — the root cause of the 2026-09-07 incident this card documents (46 of 48 lanes DIRTY with only this
     // litter, the other 2 clean-but-ahead — the whole pool read 0 of 48 acquirable at once). Any
     // non-allowlisted dirty state (real uncommitted work) is left completely untouched by this call.
-    cleanLaneLitter(dir);
+    const beforeLitter = laneStateSnapshot(dir, `origin/${repo.branch}`);
+    const litter = cleanLaneLitter(dir);
+    if (litter?.removed?.length) {
+      journalLaneEvent(dir, {
+        action: 'litter-delete', before: beforeLitter, removed: litter.removed,
+        reason: `release reaped known-safe scratch litter: ${litter.removed.join(', ')}`,
+        unpushed: Number.isFinite(beforeLitter.unpushedCommits) ? beforeLitter.unpushedCommits > 0 : undefined,
+      });
+    }
     // #x96v5hl — was an unconditional `rmSync` right after the ownership/contested decision above, which was
     // made against `lease` as read at the TOP of this loop iteration — `cleanLaneLitter` and every check since
     // ran real fs/git calls in between, real wall-clock time during which the ACTUAL holder could legitimately
@@ -2497,6 +2554,14 @@ function cmdRelease(repo) {
       event: 'release', session, ownerSession: lease.ownerSession || null, workerSession: lease.workerSession || null,
       purpose: lease.purpose, item: itemNumFromSession(lease.session), holder: laneHolderSlug(lease),
     }));
+    // #4370 — the journal line names the ACTOR (a daemon sets LANE_JOURNAL_ACTOR on this child) and the WHY
+    // (`--reason=`, e.g. the reaper's `session-gone`), never just a host:pid.
+    journalLaneEvent(dir, {
+      action: 'release', before: beforeLitter,
+      reason: typeof flags.reason === 'string' ? flags.reason : (force ? 'release --force' : 'release'),
+      leaseSession: lease.session, leaseOwnerSession: lease.ownerSession || undefined,
+      leaseWorkerSession: lease.workerSession || undefined, item: itemNumFromSession(lease.session) ?? undefined,
+    });
     // #3466 — mirror acquire's write: a released lane must stop claiming the item it was working, the same way
     // cmdRefresh/cmdRemove/the acquire-time reset already clear it. Without this a release (or the reaper's
     // `release --force` reclaim, which delegates here) leaves the registry pointing at a lane that is free
@@ -3286,7 +3351,12 @@ function moveClaimedLaneToTrash(repo, n, session) {
     takeMarkerIf(dir, (moved) => moved?.session === session, n);
     return { keep: { kind: 'leased', reason: `rename-to-trash failed (${e.message}), kept` } };
   }
-  if (readLease(trashDir)?.session === session) return { trashDir };
+  if (readLease(trashDir)?.session === session) {
+    // #4370 — the lane is gone from the pool; the journal (next to the pool, not in the lane) keeps the record.
+    // `trim` only ever claims a lane whose work is provably pushed, so this is never an unpushed-work loss.
+    journalLaneEvent(dir, { action: 'trim-remove', reason: `trim over the pool cap → ${basename(trashDir)}` });
+    return { trashDir };
+  }
   try {
     renameSync(trashDir, dir);
   } catch (e) {
@@ -3492,6 +3562,15 @@ function laneReclaimPreservationProof(dir, branch) {
   };
 }
 
+/** #4370 — journal a reclaim/salvage REFUSAL (loud when the lane holds unpushed work). A periodic caller hits
+ *  the same kept lane every tick, so an identical repeat of the lane's previous journal line is skipped. */
+function journalReclaimRefusal(dir, repo, reason, { unpushed = false, before = null } = {}) {
+  const snap = before || laneStateSnapshot(dir, `origin/${repo.branch}`);
+  journalLaneEvent(dir, {
+    action: 'reclaim-refused', before: snap, reason, unpushed, loud: unpushed || undefined,
+  }, { unlessRepeat: true });
+}
+
 /**
  * `node scripts/lane-pool.mjs reclaim --lane=N [--dry-run] [--override] [--json]` — reset ONE unleased lane
  * back to `origin/<branch>`, but only once this call's OWN re-check (never the caller's) proves every
@@ -3541,6 +3620,7 @@ function cmdReclaim(repo) {
   }
   if (!proof.preserved && !override) {
     log(`  lane-${n}: NOT reclaimed — ${proof.reason}`);
+    if (!dryRun) journalReclaimRefusal(dir, repo, `not reclaimed — ${proof.reason}`, { unpushed: true });
     if (flags.json) process.stdout.write(`${JSON.stringify({ lane: n, path: dir, dryRun, reclaimed: false, ...proof }, null, 2)}\n`);
     return;
   }
@@ -3560,6 +3640,7 @@ function cmdReclaim(repo) {
     if (gate.eligible) return false;
     if (underHold) takeMarkerIf(dir, (moved) => moved?.session === ownSession, n);
     log(`  lane-${n}: KEPT (not reset) — ${gate.reason}${underHold ? ' (re-checked under the hold)' : ''}`);
+    if (!dryRun) journalReclaimRefusal(dir, repo, `kept — owner not proven gone: ${gate.reason}`);
     if (flags.json) {
       process.stdout.write(`${JSON.stringify({ lane: n, path: dir, dryRun, reclaimed: false, kept: true, keptReason: gate.reason, ...extra }, null, 2)}\n`);
     }
@@ -3619,19 +3700,41 @@ function cmdReclaim(repo) {
       ? `NEW unpreserved content appeared after the initial look — override never covers content nobody reviewed (${reproof.reason})`
       : `work appeared after the initial check (${reproof.reason})`;
     log(`  lane-${n}: NOT reclaimed — ${why}`);
+    journalReclaimRefusal(dir, repo, `not reclaimed — ${why}`, { unpushed: true });
     if (flags.json) process.stdout.write(`${JSON.stringify({ lane: n, path: dir, dryRun, reclaimed: false, override: overriding, ...reproof }, null, 2)}\n`);
     return;
   }
   // #xl5xhmj — re-check liveness UNDER the hold too, closing the same tiny race the preservation reproof above
   // already closes: a live session could start (or resume) in the window between the initial gate read and
   // this claim. Skipped only under `--override`, matching the initial gate above.
+  let relive = null;
   if (!override) {
-    const relive = laneLivenessGate({ dir }); // fresh ledger read too — catches a NEW entry since the first gate
+    relive = laneLivenessGate({ dir }); // fresh ledger read too — catches a NEW entry since the first gate
     if (reportKept(relive, reproof, { underHold: true, ownSession: session })) return;
+  }
+  // #4370 fork 3 — the ONE statement of "never destroy unpushed work unless the owner is provably gone (or a
+  // human overrode)". Every branch above already enforces it piecewise; this is the final word, right at the
+  // reset, and its verdict is what the journal line records.
+  const before = laneStateSnapshot(dir, `origin/${repo.branch}`);
+  const verdict = destructiveActionVerdict({
+    unpushed: !reproof.preserved, ownerGone: relive ? relive.eligible : null, override: overriding, ownerReason: relive?.reason,
+  });
+  if (!verdict.allowed) {
+    takeMarkerIf(dir, (moved) => moved?.session === session, n);
+    log(`  lane-${n}: NOT reclaimed — ${verdict.reason}`);
+    journalReclaimRefusal(dir, repo, `not reclaimed — ${verdict.reason}`, { unpushed: true, before });
+    if (flags.json) process.stdout.write(`${JSON.stringify({ lane: n, path: dir, dryRun, reclaimed: false, ...reproof }, null, 2)}\n`);
+    return;
   }
   execFileSync('git', ['reset', '--hard', `origin/${repo.branch}`], { cwd: dir, stdio: 'ignore', ...defaultGitTimeoutOpt() });
   execFileSync('git', ['clean', '-fd'], { cwd: dir, stdio: 'ignore', ...defaultGitTimeoutOpt() });
   rmSync(file, { force: true }); // back to the free-pool state — the same end state a normal `release` leaves
+  journalLaneEvent(dir, {
+    action: 'reclaim-reset', before, headAfter: laneStateSnapshot(dir, `origin/${repo.branch}`).head,
+    unpushed: !reproof.preserved, preserved: reproof.preserved, override: overriding || undefined,
+    reason: `${typeof flags.reason === 'string' ? `${flags.reason}: ` : ''}${reproof.reason}${relive ? `; ${relive.reason}` : ''}`,
+    loud: verdict.loud || undefined,
+  });
   log(`  lane-${n}: reclaimed${overriding ? ' (OVERRIDE, #4139 — operator call)' : ''} — reset to origin/${repo.branch} (${reproof.reason})`);
   if (flags.json) process.stdout.write(`${JSON.stringify({ lane: n, path: dir, dryRun, reclaimed: true, override: overriding, ...reproof }, null, 2)}\n`);
 }
@@ -3654,6 +3757,7 @@ function cmdReclaimSalvage(repo, { n, dir, dryRun, lease, proof }) {
   const g = gate();
   if (!g.eligible) {
     log(`  lane-${n}: KEPT (not salvaged) — ${g.reason}`);
+    if (!dryRun) journalReclaimRefusal(dir, repo, `kept (not salvaged) — ${g.reason}`, { unpushed: !proof.preserved });
     out({ reclaimed: false, salvaged: false, kept: true, keptReason: g.reason, ...proof });
     return;
   }
@@ -3679,6 +3783,7 @@ function cmdReclaimSalvage(repo, { n, dir, dryRun, lease, proof }) {
   if (!g2.eligible) {
     giveBack();
     log(`  lane-${n}: KEPT (not salvaged) — ${g2.reason} (re-checked under the hold)`);
+    journalReclaimRefusal(dir, repo, `kept (not salvaged) — ${g2.reason} (re-checked under the hold)`, { unpushed: !proof.preserved });
     out({ reclaimed: false, salvaged: false, kept: true, keptReason: g2.reason });
     return;
   }
@@ -3708,10 +3813,18 @@ function cmdReclaimSalvage(repo, { n, dir, dryRun, lease, proof }) {
     out({ reclaimed: false, salvaged: false, kept: true, keptReason: `salvage failed: ${String(e?.message || e).split('\n')[0]}` });
     return;
   }
+  const before = laneStateSnapshot(dir, `origin/${repo.branch}`);
   const removedWorktrees = removeLitterWorktrees(dir, salvage.worktrees);
   execFileSync('git', ['reset', '--hard', `origin/${repo.branch}`], { cwd: dir, stdio: 'ignore', ...defaultGitTimeoutOpt() });
   execFileSync('git', ['clean', '-fd'], { cwd: dir, stdio: 'ignore', ...defaultGitTimeoutOpt() });
   rmSync(file, { force: true });
+  // #4370 — unpushed content here was SAVED first (a verified bundle), and the owner was proven gone (g2).
+  journalLaneEvent(dir, {
+    action: 'salvage-reset', before, headAfter: laneStateSnapshot(dir, `origin/${repo.branch}`).head,
+    unpushed: !proof.preserved, salvagedTo: salvage.bundle || salvage.outDir || undefined,
+    reason: `${typeof flags.reason === 'string' ? `${flags.reason}: ` : ''}${proof.reason}; ${g2.reason}`,
+    removedWorktrees: removedWorktrees.length ? removedWorktrees : undefined,
+  });
   log(`  lane-${n}: salvaged-to ${salvage.bundle || '(nothing unique — patch/index only)'} [${salvage.refs.join(', ') || 'no refs'}]` +
     `${removedWorktrees.length ? `, removed worktree(s) ${removedWorktrees.join(', ')}` : ''} — reset to origin/${repo.branch}`);
   out({ reclaimed: true, salvaged: true, salvage: { bundle: salvage.bundle, outDir: salvage.outDir, refs: salvage.refs, cards: salvage.cards, prs: salvage.prs }, removedWorktrees });
@@ -3787,6 +3900,10 @@ function cmdAdopt(repo) {
   writeFileSync(LEASE_MARKER(dir), JSON.stringify({ ...lease, workerSession: me }, null, 2) + '\n');
   // #3383 — record the occupancy hand-off in the lane-history ledger (best-effort).
   appendLaneHistory(dir, laneHistoryEntry({ event: 'adopt', ownerSession: me, workerSession: me, session: lease.session }));
+  journalLaneEvent(dir, {
+    action: 'adopt', reason: current && current !== me ? `took over from ${current}` : 'occupant declared',
+    before: laneStateSnapshot(dir, `origin/${repo.branch}`), leaseSession: lease.session, workerSession: me,
+  });
   log(`  adopted lane-${n} — occupant session is now ${me}${current && current !== me ? ` (took over from ${current})` : ''}`);
   log('    Edit/Write into this lane from ANY other session is now refused by guard-lane.mjs (#2997).');
   if (flags.json) process.stdout.write(JSON.stringify({ lane: n, path: dir, workerSession: me, previousWorkerSession: current }, null, 2) + '\n');

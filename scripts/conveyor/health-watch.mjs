@@ -54,6 +54,8 @@ import {
 
 export { healthDir, healthSectionLines };
 import { CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
+import { laneJournalPath, readLaneJournalTail } from '../lib/lane-history.mjs';
+import { defaultPoolRoot } from '../lib/lane-pool-paths.mjs';
 // #4317 — the same "which paths are DAEMON clones" registry `guard-lane.mjs`/`guard-bash.mjs` already use, so
 // this probe's notion of "a daemon clone" can never drift from the guards'.
 import { daemonCloneRoots } from '../lib/daemon-clone-registry.mjs';
@@ -360,9 +362,37 @@ export function probeLanePools(logsDir) {
     if (!existsSync(path)) continue;
     const st = statSync(path);
     const text = readRange(path, Math.max(0, st.size - 512 * 1024), st.size);
-    const matches = [...text.matchAll(/\{"checked":true,"health":(\{[^}]*\})/g)];
+    // #4370 — `workerWithoutLease` (lane numbers with a live worker but no lease) rides right after `health`
+    // on the same line; absent on a line written before #4370 or on a tick whose whois scan did not run.
+    const matches = [...text.matchAll(/\{"checked":true,"health":(\{[^}]*\})(?:,"workerWithoutLease":(\[[\d,]*\]|null))?/g)];
     if (!matches.length) continue;
-    try { out.push({ repo: key, health: JSON.parse(matches.at(-1)[1]), at: st.mtimeMs }); } catch { /* skip */ }
+    try {
+      const last = matches.at(-1);
+      const reading = { repo: key, health: JSON.parse(last[1]), at: st.mtimeMs };
+      if (last[2] && last[2] !== 'null') reading.workerWithoutLease = JSON.parse(last[2]);
+      out.push(reading);
+    } catch { /* skip */ }
+  }
+  return out;
+}
+
+/**
+ * #4370 — the `lane-destructive-unpushed` smell's input: the recent tail of every pool's lane lifecycle journal
+ * (`<poolRoot>/<pool>/.lane-journal.jsonl`), entries newer than `windowMs` only. fs-only, cheap. `[]` when no
+ * pool has a journal yet.
+ * @returns {Array<{pool:string, entries:Array<object>}>}
+ */
+export function probeLaneJournal({ poolRoot, now = Date.now(), windowMs = 24 * 60 * MINUTE } = {}) {
+  if (!poolRoot || !existsSync(poolRoot)) return [];
+  const out = [];
+  for (const pool of readdirSync(poolRoot)) {
+    const poolDir = join(poolRoot, pool);
+    if (!existsSync(laneJournalPath(poolDir))) continue;
+    const entries = readLaneJournalTail(poolDir).filter((e) => {
+      const t = Date.parse(e?.ts);
+      return Number.isFinite(t) && now - t <= windowMs;
+    });
+    out.push({ pool, entries });
   }
   return out;
 }
@@ -692,6 +722,12 @@ export async function tick(flags = {}) {
     : (attempt('daemonStatus', () => probeDaemonStatus()) ?? attempt('leases', leaseScan));
   probes.selfSync = attempt('selfSync', () => probeSelfSync(flags['self-sync-dir'] || defaultSelfSyncDir()));
   probes.lanePools = attempt('lanePools', () => probeLanePools(logsDir));
+  // #4370 — fs-only, every tick. A fixture tick (any of the fixture-dir flags) reads only an explicit
+  // `--lane-pool-root`, never the host's real pool.
+  const fixtureTick = flags['logs-dir'] || flags['lock-root'] || flags['state-root'];
+  probes.laneJournal = attempt('laneJournal', () => probeLaneJournal({
+    poolRoot: flags['lane-pool-root'] || (fixtureTick ? null : defaultPoolRoot(REPO_ROOT)), now,
+  }));
   // #4200-ish — cheap, fs-only, every tick: catches a shim baked with a lane-clone path BEFORE that lane resets.
   probes.ghShimLanes = attempt('ghShimLanes', () => probeGhShimLanes());
   // #4317 — cheap, every tick: an aged untracked backlog card sitting inside a daemon clone (the exact class of

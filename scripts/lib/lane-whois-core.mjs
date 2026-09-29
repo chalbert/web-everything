@@ -215,3 +215,37 @@ export function isLaneAlreadyClean({
   if (expectedBranch != null && branch !== expectedBranch) return false;
   return true;
 }
+
+/**
+ * #4370 — PURE: render one lane's lifecycle-journal entries (oldest first, as `lib/lane-history.mjs#readLaneJournal`
+ * returns them) as the `lane-whois --history <lane>` timeline — one line per event: when, what, WHO (actor name,
+ * pid, parent pid, script, session), HEAD before→after, the dirty/ahead/unpushed state it found, and why. A
+ * loud entry (a destructive action on unpushed work, or a refusal of one) is flagged `⚠`.
+ * @param {Array<object>} entries
+ * @param {{lane?: number|string}} [o]
+ * @returns {string[]}
+ */
+export function formatLaneTimeline(entries, { lane } = {}) {
+  const list = Array.isArray(entries) ? entries.filter((e) => e && typeof e === 'object') : [];
+  const title = `lane-${lane ?? list[0]?.lane ?? '?'} lifecycle journal`;
+  if (!list.length) return [`${title}: no events recorded`];
+  const short = (sha) => (sha ? String(sha).slice(0, 9) : '?');
+  const lines = [`${title} (${list.length} event${list.length === 1 ? '' : 's'}):`];
+  for (const e of list) {
+    const a = e.actor || {};
+    const detail = [a.pid ? `pid ${a.pid}` : null, a.ppid ? `ppid ${a.ppid}` : null, a.script || null, a.session ? `session ${a.session}` : null]
+      .filter(Boolean).join(', ');
+    const actor = `${a.name || 'unknown'}${detail ? ` (${detail})` : ''}`;
+    const head = e.headBefore || e.headAfter
+      ? (e.headBefore && e.headAfter && e.headBefore !== e.headAfter ? `HEAD ${short(e.headBefore)}→${short(e.headAfter)}` : `HEAD ${short(e.headAfter || e.headBefore)}`)
+      : null;
+    const state = [
+      Number.isFinite(e.dirtyBefore) ? `dirty ${e.dirtyBefore}` : null,
+      Number.isFinite(e.aheadBefore) ? `ahead ${e.aheadBefore}` : null,
+      typeof e.unpushed === 'boolean' ? `unpushed ${e.unpushed ? 'YES' : 'no'}` : null,
+    ].filter(Boolean).join(' ');
+    const parts = [e.ts || '?', `${e.loud ? '⚠ ' : ''}${e.action || '?'}`, `by ${actor}`, head, state || null].filter(Boolean);
+    lines.push(`  ${parts.join('  ')}${e.reason ? `  — ${e.reason}` : ''}`);
+  }
+  return lines;
+}

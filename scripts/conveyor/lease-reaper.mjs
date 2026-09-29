@@ -109,6 +109,8 @@ import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 // every other conveyor script already keys off, never a private re-derivation here.
 import { CONSTELLATION_REPOS, repoKeyForDir } from '../lib/constellation-repos.mjs';
 import { isCherryOutputAllPatchEquivalent } from '../lib/git-patch-equivalence.mjs';
+import { LANE_JOURNAL_ACTOR_ENV } from '../lib/lane-history.mjs';
+import { timestampLines } from '../lib/log-timestamp.mjs';
 // #3383 (this incident, 2026-09-14) — REUSE, never reimplement, the real PID-liveness probe `driver-watchdog.mjs`
 // just built for the IDENTICAL gap in a different place: a `claude agents --json` row can be a PHANTOM — still
 // LISTED (present, in some non-terminal state like `working`/`blocked`), with NO backing OS process at all (that
@@ -1072,7 +1074,9 @@ const LANE_POOL_CLI = join(HERE, '..', 'lane-pool.mjs');
 const expandHome = (p) => (p && p.startsWith('~') ? join(homedir(), p.slice(1)) : p);
 const POOL_ROOT = expandHome(process.env.LANE_POOL_ROOT) || join(homedir(), 'workspace', '.lanes');
 
-const log = (m) => process.stderr.write(m + '\n');
+// #4370 fork 4 — every reaper log line carries an ISO timestamp (the 2026-09-28 lane-18 reap could only be
+// placed in time by line number).
+const log = (m) => process.stderr.write(timestampLines(`${m}\n`));
 
 /** Read + parse a lane's `.lane-lease` marker → the lease object, or null (missing / corrupt reads as none). */
 function readLease(dir) {
@@ -1246,14 +1250,24 @@ function readDetachedWrapperPids(store = createFileRunStore()) {
   return detachedWrapperPidsBySession(runs);
 }
 
-/** Delegate the actual reclamation to lane-pool's release (reserved-lane protection lives there). */
-function releaseLane(pool, lane) {
+/** #4370 — the actor name the reaper stamps on the journal line its `release` child writes. */
+export const LEASE_REAPER_ACTOR = 'lease-reaper';
+
+/**
+ * Delegate the actual reclamation to lane-pool's release (reserved-lane protection lives there). #4370 — the
+ * child's journal line names the reaper (not a bare host:pid) and carries the reap classification as its
+ * reason (`session-gone`, `pr-merged`, `ttl-stale`, …).
+ */
+export function releaseLane(pool, lane, { reason = null, exec = execFileSync, cli = LANE_POOL_CLI, env = process.env } = {}) {
   // #x5n4zn3 — was bare (no timeout): a real `lane-pool.mjs release` call, one per reaped lease.
-  execFileSync('node', [LANE_POOL_CLI, 'release', `--pool=${pool}`, `--lane=${lane}`, '--force'], {
+  const argv = [cli, 'release', `--pool=${pool}`, `--lane=${lane}`, '--force'];
+  if (reason) argv.push(`--reason=${reason}`);
+  exec('node', argv, {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
     timeout: resolveChildTimeoutMs(),
     killSignal: 'SIGKILL',
+    env: { ...env, [LANE_JOURNAL_ACTOR_ENV]: LEASE_REAPER_ACTOR },
   });
 }
 
@@ -1347,7 +1361,7 @@ function main(argv) {
       continue;
     }
     try {
-      releaseLane(c.pool, c.lane);
+      releaseLane(c.pool, c.lane, { reason: c.reason });
       log(`  reaped ${c.pool}/lane-${c.lane} (${c.reason}; was session ${c.lease?.session ?? 'unknown'})`);
       done.push({ pool: c.pool, lane: c.lane, reason: c.reason, session: c.lease?.session ?? null });
       reaped++;
