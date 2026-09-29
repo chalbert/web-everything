@@ -3,9 +3,12 @@ bornAs: x5s8b47
 kind: story
 size: 5
 tier: pinned
-status: open
+status: resolved
 scope: ["we:scripts/operations/review-pr.mjs", "we:scripts/operations/review-job.mjs", "we:scripts/operations/review-extra-seats.mjs"]
 dateOpened: "2026-09-28"
+dateStarted: "2026-09-29"
+dateResolved: "2026-09-29"
+graduatedTo: "b93d13e29 (+ 466605269 follow-up), PR #2883"
 tags: []
 ---
 
@@ -44,6 +47,40 @@ NOT MVP-blocking (filed as natural follow-ons, not solved here): applying the sa
 
 1. **Executable** — re-run the `review-pr` operation (`--codexAdvisory` on) against a PR while Codex's seat-reservation ledger shows a live quota-hold (or a fake ledger in a unit test): the run reaches `reduce`/write with `judgeAdvisory` recorded as skipped, not suspended, and the daemon posts the panel's real verdict instead of leaving the PR silently stuck.
 
-## Done when
+## Premise check (2026-09-29) — already done, resolved without new code
 
-1. **Executable** — TODO: a command that fails before this item lands and passes after.
+Re-read against fresh `main` at claim time (conveyor-4380, lane-17): this item's own `bornAs` (`x5s8b47`)
+already shipped, landed, and merged before this dispatch picked the card up.
+
+- `git log --all` on the WE control checkout surfaces `b93d13e29 fix(review-pr): judgeAdvisory
+  quota-holds/degrades instead of crashing the run (#x5s8b47)` and its same-day follow-up
+  `466605269 WE #x5s8b47 follow-up: judgeCorrectnessAdvisory quota-holds/degrades too`, both merged to
+  `main` via PR #2883 (`82b19d95e`). `git merge-base --is-ancestor` confirms both are ancestors of the
+  fresh `main` this lane forked from.
+- The diff matches this card's MVP cut exactly: `createDefaultJudge` (`we:scripts/operations/cli-adapter.mjs`)
+  now checks the seat's provider against the shared quota-hold store (reusing
+  `we:scripts/operations/review-extra-seats.mjs#quotaHold`) before spawning, via a new `gracefulOnUnavailable`
+  request flag that `we:scripts/operations/review-pr.mjs`'s `judgeAdvisory` (and, in the follow-up,
+  `judgeCorrectnessAdvisory`) requests now set; a held/unavailable provider falls back or skips with a
+  structured `findings.judgeAdvisory.skipped` marker instead of crashing the run, and any spawn that still
+  throws is caught and recorded the same way. `we:scripts/operations/review-job.mjs`'s `crashLabelFromLoop`
+  now prefers the child's own deliberate `error: ` stdout line over stderr noise, closing the observability
+  gap.
+- **Live before/after re-verification in this lane** (not just trusting the merged diff): overlaid the
+  pre-fix (`9f7dd3d3e`, the parent of `b93d13e29`) versions of `we:scripts/operations/cli-adapter.mjs`,
+  `we:scripts/operations/review-job.mjs` and `we:scripts/operations/review-pr.mjs` under the CURRENT
+  (post-fix) test files and ran the fix's own three test files
+  (`we:scripts/operations/__tests__/judge-provider-port.test.mjs`,
+  `we:scripts/operations/__tests__/review-job.test.mjs`, `we:scripts/operations/__tests__/review-pr.test.mjs`):
+  9 failures, including `runReviewJob`'s crash-label test asserting the OLD code surfaces `"review-loop exit 1:
+  (node:12345) [DEP0040] DeprecationWarning..."` instead of the real `"spawn codex ENOENT"` — reproducing this
+  card's own "only a stray deprecation-warning line survives" symptom live. Restoring the post-fix files
+  (`git checkout -- <files>`) turned all 288 tests green, with the graceful path logging
+  `judge seat skipped — codex unavailable: quota exhausted; sitting out until 2026-10-03T17:11:11.000Z;
+  fallback antigravity unavailable too` instead of crashing.
+
+No further code needed — this card's own scope is fully covered by the merged fix. Resolving with
+`graduatedTo` pointing at the commits that already closed it, per the standing premise-check rule (never
+build a card that is already done). (This supersedes the stale scaffold placeholder that duplicated
+`## Done when` with an unfilled `TODO:` line — removed here as satisfied by the real criterion above and by
+this premise check.)
