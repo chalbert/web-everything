@@ -3,10 +3,11 @@ bornAs: xcdvaow
 kind: story
 size: 2
 parent: "4075"
-status: active
+status: resolved
 scope: ["we:.github/workflows/soak-replay-gate.yml", "we:scripts/lib/soak-replay-gate.mjs", "we:scripts/lib/daemon-soak-scope.mjs", "we:scripts/lib/__tests__/soak-replay-gate.test.mjs", "we:scripts/soak-replay-gate-cli.mjs"]
 dateOpened: "2026-09-27"
 dateStarted: "2026-09-29"
+dateResolved: "2026-09-29"
 tags: []
 ---
 
