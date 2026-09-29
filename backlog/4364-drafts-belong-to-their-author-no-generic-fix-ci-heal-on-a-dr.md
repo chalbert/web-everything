@@ -179,7 +179,7 @@ the author's-own-status the operator's exception names) but applies no OTHER lab
    hand off a red-draft fix), once `we:backlog/4361-specialist-agent-roles-a-role-registry-with-narrow-briefs-ro.md`'s
    dispatcher (its Phase 2) exists to receive it — the last of these six tasks to land, SEQUENCED after `4361`
    rather than a card-level `blockedBy` (Tasks 1-5 need nothing from `4361` and land independently per Delivery
-   shape below). `4361` (`xs57vx3`) now resolves to an existing, open card in this checkout — the first pass's
+   shape below). `4361` (`4361`) now resolves to an existing, open card in this checkout — the first pass's
    "does not yet exist" note is stale and corrected here.
 
 ## Delivery shape
@@ -211,7 +211,7 @@ with 4365/4366), resolved directly in Design/Interfaces/Tasks/`scope:` above rat
    opening the PR. Corrected: retirement needs no wrapper-side hold at all — it rides the daemon's own
    next-tick re-read of live `isDraft`, the same self-clearing pattern
    `we:scripts/operations/promote-draft-pr-dispatch.mjs` already uses for the review daemon.
-5. **[major, resolved above]** The dependency note on Task 7 (now Task 6) was stale — `4361` (`xs57vx3`) exists
+5. **[major, resolved above]** The dependency note on Task 7 (now Task 6) was stale — `4361` (`4361`) exists
    in this checkout; Task 6 is now explicitly sequenced after it (a card-level `blockedBy` would incorrectly
    hold Tasks 1-5 too, which need nothing from `4361`).
 6. **[minor, resolved above]** Task 6's (now Task 5's) "likely already true" claim about

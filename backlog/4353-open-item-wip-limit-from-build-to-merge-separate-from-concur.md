@@ -92,7 +92,7 @@ An open item is one backlog card with either (a) durable in-flight build evidenc
   JSON. `tick.plan.inFlight` (the display-only field) is untouched — pinned by a test.
 - Live proof (2026-09-28, `--dry-run --json`): BEFORE this change, the report has no `openItems` field and
   `policy` lists only `maxConcurrentBuilds`/`maxOpenPrs`. AFTER, `policy.maxOpenItems: 7` and
-  `openItems: {count: 5, cap: 7, filling: ["4108","4317","4347","4360","xvgqaqg"]}` — matching the union of
+  `openItems: {count: 5, cap: 7, filling: ["4108","4317","4347","4360","4346"]}` — matching the union of
   durable in-flight builds and delivering PRs, correctly excluding the non-delivering PR.
 - Red-then-green: the new test cases were run against the pre-fix source (via a scoped `git stash` on just the
   two implementation files) and failed for the stated reason (missing `openItems`/`wip-cap`/`policyFrom`); after

@@ -113,7 +113,7 @@ not a case this card can skip.
 the poller/webhook/recovery path" gap).** "Red-on-open" is precisely defined first: the check conclusions
 attached to the PR's INITIAL head sha — the sha `pull_request.opened` itself carries — never a LATER
 `synchronize`d head (a fresh push starts a fresh episode, unrelated to whether the PR opened red). The observer
-is a NEW consumer of the SAME webhook feed x7qre1u's ruling already names as the sanctioned signal source,
+is a NEW consumer of the SAME webhook feed 4364's ruling already names as the sanctioned signal source,
 `we:scripts/lib/pr-events.mjs` (#2812) — never a `gh pr list` poll. A new module,
 `we:scripts/conveyor/ci-red-on-open-watch.mjs` (naming mirrors `we:scripts/conveyor/parked-pr-conflict-watch.mjs`),
 is invoked the SAME way every other role already is — wrapped by
