@@ -74,13 +74,13 @@ the fix (the `.tmp` file was left behind); **confirmed GREEN** after the `try/fi
 
 ## Follow-ups (filed via the `file-item` operation, not built in this item)
 
-1. **Finding 1** (outcome-enumeration lint) → `x60c5ua` — a `check:standards` content-lint rule requiring
+1. **Finding 1** (outcome-enumeration lint) → `4485` — a `check:standards` content-lint rule requiring
    a decision/story card that gates a guarantee on an external/injected read to enumerate every
    documented outcome of that read in its Ownership table / Test plan.
-2. **Finding 2** (git-history integration test for the overlap-yield window) → `xhbvu6t` — a real-git-fixture
+2. **Finding 2** (git-history integration test for the overlap-yield window) → `4486` — a real-git-fixture
    integration test proving `windowMsAtLabelTime` reads the settings-file commit in effect AT a PR's
    `readyAt(X)`, never a later widening, against a real repo history rather than an injected fake reader.
-3. **Finding 3** (spec-consistency review lens) → `xm9goqs` — a new deterministic jury lens or red-team step
+3. **Finding 3** (spec-consistency review lens) → `4487` — a new deterministic jury lens or red-team step
    that checks a spec's own stated rules/invariants for mutual contradiction or an unhandled edge case,
    independent of whether the code matches the spec.
 
@@ -88,4 +88,4 @@ the fix (the `.tmp` file was left behind); **confirmed GREEN** after the `try/fi
 
 1. **Executable** — `node we:scripts/readiness/heavy-admission.mjs run -- npx vitest related we:scripts/operations/completion-store.mjs we:scripts/operations/__tests__/completion-store.test.mjs --run --passWithNoTests` exits 0 with the new test passing (run the command from the WE repo root without the `we:` prefix); reverting the `try/finally` in `writeCompletion` makes that same test fail.
 2. `writeCompletion` never leaves a `.tmp` file behind in the completions directory when the write-then-rename pair throws, for any reason.
-3. Findings 1–3 are each filed as their own backlog item (`x60c5ua`, `xhbvu6t`, `xm9goqs`), each carrying a design gist, named edge cases, and a required integration/wiring test per build-brief discipline — not half-built here.
+3. Findings 1–3 are each filed as their own backlog item (`4485`, `4486`, `4487`), each carrying a design gist, named edge cases, and a required integration/wiring test per build-brief discipline — not half-built here.
