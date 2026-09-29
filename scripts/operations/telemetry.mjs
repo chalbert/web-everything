@@ -336,6 +336,13 @@ export const ERROR_OUTCOMES = Object.freeze([
   'blocked-on-infra', 'gate-red', 'gate-blocked', 'blocked-mid-build',
   'escalated-conflict', 'escalated-needs-judgment', 'agent-spawn-failed', 'wrapper-threw',
   'no-free-lane', 'acquire-threw', 'could-not-predict', 'could-not-prepare',
+  // #4348-open-pr-retry — a build that finished cleanly (gate green) but whose PR-open step hit an outside
+  // dependency (GitHub rate limit/outage). Distinct from `blocked-on-infra` above (which this same file's
+  // `deliver-item-wrapper.mjs` already uses for an UNRELATED case, no free implementation lane): `open-pending`
+  // is specifically the pr-land #2659 resumable state — the lane ref is already pushed, and a later daemon
+  // tick resume-opens it automatically, never a rebuild. Still counted as an error here: at settle time the
+  // pipeline has not yet produced the PR it exists to produce, even though it is expected to self-recover.
+  'open-pending',
 ]);
 
 /** Outcome words that mean the dispatch DID deliver what it exists to deliver. */

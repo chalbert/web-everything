@@ -741,6 +741,49 @@ describe('#3321 — every pr-land COMMAND STRING the tracked file set ships decl
     // resolved behaviour; this pins that the sweep itself covers the shape.)
     expect(srcOf(DRAIN)).toMatch(/const args = \['scripts\/pr-land\.mjs',[^\]]*'--no-require-verified'/);
   });
+
+  // #4348-open-pr-retry addendum — a THIRD array-built caller, alongside the drain: `infra-blocked.mjs`'s
+  // `resumeOpen` re-invokes pr-land from the PRIMARY checkout (`INFRA_ROOT`, never a lane clone) to resume a
+  // PR-open that failed on an outside dependency after the lane ref was already pushed. Structurally identical
+  // posture to the drain/workflow producer — a lane-clone verify marker cannot exist at that cwd — but this
+  // caller was MISSING the opt-out until this fix: every resume was refused `unverified`, silently (the live
+  // #4348 stall, confirmed by reading pr-land's own refusal path — `--dry-run` cannot reproduce it, since
+  // pr-land's own docblock states the verify gate runs strictly AFTER the dry-run branch returns).
+  const INFRA_RESUME = 'scripts/conveyor/infra-blocked.mjs';
+  it('infra-blocked.mjs\'s resumeOpen builds its argv as an ARRAY too, and that array declares the posture', () => {
+    expect(srcOf(INFRA_RESUME)).toMatch(/const args = \[prLand,[^\]]*'--no-require-verified'/);
+  });
+  // PR #2899 review — the opt-out is only sound for the commit that was actually verified, so this caller must
+  // pin `--sha` to the RECORDED sha (checked against the live tip by `resumeShaDecision`), never to the
+  // moving `origin/<ref>` tip.
+  it('infra-blocked.mjs\'s resumeOpen pins --sha to the recorded sha, never the moving origin/<ref> tip', () => {
+    const src = srcOf(INFRA_RESUME);
+    expect(src).toMatch(/const args = \[prLand,[^\]]*`--sha=\$\{pin\.sha\}`/);
+    expect(src).not.toMatch(/`--sha=origin\//);
+    expect(src).toMatch(/const pin = resumeShaDecision\(\{ recordedSha: entry\.sha,/);
+  });
+  it('RED/GREEN — resumeOpen\'s REAL argv shape: WITHOUT the flag it is refused unverified (the live bug); '
+    + 'WITH it (this fix) it is untracked/ok, the same posture the drain and workflow producer already have', () => {
+    // The exact command resumeOpen builds (mirrored here as a string so the SAME `parseArgv`/`resolveVerifyOptions`/
+    // `verifyGateDecision` machinery the caller sweep already trusts for the drain/workflow can drive it) — never
+    // driven live: `resumeOpen` itself spawns real `git fetch` + `pr-land.mjs` + a `gh pr create`, which this
+    // suite does not have credentials or network for, and must not depend on either.
+    const REF = 'lane/4348-cross-locus-build-agents-never-get-the-we-lane-lane-is-overw';
+    const withFlag = `node scripts/pr-land.mjs --ref=${REF} --sha=origin/${REF} --base=main --label-on-green --no-require-verified --json`;
+    const withoutFlag = withFlag.replace(/\s--no-require-verified\b/, '');
+
+    // RED — the live #4348 shape: no marker at the primary's cwd, and no opt-out passed.
+    const redOpts = resolveVerifyOptions({ flags: parseArgv(withoutFlag), env: {} });
+    expect(redOpts.requireVerified).toBe(true);
+    expect(verifyGateDecision({ record: null, headSha: SHA, ...redOpts }))
+      .toMatchObject({ ok: false, reason: 'unverified' });
+
+    // GREEN — this fix's actual argv.
+    const greenOpts = resolveVerifyOptions({ flags: parseArgv(withFlag), env: {} });
+    expect(greenOpts).toEqual({ requireVerified: false, breakGlass: false });
+    expect(verifyGateDecision({ record: null, headSha: SHA, ...greenOpts }))
+      .toMatchObject({ ok: true, reason: 'untracked' });
+  });
 });
 
 describe('the marker filename is the never-tracked in-.git convention', () => {

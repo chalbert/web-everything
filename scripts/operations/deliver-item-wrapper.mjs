@@ -540,12 +540,35 @@ export async function deliverItem(launch, provider = CLAUDE_RESTRICTED_PROVIDER,
     if (!foundForPr) {
       throw new Error(`deliver-item-wrapper: could not resolve a slug for item #${item} — findItem returned nothing`);
     }
-    const prResult = spanAround('pr.open', { attributes: { item: String(item), park: parkDecision.label } },
-      () => openPr({
-        item, attemptTag, lane: gate.lanePath, park: parkDecision, report, slug: foundForPr.slug,
-        // #3903 main adaptation — the trial-evidence marker; see `delegationForBuild`.
-        delegation: delegationForBuild(provider, scope),
-      }));
+    // #4348-open-pr-retry — a `blocked-on-infra` PR-open (a GitHub rate limit/outage hit AFTER the lane ref
+    // was already pushed — pr-land's own #2659 handler already recorded the resumable {ref,sha,body} handle
+    // in `.conveyor/infra-blocked.json` before it exited) is NOT the generic "something in this wrapper broke"
+    // the outer catch below reports as `wrapper-threw`. Live incident: build #4348 finished, gate went green,
+    // and ONLY this step hit the GitHub rate limit — yet it sat under an indistinguishable `wrapper-threw`
+    // hold for 2+ hours, because nothing here told `open-pending` (a real, expected, self-recovering state)
+    // apart from an actual bug. Settling it as its own outcome keeps that signal legible for a dry-run/status
+    // read, while the hold below still excludes the item from re-dispatch — never a rebuild, exactly like
+    // every other terminal outcome in this function. The actual RETRY is deliberately NOT this wrapper's job
+    // (it is a one-shot process that is about to exit): `build-dispatch-daemon.mjs`'s own live tick now runs
+    // `infra-blocked.mjs retry` every cycle (#2659's existing backoff/attempt-cap state machine, unchanged),
+    // which resume-opens straight from the record pr-land already wrote — no lane, no rebuild, no second copy
+    // of ref/sha/body kept here.
+    let prResult;
+    try {
+      prResult = spanAround('pr.open', { attributes: { item: String(item), park: parkDecision.label } },
+        () => openPr({
+          item, attemptTag, lane: gate.lanePath, park: parkDecision, report, slug: foundForPr.slug,
+          // #3903 main adaptation — the trial-evidence marker; see `delegationForBuild`.
+          delegation: delegationForBuild(provider, scope),
+        }));
+    } catch (e) {
+      const infra = classifyOpenPrFailure(e);
+      if (!infra) throw e; // not the retryable class — falls through to the generic `wrapper-threw` catch below.
+      releaseClaimAndLane({ item, lane, sessionSlug, implLanePath });
+      settleTerminal('open-pending', { result: { reason: infra.reason }, releaseClaim: true, hold: 'open-pending' });
+      return finish('open-pending (blocked-on-infra — the lane ref is already pushed; a later daemon tick '
+        + 'resume-opens it, never a rebuild)', { status: 'error', outcome: 'open-pending', reason: infra.reason });
+    }
 
     // ---- 7. Forward the optional learning, if the agent supplied one (REAL CLI surface). --------------------
     if (report.learning) dropLearning({ sessionSlug, learning: report.learning });
@@ -2395,6 +2418,32 @@ export function openPr({ item, attemptTag, lane, park, report, slug, delegation 
   // `{pr, url}` object; the actual submit result (the only place `.pr`/`.url` live) is buried at
   // `findings.submit.effects[0].result`. See `extractSubmitResult`'s own docblock for the full story.
   return extractSubmitResult(JSON.parse(out));
+}
+
+/**
+ * #4348-open-pr-retry — classify a caught `openPr()` failure: is it the ONE retryable class (#2659's
+ * `blocked-on-infra`), or a genuine refusal/bug `deliverItem`'s generic `wrapper-threw` catch still owns?
+ * Returns `{ reason: 'blocked-on-infra', detail }` or `null`.
+ *
+ * PURE over the error `execFileSync` throws. `run.mjs open-pr --json`'s `effect-halted` stop
+ * (`cli-adapter.mjs#renderOutcome`) still prints the outcome envelope to stdout before exiting 1, so
+ * `e.stdout` carries it — but the halted effect's own `result` is `null`
+ * (`effect-executor.mjs#applyPendingEffects`'s catch branch sets only `error`, never `result`, on a throw), so
+ * `extractSubmitResult` — built for the SUCCESS shape at `findings.submit.effects[0].result` — cannot read the
+ * reason here. Confirmed against a REAL captured run record from the live #4348 incident, whose effect carries
+ * `result: null` and the reason folded into a longer sentence at `.error`
+ * (`"open-pr: pr-land did not report a result — blocked-on-infra. …"`, `open-pr-io.mjs`'s own sink text). This
+ * reads that per-effect `.error` (falling back to the envelope's top-level `error`,
+ * `cli-adapter.mjs#outcomePayload`'s field for the same stop) and matches pr-land's own bare reason token
+ * inside it, rather than an exact-string compare against a sentence this file does not own the wording of.
+ * Unparseable/absent `.stdout` (a spawn that never even started) classifies as not-retryable — it never guesses
+ * an infra hiccup it has no evidence of.
+ */
+export function classifyOpenPrFailure(e) {
+  let payload;
+  try { payload = JSON.parse(String(e?.stdout ?? '')); } catch { return null; }
+  const detail = String(payload?.findings?.submit?.effects?.[0]?.error ?? payload?.error ?? '');
+  return /\bblocked-on-infra\b/.test(detail) ? { reason: 'blocked-on-infra', detail } : null;
 }
 
 // #3627 follow-up — raw script call, not routed through `run.mjs`: no `learnings-drop` operation is

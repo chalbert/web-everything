@@ -32,6 +32,12 @@ import {
   DEFAULT_MAX_ATTEMPTS,
   DEFAULT_BASE_MS,
   DEFAULT_CAP_MS,
+  // #4348-open-pr-retry addendum
+  markRefusedAttempt,
+  rearmInfraBlock,
+  DEFAULT_REFUSAL_INTERVAL_MS,
+  DEFAULT_MAX_REFUSALS,
+  resumeShaDecision,
 } from '../infra-blocked.mjs';
 
 const T0 = Date.parse('2026-07-24T00:00:00.000Z');
@@ -180,6 +186,136 @@ describe('markRetryAttempt — a FAILED resume bumps the attempt and reschedules
   });
 });
 
+// #4348-open-pr-retry addendum — a resume REFUSED by a guard (`unverified`, `check-red`, …) is NOT an infra
+// failure, and must NEVER consume the SAME attempt/backoff budget a real outside-dependency outage needs (the
+// live #4348 bug: 6 `unverified` refusals, none of them a real GitHub outage, silently capped the entry and
+// stranded it — its lane ref was already pushed and its only problem was a fixable bug).
+describe('markRefusedAttempt — a REFUSED resume (a guard answered) never consumes the infra attempt/backoff budget', () => {
+  it('leaves `attempt` UNCHANGED, but counts the refusal and waits a FIXED interval before the next try', () => {
+    const s1 = recordInfraBlock([], { num: '4348', ref: 'lane/4348-x' }, T0);
+    const s2 = markRefusedAttempt(s1, '4348', T0 + 999, { reason: 'unverified' });
+    expect(s2[0].attempt).toBe(1); // unchanged — markRetryAttempt would have bumped this to 2
+    expect(s2[0].refusals).toBe(1); // its OWN counter, separate from the infra attempt budget
+    expect(Date.parse(s2[0].nextRetryAt) - (T0 + 999)).toBe(DEFAULT_REFUSAL_INTERVAL_MS); // never 0-delay
+    expect(s2[0].lastAttemptAt).toBe(new Date(T0 + 999).toISOString()); // still updated, for observability
+    expect(s2[0].cause).toBe('unverified'); // the refusal's own reason, replacing the original infra cause
+  });
+  it('the very next tick after a refusal WAITS — no zero-delay retry loop (review finding: refused-forever)', () => {
+    const s = markRefusedAttempt(recordInfraBlock([], { num: '4348', ref: 'lane/4348-x' }, T0), '4348', T0, { reason: 'bad-ref' });
+    expect(retryDecision(s[0], { now: T0 + 2 * 60_000 }).action).toBe('wait');
+    expect(retryDecision(s[0], { now: T0 + DEFAULT_REFUSAL_INTERVAL_MS }).action).toBe('retry');
+  });
+  it('N consecutive refusals SURFACE the entry (refusal-cap) — a refusal is bounded too, just by its own budget', () => {
+    let s = recordInfraBlock([], { num: '4348', ref: 'lane/4348-x' }, T0);
+    let now = T0;
+    for (let i = 0; i < DEFAULT_MAX_REFUSALS; i += 1) {
+      now += DEFAULT_REFUSAL_INTERVAL_MS;
+      expect(retryDecision(s[0], { now }).action).toBe('retry');
+      s = markRefusedAttempt(s, '4348', now, { reason: 'bad-ref' });
+    }
+    expect(s[0].attempt).toBe(1); // the infra budget is still untouched
+    const d = retryDecision(s[0], { now: now + 10 ** 9 });
+    expect(d).toMatchObject({ action: 'surface', reason: 'refusal-cap' });
+    expect(deriveInfraByNum(s, now)['4348']).toMatchObject({ capped: true, nextRetrySec: null });
+  });
+  it('an infra failure in between breaks the refusal run — the cap counts CONSECUTIVE refusals', () => {
+    let s = recordInfraBlock([], { num: '4348', ref: 'lane/4348-x' }, T0);
+    for (let i = 0; i < DEFAULT_MAX_REFUSALS - 1; i += 1) s = markRefusedAttempt(s, '4348', T0 + i, { reason: 'bad-ref' });
+    s = markRetryAttempt(s, '4348', T0 + 100, { cause: 'network' });
+    expect(s[0].refusals).toBe(0);
+  });
+  it('a re-record with a NEW verified sha (lane rebuilt + re-pushed) takes the new handle and clears refusals', () => {
+    let s = recordInfraBlock([], { num: '4348', ref: 'lane/4348-x', sha: 'a'.repeat(40), body: 'old' }, T0);
+    s = markRefusedAttempt(s, '4348', T0 + 1, { reason: 'sha-moved' });
+    const s2 = recordInfraBlock(s, { num: '4348', ref: 'lane/4348-x', sha: 'b'.repeat(40), body: 'new' }, T0 + 2);
+    expect(s2[0]).toMatchObject({ sha: 'b'.repeat(40), body: 'new', refusals: 0, attempt: 1 });
+    // the SAME sha again is still a no-op (same array reference)
+    expect(recordInfraBlock(s2, { num: '4348', ref: 'lane/4348-x', sha: 'b'.repeat(40) }, T0 + 3)).toBe(s2);
+  });
+  it('rearmInfraBlock clears the refusal counter too', () => {
+    let s = recordInfraBlock([], { num: '4348', ref: 'lane/4348-x' }, T0);
+    for (let i = 0; i < DEFAULT_MAX_REFUSALS; i += 1) s = markRefusedAttempt(s, '4348', T0 + i, { reason: 'bad-ref' });
+    const r = rearmInfraBlock(s, '4348', T0 + 10);
+    expect(r[0].refusals).toBe(0);
+    expect(retryDecision(r[0], { now: T0 + 10 }).action).toBe('retry');
+  });
+  it('parseInfraStore round-trips the refusal counter (defaults to 0)', () => {
+    expect(parseInfraStore('[{"num":"7","ref":"lane/7-y","refusals":3}]')[0].refusals).toBe(3);
+    expect(parseInfraStore('[{"num":"7","ref":"lane/7-y"}]')[0].refusals).toBe(0);
+  });
+  it('RED/GREEN — six consecutive refusals never reach the ATTEMPT cap (the live #4348 shape), where six '
+    + 'consecutive markRetryAttempt calls WOULD surface it', () => {
+    let refused = recordInfraBlock([], { num: '4348', ref: 'lane/4348-x' }, T0);
+    for (let i = 0; i < DEFAULT_MAX_ATTEMPTS + 2; i += 1) {
+      refused = markRefusedAttempt(refused, '4348', T0 + i, { reason: 'unverified' });
+    }
+    expect(refused[0].attempt).toBe(1);
+    expect(retryDecision(refused[0], { now: T0 + DEFAULT_REFUSAL_INTERVAL_MS + 10, maxAttempts: DEFAULT_MAX_ATTEMPTS }).action).toBe('retry');
+
+    // RED — this is exactly what the live bug did: the SAME six failures, routed through markRetryAttempt
+    // (the pre-fix behaviour for EVERY failure, refused or not), surface the entry and stop retrying it.
+    let capped = recordInfraBlock([], { num: '4348', ref: 'lane/4348-x' }, T0);
+    for (let i = 0; i < DEFAULT_MAX_ATTEMPTS; i += 1) {
+      capped = markRetryAttempt(capped, '4348', T0 + i, { cause: 'unverified' });
+    }
+    expect(retryDecision(capped[0], { now: T0 + 1000, maxAttempts: DEFAULT_MAX_ATTEMPTS }).action).toBe('surface');
+  });
+  it('an absent num is a no-op', () => {
+    const s = recordInfraBlock([], { num: '2659', ref: 'lane/2659-x' }, T0);
+    expect(markRefusedAttempt(s, '404', T0, { reason: 'unverified' })).toEqual(s);
+  });
+});
+
+// Review finding (PR #2899): a resume opened `origin/<ref>` — whatever the tip is NOW — with the verify gate
+// off, never the sha that was actually built and verified. The resume must pin the RECORDED sha, and refuse
+// when the lane ref has moved since.
+describe('resumeShaDecision — a resume is pinned to the recorded sha, never a moved tip', () => {
+  const SHA = 'a'.repeat(40);
+  it('tip == recorded sha → open at the RECORDED sha (immutable), not `origin/<ref>`', () => {
+    expect(resumeShaDecision({ recordedSha: SHA, tipSha: SHA, ref: 'lane/7-y' })).toEqual({ ok: true, sha: SHA });
+  });
+  it('a short recorded sha still matches its full tip — and the answer is the FULL tip sha it was checked against', () => {
+    expect(resumeShaDecision({ recordedSha: SHA.slice(0, 9), tipSha: SHA, ref: 'lane/7-y' })).toEqual({ ok: true, sha: SHA });
+  });
+  it('a too-short / non-hex recorded sha is never a prefix match (no 1-char "matches every tip")', () => {
+    for (const bad of ['a', 'aaaaaa', 'not-a-sha']) {
+      expect(resumeShaDecision({ recordedSha: bad, tipSha: SHA, ref: 'lane/7-y' })).toMatchObject({ ok: false, reason: 'no-recorded-sha' });
+    }
+  });
+  it('tip MOVED since the record → refused `sha-moved` (never open an unverified newer tip)', () => {
+    const d = resumeShaDecision({ recordedSha: SHA, tipSha: 'b'.repeat(40), ref: 'lane/7-y' });
+    expect(d).toMatchObject({ ok: false, refused: true, reason: 'sha-moved' });
+  });
+  it('tip unresolvable (ref gone) → refused `bad-ref`', () => {
+    expect(resumeShaDecision({ recordedSha: SHA, tipSha: null, ref: 'lane/7-y' })).toMatchObject({ ok: false, refused: true, reason: 'bad-ref' });
+  });
+  it('a legacy record with no sha → refused `no-recorded-sha` (nothing verified to pin to)', () => {
+    expect(resumeShaDecision({ recordedSha: null, tipSha: SHA, ref: 'lane/7-y' })).toMatchObject({ ok: false, refused: true, reason: 'no-recorded-sha' });
+  });
+});
+
+describe('rearmInfraBlock — the sanctioned CLI verb for an entry surfaced BEFORE markRefusedAttempt existed', () => {
+  it('resets attempt to 1 and nextRetryAt to now — the exact live #4348 shape (surfaced at attempt 6)', () => {
+    let s = recordInfraBlock([], { num: '4348', ref: 'lane/4348-x', cause: 'GitHub rate limit' }, T0);
+    for (let i = 0; i < DEFAULT_MAX_ATTEMPTS; i += 1) s = markRetryAttempt(s, '4348', T0 + i, { cause: 'GitHub rate limit' });
+    expect(retryDecision(s[0], { now: T0 + 10_000, maxAttempts: DEFAULT_MAX_ATTEMPTS }).action).toBe('surface'); // RED — capped
+
+    const rearmed = rearmInfraBlock(s, '4348', T0 + 10_000);
+    expect(rearmed[0].attempt).toBe(1);
+    expect(rearmed[0].nextRetryAt).toBe(new Date(T0 + 10_000).toISOString());
+    expect(retryDecision(rearmed[0], { now: T0 + 10_000, maxAttempts: DEFAULT_MAX_ATTEMPTS }).action).toBe('retry'); // GREEN — un-capped
+
+    // the resumable handle itself is untouched — a rearm is never a record write.
+    expect(rearmed[0].ref).toBe('lane/4348-x');
+    expect(rearmed[0].cause).toBe('GitHub rate limit');
+  });
+  it('an absent num is a no-op (never resurrects an already-removed record)', () => {
+    const s = recordInfraBlock([], { num: '2659', ref: 'lane/2659-x' }, T0);
+    expect(rearmInfraBlock(s, '404', T0)).toEqual(s);
+    expect(rearmInfraBlock([], '2659', T0)).toEqual([]);
+  });
+});
+
 describe('retryDecision — the wait → retry → surface state machine', () => {
   const entry = (attempt, nextRetryAt) => ({ attempt, nextRetryAt: new Date(nextRetryAt).toISOString() });
   it('still backing off (now < nextRetryAt) → wait, with the remaining ms', () => {
@@ -311,9 +447,40 @@ describe('infra-blocked source guards — resume never strands work and never me
     expect(src).not.toMatch(/WE_MERGE_BREAK_GLASS/);
   });
   it('a resume FAILURE bumps the attempt (backs off) — it never drops the record (nothing stranded)', () => {
-    // the retry loop only removes an entry when the resume OPENED a PR (r.ok); a failure calls markRetryAttempt.
+    // the retry loop only removes an entry when the resume OPENED a PR (r.ok); a genuine (non-refused) failure
+    // calls markRetryAttempt.
     expect(src).toMatch(/if \(r\.ok\) \{ mutateInfraStore\(\(s\) => removeInfraBlock/);
-    expect(src).toMatch(/else \{ mutateInfraStore\(\(s\) => markRetryAttempt/);
+    expect(src).toMatch(/mutateInfraStore\(\(s\) => markRetryAttempt/);
+  });
+  // #4348-open-pr-retry addendum
+  it('resume-open never lands unverified: pr-land is called with --no-require-verified (the SAME opt-out '
+    + 'the drain and the parallel /workflow producer already pass, and for the identical reason — a call '
+    + 'from the PRIMARY checkout against a lane ref, where no lane clone marker can exist)', () => {
+    expect(src).toMatch(/const args = \[prLand,[^\]]*'--no-require-verified'/);
+  });
+  it('a REFUSED resume (a guard answered, not an infra outage) routes to markRefusedAttempt, never markRetryAttempt '
+    + '— it must not consume the same attempt/backoff budget a real outage needs', () => {
+    expect(src).toMatch(/if \(r\.refused\) \{/);
+    expect(src).toMatch(/mutateInfraStore\(\(s\) => markRefusedAttempt/);
+    // and the branch order matters: refused is checked BEFORE the generic (infra) failure branch below it.
+    const refusedAt = src.indexOf('if (r.refused)');
+    const genericAt = src.indexOf('mutateInfraStore((s) => markRetryAttempt(s, entry.num, Date.now(), { cause: refined })');
+    expect(refusedAt).toBeGreaterThan(-1);
+    expect(genericAt).toBeGreaterThan(refusedAt);
+  });
+  it('the retry command\'s JSON output carries each failure\'s own detail (`failed: [{num, detail}]`) — before '
+    + 'this, a resume failure\'s reason reached only log() on stderr, invisible to any caller reading the JSON '
+    + '(exactly how #4348 sat stranded with its true cause unseen)', () => {
+    expect(src).toMatch(/const retried = \[\], resumed = \[\], surfaced = \[\], waiting = \[\], failed = \[\]/);
+    expect(src).toMatch(/failed\.push\(\{ num: entry\.num, detail: r\.detail, refused: true, reason: r\.reason \?\? null \}\)/);
+    expect(src).toMatch(/failed\.push\(\{ num: entry\.num, detail: r\.detail \}\)/);
+    expect(src).toMatch(/JSON\.stringify\(\{ retried, resumed, surfaced, waiting, failed \}\)/);
+  });
+  it('the sanctioned `rearm` CLI verb exists, requires --num, and goes through the same lock every other '
+    + 'mutation here does — never a hand-edit of the JSON sidecar', () => {
+    expect(src).toMatch(/sub === 'rearm'/);
+    expect(src).toMatch(/mutateInfraStore\(\(s\) => rearmInfraBlock/);
+    expect(src).toMatch(/if \(!flags\.num\) \{ log\('infra-blocked rearm: --num=<n> is required'\); return 1; \}/);
   });
   it('#2659 review 1 — every store write re-reads under a lock (no stale-snapshot clobber) — no final whole-store write', () => {
     // the retry loop must NOT snapshot the store then clobber it after a minutes-long resume; each mutation
