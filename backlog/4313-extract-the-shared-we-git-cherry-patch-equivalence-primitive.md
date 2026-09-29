@@ -45,7 +45,7 @@ divergence from "no behavior change."
 
 The actual duplicated code — called out explicitly in both files' own comments
 (`we:scripts/conveyor/lease-reaper.mjs`'s docblock: "one small (3-line) duplicated parse of `git cherry`'s
-output … tracked as a follow-up: #xuyjss1") — is the OUTPUT PARSE, not the spawn: given raw `git cherry` stdout,
+output … tracked as a follow-up: #4313") — is the OUTPUT PARSE, not the spawn: given raw `git cherry` stdout,
 decide whether every listed commit is prefixed `-` (already patch-equivalent) or there are no lines at all.
 That is the single-target primitive to extract: a pure function, `isCherryOutputAllPatchEquivalent(cherryOutput)`,
 in the new `we:scripts/lib/git-patch-equivalence.mjs`. Each call site keeps its own `git cherry` spawn (options,
