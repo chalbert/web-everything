@@ -1,4 +1,5 @@
 ---
+bornAs: xhcgdce
 kind: story
 size: 3
 tier: pinned
@@ -11,7 +12,7 @@ tags: []
 
 # Short-term: route gh READS to the operator's personal allowance, writes stay on the App
 
-The whole fleet shares ONE GitHub App installation GraphQL budget (5000 pts/hr) and it has been exhausted 3+ times in one day. Split gh READS (pr list/view/checks, api GET, run list/view, search) onto the operator's personal GitHub identity's separate 5000/hr allowance at runtime via gh auth token, read through the real gh binary (bypassing we:scripts/lib/gh-app-shim.mjs's generated shim), passed via env to the child only and never logged; every WRITE (comment/label/ready-draft/merge/review) stays on the App so bot-attributed actions are unchanged. Explicit MVP cut per xtw16qn: classify via a conservative read allowlist added to we:scripts/lib/gh-throttle.mjs, unknown classification defaults to write/App; missing/invalid personal token falls back to the App transparently. Explicit SUNSET: remove the split once cost capture (x7nlnnx) and the PR ledger (webhook-fed local PR state, epic #4281-#4284) cut read spend below ~50% of one 5000/hr budget for a week, with a health smell reporting the split's own read/write usage so the sunset is measurable.
+The whole fleet shares ONE GitHub App installation GraphQL budget (5000 pts/hr) and it has been exhausted 3+ times in one day. Split gh READS (pr list/view/checks, api GET, run list/view, search) onto the operator's personal GitHub identity's separate 5000/hr allowance at runtime via gh auth token, read through the real gh binary (bypassing we:scripts/lib/gh-app-shim.mjs's generated shim), passed via env to the child only and never logged; every WRITE (comment/label/ready-draft/merge/review) stays on the App so bot-attributed actions are unchanged. Explicit MVP cut per 4385: classify via a conservative read allowlist added to we:scripts/lib/gh-throttle.mjs, unknown classification defaults to write/App; missing/invalid personal token falls back to the App transparently. Explicit SUNSET: remove the split once cost capture (4375) and the PR ledger (webhook-fed local PR state, epic #4281-#4284) cut read spend below ~50% of one 5000/hr budget for a week, with a health smell reporting the split's own read/write usage so the sunset is measurable.
 
 ## Design
 
@@ -59,7 +60,7 @@ override, the call proceeds exactly as it does today (App). A personal token tha
 check) → one automatic retry of the SAME call on the original (App) identity, so a stale personal login
 degrades to today's behavior instead of failing the call outright.
 
-## Explicit MVP cut (card xtw16qn rule)
+## Explicit MVP cut (card 4385 rule)
 
 **In scope:**
 - The read/write classifier and the token-swap routing, inside `runGhCliPassthrough` (the shim's own call
@@ -83,7 +84,7 @@ degrades to today's behavior instead of failing the call outright.
 ## Explicit SUNSET
 
 This is a short-term operational patch, not a durable architecture decision. Remove it once BOTH:
-1. Cost capture (x7nlnnx) is landed and reporting real spend, AND
+1. Cost capture (4375) is landed and reporting real spend, AND
 2. The PR ledger (webhook-fed local PR state, epic #4281–#4284) is landed and reads are answered from local
    state instead of live `gh` calls for the read shapes it covers,
 
