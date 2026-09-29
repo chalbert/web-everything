@@ -2,9 +2,12 @@
 bornAs: xddlvn0
 kind: story
 size: 3
-status: open
+status: resolved
 scope: ["we:scripts/conveyor/build-dispatch-policy.mjs", "we:skills-src/conveyor/build-dispatch-daemon.mjs"]
 dateOpened: "2026-09-29"
+dateStarted: "2026-09-29"
+dateResolved: "2026-09-29"
+preparedDate: "2026-09-29"
 tags: []
 ---
 
@@ -24,3 +27,18 @@ Operator direction 2026-09-29 ~4:10pm ET: restrain Claude concurrency, double Co
    (or env vars) set the two caps independently, and that omitting the new flag keeps `--max-concurrent`
    behaving as the Claude cap (backward compat), never silently changing today's default behavior for a
    caller that never passes the new flag.
+
+## Prep
+
+**Design:** Keep `maxConcurrentBuilds` / `--max-concurrent` as the Claude cap (default 1);
+add `maxConcurrentExternalBuilds` / `--max-concurrent-external` (default 4), with
+`WE_BUILD_DAEMON_MAX_CONCURRENT` and `WE_BUILD_DAEMON_MAX_CONCURRENT_EXTERNAL` env defaults.
+Predict candidates with dispatch's `decideDispatchRoute` (which calls `selectProvider`) and
+`probationLaunchDecision`, using the same backlog metadata, evidence and launch settings.
+Count Codex/Antigravity together; unknown in-flight executors consume Claude capacity conservatively.
+Dedupe claims/run records while preserving the known executor. The own-items WIP cap stays total-scoped.
+
+**MVP:** Enforce both caps within each tick, expose both in reports, and cover routing, CLI/env,
+deduplication, and WIP regressions. Done-when 1 has an arithmetic contradiction: four external builds
+already fill a cap of four. Test that both candidates are held at 1+4, then that the external candidate
+is dispatched at 1+3 while Claude remains held. No cap overrun is intended.

@@ -28,7 +28,7 @@ vi.mock('../../../scripts/operations/detached-dispatch.mjs', async (importOrigin
 
 import {
   runBuildDispatchTick, settleBookkeeping, readKillSwitch, readDispatchOutcome, KILL_SWITCH_ENV,
-  cliListSettledBuilds, cliListRunStoreInFlight, cliListHolds, policyFrom,
+  cliPredictRoute, cliListSettledBuilds, cliListRunStoreInFlight, cliListHolds, policyFrom,
   // #4348-open-pr-retry
   primaryInfraStoreEnv, cliRetryInfraBlocked,
   // #4464 builder-cap-machine-wide
@@ -1298,6 +1298,50 @@ describe('automatic item preparation', () => {
     } catch (e) {
       expect(e.status).toBe(2);
       expect(e.stderr).toContain('usage: build-dispatch-daemon.mjs');
+    }
+  });
+});
+
+
+describe('executor prediction and independent caps (#4531)', () => {
+  it('sets caps independently by flags or env; the legacy flag stays Claude-only', () => {
+    expect(policyFrom({}, {})).toMatchObject({ maxConcurrentBuilds: 1, maxConcurrentExternalBuilds: 4 });
+    expect(policyFrom({ 'max-concurrent': '2' }, {})).toMatchObject({ maxConcurrentBuilds: 2, maxConcurrentExternalBuilds: 4 });
+    expect(policyFrom({ 'max-concurrent': '2', 'max-concurrent-external': '6' }, {})).toMatchObject({ maxConcurrentBuilds: 2, maxConcurrentExternalBuilds: 6 });
+    const env = { WE_BUILD_DAEMON_MAX_CONCURRENT: '3', WE_BUILD_DAEMON_MAX_CONCURRENT_EXTERNAL: '8' };
+    expect(policyFrom({}, env)).toMatchObject({ maxConcurrentBuilds: 3, maxConcurrentExternalBuilds: 8 });
+    expect(policyFrom({ 'max-concurrent': '0', 'max-concurrent-external': '0' }, env)).toMatchObject({ maxConcurrentBuilds: 0, maxConcurrentExternalBuilds: 0 });
+  });
+  it('predicts a real probation route and admits it while the Claude cap is full', async () => {
+    const root = mkdtempSync(join(tmpdir(), '4531-routing-'));
+    try {
+      mkdirSync(join(root, 'backlog'));
+      const item = { num: '3827', slug: 'docs', size: 1, scope: ['we:docs/guide.md'], tags: [] };
+      const options = { root, env: { WE_PROBATION_LAUNCH: 'on' }, loadItems: () => [item], scorecards: [], sizePolicy: {}, promotions: {} };
+      const predicted = await cliPredictRoute(item.num, item.scope, options);
+      expect(predicted.error).toBeUndefined();
+      expect(['codex', 'antigravity']).toContain(predicted.executor);
+      const dispatches = [];
+      const effects = effectsFor({ lockRoot: join(root, 'claims'), pid: 1234, dispatches, runStoreInFlight: [{ num: '9000', scope: ['we:unrelated'], executor: 'claude' }] });
+      effects.predictRoute = (num, scope) => cliPredictRoute(num, scope, options);
+      const result = await runBuildDispatchTick({ live: true, effects });
+      expect(result.dispatched.map(d => d.num)).toEqual(['3827']);
+      expect(result.plan.dispatch[0].executor).toBe(predicted.executor);
+      expect(result.plan.hold.find(h => h.num === '2662')).toBeDefined();
+      expect((await cliPredictRoute(item.num, item.scope, { ...options, env: { WE_PROBATION_LAUNCH: 'off' } })).executor).toBe('claude');
+      expect((await cliPredictRoute(item.num, item.scope, { ...options, loadItems: () => [{ ...item, scope: ['we:scripts/lib/provider-routing.mjs'] }] })).executor).toBe('claude');
+      writeFileSync(join(root, 'backlog', '3827-docs.md'), '---\ndeliveryAgent: codex\ndeliveryAgentReason: operator selection\n---\n');
+      expect((await cliPredictRoute(item.num, item.scope, options)).executor).toBe('codex');
+      expect((await cliPredictRoute(item.num, item.scope, { ...options, env: { WE_PROBATION_LAUNCH: 'off', WE_BUILD_DISPATCH_MODE: 'agent' } })).executor).toBe('claude');
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+  it('boots as a real Node CLI and rejects --bogus-flag with exit 2', () => {
+    try {
+      execFileSync(process.execPath, ['skills-src/conveyor/build-dispatch-daemon.mjs', '--bogus-flag'], { encoding: 'utf8', stdio: 'pipe' });
+      throw new Error('CLI unexpectedly succeeded');
+    } catch (error) {
+      expect(error.status).toBe(2);
+      expect(error.stderr).toContain('usage:');
     }
   });
 });

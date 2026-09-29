@@ -285,6 +285,10 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
   const candidates = spawn
     .filter((s) => !heldNums.has(normNum(s.num)))
     .map((s) => ({ num: normNum(s.num), lane: s.lane ?? null, scope: scopeByNum.get(normNum(s.num)) || [] }));
+  for (const c of candidates) {
+    c.route = effects.predictRoute ? await effects.predictRoute(c.num, c.scope) : null;
+    c.executor = c.route?.executor ?? null;
+  }
   const held = spawn.filter((s) => heldNums.has(normNum(s.num))).map((s) => normNum(s.num));
   // Card x0jgunh — `counts.building` includes THIS tick's own freshly-proposed spawns (right for the
   // interactive conveyor, which launches every spawn it is handed; wrong here, since this daemon only
@@ -414,7 +418,7 @@ const SCRIPTS = join(REPO_ROOT, 'scripts');
  * this daemon does not control. Live: 6 of 10 leased lanes were genuine builds, but the other 4 (two review
  * loops, one fix dispatch, one unrelated investigation) alone pushed the shared count past the default cap of
  * 8, so `tick-core=capacity-cap` held EVERY build candidate — including ones this daemon had real room for
- * under its OWN, much tighter `policy.maxConcurrentBuilds` (3).
+ * under its OWN executor caps (Claude 1, external 4).
  *
  * OPERATOR DECISION (2026-09-29): the builder's cap bounds ONLY the builder's own concurrent builds;
  * machine-wide load is the separate load-admission gate's job (#4076, `loadAdmission`/`load-cap`) — completely
@@ -425,7 +429,7 @@ const SCRIPTS = join(REPO_ROOT, 'scripts');
  * over this daemon's OWN durable claim count — #2924's own fix keeps that count to this daemon's own builds,
  * never machine-wide activity) is ALREADY a far tighter, correctly-scoped ceiling on what this daemon actually
  * dispatches. Exempting THIS daemon's OWN tick-core call from the shared lane-count ceiling cannot let it
- * dispatch more than `maxConcurrentBuilds` regardless — `decisions.spawnBuilds` merely gets to list MORE
+ * dispatch more than its executor caps regardless — `decisions.spawnBuilds` merely gets to list MORE
  * candidates than before (informational; `planBuildDispatch` still picks at most its own cap's worth), and item prepares have their own two-worker cap plus durable claims. The scope/decision prepare,
  * fix and ci-heal candidates are still discarded. `dispatch-plan.mjs` (tick-core's own child, `main()`'s `runJson` call below) reads the
  * IDENTICAL env var independently (`scripts/readiness/dispatch-plan.mjs`'s own `resolveMaxConcurrentLanes`
@@ -654,26 +658,31 @@ export async function cliRouteHeldItems(plan) {
   });
 }
 
-/** Predict the provider route for the dry run — the SAME `decideDispatchRoute` dispatch-lane calls, with the
- *  item's `deliveryAgent:` override honoured as the mechanical build mode would. Advisory only: dispatch-lane
+/** Predict the executor for admission and the dry run — the SAME `decideDispatchRoute` dispatch-lane calls, with the
+ *  item's `deliveryAgent:` override honoured as the mechanical build mode would. Admission prediction: dispatch-lane
  *  recomputes it at dispatch time. */
-async function cliPredictRoute(num, scope) {
+export async function cliPredictRoute(num, scope, { root = REPO_ROOT, env = process.env, loadItems, scorecards, sizePolicy, promotions } = {}) {
   try {
     const { decideDispatchRoute } = await import('../../scripts/lib/dispatch-contracts.mjs');
     const io = await import('../../scripts/operations/dispatch-lane-io.mjs');
     const { readItemDeliveryAgentOverride } = await import('../../scripts/operations/delivery-agent-marker.mjs');
-    const { readFileSync, readdirSync } = await import('node:fs');
-    const file = readdirSync(join(REPO_ROOT, 'backlog')).find((f) => f.startsWith(`${num}-`));
-    const text = file ? readFileSync(join(REPO_ROOT, 'backlog', file), 'utf8') : '';
-    const size = Number((/^size:\s*(\d+)/m.exec(text) || [])[1]) || null;
-    const override = readItemDeliveryAgentOverride(num, { root: REPO_ROOT });
+    const { probationLaunchDecision, probationLaunchFromEnv } = await import('../../scripts/operations/dispatch-providers/probation-worker.mjs');
+    const item = io.findItem(num, loadItems ?? (() => io.defaultLoadItems(root)));
+    if (!item) throw new Error(`cannot predict route: missing item #${num}`);
+    const { dispatchModesFromEnv } = await import('../../scripts/operations/dispatch-provider-registry.mjs');
+    const mechanical = dispatchModesFromEnv({ ...env, WE_BUILD_DISPATCH_MODE: env.WE_BUILD_DISPATCH_MODE || 'mechanical' }).build === 'mechanical';
+    const override = mechanical ? readItemDeliveryAgentOverride(num, { root }) : null;
     const r = decideDispatchRoute({
-      kind: 'build', cause: null, scopePaths: scope, size, tags: [],
+      kind: 'build', cause: null, scopePaths: item.scope, size: item.size ?? null,
+      risk: item.risk ?? null, tags: item.tags ?? [],
       taskKey: { storyRef: num, round: 1, taskId: 'build' }, ...(override || {}),
     }, {
-      scorecards: io.defaultReadScorecards(), sizePolicy: io.defaultReadSizePolicy({ root: REPO_ROOT }), promotions: io.defaultReadPromotions({ root: REPO_ROOT }),
+      scorecards: scorecards ?? io.defaultReadScorecards(), sizePolicy: sizePolicy ?? io.defaultReadSizePolicy({ root }), promotions: promotions ?? io.defaultReadPromotions({ root }),
     });
+    const probation = probationLaunchDecision({ launchKind: 'build', probationWorker: r.probationWorker }, probationLaunchFromEnv(env));
+    const executor = probation.launch ? r.probationWorker.executor : r.executed;
     return {
+      executor,
       marker: override?.deliveryAgent ?? null,
       taskType: r?.taskType ?? null,
       routed: r?.routed ?? null,
@@ -695,6 +704,7 @@ function cliEffects() {
     acquirePrepareClaim: (o) => acquireBuildDispatchClaim({ ...o, lockRoot: prepareClaimRoot() }),
     releasePrepareClaim: (o) => releaseBuildDispatchClaim({ ...o, lockRoot: prepareClaimRoot() }),
     planTick: cliPlanTick,
+    predictRoute: cliPredictRoute,
     fetchOpenPrs: cliFetchOpenPrs,
     listClaims: () => listBuildDispatchClaims(),
     releaseClaim: ({ num }) => releaseBuildDispatchClaim({ num }),
@@ -731,11 +741,13 @@ function parseFlags(argv) {
 
 /** EXPORTED (#4353) so a test can assert `--max-open-items` flows into the policy the same mechanical way
  *  `--max-concurrent`/`--max-open-prs` already do, without going through the full CLI/IO shell. */
-export function policyFrom(flags) {
+// Flags override WE_BUILD_DAEMON_MAX_CONCURRENT[_EXTERNAL]; the legacy knob is Claude-only.
+export function policyFrom(flags, env = process.env) {
   const n = (v, d) => (Number.isFinite(Number(v)) && Number(v) >= 0 ? Number(v) : d);
   return {
     ...BUILD_DISPATCH_POLICY,
-    maxConcurrentBuilds: n(flags['max-concurrent'], BUILD_DISPATCH_POLICY.maxConcurrentBuilds),
+    maxConcurrentBuilds: n(flags['max-concurrent'] ?? env.WE_BUILD_DAEMON_MAX_CONCURRENT, BUILD_DISPATCH_POLICY.maxConcurrentBuilds),
+    maxConcurrentExternalBuilds: n(flags['max-concurrent-external'] ?? env.WE_BUILD_DAEMON_MAX_CONCURRENT_EXTERNAL, BUILD_DISPATCH_POLICY.maxConcurrentExternalBuilds),
     maxOpenPrs: n(flags['max-open-prs'], BUILD_DISPATCH_POLICY.maxOpenPrs),
     maxOpenItems: n(flags['max-open-items'], BUILD_DISPATCH_POLICY.maxOpenItems),
   };
@@ -773,7 +785,13 @@ async function dryRun(flags) {
   // inline copy, so the per-num status detail below can never drift from the headline
   // `tick.plan.openItems`/`wouldDispatchNow` this report also prints.
   const dispatchedByBuilder = deriveDispatchedByBuilder(runStoreRows, settledRows);
-  const ifFreed = planBuildDispatch({ candidates: [...tick.plan.dispatch, ...tick.plan.hold, ...capacityOnly].map((c) => ({ num: c.num, lane: c.lane, scope: c.scope || scopeByNum.get(normNum(c.num)) || [] })), inFlight, openPrs: normalizeOpenPrs(openPrs), externalBuilding: core.building, killSwitch: cliKillSwitch(), policy, dispatchedByBuilder });
+  const reportCandidates = [];
+  for (const c of [...tick.plan.dispatch, ...tick.plan.hold, ...capacityOnly]) {
+    const scope = c.scope || scopeByNum.get(normNum(c.num)) || [];
+    const route = await cliPredictRoute(c.num, scope);
+    reportCandidates.push({ num: c.num, lane: c.lane, scope, route, executor: route.executor });
+  }
+  const ifFreed = planBuildDispatch({ candidates: reportCandidates, inFlight, openPrs: normalizeOpenPrs(openPrs), externalBuilding: core.building, killSwitch: cliKillSwitch(), policy, dispatchedByBuilder });
   const focus = String(flags.focus || '').split(',').map(normNum).filter(Boolean);
   const rows = [];
   const nums = new Set([...ifFreed.dispatch.map((x) => x.num), ...ifFreed.hold.map((x) => x.num)]);
@@ -797,7 +815,7 @@ async function dryRun(flags) {
     at: new Date().toISOString(),
     statusLine: tick.statusLine,
     policy: {
-      maxConcurrentBuilds: policy.maxConcurrentBuilds, maxOpenPrs: policy.maxOpenPrs, maxOpenItems: policy.maxOpenItems,
+      maxConcurrentBuilds: policy.maxConcurrentBuilds, maxConcurrentExternalBuilds: policy.maxConcurrentExternalBuilds, maxOpenPrs: policy.maxOpenPrs, maxOpenItems: policy.maxOpenItems,
       // #3383 continuation, live incident 2026-09-28 — `globalFreezeLabels` is what actually freezes every
       // candidate now; the three per-PR `*-stalled` labels only hold a scope-overlapping build (`freezeLabels`
       // still lists all four for anything reading the historical shape, kept alongside, not replaced).
@@ -824,7 +842,7 @@ async function dryRun(flags) {
   const w = (s) => process.stdout.write(`${s}\n`);
   w(`build-dispatch-daemon DRY RUN @ ${report.at}`);
   w(`  tick core: ${report.statusLine}`);
-  w(`  policy: cap ${policy.maxConcurrentBuilds} builds · GLOBAL freeze if open PRs > ${policy.maxOpenPrs} or any of [${(policy.globalFreezeLabels ?? policy.freezeLabels).join(', ')}] · a per-PR *-stalled label only holds a scope-overlapping build (scope-vs-open-prs)`);
+  w(`  policy: caps Claude ${policy.maxConcurrentBuilds} / external ${policy.maxConcurrentExternalBuilds} builds · GLOBAL freeze if open PRs > ${policy.maxOpenPrs} or any of [${(policy.globalFreezeLabels ?? policy.freezeLabels).join(', ')}] · a per-PR *-stalled label only holds a scope-overlapping build (scope-vs-open-prs)`);
   w(`  kill switch: ${report.killSwitch.engaged ? `ENGAGED (${report.killSwitch.reason})` : 'off'} · landing freeze: ${report.freeze.frozen ? `ON — ${report.freeze.reasons.join('; ')}` : 'off'}`);
   // card xao7080/#4518 — provider (`executor`) is visible per in-flight build here: a claim entry has no run
   // record yet (`executor` absent — the dispatch has not gone `in-flight` on disk), a run-store row carries the
@@ -835,7 +853,7 @@ async function dryRun(flags) {
   w(`  would dispatch now: ${report.wouldDispatchNow.map((n) => `#${n}`).join(', ') || 'nothing'}`);
   w(`  held items, routed: ${report.holdRouting.map((h) => `#${h.num}→${h.route}${h.commit ? `(${h.commit})` : ''}`).join(', ') || 'none'}`);
   for (const r of rows) {
-    const rt = r.route?.error ? `route ? (${r.route.error})` : `marker=${r.route.marker ?? '-'} taskType=${r.route.taskType ?? '-'} routed=${r.route.routed ?? '-'} executed=${r.route.executed ?? '-'}${r.route.refusal ? ` REFUSED: ${r.route.refusal}` : ''}`;
+    const rt = r.route?.error ? `route ? (${r.route.error})` : `marker=${r.route.marker ?? '-'} taskType=${r.route.taskType ?? '-'} routed=${r.route.routed ?? '-'} executed=${r.route.executed ?? '-'} executor=${r.route.executor ?? '-'}${r.route.refusal ? ` REFUSED: ${r.route.refusal}` : ''}`;
     w(`  #${r.num}: tick-core=${r.tickCore} → ${r.daemon}\n      ${rt}`);
   }
 }
@@ -874,7 +892,7 @@ async function live(flags) {
     tickOnce = wireSelfSyncAndAppAuth({ tickOnce, root: REPO_ROOT, selfSync: true, onRestart: () => { release(); process.exit(0); } });
   }
   const intervalMs = Number(flags['interval-ms']) > 0 ? Number(flags['interval-ms']) : DEFAULT_INTERVAL_MS;
-  console.error(`build-dispatch-daemon: live on ${hostname()}:${process.pid}, cap ${policy.maxConcurrentBuilds}, tick every ${intervalMs}ms${flags['self-sync'] ? ', self-sync ON' : ''}.`);
+  console.error(`build-dispatch-daemon: live on ${hostname()}:${process.pid}, caps Claude ${policy.maxConcurrentBuilds} / external ${policy.maxConcurrentExternalBuilds}, tick every ${intervalMs}ms${flags['self-sync'] ? ', self-sync ON' : ''}.`);
   const { stoppedReason } = await runDaemonLoop({
     tickOnce, sleep: realSleep, isAlive, intervalMs, maxTicks: flags.once ? 1 : Infinity,
     onTick: (r) => {
@@ -897,7 +915,8 @@ async function main(argv) {
   if (flags['dry-run']) return dryRun(flags);
   if (flags.live) return live(flags);
   console.error('usage: build-dispatch-daemon.mjs --dry-run [--json] [--focus=N,M]   (read-only: what it would dispatch now)\n'
-    + '       build-dispatch-daemon.mjs --live [--once] [--self-sync] [--no-prepare] [--max-concurrent=3] [--max-open-prs=12] [--max-open-items=7] [--interval-ms=120000]\n'
+    + '       build-dispatch-daemon.mjs --live [--once] [--self-sync] [--no-prepare] [--max-concurrent=1] [--max-concurrent-external=4] [--max-open-prs=12] [--max-open-items=7] [--interval-ms=120000]\n'
+    + 'caps env: WE_BUILD_DAEMON_MAX_CONCURRENT (Claude), WE_BUILD_DAEMON_MAX_CONCURRENT_EXTERNAL (Codex/agy); flags win\n'
     + `kill switch: ${KILL_SWITCH_ENV}=1 or touch <coordination root>/${KILL_SWITCH_FILENAME}`);
   process.exit(2);
 }
