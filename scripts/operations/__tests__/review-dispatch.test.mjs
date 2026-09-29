@@ -8,7 +8,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -20,7 +20,7 @@ import {
   assertMainNotStale, canonicalReviewPlaceholder, dispatchReview, fillReviewBrief, isReviewCodePath, planReviewDispatch,
   reviewDispatchDisallowedToolsArgs, reviewSessionSlug, REVIEW_BRIEF_PLACEHOLDERS,
   REVIEW_DISPATCH_DISALLOWED_TOOLS, REVIEW_DISPATCH_SYSTEM_PROMPT_FILE,
-  TOOL_FREE_ONLY_JUDGE_PROVIDERS,
+  REVIEW_SANDBOX_ROOTS, TOOL_FREE_ONLY_JUDGE_PROVIDERS,
 } from '../review-dispatch.mjs';
 import { buildReviewJudgeRequest, DEFAULT_LENS } from '../review-pr.mjs';
 import { dispatchSessionCwd } from '../dispatch-lane-io.mjs';
@@ -601,6 +601,28 @@ describe('isReviewCodePath (#4387)', () => {
     }
     expect(missing).toEqual([]);
   });
+  // PR #2916 review, round 2: the credential sandbox sits one import deeper than the entry files (dispatch-lane-io
+  // → gh-app-shim; review-core → mandate-fence; judge-spawn → session-role), so direct imports alone missed it.
+  it('puts the sandbox modules\' deeper imports on the path (PR #2916 review, round 2)', () => {
+    expect([
+      'scripts/lib/gh-app-shim.mjs', 'scripts/lib/github-app-auth-env.mjs', 'scripts/operations/session-role.mjs',
+      'scripts/lib/spawn-to-completion.mjs', 'scripts/lib/gh-throttle.mjs', 'scripts/lib/mandate-fence.mjs',
+      'scripts/lib/dispatch-contracts.mjs', 'scripts/operations/detached-dispatch.mjs',
+      'scripts/operations/dispatch-lane.mjs', 'scripts/lib/github-app-token.mjs', 'scripts/lib/secret-scrub.mjs',
+      'scripts/guard-lane.mjs', 'scripts/lib/atomic-json-file.mjs',
+    ].filter((f) => !isReviewCodePath(f))).toEqual([]);
+  });
+  // A renamed or deleted root would silently drop out of the closure (collectImportClosure skips it).
+  it('every sandbox root exists in the tree', () => {
+    const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+    expect(REVIEW_SANDBOX_ROOTS.filter((f) => !existsSync(join(repoRoot, f)))).toEqual([]);
+  });
+  it('fails closed when the sandbox closure is unknown or incomplete', () => {
+    for (const closure of [null, { files: new Set(), complete: false, bareDeps: false, jsonNames: new Set() }]) {
+      expect(isReviewCodePath('scripts/lane-pool.mjs', { closure })).toBe(true);
+      expect(isReviewCodePath('backlog/4387-review.md', { closure })).toBe(false);
+    }
+  });
 });
 
 describe('dispatchReview — managed clone behind origin/main (#4387)', () => {
@@ -662,6 +684,12 @@ describe('dispatchReview — managed clone behind origin/main (#4387)', () => {
 
   it('behind only in the dispatcher\'s sandbox/routing imports: still refuses (PR #2916 review)', () => {
     const root = behindClone('scripts/operations/dispatch-lane-io.mjs', 'scripts/lib/dispatch-bg-isolation.mjs');
+    managed();
+    expect(() => run(root)).toThrow(/2 commit\(s\) behind origin\/main.*STALE code from this checkout/s);
+  });
+
+  it('behind only in the credential sandbox (gh-app-shim, mandate-fence): still refuses (PR #2916 review, round 2)', () => {
+    const root = behindClone('scripts/lib/gh-app-shim.mjs', 'scripts/lib/mandate-fence.mjs');
     managed();
     expect(() => run(root)).toThrow(/2 commit\(s\) behind origin\/main.*STALE code from this checkout/s);
   });
