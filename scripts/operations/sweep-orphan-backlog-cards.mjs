@@ -24,9 +24,12 @@
  *   2. Reads each orphan's content directly ({@link parseOrphanCard}) — no `fs` write into the clone at any
  *      point.
  *   3. DEDUPE ({@link selectOrphanSurvivors}), against two things:
- *        - `origin/main`'s own backlog: an orphan whose `bornAs:` id (or, for a card with no such landed
- *          twin, whose title-derived source PR) already has a card on `main` is DROPPED — its debt is already
- *          tracked, landing it again would double it.
+ *        - `origin/main`'s own backlog (freshly fetched, read in THIS repo, never wherever the process
+ *          started): an orphan whose `bornAs:` id — or, for a card with no such landed twin, whose source PR
+ *          AND guard lines — already has a card on `main` is DROPPED; its debt is already tracked, landing it
+ *          again would double it. A main card for the same PR with a DIFFERENT guard drops nothing.
+ *        - An untracked card that is not a mechanically-filed prevention card, or is not a regular file (a
+ *          symlink is never read through), is never landed.
  *        - EVERY OTHER ORPHAN in this same sweep: two orphans citing the SAME source PR AND the SAME guard
  *          text are the same debt filed twice (a marker-post race, #4317's own `xxe5jvs` residual) — the
  *          second is DROPPED. Two orphans citing the same PR with GENUINELY DIFFERENT guards are kept BOTH —
@@ -74,11 +77,13 @@
  */
 import { execFileSync } from 'node:child_process';
 import {
-  readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync,
+  readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync, lstatSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
-import { dirname, join, resolve } from 'node:path';
+import {
+  basename, dirname, join, resolve,
+} from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { extractSubmitResult } from './open-pr.mjs';
@@ -116,32 +121,44 @@ const TITLE_SOURCE_RE = /^# File the prevention guard\(s\) owed by (\S+?)'s inde
  *  the card was filed for, not just the PR), title-derived `TITLE_SOURCE_RE` is the fallback every other
  *  shape (the #2749 loop's own cards carry no such key) still has. */
 const IDEMPOTENCY_KEY_RE = /approval-prevention-key:([^@\s]+)@/;
-/** `git grep`'s own basic-regex reading of the same title, scoped so a hand-typed card that merely CONTAINS
- *  this phrase mid-sentence is never mistaken for the mechanically-filed title line itself. */
+/** `git grep`'s own basic-regex reading of the same title (always run with an explicit `-G`, so a user's
+ *  `grep.extendedRegexp` config can never turn `(s)` into a group), scoped so a hand-typed card that merely
+ *  CONTAINS this phrase mid-sentence is never mistaken for the mechanically-filed title line itself. */
 const MAIN_GREP_PATTERN = '^# File the prevention guard(s) owed by';
+/** One numbered guard line of the card body (`1. \`we:...\` — ...`) — the card's actual debt. */
+const GUARD_LINE_RE = /^\d+\.\s+\S.*$/gm;
 
 /**
- * PURE. Shape one orphan card's raw text into the facts {@link selectOrphanSurvivors} dedupes on.
- * `digestHash` covers the card's OWN debt content only — the idempotency-key line (which pins a head, not the
- * guard text) is stripped first, so two cards citing the identical guard for the identical PR at two different
- * head shas still hash identically; the `## Done when` boilerplate (`file-item.mjs`'s own placeholder, verbatim
- * on every card) is stripped too, so it can never itself make two otherwise-distinct cards collide.
+ * PURE. Shape one card's raw text into the facts {@link selectOrphanSurvivors} dedupes on.
+ * `digestHash` covers the numbered GUARD LINES only — never the frontmatter (`dateOpened`, `scope`, a landed
+ * card's `bornAs`), the intro paragraph (the #2749 loop shape names its `reviewed head` sha there) or the
+ * idempotency key (which pins a head) — so the same guard for the same PR hashes identically whatever day or
+ * head it was filed at. The `## Done when` boilerplate is cut before the guard lines are read. A card with no
+ * numbered guard line at all falls back to its whole body minus frontmatter.
  * @param {string} rel - `backlog/x......-*.md`, as `git status` reported it.
  * @param {string} content
  * @returns {{rel:string, hashId:(string|null), status:string, kind:string, sourceRef:(string|null),
- *   digestHash:string, content:string}}
+ *   isPreventionCard:boolean, digestHash:string, content:string}}
  */
 export function parseOrphanCard(rel, content) {
   const hashId = /^backlog\/(x[0-9a-z]{6})-/.exec(rel)?.[1] ?? null;
   const status = readField(content, 'status') ?? 'open';
   const kind = readField(content, 'kind') ?? '';
-  const sourceRef = IDEMPOTENCY_KEY_RE.exec(content)?.[1] ?? TITLE_SOURCE_RE.exec(content)?.[1] ?? null;
-  const digestBody = String(content)
-    .replace(/\n*Idempotency key \(do not edit\):[^\n]*/, '')
-    .split(/\n##\s+Done when[\s\S]*$/)[0]
-    .trim();
+  const titleRef = TITLE_SOURCE_RE.exec(content)?.[1] ?? null;
+  const sourceRef = IDEMPOTENCY_KEY_RE.exec(content)?.[1] ?? titleRef;
+  const body = String(content)
+    .replace(/^---\n[\s\S]*?\n---\n/, '')
+    .split(/\n##\s+Done when[\s\S]*$/)[0];
+  const guards = body.match(GUARD_LINE_RE) ?? [];
+  const digestBody = guards.length ? guards.map((g) => g.trim()).join('\n') : body.trim();
   const digestHash = createHash('sha256').update(digestBody).digest('hex');
-  return { rel, hashId, status, kind, sourceRef, digestHash, content };
+  return { rel, hashId, status, kind, sourceRef, isPreventionCard: titleRef != null, digestHash, content };
+}
+
+/** PURE. The one dedupe identity — same source PR + same guard lines — shared by the orphan-vs-orphan pass
+ *  and the orphan-vs-main pass, so the two can never disagree about what "the same debt" means. */
+export function orphanDedupeKey(card) {
+  return card.sourceRef ? `${card.sourceRef}::${card.digestHash}` : `content::${card.digestHash}`;
 }
 
 /**
@@ -149,18 +166,24 @@ export function parseOrphanCard(rel, content) {
  * file header's step 3 for the two dedupe passes. Deterministic: ties within a duplicate group always keep
  * the alphabetically-first `rel` (the lowest hash id sorts first), never input order, so re-running the sweep
  * on an unchanged clone always reaches the same verdict.
+ * A card that is not a mechanically-filed prevention card (no {@link TITLE_SOURCE_RE} title) is never landed:
+ * this sweep only knows those two shapes, and anything else untracked in a clone needs a human's eyes.
  * @param {ReturnType<typeof parseOrphanCard>[]} cards
- * @param {{mainBornAsIds?:Set<string>, mainSourceRefs?:Set<string>}} [mainSets]
+ * @param {{mainBornAsIds?:Set<string>, mainGuardKeys?:Set<string>}} [mainSets] - `mainGuardKeys` holds
+ *   {@link orphanDedupeKey} of every prevention card on main, so a main card for the same PR with a DIFFERENT
+ *   guard never drops an orphan.
  * @returns {{survivors:Array, dropped:Array<{rel:string, reason:string, duplicateOf?:string}>}}
  */
-export function selectOrphanSurvivors(cards, { mainBornAsIds = new Set(), mainSourceRefs = new Set() } = {}) {
+export function selectOrphanSurvivors(cards, { mainBornAsIds = new Set(), mainGuardKeys = new Set() } = {}) {
   const dropped = [];
   const remaining = [];
   for (const c of cards) {
-    if (c.hashId && mainBornAsIds.has(c.hashId)) {
+    if (!c.isPreventionCard) {
+      dropped.push({ ...c, reason: 'not a mechanically-filed prevention card — left in the clone for a human' });
+    } else if (c.hashId && mainBornAsIds.has(c.hashId)) {
       dropped.push({ ...c, reason: `already landed on origin/main (a card there carries bornAs: ${c.hashId})` });
-    } else if (c.sourceRef && mainSourceRefs.has(c.sourceRef)) {
-      dropped.push({ ...c, reason: `already landed on origin/main (a card already covers ${c.sourceRef})` });
+    } else if (mainGuardKeys.has(orphanDedupeKey(c))) {
+      dropped.push({ ...c, reason: `already landed on origin/main (a card already covers ${c.sourceRef} with the same guard)` });
     } else {
       remaining.push(c);
     }
@@ -169,7 +192,7 @@ export function selectOrphanSurvivors(cards, { mainBornAsIds = new Set(), mainSo
   const seen = new Map();
   const survivors = [];
   for (const c of sorted) {
-    const key = c.sourceRef ? `${c.sourceRef}::${c.digestHash}` : `content::${c.digestHash}`;
+    const key = orphanDedupeKey(c);
     const first = seen.get(key);
     if (first) {
       dropped.push({ ...c, reason: `duplicate of ${first.rel} — same source + same guard`, duplicateOf: first.rel });
@@ -182,41 +205,67 @@ export function selectOrphanSurvivors(cards, { mainBornAsIds = new Set(), mainSo
 }
 
 /**
- * READ-ONLY scan of `clone` for untracked backlog cards. `exec`/`readFile` injected — no real subprocess or
- * `fs` call in a test. NEVER runs `git add`/`git commit`/anything that mutates `clone`'s working tree.
+ * READ-ONLY scan of `clone` for untracked backlog cards. `exec`/`readFile`/`lstat` injected — no real
+ * subprocess or `fs` call in a test. NEVER runs `git add`/`git commit`/anything that mutates `clone`'s working
+ * tree. Anything but a regular file (a planted symlink above all) is skipped unread: `readFile` follows
+ * symlinks, and the bytes it returns would be committed and pushed to a PR.
  * @param {string} clone
- * @param {{exec:Function, readFile?:Function}} io
+ * @param {{exec:Function, readFile?:Function, lstat?:Function}} io
  * @returns {Array<{rel:string, content:string}>}
  */
-export function listUntrackedBacklogCards(clone, { exec, readFile = (p) => readFileSync(p, 'utf8') } = {}) {
+export function listUntrackedBacklogCards(clone, {
+  exec, readFile = (p) => readFileSync(p, 'utf8'), lstat = lstatSync,
+} = {}) {
   const status = exec('git', ['-C', clone, 'status', '--porcelain', '--untracked-files=all', '--', 'backlog'], {});
   const lines = String(status || '').split('\n').map((l) => l.trim()).filter(Boolean);
   const out = [];
   for (const line of lines) {
     const m = ORPHAN_LINE_RE.exec(line);
     if (!m) continue; // tracked/modified/deleted entries, and any non-hash-id backlog path, are out of scope
-    out.push({ rel: m[1], content: readFile(join(clone, m[1])) });
+    const abs = join(clone, m[1]);
+    const st = lstat(abs);
+    if (st.isSymbolicLink() || !st.isFile()) continue;
+    out.push({ rel: m[1], content: readFile(abs) });
   }
   return out;
 }
 
 /**
- * READ `origin/main`'s own backlog for the two dedupe sets `selectOrphanSurvivors` needs — TWO `git grep`
- * passes over `ref` (never a per-file `git show` for each of ~4k backlog cards). `git grep` exits 1 with no
- * output on zero matches (never an error condition here); any OTHER failure (bad ref, not a git repo) still
- * surfaces via the caller's own try/catch, using whatever partial stdout the child process wrote.
- * @param {{exec:Function, ref?:string}} io
- * @returns {{mainBornAsIds:Set<string>, mainSourceRefs:Set<string>}}
+ * READ `ref`'s own backlog for the two dedupe sets `selectOrphanSurvivors` needs, in THIS repo (`cwd`, never
+ * wherever the process happened to start). First refreshes an `origin/<branch>` ref and verifies it resolves,
+ * so a stale or missing ref can never pass for "main has nothing". Then one `git grep` for `bornAs:` ids and
+ * one `git grep -l` for prevention-card titles, whose few matches (~dozens, never the ~4k backlog) are each
+ * read with `git show` to key them by PR + guard ({@link orphanDedupeKey}). `git grep` exits 1 with no output
+ * on zero matches — the ONLY failure read as empty; any other (exit 128: bad ref, not a repo) is thrown.
+ * @param {{exec:Function, ref?:string, cwd?:string}} io
+ * @returns {{mainBornAsIds:Set<string>, mainGuardKeys:Set<string>}}
  */
-export function readMainDedupeSets({ exec, ref = 'origin/main' }) {
-  const grepSafe = (pattern) => {
-    try { return exec('git', ['grep', '-h', pattern, ref, '--', 'backlog'], {}); } catch (e) { return String(e?.stdout ?? ''); }
+export function readMainDedupeSets({ exec, ref = 'origin/main', cwd = REPO_ROOT }) {
+  // Bounded and never interactive: a dry run fetches too, and a stuck fetch or a credential prompt must fail
+  // the read (surfaced as `read-main`), never hang an unattended sweep.
+  const git = (args) => exec('git', args, {
+    cwd, timeout: ACQUIRE_TIMEOUT_MS, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+  });
+  const remoteBranch = /^origin\/(.+)$/.exec(ref)?.[1];
+  if (remoteBranch) git(['fetch', '--quiet', 'origin', remoteBranch]);
+  git(['rev-parse', '--verify', '--quiet', `${ref}^{commit}`]);
+  const grep = (flags, pattern) => {
+    try {
+      return String(git(['grep', ...flags, '-G', '-e', pattern, ref, '--', 'backlog']));
+    } catch (e) {
+      if (e?.status === 1 && !String(e?.stderr ?? '').trim()) return '';
+      throw e;
+    }
   };
-  const bornAsText = grepSafe('^bornAs:');
-  const mainBornAsIds = new Set([...String(bornAsText).matchAll(/^bornAs:\s*(\S+)/gm)].map((m) => m[1]));
-  const titleText = grepSafe(MAIN_GREP_PATTERN);
-  const mainSourceRefs = new Set([...String(titleText).matchAll(new RegExp(TITLE_SOURCE_RE.source, 'gm'))].map((m) => m[1]));
-  return { mainBornAsIds, mainSourceRefs };
+  const mainBornAsIds = new Set([...grep(['-h'], '^bornAs:').matchAll(/^bornAs:\s*(\S+)/gm)].map((m) => m[1]));
+  const mainGuardKeys = new Set();
+  // `-z`: NUL-separated, so `core.quotePath` can never hand `git show` a quoted name.
+  for (const blob of grep(['-l', '-z'], MAIN_GREP_PATTERN).split(/[\0\n]/).map((l) => l.trim()).filter(Boolean)) {
+    const rel = blob.slice(blob.indexOf(':') + 1);
+    const card = parseOrphanCard(rel, String(git(['show', blob])));
+    if (card.isPreventionCard) mainGuardKeys.add(orphanDedupeKey(card));
+  }
+  return { mainBornAsIds, mainGuardKeys };
 }
 
 /**
@@ -290,11 +339,12 @@ export function findContentInvalidSurvivors(errors, survivors) {
  *  never spin forever even if one somehow existed. */
 export const CONTENT_VALIDATION_MAX_ATTEMPTS = 5;
 
-/** PURE. The ONE commit message for every survivor this sweep lands. */
+/** PURE. The ONE commit message for every survivor this sweep lands. Names the clone by its basename only —
+ *  the absolute local path (home dir, username) never reaches git history. */
 export function buildSweepCommitMessage(survivors, clone) {
   const rels = survivors.map((s) => s.rel).sort();
   const shown = rels.length <= 10 ? rels.join(', ') : `${rels.slice(0, 10).join(', ')}, … (+${rels.length - 10} more)`;
-  return `Land ${survivors.length} orphaned backlog card(s) rescued from ${clone}\n\n`
+  return `Land ${survivors.length} orphaned backlog card(s) rescued from ${basename(clone)}\n\n`
     + 'Untracked backlog cards written straight into a daemon clone by the pre-#4317 filing path never landed '
     + '(we:scripts/conveyor/health-smells/untracked-backlog-card.mjs flags the condition). This sweep '
     + '(we:scripts/operations/sweep-orphan-backlog-cards.mjs) copies the survivors — after dropping ones '
@@ -303,16 +353,16 @@ export function buildSweepCommitMessage(survivors, clone) {
 }
 
 /** PURE. The PR body for the same commit — names what was dropped and why, so a reviewer can spot-check the
- *  dedupe without re-deriving it. */
+ *  dedupe without re-deriving it. The clone is named by basename only, as in the commit message. */
 export function buildSweepPrBody(survivors, dropped, clone) {
   const rels = survivors.map((s) => s.rel).sort();
   const shownDropped = dropped.slice(0, 20);
   const droppedLines = shownDropped.map((d) => `- \`${d.rel}\` — ${d.reason}`).join('\n');
   const more = dropped.length > shownDropped.length ? `\n… (+${dropped.length - shownDropped.length} more)` : '';
   return 'Mechanically landed by the orphan-backlog-card sweep (#4317 follow-up).\n\n'
-    + `Source clone: \`${clone}\`\n\n`
+    + `Source clone: \`${basename(clone)}\`\n\n`
     + `## Landed (${rels.length})\n${rels.map((r) => `- \`${r}\``).join('\n')}\n\n`
-    + `## Dropped as duplicate / already on main (${dropped.length})\n${droppedLines}${more}\n`;
+    + `## Dropped — duplicate, already on main, not a prevention card, or failed check:standards (${dropped.length})\n${droppedLines}${more}\n`;
 }
 
 /**
@@ -381,7 +431,7 @@ export async function sweepOrphanBacklogCards({ clone, session, dryRun = false }
 
   if (!survivors.length) {
     return {
-      ok: true, step: 'done', reason: 'nothing to land — every orphan was a duplicate or already landed',
+      ok: true, step: 'done', reason: 'nothing to land — every orphan was a duplicate, already landed, or not a prevention card',
       landed: [], dropped, pr: null, url: null,
     };
   }

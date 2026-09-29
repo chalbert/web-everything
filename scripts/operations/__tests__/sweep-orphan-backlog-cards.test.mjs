@@ -8,8 +8,10 @@ import { describe, it, expect } from 'vitest';
 import {
   parseOrphanCard, selectOrphanSurvivors, listUntrackedBacklogCards, readMainDedupeSets, queueLandedSurvivors,
   buildSweepCommitMessage, buildSweepPrBody, sweepOrphanBacklogCards, parseSweepArgv, runSweepOrphanBacklogCardsCli,
-  parseCheckStandardsJson, findContentInvalidSurvivors,
+  parseCheckStandardsJson, findContentInvalidSurvivors, orphanDedupeKey,
 } from '../sweep-orphan-backlog-cards.mjs';
+
+const REGULAR = () => ({ isFile: () => true, isSymbolicLink: () => false });
 
 // A real orphan's shape (#4317 approval-time filer): idempotency key, one guard.
 const APPROVAL_CARD = (pr, sha, guard = 'Add the missing regression test.') => `---
@@ -78,6 +80,20 @@ describe('parseOrphanCard', () => {
     expect(a.digestHash).not.toBe(c.digestHash);
   });
 
+  // PR #2901 review: the digest must cover the guard lines ONLY — every incidental field (dateOpened, scope,
+  // the loop shape's own `reviewed head` sha, the idempotency key) must vary without changing it.
+  it('same PR + same guard hash identically across a different dateOpened, scope, and loop-shape head sha', () => {
+    const loopA = parseOrphanCard('backlog/xaaaaaa-x.md', LOOP_CARD(100, 'sha1', 'Same guard.'));
+    const loopB = parseOrphanCard('backlog/xbbbbbb-x.md', LOOP_CARD(100, 'sha2', 'Same guard.'));
+    expect(loopA.digestHash).toBe(loopB.digestHash);
+    const approvalOtherDay = APPROVAL_CARD(100, 'sha3', 'Same guard.')
+      .replace('dateOpened: "2026-09-28"', 'dateOpened: "2026-09-29"')
+      .replace('scope: ["we:scripts/a.mjs"]', 'scope: ["we:scripts/z.mjs"]');
+    const a = parseOrphanCard('backlog/xcccccc-x.md', APPROVAL_CARD(100, 'sha4', 'Same guard.'));
+    const b = parseOrphanCard('backlog/xdddddd-x.md', approvalOtherDay);
+    expect(a.digestHash).toBe(b.digestHash);
+  });
+
   it('a card with no recognizable hash-id filename gets a null hashId, never throws', () => {
     const c = parseOrphanCard('backlog/weird-name.md', APPROVAL_CARD(1, 's'));
     expect(c.hashId).toBeNull();
@@ -93,11 +109,29 @@ describe('selectOrphanSurvivors', () => {
     expect(dropped[0].reason).toMatch(/bornAs: xab12cd/);
   });
 
-  it('drops an orphan whose source PR already has a card on main, even with no bornAs match', () => {
+  it('drops an orphan whose source PR AND guard already have a card on main, even with no bornAs match', () => {
+    const onMain = parseOrphanCard('backlog/4400-a.md', `---\nbornAs: xqqqqqq\n${APPROVAL_CARD(42, 'other-head').slice(4)}`
+      .replace('dateOpened: "2026-09-28"', 'dateOpened: "2026-09-26"'));
     const cards = [parseOrphanCard('backlog/xzzzzzz-a.md', APPROVAL_CARD(42, 's1'))];
-    const { survivors, dropped } = selectOrphanSurvivors(cards, { mainSourceRefs: new Set(['chalbert/web-everything#42']) });
+    const { survivors, dropped } = selectOrphanSurvivors(cards, { mainGuardKeys: new Set([orphanDedupeKey(onMain)]) });
     expect(survivors).toEqual([]);
     expect(dropped[0].reason).toMatch(/covers chalbert\/web-everything#42/);
+  });
+
+  // PR #2901 review: a main card for the same PR with a DIFFERENT guard is different debt — never a drop.
+  it('keeps an orphan whose source PR has a card on main that names a DIFFERENT guard', () => {
+    const onMain = parseOrphanCard('backlog/4400-a.md', APPROVAL_CARD(42, 's0', 'Guard A.'));
+    const cards = [parseOrphanCard('backlog/xzzzzzz-a.md', APPROVAL_CARD(42, 's1', 'Guard B.'))];
+    const { survivors, dropped } = selectOrphanSurvivors(cards, { mainGuardKeys: new Set([orphanDedupeKey(onMain)]) });
+    expect(survivors.map((s) => s.rel)).toEqual(['backlog/xzzzzzz-a.md']);
+    expect(dropped).toEqual([]);
+  });
+
+  it('drops (leaves for a human) an untracked card that is not a mechanically-filed prevention card', () => {
+    const cards = [parseOrphanCard('backlog/xzzzzzz-a.md', '---\nkind: story\nstatus: open\n---\n\n# Something else entirely\n')];
+    const { survivors, dropped } = selectOrphanSurvivors(cards, {});
+    expect(survivors).toEqual([]);
+    expect(dropped[0].reason).toMatch(/not a mechanically-filed prevention card/);
   });
 
   it('among orphans, keeps the alphabetically-first of two citing the SAME PR + SAME guard, drops the other', () => {
@@ -147,14 +181,24 @@ describe('listUntrackedBacklogCards', () => {
       return status;
     };
     const readFile = (p) => { expect(p).toBe('/clone/backlog/xab12cd-file-the-prevention.md'); return 'CONTENT'; };
-    const out = listUntrackedBacklogCards('/clone', { exec, readFile });
+    const out = listUntrackedBacklogCards('/clone', { exec, readFile, lstat: REGULAR });
     expect(out).toEqual([{ rel: 'backlog/xab12cd-file-the-prevention.md', content: 'CONTENT' }]);
+  });
+
+  // PR #2901 review: a planted untracked symlink must never have its TARGET's bytes read (and so landed).
+  it('skips an untracked entry that is a symlink (or anything but a regular file) — never reads through it', () => {
+    const exec = () => '?? backlog/xab12cd-planted.md\n?? backlog/xcd34ef-real.md';
+    const read = [];
+    const lstat = (p) => ({ isFile: () => !p.endsWith('planted.md'), isSymbolicLink: () => p.endsWith('planted.md') });
+    const out = listUntrackedBacklogCards('/clone', { exec, lstat, readFile: (p) => { read.push(p); return 'C'; } });
+    expect(out.map((o) => o.rel)).toEqual(['backlog/xcd34ef-real.md']);
+    expect(read).toEqual(['/clone/backlog/xcd34ef-real.md']);
   });
 
   it('NEVER shells anything but the one read-only `git status` call — no add/commit path exists in this function', () => {
     const calls = [];
     const exec = (cmd, args) => { calls.push([cmd, args]); return ''; };
-    listUntrackedBacklogCards('/clone', { exec, readFile: () => '' });
+    listUntrackedBacklogCards('/clone', { exec, readFile: () => '', lstat: REGULAR });
     expect(calls).toHaveLength(1);
     expect(calls[0][1]).not.toContain('add');
     expect(calls[0][1]).not.toContain('commit');
@@ -162,24 +206,63 @@ describe('listUntrackedBacklogCards', () => {
 });
 
 describe('readMainDedupeSets', () => {
-  it('reads bornAs ids and title-derived source refs off two `git grep` passes over origin/main', () => {
+  const MAIN_CARD = LOOP_CARD(2807, 'h', 'Add the missing regression test.');
+  const mainExec = (calls, { grep } = {}) => (cmd, args, opts) => {
+    calls.push({ args, opts });
+    if (args[0] === 'fetch' || args[0] === 'rev-parse') return '';
+    if (args[0] === 'grep' && args.includes('^bornAs:')) return grep?.bornAs ?? 'bornAs: x21soye\nbornAs: x3qp94j\n';
+    if (args[0] === 'grep') return grep?.titles ?? 'origin/main:backlog/4400-file-the-prevention.md\n';
+    if (args[0] === 'show') return MAIN_CARD;
+    throw new Error(`unexpected ${args.join(' ')}`);
+  };
+
+  it('reads bornAs ids and per-card PR+guard keys off origin/main, run in this repo with an explicit regex dialect', () => {
     const calls = [];
-    const exec = (cmd, args) => {
-      calls.push(args);
-      if (args.includes('^bornAs:')) return 'bornAs: x21soye\nbornAs: x3qp94j\n';
-      return "# File the prevention guard(s) owed by chalbert/web-everything#2807's independent review\n";
-    };
-    const { mainBornAsIds, mainSourceRefs } = readMainDedupeSets({ exec });
+    const { mainBornAsIds, mainGuardKeys } = readMainDedupeSets({ exec: mainExec(calls), cwd: '/repo' });
     expect(mainBornAsIds).toEqual(new Set(['x21soye', 'x3qp94j']));
-    expect(mainSourceRefs).toEqual(new Set(['chalbert/web-everything#2807']));
-    expect(calls.every((a) => a[0] === 'grep' && a.includes('origin/main'))).toBe(true);
+    expect(mainGuardKeys).toEqual(new Set([orphanDedupeKey(parseOrphanCard('backlog/4400-a.md', MAIN_CARD))]));
+    expect(calls.every((c) => c.opts?.cwd === '/repo')).toBe(true);
+    const greps = calls.filter((c) => c.args[0] === 'grep');
+    expect(greps).toHaveLength(2);
+    expect(greps.every((c) => c.args.includes('-G') && c.args.includes('origin/main'))).toBe(true);
+    expect(calls.find((c) => c.args[0] === 'show').args).toEqual(['show', 'origin/main:backlog/4400-file-the-prevention.md']);
+  });
+
+  it('refreshes and verifies the ref before grepping it', () => {
+    const calls = [];
+    readMainDedupeSets({ exec: mainExec(calls), cwd: '/repo' });
+    expect(calls[0].args).toEqual(['fetch', '--quiet', 'origin', 'main']);
+    expect(calls[1].args).toEqual(['rev-parse', '--verify', '--quiet', 'origin/main^{commit}']);
   });
 
   it('a `git grep` with zero matches (exit 1, empty stdout) reads as an empty set, never an error', () => {
-    const exec = () => { const e = new Error('exit 1'); e.stdout = ''; throw e; };
-    const { mainBornAsIds, mainSourceRefs } = readMainDedupeSets({ exec });
+    const exec = (cmd, args) => {
+      if (args[0] !== 'grep') return '';
+      const e = new Error('exit 1'); e.status = 1; e.stdout = ''; throw e;
+    };
+    const { mainBornAsIds, mainGuardKeys } = readMainDedupeSets({ exec });
     expect(mainBornAsIds.size).toBe(0);
-    expect(mainSourceRefs.size).toBe(0);
+    expect(mainGuardKeys.size).toBe(0);
+  });
+
+  // PR #2901 review: a fatal grep (bad ref, not a repo — exit 128) must SURFACE, never read as "main is empty".
+  it('a fatal `git grep` (exit 128) throws to the caller instead of returning empty sets', () => {
+    const exec = (cmd, args) => {
+      if (args[0] !== 'grep') return '';
+      const e = new Error('fatal: not a git repository'); e.status = 128; e.stdout = ''; throw e;
+    };
+    expect(() => readMainDedupeSets({ exec })).toThrow(/not a git repository/);
+  });
+
+  it('a missing ref (rev-parse fails) throws before any grep runs', () => {
+    const calls = [];
+    const exec = (cmd, args) => {
+      calls.push(args);
+      if (args[0] === 'rev-parse') { const e = new Error('Needed a single revision'); e.status = 1; throw e; }
+      return '';
+    };
+    expect(() => readMainDedupeSets({ exec })).toThrow(/single revision/);
+    expect(calls.some((a) => a[0] === 'grep')).toBe(false);
   });
 });
 
@@ -270,6 +353,17 @@ describe('buildSweepCommitMessage / buildSweepPrBody', () => {
     expect(body).toContain('backlog/xbbbbbb-b.md');
     expect(body).toContain('bornAs: xbbbbbb');
   });
+
+  // PR #2901 review: the local absolute path (home dir, username) must never reach git history or a PR body.
+  it('names the source clone by its basename only — never the absolute local path', () => {
+    const clone = '/Users/someone/workspace/wev-review-daemon';
+    const msg = buildSweepCommitMessage([{ rel: 'backlog/xaaaaaa-a.md' }], clone);
+    const body = buildSweepPrBody([{ rel: 'backlog/xaaaaaa-a.md' }], [], clone);
+    for (const text of [msg, body]) {
+      expect(text).toContain('wev-review-daemon');
+      expect(text).not.toContain('/Users/someone');
+    }
+  });
 });
 
 // ── The full orchestration, scripted exec — mirrors land-prevention-card.test.mjs's own harness. ──────────────
@@ -305,7 +399,7 @@ describe('sweepOrphanBacklogCards — the real scan → dedupe → lane → comm
     const result = await sweepOrphanBacklogCards({ clone: '/clone', session: 's' }, {
       exec, write: () => {},
       listOrphans: () => ONE_CARD(),
-      readMain: () => ({ mainBornAsIds: new Set(['xab12cd']), mainSourceRefs: new Set() }),
+      readMain: () => ({ mainBornAsIds: new Set(['xab12cd']), mainGuardKeys: new Set() }),
       queueSurvivors: () => [],
     });
     expect(result.ok).toBe(true);
@@ -317,7 +411,7 @@ describe('sweepOrphanBacklogCards — the real scan → dedupe → lane → comm
   it('an empty clone (no untracked cards) is a clean no-op', async () => {
     const { exec, calls } = scriptedExec([]);
     const result = await sweepOrphanBacklogCards({ clone: '/clone', session: 's' }, {
-      exec, write: () => {}, listOrphans: () => [], readMain: () => ({ mainBornAsIds: new Set(), mainSourceRefs: new Set() }),
+      exec, write: () => {}, listOrphans: () => [], readMain: () => ({ mainBornAsIds: new Set(), mainGuardKeys: new Set() }),
     });
     expect(result.ok).toBe(true);
     expect(calls).toHaveLength(0);
@@ -326,7 +420,7 @@ describe('sweepOrphanBacklogCards — the real scan → dedupe → lane → comm
   it('dry-run reports survivors + dropped, acquires no lane, writes nothing', async () => {
     const { exec, calls } = scriptedExec([]);
     const result = await sweepOrphanBacklogCards({ clone: '/clone', session: 's', dryRun: true }, {
-      exec, write: () => {}, listOrphans: () => ONE_CARD(), readMain: () => ({ mainBornAsIds: new Set(), mainSourceRefs: new Set() }),
+      exec, write: () => {}, listOrphans: () => ONE_CARD(), readMain: () => ({ mainBornAsIds: new Set(), mainGuardKeys: new Set() }),
     });
     expect(result).toEqual({ ok: true, step: 'dry-run', reason: null, landed: ['backlog/xab12cd-a.md'], dropped: [], pr: null, url: null });
     expect(calls).toHaveLength(0);
@@ -339,7 +433,7 @@ describe('sweepOrphanBacklogCards — the real scan → dedupe → lane → comm
     const result = await sweepOrphanBacklogCards({ clone: '/clone', session: 'sweep-s' }, {
       exec, write: () => {},
       listOrphans: () => ONE_CARD(),
-      readMain: () => ({ mainBornAsIds: new Set(), mainSourceRefs: new Set() }),
+      readMain: () => ({ mainBornAsIds: new Set(), mainGuardKeys: new Set() }),
       queueSurvivors: (survivors) => { queuedWith.push(...survivors); return survivors.map((s) => s.hashId); },
       mkTmp: () => '/tmp/sweep-x', rmTmp: () => {}, writeFile: (p, c) => written.push({ p, c }),
     });
@@ -369,12 +463,15 @@ describe('sweepOrphanBacklogCards — the real scan → dedupe → lane → comm
     expect(calls[6].args).toEqual(expect.arrayContaining(['release', '--lane=9', '--session=sweep-s']));
     // the conveyor queue-clear ran with the survivor, best-effort.
     expect(queuedWith).toHaveLength(1);
+    // PR #2901 review: the read-only-clone invariant, asserted — no write and no git call ever targets /clone.
+    expect(written.filter((w) => w.p.startsWith('/clone'))).toEqual([]);
+    expect(calls.filter((c) => c.args.some((a) => String(a).startsWith('/clone')))).toEqual([]);
   });
 
   it('a red gate fails the sweep, never opens a PR, and STILL releases the lane', async () => {
     const { exec, calls } = scriptedExec([ACQUIRE_OK, 'added', CONTENT_CHECK_OK, 'committed', VERIFY_RED, 'released']);
     const result = await sweepOrphanBacklogCards({ clone: '/clone', session: 's' }, {
-      exec, write: () => {}, listOrphans: () => ONE_CARD(), readMain: () => ({ mainBornAsIds: new Set(), mainSourceRefs: new Set() }),
+      exec, write: () => {}, listOrphans: () => ONE_CARD(), readMain: () => ({ mainBornAsIds: new Set(), mainGuardKeys: new Set() }),
       mkTmp: () => '/tmp/x', rmTmp: () => {}, writeFile: () => {},
     });
     expect(result.ok).toBe(false);
@@ -386,7 +483,7 @@ describe('sweepOrphanBacklogCards — the real scan → dedupe → lane → comm
   it('a refused acquire fails cleanly with no lane to release', async () => {
     const { exec, calls } = scriptedExec([new Error('lane pool exhausted')]);
     const result = await sweepOrphanBacklogCards({ clone: '/clone', session: 's' }, {
-      exec, write: () => {}, listOrphans: () => ONE_CARD(), readMain: () => ({ mainBornAsIds: new Set(), mainSourceRefs: new Set() }),
+      exec, write: () => {}, listOrphans: () => ONE_CARD(), readMain: () => ({ mainBornAsIds: new Set(), mainGuardKeys: new Set() }),
     });
     expect(result.ok).toBe(false);
     expect(result.step).toBe('acquire');
@@ -417,7 +514,7 @@ describe('sweepOrphanBacklogCards — the real scan → dedupe → lane → comm
     const result = await sweepOrphanBacklogCards({ clone: '/clone', session: 's' }, {
       exec, write: () => {},
       listOrphans: () => twoCards(),
-      readMain: () => ({ mainBornAsIds: new Set(), mainSourceRefs: new Set() }),
+      readMain: () => ({ mainBornAsIds: new Set(), mainGuardKeys: new Set() }),
       queueSurvivors: () => [],
       mkTmp: () => '/tmp/x', rmTmp: () => {}, writeFile: () => {},
       rmFile: (p) => removedFiles.push(p),
@@ -442,7 +539,7 @@ describe('sweepOrphanBacklogCards — the real scan → dedupe → lane → comm
     });
     const { exec, calls } = scriptedExec([ACQUIRE_OK, 'added', CONTENT_CHECK_ALL_BAD, 'reset', 'released']);
     const result = await sweepOrphanBacklogCards({ clone: '/clone', session: 's' }, {
-      exec, write: () => {}, listOrphans: () => ONE_CARD(), readMain: () => ({ mainBornAsIds: new Set(), mainSourceRefs: new Set() }),
+      exec, write: () => {}, listOrphans: () => ONE_CARD(), readMain: () => ({ mainBornAsIds: new Set(), mainGuardKeys: new Set() }),
       mkTmp: () => '/tmp/x', rmTmp: () => {}, writeFile: () => {}, rmFile: () => {},
     });
     expect(result.ok).toBe(true);
@@ -456,7 +553,7 @@ describe('sweepOrphanBacklogCards — the real scan → dedupe → lane → comm
     const MYSTERY_RED = JSON.stringify({ ok: false, errors: [{ message: 'some unrelated repo-wide error' }] });
     const { exec, calls } = scriptedExec([ACQUIRE_OK, 'added', MYSTERY_RED, 'released']);
     const result = await sweepOrphanBacklogCards({ clone: '/clone', session: 's' }, {
-      exec, write: () => {}, listOrphans: () => ONE_CARD(), readMain: () => ({ mainBornAsIds: new Set(), mainSourceRefs: new Set() }),
+      exec, write: () => {}, listOrphans: () => ONE_CARD(), readMain: () => ({ mainBornAsIds: new Set(), mainGuardKeys: new Set() }),
       mkTmp: () => '/tmp/x', rmTmp: () => {}, writeFile: () => {},
     });
     expect(result.ok).toBe(false);
