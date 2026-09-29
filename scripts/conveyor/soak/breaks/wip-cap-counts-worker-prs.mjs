@@ -22,8 +22,8 @@
  *
  * SCENARIO: mirrors the live incident's own numbers — cap 7 (the declared default), 7 open PRs delivering
  * 4293/4304/4312/4314/4318/4321/x4mfp16, NONE of them this builder's own (`dispatchedByBuilder: []`), and 3
- * disjointly-scoped launchable candidates (4382/4131/4319, the builder's own cleared items) with plenty of free
- * build slots. Pre-fix (or `dispatchedByBuilder` simply ignored by an older `planBuildDispatch`): the union reads
+ * disjointly-scoped launchable candidates (4382/4131/4319, the builder's own cleared items) with one free build
+ * slot per candidate. Pre-fix (or `dispatchedByBuilder` simply ignored by an older `planBuildDispatch`): the union reads
  * 7/7 from the worker PRs alone, and every candidate holds `wip-cap`. Post-fix: the union reads 0/7 (no PR is
  * this builder's own), and all 3 candidates dispatch.
  */
@@ -45,7 +45,9 @@ function scenario() {
     candidates,
     openPrs,
     dispatchedByBuilder: [], // none of the 7 open PRs are this builder's own — the live incident's own shape
-    policy: BUILD_DISPATCH_POLICY, // cap 7, maxConcurrentBuilds 3 — plenty of slots, the wip-cap alone should bite pre-fix
+    // cap 7 (declared default); build slots pinned to one per candidate so the wip-cap alone can bite pre-fix,
+    // independent of the declared per-executor concurrency defaults (#4531 lowered Claude's to 1).
+    policy: { ...BUILD_DISPATCH_POLICY, maxConcurrentBuilds: BUILDER_NUMS.length },
   });
 }
 
