@@ -179,6 +179,16 @@ describe('resetHookSurface', () => {
     expect(hooksPathOnDisk(dir)).toBe(null);
   });
 
+  it('the no-baseline call (pre-worker cleanup) leaves an existing .git/config untouched (#4393)', () => {
+    const dir = makeRepo();
+    const before = readFileSync(join(dir, '.git', 'config'), 'utf8');
+
+    const result = resetHookSurface(dir); // no baseline passed at all — must never delete a real config
+
+    expect(result.clean).toBe(true);
+    expect(readFileSync(join(dir, '.git', 'config'), 'utf8')).toBe(before);
+  });
+
   it('restores the repo\'s own tracked .githooks/ as hooksPath — a pooled lane\'s guard hooks stay on for its next holder', () => {
     const dir = makeRepo();
     mkdirSync(join(dir, '.githooks'));
@@ -229,6 +239,20 @@ describe('resetHookSurface', () => {
     expect(result.clean).toBe(true);
     expect(readFileSync(outside, 'utf8')).toBe('untouched\n');
     expect(result.snapshot.configHash).toBe(baseline.configHash);
+  });
+
+  it('deletes a worker-created .git/config when the baseline recorded none (#4393)', () => {
+    const dir = makeRepo();
+    rmSync(join(dir, '.git', 'config'), { force: true }); // simulate a baseline snapshot taken with no config on disk
+    const baseline = snapshotHookSurface(dir);
+    expect(baseline.configBytes).toBeNull(); // sanity: this IS the "baseline had none" case
+    writeFileSync(join(dir, '.git', 'config'), '[core]\n\tworker-planted = true\n'); // worker creates one from nothing
+
+    const result = resetHookSurface(dir, baseline);
+
+    expect(result.clean).toBe(true);
+    expect(existsSync(join(dir, '.git', 'config'))).toBe(false); // never survives the reset
+    expect(result.snapshot.configHash).toBeNull();
   });
 
   it('a baseline restore that cannot complete (the worker made .git/config a directory) reports clean:false', () => {

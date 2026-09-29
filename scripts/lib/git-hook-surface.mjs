@@ -229,6 +229,11 @@ export function resetHookSurface(dir, baseline) {
       rmSync(configPath, { force: true });
       writeFileSync(configPath, baseline.configBytes, { flag: 'wx' });
     } catch { restoreOk = false; }
+  } else if (baseline && baseline.configBytes == null) {
+    // The baseline was taken with no `.git/config` on disk at all (#4393) — a config a worker created from
+    // nothing since then must not survive the reset. Only fires when a baseline was actually passed (the
+    // pre-worker cleanup call site passes none at all, and must leave a pre-existing repo's own config alone).
+    try { rmSync(join(dir, '.git', 'config'), { force: true }); } catch { restoreOk = false; }
   }
   try {
     const hooksDir = join(dir, '.git', 'hooks');

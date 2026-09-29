@@ -59,6 +59,13 @@
  * Imported by BOTH `we:scripts/conveyor/reconcile-core.mjs`'s `markHungSessions` pre-pass and
  * `we:scripts/conveyor/session-reaper.mjs`'s hung axis, so there is exactly ONE implementation of "is this
  * session's transcript stale", not two.
+ *
+ * SHARED LOW-LEVEL PRIMITIVE: {@link readTranscriptTailActivity} (#4312) is the ONE bounded-tail-read →
+ * newest-parseable-entry-timestamp → mtime-fallback implementation. `readHungInfo` and `readIdleFinishedInfo`
+ * below both call it (with this file's own `READ_TAIL_LINES`/`READ_MAX_BYTES`/`READ_FIELD_MAX`), and
+ * `we:scripts/conveyor/session-reaper.mjs#resolveLastActivityMs` imports it too (with its own, larger,
+ * constants) — so a future fix to the tail-parsing/mtime-fallback shape is applied in exactly one place, never
+ * three near-identical copies. See that function's own doc for its full null-vs-timestamp contract.
  */
 import { statSync } from 'node:fs';
 import { tailLines, summarizeEntry, detectBlockedOnChild } from '../../skills-src/inspect-agent-health/agent-health.mjs';
@@ -118,52 +125,106 @@ export function resolveHungThresholdMs(env = process.env) {
 }
 
 /**
+ * we:scripts/conveyor/hung-session.mjs#readTranscriptTailActivity — THE SHARED LOW-LEVEL PRIMITIVE (#4312)
+ * behind {@link readHungInfo}, {@link readIdleFinishedInfo} and
+ * `we:scripts/conveyor/session-reaper.mjs#resolveLastActivityMs`: resolve one session's own transcript path,
+ * read a BOUNDED tail, and answer the newest known real activity — the transcript's own newest PARSEABLE entry
+ * `ts`, preferred over the file's `mtime` (see file header for why), falling back to `mtime` only when NOTHING
+ * in the tail carries a parseable timestamp at all.
+ *
+ * An unparseable line is skipped, never abandons the scan — the newest parseable timestamp among the
+ * remaining lines still counts, and `entries` carries only the lines that DID parse. This is the ONE piece of
+ * policy this primitive owns; it is deliberately silent on whether a caller may TRUST a partial `entries` list
+ * for anything beyond a timestamp (see {@link readHungInfo}/{@link readIdleFinishedInfo} for why they do not).
+ * `hadUnparseableLine` reports whether any line failed, so a caller that needs to know can act on it — this
+ * primitive itself never rejects a read solely because SOME line failed; only an unresolvable/unreadable
+ * transcript, or a failed `mtime` fallback with nothing else to go on, answers `null`.
+ *
+ * Every IO function AND the tail-size/byte-cap/field-cap are caller-injected on purpose — `readHungInfo` and
+ * `readIdleFinishedInfo` pass this file's `READ_TAIL_LINES`/`READ_MAX_BYTES`/`READ_FIELD_MAX`,
+ * `resolveLastActivityMs` passes its own larger constants — this primitive never hardcodes either set.
+ * @param {{cwd?:string, sessionId?:string}|null|undefined} session
+ * @param {{tailLines:number, maxBytes:number, fieldMax:number,
+ *   resolveTranscript?:Function, tailLinesFn?:Function, summarizeEntryFn?:Function, statFn?:Function}} o
+ * @returns {{file:string, entries:Array<object>, lastActivityMs:number, hadUnparseableLine:boolean}|null}
+ */
+export function readTranscriptTailActivity(session, {
+  tailLines: tailLineCount,
+  maxBytes,
+  fieldMax,
+  resolveTranscript = resolveSessionTranscript,
+  tailLinesFn = tailLines,
+  summarizeEntryFn = summarizeEntry,
+  statFn = statSync,
+} = {}) {
+  const cwd = session?.cwd, sessionId = session?.sessionId;
+  if (!cwd || !sessionId) return null;
+
+  let file;
+  try {
+    file = resolveTranscript({ session: String(sessionId), cwd: String(cwd) });
+  } catch {
+    return null; // no transcript found — never guess
+  }
+
+  let lines;
+  try {
+    ({ lines } = tailLinesFn(file, tailLineCount, maxBytes));
+    if (!Array.isArray(lines)) throw new Error('tailLinesFn returned a non-array lines field');
+  } catch {
+    return null; // unreadable transcript (or a malformed tailLinesFn result) — never guess, never throw
+  }
+
+  const entries = [];
+  let lastActivityMs = null;
+  let hadUnparseableLine = false;
+  for (const raw of lines) {
+    let entry;
+    try {
+      entry = summarizeEntryFn(raw, fieldMax);
+    } catch {
+      hadUnparseableLine = true; // this line is missing from `entries` below — see doc above
+      continue; // one unparseable line never aborts the scan
+    }
+    entries.push(entry);
+    const t = Date.parse(entry?.ts ?? '');
+    if (Number.isFinite(t) && (lastActivityMs === null || t > lastActivityMs)) lastActivityMs = t;
+  }
+  if (lastActivityMs === null) {
+    try {
+      lastActivityMs = statFn(file).mtimeMs;
+    } catch {
+      return null;
+    }
+  }
+  return { file, entries, lastActivityMs, hadUnparseableLine };
+}
+
+/**
  * we:scripts/conveyor/hung-session.mjs#readHungInfo — THE IO SHELL for one session (a `claude agents --json`
  * row, or a session-reaper listing row — both carry `cwd`+`sessionId`). NEVER throws; any failure to locate or
  * read the transcript answers `{ hung: false, reason: 'no-signal' }` rather than guessing.
+ *
+ * Unlike {@link readTranscriptTailActivity}'s own tolerant scan, THIS caller refuses the whole read the moment
+ * `hadUnparseableLine` is true (#4312 converge review, correctness/security lenses) — never partial. A
+ * dropped line's `entries` position is gone, and this axis's `detectBlockedOnChild` pending-tool-call check
+ * (right below) has no way to tell "this line never had a tool call" apart from "this line HAD one and we
+ * lost it" — the second of those, acted on, can reap a session genuinely still mid a tool call. Refusing
+ * outright on ANY parse failure (matching this function's shape before #4312) is the only way to guarantee
+ * that never happens; `resolveLastActivityMs` (`we:scripts/conveyor/session-reaper.mjs`) does not share this
+ * restriction because it never reads `entries` for anything at all.
  * @param {{cwd?:string, sessionId?:string}} agent
  * @param {number} nowMs
  * @param {number} thresholdMs
  * @returns {{hung:boolean, reason:string, ageMs:number|null, transcriptPath?:string}}
  */
 export function readHungInfo(agent, nowMs, thresholdMs) {
-  const cwd = agent?.cwd, sessionId = agent?.sessionId;
-  if (!cwd || !sessionId) return { hung: false, reason: 'no-signal', ageMs: null };
+  const tail = readTranscriptTailActivity(agent, { tailLines: READ_TAIL_LINES, maxBytes: READ_MAX_BYTES, fieldMax: READ_FIELD_MAX });
+  if (!tail || tail.hadUnparseableLine) return { hung: false, reason: 'no-signal', ageMs: null };
 
-  let file;
-  try {
-    file = resolveSessionTranscript({ session: String(sessionId), cwd: String(cwd) });
-  } catch {
-    return { hung: false, reason: 'no-signal', ageMs: null }; // no transcript found — never guess hung
-  }
-
-  let entries;
-  try {
-    const { lines } = tailLines(file, READ_TAIL_LINES, READ_MAX_BYTES);
-    entries = lines.map((l) => summarizeEntry(l, READ_FIELD_MAX));
-  } catch {
-    return { hung: false, reason: 'no-signal', ageMs: null }; // unreadable transcript — never guess hung
-  }
-
-  // The newest PARSEABLE entry timestamp in the tail is ground truth — see the file header for why this beats
-  // the file's own mtime. Only when NOTHING in the tail carries one (an all-metadata tail, or every line
-  // failing to parse) does this fall back to mtime, as a last resort rather than refusing the whole signal.
-  let lastActivityMs = null;
-  for (const e of entries) {
-    const t = Date.parse(e?.ts ?? '');
-    if (Number.isFinite(t) && (lastActivityMs === null || t > lastActivityMs)) lastActivityMs = t;
-  }
-  if (lastActivityMs === null) {
-    try {
-      lastActivityMs = statSync(file).mtimeMs;
-    } catch {
-      return { hung: false, reason: 'no-signal', ageMs: null };
-    }
-  }
-
-  const pendingToolUse = detectBlockedOnChild(entries).pending === true;
-  const verdict = classifyHungSession({ lastActivityMs, nowMs, thresholdMs, pendingToolUse });
-  return { ...verdict, transcriptPath: file };
+  const pendingToolUse = detectBlockedOnChild(tail.entries).pending === true;
+  const verdict = classifyHungSession({ lastActivityMs: tail.lastActivityMs, nowMs, thresholdMs, pendingToolUse });
+  return { ...verdict, transcriptPath: tail.file };
 }
 
 // ── NO-NET-OUTCOME STALL (#4090, epic #3383/#4075, statute `#conveyor-session-lifecycle-policy` clause 2) ─────
@@ -393,47 +454,21 @@ export function resolveIdleFinishedThresholdMs(env = process.env) {
  * `cwd`+`sessionId`). Reuses the SAME bounded transcript read and `detectBlockedOnChild` pending-call check
  * `readHungInfo` already does — ONE implementation of "read this session's own tail and find its last real
  * activity + whether a tool call is still pending", never a second copy. NEVER throws; any failure to locate or
- * read the transcript answers `{ finished: false, reason: 'no-signal' }` rather than guessing.
+ * read the transcript answers `{ finished: false, reason: 'no-signal' }` rather than guessing. Same
+ * ANY-unparseable-line-refuses-the-whole-read rule as {@link readHungInfo} (#4312 converge review) — see that
+ * function's own doc for why a partial `entries` list is never safe for this axis's pending-call check.
  * @param {{cwd?:string, sessionId?:string}} agent
  * @param {number} nowMs
  * @param {number} thresholdMs
  * @returns {{finished:boolean, reason:string, ageMs:number|null, transcriptPath?:string}}
  */
 export function readIdleFinishedInfo(agent, nowMs, thresholdMs) {
-  const cwd = agent?.cwd, sessionId = agent?.sessionId;
-  if (!cwd || !sessionId) return { finished: false, reason: 'no-signal', ageMs: null };
+  const tail = readTranscriptTailActivity(agent, { tailLines: READ_TAIL_LINES, maxBytes: READ_MAX_BYTES, fieldMax: READ_FIELD_MAX });
+  if (!tail || tail.hadUnparseableLine) return { finished: false, reason: 'no-signal', ageMs: null };
 
-  let file;
-  try {
-    file = resolveSessionTranscript({ session: String(sessionId), cwd: String(cwd) });
-  } catch {
-    return { finished: false, reason: 'no-signal', ageMs: null }; // no transcript found — never guess
-  }
-
-  let entries;
-  try {
-    const { lines } = tailLines(file, READ_TAIL_LINES, READ_MAX_BYTES);
-    entries = lines.map((l) => summarizeEntry(l, READ_FIELD_MAX));
-  } catch {
-    return { finished: false, reason: 'no-signal', ageMs: null }; // unreadable transcript — never guess
-  }
-
-  let lastActivityMs = null;
-  for (const e of entries) {
-    const t = Date.parse(e?.ts ?? '');
-    if (Number.isFinite(t) && (lastActivityMs === null || t > lastActivityMs)) lastActivityMs = t;
-  }
-  if (lastActivityMs === null) {
-    try {
-      lastActivityMs = statSync(file).mtimeMs;
-    } catch {
-      return { finished: false, reason: 'no-signal', ageMs: null };
-    }
-  }
-
-  const pendingToolUse = detectBlockedOnChild(entries).pending === true;
-  const verdict = classifyIdleFinished({ lastActivityMs, nowMs, thresholdMs, pendingToolUse });
-  return { ...verdict, transcriptPath: file };
+  const pendingToolUse = detectBlockedOnChild(tail.entries).pending === true;
+  const verdict = classifyIdleFinished({ lastActivityMs: tail.lastActivityMs, nowMs, thresholdMs, pendingToolUse });
+  return { ...verdict, transcriptPath: tail.file };
 }
 
 /**
