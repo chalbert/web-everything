@@ -8,6 +8,7 @@ import { describe, it, expect } from 'vitest';
 import {
   parseOrphanCard, selectOrphanSurvivors, listUntrackedBacklogCards, readMainDedupeSets, queueLandedSurvivors,
   buildSweepCommitMessage, buildSweepPrBody, sweepOrphanBacklogCards, parseSweepArgv, runSweepOrphanBacklogCardsCli,
+  parseCheckStandardsJson, findContentInvalidSurvivors,
 } from '../sweep-orphan-backlog-cards.mjs';
 
 // A real orphan's shape (#4317 approval-time filer): idempotency key, one guard.
@@ -216,6 +217,42 @@ describe('queueLandedSurvivors', () => {
   });
 });
 
+describe('parseCheckStandardsJson', () => {
+  it('parses a clean single-line JSON report', () => {
+    expect(parseCheckStandardsJson('{"ok":true,"errors":[]}')).toEqual({ ok: true, errors: [] });
+  });
+
+  it('returns null, never throws, on unparseable text', () => {
+    expect(parseCheckStandardsJson('not json')).toBeNull();
+    expect(parseCheckStandardsJson(undefined)).toBeNull();
+  });
+});
+
+describe('findContentInvalidSurvivors', () => {
+  const survivors = [
+    { rel: 'backlog/xab12cd-a.md', hashId: 'xab12cd' },
+    { rel: 'backlog/xbadcard-b.md', hashId: 'xbadcard' },
+  ];
+
+  it('matches an error to the survivor whose hash id appears in the message text', () => {
+    const errors = [{ message: 'Backlog item "xbadcard-file-the-prevention" uses [[wiki-link]] syntax' }];
+    const bad = findContentInvalidSurvivors(errors, survivors);
+    expect(bad).toHaveLength(1);
+    expect(bad[0].rel).toBe('backlog/xbadcard-b.md');
+    expect(bad[0].reason).toMatch(/fails check:standards/);
+  });
+
+  it('implicates no one when no error message names any survivor\'s hash id', () => {
+    const errors = [{ message: 'some unrelated repo-wide error' }];
+    expect(findContentInvalidSurvivors(errors, survivors)).toEqual([]);
+  });
+
+  it('is a no-op on an empty or missing errors array', () => {
+    expect(findContentInvalidSurvivors([], survivors)).toEqual([]);
+    expect(findContentInvalidSurvivors(undefined, survivors)).toEqual([]);
+  });
+});
+
 describe('buildSweepCommitMessage / buildSweepPrBody', () => {
   it('the commit message carries the attribution line and every survivor rel (or a bounded summary)', () => {
     const survivors = [{ rel: 'backlog/xaaaaaa-a.md' }, { rel: 'backlog/xbbbbbb-b.md' }];
@@ -253,6 +290,7 @@ function scriptedExec(steps) {
 }
 
 const ACQUIRE_OK = JSON.stringify({ lane: 9, path: '/workspace/.lanes/web-everything/lane-9', session: 's', holder: 'h' });
+const CONTENT_CHECK_OK = JSON.stringify({ ok: true, errors: [], warnings: [] });
 const VERIFY_GREEN = JSON.stringify({ verdict: { ok: true, passed: 3, failed: 0, unrun: 0, blocking: [] } });
 const VERIFY_RED = JSON.stringify({ verdict: { ok: false, blocking: ['vitest'] } });
 const OPEN_PR_OPENED = JSON.stringify({
@@ -297,7 +335,7 @@ describe('sweepOrphanBacklogCards — the real scan → dedupe → lane → comm
   it('lands one survivor: acquires a lane, copies+commits+verifies+opens the PR, queues, releases', async () => {
     const written = [];
     const queuedWith = [];
-    const { exec, calls } = scriptedExec([ACQUIRE_OK, 'added', 'committed', VERIFY_GREEN, OPEN_PR_OPENED, 'released']);
+    const { exec, calls } = scriptedExec([ACQUIRE_OK, 'added', CONTENT_CHECK_OK, 'committed', VERIFY_GREEN, OPEN_PR_OPENED, 'released']);
     const result = await sweepOrphanBacklogCards({ clone: '/clone', session: 'sweep-s' }, {
       exec, write: () => {},
       listOrphans: () => ONE_CARD(),
@@ -315,23 +353,26 @@ describe('sweepOrphanBacklogCards — the real scan → dedupe → lane → comm
     // add — exactly the one survivor path, in the lane.
     expect(calls[1].cmd).toBe('git');
     expect(calls[1].args).toEqual(['-C', '/workspace/.lanes/web-everything/lane-9', 'add', '--', 'backlog/xab12cd-a.md']);
+    // content validation — the LANE's own check-standards.mjs, UNSCOPED, before the commit.
+    expect(calls[2].args[0]).toBe('/workspace/.lanes/web-everything/lane-9/scripts/check-standards.mjs');
+    expect(calls[2].args).toContain('--json');
     // commit — one commit, in the lane.
-    expect(calls[2].args).toContain('commit');
+    expect(calls[3].args).toContain('commit');
     // verify — the LANE's own run.mjs, mode=run.
-    expect(calls[3].args[0]).toBe('/workspace/.lanes/web-everything/lane-9/scripts/operations/run.mjs');
-    expect(calls[3].args).toContain('verify');
-    expect(calls[3].args).toContain('--mode=run');
+    expect(calls[4].args[0]).toBe('/workspace/.lanes/web-everything/lane-9/scripts/operations/run.mjs');
+    expect(calls[4].args).toContain('verify');
+    expect(calls[4].args).toContain('--mode=run');
     // open-pr — label-on-green, one PR for the whole batch.
-    expect(calls[4].args).toContain('open-pr');
-    expect(calls[4].args).toContain('--mode=label-on-green');
+    expect(calls[5].args).toContain('open-pr');
+    expect(calls[5].args).toContain('--mode=label-on-green');
     // release — always, by lane number.
-    expect(calls[5].args).toEqual(expect.arrayContaining(['release', '--lane=9', '--session=sweep-s']));
+    expect(calls[6].args).toEqual(expect.arrayContaining(['release', '--lane=9', '--session=sweep-s']));
     // the conveyor queue-clear ran with the survivor, best-effort.
     expect(queuedWith).toHaveLength(1);
   });
 
   it('a red gate fails the sweep, never opens a PR, and STILL releases the lane', async () => {
-    const { exec, calls } = scriptedExec([ACQUIRE_OK, 'added', 'committed', VERIFY_RED, 'released']);
+    const { exec, calls } = scriptedExec([ACQUIRE_OK, 'added', CONTENT_CHECK_OK, 'committed', VERIFY_RED, 'released']);
     const result = await sweepOrphanBacklogCards({ clone: '/clone', session: 's' }, {
       exec, write: () => {}, listOrphans: () => ONE_CARD(), readMain: () => ({ mainBornAsIds: new Set(), mainSourceRefs: new Set() }),
       mkTmp: () => '/tmp/x', rmTmp: () => {}, writeFile: () => {},
@@ -350,6 +391,77 @@ describe('sweepOrphanBacklogCards — the real scan → dedupe → lane → comm
     expect(result.ok).toBe(false);
     expect(result.step).toBe('acquire');
     expect(calls).toHaveLength(1); // no release call — nothing was ever acquired
+  });
+
+  // #4317 follow-up, live-caught 2026-09-29: a card whose reviewer-authored guard text trips check-standards'
+  // own content rules (the wiki-link scan matched orphan x3hxr6i, PR #2872) must be dropped, never silently
+  // rewritten, and must never sink the OTHER survivors in the same batch.
+  it('drops a survivor that fails check:standards on its own content, lands the rest', async () => {
+    const twoCards = () => [
+      { rel: 'backlog/xab12cd-a.md', content: APPROVAL_CARD(500, 'sha500') },
+      { rel: 'backlog/xbadcrd-b.md', content: APPROVAL_CARD(600, 'sha600') },
+    ];
+    const CONTENT_CHECK_ONE_BAD = JSON.stringify({
+      ok: false,
+      errors: [{ message: 'Backlog item "xbadcrd-file-the-prevention-guard-s-owed-by-chalbert-web-everything" uses [[wiki-link]] syntax at body line(s) 6' }],
+    });
+    const resetCalls = [];
+    const removedFiles = [];
+    const { exec, calls } = scriptedExec([
+      ACQUIRE_OK, 'added',
+      CONTENT_CHECK_ONE_BAD, // first pass: one bad card found
+      'reset', // git reset -- the bad card
+      CONTENT_CHECK_OK, // second pass: clean
+      'committed', VERIFY_GREEN, OPEN_PR_OPENED, 'released',
+    ]);
+    const result = await sweepOrphanBacklogCards({ clone: '/clone', session: 's' }, {
+      exec, write: () => {},
+      listOrphans: () => twoCards(),
+      readMain: () => ({ mainBornAsIds: new Set(), mainSourceRefs: new Set() }),
+      queueSurvivors: () => [],
+      mkTmp: () => '/tmp/x', rmTmp: () => {}, writeFile: () => {},
+      rmFile: (p) => removedFiles.push(p),
+    });
+    expect(result.ok).toBe(true);
+    expect(result.landed).toEqual(['backlog/xab12cd-a.md']);
+    expect(result.dropped).toHaveLength(1);
+    expect(result.dropped[0].rel).toBe('backlog/xbadcrd-b.md');
+    expect(result.dropped[0].reason).toMatch(/fails check:standards/);
+    expect(removedFiles).toEqual(['/workspace/.lanes/web-everything/lane-9/backlog/xbadcrd-b.md']);
+    const resetCall = calls.find((c) => c.args.includes('reset'));
+    expect(resetCall.args).toEqual(expect.arrayContaining(['backlog/xbadcrd-b.md']));
+    // the surviving commit was built from the ONE good card only.
+    const commitMsgWrite = calls.find((c) => c.args.includes('commit'));
+    expect(commitMsgWrite).toBeTruthy();
+  });
+
+  it('fails cleanly (never commits) when EVERY survivor fails check:standards content validation', async () => {
+    const CONTENT_CHECK_ALL_BAD = JSON.stringify({
+      ok: false,
+      errors: [{ message: 'Backlog item "xab12cd-file-the-prevention-guard-s-owed-by-chalbert-web-everything" uses [[wiki-link]] syntax' }],
+    });
+    const { exec, calls } = scriptedExec([ACQUIRE_OK, 'added', CONTENT_CHECK_ALL_BAD, 'reset', 'released']);
+    const result = await sweepOrphanBacklogCards({ clone: '/clone', session: 's' }, {
+      exec, write: () => {}, listOrphans: () => ONE_CARD(), readMain: () => ({ mainBornAsIds: new Set(), mainSourceRefs: new Set() }),
+      mkTmp: () => '/tmp/x', rmTmp: () => {}, writeFile: () => {}, rmFile: () => {},
+    });
+    expect(result.ok).toBe(true);
+    expect(result.landed).toEqual([]);
+    expect(result.dropped).toHaveLength(1);
+    expect(calls.some((c) => c.args.includes('commit'))).toBe(false);
+    expect(calls.at(-1).args).toEqual(expect.arrayContaining(['release']));
+  });
+
+  it('fails loudly when check:standards is red but no error names any survivor (never silently lands unvalidated)', async () => {
+    const MYSTERY_RED = JSON.stringify({ ok: false, errors: [{ message: 'some unrelated repo-wide error' }] });
+    const { exec, calls } = scriptedExec([ACQUIRE_OK, 'added', MYSTERY_RED, 'released']);
+    const result = await sweepOrphanBacklogCards({ clone: '/clone', session: 's' }, {
+      exec, write: () => {}, listOrphans: () => ONE_CARD(), readMain: () => ({ mainBornAsIds: new Set(), mainSourceRefs: new Set() }),
+      mkTmp: () => '/tmp/x', rmTmp: () => {}, writeFile: () => {},
+    });
+    expect(result.ok).toBe(false);
+    expect(result.step).toBe('content-check');
+    expect(calls.some((c) => c.args.includes('commit'))).toBe(false);
   });
 });
 

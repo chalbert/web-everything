@@ -33,17 +33,32 @@
  *          same PR, different debt, never collapsed.
  *   4. The survivors are copied — byte-for-byte, filename unchanged (still `x<hash>-*.md`; JIT-numbering
  *      (`we:scripts/lane-drain.mjs`) assigns the real `bornAs`-carrying number at land, exactly as it does for
- *      any other hash-id card) — into ONE lane (`lane-pool.mjs acquire`), `git add`ed and committed as ONE
- *      commit.
- *   5. The lane's OWN `run.mjs verify --mode=run` gate, run for real (see `land-prevention-card.mjs`'s header
- *      for why every operation call below runs the ACQUIRED LANE's `run.mjs`, never this script's own).
- *   6. Best-effort, non-blocking: each landed survivor is cleared for the conveyor
+ *      any other hash-id card) — into ONE lane (`lane-pool.mjs acquire`) and `git add`ed.
+ *   5. CONTENT VALIDATION ({@link findContentInvalidSurvivors}) — a LIVE-CAUGHT defect, not a hypothetical:
+ *      the 2026-09-29 live run hit orphan `x3hxr6i` (PR #2872), whose reviewer-authored guard text *described*
+ *      `[[memory-link]]` syntax and so *contained* it, tripping `check-standards.mjs`'s wiki-link rule (that
+ *      finding carries no `descriptor.file` at all — a path-less, message-only finding — so it can NEVER be
+ *      caught by scoping to `--files=`/`--local`; `verify-lane-gate.mjs`'s own header says exactly this is why a
+ *      backlog-touching lane's check:standards half stays UNSCOPED). Landing 50 good cards in the same commit
+ *      as one that fails the write-time gate would fail ALL of them, so this step runs the LANE's own
+ *      unscoped `check-standards.mjs --json` (matching the real gate's own backlog-touching behaviour) BEFORE
+ *      the commit, attributes each error to a survivor by its hash id appearing in the error's own message text
+ *      (the same id check-standards' own backlog-item errors always name), unstages + drops any survivor an
+ *      error implicates, and loops (bounded) until the remaining set is clean — never silently mutating a
+ *      dropped card's content, never landing it either. A dropped-for-content card needs a human's eyes on the
+ *      original guard text; this sweep leaves it exactly as found in the clone for the next run to re-attempt
+ *      once it is fixed (by hand, or by a follow-up product fix to the write-time rule / the filer's own
+ *      bounding pass — see the report this run's caller writes up).
+ *   6. The surviving batch is committed as ONE commit, then the lane's OWN `run.mjs verify --mode=run` gate
+ *      runs for real (see `land-prevention-card.mjs`'s header for why every operation call below runs the
+ *      ACQUIRED LANE's `run.mjs`, never this script's own).
+ *   7. Best-effort, non-blocking: each landed survivor is cleared for the conveyor
  *      ({@link queueLandedSurvivors}) exactly as `file-item` would at ordinary filing time — the conveyor
  *      queue is a machine-local, gitignored sidecar (`we:scripts/conveyor/queue-store.mjs`), never part of the
  *      commit, so a card this sweep lands is not merely landed but also pickable up by the conveyor.
- *   7. The lane's OWN `run.mjs open-pr --mode=label-on-green` opens ONE PR for every survivor. The resident
+ *   8. The lane's OWN `run.mjs open-pr --mode=label-on-green` opens ONE PR for every survivor. The resident
  *      drain daemon lands it; this script never merges.
- *   8. The lane is released on every exit path (`finally`), same reasoning as `land-prevention-card.mjs`.
+ *   9. The lane is released on every exit path (`finally`), same reasoning as `land-prevention-card.mjs`.
  *
  * KNOWN RESIDUAL, FILED NOT SILENT: this sweep is explicitly forbidden from writing to or deleting from the
  *   daemon clone (`--clone=<path>` is read-only in, never in). Its landed cards are copies — the clone's own
@@ -238,6 +253,43 @@ export function queueLandedSurvivors(survivors, {
   return queued;
 }
 
+/**
+ * PURE. Best-effort JSON parse of `check-standards.mjs --json`'s own stdout — a single `console.log(JSON
+ * .stringify(...))`, so a plain `JSON.parse` normally suffices; this only guards the case a caller hands in
+ * the raw text of a THROWN child-process error (whose `.stdout` is passed here, not re-derived), which is
+ * still exactly that one JSON line. `null` on anything unparseable, never a throw — the caller decides what an
+ * unreadable report means.
+ * @param {string} text
+ * @returns {object|null}
+ */
+export function parseCheckStandardsJson(text) {
+  try { return JSON.parse(String(text ?? '')); } catch { return null; }
+}
+
+/**
+ * PURE. Which of `survivors` does at least one `check-standards.mjs --json` error implicate? Matches by the
+ * survivor's own hash id appearing in the error's `message` text — check-standards' backlog-item findings
+ * always name the item by that id (`"Backlog item \"x3hxr6i-...\" uses..."`), and this specific finding class
+ * carries NO `descriptor.file` at all (a path-less, message-only finding — see the file header's step 5), so
+ * matching on the message is the ONLY attribution available, not a fallback from something more precise.
+ * @param {Array<{message:string}>} errors
+ * @param {Array<{rel:string, hashId:(string|null)}>} survivors
+ * @returns {Array<{rel:string, hashId:(string|null), reason:string}>}
+ */
+export function findContentInvalidSurvivors(errors, survivors) {
+  const bad = [];
+  for (const s of survivors) {
+    if (!s.hashId) continue;
+    const hit = (Array.isArray(errors) ? errors : []).find((e) => String(e?.message ?? '').includes(s.hashId));
+    if (hit) bad.push({ ...s, reason: `content itself fails check:standards, dropped (needs a human's eyes on the guard text) — ${hit.message}` });
+  }
+  return bad;
+}
+
+/** Bounded — a genuine cross-card cycle is not expected among independent prevention cards, but this can
+ *  never spin forever even if one somehow existed. */
+export const CONTENT_VALIDATION_MAX_ATTEMPTS = 5;
+
 /** PURE. The ONE commit message for every survivor this sweep lands. */
 export function buildSweepCommitMessage(survivors, clone) {
   const rels = survivors.map((s) => s.rel).sort();
@@ -266,10 +318,12 @@ export function buildSweepPrBody(survivors, dropped, clone) {
 /**
  * THE ORCHESTRATION, INJECTABLE FOR TESTS — mirrors `land-prevention-card.mjs#landPreventionCard`'s own shape:
  * `exec` stands in for every subprocess call, `write` for narration, `mkTmp`/`writeFile`/`rmTmp` for the ONE
- * scratch dir this run makes (commit message + PR body), removed on every exit path. `listOrphans`/`readMain`/
- * `queueSurvivors` are the three additional seams this sweep needs beyond that file's own (a read-only clone
- * scan, a read-only `origin/main` dedupe read, and the best-effort conveyor queue-clear) — each independently
- * stubbable so a test never touches a real clone, a real `origin/main`, or the real machine-wide queue sidecar.
+ * scratch dir this run makes (commit message + PR body), removed on every exit path, and `rmFile` for unstaging
+ * a single card the content-validation step (see the file header's step 5) drops from the batch.
+ * `listOrphans`/`readMain`/`queueSurvivors` are the three additional seams this sweep needs beyond that file's
+ * own (a read-only clone scan, a read-only `origin/main` dedupe read, and the best-effort conveyor queue-clear)
+ * — each independently stubbable so a test never touches a real clone, a real `origin/main`, or the real
+ * machine-wide queue sidecar.
  *
  * NEVER WRITES TO `input.clone`: every write in this function targets the ACQUIRED LANE, never the clone the
  * orphans were read from — see the file header's own invariant.
@@ -290,6 +344,7 @@ export async function sweepOrphanBacklogCards({ clone, session, dryRun = false }
   queueSurvivors = queueLandedSurvivors,
   mkTmp = () => mkdtempSync(join(tmpdir(), 'sweep-orphan-cards-')),
   writeFile = writeFileSync,
+  rmFile = (p) => rmSync(p, { force: true }),
   rmTmp = (dir) => rmSync(dir, { recursive: true, force: true }),
 } = {}) {
   const fail = (step, reason, extra = {}) => {
@@ -318,7 +373,9 @@ export async function sweepOrphanBacklogCards({ clone, session, dryRun = false }
     return fail('read-main', String(e?.message || e).split('\n')[0]);
   }
 
-  const { survivors, dropped } = selectOrphanSurvivors(cards, mainSets);
+  const selected = selectOrphanSurvivors(cards, mainSets);
+  let survivors = selected.survivors;
+  const dropped = [...selected.dropped];
   write(`sweep-orphan-backlog-cards: ${survivors.length} survivor(s), ${dropped.length} dropped\n`);
   for (const d of dropped) write(`  drop ${d.rel} — ${d.reason}\n`);
 
@@ -354,6 +411,44 @@ export async function sweepOrphanBacklogCards({ clone, session, dryRun = false }
       exec('git', ['-C', lane, 'add', '--', ...survivors.map((s) => s.rel)], {});
     } catch (e) {
       return fail('copy', String(e?.message || e).split('\n')[0], { dropped });
+    }
+
+    // CONTENT VALIDATION (see the file header's step 5 — a live-caught defect, not a hypothetical: PR #2872's
+    // own orphan tripped check-standards' wiki-link rule with reviewer prose that merely DESCRIBED that syntax).
+    // UNSCOPED, exactly like the real gate stays for a backlog-touching lane (`verify-lane-gate.mjs`'s own
+    // header) — this finding class carries no `descriptor.file`, so `--files=`/`--local` would silently hide it.
+    write('sweep-orphan-backlog-cards: validating card content against check:standards…\n');
+    for (let attempt = 0; attempt < CONTENT_VALIDATION_MAX_ATTEMPTS; attempt += 1) {
+      let report;
+      try {
+        report = parseCheckStandardsJson(exec('node', [join(lane, 'scripts', 'check-standards.mjs'), '--json'], { cwd: lane, timeout: VERIFY_TIMEOUT_MS }));
+      } catch (e) {
+        report = parseCheckStandardsJson(e?.stdout);
+      }
+      if (!report) return fail('content-check', 'check-standards.mjs --json produced no parseable output', { dropped });
+      if (report.ok) break;
+      const bad = findContentInvalidSurvivors(report.errors, survivors);
+      if (!bad.length) {
+        return fail('content-check', `check:standards failed with no error attributable to a survivor: ${JSON.stringify(report.errors)}`, { dropped });
+      }
+      const badRels = new Set(bad.map((b) => b.rel));
+      write(`sweep-orphan-backlog-cards: dropping ${bad.length} card(s) that fail check:standards on their own content…\n`);
+      for (const b of bad) write(`  drop ${b.rel} — ${b.reason}\n`);
+      try {
+        exec('git', ['-C', lane, 'reset', '--', ...bad.map((b) => b.rel)], {});
+        for (const b of bad) rmFile(join(lane, b.rel));
+      } catch (e) {
+        return fail('content-check', String(e?.message || e).split('\n')[0], { dropped });
+      }
+      dropped.push(...bad);
+      survivors = survivors.filter((s) => !badRels.has(s.rel));
+      if (!survivors.length) {
+        return {
+          ok: true, step: 'done',
+          reason: 'nothing to land — every surviving orphan failed check:standards on its own content',
+          landed: [], dropped, pr: null, url: null,
+        };
+      }
     }
 
     write('sweep-orphan-backlog-cards: committing…\n');
