@@ -21,7 +21,7 @@ const ANTHROPIC_USAGE_FIXTURE = {
           model: 'claude-opus-5', uncached_input_tokens: 1500, cache_read_input_tokens: 200, output_tokens: 500,
         },
         {
-          model: 'claude-sonnet-5', uncached_input_tokens: 300, cache_read_input_tokens: 0, output_tokens: 100,
+          model: 'claude-sonnet-5-5', uncached_input_tokens: 300, cache_read_input_tokens: 0, output_tokens: 100,
         },
       ],
     },
@@ -38,7 +38,7 @@ const ANTHROPIC_COST_FIXTURE = {
       ending_at: '2025-08-02T00:00:00Z',
       results: [
         { amount: '123.78912', currency: 'USD', model: 'claude-opus-5' },
-        { amount: '10.00', currency: 'USD', model: 'claude-sonnet-5' },
+        { amount: '10.00', currency: 'USD', model: 'claude-sonnet-5-5' },
       ],
     },
   ],
@@ -183,7 +183,7 @@ describe('sumAnthropicUsage', () => {
     expect(s.totalOutputTokens).toBe(600);
     expect(s.totalCacheReadTokens).toBe(200);
     expect(s.byModel['claude-opus-5']).toEqual({ inputTokens: 1500, outputTokens: 500, cacheReadTokens: 200 });
-    expect(s.byModel['claude-sonnet-5']).toEqual({ inputTokens: 300, outputTokens: 100, cacheReadTokens: 0 });
+    expect(s.byModel['claude-sonnet-5-5']).toEqual({ inputTokens: 300, outputTokens: 100, cacheReadTokens: 0 });
   });
 
   it('folds a null (ungrouped) model under one bucket rather than dropping it', () => {
@@ -202,7 +202,7 @@ describe('sumAnthropicCost', () => {
     const s = sumAnthropicCost(ANTHROPIC_COST_FIXTURE);
     expect(s.totalUsd).toBeCloseTo(1.3378912, 6);
     expect(s.byModel['claude-opus-5']).toBeCloseTo(1.2378912, 6);
-    expect(s.byModel['claude-sonnet-5']).toBeCloseTo(0.1, 6);
+    expect(s.byModel['claude-sonnet-5-5']).toBeCloseTo(0.1, 6);
   });
 });
 

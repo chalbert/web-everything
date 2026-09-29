@@ -10,7 +10,7 @@ let extractAgentUsage, delegationsFromCommand, scanAndAppend, scanSession, readA
 
 let temp, projects, store, parent, childDir;
 const timestamp = '2026-09-18T23:59:00.000Z';
-const assistant = (content, model = 'claude-sonnet-5', ts = timestamp) => ({ type: 'assistant', timestamp: ts, message: { role: 'assistant', model, content } });
+const assistant = (content, model = 'claude-sonnet-5-5', ts = timestamp) => ({ type: 'assistant', timestamp: ts, message: { role: 'assistant', model, content } });
 const bash = (command) => ({ type: 'tool_use', id: 'bash-1', name: 'Bash', input: { command } });
 const text = (value) => ({ type: 'text', text: value });
 const dispatch = (id, description = `Task ${id}`) => ({ type: 'tool_use', id, name: 'Agent', input: { description, prompt: 'Long prompt' } });
@@ -77,7 +77,7 @@ describe('full child transcript extraction', () => {
   it('uses the exact sidecar task, real assistant model, timestamp and traceability for pure Claude', async () => {
     const file = child('pure', [assistant([text('Completed without a PR.')])], { description: '  Exact task  ' });
     expect(await extractAgentUsage(file, { dispatch: dispatch('d') })).toMatchObject({
-      task: '  Exact task  ', modelTier: 'claude-sonnet-5', delegatedProvider: 'none', delegatedModel: null,
+      task: '  Exact task  ', modelTier: 'claude-sonnet-5-5', delegatedProvider: 'none', delegatedModel: null,
       outcome: null, timestamp, timestampSource: 'transcript', agentId: 'pure', sessionId: 'session-1', transcript: realpathSync(file),
     });
   });
@@ -102,7 +102,7 @@ describe('full child transcript extraction', () => {
     for (let i = 0; i < 150; i++) appendFileSync(file, JSON.stringify(assistant([text('x'.repeat(16000))])) + '\n');
     appendFileSync(file, JSON.stringify(assistant([bash('node scripts/gemini-direct-task.mjs --model=third')], 'claude-haiku-5')) + '\n');
     const record = await extractAgentUsage(file);
-    expect(record.modelTier).toEqual(['claude-sonnet-5', 'claude-haiku-5']);
+    expect(record.modelTier).toEqual(['claude-sonnet-5-5', 'claude-haiku-5']);
     expect(record.delegatedProvider).toEqual(['codex', 'gemini']);
     expect(record.delegations.map((d) => d.model)).toEqual(['first', 'second', 'third']);
   });
@@ -112,7 +112,7 @@ describe('full child transcript extraction', () => {
       assistant([text('Run node scripts/codex-direct-task.mjs'), bash('grep codex-direct-task.mjs scripts/*'), bash('ls scripts/gemini-direct-task.mjs')]),
     ]));
     expect(record.delegatedProvider).toBe('none');
-    expect(record.modelTier).toBe('claude-sonnet-5');
+    expect(record.modelTier).toBe('claude-sonnet-5-5');
   });
   it('falls back to mtime only when the FIRST line lacks a timestamp; counts corrupt rows', async () => {
     const file = child('mtime', [{ type: 'user' }, assistant([])]);
@@ -250,7 +250,7 @@ describe('report CLI', () => {
     ];
     records.forEach((r) => appendAgentUsageLogLine(r));
     appendFileSync(join(store, '2026-09-18.jsonl'), '{broken\n{}\nnull\n\n');
-    const expected = { total: 3, byModelTier: { 'claude-sonnet-5': 1, 'claude-haiku-5': 2 }, byDelegatedProvider: { codex: 1, gemini: 1, none: 1 }, byDay: { '2026-09-18': 2, '2026-09-19': 1 }, corrupt: 3 };
+    const expected = { total: 3, byModelTier: { 'claude-sonnet-5-5': 1, 'claude-haiku-5': 2 }, byDelegatedProvider: { codex: 1, gemini: 1, none: 1 }, byDay: { '2026-09-18': 2, '2026-09-19': 1 }, corrupt: 3 };
     expect(JSON.parse(cli(['--report', '--json']))).toEqual(expected);
     expect(cli(['--report'])).toBe(formatAgentUsageReport(expected) + '\n');
     expect(JSON.parse(cli(['--report', '--since=2026-09-19', '--json']))).toMatchObject({ total: 1, corrupt: 0, byDay: { '2026-09-19': 1 } });
@@ -263,6 +263,6 @@ describe('report CLI', () => {
     const record = await extractAgentUsage(child('mixed', [assistant([bash('node scripts/codex-direct-task.mjs; node scripts/gemini-direct-task.mjs')]), assistant([], 'claude-haiku-5')]));
     appendAgentUsageLogLine(record);
     appendAgentUsageLogLine({ ...record, agentId: 'unknown', modelTier: null, delegatedProvider: 'none' });
-    expect(reportAgentUsage()).toMatchObject({ total: 2, byModelTier: { 'claude-sonnet-5': 1, 'claude-haiku-5': 1, unknown: 1 }, byDelegatedProvider: { codex: 1, gemini: 1, none: 1 } });
+    expect(reportAgentUsage()).toMatchObject({ total: 2, byModelTier: { 'claude-sonnet-5-5': 1, 'claude-haiku-5': 1, unknown: 1 }, byDelegatedProvider: { codex: 1, gemini: 1, none: 1 } });
   });
 });

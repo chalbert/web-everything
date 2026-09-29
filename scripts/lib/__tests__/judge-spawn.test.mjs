@@ -67,7 +67,7 @@ describe('the recorded `--bare` trap is a gate, not a comment', () => {
   });
 
   it('buildJudgeArgv NEVER emits `--bare`, across every combination of the care→rigor dial', () => {
-    for (const model of ['sonnet', 'opus', 'haiku', 'claude-sonnet-5']) {
+    for (const model of ['sonnet', 'opus', 'haiku', 'claude-sonnet-5-5']) {
       for (const effort of EFFORT_LEVELS) {
         const argv = buildJudgeArgv({ mandate: 'judge it', shape: SHAPE, model, effort, budget: 1, sessionId: SID });
         expect(argv).not.toContain('--bare');
