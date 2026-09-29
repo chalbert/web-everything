@@ -35,6 +35,7 @@ import {
 // #2661 — the same-cause collapse primitive, unit-tested directly for its guards (the assessHealth tests above
 // only exercise it through well-formed lane inputs).
 import { clusterByCause } from '../../conveyor/infra-blocked.mjs';
+import { bornAsIndexFromItems, resolveBornAsRefs } from '../../conveyor/queue-store.mjs';
 
 describe('shapeQueue — ready/queued build-queue rows → the tick queue shape', () => {
   it('maps num/rank/buildQueued and defaults openBlockers/scope defensively', () => {
@@ -78,6 +79,20 @@ describe('shapeQueue — ready/queued build-queue rows → the tick queue shape'
   it('clearedNums = null falls back to the committed buildQueued flag (backward-compatible)', () => {
     const buildQueue = { queue: [{ num: 42, buildQueued: true }, { num: 7, buildQueued: false }] };
     expect(shapeQueue(buildQueue, null).map((r) => r.buildQueued)).toEqual([true, false]);
+  });
+
+  it('STARVATION FIX: a JIT-numbered card only reads buildQueued:true once its stale hash clearedNum is ' +
+     'resolved through bornAs BEFORE being passed in — the IO shell\'s job, proven here at the pure-fn boundary', () => {
+    const buildQueue = { queue: [{ num: '4290' }, { num: '17' }] }; // ready rows, keyed by the LANDED number
+    const bornAsIndex = bornAsIndexFromItems([{ num: '4290', bornAs: 'x34h6a2' }]);
+    const rawClearedNums = ['x34h6a2', '17']; // the stale sidecar spelling — never matches row 4290
+    expect(shapeQueue(buildQueue, rawClearedNums).map((r) => r.buildQueued)).toEqual([false, true]); // BEFORE: starved
+    const resolvedClearedNums = resolveBornAsRefs(
+      rawClearedNums.map((n) => ({ num: n, addedAt: null })),
+      bornAsIndex,
+    ).map((e) => e.num);
+    expect(resolvedClearedNums).toEqual(['4290', '17']);
+    expect(shapeQueue(buildQueue, resolvedClearedNums).map((r) => r.buildQueued)).toEqual([true, true]); // AFTER: fixed
   });
 });
 

@@ -23,7 +23,7 @@ import {
   capacityCapHint,
 } from '../dispatch-plan.mjs';
 import { PAUSABLE_KINDS } from '../dispatch-pause.mjs';
-import { normNum } from '../../conveyor/queue-store.mjs';
+import { normNum, bornAsIndexFromItems, resolveBornAsRefs } from '../../conveyor/queue-store.mjs';
 
 describe('dispatchPlan — happy path: disjoint items fill free lanes in rank order', () => {
   it('assigns free lanes to disjoint queued items in queue (rank) order', () => {
@@ -851,6 +851,38 @@ describe('clearedNotReady — a cleared id with no ready row is surfaced, never 
     expect(clearedNotReady(['999', 200], readyRows, normNum)).toEqual(['999']);
     expect(clearedNotReady(null, readyRows, normNum)).toEqual([]);
     expect(clearedNotReady([{ num: '' }, { num: null }], readyRows, normNum)).toEqual([]);
+  });
+});
+
+describe('cleared-but-not-ready STARVATION FIX (the live 2026-09-29 incident): a stale JIT-hash sidecar row ' +
+  'must resolve through bornAs BEFORE it reaches selectClearedRows/clearedNotReady', () => {
+  // Reproduces the exact live shape: the operator cleared `x34h6a2` for build; the drain later JIT-numbered
+  // that card to #4290 (stamping `bornAs: x34h6a2` on the numbered card, #2288/#2392); the sidecar still says
+  // `x34h6a2`. `readyRows` (from `backlog.mjs build-queue --json`) is keyed by the LANDED number, #4290 — so a
+  // raw, un-resolved sidecar can never match it.
+  const readyRows = [{ num: '4290' }, { num: '17' }];
+  const rawSidecar = [{ num: 'x34h6a2', addedAt: 't1' }, { num: '17', addedAt: 't2' }];
+  const bornAsIndex = bornAsIndexFromItems([{ num: '4290', bornAs: 'x34h6a2' }]);
+
+  it('BEFORE the fix (raw sidecar, no resolution): the landed+ready card reads as cleared-but-not-ready — the bug', () => {
+    const cleared = new Set(rawSidecar.map((e) => normNum(e.num)));
+    expect(selectClearedRows(readyRows, cleared, normNum)).toEqual([{ num: '17' }]); // #4290 MISSING — starved
+    expect(clearedNotReady(rawSidecar, readyRows, normNum)).toEqual(['x34h6a2']); // falsely held forever
+  });
+
+  it('AFTER the fix (resolveBornAsRefs applied first): the same card launches and drops off cleared-but-not-ready', () => {
+    const resolvedSidecar = resolveBornAsRefs(rawSidecar, bornAsIndex);
+    expect(resolvedSidecar).toEqual([{ num: '4290', addedAt: 't1' }, { num: '17', addedAt: 't2' }]);
+    const cleared = new Set(resolvedSidecar.map((e) => normNum(e.num)));
+    expect(selectClearedRows(readyRows, cleared, normNum)).toEqual([{ num: '4290' }, { num: '17' }]);
+    expect(clearedNotReady(resolvedSidecar, readyRows, normNum)).toEqual([]); // no longer starved
+  });
+
+  it('a hash the bornAs index has no record of yet (not landed / genuine typo) still surfaces — unresolved cases are unaffected', () => {
+    const sidecar = [{ num: 'xnotyet1', addedAt: null }];
+    const resolved = resolveBornAsRefs(sidecar, bornAsIndex);
+    expect(resolved).toEqual(sidecar); // unresolved — passes through unchanged
+    expect(clearedNotReady(resolved, readyRows, normNum)).toEqual(['xnotyet1']);
   });
 });
 

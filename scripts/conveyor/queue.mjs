@@ -18,20 +18,25 @@
  *   node scripts/conveyor/queue.mjs list [--json]          # print the current session queue
  *   node scripts/conveyor/queue.mjs migrate [--dry-run] [--json]  # one-time move of the OLD in-checkout sidecar
  *                                                          # into the automation's state home (decouple-primary-checkout)
+ *   node scripts/conveyor/queue.mjs migrate-bornas [--dry-run] [--json]  # rewrite stale JIT-hash rows to their
+ *                                                          # landed NNN (the drain's `bornAs:` stamp, #2288/#2392)
  *
- * The id may be typed with or without a leading `#` (`add 2613` ≡ `add '#2613'`). Clear the id the tooling
- * CURRENTLY shows: a sidecar entry can go stale across JIT-numbering — an item cleared as a `xHASH` won't match
- * once it lands as `#NNN` (and vice-versa) — so if a cleared id stops matching, `remove` it and re-`add` the
- * current id. (#2613 review, finding 3 — JIT-hash ↔ landed-number drift.)
+ * The id may be typed with or without a leading `#` (`add 2613` ≡ `add '#2613'`). A sidecar entry CAN go stale
+ * across JIT-numbering — an item cleared as a `xHASH` won't match once it lands as `#NNN` — but this now
+ * SELF-HEALS: every reader (`dispatch-plan.mjs`, `conveyor-state.mjs`) resolves a stale hash through the
+ * landed card's `bornAs:` record at read time, and `migrate-bornas` above rewrites the on-disk sidecar the
+ * same way on demand. `remove` + re-`add` under the current id remains a fallback for a hash the resolution
+ * genuinely can't place (a typo, or an item that never landed).
  */
 
 import { execFileSync } from 'node:child_process';
 import { readdirSync, readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import {
   readQueueFile, writeQueueFile, addToQueue, removeFromQueue, queueHas, resolveQueuePath, normNum,
-  resolveQueueSource, migrateLegacyQueue, legacyQueueDivergence,
+  resolveQueueSource, migrateLegacyQueue, legacyQueueDivergence, bornAsIndexFromItems, resolveBornAsRefs,
 } from './queue-store.mjs';
 import { readField } from '../backlog/frontmatter.mjs';
 import { idFromName, normalizeId } from '../backlog/id.mjs';
@@ -58,6 +63,21 @@ const NON_DISPATCHABLE = {
 
 /** Keys of the warning map used by the CLI, exposed for the file-item agreement test. */
 export const NON_DISPATCHABLE_KINDS = Object.freeze(Object.keys(NON_DISPATCHABLE));
+
+/**
+ * Best-effort backlog items load (the SAME loader `dispatch-plan.mjs`/`conveyor-state.mjs` enrich from), for
+ * `migrate-bornas`'s hash→NNN index. Never throws — a load failure returns `[]`, so a bad/absent loader makes
+ * `migrate-bornas` a safe no-op (nothing resolves) rather than a crash.
+ */
+function loadBacklogItemsBestEffort() {
+  try {
+    const require = createRequire(import.meta.url);
+    const loadBacklog = require(join(HERE, '..', '..', 'src', '_data', 'backlog.js'));
+    return typeof loadBacklog === 'function' ? loadBacklog() : [];
+  } catch {
+    return [];
+  }
+}
 
 /**
  * Best-effort `kind` of the item behind `num` — reads the backlog card's frontmatter directly (fast, no
@@ -145,6 +165,28 @@ function main(argv) {
     return emit({ ok: true, verb: 'queue', action: 'migrate', ...r }, human);
   }
 
+  if (action === 'migrate-bornas') {
+    // The sanctioned self-heal: rewrite each sidecar row whose id is a JIT hash that has since landed (its
+    // numbered card carries `bornAs: <that hash>`, #2288/#2392) to the landed NNN. Readers already resolve
+    // this at read time (#4291 area); this verb makes the on-disk sidecar match, so a subsequent `list` (and
+    // any tool that reads the file directly rather than through the resolving readers) shows the current id.
+    const items = loadBacklogItemsBestEffort();
+    const idx = bornAsIndexFromItems(items);
+    const before = readQueueFile(path);
+    const resolved = before
+      .map((e) => ({ from: e.num, to: idx.get(normNum(e.num)) }))
+      .filter((r) => r.to != null && normNum(r.from) !== r.to);
+    const after = resolveBornAsRefs(before, idx);
+    const changed = resolved.length > 0;
+    if (changed && !flags.has('dry-run')) writeQueueFile(after, path);
+    const human = !items.length
+      ? `${YEL}⚠${RST} could not load the backlog — nothing to resolve against (${path})`
+      : !changed
+        ? `${DIM}no stale bornAs hashes in the queue — nothing to migrate (${before.length} in queue, ${path})${RST}`
+        : `${GRN}${flags.has('dry-run') ? 'would resolve' : '✓ resolved'}${RST} ${resolved.length} stale hash row${resolved.length === 1 ? '' : 's'} ${DIM}${resolved.map((r) => `${r.from}→${r.to}`).join(', ')} → ${path}${RST}`;
+    return emit({ ok: true, verb: 'queue', action: 'migrate-bornas', dryRun: flags.has('dry-run'), resolved, queue: after, path }, human);
+  }
+
   if (action === 'list') {
     const queue = readQueueFile(path);
     const src = resolveQueueSource(path);
@@ -163,7 +205,7 @@ function main(argv) {
   }
 
   if (action !== 'add' && action !== 'remove') {
-    fail('usage: queue.mjs {add|remove|list|migrate} <NNN> [--json]');
+    fail('usage: queue.mjs {add|remove|list|migrate|migrate-bornas} <NNN> [--json]');
   }
   if (num == null || !num) fail(`${action} needs an item id — e.g. queue.mjs ${action} 2613`);
 
