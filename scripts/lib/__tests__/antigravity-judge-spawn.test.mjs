@@ -24,7 +24,10 @@ import { join } from 'node:path';
 vi.mock('../../conveyor/run-quality-record.mjs', () => ({ recordAntigravityRunScorecard: vi.fn(() => null) }));
 import {
   ANTIGRAVITY_CLI,
+  ANTIGRAVITY_MODEL,
   ANTIGRAVITY_EFFORT_MAP,
+  ANTIGRAVITY_MODEL_EFFORT_OVERRIDES,
+  ANTIGRAVITY_TOOL_FREE_CORRECTION,
   AntigravityToolDeniedError,
   assertNoAntigravityToolAllowlist,
   buildAntigravityJudgeArgv,
@@ -34,6 +37,7 @@ import {
   antigravityLoadedContextTokens,
   antigravityJudgeSpawn,
   resolveAntigravityJudgeTranscriptDir,
+  resolveAntigravityModelEffort,
   extractAntigravityJudgeSessionId,
   persistAntigravityJudgeTranscript,
 } from '../antigravity-judge-spawn.mjs';
@@ -108,6 +112,50 @@ describe('buildAntigravityJudgeArgv — the argv translation, per #3633\'s probe
   it('refuses a missing schemaFile', () => {
     expect(() => buildAntigravityJudgeArgv({ schemaFile: '' })).toThrow(/schemaFile/);
   });
+
+  // #x5s8b47 — live crash reproduced 2026-09-28: `--model gemini-3.1-pro --effort medium` was refused by
+  // `agy` itself (`status: "ERROR"`, "gemini-3.1-pro has no \"medium\" effort (available: low, high)"), on
+  // EVERY run of the `judgeAdvisory`/`judgeCorrectnessAdvisory` seats' quota-hold fallback onto this provider.
+  it('clamps `medium` to `high` for the pinned seat model (ANTIGRAVITY_MODEL), per ANTIGRAVITY_MODEL_EFFORT_OVERRIDES', () => {
+    const argv = buildAntigravityJudgeArgv({ ...base, model: ANTIGRAVITY_MODEL, effort: 'medium' });
+    expect(argv).toEqual(expect.arrayContaining(['--effort', 'high']));
+    expect(argv).not.toEqual(expect.arrayContaining(['--effort', 'medium']));
+  });
+
+  it('leaves `low`/`high` alone for the pinned seat model — only `medium` is unsupported', () => {
+    expect(buildAntigravityJudgeArgv({ ...base, model: ANTIGRAVITY_MODEL, effort: 'low' }))
+      .toEqual(expect.arrayContaining(['--effort', 'low']));
+    expect(buildAntigravityJudgeArgv({ ...base, model: ANTIGRAVITY_MODEL, effort: 'high' }))
+      .toEqual(expect.arrayContaining(['--effort', 'high']));
+  });
+
+  it('leaves `medium` alone for a model with no override entry, and with no model at all', () => {
+    expect(buildAntigravityJudgeArgv({ ...base, model: 'gemini-3.8-flash-low', effort: 'medium' }))
+      .toEqual(expect.arrayContaining(['--effort', 'medium']));
+    expect(buildAntigravityJudgeArgv({ ...base, effort: 'medium' }))
+      .toEqual(expect.arrayContaining(['--effort', 'medium']));
+  });
+});
+
+describe('resolveAntigravityModelEffort — #x5s8b47 per-model effort clamp, layered under ANTIGRAVITY_EFFORT_MAP', () => {
+  it('applies the override table entry for the pinned seat model', () => {
+    expect(resolveAntigravityModelEffort(ANTIGRAVITY_MODEL, 'medium')).toBe('high');
+  });
+
+  it('passes through unchanged for a value the model has no override for', () => {
+    expect(resolveAntigravityModelEffort(ANTIGRAVITY_MODEL, 'low')).toBe('low');
+    expect(resolveAntigravityModelEffort(ANTIGRAVITY_MODEL, 'high')).toBe('high');
+  });
+
+  it('passes through unchanged for an unlisted model, or no model at all', () => {
+    expect(resolveAntigravityModelEffort('gemini-3.8-flash-low', 'medium')).toBe('medium');
+    expect(resolveAntigravityModelEffort(undefined, 'medium')).toBe('medium');
+    expect(resolveAntigravityModelEffort('', 'medium')).toBe('medium');
+  });
+
+  it('ANTIGRAVITY_MODEL_EFFORT_OVERRIDES is keyed only for the pinned seat model today', () => {
+    expect(Object.keys(ANTIGRAVITY_MODEL_EFFORT_OVERRIDES)).toEqual([ANTIGRAVITY_MODEL]);
+  });
 });
 
 describe('buildAntigravityPrompt — folding the mandate into prompt text (no --append-system-prompt equivalent)', () => {
@@ -116,6 +164,21 @@ describe('buildAntigravityPrompt — folding the mandate into prompt text (no --
     expect(prompt).toContain('BE TERSE');
     expect(prompt).toContain('THE-DIFF');
     expect(prompt.indexOf('BE TERSE')).toBeLessThan(prompt.indexOf('THE-DIFF'));
+  });
+
+  // #x5s8b47 — the fix for the #3633 probe-7 silent-tool-denial shape: a caller's mandate may (wrongly, once
+  // it has degraded here from a quota-held Codex seat) claim a read-only shell exists; this correction must
+  // ALWAYS ride the prompt, after the mandate and before the material, regardless of what the mandate said.
+  it('unconditionally appends ANTIGRAVITY_TOOL_FREE_CORRECTION, between the mandate and the material', () => {
+    const prompt = buildAntigravityPrompt('you can run non-mutating commands and read files', 'THE-DIFF');
+    expect(prompt).toContain(ANTIGRAVITY_TOOL_FREE_CORRECTION);
+    expect(prompt.indexOf('you can run non-mutating')).toBeLessThan(prompt.indexOf(ANTIGRAVITY_TOOL_FREE_CORRECTION));
+    expect(prompt.indexOf(ANTIGRAVITY_TOOL_FREE_CORRECTION)).toBeLessThan(prompt.indexOf('THE-DIFF'));
+  });
+
+  it('the correction plainly states zero tools and forbids reading/running anything further', () => {
+    expect(ANTIGRAVITY_TOOL_FREE_CORRECTION).toMatch(/NO tools at all/);
+    expect(ANTIGRAVITY_TOOL_FREE_CORRECTION.toLowerCase()).toContain('do not try to read, list, or run anything');
   });
 });
 

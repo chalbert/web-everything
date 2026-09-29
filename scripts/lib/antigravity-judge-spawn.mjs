@@ -188,6 +188,43 @@ export const ANTIGRAVITY_EFFORT_MAP = Object.freeze({
 });
 
 /**
+ * #x5s8b47 — PER-MODEL `--effort` RESTRICTIONS, layered UNDER {@link ANTIGRAVITY_EFFORT_MAP}'s already
+ * CLI-LEVEL clamp (xhigh/max -> high). That map normalizes across every model `agy` can run — the CLI's
+ * `--effort` flag itself accepts low/medium/high universally — but a SPECIFIC model can still refuse a value
+ * the flag otherwise accepts: a live run seating the pinned seat model ({@link ANTIGRAVITY_MODEL},
+ * `gemini-3.1-pro`) at `medium` hit `status: "ERROR"` before any API call, `invalid model selection (--model
+ * "gemini-3.1-pro" --effort "medium"): gemini-3.1-pro has no "medium" effort (available: low, high)` — this
+ * seat's fallback path (`judgeAdvisory`/`judgeCorrectnessAdvisory` degrading onto `antigravity` when Codex is
+ * quota-held) crashed on EVERY run as a result, exactly as `ANTIGRAVITY_MODEL`'s own docblock already
+ * predicted ("REQUIRES `--effort`... available `low|high` for this specific model") but nothing enforced.
+ *
+ * A SEPARATE table from `ANTIGRAVITY_EFFORT_MAP` rather than folding model-awareness into it: most models on
+ * `agy`'s own roster accept the full low/medium/high range (#3633 probe 9's "ten models" enumeration), so a
+ * per-model entry here is the EXCEPTION, keyed only for a model actually known to restrict it — an unlisted
+ * model falls through to the CLI-level map untouched. Each entry maps an UNSUPPORTED value to the NEAREST
+ * supported one — a degrade, never a refusal, mirroring `ANTIGRAVITY_EFFORT_MAP`'s own xhigh/max -> high
+ * clamp reasoning exactly: an unsupported request should still run, at the closest level the model actually
+ * offers, rather than crash the seat outright.
+ */
+export const ANTIGRAVITY_MODEL_EFFORT_OVERRIDES = Object.freeze({
+  [ANTIGRAVITY_MODEL]: Object.freeze({ medium: 'high' }),
+});
+
+/**
+ * Resolve the FINAL `--effort` value for a given `model`, applying {@link ANTIGRAVITY_MODEL_EFFORT_OVERRIDES}
+ * (when one exists for that model) ON TOP OF the CLI-level `mapped` value {@link ANTIGRAVITY_EFFORT_MAP}
+ * already produced. PURE — no model, or a model with no override table, returns `mapped` unchanged.
+ * @param {string|undefined} model
+ * @param {string} mapped - already resolved through `ANTIGRAVITY_EFFORT_MAP`.
+ * @returns {string}
+ */
+export function resolveAntigravityModelEffort(model, mapped) {
+  const key = typeof model === 'string' ? model.trim() : '';
+  const overrides = key ? ANTIGRAVITY_MODEL_EFFORT_OVERRIDES[key] : undefined;
+  return overrides?.[mapped] ?? mapped;
+}
+
+/**
  * #3633 probe 7, reproduced live while building this module (see the file header's "LIVE RE-CONFIRMATION") —
  * the single most dangerous failure shape found across all three providers this repo has probed: a run that
  * reaches for a tool it structurally cannot use ends with exit 0, `status: "SUCCESS"`, an empty `response`,
@@ -278,7 +315,9 @@ export function buildAntigravityJudgeArgv({ schemaFile, model, effort } = {}) {
     if (!mapped) {
       throw new TypeError(`antigravity-judge-spawn: \`effort\` must be one of ${Object.keys(ANTIGRAVITY_EFFORT_MAP).join('|')}, got ${JSON.stringify(effort)}`);
     }
-    argv.push('--effort', mapped);
+    // #x5s8b47 — a SECOND, model-specific clamp on top of the CLI-level one above (see
+    // `ANTIGRAVITY_MODEL_EFFORT_OVERRIDES`'s own header for the live crash this fixes).
+    argv.push('--effort', resolveAntigravityModelEffort(model, mapped));
   }
   // `--print ''` — the prompt rides stdin as a stream-json `user` event instead (see
   // `buildAntigravityStreamInput`); an EMPTY value is required in this mode (#3633 probe 5b), never omitted
@@ -288,15 +327,48 @@ export function buildAntigravityJudgeArgv({ schemaFile, model, effort } = {}) {
 }
 
 /**
+ * #x5s8b47 — THE UNCONDITIONAL TOOL-FREE CORRECTION. Appended to EVERY mandate this spawn runs, regardless of
+ * what the caller's own mandate text said, because a caller cannot be trusted to already know it is landing
+ * on this seat: `review-pr.mjs`'s two Codex advisory seats (`judgeAdvisory`, `judgeCorrectnessAdvisory`) build
+ * their mandates assuming a REAL, if read-only, Codex shell (`CODEX_ADVISORY_SANDBOX_CORRECTION`: "you are not
+ * a tool-free juror... you can run non-mutating commands and read files") — true when Codex actually judges,
+ * but silently WRONG the moment a quota hold degrades that same request onto this genuinely zero-tool
+ * provider (the not-yet-landed `gracefulOnUnavailable`/`PROVIDER_QUOTA_FALLBACK` path, #x5s8b47's own sibling
+ * card). Live evidence (2026-09-28, real `agy` 1.2.1 runs against open PRs): a request carrying that
+ * shell-framing text reliably ended in the #3633 probe-7 silent-tool-denial shape — the model reached for
+ * `list_dir`/`run_command`, both auto-denied, `structured_output` ABSENT.
+ *
+ * FIXED HERE, AT THE PROVIDER BOUNDARY, rather than by editing each caller's mandate: this spawn is the one
+ * place that KNOWS, unconditionally and for every caller, that the seat about to run has genuinely zero tools
+ * (see the file header's "WHY TOOL-FREE" section) — a fact no caller-supplied mandate text can be trusted to
+ * already reflect correctly, since the SAME request object may otherwise be destined for a tool-bearing
+ * provider (Codex's read-only shell) on a run where no quota hold ever fires. Appended LAST, after the
+ * caller's own mandate, so it reads as an explicit correction/override of anything said above it — mirrors
+ * `CODEX_ADVISORY_SANDBOX_CORRECTION`'s own "appended, not spliced in" shape (`review-pr.mjs`) for the
+ * opposite direction (that one corrects "no tools" to "read-only shell"; this one corrects the reverse).
+ */
+export const ANTIGRAVITY_TOOL_FREE_CORRECTION = [
+  'CORRECTION FOR THIS SEAT, OVERRIDING ANYTHING SAID ABOVE ABOUT A SHELL, TOOLS, OR THE ABILITY TO READ OR RUN',
+  'ANYTHING: whatever this run is, on THIS seat you have NO tools at all — not a read-only shell, not a',
+  'sandboxed one, nothing. Any tool call you attempt (a shell command, a file read, a directory listing,',
+  'anything) is silently denied and can end this turn with an empty, useless answer instead of a real one. The',
+  'diff and description you need are already given to you below, in full, and there is nothing more available',
+  '— do not try to read, list, or run anything to get more. Answer ONLY from the material below, using the',
+  'required structured output, and say so plainly whenever you cannot verify something rather than describing',
+  'verification you did not (and cannot) perform.',
+].join(' ');
+
+/**
  * Fold the mandate into the prompt text — `agy` has no `--append-system-prompt` equivalent (#3633's flag
  * surface), same gap Codex has. A clearly-labelled two-part text, not a silent concatenation, mirroring
- * `codex-judge-spawn.mjs#buildCodexPrompt` exactly.
+ * `codex-judge-spawn.mjs#buildCodexPrompt` exactly. {@link ANTIGRAVITY_TOOL_FREE_CORRECTION} rides between the
+ * mandate and the material — see its own header for why it is unconditional.
  * @param {string} mandate
  * @param {string} input
  * @returns {string}
  */
 export function buildAntigravityPrompt(mandate, input) {
-  return `${mandate}\n\n---\n\nThe material to judge follows.\n\n${input}`;
+  return `${mandate}\n\n${ANTIGRAVITY_TOOL_FREE_CORRECTION}\n\n---\n\nThe material to judge follows.\n\n${input}`;
 }
 
 /**
