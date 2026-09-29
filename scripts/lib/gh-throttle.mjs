@@ -342,43 +342,77 @@ export function stripLeadingGhGlobalFlags(args) {
   return out;
 }
 
+// `gh api`'s own short flags (pflag): the ones that take a value, and the one boolean. Any OTHER short letter
+// is unknown to this scanner and is treated as unsafe (see {@link scanGhApiFlags}).
+const GH_API_SHORT_VALUE_FLAGS = new Set(['X', 'f', 'F', 'H', 'p', 'q', 't']);
+const GH_API_SHORT_BOOL_FLAGS = new Set(['i']);
+
 /**
- * `gh api`'s effective HTTP method, however it was spelled — `--method X`, `--method=X`, `-X X`, or the
- * squashed `-XX` short form (`gh` itself accepts all of these; a classifier that reads only one shape is
- * exactly how a real mutation could slip past a read allowlist — review-2026-09-28's finding on this card).
- * `null` when no method flag is present at all (gh's own default is GET).
+ * Scan a `gh api` argv the way pflag parses it, so no spelling of a method or payload flag slips past a read
+ * allowlist (PR #2885 review: `--input=FILE`, attached `-fkey=v`/`-Fkey=v`, a clustered `-iXPOST`, and a
+ * repeated `--method` — pflag keeps the LAST one — were all missed by exact-token matching). Handles:
+ *   - long flags, bare or `=`-joined: `--method`, `--input`, `--field`, `--raw-field`;
+ *   - short flags alone, attached (`-XPOST`, `-ftitle=x`) or clustered behind a bool (`-iXPOST`, `-if k=v`);
+ *   - a `--` never stops the scan (pflag can read it as a long flag's value — see below).
+ * `methods` lists EVERY method given, in order; `payload` is true for any payload flag; `unknown` is true for a
+ * short letter this scanner does not recognize (the caller treats that as unsafe, never as a read).
+ * @param {string[]} args
+ * @returns {{methods: string[], payload: boolean, unknown: boolean}}
+ */
+export function scanGhApiFlags(args) {
+  const a = Array.isArray(args) ? args.map(String) : [];
+  const out = { methods: [], payload: false, unknown: false };
+  for (let i = 0; i < a.length; i++) {
+    const t = a[i];
+    // No early stop at `--`: pflag takes it as the VALUE of a preceding long flag (`--preview -- -XPOST` still
+    // sends a POST), and `gh api` takes one endpoint anyway — scanning to the end can only add false negatives.
+    if (t === '--') continue;
+    if (t.startsWith('--')) {
+      const name = t.slice(2).split('=')[0];
+      const hasInline = t.includes('=');
+      if (name === 'method') out.methods.push((hasInline ? t.slice(t.indexOf('=') + 1) : String(a[++i] ?? '')).toUpperCase());
+      else if (name === 'input' || name === 'field' || name === 'raw-field') out.payload = true;
+      continue;
+    }
+    if (!t.startsWith('-') || t.length < 2) continue; // a positional (or a bare `-`)
+    for (let j = 1; j < t.length; j++) {
+      const c = t[j];
+      if (GH_API_SHORT_BOOL_FLAGS.has(c)) continue;
+      if (!GH_API_SHORT_VALUE_FLAGS.has(c)) { out.unknown = true; break; }
+      const rest = t.slice(j + 1);
+      const value = rest.length ? rest : String(a[++i] ?? '');
+      if (c === 'X') out.methods.push(value.toUpperCase());
+      if (c === 'f' || c === 'F') out.payload = true;
+      break; // a value-taking flag consumes the rest of the token (or the next arg)
+    }
+  }
+  return out;
+}
+
+/**
+ * `gh api`'s effective HTTP method (pflag: the LAST one given wins), however it was spelled — see
+ * {@link scanGhApiFlags}. `null` when no method flag is present at all (gh's own default is GET).
  * @param {string[]} args
  * @returns {string|null}
  */
 export function extractGhApiMethod(args) {
-  const a = Array.isArray(args) ? args : [];
-  for (let i = 0; i < a.length; i++) {
-    const t = String(a[i]);
-    if (t === '--method' || t === '-X') return String(a[i + 1] || '').toUpperCase() || null;
-    if (t.startsWith('--method=')) return t.slice('--method='.length).toUpperCase() || null;
-    if (t.startsWith('-X') && t.length > 2) return t.slice(2).toUpperCase();
-  }
-  return null;
+  const { methods } = scanGhApiFlags(args);
+  return methods.length ? methods[methods.length - 1] || null : null;
 }
 
 /**
- * Is a `gh api` payload flag (`-f`/`-F`/`--field`/`--raw-field`/`--input`, any spelling incl. `--field=x`)
- * present? These are `gh`'s own trigger for inferring a mutating POST (see {@link classifyGhWrite}) UNLESS an
- * explicit `--method GET`/`HEAD` is also present, in which case `gh` itself treats `-f`/`-F` as URL query
- * parameters, not a body — a real, common shape (`we:scripts/lib/review-label-provider.mjs`'s own `readPrFiles`
- * uses `--method GET … -F per_page=…`). {@link classifyGhRead}'s own allowlist is DELIBERATELY more
- * conservative than that distinction — see its doc comment — so this helper's result is used unconditionally
- * there, not only when the method is unknown.
+ * Is a `gh api` payload flag (`-f`/`-F`/`--field`/`--raw-field`/`--input`, any spelling — see {@link
+ * scanGhApiFlags}) present? These are `gh`'s own trigger for inferring a mutating POST (see {@link
+ * classifyGhWrite}) UNLESS an explicit `--method GET`/`HEAD` is also present, in which case `gh` itself treats
+ * `-f`/`-F` as URL query parameters, not a body — a real, common shape (`we:scripts/lib/review-label-provider.mjs`'s
+ * own `readPrFiles` uses `--method GET … -F per_page=…`). {@link classifyGhRead}'s own allowlist is DELIBERATELY
+ * more conservative than that distinction — see its doc comment — so this helper's result is used
+ * unconditionally there, not only when the method is unknown.
  * @param {string[]} args
  * @returns {boolean}
  */
 export function hasGhApiPayloadFlag(args) {
-  const a = Array.isArray(args) ? args : [];
-  return a.some((t) => {
-    const s = String(t);
-    return s === '-f' || s === '-F' || s === '--field' || s === '--raw-field' || s === '--input'
-      || s.startsWith('--field=') || s.startsWith('--raw-field=');
-  });
+  return scanGhApiFlags(args).payload;
 }
 
 /**
@@ -407,9 +441,10 @@ export function classifyGhRead(argvRaw) {
   if (cmd === 'run') return ['list', 'view'].includes(sub);
   if (cmd === 'search') return true;
   if (cmd === 'api') {
-    const method = extractGhApiMethod(args);
-    if (method && method !== 'GET' && method !== 'HEAD') return false;
-    return !hasGhApiPayloadFlag(args);
+    // EVERY method given must be GET/HEAD (not just the one pflag keeps), no payload, no unrecognized flag.
+    const { methods, payload, unknown } = scanGhApiFlags(args);
+    if (unknown || payload) return false;
+    return methods.every((m) => m === 'GET' || m === 'HEAD');
   }
   return false;
 }
@@ -1401,12 +1436,23 @@ export function runGhCliPassthrough(argv, { throttle = {}, spawn = spawnSync, bi
   if (eligibleForPersonalRoute) {
     const personal = throttle.personalToken !== undefined ? throttle.personalToken : personalGhToken({ bin, exec: throttle.personalTokenExec });
     if (personal) {
-      callEnv = { ...env, GH_TOKEN: personal };
+      // Layered over `process.env` (what an unrouted child inherits), so a caller's PARTIAL `throttle.env`
+      // never strips PATH/HOME from the routed child (PR #2885 review).
+      callEnv = { ...process.env, ...env, GH_TOKEN: personal };
       delete callEnv.GITHUB_TOKEN;
       usedPersonalToken = true;
     }
   }
   let identity = ghAuthIdentity(callEnv);
+  // The personal identity is only ever a BONUS bucket: when it is already blocked, the read falls back to the
+  // App bucket (checked below exactly as an unrouted call would be), never fails fast while the App may still
+  // have budget (PR #2885 review).
+  if (usedPersonalToken && readBudgetBlock(lockRoot, identity, resource, now())) {
+    recordGhCallLogEntry(logPath, { op: opLabel, attempt: 0, points: 0, outcome: 'personal_budget_blocked', resource, caller, w: isWrite, id: identity });
+    callEnv = env;
+    usedPersonalToken = false;
+    identity = ghAuthIdentity(callEnv);
+  }
   const blocked = readBudgetBlock(lockRoot, identity, resource, now());
   if (blocked) {
     recordGhCallLogEntry(logPath, { op: opLabel, attempt: 0, points: 0, outcome: 'budget_blocked', resource, caller, w: isWrite, id: identity });
@@ -1416,8 +1462,8 @@ export function runGhCliPassthrough(argv, { throttle = {}, spawn = spawnSync, bi
   // FAIL OPEN (see `failOpenGate`): an unusable lock root means this call runs ungated, never not at all.
   const gated = failOpenGate('lock-root setup', () => { mkdirSync(lockRoot, { recursive: true }); return true; }, { ...gateOpts, fallback: false, logPath: null });
 
-  // #4309 — cost-header capture. The child's env is `callEnv` (identical to a bare `process.env` inherit
-  // unless the read-routing above just swapped in the operator's personal token), so THAT is where a caller's
+  // #4309 — cost-header capture. The child inherits `process.env` (or, when the read-routing above swapped in
+  // the operator's personal token, `callEnv` — itself layered over `process.env`), so THAT is where a caller's
   // own `GH_DEBUG` would be: when set, it is left alone and relayed untouched (never stripped). Otherwise this
   // turns `GH_DEBUG=api` on, reads the free `X-Ratelimit-*` headers, and strips ONLY its own trace back out.
   const capture = resolveCostHeaderCapture(env) && !process.env.GH_DEBUG;
@@ -1425,7 +1471,7 @@ export function runGhCliPassthrough(argv, { throttle = {}, spawn = spawnSync, bi
   const outer = env[GH_OUTER_INV_ENV] || process.env[GH_OUTER_INV_ENV] || null;
 
   let attempt = 0;
-  let authFallbackTried = false;
+  let appFallbackTried = false;
   for (;;) {
     attempt += 1;
     // The trace echoes every request and response body, pretty-printed, into stderr — so a payload that fits
@@ -1439,7 +1485,7 @@ export function runGhCliPassthrough(argv, { throttle = {}, spawn = spawnSync, bi
     // an unconditional explicit `env: callEnv` would otherwise change what every OTHER caller's mocked
     // `spawn` sees, even when nothing about its own call changed.
     const spawnOpts = capture
-      ? { stdio: ['inherit', 'pipe', 'pipe'], maxBuffer: maxBuffer * DEBUG_CAPTURE_BUFFER_FACTOR, env: { ...callEnv, GH_DEBUG: 'api' } }
+      ? { stdio: ['inherit', 'pipe', 'pipe'], maxBuffer: maxBuffer * DEBUG_CAPTURE_BUFFER_FACTOR, env: { ...(callEnv === env ? process.env : callEnv), GH_DEBUG: 'api' } }
       : (callEnv === env
         ? { stdio: ['inherit', 'pipe', 'pipe'], maxBuffer }
         : { stdio: ['inherit', 'pipe', 'pipe'], maxBuffer, env: callEnv });
@@ -1470,8 +1516,8 @@ export function runGhCliPassthrough(argv, { throttle = {}, spawn = spawnSync, bi
     // to the original (App) identity ONCE, transparently — but check that identity's own budget block FIRST,
     // so a personal-token rejection can never turn into a second, doomed call against an App bucket already
     // known exhausted (review-2026-09-28 finding).
-    if (failed && usedPersonalToken && !authFallbackTried && looksLikeGhAuthFailure(stderrText)) {
-      authFallbackTried = true;
+    if (failed && usedPersonalToken && !appFallbackTried && looksLikeGhAuthFailure(stderrText)) {
+      appFallbackTried = true;
       recordGhCallLogEntry(logPath, { op: opLabel, attempt, points: 0, outcome: 'personal_token_rejected', caller, w: isWrite, resource, id: identity, inv, ...(outer ? { outer } : {}) });
       callEnv = env;
       usedPersonalToken = false;
@@ -1510,6 +1556,21 @@ export function runGhCliPassthrough(argv, { throttle = {}, spawn = spawnSync, bi
         const rec = writeBudgetBlock(lockRoot, identity, exhausted, { untilMs: until.untilMs, nowMs: now(), source: until.source, op: opLabel, caller });
         recordGhCallLogEntry(logPath, { op: opLabel, attempt, points, outcome: 'budget_exhausted', resource: exhausted, until: rec.until, caller, w: isWrite, id: identity });
         recordGhThrottleMetric('gh.throttle.exhausted', 1, { op: opLabel, attempt, source: `primary-${exhausted}` });
+        // we:backlog/xhcgdce — the PERSONAL bucket just ran dry mid-call (its block is recorded above, probed
+        // under the personal token). Retry the read ONCE on the App — after checking the App's own block, same
+        // as the rejected-token fallback (PR #2885 review).
+        if (usedPersonalToken && !appFallbackTried) {
+          appFallbackTried = true;
+          callEnv = env;
+          usedPersonalToken = false;
+          identity = ghAuthIdentity(callEnv);
+          const appBlocked = readBudgetBlock(lockRoot, identity, resource, now()) || readBudgetBlock(lockRoot, identity, exhausted, now());
+          if (appBlocked) {
+            recordGhCallLogEntry(logPath, { op: opLabel, attempt, points: 0, outcome: 'budget_blocked', resource, caller, w: isWrite, id: identity });
+            return { status: 1, stdout: Buffer.alloc(0), stderr: Buffer.from(budgetBlockedMessage(appBlocked)) };
+          }
+          continue;
+        }
         return { status: r.status == null ? 1 : r.status, stdout: r.stdout || Buffer.alloc(0), stderr: stderrOut };
       }
     }

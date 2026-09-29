@@ -59,6 +59,37 @@ describe('classifyGhRead — the conservative read allowlist', () => {
     expect(classifyGhRead(['api', '-XDELETE', 'repos/o/n/labels/x'])).toBe(false);
   });
 
+  // PR #2885 review: gh (pflag) accepts `=`-joined AND attached spellings of every payload/method flag, and a
+  // repeated `--method` resolves to the LAST one. Any spelling the classifier misses routes a real mutation onto
+  // the operator's personal token, so every one is enumerated here, table-driven.
+  it.each([
+    ['--input=FILE', ['api', 'repos/o/n/dispatches', '--input=body.json']],
+    ['--input FILE', ['api', 'repos/o/n/dispatches', '--input', 'body.json']],
+    ['-fkey=v (attached)', ['api', 'repos/o/n/issues/1/comments', '-fbody=hi']],
+    ['-Fkey=v (attached)', ['api', 'repos/o/n/issues', '-Ftitle=x']],
+    ['-f key=v', ['api', 'repos/o/n/issues', '-f', 'title=x']],
+    ['-F key=v', ['api', 'repos/o/n/issues', '-F', 'title=x']],
+    ['--field key=v', ['api', 'repos/o/n/issues', '--field', 'title=x']],
+    ['--field=key=v', ['api', 'repos/o/n/issues', '--field=title=x']],
+    ['--raw-field key=v', ['api', 'repos/o/n/issues', '--raw-field', 'title=x']],
+    ['--raw-field=key=v', ['api', 'repos/o/n/issues', '--raw-field=title=x']],
+    ['clustered bool + -f (-if)', ['api', 'repos/o/n/issues', '-if', 'title=x']],
+    ['clustered bool + attached -F (-iFtitle=x)', ['api', 'repos/o/n/issues', '-iFtitle=x']],
+    ['repeated --method, last is POST', ['api', '--method', 'GET', 'repos/o/n/issues', '--method', 'POST']],
+    ['--method=GET then -XPOST', ['api', '--method=GET', '-XPOST', 'repos/o/n/issues']],
+    ['clustered bool + -X (-iXPOST)', ['api', '-iXPOST', 'repos/o/n/issues']],
+    ['clustered bool + -X value (-iX POST)', ['api', '-iX', 'POST', 'repos/o/n/issues']],
+    ['lowercase method', ['api', '--method', 'delete', 'repos/o/n/labels/x']],
+    // pflag reads a `--` right after a value-taking long flag as that flag's VALUE, so later flags still apply.
+    ['--preview -- then -XPOST', ['api', '--preview', '--', '-XPOST', 'repos/o/n/issues']],
+    ['--jq -- then -XPOST', ['api', '--jq', '--', '-XPOST', 'repos/o/n/issues']],
+    ['--template -- then -f', ['api', '--template', '--', 'repos/o/n/issues', '-f', 'title=x']],
+    ['--header -- then --input', ['api', '--header', '--', '--input', 'b.json', 'repos/o/n/dispatches']],
+    ['global -R, --preview -- then --method=DELETE', ['-R', 'o/n', 'api', '--preview', '--', '--method=DELETE', 'r']],
+  ])('every payload/method spelling resolves to write/App: %s', (_label, argv) => {
+    expect(classifyGhRead(argv)).toBe(false);
+  });
+
   it('a GET with a payload flag stays conservative (write/App) — a documented MVP gap, never a false positive', () => {
     expect(classifyGhRead(['api', '--method', 'GET', 'repos/o/n/pulls/1/files', '-F', 'per_page=100'])).toBe(false);
     expect(classifyGhRead(['api', 'graphql', '-f', 'query=query{viewer{login}}'])).toBe(false);
@@ -210,6 +241,78 @@ describe('runGhCliPassthrough — the gh read/App-write identity split (we:backl
     });
     expect(spawn).toHaveBeenCalledTimes(1); // the rejected personal-token attempt only — no doomed App retry
     expect(r.stderr.toString()).toMatch(/shared backoff until/);
+  });
+
+  // PR #2885 review — a routed identity's failure-mode matrix: missing and rejected are covered above; these are
+  // the two budget modes. Each falls back to the App bucket (checking the App's own block first), never fails
+  // fast while the App may still have budget.
+  it("the PERSONAL bucket already blocked → the read falls back to the App bucket, not fail-fast", () => {
+    const lockRoot = tmp();
+    writeBudgetBlock(lockRoot, personalIdentity, 'graphql', { untilMs: Date.now() + 3600_000, nowMs: Date.now() });
+    const spawn = vi.fn(() => ({ status: 0, stdout: Buffer.from('[]'), stderr: Buffer.alloc(0) }));
+    const r = runGhCliPassthrough(['pr', 'list'], {
+      throttle: { lockRoot, env: APP_ENV, personalRoute: true, personalToken: PERSONAL_TOKEN }, spawn,
+    });
+    expect(r.status).toBe(0);
+    expect(spawn).toHaveBeenCalledTimes(1);
+    expect(spawn.mock.calls[0][2].env).toBeUndefined(); // plain, unmodified App env
+  });
+
+  it('BOTH buckets blocked → fails fast with the App block, no gh call at all', () => {
+    const lockRoot = tmp();
+    writeBudgetBlock(lockRoot, personalIdentity, 'graphql', { untilMs: Date.now() + 3600_000, nowMs: Date.now() });
+    writeBudgetBlock(lockRoot, 'app', 'graphql', { untilMs: Date.now() + 3600_000, nowMs: Date.now() });
+    const spawn = vi.fn();
+    const r = runGhCliPassthrough(['pr', 'list'], {
+      throttle: { lockRoot, env: APP_ENV, personalRoute: true, personalToken: PERSONAL_TOKEN }, spawn,
+    });
+    expect(r.status).toBe(1);
+    expect(spawn).not.toHaveBeenCalled();
+    expect(r.stderr.toString()).toMatch(/shared backoff until/);
+  });
+
+  it('the PERSONAL bucket exhausted MID-CALL → records the personal block (probe under the personal token), then retries once on the App', () => {
+    const lockRoot = tmp();
+    const seen = [];
+    const spawn = vi.fn((bin, argv, opts) => {
+      seen.push({ argv, token: opts.env ? opts.env.GH_TOKEN : undefined });
+      if (seen.length === 1) return { status: 1, stdout: Buffer.alloc(0), stderr: Buffer.from('GraphQL: API rate limit exceeded for user ID 1.') };
+      if (argv[0] === 'api') return { status: 1, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) }; // the budget probe
+      return { status: 0, stdout: Buffer.from('[]'), stderr: Buffer.alloc(0) };
+    });
+    const r = runGhCliPassthrough(['pr', 'list'], {
+      throttle: { lockRoot, env: APP_ENV, personalRoute: true, personalToken: PERSONAL_TOKEN, sleep: () => {} }, spawn,
+    });
+    expect(r.status).toBe(0);
+    expect(seen[0].token).toBe(PERSONAL_TOKEN);
+    const probe = seen.find((c) => c.argv[0] === 'api');
+    expect(probe && probe.token).toBe(PERSONAL_TOKEN); // the probe measured the PERSONAL identity's budget
+    expect(seen[seen.length - 1].token).toBeUndefined(); // the final retry ran on the plain App env
+    expect(readBudgetBlock(lockRoot, personalIdentity, 'graphql')).not.toBe(null);
+    expect(readBudgetBlock(lockRoot, 'app', 'graphql')).toBe(null);
+  });
+
+  it('cost-header capture keeps inheriting process.env when throttle.env is partial (unrouted call)', () => {
+    const lockRoot = tmp();
+    const spawn = vi.fn(() => ({ status: 0, stdout: Buffer.from('ok'), stderr: Buffer.alloc(0) }));
+    runGhCliPassthrough(['pr', 'comment', '1', '--body', 'x'], { throttle: { lockRoot, env: { GH_TOKEN: 'ghs_x' } }, spawn });
+    const childEnv = spawn.mock.calls[0][2].env;
+    expect(childEnv.GH_DEBUG).toBe('api');
+    expect(childEnv.PATH).toBe(process.env.PATH);
+  });
+
+  it('a routed read with a partial throttle.env still inherits process.env (PATH) in both capture modes', () => {
+    for (const costHeaders of ['0', '1']) {
+      const lockRoot = tmp();
+      const spawn = vi.fn(() => ({ status: 0, stdout: Buffer.from('ok'), stderr: Buffer.alloc(0) }));
+      runGhCliPassthrough(['pr', 'list'], {
+        throttle: { lockRoot, env: { GH_TOKEN: 'ghs_x', WE_GH_THROTTLE_COST_HEADERS: costHeaders }, personalRoute: true, personalToken: PERSONAL_TOKEN }, spawn,
+      });
+      const childEnv = spawn.mock.calls[0][2].env;
+      expect(childEnv.GH_TOKEN).toBe(PERSONAL_TOKEN);
+      expect(childEnv.GITHUB_TOKEN).toBeUndefined();
+      expect(childEnv.PATH).toBe(process.env.PATH);
+    }
   });
 
   it('records the resolved identity on the sidecar log line (the health smell)', () => {
