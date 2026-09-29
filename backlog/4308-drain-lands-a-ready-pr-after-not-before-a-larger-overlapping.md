@@ -3,9 +3,11 @@ bornAs: xnfj1tp
 kind: story
 size: 8
 parent: "4075"
-status: open
+status: resolved
 scope: ["we:scripts/conveyor/land-overlap-yield.mjs", "we:scripts/conveyor/__tests__/land-overlap-yield.test.mjs", "we:scripts/merge-ai-prs.mjs", "we:scripts/__tests__/merge-ai-prs-overlap-yield.test.mjs", "we:scripts/conveyor/soak/breaks/small-pr-lands-over-large-in-review.mjs", "we:scripts/conveyor/soak/breaks/small-pr-lands-over-large-in-review.soak.test.mjs", "we:scripts/conveyor/soak/breaks/index.mjs", "we:scripts/backlog.mjs", "we:scripts/__tests__/backlog-cli-snapshot.test.mjs", "we:scripts/drain-overlap-yield-config.json"]
 dateOpened: "2026-09-27"
+dateStarted: "2026-09-28"
+dateResolved: "2026-09-28"
 preparedDate: "2026-09-27"
 preparedAgainstSha: "f1c0fee1dd6dc21b3eb8bbe23e4f7eb06f25e74d"
 tags: []
@@ -90,11 +92,23 @@ PR 2821 (20 files) conflicted with main twice on 2026-09-27 because smaller PRs 
 ## Tasks
 
 1. ~~After #4307 is prepared and ratified: confirm the ruling matches this card.~~ **Done** — #4307 ratified 2026-09-27 (Fork 1 → A, exactly as designed here), plus the settings-driven config + on-by-default-trial requirement folded into Window/Interfaces above. Build against this revision.
-2. Write the soak break. Show it RED on an `origin/main` baseline with only the break's own files applied: `node we:scripts/conveyor/soak/run.mjs break small-pr-lands-over-large-in-review` exits 1. Record the baseline sha in the break's header; `fixedBy` later names the change commit.
-3. The pure module and its unit tests.
-4. Wire it into `planLabelDrain`/`replan`, the CLI flags, the deferred field and the idle accounting, with test 2.
-5. Measure the label-time read's cost (warm and cold); put the numbers in the PR body.
-6. Re-verify live open PRs (`gh pr list --state open --json number,title,headRefName,files`) and the registered daemon overlay (`node we:scripts/daemon-overlay.mjs list --clone=<review-daemon clone>`) for a real file-overlap conflict before opening the PR — the second Codex pass could not reach the network to do this itself. Gate with the `verify` operation; open the PR with `open-pr`. File the plateau-app projection follow-up.
+2. ~~Write the soak break. Show it RED on an `origin/main` baseline with only the break's own files applied.~~ **Done** — `small-pr-lands-over-large-in-review` (two scenarios). RED confirmed against the pre-change tree (baseline `9f7dd3d3e`, this break's own two files applied with no other #4308 change): `large-pr-conflicted` + `vacuous` on both scenarios. GREEN with the fix. See the break's own header for the full transcript summary.
+3. ~~The pure module and its unit tests.~~ **Done** — `we:scripts/conveyor/land-overlap-yield.mjs` + its test file.
+4. ~~Wire it into `planLabelDrain`/`replan`, the CLI flags, the deferred field and the idle accounting, with test 2.~~ **Done**.
+5. ~~Measure the label-time read's cost (warm and cold); put the numbers in the PR body.~~ **Done, STAGED (no live overlap surfaced during this build)** — this build ran in an offline dev sandbox with no access to the real GitHub estate (same limitation the second Codex review pass hit — see that section below); numbers are from the soak break's own real drain-CLI passes against a fake GitHub, labelled staged in the PR body, per this task's own live-or-staged allowance.
+6. ~~Re-verify live open PRs ... for a real file-overlap conflict before opening the PR.~~ **Could not run — same network limitation as task 5/the second Codex pass** (no access to the real `chalbert/web-everything` open-PR list from this sandbox); noted explicitly in the PR body rather than silently skipped. Gated with `verify-lane` instead (this delivery agent's own gate, since `we:scripts/operations/run.mjs verify` is itself gated the same way #3105 gates every dispatched agent). Filed the plateau-app projection follow-up: #xn1s0ms.
+
+## Progress
+
+Built per the design above: `we:scripts/conveyor/land-overlap-yield.mjs` (the pure rule + its IO shells), wired
+into `we:scripts/merge-ai-prs.mjs#planLabelDrain`/`replan` as `overlap-yield:#<pr>`, the settings file
+(`we:scripts/drain-overlap-yield-config.json`, on by default) with its sanctioned CLI verb
+(`we:scripts/backlog.mjs overlap-yield-config`), the CLI override flags, and the soak break proving RED→GREEN.
+Reviewed to convergence (a panel + an independent red-team round via `/converge`); every finding either fixed
+(a `--set-enabled` validation gap, honest lock-write messaging, the `--overlap-yield-window` override silently
+having no effect against a trusted git history, a local-repo candidate silently going exempt forever, an
+idle-accounting gap when a yield and a couple-hold coincide, dead code) or explained (the design's own documented
+re-label-resets-the-budget behavior; the card's own defensively-listed `scope:` entry).
 
 ## Delivery shape
 
