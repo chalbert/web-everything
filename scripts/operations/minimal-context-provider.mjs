@@ -135,11 +135,19 @@ export const RESTRICTED_PROVIDER_TOOLS = 'Bash,Edit,Write,Read,Glob,Grep';
  * `tools` is overridable (defaults to {@link RESTRICTED_PROVIDER_TOOLS}) so a future caller that genuinely
  * needs a narrower or wider allowlist than the delivery/review default can say so explicitly, in one place,
  * rather than hand-rolling a second argv builder.
+ *
+ * `addDirs` (#4348) — extra working directories, one `--add-dir <dir>` pair each, on BOTH branches. `--restricted`
+ * confines the file tools to the working directories, `--add-dir` included (`claude --help`), so a cross-locus
+ * delivery whose cwd is the impl lane needs its WE lane (the spec, the `## Progress` bookkeeping) added here or
+ * the agent cannot read it. Omitted → argv byte-identical to before.
  */
-export function buildRestrictedProviderArgv({ sessionId, prompt, resumeSessionId = null, settingsFile, tools = RESTRICTED_PROVIDER_TOOLS }) {
+export function buildRestrictedProviderArgv({
+  sessionId, prompt, resumeSessionId = null, settingsFile, tools = RESTRICTED_PROVIDER_TOOLS, addDirs = [],
+}) {
   const RESTRICTED_FLAGS = [
     '--restricted', '--tools', tools, '--strict-mcp-config',
     '--disable-slash-commands', '--settings', settingsFile,
+    ...addDirs.flatMap((dir) => ['--add-dir', dir]),
   ];
   return resumeSessionId
     ? [...RESTRICTED_FLAGS, '--resume', String(resumeSessionId), prompt]

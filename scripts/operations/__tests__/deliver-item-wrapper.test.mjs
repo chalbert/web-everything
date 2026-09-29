@@ -117,6 +117,13 @@ import { acquireBuildDispatchClaim, listBuildDispatchClaims, listBuildDispatchHo
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 describe('buildRestrictedProviderArgv', () => {
+  it('#4348 — addDirs adds one `--add-dir <dir>` pair each, on both branches, before -p/--resume', () => {
+    const fresh = buildRestrictedProviderArgv({ sessionId: 'u', prompt: 'p', settingsFile: '/s.json', addDirs: ['/we/lane-7'] });
+    expect(fresh.slice(-6)).toEqual(['--add-dir', '/we/lane-7', '-p', '--session-id', 'u', 'p']);
+    const resume = buildRestrictedProviderArgv({ prompt: 'p', resumeSessionId: 'u', settingsFile: '/s.json', addDirs: ['/we/lane-7'] });
+    expect(resume.slice(-5)).toEqual(['--add-dir', '/we/lane-7', '--resume', 'u', 'p']);
+  });
+
   it('fresh spawn: uses --restricted (never --bare), an explicit --tools allowlist, --strict-mcp-config, '
     + '--disable-slash-commands, the given --settings file, and -p/--session-id', () => {
     const argv = buildRestrictedProviderArgv({
@@ -351,20 +358,20 @@ describe('CODEX_PROVIDER.spawn (#3580 — the real second provider)', () => {
   describe('CODEX_PROVIDER.spawn lanePathOverride (build-path-codex-isolation-locus fix)', () => {
     const IMPL_LANE_PATH = '/tmp/.lanes/plateau-app/lane-4';
 
-    it('spawns with cwd = the OVERRIDE, never calling resolveLane at all', async () => {
+    it('spawns with cwd = the OVERRIDE (the WE lane is still resolved, for $LANE — #4348)', async () => {
       const o = io({ stageDeliveryReportCli: vi.fn() });
       await DELIVERY_AGENT_PROVIDERS.codex.spawn({ ...REQ, lanePathOverride: IMPL_LANE_PATH }, o);
-      expect(o.resolveLane).not.toHaveBeenCalled();
+      expect(o.resolveLane).toHaveBeenCalledWith(9, { run: o.run });
       const [argv, opts] = o.spawnAgent.mock.calls[0];
       expect(argv.slice(0, 3)).toEqual(['exec', '-C', IMPL_LANE_PATH]);
       expect(opts.cwd).toBe(IMPL_LANE_PATH);
     });
 
-    it('stamps IMPL_LANE (never present for an ordinary we-locus spawn) alongside the unchanged LANE', async () => {
+    it('stamps IMPL_LANE (never present for an ordinary we-locus spawn) alongside LANE = the WE lane', async () => {
       const o = io({ stageDeliveryReportCli: vi.fn() });
       await DELIVERY_AGENT_PROVIDERS.codex.spawn({ ...REQ, lanePathOverride: IMPL_LANE_PATH }, o);
       expect(o.spawnAgent.mock.calls[0][1].env).toMatchObject({
-        LANE: IMPL_LANE_PATH, IMPL_LANE: IMPL_LANE_PATH,
+        LANE: LANE_PATH, IMPL_LANE: IMPL_LANE_PATH,
       });
       // the ordinary (no override) spawn from the describe block above never sets IMPL_LANE at all —
       // asserted there via `.toMatchObject` with no `IMPL_LANE` key; re-asserted here for contrast.
@@ -637,7 +644,7 @@ describe('CLAUDE_RESTRICTED_PROVIDER.spawn real cwd + env (#3627 bug 7)', () => 
   describe('CLAUDE_RESTRICTED_PROVIDER.spawn lanePathOverride (build-path-codex-isolation-locus fix)', () => {
     const IMPL_LANE_PATH = '/tmp/.lanes/frontierui/lane-2';
 
-    it('never calls resolveLane at all when an override is given, and cwd is the override', async () => {
+    it('cwd is the override, LANE is the (still-resolved) WE lane, IMPL_LANE the override — #4348', async () => {
       const io = fakeIo({ stageDeliveryReportCli: vi.fn() });
       await DELIVERY_AGENT_PROVIDERS['claude-restricted'].spawn(
         {
@@ -646,10 +653,11 @@ describe('CLAUDE_RESTRICTED_PROVIDER.spawn real cwd + env (#3627 bug 7)', () => 
         },
         io,
       );
-      expect(io.resolveLane).not.toHaveBeenCalled();
+      expect(io.resolveLane).toHaveBeenCalled();
       const [, opts] = io.spawnAgent.mock.calls[0];
       expect(opts.cwd).toBe(IMPL_LANE_PATH);
-      expect(opts.env.LANE).toBe(IMPL_LANE_PATH);
+      expect(opts.env.LANE).toBe(io.resolveLane.mock.results[0].value);
+      expect(opts.env.LANE).not.toBe(IMPL_LANE_PATH);
       expect(opts.env.IMPL_LANE).toBe(IMPL_LANE_PATH);
     });
 
@@ -676,6 +684,125 @@ describe('CLAUDE_RESTRICTED_PROVIDER.spawn real cwd + env (#3627 bug 7)', () => 
       expect(stageDeliveryReportCli).not.toHaveBeenCalled();
       expect(io.spawnAgent.mock.calls[0][1].env.IMPL_LANE).toBeUndefined();
     });
+  });
+});
+
+// ================================================================================================
+// #4348 (live 2026-09-28, #3604/#2720) — a cross-locus build agent was handed ONLY the impl lane: `LANE` was set to
+// the spawn cwd (the impl-lane override), so `LANE === IMPL_LANE`, the WE lane holding `backlog/<spec>.md` was
+// neither named nor granted, and every plateau-app/frontierui build ended `not-ready (…spec missing…)`. Both
+// providers must hand the child `LANE` = WE lane, `IMPL_LANE` = impl lane, cwd = impl lane, AND a sandbox/dir
+// grant that reaches the WE lane — and a we-locus spawn must stay byte-identical.
+// ================================================================================================
+describe('cross-locus delivery reaches BOTH lanes (#4348)', () => {
+  const HOME = process.env.HOME;
+  const L7 = `${HOME}/workspace/.lanes/web-everything/lane-7`;
+  const P2 = `${HOME}/workspace/.lanes/plateau-app/lane-2`;
+  const REQ = {
+    sessionId: '43484348-4348-4348-8348-434843484348', prompt: 'BUILD #2720', lane: 7, sessionSlug: 'conveyor-2720',
+    item: '2720', attemptTag: '',
+  };
+  const codexIo = (over = {}) => ({
+    spawnAgent: vi.fn(() => ({ stdout: '{"type":"thread.started","thread_id":"tid-4348"}\n', resourceUsage: null })),
+    resolveLane: vi.fn(() => L7),
+    run: vi.fn(),
+    persistFailure: vi.fn(),
+    resolveReportsDir: vi.fn((lanePath) => `${lanePath}/.operations/delivery-reports`),
+    readThreadId: vi.fn(() => 'tid-4348'),
+    writeThreadId: vi.fn(),
+    recordCpu: vi.fn(),
+    recordScorecard: vi.fn(),
+    stageDeliveryReportCli: vi.fn(),
+    ...over,
+  });
+  const claudeIo = (over = {}) => ({
+    ensureSettingsFile: vi.fn(() => '/fake/.operations/delivery-agent-hooks-settings.json'),
+    spawnAgent: vi.fn(),
+    resolveLane: vi.fn(() => L7),
+    run: vi.fn(),
+    persistFailure: vi.fn(),
+    resolveReportsDir: vi.fn((lanePath) => `${lanePath}/.operations/delivery-reports`),
+    recordCpu: vi.fn(),
+    stageDeliveryReportCli: vi.fn(),
+    ...over,
+  });
+  const permissionsOf = (argv) => argv.find((a) => typeof a === 'string' && a.startsWith('permissions='));
+
+  it('CODEX_PROVIDER: LANE=WE lane, IMPL_LANE=impl lane, cwd=impl lane, and the WE lane is a writable root', async () => {
+    const o = codexIo();
+    await DELIVERY_AGENT_PROVIDERS.codex.spawn({ ...REQ, lanePathOverride: P2 }, o);
+    const [argv, opts] = o.spawnAgent.mock.calls[0];
+    expect(opts.cwd).toBe(P2);
+    expect(argv.slice(0, 3)).toEqual(['exec', '-C', P2]);
+    expect(opts.env).toMatchObject({ LANE: L7, IMPL_LANE: P2 });
+    expect(permissionsOf(argv)).toContain(`"${L7}"="write"`);
+    // the gate/report side stays on the impl lane — no behaviour change there.
+    expect(opts.env.OPERATION_DELIVERY_REPORTS_DIR).toBe(`${P2}/.operations/delivery-reports`);
+  });
+
+  it('CODEX_PROVIDER: the deny map seals BOTH repos\' primary checkouts, and covers neither lane', async () => {
+    const o = codexIo();
+    await DELIVERY_AGENT_PROVIDERS.codex.spawn({ ...REQ, lanePathOverride: P2 }, o);
+    const perms = permissionsOf(o.spawnAgent.mock.calls[0][0]);
+    expect(perms).toContain(`"${HOME}/workspace/plateau-app/**"="deny"`);
+    // WE's primary is whatever repo-profile resolves for the web-everything pool (REPO_ROOT-derived).
+    const weRoot = repoProfile('we').checkoutPath.replace(/\/+$/, '');
+    expect(perms).toContain(`"${weRoot}/**"="deny"`);
+  });
+
+  it('CODEX_PROVIDER: refuses (before spawning) a deny map that would cover the WE lane', async () => {
+    const o = codexIo({ denyPaths: [`${HOME}/workspace/.lanes/web-everything/**`] });
+    await expect(DELIVERY_AGENT_PROVIDERS.codex.spawn({ ...REQ, lanePathOverride: P2 }, o))
+      .rejects.toThrow(/covers the agent's own lane/);
+    expect(o.spawnAgent).not.toHaveBeenCalled();
+  });
+
+  it('CODEX_PROVIDER: the gate-failure RESUME keeps the WE-lane grant (`exec resume` takes no --add-dir)', async () => {
+    const o = codexIo();
+    await DELIVERY_AGENT_PROVIDERS.codex.spawn({ ...REQ, lanePathOverride: P2, resumeSessionId: REQ.sessionId }, o);
+    const [argv, opts] = o.spawnAgent.mock.calls[0];
+    expect(argv.slice(0, 3)).toEqual(['exec', 'resume', 'tid-4348']);
+    expect(permissionsOf(argv)).toContain(`"${L7}"="write"`);
+    expect(opts.env).toMatchObject({ LANE: L7, IMPL_LANE: P2 });
+  });
+
+  it('CLAUDE_RESTRICTED_PROVIDER: LANE=WE lane, IMPL_LANE=impl lane, cwd=impl lane, and --add-dir <WE lane>', async () => {
+    const o = claudeIo();
+    await DELIVERY_AGENT_PROVIDERS['claude-restricted'].spawn({ ...REQ, lanePathOverride: P2 }, o);
+    const [argv, opts] = o.spawnAgent.mock.calls[0];
+    expect(opts.cwd).toBe(P2);
+    expect(opts.env).toMatchObject({ LANE: L7, IMPL_LANE: P2 });
+    expect(argv[argv.indexOf('--add-dir') + 1]).toBe(L7);
+    expect(opts.env.OPERATION_DELIVERY_REPORTS_DIR).toBe(`${P2}/.operations/delivery-reports`);
+  });
+
+  it('CLAUDE_RESTRICTED_PROVIDER: the resume keeps the --add-dir grant', async () => {
+    const o = claudeIo();
+    await DELIVERY_AGENT_PROVIDERS['claude-restricted'].spawn({ ...REQ, lanePathOverride: P2, resumeSessionId: REQ.sessionId }, o);
+    const argv = o.spawnAgent.mock.calls[0][0];
+    expect(argv).toContain('--resume');
+    expect(argv[argv.indexOf('--add-dir') + 1]).toBe(L7);
+  });
+
+  it('a we-locus spawn is unchanged: LANE = WE lane, no IMPL_LANE, no --add-dir, no write grant', async () => {
+    const c = claudeIo();
+    await DELIVERY_AGENT_PROVIDERS['claude-restricted'].spawn(REQ, c);
+    const [cArgv, cOpts] = c.spawnAgent.mock.calls[0];
+    expect(cOpts.cwd).toBe(L7);
+    expect(cOpts.env.LANE).toBe(L7);
+    expect(Object.hasOwn(cOpts.env, 'IMPL_LANE')).toBe(false);
+    expect(cArgv).toEqual(buildRestrictedProviderArgv({
+      sessionId: REQ.sessionId, prompt: REQ.prompt, settingsFile: '/fake/.operations/delivery-agent-hooks-settings.json',
+    }));
+
+    const x = codexIo();
+    await DELIVERY_AGENT_PROVIDERS.codex.spawn(REQ, x);
+    const [xArgv, xOpts] = x.spawnAgent.mock.calls[0];
+    expect(xOpts.cwd).toBe(L7);
+    expect(xOpts.env.LANE).toBe(L7);
+    expect(Object.hasOwn(xOpts.env, 'IMPL_LANE')).toBe(false);
+    expect(permissionsOf(xArgv)).not.toContain('"write"');
+    expect(permissionsOf(xArgv)).not.toContain(`${HOME}/workspace/plateau-app`);
   });
 });
 

@@ -960,13 +960,13 @@ export const DELIVERY_AGENT_SPAWN_TIMEOUT_MS = 60 * 60 * 1000; // 60 minutes
  * own, different, script-relative default.
  */
 // build-path-codex-isolation-locus — `implLane`, when given (a non-`we` locus's implementation lane — see
-// `resolveDeliveryLocus`/`acquireImplLane`), is ALSO `lanePath` here (both providers' `spawn` resolve their
-// cwd to `lanePathOverride ?? resolveLane(lane)`, and `implLane` is threaded through as exactly that same
-// value — see `CLAUDE_RESTRICTED_PROVIDER.spawn`/`CODEX_PROVIDER.spawn`). It rides as its OWN env var, never
-// only folded into `LANE`, so a brief/agent that checks for its presence (the live #3604 finding's own
-// blocked reason named it) sees it set — omitted entirely (never an empty string) when this is an ordinary
-// `we`-locus delivery, so `.toEqual`'s existing exact-shape assertions on this function's output are
-// unaffected by a caller that never passes it.
+// `resolveDeliveryLocus`/`acquireImplLane`), rides as its OWN env var, `IMPL_LANE` — omitted entirely (never an
+// empty string) when this is an ordinary `we`-locus delivery, so `.toEqual`'s existing exact-shape assertions on
+// this function's output are unaffected by a caller that never passes it.
+// #4348 — `lanePath` is ALWAYS the WE lane (the clone holding `backlog/<spec>.md`), never the impl lane, even
+// for a cross-locus item whose spawn cwd IS the impl lane. The brief's contract is `$LANE` = WE lane,
+// `$IMPL_LANE` = impl lane; before #4348 both providers passed their cwd here, so a cross-locus agent got
+// `LANE === IMPL_LANE`, could not find its spec, and every plateau-app/frontierui build ended `not-ready`.
 export function buildDeliveryAgentEnv({ sessionSlug, item, lanePath, attemptTag, reportsDir, implLane = null }) {
   return {
     WE_DISPATCH_KIND: 'delivery',
@@ -1033,7 +1033,6 @@ const CLAUDE_RESTRICTED_PROVIDER = {
     } = {},
   ) {
     const settingsFile = ensureSettingsFile();
-    const argv = buildRestrictedProviderArgv({ sessionId, prompt, resumeSessionId, settingsFile });
     // #3627 bug 7(a) (live #3371 attempt) — resolve the REAL lane clone path through the SAME single source
     // of truth `resolveLanePath` already gives every other caller in this file (`runGateWithOneRetry`), never
     // a second, re-derived path computation. Without this the child inherited whatever directory the
@@ -1046,7 +1045,13 @@ const CLAUDE_RESTRICTED_PROVIDER = {
     // agent turn (build + gate + converge + PR, downstream of this spawn) runs against the IMPLEMENTATION
     // lane, never the WE lane `lane` (a number in WE's own pool) would resolve to. See
     // `deliverItem`/`resolveDeliveryLocus`'s own docblocks for why.
-    const lanePath = lanePathOverride || resolveLane(lane, { run: runFn });
+    // #4348 — the WE lane is resolved EVEN WHEN overridden: it holds the spec, so a cross-locus agent gets it as
+    // `$LANE` plus an `--add-dir` grant (`--restricted` confines file tools to the working directories).
+    const weLanePath = resolveLane(lane, { run: runFn });
+    const lanePath = lanePathOverride || weLanePath;
+    const argv = buildRestrictedProviderArgv({
+      sessionId, prompt, resumeSessionId, settingsFile, addDirs: lanePathOverride ? [weLanePath] : [],
+    });
     // build-path-codex-isolation-locus — a foreign-repo lane never carried `delivery-report-cli.mjs` (it is a
     // plain clone of THAT repo, not WE) — stage it at its real repo-relative path before the agent's first
     // `report --status=started` call needs it. See `stageDeliveryReportCliIntoLane`'s own docblock for why the
@@ -1076,7 +1081,7 @@ const CLAUDE_RESTRICTED_PROVIDER = {
     // `[env: ...]` footer `fillMinimalBrief` still also appends below (kept — see that function's own comment
     // — the brief's prose reads naturally either way, and real env vars are what the CLI actually needs).
     const deliveryEnv = buildDeliveryAgentEnv({
-      sessionSlug, item, lanePath, attemptTag, reportsDir, implLane: lanePathOverride,
+      sessionSlug, item, lanePath: weLanePath, attemptTag, reportsDir, implLane: lanePathOverride,
     });
     try {
       // #3627 bug 6 — explicit `timeout` override, distinct from (and far larger than) dispatch-lane-io.mjs's
@@ -1108,6 +1113,18 @@ const CLAUDE_RESTRICTED_PROVIDER = {
     }
   },
 };
+
+/**
+ * #4348 — the default Codex deny map for every lane a delivery agent can reach: each lane's OWN repo's primary
+ * checkout (xftsbsg — read off the lane path, so a plateau-app lane seals `plateau-app`'s checkout, not WE's),
+ * de-duplicated. One lane in → byte-identical to `defaultDeliveryDenyPaths(primaryCheckoutForLanePath(lane))`;
+ * no recognised pool dir at all → `defaultDeliveryDenyPaths()`'s own default.
+ */
+function deliveryDenyPathsForLanes(lanePaths) {
+  const roots = [...new Set(lanePaths.map((p) => primaryCheckoutForLanePath(p)).filter(Boolean))];
+  if (roots.length === 0) return defaultDeliveryDenyPaths();
+  return [...new Set(roots.flatMap((root) => defaultDeliveryDenyPaths(root)))];
+}
 
 /**
  * CODEX_PROVIDER — #3580. NO LONGER A SEAM: a REAL, live-verified implementation of
@@ -1168,7 +1185,11 @@ const CODEX_PROVIDER = {
     // build-path-codex-isolation-locus — `lanePathOverride` wins when given, exactly as in the Claude provider
     // above: THIS is the actual fix for the live #3604 finding — Codex's own OS sandbox extends `:workspace`
     // from THIS `cwd`, so a non-`we` item MUST spawn with cwd = its own implementation lane, never WE's.
-    const lanePath = lanePathOverride || resolveLane(lane, { run: runFn });
+    // #4348 — the WE lane is resolved EVEN WHEN overridden: it holds the spec and the `## Progress` bookkeeping,
+    // so a cross-locus agent gets it as `$LANE` plus a `"<we-lane>"="write"` grant in the permission profile.
+    const weLanePath = resolveLane(lane, { run: runFn });
+    const lanePath = lanePathOverride || weLanePath;
+    const extraLanes = lanePathOverride ? [weLanePath] : [];
     // build-path-codex-isolation-locus — see `CLAUDE_RESTRICTED_PROVIDER.spawn`'s identical call for why this
     // is required (never optional) whenever the agent's cwd is a foreign repo's lane.
     if (lanePathOverride) stageDeliveryReportCli(lanePath);
@@ -1178,7 +1199,7 @@ const CODEX_PROVIDER = {
     // correctly refused (`EPERM`) rather than tolerating like Claude's soft, hook-based one did.
     const reportsDir = resolveReportsDir(lanePath);
     const deliveryEnv = buildDeliveryAgentEnv({
-      sessionSlug, item, lanePath, attemptTag, reportsDir, implLane: lanePathOverride,
+      sessionSlug, item, lanePath: weLanePath, attemptTag, reportsDir, implLane: lanePathOverride,
     });
     // xftsbsg — the deny-map must seal off THIS BUILD'S OWN repo's primary checkout, not always WE's (this
     // module's own default `REPO_ROOT`). `primaryCheckoutForLanePath` reads it straight off the already-resolved
@@ -1186,8 +1207,10 @@ const CODEX_PROVIDER = {
     // `$HOME/workspace/frontierui`/`plateau-app`'s real primary checkout instead of leaving it unguarded. `null`
     // (an unrecognized pool-dir basename — e.g. a synthetic test path) falls back to `defaultDeliveryDenyPaths`'s
     // own default, byte-identical to before this fix.
-    const denyRepoRoot = primaryCheckoutForLanePath(lanePath) ?? undefined;
-    const deny = assertDenyPathsUsable(denyPaths ?? defaultDeliveryDenyPaths(denyRepoRoot), lanePath);
+    // #4348 — a cross-locus build reaches BOTH lanes, so BOTH repos' primary checkouts are sealed, and the deny
+    // map must cover neither lane.
+    const deny = denyPaths ?? deliveryDenyPathsForLanes([lanePath, ...extraLanes]);
+    for (const reachable of [lanePath, ...extraLanes]) assertDenyPathsUsable(deny, reachable);
     // Codex mints its OWN thread id and has no `--session-id`, so `resumeSessionId` (a CLAUDE-side UUID the
     // port hands every provider) is used as the SIGNAL that this is a resume, and the actual id is looked up
     // in this provider's own sidecar map. A resume with no recorded thread id is a hard error, never a silent
@@ -1202,7 +1225,9 @@ const CODEX_PROVIDER = {
         + 'carry.',
       );
     }
-    const argv = buildCodexDeliveryArgv({ prompt, cwd: lanePath, denyPaths: deny, resumeThreadId });
+    const argv = buildCodexDeliveryArgv({
+      prompt, cwd: lanePath, denyPaths: deny, resumeThreadId, writableRoots: extraLanes,
+    });
     let stdout;
     try {
       // #3383 mechanical-dispatcher follow-up — ASYNC now (was `execFileSync`); the `await` is still the only

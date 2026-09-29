@@ -345,17 +345,28 @@ export function buildHistorySurgeryCommands(targetPaths) {
  * its model-issued shell calls was not independently forced past the model's cooperation in this
  * verification; treat the `codex exec` protection as strong-in-practice-against-a-cooperative-model,
  * and `codex sandbox` as the harder, OS-level guarantee when that distinction matters.
+ *
+ * #4348 — `writableRoots` (optional, default none, so the argv is byte-identical when omitted) adds
+ * `"<dir>"="write"` entries to the SAME `filesystem` map: an extra writable root beyond the
+ * `:workspace` cwd. Live-verified on codex-cli 0.155.1 via `codex sandbox -P locked` (no model in the
+ * loop): a write into the granted dir and into a nested subdir succeeded, a write into its sibling
+ * came back `Operation not permitted`, and the deny entries alongside it still held. Chosen over
+ * `codex exec --add-dir` because `exec resume` accepts no `--add-dir`, while `-c` spans both.
  */
-export function buildNativeDenyCodexArgs(denyPaths) {
+export function buildNativeDenyCodexArgs(denyPaths, { writableRoots = [] } = {}) {
   if (!Array.isArray(denyPaths) || denyPaths.length === 0) {
     throw new TypeError('isolation: denyPaths must be a non-empty array of absolute paths or globs');
   }
-  const entries = denyPaths.map((path) => {
+  const entry = (path, access) => {
     if (typeof path !== 'string' || path.length === 0 || path.includes('\0') || path.includes('"')) {
-      throw new TypeError('isolation: each denyPath must be a non-empty string without NUL or a double quote');
+      throw new TypeError(`isolation: each ${access} path must be a non-empty string without NUL or a double quote`);
     }
-    return `"${path}"="deny"`;
-  });
+    return `"${path}"="${access}"`;
+  };
+  const entries = [
+    ...denyPaths.map((path) => entry(path, 'deny')),
+    ...writableRoots.map((path) => entry(path, 'write')),
+  ];
   const permissions = `permissions={locked={extends=":workspace",filesystem={${entries.join(',')}}}}`;
   return ['--strict-config', '-c', permissions, '-c', 'default_permissions=locked', '-c', 'project_doc_max_bytes=0'];
 }

@@ -5,11 +5,12 @@ size: 3
 priority: high
 tier: pinned
 rank: i
-status: open
+status: active
 scaffoldedBy: "investigate-dispatch-noop-lane-3-d65b5d9a"
 dateScaffolded: "2026-09-28"
 scope: ["we:scripts/operations/deliver-item-wrapper.mjs", "we:scripts/operations/codex-delivery-provider.mjs", "we:scripts/operations/deliver-item-wrapper.test.mjs"]
 dateOpened: "2026-09-28"
+dateStarted: "2026-09-28"
 tags: ["build-dispatch", "blocker"]
 ---
 
@@ -50,3 +51,18 @@ Every mechanical build of a plateau-app/frontierui-scoped card ends in about a m
    - a PR opens.
 
    Attach before/after log lines.
+
+## Progress
+
+- 2026-09-28 — **Done-when 1 + 2 built** (conveyor-4348).
+  - `we:scripts/operations/deliver-item-wrapper.mjs#buildDeliveryAgentEnv`: `LANE` is now always the WE lane. Both providers resolve the WE lane even when `lanePathOverride` is set; cwd stays the impl lane, and `IMPL_LANE` is set only for cross-locus items.
+  - Codex: the WE lane is added as a `"<we-lane>"="write"` entry in the locked profile's `filesystem` map (`we:scripts/operations/codex-delivery-provider.mjs#buildCodexDeliveryArgv` `writableRoots` → `we:scripts/lib/isolation-provider.mjs#buildNativeDenyCodexArgs` `writableRoots`).
+    - Chosen over `--add-dir` because `codex exec resume` has no `--add-dir`, while `-c` covers both the fresh spawn and the resume.
+    - It is write, not read-only, because the brief makes the agent keep `## Progress` in `$LANE`.
+    - Live-verified with `codex sandbox -P locked` (codex-cli 0.155.1): writes into the granted dir and a nested subdir succeed; a sibling write gives `Operation not permitted`; deny entries still hold; a bad access value fails config parsing.
+  - Codex deny map: now seals BOTH lanes' primary checkouts (`deliveryDenyPathsForLanes`). `assertDenyPathsUsable` runs against both lanes.
+  - Claude: `we:scripts/operations/minimal-context-provider.mjs#buildRestrictedProviderArgv` `addDirs` → `--add-dir <we-lane>` on both the fresh and the resume branch.
+  - Report dir and gate stay on the impl lane (unchanged).
+  - Tests: new `cross-locus delivery reaches BOTH lanes (#4348)` block in `we:scripts/operations/__tests__/deliver-item-wrapper.test.mjs`. The old cases that asserted `LANE === IMPL_LANE` / "resolveLane never called" were updated.
+  - Scope note: the card's `scope:` test path does not exist; the real file is the `__tests__/` one above. The fix also touched the isolation-provider and minimal-context-provider modules named above, which own the two argv builders.
+- **Done-when 3 (live proof) is open.** It needs a real build-daemon dispatch of a plateau-app card after this lands.

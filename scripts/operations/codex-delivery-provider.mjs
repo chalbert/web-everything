@@ -335,12 +335,15 @@ export function stageFixReportCliIntoLane(lanePath, {
  * @param {string} o.cwd - the resolved lane clone.
  * @param {string[]} o.denyPaths - `filesystem` deny entries, non-empty.
  * @param {string|null} [o.resumeThreadId] - Codex's own thread id; the resume branch when present.
+ * @param {string[]} [o.writableRoots] - #4348: extra writable roots beyond `cwd` (a cross-locus item's WE
+ *   lane, which holds the spec while `cwd` is the impl lane). Carried in the permission profile, not
+ *   `--add-dir`, so the resume branch keeps the same grant. Omitted → argv unchanged.
  * @param {string} [o.model]
  * @param {string} [o.effort]
  * @returns {string[]} argv AFTER the binary name.
  */
 export function buildCodexDeliveryArgv({
-  prompt, cwd, denyPaths, resumeThreadId = null,
+  prompt, cwd, denyPaths, resumeThreadId = null, writableRoots = [],
   model = CODEX_DELIVERY_MODEL, effort = CODEX_DELIVERY_EFFORT,
 }) {
   if (typeof prompt !== 'string' || !prompt.trim()) {
@@ -361,7 +364,7 @@ export function buildCodexDeliveryArgv({
   // filesystem={…}}} -c default_permissions=locked -c project_doc_max_bytes=0`, which is the whole sandbox +
   // doctrine-suppression posture this provider needs, and it already validates its input. Re-typing that
   // string here would be a second copy of a contract that has been burned into once already.
-  const sandboxArgs = buildNativeDenyCodexArgs(denyPaths);
+  const sandboxArgs = buildNativeDenyCodexArgs(denyPaths, { writableRoots });
   const common = [
     '--json',
     '--skip-git-repo-check',
