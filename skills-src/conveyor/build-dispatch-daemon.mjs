@@ -9,7 +9,7 @@
  *   so a card's `deliveryAgent:` marker routes to Codex via deliver-item-run / the wrapper, and the #3906 routing
  *   table + #4034 critical-work gate decide everything else inside dispatch-lane — this file routes nothing).
  *
- * WHAT IT IS NOT. It runs NO other pass: no prepare/fix/ci-heal spawns, no reconcile, no watchers — those have
+ * WHAT IT IS NOT. It runs NO other pass: no scope/decision prepare, fix/ci-heal spawns, no reconcile, no watchers — those have
  *   their own daemons (review, fix-dispatch, pass-daemons) or stay with runner.mjs. It never edits runner.mjs.
  *
  * SAFETY:
@@ -80,23 +80,24 @@ const guardId = (g) => JSON.stringify([g?.num ?? null, g?.pr ?? null, g?.kind ??
 
 /**
  * The tick core records a guard for EVERY spawn it surfaces, assuming the caller launches them all. This daemon
- * launches only the builds that pass its policy, and no prepare/fix/ci-heal at all — so a guard for a spawn it
+ * launches builds that pass its policy and admitted item prepares — so a guard for a spawn it
  * did not make would hold that item's lane for the guard's TTL as if an agent were starting there. Keep every
- * guard the previous tick already carried, plus only the new build guards for items actually dispatched.
+ * guard the previous tick already carried, plus only the new build/item-prepare guards for items actually dispatched.
  * `launchedNums` is trimmed the same way. Everything else in `nextState` passes through unchanged.
  */
-export function settleBookkeeping(prev = {}, next = {}, dispatchedNums = []) {
+export function settleBookkeeping(prev = {}, next = {}, dispatchedNums = [], preparedNums = []) {
   if (!next || typeof next !== 'object') return {};
   const launched = new Set(dispatchedNums.map(normNum));
+  const prepared = new Set(preparedNums.map(normNum));
   const out = { ...next };
   for (const list of GUARD_LISTS) {
     if (!Array.isArray(next[list])) continue;
     const had = new Set((Array.isArray(prev?.[list]) ? prev[list] : []).map(guardId));
-    out[list] = next[list].filter((g) => had.has(guardId(g)) || (list === 'buildGuards' && launched.has(normNum(g?.num))));
+    out[list] = next[list].filter((g) => had.has(guardId(g)) || (list === 'buildGuards' && launched.has(normNum(g?.num))) || (list === 'prepareGuards' && g.kind === 'prepare-item' && prepared.has(normNum(g.num))));
   }
   if (Array.isArray(next.launchedNums)) {
     const hadNums = new Set((Array.isArray(prev?.launchedNums) ? prev.launchedNums : []).map(normNum));
-    out.launchedNums = next.launchedNums.filter((n) => hadNums.has(normNum(n)) || launched.has(normNum(n)));
+    out.launchedNums = next.launchedNums.filter((n) => hadNums.has(normNum(n)) || launched.has(normNum(n)) || prepared.has(normNum(n)));
   }
   return out;
 }
@@ -177,7 +178,7 @@ export function deriveDispatchedByBuilder(runStoreRows = [], settledRows = []) {
  * a claim whose recorded dispatch died with none of `doneWhy`'s three retirement signals ever becoming true.
  * Optional-chained so an older test stub (every fixture that predates this) behaves exactly as before.
  */
-export async function runBuildDispatchTick({ bookkeeping = {}, live = false, policy = BUILD_DISPATCH_POLICY, effects }) {
+export async function runBuildDispatchTick({ bookkeeping = {}, live = false, policy = BUILD_DISPATCH_POLICY, prepareEnabled = true, effects }) {
   const out = await effects.planTick(bookkeeping);
   const d = out?.decisions || {};
   const admission = d.admission || {};
@@ -310,6 +311,48 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
       else { effects.releaseClaim({ num: pick.num }); failures.push({ num: pick.num, stage: 'dispatch', reason: res?.reason ?? 'not dispatched' }); }
     }
   }
+  // Separate durable claims use the existing lease primitive, without occupying build slots.
+  // Run-store rows survive restarts; guards cover the interval before a dispatched lane is visible.
+  const prepareRows = effects.listPrepareInFlight?.() ?? [];
+  const prepareBusy = new Set(prepareRows.map((r) => normNum(r.num)));
+  const prepare = { enabled: prepareEnabled, planned: [], launched: [], inFlight: [], failures: [] };
+  for (const c of effects.listPrepareClaims?.() ?? []) {
+    const num = normNum(c.meta.num);
+    if (!prepareBusy.has(num) && (clearedNums.has(num) || openPrs.some((p) => prDeliversNum(p, num)))) {
+      if (live) effects.releasePrepareClaim({ num });
+    } else prepareBusy.add(num);
+  }
+  for (const g of out?.nextState?.prepareGuards ?? []) {
+    // Only prior guards count here: this tick's proposed guards are not launches yet.
+    if (g.kind === 'prepare-item' && (bookkeeping.prepareGuards ?? []).some((old) => guardId(old) === guardId(g))) prepareBusy.add(normNum(g.num));
+  }
+  prepare.inFlight = [...prepareBusy];
+  const prepareSpawns = d.spawnPrepareItems ?? d.itemPrepareSpawns ?? [];
+  if (prepareEnabled && !plan.freeze.frozen) {
+    for (const pick of prepareSpawns) {
+      const num = normNum(pick.num);
+      // tick-core's default cap is two; it may offer fewer after its own admission checks.
+      if (prepareBusy.has(num) || prepareBusy.size >= 2) continue;
+      prepare.planned.push({ ...pick, num });
+      if (!live) { prepareBusy.add(num); continue; }
+      const claim = effects.acquirePrepareClaim({ num, scope: scopeByNum.get(num) ?? [] });
+      if (!claim.ok) {
+        prepareBusy.add(num);
+        prepare.failures.push({ num, stage: 'claim', reason: claim.reason });
+        continue;
+      }
+      let res;
+      try { res = await effects.dispatch({ num, bookkeeping, launchKind: 'prepare-item' }); }
+      catch (e) { res = { dispatching: false, reason: String(e?.message || e) }; }
+      if (res?.dispatching) {
+        prepareBusy.add(num);
+        prepare.launched.push({ num, lane: res.lane ?? pick.lane, sessionSlug: res.sessionSlug ?? null });
+      } else {
+        effects.releasePrepareClaim({ num });
+        prepare.failures.push({ num, stage: 'dispatch', reason: res?.reason ?? 'not dispatched' });
+      }
+    }
+  }
   // #4348-open-pr-retry — ONE resume pass per LIVE tick, reusing #2659's own backoff/attempt-cap state machine
   // (`scripts/conveyor/infra-blocked.mjs retry`) wholesale rather than re-deriving it here: a `blocked-on-infra`
   // PR-open (the lane ref is already pushed; `deliver-item-wrapper.mjs` now settles this as `open-pending`,
@@ -335,6 +378,7 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
     // or the live status line can say WHY an otherwise-cleared item was not offered.
     dispatchHolds: held,
     dispatched,
+    prepare,
     failures,
     // #4348-open-pr-retry — `{retried, resumed, surfaced, waiting}` from `infra-blocked.mjs retry` (or an
     // `{error}` on a best-effort failure), `null` on a dry-run tick or an older effects stub with no such call.
@@ -347,7 +391,7 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
     // `{error}` on a best-effort failure), `null` on a dry-run tick or an older effects stub with no such call.
     holdRouting,
     holdRoutingResult,
-    nextBookkeeping: settleBookkeeping(bookkeeping, out?.nextState || {}, dispatched.map((x) => x.num)),
+    nextBookkeeping: settleBookkeeping(bookkeeping, out?.nextState || {}, dispatched.map((x) => x.num), prepare.launched.map((x) => x.num)),
   };
 }
 
@@ -362,8 +406,8 @@ const SCRIPTS = join(REPO_ROOT, 'scripts');
  * (`scripts/lib/lane-concurrency.mjs`, default 8, `WE_MAX_CONCURRENT_LANES`) is a SHARED, machine-wide ceiling
  * on ALL FOUR spawn kinds at once (build/prepare/fix/ci-heal) — a deliberate, documented hardware-safety net
  * (`lane-concurrency.mjs`'s own header: a 2026-09-07 incident put a 12-core host's 1-min load average at
- * 34.95 from 42 concurrently-dispatched lanes). This daemon's OWN tick-core call reads ONLY
- * `decisions.spawnBuilds` (`runBuildDispatchTick`, above) and NEVER acts on `spawnPrepareScope`/`spawnFixes`/
+ * 34.95 from 42 concurrently-dispatched lanes). This daemon's OWN tick-core call reads
+ * `decisions.spawnBuilds` and `decisions.spawnPrepareItems` (`runBuildDispatchTick`, above) and NEVER acts on `spawnPrepareScope`/`spawnFixes`/
  * `spawnCiHeals` from this same call at all — so gating those *unused* build candidates against the
  * MACHINE-WIDE lane count (review loops, fix dispatches, interactive `/conveyor` sessions, health
  * investigations — none of which THIS daemon dispatches or can see progress on) starves builds for activity
@@ -382,9 +426,8 @@ const SCRIPTS = join(REPO_ROOT, 'scripts');
  * never machine-wide activity) is ALREADY a far tighter, correctly-scoped ceiling on what this daemon actually
  * dispatches. Exempting THIS daemon's OWN tick-core call from the shared lane-count ceiling cannot let it
  * dispatch more than `maxConcurrentBuilds` regardless — `decisions.spawnBuilds` merely gets to list MORE
- * candidates than before (informational; `planBuildDispatch` still picks at most its own cap's worth), and the
- * prepare/fix/ci-heal candidates THIS call also computes are discarded unused either way, so exempting them
- * too costs nothing. `dispatch-plan.mjs` (tick-core's own child, `main()`'s `runJson` call below) reads the
+ * candidates than before (informational; `planBuildDispatch` still picks at most its own cap's worth), and item prepares have their own two-worker cap plus durable claims. The scope/decision prepare,
+ * fix and ci-heal candidates are still discarded. `dispatch-plan.mjs` (tick-core's own child, `main()`'s `runJson` call below) reads the
  * IDENTICAL env var independently (`scripts/readiness/dispatch-plan.mjs`'s own `resolveMaxConcurrentLanes`
  * call) — set on THIS CHILD's own env only (never `process.env` itself), it propagates through the whole
  * subprocess chain for this one call without touching any OTHER caller's environment or tick-core.mjs/
@@ -423,7 +466,7 @@ export async function cliFetchOpenPrs() {
 // xovjhwh converge round 2 — exported (was module-private) so a test can drive it against a real, broken
 // run-store directory the same way the sibling `cliListSettledBuilds` already is below, and pin the "degrades
 // to `[]`, never throws" claim `deriveDispatchedByBuilder`'s own docblock makes about this exact reader.
-export async function cliListRunStoreInFlight({ now = new Date() } = {}) {
+export async function cliListRunStoreInFlight({ now = new Date(), launchKind = 'build' } = {}) {
   const { createFileRunStore } = await import('../../scripts/operations/run-store.mjs');
   const { DISPATCH_EFFECT, dispatchStillHolds } = await import('../../scripts/operations/dispatch-lane.mjs');
   const store = createFileRunStore();
@@ -434,7 +477,7 @@ export async function cliListRunStoreInFlight({ now = new Date() } = {}) {
     let run;
     try { run = store.read(id); } catch { continue; }
     for (const e of run?.effects || []) {
-      if (e?.status !== 'in-flight' || e.type !== DISPATCH_EFFECT || e.payload?.launchKind !== 'build') continue;
+      if (e?.status !== 'in-flight' || e.type !== DISPATCH_EFFECT || e.payload?.launchKind !== launchKind) continue;
       if (!dispatchStillHolds(e, now.toISOString())) continue;
       // card xao7080 (#4518) — `e.dispatch.executor` is the durable field the io shell already writes at
       // dispatch time (`dispatch-lane-io.mjs`'s `inFlight({..., dispatch})`, #3717/#3906): the ACTUAL provider
@@ -487,14 +530,16 @@ export function cliListHolds() {
   return listBuildDispatchHolds().map((h) => ({ num: normNum(h.meta.num), reason: h.meta.reason ?? null }));
 }
 
-function cliDispatch({ num, bookkeeping }) {
+export function cliDispatch({ num, bookkeeping, launchKind = 'build' }, { exec = execFileSync } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'build-dispatch-daemon-'));
   const file = join(dir, 'bookkeeping.json');
   try {
+    // dispatch-lane re-reads the tick for this num and infers prepare-item from spawnPrepareItems.
+    // Its model override travels in JSON argv plus a recorded reason, not a run.mjs control flag.
     writeFileSync(file, JSON.stringify({ bookkeeping: bookkeeping || {} }), { mode: 0o600 });
-    const text = execFileSync('node', [join(SCRIPTS, 'operations', 'run.mjs'), 'dispatch-lane', `--num=${num}`, `--bookkeepingFile=${file}`, '--json'], {
+    const text = exec('node', [join(SCRIPTS, 'operations', 'run.mjs'), 'dispatch-lane', `--num=${num}`, `--bookkeepingFile=${file}`, '--json', ...(launchKind === 'prepare-item' ? ['--modelReason=automatic item preparation uses sonnet'] : [])], {
       encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 32 * 1024 * 1024, cwd: REPO_ROOT,
-      env: { ...process.env, WE_BUILD_DISPATCH_MODE: process.env.WE_BUILD_DISPATCH_MODE || 'mechanical' },
+      env: { ...process.env, WE_BUILD_DISPATCH_MODE: process.env.WE_BUILD_DISPATCH_MODE || 'mechanical', ...(launchKind === 'prepare-item' ? { WE_DISPATCH_AGENT_ARGS: JSON.stringify([...JSON.parse(process.env.WE_DISPATCH_AGENT_ARGS || '[]'), '--model', 'sonnet']) } : {}) },
     });
     return readDispatchOutcome(text);
   } catch (e) {
@@ -642,8 +687,13 @@ async function cliPredictRoute(num, scope) {
   }
 }
 
+const prepareClaimRoot = () => join(resolveCoordinationRoot(), 'item-prepare-dispatch-claims');
+
 function cliEffects() {
   return {
+    listPrepareClaims: () => listBuildDispatchClaims({ lockRoot: prepareClaimRoot() }),
+    acquirePrepareClaim: (o) => acquireBuildDispatchClaim({ ...o, lockRoot: prepareClaimRoot() }),
+    releasePrepareClaim: (o) => releaseBuildDispatchClaim({ ...o, lockRoot: prepareClaimRoot() }),
     planTick: cliPlanTick,
     fetchOpenPrs: cliFetchOpenPrs,
     listClaims: () => listBuildDispatchClaims(),
@@ -699,11 +749,14 @@ export function policyFrom(flags) {
 async function dryRun(flags) {
   const policy = policyFrom(flags);
   const effects = cliEffects();
+  const prepareEnabled = !flags['no-prepare'];
   const runStoreRows = await cliListRunStoreInFlight();
   effects.listRunStoreInFlight = () => runStoreRows;
   const settledRows = await cliListSettledBuilds(); // #4349
   effects.listSettledBuilds = () => settledRows;
-  const tick = await runBuildDispatchTick({ bookkeeping: {}, live: false, policy, effects });
+  const prepareRows = await cliListRunStoreInFlight({ launchKind: 'prepare-item' });
+  effects.listPrepareInFlight = () => prepareRows;
+  const tick = await runBuildDispatchTick({ bookkeeping: {}, live: false, policy, prepareEnabled, effects });
   const core = tick.tickCore;
   const scopeByNum = new Map((core.queue || []).map((r) => [normNum(r.num), r.scope || []]));
   const heldByCore = new Map((core.held || []).map((h) => [normNum(h.num), h.reason]));
@@ -758,6 +811,7 @@ async function dryRun(flags) {
     // adds. `filling` names which nums fill it (never just a count) so a full-cap dry-run says WHY, not only
     // THAT.
     openItems: reportOpenItems(tick.plan.openItems),
+    prepare: tick.prepare,
     wouldDispatchNow: tick.plan.dispatch.map((x) => x.num),
     wouldRetireClaims: tick.retired,
     dispatchHolds: tick.dispatchHolds, // #4349 — items excluded this tick by a non-PR terminal-outcome cooldown
@@ -777,6 +831,7 @@ async function dryRun(flags) {
   // durable field once it has (`null` only for an older record with none, never a default guess).
   w(`  open PRs: ${report.openPrs.join(', ') || 'none'} · durable in-flight builds (claims/run records): ${report.inFlight.map((f) => `#${f.num} (${f.source}${f.executor ? ` executor=${f.executor}` : ''})`).join(', ') || 'none'} · tick core counts ${core.building} building`);
   w(`  open items ${report.openItems.count}/${report.openItems.cap}${report.openItems.filling.length ? ` (${report.openItems.filling.map((n) => `#${n}`).join(', ')})` : ''}`);
+  w(`  prepare: ${JSON.stringify(report.prepare)}`);
   w(`  would dispatch now: ${report.wouldDispatchNow.map((n) => `#${n}`).join(', ') || 'nothing'}`);
   w(`  held items, routed: ${report.holdRouting.map((h) => `#${h.num}→${h.route}${h.commit ? `(${h.commit})` : ''}`).join(', ') || 'none'}`);
   for (const r of rows) {
@@ -801,13 +856,16 @@ async function live(flags) {
 
   const policy = policyFrom(flags);
   const effects = cliEffects();
+  const prepareEnabled = !flags['no-prepare'];
   let bookkeeping = {};
   let tickOnce = async () => {
     const rows = await cliListRunStoreInFlight();
     effects.listRunStoreInFlight = () => rows;
     const settledRows = await cliListSettledBuilds(); // #4349
     effects.listSettledBuilds = () => settledRows;
-    const r = await runBuildDispatchTick({ bookkeeping, live: true, policy, effects });
+    const prepareRows = await cliListRunStoreInFlight({ launchKind: 'prepare-item' });
+    effects.listPrepareInFlight = () => prepareRows;
+    const r = await runBuildDispatchTick({ bookkeeping, live: true, policy, prepareEnabled, effects });
     bookkeeping = r.nextBookkeeping;
     return r;
   };
@@ -826,7 +884,7 @@ async function live(flags) {
       // or for an older record with none) so the operator's tick line names WHO is running each build without
       // reading scorecards. Additive over the previous bare-num array — nothing on `main` parses this stdout
       // JSON as a strict array-of-strings today (grepped 2026-09-29).
-      process.stdout.write(`${JSON.stringify({ at: new Date().toISOString(), status: r.statusLine, freeze: r.plan.freeze, inFlight: r.plan.inFlight.map((f) => ({ num: f.num, executor: f.executor ?? null })), openItems: reportOpenItems(r.plan.openItems), dispatched: r.dispatched, hold: r.plan.hold, dispatchHolds: r.dispatchHolds, failures: r.failures, retired: r.retired, infraRetry: r.infraRetry, orphanAdoption: r.orphanAdoption, holdRouting: r.holdRouting, holdRoutingResult: r.holdRoutingResult })}\n`);
+      process.stdout.write(`${JSON.stringify({ at: new Date().toISOString(), status: r.statusLine, freeze: r.plan.freeze, inFlight: r.plan.inFlight.map((f) => ({ num: f.num, executor: f.executor ?? null })), openItems: reportOpenItems(r.plan.openItems), dispatched: r.dispatched, prepare: r.prepare, hold: r.plan.hold, dispatchHolds: r.dispatchHolds, failures: r.failures, retired: r.retired, infraRetry: r.infraRetry, orphanAdoption: r.orphanAdoption, holdRouting: r.holdRouting, holdRoutingResult: r.holdRoutingResult })}\n`);
     },
     onTickError: (e) => console.error(`build-dispatch-daemon: tick failed (non-fatal): ${String(e?.message || e).split('\n')[0]}`),
   });
@@ -839,7 +897,7 @@ async function main(argv) {
   if (flags['dry-run']) return dryRun(flags);
   if (flags.live) return live(flags);
   console.error('usage: build-dispatch-daemon.mjs --dry-run [--json] [--focus=N,M]   (read-only: what it would dispatch now)\n'
-    + '       build-dispatch-daemon.mjs --live [--once] [--self-sync] [--max-concurrent=3] [--max-open-prs=12] [--max-open-items=7] [--interval-ms=120000]\n'
+    + '       build-dispatch-daemon.mjs --live [--once] [--self-sync] [--no-prepare] [--max-concurrent=3] [--max-open-prs=12] [--max-open-items=7] [--interval-ms=120000]\n'
     + `kill switch: ${KILL_SWITCH_ENV}=1 or touch <coordination root>/${KILL_SWITCH_FILENAME}`);
   process.exit(2);
 }

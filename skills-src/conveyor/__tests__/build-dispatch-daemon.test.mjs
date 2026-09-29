@@ -1115,6 +1115,15 @@ describe('cliListSettledBuilds / cliListHolds (the real readers, not a stub)', (
     expect(rows).toEqual([expect.objectContaining({ num: '2002', executor: null })]);
   });
 
+  it('reads prepare-item run records separately from build slots', async () => {
+    seedRun('dispatch-lane-prepare-2003', [{
+      key: 'dispatch:0:0', type: DISPATCH_EFFECT, stepIndex: 0, index: 0, status: 'in-flight',
+      payload: { num: '2003', launchKind: 'prepare-item' }, result: null, error: null,
+    }]);
+    expect(await cliListRunStoreInFlight()).toEqual([]);
+    expect((await cliListRunStoreInFlight({ launchKind: 'prepare-item' })).map((r) => r.num)).toEqual(['2003']);
+  });
+
   it('cliListRunStoreInFlight returns [] rather than throwing when the run-store read genuinely errors (dir is a file)', async () => {
     const filePath = join(runsDir, 'not-a-directory');
     writeFileSync(filePath, 'x');
@@ -1193,5 +1202,102 @@ describe('build-dispatch-daemon.mjs boots as a fresh `node` process — the clas
     expect(stderr).not.toMatch(/ReferenceError|before initialization/);
     expect(stderr).toMatch(/^usage: build-dispatch-daemon\.mjs/);
     expect(status).toBe(2);
+  });
+});
+
+describe('automatic item preparation', () => {
+  let lockRoot;
+  beforeEach(() => { lockRoot = mkdtempSync(join(tmpdir(), 'bdd-prepare-')); });
+  afterEach(() => { rmSync(lockRoot, { recursive: true, force: true }); });
+  function fixture({ inFlight = [], fail = false, pid = 10 } = {}) {
+    const dispatch = vi.fn(() => ({ dispatching: !fail, reason: fail ? 'refused' : null }));
+    const spawns = [{ num: '4501', lane: 1 }, { num: '4502', lane: 2 }];
+    return {
+      dispatch,
+      planTick: (bk) => ({ decisions: { itemPrepareSpawns: spawns }, nextState: {
+        tick: (bk.tick ?? 0) + 1,
+        prepareGuards: [...(bk.prepareGuards ?? []), ...spawns.map((s) => ({ ...s, kind: 'prepare-item', spawnedTick: bk.tick ?? 0 }))],
+        launchedNums: spawns.map((s) => s.num),
+      } }),
+      fetchOpenPrs: () => [], listClaims: () => [], listRunStoreInFlight: () => [],
+      killSwitch: () => ({ engaged: false }),
+      listPrepareInFlight: () => inFlight,
+      listPrepareClaims: () => listBuildDispatchClaims({ lockRoot }),
+      acquirePrepareClaim: (o) => acquireBuildDispatchClaim({ ...o, lockRoot, owner: `host:${pid}`, pid }),
+      releasePrepareClaim: (o) => releaseBuildDispatchClaim({ ...o, lockRoot }),
+    };
+  }
+  it('launches two prepare-item dispatches, retaining only their guards; no repeat next tick or after restart', async () => {
+    const effects = fixture();
+    const tick = await runBuildDispatchTick({ live: true, effects });
+    expect(effects.dispatch.mock.calls.map(([x]) => [x.num, x.launchKind])).toEqual([['4501', 'prepare-item'], ['4502', 'prepare-item']]);
+    expect(tick.nextBookkeeping.prepareGuards).toHaveLength(2);
+    expect(tick.nextBookkeeping.launchedNums).toEqual(['4501', '4502']);
+    await runBuildDispatchTick({ live: true, effects, bookkeeping: tick.nextBookkeeping });
+    expect(effects.dispatch).toHaveBeenCalledTimes(2);
+    const restarted = fixture({ pid: 20 });
+    await runBuildDispatchTick({ live: true, effects: restarted });
+    expect(restarted.dispatch).not.toHaveBeenCalled();
+  });
+  it('two existing run-store prepares leave zero slots for new items', async () => {
+    const effects = fixture({ inFlight: [{ num: '4401' }, { num: '4402' }] });
+    const tick = await runBuildDispatchTick({ live: true, effects });
+    expect(effects.dispatch).not.toHaveBeenCalled();
+    expect(tick.prepare.planned).toEqual([]);
+  });
+  it('dry-run reports planned prepares without dispatches, claims, or new guards', async () => {
+    const effects = fixture();
+    const tick = await runBuildDispatchTick({ effects });
+    expect(tick.prepare.planned.map((s) => s.num)).toEqual(['4501', '4502']);
+    expect(tick.prepare.launched).toEqual([]);
+    expect(effects.dispatch).not.toHaveBeenCalled();
+    expect(effects.listPrepareClaims()).toEqual([]);
+    expect(tick.nextBookkeeping.prepareGuards).toEqual([]);
+  });
+  it('prepare kill switch and global freeze each prevent launches', async () => {
+    const effects = fixture();
+    expect((await runBuildDispatchTick({ live: true, prepareEnabled: false, effects })).prepare.planned).toEqual([]);
+    effects.killSwitch = () => ({ engaged: true, reason: 'test' });
+    expect((await runBuildDispatchTick({ live: true, effects })).prepare.planned).toEqual([]);
+    expect(effects.dispatch).not.toHaveBeenCalled();
+  });
+  it('failed dispatch releases its claim and discards proposed guards', async () => {
+    const effects = fixture({ fail: true });
+    const tick = await runBuildDispatchTick({ live: true, effects });
+    expect(tick.prepare.failures).toHaveLength(2);
+    expect(effects.listPrepareClaims()).toEqual([]);
+    expect(tick.nextBookkeeping.prepareGuards).toEqual([]);
+  });
+  it('consumes the current tick-core spawnPrepareItems field', async () => {
+    const effects = fixture();
+    const plan = effects.planTick;
+    effects.planTick = (bk) => {
+      const out = plan(bk);
+      out.decisions.spawnPrepareItems = out.decisions.itemPrepareSpawns;
+      delete out.decisions.itemPrepareSpawns;
+      return out;
+    };
+    expect((await runBuildDispatchTick({ live: true, effects })).prepare.launched).toHaveLength(2);
+  });
+  it('dispatch shell explicitly selects sonnet using the supported model override', async () => {
+    const { cliDispatch } = await import('../build-dispatch-daemon.mjs');
+    const exec = vi.fn(() => JSON.stringify({ dispatching: true }));
+    cliDispatch({ num: '4501', launchKind: 'prepare-item', bookkeeping: {} }, { exec });
+    const [, argv, opts] = exec.mock.calls[0];
+    expect(argv).toContain('dispatch-lane');
+    expect(argv).toContain('--modelReason=automatic item preparation uses sonnet');
+    const { agentArgsFromEnv, resolveWorkerModel } = await import('../../../scripts/operations/dispatch-lane-io.mjs');
+    const choice = resolveWorkerModel({ extraArgs: agentArgsFromEnv(opts.env), table: { tier: 'sonnet', model: 'sonnet' }, modelReason: 'automatic item preparation uses sonnet' });
+    expect(choice.model).toBe('sonnet');
+    expect(choice.refusal).toBeNull();
+  });
+  it('boots with an unknown flag and exits 2 with usage', () => {
+    try {
+      execFileSync(process.execPath, [resolve('skills-src/conveyor/build-dispatch-daemon.mjs'), '--bogus-flag'], { encoding: 'utf8', stdio: 'pipe' });
+      throw new Error('expected exit 2');
+    } catch (e) {
+      expect(e.status).toBe(2);
+      expect(e.stderr).toContain('usage: build-dispatch-daemon.mjs');
+    }
   });
 });
