@@ -10,6 +10,9 @@
  * here, matching the no-fs/no-subprocess convention every sibling operation test already uses.
  */
 import { describe, it, expect } from 'vitest';
+import { mkdtempSync, existsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   landPreventionCard, parseLandPreventionCardArgv, parseRunJsonTail, runLandPreventionCardCli,
 } from '../land-prevention-card.mjs';
@@ -50,7 +53,7 @@ describe('landPreventionCard — the real acquire → file-item → commit → v
     const { exec, calls } = scriptedExec([ACQUIRE_OK, FILE_ITEM_OK, 'added', 'committed', VERIFY_GREEN, OPEN_PR_OPENED, 'released']);
     const written = [];
     const result = await landPreventionCard(INPUT, {
-      exec, write: () => {}, mkTmp: () => '/tmp/land-prevention-card-x', writeFile: (p, c) => written.push({ p, c }),
+      exec, write: () => {}, mkTmp: () => '/tmp/land-prevention-card-x', rmTmp: () => {}, writeFile: (p, c) => written.push({ p, c }),
     });
     expect(result).toEqual({ ok: true, step: 'done', num: 9001, rel: 'backlog/9001-file-the-prevention.md', pr: 5555, url: 'https://github.com/chalbert/web-everything/pull/5555', reason: null });
 
@@ -133,7 +136,7 @@ describe('landPreventionCard — the real acquire → file-item → commit → v
   it('a red gate releases the lane and never opens a PR', async () => {
     const red = JSON.stringify({ verdict: { ok: false, blocking: [{ check: 'check:standards', why: 'failed', detail: '1 error' }] } });
     const { exec, calls } = scriptedExec([ACQUIRE_OK, FILE_ITEM_OK, 'added', 'committed', red, 'released']);
-    const result = await landPreventionCard(INPUT, { exec, write: () => {}, mkTmp: () => '/tmp/x', writeFile: () => {} });
+    const result = await landPreventionCard(INPUT, { exec, write: () => {}, mkTmp: () => '/tmp/x', rmTmp: () => {}, writeFile: () => {} });
     expect(result).toMatchObject({ ok: false, step: 'verify', num: 9001, rel: 'backlog/9001-file-the-prevention.md' });
     expect(result.reason).toContain('check:standards');
     expect(calls.at(-1).args).toEqual(expect.arrayContaining(['release']));
@@ -144,7 +147,7 @@ describe('landPreventionCard — the real acquire → file-item → commit → v
       findings: { submit: { effects: [{ result: { outcome: 'refused', reason: 'check-red', pr: 5556, url: 'https://x/5556' } }] } },
     });
     const { exec, calls } = scriptedExec([ACQUIRE_OK, FILE_ITEM_OK, 'added', 'committed', VERIFY_GREEN, refused, 'released']);
-    const result = await landPreventionCard(INPUT, { exec, write: () => {}, mkTmp: () => '/tmp/x', writeFile: () => {} });
+    const result = await landPreventionCard(INPUT, { exec, write: () => {}, mkTmp: () => '/tmp/x', rmTmp: () => {}, writeFile: () => {} });
     expect(result).toMatchObject({ ok: false, step: 'open-pr', pr: 5556, reason: 'check-red' });
     // release happens even on an open-pr refusal (the lane's local worktree is done either way).
     expect(calls.some((c) => c.args?.includes?.('release'))).toBe(true);
@@ -156,13 +159,43 @@ describe('landPreventionCard — the real acquire → file-item → commit → v
   it('a PR-body write failure still releases the lane and fails cleanly, never leaking or throwing', async () => {
     const { exec, calls } = scriptedExec([ACQUIRE_OK, FILE_ITEM_OK, 'added', 'committed', VERIFY_GREEN, 'released']);
     const result = await landPreventionCard(INPUT, {
-      exec, write: () => {}, mkTmp: () => '/tmp/x',
+      exec, write: () => {}, mkTmp: () => '/tmp/x', rmTmp: () => {},
       // Succeeds for the commit-msg write, throws only on the LATER pr-body write.
       writeFile: (p) => { if (String(p).endsWith('pr-body.md')) throw new Error('ENOSPC: no space left'); },
     });
     expect(result).toMatchObject({ ok: false, step: 'unexpected' });
     expect(result.reason).toContain('ENOSPC');
     expect(calls.at(-1).args).toEqual(expect.arrayContaining(['release', '--lane=7']));
+  });
+
+  // #4317 advisory review (2026-09-29): every run used to `mkdtempSync` TWO scratch dirs (commit message, PR
+  // body) and never remove either — a permanent `land-prevention-card-*` leak in the OS temp dir per filing.
+  // Real dirs here (the default `rmTmp`), so the assertion is on the filesystem, not on a stub's call count.
+  describe('scratch dir cleanup — the one scratch dir is created once and removed on every exit path', () => {
+    const realScratch = () => {
+      const made = [];
+      const mkTmp = () => { const d = mkdtempSync(join(tmpdir(), 'land-prevention-card-test-')); made.push(d); return d; };
+      return { made, mkTmp };
+    };
+
+    it('success: exactly one scratch dir, gone after the job returns', async () => {
+      const { exec } = scriptedExec([ACQUIRE_OK, FILE_ITEM_OK, 'added', 'committed', VERIFY_GREEN, OPEN_PR_OPENED, 'released']);
+      const { made, mkTmp } = realScratch();
+      const result = await landPreventionCard(INPUT, { exec, write: () => {}, mkTmp });
+      expect(result.ok).toBe(true);
+      expect(made).toHaveLength(1);
+      expect(existsSync(made[0])).toBe(false);
+    });
+
+    it('failure after the commit (gate red): the scratch dir is still removed', async () => {
+      const VERIFY_RED = JSON.stringify({ verdict: { ok: false, blocking: ['x'] } });
+      const { exec } = scriptedExec([ACQUIRE_OK, FILE_ITEM_OK, 'added', 'committed', VERIFY_RED, 'released']);
+      const { made, mkTmp } = realScratch();
+      const result = await landPreventionCard(INPUT, { exec, write: () => {}, mkTmp });
+      expect(result).toMatchObject({ ok: false, step: 'verify' });
+      expect(made).toHaveLength(1);
+      expect(existsSync(made[0])).toBe(false);
+    });
   });
 });
 

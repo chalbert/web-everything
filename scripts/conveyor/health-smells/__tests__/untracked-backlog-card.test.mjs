@@ -19,20 +19,41 @@ describe('untracked-backlog-card', () => {
     }];
     const [out] = untrackedBacklogCard.evaluate({ untrackedBacklogCards }, { now: NOW });
     expect(out.breach).toBe(true);
-    expect(out.subject).toBe('/Users/op/workspace/wev-review-daemon:backlog/x3u9t41-file-the-prevention-guard.md');
+    expect(out.subject).toBe('/Users/op/workspace/wev-review-daemon');
+    expect(out.measure.count).toBe(1);
     expect(out.measure.ageMin).toBe(45);
+    expect(out.measure.rels).toEqual(['backlog/x3u9t41-file-the-prevention-guard.md']);
     expect(out.summary).toContain('UNTRACKED');
     expect(out.recommendation).toContain('lane');
   });
 
-  it('reports one episode per untracked card, independently', () => {
+  it('reports one episode per CLONE, independently', () => {
     const untrackedBacklogCards = [
       { cloneRoot: '/a', rel: 'backlog/x1111a1-a.md', mtimeMs: NOW - 20 * 60_000 },
       { cloneRoot: '/b', rel: 'backlog/x2222b2-b.md', mtimeMs: NOW - 90 * 60_000 },
     ];
     const out = untrackedBacklogCard.evaluate({ untrackedBacklogCards }, { now: NOW });
     expect(out).toHaveLength(2);
-    expect(out.map((o) => o.subject).sort()).toEqual(['/a:backlog/x1111a1-a.md', '/b:backlog/x2222b2-b.md']);
+    expect(out.map((o) => o.subject).sort()).toEqual(['/a', '/b']);
+  });
+
+  // #4317 advisory review (2026-09-29): one episode PER CARD turned the 23 live orphans (22 in
+  // `wev-review-daemon`, 1 in `wev-control`) into 23 `investigate` episodes on the first tick after deploy — an
+  // investigation storm for what is one problem per clone. Grouping by clone bounds the episode count by the
+  // number of daemon clones, however large the orphan backlog grows.
+  it('a large orphan backlog opens a BOUNDED number of episodes — one per clone, not one per card', () => {
+    const untrackedBacklogCards = [
+      ...Array.from({ length: 22 }, (_, i) => ({
+        cloneRoot: '/ws/wev-review-daemon', rel: `backlog/x${String(i).padStart(6, '0')}-orphan.md`, mtimeMs: NOW - (30 + i) * 60_000,
+      })),
+      { cloneRoot: '/ws/wev-control', rel: 'backlog/xcontrol-orphan.md', mtimeMs: NOW - 20 * 60_000 },
+    ];
+    const out = untrackedBacklogCard.evaluate({ untrackedBacklogCards }, { now: NOW });
+    expect(out).toHaveLength(2);
+    const review = out.find((o) => o.subject === '/ws/wev-review-daemon');
+    expect(review.measure.count).toBe(22);
+    expect(review.measure.ageMin).toBe(51); // the OLDEST card's age
+    expect(review.summary).toContain('22');
   });
 
   // The probe itself omits a card once it lands or disappears (query-time, aging-filtered) — a subject simply

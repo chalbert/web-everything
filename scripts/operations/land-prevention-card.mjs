@@ -66,7 +66,7 @@
  *     --scope=<s> [--parent=<NNN>] --queue=<true|false> --session=<slug>
  */
 import { execFileSync } from 'node:child_process';
-import { writeFileSync, mkdtempSync } from 'node:fs';
+import { writeFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -143,8 +143,9 @@ export const OPEN_PR_TIMEOUT_MS = 45 * 60_000;
  * THE ORCHESTRATION, INJECTABLE FOR TESTS. `exec` has the SAME `(cmd, args, opts) => string` shape as
  * `execFileSync` (throttled or not) elsewhere in this repo — a test hands it a scripted stub, never a real
  * subprocess. `write` is where narration goes (real stdout in production, captured in a test). `mkTmp`/
- * `writeFile` are the two fs calls this function makes directly (a scratch dir for the commit message + PR
- * body), also injectable so a test never touches a real filesystem.
+ * `writeFile`/`rmTmp` are the fs calls this function makes directly (ONE scratch dir for the commit message +
+ * PR body, removed on every exit path), also injectable so a test can stub the filesystem (or, for the
+ * cleanup proof, hand in a real scratch dir and assert it is gone).
  *
  * RETURNS a structured outcome for every step this function can itself name a reason for (acquire refused,
  * file-item refused, the gate red, the PR refused) rather than throwing — the CLI wrapper below still exits
@@ -167,7 +168,22 @@ export async function landPreventionCard(input, {
   write = (line) => process.stdout.write(line),
   mkTmp = () => mkdtempSync(join(tmpdir(), 'land-prevention-card-')),
   writeFile = writeFileSync,
+  rmTmp = (dir) => rmSync(dir, { recursive: true, force: true }),
 } = {}) {
+  // ONE scratch dir per run, created lazily and removed on every exit path (#4317 advisory review, 2026-09-29 —
+  // the first cut made a fresh `mkdtempSync` dir for each file and never removed either, leaking two per filing).
+  let scratch = null;
+  const scratchFile = (name) => join(scratch ??= mkTmp(), name);
+  try {
+    return await landPreventionCardSteps(input, { exec, write, writeFile, scratchFile });
+  } finally {
+    if (scratch) {
+      try { rmTmp(scratch); } catch (e) { write(`land-prevention-card: scratch cleanup failed (non-fatal) — ${String(e?.message || e)}\n`); }
+    }
+  }
+}
+
+async function landPreventionCardSteps(input, { exec, write, writeFile, scratchFile }) {
   let laneNum = null;
   const release = () => {
     if (laneNum == null) return;
@@ -230,7 +246,7 @@ export async function landPreventionCard(input, {
     write(`land-prevention-card: committing ${rel}…\n`);
     try {
       exec('git', ['-C', lane, 'add', '--', rel], {});
-      const msgPath = join(mkTmp(), 'commit-msg.txt');
+      const msgPath = scratchFile('commit-msg.txt');
       writeFile(msgPath, `WE #${num ?? '?'}: file the prevention guard(s) owed by an independent review\n\n`
         + 'Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>\n', 'utf8');
       exec('git', ['-C', lane, 'commit', '-F', msgPath], {});
@@ -250,7 +266,7 @@ export async function landPreventionCard(input, {
     }
 
     write('land-prevention-card: opening the PR…\n');
-    const bodyPath = join(mkTmp(), 'pr-body.md');
+    const bodyPath = scratchFile('pr-body.md');
     writeFile(bodyPath, `Mechanically filed by the approval-time prevention filer (#4317).\n\n${input.digest}\n`, 'utf8');
     const ref = `lane/${num ?? 'x'}-prevention-card`;
     let opened;

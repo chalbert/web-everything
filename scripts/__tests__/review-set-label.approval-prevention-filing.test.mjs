@@ -64,7 +64,9 @@ describe('fileApprovalPreventionCard — hands off to the detached landing job, 
   it('spawns the landing job DETACHED, in the calling checkout as cwd, and writes NOTHING there itself', () => {
     const root = fixtureDaemonClone();
     try {
-      const before = readdirSync(root).sort();
+      // RECURSIVE listing (#4317 advisory review, 2026-09-29): a top-level `readdirSync(root)` is blind to a
+      // write INTO the existing `backlog/` dir — exactly the orphan-card regression this test guards.
+      const before = readdirSync(root, { recursive: true }).sort();
       const spawnCalls = [];
       const spawnDetached = (argv, opts) => { spawnCalls.push({ argv, opts }); return { pid: 4242, on: () => {} }; };
       const result = fileApprovalPreventionCard(input, { spawnDetached, root, logPathFor: () => '/dev/null' });
@@ -73,7 +75,7 @@ describe('fileApprovalPreventionCard — hands off to the detached landing job, 
       // new file or directory anywhere under it (not just `backlog/`) — codex plan review (2026-09-28) found
       // the FIRST cut of this test checked only `backlog/`, which missed that the default `logPathFor` itself
       // wrote a log into the checkout; asserting the whole root's listing is unchanged catches that class too.
-      expect(readdirSync(root).sort()).toEqual(before);
+      expect(readdirSync(root, { recursive: true }).sort()).toEqual(before);
 
       expect(spawnCalls).toHaveLength(1);
       expect(spawnCalls[0].opts.cwd).toBe(root);
@@ -118,7 +120,7 @@ describe('fileApprovalPreventionCard — hands off to the detached landing job, 
       for (const cloneRoot of daemonCloneRoots(workspaceOf(REAL_REPO_ROOT))) {
         expect(observedLogPath.startsWith(cloneRoot)).toBe(false);
       }
-      expect(readdirSync(root).sort()).toEqual(['backlog']);
+      expect(readdirSync(root, { recursive: true }).sort()).toEqual(['backlog']);
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
