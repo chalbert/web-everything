@@ -2,6 +2,22 @@
 
 > Tier-1 reference. Read when writing or changing tests.
 
+## Standalone probation builds
+
+`scripts/operations/probation-build-run.mjs` accepts `--taskType=doc-fix|bugfix` (doc-fix default),
+roster names or legacy JSON in `--worker`, and an allowlisted `--model`. Each omitted session is
+generated independently. Different items use separate lane clones; do not reuse an explicit session
+and lane for simultaneous runs. Task files, worker logs, commit messages and PR bodies are lane-local.
+Flash keeps the Codex read-only checker; a checker refusal undoes the attempt.
+
+Verify parallel isolation with the integration test
+`scripts/__tests__/lane-pool-acquire-shares-scan-cache.test.mjs` (the three concurrent acquirers case).
+The build-run tests separately race real scorecard writers in temporary storage. Probation builds
+pass `requireLock: true` through scorecard migration and append, refusing the shared lock's usual
+unlocked fallback on timeout. A refused scorecard write is reported on stderr without undoing a
+successful build. Operation records use UUID filenames and atomic rename; call logs use append-only
+writes, so they do not replace a sibling process's records.
+
 ## Shadow reviewer agreement evidence
 
 `review-runner.mjs` appends each shadow prediction through `appendVerdict` as `verdict: observed`,

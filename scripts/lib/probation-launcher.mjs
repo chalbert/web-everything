@@ -125,26 +125,28 @@ export function buildCheckerTask({ pr, reason, diff, failingChecks = '' }) {
 }
 
 /**
- * The task text a worker gets for one doc-fix probation BUILD (#4291). PURE. Mirrors {@link buildCiHealTask}'s
+ * The task text a worker gets for one probation BUILD (doc-fix by default, or bugfix). PURE. Mirrors {@link buildCiHealTask}'s
  * shape (name the surface, state the rules, forbid commit/push/PR, hand over what the worker needs) for a
  * BUILD rather than a REPAIR: the worker has no brief of its own, so the item's own spec text is the whole task.
- * @param {{num: string|number, title?: string, spec: string, scope?: string[]}} o
+ * @param {{num: string|number, title?: string, spec: string, scope?: string[], taskType?: 'doc-fix'|'bugfix'}} o
  * @returns {string}
  */
-export function buildDocFixTask({ num, title = '', spec, scope = [] }) {
+export function buildDocFixTask({ num, title = '', spec, scope = [], taskType = 'doc-fix' }) {
   if (!num) throw new TypeError('probation-launcher: num is required');
   if (typeof spec !== 'string' || !spec.trim()) throw new TypeError('probation-launcher: spec is required');
   return [
-    `# Build backlog item #${num}${title ? `: ${title}` : ''} (doc-fix probation launch)`,
+    `# Build backlog item #${num}${title ? `: ${title}` : ''} (${taskType} probation launch)`,
     '',
     'This working directory is a fresh lane clone, freshly reset onto the current `main`. Build the item below',
     'to spec — every `## Done when` clause it states must hold when you are finished.',
     '',
     'Rules:',
-    '- This is a `doc-fix` task: touch ONLY documentation/prose files. Do not change source code, tests, or config.',
+    taskType === 'doc-fix'
+      ? '- This is a `doc-fix` task: touch ONLY documentation/prose files. Do not change source code, tests, or config.'
+      : '- This is a bugfix task: repair only the specified bug. Simple mechanical work only when using Gemini Flash.',
     `- Stay inside the item's own scope: ${scope.length ? scope.join(', ') : '(no declared scope — stay inside documentation paths only)'}.`,
-    '- Keep the change small: at most 2 files and about 100 changed lines (the proven `doc-fix` envelope). A bigger',
-    '  change than that is not a doc-fix — stop and say so in your final message rather than exceeding it.',
+    `- Keep the change small: at most ${PROVEN_TASK_ENVELOPES[taskType].maxFiles} files and about ${PROVEN_TASK_ENVELOPES[taskType].maxLoc} changed lines (the proven \`${taskType}\` envelope). A bigger`,
+    '  change exceeds the envelope — stop and say so in your final message rather than exceeding it.',
     '- Never weaken, skip or delete a test.',
     '- If the item is not buildable as written (the spec is unclear, contradictory, or already done), change',
     '  nothing and say so in your final message.',
@@ -161,11 +163,11 @@ export function buildDocFixTask({ num, title = '', spec, scope = [] }) {
  * The commit message for a probation doc-fix build (#4291). PURE. Mirrors {@link buildHealCommitMessage}: the
  * trailers name who did the work, so the review and the trial record can tell a probation build from a Claude
  * one.
- * @param {{num: string|number, worker: object}} o
+ * @param {{num: string|number, worker: object, taskType?: 'doc-fix'|'bugfix'}} o
  */
-export function buildDocFixCommitMessage({ num, worker }) {
+export function buildDocFixCommitMessage({ num, worker, taskType = 'doc-fix' }) {
   return [
-    `WE #${num}: doc-fix build on probation (${worker.executor}/${worker.model})`,
+    `WE #${num}: ${taskType} build on probation (${worker.executor}/${worker.model})`,
     '',
     `Built by the ${worker.id} probation worker (agy-launcher-probation, #4291); the launcher claimed the item,`,
     'ran the gate, resolved it, and committed. Full review and a run rating are owed on this change.',

@@ -36,11 +36,11 @@ describe('ci-heal is its own taskType, with a bounded envelope', () => {
 });
 
 describe('selectProbationWorker', () => {
-  it('rosters: doc-fix → agy-Claude + Codex; ci-heal → agy-Claude + Codex + agy-Gemini (simple only, Codex-checked); bugfix → Codex only', () => {
+  it('rosters: doc-fix → agy-Claude + Codex; ci-heal → agy-Claude + Codex + agy-Gemini (simple only, Codex-checked); bugfix → Codex + agy Claude + simple Gemini', () => {
     expect(PROBATION_ROSTER['doc-fix']).toEqual(['antigravity-claude', 'codex']);
     expect(PROBATION_ROSTER['ci-heal']).toEqual(['antigravity-claude', 'codex', 'antigravity-gemini']);
     expect(PROBATION_WORKERS['antigravity-gemini']).toMatchObject({ simpleOnly: true, checker: 'codex', model: AGY_GEMINI_SIMPLE_MODEL });
-    expect(PROBATION_ROSTER.bugfix).toEqual(['codex']);
+    expect(PROBATION_ROSTER.bugfix).toEqual(['codex', 'antigravity-claude', 'antigravity-gemini']);
     expect(PROBATION_ROSTER['build-new-feature']).toBeUndefined();
   });
 
@@ -111,7 +111,7 @@ describe('selectProvider — an opened roster taskType keeps Claude as the recom
     expect(unknown.probationWorker).toBeNull();
   });
 
-  it('default gate: non-critical bugfix gets only Codex on full-review probation; critical bugfix gets no pick', () => {
+  it('default gate: non-critical bugfix starts with Codex on full-review probation; critical bugfix gets no pick', () => {
     const context = { kind: 'fix', filesTouched: ['a.mjs'], ...open };
     const res = selectProvider({ taskType: 'bugfix' }, context);
     expect(res.recommendation).toBe(RECOMMENDATIONS.CLAUDE);
