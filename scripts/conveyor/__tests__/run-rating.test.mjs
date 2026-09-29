@@ -1,9 +1,12 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 import { scrubReasons } from '../../lib/secret-scrub.mjs';
+import { readLegacySources } from '../run-scorecard-store.mjs';
 import {
   RUBRIC_VERSION, GUARD_BLOCKS_TARGET, BASELINE_WALL_MS_BY_KIND, REFERENCE_STORY_SIZE,
   isSyntheticModel, extractTurns, sessionNameFromLines, computeWallMs, sessionTimeBounds, pairToolEvents,
@@ -15,8 +18,11 @@ import {
   findTranscriptPath, readTranscriptLines, rateSession, rateReviewJobLog,
   toScorecardRow, rollupKey, phaseForKind, rollupByDemand, flagWaste,
   scanClaudeProjectsCoverage, scanReviewJurorUsage, scanNonClaudeJudgeTranscripts, buildCoverageReport,
-  orchestratorProjectDirName,
+  orchestratorProjectDirName, preparedForItem, preparedComparison,
 } from '../run-rating.mjs';
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const CLI = join(HERE, '..', 'run-rating.mjs');
 
 const dirs = [];
 function tmp() {
@@ -959,4 +965,157 @@ describe('flagWaste — repeat-review-same-head cost', () => {
     ]).find((w) => w.type === 'repeat-review-same-head');
     expect(mixed).toMatchObject({ costUsd: 0.4, costPartial: true });
   });
+});
+
+// ── #4304: prepared (DoR) tagging + prepared-vs-unprepared comparison ─────────────────────────────────────────────
+
+/** Writes `backlog/<num>-x.md` under a fresh temp repo root, with or without `preparedDate` stamped. */
+function backlogRepoWith(num, { preparedDate = null } = {}) {
+  const root = tmp();
+  mkdirSync(join(root, 'backlog'), { recursive: true });
+  const frontmatter = [
+    '---', 'kind: story', 'status: active',
+    ...(preparedDate ? [`preparedDate: "${preparedDate}"`] : []),
+    '---', '', `# item ${num}`, '',
+  ].join('\n');
+  writeFileSync(join(root, 'backlog', `${num}-x.md`), frontmatter);
+  return root;
+}
+
+describe('preparedForItem', () => {
+  it('is true when the card carries a non-empty preparedDate', () => {
+    const root = backlogRepoWith('9001', { preparedDate: '2026-09-20' });
+    expect(preparedForItem('9001', { repoRoot: root })).toBe(true);
+  });
+  it('is false when the card exists but has no preparedDate (a bespoke ad-hoc dispatch\'s card)', () => {
+    const root = backlogRepoWith('9002');
+    expect(preparedForItem('9002', { repoRoot: root })).toBe(false);
+  });
+  it('is false — never thrown or null — when there is no item, no matching card, or a hash-only id', () => {
+    const root = backlogRepoWith('9003', { preparedDate: '2026-09-20' });
+    expect(preparedForItem(null, { repoRoot: root })).toBe(false);
+    expect(preparedForItem('9999', { repoRoot: root })).toBe(false);
+    expect(preparedForItem('xabc123', { repoRoot: root })).toBe(false);
+  });
+  // #4304 review finding: the "non-empty" half of the guarantee had no direct coverage — an empty-string or
+  // whitespace-only `preparedDate` must still read as unprepared, not slip through as truthy.
+  it('is false when preparedDate is an empty string or whitespace-only — "non-empty" is enforced, not assumed', () => {
+    const root = tmp();
+    mkdirSync(join(root, 'backlog'), { recursive: true });
+    writeFileSync(join(root, 'backlog', '9004-x.md'), ['---', 'kind: story', 'preparedDate: ""', '---', '', '# item 9004', ''].join('\n'));
+    writeFileSync(join(root, 'backlog', '9005-x.md'), ['---', 'kind: story', 'preparedDate: "   "', '---', '', '# item 9005', ''].join('\n'));
+    expect(preparedForItem('9004', { repoRoot: root })).toBe(false);
+    expect(preparedForItem('9005', { repoRoot: root })).toBe(false);
+  });
+});
+
+describe('toScorecardRow — prepared tagging', () => {
+  it('tags prepared:true/false via an injected resolver (isolated unit test)', () => {
+    const rating = { kind: 'conveyor', item: 9001, sessionName: 's', model: 'm', grade: 'A', guardBlocks: 0, errors: 0, repeatedCalls: 0, testReruns: 0, outcome: 'accepted', rawOutcome: 'accepted', tokens: null, costUsd: null, cacheHitRatio: null, shares: null, dataQuality: 'transcript' };
+    expect(toScorecardRow(rating, { preparedForItem: () => true }).prepared).toBe(true);
+    expect(toScorecardRow(rating, { preparedForItem: () => false }).prepared).toBe(false);
+  });
+  // Integration/wiring test: exercises the REAL default resolver (toScorecardRow -> preparedForItem ->
+  // readField) end to end against a real backlog card on disk, not a fake — the shape build-brief discipline
+  // (#2819) requires alongside the isolated unit test above.
+  it('tags prepared:true from a real backlog card carrying preparedDate, via the default (real FS) resolver', () => {
+    const root = backlogRepoWith('9010', { preparedDate: '2026-09-20' });
+    const rating = { kind: 'conveyor', item: '9010', sessionName: 's', model: 'm', grade: 'A', guardBlocks: 0, errors: 0, repeatedCalls: 0, testReruns: 0, outcome: 'accepted', rawOutcome: 'accepted', tokens: null, costUsd: null, cacheHitRatio: null, shares: null, dataQuality: 'transcript' };
+    expect(toScorecardRow(rating, { repoRoot: root }).prepared).toBe(true);
+  });
+  it('tags prepared:false from a bespoke ad-hoc dispatch with no item at all, via the default resolver', () => {
+    const root = tmp();
+    mkdirSync(join(root, 'backlog'), { recursive: true });
+    const rating = { kind: 'fix', item: null, sessionName: 's', model: 'm', grade: 'B', guardBlocks: 0, errors: 0, repeatedCalls: 0, testReruns: 0, outcome: 'accepted', rawOutcome: 'accepted', tokens: null, costUsd: null, cacheHitRatio: null, shares: null, dataQuality: 'transcript' };
+    expect(toScorecardRow(rating, { repoRoot: root }).prepared).toBe(false);
+  });
+});
+
+describe('preparedComparison', () => {
+  it('splits rows on `prepared`, summarizing count / avg wall time / tokens-per-demand / rework rounds / grades per side', () => {
+    const rows = [
+      { prepared: true, item: 1, dispatchKind: 'conveyor', wallMs: 600_000, grade: 'A', tokens: { in: 1000, out: 0, cacheRead: 0, cacheWrite: 0 }, costUsd: 0.1 },
+      { prepared: true, item: 2, dispatchKind: 'conveyor', wallMs: 400_000, grade: 'B', tokens: { in: 200, out: 0, cacheRead: 0, cacheWrite: 0 }, costUsd: 0.02 },
+      { prepared: false, item: 3, dispatchKind: 'fix', wallMs: 1_200_000, grade: 'C', tokens: { in: 3000, out: 0, cacheRead: 0, cacheWrite: 0 }, costUsd: 0.3 },
+    ];
+    const cmp = preparedComparison(rows);
+    expect(cmp.prepared).toMatchObject({ count: 2, avgWallMs: 500_000, tokensPerDemand: 600, demandCount: 2, reworkRounds: 0, gradeCounts: { A: 1, B: 1, C: 0, D: 0 } });
+    expect(cmp.unprepared).toMatchObject({ count: 1, avgWallMs: 1_200_000, tokensPerDemand: 3000, demandCount: 1, reworkRounds: 1, gradeCounts: { A: 0, B: 0, C: 1, D: 0 } });
+  });
+  // #4304 review finding (converged on independently by four review lenses): a row with `prepared` missing
+  // entirely (every row scored before this field existed) must be EXCLUDED from both sides, never folded into
+  // "unprepared" — `false` is "checked, confirmed unprepared"; `undefined` is "never checked", and conflating
+  // them would contaminate the unprepared side with an unknown-sized legacy cohort the instant this ships.
+  it('excludes a row with `prepared` undefined from BOTH sides, rather than guessing it into "unprepared"', () => {
+    const rows = [
+      { prepared: true, item: 1, dispatchKind: 'conveyor', wallMs: 600_000, grade: 'A' },
+      { prepared: false, item: 2, dispatchKind: 'fix', wallMs: 1_200_000, grade: 'C' },
+      // Pre-#4304 row — `prepared` was never computed for it.
+      { item: 3, dispatchKind: 'fix', wallMs: 800_000, grade: 'D' },
+    ];
+    const cmp = preparedComparison(rows);
+    expect(cmp.prepared.count).toBe(1);
+    expect(cmp.unprepared.count).toBe(1);
+    expect(cmp.prepared.count + cmp.unprepared.count).toBe(2); // the pre-#4304 row is in neither side
+  });
+  it('never throws and returns null averages for an empty side', () => {
+    const cmp = preparedComparison([{ prepared: true, item: 1, dispatchKind: 'conveyor', wallMs: 1000, grade: 'A' }]);
+    expect(cmp.unprepared).toMatchObject({ count: 0, avgWallMs: null, tokensPerDemand: null, demandCount: 0, reworkRounds: 0 });
+  });
+  // Wiring/integration coverage (#4304 review finding): prove `preparedComparison` actually recognizes the
+  // field NAMES `toScorecardRow` really emits (`wallMs`, `dispatchKind`, `grade`), not just a hand-shaped test
+  // fixture that happens to match by construction.
+  it('recognizes the real fields toScorecardRow emits (wallMs, dispatchKind, grade), not just a hand-shaped fixture', () => {
+    const preparedRating = { kind: 'conveyor', item: 1, sessionName: 's', model: 'm', grade: 'A', wallMs: 500_000, guardBlocks: 0, errors: 0, repeatedCalls: 0, testReruns: 0, outcome: 'accepted', rawOutcome: 'accepted', tokens: null, costUsd: null, cacheHitRatio: null, shares: null, dataQuality: 'transcript' };
+    const unpreparedRating = { kind: 'fix', item: 2, sessionName: 's2', model: 'm', grade: 'C', wallMs: 900_000, guardBlocks: 0, errors: 0, repeatedCalls: 0, testReruns: 0, outcome: 'accepted', rawOutcome: 'accepted', tokens: null, costUsd: null, cacheHitRatio: null, shares: null, dataQuality: 'transcript' };
+    const rows = [
+      toScorecardRow(preparedRating, { preparedForItem: () => true }),
+      toScorecardRow(unpreparedRating, { preparedForItem: () => false }),
+    ];
+    const cmp = preparedComparison(rows);
+    expect(cmp.prepared).toMatchObject({ count: 1, avgWallMs: 500_000 });
+    expect(cmp.unprepared).toMatchObject({ count: 1, avgWallMs: 900_000, reworkRounds: 1 });
+  });
+});
+
+describe('run-rating.mjs CLI `report` — prepared-vs-unprepared table (#4304)', () => {
+  // #4304 review finding: `buildReport` also runs `buildCoverageReport`, which scans real `~/.claude` project
+  // directories — on a machine with a large transcript history that can run past vitest's 5s default. Explicit,
+  // generous timeouts on both the test itself and each spawned CLI call, rather than a flaky default.
+  it('prints and JSON-reports a prepared-vs-unprepared split, against a temp scorecard store', () => {
+    const root = tmp();
+    const storeDir = join(root, '.conveyor');
+    mkdirSync(storeDir, { recursive: true });
+    const now = new Date().toISOString();
+    const row = (overrides) => ({
+      v: 1, rubricVersion: RUBRIC_VERSION, provider: 'anthropic', model: 'm', subjectClass: 'work-agent',
+      criteriaEvaluated: 4, score: 95, deductions: [], scoredAt: now, outcome: 'accepted',
+      guardBlocks: 0, errors: 0, repeatedCalls: 0, testReruns: 0, tokens: null, costUsd: null,
+      unpricedTokens: 0, cacheHitRatio: null, shares: null, dataQuality: 'transcript', waste: [],
+      costUsdPartial: false,
+      ...overrides,
+    });
+    // Pre-stamp every legacy-migration source as already-done (real stamps, computed the same way
+    // `ensureMigrated` would) so the CLI subprocess's one-time #4155 migration is a no-op against this fresh
+    // store — otherwise it could fold this checkout's own real historical rows into this temp store and make
+    // the exact counts asserted below flaky.
+    const { stamps } = readLegacySources();
+    writeFileSync(join(storeDir, 'run-scorecards.json'), JSON.stringify({
+      version: 1,
+      migrations: stamps,
+      records: [
+        row({ item: 1, dispatchKind: 'conveyor', grade: 'A', wallMs: 600_000, prepared: true }),
+        row({ item: 2, dispatchKind: 'fix', grade: 'C', wallMs: 1_200_000, prepared: false }),
+      ],
+    }, null, 2));
+    const env = { ...process.env, CONVEYOR_STATE_ROOT: root };
+    const jsonOut = execFileSync('node', [CLI, 'report', '--json'], { encoding: 'utf8', env, timeout: 30_000 });
+    const report = JSON.parse(jsonOut);
+    expect(report.prepared.prepared).toMatchObject({ count: 1, avgWallMs: 600_000, gradeCounts: { A: 1, B: 0, C: 0, D: 0 } });
+    expect(report.prepared.unprepared).toMatchObject({ count: 1, avgWallMs: 1_200_000, gradeCounts: { A: 0, B: 0, C: 1, D: 0 } });
+    const textOut = execFileSync('node', [CLI, 'report'], { encoding: 'utf8', env, timeout: 30_000 });
+    expect(textOut).toMatch(/prepared vs unprepared:/);
+    expect(textOut).toMatch(/^\s+prepared: n=1,/m);
+    expect(textOut).toMatch(/^\s+unprepared: n=1,/m);
+  }, 90_000);
 });
