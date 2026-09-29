@@ -3,9 +3,10 @@ bornAs: xjsr7pa
 kind: story
 size: 3
 parent: "3383"
-status: open
+status: resolved
 scope: ["we:scripts/operations/wip-report.mjs", "we:scripts/operations/wip-report-io.mjs", "we:scripts/operations/wip-report-cli.mjs", "we:scripts/operations/__tests__/wip-report-readable.test.mjs", "we:scripts/operations/wip-report-next.mjs", "we:scripts/operations/__tests__/wip-report-next.test.mjs"]
 dateOpened: "2026-09-21"
+dateResolved: "2026-09-29"
 preparedDate: "2026-09-21"
 preparedAgainstSha: "afd7d5118eeee0afa4c4a2cac0f1259eb3fda9ae"
 relatedTo: ["3819"]
