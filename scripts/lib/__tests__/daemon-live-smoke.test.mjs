@@ -39,16 +39,24 @@ import {
 } from '../daemon-live-smoke.mjs';
 
 /**
- * xp4lw2v — every pre-existing `runChild` fixture in this file predates the two new checks
- * (`dispatch-dry-run`/`tree-stays-clean`) and knows nothing about them. Wrapping a fixture with this makes it
- * answer both trivially (a PASSING dispatch-dry-run row, a CLEAN git status) so a test written to assert
- * something about the original five checks keeps meaning what it always meant — without every fixture in this
- * file having to learn about two checks it isn't testing. Tests that DO exercise the new checks build their own
- * `runChild` instead of using this (see the `dispatch-dry-run` / `tree-stays-clean` describe blocks below).
+ * xp4lw2v (#4468 extended) — every pre-existing `runChild` fixture in this file predates the checks added since
+ * (`dispatch-dry-run`/`tree-stays-clean`/`daemon-entries-boot`) and knows nothing about them. Wrapping a fixture
+ * with this makes every one of them answer trivially (a PASSING row, a CLEAN git status) so a test written to
+ * assert something about the ORIGINAL checks keeps meaning what it always meant — without every fixture in this
+ * file having to learn about a check it isn't testing. Both `dispatch-dry-run` and `daemon-entries-boot` spawn
+ * `node --input-type=module -e <script>`; the two scripts are told apart by a distinguishing marker only the
+ * boot-smoke one contains (`// daemon-boot-smoke:entry-boot` — #4468 review: `daemon-boot-smoke.mjs` now spawns
+ * ONE child PER entry, each a single-entry script, never a shared multi-entry one, so this stub answers each
+ * of those calls individually too), so each gets a correctly-shaped stub reply rather than a one-size-fits-all
+ * row neither check's own parsing actually expects. Tests that DO exercise one of the newer checks build their
+ * own `runChild` instead of using this.
  */
 function withNewCheckDefaults(fn) {
   return vi.fn(async (cmd, args, opts) => {
-    if (cmd === 'node' && args[0] === '--input-type=module') return '[{"kind":"stub","pr":null,"ok":true}]';
+    if (cmd === 'node' && args[0] === '--input-type=module') {
+      if (String(args[2] || '').includes('daemon-boot-smoke:entry-boot')) return '{"ok":true}';
+      return '[{"kind":"stub","pr":null,"ok":true}]';
+    }
     if (cmd === 'git' && args[0] === 'status') return '';
     return fn(cmd, args, opts);
   });
@@ -195,12 +203,15 @@ describe('classifySmokeFailure — pure, transient vs. code', () => {
       // has no `codeEntries` at all, so it (and the `beforePorcelain` snapshot `runLiveSmoke` takes up front,
       // unconditionally, before any skip logic) both still call through to `runChild` with a real `git status`.
       expect(ran(runChild)).toEqual(['status --porcelain', 'gh api', 'gh pr', 'status --porcelain']);
-      expect(smoke.results.filter((r) => r.skipped).map((r) => r.name)).toEqual(['lane-pool-list', 'lane-acquire-release', 'reconcile-dry-run', 'dispatch-dry-run']);
+      // #4468 — `daemon-entries-boot`'s codeEntries (DAEMON_ENTRY_MODULES) fall into this fixture's SAME
+      // else-branch as reconcile-dry-run/dispatch-dry-run (its own `entries[0]` is never `scripts/lane-pool.mjs`),
+      // so a backlog-only move skips it too — correct: it runs no code the diff touched either.
+      expect(smoke.results.filter((r) => r.skipped).map((r) => r.name)).toEqual(['lane-pool-list', 'lane-acquire-release', 'reconcile-dry-run', 'dispatch-dry-run', 'daemon-entries-boot']);
     });
     it('a move touching lane-pool code re-runs the lane checks (and only those tree checks)', async () => {
       const runChild = runChildFor();
       const smoke = await runLiveSmoke({ root: '/x', env: {}, runChild, changedFiles: ['scripts/lib/lane-pool-paths.mjs'], closureOf });
-      expect(smoke.results.filter((r) => r.skipped).map((r) => r.name)).toEqual(['reconcile-dry-run', 'dispatch-dry-run']);
+      expect(smoke.results.filter((r) => r.skipped).map((r) => r.name)).toEqual(['reconcile-dry-run', 'dispatch-dry-run', 'daemon-entries-boot']);
     });
     it('an unknown diff (null) or an incomplete closure runs everything, as before', async () => {
       for (const opts of [{ changedFiles: null, closureOf }, { changedFiles: ['backlog/1.md'], closureOf: () => ({ files: new Set(), complete: false, bareDeps: false, jsonNames: new Set() }) }]) {
@@ -210,13 +221,13 @@ describe('classifySmokeFailure — pure, transient vs. code', () => {
     });
     it('runLiveSmokeWithRetry forwards changedFiles', async () => {
       const runChild = runChildFor();
-      // Real closure of this repo: a backlog-only change touches none of the four tree-code checks
-      // (lane-pool-list, lane-acquire-release, reconcile-dry-run, dispatch-dry-run) — `tree-stays-clean` has no
-      // `codeEntries` and is never skipped.
+      // Real closure of this repo: a backlog-only change touches none of the five tree-code checks
+      // (lane-pool-list, lane-acquire-release, reconcile-dry-run, dispatch-dry-run, daemon-entries-boot — #4468)
+      // — `tree-stays-clean` has no `codeEntries` and is never skipped.
       const root = join(fileURLToPath(import.meta.url), '..', '..', '..', '..');
       const r = await runLiveSmokeWithRetry({ root, env: {}, runChild, changedFiles: ['backlog/4143.md'] });
       expect(r.verdict).toBe('pass');
-      expect(r.smoke.results.filter((x) => x.skipped)).toHaveLength(4);
+      expect(r.smoke.results.filter((x) => x.skipped)).toHaveLength(5);
     });
   });
 
@@ -500,7 +511,12 @@ describe('runLiveSmokeWithRetry — retries a transient verdict, never a code on
       import { runLiveSmokeWithRetry } from ${JSON.stringify(moduleUrl)};
       let call = 0;
       const runChild = async (cmd, args) => {
-        if (cmd === 'node' && args[0] === '--input-type=module') return '[{"kind":"stub","pr":null,"ok":true}]';
+        if (cmd === 'node' && args[0] === '--input-type=module') {
+          // #4468 — daemon-entries-boot spawns ONE child PER entry, each a single-entry script marked
+          // '// daemon-boot-smoke:entry-boot'; its own parsing needs a single {ok:true} object per such call.
+          if (String(args[2] || '').includes('daemon-boot-smoke:entry-boot')) return '{"ok":true}';
+          return '[{"kind":"stub","pr":null,"ok":true}]';
+        }
         if (cmd === 'git') return '';
         if (cmd === 'gh' && args[0] === 'api') { call += 1; if (call === 1) throw new Error('HTTP 503 Service Unavailable'); return '[]'; }
         if (args[1] === 'list') return '[]';
@@ -900,6 +916,44 @@ describe('dispatch-dry-run — injected runChild', () => {
     expect(dispatchRow.skipped).toBeUndefined();
     expect(runChild.mock.calls.some(([cmd, args]) => cmd === 'node' && args[0] === '--input-type=module')).toBe(true);
   });
+});
+
+describe('daemon-entries-boot — end-to-end through runLiveSmoke (#4468 review — the actual promise, not just the isolated check)', () => {
+  // The card's own goal is "reject a candidate that cannot boot" — this proves that promise through the REAL
+  // gate entry point (`runLiveSmoke`), not only through `checkDaemonEntriesBoot` in isolation: a genuinely
+  // broken entry (a real ESM circular-import TDZ fixture, via the check's own test-only env override) makes
+  // the WHOLE smoke `pass:false`, and the failure classifies `'code'` — never `'transient'` — so a rebuild
+  // would roll the candidate back and record the rejection, exactly as the live #2921 incident needed.
+  let dir;
+  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'daemon-live-smoke-boot-e2e-')); });
+  afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
+
+  it('a real broken entry fails the whole smoke, classified code (never transient)', async () => {
+    writeFileSync(join(dir, 'tdz-a.mjs'), "import { b } from './tdz-b.mjs';\nexport const a = 1;\nconsole.log(b);\n");
+    writeFileSync(join(dir, 'tdz-b.mjs'), "import { a } from './tdz-a.mjs';\nexport const b = a + 1;\n");
+    writeFileSync(join(dir, 'tdz-entry.mjs'), "import './tdz-a.mjs';\n");
+    const { runBounded } = await import('../bounded-child.mjs');
+    const runChild = vi.fn(async (cmd, args, opts = {}) => {
+      // Every OTHER check stubs clean here — ONLY `daemon-entries-boot`'s own real child (marked
+      // `daemon-boot-smoke:entry-boot`) is let through to the REAL `runBounded`, a genuine subprocess. This is
+      // the end-to-end proof: nothing about `daemon-entries-boot` is faked, only its five SIBLING checks are.
+      if (cmd === 'node' && args[0] === '--input-type=module' && String(args[2] || '').includes('daemon-boot-smoke:entry-boot')) {
+        return runBounded(cmd, args, opts);
+      }
+      if (cmd === 'node' && args[0] === '--input-type=module') return '[{"kind":"stub","pr":null,"ok":true}]';
+      if (cmd === 'git' && args[0] === 'status') return '';
+      if (args[1] === 'list') return '[]';
+      if (args[1] === 'acquire') return JSON.stringify({ lane: 1 });
+      return '';
+    });
+    const env = { ...process.env, WE_SMOKE_DAEMON_ENTRIES: 'tdz-entry.mjs' };
+    const smoke = await runLiveSmoke({ root: dir, env, runChild });
+    const bootRow = smoke.results.find((r) => r.name === 'daemon-entries-boot');
+    expect(bootRow.ok).toBe(false);
+    expect(bootRow.detail).toContain('tdz-entry.mjs');
+    expect(smoke.pass).toBe(false);
+    expect(classifySmokeFailure(smoke.results)).toBe('code');
+  }, 15_000);
 });
 
 describe('tree-stays-clean — injected runChild', () => {
