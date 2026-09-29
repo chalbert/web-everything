@@ -240,12 +240,20 @@ function cliPlanTick(payload) {
   return JSON.parse(text);
 }
 
-async function cliFetchOpenPrs() {
-  const { defaultFetchOpenPrs } = await import('../../scripts/conveyor/open-pr-fetch.mjs');
+// #4351's own build-dispatch follow-up (guided by #4309 spend accounting) — this was the top GraphQL spender in the fleet (121
+// `gh pr list` calls/3h at ~50 points each, `gh-spend.mjs report --by=caller+op`): the full 13-field
+// `defaultFetchOpenPrs` query, once per constellation repo, every tick, even though `normalizeOpenPrs`/
+// `prDeliversNum` (build-dispatch-policy.mjs) read only `number`/`headRefName`/`labels`/`files`. Moved onto
+// `fetchOpenPrsRest` — the REST/ETag path scoped to exactly that field set (open-pr-fetch.mjs's own header) —
+// so this call now spends the `core` REST bucket, not `graphql`, and repeats cost a free `304` per unchanged PR.
+// EXPORTED so `breaks/build-dispatch-graphql-exhausted.mjs` (soak) can drive it directly against a PATH-faked
+// `gh` that fails the `graphql` bucket but serves `core` — the exact live incident this card fixes.
+export async function cliFetchOpenPrs() {
+  const { fetchOpenPrsRest } = await import('../../scripts/conveyor/open-pr-fetch.mjs');
   const { CONSTELLATION_REPOS } = await import('../../scripts/lib/constellation-repos.mjs');
   const out = [];
   for (const [key, { slug }] of Object.entries(CONSTELLATION_REPOS)) {
-    out.push({ repo: key, prs: defaultFetchOpenPrs({ repo: slug }) });
+    out.push({ repo: key, prs: fetchOpenPrsRest({ repo: slug }) });
   }
   return out;
 }
