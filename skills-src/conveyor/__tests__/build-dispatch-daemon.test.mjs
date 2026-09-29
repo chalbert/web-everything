@@ -1,7 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   runBuildDispatchTick, settleBookkeeping, readKillSwitch, readDispatchOutcome, KILL_SWITCH_ENV,
   cliListSettledBuilds, cliListHolds, policyFrom,
@@ -658,5 +660,45 @@ describe('cliListSettledBuilds / cliListHolds (the real readers, not a stub)', (
 
   it('cliListHolds is empty with no holds placed', () => {
     expect(cliListHolds()).toEqual([]);
+  });
+});
+
+// LIVE incident, 2026-09-29: this PR's own build-dispatch-orphan-adopt.mjs booted clean under every vitest
+// suite in this repo (this file included) but crashed the real daemon at startup once overlaid on the
+// builder clone — `ReferenceError: Cannot access 'DELIVER_ITEM_RUN_SCRIPT' before initialization` inside
+// `dispatch-provider-registry.mjs`, a classic ESM circular-import TDZ. THE REASON EVERY OTHER TEST IN THIS
+// FILE MISSED IT: vitest (and this file's own earlier imports) load the module graph in whatever order ITS
+// OWN import statements happen to reach each file first — a different order than `node
+// skills-src/conveyor/build-dispatch-daemon.mjs` reaches it as the FIRST thing Node evaluates, which is the
+// one order that actually matters (it is exactly what launchd invokes — see
+// `launchd/com.we.build-dispatch-daemon.plist.example`'s own `ProgramArguments`). An in-process
+// `import(...)` of the same file from inside an already-running vitest worker is not a safe substitute for
+// this reason either: by then several of this daemon's own dependencies are already warm in the SAME
+// process's module cache from earlier tests, which can hide precisely this class of ordering bug. So this
+// spawns a REAL, FRESH `node` subprocess with no flags at all — the daemon's own `main()` prints its usage
+// and exits 2 before touching any state, network or filesystem, which happens strictly AFTER every static
+// import in its whole module graph has already finished evaluating; a TDZ anywhere in that graph throws
+// during the import phase, before `main()` is ever reached, and Node reports it as an uncaught
+// `ReferenceError` on stderr with exit code 1 — never the clean usage text on exit 2.
+describe('build-dispatch-daemon.mjs boots as a fresh `node` process — the class of bug a vitest import cannot catch', () => {
+  const ENTRY = resolve(fileURLToPath(import.meta.url), '..', '..', 'build-dispatch-daemon.mjs');
+
+  it('a fresh `node <entry>` process (no flags) evaluates its ENTIRE static import graph and reaches its own '
+    + 'usage text (exit 2) — never a ReferenceError/TDZ from a circular import reached only at real process '
+    + 'startup (exit 1, with the module graph never even fully loading)', () => {
+    // `main()`'s own usage block is a KNOWN, EXPECTED non-zero exit (2) — `execFileSync` throws on it exactly
+    // as it would on the crash this test exists to catch, so BOTH outcomes are read from the caught error;
+    // what tells them apart is the exit code and stderr's own text, never "did it throw".
+    let stderr = '';
+    let status = 0;
+    try {
+      execFileSync('node', [ENTRY], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    } catch (e) {
+      stderr = String(e.stderr ?? '');
+      status = e.status;
+    }
+    expect(stderr).not.toMatch(/ReferenceError|before initialization/);
+    expect(stderr).toMatch(/^usage: build-dispatch-daemon\.mjs/);
+    expect(status).toBe(2);
   });
 });
