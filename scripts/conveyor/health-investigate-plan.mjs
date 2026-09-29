@@ -28,10 +28,12 @@ import { PATH_PATTERNS, CODE_PATTERNS, scrubReasons } from '../lib/secret-scrub.
  * Smells whose OPEN episode inhibits every investigation dispatch (4065 clause 2: "while no inhibiting episode
  * (App token / rate limit, host load) is open"). An agent started under one of these would spend its 20 minutes
  * reading the SAME outage every other episode is a symptom of, and would itself add load or gh calls to it.
- * `claude-auth-expired` is here too: a dispatched session would fail on its first turn.
+ * `claude-auth-expired` is here too: a dispatched session would fail on its first turn. `github-app-token` (#4066:
+ * an expired App token or an empty REST bucket) breaks the gh shim the investigator reads through.
  */
 export const INHIBITING_SMELLS = Object.freeze(new Set([
   'bad-credentials', 'gh-graphql-budget', 'gh-call-failures', 'machine-overload', 'claude-auth-expired',
+  'github-app-token',
 ]));
 
 export const LEDGER_STATUSES = Object.freeze(['running', 'finished', 'stopped-wall-clock', 'dispatch-failed']);

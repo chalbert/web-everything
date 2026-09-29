@@ -58,7 +58,8 @@ import { CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
 // this probe's notion of "a daemon clone" can never drift from the guards'.
 import { daemonCloneRoots } from '../lib/daemon-clone-registry.mjs';
 import { workspaceOf } from '../lib/automation-home.mjs';
-import { readGithubAppStatus } from '../lib/github-app-auth-env.mjs';
+import { readGithubAppStatus, defaultCachePath } from '../lib/github-app-auth-env.mjs';
+import { resolvePrLimit, readLimitState, isGlobalOffNow } from '../lib/pr-limit.mjs';
 import { ghThrottleLockRoot, ghThrottleLogPath, budgetProbeArgs } from '../lib/gh-throttle.mjs';
 import { persistSpendHours } from '../lib/gh-spend.mjs';
 import { readSharedOpenPrs } from '../lib/pr-snapshot.mjs';
@@ -427,18 +428,51 @@ export function probeGraphqlBudget({ exec = run, lockRoot = ghThrottleLockRoot()
   return { sample, blocks };
 }
 
+/** #4066 `open-prs-over-limit`'s input: the open-PR backpressure limit per repo key and whether the operator has
+ *  it globally off — both read through `we:scripts/lib/pr-limit.mjs`'s own resolvers, never re-derived. */
+export function probePrLimit({ env = process.env, readState = readLimitState, nowMs = Date.now() } = {}) {
+  const limits = Object.fromEntries(Object.keys(CONSTELLATION_REPOS).map((k) => [k, resolvePrLimit(k, env)]));
+  const globalOff = String(env.WE_PR_LIMIT_OFF || '') === '1' || isGlobalOffNow(readState(), nowMs);
+  return { limits, globalOff };
+}
+
+/** #4066 `github-app-token`'s cache read: ONLY `expiresAt` from the shared App token cache — the token itself is
+ *  never read into the health process. `{present:false}` when there is no cache (App auth not configured). */
+export function probeAppToken({ path = defaultCachePath(), readFile = readFileSync, exists = existsSync } = {}) {
+  if (!exists(path)) return { present: false };
+  let expiresAt = null;
+  try { expiresAt = JSON.parse(readFile(path, 'utf8'))?.expiresAt ?? null; } catch { expiresAt = null; }
+  return { present: true, expiresAt: typeof expiresAt === 'string' ? expiresAt : null };
+}
+
+/** #4066 `github-app-token`'s REST headroom: `gh api rate_limit` `.resources.core` (`{limit, used, remaining,
+ *  reset}`). The rate_limit endpoint itself is free — it does not count against the bucket it reports. */
+export function probeRestBudget({ exec = run } = {}) {
+  const j = JSON.parse(String(exec('gh', budgetProbeArgs('core'), { timeoutMs: 15_000 }) || '{}'));
+  return { limit: j?.limit ?? null, used: j?.used ?? null, remaining: j?.remaining ?? null, reset: j?.reset ?? null };
+}
+
 export function probePrs({ exec = run } = {}) {
   const out = [];
   for (const { slug } of Object.values(CONSTELLATION_REPOS)) {
     // #gh-graphql-budget — the host-shared open-PR snapshot when this is the real `run` (never a test's fake exec).
     // `isDraft` (draft-first PRs, operator-approved 2026-09-27) — already part of `SNAPSHOT_FIELDS`, added here
     // so the `draft-not-promoted` smell can read it; the shared-cache path costs nothing extra for it.
-    const shared = exec === run ? readSharedOpenPrs({ repo: slug, fields: 'number,title,headRefName,labels,statusCheckRollup,updatedAt,isDraft' }) : null;
-    const rows = shared || JSON.parse(exec('gh', ['pr', 'list', '--repo', slug, '--state', 'open', '--limit', '100', '--json', 'number,title,headRefName,labels,statusCheckRollup,updatedAt,isDraft']));
+    // #4066 — `mergeable` + `comments` for the queue smells: `pr-stage-stall` classifies stages the stuck-PR
+    // watch's own way (needs `mergeable`) and reads its markers off the thread; `stood-down-prs` counts the
+    // stand-down markers. Both are already in the shared snapshot's field set, so the snapshot path costs nothing extra.
+    const fields = 'number,title,headRefName,labels,statusCheckRollup,updatedAt,isDraft,mergeable,comments';
+    const shared = exec === run ? readSharedOpenPrs({ repo: slug, fields }) : null;
+    const rows = shared || JSON.parse(exec('gh', ['pr', 'list', '--repo', slug, '--state', 'open', '--limit', '100', '--json', fields]));
     for (const pr of rows) {
       out.push({
         repo: slug, number: pr.number, title: pr.title, headRefName: pr.headRefName, updatedAt: pr.updatedAt,
         isDraft: !!pr.isDraft,
+        mergeable: pr.mergeable ?? null,
+        // Only what the marker readers need (leading line, time, trusted author) — never the whole comment record.
+        comments: (pr.comments || []).map((c) => ({
+          body: c.body, createdAt: c.createdAt, author: { login: c.author?.login ?? null }, viewerDidAuthor: c.viewerDidAuthor,
+        })),
         labels: (pr.labels || []).map((l) => ({ name: l.name })),
         // `status` (draft-first PRs, operator-approved 2026-09-27) — carried alongside `state`/`conclusion` so
         // `we:scripts/operations/pr-status.mjs#reduceCheckState` (the `draft-not-promoted` smell's own green
@@ -625,6 +659,18 @@ export async function tick(flags = {}) {
   probes.prEventsStatus = attempt('prEventsStatus', () => readPrEventsStatuses(flags['pr-events-state-dir'] || undefined));
   if (flags['graphql-budget-fixture']) probes.graphqlBudget = attempt('graphqlBudget', () => JSON.parse(readFileSync(flags['graphql-budget-fixture'], 'utf8')));
   else if (!flags['no-gh']) probes.graphqlBudget = attempt('graphqlBudget', () => probeGraphqlBudget());
+  // #4066 `github-app-token` — every tick: the App token cache's expiry (fs, never the token) and the REST core
+  // bucket (`gh api rate_limit`, free). `restBudget` is `null` (not skipped) under `--no-gh` or on a failed read, so
+  // the token subject still evaluates; a failed read is still a probe error. Fixture flags in tests.
+  // A fixture tick (`--lock-root` with no `--app-token-cache`) never reads the host's real cache — its expiry would
+  // make the test's episodes depend on the machine it runs on (same rule as `spendFixtureOnly` below).
+  probes.appToken = flags['lock-root'] && !flags['app-token-cache'] ? { present: false }
+    : attempt('appToken', () => probeAppToken(flags['app-token-cache'] ? { path: flags['app-token-cache'] } : {}));
+  probes.restBudget = flags['rest-budget-fixture']
+    ? attempt('restBudget', () => JSON.parse(readFileSync(flags['rest-budget-fixture'], 'utf8'))) ?? null
+    : (flags['no-gh'] ? null : attempt('restBudget', () => probeRestBudget()) ?? null);
+  // #4066 `open-prs-over-limit` — fs/env only; pairs with the gh-cadenced `prs` read below.
+  probes.prLimit = attempt('prLimit', () => probePrLimit());
 
   const ghCache = prev.ghCache || {};
   const ghDue = !flags['no-gh'] && (flags['force-gh'] || !ghCache.at || now - ghCache.at >= GH_CADENCE_MS);
