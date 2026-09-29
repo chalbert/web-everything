@@ -3,10 +3,11 @@ bornAs: x3ei6wr
 kind: story
 size: 3
 tier: pinned
-status: active
+status: resolved
 scope: ["we:scripts/lib/main-staleness.mjs", "we:scripts/operations/review-dispatch.mjs"]
 dateOpened: "2026-09-28"
 dateStarted: "2026-09-29"
+dateResolved: "2026-09-29"
 tags: []
 ---
 
