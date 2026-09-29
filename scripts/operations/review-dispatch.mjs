@@ -596,7 +596,7 @@ export function dispatchReview({
   const argv = buildAgentArgv({
     table: { ...tierDecision, model: tierDecision.tier },
     sessionId,
-    payload: { prompt, sessionSlug: planned.sessionSlug },
+    payload: { prompt, sessionSlug: planned.sessionSlug, launchKind: 'review' },
     systemPromptFile: REVIEW_DISPATCH_SYSTEM_PROMPT_FILE,
     extraArgs: [...reviewDispatchDisallowedToolsArgs(), ...extraArgs],
     // #x8mpubm follow-up / #4174 — resolved once, here, for this FRESH dispatch, mirroring

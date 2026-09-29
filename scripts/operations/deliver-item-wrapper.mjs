@@ -1790,7 +1790,7 @@ function runConvergeRedTeam(redTeam, { lane, item, round, material, run: runFn, 
 export function buildConvergeEditorArgv({ sessionId, prompt, settingsFile }) {
   return [
     '--restricted', '--tools', RESTRICTED_PROVIDER_TOOLS, '--strict-mcp-config', '--disable-slash-commands',
-    '--settings', settingsFile, '--output-format', 'json',
+    '--settings', settingsFile, '--output-format', 'json', '--model', 'sonnet',
     '-p', '--session-id', String(sessionId), prompt,
   ];
 }

@@ -20,7 +20,7 @@
  * `TypeError: ... is not a function` / `undefined` on pre-#3906 main.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 
 import { advanceWhileRunning, startRun } from '../engine.mjs';
@@ -33,7 +33,7 @@ import {
 } from '../dispatch-lane.mjs';
 import {
   REPO_ROOT, readTick, createDispatchSinks, buildAgentArgv, workerModelTable, resolveWorkerModel,
-  defaultReadScorecards,
+  defaultReadScorecards, defaultClaudeProvider,
 } from '../dispatch-lane-io.mjs';
 import { decideDispatchRoute } from '../../lib/dispatch-contracts.mjs';
 
@@ -432,6 +432,49 @@ describe('(e) buildAgentArgv with a table, and resolveWorkerModel\'s own shape',
   const TABLE = { tier: 'sonnet', model: 'sonnet', reason: "the standard's default" };
   const payload = { prompt: '# build #9001', sessionSlug: 'conveyor-9001' };
 
+  it.each([...LAUNCH_KINDS, 'review', 'inspect'])('%s always gets exactly one explicit model', (launchKind) => {
+    const argv = buildAgentArgv({ payload: { ...payload, launchKind } });
+    expect(argv.filter((arg) => arg === '--model')).toHaveLength(1);
+    expect(argv[argv.indexOf('--model') + 1]).toBe(launchKind === 'prepare-decision' ? 'opus' : 'sonnet');
+  });
+
+  it.each(LAUNCH_KINDS)('the Claude provider forwards the %s kind to model resolution', (launchKind) => {
+    let argv;
+    defaultClaudeProvider({ prompt: payload.prompt, launchKind }, {
+      spawnAgent: (args) => { argv = args; return 'backgrounded · abc123 · worker'; },
+    });
+    expect(argv.filter((arg) => arg === '--model')).toHaveLength(1);
+    expect(argv[argv.indexOf('--model') + 1]).toBe(launchKind === 'prepare-decision' ? 'opus' : 'sonnet');
+  });
+
+  it.each([
+    { payload: { ...payload, launchKind: 'unregistered-kind' } },
+    { payload, table: { tier: 'unknown', model: null } },
+    { payload, extraArgs: ['--model', '   '] },
+    { payload, extraArgs: ['--model'] },
+  ])('refuses a fresh spawn with no resolvable model: %j', (options) => {
+    expect(() => buildAgentArgv(options)).toThrow(/resolvable --model/);
+    try { buildAgentArgv(options); } catch (error) { expect(error.notApplied).toBe(true); }
+  });
+
+  it('refuses an unresolved model before the provider can spawn', () => {
+    const spawnAgent = vi.fn();
+    expect(() => defaultClaudeProvider({ prompt: payload.prompt, launchKind: 'unregistered-kind' }, { spawnAgent }))
+      .toThrow(/resolvable --model/);
+    expect(spawnAgent).not.toHaveBeenCalled();
+  });
+
+  it('a resume retains its model even when no fresh model resolves', () => {
+    expect(buildAgentArgv({ payload, table: { model: null }, resumeSessionId: 'existing' }))
+      .toEqual(['--bg', '--resume', 'existing', payload.prompt]);
+  });
+
+  it('normalizes repeated explicit choices to one model without changing the last choice', () => {
+    const argv = buildAgentArgv({ payload, extraArgs: ['--model', 'sonnet', '--model=opus'] });
+    expect(argv.filter((arg) => arg === '--model')).toHaveLength(1);
+    expect(argv[argv.indexOf('--model') + 1]).toBe('opus');
+  });
+
   it('injects exactly ONE --model from the table', () => {
     const argv = buildAgentArgv({ sessionId: 's1', payload, table: TABLE });
     expect(argv.filter((a) => a === '--model')).toHaveLength(1);
@@ -475,7 +518,7 @@ describe('(e) buildAgentArgv with a table, and resolveWorkerModel\'s own shape',
       .toThrow(/Fable/);
   });
 
-  it('with `table: null`, extraArgs pass through BYTE-IDENTICAL to before #3857 — no refusal, no injected model', () => {
+  it('with `table: null`, an existing explicit model is preserved', () => {
     const argv = buildAgentArgv({ sessionId: 's1', payload, extraArgs: ['--model', 'opus'] });
     expect(argv).toEqual([
       '--bg', '-n', 'conveyor-9001',

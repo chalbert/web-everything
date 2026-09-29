@@ -500,3 +500,11 @@ card loading through `readTick` and spawn argv: a pure router test cannot catch
 `findItem` dropping frontmatter risk. Review daemon fixtures must inject both
 `readPrs` and `readAgents` to exercise its shared PR snapshot; that snapshot carries
 escalation reasons and touched paths into the session model selection.
+
+### Explicit Claude spawn models
+
+Operator rule (2026-09-29): every fresh daemon-launched Claude session must pass an explicit
+`--model`; only `--resume` retains the existing session's model. `buildAgentArgv` refuses an
+unresolvable model with `notApplied`. Its launch-kind table test covers every `LAUNCH_KINDS`
+member, plus review/inspect, and the provider test checks that kind survives request narrowing.
+Preserve routed choices; defaults use `workerTierFor` and `CLAUDE_SPAWN_MODEL_BY_TIER`.

@@ -15,6 +15,12 @@ the tier in the transcript, so a bad routing call is something the user can see 
 silently paying for. Outside `/workflow` there is no test gate or drain to catch a cheap model's
 confident-but-wrong return, so the tier is the only control there.
 
+**Extended to daemon spawns (user, 2026-09-29 ~6:30 PM ET: "We should always specify models"):** every
+session a daemon launches (builds, fixes, ci-heal, reviews, prepare agents, jurors, Codex/agy runs) passes an
+explicit model. A spawn that would fall to the CLI default is a bug. Found live that day: review sessions and
+builder builds silently ran on the CLI default (Opus 5.5) because no `--model` was passed. Enforced in the
+launcher (it refuses to spawn without a model), not by habit.
+
 **How to apply:** route on the *shape of the return* — knowable before spawning — never on self-rated
 difficulty (self-rating is banned where the verdict is emitted — `docs/agent/backlog-workflow.md` §
 *Model routing*, the codified home of [[delegate-by-default-the-loop-only-orchestrates]]).
