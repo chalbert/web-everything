@@ -2,12 +2,13 @@
 bornAs: xzbfgxe
 kind: story
 size: 3
-status: open
+status: active
 priority: high
 tier: pinned
 rank: r
 scope: ["we:scripts/conveyor/ci-heal-mark.mjs", "we:scripts/conveyor/ci-heal-escalation-mark.mjs", "we:scripts/review-set-label.mjs", "we:scripts/lib/review-label-provider.mjs", "we:scripts/lib/gh-throttle.mjs", "we:scripts/operations/ci-heal-pr-dispatch.mjs", "we:scripts/conveyor/reconcile-core.mjs", "we:scripts/conveyor/__tests__/ci-heal-mark.test.mjs", "we:scripts/conveyor/__tests__/ci-heal-escalation-mark.test.mjs", "we:scripts/operations/__tests__/ci-heal-pr-dispatch.test.mjs", "we:scripts/conveyor/__tests__/reconcile-core.test.mjs"]
 dateOpened: "2026-09-28"
+dateStarted: "2026-09-29"
 preparedDate: "2026-09-28"
 preparedAgainstSha: "787f3988a8e5eeed78bd8d994ad9d513d489423b"
 tags: []
@@ -76,3 +77,10 @@ A handful of daemon-posted GitHub writes (the CI-heal counter comments, review-s
 
 1. **Executable** — `npx vitest run` over `we:scripts/conveyor/__tests__/ci-heal-mark.test.mjs`, `we:scripts/conveyor/__tests__/ci-heal-escalation-mark.test.mjs`, `we:scripts/operations/__tests__/ci-heal-pr-dispatch.test.mjs`, `we:scripts/conveyor/__tests__/reconcile-core.test.mjs`, plus the touched `we:scripts/conveyor/advisory-fix-mark.mjs` test file, fails on `main` today (new cases) and passes after this lands; `npm run check:standards` passes.
 2. **Observable** — a budget-refused CI-heal/escalation write is recorded owed (not silently dropped) and is posted exactly once by the next `ci-heal-pr-dispatch` tick, with no shared queue or replay daemon involved; a review verdict whose label write was dropped is no longer permanently stuck behind the `already-reviewed-head` short-circuit. Shown live per the proof plan.
+
+## Progress
+
+- 2026-09-29 — built (tasks 1–5). New `we:scripts/conveyor/ci-heal-owed.mjs` is the one shared primitive (sharing stayed trivial): one JSON file per `(repo, pr, kind)` under `<gh-throttle lock root>/ci-heal-owed/`, written by atomic rename (so two callers owing different writes can't lose each other's record), plus the single-sourced `postPrComment` both CLIs and the flush go through. `we:scripts/conveyor/ci-heal-mark.mjs#buildCiHealComment` gains a `head: <sha>` second line (`--head`, else local `git rev-parse HEAD`). On a budget refusal (`gh-throttle`'s budget-blocked/exhausted text, via `isRateLimitShaped`) both CLIs record the write owed and exit 0 with `owed:true`. `we:scripts/operations/ci-heal-pr-dispatch.mjs#runReconcileCiHealDispatch` flushes owed writes for its repo first, before the reconcile read: merged/closed → dropped as moot; head-matched marker already live → cleared; else posted. Bounded at 6h / 24 tries.
+- Task 4 finding: tightening `already-reviewed-head` to "label must match" on its own would have removed the #2588 guard completely. On a first accept the comment posts before the label swap, and any `review:pending` head with an accept marker already has a mismatched label, so every such head would get re-dispatched. The tightening is gated on time instead: `we:scripts/conveyor/reconcile-core.mjs#acceptLabelDropped` fires only for `review:pending` (never `review:human`) when the accept comment is older than `ACCEPT_LABEL_GRACE_MS` (15 min). The PR then falls through to the ordinary review dispatch with `relabelOwed: true`. If there's no clock or no comment timestamp, it fails closed to the old refusal. All three `dispatchReviewRow` callers are covered (the OWED table, owed-ci-rerun parallel, not-a-ci-break parallel).
+- Also stubbed the flush in `we:scripts/lib/daemon-live-smoke.mjs` (a smoke never writes to GitHub) and `we:scripts/conveyor/__tests__/fix-dispatch-queue-cap.test.mjs`.
+- Not done here: the live proof plan (needs real GitHub writes on a throwaway PR).

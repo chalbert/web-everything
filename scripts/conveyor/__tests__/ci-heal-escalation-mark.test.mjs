@@ -12,8 +12,10 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   buildCiHealEscalationComment, parseCiHealEscalations, latestCiHealEscalationForHead,
-  CI_HEAL_ESCALATION_MARKER, CI_HEAL_ESCALATION_OUTCOMES,
+  CI_HEAL_ESCALATION_MARKER, CI_HEAL_ESCALATION_OUTCOMES, postOrOweCiHealEscalation,
 } from '../ci-heal-escalation-mark.mjs';
+import { owedWriteAlreadyLive } from '../ci-heal-owed.mjs';
+import { budgetBlockedMessage } from '../../lib/gh-throttle.mjs';
 
 const AUTOMATION = { login: 'web-everything' };
 const HEAD = '70326866f0f299ddd005f9da54f0b87a3c169ac4'; // PR #2783's real head, 2026-09-27
@@ -171,5 +173,39 @@ describe('fix-agent-ci-brief.md — every escalation marker targets the head thi
     expect(captureIndex).toBeGreaterThan(-1);
     const firstMarkerCallIndex = BRIEF.indexOf(markerCalls[0]);
     expect(captureIndex).toBeLessThan(firstMarkerCallIndex);
+  });
+});
+
+// we:backlog/4352 — the escalation-marker sibling of ci-heal-mark's owed-on-budget-refusal case.
+describe('#4352 — postOrOweCiHealEscalation', () => {
+  const REPO = { key: 'we', slug: 'chalbert/web-everything' };
+  const budgetError = () => {
+    const stderr = budgetBlockedMessage({ resource: 'graphql', until: 'soon' });
+    return Object.assign(new Error(`Command failed\n${stderr}`), { status: 1, stderr });
+  };
+  const body = buildCiHealEscalationComment({ headSha: HEAD, outcome: 'needs-human', reason: 'r' });
+
+  it('a budget-refused escalation is recorded owed under its own kind, keyed by the head it already carries', () => {
+    const owed = [];
+    const out = postOrOweCiHealEscalation({
+      pr: 2783, body, headSha: HEAD, repo: REPO, post: () => { throw budgetError(); }, owe: (r) => { owed.push(r); return r; },
+    });
+    expect(out.commented).toBe(false);
+    expect(owed).toEqual([{ repo: 'we', slug: 'chalbert/web-everything', pr: 2783, kind: 'ci-heal-escalation', headSha: HEAD, body }]);
+  });
+
+  it('a successful post owes nothing; a non-budget failure still throws', () => {
+    const owe = () => { throw new Error('must not owe'); };
+    expect(postOrOweCiHealEscalation({ pr: 1, body, headSha: HEAD, repo: REPO, post: () => '', owe })).toEqual({ commented: true });
+    expect(() => postOrOweCiHealEscalation({ pr: 1, body, headSha: HEAD, repo: REPO, post: () => { throw new Error('HTTP 422'); }, owe })).toThrow(/422/);
+  });
+
+  it('the owed dedupe check agrees with latestCiHealEscalationForHead — same head matches, another head does not', () => {
+    const rec = { kind: 'ci-heal-escalation', headSha: HEAD, body };
+    const live = [{ body, author: AUTOMATION }];
+    expect(latestCiHealEscalationForHead(live, HEAD)).not.toBeNull();
+    expect(owedWriteAlreadyLive(live, rec)).toBe(true);
+    const other = buildCiHealEscalationComment({ headSha: 'f'.repeat(40), outcome: 'needs-human' });
+    expect(owedWriteAlreadyLive([{ body: other, author: AUTOMATION }], rec)).toBe(false);
   });
 });

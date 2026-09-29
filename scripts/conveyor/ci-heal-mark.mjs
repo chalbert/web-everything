@@ -37,6 +37,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 import { isTrustedMarkerAuthor } from '../lib/marker-authorship.mjs';
 import { REVIEW_LABELS, hasReviewLabel } from '../lib/review-escalation.mjs';
+import { isBudgetRefusal, postPrComment, recordOwedWrite, resolveOwedRepo } from './ci-heal-owed.mjs';
 
 /**
  * we:scripts/conveyor/ci-heal-mark.mjs#CI_HEAL_COMMENT_MARKER — the stable FIRST LINE of the durable CI-heal comment.
@@ -71,20 +72,61 @@ export function countCiHealComments(comments) {
 /**
  * we:scripts/conveyor/ci-heal-mark.mjs#buildCiHealComment — the durable comment body a completed heal posts. Its
  * FIRST line MUST be {@link CI_HEAL_COMMENT_MARKER} (single-sourced) so posting and counting can never drift. Pure.
- * @param {{ actor?:string, reason?:string }} o
+ *
+ * #4352 — when `headSha` is known it rides on the SECOND line as `head: <sha>` (the same field shape
+ * `ci-heal-escalation-mark.mjs` already uses), so an owed retry can tell "THIS heal's comment already landed" from
+ * "an older, unrelated heal posted its own marker" (`ci-heal-owed.mjs#owedWriteAlreadyLive`). Additive only: the
+ * count above matches the first line alone, so the cap is unaffected.
+ * @param {{ actor?:string, reason?:string, headSha?:string }} o
  * @returns {string}
  */
-export function buildCiHealComment({ actor = 'conveyor CI-heal agent', reason = '' } = {}) {
+export function buildCiHealComment({ actor = 'conveyor CI-heal agent', reason = '', headSha = '' } = {}) {
   const why = reason === 'behind' ? 'the branch had fallen BEHIND `main`'
     : reason === 'red-ci' ? 'a required check had gone red after open'
     : 'a required check regressed after open';
+  const head = typeof headSha === 'string' ? headSha.trim().toLowerCase() : '';
   return [
     CI_HEAL_COMMENT_MARKER,
+    ...(head ? [`head: ${head}`] : []),
     '',
     `${why}; ${actor} rebased onto current \`main\`, repaired the failing check, and re-pushed HEAD.`,
     'Only the CI axis was repaired — the review gate (`review:human` / `review:pending`) was NOT touched. A human ' +
       '`/review` (or the drain AI-review) still verdicts as before; the drain lands it once green and reviewed.',
   ].join('\n');
+}
+
+/**
+ * we:scripts/conveyor/ci-heal-mark.mjs#resolveHealHead — the head sha this heal's comment is FOR (#4352).
+ * `--head` wins; otherwise the local `HEAD` of the lane clone the agent just pushed from — a local git read,
+ * never a GitHub one (a budget block that refused the comment would refuse that read too). `''` when neither.
+ * @param {{headFlag?:string, cwd?:string, exec?:Function}} o
+ * @returns {string}
+ */
+export function resolveHealHead({ headFlag, cwd, exec = execFileSync } = {}) {
+  if (typeof headFlag === 'string' && /^[0-9a-f]{7,40}$/i.test(headFlag.trim())) return headFlag.trim().toLowerCase();
+  try {
+    const sha = String(exec('git', ['rev-parse', 'HEAD'], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })).trim();
+    return /^[0-9a-f]{40}$/i.test(sha) ? sha.toLowerCase() : '';
+  } catch { return ''; }
+}
+
+/**
+ * we:scripts/conveyor/ci-heal-mark.mjs#postOrOweCiHealComment — post the heal comment; on a BUDGET refusal
+ * (`gh-throttle.mjs`'s `budget_blocked`/`budget_exhausted`), record it owed for
+ * `ci-heal-pr-dispatch.mjs#runReconcileCiHealDispatch`'s next-tick flush instead of dropping it (#4352, the
+ * `ci-heal-2821` incident). Any OTHER failure still throws — it is not a budget problem a later retry fixes.
+ * An owe needs a head sha (the dedupe key) and a constellation repo; without either the refusal throws as before.
+ * @returns {{commented:true}|{commented:false, owed:object}}
+ */
+export function postOrOweCiHealComment({ pr, body, headSha, repo, post = postPrComment, owe = recordOwedWrite }) {
+  try {
+    post({ pr, repo: repo?.slug, body });
+    return { commented: true };
+  } catch (e) {
+    if (!isBudgetRefusal(e) || !headSha || !repo) throw e;
+    const owed = owe({ repo: repo.key, slug: repo.slug, pr, kind: 'ci-heal', headSha, body });
+    return { commented: false, owed };
+  }
 }
 
 /**
@@ -132,19 +174,29 @@ if (IS_CLI) {
   };
   const pr = Number(positionals[0]);
   if (!Number.isInteger(pr) || pr <= 0) {
-    fail('usage: ci-heal-mark.mjs <pr> [--repo=<owner/name>] [--reason=<red-ci|behind>] [--actor=<name>]  (pr must be a positive integer)');
+    fail('usage: ci-heal-mark.mjs <pr> [--repo=<owner/name>] [--reason=<red-ci|behind>] [--actor=<name>] [--head=<sha>]  (pr must be a positive integer)');
   }
+  const headSha = resolveHealHead({ headFlag: typeof flags.head === 'string' ? flags.head : undefined });
   const body = buildCiHealComment({
     actor: typeof flags.actor === 'string' ? flags.actor : undefined,
     reason: typeof flags.reason === 'string' ? flags.reason : undefined,
+    headSha,
   });
-  const args = ['pr', 'comment', String(pr), '--body', body];
-  if (typeof flags.repo === 'string') args.push(`--repo=${flags.repo}`); // the heal agent runs in its WE lane clone; a missing --repo derives from cwd.
+  // The heal agent runs in its WE lane clone; a missing --repo derives from cwd (gh's own inference for the post,
+  // the local `origin` remote for the owed record's key).
+  const owedRepo = resolveOwedRepo({ repoFlag: typeof flags.repo === 'string' ? flags.repo : undefined });
+  let posted;
   try {
-    // #x5n4zn3 — was bare (no timeout).
-    execFileSync('gh', args, { stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8', timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL' });
+    posted = postOrOweCiHealComment({
+      pr, body, headSha, repo: owedRepo,
+      // The post itself targets exactly what the caller named (or gh's cwd inference) — unchanged from before.
+      post: ({ pr: n, body: b }) => postPrComment({ pr: n, repo: typeof flags.repo === 'string' ? flags.repo : undefined, body: b }),
+    });
   } catch (e) {
     fail(`could not post CI-heal comment on PR #${pr}: ${String(e.message || e).split('\n')[0]}`);
+  }
+  if (!posted.commented) {
+    process.stderr.write(`⚠ CI-heal comment on PR #${pr} refused by the GitHub budget — recorded owed (head ${headSha}); the next ci-heal-pr-dispatch tick posts it\n`);
   }
   // #2811 — THE ONE EXCEPTION (see this file's own header): a rebase+re-push just moved the head, so a live
   // `review:accepted` is now stale. Best-effort, never fatal to a heal that already succeeded — a read miss or
@@ -166,5 +218,5 @@ if (IS_CLI) {
     // Best-effort (see the header) — an unreadable label state or a failed rearm never fails this CLI's own
     // exit code; the stale acceptance (if any) is caught by the next push through this same path, or by a human.
   }
-  process.stdout.write(JSON.stringify({ ok: true, pr, commented: true, rearmed }) + '\n');
+  process.stdout.write(JSON.stringify({ ok: true, pr, commented: posted.commented, ...(posted.owed ? { owed: true } : {}), rearmed }) + '\n');
 }

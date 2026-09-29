@@ -147,7 +147,9 @@ import {
 // #2588/review-loops (epic #3383/#4075) — read-only reuse of the drain's OWN reviewed-sha marker (never a
 // second derivation): `parseReviewedSha` recovers the head an ACCEPT-shaped verdict (`accepted`/`clear-human`/
 // `restamp`) covered. See {@link planReconcile}'s ONE-REVIEW-PER-HEAD refusal for why this pass needs it too.
-import { parseReviewedSha, planConvertSupersededVerdict, targetedCheckQuestion } from '../lib/review-escalation.mjs';
+import {
+  parseReviewedSha, planConvertSupersededVerdict, targetedCheckQuestion, findAcceptVerdictComment, REVIEW_LABELS,
+} from '../lib/review-escalation.mjs';
 // live incident, chalbert/web-everything PR #2752 (#4034/#2748) — a PR whose own content is ALREADY on `main`,
 // carried there by a different PR that stacked on its branch and merged first, never owes a fix or a review.
 // The verdict itself (`pr.alreadyLandedInMain`, per-file blob-identity evidence) is computed by the IO shell
@@ -241,6 +243,9 @@ export const DISPATCH_KINDS = Object.freeze(['fix', 'review', 'ci-heal', 'conver
  *                          #2773 mutual-exclusivity heal) is not this risk at all — `review:human` already
  *                          forbids a second ACCEPT — so that shape dispatches `kind:'convert-advisory'` instead
  *                          of refusing here; see `planConvertSupersededVerdict` and {@link dispatchReviewRow}.
+ *                          we:backlog/4352 carved out a SECOND: a `review:pending` head whose accept comment is
+ *                          older than {@link ACCEPT_LABEL_GRACE_MS} lost its label write (budget-dropped), so it
+ *                          dispatches the ordinary `review` (`relabelOwed: true`) — see {@link acceptLabelDropped}.
  *   `already-landed`    — live incident, chalbert/web-everything PR #2752 (#4034/#2748): every file this PR
  *                          touches is byte-identical to some commit already on `main` — its own content was
  *                          carried there by a DIFFERENT PR (often one stacked on its branch that merged first)
@@ -1040,6 +1045,40 @@ export function foldReviewRefusalInto(row, withPhase, markerKey) {
 }
 
 /**
+ * we:scripts/conveyor/reconcile-core.mjs#ACCEPT_LABEL_GRACE_MS — how long an accept verdict comment may sit on a
+ * head WITHOUT its `review:accepted` label before this pass reads the label write as DROPPED rather than still in
+ * flight (we:backlog/4352). `review-set-label.mjs` posts the comment FIRST on a first accept
+ * (`review-label-provider.mjs#writeOrder`), so a tick can legitimately land in the seconds between the two writes;
+ * a window this wide is far past any live review session's own finish-to-label gap (the #2588 race), yet short
+ * enough that a budget-dropped label is recovered within the same half hour.
+ */
+export const ACCEPT_LABEL_GRACE_MS = 15 * 60_000;
+
+/**
+ * we:scripts/conveyor/reconcile-core.mjs#acceptLabelDropped — does this head's accept verdict comment exist while
+ * the label it should have produced does NOT (we:backlog/4352)? Pure. Every `reviewed-sha` marker is stamped by
+ * an ACCEPT-shaped verdict (`accepted`/`clear-human`/`restamp`), whose label is `review:accepted` — so a PR still
+ * `review:pending` on that exact head, well past {@link ACCEPT_LABEL_GRACE_MS}, is the stuck shape: the comment
+ * posted, the swap was refused (a GitHub budget block), and nothing else will ever re-run it.
+ *
+ * Deliberately `review:pending` ONLY. A `review:human` PR carrying an accept marker is either the #xconv1
+ * "accepted, then escalated" shape (legitimate — the label moved AFTER the verdict) or a dropped `clear-human`
+ * swap, which a re-dispatched review cannot repair anyway (only the human ceremony clears `review:human`).
+ * FAILS CLOSED: no clock (`now` 0), no timestamp on the verdict comment, or a still-fresh comment all answer
+ * `false`, keeping the original `already-reviewed-head` refusal.
+ * @param {{labels:string[], comments:Array<object>, headSha:string, now:number, graceMs?:number}} o
+ * @returns {boolean}
+ */
+export function acceptLabelDropped({ labels, comments, headSha, now, graceMs = ACCEPT_LABEL_GRACE_MS }) {
+  const names = Array.isArray(labels) ? labels : [];
+  if (!names.includes(REVIEW_LABELS.pending) || names.includes(REVIEW_LABELS.accepted) || names.includes(REVIEW_LABELS.human)) return false;
+  if (!now) return false;
+  const verdict = findAcceptVerdictComment(comments, headSha);
+  const at = verdict?.createdAt ? Date.parse(verdict.createdAt) : NaN;
+  return Number.isFinite(at) && now - at >= graceMs;
+}
+
+/**
  * we:scripts/conveyor/reconcile-core.mjs#dispatchReviewRow — the REVIEW decision, single-sourced: the ONE copy of
  * the three checks (`already-reviewed-head` #2588, then `no-findings`, then the shared attempt cap). BOTH callers
  * run through it — the ordinary `needs-review`/`needs-human` OWED-table path, and a SECOND population —
@@ -1068,9 +1107,10 @@ export function foldReviewRefusalInto(row, withPhase, markerKey) {
  * @param {(extra:object)=>void} o.refuseCapExhausted
  * @param {Array<object>} o.dispatch
  * @param {object} [o.extra] - extra fields carried on every row this produces.
+ * @param {number} [o.now] - epoch ms; only {@link acceptLabelDropped} reads it (0 = never treat a label as dropped).
  */
 function dispatchReviewRow({
-  pr, withPhase, base, attempts, roundCap, refuse, refuseCapExhausted, dispatch, extra = {},
+  pr, withPhase, base, attempts, roundCap, refuse, refuseCapExhausted, dispatch, extra = {}, now = 0,
 }) {
   // ── `draft` (draft-first PRs, operator-approved 2026-09-27) — checked FIRST, ahead of every other refusal
   // in this function, including `already-reviewed-head`: a draft PR is never owed a review no matter what its
@@ -1094,9 +1134,19 @@ function dispatchReviewRow({
   // with a stale marker: an accept moves the label to `review:accepted`, which the OWED table never owes a review
   // (phase `queued`) and the ci-red-parallel caller never calls this for (it is gated on `review:pending`) —
   // defended by the "accepted contribution awaiting its mechanical rebase's CI" test in reconcile-core.test.mjs.
+  //
+  // we:backlog/4352 — the marker alone OVER-TRUSTED "review is done": an accept whose `review:accepted` swap a
+  // GitHub budget block refused leaves the comment (it posts first) on a still-`review:pending` head, and this
+  // refusal then held it there forever — nothing else re-runs `review-set-label.mjs` for it. So the refusal now
+  // also requires the live label to agree with the verdict; a head whose label disagrees past the grace window
+  // ({@link acceptLabelDropped}) falls through to the ordinary review dispatch below — the existing re-run path,
+  // whose verdict run re-applies the label — carrying `relabelOwed: true` so the report names why.
   const headSha = typeof pr?.headRefOid === 'string' ? pr.headRefOid.trim().toLowerCase() : '';
   const reviewedSha = headSha ? parseReviewedSha(pr?.comments) : null;
-  if (headSha && reviewedSha && reviewedSha === headSha) {
+  const relabelOwed = !!(headSha && reviewedSha && reviewedSha === headSha)
+    && acceptLabelDropped({ labels: withPhase?.labels, comments: pr?.comments, headSha, now });
+  if (relabelOwed) extra = { ...extra, relabelOwed: true };
+  if (headSha && reviewedSha && reviewedSha === headSha && !relabelOwed) {
     // #xconv1 (chalbert/web-everything#2766/#2767 unblock, epic #3383/#4075) — a `needs-human` PR in this
     // EXACT shape (accepted, then escalated — never a fresh push, or `reviewedSha` would no longer equal
     // `headSha`) is NOT the #2588 risk this refusal exists for: `review-pr.mjs`'s own `confirm` step
@@ -1202,6 +1252,7 @@ function dispatchReviewRow({
  *   restart can reset is not a cap.
  * @param {number} [o.now] - epoch ms, used ONLY to age the surfaced permission-block notes. No decision reads it,
  *   so the plan for a given input is stable over time — a `stood-down` PR returns an identical result a week on.
+ *   (we:backlog/4352 exception: {@link acceptLabelDropped}'s grace window reads it; `0` keeps that check off.)
  * @param {number} [o.roundCap] - the attempt cap; defaults to `NEGOTIATION_ROUND_CAP` (5), single-sourced from
  *   `we:scripts/lib/jury-core.mjs` rather than re-declared here.
  * @param {number} [o.ciHealCap] - the `ci-red` attempt cap (multi-repo slice 7); defaults to
@@ -1633,7 +1684,7 @@ export function planReconcile({
         if (withPhase.labels.includes('review:pending')) {
           const foldRefusal = foldReviewRefusalInto(refusals[refusals.length - 1], withPhase, 'owedCiRerun');
           dispatchReviewRow({
-            pr, withPhase, base, attempts: roundAttempts(), roundCap,
+            pr, withPhase, base, attempts: roundAttempts(), roundCap, now,
             refuse: foldRefusal, refuseCapExhausted: capExhaustedVia(foldRefusal), dispatch,
             extra: { owedCiRerun: true },
           });
@@ -1720,7 +1771,7 @@ export function planReconcile({
           if (isNotCiBreak && withPhase.labels.includes('review:pending')) {
             const foldRefusal = foldReviewRefusalInto(refusals[refusals.length - 1], withPhase, 'ciHealNotCiBreak');
             dispatchReviewRow({
-              pr, withPhase, base, attempts: roundAttempts(), roundCap,
+              pr, withPhase, base, attempts: roundAttempts(), roundCap, now,
               refuse: foldRefusal, refuseCapExhausted: capExhaustedVia(foldRefusal), dispatch,
               extra: { ciHealNotCiBreak: true },
             });
@@ -2033,7 +2084,7 @@ export function planReconcile({
     // All three checks (the head guard, no-findings, the cap) live in {@link dispatchReviewRow} — the ONE copy,
     // shared with the ci-red-parallel review above (PR #2783 review: the review decision was duplicated here).
     if (OWED[phase] === 'review') {
-      dispatchReviewRow({ pr, withPhase, base, attempts: roundAttempts(), roundCap, refuse, refuseCapExhausted, dispatch });
+      dispatchReviewRow({ pr, withPhase, base, attempts: roundAttempts(), roundCap, refuse, refuseCapExhausted, dispatch, now });
       continue;
     }
 

@@ -248,3 +248,17 @@ describe('PR #2800 — a FORGED advisory note from an untrusted login is ignored
     });
   }
 });
+
+// we:backlog/4352 — the owed-write retry is deliberately NOT adopted here: this marker is not a pure counter (a
+// later marker can retroactively "address" an earlier finding), so a late replay needs its own episode-id design.
+describe('#4352 — advisory-fix-mark gains no owed-record behaviour', () => {
+  it('is not an owed kind, and its source never reaches the owed-write module', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { dirname, join } = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+    const { OWED_KINDS } = await import('../ci-heal-owed.mjs');
+    expect(OWED_KINDS).toEqual(['ci-heal', 'ci-heal-escalation']);
+    const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'advisory-fix-mark.mjs'), 'utf8');
+    expect(src).not.toMatch(/ci-heal-owed|recordOwedWrite/);
+  });
+});

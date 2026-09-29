@@ -55,6 +55,7 @@ import {
   acquireFixDispatchClaim, releaseFixDispatchClaim, fixDispatchClaimOwner,
 } from '../conveyor/fix-dispatch-claim.mjs';
 import { readLiveFixClaim, withAltBranchHint } from '../conveyor/fix-procedure.mjs';
+import { flushOwedWrites } from '../conveyor/ci-heal-owed.mjs';
 
 /**
  * @param {{itemNum:(string|null), pr:number, laneRef:string, scope:string[], lane:number, reason?:string, repo?:string, headRefOid?:string|null}} planned - a `planFixesFromReconcile`
@@ -192,9 +193,15 @@ export async function dispatchCiHeal(planned, {
  * @param {Function} [o.pickFreeLanes] - injectable; when omitted, defaults to {@link freeLaneNumbers} scoped to
  *   THIS repo's own lane pool (`profile.lanePoolRepo`) — never the WE pool for a non-WE repo.
  * @param {Function} [o.resolveProfile] - injectable, defaults to the real {@link repoProfile}.
+ * THE OWED-WRITE FLUSH RUNS FIRST (we:backlog/4352). This function is the one CI-heal call that genuinely runs
+ * every tick, so it is where a CI-heal/escalation comment a GitHub budget block refused
+ * (`we:scripts/conveyor/ci-heal-owed.mjs`) gets retried — never the one-shot CLIs' own next invocation, which may
+ * never come. It runs BEFORE the reconcile read so a comment that lands this tick (a heal count, an escalation)
+ * is already on the PR the plan is computed from, and for every repo regardless of CI colour or capability.
  * @param {Function} [o.resolveWorkUnit] - injectable, defaults to the real {@link resolvePrWorkUnit}.
+ * @param {Function} [o.flushOwed] - injectable, defaults to {@link flushOwedWrites} for this repo.
  * @returns {Promise<{dispatched:Array<object>, refusals:Array<object>, reconcileRefusals:number,
- *   reconcileRefusalDetails:Array<object>}>} `reconcileRefusals` stays the bare count it always was (an
+ *   reconcileRefusalDetails:Array<object>, owedFlush:{posted:object[], cleared:object[], dropped:object[], kept:object[]}}>} `reconcileRefusals` stays the bare count it always was (an
  *   existing, asserted contract — see `we:scripts/conveyor/__tests__/reconcile-fix-dispatch.test.mjs`'s
  *   sibling assertion on `runReconcileFixDispatch`). `reconcileRefusalDetails` is ADDITIVE (#x0mn6x0, epic
  *   #4075/#3383): the SAME `reconciled.refusals` array the count was always derived from
@@ -225,12 +232,15 @@ export async function runReconcileCiHealDispatch({
   // `reconcile-fix-dispatch.mjs#runReconcileFixDispatch`'s own `queueAdmission`: a CI-heal costs like a fix, and is
   // refused `queue-cap` while the projected queue wait would pass the max. `null` = no gate.
   queueAdmission = null,
+  flushOwed = (key) => flushOwedWrites({ repo: key }),
 } = {}) {
   const repoKey = repo == null ? 'we' : repoKeyForSlug(repo);
   if (repoKey === null) throw new Error(`ci-heal-pr-dispatch: --repo ${repo} is not a constellation repo`);
   // #x1rr9rh (multi-repo slice 2) — guards the DISPATCHING checkout (this WE checkout's own import path), not
   // the target repo; see `runReconcileFixDispatch`'s identical note for why this runs for every repo.
   assertMainNotStale(root, checkStaleness);
+  // #4352 — retry any budget-refused CI-heal/escalation comment owed on this repo (see the docblock above).
+  const owedFlush = flushOwed(repoKey);
   const reconciled = reconcile({ repo, ...(prsFile ? { readPrs: () => readPrsFromFile(prsFile) } : {}) });
   const ciHealEntries = (reconciled.dispatch ?? []).filter((entry) => entry.kind === 'ci-heal');
   const profile = resolveProfile(repoKey);
@@ -245,7 +255,7 @@ export async function runReconcileCiHealDispatch({
       why: 'CI-heal dispatch requires a repo-specific brief and gate; the existing worker is WE-only.',
     }));
     recordUnsupported({ repo: repoKey, rows: [...otherRows, ...refusals], path: unsupportedPath });
-    return { dispatched: [], refusals, reconcileRefusals: reconciled.refusals.length, reconcileRefusalDetails: reconciled.refusals };
+    return { dispatched: [], refusals, reconcileRefusals: reconciled.refusals.length, reconcileRefusalDetails: reconciled.refusals, owedFlush };
   }
   // `ci-heal` IS supported here — clear any stale `ci-heal` unsupported rows, preserving `fix`/`review` rows.
   recordUnsupported({ repo: repoKey, rows: otherRows, path: unsupportedPath });
@@ -304,7 +314,7 @@ export async function runReconcileCiHealDispatch({
     }
   }
 
-  return { dispatched, refusals, reconcileRefusals: reconciled.refusals.length, reconcileRefusalDetails: reconciled.refusals };
+  return { dispatched, refusals, reconcileRefusals: reconciled.refusals.length, reconcileRefusalDetails: reconciled.refusals, owedFlush };
 }
 
 const IS_CLI = process.argv[1] && new URL(import.meta.url).pathname === process.argv[1];
@@ -335,6 +345,11 @@ if (IS_CLI) {
         lines.push(`  → ci-heal PR #${d.pr} (${itemLabel}) — ${who} (${d.sessionSlug}), lane-${d.lane}`);
       }
       for (const r of result.refusals) lines.push(`  ✗ ${r.kind} PR #${r.prNumber ?? r.pr} — ${r.why}`);
+      const owed = result.owedFlush ?? {};
+      for (const o of owed.posted ?? []) lines.push(`  ↻ owed ${o.kind} comment posted on PR #${o.pr} (head ${o.headSha})`);
+      for (const o of owed.cleared ?? []) lines.push(`  ↻ owed ${o.kind} comment on PR #${o.pr} already live — cleared`);
+      for (const o of owed.dropped ?? []) lines.push(`  ↻ owed ${o.kind} comment on PR #${o.pr} dropped — ${o.why}`);
+      for (const o of owed.kept ?? []) lines.push(`  ↻ owed ${o.kind} comment on PR #${o.pr} still owed — ${o.why}`);
       process.stdout.write(lines.join('\n') + '\n');
     })
     .catch((e) => {

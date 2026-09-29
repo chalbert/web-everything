@@ -80,6 +80,7 @@ describe('runReconcileCiHealDispatch — queue-cap, sharing ONE budget with the 
     const healed = [];
     const result = await runReconcileCiHealDispatch({
       root: '/repo',
+      flushOwed: () => ({ posted: [], cleared: [], dropped: [], kept: [] }), // #4352 — never the host's real owed dir
       reconcile: () => ({ dispatch: [{ kind: 'ci-heal', prNumber: 50, headRefName: 'lane/x' }, { kind: 'ci-heal', prNumber: 51, headRefName: 'lane/y' }], refusals: [] }),
       resolveProfile: WE_PROFILE,
       resolveWorkUnit: () => ({ itemNum: null, scope: [] }),
