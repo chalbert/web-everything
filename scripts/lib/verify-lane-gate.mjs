@@ -195,6 +195,114 @@ export function localChangedSet({ base = 'origin/main', runGit }) {
   }
 }
 
+/** A full or abbreviated hex commit sha — never a ref name, a flag-shaped string, or anything else `git diff`
+ *  could misread as an option. `recordSha` comes off the `.lane-verify` marker (JSON on disk, not literally
+ *  attacker input, but not a value this function itself produced either); validating its SHAPE before it ever
+ *  reaches a revision-argument position is cheap and removes the question entirely. */
+const HEX_SHA_RE = /^[0-9a-f]{7,40}$/i;
+
+/**
+ * #4296 — of the files that changed between a lane-verify marker's RECORDED sha and the `headSha` about to land,
+ * which are still LANE-RELEVANT — i.e. part of THIS lane's own diff against `base` (default `origin/main`) either
+ * as of the record OR as of `headSha`? Pure given `runGit`.
+ *
+ * WHY THIS IS THE RIGHT KEY. Today's finish-guard (`verifyGateDecision` in `lane-verify.mjs`) keys a marker's
+ * validity to an EXACT sha match, so any new commit — including a no-op merge of `base` that conflicts only on a
+ * file the lane itself never touches — invalidates a green marker and forces a full re-run (the evidence in this
+ * item: a mid-work merge that conflicted solely on `ci-heal-pr-dispatch.mjs`, outside the lane's own touch-set).
+ * The fix reuses the SAME "what does this lane actually touch" shape `resolveDefaultGate`/{@link localChangedSet}
+ * already derive for gate selection — a diff against `base` — as the validity key, instead of the raw commit
+ * identity: a marker recorded for an EARLIER sha still covers `headSha` when the overlap here is empty.
+ *
+ * WHY RECOMPUTING THE RELEVANT SET FRESH (never reusing whatever set the recorded run itself saw) is what makes
+ * a no-op merge of `base` safe, with no special-casing for "was this a merge": after merging `base` forward, a
+ * file `base` alone changed — one the lane never touches — is now IDENTICAL between `headSha` and the
+ * (also-advanced) `base`, so a fresh diff against `base` no longer lists it at all. A file the lane genuinely
+ * edited stays in the relevant set no matter how it arrived (a direct edit, brought back by a merge, whatever).
+ *
+ * WHY THE RELEVANT SET IS THE UNION OF "relevant at `recordSha`" AND "relevant at `headSha`" — NOT `headSha`
+ * alone. Filtering only against `diff(base, headSha)` misses the case where the LANE ITSELF reverts one of its
+ * own already-verified edits (undoes a change, or a later commit deletes a file back to `base`'s content) while
+ * another lane edit remains: the reverted file is real changedSinceRecord (its content differs between
+ * `recordSha` and `headSha`), but once reverted it is IDENTICAL to `base` again, so a `headSha`-only relevant set
+ * silently drops it — carrying the old green forward onto a tree whose revert was never verified. Folding in
+ * `diff(base, recordSha)` too closes this: a file relevant at EITHER end stays relevant, whichever side of the
+ * revert `headSha` lands on — which is why this function takes TWO merge-base calls, not one.
+ *
+ * ACCEPTED LIMITATION (deliberately not closed here). "Lane-relevant" means "in the lane's own diff vs `base`" —
+ * the SAME proxy `resolveDefaultGate` already uses for gate SELECTION, per this item's own instruction to reuse
+ * it. It does not follow the import/dependency graph: a merge that changes a file the lane never touched but the
+ * lane's OWN files import (or otherwise depend on) carries the old green forward even though that upstream
+ * file's new content was never locally verified — a real LOOSENING of the local gate versus the pre-#4296
+ * exact-sha check, which forced a re-verify on ANY new commit including this one. What keeps this safe to ship
+ * is that the required CI `test` check independently runs the FULL suite on the PR regardless of this local
+ * marker (the same backstop `resolveDefaultGate`'s own diff-driven test shrink already leans on, per this file's
+ * header) — never a claim that the pre-#4296 base was "no safer": it was, for this one local signal. Closing the
+ * gap fully means intersecting with `resolveDefaultGate`'s own `referencedTests`/`targets` (which follow
+ * `vitest related`'s import graph) rather than only `changedFiles` — left for a follow-up, since that graph walk
+ * is exactly the same "reachable from what changed" shape this function already reuses, and widening it is a
+ * genuine feature, not a fix.
+ *
+ * @param {{recordSha: string|null|undefined, headSha: string|null|undefined, base?: string,
+ *   runGit: (args: string[]) => string}} args
+ * @returns {string[]|null} the overlap — empty means the marker still covers `headSha`. `null` means git could
+ *   not answer (an unreadable ref, `recordSha` unreachable, no computable merge-base) — the caller MUST treat
+ *   `null` as unknown, never as "no overlap" (fail closed, same posture as {@link localChangedSet}'s `null`).
+ *   CONTRACT ON `runGit`: this function fails closed ONLY if a git failure actually THROWS — exactly the same
+ *   contract {@link localChangedSet} and {@link pinnedMergeBase} in this same file already rely on. A `runGit`
+ *   that swallows a failure into an empty string (a `tryGit`-shaped helper) would read "recordSha unreachable"
+ *   as "nothing changed" and fail OPEN. Both real callers (`we:scripts/verify-lane.mjs`'s `git`,
+ *   `we:scripts/pr-land.mjs`'s `gitC`) are bare `execFileSync` wrappers that throw on a non-zero exit — never
+ *   their `tryGit` siblings, which is exactly what makes this safe; this is a contract on the caller, not
+ *   something this function can enforce from inside itself without another git call.
+ */
+export function laneRelevantChangeSince({ recordSha, headSha, base = 'origin/main', runGit }) {
+  if (!recordSha || !headSha) return null;
+  if (recordSha === headSha) return [];
+  if (!HEX_SHA_RE.test(recordSha) || !HEX_SHA_RE.test(headSha)) return null;
+  const lines = (out) => Array.from(new Set(String(out).split('\n').map((s) => s.trim()).filter(Boolean))).sort();
+  const relevantAgainstBase = (sha) => {
+    // Pinned explicitly to `sha`, NEVER the literal `HEAD` {@link pinnedMergeBase} uses — a caller may verify a
+    // `headSha` that is not (or is no longer) this checkout's actual current HEAD (e.g. an explicit `--sha=`).
+    const mergeBase = String(runGit(['merge-base', base, sha])).trim() || null;
+    if (!mergeBase) return null;
+    return lines(runGit(['diff', '--name-only', mergeBase, sha, '--']));
+  };
+  try {
+    // The trailing `--` separates the two revisions from a pathspec (there is none) so a validly-hex-shaped but
+    // still-unexpected value can never be read as a path or a further option either.
+    const changedSinceRecord = lines(runGit(['diff', '--name-only', recordSha, headSha, '--']));
+    if (changedSinceRecord.length === 0) return [];
+    // The UNION of "relevant at record time" and "relevant at headSha" — see the header doc above for why
+    // `headSha` alone misses a lane-side revert of its own already-verified work.
+    const relevantAtHead = relevantAgainstBase(headSha);
+    if (!relevantAtHead) return null;
+    const relevantAtRecord = relevantAgainstBase(recordSha);
+    if (!relevantAtRecord) return null;
+    const stillRelevant = new Set([...relevantAtHead, ...relevantAtRecord]);
+    return changedSinceRecord.filter((f) => stillRelevant.has(f));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * #4296 (converge round 1, simplicity juror) — the ONE guard for "is there even a stale-sha record worth
+ * computing an overlap for", so `we:scripts/verify-lane.mjs` (both the bare `check` path and the `check --wait=`
+ * resolver) and `we:scripts/pr-land.mjs`'s finish-guard share ONE implementation instead of three independent
+ * copies of the same `record && !record.corrupt && record.sha && record.sha !== headSha` condition — the drift
+ * risk the finding named: a future change to what counts as a comparable record only has to land here. Pure
+ * given `runGit`; wraps {@link laneRelevantChangeSince}.
+ * @param {{record: object|null, headSha: string|null|undefined, base?: string, runGit: (args: string[]) => string}} args
+ * @returns {string[]|null|undefined} `undefined` when there is nothing to compute (no record, a corrupt one, no
+ *   recorded sha, or an exact match — {@link laneRelevantChangeSince} already short-circuits an exact match to
+ *   `[]`, but skipping the call entirely here also skips the pointless git IO). Otherwise {@link laneRelevantChangeSince}'s own `string[]|null`.
+ */
+export function laneRelevantChangeSinceForRecord({ record, headSha, base = 'origin/main', runGit }) {
+  if (!record || record.corrupt || !record.sha || record.sha === headSha) return undefined;
+  return laneRelevantChangeSince({ recordSha: record.sha, headSha, base, runGit });
+}
+
 /** The vitest test files that contain any of `needles` as a fixed string (`git grep -l -F`). `git grep` exits 1
  *  on no match, which `runGit` surfaces as a throw — that is "no referencing tests", not an error. Pure given
  *  `runGit`. */

@@ -334,6 +334,13 @@ export function resolveWaitCeilingMs(requestedMs) {
  * @param {number} [opts.pollIntervalMs]
  * @param {() => number} [opts.now] - injectable clock (defaults to `Date.now`)
  * @param {(ms:number) => Promise<void>} [opts.sleep] - injectable delay (defaults to a real `setTimeout`)
+ * @param {(record: object) => (string[]|null|undefined)} [opts.resolveLaneRelevantChangeSince] - #4296, called
+ *   with the FULL record on every poll for which the caller supplied a callback (never just the record's sha —
+ *   the callback is expected to wrap `laneRelevantChangeSinceForRecord`, which owns the actual
+ *   corrupt/missing-sha/exact-match guard, including the cheap no-git-IO return for an exact match, so calling it
+ *   unconditionally costs nothing in the common case) — the IO half `verifyGateDecision`'s `laneRelevantChangeSince`
+ *   needs. Omitted entirely ⇒ every poll keeps the pre-#4296 exact-sha behavior (never promotes a stale-sha record
+ *   to a match).
  * @returns {Promise<{sha:string, status:string, reason:string, ok:boolean, detail:string, settled:boolean, waited:{ms:number, polls:number}, lastStatus?:string, lastReason?:string}>}
  */
 export async function waitForVerifySettle({
@@ -342,6 +349,7 @@ export async function waitForVerifySettle({
   headSha,
   breakGlass = false,
   requireVerified = true,
+  resolveLaneRelevantChangeSince,
   ceilingMs,
   pollIntervalMs = DEFAULT_WAIT_POLL_INTERVAL_MS,
   now = () => Date.now(),
@@ -360,7 +368,16 @@ export async function waitForVerifySettle({
       };
     }
 
-    const v = verifyGateDecision({ record: readRecord(), headSha, breakGlass, requireVerified });
+    const currentRecord = readRecord();
+    // #4296 (converge round 2, simplicity juror) — call the resolver whenever the caller SUPPLIED one, full stop.
+    // No local pre-check of "is there even a stale-sha record" here: that was a THIRD partial copy of the same
+    // guard `laneRelevantChangeSinceForRecord` already owns, and the round-1 fix of the OTHER two copies still
+    // left this one behind. The wrapper already returns `undefined` cheaply (no git IO) for a missing/corrupt
+    // record or an exact match, so calling it unconditionally costs nothing in the common case.
+    const laneRelevantChangeSince = resolveLaneRelevantChangeSince
+      ? resolveLaneRelevantChangeSince(currentRecord)
+      : undefined;
+    const v = verifyGateDecision({ record: currentRecord, headSha, breakGlass, requireVerified, laneRelevantChangeSince });
 
     if (v.status === 'green' || v.status === 'red') {
       return { ...v, sha: headSha, settled: true, waited: { ms: now() - startedAt, polls } };
@@ -435,9 +452,20 @@ export async function waitForVerifySettle({
  *     Note a MISSING `headSha` also lands here (nothing can match it), and so is refused by default rather than
  *     waved through: not being able to identify the tree is not evidence that the tree is fine.
  *
+ * #4296 — `laneRelevantChangeSince` KEYS THE MARKER TO WHAT CHANGED, NOT THE EXACT COMMIT. Before this item,
+ * `matches` demanded `rec.sha === headSha` — any new commit on the lane, including a no-op merge of `base` that
+ * conflicts only on a file the lane itself never touches, invalidated a green marker and forced a full re-run
+ * (evidence: a mid-work merge that conflicted solely on a file outside the lane's own touch-set). The caller
+ * (`verify-lane.mjs check`, `pr-land.mjs`'s finish-guard) now MAY pass the precomputed overlap between "what
+ * changed since the marker's recorded sha" and "what this lane still touches" — `verify-lane-gate.mjs`'s
+ * `laneRelevantChangeSince` (via its `laneRelevantChangeSinceForRecord` wrapper), the IO half this pure core
+ * cannot own.
+ * An EMPTY array promotes a stale-sha record to a match (the marker still covers `headSha`); `undefined` (the
+ * caller never computed it — every EXISTING caller and unit test that omits this param) or `null` (git could not
+ * tell) never does — fail closed, exactly like every other "unknown" cell in this gate.
  * @returns {{ ok:boolean, status:string, reason:string, detail:string }}
  */
-export function verifyGateDecision({ record, headSha, nowMs = Date.now(), ttlMs = DEFAULT_VERIFY_TTL_MINUTES * 60_000, breakGlass = false, requireVerified = true } = {}) {
+export function verifyGateDecision({ record, headSha, nowMs = Date.now(), ttlMs = DEFAULT_VERIFY_TTL_MINUTES * 60_000, breakGlass = false, requireVerified = true, laneRelevantChangeSince } = {}) {
   if (breakGlass) {
     return { ok: true, status: 'break-glass', reason: 'break-glass', detail: 'WE_LAND_UNVERIFIED=1 — verification gate overridden (deliberate break-glass; the PR still rides the required CI check).' };
   }
@@ -449,10 +477,18 @@ export function verifyGateDecision({ record, headSha, nowMs = Date.now(), ttlMs 
     return { ok: false, status: 'corrupt', reason: 'verify-corrupt', detail: 'the lane verification marker exists but is unparseable (corrupt/torn) — refusing to land; re-run `node scripts/verify-lane.mjs` (or delete the marker) to record a clean result.' };
   }
 
-  const matches = rec && rec.sha && headSha && rec.sha === headSha;
+  const exactShaMatch = !!(rec && rec.sha && headSha && rec.sha === headSha);
+  // #4296 — a STALE-sha record still covers `headSha` when nothing lane-relevant changed since it was recorded.
+  // Only an actually-computed EMPTY overlap promotes this; `undefined`/`null` never do (see the doc above).
+  const coveredByUnchangedRelevantSet = !exactShaMatch && !!(rec && rec.sha && headSha)
+    && Array.isArray(laneRelevantChangeSince) && laneRelevantChangeSince.length === 0;
+  const matches = exactShaMatch || coveredByUnchangedRelevantSet;
+  const carriedForwardNote = coveredByUnchangedRelevantSet
+    ? ` (recorded for ${String(rec.sha).slice(0, 8)}; carried forward to ${String(headSha).slice(0, 8)} — no lane-relevant file changed since)`
+    : '';
 
   if (matches && rec.status === 'green') {
-    return { ok: true, status: 'green', reason: 'verified', detail: `lane verified green for ${String(headSha).slice(0, 8)} (suites: ${rec.suites || 'recorded'}).` };
+    return { ok: true, status: 'green', reason: 'verified', detail: `lane verified green for ${String(headSha).slice(0, 8)}${carriedForwardNote} (suites: ${rec.suites || 'recorded'}).` };
   }
   if (matches && rec.status === 'running') {
     const abandoned = isVerifyAbandoned(rec, nowMs, ttlMs);

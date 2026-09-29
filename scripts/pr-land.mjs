@@ -112,6 +112,7 @@ import { pushRefusal, callerIdentity, repoKeyForCheckout } from './conveyor/fix-
 import { writeAllSync } from './lib/write-all-sync.mjs';
 import { admittedArgv } from './readiness/heavy-admission.mjs'; // xaipsbs — the heal's check:standards waits for a heavy-command slot
 import { verifyGateDecision, readVerifyMarker, resolveVerifyOptions } from './lib/lane-verify.mjs'; // #2833 — the lane-verification finish-guard: refuse to land a HEAD whose synchronous suite run never finished (or, under --require-verified, was never recorded green). readVerifyMarker/resolveVerifyOptions are the SHARED marker reader + option resolver (findings 2/5) both this gate and verify-lane use, so the two can never drift (readVerifyMarker owns the VERIFY_FILENAME path — no bare JSON.parse of the marker here).
+import { laneRelevantChangeSinceForRecord } from './lib/verify-lane-gate.mjs'; // #4296 — keys the finish-guard's marker match to what LANE-RELEVANT files changed since the marker's recorded sha, not the exact commit (a no-op merge of BASE that conflicts only outside the lane's own touch-set must not force a fresh full re-verify).
 
 // ── flag parsing (mirrors push-if-green.mjs) ──────────────────────────────────────────────────────────
 const argv = process.argv.slice(2);
@@ -620,6 +621,24 @@ export function resolveRosterReconcile({ careLevel, changedFiles = [], preRegist
   return reconcileRoster({ preRegistered, recomputed, mode: timing });
 }
 
+/**
+ * #2833's finish-guard decision, extracted so it is directly testable with a real (or fake) git runner instead
+ * of only through source-text regex assertions on the CLI (converge round 1, correctness/security/standards-
+ * conformance jurors — three independently flagged the same gap: the wiring that matters most for landing was
+ * behaviorally untested). Reads the marker, computes the #4296 lane-relevant overlap for a stale-sha record
+ * (never for an exact match — {@link laneRelevantChangeSinceForRecord} owns that guard), and returns the SAME
+ * `verifyGateDecision` verdict the CLI's inline block acts on. Pure given `readMarker`/`runGit` — no CLI argv,
+ * no `process.exit`, no gh.
+ * @param {{gitDir: string, headSha: string, remote: string, base: string, runGit: (args: string[]) => string,
+ *   readMarker: (gitDir: string) => object|null, breakGlass?: boolean, requireVerified?: boolean}} args
+ * @returns {{ ok: boolean, status: string, reason: string, detail: string }}
+ */
+export function resolveFinishGuardVerdict({ gitDir, headSha, remote, base, runGit, readMarker, breakGlass = false, requireVerified = true }) {
+  const verifyRecord = readMarker(gitDir);
+  const laneRelevantChangeSinceRecord = laneRelevantChangeSinceForRecord({ record: verifyRecord, headSha, base: `${remote}/${base}`, runGit });
+  return verifyGateDecision({ record: verifyRecord, headSha, breakGlass, requireVerified, laneRelevantChangeSince: laneRelevantChangeSinceRecord });
+}
+
 // Allow importing the pure helpers without running the CLI (the test file imports this module).
 const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(new URL(import.meta.url).pathname);
 if (IS_CLI) runCli();
@@ -803,8 +822,15 @@ function runCli() {
     // `{ corrupt: true }` (refused), distinguishes a torn marker (corrupt → refuse) from a missing one (absent →
     // gate decides per --require-verified), and is the SAME read `verify-lane.mjs` performs.
     const gitDir = tryGit(['rev-parse', '--absolute-git-dir']) || join(REPO, '.git');
-    const verifyRecord = readVerifyMarker(gitDir);
-    const gate = verifyGateDecision({ record: verifyRecord, headSha: refSha, breakGlass: VERIFY_BREAK_GLASS, requireVerified: REQUIRE_VERIFIED });
+    // #4296 — a marker recorded for an EARLIER sha than `refSha` may still cover it (a no-op merge of BASE
+    // conflicting only outside the lane's own touch-set). `resolveFinishGuardVerdict` owns the whole decision —
+    // marker read, the lane-relevant overlap, and the `verifyGateDecision` call — so it is directly testable with
+    // a real or fake git runner (see `scripts/__tests__/pr-land-finish-guard.test.mjs`), not only via the CLI's
+    // own source-text wiring assertions.
+    const gate = resolveFinishGuardVerdict({
+      gitDir, headSha: refSha, remote: REMOTE, base: BASE, runGit: gitC, readMarker: readVerifyMarker,
+      breakGlass: VERIFY_BREAK_GLASS, requireVerified: REQUIRE_VERIFIED,
+    });
     if (!gate.ok) {
       emit({ repo: REPO, merged: false, reason: gate.reason, ref: REF, sha: refSha, verifyStatus: gate.status, detail: `refusing to land ${REF} — ${gate.detail} (${BASE} left untouched; this is #2833's stall guard)` }, 3);
     }

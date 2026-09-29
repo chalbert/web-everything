@@ -550,7 +550,11 @@ describe('pr-land contract guards (source-level, mirrors gated-push-wiring)', ()
     // of the marker here (pr-land's old inline parser caught only a throw, so a valid-JSON non-object slipped
     // through as untracked and landed unverified). Source-contract: pr-land calls the shared reader, and contains
     // no bare `JSON.parse(...VERIFY_FILENAME...)` / `JSON.parse(readFileSync(markerPath...))` of the marker.
-    expect(src).toMatch(/readVerifyMarker\(gitDir\)/);
+    // #4296 — the read moved inside the extracted `resolveFinishGuardVerdict` (`readMarker(gitDir)`, its own
+    // injected param), with the CLI passing `readMarker: readVerifyMarker` — still the one shared reader, never
+    // re-inlined; the two assertions below cover both ends of that indirection.
+    expect(src).toMatch(/readMarker\(gitDir\)/);
+    expect(src).toMatch(/readMarker: readVerifyMarker/);
     expect(src).not.toMatch(/JSON\.parse\([^)]*VERIFY_FILENAME/);
     expect(src).not.toMatch(/JSON\.parse\(readFileSync\(markerPath/);
     // It reads the HEAD's marker and refuses (non-ok) on the source commit BEFORE publishing to the lane ref.
@@ -568,6 +572,20 @@ describe('pr-land contract guards (source-level, mirrors gated-push-wiring)', ()
     // points can never disagree on the same flag/env pair.
     expect(src).toMatch(/resolveVerifyOptions\(\{ flags, env: process\.env \}\)/);
     expect(src).toMatch(/WE_LAND_UNVERIFIED/);
+  });
+  it('#4296: the finish-guard keys the marker to what LANE-RELEVANT changed since it was recorded, not the exact sha', () => {
+    // The shared pure computation, never a re-derivation of "what does this lane touch" here.
+    expect(src).toMatch(/laneRelevantChangeSinceForRecord/);
+    expect(src).toMatch(/from '\.\/lib\/verify-lane-gate\.mjs'/);
+    // The whole decision is extracted into ONE directly-testable function (converge round 1 — correctness /
+    // security / standards-conformance jurors all flagged that source-regex alone can't prove this behaves;
+    // `resolveFinishGuardVerdict` closes that with a real-git test, see pr-land-finish-guard.test.mjs) — the CLI
+    // block is now a thin call into it, never a re-derivation of the guard/overlap/gate-call sequence inline.
+    expect(src).toMatch(/export function resolveFinishGuardVerdict\(/);
+    expect(src).toMatch(/const gate = resolveFinishGuardVerdict\(\{/);
+    // Pinned to THIS land's base (remote/base params), not a hardcoded 'origin/main' — correct under a POC branch too.
+    expect(src).toMatch(/base: `\$\{remote\}\/\$\{base\}`/);
+    expect(src).toMatch(/base: BASE, runGit: gitC, readMarker: readVerifyMarker/);
   });
   it('#984 R4: the --park emit carries held:true (a parked PR is held by definition → the workflow never re-labels it)', () => {
     // The park branch emits `held: true` alongside `reason: 'parked'` so Finalize does not mistake a deliberate

@@ -13,7 +13,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { resolveDefaultGate, canScopeCheckStandards, composeGate, describeGate, FULL_GATE, MAX_RELATED_TARGETS } from '../verify-lane-gate.mjs';
+import { resolveDefaultGate, canScopeCheckStandards, composeGate, describeGate, laneRelevantChangeSince, FULL_GATE, MAX_RELATED_TARGETS } from '../verify-lane-gate.mjs';
 
 /** A synthetic git runner for the xpnhz4o working-tree changed set: `merge-base` resolves to a fixed sha;
  *  `diff --name-only <sha>` returns the (working-tree) changed files; `--diff-filter=D` the deleted ones;
@@ -233,6 +233,168 @@ describe('canScopeCheckStandards (#3395) — the check:standards-scoping predica
   });
 });
 
+/**
+ * laneRelevantChangeSince (#4296) — the "what changed since the marker was recorded, and does it still matter"
+ * computation the finish-guard reuses so a no-op merge of `base` (conflicting only OUTSIDE the lane's own
+ * touch-set) does not force a fresh full re-verify. A synthetic COMMIT-graph git fake (distinct from the
+ * working-tree `fakeGit` above, which this function never calls): `diff --name-only <a> <b>` returns a fixed
+ * changed-set per pair, and `merge-base <base> <headSha>` resolves to a fixed sha.
+ */
+describe('laneRelevantChangeSince (#4296) — keys marker validity to what changed, not the exact commit', () => {
+  const RECORD_SHA = 'a'.repeat(40);
+  const HEAD_SHA = 'b'.repeat(40);
+  const MERGE_BASE = 'm'.repeat(40);
+
+  /**
+   * @param {{sinceRecord: string[], relevantAtHead: string[], relevantAtRecord?: string[]}} diffs
+   *   `relevantAtRecord` defaults to `relevantAtHead` — the common case where the lane's own touch-set hasn't
+   *   changed shape between record time and headSha (only the revert-scenario tests below need it to differ).
+   */
+  function fakeCommitGit({ sinceRecord, relevantAtHead, relevantAtRecord = relevantAtHead }) {
+    return (args) => {
+      if (args[0] === 'merge-base') return MERGE_BASE;
+      if (args[0] === 'diff' && args[2] === RECORD_SHA && args[3] === HEAD_SHA) return sinceRecord.join('\n');
+      if (args[0] === 'diff' && args[2] === MERGE_BASE && args[3] === HEAD_SHA) return relevantAtHead.join('\n');
+      if (args[0] === 'diff' && args[2] === MERGE_BASE && args[3] === RECORD_SHA) return relevantAtRecord.join('\n');
+      throw new Error(`unexpected git invocation in test: ${args.join(' ')}`);
+    };
+  }
+
+  it('RED (the #4296 bug, reproduced): a no-op merge of `base` touching only an OUT-OF-SCOPE file must not be treated as an overlap', () => {
+    // The item's own evidence shape: the lane's real diff (vs base) only ever touched `scripts/verify-lane.mjs`;
+    // the merge that landed on top of the recorded green additionally changed `scripts/operations/ci-heal-pr-dispatch.mjs`
+    // — a file the lane itself never touches, brought in wholesale from `base`. After the merge that file is
+    // IDENTICAL to (the also-advanced) `base`, so it does not appear in the fresh base-diff at all.
+    const overlap = laneRelevantChangeSince({
+      recordSha: RECORD_SHA, headSha: HEAD_SHA,
+      runGit: fakeCommitGit({
+        sinceRecord: ['scripts/operations/ci-heal-pr-dispatch.mjs'],
+        relevantAtHead: ['scripts/verify-lane.mjs'],
+      }),
+    });
+    expect(overlap).toEqual([]); // no lane-relevant overlap — the marker still covers headSha
+  });
+
+  it('a genuinely overlapping merge — the changed-since-record file IS still lane-relevant — reports the overlap', () => {
+    const overlap = laneRelevantChangeSince({
+      recordSha: RECORD_SHA, headSha: HEAD_SHA,
+      runGit: fakeCommitGit({
+        sinceRecord: ['scripts/verify-lane.mjs', 'scripts/operations/ci-heal-pr-dispatch.mjs'],
+        relevantAtHead: ['scripts/verify-lane.mjs'],
+      }),
+    });
+    expect(overlap).toEqual(['scripts/verify-lane.mjs']);
+  });
+
+  it('recordSha === headSha short-circuits to no overlap without calling git at all', () => {
+    const runGit = () => { throw new Error('must not be called'); };
+    expect(laneRelevantChangeSince({ recordSha: HEAD_SHA, headSha: HEAD_SHA, runGit })).toEqual([]);
+  });
+
+  it('nothing changed since the record at all → empty overlap, merge-base never consulted', () => {
+    let mergeBaseCalled = false;
+    const runGit = (args) => {
+      if (args[0] === 'merge-base') { mergeBaseCalled = true; return MERGE_BASE; }
+      if (args[0] === 'diff') return '';
+      throw new Error('unexpected');
+    };
+    expect(laneRelevantChangeSince({ recordSha: RECORD_SHA, headSha: HEAD_SHA, runGit })).toEqual([]);
+    expect(mergeBaseCalled).toBe(false);
+  });
+
+  it('missing recordSha or headSha → null (unknown), never an empty-overlap free pass', () => {
+    expect(laneRelevantChangeSince({ recordSha: null, headSha: HEAD_SHA, runGit: () => '' })).toBe(null);
+    expect(laneRelevantChangeSince({ recordSha: RECORD_SHA, headSha: undefined, runGit: () => '' })).toBe(null);
+  });
+
+  it('#4296 (converge round 2, security juror) — a NON-hex recordSha or headSha (e.g. flag-shaped) is REFUSED before it ever reaches git as a positional revision, never passed through', () => {
+    const runGit = () => { throw new Error('must not be called — validation must reject before any git invocation'); };
+    expect(laneRelevantChangeSince({ recordSha: '--upload-pack=evil', headSha: HEAD_SHA, runGit })).toBe(null);
+    expect(laneRelevantChangeSince({ recordSha: RECORD_SHA, headSha: '-x', runGit })).toBe(null);
+    expect(laneRelevantChangeSince({ recordSha: 'not-a-sha-at-all', headSha: HEAD_SHA, runGit })).toBe(null);
+  });
+
+  it('every diff --name-only call separates revisions from pathspecs with a trailing `--`', () => {
+    const seen = [];
+    const runGit = (args) => {
+      seen.push(args);
+      if (args[0] === 'merge-base') return MERGE_BASE;
+      return 'scripts/a.mjs';
+    };
+    laneRelevantChangeSince({ recordSha: RECORD_SHA, headSha: HEAD_SHA, runGit });
+    for (const args of seen) {
+      if (args[0] === 'diff') expect(args[args.length - 1]).toBe('--');
+    }
+  });
+
+  it('an unresolvable merge-base (git cannot answer) → null, fail closed', () => {
+    const overlap = laneRelevantChangeSince({
+      recordSha: RECORD_SHA, headSha: HEAD_SHA,
+      runGit: (args) => {
+        if (args[0] === 'diff' && args[2] === RECORD_SHA) return 'scripts/a.mjs';
+        if (args[0] === 'merge-base') return ''; // git could not find one
+        throw new Error('unexpected');
+      },
+    });
+    expect(overlap).toBe(null);
+  });
+
+  it('a git throw (e.g. recordSha unreachable/gc-ed) → null, fail closed', () => {
+    const overlap = laneRelevantChangeSince({
+      recordSha: RECORD_SHA, headSha: HEAD_SHA,
+      runGit: () => { throw new Error('fatal: bad object'); },
+    });
+    expect(overlap).toBe(null);
+  });
+
+  it('pins BOTH merge-base calls to explicit shas — headSha AND recordSha, never the bare literal `HEAD`', () => {
+    // `pinnedMergeBase` (test-selection.mjs, reused elsewhere in this file) always resolves against the literal
+    // `HEAD` of the checkout; this function must never rely on that, since a caller may verify a `headSha` that
+    // is not (or is no longer) this checkout's actual current HEAD (e.g. an explicit `--sha=`) — and, since the
+    // union fix (converge round 1's red-team), it ALSO computes the lane's relevance as of `recordSha`, which is
+    // never the checkout's HEAD either.
+    const mergeBaseCalls = [];
+    const runGit = (args) => {
+      if (args[0] === 'diff' && args[2] === RECORD_SHA && args[3] === HEAD_SHA) return 'scripts/a.mjs';
+      if (args[0] === 'merge-base') { mergeBaseCalls.push(args); return MERGE_BASE; }
+      if (args[0] === 'diff' && args[2] === MERGE_BASE) return '';
+      throw new Error(`unexpected: ${args.join(' ')}`);
+    };
+    laneRelevantChangeSince({ recordSha: RECORD_SHA, headSha: HEAD_SHA, base: 'origin/main', runGit });
+    expect(mergeBaseCalls).toContainEqual(['merge-base', 'origin/main', HEAD_SHA]);
+    expect(mergeBaseCalls).toContainEqual(['merge-base', 'origin/main', RECORD_SHA]);
+  });
+
+  it('#4296 round-1-red-team FIX, reproduced: a lane REVERT of its own already-verified edit — headSha-only relevance would miss it', () => {
+    // The blocker the red-team found: the lane edited `scripts/a.mjs` AND `scripts/b.mjs`, recorded green at
+    // RECORD_SHA (both relevant then). A later commit reverts `scripts/a.mjs` back to `base`'s content while
+    // keeping `scripts/b.mjs`'s edit — headSha's own relevance (diff vs base) no longer lists `a.mjs` at all,
+    // even though `a.mjs` genuinely changed (reverted) between RECORD_SHA and headSha and that revert was never
+    // itself verified.
+    const overlap = laneRelevantChangeSince({
+      recordSha: RECORD_SHA, headSha: HEAD_SHA,
+      runGit: fakeCommitGit({
+        sinceRecord: ['scripts/a.mjs'], // a.mjs is the only file that differs between record and head
+        relevantAtHead: ['scripts/b.mjs'], // a.mjs reverted to base — no longer in the head-vs-base diff
+        relevantAtRecord: ['scripts/a.mjs', 'scripts/b.mjs'], // …but it WAS relevant when the marker was recorded
+      }),
+    });
+    expect(overlap).toEqual(['scripts/a.mjs']); // caught via relevantAtRecord — forces a re-verify
+  });
+
+  it('the ORIGINAL no-op-merge fix still holds under the union: a file never relevant at EITHER end stays excluded', () => {
+    const overlap = laneRelevantChangeSince({
+      recordSha: RECORD_SHA, headSha: HEAD_SHA,
+      runGit: fakeCommitGit({
+        sinceRecord: ['scripts/operations/ci-heal-pr-dispatch.mjs'],
+        relevantAtHead: ['scripts/verify-lane.mjs'],
+        relevantAtRecord: ['scripts/verify-lane.mjs'], // the lane never touched the upstream file at either end
+      }),
+    });
+    expect(overlap).toEqual([]);
+  });
+});
+
 describe('verify-lane.mjs source wiring — the default gate actually calls resolveDefaultGate', () => {
   it('xpnhz4o — prints describeGate before running, and `run` mode records no marker', () => {
     const src = readFileSync(resolve(process.cwd(), 'scripts/verify-lane.mjs'), 'utf8');
@@ -253,5 +415,21 @@ describe('verify-lane.mjs source wiring — the default gate actually calls reso
     const src = readFileSync(resolve(process.cwd(), 'scripts/verify-lane.mjs'), 'utf8');
     expect(src).toMatch(/join\(REPO, 'package\.json'\)/);
     expect(src).toMatch(/resolveDefaultGate\(\{[^}]*scripts: readCheckoutScripts\(\)/);
+  });
+
+  it('#4296 — both `check` paths (bare, and `--wait=`) feed laneRelevantChangeSinceForRecord into verifyGateDecision', () => {
+    const src = readFileSync(resolve(process.cwd(), 'scripts/verify-lane.mjs'), 'utf8');
+    expect(src).toMatch(/laneRelevantChangeSinceForRecord/);
+    expect(src).toMatch(/from '\.\/lib\/verify-lane-gate\.mjs'/);
+    // The bare `check` path — both calls go through the ONE shared guard+compute wrapper (converge round 1,
+    // simplicity juror: the corrupt/missing-sha/exact-match precondition must live in exactly one place, never
+    // copied per call site), and both name `base: 'origin/main'` EXPLICITLY (converge round 2, standards-
+    // conformance juror — this file's own default gate already hardcodes that base; a caller-side default here
+    // too would let the two silently disagree if either default ever changed alone).
+    expect(src).toMatch(/laneRelevantChangeSince: laneRelevantChangeSinceForRecord\(\{ record: bareCheckRecord, headSha, base: 'origin\/main', runGit: git \}\)/);
+    // The `--wait=` path threads a resolver callback through waitForVerifySettle, not a one-shot precomputed value
+    // (the wait polls the marker fresh — see waitForVerifySettle's own doc for why the callback shape matters),
+    // and the callback wraps the SAME shared wrapper, passing the FULL record (never just its sha).
+    expect(src).toMatch(/resolveLaneRelevantChangeSince: \(record\) => laneRelevantChangeSinceForRecord\(\{ record, headSha, base: 'origin\/main', runGit: git \}\)/);
   });
 });

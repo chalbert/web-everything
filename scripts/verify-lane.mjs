@@ -67,7 +67,7 @@ import { VERIFY_FILENAME, VERIFY_PREVIOUS_FILENAME, verifyStartBody, verifyFinis
 import { LEASE_FILENAME, isLeaseStale, isConfirmedOwnLease } from './lib/lane-lease.mjs';
 import { defaultPoolRoot } from './lib/lane-pool-paths.mjs';
 import { writeAllSync } from './lib/write-all-sync.mjs';
-import { resolveDefaultGate, describeGate } from './lib/verify-lane-gate.mjs';
+import { resolveDefaultGate, describeGate, laneRelevantChangeSinceForRecord } from './lib/verify-lane-gate.mjs';
 import { admissionLockRoot, resolveCap, resolveTimeoutMs, acquireSlotBlocking, releaseOwnedSlot, ADMISSION_HELD_ENV, classifyCommandKind } from './readiness/heavy-admission.mjs';
 
 // ── tiny arg parsing (matches push-if-green.mjs / lane-pool.mjs) ─────────────────────────────────────
@@ -105,6 +105,7 @@ const MARKER = join(GIT_DIR, VERIFY_FILENAME);
 // pr-land's finish-guard can never drift. It resolves `<gitDir>/.lane-verify`, folds a valid-JSON non-object to
 // `{ corrupt: true }` (never `absent`, which would fail OPEN), and returns null only for a genuinely missing file.
 const readMarker = () => readVerifyMarker(GIT_DIR);
+
 function writeMarker(record) {
   // Atomic: write a temp sibling in the same git dir, then rename over the marker — so a concurrent reader
   // (pr-land's finish-guard) never observes a half-written file (#2833 finding 5). renameSync is atomic within a
@@ -149,10 +150,19 @@ if (MODE === 'check') {
       breakGlass: VERIFY_BREAK_GLASS,
       requireVerified: REQUIRE_VERIFIED,
       ceilingMs,
+      // #4296 (converge round 2, standards-conformance juror) — `base` is explicit here, never the wrapper's own
+      // default: this file's default gate (`resolveDefaultGate`, above) already hardcodes `origin/main` as the
+      // ONLY base a WE lane clone verifies against (there is no `--base=` flag on this CLI), so naming it here
+      // too keeps the two in visible agreement instead of one relying on a default the other never mentions.
+      resolveLaneRelevantChangeSince: (record) => laneRelevantChangeSinceForRecord({ record, headSha, base: 'origin/main', runGit: git }),
     });
     emit(result, result.ok ? 0 : 2);
   }
-  const v = verifyGateDecision({ record: readMarker(), headSha, breakGlass: VERIFY_BREAK_GLASS, requireVerified: REQUIRE_VERIFIED });
+  const bareCheckRecord = readMarker();
+  const v = verifyGateDecision({
+    record: bareCheckRecord, headSha, breakGlass: VERIFY_BREAK_GLASS, requireVerified: REQUIRE_VERIFIED,
+    laneRelevantChangeSince: laneRelevantChangeSinceForRecord({ record: bareCheckRecord, headSha, base: 'origin/main', runGit: git }),
+  });
   emit({ sha: headSha, status: v.status, reason: v.reason, ok: v.ok, detail: v.detail }, v.ok ? 0 : 2);
 }
 
