@@ -139,7 +139,7 @@ import { appendLaneHistory, laneHistoryEntry, readLaneHistory, lastLaneHistoryEn
 // every reset/clean below appends one line naming its ACTOR, reason, HEAD before→after and the dirty/ahead/
 // unpushed state it found. `check:standards` (`findUnjournaledLaneMutations`) flags a new mutation point here
 // that forgets to call `journalLaneEvent`.
-import { journalLaneEvent, laneStateSnapshot, destructiveActionVerdict } from './lib/lane-history.mjs';
+import { journalLaneEvent, laneStateSnapshot, laneHead, destructiveActionVerdict } from './lib/lane-history.mjs';
 // #3568 — the shared known-safe-scratch-litter allowlist + cleanup core, reused verbatim by the periodic
 // `we:scripts/conveyor/lane-pool-health-watch.mjs` pass so the two never diverge into two separately-maintained
 // lists. Side-effect-free at import (no top-level dispatch), like every other `./lib/*.mjs` import above.
@@ -1138,7 +1138,7 @@ function refreshLane(repo, n, { force = false } = {}) {
   git(['reset', '--hard', `origin/${repo.branch}`, '--quiet'], dir);
   git(['clean', '-fd', '--quiet'], dir); // remove untracked, KEEP ignored (node_modules) — no -x
   journalLaneEvent(dir, {
-    action: 'refresh-reset', before, headAfter: laneStateSnapshot(dir, `origin/${repo.branch}`).head,
+    action: 'refresh-reset', before, headAfter: laneHead(dir),
     reason: force ? `refresh --force (${verdict.reason})` : 'refresh — clean lane fast-forwarded', loud: verdict.loud || undefined,
   });
   return { skipped: false, dirty: false, uncommitted: 0, ahead: 0 };
@@ -1808,7 +1808,7 @@ function provisionClaimedLane(repo, chosen, targetWasReserved) {
     git(['clean', '-fd', '--quiet'], dir);
     // #4370 — the reset gets its own journal line NOW (a later deps/registry failure must not lose it).
     journalLaneEvent(dir, {
-      action: 'acquire-reset', before, headAfter: laneStateSnapshot(dir, `origin/${repo.branch}`).head,
+      action: 'acquire-reset', before, headAfter: laneHead(dir),
       reason: `acquire → ${baseRef}${flags.force ? ' (--force)' : ''}`, session: flags.session || process.env.LANE_SESSION || undefined,
       loud: before.unpushed ? true : undefined,
     });
@@ -2297,10 +2297,11 @@ function cmdAcquire(repo) {
     holder: holderSlug,
   }));
   {
-    const now = laneStateSnapshot(dir, `origin/${repo.branch}`);
-    const before = acquireResetSnapshots.get(chosen) || now;
+    // A reset already snapshotted this lane — reuse it and only re-read HEAD (spawn-free), keeping acquire
+    // inside its git-spawn budget; a no-reset acquire takes its one snapshot here.
+    const before = acquireResetSnapshots.get(chosen) || laneStateSnapshot(dir, `origin/${repo.branch}`);
     journalLaneEvent(dir, {
-      action: flags.reserve ? 'reserve' : 'acquire', before, headAfter: now.head,
+      action: flags.reserve ? 'reserve' : 'acquire', before, headAfter: laneHead(dir),
       reason: flags.purpose ? `acquire --purpose=${flags.purpose}` : 'acquire', session, holder: holderSlug,
       item: flags.item !== undefined ? String(flags.item) : undefined, workerSession: occupant || undefined,
     });
@@ -3730,7 +3731,7 @@ function cmdReclaim(repo) {
   execFileSync('git', ['clean', '-fd'], { cwd: dir, stdio: 'ignore', ...defaultGitTimeoutOpt() });
   rmSync(file, { force: true }); // back to the free-pool state — the same end state a normal `release` leaves
   journalLaneEvent(dir, {
-    action: 'reclaim-reset', before, headAfter: laneStateSnapshot(dir, `origin/${repo.branch}`).head,
+    action: 'reclaim-reset', before, headAfter: laneHead(dir),
     unpushed: !reproof.preserved, preserved: reproof.preserved, override: overriding || undefined,
     reason: `${typeof flags.reason === 'string' ? `${flags.reason}: ` : ''}${reproof.reason}${relive ? `; ${relive.reason}` : ''}`,
     loud: verdict.loud || undefined,
@@ -3820,7 +3821,7 @@ function cmdReclaimSalvage(repo, { n, dir, dryRun, lease, proof }) {
   rmSync(file, { force: true });
   // #4370 — unpushed content here was SAVED first (a verified bundle), and the owner was proven gone (g2).
   journalLaneEvent(dir, {
-    action: 'salvage-reset', before, headAfter: laneStateSnapshot(dir, `origin/${repo.branch}`).head,
+    action: 'salvage-reset', before, headAfter: laneHead(dir),
     unpushed: !proof.preserved, salvagedTo: salvage.bundle || salvage.outDir || undefined,
     reason: `${typeof flags.reason === 'string' ? `${flags.reason}: ` : ''}${proof.reason}; ${g2.reason}`,
     removedWorktrees: removedWorktrees.length ? removedWorktrees : undefined,

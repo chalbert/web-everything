@@ -30,7 +30,7 @@
 import {
   existsSync, appendFileSync, readFileSync, writeFileSync, readdirSync, renameSync, statSync, openSync, readSync, closeSync,
 } from 'node:fs';
-import { join, basename, dirname } from 'node:path';
+import { join, basename, dirname, resolve } from 'node:path';
 import { hostname } from 'node:os';
 import { execFileSync } from 'node:child_process';
 
@@ -289,6 +289,48 @@ const snapshotGit = (dir, args) => {
   } catch { return null; }
 };
 
+const SHA_RE = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
+
+/** IO: read a ref's sha straight from the git dir (loose ref, then `packed-refs`); null when it is not there. */
+function readRefFromGitDir(commonDir, ref) {
+  const loose = join(commonDir, ref);
+  if (existsSync(loose)) {
+    const sha = readFileSync(loose, 'utf8').trim();
+    return SHA_RE.test(sha) ? sha : null;
+  }
+  const packed = join(commonDir, 'packed-refs');
+  if (!existsSync(packed)) return null;
+  for (const line of readFileSync(packed, 'utf8').split('\n')) {
+    const [sha, name] = line.trim().split(' ');
+    if (name === ref && SHA_RE.test(sha)) return sha;
+  }
+  return null;
+}
+
+/**
+ * IO: the lane's HEAD sha — read from `.git` on disk (no git spawn: every acquire journals HEAD before and after
+ * its reset, and acquire is git-spawn-budgeted), falling back to `git rev-parse HEAD` for any shape it does not
+ * recognise. null when neither works. Never throws.
+ */
+export function laneHead(dir) {
+  try {
+    let gitDir = join(dir, '.git');
+    if (statSync(gitDir).isFile()) {
+      const m = /^gitdir:\s*(.+)$/m.exec(readFileSync(gitDir, 'utf8'));
+      if (!m) throw new Error('unrecognised .git file');
+      gitDir = resolve(dir, m[1].trim());
+    }
+    const commonFile = join(gitDir, 'commondir');
+    const commonDir = existsSync(commonFile) ? resolve(gitDir, readFileSync(commonFile, 'utf8').trim()) : gitDir;
+    const headRaw = readFileSync(join(gitDir, 'HEAD'), 'utf8').trim();
+    if (SHA_RE.test(headRaw)) return headRaw;
+    const ref = /^ref:\s*(refs\/\S+)$/.exec(headRaw)?.[1];
+    const sha = ref ? readRefFromGitDir(commonDir, ref) : null;
+    if (sha) return sha;
+  } catch { /* fall through to git */ }
+  return snapshotGit(dir, ['rev-parse', 'HEAD']);
+}
+
 /**
  * IO: the lane's state right now — `{ head, dirty, ahead, unpushedCommits, unpushed }`. `ahead` is commits
  * past `branchRef`; `unpushedCommits` is commits on NO remote ref at all (a pushed `lane/*` branch counts as
@@ -296,12 +338,19 @@ const snapshotGit = (dir, args) => {
  * journal then says "unknown", never a guessed zero. Never throws.
  */
 export function laneStateSnapshot(dir, branchRef = 'origin/main') {
-  const head = snapshotGit(dir, ['rev-parse', 'HEAD']);
+  const head = laneHead(dir);
   const porcelain = snapshotGit(dir, ['status', '--porcelain']);
   const dirty = porcelain === null ? null : porcelain.split('\n').filter(Boolean).length;
-  const aheadRaw = snapshotGit(dir, ['rev-list', '--count', `${branchRef}..HEAD`]);
+  // `origin/x` is spelled out as `refs/remotes/origin/x`: a stray LOCAL branch/tag named `origin/x` would
+  // otherwise win the short-name lookup and hide unpushed commits from the shortcut below.
+  const remoteRef = branchRef.startsWith('origin/') ? `refs/remotes/${branchRef}` : null;
+  const aheadRaw = snapshotGit(dir, ['rev-list', '--count', `${remoteRef || branchRef}..HEAD`]);
   const ahead = aheadRaw === null ? null : Number(aheadRaw) || 0;
-  const unpushedRaw = snapshotGit(dir, ['rev-list', '--count', 'HEAD', '--not', '--remotes']);
+  // Nothing past a REMOTE ref means nothing unpushed — skip the second rev-list (acquire's git-spawn budget,
+  // `lane-pool-ahead-provably-pushed-single-spawn.test.mjs` / `lane-pool-acquire-free-list.test.mjs`).
+  const unpushedRaw = ahead === 0 && remoteRef
+    ? '0'
+    : snapshotGit(dir, ['rev-list', '--count', 'HEAD', '--not', '--remotes']);
   const unpushedCommits = unpushedRaw === null ? null : Number(unpushedRaw) || 0;
   const unpushed = dirty === null || unpushedCommits === null ? null : dirty > 0 || unpushedCommits > 0;
   return { head, dirty, ahead, unpushedCommits, unpushed };
