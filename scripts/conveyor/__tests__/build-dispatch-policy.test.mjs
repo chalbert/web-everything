@@ -50,9 +50,26 @@ describe('planBuildDispatch', () => {
     expect(r.dispatch.map((x) => x.num)).toEqual(['1', '2']);
     expect(r.hold).toEqual([expect.objectContaining({ num: '3', rule: 'cap' })]);
   });
-  it('counts the tick core\'s own building tally without double counting', () => {
+  // Card x3vs6tu, live 2026-09-29: `externalBuilding` (the conveyor's machine-wide "building" count — hand
+  // workers, fix/ci-heal workers, stranded claims) must NEVER gate this builder's own cap any more — only its
+  // own durable in-flight builds do. Machine load is the separate load guard's (#4076) job. It still rides
+  // through on the return value purely as a logged signal.
+  it('never folds externalBuilding into the cap — it only bounds this builder\'s OWN in-flight builds', () => {
     const r = planBuildDispatch({ candidates: [cand('1', ['we:a']), cand('2', ['we:b'])], externalBuilding: 2 });
-    expect(r.dispatch.map((x) => x.num)).toEqual(['1']);
+    expect(r.dispatch.map((x) => x.num)).toEqual(['1', '2']);
+    expect(r.busy).toBe(0);
+    expect(r.externalBuilding).toBe(2);
+  });
+  it('6 external building, 0 own in-flight, cap 3 → 3 free slots (the live-incident shape: a machine-wide '
+    + 'count must never starve this builder of its own capacity)', () => {
+    const r = planBuildDispatch({
+      candidates: [],
+      externalBuilding: 6,
+      policy: { ...BUILD_DISPATCH_POLICY, maxConcurrentBuilds: 3 },
+    });
+    expect(r.busy).toBe(0);
+    expect(r.slots).toBe(3);
+    expect(r.externalBuilding).toBe(6);
   });
   it('freezes on too many open PRs or the operator\'s manual daemon-bug flag', () => {
     const many = Array.from({ length: 13 }, (_, i) => pr('we', i + 1));
