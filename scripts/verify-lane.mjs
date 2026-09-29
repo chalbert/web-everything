@@ -59,7 +59,7 @@
  * marker written) / `reset` refused because a FOREIGN lease is live (own live lease no longer refuses, #3378).
  */
 import { execSync } from 'node:child_process';
-import { writeFileSync, renameSync, existsSync, readFileSync, readdirSync, unlinkSync } from 'node:fs';
+import { writeFileSync, renameSync, existsSync, readFileSync, readdirSync, unlinkSync, lstatSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -67,7 +67,7 @@ import { VERIFY_FILENAME, VERIFY_PREVIOUS_FILENAME, verifyStartBody, verifyFinis
 import { LEASE_FILENAME, isLeaseStale, isConfirmedOwnLease } from './lib/lane-lease.mjs';
 import { defaultPoolRoot } from './lib/lane-pool-paths.mjs';
 import { writeAllSync } from './lib/write-all-sync.mjs';
-import { resolveDefaultGate, describeGate, laneRelevantChangeSinceForRecord } from './lib/verify-lane-gate.mjs';
+import { resolveDefaultGate, describeGate, laneRelevantChangeSinceForRecord, computeWorkingTreeHash, stableTreeHash } from './lib/verify-lane-gate.mjs';
 import { admissionLockRoot, resolveCap, resolveTimeoutMs, acquireSlotBlocking, releaseOwnedSlot, ADMISSION_HELD_ENV, classifyCommandKind } from './readiness/heavy-admission.mjs';
 
 // ── tiny arg parsing (matches push-if-green.mjs / lane-pool.mjs) ─────────────────────────────────────
@@ -270,7 +270,49 @@ const preStart = MODE === 'run' ? null : readMarker();
 if (preStart && !preStart.corrupt && (preStart.status === 'green' || preStart.status === 'red') && preStart.sha && preStart.sha !== headSha) {
   writeFileSync(join(GIT_DIR, VERIFY_PREVIOUS_FILENAME), `${JSON.stringify(preStart, null, 2)}\n`);
 }
-if (MODE !== 'run') writeMarker(verifyStartBody({ sha: headSha, suites: GATE, startedAt: new Date().toISOString() }));
+
+// #4473 — CACHE-HIT FAST PATH, checked before the unconditional start-write below ever runs. A worker iterating
+// with UNCOMMITTED edits never moves `headSha`, so a prior `request`/`verify` for THIS exact head can already
+// have a terminal record sitting on disk when this call is made — and until now, `request`/bare `verify`
+// discarded it unconditionally on every call, forcing `verify-dispatch.mjs` to re-run the FULL gate even when
+// nothing the gate looks at had changed (the measured "same lane+sha verified repeatedly" waste this item exists
+// to cut). `headSha` alone is NOT a safe skip condition — the working tree can change with HEAD held still — so
+// this only fires when the CONTENT hash also matches (`computeWorkingTreeHash`, same shell `runGit` the gate
+// decision above already used). `null` (git couldn't answer) never matches — fail closed, same posture as every
+// other "unknown" cell this file already honors (#4296's own `laneRelevantChangeSince`).
+//
+// GREEN ONLY — a RED record is deliberately NEVER cache-hit. Reds are frequently non-code (host contention, a
+// flaky test — this very item's own card logged three such reds), and before this change a bare re-`request`/
+// `verify` on an unchanged tree always re-ran the gate, which is exactly how a worker clears a flaky red: touch
+// nothing, ask again. Caching a red would make that red STICKY (stuck exit 2 until a file is touched or `reset`
+// is run) — worse than the "wasted re-run" this item is fixing. So `request`/`verify` on a red marker always
+// fall through to the ordinary start-write below and actually re-run, same as before this diff landed.
+//
+// SAME GATE ONLY — the key also requires `preStart.suites === GATE`: a green recorded under a narrower or
+// weaker `--gate=` override (e.g. `--gate=true`) must never satisfy a LATER request for a different/stronger
+// gate on the same unchanged tree — that would silently skip the real verification the caller actually asked
+// for. Only a green produced by the SAME gate command can answer a cache hit.
+const treeHashNow = () => computeWorkingTreeHash({ runGit: git, fileMode: (f) => lstatSync(join(REPO, f)).mode });
+const currentTreeHash = MODE === 'run' ? null : treeHashNow();
+const cacheHit = MODE !== 'run' && preStart && !preStart.corrupt
+  && preStart.status === 'green'
+  && preStart.sha === headSha
+  && currentTreeHash != null && preStart.treeHash === currentTreeHash
+  && preStart.suites === GATE;
+
+if (cacheHit) {
+  const cachedDetail = `green for ${headSha.slice(0, 8)} — working tree unchanged since that verification (content hash + gate match); no new run needed.`;
+  if (MODE === 'request') {
+    // Leave the marker exactly as it is: never overwrite a still-accurate terminal record with a fresh
+    // `running` one — that overwrite is the ONLY thing that made `verify-dispatch.mjs` see `running` and
+    // re-dispatch. A caller polling `check`/`check --wait=` next reads the SAME terminal record this emits.
+    emit({ sha: headSha, status: 'cached', reason: 'cached', exitCode: preStart.exitCode ?? null, detail: `verification already ${cachedDetail}` }, 0);
+  }
+  // Bare `verify`: report the cached terminal result directly — never touch the marker, never exec the gate.
+  emit({ sha: headSha, status: 'green', reason: 'cached', exitCode: preStart.exitCode ?? null, detail: cachedDetail }, 0);
+}
+
+if (MODE !== 'run') writeMarker(verifyStartBody({ sha: headSha, suites: GATE, startedAt: new Date().toISOString(), treeHash: currentTreeHash }));
 
 // #3105 — `request` stops HERE: the marker is stamped, nothing has run yet, and this call already returns
 // (`emit` calls `process.exit`). The actual suite run is picked up by `scripts/conveyor/verify-dispatch.mjs`
@@ -321,6 +363,9 @@ if (admission.timedOut) {
 // begins now" — including the common no-contention case (`admission.waitedMs === 0`), where neither line above
 // prints anything and a caller would otherwise have no way to tell "just started" from "already deep in the
 // gate". Never remove or reword this line without updating `verify-dispatch.mjs`'s own `GATE_STARTED_MARKER`.
+// PR #2982 round-2 review — re-sample the tree hash after the admission wait (and again after the gate, below):
+// a worker editing while this run queued or ran means the gate did not see the start-of-run tree.
+const preGateTreeHash = MODE === 'run' ? null : treeHashNow();
 process.stderr.write(`⏱ gate execution starting (suites: ${GATE})\n`);
 let exitCode = 0;
 try {
@@ -358,10 +403,16 @@ if (onDisk && !onDisk.corrupt && onDisk.sha && onDisk.sha !== headSha) {
 const startBody = onDisk && !onDisk.corrupt && onDisk.sha === headSha
   ? onDisk
   : verifyStartBody({ sha: headSha, suites: GATE, startedAt: null });
+// PR #2982 review — every cache-key field is bound to what THIS run did, never re-read off the shared marker: an
+// overlapping `request` (a worker edits, or asks for another `--gate=`, mid-gate) re-stamps the marker with a
+// NEWER tree's hash or a different gate command, and inheriting either would record a green nobody verified.
+// The tree hash is recorded only if the tree held still from start, through the admission wait, to gate exit.
 const finished = verifyFinishBody(startBody, {
   finishedAt: new Date().toISOString(),
   exitCode,
   sha: headSha,
+  suites: GATE,
+  treeHash: stableTreeHash(currentTreeHash, preGateTreeHash, treeHashNow()),
 });
 writeMarker(finished);
 

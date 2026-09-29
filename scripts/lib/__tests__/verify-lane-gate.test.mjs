@@ -13,7 +13,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { resolveDefaultGate, canScopeCheckStandards, composeGate, describeGate, laneRelevantChangeSince, FULL_GATE, MAX_RELATED_TARGETS } from '../verify-lane-gate.mjs';
+import { resolveDefaultGate, canScopeCheckStandards, composeGate, describeGate, laneRelevantChangeSince, computeWorkingTreeHash, stableTreeHash, FULL_GATE, MAX_RELATED_TARGETS } from '../verify-lane-gate.mjs';
 
 /** A synthetic git runner for the xpnhz4o working-tree changed set: `merge-base` resolves to a fixed sha;
  *  `diff --name-only <sha>` returns the (working-tree) changed files; `--diff-filter=D` the deleted ones;
@@ -395,6 +395,83 @@ describe('laneRelevantChangeSince (#4296) — keys marker validity to what chang
   });
 });
 
+/** A synthetic git runner for {@link computeWorkingTreeHash} (#4473): `merge-base` resolves to a fixed sha;
+ *  `diff <sha> --` returns the tracked-diff PATCH TEXT (content, not just names); `ls-files --others
+ *  --exclude-standard` the untracked file list; `hash-object -- <file>` each untracked file's own content hash
+ *  (keyed off a simple in-memory map, standing in for the real git object hash). No real git process.
+ *  `ls-files` answers NUL-separated, as the real `-z` form does. */
+function fakeTreeGit({ mergeBase = 'deadbeef', trackedDiff = '', untracked = [], untrackedHashes = {} } = {}) {
+  return (args) => {
+    if (args[0] === 'merge-base') return mergeBase;
+    if (args[0] === 'diff') return trackedDiff;
+    if (args[0] === 'ls-files') return untracked.join('\0');
+    if (args[0] === 'hash-object') {
+      const file = args[args.length - 1];
+      return untrackedHashes[file] ?? `hash-of-${file}`;
+    }
+    throw new Error(`unexpected git invocation in test: ${args.join(' ')}`);
+  };
+}
+
+describe('computeWorkingTreeHash (#4473) — a content hash of the working tree against the pinned merge-base', () => {
+  const regularFile = () => 0o100644;
+  const treeHash = (opts, fileMode = regularFile) => computeWorkingTreeHash({ runGit: fakeTreeGit(opts), fileMode });
+
+  it('is deterministic: the same tracked diff + untracked content hashes the same across two calls', () => {
+    const opts = { trackedDiff: 'diff --git a/x b/x\n+hi\n', untracked: ['scratch.txt'] };
+    expect(treeHash(opts)).toBe(treeHash(opts));
+  });
+
+  it('changes when the TRACKED diff changes (an edit to an already-tracked file)', () => {
+    expect(treeHash({ trackedDiff: 'diff B\n' })).not.toBe(treeHash({ trackedDiff: 'diff A\n' }));
+  });
+
+  it('changes when an UNTRACKED file is added', () => {
+    expect(treeHash({ untracked: ['new.txt'] })).not.toBe(treeHash({ untracked: [] }));
+  });
+
+  it('changes when an untracked file\'s own CONTENT changes (its hash-object result differs), same filename', () => {
+    const before = treeHash({ untracked: ['scratch.txt'], untrackedHashes: { 'scratch.txt': 'aaa' } });
+    const after = treeHash({ untracked: ['scratch.txt'], untrackedHashes: { 'scratch.txt': 'bbb' } });
+    expect(after).not.toBe(before);
+  });
+
+  it('is insensitive to the ON-DISK ORDER `ls-files` happens to return untracked files in (sorted before hashing)', () => {
+    expect(treeHash({ untracked: ['b.txt', 'a.txt'] })).toBe(treeHash({ untracked: ['a.txt', 'b.txt'] }));
+  });
+
+  // PR #2982 review — `hash-object` is content-only, so the execute bit / file type must enter the key separately.
+  it('changes when an untracked file loses its EXECUTE bit (same content, same hash-object)', () => {
+    const opts = { untracked: ['tool.sh'] };
+    expect(treeHash(opts, () => 0o100644)).not.toBe(treeHash(opts, () => 0o100755));
+    // only the OWNER loses x (group/other keep it) — the owner running the gate now gets EACCES
+    expect(treeHash(opts, () => 0o100655)).not.toBe(treeHash(opts, () => 0o100755));
+  });
+
+  it('changes when an untracked path turns into a SYMLINK (same hash-object)', () => {
+    const opts = { untracked: ['link'] };
+    expect(treeHash(opts, () => 0o120777)).not.toBe(treeHash(opts, () => 0o100755));
+  });
+
+  it('returns null (fail closed) with an untracked file but no `fileMode` reader — never a mode-blind key', () => {
+    expect(computeWorkingTreeHash({ runGit: fakeTreeGit({ untracked: ['tool.sh'] }) })).toBeNull();
+    expect(computeWorkingTreeHash({ runGit: fakeTreeGit({ untracked: [] }) })).not.toBeNull();
+  });
+
+  it('passes a non-ASCII / newline-bearing untracked path to hash-object verbatim (NUL-split, never C-quoted)', () => {
+    const seen = [];
+    const git = fakeTreeGit({ untracked: ['café.txt', 'a\nb.txt'] });
+    const spy = (args) => { if (args[0] === 'hash-object') seen.push(args[args.length - 1]); return git(args); };
+    expect(computeWorkingTreeHash({ runGit: spy, fileMode: regularFile })).not.toBeNull();
+    expect(seen.sort()).toEqual(['a\nb.txt', 'café.txt']);
+  });
+
+  it('returns null (unknown — fail closed) when there is no computable merge-base', () => {
+    const git = () => { throw new Error('no upstream configured'); };
+    expect(computeWorkingTreeHash({ runGit: git })).toBeNull();
+  });
+});
+
 describe('verify-lane.mjs source wiring — the default gate actually calls resolveDefaultGate', () => {
   it('xpnhz4o — prints describeGate before running, and `run` mode records no marker', () => {
     const src = readFileSync(resolve(process.cwd(), 'scripts/verify-lane.mjs'), 'utf8');
@@ -431,5 +508,31 @@ describe('verify-lane.mjs source wiring — the default gate actually calls reso
     // (the wait polls the marker fresh — see waitForVerifySettle's own doc for why the callback shape matters),
     // and the callback wraps the SAME shared wrapper, passing the FULL record (never just its sha).
     expect(src).toMatch(/resolveLaneRelevantChangeSince: \(record\) => laneRelevantChangeSinceForRecord\(\{ record, headSha, base: 'origin\/main', runGit: git \}\)/);
+  });
+});
+
+// #4473 review finding 4 — a prior revision of this file had an additional source-text regex test here
+// ('`request`/bare `verify` compute the working-tree hash and skip re-verifying on a cache hit') that matched
+// verify-lane.mjs's exact expression text, including a whitespace window and the full start-write call. It was
+// removed: it asserted nothing about BEHAVIOR that the real-git integration tests in
+// scripts/__tests__/verify-lane.test.mjs (describe blocks tagged #4473) don't already cover end to end — cache
+// hit on matching sha+treeHash+gate, cache MISS on a differing gate, cache MISS on a red record, and cache MISS
+// with no computable origin/main ref — while being strictly MORE fragile than those: a harmless reformat or
+// reordering of the cacheHit condition redded this regex with no behavior change at all.
+
+describe('stableTreeHash (#4473, PR #2982 round-2 review) — record a tree hash only if the tree held still for the whole run', () => {
+  it('returns the hash when every sample matches', () => {
+    expect(stableTreeHash('a', 'a', 'a')).toBe('a');
+  });
+  it('returns null when any sample differs — including one that caught an edit later reverted by the next sample (A → B → A)', () => {
+    expect(stableTreeHash('a', 'b', 'b')).toBeNull();
+    expect(stableTreeHash('a', 'a', 'b')).toBeNull();
+    expect(stableTreeHash('a', 'b', 'a')).toBeNull();
+  });
+  it('returns null when any sample is unknown, or there are no samples (fail closed)', () => {
+    expect(stableTreeHash('a', null, 'a')).toBeNull();
+    expect(stableTreeHash(null, null)).toBeNull();
+    expect(stableTreeHash('a', undefined)).toBeNull();
+    expect(stableTreeHash()).toBeNull();
   });
 });

@@ -1635,11 +1635,24 @@ export function scanNonClaudeJudgeTranscripts({ home = homedir(), sinceMs = null
  * total is ATTRIBUTED to a demand (`dispatched-daemon` + `review-juror`) vs `orchestration-overhead` vs
  * `operator-interactive` vs `non-claude-judge` (tokens known, not attributed to a PR). Never claims 100%: a
  * file that failed to parse counts in `unattributedTokens`, not silently dropped from the denominator.
+ *
+ * #4473 (x4txc2g) — `projectsRoot`/`runsDirs`/`workspaceRoot`/`home` are the SAME override params
+ * {@link scanClaudeProjectsCoverage}/{@link scanReviewJurorUsage}/{@link scanNonClaudeJudgeTranscripts} already
+ * accept, threaded through here so a caller (namely this file's own tests) can point every scan root at an
+ * isolated directory instead of the real live host state (`~/.claude/projects`, every workspace checkout's
+ * `.operations/runs`, `~/.codex-judge-transcripts`). Before this, `buildCoverageReport` hardcoded all three
+ * scanners' defaults, so its OWN test could only ever read real, live, ambient host state — non-hermetic, and
+ * observed to flake under real concurrent multi-lane load (a live file's mtime ticking past a captured
+ * `Date.now()` mid-scan). Omitted (the default for every existing caller) ⇒ each scanner's own real default —
+ * byte-for-byte the prior behavior; nothing changes for `we:scripts/conveyor/run-rating.mjs`'s own `main()` call
+ * site, which never passes these.
+ * @param {{sinceMs?: number|null, projectsRoot?: string, runsDirs?: string[]|null, workspaceRoot?: string,
+ *   home?: string}} args
  */
-export function buildCoverageReport({ sinceMs = null } = {}) {
-  const claudeBuckets = scanClaudeProjectsCoverage({ sinceMs });
-  const juror = scanReviewJurorUsage({ sinceMs });
-  const nonClaudeJudge = scanNonClaudeJudgeTranscripts({ sinceMs });
+export function buildCoverageReport({ sinceMs = null, projectsRoot, runsDirs, workspaceRoot, home } = {}) {
+  const claudeBuckets = scanClaudeProjectsCoverage({ sinceMs, projectsRoot });
+  const juror = scanReviewJurorUsage({ sinceMs, runsDirs, workspaceRoot });
+  const nonClaudeJudge = scanNonClaudeJudgeTranscripts({ sinceMs, home });
 
   const jurorTokens = juror.claudeRows.reduce((s, r) => addTokenBag(s, r.tokens), zeroTokenBag());
   const jurorCost = juror.claudeRows.reduce((s, r) => s + (r.costUsd ?? 0), 0);

@@ -233,8 +233,12 @@ export function resolveVerifyOptions({ flags = {}, env = {} } = {}) {
 export const DEFAULT_VERIFY_TTL_MINUTES = 30;
 
 /** Build the AT-START (`running`) marker. The caller stamps `startedAt` (ISO) and the resolved `sha` so this
- *  stays clock-free / git-free / testable. `suites` is the gate command string, recorded for the message. */
-export function verifyStartBody({ sha, suites, startedAt }) {
+ *  stays clock-free / git-free / testable. `suites` is the gate command string, recorded for the message.
+ *  `treeHash` (#4473, optional) is the working-tree content hash ({@link ../lib/verify-lane-gate.mjs}'s
+ *  `computeWorkingTreeHash`) the IO shell computed BEFORE this call — carried through so a later `request`/
+ *  `verify` can tell "the tree is byte-identical to what this record verified" apart from "same commit, tree
+ *  moved since"; omitted/`null` (every existing caller) never enables that fast path. */
+export function verifyStartBody({ sha, suites, startedAt, treeHash }) {
   return {
     sha: sha || null,
     status: 'running',
@@ -242,6 +246,7 @@ export function verifyStartBody({ sha, suites, startedAt }) {
     finishedAt: null,
     suites: suites || null,
     exitCode: null,
+    treeHash: treeHash ?? null,
   };
 }
 
@@ -255,7 +260,7 @@ export function verifyStartBody({ sha, suites, startedAt }) {
  *  green for a tree it never verified — the exact false-green this guard exists to kill. So `sha` is passed
  *  explicitly and wins. `prev` supplies only `startedAt`/`suites` (audit fields); `base.sha` is a fallback for
  *  legacy callers that pass their own start body as `prev`. */
-export function verifyFinishBody(prev, { finishedAt, exitCode, sha } = {}) {
+export function verifyFinishBody(prev, { finishedAt, exitCode, sha, treeHash, suites } = {}) {
   const base = prev && typeof prev === 'object' ? prev : {};
   const green = Number(exitCode) === 0;
   return {
@@ -263,8 +268,16 @@ export function verifyFinishBody(prev, { finishedAt, exitCode, sha } = {}) {
     status: green ? 'green' : 'red',
     startedAt: base.startedAt ?? null,
     finishedAt: finishedAt || null,
-    suites: base.suites ?? null,
+    // #4473 — `suites` is part of the cache key too, so the gate THIS run executed wins (PR #2982 round-2 review):
+    // an overlapping `request --gate=<other>` re-stamps the shared marker with ITS command, and inheriting that
+    // would relabel this run's green as a green for a gate that never ran.
+    suites: suites ?? base.suites ?? null,
     exitCode: Number.isFinite(Number(exitCode)) ? Number(exitCode) : null,
+    // #4473 — the cache key. Like `sha`, an explicit `treeHash` (the hash the run itself captured) WINS over
+    // `base.treeHash` (PR #2982 review): `base` is usually re-read off the shared on-disk marker, which an
+    // overlapping `request` can have re-stamped with a NEWER, unverified tree's hash — inheriting it would publish
+    // a cacheable green for that tree. `verify-lane.mjs` always passes it; `base.treeHash` is a legacy fallback.
+    treeHash: treeHash !== undefined ? treeHash : (base.treeHash ?? null),
   };
 }
 

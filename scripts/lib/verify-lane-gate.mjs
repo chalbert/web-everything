@@ -58,6 +58,7 @@
  * `scripts` omitted/unknown ⇒ assumed WE-shaped, so a WE checkout's command is byte-for-byte unchanged. frontierui
  * has both `test:unit` and `check:standards`, so it too gets today's gate unchanged.
  */
+import { createHash } from 'node:crypto';
 import { SELECTION_FLAG, pinnedMergeBase, decideLocalSelection, referencedTestNeedles } from '../readiness/test-selection.mjs';
 import { isPolicyCorePath } from './gate-config.mjs';
 
@@ -193,6 +194,71 @@ export function localChangedSet({ base = 'origin/main', runGit }) {
   } catch {
     return null;
   }
+}
+
+/**
+ * #4473 — a content hash of the CURRENT working tree against the pinned merge-base: the same "what will the
+ * gate actually see" input {@link localChangedSet} derives (tracked diff, staged or not, plus untracked files),
+ * but content-addressed rather than just a file list, so two calls with byte-identical tracked+untracked content
+ * hash the SAME — even across separate process invocations (`request` then `request` again with no edit in
+ * between), which is exactly what a file-list-only key cannot tell apart from "the same files, edited again".
+ *
+ * WHY THIS EXISTS. `verify-lane.mjs`'s marker is keyed only to `headSha` (the commit) — but a worker iterating
+ * with UNCOMMITTED edits never moves `headSha` at all, while the gate's own inputs (`resolveDefaultGate` /
+ * {@link localChangedSet}) are keyed off the WORKING TREE, not the commit. Before this, `request`/bare `verify`
+ * unconditionally discarded any existing terminal record and started a fresh `running` marker on every call,
+ * which `verify-dispatch.mjs` then re-ran to completion — the exact "same lane+sha verified repeatedly" waste
+ * this item's transcript evidence measured. A content hash lets the caller tell "truly unchanged since the last
+ * terminal record" (safe to answer from cache) apart from "same commit, but the tree moved since" (must re-run) —
+ * a same-`headSha` check ALONE cannot make that distinction and would risk a false green.
+ *
+ * Returns `null` when git cannot answer (no computable merge-base, or a git failure) — the caller MUST treat
+ * `null` as unknown, never as a fixed/comparable value (fail closed, same posture as {@link localChangedSet}).
+ *
+ * `fileMode` (PR #2982 review) reads an untracked path's `lstat` mode. The tracked diff already carries mode
+ * changes (`old mode`/`new mode`), but `git hash-object` is content-only, so an untracked executable that loses
+ * its execute bit would otherwise hash identically while the gate running it now fails. Omitted ⇒ `null` (fail
+ * closed) whenever there is an untracked file, so a caller can never silently get a mode-blind key.
+ * @param {{base?: string, runGit: (args: string[]) => string, fileMode?: (path: string) => number}} args
+ * @returns {string|null}
+ */
+export function computeWorkingTreeHash({ base = 'origin/main', runGit, fileMode }) {
+  const mergeBase = pinnedMergeBase({ base, runGit });
+  if (!mergeBase) return null;
+  try {
+    // The tracked diff (staged + unstaged) against the merge-base — the same shape `localChangedSet`'s
+    // `tracked` derives, but the full patch text (content), not just names.
+    const trackedDiff = runGit(['diff', mergeBase, '--']);
+    // `-z`: NUL-separated and never C-quoted, so a non-ASCII / newline-bearing path reaches `hash-object` as the
+    // real filename instead of a quoted string it cannot find (which used to fail the whole hash closed).
+    const untracked = String(runGit(['ls-files', '-z', '--others', '--exclude-standard']))
+      .split('\0').filter(Boolean).sort();
+    if (untracked.length && typeof fileMode !== 'function') return null;
+    // Each untracked file's OWN content hash (`git hash-object`, deterministic and reads the file itself) plus
+    // its file type + full permission bits (any x bit alone would miss 755 → 655, which the owner can no longer
+    // execute) — never mtime/size, which can change with no content change and hash-flap.
+    const untrackedDigest = untracked
+      .map((f) => `${f}:${(fileMode(f) & 0o177777).toString(8)}:${String(runGit(['hash-object', '--', f])).trim()}`)
+      .join('\n');
+    return createHash('sha256').update(trackedDiff).update('\u0000').update(untrackedDigest).digest('hex');
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * #4473 (PR #2982 round-2 review) — the tree hash a finished run may record: the start-of-run hash, but only when
+ * every later sample (just before the gate ran, just after it exited) still equals it. A worker editing during
+ * the admission wait or the gate itself means the gate saw a different tree than the one hashed at start, so the
+ * run's result must not be cacheable for either — `null`, which never matches (fail closed). Known limit: an edit
+ * made AND reverted entirely between two samples is invisible to sampling; this narrows the window, it cannot
+ * close it.
+ * @param {...(string|null|undefined)} samples - the tree hashes in the order they were taken
+ * @returns {string|null}
+ */
+export function stableTreeHash(...samples) {
+  if (!samples.length || samples.some((h) => typeof h !== 'string' || !h)) return null;
+  return samples.every((h) => h === samples[0]) ? samples[0] : null;
 }
 
 /** A full or abbreviated hex commit sha — never a ref name, a flag-shaped string, or anything else `git diff`
