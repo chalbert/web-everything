@@ -55,7 +55,7 @@ anything under this card's original scope.
 
 The operator separately asked (mid-session) for build-dispatch concurrency to be split by provider (Claude
 cap default 1, external/Codex-agy cap default 4). That is real new scope, not covered by the already-done
-finding above, and too large for this card's remaining budget — filed as its own follow-up, **`xddlvn0`**
+finding above, and too large for this card's remaining budget — filed as its own follow-up, **`4531`**
 ("Split build-dispatch concurrency cap by provider (Claude vs Codex/agy)"). This PR ships only the minimum
 bar the operator named as acceptable in that case: the ACTUAL provider (`executor`: `claude`/`antigravity`/
 `codex`) of every in-flight build is now visible on `we:skills-src/conveyor/build-dispatch-daemon.mjs`'s tick
