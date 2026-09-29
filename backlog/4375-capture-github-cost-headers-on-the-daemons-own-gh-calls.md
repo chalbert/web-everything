@@ -3,10 +3,11 @@ bornAs: x7nlnnx
 kind: story
 size: 5
 tier: pinned
-status: active
+status: resolved
 scope: ["we:scripts/lib/gh-throttle.mjs", "we:scripts/lib/gh-spend.mjs", "we:scripts/conveyor/fix-procedure.mjs", "we:skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs", "we:skills-src/conveyor/review-daemon.mjs", "we:scripts/pr-land.mjs"]
 dateOpened: "2026-09-28"
 dateStarted: "2026-09-29"
+dateResolved: "2026-09-29"
 tags: []
 ---
 
