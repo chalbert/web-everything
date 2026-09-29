@@ -933,7 +933,7 @@ describe('what the sink actually runs', () => {
     // real dispatch argv. Passing it bought nothing and encoded a false premise the rest of the file read as
     // fact; the handle now comes from the id the CLI prints (`parseBackgroundedId`).
     const argv = buildAgentArgv({ sessionId: 'sess-c3', payload });
-    expect(argv).toEqual(['--bg', '-n', 'conveyor-3037', '--settings', JSON.stringify({ env: { WE_CONVEYOR_WORKER: '1' } }), '# build #3037']);
+    expect(argv).toEqual(['--bg', '-n', 'conveyor-3037', '--settings', JSON.stringify({ env: { WE_CONVEYOR_WORKER: '1' } }), '--model', 'sonnet', '# build #3037']);
     expect(argv).not.toContain('--session-id');
     expect(argv).not.toContain('sess-c3');
   });
@@ -969,7 +969,7 @@ describe('what the sink actually runs', () => {
     expect(argv).toEqual([
       '--bg', '-n', 'conveyor-3037',
       '--settings', JSON.stringify({ env: { PATH: '/shim:/usr/bin', WE_CONVEYOR_WORKER: '1' }, worktree: { bgIsolation: 'none' } }),
-      '# build #3037',
+      '--model', 'sonnet', '# build #3037',
     ]);
   });
 

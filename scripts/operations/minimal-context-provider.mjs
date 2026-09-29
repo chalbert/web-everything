@@ -178,7 +178,7 @@ export function buildRestrictedProviderArgv({
   ];
   return resumeSessionId
     ? [...RESTRICTED_FLAGS, '--resume', String(resumeSessionId), prompt]
-    : [...RESTRICTED_FLAGS, '-p', '--session-id', String(sessionId), prompt];
+    : [...RESTRICTED_FLAGS, '--model', 'sonnet', '-p', '--session-id', String(sessionId), prompt];
 }
 
 // ================================================================================================

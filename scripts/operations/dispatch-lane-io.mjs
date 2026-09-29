@@ -103,6 +103,7 @@ import { assertMainNotStale, behindFiles, gitRun, isCodePath } from '../lib/main
 import { CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
 import { inFlight, notApplied } from './effect-executor.mjs';
 import { createFileRunStore } from './run-store.mjs';
+import { workerTierFor } from '../lib/provider-routing.mjs';
 import { DEFAULT_EXPECTED_WITHIN_MINUTES, DISPATCH_EFFECT, DISPATCH_LISTING_GRACE_MINUTES, LAUNCH_KINDS } from './dispatch-lane.mjs';
 // #3383 — the spawned session is a WORKER; a hook-driven tick-once must never run in it (see session-role.mjs).
 import { markWorkerEnv, workerMarkerSettingsEnv } from './session-role.mjs';
@@ -1449,9 +1450,8 @@ export function createDispatchSinks({
       ensureWorktreeIsolation(sessionCwd);
       const worktreeSettings = resolveWorktreeIsolation();
       // #3857 — the model-tier table's answer for this dispatch, read straight off `payload.routing`
-      // (`decideDispatchRoute`'s record, computed upstream by the read step — never recomputed here). `null`
-      // when the read carried no routing record (a hand-built fixture), which keeps `buildAgentArgv` on its
-      // pre-#3857 pass-through behaviour. See {@link workerModelTable}.
+      // (`decideDispatchRoute`'s record, computed upstream by the read step). Without a routed
+      // model, `buildAgentArgv` uses the launch kind’s tier and refuses an unresolved model.
       const table = workerModelTable(payload?.routing);
       const modelReason = payload?.modelReason ?? null;
       // build-path-codex-isolation — WHAT ACTUALLY RAN IT, reported by the provider that started it (see
@@ -1571,7 +1571,7 @@ export function createDispatchSinks({
 
 /**
  * #3857/#3906 — THE MODEL-TIER TABLE'S ANSWER for one dispatch, as the `table` {@link buildAgentArgv} takes:
- * `{tier, model, reason}`, or `null` (no `--model` injected — the pre-#3857 pass-through).
+ * `{tier, model, reason}`, or `null` (the argv builder must resolve a launch-kind default).
  *
  *   - A ROUTED record whose `model` is a native Claude id → its tier's spawn ALIAS (`sonnet`/`opus`). The
  *     prototype passed the pinned id; #3906 passes the alias so a worker is never an older model.
@@ -1706,7 +1706,7 @@ export function defaultClaudeProvider(request, { spawnAgent = (argv, opts) => de
   request.reportExecutor?.('claude');
   const argv = buildAgentArgv({
     sessionId: request.sessionId,
-    payload: { prompt: request.prompt, sessionSlug: request.sessionSlug, num: request.num },
+    payload: { prompt: request.prompt, sessionSlug: request.sessionSlug, num: request.num, launchKind: request.launchKind },
     extraArgs: request.extraArgs,
     systemPromptFile: request.systemPromptFile,
     // #x8mpubm — resolved once by the SINK (`createDispatchSinks`), not here: this function never reaches
@@ -2184,10 +2184,9 @@ export function buildAgentArgv({
   // to before this param existed — only `createDispatchSinks`' own resolver ever supplies a real value.
   worktreeSettings = null,
   // #3857 — `table` is the checked-in model-tier table's answer for THIS dispatch ({tier, model, reason} — see
-  // `../lib/provider-routing.mjs#workerTierFor` and {@link workerModelTable}); `null` (every caller that computes
-  // no routing decision: reconcile-fix dispatch) keeps this function's OLD behaviour byte-identical —
-  // extraArgs pass through untouched, no --model is ever injected or refused. Passing `table` is what OPTS a
-  // caller into the enforcement, once, at the one argv builder every Claude dispatch shares.
+  // `../lib/provider-routing.mjs#workerTierFor` and {@link workerModelTable}). Explicit routing takes
+  // precedence; with no `table`, the launch kind's own tier is used, and a spawn with no resolvable model is
+  // refused (operator rule 2026-09-29: every fresh Claude launch passes an explicit --model).
   table = null, modelReason = null,
 }) {
   const prompt = String(payload?.prompt || '');
@@ -2217,6 +2216,19 @@ export function buildAgentArgv({
     if (decision.refusal) throw notApplied(`dispatch-lane: ${decision.refusal}`);
     args = decision.cleanArgs;
     if (decision.model) modelArgs.push('--model', String(decision.model));
+  } else {
+    const explicit = extractModelFlag(args);
+    const kind = payload?.launchKind ?? 'build';
+    const tier = [...LAUNCH_KINDS, 'review', 'inspect'].includes(kind)
+      ? workerTierFor({ kind }).tier : null;
+    const model = explicit.found ? explicit.value : CLAUDE_SPAWN_MODEL_BY_TIER[tier];
+    args = explicit.rest;
+    if (model) modelArgs.push('--model', model);
+  }
+  // Operator rule 2026-09-29: a fresh session must never inherit the CLI default.
+  // Resume returns above and retains the existing session's model.
+  if (typeof modelArgs[1] !== 'string' || !modelArgs[1].trim() || modelArgs[1].startsWith('-')) {
+    throw notApplied('dispatch-lane: refusing to start an agent without a resolvable --model');
   }
   return [
     '--bg',
@@ -2232,8 +2244,9 @@ export function buildAgentArgv({
     // honour the last one anyway).
     '--settings', JSON.stringify(worktreeSettings ? { env: sessionEnv, worktree: worktreeSettings } : { env: sessionEnv }),
     ...(systemPromptFile ? ['--append-system-prompt-file', String(systemPromptFile)] : []),
-    ...modelArgs,
+    ...(table ? modelArgs : []),
     ...args,
+    ...(!table ? modelArgs : []),
     prompt,
   ];
 }

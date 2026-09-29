@@ -121,7 +121,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 describe('buildRestrictedProviderArgv', () => {
   it('#4348 — addDirs adds one `--add-dir <dir>` pair each, on both branches, before -p/--resume', () => {
     const fresh = buildRestrictedProviderArgv({ sessionId: 'u', prompt: 'p', settingsFile: '/s.json', addDirs: ['/we/lane-7'] });
-    expect(fresh.slice(-6)).toEqual(['--add-dir', '/we/lane-7', '-p', '--session-id', 'u', 'p']);
+    expect(fresh.slice(-8)).toEqual(['--add-dir', '/we/lane-7', '--model', 'sonnet', '-p', '--session-id', 'u', 'p']);
     const resume = buildRestrictedProviderArgv({ prompt: 'p', resumeSessionId: 'u', settingsFile: '/s.json', addDirs: ['/we/lane-7'] });
     expect(resume.slice(-5)).toEqual(['--add-dir', '/we/lane-7', '--resume', 'u', 'p']);
   });
@@ -134,7 +134,7 @@ describe('buildRestrictedProviderArgv', () => {
     expect(argv).toEqual([
       '--restricted', '--tools', 'Bash,Edit,Write,Read,Glob,Grep', '--strict-mcp-config',
       '--disable-slash-commands', '--settings', '/repo/.operations/hooks.json',
-      '-p', '--session-id', 'session-1', 'build item #1234',
+      '--model', 'sonnet', '-p', '--session-id', 'session-1', 'build item #1234',
     ]);
   });
 
@@ -155,7 +155,7 @@ describe('buildRestrictedProviderArgv', () => {
     expect(argv).not.toContain('--safe-mode');
   });
 
-  it('resume: drops -p/--session-id, adds --resume <id>, but KEEPS every other flag identical to a fresh '
+  it('resume: drops -p/--session-id, adds --resume <id>, retains the session model and keeps the restriction flags from a fresh '
     + 'spawn (--resume was verified, not assumed, to preserve both auth-without-a-key and hooks-firing)', () => {
     const argv = buildRestrictedProviderArgv({
       sessionId: 'session-1', prompt: 'fix the gate failure', resumeSessionId: 'session-1',
@@ -1837,6 +1837,8 @@ describe('buildConvergeEditorArgv (#3627 gap 3 helper)', () => {
     expect(argv).not.toContain('--safe-mode');
     expect(argv).not.toContain('--resume');
     expect(argv).toEqual(expect.arrayContaining(['--output-format', 'json']));
+    expect(argv.filter((arg) => arg === '--model')).toHaveLength(1);
+    expect(argv[argv.indexOf('--model') + 1]).toBe('sonnet');
     expect(argv[argv.length - 1]).toBe('fix it');
   });
 });
