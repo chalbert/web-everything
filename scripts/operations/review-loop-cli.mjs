@@ -74,6 +74,12 @@ import {
 } from '../lib/review-loop-policy.mjs';
 import { hasUncapturedPrevention } from '../lib/jury-core.mjs';
 import { writeAllSync } from '../lib/write-all-sync.mjs';
+// #4493 — this file's own mechanized prevention filing had the SAME orphaned-card bug `we:scripts/review-set-
+// label.mjs#fileApprovalPreventionCard` was fixed for under #4317: `fileItemForPrevention` below drives
+// `file-item` IN PROCESS, against whatever checkout is running the review daemon (routinely a read-only clone,
+// never committed, never pushed). `fileItemForPreventionViaLandingJob` (below) routes through the SAME shared
+// detached-landing-job seam #4317's caller already uses, extracted to this leaf for exactly this reuse.
+import { spawnPreventionLandingJob } from '../lib/prevention-landing-job.mjs';
 
 /** The operation this driver always runs. Not a flag: this file has exactly one job. */
 export const REVIEW_LOOP_OP = 'review-pr';
@@ -115,12 +121,18 @@ export function applyUnattendedActorDefault(input, argv = []) {
 }
 
 /**
- * THE PRODUCTION `fileItem` BINDING (#2749) — drives the declared `file-item` operation to completion, IN
- * PROCESS, exactly the way `run.mjs file-item --json --title=… …` would from a terminal (same
- * `resolveOperation`/`runOperationCli` this file already uses for `review-pr` itself), so filing the owed
- * prevention card reuses the SAME declaration/effects/refusals a human's own `file-item` invocation gets,
- * never a re-derived shortcut. `file-item` has no `confirm`/`judge` step (every step is `compute`/`effect`), so
- * this always settles in ONE `driveRun` sweep — no `makeJudge`, no resume.
+ * A `fileItem` BINDING (#2749) THAT DRIVES `file-item` IN PROCESS, exactly the way `run.mjs file-item --json
+ * --title=… …` would from a terminal (same `resolveOperation`/`runOperationCli` this file already uses for
+ * `review-pr` itself). `file-item` has no `confirm`/`judge` step (every step is `compute`/`effect`), so this
+ * always settles in ONE `driveRun` sweep — no `makeJudge`, no resume.
+ *
+ * NO LONGER `runReviewLoopOnce`'s PRODUCTION DEFAULT (#4493). This writes the filed card into `file-item`'s own
+ * root — wherever THIS process's checkout is, which for the real caller (the review daemon) is routinely a
+ * read-only clone that never commits or pushes: the exact bug `we:scripts/review-set-label.mjs
+ * #fileApprovalPreventionCard` was fixed for under #4317, just via this file's own separate caller (74 orphaned
+ * `backlog/x*.md` cards in `~/workspace/wev-review-daemon` as of 2026-09-29, from BOTH callers). Kept, still
+ * exported and tested, as a plain in-process binding a caller genuinely running inside its own writable lane
+ * could still choose to inject; the production default is {@link fileItemForPreventionViaLandingJob}.
  *
  * A FRESH `createFileRunStore()` PER CALL, not the caller's own `review-pr` store: `file-item` is a DIFFERENT
  * operation with its own run-record namespace (`we:scripts/operations/run-store.mjs` keys records by run id,
@@ -142,6 +154,40 @@ export async function fileItemForPrevention(input, {
   return run({
     declaration, argv, registry, store: makeStore(), sinks, newRunId: () => newRunId('file-item'),
   });
+}
+
+/**
+ * THE PRODUCTION `fileItem` BINDING (#4493) — routes the review-loop's own mechanized prevention filing through
+ * the SAME detached landing job (`we:scripts/operations/land-prevention-card.mjs`, #4317) that `we:scripts/
+ * review-set-label.mjs#fileApprovalPreventionCard`'s approval-time caller already uses, via the shared leaf
+ * {@link module:prevention-landing-job.spawnPreventionLandingJob}, instead of {@link fileItemForPrevention}'s
+ * in-process `file-item` drive. See this file's own header import comment for the bug this closes.
+ *
+ * SHAPED TO MATCH {@link fileItemForPrevention}'s OWN RETURN CONTRACT `{code, lines}` so every downstream
+ * reader in `runReviewLoopOnce` (`parseFiledPayload`, the `filed?.code !== 0` refusal check) needs no new
+ * plumbing: a successful spawn synthesizes a `file-item`-shaped JSON line carrying `queued: true` and the job's
+ * own tracking handle in place of a real card number — not known yet, since the job lands the card later, on
+ * its own time, exactly like the approval-time caller's own "queued for landing" case; a failed spawn reports a
+ * non-zero `code`, which the EXISTING refusal path already handles unchanged.
+ *
+ * @param {{title:string,kind:string,size:string,digest:string,scope:string,parent:string,queue:string}} input -
+ *   {@link module:review-loop-policy.buildPreventionFilingInput}'s own output.
+ * @param {{spawnJob?: Function}} [deps] - `spawnJob` is injectable (same shape as
+ *   {@link module:prevention-landing-job.spawnPreventionLandingJob}) so a test asserts the argv with no real
+ *   subprocess and no real `backlog/` write in the calling checkout; production always uses the real one.
+ * @returns {Promise<{code:number, lines:string[]}>}
+ */
+export async function fileItemForPreventionViaLandingJob(input, { spawnJob = spawnPreventionLandingJob } = {}) {
+  const filed = spawnJob(input, { sessionPrefix: 'review-loop-prevention' });
+  if (!filed.ok) {
+    return { code: 1, lines: [filed.error ?? 'land-prevention-card: unknown spawn failure'] };
+  }
+  return {
+    code: 0,
+    lines: [JSON.stringify({
+      verdict: { num: null, rel: null }, queued: true, handle: filed.handle, session: filed.session,
+    })],
+  };
 }
 
 /**
@@ -266,8 +312,9 @@ export function parseFiledPayload(lines = []) {
  *   test never touches the real pool file; the real caller always passes `learnings-drop.mjs#appendEntry`.
  * @param {string} [o.session] - the learnings-pool session slug the queued-accept entry files under.
  * @param {(input: object) => Promise<{code: number, lines: string[]}>} [o.fileItem] - #2749: files the owed
- *   prevention card through the declared `file-item` operation. Injected so a test never touches the real
- *   backlog/queue files; the real caller always passes {@link fileItemForPrevention}.
+ *   prevention card. Injected so a test never touches the real backlog/queue files; the real caller always
+ *   passes {@link fileItemForPreventionViaLandingJob} (#4493 — routes through a real lane, never the calling
+ *   checkout directly; see that function's own doc).
  * @param {(input: object, o: object) => ({filed: Array<object>, uncovered: Array<object>}|null)} [o.findFiledPrevention] -
  *   PR #2766: splits the owed guards into those an earlier round already filed and those still unfiled (`null`
  *   means none filed); the real caller always passes {@link findFiledPreventionCard}.
@@ -275,7 +322,7 @@ export function parseFiledPayload(lines = []) {
  */
 export async function runReviewLoopOnce({
   declaration, registry, argv, store, sinks, makeJudge, mintRunId, autoConfirm = reviewLoopAutoConfirm,
-  appendLearning = appendEntry, session = 'review-loop', fileItem = fileItemForPrevention,
+  appendLearning = appendEntry, session = 'review-loop', fileItem = fileItemForPreventionViaLandingJob,
   findFiledPrevention = findFiledPreventionCard,
 } = {}) {
   const parsed = parseOperationArgv(declaration, argv);
@@ -405,6 +452,12 @@ export async function runReviewLoopOnce({
 
     const filedNum = alreadyFiled ? alreadyFiled.num : (filedPayload?.verdict?.num ?? null);
     const filedRel = alreadyFiled ? alreadyFiled.path : (filedPayload?.verdict?.rel ?? null);
+    // #4493 — the production filer now spawns a detached landing job (see `fileItemForPreventionViaLandingJob`)
+    // rather than filing synchronously, so `filedNum`/`filedRel` are genuinely unknown yet on that path — never
+    // confuse that with the pre-existing "stdout was unreadable" case (`filedPayload` parsed to `{}`), which
+    // stays rendered exactly as before via the `(no path) (#?)` fallback below.
+    const filedQueued = !alreadyFiled && filedPayload?.queued === true;
+    const filedHandle = filedQueued ? (filedPayload?.handle ?? null) : null;
 
     // THE CARD IS FILED AND TRACKED — resume THIS SAME run with the mechanical `accept` the policy itself
     // declined to answer, so the label swap + durable comment apply exactly as a clean accept's would.
@@ -416,7 +469,11 @@ export async function runReviewLoopOnce({
     if (parsed.control.json) {
       const payload = {
         ...JSON.parse(rendered.lines[0]),
-        preventionFiled: { num: filedNum, path: filedRel, ...(alreadyFiled ? { alreadyFiled: true } : {}) },
+        preventionFiled: {
+          num: filedNum, path: filedRel,
+          ...(alreadyFiled ? { alreadyFiled: true } : {}),
+          ...(filedQueued ? { queued: true, handle: filedHandle } : {}),
+        },
       };
       return { code: rendered.code, lines: [JSON.stringify(payload, null, 2)], run: acceptedOutcome.run, stopped: acceptedOutcome.stopped };
     }
@@ -426,8 +483,11 @@ export async function runReviewLoopOnce({
         ...rendered.lines, '',
         alreadyFiled
           ? `prevention guard(s) ALREADY filed by an earlier round — ${filedRel} (#${filedNum}); not filed again.`
-          : `prevention guard(s) filed mechanically — ${filedRel ?? '(no path)'} (#${filedNum ?? '?'}), cleared to `
-            + 'the conveyor; no human was asked.',
+          : filedQueued
+            ? `prevention guard(s) queued for landing via a lane (tracking ${filedHandle ?? 'an untracked job'}), `
+              + 'cleared to the conveyor; no human was asked.'
+            : `prevention guard(s) filed mechanically — ${filedRel ?? '(no path)'} (#${filedNum ?? '?'}), cleared to `
+              + 'the conveyor; no human was asked.',
       ],
       run: acceptedOutcome.run,
       stopped: acceptedOutcome.stopped,
