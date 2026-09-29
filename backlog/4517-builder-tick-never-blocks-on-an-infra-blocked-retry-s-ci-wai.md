@@ -1,4 +1,5 @@
 ---
+bornAs: xvq0ejq
 kind: story
 size: 3
 tier: pinned
@@ -9,7 +10,7 @@ tags: []
 
 # Builder tick never blocks on an infra-blocked retry's CI wait
 
-Every build-dispatch-daemon tick calls we:scripts/conveyor/infra-blocked.mjs retry synchronously via cliRetryInfraBlocked's execFileSync at we:skills-src/conveyor/build-dispatch-daemon.mjs:460, invoked from runBuildDispatchTick at we:skills-src/conveyor/build-dispatch-daemon.mjs:246-247. That retry pass can itself call we:scripts/pr-land.mjs --label-on-green, which blocks waiting for CI to go green. So one PR's slow CI wait stalls the daemon's ENTIRE tick (dispatch, liveness, claims), not just the retry. Live evidence (2026-09-29, 2:55pm ET): launchd com.we.build-dispatch-daemon (pid 77087, clone ~/workspace/wev-control) wrote its last tick line at 18:22:56Z then produced no tick for 30+ minutes; its child node we:scripts/conveyor/infra-blocked.mjs retry had run 26 minutes, itself waiting 14 minutes on we:scripts/pr-land.mjs --ref=lane/xkqiewd-prevention-card ... --label-on-green. Log: ~/workspace/.operations/coordination/build-dispatch-daemon.log.
+Every build-dispatch-daemon tick calls we:scripts/conveyor/infra-blocked.mjs retry synchronously via cliRetryInfraBlocked's execFileSync at we:skills-src/conveyor/build-dispatch-daemon.mjs:460, invoked from runBuildDispatchTick at we:skills-src/conveyor/build-dispatch-daemon.mjs:246-247. That retry pass can itself call we:scripts/pr-land.mjs --label-on-green, which blocks waiting for CI to go green. So one PR's slow CI wait stalls the daemon's ENTIRE tick (dispatch, liveness, claims), not just the retry. Live evidence (2026-09-29, 2:55pm ET): launchd com.we.build-dispatch-daemon (pid 77087, clone ~/workspace/wev-control) wrote its last tick line at 18:22:56Z then produced no tick for 30+ minutes; its child node we:scripts/conveyor/infra-blocked.mjs retry had run 26 minutes, itself waiting 14 minutes on we:scripts/pr-land.mjs --ref=lane/4511-prevention-card ... --label-on-green. Log: ~/workspace/.operations/coordination/build-dispatch-daemon.log.
 
 ## Design / MVP
 
