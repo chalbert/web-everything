@@ -5,12 +5,13 @@ size: 3
 priority: high
 tier: pinned
 rank: i
-status: active
+status: resolved
 scaffoldedBy: "investigate-dispatch-noop-lane-3-d65b5d9a"
 dateScaffolded: "2026-09-28"
 scope: ["we:scripts/operations/deliver-item-wrapper.mjs", "we:scripts/operations/codex-delivery-provider.mjs", "we:scripts/operations/deliver-item-wrapper.test.mjs"]
 dateOpened: "2026-09-28"
 dateStarted: "2026-09-28"
+dateResolved: "2026-09-29"
 tags: ["build-dispatch", "blocker"]
 ---
 
