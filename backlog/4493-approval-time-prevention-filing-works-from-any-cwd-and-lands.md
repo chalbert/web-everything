@@ -84,6 +84,12 @@ a managed clone behind on it still refuses to dispatch a review.
   open-pr) — never by hand-copying files out of the daemon clone. This is a genuinely separate migration/backfill
   concern (bulk-processing 74 pre-existing files, most already superseded or duplicate) from the "stop making new
   orphans" fix above, and does not block it landing.
+- The PR's `soak-replay-gate` check reddened (this IS a live-daemon-break fix) — waived on the PR with a stated
+  reason (the write-avoidance mechanism is already soak-tested via #4317's own break; the review-loop-specific
+  wiring is proven by a real unit test added here) rather than built under time pressure. A dedicated soak break
+  for this caller — `we:backlog/xkp9z65-add-a-dedicated-daemon-soak-break-scenario-for-we-scripts-op.md` — is
+  filed as its own follow-up, with the design note for why it needs a different probe shape than #4317's break
+  (a brand-new export vs. a default-parameter swap).
 
 ## Test plan (each fails before the change, passes after)
 
