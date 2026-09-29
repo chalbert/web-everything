@@ -344,6 +344,16 @@ describe('salvageLane (real git)', () => {
     expect(listUnregisteredWorktreeLitter(lane)).toEqual([]);
   });
 
+  // This test and its `locked`-directory sibling below deliberately chmod a real directory to 0o000 for a
+  // few synchronous statements. A prior CI run (test-shard (1), run 36509203076) crashed the whole vitest
+  // worker (SIGABRT, exit 134) when something native SHARING that worker process's SAME OS thread pool
+  // (another test file's own directory walk) hit the unreadable dir mid-window and threw an uncaught
+  // `std::filesystem::filesystem_error` — no JS try/finally can catch a different thread's uncaught C++
+  // exception, so restoring permissions quickly (below) narrows the window but can't fully close it by
+  // itself. `vitest.config.ts` now pins this whole FILE to its own isolated single-fork process
+  // (`poolMatchGlobs`), so no other test file's native activity ever shares a process with these two —
+  // removing the contention the crash needed to happen at all. Keep the revoke-then-restore window here
+  // as tight as it already is regardless; it's cheap insurance, not the primary fix.
   it('#4273 review — listUnregisteredWorktreeLitter propagates when .claude/worktrees ITSELF is unstattable for a reason OTHER than absence (never silently reads that as "[]" the way a bare existsSync would)', () => {
     if (process.getuid && process.getuid() === 0) return; // root ignores POSIX perms — chmod can't deny it
     mkdirSync(join(lane, '.claude', 'worktrees'), { recursive: true });
