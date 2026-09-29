@@ -50,9 +50,22 @@ function newestMtime(path, isDir, isGit) {
   let m = lstatSync(path).mtimeMs;
   const bump = (p) => { try { m = Math.max(m, statSync(p).mtimeMs); } catch { /* absent */ } };
   // A read-only `git status` rewrites `.git/index` (and the `.git` dir's mtime), so neither counts as activity —
-  // only the HEAD reflog (a commit/checkout/reset) and the working tree's own top-level entries do.
+  // only the HEAD reflog (a commit/checkout/reset) and the working tree's own entries, at any depth, do.
   if (isDir && isGit) { m = 0; bump(join(path, '.git', 'logs', 'HEAD')); }
-  if (isDir) { try { for (const c of readdirSync(path)) if (c !== '.git') bump(join(path, c)); } catch { /* unreadable */ } }
+  // Recurse into every descendant, not just the top level (#4272) — a directory whose own top-level entries
+  // (and own lstat) have gone stale can still hold a genuinely fresh file several levels down. Missing that
+  // aged the whole tree out and deleted it with no salvage step, an unrecoverable loss of real work.
+  const walk = (dir) => {
+    let entries;
+    try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; /* unreadable */ }
+    for (const ent of entries) {
+      if (ent.name === '.git') continue;
+      const p = join(dir, ent.name);
+      bump(p);
+      if (ent.isDirectory()) walk(p);
+    }
+  };
+  if (isDir) walk(path);
   return m;
 }
 

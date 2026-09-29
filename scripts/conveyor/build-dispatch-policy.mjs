@@ -13,12 +13,22 @@
  * declared but not yet enforced by code is visible as such rather than silently assumed:
  *   - cap concurrent builds (default 3), counted over DURABLE in-flight evidence (claims + run records), so a
  *     daemon restart cannot reset the count;
+ *   - wip-cap (#4353): cap OPEN ITEMS — build start until merge (durable in-flight ∪ delivered-by-open-PR),
+ *     the UNION not the sum — separately from `maxConcurrentBuilds`, which only bounds machine load. An item
+ *     stops counting the moment it is no longer in-flight AND no open PR delivers it (merged, or the PR closed).
  *   - landing freeze: hold every new build while open PRs exceed `maxOpenPrs`, or while any open PR carries a
  *     label that means "a daemon failed to move this PR" (`freezeLabels`);
  *   - scope check against every open PR's files, and hot-file serialisation: no two in-flight builds (or two
  *     picks in one tick) touch the same file;
  *   - branch names never start with a bare number (the delivery ref is `lane/<num>...`);
  *   - task-prefixed scratch files and draft-first PRs — declared here, enforced by the brief / PR #2813.
+ *
+ * `maxOpenPrs` vs `maxOpenItems` (#4353 task 4, decided from LIVE data 2026-09-28): kept as two distinct
+ * thresholds, not folded into one. Live `openPrs` that day included
+ * `lane/investigate-lane-reset` — a real open PR with no leading-digit delivery ref, so it counts toward
+ * `maxOpenPrs` (total review/CI load this repo is carrying) but NOT toward `maxOpenItems` (backlog-card WIP).
+ * The populations provably diverge in practice, so `maxOpenPrs` stays as the coarser "how much is open in this
+ * repo at all" ceiling while `maxOpenItems` is the per-card pipeline cap this card adds.
  *
  * PURE: no fs, no clock, no child_process. Every input is passed in; unit-tested in
  * we:scripts/conveyor/__tests__/build-dispatch-policy.test.mjs.
@@ -31,6 +41,10 @@ import { normNum } from './queue-store.mjs';
 export const BUILD_DISPATCH_POLICY = Object.freeze({
   maxConcurrentBuilds: 3,
   maxOpenPrs: 12,
+  // #4353 — open items from build start until MERGE (durable in-flight ∪ delivered-by-open-PR), a tighter,
+  // separate cap from `maxConcurrentBuilds` (which only bounds builds actually running right now). Unmeasured
+  // starting point per the operator's own framing — see `planBuildDispatch`'s `wip-cap` rule below.
+  maxOpenItems: 7,
   // Live incident 2026-09-28 (we#2852): ONE PR mislabelled `review-status:ci-heal-stalled` (a ci-heal session
   // that had actually finished — see we:scripts/conveyor/review-status-tag.mjs's own fix for that bug) froze
   // EVERY queued build, unrelated scope or not, because these three per-PR labels used to feed the SAME global
@@ -53,6 +67,7 @@ export const BUILD_DISPATCH_POLICY = Object.freeze({
   globalFreezeLabels: Object.freeze(['blocked:daemon-bug']),
   rules: Object.freeze([
     { id: 'cap', text: 'at most maxConcurrentBuilds builds in flight', enforcedBy: 'build-dispatch-policy.mjs' },
+    { id: 'wip-cap', text: 'at most maxOpenItems items open from build start until merge (durable in-flight ∪ delivered-by-open-PR)', enforcedBy: 'build-dispatch-policy.mjs' },
     { id: 'landing-freeze', text: 'no new build while open PRs > maxOpenPrs or any open PR carries a freeze label', enforcedBy: 'build-dispatch-policy.mjs' },
     { id: 'scope-vs-open-prs', text: "a build whose scope overlaps an open PR's files waits for that PR", enforcedBy: 'build-dispatch-policy.mjs' },
     { id: 'hot-file', text: 'no two in-flight builds on the same file', enforcedBy: 'build-dispatch-policy.mjs' },
@@ -117,16 +132,23 @@ export function plannedBuildRef(num) {
   return `lane/${normNum(num) || String(num)}-build`;
 }
 
-/**
- * Does an open PR deliver `num`? The delivery ref is `lane/<num>[attempt]-<slug>`; the digit run must end there
- * (so `lane/2385-x` matches 2385 but not 238).
- */
+/** The delivery-ref shape: `lane/<num>[attempt]-<slug>`. The digit/hash run must end there (so `lane/2385-x`
+ *  matches 2385 but not 238), and a leading `x` marks a hash-numbered card (`lane/xcd92xh-x`). */
+const DELIVERY_REF_RE = /^lane\/(\d+|x[0-9a-z]{6})[b-z]?-/i;
+
+/** The num an open PR's `headRefName` delivers, or `null` when it does not match the delivery-ref shape at all
+ *  (a hand-made / non-item PR, e.g. `lane/investigate-lane-reset` — counts toward `maxOpenPrs` but not toward
+ *  `maxOpenItems`, #4353). */
+export function prDeliveredNum(pr) {
+  const m = DELIVERY_REF_RE.exec(String(pr?.headRefName ?? ''));
+  return m ? normNum(m[1]) : null;
+}
+
+/** Does an open PR deliver `num`? Same delivery-ref match as {@link prDeliveredNum}, pinned to one num. */
 export function prDeliversNum(pr, num) {
   const key = normNum(num);
   if (!key) return false;
-  const m = /^lane\/(\d+|x[0-9a-z]{6})[b-z]?-/i.exec(String(pr?.headRefName ?? ''));
-  if (!m) return false;
-  return normNum(m[1]) === key;
+  return prDeliveredNum(pr) === key;
 }
 
 /**
@@ -163,7 +185,9 @@ export function normalizeOpenPrs(byRepo) {
  *   also lease lanes) are never counted twice.
  * @param {{engaged:boolean, reason?:string}} [o.killSwitch]
  * @param {object} [o.policy]
- * @returns {{freeze:{frozen:boolean, reasons:string[]}, slots:number, dispatch:Array<object>, hold:Array<object>}}
+ * @returns {{freeze:{frozen:boolean, reasons:string[]}, slots:number, dispatch:Array<object>, hold:Array<object>,
+ *   openItems:{count:number, cap:number, nums:string[]}}} `openItems` is the PRE-TICK union
+ *   (`{inFlight} ∪ {delivered-by-open-PR}`), #4353 — the value the `wip-cap` rule below checks and decrements.
  */
 export function planBuildDispatch({
   candidates = [], inFlight = [], openPrs = [], externalBuilding = 0, killSwitch = { engaged: false }, policy = BUILD_DISPATCH_POLICY,
@@ -197,6 +221,23 @@ export function planBuildDispatch({
   const busy = Math.max(running.length, Number(externalBuilding) > 0 ? Number(externalBuilding) : 0);
   let slots = Math.max(0, policy.maxConcurrentBuilds - busy);
   const picked = [];
+  // #4353 — a policy object missing `maxOpenItems` (a caller predating this field) must never silently disable
+  // the cap: `>= undefined` is always false, so an unguarded read would fail OPEN. Falls back to the declared
+  // default the same way `globalFreezeLabels ?? freezeLabels` already does above for an older policy shape.
+  const maxOpenItems = Number.isFinite(policy.maxOpenItems) ? policy.maxOpenItems : BUILD_DISPATCH_POLICY.maxOpenItems;
+
+  // #4353 — the WIP union: {inFlight} ∪ {delivered-by-open-PR}, deduped by num (a build whose OWN PR is already
+  // open and counted is not double-counted just because its claim also still shows in-flight).
+  // `openItemsInitial` is the PRE-TICK snapshot the return value / report field reads; `openItems` (below) is the
+  // WORKING COPY the loop mutates as each candidate is admitted, exactly like `slots` already does for
+  // `maxConcurrentBuilds` — a static one-time gate would wrongly admit multiple candidates in one pass once
+  // their combined count crosses `maxOpenItems` (Risks, #4353).
+  const openItemsInitial = new Set(inFlightByNum.keys());
+  for (const pr of openPrs) {
+    const n = prDeliveredNum(pr);
+    if (n) openItemsInitial.add(n);
+  }
+  const openItems = new Set(openItemsInitial);
 
   for (const c of candidates) {
     const num = normNum(c.num);
@@ -220,11 +261,32 @@ export function planBuildDispatch({
       }
     }
     if (blocked) { hold.push({ ...base, ...blocked }); continue; }
+    // #4353 wip-cap — checked BEFORE the plain concurrency `cap` below, inside the SAME per-candidate loop
+    // (`openItems` grows as candidates are admitted, never a static pre-tick gate). `num` is guaranteed absent
+    // from `openItems` here: EITHER member of the union that could already hold it — already in-flight
+    // (`inFlightByNum.has(num)`, above) or already delivered by an open PR (`deliveringPr`, above) — already
+    // `continue`d this candidate via the `in-flight` rule before this line is ever reached. So admitting it
+    // here always grows the union by exactly one.
+    if (openItems.size >= maxOpenItems) {
+      hold.push({ ...base, rule: 'wip-cap', reason: `${openItems.size} open items (cap ${maxOpenItems}): ${[...openItems].sort().join(', ')}` });
+      continue;
+    }
     if (slots <= 0) { hold.push({ ...base, rule: 'cap', reason: `${busy + picked.length} builds in flight (cap ${policy.maxConcurrentBuilds})` }); continue; }
     slots -= 1;
+    openItems.add(num);
     const pick = { ...base, scope: c.scope, source: 'this-tick' };
     picked.push(pick);
     dispatch.push(pick);
   }
-  return { freeze: { frozen, reasons: freezeReasons }, inFlight: running, busy, slots, dispatch, hold };
+  return {
+    freeze: { frozen, reasons: freezeReasons }, inFlight: running, busy, slots, dispatch, hold,
+    openItems: { count: openItemsInitial.size, cap: maxOpenItems, nums: [...openItemsInitial].sort() },
+  };
+}
+
+/** The report/status-line shape for `plan.openItems` (#4353) — `nums` renamed to `filling`, the name a reader
+ *  outside this module (a dry-run report, a live status line) expects. Pure, exported so the field rename is
+ *  pinned by a test independent of the daemon's IO shell. */
+export function reportOpenItems(openItems) {
+  return { count: openItems.count, cap: openItems.cap, filling: openItems.nums };
 }

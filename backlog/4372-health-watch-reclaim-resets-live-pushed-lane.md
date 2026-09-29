@@ -2,10 +2,11 @@
 bornAs: xl5xhmj
 kind: story
 size: 3
-status: open
+status: resolved
 priority: high
 scope: ["we:scripts/lane-pool.mjs", "we:scripts/conveyor/lane-pool-health-watch.mjs"]
 dateOpened: "2026-09-28"
+dateResolved: "2026-09-28"
 preparedDate: "2026-09-28"
 tags: ["blocker", "lane-pool", "health-watch"]
 ---

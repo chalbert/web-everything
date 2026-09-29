@@ -2,9 +2,11 @@
 bornAs: xw3a9nd
 kind: task
 parent: "4075"
-status: open
+status: resolved
 scope: ["we:scripts/lib/pool-leftovers.mjs"]
 dateOpened: "2026-09-27"
+dateStarted: "2026-09-28"
+dateResolved: "2026-09-28"
 tags: []
 ---
 
@@ -20,4 +22,17 @@ PREVENTION (from the reviewer, still owed): add a filesystem integration test wi
 
 ## Done when
 
-1. **Executable** — TODO: a command that fails before this item lands and passes after.
+1. **Executable** — `npx vitest run we:scripts/lib/__tests__/pool-leftovers.test.mjs` fails on unfixed
+   `newestMtime` (a scratch dir with stale top-level entries but a fresh file several levels down is
+   wrongly classified `delete`) and passes after `newestMtime` recurses into every descendant instead of
+   only the directory's own top-level children.
+
+## Progress
+
+- `newestMtime` in `we:scripts/lib/pool-leftovers.mjs` now recurses into every descendant directory
+  (skipping `.git`) instead of inspecting only the top-level children, so a genuinely fresh file several
+  levels down bubbles up and keeps the whole tree from being aged out.
+- Added `we:scripts/lib/__tests__/pool-leftovers.test.mjs`: a real-filesystem integration test through
+  `sweepPoolLeftovers` proving (a) a dir with stale top-level entries but a fresh deeply-nested file is
+  kept (reproduced red pre-fix, green post-fix), and (b) a dir stale all the way down is still deleted as
+  before.

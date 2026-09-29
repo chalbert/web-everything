@@ -23,7 +23,7 @@ const FAKE_SESSION_1 = 'session-fake-aaaa';
 const FAKE_SESSION_2 = 'session-fake-bbbb';
 
 /** A synthetic cost record. `iso` is `receivedAt`; `model`/`querySource` feed `attributes`. */
-function costRec(iso, usd, model = 'claude-sonnet-5', querySource = 'main', sessionId = FAKE_SESSION_1) {
+function costRec(iso, usd, model = 'claude-sonnet-5-5', querySource = 'main', sessionId = FAKE_SESSION_1) {
   return {
     v: 1, receivedAt: iso, name: 'claude_code.cost.usage', unit: 'USD', value: usd,
     attributes: {
@@ -37,7 +37,7 @@ function tokenRec(iso, type, value, sessionId = FAKE_SESSION_1) {
   return {
     v: 1, receivedAt: iso, name: 'claude_code.token.usage', unit: 'tokens', value,
     attributes: {
-      type, model: 'claude-sonnet-5', query_source: 'main', 'session.id': sessionId,
+      type, model: 'claude-sonnet-5-5', query_source: 'main', 'session.id': sessionId,
       'user.email': FAKE_EMAIL, 'organization.id': FAKE_ORG, 'user.id': FAKE_USER,
     },
   };
@@ -47,7 +47,7 @@ function countRec(iso, name, value, sessionId = FAKE_SESSION_1) {
   return {
     v: 1, receivedAt: iso, name, unit: name.includes('active_time') ? 's' : '', value,
     attributes: {
-      model: 'claude-sonnet-5', query_source: 'main', 'session.id': sessionId,
+      model: 'claude-sonnet-5-5', query_source: 'main', 'session.id': sessionId,
       'user.email': FAKE_EMAIL, 'organization.id': FAKE_ORG, 'user.id': FAKE_USER,
     },
   };
@@ -65,7 +65,7 @@ describe('module hygiene — pure, no node: imports', () => {
 describe('modelFamily / roleOf', () => {
   it('buckets model ids by substring family, else other', () => {
     expect(modelFamily('claude-opus-4-5')).toBe('opus');
-    expect(modelFamily('claude-sonnet-5')).toBe('sonnet');
+    expect(modelFamily('claude-sonnet-5-5')).toBe('sonnet');
     expect(modelFamily('claude-haiku-4-5')).toBe('haiku');
     expect(modelFamily('claude-mystery-9')).toBe('other');
     expect(modelFamily(undefined)).toBe('other');
@@ -126,15 +126,15 @@ describe('week totals — records before the window, families, roles, gap days',
     // A UTC-midnight record that belongs to the PREVIOUS ET day: 2026-10-31T04:00:00Z is EDT-4 -> 2026-10-30
     // 00:00 local... use a value that's unambiguous: 2026-10-31T00:30:00Z (EDT -4) = 2026-10-30 20:30 ET,
     // i.e. UTC calendar date is the 31st but the ET calendar day is the 30th.
-    costRec('2026-10-31T00:30:00.000Z', 2.25, 'claude-sonnet-5', 'subagent', FAKE_SESSION_2),
+    costRec('2026-10-31T00:30:00.000Z', 2.25, 'claude-sonnet-5-5', 'subagent', FAKE_SESSION_2),
     // Sat 2026-10-31 — one model per family plus an unknown one, one role per known value plus an unknown one.
     costRec('2026-10-31T15:00:00.000Z', 10, 'claude-opus-4-5', 'main'),
-    costRec('2026-10-31T15:05:00.000Z', 20, 'claude-sonnet-5', 'subagent'),
+    costRec('2026-10-31T15:05:00.000Z', 20, 'claude-sonnet-5-5', 'subagent'),
     costRec('2026-10-31T15:10:00.000Z', 5, 'claude-haiku-4-5', 'auxiliary'),
     costRec('2026-10-31T15:15:00.000Z', 3, 'claude-mystery-9', 'something-else'),
     // Sun 2026-11-01 (the actual fall-back day, 2am local repeats) — after the window's own conversion this
     // is well inside the plan week; give it a small amount to prove the transition day itself is still summed.
-    costRec('2026-11-01T18:00:00.000Z', 7, 'claude-sonnet-5', 'main'),
+    costRec('2026-11-01T18:00:00.000Z', 7, 'claude-sonnet-5-5', 'main'),
     // Mon 2026-11-02 — deliberately ZERO records: the gap day.
     // After the window entirely (Sat 2026-11-07, after the renewal) — must be excluded.
     costRec('2026-11-07T13:00:00.000Z', 111, 'claude-opus-4-5', 'main'),
@@ -203,7 +203,7 @@ describe('previousWeek comparability', () => {
   it('IS comparable when the earliest record predates the previous window\'s start, and totals that window', () => {
     const records = [
       // Well before the previous window even starts (2026-10-23T20:00:00Z).
-      costRec('2026-10-15T12:00:00.000Z', 1, 'claude-sonnet-5', 'main'),
+      costRec('2026-10-15T12:00:00.000Z', 1, 'claude-sonnet-5-5', 'main'),
       // Inside the previous week (Oct 23 16:00 ET -> Oct 30 16:00 ET).
       costRec('2026-10-24T15:00:00.000Z', 4, 'claude-opus-4-5', 'main'),
       costRec('2026-10-29T15:00:00.000Z', 6, 'claude-opus-4-5', 'main'),
@@ -267,7 +267,7 @@ describe('today — commits, lines changed, sessions, active hours', () => {
 describe('last10 — 10 trailing ET days ending today, independent of the plan-week window', () => {
   it('has 10 entries ending on today, each carrying its own usd (null when no cost record that day)', () => {
     const records = [
-      costRec('2026-11-03T14:00:00.000Z', 9, 'claude-sonnet-5', 'main'), // today
+      costRec('2026-11-03T14:00:00.000Z', 9, 'claude-sonnet-5-5', 'main'), // today
       costRec('2026-10-25T14:00:00.000Z', 4, 'claude-opus-4-5', 'main'), // 9 days ago — inside last10
     ];
     const out = summarizeTelemetryUsage({ records, now: NOW_DST });
@@ -286,7 +286,7 @@ describe('no identity ever reaches the output (allowlist projection)', () => {
   it('a serialised snapshot contains none of the fixtures\' identity strings', () => {
     const records = [
       costRec('2026-10-31T15:00:00.000Z', 10, 'claude-opus-4-5', 'main', FAKE_SESSION_1),
-      costRec('2026-10-31T15:05:00.000Z', 5, 'claude-sonnet-5', 'subagent', FAKE_SESSION_2),
+      costRec('2026-10-31T15:05:00.000Z', 5, 'claude-sonnet-5-5', 'subagent', FAKE_SESSION_2),
       tokenRec('2026-11-03T14:00:00.000Z', 'input', 10, FAKE_SESSION_1),
     ];
     const out = summarizeTelemetryUsage({ records, now: NOW_DST });

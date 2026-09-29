@@ -25,7 +25,7 @@ function costRec(iso, usd, sessionId) {
   return {
     v: 1, receivedAt: iso, name: 'claude_code.cost.usage', unit: 'USD', value: usd,
     attributes: {
-      model: 'claude-sonnet-5', query_source: 'main', 'session.id': sessionId,
+      model: 'claude-sonnet-5-5', query_source: 'main', 'session.id': sessionId,
       'user.email': FAKE_EMAIL, 'organization.id': FAKE_ORG, 'user.id': FAKE_USER,
     },
   };
@@ -35,7 +35,7 @@ function tokenRec(iso, type, value, sessionId) {
   return {
     v: 1, receivedAt: iso, name: 'claude_code.token.usage', unit: 'tokens', value,
     attributes: {
-      type, model: 'claude-sonnet-5', query_source: 'main', 'session.id': sessionId,
+      type, model: 'claude-sonnet-5-5', query_source: 'main', 'session.id': sessionId,
       'user.email': FAKE_EMAIL, 'organization.id': FAKE_ORG, 'user.id': FAKE_USER,
     },
   };

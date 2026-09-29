@@ -4,7 +4,7 @@ kind: story
 size: 8
 status: open
 blockedBy: ["4365"]
-scope: ["we:scripts/operations/open-pr.mjs", "we:scripts/operations/open-pr-io.mjs", "we:scripts/operations/__tests__/open-pr.test.mjs", "we:scripts/operations/preflight-ci-mirror.mjs", "we:scripts/operations/__tests__/preflight-ci-mirror.test.mjs", "we:scripts/conveyor/ci-red-on-open-classify.mjs", "we:scripts/conveyor/__tests__/ci-red-on-open-classify.test.mjs", "we:scripts/conveyor/conflict-postmortem-store.mjs", "we:scripts/progress-board.mjs", "we:.github/workflows/ci.yml", "we:.github/workflows/soak-replay-gate.yml", "we:.github/workflows/review-gate.yml"]
+scope: ["we:scripts/operations/open-pr.mjs", "we:scripts/operations/open-pr-io.mjs", "we:scripts/operations/__tests__/open-pr.test.mjs", "we:scripts/operations/preflight-ci-mirror.mjs", "we:scripts/operations/__tests__/preflight-ci-mirror.test.mjs", "we:scripts/conveyor/ci-red-on-open-classify.mjs", "we:scripts/conveyor/__tests__/ci-red-on-open-classify.test.mjs", "we:scripts/conveyor/ci-red-on-open-watch.mjs", "we:scripts/conveyor/__tests__/ci-red-on-open-watch.test.mjs", "we:scripts/conveyor/conflict-postmortem-store.mjs", "we:scripts/lib/verify-lane-gate.mjs", "we:scripts/lib/pr-events.mjs", "we:scripts/lib/soak-gate-merge-base-diff.mjs", "we:scripts/progress-board.mjs", "we:.github/workflows/ci.yml", "we:.github/workflows/soak-replay-gate.yml", "we:.github/workflows/review-gate.yml"]
 dateOpened: "2026-09-28"
 tags: []
 ---
@@ -34,14 +34,14 @@ against an open PR's own commits — out of scope, not "can't mirror," genuinely
 | CI job (`we:.github/workflows/ci.yml` unless noted) | Kind | Local mirror |
 | --- | --- | --- |
 | Repo health gate (`test` job) | non-test | `npm run check:standards` (already includes the statute lint, #2854's own gap) |
-| `we:.github/workflows/soak-replay-gate.yml` | non-test | `node we:scripts/soak-replay-gate-cli.mjs --files-status=$(git diff -M --name-status <merge-base> HEAD)`, merge-base computed exactly as `we:scripts/lib/soak-gate-merge-base-diff.mjs` does it — the same fix #4264/#4292 already made for CI's own false-positive |
+| `we:.github/workflows/soak-replay-gate.yml` | non-test | `node we:scripts/soak-replay-gate-cli.mjs --base-sha=<mergeBaseSha> --head-sha=<headSha> --title=<effectiveTitle> --body="$(cat <the bodyFile `open-pr` is about to submit>)"` — the SAME `--base-sha`/`--head-sha` mode `we:.github/workflows/soak-replay-gate.yml` itself already calls (per `we:scripts/soak-replay-gate-cli.mjs`'s own header, "This is now the mode … actually calls"), which computes its own merge-base diff via `we:scripts/lib/soak-gate-merge-base-diff.mjs#computeSoakGateNameStatus` rather than a hand-built, unquoted `--files-status=$(git diff …)` string (see the corrected soak-replay-gate design below — the first pass's command was unsafe as written). `effectiveTitle` is NOT `input.title` verbatim — see the corrected title derivation below |
 | `we:.github/workflows/review-gate.yml` | non-test | N/A, and EXCLUDED from the red-on-open KPI, not merely un-mirrored — `open-pr` defaults a fresh PR to `review:pending` and this check deliberately fails on any review hold, so it is EXPECTED red the moment a PR opens (requiring it green before opening would be circular: review cannot finish before the PR exists) |
 | `test-shard`/`test`, `daemon-soak-scope`/`soak-shard`/`daemon-soak`, `visual` | test | excluded by design — mirroring these IS the unscoped full suite `we:docs/agent/platform-decisions.md#local-gate-never-full-suite-by-default` just forbade as a default |
 | `smoke`'s "Build WE docs" step | non-test | `npm run build:docs` — cheap, catches a broken 11ty template before CI does |
 | `smoke`'s Playwright interaction lane | test | excluded, same reason as the shard jobs |
 | `test-selection-measure` | measurement-only, no gate | not mirrored — it has no pass/fail verdict |
 | Coverage merge + 80% bar (inside `test`) | test | excluded — approximating it locally would mean running the full suite, the exact default this card must not reintroduce |
-| "affected tests" (not a CI job — this card's own addition) | test, but SCOPED | `node we:scripts/readiness/test-selection.mjs`'s existing `decideLocalSelection`, run against the merge-base diff — already falls back to full suite on its own when the diff can't be soundly narrowed (config/shared-helper changes, deleted files), which is the SOUND automatic fallback `we:docs/agent/platform-decisions.md#local-gate-never-full-suite-by-default` explicitly carves out as not governed by the "never explicitly default to full" rule |
+| "affected tests" (not a CI job — this card's own addition) | test, but SCOPED | **The actual executable seam, corrected below** — `we:scripts/readiness/test-selection.mjs#decideLocalSelection` is only a PURE decision (`{mode, relatedFiles}`), never an executor; its own CLI (`we:scripts/readiness/test-selection.mjs:531`, `runCli`) calls the separate CI-policy path `selectTests` and only PRINTS the decision — it never runs anything. The real seam that both decides AND executes is `we:scripts/lib/verify-lane-gate.mjs#resolveDefaultGate`, already wired to `decideLocalSelection` (line 149) and already composing (`composeGate`, line 82) and running the real `npx vitest related <targets> --run --passWithNoTests` / `npm run test:unit` command `we:scripts/verify-lane.mjs` executes today — this preflight check reuses THAT function's vitest-half command (not `check:standards`, which this card's own preflight already runs separately), never re-derives test execution from the bare CLI |
 
 ## Design
 
@@ -50,40 +50,153 @@ against an open PR's own commits — out of scope, not "can't mirror," genuinely
 `we:scripts/operations/preflight-ci-mirror.mjs#planPreflight({changedFiles, mergeBaseSha, headSha, title, body})` → `{checks: [{name, command, status: 'pass'|'fail'|'skipped', reason?, fix?}], allGreen: boolean}`. PURE decision over INJECTED results — this module decides which checks apply and how to report them; it does not itself shell anything (mirrors `we:scripts/operations/scaffold.mjs`'s own pure-plan/impure-io split). The IO shell (`we:preflight-ci-mirror-io.mjs`, follow-up naming TBD at build time, same split as every other operation here) actually runs `check:standards`, the soak-replay-gate CLI, `build:docs`, and the scoped test-selection command, and feeds their pass/fail + stdout tail back in.
 
 `we:scripts/operations/open-pr.mjs` gains a new refusal reason `ci-red`, distinct in MEANING from the existing
-`check-red` (which already means a required CI check went red AFTER the PR opened — this card's new reason
-covers a check that would have gone red BEFORE the PR is ever submitted). The exact seam is still open (see the
-Independent plan review below): `we:open-pr.mjs` has no push step of its own — its IO shell submits through
-`we:pr-land.mjs` — so the refusal must gate that submission call, not a step that does not exist today. Reports
-the FIRST failing check's `name` + `fix` text verbatim so the caller acts on the exact command that failed,
-never a generic "CI would fail."
+`check-red` (in `HOME_REASONS`, `we:scripts/operations/open-pr.mjs:286` — a required CI check went red AFTER the
+PR opened — this card's new reason covers a check that would have gone red BEFORE the PR is ever submitted).
 
-**Classification of a red-on-open result** — `we:scripts/conveyor/ci-red-on-open-classify.mjs`, a pure function `classifyRedOnOpen({job, preflightRan, preflightPassed, rerunPassed, loadSignal})`:
+**The actual seam, named against the real operation shape (resolves the first pass's "no push step to gate"
+gap).** `we:scripts/operations/open-pr.mjs#openPrOperation` (line 189) is exactly two steps today: `plan`
+(`compute`, PURE — reads `input.*`, calls `planOpen`) then `submit` (`effect` — reads `verdict`, hands
+`we:scripts/pr-land.mjs` the argv `planOpen` computed). The operation engine's closed 4-kind vocabulary
+(`we:scripts/operations/step-kinds.mjs`) has no fifth kind for "run local commands and decide" — a preflight
+that actually executes `check:standards`/the soak gate/`build:docs`/the scoped test command is IO, so it cannot
+live inside `plan` (a `compute` step is contractually pure). It is wired as a NEW `effect` step, `preflight`,
+inserted BEFORE `plan`, whose effect payload runs the four local commands via
+`we:scripts/operations/preflight-ci-mirror.mjs`'s IO shell.
+
+**Reading the effect's result — corrected against the engine's real shape (second-pass correction: the first
+attempt assumed `findings.preflight` WAS `{allGreen, checks}` directly, which is wrong).**
+`we:scripts/operations/engine.mjs#effectFinding` (`:191`) always wraps a step's result as `{applied: boolean,
+effects: [{type, status, result, error}]}`, keyed by ordinal, never the bare returned value. Since the
+`preflight` step declares exactly one effect, `planOpen` reads
+`findings.preflight?.effects?.[0]?.result` (guarded on `findings.preflight?.applied` and
+`effects[0]?.status === 'applied'` — an effect that failed to APPLY at all, e.g. a crashed IO shell, is treated
+as `allGreen: false` with reason `'preflight-did-not-run'`, never silently treated as green). `findings` is one
+of the three roots `compute` steps may legally read (`we:scripts/operations/step-kinds.mjs`'s `READ_ROOTS`).
+`planOpen`'s signature widens to accept `preflight: {allGreen, checks} | null` and, when `!allGreen`, pushes a
+`ci-red` problem onto the SAME `problems` array its existing ref-shape/empty-body checks already populate
+(`we:scripts/operations/open-pr.mjs`'s `planOpen`, the "checked here because they are cheap … restated as a
+pre-flight" pattern its own docblock already states) — so `verdictFrom: 'plan'` (unchanged) refuses the WHOLE
+run before `submit`'s effect ever executes, exactly like every other `planOpen` refusal today. Reports the
+FIRST failing check's `name` + `fix` text verbatim so the caller acts on the exact command that failed, never a
+generic "CI would fail."
+
+**Effective title, not the raw input (second-pass correction: `input.title` alone is not what actually ships).**
+`we:scripts/pr-land.mjs` derives `derivedTitle = TITLE ?? (source commit's own subject) ?? \`land ${REF}\``
+(`:737`) whenever the caller's `--title` is empty — the SCHEMA default for `we:scripts/operations/open-pr.mjs`'s
+own `input.title` (`:203`, `default: ''`). Passing the bare (usually empty) `input.title` to the soak-replay-gate
+mirror would therefore mirror a DIFFERENT title than the one CI actually evaluates — exactly the false-green the
+first pass's own command already had for a different reason. The preflight IO shell computes the SAME derivation
+locally (`input.title || git log -1 --format=%s <sha> || \`land ${ref}\``, mirroring `we:scripts/pr-land.mjs:737`
+exactly) before calling the soak-replay-gate CLI, never the bare `input.title`.
+
+**Scope caveat on the explicit-`sha`/non-`main`-`base` path (second-pass addition, not solved further — a
+named, honest limitation rather than a silent gap).** `we:scripts/operations/open-pr.mjs` supports an explicit
+source `sha` and non-`main` `base` (`:218`), and `we:scripts/pr-land.mjs` resolves and pushes exactly that commit
+(`:730`) — but `we:scripts/lib/verify-lane-gate.mjs#resolveDefaultGate`'s own diff/selection machinery is built
+for the WORKING TREE, not an arbitrary historical `sha` (its own docblock, "the changed set is the WORKING TREE
+… not HEAD's committed diff", `:141-149`). When `input.sha`/`input.base` name something OTHER than the ordinary
+"HEAD, against `main`" case, the preflight's four checks still run against the CURRENT working tree (a
+best-effort approximation, not a fresh checkout of the explicit `sha`) and each `CheckResult` carries an
+explicit `scopeCaveat: 'ran against the working tree, not the explicit --sha/--base being published'` rather
+than silently claiming full coverage of a commit it never actually inspected. Building a real per-`sha` preflight
+(a scratch worktree checkout) is left for a follow-up if this path proves to matter in practice — the ordinary
+case (an agent's own lane opening its own PR at HEAD against `main`) is unaffected and gets the full guarantee.
+
+**Dry-run degrades gracefully, never crashes (second-pass addition).** `input.bodyFile` is legitimately empty on
+a `dryRun` call (`we:scripts/operations/open-pr.mjs:97`, `:211` — the schema's own conditional-requirement
+comment). The preflight IO shell reads `input.bodyFile || ''` explicitly (an absent body becomes `''`, matching
+what an actual push with no body would send) rather than failing to read a file that may not exist — the four
+checks still run and still report a real `allGreen` verdict on a dry run, which is useful rehearsal information,
+not a case this card can skip.
+
+**What actually OBSERVES a red-on-open result and calls the classifier (resolves the first pass's "nothing names
+the poller/webhook/recovery path" gap).** "Red-on-open" is precisely defined first: the check conclusions
+attached to the PR's INITIAL head sha — the sha `pull_request.opened` itself carries — never a LATER
+`synchronize`d head (a fresh push starts a fresh episode, unrelated to whether the PR opened red). The observer
+is a NEW consumer of the SAME webhook feed 4364's ruling already names as the sanctioned signal source,
+`we:scripts/lib/pr-events.mjs` (#2812) — never a `gh pr list` poll. A new module,
+`we:scripts/conveyor/ci-red-on-open-watch.mjs` (naming mirrors `we:scripts/conveyor/parked-pr-conflict-watch.mjs`),
+is invoked the SAME way every other role already is — wrapped by
+`we:scripts/lib/pr-events.mjs#withPrEvents` inside the daemon tick loop, never a bespoke standalone poller — and
+adds one more `ROLE_RELEVANCE` entry filtering `pull_request.opened` + the matching-sha `check_suite`/`check_run`
+events.
+
+**What the feed can and cannot actually tell the observer (second-pass correction: the feed is thinner than
+the first draft assumed).** `we:scripts/conveyor/pr-events-worker/core.mjs#parseGithubEvent` (`:83-93`) stores
+only `{sha, conclusion, app|name}` per check event — no run/attempt id, no failure detail, and its `at` timestamp
+is the WORKER'S OWN RECEIPT time, not the PR's real `opened_at`. This is enough for `job`/`preflightRan`/
+`rerunPassed` (a job is identified by `name` on a given `sha`, and a rerun is a SECOND event for the SAME
+`(sha, name)`), but NOT enough for `failureShape` (timeout/resource vs. a deterministic assertion failure) —
+that needs the check run's own detail, which the feed never carries. The observer makes ONE targeted `gh`
+read (the failing check's own output, e.g. `gh api repos/{repo}/check-runs/{id}`) at the moment it is ABOUT to
+classify a red episode — never a bulk poll loop, the same "feed wakes it, THEN it does its own bounded read"
+pattern the review/fix daemons already use once `we:scripts/lib/pr-events.mjs` wakes them. `openedAtMs` uses the
+feed's receipt timestamp as a close-enough proxy for the real open time (the feed's own latency is seconds, not
+minutes) — stated as an approximation, not claimed exact.
+
+**Reader gaps (`reset`/`gap`) never silently corrupt the denominator.** A fresh reader, or one that fell behind
+past the feed's retention window, gets `{reset: true}` or `{gap: true}` (`we:scripts/lib/pr-events.mjs`'s own
+`pollEvents` shape) — meaning the feed alone cannot prove it saw every `pull_request.opened` in the window. The
+observer's `openedCount` is therefore reconciled, not trusted from the feed alone: it is cross-checked against
+`we:scripts/progress-board.mjs`'s own existing live open/recent-PR listing over the SAME trailing window (a
+floor the board already reads for its other derived lines) — a feed gap under-counts at worst, never silently
+over- or under-reports without the board's own independent count to compare against.
+
+**Finalization happens ONCE, not provisionally then updated (second-pass correction: resolves the "append-only
+store rejects a later reclassification" contradiction).** The append-only discipline this store already commits
+to (4365's own "written once, at resolution" rule) means the observer must not write a row the moment INITIAL
+checks resolve and then try to "correct" it after a rerun — it WAITS for finalization first: initial checks
+resolve, AND (if any went red) either a rerun signal arrives or a bounded finalization window elapses with no
+rerun, THEN it classifies ONCE and appends ONCE. A red episode with a rerun still pending is simply not yet
+final — the observer holds it (in memory / re-derivable from the feed's own cursor, no new durable state) rather
+than writing a premature `unclassified` row it would later need to mutate.
+
+**Classification of a red-on-open result** — `we:scripts/conveyor/ci-red-on-open-classify.mjs`, a pure function
+`classifyRedOnOpen({job, preflightRan, preflightPassed, rerunPassed, failureShape})` (one consistent name,
+`failureShape`, replacing the first pass's inconsistent `loadSignal`/`failureShape` split), with an explicit
+`unclassified` fallback (never a guess) for a case none of the four name — a deterministic failure after a
+passing mirror, a failure never rerun, or a non-test failure with no mirror at all:
 1. `missing-pre-flight-check` — the failing CI job has a local mirror in the table above and `preflightRan` is false OR the mirror's own coverage did not include the failing file (a mirror that exists but was not run, or was run against the wrong diff base). #2852 and #2854 are this class.
-2. `test-not-selected` — the failing job is test-classified, the scoped `we:test-selection.mjs` run passed locally, and CI's broader run failed on a file the scoped selection excluded. Distinguishes a genuine selection-narrowing miss from an unrelated flake.
+2. `test-not-selected` — the failing job is test-classified, the scoped preflight's `we:scripts/lib/verify-lane-gate.mjs#resolveDefaultGate` run passed locally, and CI's broader run failed on a file the scoped selection excluded. Distinguishes a genuine selection-narrowing miss from an unrelated flake.
 3. `flaky` — an immediate CI re-run of the SAME commit, no code change, passes. Requires the re-run signal; never asserted from a single red run.
 4. `environment` — a re-run fails again but for a load/capacity/resource reason (timeout under concurrent load, OOM, disk) rather than a deterministic assertion failure — #4309's build is this class, distinguished from `flaky` by the FAILURE SHAPE (timeout/resource vs. a repeatable-then-not assertion), not by re-run alone.
+5. `unclassified` — none of the above four inputs resolve the case (e.g. a deterministic failure after a passing mirror, or a failure with no rerun signal at all) — an honest "don't know" value, never asserted from partial evidence.
 
-**Shared storage.** `classifyRedOnOpen`'s verdict is appended to 4365's `we:scripts/conveyor/conflict-postmortem-store.mjs` store as a row with `mode: 'ci-red-on-open'` (a THIRD `mode` value alongside that item's `main-base`/`stacked-rebase`) — the operator's own instruction to share storage, and consistent with that item's `Row` shape already carrying a `mode` discriminator built to be extended, not a parallel store. `classifyRedOnOpen` recurring on the SAME job feeds the CI inventory table above the same way 4365's roll-up feeds the prepare checklist: a class recurring past threshold is a candidate pre-flight ADDITION (a job with no mirror today that keeps failing red-on-open earns one), read off the roll-up, never auto-applied.
+**Shared storage — including a GREEN row, not only red ones (second-pass correction: the first draft's five
+classes describe failures only, but the denominator needs every opening).** `classifyRedOnOpen`'s verdict is
+appended to 4365's `we:scripts/conveyor/conflict-postmortem-store.mjs` store as a row with `mode:
+'ci-red-on-open'` (a THIRD `mode` value alongside that item's `main-base`/`stacked-rebase`) — the operator's own
+instruction to share storage, and consistent with that item's `Row` shape already carrying a `mode`
+discriminator built to be extended, not a parallel store. Every PR-opened episode this observer finalizes gets
+EXACTLY ONE row, keyed by `episodeId = ${prNumber}:${openedAtMs}` (the SAME episode-id shape 4365 introduces):
+`redOnOpen: boolean` (true for any of the five failure classes, false when every required check finalized
+green), `class: <one of the five>|null` (`null` only when `redOnOpen` is false — a green PR was never
+classified, never forced into `unclassified`). `openedCount` = every row in the window regardless of
+`redOnOpen`; `redOnOpenCount` = rows where `redOnOpen` is true — both durable counts, neither a live re-derived
+snapshot. `classifyRedOnOpen` recurring on the SAME job feeds the CI inventory table above the same way 4365's
+roll-up feeds the prepare checklist: a class recurring past threshold is a candidate pre-flight ADDITION (a job
+with no mirror today that keeps failing red-on-open earns one), read off the roll-up, never auto-applied.
 
-**Red-on-open KPI on the plan page.** `we:scripts/progress-board.mjs` already classifies every open/recent PR into one bucket via `classifyPr`, including `ci-red` — but that is a LIVE snapshot (re-read every refresh), not a durable "was this PR red the MOMENT it opened" fact, which can flip to green after a fix before anyone looks. The KPI therefore reads the DURABLE `mode: 'ci-red-on-open'` rows from the shared store (this card, not `classifyPr`'s live read) over a trailing window, reported as `redOnOpenRate = redOnOpenCount / totalOpenedCount` for the same window, added as one more DERIVED (live, free) line in the board's existing derived section — no hand-maintained number, matching that file's own "never hand-typed" discipline.
+**Red-on-open KPI on the plan page.** `we:scripts/progress-board.mjs` already classifies every open/recent PR into one bucket via `classifyPr`, including `ci-red` — but that is a LIVE snapshot (re-read every refresh), not a durable "was this PR red the MOMENT it opened" fact, which can flip to green after a fix before anyone looks. The KPI therefore reads the DURABLE `mode: 'ci-red-on-open'` rows from the shared store (this card, not `classifyPr`'s live read) over a trailing window, reported as `redOnOpenRate = redOnOpenCount / openedCount` for the same window (both counts include every finalized episode, green and red alike, per the corrected Row shape above), added as one more DERIVED (live, free) line in the board's existing derived section — no hand-maintained number, matching that file's own "never hand-typed" discipline.
 
 ## Interfaces
 
 - `we:scripts/operations/preflight-ci-mirror.mjs`
-  - `planPreflight({changedFiles: string[], results: {checkStandards, soakReplayGate, buildDocs, scopedTests}: {ran: boolean, passed: boolean, output?: string}})` → PURE, `{checks: CheckResult[], allGreen: boolean}`.
+  - `planPreflight({changedFiles: string[], results: {checkStandards, soakReplayGate, buildDocs, scopedTests}: {ran: boolean, passed: boolean, output?: string}})` → PURE, `{checks: CheckResult[], allGreen: boolean}`. `scopedTests` is populated by running `we:scripts/lib/verify-lane-gate.mjs#resolveDefaultGate`'s vitest-half command and reading its exit code — never the bare `we:scripts/readiness/test-selection.mjs` CLI, which only prints a decision (see the CI-inventory table's corrected "affected tests" row above).
   - `CheckResult = {name: 'check:standards'|'soak-replay-gate'|'build:docs'|'affected-tests', status: 'pass'|'fail'|'skipped', reason?: string, fix?: string}`. `fix` is the exact command to re-run, always present on `fail`.
-- `we:scripts/operations/open-pr.mjs` — new refusal reason `'ci-red'` in `SUBMIT_OUTCOMES`'s refusal table (alongside the existing `check-red`, `empty-body`, etc.), reads `planPreflight`'s `allGreen` before the push step; message includes the first failing `CheckResult.fix` verbatim.
+- `we:scripts/operations/open-pr.mjs` — new refusal reason `'ci-red'` added to `HOME_REASONS`' local-refusal vocabulary (alongside the existing `check-red`, `empty-body`, etc. — corrected: `SUBMIT_OUTCOMES` is the three-element `opened|refused|unrun` outcome array, not the refusal-reason table, per the first pass's own naming correction). Wired as a NEW `effect` step, `preflight`, inserted before the existing `plan` step in `openPrOperation` (`we:scripts/operations/open-pr.mjs:189`); `plan`'s `compute` step reads the new `findings.preflight` (a legal `READ_ROOTS` entry) and `planOpen` folds `!allGreen` into its existing `problems` array as `ci-red`, refusing before `submit`'s effect ever runs. Message includes the first failing `CheckResult.fix` verbatim.
+- `we:scripts/conveyor/ci-red-on-open-watch.mjs` — the observer (NEW, resolves the first pass's "nothing calls the classifier" gap): wrapped by `we:scripts/lib/pr-events.mjs#withPrEvents` inside the daemon tick loop (a `ROLE_RELEVANCE` consumer, never a bespoke poller), watching `pull_request.opened` + the matching-sha `check_suite`/`check_run` events, keyed by `${prNumber}:${openedAtMs}`; holds a red episode until FINALIZED (rerun observed or its bounded window elapses) before classifying; reconciles `openedCount` against `we:scripts/progress-board.mjs`'s own live PR listing on every `reset`/`gap` read.
 - `we:scripts/conveyor/ci-red-on-open-classify.mjs`
-  - `classifyRedOnOpen({job, preflightRan, preflightPassed, rerunPassed, failureShape})` → PURE, `'missing-pre-flight-check' | 'test-not-selected' | 'flaky' | 'environment'`.
-  - Writes through 4365's `appendConflictPostmortem` with `mode: 'ci-red-on-open'`, `class` taking one of the four values above (that item's `Row.class` enum is widened to accept these four alongside its own four — a single `class: string` field, discriminated by `mode`, never two parallel enums).
-- `we:scripts/progress-board.mjs` — one new derived line, `redOnOpenRate`, computed from the shared store's `mode: 'ci-red-on-open'` rows over the board's existing trailing window, alongside the existing PR-status and output-mix derived sections.
+  - `classifyRedOnOpen({job, preflightRan, preflightPassed, rerunPassed, failureShape})` → PURE, `'missing-pre-flight-check' | 'test-not-selected' | 'flaky' | 'environment' | 'unclassified'`.
+  - Writes through 4365's `appendConflictPostmortem` with `mode: 'ci-red-on-open'`, `redOnOpen: boolean`, `class` taking one of the five values above when `redOnOpen` is true, else `null` (that item's `Row.class` enum is widened to accept these five alongside its own five — a single `class: string|null` field, discriminated by `mode`, never two parallel enums), `episodeId = ${prNumber}:${openedAtMs}` — one row per FINALIZED PR-opened episode, including a green one.
+- `we:scripts/progress-board.mjs` — one new derived line, `redOnOpenRate = redOnOpenCount / openedCount` (both counts over every finalized episode, green and red), reading `0/0` as "nothing opened in window" when the store is genuinely empty for that window, computed from the shared store's `mode: 'ci-red-on-open'` rows over the board's existing trailing window, alongside the existing PR-status and output-mix derived sections.
 
 ## Tasks
 
 1. `we:scripts/operations/preflight-ci-mirror.mjs` (pure planner) + tests: each of the four checks reported pass/fail/skipped correctly from injected results; `allGreen` false when any check fails; the CI-inventory table's own N/A rows (review-gate, deploy, etc.) never appear as checks.
-2. The IO shell that actually runs the four local commands (check:standards, the soak-replay-gate CLI with the real merge-base diff, `build:docs`, the scoped test-selection command), each with a bounded timeout.
-3. Wire `we:scripts/operations/open-pr.mjs`'s new `ci-red` refusal ahead of its push step; test that a failing preflight refuses with the exact `fix` text and pushes nothing.
-4. `we:scripts/conveyor/ci-red-on-open-classify.mjs` + tests for all four classes, plus the shared-store write (`mode: 'ci-red-on-open'`) reusing 4365's `appendConflictPostmortem` — this task is `blockedBy` 4365 landing first (the store/record module must exist before this item's write can compile against it).
+2. The IO shell that actually runs the four local commands: `check:standards`, the soak-replay-gate CLI via its `--base-sha`/`--head-sha` mode (real title/body from `input.title`/`input.bodyFile`), `build:docs`, and the scoped test command by running `we:scripts/lib/verify-lane-gate.mjs#resolveDefaultGate`'s own vitest-half command and enforcing its exit code — each with a bounded timeout.
+3. Wire `we:scripts/operations/open-pr.mjs`'s new `preflight` effect step + `planOpen`'s `ci-red` refusal ahead of `submit`; test that a failing preflight refuses with the exact `fix` text and pushes nothing.
+4. `we:scripts/conveyor/ci-red-on-open-watch.mjs` (the pr-events observer) + `we:scripts/conveyor/ci-red-on-open-classify.mjs` (all five classes, including `unclassified`) + tests, plus the shared-store write (`mode: 'ci-red-on-open'`) reusing 4365's `appendConflictPostmortem` — this task is `blockedBy` 4365 landing first (the store/record module must exist before this item's write can compile against it).
 5. Triage this week's #2835/#2839/#2843/#2845 through the built classifier as its first real fixture batch (not asserted by hand above), plus #2852/#2854/#4309 as known-answer regression fixtures.
 6. `we:scripts/progress-board.mjs`'s new `redOnOpenRate` derived line + a test that it reads the shared store, never `classifyPr`'s live snapshot.
 
@@ -159,16 +272,116 @@ Confidence **High**, build-ready **No**. Not stamped `preparedDate`. Corrections
    failure never rerun; a non-test failure with no mirror) have no defined outcome. **Open — needs one
    consistent signature, an explicit precedence order, and an honest `unclassified` outcome.**
 
-**Handling:** item 1 and the `review-gate` KPI-exclusion intent (item 6) and the `check-red`/`ci-red` naming
-(item 4's naming half) are corrected directly in the sections above. The rest (2, 3, 5, 7, 8, and item 4's
-submission-boundary half) are real open design work, not fold-in edits — this card stays `status: open`,
-un-prepared (`preparedDate` withheld), `blockedBy` 4365 unchanged, until a second design pass closes them and
-a follow-up independent review confirms it.
+**Handling:** items 1–8 are now resolved in the second design pass folded into the CI-inventory table, Design,
+Interfaces, Tasks, and `scope:` above (2026-09-28, ahead of this item's own scheduled combined Codex re-review
+with 4364/4365):
+1. resolved (unchanged from the first correction).
+2. resolved — the CI-inventory table's "affected tests" row and Design/Interfaces/Tasks now name the real
+   executable seam, `we:scripts/lib/verify-lane-gate.mjs#resolveDefaultGate` (already wired to
+   `decideLocalSelection` and already executing `npx vitest related … --run` for `we:scripts/verify-lane.mjs`
+   today), never the bare `we:scripts/readiness/test-selection.mjs` CLI.
+3. resolved — the soak-replay-gate mirror command now uses the CLI's own `--base-sha`/`--head-sha` mode (the
+   SAME mode CI's workflow calls, per that CLI's own header) with real `--title`/`--body` sourced from
+   `input.title`/`input.bodyFile` (already in hand before push) — never a hand-built, unquoted `--files-status=`
+   string. The gate code itself runs from the candidate branch (the lane's own checkout), consistent with every
+   other preflight check this card adds (`check:standards`, `build:docs` also run from the local tree) — CI's
+   separate `ref: main` checkout is its own bootstrap-safety concern, not one this local preflight needs to
+   replicate.
+4. resolved — `HOME_REASONS` (not `SUBMIT_OUTCOMES`) is now named as the refusal-reason table; `ci-red` is
+   named distinct from `check-red`; the submission boundary is now concrete — a new `preflight` `effect` step
+   ahead of `openPrOperation`'s existing `plan`/`submit` steps, `findings.preflight` read by `plan`'s `compute`.
+5. resolved — the observer is `we:scripts/conveyor/ci-red-on-open-watch.mjs`, a new `we:scripts/lib/pr-events.mjs`
+   consumer; "red-on-open" is defined as the initial-head's check conclusions; denominator/dedupe both use the
+   `${prNumber}:${openedAtMs}` episode id.
+6. resolved (unchanged from the first correction).
+7. resolved — `episodeId` + the `mode`-scoped rollup filter (folded into 4365's own Interfaces) give the shared
+   store a real discriminated-union shape: 4365's `Row` fields (`prA`/`prB`/`files`/`hotFile`) apply to
+   `main-base`/`stacked-rebase` rows, this card's fields (`opposingPrNumbers`/`handle`/`evidenceComplete`) are
+   read the same regardless of `mode`, and `rollupConflictPostmortems` excludes `mode: 'ci-red-on-open'` rows
+   from its conflict-shaped aggregates.
+8. resolved — `classifyRedOnOpen`'s signature is one consistent name (`failureShape`), gains an explicit
+   `unclassified` fifth value, and the CI-inventory table above now names exactly which existing signal
+   (`resolveDefaultGate`'s own pass/fail) backs `test-not-selected`.
+
+This card is now presented for the ONE combined read-only Codex re-review this session runs across 4364/4365/4366
+together; see "Independent plan review — second pass" below for that outcome.
+
+## Independent plan review — second pass (Codex, read-only, 2026-09-28)
+
+Confidence **High**, build-ready **No** — the first pass's fixes above introduced NEW gaps, found and resolved
+directly in Design/Interfaces above rather than left open:
+
+1. **[blocker, resolved above]** The soak mirror still did not always receive the EFFECTIVE PR title:
+   `input.title` defaults empty, and `we:scripts/pr-land.mjs` derives an omitted title from the commit subject —
+   passing the bare input could mirror a different title than the one CI evaluates. Corrected: the preflight
+   computes the SAME derivation locally before calling the CLI.
+2. **[blocker, resolved above]** The preflight was not bound to the tree actually being published — `open-pr`
+   supports an explicit `sha`/non-`main` `base`, but the test/build seam runs against the working tree. Corrected
+   with an honest, scoped limitation: full coverage on the ordinary HEAD-against-`main` case, a stated
+   `scopeCaveat` (not silent) on the explicit-`sha` path.
+3. **[blocker, resolved above]** The named webhook consumer's feed does not carry run/attempt identity, failure
+   detail, or a true opening timestamp, and gap/reset recovery was unnamed. Corrected: the feed's real fields are
+   named explicitly, a targeted supplementary `gh` read supplies `failureShape`, and `openedCount` reconciles
+   against `we:scripts/progress-board.mjs`'s own live listing on every gap.
+4. **[blocker, resolved above]** The shared CI row had no green-row shape, so the denominator (every opening,
+   not just red ones) was undefined. Corrected: every finalized episode gets a row (`redOnOpen: boolean`, `class`
+   nullable), never only the red ones.
+5. **[blocker, resolved above]** Classifier evidence and finalization were incompatible with the append-only
+   store: appending at initial-checks-resolved would need a later `flaky`/`environment` update the store forbids.
+   Corrected: the observer holds a red episode until FINALIZED (rerun observed or its window elapses), classifies
+   once, appends once.
+6. **[major, resolved above]** The effect-result shape was misstated — an effect's result lands at
+   `findings.<step>.effects[].result`, not directly at `findings.<step>`. Corrected against
+   `we:scripts/operations/engine.mjs#effectFinding`'s real shape.
+7. **[major, resolved above]** Supported dry runs (`bodyFile` legitimately omitted) were unaddressed by the new
+   preflight. Corrected: the IO shell reads `input.bodyFile || ''` explicitly rather than assuming a file exists.
+8. **[minor, resolved above]** `resolveDefaultGate` builds a command, it does not execute it — the description
+   now says the IO shell runs that command and enforces its exit code, not that the function itself executes.
 
 ## Done when
 
 1. **Executable** — `we:scripts/operations/preflight-ci-mirror.mjs`'s planner fails (reports `allGreen: false`) against a fixture reconstructing #2852's diff (no soak-break scenario, no waiver) and against #2854's diff (the flagged statute wording), and passes against a clean fixture — before this item lands there is no such planner to run at all.
 2. `open-pr` refuses to push when any mirrored check fails, reporting the exact local command to re-run; it still opens cleanly when every mirrored check passes, proven by a test for each of the four checks failing individually.
-3. `classifyRedOnOpen` correctly classifies #2852 → `missing-pre-flight-check`, #2854 → `missing-pre-flight-check`, and a synthetic load-timeout fixture modeled on #4309 → `environment`, and a same-commit-passes-on-rerun fixture → `flaky`.
+3. `classifyRedOnOpen` correctly classifies #2852 → `missing-pre-flight-check`, #2854 → `missing-pre-flight-check`, a synthetic load-timeout fixture modeled on #4309 → `environment`, a same-commit-passes-on-rerun fixture → `flaky`, and a fixture with no rerun signal and no matching mirror → `unclassified` (never a guessed class).
 4. `we:scripts/progress-board.mjs` reports a non-fabricated `redOnOpenRate` sourced from the shared store, `0/0` (not a crash, not a fabricated 0%) when the store is empty.
 5. No change to `we:review-gate.yml`/`we:deploy.yml`/etc — this item only adds a NEW local pre-flight step and a NEW classifier; it does not touch or re-trigger any existing CI workflow.
+
+## Independent plan review — re-review (Codex, read-only, 2026-09-28)
+
+Confidence **High**, build-ready **No** — **4 blockers remain**, found against the second-pass fixes above:
+
+1. **[blocker, OPEN]** Even the ordinary HEAD-against-`main` case (where this card claims full coverage, no
+   caveat needed) does not actually guarantee the preflight covers what gets published: `we:scripts/lib/verify-lane-gate.mjs`'s
+   selected gate runs against the WORKING TREE (staged, unstaged, AND untracked content, `:184`), while
+   `we:scripts/pr-land.mjs` publishes the resolved SOURCE COMMIT (`:730`) — an uncommitted local fix can make the
+   preflight pass while the actual published `sha` stays broken. **Open — the `scopeCaveat` this pass added only
+   covers the explicit-`sha` path; the ordinary path needs its own honest statement (or a commit-first
+   requirement) before "full coverage" is a true claim.**
+2. **[blocker, OPEN]** `we:scripts/lib/pr-events.mjs#withPrEvents` (the wrapper this pass names as the
+   observer's integration point) does not deliver individual events to a consumer at all — its `sleep` method
+   (`:217`, `:233`, `:270`) discards the polled event payload and returns only wake metadata; forwarding actual
+   events needs a separate callback/consumer this card's design never wires. **Open — `we:scripts/conveyor/ci-red-on-open-watch.mjs`
+   needs a real integration point named, not just "wrapped by `withPrEvents`."**
+3. **[blocker, OPEN]** The reconciliation this pass added (cross-check `openedCount` against
+   `we:scripts/progress-board.mjs`'s live listing on a feed gap) cannot actually reconstruct the promised
+   denominator: that board reads at most ~30 open + ~6 recently-merged PRs (`:599`, `:646`), excludes
+   closed-but-unmerged PRs entirely, and keeps no opening timestamp or initial sha — while a fresh/reset feed
+   cursor starts at the CURRENT head with no history (`we:scripts/conveyor/pr-events-worker/core.mjs:138`). Any
+   in-flight unfinalized episode across a gap is simply unrecoverable by either source. **Open — needs either a
+   real durable "episode in flight" record (a small addition, not zero new state) or an honest statement that a
+   gap can silently drop episodes from the denominator.**
+4. **[blocker, OPEN]** `failureShape` is still not actually available from the named inputs:
+   `we:scripts/conveyor/pr-events-worker/core.mjs#parseGithubEvent` (`:83`) records no local-preflight evidence,
+   no selected-vs-failed test identity, and no check-run id — the "one targeted `gh` read" this pass added has
+   no id to read BY (the feed never captures one). **Open — the feed needs to capture the id (a real, small
+   change to `parseGithubEvent`, currently out of `scope:`), or the observer needs a different way to name which
+   check to fetch.**
+
+MINOR (also open): the effective-title derivation (`input.title || …`) preserves a whitespace-only title, while
+`we:scripts/operations/open-pr.mjs`'s own submission path trims and omits it (`:123`) — a cosmetic mismatch, fix
+at next touch.
+
+**This card stays `status: open`, `preparedDate` withheld, `blockedBy: ["4365"]` unchanged** — four real
+blockers remain after this session's one permitted re-review round; a follow-up prep pass (working-tree-vs-
+published-commit reconciliation, a real pr-events integration point, a real gap-recovery record, and a
+check-run id in the feed) is owed before build.

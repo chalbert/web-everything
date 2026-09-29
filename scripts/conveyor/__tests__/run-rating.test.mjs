@@ -35,7 +35,7 @@ afterEach(() => {
  *  fixture line below converts its numeric `ts` (epoch ms, easiest to reason about in assertions) to that
  *  same string shape, so these fixtures exercise the exact parsing the real IO shell does. */
 function iso(ts) { return new Date(ts).toISOString(); }
-function assistantLine({ ts, model = 'claude-sonnet-5', usage = {}, content = [] }) {
+function assistantLine({ ts, model = 'claude-sonnet-5-5', usage = {}, content = [] }) {
   return { type: 'assistant', timestamp: iso(ts), message: { model, usage, content } };
 }
 function userLine({ ts, content = [] }) {
@@ -75,7 +75,7 @@ function fixtureTranscript() {
 
 describe('isSyntheticModel', () => {
   it('flags a synthetic marker model', () => { expect(isSyntheticModel('<synthetic>')).toBe(true); });
-  it('does not flag a real model id', () => { expect(isSyntheticModel('claude-sonnet-5')).toBe(false); });
+  it('does not flag a real model id', () => { expect(isSyntheticModel('claude-sonnet-5-5')).toBe(false); });
   it('does not flag null/undefined', () => { expect(isSyntheticModel(null)).toBe(false); expect(isSyntheticModel(undefined)).toBe(false); });
 });
 
@@ -276,12 +276,12 @@ describe('sumTokens / dominantModel / computeCostUsd / computeCacheHitRatio', ()
     expect(sums.cacheRead).toBe(200);
   });
   it('dominantModel picks the most frequent real model, ignoring synthetic turns', () => {
-    expect(dominantModel(extractTurns(fixtureTranscript()))).toBe('claude-sonnet-5');
+    expect(dominantModel(extractTurns(fixtureTranscript()))).toBe('claude-sonnet-5-5');
   });
   it('dominantModel is null with no real turns', () => { expect(dominantModel([])).toBeNull(); });
   it('computeCostUsd prices the 5m and 1h cache tiers separately and is null for an unrecognised model', () => {
     const sums = { in: 1_000_000, out: 0, cacheRead: 0, cacheWrite5m: 1_000_000, cacheWrite1h: 0 };
-    expect(computeCostUsd(sums, 'claude-sonnet-5')).toBeCloseTo(3 + 3.75, 5); // in-rate + sonnet cw5m rate
+    expect(computeCostUsd(sums, 'claude-sonnet-5-5')).toBeCloseTo(3 + 3.75, 5); // in-rate + sonnet cw5m rate
     expect(computeCostUsd({ in: 1, out: 0, cacheRead: 0, cacheWrite5m: 0, cacheWrite1h: 0 }, 'some-unknown-model')).toBeNull();
   });
   it('computeCacheHitRatio is cacheRead / (in + cacheRead), null with neither', () => {
@@ -456,7 +456,7 @@ describe('rateTranscript', () => {
   it('combines every piece into one rating record for a realistic fixture', () => {
     const rating = rateTranscript(fixtureTranscript(), { kind: 'fix', pr: 2748, item: '4194', rawOutcome: 're-armed' });
     expect(rating).toMatchObject({
-      kind: 'fix', pr: 2748, item: '4194', sessionName: 'fix-2748', model: 'claude-sonnet-5',
+      kind: 'fix', pr: 2748, item: '4194', sessionName: 'fix-2748', model: 'claude-sonnet-5-5',
       wallMs: 10 * 60_000, guardBlocks: 0, errors: 0, repeatedCalls: 0, testReruns: 0,
       outcome: 'pushed', rawOutcome: 're-armed', grade: 'A', dataQuality: 'transcript',
     });
@@ -769,7 +769,7 @@ describe('scanClaudeProjectsCoverage', () => {
     mkdirSync(dispatchDir, { recursive: true });
     mkdirSync(join(orchDir, 'sess1', 'subagents'), { recursive: true });
     mkdirSync(otherDir, { recursive: true });
-    const line = (usage) => `${JSON.stringify({ type: 'assistant', timestamp: '2026-09-27T10:00:00.000Z', message: { model: 'claude-sonnet-5', usage } })}\n`;
+    const line = (usage) => `${JSON.stringify({ type: 'assistant', timestamp: '2026-09-27T10:00:00.000Z', message: { model: 'claude-sonnet-5-5', usage } })}\n`;
     writeFileSync(join(dispatchDir, 'a.jsonl'), line({ input_tokens: 100, output_tokens: 10 }));
     writeFileSync(join(orchDir, 'sess1.jsonl'), line({ input_tokens: 200, output_tokens: 20 }));
     writeFileSync(join(orchDir, 'sess1', 'subagents', 'agent-1.jsonl'), line({ input_tokens: 300, output_tokens: 30 }));
@@ -784,7 +784,7 @@ describe('scanClaudeProjectsCoverage', () => {
     const dir = join(root, 'x-operations-dispatch-1');
     mkdirSync(dir, { recursive: true });
     const file = join(dir, 'old.jsonl');
-    writeFileSync(file, `${JSON.stringify({ type: 'assistant', timestamp: '2020-01-01T00:00:00.000Z', message: { model: 'claude-sonnet-5', usage: { input_tokens: 1, output_tokens: 1 } } })}\n`);
+    writeFileSync(file, `${JSON.stringify({ type: 'assistant', timestamp: '2020-01-01T00:00:00.000Z', message: { model: 'claude-sonnet-5-5', usage: { input_tokens: 1, output_tokens: 1 } } })}\n`);
     // an impossibly future cutoff — no real file's mtime can ever satisfy it, proving the filter bites.
     const buckets = scanClaudeProjectsCoverage({ projectsRoot: root, sinceMs: Date.now() + 3600_000 });
     expect(buckets['dispatched-daemon'].fileCount).toBe(0);
@@ -886,26 +886,26 @@ describe('computeTimeShares — wall-time accounting invariant', () => {
 describe('rateTranscript — mixed-model pricing', () => {
   it('prices mixed-model turns separately (cost = sum of per-model pricing), not all at the dominant model', () => {
     const lines = [
-      assistantLine({ ts: 0, model: 'claude-sonnet-5', usage: usage({ inTok: 1000, outTok: 1000 }) }),
-      assistantLine({ ts: 1000, model: 'claude-sonnet-5', usage: usage({ inTok: 1000, outTok: 1000 }) }),
+      assistantLine({ ts: 0, model: 'claude-sonnet-5-5', usage: usage({ inTok: 1000, outTok: 1000 }) }),
+      assistantLine({ ts: 1000, model: 'claude-sonnet-5-5', usage: usage({ inTok: 1000, outTok: 1000 }) }),
       assistantLine({ ts: 2000, model: 'claude-opus-5-5', usage: usage({ inTok: 1_000_000, outTok: 1_000_000 }) }),
     ];
     const rating = rateTranscript(lines, { kind: 'fix' });
-    const sonnet = computeCostUsd(sumTokens(extractTurns(lines.slice(0, 2))), 'claude-sonnet-5');
+    const sonnet = computeCostUsd(sumTokens(extractTurns(lines.slice(0, 2))), 'claude-sonnet-5-5');
     const opus = computeCostUsd(sumTokens(extractTurns(lines.slice(2))), 'claude-opus-5-5');
     expect(rating.costUsd).toBeCloseTo(sonnet + opus, 6);
     expect(rating.costUsdPartial).toBe(false);
   });
   it('preserves unknown-priced usage explicitly instead of silently pricing it at the dominant model', () => {
     const lines = [
-      assistantLine({ ts: 0, model: 'claude-sonnet-5', usage: usage({ inTok: 1000 }) }),
-      assistantLine({ ts: 1000, model: 'claude-sonnet-5', usage: usage({ inTok: 1000 }) }),
+      assistantLine({ ts: 0, model: 'claude-sonnet-5-5', usage: usage({ inTok: 1000 }) }),
+      assistantLine({ ts: 1000, model: 'claude-sonnet-5-5', usage: usage({ inTok: 1000 }) }),
       assistantLine({ ts: 2000, model: 'some-unknown-model', usage: usage({ inTok: 500, outTok: 0 }) }),
     ];
     const rating = rateTranscript(lines, { kind: 'fix' });
     expect(rating.costUsdPartial).toBe(true);
     expect(rating.unpricedTokens).toBe(500);
-    expect(rating.costUsd).toBeCloseTo(computeCostUsd(sumTokens(extractTurns(lines.slice(0, 2))), 'claude-sonnet-5'), 6);
+    expect(rating.costUsd).toBeCloseTo(computeCostUsd(sumTokens(extractTurns(lines.slice(0, 2))), 'claude-sonnet-5-5'), 6);
     expect(toScorecardRow(rating)).toMatchObject({ costUsdPartial: true, unpricedTokens: 500 });
   });
   it('is null (never 0) when no turn could be priced at all', () => {

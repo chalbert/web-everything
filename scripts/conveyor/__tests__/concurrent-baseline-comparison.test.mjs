@@ -15,7 +15,7 @@ function memIo(initial = { version: 1, records: [] }) {
 }
 
 const baseTask = () => ({ description: 'Independently review+verify PR 2223', taskType: 'bugfix', item: 3690, pr: 2223 });
-const baseClaude = () => ({ model: 'claude-sonnet-5', outcome: 'landed', verifiedBy: 'independent-claude', findings: null });
+const baseClaude = () => ({ model: 'claude-sonnet-5-5', outcome: 'landed', verifiedBy: 'independent-claude', findings: null });
 const baseDelegated = () => ({ provider: 'antigravity', model: 'claude-sonnet-4-6', outcome: 'rejected', verifiedBy: 'independent-claude', findings: 'No usable review verdict was ever delivered.' });
 
 afterEach(() => vi.restoreAllMocks());
@@ -65,7 +65,7 @@ describe('recordConcurrentBaselineComparison', () => {
     expect(result.comparisonId).toBe('cmp-fixed-1');
     expect(result.comparison.agreement).toBe(AGREEMENTS.CLAUDE_BETTER);
     expect(result.claudeRow).toMatchObject({
-      provider: 'claude-native', model: 'claude-sonnet-5', outcome: 'landed',
+      provider: 'claude-native', model: 'claude-sonnet-5-5', outcome: 'landed',
       taskDescription: baseTask().description, taskType: 'bugfix', item: 3690, pr: 2223, comparisonId: 'cmp-fixed-1',
     });
     expect(result.delegatedRow).toMatchObject({
@@ -186,7 +186,7 @@ describe('dispatchDelegatedProvider', () => {
 describe('concurrent-baseline-comparison CLI', () => {
   const args = [
     '--task=Independently review+verify PR 2223', '--task-type=bugfix', '--item=3690', '--pr=2223',
-    '--claude-model=claude-sonnet-5', '--claude-outcome=landed', '--claude-verified-by=independent-claude',
+    '--claude-model=claude-sonnet-5-5', '--claude-outcome=landed', '--claude-verified-by=independent-claude',
     '--delegated-provider=antigravity', '--delegated-model=claude-sonnet-4-6',
     '--delegated-outcome=rejected', '--delegated-verified-by=independent-claude',
   ];
@@ -204,7 +204,7 @@ describe('concurrent-baseline-comparison CLI', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     const io = memIo();
     main(args, io);
-    expect(readStore(io).records.find((r) => r.model === 'claude-sonnet-5').provider).toBe('claude-native');
+    expect(readStore(io).records.find((r) => r.model === 'claude-sonnet-5-5').provider).toBe('claude-native');
   });
 
   it('prints help without writing', () => {

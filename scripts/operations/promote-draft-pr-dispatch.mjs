@@ -43,6 +43,17 @@
  * `completed`+`success` for that sha RIGHT NOW, no `pending`, no failure. A stale-green entry is refused
  * (`kind:'stale-check-refused'`) rather than promoted — the draft stays draft and the SAME plan entry recurs
  * next tick, exactly like every other refusal in this family self-heals with no retry loop of its own.
+ *
+ * CWD-INFERRED-REPO FIX (we:backlog/x4ua3v8, live incident 2026-09-28): the default `provider` used to be
+ * `createDraftPromoteProvider({ cwd: root })` with NO repo threaded through — `we:scripts/lib/
+ * draft-promote-provider.mjs`'s `gh pr ready <pr>` then relied on `gh` inferring the repo from `root`'s git
+ * remote. `root` is this dispatching checkout's OWN cwd (always the WE checkout the daemon runs from,
+ * `we:skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs#runPromoteDraftDispatchAllRepos` loops every
+ * constellation repo via `we:scripts/lib/for-each-repo.mjs` from the SAME process) — so every non-WE PR
+ * number silently resolved against `chalbert/web-everything` instead. Confirmed live:
+ * `chalbert/plateau-app#187` refused ("Command failed: gh pr ready 187") until promoted by hand. Fixed by
+ * threading this function's own already-resolved `repoSlug` through to the provider as an explicit `--repo`
+ * — `undefined` for the WE-default path (byte-identical to before), the real slug otherwise.
  */
 import { repoKeyForSlug, CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
 import { armSelfReexecOnFastForward, assertMainNotStale } from '../lib/main-staleness.mjs';
@@ -80,7 +91,9 @@ export function defaultReadHeadCheckState({
  * @param {string|null} [o.repo] - a constellation repo slug, or `null` for WE (mirrors every sibling dispatcher).
  * @param {Function} [o.reconcile] - injectable, defaults to the real `runReconcilePass`.
  * @param {string} [o.prsFile] - when given, `reconcile` reads this tick's shared PR listing instead of a fresh `gh pr list`.
- * @param {object} [o.provider] - injectable `gh` seam (`createDraftPromoteProvider`'s shape); a test passes a fake.
+ * @param {object} [o.provider] - injectable `gh` seam (`createDraftPromoteProvider`'s shape); a test passes a
+ *   fake. Omitted, the real default is constructed AFTER `repoSlug` resolves (see the file header's
+ *   CWD-INFERRED-REPO FIX note) so it is threaded an explicit `--repo` for every non-WE dispatch.
  * @param {Function} [o.checkStaleness] - threaded straight to `assertMainNotStale`, mirroring every sibling dispatcher's own seam.
  * @returns {{dispatched:Array<{pr:number, kind:'promote-draft'}>, refusals:Array<{pr:number, kind:string, why:string}>, reconcileRefusals:number, reconcileRefusalDetails:Array<object>}}
  *   `dispatched` (not `promoted` — RENAMED, epic #4075/#3383 follow-up) so this shape matches every sibling
@@ -94,7 +107,7 @@ export function runReconcilePromoteDraftDispatch({
   repo = null,
   reconcile = runReconcilePass,
   prsFile,
-  provider = createDraftPromoteProvider({ cwd: root }),
+  provider,
   checkStaleness,
   // #2811 — the fresh per-sha re-read, injectable so a test can pin the exact race (plan says green, a fresh
   // read says red/pending) with no `gh` on PATH. Defaults to the real `gh api commits/<sha>/check-runs` read.
@@ -112,6 +125,12 @@ export function runReconcilePromoteDraftDispatch({
   // mechanical pass (`ci-heal-pr-dispatch.mjs`, `reconcile-fix-dispatch.mjs`) — never the target repo.
   assertMainNotStale(root, checkStaleness);
   const repoSlug = CONSTELLATION_REPOS[repoKey].slug;
+  // #4285-cwd-repo (we:backlog/x4ua3v8) — explicit `--repo` for every non-WE dispatch; `undefined` for WE
+  // keeps the WE-default path byte-identical to before this fix (still relies on `cwd` inference there, same
+  // as `createGhLandProvider`'s own documented-safe convention for a same-repo cwd).
+  const ghProvider = provider ?? createDraftPromoteProvider({
+    cwd: root, repo: repoKey === 'we' ? undefined : repoSlug,
+  });
   const reconciled = reconcile({ repo, ...(prsFile ? { readPrs: () => readPrsFromFile(prsFile) } : {}) });
   const entries = (reconciled.dispatch ?? []).filter((entry) => entry.kind === 'promote-draft');
   const dispatched = [];
@@ -142,7 +161,7 @@ export function runReconcilePromoteDraftDispatch({
       continue;
     }
     try {
-      provider.ready(entry.prNumber);
+      ghProvider.ready(entry.prNumber);
       dispatched.push({ pr: entry.prNumber, kind: 'promote-draft' });
       try {
         clearAwaitingCi({ pr: entry.prNumber, repo: repoSlug, state: null });
