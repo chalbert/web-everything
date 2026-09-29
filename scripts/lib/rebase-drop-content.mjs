@@ -36,6 +36,7 @@
 
 import { gitRun as gitRunner, hashObjectVerified, verifyTreeBlob, ensureFullHistory } from './git-run.mjs';
 import { LANE_MANIFEST, parseMergeTree } from './rebase-drop-manifest.mjs';
+import { refuseHeldPush } from '../conveyor/fix-procedure.mjs';
 
 export { LANE_MANIFEST };
 
@@ -395,6 +396,11 @@ export function rebaseDropContent({
   const ct = run('git', ['commit-tree', resolvedTree, '-p', base, '-p', mergeRef, '-m', msg], { cwd });
   const newCommit = String(ct.stdout || '').trim();
   if (ct.status !== 0 || !newCommit) return { action: 'error', reason: `commit-tree failed (${firstLine(ct.stderr)})` };
+
+  // #4293 — refuse this mechanical push too if another fixer holds the LIVE fix claim on the PR this laneRef
+  // belongs to (see `refuseHeldPush`'s own header for why the check lives here, not at each caller).
+  const refusal = refuseHeldPush({ run, cwd, remote, branch: laneRef });
+  if (refusal) return { action: 'error', reason: refusal.message };
 
   const push = run('git', ['push', remote, `${newCommit}:refs/heads/${laneRef}`], { cwd });
   if (push.status !== 0) return { action: 'error', reason: `push to ${laneRef} failed (${firstLine(push.stderr)})` };

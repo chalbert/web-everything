@@ -301,6 +301,28 @@ export function repoKeyFromRemoteUrl(url) {
   return m ? repoKeyForSlug(m[1]) : null;
 }
 
+/**
+ * The push-claim check for a caller that already owns its OWN injected git `run(cmd,args,opts) ->
+ * {status,stdout,stderr}` — the shared rebase/heal plumbing (`rebase-drop-content.mjs`, `rebase-drop-
+ * manifest.mjs`, `nnn-collision-heal.mjs`) and `review-prep-io.mjs`'s push-only path all take one. Wiring
+ * {@link pushRefusal} in HERE (once), rather than only at each of their callers, is what makes the invariant
+ * hold "by construction" (#4293) — `rebaseDropManifest` alone has a second caller (`scripts/lane-resume.mjs`)
+ * that a caller-side check would miss entirely. Derives the repo key off the SAME injected `run`, never a
+ * subprocess of its own, so the three plumbing libs' "pure, injectable-run" test contract stays intact: a
+ * scripted test `run` that doesn't stub `remote get-url` simply resolves no repo key, which degrades to
+ * `pushRefusal`'s already-safe `repo:null` (any-repo, fail-closed) match — never a thrown error.
+ * @param {{run:Function, cwd?:string, remote?:string, branch:string}} o
+ * @returns {null | {refused:true, pr:number, repo:string, holder:string, why:string, message:string}}
+ */
+export function refuseHeldPush({ run, cwd, remote = 'origin', branch }) {
+  let repo = null;
+  try {
+    const url = run('git', ['remote', 'get-url', remote], cwd ? { cwd } : {});
+    if (url && Number(url.status) === 0) repo = repoKeyFromRemoteUrl(String(url.stdout || '').trim());
+  } catch { repo = null; }
+  return pushRefusal({ repo, branch, ...callerIdentity() });
+}
+
 /** The repo key a checkout PATH pushes to via `remote` (default `origin`), or `null` on any failure. `cwd` is a
  *  directory, never a `owner/name` slug — a slug is not a directory, so it always reads `null`. */
 export function repoKeyForCheckout(cwd, { remote = 'origin', exec = execFileSync } = {}) {

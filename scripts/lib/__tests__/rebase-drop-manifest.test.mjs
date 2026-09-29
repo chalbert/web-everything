@@ -4,7 +4,10 @@
  *   finisher (`scripts/lane-resume.mjs land`). The git process calls are the I/O boundary (injected `run`);
  *   the merge-tree parse + the manifest-only-vs-real disposition + the plumbing SEQUENCE are decided here.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { gitBlobOid } from '../git-run.mjs';
 import {
   LANE_MANIFEST,
@@ -12,6 +15,8 @@ import {
   manifestConflictDisposition,
   rebaseDropManifest,
 } from '../rebase-drop-manifest.mjs';
+import { acquireFixClaim } from '../../conveyor/fix-procedure.mjs';
+import { fixDispatchClaimRoot } from '../../conveyor/fix-claim-store.mjs';
 
 // A `git merge-tree --write-tree` conflict block: line 1 = tree OID, then `<mode> <oid> <stage>\t<path>`
 // lines (one per unmerged stage), a blank line, then informational messages.
@@ -394,5 +399,58 @@ describe('rebaseDropManifest — shallow-checkout recovery (#x8pcbf3, PR #2752)'
     expect(r.action).toBe('error');
     expect(r.reason).not.toMatch(/checkout/);
     expect(calls.some((c) => c.args[0] === 'rev-parse')).toBe(false);
+  });
+});
+
+// ── #4293 — the mechanical push refuses a branch another fixer holds the LIVE fix claim on ─────────────────
+describe('rebaseDropManifest refuses to push onto a branch a fixer holds the LIVE fix claim on (#4293)', () => {
+  let root;
+  const priorRoot = process.env.WE_COORDINATION_ROOT;
+  beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'we-fix-claim-')); process.env.WE_COORDINATION_ROOT = root; });
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+    if (priorRoot === undefined) delete process.env.WE_COORDINATION_ROOT; else process.env.WE_COORDINATION_ROOT = priorRoot;
+  });
+
+  const REMOTE_URL = { status: 0, stdout: 'git@github.com:chalbert/web-everything.git\n' };
+
+  it('a manifest-only conflict on a claimed lane is refused BEFORE the push — the invariant holds even though the PR is not draft', () => {
+    acquireFixClaim({ repo: 'we', pr: 4293, who: 'fixer-4293', why: 'repairing a review finding', branch: 'lane/x-claimed', lockRoot: fixDispatchClaimRoot() });
+    const { run, calls } = scriptedRun({
+      'merge-tree': { status: 1, stdout: conflictOut([LANE_MANIFEST]) },
+      remote: REMOTE_URL,
+      ...RESOLVED_PLUMBING,
+    });
+    const r = rebaseDropManifest({ laneRef: 'lane/x-claimed', run });
+    expect(r.action).toBe('error');
+    expect(r.reason).toMatch(/holds the fix claim on PR #4293/);
+    expect(r.reason).toMatch(/fixer-4293/);
+    // the refusal sits AFTER commit-tree (pure, local, git-object-only — no remote effect) but BEFORE push (the
+    // one call with a remote effect) — so commit-tree still runs, and that is fine; push must not.
+    expect(calls.some((c) => c.args[0] === 'commit-tree')).toBe(true);
+    expect(calls.some((c) => c.args[0] === 'push')).toBe(false);
+  });
+
+  it('the SAME lane, with no live claim, still rebases and pushes as before (no regression)', () => {
+    const { run, calls } = scriptedRun({
+      'merge-tree': { status: 1, stdout: conflictOut([LANE_MANIFEST]) },
+      remote: REMOTE_URL,
+      ...RESOLVED_PLUMBING,
+    });
+    const r = rebaseDropManifest({ laneRef: 'lane/x-unclaimed', run });
+    expect(r.action).toBe('rebased');
+    expect(calls.some((c) => c.args[0] === 'push')).toBe(true);
+  });
+
+  it('a DIFFERENT repo\'s branch of the same name is unaffected by a WE claim', () => {
+    acquireFixClaim({ repo: 'we', pr: 4293, who: 'fixer-4293', branch: 'lane/x-shared-name', lockRoot: fixDispatchClaimRoot() });
+    const { run, calls } = scriptedRun({
+      'merge-tree': { status: 1, stdout: conflictOut([LANE_MANIFEST]) },
+      remote: { status: 0, stdout: 'git@github.com:chalbert/frontierui.git\n' },
+      ...RESOLVED_PLUMBING,
+    });
+    const r = rebaseDropManifest({ laneRef: 'lane/x-shared-name', run });
+    expect(r.action).toBe('rebased');
+    expect(calls.some((c) => c.args[0] === 'push')).toBe(true);
   });
 });

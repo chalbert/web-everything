@@ -3,10 +3,12 @@
  *   the manifest-only case: auto-resolve a `git merge-tree` conflict whose every hunk is non-overlapping
  *   (disjoint base-line ranges), still skip a genuinely overlapping hunk for `/finish`.
  */
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { acquireFixClaim } from '../../conveyor/fix-procedure.mjs';
+import { fixDispatchClaimRoot } from '../../conveyor/fix-claim-store.mjs';
 import {
   LANE_MANIFEST,
   splitLinesKeepEnds,
@@ -455,6 +457,40 @@ describe('rebaseDropContent', () => {
     for (const subcmd of ['fetch', 'merge-tree', 'cat-file', 'read-tree', 'hash-object', 'update-index', 'write-tree', 'commit-tree', 'push']) {
       expect(calls.find((c) => c.args[0] === subcmd)?.cwd).toBe('/repos/frontierui');
     }
+  });
+});
+
+// ── #4293 — the mechanical push refuses a branch another fixer holds the LIVE fix claim on ─────────────────
+describe('rebaseDropContent refuses to push onto a branch a fixer holds the LIVE fix claim on (#4293)', () => {
+  let root;
+  const priorRoot = process.env.WE_COORDINATION_ROOT;
+  beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'we-fix-claim-')); process.env.WE_COORDINATION_ROOT = root; });
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+    if (priorRoot === undefined) delete process.env.WE_COORDINATION_ROOT; else process.env.WE_COORDINATION_ROOT = priorRoot;
+  });
+
+  it('a non-overlapping content conflict on a claimed lane is refused before the push', () => {
+    acquireFixClaim({ repo: 'we', pr: 4293, who: 'fixer-4293', branch: 'lane/x-2371-claimed', lockRoot: fixDispatchClaimRoot() });
+
+    const out = conflictOutStages([
+      { path: 'reports/2026-07-09-x.md', stages: {
+        1: { mode: '100644', oid: oid('base') },
+        2: { mode: '100644', oid: oid('ours') },
+        3: { mode: '100644', oid: oid('thr') },
+      } },
+    ]);
+    const blobs = { [oid('base')]: 'intro\n', [oid('ours')]: 'intro\nOURS verdict\n', [oid('thr')]: 'intro\nTHEIRS verdict\n' };
+    const { run, calls } = scriptedRun({
+      'merge-tree': { status: 1, stdout: out },
+      'cat-file': (args) => ({ status: 0, stdout: blobs[args[2]] ?? '' }),
+      remote: { status: 0, stdout: 'git@github.com:chalbert/web-everything.git\n' },
+      ...honestWriteBack().script,
+    });
+    const r = rebaseDropContent({ laneRef: 'lane/x-2371-claimed', run });
+    expect(r.action).toBe('error');
+    expect(r.reason).toMatch(/holds the fix claim on PR #4293/);
+    expect(calls.some((c) => c.args[0] === 'push')).toBe(false);
   });
 });
 

@@ -6,10 +6,15 @@
  *   the injected-`run` I/O boundary, its SEQUENCE (detect cheaply, then read/rebuild only on a real collision)
  *   asserted with a scripted runner.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { gitBlobOid } from '../git-run.mjs';
 import { allocateGapId, rewriteRefs, assertContentPreserved } from '../../backlog/renumber-collisions.mjs';
 import { planBaseCollisionHeal, backlogBasenames, healNnnCollision, writePlanToIndex } from '../nnn-collision-heal.mjs';
+import { acquireFixClaim } from '../../conveyor/fix-procedure.mjs';
+import { fixDispatchClaimRoot } from '../../conveyor/fix-claim-store.mjs';
 
 const mk = (num, slug, body = '') => ({
   name: `${num}-${slug}.md`,
@@ -249,6 +254,39 @@ describe('healNnnCollision — git boundary sequence', () => {
     expect(r.action).toBe('error');
     expect(r.reason).toMatch(/fetch/);
     expect(calls.some((c) => c.args[0] === 'ls-tree')).toBe(false);
+  });
+});
+
+// ── #4293 — the mechanical push refuses a branch another fixer holds the LIVE fix claim on ─────────────────
+describe('healNnnCollision refuses to push onto a branch a fixer holds the LIVE fix claim on (#4293)', () => {
+  let root;
+  const priorRoot = process.env.WE_COORDINATION_ROOT;
+  beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'we-fix-claim-')); process.env.WE_COORDINATION_ROOT = root; });
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+    if (priorRoot === undefined) delete process.env.WE_COORDINATION_ROOT; else process.env.WE_COORDINATION_ROOT = priorRoot;
+  });
+
+  it('a real collision on a claimed lane is refused before the push', () => {
+    acquireFixClaim({ repo: 'we', pr: 4293, who: 'fixer-4293', branch: 'lane/x-2222-claimed', lockRoot: fixDispatchClaimRoot() });
+    const laneName = '2219-drain-finding.md';
+    const { run, calls } = scriptedRun({
+      fetch: { status: 0 },
+      'ls-tree': (args) => ({ status: 0, stdout: args.includes('origin/main') ? 'backlog/2218-a.md\nbacklog/2219-existing.md\nbacklog/2221-c.md\n' : `backlog/${laneName}\n` }),
+      'cat-file': { status: 0, stdout: mk('2219', 'drain-finding', 'x').text },
+      'read-tree': { status: 0 },
+      'hash-object': (_a, o) => ({ status: 0, stdout: gitBlobOid(o?.input ?? '') + '\n' }),
+      'update-index': { status: 0 },
+      rm: { status: 0 },
+      'write-tree': { status: 0, stdout: 'tree'.padEnd(40, '0') + '\n' },
+      'commit-tree': { status: 0, stdout: 'newCommit'.padEnd(40, '0') + '\n' },
+      remote: { status: 0, stdout: 'git@github.com:chalbert/web-everything.git\n' },
+      push: { status: 0 },
+    });
+    const r = healNnnCollision({ laneRef: 'lane/x-2222-claimed', run });
+    expect(r.action).toBe('error');
+    expect(r.reason).toMatch(/holds the fix claim on PR #4293/);
+    expect(calls.some((c) => c.args[0] === 'push')).toBe(false);
   });
 });
 

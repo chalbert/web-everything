@@ -25,6 +25,7 @@
 
 import { gitRun as gitRunner, hashObjectVerified } from './git-run.mjs';
 import { parseBacklogFilename, rewriteRefs, allocateGapId, assertContentPreserved } from '../backlog/renumber-collisions.mjs';
+import { refuseHeldPush } from '../conveyor/fix-procedure.mjs';
 
 /**
  * Build the renumber PLAN for an incoming lane whose NEW backlog item reuses an id already on the merge base.
@@ -303,6 +304,11 @@ export function healNnnCollision({
   const ct = run('git', ['commit-tree', tree, '-p', mergeRef, '-m', msg]);
   const newCommit = String(ct.stdout || '').trim();
   if (ct.status !== 0 || !newCommit) return { action: 'error', reason: `commit-tree failed (${firstLine(ct.stderr)})` };
+
+  // #4293 — refuse this mechanical push too if another fixer holds the LIVE fix claim on the PR this laneRef
+  // belongs to (see `refuseHeldPush`'s own header for why the check lives here, not at each caller).
+  const refusal = refuseHeldPush({ run, remote, branch: laneRef });
+  if (refusal) return { action: 'error', reason: refusal.message };
 
   const push = run('git', ['push', remote, `${newCommit}:refs/heads/${laneRef}`]);
   if (push.status !== 0) return { action: 'error', reason: `push to ${laneRef} failed (${firstLine(push.stderr)})` };

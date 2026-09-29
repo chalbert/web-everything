@@ -32,6 +32,7 @@
 
 import { gitRun as gitRunner, ensureFullHistory } from './git-run.mjs';
 import { applyCollisionHealToIndex } from './nnn-collision-heal.mjs';
+import { refuseHeldPush } from '../conveyor/fix-procedure.mjs';
 
 export const LANE_MANIFEST = '.lane-manifest.json';
 
@@ -222,6 +223,12 @@ export function rebaseDropManifest({
   const ct = run('git', ['commit-tree', resolvedTree, '-p', base, '-p', mergeRef, '-m', msg], { cwd });
   const newCommit = String(ct.stdout || '').trim();
   if (ct.status !== 0 || !newCommit) return { action: 'error', reason: `commit-tree failed (${(ct.stderr || '').split('\n')[0]})` };
+
+  // #4293 — refuse this mechanical push too if another fixer holds the LIVE fix claim on the PR this laneRef
+  // belongs to (see `refuseHeldPush`'s own header for why the check lives here, not at each caller — this
+  // function alone is reused by `scripts/lane-resume.mjs`, which a caller-side check would miss).
+  const refusal = refuseHeldPush({ run, cwd, remote, branch: laneRef });
+  if (refusal) return { action: 'error', reason: refusal.message };
 
   // Fast-forward push (newCommit descends from laneRef) to the guard-safe lane/* ref — no checkout.
   const push = run('git', ['push', remote, `${newCommit}:refs/heads/${laneRef}`], { cwd });
