@@ -388,6 +388,233 @@ describe('verify-lane check --wait= (#4358) — a bounded internal wait, one CLI
   }
 });
 
+/**
+ * #4473 — THE LIVE BUG, REPRODUCED END TO END: `request`/bare `verify` used to overwrite an already-accurate
+ * terminal marker with a fresh `running` one on EVERY call, even when nothing the gate looks at had changed
+ * since that marker was recorded — the exact "same lane+sha verified repeatedly" waste this item's transcript
+ * evidence measured (a worker re-`request`s after each uncommitted edit while HEAD never moves). The fix adds a
+ * working-tree content hash (`computeWorkingTreeHash`) alongside `sha` AND the gate command (`suites`) as the
+ * cache-hit key, and restricts the cache hit to a GREEN record only (never red — see the dedicated describe
+ * block below): real `git`, the real CLI — this describe block needs a real `origin/main` ref (the outer
+ * suite's bare temp repo has none) so the hash's own merge-base lookup can resolve.
+ */
+describe('verify-lane request/verify — a cache hit on an UNCHANGED working tree skips re-verifying (#4473)', () => {
+  beforeEach(() => {
+    execFileSync('git', ['branch', 'origin/main'], { cwd: dir });
+  });
+
+  function runRequest(gate) {
+    try {
+      const out = execFileSync('node', [VERIFY_LANE, 'request', `--gate=${gate}`, '--json'], { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+      return { code: 0, json: JSON.parse(out.trim().split('\n').pop()) };
+    } catch (e) {
+      return { code: e.status ?? null, json: (() => { try { return JSON.parse(String(e.stdout).trim().split('\n').pop()); } catch { return null; } })() };
+    }
+  }
+
+  it('`request` on an unchanged tree, SAME gate, after an existing GREEN marker leaves the marker untouched and reports it cached', () => {
+    const first = runVerify('true');
+    expect(first.json.status).toBe('green');
+    const beforeOnDisk = readFileSync(marker(), 'utf8');
+
+    // Same gate command ('true') as the one that produced the green — this is the genuine cache-hit case.
+    const { code, json } = runRequest('true');
+    expect(code).toBe(0);
+    expect(json.status).toBe('cached');
+    expect(json.sha).toBe(headSha());
+
+    expect(readFileSync(marker(), 'utf8')).toBe(beforeOnDisk); // byte-identical — never rewritten to `running`
+  });
+
+  // #4473 review findings 2/3 — the cache key must include the GATE COMMAND, not just sha+treeHash. A green
+  // recorded under a weaker/narrower `--gate=` (e.g. `true`) must never satisfy a LATER request for a different
+  // gate on the same unchanged tree: that would silently skip the real verification the caller actually asked
+  // for (a false green for the stronger gate).
+  it('`request` on an unchanged tree but a DIFFERENT gate than the recorded green does NOT serve that green from cache — forces a fresh run', () => {
+    expect(runVerify('true').json.status).toBe('green'); // green recorded under the weak gate `true`
+
+    const { code, json } = runRequest('exit 7'); // a different, stronger gate on the SAME unchanged tree
+    expect(code).toBe(0);
+    expect(json.status).toBe('requested'); // NOT `cached` — the differing gate command misses the cache key
+    const onDisk = JSON.parse(readFileSync(marker(), 'utf8'));
+    expect(onDisk.status).toBe('running'); // re-stamped for a real re-run, exactly as before this fix existed
+    expect(onDisk.suites).toBe('exit 7');
+  });
+
+  // converge round 1 (v3), claim-accuracy — the `preStart.sha === headSha` clause is asserted in the design
+  // prose ("`headSha` alone is NOT safe... only fires when sha, treeHash and gate all match") but no prior test
+  // isolated it: every other test in this block keeps HEAD fixed, so deleting that clause would still pass them
+  // all. A new empty commit changes `headSha` while leaving the WORKING TREE'S CONTENT identical (`git commit
+  // --allow-empty` writes no file), so `treeHash` recomputes to the exact same value — isolating the sha check
+  // specifically.
+  it('`request` on an IDENTICAL working tree but a DIFFERENT headSha (an empty commit) does NOT serve the old green from cache', () => {
+    expect(runVerify('true').json.status).toBe('green');
+    const firstSha = headSha();
+
+    execFileSync('git', ['commit', '--allow-empty', '-qm', 'no tree change'], { cwd: dir });
+    expect(headSha()).not.toBe(firstSha); // sha moved...
+    // ...but the tracked+untracked tree content is byte-identical, so treeHash alone would (wrongly) match.
+
+    const { code, json } = runRequest('true'); // same gate, same tree content, DIFFERENT sha
+    expect(code).toBe(0);
+    expect(json.status).toBe('requested'); // NOT `cached` — sha mismatch alone forces a fresh run
+    expect(json.sha).toBe(headSha());
+    const onDisk = JSON.parse(readFileSync(marker(), 'utf8'));
+    expect(onDisk.status).toBe('running');
+    expect(onDisk.sha).toBe(headSha());
+  });
+
+  it('`request` on a tree that changed (an uncommitted edit) since that green STILL overwrites to `running` (safety preserved)', () => {
+    expect(runVerify('true').json.status).toBe('green');
+
+    writeFileSync(join(dir, 'scratch.txt'), 'an uncommitted edit\n'); // HEAD unchanged, tree changed
+
+    const { code, json } = runRequest('true');
+    expect(code).toBe(0);
+    expect(json.status).toBe('requested');
+    const onDisk = JSON.parse(readFileSync(marker(), 'utf8'));
+    expect(onDisk.status).toBe('running');
+    expect(onDisk.sha).toBe(headSha());
+  });
+
+  it('bare `verify` on an unchanged tree, same gate, exits green from the cached record WITHOUT invoking the gate at all', () => {
+    // The spy script + its ran-marker live OUTSIDE `dir` (a sibling temp dir) — writing them INSIDE the repo
+    // would itself be a new untracked file, changing the working-tree hash and masking the very fast path this
+    // test means to prove (that trap is exactly what the first cut of this test fell into).
+    const spyDir = mkdtempSync(join(tmpdir(), 'verify-lane-spy-'));
+    try {
+      const ranMarker = join(spyDir, 'gate-ran.txt');
+      const gateScript = join(spyDir, 'spy.mjs');
+      writeFileSync(gateScript, `import { writeFileSync } from 'node:fs';\nwriteFileSync(${JSON.stringify(ranMarker)}, 'ran');\nprocess.exit(0);\n`);
+      const gateCmd = `node ${gateScript}`;
+
+      const first = runVerify(gateCmd); // records green, and legitimately runs the gate once
+      expect(first.json.status).toBe('green');
+      expect(existsSync(ranMarker)).toBe(true);
+      rmSync(ranMarker); // reset the spy so the second call below proves the gate did NOT run again
+
+      const second = runVerify(gateCmd); // identical gate command to the one that produced the green
+      expect(second.code).toBe(0);
+      expect(second.json.status).toBe('green');
+      expect(second.json.reason).toBe('cached');
+      expect(existsSync(ranMarker)).toBe(false); // the gate command never executed the SECOND time
+    } finally {
+      rmSync(spyDir, { recursive: true, force: true });
+    }
+  });
+
+  it('bare `verify` on a changed tree still runs the gate for real', () => {
+    expect(runVerify('true').json.status).toBe('green');
+    writeFileSync(join(dir, 'scratch.txt'), 'an uncommitted edit\n');
+
+    const spyDir = mkdtempSync(join(tmpdir(), 'verify-lane-spy-'));
+    try {
+      const ranMarker = join(spyDir, 'gate-ran-2.txt');
+      const gateScript = join(spyDir, 'spy2.mjs');
+      writeFileSync(gateScript, `import { writeFileSync } from 'node:fs';\nwriteFileSync(${JSON.stringify(ranMarker)}, 'ran');\nprocess.exit(0);\n`);
+
+      const second = runVerify(`node ${gateScript}`);
+      expect(second.code).toBe(0);
+      expect(second.json.status).toBe('green');
+      expect(existsSync(ranMarker)).toBe(true); // the gate DID execute
+    } finally {
+      rmSync(spyDir, { recursive: true, force: true });
+    }
+  });
+});
+
+/**
+ * #4473 review finding 1 — a RED record must NEVER be served from cache. Reds are frequently non-code (host
+ * contention, a flaky test — this very item's own card logged three such reds live), and before this fix a bare
+ * re-`request`/`verify` on an unchanged tree always re-ran the gate, which is exactly how a worker clears a
+ * flaky red: touch nothing, ask again. If a red were cache-hit, that red would become STICKY — stuck at exit 2
+ * until a file is touched or `reset` is run — strictly worse than the redundant-rerun problem this item set out
+ * to fix. These tests prove the fast path never engages for a red marker, on the SAME gate and an UNCHANGED
+ * tree — the exact conditions that would otherwise be a cache hit for green.
+ */
+describe('verify-lane request/verify — a RED marker is NEVER cache-hit, even on an unchanged tree with the same gate (#4473 finding 1)', () => {
+  beforeEach(() => {
+    execFileSync('git', ['branch', 'origin/main'], { cwd: dir });
+  });
+
+  function runRequest(gate) {
+    try {
+      const out = execFileSync('node', [VERIFY_LANE, 'request', `--gate=${gate}`, '--json'], { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+      return { code: 0, json: JSON.parse(out.trim().split('\n').pop()) };
+    } catch (e) {
+      return { code: e.status ?? null, json: (() => { try { return JSON.parse(String(e.stdout).trim().split('\n').pop()); } catch { return null; } })() };
+    }
+  }
+
+  it('`request` after a RED marker on an unchanged tree re-stamps `running` instead of returning the red from cache', () => {
+    const first = runVerify('exit 2');
+    expect(first.json.status).toBe('red');
+    expect(first.code).toBe(2);
+
+    // Unchanged tree, SAME gate command — this is exactly the shape that IS a cache hit for green.
+    const { code, json } = runRequest('exit 2');
+    expect(code).toBe(0);
+    expect(json.status).toBe('requested'); // never `cached` for a red
+    const onDisk = JSON.parse(readFileSync(marker(), 'utf8'));
+    expect(onDisk.status).toBe('running'); // re-stamped, so verify-dispatch.mjs actually re-dispatches
+  });
+
+  it('bare `verify` after a RED marker on an unchanged tree actually RE-EXECUTES the gate (a flaky red can clear on retry)', () => {
+    expect(runVerify('exit 2').json.status).toBe('red');
+
+    // Same gate command this time exits 0 — simulating the flake clearing on an untouched retry. If the red were
+    // wrongly cache-hit, this would report `red` again from the stale record without ever running the command.
+    const spyDir = mkdtempSync(join(tmpdir(), 'verify-lane-spy-'));
+    try {
+      const ranMarker = join(spyDir, 'gate-ran-red.txt');
+      const gateScript = join(spyDir, 'spy-red.mjs');
+      writeFileSync(gateScript, `import { writeFileSync } from 'node:fs';\nwriteFileSync(${JSON.stringify(ranMarker)}, 'ran');\nprocess.exit(0);\n`);
+
+      const second = runVerify(`node ${gateScript}`);
+      expect(existsSync(ranMarker)).toBe(true); // the gate WAS actually invoked — never served from cache
+      expect(second.json.status).toBe('green'); // and its real (fresh) result is what gets reported
+    } finally {
+      rmSync(spyDir, { recursive: true, force: true });
+    }
+  });
+});
+
+/**
+ * #4473 review finding 5 — the fail-closed guarantee (`currentTreeHash != null`, so an unresolvable hash never
+ * matches) needs a BEHAVIORAL proof, not only the source-text regex that used to be the only guard. This describe
+ * block deliberately does NOT create an `origin/main` ref (unlike the two describe blocks above) — the outer
+ * `beforeEach` only leaves a bare one-commit repo — so `computeWorkingTreeHash`'s own merge-base lookup has
+ * nothing to resolve and returns `null`, and the cache-hit guard must never treat that as a match.
+ */
+describe('verify-lane verify — with no computable origin/main ref, the tree hash is unknown and the cache is fail-closed (#4473 finding 5)', () => {
+  it('a repeat `verify` with the SAME gate command on an otherwise-unchanged tree still re-runs the gate for real', () => {
+    // converge round 2 (claim-accuracy) — the first cut of this test used a DIFFERENT gate command for the
+    // second call, so `preStart.suites === GATE` alone already forced the re-run: the test passed even with
+    // `currentTreeHash != null` deleted, proving nothing about the null-hash guard specifically. Both calls now
+    // use the SAME spy script, isolating exactly the one thing this test claims to defend.
+    const spyDir = mkdtempSync(join(tmpdir(), 'verify-lane-spy-'));
+    try {
+      const ranMarker = join(spyDir, 'gate-ran-noref.txt');
+      const gateScript = join(spyDir, 'spy-noref.mjs');
+      writeFileSync(gateScript, `import { writeFileSync } from 'node:fs';\nwriteFileSync(${JSON.stringify(ranMarker)}, 'ran');\nprocess.exit(0);\n`);
+      const gateCmd = `node ${gateScript}`;
+
+      const first = runVerify(gateCmd);
+      expect(first.json.status).toBe('green');
+      expect(existsSync(ranMarker)).toBe(true);
+      rmSync(ranMarker); // reset the spy so the second call proves a REAL re-execution, not a leftover file
+
+      const second = runVerify(gateCmd); // identical gate command — only the missing origin/main ref differs
+      expect(second.code).toBe(0);
+      expect(second.json.status).toBe('green');
+      expect(second.json.reason).not.toBe('cached'); // a null tree hash must never satisfy the cache-hit guard
+      expect(existsSync(ranMarker)).toBe(true); // the gate DID execute AGAIN — no false cache hit from a null hash
+    } finally {
+      rmSync(spyDir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('verify-lane reset (x4jcqm4) — clearing a stale marker without a lease to protect', () => {
   const leaseFile = () => join(dir, '.git', '.lane-lease');
   function runReset(env = {}) {

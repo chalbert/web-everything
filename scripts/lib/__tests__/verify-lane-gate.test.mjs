@@ -13,7 +13,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { resolveDefaultGate, canScopeCheckStandards, composeGate, describeGate, laneRelevantChangeSince, FULL_GATE, MAX_RELATED_TARGETS } from '../verify-lane-gate.mjs';
+import { resolveDefaultGate, canScopeCheckStandards, composeGate, describeGate, laneRelevantChangeSince, computeWorkingTreeHash, FULL_GATE, MAX_RELATED_TARGETS } from '../verify-lane-gate.mjs';
 
 /** A synthetic git runner for the xpnhz4o working-tree changed set: `merge-base` resolves to a fixed sha;
  *  `diff --name-only <sha>` returns the (working-tree) changed files; `--diff-filter=D` the deleted ones;
@@ -395,6 +395,59 @@ describe('laneRelevantChangeSince (#4296) — keys marker validity to what chang
   });
 });
 
+/** A synthetic git runner for {@link computeWorkingTreeHash} (#4473): `merge-base` resolves to a fixed sha;
+ *  `diff <sha> --` returns the tracked-diff PATCH TEXT (content, not just names); `ls-files --others
+ *  --exclude-standard` the untracked file list; `hash-object -- <file>` each untracked file's own content hash
+ *  (keyed off a simple in-memory map, standing in for the real git object hash). No real git process. */
+function fakeTreeGit({ mergeBase = 'deadbeef', trackedDiff = '', untracked = [], untrackedHashes = {} } = {}) {
+  return (args) => {
+    if (args[0] === 'merge-base') return mergeBase;
+    if (args[0] === 'diff') return trackedDiff;
+    if (args[0] === 'ls-files') return untracked.join('\n');
+    if (args[0] === 'hash-object') {
+      const file = args[args.length - 1];
+      return untrackedHashes[file] ?? `hash-of-${file}`;
+    }
+    throw new Error(`unexpected git invocation in test: ${args.join(' ')}`);
+  };
+}
+
+describe('computeWorkingTreeHash (#4473) — a content hash of the working tree against the pinned merge-base', () => {
+  it('is deterministic: the same tracked diff + untracked content hashes the same across two calls', () => {
+    const git = fakeTreeGit({ trackedDiff: 'diff --git a/x b/x\n+hi\n', untracked: ['scratch.txt'] });
+    expect(computeWorkingTreeHash({ runGit: git })).toBe(computeWorkingTreeHash({ runGit: git }));
+  });
+
+  it('changes when the TRACKED diff changes (an edit to an already-tracked file)', () => {
+    const before = computeWorkingTreeHash({ runGit: fakeTreeGit({ trackedDiff: 'diff A\n' }) });
+    const after = computeWorkingTreeHash({ runGit: fakeTreeGit({ trackedDiff: 'diff B\n' }) });
+    expect(after).not.toBe(before);
+  });
+
+  it('changes when an UNTRACKED file is added', () => {
+    const before = computeWorkingTreeHash({ runGit: fakeTreeGit({ untracked: [] }) });
+    const after = computeWorkingTreeHash({ runGit: fakeTreeGit({ untracked: ['new.txt'] }) });
+    expect(after).not.toBe(before);
+  });
+
+  it('changes when an untracked file\'s own CONTENT changes (its hash-object result differs), same filename', () => {
+    const before = computeWorkingTreeHash({ runGit: fakeTreeGit({ untracked: ['scratch.txt'], untrackedHashes: { 'scratch.txt': 'aaa' } }) });
+    const after = computeWorkingTreeHash({ runGit: fakeTreeGit({ untracked: ['scratch.txt'], untrackedHashes: { 'scratch.txt': 'bbb' } }) });
+    expect(after).not.toBe(before);
+  });
+
+  it('is insensitive to the ON-DISK ORDER `ls-files` happens to return untracked files in (sorted before hashing)', () => {
+    const a = computeWorkingTreeHash({ runGit: fakeTreeGit({ untracked: ['b.txt', 'a.txt'] }) });
+    const b = computeWorkingTreeHash({ runGit: fakeTreeGit({ untracked: ['a.txt', 'b.txt'] }) });
+    expect(a).toBe(b);
+  });
+
+  it('returns null (unknown — fail closed) when there is no computable merge-base', () => {
+    const git = () => { throw new Error('no upstream configured'); };
+    expect(computeWorkingTreeHash({ runGit: git })).toBeNull();
+  });
+});
+
 describe('verify-lane.mjs source wiring — the default gate actually calls resolveDefaultGate', () => {
   it('xpnhz4o — prints describeGate before running, and `run` mode records no marker', () => {
     const src = readFileSync(resolve(process.cwd(), 'scripts/verify-lane.mjs'), 'utf8');
@@ -433,3 +486,12 @@ describe('verify-lane.mjs source wiring — the default gate actually calls reso
     expect(src).toMatch(/resolveLaneRelevantChangeSince: \(record\) => laneRelevantChangeSinceForRecord\(\{ record, headSha, base: 'origin\/main', runGit: git \}\)/);
   });
 });
+
+// #4473 review finding 4 — a prior revision of this file had an additional source-text regex test here
+// ('`request`/bare `verify` compute the working-tree hash and skip re-verifying on a cache hit') that matched
+// verify-lane.mjs's exact expression text, including a whitespace window and the full start-write call. It was
+// removed: it asserted nothing about BEHAVIOR that the real-git integration tests in
+// scripts/__tests__/verify-lane.test.mjs (describe blocks tagged #4473) don't already cover end to end — cache
+// hit on matching sha+treeHash+gate, cache MISS on a differing gate, cache MISS on a red record, and cache MISS
+// with no computable origin/main ref — while being strictly MORE fragile than those: a harmless reformat or
+// reordering of the cacheHit condition redded this regex with no behavior change at all.

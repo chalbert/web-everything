@@ -58,6 +58,7 @@
  * `scripts` omitted/unknown ⇒ assumed WE-shaped, so a WE checkout's command is byte-for-byte unchanged. frontierui
  * has both `test:unit` and `check:standards`, so it too gets today's gate unchanged.
  */
+import { createHash } from 'node:crypto';
 import { SELECTION_FLAG, pinnedMergeBase, decideLocalSelection, referencedTestNeedles } from '../readiness/test-selection.mjs';
 import { isPolicyCorePath } from './gate-config.mjs';
 
@@ -190,6 +191,47 @@ export function localChangedSet({ base = 'origin/main', runGit }) {
     const deletedFiles = lines(runGit(['diff', '--name-only', '--diff-filter=D', mergeBase]));
     const untracked = lines(runGit(['ls-files', '--others', '--exclude-standard']));
     return { changedFiles: Array.from(new Set([...tracked, ...untracked])).sort(), deletedFiles };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * #4473 — a content hash of the CURRENT working tree against the pinned merge-base: the same "what will the
+ * gate actually see" input {@link localChangedSet} derives (tracked diff, staged or not, plus untracked files),
+ * but content-addressed rather than just a file list, so two calls with byte-identical tracked+untracked content
+ * hash the SAME — even across separate process invocations (`request` then `request` again with no edit in
+ * between), which is exactly what a file-list-only key cannot tell apart from "the same files, edited again".
+ *
+ * WHY THIS EXISTS. `verify-lane.mjs`'s marker is keyed only to `headSha` (the commit) — but a worker iterating
+ * with UNCOMMITTED edits never moves `headSha` at all, while the gate's own inputs (`resolveDefaultGate` /
+ * {@link localChangedSet}) are keyed off the WORKING TREE, not the commit. Before this, `request`/bare `verify`
+ * unconditionally discarded any existing terminal record and started a fresh `running` marker on every call,
+ * which `verify-dispatch.mjs` then re-ran to completion — the exact "same lane+sha verified repeatedly" waste
+ * this item's transcript evidence measured. A content hash lets the caller tell "truly unchanged since the last
+ * terminal record" (safe to answer from cache) apart from "same commit, but the tree moved since" (must re-run) —
+ * a same-`headSha` check ALONE cannot make that distinction and would risk a false green.
+ *
+ * Returns `null` when git cannot answer (no computable merge-base, or a git failure) — the caller MUST treat
+ * `null` as unknown, never as a fixed/comparable value (fail closed, same posture as {@link localChangedSet}).
+ * @param {{base?: string, runGit: (args: string[]) => string}} args
+ * @returns {string|null}
+ */
+export function computeWorkingTreeHash({ base = 'origin/main', runGit }) {
+  const mergeBase = pinnedMergeBase({ base, runGit });
+  if (!mergeBase) return null;
+  try {
+    // The tracked diff (staged + unstaged) against the merge-base — the same shape `localChangedSet`'s
+    // `tracked` derives, but the full patch text (content), not just names.
+    const trackedDiff = runGit(['diff', mergeBase, '--']);
+    const untracked = String(runGit(['ls-files', '--others', '--exclude-standard']))
+      .split('\n').map((s) => s.trim()).filter(Boolean).sort();
+    // Each untracked file's OWN content hash (`git hash-object`, deterministic and reads the file itself) —
+    // never the file's mtime/size, which can change with no content change and would hash-flap.
+    const untrackedDigest = untracked
+      .map((f) => `${f}:${String(runGit(['hash-object', '--', f])).trim()}`)
+      .join('\n');
+    return createHash('sha256').update(trackedDiff).update('\u0000').update(untrackedDigest).digest('hex');
   } catch {
     return null;
   }

@@ -233,8 +233,12 @@ export function resolveVerifyOptions({ flags = {}, env = {} } = {}) {
 export const DEFAULT_VERIFY_TTL_MINUTES = 30;
 
 /** Build the AT-START (`running`) marker. The caller stamps `startedAt` (ISO) and the resolved `sha` so this
- *  stays clock-free / git-free / testable. `suites` is the gate command string, recorded for the message. */
-export function verifyStartBody({ sha, suites, startedAt }) {
+ *  stays clock-free / git-free / testable. `suites` is the gate command string, recorded for the message.
+ *  `treeHash` (#4473, optional) is the working-tree content hash ({@link ../lib/verify-lane-gate.mjs}'s
+ *  `computeWorkingTreeHash`) the IO shell computed BEFORE this call — carried through so a later `request`/
+ *  `verify` can tell "the tree is byte-identical to what this record verified" apart from "same commit, tree
+ *  moved since"; omitted/`null` (every existing caller) never enables that fast path. */
+export function verifyStartBody({ sha, suites, startedAt, treeHash }) {
   return {
     sha: sha || null,
     status: 'running',
@@ -242,6 +246,7 @@ export function verifyStartBody({ sha, suites, startedAt }) {
     finishedAt: null,
     suites: suites || null,
     exitCode: null,
+    treeHash: treeHash ?? null,
   };
 }
 
@@ -265,6 +270,13 @@ export function verifyFinishBody(prev, { finishedAt, exitCode, sha } = {}) {
     finishedAt: finishedAt || null,
     suites: base.suites ?? null,
     exitCode: Number.isFinite(Number(exitCode)) ? Number(exitCode) : null,
+    // #4473 — carried through from the START body unchanged; this function never recomputes it. Accuracy is a
+    // CALLER contract, not something this pure function can enforce: `verify-lane.mjs` recomputes the hash fresh
+    // and re-writes the start body on every path that actually goes on to run the gate (bare `verify`, including
+    // when it picks up a `request`-stamped marker), immediately before admission-queueing and `execSync`, so by
+    // the time this finish write runs, `base.treeHash` is the one taken right before the gate executed — the
+    // same timing window `GATE` (the command string) itself already has, not a new one.
+    treeHash: base.treeHash ?? null,
   };
 }
 

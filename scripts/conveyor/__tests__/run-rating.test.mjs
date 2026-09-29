@@ -852,10 +852,52 @@ describe('scanNonClaudeJudgeTranscripts', () => {
 });
 
 describe('buildCoverageReport', () => {
-  it('never claims more than 100% and reports a percentage per bucket that sums to ~100 when files exist', () => {
-    const report = buildCoverageReport({ sinceMs: Date.now() }); // an impossible "since" — every real bucket empty
+  // #4473 (x4txc2g) — HERMETIC. `buildCoverageReport` used to hardcode every scanner's REAL default root
+  // (`~/.claude/projects`, every workspace checkout's `.operations/runs`, `~/.codex-judge-transcripts`), so this
+  // describe block could only ever read live, ambient, shared-host state. Under real concurrent multi-lane load
+  // that is non-deterministic: a live file's mtime can tick past a captured `Date.now()` mid-scan, producing a
+  // nonzero total this test's own name says should be impossible (observed live: 3 real red dispatches through
+  // the actual verify-lane daemon, see backlog/x4txc2g). Both tests below point `projectsRoot`/`runsDirs`/`home`
+  // at an ISOLATED `tmp()` dir instead — the exact same override params `scanClaudeProjectsCoverage`/
+  // `scanReviewJurorUsage`/`scanNonClaudeJudgeTranscripts` already accepted (their own describe blocks above
+  // already use them); the only gap was `buildCoverageReport` itself not forwarding them.
+  it('never claims more than 100% and reports a percentage per bucket that sums to ~100 when NO files exist', () => {
+    const root = tmp();
+    const report = buildCoverageReport({
+      sinceMs: Date.now(), // belt + suspenders: even a file dated "now" is excluded
+      projectsRoot: join(root, 'projects'), // does not exist — isolated, never the real ~/.claude/projects
+      runsDirs: [], // an explicit empty list — scans NO checkout's .operations/runs
+      home: join(root, 'home'), // does not exist — isolated, never the real ~
+    });
     expect(report.totalTokens).toBe(0);
     expect(report.attributed.pct).toBeNull(); // 0/0 — never a fabricated percentage
+  });
+
+  // MUTATION PROOF, folded into a real assertion rather than a separate no-op probe: this pins an EXACT token
+  // total from three isolated fixture files (110 + 55 + 30 = 195 — the arithmetic below). If `buildCoverageReport`
+  // ever regressed to ignoring these override params (the pre-fix shape — ALWAYS the real, unmocked scanner
+  // defaults), the real ambient host state this same machine keeps writing (this very session's own live
+  // transcript, any other concurrently-running lane's, real review-juror run records) would almost certainly
+  // add MORE tokens on top of 195 — a regression this exact-equality assertion catches, where a `toBeGreaterThan`
+  // would not (the real host already has far more than 0 tokens lying around). This is what makes the isolation
+  // itself provable, not merely assumed.
+  it('WHEN FILES EXIST (in the isolated roots): buckets an EXACT token total, and the per-bucket pct sums to ~100', () => {
+    const root = tmp();
+    const dispatchDir = join(root, 'projects', 'x-operations-dispatch-1');
+    const runsDir = join(root, 'runs');
+    const codexDir = join(root, 'home', '.codex-judge-transcripts');
+    mkdirSync(dispatchDir, { recursive: true });
+    mkdirSync(runsDir, { recursive: true });
+    mkdirSync(codexDir, { recursive: true });
+    writeFileSync(join(dispatchDir, 'a.jsonl'), `${JSON.stringify({ type: 'assistant', timestamp: '2026-09-27T10:00:00.000Z', message: { model: 'claude-sonnet-5-5', usage: { input_tokens: 100, output_tokens: 10 } } })}\n`); // 110
+    writeFileSync(join(runsDir, 'review-pr-x.json'), JSON.stringify({ input: { pr: 1 }, telemetry: [{ model: 'sonnet', costUsd: 0.1, usage: { input_tokens: 50, output_tokens: 5 } }] })); // 55
+    writeFileSync(join(codexDir, 'codex-judge-1.jsonl'), `${JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 25, output_tokens: 5 } })}\n`); // 30
+
+    const report = buildCoverageReport({ projectsRoot: join(root, 'projects'), runsDirs: [runsDir], home: join(root, 'home') });
+
+    expect(report.totalTokens).toBe(195); // 110 (dispatched-daemon) + 55 (review-juror) + 30 (non-claude-judge)
+    const pcts = [report.attributed.pct, report.orchestrationOverhead.pct, report.operatorInteractive.pct, report.nonClaudeJudge.pct].filter((p) => p !== null);
+    expect(pcts.reduce((s, p) => s + p, 0)).toBeCloseTo(100, 5); // never over 100%, and sums to it when known
   });
 });
 
