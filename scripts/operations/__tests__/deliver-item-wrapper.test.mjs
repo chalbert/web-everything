@@ -698,7 +698,9 @@ describe('CLAUDE_RESTRICTED_PROVIDER.spawn real cwd + env (#3627 bug 7)', () => 
 // ================================================================================================
 describe('cross-locus delivery reaches BOTH lanes (#4348)', () => {
   const HOME = process.env.HOME;
-  const L7 = `${HOME}/workspace/.lanes/web-everything/lane-7`;
+  // A lane number no real pool uses: the default deny map covers the checkout this suite RUNS from, so a real
+  // lane path (e.g. lane-7) here makes these tests fail whenever the suite runs inside that very lane.
+  const L7 = `${HOME}/workspace/.lanes/web-everything/lane-4348`;
   const P2 = `${HOME}/workspace/.lanes/plateau-app/lane-2`;
   const REQ = {
     sessionId: '43484348-4348-4348-8348-434843484348', prompt: 'BUILD #2720', lane: 7, sessionSlug: 'conveyor-2720',
