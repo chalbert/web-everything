@@ -934,6 +934,23 @@ export function numberPendingHashes(CWD, { dryRun = false } = {}) {
   // bookkeeping (Rule #105) that never lands on main, so unbounded growth is negligible (a TTL prune is a
   // possible future refinement, not a correctness need).
   writeFileSync(ledgerAbs, JSON.stringify(ledger, null, 2) + '\n');
+  // DELIBERATELY does NOT also rewrite the conveyor's `.conveyor/queue.json` sidecar here (queue-store.mjs),
+  // even though `assigned` is exactly the hash→NNN map a stale cleared-for-build row needs. Two reasons this
+  // numbering commit stays read-only outside `backlog/` + its own local ledger:
+  //   1. LAYERING — this function runs wherever a lane's WE half lands (any drain daemon host, any lane clone,
+  //      possibly CI), but the conveyor sidecar is ONE machine-wide file in a specific operator's automation
+  //      state home (`automation-home.mjs#automationStateRoot`, `CONVEYOR_STATE_ROOT`-pinnable). Coupling the
+  //      numbering commit to that path would make drain correctness depend on conveyor state-root plumbing
+  //      it has no other reason to know about, and would silently no-op (or write to the wrong root) on any
+  //      host where they diverge — worse than doing nothing.
+  //   2. SUFFICIENCY — resolution is fully recovered at READ TIME instead: `queue-store.mjs#bornAsIndexFromItems`
+  //      + `#resolveBornAsRefs` map a stale hash row to its `bornAs`-stamped landed NNN on every read
+  //      (`dispatch-plan.mjs`, `conveyor-state.mjs`), and `queue.mjs migrate-bornas` rewrites the on-disk
+  //      sidecar itself the same way on demand. Both consume the SAME durable `bornAs:` stamp this function
+  //      writes into the numbered card's frontmatter (`backlog/id.mjs#stampBornAs`) — so a stale row self-heals
+  //      the next time anything reads or migrates the queue, with no write-side coupling and no missed case
+  //      (a numbering commit made while the sidecar happens to be unreachable would otherwise silently drop
+  //      the rewrite for good).
   quietGit(CWD, ['add', '--', ...new Set(toAdd)]); // stage rewrites + new renamed files (deletions already staged by git rm; ledger stays untracked)
   const paths = [...new Set(commitPaths)];
   const summary = assigned.map((a) => `${a.hash}→#${a.nnn}`).join(', ');

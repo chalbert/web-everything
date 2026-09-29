@@ -38,7 +38,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
-import { readQueueFile, resolveQueuePath, normNum } from '../conveyor/queue-store.mjs';
+import { readQueueFile, resolveQueuePath, normNum, bornAsIndexFromItems, resolveBornAsRefs } from '../conveyor/queue-store.mjs';
 import { collapseRollupToLatestPerName } from '../merge-ai-prs.mjs';
 import { CI_TRUTH_EXCLUDED_CHECKS } from '../operations/pr-status.mjs';
 // #3296 — `countStandDownComments` recovers "has a fixer already stood down here" from the PR's own comments
@@ -816,12 +816,20 @@ async function main(argv) {
   //     false parallel claim, and no false needs-slice) and is logged to stderr ONLY, NOT pushed to errors[] (a
   //     cosmetic enrichment miss must not flip the tick's health verdict to warn). Mirrors dispatch-plan.mjs's own
   //     enrichment.
-  if (buildQueue && Array.isArray(buildQueue.queue) && buildQueue.queue.length) {
+  // Loaded here (rather than only inside the `if` below) so it is ALSO available for the bornAs resolution at
+  // 5b below even on a tick whose build-queue happens to be empty — a stale-hash sidecar row must still resolve
+  // (or fail to) the same way regardless of what's currently ready.
+  let backlogItems = [];
+  try {
+    const require = createRequire(import.meta.url);
+    const loadBacklog = require(join(ROOT, 'src', '_data', 'backlog.js'));
+    backlogItems = typeof loadBacklog === 'function' ? loadBacklog() : [];
+  } catch (e) {
+    log(`  ⚠ could not load backlog for scope/kind enrichment (${String(e.message || e).split('\n')[0]}) — armed items read as unshaped, non-epic`);
+  }
+  if (buildQueue && Array.isArray(buildQueue.queue) && buildQueue.queue.length && backlogItems.length) {
     try {
-      const require = createRequire(import.meta.url);
-      const loadBacklog = require(join(ROOT, 'src', '_data', 'backlog.js'));
-      const items = typeof loadBacklog === 'function' ? loadBacklog() : [];
-      const byNum = new Map(items.map((it) => [String(it.num), it]));
+      const byNum = new Map(backlogItems.map((it) => [String(it.num), it]));
       buildQueue.queue = buildQueue.queue.map((r) => {
         const it = byNum.get(String(r?.num));
         return {
@@ -905,7 +913,16 @@ async function main(argv) {
   //     `buildQueued` frontmatter — is what arms a conveyor build, so the tick picture's `queue.buildQueued`
   //     reflects it (see shapeQueue). Read via the SAME resolver the dispatcher uses (script-location + env
   //     override) so the reader here can never diverge from the writer. A missing/corrupt sidecar degrades to [].
-  const clearedNums = readQueueFile(resolveQueuePath()).map((e) => e.num);
+  //
+  //     RESOLVE-AT-READ-TIME (same fix as dispatch-plan.mjs, #4291 area): the drain JIT-numbers a cleared card
+  //     the moment its WE half lands, but the sidecar keeps the pre-number hash the operator cleared it under —
+  //     rewriting it through the SAME `bornAsIndexFromItems`/`resolveBornAsRefs` pair BEFORE it becomes
+  //     `clearedNums` means `buildQueued` (and the idle-stop / unshaped / needs-slice / decision derivations
+  //     that filter on it below) sees the card's landed NNN, not a dead hash that will never again match a
+  //     build-queue row. An unresolvable hash (not yet landed, or a typo) passes through unchanged — unresolved
+  //     ids still surface via `deriveClearedNotReady` exactly as before.
+  const bornAsIndex = bornAsIndexFromItems(backlogItems);
+  const clearedNums = resolveBornAsRefs(readQueueFile(resolveQueuePath()), bornAsIndex).map((e) => e.num);
 
   // 5c. The infra-blocked state (#2659): items whose build succeeded + lane ref pushed, but whose PR-open failed
   //     on an outside dependency (a GitHub outage). Read via the SAME script-location resolver pr-land writes to

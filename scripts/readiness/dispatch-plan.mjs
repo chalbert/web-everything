@@ -762,21 +762,44 @@ async function main(argv) {
   //    blocks). An item is in the conveyor queue IFF its num is in the sidecar; committed `buildQueued` no
   //    longer arms a conveyor build. Enrich each with its predicted `scope` + `openBlockers` from the backlog
   //    loader (build-queue doesn't emit them). Dynamic-import keeps the pure core import-clean.
-  const { readQueueFile, resolveQueuePath, normNum } = await import('../conveyor/queue-store.mjs');
+  const { readQueueFile, resolveQueuePath, normNum, bornAsIndexFromItems, resolveBornAsRefs } =
+    await import('../conveyor/queue-store.mjs');
   // `--queue-file=<json>` (#3720, land-advance's item-pull): membership AND order come from the caller's list (epic
   // #3383's Priority order), not the sidecar + build-queue ranking. Every hold below still applies unchanged; the
   // `blocked` branch is what gates an unready item here, since this path skips build-queue's ready filter.
   const queueFile = typeof flags['queue-file'] === 'string' ? flags['queue-file'] : null;
   const sidecar = queueFile ? [] : readQueueFile(resolveQueuePath()); // script-location + env override — matches conveyor-state
-  const cleared = new Set(sidecar.map((e) => normNum(e.num)));
-  // `--backlog-dir` (#3445) points this read (and, via `WE_BACKLOG_DIR` below, the byNum enrichment require
-  // just past it) at a fixture corpus instead of the live `backlog/` directory — the dispatcher-fixture-root
-  // thread (#3402).
+  // `--backlog-dir` (#3445) points this read (and the byNum enrichment require just below) at a fixture corpus
+  // instead of the live `backlog/` directory — the dispatcher-fixture-root thread (#3402). Set BEFORE the
+  // require below (not after, as before this change) so the SAME load also builds the bornAs index the sidecar
+  // resolution just below needs — fixture and live runs must resolve against the same corpus.
   const bqArgs = ['build-queue', '--json'];
   if (typeof flags['backlog-dir'] === 'string') {
     bqArgs.push(`--backlog-dir=${flags['backlog-dir']}`);
     process.env.WE_BACKLOG_DIR = flags['backlog-dir'];
   }
+  let byNum = new Map();
+  let backlogItems = [];
+  try {
+    const { createRequire } = await import('node:module');
+    const require = createRequire(import.meta.url);
+    const loadBacklog = require(join(HERE, '..', '..', 'src', '_data', 'backlog.js'));
+    backlogItems = typeof loadBacklog === 'function' ? loadBacklog() : [];
+    byNum = new Map(backlogItems.map((it) => [String(it.num), it]));
+  } catch (e) {
+    log(`  ⚠ could not load backlog for scope/openBlockers enrichment (${String(e.message || e).split('\n')[0]}) — items read as unshaped (no scope → held unshaped-no-scope, auto-prepared)`);
+  }
+  // RESOLVE-AT-READ-TIME (the fix): the drain JIT-numbers a cleared card the moment its WE half lands (#2288),
+  // stamping the pre-number hash into the numbered card's `bornAs:` frontmatter (#2392) — but the sidecar still
+  // holds the stale hash the operator originally cleared. Rewriting every sidecar entry through the bornAs
+  // index BEFORE it feeds `cleared`/`clearedNotReady` means a JIT-numbered card's cleared-for-build intent
+  // survives the rename: it now matches the build-queue row's landed NNN instead of reading as
+  // cleared-but-not-ready forever. A hash the index doesn't know (not yet landed, or a genuine typo) passes
+  // through unresolved and still surfaces via `clearedNotReady` exactly as before — this is pure ADDITION, no
+  // existing hold behavior changes for ids that were never stale.
+  const bornAsIndex = bornAsIndexFromItems(backlogItems);
+  const resolvedSidecar = queueFile ? sidecar : resolveBornAsRefs(sidecar, bornAsIndex);
+  const cleared = new Set(resolvedSidecar.map((e) => normNum(e.num)));
   let rows;
   let bqRows = [];
   let observeSelection;
@@ -795,19 +818,10 @@ async function main(argv) {
     };
     rows = selectClearedRows(bqRows, cleared, normNum, observeSelection);
   }
-  // Cleared-but-not-ready: sidecar ids with no ready build-queue row — surfaced as held entries below, never
-  // silently dropped (#2613 review, required 2b).
-  const notReady = clearedNotReady(sidecar, bqRows, normNum, observeSelection);
-  let byNum = new Map();
-  try {
-    const { createRequire } = await import('node:module');
-    const require = createRequire(import.meta.url);
-    const loadBacklog = require(join(HERE, '..', '..', 'src', '_data', 'backlog.js'));
-    const items = typeof loadBacklog === 'function' ? loadBacklog() : [];
-    byNum = new Map(items.map((it) => [String(it.num), it]));
-  } catch (e) {
-    log(`  ⚠ could not load backlog for scope/openBlockers enrichment (${String(e.message || e).split('\n')[0]}) — items read as unshaped (no scope → held unshaped-no-scope, auto-prepared)`);
-  }
+  // Cleared-but-not-ready: RESOLVED sidecar ids with no ready build-queue row — surfaced as held entries below,
+  // never silently dropped (#2613 review, required 2b). Using `resolvedSidecar` (not the raw `sidecar`) means a
+  // stale-hash row that the bornAs index just resolved is judged by its landed NNN, not its dead hash spelling.
+  const notReady = clearedNotReady(resolvedSidecar, bqRows, normNum, observeSelection);
   const queue = rows.map((r) => {
     const it = byNum.get(String(r.num));
     return {
@@ -1000,7 +1014,11 @@ async function main(argv) {
   // entries which never reached the pure build planner.
   plan.selection = [...selection.values()];
   const notReadyKeys = new Set(notReady.map(normNum));
-  plan.cleared = sidecar.map((entry) => ({
+  // RESOLVED spelling (not the raw `sidecar`): `notReady`/`notReadyKeys` were computed off `resolvedSidecar`, so
+  // a stale-hash row that just got rewritten to its landed NNN must be looked up here by that SAME NNN — keying
+  // off the raw hash would falsely read `ready:true` for a resolved-but-genuinely-not-ready row (its hash key
+  // would miss `notReadyKeys` even though its resolved NNN is in there).
+  plan.cleared = resolvedSidecar.map((entry) => ({
     num: normNum(entry.num),
     ready: !notReadyKeys.has(normNum(entry.num)),
   }));

@@ -29,6 +29,8 @@ import {
   resolveQueueSource,
   migrateLegacyQueue,
   legacyQueueDivergence,
+  bornAsIndexFromItems,
+  resolveBornAsRefs,
 } from '../queue-store.mjs';
 import { mkdirSync, writeFileSync, utimesSync, realpathSync } from 'node:fs';
 
@@ -298,5 +300,77 @@ describe('decouple-primary-checkout — one-release legacy read + one-time migra
     const older = new Date(Date.now() - 120_000);
     utimesSync(w.legacyPath, older, older);
     expect(legacyQueueDivergence({ env: w.env, root: w.lane })).toEqual({ diverged: false, legacyPath: null });
+  });
+});
+
+describe('bornAsIndexFromItems — hash → landed-NNN lookup', () => {
+  it('maps each item\'s bornAs hash to its normalized num', () => {
+    const idx = bornAsIndexFromItems([
+      { num: '4290', bornAs: 'x34h6a2' },
+      { num: '042', bornAs: 'xQxPeac' }, // padded num + mixed-case hash both normalize
+    ]);
+    expect(idx.get('x34h6a2')).toBe('4290');
+    expect(idx.get('xqxpeac')).toBe('42');
+    expect(idx.size).toBe(2);
+  });
+
+  it('skips items with no bornAs, an empty bornAs, or no resolvable num', () => {
+    const idx = bornAsIndexFromItems([
+      { num: '1', bornAs: null },
+      { num: '2', bornAs: '' },
+      { num: '3' },
+      { bornAs: 'xabcdef' }, // no num — can't be a landed target
+    ]);
+    expect(idx.size).toBe(0);
+  });
+
+  it('first item wins a duplicate bornAs hash (tolerates the data bug rather than throwing)', () => {
+    const idx = bornAsIndexFromItems([
+      { num: '100', bornAs: 'xdupe01' },
+      { num: '200', bornAs: 'xdupe01' },
+    ]);
+    expect(idx.get('xdupe01')).toBe('100');
+  });
+
+  it('non-array input → empty map', () => {
+    expect(bornAsIndexFromItems(null).size).toBe(0);
+    expect(bornAsIndexFromItems(undefined).size).toBe(0);
+  });
+});
+
+describe('resolveBornAsRefs — self-heal stale JIT-hash rows (#4291 area)', () => {
+  it('rewrites a resolvable hash row to its landed NNN, keeping the original addedAt', () => {
+    const idx = bornAsIndexFromItems([{ num: '4290', bornAs: 'x34h6a2' }]);
+    const out = resolveBornAsRefs([{ num: 'x34h6a2', addedAt: '2026-01-01T00:00:00.000Z' }], idx);
+    expect(out).toEqual([{ num: '4290', addedAt: '2026-01-01T00:00:00.000Z' }]);
+  });
+
+  it('leaves an unresolvable id (not yet landed, or a typo) byte-identical', () => {
+    const idx = bornAsIndexFromItems([{ num: '4290', bornAs: 'x34h6a2' }]);
+    const entries = [{ num: 'xnotyet1', addedAt: null }, { num: '2613', addedAt: 'ts' }];
+    expect(resolveBornAsRefs(entries, idx)).toEqual(entries);
+  });
+
+  it('collapses a queue holding BOTH the stale hash and an independently-cleared NNN into ONE entry, keeping the first addedAt', () => {
+    const idx = bornAsIndexFromItems([{ num: '4290', bornAs: 'x34h6a2' }]);
+    const out = resolveBornAsRefs(
+      [{ num: 'x34h6a2', addedAt: 'first' }, { num: '4290', addedAt: 'second' }],
+      idx,
+    );
+    expect(out).toEqual([{ num: '4290', addedAt: 'first' }]);
+  });
+
+  it('accepts a plain-object index (not just a Map)', () => {
+    const out = resolveBornAsRefs([{ num: 'xhash01', addedAt: null }], { xhash01: '99' });
+    expect(out).toEqual([{ num: '99', addedAt: null }]);
+  });
+
+  it('non-array queue → empty array; never mutates the input array', () => {
+    const idx = bornAsIndexFromItems([{ num: '1', bornAs: 'xabc' }]);
+    expect(resolveBornAsRefs(null, idx)).toEqual([]);
+    const input = [{ num: 'xabc', addedAt: null }];
+    const out = resolveBornAsRefs(input, idx);
+    expect(input).toEqual([{ num: 'xabc', addedAt: null }]); // input untouched
+    expect(out).toEqual([{ num: '1', addedAt: null }]);
   });
 });

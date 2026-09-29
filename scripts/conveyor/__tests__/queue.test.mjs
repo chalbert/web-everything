@@ -175,3 +175,57 @@ describe('queue.mjs CLI — clearing a non-dispatchable kind (epic/decision) sti
     expect(readSidecar().map((e) => e.num)).toEqual(['90001']); // still added
   });
 });
+
+describe('queue.mjs CLI — migrate-bornas (self-heal a stale JIT-hash row, live incident 2026-09-29)', () => {
+  // The live shape: the operator cleared a card by its pre-number hash; the drain later JIT-numbered it,
+  // stamping `bornAs: <hash>` on the landed card (#2288/#2392). `migrate-bornas` reads the REAL backlog loader
+  // (`src/_data/backlog.js`, via `WE_BACKLOG_DIR` — the SAME override `dispatch-plan.mjs`/`conveyor-state.mjs`
+  // use), so the fixture card below needs to satisfy that loader's parse, not just `kindOf`'s raw frontmatter
+  // scan (hence `size`/`dateOpened`, mirroring `backlog-scoped-loader.test.mjs`'s fixture).
+  let backlogDir;
+  beforeEach(() => {
+    backlogDir = join(dir, 'we-backlog');
+    mkdirSync(backlogDir, { recursive: true });
+    writeFileSync(
+      join(backlogDir, '4290-drain-daemon-starved.md'),
+      '---\nkind: story\nsize: 1\nstatus: open\ndateOpened: "2026-09-01"\nbornAs: x34h6a2\n---\n\n# Fix\n\nbody.\n',
+    );
+  });
+
+  const runBornAs = (args) =>
+    execFileSync('node', [CLI, ...args], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, CONVEYOR_QUEUE_FILE: SIDECAR, WE_BACKLOG_DIR: backlogDir, CONVEYOR_NO_KIND_CHECK: '1', CONVEYOR_NO_READY_CHECK: '1' },
+    });
+
+  it('dry-run reports the rewrite without touching the sidecar; a real run applies it', () => {
+    runBornAs(['add', 'x34h6a2', '--json']);
+    expect(readSidecar().map((e) => e.num)).toEqual(['x34h6a2']);
+
+    const dry = JSON.parse(runBornAs(['migrate-bornas', '--dry-run', '--json']));
+    expect(dry.ok).toBe(true);
+    expect(dry.dryRun).toBe(true);
+    expect(dry.resolved).toEqual([{ from: 'x34h6a2', to: '4290' }]);
+    expect(readSidecar().map((e) => e.num)).toEqual(['x34h6a2']); // unchanged — dry-run never writes
+
+    const real = JSON.parse(runBornAs(['migrate-bornas', '--json']));
+    expect(real.resolved).toEqual([{ from: 'x34h6a2', to: '4290' }]);
+    expect(readSidecar().map((e) => e.num)).toEqual(['4290']); // rewritten on disk
+  });
+
+  it('is idempotent — a second run against an already-resolved queue reports nothing to migrate', () => {
+    runBornAs(['add', 'x34h6a2', '--json']);
+    runBornAs(['migrate-bornas', '--json']);
+    const again = JSON.parse(runBornAs(['migrate-bornas', '--json']));
+    expect(again.resolved).toEqual([]);
+    expect(readSidecar().map((e) => e.num)).toEqual(['4290']);
+  });
+
+  it('a hash with no landed card yet (or a genuine typo) is left alone', () => {
+    runBornAs(['add', 'xnotyet1', '--json']);
+    const out = JSON.parse(runBornAs(['migrate-bornas', '--json']));
+    expect(out.resolved).toEqual([]);
+    expect(readSidecar().map((e) => e.num)).toEqual(['xnotyet1']);
+  });
+});

@@ -128,6 +128,57 @@ export function serializeQueue(queue) {
   return JSON.stringify(Array.isArray(queue) ? queue : [], null, 2) + '\n';
 }
 
+/**
+ * Build a HASH → landed-NNN lookup from backlog items (each `{num, bornAs}`), keyed by {@link normNum}. Pure —
+ * no fs. The drain JIT-numbers a cleared card the moment its WE half lands (#2288), stamping the pre-number
+ * hash it was cut under into the numbered card's `bornAs:` frontmatter (#2392) — that durable, cross-clone
+ * record is the ONE link between the two spellings, and it never changes again once stamped. First item wins a
+ * hash (each hash mints exactly one card in practice; a duplicate `bornAs` would be a data bug — flagged by
+ * `check-standards-rules.mjs#duplicateBornAs` — this index tolerates it silently rather than throwing, like
+ * every other bornAs reader in this repo).
+ * @param {Array<{num?:*, bornAs?:*}>} items
+ * @returns {Map<string,string>} normalized bornAs hash → normalized landed num
+ */
+export function bornAsIndexFromItems(items) {
+  const idx = new Map();
+  for (const it of (Array.isArray(items) ? items : [])) {
+    const hash = normNum(it?.bornAs);
+    if (hash === '' || idx.has(hash)) continue;
+    const num = normNum(it?.num);
+    if (num === '') continue;
+    idx.set(hash, num);
+  }
+  return idx;
+}
+
+/**
+ * SELF-HEAL a queue's stale JIT-hash rows (#4291 area, "queue starves the builder"): the drain JIT-numbers a
+ * CLEARED card the instant its WE half lands, but the sidecar the operator cleared it into still holds the
+ * pre-number hash — every membership test in this file is an EXACT `normNum` match, so a stale hash row reads
+ * as "cleared, but no matching ready row" FOREVER even once the card is numbered and ready (the "cleared but
+ * not ready" hold that never clears itself is the exact bug this fixes). Rewrites each entry whose normalized
+ * `num` is a key in `bornAsIndex` to that hash's landed NNN, keeping the entry's ORIGINAL `addedAt` — the
+ * FIRST clear's timestamp survives the rename, never refreshed. An entry that doesn't resolve (not a JIT hash,
+ * or a hash `bornAsIndex` has no record of yet) passes through byte-identical. Rewriting through
+ * {@link addToQueue} means a queue that independently holds BOTH the stale hash row and an NNN row for the
+ * same landed card collapses to ONE entry (idempotent dedup, keeping whichever `addedAt` was added first) —
+ * never a duplicate. Pure; called by both the readiness reader (resolve-at-read-time) and `queue.mjs
+ * migrate-bornas` (the one-shot on-disk rewrite) so the two never disagree on what a hash resolves to.
+ * @param {Array<{num:string, addedAt:(string|null)}>} queue
+ * @param {Map<string,string>|Record<string,string>} bornAsIndex  normalized hash → normalized/landed num
+ *   ({@link bornAsIndexFromItems})
+ * @returns {Array<{num:string, addedAt:(string|null)}>} a NEW array (never mutates the input)
+ */
+export function resolveBornAsRefs(queue, bornAsIndex) {
+  const idx = bornAsIndex instanceof Map ? bornAsIndex : new Map(Object.entries(bornAsIndex || {}));
+  let out = [];
+  for (const e of (Array.isArray(queue) ? queue : [])) {
+    const resolved = idx.get(normNum(e?.num));
+    out = addToQueue(out, resolved != null ? resolved : e?.num, e?.addedAt ?? null);
+  }
+  return out;
+}
+
 // ── THIN FS SHELL (the boundary — used by the CLI + the readiness shells that read the cleared set) ───────────
 
 // The repo root resolved by SCRIPT LOCATION (this file is scripts/conveyor/queue-store.mjs → root is two up).
