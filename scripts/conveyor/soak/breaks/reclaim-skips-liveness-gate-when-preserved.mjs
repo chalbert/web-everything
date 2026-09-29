@@ -40,8 +40,16 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { runSoak } from '../soak.mjs';
 
+/** Hermetic commit identity — a CI runner has no global `user.name`/`user.email`, so `git commit` would abort. */
+const GIT_IDENTITY_ENV = {
+  GIT_AUTHOR_NAME: 'Sim World', GIT_AUTHOR_EMAIL: 'sim@example.com',
+  GIT_COMMITTER_NAME: 'Sim World', GIT_COMMITTER_EMAIL: 'sim@example.com',
+};
+
 function git(cwd, args) {
-  return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  return execFileSync('git', ['-c', 'commit.gpgsign=false', ...args], {
+    cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...GIT_IDENTITY_ENV },
+  }).trim();
 }
 
 /** A fake `claude` (agents listing) + `lsof` (no live pids) pair on one bin dir, so the gate's reads are fully
