@@ -102,14 +102,14 @@ Done-when.
 
 ## Follow-ups
 
-Filed we:backlog/xvou4u3-harden-needs-prepare-prepareddate-validation-calendar-aware.md — a converge round-2
+Filed we:backlog/4505-harden-needs-prepare-prepareddate-validation-calendar-aware.md — a converge round-2
 panel (correctness/security/standards-conformance) found the `YYYY-MM-DD` format check accepts a
 calendar-impossible date (`2026-13-45`) and could mis-hold a genuinely prepared card if a loader ever parsed an
 unquoted date into a `Date` object; also, the equivalent check is duplicated in spirit (never structurally)
 across we:backlog.mjs's `prepare-stamp`, we:scripts/readiness/engine.mjs's `prepared` derivation, and this gate.
 Fix: one shared `isPreparedDate()` helper, calendar-aware and `Date`-safe.
 
-Filed we:backlog/xr7qn83-spawn-a-full-prepare-agent-for-needs-prepare-holds-design-mv.md (`blockedBy: 4470`) —
+Filed we:backlog/4504-spawn-a-full-prepare-agent-for-needs-prepare-holds-design-mv.md (`blockedBy: 4470`) —
 actually SPAWNING a dedicated "prepare" agent for a `needs-prepare` hold (the card's fuller "dispatched as a
 PREPARE job instead" language). The existing `prepare` job kind (`spawnPrepareScope` /
 we:skills-src/conveyor/prepare-scope-agent-brief.md) only authors a missing `scope:` — a narrow, mechanical,

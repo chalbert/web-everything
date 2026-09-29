@@ -79,10 +79,10 @@ after).
 ## Progress
 
 **Premise check (2026-09-29, conveyor-4379): already done on `main` before this card was JIT-numbered.**
-This card was born as `x4ua3v8`. The fix it describes landed directly under that hash-id, in two
+This card was born as `4379`. The fix it describes landed directly under that hash-id, in two
 commits already on `main` — no `--repo` code change was needed here:
 
-- `467349c87` — `we:backlog/x4ua3v8 - promote-draft-pr-dispatch: pass --repo explicitly (fix
+- `467349c87` — `we:backlog/4379 - promote-draft-pr-dispatch: pass --repo explicitly (fix
   cwd-inferred cross-repo PR bug)`. Added `buildReadyArgs(pr, repo)` / threaded `repo` through
   `createDraftPromoteProvider` (`we:scripts/lib/draft-promote-provider.mjs`) and
   `runReconcilePromoteDraftDispatch` (`we:scripts/operations/promote-draft-pr-dispatch.mjs`) — the exact
@@ -90,7 +90,7 @@ commits already on `main` — no `--repo` code change was needed here:
   above is `git merge-base --is-ancestor`-verified reachable from it). The extended
   `we:scripts/lib/__tests__/draft-promote-provider.test.mjs` on `main` covers the same two cases this
   card's `## Tests` section describes (the `--repo`-appending case and the byte-identical omitted case).
-- `bc5693278` — `we:backlog/x4ua3v8 - promote-draft-cross-repo: add the owed soak break (author
+- `bc5693278` — `we:backlog/4379 - promote-draft-cross-repo: add the owed soak break (author
   continuation, PR #2880)`. Closed the daemon-behaviour-change soak-break obligation the mocked unit
   tests alone didn't cover (added `we:scripts/conveyor/soak/breaks/promote-draft-cross-repo.mjs`, proven
   red-before/green-after against the real live-incident failure text).
