@@ -76,6 +76,8 @@
  * codified in a sibling statute PR).
  */
 
+import { getCachedVerdict, recordVerdicts, readAlreadyDoneCacheState, writeAlreadyDoneCacheState,
+  ALREADY_DONE_NOT_DONE_COOLDOWN_MS, ALREADY_DONE_DONE_COOLDOWN_MS } from './already-done-cache.mjs';
 import { scopesOverlap, normScope } from './scope-lease.mjs';
 import { isGroupingKind } from '../check-standards-rules.mjs';
 import { writeLineSync } from '../lib/write-all-sync.mjs';
@@ -901,6 +903,8 @@ async function main(argv) {
   //     filters to not-yet-resolved rows, so a resolved-but-still-cleared item never reaches `queue` at all;
   //     see this file's own header and #3460's live acceptance case). Skipped entirely when `--no-ground-truth`
   //     is passed (mirrors the sibling session-reaper fix's own rollback escape hatch) or `gh` cannot run.
+  //     Per-item cooldowns in already-done-cache.mjs reuse successful verdicts across ticks (30 min for
+  //     not-done, 24h for done). `--no-already-done-cache` bypasses ALL cache reads/writes for a fresh sweep.
   // `notReady` id (normalized, string-keyed) → the merged PR the ground-truth pass found for it, when it did.
   // Kept separate from `queue` rows because a `cleared-but-not-ready` id has no row of its own to carry a
   // field on — it is appended to `plan.held` as a bare id further down, past `dispatchPlan` itself.
@@ -910,24 +914,51 @@ async function main(argv) {
     const nowMs = Date.now();
     const staleQueueRows = queue.filter((row) => isStaleEnoughForGroundTruth(byNum.get(String(row.num)), nowMs));
     const staleNotReadyIds = notReady.filter((id) => isStaleEnoughForGroundTruth(byNum.get(String(id)), nowMs));
-    // CONCURRENT, not sequential (epic #3383, live incident 2026-09-04) — a plain `for` loop paid one `gh pr
-    // list` round-trip PER stale id, one at a time; with the queue at 69 entries (most past the 2h age gate)
-    // that pushed a single dispatch-plan tick past 60-140s, starving the conveyor runner's own ~120s tick
-    // budget. `defaultCheckAlreadyDoneAsync` uses `execFile` (non-blocking) instead of `execFileSync`, so
-    // every stale id's round-trip now runs in parallel. Same fail-soft contract, same query shape, same
-    // matcher — only the concurrency changed.
+    const useCache = !flags['no-already-done-cache'];
+    const cacheState = useCache ? readAlreadyDoneCacheState() : null;
+    // Unset/blank/non-numeric overrides fall back; zero forces rechecks on every tick.
+    const cooldownMs = (env, fallback) => env?.trim() && Number(env) >= 0 ? Number(env) : fallback;
+    const cacheOptions = {
+      notDoneCooldownMs: cooldownMs(process.env.WE_DISPATCH_PLAN_ALREADY_DONE_NOT_DONE_COOLDOWN_MS, ALREADY_DONE_NOT_DONE_COOLDOWN_MS),
+      doneCooldownMs: cooldownMs(process.env.WE_DISPATCH_PLAN_ALREADY_DONE_DONE_COOLDOWN_MS, ALREADY_DONE_DONE_COOLDOWN_MS),
+    };
+    const queueMisses = staleQueueRows.filter((row) => {
+      const verdict = useCache ? getCachedVerdict(cacheState, row.num, nowMs, cacheOptions) : null;
+      if (verdict?.done && verdict.pr) row.alreadyDonePr = verdict.pr;
+      return verdict === null;
+    });
+    const notReadyMisses = staleNotReadyIds.filter((id) => {
+      const verdict = useCache ? getCachedVerdict(cacheState, id, nowMs, cacheOptions) : null;
+      if (verdict?.done && verdict.pr) alreadyDoneNotReady.set(String(id), verdict.pr);
+      return verdict === null;
+    });
+    // CONCURRENT submission, not a sequential await loop (epic #3383, live incident 2026-09-04) — the
+    // original sequential round-trips pushed a 69-item tick past 60-140s, starving the ~120s tick budget.
+    // The checker now bounds/attributes its calls through gh-throttle (#4415); the cooldown additionally
+    // limits submissions to cache misses. Same fail-soft contract, query shape, and matcher.
     const [queueVerdicts, notReadyVerdicts] = await Promise.all([
-      Promise.all(staleQueueRows.map((row) => defaultCheckAlreadyDoneAsync(row.num))),
-      Promise.all(staleNotReadyIds.map((id) => defaultCheckAlreadyDoneAsync(id))),
+      Promise.all(queueMisses.map((row) => defaultCheckAlreadyDoneAsync(row.num))),
+      Promise.all(notReadyMisses.map((id) => defaultCheckAlreadyDoneAsync(id))),
     ]);
-    staleQueueRows.forEach((row, i) => {
+    const verdictsById = new Map();
+    queueMisses.forEach((row, i) => {
       const verdict = queueVerdicts[i];
       if (verdict.done && verdict.pr) row.alreadyDonePr = verdict.pr;
+      verdictsById.set(row.num, verdict);
     });
-    staleNotReadyIds.forEach((id, i) => {
+    notReadyMisses.forEach((id, i) => {
       const verdict = notReadyVerdicts[i];
       if (verdict.done && verdict.pr) alreadyDoneNotReady.set(String(id), verdict.pr);
+      verdictsById.set(id, verdict);
     });
+    // The cache write is an OPTIMIZATION, not a correctness requirement — fail-soft on it exactly like every
+    // other best-effort read/write in this pass (the read above already fails open inside
+    // `readAlreadyDoneCacheState`). An unwritable `.conveyor` (read-only checkout, full disk, permissions)
+    // must never take down a whole dispatch-plan tick just because it could not persist a cooldown hint; the
+    // next tick simply re-checks the same items, same as it always has.
+    if (useCache) {
+      try { writeAlreadyDoneCacheState(recordVerdicts(cacheState, verdictsById, nowMs)); } catch { /* best-effort */ }
+    }
   }
 
   // 2. THE ACTIVE LEASES — reuse the live scope-lease collector. Each lease's held scope = predicted ∪ observed.
