@@ -43,7 +43,7 @@ function log(entry) { if (process.env.GH_CALL_LOG) fs.appendFileSync(process.env
 if (a[0] === 'repo' && a[1] === 'view') { process.stdout.write('main'); process.exit(0); }
 if (a[0] === 'pr' && a[1] === 'list') {
   log({ argv: a });
-  const all = JSON.parse(process.env.GH_FIXTURE_PRS || '[]');
+  const all = JSON.parse(process.env.GH_FIXTURE_PRS_FILE ? fs.readFileSync(process.env.GH_FIXTURE_PRS_FILE, 'utf8') : (process.env.GH_FIXTURE_PRS || '[]'));
   const limitIdx = a.indexOf('--limit');
   const limit = limitIdx >= 0 ? Number(a[limitIdx + 1]) : all.length;
   // fs.writeSync (never process.stdout.write + process.exit) — a large payload's async pipe write can be
@@ -216,7 +216,13 @@ describe('merge-ai-prs CLI — #4108 one `gh pr list` per repo per pass (RECONCI
 
   it('the reused-listing fixture (500+ open PRs) still reaches the escalated OPEN_PR_LIST_LIMIT page and trips the candidate-side DEGRADED warning — sizing/escalation is unaffected by reuse', () => {
     const all = Array.from({ length: OPEN_PR_LIST_LIMIT + 1 }, (_, i) => openPr(10000 + i, { labeled: i === 0 }));
-    const r = runCli([], { GH_FIXTURE_PRS: JSON.stringify(all) });
+    // Handed over as a FILE, never the GH_FIXTURE_PRS env var: 501 PRs serialize to ~135 KB, past Linux's
+    // 128 KB per-string MAX_ARG_STRLEN, so on the (Linux) CI runner the spawn itself failed E2BIG (status null)
+    // while passing on macOS, which has no per-string cap.
+    const fixtureFile = join(dirname(callLog), 'fixture-prs.json');
+    writeFileSync(fixtureFile, JSON.stringify(all));
+    const r = runCli([], { GH_FIXTURE_PRS_FILE: fixtureFile });
+    expect(r.error).toBeUndefined();
     expect(r.status).toBe(0);
     expect(r.stderr).toMatch(/DEGRADED drain listing/);
     // the sized-then-escalate retry is the SAME single logical listing (not two independent gh pr list
