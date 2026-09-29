@@ -321,6 +321,37 @@ describe('backlog.mjs CLI — ephemeral-clone integration smoke (#2273/#2274)', 
   });
 });
 
+// #4308 — the sanctioned CLI verb for the drain's TRACKED (never git-ignored) land-time overlap-yield
+// settings file. `WE_SCRIPTS_DIR/drain-overlap-yield-config.json` was copied wholesale into the clone by
+// `cpSync` above, so `--show` here reads the REAL shipped default (`enabled:true, windowMinutes:45`).
+describe('backlog.mjs CLI — overlap-yield-config (#4308)', () => {
+  const configPath = () => join(clone, 'scripts', 'drain-overlap-yield-config.json');
+
+  it('--show reads the shipped default (enabled:true, windowMinutes:45)', () => {
+    const res = run(['overlap-yield-config', '--show']);
+    expect(res.code).toBe(0);
+    expect(res.json.config).toEqual({ enabled: true, windowMinutes: 45 });
+  });
+
+  it('--set-window=<n> persists just that field, never merged/overwritten silently', () => {
+    expect(run(['overlap-yield-config', '--set-window=20']).code).toBe(0);
+    expect(JSON.parse(readFileSync(configPath(), 'utf8'))).toEqual({ enabled: true, windowMinutes: 20 });
+    expect(run(['overlap-yield-config', '--set-enabled=false']).code).toBe(0);
+    // enabled flips; the window just set is UNTOUCHED (a read-modify-write, not a fresh default overwrite).
+    expect(JSON.parse(readFileSync(configPath(), 'utf8'))).toEqual({ enabled: false, windowMinutes: 20 });
+    // restore for any later test in this file that assumes the shipped default.
+    expect(run(['overlap-yield-config', '--set-enabled=true', '--set-window=45']).code).toBe(0);
+  });
+
+  it('a non-positive/non-numeric --set-window is refused — exit 1, file untouched', () => {
+    const before = readFileSync(configPath(), 'utf8');
+    expect(run(['overlap-yield-config', '--set-window=0']).code).toBe(1);
+    expect(run(['overlap-yield-config', '--set-window=abc']).code).toBe(1);
+    expect(readFileSync(configPath(), 'utf8')).toBe(before);
+  });
+
+});
+
 // #2747 — the deliverable is that the REAL CLI stamps the OPERATOR's calendar day, not the runtime's UTC
 // day. The assertions above cannot prove that on a UTC host (CI), where the two agree. This block pins
 // the CLI's stamp under two zones held 25 hours apart, so their calendar days ALWAYS differ, at every

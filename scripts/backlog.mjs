@@ -58,6 +58,7 @@ import { BACKLOG_KINDS } from './check-standards-rules.mjs';
 import { numberPendingHashes, landedNumberFor } from './lane-drain.mjs';
 import { laneGuardDecision, resolveReal, isLaneLocus } from './guard-lane.mjs';
 import { TIERS, rankBetween, DEFAULT_CONFIG, validateConfig, orderQueueDetailed } from './lib/build-queue.mjs';
+import { loadOverlapYieldConfig, writeOverlapYieldConfig, defaultOverlapYieldConfigPath } from './conveyor/land-overlap-yield.mjs';
 import { localToday } from './lib/local-date.mjs';
 import { writeLineSync } from './lib/write-all-sync.mjs';
 import { writeBacklogMd as writeBacklogMdCore, writeBacklogMdUnguarded as writeBacklogMdUnguardedCore } from './backlog/guarded-write.mjs';
@@ -1012,6 +1013,49 @@ function weights() {
 }
 
 /**
+ * overlap-yield-config [--show] | --set-enabled=<true|false> | --set-window=<minutes> — the ONE sanctioned
+ * editor for the TRACKED (#4308, never git-ignored — unlike `weights`' `build-queue-config.json`) drain
+ * land-time overlap-yield settings (`we:scripts/drain-overlap-yield-config.json`, `{enabled, windowMinutes}`).
+ * Strictly validated on write (`enabled` boolean, `windowMinutes` a finite number > 0) — an invalid edit is
+ * refused, nothing is written; `--set-enabled` accepts ONLY the literal strings `true`/`false` — anything else
+ * (`yes`, `1`, `TRUE`) is a usage error, never a silent fall-through to `--show` (2026-09-29 review finding).
+ * Attempts a per-file lock around the read-modify-write (`we:scripts/readiness/file-locks.mjs`, via
+ * `writeOverlapYieldConfig`) — never a bare `writeFileSync` — but DEGRADES to an unlocked write when the lock
+ * cannot be acquired (mirrors `we:scripts/lib/target-registry.mjs#appendRegistryEntry`'s own `unlocked: true`
+ * convention); the printed result says so plainly rather than claiming a concurrent writer was ruled out.
+ * Lane-gated exactly like `weights`: this tracked file must never be spliced onto the shared PRIMARY checkout.
+ */
+function overlapYieldConfig() {
+  const path = defaultOverlapYieldConfigPath();
+  const setEnabledFlag = argv.find((a) => a.startsWith('--set-enabled='));
+  const windowFlag = argv.find((a) => a.startsWith('--set-window='));
+  if (argv.includes('--show') || (!setEnabledFlag && !windowFlag)) {
+    const cfg = loadOverlapYieldConfig({ path, warn: (msg) => process.stderr.write(`${msg}\n`) });
+    return ok({ verb: 'overlap-yield-config', config: cfg },
+      `${BLD}drain overlap-yield config${RST}\n  enabled: ${cfg.enabled}\n  windowMinutes: ${cfg.windowMinutes}`);
+  }
+  const patch = {};
+  if (setEnabledFlag) {
+    const raw = setEnabledFlag.slice('--set-enabled='.length);
+    if (raw !== 'true' && raw !== 'false') die(`--set-enabled expects "true" or "false", got "${raw}"`);
+    patch.enabled = raw === 'true';
+  }
+  if (windowFlag) {
+    const raw = windowFlag.slice('--set-window='.length);
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n <= 0) die(`--set-window expects a positive number of minutes, got "${raw}"`);
+    patch.windowMinutes = n;
+  }
+  if (laneGuardDecision(resolveReal(dirname(path)), ROOT)) {
+    die(`overlap-yield config mutation BLOCKED — "${path}" resolves under the shared PRIMARY checkout; run it in a lane clone, never primary (#2302/#2339/#4308). No override.`);
+  }
+  const result = writeOverlapYieldConfig({ path, patch, owner: `backlog.mjs:${process.pid}` });
+  if (!result.ok) die(`refused — the config would be invalid: ${result.errors.join('; ')}`);
+  ok({ verb: 'overlap-yield-config', config: result.config, locked: result.locked },
+    `${GRN}✓ overlap-yield config updated${RST} ${DIM}enabled=${result.config.enabled} windowMinutes=${result.config.windowMinutes}${result.locked ? '' : ' (lock unavailable — wrote unlocked; a concurrent writer may have raced this edit)'}${RST}`);
+}
+
+/**
  * build-queue [--json] [--next] — READ the ordered build queue (epic #2527): every READY item in the exact
  * order the autonomous builder would pull them (tier → effectiveScore → rank → dateOpened → num), each row
  * annotated with WHY it ranks there (build-queue tier + score). PURE READ — nothing on disk changes; the
@@ -1289,6 +1333,7 @@ switch (verb) {
   case 'tier': tier(); break;
   case 'rank': rank(); break;
   case 'weights': weights(); break;
+  case 'overlap-yield-config': overlapYieldConfig(); break;
   case 'build-queue':
     (positional[0] === 'add' || positional[0] === 'remove') ? buildQueueMark(positional[0]) : buildQueue();
     break;
@@ -1316,6 +1361,7 @@ switch (verb) {
       `  ${GRN}tier${RST} <NNN> --to=pinned|normal|someday|won't [--clear]   set the build-queue TIER (#2528, the coarse ordering bucket); frontmatter-only\n` +
       `  ${GRN}rank${RST} <NNN> --to=<key> | --after=<NNN> [--before=<NNN>]   set the build-queue LexoRank (#2528, manual drag-order within a tier)\n` +
       `  ${GRN}weights${RST} [--show] | --set=<key>=<n>   read/edit the build-queue scoring config (#2528; validated: sum 100, ≤5, none >50%)\n` +
+      `  ${GRN}overlap-yield-config${RST} [--show] | --set-enabled=<true|false> | --set-window=<minutes>   read/edit the drain's land-time overlap-yield settings (#4308; tracked file, validated, lock-serialized)\n` +
       `  ${GRN}yield${RST} <NNN-slug>            move a LOCAL-ONLY NNN collision to the next free number (refuses a git-tracked item; NNN is immutable)\n` +
       `  ${GRN}number-stranded${RST} [--dry-run]      number every TRACKED hash-id backlog file in this checkout (a hash that reached main via a numbering-bypassing land; #2319/#2288)\n` +
       `  ${GRN}scaffold${RST} --kind=story|epic|task|decision|feature --size= --title= [--digest=] [--blocked-by=] [--parent=] [--session=<slug>]   --session ⇒ born active+owned (#670), publish with settle\n` +

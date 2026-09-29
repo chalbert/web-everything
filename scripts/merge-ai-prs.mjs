@@ -61,6 +61,17 @@
  * poll. `--max-idle=N` bounds the follow: after N consecutive passes that merge nothing AND have nothing left
  * deferred, the watch exits 0 (an unbounded `--watch` runs until Ctrl-C). This retires the `queued.json` poll —
  * the label lander is now the single collection point for ALL producer output (`/workflow`, `/pr`, solo lanes).
+ * A pass waiting ONLY on a timed overlap-yield (below) never counts as idle — it may still clear by polling.
+ *
+ * OVERLAP-YIELD (#4308 — the land-time complement of #4295): a ready PR X HOLDS for a bounded window when a
+ * LARGER PR Y touching the same file(s) is already open, in review, on the same base. Settings-driven
+ * (`we:scripts/drain-overlap-yield-config.json`, `{enabled, windowMinutes}`, edited only via `node
+ * scripts/backlog.mjs overlap-yield-config`), on by default (a trial). One-off overrides, never persisted:
+ *   node scripts/merge-ai-prs.mjs --label=ready-to-merge --overlap-yield            # force-enable for this run
+ *   node scripts/merge-ai-prs.mjs --label=ready-to-merge --no-overlap-yield         # force-disable for this run
+ *   node scripts/merge-ai-prs.mjs --label=ready-to-merge --overlap-yield-window=20  # override the window (minutes)
+ * (also `WE_DRAIN_OVERLAP_YIELD=1|0`; a CLI flag beats the env var; `--overlap-yield`+`--no-overlap-yield`
+ * together, or a non-`0`/`1` env value, is a usage error.) See `we:scripts/conveyor/land-overlap-yield.mjs`.
  *
  * Usage:
  *   node scripts/merge-ai-prs.mjs --dry-run            # list every open PR + the merge/skip verdict, merge NOTHING
@@ -164,6 +175,7 @@ import { ensureFreshGithubAppEnv } from './lib/github-app-auth-env.mjs';
 // x2e120n — per-step pass timing ("why so slow", the resident drain daemon's history.jsonl carried only a
 // pass's TOTAL ms, no breakdown). See pass-timings.mjs's own header for the full shape/rationale.
 import { createStepTimer, formatTimingsSummary, PASS_STEP_ORDER } from './lib/pass-timings.mjs';
+import { computeOverlapContext, parseOverlapYieldOverrides, isExemptItem, overlapRowKey } from './conveyor/land-overlap-yield.mjs'; // #4308 — the land-time overlap-yield planner (see planLabelDrain's own `overlapContext` param)
 export { remoteManifestApiArgs };
 
 // #2414 — the local, machine-scoped FIRST-DRAIN-SIGHTING manifest baseline the land-time tamper gate diffs a
@@ -1761,6 +1773,63 @@ export function narrowPrsByRepo(listings, { onlyPr = null, onlyRepo = null, repo
   return out;
 }
 
+/** #4308 — GitHub's own files-connection page size a listing was fetched with is not independently known at the
+ *  row level, so a PR whose `files` array is AT this conservative cap is read as "maybe truncated ⇒ unknown"
+ *  (rule 2 — an unknown file list never yields, the safe direction), never trusted as complete. */
+const OVERLAP_FILES_PAGE_CAP = 100;
+
+/**
+ * #4308 — build the pure `land-overlap-yield.mjs` module's row shape for both the X side (`candidates`, this
+ * pass's still-in-play PRs) and the Y side (every open PR the pass-START listing shows) from data ALREADY
+ * fetched this pass (`verdicts` + `openPrContext.prsByRepo`) — no extra `gh pr list` call. `mergedPrKeys`
+ * excludes any PR already merged EARLIER in this same cascade: `openPrContext.prsByRepo` is a pass-START
+ * snapshot (the same staleness #3004's own docblock names), so without this a candidate could "yield" to a Y
+ * that is no longer actually open. Exported ONLY for its own unit test — this is the ONE production wiring seam (runCli), mirroring
+ * how `buildDrainVerdicts` is the one verdict-building seam.
+ *
+ * `localSlug` NORMALIZES every row's `repo` to `repo || localSlug` (2026-09-29 review finding): the LOCAL repo
+ * can be keyed `null` in `openPrContext.prsByRepo` (a single-repo / `--this-repo` sweep), but
+ * `readyToMergeLabelTimeMs` needs a real `owner/name` slug to call `gh api repos/<slug>/issues/<num>/events` —
+ * a `null` repo there returns `null` (no slug to call), which `computeOverlapContext` reads as "cannot compute
+ * a budget" and marks the candidate exempt, silently disabling the feature for every LOCAL-repo candidate. Every
+ * key this function builds (and every key a caller matches against its returned rows) MUST go through
+ * {@link overlapRowKey} on an ALREADY-normalized row — never re-inline the `${repo||''}#${num}` template.
+ * @returns {{candidateRows:object[], openPrRows:object[]}}
+ */
+export function buildOverlapRows({ candidates, verdicts, openPrContext, mergedPrKeys = new Set(), localSlug = null } = {}) {
+  const verdictByKey = new Map();
+  for (const v of (Array.isArray(verdicts) ? verdicts : [])) verdictByKey.set(overlapRowKey({ repo: v.repo || localSlug, number: v.num }), v);
+  const rowsByKey = new Map();
+  if (openPrContext?.prsByRepo instanceof Map) {
+    for (const [repo, prs] of openPrContext.prsByRepo) {
+      const normalizedRepo = repo || localSlug || null;
+      for (const p of (Array.isArray(prs) ? prs : [])) {
+        if (!p || p.number == null) continue;
+        const key = overlapRowKey({ repo: normalizedRepo, number: p.number });
+        if (mergedPrKeys.has(key)) continue;
+        const v = verdictByKey.get(key);
+        const files = Array.isArray(p.files) ? p.files : [];
+        rowsByKey.set(key, {
+          number: p.number, repo: normalizedRepo, baseRefName: p.baseRefName ?? null, isDraft: !!p.isDraft,
+          labels: Array.isArray(p.labels) ? p.labels : [], files, filesComplete: files.length < OVERLAP_FILES_PAGE_CAP,
+          readyAtMs: null, windowMs: null, headSha: v?.headSha ?? p.headRefOid ?? null,
+          item: v?.item ?? null, exempt: false,
+          dependsOn: new Set([...(v?.blockedBy || []), ...(v?.stackParents || [])]),
+        });
+      }
+    }
+  }
+  const openPrRows = [...rowsByKey.values()];
+  const candidateRows = [];
+  for (const c of (Array.isArray(candidates) ? candidates : [])) {
+    if (c.decision !== 'merge') continue; // only an actually-ready PR can be an X
+    const base = rowsByKey.get(overlapRowKey({ repo: c.repo || localSlug, number: c.num }));
+    if (!base) continue; // no raw listing row — should not happen for a candidate drawn from this same listing
+    candidateRows.push({ ...base, exempt: isExemptItem(c.item) });
+  }
+  return { candidateRows, openPrRows };
+}
+
 /**
  * #xc7p3q9 (Fix 4 / B12) — the narrow→classify→attach half of the pass. `narrowPrsByRepo → buildDrainVerdicts`.
  * Deliberately does NOT couple-join or build carrier health: R5 moves the couple gate to AFTER the escalation/park
@@ -1786,7 +1855,7 @@ export function prepareDrainVerdicts({ listings, repos = [], onlyPr = null, only
  * Pure.
  * @returns {{prsByRepo:Map, verdicts:Array, carrierHealth:Map, plan:{ready:Array, deferred:Array, staleLandedOpenItems:Array}}}
  */
-export function planDrainPass({ verdicts = null, listings = null, openPrContext = {}, repos = [], onlyPr = null, onlyRepo = null, readOf, requiredCheck = 'test', escalationRelief = { prs: [], passWide: false }, label = null, isLocalRepo = () => false, localSlug = null, defaultBranchOf = () => null, candidateHeldByKey = null, landedThisPass = new Set(), provenOnMain = new Set(), coupleIncomplete = new Set() } = {}) {
+export function planDrainPass({ verdicts = null, listings = null, openPrContext = {}, repos = [], onlyPr = null, onlyRepo = null, readOf, requiredCheck = 'test', escalationRelief = { prs: [], passWide: false }, label = null, isLocalRepo = () => false, localSlug = null, defaultBranchOf = () => null, candidateHeldByKey = null, landedThisPass = new Set(), provenOnMain = new Set(), coupleIncomplete = new Set(), overlapContext = null } = {}) {
   let prsByRepo = null;
   let vs = verdicts;
   if (!Array.isArray(vs)) {
@@ -1808,7 +1877,7 @@ export function planDrainPass({ verdicts = null, listings = null, openPrContext 
   // `landedThisPass` by construction and can never change an answer: the tests would pass (they hand-seed the set)
   // while production behaviour stayed byte-identical. The live derivation belongs in the CASCADE, against refs
   // that ACTUALLY merged — see `deriveCoupleIncomplete`. The disjointness/reachability test pins this.
-  const plan = planLabelDrain(vs, { landedThisPass, provenOnMain, coupleIncomplete, extraOpenItems: ctx.openItems, contextComplete: !!ctx.contextComplete, isWeRepo: isLocalRepo });
+  const plan = planLabelDrain(vs, { landedThisPass, provenOnMain, coupleIncomplete, extraOpenItems: ctx.openItems, contextComplete: !!ctx.contextComplete, isWeRepo: isLocalRepo, overlapContext, overlapLocalSlug: localSlug });
   return { prsByRepo, verdicts: vs, carrierHealth, plan };
 }
 
@@ -1895,10 +1964,10 @@ export function isConfirmSweepSettled({ merged = 0, pendingRebased = 0, consider
  * orphan the per-carrier gate structurally misses (an unreadable/unlisted carrier has no `manifestRefs` to key a
  * join on). #xc7p3q9 (R2) — a verdict's `waitOn` is NEVER allowed to name its OWN item (a self-referential wait is
  * structurally unsatisfiable — the livelock); such an edge is stripped.
- * @param {{landedThisPass?:Set, provenOnMain?:Set, coupleIncomplete?:Set, extraOpenItems?:Iterable<number|string>, contextComplete?:boolean, isWeRepo?:function}} [proof]  the proof bag: positive proof-of-land sets plus (#3004) the NEGATIVE `coupleIncomplete` counter-evidence set (all `asItemId`-keyed)
+ * @param {{landedThisPass?:Set, provenOnMain?:Set, coupleIncomplete?:Set, extraOpenItems?:Iterable<number|string>, contextComplete?:boolean, isWeRepo?:function, overlapContext?:(Map|null), overlapLocalSlug?:(string|null)}} [proof]  the proof bag: positive proof-of-land sets plus (#3004) the NEGATIVE `coupleIncomplete` counter-evidence set (all `asItemId`-keyed). `overlapContext` (#4308) is `null` (every caller/test before #4308, unchanged behaviour) or a PRECOMPUTED `Map<string,{yieldTo,repo,files,untilMs,windowMinutes}>` keyed by `we:scripts/conveyor/land-overlap-yield.mjs#overlapRowKey` (`` `${repo||''}#${num}` `` — never a bare PR number, which collides across repos) — the caller's IO layer (`computeOverlapContext`) builds it fresh every planning pass (#4308 Window "read fresh at the start of every planning pass"); this function only ever CONSUMES it, never fetches it. `overlapLocalSlug` MUST be the same `localSlug` the caller's `buildOverlapRows` normalized every row's `repo` with (2026-09-29 review finding) — a candidate's own `c.repo` can be `null` for the local repo while the Map's keys were built against the normalized slug; omitting this reintroduces the exact key mismatch that silently disabled the feature for every local-repo candidate.
  * @returns {{ready:Array, deferred:Array<{num,item,waitOn:Array<number|string>}>, staleLandedOpenItems:Array<number|string>}}  ready is ordered (item asc, then PR#); staleLandedOpenItems = items proven landed yet still named by an open PR (#999/xq985wu F2 stale-PR diagnostic).
  */
-export function planLabelDrain(candidates, { landedThisPass = new Set(), provenOnMain = new Set(), coupleIncomplete = new Set(), extraOpenItems = null, contextComplete = true, isWeRepo = () => false } = {}) {
+export function planLabelDrain(candidates, { landedThisPass = new Set(), provenOnMain = new Set(), coupleIncomplete = new Set(), extraOpenItems = null, contextComplete = true, isWeRepo = () => false, overlapContext = null, overlapLocalSlug = null } = {}) {
   const list = Array.isArray(candidates) ? candidates : [];
   // Every candidate still in play keeps its item "open" — a red/skip blocker must still defer its dependents,
   // so the open set is ALL candidate items, not just the mergeable ones. (A merged item is removed by the
@@ -1978,6 +2047,11 @@ export function planLabelDrain(candidates, { landedThisPass = new Set(), provenO
     // INHERITED — item), so the self-wait strip below cannot erase a genuine couple defer while it still removes a
     // literal self-referential edge.
     const coupleWait = coupleDeferred ? [`couple-carrier:${c.coupleCarrier?.num ?? c.coupleCarrier?.item ?? 'unknown'}`] : [];
+    // #4308 — the land-time overlap-yield wait: `overlapContext` is a precomputed Map (see this function's own
+    // docblock) keyed `` `${repo||''}#${num}` `` (never a bare `c.num` — cross-repo PR-number collision). A miss
+    // (the common case: not enabled, no candidates overlap, or this one lost the trial pass) is simply no wait.
+    const overlapEntry = overlapContext instanceof Map ? overlapContext.get(overlapRowKey({ repo: c.repo || overlapLocalSlug, number: c.num })) : null;
+    const overlapWait = overlapEntry ? [`overlap-yield:#${overlapEntry.yieldTo}`] : [];
     // #xc7p3q9 (R1) — PLAN-WIDE fail-closed backstop: in an INCOMPLETE context a manifest-less verdict from a
     // NON-WE repo MIGHT be a coupled impl whose carrier we could not read → it must never enter `ready`, whether or
     // not a join stamped `coupleDefer`. Catches the un-joined orphan the per-carrier gate structurally misses.
@@ -1985,15 +2059,26 @@ export function planLabelDrain(candidates, { landedThisPass = new Set(), provenO
     const blindWait = blindImplDefer ? ['incomplete-context'] : [];
     // #xc7p3q9 (R2) — a verdict may NEVER waitOn its OWN item (a self-referential wait is structurally
     // unsatisfiable — the livelock). Strip any edge naming this verdict's own item.
-    const waitOn = [...new Set([...blockWait, ...stackWait, ...coupleWait, ...blindWait])].filter((w) => c.item == null || String(w) !== String(c.item));
+    const waitOn = [...new Set([...blockWait, ...stackWait, ...coupleWait, ...blindWait, ...overlapWait])].filter((w) => c.item == null || String(w) !== String(c.item));
     if (waitOn.length === 0) ready.push(c);
     else {
       // #xc7p3q9 (Fix 3) — a defer whose ONLY cause is a review-HELD carrier is flagged `heldCoupleOnly`
       // so idle accounting can treat such a pass as idle (a human hold will not clear by polling). A defer that
       // ALSO waits on a real blockedBy/stackParents edge, or that fails closed on degraded/truncated/incomplete
-      // (which MAY clear on a re-fetch), is NOT flagged — the watch keeps polling.
-      const heldCoupleOnly = blockWait.length === 0 && stackWait.length === 0 && blindWait.length === 0 && coupleDeferred && (c.coupleDeferReason === 'held' || c.coupleHumanTerminal === true);
-      deferred.push({ num: c.num, item: c.item, waitOn, ...(heldCoupleOnly ? { heldCoupleOnly: true } : {}), headSha: c.headSha ?? null });
+      // (which MAY clear on a re-fetch), is NOT flagged — the watch keeps polling. #4308 — an overlap-yield wait
+      // is DELIBERATELY never folded into this flag: polling clears it too (Y lands, or X's own budget runs
+      // out), so it stays an ordinary active deferral, never idle (#4308 "Idle accounting").
+      // #4308 review finding (2026-09-29) — `overlapWait.length === 0` ADDED: without it, a defer with BOTH a
+      // held-couple cause AND a live, pollable overlap-yield cause still read `heldCoupleOnly:true` (the other
+      // three arms said nothing about it), so `deferralsAllHeldCouple`/`isPassIdle` would misclassify a pass
+      // that COULD still clear by polling (Y lands, or X's own budget runs out) as idle. heldCoupleOnly must mean
+      // "held ONLY by the couple", not merely "held by the couple among other things".
+      const heldCoupleOnly = blockWait.length === 0 && stackWait.length === 0 && blindWait.length === 0 && overlapWait.length === 0 && coupleDeferred && (c.coupleDeferReason === 'held' || c.coupleHumanTerminal === true);
+      deferred.push({
+        num: c.num, item: c.item, waitOn, ...(heldCoupleOnly ? { heldCoupleOnly: true } : {}),
+        ...(overlapEntry ? { overlapYield: { pr: overlapEntry.yieldTo, repo: c.repo ?? null, files: overlapEntry.files, untilMs: overlapEntry.untilMs, windowMinutes: overlapEntry.windowMinutes } } : {}),
+        headSha: c.headSha ?? null,
+      });
     }
   }
   // Numeric items (landed NNNs) sort by number ascending, as before. A hash item has no numeric order yet
@@ -2027,8 +2112,13 @@ export function planLabelDrain(candidates, { landedThisPass = new Set(), provenO
 // authoritative open set for the early-land decision.
 export { OPEN_PR_LIST_LIMIT, isDegradedOpenPrListing };
 /** #gh-graphql-budget — the context listing's `--json` (the shared snapshot serves it; the direct fallback asks for
- *  exactly the same). `body` rides it so a PR's lane manifest is read off the listing, never a per-PR re-read. */
-export const CONTEXT_LIST_FIELDS = 'number,title,body,labels,statusCheckRollup,headRefName,headRefOid';
+ *  exactly the same). `body` rides it so a PR's lane manifest is read off the listing, never a per-PR re-read.
+ *  #4308 — `baseRefName`/`isDraft`/`files` ADDED (all three already valid `SNAPSHOT_FIELDS` entries, so a shared
+ *  snapshot already fetched with them for some OTHER caller serves this for free): this UNFILTERED-by-label
+ *  listing is the overlap-yield planner's ONLY source for a same-based/non-draft/changed-file read on an open PR
+ *  that is NOT itself `ready-to-merge` (a label-scoped candidate listing never sees it at all — #4308 Data). The
+ *  measured cost of widening it is exactly Task 5's "warm and cold caches" number (this PR's own body). */
+export const CONTEXT_LIST_FIELDS = 'number,title,body,labels,statusCheckRollup,headRefName,headRefOid,baseRefName,isDraft,files';
 
 /** Bound a `--watch --interval=N` poll count. `--max-idle=N` (optional) exits after N consecutive idle passes
  *  (a pass that merged nothing AND has nothing deferred waiting); omitted → unbounded (until Ctrl-C). Pure.
@@ -3450,6 +3540,11 @@ async function runCli() {
   // very first discovery call; a `--watch` run re-checks at the top of every pass (see the watch loop). See
   // github-app-auth-env.mjs's own header for why this lives outside gh-throttle.mjs.
   await ensureFreshGithubAppEnv({ log: console });
+  // #4308 — the drain CLI's one-off overlap-yield overrides (`--overlap-yield`/`--no-overlap-yield`/
+  // `--overlap-yield-window=<n>`, env `WE_DRAIN_OVERLAP_YIELD`). A usage error (conflicting flags, a bad env
+  // value) throws here and is caught by this file's own top-level `runCli().catch(...)` — an ordinary CLI
+  // usage-error exit, not a drain failure.
+  const overlapYieldOverrides = parseOverlapYieldOverrides({ argv, env: process.env });
   const AS_JSON = !!flags.json;
   const DRY_RUN = !!flags['dry-run'];
   const REQUIRED = typeof flags.check === 'string' ? flags.check : 'test';
@@ -4937,6 +5032,19 @@ async function runCli() {
   // `replan` closure below only re-orders across merges, it never re-derives the join wiring.
   const candidateHeldByKey = new Map();
   for (const v of verdicts) candidateHeldByKey.set(`${v.repo || 'cwd'}::${v.num}`, v.decision !== 'merge');
+  // #4308 — one overlap-yield computation per planLabelDrain/replan CALL (never hoisted out of the cascade):
+  // "read fresh at the start of every planning pass" (the Window section's own words) means the SETTINGS FILE,
+  // not just this one pass's start — a long `--watch` must see a live disable/window edit on its very next
+  // `replan`, not only the pass this closure was built in. `mergedPrKeys` starts empty (nothing has merged yet).
+  const logOverlapYields = (octx) => {
+    if (AS_JSON) return;
+    for (const [key, w] of octx.waits) {
+      process.stderr.write(`  ⏳ overlap-yield: ${key} yields to #${w.yieldTo} (files: ${w.files.join(', ') || '(unknown)'}; window ${w.windowMinutes != null ? `${w.windowMinutes}m` : '?'}; until ${new Date(w.untilMs).toISOString()})\n`);
+    }
+  };
+  const overlapRows0 = buildOverlapRows({ candidates: verdicts, verdicts, openPrContext, mergedPrKeys: new Set(), localSlug });
+  const overlapCtx0 = computeOverlapContext({ candidateRows: overlapRows0.candidateRows, openPrRows: overlapRows0.openPrRows, overrides: overlapYieldOverrides });
+  logOverlapYields(overlapCtx0);
   const preparedPass = planDrainPass({
     verdicts,
     openPrContext,
@@ -4947,6 +5055,7 @@ async function runCli() {
     candidateHeldByKey,
     landedThisPass,
     provenOnMain,
+    overlapContext: overlapCtx0.waits,
   });
   // #xc7p3q9 — the ONE re-plan wiring (shared by the dry-run report and the live cascade): re-orders the joined+
   // stamped `verdicts` across merges, threading the SAME extraOpenItems + contextComplete + WE-repo predicate the
@@ -4954,7 +5063,17 @@ async function runCli() {
   // #3004 — `coupleIncomplete` is a PER-ITERATION argument, not a closed-over constant: the cascade is stateful and
   // the answer changes every time something merges (or fails to). It defaults empty, so the DRY-RUN report and any
   // call that does not re-derive behave exactly as before.
-  const replan = (cands, coupleIncomplete = new Set()) => planLabelDrain(cands, { landedThisPass, provenOnMain, coupleIncomplete, extraOpenItems: orderExtraOpenItems, contextComplete: !!openPrContext.contextComplete, isWeRepo: isLocalRepo });
+  const replan = (cands, coupleIncomplete = new Set()) => {
+    // #4308 — recomputed EVERY call (not hoisted): `merged` (declared below, in scope by the time this runs)
+    // grows across the cascade, so each replan's `openPrRows` excludes whatever has ALREADY landed this pass
+    // (openPrContext.prsByRepo is a pass-START snapshot and would otherwise still show a landed PR as open —
+    // the same staleness #3004 documents elsewhere in this cascade).
+    const mergedPrKeys = new Set(merged.map((m) => overlapRowKey({ repo: m.repo || localSlug, number: m.num })));
+    const rows = buildOverlapRows({ candidates: cands, verdicts, openPrContext, mergedPrKeys, localSlug });
+    const octx = computeOverlapContext({ candidateRows: rows.candidateRows, openPrRows: rows.openPrRows, overrides: overlapYieldOverrides });
+    logOverlapYields(octx);
+    return planLabelDrain(cands, { landedThisPass, provenOnMain, coupleIncomplete, extraOpenItems: orderExtraOpenItems, contextComplete: !!openPrContext.contextComplete, isWeRepo: isLocalRepo, overlapContext: octx.waits, overlapLocalSlug: localSlug });
+  };
   const toMerge = verdicts.filter((v) => v.decision === 'merge'); // @merge-gate-exempt the FINAL set actually merged; a held PR is `decision:'skip'` and MUST be excluded here — this is the hard AND that never lands a held PR
   const skipped = verdicts.filter((v) => v.decision === 'skip');
   // #xc7p3q9 (R6) — the held couple's members (its `skip` carrier + its deferred impl half — both carry
