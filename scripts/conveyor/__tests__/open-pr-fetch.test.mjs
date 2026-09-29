@@ -1,12 +1,28 @@
 import { describe, it, expect, vi } from 'vitest';
-import { defaultFetchOpenPrs, readPrsFromFile, OPEN_PR_LIST_FIELDS, PR_LIST_LIMIT } from '../open-pr-fetch.mjs';
+import { readFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import {
+  defaultFetchOpenPrs, readPrsFromFile, OPEN_PR_LIST_FIELDS, PR_LIST_LIMIT,
+  fetchOpenPrsRest, restPullToBuildDispatchShape, BUILD_DISPATCH_PR_FIELDS,
+} from '../open-pr-fetch.mjs';
 import { runGhSync } from '../../lib/gh-throttle.mjs';
+import { normalizeOpenPrs } from '../build-dispatch-policy.mjs';
 import { defaultListOpenPrs } from '../duplicate-pr-watch.mjs';
 import { defaultListParkedPrs as listConflicts } from '../parked-pr-conflict-watch.mjs';
 import { defaultListParkedPrs as listProgress } from '../parked-pr-progress-watch.mjs';
 import { defaultReadPrs } from '../reconcile-pass.mjs';
 
-vi.mock('../../lib/gh-throttle.mjs', () => ({ runGhSync: vi.fn(), execFileSyncThrottled: vi.fn() }));
+// `execFileSyncThrottled`/`runGhSync` are mocked (existing tests drive `runGhSync` directly); every OTHER
+// export (`ghAuthIdentity`, `deriveGhCaller`, `ghThrottleLockRoot`, …) stays REAL via `importOriginal` — the
+// REST-path tests below pass their own `exec`, but still call through `gh-rest-read.mjs#ghRestGetJson`, which
+// needs those real, pure helpers to resolve an identity/cache key. The end-to-end "real throttle" proof (no
+// mocking at all) lives in its own file, `open-pr-fetch-rest-live.test.mjs`.
+vi.mock('../../lib/gh-throttle.mjs', async (importOriginal) => ({ ...(await importOriginal()), runGhSync: vi.fn(), execFileSyncThrottled: vi.fn() }));
+
+const FIXTURE = JSON.parse(readFileSync(
+  join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'open-prs-rest-vs-graphql.json'), 'utf8',
+));
 
 describe('shared open-PR discovery', () => {
   it('pins the deduplicated union and proves every standalone field is included', () => {
@@ -42,6 +58,58 @@ describe('shared open-PR discovery', () => {
   it('propagates fetch/parse failures so the runner can fall back', () => {
     expect(() => defaultFetchOpenPrs({ exec: () => { throw new Error('throttled'); } })).toThrow('throttled');
     expect(() => defaultFetchOpenPrs({ exec: () => '{broken' })).toThrow();
+  });
+});
+
+describe('fetchOpenPrsRest — build-dispatch daemon field parity (#4351 follow-up, guided by #4309 spend accounting)', () => {
+  it('BUILD_DISPATCH_PR_FIELDS names exactly what build-dispatch-policy.mjs reads off a PR', () => {
+    expect(BUILD_DISPATCH_PR_FIELDS).toEqual(['number', 'headRefName', 'labels', 'files', 'isDraft']);
+  });
+
+  it('maps a REST pulls item + its own files page to exactly what the old GraphQL query returned', () => {
+    const mapped = FIXTURE.restPulls.map((p) => restPullToBuildDispatchShape(p, FIXTURE.restFiles[String(p.number)]));
+    expect(mapped).toEqual(FIXTURE.graphql);
+  });
+
+  it('normalizeOpenPrs reads the REST-mapped rows identically to the old GraphQL rows', () => {
+    const viaGraphql = normalizeOpenPrs([{ repo: 'we', prs: FIXTURE.graphql }]);
+    const restMapped = FIXTURE.restPulls.map((p) => restPullToBuildDispatchShape(p, FIXTURE.restFiles[String(p.number)]));
+    const viaRest = normalizeOpenPrs([{ repo: 'we', prs: restMapped }]);
+    expect(viaRest).toEqual(viaGraphql);
+    expect(viaRest.length).toBeGreaterThan(0); // the parity check above must not be vacuous
+  });
+
+  function scripted(responses) {
+    const calls = [];
+    const exec = (file, argv) => {
+      calls.push(argv);
+      const next = responses.shift();
+      if (next instanceof Error) throw next;
+      return next;
+    };
+    return { exec, calls };
+  }
+  const httpOk = (body, etag = 'W/"e1"') => `HTTP/2.0 200 OK\r\n${etag ? `Etag: ${etag}\r\n` : ''}\r\n${body}`;
+
+  it('lists open PRs then each one\'s own files page via REST `gh api` — never `gh pr` (graphql)', () => {
+    const { exec, calls } = scripted([
+      httpOk(JSON.stringify(FIXTURE.restPulls)),
+      httpOk(JSON.stringify(FIXTURE.restFiles['2901'])),
+      httpOk(JSON.stringify(FIXTURE.restFiles['2902'])),
+    ]);
+    const rows = fetchOpenPrsRest({ repo: 'chalbert/web-everything', exec, env: { VITEST: '1' } });
+    expect(rows).toEqual(FIXTURE.graphql);
+    expect(calls).toEqual([
+      ['api', '-i', 'repos/chalbert/web-everything/pulls?state=open&per_page=100&page=1'],
+      ['api', '-i', 'repos/chalbert/web-everything/pulls/2901/files?per_page=100&page=1'],
+      ['api', '-i', 'repos/chalbert/web-everything/pulls/2902/files?per_page=100&page=1'],
+    ]);
+    expect(calls.every((argv) => argv[0] !== 'pr')).toBe(true);
+  });
+
+  it('tolerates a PR with no files (an empty page, never a crash)', () => {
+    const { exec } = scripted([httpOk(JSON.stringify([FIXTURE.restPulls[0]])), httpOk('[]')]);
+    expect(fetchOpenPrsRest({ repo: 'o/r', exec, env: { VITEST: '1' } })[0].files).toEqual([]);
   });
 });
 

@@ -1,0 +1,46 @@
+{
+  "_note": "#4351 build-dispatch follow-up shape-equivalence pair for the build-dispatch daemon's open-PR read: `graphql` is what `defaultFetchOpenPrs` (gh pr list --json <OPEN_PR_LIST_FIELDS>) trimmed to the fields build-dispatch-policy.mjs actually reads (number, headRefName, labels, files, isDraft); `restPulls` is the same two PRs as `GET repos/o/r/pulls?state=open` would answer; `restFiles` is each PR's own `GET repos/o/r/pulls/{number}/files` page. `fetchOpenPrsRest` must turn `restPulls`+`restFiles` into exactly `graphql`.",
+  "graphql": [
+    {
+      "number": 2901,
+      "headRefName": "lane/2901-fix-thing",
+      "labels": [{ "name": "review:pending" }],
+      "files": [{ "path": "scripts/lib/gh-throttle.mjs" }, { "path": "scripts/conveyor/open-pr-fetch.mjs" }],
+      "isDraft": false
+    },
+    {
+      "number": 2902,
+      "headRefName": "lane/2902-other-thing",
+      "labels": [],
+      "files": [{ "path": "backlog/2902-other-thing.md" }],
+      "isDraft": true
+    }
+  ],
+  "restPulls": [
+    {
+      "number": 2901,
+      "title": "WE #2901: fix thing",
+      "draft": false,
+      "head": { "ref": "lane/2901-fix-thing", "sha": "aaa111" },
+      "base": { "ref": "main" },
+      "labels": [{ "name": "review:pending", "color": "ededed" }]
+    },
+    {
+      "number": 2902,
+      "title": "WE #2902: other thing",
+      "draft": true,
+      "head": { "ref": "lane/2902-other-thing", "sha": "bbb222" },
+      "base": { "ref": "main" },
+      "labels": []
+    }
+  ],
+  "restFiles": {
+    "2901": [
+      { "filename": "scripts/lib/gh-throttle.mjs", "status": "modified", "additions": 3, "deletions": 1 },
+      { "filename": "scripts/conveyor/open-pr-fetch.mjs", "status": "modified", "additions": 5, "deletions": 0 }
+    ],
+    "2902": [
+      { "filename": "backlog/2902-other-thing.md", "status": "added", "additions": 10, "deletions": 0 }
+    ]
+  }
+}
