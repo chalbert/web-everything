@@ -87,7 +87,7 @@ a managed clone behind on it still refuses to dispatch a review.
 - The PR's `soak-replay-gate` check reddened (this IS a live-daemon-break fix) — waived on the PR with a stated
   reason (the write-avoidance mechanism is already soak-tested via #4317's own break; the review-loop-specific
   wiring is proven by a real unit test added here) rather than built under time pressure. A dedicated soak break
-  for this caller — `we:backlog/xkp9z65-add-a-dedicated-daemon-soak-break-scenario-for-we-scripts-op.md` — is
+  for this caller — `we:backlog/4532-add-a-dedicated-daemon-soak-break-scenario-for-we-scripts-op.md` — is
   filed as its own follow-up, with the design note for why it needs a different probe shape than #4317's break
   (a brand-new export vs. a default-parameter swap).
 
@@ -137,9 +137,9 @@ already-bounded seam, not a new trust boundary. The idempotency-blind-spot findi
 already-accepted residual as #4399 (open, `blockedBy: 4317`) for the OTHER caller — folded into #4399's scope
 (now covers both callers) rather than filed as a duplicate; not a new gap this item introduces. Filed rather than
 hand-fixed here, both pre-existing/low-severity and `parallelizable: true`: the security lens's title/scope/
-digest-hardening idea → `we:backlog/xszsr8e-bound-title-scope-digest-reaching-the-prevention-card-landin.md`; the
+digest-hardening idea → `we:backlog/4533-bound-title-scope-digest-reaching-the-prevention-card-landin.md`; the
 simplicity lens's "delete the now-unused `fileItemForPrevention`" idea →
-`we:backlog/xwtj36n-delete-the-now-unused-in-process-fileitemforprevention-build.md`. The "byte-for-byte" claim
+`we:backlog/4534-delete-the-now-unused-in-process-fileitemforprevention-build.md`. The "byte-for-byte" claim
 above is corrected to note the one cosmetic exception (the
 async-error stderr message's own label changed from `fileApprovalPreventionCard:` to
 `spawnPreventionLandingJob:`).
@@ -150,15 +150,15 @@ incomplete — the corrected line still carried a literal, non-runnable `we:` pr
 this section still stood, unfixed, in the Proof plan above (claim-accuracy). Both genuinely fixed now: the
 executable command moved into a fenced code block (exempt from the `we:`-locus lint, since it is a real shell
 command, not a doc citation) with the bare, runnable path; the Proof plan's wording corrected the same way as
-here. The two new follow-up cards (`xszsr8e`, `xwtj36n`) also had file-item's placeholder "Done when" — replaced
+here. The two new follow-up cards (`4533`, `4534`) also had file-item's placeholder "Done when" — replaced
 with real executable criteria on each card. Round 2's repeat idempotency/security/dead-code findings are the SAME
-three already dismissed above (folded into #4399 / filed as `xszsr8e` / filed as `xwtj36n`) — not new. One
+three already dismissed above (folded into #4399 / filed as `4533` / filed as `4534`) — not new. One
 genuinely new, minor simplicity finding — the thin wrapper's docblock stayed long after the extraction shrank its
 body to one line — fixed by trimming it to a pointer at the shared leaf's own doc.
 
 **Round 3** (fresh panel again): simplicity came back CLEAN (0 findings) — the docblock trim held. The remaining
 lenses repeated the SAME already-dismissed idempotency/security class (correctness, security — still #4399 /
-`xszsr8e`, not new) plus two real, now-fixed accuracy gaps: the round-2 docblock trim pointed to detail the leaf's
+`4533`, not new) plus two real, now-fixed accuracy gaps: the round-2 docblock trim pointed to detail the leaf's
 own doc didn't actually carry yet — fixed by restoring the "why detached"/`num`/`rel`-null/`retractTo` specifics
 onto `spawnPreventionLandingJob` itself (the leaf, not the wrapper, so it is written once); and the Design
 section's own "zero behavior change" phrase (claim-accuracy) — fixed at its source, matching the *Converge
