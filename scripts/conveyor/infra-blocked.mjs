@@ -51,7 +51,9 @@ import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 // (`unverified`/`check-red`/`bad-ref`/… → `refused`; `blocked-on-infra`/`gh-error`/… → `unrun`), reused here
 // rather than re-derived: `resumeOpen` needs the identical "did a guard answer, or did the environment simply
 // fail to run" split, for the identical reason (never let a fixable refusal masquerade as an unresolved outage).
-import { HOME_REASONS } from '../operations/open-pr.mjs';
+// Imported from the table's LEAF, never `open-pr.mjs` itself: this module is in the driver-watchdog's pinned
+// import graph, which must not pull in the operation registry (`driver-watchdog.test.mjs`).
+import { HOME_REASONS } from '../operations/pr-land-reasons.mjs';
 
 // ── TUNING (exported so a caller/test can override; the conveyor tick uses the defaults) ──────────────────────
 
