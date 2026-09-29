@@ -85,9 +85,22 @@ export function releaseBuildDispatchClaim({ repo = 'we', num, lockRoot = buildDi
   return { released: true };
 }
 
-/** Every LIVE (unexpired) build claim, with its meta. Expired or meta-less entries are skipped. */
+/**
+ * Every build claim, with its meta. Expired or meta-less entries are skipped BY DEFAULT — the ordinary,
+ * dead-holder-floor read every existing caller already trusts.
+ *
+ * `ignoreExpiry: true` (#4131 build-orphan-adopt fix, live 2026-09-29) reads every claim still on disk
+ * REGARDLESS of its TTL — for the ONE caller that needs it, `build-dispatch-orphan-adopt.mjs`'s own adoption
+ * pass. A claim's TTL is a dead-holder floor for the ORDINARY "is this claim still legitimately in flight"
+ * question every other reader asks; it is the WRONG floor for "has this claim's underlying situation already
+ * been resolved", which is what adoption asks instead, using its own POSITIVE liveness evidence (a kernel pid
+ * probe, a settled outcome) rather than a clock. Confirmed live: #4131's claim aged out of the ordinary
+ * (expiry-filtered) read while the daemon was down for hours on an unrelated bug, becoming invisible to BOTH
+ * the ordinary retirement path AND this adoption pass — see that fix's own commit for the full incident.
+ */
 export function listBuildDispatchClaims({
   lockRoot = buildDispatchClaimRoot(), nowMs = Date.now(), leaseMinutes = DEFAULT_BUILD_DISPATCH_CLAIM_TTL_MINUTES,
+  ignoreExpiry = false,
 } = {}) {
   let dirNames;
   try { dirNames = readdirSync(lockRoot); } catch { return []; }
@@ -97,7 +110,7 @@ export function listBuildDispatchClaims({
     try { raw = readFileSync(join(lockRoot, dirName, 'lock.json'), 'utf8'); } catch { continue; }
     const entry = parseLockEntry(raw);
     if (!entry?.meta?.num || entry.meta.kind !== 'build') continue;
-    if (isLeaseExpired(entry, nowMs, leaseMinutes)) continue;
+    if (!ignoreExpiry && isLeaseExpired(entry, nowMs, leaseMinutes)) continue;
     out.push(entry);
   }
   return out;
@@ -165,4 +178,74 @@ export function listBuildDispatchHolds({
     out.push(entry);
   }
   return out;
+}
+
+// ================================================================================================
+// build-orphan-adopt (#4131/#4382 fix) — THE RESUME MARKER. A third lease, same primitive, same posture as
+// the hold above: a claim whose recorded dispatch died (its `pid:` handle no longer answers — see
+// scripts/conveyor/build-dispatch-orphan-adopt.mjs) may be ADOPTED by spawning one fresh, detached
+// `deliver-item-run.mjs --resume` process that skips the agent turn and goes straight to gate/converge/PR.
+// This marker exists so a LATER tick can tell "a resume for this item is already under way, owned by pid P"
+// from "nothing has ever tried" — without it, every tick that still finds the ORIGINAL claim's dead-pid
+// dispatch row would spawn ANOTHER resume attempt, racing two wrappers over the same lane. Keyed the same way
+// a claim is (`build-dispatch:<repo>:<num>`), under its own root + `kind:'resume'` so it never collides with
+// either the claim or the hold.
+// ================================================================================================
+
+/** As long as the claim it shadows (PR #2921 review): a shorter marker could lapse while its resume is still
+ *  running — the pass would then read the original row's dead pid and resume a second time — and would reset
+ *  the `attempts` count the resume cap relies on. A liveness answer comes from the marker's own pid long
+ *  before this TTL matters; the TTL only bounds an UNCONFIRMED marker, and the claim lapses at the same time. */
+export const DEFAULT_BUILD_DISPATCH_RESUME_TTL_MINUTES = DEFAULT_BUILD_DISPATCH_CLAIM_TTL_MINUTES;
+
+export function buildDispatchResumeRoot(root = resolveCoordinationRoot()) {
+  return join(root, 'build-dispatch-resumes');
+}
+
+/** Record a fresh resume attempt for one item, owned by the resume process's own pid — the kernel-probeable
+ *  handle a later tick's own orphan-adopt read checks liveness against, exactly the way a claim's `pid:`
+ *  dispatch handle already is. Unconditional, like `placeBuildDispatchHold` — a resume marker that already
+ *  exists for this item (an earlier resume that itself died) is simply refreshed.
+ *
+ *  PR #2921 review — the marker is BOUND to the run-store row it resumes (`runId` + `rowKey`): a marker left
+ *  over from an older attempt never answers the liveness question for a NEWER dispatch of the same item.
+ *  `attempts` counts resume spawns for that row, so the orphan-adopt pass can stop respawning after a cap.
+ *  `pid: null` is a PENDING marker — written BEFORE the spawn, so a crash between the spawn and the pid write
+ *  still leaves a marker: the orphan-adopt pass reads it as "starting" for a short grace, then as UNCONFIRMED
+ *  and leaves it alone until this TTL — it never spawns a second resume beside one it cannot probe.
+ *  `spawnFailed` records a spawn that threw (known not running). The lease's own pid is the writer's pid for a
+ *  pending marker; only `meta.pid` names the resume process. */
+export function markBuildDispatchResume({
+  repo = 'we', num, pid = null, runId = null, rowKey = null, attempts = 1, spawnFailed = false,
+  owner = buildDispatchClaimOwner({ pid: pid ?? process.pid }),
+  nowMs = Date.now(), nowIso = new Date(nowMs).toISOString(),
+  ttlMinutes = DEFAULT_BUILD_DISPATCH_RESUME_TTL_MINUTES, lockRoot = buildDispatchResumeRoot(),
+} = {}) {
+  const resource = buildDispatchResource({ repo, num });
+  const meta = { repo, num: normNum(num), kind: 'resume', pid, runId, rowKey, attempts, spawnFailed: Boolean(spawnFailed), resumedAt: nowIso };
+  try { releaseLockDir(lockRoot, resource); } catch { /* absent — nothing to clear */ }
+  const result = reserve(lockRoot, resource, owner, nowMs, nowIso, pid ?? process.pid, 'unknown', ttlMinutes, meta);
+  return { ...result, resource, lockRoot };
+}
+
+/** The live resume marker for one item, or `null` — used to decide whether a dead-pid claim already has a
+ *  resume attempt under way before starting a second one. */
+export function readBuildDispatchResume({
+  repo = 'we', num, lockRoot = buildDispatchResumeRoot(), nowMs = Date.now(),
+  ttlMinutes = DEFAULT_BUILD_DISPATCH_RESUME_TTL_MINUTES,
+} = {}) {
+  const resource = buildDispatchResource({ repo, num });
+  const entry = readLockEntry(lockRoot, resource);
+  if (!entry || isLeaseExpired(entry, nowMs, ttlMinutes)) return null;
+  return entry;
+}
+
+/** Release a resume marker — the orphan-adopt pass clears it once the resumed attempt itself settles (a PR
+ *  opens, or it fails and the ordinary claim retirement/hold path takes over), so a later dead pid does not
+ *  read as "still resuming" forever. */
+export function releaseBuildDispatchResume({ repo = 'we', num, lockRoot = buildDispatchResumeRoot() } = {}) {
+  const resource = buildDispatchResource({ repo, num });
+  if (!readLockEntry(lockRoot, resource)) return { released: false, reason: 'absent' };
+  releaseLockDir(lockRoot, resource);
+  return { released: true };
 }

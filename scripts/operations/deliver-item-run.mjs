@@ -77,8 +77,13 @@ const REQUIRED_FLAGS = Object.freeze(['num', 'lane', 'session']);
  * and `dispatch-providers/build.mjs#deliverItemDetachedProvider`) so `deliverItem` can settle it on exit. Either
  * absent (an older dispatch, a hand-run CLI invocation) is a clean no-op downstream, never a guess.
  *
+ * `--resume` (build-orphan-adopt, #4131/#4382 fix, optional bare flag) — this dispatch is RESUMING an attempt
+ * whose own detached wrapper died before it could report anything further; threaded to `deliverItem`'s own
+ * `launch.resume`, which `runAgentToCompletion` reads to skip spawning a fresh agent turn entirely (see that
+ * function's own docblock). Absent for every ordinary dispatch — unchanged.
+ *
  * @returns {{item: string, lane: string, scope: string, sessionSlug: string, attemptTag: string, provider: string,
- *   runId: string, effectKey: string}}
+ *   runId: string, effectKey: string, resume: boolean}}
  */
 export function parseDeliverItemRunArgv(argv = []) {
   const flags = {};
@@ -104,6 +109,7 @@ export function parseDeliverItemRunArgv(argv = []) {
     provider: String(flags.provider ?? '').trim(),
     runId: String(flags['run-id'] ?? '').trim(),
     effectKey: String(flags['effect-key'] ?? '').trim(),
+    resume: flags.resume === 'true',
   };
 }
 

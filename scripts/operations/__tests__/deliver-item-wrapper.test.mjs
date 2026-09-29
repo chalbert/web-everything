@@ -1928,6 +1928,70 @@ describe('runAgentToCompletion (#3627 bug 5 — real UUID session id, never sess
   });
 });
 
+// build-orphan-adopt (#4131/#4382 fix) — `resume: true` skips the agent turn entirely when the PRIOR attempt's
+// own `done` report is still there AND the lane still holds the commit it describes; it never spawns
+// `provider.spawn`, which is the whole point (a resume must never re-run the agent — see this file's own
+// docblock on `runAgentToCompletion`).
+describe('runAgentToCompletion — resume branch (build-orphan-adopt, #4131/#4382 fix)', () => {
+  const fakeResolveLane = () => '/fake/pool/lane-9';
+
+  it('returns the existing report and never calls provider.spawn when the lane still has the commit', async () => {
+    const provider = { spawn: vi.fn() };
+    const doneReport = { status: 'done', outcome: 'done', filesTouched: ['a.mjs'] };
+    const readReport = vi.fn(() => doneReport);
+    const isLaneCommitAhead = vi.fn(() => true);
+
+    const report = await runAgentToCompletion(
+      { item: '4131', sessionSlug: 'conveyor-4131', lane: 9, attemptTag: '', claudeSessionId: 'x', provider, resume: true },
+      { readReport, resolveLane: fakeResolveLane, isLaneCommitAhead },
+    );
+
+    expect(report).toBe(doneReport);
+    expect(provider.spawn).not.toHaveBeenCalled();
+    expect(readReport).toHaveBeenCalledWith('conveyor-4131', expect.any(String));
+    expect(isLaneCommitAhead).toHaveBeenCalledWith({ lane: '/fake/pool/lane-9', run: expect.any(Function) });
+  });
+
+  it('throws (never falls back to a fresh spawn) when the report says done but the lane has no commit ahead '
+    + '— the lane was reset/reused since the report was written', async () => {
+    const provider = { spawn: vi.fn() };
+    const readReport = vi.fn(() => ({ status: 'done', outcome: 'done', filesTouched: ['a.mjs'] }));
+    await expect(runAgentToCompletion(
+      { item: '4131', sessionSlug: 'conveyor-4131', lane: 9, attemptTag: '', claudeSessionId: 'x', provider, resume: true },
+      { readReport, resolveLane: fakeResolveLane, isLaneCommitAhead: () => false },
+    )).rejects.toThrow(/nothing to resume from/);
+    expect(provider.spawn).not.toHaveBeenCalled();
+  });
+
+  it('throws when there is no report at all to resume from', async () => {
+    const provider = { spawn: vi.fn() };
+    await expect(runAgentToCompletion(
+      { item: '4131', sessionSlug: 'conveyor-4131', lane: 9, attemptTag: '', claudeSessionId: 'x', provider, resume: true },
+      { readReport: () => null, resolveLane: fakeResolveLane, isLaneCommitAhead: () => true },
+    )).rejects.toThrow(/nothing to resume from/);
+    expect(provider.spawn).not.toHaveBeenCalled();
+  });
+
+  it('a non-`done` report (e.g. `blocked`) is not resumable either', async () => {
+    const provider = { spawn: vi.fn() };
+    await expect(runAgentToCompletion(
+      { item: '4131', sessionSlug: 'conveyor-4131', lane: 9, attemptTag: '', claudeSessionId: 'x', provider, resume: true },
+      { readReport: () => ({ status: 'blocked' }), resolveLane: fakeResolveLane, isLaneCommitAhead: () => true },
+    )).rejects.toThrow(/nothing to resume from/);
+    expect(provider.spawn).not.toHaveBeenCalled();
+  });
+
+  it('resume defaults to false — every existing (pre-#4131 fix) call is unaffected', async () => {
+    const provider = { spawn: vi.fn() };
+    const readReport = vi.fn(() => ({ status: 'done', outcome: 'done', filesTouched: [] }));
+    await runAgentToCompletion(
+      { item: '1234', sessionSlug: 'conveyor-1234', lane: 7, attemptTag: '', provider, claudeSessionId: 'x' },
+      { readBrief: () => 'x', readReport, loadItems: () => [{ num: '1234', slug: 'do-the-thing', scope: [] }], resolveLane: fakeResolveLane },
+    );
+    expect(provider.spawn).toHaveBeenCalledTimes(1); // the ordinary fresh-spawn path, unchanged.
+  });
+});
+
 describe('runConvergeEdit (#3627 bug 5 — real UUID session id, not the old readable per-round string)', () => {
   it('spawns with a real-UUID --session-id, never the old `${item}-converge-editor-r${round}` literal', () => {
     const run = vi.fn(() => JSON.stringify({ result: JSON.stringify({ advanced: true, dismissed: [] }) }));
@@ -3354,6 +3418,47 @@ describe('deliverItem (#4349 — settles its run-store effect + releases/holds t
     store.write(run);
     return store;
   }
+
+  it('PR #2921 review — a RESUMED delivery re-leases its lane with --no-reset, never re-claims the (already '
+    + 'active) item, reuses the prior done report, and settles the ORIGINAL row from its own outcome — never '
+    + '`wrapper-threw`', async () => {
+    const store = seedInFlightRun('dispatch-lane-9001r');
+    acquireBuildDispatchClaim({ num: '9001', scope: [] });
+    tryReadDeliveryReport.mockReturnValue({ status: 'done', outcome: 'blocked', filesTouched: ['x.mjs'], reason: 'blockedBy 1 re-opened' });
+    const acquires = [];
+    execFileSync.mockImplementation((cmd, args = []) => {
+      const a = args || [];
+      if (cmd === 'node' && a[0] === 'scripts/lane-pool.mjs' && a[1] === 'acquire') { acquires.push(a); return ''; }
+      if (cmd === 'node' && a[0] === 'scripts/lane-pool.mjs' && a[1] === 'status') {
+        return JSON.stringify({ repo: 'web-everything', root: '/pool', lanes: [{ lane: 7, path: lane, exists: true }] });
+      }
+      if (cmd === 'node' && a[0] === 'scripts/operations/run.mjs' && a[1] === 'claim') {
+        throw new Error('claim: status is "active", expected "open" — a resume must never re-claim');
+      }
+      if (cmd === 'git' && a[0] === 'rev-list') return '1\n';
+      if (cmd === 'node' && a[0] === 'scripts/backlog.mjs' && a[1] === 'release') return '';
+      if (cmd === 'node' && a[0] === 'scripts/lane-pool.mjs' && a[1] === 'release') return '';
+      throw new Error(`unexpected execFileSync(${cmd}, ${JSON.stringify(a)})`);
+    });
+    const spawn = vi.fn();
+
+    const result = await deliverItem(
+      {
+        item: '9001', lane: 7, scope: [], sessionSlug: 'conveyor-9001', attemptTag: '',
+        runId: 'dispatch-lane-9001r', effectKey: 'dispatch:0:0', resume: true,
+      },
+      { spawn },
+      { newSessionId: () => 'uuid-fixed' },
+    );
+
+    expect(acquires).toEqual([expect.arrayContaining(['--lane=7', '--no-reset'])]);
+    expect(spawn).not.toHaveBeenCalled(); // no fresh agent turn on a resume
+    // The prior report's OWN outcome drives the finish (blocked with files touched → blocked-mid-build).
+    expect(result.result).toMatch(/^blocked-mid-build \(blockedBy 1 re-opened/);
+    const settledEntry = store.read('dispatch-lane-9001r').effects[0];
+    expect(settledEntry.status).toBe('applied');
+    expect(settledEntry.result.outcome).toBe('blocked-mid-build');
+  });
 
   it('Done-when 1 — a `not-ready` finish settles the effect `applied` with `result.outcome === "not-ready"` '
     + 'and releases the build-dispatch claim', async () => {

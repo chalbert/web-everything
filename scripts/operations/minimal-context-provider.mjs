@@ -107,6 +107,33 @@ export const run = (cmd, args, opts = {}) => execFileSync(cmd, args, {
   encoding: 'utf8', cwd: resolveRunCwd(), maxBuffer: RUN_MAX_BUFFER_BYTES, ...opts,
 });
 
+/**
+ * build-orphan-adopt (#4131/#4382 fix) — does `lane`'s working tree still hold at least one commit ahead of
+ * its delivery base (`main` by default)? HALF of the resumability check
+ * `deliver-item-wrapper.mjs#runAgentToCompletion`'s `resume` branch uses (the other half is a `done` report —
+ * see that function) — reused as-is by `scripts/conveyor/build-dispatch-orphan-adopt.mjs`, never re-derived,
+ * so both callers agree on what "resumable" means. A report with no surviving commit means the lane was
+ * reset, reclaimed, or reused since the report was written, and resuming from it would hand the
+ * gate/converge/PR steps a diff that no longer exists — worse than starting over. Fails closed (`false`) on
+ * any git error: an unreadable lane is never treated as resumable.
+ *
+ * PR #2921 review — the default base is `origin/main`, never the local `main`: a pool lane's working branch IS
+ * its local `main` (`lane-pool.mjs acquire` runs `checkout -B main origin/main`, and the build commits onto
+ * it), so `main..HEAD` is always 0 in a real lane — confirmed live (`main..HEAD` = 0, `origin/main..HEAD` = 1
+ * on a lane holding one finished commit). Same base `lane-pool.mjs#laneDirtyOrAhead` uses.
+ * @param {{lane: string, base?: string, run?: Function}} o
+ * @returns {boolean}
+ */
+export function laneHasCommitAhead({ lane, base = 'origin/main', run: runFn = run } = {}) {
+  try {
+    const out = runFn('git', ['rev-list', '--count', `${base}..HEAD`], { cwd: lane });
+    const n = Number(String(out ?? '').trim());
+    return Number.isFinite(n) && n > 0;
+  } catch {
+    return false;
+  }
+}
+
 /** The tool allowlist `--restricted` needs handed back explicitly (verified against the real CLI while writing
  *  `deliver-item-wrapper.mjs`: `--tools=default` does NOT restore what `--restricted` removes — a probe asking
  *  for a Bash call under `--tools=default` came back "no shell tool available"). This is what a minimal-context
@@ -268,6 +295,10 @@ export function persistSpawnFailure(dirName, sessionSlug, error, { resumeSession
 export function acquireLane(
   {
     lane, sessionSlug, scope, item, claudeSessionId, purpose = 'conveyor-delivery', waitMs, base,
+    // PR #2921 review — a RESUMED delivery (build-orphan-adopt) must re-lease its lane WITHOUT the reset to
+    // `origin/main`, or the reset would wipe the finished commit it exists to resume. NUMBERED shape only;
+    // `false` (every other caller) leaves the argv byte-identical.
+    noReset = false,
     // build-path-codex-isolation-locus — the checkout a NON-`we` locus item's own lane must be acquired
     // against (`repoProfile(key).checkoutPath`, e.g. `$HOME/workspace/plateau-app`), never the calling
     // process's own cwd-derived default. `undefined` (every existing caller) is byte-identical to before this
@@ -306,6 +337,7 @@ export function acquireLane(
     acquireOut = runFn('node', [
       'scripts/lane-pool.mjs', 'acquire', `--lane=${lane}`, `--purpose=${purpose}`,
       `--session=${sessionSlug}`, `--scope=${scope}`, `--item=${item}`, '--adopt',
+      ...(noReset ? ['--no-reset'] : []),
     ], { env });
   } else {
     // UNNUMBERED — the real review-brief shape: no --lane/--scope/--item, optional --wait-ms. GENERALIZED

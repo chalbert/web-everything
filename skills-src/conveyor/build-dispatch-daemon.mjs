@@ -46,6 +46,11 @@ import {
   listBuildDispatchHolds,
 } from '../../scripts/conveyor/build-dispatch-claim.mjs';
 import { resolveCoordinationRoot } from '../../scripts/operations/coordination-root.mjs';
+// #4131/#4382 build-orphan-adopt — see that module's own header for the mechanism this closes.
+import { adoptOrphanedBuildClaims } from '../../scripts/conveyor/build-dispatch-orphan-adopt.mjs';
+// #4464 builder-cap-machine-wide — see `cliPlanTick`'s own docblock for why this daemon's tick-core read is
+// exempted from the shared, machine-wide lane-count ceiling.
+import { MAX_CONCURRENT_LANES_ENV } from '../../scripts/lib/lane-concurrency.mjs';
 
 export const BUILD_DISPATCH_DAEMON_LEASE_KEY = '<conveyor:build-dispatch-daemon-lease>';
 export const DEFAULT_INTERVAL_MS = 120_000;
@@ -119,6 +124,14 @@ export function readDispatchOutcome(text) {
  *     `effects` stub that predates #4349 (an existing test fixture) simply supplies neither and nothing
  *     about this tick's behaviour changes for it.
  * `live:false` plans and reports without retiring, claiming, or dispatching anything.
+ *
+ * #4131/#4382 build-orphan-adopt — `adoptOrphans({allowResume, frozenReason})` (optional, LIVE ONLY,
+ * best-effort) runs before the retire loop below ever reads `effects.listClaims()`, with `allowResume` false
+ * while the kill switch or a landing freeze is on: a claim it releases this same tick is then simply
+ * absent from that read, freeing the item for THIS tick's own dispatch decision rather than waiting a full
+ * cycle. See `scripts/conveyor/build-dispatch-orphan-adopt.mjs`'s own header for the mechanism this closes —
+ * a claim whose recorded dispatch died with none of `doneWhy`'s three retirement signals ever becoming true.
+ * Optional-chained so an older test stub (every fixture that predates this) behaves exactly as before.
  */
 export async function runBuildDispatchTick({ bookkeeping = {}, live = false, policy = BUILD_DISPATCH_POLICY, effects }) {
   const out = await effects.planTick(bookkeeping);
@@ -127,6 +140,15 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
   const scopeByNum = new Map((admission.queue || []).map((r) => [normNum(r.num), Array.isArray(r.scope) ? r.scope : []]));
   const clearedNums = new Set((admission.cleared || []).map((r) => normNum(r.num)));
   const openPrs = normalizeOpenPrs(await effects.fetchOpenPrs());
+  // PR #2921 review — a resume spawns real gate/converge/PR work, so it obeys the SAME kill switch and landing
+  // freeze a fresh dispatch does (`planBuildDispatch`'s own freeze rule, computed here with no candidates).
+  // Still before this tick's own `listClaims()` read, so a claim released here frees its item this same tick.
+  let orphanAdoption = null;
+  if (live && typeof effects.adoptOrphans === 'function') {
+    const { freeze } = planBuildDispatch({ openPrs, killSwitch: effects.killSwitch(), policy });
+    try { orphanAdoption = await effects.adoptOrphans({ allowResume: !freeze.frozen, frozenReason: freeze.reasons.join('; ') }); }
+    catch (e) { orphanAdoption = { error: String(e?.message || e).split('\n')[0] }; }
+  }
   const runStoreInFlight = effects.listRunStoreInFlight();
   // A claim retires on a SETTLED non-PR outcome, but never over a run-store row that is CURRENTLY in-flight
   // for the same item: only one claim ever exists per `num` at a time (the daemon's own `acquireClaim` is a
@@ -240,6 +262,10 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
     // #4348-open-pr-retry — `{retried, resumed, surfaced, waiting}` from `infra-blocked.mjs retry` (or an
     // `{error}` on a best-effort failure), `null` on a dry-run tick or an older effects stub with no such call.
     infraRetry,
+    // #4131/#4382 build-orphan-adopt — the array `adoptOrphanedBuildClaims()` returned (`{num, action, reason}`
+    // per live claim), or an `{error}` on a best-effort failure, `null` on a dry-run tick or an older effects
+    // stub with no such call.
+    orphanAdoption,
     nextBookkeeping: settleBookkeeping(bookkeeping, out?.nextState || {}, dispatched.map((x) => x.num)),
   };
 }
@@ -250,9 +276,47 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, '..', '..');
 const SCRIPTS = join(REPO_ROOT, 'scripts');
 
-function cliPlanTick(payload) {
-  const text = execFileSync('node', [join(SCRIPTS, 'conveyor', 'tick-core.mjs')], {
+/**
+ * #4464 builder-cap-machine-wide (live incident 2026-09-29 ~11 ET) — `tick-core.mjs`'s own `capacity-cap`
+ * (`scripts/lib/lane-concurrency.mjs`, default 8, `WE_MAX_CONCURRENT_LANES`) is a SHARED, machine-wide ceiling
+ * on ALL FOUR spawn kinds at once (build/prepare/fix/ci-heal) — a deliberate, documented hardware-safety net
+ * (`lane-concurrency.mjs`'s own header: a 2026-09-07 incident put a 12-core host's 1-min load average at
+ * 34.95 from 42 concurrently-dispatched lanes). This daemon's OWN tick-core call reads ONLY
+ * `decisions.spawnBuilds` (`runBuildDispatchTick`, above) and NEVER acts on `spawnPrepareScope`/`spawnFixes`/
+ * `spawnCiHeals` from this same call at all — so gating those *unused* build candidates against the
+ * MACHINE-WIDE lane count (review loops, fix dispatches, interactive `/conveyor` sessions, health
+ * investigations — none of which THIS daemon dispatches or can see progress on) starves builds for activity
+ * this daemon does not control. Live: 6 of 10 leased lanes were genuine builds, but the other 4 (two review
+ * loops, one fix dispatch, one unrelated investigation) alone pushed the shared count past the default cap of
+ * 8, so `tick-core=capacity-cap` held EVERY build candidate — including ones this daemon had real room for
+ * under its OWN, much tighter `policy.maxConcurrentBuilds` (3).
+ *
+ * OPERATOR DECISION (2026-09-29): the builder's cap bounds ONLY the builder's own concurrent builds;
+ * machine-wide load is the separate load-admission gate's job (#4076, `loadAdmission`/`load-cap`) — completely
+ * UNCHANGED by this override, since it is computed independently from CPU/load sampling and never reads
+ * `maxConcurrentLanes` at all.
+ *
+ * THE FIX, and why it is SAFE: this daemon's own `policy.maxConcurrentBuilds` (enforced by `planBuildDispatch`,
+ * over this daemon's OWN durable claim count — #2924's own fix keeps that count to this daemon's own builds,
+ * never machine-wide activity) is ALREADY a far tighter, correctly-scoped ceiling on what this daemon actually
+ * dispatches. Exempting THIS daemon's OWN tick-core call from the shared lane-count ceiling cannot let it
+ * dispatch more than `maxConcurrentBuilds` regardless — `decisions.spawnBuilds` merely gets to list MORE
+ * candidates than before (informational; `planBuildDispatch` still picks at most its own cap's worth), and the
+ * prepare/fix/ci-heal candidates THIS call also computes are discarded unused either way, so exempting them
+ * too costs nothing. `dispatch-plan.mjs` (tick-core's own child, `main()`'s `runJson` call below) reads the
+ * IDENTICAL env var independently (`scripts/readiness/dispatch-plan.mjs`'s own `resolveMaxConcurrentLanes`
+ * call) — set on THIS CHILD's own env only (never `process.env` itself), it propagates through the whole
+ * subprocess chain for this one call without touching any OTHER caller's environment or tick-core.mjs/
+ * dispatch-plan.mjs's own code at all.
+ */
+export const BUILD_DAEMON_LANE_CAP_EXEMPT_VALUE = '1000000';
+
+// EXPORTED (#4464) so a test can assert the env override directly, against an injected `exec` — mirrors this
+// file's own established `{ exec = execFileSync }` seam (`cliRetryInfraBlocked`, below).
+export function cliPlanTick(payload, { exec = execFileSync } = {}) {
+  const text = exec('node', [join(SCRIPTS, 'conveyor', 'tick-core.mjs')], {
     input: JSON.stringify({ bookkeeping: payload || {} }), encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024,
+    env: { ...process.env, [MAX_CONCURRENT_LANES_ENV]: BUILD_DAEMON_LANE_CAP_EXEMPT_VALUE },
   });
   return JSON.parse(text);
 }
@@ -455,6 +519,9 @@ function cliEffects() {
     dispatch: cliDispatch,
     // #4348-open-pr-retry — only called by `runBuildDispatchTick` when `live` (never on a `--dry-run` tick).
     retryInfraBlocked: cliRetryInfraBlocked,
+    // #4131/#4382 build-orphan-adopt — only called by `runBuildDispatchTick` when `live`, and BEFORE this same
+    // tick's own claim retirement read — see that function's own docblock.
+    adoptOrphans: (o) => adoptOrphanedBuildClaims(o),
   };
 }
 
@@ -596,7 +663,7 @@ async function live(flags) {
     tickOnce, sleep: realSleep, isAlive, intervalMs, maxTicks: flags.once ? 1 : Infinity,
     onTick: (r) => {
       if (!r || !r.plan) { console.error(`build-dispatch-daemon: tick skipped (${r?.reason ?? 'self-sync'})`); return; }
-      process.stdout.write(`${JSON.stringify({ at: new Date().toISOString(), status: r.statusLine, freeze: r.plan.freeze, inFlight: r.plan.inFlight.map((f) => f.num), openItems: reportOpenItems(r.plan.openItems), dispatched: r.dispatched, hold: r.plan.hold, dispatchHolds: r.dispatchHolds, failures: r.failures, retired: r.retired, infraRetry: r.infraRetry })}\n`);
+      process.stdout.write(`${JSON.stringify({ at: new Date().toISOString(), status: r.statusLine, freeze: r.plan.freeze, inFlight: r.plan.inFlight.map((f) => f.num), openItems: reportOpenItems(r.plan.openItems), dispatched: r.dispatched, hold: r.plan.hold, dispatchHolds: r.dispatchHolds, failures: r.failures, retired: r.retired, infraRetry: r.infraRetry, orphanAdoption: r.orphanAdoption })}\n`);
     },
     onTickError: (e) => console.error(`build-dispatch-daemon: tick failed (non-fatal): ${String(e?.message || e).split('\n')[0]}`),
   });

@@ -18,17 +18,25 @@ describe('parseDeliverItemRunArgv', () => {
     ]);
     expect(launch).toEqual({
       item: '3645', lane: '2', sessionSlug: 'conveyor-3645', scope: 'we:scripts/foo.mjs', attemptTag: 'b',
-      provider: 'codex', runId: 'dispatch-lane-abc', effectKey: 'dispatch',
+      provider: 'codex', runId: 'dispatch-lane-abc', effectKey: 'dispatch', resume: false,
     });
   });
 
   // #4349 — `--run-id=`/`--effect-key=` let `deliverItem` settle its own run-store effect on exit
   // (`deliver-item-settle.mjs`); both are optional so an older/hand-run dispatch still parses cleanly.
-  it('defaults scope/attempt/provider/run-id/effect-key to empty strings when absent', () => {
+  it('defaults scope/attempt/provider/run-id/effect-key to empty strings, resume to false, when absent', () => {
     const launch = parseDeliverItemRunArgv(['--num=1', '--lane=2', '--session=s']);
     expect(launch).toEqual({
       item: '1', lane: '2', sessionSlug: 's', scope: '', attemptTag: '', provider: '', runId: '', effectKey: '',
+      resume: false,
     });
+  });
+
+  // build-orphan-adopt (#4131/#4382) — a bare `--resume` parses true; `deliverItem`'s own `launch.resume`
+  // rides this straight through to `runAgentToCompletion`'s resume branch (see that function's own docblock).
+  it('parses a bare `--resume` flag to `resume: true`', () => {
+    const launch = parseDeliverItemRunArgv(['--num=4131', '--lane=9', '--session=conveyor-4131', '--resume']);
+    expect(launch.resume).toBe(true);
   });
 
   it('refuses a missing `--num=`, by name', () => {

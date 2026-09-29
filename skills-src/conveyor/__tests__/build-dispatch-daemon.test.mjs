@@ -1,13 +1,18 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   runBuildDispatchTick, settleBookkeeping, readKillSwitch, readDispatchOutcome, KILL_SWITCH_ENV,
   cliListSettledBuilds, cliListHolds, policyFrom,
   // #4348-open-pr-retry
   primaryInfraStoreEnv, cliRetryInfraBlocked,
+  // #4464 builder-cap-machine-wide
+  cliPlanTick, BUILD_DAEMON_LANE_CAP_EXEMPT_VALUE,
 } from '../build-dispatch-daemon.mjs';
+import { MAX_CONCURRENT_LANES_ENV } from '../../../scripts/lib/lane-concurrency.mjs';
 import {
   acquireBuildDispatchClaim, releaseBuildDispatchClaim, listBuildDispatchClaims,
   placeBuildDispatchHold, listBuildDispatchHolds,
@@ -248,6 +253,70 @@ describe('runBuildDispatchTick — #4348-open-pr-retry (infra-blocked resume fol
     const r = await runBuildDispatchTick({ live: true, effects });
     expect(r.infraRetry).toEqual({ error: 'infra-blocked: gh network error' });
     // the REST of the tick still ran normally — this is a side effect, never a gate on the plan.
+    expect(r.dispatched.length).toBeGreaterThan(0);
+  });
+});
+
+// #4131/#4382 build-orphan-adopt — mirrors the #4348-open-pr-retry suite above: same optional-effect shape
+// (`effects.adoptOrphans`), same LIVE-only/best-effort posture, so the two are asserted the same way.
+describe('runBuildDispatchTick — #4131/#4382 build-orphan-adopt', () => {
+  let lockRoot;
+  beforeEach(() => { lockRoot = mkdtempSync(join(tmpdir(), 'bdd-claims-orphan-')); });
+  afterEach(() => { rmSync(lockRoot, { recursive: true, force: true }); });
+
+  it('a LIVE tick calls effects.adoptOrphans() exactly once, BEFORE this same tick reads its own claims, and '
+    + 'its result rides on the tick report', async () => {
+    const dispatches = [];
+    let calls = 0;
+    const order = [];
+    const effects = {
+      ...effectsFor({ lockRoot, pid: 1, dispatches }),
+      adoptOrphans: async () => { calls += 1; order.push('adopt'); return [{ num: '4131', action: 'resume', reason: 'x', pid: 55555 }]; },
+    };
+    const realListClaims = effects.listClaims;
+    effects.listClaims = () => { order.push('listClaims'); return realListClaims(); };
+    const r = await runBuildDispatchTick({ live: true, effects });
+    expect(calls).toBe(1);
+    expect(r.orphanAdoption).toEqual([{ num: '4131', action: 'resume', reason: 'x', pid: 55555 }]);
+    expect(order[0]).toBe('adopt'); // adoption runs before the tick's own claim read.
+  });
+
+  it('PR #2921 review — resume is allowed only when neither the kill switch nor a landing freeze is on', async () => {
+    const dispatches = [];
+    const seen = [];
+    const base = effectsFor({ lockRoot, pid: 1, dispatches });
+    const adoptOrphans = async (o) => { seen.push(o); return []; };
+
+    await runBuildDispatchTick({ live: true, effects: { ...base, adoptOrphans } });
+    await runBuildDispatchTick({ live: true, effects: { ...base, adoptOrphans, killSwitch: () => ({ engaged: true, reason: 'operator' }) } });
+    const tooManyPrs = Array.from({ length: BUILD_DISPATCH_POLICY.maxOpenPrs + 1 }, (_, i) => ({ number: 9000 + i, labels: [], files: [], headRefName: `x-${i}` }));
+    await runBuildDispatchTick({ live: true, effects: { ...base, adoptOrphans, fetchOpenPrs: async () => [{ repo: 'we', prs: tooManyPrs }] } });
+
+    expect(seen.map((o) => o?.allowResume)).toEqual([true, false, false]);
+    expect(seen[1].frozenReason).toMatch(/kill switch/);
+    expect(seen[2].frozenReason).toMatch(/maxOpenPrs/);
+  });
+
+  it('a DRY-RUN tick (live:false) never calls it — a dry run must touch nothing', async () => {
+    const dispatches = [];
+    let calls = 0;
+    const effects = { ...effectsFor({ lockRoot, pid: 1, dispatches }), adoptOrphans: async () => { calls += 1; return []; } };
+    const r = await runBuildDispatchTick({ live: false, effects });
+    expect(calls).toBe(0);
+    expect(r.orphanAdoption).toBeNull();
+  });
+
+  it('an OLDER effects stub with no `adoptOrphans` at all behaves exactly as before this card — no call, no throw', async () => {
+    const dispatches = [];
+    const r = await runBuildDispatchTick({ live: true, effects: effectsFor({ lockRoot, pid: 1, dispatches }) });
+    expect(r.orphanAdoption).toBeNull();
+  });
+
+  it('a THROWING adoption pass never fails this tick\'s own build-dispatch plan — best-effort, captured as `{error}`', async () => {
+    const dispatches = [];
+    const effects = { ...effectsFor({ lockRoot, pid: 1, dispatches }), adoptOrphans: async () => { throw new Error('orphan-adopt: run-store unreadable'); } };
+    const r = await runBuildDispatchTick({ live: true, effects });
+    expect(r.orphanAdoption).toEqual({ error: 'orphan-adopt: run-store unreadable' });
     expect(r.dispatched.length).toBeGreaterThan(0);
   });
 });
@@ -615,5 +684,78 @@ describe('cliListSettledBuilds / cliListHolds (the real readers, not a stub)', (
 
   it('cliListHolds is empty with no holds placed', () => {
     expect(cliListHolds()).toEqual([]);
+  });
+});
+
+// LIVE incident, 2026-09-29: this PR's own build-dispatch-orphan-adopt.mjs booted clean under every vitest
+// suite in this repo (this file included) but crashed the real daemon at startup once overlaid on the
+// builder clone — `ReferenceError: Cannot access 'DELIVER_ITEM_RUN_SCRIPT' before initialization` inside
+// `dispatch-provider-registry.mjs`, a classic ESM circular-import TDZ. THE REASON EVERY OTHER TEST IN THIS
+// FILE MISSED IT: vitest (and this file's own earlier imports) load the module graph in whatever order ITS
+// OWN import statements happen to reach each file first — a different order than `node
+// skills-src/conveyor/build-dispatch-daemon.mjs` reaches it as the FIRST thing Node evaluates, which is the
+// one order that actually matters (it is exactly what launchd invokes — see
+// `launchd/com.we.build-dispatch-daemon.plist.example`'s own `ProgramArguments`). An in-process
+// `import(...)` of the same file from inside an already-running vitest worker is not a safe substitute for
+// this reason either: by then several of this daemon's own dependencies are already warm in the SAME
+// process's module cache from earlier tests, which can hide precisely this class of ordering bug. So this
+// spawns a REAL, FRESH `node` subprocess with no flags at all — the daemon's own `main()` prints its usage
+// and exits 2 before touching any state, network or filesystem, which happens strictly AFTER every static
+// import in its whole module graph has already finished evaluating; a TDZ anywhere in that graph throws
+// during the import phase, before `main()` is ever reached, and Node reports it as an uncaught
+// `ReferenceError` on stderr with exit code 1 — never the clean usage text on exit 2.
+// #4464 builder-cap-machine-wide (live incident 2026-09-29 ~11 ET) — `cliPlanTick`'s own env override, so this
+// daemon's tick-core read is exempted from the shared, machine-wide lane-count ceiling. See `cliPlanTick`'s
+// own docblock for the full incident and why exempting it is safe.
+describe('cliPlanTick — exempts this daemon\'s own tick-core read from the shared lane-count ceiling (#4464)', () => {
+  it('passes WE_MAX_CONCURRENT_LANES on the CHILD\'s own env, set to the exempt value', () => {
+    const exec = (cmd, args, opts) => {
+      expect(opts.env[MAX_CONCURRENT_LANES_ENV]).toBe(BUILD_DAEMON_LANE_CAP_EXEMPT_VALUE);
+      return JSON.stringify({ decisions: {}, nextState: {} });
+    };
+    const out = cliPlanTick({}, { exec });
+    expect(out).toEqual({ decisions: {}, nextState: {} });
+  });
+
+  it('never touches process.env itself — only the child\'s own env object', () => {
+    const before = process.env[MAX_CONCURRENT_LANES_ENV];
+    const exec = () => JSON.stringify({ decisions: {}, nextState: {} });
+    cliPlanTick({}, { exec });
+    expect(process.env[MAX_CONCURRENT_LANES_ENV]).toBe(before);
+  });
+
+  it('still forwards every OTHER inherited env var unchanged (a spread, never a replacement)', () => {
+    const exec = (cmd, args, opts) => {
+      expect(opts.env.PATH).toBe(process.env.PATH);
+      return JSON.stringify({ decisions: {}, nextState: {} });
+    };
+    cliPlanTick({}, { exec });
+  });
+
+  it('the exempt value is a real, effectively-unbounded number — never accidentally tiny', () => {
+    expect(Number(BUILD_DAEMON_LANE_CAP_EXEMPT_VALUE)).toBeGreaterThan(1000);
+  });
+});
+
+describe('build-dispatch-daemon.mjs boots as a fresh `node` process — the class of bug a vitest import cannot catch', () => {
+  const ENTRY = resolve(fileURLToPath(import.meta.url), '..', '..', 'build-dispatch-daemon.mjs');
+
+  it('a fresh `node <entry>` process (no flags) evaluates its ENTIRE static import graph and reaches its own '
+    + 'usage text (exit 2) — never a ReferenceError/TDZ from a circular import reached only at real process '
+    + 'startup (exit 1, with the module graph never even fully loading)', () => {
+    // `main()`'s own usage block is a KNOWN, EXPECTED non-zero exit (2) — `execFileSync` throws on it exactly
+    // as it would on the crash this test exists to catch, so BOTH outcomes are read from the caught error;
+    // what tells them apart is the exit code and stderr's own text, never "did it throw".
+    let stderr = '';
+    let status = 0;
+    try {
+      execFileSync('node', [ENTRY], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    } catch (e) {
+      stderr = String(e.stderr ?? '');
+      status = e.status;
+    }
+    expect(stderr).not.toMatch(/ReferenceError|before initialization/);
+    expect(stderr).toMatch(/^usage: build-dispatch-daemon\.mjs/);
+    expect(status).toBe(2);
   });
 });
