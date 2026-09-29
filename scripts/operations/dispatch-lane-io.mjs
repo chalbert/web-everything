@@ -45,15 +45,21 @@
 // underneath it. Added by #3165, which grew the file from 792 to 826 code lines past the 800 line.
 
 import { withSalvageHint } from '../lib/salvage-index.mjs';
-import { execFile, execFileSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
+// #4415 (round 2) — live incident 2026-09-29: `defaultCheckAlreadyDone`/`defaultCheckAlreadyDoneAsync`/
+// `defaultListPrs` below all defaulted to a bare, unattributed `execFileSync`/`execFile` — never
+// `execFileSyncThrottled` — exactly the same defect this card's first round fixed in `lease-reaper.mjs` and
+// `lane-pool.mjs`. This time the caller is `dispatch-plan.mjs`'s already-done pass
+// (`Promise.all(staleQueueRows.map((row) => defaultCheckAlreadyDoneAsync(row.num)))`, UNBOUNDED concurrency,
+// one `gh pr list --search "<NNN> in:title" --state merged` call PER stale item): measured live, ~80-100 of
+// these ran SIMULTANEOUSLY in a single `ps aux` snapshot, none logged anywhere, spending the shared `graphql`
+// bucket (8943 points/hour that hour, 6365.2 UNATTRIBUTED — `gh-spend.mjs report --hours=1 --by=caller`).
+import { execFileSyncThrottled } from '../lib/gh-throttle.mjs';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { randomUUID } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { promisify } from 'node:util';
-
-const execFileAsync = promisify(execFile);
 
 import { normNum } from '../conveyor/queue-store.mjs';
 import { laneRefItemNum, laneRefAttemptTag, sessionSlugAttemptTag } from '../conveyor/lease-reaper.mjs';
@@ -255,7 +261,11 @@ export function readTick({
   num,
   bookkeepingFile = '',
   root = REPO_ROOT,
-  exec = execFileSync,
+  // #4415 round 2 — this `exec` feeds `checkAlreadyDone`/`laneRefForPr`/`listAgents` below, ALL of which
+  // shell `gh` (or `claude`) directly with whatever this default is; it must be `execFileSyncThrottled`, never
+  // a bare `execFileSync`, or fixing those functions' OWN internal defaults is moot the moment `readTick`
+  // passes an explicit `{ exec }` override into them (which it always does, right below).
+  exec = execFileSyncThrottled,
   runNode = (argv, opts) => defaultRunNode(argv, opts, { exec }),
   readText = (path) => readFileSync(path, 'utf8'),
   loadItems = () => defaultLoadItems(root),
@@ -2432,7 +2442,8 @@ export function resumeSucceeded({ printedId, requestedSessionId, agentsAfter }) 
  * @param {() => object[]} [o.listPrs] - injectable `gh pr list` reader. Same seam, same reason: the whole PR
  *   axis is testable with no network and no `gh`.
  * @param {Function} [o.exec] - the `execFileSync`-shaped call the DEFAULT readers go through. See
- *   {@link readTick} for why this is a second seam and not the same one.
+ *   {@link readTick} for why this is a second seam and not the same one. Defaults to
+ *   {@link execFileSyncThrottled} (#4415 round 2) — never a bare `execFileSync`.
  * @param {() => Date} [o.now]
  * @param {(pid: number) => boolean} [o.isPidAlive] - #3645/#4212: the liveness probe for a DETACHED
  *   delivery-wrapper handle (`pid:<n>`). Injectable for the same reason `listAgents`/`listPrs` are: the whole
@@ -2440,7 +2451,7 @@ export function resumeSucceeded({ printedId, requestedSessionId, agentsAfter }) 
  * @returns {Record<string, Function>} effect type → `async (entry, ctx) => {status, result?, error?}`.
  */
 export function createDispatchObservers({
-  exec = execFileSync,
+  exec = execFileSyncThrottled,
   listAgents = () => defaultListAgents({ exec }),
   listPrs = () => defaultListPrs({ exec }),
   isPidAlive = defaultIsPidAlive,
@@ -2675,8 +2686,10 @@ export function classifyDispatchPr({ num, startedAt = null, prs = null, attempt 
  * backlog of open+recent PRs, and a bound is what keeps one wedged read from being unbounded.
  *
  * @param {{exec?: Function, env?: object}} [io] - injected ONLY so the argv and opts can be asserted.
+ *   Defaults to {@link execFileSyncThrottled} (#4415 round 2), never a bare `execFileSync` — this is a
+ *   `gh pr list` PR-listing read, the exact shape `gh-throttle.mjs` attributes and paces.
  */
-export function defaultListPrs({ exec = execFileSync, env = process.env } = {}) {
+export function defaultListPrs({ exec = execFileSyncThrottled, env = process.env } = {}) {
   const out = exec('gh', ['pr', 'list', '--state', 'all', '--limit', String(PR_LIST_LIMIT), '--json', PR_LIST_JSON_FIELDS], {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -2840,9 +2853,12 @@ export function filterAlreadyDoneCandidates(prs, num) {
  *
  * @param {string|number} num - the item id.
  * @param {{exec?: Function, env?: object}} [io] - injected ONLY so the argv/opts are assertable in a test.
+ *   Defaults to {@link execFileSyncThrottled} (#4415 round 2), never a bare `execFileSync` — see this
+ *   function's async sibling below for why an unthrottled default here is exactly what blew the shared
+ *   `graphql` bucket live, 2026-09-29.
  * @returns {{done: boolean, pr: object|null, checked: boolean}}
  */
-export function defaultCheckAlreadyDone(num, { exec = execFileSync, env = process.env } = {}) {
+export function defaultCheckAlreadyDone(num, { exec = execFileSyncThrottled, env = process.env } = {}) {
   const key = String(num ?? '').trim();
   if (!key) return { done: false, pr: null, checked: false };
   let raw;
@@ -2867,6 +2883,27 @@ export function defaultCheckAlreadyDone(num, { exec = execFileSync, env = proces
 }
 
 /**
+ * #4415 round 2 — an async-signature-compatible THROTTLED `gh` call: the default `execFileFn` for
+ * {@link defaultCheckAlreadyDoneAsync} below, in place of the bare promisified `execFile` it replaces. Same
+ * shape a caller of the promisified `execFile` already expects (`(file, args, opts) =>
+ * Promise<{stdout, stderr}>`), but the real work goes through {@link execFileSyncThrottled} — the SAME shared
+ * concurrency semaphore and attribution log every other `gh` caller in this codebase goes through.
+ * Deliberately SYNC under the hood despite the async signature: the semaphore's own blocking acquire is
+ * exactly what needs to bind here, so many "concurrent" callers queue through it one at a time rather than all
+ * hitting `gh` at once (see {@link defaultCheckAlreadyDoneAsync}'s own docblock for the live incident this
+ * fixes). A thrown error from the sync call becomes a REJECTED promise by ordinary `async function` semantics,
+ * so `defaultCheckAlreadyDoneAsync`'s existing try/catch-and-degrade needs no change at all.
+ * @param {string} file
+ * @param {string[]} args
+ * @param {object} [opts]
+ * @returns {Promise<{stdout: string, stderr: string}>}
+ */
+async function execFileThrottledAsync(file, args, opts = {}) {
+  const stdout = execFileSyncThrottled(file, args, opts);
+  return { stdout, stderr: '' };
+}
+
+/**
  * THE CONCURRENT SIBLING OF {@link defaultCheckAlreadyDone} — same query shape, same matcher, but via
  * `execFile` (promise-based) instead of `execFileSync`, so a caller checking MANY ids in one tick can run
  * them concurrently instead of paying each `gh` round-trip serially.
@@ -2888,12 +2925,28 @@ export function defaultCheckAlreadyDone(num, { exec = execFileSync, env = proces
  * `{ done: false, pr: null, checked: false }` rather than rejecting — a caller `Promise.all`-ing many of
  * these must never have one bad id fail the whole batch.
  *
+ * #4415 round 2 — LIVE INCIDENT, 2026-09-29: this function's OLD default (the plain promisified
+ * `node:child_process` `execFile`) is EXACTLY what "many can be in flight at once" (this docblock's own words,
+ * above) turned into in production — `dispatch-plan.mjs`'s `Promise.all(staleQueueRows.map((row) =>
+ * defaultCheckAlreadyDoneAsync(row.num)))` has NO concurrency cap of its own, and a `ps aux` snapshot caught
+ * ~80-100 of these `gh pr list --search … --state merged` calls running SIMULTANEOUSLY, none of them logged
+ * anywhere (the bare promisified `execFile` never touches `gh-throttle.mjs`) — the single largest UNATTRIBUTED
+ * slice of the shared `graphql` bucket that hour (6365.2 of 8943 points, `gh-spend.mjs report --hours=1
+ * --by=caller`).
+ * Fixed the same way every other `gh` caller in this codebase is: the default now goes through
+ * {@link execFileThrottledAsync} — same async signature `defaultCheckAlreadyDoneAsync`'s own contract needs
+ * (`(file, args, opts) => Promise<{stdout, stderr}>`), but the real work is `execFileSyncThrottled`, whose
+ * shared concurrency semaphore (`DEFAULT_GH_CONCURRENCY_CAP`, `gh-throttle.mjs`) now genuinely bounds how many
+ * of these run at once, AND logs every one for attribution. Deliberately re-serializes what was async/parallel
+ * — a real latency cost, but the "many in flight, none paced" property is exactly what broke live, so trading
+ * speed for a bounded, attributed rate is the correct direction here, not a regression to paper over.
+ *
  * @param {string|number} num - the item id.
  * @param {{execFileFn?: Function, env?: object}} [io] - `execFileFn` injected ONLY so the argv/opts are
- *   assertable in a test; defaults to the promisified `node:child_process` `execFile`.
+ *   assertable in a test; defaults to {@link execFileThrottledAsync}, never the bare promisified `execFile`.
  * @returns {Promise<{done: boolean, pr: object|null, checked: boolean}>}
  */
-export async function defaultCheckAlreadyDoneAsync(num, { execFileFn = execFileAsync, env = process.env } = {}) {
+export async function defaultCheckAlreadyDoneAsync(num, { execFileFn = execFileThrottledAsync, env = process.env } = {}) {
   const key = String(num ?? '').trim();
   if (!key) return { done: false, pr: null, checked: false };
   let raw;
@@ -2937,7 +2990,7 @@ export async function defaultCheckAlreadyDoneAsync(num, { execFileFn = execFileA
  * @param {{exec?: Function, env?: object}} [io] - injected ONLY so the argv and opts can be asserted.
  * @returns {string|null} the PR's `headRefName`, or `null` when the field is absent or blank.
  */
-export function defaultLaneRefForPr(pr, { exec = execFileSync, env = process.env } = {}) {
+export function defaultLaneRefForPr(pr, { exec = execFileSyncThrottled, env = process.env } = {}) {
   // A THROW HERE IS DELIBERATE, not an oversight — the OBSERVER elsewhere in this file is fail-SOFT on a `gh`
   // failure (a completed build still needing a person is the acceptable cost there), but this is not an
   // observer: it runs BEFORE a dispatch, to resolve a value that dispatch cannot proceed without. Swallowing
