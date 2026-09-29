@@ -76,6 +76,12 @@ import { createHash, randomBytes } from 'node:crypto';
 import { homedir, hostname } from 'node:os';
 import { join, basename, resolve, dirname, sep } from 'node:path';
 import { resolveReal } from './guard-lane.mjs';
+// #4415 — live incident 2026-09-29: `deadLeasePlan`'s own `gh pr list --state all` (below) was a bare,
+// unattributed, GraphQL-backed `execFileSync`, run on EVERY `acquire` and EVERY `list --acquirable` scan
+// across every session in every pool — measured as the top unattributed slice of the app's GraphQL bucket
+// (`gh-spend.mjs report`'s own total minus every row it could explain). Converted to the same REST +
+// ETag-conditional path #4351 built for `build-dispatch-daemon.mjs`'s own top-spender fix.
+import { ghRestGetPaged } from './lib/gh-rest-read.mjs';
 // #x9fbg1x — every lane clone this pool hands out gets Claude Code's own background-session worktree-isolation
 // guard turned OFF, via an UNTRACKED (`.gitignore`d) settings.local.json this call writes INTO the clone —
 // never the tracked, repo-wide `.claude/settings.json` (which no longer carries this key; see that file's own
@@ -121,7 +127,7 @@ import { sleepSyncMs } from './readiness/drain-lock.mjs';
 // #xkk4lv7 — `prDetailsFromList`/`resolveLeaseItemNum` ADDED: the SAME branch-based item-resolution fallback
 // (+ its Fork 2/Option C safety gate) `lease-reaper.mjs`'s own resident pass now drives, imported rather than
 // re-derived (this card's Risk 5 — the two reapers must stay single-sourced).
-import { classifyReap, reapPlan, prStatesFromList, prStatesByPrNumber, prDetailsFromList, itemNumFromSession, prNumFromSession, resolveLeaseItemNum } from './conveyor/lease-reaper.mjs';
+import { classifyReap, reapPlan, prStatesFromList, prStatesByPrNumber, prDetailsFromList, itemNumFromSession, prNumFromSession, resolveLeaseItemNum, restPullToPrStateShape } from './conveyor/lease-reaper.mjs';
 import { readField } from './backlog/frontmatter.mjs';
 // #3383 — the lane-history ledger (`<lane>/.git/lane-history.jsonl`): one line per acquire/adopt/release/reap,
 // so a lane can be traced back to the session/card/PR that used it AFTER its lease is released (today nothing
@@ -1547,8 +1553,18 @@ function deadLeasePlan(repo, nowMs, ttlMs) {
     // #xkk4lv7 — `mergeCommit` ADDED: the branch-fallback's Fork 2/Option C corroboration (`laneQuietSincePr`,
     // via `resolveLeaseItemNum`) needs a merged PR's own merge-commit sha, which the pre-existing field list
     // never carried (mirrors the identical addition to `lease-reaper.mjs#fetchPrStatesForRepo`).
-    const out = execFileSync('gh', ['pr', 'list', '--state', 'all', '--limit', '400', '--json', 'number,state,mergedAt,headRefName,mergeCommit'], { cwd: repo.referencePath, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 20_000, killSignal: 'SIGKILL' });
-    const prs = JSON.parse(out);
+    // #4415 — was a bare `execFileSync('gh', ['pr','list',…])`: unattributed AND GraphQL-backed, run on every
+    // `acquire`/`list --acquirable`. Now the shared REST + ETag-conditional path (#4351), scoped via `cwd`
+    // exactly as the old call was (no `--repo` — gh resolves `{owner}/{repo}` off `repo.referencePath`'s own
+    // remote, unchanged); `restPullToPrStateShape` reshapes REST's `head.ref`/`merged_at`/`merge_commit_sha`
+    // into the fields `prStatesFromList`/`prStatesByPrNumber`/`prDetailsFromList` already read.
+    const pulls = ghRestGetPaged('repos/{owner}/{repo}/pulls?state=all', {
+      context: repo.referencePath,
+      op: 'rest pr-list (lane-pool-reap)',
+      maxItems: 400,
+      execOpts: { cwd: repo.referencePath, timeout: 20_000, killSignal: 'SIGKILL' },
+    });
+    const prs = pulls.map(restPullToPrStateShape);
     prStates = { byItem: prStatesFromList(prs), byPr: prStatesByPrNumber(prs), detailsByItem: prDetailsFromList(prs) };
   } catch { prStates = null; }
   // Item-resolved axis (OFFLINE): read the pool's origin/<branch> backlog listing ONCE, then answer

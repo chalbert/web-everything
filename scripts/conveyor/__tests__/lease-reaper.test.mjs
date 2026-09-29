@@ -39,6 +39,7 @@ import {
   AGENT_GONE_STATES,
   repoKeyForPool,
   fetchPrStatesForRepo,
+  restPullToPrStateShape,
   detachedWrapperPidsBySession,
   laneBranchItemNum,
   laneQuietSincePr,
@@ -328,6 +329,30 @@ describe('classifyReap — degenerate inputs', () => {
   it('null / non-object lease → keep (never reap what we cannot read)', () => {
     expect(classifyReap(null, { nowMs: NOW, ttlMs: TTL_MS })).toEqual({ reap: false, reason: null });
     expect(classifyReap(undefined, { nowMs: NOW, ttlMs: TTL_MS })).toEqual({ reap: false, reason: null });
+  });
+});
+
+// #4415 — proves the REST-shape reads (`head.ref`/`merged_at`/`merge_commit_sha`) map to exactly the fields
+// `prStatesFromList`/`prDetailsFromList` already read, AND that the pre-existing GraphQL-shaped fixtures every
+// other test in this file hand-builds keep resolving unchanged (this mapper is additive, never a breaking reshape).
+describe('restPullToPrStateShape — REST list-item → the GraphQL-shaped fields the reducers already read (#4415)', () => {
+  it('a REST pull item (head.ref, merged_at, merge_commit_sha) maps to headRefName/mergedAt/mergeCommit.oid', () => {
+    const rest = { number: 900, state: 'closed', merged_at: '2026-09-22T00:00:00Z', merge_commit_sha: 'deadbeef', head: { ref: 'lane/181-x' } };
+    expect(restPullToPrStateShape(rest)).toEqual({
+      number: 900, state: 'closed', headRefName: 'lane/181-x', mergedAt: '2026-09-22T00:00:00Z', mergeCommit: { oid: 'deadbeef' },
+    });
+  });
+  it('a REST open pull (no merged_at/merge_commit_sha) maps mergeCommit to null, never a bogus {oid: undefined}', () => {
+    const rest = { number: 42, state: 'open', merged_at: null, merge_commit_sha: null, head: { ref: 'lane/42-y' } };
+    expect(restPullToPrStateShape(rest)).toEqual({ number: 42, state: 'open', headRefName: 'lane/42-y', mergedAt: null, mergeCommit: null });
+  });
+  it('tolerant of the pre-existing GraphQL-shaped fixture (headRefName/mergeCommit.oid top-level, no head/merge_commit_sha) — unchanged pass-through', () => {
+    const graphqlShaped = { number: 500, state: 'MERGED', headRefName: 'lane/2825-x', mergedAt: '2026-09-01T00:00:00Z', mergeCommit: { oid: 'cafef00d' } };
+    expect(restPullToPrStateShape(graphqlShaped)).toEqual(graphqlShaped);
+  });
+  it('a malformed/empty item degrades to a safe empty shape, never throws', () => {
+    expect(restPullToPrStateShape({})).toEqual({ number: undefined, state: undefined, headRefName: '', mergedAt: null, mergeCommit: null });
+    expect(restPullToPrStateShape(null)).toEqual({ number: undefined, state: undefined, headRefName: '', mergedAt: null, mergeCommit: null });
   });
 });
 
@@ -986,16 +1011,20 @@ describe('repoKeyForPool — #xr4ygg7 the repo a lane-pool DIRECTORY NAME names 
 });
 
 describe('fetchPrStatesForRepo — #xr4ygg7 ONE gh pr list PER REPO, never one shared always-WE read', () => {
-  it('scopes the gh call to the repo\'s own constellation slug via --repo, and returns BOTH keyspaces from the one fetch (#x5wm9ot)', () => {
+  it('scopes the gh call to the repo\'s own constellation slug via the REST path, and returns BOTH keyspaces from the one fetch (#x5wm9ot)', () => {
     const calls = [];
     // PR #900 has head ref `lane/181-x` (item 181's couple) — its OWN PR number (900) is a DIFFERENT number
     // from that item number, on purpose: this is exactly the fix-<PR>-vs-item-number distinction bug #1 named.
-    const exec = (cmd, args) => { calls.push({ cmd, args }); return JSON.stringify([{ number: 900, headRefName: 'lane/181-x', state: 'MERGED', mergedAt: '2026-09-22T00:00:00Z' }]); };
+    const exec = (cmd, args) => {
+      calls.push({ cmd, args });
+      return JSON.stringify([{ number: 900, headRefName: 'lane/181-x', state: 'MERGED', mergedAt: '2026-09-22T00:00:00Z' }]);
+    };
     const states = fetchPrStatesForRepo('plateau-app', {}, { exec });
     expect(calls).toHaveLength(1);
     expect(calls[0].cmd).toBe('gh');
-    expect(calls[0].args).toContain('--repo');
-    expect(calls[0].args[calls[0].args.indexOf('--repo') + 1]).toBe('chalbert/plateau-app');
+    // #4415 — REST, not `pr list`: `['api', '-i', 'repos/<slug>/pulls?state=all&per_page=…&page=1']`.
+    expect(calls[0].args[0]).toBe('api');
+    expect(calls[0].args).toContain('repos/chalbert/plateau-app/pulls?state=all&per_page=100&page=1');
     expect(states.byItem.get('181')).toBe('merged');  // an item-kind (conveyor-181) lookup
     expect(states.byPr.get('900')).toBe('merged');    // a PR_KIND (fix-900) lookup — DIFFERENT key, same fetch
     expect(states.byItem.get('900')).toBeUndefined(); // the PR's own number is NOT in the item-keyed map
@@ -1005,9 +1034,9 @@ describe('fetchPrStatesForRepo — #xr4ygg7 ONE gh pr list PER REPO, never one s
     const calls = [];
     const exec = (cmd, args) => { calls.push(args); return '[]'; };
     fetchPrStatesForRepo('we', { 'pr-repo': 'chalbert/some-fork' }, { exec });
-    expect(calls[0][calls[0].indexOf('--repo') + 1]).toBe('chalbert/some-fork');
+    expect(calls[0]).toContain('repos/chalbert/some-fork/pulls?state=all&per_page=100&page=1');
     fetchPrStatesForRepo('frontierui', { 'pr-repo': 'chalbert/some-fork' }, { exec });
-    expect(calls[1][calls[1].indexOf('--repo') + 1]).toBe('chalbert/frontierui');
+    expect(calls[1]).toContain('repos/chalbert/frontierui/pulls?state=all&per_page=100&page=1');
   });
   it('--no-check-prs disables the axis with no exec call at all', () => {
     const exec = () => { throw new Error('must not be called'); };
