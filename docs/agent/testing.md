@@ -4,11 +4,13 @@
 
 ## Standalone probation builds
 
-`scripts/operations/probation-build-run.mjs` accepts `--taskType=doc-fix|bugfix` (doc-fix default),
+`scripts/operations/probation-build-run.mjs` accepts `--taskType=doc-fix|bugfix|test-fix` (doc-fix default),
 roster names or legacy JSON in `--worker`, and an allowlisted `--model`. Each omitted session is
 generated independently. Different items use separate lane clones; do not reuse an explicit session
 and lane for simultaneous runs. Task files, worker logs, commit messages and PR bodies are lane-local.
 Flash keeps the Codex read-only checker; a checker refusal undoes the attempt.
+`test-fix` uses Flash without a separate simple flag and refuses non-test worker diffs.
+The CI-heal decision currently has no structured failing-file list; do not infer one from check names.
 
 Verify parallel isolation with the integration test
 `scripts/__tests__/lane-pool-acquire-shares-scan-cache.test.mjs` (the three concurrent acquirers case).

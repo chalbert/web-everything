@@ -41,6 +41,8 @@ import {
   healDiffWithinEnvelope, launchScorecardRow, newUntrackedPaths, parseCheckerVerdict, summarizeNumstat, workerNeeded,
 } from '../lib/probation-launcher.mjs';
 
+import { PROVEN_TASK_ENVELOPES } from '../lib/provider-routing.mjs';
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 /** The WE checkout every tool is resolved from — by script location, never cwd. */
 export const WE_ROOT = resolve(HERE, '..', '..');
@@ -127,7 +129,7 @@ export async function runProbationHeal(args, io) {
     const baseSha = io.headSha(lanePath);
     // Snapshot what is untracked BEFORE the worker runs, so only files it creates can join the heal.
     const preexisting = io.untracked(lanePath);
-    const task = buildCiHealTask({ pr, reason, scope: args.scope, failingChecks: io.failingChecks(pr), gateOutput: gate.output, logTail: io.failedLogTail(pr) });
+    const task = (worker.taskType === 'test-fix' ? 'Test-fix: change only tests or test fixtures. If production code is wrong, stop and report it.\n\n' : '') + buildCiHealTask({ pr, reason, scope: args.scope, failingChecks: io.failingChecks(pr), gateOutput: gate.output, logTail: io.failedLogTail(pr) });
     const taskFile = io.writeTaskFile(lanePath, 'probation-heal-task.md', task);
     const preHookSurface = hookReset.snapshot;
     log(`running ${worker.launcher} --model=${worker.model}`);
@@ -151,7 +153,7 @@ export async function runProbationHeal(args, io) {
     const summary = summarizeNumstat(io.diffNumstat(lanePath, baseSha, preexisting), { exclude: preexisting });
     diffRow = { files: summary.files, loc: summary.loc };
     if (!summary.files) return finish('escalated-needs-human', executor, `the worker changed nothing (${run.ok ? 'it finished' : 'it failed'})`, { diff: diffRow });
-    const fits = healDiffWithinEnvelope(summary);
+    const fits = healDiffWithinEnvelope(summary, PROVEN_TASK_ENVELOPES[worker.taskType ?? 'ci-heal']);
     if (!fits.ok) {
       io.discardChanges(lanePath, baseSha, preexisting);
       return finish('gate-red', executor, `not pushed: ${fits.reason}`, { diff: diffRow });

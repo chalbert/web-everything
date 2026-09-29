@@ -156,3 +156,26 @@ describe('decideDispatchRoute carries the pick on the record', () => {
     expect(out.probationWorker?.id).toBe('antigravity-claude');
   });
 });
+
+
+describe('test-fix probation (#4551)', () => {
+  it('routes an all-test build or fix to Flash with the Codex checker without a simple flag', () => {
+    for (const kind of ['build', 'fix']) {
+      const filesTouched = ['scripts/__tests__/repair.test.mjs'];
+      const { taskType } = taskTypeFor({ kind, scopePaths: filesTouched });
+      expect(taskType).toBe('test-fix');
+      const route = selectProvider({ taskType }, { kind, filesTouched, estimatedSize: 20, ...open });
+      expect(route.probationWorker).toMatchObject({ id: 'antigravity-gemini', model: 'gemini-3.8-flash-high', checker: 'codex' });
+      expect(decideDispatchRoute({ kind, scopePaths: filesTouched, size: 1 }).probationWorker).toMatchObject({
+        id: 'antigravity-gemini', model: 'gemini-3.8-flash-high', checker: 'codex', taskType: 'test-fix',
+      });
+    }
+  });
+  it('refuses a mixed scope and retains the normal Claude route', () => {
+    const filesTouched = ['scripts/a.test.mjs', 'scripts/a.mjs'];
+    const route = selectProvider({ taskType: 'test-fix' }, { kind: 'build', filesTouched, ...open });
+    expect(route.probationWorker).toBeNull();
+    expect(route.recommendation).toBe('claude');
+    expect(taskTypeFor({ kind: 'fix', scopePaths: filesTouched }).taskType).toBe('bugfix');
+  });
+});

@@ -129,16 +129,28 @@ export function isDocScopePath(entry) {
   return DOC_PATH_SUFFIXES.some((s) => path.endsWith(s));
 }
 
+/** Shared test-file boundary for classification and the post-worker diff envelope. */
+export function isTestPath(entry) {
+  if (typeof entry !== 'string') return false;
+  const path = normalizeScopePath(entry);
+  if (!path || path.startsWith('/') || path.split('/').includes('..')) return false;
+  return /(^|\/)__tests__\//.test(path)
+    || /(^|\/)[^/]+\.(test|spec)\.[^/]+$/.test(path)
+    || /(^|\/)(__fixtures__|test-fixtures)\//.test(path)
+    || /(^|\/)(tests?|__tests__)\/(?:[^/]+\/)*fixtures\//.test(path);
+}
+
 /**
  * THE DERIVATION. Pure, total, and the ONLY place a dispatch becomes a router `taskType`.
  *
- * @param {{kind?: string, cause?: string|null, scopePaths?: string[]}} dispatch
+ * @param {{kind?: string, cause?: string|null, scopePaths?: string[], failingFiles?: string[]}} dispatch
  *   - `kind`   the dispatch kind (`we:scripts/operations/dispatch-lane.mjs#LAUNCH_KINDS`, or `review`).
  *   - `cause`  why this dispatch was made ({@link DISPATCH_CAUSES}); `null`/`''`/absent means "no cause given".
  *   - `scopePaths` the dispatch's declared scope, repo-qualified or not.
+ *   - `failingFiles` optional structured CI failure paths; absent evidence keeps ordinary ci-heal.
  * @returns {{outcome: 'task-type'|'role'|'refused', taskType: string|null, role: string|null, reason: string}}
  */
-export function taskTypeFor({ kind, cause, scopePaths } = {}) {
+export function taskTypeFor({ kind, cause, scopePaths, failingFiles } = {}) {
   const k = String(kind ?? '').trim();
   const rawCause = cause == null ? '' : String(cause).trim();
   const paths = Array.isArray(scopePaths) ? scopePaths.map(String).filter((p) => p.trim()) : [];
@@ -168,6 +180,12 @@ export function taskTypeFor({ kind, cause, scopePaths } = {}) {
   }
   // agy-launcher-probation (operator, 2026-09-27) — a CI heal is its own taskType, not `bugfix`: it repairs a red
   // or BEHIND PR's CI, not a reviewer's finding, and it is opened on probation while `bugfix` stays closed.
+  if (k === 'ci-heal' && Array.isArray(failingFiles) && failingFiles.length && failingFiles.every(isTestPath)) {
+    return derived('test-fix', 'every supplied failing file is a test file');
+  }
+  if (['build', 'fix'].includes(k) && paths.length && paths.every(isTestPath)) {
+    return derived('test-fix', 'every declared scope path is a test file');
+  }
   if (k === 'ci-heal') {
     return derived('ci-heal', 'a `ci-heal` repairs a red or BEHIND PR\'s CI, which is its own task type');
   }

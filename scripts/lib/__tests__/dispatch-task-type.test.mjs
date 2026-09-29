@@ -185,3 +185,16 @@ describe('the all-docs rule', () => {
     expect(normalizeScopePath(null)).toBe('');
   });
 });
+
+
+describe('test-only failure classification (#4551)', () => {
+  it('classifies a nonempty all-test failing-file list before ordinary ci-heal', () => {
+    expect(taskTypeFor({ kind: 'ci-heal', failingFiles: ['scripts/a.test.mjs', 'tests/fixtures/input.json'] }).taskType).toBe('test-fix');
+  });
+  it.each([undefined, [], ['scripts/a.test.mjs', 'src/a.mjs'], [''], [null], ['tests/fixtures/../../src/a.mjs']])('keeps ordinary ci-heal for missing, mixed or invalid evidence: %j', (failingFiles) => {
+    expect(taskTypeFor({ kind: 'ci-heal', failingFiles }).taskType).toBe('ci-heal');
+  });
+  it.each(['src/__tests__/helper.ts', 'src/a.test.ts', 'e2e/a.spec.ts', 'test/fixtures/input.json', 'src/__fixtures__/a.json'])('recognizes test path %s', (path) => {
+    expect(taskTypeFor({ kind: 'build', scopePaths: [path] }).taskType).toBe('test-fix');
+  });
+});

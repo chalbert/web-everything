@@ -26,6 +26,7 @@
  * and is reused as-is by both run scripts.
  */
 
+import { isTestPath } from './dispatch-task-type.mjs';
 import { PROVEN_TASK_ENVELOPES } from './provider-routing.mjs';
 
 /** The launcher scripts a probation worker may name, repo-relative. */
@@ -141,7 +142,9 @@ export function buildDocFixTask({ num, title = '', spec, scope = [], taskType = 
     'to spec — every `## Done when` clause it states must hold when you are finished.',
     '',
     'Rules:',
-    taskType === 'doc-fix'
+    taskType === 'test-fix'
+      ? '- Touch ONLY test files or test fixtures. If production code is wrong, stop and report it; do not change production code.'
+      : taskType === 'doc-fix'
       ? '- This is a `doc-fix` task: touch ONLY documentation/prose files. Do not change source code, tests, or config.'
       : '- This is a bugfix task: repair only the specified bug. Simple mechanical work only when using Gemini Flash.',
     `- Stay inside the item's own scope: ${scope.length ? scope.join(', ') : '(no declared scope — stay inside documentation paths only)'}.`,
@@ -290,6 +293,9 @@ export function newUntrackedPaths(before, after) {
  * @returns {{ok: boolean, reason: string}}
  */
 export function healDiffWithinEnvelope(summary, envelope = PROVEN_TASK_ENVELOPES['ci-heal']) {
+  if (envelope.testOnly && (!summary.paths?.length || !summary.paths.every(isTestPath))) {
+    return { ok: false, reason: 'test-fix refused non-test or missing paths; use the normal route for production changes' };
+  }
   if (summary.files > envelope.maxFiles) return { ok: false, reason: `the heal touched ${summary.files} files (limit ${envelope.maxFiles})` };
   if (summary.loc > envelope.maxLoc) return { ok: false, reason: `the heal changed ${summary.loc} lines (limit ${envelope.maxLoc})` };
   return { ok: true, reason: `${summary.files} file(s), ${summary.loc} line(s) — within the ci-heal envelope` };
