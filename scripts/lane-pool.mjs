@@ -114,6 +114,7 @@ import { readFreeLaneList, isFreeLaneListFresh, freeLaneCandidates, resolveFreeL
 // #2560 — lane-pool may freely import readiness (confirmed no circular import): the advisory scope-lease check
 // at acquire. normScope normalizes the declared `--scope`; candidateLaunch is the pure overlap-at-launch query.
 import { normScope } from './readiness/scope-lease.mjs';
+import { isCherryOutputAllPatchEquivalent } from './lib/git-patch-equivalence.mjs';
 import { candidateLaunch } from './readiness/scope-lease-live.mjs';
 // #x3jmao3 — the SAME non-busy-wait spin-poll primitive `withNumberingLock` already uses to space its own
 // spin-acquire (`we:scripts/readiness/drain-lock.mjs`), reused rather than re-implemented, for `acquire`'s
@@ -943,12 +944,14 @@ function aheadIsPatchEquivalent(dir, head, remoteShas, branch) {
 }
 
 /** ONE `git cherry <upstream> <head>` call. `true` iff every commit `<head>` has that `<upstream>` lacks is
- *  patch-equivalent to something already in `<upstream>` (or there are none — already ancestor-contained). */
+ *  patch-equivalent to something already in `<upstream>` (or there are none — already ancestor-contained).
+ *  #4313 — the parse itself is the shared `./lib/git-patch-equivalence.mjs` primitive (also used by
+ *  `lease-reaper.mjs`'s `defaultGitIsAncestor`); this file's own `tryGit` spawn (env/timeout hardening) and
+ *  `null → false` fold stay local, unchanged. */
 function cherryAllPatchEquivalent(dir, upstream, head) {
   const out = tryGit(['cherry', upstream, head], dir);
   if (out === null) return false; // unresolvable (e.g. `branch` not fetched here) — try the batched fallback
-  const lines = out.split('\n').filter(Boolean);
-  return lines.length === 0 || lines.every((l) => l.startsWith('-'));
+  return isCherryOutputAllPatchEquivalent(out);
 }
 
 /**
