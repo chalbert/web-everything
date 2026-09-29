@@ -1,4 +1,5 @@
 ---
+bornAs: x5s8b47
 kind: story
 size: 5
 tier: pinned
@@ -10,7 +11,7 @@ tags: []
 
 # review-pr judgeAdvisory crashes silently when Codex is quota-exhausted, permanently stalling advisory review
 
-The core (mandatory-when-opted-in) `judgeAdvisory` seat in `we:scripts/operations/review-pr.mjs` (`providerName: 'codex'`, #xqa9ttq) spawns a real `codex` CLI process with no quota/availability check at all. `we:scripts/operations/review-extra-seats.mjs#quotaHold` (line 164) already reads Codex's own quota gauge and gracefully skips/logs ("skipping codex — quota gauge at N% on its last seat call; sitting out until <reset>") for its OWN, separate bonus-seat path — but `judgeAdvisory` never calls it. When Codex is exhausted, the spawn fails, and nothing in the job's step-execution wrapper (`we:scripts/operations/review-job.mjs`) catches the failure cleanly: the whole `review-loop-cli` process crashes (exit 1), its real error is lost (only a stray Node deprecation-warning line survives into the completion record's `label`), and `review-pr`'s run record is left permanently suspended at `pending:{step:'judgeAdvisory', stepIndex:3}` — never resumed, because a fresh dispatch (`we:scripts/operations/review-job.mjs`, the #2848 job-model core) always starts a brand-new run from `read` (stepIndex 0) with a new UUID, never revisiting the orphaned one.
+The core (mandatory-when-opted-in) `judgeAdvisory` seat in `we:scripts/operations/review-pr.mjs` (`providerName: 'codex'`, #3704) spawns a real `codex` CLI process with no quota/availability check at all. `we:scripts/operations/review-extra-seats.mjs#quotaHold` (line 164) already reads Codex's own quota gauge and gracefully skips/logs ("skipping codex — quota gauge at N% on its last seat call; sitting out until <reset>") for its OWN, separate bonus-seat path — but `judgeAdvisory` never calls it. When Codex is exhausted, the spawn fails, and nothing in the job's step-execution wrapper (`we:scripts/operations/review-job.mjs`) catches the failure cleanly: the whole `review-loop-cli` process crashes (exit 1), its real error is lost (only a stray Node deprecation-warning line survives into the completion record's `label`), and `review-pr`'s run record is left permanently suspended at `pending:{step:'judgeAdvisory', stepIndex:3}` — never resumed, because a fresh dispatch (`we:scripts/operations/review-job.mjs`, the #2848 job-model core) always starts a brand-new run from `read` (stepIndex 0) with a new UUID, never revisiting the orphaned one.
 
 ## Measured, live (2026-09-28, ~7:07–7:29 PM ET)
 

@@ -10,7 +10,7 @@ tags: []
 
 # Provider allowance gate: every model spawn checks a live allowance gauge and falls back by a declared chain
 
-Every provider spawn today — we:scripts/operations/review-pr.mjs's judgeAdvisory seat, fix/ci-heal, build/deliver wrappers, prepare's we:scripts/codex-direct-task.mjs / we:scripts/gemini-direct-task.mjs, probation launchers — launches Codex/Antigravity/Claude with no live allowance check. 2026-09-28: Codex hit quota, judgeAdvisory crashed uncaught, review-loop-cli died, 5 PRs' reviews stalled (narrow fix we:backlog/x5s8b47). Meanwhile a worker's plan review switched to Gemini on its own — the systemic behavior wanted. Full design: a gauge per provider/account, ONE spawn chokepoint, per-job-kind fallback chains as policy, a health smell, auto-recovery. MVP: the chokepoint plus Codex/Antigravity gauges wired into review seats and direct-task scripts.
+Every provider spawn today — we:scripts/operations/review-pr.mjs's judgeAdvisory seat, fix/ci-heal, build/deliver wrappers, prepare's we:scripts/codex-direct-task.mjs / we:scripts/gemini-direct-task.mjs, probation launchers — launches Codex/Antigravity/Claude with no live allowance check. 2026-09-28: Codex hit quota, judgeAdvisory crashed uncaught, review-loop-cli died, 5 PRs' reviews stalled (narrow fix we:backlog/4380). Meanwhile a worker's plan review switched to Gemini on its own — the systemic behavior wanted. Full design: a gauge per provider/account, ONE spawn chokepoint, per-job-kind fallback chains as policy, a health smell, auto-recovery. MVP: the chokepoint plus Codex/Antigravity gauges wired into review seats and direct-task scripts.
 
 ## Evidence (2026-09-28)
 
@@ -20,7 +20,7 @@ Every provider spawn today — we:scripts/operations/review-pr.mjs's judgeAdviso
   bonus-seat path. The spawn failure was never caught cleanly, `review-loop-cli` crashed (exit 1), and 5 PRs'
   reviews (`#2865`/`#2867`/`#2873`/`#2874`/`#2875`) were left permanently suspended at
   `pending:{step:'judgeAdvisory'}` with no resume path. The narrow, single-seat fix for this one crash is filed
-  separately as `we:backlog/x5s8b47` (tiered `pinned`) — this epic is the SYSTEMIC generalization: the same gap
+  separately as `we:backlog/4380` (tiered `pinned`) — this epic is the SYSTEMIC generalization: the same gap
   (a spawn with no live allowance check) sits at every OTHER provider launch point too, not only this one seat.
 - Same session, meanwhile: a worker driving its own plan review switched from Codex to Gemini **by itself**
   when Codex looked unavailable — with no chokepoint or declared chain telling it to. That ad-hoc self-correct
@@ -82,7 +82,7 @@ Every provider spawn today — we:scripts/operations/review-pr.mjs's judgeAdviso
    a prepare pass or an operator's manual invocation sees the same gate a review seat does.
 4. A declared fallback chain for at least the `advisory` job-kind (point 3 of the Full design), with a
    structured skip/fallback marker recorded on the run — the same "intentional, visible sit-out, never a
-   silent crash" shape `we:backlog/x5s8b47`'s own MVP already applies to the single `judgeAdvisory` seat,
+   silent crash" shape `we:backlog/4380`'s own MVP already applies to the single `judgeAdvisory` seat,
    generalized here to every MVP-covered launch site and to a genuine multi-step chain, not only a single skip.
 5. Every Full-design piece this slice does NOT build — the full per-account gauge roster (Claude's two
    subscriptions, the GitHub identities), the fix/ci-heal and build/deliver wrapper, probation launchers, the
