@@ -150,7 +150,6 @@ describe('dispatchReview — the composition: plan → fill → mint → spawn',
       '--append-system-prompt-file', REVIEW_DISPATCH_SYSTEM_PROMPT_FILE,
       '--model', 'sonnet',
       ...DISALLOWED_TOOLS_ARGV,
-      '--model', 'sonnet',
       '# brief for 1234 in chalbert/web-everything\n'
       + 'acquire: node scripts/lane-pool.mjs acquire --session=review-1234\n'
       + 'this brief documents {{LIKE_THIS}} as an example convention, not a real token',
@@ -263,7 +262,6 @@ describe('dispatchReview — the composition: plan → fill → mint → spawn',
       '--model', 'sonnet',
       ...DISALLOWED_TOOLS_ARGV,
       '--permission-mode', 'plan',
-      '--model', 'sonnet',
       '# brief for 1234 in chalbert/web-everything\n'
       + 'acquire: node scripts/lane-pool.mjs acquire --session=review-1234\n'
       + 'this brief documents {{LIKE_THIS}} as an example convention, not a real token',
