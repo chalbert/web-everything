@@ -62,6 +62,11 @@
 
 import { normNum } from './queue-store.mjs';
 import { DISPATCH_EFFECT } from '../operations/dispatch-lane.mjs';
+// Through the REGISTRY, never `dispatch-providers/build.mjs` directly: `detached-dispatch.mjs` imports the
+// registry, which imports `build.mjs` — entering that cycle at `build.mjs` (or at `detached-dispatch.mjs` first)
+// leaves the registry reading `DELIVER_ITEM_RUN_SCRIPT` in its TDZ at load. The registry is the cycle's own
+// entry point; the run script is read from it at CALL time.
+import { dispatchProviderEntry } from '../operations/dispatch-provider-registry.mjs';
 import { createFileRunStore } from '../operations/run-store.mjs';
 import { resolveInFlight } from '../operations/effect-executor.mjs';
 import { resolveLanePath, laneHasCommitAhead } from '../operations/minimal-context-provider.mjs';
@@ -69,7 +74,6 @@ import { tryReadDeliveryReport, resolveDeliveryReportsDir } from '../operations/
 import {
   REPO_ROOT, defaultIsPidAlive, defaultSpawnDetached, deliveryDispatchLogPath, detachedHandlePid,
 } from '../operations/detached-dispatch.mjs';
-import { DELIVER_ITEM_RUN_SCRIPT } from '../operations/dispatch-providers/build.mjs';
 import {
   listBuildDispatchClaims, releaseBuildDispatchClaim,
   markBuildDispatchResume, readBuildDispatchResume, releaseBuildDispatchResume,
@@ -201,7 +205,7 @@ function settleOrphanRow({ runId, key }, store = createFileRunStore()) {
  *  finished). Returns the spawned pid. */
 export function spawnResumeDelivery({ num, lane, scope, sessionSlug }, { spawnDetached = defaultSpawnDetached, logPathFor = deliveryDispatchLogPath } = {}) {
   const argv = [
-    String(DELIVER_ITEM_RUN_SCRIPT),
+    String(dispatchProviderEntry('build').runScript),
     `--num=${num}`, `--lane=${lane}`, `--session=${sessionSlug}`, `--scope=${String(scope ?? '')}`, '--resume',
   ];
   const child = spawnDetached(argv, { cwd: REPO_ROOT, logPath: logPathFor(sessionSlug) });
