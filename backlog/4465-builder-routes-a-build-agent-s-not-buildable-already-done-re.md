@@ -156,11 +156,11 @@ reports the hold was never routed) and once restored (GREEN — `judge` returns 
 
 ## Follow-ups (filed as cards, not built here)
 
-- we:backlog/xuxq6b4-route-c-build-dispatch-hold-findings-feed-the-health-episode.md — wire route (c) findings
+- we:backlog/4523-route-c-build-dispatch-hold-findings-feed-the-health-episode.md — wire route (c) findings
   into the full health-episode/smell pipeline instead of the standalone JSON ledger.
-- we:backlog/xmrsucc-classify-a-build-dispatch-hold-at-placement-time-deliver-ite.md — classify at the delivery
+- we:backlog/4521-classify-a-build-dispatch-hold-at-placement-time-deliver-ite.md — classify at the delivery
   wrapper's own `placeBuildDispatchHold` call site for same-tick (not next-tick) routing.
-- we:backlog/xq7a8h0-observe-a-hold-route-landing-s-own-terminal-outcome-instead.md — give a hold-route
+- we:backlog/4522-observe-a-hold-route-landing-s-own-terminal-outcome-instead.md — give a hold-route
   landing the same run-store/settle observability the `build` dispatch path already has, instead of a
   fire-and-forget detached spawn; a landing that starts but later fails is currently a known, accepted MVP
   gap (rides out the lease/hold TTL rather than being retried promptly).
