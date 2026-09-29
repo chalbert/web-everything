@@ -226,6 +226,40 @@ describe('#4194 cost controls — kill switch, cap, quota', () => {
     // the SAME count admission gates on
     expect(reserveSeatCalls({ ledger: ledgers.codex, records, want: 5, dailyCap: 4, now: NOW, newId: () => 'n', provider: 'codex' }).used).toBe(3);
   });
+
+  it('#4321 migration — a completed Gemini call keeps its own budget charge; the shared pre-split ledger\'s reservations stay codex\'s, never reassigned to Gemini', () => {
+    // Pre-split scorecards: a landed codex row and a landed gemini row, both scored today.
+    const records = [
+      { dispatchKind: REVIEW_SEAT_DISPATCH_KIND, provider: 'codex', callId: 'codex-landed', scoredAt: '2026-09-26T14:00:00Z' },
+      { dispatchKind: REVIEW_SEAT_DISPATCH_KIND, provider: 'agy-gemini', callId: 'gemini-landed', scoredAt: '2026-09-26T14:05:00Z' },
+    ];
+    // THE shared, pre-split ledger (card's own wording): it carries codex's own tagged reservation, an
+    // UNTAGGED one from before the per-provider split existed, AND a Gemini-tagged one whose callId matches
+    // Gemini's own completed row (so the completed-record/own-reservation dedupe is exercised too, not just
+    // isolation from codex). Production already gives each provider its own ledger FILE
+    // (`reservationLedgerFileFor`) — this fixture is NOT that normal path. It deliberately feeds the SAME
+    // (codex-owned, pre-split) ledger object to BOTH providers, modeling the regression this test guards
+    // against: a read path that ever fell back to the shared/legacy file for a provider it doesn't own.
+    // `reservationIsFor`'s own per-entry provider check, not file separation, is what must hold here — and
+    // prove Gemini's own completed call is still counted on its own budget, untouched by codex's (tagged or
+    // legacy) reservations.
+    const sharedLedger = { version: 1, reservations: [
+      { callId: 'codex-landed', at: '2026-09-26T13:59:00Z', provider: 'codex' },
+      { callId: 'legacy-untagged', at: '2026-09-26T14:10:00Z' },
+      { callId: 'gemini-landed', at: '2026-09-26T14:04:00Z', provider: 'agy-gemini' },
+    ] };
+    const ledgers = { codex: sharedLedger, 'agy-gemini': sharedLedger };
+    const usage = reviewSeatCapUsage(records, NOW, {}, ledgers);
+    // Codex keeps both its own tagged call and the untagged legacy reservation — nothing lost off codex.
+    expect(usage.codex.usedToday).toBe(2);
+    // Gemini's completed call retains its own charge (1, deduped against its own matching reservation, not
+    // doubled) — the shared ledger's codex-owned entries never inflate it, i.e. they are not reassigned to
+    // Gemini.
+    expect(usage['agy-gemini'].usedToday).toBe(1);
+    // The SAME split holds through the admission-time counter both providers gate on.
+    expect(reserveSeatCalls({ ledger: sharedLedger, records, want: 5, dailyCap: 10, now: NOW, newId: () => 'n', provider: 'codex' }).used).toBe(2);
+    expect(reserveSeatCalls({ ledger: sharedLedger, records, want: 5, dailyCap: 10, now: NOW, newId: () => 'n', provider: 'agy-gemini' }).used).toBe(1);
+  });
 });
 
 describe('#4194 the direct-task scripts in --review mode', () => {
