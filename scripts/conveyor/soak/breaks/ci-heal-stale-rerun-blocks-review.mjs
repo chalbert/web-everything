@@ -60,7 +60,7 @@ const REVIEW_STARVED_INVARIANT = 'review-never-dispatched';
 export default {
   id: 'ci-heal-stale-rerun-blocks-review',
   title: 'a required check\'s STALE, superseded run (from a rerun on the same head) reads ci-red forever, dispatching a ci-heal that finds nothing and permanently starving the review this PR was actually owed',
-  card: 'we:backlog/fix-review-ciheal-deadlock — live deadlock, PR #2878 (chalbert/web-everything, WE #4358)',
+  card: 'we:backlog/fix-review-ciheal-deadlock — live deadlock, PR #2878 (WE #4358)',
   fixedBy: {
     sha: 'this same PR', where: 'this same PR (we:backlog/fix-review-ciheal-deadlock)',
     paths: ['scripts/progress-board.mjs', 'scripts/operations/pr-status.mjs'],
