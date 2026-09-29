@@ -242,6 +242,17 @@ describe('runProbationBuild — the arc', () => {
     expect(calls.some((c) => c[0] === 'resolve')).toBe(false);
   });
 
+  it('an empty dispatch --scope is a whole-clone lease, not deny-all — the card\'s scope alone bounds the build (#4291 advisory finding)', async () => {
+    const { io, calls } = fakeIo();
+    const r = await runProbationBuild(args(codex, { scope: '' }), io);
+    expect(r.outcome).toBe('opened-pr');
+    expect(calls.some((c) => c[0] === 'commit')).toBe(true);
+    const { io: io2 } = fakeIo({ numstat: '1\t2\tbacklog-docs/other.md' });
+    expect((await runProbationBuild(args(codex, { scope: '' }), io2)).outcome).toBe('gate-red'); // the card still governs
+    const { io: io3 } = fakeIo(); // a lease naming only another repo's paths is still a lease — nothing here is leased
+    expect((await runProbationBuild(args(codex, { scope: 'frontierui:docs/x.md' }), io3)).outcome).toBe('gate-red');
+  });
+
   it('a card with no declared scope is refused even when the dispatch passed a --scope (#4291 advisory finding)', async () => {
     const { io, calls } = fakeIo({ itemScope: [] });
     const r = await runProbationBuild(args(), io);

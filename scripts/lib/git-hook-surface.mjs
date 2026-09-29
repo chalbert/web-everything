@@ -20,8 +20,10 @@
  *      `.git/config`, so pointing `core.hooksPath` at `/dev/null` (not a directory — git finds no hook file
  *      under it and silently treats every hook as absent) via this env disables hooks for EVERY git command
  *      that inherits it, even one a worker's own re-write of `.git/config` tries to re-enable. Apply it to
- *      every subprocess a run script spawns in the lane — the worker's own launcher included, so its own git
- *      use (if any) is covered without editing `codex-direct-task.mjs`/`gemini-direct-task.mjs` at all.
+ *      every subprocess the run script ITSELF runs in the lane (commit, gate, resolve, push, …) — NOT to the
+ *      worker or checker process (#4291 advisory review): a hook the worker plants and then runs itself gains
+ *      it nothing, while the override would switch off the repo's own `.githooks/pre-push` main-push guard — a
+ *      guard against a worker's MISTAKE (not a security boundary: a hostile worker can bypass any hook).
  *   2. DETECTION + CLEANUP — {@link resetHookSurface} (force a known-clean baseline before a worker ever runs,
  *      so a PREVIOUS dispatch's leftovers in a reused pooled lane are never silently inherited) and
  *      {@link snapshotHookSurface}/{@link hookSurfaceChanged} (did anything change while the worker ran? loudly
@@ -148,12 +150,37 @@ export function hookSurfaceChanged(before, after) {
   return { changed: false, reason: 'unchanged' };
 }
 
+/** The repo's own tracked hooks directory, which `npm prepare` points `core.hooksPath` at. */
+export const REPO_HOOKS_PATH = '.githooks';
+
+/**
+ * Put `core.hooksPath` back to the repo's own convention: `.githooks` when the repo TRACKS files there (what
+ * `npm prepare` sets — `.githooks/pre-push` is the main-push guard), else unset. Read from the COMMITTED tree
+ * (`ls-tree HEAD`), never the index: a `.githooks/` the worker created — even one it `git add`ed — is never
+ * trusted. Returns whether the config write succeeded.
+ */
+function restoreRepoHooksPath(dir) {
+  let tracked = false;
+  try {
+    tracked = execFileSync('git', ['-C', dir, 'ls-tree', '--name-only', 'HEAD', '--', REPO_HOOKS_PATH], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim() !== '';
+  } catch { return false; }
+  try {
+    if (tracked) execFileSync('git', ['-C', dir, 'config', 'core.hooksPath', REPO_HOOKS_PATH], { stdio: 'ignore' });
+    else execFileSync('git', ['-C', dir, 'config', '--unset-all', 'core.hooksPath'], { stdio: 'ignore' });
+    return true;
+  } catch (e) {
+    return !tracked && e?.status === 5; // `--unset-all` on a key that is not set exits 5 — already clean.
+  }
+}
+
 /**
  * Force the lane's git-hook surface back to a known-safe baseline: delete every entry directly under
  * `.git/hooks/` that is not a `*.sample` file (git's own inert-template convention — these ship with every
- * `git init`/clone and are never executed), and pin `core.hooksPath=/dev/null` into the lane's OWN
- * `.git/config` ON DISK — belt and suspenders alongside {@link HOOKS_DISABLED_ENV}'s env override, so a
- * process that ever forgets to apply the env still inherits a repo-level override.
+ * `git init`/clone and are never executed), and put `core.hooksPath` in the lane's OWN `.git/config` back to
+ * the repo's own tracked `.githooks/` (or unset it) — undoing a repoint, never pinning it off. #4291 advisory
+ * review: an earlier draft pinned `/dev/null` here, which left a pooled lane's guard hooks (`pre-push`'s
+ * main-push lock, `pre-commit`) silently off for whoever held the lane next. The launcher's own git calls are
+ * kept hook-free by {@link HOOKS_DISABLED_ENV}, not by this on-disk value.
  *
  * Called BEFORE a worker ever runs (so a PREVIOUS dispatch's leftovers in a reused pooled lane can never be
  * silently inherited and blamed on the current run) and again after a detected tamper (so the lane is not left
@@ -174,10 +201,7 @@ export function resetHookSurface(dir) {
       try { rmSync(join(hooksDir, name), { force: true, recursive: true }); } catch { /* best-effort */ }
     }
   } catch { /* no .git/hooks/ at all — nothing to clean */ }
-  let configOk = true;
-  try {
-    execFileSync('git', ['-C', dir, 'config', 'core.hooksPath', '/dev/null'], { stdio: 'ignore' });
-  } catch { configOk = false; }
+  const configOk = restoreRepoHooksPath(dir);
   const snapshot = snapshotHookSurface(dir);
   const leftover = Object.keys(snapshot.files).filter((name) => !name.endsWith('.sample'));
   return { clean: configOk && leftover.length === 0, leftover, snapshot };

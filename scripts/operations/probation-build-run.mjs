@@ -308,7 +308,9 @@ export async function runProbationBuild(args, io) {
     // fallback that no longer exists — see the "no declared scope" refusal above). The ALLOWLIST is the item's
     // own declared `scope:`, guaranteed non-empty by that refusal: the worker may touch ONLY the paths the item
     // itself names.
-    const outOfScopePaths = summary.paths.filter((p) => !pathInScope(p, scopeEntries) || !pathInScope(p, leasedEntries));
+    // An empty `--scope` is a whole-clone lease (lane-pool's own meaning), not deny-all — the card alone bounds it.
+    // Gated on the RAW `--scope`: a lease naming only other repos' paths filters to `[]` but is still a lease.
+    const outOfScopePaths = summary.paths.filter((p) => !pathInScope(p, scopeEntries) || ((args.scope ?? []).length > 0 && !pathInScope(p, leasedEntries)));
     if (outOfScopePaths.length) {
       return abandon('gate-red', `not built: touched path(s) outside the item's own declared scope — a doc-fix worker may edit only what the item names: ${outOfScopePaths.join(', ')}`, { diff: diffRow });
     }
@@ -404,11 +406,12 @@ export function openPrArgv({ num, attemptTag, slug, bodyFile }) {
 }
 
 /** The real `io` for {@link runProbationBuild}. Every call is bounded and never throws past its own contract.
- *  x55dojc — `laneEnv` disables git hooks (see `../lib/git-hook-surface.mjs`) for EVERY subprocess spawned in
- *  the lane, the worker's own launcher process included, so a planted hook can never fire regardless of which
- *  of these calls happens to run it. */
+ *  x55dojc — `laneEnv` disables git hooks (see `../lib/git-hook-surface.mjs`) for every subprocess the
+ *  LAUNCHER runs in the lane, so a planted hook can never fire with the launcher's own credentials. The worker
+ *  gets `workerEnv` instead (#4291 advisory review): it keeps the repo's own `.githooks/pre-push` main-push guard. */
 export function realIo({ session, env = process.env } = {}) {
-  const laneEnv = withHooksDisabled({ ...env, LANE_SESSION: session });
+  const workerEnv = { ...env, LANE_SESSION: session };
+  const laneEnv = withHooksDisabled(workerEnv);
   return {
     log: (m) => console.error(m),
     acquireLane: ({ lane, session: s, scope }) => {
@@ -454,8 +457,8 @@ export function realIo({ session, env = process.env } = {}) {
     },
     runWorker: (argv) => {
       // SYNCHRONOUS on purpose: both launchers block until the model's turn ends (see their own headers).
-      // x55dojc: `laneEnv` (not the bare `env`) so the worker's own git use, if any, inherits hooks-disabled.
-      const r = trySh(process.execPath, argv, { env: laneEnv, timeout: 70 * 60 * 1000 });
+      // `workerEnv`, never `laneEnv`: the worker's own git use keeps the repo's guard hooks (see `realIo`).
+      const r = trySh(process.execPath, argv, { env: workerEnv, timeout: 70 * 60 * 1000 });
       return { ok: r.ok, out: r.out.slice(-4000) };
     },
     untracked: (dir) => sh('git', ['-C', dir, 'ls-files', '--others', '--exclude-standard'], { env: laneEnv }).split('\n').filter(Boolean),

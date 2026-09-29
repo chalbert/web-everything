@@ -153,7 +153,11 @@ describe('snapshotHookSurface / hookSurfaceChanged', () => {
 });
 
 describe('resetHookSurface', () => {
-  it('deletes a planted hook, keeps *.sample files, and pins hooksPath=/dev/null on disk', () => {
+  const hooksPathOnDisk = (dir) => {
+    try { return execFileSync('git', ['config', '--local', '--get', 'core.hooksPath'], { cwd: dir, encoding: 'utf8' }).trim(); } catch { return null; }
+  };
+
+  it('deletes a planted hook, keeps *.sample files, and drops a repointed hooksPath (repo tracks no .githooks/)', () => {
     const dir = makeRepo();
     mkdirSync(join(dir, '.git', 'hooks'), { recursive: true });
     writeFileSync(join(dir, '.git', 'hooks', 'pre-commit'), '#!/bin/sh\nexit 1\n');
@@ -165,8 +169,35 @@ describe('resetHookSurface', () => {
     expect(result.leftover).toEqual([]);
     expect(Object.keys(result.snapshot.files)).not.toContain('pre-commit'); // the planted (non-sample) hook is gone
     expect(Object.keys(result.snapshot.files)).toContain('pre-commit.sample'); // the sample template is untouched
-    const cfg = execFileSync('git', ['config', '--local', '--get', 'core.hooksPath'], { cwd: dir, encoding: 'utf8' }).trim();
-    expect(cfg).toBe('/dev/null');
+    expect(hooksPathOnDisk(dir)).toBe(null);
+  });
+
+  it('restores the repo\'s own tracked .githooks/ as hooksPath — a pooled lane\'s guard hooks stay on for its next holder', () => {
+    const dir = makeRepo();
+    mkdirSync(join(dir, '.githooks'));
+    writeFileSync(join(dir, '.githooks', 'pre-push'), '#!/bin/sh\nexit 0\n');
+    execFileSync('git', ['add', '.githooks/pre-push'], { cwd: dir });
+    execFileSync('git', ['commit', '--quiet', '-m', 'hooks'], { cwd: dir });
+    execFileSync('git', ['config', 'core.hooksPath', '.githooks'], { cwd: dir }); // what `npm prepare` sets
+    expect(resetHookSurface(dir).clean).toBe(true);
+    expect(hooksPathOnDisk(dir)).toBe('.githooks'); // not left pinned at /dev/null
+
+    execFileSync('git', ['config', 'core.hooksPath', '/tmp/evil'], { cwd: dir }); // a worker repoints it
+    expect(resetHookSurface(dir).clean).toBe(true);
+    expect(hooksPathOnDisk(dir)).toBe('.githooks');
+  });
+
+  it('never trusts an UNTRACKED .githooks/ a worker created — hooksPath is dropped, not pointed at it', () => {
+    const dir = makeRepo();
+    mkdirSync(join(dir, '.githooks'));
+    writeFileSync(join(dir, '.githooks', 'pre-commit'), '#!/bin/sh\nexit 0\n');
+    execFileSync('git', ['config', 'core.hooksPath', '.githooks'], { cwd: dir });
+    expect(resetHookSurface(dir).clean).toBe(true);
+    expect(hooksPathOnDisk(dir)).toBe(null);
+    execFileSync('git', ['add', '.githooks/pre-commit'], { cwd: dir }); // staged, but never committed
+    execFileSync('git', ['config', 'core.hooksPath', '.githooks'], { cwd: dir });
+    expect(resetHookSurface(dir).clean).toBe(true);
+    expect(hooksPathOnDisk(dir)).toBe(null);
   });
 
   it('reports uncleanable leftovers rather than silently proceeding', () => {
