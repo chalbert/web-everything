@@ -2,11 +2,12 @@
 bornAs: x6j6hp9
 kind: story
 size: 5
-status: active
+status: resolved
 priority: high
 scope: ["we:scripts/lib/lane-history.mjs", "we:scripts/lane-pool.mjs", "we:scripts/conveyor/lease-reaper.mjs", "we:scripts/conveyor/lane-pool-health-watch.mjs", "we:scripts/lib/lane-whois-core.mjs"]
 dateOpened: "2026-09-28"
 dateStarted: "2026-09-29"
+dateResolved: "2026-09-29"
 preparedDate: "2026-09-28"
 tags: ["lane-pool", "telemetry", "observability"]
 ---
