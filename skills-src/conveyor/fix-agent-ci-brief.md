@@ -151,6 +151,17 @@ LANE=$(node "{{WE_ROOT}}/scripts/lane-pool.mjs" acquire --repo={{LANE_REPO}} --l
 
 ### 2. Rebase onto current `main` (the usual root cause — `main` advanced under the branch)
 
+**This is the ONE sanctioned catch-up with `main` for this whole run (#4297), placed FIRST rather than
+immediately before step 4's gate** — unlike the generic build/fix briefs, diagnosing a "behind" CI failure
+needs a current base to diagnose against, so front-loading it is the deliberate, once-only equivalent of their
+right-before-the-gate placement, not an exception to it.
+
+**Do NOT rebase a second time in this same session**, even if `main` advances again while you are still
+diagnosing/repairing (step 3) or before you re-push (step 6) — a clean step-2 rebase leaves no working-tree
+conflict for a later `main` move to reopen, so nothing forces a second rebase; re-rebasing anyway would only
+restart the "catch-up" this step already finished once. If `main` moving again genuinely matters, that is the
+next tick's fresh ci-heal dispatch's job, not this run's — finish this pass on the base you already have.
+
 ```bash
 git fetch origin main
 git rebase origin/main

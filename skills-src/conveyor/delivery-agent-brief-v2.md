@@ -146,8 +146,9 @@ repo names (the wrapper forwards this verbatim to the learnings drop-box, which 
 ## After you report `done`
 
 You are finished. Do not push, do not open a PR, do not wait, do not poll anything, do not run `/converge`
-yourself, do not check CI. The wrapper picks your report up, runs the gate, drives the review stage, opens
-the PR (or parks it, or holds it back), and applies whatever label the situation calls for — all of that using
+yourself, do not check CI. The wrapper picks your report up, catches up with `origin/main` at most once if this
+item's work needs it (never speculatively earlier — #4297), runs the gate, drives the review stage, opens the
+PR (or parks it, or holds it back), and applies whatever label the situation calls for — all of that using
 your `outcome`/`reason`/`filesTouched`, never asking you to reason about any of it.
 
 **One exception: the wrapper may resume you.** If the gate it runs after your `done` report comes back red,
