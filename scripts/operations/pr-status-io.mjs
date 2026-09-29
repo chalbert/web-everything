@@ -61,7 +61,9 @@ export function checksArgv({ repo, sha }) {
     // the same reasoning has to be carried to every call it applies to, not only the one under the cursor.
     '--paginate',
     `repos/${repo}/commits/${sha}/check-runs`,
-    '--jq', '.check_runs[] | {name,status,conclusion}',
+    // `id` — this feed is NEWEST-first (the rollup is oldest-first), so `collapseRollupToLatestPerName` ranks a
+    // check's reruns by run id rather than by position (PR #2894 review).
+    '--jq', '.check_runs[] | {id,name,status,conclusion}',
   ];
 }
 

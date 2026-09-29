@@ -19,8 +19,8 @@ const AUTOMATION = { login: 'web-everything' };
 const HEAD = '70326866f0f299ddd005f9da54f0b87a3c169ac4'; // PR #2783's real head, 2026-09-27
 
 describe('CI_HEAL_ESCALATION_OUTCOMES', () => {
-  it('is exactly the two-valued enum the file header describes', () => {
-    expect(CI_HEAL_ESCALATION_OUTCOMES).toEqual(['needs-human', 'waiting-on-system-fix']);
+  it('is exactly the three-valued enum the file header describes', () => {
+    expect(CI_HEAL_ESCALATION_OUTCOMES).toEqual(['needs-human', 'waiting-on-system-fix', 'not-a-ci-break']);
   });
 });
 
@@ -52,6 +52,19 @@ describe('buildCiHealEscalationComment', () => {
   it('a missing headSha throws', () => {
     expect(() => buildCiHealEscalationComment({ outcome: 'needs-human' })).toThrow();
   });
+  // we:backlog/fix-review-ciheal-deadlock (LIVE DEADLOCK 2026-09-28/29, PR #2878) — the third outcome: every
+  // required check is green, the only red is the review gate itself. Requires no systemFixRef (there is no
+  // fix to wait on) and its own distinct message, never the generic needs-human "a person must judge this" text.
+  it('not-a-ci-break requires no systemFixRef and carries its own message (never conflated with needs-human)', () => {
+    const body = buildCiHealEscalationComment({
+      headSha: HEAD, outcome: 'not-a-ci-break',
+      reason: 'not a CI break — the only red check is review-gate, held by the review:pending label',
+    });
+    expect(body).not.toContain('system-fix:');
+    expect(body).toContain('outcome: not-a-ci-break');
+    expect(body).toMatch(/owed its ordinary review/);
+    expect(body).not.toMatch(/needs a human judgment call/);
+  });
 });
 
 describe('parseCiHealEscalations — the round trip and the trusted-author gate', () => {
@@ -64,6 +77,17 @@ describe('parseCiHealEscalations — the round trip and the trusted-author gate'
     const body = buildCiHealEscalationComment({ headSha: HEAD, outcome: 'waiting-on-system-fix', systemFixRef: 2784, reason: 'soak-replay-gate false red' });
     const [parsed] = parseCiHealEscalations([{ body, author: AUTOMATION }]);
     expect(parsed).toMatchObject({ headSha: HEAD, outcome: 'waiting-on-system-fix', systemFixRef: '2784' });
+  });
+  it('round-trips the not-a-ci-break shape (we:backlog/fix-review-ciheal-deadlock, PR #2878)', () => {
+    const body = buildCiHealEscalationComment({
+      headSha: HEAD, outcome: 'not-a-ci-break',
+      reason: 'not a CI break — the only red check is review-gate, held by the review:pending label',
+    });
+    const [parsed] = parseCiHealEscalations([{ body, author: AUTOMATION }]);
+    expect(parsed).toMatchObject({
+      headSha: HEAD, outcome: 'not-a-ci-break', systemFixRef: null,
+      reason: 'not a CI break — the only red check is review-gate, held by the review:pending label',
+    });
   });
   it('#3383 — an UNTRUSTED author\'s identical-looking comment never counts (forgeable "already escalated" would suppress a real ci-heal)', () => {
     const body = buildCiHealEscalationComment({ headSha: HEAD, outcome: 'needs-human' });

@@ -2849,7 +2849,8 @@ describe('#4269: the ci-heal brief captures the examined head ONCE and never re-
       BRIEF_REQUIRED_BY_KIND['ci-heal'], undefined, REPO_AWARE_VALUE_PATTERNS,
     );
     expect(prompt).toContain('EXAMINED_HEAD="$(gh pr view 743 --repo chalbert/web-everything --json headRefOid --jq .headRefOid)"');
-    expect(prompt.match(/--head="\$EXAMINED_HEAD"/g)).toHaveLength(4);
+    // lane-ref-gone, conflict, not-a-ci-break, needs-human, waiting-on-system-fix
+    expect(prompt.match(/--head="\$EXAMINED_HEAD"/g)).toHaveLength(5);
   });
 });
 

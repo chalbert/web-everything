@@ -120,6 +120,10 @@
 // re-exported-only names) — every existing importer of THIS file keeps resolving all five unchanged.
 import { isAiGeneratedPr, hasLabel } from './lib/ai-pr-authorship.mjs';
 import { OPEN_PR_LIST_LIMIT, isDegradedOpenPrListing, filterOpenPrsByLabel } from './lib/no-search-backed-pr-list.mjs';
+// #2925/#xkfv491 (we:backlog/fix-review-ciheal-deadlock) — see this file's own re-export note (further down,
+// beside `latestRequiredCheck`) for why `collapseRollupToLatestPerName`/`rollupRowKind` now live in their own
+// dependency-free `./lib/rollup-collapse.mjs` rather than here.
+import { collapseRollupToLatestPerName } from './lib/rollup-collapse.mjs';
 export { isAiAuthor, isAiCommit, isMechanicalMergeCommit, isDrainBookkeepingCommit } from './lib/ai-pr-authorship.mjs';
 export { isAiGeneratedPr, hasLabel };
 import { execFileSync, execFile, spawnSync } from 'node:child_process';
@@ -401,59 +405,19 @@ export function latestRequiredCheck(pr, requiredCheck = 'test') {
   return collapsed.find((c) => (c?.name || c?.context) === requiredCheck) || null;
 }
 
-/**
- * #2925 — the SAME per-name collapse `latestRequiredCheck` implements above, generalised from ONE check name to
- * EVERY name in the rollup. `latestRequiredCheck` is now a by-name lookup over this function's output — ONE
- * implementation, no fork. Exists because a reader that folds every rollup ENTRY into one verdict (rather than
- * picking one check out) has the SAME defect as `.find(...)`-picks-the-first: a superseded `CANCELLED` entry
- * beside a later `SUCCESS` outranks the run that actually finished, whether it is read first or folded in at all.
- * `we:scripts/fetch-parked.mjs#rollupToCheckRows` and `we:scripts/readiness/conveyor-state.mjs#ciRollup` both fold
- * every entry — collapse to the latest entry per name FIRST, then fold.
- *
- * Within a name: take the FIRST non-empty tier of `CheckRun` → untagged → `StatusContext` ({@link rollupRowKind}),
- * then the LAST entry (creation order, #xkfv491) in that tier. Pure. Order of the returned rows is NOT the input
- * order — one row per distinct name, in first-seen order.
- *
- * A row with NEITHER `name` NOR `context` (unreachable off a real `gh pr view --json statusCheckRollup` — every
- * live row carries one or the other) is passed through UNCOLLAPSED, one output row per such input row: there is
- * no name to group it by, so grouping it with any other nameless row would silently fold two unrelated checks
- * into one and grouping it under a shared empty-string key would do the same. Each gets its own group.
- * @param {Array<object>|null|undefined} rollup
- * @returns {Array<object>} one collapsed entry per distinct check name (nameless rows pass through 1:1).
- */
-export function collapseRollupToLatestPerName(rollup) {
-  const roll = Array.isArray(rollup) ? rollup : [];
-  const byName = new Map();
-  for (const c of roll) {
-    const name = c?.name || c?.context || Symbol('nameless-rollup-row'); // ungroupable — its own singleton group
-    if (!byName.has(name)) byName.set(name, []);
-    byName.get(name).push(c);
-  }
-  const out = [];
-  for (const matches of byName.values()) {
-    const tier = (k) => matches.filter((c) => rollupRowKind(c) === k);
-    const pool = [tier('CheckRun'), tier('untagged'), matches].find((t) => t.length);
-    out.push(pool[pool.length - 1]);
-  }
-  return out;
-}
-
-/**
- * Which member of GitHub's `StatusCheckRollupContext` union a rollup row is — `'CheckRun'`, `'StatusContext'`,
- * or `'untagged'` (unknown provenance, never granted CheckRun rank). `__typename` is authoritative when present;
- * only when it is absent entirely do we fall back to shape, and then only for the ONE unambiguous case: a
- * `context` with no `name` is the legacy commit-status shape and nothing else. A bare `name` is NOT taken as
- * proof of a CheckRun — that is exactly the inference `rollupToCheckRows` output would fool. Pure.
- * @param {object|null|undefined} c a single `statusCheckRollup` entry
- * @returns {'CheckRun'|'StatusContext'|'untagged'}
- */
-export function rollupRowKind(c) {
-  const t = c?.__typename;
-  if (t === 'CheckRun' || t === 'StatusContext') return t;
-  if (t) return 'untagged';                                     // a union member we don't know — no CheckRun rank
-  if (c?.context != null && c?.name == null) return 'StatusContext'; // unambiguous legacy commit-status shape
-  return 'untagged';
-}
+// #2925/#xkfv491 — `collapseRollupToLatestPerName`/`rollupRowKind` now live in their OWN dependency-free module,
+// `we:scripts/lib/rollup-collapse.mjs` (we:backlog/fix-review-ciheal-deadlock): `we:scripts/operations/
+// pr-status.mjs` needed this exact collapse too (its `reduceCheckState` had the identical stale-rerun defect —
+// see that function's own header), but it is the declaring module of the `pr-reconcile` READ-ONLY operation,
+// which must import nothing that can act — and this file imports `node:child_process`/`node:fs` writes/etc.
+// throughout. `collapseRollupToLatestPerName` (imported up top, beside `./lib/ai-pr-authorship.mjs`) is used
+// here directly by `latestRequiredCheck` above and re-exported unchanged; `rollupRowKind` is re-exported ONLY
+// (nothing in THIS file calls it locally any more) — mirrors `./lib/ai-pr-authorship.mjs`'s own
+// used-here-vs-re-exported-only split. Every existing importer of either name FROM THIS FILE (`we:scripts/
+// fetch-parked.mjs`, `we:scripts/readiness/conveyor-state.mjs`, `we:scripts/conveyor/ci-red-recovery-watch.mjs`,
+// `we:scripts/progress-board.mjs`, and the test importing `rollupRowKind` directly) keeps working unchanged.
+export { collapseRollupToLatestPerName };
+export { rollupRowKind } from './lib/rollup-collapse.mjs';
 
 /** Is the required `test` check green on this PR's rollup? (Other checks — cla, Workers Builds — are ignored.)
  *  Reads the LATEST run of that check (#xkfv491), never the first-listed one. */

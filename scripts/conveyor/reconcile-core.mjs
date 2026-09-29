@@ -1019,6 +1019,27 @@ export function assessLiveness(bound) {
 }
 
 /**
+ * The `refuse` a parallel-review caller injects into {@link dispatchReviewRow}: it FOLDS the review decision's
+ * own refusal into the caller's existing refusal `row` as `reviewRefusal`, never a second row for the same PR
+ * (PR #2783 review). ONE implementation for both callers (`owed-ci-rerun` and the `not-a-ci-break`
+ * escalation — PR #2894 review): drops every key already on `withPhase` and the caller's own population
+ * `markerKey` (it belongs on the dispatch row, not inside `reviewRefusal`), and tolerates a bare
+ * `refuse(kind)` with no `extra`.
+ * @param {object} row the caller's already-pushed refusal row
+ * @param {object} withPhase
+ * @param {string} markerKey e.g. `'owedCiRerun'`
+ * @returns {(kind:string, extra?:object)=>void}
+ */
+export function foldReviewRefusalInto(row, withPhase, markerKey) {
+  return (kind, extra) => {
+    row.reviewRefusal = {
+      kind,
+      ...Object.fromEntries(Object.entries(extra ?? {}).filter(([k]) => !(k in withPhase) && k !== markerKey)),
+    };
+  };
+}
+
+/**
  * we:scripts/conveyor/reconcile-core.mjs#dispatchReviewRow — the REVIEW decision, single-sourced: the ONE copy of
  * the three checks (`already-reviewed-head` #2588, then `no-findings`, then the shared attempt cap). BOTH callers
  * run through it — the ordinary `needs-review`/`needs-human` OWED-table path, and a SECOND population —
@@ -1610,12 +1631,7 @@ export function planReconcile({
         // by PR and keeps the last one, so a trailing `no-findings` row (holds `['fix']`) silently erased this
         // row's `['review','fix']` hold and let land-advance dispatch its own, uncoordinated review.
         if (withPhase.labels.includes('review:pending')) {
-          const owedRow = refusals[refusals.length - 1];
-          const foldRefusal = (kind, extra) => {
-            owedRow.reviewRefusal = {
-              kind, ...Object.fromEntries(Object.entries(extra).filter(([k]) => !(k in withPhase) && k !== 'owedCiRerun')),
-            };
-          };
+          const foldRefusal = foldReviewRefusalInto(refusals[refusals.length - 1], withPhase, 'owedCiRerun');
           dispatchReviewRow({
             pr, withPhase, base, attempts: roundAttempts(), roundCap,
             refuse: foldRefusal, refuseCapExhausted: capExhaustedVia(foldRefusal), dispatch,
@@ -1638,13 +1654,26 @@ export function planReconcile({
       const escalation = latestCiHealEscalationForHead(pr?.comments, base.headRefOid);
       if (escalation) {
         const isSystemFix = escalation.outcome === 'waiting-on-system-fix';
+        // we:backlog/fix-review-ciheal-deadlock (LIVE DEADLOCK 2026-09-28/29, PR #2878, chalbert/web-everything)
+        // — the THIRD escalation outcome (`ci-heal-escalation-mark.mjs#CI_HEAL_ESCALATION_OUTCOMES`): ci-heal
+        // examined the PR and confirmed the red is the review gate itself (held by the `review:pending`/
+        // `review:human` label), not a CI break — a STRUCTURED verdict, never parsed from `reason` prose. Unlike
+        // a genuine `needs-human` (a real judgment call on the diff) this is NOT a dead end an operator must be
+        // pulled in for: the PR is owed its ordinary review, right now, exactly as `owed-ci-rerun` above already
+        // dispatches review IN PARALLEL with its own ci-side refusal. Before this outcome existed, the ONLY
+        // bucket available for "not a CI break" was `needs-human`, and the generic `needs-human`/`ci-heal-
+        // escalated` refusal below unconditionally `continue`s past this PR — which is exactly how #2878
+        // deadlocked: the review daemon's OWN dispatch reads this SAME plan, saw `ci-heal-escalated` and no
+        // `review` row, and stood down every tick, while ci-heal (correctly) refused to re-heal a PR with
+        // nothing left to heal. Two correct local refusals, no dispatcher ever asking the other question.
+        const isNotCiBreak = escalation.outcome === 'not-a-ci-break';
         // #4263 — a `waiting-on-system-fix` escalation names a fix PR (`escalation.systemFixRef`) and refuses
         // ONLY until that fix lands; it must not suppress healing FOREVER once the fix PR is actually
         // merged/closed and CI reruns on this SAME head (no new push to move it). `pr.systemFixLanded` is
         // EVIDENCE injected by `reconcile-pass.mjs#enrichPrsWithSystemFixFacts` (this file stays IO-free): it
         // independently re-checks the referenced `systemFixRef` PR's own current state before this refusal is
-        // ever honored. A plain `needs-human` escalation names no PR to re-check and is entirely unaffected —
-        // this only ever gates the `isSystemFix` branch.
+        // ever honored. A plain `needs-human`/`not-a-ci-break` escalation names no PR to re-check and is
+        // entirely unaffected — this only ever gates the `isSystemFix` branch.
         if (isSystemFix && base.systemFixLanded) {
           notes.push({
             kind: 'system-fix-landed', prNumber, headSha: escalation.headSha, systemFixRef: escalation.systemFixRef,
@@ -1662,19 +1691,40 @@ export function planReconcile({
             ...(escalation.systemFixRef ? { systemFixRef: escalation.systemFixRef } : {}),
             why: isSystemFix
               ? `ci-heal already escalated this exact head (\`${escalation.headSha}\`) as waiting on system fix #${escalation.systemFixRef} — the red is the tooling/gate's own fault, not this PR's; nothing further is owed until that fix lands or a new push changes this head`
-              : `ci-heal already escalated this exact head (\`${escalation.headSha}\`) to a human — re-dispatching would re-ask the identical already-answered question every tick until a new push changes this head`,
+              : isNotCiBreak
+                ? `ci-heal already confirmed this exact head (\`${escalation.headSha}\`) is NOT a CI break — the red is the review gate itself, held by the review label. No further heal is owed; the PR is owed its ordinary review instead (dispatched in parallel below when \`review:pending\`)`
+                : `ci-heal already escalated this exact head (\`${escalation.headSha}\`) to a human — re-dispatching would re-ask the identical already-answered question every tick until a new push changes this head`,
           });
           // A capped/exhausted ci-red PR is already promoted from a bare refusal to a surfaced `note`
           // (`ci-heal-exhausted`, above) precisely because it is the one dead end an operator must be pulled in
-          // for — an escalation is the SAME shape of dead end (nothing live, nothing auto-heal can do about it
-          // right now) and gets the identical treatment, once per tick, until a new push or a person clears it.
+          // for — a genuine `needs-human`/`waiting-on-system-fix` escalation is the SAME shape of dead end
+          // (nothing live, nothing auto-heal can do about it right now) and gets the identical treatment, once
+          // per tick, until a new push or a person clears it. `not-a-ci-break` is deliberately NOT a dead end
+          // (see above) — it still gets this same informational note (an operator reading the report should
+          // see why no MORE ci-heal is coming), but never blocks the review this PR is actually owed.
           notes.push({
             kind: 'ci-heal-escalated', prNumber, headSha: escalation.headSha, outcome: escalation.outcome,
             ...(escalation.systemFixRef ? { systemFixRef: escalation.systemFixRef } : {}),
             text: isSystemFix
               ? `PR #${prNumber}: ci-heal escalated on head \`${escalation.headSha}\` — waiting on system fix #${escalation.systemFixRef}; will not re-dispatch until it lands or a new push changes this head`
-              : `PR #${prNumber}: ci-heal escalated on head \`${escalation.headSha}\` — ${escalation.reason || 'needs a human judgment call'}; will not re-dispatch until a new push changes this head`,
+              : isNotCiBreak
+                ? `PR #${prNumber}: ci-heal confirmed head \`${escalation.headSha}\` is not a CI break (review gate only) — no further heal owed; review is dispatched normally`
+                : `PR #${prNumber}: ci-heal escalated on head \`${escalation.headSha}\` — ${escalation.reason || 'needs a human judgment call'}; will not re-dispatch until a new push changes this head`,
           });
+          // `not-a-ci-break` is this file's OWN structured confirmation that the PR's true owed action is a
+          // review — dispatch it IN PARALLEL with the ci-side refusal above, the SAME `dispatchReviewRow`/fold
+          // shape `owed-ci-rerun` already uses a few lines above this whole `ci-red` branch, gated the same way
+          // on `review:pending` (an already-`review:accepted` PR owes no fresh review; `review:changes`/
+          // `review:human`-without-`review:accepted` never reach this branch at all — see `owed-ci-rerun`'s own
+          // note on this for the full precedence argument, unchanged here).
+          if (isNotCiBreak && withPhase.labels.includes('review:pending')) {
+            const foldRefusal = foldReviewRefusalInto(refusals[refusals.length - 1], withPhase, 'ciHealNotCiBreak');
+            dispatchReviewRow({
+              pr, withPhase, base, attempts: roundAttempts(), roundCap,
+              refuse: foldRefusal, refuseCapExhausted: capExhaustedVia(foldRefusal), dispatch,
+              extra: { ciHealNotCiBreak: true },
+            });
+          }
           continue;
         }
       }

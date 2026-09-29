@@ -95,6 +95,11 @@ import { CI_TRUTH_EXCLUDED_CHECKS, FAILING_CONCLUSIONS } from './operations/pr-s
 // "the label is outdated — THIS read's own rollup already proves the required check green". Side-effect-free
 // import (`merge-ai-prs.mjs`'s CLI is behind an `IS_CLI` guard, mirrored by `pr-watch.mjs`'s identical import).
 import { isRequiredCheckGreen, isRequiredCheckPending } from './merge-ai-prs.mjs';
+// #2925/#xkfv491 (we:backlog/fix-review-ciheal-deadlock) — sourced from its own dependency-free module rather
+// than re-imported from `./merge-ai-prs.mjs` (where it also lives, re-exported) — see that lib module's own
+// header for why `./operations/pr-status.mjs` needed this split; this file has no such constraint itself
+// (it already imports `./merge-ai-prs.mjs` above) but there is no reason to prefer the heavier path either.
+import { collapseRollupToLatestPerName } from './lib/rollup-collapse.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DEFAULT_STATE = join(ROOT, 'reports', 'progress-board.json');
@@ -481,13 +486,31 @@ function ghPrList(repo, args) {
  *  "the required check failed … owed a ci-heal, not a rebase" on the very same tick. Two predicates for the same
  *  question, one of them wrong, is the defect — reusing `FAILING_CONCLUSIONS` here removes the second
  *  derivation entirely.
+ *
+ *  COLLAPSED TO THE LATEST RUN PER CHECK NAME FIRST (`collapseRollupToLatestPerName`, #2925/#xkfv491) —
+ *  LIVE DEADLOCK 2026-09-28/29, PR #2878 (chalbert/web-everything): `review-gate` re-runs on every `labeled`/
+ *  `unlabeled` event (`.github/workflows/review-gate.yml`), and once a repo's branch protection grows a SECOND
+ *  gate-shaped required check that reruns more than once per head (here `soak-replay-gate`, added to
+ *  `required_status_checks.contexts` after the earlier `CI_TRUTH_EXCLUDED_CHECKS`-only era — see that
+ *  constant's own header), a single HEAD can carry BOTH a stale `FAILURE` run and a later `SUCCESS` rerun of the
+ *  SAME required check name in one `statusCheckRollup` fetch. `requiredChecks` (live branch protection,
+ *  `we:scripts/lib/required-status-checks.mjs`) REPLACES the exclusion list once supplied (see this function's
+ *  own header above) — so a required-check name that is ALSO on `CI_TRUTH_EXCLUDED_CHECKS` is no longer excused
+ *  by that list, and a bare `.some()` over the raw array found the stale, already-superseded `FAILURE` run and
+ *  read the PR `ci-red` forever, even though its LATEST run (and every OTHER required check: `test`, `smoke`,
+ *  `daemon-soak`) was green — dispatching a ci-heal that could only ever escalate "not a CI break — the only
+ *  red check is review-gate", which then durably blocked review dispatch too (`reconcile-core.mjs`'s
+ *  `ci-heal-escalated` refusal). `we:scripts/merge-ai-prs.mjs#isRequiredCheckGreen`/`isRequiredCheckFailed`
+ *  already fixed this exact class of defect for their own (single-check) reads under #2925/#xkfv491 — this is
+ *  that SAME collapse, applied here so a wholesale "did anything fail" scan cannot re-derive the bug the
+ *  per-check reader already closed.
  *  @param {Array<{name?: string, conclusion?: string, state?: string}>} rollup
  *  @param {string[]} [requiredChecks] - the repo's required status-check names (branch protection); when
  *    given and non-empty, ONLY these names can count as CI truth (see above).
  */
 export function ciFailed(rollup, requiredChecks) {
   const required = Array.isArray(requiredChecks) && requiredChecks.length ? requiredChecks : null;
-  return (rollup ?? []).some((c) => {
+  return collapseRollupToLatestPerName(rollup).some((c) => {
     const name = String(c?.name ?? '');
     if (required) {
       if (!required.includes(name)) return false;

@@ -18,8 +18,14 @@ import {
   prStatusOperation, reduceCheckState, labelDisagreements, shapeReadFinding, assessPrs,
   PR_STATUS_OP, CHECK_STATES, LABEL_CLAIMS, FAILING_CONCLUSIONS,
 } from '../pr-status.mjs';
+import { collapseRollupToLatestPerName } from '../../lib/rollup-collapse.mjs';
 import { listArgv, checksArgv, parseJsonLines, labelNames, createPrReader, LIST_LIMIT } from '../pr-status-io.mjs';
 
+// `reduceCheckState` collapses to the LATEST run per check NAME first (`collapseRollupToLatestPerName`,
+// #2925/#xkfv491 — see that function's own header, and `reduceCheckState`'s, for why). Two helper calls that
+// share a `name` (the default, when omitted) are therefore NOT two independent checks — they are two RUNS of
+// the SAME check, and only the LAST one in the array is read. Give every check in a test its own distinct
+// `name` unless the point of that specific test IS the same-name collapse.
 const done = (conclusion, name = 'test') => ({ name, status: 'completed', conclusion });
 const running = (name = 'test') => ({ name, status: 'in_progress', conclusion: null });
 
@@ -50,7 +56,9 @@ describe('reduceCheckState — the empty list is the whole point', () => {
 
   it('green requires at least one check that actually succeeded', () => {
     expect(reduceCheckState([done('success')]).state).toBe('green');
-    expect(reduceCheckState([done('success'), done('skipped')]).state).toBe('green');
+    // Two DISTINCT checks (never the SAME name twice — see the `collapseRollupToLatestPerName` note below):
+    // one real check passed, a separate one merely skipped. Still green.
+    expect(reduceCheckState([done('success'), done('skipped', 'visual')]).state).toBe('green');
   });
 
   it('pending outranks failure outranks success — a caller acts on the worst thing still true', () => {
@@ -89,6 +97,56 @@ describe('reduceCheckState — the empty list is the whole point', () => {
     // Omitted/empty falls back to the exclusion-list default, unchanged.
     expect(reduceCheckState([done('success', 'test'), done('failure', 'soak-replay-gate')]).state).toBe('green');
     expect(reduceCheckState([done('success', 'test'), done('failure', 'soak-replay-gate')], []).state).toBe('green');
+  });
+
+  // we:backlog/fix-review-ciheal-deadlock (LIVE DEADLOCK 2026-09-28/29, PR #2878, chalbert/web-everything) —
+  // a required check that RE-RUNS more than once on one head (a `-gate`-shaped check retriggered by a
+  // `labeled`/`unlabeled`/`edited` event: `review-gate.yml`, `soak-replay-gate.yml`) can leave a STALE
+  // `FAILURE` run beside a later `SUCCESS` rerun of the SAME name in one `statusCheckRollup` fetch. Before the
+  // `collapseRollupToLatestPerName` fix, a flat `.filter()` counted the stale run too, reading `red` off a
+  // check whose CURRENT run had already gone green — dispatching a ci-heal that could only ever find nothing
+  // to fix. Confirmed against #2878's own real rollup (fetched live via `gh pr view --json statusCheckRollup`).
+  it('collapses to the LATEST run per check name before judging — a stale failure superseded by a later success reads green, not red', () => {
+    const required = ['test', 'smoke', 'daemon-soak', 'soak-replay-gate'];
+    // The exact live shape: `soak-replay-gate` failed once, then reran green on the SAME head — no new push,
+    // just a rerun (GitHub keeps both check runs). Every OTHER required check only ever ran once, green.
+    expect(reduceCheckState([
+      done('failure', 'soak-replay-gate'), // stale — superseded below
+      done('success', 'test'),
+      done('success', 'smoke'),
+      done('success', 'daemon-soak'),
+      done('success', 'soak-replay-gate'), // the LATEST run of the same check — this is the one that counts
+    ], required).state).toBe('green');
+    // The mirror case: a check that PASSED once and then genuinely failed on a LATER rerun must still read
+    // red — collapsing to the latest run is not "ever green, always green".
+    expect(reduceCheckState([
+      done('success', 'soak-replay-gate'),
+      done('failure', 'soak-replay-gate'),
+    ], required).state).toBe('red');
+  });
+
+  // PR #2894 review (CONFIRMED): the REST `commits/<sha>/check-runs` feed (`checksArgv` — used by
+  // `assessPrs`/`pr-reconcile` and `promote-draft-pr-dispatch.mjs#defaultReadHeadCheckState`) lists runs
+  // NEWEST-FIRST, the opposite of `statusCheckRollup`. A positional "last entry wins" collapse would keep the
+  // OLDEST run there, so a check that passed and then genuinely failed on a later rerun read green — and
+  // promote-draft could `gh pr ready` a draft whose latest required check is red. Each REST row carries its
+  // run `id` (monotonic by creation), so the collapse ranks by it whenever every run of a name has one.
+  it('REST newest-first feed: ranks by run id, so a later failure is never hidden behind an older success', () => {
+    const required = ['soak-replay-gate'];
+    const run = (id, conclusion) => ({ id, name: 'soak-replay-gate', status: 'completed', conclusion });
+    expect(reduceCheckState([run(109255880842, 'failure'), run(109255874532, 'success')], required).state).toBe('red');
+    expect(reduceCheckState([run(109255880842, 'success'), run(109255874532, 'failure')], required).state).toBe('green');
+    // Same runs, rollup (oldest-first) order — the answer must not depend on the feed's ordering.
+    expect(reduceCheckState([run(109255874532, 'success'), run(109255880842, 'failure')], required).state).toBe('red');
+  });
+
+  it('falls back to last-by-position unless EVERY run of a name has a numeric id (the rollup carries none)', () => {
+    const row = (id, conclusion) => ({ ...(id === undefined ? {} : { id }), name: 'x', status: 'completed', conclusion });
+    const pick = (rows) => collapseRollupToLatestPerName(rows)[0].conclusion;
+    expect(pick([row(undefined, 'failure'), row(undefined, 'success')])).toBe('success'); // rollup: no ids
+    expect(pick([row(9, 'success'), row(undefined, 'failure')])).toBe('failure');         // mixed → positional
+    expect(pick([row('CR_kwA', 'success'), row('CR_kwB', 'failure')])).toBe('failure');   // GraphQL node ids → positional
+    expect(pick([row('20', 'failure'), row('10', 'success')])).toBe('failure');           // numeric strings rank
   });
 
   it('only ever answers with a declared state', () => {
@@ -203,6 +261,11 @@ describe('the io shell', () => {
     const argv = checksArgv({ repo: 'o/r', sha: 'deadbeef' });
     expect(argv.join(' ')).toContain('repos/o/r/commits/deadbeef/check-runs');
     expect(argv.join(' ')).not.toMatch(/pr checks/);
+  });
+
+  it('selects each run\'s `id` — the REST feed is newest-first, and the per-name collapse ranks by it (PR #2894 review)', () => {
+    const jq = checksArgv({ repo: 'o/r', sha: 'deadbeef' }).at(-1);
+    expect(jq).toMatch(/\{[^}]*\bid\b[^}]*\}/);
   });
 
   it('parses newline-delimited json, and reads a blank stream as zero checks', () => {
