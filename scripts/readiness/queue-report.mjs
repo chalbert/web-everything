@@ -16,8 +16,8 @@
  *     kill-switch is withholding it, cleared via `dispatch-pause.mjs clear`). This is the exact bucket tonight's
  *     mistake put in the wrong place.
  *   • `not-ready` — needs an action (or an external event) before it can ever be picked up, independent of lane
- *     capacity: `blocked`, `unshaped-no-scope`, `needs-slice`, `needs-decision`, `needs-investigation`, `branch-drift-blocked`,
- *     `cleared-but-not-ready`.
+ *     capacity: `blocked`, `unshaped-no-scope`, `needs-prepare`, `needs-slice`, `needs-decision`,
+ *     `needs-investigation`, `branch-drift-blocked`, `cleared-but-not-ready`.
  *   • `stale-noise` — not a real held queue member at all; a signal that something should be verified/cleared,
  *     never waited on: `already-done` (a merged PR appears to already close the item out).
  *
@@ -78,7 +78,10 @@ export const NOT_READY_REASONS = Object.freeze([
   // `no-size` (#3801 Fork 4 (b), #3849 admission) joins `unshaped-no-scope` here — same semantics: an action
   // (prepare authors the missing size/estimate, the same agent that authors a missing scope, #3842) is needed
   // before the item can ever be picked up, independent of lane capacity.
-  'blocked', 'unshaped-no-scope', 'no-size', 'needs-slice', 'needs-decision', 'needs-investigation', 'branch-drift-blocked', 'cleared-but-not-ready',
+  // `needs-prepare` (card #4470) joins them too: the item needs a full prepare pass (premise check, scope
+  // correction, design/MVP/test/proof plan, `preparedDate` stamp) before it can ever be picked up, independent
+  // of lane capacity — same semantics, a different missing readiness ingredient.
+  'blocked', 'unshaped-no-scope', 'no-size', 'needs-prepare', 'needs-slice', 'needs-decision', 'needs-investigation', 'branch-drift-blocked', 'cleared-but-not-ready',
 ]);
 
 /** Held reasons that are not a real held queue member at all — a signal to verify/clear, never to wait on. */

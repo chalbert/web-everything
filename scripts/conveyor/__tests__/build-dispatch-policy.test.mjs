@@ -149,7 +149,7 @@ describe('planBuildDispatch', () => {
       .toEqual([{ repo: 'we', number: 1, headRefName: 'lane/1-x', labels: ['l'], files: [{ repo: 'we', path: 'a' }] }]);
   });
   it('declares every operator rule with who enforces it', () => {
-    expect(BUILD_DISPATCH_POLICY.rules.map((r) => r.id)).toEqual(['cap', 'wip-cap', 'landing-freeze', 'scope-vs-open-prs', 'hot-file', 'branch-name', 'scratch-prefix', 'draft-first']);
+    expect(BUILD_DISPATCH_POLICY.rules.map((r) => r.id)).toEqual(['cap', 'wip-cap', 'landing-freeze', 'scope-vs-open-prs', 'hot-file', 'branch-name', 'scratch-prefix', 'draft-first', 'needs-prepare']);
     expect(BUILD_DISPATCH_POLICY.maxConcurrentBuilds).toBe(3);
     expect(BUILD_DISPATCH_POLICY.maxOpenItems).toBe(7);
   });

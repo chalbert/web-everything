@@ -749,6 +749,96 @@ describe('dispatchPlan — the NO-SIZE admission hold (#3801 Fork 4 (b), #3849 a
   });
 });
 
+describe('dispatchPlan — the NEEDS-PREPARE readiness hold (card #4470, PREPARE = full design + explicit MVP cut)', () => {
+  const REQUIRE = { requirePreparedDate: true };
+
+  it('`preparePolicy` omitted (the default) — an unprepared scoped item launches exactly as before this card', () => {
+    const plan = dispatchPlan({ queue: [{ num: 1, kind: 'story', scope: ['src/a/'] }], leases: [], freeLanes: [2] });
+    expect(plan.launch).toEqual([{ num: 1, lane: 2 }]);
+    expect(plan.held).toEqual([]);
+  });
+
+  it('under `requirePreparedDate`, a scoped story with no `preparedDate` is HELD "needs-prepare" and never launches', () => {
+    const plan = dispatchPlan({
+      queue: [{ num: 1, kind: 'story', scope: ['src/a/'] }],
+      leases: [], freeLanes: [2],
+      preparePolicy: REQUIRE,
+    });
+    expect(plan.launch).toEqual([]);
+    expect(plan.held).toEqual([{ num: 1, reason: 'needs-prepare' }]);
+  });
+
+  it('under `requirePreparedDate`, a scoped task with a valid `preparedDate` launches normally', () => {
+    const plan = dispatchPlan({
+      queue: [{ num: 1, kind: 'task', scope: ['src/a/'], preparedDate: '2026-09-01' }],
+      leases: [], freeLanes: [2],
+      preparePolicy: REQUIRE,
+    });
+    expect(plan.launch).toEqual([{ num: 1, lane: 2 }]);
+    expect(plan.held).toEqual([]);
+  });
+
+  it('a blank/malformed `preparedDate` is never "truthful" — still HELD "needs-prepare"', () => {
+    const bad = ['', '   ', 'soon', '2026/09/01', 2026, null];
+    for (const preparedDate of bad) {
+      const plan = dispatchPlan({
+        queue: [{ num: 1, kind: 'story', scope: ['src/a/'], preparedDate }],
+        leases: [], freeLanes: [2],
+        preparePolicy: REQUIRE,
+      });
+      expect(plan.held).toEqual([{ num: 1, reason: 'needs-prepare' }]);
+    }
+  });
+
+  it('a `fix` dispatch is NEVER held for prepare, even unprepared (same exemption as the size gate)', () => {
+    const plan = dispatchPlan({
+      queue: [{ num: 1, kind: 'fix', scope: ['src/a/'] }],
+      leases: [], freeLanes: [2],
+      preparePolicy: REQUIRE,
+    });
+    expect(plan.launch).toEqual([{ num: 1, lane: 2 }]);
+    expect(plan.held).toEqual([]);
+  });
+
+  it('a `ci-heal` dispatch is NEVER held for prepare, even unprepared', () => {
+    const plan = dispatchPlan({
+      queue: [{ num: 1, kind: 'ci-heal', scope: ['src/a/'] }],
+      leases: [], freeLanes: [2],
+      preparePolicy: REQUIRE,
+    });
+    expect(plan.launch).toEqual([{ num: 1, lane: 2 }]);
+    expect(plan.held).toEqual([]);
+  });
+
+  it('unscoped keeps "unshaped-no-scope" — the prepare gate never relabels a more specific hold', () => {
+    const plan = dispatchPlan({
+      queue: [{ num: 1, kind: 'story' }], // no scope at all, no preparedDate either
+      leases: [], freeLanes: [2],
+      preparePolicy: REQUIRE,
+    });
+    expect(plan.launch).toEqual([]);
+    expect(plan.held).toEqual([{ num: 1, reason: 'unshaped-no-scope' }]);
+  });
+
+  it('a prepared story and an unprepared story in the same tick: the prepared one launches, the other holds', () => {
+    const plan = dispatchPlan({
+      queue: [
+        { num: 1, kind: 'story', scope: ['src/a/'] }, // unprepared, higher rank
+        { num: 2, kind: 'story', scope: ['src/b/'], preparedDate: '2026-09-01' },
+      ],
+      leases: [], freeLanes: [3, 4],
+      preparePolicy: REQUIRE,
+    });
+    expect(plan.launch).toEqual([{ num: 2, lane: 3 }]);
+    expect(plan.held).toEqual([{ num: 1, reason: 'needs-prepare' }]);
+  });
+
+  it('HELD_REASONS lists the new token', async () => {
+    const { HELD_REASONS } = await import('../dispatch-plan.mjs');
+    expect(HELD_REASONS).toContain('needs-prepare');
+  });
+});
+
 describe('dispatchPlan — mixed tick pins the full precedence + ordering', () => {
   it('resolves blocked / unscoped / lease-overlap / rival / launch / no-free-lane together', () => {
     const plan = dispatchPlan({
