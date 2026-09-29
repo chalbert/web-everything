@@ -79,6 +79,7 @@ import { runReconcilePass, defaultReadPrs, defaultReadAgents } from '../../scrip
 // x26lw6u — the review is dispatched as a deterministic JOB (`review-job.mjs`: acquire → review-loop-cli →
 // report → release, no Claude wrapper session); `WE_REVIEW_DISPATCH_MODE=session` keeps the old `claude --bg`
 // path reachable. The jurors review-loop-cli spawns are the fresh, independent reviewers either way.
+import { parseEscalationReason } from '../../scripts/review-detail.mjs';
 import { dispatchReviewByMode } from '../../scripts/operations/review-job.mjs';
 import { tagReviewRound } from '../../scripts/conveyor/review-round-tag.mjs';
 import { tagReviewStatus } from '../../scripts/conveyor/review-status-tag.mjs';
@@ -353,7 +354,11 @@ export function runReviewTick({
   const notStarted = [];
   for (const d of dispatchable) {
     try {
-      const result = dispatch({ pr: d.prNumber, repo });
+      const subject = (Array.isArray(rawPrs) ? rawPrs : []).find(p => Number(p?.number) === Number(d.prNumber));
+      const result = dispatch({ pr: d.prNumber, repo,
+        escalationReason: parseEscalationReason(subject?.body ?? ''),
+        scopePaths: (subject?.files ?? []).map(f => typeof f === 'string' ? f : f.path),
+      });
       // x26lw6u — a job dispatch that declined to start (a live job already on this PR, or the lane cool-off)
       // did not advance the round, so it gets no round tag — same rule as a failed dispatch.
       if (result?.skipped) { notStarted.push({ prNumber: d.prNumber, reason: result.skipped }); continue; }

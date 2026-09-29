@@ -5914,3 +5914,15 @@ one place:
 - **Prove claims by observation** → AGENTS.md hard rule 7 / [testing.md](testing.md).
 - <a id="memory-optimization-strategy"></a>**Memory-optimization strategy — right-home / prune only; eviction closed** (#1868, under watch #1855): shrink the always-loaded memory surface via rule-1 right-homing of durable rules into this doc + the AGENTS.md router (agent-read on-demand). **Evict-to-recall-only is CLOSED** — a fresh-session recall test (2026-06-27) read NEGATIVE: the harness auto-loads only the `MEMORY.md` index, so an *unindexed* topic file is unreachable and eviction would lose the fact. The index is the sole recall surface; the gate's error on any unindexed topic file is correct. Realistic reclaim is modest (most memories carry nuance beyond canon, #1881). Gate tracks the documented ~24.4 KB limit (22 KB ceiling). Full strategy → [memory-management.md#strategy--direction-the-target-architecture](memory-management.md). **Amended by #1893 — see below.**
 - <a id="memory-index-tree"></a>**Memory index is a router-tree** (#1893, amends [#memory-optimization-strategy](#memory-optimization-strategy)/#1868): `MEMORY.md` is a three-tier tree — an always-loaded **category map** + a ~12-rule **core-invariants** block; recall-gated `index-<category>.md` **sub-indexes**; numbered leaf files `N-slug.md` reached by the `we:scripts/memory-resolve.mjs` router (by number or slug). #1868's eviction-closed test covered only *fully-unindexed* files; every sub-index here is reachable from the always-loaded map via the **same explicit-read router pattern** this doc already endorses, so the index drops ~20 KB → ~3 KB while the core invariants stay always-loaded. `we:scripts/check-memory.mjs` enforces the shape: the map links **only** `index-*` sub-indexes (a leaf link there is denied — the anti-regression guard), and every leaf must be reachable. Residual to watch: reliability of opening the right sub-index for *subtle* relevance. Full spec → [memory-management.md#index-tree](memory-management.md).
+
+### Daemon Claude worker models follow risk {#daemon-claude-worker-risk}
+
+Operator ruling, 2026-09-29: Claude build/fix workers default to Sonnet. Use Opus for
+high-risk work, statute-tier paths, security-critical work, and decision preparation.
+Dispatch machinery alone does not raise the model tier. This governs the work-doer,
+not the separate build-supervisor ladder or external-provider eligibility.
+
+Review sessions always receive an explicit model: Sonnet by default, Opus for high
+care/escalation or statute-tier paths. The review daemon forwards the PR snapshot's
+escalation reasons and touched paths to the session launcher; CLI defaults never
+choose the session's tier. The existing review care classifier interprets reasons.

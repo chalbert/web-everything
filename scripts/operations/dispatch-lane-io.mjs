@@ -497,6 +497,7 @@ export function readTick({
       cause: null,
       scopePaths: Array.isArray(item?.scope) ? item.scope : [],
       size: item?.size ?? null,
+      risk: item?.risk ?? null,
       // #3857 — a `security` tag raises the worker to Opus; carried through `findItem` for this read.
       tags: Array.isArray(item?.tags) ? item.tags : [],
       taskKey: { storyRef: key, round: 1, taskId: launchKind },
@@ -1003,6 +1004,7 @@ export function findItem(key, loadItems, pocRegistry = null) {
     // router's proven envelopes are measured in. SPREAD, not a `null` key: "this card declares no `size:`" is
     // the ABSENCE of the field, and it keeps the resolved-item shape byte-identical for every unsized card.
     ...(it.size == null || it.size === '' ? {} : { size: it.size }),
+    ...(it.risk == null ? {} : { risk: it.risk }),
     // #3857/#3906 — the card's `tags:`, for the tier table's `security` row. Spread for the same reason.
     ...(Array.isArray(it.tags) && it.tags.length ? { tags: it.tags.map(String) } : {}),
     // #3637 — WHICH BRANCH this item delivers to. Absent ⇒ `main` ⇒ today's behaviour, byte-identical. The
@@ -2181,7 +2183,7 @@ export function buildAgentArgv({
   worktreeSettings = null,
   // #3857 — `table` is the checked-in model-tier table's answer for THIS dispatch ({tier, model, reason} — see
   // `../lib/provider-routing.mjs#workerTierFor` and {@link workerModelTable}); `null` (every caller that computes
-  // no routing decision: review and reconcile-fix dispatch) keeps this function's OLD behaviour byte-identical —
+  // no routing decision: reconcile-fix dispatch) keeps this function's OLD behaviour byte-identical —
   // extraArgs pass through untouched, no --model is ever injected or refused. Passing `table` is what OPTS a
   // caller into the enforcement, once, at the one argv builder every Claude dispatch shares.
   table = null, modelReason = null,

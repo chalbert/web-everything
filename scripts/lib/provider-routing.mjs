@@ -436,7 +436,8 @@ export function selectProbationWorker({ taskType, tier = CLAUDE_TIERS.SONNET, si
  * THE MODEL-TIER TABLE (#3857) — the ONE checked-in table deciding a dispatch worker's Claude tier, by
  * dispatch fact, replacing both the old size/file-count/testability Opus criteria this function's Step 4
  * used to compute inline and the standalone `STORY_KIND_RUNGS` table (`dispatch-contracts.mjs`), which
- * this folds in rather than keeping beside. Sourced verbatim from the operator's 2026-09-22 routing rule
+ * this folds in rather than keeping beside. Updated by the operator's 2026-09-29 risk-based ruling
+ * (`docs/agent/platform-decisions.md#daemon-claude-worker-risk`); originally the 2026-09-22 routing rule
  * (narrower and later than `docs/agent/backlog-workflow.md#model-routing`, which governs the INTERACTIVE
  * orchestrating loop's own sub-agent spawns and is untouched by this table — see
  * [delegation-trial-record-graduation](/docs/agent/platform-decisions.md#delegation-trial-record-graduation),
@@ -446,11 +447,11 @@ export function selectProbationWorker({ taskType, tier = CLAUDE_TIERS.SONNET, si
  * function returns as soon as one row matches, and the fallback (no row matches) is always `sonnet`.
  * `haiku` is never a table output.
  *
- * @param {{kind?: string, taskType?: string, scopePaths?: string[], tags?: string[]}} [o]
+ * @param {{kind?: string, taskType?: string, scopePaths?: string[], tags?: string[], risk?: string}} [o]
  * @returns {{tier: 'sonnet'|'opus', reason: string}}
  */
 // @test-only-export-ok: Shared library exported for the mechanical dispatch spawn path (#3857) and its own test
-export function workerTierFor({ kind, taskType, scopePaths, tags } = {}) {
+export function workerTierFor({ kind, taskType, scopePaths, tags, risk } = {}) {
   const k = typeof kind === 'string' ? kind.trim() : '';
   const t = typeof taskType === 'string' ? taskType.trim() : '';
   const paths = Array.isArray(scopePaths) ? scopePaths.map(String) : [];
@@ -465,8 +466,8 @@ export function workerTierFor({ kind, taskType, scopePaths, tags } = {}) {
   if (k === 'security-fix' || tagList.includes('security')) {
     return { tier: CLAUDE_TIERS.OPUS, reason: 'a security-critical fix' };
   }
-  if (paths.some((p) => DISPATCH_MACHINERY_PATHS.includes(p)) || k === 'dispatch-machinery') {
-    return { tier: CLAUDE_TIERS.OPUS, reason: 'wide-blast-radius dispatch machinery' };
+  if (risk === 'high') {
+    return { tier: CLAUDE_TIERS.OPUS, reason: 'high-risk work' };
   }
   return { tier: CLAUDE_TIERS.SONNET, reason: "the standard's default" };
 }
@@ -886,14 +887,14 @@ export function selectProvider(task, context) {
   // ──────────────────────────────────────────────────────────────────────────
   // Step 4: Claude Fallback by Effort Tier — the ONE checked-in table (#3857), never inline criteria.
   // ──────────────────────────────────────────────────────────────────────────
-  const tierDecision = workerTierFor({ kind, taskType, scopePaths: filesTouched, tags });
+  const tierDecision = workerTierFor({ kind, taskType, scopePaths: filesTouched, tags, risk: context?.risk });
   const claudeTier = tierDecision.tier;
   const claudeReason = tierDecision.reason;
 
   auditTrail.push({
     criterion: 'claude-tier',
     result: claudeTier,
-    dataConsulted: `taskType='${taskType}', files=${filesTouched.length}, size=${estimatedSize} LOC, statute=${hasStatuteFile}, testable=${acceptanceTestable !== false}`,
+    dataConsulted: `taskType='${taskType}', files=${filesTouched.length}, size=${estimatedSize} LOC, statute=${hasStatuteFile}, risk=${context?.risk ?? 'unspecified'}, testable=${acceptanceTestable !== false}`,
     reasoning: claudeReason,
   });
 

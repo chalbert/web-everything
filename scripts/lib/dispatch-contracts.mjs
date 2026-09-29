@@ -475,7 +475,7 @@ export function routeDispatch(profile, options = {}) {
       // the RAW scorecards, because `routingRecords` projects away the scope evidence a miss row may carry.
       const criticalWork = criticalWorkVerdict({ taskType: profile.taskType, filesTouched: profile.filesTouched, estimatedLoc: profile.estimatedLoc, acceptanceTestable: profile.acceptanceTestable, risk: profile.risk });
       const criticalMisses = criticalMissesFor(scorecards, profile.taskType);
-      const context = { filesTouched: [...profile.filesTouched], estimatedSize: profile.estimatedLoc, acceptanceTestable: profile.acceptanceTestable, scorecards: records, kind, tags, criticalWork, criticalMisses, simple: simple === true, ...(criticalWorkGate ? { criticalWorkGate } : {}) };
+      const context = { risk: profile.risk, filesTouched: [...profile.filesTouched], estimatedSize: profile.estimatedLoc, acceptanceTestable: profile.acceptanceTestable, scorecards: records, kind, tags, criticalWork, criticalMisses, simple: simple === true, ...(criticalWorkGate ? { criticalWorkGate } : {}) };
       const selected = selectProvider(task, context);
       routerAudit.push(...selected.auditTrail);
       out.provider = selected.recommendation;

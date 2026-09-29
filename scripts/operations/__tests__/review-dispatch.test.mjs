@@ -148,6 +148,7 @@ describe('dispatchReview — the composition: plan → fill → mint → spawn',
       '-n', 'review-1234',
       '--settings', JSON.stringify({ env: { WE_CONVEYOR_WORKER: '1' }, worktree: { bgIsolation: 'none' } }), // xgqz204 — the worker marker, always
       '--append-system-prompt-file', REVIEW_DISPATCH_SYSTEM_PROMPT_FILE,
+      '--model', 'sonnet',
       ...DISALLOWED_TOOLS_ARGV,
       '# brief for 1234 in chalbert/web-everything\n'
       + 'acquire: node scripts/lane-pool.mjs acquire --session=review-1234\n'
@@ -159,6 +160,23 @@ describe('dispatchReview — the composition: plan → fill → mint → spawn',
     expect(result.pr).toBe(1234);
     expect(result.repo).toBe('chalbert/web-everything');
     expect(result.unknownTokens).toEqual(['{{LIKE_THIS}}']);
+  });
+
+  it.each([
+    [{ careLevel: 'none' }, 'sonnet'],
+    [{ careLevel: 'elevated' }, 'sonnet'],
+    [{ careLevel: 'high' }, 'opus'],
+    [{ escalationReason: ['statute'] }, 'opus'],
+    [{ scopePaths: ['docs/agent/platform-decisions.md'] }, 'opus'],
+  ])('passes an explicit review model for %j', (signals, model) => {
+    const spawnAgent = vi.fn();
+    dispatchReview({ pr: 1234, repo: 'chalbert/web-everything', root: '/repo',
+      readBrief: () => REAL_TEMPLATE_STUB, checkStaleness: FRESH, spawnAgent,
+      ensureSessionCwd: d => d, resolveSettingsEnv: () => null,
+      isolateSession: () => ({ worktreeSettings: null }), ...signals });
+    const argv = spawnAgent.mock.calls[0][0];
+    expect(argv.filter(a => a === '--model')).toHaveLength(1);
+    expect(argv[argv.indexOf('--model') + 1]).toBe(model);
   });
 
   // #x8mpubm follow-up (live-caught 2026-09-24, review-2591/2593/2600/2599/2594/2582) — this dispatch NEVER
@@ -241,6 +259,7 @@ describe('dispatchReview — the composition: plan → fill → mint → spawn',
       '-n', 'review-1234',
       '--settings', JSON.stringify({ env: { WE_CONVEYOR_WORKER: '1' }, worktree: { bgIsolation: 'none' } }), // xgqz204 — the worker marker, always
       '--append-system-prompt-file', REVIEW_DISPATCH_SYSTEM_PROMPT_FILE,
+      '--model', 'sonnet',
       ...DISALLOWED_TOOLS_ARGV,
       '--permission-mode', 'plan',
       '# brief for 1234 in chalbert/web-everything\n'
@@ -376,20 +395,25 @@ describe('REVIEW_DISPATCH_DISALLOWED_TOOLS (#3433)', () => {
     expect(calls[0].argv).toEqual(expect.arrayContaining(DISALLOWED_TOOLS_ARGV));
   });
 
-  it('the deny list comes BEFORE any caller-supplied extraArgs — a caller cannot push it later or shadow it', () => {
-    const calls = [];
-    dispatchReview({
+  it('keeps the deny list before caller-supplied extraArgs', () => {
+    const spawnAgent = vi.fn();
+    dispatchReview({ pr: 1234, repo: 'chalbert/web-everything', root: '/repo',
+      readBrief: () => REAL_TEMPLATE_STUB, spawnAgent, checkStaleness: FRESH,
+      extraArgs: ['--permission-mode', 'plan'] });
+    const argv = spawnAgent.mock.calls[0][0];
+    const denyIndex = argv.findIndex(a => a.startsWith('--disallowedTools='));
+    expect(denyIndex).toBeGreaterThan(-1);
+    expect(argv.indexOf('--permission-mode')).toBeGreaterThan(denyIndex);
+  });
+
+  it('refuses an ambient model override rather than bypassing review risk routing', () => {
+    const spawnAgent = vi.fn();
+    expect(() => dispatchReview({
       pr: 1234, repo: 'chalbert/web-everything', root: '/repo',
-      readBrief: () => REAL_TEMPLATE_STUB,
-      mintSessionId: () => '11111111-1111-4111-8111-111111111111',
-      spawnAgent: (argv, opts) => { calls.push({ argv, opts }); return ''; },
-      extraArgs: ['--model', 'sonnet'],
-      checkStaleness: FRESH,
-    });
-    const disallowedIdx = calls[0].argv.findIndex((a) => a.startsWith('--disallowedTools='));
-    const modelIdx = calls[0].argv.indexOf('--model');
-    expect(disallowedIdx).toBeGreaterThan(-1);
-    expect(modelIdx).toBeGreaterThan(disallowedIdx);
+      readBrief: () => REAL_TEMPLATE_STUB, spawnAgent,
+      extraArgs: ['--model', 'opus'], checkStaleness: FRESH,
+    })).toThrow(/hand-set --model/);
+    expect(spawnAgent).not.toHaveBeenCalled();
   });
 });
 
