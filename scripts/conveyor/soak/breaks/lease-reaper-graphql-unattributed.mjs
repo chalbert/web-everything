@@ -39,7 +39,7 @@ const FIXTURE = fileURLToPath(new URL('./fixtures/lease-reaper-graphql-unattribu
 
 export default {
   id: 'lease-reaper-graphql-unattributed',
-  title: 'the resident lease-reaper daemon\'s own PR-terminal read was a bare, unattributed, GraphQL-backed `gh pr list` — invisible to gh-spend.mjs and the top drain of the shared graphql bucket',
+  title: 'the resident lease-reaper daemon\'s own PR-terminal read was a bare, unattributed, GraphQL-backed gh `pr list` — invisible to gh-spend.mjs and the top drain of the shared graphql bucket',
   card: 'we:backlog/4415',
   fixedBy: { sha: 'fd3ebc13d', where: 'lane/graphql-unattributed-spender', paths: ['scripts/conveyor/lease-reaper.mjs', 'scripts/lane-pool.mjs'] },
   fixPresent(root) {
@@ -100,7 +100,7 @@ export default {
     }
     const argvLines = existsSync(argvLog) ? readFileSync(argvLog, 'utf8').trim().split('\n').filter(Boolean) : [];
     if (argvLines.some((l) => l.startsWith('pr list'))) {
-      violations.push({ invariant: 'graphql-pr-list-used', detail: `at least one invocation used the GraphQL-backed 'gh pr list' (argv log: ${JSON.stringify(argvLines)}) — the shared graphql bucket is still being spent here` });
+      violations.push({ invariant: 'graphql-pr-list-used', detail: `at least one invocation used the GraphQL-backed gh 'pr list' (argv log: ${JSON.stringify(argvLines)}) — the shared graphql bucket is still being spent here` });
     }
     const callLogPath = ghThrottleLogPath(ghThrottleLockRoot(undefined, env));
     const callLines = existsSync(callLogPath) ? readFileSync(callLogPath, 'utf8').trim().split('\n').filter(Boolean) : [];
