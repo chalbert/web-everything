@@ -15,7 +15,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   landPreventionCard, parseLandPreventionCardArgv, parseRunJsonTail, runLandPreventionCardCli,
+  boundCardText, boundLandPreventionCardInput, CARD_TEXT_CAPS, buildLandingRetractionComment, postLandingRetraction,
 } from '../land-prevention-card.mjs';
+import { hasApprovalPreventionMarkerForHead, buildApprovalPreventionMarker, buildApprovalPreventionJobMarker } from '../../lib/approval-prevention-notice.mjs';
 
 const INPUT = {
   title: 'File the prevention guard(s) owed by o/r#42\'s independent review',
@@ -203,7 +205,16 @@ describe('parseLandPreventionCardArgv — PURE', () => {
   it('parses every required flag', () => {
     expect(parseLandPreventionCardArgv([
       '--title=t', '--kind=story', '--size=3', '--digest=d', '--scope=we:a.mjs', '--parent=4075', '--queue=true', '--session=s',
-    ])).toEqual({ title: 't', kind: 'story', size: '3', digest: 'd', scope: 'we:a.mjs', parent: '4075', queue: 'true', session: 's' });
+    ])).toEqual({
+      title: 't', kind: 'story', size: '3', digest: 'd', scope: 'we:a.mjs', parent: '4075', queue: 'true', session: 's', retract: null,
+    });
+  });
+
+  it('parses the retraction target only when all three --retract-* flags are present', () => {
+    const base = ['--title=t', '--kind=story', '--size=3', '--digest=d', '--scope=we:a.mjs', '--queue=true', '--session=s'];
+    expect(parseLandPreventionCardArgv([...base, '--retract-repo=o/r', '--retract-pr=7', '--retract-head=abc1234']).retract)
+      .toEqual({ repo: 'o/r', pr: '7', headSha: 'abc1234' });
+    expect(parseLandPreventionCardArgv([...base, '--retract-repo=o/r', '--retract-pr=7']).retract).toBeNull();
   });
 
   it('throws, by name, on a missing required flag', () => {
@@ -257,5 +268,104 @@ describe('runLandPreventionCardCli — exit-code mapping', () => {
     });
     expect(code).toBe(1);
     expect(landCalled).toBe(false);
+  });
+
+  it('a failing land with --retract-* flags calls retract once; a retract that throws never changes the exit', async () => {
+    const calls = [];
+    const argv = ['--title=t', '--kind=story', '--size=3', '--digest=d', '--scope=we:a.mjs', '--queue=true',
+      '--session=s1', '--retract-repo=o/r', '--retract-pr=7', `--retract-head=${'a'.repeat(40)}`];
+    const failing = async () => ({ ok: false, step: 'acquire', num: null, rel: null, pr: null, url: null, reason: 'no lane' });
+    const { code } = await runLandPreventionCardCli(argv, {
+      land: failing, write: () => {}, writeErr: () => {},
+      retract: (r) => { calls.push(r); throw new Error('gh down'); },
+    });
+    expect(code).toBe(1);
+    expect(calls).toEqual([{ repo: 'o/r', pr: '7', headSha: 'a'.repeat(40), session: 's1', result: expect.objectContaining({ step: 'acquire' }) }]);
+  });
+
+  it('does NOT retract when a PR may already exist (open-pr named a PR but did not report `opened`)', async () => {
+    const calls = [];
+    const argv = ['--title=t', '--kind=story', '--size=3', '--digest=d', '--scope=we:a.mjs', '--queue=true',
+      '--session=s1', '--retract-repo=o/r', '--retract-pr=7', `--retract-head=${'a'.repeat(40)}`];
+    const { code } = await runLandPreventionCardCli(argv, {
+      land: async () => ({ ok: false, step: 'open-pr', num: 1, rel: 'r', pr: 55, url: 'u', reason: 'check red' }),
+      write: () => {}, writeErr: () => {}, retract: (r) => calls.push(r),
+    });
+    expect(code).toBe(1);
+    expect(calls).toHaveLength(0);
+  });
+});
+
+describe('card text bounding (#4317 advisory review, 2026-09-29)', () => {
+  it('boundCardText strips control chars, neutralizes HTML comments, and caps with a visible note', () => {
+    expect(boundCardText('a\u0007b\u001b[1m<!-- x -->\nc', 100)).toBe('a b [1m&lt;!-- x --&gt;\nc');
+    // Never joins text around a stripped char into a new bare path the #883 gate would refuse.
+    expect(boundCardText('use foo\u0007.mjs', 100)).toBe('use foo .mjs');
+    expect(boundCardText('a\nb\tc', 100, { singleLine: true })).toBe('a b c');
+    const long = boundCardText('y'.repeat(500), 120);
+    expect(long.length).toBeLessThanOrEqual(120);
+    expect(long).toMatch(/truncated: 380 chars over the 120-char cap/);
+  });
+
+  it('boundLandPreventionCardInput keeps the idempotency key line verbatim after truncating the digest body', () => {
+    const key = 'approval-prevention-key:o/r#7@abc';
+    const out = boundLandPreventionCardInput({
+      title: 't'.repeat(1000), scope: 's', digest: `${'z'.repeat(20_000)}\n\nIdempotency key (do not edit): ${key}`,
+    });
+    expect(out.title.length).toBeLessThanOrEqual(CARD_TEXT_CAPS.title);
+    expect(out.digest.length).toBeLessThanOrEqual(CARD_TEXT_CAPS.digest);
+    expect(out.digest.endsWith(`\n\nIdempotency key (do not edit): ${key}`)).toBe(true);
+  });
+
+  it('a fake key line is bounded like ordinary text, and scope is capped by whole entries', () => {
+    const fake = boundLandPreventionCardInput({
+      title: 't', scope: 's', digest: `body\n\nIdempotency key (do not edit): ${'q '.repeat(9000)}`,
+    });
+    expect(fake.digest.length).toBeLessThanOrEqual(CARD_TEXT_CAPS.digest);
+    const entries = Array.from({ length: 200 }, (_, i) => `we:scripts/dir/file-${i}.mjs`);
+    const { scope } = boundLandPreventionCardInput({ title: 't', digest: 'd', scope: entries.join(',') });
+    expect(scope.length).toBeLessThanOrEqual(CARD_TEXT_CAPS.scope);
+    expect(scope.split(',').every((e) => entries.includes(e))).toBe(true);
+  });
+
+  it('short, ordinary card text passes through unchanged', () => {
+    const input = { title: 'File the guard', scope: 'we:a.mjs,we:b.mjs', digest: 'line 1\n\n1. `we:a.mjs:3` — add a test' };
+    expect(boundLandPreventionCardInput(input)).toEqual(input);
+  });
+});
+
+describe('postLandingRetraction — a failed job retracts its own marker on the PR', () => {
+  const headSha = 'c0ffee'.repeat(6) + 'abcd';
+
+  it('posts the retraction via gh, and the posted body un-files exactly that job\'s marker', () => {
+    const gh = [];
+    const ok = postLandingRetraction(
+      { repo: 'o/r', pr: '7', headSha, session: 'prevention-card-j1', result: { step: 'verify', reason: 'gate red' } },
+      { exec: (cmd, args) => { gh.push([cmd, ...args]); return ''; }, write: () => {} },
+    );
+    expect(ok).toBe(true);
+    expect(gh[0].slice(0, 6)).toEqual(['gh', 'pr', 'comment', '7', '--repo', 'o/r']);
+    const retraction = gh[0][7];
+    const author = { login: 'web-everything' };
+    const marker = `${buildApprovalPreventionMarker({ headSha })} ${buildApprovalPreventionJobMarker('prevention-card-j1')}`;
+    const other = `${buildApprovalPreventionMarker({ headSha })} ${buildApprovalPreventionJobMarker('prevention-card-j2')}`;
+    expect(hasApprovalPreventionMarkerForHead([{ body: marker, author }], headSha)).toBe(true);
+    // Order-independent: the retraction may land before the marker comment itself.
+    expect(hasApprovalPreventionMarkerForHead([{ body: retraction, author }, { body: marker, author }], headSha)).toBe(false);
+    // Another job's marker for the same head still counts.
+    expect(hasApprovalPreventionMarkerForHead([{ body: marker, author }, { body: other, author }, { body: retraction, author }], headSha)).toBe(true);
+    // An untrusted retraction is ignored.
+    expect(hasApprovalPreventionMarkerForHead([{ body: marker, author }, { body: retraction, author: { login: 'rando' } }], headSha)).toBe(true);
+  });
+
+  it('never throws: a gh failure or an invalid head is narrated and reported as not posted', () => {
+    const lines = [];
+    expect(postLandingRetraction({ repo: 'o/r', pr: '7', headSha, session: 's', result: {} },
+      { exec: () => { throw new Error('gh down'); }, write: (l) => lines.push(l) })).toBe(false);
+    expect(postLandingRetraction({ repo: 'o/r', pr: '7', headSha: 'not-a-sha', session: 's', result: {} },
+      { exec: () => { throw new Error('unreachable'); }, write: (l) => lines.push(l) })).toBe(false);
+    expect(lines.join('')).toMatch(/gh down/);
+    expect(lines.join('')).toMatch(/invalid head/);
+    expect(buildLandingRetractionComment({ headSha: 'zz', session: 's' })).toBe('');
   });
 });

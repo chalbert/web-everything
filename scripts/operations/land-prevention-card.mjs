@@ -48,18 +48,20 @@
  * CLASS of failure this file exists to prevent: something writing an untracked backlog card straight into a
  * daemon clone again, by whatever future path.
  *
+ * A FAILED JOB RETRACTS ITS OWN MARKER (#4317 advisory review, 2026-09-29). `runApprovalPreventionFiling` posts
+ * its head-keyed idempotency marker when this job SPAWNS, not when it LANDS. So the spawner passes
+ * `--retract-repo/--retract-pr/--retract-head`, and a job that fails (lane exhaustion, a red gate, a refused PR)
+ * posts a retraction for its own head + session ({@link postLandingRetraction}). The next approval on that head
+ * then files the guard again instead of losing it.
+ *
+ * CARD TEXT IS BOUNDED before it is filed ({@link boundLandPreventionCardInput}): reviewer-derived
+ * title/digest/scope reach `main` with no human gate (`--mode=label-on-green`), so each field is length-capped,
+ * stripped of control characters, and cannot carry an HTML-comment marker.
+ *
  * KNOWN RESIDUAL, FILED — not a silent gap. `we:backlog/xxe5jvs-a-partial-failure-in-the-detached-prevention-
- * card-landing-jo.md` (codex plan-review + converge red-team, both 2026-09-28, `blockedBy` this card):
- * `runApprovalPreventionFiling` posts its head-keyed idempotency marker on a successful SPAWN (a pid exists),
- * not a successful LAND, and this job has no `repo`/`pr`/`gh` handle to retract or complement that marker —
- * so a partial failure here (lane exhaustion, a red gate, a refused PR) permanently suppresses every later
- * filing attempt for that exact PR head, with the guard silently lost. The SAME root cause also lets a
- * marker-post failure racing a second approval spawn a DUPLICATE landing job for the same guard (the on-disk
- * idempotency lookup that used to catch that, `findApprovalPreventionCardOnDisk`, no longer sees a card that
- * is still landing in a lane) — that follow-up card covers both shapes. A SEPARATE, unrelated follow-up,
- * `we:backlog/xc5q9jn-approval-time-prevention-cards-land-with-unsanitized-review.md`, tracks that the card's
- * own title/digest/scope content (ultimately reviewer/PR-derived text) is neither sanitized nor length-capped
- * before it lands with no human gate (`--mode=label-on-green`).
+ * card-landing-jo.md`: a marker-post failure racing a second approval can still spawn a DUPLICATE landing job
+ * for the same guard (the on-disk idempotency lookup, `findApprovalPreventionCardOnDisk`, no longer sees a card
+ * that is still landing in a lane).
  *
  * Usage:
  *   node scripts/operations/land-prevention-card.mjs --title=<t> --kind=<k> --size=<n> --digest=<d> \
@@ -72,6 +74,8 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { extractSubmitResult } from './open-pr.mjs';
+import { buildApprovalPreventionRetraction } from '../lib/approval-prevention-notice.mjs';
+import { execFileSyncThrottled } from '../lib/gh-throttle.mjs';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 export const REPO_ROOT = resolve(HERE, '..', '..');
@@ -87,10 +91,81 @@ export const LANE_POOL_CLI = join(REPO_ROOT, 'scripts', 'lane-pool.mjs');
 const REQUIRED_FLAGS = Object.freeze(['title', 'kind', 'size', 'digest', 'scope', 'queue', 'session']);
 
 /**
+ * #4317 advisory review (2026-09-29, security + codex-correctness) — the card's title/digest/scope are built from
+ * review-finding text (a reviewer's prose, ultimately traceable to a reviewed PR's diff), and this job lands them
+ * on `main` with no human gate (`--mode=label-on-green`). So every card this job files is BOUNDED first, here —
+ * the one chokepoint every card crosses before it is written: a length cap per field, control characters
+ * stripped, and HTML-comment delimiters neutralized so finding text can never forge a durable marker (e.g.
+ * `approval-prevention-filed`) in the card or the PR body. Prompt-shaped prose itself cannot be "escaped" — it is
+ * still ordinary card text a reader weighs — but it can no longer be unbounded or smuggle invisible markup.
+ */
+export const CARD_TEXT_CAPS = Object.freeze({ title: 200, scope: 2000, digest: 8000 });
+const DIGEST_KEY_SEP = '\n\nIdempotency key (do not edit): ';
+
+/**
+ * PURE. Bound one untrusted card field: strip control characters (keeping `\n`/`\t` unless `singleLine`),
+ * neutralize `<!--`/`-->`, and cap the length with a visible truncation note.
+ * @param {string} text
+ * @param {number} max
+ * @param {{singleLine?: boolean}} [o]
+ * @returns {string}
+ */
+export function boundCardText(text, max, { singleLine = false } = {}) {
+  let s = String(text ?? '')
+    // eslint-disable-next-line no-control-regex
+    // A SPACE, never '': joining the text around a control char could mint a new bare path (`foo\u0007.mjs` →
+    // `foo.mjs`) that the #883 locus-prefix write gate would then refuse.
+    .replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, ' ')
+    .replace(/<!--/g, '&lt;!--')
+    .replace(/-->/g, '--&gt;');
+  if (singleLine) s = s.replace(/[\n\t]+/g, ' ');
+  if (s.length <= max) return s;
+  const note = ` … [truncated: ${s.length - max} chars over the ${max}-char cap]`;
+  return `${s.slice(0, Math.max(0, max - note.length))}${note}`;
+}
+
+/**
+ * PURE. {@link boundCardText} applied to every reviewer-derived field. The digest's trailing idempotency-key line
+ * (`buildApprovalPreventionFilingInput`) is kept verbatim at the end, so truncation never breaks the on-disk
+ * idempotency lookup that matches it byte for byte.
+ * @template {{title:string, digest:string, scope:string}} T
+ * @param {T} input
+ * @returns {T}
+ */
+export function boundLandPreventionCardInput(input) {
+  const digest = String(input.digest ?? '');
+  const at = digest.lastIndexOf(DIGEST_KEY_SEP);
+  // Only a REAL key line (one short token, the builder's own shape) is kept verbatim; anything else is ordinary
+  // digest text and is bounded like the rest.
+  const tail = at === -1 ? '' : digest.slice(at + DIGEST_KEY_SEP.length);
+  const isKey = /^approval-prevention-key:\S{1,300}$/.test(tail);
+  const keyLine = isKey ? digest.slice(at) : '';
+  const body = isKey ? digest.slice(0, at) : digest;
+  // Scope is capped by dropping WHOLE entries, never by slicing one mid-path (a sliced entry would be a fake path
+  // in the frontmatter `scope:` the conveyor uses to keep lanes apart).
+  const scopeEntries = boundCardText(input.scope, Number.MAX_SAFE_INTEGER, { singleLine: true }).split(',');
+  let scope = '';
+  for (const entry of scopeEntries) {
+    const next = scope ? `${scope},${entry}` : entry;
+    if (next.length > CARD_TEXT_CAPS.scope) break;
+    scope = next;
+  }
+  return {
+    ...input,
+    title: boundCardText(input.title, CARD_TEXT_CAPS.title, { singleLine: true }),
+    scope,
+    digest: `${boundCardText(body, CARD_TEXT_CAPS.digest - keyLine.length)}${keyLine}`,
+  };
+}
+
+/**
  * PURE. `--k=v` argv → the flat flag map this script acts on. Mirrors `deliver-item-run.mjs`'s own parser
- * (`parseDeliverItemRunArgv`) — same shape, same "throw on a missing required flag, by name" contract.
+ * (`parseDeliverItemRunArgv`) — same shape, same "throw on a missing required flag, by name" contract. The card
+ * text comes back already bounded ({@link boundLandPreventionCardInput}). `retract` is set only when all three
+ * `--retract-repo/--retract-pr/--retract-head` flags are present (see {@link postLandingRetraction}).
  * @param {string[]} argv
- * @returns {{title:string, kind:string, size:string, digest:string, scope:string, parent:string, queue:string, session:string}}
+ * @returns {{title:string, kind:string, size:string, digest:string, scope:string, parent:string, queue:string,
+ *   session:string, retract:({repo:string, pr:string, headSha:string}|null)}}
  */
 export function parseLandPreventionCardArgv(argv = []) {
   const flags = {};
@@ -107,7 +182,8 @@ export function parseLandPreventionCardArgv(argv = []) {
       + 'cannot be filed with no content and no session slug',
     );
   }
-  return {
+  const retractFlags = ['retract-repo', 'retract-pr', 'retract-head'].map((k) => String(flags[k] ?? '').trim());
+  return boundLandPreventionCardInput({
     title: String(flags.title),
     kind: String(flags.kind),
     size: String(flags.size),
@@ -116,7 +192,50 @@ export function parseLandPreventionCardArgv(argv = []) {
     parent: String(flags.parent ?? ''),
     queue: String(flags.queue),
     session: String(flags.session),
-  };
+    retract: retractFlags.every(Boolean)
+      ? { repo: retractFlags[0], pr: retractFlags[1], headSha: retractFlags[2] }
+      : null,
+  });
+}
+
+/**
+ * PURE. The comment a FAILED landing job posts on the PR whose approval spawned it: the retraction marker for
+ * this job's own head + session (`we:scripts/lib/approval-prevention-notice.mjs#buildApprovalPreventionRetraction`)
+ * plus a one-line human-readable reason. `''` when the head/session cannot form a valid marker.
+ * @param {{headSha:string, session:string, result?:{step?:string, reason?:string}}} o
+ * @returns {string}
+ */
+export function buildLandingRetractionComment({ headSha, session, result } = {}) {
+  const marker = buildApprovalPreventionRetraction({ headSha, session });
+  if (!marker) return '';
+  const why = boundCardText(`${result?.step ?? 'unknown'}: ${result?.reason ?? 'no reason recorded'}`, 300, { singleLine: true });
+  return `${marker}\nThe approval-time prevention card for this head did not land (\`${session}\` failed at ${why}). `
+    + 'Its filing marker above is retracted, so the next approval on this head files the guard again.';
+}
+
+/**
+ * Best-effort: post {@link buildLandingRetractionComment} on `repo#pr`. Never throws — a failure is narrated to
+ * `write` and the job still exits non-zero with its own reason.
+ * @param {{repo:string, pr:string, headSha:string, session:string, result:object}} o
+ * @param {{exec?: Function, write?: Function}} [io]
+ * @returns {boolean} whether the comment was posted
+ */
+export function postLandingRetraction({ repo, pr, headSha, session, result }, {
+  exec = execFileSyncThrottled,
+  write = (line) => process.stderr.write(line),
+} = {}) {
+  const body = buildLandingRetractionComment({ headSha, session, result });
+  if (!body) {
+    write(`land-prevention-card: no retraction posted — invalid head/session (${headSha} / ${session})\n`);
+    return false;
+  }
+  try {
+    exec('gh', ['pr', 'comment', String(pr), '--repo', String(repo), '--body', body], { encoding: 'utf8' });
+    return true;
+  } catch (e) {
+    write(`land-prevention-card: retraction comment failed to post on ${repo}#${pr} — ${String(e?.message || e).split('\n')[0]}\n`);
+    return false;
+  }
 }
 
 /** Best-effort parse of a `run.mjs <op> --json` invocation's stdout, tolerant of a leading warning line — the
@@ -156,7 +275,8 @@ export const OPEN_PR_TIMEOUT_MS = 45 * 60_000;
  * starve the pool for every OTHER item. The ENTIRE post-acquire sequence (codex plan review, 2026-09-28) runs
  * under one enclosing try/catch, not just the steps that already had their own — an unexpected throw (a full
  * disk during the PR-body write, say) must still release the lane and return a clean failure, never leak or
- * propagate an unhandled rejection out of this async function.
+ * propagate an unhandled rejection out of this async function. The release itself runs in ONE `finally`
+ * (#4317 advisory review, 2026-09-29), so no early return added later can skip it.
  *
  * @param {{title:string,kind:string,size:string,digest:string,scope:string,parent:string,queue:string,
  *   session:string}} input
@@ -194,11 +314,17 @@ async function landPreventionCardSteps(input, { exec, write, writeFile, scratchF
     }
   };
   const fail = (step, reason, extra = {}) => {
-    release();
     write(`land-prevention-card: FAILED at ${step} — ${reason}\n`);
     return { ok: false, step, num: extra.num ?? null, rel: extra.rel ?? null, pr: extra.pr ?? null, url: extra.url ?? null, reason };
   };
+  try {
+    return await runInLane(input, { exec, write, writeFile, scratchFile, fail, setLane: (n) => { laneNum = n; } });
+  } finally {
+    release(); // every exit path, once a lane number is known
+  }
+}
 
+async function runInLane(input, { exec, write, writeFile, scratchFile, fail, setLane }) {
   let acquired;
   try {
     write(`land-prevention-card: acquiring a lane (session ${input.session})…\n`);
@@ -209,7 +335,7 @@ async function landPreventionCardSteps(input, { exec, write, writeFile, scratchF
     return fail('acquire', String(e?.message || e).split('\n')[0]);
   }
   const lane = acquired?.path ?? null;
-  laneNum = acquired?.lane ?? null;
+  setLane(acquired?.lane ?? null);
   if (!lane) return fail('acquire', 'lane-pool acquire produced no usable lane path');
   // THE #4317-REVIEW FIX (codex plan review, 2026-09-28): every operation from here on must run the ACQUIRED
   // LANE's OWN `run.mjs`, never a `run.mjs` resolved from wherever THIS script itself lives (the checkout that
@@ -280,10 +406,8 @@ async function landPreventionCardSteps(input, { exec, write, writeFile, scratchF
       if (!opened) return fail('open-pr', String(e?.message || e).split('\n')[0], { num, rel });
     }
     const submit = extractSubmitResult(opened || {});
-    release();
     if (submit?.outcome !== 'opened') {
-      write(`land-prevention-card: FAILED at open-pr — ${submit?.reason ?? 'PR was not opened'}\n`);
-      return { ok: false, step: 'open-pr', num, rel, pr: submit?.pr ?? null, url: submit?.url ?? null, reason: submit?.reason ?? 'PR was not opened' };
+      return fail('open-pr', submit?.reason ?? 'PR was not opened', { num, rel, pr: submit?.pr, url: submit?.url });
     }
     write(`land-prevention-card: landed — PR #${submit.pr} (${submit.url})\n`);
     return { ok: true, step: 'done', num, rel, pr: submit.pr ?? null, url: submit.url ?? null, reason: null };
@@ -306,6 +430,7 @@ export async function runLandPreventionCardCli(argv = [], {
   land = landPreventionCard,
   write = (line) => process.stdout.write(line),
   writeErr = (line) => process.stderr.write(line),
+  retract = (r) => postLandingRetraction(r, { write: writeErr }),
 } = {}) {
   let input;
   try {
@@ -318,6 +443,15 @@ export async function runLandPreventionCardCli(argv = [], {
   const result = await land(input, { write });
   if (!result.ok) {
     writeErr(`land-prevention-card: did not land — ${result.step}: ${result.reason}\n`);
+    // The approval that spawned this job already posted its filing marker; retract it so the guard is retried on
+    // the next approval of this head instead of being lost (#4317 advisory review, 2026-09-29).
+    // Not when a PR may already exist (open-pr reported a number/url but not `opened`): retracting then would
+    // trade a lost guard for a duplicate card. That ambiguous case stays with the residual card xxe5jvs.
+    if (input.retract && result.pr == null && result.url == null) {
+      try { retract({ ...input.retract, session: input.session, result }); } catch (e) {
+        writeErr(`land-prevention-card: retraction threw (non-fatal) — ${String(e?.message || e)}\n`);
+      }
+    }
     return { code: 1, result };
   }
   write(`land-prevention-card: done — PR #${result.pr}\n`);

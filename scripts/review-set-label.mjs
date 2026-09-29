@@ -173,7 +173,7 @@ function preventionCardLandingLogPath(sessionSlug) {
 // See `runApprovalPreventionFiling` below for the wiring and why THIS seam, not the drain's land step.
 import {
   selectApprovalPreventionFindings, hasApprovalPreventionMarkerForHead, buildApprovalPreventionMarker,
-  buildApprovalPreventionFilingInput, buildApprovalPreventionKey,
+  buildApprovalPreventionFilingInput, buildApprovalPreventionKey, buildApprovalPreventionJobMarker,
 } from './lib/approval-prevention-notice.mjs';
 // #xwp8ioh — the #2953 inert-PR predicate, extracted so `review-pr`'s `read` step enforces the same rule
 // before a juror is paid instead of this site being the only place it is checked.
@@ -695,7 +695,13 @@ export function derivePreventionParent(findings) {
  * (`findApprovalPreventionCardOnDisk`) short-circuits to a synchronous `{ok:true, num, rel}` when a PAST run's
  * card has, by now, actually landed and reached this checkout — this function is never even called then.
  *
- * @param {{title:string,kind:string,size:string,digest:string,scope:string,parent:string,queue:string}} input
+ * `input.retractTo` (`{repo, pr, headSha}`, optional) is passed to the job as `--retract-*` flags: if the job
+ * fails after this spawn succeeded, it posts a retraction of this spawn's marker on that PR, so the next approval
+ * on the same head retries instead of the guard being lost (#4317 advisory review, 2026-09-29). The returned
+ * `session` is the job's slug, which the marker comment names.
+ *
+ * @param {{title:string,kind:string,size:string,digest:string,scope:string,parent:string,queue:string,
+ *   retractTo?:{repo:string,pr:(number|string),headSha:string}}} input
  * @param {{spawnDetached?: Function, logPathFor?: Function, runScript?: string, root?: string}} [o] -
  *   `spawnDetached` is injectable (same shape as `defaultSpawnDetached`) so a test can assert the exact argv
  *   with no real subprocess and no real `backlog/` write in the calling checkout.
@@ -718,6 +724,9 @@ export function fileApprovalPreventionCard(input, {
     ...(input.parent ? [`--parent=${input.parent}`] : []),
     `--queue=${input.queue}`,
     `--session=${sessionSlug}`,
+    ...(input.retractTo?.repo && input.retractTo?.pr && input.retractTo?.headSha
+      ? [`--retract-repo=${input.retractTo.repo}`, `--retract-pr=${input.retractTo.pr}`, `--retract-head=${input.retractTo.headSha}`]
+      : []),
   ];
   try {
     // `cwd: root` — the checkout THIS process is running in (whatever reviewed the PR), NEVER a lane: the
@@ -743,7 +752,7 @@ export function fileApprovalPreventionCard(input, {
         } catch { /* stderr itself unavailable — nothing else to do */ }
       });
     }
-    return { ok: true, num: null, rel: null, error: null, handle: `pid:${pid}` };
+    return { ok: true, num: null, rel: null, error: null, handle: `pid:${pid}`, session: sessionSlug };
   } catch (e) {
     return { ok: false, num: null, rel: null, error: `could not spawn the landing job: ${String(e?.message || e)}` };
   }
@@ -815,14 +824,18 @@ export function runApprovalPreventionFiling({
   const existing = findFiledApprovalPrevention(key);
   const filed = existing
     ? { ok: true, num: existing.num, rel: existing.rel, error: null }
-    : fileApprovalPrevention(buildApprovalPreventionFilingInput({
-      repo,
-      pr,
-      findings: selection.findings,
-      parent: derivePreventionParent(selection.findings),
-      source: selection.source,
-      key,
-    }));
+    : fileApprovalPrevention({
+      ...buildApprovalPreventionFilingInput({
+        repo,
+        pr,
+        findings: selection.findings,
+        parent: derivePreventionParent(selection.findings),
+        source: selection.source,
+        key,
+      }),
+      // Where a landing job that fails after spawning posts its retraction (`fileApprovalPreventionCard`).
+      retractTo: { repo, pr, headSha },
+    });
   if (!filed.ok) {
     process.stderr.write(
       `review-set-label: approval-time prevention filing for ${subject} FAILED (the approval above already `
@@ -838,7 +851,10 @@ export function runApprovalPreventionFiling({
   const landedDesc = filed.rel
     ? `${filed.rel} (#${filed.num ?? '?'})`
     : `queued for landing via a lane (tracking ${filed.handle ?? 'an untracked job'})`;
-  const noteBody = `${marker}\nFiled the prevention guard(s) owed by ${subject}'s independent review, `
+  // The job marker lets a landing job that later FAILS retract exactly this marker (see
+  // `buildApprovalPreventionJobMarker`), so the next approval on this head files again.
+  const jobMarker = filed.session ? buildApprovalPreventionJobMarker(filed.session) : '';
+  const noteBody = `${marker}${jobMarker ? ` ${jobMarker}` : ''}\nFiled the prevention guard(s) owed by ${subject}'s independent review, `
     + `mechanically, on approval (operator rule, 2026-09-27) — ${landedDesc}.`;
   try {
     provider.postComment(repo, pr, noteBody);
