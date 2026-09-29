@@ -307,6 +307,19 @@ export function advanceHeldStall(prevHeldStall, heldEntries, stallTicks = DEFAUL
 export const DEFAULT_BUILD_TTL_TICKS = 3;
 /** Default TTL (in ticks) for the PREPARE guard's died-before-first-PR backstop (SKILL §2 prepare guard). */
 export const DEFAULT_PREPARE_TTL_TICKS = 5;
+/**
+ * #4504 — Default TTL (in ticks) for a `prepare-item` guard's died-before-first-PR backstop. A full prepare pass
+ * (premise check, five authored sections, gate, adversarial review, then the PR) takes far longer than the
+ * scope-only prepare the 5-tick TTL was sized for; at 5 ticks (~10 min) the guard would retire under a
+ * still-running agent and the next tick would dispatch a duplicate onto the same item.
+ */
+export const DEFAULT_PREPARE_ITEM_TTL_TICKS = 20;
+/**
+ * #4504 — Default per-item cap on `prepare-item` attempts that TTL-retired without ever opening a PR (the
+ * died / could-not-prepare shape). At the cap the item is left held with a note instead of re-dispatched, so a
+ * handful of un-preparable items can never hold the concurrency cap forever.
+ */
+export const DEFAULT_PREPARE_ITEM_RETRY_CAP = 2;
 /** Default TTL (in ticks) for the FIX guard's died-before-rearm backstop (SKILL §3c). */
 export const DEFAULT_FIX_TTL_TICKS = 5;
 /** Default per-PR auto-fix attempt cap before a bounce is surfaced for `/review` (SKILL §3c). */
@@ -575,7 +588,7 @@ export function filterLaunches(launches, liveBuildGuards) {
  * @param {{ unshaped?:object[], decisions?:object[], investigations?:object[], needsPrepare?:object[], prs?:object[], tick:number, ttlTicks?:number }} ctx
  * @returns {{ live:Array<object>, retired:Array<{num:*, kind:string, reason:string, note?:boolean}> }}
  */
-export function retirePrepareGuards(prepareGuards, { unshaped = [], decisions = [], investigations = [], needsPrepare = [], prs = [], tick = 0, now = null, ttlTicks = DEFAULT_PREPARE_TTL_TICKS } = {}) {
+export function retirePrepareGuards(prepareGuards, { unshaped = [], decisions = [], investigations = [], needsPrepare = [], prs = [], lanes = [], tick = 0, now = null, ttlTicks = DEFAULT_PREPARE_TTL_TICKS, itemPrepareTtlTicks = DEFAULT_PREPARE_ITEM_TTL_TICKS } = {}) {
   const unshapedNums = new Set((Array.isArray(unshaped) ? unshaped : []).map((u) => normNum(u.num)));
   const unpreparedNums = new Set(
     (Array.isArray(decisions) ? decisions : []).filter((d) => d?.prepared !== true).map((d) => normNum(d.num)),
@@ -585,6 +598,7 @@ export function retirePrepareGuards(prepareGuards, { unshaped = [], decisions = 
   // (the caller derives this straight off `plan.held`, same shape as `state.unshaped`).
   const investigationNums = new Set((Array.isArray(investigations) ? investigations : []).map((i) => normNum(i.num)));
   const needsPrepareNums = new Set((Array.isArray(needsPrepare) ? needsPrepare : []).map((n) => normNum(n.num)));
+  const leasedLanes = new Set((Array.isArray(lanes) ? lanes : []).map((l) => String(l?.lane)));
   const live = [];
   const retired = [];
   for (const g of Array.isArray(prepareGuards) ? prepareGuards : []) {
@@ -596,11 +610,17 @@ export function retirePrepareGuards(prepareGuards, { unshaped = [], decisions = 
     const sawPr = g.sawPr === true || openPr;
     if (!pendingNums.has(key)) { retired.push({ num: g.num, kind, reason: 'scope-committed' }); continue; }
     if (sawPr && !openPr) { retired.push({ num: g.num, kind, reason: 'pr-terminal' }); continue; }
-    if (!sawPr && guardTtlElapsed(g, { tick, now, ttlTicks })) {
-      retired.push({ num: g.num, kind, reason: 'ttl', note: true });
+    // #4504 — a prepare-item guard runs on its own, longer TTL (see DEFAULT_PREPARE_ITEM_TTL_TICKS), and tracks a
+    // sticky `claimed` flag (its lane observed leased at least once), the same claim signal `retireFixGuards`
+    // uses: only a CLAIMED TTL retirement is a real attempt that counts against the retry cap (#3454's shape).
+    const isItem = kind === 'prepare-item';
+    const claimed = isItem && (g.claimed === true || leasedLanes.has(String(g.lane)));
+    if (!sawPr && guardTtlElapsed(g, { tick, now, ttlTicks: isItem ? itemPrepareTtlTicks : ttlTicks })) {
+      retired.push(isItem ? { num: g.num, kind, reason: 'ttl', note: true, claimed } : { num: g.num, kind, reason: 'ttl', note: true });
       continue;
     }
-    live.push(sawPr === g.sawPr ? g : { ...g, sawPr }); // persist the sticky sawPr flip
+    const next = sawPr === g.sawPr ? g : { ...g, sawPr }; // persist the sticky sawPr flip
+    live.push(isItem && claimed && g.claimed !== true ? { ...next, claimed } : next);
   }
   return { live, retired };
 }
@@ -617,7 +637,7 @@ export function retirePrepareGuards(prepareGuards, { unshaped = [], decisions = 
  * @param {{ unshaped?:object[], decisions?:object[], investigations?:object[], needsPrepare?:object[], prs?:object[], livePrepareGuards?:object[], availableLanes?:Array<*>, maxConcurrentItemPrepares?:number, tick:number, now?:number|null, trace?:boolean, dispatchPaused?:boolean, pausedKinds?:string[]|null }} ctx
  * @returns {{ scopeSpawns:Array<{num:*, lane:*}>, decisionSpawns:Array<{num:*, lane:*}>, investigationSpawns:Array<{num:*, lane:*}>, itemPrepareSpawns:Array<{num:*, lane:*}>, newGuards:Array<object>, consumedLanes:Array<*>, notes:Array<{kind:string, num:*, text:string}> }}
  */
-export function planPrepareSpawns({ unshaped = [], decisions = [], investigations = [], needsPrepare = [], prs = [], livePrepareGuards = [], availableLanes = [], maxConcurrentItemPrepares = 2, tick = 0, now = null, trace = false, dispatchPaused = false, pausedKinds = null } = {}) {
+export function planPrepareSpawns({ unshaped = [], decisions = [], investigations = [], needsPrepare = [], prs = [], livePrepareGuards = [], availableLanes = [], maxConcurrentItemPrepares = 2, itemPrepareAttempts = {}, itemPrepareRetryCap = DEFAULT_PREPARE_ITEM_RETRY_CAP, tick = 0, now = null, trace = false, dispatchPaused = false, pausedKinds = null } = {}) {
   const guardNums = new Set((Array.isArray(livePrepareGuards) ? livePrepareGuards : []).map((g) => normNum(g.num)));
   const lanes = [...(Array.isArray(availableLanes) ? availableLanes : [])];
   const scopeSpawns = [];
@@ -660,8 +680,20 @@ export function planPrepareSpawns({ unshaped = [], decisions = [], investigation
   // #3567 — every held `needs-investigation` candidate spawns ONE investigate agent, no `prepared` gate: an
   // investigation is a single dispatched investigator, not a two-phase prepare-then-ratify lifecycle.
   for (const i of Array.isArray(investigations) ? investigations : []) if (i?.num != null) plan(i.num, 'investigate', investigationSpawns);
-  for (const p of Array.isArray(needsPrepare) ? needsPrepare : []) {
-    if (p?.num == null) continue;
+  // #4504 advisory — ROTATE the cap: least-attempted candidates first (a stable sort, so ties keep plan order),
+  // and an item whose prepare-item attempts reached the retry cap is held with a note instead of re-dispatched.
+  // Without this, the first two candidates in `plan.held` order held the cap forever when un-preparable.
+  const attemptsOf = (num) => Number(itemPrepareAttempts?.[normNum(num)]) || 0;
+  const itemCandidates = (Array.isArray(needsPrepare) ? needsPrepare : [])
+    .filter((p) => p?.num != null)
+    .map((p, i) => ({ p, i, n: attemptsOf(p.num) }))
+    .sort((a, b) => a.n - b.n || a.i - b.i)
+    .map(({ p }) => p);
+  for (const p of itemCandidates) {
+    if (!guardNums.has(normNum(p.num)) && attemptsOf(p.num) >= itemPrepareRetryCap) {
+      if (!(dispatchPaused === true || (Array.isArray(pausedKinds) && pausedKinds.includes('prepare-item')))) notes.push({ kind: 'prepare-item-retry-cap', num: p.num, text: `⏸ #${p.num} — prepare-item produced no PR in ${attemptsOf(p.num)} attempt(s); left for a human` });
+      continue;
+    }
     // #4504 review round 2 — the cap must NEVER fire for a num that already has a live prepare-family guard
     // (necessarily its own prior `prepare-item` guard here, since a needs-prepare candidate is never ALSO
     // unshaped/a decision/an investigation — the four candidate sets are disjoint by construction). Checking
@@ -1159,6 +1191,9 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
   const cfg = {
     buildTtlTicks: config.buildTtlTicks ?? DEFAULT_BUILD_TTL_TICKS,
     prepareTtlTicks: config.prepareTtlTicks ?? DEFAULT_PREPARE_TTL_TICKS,
+    prepareItemTtlTicks: config.prepareItemTtlTicks ?? DEFAULT_PREPARE_ITEM_TTL_TICKS,
+    prepareItemRetryCap: config.prepareItemRetryCap ?? DEFAULT_PREPARE_ITEM_RETRY_CAP,
+    maxConcurrentItemPrepares: config.maxConcurrentItemPrepares ?? 2,
     fixTtlTicks: config.fixTtlTicks ?? DEFAULT_FIX_TTL_TICKS,
     fixRetryCap: config.fixRetryCap ?? DEFAULT_FIX_RETRY_CAP,
     ciHealTtlTicks: config.ciHealTtlTicks ?? DEFAULT_CI_HEAL_TTL_TICKS,
@@ -1238,7 +1273,19 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
   });
   const prepare = retirePrepareGuards(bookkeeping.prepareGuards, {
     unshaped: scopeOrSizeNeeded, decisions, investigations: heldGuardPending, needsPrepare: heldGuardPending, prs, tick, now, ttlTicks: cfg.prepareTtlTicks,
+    lanes, itemPrepareTtlTicks: cfg.prepareItemTtlTicks,
   });
+  // #4504 advisory — per-item prepare-item attempt tally (in-session, like `fixAttempts`). A TTL retirement is
+  // one attempt that produced no PR; it feeds planPrepareSpawns' rotation + retry cap. An entry is dropped once
+  // its item is no longer held at all (prepared, resolved, or re-shaped), so it never outlives its reason.
+  const heldNums = new Set(heldGuardPending.map((h) => normNum(h.num)));
+  const itemPrepareAttempts = {};
+  for (const [num, count] of Object.entries(bookkeeping.itemPrepareAttempts && typeof bookkeeping.itemPrepareAttempts === 'object' ? bookkeeping.itemPrepareAttempts : {})) {
+    if (heldNums.has(normNum(num))) itemPrepareAttempts[normNum(num)] = Number(count) || 0;
+  }
+  for (const r of prepare.retired) {
+    if (r.kind === 'prepare-item' && r.reason === 'ttl' && r.claimed) itemPrepareAttempts[normNum(r.num)] = (itemPrepareAttempts[normNum(r.num)] || 0) + 1;
+  }
   const fix = retireFixGuards(bookkeeping.fixGuards, { prs, lanes, tick, now, ttlTicks: cfg.fixTtlTicks });
   // #3454 — bump fixAttempts HERE, once per guard, exactly when retireFixGuards confirms a REAL attempt (its
   // assigned lane was observed leased) — never speculatively at plan time (that was the phantom-attempt bug).
@@ -1415,6 +1462,9 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
     prs,
     livePrepareGuards: prepare.live,
     availableLanes,
+    maxConcurrentItemPrepares: cfg.maxConcurrentItemPrepares,
+    itemPrepareAttempts,
+    itemPrepareRetryCap: cfg.prepareItemRetryCap,
     tick,
     now,
     trace: true,
@@ -1508,7 +1558,7 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
     for (const h of q.held) notes.push({ kind: 'queue-cap', num: h.num, pr: h.pr, text: `⏸ ${what} PR #${h.pr} (#${h.num}) — queue-cap (${queueCapReading(h, queueBudget)})` });
   }
   for (const r of build.retired) if (r.note) notes.push({ kind: 'build-ttl', num: r.num, text: `⚠ #${r.num} never claimed after ${cfg.buildTtlTicks} ticks — re-dispatching` });
-  for (const r of prepare.retired) if (r.note) notes.push({ kind: 'prepare-ttl', num: r.num, text: `⚠ prepare #${r.num} produced no PR in ${cfg.prepareTtlTicks} ticks — re-dispatching` });
+  for (const r of prepare.retired) if (r.note) notes.push({ kind: 'prepare-ttl', num: r.num, text: `⚠ prepare #${r.num} produced no PR in ${r.kind === 'prepare-item' ? cfg.prepareItemTtlTicks : cfg.prepareTtlTicks} ticks — re-dispatching` });
   // #3454 — an UNCLAIMED TTL (dispatch-lane.mjs's own in-flight guard refused it pre-flight, or it died before
   // ever acquiring a lane) reads distinctly from a CLAIMED one (a real agent started, then went silent) — the
   // former burned no retry budget and says so; the latter already counted toward the cap (see `newlyClaimed`).
@@ -1674,6 +1724,7 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
       tick: tick + 1,
       buildGuards: liveBuildGuards,
       prepareGuards: livePrepareGuards,
+      itemPrepareAttempts,
       fixGuards: liveFixGuards,
       fixAttempts: fixPlan.fixAttempts,
       ciHealGuards: liveCiHealGuards,

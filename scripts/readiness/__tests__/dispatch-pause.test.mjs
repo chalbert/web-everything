@@ -197,6 +197,17 @@ describe('dispatch-pause — resolvePausedKinds / isKindPaused / isScopedPause (
     expect(isKindPaused(scoped, 'ci-heal')).toBe(false);
     expect(isScopedPause(scoped)).toBe(true);
   });
+  it('a LEGACY scope naming every kind that existed before prepare-item still holds prepare-item (#4504 advisory)', () => {
+    // Written before #4504 added `prepare-item`, this scope meant "everything". It must not silently leak
+    // the new kind once it lands.
+    const legacy = { paused: true, pausedKinds: ['build', 'prepare', 'prepare-decision', 'investigate', 'fix', 'ci-heal'] };
+    expect(isKindPaused(legacy, 'prepare-item')).toBe(true);
+    expect(resolvePausedKinds(legacy)).toEqual([...PAUSABLE_KINDS]);
+    expect(isScopedPause(legacy)).toBe(false);
+    // A scope that leaves any legacy kind out stays a real scope — prepare-item is not dragged in.
+    const partial = { paused: true, pausedKinds: ['build', 'prepare', 'prepare-decision', 'investigate', 'fix'] };
+    expect(isKindPaused(partial, 'prepare-item')).toBe(false);
+  });
   it('a scope naming ALL kinds reads as blanket (same hold, same wording)', () => {
     expect(isScopedPause({ paused: true, pausedKinds: [...PAUSABLE_KINDS] })).toBe(false);
   });

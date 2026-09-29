@@ -36,6 +36,8 @@ import {
   durableBuildNums,
   DEFAULT_BUILD_TTL_TICKS,
   DEFAULT_PREPARE_TTL_TICKS,
+  DEFAULT_PREPARE_ITEM_TTL_TICKS,
+  DEFAULT_PREPARE_ITEM_RETRY_CAP,
   DEFAULT_FIX_RETRY_CAP,
   DEFAULT_CI_HEAL_RETRY_CAP,
   advanceHeldStall,
@@ -236,6 +238,22 @@ describe('retirePrepareGuards — NEVER on Agent-return; scope-committed / PR-te
     expect(done.retired[0]).toMatchObject({ num: 30, reason: 'scope-committed' });
   });
 
+  it('a prepare-item guard gets its OWN, longer TTL — a full prepare pass outlives the 5-tick scope-prepare TTL (#4504 advisory)', () => {
+    expect(DEFAULT_PREPARE_ITEM_TTL_TICKS).toBeGreaterThan(DEFAULT_PREPARE_TTL_TICKS);
+    const g = [
+      { num: 50, kind: 'prepare-item', lane: 4, spawnedTick: 0, sawPr: false },
+      { num: 51, kind: 'prepare', lane: 5, spawnedTick: 0, sawPr: false },
+    ];
+    const ctx = { unshaped: [{ num: 51 }], needsPrepare: [{ num: 50 }], prs: [] };
+    // Past the scope TTL: the scope guard retires, the prepare-item guard is still inside its own budget.
+    const mid = retirePrepareGuards(g, { ...ctx, tick: DEFAULT_PREPARE_TTL_TICKS });
+    expect(mid.live.map((x) => x.num)).toEqual([50]);
+    expect(mid.retired).toEqual([expect.objectContaining({ num: 51, reason: 'ttl' })]);
+    // Past its own TTL, it retires too.
+    const late = retirePrepareGuards(g, { ...ctx, tick: DEFAULT_PREPARE_ITEM_TTL_TICKS });
+    expect(late.retired).toEqual(expect.arrayContaining([expect.objectContaining({ num: 50, kind: 'prepare-item', reason: 'ttl' })]));
+  });
+
   it('an investigate guard keys retirement on the STILL-HELD-needs-investigation set (#3567) — no prepared flag to wait on', () => {
     const ig = [{ num: 40, kind: 'investigate', lane: 8, spawnedTick: 0, sawPr: false }];
     // still held needs-investigation this tick → live
@@ -301,6 +319,35 @@ describe('planPrepareSpawns — union re-dispatch gate + lane exclusion (SKILL �
     expect(r.itemPrepareSpawns).toEqual([]); // #100 IS capped (1 live + 0 new already at ceiling 1)
     expect(r.notes.some((n) => n.kind === 'prepare-item-cap' && n.num === 99)).toBe(false); // never #99
     expect(r.notes.some((n) => n.kind === 'prepare-item-cap' && n.num === 100)).toBe(true); // only the new one
+  });
+
+  it('defaults to TWO concurrent prepare-item spawns when maxConcurrentItemPrepares is omitted (#4504 advisory)', () => {
+    const r = planPrepareSpawns({ needsPrepare: [{ num: 99 }, { num: 100 }, { num: 101 }], availableLanes: [5, 6, 7], tick: 0 });
+    expect(r.itemPrepareSpawns).toEqual([{ num: 99, lane: 5 }, { num: 100, lane: 6 }]);
+    expect(r.notes.filter((n) => n.kind === 'prepare-item-cap').map((n) => n.num)).toEqual([101]);
+  });
+
+  it('ROTATES the prepare-item cap to the least-attempted candidate, so a stuck item cannot hold a slot forever (#4504 advisory)', () => {
+    // #99 already failed one attempt (TTL-retired, no PR); #100 never tried. With one slot, #100 goes first.
+    const r = planPrepareSpawns({
+      needsPrepare: [{ num: 99 }, { num: 100 }],
+      itemPrepareAttempts: { 99: 1 },
+      availableLanes: [5],
+      maxConcurrentItemPrepares: 1,
+      tick: 0,
+    });
+    expect(r.itemPrepareSpawns).toEqual([{ num: 100, lane: 5 }]);
+  });
+
+  it('stops re-dispatching a needs-prepare item once its prepare-item attempts reach the retry cap, with a note (#4504 advisory)', () => {
+    const r = planPrepareSpawns({
+      needsPrepare: [{ num: 99 }, { num: 100 }],
+      itemPrepareAttempts: { 99: DEFAULT_PREPARE_ITEM_RETRY_CAP },
+      availableLanes: [5, 6],
+      tick: 0,
+    });
+    expect(r.itemPrepareSpawns).toEqual([{ num: 100, lane: 5 }]);
+    expect(r.notes.some((n) => n.kind === 'prepare-item-retry-cap' && n.num === 99)).toBe(true);
   });
 
   it('spawns one prepare-scope agent per unshaped item, consuming free lanes', () => {
@@ -860,6 +907,41 @@ describe('planTick — a cleared kind:investigation item is spawned via spawnInv
       bookkeeping: { tick: 2, prepareGuards: blockedTick.nextState.prepareGuards },
     });
     expect(unblockedTick.decisions.spawnPrepareItems).toEqual([]); // still suppressed — no duplicate agent
+  });
+
+  it('with more needs-prepare candidates than the cap, a prepare-item that dies without a PR yields its slot — every candidate is eventually reached (#4504 advisory)', () => {
+    // Cap 1, three candidates, and no agent ever opens a PR or stamps (the could-not-prepare / died shape).
+    // Each TTL retirement counts one attempt against that num, so the slot rotates instead of re-spawning
+    // the first candidate forever.
+    const held = [{ num: 8001, reason: 'needs-prepare' }, { num: 8002, reason: 'needs-prepare' }, { num: 8003, reason: 'needs-prepare' }];
+    let bookkeeping = { tick: 0 };
+    const spawned = [];
+    for (let i = 0; i < 3 * (DEFAULT_PREPARE_ITEM_TTL_TICKS + 1); i++) {
+      const r = planTick({
+        state: { queue: [], lanes: [{ lane: 4 }], prs: [] }, // the agent really acquired its lane (claimed)
+        plan: { launch: [], held },
+        freeLanes: [4],
+        bookkeeping,
+        config: { maxConcurrentItemPrepares: 1 },
+      });
+      spawned.push(...r.decisions.spawnPrepareItems.map((s) => s.num));
+      bookkeeping = r.nextState;
+    }
+    expect(new Set(spawned)).toEqual(new Set([8001, 8002, 8003]));
+    expect(bookkeeping.itemPrepareAttempts).toMatchObject({ 8001: 1, 8002: 1 });
+  });
+
+  it('an UNCLAIMED prepare-item TTL retirement (lane never leased — refused pre-flight) burns no attempt (#4504 advisory, #3454 shape)', () => {
+    const guard = { num: 8101, kind: 'prepare-item', lane: 4, spawnedTick: 0, sawPr: false };
+    const r = planTick({
+      state: { queue: [], lanes: [], prs: [] },
+      plan: { launch: [], held: [{ num: 8101, reason: 'needs-prepare' }] },
+      freeLanes: [4],
+      bookkeeping: { tick: DEFAULT_PREPARE_ITEM_TTL_TICKS, prepareGuards: [guard] },
+    });
+    expect(r.decisions.retireGuards.prepare).toEqual([expect.objectContaining({ num: 8101, reason: 'ttl', claimed: false })]);
+    expect(r.nextState.itemPrepareAttempts).toEqual({});
+    expect(r.decisions.spawnPrepareItems).toEqual([{ num: 8101, lane: 4 }]); // free re-dispatch
   });
 
   it('a needs-prepare item held BLOCKED by the prepare-item kind-scoped dispatch-pause spawns nothing, then spawns once unpaused (#4504 review round 2)', () => {
