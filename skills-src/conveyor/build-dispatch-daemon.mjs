@@ -30,7 +30,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
-import { tmpdir, hostname } from 'node:os';
+import { tmpdir, hostname, homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -211,6 +211,20 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
       else { effects.releaseClaim({ num: pick.num }); failures.push({ num: pick.num, stage: 'dispatch', reason: res?.reason ?? 'not dispatched' }); }
     }
   }
+  // #4348-open-pr-retry — ONE resume pass per LIVE tick, reusing #2659's own backoff/attempt-cap state machine
+  // (`scripts/conveyor/infra-blocked.mjs retry`) wholesale rather than re-deriving it here: a `blocked-on-infra`
+  // PR-open (the lane ref is already pushed; `deliver-item-wrapper.mjs` now settles this as `open-pending`,
+  // never `wrapper-threw`) never re-runs a build — this only ever re-invokes `pr-land`, which itself never
+  // merges (memory rule 104). This is DELIBERATELY this daemon's OWN tick, not a separate standalone pass: the
+  // live incident (#4348, run f4166fa3883080a9) sat stranded for 2+ hours because nothing ever ticked the
+  // registered `infra-blocked` pass at all — this daemon is the one already confirmed alive and self-syncing.
+  // Optional-chained so an older test stub that predates this field behaves exactly as before (no call, no
+  // throw); best-effort — a retry-pass hiccup must never fail this tick's own build-dispatch plan.
+  let infraRetry = null;
+  if (live && typeof effects.retryInfraBlocked === 'function') {
+    try { infraRetry = await effects.retryInfraBlocked(); }
+    catch (e) { infraRetry = { error: String(e?.message || e).split('\n')[0] }; }
+  }
   return {
     live,
     statusLine: d.statusLine || '',
@@ -223,6 +237,9 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
     dispatchHolds: held,
     dispatched,
     failures,
+    // #4348-open-pr-retry — `{retried, resumed, surfaced, waiting}` from `infra-blocked.mjs retry` (or an
+    // `{error}` on a best-effort failure), `null` on a dry-run tick or an older effects stub with no such call.
+    infraRetry,
     nextBookkeeping: settleBookkeeping(bookkeeping, out?.nextState || {}, dispatched.map((x) => x.num)),
   };
 }
@@ -331,6 +348,50 @@ function cliKillSwitch() {
   return readKillSwitch({ env: process.env, killFileExists: existsSync(killFilePath), killFilePath });
 }
 
+/**
+ * #4348-open-pr-retry — where the OPERATOR'S PRIMARY WE checkout lives, so THIS daemon (which may run from a
+ * genuinely DIFFERENT checkout — e.g. a dedicated daemon host clone with no git-alternates relationship to the
+ * primary at all) can still find the SAME `.conveyor/infra-blocked.json` that `pr-land.mjs` actually wrote the
+ * resumable handle into. `infra-blocked.mjs`'s own header says its store is "the PRIMARY checkout's session
+ * sidecar" and assumes "the retry pass reads from the primary" — true when the retry pass ran from the primary
+ * itself, and silently broken once a build-dispatch daemon split (#3383) moved this tick onto its own,
+ * independent checkout: confirmed live for #4348 (run f4166fa3883080a9) — the record sat correctly written at
+ * `~/workspace/webeverything/.conveyor/infra-blocked.json` while this daemon's own checkout has no
+ * `.conveyor/` directory at all, so an un-pointed retry call would silently no-op forever (`readInfraStore`
+ * returns `[]` for a missing file, never an error).
+ *
+ * Mirrors `coordination-root.mjs`'s own `~/workspace/`-relative convention (#3383) — that file already bakes
+ * in this operator's layout for the build-dispatch claim/hold family; `WE_PRIMARY_CHECKOUT` overrides it here
+ * the same way `WE_COORDINATION_ROOT` overrides that one. Returns `{}` (no override) when neither the env var
+ * nor the default path resolves to a real `.conveyor/infra-blocked.json` — a host where this daemon genuinely
+ * IS the primary, or one with a different layout entirely, sees no change from `infra-blocked.mjs`'s own
+ * default (today's behaviour, unchanged).
+ */
+export function primaryInfraStoreEnv({ env = process.env, home = homedir() } = {}) {
+  const root = (env.WE_PRIMARY_CHECKOUT || '').trim() || join(home, 'workspace', 'webeverything');
+  const file = join(root, '.conveyor', 'infra-blocked.json');
+  return existsSync(file) ? { CONVEYOR_INFRA_FILE: file } : {};
+}
+
+/**
+ * #4348-open-pr-retry — ONE `infra-blocked.mjs retry` pass, shelled exactly like `runner.mjs`'s own per-repo
+ * mechanical-pass call (`run('conveyor/infra-blocked.mjs', ['retry'], 'we', repo)`), reusing its whole
+ * backoff/attempt-cap/resume state machine (#2659) rather than re-deriving any of it here. Best-effort: a
+ * malformed/unparseable result or a spawn failure never throws past this function — {@link runBuildDispatchTick}
+ * already wraps its own call in try/catch, but this stays defensive on its own too, matching every other
+ * `cli*` shell function in this file. */
+export function cliRetryInfraBlocked() {
+  try {
+    const text = execFileSync('node', [join(SCRIPTS, 'conveyor', 'infra-blocked.mjs'), 'retry'], {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 16 * 1024 * 1024, cwd: REPO_ROOT,
+      env: { ...process.env, ...primaryInfraStoreEnv() },
+    });
+    return JSON.parse(text || '{}');
+  } catch (e) {
+    return { error: String(e?.stderr || e?.message || e).replace(/\s+/g, ' ').slice(0, 400) };
+  }
+}
+
 /** Predict the provider route for the dry run — the SAME `decideDispatchRoute` dispatch-lane calls, with the
  *  item's `deliveryAgent:` override honoured as the mechanical build mode would. Advisory only: dispatch-lane
  *  recomputes it at dispatch time. */
@@ -381,6 +442,8 @@ function cliEffects() {
     listHolds: cliListHolds,
     killSwitch: cliKillSwitch,
     dispatch: cliDispatch,
+    // #4348-open-pr-retry — only called by `runBuildDispatchTick` when `live` (never on a `--dry-run` tick).
+    retryInfraBlocked: cliRetryInfraBlocked,
   };
 }
 
@@ -522,7 +585,7 @@ async function live(flags) {
     tickOnce, sleep: realSleep, isAlive, intervalMs, maxTicks: flags.once ? 1 : Infinity,
     onTick: (r) => {
       if (!r || !r.plan) { console.error(`build-dispatch-daemon: tick skipped (${r?.reason ?? 'self-sync'})`); return; }
-      process.stdout.write(`${JSON.stringify({ at: new Date().toISOString(), status: r.statusLine, freeze: r.plan.freeze, inFlight: r.plan.inFlight.map((f) => f.num), openItems: reportOpenItems(r.plan.openItems), dispatched: r.dispatched, hold: r.plan.hold, dispatchHolds: r.dispatchHolds, failures: r.failures, retired: r.retired })}\n`);
+      process.stdout.write(`${JSON.stringify({ at: new Date().toISOString(), status: r.statusLine, freeze: r.plan.freeze, inFlight: r.plan.inFlight.map((f) => f.num), openItems: reportOpenItems(r.plan.openItems), dispatched: r.dispatched, hold: r.plan.hold, dispatchHolds: r.dispatchHolds, failures: r.failures, retired: r.retired, infraRetry: r.infraRetry })}\n`);
     },
     onTickError: (e) => console.error(`build-dispatch-daemon: tick failed (non-fatal): ${String(e?.message || e).split('\n')[0]}`),
   });

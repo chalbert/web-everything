@@ -1,10 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   runBuildDispatchTick, settleBookkeeping, readKillSwitch, readDispatchOutcome, KILL_SWITCH_ENV,
   cliListSettledBuilds, cliListHolds, policyFrom,
+  // #4348-open-pr-retry
+  primaryInfraStoreEnv,
 } from '../build-dispatch-daemon.mjs';
 import {
   acquireBuildDispatchClaim, releaseBuildDispatchClaim, listBuildDispatchClaims,
@@ -197,6 +199,82 @@ describe('runBuildDispatchTick', () => {
     expect(r.plan.hold.find((h) => h.rule === 'wip-cap').reason).toMatch(/500/);
     // this card must never touch the pre-existing display-only field — still the raw durable in-flight list.
     expect(r.plan.inFlight).toEqual([]);
+  });
+});
+
+// #4348-open-pr-retry — the live incident this closes: build #4348 finished (gate green), its PR-open hit the
+// GitHub rate limit, and the item sat under an indistinguishable `wrapper-threw` build-dispatch hold for 2+
+// hours because NOTHING ever retried the open — the `infra-blocked.mjs retry` pass (#2659's own
+// backoff/attempt-cap state machine) was registered but never ticked. This daemon's own LIVE tick — already
+// confirmed alive — now runs that retry pass itself every cycle, so a resumable `blocked-on-infra` open-pr
+// recovers on its own, with no rebuild.
+describe('runBuildDispatchTick — #4348-open-pr-retry (infra-blocked resume folded into this daemon\'s own tick)', () => {
+  let lockRoot;
+  beforeEach(() => { lockRoot = mkdtempSync(join(tmpdir(), 'bdd-claims-infra-')); });
+  afterEach(() => { rmSync(lockRoot, { recursive: true, force: true }); });
+
+  it('a LIVE tick calls effects.retryInfraBlocked() exactly once, and its result rides on the tick report', async () => {
+    const dispatches = [];
+    let calls = 0;
+    const effects = { ...effectsFor({ lockRoot, pid: 1, dispatches }), retryInfraBlocked: async () => { calls += 1; return { retried: ['4348'], resumed: [{ num: '4348', pr: 9001 }], surfaced: [], waiting: [] }; } };
+    const r = await runBuildDispatchTick({ live: true, effects });
+    expect(calls).toBe(1);
+    expect(r.infraRetry).toEqual({ retried: ['4348'], resumed: [{ num: '4348', pr: 9001 }], surfaced: [], waiting: [] });
+  });
+
+  it('a DRY-RUN tick (live:false) never calls it — a dry run must touch nothing', async () => {
+    const dispatches = [];
+    let calls = 0;
+    const effects = { ...effectsFor({ lockRoot, pid: 1, dispatches }), retryInfraBlocked: async () => { calls += 1; return {}; } };
+    const r = await runBuildDispatchTick({ live: false, effects });
+    expect(calls).toBe(0);
+    expect(r.infraRetry).toBeNull();
+  });
+
+  it('an OLDER effects stub with no `retryInfraBlocked` at all behaves exactly as before this card — no call, no throw', async () => {
+    const dispatches = [];
+    const r = await runBuildDispatchTick({ live: true, effects: effectsFor({ lockRoot, pid: 1, dispatches }) });
+    expect(r.infraRetry).toBeNull();
+  });
+
+  it('a THROWING retry pass never fails this tick\'s own build-dispatch plan — best-effort, captured as `{error}`', async () => {
+    const dispatches = [];
+    const effects = { ...effectsFor({ lockRoot, pid: 1, dispatches }), retryInfraBlocked: async () => { throw new Error('infra-blocked: gh network error'); } };
+    const r = await runBuildDispatchTick({ live: true, effects });
+    expect(r.infraRetry).toEqual({ error: 'infra-blocked: gh network error' });
+    // the REST of the tick still ran normally — this is a side effect, never a gate on the plan.
+    expect(r.dispatched.length).toBeGreaterThan(0);
+  });
+});
+
+describe('primaryInfraStoreEnv (#4348-open-pr-retry)', () => {
+  let home;
+  beforeEach(() => { home = mkdtempSync(join(tmpdir(), 'bdd-home-')); });
+  afterEach(() => { rmSync(home, { recursive: true, force: true }); });
+
+  it('no override when neither the env var nor the default `~/workspace/webeverything` layout resolves to a '
+    + 'real store — a host where this daemon genuinely IS the primary sees no change', () => {
+    expect(primaryInfraStoreEnv({ env: {}, home })).toEqual({});
+  });
+
+  it('overrides CONVEYOR_INFRA_FILE at the DEFAULT `<home>/workspace/webeverything/.conveyor/infra-blocked.json` '
+    + 'once that file exists — the live #4348 shape (a daemon checkout with no relationship to the primary)', () => {
+    const file = join(home, 'workspace', 'webeverything', '.conveyor', 'infra-blocked.json');
+    mkdirSync(join(home, 'workspace', 'webeverything', '.conveyor'), { recursive: true });
+    writeFileSync(file, '[]');
+    expect(primaryInfraStoreEnv({ env: {}, home })).toEqual({ CONVEYOR_INFRA_FILE: file });
+  });
+
+  it('WE_PRIMARY_CHECKOUT overrides the default layout, same convention as WE_COORDINATION_ROOT', () => {
+    const altRoot = mkdtempSync(join(tmpdir(), 'bdd-alt-primary-'));
+    try {
+      const file = join(altRoot, '.conveyor', 'infra-blocked.json');
+      mkdirSync(join(altRoot, '.conveyor'), { recursive: true });
+      writeFileSync(file, '[]');
+      expect(primaryInfraStoreEnv({ env: { WE_PRIMARY_CHECKOUT: altRoot }, home })).toEqual({ CONVEYOR_INFRA_FILE: file });
+    } finally {
+      rmSync(altRoot, { recursive: true, force: true });
+    }
   });
 });
 

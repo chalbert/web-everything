@@ -105,6 +105,8 @@ import {
   // build-path-codex-isolation-locus
   resolveDeliveryLocus, acquireImplLane, stageDeliveryReportCliIntoLane, DELIVERY_REPORT_CLI_REL_FILES,
   mergeSettleResult,
+  // #4348-open-pr-retry
+  classifyOpenPrFailure,
 } from '../deliver-item-wrapper.mjs';
 import { repoProfile } from '../../lib/repo-profile.mjs';
 // #4349 — real (never mocked) run-store + build-dispatch-claim reads, driven through a temp `OPERATION_RUNS_DIR`
@@ -2260,6 +2262,57 @@ function openPrEnvelope(result) {
   });
 }
 
+/**
+ * #4348-open-pr-retry — a REALISTIC `run.mjs open-pr --json` stdout for the `effect-halted` stop
+ * (`cli-adapter.mjs#renderOutcome`, exit code 1): the halted effect's own `result` stays `null`
+ * (`effect-executor.mjs#applyPendingEffects`'s catch branch sets only `error`), and the reason is folded into
+ * the effect's `.error` sentence. Transcribed from the REAL captured run record for the live #4348 incident
+ * (run f4166fa3883080a9), not guessed.
+ */
+function openPrHaltedEnvelope(errorText) {
+  return JSON.stringify({
+    runId: 'open-pr-test', op: 'open-pr', stopped: 'effect-halted', applied: [],
+    inFlight: [], pending: { step: 'submit', kind: 'effect', stepIndex: 1 }, verdict: { ref: 'lane/test', base: 'main' },
+    findings: {
+      plan: { ref: 'lane/test', base: 'main' },
+      submit: { applied: false, effects: [{ type: 'open-pr.submit', status: 'pending', result: null, error: errorText }] },
+    },
+    telemetry: [], spend: { jurors: 0, costUsd: 0, wallMs: 0, durationMs: 0 }, error: errorText,
+  });
+}
+
+// ================================================================================================
+// #4348-open-pr-retry — `classifyOpenPrFailure` is what tells a `blocked-on-infra` PR-open (retryable — see
+// `deliverItem`'s new `open-pending` branch) apart from a genuine refusal/bug (still `wrapper-threw`).
+// ================================================================================================
+describe('classifyOpenPrFailure (#4348-open-pr-retry)', () => {
+  const BLOCKED_TEXT = 'open-pr: pr-land did not report a result — blocked-on-infra. The PR was NOT opened, '
+    + 'and this is not a refusal you can fix by editing the request.';
+
+  it('reads the REAL halted-effect shape (result:null, reason folded into .error) and matches the bare token', () => {
+    const e = new Error('Command failed'); e.stdout = openPrHaltedEnvelope(BLOCKED_TEXT);
+    expect(classifyOpenPrFailure(e)).toEqual({ reason: 'blocked-on-infra', detail: BLOCKED_TEXT });
+  });
+
+  it('falls back to the envelope\'s top-level `error` when the per-effect one is absent', () => {
+    const payload = JSON.parse(openPrHaltedEnvelope(BLOCKED_TEXT));
+    payload.findings.submit.effects[0].error = null;
+    const e = new Error('Command failed'); e.stdout = JSON.stringify(payload);
+    expect(classifyOpenPrFailure(e)).toEqual({ reason: 'blocked-on-infra', detail: BLOCKED_TEXT });
+  });
+
+  it('a genuine refusal (e.g. `check-red`) is NOT reclassified — it stays the generic wrapper-threw case', () => {
+    const e = new Error('Command failed'); e.stdout = openPrHaltedEnvelope('open-pr: refused — check-red');
+    expect(classifyOpenPrFailure(e)).toBeNull();
+  });
+
+  it('unparseable/absent stdout (the spawn never even started) never guesses an infra hiccup', () => {
+    expect(classifyOpenPrFailure(new Error('spawn ENOENT'))).toBeNull();
+    const withStdout = new Error('boom'); withStdout.stdout = 'not json';
+    expect(classifyOpenPrFailure(withStdout)).toBeNull();
+  });
+});
+
 // ================================================================================================
 // Bug 1 (found re-reading the file end-to-end before the first real #3371 run) — `openPr`'s PR ref carried a
 // literal, never-substituted `<slug>` placeholder (`lane/${item}${attemptTag}-<slug>`), which would have
@@ -3414,6 +3467,67 @@ describe('deliverItem (#4349 — settles its run-store effect + releases/holds t
     // PR-observed retirement owns this, not the wrapper racing ahead of it.
     expect(listBuildDispatchClaims().map((c) => c.meta.num)).toEqual(['9003']);
     expect(listBuildDispatchHolds()).toEqual([]);
+  });
+
+  it('a `blocked-on-infra` PR-open (#4348-open-pr-retry — a GitHub rate limit AFTER the lane ref is already '
+    + 'pushed) settles as `open-pending`, never the generic `wrapper-threw`, and places a hold so it is not '
+    + 'rebuilt — the actual retry is a LATER daemon tick, not this wrapper', async () => {
+    seedInFlightRun('dispatch-lane-9004m');
+    acquireBuildDispatchClaim({ num: '9004', scope: [] });
+    findItem.mockReturnValue({ num: '9004', slug: 'infra-thing', specPath: 'backlog/9004-infra-thing.md', scope: [] });
+    tryReadDeliveryReport.mockReturnValue({ status: 'done', outcome: 'done', filesTouched: ['a.mjs'], reason: 'did it' });
+    execFileSync.mockImplementation((cmd, args = []) => {
+      const a = args || [];
+      if (cmd === 'node' && a[0] === 'scripts/lane-pool.mjs' && a[1] === 'acquire') return '';
+      if (cmd === 'node' && a[0] === 'scripts/lane-pool.mjs' && a[1] === 'status') {
+        return JSON.stringify({ repo: 'web-everything', root: '/pool', lanes: [{ lane: 7, path: lane, exists: true }] });
+      }
+      if (cmd === 'node' && a[0] === 'scripts/verify-lane.mjs') return '{}';
+      if (cmd === 'node' && a[0] === 'scripts/operations/run.mjs' && a[1] === 'claim') return '{}';
+      if (cmd === 'node' && a[0] === 'scripts/operations/run.mjs' && a[1] === 'verify') {
+        return JSON.stringify({
+          runId: 'run-1', op: 'verify', stopped: 'complete', applied: [],
+          verdict: { ok: true, cwd: lane, suite: 'run', passed: 2, failed: 0, unrun: 0, checks: [], blocking: [] },
+        });
+      }
+      if (cmd === 'node' && a[0] === 'scripts/converge-cli.mjs' && a[1] === 'init') {
+        return JSON.stringify({ action: 'land', round: 1, roundCap: 5, verdict: 'land', dismissed: [] });
+      }
+      if (cmd === 'git') return '';
+      if (cmd === 'node' && String(a[0]).endsWith('scripts/operations/run.mjs') && a[1] === 'open-pr') {
+        // the REAL shape a rate-limited `gh pr create` produces end to end: `run.mjs open-pr --json` exits 1
+        // (`effect-halted`), still printing the outcome envelope to stdout — exactly what `execFileSync` throws.
+        const err = new Error('Command failed: run.mjs open-pr'); err.status = 1; err.stderr = '';
+        err.stdout = openPrHaltedEnvelope(
+          'open-pr: pr-land did not report a result — blocked-on-infra. The PR was NOT opened, and this is not '
+          + 'a refusal you can fix by editing the request.',
+        );
+        throw err;
+      }
+      if (cmd === 'node' && a[0] === 'scripts/backlog.mjs' && a[1] === 'release') return '';
+      if (cmd === 'node' && a[0] === 'scripts/lane-pool.mjs' && a[1] === 'release') return '';
+      throw new Error(`unexpected execFileSync(${cmd}, ${JSON.stringify(a)})`);
+    });
+
+    const result = await deliverItem(
+      {
+        item: '9004', lane: 7, scope: [], sessionSlug: 'conveyor-9004', attemptTag: '',
+        runId: 'dispatch-lane-9004m', effectKey: 'dispatch:0:0',
+      },
+      { spawn: vi.fn(), vendor: 'claude' },
+      { newSessionId: () => 'uuid-fixed' },
+    );
+
+    expect(result.result).toMatch(/^open-pending \(blocked-on-infra/);
+    const store = createFileRunStore(runsDir);
+    expect(store.read('dispatch-lane-9004m').effects[0].status).toBe('applied');
+    expect(store.read('dispatch-lane-9004m').effects[0].result).toEqual({ outcome: 'open-pending', reason: 'blocked-on-infra' });
+    // Never rebuilt: the claim is released AND a hold is placed, exactly like every other non-PR terminal
+    // outcome above. The difference from `wrapper-threw` is legibility (a dry-run/status read can now tell
+    // "this will self-recover" apart from "something actually broke"), never the re-dispatch guard itself.
+    expect(listBuildDispatchClaims()).toEqual([]);
+    expect(listBuildDispatchHolds().map((h) => h.meta.num)).toEqual(['9004']);
+    expect(listBuildDispatchHolds()[0].meta.reason).toBe('open-pending');
   });
 
   it('finding #7 — a throw AFTER an earlier `settleTerminal` already ran (here, `finish()` itself blowing up '
