@@ -426,6 +426,8 @@ const DISPATCH_DRY_RUN_LINES = [
   "  const stubDispatch = async (planned) => ({ agentId: null, sessionSlug: 'stub-ci-heal', pr: planned.pr, itemNum: planned.itemNum, lane: planned.lane, unknownTokens: [] });",
   "  const r = await runReconcileCiHealDispatch({",
   "    repo: WE_SLUG, dispatch: stubDispatch, pickFreeLanes: () => [90301, 90302, 90303, 90304, 90305], checkStaleness: skipStaleness,",
+  "    // #4352 — the owed-write flush POSTS PR comments; a smoke never writes to GitHub, same as its stubbed dispatch.",
+  "    flushOwed: () => ({ posted: [], cleared: [], dropped: [], kept: [] }),",
   "  });",
   "  if (!Array.isArray(r.dispatched) || !Array.isArray(r.refusals)) throw new Error('runReconcileCiHealDispatch returned an unexpected shape');",
   "});",

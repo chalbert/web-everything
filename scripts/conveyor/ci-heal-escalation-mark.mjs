@@ -44,14 +44,15 @@
  *
  * NO PARALLEL STATE STORE (#2612 invariant, matching every sibling marker in this directory): the record lives
  * on the PR's own comment thread, read back by {@link latestCiHealEscalationForHead}, exactly as
- * `countCiHealComments` / `countStandDownComments` already work.
+ * `countCiHealComments` / `countStandDownComments` already work. The one local file this CLI may write — a
+ * `ci-heal-owed.mjs` record when a GitHub budget block refuses the post (#4352) — is a pending-write note, never
+ * read by any decision: it only makes sure the PR-thread record eventually exists.
  */
 import { resolve } from 'node:path';
-import { execFileSync } from 'node:child_process';
-import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 import { isTrustedMarkerAuthor } from '../lib/marker-authorship.mjs';
 import { createGhProvider } from '../lib/review-label-provider.mjs';
 import { STATUS_LABEL_RE } from './review-status-tag.mjs';
+import { isBudgetRefusal, postPrComment, recordOwedWrite, resolveOwedRepo } from './ci-heal-owed.mjs';
 
 /**
  * we:scripts/conveyor/ci-heal-escalation-mark.mjs#CI_HEAL_ESCALATION_MARKER — the stable FIRST LINE of the
@@ -151,6 +152,25 @@ export function latestCiHealEscalationForHead(comments, headSha) {
   return matches.length ? matches[matches.length - 1] : null;
 }
 
+/**
+ * we:scripts/conveyor/ci-heal-escalation-mark.mjs#postOrOweCiHealEscalation — post the escalation comment; on a
+ * BUDGET refusal, record it owed for `ci-heal-pr-dispatch.mjs#runReconcileCiHealDispatch`'s next-tick flush
+ * instead of dropping it (#4352). The escalation already carries its head (`--head` is required), so the owed
+ * record's dedupe key is exactly what {@link latestCiHealEscalationForHead} matches on. Any non-budget failure,
+ * or a repo outside the constellation, still throws.
+ * @returns {{commented:true}|{commented:false, owed:object}}
+ */
+export function postOrOweCiHealEscalation({ pr, body, headSha, repo, post = postPrComment, owe = recordOwedWrite }) {
+  try {
+    post({ pr, repo: repo?.slug, body });
+    return { commented: true };
+  } catch (e) {
+    if (!isBudgetRefusal(e) || !headSha || !repo) throw e;
+    const owed = owe({ repo: repo.key, slug: repo.slug, pr, kind: 'ci-heal-escalation', headSha, body });
+    return { commented: false, owed };
+  }
+}
+
 // ── IO SHELL (runs only as a CLI — the pure exports above stay side-effect-free on import) ────────────────────────
 const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(new URL(import.meta.url).pathname);
 if (IS_CLI) {
@@ -184,12 +204,17 @@ if (IS_CLI) {
     fail(String(e.message || e));
   }
   const repo = typeof flags.repo === 'string' ? flags.repo : undefined;
-  const commentArgs = ['pr', 'comment', String(pr), '--body', body];
-  if (repo) commentArgs.push(`--repo=${repo}`);
+  let posted;
   try {
-    execFileSync('gh', commentArgs, { stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8', timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL' });
+    posted = postOrOweCiHealEscalation({
+      pr, body, headSha: flags.head, repo: resolveOwedRepo({ repoFlag: repo }),
+      post: ({ pr: n, body: b }) => postPrComment({ pr: n, repo, body: b }),
+    });
   } catch (e) {
     fail(`could not post CI-heal escalation comment on PR #${pr}: ${String(e.message || e).split('\n')[0]}`);
+  }
+  if (!posted.commented) {
+    process.stderr.write(`⚠ CI-heal escalation on PR #${pr} refused by the GitHub budget — recorded owed (head ${flags.head}); the next ci-heal-pr-dispatch tick posts it\n`);
   }
   // Clear a stale `review-status:fixing`/`review-status:fix-stalled` label IMMEDIATELY — this session is about
   // to exit, and waiting for the next scheduled `review-status-tag.mjs` tick (still driven by a LIVE-agent read
@@ -212,5 +237,5 @@ if (IS_CLI) {
     // a failed clear here is never worth failing the escalation itself over; the next scheduled tick still
     // self-corrects it once this process is gone.
   }
-  process.stdout.write(JSON.stringify({ ok: true, pr, escalated: true, outcome: flags.outcome }) + '\n');
+  process.stdout.write(JSON.stringify({ ok: true, pr, escalated: true, ...(posted.owed ? { owed: true } : {}), outcome: flags.outcome }) + '\n');
 }

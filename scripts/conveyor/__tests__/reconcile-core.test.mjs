@@ -34,6 +34,7 @@ import {
   REFUSAL_KINDS, DISPATCH_KINDS, selectStatusCandidates, markSelfReportedDone, markHungSessions,
   markAuthExpiredSessions, markIdleFinishedSessions, markBgIsolationStalls, CI_HEAL_ROUND_CAP,
   CONFLICT_FIX_ROUND_CAP, ADVISORY_FIX_ROUND_CAP, CONFLICT_FIX_ABSOLUTE_CEILING, foldReviewRefusalInto,
+  ACCEPT_LABEL_GRACE_MS, acceptLabelDropped,
 } from '../reconcile-core.mjs';
 import {
   STAND_DOWN_MARKER, WATCHER_STAND_DOWN_ACTOR, SUPERSEDE_STAND_DOWN_MARKER, buildStandDownComment,
@@ -2941,6 +2942,68 @@ describe('#2588/review-loops — ONE REVIEW PER HEAD COMMIT (epic #3383/#4075)',
     };
     const plan = planReconcile({ prs: [pr], agents: [], durableCounts: {}, now: NOW });
     expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'review', prNumber: 2591 })]);
+  });
+
+  // we:backlog/4352 — the accept comment posts FIRST, then the label swap; a budget-refused swap left the PR
+  // `review:pending` with a matching `reviewed-sha` forever, because this guard trusted the marker alone.
+  describe('#4352 — the guard also requires the live label to match the verdict', () => {
+    const acceptAt = (ms) => ({
+      body: `🔁 review accepted\n\n${buildReviewedShaMarker(HEAD)}`, author: { login: 'web-everything' },
+      createdAt: new Date(NOW - ms).toISOString(),
+    });
+    const stuckPr = (over = {}) => ({
+      number: 4352, state: 'OPEN', headRefName: 'lane/4352', headRefOid: HEAD,
+      labels: lbl('review:pending'), mergeStateStatus: 'CLEAN', statusCheckRollup: pendingRollup,
+      comments: [acceptAt(ACCEPT_LABEL_GRACE_MS + 60_000)], ...over,
+    });
+
+    it('a `review:pending` head whose accept comment is past the grace window is re-dispatched `review` (relabelOwed), not refused', () => {
+      const plan = planReconcile({ prs: [stuckPr()], agents: [], durableCounts: {}, now: NOW });
+      expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'review', prNumber: 4352, relabelOwed: true })]);
+      expect(plan.refusals.find((r) => r.kind === 'already-reviewed-head')).toBeUndefined();
+    });
+
+    it('comment AND label agree (`review:accepted`, however old the comment) → no review re-run, unchanged', () => {
+      const plan = planReconcile({ prs: [stuckPr({ labels: lbl('review:accepted') })], agents: [], durableCounts: {}, now: NOW });
+      expect(plan.dispatch.filter((d) => d.kind === 'review')).toHaveLength(0);
+    });
+
+    it('still refuses inside the grace window — the label swap may simply be in flight (the #2588 race)', () => {
+      const plan = planReconcile({ prs: [stuckPr({ comments: [acceptAt(60_000)] })], agents: [], durableCounts: {}, now: NOW });
+      expect(plan.dispatch).toHaveLength(0);
+      expect(plan.refusals[0].kind).toBe('already-reviewed-head');
+    });
+
+    it('fails closed with no clock or no comment timestamp — the original refusal stands', () => {
+      expect(planReconcile({ prs: [stuckPr()], agents: [], durableCounts: {}, now: 0 }).refusals[0].kind).toBe('already-reviewed-head');
+      const noTs = stuckPr({ comments: [{ body: buildReviewedShaMarker(HEAD), author: { login: 'web-everything' } }] });
+      expect(planReconcile({ prs: [noTs], agents: [], durableCounts: {}, now: NOW }).refusals[0].kind).toBe('already-reviewed-head');
+    });
+
+    it('a `review:human` head is NOT treated as a dropped label (escalated-after-accept is legitimate; only the ceremony clears it)', () => {
+      const plan = planReconcile({ prs: [stuckPr({ labels: lbl('review:human') })], agents: [], durableCounts: {}, now: NOW });
+      expect(plan.dispatch).toHaveLength(0);
+      expect(plan.refusals[0].kind).toBe('already-reviewed-head');
+    });
+
+    it('the ci-red-parallel caller gets the same treatment (owed-ci-rerun + stuck accept label → review dispatched)', () => {
+      const pr = pr1563({
+        number: 4353, headRefOid: HEAD, labels: lbl('review:pending', 'ci:failed'), statusCheckRollup: redRollup,
+        requiredCheckCompletedAt: '2026-09-25T01:57:47Z', aheadByOnMain: 33, comments: [acceptAt(ACCEPT_LABEL_GRACE_MS + 60_000)],
+      });
+      const plan = planReconcile({
+        prs: [pr], agents: [], now: NOW, mainRedWindows: [{ start: '2026-09-25T01:30:55Z', end: '2026-09-25T02:31:25Z' }],
+      });
+      expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'review', prNumber: 4353, owedCiRerun: true, relabelOwed: true })]);
+    });
+
+    it('acceptLabelDropped — pure: label AND age must both disagree', () => {
+      const comments = [acceptAt(ACCEPT_LABEL_GRACE_MS)];
+      expect(acceptLabelDropped({ labels: ['review:pending'], comments, headSha: HEAD, now: NOW })).toBe(true);
+      expect(acceptLabelDropped({ labels: ['review:pending', 'review:accepted'], comments, headSha: HEAD, now: NOW })).toBe(false);
+      expect(acceptLabelDropped({ labels: ['review:accepted'], comments, headSha: HEAD, now: NOW })).toBe(false);
+      expect(acceptLabelDropped({ labels: ['review:pending'], comments, headSha: OLDER_HEAD, now: NOW })).toBe(false);
+    });
   });
 });
 

@@ -8,7 +8,16 @@
  *   that ONLY a trusted author (automation or the repo operator) counts at all.
  */
 import { describe, it, expect } from 'vitest';
-import { countCiHealComments, buildCiHealComment, CI_HEAL_COMMENT_MARKER, spawnCiHealRearm } from '../ci-heal-mark.mjs';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
+import {
+  countCiHealComments, buildCiHealComment, CI_HEAL_COMMENT_MARKER, spawnCiHealRearm, postOrOweCiHealComment, resolveHealHead,
+} from '../ci-heal-mark.mjs';
+import { readOwedWrites, owedWriteAlreadyLive } from '../ci-heal-owed.mjs';
+import { budgetBlockedMessage } from '../../lib/gh-throttle.mjs';
 
 const AUTOMATION = { login: 'web-everything' };
 
@@ -90,5 +99,72 @@ describe('spawnCiHealRearm — hand a stale review:accepted back through rearm-r
   it('a spawn failure never throws — reported as {ok:false, reason}', () => {
     const thrower = () => { throw new Error('spawn ENOENT'); };
     expect(spawnCiHealRearm({ pr: 2811, repo: 'chalbert/web-everything', spawn: thrower })).toEqual({ ok: false, reason: 'spawn ENOENT' });
+  });
+});
+
+// we:backlog/4352 — a budget-refused heal comment is recorded OWED (head-scoped), never silently dropped.
+describe('#4352 — head-scoped heal comment + owed-on-budget-refusal', () => {
+  const HEAD = 'abcdef0123456789abcdef0123456789abcdef01';
+  const REPO = { key: 'we', slug: 'chalbert/web-everything' };
+  const budgetError = () => {
+    const stderr = budgetBlockedMessage({ resource: 'graphql', until: '2026-09-27T23:00:00Z' });
+    return Object.assign(new Error(`Command failed: gh pr comment\n${stderr}`), { status: 1, stderr });
+  };
+
+  it('buildCiHealComment carries `head: <sha>` on its SECOND line; the marker still leads and still counts once', () => {
+    const body = buildCiHealComment({ reason: 'red-ci', headSha: HEAD.toUpperCase() });
+    expect(body.split('\n').slice(0, 2)).toEqual([CI_HEAL_COMMENT_MARKER, `head: ${HEAD}`]);
+    expect(countCiHealComments([{ body, author: AUTOMATION }])).toBe(1);
+    expect(buildCiHealComment({ reason: 'red-ci' })).not.toMatch(/^head:/m); // no sha → no line, never `head: `
+  });
+
+  it('a budget-refused post writes an owed record carrying the head sha and returns commented:false', () => {
+    const owed = [];
+    const out = postOrOweCiHealComment({
+      pr: 2821, body: 'b', headSha: HEAD, repo: REPO,
+      post: () => { throw budgetError(); }, owe: (r) => { owed.push(r); return r; },
+    });
+    expect(out.commented).toBe(false);
+    expect(owed).toEqual([{ repo: 'we', slug: 'chalbert/web-everything', pr: 2821, kind: 'ci-heal', headSha: HEAD, body: 'b' }]);
+  });
+
+  it('a NON-budget failure still throws (nothing owed) — a retry would not fix it', () => {
+    const owe = () => { throw new Error('must not owe'); };
+    expect(() => postOrOweCiHealComment({
+      pr: 1, body: 'b', headSha: HEAD, repo: REPO, post: () => { throw new Error('HTTP 404: Not Found'); }, owe,
+    })).toThrow(/404/);
+  });
+
+  it('with no head sha (no dedupe key) a budget refusal still throws rather than owing an undedupable write', () => {
+    expect(() => postOrOweCiHealComment({
+      pr: 1, body: 'b', headSha: '', repo: REPO, post: () => { throw budgetError(); }, owe: () => ({}),
+    })).toThrow(/rate limit/);
+  });
+
+  it('resolveHealHead — --head wins; else local `git rev-parse HEAD`; else empty', () => {
+    expect(resolveHealHead({ headFlag: HEAD, exec: () => { throw new Error('unused'); } })).toBe(HEAD);
+    expect(resolveHealHead({ exec: () => `${HEAD}\n` })).toBe(HEAD);
+    expect(resolveHealHead({ exec: () => { throw new Error('not a repo'); } })).toBe('');
+  });
+
+  it('REAL CLI PATH: a budget-blocked `gh` → owed record on disk (with head), exit 0, not a bare failure', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ci-heal-mark-owed-'));
+    try {
+      const bin = join(dir, 'bin');
+      mkdirSync(bin, { recursive: true });
+      // A `gh` that refuses exactly like gh-throttle's budget_blocked outcome does, for every call.
+      writeFileSync(join(bin, 'gh'), `#!/bin/sh\nprintf '%s' ${JSON.stringify(budgetBlockedMessage({ resource: 'graphql', until: 'soon' }))} >&2\nexit 1\n`);
+      chmodSync(join(bin, 'gh'), 0o755);
+      const lockRoot = join(dir, 'lock');
+      const r = spawnSync(process.execPath, [
+        join(dirname(fileURLToPath(import.meta.url)), '..', 'ci-heal-mark.mjs'), '2821', '--repo=chalbert/web-everything', '--reason=red-ci', `--head=${HEAD}`,
+      ], { encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, WE_GH_THROTTLE_LOCK_ROOT: lockRoot } });
+      expect(r.status, r.stderr).toBe(0);
+      expect(JSON.parse(r.stdout.trim().split('\n').pop())).toMatchObject({ ok: true, pr: 2821, commented: false, owed: true });
+      const owed = readOwedWrites({ dir: join(lockRoot, 'ci-heal-owed') });
+      expect(owed).toEqual([expect.objectContaining({ repo: 'we', slug: 'chalbert/web-everything', pr: 2821, kind: 'ci-heal', headSha: HEAD })]);
+      // The owed body IS the comment that will be posted — and it dedupes against itself once live.
+      expect(owedWriteAlreadyLive([{ body: owed[0].body, author: AUTOMATION }], owed[0])).toBe(true);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 });

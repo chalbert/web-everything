@@ -15,12 +15,30 @@
 import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 
 import { DISPATCH_EFFECT } from '../dispatch-lane.mjs';
 import { briefPath, REPO_ROOT } from '../dispatch-lane-io.mjs';
 import { dispatchCiHeal, runReconcileCiHealDispatch } from '../ci-heal-pr-dispatch.mjs';
 import { readUnsupported } from '../../conveyor/unsupported-repo.mjs';
+import { flushOwedWrites, readOwedWrites, recordOwedWrite, OWED_MAX_AGE_MS } from '../../conveyor/ci-heal-owed.mjs';
+import { buildCiHealComment } from '../../conveyor/ci-heal-mark.mjs';
+
+// #4352 — `runReconcileCiHealDispatch` now flushes owed CI-heal writes from the host-shared gh-throttle lock root
+// by default. Point that root at a throwaway dir for this whole file so no test ever reads (or posts) a real
+// host's owed record.
+let savedLockRoot;
+let isolatedLockRoot;
+beforeAll(() => {
+  savedLockRoot = process.env.WE_GH_THROTTLE_LOCK_ROOT;
+  isolatedLockRoot = mkdtempSync(join(tmpdir(), 'ci-heal-dispatch-lockroot-'));
+  process.env.WE_GH_THROTTLE_LOCK_ROOT = isolatedLockRoot;
+});
+afterAll(() => {
+  if (savedLockRoot === undefined) delete process.env.WE_GH_THROTTLE_LOCK_ROOT;
+  else process.env.WE_GH_THROTTLE_LOCK_ROOT = savedLockRoot;
+  rmSync(isolatedLockRoot, { recursive: true, force: true });
+});
 
 const FRESH = () => ({ fresh: true, behind: 0 });
 
@@ -328,5 +346,115 @@ describe('runReconcileCiHealDispatch — repo capability gate (#3967 multi-repo 
     });
     expect(result.reconcileRefusals).toBe(1);
     expect(result.reconcileRefusalDetails).toEqual([{ prNumber: 2635, kind: 'owed-ci-rerun', why: "main's own CI was red" }]);
+  });
+});
+
+// ── #4352 — the per-tick OWED-WRITE FLUSH ────────────────────────────────────────────────────────────────────────
+// A fake `gh` stands in for GitHub: it serves `pr view` from a mutable PR record and appends every `pr comment`
+// to that record's own thread, so "posted exactly once" is read off the same comment list a real PR would show.
+describe('#4352 — runReconcileCiHealDispatch flushes owed CI-heal writes first, idempotently', () => {
+  const HEAD = '1234567890abcdef1234567890abcdef12345678';
+  const AUTOMATION = { login: 'web-everything' };
+  const fakeGh = (prs, { failPosts = false } = {}) => {
+    const calls = [];
+    const exec = (cmd, args) => {
+      calls.push(args.slice(0, 2).join(' '));
+      const pr = prs[Number(args[2])];
+      if (args[0] === 'pr' && args[1] === 'view') return JSON.stringify({ state: pr.state, comments: pr.comments });
+      if (args[0] === 'pr' && args[1] === 'comment') {
+        if (failPosts) throw Object.assign(new Error('rate limit exceeded'), { stderr: 'API rate limit exceeded' });
+        pr.comments.push({ body: args[args.indexOf('--body') + 1], author: AUTOMATION });
+        return '';
+      }
+      throw new Error(`unexpected gh ${args.join(' ')}`);
+    };
+    return { calls, exec };
+  };
+  const owe = (dir, pr, extra = {}, now = Date.now()) => recordOwedWrite({
+    repo: 'we', slug: 'chalbert/web-everything', pr, kind: 'ci-heal', headSha: HEAD,
+    body: buildCiHealComment({ reason: 'red-ci', headSha: HEAD }), ...extra,
+  }, { dir, now });
+  const run = (dir, exec, order = [], now = Date.now()) => runReconcileCiHealDispatch({
+    root: '/repo', repo: 'chalbert/web-everything', checkStaleness: FRESH,
+    flushOwed: (key) => { order.push('flush'); return flushOwedWrites({ repo: key, dir, exec, now }); },
+    reconcile: () => { order.push('reconcile'); return { dispatch: [], refusals: [] }; },
+    dispatch: async () => { order.push('dispatch'); return {}; },
+    pickFreeLanes: () => [],
+    unsupportedPath: join(dir, 'unsupported.json'),
+  });
+
+  it('posts an owed comment in-process BEFORE the reconcile read, clears it, and a second tick posts nothing', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'owed-flush-'));
+    try {
+      const prs = { 2821: { state: 'OPEN', comments: [] } };
+      const { calls, exec } = fakeGh(prs);
+      owe(dir, 2821);
+      const order = [];
+      const first = await run(dir, exec, order);
+      expect(order).toEqual(['flush', 'reconcile']); // flush first; never a dispatched agent
+      expect(first.owedFlush.posted).toEqual([expect.objectContaining({ pr: 2821, kind: 'ci-heal', headSha: HEAD })]);
+      expect(prs[2821].comments).toHaveLength(1);
+      expect(readOwedWrites({ dir })).toEqual([]);
+      // Re-owe the SAME write (e.g. a client-side failure that actually landed) — the head-scoped marker catches it.
+      owe(dir, 2821);
+      const second = await run(dir, exec);
+      expect(second.owedFlush.cleared).toEqual([expect.objectContaining({ pr: 2821 })]);
+      expect(prs[2821].comments).toHaveLength(1); // exactly one CI-heal comment, ever
+      expect(calls.filter((c) => c === 'pr comment')).toHaveLength(1);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('an OLDER heal\'s marker for a different head does not satisfy the owed write — it is still posted', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'owed-flush-'));
+    try {
+      const older = buildCiHealComment({ reason: 'red-ci', headSha: 'f'.repeat(40) });
+      const prs = { 7: { state: 'OPEN', comments: [{ body: older, author: AUTOMATION }] } };
+      const { exec } = fakeGh(prs);
+      owe(dir, 7);
+      const out = await run(dir, exec);
+      expect(out.owedFlush.posted).toHaveLength(1);
+      expect(prs[7].comments).toHaveLength(2);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('a merged or closed PR\'s owed write is dropped as moot, never posted', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'owed-flush-'));
+    try {
+      const prs = { 8: { state: 'MERGED', comments: [] }, 9: { state: 'CLOSED', comments: [] } };
+      const { calls, exec } = fakeGh(prs);
+      owe(dir, 8); owe(dir, 9);
+      const out = await run(dir, exec);
+      expect(out.owedFlush.dropped.map((d) => d.pr).sort()).toEqual([8, 9]);
+      expect(calls).not.toContain('pr comment');
+      expect(readOwedWrites({ dir })).toEqual([]);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('a still-refused post is kept (attempts bumped); a record past its bound is dropped, not retried forever', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'owed-flush-'));
+    try {
+      const prs = { 10: { state: 'OPEN', comments: [] }, 11: { state: 'OPEN', comments: [] } };
+      const { calls, exec } = fakeGh(prs, { failPosts: true });
+      const now = Date.now();
+      owe(dir, 10, {}, now);
+      owe(dir, 11, {}, now - OWED_MAX_AGE_MS - 1);
+      const out = await run(dir, exec, [], now);
+      expect(out.owedFlush.kept).toEqual([expect.objectContaining({ pr: 10 })]);
+      expect(out.owedFlush.dropped).toEqual([expect.objectContaining({ pr: 11, why: 'expired' })]);
+      expect(readOwedWrites({ dir })).toEqual([expect.objectContaining({ pr: 10, attempts: 1 })]);
+      expect(calls.filter((c) => c === 'pr comment')).toHaveLength(1); // the expired one never even tried
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('only flushes the tick\'s OWN repo — another repo\'s owed record is left for that repo\'s tick', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'owed-flush-'));
+    try {
+      const { calls, exec } = fakeGh({});
+      recordOwedWrite({ repo: 'plateau-app', slug: 'chalbert/plateau-app', pr: 3, kind: 'ci-heal', headSha: HEAD, body: 'x' }, { dir });
+      const out = await run(dir, exec);
+      expect(calls).toEqual([]);
+      expect(out.owedFlush).toEqual({ posted: [], cleared: [], dropped: [], kept: [] });
+      expect(readOwedWrites({ dir })).toHaveLength(1);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 });
