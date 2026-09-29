@@ -83,6 +83,7 @@ import { ensureFreshGithubAppEnv } from './github-app-auth-env.mjs';
 import { collectImportClosure, closureHits } from './import-closure.mjs';
 import { CONSTELLATION_REPOS } from './constellation-repos.mjs';
 import { gitRun } from './main-staleness.mjs';
+import { DAEMON_BOOT_SMOKE_CHECK, DEFAULT_DAEMON_BOOT_MS } from './daemon-boot-smoke.mjs';
 
 /** Set to `1`/`true`/`yes` to disable the whole gate — every merge is adopted unconditionally, exactly like
  *  before this file existed. The one intentionally fail-OPEN switch in this module. */
@@ -111,6 +112,8 @@ export const SMOKE_BUDGET_ENV = Object.freeze({
   // `treeStaysCleanMs` is one bare `git status --porcelain`, always fast.
   dispatchDryRunMs: 'WE_SMOKE_DISPATCH_DRY_RUN_MS',
   treeStaysCleanMs: 'WE_SMOKE_TREE_STAYS_CLEAN_MS',
+  // #4468 — {@link checkDaemonEntriesBoot}'s own budget; see `daemon-boot-smoke.mjs`.
+  daemonBootMs: 'WE_SMOKE_DAEMON_BOOT_MS',
 });
 
 function envMs(env, key, fallback) {
@@ -138,6 +141,7 @@ export function resolveSmokeBudgets(env = process.env) {
     reconcileMs: envMs(env, SMOKE_BUDGET_ENV.reconcileMs, 60_000),
     dispatchDryRunMs: envMs(env, SMOKE_BUDGET_ENV.dispatchDryRunMs, 45_000),
     treeStaysCleanMs: envMs(env, SMOKE_BUDGET_ENV.treeStaysCleanMs, 10_000),
+    daemonBootMs: envMs(env, SMOKE_BUDGET_ENV.daemonBootMs, DEFAULT_DAEMON_BOOT_MS),
   };
 }
 
@@ -564,6 +568,13 @@ export const SMOKE_CHECKS = Object.freeze([
   { name: 'reconcile-dry-run', run: checkReconcileDryRun, mayBeTransient: false, codeEntries: ['scripts/conveyor/reconcile-pass.mjs'] },
   // xp4lw2v (epic #4075/#3383) — see the two functions' own docblocks just above for what each covers.
   { name: 'dispatch-dry-run', run: checkDispatchDryRun, mayBeTransient: false, codeEntries: DISPATCH_DRY_RUN_CODE_ENTRIES },
+  // #4468 — actually BOOTS (imports) every standalone daemon entry module on the candidate tree; see
+  // `daemon-boot-smoke.mjs`'s own header for the live incident this closes (#2921: a smoke-passing candidate
+  // that then crash-looped every daemon at startup, because nothing before this row ever imported an entry file).
+  // The row itself is `DAEMON_BOOT_SMOKE_CHECK` — imported whole, never re-declared here, so `mayBeTransient`/
+  // `codeEntries` have exactly one definition (a #4468 review finding: a hand-copied literal here previously
+  // drifted from the exported object the tests actually assert on).
+  DAEMON_BOOT_SMOKE_CHECK,
   // ALWAYS LAST, NEVER SKIPPED: no `codeEntries`, so `checkCodeUnchanged` never short-circuits it.
   { name: 'tree-stays-clean', run: checkTreeStaysClean, mayBeTransient: false },
 ]);
