@@ -280,6 +280,108 @@ export function isVerifyAbandoned(record, nowMs, ttlMs = DEFAULT_VERIFY_TTL_MINU
   return nowMs - at >= ttlMs;
 }
 
+/** How often `waitForVerifySettle` re-checks the marker inside one bounded wait (#4358). This is an INTERNAL
+ *  poll cadence, not a per-turn one: the whole point of the wait is that a single call absorbs however many of
+ *  these it takes, so a short interval costs nothing extra in the metric that actually mattered before this
+ *  item (tool-call COUNT) — only the ceiling below needs to stay conservative. */
+export const DEFAULT_WAIT_POLL_INTERVAL_MS = 2_000;
+
+/** The hard ceiling a `--wait=<ms>` request is clamped to, regardless of what was asked for. #4358's own risk
+ *  note: "a literal in-process blocking wait must stay inside the tool's own safe foreground window" — the
+ *  same ~120s window `we:scripts/guard-bash.mjs` cites for why a raw gate run gets silently auto-backgrounded.
+ *  90s leaves real margin under that window for process/IO overhead on either side of the wait itself. */
+export const MAX_SAFE_WAIT_MS = 90_000;
+
+/** Clamp a requested `--wait=<ms>` to {@link MAX_SAFE_WAIT_MS}. Pure, and pulled out of `verify-lane.mjs`
+ *  specifically so the clamp itself — not just the stderr warning that mentions it — has a direct unit test. */
+export function resolveWaitCeilingMs(requestedMs) {
+  return Math.min(requestedMs, MAX_SAFE_WAIT_MS);
+}
+
+/**
+ * Bounded, internally-pollable wait for the verify marker to SETTLE (#4358) — the core this item exists to add.
+ * Pure except for the injected IO/clock/sleep, so it is unit-testable with a fake clock and fake marker reads,
+ * no real timers and no real git. Poll until the FIRST result that is genuinely final:
+ *
+ *   - **Only `green`/`red` may end a wait as `settled`** (`result.settled === true`) — the two states a
+ *     synchronous suite run actually produces at finish.
+ *   - **A HEAD move mid-wait** (the tracked sha stops being current — a new commit landed on the lane) is its
+ *     own distinct case (`status: 'head-moved'`), never folded into "still pending": a marker keyed to a sha
+ *     that is no longer HEAD can never settle for THIS wait, no matter how much longer it runs.
+ *   - **`running` is the ONLY status this loop keeps POLLING on.** `scripts/conveyor/verify-dispatch.mjs`
+ *     dispatches a lane precisely when its marker is `running` for this head, and only then — that is the one
+ *     status a background process can still move off of. Every OTHER status this function can see
+ *     (`break-glass`, `corrupt`, `absent`, `untracked`) ends the wait IMMEDIATELY instead, UNSETTLED
+ *     (`settled: false`) — the same verdict the non-waiting `check` already gives for that status, just without
+ *     burning the ceiling on a status more waiting cannot change: `break-glass` is a constant override, `corrupt`
+ *     needs a human, and `absent`/`untracked` (no record recognized for this head) can only ever be fixed by an
+ *     explicit `request`/`verify`/`reset` — never by waiting longer here. (Converge round 1, #4358 — both the
+ *     panel and an independent red-team caught this: treating `absent` as "still pending" made a forgotten
+ *     `request` cost a FULL ceiling before saying so, and every retry the brief tells the caller to make on a
+ *     `timeout` would repeat that cost with no way to make progress.) None of these four is folded into "done"
+ *     just because its own `ok` can be `true` (#4358 risk: never conflate `ok:true` with "settled").
+ *   - **If `ceilingMs` elapses while still `running`**, the wait ends UNSETTLED as `status: 'timeout'` —
+ *     `lastStatus`/`lastReason` carry the last real read for diagnosis, but never substitute for the honest
+ *     `timeout` verdict itself.
+ *
+ * @param {object} opts
+ * @param {() => (object|null)} opts.readRecord - reads the current marker fresh; called every poll
+ * @param {() => (string|null)} opts.readHead - reads the CURRENT head sha fresh; called every poll (catches a move)
+ * @param {string} opts.headSha - the sha this wait is tracking (captured once, before the wait started)
+ * @param {boolean} [opts.breakGlass]
+ * @param {boolean} [opts.requireVerified]
+ * @param {number} opts.ceilingMs - the bounded wait ceiling (the caller clamps this to {@link MAX_SAFE_WAIT_MS})
+ * @param {number} [opts.pollIntervalMs]
+ * @param {() => number} [opts.now] - injectable clock (defaults to `Date.now`)
+ * @param {(ms:number) => Promise<void>} [opts.sleep] - injectable delay (defaults to a real `setTimeout`)
+ * @returns {Promise<{sha:string, status:string, reason:string, ok:boolean, detail:string, settled:boolean, waited:{ms:number, polls:number}, lastStatus?:string, lastReason?:string}>}
+ */
+export async function waitForVerifySettle({
+  readRecord,
+  readHead,
+  headSha,
+  breakGlass = false,
+  requireVerified = true,
+  ceilingMs,
+  pollIntervalMs = DEFAULT_WAIT_POLL_INTERVAL_MS,
+  now = () => Date.now(),
+  sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
+} = {}) {
+  const startedAt = now();
+  let polls = 0;
+  for (;;) {
+    polls += 1;
+    const currentHead = readHead();
+    if (currentHead && currentHead !== headSha) {
+      return {
+        sha: headSha, status: 'head-moved', reason: 'head-moved', ok: false,
+        detail: `HEAD moved from ${String(headSha).slice(0, 8)} to ${String(currentHead).slice(0, 8)} while waiting — a marker keyed to ${String(headSha).slice(0, 8)} can never settle for this wait now; re-run \`verify-lane.mjs request\` and \`check --wait=\` for the new HEAD.`,
+        settled: false, waited: { ms: now() - startedAt, polls },
+      };
+    }
+
+    const v = verifyGateDecision({ record: readRecord(), headSha, breakGlass, requireVerified });
+
+    if (v.status === 'green' || v.status === 'red') {
+      return { ...v, sha: headSha, settled: true, waited: { ms: now() - startedAt, polls } };
+    }
+    // Only `running` keeps polling — see the function doc above for why. Everything else ends NOW, unsettled.
+    if (v.status !== 'running') {
+      return { ...v, sha: headSha, settled: false, waited: { ms: now() - startedAt, polls } };
+    }
+
+    const elapsed = now() - startedAt;
+    if (elapsed >= ceilingMs) {
+      return {
+        sha: headSha, status: 'timeout', reason: 'wait-timeout', ok: false,
+        detail: `still not settled after waiting ${elapsed}ms (ceiling ${ceilingMs}ms) — last read: ${v.status} (${v.reason}). Poll \`check --wait=\` again.`,
+        settled: false, waited: { ms: elapsed, polls }, lastStatus: v.status, lastReason: v.reason,
+      };
+    }
+    await sleep(Math.min(pollIntervalMs, ceilingMs - elapsed));
+  }
+}
+
 /**
  * THE FINISH-GUARD DECISION (#2833). Given the lane's verification `record` and the `headSha` a delivery step
  * (pr-land) is about to land, decide whether that HEAD is verified enough to deliver. Pure — no fs/git/clock.

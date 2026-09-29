@@ -2,9 +2,11 @@
 bornAs: xevbh9g
 kind: story
 size: 3
-status: open
-scope: ["we:scripts/verify-lane.mjs", "we:scripts/lib/lane-verify.mjs", "we:skills-src/conveyor/delivery-agent-brief.md", "we:skills-src/conveyor/delivery-agent-brief-v2.md"]
+status: resolved
+scope: ["we:scripts/verify-lane.mjs", "we:scripts/lib/lane-verify.mjs", "we:skills-src/conveyor/delivery-agent-brief.md"]
 dateOpened: "2026-09-28"
+dateStarted: "2026-09-28"
+dateResolved: "2026-09-28"
 preparedDate: "2026-09-28"
 preparedAgainstSha: "d0ca633fdd77999f8e9ac61e0ee330544ab494eb"
 tags: []
@@ -111,3 +113,48 @@ found three real problems with the plan below (kept, corrected):
 - **After:** the same real wait, on a gate of comparable duration, shows materially fewer total invocations
   using `check --wait=` — record the real count and elapsed time for comparison, not just an assumption that
   renaming the call reduced anything.
+
+## Progress
+- Added `--wait=<ms>` to `we:scripts/verify-lane.mjs`'s existing `check` mode (no new subcommand), built on a new
+  pure, fake-clock-testable core (`waitForVerifySettle` in `we:scripts/lib/lane-verify.mjs`). Only `green`/`red`
+  settle the wait; `running` is the ONLY status it actually spends the ceiling waiting on (the one status a
+  background process can still move off of); everything else (`break-glass`, `corrupt`, `absent`, `untracked`)
+  ends the wait IMMEDIATELY, unsettled; a HEAD move mid-wait is its own distinct `head-moved` result; a `timeout`
+  is returned only if still `running` at the clamped, safe ceiling (`MAX_SAFE_WAIT_MS = 90_000`).
+- Updated `we:skills-src/conveyor/delivery-agent-brief.md`'s two request-then-poll sections (mid-gate step 5,
+  final-HEAD verify in step 8) to use `check --wait=` instead of the old bare "poll again next turn" loop.
+- `we:skills-src/conveyor/delivery-agent-brief-v2.md` genuinely has no request/poll steps to change (it's the
+  non-live prototype whose header moves verification out of the brief entirely) — dropped from scope per the
+  item's own Codex correction above, not an oversight. Also removed it from this card's own frontmatter
+  `scope:` array (round-2 converge, claim-accuracy lens: the array still listing it while Progress called it
+  "dropped" was a real inconsistency — fixed by aligning the declared scope with what was actually touched).
+- Confirmed live against the real `we:scripts/guard-bash.mjs` `dispatchedAgentVerificationReason` function (not
+  just its regex read cold) that `check --wait=<ms>` is NOT denied to a dispatched agent, then pinned that as a
+  real regression test in `we:scripts/__tests__/guard-bash.test.mjs` rather than leaving it as prose here.
+- **Converged across three fresh rounds** (panel + independent red-team each time, `--care=elevated`), each run
+  over the diff as it stood at that point:
+  - **Round 1** — both independently caught that the first cut treated `absent` (no marker for this HEAD) like
+    `running`, so a forgotten `request` cost the FULL wait ceiling before saying so; fixed by making `running`
+    the only status the wait actually polls on. The red-team separately caught that a BARE `--wait` (no `=<ms>`)
+    parsed to boolean `true`, and `Number(true) = 1` would silently run a real ~1ms wait instead of a usage
+    error; fixed and covered. Also caught a stray `we:.commit-msg.txt` / `we:.converge-state.json` "in the
+    diff" — a false alarm from the material-read step including untracked lane scratch files never staged.
+  - **Round 2** — caught the card's own frontmatter `scope:` array still listing the dropped
+    `we:skills-src/conveyor/delivery-agent-brief-v2.md`; fixed by removing it (see above). Asked for the
+    ceiling clamp itself to have a direct unit test; extracted `we:resolveWaitCeilingMs` and covered it.
+  - **Round 3** — asked for the CLI-to-core clamp WIRING to be pinned too (not just the clamp function in
+    isolation); added a source-inspection test proving `we:scripts/verify-lane.mjs` hands the clamped
+    `ceilingMs`, not the raw request, to `waitForVerifySettle`. Also flagged review-history narrative repeated
+    across code comments; trimmed to a single home (this section). One claim-accuracy finding — that the
+    brief's plain `check --wait=` example needed `--require-verified` to get a fast `absent` — was checked LIVE
+    against the real CLI with no flags at all and found INCORRECT (#3321's default is already
+    `requireVerified:true`); a CLI test now pins the default path directly so this can't recur as a live doubt.
+  - Verdict after the round-3 fixes: `land`.
+- Targeted `vitest related` over the four touched SOURCE/test files (`we:scripts/verify-lane.mjs`,
+  `we:scripts/lib/lane-verify.mjs`, and their two `__tests__` files) plus the guard-bash addition: all green.
+- **Live proof (test plan item 6)**, recorded on this item's own step-5 gate wait (a real ~446s wait, this lane
+  contending with two sibling lanes on the heavy-admission pool): the OLD bare `check --json` style, run for real
+  at the fastest cadence achievable back-to-back, averaged ~5.3s between calls — extrapolated over the full
+  446s wait, ~84 calls. The NEW `check --wait=` style covered the SAME real wait in exactly 6 calls (three
+  `--wait=60000`, two `--wait=90000`, one final call that returned green in 14ms) — roughly a 14x reduction in
+  tool-call count for an identical real gate. Full call-by-call numbers are in the PR body.

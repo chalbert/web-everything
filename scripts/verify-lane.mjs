@@ -34,6 +34,16 @@
  *   node scripts/verify-lane.mjs --json              # machine-readable {sha, status, exitCode} on stdout
  *   node scripts/verify-lane.mjs check               # READ-ONLY: print the current marker's gate verdict for HEAD, run nothing
  *   node scripts/verify-lane.mjs check --require-verified   # exit non-zero unless HEAD has a fresh GREEN marker (the gate pr-land applies)
+ *   node scripts/verify-lane.mjs check --wait=<ms>   # #4358 — BLOCK internally (polling the marker, not your turn loop),
+ *     but ONLY while the marker is `running` — the one status a background process can still move off of. Returns the
+ *     instant it settles green/red, and returns everything else (`absent`/`corrupt`/`break-glass`/`head-moved`)
+ *     IMMEDIATELY too — waiting longer can never change any of those. A bounded "timeout" is returned only if it is
+ *     still `running` when <ms> elapses (clamped to a safe ceiling well under this tool's own foreground window — see
+ *     MAX_SAFE_WAIT_MS / waitForVerifySettle in lib/lane-verify.mjs). Replaces the old "request, then `check` again
+ *     next turn, repeat" loop with ONE call per wait in the common case: same sanctioned `check` subcommand
+ *     (`we:scripts/guard-bash.mjs`'s allowlist matches on the subcommand word, not the flags after it, so this needed
+ *     no guard change), just a flag that does the polling for you instead of handing it back to the caller's own turn
+ *     loop.
  *   node scripts/verify-lane.mjs reset                # clear a stale marker so `verify` can start (x4jcqm4) — refuses if a FOREIGN lease is live (own live lease is OK, #3378)
  *   node scripts/verify-lane.mjs request              # #3105 — stamp the `running` marker and return immediately; does NOT run the gate.
  *     The sanctioned call for an interactive agent session: the actual suite run is picked up and executed by
@@ -53,7 +63,7 @@ import { writeFileSync, renameSync, existsSync, readFileSync, readdirSync, unlin
 import { execFileSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { VERIFY_FILENAME, VERIFY_PREVIOUS_FILENAME, verifyStartBody, verifyFinishBody, verifyGateDecision, readVerifyMarker, resolveVerifyOptions } from './lib/lane-verify.mjs';
+import { VERIFY_FILENAME, VERIFY_PREVIOUS_FILENAME, verifyStartBody, verifyFinishBody, verifyGateDecision, readVerifyMarker, resolveVerifyOptions, waitForVerifySettle, resolveWaitCeilingMs } from './lib/lane-verify.mjs';
 import { LEASE_FILENAME, isLeaseStale, isConfirmedOwnLease } from './lib/lane-lease.mjs';
 import { defaultPoolRoot } from './lib/lane-pool-paths.mjs';
 import { writeAllSync } from './lib/write-all-sync.mjs';
@@ -116,6 +126,32 @@ if (!headSha) emit({ sha: null, status: 'error', reason: 'no-head', detail: `cou
 // ── `check` — READ-ONLY: report the finish-guard verdict for HEAD, run nothing. This is exactly the gate
 //    pr-land applies, exposed so a delivery step can pre-flight it (and so it is directly testable end-to-end).
 if (MODE === 'check') {
+  // #4358 — `--wait=<ms>` is a FLAG on this existing subcommand, not a new one (see the usage banner above for
+  // why that shape specifically matters to the guard). Bare `check` (no `--wait`) below is completely
+  // unchanged: one fast, non-blocking marker read, exactly as every other caller (humans, other scripts) already
+  // relies on.
+  if (flags.wait !== undefined) {
+    // #4358 — a BARE `--wait` (no `=<ms>`) parses to the boolean `true` (see the tiny arg parser above), and
+    // `Number(true) === 1` would otherwise sail past the finite/positive check as a silent ~1ms wait. Only a
+    // STRING value is a legitimate ask; anything else is `NaN` here, which that check already refuses.
+    const requestedMs = typeof flags.wait === 'string' ? Number(flags.wait) : NaN;
+    if (!Number.isFinite(requestedMs) || requestedMs <= 0) {
+      emit({ sha: headSha, status: 'error', reason: 'bad-wait', ok: false, detail: `--wait must be given as --wait=<ms> (a positive number of milliseconds), got ${JSON.stringify(flags.wait)}.` }, 3);
+    }
+    const ceilingMs = resolveWaitCeilingMs(requestedMs);
+    if (ceilingMs < requestedMs) {
+      process.stderr.write(`⚠ --wait=${requestedMs}ms clamped to ${ceilingMs}ms — a single blocking wait must stay inside this tool's own safe foreground window.\n`);
+    }
+    const result = await waitForVerifySettle({
+      readRecord: readMarker,
+      readHead: () => tryGit(['rev-parse', 'HEAD']),
+      headSha,
+      breakGlass: VERIFY_BREAK_GLASS,
+      requireVerified: REQUIRE_VERIFIED,
+      ceilingMs,
+    });
+    emit(result, result.ok ? 0 : 2);
+  }
   const v = verifyGateDecision({ record: readMarker(), headSha, breakGlass: VERIFY_BREAK_GLASS, requireVerified: REQUIRE_VERIFIED });
   emit({ sha: headSha, status: v.status, reason: v.reason, ok: v.ok, detail: v.detail }, v.ok ? 0 : 2);
 }
