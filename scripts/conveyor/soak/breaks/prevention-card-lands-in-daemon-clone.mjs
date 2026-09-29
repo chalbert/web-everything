@@ -75,11 +75,24 @@ export default {
   fixedBy: {
     sha: 'ee579b233',
     where: 'lane/4317-land-prevention-cards-via-lane',
-    paths: ['scripts/review-set-label.mjs'],
+    paths: ['scripts/review-set-label.mjs', 'scripts/lib/prevention-landing-job.mjs'],
   },
+  // #4493 moved the detached-spawn machinery this marker originally tested for — `defaultSpawnDetached`,
+  // referenced directly in `fileApprovalPreventionCard`'s own body — OUT of `review-set-label.mjs` and into a
+  // shared leaf (`scripts/lib/prevention-landing-job.mjs#spawnPreventionLandingJob`, reused by a SECOND caller,
+  // `review-loop-cli.mjs`). `fileApprovalPreventionCard` is now a thin wrapper that delegates to it and no
+  // longer mentions `defaultSpawnDetached` by name — so the ORIGINAL single-string check went stale on a
+  // behavior-preserving refactor it never anticipated (live-caught, 2026-09-29, PR #2983 CI). Check either the
+  // pre-#4493 shape (the reference still inline, for a tree that predates the extraction) or the post-#4493
+  // shape (the wrapper delegates to the shared leaf, which itself carries the reference) — both are "the fix is
+  // present", by the SAME test #4317 always meant: nothing in the calling checkout drives `file-item` directly.
   fixPresent(root) {
     try {
-      return /defaultSpawnDetached/.test(readFileSync(join(root, 'scripts/review-set-label.mjs'), 'utf8'));
+      const wrapper = readFileSync(join(root, 'scripts/review-set-label.mjs'), 'utf8');
+      if (/defaultSpawnDetached/.test(wrapper)) return true;
+      if (!/spawnPreventionLandingJob/.test(wrapper)) return false;
+      const leaf = readFileSync(join(root, 'scripts/lib/prevention-landing-job.mjs'), 'utf8');
+      return /defaultSpawnDetached/.test(leaf);
     } catch { return false; }
   },
   async run({ log } = {}) {
