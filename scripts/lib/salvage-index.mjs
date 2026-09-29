@@ -14,8 +14,8 @@
  * append is never lost.
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync, renameSync } from 'node:fs';
-import { basename, dirname, join } from 'node:path';
+import { existsSync, readFileSync, readdirSync, rmSync, lstatSync, realpathSync, writeFileSync, renameSync } from 'node:fs';
+import { basename, dirname, join, resolve, sep } from 'node:path';
 import { withFileLock } from './atomic-json-file.mjs';
 import { resolveSalvageRoot, salvageIndexPath, deriveSalvageTargets, SALVAGE_DIR_ENV } from './lane-salvage.mjs';
 
@@ -134,7 +134,13 @@ export function refreshSalvageIndex({ root = resolveSalvageRoot(), branchRef = '
     for (const e of entries) {
       const t = Date.parse(e.ts) || parseSalvageStamp(e.stamp) || nowMs;
       if (t < cutoff) {
-        for (const f of entryFiles(e)) { try { bytesFreed += statSync(f).size; } catch { /* gone */ } }
+        // #4273: only stat/size paths genuinely under the salvage root — same containment rule
+        // `deleteEntryArtifacts` enforces for the actual removal, applied here too so a tampered
+        // out-of-root path is never even walked. DEDUPE `plain` against `globbed` first — `bundle`/`patches`
+        // sit inside `outDir` too, so the `lane-N.` glob ALSO finds them; summing both sets un-deduped would
+        // double-count every such file's bytes (review finding: correctness/claim-accuracy, this round).
+        const { plain, globbed } = entryFiles(e);
+        for (const f of new Set([...plain, ...globbed])) { if (isUnderSalvageRoot(f, root)) { try { bytesFreed += pathSize(f); } catch { /* gone */ } } }
         expired.push(e);
         continue;
       }
@@ -150,21 +156,78 @@ export function refreshSalvageIndex({ root = resolveSalvageRoot(), branchRef = '
     decide(readSalvageIndex(root).map((e) => ({ ...e })));
   } else if (existsSync(salvageIndexPath(root))) {
     updateSalvageIndex(root, decide);
-    for (const e of expired) deleteEntryArtifacts(e);
+    for (const e of expired) deleteEntryArtifacts(e, root);
   }
   return { landed, expired, bytesFreed, kept: readSalvageIndex(root).length };
 }
 
+/** Splits an entry's removable paths into two sets with DIFFERENT removal rules (#4273 review — narrowing the
+ *  blast radius of the recursive delete a `litter` copy forced in):
+ *  - `plain`: `bundle` + `patches` — files `salvageLane` itself always writes as plain FILES, never a
+ *    directory. Removed NON-recursively, exactly as before this module ever supported `litter` — an
+ *    index-supplied `bundle`/`patches` entry that turned out to BE a directory (tampered or corrupt) simply
+ *    fails to remove (as it always has), never recursively deletes a whole tree.
+ *  - `globbed`: every OTHER `lane-${lane}.*`-prefixed entry actually sitting in `outDir` — this is where a
+ *    directory-shaped artifact (`lane-N.wt-litter`, a `litter` copy) lives, so recursive removal is scoped to
+ *    ONLY this glob-derived set, never to an index-supplied `bundle`/`patches` path.
+ *  `e.litter[].dest` paths are deliberately not read from the index row at all here: they are nested INSIDE
+ *  the `lane-N.wt-litter` directory the glob already finds, so re-adding them would double-count their bytes
+ *  in `pathSize` and be redundant for `rmSync` (removing the parent directory already removes them). */
 function entryFiles(e) {
-  const files = new Set([e.bundle, ...(e.patches || [])].filter(Boolean));
+  const plain = new Set([e.bundle, ...(e.patches || [])].filter(Boolean));
+  const globbed = new Set();
   if (e.outDir && existsSync(e.outDir)) {
-    for (const f of readdirSync(e.outDir)) if (f.startsWith(`lane-${e.lane}.`)) files.add(join(e.outDir, f));
+    for (const f of readdirSync(e.outDir)) if (f.startsWith(`lane-${e.lane}.`)) globbed.add(join(e.outDir, f));
   }
-  return [...files];
+  return { plain: [...plain], globbed: [...globbed] };
 }
 
-function deleteEntryArtifacts(e) {
-  for (const f of entryFiles(e)) rmSync(f, { force: true });
+/** A path's total size on disk — recurses into a directory (e.g. a `litter` copy) instead of reporting just
+ *  its own directory-entry size, so `bytesFreed` (#4273) is not silently undercounted for one. Uses
+ *  `lstatSync`, NEVER `statSync`, and never recurses into a symlink: a `litter` copy can itself contain a
+ *  symlink (salvage preserves one verbatim, never dereferencing it — see `lane-salvage.mjs`), and following one
+ *  here during expiry accounting could count bytes that were never actually copied, or loop on a self- /
+ *  ancestor-referential link. A symlink's OWN (small) size is all this ever reports for one. */
+function pathSize(p) {
+  let total = 0;
+  const st = lstatSync(p);
+  if (st.isSymbolicLink() || !st.isDirectory()) return st.size;
+  for (const name of readdirSync(p)) { try { total += pathSize(join(p, name)); } catch { /* gone */ } }
+  return total;
+}
+
+/** Resolve to a REAL path when it exists (so a symlink can never route a comparison around it), falling back
+ *  to a plain lexical resolve for a path that is already gone (expiry must still be able to reason about — and
+ *  skip cleanly past — something a previous run already removed). */
+function realOrResolved(p) {
+  try { return realpathSync(p); } catch { return resolve(p); }
+}
+
+/** Is `p` STRICTLY inside the salvage root — never the root itself? A path-containment check (#4273 review) —
+ *  every path this module deletes comes from an index row it also trusts for its filename `lane-${lane}.`
+ *  prefix glob, so a corrupted/hand-edited `index.jsonl` whose `bundle`/`patches`/`outDir` points AT or OUTSIDE
+ *  the salvage root must never let expiry `rmSync` (recursively, for a `litter` directory) whatever is there.
+ *  `rp === r` is DELIBERATELY not accepted (a legitimate `bundle`/`patches`/`litter[].dest` is always nested
+ *  under `<root>/<pool>/<stamp>/…`, never the root itself), and both sides resolve through `realOrResolved` so
+ *  a symlink planted inside a legitimate `outDir` cannot resolve OUT of the root and still pass. */
+export function isUnderSalvageRoot(p, root) {
+  const r = realOrResolved(root);
+  const rp = realOrResolved(p);
+  return rp !== r && rp.startsWith(r + sep);
+}
+
+function deleteEntryArtifacts(e, root) {
+  const { plain, globbed } = entryFiles(e);
+  // `plain` (bundle/patches) is what `salvageLane` always writes as ordinary FILES — never recursive, exactly
+  // as this module behaved before `litter` existed. A NON-recursive `rmSync` on a path that turns out to BE a
+  // directory (a tampered/legacy row) THROWS (`EISDIR`) rather than quietly no-op-ing — `force` only suppresses
+  // a MISSING path, never a wrong-type one — so this is wrapped: one bad entry must never abort expiry for
+  // every OTHER entry in the same batch (matches this function's own outDir-cleanup below, already wrapped).
+  // It never recursively deletes a whole tree either way — it just sometimes fails to remove at all.
+  for (const f of plain) { if (isUnderSalvageRoot(f, root)) { try { rmSync(f, { force: true }); } catch { /* wrong type (e.g. a directory) or a race — leave it, keep going */ } } }
+  // `globbed` is where a `litter` copy's directory (`lane-N.wt-litter`) lives — recursive removal is scoped to
+  // ONLY this glob-derived set, per `entryFiles`'s docblock.
+  for (const f of globbed) { if (isUnderSalvageRoot(f, root)) { try { rmSync(f, { recursive: true, force: true }); } catch { /* leave it, keep going */ } } }
   if (e.outDir && existsSync(e.outDir)) { try { if (!readdirSync(e.outDir).length) rmSync(e.outDir, { recursive: true }); } catch { /* keep */ } }
   if (e.dir && existsSync(e.dir)) {
     // Every ref this salvage made, including ones an older index row did not list (`refs/salvage/lane-N-<stamp>-*`).

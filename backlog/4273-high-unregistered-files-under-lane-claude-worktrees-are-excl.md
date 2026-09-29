@@ -2,9 +2,13 @@
 bornAs: xx3wmcg
 kind: task
 parent: "4075"
-status: open
-scope: ["we:scripts/lib/lane-salvage.mjs"]
+status: resolved
+scope: ["we:scripts/lib/lane-salvage.mjs", "we:scripts/lib/salvage-index.mjs"]
 dateOpened: "2026-09-27"
+dateStarted: "2026-09-28"
+dateResolved: "2026-09-28"
+preparedDate: "2026-09-28"
+preparedAgainstSha: "bc6f437771ce61f9eec92149f36211cec7531cc1"
 tags: []
 ---
 
