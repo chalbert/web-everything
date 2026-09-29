@@ -1737,6 +1737,19 @@ export function narrowPrsByRepo(listings, { onlyPr = null, onlyRepo = null, repo
   return out;
 }
 
+/**
+ * #4108 (converge round 2, red-team — 5/5 jurors: no test distinguished this from a map built off `prs`) — the
+ * RECONCILE context's per-repo reused rows: `repo → listing.rows`, deliberately `rows` (the RAW page `listOne`
+ * fetched, before EITHER the `--label` or `--base` client-side filter), never `listing.prs` (the already-
+ * filtered candidate set). The context is documented label/only/repo-BLIND (#2421) — feeding it the filtered
+ * `prs` instead would silently narrow it to the label/base match, the exact regression this pins. Pure.
+ * @param {Array<{repo:(string|null), rows:Array}>} listings
+ * @returns {Map<(string|null), Array>}
+ */
+export function buildLiveListingsByRepo(listings) {
+  return new Map((Array.isArray(listings) ? listings : []).map((l) => [l.repo, l.rows]));
+}
+
 /** #4308 — GitHub's own files-connection page size a listing was fetched with is not independently known at the
  *  row level, so a PR whose `files` array is AT this conservative cap is read as "maybe truncated ⇒ unknown"
  *  (rule 2 — an unknown file list never yields, the safe direction), never trusted as complete. */
@@ -2083,6 +2096,32 @@ export { OPEN_PR_LIST_LIMIT, isDegradedOpenPrListing };
  *  that is NOT itself `ready-to-merge` (a label-scoped candidate listing never sees it at all — #4308 Data). The
  *  measured cost of widening it is exactly Task 5's "warm and cold caches" number (this PR's own body). */
 export const CONTEXT_LIST_FIELDS = 'number,title,body,labels,statusCheckRollup,headRefName,headRefOid,baseRefName,isDraft,files';
+
+/** #4108 (converge round 2) — the candidate listing's OWN fields, unwidened. Used verbatim when RECONCILE is
+ *  off (a bare `/merge`/`/finish`/`/pr` sweep — no repo's context is ever collected that pass, #xc7p3q9 B3), so
+ *  that path never pays {@link SWEEP_LIST_FIELDS}' extra connection fields (`files` prices a GraphQL page) for a
+ *  widening it has no reuse to spend it on. */
+const CANDIDATE_ONLY_FIELDS = 'number,title,body,headRefName,headRefOid,baseRefName,mergeable,mergeStateStatus,statusCheckRollup,labels';
+
+/** #4108 — {@link CANDIDATE_ONLY_FIELDS} (the certification inputs {@link CONTEXT_LIST_FIELDS} doesn't need)
+ *  UNION'd with {@link CONTEXT_LIST_FIELDS}. `sweepOnce`'s per-repo candidate listing (`listOne`) requests this
+ *  widened set, ONLY while RECONCILE is on, so its ALREADY-LIVE row for a repo can be reused as that repo's
+ *  open-PR CONTEXT row too — one `gh pr list` per repo per pass instead of two sequential round-trips for the
+ *  identical open-PR set (the double-listing this constant exists to close). Order-independent; the extra
+ *  fields a caller doesn't read are inert to `narrowPrsByRepo`/`classifyPr`. */
+export const SWEEP_LIST_FIELDS = [...new Set([
+  ...CANDIDATE_ONLY_FIELDS.split(','),
+  ...CONTEXT_LIST_FIELDS.split(','),
+])].join(',');
+
+/** #4108 (converge round 1) — `gh pr list --base <branch>` matches a PR's base branch name EXACTLY (no glob/
+ *  prefix); applied here CLIENT-SIDE, mirroring the client-side `--label` conversion (#no-label-search), so the
+ *  RAW fetch behind it stays base-UNFILTERED and safe to reuse for the base-blind open-PR context. Pure. A
+ *  falsy `base` filters nothing. */
+export function filterOpenPrsByBase(rows, base) {
+  if (!Array.isArray(rows)) return [];
+  return base ? rows.filter((r) => r && r.baseRefName === base) : rows;
+}
 
 /** Bound a `--watch --interval=N` poll count. `--max-idle=N` (optional) exits after N consecutive idle passes
  *  (a pass that merged nothing AND has nothing deferred waiting); omitted → unbounded (until Ctrl-C). Pure.
@@ -3823,12 +3862,21 @@ async function runCli() {
   // now unit-tested through the SAME code (R4 — the old closure was unreachable from any test). Lists over
   // CONTEXT_REPOS (the constellation ∪ REPOS), NOT the narrowed REPOS, so a carrier a `--repos`/`--this-repo`/
   // `--only` sweep filtered out of the candidate set is still visible for the couple gate's health read.
-  const collectContext = () => collectOpenPrContext({
+  // #4108 (converge round 1 v3, simplicity lens) — no default: the sole call site (below) always passes
+  // `liveListingsByRepo` explicitly.
+  const collectContext = (liveByRepo) => collectOpenPrContext({
     contextRepos: CONTEXT_REPOS,
     reconcileRan: true,
     // #999/xq985wu F3 — `--limit OPEN_PR_LIST_LIMIT` (raised off the old silent 100). This listing is the SOLE
     // cross-item ordering source on a full sweep, so a truncated page is a MERGE-SAFETY hazard.
     listOpenPrs: async (repo) => {
+      // #4108 — this repo was already listed LIVE this pass for the merge-candidate set below
+      // (`SWEEP_LIST_FIELDS` widens that call to cover everything this context needs too) — reuse it instead of
+      // a second `gh pr list` round-trip for the SAME repo, same pass. Only covers `repo`s in `REPOS`; a repo
+      // that is in `CONTEXT_REPOS` but not `REPOS` (a narrowed `--repos`/`--this-repo` sweep's extra
+      // constellation-context repos — rare, a no-op on the common full sweep) falls through to the snapshot/live
+      // read below, unchanged.
+      if (liveByRepo.has(repo)) return liveByRepo.get(repo);
       // xsbyo56 — `body` added so the #2832 held-reconcile branch (below) can read back the PR's own
       // `## Escalation reason` block (`buildHeldReviewHoldReason`/`parseEscalationReason`) and name the
       // specific file(s) that forced a review:human/pending/changes hold, not just the label.
@@ -4043,20 +4091,6 @@ async function runCli() {
   // number-keyed cross-repo map. The single list is what lets the cascade honour cross-repo `blockedBy`.
   const reconciledLabels = [];
   const verdicts = [];
-  // #2421 — the shared open-PR listing + manifest reads + cross-repo item-openness set the reconcile below
-  // needs, computed ONCE for this pass (RECONCILE-gated — same cost profile as the reconcile it feeds: free on
-  // a bare, unlabelled sweep).
-  // #xc7p3q9 (B3) — when the blind context is NEVER collected (`RECONCILE` false: a bare `/merge` sweep or
-  // `--no-reconcile-labels`), it is INCOMPLETE by construction — `contextComplete:false` — so the couple gate
-  // fails closed (a coupled impl defers rather than orphan-landing past a carrier the gate cannot see).
-  const openPrContext = RECONCILE ? await __t.timeAsync('listing', () => collectContext()) : reduceOpenPrContext({ listings: [], reads: new Map(), reconcileRan: false });
-  // #xc7p3q9 (R2) — the operator escape hatch symmetric to `--no-review-escalation`: `--assume-complete-context`
-  // FORCES the context complete so a genuinely-stuck couple (e.g. a persistent read-noise fail-closed) can land
-  // short of editing the script. Prints a LOUD one-line waiver. Off by default; the fail-closed gate stays live.
-  if (ASSUME_COMPLETE_CONTEXT && !openPrContext.contextComplete) {
-    openPrContext.contextComplete = true;
-    if (!AS_JSON) process.stderr.write('  ⚠ --assume-complete-context: FORCING contextComplete=true — the couple gate will treat a carrier ABSENT from this pass\'s (possibly incomplete) open-PR context as LANDED. Operator waiver; use only to unstick a queue you have verified by hand (#xc7p3q9 R2).\n');
-  }
   // #2417 — list ALL repos CONCURRENTLY up front (was one `gh pr list` per repo, serial, interleaved with the
   // per-repo processing below). A single repo's list failure is a bad-env hard-fail, preserved — but
   // now surfaced after the concurrent batch instead of mid-loop. #3383 gh-error — exit 4, distinct from the
@@ -4067,16 +4101,28 @@ async function runCli() {
   // over a handful of queued PRs cost 3 points x 3 repos every pass. Kept a LIVE read (it is the merge-candidate
   // set, so it must not lag a just-removed `ready-to-merge`), but sized off the shared snapshot's open count and
   // re-listed at OPEN_PR_LIST_LIMIT when that page came back full.
+  // #4108 — moved AHEAD of the (RECONCILE-gated) open-PR context below: this listing now also SERVES that
+  // context for every repo in `REPOS` (via `SWEEP_LIST_FIELDS`'s widened `--json`), instead of the context
+  // issuing its OWN separate `gh pr list` for the same repo right after this one finishes. The two were
+  // SEQUENTIAL (not concurrent) full round-trips for the identical open-PR set every pass RECONCILE is on —
+  // the double-listing this item closes.
   const listOne = async (repo) => {
     // #no-label-search (2026-09-27 live incident) — `gh pr list --label` is served by GitHub's issue-SEARCH
     // index, a separate, much smaller budget than the ordinary GraphQL list this call already is. The drain
     // failed every pass on "API rate limit already exceeded" from THAT bucket while the real GraphQL budget
     // still had 2000+ points left. `labels` is already requested in --json below, so filter client-side
     // instead of passing `--label` — identical candidate set, no search-backed call at all.
+    // #4108 (converge round 1, 4/5 jurors) — `--base` is likewise applied CLIENT-SIDE below (`filterOpenPrsByBase`,
+    // see its docblock for why), never as a server-side `gh pr list --base` flag on THIS call: `rows` (the raw
+    // fetch, before either filter) is what `liveListingsByRepo` hands to the RECONCILE context, and that context
+    // must stay base-blind (#2421).
     const run = async (limit) => {
+      // #4108 (converge round 2) — only widen to SWEEP_LIST_FIELDS when RECONCILE is actually on: that is the
+      // ONLY case anything reuses this repo's rows for the context (see `liveListingsByRepo` below). RECONCILE
+      // off means this call is never reused, so the extra context fields (`files`, `isDraft`) would just be
+      // GraphQL cost with no offsetting call removed.
       const listArgs = ['pr', 'list', ...repoFlag(repo), '--state', 'open', '--limit', String(limit),
-        '--json', 'number,title,body,headRefName,headRefOid,baseRefName,mergeable,mergeStateStatus,statusCheckRollup,labels'];
-      if (base) listArgs.push('--base', base);
+        '--json', RECONCILE ? SWEEP_LIST_FIELDS : CANDIDATE_ONLY_FIELDS];
       const { stdout } = await execFileP('gh', listArgs, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
       return JSON.parse(stdout.trim() || '[]');
     };
@@ -4087,9 +4133,10 @@ async function runCli() {
       let rows = await run(sized);
       let limit = sized;
       if (rows.length >= sized) { limit = OPEN_PR_LIST_LIMIT; rows = await run(limit); }
-      const { prs, truncated } = filterOpenPrsByLabel(rows, label, limit);
+      const { prs: labelMatched, truncated } = filterOpenPrsByLabel(rows, label, limit);
+      const prs = filterOpenPrsByBase(labelMatched, base);
       if (truncated) process.stderr.write(`  ⚠️  DEGRADED drain listing for ${repoTag(repo) || 'cwd'}: the open-PR list hit the --limit ${limit} cap — it MAY be truncated, so a ${label || 'candidate'} PR past it can be missing this pass (#no-label-search)\n`);
-      return { repo, prs };
+      return { repo, prs, rows };
     }
     catch (e) { return { repo, err: describeGhListError(e) }; }
   };
@@ -4106,6 +4153,26 @@ async function runCli() {
   const [listings] = await __t.timeAsync('listing', () => Promise.all([mapWithConcurrency(REPOS, REPOS.length, listOne), Promise.all(REPOS.map(resolveDefaultBranch))]));
   const listErr = listings.find((l) => l.err);
   if (listErr) fail('gh-error', `gh pr list${listErr.repo ? ` --repo ${listErr.repo}` : ''} failed [${listErr.err.kind}]: ${listErr.err.text}${listErr.err.hint ? ` — ${listErr.err.hint}` : ''}`, 4);
+  // #4108 — this pass's already-fetched LIVE rows per repo (see `buildLiveListingsByRepo`'s docblock for why
+  // it is `rows`, never `prs`), reused below so `collectContext` need not re-list any repo in `REPOS`. `l.rows`
+  // is always an array here (never undefined): the `listErr` check above already `fail()`-exited on any entry
+  // that lacks one (an errored `listOne` returns `{repo, err}`, no `rows`).
+  const liveListingsByRepo = buildLiveListingsByRepo(listings);
+  // #2421 — the shared open-PR listing + manifest reads + cross-repo item-openness set the reconcile below
+  // needs, computed ONCE for this pass (RECONCILE-gated — same cost profile as the reconcile it feeds: free on
+  // a bare, unlabelled sweep). #4108 — reuses `liveListingsByRepo` above instead of re-listing every repo in
+  // `REPOS`.
+  // #xc7p3q9 (B3) — when the blind context is NEVER collected (`RECONCILE` false: a bare `/merge` sweep or
+  // `--no-reconcile-labels`), it is INCOMPLETE by construction — `contextComplete:false` — so the couple gate
+  // fails closed (a coupled impl defers rather than orphan-landing past a carrier the gate cannot see).
+  const openPrContext = RECONCILE ? await __t.timeAsync('listing', () => collectContext(liveListingsByRepo)) : reduceOpenPrContext({ listings: [], reads: new Map(), reconcileRan: false });
+  // #xc7p3q9 (R2) — the operator escape hatch symmetric to `--no-review-escalation`: `--assume-complete-context`
+  // FORCES the context complete so a genuinely-stuck couple (e.g. a persistent read-noise fail-closed) can land
+  // short of editing the script. Prints a LOUD one-line waiver. Off by default; the fail-closed gate stays live.
+  if (ASSUME_COMPLETE_CONTEXT && !openPrContext.contextComplete) {
+    openPrContext.contextComplete = true;
+    if (!AS_JSON) process.stderr.write('  ⚠ --assume-complete-context: FORCING contextComplete=true — the couple gate will treat a carrier ABSENT from this pass\'s (possibly incomplete) open-PR context as LANDED. Operator waiver; use only to unstick a queue you have verified by hand (#xc7p3q9 R2).\n');
+  }
   // #2683 — the `--only` target is repo-scoped (see `matchesOnlyTarget`): `--only-repo=<slug>` names the repo;
   // a single-repo sweep (`--this-repo` / `--repos=<one>` — the legacy `/pr`+`/finish` callers) matches its one
   // repo; a multi-repo default sweep with no `--only-repo` disambiguates to the LOCAL repo. This narrows the
