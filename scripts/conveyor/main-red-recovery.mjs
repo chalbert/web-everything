@@ -49,6 +49,7 @@
  */
 import { isTrustedMarkerAuthor } from '../lib/marker-authorship.mjs';
 import { latestRequiredCheck, isRequiredCheckFailed } from '../merge-ai-prs.mjs';
+import { FALLBACK_REQUIRED_STATUS_CHECKS } from '../lib/required-status-checks.mjs';
 
 /**
  * we:scripts/conveyor/main-red-recovery.mjs#MAIN_RED_CONCLUSIONS — which of `main`'s own `CI` run conclusions
@@ -162,7 +163,9 @@ export function classifyCiFailureAttribution({ failureCompletedAt, mainRedWindow
  * and `ci-red-recovery-watch` never rebased it. Mirrors today's required contexts (`test`, `smoke`,
  * `daemon-soak`); a name a repo does not report is simply never failing, so the list is safe for any repo.
  */
-export const DEFAULT_MAIN_RED_ATTRIBUTED_CHECKS = Object.freeze([DEFAULT_REQUIRED_CHECK, 'smoke', 'daemon-soak']);
+// #4501 — imported, not re-hardcoded, so this can never silently diverge from the branch-protection
+// fallback (they were byte-identical by coincidence, not by construction, before this).
+export const DEFAULT_MAIN_RED_ATTRIBUTED_CHECKS = FALLBACK_REQUIRED_STATUS_CHECKS;
 
 /**
  * we:scripts/conveyor/main-red-recovery.mjs#failingRequiredCheckForAttribution — soak-main-red: across EVERY
