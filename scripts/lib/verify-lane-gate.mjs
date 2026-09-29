@@ -246,6 +246,21 @@ export function computeWorkingTreeHash({ base = 'origin/main', runGit, fileMode 
   }
 }
 
+/**
+ * #4473 (PR #2982 round-2 review) — the tree hash a finished run may record: the start-of-run hash, but only when
+ * every later sample (just before the gate ran, just after it exited) still equals it. A worker editing during
+ * the admission wait or the gate itself means the gate saw a different tree than the one hashed at start, so the
+ * run's result must not be cacheable for either — `null`, which never matches (fail closed). Known limit: an edit
+ * made AND reverted entirely between two samples is invisible to sampling; this narrows the window, it cannot
+ * close it.
+ * @param {...(string|null|undefined)} samples - the tree hashes in the order they were taken
+ * @returns {string|null}
+ */
+export function stableTreeHash(...samples) {
+  if (!samples.length || samples.some((h) => typeof h !== 'string' || !h)) return null;
+  return samples.every((h) => h === samples[0]) ? samples[0] : null;
+}
+
 /** A full or abbreviated hex commit sha — never a ref name, a flag-shaped string, or anything else `git diff`
  *  could misread as an option. `recordSha` comes off the `.lane-verify` marker (JSON on disk, not literally
  *  attacker input, but not a value this function itself produced either); validating its SHAPE before it ever

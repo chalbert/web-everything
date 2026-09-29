@@ -13,7 +13,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { resolveDefaultGate, canScopeCheckStandards, composeGate, describeGate, laneRelevantChangeSince, computeWorkingTreeHash, FULL_GATE, MAX_RELATED_TARGETS } from '../verify-lane-gate.mjs';
+import { resolveDefaultGate, canScopeCheckStandards, composeGate, describeGate, laneRelevantChangeSince, computeWorkingTreeHash, stableTreeHash, FULL_GATE, MAX_RELATED_TARGETS } from '../verify-lane-gate.mjs';
 
 /** A synthetic git runner for the xpnhz4o working-tree changed set: `merge-base` resolves to a fixed sha;
  *  `diff --name-only <sha>` returns the (working-tree) changed files; `--diff-filter=D` the deleted ones;
@@ -519,3 +519,20 @@ describe('verify-lane.mjs source wiring — the default gate actually calls reso
 // hit on matching sha+treeHash+gate, cache MISS on a differing gate, cache MISS on a red record, and cache MISS
 // with no computable origin/main ref — while being strictly MORE fragile than those: a harmless reformat or
 // reordering of the cacheHit condition redded this regex with no behavior change at all.
+
+describe('stableTreeHash (#4473, PR #2982 round-2 review) — record a tree hash only if the tree held still for the whole run', () => {
+  it('returns the hash when every sample matches', () => {
+    expect(stableTreeHash('a', 'a', 'a')).toBe('a');
+  });
+  it('returns null when any sample differs — including one that caught an edit later reverted by the next sample (A → B → A)', () => {
+    expect(stableTreeHash('a', 'b', 'b')).toBeNull();
+    expect(stableTreeHash('a', 'a', 'b')).toBeNull();
+    expect(stableTreeHash('a', 'b', 'a')).toBeNull();
+  });
+  it('returns null when any sample is unknown, or there are no samples (fail closed)', () => {
+    expect(stableTreeHash('a', null, 'a')).toBeNull();
+    expect(stableTreeHash(null, null)).toBeNull();
+    expect(stableTreeHash('a', undefined)).toBeNull();
+    expect(stableTreeHash()).toBeNull();
+  });
+});

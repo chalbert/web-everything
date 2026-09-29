@@ -630,6 +630,57 @@ describe('verify-lane — the cache key is bound to the tree THIS run verified (
     }
   });
 
+  it('overlapping requests with different gates cannot relabel a completed green (PR #2982 round-2 review)', () => {
+    const spyDir = mkdtempSync(join(tmpdir(), 'verify-lane-spy-'));
+    try {
+      // The STRONGER gate fails for real; the weaker one passes, and mid-run re-`request`s the stronger gate on the
+      // SAME unchanged tree — re-stamping the shared marker `running` with suites = the stronger command.
+      const strongScript = join(spyDir, 'strong.mjs');
+      writeFileSync(strongScript, 'process.exit(1);\n');
+      const strongCmd = `node ${strongScript}`;
+      const weakScript = join(spyDir, 'weak.mjs');
+      const weakCmd = `node ${weakScript}`;
+      writeFileSync(weakScript, [
+        "import { execFileSync } from 'node:child_process';",
+        `execFileSync('node', [${JSON.stringify(VERIFY_LANE)}, 'request', ${JSON.stringify(`--gate=${strongCmd}`)}, '--json'], { cwd: ${JSON.stringify(dir)}, stdio: 'ignore' });`,
+        'process.exit(0);',
+        '',
+      ].join('\n'));
+
+      expect(runVerify(weakCmd).json.status).toBe('green');
+      // The finished marker names the gate that actually ran, never the overlapping request's.
+      expect(JSON.parse(readFileSync(marker(), 'utf8')).suites).toBe(weakCmd);
+
+      const { code, json } = runRequest(strongCmd);
+      expect(code).toBe(0);
+      expect(json.status).toBe('requested');
+    } finally {
+      rmSync(spyDir, { recursive: true, force: true });
+    }
+  });
+
+  it('a tree edited while the gate runs records no tree hash, so reverting to the start-of-run tree afterwards is not served from cache', () => {
+    const spyDir = mkdtempSync(join(tmpdir(), 'verify-lane-spy-'));
+    try {
+      // The gate itself plays the worker editing mid-run (the same effect as an edit during the admission wait:
+      // the tree the gate saw is not the tree hashed at start). It does NOT re-request.
+      const edited = join(dir, 'edited-mid-gate.txt');
+      const gateScript = join(spyDir, 'edit.mjs');
+      const gateCmd = `node ${gateScript}`;
+      writeFileSync(gateScript, `import { writeFileSync } from 'node:fs';\nwriteFileSync(${JSON.stringify(edited)}, 'x\\n');\nprocess.exit(0);\n`);
+
+      expect(runVerify(gateCmd).json.status).toBe('green');
+      expect(JSON.parse(readFileSync(marker(), 'utf8')).treeHash).toBeNull();
+
+      rmSync(edited); // back to the start-of-run tree
+      const { code, json } = runRequest(gateCmd);
+      expect(code).toBe(0);
+      expect(json.status).toBe('requested');
+    } finally {
+      rmSync(spyDir, { recursive: true, force: true });
+    }
+  });
+
   it('an untracked executable that loses its execute bit (same content) invalidates the cached green — the gate re-runs and fails', () => {
     const tool = join(dir, 'tool.sh');
     writeFileSync(tool, '#!/bin/sh\nexit 0\n');

@@ -260,7 +260,7 @@ export function verifyStartBody({ sha, suites, startedAt, treeHash }) {
  *  green for a tree it never verified — the exact false-green this guard exists to kill. So `sha` is passed
  *  explicitly and wins. `prev` supplies only `startedAt`/`suites` (audit fields); `base.sha` is a fallback for
  *  legacy callers that pass their own start body as `prev`. */
-export function verifyFinishBody(prev, { finishedAt, exitCode, sha, treeHash } = {}) {
+export function verifyFinishBody(prev, { finishedAt, exitCode, sha, treeHash, suites } = {}) {
   const base = prev && typeof prev === 'object' ? prev : {};
   const green = Number(exitCode) === 0;
   return {
@@ -268,7 +268,10 @@ export function verifyFinishBody(prev, { finishedAt, exitCode, sha, treeHash } =
     status: green ? 'green' : 'red',
     startedAt: base.startedAt ?? null,
     finishedAt: finishedAt || null,
-    suites: base.suites ?? null,
+    // #4473 — `suites` is part of the cache key too, so the gate THIS run executed wins (PR #2982 round-2 review):
+    // an overlapping `request --gate=<other>` re-stamps the shared marker with ITS command, and inheriting that
+    // would relabel this run's green as a green for a gate that never ran.
+    suites: suites ?? base.suites ?? null,
     exitCode: Number.isFinite(Number(exitCode)) ? Number(exitCode) : null,
     // #4473 — the cache key. Like `sha`, an explicit `treeHash` (the hash the run itself captured) WINS over
     // `base.treeHash` (PR #2982 review): `base` is usually re-read off the shared on-disk marker, which an

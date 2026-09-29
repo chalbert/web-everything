@@ -67,7 +67,7 @@ import { VERIFY_FILENAME, VERIFY_PREVIOUS_FILENAME, verifyStartBody, verifyFinis
 import { LEASE_FILENAME, isLeaseStale, isConfirmedOwnLease } from './lib/lane-lease.mjs';
 import { defaultPoolRoot } from './lib/lane-pool-paths.mjs';
 import { writeAllSync } from './lib/write-all-sync.mjs';
-import { resolveDefaultGate, describeGate, laneRelevantChangeSinceForRecord, computeWorkingTreeHash } from './lib/verify-lane-gate.mjs';
+import { resolveDefaultGate, describeGate, laneRelevantChangeSinceForRecord, computeWorkingTreeHash, stableTreeHash } from './lib/verify-lane-gate.mjs';
 import { admissionLockRoot, resolveCap, resolveTimeoutMs, acquireSlotBlocking, releaseOwnedSlot, ADMISSION_HELD_ENV, classifyCommandKind } from './readiness/heavy-admission.mjs';
 
 // ── tiny arg parsing (matches push-if-green.mjs / lane-pool.mjs) ─────────────────────────────────────
@@ -292,7 +292,8 @@ if (preStart && !preStart.corrupt && (preStart.status === 'green' || preStart.st
 // weaker `--gate=` override (e.g. `--gate=true`) must never satisfy a LATER request for a different/stronger
 // gate on the same unchanged tree — that would silently skip the real verification the caller actually asked
 // for. Only a green produced by the SAME gate command can answer a cache hit.
-const currentTreeHash = MODE === 'run' ? null : computeWorkingTreeHash({ runGit: git, fileMode: (f) => lstatSync(join(REPO, f)).mode });
+const treeHashNow = () => computeWorkingTreeHash({ runGit: git, fileMode: (f) => lstatSync(join(REPO, f)).mode });
+const currentTreeHash = MODE === 'run' ? null : treeHashNow();
 const cacheHit = MODE !== 'run' && preStart && !preStart.corrupt
   && preStart.status === 'green'
   && preStart.sha === headSha
@@ -362,6 +363,9 @@ if (admission.timedOut) {
 // begins now" — including the common no-contention case (`admission.waitedMs === 0`), where neither line above
 // prints anything and a caller would otherwise have no way to tell "just started" from "already deep in the
 // gate". Never remove or reword this line without updating `verify-dispatch.mjs`'s own `GATE_STARTED_MARKER`.
+// PR #2982 round-2 review — re-sample the tree hash after the admission wait (and again after the gate, below):
+// a worker editing while this run queued or ran means the gate did not see the start-of-run tree.
+const preGateTreeHash = MODE === 'run' ? null : treeHashNow();
 process.stderr.write(`⏱ gate execution starting (suites: ${GATE})\n`);
 let exitCode = 0;
 try {
@@ -399,14 +403,16 @@ if (onDisk && !onDisk.corrupt && onDisk.sha && onDisk.sha !== headSha) {
 const startBody = onDisk && !onDisk.corrupt && onDisk.sha === headSha
   ? onDisk
   : verifyStartBody({ sha: headSha, suites: GATE, startedAt: null });
-// PR #2982 review — the cache key is bound to the tree THIS run verified, never re-read off the shared marker: an
-// overlapping `request` (a worker edits, then re-requests mid-gate) re-stamps the marker with a NEWER tree's
-// hash, and inheriting that would record green for a tree the gate never saw.
+// PR #2982 review — every cache-key field is bound to what THIS run did, never re-read off the shared marker: an
+// overlapping `request` (a worker edits, or asks for another `--gate=`, mid-gate) re-stamps the marker with a
+// NEWER tree's hash or a different gate command, and inheriting either would record a green nobody verified.
+// The tree hash is recorded only if the tree held still from start, through the admission wait, to gate exit.
 const finished = verifyFinishBody(startBody, {
   finishedAt: new Date().toISOString(),
   exitCode,
   sha: headSha,
-  treeHash: currentTreeHash,
+  suites: GATE,
+  treeHash: stableTreeHash(currentTreeHash, preGateTreeHash, treeHashNow()),
 });
 writeMarker(finished);
 
