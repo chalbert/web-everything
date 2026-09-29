@@ -103,6 +103,140 @@ describe('verify-lane — a terminal record for an EARLIER commit of this lane i
   });
 });
 
+/**
+ * #4296 — THE LIVE BUG, REPRODUCED END TO END: a mid-work merge of `origin/main` that conflicts only on a file
+ * OUTSIDE the lane's own touch-set used to invalidate a green marker and force a full re-run, purely because the
+ * merge commit's sha differs from the sha the marker was recorded for. The fix keys the marker's validity to what
+ * LANE-RELEVANT files changed since it was recorded, not the exact commit — reusing the same changed-file
+ * computation `resolveDefaultGate` derives for gate selection. Real `git`, real merge, the real `check` CLI —
+ * no fakes — because the whole point is that this survives an ACTUAL merge commit, not a synthetic marker edit.
+ */
+describe('verify-lane check — #4296 a no-op merge of origin/main (touching only an out-of-lane file) keeps a green marker valid', () => {
+  function runBareCheck() {
+    const r = spawnSync('node', [VERIFY_LANE, 'check', '--json'], { cwd: dir, encoding: 'utf8' });
+    return { code: r.status, json: (() => { try { return JSON.parse(String(r.stdout).trim().split('\n').pop()); } catch { return null; } })() };
+  }
+  const commit = (msg) => execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', msg], { cwd: dir });
+  const writeAndAdd = (relPath, contents) => {
+    mkdirSync(join(dir, relPath.split('/').slice(0, -1).join('/') || '.'), { recursive: true });
+    writeFileSync(join(dir, relPath), contents);
+    execFileSync('git', ['add', relPath], { cwd: dir });
+  };
+  // Never hardcode 'main' — beforeEach's `git init` uses whatever this host's git resolves as its default
+  // branch name, and this suite must not depend on that.
+  const laneBranch = () => execFileSync('git', ['symbolic-ref', '--short', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim();
+
+  it('a merge that touches only a file the lane never edited keeps the green marker for the PRE-merge sha valid', () => {
+    const main = laneBranch();
+    // Base tree: the two files this scenario needs, committed before either side diverges.
+    writeAndAdd('scripts/verify-lane.mjs', 'base\n');
+    writeAndAdd('scripts/operations/ci-heal-pr-dispatch.mjs', 'base\n');
+    commit('base');
+    execFileSync('git', ['branch', 'origin/main'], { cwd: dir }); // stand-in for the remote-tracking ref
+
+    // The LANE's own edit: touches only scripts/verify-lane.mjs.
+    writeAndAdd('scripts/verify-lane.mjs', 'lane edit\n');
+    commit('lane edit');
+    const laneSha = headSha();
+
+    // Record a GREEN marker for the lane's edit, via the REAL CLI.
+    const verified = runVerify('true');
+    expect(verified.json.status).toBe('green');
+    expect(verified.json.sha).toBe(laneSha);
+
+    // Meanwhile, `origin/main` moved on — a change to a file the lane itself never touches.
+    execFileSync('git', ['checkout', '-q', 'origin/main'], { cwd: dir });
+    writeAndAdd('scripts/operations/ci-heal-pr-dispatch.mjs', 'upstream edit\n');
+    commit('upstream edit');
+    execFileSync('git', ['checkout', '-q', main], { cwd: dir });
+
+    // The mid-work merge (a real merge commit — auto-clean, the two sides touch different files).
+    execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', 'merge', '--no-edit', '-q', 'origin/main'], { cwd: dir });
+    const mergeSha = headSha();
+    expect(mergeSha).not.toBe(laneSha); // the marker is now for an EARLIER commit than HEAD
+
+    // THE FIX: `check` (no re-run) still reports green for the NEW head — the merge touched nothing lane-relevant.
+    const { code, json } = runBareCheck();
+    expect(code).toBe(0);
+    expect(json).toMatchObject({ sha: mergeSha, status: 'green', ok: true, reason: 'verified' });
+    expect(json.detail).toMatch(/carried forward/);
+    expect(json.detail).toMatch(new RegExp(laneSha.slice(0, 8)));
+
+    // The marker on disk is UNCHANGED (still recorded for the pre-merge sha) — this is a read-time carry-forward,
+    // never a rewrite, and no suite ran a second time.
+    expect(JSON.parse(readFileSync(marker(), 'utf8')).sha).toBe(laneSha);
+  });
+
+  it('COUNTER-CASE: a merge that DOES touch a file the lane relies on still forces a re-verify', () => {
+    const main = laneBranch();
+    writeAndAdd('scripts/verify-lane.mjs', 'base\n');
+    commit('base');
+    execFileSync('git', ['branch', 'origin/main'], { cwd: dir });
+
+    writeAndAdd('scripts/verify-lane.mjs', 'lane edit\n');
+    commit('lane edit');
+    const laneSha = headSha();
+    expect(runVerify('true').json.status).toBe('green');
+
+    // This time `origin/main` changes the SAME file the lane's own diff already covers.
+    execFileSync('git', ['checkout', '-q', 'origin/main'], { cwd: dir });
+    writeAndAdd('scripts/verify-lane.mjs', 'base\nupstream addition\n');
+    commit('upstream addition to the lane\'s own file');
+    execFileSync('git', ['checkout', '-q', main], { cwd: dir });
+
+    // A real conflict (both sides touched the same line region is not required — just the same file) — resolve
+    // by taking the lane's own content plus the upstream addition, i.e. a genuine 3-way merge outcome.
+    const merge = spawnSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', 'merge', '--no-edit', '-q', 'origin/main'], { cwd: dir, encoding: 'utf8' });
+    if (merge.status !== 0) {
+      // Conflict — resolve trivially and complete the merge (still a merge commit whose diff vs the marker's
+      // sha touches scripts/verify-lane.mjs, which is exactly what this counter-case needs to prove).
+      writeFileSync(join(dir, 'scripts/verify-lane.mjs'), 'lane edit\nupstream addition\n');
+      execFileSync('git', ['add', 'scripts/verify-lane.mjs'], { cwd: dir });
+      execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '--no-edit', '-q'], { cwd: dir });
+    }
+    const mergeSha = headSha();
+    expect(mergeSha).not.toBe(laneSha);
+
+    const { code, json } = runBareCheck();
+    expect(code).toBe(2); // NOT ok — this is not a blanket bypass
+    expect(json).toMatchObject({ sha: mergeSha, status: 'absent', reason: 'unverified', ok: false });
+  });
+
+  it('#4296 round-1 RED-TEAM FIX, reproduced with real git: a lane REVERT of its own already-verified edit still forces a re-verify', () => {
+    // The blocker the red-team found in the FIRST cut of this fix: filtering `changedSinceRecord` against only
+    // `diff(base, headSha)` (the CURRENT lane touch-set) missed the case where the lane's OWN later commit
+    // reverts one of its own already-verified edits back to `base`'s content while another lane edit remains —
+    // the reverted file drops out of `diff(base, headSha)` (it is identical to base again) even though it
+    // genuinely changed between the marker's recorded sha and headSha, and that revert itself was never run
+    // through the suite. The fix folds in `diff(base, recordSha)` too, so a file relevant at EITHER end stays
+    // relevant.
+    const main = laneBranch();
+    writeAndAdd('scripts/verify-lane.mjs', 'base\n');
+    writeAndAdd('scripts/operations/ci-heal-pr-dispatch.mjs', 'base\n');
+    commit('base');
+    execFileSync('git', ['branch', 'origin/main'], { cwd: dir });
+
+    // The lane edits TWO files.
+    writeAndAdd('scripts/verify-lane.mjs', 'lane edit A\n');
+    writeAndAdd('scripts/operations/ci-heal-pr-dispatch.mjs', 'lane edit B\n');
+    commit('lane edit A+B');
+    const laneSha = headSha();
+    expect(runVerify('true').json.status).toBe('green');
+
+    // A LATER lane commit reverts A back to base's content, keeping B's edit. No merge involved at all — this
+    // is the lane's own work, and origin/main never moves in this scenario.
+    writeAndAdd('scripts/verify-lane.mjs', 'base\n');
+    commit('revert A back to base');
+    const revertSha = headSha();
+    expect(revertSha).not.toBe(laneSha);
+    void main;
+
+    const { code, json } = runBareCheck();
+    expect(code).toBe(2); // the revert of A must still force a re-verify — it was never itself tested
+    expect(json).toMatchObject({ sha: revertSha, status: 'absent', reason: 'unverified', ok: false });
+  });
+});
+
 describe('verify-lane request (#3105) — stamp the marker, run nothing, return immediately', () => {
   function runRequest(gate) {
     try {

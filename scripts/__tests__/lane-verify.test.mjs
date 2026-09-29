@@ -141,6 +141,59 @@ describe('verifyGateDecision — the finish-guard the delivery path applies (#28
   });
 });
 
+describe('verifyGateDecision — #4296 keys the marker to what changed, not the exact commit', () => {
+  const green = verifyFinishBody(verifyStartBody({ sha: SHA, suites: 'gate', startedAt: new Date(T0).toISOString() }), { finishedAt: new Date(T0).toISOString(), exitCode: 0 });
+  const staleGreen = { ...green, sha: OTHER }; // recorded for OTHER, headSha will be SHA
+
+  it('RED (the bug, without the new param): a marker for a different sha refuses even though nothing relevant changed — this is EXACTLY today\'s pre-#4296 behavior, still the default when the caller never computes the overlap', () => {
+    const v = verifyGateDecision({ record: staleGreen, headSha: SHA, requireVerified: true });
+    expect(v.ok).toBe(false);
+    expect(v.reason).toBe('unverified');
+  });
+
+  it('GREEN (the fix): an EMPTY computed overlap promotes the stale-sha record to a match', () => {
+    const v = verifyGateDecision({ record: staleGreen, headSha: SHA, requireVerified: true, laneRelevantChangeSince: [] });
+    expect(v.ok).toBe(true);
+    expect(v.reason).toBe('verified');
+    expect(v.detail).toMatch(/carried forward/);
+    expect(v.detail).toMatch(new RegExp(OTHER.slice(0, 8)));
+  });
+
+  it('a NON-empty overlap (a genuinely overlapping change) still refuses — this is not a blanket bypass', () => {
+    const v = verifyGateDecision({ record: staleGreen, headSha: SHA, requireVerified: true, laneRelevantChangeSince: ['scripts/verify-lane.mjs'] });
+    expect(v.ok).toBe(false);
+    expect(v.reason).toBe('unverified');
+  });
+
+  it('`undefined` (never computed) and `null` (git could not tell) both fail closed — same as no param at all', () => {
+    for (const val of [undefined, null]) {
+      const v = verifyGateDecision({ record: staleGreen, headSha: SHA, requireVerified: true, laneRelevantChangeSince: val });
+      expect(v.ok, String(val)).toBe(false);
+      expect(v.reason, String(val)).toBe('unverified');
+    }
+  });
+
+  it('an EXACT sha match is unaffected by the new param (still matches even with a non-empty overlap, which cannot legitimately happen for sha-equal records but must not break the exact-match fast path)', () => {
+    const v = verifyGateDecision({ record: green, headSha: SHA, requireVerified: true, laneRelevantChangeSince: ['irrelevant'] });
+    expect(v.ok).toBe(true);
+    expect(v.reason).toBe('verified');
+  });
+
+  it('a carried-forward RED record still refuses under requireVerified (the marker\'s STATUS carries forward too, not just its shape)', () => {
+    const staleRed = verifyFinishBody(verifyStartBody({ sha: OTHER, suites: 'gate', startedAt: 't' }), { finishedAt: 'u', exitCode: 2, sha: OTHER });
+    const v = verifyGateDecision({ record: staleRed, headSha: SHA, requireVerified: true, laneRelevantChangeSince: [] });
+    expect(v.ok).toBe(false);
+    expect(v.reason).toBe('verify-red');
+  });
+
+  it('a carried-forward RUNNING record still refuses as unfinished (a half-run verification must not look complete, stale sha or not)', () => {
+    const staleRunning = verifyStartBody({ sha: OTHER, suites: 'gate', startedAt: new Date(T0).toISOString() });
+    const v = verifyGateDecision({ record: staleRunning, headSha: SHA, nowMs: T0 + min(1), requireVerified: true, laneRelevantChangeSince: [] });
+    expect(v.ok).toBe(false);
+    expect(v.reason).toBe('verify-unfinished');
+  });
+});
+
 describe('verifyFinishBody stamps the sha the run verified, never the on-disk marker (#2833 finding 1)', () => {
   it('an explicit sha wins over prev.sha — a finish never inherits a moved marker\'s sha', () => {
     // `prev` is a marker that moved to OTHER (an overlapping run) while THIS run verified SHA.
@@ -927,6 +980,42 @@ describe('waitForVerifySettle — bounded wait for the marker to settle (#4358)'
 
     expect(result).toMatchObject({ status: 'absent', reason: 'unverified', ok: false, settled: false });
     expect(result.waited.polls).toBe(1);
+  });
+
+  it('#4296: a STALE marker covered by an EMPTY resolveLaneRelevantChangeSince settles GREEN instead of ending absent', async () => {
+    const { green } = gateFor(OTHER); // recorded for OTHER, but nothing lane-relevant changed since
+    const { now, sleep } = fakeClock();
+    let calledWith = null;
+
+    const result = await waitForVerifySettle({
+      readRecord: () => green, readHead: () => SHA, headSha: SHA, requireVerified: true,
+      resolveLaneRelevantChangeSince: (record) => { calledWith = record; return []; },
+      ceilingMs: 60_000, pollIntervalMs: 2_000, now, sleep,
+    });
+
+    expect(calledWith).toBe(green); // called with the FULL record, not just its sha
+    expect(result).toMatchObject({ status: 'green', reason: 'verified', ok: true, settled: true });
+  });
+
+  it('#4296 (converge round 2): an exact-match record still settles GREEN even when resolveLaneRelevantChangeSince is called and returns something else entirely — the exact-sha fast path wins regardless', async () => {
+    // Round 2 removed the local "only call when sha differs" pre-check (a third partial copy of the guard
+    // laneRelevantChangeSinceForRecord already owns) — the resolver is now called UNCONDITIONALLY whenever the
+    // caller supplies one. This proves that change is safe: even a resolver that returns a NON-empty overlap (the
+    // "refuse" signal) is ignored for an exact-sha match, because verifyGateDecision's exactShaMatch short-circuits
+    // before `laneRelevantChangeSince` is ever consulted.
+    const { green } = gateFor(SHA);
+    const { now, sleep } = fakeClock();
+    let calledWith;
+    const resolveLaneRelevantChangeSince = (record) => { calledWith = record; return ['some/file.mjs']; };
+
+    const result = await waitForVerifySettle({
+      readRecord: () => green, readHead: () => SHA, headSha: SHA, requireVerified: true,
+      resolveLaneRelevantChangeSince,
+      ceilingMs: 60_000, pollIntervalMs: 2_000, now, sleep,
+    });
+
+    expect(calledWith).toBe(green); // it WAS called (round-2 change) — with the exact-match record
+    expect(result).toMatchObject({ status: 'green', ok: true, settled: true }); // but it changed nothing
   });
 
   it('a HEAD move mid-wait is reported distinctly from "still pending" — never folded into a timeout', async () => {
