@@ -81,7 +81,7 @@ export default {
   async run({ log } = {}) {
     const violations = [];
     const {
-      adoptOrphanedBuildClaims, checkResumable, findLatestInFlightBuildRow,
+      adoptOrphanedBuildClaims, checkResumable, findLatestBuildRow,
     } = await import(resolve(REPO_ROOT, 'scripts/conveyor/build-dispatch-orphan-adopt.mjs'));
     const {
       acquireBuildDispatchClaim, releaseBuildDispatchClaim, listBuildDispatchClaims,
@@ -112,6 +112,22 @@ export default {
       return runId;
     }
 
+/** Write a real SETTLED (`applied`) `build` dispatch effect for `num` — the exact #4131 live shape: the
+     *  wrapper's own exit path settled it as `pr-opened`, but the PR number came back null. No `handle`/pid at
+     *  all is relevant here — settled rows are read by `outcome`/`pr`, never probed for liveness. */
+    function writeSettledPrOpenedNullRow(num, { lane, sessionSlug }) {
+      const runId = newRunId('dispatch-lane');
+      const record = newRunRecord({ id: runId, op: 'dispatch-lane', input: {} });
+      record.effects.push({
+        key: 'step:1:0', type: DISPATCH_EFFECT, stepIndex: 1, index: 0, status: 'applied',
+        handle: null, startedAt: new Date(Date.now() - 60 * 60_000).toISOString(),
+        result: { outcome: 'pr-opened', pr: null, park: 'review:pending' },
+        payload: { num, launchKind: 'build', lane, sessionSlug, scope: [] },
+      });
+      store.write(record);
+      return runId;
+    }
+
     function settleRow({ runId, key }) {
       const run = store.read(runId);
       const entry = (run.effects || []).find((e) => e.key === key);
@@ -121,7 +137,7 @@ export default {
 
     const deadPid = realDeadPid();
 
-    // ── #4131 shape: report says done, lane still has the commit → RESUME ──────────────────────────────────
+    // ── #4131-A shape: an IN-FLIGHT row, dead pid, report says done, lane still has the commit → RESUME ──────
     const resumableLane = makeLane({ ahead: true });
     writeDeliveryReport(
       applyDeliveryUpdate(newDeliveryReport({ session: 'conveyor-4131', item: '4131' }), {
@@ -133,23 +149,46 @@ export default {
     const rowA = writeInFlightRow('4131', { lane: 9, sessionSlug: 'conveyor-4131', deadPid });
     let spawnedResumeWith = null;
 
-    // ── #4382 shape: nothing resumable at all → RELEASE, no hold ────────────────────────────────────────────
+    // ── #4382 shape: an IN-FLIGHT row, dead pid, nothing resumable at all → RELEASE, no hold ─────────────────
     const emptyLane = makeLane({ ahead: false });
     acquireBuildDispatchClaim({ num: '4382', scope: [], lockRoot: claimRoot });
     const rowB = writeInFlightRow('4382', { lane: 11, sessionSlug: 'conveyor-4382', deadPid });
 
-    const laneByLaneNum = { 9: resumableLane, 11: emptyLane };
-    const rowByNum = { 4131: rowA, 4382: rowB };
+    // ── #4131-B shape (the ACTUAL live #4131): SETTLED `pr-opened` with a NULL pr, lane already recycled to a
+    // different session → RELEASE (the lane-lease-currency check refuses to trust a lane that has moved on;
+    // see `checkResumable`'s own docblock). This is the exact gap `findLatestBuildRow` closed — the OLD
+    // in-flight-only lookup never even saw this row at all. ─────────────────────────────────────────────────
+    const recycledLane = makeLane({ ahead: true }); // has SOME commit, but it belongs to whoever holds it NOW.
+    acquireBuildDispatchClaim({ num: '4468', scope: [], lockRoot: claimRoot });
+    const rowC = writeSettledPrOpenedNullRow('4468', { lane: 30, sessionSlug: 'conveyor-4468' });
+
+    // ── #4382-EXACT shape (the ACTUAL live #4382): NO run-store row was ever found at all (killed before it
+    // ever reached `in-flight`) — only the claim's own OWNER pid (dead) says anything at all → RELEASE. ──────
+    acquireBuildDispatchClaim({ num: '4469', scope: [], lockRoot: claimRoot, pid: deadPid });
+
+    const laneByLaneNum = { 9: resumableLane, 11: emptyLane, 30: recycledLane };
+    // The lane-lease-currency check ({@link checkResumable}'s own safety fix) needs to see #4131's lane (9)
+    // as STILL leased under its own matching session — this soak sandbox has no real lane-pool state, so the
+    // read is faked to the exact shape a real, still-current lease would answer. Lane 30 is faked as
+    // currently leased to a DIFFERENT session (`conveyor-9999`) — a later item that recycled it, exactly as
+    // #4131's own real lane (8) was recycled twice before this fix landed.
+    const sessionByLaneNum = { 9: 'conveyor-4131', 11: 'conveyor-4382', 30: 'conveyor-9999' };
+    const rowByNum = { 4131: rowA, 4382: rowB, 4468: rowC };
 
     let results;
     try {
       results = await adoptOrphanedBuildClaims({
-        listClaims: () => listBuildDispatchClaims({ lockRoot: claimRoot }),
-        findRow: (num) => findLatestInFlightBuildRow([{ id: rowByNum[num], record: store.read(rowByNum[num]) }], num),
+        listClaims: () => listBuildDispatchClaims({ lockRoot: claimRoot, ignoreExpiry: true }),
+        findRow: (num) => (rowByNum[num] ? findLatestBuildRow([{ id: rowByNum[num], record: store.read(rowByNum[num]) }], num) : null),
         readResumeMarker: (num) => readBuildDispatchResume({ num, lockRoot: resumeRoot }),
         // REAL checkResumable — real `tryReadDeliveryReport`/`laneHasCommitAhead` (real git), only the
-        // lane-pool path lookup is short-circuited (no real lane-pool state on this host).
-        resolveResumability: ({ lane, sessionSlug }) => checkResumable({ lane, sessionSlug, resolveLane: () => laneByLaneNum[Number(lane)] }),
+        // lane-pool reads (lease-currency + path lookup) are short-circuited (no real lane-pool state on this
+        // host).
+        resolveResumability: ({ lane, sessionSlug }) => checkResumable({
+          lane, sessionSlug,
+          currentLaneSession: () => sessionByLaneNum[Number(lane)],
+          resolveLane: () => laneByLaneNum[Number(lane)],
+        }),
         releaseClaim: ({ num }) => releaseBuildDispatchClaim({ num, lockRoot: claimRoot }),
         releaseResumeMarker: ({ num }) => releaseBuildDispatchResume({ num, lockRoot: resumeRoot }),
         settleRow,
@@ -187,8 +226,27 @@ export default {
       violations.push({ invariant: 'claim-stuck-forever', detail: '#4382\'s claim is STILL held after adoption — this is the exact live bug: a dead-wrapper claim never retired, permanently occupying a builder slot' });
     }
 
+    // #4468 (the ACTUAL live #4131 shape) — settled `pr-opened` with a null pr, lane already recycled to a
+    // DIFFERENT session → RELEASED, never resumed off a lane that belongs to someone else now.
+    if (byNum['4468']?.action !== 'release') {
+      violations.push({ invariant: 'settled-null-pr-not-released', detail: `#4468 (settled pr-opened, no real pr, lane recycled) got action ${JSON.stringify(byNum['4468'])}, expected 'release'` });
+    }
+    if (claimsAfter.includes('4468')) {
+      violations.push({ invariant: 'settled-null-pr-claim-stuck', detail: '#4468\'s claim is STILL held — the exact #4131 live shape (a settled pr-opened outcome with no confirmed pr) must never be left stuck just because doneWhy defers pr-opened settles to a PR that does not exist' });
+    }
+
+    // #4469 (the ACTUAL live #4382 shape) — NO run-store row at all, only the claim's own dead owner pid →
+    // RELEASED — the exact gap the original (in-flight-only, no-owner-pid-fallback) version of this module left
+    // open.
+    if (byNum['4469']?.action !== 'release') {
+      violations.push({ invariant: 'no-record-dead-owner-not-released', detail: `#4469 (no run-store row at all, dead owner pid) got action ${JSON.stringify(byNum['4469'])}, expected 'release'` });
+    }
+    if (claimsAfter.includes('4469')) {
+      violations.push({ invariant: 'no-record-dead-owner-claim-stuck', detail: '#4469\'s claim is STILL held — this is the exact #4382 live shape' });
+    }
+
     // cleanup — best-effort, never masks a violation already recorded.
-    for (const dir of [claimRoot, resumeRoot, runsDir, resumableLane, emptyLane]) {
+    for (const dir of [claimRoot, resumeRoot, runsDir, resumableLane, emptyLane, recycledLane]) {
       try { rmSync(dir, { recursive: true, force: true }); } catch { /* best-effort */ }
     }
 

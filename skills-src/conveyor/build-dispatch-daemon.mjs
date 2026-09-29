@@ -48,6 +48,9 @@ import {
 import { resolveCoordinationRoot } from '../../scripts/operations/coordination-root.mjs';
 // #4131/#4382 build-orphan-adopt — see that module's own header for the mechanism this closes.
 import { adoptOrphanedBuildClaims } from '../../scripts/conveyor/build-dispatch-orphan-adopt.mjs';
+// #4464 builder-cap-machine-wide — see `cliPlanTick`'s own docblock for why this daemon's tick-core read is
+// exempted from the shared, machine-wide lane-count ceiling.
+import { MAX_CONCURRENT_LANES_ENV } from '../../scripts/lib/lane-concurrency.mjs';
 
 export const BUILD_DISPATCH_DAEMON_LEASE_KEY = '<conveyor:build-dispatch-daemon-lease>';
 export const DEFAULT_INTERVAL_MS = 120_000;
@@ -268,9 +271,47 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, '..', '..');
 const SCRIPTS = join(REPO_ROOT, 'scripts');
 
-function cliPlanTick(payload) {
-  const text = execFileSync('node', [join(SCRIPTS, 'conveyor', 'tick-core.mjs')], {
+/**
+ * #4464 builder-cap-machine-wide (live incident 2026-09-29 ~11 ET) — `tick-core.mjs`'s own `capacity-cap`
+ * (`scripts/lib/lane-concurrency.mjs`, default 8, `WE_MAX_CONCURRENT_LANES`) is a SHARED, machine-wide ceiling
+ * on ALL FOUR spawn kinds at once (build/prepare/fix/ci-heal) — a deliberate, documented hardware-safety net
+ * (`lane-concurrency.mjs`'s own header: a 2026-09-07 incident put a 12-core host's 1-min load average at
+ * 34.95 from 42 concurrently-dispatched lanes). This daemon's OWN tick-core call reads ONLY
+ * `decisions.spawnBuilds` (`runBuildDispatchTick`, above) and NEVER acts on `spawnPrepareScope`/`spawnFixes`/
+ * `spawnCiHeals` from this same call at all — so gating those *unused* build candidates against the
+ * MACHINE-WIDE lane count (review loops, fix dispatches, interactive `/conveyor` sessions, health
+ * investigations — none of which THIS daemon dispatches or can see progress on) starves builds for activity
+ * this daemon does not control. Live: 6 of 10 leased lanes were genuine builds, but the other 4 (two review
+ * loops, one fix dispatch, one unrelated investigation) alone pushed the shared count past the default cap of
+ * 8, so `tick-core=capacity-cap` held EVERY build candidate — including ones this daemon had real room for
+ * under its OWN, much tighter `policy.maxConcurrentBuilds` (3).
+ *
+ * OPERATOR DECISION (2026-09-29): the builder's cap bounds ONLY the builder's own concurrent builds;
+ * machine-wide load is the separate load-admission gate's job (#4076, `loadAdmission`/`load-cap`) — completely
+ * UNCHANGED by this override, since it is computed independently from CPU/load sampling and never reads
+ * `maxConcurrentLanes` at all.
+ *
+ * THE FIX, and why it is SAFE: this daemon's own `policy.maxConcurrentBuilds` (enforced by `planBuildDispatch`,
+ * over this daemon's OWN durable claim count — #2924's own fix keeps that count to this daemon's own builds,
+ * never machine-wide activity) is ALREADY a far tighter, correctly-scoped ceiling on what this daemon actually
+ * dispatches. Exempting THIS daemon's OWN tick-core call from the shared lane-count ceiling cannot let it
+ * dispatch more than `maxConcurrentBuilds` regardless — `decisions.spawnBuilds` merely gets to list MORE
+ * candidates than before (informational; `planBuildDispatch` still picks at most its own cap's worth), and the
+ * prepare/fix/ci-heal candidates THIS call also computes are discarded unused either way, so exempting them
+ * too costs nothing. `dispatch-plan.mjs` (tick-core's own child, `main()`'s `runJson` call below) reads the
+ * IDENTICAL env var independently (`scripts/readiness/dispatch-plan.mjs`'s own `resolveMaxConcurrentLanes`
+ * call) — set on THIS CHILD's own env only (never `process.env` itself), it propagates through the whole
+ * subprocess chain for this one call without touching any OTHER caller's environment or tick-core.mjs/
+ * dispatch-plan.mjs's own code at all.
+ */
+export const BUILD_DAEMON_LANE_CAP_EXEMPT_VALUE = '1000000';
+
+// EXPORTED (#4464) so a test can assert the env override directly, against an injected `exec` — mirrors this
+// file's own established `{ exec = execFileSync }` seam (`cliRetryInfraBlocked`, below).
+export function cliPlanTick(payload, { exec = execFileSync } = {}) {
+  const text = exec('node', [join(SCRIPTS, 'conveyor', 'tick-core.mjs')], {
     input: JSON.stringify({ bookkeeping: payload || {} }), encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024,
+    env: { ...process.env, [MAX_CONCURRENT_LANES_ENV]: BUILD_DAEMON_LANE_CAP_EXEMPT_VALUE },
   });
   return JSON.parse(text);
 }

@@ -85,9 +85,22 @@ export function releaseBuildDispatchClaim({ repo = 'we', num, lockRoot = buildDi
   return { released: true };
 }
 
-/** Every LIVE (unexpired) build claim, with its meta. Expired or meta-less entries are skipped. */
+/**
+ * Every build claim, with its meta. Expired or meta-less entries are skipped BY DEFAULT — the ordinary,
+ * dead-holder-floor read every existing caller already trusts.
+ *
+ * `ignoreExpiry: true` (#4131 build-orphan-adopt fix, live 2026-09-29) reads every claim still on disk
+ * REGARDLESS of its TTL — for the ONE caller that needs it, `build-dispatch-orphan-adopt.mjs`'s own adoption
+ * pass. A claim's TTL is a dead-holder floor for the ORDINARY "is this claim still legitimately in flight"
+ * question every other reader asks; it is the WRONG floor for "has this claim's underlying situation already
+ * been resolved", which is what adoption asks instead, using its own POSITIVE liveness evidence (a kernel pid
+ * probe, a settled outcome) rather than a clock. Confirmed live: #4131's claim aged out of the ordinary
+ * (expiry-filtered) read while the daemon was down for hours on an unrelated bug, becoming invisible to BOTH
+ * the ordinary retirement path AND this adoption pass — see that fix's own commit for the full incident.
+ */
 export function listBuildDispatchClaims({
   lockRoot = buildDispatchClaimRoot(), nowMs = Date.now(), leaseMinutes = DEFAULT_BUILD_DISPATCH_CLAIM_TTL_MINUTES,
+  ignoreExpiry = false,
 } = {}) {
   let dirNames;
   try { dirNames = readdirSync(lockRoot); } catch { return []; }
@@ -97,7 +110,7 @@ export function listBuildDispatchClaims({
     try { raw = readFileSync(join(lockRoot, dirName, 'lock.json'), 'utf8'); } catch { continue; }
     const entry = parseLockEntry(raw);
     if (!entry?.meta?.num || entry.meta.kind !== 'build') continue;
-    if (isLeaseExpired(entry, nowMs, leaseMinutes)) continue;
+    if (!ignoreExpiry && isLeaseExpired(entry, nowMs, leaseMinutes)) continue;
     out.push(entry);
   }
   return out;

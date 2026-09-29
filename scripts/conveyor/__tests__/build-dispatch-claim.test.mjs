@@ -11,7 +11,36 @@ import {
   placeBuildDispatchHold, releaseBuildDispatchHold, listBuildDispatchHolds,
   DEFAULT_BUILD_DISPATCH_HOLD_MINUTES,
   markBuildDispatchResume, readBuildDispatchResume, releaseBuildDispatchResume,
+  acquireBuildDispatchClaim, listBuildDispatchClaims,
 } from '../build-dispatch-claim.mjs';
+
+// #4131 build-orphan-adopt (live 2026-09-29) — a claim aged out of the ORDINARY read while the daemon was
+// down for hours on an unrelated bug, invisible to both retirement and adoption. `ignoreExpiry: true` is the
+// ONE reader that needs to see past the TTL filter (`build-dispatch-orphan-adopt.mjs`'s own adoption pass).
+describe('listBuildDispatchClaims — ignoreExpiry (#4131 build-orphan-adopt)', () => {
+  let lockRoot;
+  beforeEach(() => { lockRoot = mkdtempSync(join(tmpdir(), 'bdd-claims-expiry-')); });
+  afterEach(() => { rmSync(lockRoot, { recursive: true, force: true }); });
+
+  it('the ORDINARY read (default) skips an expired claim, exactly as before this option existed', () => {
+    acquireBuildDispatchClaim({ num: '4131', scope: [], lockRoot, leaseMinutes: 240 });
+    const past = Date.now() + 300 * 60_000;
+    expect(listBuildDispatchClaims({ lockRoot, nowMs: past })).toEqual([]);
+  });
+
+  it('`ignoreExpiry: true` still returns it, past its TTL', () => {
+    acquireBuildDispatchClaim({ num: '4131', scope: [], lockRoot, leaseMinutes: 240 });
+    const past = Date.now() + 300 * 60_000;
+    const claims = listBuildDispatchClaims({ lockRoot, nowMs: past, ignoreExpiry: true });
+    expect(claims.map((c) => c.meta.num)).toEqual(['4131']);
+  });
+
+  it('a genuinely LIVE (unexpired) claim is unaffected by the flag either way', () => {
+    acquireBuildDispatchClaim({ num: '4131', scope: [], lockRoot });
+    expect(listBuildDispatchClaims({ lockRoot }).map((c) => c.meta.num)).toEqual(['4131']);
+    expect(listBuildDispatchClaims({ lockRoot, ignoreExpiry: true }).map((c) => c.meta.num)).toEqual(['4131']);
+  });
+});
 
 describe('build-dispatch hold (#4349 — stops the not-ready re-dispatch loop)', () => {
   let lockRoot;

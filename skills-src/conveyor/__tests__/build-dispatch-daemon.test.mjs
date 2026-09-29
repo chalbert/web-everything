@@ -9,7 +9,10 @@ import {
   cliListSettledBuilds, cliListHolds, policyFrom,
   // #4348-open-pr-retry
   primaryInfraStoreEnv, cliRetryInfraBlocked,
+  // #4464 builder-cap-machine-wide
+  cliPlanTick, BUILD_DAEMON_LANE_CAP_EXEMPT_VALUE,
 } from '../build-dispatch-daemon.mjs';
+import { MAX_CONCURRENT_LANES_ENV } from '../../../scripts/lib/lane-concurrency.mjs';
 import {
   acquireBuildDispatchClaim, releaseBuildDispatchClaim, listBuildDispatchClaims,
   placeBuildDispatchHold, listBuildDispatchHolds,
@@ -685,6 +688,39 @@ describe('cliListSettledBuilds / cliListHolds (the real readers, not a stub)', (
 // import in its whole module graph has already finished evaluating; a TDZ anywhere in that graph throws
 // during the import phase, before `main()` is ever reached, and Node reports it as an uncaught
 // `ReferenceError` on stderr with exit code 1 — never the clean usage text on exit 2.
+// #4464 builder-cap-machine-wide (live incident 2026-09-29 ~11 ET) — `cliPlanTick`'s own env override, so this
+// daemon's tick-core read is exempted from the shared, machine-wide lane-count ceiling. See `cliPlanTick`'s
+// own docblock for the full incident and why exempting it is safe.
+describe('cliPlanTick — exempts this daemon\'s own tick-core read from the shared lane-count ceiling (#4464)', () => {
+  it('passes WE_MAX_CONCURRENT_LANES on the CHILD\'s own env, set to the exempt value', () => {
+    const exec = (cmd, args, opts) => {
+      expect(opts.env[MAX_CONCURRENT_LANES_ENV]).toBe(BUILD_DAEMON_LANE_CAP_EXEMPT_VALUE);
+      return JSON.stringify({ decisions: {}, nextState: {} });
+    };
+    const out = cliPlanTick({}, { exec });
+    expect(out).toEqual({ decisions: {}, nextState: {} });
+  });
+
+  it('never touches process.env itself — only the child\'s own env object', () => {
+    const before = process.env[MAX_CONCURRENT_LANES_ENV];
+    const exec = () => JSON.stringify({ decisions: {}, nextState: {} });
+    cliPlanTick({}, { exec });
+    expect(process.env[MAX_CONCURRENT_LANES_ENV]).toBe(before);
+  });
+
+  it('still forwards every OTHER inherited env var unchanged (a spread, never a replacement)', () => {
+    const exec = (cmd, args, opts) => {
+      expect(opts.env.PATH).toBe(process.env.PATH);
+      return JSON.stringify({ decisions: {}, nextState: {} });
+    };
+    cliPlanTick({}, { exec });
+  });
+
+  it('the exempt value is a real, effectively-unbounded number — never accidentally tiny', () => {
+    expect(Number(BUILD_DAEMON_LANE_CAP_EXEMPT_VALUE)).toBeGreaterThan(1000);
+  });
+});
+
 describe('build-dispatch-daemon.mjs boots as a fresh `node` process — the class of bug a vitest import cannot catch', () => {
   const ENTRY = resolve(fileURLToPath(import.meta.url), '..', '..', 'build-dispatch-daemon.mjs');
 
