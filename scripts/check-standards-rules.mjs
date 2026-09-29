@@ -3972,3 +3972,53 @@ export function findHandMaintainedRegistryIndex(files) {
   }
   return findings;
 }
+
+// ── #4370 — every lane mutation point is journalled ────────────────────────────────────────────────────
+// The lane lifecycle audit journal (`we:scripts/lib/lane-history.mjs#journalLaneEvent`) only answers "who reset
+// this lane, and why" if EVERY mutation point calls it. A new `git reset --hard` / `git clean` / lease-marker
+// `rmSync` added to lane code without a journal call next to it silently reopens the 2026-09-28 blind spot.
+// An intentional exception (a mutation on something that is not a pool lane, or undoing this process's own
+// just-written claim) carries a `journal-exempt: <why>` comment on the line or up to 3 lines above it.
+
+/** The lane code this guard scans (repo-relative). */
+export const LANE_MUTATION_FILES = Object.freeze([
+  'scripts/lane-pool.mjs',
+  'scripts/conveyor/lane-pool-health-watch.mjs',
+  'scripts/conveyor/lease-reaper.mjs',
+]);
+
+const LANE_MUTATION_RES = Object.freeze([
+  { re: /\[\s*['"]reset['"]\s*,\s*['"]--hard['"]/, what: 'git reset --hard' },
+  { re: /\[\s*['"]clean['"]\s*,\s*['"]-f/, what: 'git clean' },
+  { re: /rmSync\(\s*LEASE_MARKER\(/, what: 'lease-marker rmSync' },
+]);
+
+const JOURNAL_CALL_RE = /\bjournal(?:LaneEvent|ReclaimRefusal)\s*\(/;
+/** How far (lines, either side) a journal call may sit from the mutation it records. */
+export const LANE_JOURNAL_WINDOW = 15;
+
+/**
+ * PURE.
+ * @param {{file: string, content: string}[]} files — only `LANE_MUTATION_FILES` entries are inspected.
+ * @returns {{file: string, line: number, reason: string}[]}
+ */
+export function findUnjournaledLaneMutations(files) {
+  const findings = [];
+  for (const { file, content } of files) {
+    if (!LANE_MUTATION_FILES.includes(file)) continue;
+    const lines = String(content).split('\n');
+    lines.forEach((text, i) => {
+      if (/^\s*(\/\/|\*)/.test(text)) return; // a comment mentioning the command is not a call
+      const hit = LANE_MUTATION_RES.find(({ re }) => re.test(text));
+      if (!hit) return;
+      if (lines.slice(Math.max(0, i - 3), i + 1).some((l) => /journal-exempt:/.test(l))) return;
+      const window = lines.slice(Math.max(0, i - LANE_JOURNAL_WINDOW), i + LANE_JOURNAL_WINDOW + 1);
+      if (window.some((l) => JOURNAL_CALL_RE.test(l))) return;
+      findings.push({
+        file, line: i + 1,
+        reason: `${hit.what} with no journalLaneEvent(...) call within ${LANE_JOURNAL_WINDOW} lines — record it in the lane lifecycle journal, or mark it \`// journal-exempt: <why>\``,
+      });
+    });
+  }
+  return findings;
+}

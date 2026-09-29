@@ -2,10 +2,11 @@
 bornAs: x6j6hp9
 kind: story
 size: 5
-status: open
+status: active
 priority: high
 scope: ["we:scripts/lib/lane-history.mjs", "we:scripts/lane-pool.mjs", "we:scripts/conveyor/lease-reaper.mjs", "we:scripts/conveyor/lane-pool-health-watch.mjs", "we:scripts/lib/lane-whois-core.mjs"]
 dateOpened: "2026-09-28"
+dateStarted: "2026-09-29"
 preparedDate: "2026-09-28"
 tags: ["lane-pool", "telemetry", "observability"]
 ---
@@ -76,3 +77,40 @@ Finding them took a manual join of five sources, because none records the whole 
    lease" both fire on a fixture and are wired into the health output.
 4. **Live proof** — after landing, the next lane reset in the pool shows up in the journal with its daemon name
    and reason, and on Plateau /wip (#4340 panel).
+
+## Progress
+
+- [x] **Journal core** — `we:scripts/lib/lane-history.mjs`: `journalLaneEvent()` appends to
+  `<poolDir>/.lane-journal.jsonl` (a pool dot-entry, next to the lanes; rotated aside by size, never trimmed
+  or deleted). Each line: `ts`, `lane`, `action`, `actor` (`name` = the daemon declared via
+  `LANE_JOURNAL_ACTOR` else the script, plus `script`+subcommand, `session`, `pid`, `ppid`, `host`), `reason`,
+  `headBefore`→`headAfter`, `dirtyBefore`, `aheadBefore`, `unpushedCommitsBefore`, `unpushed`. `readLaneJournal`
+  reads across rotations; a repeated identical refusal is written once (`unlessRepeat`).
+- [x] **Call sites** (`we:scripts/lane-pool.mjs`) — `acquire` (+ `acquire-reset`), `reserve`, `adopt`,
+  `release` (+ `litter-delete` of release-time scratch), `release --all-pools`, acquire-native `reap`,
+  `lease-expire` (stale lease taken over), `refresh-reset`, `reclaim-reset`, `salvage-reset`, `reclaim-refused`,
+  `trim-remove`. The lease-reaper spawns `release` with `LANE_JOURNAL_ACTOR=lease-reaper` and
+  `--reason=<classification>`; the health watch spawns `reclaim` with `LANE_JOURNAL_ACTOR=lane-pool-health-watch`
+  and `--reason=<pass>`, and journals its own litter reaps.
+- [x] **Fork 3 — refusal** — `destructiveActionVerdict()` is the single rule at the reclaim reset: unpushed
+  work is destroyed only when the owner is proven gone (liveness gate) or under the operator `--override`;
+  both are journalled `loud` (and echoed to stderr); a refusal is journalled `loud`. `refresh --force` stays an
+  operator override (existing #2267 contract) but is journalled `loud` when it destroys unpushed work.
+- [x] **Fork 2 — standards scan** — `findUnjournaledLaneMutations` (`check:standards` 6f-i-d) flags a
+  `git reset --hard` / `git clean` / lease-marker `rmSync` in lane code with no journal call within 15 lines
+  (`// journal-exempt: <why>` for the two legitimate cases: the pool-root sibling clone, and undoing a refused
+  acquire's own claim).
+- [x] **Fork 4 — timestamps** — every lease-reaper and lane-pool-health-watch stderr line is ISO-prefixed
+  (`we:scripts/lib/log-timestamp.mjs`).
+- [x] **Done-when 1** — `we:scripts/__tests__/lane-pool-lifecycle-journal.test.mjs` drives a real acquire →
+  the reaper's own `releaseLane` → the health watch's own `defaultReclaimLane` on a fixture pool and asserts the
+  three lines (actor name + pid/ppid, reason, HEAD before→after, dirty/ahead).
+- [x] **Done-when 2** — `lane-whois --history <lane>` in `we:scripts/lane-whois.mjs` (renderer
+  `formatLaneTimeline` in `we:scripts/lib/lane-whois-core.mjs`; `--json` for raw entries).
+- [x] **Done-when 3** — smells `lane-destructive-unpushed` (probe `laneJournal`, the recent journal tail) and
+  `lane-worker-without-lease` (the health watch now emits `workerWithoutLease` right after `health` on its tick
+  line; `probeLanePools` lifts it) — both fire on fixtures and are wired into
+  `we:scripts/conveyor/health-watch.mjs#tick`.
+- [ ] **Done-when 4 — live proof** — after landing: the next pool reset shows in the journal with its daemon
+  name and reason. Showing it on Plateau /wip is the #4340 daemons panel's job (it reads this journal); not
+  built in this card.

@@ -77,6 +77,7 @@ import {
   scanPublishSecrets,
   scanHarnessScaffolding,
   findHandMaintainedRegistryIndex, REGISTRY_DISCOVERY_INDEX_FILES,
+  findUnjournaledLaneMutations, LANE_MUTATION_FILES,
   findGitHookAllFlags,
   gitHookAllFlagError,
   buildTrackedPathIndex, scopeBasenameMismatches, scopeBasenameMismatchMessage,
@@ -1492,6 +1493,21 @@ mark("6f-i-b. HARNESS-SCAFFOLDING leak sweep on the committed corpus (#3448)");
       `adding a break/smell in the same window never collide on a hand-maintained index again).`,
       { kind: 'registry-discovery-regression', file },
     );
+  }
+}
+
+// ── 6f-i-d. LANE-JOURNAL coverage guard (#4370) ──────────────────────────────────────────────────
+// Every `git reset --hard` / `git clean` / lease-marker `rmSync` in lane code must sit next to a
+// `journalLaneEvent(...)` call (or carry a `journal-exempt: <why>` comment), so the per-pool lane lifecycle
+// journal keeps answering "who reset this lane, and why". Pure detector: `findUnjournaledLaneMutations`.
+{
+  const laneFiles = [];
+  for (const rel of LANE_MUTATION_FILES) {
+    const abs = join(ROOT, rel);
+    if (existsSync(abs)) laneFiles.push({ file: rel, content: readFileSync(abs, 'utf8') });
+  }
+  for (const { file, line, reason } of findUnjournaledLaneMutations(laneFiles)) {
+    err(`${file}:${line} ${reason} (#4370).`, { kind: 'lane-mutation-unjournaled', file });
   }
 }
 

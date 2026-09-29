@@ -22,9 +22,17 @@
  * {@link MAX_HISTORY_LINES} lines on every write, so a lane cycling through hundreds of sessions over months
  * never grows an unbounded ledger — the RECENT trail (who holds it now, who held it last, its last few hops)
  * is what `whois` actually needs; ancient history is not worth keeping forever.
+ *
+ * #4370 — the FORENSIC counterpart lives at the bottom of this file: the per-POOL lane lifecycle audit journal
+ * (`<poolDir>/.lane-journal.jsonl`, never trimmed, rotated by size), which records every lease write/delete AND
+ * every reset/clean/reclaim/litter deletion with its actor, reason and before-state. See its own section header.
  */
-import { existsSync, appendFileSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import {
+  existsSync, appendFileSync, readFileSync, writeFileSync, readdirSync, renameSync, statSync, openSync, readSync, closeSync,
+} from 'node:fs';
+import { join, basename, dirname, resolve } from 'node:path';
+import { hostname } from 'node:os';
+import { execFileSync } from 'node:child_process';
 
 /** The ledger's filename, inside `<lane>/.git/`. */
 export const LANE_HISTORY_FILENAME = 'lane-history.jsonl';
@@ -144,4 +152,319 @@ export function readLaneHistory(dir) {
 /** PURE: the most recent entry in an (oldest-first) entries array, or `null`. */
 export function lastLaneHistoryEntry(entries) {
   return entries.length ? entries[entries.length - 1] : null;
+}
+
+// ── the per-POOL lifecycle AUDIT JOURNAL (#4370) ─────────────────────────────────────────────────────────
+//
+// The ledger above answers "who held this lane" and is deliberately small (trimmed, lives in the lane's own
+// `.git`). It cannot answer the forensic question #4370 was filed for — "who reset lane-18's tree at 16:49,
+// why, and was there unpushed work in it" — because (a) it only records acquire/adopt/release/reap, never a
+// reset, a clean, a litter deletion or a reclaim, (b) it carries no ACTOR (a daemon name, a pid, a parent pid),
+// (c) it records no BEFORE-state (HEAD, dirty count, commits ahead), and (d) it is trimmed and lives inside the
+// very tree a re-clone destroys.
+//
+// The journal is the other half: ONE append-only JSONL per pool, at `<poolDir>/.lane-journal.jsonl` — next to
+// the lanes, never inside one (`pool-leftovers.mjs` never touches a pool dot-entry), so no lane reset or
+// re-clone can erase it. It is ROTATED BY SIZE (renamed aside, never deleted) and never trimmed to N lines.
+// Every mutation point calls {@link journalLaneEvent} with the lane dir, the action and a before-snapshot;
+// `we:scripts/check-standards-rules.mjs#findUnjournaledLaneMutations` keeps new mutation points honest.
+
+/** The journal's filename, directly inside a pool dir. A dot-entry on purpose (pool bookkeeping). */
+export const LANE_JOURNAL_FILENAME = '.lane-journal.jsonl';
+
+/** Rotate (rename aside) once the live journal reaches this many bytes. Rotated files are never deleted. */
+export const LANE_JOURNAL_MAX_BYTES = 32 * 1024 * 1024;
+
+/** Env var a daemon sets on the `lane-pool.mjs` child it spawns, so the journal names the DAEMON, not the CLI. */
+export const LANE_JOURNAL_ACTOR_ENV = 'LANE_JOURNAL_ACTOR';
+
+/**
+ * Actions that change (or delete from) a lane's working tree. A destructive action on a lane with unpushed
+ * work is the loud case — the `lane-destructive-unpushed` health smell reads exactly this set.
+ */
+export const DESTRUCTIVE_LANE_ACTIONS = Object.freeze(new Set([
+  'acquire-reset', 'refresh-reset', 'reclaim-reset', 'salvage-reset', 'litter-delete',
+]));
+
+/**
+ * PURE: did this journal entry destroy unpushed work without saving it first? A destructive action whose
+ * before-state had unpushed work and no salvage bundle. The `lane-destructive-unpushed` smell's predicate.
+ */
+export function isUnsalvagedDestructiveUnpushed(entry) {
+  return !!entry && DESTRUCTIVE_LANE_ACTIONS.has(entry.action) && entry.unpushed === true && !entry.salvagedTo;
+}
+
+/** A rotated journal: `.lane-journal.<UTC stamp>.jsonl` — the stamp sorts lexically in time order. */
+const ROTATED_JOURNAL_RE = /^\.lane-journal\.(\d{8}T\d{6}(?:\d{3})?Z)\.jsonl$/;
+
+/** The live journal's absolute path for a pool dir. */
+export function laneJournalPath(poolDir) {
+  return join(poolDir, LANE_JOURNAL_FILENAME);
+}
+
+/** PURE: `{ poolDir, lane }` for a lane dir (`<poolDir>/lane-N`), or `null` when `dir` is not shaped like one. */
+export function laneOfDir(dir) {
+  const m = /^lane-(\d+)$/.exec(basename(String(dir || '')));
+  return m ? { poolDir: dirname(dir), lane: Number(m[1]) } : null;
+}
+
+/**
+ * PURE: WHO is acting — the thing the 2026-09-28 investigation could not recover (`release Mac:40984` named a
+ * host:pid, never "lease-reaper"). `name` is the daemon a spawning parent declared via
+ * {@link LANE_JOURNAL_ACTOR_ENV}, else this script's own name; `script` is the script plus its subcommand;
+ * `session` is the durable Claude session id when one is in the env.
+ */
+export function journalActor({ env = {}, argv = [], pid = null, ppid = null, host = null } = {}) {
+  const scriptBase = argv[1] ? basename(String(argv[1])).replace(/\.m?js$/, '') : null;
+  const sub = argv[2] && !String(argv[2]).startsWith('-') ? String(argv[2]) : null;
+  const script = scriptBase ? (sub ? `${scriptBase} ${sub}` : scriptBase) : null;
+  const declared = typeof env[LANE_JOURNAL_ACTOR_ENV] === 'string' && env[LANE_JOURNAL_ACTOR_ENV].trim()
+    ? env[LANE_JOURNAL_ACTOR_ENV].trim() : null;
+  const actor = { name: declared || scriptBase || 'unknown' };
+  if (script) actor.script = script;
+  if (env.CLAUDE_CODE_SESSION_ID) actor.session = env.CLAUDE_CODE_SESSION_ID;
+  if (Number.isInteger(pid)) actor.pid = pid;
+  if (Number.isInteger(ppid)) actor.ppid = ppid;
+  if (host) actor.host = host;
+  return actor;
+}
+
+/** The actor for THIS process. */
+export function currentJournalActor() {
+  return journalActor({ env: process.env, argv: process.argv, pid: process.pid, ppid: process.ppid, host: hostname() });
+}
+
+/**
+ * PURE: shape one journal line. `before` is a {@link laneStateSnapshot} taken BEFORE the mutation; `headAfter`
+ * is HEAD once it ran (equal to `before.head` for a lease-only event). `unpushed` defaults to the snapshot's
+ * own answer; a caller holding a stronger proof (reclaim's preservation re-check) passes it explicitly.
+ * Unknown fields are omitted, never written `null` (same rule as {@link laneHistoryEntry}).
+ */
+export function laneJournalEntry({
+  nowMs = Date.now(), lane, action, actor, reason, before = null, headAfter, unpushed, ...extra
+} = {}) {
+  if (!action) throw new Error('laneJournalEntry needs an `action`');
+  const entry = { ts: new Date(nowMs).toISOString(), lane: Number.isInteger(lane) ? lane : null, action };
+  entry.actor = actor || { name: 'unknown' };
+  if (reason) entry.reason = String(reason);
+  if (before?.head) entry.headBefore = before.head;
+  const after = headAfter !== undefined ? headAfter : before?.head;
+  if (after) entry.headAfter = after;
+  if (Number.isFinite(before?.dirty)) entry.dirtyBefore = before.dirty;
+  if (Number.isFinite(before?.ahead)) entry.aheadBefore = before.ahead;
+  if (Number.isFinite(before?.unpushedCommits)) entry.unpushedCommitsBefore = before.unpushedCommits;
+  const unpushedValue = typeof unpushed === 'boolean' ? unpushed : before?.unpushed;
+  if (typeof unpushedValue === 'boolean') entry.unpushed = unpushedValue;
+  for (const [k, v] of Object.entries(extra)) {
+    if (v === undefined || v === null || (typeof v === 'string' && v.trim() === '')) continue;
+    entry[k] = v;
+  }
+  return entry;
+}
+
+/**
+ * PURE — #4370 fork 3: may a destructive action run on this lane right now? Nothing unpushed ⇒ yes. Unpushed
+ * work ⇒ only when the owner is PROVABLY gone (no live owner session, no live process in the lane, quiet
+ * period passed — `lane-salvage.mjs#laneLivenessGate`'s answer), or when a human typed the explicit override.
+ * Either unpushed path is `loud` (logged + journalled as such); a refusal is always loud.
+ * @param {{unpushed:boolean, ownerGone?:boolean|null, override?:boolean, ownerReason?:string}} p
+ * @returns {{allowed:boolean, loud:boolean, reason:string}}
+ */
+export function destructiveActionVerdict({ unpushed, ownerGone = null, override = false, ownerReason = '' } = {}) {
+  if (unpushed !== true && unpushed !== false) {
+    return { allowed: false, loud: true, reason: 'unpushed state unknown — never destroy blind' };
+  }
+  if (!unpushed) return { allowed: true, loud: false, reason: 'no unpushed work' };
+  if (override) return { allowed: true, loud: true, reason: 'unpushed work destroyed under an explicit operator override' };
+  if (ownerGone === true) return { allowed: true, loud: true, reason: `unpushed work, owner proven gone${ownerReason ? ` (${ownerReason})` : ''}` };
+  return {
+    allowed: false, loud: true,
+    reason: `REFUSED — unpushed work and the owner is not proven gone${ownerReason ? ` (${ownerReason})` : ''}`,
+  };
+}
+
+const snapshotGit = (dir, args) => {
+  try {
+    return execFileSync('git', args, { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 30_000, maxBuffer: 64 * 1024 * 1024 }).trim();
+  } catch { return null; }
+};
+
+const SHA_RE = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
+
+/** IO: read a ref's sha straight from the git dir (loose ref, then `packed-refs`); null when it is not there. */
+function readRefFromGitDir(commonDir, ref) {
+  const loose = join(commonDir, ref);
+  if (existsSync(loose)) {
+    const sha = readFileSync(loose, 'utf8').trim();
+    return SHA_RE.test(sha) ? sha : null;
+  }
+  const packed = join(commonDir, 'packed-refs');
+  if (!existsSync(packed)) return null;
+  for (const line of readFileSync(packed, 'utf8').split('\n')) {
+    const [sha, name] = line.trim().split(' ');
+    if (name === ref && SHA_RE.test(sha)) return sha;
+  }
+  return null;
+}
+
+/**
+ * IO: the lane's HEAD sha — read from `.git` on disk (no git spawn: every acquire journals HEAD before and after
+ * its reset, and acquire is git-spawn-budgeted), falling back to `git rev-parse HEAD` for any shape it does not
+ * recognise. null when neither works. Never throws.
+ */
+export function laneHead(dir) {
+  try {
+    let gitDir = join(dir, '.git');
+    if (statSync(gitDir).isFile()) {
+      const m = /^gitdir:\s*(.+)$/m.exec(readFileSync(gitDir, 'utf8'));
+      if (!m) throw new Error('unrecognised .git file');
+      gitDir = resolve(dir, m[1].trim());
+    }
+    const commonFile = join(gitDir, 'commondir');
+    const commonDir = existsSync(commonFile) ? resolve(gitDir, readFileSync(commonFile, 'utf8').trim()) : gitDir;
+    const headRaw = readFileSync(join(gitDir, 'HEAD'), 'utf8').trim();
+    if (SHA_RE.test(headRaw)) return headRaw;
+    const ref = /^ref:\s*(refs\/\S+)$/.exec(headRaw)?.[1];
+    const sha = ref ? readRefFromGitDir(commonDir, ref) : null;
+    if (sha) return sha;
+  } catch { /* fall through to git */ }
+  return snapshotGit(dir, ['rev-parse', 'HEAD']);
+}
+
+/**
+ * IO: the lane's state right now — `{ head, dirty, ahead, unpushedCommits, unpushed }`. `ahead` is commits
+ * past `branchRef`; `unpushedCommits` is commits on NO remote ref at all (a pushed `lane/*` branch counts as
+ * pushed); `unpushed` is either of those or any dirty file. Every field is `null` when its read failed — the
+ * journal then says "unknown", never a guessed zero. Never throws.
+ */
+export function laneStateSnapshot(dir, branchRef = 'origin/main') {
+  const head = laneHead(dir);
+  const porcelain = snapshotGit(dir, ['status', '--porcelain']);
+  const dirty = porcelain === null ? null : porcelain.split('\n').filter(Boolean).length;
+  // `origin/x` is spelled out as `refs/remotes/origin/x`: a stray LOCAL branch/tag named `origin/x` would
+  // otherwise win the short-name lookup and hide unpushed commits from the shortcut below.
+  const remoteRef = branchRef.startsWith('origin/') ? `refs/remotes/${branchRef}` : null;
+  const aheadRaw = snapshotGit(dir, ['rev-list', '--count', `${remoteRef || branchRef}..HEAD`]);
+  const ahead = aheadRaw === null ? null : Number(aheadRaw) || 0;
+  // Nothing past a REMOTE ref means nothing unpushed — skip the second rev-list (acquire's git-spawn budget,
+  // `lane-pool-ahead-provably-pushed-single-spawn.test.mjs` / `lane-pool-acquire-free-list.test.mjs`).
+  const unpushedRaw = ahead === 0 && remoteRef
+    ? '0'
+    : snapshotGit(dir, ['rev-list', '--count', 'HEAD', '--not', '--remotes']);
+  const unpushedCommits = unpushedRaw === null ? null : Number(unpushedRaw) || 0;
+  const unpushed = dirty === null || unpushedCommits === null ? null : dirty > 0 || unpushedCommits > 0;
+  return { head, dirty, ahead, unpushedCommits, unpushed };
+}
+
+/** IO: rename the live journal aside once it is over the size cap. Best-effort. */
+function rotateLaneJournal(file, maxBytes, nowMs) {
+  try {
+    if (statSync(file).size < maxBytes) return;
+    const stamp = new Date(nowMs).toISOString().replace(/[-:]/g, '').replace('.', '');
+    renameSync(file, join(dirname(file), `.lane-journal.${stamp}.jsonl`));
+  } catch { /* best-effort — an over-size journal is still a journal */ }
+}
+
+/** IO: append one already-shaped entry to a pool's journal. Never throws; returns whether it landed. */
+export function appendLaneJournal(poolDir, entry, { maxBytes = LANE_JOURNAL_MAX_BYTES, nowMs = Date.now() } = {}) {
+  try {
+    if (!existsSync(poolDir)) return false;
+    const file = laneJournalPath(poolDir);
+    if (existsSync(file)) rotateLaneJournal(file, maxBytes, nowMs);
+    appendFileSync(file, `${JSON.stringify(entry)}\n`, 'utf8');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * IO — THE helper every lane mutation point calls (#4370 fork 2). Records `action` on lane dir `dir` in its
+ * pool's journal, stamped with this process's actor. NEVER throws: a bookkeeping hiccup must not fail the real
+ * reset/release it rides on. A `loud` entry is also echoed to stderr, so a daemon's own log carries it.
+ * @param {string} dir - the lane clone (`<poolDir>/lane-N`)
+ * @param {object} fields - {@link laneJournalEntry}'s fields minus `lane`/`actor` (derived here)
+ * @returns {boolean}
+ */
+export function journalLaneEvent(dir, fields = {}, {
+  actor = currentJournalActor(), nowMs = Date.now(), maxBytes, unlessRepeat = false,
+} = {}) {
+  try {
+    const where = laneOfDir(dir);
+    if (!where) return false;
+    const entry = laneJournalEntry({ ...fields, nowMs, lane: where.lane, actor });
+    if (unlessRepeat) {
+      const previous = readLaneJournalTail(where.poolDir, { maxBytes: 256 * 1024 }).filter((e) => e?.lane === where.lane).at(-1);
+      if (isRepeatJournalEntry(previous, entry)) return false;
+    }
+    if (entry.loud) {
+      process.stderr.write(`${entry.ts} ⚠ lane-${where.lane}: ${entry.action} by ${entry.actor.name}${entry.actor.pid ? ` (pid ${entry.actor.pid})` : ''} — ${entry.reason || 'no reason given'}\n`);
+    }
+    return appendLaneJournal(where.poolDir, entry, { nowMs, ...(maxBytes ? { maxBytes } : {}) });
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * PURE: is `entry` a no-news repeat of `previous` — same action, reason and lane state? Lets a caller that
+ * re-evaluates the same lane every tick (a periodic reclaim refusal) journal the FIRST refusal and every change,
+ * never the same line 700 times a day.
+ */
+export function isRepeatJournalEntry(previous, entry) {
+  if (!previous || !entry) return false;
+  return ['action', 'reason', 'headBefore', 'dirtyBefore', 'aheadBefore', 'unpushed'].every((k) => previous[k] === entry[k]);
+}
+
+/** IO: every journal file for a pool, oldest first (rotated files by stamp, then the live one). */
+function laneJournalFiles(poolDir) {
+  let names = [];
+  try { names = readdirSync(poolDir); } catch { return []; }
+  const rotated = names.filter((n) => ROTATED_JOURNAL_RE.test(n)).sort();
+  const files = rotated.map((n) => join(poolDir, n));
+  if (names.includes(LANE_JOURNAL_FILENAME)) files.push(laneJournalPath(poolDir));
+  return files;
+}
+
+/**
+ * IO: read a pool's journal, oldest first, across rotations; `lane` filters to one lane. A corrupt line is
+ * skipped, never thrown (same tolerance as {@link readLaneHistory}).
+ */
+export function readLaneJournal(poolDir, { lane = null } = {}) {
+  const out = [];
+  for (const file of laneJournalFiles(poolDir)) {
+    let text;
+    try { text = readFileSync(file, 'utf8'); } catch { continue; }
+    for (const line of text.split('\n')) {
+      if (!line.trim()) continue;
+      let entry;
+      try { entry = JSON.parse(line); } catch { continue; }
+      if (lane !== null && entry?.lane !== Number(lane)) continue;
+      out.push(entry);
+    }
+  }
+  return out;
+}
+
+/**
+ * IO: the TAIL of a pool's live journal (last `maxBytes`) — what a per-tick health probe reads, never the whole
+ * rotated history. A torn first line is skipped.
+ */
+export function readLaneJournalTail(poolDir, { maxBytes = 1024 * 1024 } = {}) {
+  const file = laneJournalPath(poolDir);
+  try {
+    const size = statSync(file).size;
+    const len = Math.min(size, maxBytes);
+    const buf = Buffer.alloc(len);
+    const fd = openSync(file, 'r');
+    try { readSync(fd, buf, 0, len, size - len); } finally { closeSync(fd); }
+    const out = [];
+    for (const line of buf.toString('utf8').split('\n')) {
+      if (!line.trim()) continue;
+      try { out.push(JSON.parse(line)); } catch { /* torn first line */ }
+    }
+    return out;
+  } catch {
+    return [];
+  }
 }
