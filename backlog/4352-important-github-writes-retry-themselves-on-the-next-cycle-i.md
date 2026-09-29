@@ -2,13 +2,14 @@
 bornAs: xzbfgxe
 kind: story
 size: 3
-status: active
+status: resolved
 priority: high
 tier: pinned
 rank: r
 scope: ["we:scripts/conveyor/ci-heal-mark.mjs", "we:scripts/conveyor/ci-heal-escalation-mark.mjs", "we:scripts/review-set-label.mjs", "we:scripts/lib/review-label-provider.mjs", "we:scripts/lib/gh-throttle.mjs", "we:scripts/operations/ci-heal-pr-dispatch.mjs", "we:scripts/conveyor/reconcile-core.mjs", "we:scripts/conveyor/__tests__/ci-heal-mark.test.mjs", "we:scripts/conveyor/__tests__/ci-heal-escalation-mark.test.mjs", "we:scripts/operations/__tests__/ci-heal-pr-dispatch.test.mjs", "we:scripts/conveyor/__tests__/reconcile-core.test.mjs"]
 dateOpened: "2026-09-28"
 dateStarted: "2026-09-29"
+dateResolved: "2026-09-29"
 preparedDate: "2026-09-28"
 preparedAgainstSha: "787f3988a8e5eeed78bd8d994ad9d513d489423b"
 tags: []
