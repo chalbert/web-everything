@@ -3,9 +3,10 @@ bornAs: x3vs6tu
 kind: story
 size: 2
 tier: pinned
-status: open
+status: resolved
 scope: ["we:scripts/conveyor/build-dispatch-policy.mjs"]
 dateOpened: "2026-09-29"
+dateResolved: "2026-09-29"
 tags: []
 ---
 
