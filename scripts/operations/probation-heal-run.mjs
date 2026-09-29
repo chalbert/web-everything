@@ -140,10 +140,13 @@ export async function runProbationHeal(args, io) {
     const hookCheck = hookSurfaceChanged(preHookSurface, postHookSurface);
     if (hookCheck.changed) {
       log(`SECURITY: the worker's own run changed the lane's git-hook surface — refusing, discarding, never committing/pushing: ${hookCheck.reason}`);
-      io.discardChanges(lanePath, baseSha, preexisting);
-      io.resetHookSurface(lanePath);
-      io.escalate({ pr, head: examinedHead, reason: `git-hook surface changed during the worker's run: ${hookCheck.reason}` });
-      return finish('escalated-needs-human', executor, `refused: ${hookCheck.reason}`, { diff: diffRow });
+      // The pre-worker config comes back first (the whole file), so `discardChanges` never runs git under it —
+      // and if it could not, no git runs in the lane at all; a human gets it.
+      const restored = io.resetHookSurface(lanePath, preHookSurface).clean;
+      if (restored) io.discardChanges(lanePath, baseSha, preexisting);
+      const detail = `${hookCheck.reason}${restored ? '' : ' (the lane config could not be restored — the lane was NOT discarded; quarantine it)'}`;
+      io.escalate({ pr, head: examinedHead, reason: `git-hook surface changed during the worker's run: ${detail}` });
+      return finish('escalated-needs-human', executor, `refused: ${detail}`, { diff: diffRow });
     }
     const summary = summarizeNumstat(io.diffNumstat(lanePath, baseSha, preexisting), { exclude: preexisting });
     diffRow = { files: summary.files, loc: summary.loc };
@@ -168,10 +171,11 @@ export async function runProbationHeal(args, io) {
     const preCommitCheck = hookSurfaceChanged(postHookSurface, preCommitHookSurface);
     if (preCommitCheck.changed) {
       log(`SECURITY: the lane's git-hook surface changed during the gate/checker window — refusing, discarding, never committing/pushing: ${preCommitCheck.reason}`);
-      io.discardChanges(lanePath, baseSha, preexisting);
-      io.resetHookSurface(lanePath);
-      io.escalate({ pr, head: examinedHead, reason: `git-hook surface changed during the gate/checker window: ${preCommitCheck.reason}` });
-      return finish('escalated-needs-human', executor, `refused: ${preCommitCheck.reason}`, { diff: diffRow, checker: checkerRow });
+      const restored = io.resetHookSurface(lanePath, preHookSurface).clean;
+      if (restored) io.discardChanges(lanePath, baseSha, preexisting);
+      const detail = `${preCommitCheck.reason}${restored ? '' : ' (the lane config could not be restored — the lane was NOT discarded; quarantine it)'}`;
+      io.escalate({ pr, head: examinedHead, reason: `git-hook surface changed during the gate/checker window: ${detail}` });
+      return finish('escalated-needs-human', executor, `refused: ${detail}`, { diff: diffRow, checker: checkerRow });
     }
     io.commit(lanePath, summary.paths, buildHealCommitMessage({ pr, reason, worker, item: args.num }));
   } else if (!gate.pass || !rebaseMovedHead) {
@@ -231,7 +235,7 @@ export function realIo({ session, env = process.env } = {}) {
       return false;
     },
     headSha: (dir) => sh('git', ['-C', dir, 'rev-parse', 'HEAD'], { env: laneEnv }).trim(),
-    resetHookSurface: (dir) => resetHookSurface(dir),
+    resetHookSurface: (dir, baseline) => resetHookSurface(dir, baseline),
     snapshotHookSurface: (dir) => snapshotHookSurface(dir),
     runGate: (dir) => {
       const r = node('scripts/verify-lane.mjs', ['run', '--repo=.'], { cwd: dir, env: laneEnv, timeout: GATE_TIMEOUT_MS });
@@ -267,12 +271,15 @@ export function realIo({ session, env = process.env } = {}) {
       // The launcher intent-adds every untracked file for its own diff; take the pre-existing ones back out of the
       // index so no intent-to-add entry for a file the worker never wrote is left in the lane.
       if (preexisting.length) trySh('git', ['-C', dir, 'reset', '-q', '--', ...preexisting], { env: laneEnv });
-      return sh('git', ['-C', dir, 'diff', '--numstat', base], { env: laneEnv });
+      // `--no-renames`: a rename's numstat line reads `old => new`, one path string `commit`'s `git add` rejects.
+      return sh('git', ['-C', dir, 'diff', '--no-renames', '--numstat', base], { env: laneEnv });
     },
     diffText: (dir, base) => sh('git', ['-C', dir, 'diff', base], { env: laneEnv }),
     // Undo ONLY the worker's own changes: reset tracked files, and delete just the untracked paths it created.
+    // `trySh` throughout: a git hiccup listing untracked files must not skip the reset below.
     discardChanges: (dir, base, preexisting = []) => {
-      const created = newUntrackedPaths(preexisting, sh('git', ['-C', dir, 'ls-files', '--others', '--exclude-standard'], { env: laneEnv }).split('\n').filter(Boolean));
+      const listed = trySh('git', ['-C', dir, 'ls-files', '--others', '--exclude-standard'], { env: laneEnv });
+      const created = listed.ok ? newUntrackedPaths(preexisting, listed.out.split('\n').filter(Boolean)) : [];
       trySh('git', ['-C', dir, 'reset', '--hard', base], { env: laneEnv });
       if (created.length) trySh('git', ['-C', dir, 'clean', '-f', '--', ...created], { env: laneEnv });
     },

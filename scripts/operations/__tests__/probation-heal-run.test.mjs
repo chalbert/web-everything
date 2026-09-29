@@ -138,7 +138,7 @@ describe('routeDispatchProvider — the probation branch', () => {
  *  to exercise those refusal paths without a real fs/git dependency. */
 function fakeIo({
   gate = [false, true], rebaseOk = true, moved = true, numstat = '2\t1\tscripts/a.mjs', checker = 'APPROVE',
-  pushOk = true, state = 'OPEN', hookResetClean = true, hookTampered = false,
+  pushOk = true, state = 'OPEN', hookResetClean = true, hookTampered = false, tamperRestoreClean = true,
 } = {}) {
   const calls = [];
   const gates = [...gate];
@@ -150,7 +150,7 @@ function fakeIo({
     completion: (c) => calls.push(['completion', c.status, c.outcome]),
     prHead: () => ({ state, headRefOid: 'examined', headRefName: 'lane/x' }),
     acquireLane: () => '/lanes/9',
-    resetHookSurface: (d) => { calls.push(['reset-hooks', d]); return { clean: hookResetClean, leftover: hookResetClean ? [] : ['pre-commit'], snapshot: cleanSnapshot }; },
+    resetHookSurface: (d, baseline) => { calls.push(baseline ? ['reset-hooks', d, baseline] : ['reset-hooks', d]); return { clean: baseline ? tamperRestoreClean : hookResetClean, leftover: hookResetClean ? [] : ['pre-commit'], snapshot: cleanSnapshot }; },
     snapshotHookSurface: (d) => { calls.push(['snapshot-hooks', d]); return hookTampered ? tamperedSnapshot : cleanSnapshot; },
     rebaseOntoMain: () => { if (rebaseOk && moved) head = 'rebased'; return rebaseOk; },
     headSha: () => head,
@@ -271,6 +271,14 @@ describe('runProbationHeal — the arc', () => {
     expect(calls.some((c) => c[0] === 'push')).toBe(false);
     expect(calls.some((c) => c[0] === 'discard')).toBe(true);
     expect(calls.filter((c) => c[0] === 'reset-hooks').length).toBeGreaterThanOrEqual(2); // baseline + post-tamper cleanup
+    // #4291 advisory finding (security) — the cleanup restores the PRE-worker config, before `discard` runs git.
+    const cleanupAt = calls.findIndex((c) => c[0] === 'reset-hooks' && c[2]);
+    expect(calls[cleanupAt][2]).toEqual({ configHash: 'clean', files: {} });
+    expect(cleanupAt).toBeLessThan(calls.findIndex((c) => c[0] === 'discard'));
+    const failed = fakeIo({ hookTampered: true, tamperRestoreClean: false });
+    const r2 = await runProbationHeal(args(), failed.io);
+    expect(r2.detail).toMatch(/NOT discarded; quarantine it/);
+    expect(failed.calls.some((c) => c[0] === 'discard' || c[0] === 'commit' || c[0] === 'push')).toBe(false);
     expect(calls.find((c) => c[0] === 'escalate')[1]).toMatch(/git-hook surface changed during the worker/);
     expect(calls.find((c) => c[0] === 'scorecard')).toEqual(['scorecard', 'escalated-needs-human', 'antigravity', null, null]);
   });

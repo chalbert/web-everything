@@ -22,7 +22,10 @@ we:scripts/operations/probation-heal-run.mjs and we:scripts/operations/probation
 - `we:backlog/xnygz00-cover-git-config-controlled-execution-paths-beyond-core-hook.md` — this fix is scoped to
   the traditional hooks mechanism (`.git/hooks/<name>`, `core.hooksPath`) only; a 2026-09-28 Codex plan review
   flagged `core.fsmonitor`, `clean`/`smudge`/`textconv` filters, and the newer `hook.<name>.command`/`.event`
-  config-hooks as separate, broader config-controlled execution paths worth a dedicated pass.
+  config-hooks as separate, broader config-controlled execution paths worth a dedicated pass. The title's
+  "gitignored config" half is NOT delivered here either (#4291 advisory review): a gitignored file the gate
+  loads (a vitest/npm config, `node_modules`) is never inspected. It is tracked in that same follow-up. A
+  detected tamper now restores the whole pre-worker `.git/config`, not just `core.hooksPath`.
 - `we:backlog/x3j03qu-we-scripts-operations-probation-heal-run-mjs-s-arc-has-no-to.md` — found incidentally:
   unlike `we:scripts/operations/probation-build-run.mjs`, `we:scripts/operations/probation-heal-run.mjs`'s arc
   has no top-level try/catch, so an unexpected thrown error (e.g. from a lane a worker corrupted) propagates

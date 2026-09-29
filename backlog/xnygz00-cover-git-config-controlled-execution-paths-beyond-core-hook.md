@@ -10,7 +10,7 @@ tags: []
 
 # Cover git config-controlled execution paths beyond core.hooksPath in the probation-run hook hardening (core.fsmonitor, filters, hook.<name>.command)
 
-TODO digest — one ≤100-word paragraph: what this item does and why (replace this line).
+The probation run scripts' hook hardening (x55dojc) covers `.git/hooks/` and `core.hooksPath` only. A worker can still reach code execution through other paths: `core.fsmonitor`, `clean`/`smudge`/`textconv` filters, `hook.<name>.command` config-hooks, or a gitignored file the gate loads (a vitest/npm config, `node_modules`). A detected tamper restores the whole pre-worker `.git/config`, but a lane whose config was poisoned by a run that crashed before cleanup is still re-baselined as clean at the next acquire. Cover these, ideally by running the worker in a disposable clone whose `.git` it cannot write (#4291 advisory review).
 
 ## Done when
 

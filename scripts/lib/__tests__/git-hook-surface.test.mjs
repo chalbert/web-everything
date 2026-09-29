@@ -4,7 +4,7 @@
  * is fs/git-adjacent behavior that a fake would just re-assert.
  */
 import { execFileSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -198,6 +198,39 @@ describe('resetHookSurface', () => {
     execFileSync('git', ['config', 'core.hooksPath', '.githooks'], { cwd: dir });
     expect(resetHookSurface(dir).clean).toBe(true);
     expect(hooksPathOnDisk(dir)).toBe(null);
+  });
+
+  it('given the pre-worker baseline, restores the WHOLE .git/config — a worker\'s other edits (core.fsmonitor, include.path) never become the next dispatch\'s baseline', () => {
+    const dir = makeRepo();
+    const baseline = snapshotHookSurface(dir);
+    execFileSync('git', ['config', 'core.fsmonitor', '/tmp/evil-fsmonitor'], { cwd: dir });
+    execFileSync('git', ['config', 'include.path', '/tmp/evil-include'], { cwd: dir });
+    const result = resetHookSurface(dir, baseline);
+    expect(result.clean).toBe(true);
+    expect(result.snapshot.configHash).toBe(baseline.configHash);
+    expect(hookSurfaceChanged(baseline, result.snapshot).changed).toBe(false);
+  });
+
+  it('restoring the baseline config never writes through a .git/config symlink the worker planted', () => {
+    const dir = makeRepo();
+    const baseline = snapshotHookSurface(dir);
+    const outside = join(dir, 'outside-config');
+    writeFileSync(outside, 'untouched\n');
+    rmSync(join(dir, '.git', 'config'));
+    symlinkSync(outside, join(dir, '.git', 'config'));
+    const result = resetHookSurface(dir, baseline);
+    expect(result.clean).toBe(true);
+    expect(readFileSync(outside, 'utf8')).toBe('untouched\n');
+    expect(result.snapshot.configHash).toBe(baseline.configHash);
+  });
+
+  it('a baseline restore that cannot complete (the worker made .git/config a directory) reports clean:false', () => {
+    const dir = makeRepo();
+    const baseline = snapshotHookSurface(dir);
+    rmSync(join(dir, '.git', 'config'));
+    mkdirSync(join(dir, '.git', 'config'));
+    writeFileSync(join(dir, '.git', 'config', 'x'), 'x');
+    expect(resetHookSurface(dir, baseline).clean).toBe(false);
   });
 
   it('reports uncleanable leftovers rather than silently proceeding', () => {

@@ -5,7 +5,7 @@
  * past `discardChanges` would redden nothing.
  */
 import { execFileSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -69,6 +69,66 @@ describe.each([
     expect(existsSync(join(dir, 'evil.md'))).toBe(false);
     expect(existsSync(join(dir, 'keep.txt'))).toBe(true);
     expect(execFileSync('git', ['status', '--porcelain'], { cwd: dir, encoding: 'utf8' }).trim()).toBe('?? keep.txt');
+  });
+});
+
+/**
+ * #4291 advisory finding (security/coverage) — EVERY subprocess the launcher itself runs in the lane must carry
+ * the hooks-disabled override, not just `commit`. A `git` shim first on PATH and a `NODE_OPTIONS` preload
+ * record the override each child inherits (the preload then exits, so no real WE script runs), and every io
+ * method that touches the lane is driven once.
+ */
+function recordingEnv() {
+  const dir = mkdtempSync(join(tmpdir(), 'we-probation-envlog-'));
+  dirs.push(dir);
+  const log = join(dir, 'calls.log');
+  const realGit = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
+  mkdirSync(join(dir, 'bin'));
+  writeFileSync(join(dir, 'bin', 'git'), `#!/bin/sh\nprintf '%s git %s\\n' "\${GIT_CONFIG_COUNT:-none}" "$*" >> ${JSON.stringify(log)}\nexec ${JSON.stringify(realGit)} "$@"\n`);
+  chmodSync(join(dir, 'bin', 'git'), 0o755);
+  const preload = join(dir, 'preload.cjs');
+  writeFileSync(preload, `require('node:fs').appendFileSync(${JSON.stringify(log)}, \`\${process.env.GIT_CONFIG_COUNT ?? 'none'} node \${process.argv[1] ?? ''}\\n\`); process.exit(0);\n`);
+  const env = { ...process.env, PATH: `${join(dir, 'bin')}:${process.env.PATH}`, NODE_OPTIONS: `--require=${preload}` };
+  delete env.GIT_CONFIG_COUNT;
+  return { env, lines: () => readFileSync(log, 'utf8').split('\n').filter(Boolean) };
+}
+
+describe.each([
+  ['probation-build-run', buildRealIo, (io, dir, base) => {
+    io.acquireLane({ lane: 1, session: 's', scope: ['we:a.md'] });
+    io.claim('1', 's', dir);
+    io.headSha(dir);
+    const pre = io.untracked(dir);
+    writeFileSync(join(dir, 'a.md'), 'v1\n');
+    io.diffNumstat(dir, base, pre);
+    io.resolveItem('1', dir);
+    io.commit(dir, ['a.md'], 'm');
+    io.runGate(dir);
+    io.openPr({ lanePath: dir, num: '1', slug: 'x', attemptTag: '', bodyFile: join(dir, '.git', 'body') });
+    io.discardChanges(dir, base, pre);
+  }],
+  ['probation-heal-run', healRealIo, (io, dir, base) => {
+    io.acquireLane({ ref: 'lane/x', lane: 1, session: 's', scope: ['we:a.md'] });
+    io.rebaseOntoMain(dir);
+    io.headSha(dir);
+    const pre = io.untracked(dir);
+    writeFileSync(join(dir, 'a.md'), 'v1\n');
+    io.diffNumstat(dir, base, pre);
+    io.diffText(dir, base);
+    io.runGate(dir);
+    io.commit(dir, ['a.md'], 'm');
+    io.push(dir, 'lane/x', base);
+    io.discardChanges(dir, base, pre);
+  }],
+])('%s realIo — every launcher subprocess in the lane inherits the hooks-disabled override', (_name, realIo, drive) => {
+  it('no git or node child the launcher starts in the lane runs without it', () => {
+    const { dir, base } = makeRepo();
+    const { env, lines } = recordingEnv();
+    drive(realIo({ session: 'sess-1', env }), dir, base);
+    const calls = lines();
+    expect(calls.some((l) => / git /.test(l))).toBe(true);
+    expect(calls.some((l) => / node /.test(l))).toBe(true);
+    expect(calls.filter((l) => !l.startsWith('1 '))).toEqual([]);
   });
 });
 

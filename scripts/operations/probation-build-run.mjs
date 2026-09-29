@@ -125,6 +125,22 @@ function pathInScope(path, scopeEntries) {
   return scopeEntries.some((entry) => (entry.endsWith('/') ? path.startsWith(entry) : path === entry));
 }
 
+/** gray-matter's executable engines, each replaced by one that refuses. */
+const REFUSE_ENGINE = () => { throw new Error('executable frontmatter refused'); };
+const NO_EXEC_ENGINES = Object.freeze({ js: REFUSE_ENGINE, javascript: REFUSE_ENGINE, coffee: REFUSE_ENGINE, coffeescript: REFUSE_ENGINE, cson: REFUSE_ENGINE });
+
+/**
+ * A card's frontmatter data, YAML only. #4291 advisory finding (security) — gray-matter's DEFAULT engines
+ * `eval` a `---js` block, and `findItem` re-reads the card after the worker ran, so a bare `matter(text)` would
+ * run worker-written JS inside the launcher. Anything but a plain `---` YAML block throws (→ no scope).
+ * @param {string} text
+ * @returns {object}
+ */
+function parseYamlFrontmatter(text) {
+  if (!/^---\r?\n/.test(text)) throw new Error('not a plain YAML frontmatter block');
+  return matter(text, { language: 'yaml', engines: NO_EXEC_ENGINES }).data;
+}
+
 /** Parse `--k=v` flags. PURE. */
 export function parseArgs(argv) {
   const flags = {};
@@ -142,7 +158,6 @@ export function parseArgs(argv) {
     lane: flags.lane ? Number(flags.lane) : null,
     scope: typeof flags.scope === 'string' && flags.scope ? flags.scope.split(',') : [],
     worker,
-    dryRun: flags['dry-run'] === true,
   };
 }
 
@@ -283,8 +298,10 @@ export async function runProbationBuild(args, io) {
     const hookCheck = hookSurfaceChanged(preHookSurface, postHookSurface);
     if (hookCheck.changed) {
       log(`SECURITY: the worker's own run changed the lane's git-hook surface — refusing, discarding, never committing/pushing: ${hookCheck.reason}`);
-      io.resetHookSurface(lanePath);
-      return abandon('escalated-needs-human', `refused: ${hookCheck.reason}`, {});
+      // The pre-worker config comes back (the whole file, not just hooksPath) BEFORE `abandon`'s discard runs git.
+      // If it could not, no git runs in the lane at all: `baseSha = null` skips the discard, and a human gets it.
+      if (!io.resetHookSurface(lanePath, preHookSurface).clean) baseSha = null;
+      return abandon('escalated-needs-human', `refused: ${hookCheck.reason}${baseSha == null ? ' (the lane config could not be restored — the lane was NOT discarded; quarantine it)' : ''}`, {});
     }
     // #4291 plan-review finding (correctness, round 2) — a worker that crashed or timed out but still left a
     // partial, envelope-sized diff must never be treated as a clean build: a resolved item + an opened PR would
@@ -322,9 +339,12 @@ export async function runProbationBuild(args, io) {
     // (it is the CLAIM's own bookkeeping, not the worker's change), which means a worker that rewrites the
     // item's own file directly — disobeying "do not resolve the backlog item" — would otherwise be invisible
     // to every check above AND silently committed. Re-read the item and require BOTH its BODY (the spec text)
-    // and its frontmatter (beyond the claim's own stamp fields) to be unchanged from before the worker ran.
+    // and its frontmatter to be unchanged from before the worker ran.
+    // #4291 advisory finding (codex-correctness) — compared byte for byte against the POST-CLAIM read, never the
+    // pre-claim one with the claim-owned keys allowed: those keys may change through `claim`, not through the
+    // worker, so a worker forging `status:`/`dateStarted:` is tamper too.
     const postWorkerItem = io.findItem(num, lanePath);
-    if (postWorkerItem?.spec !== item.spec || frontmatterTamperedBeyondClaim(item.raw, postWorkerItem?.raw, BUILD_OWNED_FRONTMATTER_KEYS)) {
+    if (postWorkerItem?.spec !== item.spec || postWorkerItem?.raw !== afterClaim?.raw) {
       return abandon('escalated-needs-human', 'not built: the worker edited the item\'s own backlog card — refusing', { diff: diffRow });
     }
 
@@ -338,8 +358,8 @@ export async function runProbationBuild(args, io) {
     const preCommitCheck = hookSurfaceChanged(postHookSurface, preCommitHookSurface);
     if (preCommitCheck.changed) {
       log(`SECURITY: the lane's git-hook surface changed during resolve — refusing, discarding, never committing/pushing: ${preCommitCheck.reason}`);
-      io.resetHookSurface(lanePath);
-      return abandon('escalated-needs-human', `refused: ${preCommitCheck.reason}`, { diff: diffRow });
+      if (!io.resetHookSurface(lanePath, preHookSurface).clean) baseSha = null;
+      return abandon('escalated-needs-human', `refused: ${preCommitCheck.reason}${baseSha == null ? ' (the lane config could not be restored — the lane was NOT discarded; quarantine it)' : ''}`, { diff: diffRow });
     }
 
     io.commit(lanePath, [...summary.paths, item.path], buildDocFixCommitMessage({ num, worker }));
@@ -423,7 +443,7 @@ export function realIo({ session, env = process.env } = {}) {
       const last = r.out.trim().split('\n').filter(Boolean).at(-1) ?? '';
       return last.startsWith('/') ? last : null;
     },
-    resetHookSurface: (dir) => resetHookSurface(dir),
+    resetHookSurface: (dir, baseline) => resetHookSurface(dir, baseline),
     snapshotHookSurface: (dir) => snapshotHookSurface(dir),
     // The item's own backlog file, resolved by listing `backlog/` for `<num>-*.md` — never a hand-rolled loader
     // of `src/_data/backlog.js` (that loader's own consumer, `dispatch-lane-io.mjs#findItem`, is what handed
@@ -443,7 +463,7 @@ export function realIo({ session, env = process.env } = {}) {
       // frontmatter FIELD (`scope:`, `blockedBy:`, …) rather than the body.
       // `scope` — the card's own declared `scope:` (the build's edit allowlist); anything but a list reads as none.
       let scope = [];
-      try { const s = matter(text).data?.scope; if (Array.isArray(s)) scope = s.filter((p) => typeof p === 'string' && p.trim()).map((p) => p.trim()); } catch { /* unparseable frontmatter → no scope → refused */ }
+      try { const s = parseYamlFrontmatter(text)?.scope; if (Array.isArray(s)) scope = s.filter((p) => typeof p === 'string' && p.trim()).map((p) => p.trim()); } catch { /* unparseable frontmatter → no scope → refused */ }
       return { path, slug: name.slice(String(n).length + 1, -3), title: titleMatch ? titleMatch[1].trim() : '', spec: body, raw: text, scope };
     },
     claim: (n, s, dir) => node('scripts/backlog.mjs', ['claim', String(n), `--session=${s}`], { cwd: dir, env: laneEnv }).ok,

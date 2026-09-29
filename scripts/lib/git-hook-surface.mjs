@@ -38,7 +38,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { lstatSync, readdirSync, readFileSync, readlinkSync, rmSync } from 'node:fs';
+import { lstatSync, readdirSync, readFileSync, readlinkSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 /**
@@ -96,8 +96,12 @@ function fingerprintEntry(path) {
  *
  * Never throws: a missing `.git/hooks/` reads as `{}` (not itself suspicious — a fresh/shallow clone may have
  * none); a missing/unreadable `.git/config` reads `configHash: null`.
+ *
+ * `configBytes` carries the file itself (raw bytes, so a restore is byte-exact), so a caller can hand this
+ * snapshot back to {@link resetHookSurface} as the baseline to restore after a detected tamper (#4291 advisory
+ * finding). It may hold credentials (a remote URL with a token): never log or serialize a snapshot.
  * @param {string} dir - the lane's own checkout root (NOT `.git` itself).
- * @returns {{configHash: string|null, files: Record<string,string>}}
+ * @returns {{configHash: string|null, configBytes: Buffer|null, files: Record<string,string>}}
  */
 export function snapshotHookSurface(dir) {
   const files = {};
@@ -108,10 +112,12 @@ export function snapshotHookSurface(dir) {
     }
   } catch { /* no .git/hooks/ at all — files stays {} */ }
   let configHash = null;
+  let configBytes = null;
   try {
-    configHash = createHash('sha256').update(readFileSync(join(dir, '.git', 'config'))).digest('hex');
+    configBytes = readFileSync(join(dir, '.git', 'config'));
+    configHash = createHash('sha256').update(configBytes).digest('hex');
   } catch { /* no .git/config — configHash stays null */ }
-  return { configHash, files };
+  return { configHash, configBytes, files };
 }
 
 /**
@@ -188,12 +194,27 @@ function restoreRepoHooksPath(dir) {
  * this is very often itself called from a caller already inside a cleanup/refusal path, where a throw would
  * skip the escalation/reporting that must still happen.
  *
+ * `baseline` (#4291 advisory finding) — after a detected tamper, pass the pre-worker {@link snapshotHookSurface}:
+ * the WHOLE `.git/config` is put back to its text first (a `core.fsmonitor`, `include.path` or alias the worker
+ * added is gone, rather than hashed into the next dispatch's baseline). The file is removed and re-created, so a
+ * `.git/config` symlink the worker planted is replaced, never written through.
+ *
  * @param {string} dir
- * @returns {{clean: boolean, leftover: string[], snapshot: {configHash: string|null, files: Record<string,string>}}}
+ * @param {{configBytes?: Buffer|null}} [baseline]
+ * @returns {{clean: boolean, leftover: string[], snapshot: {configHash: string|null, configBytes: Buffer|null, files: Record<string,string>}}}
  *   `clean: false` means the cleanup could not fully complete (a leftover non-sample hook file, or the config
- *   write failed) — a caller MUST treat that as "no safe baseline" and refuse before running any worker.
+ *   write/restore failed) — a caller MUST treat that as "no safe baseline": refuse before running any worker,
+ *   and after a tamper run no further git in the lane (not even the discard).
  */
-export function resetHookSurface(dir) {
+export function resetHookSurface(dir, baseline) {
+  let restoreOk = true;
+  if (baseline?.configBytes != null) {
+    const configPath = join(dir, '.git', 'config');
+    try {
+      rmSync(configPath, { force: true });
+      writeFileSync(configPath, baseline.configBytes, { flag: 'wx' });
+    } catch { restoreOk = false; }
+  }
   try {
     const hooksDir = join(dir, '.git', 'hooks');
     for (const name of readdirSync(hooksDir)) {
@@ -204,5 +225,5 @@ export function resetHookSurface(dir) {
   const configOk = restoreRepoHooksPath(dir);
   const snapshot = snapshotHookSurface(dir);
   const leftover = Object.keys(snapshot.files).filter((name) => !name.endsWith('.sample'));
-  return { clean: configOk && leftover.length === 0, leftover, snapshot };
+  return { clean: restoreOk && configOk && leftover.length === 0, leftover, snapshot };
 }

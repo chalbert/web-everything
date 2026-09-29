@@ -28,6 +28,15 @@ describe('realIo().findItem — the card\'s own scope is what the arc allowlists
     withCard('---\nstatus: open\nscope: we:docs/a.md\n---\n\n# X\n', (item) => expect(item.scope).toEqual([]));
     withCard('---\nstatus: open\nscope: ["", "  ", null]\n---\n\n# X\n', (item) => expect(item.scope).toEqual([]));
   });
+  // #4291 advisory finding (security) — gray-matter's default engines EVAL a `---js` block, and the post-worker
+  // re-read parses text the worker controls. It must never run, and reads as no scope.
+  it.each(['js', 'javascript', 'coffee'])('a `---%s` card is never evaluated — no scope, no side effect', (lang) => {
+    delete globalThis.__probationCardEvalRan;
+    withCard(`---${lang}\n{ scope: (globalThis.__probationCardEvalRan = true, ["we:docs/a.md"]) }\n---\n\n# X\n`, (item) => {
+      expect(globalThis.__probationCardEvalRan).toBeUndefined();
+      expect(item.scope).toEqual([]);
+    });
+  });
 });
 
 describe('openPrArgv — every probation build PR is parked review:pending, never label-on-green (#4291 plan review round 3)', () => {
@@ -55,7 +64,7 @@ function fakeIo({
   lane = '/lanes/22', item = { path: 'backlog/4291-probation-launcher.md', slug: 'probation-launcher', title: 'Probation launcher', spec: '## Done when\n\n1. it works.', raw: ITEM_RAW, scope: itemScope },
   claimOk = true, numstat = '1\t20\tbacklog-docs/probation.md', gate = true, resolveOk = true, openPr: openPrResult = { ok: true, pr: 9001, url: 'https://x/9001' },
   throwOn = null, postWorkerSpec = null, postWorkerRaw = null, claimTamperedRaw = null, runWorkerOk = true,
-  headShaSequence = null, throwOnHeadShaCall = null, hookResetClean = true, hookTampered = false,
+  headShaSequence = null, throwOnHeadShaCall = null, hookResetClean = true, hookTampered = false, tamperRestoreClean = true,
 } = {}) {
   const calls = [];
   const boom = (name) => { if (throwOn === name) throw new Error(`${name} exploded`); };
@@ -66,7 +75,7 @@ function fakeIo({
   const io = {
     log: () => {},
     acquireLane: (o) => { calls.push(['acquireLane', o.lane, o.scope]); return lane; },
-    resetHookSurface: (d) => { boom('resetHookSurface'); calls.push(['reset-hooks', d]); return { clean: hookResetClean, leftover: hookResetClean ? [] : ['pre-commit'], snapshot: cleanSnapshot }; },
+    resetHookSurface: (d, baseline) => { boom('resetHookSurface'); calls.push(baseline ? ['reset-hooks', d, baseline] : ['reset-hooks', d]); return { clean: baseline ? tamperRestoreClean : hookResetClean, leftover: hookResetClean ? [] : ['pre-commit'], snapshot: cleanSnapshot }; },
     snapshotHookSurface: (d) => { boom('snapshotHookSurface'); calls.push(['snapshot-hooks', d]); return hookTampered ? tamperedSnapshot : cleanSnapshot; },
     findItem: () => {
       findItemCalls += 1;
@@ -307,6 +316,18 @@ describe('runProbationBuild — the arc', () => {
     expect(calls.some((c) => c[0] === 'discard')).toBe(true);
     expect(calls.some((c) => c[0] === 'resolve')).toBe(false);
   });
+  // #4291 advisory finding (codex-correctness) — the post-worker card is compared against the POST-CLAIM read,
+  // byte for byte: `status`/`dateStarted` are claim-owned, but the worker may not forge them either.
+  it.each([
+    ['status', '---\nstatus: resolved\nscope: ["we:backlog-docs/probation.md"]\n---\n\n## Done when\n\n1. it works.'],
+    ['dateStarted', '---\nstatus: open\nscope: ["we:backlog-docs/probation.md"]\ndateStarted: "2020-01-01"\n---\n\n## Done when\n\n1. it works.'],
+  ])('a worker forging the claim-owned `%s` directly is caught as tamper', async (_key, forged) => {
+    const { io, calls } = fakeIo({ postWorkerRaw: forged });
+    const r = await runProbationBuild(args(), io);
+    expect(r.outcome).toBe('escalated-needs-human');
+    expect(r.detail).toMatch(/edited the item's own backlog card/);
+    expect(calls.some((c) => c[0] === 'resolve')).toBe(false);
+  });
   it('a worker that did not finish cleanly (ok:false) is escalated, never resolved or committed, even with a partial diff (#4291 plan review round 2)', async () => {
     const { io, calls } = fakeIo({ runWorkerOk: false });
     const r = await runProbationBuild(args(), io);
@@ -428,6 +449,19 @@ describe('runProbationBuild — the arc', () => {
     expect(calls.some((c) => c[0] === 'openPr')).toBe(false);
     expect(calls.some((c) => c[0] === 'discard')).toBe(true);
     expect(calls.filter((c) => c[0] === 'reset-hooks').length).toBeGreaterThanOrEqual(2); // baseline + post-tamper cleanup
+    // #4291 advisory finding (security) — the cleanup restores the PRE-worker config (the whole file, not just
+    // hooksPath), and does so BEFORE `discard` runs git in the lane.
+    const cleanupAt = calls.findIndex((c) => c[0] === 'reset-hooks' && c[2]);
+    expect(calls[cleanupAt][2]).toEqual({ configHash: 'clean', files: {} });
+    expect(cleanupAt).toBeLessThan(calls.findIndex((c) => c[0] === 'discard'));
+  });
+
+  it('a tamper whose config restore fails runs NO further git in the lane — no discard — and says to quarantine it', async () => {
+    const { io, calls } = fakeIo({ hookTampered: true, tamperRestoreClean: false });
+    const r = await runProbationBuild(args(), io);
+    expect(r.outcome).toBe('escalated-needs-human');
+    expect(r.detail).toMatch(/NOT discarded; quarantine it/);
+    expect(calls.some((c) => c[0] === 'discard' || c[0] === 'commit')).toBe(false);
   });
 
   it('refuses with no num, session or worker', async () => {
