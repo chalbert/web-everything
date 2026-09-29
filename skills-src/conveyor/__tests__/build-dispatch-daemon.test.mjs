@@ -28,13 +28,15 @@ vi.mock('../../../scripts/operations/detached-dispatch.mjs', async (importOrigin
 
 import {
   runBuildDispatchTick, settleBookkeeping, readKillSwitch, readDispatchOutcome, KILL_SWITCH_ENV,
-  cliListSettledBuilds, cliListHolds, policyFrom,
+  cliListSettledBuilds, cliListRunStoreInFlight, cliListHolds, policyFrom,
   // #4348-open-pr-retry
   primaryInfraStoreEnv, cliRetryInfraBlocked,
   // #4464 builder-cap-machine-wide
   cliPlanTick, BUILD_DAEMON_LANE_CAP_EXEMPT_VALUE,
   // #4465 build-dispatch-hold-router
   cliRouteHeldItems, cliSpawnHoldLand,
+  // xovjhwh — the shared attribution derivation `runBuildDispatchTick` and `dryRun` both call
+  deriveDispatchedByBuilder,
 } from '../build-dispatch-daemon.mjs';
 import { listHoldFindings } from '../../../scripts/conveyor/build-dispatch-hold-router.mjs';
 import { MAX_CONCURRENT_LANES_ENV } from '../../../scripts/lib/lane-concurrency.mjs';
@@ -68,8 +70,10 @@ function sameFileTick(prev = {}) {
   };
 }
 
-/** Real claim module over a temp lock root; `pid` stands in for the daemon process (a restart = new pid). */
-function effectsFor({ lockRoot, pid, dispatches, openPrs = [] }) {
+/** Real claim module over a temp lock root; `pid` stands in for the daemon process (a restart = new pid).
+ *  `runStoreInFlight`/`settledBuilds` (xovjhwh) are THIS builder's own durable dispatch-lane run records —
+ *  `runBuildDispatchTick` derives `dispatchedByBuilder` from exactly these two reads. */
+function effectsFor({ lockRoot, pid, dispatches, openPrs = [], runStoreInFlight = [], settledBuilds = [] }) {
   const owner = `testhost:${pid}`;
   return {
     planTick: (bk) => sameFileTick(bk),
@@ -77,7 +81,8 @@ function effectsFor({ lockRoot, pid, dispatches, openPrs = [] }) {
     listClaims: () => listBuildDispatchClaims({ lockRoot }),
     releaseClaim: ({ num }) => releaseBuildDispatchClaim({ num, lockRoot }),
     acquireClaim: ({ num, scope }) => acquireBuildDispatchClaim({ num, scope, owner, pid, lockRoot }),
-    listRunStoreInFlight: () => [],
+    listRunStoreInFlight: () => runStoreInFlight,
+    listSettledBuilds: () => settledBuilds,
     killSwitch: () => ({ engaged: false }),
     dispatch: ({ num }) => { dispatches.push({ num, pid }); return { dispatching: true, lane: 13 }; },
   };
@@ -228,12 +233,62 @@ describe('runBuildDispatchTick', () => {
     const dispatches = [];
     const openPrs = [{ number: 50, headRefName: 'lane/500-x', labels: [], files: [] }];
     const policy = { ...BUILD_DISPATCH_POLICY, maxOpenItems: 1 };
-    const r = await runBuildDispatchTick({ live: false, policy, effects: effectsFor({ lockRoot, pid: 1, dispatches, openPrs }) });
+    // xovjhwh — #500's open PR only fills the wip-cap because THIS builder's own settled dispatch-lane record
+    // shows it dispatched #500 (its build finished with the PR still open, #4349's own `pr-opened` outcome).
+    const settledBuilds = [{ num: '500', outcome: 'pr-opened', startedAt: '2026-01-01T00:00:00Z' }];
+    const r = await runBuildDispatchTick({ live: false, policy, effects: effectsFor({ lockRoot, pid: 1, dispatches, openPrs, settledBuilds }) });
     expect(r.plan.openItems).toEqual({ count: 1, cap: 1, nums: ['500'] });
     expect(r.plan.hold.filter((h) => h.rule === 'wip-cap').map((h) => h.num)).toEqual(['3827', '2662']);
     expect(r.plan.hold.find((h) => h.rule === 'wip-cap').reason).toMatch(/500/);
     // this card must never touch the pre-existing display-only field — still the raw durable in-flight list.
     expect(r.plan.inFlight).toEqual([]);
+  });
+
+  // xovjhwh (operator decision 2026-09-29) — the real end-to-end wiring: `runBuildDispatchTick` must derive
+  // `dispatchedByBuilder` from its OWN `listRunStoreInFlight`/`listSettledBuilds` reads and thread it into
+  // `planBuildDispatch`, not just the pure planner in isolation. Live incident this closes: openItems read 7/7
+  // filled by six hand-dispatched worker PRs, so wip-cap held the builder's own cleared items and it built
+  // nothing. (The REAL reader's own fail-open behaviour on an actual read error is pinned separately, against
+  // the real `cliListSettledBuilds`/`cliListRunStoreInFlight`, in the "real readers" describe block below —
+  // converge round 2, correctness/security/claim-accuracy: this planner-level test alone does not exercise
+  // that catch path and was previously miscited as if it did.)
+  it('a hand-dispatched worker\'s open PR (no run-store/settled record from THIS builder) never fills the wip-cap — a builder-dispatched one still does', async () => {
+    const dispatches = [];
+    const openPrs = [
+      { number: 50, headRefName: 'lane/500-x', labels: [], files: [] }, // a worker's PR — this builder has no run record for #500 at all
+      { number: 51, headRefName: 'lane/600-x', labels: [], files: [] }, // this builder's own dispatch, already settled
+    ];
+    const settledBuilds = [{ num: '600', outcome: 'pr-opened', startedAt: '2026-01-01T00:00:00Z' }];
+    const policy = { ...BUILD_DISPATCH_POLICY, maxOpenItems: 1 };
+    const r = await runBuildDispatchTick({ live: false, policy, effects: effectsFor({ lockRoot, pid: 1, dispatches, openPrs, settledBuilds }) });
+    // #500 (worker) is excluded; #600 (builder) alone fills the cap.
+    expect(r.plan.openItems).toEqual({ count: 1, cap: 1, nums: ['600'] });
+    expect(r.plan.hold.filter((h) => h.rule === 'wip-cap').map((h) => h.num)).toEqual(['3827', '2662']);
+  });
+});
+
+// xovjhwh converge round 1 (simplicity/standards-conformance finding) — `runBuildDispatchTick` and `dryRun`
+// both derived `dispatchedByBuilder` inline from the same two reads, which could silently drift if either copy
+// were edited alone. Pulled into `deriveDispatchedByBuilder` and pinned directly here, once, so both call sites
+// stay provably identical without a live-daemon test having to exercise `dryRun` itself.
+describe('deriveDispatchedByBuilder (xovjhwh) — the single derivation runBuildDispatchTick and dryRun both call', () => {
+  it('unions the in-flight run-store nums with the settled-build nums, deduped', () => {
+    const runStoreRows = [{ num: '1' }, { num: '2' }];
+    const settledRows = [{ num: '2', outcome: 'pr-opened' }, { num: '3', outcome: 'gate-red' }];
+    expect(deriveDispatchedByBuilder(runStoreRows, settledRows)).toEqual(new Set(['1', '2', '3']));
+  });
+
+  it('is empty when both reads are empty — no builder-own attribution at all', () => {
+    expect(deriveDispatchedByBuilder([], [])).toEqual(new Set());
+  });
+
+  it('defaults both args to empty arrays and normalizes nums the same way `normNum` does elsewhere', () => {
+    expect(deriveDispatchedByBuilder()).toEqual(new Set());
+    expect(deriveDispatchedByBuilder([{ num: '#042' }], [])).toEqual(new Set(['42']));
+  });
+
+  it('ignores a row with no num rather than adding a falsy/undefined entry', () => {
+    expect(deriveDispatchedByBuilder([{ num: '' }, { num: '7' }], [{}])).toEqual(new Set(['7']));
   });
 });
 
@@ -901,6 +956,25 @@ describe('cliListSettledBuilds / cliListHolds (the real readers, not a stub)', (
 
   it('cliListHolds is empty with no holds placed', () => {
     expect(cliListHolds()).toEqual([]);
+  });
+
+  // xovjhwh converge round 2 (correctness/security/standards-conformance) — `deriveDispatchedByBuilder`'s own
+  // docblock claims these two readers "degrade to `[]` on their own read error... never throw." The
+  // pure-planner tests can only feed already-degraded empty arrays; this drives an ACTUAL read failure through
+  // the REAL readers — `OPERATION_RUNS_DIR` pointed at a plain FILE, so the real store's `readdirSync` throws
+  // ENOTDIR — and pins that both catch it rather than propagating.
+  it('cliListSettledBuilds returns [] rather than throwing when the run-store read genuinely errors (dir is a file)', async () => {
+    const filePath = join(runsDir, 'not-a-directory');
+    writeFileSync(filePath, 'x');
+    process.env.OPERATION_RUNS_DIR = filePath;
+    await expect(cliListSettledBuilds()).resolves.toEqual([]);
+  });
+
+  it('cliListRunStoreInFlight returns [] rather than throwing when the run-store read genuinely errors (dir is a file)', async () => {
+    const filePath = join(runsDir, 'not-a-directory');
+    writeFileSync(filePath, 'x');
+    process.env.OPERATION_RUNS_DIR = filePath;
+    await expect(cliListRunStoreInFlight()).resolves.toEqual([]);
   });
 });
 
