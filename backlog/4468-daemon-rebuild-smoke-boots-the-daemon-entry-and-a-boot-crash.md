@@ -86,7 +86,7 @@ Live, before/after, never against a real daemon:
 ## Follow-ups
 
 - Filed: wire the boot watchdog into a real daemon's actual launch config (choose real N/K from observed real
-  boot times, prove it live on one real daemon's own dedicated clone) — `we:backlog/xmbljjc-wire-the-4468-daemon-boot-crash-loop-supervisor-into-a-real.md`, `blockedBy: 4468`.
+  boot times, prove it live on one real daemon's own dedicated clone) — `we:backlog/4509-wire-the-4468-daemon-boot-crash-loop-supervisor-into-a-real.md`, `blockedBy: 4468`.
 
 ## Done when
 
