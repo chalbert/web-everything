@@ -23,8 +23,40 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import {
   REPO_ROOT, RESTRICTED_PROVIDER_TOOLS, buildRestrictedProviderArgv, createHooksSettingsWriter,
   persistSpawnFailure, acquireLane, resetStaleVerifyMarker, releaseLane, releaseAllPools, resolveLanePath,
-  runVerifyOperation, resolveRunCwd,
+  runVerifyOperation, resolveRunCwd, laneHasCommitAhead,
 } from '../minimal-context-provider.mjs';
+
+// build-orphan-adopt (#4131/#4382) — HALF of the resumability check `deliver-item-wrapper.mjs
+// #runAgentToCompletion`'s `resume` branch uses, and `scripts/conveyor/build-dispatch-orphan-adopt.mjs`'s own
+// `checkResumable` reuses the SAME function rather than re-deriving it.
+describe('laneHasCommitAhead', () => {
+  it('true when the lane has at least one commit ahead of its base', () => {
+    const run = vi.fn(() => '3\n');
+    expect(laneHasCommitAhead({ lane: '/fake/lane-9', run })).toBe(true);
+    expect(run).toHaveBeenCalledWith('git', ['rev-list', '--count', 'main..HEAD'], { cwd: '/fake/lane-9' });
+  });
+
+  it('false when the lane has zero commits ahead', () => {
+    const run = vi.fn(() => '0\n');
+    expect(laneHasCommitAhead({ lane: '/fake/lane-9', run })).toBe(false);
+  });
+
+  it('respects a non-default base', () => {
+    const run = vi.fn(() => '1\n');
+    laneHasCommitAhead({ lane: '/fake/lane-9', base: 'lane/daemon-poc', run });
+    expect(run).toHaveBeenCalledWith('git', ['rev-list', '--count', 'lane/daemon-poc..HEAD'], { cwd: '/fake/lane-9' });
+  });
+
+  it('fails closed (false) when git throws — an unreadable lane is never resumable', () => {
+    const run = vi.fn(() => { throw new Error('not a git repository'); });
+    expect(laneHasCommitAhead({ lane: '/fake/gone', run })).toBe(false);
+  });
+
+  it('fails closed (false) on unparseable output', () => {
+    const run = vi.fn(() => 'not-a-number\n');
+    expect(laneHasCommitAhead({ lane: '/fake/lane-9', run })).toBe(false);
+  });
+});
 
 describe('REPO_ROOT', () => {
   // NOTE, mirroring `deliver-item-wrapper.test.mjs`'s own pre-existing comment on this exact point: this file's

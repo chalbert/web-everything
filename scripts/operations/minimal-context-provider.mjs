@@ -107,6 +107,28 @@ export const run = (cmd, args, opts = {}) => execFileSync(cmd, args, {
   encoding: 'utf8', cwd: resolveRunCwd(), maxBuffer: RUN_MAX_BUFFER_BYTES, ...opts,
 });
 
+/**
+ * build-orphan-adopt (#4131/#4382 fix) — does `lane`'s working tree still hold at least one commit ahead of
+ * its delivery base (`main` by default)? HALF of the resumability check
+ * `deliver-item-wrapper.mjs#runAgentToCompletion`'s `resume` branch uses (the other half is a `done` report —
+ * see that function) — reused as-is by `scripts/conveyor/build-dispatch-orphan-adopt.mjs`, never re-derived,
+ * so both callers agree on what "resumable" means. A report with no surviving commit means the lane was
+ * reset, reclaimed, or reused since the report was written, and resuming from it would hand the
+ * gate/converge/PR steps a diff that no longer exists — worse than starting over. Fails closed (`false`) on
+ * any git error: an unreadable lane is never treated as resumable.
+ * @param {{lane: string, base?: string, run?: Function}} o
+ * @returns {boolean}
+ */
+export function laneHasCommitAhead({ lane, base = 'main', run: runFn = run } = {}) {
+  try {
+    const out = runFn('git', ['rev-list', '--count', `${base}..HEAD`], { cwd: lane });
+    const n = Number(String(out ?? '').trim());
+    return Number.isFinite(n) && n > 0;
+  } catch {
+    return false;
+  }
+}
+
 /** The tool allowlist `--restricted` needs handed back explicitly (verified against the real CLI while writing
  *  `deliver-item-wrapper.mjs`: `--tools=default` does NOT restore what `--restricted` removes — a probe asking
  *  for a Bash call under `--tools=default` came back "no shell tool available"). This is what a minimal-context

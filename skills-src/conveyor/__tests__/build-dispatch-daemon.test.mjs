@@ -247,6 +247,54 @@ describe('runBuildDispatchTick — #4348-open-pr-retry (infra-blocked resume fol
   });
 });
 
+// #4131/#4382 build-orphan-adopt — mirrors the #4348-open-pr-retry suite above: same optional-effect shape
+// (`effects.adoptOrphans`), same LIVE-only/best-effort posture, so the two are asserted the same way.
+describe('runBuildDispatchTick — #4131/#4382 build-orphan-adopt', () => {
+  let lockRoot;
+  beforeEach(() => { lockRoot = mkdtempSync(join(tmpdir(), 'bdd-claims-orphan-')); });
+  afterEach(() => { rmSync(lockRoot, { recursive: true, force: true }); });
+
+  it('a LIVE tick calls effects.adoptOrphans() exactly once, BEFORE this same tick reads its own claims, and '
+    + 'its result rides on the tick report', async () => {
+    const dispatches = [];
+    let calls = 0;
+    const order = [];
+    const effects = {
+      ...effectsFor({ lockRoot, pid: 1, dispatches }),
+      adoptOrphans: async () => { calls += 1; order.push('adopt'); return [{ num: '4131', action: 'resume', reason: 'x', pid: 55555 }]; },
+    };
+    const realListClaims = effects.listClaims;
+    effects.listClaims = () => { order.push('listClaims'); return realListClaims(); };
+    const r = await runBuildDispatchTick({ live: true, effects });
+    expect(calls).toBe(1);
+    expect(r.orphanAdoption).toEqual([{ num: '4131', action: 'resume', reason: 'x', pid: 55555 }]);
+    expect(order[0]).toBe('adopt'); // adoption runs before the tick's own claim read.
+  });
+
+  it('a DRY-RUN tick (live:false) never calls it — a dry run must touch nothing', async () => {
+    const dispatches = [];
+    let calls = 0;
+    const effects = { ...effectsFor({ lockRoot, pid: 1, dispatches }), adoptOrphans: async () => { calls += 1; return []; } };
+    const r = await runBuildDispatchTick({ live: false, effects });
+    expect(calls).toBe(0);
+    expect(r.orphanAdoption).toBeNull();
+  });
+
+  it('an OLDER effects stub with no `adoptOrphans` at all behaves exactly as before this card — no call, no throw', async () => {
+    const dispatches = [];
+    const r = await runBuildDispatchTick({ live: true, effects: effectsFor({ lockRoot, pid: 1, dispatches }) });
+    expect(r.orphanAdoption).toBeNull();
+  });
+
+  it('a THROWING adoption pass never fails this tick\'s own build-dispatch plan — best-effort, captured as `{error}`', async () => {
+    const dispatches = [];
+    const effects = { ...effectsFor({ lockRoot, pid: 1, dispatches }), adoptOrphans: async () => { throw new Error('orphan-adopt: run-store unreadable'); } };
+    const r = await runBuildDispatchTick({ live: true, effects });
+    expect(r.orphanAdoption).toEqual({ error: 'orphan-adopt: run-store unreadable' });
+    expect(r.dispatched.length).toBeGreaterThan(0);
+  });
+});
+
 describe('primaryInfraStoreEnv (#4348-open-pr-retry)', () => {
   let home;
   beforeEach(() => { home = mkdtempSync(join(tmpdir(), 'bdd-home-')); });

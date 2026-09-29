@@ -10,6 +10,7 @@ import { join } from 'node:path';
 import {
   placeBuildDispatchHold, releaseBuildDispatchHold, listBuildDispatchHolds,
   DEFAULT_BUILD_DISPATCH_HOLD_MINUTES,
+  markBuildDispatchResume, readBuildDispatchResume, releaseBuildDispatchResume,
 } from '../build-dispatch-claim.mjs';
 
 describe('build-dispatch hold (#4349 — stops the not-ready re-dispatch loop)', () => {
@@ -63,5 +64,48 @@ describe('build-dispatch hold (#4349 — stops the not-ready re-dispatch loop)',
   it('DEFAULT_BUILD_DISPATCH_HOLD_MINUTES is a real, positive, hours-scale TTL', () => {
     expect(DEFAULT_BUILD_DISPATCH_HOLD_MINUTES).toBeGreaterThan(0);
     expect(DEFAULT_BUILD_DISPATCH_HOLD_MINUTES).toBeGreaterThanOrEqual(60);
+  });
+});
+
+describe('build-dispatch resume marker (#4131/#4382 build-orphan-adopt)', () => {
+  let lockRoot;
+  beforeEach(() => { lockRoot = mkdtempSync(join(tmpdir(), 'bdd-resume-')); });
+  afterEach(() => { rmSync(lockRoot, { recursive: true, force: true }); });
+
+  it('records the resume attempt\'s own pid, readable back for a later liveness check', () => {
+    markBuildDispatchResume({ num: '4131', pid: 12345, lockRoot });
+    const marker = readBuildDispatchResume({ num: '4131', lockRoot });
+    expect(marker).toMatchObject({ pid: 12345, meta: expect.objectContaining({ num: '4131', kind: 'resume', pid: 12345 }) });
+  });
+
+  it('refreshes (never refuses) a second resume marker for the same item — a re-adoption after the first '
+    + 'resume itself died, not a mutex', () => {
+    markBuildDispatchResume({ num: '4131', pid: 111, lockRoot });
+    markBuildDispatchResume({ num: '4131', pid: 222, lockRoot });
+    expect(readBuildDispatchResume({ num: '4131', lockRoot }).pid).toBe(222);
+  });
+
+  it('self-expires after its TTL, and releaseBuildDispatchResume clears it early', () => {
+    markBuildDispatchResume({ num: '4131', pid: 1, lockRoot, ttlMinutes: 10 });
+    const past = Date.now() + 11 * 60_000;
+    expect(readBuildDispatchResume({ num: '4131', lockRoot, nowMs: past, ttlMinutes: 10 })).toBeNull();
+
+    markBuildDispatchResume({ num: '4131', pid: 1, lockRoot });
+    expect(releaseBuildDispatchResume({ num: '4131', lockRoot })).toEqual({ released: true });
+    expect(readBuildDispatchResume({ num: '4131', lockRoot })).toBeNull();
+  });
+
+  it('never collides with a real claim or a hold — separate root + distinct `kind`', async () => {
+    const { acquireBuildDispatchClaim, listBuildDispatchClaims } = await import('../build-dispatch-claim.mjs');
+    const claimRoot = mkdtempSync(join(tmpdir(), 'bdd-resume-claimroot-'));
+    try {
+      acquireBuildDispatchClaim({ num: '4131', scope: [], lockRoot: claimRoot });
+      markBuildDispatchResume({ num: '4131', pid: 1, lockRoot });
+      expect(listBuildDispatchClaims({ lockRoot: claimRoot }).map((c) => c.meta.num)).toEqual(['4131']);
+      expect(readBuildDispatchResume({ num: '4131', lockRoot })).not.toBeNull();
+      expect(listBuildDispatchClaims({ lockRoot })).toEqual([]);
+    } finally {
+      rmSync(claimRoot, { recursive: true, force: true });
+    }
   });
 });

@@ -46,6 +46,8 @@ import {
   listBuildDispatchHolds,
 } from '../../scripts/conveyor/build-dispatch-claim.mjs';
 import { resolveCoordinationRoot } from '../../scripts/operations/coordination-root.mjs';
+// #4131/#4382 build-orphan-adopt — see that module's own header for the mechanism this closes.
+import { adoptOrphanedBuildClaims } from '../../scripts/conveyor/build-dispatch-orphan-adopt.mjs';
 
 export const BUILD_DISPATCH_DAEMON_LEASE_KEY = '<conveyor:build-dispatch-daemon-lease>';
 export const DEFAULT_INTERVAL_MS = 120_000;
@@ -119,8 +121,20 @@ export function readDispatchOutcome(text) {
  *     `effects` stub that predates #4349 (an existing test fixture) simply supplies neither and nothing
  *     about this tick's behaviour changes for it.
  * `live:false` plans and reports without retiring, claiming, or dispatching anything.
+ *
+ * #4131/#4382 build-orphan-adopt — `adoptOrphans()` (optional, LIVE ONLY, best-effort) runs FIRST, before the
+ * retire loop below ever reads `effects.listClaims()`: a claim it releases this same tick is then simply
+ * absent from that read, freeing the item for THIS tick's own dispatch decision rather than waiting a full
+ * cycle. See `scripts/conveyor/build-dispatch-orphan-adopt.mjs`'s own header for the mechanism this closes —
+ * a claim whose recorded dispatch died with none of `doneWhy`'s three retirement signals ever becoming true.
+ * Optional-chained so an older test stub (every fixture that predates this) behaves exactly as before.
  */
 export async function runBuildDispatchTick({ bookkeeping = {}, live = false, policy = BUILD_DISPATCH_POLICY, effects }) {
+  let orphanAdoption = null;
+  if (live && typeof effects.adoptOrphans === 'function') {
+    try { orphanAdoption = await effects.adoptOrphans(); }
+    catch (e) { orphanAdoption = { error: String(e?.message || e).split('\n')[0] }; }
+  }
   const out = await effects.planTick(bookkeeping);
   const d = out?.decisions || {};
   const admission = d.admission || {};
@@ -240,6 +254,10 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
     // #4348-open-pr-retry — `{retried, resumed, surfaced, waiting}` from `infra-blocked.mjs retry` (or an
     // `{error}` on a best-effort failure), `null` on a dry-run tick or an older effects stub with no such call.
     infraRetry,
+    // #4131/#4382 build-orphan-adopt — the array `adoptOrphanedBuildClaims()` returned (`{num, action, reason}`
+    // per live claim), or an `{error}` on a best-effort failure, `null` on a dry-run tick or an older effects
+    // stub with no such call.
+    orphanAdoption,
     nextBookkeeping: settleBookkeeping(bookkeeping, out?.nextState || {}, dispatched.map((x) => x.num)),
   };
 }
@@ -455,6 +473,9 @@ function cliEffects() {
     dispatch: cliDispatch,
     // #4348-open-pr-retry — only called by `runBuildDispatchTick` when `live` (never on a `--dry-run` tick).
     retryInfraBlocked: cliRetryInfraBlocked,
+    // #4131/#4382 build-orphan-adopt — only called by `runBuildDispatchTick` when `live`, and BEFORE this same
+    // tick's own claim retirement read — see that function's own docblock.
+    adoptOrphans: () => adoptOrphanedBuildClaims(),
   };
 }
 
@@ -596,7 +617,7 @@ async function live(flags) {
     tickOnce, sleep: realSleep, isAlive, intervalMs, maxTicks: flags.once ? 1 : Infinity,
     onTick: (r) => {
       if (!r || !r.plan) { console.error(`build-dispatch-daemon: tick skipped (${r?.reason ?? 'self-sync'})`); return; }
-      process.stdout.write(`${JSON.stringify({ at: new Date().toISOString(), status: r.statusLine, freeze: r.plan.freeze, inFlight: r.plan.inFlight.map((f) => f.num), openItems: reportOpenItems(r.plan.openItems), dispatched: r.dispatched, hold: r.plan.hold, dispatchHolds: r.dispatchHolds, failures: r.failures, retired: r.retired, infraRetry: r.infraRetry })}\n`);
+      process.stdout.write(`${JSON.stringify({ at: new Date().toISOString(), status: r.statusLine, freeze: r.plan.freeze, inFlight: r.plan.inFlight.map((f) => f.num), openItems: reportOpenItems(r.plan.openItems), dispatched: r.dispatched, hold: r.plan.hold, dispatchHolds: r.dispatchHolds, failures: r.failures, retired: r.retired, infraRetry: r.infraRetry, orphanAdoption: r.orphanAdoption })}\n`);
     },
     onTickError: (e) => console.error(`build-dispatch-daemon: tick failed (non-fatal): ${String(e?.message || e).split('\n')[0]}`),
   });

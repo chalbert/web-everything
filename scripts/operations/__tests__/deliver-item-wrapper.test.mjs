@@ -1928,6 +1928,70 @@ describe('runAgentToCompletion (#3627 bug 5 — real UUID session id, never sess
   });
 });
 
+// build-orphan-adopt (#4131/#4382 fix) — `resume: true` skips the agent turn entirely when the PRIOR attempt's
+// own `done` report is still there AND the lane still holds the commit it describes; it never spawns
+// `provider.spawn`, which is the whole point (a resume must never re-run the agent — see this file's own
+// docblock on `runAgentToCompletion`).
+describe('runAgentToCompletion — resume branch (build-orphan-adopt, #4131/#4382 fix)', () => {
+  const fakeResolveLane = () => '/fake/pool/lane-9';
+
+  it('returns the existing report and never calls provider.spawn when the lane still has the commit', async () => {
+    const provider = { spawn: vi.fn() };
+    const doneReport = { status: 'done', outcome: 'done', filesTouched: ['a.mjs'] };
+    const readReport = vi.fn(() => doneReport);
+    const isLaneCommitAhead = vi.fn(() => true);
+
+    const report = await runAgentToCompletion(
+      { item: '4131', sessionSlug: 'conveyor-4131', lane: 9, attemptTag: '', claudeSessionId: 'x', provider, resume: true },
+      { readReport, resolveLane: fakeResolveLane, isLaneCommitAhead },
+    );
+
+    expect(report).toBe(doneReport);
+    expect(provider.spawn).not.toHaveBeenCalled();
+    expect(readReport).toHaveBeenCalledWith('conveyor-4131', expect.any(String));
+    expect(isLaneCommitAhead).toHaveBeenCalledWith({ lane: '/fake/pool/lane-9', run: expect.any(Function) });
+  });
+
+  it('throws (never falls back to a fresh spawn) when the report says done but the lane has no commit ahead '
+    + '— the lane was reset/reused since the report was written', async () => {
+    const provider = { spawn: vi.fn() };
+    const readReport = vi.fn(() => ({ status: 'done', outcome: 'done', filesTouched: ['a.mjs'] }));
+    await expect(runAgentToCompletion(
+      { item: '4131', sessionSlug: 'conveyor-4131', lane: 9, attemptTag: '', claudeSessionId: 'x', provider, resume: true },
+      { readReport, resolveLane: fakeResolveLane, isLaneCommitAhead: () => false },
+    )).rejects.toThrow(/nothing to resume from/);
+    expect(provider.spawn).not.toHaveBeenCalled();
+  });
+
+  it('throws when there is no report at all to resume from', async () => {
+    const provider = { spawn: vi.fn() };
+    await expect(runAgentToCompletion(
+      { item: '4131', sessionSlug: 'conveyor-4131', lane: 9, attemptTag: '', claudeSessionId: 'x', provider, resume: true },
+      { readReport: () => null, resolveLane: fakeResolveLane, isLaneCommitAhead: () => true },
+    )).rejects.toThrow(/nothing to resume from/);
+    expect(provider.spawn).not.toHaveBeenCalled();
+  });
+
+  it('a non-`done` report (e.g. `blocked`) is not resumable either', async () => {
+    const provider = { spawn: vi.fn() };
+    await expect(runAgentToCompletion(
+      { item: '4131', sessionSlug: 'conveyor-4131', lane: 9, attemptTag: '', claudeSessionId: 'x', provider, resume: true },
+      { readReport: () => ({ status: 'blocked' }), resolveLane: fakeResolveLane, isLaneCommitAhead: () => true },
+    )).rejects.toThrow(/nothing to resume from/);
+    expect(provider.spawn).not.toHaveBeenCalled();
+  });
+
+  it('resume defaults to false — every existing (pre-#4131 fix) call is unaffected', async () => {
+    const provider = { spawn: vi.fn() };
+    const readReport = vi.fn(() => ({ status: 'done', outcome: 'done', filesTouched: [] }));
+    await runAgentToCompletion(
+      { item: '1234', sessionSlug: 'conveyor-1234', lane: 7, attemptTag: '', provider, claudeSessionId: 'x' },
+      { readBrief: () => 'x', readReport, loadItems: () => [{ num: '1234', slug: 'do-the-thing', scope: [] }], resolveLane: fakeResolveLane },
+    );
+    expect(provider.spawn).toHaveBeenCalledTimes(1); // the ordinary fresh-spawn path, unchanged.
+  });
+});
+
 describe('runConvergeEdit (#3627 bug 5 — real UUID session id, not the old readable per-round string)', () => {
   it('spawns with a real-UUID --session-id, never the old `${item}-converge-editor-r${round}` literal', () => {
     const run = vi.fn(() => JSON.stringify({ result: JSON.stringify({ advanced: true, dismissed: [] }) }));

@@ -149,7 +149,7 @@ import { findUnmarkedLocusRefs } from '../check-standards-rules.mjs';
 import {
   REPO_ROOT, run, RESTRICTED_PROVIDER_TOOLS, buildRestrictedProviderArgv, createHooksSettingsWriter,
   persistSpawnFailure, acquireLane, resetStaleVerifyMarker, releaseLane, releaseAllPools, resolveLanePath,
-  runVerifyOperation,
+  runVerifyOperation, laneHasCommitAhead,
 } from './minimal-context-provider.mjs';
 // #3580 — the REAL Codex implementation of the `DeliveryAgentProvider` port below. Its own file header carries
 // the full live-verification trail (which flags, which invocation blocks, and what replaces the Claude-only
@@ -169,6 +169,7 @@ import { taskTypeFor } from '../lib/dispatch-task-type.mjs';
 // home) keeps working unchanged — the extraction moved WHERE they are defined, never what imports them.
 export {
   acquireLane, resetStaleVerifyMarker, resolveLanePath, runVerifyOperation, buildRestrictedProviderArgv,
+  laneHasCommitAhead,
 };
 
 // #xu2pp2m — `RESTRICTED_PROVIDER_TOOLS` now imported from `./minimal-context-provider.mjs` (see the import
@@ -319,7 +320,10 @@ export async function deliverItem(launch, provider = CLAUDE_RESTRICTED_PROVIDER,
   // dispatch sink. Either absent — an older dispatch, a hand-built test launch, a resumed dispatch that
   // predates this — and `settleTerminal` below just skips the run-store settle; it still releases/holds the
   // real build-dispatch claim this process took, because that claim exists whether or not a run-store row does.
-  const { item, lane, scope, sessionSlug, attemptTag, runId, effectKey } = launch;
+  // build-orphan-adopt (#4131/#4382 fix) — `resume` (default false) rides straight through to
+  // `runAgentToCompletion`'s own `resume` branch below; every other caller (every existing dispatch) never
+  // sets it, so `deliverItem` is byte-identical for them.
+  const { item, lane, scope, sessionSlug, attemptTag, runId, effectKey, resume = false } = launch;
 
   // Every terminal exit funnels through here (alongside `finish()`, never instead of it): settle this
   // delivery's own run-store effect with the outcome just produced, and — for a non-PR outcome only — release
@@ -451,7 +455,7 @@ export async function deliverItem(launch, provider = CLAUDE_RESTRICTED_PROVIDER,
     let report;
     try {
       report = await runAgentToCompletion({
-        item, sessionSlug, lane, attemptTag, provider, claudeSessionId, lanePathOverride: implLanePath,
+        item, sessionSlug, lane, attemptTag, provider, claudeSessionId, lanePathOverride: implLanePath, resume,
       });
       turn.ok({
         outcome: report && report.outcome ? String(report.outcome) : 'unreported',
@@ -1357,6 +1361,16 @@ export async function runAgentToCompletion(
     // resolveLane(lane)` — see either `spawn`'s own docblock) and re-used below so THIS function's own
     // report-read resolves the SAME directory the spawn actually wrote to.
     lanePathOverride = null,
+    // build-orphan-adopt (#4131/#4382 fix) — true when this call is RESUMING an attempt whose own detached
+    // wrapper died before it could settle anything further (see
+    // scripts/conveyor/build-dispatch-orphan-adopt.mjs). A resume NEVER spawns a fresh agent turn — it trusts
+    // the PRIOR attempt's own `done` report, provided the lane still holds the commit that report describes.
+    // Neither check alone is enough evidence a prior attempt actually finished: a report with no surviving
+    // commit means the lane was reset/reused since; a commit with no report means the agent never sent one (a
+    // crash mid-turn) — either way this throws rather than guess at a synthetic report, and the caller (the
+    // orphan-adopt pass) is expected to have already decided resumability BEFORE spawning this resume, so the
+    // throw here is a defensive fallback, not the primary path.
+    resume = false,
   },
   {
     readBrief = () => readFileSync(`${REPO_ROOT}/skills-src/conveyor/delivery-agent-brief-v2.md`, 'utf8'),
@@ -1365,8 +1379,30 @@ export async function runAgentToCompletion(
     resolveReportsDir = resolveDeliveryReportsDir,
     run: runFn = run,
     loadItems,
+    isLaneCommitAhead = laneHasCommitAhead,
   } = {},
 ) {
+  // #3383 mechanical-dispatcher fix — read back from the SAME lane-scoped directory the provider itself just
+  // resolved and handed to the spawned agent (see `CLAUDE_RESTRICTED_PROVIDER.spawn`/`CODEX_PROVIDER.spawn`),
+  // never this process's own script-location default — which is always the primary checkout, not the lane.
+  // `resolveLane`/`resolveReportsDir` mirror the exact same seams each provider already uses, so a test can
+  // assert on this independently of which provider ran. Resolved up front (rather than only after the fresh
+  // spawn below) so the `resume` branch can use it too — a pure function of `lane`/`lanePathOverride`, so
+  // moving it earlier changes nothing about what it resolves to for the pre-existing, non-resume path.
+  const lanePath = lanePathOverride || resolveLane(lane, { run: runFn });
+  const reportsDir = resolveReportsDir(lanePath);
+
+  if (resume) {
+    const existing = readReport(sessionSlug, reportsDir);
+    if (existing && existing.status === 'done' && isLaneCommitAhead({ lane: lanePath, run: runFn })) {
+      return existing;
+    }
+    throw new Error(
+      `deliver-item-wrapper: --resume requested for ${sessionSlug} but no resumable done report + lane commit `
+      + `was found under ${lanePath} — nothing to resume from`,
+    );
+  }
+
   const briefTemplate = readBrief();
   const prompt = fillMinimalBrief(briefTemplate, { item, sessionSlug, lane, attemptTag }, { loadItems }); // SKETCH — see below
 
@@ -1377,13 +1413,6 @@ export async function runAgentToCompletion(
     sessionId: claudeSessionId, prompt, lane, sessionSlug, item, attemptTag, lanePathOverride,
   }); // AWAITS — see DeliveryAgentProvider's own docblock.
 
-  // #3383 mechanical-dispatcher fix — read back from the SAME lane-scoped directory the provider itself just
-  // resolved and handed to the spawned agent (see `CLAUDE_RESTRICTED_PROVIDER.spawn`/`CODEX_PROVIDER.spawn`),
-  // never this process's own script-location default — which is always the primary checkout, not the lane.
-  // `resolveLane`/`resolveReportsDir` mirror the exact same seams each provider already uses, so a test can
-  // assert on this independently of which provider ran.
-  const lanePath = lanePathOverride || resolveLane(lane, { run: runFn });
-  const reportsDir = resolveReportsDir(lanePath);
   const report = readReport(sessionSlug, reportsDir);
   if (!report || report.status !== 'done') {
     // The agent's process exited without ever sending a `done` report — a crash, per #3436's own precedent.
