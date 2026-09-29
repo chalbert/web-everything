@@ -1150,7 +1150,15 @@ describe('run-rating.mjs CLI `report` — prepared-vs-unprepared table (#4304)',
         row({ item: 2, dispatchKind: 'fix', grade: 'C', wallMs: 1_200_000, prepared: false }),
       ],
     }, null, 2));
-    const env = { ...process.env, CONVEYOR_STATE_ROOT: root };
+    // #4473 ci-heal — point the coverage scanners at empty temp roots too (their existing env overrides), so the
+    // subprocess never walks the host's real transcript history: on a busy host (~4 GB of `~/.claude/projects`)
+    // that scan alone ran ~46s, past the 30s spawn timeout below.
+    const env = {
+      ...process.env,
+      CONVEYOR_STATE_ROOT: root,
+      WE_CLAUDE_PROJECTS_DIR: join(root, 'claude-projects'),
+      WE_WORKSPACE_ROOT: join(root, 'workspace'),
+    };
     const jsonOut = execFileSync('node', [CLI, 'report', '--json'], { encoding: 'utf8', env, timeout: 30_000 });
     const report = JSON.parse(jsonOut);
     expect(report.prepared.prepared).toMatchObject({ count: 1, avgWallMs: 600_000, gradeCounts: { A: 1, B: 0, C: 0, D: 0 } });
