@@ -3,6 +3,7 @@ bornAs: xri0853
 kind: story
 size: 5
 priority: high
+tier: pinned
 status: open
 blockedBy: ["4309"]
 scope: ["we:scripts/lib/gh-spend.mjs", "we:scripts/lib/gh-throttle.mjs", "we:scripts/lib/review-label-provider.mjs", "we:scripts/conveyor/pr-watch.mjs", "we:scripts/conveyor/ci-queue-watch.mjs", "we:scripts/conveyor/parked-pr-conflict-watch.mjs", "we:scripts/wait-green.mjs"]
@@ -13,6 +14,15 @@ tags: []
 # Move the heaviest GitHub reads to REST, guided by #4309 spend data
 
 Once #4309 attributes GraphQL spend per caller and op (`we:scripts/lib/gh-spend.mjs report --by=caller+op`), use that report to move the highest-cost, highest-volume GraphQL reads onto REST calls instead — REST and GraphQL are billed against separate primary buckets, so the same read done via REST spends none of the GraphQL budget the 2026-09-27 incident exhausted. This is a data-guided follow-up, not a guess: it waits for a few busy hours of #4309's real numbers before picking which callers to convert, rather than assuming today.
+
+## Operator direction (2026-09-28, ~9:20 PM ET): all reads on REST, with conditional requests
+
+Live trigger: at 9:11 PM ET the App installation's GraphQL bucket ran out and the drain stopped (pass exit 4, `rate-limited`) while the REST core bucket sat at 6100/6100. The operator asked whether all requests can use plain REST and approved this direction. It widens the goal from "the top 1-3 spenders" to "reads default to REST", keeping the data-guided order for which callers go first:
+
+- **GraphQL stays only for GraphQL-only mutations:** `markPullRequestReadyForReview` (draft promote) and `enablePullRequestAutoMerge`. Every read with a REST equivalent moves (pr list/view, labels, checks, files, comments).
+- **ETag conditional requests (Must).** Send `If-None-Match` with a cached ETag, stored on disk and keyed by URL + identity. An unchanged answer returns `304 Not Modified`, which does not count against the REST limit. The daemons mostly re-poll PRs that haven't changed, so this is the largest saving and it answers this card's "REST could become the new bottleneck" risk. Put it in the shared read path (`we:scripts/lib/gh-throttle.mjs` or a small REST read helper next to it) so every converted caller gets it, not per call site.
+- **Extra proof:** the spend report or the throttle log shows 304 hits for the converted callers. One drain pass and one review-daemon tick run with GraphQL spend near zero.
+- **Follow-up (not MVP):** webhook-driven invalidation of the ETag cache.
 
 ## Why this is blocked by #4309, concretely
 
