@@ -67,7 +67,7 @@ related we:scripts/merge-ai-prs.mjs we:scripts/__tests__/merge-ai-prs-listing-de
 
 ## Follow-ups
 
-- **we:xejvuqt** (blockedBy #4108) — add an end-to-end integration test proving a REAL cross-base or unlabelled
+- **we:4528** (blockedBy #4108) — add an end-to-end integration test proving a REAL cross-base or unlabelled
   carrier PR (via `listOne`'s actual return, not a hand-built stub) stays visible to the reused RECONCILE
   context through the couple gate's `held`/`deferred` verdict. Surfaced repeatedly by independent converge
   panel/red-team rounds as a real but parallelizable gap (never a blocker per the loop's own disposition rule),
