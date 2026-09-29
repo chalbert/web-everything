@@ -10,7 +10,8 @@
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, posix } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { afterEach, describe, it, expect, vi } from 'vitest';
 
@@ -581,6 +582,25 @@ describe('isReviewCodePath (#4387)', () => {
       'scripts/lib/__tests__/review-core.test.mjs', 'docs/review/x.mjs', '', null, undefined,
     ].some(isReviewCodePath)).toBe(false);
   });
+  // PR #2916 review: the dispatcher's own direct imports (provider routing, session isolation, the gh shim in
+  // dispatch-lane-io) were left off the path, so a clone behind only in those files dispatched with stale
+  // sandbox code. Fail closed: a new relative import of any review entry file reddens this until it is listed.
+  it('covers every relative import of the review entry files (fail closed on a new import)', () => {
+    const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+    const entries = [
+      'scripts/operations/review-dispatch.mjs', 'scripts/operations/review-pr.mjs',
+      'scripts/operations/cli-adapter.mjs', 'scripts/operations/review-loop-cli.mjs',
+    ];
+    const missing = [];
+    for (const entry of entries) {
+      const src = readFileSync(join(repoRoot, entry), 'utf8');
+      for (const m of src.matchAll(/(?:\bfrom\s+|\bimport\s*\(\s*|^\s*import\s+)['"](\.{1,2}\/[^'"]+)['"]/gm)) {
+        const target = posix.normalize(posix.join(posix.dirname(entry), m[1]));
+        if (!isReviewCodePath(target)) missing.push(`${entry} → ${target}`);
+      }
+    }
+    expect(missing).toEqual([]);
+  });
 });
 
 describe('dispatchReview — managed clone behind origin/main (#4387)', () => {
@@ -636,6 +656,12 @@ describe('dispatchReview — managed clone behind origin/main (#4387)', () => {
 
   it('behind in a review-path file: still refuses, before spawning', () => {
     const root = behindClone('scripts/lane-pool.mjs', 'scripts/operations/review-pr.mjs');
+    managed();
+    expect(() => run(root)).toThrow(/2 commit\(s\) behind origin\/main.*STALE code from this checkout/s);
+  });
+
+  it('behind only in the dispatcher\'s sandbox/routing imports: still refuses (PR #2916 review)', () => {
+    const root = behindClone('scripts/operations/dispatch-lane-io.mjs', 'scripts/lib/dispatch-bg-isolation.mjs');
     managed();
     expect(() => run(root)).toThrow(/2 commit\(s\) behind origin\/main.*STALE code from this checkout/s);
   });

@@ -407,9 +407,28 @@ export function fillReviewBrief(template, values = {}) {
  *  provider adapter, the lib judge/jury/review modules, and the staleness guard itself. A managed clone behind
  *  `origin/main` only in files outside this set still dispatches a review (see `assertMainNotStale`'s
  *  `dispatchPath`). A declared list, not the full import closure: that closure reaches ~190 files (the backlog,
- *  lane-pool and conveyor libraries), so nearly every landed PR would touch it and the guard would keep refusing. */
+ *  lane-pool and conveyor libraries), so nearly every landed PR would touch it and the guard would keep refusing.
+ *  It does include EVERY direct import of the four review entry files (this dispatcher, review-pr, cli-adapter,
+ *  review-loop-cli) — the sandbox (dispatch-lane-io's gh shim and argv, dispatch-bg-isolation), seat/model routing
+ *  and the operation engine. A clone behind in one of those must refuse (PR #2916 review). The
+ *  `isReviewCodePath (#4387)` test reddens when an entry file gains an import this set does not cover. */
 const REVIEW_CODE_PATH_RE = /^scripts\/(operations|lib|conveyor)\/[^/]*(review|judge|jury)[^/]*$/;
-const REVIEW_CODE_PATH_FILES = new Set(['scripts/operations/cli-adapter.mjs', 'scripts/lib/main-staleness.mjs']);
+const REVIEW_CODE_PATH_FILES = new Set([
+  'scripts/operations/cli-adapter.mjs', 'scripts/lib/main-staleness.mjs',
+  // the dispatcher's own imports: sandbox, session isolation, routing, repo resolution
+  'scripts/operations/dispatch-lane-io.mjs', 'scripts/lib/dispatch-bg-isolation.mjs',
+  'scripts/lib/provider-routing.mjs', 'scripts/lib/codex-model-routing.mjs', 'scripts/lib/constellation-repos.mjs',
+  'scripts/lib/repo-profile.mjs', 'scripts/lib/write-all-sync.mjs',
+  // the operation engine review-pr / cli-adapter / review-loop-cli run on
+  'scripts/operations/engine.mjs', 'scripts/operations/effect-executor.mjs', 'scripts/operations/registry.mjs',
+  'scripts/operations/run-record.mjs', 'scripts/operations/run-store.mjs', 'scripts/operations/run.mjs',
+  'scripts/operations/scaffold-io.mjs', 'scripts/operations/step-kinds.mjs',
+  // review-pr's remaining direct imports
+  'scripts/codex-direct-task.mjs', 'scripts/review-core-cli.mjs', 'scripts/review-set-label.mjs',
+  'scripts/lib/advisory-labels.mjs', 'scripts/lib/model-probation.mjs', 'scripts/lib/pr-liveness.mjs',
+  'scripts/conveyor/advisory-round-count.mjs', 'scripts/conveyor/learnings-drop.mjs',
+  'scripts/conveyor/run-scorecard-store.mjs',
+]);
 
 /** PURE — is `path` (repo-relative) on the review code path? */
 export function isReviewCodePath(path) {
