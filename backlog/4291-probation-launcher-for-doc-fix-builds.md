@@ -85,9 +85,9 @@ lane and attributes its scorecard row correctly; and — after two rounds of try
 dangerous paths (statute docs, then `we:CLAUDE.md`/`we:AGENTS.md`, then `we:GEMINI.md`) — replacing the
 denylist with an ALLOWLIST: the worker may touch only the item's own declared `scope:`, and an item with no
 declared scope is refused outright before any worker runs. Two follow-ups were filed rather than half-done in
-this item: `we:backlog/x7ed2p0-*.md` (wire or drop the two run scripts' dead `--dry-run` flag) and
-`we:backlog/xu82c3s-*.md` (share their duplicated git-helper io). A third,
-`we:backlog/x55dojc-*.md` (harden both run scripts against a worker planting a git hook or gitignored
+this item: `we:backlog/4402-*.md` (wire or drop the two run scripts' dead `--dry-run` flag) and
+`we:backlog/4404-*.md` (share their duplicated git-helper io). A third,
+`we:backlog/4401-*.md` (harden both run scripts against a worker planting a git hook or gitignored
 config), is a real, pre-existing risk the ALREADY-LANDED ci-heal launcher shares identically — accepted for
 ci-heal on 2026-09-27, not introduced or worsened by this item, and not fixable by a doc-fix-only patch.
 

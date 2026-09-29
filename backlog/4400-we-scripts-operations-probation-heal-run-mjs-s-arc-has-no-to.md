@@ -1,7 +1,8 @@
 ---
+bornAs: x3j03qu
 kind: task
 status: active
-scaffoldedBy: "conveyor-x55dojc-lane-38"
+scaffoldedBy: "conveyor-4401-lane-38"
 dateScaffolded: "2026-09-28"
 scope: ["we:scripts/operations/probation-heal-run.mjs"]
 dateOpened: "2026-09-28"
