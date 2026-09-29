@@ -33,6 +33,8 @@ import {
   primaryInfraStoreEnv, cliRetryInfraBlocked,
   // #4464 builder-cap-machine-wide
   cliPlanTick, BUILD_DAEMON_LANE_CAP_EXEMPT_VALUE,
+  // #4517 — infra-retry call bound
+  INFRA_RETRY_TIMEOUT_MS, DEFAULT_INTERVAL_MS,
   // #4465 build-dispatch-hold-router
   cliRouteHeldItems, cliSpawnHoldLand,
   // xovjhwh — the shared attribution derivation `runBuildDispatchTick` and `dryRun` both call
@@ -661,6 +663,105 @@ describe('cliRetryInfraBlocked — passes the primary store path to the child re
   it('a throwing exec is captured as `{error}`, never thrown', () => {
     const r = cliRetryInfraBlocked({ exec: () => { throw new Error('boom'); }, env: {}, home });
     expect(r.error).toMatch(/boom/);
+  });
+});
+
+describe('cliRetryInfraBlocked — bounds the child so a slow retry can never stall a whole tick (#4517)', () => {
+  it('the default bound leaves real headroom inside the daemon tick interval', () => {
+    expect(INFRA_RETRY_TIMEOUT_MS).toBeLessThan(DEFAULT_INTERVAL_MS);
+  });
+
+  it('passes `timeout` (and a `killSignal`) through to exec, defaulting to INFRA_RETRY_TIMEOUT_MS', () => {
+    let capturedOpts;
+    cliRetryInfraBlocked({ exec: (c, a, o) => { capturedOpts = o; return '{}'; }, env: {}, home: '/x' });
+    expect(capturedOpts.timeout).toBe(INFRA_RETRY_TIMEOUT_MS);
+    expect(capturedOpts.killSignal).toBe('SIGTERM');
+  });
+
+  it('an explicit `timeoutMs` override reaches exec as its `timeout` option', () => {
+    let capturedOpts;
+    cliRetryInfraBlocked({ exec: (c, a, o) => { capturedOpts = o; return '{}'; }, env: {}, home: '/x', timeoutMs: 5000 });
+    expect(capturedOpts.timeout).toBe(5000);
+  });
+
+  // Simulates real `execFileSync` timeout semantics without a real subprocess: if the caller's bound is
+  // tighter than the work the child would otherwise take, the fake `exec` only "runs" for the bound, then
+  // throws the same shape a real timed-out execFileSync throws (`err.signal === 'SIGTERM'`). If no bound
+  // (or a looser one) is given, it runs the full duration and returns normally. Small ms values keep this
+  // test fast and deterministic while still exercising real wall-clock timing.
+  function fakeExecRespectingTimeout(slowMs) {
+    return (cmd, args, opts) => {
+      const bound = opts?.timeout;
+      const boundBites = typeof bound === 'number' && bound < slowMs;
+      const wait = boundBites ? bound : slowMs;
+      const start = Date.now();
+      while (Date.now() - start < wait) { /* busy-wait: models execFileSync's real blocking wait */ }
+      if (boundBites) {
+        const err = new Error(`command timed out after ${bound}ms`);
+        err.signal = 'SIGTERM';
+        throw err;
+      }
+      return JSON.stringify({ retried: [], resumed: [], surfaced: [], waiting: [] });
+    };
+  }
+
+  it('a retry that would otherwise run 5x the bound is cut short near the bound, not left to run to completion', () => {
+    const exec = fakeExecRespectingTimeout(250); // "would take" 250ms unbounded
+    const start = Date.now();
+    const result = cliRetryInfraBlocked({ exec, env: {}, home: '/x', timeoutMs: 50 });
+    const elapsed = Date.now() - start;
+    expect(elapsed).toBeLessThan(200); // well short of the full 250ms the slow retry would have taken
+    expect(result.timedOut).toBe(true);
+  });
+
+  it('a retry well under the bound completes normally and is unaffected', () => {
+    const exec = fakeExecRespectingTimeout(10);
+    const result = cliRetryInfraBlocked({ exec, env: {}, home: '/x', timeoutMs: 50 });
+    expect(result).toEqual({ retried: [], resumed: [], surfaced: [], waiting: [] });
+    expect(result.timedOut).toBeUndefined();
+  });
+
+  // Review finding (converge round 1, correctness/security/standards-conformance/claim-accuracy lenses, all
+  // independently): every test above models the bound with a hand-written fake `exec`, never a real
+  // `execFileSync`, so nothing proves the SIGTERM timeout genuinely returns control — especially when the
+  // direct child is itself synchronously blocked inside its OWN nested `execFileSync` call to a grandchild
+  // (exactly `infra-blocked.mjs retry`'s own shape: it waits on `pr-land --label-on-green` via its own
+  // independently-piped `execFileSync`, never inheriting this call's pipes — see `infra-blocked.mjs`'s own
+  // `stdio: ['ignore', 'pipe', 'pipe']` call to `pr-land.mjs`). This test builds that exact two-level real
+  // process tree (no fakes) and proves `execFileSync`'s own `timeout`/`killSignal` option bounds it near the
+  // bound, not the grandchild's full (much longer) sleep — the actual OS-level property every fake-exec test
+  // above only assumes.
+  it('a REAL two-level process tree — a child synchronously blocked in its own execFileSync call to an '
+    + 'independently-piped grandchild, mirroring infra-blocked.mjs\'s own call to pr-land — is still bounded by '
+    + 'execFileSync\'s timeout, not left to run the grandchild\'s full sleep (#4517)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'infra-retry-real-tree-'));
+    try {
+      const grandchild = join(dir, 'grandchild.mjs');
+      const child = join(dir, 'child.mjs');
+      // The "CI wait" stand-in — deliberately far longer than the bound below.
+      writeFileSync(grandchild, 'await new Promise((r) => setTimeout(r, 5000));\n');
+      // Mirrors infra-blocked.mjs's OWN pattern exactly: a synchronous execFileSync call to a further child,
+      // with its OWN independent stdio pipes (never inherited from whoever calls THIS script).
+      writeFileSync(child,
+        "import { execFileSync } from 'node:child_process';\n"
+        + `execFileSync(${JSON.stringify(process.execPath)}, [${JSON.stringify(grandchild)}], `
+        + "{ stdio: ['ignore', 'pipe', 'pipe'] });\n");
+      const start = Date.now();
+      let timedOut = false;
+      try {
+        execFileSync(process.execPath, [child], { stdio: ['ignore', 'pipe', 'pipe'], timeout: 300, killSignal: 'SIGTERM' });
+      } catch (e) {
+        timedOut = e.signal === 'SIGTERM';
+      }
+      const elapsed = Date.now() - start;
+      expect(timedOut).toBe(true);
+      // Well short of the grandchild's 5000ms sleep — the real, unfaked proof that the bound returns control
+      // even through a nested, independently-piped child process, addressing the panel's "only a fake exec"
+      // finding with an actual subprocess rather than another model of one.
+      expect(elapsed).toBeLessThan(4000);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

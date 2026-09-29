@@ -57,6 +57,11 @@ import { MAX_CONCURRENT_LANES_ENV } from '../../scripts/lib/lane-concurrency.mjs
 
 export const BUILD_DISPATCH_DAEMON_LEASE_KEY = '<conveyor:build-dispatch-daemon-lease>';
 export const DEFAULT_INTERVAL_MS = 120_000;
+// #4517 — bounds cliRetryInfraBlocked's execFileSync so a slow `pr-land --label-on-green` CI wait inside
+// `infra-blocked.mjs retry` can never stall a whole daemon tick past this. Well under DEFAULT_INTERVAL_MS
+// (120_000ms) so the rest of the tick (dispatch, liveness, claims) always keeps real headroom. A retry that
+// times out is simply retried next tick — idempotent, matching #2659's own backoff design; nothing is lost.
+export const INFRA_RETRY_TIMEOUT_MS = 60_000;
 export const KILL_SWITCH_ENV = 'WE_BUILD_DAEMON_KILL';
 export const KILL_SWITCH_FILENAME = 'build-dispatch-daemon.kill';
 
@@ -532,16 +537,34 @@ export function primaryInfraStoreEnv({ env = process.env, home = homedir() } = {
  * malformed/unparseable result or a spawn failure never throws past this function — {@link runBuildDispatchTick}
  * already wraps its own call in try/catch, but this stays defensive on its own too, matching every other
  * `cli*` shell function in this file. `exec`/`env`/`home` are injectable so a test can assert the child env
- * really carries the primary store path (that env line IS the #4348 fix). */
-export function cliRetryInfraBlocked({ exec = execFileSync, env = process.env, home = homedir() } = {}) {
+ * really carries the primary store path (that env line IS the #4348 fix).
+ *
+ * #4517 — `timeoutMs` (default {@link INFRA_RETRY_TIMEOUT_MS}) bounds the child via `execFileSync`'s own
+ * `timeout`/`killSignal` options, so a slow nested `pr-land --label-on-green` CI wait can never block this call
+ * — and therefore the daemon tick that `await`s it — past that bound. A killed-on-timeout result carries
+ * `timedOut: true` (detected from `e.signal === 'SIGTERM'` or `e.code === 'ETIMEDOUT'`) so a caller/log can tell
+ * a bound-triggered stop apart from a real spawn/parse error; either way the retry is simply retried next tick
+ * (idempotent — #2659's own backoff design already tolerates a repeated attempt). This bounds ONLY the direct
+ * `node infra-blocked.mjs retry` child; a `pr-land` grandchild it may itself be waiting on is not signaled and
+ * can outlive the bound as a harmless orphan (its own stdio is independently piped by `infra-blocked.mjs`'s own
+ * `execFileSync` call, never inherited from this one, so an orphaned grandchild cannot hold this call's pipes
+ * open or delay its return — see this file's own test for a real, non-fake-exec proof of exactly that shape). */
+export function cliRetryInfraBlocked({
+  exec = execFileSync, env = process.env, home = homedir(), timeoutMs = INFRA_RETRY_TIMEOUT_MS,
+} = {}) {
   try {
     const text = exec('node', [join(SCRIPTS, 'conveyor', 'infra-blocked.mjs'), 'retry'], {
       encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 16 * 1024 * 1024, cwd: REPO_ROOT,
+      timeout: timeoutMs, killSignal: 'SIGTERM',
       env: { ...env, ...primaryInfraStoreEnv({ env, home }) },
     });
     return JSON.parse(text || '{}');
   } catch (e) {
-    return { error: String(e?.stderr || e?.message || e).replace(/\s+/g, ' ').slice(0, 400) };
+    const timedOut = e?.signal === 'SIGTERM' || e?.code === 'ETIMEDOUT';
+    return {
+      error: String(e?.stderr || e?.message || e).replace(/\s+/g, ' ').slice(0, 400),
+      ...(timedOut ? { timedOut: true } : {}),
+    };
   }
 }
 

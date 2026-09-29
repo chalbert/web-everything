@@ -3,8 +3,12 @@ bornAs: xvq0ejq
 kind: story
 size: 3
 tier: pinned
-status: open
+status: resolved
 dateOpened: "2026-09-29"
+dateStarted: "2026-09-29"
+dateResolved: "2026-09-29"
+preparedDate: "2026-09-29"
+preparedAgainstSha: "15d06873b8cc535bfa7298a3e5fefa4acbefba07"
 tags: []
 ---
 
