@@ -3,10 +3,14 @@ bornAs: x6dyxwq
 kind: story
 size: 5
 parent: "4075"
-status: open
+status: resolved
 blockedBy: ["4065", "4077"]
-scope: ["we:scripts/conveyor/health-file-request.mjs", "we:scripts/operations/health-file-request-land.mjs", "we:scripts/conveyor/health-watch-core.mjs"]
+scope: ["we:scripts/conveyor/health-file-request.mjs", "we:scripts/operations/health-file-request-land.mjs", "we:scripts/conveyor/health-watch-core.mjs", "we:scripts/conveyor/health-watch.mjs", "we:scripts/conveyor/__tests__/health-file-request.test.mjs", "we:scripts/operations/__tests__/health-file-request-land.test.mjs", "we:scripts/conveyor/__tests__/health-watch-core.test.mjs", "we:scripts/conveyor/__tests__/health-watch.test.mjs"]
 dateOpened: "2026-09-24"
+dateStarted: "2026-09-28"
+dateResolved: "2026-09-28"
+preparedDate: "2026-09-28"
+preparedAgainstSha: "7b014e355619cd456edb582b4a5582f0edc39ac9"
 tags: [health-daemon]
 ---
 

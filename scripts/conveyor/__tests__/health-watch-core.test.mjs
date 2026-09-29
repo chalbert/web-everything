@@ -683,6 +683,20 @@ describe('planActions', () => {
     expect(tick.plan.find((p) => p.kind === 'investigate').suppressed).toBeNull();
   });
 
+  // #4079 (review round 1, finding 10) — filing dispatch is its own operator switch, same independent-of-`mode`
+  // shape as `investigateDispatch` just above (4065 clause 6).
+  it('file is unsuppressed only when config `fileDispatch` is on — in any mode — and runHealthTick passes it', () => {
+    const D = { id: 'd', openAfter: 1, closeAfter: 1, severity: 'medium', action: 'file', evaluate: () => [{ subject: 'p', breach: true }] };
+    const r = stepEpisodes(emptyHealthState(), [{ smell: D, results: [{ subject: 'p', breach: true }] }], 0);
+    const file = (opts) => planActions(r.transitions, { d: D }, opts).find((p) => p.kind === 'file');
+    expect(file({ mode: 'shadow' }).suppressed).toMatch(/shadow mode.*fileDispatch/);
+    expect(file({ mode: 'live' }).suppressed).toMatch(/dispatch is off/);
+    expect(file({ mode: 'shadow', fileDispatch: true }).suppressed).toBeNull();
+    expect(DEFAULT_HEALTH_CONFIG.fileDispatch).toBe(false);
+    const tick = runHealthTick(emptyHealthState(), {}, [D], 0, { config: { fileDispatch: true } });
+    expect(tick.plan.find((p) => p.kind === 'file').suppressed).toBeNull();
+  });
+
   it('the report renders an investigation status and scrubbed findings, and nothing when none was considered', () => {
     const ep = { key: 'd::p', smell: 'd', subject: 'p', status: 'open', severity: 'medium', openedAt: 0, lastBreachAt: 0 };
     expect(renderEpisodeReport(ep, { now: 0 })).not.toContain('Agent investigation');

@@ -29,6 +29,7 @@
  *                                                  [--logs-dir=DIR] [--lock-root=DIR] [--self-sync-dir=DIR]
  *                                                  [--ps-fixture=FILE] [--machine-load-fixture=FILE]  # machine-overload's inputs, real by default
  *                                                  [--no-investigate]  # skip the #4078 investigation pass entirely
+ *                                                  [--no-file]  # skip the #4079 filing-request planning pass entirely
  *   node scripts/conveyor/health-watch.mjs section [--state-root=DIR]      # the HEALTH section (operator queue)
  *   node scripts/conveyor/health-watch.mjs silence --smell=ID [--subject=S] --card=NNN [--hours=72]
  *   node scripts/conveyor/health-watch.mjs unsilence --smell=ID [--subject=S]
@@ -47,6 +48,9 @@ import {
 import { SMELLS } from './health-smells/index.mjs';
 import { healthDir, healthSectionLines } from './health-watch-section.mjs';
 import { runInvestigations } from './health-investigate-dispatch.mjs';
+import {
+  planFileRequests, recordRequested, readLedgerStrict, writeLedger, spliceFilingSection, withLedgerLock,
+} from './health-file-request.mjs';
 
 export { healthDir, healthSectionLines };
 import { CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
@@ -643,6 +647,34 @@ export async function tick(flags = {}) {
     } catch (e) { probeErrors.investigate = scrubText(String(e?.message || e).split('\n')[0]); }
   }
 
+  // #4079 — filing requests (slice 5): plan which open episodes get a NEW filing request this tick and append
+  // them to the ledger. This ONLY plans + ledgers; it never lands anything itself — the lane-bound landing
+  // pass (scripts/operations/health-file-request-land.mjs) is invocable standalone (`node
+  // scripts/operations/health-file-request-land.mjs`), never from inside this tick: its own acquire/verify/
+  // open-pr sequence can run many minutes, well past this tick's timeout budget, so nothing here schedules or
+  // awaits it (#4079 review round 2, claim-accuracy finding — a RECURRING driver registration for it is
+  // explicitly deferred follow-up work, not yet wired by this slice). Its own failure is a probe error, never
+  // a failed tick.
+  //
+  // The whole read-plan-write is INSIDE `withLedgerLock` — the same lock `claimForLanding`/`patchLedgerEntry`
+  // take — not just the write. A bare `readLedgerStrict` + `writeLedger` pair here would let the landing
+  // pass's claim (status: 'landing') or finalize (status: 'landed') land in the gap between this tick's own
+  // read and write, and this tick's stale copy would then silently erase it (the ledger module's own header
+  // names exactly this hazard as the reason the lock exists).
+  let filingLedger = null;
+  if (!flags['no-file']) {
+    try {
+      const smellsByIdForFiling = Object.fromEntries(SMELLS.map((s) => [s.id, s]));
+      withLedgerLock(dir, () => {
+        const ledgerBefore = readLedgerStrict(dir);
+        const { toRequest } = planFileRequests({ episodes: state.episodes, smellsById: smellsByIdForFiling, ledger: ledgerBefore, config, now });
+        filingLedger = ledgerBefore;
+        for (const { request } of toRequest) filingLedger = recordRequested(filingLedger, request, now);
+        if (!flags['dry-run'] && toRequest.length) writeLedger(dir, filingLedger);
+      });
+    } catch (e) { probeErrors.file = scrubText(String(e?.message || e).split('\n')[0]); }
+  }
+
   // Real desktop notifications — THE MINIMAL NOTIFY PATH (#4077 slice 1 shipped with none: every `notify` plan
   // entry was only ever reported as "Held back" in a report, never actually sent, in ANY mode — see
   // `health-watch-core.mjs#planActions`'s own doc). Only entries `planActions` did NOT mark `suppressed` reach
@@ -679,9 +711,13 @@ export async function tick(flags = {}) {
     for (const ep of toWrite) {
       if (!ep?.id) continue;
       const md = renderEpisodeReport(ep, { now, smell: smellsById[ep.smell], diagnosis: ep.diagnosis, plan: result.plan, mode: config.mode });
-      writeJsonAtomic(join(reportDir, `${ep.id}.md`), md);
+      const mdPath = join(reportDir, `${ep.id}.md`);
+      writeJsonAtomic(mdPath, md);
       writeJsonAtomic(join(reportDir, `${ep.id}.json`), scrubDeep(ep));
-      written.push(join(reportDir, `${ep.id}.md`));
+      written.push(mdPath);
+      // #4079 — splice the filing section (if any) into the report just written above.
+      const filingEntry = filingLedger?.find((e) => e.key === ep.key);
+      if (filingEntry) { try { spliceFilingSection(mdPath, filingEntry); } catch { /* retried next tick */ } }
     }
     writeJsonAtomic(statePath, state);
     writeJsonAtomic(join(dir, 'last-tick.json'), state.lastTick);

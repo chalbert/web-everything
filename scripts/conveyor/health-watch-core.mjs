@@ -60,6 +60,11 @@ export const DEFAULT_HEALTH_CONFIG = Object.freeze({
   // A running investigation is stopped on the first tick within this much of its wall clock, so a 5-minute tick
   // cadence still stops it AT OR BEFORE the clock, never up to one tick after it.
   investigateReapLeadMs: 5 * MINUTE,
+  // #4079 — filing requests (slice 5). OFF until the operator turns it on, same independent-of-`mode` switch
+  // shape as `investigateDispatch` just above (4065 clause 6). See scripts/conveyor/health-file-request.mjs.
+  fileDispatch: false,
+  fileMaxPerDay: 3,
+  fileWindowMs: 24 * HOUR,
 });
 
 // ── 1. Daemon log parsing ────────────────────────────────────────────────────────────────────────────────────
@@ -441,7 +446,9 @@ export function stepEpisodes(state, evaluations, now, { config = DEFAULT_HEALTH_
  * `we:scripts/conveyor/health-investigate-dispatch.mjs#planInvestigations`, which reads every open episode —
  * not only this tick's transitions — so an episode refused for "one already running" is picked up once the slot frees.
  */
-export function planActions(transitions, smellsById, { mode = 'shadow', notifySet = NOTIFY_EVEN_IN_SHADOW, investigateDispatch = false } = {}) {
+export function planActions(transitions, smellsById, {
+  mode = 'shadow', notifySet = NOTIFY_EVEN_IN_SHADOW, investigateDispatch = false, fileDispatch = false,
+} = {}) {
   const plan = [];
   for (const t of transitions) {
     const ep = t.episode;
@@ -455,7 +462,10 @@ export function planActions(transitions, smellsById, { mode = 'shadow', notifySe
         const off = mode === 'shadow' ? 'shadow mode (agent investigation dispatch is off — config `investigateDispatch`)' : 'agent investigation dispatch is off (config `investigateDispatch`)';
         plan.push({ kind: 'investigate', key: t.key, suppressed: investigateDispatch === true ? null : off });
       }
-      if (smell.action === 'file') plan.push({ kind: 'file', key: t.key, suppressed: mode === 'shadow' ? 'shadow mode' : 'not built yet (slice 5)' });
+      if (smell.action === 'file') {
+        const off = mode === 'shadow' ? 'shadow mode (filing dispatch is off — config `fileDispatch`)' : 'filing dispatch is off (config `fileDispatch`)';
+        plan.push({ kind: 'file', key: t.key, suppressed: fileDispatch === true ? null : off });
+      }
     } else if (t.type === 'reminder' || t.type === 'silence-expired') {
       plan.push({ kind: 'notify', key: t.key, reason: t.type, suppressed: shadowSuppressed ? 'shadow mode' : null });
     }
@@ -669,6 +679,6 @@ export function runHealthTick(prevState, probes, smells, now, { config = {}, act
   });
   const stepped = stepEpisodes({ ...state, daemons, probeErrors: errs, heavyHeldSince }, evaluations, now, { config: cfg, activeCards });
   const smellsById = Object.fromEntries(smells.map((s) => [s.id, s]));
-  const plan = planActions(stepped.transitions, smellsById, { mode: cfg.mode, investigateDispatch: cfg.investigateDispatch });
+  const plan = planActions(stepped.transitions, smellsById, { mode: cfg.mode, investigateDispatch: cfg.investigateDispatch, fileDispatch: cfg.fileDispatch });
   return { state: stepped.state, transitions: stepped.transitions, plan, evaluations };
 }

@@ -5,7 +5,7 @@
  *   `tick()` also reads the real GitHub App status file from the home dir — read-only, harmless, left alone.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync, appendFileSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, appendFileSync, mkdirSync, readdirSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -525,6 +525,84 @@ describe('persisted state is scrubbed', () => {
     const stateText = readFileSync(join(healthDir(stateRoot), 'state.json'), 'utf8');
     expect(stateText).toContain('chalbert/web-everything#9');
     expect(stateText).not.toContain(tok);
+  });
+});
+
+// #4079 review round 1, finding 10 — the tick's own filing-request wiring (`--no-file`, `--dry-run` never
+// writing the ledger, a filing-pass failure landing in `probeErrors.file` rather than failing the tick) had
+// no direct test; only the pure `planFileRequests`/`landPending` pieces did.
+describe('tick() — #4079 filing-request dispatch plumbing', () => {
+  const seedEpisode = (hd) => {
+    mkdirSync(hd, { recursive: true });
+    writeFileSync(join(hd, 'state.json'), JSON.stringify({
+      episodes: {
+        'my-smell::we': {
+          key: 'my-smell::we', smell: 'my-smell', subject: 'we', status: 'open', id: '2026-09-01-x-we-0000',
+          investigation: { recommendation: { productChange: 'add a retry' } },
+        },
+      },
+    }));
+  };
+  const flagsFor = (stateRoot, n) => ({
+    'state-root': stateRoot,
+    'logs-dir': join(dir, `logs-file-${n}`),
+    'lock-root': join(dir, `locks-file-${n}`),
+    'self-sync-dir': join(dir, `sync-file-${n}`),
+    'no-gh': true, 'no-diagnose': true, 'no-investigate': true,
+  });
+  const mkFlagDirs = (flags) => {
+    mkdirSync(flags['logs-dir'], { recursive: true });
+    mkdirSync(flags['lock-root'], { recursive: true });
+    mkdirSync(flags['self-sync-dir'], { recursive: true });
+  };
+
+  it('plans and ledgers a filing request when config `fileDispatch` is on', async () => {
+    const stateRoot = join(dir, 'state-file-1');
+    const hd = healthDir(stateRoot);
+    seedEpisode(hd);
+    writeFileSync(join(hd, 'config.json'), JSON.stringify({ fileDispatch: true }));
+    const flags = flagsFor(stateRoot, 1);
+    mkFlagDirs(flags);
+    await tick(flags);
+    const ledger = JSON.parse(readFileSync(join(hd, 'filing', 'ledger.json'), 'utf8'));
+    expect(ledger).toHaveLength(1);
+    expect(ledger[0].key).toBe('my-smell::we');
+    expect(ledger[0].status).toBe('pending');
+  });
+
+  it('--no-file skips the filing pass entirely — no ledger file is ever created', async () => {
+    const stateRoot = join(dir, 'state-file-2');
+    const hd = healthDir(stateRoot);
+    seedEpisode(hd);
+    writeFileSync(join(hd, 'config.json'), JSON.stringify({ fileDispatch: true }));
+    const flags = { ...flagsFor(stateRoot, 2), 'no-file': true };
+    mkFlagDirs(flags);
+    await tick(flags);
+    expect(existsSync(join(hd, 'filing', 'ledger.json'))).toBe(false);
+  });
+
+  it('--dry-run computes the plan but never writes the ledger', async () => {
+    const stateRoot = join(dir, 'state-file-3');
+    const hd = healthDir(stateRoot);
+    seedEpisode(hd);
+    writeFileSync(join(hd, 'config.json'), JSON.stringify({ fileDispatch: true }));
+    const flags = { ...flagsFor(stateRoot, 3), 'dry-run': true };
+    mkFlagDirs(flags);
+    await tick(flags);
+    expect(existsSync(join(hd, 'filing', 'ledger.json'))).toBe(false);
+  });
+
+  it('a broken filing pass (corrupt ledger) lands in probeErrors.file — never a failed tick', async () => {
+    const stateRoot = join(dir, 'state-file-4');
+    const hd = healthDir(stateRoot);
+    seedEpisode(hd);
+    writeFileSync(join(hd, 'config.json'), JSON.stringify({ fileDispatch: true }));
+    mkdirSync(join(hd, 'filing'), { recursive: true });
+    writeFileSync(join(hd, 'filing', 'ledger.json'), '{ not json');
+    const flags = flagsFor(stateRoot, 4);
+    mkFlagDirs(flags);
+    const summary = await tick(flags);
+    expect(summary.probeErrors.file).toMatch(/corrupt/);
   });
 });
 
