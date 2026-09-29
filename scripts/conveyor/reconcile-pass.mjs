@@ -1000,10 +1000,22 @@ export function runReconcilePass({
   // before) — only a caller-supplied value is normalised.
   const resolvedRepo = repo == null ? null : CONSTELLATION_REPOS[repoKey].slug;
   const rawPrs = readPrs({ repo: resolvedRepo });
+  // #4501 — read the live required-check set (branch protection, cached; degrades to
+  // FALLBACK_REQUIRED_STATUS_CHECKS if the live fetch fails) BEFORE enriching main-red facts, so BOTH
+  // `enrichMainRed` below and `planReconcile` further down judge the SAME set. Moved up from just before
+  // `planReconcile` — previously `enrichMainRed` ran on the OLD hardcoded `DEFAULT_MAIN_RED_ATTRIBUTED_CHECKS`
+  // default while `planReconcile` (two calls later) already got the live-fetched value: two different sets in
+  // one pass over the same PRs. A repo this constellation does not know the gh slug for (`resolvedRepo` stays
+  // `null`, `gh` infers from cwd) still gets a required set: `getRequiredStatusChecks` degrades to its own
+  // cache/fallback chain rather than ever throwing, so this call is safe unconditionally (see that module's
+  // own header).
+  const { checks: requiredChecks } = readRequiredChecks({ repo: resolvedRepo, branch: defaultBranch });
   // we:backlog/x5uqim1-*.md — attach `requiredCheckCompletedAt`/`aheadByOnMain` to any currently-failing
   // PR and read `main`'s own red windows, so `planReconcile` can tell a `ci-red` PR caused by a red `main` apart
   // from the PR's own defect. Costs nothing beyond what `readPrs` already fetched when nothing is `ci:failed`.
-  const { prs: redPrs, mainRedWindows, mainLatestCheckRuns } = enrichMainRed(rawPrs, { repo: resolvedRepo, defaultBranch });
+  // #4501 — `requiredChecks` now threaded through so this enrichment judges the SAME live-required set
+  // `planReconcile` uses below, instead of silently falling back to `DEFAULT_MAIN_RED_ATTRIBUTED_CHECKS`.
+  const { prs: redPrs, mainRedWindows, mainLatestCheckRuns } = enrichMainRed(rawPrs, { repo: resolvedRepo, defaultBranch, requiredChecks });
   // live incident, PR #2752 (#4034/#2748) — attach `alreadyLandedInMain` to any PR carrying
   // `merge-status:conflicting` whose own content is already, file-by-file, present on `main`. Costs nothing
   // beyond the label scan `readPrs` already fetched every field for when no PR carries that label.
@@ -1013,10 +1025,6 @@ export function runReconcilePass({
   // #4263 — re-check any `waiting-on-system-fix` escalation's named fix PR for having since landed.
   const prs = enrichFixClaims(enrichSystemFix(baseRefPrs, { repo: resolvedRepo }), { repo: repoKey });
   const agents = enrich(readAgents({}));
-  // A repo this constellation does not know the gh slug for (`resolvedRepo` stays `null`, `gh` infers from cwd)
-  // still gets a required set: `getRequiredStatusChecks` degrades to its own cache/fallback chain rather than
-  // ever throwing, so this call is safe unconditionally (see that module's own header).
-  const { checks: requiredChecks } = readRequiredChecks({ repo: resolvedRepo, branch: defaultBranch });
   const mainSha = resolveMainSha(defaultBranch);
   const plan = planReconcile({
     repo: repoKey, prs, agents, durableCounts: durableCountsFrom(prs), now, defaultBranch, mainRedWindows,

@@ -829,6 +829,12 @@ describe('failingRequiredCheckForAttribution — every required check, not test 
     expect(DEFAULT_MAIN_RED_ATTRIBUTED_CHECKS).toEqual(['test', 'smoke', 'daemon-soak']);
   });
 
+  it('DEFAULT_MAIN_RED_ATTRIBUTED_CHECKS is the SAME binding as required-status-checks.mjs\'s FALLBACK (#4501 — never a second hardcoded copy)', async () => {
+    const { DEFAULT_MAIN_RED_ATTRIBUTED_CHECKS } = await import('../main-red-recovery.mjs');
+    const { FALLBACK_REQUIRED_STATUS_CHECKS } = await import('../../lib/required-status-checks.mjs');
+    expect(DEFAULT_MAIN_RED_ATTRIBUTED_CHECKS).toBe(FALLBACK_REQUIRED_STATUS_CHECKS);
+  });
+
   it('a daemon-soak-only red PR is failing, and its daemon-soak failure is the one judged', () => {
     const p = pr(row('test', 'SUCCESS', '2026-09-27T02:03:00Z'), row('daemon-soak', 'FAILURE', '2026-09-27T02:11:30Z'));
     expect(isAnyRequiredCheckFailed(p)).toBe(true);

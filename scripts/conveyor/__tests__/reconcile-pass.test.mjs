@@ -33,7 +33,10 @@ it('normalises a bare repo KEY (e.g. --repo=we) to its gh owner/name slug before
     readAgents: () => [], enrich: (agents) => agents,
   });
   expect(readPrs).toHaveBeenCalledWith({ repo: 'chalbert/web-everything' });
-  expect(enrichMainRed).toHaveBeenCalledWith([], { repo: 'chalbert/web-everything', defaultBranch: 'main' });
+  // #4501 — `enrichMainRed` now also receives the live-fetched `requiredChecks` (here degraded to the
+  // FALLBACK_REQUIRED_STATUS_CHECKS default, since `execFileSync` is mocked with no real `gh` behind it) —
+  // this test's own concern (repo-key normalisation) is unaffected.
+  expect(enrichMainRed).toHaveBeenCalledWith([], { repo: 'chalbert/web-everything', defaultBranch: 'main', requiredChecks: ['test', 'smoke', 'daemon-soak'] });
 });
 
 // #2748 false-red follow-up (soak-replay-gate, PR #2775) — `runReconcilePass` is the ONE call site wired
@@ -166,6 +169,57 @@ it('enrichPrsWithMainRedFacts reads main\'s run list once, and attaches the gree
   expect(readMainLatestCheckRuns).toHaveBeenCalledWith(expect.objectContaining({ mainRuns }));
   expect(readMainGreenFixFacts).toHaveBeenCalledWith('dfb57d0', expect.objectContaining({ greenSha: 'green-sha', checkName: 'daemon-soak' }));
   expect(out.prs[0]).toMatchObject({ prContainsMainGreenSha: false, mergeBaseCheckRuns: [] });
+});
+
+it('enrichPrsWithMainRedFacts also enriches a PR red only on soak-replay-gate, when requiredChecks names it (#4501)', async () => {
+  const { enrichPrsWithMainRedFacts } = await import('../reconcile-pass.mjs');
+  const readMainRuns = () => [];
+  // Real shape, chalbert/web-everything PR #2939, CI run 36599015675: soak-replay-gate FAILURE while
+  // test/smoke/daemon-soak were all SUCCESS.
+  const soakGateRed = {
+    number: 2939, headRefOid: 'deadbeef', statusCheckRollup: [
+      { name: 'test', status: 'completed', conclusion: 'success', completedAt: '2026-09-29T17:08:47Z' },
+      { name: 'smoke', status: 'completed', conclusion: 'success', completedAt: '2026-09-29T16:39:24Z' },
+      { name: 'daemon-soak', status: 'completed', conclusion: 'success', completedAt: '2026-09-29T16:45:57Z' },
+      { name: 'soak-replay-gate', status: 'completed', conclusion: 'failure', completedAt: '2026-09-29T16:39:42Z' },
+    ],
+  };
+  const out = enrichPrsWithMainRedFacts([soakGateRed], {
+    readMainRuns, readAheadBy: () => 2, requiredChecks: ['test', 'smoke', 'daemon-soak', 'soak-replay-gate'],
+  });
+  expect(out.prs[0].requiredCheckName).toBe('soak-replay-gate');
+  expect(out.prs[0].requiredCheckCompletedAt).toBe('2026-09-29T16:39:42Z');
+});
+
+it('enrichPrsWithMainRedFacts SKIPS that same PR when requiredChecks omits soak-replay-gate (#4501 before/proof)', async () => {
+  const { enrichPrsWithMainRedFacts } = await import('../reconcile-pass.mjs');
+  const readMainRuns = () => [];
+  const soakGateRed = {
+    number: 2939, headRefOid: 'deadbeef', statusCheckRollup: [
+      { name: 'test', status: 'completed', conclusion: 'success', completedAt: '2026-09-29T17:08:47Z' },
+      { name: 'smoke', status: 'completed', conclusion: 'success', completedAt: '2026-09-29T16:39:24Z' },
+      { name: 'daemon-soak', status: 'completed', conclusion: 'success', completedAt: '2026-09-29T16:45:57Z' },
+      { name: 'soak-replay-gate', status: 'completed', conclusion: 'failure', completedAt: '2026-09-29T16:39:42Z' },
+    ],
+  };
+  const out = enrichPrsWithMainRedFacts([soakGateRed], {
+    readMainRuns, readAheadBy: () => 2, requiredChecks: ['test', 'smoke', 'daemon-soak'],
+  });
+  expect(out.prs).toEqual([soakGateRed]); // unchanged — never even enriched
+  expect(out.mainRedWindows).toEqual([]);
+});
+
+it('runReconcilePass threads the live-fetched requiredChecks into enrichMainRed, not just planReconcile (#4501)', async () => {
+  const { runReconcilePass } = await import('../reconcile-pass.mjs');
+  let enrichMainRedCalledWith = null;
+  const readRequiredChecks = () => ({ checks: ['test', 'smoke', 'daemon-soak', 'soak-replay-gate'], source: 'live' });
+  const enrichMainRed = (prs, opts) => { enrichMainRedCalledWith = opts; return { prs, mainRedWindows: [], mainLatestCheckRuns: [] }; };
+  runReconcilePass({
+    readPrs: () => [], readAgents: () => [], enrich: (a) => a, enrichMainRed,
+    enrichAlreadyLanded: (prs) => prs, enrichBaseRef: (prs) => prs, enrichSystemFix: (prs) => prs,
+    enrichFixClaims: (prs) => prs, readRequiredChecks, resolveMainSha: () => null,
+  });
+  expect(enrichMainRedCalledWith.requiredChecks).toEqual(['test', 'smoke', 'daemon-soak', 'soak-replay-gate']);
 });
 
 it('enrichPrsWithMainRedFacts skips the green-fix read when the check is not green on main', async () => {
