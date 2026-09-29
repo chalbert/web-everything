@@ -11,6 +11,8 @@
  *   • `mv`/`git mv` of a backlog/*.md that CHANGES its NNN prefix — NNN is immutable.
  *   • `>>` / `tee -a` / `sed -i` / `perl -*pi` into backlog|reports/*.md — bypasses the Edit/Write
  *     locus-prefix hook; use the Edit/Write tools so the check fires.
+ *   • #4070 — the TRUNCATING half of the same rule: a `>`/heredoc redirect, `cp`/`install`, or a `mv` from
+ *     outside the corpus onto a backlog|reports/*.md (`corpusOverwriteTargets`).
  *   • `git push` to a constellation `main` branch — strict lane-only enforcement (#2203): every change
  *     reaches main through a `lane/*` ref → PR → CI, so a DIRECT push bypasses the gate (observed
  *     2026-07-03: an ungated direct push landed a check:standards error on main). Escape: `MAIN_PUSH_OK=1`.
@@ -1744,6 +1746,40 @@ export function isFileWriteRedirect(segment) {
   return fileWriteTargets(segment).some((f) => !isScratch(f));
 }
 
+/** A backlog|reports `.md` file as a WRITE TARGET — relative (`backlog/x.md`, `./reports/y.md`) or absolute
+ *  (`/…/lane-3/backlog/x.md`). Anchored on a path boundary so `mybacklog/x.md` is not a card. */
+const CORPUS_FILE_TARGET = /(?:^|\/)(?:backlog|reports)\/[^\s'")]*\.md$/;
+const COPY_PROGRAMS = new Set(['cp', 'gcp', 'install', 'ginstall', 'mv', 'gmv']);
+
+/** #4070 — every backlog|reports `.md` path `segment` OVERWRITES from the shell, scratch excluded. Pure.
+ *  The `>>`/`tee`/`sed -i`/`perl -pi` arm in `reason()` already covered appends and in-place edits; a
+ *  TRUNCATING write slipped past it, and a truncating write is the one that replaces a card wholesale:
+ *    • any write redirect — `cat > backlog/x.md <<'EOF'`, `echo … > backlog/x.md`, `>|`, `&>`, `1>`;
+ *    • `cp`/`install` with a corpus destination (the LAST operand), and `mv` onto a corpus path FROM a
+ *      non-corpus source (a same-number `mv` between two corpus paths is a slug rename; the renumber arm owns
+ *      those).
+ *  Every one of these skips the Edit/Write hooks (`backlog-guard.mjs`, `lint-locus-prefix.mjs`) that would
+ *  have validated the new content. KNOWN LIMIT: an interpreter writing through its own file API
+ *  (`python -c "open(…,'w')"`, `node -e "fs.writeFileSync(…)"`) or a `-t <dir>` copy is not parsed here. */
+export function corpusOverwriteTargets(segment) {
+  const out = fileWriteTargets(segment).filter((f) => CORPUS_FILE_TARGET.test(unquote(f)) && !isScratch(f));
+  const toks = shellTokens(canonicalCommand(segment));
+  const rest = toks.slice(wrapperPrefixLength(toks.map((t) => (t.op || t.quoted ? ' ' : t.text))));
+  const prog = rest[0] && !rest[0].quoted && !rest[0].op ? rest[0].text.replace(/^.*\//, '') : '';
+  if (COPY_PROGRAMS.has(prog)) {
+    const args = [];
+    for (let i = 1; i < rest.length; i++) {
+      if (rest[i].op) { i += 1; continue; }                          // a redirect and its target: handled above
+      args.push(rest[i]);
+    }
+    const files = fileOperands(args, new Set(['-S', '--suffix', '-m', '--mode', '-o', '--owner', '-g', '--group']));
+    const dest = files.length >= 2 ? unquote(files[files.length - 1]) : '';
+    const fromOutside = files.slice(0, -1).some((f) => !CORPUS_FILE_TARGET.test(unquote(f)));
+    if (CORPUS_FILE_TARGET.test(dest) && !isScratch(dest) && (!prog.endsWith('mv') || fromOutside)) out.push(dest);
+  }
+  return [...new Set(out)];
+}
+
 /** The #2749 hard-tree-write deny reason for `segment` at a PRIMARY cwd, or null. Pure. Checked ONLY when
  *  `primaryCwd` is true (callers gate it); the `MAIN_SESSION_BUILD_OK=1` escape is checked by the caller
  *  (`reason()`), mirroring `MAIN_PUSH_OK`/`LANE_CLOBBER_OK`. */
@@ -2922,6 +2958,10 @@ export function reason(segment, { primaryCwd = false, staleBehind = 0, foreignLi
   // invocations (a `>>` from any other command is caught by the first half of this OR, untouched).
   if (/>>\s*(?:\.\/)?(?:backlog|reports)\//.test(s) || (atCommand(/^(?:sed|gsed|tee|perl)\b/) && fileWriteTargets(s).some((f) => CORPUS_MD.test(f))))
     return "Don't append/in-place-edit backlog|reports/*.md from the shell (>>, tee -a, sed -i, perl -pi) — it bypasses the locus-prefix write hook so bare code-paths leak to the gate. Use the Edit/Write tools.";
+  // #4070 — the truncating half of the same rule (a heredoc/`>` redirect, a `cp`/`mv` over a card).
+  const overwritten = corpusOverwriteTargets(s);
+  if (overwritten.length)
+    return `Don't overwrite backlog|reports/*.md from the shell (${overwritten.join(', ')}: a \`>\`/heredoc redirect, \`cp\`, or \`mv\` onto it) — it skips the Edit/Write hooks (backlog-guard, locus-prefix) that validate a card's content. Use the Edit/Write tools; a new item is minted with \`node scripts/backlog.mjs scaffold\`.`;
 
   // A raw PR-BODY rewrite DISARMS the self-clear guard. `pr-land` stamps `authored-by-actor` into the body at
   // open; `review-independence.mjs` reads it to refuse an author clearing its own PR. Replacing the body drops

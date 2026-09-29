@@ -259,6 +259,8 @@ export const DELIVERY_HOOKS_SETTINGS = Object.freeze({
       },
       { matcher: 'Bash', hooks: [{ type: 'command', command: 'node scripts/guard-bash.mjs' }] },
     ],
+    // #4070 — the agent's `done` report is its one sanctioned output; a turn may not end with it still `started`.
+    Stop: [{ hooks: [{ type: 'command', command: 'node scripts/guard-stop-completion-record.mjs' }] }],
   },
   permissions: {
     allow: RESTRICTED_PROVIDER_TOOLS.split(','),
