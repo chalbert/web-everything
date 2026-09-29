@@ -16,6 +16,9 @@
  *   - wip-cap (#4353): cap OPEN ITEMS — build start until merge (durable in-flight ∪ delivered-by-open-PR),
  *     the UNION not the sum — separately from `maxConcurrentBuilds`, which only bounds machine load. An item
  *     stops counting the moment it is no longer in-flight AND no open PR delivers it (merged, or the PR closed).
+ *     Card xovjhwh (operator decision 2026-09-29): the delivered-by-open-PR side counts ONLY PRs this builder
+ *     itself dispatched (per its own durable run records, `dispatchedByBuilder`) — a hand-dispatched worker's PR
+ *     still counts toward `maxOpenPrs`/`hot-file`, but never toward this cap;
  *   - landing freeze: hold every new build while open PRs exceed `maxOpenPrs`, or while any open PR carries a
  *     label that means "a daemon failed to move this PR" (`freezeLabels`);
  *   - scope check against every open PR's files, and hot-file serialisation: no two in-flight builds (or two
@@ -200,12 +203,24 @@ export function normalizeOpenPrs(byRepo) {
  *   operator's chosen cap of 3 the builder would never build at all while ANY other worker ran anywhere.
  * @param {{engaged:boolean, reason?:string}} [o.killSwitch]
  * @param {object} [o.policy]
+ * @param {Iterable<string>|null} [o.dispatchedByBuilder] card xovjhwh (operator decision 2026-09-29): the set of
+ *   item nums THIS builder's own durable dispatch-lane run records show it dispatched a build for (in-flight or
+ *   already settled — see `build-dispatch-daemon.mjs`'s `runBuildDispatchTick`, which derives it from the same
+ *   `listRunStoreInFlight`/`listSettledBuilds` reads it already makes). When given, an open PR only feeds the
+ *   `wip-cap` union when its delivered num is IN this set — a hand-dispatched worker's PR (fix worker, ci-heal
+ *   worker, stranded-claim resume) never went through this builder's own run records, so it must not fill
+ *   `maxOpenItems` just because its branch name matches the delivery-ref shape. It still counts toward
+ *   `maxOpenPrs` and still participates in `scope-vs-open-prs`/`hot-file` — neither reads this set. `null` (the
+ *   default) keeps the OLD, unfiltered union — every existing caller/test that predates this card sees no
+ *   change; the real daemon always passes its own set.
  * @returns {{freeze:{frozen:boolean, reasons:string[]}, slots:number, dispatch:Array<object>, hold:Array<object>,
  *   openItems:{count:number, cap:number, nums:string[]}}} `openItems` is the PRE-TICK union
- *   (`{inFlight} ∪ {delivered-by-open-PR}`), #4353 — the value the `wip-cap` rule below checks and decrements.
+ *   (`{inFlight} ∪ {delivered-by-open-PR ∩ dispatchedByBuilder}`), #4353/xovjhwh — the value the `wip-cap` rule
+ *   below checks and decrements.
  */
 export function planBuildDispatch({
   candidates = [], inFlight = [], openPrs = [], externalBuilding = 0, killSwitch = { engaged: false }, policy = BUILD_DISPATCH_POLICY,
+  dispatchedByBuilder = null,
 } = {}) {
   const hold = [];
   const dispatch = [];
@@ -250,10 +265,14 @@ export function planBuildDispatch({
   // WORKING COPY the loop mutates as each candidate is admitted, exactly like `slots` already does for
   // `maxConcurrentBuilds` — a static one-time gate would wrongly admit multiple candidates in one pass once
   // their combined count crosses `maxOpenItems` (Risks, #4353).
+  // xovjhwh — the builder-owned subset of the delivered-by-open-PR side. `null` means the caller did not supply
+  // an attribution set at all (every pre-existing caller/test): keep counting every delivered PR, unchanged. A
+  // caller that DOES supply one (only `build-dispatch-daemon.mjs`, live) gets the filtered union instead.
+  const ownedNums = dispatchedByBuilder == null ? null : new Set([...dispatchedByBuilder].map(normNum).filter(Boolean));
   const openItemsInitial = new Set(inFlightByNum.keys());
   for (const pr of openPrs) {
     const n = prDeliveredNum(pr);
-    if (n) openItemsInitial.add(n);
+    if (n && (ownedNums == null || ownedNums.has(n))) openItemsInitial.add(n);
   }
   const openItems = new Set(openItemsInitial);
 

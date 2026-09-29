@@ -114,6 +114,41 @@ export function readDispatchOutcome(text) {
 }
 
 /**
+ * xovjhwh (operator decision 2026-09-29) — "this builder's own dispatch-lane run records," as a flat `Set` of
+ * item nums: every item the run-store currently shows in-flight PLUS every item whose `dispatch-lane` build
+ * effect has already settled (any outcome — even a non-`pr-opened` one; `planBuildDispatch`'s own delivered-PR
+ * check is what actually gates whether an open PR counts, this set only says "the builder dispatched it at some
+ * point"). Both inputs are RAW rows (`{num, ...}`), not the deduped `Map`s their callers separately build for
+ * their own purposes (`inFlightNums`, `settledByNum`) — this derivation only needs the num.
+ *
+ * WHY THESE TWO READS ARE THAT SET: verified by a full-repo sweep (`grep -rn "'dispatch-lane'"` across
+ * `scripts/` and `skills-src/`, converge round 1, claim-accuracy finding), not merely reasoned from this file's
+ * own code paths — `cliDispatch` below is the ONLY place in this codebase that spawns `run.mjs dispatch-lane`
+ * for a build; nothing else writes a `dispatch-lane*` run-store record. A hand-dispatched worker (per
+ * `we:skills-src/mechanical-delivery-doctrine/SKILL.md`) opens its PR via the `Agent` tool directly, never
+ * through `dispatch-lane` — so its num never lands in either read, and its PR correctly stays excluded from
+ * `maxOpenItems` even though it still counts toward `maxOpenPrs`/`hot-file` (both read `openPrs` unfiltered).
+ *
+ * PULLED OUT SO `runBuildDispatchTick`'s live tick and `dryRun`'s `ifFreed` report call the SAME derivation —
+ * converge round 1 (simplicity/standards-conformance findings) flagged the two as independently re-derived
+ * inline, which let them silently drift if a THIRD source of "the builder's own" was ever added to one but not
+ * the other.
+ *
+ * ACCEPTED FAIL DIRECTION: both reads already degrade to `[]` on their own read error
+ * (`cliListRunStoreInFlight`/`cliListSettledBuilds` below each `catch` to `[]`, never throw — pinned against a
+ * REAL broken run-store directory, not just a hand-fed empty array, by their own "real readers" tests), so a
+ * read failure only SHRINKS this set — failing the `wip-cap` open (under-counts, bounded by
+ * `maxConcurrentBuilds`/`maxOpenPrs`), same direction `inFlightNums` already had pre-#xovjhwh for the in-flight
+ * side. Making a read fail CLOSED instead is a card Follow-up, not this MVP.
+ */
+export function deriveDispatchedByBuilder(runStoreRows = [], settledRows = []) {
+  const nums = new Set();
+  for (const r of runStoreRows) { const n = normNum(r?.num); if (n) nums.add(n); }
+  for (const r of settledRows) { const n = normNum(r?.num); if (n) nums.add(n); }
+  return nums;
+}
+
+/**
  * ONE tick. Every effect is injected:
  *   planTick(bookkeeping) → tick-core `{decisions, nextState}`; fetchOpenPrs() → `[{repo, prs}]`;
  *   listClaims() → claim entries; releaseClaim({num}); acquireClaim({num, scope}) → `{ok, reason, heldBy}`;
@@ -154,6 +189,7 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
     catch (e) { orphanAdoption = { error: String(e?.message || e).split('\n')[0] }; }
   }
   const runStoreInFlight = effects.listRunStoreInFlight();
+  const settledRows = effects.listSettledBuilds?.() ?? [];
   // A claim retires on a SETTLED non-PR outcome, but never over a run-store row that is CURRENTLY in-flight
   // for the same item: only one claim ever exists per `num` at a time (the daemon's own `acquireClaim` is a
   // mutex on that resource), so a lingering settled record from an OLDER, already-retired attempt must never
@@ -164,7 +200,7 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
   // attempt's own dispatch-start time (see `cliListSettledBuilds`'s own note); a row with no timestamp at all
   // (an older effects stub, or a test) is kept only when nothing with a real timestamp has claimed the slot.
   const settledByNum = new Map();
-  for (const r of effects.listSettledBuilds?.() ?? []) {
+  for (const r of settledRows) {
     const n = normNum(r.num);
     const prev = settledByNum.get(n);
     if (!prev || (typeof r.startedAt === 'string' && r.startedAt > (prev.startedAt || ''))) settledByNum.set(n, r);
@@ -248,7 +284,13 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
   // dispatches a SUBSET up to its own cap). `counts.buildingInFlight` excludes them; fall back to `building`
   // for a `planTick` stub (tests, older callers) that has not been updated to emit it.
   const externalBuilding = Number(d.counts?.buildingInFlight ?? d.counts?.building) || 0;
-  const plan = planBuildDispatch({ candidates, inFlight, openPrs, externalBuilding, killSwitch: effects.killSwitch(), policy });
+  // xovjhwh (operator decision 2026-09-29) — the wip-cap's delivered-by-open-PR side must count only PRs THIS
+  // builder itself dispatched, never a hand-dispatched worker's (fix worker, ci-heal worker, stranded-claim
+  // resume) merely because its branch names a card. `deriveDispatchedByBuilder` (above) is the single, shared
+  // derivation `dryRun` also calls — see its own docblock for why `runStoreInFlight`/`settledRows` ARE this
+  // builder's own durable dispatch-lane run records, and why the two staying in sync matters.
+  const dispatchedByBuilder = deriveDispatchedByBuilder(runStoreInFlight, settledRows);
+  const plan = planBuildDispatch({ candidates, inFlight, openPrs, externalBuilding, killSwitch: effects.killSwitch(), policy, dispatchedByBuilder });
 
   const dispatched = [];
   const failures = [];
@@ -372,7 +414,10 @@ export async function cliFetchOpenPrs() {
   return out;
 }
 
-async function cliListRunStoreInFlight({ now = new Date() } = {}) {
+// xovjhwh converge round 2 — exported (was module-private) so a test can drive it against a real, broken
+// run-store directory the same way the sibling `cliListSettledBuilds` already is below, and pin the "degrades
+// to `[]`, never throws" claim `deriveDispatchedByBuilder`'s own docblock makes about this exact reader.
+export async function cliListRunStoreInFlight({ now = new Date() } = {}) {
   const { createFileRunStore } = await import('../../scripts/operations/run-store.mjs');
   const { DISPATCH_EFFECT, dispatchStillHolds } = await import('../../scripts/operations/dispatch-lane.mjs');
   const store = createFileRunStore();
@@ -640,7 +685,13 @@ async function dryRun(flags) {
     ...listBuildDispatchClaims().map((c) => ({ num: normNum(c.meta.num), scope: c.meta.scope || [], source: `claim ${c.owner}` })),
     ...runStoreRows,
   ];
-  const ifFreed = planBuildDispatch({ candidates: [...tick.plan.dispatch, ...tick.plan.hold, ...capacityOnly].map((c) => ({ num: c.num, lane: c.lane, scope: c.scope || scopeByNum.get(normNum(c.num)) || [] })), inFlight, openPrs: normalizeOpenPrs(openPrs), externalBuilding: core.building, killSwitch: cliKillSwitch(), policy });
+  // xovjhwh — the SAME shared derivation `runBuildDispatchTick` calls internally for `tick.plan` (unavailable
+  // here since it is local to that function's own call); recomputed from the same two rows this dry-run already
+  // fetched (`runStoreRows`/`settledRows`, above), through `deriveDispatchedByBuilder` rather than a second
+  // inline copy, so the per-num status detail below can never drift from the headline
+  // `tick.plan.openItems`/`wouldDispatchNow` this report also prints.
+  const dispatchedByBuilder = deriveDispatchedByBuilder(runStoreRows, settledRows);
+  const ifFreed = planBuildDispatch({ candidates: [...tick.plan.dispatch, ...tick.plan.hold, ...capacityOnly].map((c) => ({ num: c.num, lane: c.lane, scope: c.scope || scopeByNum.get(normNum(c.num)) || [] })), inFlight, openPrs: normalizeOpenPrs(openPrs), externalBuilding: core.building, killSwitch: cliKillSwitch(), policy, dispatchedByBuilder });
   const focus = String(flags.focus || '').split(',').map(normNum).filter(Boolean);
   const rows = [];
   const nums = new Set([...ifFreed.dispatch.map((x) => x.num), ...ifFreed.hold.map((x) => x.num)]);
@@ -674,8 +725,9 @@ async function dryRun(flags) {
     freeze: tick.plan.freeze,
     openPrs: normalizeOpenPrs(openPrs).map((p) => `${p.repo}#${p.number}`),
     inFlight: tick.plan.inFlight,
-    // #4353 — {inFlight} ∪ {delivered-by-open-PR}, the cap this card adds. `filling` names which nums fill it
-    // (never just a count) so a full-cap dry-run says WHY, not only THAT.
+    // #4353 — {inFlight} ∪ {delivered-by-open-PR ∩ this builder's own dispatches, xovjhwh}, the cap this card
+    // adds. `filling` names which nums fill it (never just a count) so a full-cap dry-run says WHY, not only
+    // THAT.
     openItems: reportOpenItems(tick.plan.openItems),
     wouldDispatchNow: tick.plan.dispatch.map((x) => x.num),
     wouldRetireClaims: tick.retired,
