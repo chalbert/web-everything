@@ -1,0 +1,473 @@
+#!/usr/bin/env node
+/**
+ * @file scripts/operations/sweep-orphan-backlog-cards.mjs
+ * @description #4317 FOLLOW-UP — THE SANCTIONED SWEEP for the BACKLOG of orphans #4317's own fix left behind.
+ *   `we:scripts/operations/land-prevention-card.mjs` (that fix) stops the CLASS of failure going forward: a
+ *   NEW approval-time prevention card now lands through a real lane, never straight into a daemon clone. It
+ *   never touched the EXISTING orphans the pre-fix code path had already written — untracked `backlog/x*.md`
+ *   cards sitting in a daemon clone's own working tree, invisible to a rebuild's dirty check by design
+ *   (`we:scripts/lib/daemon-rebuild.mjs`), never landing on their own. Live 2026-09-29: 73 in
+ *   `wev-review-daemon`, 0 in `wev-control`.
+ *
+ * WHY A SWEEP, NOT A HAND FIX (#1826/operator rule — failures improve the product, never manual intervention):
+ *   hand-copying 73 files one at a time is exactly the "manual step" this repo's own doctrine refuses as a
+ *   default. This is the DECLARED, RE-RUNNABLE tool the next daemon clone (or the next bug that writes into
+ *   one) can be pointed at again — `we:scripts/conveyor/health-smells/untracked-backlog-card.mjs` already
+ *   flags the condition this sweep clears.
+ *
+ * WHAT IT DOES, READ-ONLY ON THE CLONE, IN ORDER (mirrors `land-prevention-card.mjs`'s own acquire → commit →
+ *   verify → open-pr → release sequence, but for a BATCH of already-written cards rather than one freshly
+ *   filed one):
+ *   1. `git status --porcelain --untracked-files=all -- backlog` on `--clone=<path>` — READ ONLY, never `add`,
+ *      never `git -C <clone> ...` writes. The clone's own copies are left exactly as found; see the file's own
+ *      `KNOWN RESIDUAL` note below for what removes them.
+ *   2. Reads each orphan's content directly ({@link parseOrphanCard}) — no `fs` write into the clone at any
+ *      point.
+ *   3. DEDUPE ({@link selectOrphanSurvivors}), against two things:
+ *        - `origin/main`'s own backlog: an orphan whose `bornAs:` id (or, for a card with no such landed
+ *          twin, whose title-derived source PR) already has a card on `main` is DROPPED — its debt is already
+ *          tracked, landing it again would double it.
+ *        - EVERY OTHER ORPHAN in this same sweep: two orphans citing the SAME source PR AND the SAME guard
+ *          text are the same debt filed twice (a marker-post race, #4317's own `xxe5jvs` residual) — the
+ *          second is DROPPED. Two orphans citing the same PR with GENUINELY DIFFERENT guards are kept BOTH —
+ *          same PR, different debt, never collapsed.
+ *   4. The survivors are copied — byte-for-byte, filename unchanged (still `x<hash>-*.md`; JIT-numbering
+ *      (`we:scripts/lane-drain.mjs`) assigns the real `bornAs`-carrying number at land, exactly as it does for
+ *      any other hash-id card) — into ONE lane (`lane-pool.mjs acquire`), `git add`ed and committed as ONE
+ *      commit.
+ *   5. The lane's OWN `run.mjs verify --mode=run` gate, run for real (see `land-prevention-card.mjs`'s header
+ *      for why every operation call below runs the ACQUIRED LANE's `run.mjs`, never this script's own).
+ *   6. Best-effort, non-blocking: each landed survivor is cleared for the conveyor
+ *      ({@link queueLandedSurvivors}) exactly as `file-item` would at ordinary filing time — the conveyor
+ *      queue is a machine-local, gitignored sidecar (`we:scripts/conveyor/queue-store.mjs`), never part of the
+ *      commit, so a card this sweep lands is not merely landed but also pickable up by the conveyor.
+ *   7. The lane's OWN `run.mjs open-pr --mode=label-on-green` opens ONE PR for every survivor. The resident
+ *      drain daemon lands it; this script never merges.
+ *   8. The lane is released on every exit path (`finally`), same reasoning as `land-prevention-card.mjs`.
+ *
+ * KNOWN RESIDUAL, FILED NOT SILENT: this sweep is explicitly forbidden from writing to or deleting from the
+ *   daemon clone (`--clone=<path>` is read-only in, never in). Its landed cards are copies — the clone's own
+ *   originals become harmless untracked leftovers once their content is on `main` (the dedupe in step 3 will
+ *   then drop them on any RE-RUN of this sweep, by the `bornAs:` match). There is currently NO sanctioned
+ *   cleanup that removes them from the clone itself; the report this tool's caller writes up proposes one
+ *   (a daemon-rebuild-time prune of untracked `backlog/x*.md` whose id is already `bornAs:` on `main`) rather
+ *   than this file reaching into the clone to delete them.
+ *
+ * Usage:
+ *   node scripts/operations/sweep-orphan-backlog-cards.mjs --clone=<path to a daemon clone> [--session=<slug>]
+ *     [--dry-run=true]
+ */
+import { execFileSync } from 'node:child_process';
+import {
+  readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { createHash } from 'node:crypto';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import { extractSubmitResult } from './open-pr.mjs';
+import { parseRunJsonTail } from './land-prevention-card.mjs';
+import { readField } from '../backlog/frontmatter.mjs';
+import { NON_DISPATCHABLE_KINDS } from './file-item.mjs';
+import {
+  readQueueFile, writeQueueFile, addToQueue, queueHas, resolveQueuePath,
+} from '../conveyor/queue-store.mjs';
+
+const HERE = resolve(fileURLToPath(import.meta.url), '..');
+export const REPO_ROOT = resolve(HERE, '..', '..');
+// Same reasoning as `land-prevention-card.mjs#LANE_POOL_CLI`: THIS checkout's own copy, resolved by script
+// location — `lane-pool.mjs` resolves its pool root from `cwd`, never script location, so running it with
+// `cwd: REPO_ROOT` against a real, `origin`-bearing checkout is correct even when THIS script itself happens
+// to be invoked from a daemon clone's copy of the same file.
+export const LANE_POOL_CLI = join(REPO_ROOT, 'scripts', 'lane-pool.mjs');
+
+export const ACQUIRE_TIMEOUT_MS = 3 * 60_000;
+export const VERIFY_TIMEOUT_MS = 70 * 60_000;
+export const OPEN_PR_TIMEOUT_MS = 45 * 60_000;
+
+/** An untracked backlog card `git status --porcelain --untracked-files=all` reports — the SAME shape
+ *  `we:scripts/conveyor/health-watch.mjs#probeUntrackedBacklogCards` already matches (a provisional hash id,
+ *  never a numbered card — a numbered card is never untracked by construction, `check-backlog-item.mjs`). */
+const ORPHAN_LINE_RE = /^\?\?\s+(backlog\/(x[0-9a-z]{6})-[^/]*\.md)$/;
+
+/** Both card shapes this sweep has actually found carry this exact title — the #4317 approval-time filer
+ *  and its #2749 unattended-review-loop sibling both build it from the same `${repo}#${pr}` pair
+ *  (`we:scripts/lib/approval-prevention-notice.mjs#buildApprovalPreventionFilingInput`,
+ *  `we:scripts/lib/review-loop-policy.mjs#buildPreventionFilingInput`) — so the title alone is a reliable
+ *  source-PR extractor across both, with no dependency on either builder's own digest shape. */
+const TITLE_SOURCE_RE = /^# File the prevention guard\(s\) owed by (\S+?)'s independent review\s*$/m;
+/** The #4317 approval-time shape's own idempotency key line — read FIRST when present (it pins the exact head
+ *  the card was filed for, not just the PR), title-derived `TITLE_SOURCE_RE` is the fallback every other
+ *  shape (the #2749 loop's own cards carry no such key) still has. */
+const IDEMPOTENCY_KEY_RE = /approval-prevention-key:([^@\s]+)@/;
+/** `git grep`'s own basic-regex reading of the same title, scoped so a hand-typed card that merely CONTAINS
+ *  this phrase mid-sentence is never mistaken for the mechanically-filed title line itself. */
+const MAIN_GREP_PATTERN = '^# File the prevention guard(s) owed by';
+
+/**
+ * PURE. Shape one orphan card's raw text into the facts {@link selectOrphanSurvivors} dedupes on.
+ * `digestHash` covers the card's OWN debt content only — the idempotency-key line (which pins a head, not the
+ * guard text) is stripped first, so two cards citing the identical guard for the identical PR at two different
+ * head shas still hash identically; the `## Done when` boilerplate (`file-item.mjs`'s own placeholder, verbatim
+ * on every card) is stripped too, so it can never itself make two otherwise-distinct cards collide.
+ * @param {string} rel - `backlog/x......-*.md`, as `git status` reported it.
+ * @param {string} content
+ * @returns {{rel:string, hashId:(string|null), status:string, kind:string, sourceRef:(string|null),
+ *   digestHash:string, content:string}}
+ */
+export function parseOrphanCard(rel, content) {
+  const hashId = /^backlog\/(x[0-9a-z]{6})-/.exec(rel)?.[1] ?? null;
+  const status = readField(content, 'status') ?? 'open';
+  const kind = readField(content, 'kind') ?? '';
+  const sourceRef = IDEMPOTENCY_KEY_RE.exec(content)?.[1] ?? TITLE_SOURCE_RE.exec(content)?.[1] ?? null;
+  const digestBody = String(content)
+    .replace(/\n*Idempotency key \(do not edit\):[^\n]*/, '')
+    .split(/\n##\s+Done when[\s\S]*$/)[0]
+    .trim();
+  const digestHash = createHash('sha256').update(digestBody).digest('hex');
+  return { rel, hashId, status, kind, sourceRef, digestHash, content };
+}
+
+/**
+ * PURE. Split parsed orphan cards into survivors (land these) and dropped (why each was dropped) — see the
+ * file header's step 3 for the two dedupe passes. Deterministic: ties within a duplicate group always keep
+ * the alphabetically-first `rel` (the lowest hash id sorts first), never input order, so re-running the sweep
+ * on an unchanged clone always reaches the same verdict.
+ * @param {ReturnType<typeof parseOrphanCard>[]} cards
+ * @param {{mainBornAsIds?:Set<string>, mainSourceRefs?:Set<string>}} [mainSets]
+ * @returns {{survivors:Array, dropped:Array<{rel:string, reason:string, duplicateOf?:string}>}}
+ */
+export function selectOrphanSurvivors(cards, { mainBornAsIds = new Set(), mainSourceRefs = new Set() } = {}) {
+  const dropped = [];
+  const remaining = [];
+  for (const c of cards) {
+    if (c.hashId && mainBornAsIds.has(c.hashId)) {
+      dropped.push({ ...c, reason: `already landed on origin/main (a card there carries bornAs: ${c.hashId})` });
+    } else if (c.sourceRef && mainSourceRefs.has(c.sourceRef)) {
+      dropped.push({ ...c, reason: `already landed on origin/main (a card already covers ${c.sourceRef})` });
+    } else {
+      remaining.push(c);
+    }
+  }
+  const sorted = [...remaining].sort((a, b) => a.rel.localeCompare(b.rel));
+  const seen = new Map();
+  const survivors = [];
+  for (const c of sorted) {
+    const key = c.sourceRef ? `${c.sourceRef}::${c.digestHash}` : `content::${c.digestHash}`;
+    const first = seen.get(key);
+    if (first) {
+      dropped.push({ ...c, reason: `duplicate of ${first.rel} — same source + same guard`, duplicateOf: first.rel });
+    } else {
+      seen.set(key, c);
+      survivors.push(c);
+    }
+  }
+  return { survivors, dropped };
+}
+
+/**
+ * READ-ONLY scan of `clone` for untracked backlog cards. `exec`/`readFile` injected — no real subprocess or
+ * `fs` call in a test. NEVER runs `git add`/`git commit`/anything that mutates `clone`'s working tree.
+ * @param {string} clone
+ * @param {{exec:Function, readFile?:Function}} io
+ * @returns {Array<{rel:string, content:string}>}
+ */
+export function listUntrackedBacklogCards(clone, { exec, readFile = (p) => readFileSync(p, 'utf8') } = {}) {
+  const status = exec('git', ['-C', clone, 'status', '--porcelain', '--untracked-files=all', '--', 'backlog'], {});
+  const lines = String(status || '').split('\n').map((l) => l.trim()).filter(Boolean);
+  const out = [];
+  for (const line of lines) {
+    const m = ORPHAN_LINE_RE.exec(line);
+    if (!m) continue; // tracked/modified/deleted entries, and any non-hash-id backlog path, are out of scope
+    out.push({ rel: m[1], content: readFile(join(clone, m[1])) });
+  }
+  return out;
+}
+
+/**
+ * READ `origin/main`'s own backlog for the two dedupe sets `selectOrphanSurvivors` needs — TWO `git grep`
+ * passes over `ref` (never a per-file `git show` for each of ~4k backlog cards). `git grep` exits 1 with no
+ * output on zero matches (never an error condition here); any OTHER failure (bad ref, not a git repo) still
+ * surfaces via the caller's own try/catch, using whatever partial stdout the child process wrote.
+ * @param {{exec:Function, ref?:string}} io
+ * @returns {{mainBornAsIds:Set<string>, mainSourceRefs:Set<string>}}
+ */
+export function readMainDedupeSets({ exec, ref = 'origin/main' }) {
+  const grepSafe = (pattern) => {
+    try { return exec('git', ['grep', '-h', pattern, ref, '--', 'backlog'], {}); } catch (e) { return String(e?.stdout ?? ''); }
+  };
+  const bornAsText = grepSafe('^bornAs:');
+  const mainBornAsIds = new Set([...String(bornAsText).matchAll(/^bornAs:\s*(\S+)/gm)].map((m) => m[1]));
+  const titleText = grepSafe(MAIN_GREP_PATTERN);
+  const mainSourceRefs = new Set([...String(titleText).matchAll(new RegExp(TITLE_SOURCE_RE.source, 'gm'))].map((m) => m[1]));
+  return { mainBornAsIds, mainSourceRefs };
+}
+
+/**
+ * Best-effort, NEVER thrown out of the caller: clear every landed survivor for the conveyor exactly as
+ * `file-item` would at ordinary filing time ({@link ../operations/file-item-io.mjs}) — the queue is a
+ * machine-local sidecar (`we:scripts/conveyor/queue-store.mjs`), never part of the commit/PR, so this can run
+ * regardless of whether the PR has merged yet, and re-running it is idempotent (`addToQueue`'s own contract).
+ * Skips a card whose `kind` the conveyor can never dispatch (epic/decision) or that was born anything but
+ * `open` — the same two refusals `file-item.mjs#planQueueing` already applies at ordinary filing time.
+ * @param {Array<{hashId:(string|null), kind:string, status:string}>} survivors
+ * @param {{read?:Function, writeQ?:Function, has?:Function, add?:Function, queuePath?:Function, now?:Function}} [io]
+ * @returns {string[]} the hash ids actually queued (already-queued ids are skipped, not re-listed)
+ */
+export function queueLandedSurvivors(survivors, {
+  read = readQueueFile,
+  writeQ = writeQueueFile,
+  has = queueHas,
+  add = addToQueue,
+  queuePath = resolveQueuePath,
+  now = () => new Date().toISOString(),
+} = {}) {
+  const path = queuePath();
+  let q = read(path);
+  let changed = false;
+  const queued = [];
+  for (const s of survivors) {
+    if (!s.hashId || NON_DISPATCHABLE_KINDS.includes(s.kind) || s.status !== 'open') continue;
+    if (has(q, s.hashId)) continue;
+    q = add(q, s.hashId, now());
+    changed = true;
+    queued.push(s.hashId);
+  }
+  if (changed) writeQ(q, path);
+  return queued;
+}
+
+/** PURE. The ONE commit message for every survivor this sweep lands. */
+export function buildSweepCommitMessage(survivors, clone) {
+  const rels = survivors.map((s) => s.rel).sort();
+  const shown = rels.length <= 10 ? rels.join(', ') : `${rels.slice(0, 10).join(', ')}, … (+${rels.length - 10} more)`;
+  return `Land ${survivors.length} orphaned backlog card(s) rescued from ${clone}\n\n`
+    + 'Untracked backlog cards written straight into a daemon clone by the pre-#4317 filing path never landed '
+    + '(we:scripts/conveyor/health-smells/untracked-backlog-card.mjs flags the condition). This sweep '
+    + '(we:scripts/operations/sweep-orphan-backlog-cards.mjs) copies the survivors — after dropping ones '
+    + `already on main or duplicating another orphan — into one lane and lands them as one PR:\n${shown}\n\n`
+    + 'Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\n';
+}
+
+/** PURE. The PR body for the same commit — names what was dropped and why, so a reviewer can spot-check the
+ *  dedupe without re-deriving it. */
+export function buildSweepPrBody(survivors, dropped, clone) {
+  const rels = survivors.map((s) => s.rel).sort();
+  const shownDropped = dropped.slice(0, 20);
+  const droppedLines = shownDropped.map((d) => `- \`${d.rel}\` — ${d.reason}`).join('\n');
+  const more = dropped.length > shownDropped.length ? `\n… (+${dropped.length - shownDropped.length} more)` : '';
+  return 'Mechanically landed by the orphan-backlog-card sweep (#4317 follow-up).\n\n'
+    + `Source clone: \`${clone}\`\n\n`
+    + `## Landed (${rels.length})\n${rels.map((r) => `- \`${r}\``).join('\n')}\n\n`
+    + `## Dropped as duplicate / already on main (${dropped.length})\n${droppedLines}${more}\n`;
+}
+
+/**
+ * THE ORCHESTRATION, INJECTABLE FOR TESTS — mirrors `land-prevention-card.mjs#landPreventionCard`'s own shape:
+ * `exec` stands in for every subprocess call, `write` for narration, `mkTmp`/`writeFile`/`rmTmp` for the ONE
+ * scratch dir this run makes (commit message + PR body), removed on every exit path. `listOrphans`/`readMain`/
+ * `queueSurvivors` are the three additional seams this sweep needs beyond that file's own (a read-only clone
+ * scan, a read-only `origin/main` dedupe read, and the best-effort conveyor queue-clear) — each independently
+ * stubbable so a test never touches a real clone, a real `origin/main`, or the real machine-wide queue sidecar.
+ *
+ * NEVER WRITES TO `input.clone`: every write in this function targets the ACQUIRED LANE, never the clone the
+ * orphans were read from — see the file header's own invariant.
+ *
+ * A lane is acquired ONLY once there is at least one survivor to land (an empty or fully-deduped clone returns
+ * `ok:true` having touched no lane at all) and is ALWAYS released once acquired, on every exit path, exactly
+ * like `land-prevention-card.mjs`'s own `finally`.
+ *
+ * @param {{clone:string, session:string, dryRun?:boolean}} input
+ * @returns {Promise<{ok:boolean, step:string, reason:(string|null), landed:string[],
+ *   dropped:Array<{rel:string,reason:string}>, pr:(number|null), url:(string|null)}>}
+ */
+export async function sweepOrphanBacklogCards({ clone, session, dryRun = false }, {
+  exec = (cmd, args, opts = {}) => String(execFileSync(cmd, args, { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, ...opts })),
+  write = (line) => process.stdout.write(line),
+  listOrphans = listUntrackedBacklogCards,
+  readMain = readMainDedupeSets,
+  queueSurvivors = queueLandedSurvivors,
+  mkTmp = () => mkdtempSync(join(tmpdir(), 'sweep-orphan-cards-')),
+  writeFile = writeFileSync,
+  rmTmp = (dir) => rmSync(dir, { recursive: true, force: true }),
+} = {}) {
+  const fail = (step, reason, extra = {}) => {
+    write(`sweep-orphan-backlog-cards: FAILED at ${step} — ${reason}\n`);
+    return {
+      ok: false, step, reason, landed: extra.landed ?? [], dropped: extra.dropped ?? [],
+      pr: extra.pr ?? null, url: extra.url ?? null,
+    };
+  };
+
+  write(`sweep-orphan-backlog-cards: scanning ${clone} for untracked backlog cards…\n`);
+  let raw;
+  try {
+    raw = listOrphans(clone, { exec });
+  } catch (e) {
+    return fail('scan', String(e?.message || e).split('\n')[0]);
+  }
+  const cards = raw.map((r) => parseOrphanCard(r.rel, r.content));
+  write(`sweep-orphan-backlog-cards: found ${cards.length} untracked card(s) in ${clone}\n`);
+  if (!cards.length) return { ok: true, step: 'done', reason: 'no untracked backlog cards found', landed: [], dropped: [], pr: null, url: null };
+
+  let mainSets;
+  try {
+    mainSets = readMain({ exec });
+  } catch (e) {
+    return fail('read-main', String(e?.message || e).split('\n')[0]);
+  }
+
+  const { survivors, dropped } = selectOrphanSurvivors(cards, mainSets);
+  write(`sweep-orphan-backlog-cards: ${survivors.length} survivor(s), ${dropped.length} dropped\n`);
+  for (const d of dropped) write(`  drop ${d.rel} — ${d.reason}\n`);
+
+  if (!survivors.length) {
+    return {
+      ok: true, step: 'done', reason: 'nothing to land — every orphan was a duplicate or already landed',
+      landed: [], dropped, pr: null, url: null,
+    };
+  }
+  if (dryRun) return { ok: true, step: 'dry-run', reason: null, landed: survivors.map((s) => s.rel), dropped, pr: null, url: null };
+
+  let scratch = null;
+  const scratchFile = (name) => join(scratch ??= mkTmp(), name);
+  let laneNum = null;
+  try {
+    let acquired;
+    try {
+      write(`sweep-orphan-backlog-cards: acquiring a lane (session ${session})…\n`);
+      acquired = parseRunJsonTail(exec('node', [
+        LANE_POOL_CLI, 'acquire', '--purpose=orphan-card-sweep', `--session=${session}`, '--json',
+      ], { cwd: REPO_ROOT, timeout: ACQUIRE_TIMEOUT_MS }));
+    } catch (e) {
+      return fail('acquire', String(e?.message || e).split('\n')[0], { dropped });
+    }
+    const lane = acquired?.path ?? null;
+    laneNum = acquired?.lane ?? null;
+    if (!lane) return fail('acquire', 'lane-pool acquire produced no usable lane path', { dropped });
+    const laneRunMjs = join(lane, 'scripts', 'operations', 'run.mjs');
+
+    write(`sweep-orphan-backlog-cards: copying ${survivors.length} card(s) into ${lane}…\n`);
+    try {
+      for (const s of survivors) writeFile(join(lane, s.rel), s.content, 'utf8');
+      exec('git', ['-C', lane, 'add', '--', ...survivors.map((s) => s.rel)], {});
+    } catch (e) {
+      return fail('copy', String(e?.message || e).split('\n')[0], { dropped });
+    }
+
+    write('sweep-orphan-backlog-cards: committing…\n');
+    try {
+      const msgPath = scratchFile('commit-msg.txt');
+      writeFile(msgPath, buildSweepCommitMessage(survivors, clone), 'utf8');
+      exec('git', ['-C', lane, 'commit', '-F', msgPath], {});
+    } catch (e) {
+      return fail('commit', String(e?.message || e).split('\n')[0], { dropped });
+    }
+
+    write('sweep-orphan-backlog-cards: running the gate…\n');
+    let verified;
+    try {
+      verified = parseRunJsonTail(exec('node', [laneRunMjs, 'verify', `--checkout=${lane}`, '--mode=run', '--json'], { cwd: lane, timeout: VERIFY_TIMEOUT_MS }));
+    } catch (e) {
+      verified = parseRunJsonTail(e?.stdout);
+    }
+    if (!verified?.verdict?.ok) {
+      return fail('verify', `gate not green: ${JSON.stringify(verified?.verdict?.blocking ?? verified?.error ?? 'unrun')}`, { dropped });
+    }
+
+    write('sweep-orphan-backlog-cards: opening the PR…\n');
+    const bodyPath = scratchFile('pr-body.md');
+    writeFile(bodyPath, buildSweepPrBody(survivors, dropped, clone), 'utf8');
+    const ref = `lane/orphan-card-sweep-${session}`;
+    let opened;
+    try {
+      opened = parseRunJsonTail(exec('node', [
+        laneRunMjs, 'open-pr', `--ref=${ref}`, '--base=main', `--bodyFile=${bodyPath}`,
+        '--mode=label-on-green', '--requireVerified=true', '--json',
+      ], { cwd: lane, timeout: OPEN_PR_TIMEOUT_MS }));
+    } catch (e) {
+      opened = parseRunJsonTail(e?.stdout);
+      if (!opened) return fail('open-pr', String(e?.message || e).split('\n')[0], { dropped });
+    }
+    const submit = extractSubmitResult(opened || {});
+    if (submit?.outcome !== 'opened') {
+      return fail('open-pr', submit?.reason ?? 'PR was not opened', { dropped, pr: submit?.pr, url: submit?.url });
+    }
+
+    try {
+      const queued = queueSurvivors(survivors);
+      if (queued.length) write(`sweep-orphan-backlog-cards: cleared ${queued.length} card(s) for the conveyor\n`);
+    } catch (e) {
+      write(`sweep-orphan-backlog-cards: conveyor queue-clear failed (non-fatal) — ${String(e?.message || e).split('\n')[0]}\n`);
+    }
+
+    write(`sweep-orphan-backlog-cards: landed — PR #${submit.pr} (${submit.url})\n`);
+    return { ok: true, step: 'done', reason: null, landed: survivors.map((s) => s.rel), dropped, pr: submit.pr ?? null, url: submit.url ?? null };
+  } catch (e) {
+    return fail('unexpected', String(e?.message || e), { dropped });
+  } finally {
+    if (laneNum != null) {
+      try {
+        exec('node', [LANE_POOL_CLI, 'release', `--lane=${laneNum}`, `--session=${session}`], { cwd: REPO_ROOT, timeout: ACQUIRE_TIMEOUT_MS });
+      } catch (e) {
+        write(`sweep-orphan-backlog-cards: lane-${laneNum} release failed (non-fatal, will age out on its own TTL) — ${String(e?.message || e)}\n`);
+      }
+    }
+    if (scratch) {
+      try { rmTmp(scratch); } catch (e) { write(`sweep-orphan-backlog-cards: scratch cleanup failed (non-fatal) — ${String(e?.message || e)}\n`); }
+    }
+  }
+}
+
+/** PURE. `--k=v` argv → this script's own flat flag map. `--clone=` is required (there is no default clone —
+ *  this tool never guesses which checkout to read); `--session=` defaults to a timestamped slug so an
+ *  interactive run needs no ceremony; `--dry-run=true` reports the survivors/dropped without acquiring a lane
+ *  or writing anything. */
+export function parseSweepArgv(argv = []) {
+  const flags = {};
+  for (const a of Array.isArray(argv) ? argv : []) {
+    if (typeof a !== 'string' || !a.startsWith('--')) continue;
+    const eq = a.indexOf('=');
+    if (eq === -1) flags[a.slice(2)] = 'true';
+    else flags[a.slice(2, eq)] = a.slice(eq + 1);
+  }
+  const clone = String(flags.clone ?? '').trim();
+  if (!clone) {
+    throw new TypeError('sweep-orphan-backlog-cards: --clone=<path to a daemon clone> is required — this tool never guesses which checkout to read');
+  }
+  const session = String(flags.session ?? '').trim() || `orphan-card-sweep-${Date.now()}`;
+  const dryRun = ['1', 'true', 'yes'].includes(String(flags['dry-run'] ?? '').trim().toLowerCase());
+  return { clone: resolve(clone), session, dryRun };
+}
+
+/** THE CLI, AS A FUNCTION — same reason `land-prevention-card.mjs#runLandPreventionCardCli` is extracted: the
+ *  argv parse, the exit-code mapping and the failure text are all reachable from a test with no subprocess. */
+export async function runSweepOrphanBacklogCardsCli(argv = [], {
+  sweep = sweepOrphanBacklogCards,
+  write = (line) => process.stdout.write(line),
+  writeErr = (line) => process.stderr.write(line),
+} = {}) {
+  let input;
+  try {
+    input = parseSweepArgv(argv);
+  } catch (e) {
+    writeErr(`error: ${String(e?.message ?? e)}\n`);
+    return { code: 1, result: null };
+  }
+  write(`sweep-orphan-backlog-cards: starting (clone ${input.clone}, session ${input.session}${input.dryRun ? ', dry-run' : ''})\n`);
+  const result = await sweep(input, { write });
+  if (!result.ok) {
+    writeErr(`sweep-orphan-backlog-cards: did not land — ${result.step}: ${result.reason}\n`);
+    return { code: 1, result };
+  }
+  write(`sweep-orphan-backlog-cards: done — landed ${result.landed.length} card(s), dropped ${result.dropped.length}`
+    + `${result.pr ? `, PR #${result.pr}` : ''}\n`);
+  return { code: 0, result };
+}
+
+const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
+if (IS_CLI) {
+  const { code } = await runSweepOrphanBacklogCardsCli(process.argv.slice(2));
+  process.exitCode = code;
+}
