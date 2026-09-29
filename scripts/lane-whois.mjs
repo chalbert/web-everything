@@ -55,6 +55,7 @@ import {
 } from './lib/lane-whois-core.mjs';
 import { readField } from './backlog/frontmatter.mjs';
 import { execFileSyncThrottled } from './lib/gh-throttle.mjs';
+import { ghRestGetPaged } from './lib/gh-rest-read.mjs';
 
 const LEASE_MARKER = (dir) => join(dir, '.git', LEASE_FILENAME);
 
@@ -319,15 +320,20 @@ export function fetchAllPrs({
   }
   let prs = [];
   try {
-    const args = ['pr', 'list', '--state', 'all', '--json', 'number,state,title,headRefName,body', '--limit', String(PR_LIST_LIMIT)];
-    if (ghRepo) args.splice(2, 0, '--repo', ghRepo);
+    // #4351 — REST, not `gh pr list --state all --limit 500` (GraphQL, ~5 points a call and this caller's
+    // 754 calls/24h ranked it among the top GraphQL spenders). Same order (created, newest first), each page a
+    // conditional GET, so an unchanged page is a free 304. `{owner}/{repo}` keeps gh's own cwd resolution
+    // when no repo was named; the cwd then joins the ETag cache key.
+    const repoPath = ghRepo ? `repos/${ghRepo}` : 'repos/{owner}/{repo}';
     // maxBuffer: 500 PRs' worth of `body` text easily clears Node's 1MB default and fails CLOSED with ENOBUFS
     // (caught below, degrading to "no PR evidence" — live-caught during this item's own before/after proof: a
     // silent 0-result fetch that made every card/PR-backed verdict look like `unknown-work` instead of its real
     // answer). 32MB matches this file's other large batched reads (`batchPatchIds`-shaped calls elsewhere).
-    const raw = execFileSyncThrottled('gh', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: GH_TIMEOUT_MS, maxBuffer: 32 * 1024 * 1024, exec });
-    const parsed = JSON.parse(raw);
-    prs = Array.isArray(parsed) ? parsed : [];
+    const pulls = ghRestGetPaged(`${repoPath}/pulls?state=all`, {
+      maxItems: PR_LIST_LIMIT, context: ghRepo ? '' : process.cwd(), op: 'rest pulls (whois)',
+      exec: (file, args, opts) => execFileSyncThrottled(file, args, { ...opts, timeout: GH_TIMEOUT_MS, maxBuffer: 32 * 1024 * 1024, exec }),
+    });
+    prs = pulls.map(restPullToListShape);
   } catch {
     prs = []; // no `gh`, no network, no auth — degrade to "no PR evidence found", never crash the whole report
   }
@@ -338,6 +344,16 @@ export function fetchAllPrs({
     } catch { /* best-effort — a cache write failure never fails the run */ }
   }
   return prs;
+}
+
+/**
+ * #4351 — one REST `pulls` item in the exact shape `gh pr list --json number,state,title,headRefName,body`
+ * returned: REST's `state` is only open/closed, so a set `merged_at` means `MERGED`; `head.ref` is
+ * `headRefName`; a `null` body is `""` (gh's own rendering). PURE.
+ */
+export function restPullToListShape(p) {
+  const state = p && p.merged_at ? 'MERGED' : String((p && p.state) || '').toUpperCase();
+  return { number: p.number, state, title: p.title ?? '', headRefName: p.head?.ref ?? '', body: p.body ?? '' };
 }
 
 /** In-process match against the ONE fetched PR list (see {@link fetchAllPrs}) — cached per run so a card id

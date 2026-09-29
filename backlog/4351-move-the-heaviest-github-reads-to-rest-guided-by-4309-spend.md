@@ -4,10 +4,11 @@ kind: story
 size: 5
 priority: high
 tier: pinned
-status: open
+status: active
 blockedBy: ["4309"]
 scope: ["we:scripts/lib/gh-spend.mjs", "we:scripts/lib/gh-throttle.mjs", "we:scripts/lib/review-label-provider.mjs", "we:scripts/conveyor/pr-watch.mjs", "we:scripts/conveyor/ci-queue-watch.mjs", "we:scripts/conveyor/parked-pr-conflict-watch.mjs", "we:scripts/wait-green.mjs"]
 dateOpened: "2026-09-28"
+dateStarted: "2026-09-29"
 tags: []
 ---
 
@@ -64,3 +65,10 @@ Live trigger: at 9:11 PM ET the App installation's GraphQL bucket ran out and th
 
 1. **Executable** — the shape-equivalence test for each converted call site fails on `main` today (new test, run before conversion — comparing today's GraphQL-only fixture against an unconverted REST call would fail by construction) and passes after conversion; existing daemon tests for touched files pass unchanged; `npm run check:standards` passes.
 2. **Observable** — `we:scripts/lib/gh-spend.mjs report --by=caller+op` shows the converted caller/op pair's GraphQL points at (near) zero and its request volume moved to REST, per the proof plan.
+
+## Progress
+
+- **Ranking (2026-09-29, `we:scripts/lib/gh-spend.mjs report --hours=24 --by=caller+op`).** No live `X-Ratelimit-*` header rows landed in the window, so every line reads UNKNOWN points. The ranking below is by invocations × known per-call cost. GraphQL top: the shared open-PR snapshot `pr list (snapshot)` (~2,100 across merge-ai-prs/reconcile/parked-conflict/review/health callers, 1 point each by its own measurement), the lane-whois caller's `pr list` (754, a `--state all --limit 500` list, so ~5 points each), the build-dispatch-daemon caller's `pr list` (699, argv not in the log), then the pr-land caller's `pr view` / `pr checks` / `pr view commits` (~600 each across identities). The suspect list in this card's Scope ranks low: `parked-pr-conflict-watch` reads the snapshot, and `pr-watch` / `ci-queue-watch` / `wait-green` / `review-label-provider` don't appear in the top rows.
+- **Shared read path (Must): done.** `we:scripts/lib/gh-rest-read.mjs` adds `ghRestGetJson` and `ghRestGetPaged`. Each is a `gh api -i` GET through the existing throttle, with `If-None-Match` taken from an on-disk ETag cache keyed by path + auth identity (+ cwd when the path uses `{owner}/{repo}`). A 304 is served from the cache and logged as `outcome: not_modified`; any other failure is re-thrown unchanged. Verified live: `gh api` exits 1 on a 304 but still prints the headers under `-i`, and three back-to-back 304s left `X-Ratelimit-Used` unchanged.
+- **First conversion: `we:scripts/lane-whois.mjs#fetchAllPrs`**, the highest-cost single caller with a clean REST equivalent. It now calls `repos/<r>/pulls?state=all` paged at 100 (same newest-first order), mapped by `restPullToListShape`: `merged_at` becomes `MERGED`, `head.ref` becomes `headRefName`, a null body becomes `""`. The shape-equivalence test (`we:scripts/lib/__tests__/gh-rest-read.test.mjs`) runs against a live-captured REST/GraphQL fixture pair (merged/open/closed PRs). The real-call-path test runs through the throttle and a PATH-faked `gh` and asserts that the `gh-spend` rollup shows only the `core` bucket. Live smoke: one whois run made 5 `core` page reads; the repeat run got five `not_modified` 304s, with zero GraphQL.
+- **Not converted here (follow-up):** the shared snapshot (`we:scripts/lib/pr-snapshot.mjs`) is the #1 GraphQL spender, but its field set (`mergeable`, `mergeStateStatus`, `files`, `comments`, `statusCheckRollup`) has no single REST list equivalent: REST needs per-PR calls for each. It needs its own design (REST list + ETag'd per-PR detail/check-runs, perhaps only for the fields callers actually read). The pr-land caller's `pr view` / `pr checks` and the build-dispatch-daemon caller's `pr list` come next by volume.
