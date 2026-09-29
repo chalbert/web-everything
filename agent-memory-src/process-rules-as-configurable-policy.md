@@ -13,7 +13,7 @@ vs. CI, [[docs/agent/platform-decisions.md#local-gate-never-full-suite-by-defaul
 requirement, the live-proof gate ([[failure-is-a-product-improvement]]), draft ownership (`we:backlog/4364`'s
 own author-owns-until-promoted ruling), capacity caps, model/provider routing and probation
 (`we:scripts/lib/provider-routing.mjs`, `we:scripts/lib/model-probation.mjs`), specialist roles
-(`we:backlog/4361`, `xs57vx3`), postmortems (`we:backlog/4365`'s conflict-postmortem store), and telemetry —
+(`we:backlog/4361`, `4361`), postmortems (`we:backlog/4365`'s conflict-postmortem store), and telemetry —
 each of these is a NAMED dimension with a small set of NAMED options and a stated default, layered
 **defaults → org/project → risk (care level) → card**, never buried as an unnamed `if` in one script or one
 paragraph of prose. The chosen policy is recorded on every run so run rating (`we:scripts/conveyor/run-rating.mjs`)
@@ -22,8 +22,8 @@ can compare outcomes ACROSS policies, not just across cards.
 **Why now, not earlier.** This repo has been adding exactly these rules one at a time, each as its own
 hard-coded default buried in its own file or memory entry (the MVP-cut rule itself, `we:agent-memory-src/story-preparation-checklist.md`'s
 items 11-13, is one more instance of the SAME pattern this item now names). Ties to epic `we:backlog/4305`
-(`xg2nk4l`, "configurable/combinable delivery and testing strategies") and the role registry card
-`we:backlog/4361` (`xs57vx3`) — both are dimension-shaped asks already filed; this item is the ONE place that
+(`4305`, "configurable/combinable delivery and testing strategies") and the role registry card
+`we:backlog/4361` (`4361`) — both are dimension-shaped asks already filed; this item is the ONE place that
 names the pattern itself, so the next rule we adopt is authored as a dimension from the start rather than as
 another one-off default someone later has to retrofit.
 

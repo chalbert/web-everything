@@ -48,7 +48,7 @@ Every provider spawn today — we:scripts/operations/review-pr.mjs's judgeAdviso
      `execFileSync('codex', …)` spawn every Codex fix/ci-heal/build dispatch runs through, per its own header),
      `we:scripts/operations/ci-heal-pr-dispatch.mjs`, `we:scripts/operations/deliver-item-wrapper.mjs`,
      `we:scripts/operations/deliver-item-run.mjs`.
-   - **prepare** — no dedicated prepare operation exists yet (`we:backlog/xtw16qn` notes prepare passes today
+   - **prepare** — no dedicated prepare operation exists yet (`we:backlog/4385` notes prepare passes today
      run as an ad-hoc session driving `node we:scripts/codex-direct-task.mjs --review` directly); the direct-task
      scripts themselves are prepare's real spawn point.
    - **`we:scripts/codex-direct-task.mjs`**, **`we:scripts/gemini-direct-task.mjs`** — the personal
@@ -102,7 +102,7 @@ Every provider spawn today — we:scripts/operations/review-pr.mjs's judgeAdviso
 **Review gate:** a plan-review finding blocks only when it breaks an MVP Must above or names real harm (a
 provider silently mis-gated into a worse fallback, or a required seat blocked on an optional provider); a valid
 finding beyond the MVP Musts is scope-growth — auto-filed as a follow-up, never used to hold this card open
-past its own review-round cap (`we:backlog/xtw16qn`'s rule, applied to this card's own review).
+past its own review-round cap (`we:backlog/4385`'s rule, applied to this card's own review).
 
 ## Done when
 

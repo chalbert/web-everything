@@ -116,7 +116,7 @@ probation trial — never an unsupervised general grant.
   to formally include `antigravity` as a candidate for the unrelated ADDED (advisory) seat axis — a real, but
   separate and smaller, piece of work this card's MVP does not need.
 - Surfacing this new role's trial stats in `we:scripts/conveyor/run-rating.mjs` / the graduation-progress
-  report — genuinely useful once several trials exist to compare, mirroring `xtw16qn`'s own Could-cut reasoning
+  report — genuinely useful once several trials exist to compare, mirroring `4385`'s own Could-cut reasoning
   ("a rule can be applied and later measured; it cannot be measured before it exists").
 
 **Size:** the MVP is one new probation role + one care-level branch + one dispatch path already proven by
@@ -181,7 +181,7 @@ spot-check clause structurally need this card's `none`/`low` plumbing first).
    under the new `mandatory-review-seat` dispatchKind, which cannot collide with existing `review-seat` rows;
    any allowance ambiguity fails closed to native Claude. Proven on a REAL low-care-level PR (this card's own
    PR, or the next `none`/`low` PR after this lands) as live evidence — per this repo's own "prove on the live
-   case, never a private workaround" discipline (`xtw16qn`'s own Done-when uses the identical proof
+   case, never a private workaround" discipline (`4385`'s own Done-when uses the identical proof
    requirement) — not unit tests alone.
 2. **Could** — `elevated` → Opus 4.6 routing, the "every accept on elevated" spot-check clause, and the real
    provider-allowance-gate wiring, once that sibling card exists and lands.
