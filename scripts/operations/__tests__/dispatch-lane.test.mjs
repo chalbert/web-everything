@@ -846,10 +846,15 @@ describe('the declared effect is a dispatch', () => {
     });
 
     it('if the retry ALSO refuses on trust, the final error still carries the trust-refusal text (classified at the call site, not swallowed here)', () => {
-      const exec = () => { throw trustRefusalError('/scratch/dispatch/sess-2'); };
+      // #4318 guard 2 — a deterministic execution-counter assertion, matching the sibling "retries once"
+      // test above: the retry bound must hold (exactly the original attempt + one retry) even when the
+      // retry ALSO fails, not just on the happy-path retry that succeeds.
+      let calls = 0;
+      const exec = () => { calls += 1; throw trustRefusalError('/scratch/dispatch/sess-2'); };
       const grantTrust = () => {};
       expect(() => defaultSpawnAgent(['--bg'], { cwd: '/scratch/dispatch/sess-2' }, { exec, grantTrust }))
         .toThrow(/Workspace not trusted|Command failed/);
+      expect(calls).toBe(2);
     });
 
     it('never retries a NON-trust failure — one exec call, no re-grant', () => {
@@ -1078,7 +1083,7 @@ describe('what the sink actually runs', () => {
     expect(outcome.run.effects[0].status).toBe('failed');
   });
 
-  // #4174 follow-up (live-caught 2026-09-27) — 17 real refusals (`we:backlog/xrv69j6-*.md`, PRs #2766/#2767/
+  // #4174 follow-up (live-caught 2026-09-27) — 17 real refusals (`#4238`, PRs #2766/#2767/
   // #2800/#2803/#2822) logged "whether an agent started is UNKNOWN" for exactly this error, even though the
   // CLI's own stderr already proves the answer is "no agent started". FAILING BEFORE THIS FIX: this case would
   // have landed in the `it('any OTHER failure is INDETERMINATE…')` bucket below — `in-flight` with a null

@@ -147,6 +147,112 @@ export function findHashPathCitesInGrepLines(lines) {
   return out;
 }
 
+// Char classes only, never `\d` — this source string is shared with a raw `git grep -E` invocation
+// (check-standards.mjs's gate) whose POSIX ERE flavor doesn't support Perl's `\d`, the same reasoning
+// HASH_PATH_CITE_SOURCE above already follows.
+export const BACKLOG_GLOB_CITE_SOURCE = 'backlog/([0-9]{1,5}|x[0-9a-z]{6,7})-\\*\\.md';
+const BACKLOG_GLOB_CITE_RE = new RegExp(`\\b${BACKLOG_GLOB_CITE_SOURCE}`, 'g');
+const BORN_AS_HASH_TEST_RE = new RegExp(`^${HASH_SLUG}$`);
+
+/**
+ * The full RESOLUTION set gate 6f-ii-d's `findDanglingBacklogGlobCite` checks a cited id against: every
+ * item's own `num` (a still-pending item's `num` IS its birth hash; a landed item's `num` is its `#NNN`)
+ * UNION every item's `bornAs` hash (a landed item's birth hash — the id its glob citations were written
+ * against before it graduated). Extracted into its own function, called by BOTH check-standards.mjs's real
+ * gate and this module's own tests, so the wiring this builds can never silently drift from what actually
+ * ships — round-2 independent review (#4318) caught an earlier draft's "wiring" test re-implementing this
+ * exact formula locally (its own `isHashLike` copy) instead of calling it, which could drift from the
+ * shipped construction with no test ever noticing.
+ *
+ * @param backlog array of `{ num, bornAs? }` — the already-loaded backlog item list.
+ * @returns Set<string> of every id currently resolvable to a real backlog file.
+ */
+export function buildBacklogResolvableIds(backlog) {
+  const items = backlog || [];
+  return new Set([
+    ...items.map((b) => String(b.num)),
+    ...items.filter((b) => typeof b.bornAs === 'string' && BORN_AS_HASH_TEST_RE.test(b.bornAs)).map((b) => b.bornAs),
+  ]);
+}
+
+/**
+ * Gate 6f-ii-d (#4318) — the WILDCARD-GLOB backlog citation, `backlog/<id>` followed by a LITERAL `-*.md`
+ * (not a real slug), does not resolve to any currently-tracked or landed item. This convention is
+ * distinct from `findHashPathCiteOutsideBacklog` above: that gate matches a citation carrying a REAL
+ * slug (`[A-Za-z0-9-]+`, no `*`) and flags the FORM unconditionally (it always dangles once the card is
+ * JIT-numbered); this gate matches the deliberately-vague glob form authors already use to dodge that
+ * exact staleness problem, and checks RESOLUTION instead — the same "does it resolve against something
+ * real" test gate 3b (`findDanglingMemoryHashSlugs`) already applies to bare hash-slugs, extended to this
+ * glob-path form and to NUMERIC ids too (an id that graduated from a hash to a number, or a stale numeric
+ * id from a renumber, both leave the glob matching nothing).
+ *
+ * A `bornAs` hash counts as resolving, same as gate 3b — so an id that graduated hash→NNN is a
+ * STALENESS/hygiene issue (the citation should name the current id), never something THIS gate flags.
+ * The gate's real catch is an id with neither a `num` nor a `bornAs` match anywhere: the live instance
+ * this gate's own build turned up (#4318) is `we:scripts/conveyor/reconcile-core.mjs` citing an id with no
+ * match at all on this tree — filed as a follow-up rather than fixed in the same change (see the #4318
+ * card's own Proof plan / Follow-ups for the full trace and the id, kept out of this docstring's own text
+ * so it can't become a second self-citing instance of the exact thing this gate exists to catch).
+ *
+ * DELIBERATELY generic on the id shape: a hash (`x[0-9a-z]{6,7}`) OR a bare backlog number (`[0-9]{1,5}`)
+ * — both forms appear in the corpus.
+ *
+ * @param text the file body (raw).
+ * @param relPath the file's repo-relative path (test-file fixtures are exempt — same reasoning as
+ *        findHashPathCiteOutsideBacklog's own exemption: a synthetic glob-cite string in a test's own
+ *        fixture is not a real citation).
+ * @param opts.resolvableIds Set<string> — every id (backlog `num`, or any item's `bornAs` hash) that
+ *        currently resolves to a real backlog file. The caller builds this from the already-loaded
+ *        `backlog` array — no extra fs pass.
+ * @returns array of `{ id, path }`, deduped per distinct id per call (a call is already one file).
+ */
+export function findDanglingBacklogGlobCite(text, relPath, { resolvableIds = new Set() } = {}) {
+  const findings = [];
+  if (typeof text !== 'string' || text === '' || typeof relPath !== 'string') return findings;
+  if (PROVENANCE_TEST_FILE_RE.test(relPath)) return findings;
+  const seen = new Set();
+  for (const m of text.matchAll(BACKLOG_GLOB_CITE_RE)) {
+    const id = m[1];
+    if (seen.has(id)) continue;
+    seen.add(id);
+    if (resolvableIds.has(id)) continue; // resolves to a currently-tracked or landed item — not a defect
+    findings.push({ id, path: m[0] });
+  }
+  return findings;
+}
+
+/**
+ * Scan `git grep -n` output lines (`<file>:<lineno>:<text>`) with findDanglingBacklogGlobCite, deduping
+ * per file+id across the WHOLE hit set — the wiring `check-standards.mjs`'s gate 6f-ii-d actually runs.
+ * Mirrors `findHashPathCitesInGrepLines` above (same line-splitting shape, same per-call reason). Extracted
+ * so this wiring — not just the pure per-line detector — is unit-testable and can't silently drift from
+ * what the gate ships (round-3 red-team review, #4318: every lens converged on "the line-parsing and
+ * per-file/id dedup the gate does are described in a comment but defended by no test").
+ *
+ * @param lines raw `git grep -n` output lines.
+ * @param opts.resolvableIds Set<string> — see findDanglingBacklogGlobCite.
+ * @returns array of `{ file, id, path }`, deduped per distinct (file, id) pair across the WHOLE input
+ *          (unlike findDanglingBacklogGlobCite's own per-call dedup, which only ever sees one line here).
+ */
+export function findDanglingBacklogGlobCitesInGrepLines(lines, { resolvableIds = new Set() } = {}) {
+  const out = [];
+  const seen = new Set();
+  for (const line of lines) {
+    const i = line.indexOf(':');
+    if (i === -1) continue;
+    const j = line.indexOf(':', i + 1);
+    const file = line.slice(0, i);
+    const content = j === -1 ? line.slice(i + 1) : line.slice(j + 1);
+    for (const f of findDanglingBacklogGlobCite(content, file, { resolvableIds })) {
+      const key = `${file}\u0000${f.id}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ file, ...f });
+    }
+  }
+  return out;
+}
+
 /**
  * Build the anchor → owning-items map from backlog front-matter. A platform-decisions `#anchor` is owned
  * by EVERY backlog item that resolves to it — an anchor is genuinely multi-owner on this corpus (measured:

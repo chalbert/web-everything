@@ -44,6 +44,10 @@ import {
   findHashPathCiteOutsideBacklog,
   findHashPathCitesInGrepLines,
   HASH_PATH_CITE_SOURCE,
+  findDanglingBacklogGlobCite,
+  BACKLOG_GLOB_CITE_SOURCE,
+  buildBacklogResolvableIds,
+  findDanglingBacklogGlobCitesInGrepLines,
 } from '../lib/citation-check.mjs';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -380,6 +384,147 @@ describe('findHashPathCiteOutsideBacklog — #4075 follow-up (xmd4pfa): a hash-n
       { file: 'scripts/mixed.mjs', path: 'backlog/xnotone-other.md', hash: 'xnotone' },
       { file: 'scripts/mixed.mjs', path: 'backlog/xhash01-alpha.md', hash: 'xhash01' },
     ]);
+  });
+});
+
+describe('findDanglingBacklogGlobCite — gate 6f-ii-d (#4318): the wildcard-glob `backlog/<id>-*.md` convention', () => {
+  // Pure-function case: an id absent from the SUPPLIED resolvableIds fires. This is NOT the xrv69j6
+  // incident (see the test below and the #4318 card's own correction) — the real resolvableIds construction
+  // (num ∪ bornAs-of-hash-items) would include xrv69j6 via #4238's bornAs, so that specific citation was a
+  // staleness/hygiene fix, never something this gate flagged. This case is a genuinely unresolvable id, the
+  // shape the gate's real corpus hit (a citation with no num AND no bornAs match anywhere) takes.
+  it('FIRES on a hash id absent from resolvableIds', () => {
+    const hits = findDanglingBacklogGlobCite(
+      'own unlocked write of ~/.claude.json. See we:backlog/xnotany-*.md and dispatch-lane-io.mjs#isTrustRefusal.',
+      'scripts/conveyor/health-smells/dispatch-trust-refused.mjs',
+      { resolvableIds: new Set(['4238']) },
+    );
+    expect(hits).toEqual([{ id: 'xnotany', path: 'backlog/xnotany-*.md' }]);
+  });
+
+  // WIRING case (round-2 independent review: "nothing tests the bornAs union end to end", and — round-3
+  // red-team — "the wiring test re-implements the union locally instead of calling the shipped code, so it
+  // tests its own copy, not the gate"). Calls the ACTUAL SHARED builder check-standards.mjs's gate calls
+  // (buildBacklogResolvableIds), not a local reimplementation, from a synthetic backlog fixture, and proves
+  // a hash that graduated to a landed number (num:'4238', bornAs:'xrv69j6') resolves. This is the real-world
+  // shape of the xrv69j6→#4238 graduation this item's own build ran into: the gate does NOT flag it, and
+  // this test can never silently drift from that guarantee the way a re-implemented copy could.
+  it('a graduated hash resolves via buildBacklogResolvableIds (the SAME builder the real gate calls) — never flagged', () => {
+    const backlog = [
+      { num: '4238', bornAs: 'xrv69j6' },
+      { num: 'xqmw8g9' }, // a still-pending item: hash num, no bornAs yet
+    ];
+    const resolvableIds = buildBacklogResolvableIds(backlog);
+    expect(findDanglingBacklogGlobCite('see we:backlog/xrv69j6-*.md', 'docs/agent/rule.md', { resolvableIds })).toHaveLength(0);
+  });
+
+  it('buildBacklogResolvableIds: a still-pending item (hash num, no bornAs) resolves via its own num', () => {
+    const resolvableIds = buildBacklogResolvableIds([{ num: 'xqmw8g9' }]);
+    expect(resolvableIds.has('xqmw8g9')).toBe(true);
+  });
+
+  it('buildBacklogResolvableIds: ignores a non-hash-shaped bornAs (never asserts membership it can\'t back)', () => {
+    const resolvableIds = buildBacklogResolvableIds([{ num: '10', bornAs: 'not-a-hash' }]);
+    expect(resolvableIds.has('not-a-hash')).toBe(false);
+    expect(resolvableIds.has('10')).toBe(true);
+  });
+
+  it('buildBacklogResolvableIds: tolerates a missing/empty backlog array — never throws', () => {
+    expect(buildBacklogResolvableIds([])).toEqual(new Set());
+    expect(buildBacklogResolvableIds(undefined)).toEqual(new Set());
+  });
+
+  it('FIRES on a numeric id that was renumbered away — not just hash ids', () => {
+    const hits = findDanglingBacklogGlobCite('see we:backlog/9999-*.md', 'docs/agent/rule.md', { resolvableIds: new Set(['4238']) });
+    expect(hits).toEqual([{ id: '9999', path: 'backlog/9999-*.md' }]);
+  });
+
+  // GREEN: once xrv69j6's bornAs (still pending) or #4238 (landed) is in the resolution set, the SAME glob
+  // citation passes — this is the after-fix shape for a currently-live citation, not a synthetic case.
+  it('PASSES (empty) once the id resolves via a landed item\'s num', () => {
+    expect(findDanglingBacklogGlobCite('see we:backlog/4238-*.md', 'docs/agent/rule.md', { resolvableIds: new Set(['4238']) })).toHaveLength(0);
+  });
+
+  it('PASSES (empty) once the id resolves via a still-pending item\'s bornAs hash', () => {
+    expect(findDanglingBacklogGlobCite('see we:backlog/xrv69j6-*.md', 'docs/agent/rule.md', { resolvableIds: new Set(['xrv69j6']) })).toHaveLength(0);
+  });
+
+  it('PASSES (empty) for a REAL slug (no literal `*`) — that is gate 6f-ii-c\'s citation shape, not this one\'s', () => {
+    expect(findDanglingBacklogGlobCite('see backlog/xrv69j6-a-real-slug.md', 'docs/agent/rule.md', { resolvableIds: new Set() })).toHaveLength(0);
+  });
+
+  it('PASSES (empty) for a synthetic glob-cite string living in a test file\'s own fixture — not a real citation', () => {
+    expect(findDanglingBacklogGlobCite('see we:backlog/xnotreal-*.md', 'scripts/__tests__/whatever.test.mjs', { resolvableIds: new Set() })).toHaveLength(0);
+  });
+
+  it('dedupes the SAME dangling id cited twice in one file to one finding', () => {
+    const text = 'first: backlog/xdupe01-*.md, again: backlog/xdupe01-*.md';
+    expect(findDanglingBacklogGlobCite(text, 'reports/note.md', { resolvableIds: new Set() })).toHaveLength(1);
+  });
+
+  it('reports two findings for two genuinely different dangling ids in the same file', () => {
+    const text = 'backlog/xoneid1-*.md and backlog/xtwoid2-*.md';
+    const hits = findDanglingBacklogGlobCite(text, 'reports/note.md', { resolvableIds: new Set() });
+    expect(hits.map((h) => h.id).sort()).toEqual(['xoneid1', 'xtwoid2']);
+  });
+
+  it('defaults resolvableIds to empty when omitted — every glob cite dangles with no resolution set', () => {
+    expect(findDanglingBacklogGlobCite('see backlog/1234-*.md', 'reports/note.md')).toEqual([{ id: '1234', path: 'backlog/1234-*.md' }]);
+  });
+
+  it('BACKLOG_GLOB_CITE_SOURCE is a valid POSIX ERE (git grep -E) and ECMA regex — one pattern, both engines', () => {
+    expect(new RegExp(BACKLOG_GLOB_CITE_SOURCE).test('backlog/xrv69j6-*.md')).toBe(true);
+    expect(new RegExp(BACKLOG_GLOB_CITE_SOURCE).test('backlog/4238-*.md')).toBe(true);
+    expect(new RegExp(BACKLOG_GLOB_CITE_SOURCE).test('backlog/xrv69j6-a-real-slug.md')).toBe(false);
+  });
+});
+
+describe('findDanglingBacklogGlobCitesInGrepLines — gate 6f-ii-d\'s ACTUAL wiring (round-3 red-team, #4318)', () => {
+  // The wiring check-standards.mjs's gate calls: raw `git grep -n` lines in, file+line parsing, per-file/id
+  // dedup ACROSS the whole hit set (not just within one line) out. Round-3 red-team: every lens converged on
+  // "this exact shape is described in a comment but defended by no test" — this closes that gap for real,
+  // by testing the function the gate actually calls, not a re-implementation of it.
+  it('reports EVERY dangling cite on a git-grep line, and keeps the test-file exemption', () => {
+    const hits = findDanglingBacklogGlobCitesInGrepLines([
+      'scripts/mixed.mjs:3:// see backlog/xnotone-*.md and backlog/xhash01-*.md',
+      'scripts/__tests__/x.test.mjs:9:fixture backlog/xhash02-*.md',
+    ], { resolvableIds: new Set() });
+    expect(hits).toEqual([
+      { file: 'scripts/mixed.mjs', id: 'xnotone', path: 'backlog/xnotone-*.md' },
+      { file: 'scripts/mixed.mjs', id: 'xhash01', path: 'backlog/xhash01-*.md' },
+    ]);
+  });
+
+  it('dedupes the SAME (file, id) pair across MULTIPLE distinct git-grep lines — not just within one line', () => {
+    const hits = findDanglingBacklogGlobCitesInGrepLines([
+      'scripts/a.mjs:3:first: backlog/xdupe01-*.md',
+      'scripts/a.mjs:9:again, same file: backlog/xdupe01-*.md',
+    ], { resolvableIds: new Set() });
+    expect(hits).toEqual([{ file: 'scripts/a.mjs', id: 'xdupe01', path: 'backlog/xdupe01-*.md' }]);
+  });
+
+  it('does NOT dedupe the SAME id cited from two DIFFERENT files', () => {
+    const hits = findDanglingBacklogGlobCitesInGrepLines([
+      'scripts/a.mjs:1:backlog/xshared-*.md',
+      'scripts/b.mjs:1:backlog/xshared-*.md',
+    ], { resolvableIds: new Set() });
+    expect(hits.map((h) => h.file).sort()).toEqual(['scripts/a.mjs', 'scripts/b.mjs']);
+  });
+
+  it('an id present in resolvableIds produces no finding, from real grep-line input', () => {
+    const hits = findDanglingBacklogGlobCitesInGrepLines(
+      ['docs/agent/rule.md:5:see backlog/4238-*.md'],
+      { resolvableIds: new Set(['4238']) },
+    );
+    expect(hits).toHaveLength(0);
+  });
+
+  it('a line with no second colon (no line number) is skipped, never throws', () => {
+    expect(findDanglingBacklogGlobCitesInGrepLines(['not-a-grep-line'], { resolvableIds: new Set() })).toEqual([]);
+  });
+
+  it('defaults resolvableIds to empty and tolerates an empty lines array', () => {
+    expect(findDanglingBacklogGlobCitesInGrepLines([])).toEqual([]);
   });
 });
 

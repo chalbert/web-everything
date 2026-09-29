@@ -34,7 +34,7 @@ export default {
   minErrors: 2,
   recommendationHint: 'A dispatched session\'s scratch cwd is repeatedly refused as "not trusted" — the '
     + 'spawn-time grant/retry in dispatch-lane-io.mjs is losing a race against a concurrent claude process\'s '
-    + 'own unlocked write of ~/.claude.json. See we:backlog/xrv69j6-*.md and dispatch-lane-io.mjs#isTrustRefusal.',
+    + 'own unlocked write of ~/.claude.json. See #4238 and dispatch-lane-io.mjs#isTrustRefusal.',
   evaluate(_probes, { now, daemons }) {
     const per = {};
     let total = 0;

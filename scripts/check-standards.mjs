@@ -104,6 +104,8 @@ import {
   findUnresolvedIdentifiers, buildIdentifierIndex, isIndexableSourcePath, PROVENANCE_ESCAPE_MARKERS,
   makeRepoResolver, findDanglingSymbolAnchors, findDanglingGraduatedTargets,
   HASH_PATH_CITE_SOURCE, findHashPathCitesInGrepLines,
+  BACKLOG_GLOB_CITE_SOURCE, buildBacklogResolvableIds,
+  findDanglingBacklogGlobCitesInGrepLines,
 } from './lib/citation-check.mjs';
 import { TRUST_CHAIN, POLICY_SPEC_BASENAMES } from './lib/gate-config.mjs';
 // #2892 — the leash-pin rule asserts against the REAL rubric, not a copy of its predicate.
@@ -1733,6 +1735,66 @@ try {
 }
 
 mark("6f-ii-c. HASH-PATH CITATION outside backlog/ (#4075 follow-up, xmd4pfa)");
+// ── 6f-ii-d. DANGLING BACKLOG-GLOB CITATION (#4318) ────────────────────────────────────────────────
+// The `backlog/<id>-*.md` WILDCARD-GLOB citation convention (a literal `*`, not a real slug — ~93 corpus
+// hits) is authors' own workaround for gate 6f-ii-c above (a real slug always dangles at JIT-numbering;
+// the glob form deliberately avoids naming one). But the glob's own `<id>` still dangles the moment it
+// graduates hash→NNN or a numeric id gets renumbered — findDanglingBacklogGlobCite resolves it against the
+// tree the same way gate 3b already resolves a bare hash-slug, extended to the glob-path form and to
+// numeric ids. A `bornAs` hash counts as resolving (same as gate 3b) — so a citation naming an id that has
+// since graduated to a real `#NNN` is a STALENESS/hygiene issue (cite the current id instead), never a
+// dangling one; the gate's real catch is an id with NEITHER a `num` NOR a `bornAs` anywhere on the tree
+// (see citation-check.mjs's own header on findDanglingBacklogGlobCite for the live instance this gate's own
+// build turned up on that basis, #4318). Unlike 6f-ii-c, `backlog/` is NOT exempt here: a backlog item can
+// dangle-cite a sibling's stale glob just as easily as any other file.
+//
+// DELIBERATELY OUTSIDE the Rust-port branch above, same reasoning as 6f-ii-b/6f-ii-c: the port is verified
+// byte-identical to only the original four gates; folding a fifth in here would mean it silently doesn't
+// run whenever the Rust path is taken.
+//
+// WARN-level, matching CITATION_GATES_ENFORCED and the rest of this gate family — a first run against the
+// historical corpus will surface pre-existing hits nobody was checking before.
+try {
+  const emit4 = CITATION_GATES_ENFORCED ? err : warn;
+  // Reuse the already-loaded `backlog` array (no extra fs pass) via the SHARED, tested builder (#4318
+  // round-2 review) — every id that currently resolves to a real backlog file, either as a landed/pending
+  // item's own `num` or as any item's birth `bornAs` hash (mirrors gate 3b's pendingHashes/bornAsHashes
+  // construction, widened to include numeric `num`s too since this gate also catches a numeric id going
+  // stale, not just a hash). Calling the shared builder — not re-deriving the union inline — is what lets
+  // this module's own tests exercise the EXACT construction this gate ships, not a copy of it.
+  const resolvableIds = buildBacklogResolvableIds(backlog);
+  let hits = [];
+  try {
+    hits = execFileSync(
+      'git', ['grep', '--threads=1', '-nE', BACKLOG_GLOB_CITE_SOURCE, '--', '.', ':!node_modules'],
+      { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 16 * 1024 * 1024 },
+    ).split('\n').filter(Boolean);
+  } catch (e) {
+    // git grep exits 1 on "no match" — that is the common, expected empty case, never a gate crash. Any
+    // OTHER exit (git unavailable, output past maxBuffer, a real error) is NOT the same as "no findings" —
+    // independent review (#4318, security lens) caught the sibling gates' identical catch-all silently
+    // reporting clean on a real scan failure. Route it through the SAME emit4 the gate's own findings use
+    // (not a bare `warn`) so CITATION_GATES_ENFORCED promotes a real scan failure to a hard error exactly
+    // like it would promote a real finding — a scan that couldn't run is not entitled to a softer floor
+    // than a scan that ran and found something.
+    if (e?.status !== 1) {
+      emit4(`backlog-glob citation gate: git grep failed unexpectedly (${String(e?.message || e).split('\n')[0]}) ` +
+        `— this run's findings for gate 6f-ii-d may be INCOMPLETE, not clean.`,
+        { kind: 'citation-backlog-glob-scan-error', file: 'scripts/check-standards.mjs', global: true });
+    }
+  }
+  for (const f of findDanglingBacklogGlobCitesInGrepLines(hits, { resolvableIds })) {
+    emit4(`${f.file}: cites \`${f.path}\` — id \`${f.id}\` resolves to no currently-tracked or landed ` +
+      `backlog item (a graduated hash→NNN id still resolves via bornAs and never trips this; this is a ` +
+      `typo, an abandoned lane's throwaway id, or an id that was never landed under this exact form) ` +
+      `(#4318). Update the glob to a real id, or cite it by stable \`#NNN\` instead.`,
+      { kind: 'citation-backlog-glob-dangling', file: f.file });
+  }
+} catch (e) {
+  err(`backlog-glob citation gate failed: ${e.message}`);
+}
+
+mark("6f-ii-d. DANGLING BACKLOG-GLOB CITATION (#4318)");
 // ── 6f-iii. PROVENANCE gate (#3026) — a backticked identifier in prose must resolve, or be marked ──
 // The one citation form the #2821 subset cannot reach. Gates 3/5/10 are all LOCUS-shaped (a path, a line,
 // an anchor); a bare `` `validateTodoMarkerBlock` `` in a sentence is none of those, so the highest-frequency
