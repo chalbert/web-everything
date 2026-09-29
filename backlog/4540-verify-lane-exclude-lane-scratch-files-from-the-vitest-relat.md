@@ -1,4 +1,5 @@
 ---
+bornAs: x88m779
 kind: story
 size: 2
 status: open

@@ -53,7 +53,7 @@ a still-accurate green just because it was asked twice.
 **Scope correction.** The card named `we:scripts/verify-lane.mjs` + `we:scripts/lib/verify-lane-gate.mjs`. The
 marker *shape* (`treeHash` alongside `sha`) lives in `we:scripts/lib/lane-verify.mjs`
 (`verifyStartBody`/`verifyFinishBody`), so that file is added to `scope:` above. `we:scripts/conveyor/run-rating.mjs`
-is also added: the orchestrator directed folding x4txc2g's hermetic-test fix into this same PR/commit (see the
+is also added: the orchestrator directed folding 4538's hermetic-test fix into this same PR/commit (see the
 Progress log) rather than a separate one, since it was the direct unblock for this card's own step-5 gate — a
 deliberate, orchestrator-approved scope addition, not drift. No other file needs to change for the MVP.
 
@@ -140,8 +140,8 @@ not just unit tests:
   after probe (real `git`, real `we:scripts/verify-lane.mjs request`, byte-identical marker on the cache hit vs.
   an unconditional `running` rewrite before the fix). Wider `vitest related` sweep on the touched files:
   2965/2965 green.
-- 2026-09-29 — Filed the two card-body follow-ups as separate cards (per this card's own MVP cut): x5awn7x
-  (inline-run-when-a-slot-is-free) and x88m779 (exclude lane scratch files from the related set).
+- 2026-09-29 — Filed the two card-body follow-ups as separate cards (per this card's own MVP cut): 4539
+  (inline-run-when-a-slot-is-free) and 4540 (exclude lane scratch files from the related set).
 - 2026-09-29 — **Step-5 terminal gate: RED, three independent dispatches, NOT from this item's own diff.**
   `node we:scripts/verify-lane.mjs request` + `check --wait=` came back `red` (exit 1) three times running. Root
   cause isolated by direct reproduction: the vitest half failed on
@@ -153,27 +153,27 @@ not just unit tests:
   `we:scripts/verify-lane.mjs` inside an unrelated example command, which the diff-driven selection's basename-
   needle grep treats as a real reference. Confirmed via isolated repro: the exact same combined command (and the
   narrower two-file combo) passed cleanly on direct manual runs; only the real daemon-dispatched runs (longer
-  wall time, more host contention) hit it, 3/3. Filed the root cause as its own card, x4txc2g, rather than
+  wall time, more host contention) hit it, 3/3. Filed the root cause as its own card, 4538, rather than
   hand-patching `we:scripts/conveyor/__tests__/run-rating.test.mjs` under this item's scope. Per this brief's
   own escalation rule (gate red -- fix it or report and stop; never bypass), stopping here: card left `active`,
   nothing committed, no PR opened. A retry (fresh `request`) may simply land green on a quieter host window, or
-  land once x4txc2g is fixed.
+  land once 4538 is fixed.
 - 2026-09-29 — A 4th `request` was made to double-check under changed host conditions; it did not settle within
   several `check --wait=` cycles -- `ps aux` at the time showed 5+ OTHER concurrent lanes (29, 35, 42, 45, ...)
   all polling/dispatching their own verify-lane gates simultaneously on this same shared host, consistent with
   the host-contention read above. Left unsettled/`running` rather than waited out indefinitely; the three
   earlier, fully-settled RED results already carry the complete diagnosis.
 - 2026-09-29 — **Reconciling the two bullets above with what actually shipped (#4473 review finding 6).** The
-  "stopping here" bullet said nothing would be committed and no PR opened for x4txc2g, expecting a separate
-  card/PR to pick it up later. On reflection, x4txc2g's own fix ((1), the hermetic `buildCoverageReport` test)
+  "stopping here" bullet said nothing would be committed and no PR opened for 4538, expecting a separate
+  card/PR to pick it up later. On reflection, 4538's own fix ((1), the hermetic `buildCoverageReport` test)
   turned out to be small and fully isolated to `we:scripts/conveyor/run-rating.mjs` +
   `we:scripts/conveyor/__tests__/run-rating.test.mjs` — a direct, low-risk unblock for THIS card's own gate
   rather than scope creep — so it was folded into this same lane/diff instead of waiting on a separate PR.
-  x4txc2g is marked `resolved` accordingly ("Fixed under #4473's own PR"). This bullet supersedes the "nothing
+  4538 is marked `resolved` accordingly ("Fixed under #4473's own PR"). This bullet supersedes the "nothing
   committed, no PR opened" framing above: that was accurate at the moment it was written, but the plan changed
-  immediately after. A reader should trust THIS bullet (and x4txc2g's own Progress log) over the two above for
+  immediately after. A reader should trust THIS bullet (and 4538's own Progress log) over the two above for
   the current state of the gate/fix-2 split; the needle-heuristic fix (2) is still correctly split out to
-  xaani98 and NOT part of this diff.
+  4541 and NOT part of this diff.
 - 2026-09-29 — **`/converge` (elevated care, 5-lens panel: correctness, security, simplicity, standards-
   conformance, claim-accuracy).** Round 1's panel + an independent red-team caught two real, genuine bugs the
   fix's own tests had not (both introduced/worse-than-base/not-parallelizable — a converge BLOCKER):
