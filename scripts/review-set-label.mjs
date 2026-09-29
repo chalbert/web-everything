@@ -146,6 +146,7 @@ import { execFileSyncThrottled } from './lib/gh-throttle.mjs';
 import {
   defaultSpawnDetached, REPO_ROOT as PREVENTION_LANDING_REPO_ROOT,
 } from './operations/detached-dispatch.mjs';
+import { buildGhShimSettingsEnv } from './lib/gh-app-shim.mjs';
 // codex plan review (2026-09-28) — the landing job's own log must live OUTSIDE any checkout, never in
 // `deliveryDispatchLogPath`'s in-checkout default (`<checkout>/.operations/delivery-dispatch-logs/`), which
 // would itself write into whatever daemon clone is running this: exactly the class of write this whole file
@@ -702,7 +703,8 @@ export function derivePreventionParent(findings) {
  *
  * @param {{title:string,kind:string,size:string,digest:string,scope:string,parent:string,queue:string,
  *   retractTo?:{repo:string,pr:(number|string),headSha:string}}} input
- * @param {{spawnDetached?: Function, logPathFor?: Function, runScript?: string, root?: string}} [o] -
+ * @param {{spawnDetached?: Function, logPathFor?: Function, runScript?: string, root?: string,
+ *   resolveSettingsEnv?: Function}} [o] - `resolveSettingsEnv` returns the gh-App-shim env forwarded to the job.
  *   `spawnDetached` is injectable (same shape as `defaultSpawnDetached`) so a test can assert the exact argv
  *   with no real subprocess and no real `backlog/` write in the calling checkout.
  * @returns {{ok:boolean, num:(number|null), rel:(string|null), error:(string|null), handle?:string}}
@@ -712,7 +714,16 @@ export function fileApprovalPreventionCard(input, {
   logPathFor = preventionCardLandingLogPath,
   runScript = LAND_PREVENTION_CARD_SCRIPT,
   root = PREVENTION_LANDING_REPO_ROOT,
+  resolveSettingsEnv = () => buildGhShimSettingsEnv(),
 } = {}) {
+  // #4317 advisory review (2026-09-29 04:47, correctness): `defaultSpawnDetached` strips the inherited
+  // GH_TOKEN/GITHUB_TOKEN and restores gh's App identity ONLY through `settingsEnv` — without it the job's own gh
+  // calls (open-pr, the retraction comment) ran with no token on an App-auth host. Same forwarding as
+  // `dispatch-providers/build.mjs` (#landing-freeze-2779). No `cwd` here, deliberately: that option ALSO writes
+  // `<cwd>/.claude/settings.local.json`, a write into the calling checkout this function exists to never make.
+  // Resolver failure → `null` (the spawn still goes out, as it did before), never a thrown approval.
+  let settingsEnv = null;
+  try { settingsEnv = resolveSettingsEnv() || null; } catch { settingsEnv = null; }
   const sessionSlug = `prevention-card-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   const argv = [
     runScript,
@@ -736,7 +747,7 @@ export function fileApprovalPreventionCard(input, {
     // own state root, never `root`/`REPO_ROOT`) — codex plan review (2026-09-28) flagged the prior default
     // (`deliveryDispatchLogPath`'s own in-checkout `.operations/delivery-dispatch-logs/`) as still writing
     // into the calling checkout, which this function's whole point is to stop doing.
-    const child = spawnDetached(argv, { cwd: root, logPath: logPathFor(sessionSlug) });
+    const child = spawnDetached(argv, { cwd: root, logPath: logPathFor(sessionSlug), settingsEnv });
     const pid = Number(child?.pid);
     if (!Number.isInteger(pid) || pid <= 0) {
       return { ok: false, num: null, rel: null, error: 'land-prevention-card: spawned but node reported no pid' };

@@ -131,6 +131,40 @@ describe('fileApprovalPreventionCard — hands off to the detached landing job, 
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
+  // #4317 advisory review (2026-09-29 04:47, correctness): `defaultSpawnDetached` strips the inherited
+  // GH_TOKEN/GITHUB_TOKEN and restores gh's App identity ONLY through `settingsEnv` — the job's gh calls
+  // (open-pr, the retraction comment) ran with no token when this spawn passed only `{cwd, logPath}`. Same
+  // forwarding as `dispatch-providers/build.mjs` (#landing-freeze-2779).
+  it('forwards the gh-App-shim settingsEnv to the detached landing job', () => {
+    const spawnCalls = [];
+    const spawnDetached = (argv, opts) => { spawnCalls.push({ argv, opts }); return { pid: 5 }; };
+    const shimEnv = { PATH: '/home/x/.claude/github-app-token/gh-shim.d/abc:/usr/bin' };
+    fileApprovalPreventionCard(input, {
+      spawnDetached, root: '/tmp', logPathFor: () => '/dev/null', resolveSettingsEnv: () => shimEnv,
+    });
+    expect(spawnCalls[0].opts.settingsEnv).toEqual(shimEnv);
+  });
+
+  it('a host with no App auth configured (resolver → null) still spawns, with no settingsEnv to add', () => {
+    const spawnCalls = [];
+    const spawnDetached = (argv, opts) => { spawnCalls.push({ argv, opts }); return { pid: 5 }; };
+    const result = fileApprovalPreventionCard(input, {
+      spawnDetached, root: '/tmp', logPathFor: () => '/dev/null', resolveSettingsEnv: () => null,
+    });
+    expect(result.ok).toBe(true);
+    expect(spawnCalls[0].opts.settingsEnv).toBeNull();
+  });
+
+  it('a throwing resolver never costs the approval — the job still spawns', () => {
+    const spawnCalls = [];
+    const spawnDetached = (argv, opts) => { spawnCalls.push({ argv, opts }); return { pid: 5 }; };
+    const result = fileApprovalPreventionCard(input, {
+      spawnDetached, root: '/tmp', logPathFor: () => '/dev/null', resolveSettingsEnv: () => { throw new Error('boom'); },
+    });
+    expect(result.ok).toBe(true);
+    expect(spawnCalls[0].opts.settingsEnv).toBeNull();
+  });
+
   it('omits --parent when input.parent is empty', () => {
     const spawnCalls = [];
     const spawnDetached = (argv) => { spawnCalls.push(argv); return { pid: 1 }; };

@@ -193,6 +193,14 @@ export function buildApprovalPreventionRetraction({ headSha, session } = {}) {
   return `<!-- approval-prevention-retracted:${head}:${session} -->`;
 }
 
+/** The line {@link buildApprovalPreventionFilingInput} appends the card-side key to the digest with. Exported so
+ *  `we:scripts/operations/land-prevention-card.mjs#boundLandPreventionCardInput` finds that line by the SAME
+ *  constant, never a copy that could drift (#4317 advisory review, 2026-09-29). */
+export const APPROVAL_PREVENTION_DIGEST_KEY_SEP = '\n\nIdempotency key (do not edit): ';
+
+/** The prefix every {@link buildApprovalPreventionKey} key starts with. */
+export const APPROVAL_PREVENTION_KEY_PREFIX = 'approval-prevention-key:';
+
 /**
  * THE CARD-SIDE IDEMPOTENCY KEY — written into the filed card's own body by
  * {@link buildApprovalPreventionFilingInput}, so the card itself (not only the PR marker comment) records which
@@ -205,7 +213,7 @@ export function buildApprovalPreventionRetraction({ headSha, session } = {}) {
  */
 export function buildApprovalPreventionKey({ repo, pr, headSha } = {}) {
   const repoKey = String(repo ?? '').toLowerCase(); // GitHub slugs are case-insensitive
-  return `approval-prevention-key:${repoKey}#${String(pr ?? '')}@${String(headSha ?? '').toLowerCase()}`;
+  return `${APPROVAL_PREVENTION_KEY_PREFIX}${repoKey}#${String(pr ?? '')}@${String(headSha ?? '').toLowerCase()}`;
 }
 
 /**
@@ -378,7 +386,7 @@ export function buildApprovalPreventionFilingInput({
     size: '3',
     // The key is appended AFTER the #883 rewrite so that pass can never alter it (a later lookup matches it byte
     // for byte).
-    digest: key ? `${digest}\n\nIdempotency key (do not edit): ${key}` : digest,
+    digest: key ? `${digest}${APPROVAL_PREVENTION_DIGEST_KEY_SEP}${key}` : digest,
     scope,
     parent: parent || '',
     queue: 'true',

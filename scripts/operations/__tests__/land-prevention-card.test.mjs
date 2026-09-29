@@ -17,7 +17,10 @@ import {
   landPreventionCard, parseLandPreventionCardArgv, parseRunJsonTail, runLandPreventionCardCli,
   boundCardText, boundLandPreventionCardInput, CARD_TEXT_CAPS, buildLandingRetractionComment, postLandingRetraction,
 } from '../land-prevention-card.mjs';
-import { hasApprovalPreventionMarkerForHead, buildApprovalPreventionMarker, buildApprovalPreventionJobMarker } from '../../lib/approval-prevention-notice.mjs';
+import {
+  hasApprovalPreventionMarkerForHead, buildApprovalPreventionMarker, buildApprovalPreventionJobMarker,
+  buildApprovalPreventionKey, APPROVAL_PREVENTION_DIGEST_KEY_SEP,
+} from '../../lib/approval-prevention-notice.mjs';
 
 const INPUT = {
   title: 'File the prevention guard(s) owed by o/r#42\'s independent review',
@@ -51,6 +54,30 @@ const OPEN_PR_OPENED = JSON.stringify({
 });
 
 describe('landPreventionCard — the real acquire → file-item → commit → verify → open-pr → release sequence', () => {
+  // #4317 advisory review (2026-09-29 04:47, logic): a hash-id card has no `num`, and the first cut fell back to
+  // ONE shared `lane/x-prevention-card` ref — two in-flight hash-id cards then collided on the same branch.
+  it('two unnumbered (hash-id) cards open on DISTINCT branch refs', async () => {
+    const refFor = async (rel, session) => {
+      const fileOk = JSON.stringify({ verdict: { num: null, rel } });
+      const { exec, calls } = scriptedExec([ACQUIRE_OK, fileOk, 'added', 'committed', VERIFY_GREEN, OPEN_PR_OPENED, 'released']);
+      const result = await landPreventionCard({ ...INPUT, session }, {
+        exec, write: () => {}, mkTmp: () => '/tmp/x', rmTmp: () => {}, writeFile: () => {},
+      });
+      expect(result.ok).toBe(true);
+      return calls[5].args.find((a) => a.startsWith('--ref=')).slice('--ref='.length);
+    };
+    const a = await refFor('backlog/xab12cd-file-the-prevention.md', 'prevention-card-a');
+    const b = await refFor('backlog/xef34gh-file-the-prevention.md', 'prevention-card-b');
+    expect(a).toBe('lane/xab12cd-prevention-card');
+    expect(b).toBe('lane/xef34gh-prevention-card');
+    // No id derivable from the path at all → the job's own (unique) session slug, never a shared constant.
+    const c = await refFor('backlog/weird.md', 'prevention-card-c');
+    expect(c).toBe('lane/prevention-card-c');
+    // A plain slug word is never mistaken for a hash id (it would collide across cards again).
+    const d = await refFor('backlog/file-the-prevention.md', 'prevention-card-d');
+    expect(d).toBe('lane/prevention-card-d');
+  });
+
   it('lands the card: reaches an opened, labelled PR, and releases the lane', async () => {
     const { exec, calls } = scriptedExec([ACQUIRE_OK, FILE_ITEM_OK, 'added', 'committed', VERIFY_GREEN, OPEN_PR_OPENED, 'released']);
     const written = [];
@@ -307,6 +334,24 @@ describe('card text bounding (#4317 advisory review, 2026-09-29)', () => {
     expect(long).toMatch(/truncated: 380 chars over the 120-char cap/);
   });
 
+  // #4317 advisory review (2026-09-29 04:47, security): the C0-only strip let Unicode format / bidi / line-separator
+  // characters through, so a card that auto-lands on main could read differently to a human than to an agent.
+  // Code points, never literal characters: the #2866 standards check forbids these invisibles in source.
+  it.each([
+    ['C1 NEL', 0x85], ['C1 CSI', 0x9b], ['line separator', 0x2028], ['paragraph separator', 0x2029],
+    ['RLO bidi override', 0x202e], ['LRE bidi embedding', 0x202a], ['RLI bidi isolate', 0x2067],
+    ['PDI bidi isolate', 0x2069], ['zero-width space', 0x200b], ['zero-width joiner', 0x200d],
+    ['byte-order mark', 0xfeff], ['soft hyphen', 0xad], ['word joiner', 0x2060],
+  ])('boundCardText neutralizes %s', (_name, cp) => {
+    const ch = String.fromCodePoint(cp);
+    expect(boundCardText(`a${ch}b`, 100)).toBe('a b');
+    expect(boundCardText(`a${ch}b`, 100, { singleLine: true })).toBe('a b');
+  });
+
+  it('boundCardText keeps ordinary non-ASCII text (accents, CJK, emoji without joiners)', () => {
+    expect(boundCardText('café — 日本 ✓ 🚦', 100)).toBe('café — 日本 ✓ 🚦');
+  });
+
   it('boundLandPreventionCardInput keeps the idempotency key line verbatim after truncating the digest body', () => {
     const key = 'approval-prevention-key:o/r#7@abc';
     const out = boundLandPreventionCardInput({
@@ -315,6 +360,23 @@ describe('card text bounding (#4317 advisory review, 2026-09-29)', () => {
     expect(out.title.length).toBeLessThanOrEqual(CARD_TEXT_CAPS.title);
     expect(out.digest.length).toBeLessThanOrEqual(CARD_TEXT_CAPS.digest);
     expect(out.digest.endsWith(`\n\nIdempotency key (do not edit): ${key}`)).toBe(true);
+  });
+
+  // #4317 advisory review (2026-09-29 04:47, simplicity): the key line's separator is the builder's own exported
+  // constant, not a copy — so a real builder-produced digest always round-trips through the bound.
+  it('keeps the key of a REAL builder-produced digest, via the shared separator constant', () => {
+    const key = buildApprovalPreventionKey({ repo: 'o/r', pr: 7, headSha: 'ABC123' });
+    const digest = `${'z'.repeat(20_000)}${APPROVAL_PREVENTION_DIGEST_KEY_SEP}${key}`;
+    const out = boundLandPreventionCardInput({ title: 't', scope: 's', digest });
+    expect(out.digest.endsWith(`${APPROVAL_PREVENTION_DIGEST_KEY_SEP}${key}`)).toBe(true);
+    expect(out.digest.length).toBeLessThanOrEqual(CARD_TEXT_CAPS.digest);
+  });
+
+  it('a key-shaped line carrying an invisible char is NOT kept verbatim — it is bounded like ordinary text', () => {
+    const rlo = String.fromCodePoint(0x202e);
+    const digest = `body${APPROVAL_PREVENTION_DIGEST_KEY_SEP}approval-prevention-key:o/r#7@ab${rlo}cd`;
+    const out = boundLandPreventionCardInput({ title: 't', scope: 's', digest });
+    expect(out.digest.includes(rlo)).toBe(false);
   });
 
   it('a fake key line is bounded like ordinary text, and scope is capped by whole entries', () => {

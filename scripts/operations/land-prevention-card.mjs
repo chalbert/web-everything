@@ -70,11 +70,13 @@
 import { execFileSync } from 'node:child_process';
 import { writeFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { extractSubmitResult } from './open-pr.mjs';
-import { buildApprovalPreventionRetraction } from '../lib/approval-prevention-notice.mjs';
+import {
+  buildApprovalPreventionRetraction, APPROVAL_PREVENTION_DIGEST_KEY_SEP, APPROVAL_PREVENTION_KEY_PREFIX,
+} from '../lib/approval-prevention-notice.mjs';
 import { execFileSyncThrottled } from '../lib/gh-throttle.mjs';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
@@ -100,11 +102,18 @@ const REQUIRED_FLAGS = Object.freeze(['title', 'kind', 'size', 'digest', 'scope'
  * still ordinary card text a reader weighs — but it can no longer be unbounded or smuggle invisible markup.
  */
 export const CARD_TEXT_CAPS = Object.freeze({ title: 200, scope: 2000, digest: 8000 });
-const DIGEST_KEY_SEP = '\n\nIdempotency key (do not edit): ';
+
+/** Every INVISIBLE or text-reordering character, by Unicode class so the whole family is covered by construction
+ *  (#4317 advisory review, 2026-09-29 04:47 — the first cut stripped only C0/DEL): `\p{Cc}` is every control char
+ *  (C0, DEL, C1), `\p{Cf}` every format char (bidi embeddings/overrides/isolates, zero-width space/joiners, BOM,
+ *  soft hyphen, word joiner), plus the two Unicode line/paragraph separators (`\p{Zl}`/`\p{Zp}`). `\n` and `\t`
+ *  are the only exceptions — ordinary card layout. Deliberately broad: it also splits ZWJ emoji sequences and drops
+ *  ZWNJ/tag characters, a cosmetic loss accepted for card text that lands on `main` with no human gate. */
+const INVISIBLE_CHARS_RE = /(?![\n\t])[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu;
 
 /**
- * PURE. Bound one untrusted card field: strip control characters (keeping `\n`/`\t` unless `singleLine`),
- * neutralize `<!--`/`-->`, and cap the length with a visible truncation note.
+ * PURE. Bound one untrusted card field: strip control, format, bidi and line-separator characters (keeping
+ * `\n`/`\t` unless `singleLine`), neutralize `<!--`/`-->`, and cap the length with a visible truncation note.
  * @param {string} text
  * @param {number} max
  * @param {{singleLine?: boolean}} [o]
@@ -112,10 +121,9 @@ const DIGEST_KEY_SEP = '\n\nIdempotency key (do not edit): ';
  */
 export function boundCardText(text, max, { singleLine = false } = {}) {
   let s = String(text ?? '')
-    // eslint-disable-next-line no-control-regex
     // A SPACE, never '': joining the text around a control char could mint a new bare path (`foo\u0007.mjs` →
     // `foo.mjs`) that the #883 locus-prefix write gate would then refuse.
-    .replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, ' ')
+    .replace(INVISIBLE_CHARS_RE, ' ')
     .replace(/<!--/g, '&lt;!--')
     .replace(/-->/g, '--&gt;');
   if (singleLine) s = s.replace(/[\n\t]+/g, ' ');
@@ -134,11 +142,14 @@ export function boundCardText(text, max, { singleLine = false } = {}) {
  */
 export function boundLandPreventionCardInput(input) {
   const digest = String(input.digest ?? '');
-  const at = digest.lastIndexOf(DIGEST_KEY_SEP);
+  const at = digest.lastIndexOf(APPROVAL_PREVENTION_DIGEST_KEY_SEP);
   // Only a REAL key line (one short token, the builder's own shape) is kept verbatim; anything else is ordinary
   // digest text and is bounded like the rest.
-  const tail = at === -1 ? '' : digest.slice(at + DIGEST_KEY_SEP.length);
-  const isKey = /^approval-prevention-key:\S{1,300}$/.test(tail);
+  const tail = at === -1 ? '' : digest.slice(at + APPROVAL_PREVENTION_DIGEST_KEY_SEP.length);
+  const isKey = tail.startsWith(APPROVAL_PREVENTION_KEY_PREFIX)
+    // Printable ASCII only — the builder's own key is always ASCII, and `\S` would admit bidi/zero-width chars
+    // into a line that is kept verbatim, bypassing `boundCardText`.
+    && /^[\x21-\x7e]{1,300}$/.test(tail.slice(APPROVAL_PREVENTION_KEY_PREFIX.length));
   const keyLine = isKey ? digest.slice(at) : '';
   const body = isKey ? digest.slice(0, at) : digest;
   // Scope is capped by dropping WHOLE entries, never by slicing one mid-path (a sliced entry would be a fake path
@@ -275,8 +286,9 @@ export const OPEN_PR_TIMEOUT_MS = 45 * 60_000;
  * starve the pool for every OTHER item. The ENTIRE post-acquire sequence (codex plan review, 2026-09-28) runs
  * under one enclosing try/catch, not just the steps that already had their own — an unexpected throw (a full
  * disk during the PR-body write, say) must still release the lane and return a clean failure, never leak or
- * propagate an unhandled rejection out of this async function. The release itself runs in ONE `finally`
- * (#4317 advisory review, 2026-09-29), so no early return added later can skip it.
+ * propagate an unhandled rejection out of this async function. The release and the scratch-dir cleanup both run
+ * in this function's ONE `finally` (#4317 advisory review, 2026-09-29), so no early return added later can skip
+ * them — one plain sequential `try/catch/finally`, no helper layers or callbacks to trace.
  *
  * @param {{title:string,kind:string,size:string,digest:string,scope:string,parent:string,queue:string,
  *   session:string}} input
@@ -294,63 +306,36 @@ export async function landPreventionCard(input, {
   // the first cut made a fresh `mkdtempSync` dir for each file and never removed either, leaking two per filing).
   let scratch = null;
   const scratchFile = (name) => join(scratch ??= mkTmp(), name);
-  try {
-    return await landPreventionCardSteps(input, { exec, write, writeFile, scratchFile });
-  } finally {
-    if (scratch) {
-      try { rmTmp(scratch); } catch (e) { write(`land-prevention-card: scratch cleanup failed (non-fatal) — ${String(e?.message || e)}\n`); }
-    }
-  }
-}
-
-async function landPreventionCardSteps(input, { exec, write, writeFile, scratchFile }) {
-  let laneNum = null;
-  const release = () => {
-    if (laneNum == null) return;
-    try {
-      exec('node', [LANE_POOL_CLI, 'release', `--lane=${laneNum}`, `--session=${input.session}`], { cwd: REPO_ROOT, timeout: ACQUIRE_TIMEOUT_MS });
-    } catch (e) {
-      write(`land-prevention-card: lane-${laneNum} release failed (non-fatal, will age out on its own TTL) — ${String(e?.message || e)}\n`);
-    }
-  };
+  let laneNum = null; // set once acquired; the `finally` releases it on every exit path
   const fail = (step, reason, extra = {}) => {
     write(`land-prevention-card: FAILED at ${step} — ${reason}\n`);
     return { ok: false, step, num: extra.num ?? null, rel: extra.rel ?? null, pr: extra.pr ?? null, url: extra.url ?? null, reason };
   };
+  // EVERYTHING runs under ONE enclosing try/catch/finally — the #4317-review fix for the "PR-body prep throws and
+  // leaks the lane" gap: `mkTmp()`/`writeFile()` (and any other step that is not its own already-labelled failure
+  // mode below) must still release the lane and return a clean failure, never propagate an unhandled rejection.
   try {
-    return await runInLane(input, { exec, write, writeFile, scratchFile, fail, setLane: (n) => { laneNum = n; } });
-  } finally {
-    release(); // every exit path, once a lane number is known
-  }
-}
+    let acquired;
+    try {
+      write(`land-prevention-card: acquiring a lane (session ${input.session})…\n`);
+      acquired = parseRunJsonTail(exec('node', [
+        LANE_POOL_CLI, 'acquire', '--purpose=prevention-card', `--session=${input.session}`, '--json',
+      ], { cwd: REPO_ROOT, timeout: ACQUIRE_TIMEOUT_MS }));
+    } catch (e) {
+      return fail('acquire', String(e?.message || e).split('\n')[0]);
+    }
+    const lane = acquired?.path ?? null;
+    laneNum = acquired?.lane ?? null;
+    if (!lane) return fail('acquire', 'lane-pool acquire produced no usable lane path');
+    // THE #4317-REVIEW FIX (codex plan review, 2026-09-28): every operation from here on must run the ACQUIRED
+    // LANE's OWN `run.mjs`, never a `run.mjs` resolved from wherever THIS script itself lives (the checkout that
+    // spawned this job, e.g. a daemon clone). `scaffold-io.mjs#REPO_ROOT` (and its siblings) resolve their own
+    // repo root by SCRIPT LOCATION, not by `cwd` — so running the CALLER's `run.mjs` with `cwd: lane` would still
+    // have written the card into the CALLER's own `backlog/`, the exact bug this whole file exists to fix, just
+    // one hop further out. A real delivery agent avoids this by `cd $LANE` + a RELATIVE `scripts/...` path; this
+    // does the equivalent by building the lane's own absolute path explicitly.
+    const laneRunMjs = join(lane, 'scripts', 'operations', 'run.mjs');
 
-async function runInLane(input, { exec, write, writeFile, scratchFile, fail, setLane }) {
-  let acquired;
-  try {
-    write(`land-prevention-card: acquiring a lane (session ${input.session})…\n`);
-    acquired = parseRunJsonTail(exec('node', [
-      LANE_POOL_CLI, 'acquire', '--purpose=prevention-card', `--session=${input.session}`, '--json',
-    ], { cwd: REPO_ROOT, timeout: ACQUIRE_TIMEOUT_MS }));
-  } catch (e) {
-    return fail('acquire', String(e?.message || e).split('\n')[0]);
-  }
-  const lane = acquired?.path ?? null;
-  setLane(acquired?.lane ?? null);
-  if (!lane) return fail('acquire', 'lane-pool acquire produced no usable lane path');
-  // THE #4317-REVIEW FIX (codex plan review, 2026-09-28): every operation from here on must run the ACQUIRED
-  // LANE's OWN `run.mjs`, never a `run.mjs` resolved from wherever THIS script itself lives (the checkout that
-  // spawned this job, e.g. a daemon clone). `scaffold-io.mjs#REPO_ROOT` (and its siblings) resolve their own
-  // repo root by SCRIPT LOCATION, not by `cwd` — so running the CALLER's `run.mjs` with `cwd: lane` would still
-  // have written the card into the CALLER's own `backlog/`, the exact bug this whole file exists to fix, just
-  // one hop further out. A real delivery agent avoids this by `cd $LANE` + a RELATIVE `scripts/...` path; this
-  // does the equivalent by building the lane's own absolute path explicitly.
-  const laneRunMjs = join(lane, 'scripts', 'operations', 'run.mjs');
-
-  // EVERYTHING BELOW THIS LINE, ONCE A LANE IS HELD, RUNS UNDER ONE ENCLOSING try/catch — the #4317-review
-  // fix for the "PR-body prep throws and leaks the lane" gap: `mkTmp()`/`writeFile()` (and any other step that
-  // is not its own already-labelled failure mode below) must still release the lane and return a clean
-  // failure, never propagate an unhandled rejection out of this async function.
-  try {
     write(`land-prevention-card: filing the card in ${lane}…\n`);
     const fileArgv = [
       laneRunMjs, 'file-item', `--title=${input.title}`, `--kind=${input.kind}`, `--size=${input.size}`,
@@ -394,7 +379,7 @@ async function runInLane(input, { exec, write, writeFile, scratchFile, fail, set
     write('land-prevention-card: opening the PR…\n');
     const bodyPath = scratchFile('pr-body.md');
     writeFile(bodyPath, `Mechanically filed by the approval-time prevention filer (#4317).\n\n${input.digest}\n`, 'utf8');
-    const ref = `lane/${num ?? 'x'}-prevention-card`;
+    const ref = preventionCardRef({ num, rel, session: input.session });
     let opened;
     try {
       opened = parseRunJsonTail(exec('node', [
@@ -413,7 +398,35 @@ async function runInLane(input, { exec, write, writeFile, scratchFile, fail, set
     return { ok: true, step: 'done', num, rel, pr: submit.pr ?? null, url: submit.url ?? null, reason: null };
   } catch (e) {
     return fail('unexpected', String(e?.message || e));
+  } finally {
+    if (laneNum != null) {
+      try {
+        exec('node', [LANE_POOL_CLI, 'release', `--lane=${laneNum}`, `--session=${input.session}`], { cwd: REPO_ROOT, timeout: ACQUIRE_TIMEOUT_MS });
+      } catch (e) {
+        write(`land-prevention-card: lane-${laneNum} release failed (non-fatal, will age out on its own TTL) — ${String(e?.message || e)}\n`);
+      }
+    }
+    if (scratch) {
+      try { rmTmp(scratch); } catch (e) { write(`land-prevention-card: scratch cleanup failed (non-fatal) — ${String(e?.message || e)}\n`); }
+    }
   }
+}
+
+/**
+ * PURE. The `lane/*` ref a filed card's PR opens on — unique per card (#4317 advisory review, 2026-09-29 04:47:
+ * the first cut fell back to ONE shared `lane/x-prevention-card` for every unnumbered card, so two in-flight
+ * hash-id cards collided on the same branch). Uses the card's `num` when it has one, else the hash id that
+ * leads the card's own filename (`backlog/<id>-<slug>.md`), else the job's own unique session slug.
+ * @param {{num:(number|string|null), rel:(string|null), session:string}} o
+ * @returns {string}
+ */
+export function preventionCardRef({ num, rel, session }) {
+  if (num != null && String(num).trim()) return `lane/${String(num).trim()}-prevention-card`;
+  // The backlog's own provisional hash-id shape (`x` + 6, as `check-backlog-item.mjs` reads it) — never a looser
+  // pattern that a plain slug word (`file-the-…`) could also match and so collide again.
+  const id = /^(x[0-9a-z]{6})-/.exec(basename(String(rel ?? '')))?.[1];
+  if (id) return `lane/${id}-prevention-card`;
+  return `lane/${session}`;
 }
 
 /**
