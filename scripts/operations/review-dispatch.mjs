@@ -153,7 +153,8 @@ import { JUDGE_PROVIDER_NAMES } from './cli-adapter.mjs';
 export const REVIEW_DISPATCH_SYSTEM_PROMPT_FILE = join(
   dirname(fileURLToPath(import.meta.url)), '..', '..', 'skills-src', 'review', 'review-agent-system-prompt.md',
 );
-import { armSelfReexecOnFastForward, assertMainNotStale } from '../lib/main-staleness.mjs';
+import { armSelfReexecOnFastForward, assertMainNotStale, isCodePath } from '../lib/main-staleness.mjs';
+import { closureHits, collectImportClosure } from '../lib/import-closure.mjs';
 // #3875 — re-exported so this file's own two existing importers (this module's own `dispatchReview` below,
 // and we:scripts/conveyor/reconcile-fix-dispatch.mjs) need no import change: the implementation moved to
 // we:scripts/lib/main-staleness.mjs (a pure lib, importable by a future daemon with no dependency on this
@@ -403,6 +404,73 @@ export function fillReviewBrief(template, values = {}) {
 // default behavior. Read the guard's full history/design there, not here. Both of this guard's callers
 // (this file's `dispatchReview` below, and we:scripts/conveyor/reconcile-fix-dispatch.mjs) are unchanged.
 
+/** #4387 — the declared REVIEW CODE PATH: the review operation (review-pr, this dispatcher, the loop CLI), its
+ *  provider adapter, the lib judge/jury/review modules, and the staleness guard itself. A managed clone behind
+ *  `origin/main` only in files outside this set still dispatches a review (see `assertMainNotStale`'s
+ *  `dispatchPath`). A declared list, not the full import closure: that closure reaches ~330 files (the backlog,
+ *  lane-pool and conveyor libraries), so nearly every landed PR would touch it and the guard would keep refusing.
+ *  It does include EVERY direct import of the four review entry files (this dispatcher, review-pr, cli-adapter,
+ *  review-loop-cli) — the sandbox (dispatch-lane-io's gh shim and argv, dispatch-bg-isolation), seat/model routing
+ *  and the operation engine. A clone behind in one of those must refuse (PR #2916 review). The
+ *  `isReviewCodePath (#4387)` test reddens when an entry file gains an import this set does not cover. The
+ *  sandbox modules' deeper imports come from `REVIEW_SANDBOX_ROOTS` below. */
+const REVIEW_CODE_PATH_RE = /^scripts\/(operations|lib|conveyor)\/[^/]*(review|judge|jury)[^/]*$/;
+const REVIEW_CODE_PATH_FILES = new Set([
+  'scripts/operations/cli-adapter.mjs', 'scripts/lib/main-staleness.mjs',
+  // the dispatcher's own imports: sandbox, session isolation, routing, repo resolution
+  'scripts/operations/dispatch-lane-io.mjs', 'scripts/lib/dispatch-bg-isolation.mjs',
+  'scripts/lib/provider-routing.mjs', 'scripts/lib/codex-model-routing.mjs', 'scripts/lib/constellation-repos.mjs',
+  'scripts/lib/repo-profile.mjs', 'scripts/lib/write-all-sync.mjs',
+  // the session scratch cwd (#4174) — a root would pull in guard-bash and the fix-claim store
+  'scripts/guard-lane.mjs',
+  // the operation engine review-pr / cli-adapter / review-loop-cli run on
+  'scripts/operations/engine.mjs', 'scripts/operations/effect-executor.mjs', 'scripts/operations/registry.mjs',
+  'scripts/operations/run-record.mjs', 'scripts/operations/run-store.mjs', 'scripts/operations/run.mjs',
+  'scripts/operations/scaffold-io.mjs', 'scripts/operations/step-kinds.mjs',
+  // review-pr's remaining direct imports
+  'scripts/codex-direct-task.mjs', 'scripts/review-core-cli.mjs', 'scripts/review-set-label.mjs',
+  'scripts/lib/advisory-labels.mjs', 'scripts/lib/model-probation.mjs', 'scripts/lib/pr-liveness.mjs',
+  'scripts/conveyor/advisory-round-count.mjs', 'scripts/conveyor/learnings-drop.mjs',
+  'scripts/conveyor/run-scorecard-store.mjs',
+]);
+
+/** #4387 (PR #2916 review, round 2) — direct imports are not enough: the credential sandbox lives one level
+ *  deeper (dispatch-lane-io → gh-app-shim's `sanitizeSpawnEnv`/`buildGhShimSettingsEnv`, github-app-auth-env,
+ *  session-role, spawn-to-completion; review-core → mandate-fence). The FULL static import closure of these
+ *  sandbox, spawn and verdict modules is on the review code path, computed from the running tree, so a new
+ *  import under them is covered with no list to update. That closure is ~75 files (it also reaches daemon-sync,
+ *  telemetry and queue helpers); about 1 in 6 recent landed PRs touch the path with it. The closure of the entry
+ *  files themselves is not used: it reaches ~330 files (the conveyor, via review-job and dispatch-lane-io), and
+ *  about a quarter of recent landed PRs touch it, so the guard would refuse most of the time again. */
+export const REVIEW_SANDBOX_ROOTS = Object.freeze([
+  'scripts/lib/gh-app-shim.mjs', 'scripts/lib/github-app-auth-env.mjs', 'scripts/operations/session-role.mjs',
+  'scripts/lib/spawn-to-completion.mjs', 'scripts/lib/dispatch-bg-isolation.mjs', 'scripts/lib/gh-throttle.mjs',
+  'scripts/lib/dispatch-contracts.mjs', 'scripts/operations/detached-dispatch.mjs',
+  'scripts/operations/dispatch-lane.mjs', 'scripts/lib/mandate-fence.mjs', 'scripts/lib/review-core.mjs',
+  'scripts/lib/jury-core.mjs', 'scripts/lib/judge-spawn.mjs', 'scripts/lib/codex-judge-spawn.mjs',
+  'scripts/lib/antigravity-judge-spawn.mjs', 'scripts/lib/main-staleness.mjs', 'scripts/lib/atomic-json-file.mjs',
+]);
+const THIS_CODE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+let sandboxClosureMemo;
+
+/** The sandbox roots' static import closure in this process's own tree (memoized), or `null` if unreadable. */
+export function reviewSandboxClosure() {
+  if (sandboxClosureMemo === undefined) {
+    sandboxClosureMemo = collectImportClosure({ root: THIS_CODE_ROOT, entries: [...REVIEW_SANDBOX_ROOTS] });
+  }
+  return sandboxClosureMemo;
+}
+
+/** Is `path` (repo-relative) on the review code path? `closure` is injectable; an unknown or incomplete
+ *  closure fails closed — every code file counts as on the path. */
+export function isReviewCodePath(path, { closure = reviewSandboxClosure() } = {}) {
+  const p = String(path || '');
+  if (!p) return false;
+  if (REVIEW_CODE_PATH_FILES.has(p) || REVIEW_CODE_PATH_RE.test(p)) return true;
+  if (!closure || !closure.complete) return isCodePath(p);
+  return closureHits({ closure, changedFiles: [p] }).length > 0;
+}
+
 /**
  * Shape one dispatch request and verify the selected checkout before filling or spawning.
  *
@@ -481,8 +549,8 @@ export function dispatchReview({
   assertNotALaneCheckout(root);
   // #3439 — refuse (not silently spawn) when this checkout is behind origin/main: see `assertMainNotStale`.
   // `checkStaleness` undefined here falls straight through to that function's own default — no need to
-  // duplicate it.
-  assertMainNotStale(root, checkStaleness);
+  // duplicate it. #4387 — a managed clone refuses only when a behind file is on the review code path.
+  assertMainNotStale(root, checkStaleness, { dispatchPath: isReviewCodePath });
   // #xqa9ttq — validated HERE, before the brief is ever filled: an unrecognised name would otherwise reach
   // `review-loop-cli.mjs`'s own `--provider` parse INSIDE the dispatched session, where the refusal happens
   // minutes into a real dispatch instead of at the command line that requested it.

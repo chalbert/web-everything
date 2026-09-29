@@ -3,9 +3,10 @@ bornAs: x3ei6wr
 kind: story
 size: 3
 tier: pinned
-status: open
+status: active
 scope: ["we:scripts/lib/main-staleness.mjs", "we:scripts/operations/review-dispatch.mjs"]
 dateOpened: "2026-09-28"
+dateStarted: "2026-09-29"
 tags: []
 ---
 
@@ -15,4 +16,22 @@ we:scripts/lib/main-staleness.mjs's guard, called from we:scripts/operations/rev
 
 ## Done when
 
-1. **Executable** — TODO: a command that fails before this item lands and passes after.
+1. **Executable** — `npx vitest run we:scripts/operations/__tests__/review-dispatch.test.mjs -t "#4387"`: a real
+   managed clone behind origin/main in code OFF the review path dispatches (before: refused with the stale
+   marker), and one behind in we:scripts/operations/review-pr.mjs still refuses.
+
+## Progress
+
+- `assertMainNotStale` (we:scripts/lib/main-staleness.mjs) takes an opt-in `dispatchPath` predicate: a MANAGED
+  clone behind only in code files the predicate rejects dispatches and logs the tolerated lag
+  (`behindOffDispatchPath`). Unknown/empty behind-file list still refuses (fail closed); unset keeps the #4044
+  rule; unmanaged checkouts are unchanged (they auto-ff, or get the reason-specific refusal).
+- we:scripts/operations/review-dispatch.mjs declares `isReviewCodePath` (review/judge/jury modules under
+  `scripts/{operations,lib,conveyor}/`, we:scripts/operations/cli-adapter.mjs, and the guard itself) and passes
+  it. A declared list, not the import closure: review-dispatch + review-pr + cli-adapter statically reach ~190
+  files, so the closure would refuse on nearly every landed PR.
+- Unit tests for both branches plus fail-closed cases (we:scripts/lib/__tests__/main-staleness.test.mjs);
+  real-call-path tests through `dispatchReview` on a real temp git clone
+  (we:scripts/operations/__tests__/review-dispatch.test.mjs).
+- Follow-up (not in this item): the same rule for the fix (we:scripts/conveyor/reconcile-fix-dispatch.mjs) and
+  verify dispatchers — pass their own `dispatchPath`.

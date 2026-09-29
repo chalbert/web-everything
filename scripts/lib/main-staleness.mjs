@@ -177,12 +177,16 @@ export function behindFiles(root, base = 'main', run = gitRun) {
  * @param {string} root
  * @param {(root: string) => ReturnType<typeof checkMainStaleness>} [checkStaleness] - injectable, defaults to
  *   a real `checkMainStaleness` scoped (via `run`'s `cwd`) to `root`.
- * @param {{base?: string, label?: string}} [o] - `base` is the delivery target to measure staleness against
- *   (default `main`); `label` prefixes the thrown/logged message so each caller reads as itself (default
- *   `review-dispatch`, this function's original and still most common caller).
+ * @param {{base?: string, label?: string, dispatchPath?: ((path: string) => boolean)|null}} [o] - `base` is the
+ *   delivery target to measure staleness against (default `main`); `label` prefixes the thrown/logged message so
+ *   each caller reads as itself (default `review-dispatch`, this function's original and still most common
+ *   caller). `dispatchPath` (#4387) narrows a MANAGED clone's refusal to the files this dispatch actually runs:
+ *   when set, a managed clone behind only in files it rejects dispatches and logs the tolerated lag. Unset (the
+ *   default) keeps the #4044 rule — any code file behind refuses.
  */
 export function assertMainNotStale(root, checkStaleness, {
-  base = 'main', label = 'review-dispatch',
+  base = 'main', label = 'review-dispatch', dispatchPath = null,
+  listBehindFiles = (r) => behindFiles(r, base),
   // xgqz204 — the self-fast-forward seams (see `selfFastForwardAction`). All default to the real process.
   codeRoot = THIS_CODE_ROOT, armed = selfSyncState.armed, reexeced = selfSyncState.reexeced,
   reexec = reexecSelf, changedFiles = (r, from, to) => changedFilesBetween(r, from, to),
@@ -207,10 +211,19 @@ export function assertMainNotStale(root, checkStaleness, {
   // file cannot make it stale. So a managed clone behind ONLY in non-code files is fresh enough to dispatch;
   // the next tick-start rebuild still brings it current. Unknown diff ⇒ the refusal stands (fail closed).
   if (st && st.action === 'warn' && managedClone) {
-    const files = behindFiles(root, base);
+    const files = listBehindFiles(root);
     if (Array.isArray(files) && files.length > 0 && !files.some(isCodePath)) {
       process.stderr.write(`${label}: the managed clone is ${st.behind} commit(s) behind origin/${base} in non-code files only (${files.length} file(s)) — not stale for dispatch (#4044).\n`);
       st = { fresh: true, behind: st.behind, behindNonCodeOnly: true, files: files.length };
+    } else if (Array.isArray(files) && files.length > 0 && typeof dispatchPath === 'function'
+      && !files.some((f) => isCodePath(f) && dispatchPath(f))) {
+      // #4387 (live 2026-09-28): the drain lands about a PR a minute and a rebuild takes minutes, so the review
+      // daemon sat 4-18 commits behind and logged 970 refusals in one evening — for commits that never touched
+      // the code a review dispatch runs. Only a behind file on the caller's own dispatch path can make it stale.
+      const code = files.filter(isCodePath).length;
+      write(`${label}: the managed clone is ${st.behind} commit(s) behind origin/${base} (${code} code file(s), none on `
+        + `this dispatch's code path) — tolerating the lag and dispatching (#4387).\n`);
+      st = { fresh: true, behind: st.behind, behindOffDispatchPath: true, files: files.length, codeFiles: code };
     }
   }
   // x5wbsbc (epic #4075) — FALLBACK TO THE LAST WORKING BUILD, NEVER BLOCK DELIVERY (operator ruling 2026-09-26).

@@ -251,6 +251,43 @@ describe('assertMainNotStale — managed clone never auto-ffs (#4044 Module E)',
     expect(st).toMatchObject({ fresh: true, behindNonCodeOnly: true, behind: 1 });
     expect(git(clonePath, 'rev-list', '--count', 'HEAD..origin/main').trim()).toBe('1'); // only the rebuild moves it
   });
+  // #4387 — a caller's `dispatchPath` narrows the refusal to the files that dispatch actually runs.
+  it('managed clone behind in code OFF the dispatch path dispatches and logs the tolerated lag (#4387)', () => {
+    const clonePath = makeBehindClone('unrelated.mjs');
+    const logs = [];
+    const st = withManagedCloneEnv('1', () => assertMainNotStale(clonePath, undefined, {
+      label: 'test', dispatchPath: (p) => p === 'review.mjs', write: (s) => logs.push(s),
+    }));
+    expect(st).toMatchObject({ fresh: true, behindOffDispatchPath: true, behind: 1, codeFiles: 1 });
+    expect(logs.join('')).toMatch(/1 commit\(s\) behind origin\/main .*tolerating the lag/);
+    expect(git(clonePath, 'rev-list', '--count', 'HEAD..origin/main').trim()).toBe('1'); // never touched
+  });
+  it('managed clone behind in code ON the dispatch path still refuses (#4387)', () => {
+    const clonePath = makeBehindClone('review.mjs');
+    expect(() => withManagedCloneEnv('1', () => assertMainNotStale(clonePath, undefined, {
+      label: 'test', dispatchPath: (p) => p === 'review.mjs', write: () => {},
+    }))).toThrow(/STALE code from this checkout/);
+  });
+  it('dispatchPath fails closed: unknown or empty behind-file list refuses; unset keeps the #4044 rule (#4387)', () => {
+    const warn = () => ({ action: 'warn', reason: 'not-auto-syncing', behind: 3, ahead: 0, dirty: false });
+    const opts = { label: 'test', dispatchPath: () => false, write: () => {}, lastGood: () => null };
+    withManagedCloneEnv('1', () => {
+      expect(() => assertMainNotStale('/repo', warn, { ...opts, listBehindFiles: () => null })).toThrow(/STALE/);
+      expect(() => assertMainNotStale('/repo', warn, { ...opts, listBehindFiles: () => [] })).toThrow(/STALE/);
+      expect(() => assertMainNotStale('/repo', warn, { ...opts, dispatchPath: null, listBehindFiles: () => ['x.mjs'] }))
+        .toThrow(/STALE/);
+      // a behind TEST file on the dispatch path is not code — tolerated
+      expect(assertMainNotStale('/repo', warn, { ...opts, dispatchPath: (p) => p.startsWith('a/'), listBehindFiles: () => ['a/__tests__/r.mjs', 'x.mjs'] }))
+        .toMatchObject({ fresh: true, behindOffDispatchPath: true });
+    });
+  });
+  it('dispatchPath never widens an UNMANAGED checkout\'s rule — a diverged checkout still refuses (#4387)', () => {
+    const warn = () => ({ action: 'warn', reason: 'diverged', behind: 3, ahead: 1, dirty: false });
+    withManagedCloneEnv(undefined, () => {
+      expect(() => assertMainNotStale('/repo', warn, { dispatchPath: () => false, listBehindFiles: () => ['x.mjs'] }))
+        .toThrow(/DIVERGED/);
+    });
+  });
   it('isCodePath: modules and JSON are code; markdown and tests are not', () => {
     expect(['a.mjs', 'x/y.js', 'c.cjs', 'd.ts', 'src/_data/x.json', 'package-lock.json'].every(isCodePath)).toBe(true);
     expect(['backlog/1.md', 'docs/a.njk', 'scripts/__tests__/a.mjs', 'x/a.test.mjs'].some(isCodePath)).toBe(false);
