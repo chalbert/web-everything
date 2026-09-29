@@ -646,6 +646,94 @@ function stripForCodex(request) {
 export const TOOL_FREE_JUDGE_PROVIDER_NAMES = Object.freeze(['codex', 'antigravity']);
 
 /**
+ * #x5s8b47 — WHICH PROVIDER COVERS FOR WHICH, when a `gracefulOnUnavailable` judge request's own provider is
+ * quota-held (see {@link createDefaultJudge}'s graceful-degradation path). `antigravity` is the only OTHER
+ * tool-free judge provider this engine wires (see {@link TOOL_FREE_JUDGE_PROVIDER_NAMES}), so it is codex's
+ * one fallback. No entry for antigravity itself — a lookup miss reads as "no further fallback".
+ */
+export const PROVIDER_QUOTA_FALLBACK = Object.freeze({ codex: 'antigravity' });
+
+/**
+ * Is `providerName` sitting out a quota hit, per the SAME shared review-seat scorecard store
+ * `review-extra-seats.mjs#quotaHold` already reads for its own bonus-seat path? REUSED, not restated: this
+ * calls that exact function rather than re-deriving the exhausted/gauge-percent logic a second time.
+ *
+ * A DYNAMIC import, deliberately, not a static one: `review-extra-seats.mjs` pulls in a heavier tree
+ * (`review-dispatch.mjs`, `review-core.mjs`, and from there `markdown-it`) than this file wants at its OWN
+ * module-load time — this file's own header (`requireAllProperties`'s import note) already records the
+ * #2273/#2274 regression that taught that a static import of a `markdown-it`-adjacent module here breaks the
+ * lightweight CLI entry points (`we:scripts/backlog.mjs` among them) that load `cli-adapter.mjs` from a tree
+ * with no `node_modules` at all. A static import of `review-extra-seats.mjs` would pay that cost for EVERY
+ * such caller, whether or not it ever seats a graceful judge request; the dynamic import here pays it only
+ * when a request actually opts in (today, only `review-pr`'s `judgeAdvisory` seat).
+ *
+ * Never throws: an unreadable store, a failed import, or any other scan error reads as "no records", which
+ * `quotaHold` itself already treats as usable — the same fail-open posture `review-extra-seats.mjs` takes on
+ * its own read (`runExtraSeats`'s `catch` around `io.readRecords()`).
+ * @param {string} providerName
+ * @param {number} when - epoch ms.
+ * @returns {Promise<string|null>} the hold reason, or null when usable.
+ */
+export async function defaultProviderQuotaHold(providerName, when) {
+  try {
+    const [{ quotaHold }, { readStore }] = await Promise.all([
+      import('./review-extra-seats.mjs'),
+      import('../conveyor/run-scorecard-store.mjs'),
+    ]);
+    return quotaHold(readStore().records, providerName, when);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * THE PROVIDER CALL'S OWN OPTION OBJECT — extracted from {@link createDefaultJudge} (#x5s8b47) so the
+ * graceful-degradation path's fallback spawn builds it identically to the ordinary path, rather than a second,
+ * driftable copy. Byte-identical to what that function built inline before this extraction; see the inline
+ * comments this carries forward for why each conditional spread exists.
+ * @param {object} effective
+ * @param {string|null} cwd
+ * @param {string} effectiveProviderName
+ */
+function buildProviderRequest(effective, cwd, effectiveProviderName) {
+  return {
+    mandate: effective.mandate,
+    input: effective.input,
+    shape: effective.shape,
+    // #3383 mechanical-dispatcher Gap 2 root cause fix — omitted, not present-and-`undefined`, when the
+    // declaration deliberately asks for no model override, so each provider's OWN default applies. See the
+    // full account in this function's pre-extraction history (git blame) if this ever needs re-deriving.
+    ...(effective.model !== undefined ? { model: effective.model } : {}),
+    effort: effective.effort,
+    budget: effective.budget,
+    runId: effective.runId,
+    lens: effective.lens,
+    ...(effective.allowedTools ? { allowedTools: effective.allowedTools } : {}),
+    // #xqa9ttq (PR #2117 review, CONFIRMED) - a codex request NEVER receives the factory's lane cwd: the seat
+    // is tool-free and diff-only, and `-C <lane>` would load the untrusted PR checkout's AGENTS.md into it.
+    ...(cwd && effectiveProviderName !== 'codex' ? { cwd } : {}),
+  };
+}
+
+/** THE TELEMETRY HALF of a provider outcome, extracted alongside {@link buildProviderRequest} for the same
+ *  reason — reused by both the ordinary and the graceful-degradation spawn paths. */
+function judgeTelemetryFrom(outcome, effective) {
+  return {
+    costUsd: outcome.costUsd,
+    durationMs: outcome.durationMs,
+    wallMs: outcome.wallMs,
+    numTurns: outcome.numTurns,
+    stopReason: outcome.stopReason,
+    sessionId: outcome.sessionId,
+    loadedContextTokens: outcome.loadedContextTokens,
+    usage: outcome.usage,
+    transcriptFile: outcome.transcriptFile,
+    timedOut: outcome.timedOut,
+    model: effective.model,
+  };
+}
+
+/**
  * The default judge: ONE tool-free juror per `judge` step, guarded by {@link assertSafeJudgeRequest}.
  *
  * IT RETURNS WHAT THE SPAWN COST, not only what the juror said. `judgeSpawn` reports `costUsd`, `sessionId`,
@@ -675,9 +763,21 @@ export const TOOL_FREE_JUDGE_PROVIDER_NAMES = Object.freeze(['codex', 'antigravi
  *   {@link resolveJudgeProvider}; injectable so a test can substitute BOTH providers at once without touching
  *   the `codex-judge-spawn.mjs` module boundary — the seam `judge-provider-selection.test.mjs` already uses at
  *   the `resolveJudgeProvider` layer, extended here to the per-request path.
+ * @param {(providerName: string, when: number) => Promise<string|null>} [o.checkProviderHold] - #x5s8b47 —
+ *   ONLY consulted for a request carrying `gracefulOnUnavailable: true`. Defaults to the real
+ *   {@link defaultProviderQuotaHold}; injectable so a test drives the graceful path with no real scorecard
+ *   store on disk.
+ * @param {() => number} [o.now] - #x5s8b47 — mints the instant the graceful path checks quota-hold against.
+ *   Injected, never `Date.now()` read ad hoc, mirroring `driveRun`'s own `clock` seam.
+ * @param {(line: string) => void} [o.logGracefulOutcome] - #x5s8b47 — where a skip or a caught crash is
+ *   logged. Defaults to a bare stderr write; injectable so a test can assert on it without capturing real
+ *   process streams.
  */
 export function createDefaultJudge({
   provider, providerName = 'claude', cwd, model, resolveProvider = resolveJudgeProvider,
+  checkProviderHold = defaultProviderQuotaHold,
+  now = () => Date.now(),
+  logGracefulOutcome = (line) => { try { process.stderr.write(`${line}\n`); } catch { /* best effort */ } },
 } = {}) {
   return async (request) => {
     // #xqa9ttq — A REQUEST MAY PIN ITS OWN PROVIDER (`request.providerName`), overriding this factory's. This
@@ -726,6 +826,60 @@ export function createDefaultJudge({
         + 'default `claude` provider for a tool-bearing role.',
       );
     }
+    // #x5s8b47 — THE GRACEFUL-DEGRADATION PATH. A request opts in with `gracefulOnUnavailable: true` (today,
+    // only `review-pr`'s `judgeAdvisory` seat — see its own `buildReviewAdvisoryJudgeRequest`) to say: this
+    // seat is ADVISORY (its per-lens verdict cannot, by construction, block the panel — see that seat's own
+    // docblock), so its provider being unavailable is a SKIP, never a run failure. Two failure modes this
+    // closes, both measured live against PRs #2865/#2867/#2873/#2874/#2875 (card x5s8b47): (a) Codex
+    // quota-exhausted — the spawn was never even attempted before this fix, so it failed every time and
+    // crashed the whole `review-loop-cli` process; and (b) the spawn throwing for any OTHER reason, mid-call.
+    // NEITHER may propagate past this function for a graceful request: both become a recorded, zero-finding,
+    // non-blocking judge answer instead. `reduce`'s own silent-juror refusal (`review-pr.mjs`) requires a
+    // non-empty `summary`, which the skip answer below always carries, so a skip reads to every downstream
+    // consumer as an ordinary — if uninformative — juror answer, never as `unrun`.
+    if (effective.gracefulOnUnavailable === true) {
+      const at = now();
+      const primaryHold = await checkProviderHold(effectiveProviderName, at);
+      let spawnProviderName = effectiveProviderName;
+      let holdReason = primaryHold;
+      if (primaryHold) {
+        const fallbackName = PROVIDER_QUOTA_FALLBACK[effectiveProviderName];
+        const fallbackHold = fallbackName ? await checkProviderHold(fallbackName, at) : null;
+        if (fallbackName && !fallbackHold) {
+          // The fallback is usable: spend IT instead of skipping outright. `effective` needs no rebuilding —
+          // it already carries no `model`/`allowedTools` for a tool-free seat (see the guards above), which is
+          // exactly what the fallback provider needs too.
+          spawnProviderName = fallbackName;
+          holdReason = null;
+        } else {
+          holdReason = fallbackName
+            ? `${primaryHold}; fallback \`${fallbackName}\` unavailable too (${fallbackHold})`
+            : `${primaryHold} (no fallback provider configured for \`${effectiveProviderName}\`)`;
+        }
+      }
+      const skipOutcome = (reason, extra = {}) => judgeOutcome({
+        summary: `skipped: ${reason}`,
+        findings: [],
+        skipped: { provider: effectiveProviderName, reason, ...extra },
+      });
+      if (holdReason) {
+        logGracefulOutcome(`judge seat skipped — ${effectiveProviderName} unavailable: ${holdReason}`);
+        return skipOutcome(holdReason);
+      }
+      const spawnProvider = spawnProviderName === effectiveProviderName
+        ? (request?.providerName !== undefined ? resolveProvider(request.providerName) : (provider ?? resolveProvider(providerName)))
+        : resolveProvider(spawnProviderName);
+      try {
+        const outcome = await spawnProvider(buildProviderRequest(effective, cwd, spawnProviderName));
+        // NOT a spread of `outcome` — see the ordinary path's own note just below.
+        return judgeOutcome(outcome.value, judgeTelemetryFrom(outcome, effective));
+      } catch (e) {
+        const reason = `spawn failed — ${String(e?.message ?? e).slice(0, 500)}`;
+        logGracefulOutcome(`judge seat crashed, recorded as skipped — ${spawnProviderName}: ${reason}`);
+        return skipOutcome(reason, { provider: spawnProviderName, crashed: true });
+      }
+    }
+
     // #xqa9ttq — RESOLUTION ORDER. A REQUEST-level `providerName` always resolves via `resolveProvider` (the
     // real one by default) — it names a concrete provider the request itself insists on, so an unrelated
     // `provider` stub injected at the FACTORY level (there for a DIFFERENT seat's test) must not silently
@@ -734,72 +888,12 @@ export function createDefaultJudge({
     const resolvedProvider = request?.providerName !== undefined
       ? resolveProvider(request.providerName)
       : (provider ?? resolveProvider(providerName));
-    const outcome = await resolvedProvider({
-      mandate: effective.mandate,
-      input: effective.input,
-      shape: effective.shape,
-      // #3383 mechanical-dispatcher Gap 2 root cause fix — THIS was `model: effective.model,` unconditionally,
-      // which for a seat that DELIBERATELY OMITS `model` (both Codex advisory seats, the Antigravity seat —
-      // see this function's own `@param o.model` docblock above for why) still wrote an explicit `model:
-      // undefined` OWN PROPERTY onto the object handed to `resolvedProvider`. `resolveJudgeProvider`'s own
-      // codex/antigravity wrappers default a missing `model` via OBJECT SPREAD ORDER (`{ model: CODEX_MODEL,
-      // ...request }`), which — unlike a destructured default parameter — does NOT skip an explicit `undefined`
-      // key: the spread OVERWRITES the default with `undefined`, so `model` reached `codexJudgeSpawn`/
-      // `antigravityJudgeSpawn` as `undefined` regardless. That silently (a) dropped the pinned `-m <model>`
-      // argv entirely (the seat ran on the provider CLI's own ambient default model, never the declared one) and
-      // (b) made EVERY advisory-seat scorecard row fail `run-scorecard-store.mjs#validateScorecard`'s `model`
-      // requirement, so `recordCodexRunScorecard`/`recordAntigravityRunScorecard` (both correctly wired and
-      // correctly CALLED) silently returned `null` every time — confirmed live: a real end-to-end review-pr run
-      // over PR #2178 threw `run-scorecard-store: refusing to append an invalid scorecard: - \`model\` is
-      // required` on all three optional seats, caught by each recorder's own never-throws catch. Conditional
-      // inclusion (mirroring `allowedTools`/`cwd` just below, which already use this exact pattern) is the fix:
-      // when `effective.model` is genuinely undefined, the key is OMITTED, not present-and-undefined, which lets
-      // each provider's OWN default apply — `resolveJudgeProvider`'s spread-order default for codex/antigravity,
-      // and `judgeSpawn`'s own `model = DEFAULT_MODEL` destructured default for `claude` (unaffected either way,
-      // since a destructured default DOES trigger on an absent key, same as it always did on an explicit
-      // `undefined` one — this change is a no-op for that path).
-      ...(effective.model !== undefined ? { model: effective.model } : {}),
-      effort: effective.effort,
-      budget: effective.budget,
-      runId: effective.runId,
-      lens: effective.lens,
-      ...(effective.allowedTools ? { allowedTools: effective.allowedTools } : {}),
-      // #xqa9ttq (PR #2117 review, CONFIRMED) - a codex request NEVER receives the factory's lane cwd: the
-      // seat is tool-free and diff-only, and `-C <lane>` would load the untrusted PR checkout's AGENTS.md
-      // into it. codexJudgeSpawn then uses its own scratch mkdtemp.
-      ...(cwd && effectiveProviderName !== 'codex' ? { cwd } : {}),
-    });
+    // #3383 mechanical-dispatcher Gap 2 root cause fix — see `buildProviderRequest`'s own comment for the full
+    // account of why `model`/`cwd` are conditionally spread rather than always present.
+    const outcome = await resolvedProvider(buildProviderRequest(effective, cwd, effectiveProviderName));
     // NOT a spread of `outcome`: it also carries `argv` (which embeds the whole mandate) and the answer itself.
     // The record keeps the meter, never the material. `normalizeJudgeTelemetry` whitelists again on arrival.
-    return judgeOutcome(outcome.value, {
-      costUsd: outcome.costUsd,
-      durationMs: outcome.durationMs,
-      wallMs: outcome.wallMs,
-      numTurns: outcome.numTurns,
-      stopReason: outcome.stopReason,
-      sessionId: outcome.sessionId,
-      loadedContextTokens: outcome.loadedContextTokens,
-      usage: outcome.usage,
-      // THE JUDGE TRANSCRIPT FIX — `codexJudgeSpawn` (`we:scripts/lib/codex-judge-spawn.mjs`) and
-      // `antigravityJudgeSpawn` (`we:scripts/lib/antigravity-judge-spawn.mjs`, #3383's mirror of the same
-      // fix) both return this; `judgeSpawn`'s (Claude's) outcome carries no such field, so
-      // `outcome.transcriptFile` is `undefined` for that provider and `normalizeJudgeTelemetry`'s string
-      // whitelist silently drops it — no per-provider branch needed here for all three to coexist. A PATH
-      // ONLY, never transcript content, per that whitelist's own discipline.
-      transcriptFile: outcome.transcriptFile,
-      // #3203 — the juror hit the WALL and its answer was recovered from the killed process. Recorded so the
-      // row says which happened: a bound being hit and a crash used to be indistinguishable here, and a
-      // recovered review is worth knowing about even though it is a real verdict.
-      timedOut: outcome.timedOut,
-      // WHICH MODEL JUDGED, not only what it cost (#3151). Nothing filled this slot before — merely incomplete
-      // while the model was a declared LITERAL, since the declaration answered "which model" for anyone who
-      // read it. `--model` makes it operator-controllable, and a verdict recorded without the model that
-      // produced it is a record that implies the declared one. `effective`, so an override is what gets
-      // recorded rather than what was asked for. ONLY the model: the engine takes `lens` and `effort` from the
-      // suspended request and would ignore them here, and reporting a value that is silently discarded reads
-      // as a contract this side does not have.
-      model: effective.model,
-    });
+    return judgeOutcome(outcome.value, judgeTelemetryFrom(outcome, effective));
   };
 }
 
