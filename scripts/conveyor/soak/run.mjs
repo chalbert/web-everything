@@ -50,9 +50,14 @@ async function main(argv) {
     process.stdout.write(`break ${b.id}: ${b.title}\n  card: ${b.card}; fixed by ${b.fixedBy.sha} on ${b.fixedBy.where}; fix present in this tree: ${b.fixPresent(REPO_ROOT)}\n`);
     const report = await b.run({});
     const problems = b.judge(report);
+    // Not every break's `run()` drives the full `runSoak(...)` scenario shape (many are lighter, custom
+    // scenarios — see this file's own header) — `report.ticks` is only ever present on the ones that do. A
+    // GREEN print that assumed it crashed `run.mjs break <id>` outright for every other break (found running
+    // `red-green.mjs` on one of them), silently defeating the RED-before/GREEN-after proof this CLI exists for.
+    const ticksNote = Array.isArray(report?.ticks) ? `${report.ticks.length} ticks, ` : '';
     process.stdout.write(problems.length
       ? `RED — break ${b.id} reproduced:\n${problems.map((p) => `  - ${p}`).join('\n')}\n`
-      : `GREEN — break ${b.id} did not reproduce (${report.ticks.length} ticks, invariants held)\n`);
+      : `GREEN — break ${b.id} did not reproduce (${ticksNote}invariants held)\n`);
     return problems.length ? 1 : 0;
   }
   process.stderr.write('usage: run.mjs soak [--rounds=N --seed=N --main-every=N] | break <id> | list\n');
