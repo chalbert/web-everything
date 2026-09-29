@@ -167,7 +167,7 @@ import { driftDefaults, findPocBranch, readRegistry } from '../lib/poc-branches.
  *  `planFixSpawns`/CI-heal sibling), which this function never touches, so it is never held by this. The
  *  operator gloss is {@link PR_LIMIT_HINT}. */
 export const HELD_REASONS = Object.freeze([
-  'already-done', 'blocked', 'unshaped-no-scope', 'no-size', 'needs-slice', 'needs-decision', 'needs-investigation', 'branch-drift-blocked', 'no free lane', 'capacity-cap', 'overlaps lane-<n>', 'cleared-but-not-ready', 'dispatch-paused', 'pr-limit',
+  'already-done', 'blocked', 'unshaped-no-scope', 'no-size', 'needs-prepare', 'needs-slice', 'needs-decision', 'needs-investigation', 'branch-drift-blocked', 'no free lane', 'capacity-cap', 'overlaps lane-<n>', 'cleared-but-not-ready', 'dispatch-paused', 'pr-limit',
 ]);
 
 /** The operator-facing gloss for an `unshaped-no-scope` hold — surfaced beside the token in the CLI and the
@@ -181,6 +181,13 @@ export const UNSHAPED_HINT = 'no predicted scope — author it to parallelize';
  *  agent that authors `scope:` (`we:scripts/operations/prepare-scope-wrapper.mjs`, #3842). Only surfaced under
  *  `unsizedCardPolicy: 'block'` — see {@link HELD_REASONS} and `dispatchPlan`'s own `sizePolicy` input. */
 export const NO_SIZE_HINT = 'no declared size/estimate — prepare will author one';
+
+/** The operator-facing gloss for a `needs-prepare` hold (card #4470, operator rule 2026-09-28: PREPARE = full
+ *  design + explicit MVP cut, build only the MVP) — surfaced beside the token so a held item always tells the
+ *  operator WHAT to do: run a prepare pass (premise check, scope correction, design/MVP/test/proof plan,
+ *  `backlog.mjs prepare-stamp`) before it can build. Only surfaced when the IO shell opts into `preparePolicy`
+ *  — see {@link dispatchPlan}'s own `preparePolicy` input. */
+export const NEEDS_PREPARE_HINT = 'no truthful preparedDate — needs a prepare pass before it can build';
 
 /** The operator-facing gloss for a `needs-slice` hold — surfaced beside the token so a held epic always tells the
  *  operator WHAT to do: decompose it (`/slice <num>`) into buildable child stories, which the conveyor then
@@ -400,6 +407,21 @@ function hasOpenBlockers(item) {
  *                   is supplied) so an assumed-size launch is never indistinguishable from a declared one. A
  *                   `deliveryAgent:` marker never bypasses this hold (#3801 Fork 5) — this core reads no such
  *                   field, so there is nothing to bypass.
+ *   • `preparePolicy` — (card #4470, operator rule 2026-09-28: PREPARE = full design + explicit MVP cut, build
+ *                   only the MVP) `null`/absent (the default) skips this gate ENTIRELY — every existing direct
+ *                   caller of the pure core (tests included) keeps dispatching an unprepared item exactly as
+ *                   before, unless it opts in, the SAME "off unless supplied" default `sizePolicy` uses. The IO
+ *                   shell's `main()` opts in unconditionally (`{ requirePreparedDate: true }`) for the live
+ *                   daemon, skippable via `--no-prepare-check` (mirrors `--no-size-check`). When supplied with
+ *                   `requirePreparedDate: true`, a scoped item (any `kind` other than `fix`/`ci-heal`, exempt for
+ *                   the same reason they are exempt from the size gate — neither can reach this queue via the
+ *                   production build-queue shell) with no truthful `preparedDate` (a valid `YYYY-MM-DD` string;
+ *                   absent/blank/malformed all read as unprepared) holds `needs-prepare` instead of launching,
+ *                   checked right after the `no-size` gate (itself right after the scope gate) — same
+ *                   precedence class: a READINESS gate, not a lane-scheduling concern. `preparedDate` is a
+ *                   FORMAT check on self-attested frontmatter, not a verified/signed claim — it proves the field
+ *                   is well-formed, never that a real prepare pass happened. This is a card lacking DoR
+ *                   (Definition of Ready), never "not sized yet" (that is `no-size`'s own, separate axis).
  * @returns {{ launch: Array<{num, lane, sized?:boolean}>, held: Array<{num, reason:string}> }}
  *   `launch` — the SCOPED items to start now, each on the free lane it was assigned, in rank order. An UNSCOPED
  *              item is NEVER launched (it is held `unshaped-no-scope` for the skill to auto-prepare). `sized` is
@@ -407,7 +429,7 @@ function hasOpenBlockers(item) {
  *              `false` when it launched on the `default-size` fallback.
  *   `held`   — every other queued item with its single reason ∈ {@link HELD_REASONS}.
  */
-export function dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, driftGraduationItem, maxConcurrentLanes = Infinity, dispatchPaused = false, dispatchPausedKinds = null, sizePolicy = null, prLimitHeld = false, trace = false } = {}) {
+export function dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, driftGraduationItem, maxConcurrentLanes = Infinity, dispatchPaused = false, dispatchPausedKinds = null, sizePolicy = null, preparePolicy = null, prLimitHeld = false, trace = false } = {}) {
   // The pause is per-KIND now, and this core only ever decides ONE kind: `build`. Resolving the marker's
   // declared scope through the shared predicate (rather than reading the raw boolean) is what makes an
   // old-format `{paused:true}` — and every caller that still passes only the boolean — keep holding builds,
@@ -536,6 +558,26 @@ export function dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, drif
       : item.size !== undefined && item.size !== null;
     if (sizePolicy && !sizeExempt && !hasDeclaredSize && sizePolicy.unsizedCardPolicy === 'block') {
       held.push({ num, reason: 'no-size' });
+      continue;
+    }
+
+    // 4.45. NO TRUTHFUL `preparedDate`, under `preparePolicy.requirePreparedDate: true` (card #4470, operator
+    //    rule 2026-09-28: PREPARE = full design + explicit MVP cut, build only the MVP) — HOLD `needs-prepare`.
+    //    Checked right after the size gate, same precedence class: a READINESS gate (is the item buildable at
+    //    all — has it been through a prepare pass), not a lane-scheduling concern, so it holds regardless of
+    //    what lane/overlap state exists below. `preparePolicy` is `null` by default (this axis is OFF unless the
+    //    IO shell opts in — see this function's own docblock), so every direct caller that does not opt in
+    //    dispatches an unprepared item exactly as before this card. `fix`/`ci-heal` are EXEMPT, same reasoning
+    //    (and the same `sizeExempt` flag) as the size gate just above — neither `kind` can actually reach this
+    //    queue via the production build-queue shell. A `preparedDate` must be a plain `YYYY-MM-DD` string;
+    //    absent, blank, or any other shape reads as unprepared — this is deliberately the SAME format check
+    //    `we:scripts/backlog.mjs prepare-stamp` writes and `we:scripts/readiness/engine.mjs`'s own `prepared`
+    //    derivation for decisions already treats as the ready signal. NOTE the honest limit of "truthful" here:
+    //    this is a FORMAT check on self-attested frontmatter, not a verified/signed claim — it catches a missing
+    //    or malformed stamp, never a stale or hand-typed one on an otherwise-unprepared card. Stronger provenance
+    //    (cross-checking `preparedAgainstSha`) is a possible future hardening, not this MVP's job.
+    if (preparePolicy?.requirePreparedDate && !sizeExempt && !(typeof item.preparedDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(item.preparedDate))) {
+      held.push({ num, reason: 'needs-prepare' });
       continue;
     }
 
@@ -840,6 +882,11 @@ async function main(argv) {
       // `no-size` rather than launching blind on an unmeasured number).
       size: it?.size,
       estimatedLoc: it?.estimatedLoc,
+      // card #4470 — the prepare gate's own input: a story/task's `preparedDate:` frontmatter (written by
+      // `we:scripts/backlog.mjs prepare-stamp`). Absent when the loader failed to load (safe degradation —
+      // reads as unprepared under the live default policy, held `needs-prepare` rather than launching blind on
+      // a card nobody has actually prepared).
+      preparedDate: it?.preparedDate,
     };
   });
 
@@ -978,6 +1025,13 @@ async function main(argv) {
     }
   }
 
+  // 3.75 THE PREPARE POLICY (card #4470, operator rule 2026-09-28: PREPARE = full design + explicit MVP cut,
+  //     build only the MVP) — unlike `sizePolicy`, there is no checked-in settings file to read/validate: the
+  //     operator rule is unconditional (no "which mode" choice), so the live daemon simply turns the gate ON.
+  //     Skippable via `--no-prepare-check` (mirrors `--no-size-check`/`--no-drift-check`/`--no-pause-check`) —
+  //     the same emergency escape hatch every other axis above already gets.
+  const preparePolicy = flags['no-prepare-check'] ? null : { requirePreparedDate: true };
+
   // 3.8 OPEN-PR BACKPRESSURE LIMIT (we:xniq7xs) — read the live open-PR count for WE (this core's own build
   //     queue) against its cap, resolved through the SAME module `pr-land.mjs`'s pre-create check uses, so the
   //     two enforcement points can never disagree on what "over the limit" means. FAIL-OPEN on any error (a
@@ -999,7 +1053,7 @@ async function main(argv) {
 
   // #xupukxa — the concurrency ceiling, env-overridable exactly like heavy-admission.mjs's own cap knob.
   const maxConcurrentLanes = resolveMaxConcurrentLanes(process.env);
-  const plan = dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, driftGraduationItem, maxConcurrentLanes, dispatchPaused, dispatchPausedKinds, sizePolicy, prLimitHeld, trace: true });
+  const plan = dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, driftGraduationItem, maxConcurrentLanes, dispatchPaused, dispatchPausedKinds, sizePolicy, preparePolicy, prLimitHeld, trace: true });
   // Surface cleared-but-not-ready ids as held entries so a clear never silently vanishes (#2613 review, 2b).
   // #3457/#3460: a `notReady` id the ground-truth pass above CONFIRMED already done (the exact `#3435` live
   // shape — a RESOLVED item whose sidecar clear was never removed) is surfaced as `already-done`, naming the
@@ -1050,6 +1104,7 @@ async function main(argv) {
       // held `needs-decision` (#2647), or check + resolve/re-clear an `already-done` hold (#3457/#3460).
       const hint = h.reason === 'unshaped-no-scope' ? ` (${UNSHAPED_HINT})`
         : h.reason === 'no-size' ? ` (${NO_SIZE_HINT})`
+        : h.reason === 'needs-prepare' ? ` (${NEEDS_PREPARE_HINT})`
         : h.reason === 'needs-slice' ? ` (${NEEDS_SLICE_HINT})`
           : h.reason === 'needs-decision' ? ` (${NEEDS_DECISION_HINT})`
             : h.reason === 'already-done' ? ` (${ALREADY_DONE_HINT}${h.alreadyDonePr?.url ? ` — ${h.alreadyDonePr.url}` : ''})`

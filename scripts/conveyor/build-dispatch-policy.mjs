@@ -74,6 +74,12 @@ export const BUILD_DISPATCH_POLICY = Object.freeze({
     { id: 'branch-name', text: 'a delivery branch never starts with a bare number', enforcedBy: 'build-dispatch-policy.mjs (checks the planned ref)' },
     { id: 'scratch-prefix', text: 'scratch files in the brief are task-prefixed', enforcedBy: 'delivery brief (follow-up card)' },
     { id: 'draft-first', text: 'agent PRs open as drafts and are promoted on green', enforcedBy: 'PR #2813' },
+    // Card #4470 (operator rule 2026-09-28: PREPARE = full design + explicit MVP cut, build only the MVP) —
+    // enforced UPSTREAM of this file: a card with no truthful `preparedDate` never even becomes a candidate
+    // this planner sees (`dispatch-plan.mjs` holds it `needs-prepare` before it ever reaches `spawnBuilds`), so
+    // this row is DOCUMENTATION PARITY (every operator rule visible here, per this file's own header) — no
+    // logic in this planner changes for it.
+    { id: 'needs-prepare', text: 'a candidate carrying no truthful preparedDate is never built — held for a prepare pass first', enforcedBy: 'readiness/dispatch-plan.mjs' },
   ]),
 });
 

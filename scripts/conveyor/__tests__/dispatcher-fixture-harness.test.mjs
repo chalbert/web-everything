@@ -73,7 +73,10 @@ describe('dispatcher fixture-root harness — conveyor-state → dispatch-plan �
 
     try {
       writeItem(backlogDir, '9001-ready-item.md', {
-        bornAs: 'x9001fix', kind: 'story', size: 2, status: 'open',
+        // card #4470 — a truly BUILD-READY item now also carries a truthful `preparedDate`; without one the
+        // live daemon's default `preparePolicy` (`dispatch-plan.mjs`'s own IO shell, opted in unconditionally)
+        // holds it `needs-prepare` instead of launching, which this fixture's own assertions below would catch.
+        bornAs: 'x9001fix', kind: 'story', size: 2, status: 'open', preparedDate: '2026-01-01',
         scope: ['we:scripts/fixture-thing.mjs'], dateOpened: '2026-01-01', tags: [],
       }, 'An open, build-ready fixture item');
       writeItem(backlogDir, '9002-blocked-item.md', {
@@ -169,4 +172,53 @@ describe('dispatcher fixture-root harness — conveyor-state → dispatch-plan �
       rmSync(fixtureRoot, { recursive: true, force: true });
     }
   }, 60_000); // several `node` subprocess shells — generous timeout, not a perf assertion
+
+  // card #4470 — a converge round-1 panel finding (6 of 10 seats, correctness/security/standards-conformance/
+  // claim-accuracy) caught that every other test for the `needs-prepare` gate calls the PURE `dispatchPlan()`
+  // core directly with an explicit `preparePolicy` — none of them exercise `dispatch-plan.mjs`'s own `main()`
+  // IO shell, which is where the LIVE daemon's default (`preparePolicy = { requirePreparedDate: true }` unless
+  // `--no-prepare-check`) actually lives. This test closes exactly that gap: it shells the REAL CLI, not the
+  // pure function, against an UNPREPARED fixture item.
+  it('dispatch-plan.mjs main() enforces needs-prepare BY DEFAULT and skips it under --no-prepare-check (#4470)', () => {
+    const fixtureRoot = mkdtempSync(join(tmpdir(), 'dispatcher-fixture-prepare-'));
+    const backlogDir = join(fixtureRoot, 'backlog');
+    mkdirSync(backlogDir, { recursive: true });
+    const queueFile = join(fixtureRoot, 'queue.json');
+    try {
+      // An open, scoped, otherwise build-ready item that carries NO `preparedDate` — the exact shape the live
+      // queue is full of today (card #4470's own body: "dispatch-plan tags nearly every row 'unprep'").
+      writeItem(backlogDir, '9101-unprepared-item.md', {
+        bornAs: 'x9101fix', kind: 'story', size: 2, status: 'open',
+        scope: ['we:scripts/fixture-thing101.mjs'], dateOpened: '2026-01-01', tags: [],
+      }, 'An open, scoped, UNPREPARED fixture item');
+      writeFileSync(queueFile, JSON.stringify([{ num: '9101', addedAt: new Date().toISOString() }]), 'utf8');
+      const env = { ...process.env, CONVEYOR_QUEUE_FILE: queueFile };
+
+      // Default (no `--no-prepare-check`): the live daemon's own posture. An unprepared item holds
+      // `needs-prepare` — never launches — proving `main()` actually wires `preparePolicy` into `dispatchPlan`
+      // rather than leaving it `null` (the pure core's own "gate off" default, which every OTHER test here
+      // exercises directly and would pass even if this wiring were dropped).
+      // `--no-size-check` isolates this test to the prepare axis alone (the size-policy axis is a separate,
+      // already-covered concern — without it a sized fixture item's `launch` entry also carries `sized: true`).
+      const held = JSON.parse(execFileSync(
+        process.execPath,
+        [PLAN_CLI, '--json', `--backlog-dir=${backlogDir}`, '--free-lanes=911', '--no-drift-check', '--no-pause-check', '--no-size-check'],
+        { encoding: 'utf8', env, maxBuffer: 32 * 1024 * 1024 },
+      ));
+      expect(held.launch).toEqual([]);
+      expect(held.held).toEqual(expect.arrayContaining([{ num: '9101', reason: 'needs-prepare' }]));
+
+      // `--no-prepare-check`: the documented escape hatch (mirrors `--no-size-check`) — the SAME unprepared item
+      // now launches, proving the flag genuinely disables the axis rather than being dead wiring.
+      const skipped = JSON.parse(execFileSync(
+        process.execPath,
+        [PLAN_CLI, '--json', `--backlog-dir=${backlogDir}`, '--free-lanes=912', '--no-drift-check', '--no-pause-check', '--no-size-check', '--no-prepare-check'],
+        { encoding: 'utf8', env, maxBuffer: 32 * 1024 * 1024 },
+      ));
+      expect(skipped.launch).toEqual([{ num: '9101', lane: 912 }]);
+      expect(skipped.held).toEqual([]);
+    } finally {
+      rmSync(fixtureRoot, { recursive: true, force: true });
+    }
+  }, 30_000);
 });
