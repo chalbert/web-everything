@@ -451,7 +451,7 @@ describe('verify-lane request/verify — a cache hit on an UNCHANGED working tre
     expect(runVerify('true').json.status).toBe('green');
     const firstSha = headSha();
 
-    execFileSync('git', ['commit', '--allow-empty', '-qm', 'no tree change'], { cwd: dir });
+    execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '--allow-empty', '-qm', 'no tree change'], { cwd: dir });
     expect(headSha()).not.toBe(firstSha); // sha moved...
     // ...but the tracked+untracked tree content is byte-identical, so treeHash alone would (wrongly) match.
 
