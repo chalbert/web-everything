@@ -186,7 +186,9 @@ export function normalizeOpenPrs(byRepo) {
  *
  * @param {object} o
  * @param {Array<{num:string, lane?:number, scope:string[]}>} o.candidates  in tick-core order
- * @param {Array<{num:string, scope:string[], source:string}>} o.inFlight   durable in-flight builds
+ * @param {Array<{num:string, scope:string[], source:string, executor?:string|null}>} o.inFlight   durable
+ *   in-flight builds — `executor` (card xao7080/#4518, `claude`/`antigravity`/`codex`/`null`) rides through
+ *   unchanged for the caller's own reporting; this planner never reads or branches on it
  * @param {Array<{repo:string, number:number, files:Array, labels:string[], headRefName:string}>} o.openPrs
  * @param {number} [o.externalBuilding]  the conveyor's machine-wide "building" count — hand-dispatched workers,
  *   fix workers, ci-heal workers, stranded claims, AND this daemon's own builds, all folded into one tally with

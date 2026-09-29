@@ -161,6 +161,28 @@ describe('runBuildDispatchTick', () => {
     expect(r.nextBookkeeping.launchedNums).toEqual(['3827']);
   });
 
+  // card xao7080/#4518 (converge round 1, panel + red-team, both independently) — the reader-level test on
+  // `cliListRunStoreInFlight` alone proves the field is READ, never that it SURVIVES into `plan.inFlight`, the
+  // object both the `--dry-run` report and the live tick JSON actually print from. This is the end-to-end proof:
+  // an already in-flight run-store row's `executor` rides through `runBuildDispatchTick` → `planBuildDispatch`
+  // unmangled, and that item is held (never re-dispatched) rather than launched a second time.
+  it('card xao7080/#4518 — a run-store row\'s `executor` rides through into `plan.inFlight`, not just the '
+    + 'reader that produced it', async () => {
+    const dispatches = [];
+    const r = await runBuildDispatchTick({
+      live: true,
+      effects: effectsFor({
+        lockRoot, pid: 1, dispatches,
+        runStoreInFlight: [{ num: '3827', scope: [], source: 'run dispatch-lane-9', executor: 'codex' }],
+      }),
+    });
+    expect(r.plan.inFlight).toEqual(expect.arrayContaining([expect.objectContaining({ num: '3827', executor: 'codex' })]));
+    // #3827 is already in-flight per the run store — held, never dispatched a second time (#2662 is a
+    // separate, unrelated candidate this same tick's hot-file rule frees once #3827 stops competing for it).
+    expect(r.plan.hold.find((h) => h.num === '3827')).toMatchObject({ rule: 'in-flight' });
+    expect(r.dispatched.map((d) => d.num)).not.toContain('3827');
+  });
+
   /** A fake tick-core answer with `n` freshly-proposed spawns and a caller-supplied `counts`. */
   function manySpawnsTick(n, counts) {
     const spawnBuilds = Array.from({ length: n }, (_, i) => ({ num: String(200 + i), lane: i + 1 }));
@@ -968,6 +990,28 @@ describe('cliListSettledBuilds / cliListHolds (the real readers, not a stub)', (
     writeFileSync(filePath, 'x');
     process.env.OPERATION_RUNS_DIR = filePath;
     await expect(cliListSettledBuilds()).resolves.toEqual([]);
+  });
+
+  it('card xao7080/#4518 — cliListRunStoreInFlight carries the durable `dispatch.executor` field through, '
+    + 'so an in-flight build\'s provider is visible without re-deriving it', async () => {
+    seedRun('dispatch-lane-2001', [{
+      key: 'dispatch:0:0', type: DISPATCH_EFFECT, stepIndex: 0, index: 0, status: 'in-flight',
+      payload: { num: '2001', launchKind: 'build', scope: ['we:foo.md'] },
+      dispatch: { launchKind: 'build', route: 'detached', executor: 'antigravity' },
+      result: null, error: null,
+    }]);
+    const rows = await cliListRunStoreInFlight();
+    expect(rows).toEqual([{ num: '2001', scope: ['we:foo.md'], source: 'run dispatch-lane-2001', executor: 'antigravity' }]);
+  });
+
+  it('card xao7080/#4518 — cliListRunStoreInFlight reports `executor: null` for a record written before the '
+    + 'field existed, never a guessed provider', async () => {
+    seedRun('dispatch-lane-2002', [{
+      key: 'dispatch:0:0', type: DISPATCH_EFFECT, stepIndex: 0, index: 0, status: 'in-flight',
+      payload: { num: '2002', launchKind: 'build' }, result: null, error: null,
+    }]);
+    const rows = await cliListRunStoreInFlight();
+    expect(rows).toEqual([expect.objectContaining({ num: '2002', executor: null })]);
   });
 
   it('cliListRunStoreInFlight returns [] rather than throwing when the run-store read genuinely errors (dir is a file)', async () => {

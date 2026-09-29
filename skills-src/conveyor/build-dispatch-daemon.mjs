@@ -152,7 +152,8 @@ export function deriveDispatchedByBuilder(runStoreRows = [], settledRows = []) {
  * ONE tick. Every effect is injected:
  *   planTick(bookkeeping) → tick-core `{decisions, nextState}`; fetchOpenPrs() → `[{repo, prs}]`;
  *   listClaims() → claim entries; releaseClaim({num}); acquireClaim({num, scope}) → `{ok, reason, heldBy}`;
- *   listRunStoreInFlight() → `[{num, scope, source}]`; killSwitch() → `{engaged, reason}`;
+ *   listRunStoreInFlight() → `[{num, scope, source, executor}]` (card xao7080/#4518 — `executor` is the
+ *     provider that actually ran it, `null` for a record with none); killSwitch() → `{engaged, reason}`;
  *   dispatch({num, bookkeeping}) → `{dispatching, reason}`.
  *   #4349 — listSettledBuilds() → `[{num, outcome}]` (a settled, non-PR terminal outcome a wrapper itself
  *     wrote — the claim-retirement signal a stale `pid:` handle used to give nothing for) and
@@ -430,7 +431,12 @@ export async function cliListRunStoreInFlight({ now = new Date() } = {}) {
     for (const e of run?.effects || []) {
       if (e?.status !== 'in-flight' || e.type !== DISPATCH_EFFECT || e.payload?.launchKind !== 'build') continue;
       if (!dispatchStillHolds(e, now.toISOString())) continue;
-      rows.push({ num: normNum(e.payload.num), scope: e.payload.scope || [], source: `run ${id}` });
+      // card xao7080 (#4518) — `e.dispatch.executor` is the durable field the io shell already writes at
+      // dispatch time (`dispatch-lane-io.mjs`'s `inFlight({..., dispatch})`, #3717/#3906): the ACTUAL provider
+      // (`claude`/`antigravity`/`codex`) that ran this in-flight build, never a guess. `null` for an older
+      // record written before that field existed, or a stub that never sets it — reported as "provider
+      // unknown" rather than defaulting to a wrong guess.
+      rows.push({ num: normNum(e.payload.num), scope: e.payload.scope || [], source: `run ${id}`, executor: e.dispatch?.executor ?? null });
     }
   }
   return rows;
@@ -743,7 +749,10 @@ async function dryRun(flags) {
   w(`  tick core: ${report.statusLine}`);
   w(`  policy: cap ${policy.maxConcurrentBuilds} builds · GLOBAL freeze if open PRs > ${policy.maxOpenPrs} or any of [${(policy.globalFreezeLabels ?? policy.freezeLabels).join(', ')}] · a per-PR *-stalled label only holds a scope-overlapping build (scope-vs-open-prs)`);
   w(`  kill switch: ${report.killSwitch.engaged ? `ENGAGED (${report.killSwitch.reason})` : 'off'} · landing freeze: ${report.freeze.frozen ? `ON — ${report.freeze.reasons.join('; ')}` : 'off'}`);
-  w(`  open PRs: ${report.openPrs.join(', ') || 'none'} · durable in-flight builds (claims/run records): ${report.inFlight.map((f) => `#${f.num} (${f.source})`).join(', ') || 'none'} · tick core counts ${core.building} building`);
+  // card xao7080/#4518 — provider (`executor`) is visible per in-flight build here: a claim entry has no run
+  // record yet (`executor` absent — the dispatch has not gone `in-flight` on disk), a run-store row carries the
+  // durable field once it has (`null` only for an older record with none, never a default guess).
+  w(`  open PRs: ${report.openPrs.join(', ') || 'none'} · durable in-flight builds (claims/run records): ${report.inFlight.map((f) => `#${f.num} (${f.source}${f.executor ? ` executor=${f.executor}` : ''})`).join(', ') || 'none'} · tick core counts ${core.building} building`);
   w(`  open items ${report.openItems.count}/${report.openItems.cap}${report.openItems.filling.length ? ` (${report.openItems.filling.map((n) => `#${n}`).join(', ')})` : ''}`);
   w(`  would dispatch now: ${report.wouldDispatchNow.map((n) => `#${n}`).join(', ') || 'nothing'}`);
   w(`  held items, routed: ${report.holdRouting.map((h) => `#${h.num}→${h.route}${h.commit ? `(${h.commit})` : ''}`).join(', ') || 'none'}`);
@@ -789,7 +798,12 @@ async function live(flags) {
     tickOnce, sleep: realSleep, isAlive, intervalMs, maxTicks: flags.once ? 1 : Infinity,
     onTick: (r) => {
       if (!r || !r.plan) { console.error(`build-dispatch-daemon: tick skipped (${r?.reason ?? 'self-sync'})`); return; }
-      process.stdout.write(`${JSON.stringify({ at: new Date().toISOString(), status: r.statusLine, freeze: r.plan.freeze, inFlight: r.plan.inFlight.map((f) => f.num), openItems: reportOpenItems(r.plan.openItems), dispatched: r.dispatched, hold: r.plan.hold, dispatchHolds: r.dispatchHolds, failures: r.failures, retired: r.retired, infraRetry: r.infraRetry, orphanAdoption: r.orphanAdoption, holdRouting: r.holdRouting, holdRoutingResult: r.holdRoutingResult })}\n`);
+      // card xao7080/#4518 — `{num, executor}` per in-flight build, not a bare num: `executor` is the durable
+      // dispatch-record field (`claude`/`antigravity`/`codex`, `null` before the run goes `in-flight` on disk
+      // or for an older record with none) so the operator's tick line names WHO is running each build without
+      // reading scorecards. Additive over the previous bare-num array — nothing on `main` parses this stdout
+      // JSON as a strict array-of-strings today (grepped 2026-09-29).
+      process.stdout.write(`${JSON.stringify({ at: new Date().toISOString(), status: r.statusLine, freeze: r.plan.freeze, inFlight: r.plan.inFlight.map((f) => ({ num: f.num, executor: f.executor ?? null })), openItems: reportOpenItems(r.plan.openItems), dispatched: r.dispatched, hold: r.plan.hold, dispatchHolds: r.dispatchHolds, failures: r.failures, retired: r.retired, infraRetry: r.infraRetry, orphanAdoption: r.orphanAdoption, holdRouting: r.holdRouting, holdRoutingResult: r.holdRoutingResult })}\n`);
     },
     onTickError: (e) => console.error(`build-dispatch-daemon: tick failed (non-fatal): ${String(e?.message || e).split('\n')[0]}`),
   });

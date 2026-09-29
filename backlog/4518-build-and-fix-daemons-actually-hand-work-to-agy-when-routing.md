@@ -2,13 +2,65 @@
 bornAs: xao7080
 kind: story
 size: 5
-status: open
-scope: ["we:skills-src/conveyor/build-dispatch-daemon.mjs", "we:skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs", "we:scripts/lib/provider-routing.mjs", "we:scripts/lib/dispatch-contracts.mjs", "we:scripts/gemini-direct-task.mjs", "we:scripts/lib/probation-launcher.mjs"]
+status: resolved
+scope: ["we:backlog/4518-build-and-fix-daemons-actually-hand-work-to-agy-when-routing.md", "we:skills-src/conveyor/build-dispatch-daemon.mjs", "we:scripts/conveyor/build-dispatch-policy.mjs"]
 dateOpened: "2026-09-29"
+dateStarted: "2026-09-29"
+dateResolved: "2026-09-29"
+graduatedTo: a143611f6,5414b50cc
 tags: []
 ---
 
 # Build and fix daemons actually hand work to agy when routing offers it
+
+## Premise check (2026-09-29) — already done on `main`, before this card was even opened
+
+Re-grepping `main` at claim time (never just `we:skills-src/conveyor`/`we:scripts/conveyor`, which is all this
+card's own opening evidence grepped) turns up the delivery path this card asks for, already landed and tested:
+
+- **`ci-heal`** — `we:scripts/operations/ci-heal-pr-dispatch.mjs#dispatchCiHeal` already calls
+  `decideDispatchRoute` (`we:scripts/lib/dispatch-contracts.mjs`) and forwards its `probationWorker` onto the
+  SAME effect sink the build path uses (`we:scripts/operations/dispatch-lane-io.mjs#createDispatchSinks`).
+  Landed as "Probation launcher: run opened doc-fix/ci-heal work on Codex and Antigravity" (PR #2819, merge
+  `a143611f6`, 2026-09-27).
+- **`build` / `doc-fix`** — `we:scripts/operations/dispatch-lane.mjs` and `we:scripts/operations/dispatch-lane-io.mjs`
+  compute the same route for a `build` dispatch and hand it to `we:scripts/operations/dispatch-providers/probation-worker.mjs`,
+  which is wired for the `build` kind against the `doc-fix` taskType only (`PROBATION_LAUNCHABLE_KINDS`).
+  Landed as backlog item **#4291** ("doc-fix probation launcher — dispatch a picked probation worker for a
+  build", PR #2867, merge `5414b50cc`, 2026-09-28) — **#4291's own `resolved` frontmatter already carries the
+  scope this card guessed at** (`we:scripts/lib/probation-launcher.mjs`,
+  `we:scripts/operations/dispatch-providers/probation-worker.mjs`).
+- The chain both routes reach — `we:scripts/operations/dispatch-providers/probation-worker.mjs` →
+  `we:scripts/operations/probation-build-run.mjs`/`we:scripts/operations/probation-heal-run.mjs` →
+  `we:scripts/lib/probation-launcher.mjs` — shells `we:scripts/gemini-direct-task.mjs` and
+  `we:scripts/codex-direct-task.mjs` directly (`PROBATION_LAUNCHERS`), gated on
+  `CRITICAL_WORK_GATE.openForNonCritical` and tiered via `selectProbationWorker`/`AGY_GEMINI_SIMPLE_MODEL`/
+  `AGY_CLAUDE_MODEL_BY_TIER` exactly as this card's own Design describes — no code left to add for either
+  opened taskType. `we:scripts/operations/__tests__/dispatch-lane-routing-record.test.mjs` (line ~173) already
+  asserts `heal.routing.probationWorker` for `ci-heal`; `we:scripts/operations/__tests__/probation-build-run.test.mjs`
+  and `we:scripts/operations/__tests__/probation-heal-run.test.mjs` cover the launch scripts themselves.
+
+**Why this card's own opening evidence missed it:** the card's grep scope (`we:skills-src/conveyor` +
+`we:scripts/conveyor`) never covered `we:scripts/operations/`, where the actual routing/launch wiring lives —
+`we:skills-src/conveyor/build-dispatch-daemon.mjs` and `we:skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs`
+deliberately "route nothing" themselves (see the former's own header); they delegate to
+`we:scripts/operations/dispatch-lane.mjs` / `we:scripts/operations/ci-heal-pr-dispatch.mjs`, which already do
+this. The "0 doc-fix/ci-heal runs of ANY kind" scorecard read is plausibly still true today (no live candidate
+has hit the path yet), but that is an absence-of-traffic fact, not an absence-of-wiring one.
+
+**Resolving with `graduatedTo: a143611f6,5414b50cc`** (the two merge commits above) rather than building
+anything under this card's original scope.
+
+## Orchestrator add-on handled in this same PR (operator, 2026-09-29 ~4:10pm ET)
+
+The operator separately asked (mid-session) for build-dispatch concurrency to be split by provider (Claude
+cap default 1, external/Codex-agy cap default 4). That is real new scope, not covered by the already-done
+finding above, and too large for this card's remaining budget — filed as its own follow-up, **`xddlvn0`**
+("Split build-dispatch concurrency cap by provider (Claude vs Codex/agy)"). This PR ships only the minimum
+bar the operator named as acceptable in that case: the ACTUAL provider (`executor`: `claude`/`antigravity`/
+`codex`) of every in-flight build is now visible on `we:skills-src/conveyor/build-dispatch-daemon.mjs`'s tick
+line (both the `--dry-run` report and the live daemon's per-tick JSON), sourced from the durable dispatch
+record's own `executor` field (`we:scripts/operations/dispatch-lane-io.mjs`) rather than any new plumbing.
 
 we:scripts/lib/provider-routing.mjs computes `alternateBackend` (agy via `node we:scripts/gemini-direct-task.mjs`) as the default capacity-relief route offered on every Claude Sonnet/Opus dispatch (confirmed live on origin/main e141d647), and separately pins model tiers agy actually exposes: `AGY_GEMINI_SIMPLE_MODEL = 'gemini-3.8-flash-high'` for simple/low-judgment work, `AGY_CLAUDE_MODEL_BY_TIER` = `claude-sonnet-4-6` / `claude-opus-4-6-thinking` for harder work routed to agy-claude, plus gemini-3.1-pro as the non-simple Gemini tier (`agy models` on agy 1.2.12). But confirmed by grep on origin/main: no dispatcher CONSUMES the offer. `we:skills-src/conveyor/build-dispatch-daemon.mjs` (builds) and `we:skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs` (fixes) never reference `we:scripts/gemini-direct-task.mjs`/`alternateBackend` at all; only `we:scripts/lib/dispatch-contracts.mjs` reads the field (to log it), and grepping `we:skills-src/conveyor`+`we:scripts/conveyor` for gemini-direct-task/alternateBackend turns up only rating/backfill/comparison scripts (`we:scripts/conveyor/run-rating.mjs`, `we:scripts/conveyor/backfill-2026-09-14-delegation-trials.mjs`, `we:scripts/conveyor/concurrent-baseline-comparison.mjs`) — never a live dispatcher. So the offer is advisory-only and every build/fix still runs on Claude, even though the existing probation mechanism (`we:scripts/lib/probation-launcher.mjs`, `we:scripts/operations/probation-build-run.mjs`/`we:scripts/operations/probation-heal-run.mjs`) already knows how to launch + rate an agy run and close a bad offer. Live scorecard check (2026-09-29, 3147 records): 0 doc-fix/ci-heal runs of ANY kind were ever dispatched to antigravity-claude/antigravity-gemini — the only agy-provider rows (623 total) are advisory-review judge seats (608) and one-off session-delegation trials (15, conflict-resolution/other), never a build or fix. MVP: `we:skills-src/conveyor/build-dispatch-daemon.mjs` and the fix dispatch path launch via `we:scripts/gemini-direct-task.mjs` when `alternateBackend` is offered, for the task types `CRITICAL_WORK_GATE.openForNonCritical` allows — routing SIMPLE, low-judgment work (card-only/resolve-only PRs, doc-fix, ci-heal reruns, prevention cards) to `AGY_GEMINI_SIMPLE_MODEL` (gemini-3.8-flash-high), harder opened work to agy-claude (sonnet/opus tier) or gemini-3.1-pro — reusing `we:scripts/lib/provider-routing.mjs`'s existing tiering, never inventing a new one — with the run rated like any other so a bad trial closes the offer (existing mechanism, no new gate).
 
