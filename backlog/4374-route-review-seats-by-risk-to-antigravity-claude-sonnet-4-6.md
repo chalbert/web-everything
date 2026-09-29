@@ -13,8 +13,8 @@ tags: []
 we:scripts/operations/review-pr.mjs's two MANDATORY seats (judge=correctness, judgeSecurity=security) spawn as native Claude judges today with no provider field — hardcoded, not caller-negotiable — while every existing non-Claude seat (Codex/Antigravity) is deliberately kept advisory-only, so every PR pays >=2 native-Claude mandatory seats regardless of care level; most PRs today are backlog/docs-only card PRs paying that same cost, and Claude tokens are the binding constraint (Codex out until Oct 3). This card routes the MANDATORY seats themselves by the care level we:scripts/operations/review-pr.mjs already derives (we:scripts/review-core-cli.mjs's buildShapePlan/careLevel): none/low -> agy-claude Sonnet 4.6, elevated -> agy-claude Opus 4.6 (we:scripts/lib/provider-routing.mjs's AGY_CLAUDE_MODEL_BY_TIER, already pinned), high -> unchanged native Claude. Recorded as probation trials of a new we:scripts/lib/model-probation.mjs role (mandatory-review, deliberately NOT in NEVER_BLOCKING_ROLES, per #model-probation-graduation-criteria clause 3's already-anticipated 'future blocking/gating reviewer role'), with a 1-in-5 native-Claude spot check comparing verdicts; disagreements are informative trials, promotion stays a human decision. MVP cut: low care-level only, Sonnet 4.6, spot check + trial recording; elevated/Opus and real allowance-gate fallback are follow-up slices.
 
 **Lineage note:** conceptually a "model routing + probation" dimension instance of the
-policy-as-configurable-dimensions epic (`xv0h3mp`, `#4305`) — no `parent:` frontmatter link is set because
-`xv0h3mp` lives only on `origin/lane/cost-capture-and-policy-design` and does not yet resolve to an item on
+policy-as-configurable-dimensions epic (`4376`, `#4305`) — no `parent:` frontmatter link is set because
+`4376` lives only on `origin/lane/cost-capture-and-policy-design` and does not yet resolve to an item on
 `main`; wire the `parent:` field once that epic lands, rather than filing a card whose parent link is
 currently unresolvable.
 
