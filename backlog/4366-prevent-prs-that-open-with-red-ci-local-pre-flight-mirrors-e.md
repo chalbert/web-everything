@@ -6,6 +6,8 @@ status: open
 blockedBy: ["4365"]
 scope: ["we:scripts/operations/open-pr.mjs", "we:scripts/operations/open-pr-io.mjs", "we:scripts/operations/__tests__/open-pr.test.mjs", "we:scripts/operations/preflight-ci-mirror.mjs", "we:scripts/operations/__tests__/preflight-ci-mirror.test.mjs", "we:scripts/conveyor/ci-red-on-open-classify.mjs", "we:scripts/conveyor/__tests__/ci-red-on-open-classify.test.mjs", "we:scripts/conveyor/ci-red-on-open-watch.mjs", "we:scripts/conveyor/__tests__/ci-red-on-open-watch.test.mjs", "we:scripts/conveyor/conflict-postmortem-store.mjs", "we:scripts/lib/verify-lane-gate.mjs", "we:scripts/lib/pr-events.mjs", "we:scripts/lib/soak-gate-merge-base-diff.mjs", "we:scripts/progress-board.mjs", "we:.github/workflows/ci.yml", "we:.github/workflows/soak-replay-gate.yml", "we:.github/workflows/review-gate.yml"]
 dateOpened: "2026-09-28"
+preparedDate: "2026-09-28"
+preparedAgainstSha: "1b6fc1381a3132a8df2d16526ba537f40527a317"
 tags: []
 ---
 
@@ -204,6 +206,40 @@ with no mirror today that keeps failing red-on-open earns one), read off the rol
 
 Two PRs in practice, one item here: this card is `blockedBy` 4365 (the shared store must land first). Within this card, land incrementally — the preflight planner and `open-pr` wiring first (useful standalone, gates every PR regardless of classification), then the classifier + shared-store write, then the progress-board KPI last (purely additive, reads a store that may still be empty).
 
+## MVP cut
+
+Per the operator's prepare-rule ruling (full design stays above; only the MVP builds now): **the MVP is local
+`soak-replay-gate` + `check:standards` before `open-pr`, refusing on failure.**
+
+**Must (MVP):**
+- `we:scripts/operations/preflight-ci-mirror.mjs#planPreflight`, narrowed to TWO checks —
+  `check:standards` and the soak-replay-gate CLI's `--base-sha`/`--head-sha` mode (with the effective-title
+  derivation and structured argv fixes already folded into Design above) — never the `build:docs` or scoped-test
+  checks (Could, below).
+- The IO shell running those two commands with a bounded timeout (Task 2, narrowed); before running
+  `check:standards` specifically, it checks `git status --porcelain` and attaches an honest `scopeCaveat` to
+  that `CheckResult` when the tree is dirty (see the MVP-blocking classification below — `check:standards`, unlike
+  the soak-replay-gate CLI, has no `--base-sha`/`--head-sha` mode of its own).
+- `we:scripts/operations/open-pr.mjs`'s new `preflight` effect step + `planOpen`'s `ci-red` refusal (Task 3,
+  unchanged — the refusal wiring is check-count-agnostic).
+- Fixtures: #2852 (no soak-break scenario) and #2854 (statute-lint miss) both refused locally, matching Task 1's
+  own two named fixtures (both are covered by the two MVP checks alone — neither needed `build:docs` or the
+  scoped-test check to catch).
+
+**Could (follow-up, already designed above — not built now):**
+- `build:docs` and the scoped-test (`we:scripts/lib/verify-lane-gate.mjs#resolveDefaultGate`) checks in the
+  preflight planner (Task 1/2's remaining two checks).
+- The entire `ci-red-on-open` observer/classifier/KPI half of this card:
+  `we:scripts/conveyor/ci-red-on-open-watch.mjs`, `we:scripts/conveyor/ci-red-on-open-classify.mjs`, and the
+  `we:scripts/progress-board.mjs` `redOnOpenRate` line (Task 4, 5, 6) — this is the whole "classify + KPI" half
+  the four remaining blockers below concern; none of it is needed for "refuse a bad push locally," only for
+  measuring what slips past it.
+- The shared-store integration with #4365's `mode: 'ci-red-on-open'` row.
+
+**Size:** the MVP is 1 of the original 6 tasks in substance (the preflight planner narrowed to 2 checks + the
+`open-pr` wiring) — well under this rule's ~1.5× budget against the card's own size-8 basis; the observer/
+classifier/KPI half is real, separately-sized follow-up work, not a hidden remainder of THIS size.
+
 ## Proof plan (live, before/after)
 
 **Before:** #2852/#2854/#4309, each red-on-open with no local mirror run first (Evidence above).
@@ -381,7 +417,60 @@ MINOR (also open): the effective-title derivation (`input.title || …`) preserv
 `we:scripts/operations/open-pr.mjs`'s own submission path trims and omits it (`:123`) — a cosmetic mismatch, fix
 at next touch.
 
-**This card stays `status: open`, `preparedDate` withheld, `blockedBy: ["4365"]` unchanged** — four real
-blockers remain after this session's one permitted re-review round; a follow-up prep pass (working-tree-vs-
-published-commit reconciliation, a real pr-events integration point, a real gap-recovery record, and a
-check-run id in the feed) is owed before build.
+## MVP-blocking classification (per the operator's prepare-rule ruling)
+
+Per this repo's new prepare rule (full design stays above; a plan-review finding blocks the stamp ONLY when it
+breaks an MVP Must or names real harm — everything else is SCOPE-GROWTH, an already-designed follow-up, never
+silently dropped):
+
+1. **Working-tree-vs-published-commit binding — MVP-BLOCKING for `check:standards`, resolved directly (this
+   session's own re-review correctly caught this session's own first-draft classification as FALSE: `we:check-standards.mjs`
+   reads checkout files straight off disk (`readFileSync`, no `--base-sha`/`--head-sha` mode at all —
+   verified against the real script, whose flags are `--json`/`--local`/`--files=` plus `--scope=`/`--mine=`
+   — a same-machine SESSION-ownership partition of the SAME whole-checkout read, not a commit-scoped diff mode)
+   — it is NOT
+   git-diff-scoped the way the soak-replay-gate CLI is; only that ONE of the two MVP checks was ever safe from
+   this gap.** Real, honest fix (not deferred): the preflight IO shell checks `git status --porcelain` is empty
+   (working tree matches HEAD) before running `check:standards`; when clean, the check gives FULL coverage of
+   what `we:pr-land.mjs` will actually publish (no gap — HEAD is what's checked and what ships); when dirty, the
+   `CheckResult` for `check:standards` carries the SAME `scopeCaveat` field the card's own Design already defined
+   for the explicit-`sha` path ("ran against the working tree, which has uncommitted changes not reflected in
+   the published commit"), never silently claiming full coverage. The ordinary case this repo's own lane
+   workflow produces (commit, then verify/open-pr) is unaffected — the caveat fires only on a genuinely dirty
+   tree, an honest, cheap, already-buildable check, not a follow-up.
+2. **`we:scripts/lib/pr-events.mjs#withPrEvents` has no per-event delivery — FOLLOW-UP, not MVP-blocking.** This
+   applies only to the `ci-red-on-open` OBSERVER, entirely cut from the MVP above. Filed as a follow-up slice
+   (name the real integration point before building the observer).
+3. **Gap-recovery denominator is unrecoverable across a feed gap — FOLLOW-UP, not MVP-blocking.** Same observer,
+   same cut. Filed as a follow-up slice (a real durable in-flight-episode record, or an honest gap-drop
+   statement).
+4. **`failureShape` has no check-run id to read by — FOLLOW-UP, not MVP-blocking.** Same classifier, same cut.
+   Filed as a follow-up slice (capture a check-run id in `we:scripts/conveyor/pr-events-worker/core.mjs#parseGithubEvent`).
+
+## Independent plan review — MVP re-review (Codex, read-only, 2026-09-28)
+
+This session's own one permitted re-review round, confined to the MVP cut + classification above. **1 blocker
+found, resolved directly above:**
+
+1. **[blocker, resolved above]** This session's own first-draft classification claimed `check:standards` takes
+   an explicit `--base-sha`/`--head-sha` mode like the soak-replay-gate CLI does — verified FALSE against the
+   real `we:check-standards.mjs` (reads checkout files directly, no diff-scoped mode at all). **Resolved**: the
+   preflight now checks `git status --porcelain` before running `check:standards` and attaches an honest
+   `scopeCaveat` on a dirty tree, mirroring the caveat mechanism the card's own Design already built for the
+   explicit-`sha`/non-`main`-`base` path — the ordinary clean-tree case (this repo's own commit-then-verify lane
+   workflow) is unaffected and gets full coverage.
+2. **[scope-growth, confirmed correct]** All three remaining findings (pr-events delivery, gap-recovery
+   denominator, missing check-run id) concern only the `ci-red-on-open` observer/classifier/KPI, entirely cut
+   from the MVP — confirmed they name no risk reaching the two-check preflight itself.
+3. **[not-an-issue, confirmed]** No technical dependency between the MVP and `#4365`'s shared store — confirmed
+   against Interfaces (the MVP's `preflight`/`ci-red` refusal path never reads or writes that store).
+
+**Round 2 (this session's cap, confirmation-only) result: confirmed resolved**, with one minor factual
+correction folded in above (`we:check-standards.mjs` also accepts `--scope=`/`--mine=`, a same-machine
+session-ownership partition of the same whole-checkout read — not a commit-scoped diff mode, so the core
+finding stands; only the "only three flags" phrasing was incomplete).
+
+**MVP has no remaining blocker.** `node we:scripts/backlog.mjs prepare-stamp 4366` is appropriate.
+`blockedBy: ["4365"]` stays as-is at the card level (the card's full design, Could items included, still needs
+4365's store) — a caveat worth a human's attention if this card is ever dispatched for its MVP slice alone
+before 4365 lands, since the MVP itself has no real dependency.

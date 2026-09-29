@@ -10,6 +10,7 @@ metadata:
 Agent Meta · Memory · Model Routing cluster — open a leaf with `node scripts/memory-resolve.mjs <N>` (or `--cat`):
 
 - 9. Memory-Management Policy — index=TREE: always-loaded map+core-invariants; rules live in category sub-indexes; #1517/#1868
+- [Process rules as configurable policy](process-rules-as-configurable-policy.md) — every delivery/process rule (prepare depth, MVP cut, review-blocking classes/rounds, scope budget, test strategy, draft ownership, capacity caps, model routing, specialist roles, postmortems, telemetry) is a named POLICY DIMENSION with named options, layered defaults→org/project→risk→card, never a hard-coded rule; the chosen policy rides on every run so run rating can compare policies; MVP = gather today's scattered rules into one policy file the daemons read (operator direction 2026-09-28; ties to #4305/#4361)
 - 44. State-Representing Edits Need No Permission — REAL-state edits=default-do: apply+report; ask only on new scope
 - 140. Persist Ratifiable Wording Live — in decision discussion, write proposed wording INTO the item the same turn; never make the user ask
 - 55. Hand Back Early In Interactive Loops — collect first; build on explicit go; no early design→build→commit
