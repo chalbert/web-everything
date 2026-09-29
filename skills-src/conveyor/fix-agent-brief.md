@@ -251,6 +251,10 @@ PR to `main` automatically the moment its base branch merges and is deleted (the
 gh pr view {{PR_NUM}} --json baseRefName --repo {{REPO}} --jq .baseRefName
 ```
 
+**This is the only point in this brief where you may touch `origin/main` at all, and at most once (#4297) —
+never fetch or merge it speculatively anywhere else in the repair, and only when it actually blocks the gate
+right now, never pre-emptively.**
+
 If `origin/main` advanced under the lane and a **conflict**
 blocks the gate, resolve it the `/finish` way (regenerate derived artifacts, take-main for coordination JSON) —
 or, if it is a genuine same-line code overlap you cannot safely resolve, **record the stand-down on the PR

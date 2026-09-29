@@ -202,6 +202,31 @@ faster than `verify-lane.mjs`'s own diff-driven default, appropriate for a quick
 as useful while you work; it is advisory only and **never** substitutes for step 5's terminal gate, `pr-land`'s
 finish-guard, or CI's `test` check — none of which it satisfies.
 
+### 4a. Catch up with `main` once, immediately before the gate — never speculatively mid-work (#4297)
+
+**You get exactly ONE `origin/main` touch for the whole build — never two.** A speculative mid-work catch-up
+that touches none of your own files still moves local HEAD, which invalidates the exact-sha-keyed verify marker
+(#4296) and forces a wasted full re-run — the exact cost a mid-work merge produced live inside the #4294
+daemon-fix session (a conflict entirely outside the lane's own touch-set).
+
+**The normal case — do it here, right before step 5's gate:**
+
+```bash
+git fetch origin main
+git merge origin/main
+```
+
+Resolve any conflict the `/finish` way — regenerate derived/generated artifacts rather than hand-merging them,
+take-main for coordination JSON (`claims.json`, registries). A genuine same-line code conflict you cannot
+safely resolve is a hard stop: do not push through it, and report it plainly in your one-line return (step 10).
+
+**The sole exception — you already spent your one touch earlier, mid-work, because it genuinely blocked you.**
+If `origin/main` advances while you are still editing and a real, PRESENT conflict (not a hypothetical future
+one) blocks the file you are actively touching — never pre-empted "in case" one might appear later — resolve it
+right then, the same `/finish` way. **If that already happened, skip this step entirely when you reach it: do
+NOT run the merge above a second time.** The two paths are alternatives, not additive — whichever one fires is
+the build's one and only merge.
+
 ### 5. Run the gate GREEN (in the item's own locus)
 
 A WE item's gate is `npm run check:standards`. For a cross-locus item, run **that** locus's gate
