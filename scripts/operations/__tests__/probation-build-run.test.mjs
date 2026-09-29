@@ -10,10 +10,13 @@
  * ever pushed on a failure path, so a plain `git reset --hard` back to the pre-claim HEAD undoes the claim
  * along with everything after it in one step; there is no separate "release the claim" call at all.
  */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawn } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { withInfraLock } from '../../conveyor/infra-blocked.mjs';
 import { openPrArgv, parseArgs, realIo, runProbationBuild } from '../probation-build-run.mjs';
 
 describe('realIo().findItem — the card\'s own scope is what the arc allowlists (#4291 advisory finding)', () => {
@@ -466,7 +469,149 @@ describe('runProbationBuild — the arc', () => {
 
   it('refuses with no num, session or worker', async () => {
     await expect(runProbationBuild(parseArgs(['--session=s', '--worker={"id":"codex"}']), fakeIo().io)).rejects.toThrow();
-    await expect(runProbationBuild(parseArgs(['--num=1', '--worker={"id":"codex"}']), fakeIo().io)).rejects.toThrow();
+    await expect(runProbationBuild(parseArgs(['--num=1', '--session=', '--worker={"id":"codex"}']), fakeIo().io)).rejects.toThrow();
     await expect(runProbationBuild(parseArgs(['--num=1', '--session=s']), fakeIo().io)).rejects.toThrow();
   });
+});
+
+describe('standalone task types and workers', () => {
+  it.each(['codex', 'antigravity-claude', 'antigravity-gemini'])('resolves %s by name and generates a unique session', (id) => {
+    const argv = ['--num=4519', `--worker=${id}`];
+    const a = parseArgs(argv);
+    expect(a.worker.id).toBe(id);
+    expect(a.worker.model).toBeTruthy();
+    expect(a.taskType).toBe('doc-fix');
+    expect(a.session).toMatch(new RegExp(`^probation-4519-${id}-[a-f0-9]+$`));
+    expect(parseArgs(argv).session).not.toBe(a.session);
+  });
+
+  it.each(['antigravity-claude', 'antigravity-gemini'])('allows the agy overrides for %s and retains Flash checking', (id) => {
+    for (const model of ['claude-sonnet-4-6', 'gemini-3.8-flash-high']) {
+      const a = parseArgs([`--worker=${id}`, `--model=${model}`]);
+      expect(a.worker.model).toBe(model);
+      if (model.startsWith('gemini')) expect(a.worker).toMatchObject({ simpleOnly: true, checker: 'codex' });
+    }
+  });
+
+  it.each(['codex', 'antigravity-claude', 'antigravity-gemini'])('rejects disallowed models for %s', (id) => {
+    expect(() => parseArgs([`--worker=${id}`, '--model=unapproved'])).toThrow('disallowed model');
+    expect(() => parseArgs([`--worker=${JSON.stringify({ id, model: 'unapproved' })}`])).toThrow('disallowed model');
+  });
+
+  it('refuses an agy model on Codex and an unsupported task type', () => {
+    expect(() => parseArgs(['--worker=codex', '--model=claude-sonnet-4-6'])).toThrow('disallowed model');
+    expect(() => parseArgs(['--taskType=ci-heal'])).toThrow('taskType');
+  });
+
+  it.each([[200, 'opened-pr'], [300, 'gate-red']])('bugfix bounds a %i LOC source diff', async (loc, outcome) => {
+    const { io, calls } = fakeIo({ itemScope: ['we:scripts/example.mjs'], numstat: `${loc}\t0\tscripts/example.mjs` });
+    const rows = [];
+    io.appendScorecard = (row) => rows.push(row);
+    const acquire = io.acquireLane;
+    io.acquireLane = (o) => { expect(o.taskType).toBe('bugfix'); return acquire(o); };
+    const result = await runProbationBuild(args(codex, { taskType: 'bugfix', scope: 'we:scripts/example.mjs' }), io);
+    expect(result).toMatchObject({ outcome, pr: outcome === 'opened-pr' ? 9001 : null });
+    expect(rows[0].taskType).toBe('bugfix');
+    if (outcome === 'opened-pr') expect(calls.find((c) => c[0] === 'commit')[2]).toContain('bugfix build');
+    else expect(calls.some((c) => c[0] === 'discard')).toBe(true);
+  });
+
+  it('the default still refuses 200 documentation LOC', async () => {
+    const { io } = fakeIo({ numstat: '200\t0\tbacklog-docs/probation.md' });
+    expect((await runProbationBuild(args(), io)).outcome).toBe('gate-red');
+  });
+
+  it('bugfix refuses statute paths even when explicitly scoped', async () => {
+    const path = 'docs/agent/platform-decisions.md';
+    const { io } = fakeIo({ itemScope: [path], numstat: `1\t0\t${path}` });
+    const r = await runProbationBuild(args(codex, { taskType: 'bugfix', scope: path }), io);
+    expect(r.detail).toContain('statute-tier');
+    expect(r.outcome).toBe('gate-red');
+  });
+
+  it.each(['APPROVE', 'REJECT'])('Flash requires its read-only Codex checker: %s', async (verdict) => {
+    const { io, calls } = fakeIo();
+    io.diffText = () => 'diff';
+    io.runChecker = (argv) => { expect(argv).toContain('--review'); return verdict; };
+    const a = parseArgs(['--num=4291', '--worker=antigravity-gemini', '--taskType=bugfix']);
+    expect((await runProbationBuild(a, io)).outcome).toBe(verdict === 'APPROVE' ? 'opened-pr' : 'gate-red');
+    if (verdict === 'REJECT') expect(calls.some((c) => c[0] === 'commit')).toBe(false);
+  });
+
+  it('uses bugfix in the PR title and body and retains the verification park', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'probation-body-'));
+    try {
+      const bodyFile = realIo().writePrBody(dir, { num: '1', worker: codex, diff: { loc: 200, files: 1 }, taskType: 'bugfix' });
+      expect(readFileSync(bodyFile, 'utf8')).toContain('within the proven `bugfix` envelope');
+      expect(openPrArgv({ num: '1', slug: 'fix', bodyFile, taskType: 'bugfix' })).toEqual(expect.arrayContaining([
+        '--title=WE #1: bugfix build — fix', '--requireVerified=true', '--parkLabel=review:pending',
+      ]));
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('invalid CLI input exits with a single JSON result before acquiring a lane', () => {
+    try {
+      execFileSync(process.execPath, ['scripts/operations/probation-build-run.mjs', '--num=1', '--worker=codex', '--model=unapproved'], { encoding: 'utf8' });
+      throw new Error('expected refusal');
+    } catch (e) {
+      expect(JSON.parse(e.stdout)).toMatchObject({ executor: 'none', pr: null, outcome: 'escalated-needs-human', detail: expect.stringContaining('disallowed model') });
+    }
+  });
+
+  it('separate processes append all scorecards under the existing store lock', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'probation-scorecard-race-'));
+    const path = join(dir, 'scorecards.json');
+    const storeUrl = pathToFileURL(resolve('scripts/conveyor/run-scorecard-store.mjs')).href;
+    const launcherUrl = pathToFileURL(resolve('scripts/lib/probation-launcher.mjs')).href;
+    try {
+      await Promise.all([1, 2, 3, 4].map((item) => new Promise((done, fail) => {
+        const code = `import { appendScorecard } from ${JSON.stringify(storeUrl)};
+          import { launchScorecardRow } from ${JSON.stringify(launcherUrl)};
+          appendScorecard(launchScorecardRow({ worker: ${JSON.stringify({ ...codex, taskType: 'bugfix' })},
+            pr: null, repo: 'chalbert/web-everything', handle: 'parallel-${item}', item: '${item}', launchOutcome: 'gate-red' }),
+            { path: ${JSON.stringify(path)}, requireLock: true });`;
+        const child = spawn(process.execPath, ['--input-type=module', '-e', code], { env: { ...process.env, LANE_POOL_ROOT: dir } });
+        let stderr = '';
+        child.stderr.on('data', (data) => { stderr += data; });
+        child.on('error', fail);
+        child.on('close', (status) => status === 0 ? done() : fail(new Error(stderr)));
+      })));
+      const rows = JSON.parse(readFileSync(path, 'utf8')).records;
+      expect(rows.map((r) => r.item).sort()).toEqual(['1', '2', '3', '4']);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+});
+
+it('required store locks refuse writes under contention instead of falling back unlocked', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'probation-lock-'));
+  const path = join(dir, 'store.json');
+  let wrote = false;
+  try {
+    writeFileSync(`${path}.lock`, String(process.pid));
+    expect(() => withInfraLock(path, () => { wrote = true; }, { timeoutMs: 0, requireLock: true })).toThrow('could not acquire store lock');
+    expect(wrote).toBe(false);
+    expect(readFileSync(`${path}.lock`, 'utf8')).toBe(String(process.pid));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+it('undoes a worker-created commit instead of publishing a multi-commit arc', async () => {
+  const { io, calls } = fakeIo({ headShaSequence: ['base-sha', 'base-sha', 'worker-commit'] });
+  const result = await runProbationBuild(args(codex, { taskType: 'bugfix' }), io);
+  expect(result.outcome).toBe('escalated-needs-human');
+  expect(calls).toContainEqual(['discard', 'base-sha']);
+  expect(calls.some((c) => c[0] === 'commit' || c[0] === 'openPr')).toBe(false);
+});
+
+it('restores checker hook tampering before undoing a rejected Flash build', async () => {
+  const { io, calls } = fakeIo();
+  let checked = false;
+  io.diffText = () => 'diff';
+  io.runChecker = () => { checked = true; return 'REJECT'; };
+  io.snapshotHookSurface = () => ({ configHash: checked ? 'tampered' : 'clean', files: {} });
+  const result = await runProbationBuild(parseArgs(['--num=4291', '--worker=antigravity-gemini', '--taskType=bugfix']), io);
+  expect(result.detail).toContain('checker changed the git-hook surface');
+  const restore = calls.findIndex((c) => c[0] === 'reset-hooks' && c.length === 3);
+  const discard = calls.findIndex((c) => c[0] === 'discard');
+  expect(restore).toBeGreaterThan(-1);
+  expect(discard).toBeGreaterThan(restore);
 });

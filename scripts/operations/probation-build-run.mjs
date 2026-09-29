@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 /**
  * @file scripts/operations/probation-build-run.mjs
- * @description THE PROBATION DOC-FIX BUILD RUN (agy-launcher-probation, #4291) — the detached per-dispatch
- *   process `dispatch-providers/probation-worker.mjs` starts for one opened, non-critical `doc-fix` `build`.
+ * @description THE PROBATION BUILD RUN (agy-launcher-probation, #4291) — the detached per-dispatch
+ *   process `dispatch-providers/probation-worker.mjs` starts for doc-fix builds. Also runs directly from
+ *   the operator CLI for one non-critical doc-fix or bugfix item.
  *   PR #2819 opened the model-probation gate and started RECORDING a doc-fix pick; this script is what actually
  *   LAUNCHES it, the doc-fix sibling of `we:scripts/operations/probation-heal-run.mjs` (`ci-heal`). It follows
  *   the same arc as a normal mechanical `build` dispatch (claim, build, gate, resolve, PR), with the SCRIPT
@@ -12,7 +13,7 @@
  *     1. claim the item in the lane (`we:scripts/backlog.mjs claim`);
  *     2. run the worker SYNCHRONOUSLY through its launcher (`gemini-direct-task.mjs` / `codex-direct-task.mjs`,
  *        both foreground-blocking by design) against the item's own spec text;
- *     3. bound the build diff to the `doc-fix` envelope (`we:scripts/lib/provider-routing.mjs#PROVEN_TASK_ENVELOPES`);
+ *     3. bound the build diff to the selected taskType's envelope (`we:scripts/lib/provider-routing.mjs#PROVEN_TASK_ENVELOPES`);
  *     4. resolve the item (`we:scripts/operations/run.mjs resolve`) and commit everything — the worker's files
  *        plus the item's own now-resolved backlog card — in ONE commit, trailers naming the worker;
  *     5. run the gate on the FINAL commit (the default, marker-writing `verify-lane` mode, not the marker-less
@@ -54,10 +55,16 @@
  * every other conveyor delivery arc's own EXIT step) or on failure (matching `probation-heal-run.mjs`, which
  * never releases the lane either — the lease reaper reclaims it).
  *
+ * Operator CLI: --num=<item> --taskType=doc-fix|bugfix --worker=<roster id|JSON> [--model=<allowed id>].
+ * Omitted taskType remains doc-fix; omitted session gets a random per-run identity. Worker names resolve
+ * from PROBATION_WORKERS (agy Claude defaults to Sonnet). Flash is for simple mechanical work and requires
+ * a read-only Codex APPROVE. No enclosing Claude session is started.
+ *
  * IO lives in the `io` object so the whole arc is testable with fakes; the CLI block at the bottom wires the
  * real processes.
  */
 
+import { randomBytes } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -66,10 +73,10 @@ import matter from 'gray-matter';
 import { appendScorecard as appendScorecardRow } from '../conveyor/run-scorecard-store.mjs';
 import { CONSTELLATION_REPOS, DEFAULT_REPO_KEY } from '../lib/constellation-repos.mjs';
 import { hookSurfaceChanged, resetHookSurface, snapshotHookSurface, withHooksDisabled } from '../lib/git-hook-surface.mjs';
-import { PROVEN_TASK_ENVELOPES } from '../lib/provider-routing.mjs';
+import { AGY_CLAUDE_MODEL_BY_TIER, PROBATION_WORKERS, PROVEN_TASK_ENVELOPES, isStatuteTierPath } from '../lib/provider-routing.mjs';
 import { isDocScopePath } from '../lib/dispatch-task-type.mjs';
 import {
-  buildDocFixCommitMessage, buildDocFixTask, buildWorkerArgv, frontmatterTamperedBeyondClaim,
+  buildCheckerArgv, parseCheckerVerdict, buildDocFixCommitMessage, buildDocFixTask, buildWorkerArgv, frontmatterTamperedBeyondClaim,
   healDiffWithinEnvelope, launchScorecardRow, newUntrackedPaths, summarizeNumstat,
 } from '../lib/probation-launcher.mjs';
 import { extractSubmitResult } from './open-pr.mjs';
@@ -79,9 +86,6 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 export const WE_ROOT = resolve(HERE, '..', '..');
 const REPO_SLUG = CONSTELLATION_REPOS[DEFAULT_REPO_KEY].slug;
 const GATE_TIMEOUT_MS = 20 * 60 * 1000;
-/** The `doc-fix` roster (`we:scripts/lib/provider-routing.mjs#PROBATION_ROSTER`) carries no `checker` — this
- *  launch never needs the second-model approval step `probation-heal-run.mjs` runs for Antigravity-Gemini. */
-const DOC_FIX_ENVELOPE = PROVEN_TASK_ENVELOPES['doc-fix'];
 /** This launcher only ever calls plain `claim`/`resolve` — never `prepare-stamp`, never `resolve` with
  *  `--graduated-to=`/`--codified-to=` — so its own frontmatter-tamper checks allow only what THOSE two calls
  *  can legitimately produce (#4291 plan-review finding, round 8; see `frontmatterTamperedBeyondClaim`'s own
@@ -141,7 +145,7 @@ function parseYamlFrontmatter(text) {
   return matter(text, { language: 'yaml', engines: NO_EXEC_ENGINES }).data;
 }
 
-/** Parse `--k=v` flags. PURE. */
+/** Parse `--k=v` flags, resolving roster workers and minting an omitted session. */
 export function parseArgs(argv) {
   const flags = {};
   for (const a of argv) {
@@ -150,10 +154,29 @@ export function parseArgs(argv) {
     if (eq === -1) flags[a.slice(2)] = true;
     else flags[a.slice(2, eq)] = a.slice(eq + 1);
   }
-  const worker = typeof flags.worker === 'string' ? JSON.parse(flags.worker) : null;
+  const taskType = flags.taskType ?? 'doc-fix';
+  if (!['doc-fix', 'bugfix'].includes(taskType)) throw new Error('taskType must be doc-fix or bugfix');
+  const supplied = typeof flags.worker === 'string'
+    ? (Object.hasOwn(PROBATION_WORKERS, flags.worker) ? { id: flags.worker } : JSON.parse(flags.worker))
+    : null;
+  let worker = null;
+  if (supplied) {
+    const def = Object.hasOwn(PROBATION_WORKERS, supplied.id) ? PROBATION_WORKERS[supplied.id] : null;
+    if (!def) throw new Error('unknown probation worker');
+    const defaultModel = def.model ?? AGY_CLAUDE_MODEL_BY_TIER.sonnet;
+    const model = flags.model ?? supplied.model ?? defaultModel;
+    const allowed = def.provider === 'antigravity'
+      ? [defaultModel, 'claude-sonnet-4-6', 'gemini-3.8-flash-high'] : [defaultModel];
+    if (!allowed.includes(model)) throw new Error(`disallowed model for ${def.id}: ${model}`);
+    // A Flash override must never bypass the simple-only/checker constraints.
+    const flash = model === 'gemini-3.8-flash-high';
+    worker = { ...supplied, ...def, model, taskType,
+      simpleOnly: def.simpleOnly || flash, checker: flash ? 'codex' : def.checker };
+  }
   return {
     num: flags.num ? String(flags.num) : null,
-    session: String(flags.session ?? ''),
+    session: String(flags.session ?? `probation-${flags.num ?? 'unknown'}-${worker?.id ?? 'unknown'}-${randomBytes(4).toString('hex')}`),
+    taskType,
     attemptTag: flags.attempt ? String(flags.attempt) : '',
     lane: flags.lane ? Number(flags.lane) : null,
     scope: typeof flags.scope === 'string' && flags.scope ? flags.scope.split(',') : [],
@@ -162,13 +185,15 @@ export function parseArgs(argv) {
 }
 
 /**
- * THE ARC. Returns `{outcome, executor, detail}` — `executor` is who actually wrote the change (the worker's
+ * THE ARC. Returns `{outcome, executor, pr, detail}` — `executor` is who actually wrote the change (the worker's
  * own executor whenever it ran; `'none'` when nothing was ever attempted).
  * @param {ReturnType<typeof parseArgs>} args
  * @param {object} io - see {@link realIo} for the shape.
  */
 export async function runProbationBuild(args, io) {
   const { num, session, worker } = args;
+  const taskType = args.taskType ?? 'doc-fix';
+  if (!['doc-fix', 'bugfix'].includes(taskType)) throw new Error('taskType must be doc-fix or bugfix');
   if (!num || !session || !worker?.id) throw new Error('probation-build-run: --num, --session and --worker are required');
   const log = (m) => io.log(`probation-build-run #${num} [${worker.id}]: ${m}`);
   const finish = (outcome, executor, detail, row = {}) => {
@@ -176,11 +201,11 @@ export async function runProbationBuild(args, io) {
     // found is not a trial of it.
     if (executor === worker.executor) {
       io.appendScorecard(launchScorecardRow({
-        worker, pr: row.pr ?? null, repo: REPO_SLUG, handle: session, item: num, launchOutcome: outcome, diff: row.diff ?? null,
+        worker: { ...worker, taskType }, checker: checkerRow, pr: row.pr ?? null, repo: REPO_SLUG, handle: session, item: num, launchOutcome: outcome, diff: row.diff ?? null,
       }));
     }
     log(`${outcome} — ${detail}`);
-    return { outcome, executor, detail };
+    return { outcome, executor, pr: row.pr ?? null, detail };
   };
 
   // Mutable across the whole arc, read by the ONE catch at the bottom — #4291 plan review round 4
@@ -189,6 +214,7 @@ export async function runProbationBuild(args, io) {
   // this function entirely instead of reporting cleanly. Wrapping the WHOLE arc in one try/catch — with these
   // three variables as the only state the catch needs — closes that for every call, not just the ones a
   // reviewer happened to name.
+  let checkerRow = null;
   let lanePath = null;
   let baseSha = null;
   let preexisting = [];
@@ -202,7 +228,7 @@ export async function runProbationBuild(args, io) {
   };
 
   try {
-    lanePath = io.acquireLane({ lane: args.lane, session, scope: args.scope });
+    lanePath = io.acquireLane({ lane: args.lane, session, scope: args.scope, taskType });
     if (!lanePath) return finish('not-applicable', 'none', 'could not acquire a lane for this build');
 
     // x55dojc — force a known-clean git-hook baseline BEFORE any claim/worker/commit runs in this lane, so a
@@ -275,7 +301,7 @@ export async function runProbationBuild(args, io) {
     const scopeEntries = declaredScopePaths(item.scope);
     const leasedEntries = declaredScopePaths(args.scope);
     if (!scopeEntries.length) {
-      return abandon('not-applicable', 'the item declares no scope: — refusing before running any worker; a doc-fix build needs a declared scope to bound what the worker may touch', {}, 'none');
+      return abandon('not-applicable', 'the item declares no scope: — refusing before running any worker; a probation build needs a declared scope to bound what the worker may touch', {}, 'none');
     }
 
     // The item's own file is EXCLUDED from every diff/envelope measurement below, on top of `preexisting` — the
@@ -285,7 +311,7 @@ export async function runProbationBuild(args, io) {
     // once.
     const excludeFromDiff = [...preexisting, item.path];
 
-    const task = buildDocFixTask({ num, title: item.title, spec: item.spec, scope: item.scope });
+    const task = buildDocFixTask({ num, title: item.title, spec: item.spec, scope: item.scope, taskType });
     const taskFile = io.writeTaskFile(lanePath, 'probation-build-task.md', task);
     const preHookSurface = hookReset.snapshot;
     log(`running ${worker.launcher} --model=${worker.model}`);
@@ -317,7 +343,7 @@ export async function runProbationBuild(args, io) {
     // the tiny envelope. Every path it actually touched (never `item.path` — checked separately below, because
     // a `.md` backlog card would otherwise pass this exact check too) must be a documentation path.
     const nonDocPaths = summary.paths.filter((p) => !isDocScopePath(p));
-    if (nonDocPaths.length) {
+    if (taskType === 'doc-fix' && nonDocPaths.length) {
       return abandon('gate-red', `not built: touched non-documentation path(s) — a doc-fix worker may edit documentation only: ${nonDocPaths.join(', ')}`, { diff: diffRow });
     }
     // #4291 plan-review finding (security, rounds 4-7) — `isDocScopePath` accepts ANY `.md`/`docs/` path, which
@@ -329,10 +355,13 @@ export async function runProbationBuild(args, io) {
     // Gated on the RAW `--scope`: a lease naming only other repos' paths filters to `[]` but is still a lease.
     const outOfScopePaths = summary.paths.filter((p) => !pathInScope(p, scopeEntries) || ((args.scope ?? []).length > 0 && !pathInScope(p, leasedEntries)));
     if (outOfScopePaths.length) {
-      return abandon('gate-red', `not built: touched path(s) outside the item's own declared scope — a doc-fix worker may edit only what the item names: ${outOfScopePaths.join(', ')}`, { diff: diffRow });
+      return abandon('gate-red', `not built: touched path(s) outside the item's own declared scope — a probation worker may edit only what the item names: ${outOfScopePaths.join(', ')}`, { diff: diffRow });
     }
 
-    const fits = healDiffWithinEnvelope(summary, DOC_FIX_ENVELOPE);
+    if (summary.paths.some(isStatuteTierPath)) {
+      return abandon('gate-red', 'not built: statute-tier paths are refused', { diff: diffRow });
+    }
+    const fits = healDiffWithinEnvelope(summary, PROVEN_TASK_ENVELOPES[taskType]);
     if (!fits.ok) return abandon('gate-red', `not built: ${fits.reason}`, { diff: diffRow });
 
     // #4291 plan-review finding (correctness/security) — `item.path` is excluded from the diff/envelope above
@@ -346,6 +375,22 @@ export async function runProbationBuild(args, io) {
     const postWorkerItem = io.findItem(num, lanePath);
     if (postWorkerItem?.spec !== item.spec || postWorkerItem?.raw !== afterClaim?.raw) {
       return abandon('escalated-needs-human', 'not built: the worker edited the item\'s own backlog card — refusing', { diff: diffRow });
+    }
+
+    if (worker.checker) {
+      const checkerTask = io.writeTaskFile(lanePath, 'probation-build-check.md', [
+        `Check this ${taskType} against its spec. Answer APPROVE or REJECT on the first line, then reasons.`,
+        'Reject scope creep, weakened tests, incorrect fixes, or work that is not simple and mechanical.',
+        item.spec, io.diffText(lanePath, baseSha),
+      ].join('\n\n'));
+      const verdict = parseCheckerVerdict(io.runChecker(buildCheckerArgv({ checker: worker.checker, weRoot: WE_ROOT, dir: lanePath, taskFile: checkerTask })));
+      checkerRow = { provider: worker.checker, verdict: verdict.verdict, reason: verdict.reason };
+      const checkerHooks = hookSurfaceChanged(postHookSurface, io.snapshotHookSurface(lanePath));
+      if (checkerHooks.changed) {
+        if (!io.resetHookSurface(lanePath, preHookSurface).clean) baseSha = null;
+        return abandon('escalated-needs-human', `refused: checker changed the git-hook surface: ${checkerHooks.reason}`, { diff: diffRow });
+      }
+      if (!verdict.approved) return abandon('gate-red', `the ${worker.checker} checker did not approve: ${verdict.reason}`, { diff: diffRow });
     }
 
     const resolved = io.resolveItem(num, lanePath);
@@ -362,7 +407,10 @@ export async function runProbationBuild(args, io) {
       return abandon('escalated-needs-human', `refused: ${preCommitCheck.reason}${baseSha == null ? ' (the lane config could not be restored — the lane was NOT discarded; quarantine it)' : ''}`, { diff: diffRow });
     }
 
-    io.commit(lanePath, [...summary.paths, item.path], buildDocFixCommitMessage({ num, worker }));
+    if (io.headSha(lanePath) !== baseSha) {
+      return abandon('escalated-needs-human', 'refused: worker or resolve moved HEAD before the launcher commit', { diff: diffRow });
+    }
+    io.commit(lanePath, [...summary.paths, item.path], buildDocFixCommitMessage({ num, worker, taskType }));
 
     // The FINAL gate, on the commit that carries both the build and the resolve — the marker-writing mode
     // (unlike `probation-heal-run.mjs#runGate`'s marker-less `run` mode), because `open-pr --requireVerified=true`
@@ -377,8 +425,8 @@ export async function runProbationBuild(args, io) {
     // `submitted.ok === false` case already handled explicitly. `writePrBody`/`openPr` therefore never reach
     // `abandon` — a throw here reports `escalated-needs-human` and stops, exactly like a `!submitted.ok` result.
     try {
-      const bodyFile = io.writePrBody(lanePath, { num, worker, diff: diffRow });
-      const submitted = io.openPr({ lanePath, num, slug: item.slug, attemptTag: args.attemptTag, bodyFile });
+      const bodyFile = io.writePrBody(lanePath, { num, worker, diff: diffRow, taskType });
+      const submitted = io.openPr({ lanePath, num, slug: item.slug, attemptTag: args.attemptTag, bodyFile, taskType });
       if (!submitted.ok) {
         // The build is committed and gate-green in the lane either way — never discarded here. A
         // `blocked-on-infra` ref push is auto-retried by the conveyor's own recovery pass; anything else is a
@@ -414,13 +462,14 @@ const node = (script, args, opts) => trySh(process.execPath, [join(WE_ROOT, scri
  * present WITHOUT running a real `open-pr` process (#4291 plan review, round 3: a fake-io arc test can never
  * catch a later edit that drops one of these — this is the direct, cheap defence). Every probation build PR is
  * parked `review:pending`, never `label-on-green` — see the file docblock for why.
- * @param {{num: string|number, attemptTag?: string, slug: string, bodyFile: string}} o
+ * @param {{num: string|number, attemptTag?: string, slug: string, bodyFile: string, taskType?: 'doc-fix'|'bugfix'}} o
  * @returns {string[]}
  */
-export function openPrArgv({ num, attemptTag, slug, bodyFile }) {
+export function openPrArgv({ num, attemptTag, slug, bodyFile, taskType = 'doc-fix' }) {
   const ref = `lane/${num}${attemptTag ?? ''}-${slug}`;
   return [
     'open-pr', `--ref=${ref}`, '--sha=HEAD', '--base=main', `--bodyFile=${bodyFile}`,
+    `--title=WE #${num}: ${taskType} build — ${slug}`,
     '--mode=park', '--parkLabel=review:pending', '--requireVerified=true', '--json',
   ];
 }
@@ -434,8 +483,8 @@ export function realIo({ session, env = process.env } = {}) {
   const laneEnv = withHooksDisabled(workerEnv);
   return {
     log: (m) => console.error(m),
-    acquireLane: ({ lane, session: s, scope }) => {
-      const args = ['acquire', `--repo=${WE_ROOT}`, '--purpose=probation-doc-fix-build', `--session=${s}`, '--base=main'];
+    acquireLane: ({ lane, session: s, scope, taskType = 'doc-fix' }) => {
+      const args = ['acquire', `--repo=${WE_ROOT}`, `--purpose=probation-${taskType}-build`, `--session=${s}`, '--base=main'];
       if (lane) args.push(`--lane=${lane}`);
       if (scope?.length) args.push(`--scope=${scope.join(',')}`);
       const r = node('scripts/lane-pool.mjs', args, { env: laneEnv, timeout: 15 * 60 * 1000 });
@@ -481,6 +530,12 @@ export function realIo({ session, env = process.env } = {}) {
       const r = trySh(process.execPath, argv, { env: workerEnv, timeout: 70 * 60 * 1000 });
       return { ok: r.ok, out: r.out.slice(-4000) };
     },
+    runChecker: (argv) => {
+      const r = trySh(process.execPath, argv, { env: workerEnv, timeout: 20 * 60 * 1000 });
+      if (!r.ok) return '';
+      try { return JSON.parse(r.out).lastMessage ?? ''; } catch { return ''; }
+    },
+    diffText: (dir, base) => sh('git', ['-C', dir, 'diff', '--no-renames', base], { env: laneEnv }),
     untracked: (dir) => sh('git', ['-C', dir, 'ls-files', '--others', '--exclude-standard'], { env: laneEnv }).split('\n').filter(Boolean),
     diffNumstat: (dir, base, exclude = []) => {
       const created = newUntrackedPaths(exclude, sh('git', ['-C', dir, 'ls-files', '--others', '--exclude-standard'], { env: laneEnv }).split('\n').filter(Boolean));
@@ -527,14 +582,14 @@ export function realIo({ session, env = process.env } = {}) {
       const r = node('scripts/verify-lane.mjs', ['--json'], { cwd: dir, env: laneEnv, timeout: GATE_TIMEOUT_MS });
       return { pass: r.ok, output: r.out.slice(-12000) };
     },
-    writePrBody: (dir, { num: n, worker: w, diff }) => {
+    writePrBody: (dir, { num: n, worker: w, diff, taskType = 'doc-fix' }) => {
       const bodyFile = join(dir, '.pr-body.md');
       writeFileSync(bodyFile, [
-        `Doc-fix build on probation (${w.executor}/${w.model}) for #${n} (agy-launcher-probation, #4291).`,
+        `${taskType} build on probation (${w.executor}/${w.model}) for #${n} (agy-launcher-probation, #4291).`,
         '',
         `Probation worker \`${w.id}\` built this item to spec via its own synchronous launcher, then the launcher`,
         `ran the gate, resolved the item and committed. ${diff.files} file(s), ${diff.loc} line(s) changed —`,
-        'within the proven `doc-fix` envelope.',
+        `within the proven \`${taskType}\` envelope.`,
         '',
         'Full review and a run rating are owed on this change; promotion out of probation stays an explicit',
         'human decision.',
@@ -542,8 +597,8 @@ export function realIo({ session, env = process.env } = {}) {
       ].join('\n'));
       return bodyFile;
     },
-    openPr: ({ lanePath: dir, num: n, slug, attemptTag, bodyFile }) => {
-      const r = node('scripts/operations/run.mjs', openPrArgv({ num: n, attemptTag, slug, bodyFile }), { cwd: dir, env: laneEnv });
+    openPr: ({ lanePath: dir, num: n, slug, attemptTag, bodyFile, taskType }) => {
+      const r = node('scripts/operations/run.mjs', openPrArgv({ num: n, attemptTag, slug, bodyFile, taskType }), { cwd: dir, env: laneEnv });
       if (!r.ok) {
         const blockedOnInfra = /blocked-on-infra|outside dependency|network fault/i.test(r.out);
         return { ok: false, blockedOnInfra, reason: r.out.trim().slice(0, 1000) };
@@ -558,7 +613,7 @@ export function realIo({ session, env = process.env } = {}) {
     },
     appendScorecard: (row) => {
       // Best-effort: a lost trial row must never fail a build that worked.
-      try { appendScorecardRow(row); } catch (e) { console.error(`probation-build-run: scorecard row not written: ${e?.message ?? e}`); }
+      try { appendScorecardRow(row, { requireLock: true }); } catch (e) { console.error(`probation-build-run: scorecard row not written: ${e?.message ?? e}`); }
     },
   };
 }
@@ -572,14 +627,14 @@ export function assertRunnable() {
 
 const isMain = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
 if (isMain) {
-  assertRunnable();
-  const args = parseArgs(process.argv.slice(2));
-  const io = realIo({ session: args.session });
-  runProbationBuild(args, io).then((result) => {
+  try {
+    assertRunnable();
+    const args = parseArgs(process.argv.slice(2));
+    const result = await runProbationBuild(args, realIo({ session: args.session }));
     console.log(JSON.stringify(result));
     process.exitCode = result.outcome === 'opened-pr' || result.outcome === 'not-applicable' ? 0 : 1;
-  }).catch((e) => {
-    console.error(`probation-build-run: ${e?.stack || e}`);
+  } catch (e) {
+    console.log(JSON.stringify({ outcome: 'escalated-needs-human', executor: 'none', pr: null, detail: String(e?.message ?? e) }));
     process.exitCode = 1;
-  });
+  }
 }

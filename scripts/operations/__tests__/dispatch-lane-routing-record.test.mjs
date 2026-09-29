@@ -173,7 +173,7 @@ describe('(a) the no-op proof — critical-work gate keeps build/fix/ci-heal on 
         expect(read.routing.taskType, launchKind).toBe(launchKind === 'fix' ? 'bugfix' : 'build-new-feature');
         expect(gateEntry.result, launchKind).toBe(launchKind === 'fix' ? 'open-non-critical' : 'claude-only');
         if (launchKind === 'fix') {
-          expect(read.routing.probationWorker).toMatchObject({ id: 'codex', supervision: 'full', review: 'full' });
+          expect(read.routing.probationWorker).toMatchObject({ id: 'antigravity-claude', supervision: 'full', review: 'full' });
         } else {
           expect(read.routing.probationWorker).toBeNull();
         }

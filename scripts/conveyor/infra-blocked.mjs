@@ -491,8 +491,9 @@ export function writeInfraStore(store, path = resolveInfraStorePath()) {
  * (best-effort — a lock must never DEADLOCK a tick; the worst case degrades to the pre-lock last-write-wins). The
  * critical section is a fast in-memory read-modify-write (microseconds), so contention is brief; `fn` must NOT do
  * slow IO (e.g. a blocking `pr-land`) while holding it. Returns `fn()`'s result.
+ * Set `requireLock` to refuse an unlocked fallback write when preserving concurrent updates is required.
  */
-export function withInfraLock(path, fn, { staleMs = 15_000, timeoutMs = 5_000 } = {}) {
+export function withInfraLock(path, fn, { staleMs = 15_000, timeoutMs = 5_000, requireLock = false } = {}) {
   const lockPath = `${path}.lock`;
   mkdirSync(dirname(path), { recursive: true });
   const start = Date.now();
@@ -514,6 +515,7 @@ export function withInfraLock(path, fn, { staleMs = 15_000, timeoutMs = 5_000 } 
       const spinUntil = Date.now() + 8; while (Date.now() < spinUntil) { /* brief busy-wait — sections are µs */ }
     }
   }
+  if (requireLock && !held) throw new Error(`could not acquire store lock: ${lockPath}`);
   try { return fn(); }
   finally { if (held) { try { unlinkSync(lockPath); } catch { /* already gone */ } } }
 }

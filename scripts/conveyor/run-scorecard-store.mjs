@@ -219,10 +219,11 @@ export function mergeLegacyStores(target, legacyTexts, stamps = []) {
  * that each read, change and write drop whichever row landed first (review of PR #2684). The section it guards
  * must stay fast — no git, no network. Like every user of that lock, it is best-effort: a holder that cannot
  * get it within 5s (or hits an unexpected fs error) writes unlocked rather than fail a scoring pass, so a lost
- * update stays possible only under that extreme contention.
+ * update stays possible only under that extreme contention. Probation builds pass `requireLock: true`
+ * to migration and append: lock acquisition failure then refuses the write instead.
  */
-function withStoreLock(path, fn) {
-  return withInfraLock(path, fn);
+function withStoreLock(path, fn, requireLock = false) {
+  return withInfraLock(path, fn, { requireLock });
 }
 
 let migrationChecked = false;
@@ -272,7 +273,7 @@ export function migrateLegacyStore({
 function ensureMigrated(io) {
   if (migrationChecked || ['path', 'read', 'exists', 'write'].some((k) => io[k] !== undefined)) return;
   migrationChecked = true;
-  migrateLegacyStore();
+  migrateLegacyStore({ lock: (path, fn) => withStoreLock(path, fn, io.requireLock === true) });
 }
 
 function atomicWrite(p, s) {
@@ -342,7 +343,7 @@ export function appendScorecard(row, io = {}) {
     writeStore(store, io);
   };
   if (io.write !== undefined) appendRow();
-  else withStoreLock(io.path ?? resolveScorecardStorePath(), appendRow);
+  else withStoreLock(io.path ?? resolveScorecardStorePath(), appendRow, io.requireLock === true);
   return stamped;
 }
 
