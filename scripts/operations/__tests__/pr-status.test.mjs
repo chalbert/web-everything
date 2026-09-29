@@ -20,6 +20,11 @@ import {
 } from '../pr-status.mjs';
 import { listArgv, checksArgv, parseJsonLines, labelNames, createPrReader, LIST_LIMIT } from '../pr-status-io.mjs';
 
+// `reduceCheckState` collapses to the LATEST run per check NAME first (`collapseRollupToLatestPerName`,
+// #2925/#xkfv491 — see that function's own header, and `reduceCheckState`'s, for why). Two helper calls that
+// share a `name` (the default, when omitted) are therefore NOT two independent checks — they are two RUNS of
+// the SAME check, and only the LAST one in the array is read. Give every check in a test its own distinct
+// `name` unless the point of that specific test IS the same-name collapse.
 const done = (conclusion, name = 'test') => ({ name, status: 'completed', conclusion });
 const running = (name = 'test') => ({ name, status: 'in_progress', conclusion: null });
 
@@ -50,7 +55,9 @@ describe('reduceCheckState — the empty list is the whole point', () => {
 
   it('green requires at least one check that actually succeeded', () => {
     expect(reduceCheckState([done('success')]).state).toBe('green');
-    expect(reduceCheckState([done('success'), done('skipped')]).state).toBe('green');
+    // Two DISTINCT checks (never the SAME name twice — see the `collapseRollupToLatestPerName` note below):
+    // one real check passed, a separate one merely skipped. Still green.
+    expect(reduceCheckState([done('success'), done('skipped', 'visual')]).state).toBe('green');
   });
 
   it('pending outranks failure outranks success — a caller acts on the worst thing still true', () => {
@@ -89,6 +96,32 @@ describe('reduceCheckState — the empty list is the whole point', () => {
     // Omitted/empty falls back to the exclusion-list default, unchanged.
     expect(reduceCheckState([done('success', 'test'), done('failure', 'soak-replay-gate')]).state).toBe('green');
     expect(reduceCheckState([done('success', 'test'), done('failure', 'soak-replay-gate')], []).state).toBe('green');
+  });
+
+  // we:backlog/fix-review-ciheal-deadlock (LIVE DEADLOCK 2026-09-28/29, PR #2878, chalbert/web-everything) —
+  // a required check that RE-RUNS more than once on one head (a `-gate`-shaped check retriggered by a
+  // `labeled`/`unlabeled`/`edited` event: `review-gate.yml`, `soak-replay-gate.yml`) can leave a STALE
+  // `FAILURE` run beside a later `SUCCESS` rerun of the SAME name in one `statusCheckRollup` fetch. Before the
+  // `collapseRollupToLatestPerName` fix, a flat `.filter()` counted the stale run too, reading `red` off a
+  // check whose CURRENT run had already gone green — dispatching a ci-heal that could only ever find nothing
+  // to fix. Confirmed against #2878's own real rollup (fetched live via `gh pr view --json statusCheckRollup`).
+  it('collapses to the LATEST run per check name before judging — a stale failure superseded by a later success reads green, not red', () => {
+    const required = ['test', 'smoke', 'daemon-soak', 'soak-replay-gate'];
+    // The exact live shape: `soak-replay-gate` failed once, then reran green on the SAME head — no new push,
+    // just a rerun (GitHub keeps both check runs). Every OTHER required check only ever ran once, green.
+    expect(reduceCheckState([
+      done('failure', 'soak-replay-gate'), // stale — superseded below
+      done('success', 'test'),
+      done('success', 'smoke'),
+      done('success', 'daemon-soak'),
+      done('success', 'soak-replay-gate'), // the LATEST run of the same check — this is the one that counts
+    ], required).state).toBe('green');
+    // The mirror case: a check that PASSED once and then genuinely failed on a LATER rerun must still read
+    // red — collapsing to the latest run is not "ever green, always green".
+    expect(reduceCheckState([
+      done('success', 'soak-replay-gate'),
+      done('failure', 'soak-replay-gate'),
+    ], required).state).toBe('red');
   });
 
   it('only ever answers with a declared state', () => {

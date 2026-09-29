@@ -21,12 +21,26 @@
  * rebase or a fresh push moves the head, the old escalation comment stops matching, and the very next
  * reconcile tick plans a heal again — no human intervention required, no stale record to clean up.
  *
- * OUTCOME IS TWO-VALUED (we:backlog/heal-wait-for-rerun, Fork 2): `needs-human` — a genuine judgment call the
- * agent could not safely make (the diff itself looks wrong, a real conflict, the lane ref is gone). `waiting-
- * on-system-fix` — the red is caused by the TOOLING/GATE ITSELF (an advisory check misbehaving, a false-red
- * bug in the pipeline) and a system-level fix for it is ALREADY OPEN (e.g. #2784 for the soak-replay-gate false
- * red) — this PR did nothing wrong and owes NOTHING further until that fix lands or its own head changes, so it
- * must never be miscounted as "the operator must judge this" the way a real `needs-human` is.
+ * OUTCOME IS THREE-VALUED (we:backlog/heal-wait-for-rerun, Fork 2; `not-a-ci-break` added we:backlog/
+ * fix-review-ciheal-deadlock, LIVE DEADLOCK 2026-09-28/29, PR #2878 chalbert/web-everything):
+ *   · `needs-human` — a genuine judgment call the agent could not safely make (the diff itself looks wrong, a
+ *     real conflict, the lane ref is gone).
+ *   · `waiting-on-system-fix` — the red is caused by the TOOLING/GATE ITSELF (an advisory check misbehaving, a
+ *     false-red bug in the pipeline) and a system-level fix for it is ALREADY OPEN (e.g. #2784 for the
+ *     soak-replay-gate false red) — this PR did nothing wrong and owes NOTHING further until that fix lands or
+ *     its own head changes, so it must never be miscounted as "the operator must judge this" the way a real
+ *     `needs-human` is.
+ *   · `not-a-ci-break` — every required check is green on this exact head; the ONLY red is a review-gate-shaped
+ *     check reflecting an un-cleared review hold (`review:pending`/`review:human`/`review:changes`) — by
+ *     design, not a defect. This PR did nothing wrong EITHER, but unlike `waiting-on-system-fix` there is no
+ *     system fix to wait on: it is owed its ORDINARY REVIEW, right now. LIVE DEADLOCK this closes: PR #2878 got
+ *     this exact finding written as prose under `needs-human` ("not a CI break — the only red check is
+ *     review-gate…") — `we:scripts/conveyor/reconcile-core.mjs#planReconcile`'s escalation refusal reads
+ *     `needs-human` as a terminal, review-blocking dead end (the correct behaviour for a REAL `needs-human`), so
+ *     the review daemon stood down every tick, and ci-heal (correctly) refused to re-heal a PR with nothing
+ *     left to heal — a deadlock neither side could see, because the reason lived only in unstructured prose
+ *     neither side parsed. A `not-a-ci-break` escalation reads instead as "dispatch the review this PR was
+ *     always owed, in parallel with refusing another heal" (see that function's own header for the exact fold).
  *
  * NO PARALLEL STATE STORE (#2612 invariant, matching every sibling marker in this directory): the record lives
  * on the PR's own comment thread, read back by {@link latestCiHealEscalationForHead}, exactly as
@@ -47,14 +61,14 @@ import { STATUS_LABEL_RE } from './review-status-tag.mjs';
  */
 export const CI_HEAL_ESCALATION_MARKER = '🚦 conveyor CI-heal — escalated';
 
-/** The two outcomes a ci-heal escalation can carry — see the file header for what distinguishes them. */
-export const CI_HEAL_ESCALATION_OUTCOMES = Object.freeze(['needs-human', 'waiting-on-system-fix']);
+/** The three outcomes a ci-heal escalation can carry — see the file header for what distinguishes them. */
+export const CI_HEAL_ESCALATION_OUTCOMES = Object.freeze(['needs-human', 'waiting-on-system-fix', 'not-a-ci-break']);
 
 /**
  * we:scripts/conveyor/ci-heal-escalation-mark.mjs#buildCiHealEscalationComment — the durable comment body a
  * ci-heal escalation posts. Its FIRST line MUST be {@link CI_HEAL_ESCALATION_MARKER}; every field after it is a
  * `key: value` line so {@link parseCiHealEscalations} can read it back with no ambiguity. Pure.
- * @param {{headSha:string, outcome:'needs-human'|'waiting-on-system-fix', reason?:string, systemFixRef?:(number|string|null)}} o
+ * @param {{headSha:string, outcome:'needs-human'|'waiting-on-system-fix'|'not-a-ci-break', reason?:string, systemFixRef?:(number|string|null)}} o
  * @returns {string}
  */
 export function buildCiHealEscalationComment({ headSha, outcome, reason = '', systemFixRef = null } = {}) {
@@ -79,8 +93,12 @@ export function buildCiHealEscalationComment({ headSha, outcome, reason = '', sy
       ? 'This required check is red because of the tooling/gate itself, not this PR\'s own code — a system-level ' +
         'fix is already open for it. Nothing further is owed here until that fix lands or this PR\'s own head ' +
         'changes; re-dispatching a heal against this exact head would only repeat the same finding.'
-      : 'A ci-heal agent stopped here rather than guess — this needs a human judgment call, not another repair ' +
-        'attempt. A person clears this by pushing a new commit (which re-arms auto-heal) or taking the PR over.',
+      : outcome === 'not-a-ci-break'
+        ? 'Every required check is green on this exact head — the only red is the review gate itself, held by ' +
+          'the review label (this is BY DESIGN, not a defect). This PR did nothing wrong and owes NO further ' +
+          'ci-heal; it is owed its ordinary review, dispatched normally alongside this escalation.'
+        : 'A ci-heal agent stopped here rather than guess — this needs a human judgment call, not another repair ' +
+          'attempt. A person clears this by pushing a new commit (which re-arms auto-heal) or taking the PR over.',
   );
   return lines.join('\n');
 }
@@ -152,7 +170,7 @@ if (IS_CLI) {
   };
   const pr = Number(positionals[0]);
   if (!Number.isInteger(pr) || pr <= 0) {
-    fail('usage: ci-heal-escalation-mark.mjs <pr> --head=<sha> --outcome=needs-human|waiting-on-system-fix '
+    fail('usage: ci-heal-escalation-mark.mjs <pr> --head=<sha> --outcome=needs-human|waiting-on-system-fix|not-a-ci-break '
       + '[--reason="<text>"] [--system-fix=<n>] [--repo=<owner/name>]');
   }
   if (typeof flags.head !== 'string' || !flags.head) fail('--head=<sha> is required');

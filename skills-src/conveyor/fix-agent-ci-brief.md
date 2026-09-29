@@ -206,17 +206,35 @@ gh run view <run-id> --log-failed --repo {{REPO}} # the failing step's log (opti
   ```
   (never a raw `gh pr edit --body` — it drops the PR's own authorship stamp; see that script's own header.)
 - If the required check is red for a reason that is NOT a CI/rebase break and NOT a metadata fix — do **NOT**
-  guess which of the two outcomes below applies without checking; picking the wrong one either hides a real
-  defect from the operator or wastes their attention on tooling that already has a fix in flight:
-  - **Almost always `needs-human`** — the diff itself is genuinely wrong and needs a design call, or you are
-    simply unsure. Report and stop:
+  guess which of the three outcomes below applies without checking; picking the wrong one either hides a real
+  defect from the operator, wastes their attention on tooling that already has a fix in flight, or (we:backlog/
+  fix-review-ciheal-deadlock, LIVE DEADLOCK 2026-09-28/29, PR #2878) silently blocks the PR's own review forever:
+  - **`not-a-ci-break` — check this FIRST, before reaching for `needs-human`:** every check `gh pr checks`
+    actually lists as a REQUIRED status check (`test`/`smoke`/`daemon-soak`/`soak-replay-gate` — confirm live via
+    `gh api repos/{{REPO}}/branches/main/protection --jq .required_status_checks.contexts`, never assume the
+    list from memory) is green on `$EXAMINED_HEAD`, and the ONLY red is a review-gate-shaped check
+    (`review-gate` itself, or one that only ever reflects the `review:pending`/`review:human`/`review:changes`
+    label) — by design, not a defect. This PR did nothing wrong and there is no "system fix" to wait on either:
+    it is owed its ORDINARY REVIEW, right now, not another ci-heal attempt:
     ```bash
     node "{{WE_ROOT}}/scripts/operations/completion-cli.mjs" report --repo={{REPO}} --session={{SESSION_SLUG}} --status=done --outcome=escalated-needs-human
     node "{{WE_ROOT}}/scripts/conveyor/fix-procedure.mjs" fix-end {{PR_NUM}} --repo={{REPO}} --who={{SESSION_SLUG}}
     node "{{WE_ROOT}}/scripts/conveyor/ci-heal-escalation-mark.mjs" {{PR_NUM}} --repo={{REPO}} \
-      --head="$EXAMINED_HEAD" --outcome=needs-human --reason="not a CI break — <name the actual finding>"
+      --head="$EXAMINED_HEAD" --outcome=not-a-ci-break --reason="not a CI break — every required check is green; only <name the gate check> is red, held by the review label"
     ```
-    Then report `#{{ITEM_NUM}} → ci-heal escalated (needs human — not a CI break)`. The review gate (if any) still
+    Then report `#{{ITEM_NUM}} → ci-heal stood down (not a CI break — owed a review, not a heal)`. This is a
+    STRUCTURED signal, not prose: `reconcile-core.mjs`'s escalation refusal reads this exact outcome as "dispatch
+    the review this PR was always owed, in parallel" — unlike `needs-human` below, it never durably blocks
+    review dispatch.
+  - **`needs-human`** — the diff itself is genuinely wrong and needs a design call, or you are simply unsure
+    (never for the review-gate-only case above — that is ALWAYS `not-a-ci-break`, never this). Report and stop:
+    ```bash
+    node "{{WE_ROOT}}/scripts/operations/completion-cli.mjs" report --repo={{REPO}} --session={{SESSION_SLUG}} --status=done --outcome=escalated-needs-human
+    node "{{WE_ROOT}}/scripts/conveyor/fix-procedure.mjs" fix-end {{PR_NUM}} --repo={{REPO}} --who={{SESSION_SLUG}}
+    node "{{WE_ROOT}}/scripts/conveyor/ci-heal-escalation-mark.mjs" {{PR_NUM}} --repo={{REPO}} \
+      --head="$EXAMINED_HEAD" --outcome=needs-human --reason="<name the actual finding>"
+    ```
+    Then report `#{{ITEM_NUM}} → ci-heal escalated (needs human)`. The review gate (if any) still
     owes a human verdict; a human handles it via `/finish`.
   - **`waiting-on-system-fix` — narrow, and ONLY when BOTH hold:** (1) the red is caused by the CI TOOLING/GATE
     ITSELF, not this PR's own diff (the SAME advisory check misbehaving the SAME way on more than one unrelated

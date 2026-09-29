@@ -196,6 +196,48 @@ describe('classifyPr', () => {
     expect(classifyPr(pr({ labels: ['review:pending'], statusCheckRollup: rollup }))).toBe('needs-review');
   });
 
+  // we:backlog/fix-review-ciheal-deadlock (LIVE DEADLOCK 2026-09-28/29, PR #2878, chalbert/web-everything) —
+  // the REAL rollup read live off PR #2878 via `gh pr view 2878 --repo chalbert/web-everything --json
+  // statusCheckRollup` at the moment of the incident (trimmed to the fields `ciFailed`/`classifyPr` read).
+  // `soak-replay-gate` is a REQUIRED check (`gh api repos/chalbert/web-everything/branches/main/protection
+  // --jq .required_status_checks.contexts` confirmed live: `["test","smoke","daemon-soak","soak-replay-gate"]`
+  // — added to branch protection after the #2748 fix above landed, when only `test`/`smoke`/`daemon-soak`
+  // were required) and, like `review-gate`, it RE-RUNS on more than one event for the SAME head — leaving a
+  // stale `FAILURE` run beside a later `SUCCESS` rerun in the very same fetch. Before the
+  // `collapseRollupToLatestPerName` fix (see `ciFailed`'s own header), a flat `.some()` found that stale run
+  // and read `ci-red` forever, even though every required check's LATEST run (and `review-gate`, excluded by
+  // design) was green — dispatching a ci-heal that could only ever escalate "not a CI break — the only red
+  // check is review-gate", which then durably blocked review dispatch too.
+  it('collapses to the latest run per check name — PR #2878\'s real live rollup, 2026-09-28/29 '
+    + '(we:backlog/fix-review-ciheal-deadlock)', () => {
+    const pr2878Rollup = [
+      { __typename: 'CheckRun', name: 'review-gate', conclusion: 'FAILURE' }, // stale — superseded below
+      { __typename: 'CheckRun', name: 'review-gate', conclusion: 'FAILURE' },
+      { __typename: 'CheckRun', name: 'soak-replay-gate', conclusion: 'FAILURE' }, // stale — superseded below
+      { __typename: 'CheckRun', name: 'test-shard (1)', conclusion: 'SUCCESS' },
+      { __typename: 'CheckRun', name: 'review-gate', conclusion: 'SUCCESS' }, // the LATEST review-gate run
+      { __typename: 'CheckRun', name: 'soak-replay-gate', conclusion: 'SUCCESS' }, // the LATEST run — this counts
+      { __typename: 'CheckRun', name: 'test-shard (2)', conclusion: 'SUCCESS' },
+      { __typename: 'CheckRun', name: 'test-shard (3)', conclusion: 'SUCCESS' },
+      { __typename: 'CheckRun', name: 'test-shard (4)', conclusion: 'SUCCESS' },
+      { __typename: 'CheckRun', name: 'daemon-soak-scope', conclusion: 'SUCCESS' },
+      { __typename: 'CheckRun', name: 'smoke', conclusion: 'SUCCESS' },
+      { __typename: 'CheckRun', name: 'test-selection-measure', conclusion: 'SKIPPED' },
+      { __typename: 'CheckRun', name: 'visual', conclusion: 'SKIPPED' },
+      { __typename: 'CheckRun', name: 'test', conclusion: 'SUCCESS' },
+      { __typename: 'CheckRun', name: 'soak-shard (1)', conclusion: 'SUCCESS' },
+      { __typename: 'CheckRun', name: 'soak-shard (2)', conclusion: 'SUCCESS' },
+      { __typename: 'CheckRun', name: 'soak-shard (3)', conclusion: 'SUCCESS' },
+      { __typename: 'CheckRun', name: 'soak-shard (4)', conclusion: 'SUCCESS' },
+      { __typename: 'CheckRun', name: 'daemon-soak', conclusion: 'SUCCESS' },
+    ];
+    const requiredChecks = ['test', 'smoke', 'daemon-soak', 'soak-replay-gate'];
+    expect(ciFailed(pr2878Rollup, requiredChecks)).toBe(false);
+    expect(
+      classifyPr(pr({ labels: ['review:pending'], mergeStateStatus: 'UNSTABLE', statusCheckRollup: pr2878Rollup }), requiredChecks),
+    ).toBe('needs-review');
+  });
+
   it('treats a merged pull request as landed whatever its labels say', () => {
     expect(classifyPr(pr({ state: 'MERGED', labels: ['review:human'] }))).toBe('landed');
   });

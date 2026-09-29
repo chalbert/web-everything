@@ -1140,6 +1140,78 @@ describe('case 5l — a ci-heal already escalated THIS EXACT head never gets re-
     expect(REFUSAL_KINDS).toContain('ci-heal-escalated');
     expect(REFUSAL_KINDS).toContain('waiting-on-system-fix');
   });
+
+  // we:backlog/fix-review-ciheal-deadlock (LIVE DEADLOCK 2026-09-28/29, PR #2878, chalbert/web-everything) —
+  // a `not-a-ci-break` escalation is ci-heal's OWN structured confirmation that the PR's true owed action is
+  // a review, never another heal. BEFORE this fix, the only bucket available for this exact finding was
+  // `needs-human` — which this same describe block's own earlier tests confirm is a hard, review-blocking
+  // `continue` with no parallel dispatch. #2878 deadlocked exactly there: ci-heal (correctly) refused to
+  // re-heal a head with nothing left to fix, and the review daemon read the SAME `ci-heal-escalated` refusal
+  // and stood down every tick — nobody ever asked "does this PR still need a review". `not-a-ci-break` closes
+  // it structurally: never re-dispatch the heal, but DO dispatch the review, in parallel, exactly the way
+  // `owed-ci-rerun` already does a few branches up (see the `review-while-main-red` describe block above).
+  describe('not-a-ci-break escalation dispatches review in parallel — never a dead end, unlike needs-human (we:backlog/fix-review-ciheal-deadlock)', () => {
+    it('dispatches BOTH the ci-heal-escalated refusal (no further heal) AND a review, with findings present', () => {
+      const escalation = buildCiHealEscalationComment({
+        headSha: HEAD_2783, outcome: 'not-a-ci-break',
+        reason: 'not a CI break — every required check is green; only review-gate is red, held by the review label',
+      });
+      const plan = planReconcile({
+        prs: [pr2783({ comments: [{ body: escalation, author: AUTOMATION }, finding()] })], agents: [], now: NOW,
+      });
+      expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'review', prNumber: 2783 })]);
+      expect(plan.dispatch.some((d) => d.kind === 'ci-heal')).toBe(false);
+      expect(plan.refusals).toEqual([expect.objectContaining({
+        kind: 'ci-heal-escalated', prNumber: 2783, headSha: HEAD_2783,
+      })]);
+      expect(plan.notes).toEqual(expect.arrayContaining([
+        expect.objectContaining({ kind: 'ci-heal-escalated', prNumber: 2783, outcome: 'not-a-ci-break' }),
+      ]));
+    });
+
+    it('zero-findings population: `no-findings` folds into the ci-heal-escalated row, and the review still dispatches', () => {
+      const escalation = buildCiHealEscalationComment({ headSha: HEAD_2783, outcome: 'not-a-ci-break', reason: 'not a CI break' });
+      const plan = planReconcile({
+        prs: [pr2783({ comments: [{ body: escalation, author: AUTOMATION }] })], agents: [], now: NOW,
+      });
+      expect(plan.refusals).toEqual([expect.objectContaining({
+        kind: 'ci-heal-escalated', reviewRefusal: expect.objectContaining({ kind: 'no-findings', findings: 0 }),
+      })]);
+      expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'review', prNumber: 2783, findings: 0 })]);
+    });
+
+    it('never fires without the `review:pending` label — an already-`review:accepted` PR is refused ci-heal-escalated alone', () => {
+      const escalation = buildCiHealEscalationComment({ headSha: HEAD_2783, outcome: 'not-a-ci-break', reason: 'not a CI break' });
+      const plan = planReconcile({
+        prs: [pr2783({ labels: lbl('review:accepted'), comments: [{ body: escalation, author: AUTOMATION }] })],
+        agents: [], now: NOW,
+      });
+      expect(plan.dispatch).toEqual([]);
+      expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'ci-heal-escalated', prNumber: 2783 })]);
+    });
+
+    it('a genuine needs-human escalation is UNCHANGED — still a hard stop, never a parallel review (regression guard)', () => {
+      const escalation = buildCiHealEscalationComment({ headSha: HEAD_2783, outcome: 'needs-human', reason: 'the diff itself is genuinely wrong' });
+      const plan = planReconcile({
+        prs: [pr2783({ comments: [{ body: escalation, author: AUTOMATION }, finding()] })], agents: [], now: NOW,
+      });
+      expect(plan.dispatch).toEqual([]);
+      expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'ci-heal-escalated', prNumber: 2783 })]);
+      expect(plan.refusals[0].reviewRefusal).toBeUndefined();
+    });
+
+    it('a waiting-on-system-fix escalation is UNCHANGED — still a hard stop, never a parallel review (regression guard)', () => {
+      const escalation = buildCiHealEscalationComment({
+        headSha: HEAD_2783, outcome: 'waiting-on-system-fix', systemFixRef: 2784, reason: 'tooling gate false red',
+      });
+      const plan = planReconcile({
+        prs: [pr2783({ comments: [{ body: escalation, author: AUTOMATION }, finding()] })], agents: [], now: NOW,
+      });
+      expect(plan.dispatch).toEqual([]);
+      expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'waiting-on-system-fix', prNumber: 2783 })]);
+      expect(plan.refusals[0].reviewRefusal).toBeUndefined();
+    });
+  });
 });
 
 describe('case 5g — owed-ci-rerun refuses ci-heal for a ci-red PR attributable to a red main (we:backlog/x5uqim1)', () => {

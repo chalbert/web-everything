@@ -71,6 +71,13 @@
  */
 import { op } from './registry.mjs';
 import { compute } from './step-kinds.mjs';
+// #2925/#xkfv491, threaded here 2026-09-29 (LIVE DEADLOCK, PR #2878 — see `reduceCheckState`'s own header).
+// Imported from its OWN dependency-free module, `../lib/rollup-collapse.mjs`, NEVER from `../merge-ai-prs.mjs`
+// (where this same collapse also lives, re-exported) — this file is the declaring module of the `pr-reconcile`
+// READ-ONLY operation (`we:scripts/operations/http-adapter.test.mjs#3036`), which must import nothing that can
+// act, and `merge-ai-prs.mjs` imports `node:child_process`/`node:fs` writes/etc. throughout. See that lib
+// module's own header for the full reasoning.
+import { collapseRollupToLatestPerName } from '../lib/rollup-collapse.mjs';
 
 export const PR_STATUS_OP = 'pr-status';
 
@@ -149,13 +156,21 @@ export const FAILING_CONCLUSIONS = Object.freeze([
  * required-set inclusion this file's sibling `we:scripts/progress-board.mjs#ciFailed` documents in full —
  * only a check named in `requiredChecks` is considered here at all. Omitted, behaviour is unchanged.
  *
+ * COLLAPSED TO THE LATEST RUN PER CHECK NAME FIRST (`collapseRollupToLatestPerName`, #2925/#xkfv491) — see
+ * `we:scripts/progress-board.mjs#ciFailed`'s own header for the full live incident (PR #2878, chalbert/
+ * web-everything) this closes: `runs` here is the SAME raw `pr.statusCheckRollup` `ciFailed` reads (both are
+ * fed it by `we:scripts/conveyor/reconcile-core.mjs#planReconcile`, one call apart), so a required check that
+ * reran more than once on one head (a `-gate`-shaped check retriggered by a label/edit event) left a stale
+ * `FAILURE` run beside its own later `SUCCESS` rerun, and this reducer's flat `.filter()` counted BOTH —
+ * reading `check.state: 'red'` off a check whose CURRENT run had already gone green.
+ *
  * @param {Array<{name?: string, status?: string, conclusion?: string|null}>} runs - check runs FOR THE HEAD SHA
  * @param {string[]} [requiredChecks] - the repo's required status-check names; see above.
  * @returns {{state: string, why: string, counts: {total: number, succeeded: number, failed: number, running: number, nonBlocking: number, unreadable: number}}}
  */
 export function reduceCheckState(runs = [], requiredChecks) {
   const required = Array.isArray(requiredChecks) && requiredChecks.length ? requiredChecks : null;
-  const list = (Array.isArray(runs) ? runs : []).filter((r) => {
+  const list = collapseRollupToLatestPerName(runs).filter((r) => {
     const name = String(r?.name ?? '');
     return required ? required.includes(name) : !CI_TRUTH_EXCLUDED_CHECKS.includes(name);
   });
