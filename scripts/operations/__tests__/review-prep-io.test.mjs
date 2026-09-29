@@ -21,6 +21,8 @@ import {
 } from '../review-prep-io.mjs';
 import { REVIEW_PREP_EFFECTS } from '../review-prep.mjs';
 import { notApplied } from '../effect-executor.mjs';
+import { acquireFixClaim } from '../../conveyor/fix-procedure.mjs';
+import { fixDispatchClaimRoot } from '../../conveyor/fix-claim-store.mjs';
 
 let root;
 beforeEach(() => {
@@ -228,6 +230,31 @@ describe('recordPrepVerdict — `land` (#3233): always pushes, `pr-land` only wh
     expect(result.land).toBeUndefined();
     expect(Array.isArray(result.followUp)).toBe(true);
     expect(result.followUp[0]).toContain('--ref=lane/review-prep-9999-deadbeef');
+  });
+
+  it('#4293 — refuses to push a ref another fixer already holds the LIVE claim on, never pushes', async () => {
+    writeCard('9999-a-fake-card.md');
+    const priorRoot = process.env.WE_COORDINATION_ROOT;
+    const claimRoot = mkdtempSync(join(tmpdir(), 'we-fix-claim-'));
+    process.env.WE_COORDINATION_ROOT = claimRoot;
+    try {
+      // sha is pinned to 'deadbeefcafe' by the `rev-parse` stub below → ref = lane/review-prep-9999-deadbeef.
+      acquireFixClaim({ repo: 'chalbert/web-everything', pr: 4293, who: 'fixer-4293', branch: 'lane/review-prep-9999-deadbeef', lockRoot: fixDispatchClaimRoot() });
+      const gitCalls = [];
+      const result = await recordPrepVerdict(baseArgs({
+        land: false,
+        exec: (cmd, args) => { gitCalls.push(args); return args[0] === 'rev-parse' ? 'deadbeefcafe\n' : ''; },
+      }));
+      expect(gitCalls.some((a) => a[0] === 'push')).toBe(false);
+      expect(result).toMatchObject({
+        recorded: true, verified: true, pushed: false, landed: false, sha: 'deadbeefcafe',
+        ref: 'lane/review-prep-9999-deadbeef',
+      });
+      expect(result.reason).toMatch(/holds the fix claim on PR #4293/);
+    } finally {
+      rmSync(claimRoot, { recursive: true, force: true });
+      if (priorRoot === undefined) delete process.env.WE_COORDINATION_ROOT; else process.env.WE_COORDINATION_ROOT = priorRoot;
+    }
   });
 
   it('the default `land: true` DOWNGRADES to push-only on a credential-less host — never refuses', async () => {

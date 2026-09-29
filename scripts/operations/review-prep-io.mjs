@@ -43,6 +43,7 @@ import { createRequire } from 'node:module';
 
 import { REVIEW_PREP_EFFECTS, isCleanPrepReview, renderPrepReviewSection } from './review-prep.mjs';
 import { notApplied } from './effect-executor.mjs';
+import { pushRefusal, callerIdentity } from '../conveyor/fix-procedure.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 /** The repo root, resolved by SCRIPT LOCATION and never by cwd — same reason `run-store.mjs` does it. */
@@ -362,6 +363,12 @@ export async function recordPrepVerdict({
       recorded: true, verified: true, aborted: false, path, sha, ref, clean, actor, followUp,
       ...(downgradeReason ? { reason: downgradeReason } : {}),
     };
+    // #4293 — this ref is minted fresh per item+sha, so it essentially never collides with an already-open PR's
+    // branch, but on the rare repeat (same item, same content, a fixer already claimed the resulting PR) refuse
+    // the push rather than mechanically overwrite it — the same invariant the shared rebase/heal plumbing now
+    // holds. Cheap defense-in-depth: no new I/O beyond the claim-store read `pushRefusal` already does.
+    const refusal = pushRefusal({ repo, branch: ref, ...callerIdentity() });
+    if (refusal) return { ...base, pushed: false, landed: false, reason: refusal.message };
     try {
       exec('git', ['push', 'origin', `${sha}:refs/heads/${ref}`], { cwd, encoding: 'utf8' });
     } catch {

@@ -22,8 +22,10 @@ import {
   acquireFixClaim, releaseFixClaim, heartbeatFixClaim, readLiveFixClaim, pushRefusal, isClaimHolder,
   fixBegin, fixEnd, withAltBranchHint, repoKeyFromRemoteUrl, repoKeyForCheckout, DEFAULT_FIX_CLAIM_TTL_MINUTES,
   FIX_BEGIN_MARKER, FIX_END_MARKER, FIXING_LABEL, STOOD_DOWN_LABEL, parseGitPush, resolvePushDestination,
+  refuseHeldPush,
 } from '../fix-procedure.mjs';
 import { acquireFixDispatchClaim, refreshLiveFixDispatchClaims } from '../fix-dispatch-claim.mjs';
+import { fixDispatchClaimRoot } from '../fix-claim-store.mjs';
 import {
   STAND_DOWN_MARKER, CONCURRENT_AUTHOR_PAUSE_MARKER, buildConcurrentAuthorPauseComment, concurrentAuthorPauses,
   countTerminalStandDowns, countStandDownComments, parseAltBranch, buildStandDownComment,
@@ -515,6 +517,75 @@ describe('repoKeyFromRemoteUrl', () => {
     expect(repoKeyForCheckout('/lanes/x', { exec })).toBe('we');
     expect(repoKeyForCheckout('/lanes/x', { remote: 'upstream', exec })).toBe('frontierui');
     expect(calls).toEqual([['origin', '/lanes/x'], ['upstream', '/lanes/x']]);
+  });
+});
+
+// #4293 — the push-claim check the shared rebase/heal plumbing (and review-prep-io.mjs) call through, given
+// their OWN injected git `run`. `refuseHeldPush` takes no `lockRoot`/`nowMs`/identity overrides of its own (it
+// forwards to `pushRefusal`'s/`callerIdentity`'s real defaults, exactly like production callers get for free) —
+// so these tests steer it the SAME way `rebase-drop-manifest.test.mjs`'s sibling #4293 suite does: override
+// `WE_COORDINATION_ROOT` (the env seam `fixDispatchClaimRoot()` already reads) instead of passing `lockRoot`,
+// and acquire the fixture claim at real `Date.now()` so it is fresh against `pushRefusal`'s own real clock.
+// `pushRefusal`/`callerIdentity` are already proven above; this covers the two things unique to this wrapper:
+// deriving the repo off the injected `run` (never a subprocess of its own), and the fail-closed degrade a
+// scrutiny round flagged as undefended — a `remote get-url` that fails, or throws outright, must still refuse a
+// live claim (repo:null matches ANY repo) rather than skip the check or throw.
+describe('refuseHeldPush — the injected-run push-claim check (#4293)', () => {
+  let claimRoot;
+  const priorRoot = process.env.WE_COORDINATION_ROOT;
+  beforeEach(() => {
+    claimRoot = mkdtempSync(join(tmpdir(), 'we-fix-claim-'));
+    process.env.WE_COORDINATION_ROOT = claimRoot;
+    // a WORKER (session-less) claim — held by `who` + a minted token, never this test's own ambient
+    // CLAUDE_CODE_SESSION_ID, so `refuseHeldPush`'s default caller identity is never the holder by accident.
+    // `lockRoot` must be the FULL claims dir (`fixDispatchClaimRoot()`, evaluated AFTER the env override above),
+    // the same value `refuseHeldPush`'s own default (`pushRefusal`'s `lockRoot = fixDispatchClaimRoot()`) reads.
+    acquireFixClaim({ repo: 'we', pr: 2811, who: 'fix-2811', why: 'address review', branch: BRANCH, lockRoot: fixDispatchClaimRoot() });
+  });
+  afterEach(() => {
+    rmSync(claimRoot, { recursive: true, force: true });
+    if (priorRoot === undefined) delete process.env.WE_COORDINATION_ROOT; else process.env.WE_COORDINATION_ROOT = priorRoot;
+  });
+
+  const scriptedRun = (remoteResult) => (cmd, args) => {
+    if (args[0] === 'remote') {
+      if (remoteResult === 'throw') throw new Error('git: not a repository');
+      return remoteResult;
+    }
+    return { status: 0, stdout: '' };
+  };
+
+  it('resolves the repo off the injected run (never a subprocess of its own) and refuses a live claim', () => {
+    const run = scriptedRun({ status: 0, stdout: 'git@github.com:chalbert/web-everything.git\n' });
+    const remoteCalls = [];
+    const spied = (cmd, args, opts) => { if (args[0] === 'remote') remoteCalls.push(args); return run(cmd, args, opts); };
+    const refusal = refuseHeldPush({ run: spied, remote: 'origin', branch: BRANCH });
+    expect(refusal).toMatchObject({ refused: true, pr: 2811, holder: 'fix-2811' });
+    // the repo came from the injected `run`, not a real `execFileSync` — one call, through the same seam.
+    expect(remoteCalls).toEqual([['remote', 'get-url', 'origin']]);
+  });
+
+  it('a repo the run resolves to a DIFFERENT constellation repo is unaffected by this claim', () => {
+    const run = scriptedRun({ status: 0, stdout: 'git@github.com:chalbert/frontierui.git\n' });
+    expect(refuseHeldPush({ run, remote: 'origin', branch: BRANCH })).toBeNull();
+  });
+
+  it('FAIL-CLOSED: `remote get-url` exiting non-zero degrades to repo:null (any-repo match) and still refuses', () => {
+    const run = scriptedRun({ status: 1, stdout: '', stderr: 'fatal: No such remote' });
+    const refusal = refuseHeldPush({ run, remote: 'origin', branch: BRANCH });
+    expect(refusal).toMatchObject({ refused: true, pr: 2811, holder: 'fix-2811' });
+  });
+
+  it('FAIL-CLOSED: `remote get-url` THROWING degrades to repo:null (any-repo match) and never throws itself', () => {
+    const run = scriptedRun('throw');
+    expect(() => refuseHeldPush({ run, remote: 'origin', branch: BRANCH })).not.toThrow();
+    const refusal = refuseHeldPush({ run, remote: 'origin', branch: BRANCH });
+    expect(refusal).toMatchObject({ refused: true, pr: 2811, holder: 'fix-2811' });
+  });
+
+  it('no live claim on the branch → null, whether or not the repo resolves', () => {
+    const run = scriptedRun({ status: 0, stdout: 'git@github.com:chalbert/web-everything.git\n' });
+    expect(refuseHeldPush({ run, remote: 'origin', branch: 'lane/no-claim-here' })).toBeNull();
   });
 });
 
