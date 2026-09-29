@@ -33,7 +33,7 @@ import {
   planReconcile, countFindings, bindAgents, assessLiveness, isAwaitingPermission, startedAtMs,
   REFUSAL_KINDS, DISPATCH_KINDS, selectStatusCandidates, markSelfReportedDone, markHungSessions,
   markAuthExpiredSessions, markIdleFinishedSessions, markBgIsolationStalls, CI_HEAL_ROUND_CAP,
-  CONFLICT_FIX_ROUND_CAP, ADVISORY_FIX_ROUND_CAP, CONFLICT_FIX_ABSOLUTE_CEILING,
+  CONFLICT_FIX_ROUND_CAP, ADVISORY_FIX_ROUND_CAP, CONFLICT_FIX_ABSOLUTE_CEILING, foldReviewRefusalInto,
 } from '../reconcile-core.mjs';
 import {
   STAND_DOWN_MARKER, WATCHER_STAND_DOWN_ACTOR, SUPERSEDE_STAND_DOWN_MARKER, buildStandDownComment,
@@ -1178,6 +1178,18 @@ describe('case 5l — a ci-heal already escalated THIS EXACT head never gets re-
         kind: 'ci-heal-escalated', reviewRefusal: expect.objectContaining({ kind: 'no-findings', findings: 0 }),
       })]);
       expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'review', prNumber: 2783, findings: 0 })]);
+      // PR #2894 review: the folded refusal strips the population marker, exactly as the `owed-ci-rerun` fold
+      // strips `owedCiRerun` — it belongs on the dispatch row, never inside `reviewRefusal`.
+      expect(plan.refusals[0].reviewRefusal).not.toHaveProperty('ciHealNotCiBreak');
+    });
+
+    it('foldReviewRefusalInto: one shared fold — strips withPhase keys and the marker, and tolerates a bare refusal (PR #2894 review)', () => {
+      const row = { kind: 'ci-heal-escalated' };
+      const fold = foldReviewRefusalInto(row, { prNumber: 1, labels: [] }, 'ciHealNotCiBreak');
+      fold('no-findings', { prNumber: 1, labels: [], ciHealNotCiBreak: true, findings: 0 });
+      expect(row.reviewRefusal).toEqual({ kind: 'no-findings', findings: 0 });
+      expect(() => fold('cap-exhausted')).not.toThrow();
+      expect(row.reviewRefusal).toEqual({ kind: 'cap-exhausted' });
     });
 
     it('never fires without the `review:pending` label — an already-`review:accepted` PR is refused ci-heal-escalated alone', () => {

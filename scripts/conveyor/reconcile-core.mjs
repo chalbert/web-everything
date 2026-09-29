@@ -1019,6 +1019,27 @@ export function assessLiveness(bound) {
 }
 
 /**
+ * The `refuse` a parallel-review caller injects into {@link dispatchReviewRow}: it FOLDS the review decision's
+ * own refusal into the caller's existing refusal `row` as `reviewRefusal`, never a second row for the same PR
+ * (PR #2783 review). ONE implementation for both callers (`owed-ci-rerun` and the `not-a-ci-break`
+ * escalation — PR #2894 review): drops every key already on `withPhase` and the caller's own population
+ * `markerKey` (it belongs on the dispatch row, not inside `reviewRefusal`), and tolerates a bare
+ * `refuse(kind)` with no `extra`.
+ * @param {object} row the caller's already-pushed refusal row
+ * @param {object} withPhase
+ * @param {string} markerKey e.g. `'owedCiRerun'`
+ * @returns {(kind:string, extra?:object)=>void}
+ */
+export function foldReviewRefusalInto(row, withPhase, markerKey) {
+  return (kind, extra) => {
+    row.reviewRefusal = {
+      kind,
+      ...Object.fromEntries(Object.entries(extra ?? {}).filter(([k]) => !(k in withPhase) && k !== markerKey)),
+    };
+  };
+}
+
+/**
  * we:scripts/conveyor/reconcile-core.mjs#dispatchReviewRow — the REVIEW decision, single-sourced: the ONE copy of
  * the three checks (`already-reviewed-head` #2588, then `no-findings`, then the shared attempt cap). BOTH callers
  * run through it — the ordinary `needs-review`/`needs-human` OWED-table path, and a SECOND population —
@@ -1610,12 +1631,7 @@ export function planReconcile({
         // by PR and keeps the last one, so a trailing `no-findings` row (holds `['fix']`) silently erased this
         // row's `['review','fix']` hold and let land-advance dispatch its own, uncoordinated review.
         if (withPhase.labels.includes('review:pending')) {
-          const owedRow = refusals[refusals.length - 1];
-          const foldRefusal = (kind, extra) => {
-            owedRow.reviewRefusal = {
-              kind, ...Object.fromEntries(Object.entries(extra).filter(([k]) => !(k in withPhase) && k !== 'owedCiRerun')),
-            };
-          };
+          const foldRefusal = foldReviewRefusalInto(refusals[refusals.length - 1], withPhase, 'owedCiRerun');
           dispatchReviewRow({
             pr, withPhase, base, attempts: roundAttempts(), roundCap,
             refuse: foldRefusal, refuseCapExhausted: capExhaustedVia(foldRefusal), dispatch,
@@ -1702,13 +1718,7 @@ export function planReconcile({
           // `review:human`-without-`review:accepted` never reach this branch at all — see `owed-ci-rerun`'s own
           // note on this for the full precedence argument, unchanged here).
           if (isNotCiBreak && withPhase.labels.includes('review:pending')) {
-            const escalatedRow = refusals[refusals.length - 1];
-            const foldRefusal = (foldKind, extra) => {
-              escalatedRow.reviewRefusal = {
-                kind: foldKind,
-                ...Object.fromEntries(Object.entries(extra).filter(([k]) => !(k in withPhase))),
-              };
-            };
+            const foldRefusal = foldReviewRefusalInto(refusals[refusals.length - 1], withPhase, 'ciHealNotCiBreak');
             dispatchReviewRow({
               pr, withPhase, base, attempts: roundAttempts(), roundCap,
               refuse: foldRefusal, refuseCapExhausted: capExhaustedVia(foldRefusal), dispatch,

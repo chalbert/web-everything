@@ -53,8 +53,8 @@ export function rollupRowKind(c) {
  * pr-status.mjs#reduceCheckState` all fold every entry — collapse to the latest entry per name FIRST, then fold.
  *
  * Within a name: take the FIRST non-empty tier of `CheckRun` → untagged → `StatusContext` ({@link
- * rollupRowKind}), then the LAST entry (creation order, #xkfv491) in that tier. Pure. Order of the returned
- * rows is NOT the input order — one row per distinct name, in first-seen order.
+ * rollupRowKind}), then the LATEST entry in that tier ({@link latestOf}). Pure. Order of the returned rows is
+ * NOT the input order — one row per distinct name, in first-seen order.
  *
  * A row with NEITHER `name` NOR `context` (unreachable off a real `gh pr view --json statusCheckRollup` — every
  * live row carries one or the other) is passed through UNCOLLAPSED, one output row per such input row: there is
@@ -75,7 +75,25 @@ export function collapseRollupToLatestPerName(rollup) {
   for (const matches of byName.values()) {
     const tier = (k) => matches.filter((c) => rollupRowKind(c) === k);
     const pool = [tier('CheckRun'), tier('untagged'), matches].find((t) => t.length);
-    out.push(pool[pool.length - 1]);
+    out.push(latestOf(pool));
   }
   return out;
+}
+
+/**
+ * The latest run among several runs of ONE check. PR #2894 review (CONFIRMED live): the two feeds this module
+ * serves disagree on order — `gh pr view --json statusCheckRollup` is oldest→newest (creation order,
+ * #xkfv491), but the REST `commits/<sha>/check-runs` feed (`we:scripts/operations/pr-status-io.mjs#checksArgv`)
+ * is NEWEST-first, so a positional "last wins" silently kept the OLDEST run there. When EVERY run carries a
+ * numeric run `id` (REST rows do — `checksArgv` selects it; GitHub run ids are monotonic by creation), the
+ * highest id wins regardless of order. Otherwise (the rollup, which carries no id) the last entry wins, as
+ * before. Timestamps are deliberately NOT used: the rollup reports a queued run's `startedAt` as the zero date,
+ * which would rank the newest run oldest.
+ * @param {Array<object>} runs non-empty
+ * @returns {object}
+ */
+function latestOf(runs) {
+  const ids = runs.map((c) => Number(c?.id));
+  if (!ids.every((id) => Number.isSafeInteger(id) && id > 0)) return runs[runs.length - 1];
+  return runs[ids.indexOf(Math.max(...ids))];
 }
