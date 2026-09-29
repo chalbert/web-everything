@@ -1,4 +1,5 @@
 ---
+bornAs: x3y1d1u
 kind: story
 size: 3
 tier: pinned
