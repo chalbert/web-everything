@@ -13,6 +13,7 @@ import {
 } from '../review-dispatch.mjs';
 import {
   runExtraSeats, extraSeatsEnabled, resolveDailyCap, callsUsedToday, callsUsedTodayForProvider, quotaHold,
+  PROBE_INTERVAL_ENV, DEFAULT_PROBE_INTERVAL_MS, resolveProbeIntervalMs, probeDue, quotaHoldOrProbe,
   claudeFindingsFromLoop, buildSeatTask, parseSeatAnswer, classifySeatCall, buildSeatRows, seatCallArgv, capDay,
   renderSeatSummary, EXTRA_SEATS_ENV, DAILY_CAP_ENV, DEFAULT_DAILY_CAP, PROVIDER_CAP_ENV, PROVIDER_CAP_DEFAULT,
   resolveProviderCap, reviewSeatCapUsage, toIsoInstant, extractAnswerJson, reserveSeatCalls, createExtraSeatsIo,
@@ -154,6 +155,59 @@ describe('#4194 provider-routing selectReviewSeatProvider', () => {
   it('returns null with a reason when nothing is available, and is deterministic', () => {
     expect(selectReviewSeatProvider({ lens: 'x', available: [] }).provider).toBeNull();
     expect(selectReviewSeatProvider({ lens: 'x' })).toEqual(selectReviewSeatProvider({ lens: 'x' }));
+  });
+});
+
+describe('card x6ov12s — quota hold self-probe', () => {
+  const NOW = Date.parse('2026-09-29T14:00:00-04:00');
+  const q = {
+    dispatchKind: REVIEW_SEAT_DISPATCH_KIND, provider: 'codex', status: 'ok',
+    quotaUsedPercent: 99, quotaResetsAt: '2026-10-03T17:11:00-04:00', scoredAt: '2026-09-28T22:31:00-04:00',
+  };
+
+  it('probeDue requires a row for that provider and a full interval since its timestamp', () => {
+    const at = Date.parse(q.scoredAt);
+    expect(probeDue([], 'codex', NOW, DEFAULT_PROBE_INTERVAL_MS)).toBe(false);
+    expect(probeDue([q], 'agy-claude', NOW, DEFAULT_PROBE_INTERVAL_MS)).toBe(false);
+    expect(probeDue([{ ...q, scoredAt: 'invalid' }], 'codex', NOW, DEFAULT_PROBE_INTERVAL_MS)).toBe(false);
+    expect(probeDue([q], 'codex', at + DEFAULT_PROBE_INTERVAL_MS - 1, DEFAULT_PROBE_INTERVAL_MS)).toBe(false);
+    expect(probeDue([q], 'codex', at + DEFAULT_PROBE_INTERVAL_MS, DEFAULT_PROBE_INTERVAL_MS)).toBe(true);
+    expect(probeDue([q], 'codex', NOW, DEFAULT_PROBE_INTERVAL_MS)).toBe(true);
+  });
+
+  it('resolveProbeIntervalMs defaults when unset or invalid and respects a valid override', () => {
+    expect(resolveProbeIntervalMs({})).toBe(DEFAULT_PROBE_INTERVAL_MS);
+    expect(resolveProbeIntervalMs({ [PROBE_INTERVAL_ENV]: '60000' })).toBe(60_000);
+    expect(resolveProbeIntervalMs({ [PROBE_INTERVAL_ENV]: '3600000' })).toBe(3_600_000);
+    for (const v of ['lots', '-1', '59999', 'Infinity']) {
+      expect(resolveProbeIntervalMs({ [PROBE_INTERVAL_ENV]: v })).toBe(DEFAULT_PROBE_INTERVAL_MS);
+    }
+  });
+
+  it('quotaHoldOrProbe leaves an unheld provider available', () => {
+    const clean = { ...q, quotaUsedPercent: 12 };
+    expect(quotaHold([clean], 'codex', NOW)).toBeNull();
+    expect(quotaHoldOrProbe([clean], 'codex', NOW, {})).toBeNull();
+  });
+
+  it('quotaHoldOrProbe preserves the exact hold reason until the probe is due', () => {
+    const now = Date.parse(q.scoredAt) + DEFAULT_PROBE_INTERVAL_MS - 1;
+    expect(quotaHold([q], 'codex', now)).toMatch(/99%/);
+    expect(quotaHoldOrProbe([q], 'codex', now, {})).toBe(quotaHold([q], 'codex', now));
+  });
+
+  it('soak-break: the live incident stays held without the probe, but the probe admits it', () => {
+    expect(quotaHold([q], 'codex', NOW)).toMatch(/99%.*2026-10-03T21:11:00.000Z/);
+    expect(quotaHoldOrProbe([q], 'codex', NOW, {})).toBeNull();
+  });
+
+  it('a fresh exhausted probe re-arms the hold until another full interval elapses', () => {
+    const at = Date.parse(q.scoredAt) + DEFAULT_PROBE_INTERVAL_MS;
+    const records = [q, { ...q, status: 'quota-exhausted', scoredAt: '2026-09-28T23:01:00-04:00' }];
+    expect(quotaHold(records, 'codex', at + 1)).toMatch(/quota exhausted/);
+    expect(quotaHoldOrProbe(records, 'codex', at + 1, {})).toBe(quotaHold(records, 'codex', at + 1));
+    expect(quotaHoldOrProbe(records, 'codex', at + DEFAULT_PROBE_INTERVAL_MS - 1, {})).toBe(quotaHold(records, 'codex', at + DEFAULT_PROBE_INTERVAL_MS - 1));
+    expect(quotaHoldOrProbe(records, 'codex', at + DEFAULT_PROBE_INTERVAL_MS, {})).toBeNull();
   });
 });
 
@@ -426,6 +480,20 @@ describe('#4194 prompt, answer parsing, confirmation, rows', () => {
 });
 
 describe('#4194 runExtraSeats — the arc, with fakes', () => {
+  it('card x6ov12s — the live incident admits exactly one Codex call once its hold is probe-due', async () => {
+    const now = Date.parse('2026-09-29T14:00:00-04:00');
+    const records = [{
+      dispatchKind: REVIEW_SEAT_DISPATCH_KIND, provider: 'codex', status: 'ok',
+      quotaUsedPercent: 99, quotaResetsAt: '2026-10-03T17:11:00-04:00', scoredAt: '2026-09-28T22:31:00-04:00',
+    }];
+    const { io, calls, rows } = fakeSeatIo({ now: () => now, readRecords: () => records });
+    expect(quotaHold(records, 'codex', now)).toMatch(/99%/);
+    const r = await runExtraSeats({ pr: 5, repo: REPO, lanePath: '/lane', loopPayload: LOOP_PAYLOAD, env: {} }, io);
+    expect(r.status).toBe('ran');
+    expect(calls.filter((c) => c[0] === 'seat' && c[1].provider === 'codex')).toHaveLength(1);
+    expect(rows.some((row) => row.provider === 'codex')).toBe(true);
+  });
+
   it('runs all three providers in parallel, writes one evidence row per seat, stamps Claude confirmation, cleans up', async () => {
     const { io, calls, rows } = fakeSeatIo();
     const r = await runExtraSeats({ pr: 5, repo: REPO, lanePath: '/lane', loopPayload: LOOP_PAYLOAD, env: {} }, io);

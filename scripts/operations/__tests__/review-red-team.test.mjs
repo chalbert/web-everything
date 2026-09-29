@@ -9,7 +9,7 @@ import {
   runRedTeam, redTeamEnabled, redTeamMarker, redTeamCommentPosted, redTeamAlreadyRan, resolveBuilder,
   buildRedTeamTask, buildRecheckRequest, applyRecheck, buildMissRows, renderRedTeamComment, replayPayload,
   reserveSeatCalls, RED_TEAM_ENV, EXTRA_SEATS_ENV, DAILY_CAP_ENV, PROVIDER_CAP_ENV, RED_TEAM_SEAT, RED_TEAM_MODELS,
-  RED_TEAM_MISS_DISPATCH_KIND, ACCEPTING_SEAT_MODEL,
+  RED_TEAM_MISS_DISPATCH_KIND, ACCEPTING_SEAT_MODEL, DEFAULT_PROBE_INTERVAL_MS,
 } from '../review-extra-seats.mjs';
 import { runReviewJob, summarizeRedTeam } from '../review-job.mjs';
 import { JUDGE_MODEL } from '../review-pr.mjs';
@@ -85,6 +85,30 @@ describe('x00g3tt — the red team fires on ACCEPT only', () => {
     expect(['codex', 'agy-claude', 'agy-gemini']).toContain(seats[0][1].provider);
     expect(seats[0][1]).toMatchObject({ model: RED_TEAM_MODELS[seats[0][1].provider].model, effort: 'high' });
     expect(r.status).toBe('ran');
+  });
+
+  it('card x6ov12s — a held-but-probe-due codex is still admitted to the red-team pass (both call sites wired)', async () => {
+    // Same live-incident shape as review-extra-seats.test.mjs's runExtraSeats case: codex's last row would
+    // still hold under the plain `quotaHold` reader (99% gauge, resetsAt days out); this call site must read
+    // it through `quotaHoldOrProbe` too, so a full probe interval past that row's own `scoredAt` admits it.
+    const heldRow = {
+      dispatchKind: 'review-seat', provider: 'codex', status: 'ok',
+      quotaUsedPercent: 99, quotaResetsAt: '2026-10-03T17:11:00-04:00', scoredAt: '2026-09-28T22:31:00-04:00',
+    };
+    const now = Date.parse(heldRow.scoredAt) + DEFAULT_PROBE_INTERVAL_MS;
+    const { io, calls } = fakeIo({
+      now: () => now,
+      readRecords: () => [heldRow],
+      // Only codex is a real candidate here — the other two providers' own CLI is unavailable, so this run's
+      // ONE dispatch can only reach codex, and only if the red-team's own quotaHold(...) call site was swapped
+      // to quotaHoldOrProbe(...) too. Left un-swapped (soak break), codex reads as held and NOTHING is available.
+      cliAvailable: (p) => p === 'codex',
+    });
+    const r = await runRedTeam({ pr: 5, repo: REPO, lanePath: '/lane', loopPayload: payload('accept'), env: {} }, io);
+    expect(r.status).toBe('ran');
+    const seats = calls.filter((c) => c[0] === 'seat');
+    expect(seats).toHaveLength(1);
+    expect(seats[0][1].provider).toBe('codex');
   });
 
   it.each(['changes', 'needs-human', null])('a %s verdict gets NO red-team dispatch', async (verdict) => {

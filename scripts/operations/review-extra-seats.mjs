@@ -260,6 +260,46 @@ export function quotaHold(records, provider, now) {
   return null;
 }
 
+/** How long a HELD provider sits out before this module allows exactly one real call through to test whether
+ *  its quota has actually refreshed (e.g. a weekly reset) — the only way any row can ever update a stale hold,
+ *  since `quotaHold` otherwise blocks every call that could write a fresh one. Env override; default 30 min. */
+export const PROBE_INTERVAL_ENV = 'WE_REVIEW_SEAT_PROBE_INTERVAL_MS';
+export const DEFAULT_PROBE_INTERVAL_MS = 30 * 60 * 1000;
+
+/** @returns {number} the configured probe interval in ms (>= 60s), else the default. PURE. */
+export function resolveProbeIntervalMs(env = process.env) {
+  const n = Number(env?.[PROBE_INTERVAL_ENV]);
+  return Number.isFinite(n) && n >= 60_000 ? n : DEFAULT_PROBE_INTERVAL_MS;
+}
+
+/** Is `provider`'s hold due for a re-probe? True once at least `intervalMs` has elapsed since that provider's
+ *  own MOST RECENT seat row (whatever wrote the current hold, or a prior probe that re-armed it). False when
+ *  there is no row to measure from (quotaHold already returns null in that case, so this is never even asked).
+ *  PURE. */
+export function probeDue(records, provider, now, intervalMs) {
+  const rows = seatRows(records).filter((r) => r.provider === provider)
+    .sort((a, b) => String(b.scoredAt ?? '').localeCompare(String(a.scoredAt ?? '')));
+  const last = rows[0];
+  if (!last) return false;
+  const lastAt = Date.parse(last.scoredAt ?? '');
+  if (!Number.isFinite(lastAt)) return false;
+  return now - lastAt >= intervalMs;
+}
+
+/**
+ * `quotaHold`, but a hold that has sat long enough without a fresh row is treated as OVER for exactly one call
+ * — the self-probe (card x6ov12s). Returns the SAME shape as `quotaHold`: `null` when the caller may proceed
+ * (not held, OR held-but-due-for-a-probe), else the hold reason `quotaHold` itself returned. Never mutates
+ * anything and never itself writes a row — the caller's own normal per-provider single-call-per-run shape is
+ * what turns "may proceed" into exactly one real call, whose resulting row (clean → hold fully ends; another
+ * quota-exhausted → hold re-arms with a fresh timestamp) `quotaHold`/`probeDue` naturally read next time. PURE.
+ */
+export function quotaHoldOrProbe(records, provider, now, env = process.env) {
+  const hold = quotaHold(records, provider, now);
+  if (!hold) return null;
+  return probeDue(records, provider, now, resolveProbeIntervalMs(env)) ? null : hold;
+}
+
 /** Claude's own mandatory seats' findings, off `review-loop-cli.mjs --json`'s payload. PURE.
  *  @returns {Array<object>|null} null when the payload carries no judged seat at all (nothing to confirm against). */
 export function claudeFindingsFromLoop(payload) {
@@ -528,7 +568,7 @@ export async function runExtraSeats({ pr, repo, lanePath, loopPayload, env = pro
     const unavailable = [];
     for (const p of REVIEW_SEAT_PROVIDERS) {
       if (!io.cliAvailable(p)) { unavailable.push({ provider: p, reason: `${p} CLI not found on PATH` }); continue; }
-      const hold = quotaHold(records, p, now);
+      const hold = quotaHoldOrProbe(records, p, now, env);
       if (hold) { unavailable.push({ provider: p, reason: hold }); continue; }
       if (usedByProvider[p] >= caps[p]) { unavailable.push({ provider: p, reason: `daily-cap: ${usedByProvider[p]}/${caps[p]} non-Claude seat calls already used today for ${p}` }); continue; }
       available.push(p);
@@ -1209,7 +1249,7 @@ export async function runRedTeam({ pr, repo, lanePath, loopPayload, env = proces
     const usedByProvider = Object.fromEntries(REVIEW_SEAT_PROVIDERS.map((p) => [p, callsUsedTodayForProvider(records, now, p)]));
     for (const p of REVIEW_SEAT_PROVIDERS) {
       if (!io.cliAvailable(p)) { unavailable.push(`${p}: CLI not found on PATH`); continue; }
-      const hold = quotaHold(records, p, now);
+      const hold = quotaHoldOrProbe(records, p, now, env);
       if (hold) { unavailable.push(`${p}: ${hold}`); continue; }
       if (usedByProvider[p] >= caps[p]) { unavailable.push(`${p}: daily-cap: ${usedByProvider[p]}/${caps[p]} non-Claude seat calls already used today`); continue; }
       available.push(p);
