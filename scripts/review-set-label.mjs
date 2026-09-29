@@ -137,6 +137,32 @@ import { writeAllSync } from './lib/write-all-sync.mjs';
 // call. See `we:backlog/3631-migrate-remaining-gh-cli-call-sites-to-the-gh-throttle-wrapp.md` for the tracked
 // item this is one slice of.
 import { execFileSyncThrottled } from './lib/gh-throttle.mjs';
+// #4317 — the approval-time prevention filer no longer shells `file-item` INLINE (in whatever checkout is
+// reviewing the PR, routinely a read-only daemon clone that never commits or pushes — see
+// `fileApprovalPreventionCard`'s own doc below for the incident). It hands the composed card off to a DETACHED
+// landing job that acquires a real lane and runs the full file-item/verify/open-pr sequence there, reusing the
+// SAME detached-spawn primitives the mechanical build dispatcher already uses
+// (`we:scripts/operations/dispatch-providers/build.mjs`) rather than inventing a second one.
+import {
+  defaultSpawnDetached, REPO_ROOT as PREVENTION_LANDING_REPO_ROOT,
+} from './operations/detached-dispatch.mjs';
+import { buildGhShimSettingsEnv } from './lib/gh-app-shim.mjs';
+// codex plan review (2026-09-28) — the landing job's own log must live OUTSIDE any checkout, never in
+// `deliveryDispatchLogPath`'s in-checkout default (`<checkout>/.operations/delivery-dispatch-logs/`), which
+// would itself write into whatever daemon clone is running this: exactly the class of write this whole file
+// exists to stop. `automationStateRoot` is the automation's own state home, never a checkout.
+import { automationStateRoot } from './lib/automation-home.mjs';
+
+/** The detached job `fileApprovalPreventionCard` spawns — resolved by SCRIPT LOCATION, same reason every other
+ *  detached-dispatch script root resolves this way (never cwd, which for THIS file is whatever checkout is
+ *  reviewing a PR right now). */
+const LAND_PREVENTION_CARD_SCRIPT = join(PREVENTION_LANDING_REPO_ROOT, 'scripts', 'operations', 'land-prevention-card.mjs');
+
+/** Where a landing job's own stdout/stderr narration goes — the automation's state root, NEVER a checkout. */
+function preventionCardLandingLogPath(sessionSlug) {
+  const safe = /^[A-Za-z0-9._-]+$/.test(String(sessionSlug || '')) ? String(sessionSlug) : 'unnamed-prevention-card';
+  return join(automationStateRoot(), 'prevention-card-landing-logs', `${safe}.log`);
+}
 // #4258-shape (operator, 2026-09-27, "prevention outstanding should be filed by default on approval") — THE
 // APPROVAL-TIME MECHANICAL FILING STEP. `selectApprovalPreventionFindings` decides WHICH owed findings (if any)
 // this approval owes a card for (an advisory note's, or this very accept comment's, non-blocking `Prevention
@@ -148,7 +174,7 @@ import { execFileSyncThrottled } from './lib/gh-throttle.mjs';
 // See `runApprovalPreventionFiling` below for the wiring and why THIS seam, not the drain's land step.
 import {
   selectApprovalPreventionFindings, hasApprovalPreventionMarkerForHead, buildApprovalPreventionMarker,
-  buildApprovalPreventionFilingInput, buildApprovalPreventionKey,
+  buildApprovalPreventionFilingInput, buildApprovalPreventionKey, buildApprovalPreventionJobMarker,
 } from './lib/approval-prevention-notice.mjs';
 // #xwp8ioh — the #2953 inert-PR predicate, extracted so `review-pr`'s `read` step enforces the same rule
 // before a juror is paid instead of this site being the only place it is checked.
@@ -642,53 +668,65 @@ export function derivePreventionParent(findings) {
 }
 
 /**
- * THE REAL, SYNCHRONOUS prevention-filing seam — shells `node scripts/operations/run.mjs file-item …`, the same
- * declared operation `we:scripts/operations/review-loop-cli.mjs#fileItemForPrevention` drives IN PROCESS for
- * #2766's own mechanism. THIS file cannot do the same in-process call: that binding is `async`
- * (`resolveOperation`/`runOperationCli` both return promises), and `runReviewLabelCli` is, and must stay,
- * SYNCHRONOUS — every existing caller (`we:scripts/conveyor/rearm-review.mjs`, `reconcile-finding.mjs`) invokes
- * it as a plain, non-awaited call, and the function calls `process.exit()` on every exit path. A subprocess is
- * therefore the correct seam here, not a shortcut around one: `execFileSyncThrottled` is this file's OWN existing
- * subprocess primitive (already used for `computeNetDiffText`'s `git` calls above); `node` is not a throttled
- * command (only `file==='gh'` is), so this passes straight through to a plain `execFileSync`.
+ * #4317 — THE LANDING SEAM: hands the composed card off to a DETACHED job
+ * (`we:scripts/operations/land-prevention-card.mjs`) rather than shelling `file-item` INLINE the way this
+ * function used to. THE INCIDENT THAT CHANGED THIS: `runReviewLabelCli` runs wherever a PR got reviewed —
+ * routinely a read-only daemon clone (`we:scripts/lib/daemon-clone-registry.mjs`), never committed to and
+ * never pushed. Filing `file-item` directly there wrote a real `backlog/x*.md` file into that checkout's
+ * working tree and stopped — exactly what `file-item`'s own header warns landing is NOT: "landing is a
+ * separate three-call sequence (file-item, verify, open-pr) the filing hook never runs." The file then sat
+ * UNTRACKED forever: the daemon rebuild's own dirty check reads `git status --untracked-files=no` by design
+ * (an untracked sidecar must never block a rebuild), so nothing ever surfaced it either. Live 2026-09-28: 22
+ * such orphans in `wev-review-daemon`, 1 in `wev-control`, dating to PR #2807.
  *
- * RELIES ON THE SAME CWD GUARANTEE `computeNetDiffText`'s own doc comment states above: this process's cwd must
- * be the named repo's checkout, exactly as every real caller of `runReviewLabelCli` already guarantees. A test
- * that wants no such guarantee (and no real `file-item` write) injects `fileApprovalPrevention` instead.
+ * WHY DETACHED, NOT INLINE. `runApprovalPreventionFiling` (below) runs SYNCHRONOUSLY, and — the file's own
+ * "can therefore NEVER cost the approval that already happened" invariant — must stay fast and non-blocking:
+ * the full lane-acquire + file-item + verify + open-pr sequence is the same multi-minute arc a delivery agent
+ * runs (`we:skills-src/conveyor/delivery-agent-brief.md` step 5's own gate alone is documented at 150-350s).
+ * So this function's ONLY synchronous work is spawning that sequence as its own detached, unref'd process
+ * (`we:scripts/operations/detached-dispatch.mjs#defaultSpawnDetached` — the SAME primitive
+ * `we:scripts/operations/dispatch-providers/build.mjs#deliverItemDetachedProvider` already uses for exactly
+ * this "validate fast, spawn detached, return in milliseconds" shape) and returning; the spawned job
+ * (`land-prevention-card.mjs`) does the real acquire/file-item/verify/open-pr/release work on its own time,
+ * reusing those EXISTING declared operations rather than inventing a second writer.
  *
- * @param {{title:string,kind:string,size:string,digest:string,scope:string,parent:string,queue:string}} input
- * @param {{exec?: Function}} [o] - `exec` is injectable (same `(args, opts) => string` shape as
- *   `execFileSyncThrottled` itself) so a test can assert the exact argv without a real `node` subprocess or
- *   backlog write; production always uses the real one.
- * @returns {{ok:boolean, num:(number|null), rel:(string|null), error:(string|null)}}
+ * `num`/`rel` are `null` on this path (the card's real id is not known until the spawned job files it) — see
+ * `runApprovalPreventionFiling`'s own marker-comment text, which reads `filed.handle` instead when they are.
+ * They are still populated on the OTHER path into this seam: `runApprovalPreventionFiling`'s on-disk lookup
+ * (`findApprovalPreventionCardOnDisk`) short-circuits to a synchronous `{ok:true, num, rel}` when a PAST run's
+ * card has, by now, actually landed and reached this checkout — this function is never even called then.
+ *
+ * `input.retractTo` (`{repo, pr, headSha}`, optional) is passed to the job as `--retract-*` flags: if the job
+ * fails after this spawn succeeded, it posts a retraction of this spawn's marker on that PR, so the next approval
+ * on the same head retries instead of the guard being lost (#4317 advisory review, 2026-09-29). The returned
+ * `session` is the job's slug, which the marker comment names.
+ *
+ * @param {{title:string,kind:string,size:string,digest:string,scope:string,parent:string,queue:string,
+ *   retractTo?:{repo:string,pr:(number|string),headSha:string}}} input
+ * @param {{spawnDetached?: Function, logPathFor?: Function, runScript?: string, root?: string,
+ *   resolveSettingsEnv?: Function}} [o] - `resolveSettingsEnv` returns the gh-App-shim env forwarded to the job.
+ *   `spawnDetached` is injectable (same shape as `defaultSpawnDetached`) so a test can assert the exact argv
+ *   with no real subprocess and no real `backlog/` write in the calling checkout.
+ * @returns {{ok:boolean, num:(number|null), rel:(string|null), error:(string|null), handle?:string}}
  */
-/**
- * Best-effort parse of a `file-item --json` invocation's stdout into its payload object — the SAME shape both
- * a clean run (`stopped: 'complete'`) and a refused one (`stopped: 'effect-halted'`, `.error` set — e.g. the
- * write-time #883 locus-prefix gate) print. `null` when `out` carries no parseable `{…}` at all (a crash before
- * any JSON was printed). Shared by both the success path and {@link fileApprovalPreventionCard}'s own catch
- * below, so a REFUSAL surfaces the SAME real reason on either path — `execFileSync` throws on ANY non-zero
- * exit, and `file-item` exits non-zero for both a genuine crash AND an ordinary, diagnostic `effect-halted`
- * refusal that still prints valid JSON to stdout.
- *
- * @param {unknown} out
- * @returns {object|null}
- */
-function parseFileItemPayload(out) {
-  const text = String(out ?? '');
-  const lines = text.split('\n');
-  const start = lines.findIndex((l) => l.trimStart().startsWith('{'));
-  if (start === -1) return null;
-  try {
-    return JSON.parse(lines.slice(start).join('\n'));
-  } catch {
-    return null;
-  }
-}
-
-export function fileApprovalPreventionCard(input, { exec = execFileSyncThrottled } = {}) {
+export function fileApprovalPreventionCard(input, {
+  spawnDetached = defaultSpawnDetached,
+  logPathFor = preventionCardLandingLogPath,
+  runScript = LAND_PREVENTION_CARD_SCRIPT,
+  root = PREVENTION_LANDING_REPO_ROOT,
+  resolveSettingsEnv = () => buildGhShimSettingsEnv(),
+} = {}) {
+  // #4317 advisory review (2026-09-29 04:47, correctness): `defaultSpawnDetached` strips the inherited
+  // GH_TOKEN/GITHUB_TOKEN and restores gh's App identity ONLY through `settingsEnv` — without it the job's own gh
+  // calls (open-pr, the retraction comment) ran with no token on an App-auth host. Same forwarding as
+  // `dispatch-providers/build.mjs` (#landing-freeze-2779). No `cwd` here, deliberately: that option ALSO writes
+  // `<cwd>/.claude/settings.local.json`, a write into the calling checkout this function exists to never make.
+  // Resolver failure → `null` (the spawn still goes out, as it did before), never a thrown approval.
+  let settingsEnv = null;
+  try { settingsEnv = resolveSettingsEnv() || null; } catch { settingsEnv = null; }
+  const sessionSlug = `prevention-card-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   const argv = [
-    'scripts/operations/run.mjs', 'file-item',
+    runScript,
     `--title=${input.title}`,
     `--kind=${input.kind}`,
     `--size=${input.size}`,
@@ -696,38 +734,49 @@ export function fileApprovalPreventionCard(input, { exec = execFileSyncThrottled
     `--scope=${input.scope}`,
     ...(input.parent ? [`--parent=${input.parent}`] : []),
     `--queue=${input.queue}`,
-    '--json',
+    `--session=${sessionSlug}`,
+    ...(input.retractTo?.repo && input.retractTo?.pr && input.retractTo?.headSha
+      ? [`--retract-repo=${input.retractTo.repo}`, `--retract-pr=${input.retractTo.pr}`, `--retract-head=${input.retractTo.headSha}`]
+      : []),
   ];
   try {
-    const out = String(exec('node', argv, { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 }));
-    const payload = parseFileItemPayload(out);
-    if (!payload) {
-      return { ok: false, num: null, rel: null, error: `file-item produced no parseable JSON: ${out.slice(0, 500)}` };
+    // `cwd: root` — the checkout THIS process is running in (whatever reviewed the PR), NEVER a lane: the
+    // spawned job acquires its OWN lane from there (`lane-pool.mjs`'s own repo resolution needs a real git
+    // checkout with an `origin` remote to clone from, which a daemon clone genuinely is — it is read-ONLY by
+    // convention, not by git config). `logPathFor` defaults to a path OUTSIDE any checkout (the automation's
+    // own state root, never `root`/`REPO_ROOT`) — codex plan review (2026-09-28) flagged the prior default
+    // (`deliveryDispatchLogPath`'s own in-checkout `.operations/delivery-dispatch-logs/`) as still writing
+    // into the calling checkout, which this function's whole point is to stop doing.
+    const child = spawnDetached(argv, { cwd: root, logPath: logPathFor(sessionSlug), settingsEnv });
+    const pid = Number(child?.pid);
+    if (!Number.isInteger(pid) || pid <= 0) {
+      return { ok: false, num: null, rel: null, error: 'land-prevention-card: spawned but node reported no pid' };
     }
-    return { ok: true, num: payload?.verdict?.num ?? null, rel: payload?.verdict?.rel ?? null, error: null };
+    // codex plan review (2026-09-28): a detached child's `spawn` can still fail ASYNCHRONOUSLY after
+    // returning a pid (e.g. a bad `cwd`) — with no listener, that surfaces as an uncaught `error` event on
+    // THIS (synchronous, `process.exit`-on-every-path) process, which is exactly the "costs the approval that
+    // already happened" outcome the whole file exists to prevent. Best-effort: narrate it, never throw.
+    if (typeof child?.on === 'function') {
+      child.on('error', (err) => {
+        try {
+          process.stderr.write(`fileApprovalPreventionCard: the detached landing job errored asynchronously (pid ${pid}) — ${String(err?.message || err)}\n`);
+        } catch { /* stderr itself unavailable — nothing else to do */ }
+      });
+    }
+    return { ok: true, num: null, rel: null, error: null, handle: `pid:${pid}`, session: sessionSlug };
   } catch (e) {
-    // chalbert/web-everything#2766's OWN approval (2026-09-27) FAILED live with a stderr that read like part of
-    // this call's OWN argv (the multi-line digest + the idempotency-key text, running straight into the next
-    // `--scope=…` flag) — because `ghErr` blindly takes the LAST non-blank line of `e.stderr || e.message`, and
-    // `execFileSync`'s thrown error has NO real `stderr` for an ordinary `file-item` refusal (it exits non-zero
-    // with a clean JSON payload on STDOUT, `e.stderr` empty), so `ghErr` fell back to `e.message` — Node's own
-    // "Command failed: <cmd> <args…>" reconstruction of THIS CALL's argv, whose last "line" (split on the
-    // digest's own embedded newlines) is a meaningless fragment of that argv, never the real reason. `e.stdout`
-    // is a real, structured `file-item` payload on EXACTLY this path (an `effect-halted` refusal, e.g. the #883
-    // locus-prefix gate) — parsed the same way the success branch above already does, so the real `.error` wins
-    // whenever it is there, and only an unparseable stdout (a genuine crash before any JSON prints) falls back
-    // to `ghErr`.
-    const payload = parseFileItemPayload(e?.stdout);
-    return { ok: false, num: null, rel: null, error: payload?.error ?? ghErr(e, 'file-item failed') };
+    return { ok: false, num: null, rel: null, error: `could not spawn the landing job: ${String(e?.message || e)}` };
   }
 }
 
 /**
  * THE CARD-SIDE IDEMPOTENCY LOOKUP (PR #2805 review, codex-correctness finding) — has an approval already filed
  * a card carrying `key` ({@link buildApprovalPreventionKey}, written into the card body by the builder)? Scans
- * `<root>/backlog/*.md`, the directory `file-item` writes into. `root` defaults to this process's cwd — the SAME
- * checkout {@link fileApprovalPreventionCard}'s `node scripts/operations/run.mjs` subprocess files into, per the
- * cwd guarantee stated there. Only called on the rare path where a card is owed and no trusted PR marker exists.
+ * `<root>/backlog/*.md`, the directory `file-item` writes into. `root` defaults to this process's cwd — THIS
+ * checkout's own `backlog/`, which {@link fileApprovalPreventionCard} (#4317) no longer writes into directly:
+ * this lookup only ever finds a hit when a PAST run's card, filed in its own lane and landed via a real PR,
+ * has since reached THIS checkout too (e.g. a daemon rebuild that pulled past it). Only called on the rare
+ * path where a card is owed and no trusted PR marker exists.
  * Never throws: an unreadable directory or file reads as "not found".
  *
  * LIMIT: this sees only THIS checkout's `backlog/` (plus whatever has already reached it from `main`). A retry
@@ -786,14 +835,18 @@ export function runApprovalPreventionFiling({
   const existing = findFiledApprovalPrevention(key);
   const filed = existing
     ? { ok: true, num: existing.num, rel: existing.rel, error: null }
-    : fileApprovalPrevention(buildApprovalPreventionFilingInput({
-      repo,
-      pr,
-      findings: selection.findings,
-      parent: derivePreventionParent(selection.findings),
-      source: selection.source,
-      key,
-    }));
+    : fileApprovalPrevention({
+      ...buildApprovalPreventionFilingInput({
+        repo,
+        pr,
+        findings: selection.findings,
+        parent: derivePreventionParent(selection.findings),
+        source: selection.source,
+        key,
+      }),
+      // Where a landing job that fails after spawning posts its retraction (`fileApprovalPreventionCard`).
+      retractTo: { repo, pr, headSha },
+    });
   if (!filed.ok) {
     process.stderr.write(
       `review-set-label: approval-time prevention filing for ${subject} FAILED (the approval above already `
@@ -802,13 +855,23 @@ export function runApprovalPreventionFiling({
     return;
   }
   const marker = buildApprovalPreventionMarker({ headSha });
-  const noteBody = `${marker}\nFiled the prevention guard(s) owed by ${subject}'s independent review, `
-    + `mechanically, on approval (operator rule, 2026-09-27) — ${filed.rel ?? '(no path)'} (#${filed.num ?? '?'}).`;
+  // #4317 — `filed.rel`/`filed.num` are known IMMEDIATELY only on the on-disk-hit path (a past run's card has
+  // already reached this checkout); the ordinary path spawns a detached landing job (see
+  // `fileApprovalPreventionCard`) and knows only that job's `pid:<n>` handle at comment-post time. Either
+  // phrasing records a real, checkable fact — never a guess at a number that does not exist yet.
+  const landedDesc = filed.rel
+    ? `${filed.rel} (#${filed.num ?? '?'})`
+    : `queued for landing via a lane (tracking ${filed.handle ?? 'an untracked job'})`;
+  // The job marker lets a landing job that later FAILS retract exactly this marker (see
+  // `buildApprovalPreventionJobMarker`), so the next approval on this head files again.
+  const jobMarker = filed.session ? buildApprovalPreventionJobMarker(filed.session) : '';
+  const noteBody = `${marker}${jobMarker ? ` ${jobMarker}` : ''}\nFiled the prevention guard(s) owed by ${subject}'s independent review, `
+    + `mechanically, on approval (operator rule, 2026-09-27) — ${landedDesc}.`;
   try {
     provider.postComment(repo, pr, noteBody);
   } catch (e) {
     process.stderr.write(
-      `review-set-label: ${subject}'s approval-time prevention card ${filed.rel ?? filed.num} filed OK, but its `
+      `review-set-label: ${subject}'s approval-time prevention card ${filed.rel ?? filed.handle ?? filed.num} filed OK, but its `
       + `marker comment failed to post (a LATER run may attempt to re-file) — ${ghErr(e, String(e))}\n`,
     );
   }

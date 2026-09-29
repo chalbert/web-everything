@@ -162,6 +162,45 @@ export function buildApprovalPreventionMarker({ headSha } = {}) {
 
 const MARKER_RE = /<!-- approval-prevention-filed:([0-9a-f]{7,40}) -->/gi;
 
+/** A detached landing job's own session slug — the only shape the job/retraction markers below accept. */
+const SESSION_RE = /^[A-Za-z0-9._-]{1,120}$/;
+const JOB_RE = /<!-- approval-prevention-job:([A-Za-z0-9._-]{1,120}) -->/i;
+const RETRACTED_RE = /<!-- approval-prevention-retracted:([0-9a-f]{7,40}):([A-Za-z0-9._-]{1,120}) -->/gi;
+
+/**
+ * #4317 advisory review (2026-09-29, codex-correctness) — the marker is posted when the detached landing job is
+ * SPAWNED, not when it LANDS. So the marker comment also names that job's session slug, and a job that then
+ * fails posts {@link buildApprovalPreventionRetraction} for the same head + session. A filed marker whose job
+ * was retracted no longer counts ({@link hasApprovalPreventionMarkerForHead}), so the next approval on that head
+ * files again instead of the guard being lost for good. Keyed by session, not by comment order: a job that fails
+ * within milliseconds can post its retraction BEFORE the marker comment itself lands. `''` for an unsafe slug.
+ * @param {string} session
+ * @returns {string}
+ */
+export function buildApprovalPreventionJobMarker(session) {
+  return SESSION_RE.test(String(session ?? '')) ? `<!-- approval-prevention-job:${session} -->` : '';
+}
+
+/**
+ * The failed landing job's retraction of its own marker (see {@link buildApprovalPreventionJobMarker}). PURE.
+ * `''` when the head is not a hex SHA or the session is not a safe slug.
+ * @param {{headSha: string, session: string}} o
+ * @returns {string}
+ */
+export function buildApprovalPreventionRetraction({ headSha, session } = {}) {
+  const head = String(headSha ?? '').toLowerCase();
+  if (!/^[0-9a-f]{7,40}$/.test(head) || !SESSION_RE.test(String(session ?? ''))) return '';
+  return `<!-- approval-prevention-retracted:${head}:${session} -->`;
+}
+
+/** The line {@link buildApprovalPreventionFilingInput} appends the card-side key to the digest with. Exported so
+ *  `we:scripts/operations/land-prevention-card.mjs#boundLandPreventionCardInput` finds that line by the SAME
+ *  constant, never a copy that could drift (#4317 advisory review, 2026-09-29). */
+export const APPROVAL_PREVENTION_DIGEST_KEY_SEP = '\n\nIdempotency key (do not edit): ';
+
+/** The prefix every {@link buildApprovalPreventionKey} key starts with. */
+export const APPROVAL_PREVENTION_KEY_PREFIX = 'approval-prevention-key:';
+
 /**
  * THE CARD-SIDE IDEMPOTENCY KEY — written into the filed card's own body by
  * {@link buildApprovalPreventionFilingInput}, so the card itself (not only the PR marker comment) records which
@@ -174,7 +213,7 @@ const MARKER_RE = /<!-- approval-prevention-filed:([0-9a-f]{7,40}) -->/gi;
  */
 export function buildApprovalPreventionKey({ repo, pr, headSha } = {}) {
   const repoKey = String(repo ?? '').toLowerCase(); // GitHub slugs are case-insensitive
-  return `approval-prevention-key:${repoKey}#${String(pr ?? '')}@${String(headSha ?? '').toLowerCase()}`;
+  return `${APPROVAL_PREVENTION_KEY_PREFIX}${repoKey}#${String(pr ?? '')}@${String(headSha ?? '').toLowerCase()}`;
 }
 
 /**
@@ -184,6 +223,10 @@ export function buildApprovalPreventionKey({ repo, pr, headSha } = {}) {
  * about what "the same head" means). A marker counts only from a trusted author ({@link isTrustedMarkerAuthor}) —
  * otherwise any commenter could suppress the filing by posting the marker string.
  *
+ * A marker whose comment names a landing job ({@link buildApprovalPreventionJobMarker}) does NOT count once a
+ * trusted retraction for that same head + job exists ({@link buildApprovalPreventionRetraction}) — the job
+ * failed, so the guard was never filed and the next approval must retry it.
+ *
  * @param {Array<{body?: string, author?: {login?: string}}>} comments
  * @param {string} headSha
  * @returns {boolean}
@@ -191,11 +234,20 @@ export function buildApprovalPreventionKey({ repo, pr, headSha } = {}) {
 export function hasApprovalPreventionMarkerForHead(comments, headSha) {
   const head = String(headSha ?? '').toLowerCase();
   if (!head) return false;
-  for (const comment of trustedComments(comments)) {
+  const sameHead = (marked) => head.startsWith(marked) || marked.startsWith(head);
+  const trusted = trustedComments(comments);
+  const retracted = new Set();
+  for (const comment of trusted) {
+    for (const m of String(comment?.body ?? '').matchAll(RETRACTED_RE)) {
+      if (sameHead(m[1].toLowerCase())) retracted.add(m[2].toLowerCase());
+    }
+  }
+  for (const comment of trusted) {
     const body = String(comment?.body ?? '');
+    const job = JOB_RE.exec(body)?.[1]?.toLowerCase();
+    if (job && retracted.has(job)) continue;
     for (const m of body.matchAll(MARKER_RE)) {
-      const marked = m[1].toLowerCase();
-      if (head.startsWith(marked) || marked.startsWith(head)) return true;
+      if (sameHead(m[1].toLowerCase())) return true;
     }
   }
   return false;
@@ -334,7 +386,7 @@ export function buildApprovalPreventionFilingInput({
     size: '3',
     // The key is appended AFTER the #883 rewrite so that pass can never alter it (a later lookup matches it byte
     // for byte).
-    digest: key ? `${digest}\n\nIdempotency key (do not edit): ${key}` : digest,
+    digest: key ? `${digest}${APPROVAL_PREVENTION_DIGEST_KEY_SEP}${key}` : digest,
     scope,
     parent: parent || '',
     queue: 'true',

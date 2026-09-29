@@ -54,6 +54,10 @@ import {
 
 export { healthDir, healthSectionLines };
 import { CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
+// #4317 — the same "which paths are DAEMON clones" registry `guard-lane.mjs`/`guard-bash.mjs` already use, so
+// this probe's notion of "a daemon clone" can never drift from the guards'.
+import { daemonCloneRoots } from '../lib/daemon-clone-registry.mjs';
+import { workspaceOf } from '../lib/automation-home.mjs';
 import { readGithubAppStatus } from '../lib/github-app-auth-env.mjs';
 import { ghThrottleLockRoot, ghThrottleLogPath, budgetProbeArgs } from '../lib/gh-throttle.mjs';
 import { persistSpendHours } from '../lib/gh-spend.mjs';
@@ -300,6 +304,51 @@ export function probeGhShimLanes({ home = homedir(), exists = existsSync, readdi
   });
 }
 
+/**
+ * #4317 — every KNOWN daemon clone's own untracked `backlog/x*.md` file, aged past `agedMs`. Real
+ * `git status --porcelain --untracked-files=all -- backlog` per clone root (never `--untracked-files=no`,
+ * unlike the daemon rebuild's own dirty check — that check deliberately IGNORES untracked files so a sidecar
+ * never blocks a rebuild; this probe exists BECAUSE that means nothing else ever surfaces one). A clone root
+ * that no longer exists, or is not a real git checkout, is silently skipped — this probe never fails the tick
+ * over a clone that has since been torn down.
+ *
+ * `agedMs` (default 15 min, matching `clone-stale.mjs`'s own `recentMs`) is the grace period: a card can sit
+ * untracked for the few seconds/minutes a real filing pipeline takes before it commits, and that must never
+ * read as a breach. Filtering happens HERE, in the probe, not in the smell's `evaluate` — the smell simply
+ * reports whatever this function still sees.
+ *
+ * @param {{roots?: string[], exec?: Function, timeoutMs?: number, stat?: Function, now?: number, agedMs?: number}} [o]
+ * @returns {Array<{cloneRoot: string, rel: string, mtimeMs: number}>}
+ */
+export function probeUntrackedBacklogCards({
+  roots = daemonCloneRoots(workspaceOf(REPO_ROOT)),
+  exec = run,
+  timeoutMs = 15_000,
+  stat = statSync,
+  now = Date.now(),
+  agedMs = 15 * MINUTE,
+} = {}) {
+  const out = [];
+  for (const root of roots) {
+    let status;
+    try {
+      status = exec('git', ['-C', root, 'status', '--porcelain', '--untracked-files=all', '--', 'backlog'], { timeoutMs });
+    } catch {
+      continue; // not a real checkout (any more), or `git` itself failed — nothing to report for this root
+    }
+    const lines = String(status || '').split('\n').map((l) => l.trim()).filter(Boolean);
+    for (const line of lines) {
+      const m = /^\?\?\s+backlog\/(x[0-9a-z]{6}-.*\.md)$/.exec(line);
+      if (!m) continue; // tracked/modified/deleted entries, and any non-hash-id backlog path, are out of scope
+      const rel = `backlog/${m[1]}`;
+      let mtimeMs;
+      try { mtimeMs = stat(join(root, rel)).mtimeMs; } catch { continue; } // gone between status + stat
+      if (now - mtimeMs >= agedMs) out.push({ cloneRoot: root, rel, mtimeMs });
+    }
+  }
+  return out;
+}
+
 /** The last `{"checked":true,"health":{…}}` line each lane-pool-health-watch log printed. */
 export function probeLanePools(logsDir) {
   const out = [];
@@ -537,6 +586,9 @@ export async function tick(flags = {}) {
   probes.lanePools = attempt('lanePools', () => probeLanePools(logsDir));
   // #4200-ish — cheap, fs-only, every tick: catches a shim baked with a lane-clone path BEFORE that lane resets.
   probes.ghShimLanes = attempt('ghShimLanes', () => probeGhShimLanes());
+  // #4317 — cheap, every tick: an aged untracked backlog card sitting inside a daemon clone (the exact class of
+  // failure the approval-time prevention filer used to cause before it started landing through a real lane).
+  probes.untrackedBacklogCards = attempt('untrackedBacklogCards', () => probeUntrackedBacklogCards({ now }));
   probes.appStatus = attempt('appStatus', () => readGithubAppStatus()) ?? null;
   // The declared heavy-command admission read (cap, held slots, waiters with requestedAt) — a fixture file in tests.
   probes.heavyQueue = attempt('heavyQueue', () => (flags['heavy-status-file']
