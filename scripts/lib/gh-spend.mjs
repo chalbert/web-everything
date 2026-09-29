@@ -6,8 +6,8 @@
  * WHERE THE NUMBERS COME FROM. The throttle's CLI passthrough (every agent session's `gh`, via the gh App shim)
  * logs GitHub's own free `X-Ratelimit-*` headers on each call line (`rl: [{used, rem, limit, reset, res}]`, one
  * per HTTP response). `used` is the bucket's running counter for one `(identity, resource, reset)` window, so the
- * change between two observations is what was spent in between. Daemon calls made through `runGhSync` carry no
- * `rl` (their exec is unchanged) — their cost can only be ESTIMATED.
+ * change between two observations is what was spent in between. Daemon calls made through `runGhSync` carry the
+ * same `rl` since #4375; a line without one (capture off, a non-piped stderr, an older line) can only be ESTIMATED.
  *
  * THREE COUNTS, NEVER MIXED:
  *   - invocations — one per logical gh command (retries share an `inv`; a nested shim record carrying

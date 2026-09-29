@@ -163,8 +163,15 @@
  * takes via the gh App shim) now turns `GH_DEBUG=api` on by default, reads each response's free `X-Ratelimit-*`
  * headers into the `calls.jsonl` line's `rl` field, and strips its own trace back out ({@link stripGhDebug})
  * before relaying stderr — a caller that set its own `GH_DEBUG` is never stripped. Kill switch:
- * `WE_GH_THROTTLE_COST_HEADERS=0`. {@link runGhSync}'s own exec is unchanged (its lines stay estimate-only);
- * both entry points log `id` (auth identity), `inv` (invocation id) and `resource`. `gh-spend.mjs` rolls it up.
+ * `WE_GH_THROTTLE_COST_HEADERS=0`. Both entry points log `id` (auth identity), `inv` (invocation id) and
+ * `resource`. `gh-spend.mjs` rolls it up.
+ *
+ * #4375 — {@link runGhSync} (the daemons' import path) captures too, on EVERY call, success or failure: its real
+ * exec is {@link spawnWithGhDebugCapture} + {@link settleLikeExecFileSync}, a `spawnSync` emulation of
+ * `execFileSync` (which, on success, gives the caller no stderr to read headers from), so the return value, the
+ * thrown error's fields and message, and the stderr relayed to this process all read as an uncaptured call's
+ * would. Same kill switch; skipped for a caller-set `GH_DEBUG` or a non-piped stderr. `calibrateHeaders` above is
+ * unchanged: it still leaves its trace in the thrown stderr, and is simply never stripped.
  * ================================================================================================
  */
 
@@ -642,7 +649,7 @@ export function parseGhDebugResponseHeaders(text) {
 
 // ── cost-header capture (#4309) — free `X-Ratelimit-*` headers via `GH_DEBUG=api`, stripped before relay ────────
 
-/** Kill switch for {@link runGhCliPassthrough}'s cost-header capture: `WE_GH_THROTTLE_COST_HEADERS=0` turns it
+/** Kill switch for the cost-header capture ({@link runGhCliPassthrough}, and {@link runGhSync} since #4375): `WE_GH_THROTTLE_COST_HEADERS=0` turns it
  *  off (the call then runs with no `GH_DEBUG` and logs no `rl`; `gh-spend.mjs` falls back to estimates). */
 export const GH_COST_HEADERS_ENV = 'WE_GH_THROTTLE_COST_HEADERS';
 
@@ -730,6 +737,65 @@ export function rateLimitRecords(responses) {
     out.push({ used: num('x-ratelimit-used'), rem: num('x-ratelimit-remaining'), limit: num('x-ratelimit-limit'), reset: num('x-ratelimit-reset'), res: h['x-ratelimit-resource'] || null });
   }
   return out;
+}
+
+// ── #4375 — the same capture for {@link runGhSync}: an `execFileSync` emulation over `spawnSync` ──────────────
+
+/** `execFileSync`'s own default `maxBuffer` (Node's `spawnSync` default) — the cap a capturing spawn re-applies
+ *  to stdout when the caller did not pass one. */
+export const EXEC_SYNC_DEFAULT_MAX_BUFFER = 1024 * 1024;
+
+/**
+ * Whether an `execFileSync` `stdio` option leaves the child's stderr PIPED — the only case a capture can read the
+ * trace and strip it before anything reaches a terminal. Unset / `'pipe'` / `'overlapped'` (as a string, or as
+ * `stdio[2]`, where a missing or nullish entry also defaults to a pipe) → true; `'inherit'`, `'ignore'`, an fd
+ * number or a stream → false (that call runs uncaptured, exactly as before #4375). Pure.
+ */
+export function stdioPipesStderr(stdio) {
+  const s = Array.isArray(stdio) ? stdio[2] : stdio;
+  return s == null || s === 'pipe' || s === 'overlapped';
+}
+
+/**
+ * Run `file args` via `spawnSync` with `GH_DEBUG=api`, read the trace's response headers and (when `strip`) remove
+ * the trace from stderr — returning a `spawnSync`-shaped result that reads as if the call had run WITHOUT debug.
+ * The child gets {@link DEBUG_CAPTURE_BUFFER_FACTOR}× the caller's `maxBuffer` for the trace; stdout's own cap is
+ * re-applied afterwards as the `ENOBUFS` error an uncaptured call would have raised. Every other option (`input`,
+ * `stdio`, `cwd`, `timeout`, `encoding`, …) reaches `spawn` unchanged — `execFileSync` is `spawnSync` underneath,
+ * so stdin is handled exactly as before.
+ * @returns {{result:object, responses:Array<{status:number, headers:Record<string,string>}>, rawStderrText:string}}
+ */
+export function spawnWithGhDebugCapture(file, args, opts = {}, { spawn = spawnSync, strip = true } = {}) {
+  const maxBuffer = opts.maxBuffer != null ? opts.maxBuffer : EXEC_SYNC_DEFAULT_MAX_BUFFER;
+  const ret = spawn(file, args, { ...opts, maxBuffer: maxBuffer * DEBUG_CAPTURE_BUFFER_FACTOR, env: { ...(opts.env || process.env), GH_DEBUG: 'api' } });
+  const raw = ret.stderr;
+  const rawStderrText = raw == null ? '' : String(raw);
+  const parsed = stripGhDebug(rawStderrText);
+  // Byte-for-byte: the original stderr value is kept whenever nothing was stripped (no utf8 round trip).
+  const stderr = strip && parsed.stderr !== rawStderrText
+    ? (typeof raw === 'string' ? parsed.stderr : Buffer.from(parsed.stderr, 'utf8'))
+    : raw;
+  const result = { ...ret, stderr, output: Array.isArray(ret.output) ? ret.output.map((o, i) => (i === 2 ? stderr : o)) : ret.output };
+  const stdoutBytes = ret.stdout == null ? 0 : (typeof ret.stdout === 'string' ? Buffer.byteLength(ret.stdout) : ret.stdout.length);
+  if (!result.error && stdoutBytes > maxBuffer) result.error = captureStdoutOverflow(file, args);
+  return { result, responses: parsed.responses, rawStderrText };
+}
+
+/**
+ * Settle a `spawnSync` result exactly the way Node's own `execFileSync` does (node 22 `child_process.js`): relay
+ * stderr to this process's stderr when the caller set no `stdio`; throw `ret.error` with the result's fields
+ * assigned onto it; throw `Command failed: <file args>[\n<stderr>]` with the same fields on a non-zero exit; else
+ * return stdout. Kept in lockstep with that source so a caller can never tell the two paths apart.
+ */
+export function settleLikeExecFileSync(file, args, opts, ret) {
+  if (!opts.stdio && ret.stderr) process.stderr.write(ret.stderr);
+  if (ret.error) throw Object.assign(ret.error, ret);
+  if (ret.status !== 0) {
+    let msg = `Command failed: ${[opts.argv0 || file, ...args].join(' ')}`;
+    if (ret.stderr && ret.stderr.length > 0) msg += `\n${ret.stderr.toString()}`;
+    throw Object.assign(new Error(msg), ret);
+  }
+  return ret.stdout;
 }
 
 /** Env var {@link runGhSync} sets on its real `gh` child so a nested passthrough (the gh App shim → this CLI)
@@ -1225,6 +1291,8 @@ export function recordGhCallLogEntry(logPath, entry) {
  *   @param {string} [opts.throttle.op]                low-cardinality label for the sidecar log (default:
  *     derived from `args`, e.g. "pr view")
  *   @param {string} [opts.throttle.logPath]           override the sidecar call-log path (tests)
+ *   @param {string} [opts.throttle.bin]               the executable the real exec runs (default `'gh'`; tests)
+ *   @param {Function} [opts.throttle.spawn]           `spawnSync` stand-in for the #4375 capture path (tests)
  * @returns {Buffer|string} whatever the underlying `exec`/`execFileSync` call returns on success
  */
 export function runGhSync(args, opts = {}) {
@@ -1244,7 +1312,20 @@ export function runGhSync(args, opts = {}) {
   // #4309 — one invocation id across every retry of this call. Only the REAL exec passes it down (so a nested
   // shim → passthrough record says `outer: <inv>`); an injected test exec still sees `opts` byte-unchanged.
   const inv = randomUUID().slice(0, 12);
-  const exec = throttle.exec || ((a, o) => execFileSync('gh', a, { ...o, env: { ...(o.env || process.env), [GH_OUTER_INV_ENV]: inv } }));
+  // #4375 — cost-header capture on the REAL exec, success or failure (the passthrough's #4309 capture, same kill
+  // switch). Skipped for an injected `exec` (tests keep their execFileSync-shaped mock), for a caller that set its
+  // own `GH_DEBUG` (never overridden, never stripped), and for a caller whose stderr is not piped (the trace would
+  // reach the terminal before it could be stripped). `calibrateHeaders` callers keep their trace in stderr, as
+  // before — they are captured but never stripped. `throttle.bin`/`throttle.spawn` are test seams.
+  const bin = throttle.bin || 'gh';
+  const capture = !throttle.exec && resolveCostHeaderCapture(env) && !(execOpts.env || process.env).GH_DEBUG && stdioPipesStderr(execOpts.stdio);
+  let lastCapture = null;
+  const exec = throttle.exec || ((a, o) => {
+    const childOpts = { ...o, env: { ...(o.env || process.env), [GH_OUTER_INV_ENV]: inv } };
+    if (!capture) return execFileSync(bin, a, childOpts);
+    lastCapture = spawnWithGhDebugCapture(bin, a, childOpts, { spawn: throttle.spawn || spawnSync, strip: !calibrateHeaders });
+    return settleLikeExecFileSync(bin, a, o, lastCapture.result);
+  });
   const points = throttle.points != null ? throttle.points : 1;
   const budgetPerMin = throttle.budgetPerMin != null ? throttle.budgetPerMin : resolveGhPointsBudgetPerMin(env);
   const pointsWindowMs = throttle.pointsWindowMs != null ? throttle.pointsWindowMs : GH_POINTS_WINDOW_MS;
@@ -1295,16 +1376,21 @@ export function runGhSync(args, opts = {}) {
     try {
       // `GH_DEBUG=api` is added ONLY when this call opted into header calibration, and ONLY if the caller
       // did not already ask for a specific debug mode of its own — never silently overridden. It changes
-      // nothing about a SUCCESSFUL call (stdout is untouched; execFileSync discards stderr on success either
-      // way — see the module header), so this stays inert for the common case even when calibration is on.
+      // nothing about a SUCCESSFUL call's stdout (see the module header). The #4375 capture, when on, lives
+      // inside the real `exec` itself and records what it read in `lastCapture`.
       const callExecOpts = calibrateHeaders ? withDebugEnv(execOpts) : execOpts;
+      lastCapture = null;
       result = exec(args, callExecOpts);
     } catch (e) {
       failure = e;
     } finally {
       if (acq.ok) failOpenGate('release', () => releaseGhSlotSync({ lockRoot, cap, owner }), gateOpts);
     }
-    recordGhCallLogEntry(logPath, { op: opLabel, attempt, points, outcome: 'call', ok: !failure, caller, w: isWrite, resource, id: identity, inv });
+    const captured = lastCapture;
+    recordGhCallLogEntry(logPath, {
+      op: opLabel, attempt, points, outcome: 'call', ok: !failure, caller, w: isWrite, resource, id: identity, inv,
+      ...(captured ? { rl: rateLimitRecords(captured.responses) } : {}),
+    });
     if (!failure) {
       // #gh-graphql-budget — a landed write makes the shared open-PR snapshot stale for that repo.
       if (isWrite) markPrSnapshotDirty({ repo: repoFromGhArgs(args), env });
@@ -1314,9 +1400,10 @@ export function runGhSync(args, opts = {}) {
     const text = `${failure && failure.stderr ? String(failure.stderr) : ''}\n${failure && failure.message ? String(failure.message) : ''}`;
     if (!isRateLimitShaped(text)) throw failure;
 
-    // A REAL signal (only ever present when `calibrateHeaders` put a `GH_DEBUG` trace into this failure's
+    // A REAL signal (the #4375 capture's pre-strip trace, else a `calibrateHeaders` trace left in this failure's
     // stderr) beats the guessed backoff — see `calibratedBackoffMs`'s own docblock for the fallback contract.
-    const headers = parseGhDebugResponseHeaders(failure && failure.stderr);
+    // `text` above is the STRIPPED stderr, so a response body mentioning a rate limit never classifies as one.
+    const headers = parseGhDebugResponseHeaders(captured ? captured.rawStderrText : failure && failure.stderr);
 
     // #gh-graphql-budget — a PRIMARY exhaustion cannot clear before the bucket's reset: record the shared block
     // and give up NOW instead of spending the retry ladder on calls GitHub will refuse.

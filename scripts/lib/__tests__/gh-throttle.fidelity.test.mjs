@@ -240,7 +240,7 @@ describe('runGhCliPassthrough — cost-header capture (#4309)', () => {
     runGhSync(['pr', 'list'], { encoding: 'utf8', throttle: { lockRoot, cap: 2, sleep: () => {}, exec } });
     expect(exec).toHaveBeenCalledWith(['pr', 'list'], { encoding: 'utf8' });
     expect(readLog(lockRoot)[0]).toMatchObject({ resource: 'graphql', id: expect.any(String), inv: expect.any(String) });
-    expect(readLog(lockRoot)[0].rl).toBeUndefined(); // runGhSync's exec is unchanged — estimate-only
+    expect(readLog(lockRoot)[0].rl).toBeUndefined(); // an injected exec is never captured (#4375 captures the REAL exec)
   });
 });
 
@@ -293,5 +293,141 @@ describe('runGhCliPassthrough — debug capture preserves successful large-paylo
     } finally { delete process.env.FAKE_SIZE; }
     const [line] = readFileSync(ghThrottleLogPath(join(dir, 'locks')), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
     expect(line).toMatchObject({ outcome: 'call', ok: false, rl: [{ used: 7, res: 'graphql' }] });
+  });
+});
+
+// ── #4375 — runGhSync captures cost headers on EVERY real call, success or failure ───────────────────────────
+describe('runGhSync — cost-header capture on the real exec (#4375)', () => {
+  const readLog = (lockRoot) => readFileSync(ghThrottleLogPath(lockRoot), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  const tuning = (dir, extra = {}) => ({ lockRoot: join(dir, 'locks'), cap: 2, sleep: () => {}, bin: join(dir, 'fake-gh'), ...extra });
+  afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); });
+
+  // A REAL subprocess standing in for gh: replays the golden fixtures — the DEBUG trace when GH_DEBUG=api, the plain
+  // stderr otherwise — plus an optional real warning, an exit code, and stdin echoed to stdout.
+  const fakeGh = () => {
+    const dir = mkdtempSync(join(tmpdir(), 'gh-sync-cap-'));
+    const bin = join(dir, 'fake-gh');
+    writeFileSync(bin, [
+      '#!/usr/bin/env node',
+      'const fs = require("node:fs");',
+      'const e = process.env;',
+      'const debug = e.GH_DEBUG === "api";',
+      'if (debug && e.FAKE_TRACE) process.stderr.write(fs.readFileSync(e.FAKE_TRACE));',
+      'if (e.FAKE_WARN) process.stderr.write(e.FAKE_WARN);',
+      'if (!debug && e.FAKE_PLAIN) process.stderr.write(fs.readFileSync(e.FAKE_PLAIN));',
+      'process.stdout.write(e.FAKE_ECHO_STDIN ? fs.readFileSync(0) : "{\\"number\\":2828}\\n");',
+      'process.exitCode = Number(e.FAKE_EXIT || 0);',
+    ].join('\n'), 'utf8');
+    chmodSync(bin, 0o755);
+    return { dir, bin };
+  };
+  const envFor = (fake) => {
+    const env = { ...process.env, GH_TOKEN: 'ghs_x', ...fake };
+    delete env.GH_DEBUG;
+    delete env.WE_GH_THROTTLE_COST_HEADERS;
+    return env;
+  };
+  const SUCCESS = { FAKE_TRACE: join(FIX, 'pr-view-success.debug.stderr') };
+  const NOT_FOUND = { FAKE_TRACE: join(FIX, 'pr-view-404.debug.stderr'), FAKE_PLAIN: join(FIX, 'pr-view-404.plain.stderr'), FAKE_EXIT: '1' };
+  const catchErr = (fn) => { try { fn(); } catch (e) { return e; } throw new Error('expected a throw'); };
+  const errShape = (e) => ({ message: e.message, status: e.status, signal: e.signal, stdout: String(e.stdout), stderr: String(e.stderr), output: (e.output || []).map((o) => (o == null ? o : String(o))) });
+
+  it('a SUCCESS logs rl/id/inv and returns byte-identical stdout to a raw execFileSync (buffer and utf8)', () => {
+    const { dir, bin } = fakeGh();
+    const env = envFor({ ...SUCCESS, FAKE_WARN: 'Warning: 1 uncommitted change\n' });
+    const stdio = ['ignore', 'pipe', 'pipe'];
+    for (const encoding of [undefined, 'utf8']) {
+      const raw = execFileSync(bin, ['pr', 'view', '2828'], { env, stdio, encoding });
+      const got = runGhSync(['pr', 'view', '2828'], { env, stdio, encoding, throttle: tuning(dir) });
+      expect(Buffer.isBuffer(got)).toBe(Buffer.isBuffer(raw));
+      expect(String(got)).toBe(String(raw));
+    }
+    const lines = readLog(join(dir, 'locks'));
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toMatchObject({ outcome: 'call', ok: true, resource: 'graphql', id: 'app', rl: [{ used: 36, rem: 4964, limit: 5000, reset: 1790615715, res: 'graphql' }] });
+    expect(lines[0].inv).toMatch(/^[0-9a-f-]{12}$/);
+  });
+
+  it('a FAILURE throws the SAME error shape (message, status, stdout, stderr, output) as a raw execFileSync, and logs rl', () => {
+    const { dir, bin } = fakeGh();
+    const env = envFor(NOT_FOUND);
+    const opts = { env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] };
+    const raw = catchErr(() => execFileSync(bin, ['pr', 'view', '999999999'], opts));
+    const got = catchErr(() => runGhSync(['pr', 'view', '999999999'], { ...opts, throttle: tuning(dir) }));
+    expect(errShape(got)).toEqual(errShape(raw));
+    expect(got.stderr).toBe(fx('pr-view-404.plain.stderr'));
+    expect(readLog(join(dir, 'locks'))[0]).toMatchObject({ ok: false, rl: [{ used: 37, res: 'graphql' }] });
+  });
+
+  it('with NO stdio option, relays the SAME (stripped) stderr to this process as execFileSync would', () => {
+    const { dir, bin } = fakeGh();
+    const env = envFor({ ...SUCCESS, FAKE_WARN: 'Warning: real\n' });
+    const writes = [];
+    vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => { writes.push(String(chunk)); return true; });
+    execFileSync(bin, ['pr', 'view', '2828'], { env });
+    const rawWrites = writes.splice(0);
+    runGhSync(['pr', 'view', '2828'], { env, throttle: tuning(dir) });
+    expect(writes).toEqual(rawWrites);
+    expect(writes.join('')).toBe('Warning: real\n');
+    expect(readLog(join(dir, 'locks'))[0].rl).toHaveLength(1);
+  });
+
+  it('stdin: an `input` body reaches gh on EVERY attempt, exactly as execFileSync passes it', () => {
+    const { dir, bin } = fakeGh();
+    const env = envFor({ ...SUCCESS, FAKE_ECHO_STDIN: '1' });
+    const got = runGhSync(['api', 'graphql', '--input', '-'], { env, input: '{"query":"{ viewer { login } }"}', encoding: 'utf8', throttle: tuning(dir) });
+    expect(got).toBe('{"query":"{ viewer { login } }"}');
+    const spawn = vi.fn(() => ({ status: 1, stdout: Buffer.alloc(0), stderr: Buffer.from('HTTP 403: You have exceeded a secondary rate limit\n'), output: [], error: null }));
+    catchErr(() => runGhSync(['api', 'graphql'], { input: 'BODY', stdio: ['pipe', 'pipe', 'pipe'], throttle: tuning(dir, { spawn, maxAttempts: 2 }) }));
+    expect(spawn).toHaveBeenCalledTimes(2);
+    for (const call of spawn.mock.calls) expect(call[2]).toMatchObject({ input: 'BODY', stdio: ['pipe', 'pipe', 'pipe'], env: expect.objectContaining({ GH_DEBUG: 'api' }) });
+  });
+
+  it('classifies on the STRIPPED stderr (a body saying "API rate limit exceeded" is not retried), reads backoff headers from the trace', () => {
+    const trace = fx('pr-view-404.debug.stderr').replace('Could not resolve to a PullRequest', 'API rate limit exceeded');
+    const spawn = vi.fn(() => ({ status: 1, stdout: Buffer.alloc(0), stderr: Buffer.from(trace), output: [], error: null }));
+    const dir = mkdtempSync(join(tmpdir(), 'gh-sync-cap-'));
+    const err = catchErr(() => runGhSync(['pr', 'view', '9'], { stdio: 'pipe', throttle: tuning(dir, { spawn, maxAttempts: 3 }) }));
+    expect(spawn).toHaveBeenCalledTimes(1);
+    expect(String(err.stderr)).toBe(fx('pr-view-404.plain.stderr'));
+    // a REAL secondary limit: the stripped error line classifies, the trace's Retry-After calibrates the wait
+    const secondary = fx('pr-view-404.debug.stderr').replace('< X-Ratelimit-Limit', '< Retry-After: 7\n< X-Ratelimit-Limit')
+      .replace(/^GraphQL: .*$/m, 'HTTP 403: You have exceeded a secondary rate limit');
+    const sleeps = [];
+    const spawn2 = vi.fn()
+      .mockReturnValueOnce({ status: 1, stdout: Buffer.alloc(0), stderr: Buffer.from(secondary), output: [], error: null })
+      .mockReturnValueOnce({ status: 0, stdout: Buffer.from('ok'), stderr: Buffer.from(fx('pr-view-success.debug.stderr')), output: [], error: null });
+    expect(String(runGhSync(['pr', 'view', '9'], { stdio: 'pipe', throttle: tuning(dir, { spawn: spawn2, maxAttempts: 3, sleep: (ms) => sleeps.push(ms) }) }))).toBe('ok');
+    expect(sleeps[0]).toBeGreaterThanOrEqual(7000);
+  });
+
+  it('no capture — and the raw exec path unchanged — for a caller GH_DEBUG, a non-piped stderr, or the kill switch', () => {
+    const { dir } = fakeGh();
+    const spawn = vi.fn();
+    // caller's own GH_DEBUG: the trace is the caller's, relayed untouched
+    const callerDebug = catchErr(() => runGhSync(['pr', 'view', '9'], { env: { ...envFor(NOT_FOUND), GH_DEBUG: 'api' }, encoding: 'utf8', stdio: 'pipe', throttle: tuning(dir, { spawn }) }));
+    expect(callerDebug.stderr).toBe(fx('pr-view-404.debug.stderr'));
+    // stderr not piped
+    runGhSync(['pr', 'view', '2828'], { env: envFor(SUCCESS), stdio: ['ignore', 'pipe', 'ignore'], throttle: tuning(dir, { spawn }) });
+    // kill switch
+    runGhSync(['pr', 'view', '2828'], { env: envFor(SUCCESS), stdio: 'pipe', throttle: tuning(dir, { spawn, env: { WE_GH_THROTTLE_COST_HEADERS: '0' } }) });
+    expect(spawn).not.toHaveBeenCalled();
+    expect(readLog(join(dir, 'locks')).map((l) => l.rl)).toEqual([undefined, undefined, undefined]);
+  });
+
+  it('calibrateHeaders callers are captured (rl logged) but keep their trace in stderr, as before', () => {
+    const { dir } = fakeGh();
+    const err = catchErr(() => runGhSync(['pr', 'create'], { env: envFor(NOT_FOUND), encoding: 'utf8', stdio: 'pipe', throttle: tuning(dir, { calibrateHeaders: true }) }));
+    expect(err.stderr).toBe(fx('pr-view-404.debug.stderr'));
+    expect(readLog(join(dir, 'locks'))[0].rl).toEqual([{ used: 37, rem: 4963, limit: 5000, reset: 1790615715, res: 'graphql' }]);
+  });
+
+  it('stdout over the caller\'s maxBuffer still raises ENOBUFS (the trace headroom never loosens the cap), and is logged', () => {
+    const spawn = vi.fn(() => ({ status: 0, stdout: Buffer.alloc(2048), stderr: Buffer.from(fx('pr-view-success.debug.stderr')), output: [], error: null }));
+    const dir = mkdtempSync(join(tmpdir(), 'gh-sync-cap-'));
+    const err = catchErr(() => runGhSync(['api', 'graphql'], { maxBuffer: 1024, stdio: 'pipe', throttle: tuning(dir, { spawn }) }));
+    expect(err.code).toBe('ENOBUFS');
+    expect(spawn.mock.calls[0][2].maxBuffer).toBe(1024 * 8);
+    expect(readLog(join(dir, 'locks'))[0]).toMatchObject({ ok: false, rl: [{ used: 36 }] });
   });
 });

@@ -3,9 +3,10 @@ bornAs: x7nlnnx
 kind: story
 size: 5
 tier: pinned
-status: open
+status: active
 scope: ["we:scripts/lib/gh-throttle.mjs", "we:scripts/lib/gh-spend.mjs", "we:scripts/conveyor/fix-procedure.mjs", "we:skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs", "we:skills-src/conveyor/review-daemon.mjs", "we:scripts/pr-land.mjs"]
 dateOpened: "2026-09-28"
+dateStarted: "2026-09-29"
 tags: []
 ---
 
@@ -90,6 +91,33 @@ we:scripts/lib/gh-spend.mjs (same log shape), we:scripts/conveyor/health-smells/
 prefers attributed points when `rl` is present). Named top callers, for context only (not edited by this
 card): we:scripts/conveyor/fix-procedure.mjs, we:skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs,
 we:skills-src/conveyor/review-daemon.mjs, we:scripts/pr-land.mjs.
+
+## Progress
+
+- [x] **Must 1** — `runGhSync`'s real exec is now `spawnWithGhDebugCapture` + `settleLikeExecFileSync`
+  (we:scripts/lib/gh-throttle.mjs): `spawnSync` with `GH_DEBUG=api`, trace stripped via the existing
+  `stripGhDebug`, on every call, success or failure; gated by `WE_GH_THROTTLE_COST_HEADERS` (no new flag).
+  Skipped (the pre-#4375 `execFileSync` path, byte-unchanged) for an injected `throttle.exec`, a caller-set
+  `GH_DEBUG`, and a caller whose stderr is not piped (`'inherit'`/`'ignore'`/fd — the trace would reach the
+  terminal before it could be stripped). `calibrateHeaders` callers are captured but not stripped (their
+  trace-in-stderr opt-in contract is unchanged); backoff headers now come from the pre-strip trace, and rate-limit
+  classification runs on the stripped text (a response body mentioning a rate limit never retries).
+- [x] **Must 2** — `runGhSync` call lines carry `rl` next to `id`/`inv`; the rollup is unchanged (only its
+  header comment was corrected). A nested shim → passthrough call sees the parent's `GH_DEBUG`, relays the trace
+  unstripped, and logs `outer: <inv>`; the outer `runGhSync` line holds the `rl` and the rollup joins the pair
+  as one invocation.
+- [x] **Must 3** — `settleLikeExecFileSync` mirrors Node 22's own `execFileSync` source (stderr relayed to this
+  process when no `stdio` is set; `Command failed: …` message; result fields assigned onto the thrown error);
+  stdout's own `maxBuffer` is re-applied as `ENOBUFS` after the widened trace headroom. `input`/`stdio[0]` are
+  passed through on every attempt exactly as `execFileSync` did, so the stdin behavior is unchanged.
+- [x] Tests: we:scripts/lib/__tests__/gh-throttle.fidelity.test.mjs (8 new cases, real subprocess fake-gh
+  replaying the golden traces, side by side with raw `execFileSync`: success buffer/utf8, failure error shape,
+  no-stdio stderr relay, stdin, stripped classification + Retry-After backoff, the three no-capture cases,
+  calibrateHeaders, ENOBUFS); we:scripts/lib/__tests__/gh-spend.test.mjs (runGhSync lines → rollup attributes
+  the daemon caller's real delta). 7 of the 8 new fidelity cases fail with the capture disabled.
+- [x] Perf: the spawn is the same `spawnSync` `execFileSync` already used; the added cost is `stripGhDebug`
+  (~20µs for a single-request trace, ~60µs for a paginated one) — negligible next to a `gh` round trip.
+- [ ] Observable check (we:scripts/lib/gh-spend.mjs `report --hours=24` one hour after deploy) — post-land.
 
 ## Done when
 

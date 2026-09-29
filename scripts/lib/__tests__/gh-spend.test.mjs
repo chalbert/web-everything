@@ -5,14 +5,16 @@
  *   window (estimates allocated INSIDE the residual, never on top); `unknown` never coerced; nested and retried
  *   calls counted once; hourly persistence idempotent and cursor-safe.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { appendFileSync, mkdtempSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   attributeSpend, rollupSpend, rollupSpendDetailed, persistSpendHours, collectSpendRows, summarizeSpendRows, renderSpendReport,
   readSpendRows, spendPaths, MAX_ATTRIBUTED_PER_RESPONSE,
 } from '../gh-spend.mjs';
+import { runGhSync, ghThrottleLogPath } from '../gh-throttle.mjs';
 
 const T0 = Date.parse('2026-09-28T10:00:00Z');
 const RESET = T0 / 1000 + 3600;
@@ -275,5 +277,25 @@ describe('the persistence cursor detects rotation by file identity, not size alo
     const second = persistSpendHours({ logPath, now: T0 + 181 * 60_000 });
     expect(second.consumedLines).toBe(1);
     expect(second.offset).toBeGreaterThan(first.offset);
+  });
+});
+
+// ── #4375 — a daemon's runGhSync calls now carry `rl`, so the UNCHANGED rollup ranks their real spend ─────────────
+describe('rollupSpend over real runGhSync log lines (#4375)', () => {
+  const trace = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'gh-debug', 'pr-view-success.debug.stderr'), 'utf8');
+  const withUsed = (used) => Buffer.from(trace.replace('X-Ratelimit-Used: 36', `X-Ratelimit-Used: ${used}`));
+
+  it('two successful daemon calls → the second is ATTRIBUTED its real delta, nothing UNKNOWN past the baseline', () => {
+    const lockRoot = mkdtempSync(join(tmpdir(), 'gh-spend-sync-'));
+    const spawn = vi.fn()
+      .mockReturnValueOnce({ status: 0, stdout: Buffer.from('[]'), stderr: withUsed(36), output: [], error: null })
+      .mockReturnValueOnce({ status: 0, stdout: Buffer.from('[]'), stderr: withUsed(40), output: [], error: null });
+    const throttle = { lockRoot, cap: 2, sleep: () => {}, spawn, caller: 'reconcile-fix-dispatch-daemon.mjs', env: { GH_TOKEN: 'ghs_x' } };
+    runGhSync(['pr', 'list'], { stdio: 'pipe', throttle });
+    runGhSync(['pr', 'view', '1'], { stdio: 'pipe', throttle });
+    const entries = readFileSync(ghThrottleLogPath(lockRoot), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    const [row] = rollupSpend(entries, { now: Date.now() + HOURS(1) });
+    expect(row).toMatchObject({ identity: 'app', resource: 'graphql', requests: 2, responses: 2, bucketUsed: 4, attributed: 4 });
+    expect(row.byCaller['reconcile-fix-dispatch-daemon.mjs']).toMatchObject({ requests: 2, attributed: 4, unknown: 1 }); // the first is the window baseline
   });
 });
