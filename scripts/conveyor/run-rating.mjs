@@ -1070,7 +1070,8 @@ export function resolvePrBouncedViaGh(item, { exec = execFileSync, repo = DEFAUL
  * field this module actually cares about rides through as an extra field (that store's own docs: "extra
  * fields pass through").
  */
-export function toScorecardRow(rating, { provider = 'anthropic' } = {}) {
+export function toScorecardRow(rating, { provider = 'anthropic', repoRoot = REPO_ROOT, preparedForItem: preparedResolver } = {}) {
+  const resolvePrepared = preparedResolver ?? ((item) => preparedForItem(item, { repoRoot }));
   const gradeScore = { A: 95, B: 80, C: 55, D: 25 }[rating.grade] ?? null;
   // Evidence strings are deliberately plain plural, never `(s)` — that reads to the append-time secret scrub
   // as call-syntax (`name(...)`) and gets refused outright (Fork 2's amendment: deny on a hit, never redact —
@@ -1111,6 +1112,7 @@ export function toScorecardRow(rating, { provider = 'anthropic' } = {}) {
     dataQuality: rating.dataQuality ?? 'transcript',
     waste: Array.isArray(rating.waste) ? rating.waste : [],
     costUsdPartial: rating.costUsdPartial ?? false,
+    prepared: resolvePrepared(rating.item ?? null),
   };
 }
 
@@ -1230,22 +1232,57 @@ export function rollupByDemand(rows, { sizeForItem = () => null } = {}) {
   });
 }
 
-/** Default `sizeForItem` — reads `backlog/<num>-*.md`'s `size:` frontmatter field via the canonical reader
- *  (`readField`), never a hand-rolled YAML parse. `null` for anything not found (no card, no size stamped, or
- *  a hash-identified item this glob can't match). */
-export function backlogSizeForItem(itemOrPr, { repoRoot = REPO_ROOT } = {}) {
+/** Shared by {@link backlogSizeForItem} and {@link preparedForItem} — both are "read one frontmatter field off
+ *  `backlog/<num>-*.md`" with the same numeric-id gate, directory glob and not-found handling; this is the one
+ *  place that logic lives. `null` when the id isn't a plain numeric item (a hash-identified item this glob
+ *  can't match), no card is found, or the file can't be read — never throws. */
+function readBacklogCardContent(itemOrPr, { repoRoot = REPO_ROOT } = {}) {
   const num = String(itemOrPr ?? '').trim();
   if (!/^\d+$/.test(num)) return null;
   let names;
   try { names = readdirSync(join(repoRoot, 'backlog')); } catch { return null; }
   const match = names.find((n) => n.startsWith(`${num}-`) && n.endsWith('.md'));
   if (!match) return null;
-  try {
-    const content = readFileSync(join(repoRoot, 'backlog', match), 'utf8');
-    const raw = readField(content, 'size');
-    const size = Number(raw);
-    return Number.isFinite(size) ? size : null;
-  } catch { return null; }
+  try { return readFileSync(join(repoRoot, 'backlog', match), 'utf8'); } catch { return null; }
+}
+
+/** Default `sizeForItem` — reads `backlog/<num>-*.md`'s `size:` frontmatter field via the canonical reader
+ *  (`readField`), never a hand-rolled YAML parse. `null` for anything not found (no card, no size stamped, or
+ *  a hash-identified item this glob can't match). */
+export function backlogSizeForItem(itemOrPr, { repoRoot = REPO_ROOT } = {}) {
+  const content = readBacklogCardContent(itemOrPr, { repoRoot });
+  if (content === null) return null;
+  const size = Number(readField(content, 'size'));
+  return Number.isFinite(size) ? size : null;
+}
+
+/**
+ * Whether the backlog card for `itemOrPr` carries evidence of being PREPARED (Definition-of-Ready — #2618):
+ * filed and prepared with scope, risks, a test plan and tasks, reviewed before build, as opposed to a bespoke
+ * ad-hoc prompt. Detected the same way {@link backlogSizeForItem} detects `size` — a direct read of the card's
+ * `preparedDate` frontmatter field via {@link readField}, at SCORE time (#4304's chosen design; see that card)
+ * — never inferred from `dispatchKind` alone, because a conveyor-dispatched item can itself be unprepared (a
+ * scaffolded-but-never-reviewed card).
+ *
+ * This checks PRESENCE of a stamped `preparedDate`, not its ORDERING relative to any particular dispatch or
+ * claim — a card is prepared once and can be claimed/dispatched any number of times after, and this module has
+ * no per-dispatch "was it still prepared as of THIS run" timestamp to compare against (nothing else in the
+ * codebase tracks that either). "Prepared" here means "this card was, at some point, brought to Definition of
+ * Ready" — the same thing the story-preparation checklist itself stamps `preparedDate` for.
+ *
+ * Returns `false` — never `null` — whenever prepared status cannot be CONFIRMED: no `item` at all, a hash-only
+ * id this numeric glob can't match, no matching card on disk, or a card with no `preparedDate` stamped.
+ * "Prepared" is an affirmative claim a caller must be able to trust, so the absence of evidence is never
+ * treated as evidence of readiness.
+ * @param {string|number|null} itemOrPr
+ * @param {{repoRoot?: string}} [o]
+ * @returns {boolean}
+ */
+export function preparedForItem(itemOrPr, { repoRoot = REPO_ROOT } = {}) {
+  const content = readBacklogCardContent(itemOrPr, { repoRoot });
+  if (content === null) return false;
+  const raw = readField(content, 'preparedDate');
+  return typeof raw === 'string' && raw.trim() !== '';
 }
 
 /**
@@ -1306,6 +1343,43 @@ export function topWasteCauses(rows, { by = 'minutes', limit = 5 } = {}) {
   }
   const ranked = [...totals.values()].sort((a, b) => b[by] - a[by]).slice(0, limit);
   return { ranked, guardBlockCount };
+}
+
+/**
+ * Prepared-vs-unprepared comparison for the `report` CLI (#4304) — splits `rows` STRICTLY on the stamped
+ * `row.prepared` boolean: `true` → "prepared", `false` → "unprepared". A row with `prepared` missing
+ * entirely (`undefined` — every row scored before this field existed) is EXCLUDED from both buckets, never
+ * folded into "unprepared": `false` is an affirmative "checked, and no evidence of readiness"; `undefined` is
+ * "never checked at all", and conflating the two would silently contaminate the unprepared side with an
+ * unknown-sized cohort of legacy rows the instant this ships (a real report-accuracy defect a red-team of this
+ * very card's diff converged on independently across four lenses — never guess a legacy row's prepared-ness
+ * either direction). Summarizes each side: row count, average wall time, tokens per demand (via
+ * {@link rollupByDemand}), rework-round count (`dispatchKind` in {@link REWORK_KINDS}), and grade distribution.
+ * PURE — takes no `sizeForItem` option: `tokensPerDemand` is `totalTokens / demandCount` only, never a
+ * size-derived figure, so there is nothing here for a size resolver to feed (an earlier revision threaded one
+ * through to {@link rollupByDemand} and it was genuinely never read — removed rather than kept as unused
+ * plumbing).
+ * @param {object[]} rows
+ */
+export function preparedComparison(rows) {
+  const buckets = { prepared: [], unprepared: [] };
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (row.prepared === true) buckets.prepared.push(row);
+    else if (row.prepared === false) buckets.unprepared.push(row);
+    // `row.prepared === undefined` (a pre-#4304 row) is neither — excluded from both sides, not guessed.
+  }
+  const summarize = (groupRows) => {
+    const wallTimes = groupRows.map((r) => r.wallMs).filter((w) => typeof w === 'number');
+    const avgWallMs = wallTimes.length ? wallTimes.reduce((s, w) => s + w, 0) / wallTimes.length : null;
+    const demand = rollupByDemand(groupRows);
+    const totalTokens = demand.reduce((s, d) => s + d.totalTokens, 0);
+    const tokensPerDemand = demand.length ? totalTokens / demand.length : null;
+    const reworkRounds = groupRows.filter((r) => REWORK_KINDS.has(r.dispatchKind)).length;
+    const gradeCounts = { A: 0, B: 0, C: 0, D: 0 };
+    for (const r of groupRows) if (gradeCounts[r.grade] !== undefined) gradeCounts[r.grade] += 1;
+    return { count: groupRows.length, avgWallMs, tokensPerDemand, demandCount: demand.length, reworkRounds, gradeCounts };
+  };
+  return { prepared: summarize(buckets.prepared), unprepared: summarize(buckets.unprepared) };
 }
 
 // ── PURE + IO: full-fleet token COVERAGE (message-2 recalibration, #4075, operator-directed 2026-09-27) ──────────
@@ -1657,7 +1731,8 @@ function buildReport(sinceMs) {
   const wasteByMinutes = topWasteCauses(rows, { by: 'minutes', limit: 5 });
   const wasteByTokens = topWasteCauses(rows, { by: 'tokens', limit: 5 });
   const coverage = buildCoverageReport({ sinceMs });
-  return { rowCount: rows.length, gradeCounts, wasteByType, wasteTotal: waste.length, demand, wasteByMinutes, wasteByTokens, coverage };
+  const prepared = preparedComparison(rows);
+  return { rowCount: rows.length, gradeCounts, wasteByType, wasteTotal: waste.length, demand, wasteByMinutes, wasteByTokens, coverage, prepared };
 }
 
 async function main() {
@@ -1692,6 +1767,13 @@ async function main() {
     const tokLabel = d.hasUnknownTokens ? `${d.totalTokens}+ tok (partial — ${d.unmeasuredSessions} unmeasured session(s))` : `${d.totalTokens} tok`;
     const costLabel = d.hasUnknownCost ? `$${d.totalCostUsd.toFixed(2)}+ (partial)` : `$${d.totalCostUsd.toFixed(2)}`;
     process.stdout.write(`    ${d.key}: ${tokLabel}, ${costLabel}, ${d.sessions} session(s), tokens/pt=${sp}\n`);
+  }
+  process.stdout.write('  prepared vs unprepared:\n');
+  for (const [label, s] of [['prepared', report.prepared.prepared], ['unprepared', report.prepared.unprepared]]) {
+    const wall = s.avgWallMs !== null ? `${(s.avgWallMs / 60_000).toFixed(1)} min` : 'n/a';
+    const perDemand = s.tokensPerDemand !== null ? Math.round(s.tokensPerDemand) : 'n/a';
+    const grades = `A=${s.gradeCounts.A} B=${s.gradeCounts.B} C=${s.gradeCounts.C} D=${s.gradeCounts.D}`;
+    process.stdout.write(`    ${label}: n=${s.count}, avg wall=${wall}, tok/demand=${perDemand} (${s.demandCount} demand(s)), rework rounds=${s.reworkRounds}, grades ${grades}\n`);
   }
 }
 

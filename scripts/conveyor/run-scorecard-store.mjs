@@ -318,9 +318,12 @@ export function writeStore(store, { path = resolveScorecardStorePath(), write = 
  * so a caller must fix the row rather than have it silently coerced or dropped.
  * @param {object} row - everything `validateScorecard` requires, plus whatever else Fork 2's shape names
  *   (`item`, `handle`, `effort`, `outcome`, `probationStatus`, `scoredAt`, …) — including `changedFiles` (#4034
- *   follow-up, card 4034b), the PR's changed files net versus its base. This function stores whatever a writer
- *   passes through unmodified (the spread below); every writer decides its OWN shape, this store enforces only
- *   the bones every row must share, per {@link validateScorecard}.
+ *   follow-up, card 4034b), the PR's changed files net versus its base, and `prepared` (#4304: whether the
+ *   dispatched item's backlog card carries a stamped Definition-of-Ready `preparedDate` — checked at SCORE
+ *   time by `run-rating.mjs#toScorecardRow`, not compared against the dispatch/claim time itself; see that
+ *   function's own doc). This function stores whatever a writer passes through unmodified (the spread below);
+ *   every writer decides its OWN shape, this store enforces only the bones every row must share, per
+ *   {@link validateScorecard}.
  * @param {object} [io] - `readStore`/`writeStore`'s own injectable IO, threaded through for tests.
  * @returns {object} the stored row (with `scoredAt` filled in if the caller omitted it).
  */
