@@ -78,7 +78,7 @@ import { writeAllSync } from '../lib/write-all-sync.mjs';
  *
  * `review-dispatch` is absent ON PURPOSE — it is a separate mechanical pass, never gated by this lever.
  */
-export const PAUSABLE_KINDS = Object.freeze(['build', 'prepare', 'prepare-decision', 'investigate', 'fix', 'ci-heal']);
+export const PAUSABLE_KINDS = Object.freeze(['build', 'prepare', 'prepare-decision', 'prepare-item', 'investigate', 'fix', 'ci-heal']);
 
 /**
  * Normalize a raw `pausedKinds` value → a non-empty array of kind names, or `null` for "no scope declared"

@@ -179,6 +179,13 @@ describe('retireBuildGuards — claim / Agent-return / TTL (SKILL §2, three way
 // ── The DIFFERENT prepare guard ───────────────────────────────────────────────────────────────────────────────
 
 describe('retirePrepareGuards — NEVER on Agent-return; scope-committed / PR-terminal / TTL-to-first-PR only', () => {
+  it('retains a LIVE prepare-item guard while the item is still held needs-prepare, retires once cleared (#4504)', () => {
+    const pg = [{ num: 50, kind: 'prepare-item', lane: 9 }];
+    expect(retirePrepareGuards(pg, { needsPrepare: [{ num: 50 }], prs: [], tick: 1 }).live).toHaveLength(1);
+    const done = retirePrepareGuards(pg, { needsPrepare: [], prs: [], tick: 1 });
+    expect(done.retired[0]).toMatchObject({ num: 50, reason: 'scope-committed' });
+  });
+
   const guard = () => [{ num: 20, kind: 'prepare', lane: 5, spawnedTick: 0, sawPr: false }];
 
   it('stays LIVE while the item is still unshaped and no PR has appeared (a slow but healthy prepare)', () => {
@@ -240,6 +247,62 @@ describe('retirePrepareGuards — NEVER on Agent-return; scope-committed / PR-te
 });
 
 describe('planPrepareSpawns — union re-dispatch gate + lane exclusion (SKILL §3b/§3e)', () => {
+  it('spawns ONE prepare-item agent per held needs-prepare candidate (#4504)', () => {
+    const r = planPrepareSpawns({ needsPrepare: [{ num: 99 }], availableLanes: [5], tick: 0 });
+    expect(r.itemPrepareSpawns).toEqual([{ num: 99, lane: 5 }]);
+    expect(r.newGuards[0]).toMatchObject({ num: 99, kind: 'prepare-item' });
+  });
+
+  it('SKIPS a needs-prepare candidate with a live prepare-item guard entry (in-flight) (#4504)', () => {
+    const r = planPrepareSpawns({
+      needsPrepare: [{ num: 99 }],
+      livePrepareGuards: [{ num: 99, kind: 'prepare-item', lane: 5 }],
+      availableLanes: [7],
+      tick: 1,
+    });
+    expect(r.itemPrepareSpawns).toEqual([]);
+  });
+
+  it('CAPS concurrent prepare-item spawns at maxConcurrentItemPrepares, holding the rest with a note (#4504)', () => {
+    const r = planPrepareSpawns({
+      needsPrepare: [{ num: 99 }, { num: 100 }],
+      availableLanes: [5, 6],
+      maxConcurrentItemPrepares: 1,
+      tick: 0,
+    });
+    expect(r.itemPrepareSpawns).toEqual([{ num: 99, lane: 5 }]);
+    expect(r.notes.some((n) => n.kind === 'prepare-item-cap' && n.num === 100)).toBe(true);
+  });
+
+  it('the prepare-item cap counts already-LIVE guards too, not just this tick\'s new spawns (#4504)', () => {
+    const r = planPrepareSpawns({
+      needsPrepare: [{ num: 100 }],
+      livePrepareGuards: [{ num: 99, kind: 'prepare-item', lane: 4 }],
+      availableLanes: [5],
+      maxConcurrentItemPrepares: 1,
+      tick: 0,
+    });
+    expect(r.itemPrepareSpawns).toEqual([]);
+    expect(r.notes.some((n) => n.kind === 'prepare-item-cap' && n.num === 100)).toBe(true);
+  });
+
+  it('an item ALREADY covered by a live prepare-item guard never hits the cap note, even at/over cap (#4504 review round 2)', () => {
+    // #99 is already in flight (its own guard); the cap is already at its ceiling. #99 must stay a silent
+    // in-flight no-op (via the union re-dispatch gate), never a spurious `prepare-item-cap` note — and a
+    // genuinely NEW candidate later in the same tick must still get its fair shot at the cap, not be starved
+    // because the loop mis-held the already-in-flight one first.
+    const r = planPrepareSpawns({
+      needsPrepare: [{ num: 99 }, { num: 100 }],
+      livePrepareGuards: [{ num: 99, kind: 'prepare-item', lane: 4 }],
+      availableLanes: [5],
+      maxConcurrentItemPrepares: 1,
+      tick: 1,
+    });
+    expect(r.itemPrepareSpawns).toEqual([]); // #100 IS capped (1 live + 0 new already at ceiling 1)
+    expect(r.notes.some((n) => n.kind === 'prepare-item-cap' && n.num === 99)).toBe(false); // never #99
+    expect(r.notes.some((n) => n.kind === 'prepare-item-cap' && n.num === 100)).toBe(true); // only the new one
+  });
+
   it('spawns one prepare-scope agent per unshaped item, consuming free lanes', () => {
     const r = planPrepareSpawns({ unshaped: [{ num: 20 }, { num: 21 }], availableLanes: [5, 6], tick: 0 });
     expect(r.scopeSpawns).toEqual([{ num: 20, lane: 5 }, { num: 21, lane: 6 }]);
@@ -699,6 +762,17 @@ describe('routeWatcherExit — the exit-code → action table (SKILL §3)', () =
 // ── The whole composition ─────────────────────────────────────────────────────────────────────────────────────
 
 describe('planTick — a cleared kind:investigation item is spawned via spawnInvestigations, NEVER spawnBuilds (#3567)', () => {
+  it('a scoped item held needs-prepare spawns via spawnPrepareItems, never spawnBuilds (#4504)', () => {
+    const result = planTick({
+      state: { queue: [], lanes: [], prs: [] },
+      plan: { launch: [], held: [{ num: 77, reason: 'needs-prepare' }] },
+      freeLanes: [4, 5],
+      bookkeeping: { tick: 0 },
+    });
+    expect(result.decisions.spawnPrepareItems.some((s) => String(s.num) === '77')).toBe(true);
+    expect(result.decisions.spawnBuilds.some((s) => String(s.num) === '77')).toBe(false);
+  });
+
   it('a held needs-investigation item spawns straight into spawnInvestigations, same tick it clears', () => {
     const out = planTick({
       state: { queue: [], lanes: [], prs: [] },
@@ -760,6 +834,50 @@ describe('planTick — a cleared kind:investigation item is spawned via spawnInv
       bookkeeping: { tick: 2, prepareGuards: blockedTick.nextState.prepareGuards },
     });
     expect(unblockedTick.decisions.spawnInvestigations).toEqual([]); // still suppressed — no duplicate agent
+  });
+
+  it('a TRANSIENT reason-flip to blocked never drops the live prepare-item guard — no duplicate dispatch on unblock (#4504 review round 2)', () => {
+    // Same shape as the investigate case just above, for the OTHER wide-held-set guard kind #4504 adds: a
+    // still-running prepare-item agent must survive a transient `blocked` flip and go on suppressing a
+    // second dispatch once the item clears back to `needs-prepare` — this is the exact planTick-level
+    // coverage the #4504 review round 1 panel found missing (the only prior test called
+    // `retirePrepareGuards` directly with a hand-built `needsPrepare` array).
+    const liveGuard = { num: 7001, kind: 'prepare-item', lane: 4, spawnedTick: 0, sawPr: false };
+    const blockedTick = planTick({
+      state: { queue: [], lanes: [], prs: [] },
+      plan: { launch: [], held: [{ num: 7001, reason: 'blocked' }] },
+      freeLanes: [4],
+      bookkeeping: { tick: 1, prepareGuards: [liveGuard] },
+    });
+    expect(blockedTick.decisions.retireGuards.prepare).toEqual([]); // NOT retired
+    expect(blockedTick.decisions.spawnPrepareItems).toEqual([]); // NOT re-spawned
+    expect(blockedTick.nextState.prepareGuards).toEqual(expect.arrayContaining([expect.objectContaining({ num: 7001, kind: 'prepare-item' })]));
+
+    const unblockedTick = planTick({
+      state: { queue: [], lanes: [], prs: [] },
+      plan: { launch: [], held: [{ num: 7001, reason: 'needs-prepare' }] },
+      freeLanes: [4],
+      bookkeeping: { tick: 2, prepareGuards: blockedTick.nextState.prepareGuards },
+    });
+    expect(unblockedTick.decisions.spawnPrepareItems).toEqual([]); // still suppressed — no duplicate agent
+  });
+
+  it('a needs-prepare item held BLOCKED by the prepare-item kind-scoped dispatch-pause spawns nothing, then spawns once unpaused (#4504 review round 2)', () => {
+    // #4504 review round 1 (claim-accuracy) found the shared `everyKindReady` pause fixture carries no
+    // needs-prepare candidate, so the "ALL SEVEN kinds" pause test never actually exercises prepare-item's
+    // own pausability — it passes whether or not the kind is wired into TICK_SPAWN_KINDS/pausedKinds at all.
+    // This is a standalone fixture (not sharing/perturbing `everyKindReady`, to avoid reshuffling every OTHER
+    // test that fixture already covers) that pins the real behavior directly.
+    const fixture = {
+      state: { queue: [], lanes: [], prs: [] },
+      plan: { launch: [], held: [{ num: 7002, reason: 'needs-prepare' }] },
+      freeLanes: [4],
+      bookkeeping: { tick: 0 },
+    };
+    const paused = planTick({ ...fixture, dispatchPaused: true, dispatchPausedKinds: ['prepare-item'] });
+    expect(paused.decisions.spawnPrepareItems).toEqual([]);
+    const unpaused = planTick(fixture);
+    expect(unpaused.decisions.spawnPrepareItems).toEqual([{ num: 7002, lane: 4 }]);
   });
 });
 
@@ -1245,8 +1363,8 @@ describe('planTick — composes the tick and threads nextState', () => {
         // #3842's prepare-scope agent authors either (or both) in one turn.
         expect.objectContaining({ kind: 'auto-preparing-scope', nums: [90] }),
       ]));
-      // The exclusion set itself is exactly the five reasons that have their own note elsewhere.
-      expect(HELD_NOTE_EXCLUDED_REASONS).toEqual(['needs-slice', 'needs-decision', 'needs-investigation', 'unshaped-no-scope', 'no-size']);
+      // The exclusion set itself is exactly the six reasons that have their own note elsewhere.
+      expect(HELD_NOTE_EXCLUDED_REASONS).toEqual(['needs-slice', 'needs-decision', 'needs-investigation', 'needs-prepare', 'unshaped-no-scope', 'no-size']);
     });
 
     it('emits NO held notes when the queue is empty (plan.held absent or [])', () => {
@@ -2042,8 +2160,8 @@ describe('planTick — KIND-SCOPED dispatch-pause (epic #3383): hold NEW-item ki
     expect(out.decisions.spawnFixes).toEqual([{ pr: 99, num: 40, lane: 7 }]);
   });
 
-  it('a scope naming ALL SIX kinds is indistinguishable from a blanket pause', () => {
-    const kinds = ['build', 'prepare', 'prepare-decision', 'investigate', 'fix', 'ci-heal'];
+  it('a scope naming ALL SEVEN kinds is indistinguishable from a blanket pause', () => {
+    const kinds = ['build', 'prepare', 'prepare-decision', 'prepare-item', 'investigate', 'fix', 'ci-heal'];
     const scoped = planTick({ ...everyKindReady, dispatchPaused: true, dispatchPausedKinds: kinds });
     const blanket = planTick({ ...everyKindReady, dispatchPaused: true });
     expect(scoped).toEqual(blanket);

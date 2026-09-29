@@ -162,7 +162,7 @@ import { createQueueBudget, dispatchDemandMinutes, DEFAULT_ARRIVAL_WINDOW_MINUTE
  *  (`auto-preparing-scope` / `prepare-no-lane` — one prepare-scope agent authors both `scope:` and a missing
  *  size/estimate, #3842). The held-reason note loop below skips these so an item is never double-reported under
  *  two note kinds. */
-export const HELD_NOTE_EXCLUDED_REASONS = Object.freeze(['needs-slice', 'needs-decision', 'needs-investigation', 'unshaped-no-scope', 'no-size']);
+export const HELD_NOTE_EXCLUDED_REASONS = Object.freeze(['needs-slice', 'needs-decision', 'needs-investigation', 'needs-prepare', 'unshaped-no-scope', 'no-size']);
 
 /**
  * SELF-DIAGNOSED STALL DETECTION (2026-09-14, live incident: #3521 held `overlaps lane-2` for 85+ minutes across
@@ -344,7 +344,7 @@ export const DEFAULT_IDLE_WINDOW_MS = 15 * 60 * 1000;
  * `we:scripts/readiness/dispatch-plan.mjs` empties `plan.launch` to `dispatch-paused` holds, so this core never
  * decides a build's fate. Used to word the kind-scoped pause note with the kinds THIS tick actually withheld.
  */
-export const TICK_SPAWN_KINDS = Object.freeze(['prepare', 'prepare-decision', 'investigate', 'fix', 'ci-heal']);
+export const TICK_SPAWN_KINDS = Object.freeze(['prepare', 'prepare-decision', 'prepare-item', 'investigate', 'fix', 'ci-heal']);
 
 /** The review label that routes a bounced PR to a fix agent (vs. a human-owned review park). */
 export const REVIEW_CHANGES_LABEL = 'review:changes';
@@ -557,8 +557,9 @@ export function filterLaunches(launches, liveBuildGuards) {
  * RETIRE the PREPARE guard entries (SKILL §2 prepare guard + §3e) — its OWN rules, never the build guard's.
  * Keyed by `num`; retires ONLY on scope-committed / PR-terminal / TTL-to-first-PR, NEVER on Agent-return.
  *
- *   • SCOPE-COMMITTED — the item left the pending set: `state.unshaped` for a `kind:'prepare'` (scope) guard, or
- *                       the un-prepared `state.decisions` rows for a `kind:'prepare-decision'` guard. Success.
+ *   • SCOPE-COMMITTED — the item left the pending set: `state.unshaped` for a `kind:'prepare'` (scope) guard, the
+ *                       un-prepared `state.decisions` rows for a `kind:'prepare-decision'` guard, or the wide
+ *                       held set for a `kind:'prepare-item'` guard (#4504). Success.
  *   • PR-TERMINAL     — a prepare PR for the num was seen OPEN (`sawPr`) and has now left the open set.
  *   • TTL-TO-FIRST-PR — fires ONLY while NO open PR for the num has EVER appeared (`!sawPr`) and the entry is
  *                       older than `ttlTicks` — catches an agent that died before opening its PR. Once an open
@@ -571,10 +572,10 @@ export function filterLaunches(launches, liveBuildGuards) {
  * both the guard and the gate, and `gh pr list --state open` rarely drops a genuinely-open PR.)
  *
  * @param {Array<{num:*, kind?:string, lane:*, spawnedTick:number, sawPr?:boolean}>} prepareGuards
- * @param {{ unshaped?:object[], decisions?:object[], investigations?:object[], prs?:object[], tick:number, ttlTicks?:number }} ctx
+ * @param {{ unshaped?:object[], decisions?:object[], investigations?:object[], needsPrepare?:object[], prs?:object[], tick:number, ttlTicks?:number }} ctx
  * @returns {{ live:Array<object>, retired:Array<{num:*, kind:string, reason:string, note?:boolean}> }}
  */
-export function retirePrepareGuards(prepareGuards, { unshaped = [], decisions = [], investigations = [], prs = [], tick = 0, now = null, ttlTicks = DEFAULT_PREPARE_TTL_TICKS } = {}) {
+export function retirePrepareGuards(prepareGuards, { unshaped = [], decisions = [], investigations = [], needsPrepare = [], prs = [], tick = 0, now = null, ttlTicks = DEFAULT_PREPARE_TTL_TICKS } = {}) {
   const unshapedNums = new Set((Array.isArray(unshaped) ? unshaped : []).map((u) => normNum(u.num)));
   const unpreparedNums = new Set(
     (Array.isArray(decisions) ? decisions : []).filter((d) => d?.prepared !== true).map((d) => normNum(d.num)),
@@ -583,13 +584,14 @@ export function retirePrepareGuards(prepareGuards, { unshaped = [], decisions = 
   // `prepared` flag to wait on, so "still pending" is simply "still held `needs-investigation` this tick"
   // (the caller derives this straight off `plan.held`, same shape as `state.unshaped`).
   const investigationNums = new Set((Array.isArray(investigations) ? investigations : []).map((i) => normNum(i.num)));
+  const needsPrepareNums = new Set((Array.isArray(needsPrepare) ? needsPrepare : []).map((n) => normNum(n.num)));
   const live = [];
   const retired = [];
   for (const g of Array.isArray(prepareGuards) ? prepareGuards : []) {
     if (!g || g.num == null) continue;
     const key = normNum(g.num);
     const kind = g.kind || 'prepare';
-    const pendingNums = kind === 'prepare-decision' ? unpreparedNums : kind === 'investigate' ? investigationNums : unshapedNums;
+    const pendingNums = kind === 'prepare-decision' ? unpreparedNums : kind === 'investigate' ? investigationNums : kind === 'prepare-item' ? needsPrepareNums : unshapedNums;
     const openPr = !!openPrForNum(prs, g.num);
     const sawPr = g.sawPr === true || openPr;
     if (!pendingNums.has(key)) { retired.push({ num: g.num, kind, reason: 'scope-committed' }); continue; }
@@ -612,15 +614,16 @@ export function retirePrepareGuards(prepareGuards, { unshaped = [], decisions = 
  * item HOLDS (a note, no spawn — atomic `acquire` would fail one race anyway). Pure — mutates nothing; returns
  * the spawns, the new guard entries, the lanes it consumed, and any hold notes.
  *
- * @param {{ unshaped?:object[], decisions?:object[], investigations?:object[], prs?:object[], livePrepareGuards?:object[], availableLanes?:Array<*>, tick:number, now?:number|null, trace?:boolean, dispatchPaused?:boolean, pausedKinds?:string[]|null }} ctx
- * @returns {{ scopeSpawns:Array<{num:*, lane:*}>, decisionSpawns:Array<{num:*, lane:*}>, investigationSpawns:Array<{num:*, lane:*}>, newGuards:Array<object>, consumedLanes:Array<*>, notes:Array<{kind:string, num:*, text:string}> }}
+ * @param {{ unshaped?:object[], decisions?:object[], investigations?:object[], needsPrepare?:object[], prs?:object[], livePrepareGuards?:object[], availableLanes?:Array<*>, maxConcurrentItemPrepares?:number, tick:number, now?:number|null, trace?:boolean, dispatchPaused?:boolean, pausedKinds?:string[]|null }} ctx
+ * @returns {{ scopeSpawns:Array<{num:*, lane:*}>, decisionSpawns:Array<{num:*, lane:*}>, investigationSpawns:Array<{num:*, lane:*}>, itemPrepareSpawns:Array<{num:*, lane:*}>, newGuards:Array<object>, consumedLanes:Array<*>, notes:Array<{kind:string, num:*, text:string}> }}
  */
-export function planPrepareSpawns({ unshaped = [], decisions = [], investigations = [], prs = [], livePrepareGuards = [], availableLanes = [], tick = 0, now = null, trace = false, dispatchPaused = false, pausedKinds = null } = {}) {
+export function planPrepareSpawns({ unshaped = [], decisions = [], investigations = [], needsPrepare = [], prs = [], livePrepareGuards = [], availableLanes = [], maxConcurrentItemPrepares = 2, tick = 0, now = null, trace = false, dispatchPaused = false, pausedKinds = null } = {}) {
   const guardNums = new Set((Array.isArray(livePrepareGuards) ? livePrepareGuards : []).map((g) => normNum(g.num)));
   const lanes = [...(Array.isArray(availableLanes) ? availableLanes : [])];
   const scopeSpawns = [];
   const decisionSpawns = [];
   const investigationSpawns = [];
+  const itemPrepareSpawns = [];
   const newGuards = [];
   const consumedLanes = [];
   const notes = [];
@@ -647,6 +650,9 @@ export function planPrepareSpawns({ unshaped = [], decisions = [], investigation
     newGuards.push({ num, kind, lane, ...spawnStamp(tick, now), sawPr: false });
   };
 
+  const liveItemPrepareCount = (Array.isArray(livePrepareGuards) ? livePrepareGuards : [])
+    .filter((g) => (g?.kind || 'prepare') === 'prepare-item').length;
+
   for (const u of Array.isArray(unshaped) ? unshaped : []) if (u?.num != null) plan(u.num, 'prepare', scopeSpawns);
   for (const d of Array.isArray(decisions) ? decisions : []) {
     if (d?.num != null && d.prepared !== true) plan(d.num, 'prepare-decision', decisionSpawns);
@@ -654,7 +660,22 @@ export function planPrepareSpawns({ unshaped = [], decisions = [], investigation
   // #3567 — every held `needs-investigation` candidate spawns ONE investigate agent, no `prepared` gate: an
   // investigation is a single dispatched investigator, not a two-phase prepare-then-ratify lifecycle.
   for (const i of Array.isArray(investigations) ? investigations : []) if (i?.num != null) plan(i.num, 'investigate', investigationSpawns);
-  return { scopeSpawns, decisionSpawns, investigationSpawns, newGuards, consumedLanes, notes, ...(trace ? { admission } : {}) };
+  for (const p of Array.isArray(needsPrepare) ? needsPrepare : []) {
+    if (p?.num == null) continue;
+    // #4504 review round 2 — the cap must NEVER fire for a num that already has a live prepare-family guard
+    // (necessarily its own prior `prepare-item` guard here, since a needs-prepare candidate is never ALSO
+    // unshaped/a decision/an investigation — the four candidate sets are disjoint by construction). Checking
+    // the cap before this let an already-in-flight item get a spurious `prepare-item-cap` note every tick it
+    // stayed held, instead of the silent in-flight no-op `plan()` already gives it — and, worse, meant a
+    // SECOND genuinely-new candidate the same tick was never even considered, because the loop never reached
+    // `plan()` to learn the first one was a no-op.
+    if (!guardNums.has(normNum(p.num)) && liveItemPrepareCount + itemPrepareSpawns.length >= maxConcurrentItemPrepares) {
+      notes.push({ kind: 'prepare-item-cap', num: p.num, text: `⏸ #${p.num} — prepare-item concurrency cap (${maxConcurrentItemPrepares}) reached` });
+      continue;
+    }
+    plan(p.num, 'prepare-item', itemPrepareSpawns);
+  }
+  return { scopeSpawns, decisionSpawns, investigationSpawns, itemPrepareSpawns, newGuards, consumedLanes, notes, ...(trace ? { admission } : {}) };
 }
 
 /**
@@ -900,6 +921,7 @@ export function clearTerminalCiHealAttempts(ciHealAttempts, prs) {
  * — the ghost-lease reclamation #2667 delivered but #2700 wires into the tick. Pure — derived from the num and
  * whether a LIVE prepare guard still holds it:
  *   • a `prepare-decision` guard → `prepare-decision-<num>` (the decision-prepare agent's session, SKILL §3e);
+ *   • a `prepare-item` guard     → `prepare-item-<num>` (the full item-prepare agent's session, #4504);
  *   • a `prepare` (scope) guard  → `prepare-<num>` (the scope-prepare agent's session, SKILL §3b);
  *   • otherwise                  → `conveyor-<num>` (the build/delivery agent's session, SKILL §3).
  * A prepare guard stays LIVE from spawn until its scope PR merges, so an OPEN prepare PR always still carries its
@@ -913,7 +935,7 @@ export function clearTerminalCiHealAttempts(ciHealAttempts, prs) {
  */
 export function releaseSessionForNum(num, prepareKindByNum) {
   const kind = prepareKindByNum instanceof Map ? prepareKindByNum.get(normNum(num)) : undefined;
-  return mintSessionSlug({ kind: ['prepare', 'prepare-decision'].includes(kind) ? kind : 'conveyor', id: num });
+  return mintSessionSlug({ kind: ['prepare', 'prepare-decision', 'prepare-item'].includes(kind) ? kind : 'conveyor', id: num });
 }
 
 /**
@@ -1175,8 +1197,24 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
   // this tick — it drops out of `held` entirely ONLY once resolved (or already-done), which is the real
   // "the investigation is over" signal. Spawn candidates stay narrow (never dispatch a SECOND agent onto a
   // `blocked` item); guard retention stays wide (never lose the guard that is suppressing that second dispatch).
-  const investigationsGuardPending = (Array.isArray(plan.held) ? plan.held : [])
+  //
+  // DELIBERATELY UNFILTERED BY REASON — not "the needs-investigation set" despite its use below, and #4504
+  // reuses this SAME wide set (not a copy-paste of the wrong value) for the `prepare-item` guard's pending set
+  // too, for the identical reason: a `needs-prepare` item can transiently flip to `blocked` while its
+  // prepare-item agent is mid-run, and this set must still contain it. Named `heldGuardPending` (not
+  // `investigationsGuardPending`) because it now backs BOTH prepare-family guard kinds that need the wide
+  // read — a name scoped to one kind was exactly what made four independent reviewers misread this line as a
+  // copy-paste bug in #4504's own review (it is not: this IS the wide set, for both kinds, by construction).
+  const heldGuardPending = (Array.isArray(plan.held) ? plan.held : [])
     .filter((h) => h && h.num != null)
+    .map((h) => ({ num: h.num }));
+
+  // #4504 — the `needs-prepare` SPAWN CANDIDATES (narrow — only THIS tick's `reason === 'needs-prepare'` rows),
+  // read straight off THIS TICK's dispatch plan, same pattern as `needs-investigation` above (#3567): a
+  // needs-prepare item has no separate `state` derivation step either. Guard RETENTION for this kind uses
+  // `heldGuardPending` (the wide set just above), never this narrow one — see that set's own comment for why.
+  const needsPrepareHeld = (Array.isArray(plan.held) ? plan.held : [])
+    .filter((h) => h && h.reason === 'needs-prepare' && h.num != null)
     .map((h) => ({ num: h.num }));
 
   // #3849 — the `no-size` holds, read straight off THIS TICK's dispatch plan, same pattern as
@@ -1199,7 +1237,7 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
     lanes, queue, tick, now, ttlTicks: cfg.buildTtlTicks, returnedBuildNums: signals.returnedBuildNums,
   });
   const prepare = retirePrepareGuards(bookkeeping.prepareGuards, {
-    unshaped: scopeOrSizeNeeded, decisions, investigations: investigationsGuardPending, prs, tick, now, ttlTicks: cfg.prepareTtlTicks,
+    unshaped: scopeOrSizeNeeded, decisions, investigations: heldGuardPending, needsPrepare: heldGuardPending, prs, tick, now, ttlTicks: cfg.prepareTtlTicks,
   });
   const fix = retireFixGuards(bookkeeping.fixGuards, { prs, lanes, tick, now, ttlTicks: cfg.fixTtlTicks });
   // #3454 — bump fixAttempts HERE, once per guard, exactly when retireFixGuards confirms a REAL attempt (its
@@ -1373,6 +1411,7 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
     unshaped: scopeOrSizeNeeded,
     decisions,
     investigations,
+    needsPrepare: needsPrepareHeld,
     prs,
     livePrepareGuards: prepare.live,
     availableLanes,
@@ -1392,6 +1431,7 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
     ...prep.scopeSpawns.map((s) => normNum(s.num)),
     ...prep.decisionSpawns.map((s) => normNum(s.num)),
     ...prep.investigationSpawns.map((s) => normNum(s.num)),
+    ...prep.itemPrepareSpawns.map((s) => normNum(s.num)),
   ]));
 
   // 6. FIX spawns — conveyor-launched `review:changes` PRs, gated by in-flight test + retry cap; consume lanes.
@@ -1482,6 +1522,7 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
   }
   for (const r of ciHeal.retired) if (r.note) notes.push({ kind: 'ci-heal-ttl', num: r.num, text: `⚠ CI-heal for PR carrying #${r.num} stalled ${cfg.ciHealTtlTicks} ticks — re-dispatch allowed` });
   if (prep.scopeSpawns.length) notes.push({ kind: 'auto-preparing-scope', nums: prep.scopeSpawns.map((s) => s.num), text: `⚠ ${prep.scopeSpawns.length} auto-preparing scope: ${prep.scopeSpawns.map((s) => `#${s.num}`).join(' ')}` });
+  if (prep.itemPrepareSpawns.length) notes.push({ kind: 'auto-preparing-item', nums: prep.itemPrepareSpawns.map((s) => s.num), text: `⚠ ${prep.itemPrepareSpawns.length} auto-preparing item: ${prep.itemPrepareSpawns.map((s) => `#${s.num}`).join(' ')}` });
   if (prep.investigationSpawns.length) notes.push({ kind: 'auto-investigating', nums: prep.investigationSpawns.map((s) => s.num), text: `⚠ ${prep.investigationSpawns.length} auto-investigating: ${prep.investigationSpawns.map((s) => `#${s.num}`).join(' ')}` });
   notes.push(...prep.notes.map((n) => ({ kind: n.kind, num: n.num, text: n.text })));
   notes.push(...fixPlan.notes.map((n) => ({ kind: n.kind, num: n.num, pr: n.pr, text: n.text })));
@@ -1591,6 +1632,7 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
     suppressedBuilds: launched.suppressed,
     spawnPrepareScope: prep.scopeSpawns,
     spawnPrepareDecision: prep.decisionSpawns,
+    spawnPrepareItems: prep.itemPrepareSpawns,
     spawnInvestigations: prep.investigationSpawns,
     spawnFixes: fixPlan.spawns,
     spawnCiHeals: ciHealPlan.spawns,

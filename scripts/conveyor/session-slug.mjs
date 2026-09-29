@@ -6,7 +6,7 @@ import { repoSlugTag, repoKeyForSlugTag } from '../lib/constellation-repos.mjs';
 // re-derived) so `we:scripts/conveyor/session-reaper.mjs#sessionTarget` and `we:scripts/conveyor/lease-reaper.mjs`
 // pick it up for free through the shared `parseSessionSlug` grammar below — no second naming scheme.
 export const PR_KINDS = ['review', 'fix', 'ci-heal', 'inspect'];
-export const ITEM_KINDS = ['conveyor', 'prepare', 'prepare-decision'];
+export const ITEM_KINDS = ['conveyor', 'prepare', 'prepare-decision', 'prepare-item'];
 
 export function mintSessionSlug({ kind, id, repo = 'we', attempt = '' }) {
   const itemKind = ITEM_KINDS.includes(kind);
@@ -25,7 +25,7 @@ export function mintSessionSlug({ kind, id, repo = 'we', attempt = '' }) {
 
 /** Hash item names are deliberately not reapable by number. */
 export function parseSessionSlug(name) {
-  const match = /^(review|fix|ci-heal|inspect|conveyor|prepare-decision|prepare)-(?:([a-z]+)-)?(\d+)([a-z]?)$/i.exec(String(name ?? ''));
+  const match = /^(review|fix|ci-heal|inspect|conveyor|prepare-decision|prepare-item|prepare)-(?:([a-z]+)-)?(\d+)([a-z]?)$/i.exec(String(name ?? ''));
   if (!match) return null;
   const [, rawKind, rawTag, id, rawAttempt] = match;
   const kind = rawKind.toLowerCase();

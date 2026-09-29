@@ -645,7 +645,7 @@ describe('filling the delivery brief', () => {
     // it the bare kind STRING yields `undefined`, falls through to `conveyor-<num>` — and would then only
     // agree with the hardcoded slug this card exists to remove.
     for (const num of ['3037', 'x0t9923', '42']) {
-      for (const kind of ['prepare', 'prepare-decision']) {
+      for (const kind of ['prepare', 'prepare-decision', 'prepare-item']) {
         expect(sessionSlugFor(num, kind), `${kind} #${num}`).toBe(releaseSessionForNum(num, new Map([[num, kind]])));
       }
     }
@@ -2349,11 +2349,15 @@ describe('#3165: the planner\'s prepare lists reach the spawner', () => {
     // …and the pure half refuses a reader that hands it one, rather than shaping a read around it.
     expect(() => shapeDispatchRead(tickRead({ launchKind: 'prepare-scope' }), { num: '3037' }))
       .toThrow(/unknown `launchKind`/);
-    // The six that ARE wired all resolve, and to six DISTINCT files (#3332 grew this from three to five,
-    // #3567 to six) — one map entry pointing at the wrong brief is the same failure with a quieter face.
+    // The seven that ARE wired all resolve, and to seven DISTINCT files (#3332 grew this from three to five,
+    // #3567 to six, #4504 to seven) — one map entry pointing at the wrong brief is the same failure with a quieter face.
     const paths = LAUNCH_KINDS.map((k) => briefPath(REPO_ROOT, k));
-    expect(new Set(paths).size).toBe(6);
+    expect(new Set(paths).size).toBe(7);
     for (const path of paths) expect(readFileSync(path, 'utf8').trim()).not.toBe('');
+  });
+
+  it('resolves the prepare-item brief path (#4504)', () => {
+    expect(briefPath(REPO_ROOT, 'prepare-item')).toMatch(/skills-src\/conveyor\/prepare-item-agent-brief\.md$/);
   });
 
   // ── criterion 5 ──────────────────────────────────────────────────────────────────────────────────────────
@@ -2716,19 +2720,19 @@ describe('#3332: the planner\'s fix and CI-heal lists reach the spawner', () => 
 // session would reintroduce the #3107 bounce that flow was built to avoid. So this operation takes the loud
 // alternative instead, and these are its pure, dispatch-independent facts.
 describe('#3168 — KIND_DECLARES_OCCUPANCY_ON_DISPATCH / occupancyFailOpenWarning (pure)', () => {
-  it('covers exactly the six known launch kinds, no more and no fewer', () => {
+  it('covers exactly the seven known launch kinds, no more and no fewer', () => {
     expect(Object.keys(KIND_DECLARES_OCCUPANCY_ON_DISPATCH).sort()).toEqual([...LAUNCH_KINDS].sort());
   });
 
   it('`build` and `investigate` self-adopt (their briefs pass `--adopt`) — every other kind does not', () => {
     expect(KIND_DECLARES_OCCUPANCY_ON_DISPATCH.build).toBe(true);
     expect(KIND_DECLARES_OCCUPANCY_ON_DISPATCH.investigate).toBe(true);
-    for (const kind of ['prepare', 'prepare-decision', 'fix', 'ci-heal']) {
+    for (const kind of ['prepare', 'prepare-decision', 'prepare-item', 'fix', 'ci-heal']) {
       expect(KIND_DECLARES_OCCUPANCY_ON_DISPATCH[kind], kind).toBe(false);
     }
   });
 
-  it('the two briefs marked TRUE actually pass `--adopt` on disk, and the four marked FALSE actually do not', () => {
+  it('the two briefs marked TRUE actually pass `--adopt` on disk, and the five marked FALSE actually do not', () => {
     // The map above is a STATIC claim about the brief files — this is what keeps it from silently drifting the
     // moment someone edits a brief without touching this table. Real files, real `readFileSync`, no stubbing.
     for (const [kind, selfAdopts] of Object.entries(KIND_DECLARES_OCCUPANCY_ON_DISPATCH)) {
@@ -3181,6 +3185,7 @@ describe('#3110 — fillBrief tolerates a blank OPTIONAL placeholder (ATTEMPT_TA
     expect(BRIEF_REQUIRED_BY_KIND.build).toContain('ATTEMPT_TAG');
     expect(BRIEF_REQUIRED_BY_KIND.prepare).not.toContain('ATTEMPT_TAG');
     expect(BRIEF_REQUIRED_BY_KIND['prepare-decision']).not.toContain('ATTEMPT_TAG');
+    expect(BRIEF_REQUIRED_BY_KIND['prepare-item']).not.toContain('ATTEMPT_TAG');
     expect(BRIEF_REQUIRED_BY_KIND.fix).not.toContain('ATTEMPT_TAG');
     expect(BRIEF_REQUIRED_BY_KIND['ci-heal']).not.toContain('ATTEMPT_TAG');
   });
@@ -3452,7 +3457,7 @@ describe('#3637 — deliveryTarget resolves to the brief\'s {{DELIVERY_BASE}}', 
   it('DELIVERY_BASE is a registered placeholder, required for BUILD only', () => {
     expect(BRIEF_PLACEHOLDERS).toContain('DELIVERY_BASE');
     expect(BRIEF_REQUIRED_BY_KIND.build).toContain('DELIVERY_BASE');
-    for (const kind of ['prepare', 'prepare-decision', 'fix', 'ci-heal']) {
+    for (const kind of ['prepare', 'prepare-decision', 'prepare-item', 'fix', 'ci-heal']) {
       expect(BRIEF_REQUIRED_BY_KIND[kind]).not.toContain('DELIVERY_BASE');
     }
   });

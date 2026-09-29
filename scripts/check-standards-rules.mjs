@@ -63,6 +63,9 @@ export const WE_ONLY_LANE_CONVEYOR_BRIEFS = new Set([
   'skills-src/conveyor/investigation-agent-brief.md',
   'skills-src/conveyor/prepare-decision-agent-brief.md',
   'skills-src/conveyor/prepare-scope-agent-brief.md',
+  // #4504 — same topology as the two prepare briefs above: its `acquire` (step 1) carries no `--repo=`, so
+  // `$LANE` is always a WE checkout by construction, never a second impl-repo lane.
+  'skills-src/conveyor/prepare-item-agent-brief.md',
 ]);
 
 /**

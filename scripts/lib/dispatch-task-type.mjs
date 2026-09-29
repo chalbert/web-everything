@@ -41,7 +41,7 @@
  *   | `fix`, cause `conflict`               | `conflict-resolution` | a CAUSE, not a kind (#3717)            |
  *   | `fix`                                 | `bugfix`            | derivable                                |
  *   | `ci-heal`                             | `ci-heal`           | its own taskType since 2026-09-27        |
- *   | `prepare`, `prepare-decision`         | (role)              | authoring, changes no product code       |
+ *   | `prepare`, `prepare-decision`, `prepare-item` | (role)      | authoring, changes no product code       |
  *   | `investigate`                         | (role)              | triage-research, changes no product code |
  *   | `review`                              | (role)              | judging, changes no product code         |
  *   | anything else                         | REFUSED             | never guessed                            |
@@ -65,7 +65,7 @@ export const CODE_CHANGE_DISPATCH_KINDS = Object.freeze(['build', 'fix', 'ci-hea
  * `taskType`, and the provider cascade is never consulted for it. See the file docblock for why this is a
  * third outcome rather than a `taskType` or a refusal.
  */
-export const ROLE_DISPATCH_KINDS = Object.freeze(['prepare', 'prepare-decision', 'investigate', 'review']);
+export const ROLE_DISPATCH_KINDS = Object.freeze(['prepare', 'prepare-decision', 'prepare-item', 'investigate', 'review']);
 
 /**
  * THE CLOSED CAUSE VOCABULARY. A cause is WHY a dispatch of a given kind was made — the axis #3717 names as
@@ -251,6 +251,10 @@ export const DISPATCH_TASK_TYPE_TABLE = Object.freeze([
   Object.freeze({
     example: Object.freeze({ kind: 'prepare-decision', cause: null, scopePaths: Object.freeze(['we:backlog/1.md']) }),
     outcome: 'role', taskType: null, note: 'decision authoring — the role path',
+  }),
+  Object.freeze({
+    example: Object.freeze({ kind: 'prepare-item', cause: null, scopePaths: Object.freeze(['we:backlog/1.md']) }),
+    outcome: 'role', taskType: null, note: 'story/task full-prepare authoring — the role path (#4504)',
   }),
   Object.freeze({
     example: Object.freeze({ kind: 'investigate', cause: null, scopePaths: Object.freeze(['we:backlog/1.md']) }),
