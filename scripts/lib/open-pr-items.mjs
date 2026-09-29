@@ -342,6 +342,10 @@ function isNonDeliveryPr(ref, title, { body = '', changedFiles = null } = {}) {
  * not a guess from file paths. Tried FIRST; when it resolves, the caller (`landedIdsForCandidate`) treats the
  * returned NNN exactly like a hash literal (both pass through `asItemId`), so this never needs a second code
  * path downstream.
+ *
+ * #4477 — when the ref has no lead hash, also read the title's lead `WE #<hash>:` marker (PR #2924's
+ * descriptive lane ref), mirroring the numeric title-lead convention. A ref-lead hash still wins;
+ * whole-PR guards and the landed-number lookup apply unchanged.
  * @param {{body?:string, changedFiles?:(Array|null), landedNumberFor?:function}} [o] `landedNumberFor(hash)` →
  *   the item's current NNN (as a string) if a `bornAs: <hash>` record already exists on `origin/main`, else
  *   `null`/falsy. Defaults to `() => null` (inert — identical to pre-#xqpqyr2 behaviour).
@@ -350,8 +354,15 @@ function isNonDeliveryPr(ref, title, { body = '', changedFiles = null } = {}) {
 export function deliveredHashFromPr(headRefName = '', title = '', { body = '', changedFiles = null, landedNumberFor = () => null } = {}) {
   const ref = String(headRefName || '');
   const lane = ref.match(/(?:^|\/)lane\/(.+)$/);
-  const lead = lane ? lane[1].split(/[-_]/).filter(Boolean)[0] : '';
-  if (!/^x[0-9a-z]{6}$/.test(lead || '')) return null;
+  const refLead = lane ? lane[1].split(/[-_]/).filter(Boolean)[0] : '';
+  const refIsHash = /^x[0-9a-z]{6}$/.test(refLead || '');
+  // #4477 — a descriptive lane ref can name its card's hash in the title's lead position instead.
+  // Mirror deliveredItemNumsFromPr's numeric title-lead convention; a ref-lead hash always wins.
+  // (round-1 simplicity nit: no need to re-test the hash shape below — `refLead` is already known-hash
+  // via `refIsHash`, and the title regex's own capture group can only ever match the hash shape.)
+  const titleLeadMatch = refIsHash ? null : /^\s*(?:WE\s+)?#(x[0-9a-z]{6})\s*:/i.exec(String(title || ''));
+  const lead = refIsHash ? refLead : (titleLeadMatch ? titleLeadMatch[1].toLowerCase() : '');
+  if (!lead) return null;
   if (isNonDeliveryPr(ref, title, { body, changedFiles })) return null;
   const landed = typeof landedNumberFor === 'function' ? landedNumberFor(lead) : null;
   if (landed != null) return String(landed);
