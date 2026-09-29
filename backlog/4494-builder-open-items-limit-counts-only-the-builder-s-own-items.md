@@ -1,4 +1,5 @@
 ---
+bornAs: xovjhwh
 kind: story
 size: 3
 tier: pinned
@@ -10,7 +11,7 @@ tags: []
 
 # Builder open-items limit counts only the builder's own items
 
-Operator decision 2026-09-29 ~1:40 PM ET: the builder's open-items cap (wip-cap, #4353, maxOpenItems=7) must count only the builder's own items, not items built by hand-dispatched workers. Live 2026-09-29T17:26:28Z, we:scripts/conveyor/build-dispatch-policy.mjs's planBuildDispatch (~lines 241-283) built the WIP set as {inFlight} union {delivered-by-open-PR}, where the PR side is every open PR whose branch names a card (prDeliveredNum); openItems read 7/7 filled by 4293, 4304, 4312, 4314, 4318, 4321, x4mfp16 -- six worker PRs -- so wip-cap held 4382, 4131, 4319 and the builder built nothing. Same shape as the #4464 cap fix (PR #2924), which made maxConcurrentBuilds count only the builder's own builds.
+Operator decision 2026-09-29 ~1:40 PM ET: the builder's open-items cap (wip-cap, #4353, maxOpenItems=7) must count only the builder's own items, not items built by hand-dispatched workers. Live 2026-09-29T17:26:28Z, we:scripts/conveyor/build-dispatch-policy.mjs's planBuildDispatch (~lines 241-283) built the WIP set as {inFlight} union {delivered-by-open-PR}, where the PR side is every open PR whose branch names a card (prDeliveredNum); openItems read 7/7 filled by 4293, 4304, 4312, 4314, 4318, 4321, 4484 -- six worker PRs -- so wip-cap held 4382, 4131, 4319 and the builder built nothing. Same shape as the #4464 cap fix (PR #2924), which made maxConcurrentBuilds count only the builder's own builds.
 
 ## Design
 
@@ -28,7 +29,7 @@ Those same worker PRs still count toward `maxOpenPrs` (unchanged — a separate 
 volume, not builder attribution) and still participate in scope-overlap holds (`hot-file`,
 unchanged — a worker's in-flight scope must still block a conflicting builder dispatch). Only the
 `wip-cap` (`maxOpenItems`) arithmetic changes. This mirrors the shape of the `maxConcurrentBuilds`
-fix (x3vs6tu/#4464, PR #2924): that fix made the *build-slot* cap count only the builder's own
+fix (4464/#4464, PR #2924): that fix made the *build-slot* cap count only the builder's own
 in-flight builds instead of every machine-wide "building" signal; this fix makes the *open-items*
 cap count only the builder's own open-PR deliveries instead of every open PR that merely names a
 card.
