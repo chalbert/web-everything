@@ -146,9 +146,10 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
   // PR #2921 review — a resume spawns real gate/converge/PR work, so it obeys the SAME kill switch and landing
   // freeze a fresh dispatch does (`planBuildDispatch`'s own freeze rule, computed here with no candidates).
   // Still before this tick's own `listClaims()` read, so a claim released here frees its item this same tick.
+  // Computed once, LIVE only: every live effect below that spawns PR work obeys it.
+  const freeze = live ? planBuildDispatch({ openPrs, killSwitch: effects.killSwitch(), policy }).freeze : null;
   let orphanAdoption = null;
   if (live && typeof effects.adoptOrphans === 'function') {
-    const { freeze } = planBuildDispatch({ openPrs, killSwitch: effects.killSwitch(), policy });
     try { orphanAdoption = await effects.adoptOrphans({ allowResume: !freeze.frozen, frozenReason: freeze.reasons.join('; ') }); }
     catch (e) { orphanAdoption = { error: String(e?.message || e).split('\n')[0] }; }
   }
@@ -176,10 +177,22 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
   // exactly as before (no call, no throw). See `scripts/conveyor/build-dispatch-hold-router.mjs`'s own header
   // for the three routes and why this sweeps EVERY hold each tick rather than hooking the wrapper that first
   // placed it — it catches a hold from before this fix existed exactly the same as a fresh one.
+  //
+  // PR #2967 review — routes (a)/(b) spawn a lane → commit → `open-pr --mode=label-on-green` landing, i.e. real
+  // self-merging PR work, so they obey the SAME kill switch and landing freeze `adoptOrphans` above does. While
+  // frozen they are WITHHELD — never passed to `routeHeldItems`, so no dedup lease is spent on them and the
+  // first tick after the freeze lifts routes them. Route (c) is a host-local ledger append (no lane, no PR) and
+  // still runs.
   const holdRouting = planHoldRouting(holds);
   let holdRoutingResult = null;
   if (live && typeof effects.routeHeldItems === 'function') {
-    try { holdRoutingResult = await effects.routeHeldItems(holdRouting); }
+    const allowed = freeze.frozen ? holdRouting.filter((h) => h.route === 'other') : holdRouting;
+    const withheld = holdRouting.filter((h) => !allowed.includes(h))
+      .map((h) => ({ num: h.num, route: h.route, action: 'withheld-frozen', reason: freeze.reasons.join('; ') }));
+    try {
+      const routed = await effects.routeHeldItems(allowed);
+      holdRoutingResult = [...(Array.isArray(routed) ? routed : []), ...withheld];
+    }
     catch (e) { holdRoutingResult = { error: String(e?.message || e).split('\n')[0] }; }
   }
 

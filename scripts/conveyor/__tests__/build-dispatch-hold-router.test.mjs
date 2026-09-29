@@ -64,6 +64,13 @@ describe('planHoldRouting', () => {
     expect(planHoldRouting(null)).toEqual([]);
     expect(planHoldRouting(undefined)).toEqual([]);
   });
+
+  // PR #2967 review (security) — `num` becomes a lock dir, a git ref and a log filename downstream.
+  it('drops a hold whose `num` is not a card id (traversal, slash, shell metachar, oversized hash)', () => {
+    const holds = ['../../x', 'a/b', '4380;rm', 'x'.repeat(40), '..'].map((num) => ({ num, reason: ALREADY_DONE_REASON }));
+    expect(planHoldRouting([...holds, { num: 'x5s8b47', reason: 'wrapper-threw' }]))
+      .toEqual([{ num: 'x5s8b47', route: 'other', commit: null, reason: 'wrapper-threw' }]);
+  });
 });
 
 describe('reserveHoldRoute / releaseHoldRoute — the cross-tick dedup lease', () => {

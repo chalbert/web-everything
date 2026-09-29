@@ -61,14 +61,25 @@ export function classifyHoldReason(reason) {
   return { route: 'other', commit: null };
 }
 
+// A card id: a JIT-assigned number, or a pre-numbering `bornAs` hash (e.g. `x5s8b47`).
+const HOLD_NUM_RE = /^(?:\d+|[a-z0-9]{6,8})$/;
+
+/** PURE. Is `num` (already `normNum`-ed) a real card id? #4465 PR #2967 review (security finding): `num` is
+ *  read from a hold's `lock.json` and then names a lock directory, a git ref (`lane/hold-route-<num>`) and a
+ *  log file — a malformed or hostile value like `../../x` or `a/b` must never reach any of them. */
+export function isValidHoldNum(num) {
+  return HOLD_NUM_RE.test(String(num ?? ''));
+}
+
 /** PURE. `holds` is {@link listBuildDispatchHolds}'s own normalized shape (`{num, reason}`, as
  *  we:skills-src/conveyor/build-dispatch-daemon.mjs#cliListHolds already returns it). One routing entry per
- *  hold with a real `num`, in the same order; entries with no `num` are dropped rather than routed blind. */
+ *  hold with a real card-id `num` ({@link isValidHoldNum}), in the same order; an entry with no `num`, or one
+ *  that is not a card id, is dropped rather than routed blind. */
 export function planHoldRouting(holds) {
   return (Array.isArray(holds) ? holds : [])
     .map((h) => {
       const num = normNum(h?.num);
-      if (!num) return null;
+      if (!isValidHoldNum(num)) return null;
       const { route, commit } = classifyHoldReason(h?.reason);
       return { num, route, commit, reason: h?.reason ?? null };
     })

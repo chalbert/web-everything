@@ -29,6 +29,8 @@ import { fileURLToPath } from 'node:url';
 
 import { resolveChildTimeoutMs, resolveLaneAcquireTimeoutMs } from '../lib/bounded-child.mjs';
 import { localToday } from '../lib/local-date.mjs';
+import { isValidHoldNum } from '../conveyor/build-dispatch-hold-router.mjs';
+import { normNum } from '../conveyor/queue-store.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = join(HERE, '..', '..');
@@ -73,6 +75,34 @@ export function commitReferencesItem(message, ids) {
   return list.some((id) => new RegExp(`#${escapeRegExp(id)}\\b`).test(text));
 }
 
+// Subject-line words that mark a commit as only PART of a card's delivery — never the one that closes it.
+const PARTIAL_DELIVERY_RE = /\b(?:part|slice|phase|stage)\s*\d+\b|\(\s*\d+\s*\/\s*\d+\s*\)|\bpartial(?:ly)?\b|\bgroundwork\b|\bscaffold(?:ing)?\b/i;
+
+/** PURE. Does this commit's SUBJECT LINE name one of `ids` as the card it DELIVERS — not merely mention it?
+ *  #4465 PR #2967 review (security finding): `commitReferencesItem` matches `#<id>` ANYWHERE in the message,
+ *  so a related-but-not-delivering commit ("see #N", "follow-up to #N", a body-only mention) or a PARTIAL one
+ *  ("WE #N: part 1") passed, and the card was auto-resolved with its spec unbuilt. Accepts exactly the two
+ *  delivery shapes this repo's own history uses on the subject line:
+ *   - the lead tag `WE #<id>: …` (any `<TAG> #<id>:` prefix, a bare `#<id>: …`, or a multi-id tag
+ *     `WE #<a>/#<b>: …` naming this card among its ids);
+ *   - the trailing reference `fix(x): … (#<id>)` a conventional-commit subject ends with (the shape #4380's
+ *     own live citation, commit b93d13e29, actually has) — accepted for a `bornAs` HASH id only: a trailing
+ *     `(#<number>)` is far more often a squash-merge PR number or the tool/epic card a drain commit cites
+ *     ("drain: mark card 4498 resolved on land (#2748)"), and PR numbers overlap card numbers.
+ *  Refuses a subject carrying a partial-delivery marker ({@link PARTIAL_DELIVERY_RE}: "part 2", "slice 1",
+ *  "(1/3)", "partial", "groundwork", "scaffold") even in a delivery shape. Fails SAFE: a real delivery in some
+ *  other shape is refused (the item falls back to ordinary build dispatch), never auto-resolved. */
+export function commitDeliversItem(message, ids) {
+  const subject = String(message ?? '').split(/\r?\n/)[0].trim();
+  if (!subject || PARTIAL_DELIVERY_RE.test(subject)) return false;
+  const list = (Array.isArray(ids) ? ids : [ids]).map((id) => String(id ?? '').trim()).filter(Boolean);
+  return list.some((id) => {
+    const e = escapeRegExp(id);
+    if (new RegExp(`^(?:[A-Za-z][\\w-]*\\s+)?(?:#[\\w]+/)*#${e}(?:/#[\\w]+)*:`).test(subject)) return true;
+    return !/^\d+$/.test(id) && new RegExp(`\\(#${e}\\)\\s*$`).test(subject);
+  });
+}
+
 /** PURE. Extract a card's `bornAs:` hash from its frontmatter text, or `null` if absent/unparseable. */
 export function extractBornAs(cardText) {
   const m = /^bornAs:\s*(\S+)/m.exec(String(cardText ?? ''));
@@ -93,17 +123,49 @@ export function commitTouchesNonBacklogFile(files) {
   return list.map((f) => f.trim()).filter(Boolean).some((f) => !f.startsWith('backlog/'));
 }
 
-/** PURE. Clear a card's `scope:` line (making it "unshaped" for dispatch-plan's own existing auto-prepare)
- *  and append the routing agent's finding as a new section — text in, text out, no IO. */
+export const MAX_REASON_CHARS = 500;
+
+/** PURE. Neutralize an agent-supplied hold `reason` before it is written into an AUTO-MERGED card body or PR
+ *  body — #4465 PR #2967 review (security finding): it was written verbatim (only `\n` quoted), so a steered
+ *  agent could plant headings, fences, HTML comments or instructions aimed at the next prepare agent, with no
+ *  length cap. Collapses every control character and line break (`\r`, `\n`, tabs, …) to one space, so the
+ *  text stays ONE quoted line that cannot open a heading, list or new block; turns backticks into `'` so no
+ *  code fence or inline code can open; escapes `<`/`>` so no HTML comment or tag can open; and caps the
+ *  result at {@link MAX_REASON_CHARS}. */
+export function sanitizeHoldReason(reason, { max = MAX_REASON_CHARS } = {}) {
+  const flat = String(reason ?? '')
+    .replace(/[\p{Cc}\p{Zl}\p{Zp}]+/gu, ' ')
+    .replace(/`/g, "'")
+    .replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
+}
+
+// A frontmatter `scope:` key and every indented continuation line under it — covers the inline form
+// (`scope: [a, b]`), a bracket list wrapped over several lines, AND a YAML block list (`scope:\n  - a\n  - b`).
+const SCOPE_KEY_RE = /^scope:[^\n]*(?:\n[ \t]+[^\n]*)*/m;
+
+/** PURE. Clear a card's `scope:` (making it "unshaped" for dispatch-plan's own existing auto-prepare) and
+ *  append the routing agent's finding as a new section — text in, text out, no IO. Only the FRONTMATTER's own
+ *  `scope:` key is touched, in any of its list shapes (#4465 PR #2967 review: an earlier revision matched only
+ *  the inline `scope: [..]` form, so a YAML block-list scope was left in place while the finding claimed the
+ *  card was routed to prepare). */
 export function clearScopeAndAppendFinding(cardText, { num, reason, today = localToday() } = {}) {
-  const cleared = String(cardText ?? '').replace(/^scope:\s*\[[^\]]*\]\s*$/m, 'scope: []');
+  const text = String(cardText ?? '').replace(/\r\n/g, '\n');
+  const fm = /^---\n([\s\S]*?)\n---(?=\n|$)/.exec(text);
+  // No frontmatter → no `scope:` to clear, and the finding below would falsely claim it was: refuse (landOne
+  // turns the throw into a `failed` result, so nothing lands).
+  if (!fm) throw new Error(`clearScopeAndAppendFinding: card #${num} has no frontmatter — cannot clear its scope`);
+  const cleared = `---\n${fm[1].replace(SCOPE_KEY_RE, 'scope: []')}\n---${text.slice(fm[0].length)}`;
+  const quoted = sanitizeHoldReason(reason) || '(no reason recorded)';
   const section = [
     '',
     `## Held finding — auto-routed by #4465 (${today})`,
     '',
     `The build-dispatch daemon held #${num} with:`,
     '',
-    `> ${String(reason ?? '(no reason recorded)').replace(/\n/g, '\n> ')}`,
+    `> ${quoted}`,
     '',
     "`scope:` was cleared above so this card is picked up by the existing unshaped-item auto-prepare path;",
     'a prepare pass re-scopes it against the finding.',
@@ -149,7 +211,7 @@ function renderPrBody({ num, route, commit, reason }) {
   } else {
     lines.push('Route: **out-of-scope / superseded**. `scope:` cleared and the agent\'s finding appended to', 'the card body so the existing unshaped-item auto-prepare path re-scopes it.', '');
   }
-  lines.push('Original hold reason:', '', `> ${String(reason ?? '').replace(/\n/g, '\n> ')}`, '');
+  lines.push('Original hold reason:', '', `> ${sanitizeHoldReason(reason)}`, '');
   return lines.join('\n');
 }
 
@@ -166,6 +228,11 @@ export function landOne({ num, route, commit = null, reason = null }, {
 } = {}) {
   if (route !== 'already-done' && route !== 'out-of-scope') {
     return { status: 'failed', error: `landOne: unroutable route '${route}' — only 'already-done'/'out-of-scope' land here` };
+  }
+  // PR #2967 review — `num` names a git ref, a card filename prefix and a commit subject below; refuse anything
+  // that is not a real card id before any of them is built from it.
+  if (!isValidHoldNum(normNum(num))) {
+    return { status: 'failed', error: `landOne: '${String(num).slice(0, 40)}' is not a card id — refusing to route it` };
   }
   let acq = null;
   try {
@@ -213,6 +280,12 @@ export function landOne({ num, route, commit = null, reason = null }, {
       const commitFiles = runFn('git', ['show', '--name-only', '--format=', commit], lane);
       if (!commitTouchesNonBacklogFile(commitFiles)) {
         throw new Error(`landOne: cited commit ${commit} references #${num} but touches only backlog/ files — refusing to auto-resolve on a bookkeeping-only citation`);
+      }
+      //  (4) PR #2967 review (security finding) — a mention is not a delivery: the SUBJECT must name this card
+      //      as what the commit delivers, with no partial-delivery marker (`commitDeliversItem`, above), or a
+      //      "see #N" / "follow-up to #N" / "WE #N: part 1" commit would close a card whose spec is unbuilt.
+      if (!commitDeliversItem(commitMessage, [num, bornAs])) {
+        throw new Error(`landOne: cited commit ${commit} mentions #${num} but its subject does not deliver it (a related, follow-up or partial commit) — refusing to auto-resolve`);
       }
       runFn('node', [join(lane, 'scripts', 'backlog.mjs'), 'resolve', String(num), `--graduated-to=${commit}`], lane);
       msg = `WE #${num}: auto-resolve — build-dispatch hold cited commit ${commit} as already landing the spec\n\nRouted by #4465's hold router; no agent turn.\n`;

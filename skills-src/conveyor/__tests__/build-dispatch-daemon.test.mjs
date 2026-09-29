@@ -394,6 +394,35 @@ describe('runBuildDispatchTick — #4465 build-dispatch-hold-router wiring', () 
     expect(live.holdRoutingResult).toEqual([{ num: '4380', route: 'already-done', action: 'landing-spawned' }]);
   });
 
+  // PR #2967 review (correctness) — routes (a)/(b) open self-merging PRs, so they obey the kill switch and the
+  // landing freeze exactly as `adoptOrphans` does; route (c) is a ledger append and still runs.
+  it('withholds the landable routes (never passed on, so no lease is spent) while the kill switch or a landing '
+    + 'freeze is on; route "other" still runs', async () => {
+    const dispatches = [];
+    const seen = [];
+    const base = {
+      ...effectsFor({ lockRoot, pid: 1, dispatches }),
+      listHolds: () => [
+        { num: '4295', reason: 'spec not buildable as written' },
+        { num: '4380', reason: 'spec already done on main: commit b93d13e29' },
+        { num: '9001', reason: 'wrapper-threw' },
+      ],
+      routeHeldItems: async (plan) => { seen.push(plan.map((p) => p.num)); return plan.map((p) => ({ num: p.num, route: p.route, action: 'x' })); },
+    };
+    const tooManyPrs = Array.from({ length: BUILD_DISPATCH_POLICY.maxOpenPrs + 1 }, (_, i) => ({ number: 9000 + i, labels: [], files: [], headRefName: `x-${i}` }));
+
+    await runBuildDispatchTick({ live: true, effects: base });
+    const killed = await runBuildDispatchTick({ live: true, effects: { ...base, killSwitch: () => ({ engaged: true, reason: 'operator' }) } });
+    const frozen = await runBuildDispatchTick({ live: true, effects: { ...base, fetchOpenPrs: async () => [{ repo: 'we', prs: tooManyPrs }] } });
+
+    expect(seen).toEqual([['4295', '4380', '9001'], ['9001'], ['9001']]);
+    for (const [r, why] of [[killed, /kill switch/], [frozen, /maxOpenPrs/]]) {
+      const withheld = r.holdRoutingResult.filter((o) => o.action === 'withheld-frozen');
+      expect(withheld.map((o) => o.num)).toEqual(['4295', '4380']);
+      expect(withheld[0].reason).toMatch(why);
+    }
+  });
+
   it('an OLDER effects stub with no `routeHeldItems` at all behaves exactly as before this card — no call, no throw', async () => {
     const dispatches = [];
     const effects = { ...effectsFor({ lockRoot, pid: 1, dispatches }), listHolds: () => [{ num: '4380', reason: 'x' }] };
