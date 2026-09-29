@@ -1265,6 +1265,9 @@ describe('automatic item preparation', () => {
     const effects = fixture({ fail: true });
     const tick = await runBuildDispatchTick({ live: true, effects });
     expect(tick.prepare.failures).toHaveLength(2);
+    const retry = await runBuildDispatchTick({ live: true, effects, bookkeeping: tick.nextBookkeeping });
+    expect(retry.prepare.planned.map((s) => s.num)).toEqual(['4501', '4502']);
+    expect(effects.dispatch).toHaveBeenCalledTimes(4);
     expect(effects.listPrepareClaims()).toEqual([]);
     expect(tick.nextBookkeeping.prepareGuards).toEqual([]);
   });
@@ -1279,12 +1282,43 @@ describe('automatic item preparation', () => {
     };
     expect((await runBuildDispatchTick({ live: true, effects })).prepare.launched).toHaveLength(2);
   });
+  it('dispatch re-read admits the planned prepare under the same lane cap, without spawning', async () => {
+    const { cliDispatch } = await import('../build-dispatch-daemon.mjs');
+    const { planTick } = await import('../../../scripts/conveyor/tick-core.mjs');
+    const { readTick } = await import('../../../scripts/operations/dispatch-lane-io.mjs');
+    const { shapeDispatchRead } = await import('../../../scripts/operations/dispatch-lane.mjs');
+    const fixtureTick = (maxConcurrentLanes) => planTick({
+      state: { queue: [], lanes: [{ lane: 1, scope: ['we:src/b/'] }], prs: [] },
+      plan: { launch: [], held: [{ num: '4501', reason: 'needs-prepare' }] },
+      freeLanes: [2], config: { maxConcurrentLanes },
+    });
+    const assess = (tick) => shapeDispatchRead(readTick({
+      num: '4501', runNode: () => JSON.stringify(tick),
+      loadItems: () => [{ num: '4501', slug: 'prepare-regression', kind: 'story', size: 3, scope: ['we:src/a/'] }],
+      listInFlightDispatches: () => ({ runs: [], unreadable: 0 }), listAgents: () => [],
+      checkAlreadyDone: () => ({ done: false, pr: null, checked: true }),
+      readScorecards: () => [], readDeliveryAgentOverride: () => null,
+    }), { num: '4501' });
+    expect(assess(fixtureTick(1)).holdReason).toBe('the build planner held this item: needs-prepare');
+    const result = cliDispatch({ num: '4501', launchKind: 'prepare-item', bookkeeping: {} }, {
+      exec: (_cmd, _argv, opts) => {
+        const tick = fixtureTick(Number(opts.env[MAX_CONCURRENT_LANES_ENV] ?? 1));
+        const read = assess(tick);
+        expect(read.launchKind).toBe('prepare-item');
+        expect(read.dispatching).toBe(true);
+        return JSON.stringify(read);
+      },
+    });
+    expect(result.dispatching).toBe(true);
+  });
+
   it('dispatch shell explicitly selects sonnet using the supported model override', async () => {
     const { cliDispatch } = await import('../build-dispatch-daemon.mjs');
     const exec = vi.fn(() => JSON.stringify({ dispatching: true }));
     cliDispatch({ num: '4501', launchKind: 'prepare-item', bookkeeping: {} }, { exec });
     const [, argv, opts] = exec.mock.calls[0];
     expect(argv).toContain('dispatch-lane');
+    expect(opts.env[MAX_CONCURRENT_LANES_ENV]).toBe(BUILD_DAEMON_LANE_CAP_EXEMPT_VALUE);
     expect(argv).toContain('--modelReason=automatic item preparation uses sonnet');
     const { agentArgsFromEnv, resolveWorkerModel } = await import('../../../scripts/operations/dispatch-lane-io.mjs');
     const choice = resolveWorkerModel({ extraArgs: agentArgsFromEnv(opts.env), table: { tier: 'sonnet', model: 'sonnet' }, modelReason: 'automatic item preparation uses sonnet' });
