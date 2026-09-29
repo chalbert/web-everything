@@ -8,15 +8,15 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import { afterEach, describe, it, expect, vi } from 'vitest';
 
 import { runReconcileFixDispatch } from '../../conveyor/reconcile-fix-dispatch.mjs';
 import {
-  assertMainNotStale, canonicalReviewPlaceholder, dispatchReview, fillReviewBrief, planReviewDispatch,
+  assertMainNotStale, canonicalReviewPlaceholder, dispatchReview, fillReviewBrief, isReviewCodePath, planReviewDispatch,
   reviewDispatchDisallowedToolsArgs, reviewSessionSlug, REVIEW_BRIEF_PLACEHOLDERS,
   REVIEW_DISPATCH_DISALLOWED_TOOLS, REVIEW_DISPATCH_SYSTEM_PROMPT_FILE,
   TOOL_FREE_ONLY_JUDGE_PROVIDERS,
@@ -562,6 +562,82 @@ describe('dispatchReview — refuses to spawn from a stale checkout (#3439)', ()
       checkStaleness: FRESH,
     });
     expect(calls).toHaveLength(1);
+  });
+});
+
+// ── #4387 — a managed clone refuses only when the commits it is behind touch the review code path ─────────────
+
+describe('isReviewCodePath (#4387)', () => {
+  it('names the review operation, its adapter, the judge/jury/review libs, and the guard itself', () => {
+    expect([
+      'scripts/operations/review-pr.mjs', 'scripts/operations/review-dispatch.mjs', 'scripts/operations/cli-adapter.mjs',
+      'scripts/operations/review-loop-cli.mjs', 'scripts/lib/judge-spawn.mjs', 'scripts/lib/jury-core.mjs',
+      'scripts/lib/codex-judge-spawn.mjs', 'scripts/lib/review-policy.contract.json', 'scripts/lib/main-staleness.mjs',
+    ].every(isReviewCodePath)).toBe(true);
+  });
+  it('rejects unrelated code, backlog cards, nested dirs, and non-strings', () => {
+    expect([
+      'scripts/backlog/frontmatter.mjs', 'scripts/lane-pool.mjs', 'backlog/4387-review.md',
+      'scripts/lib/__tests__/review-core.test.mjs', 'docs/review/x.mjs', '', null, undefined,
+    ].some(isReviewCodePath)).toBe(false);
+  });
+});
+
+describe('dispatchReview — managed clone behind origin/main (#4387)', () => {
+  let dir;
+  const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  const commit = (cwd, file, text) => {
+    mkdirSync(dirname(join(cwd, file)), { recursive: true });
+    writeFileSync(join(cwd, file), text);
+    git(cwd, 'add', file);
+    git(cwd, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', `edit ${file}`);
+  };
+  function behindClone(...behindFiles) {
+    dir = mkdtempSync(join(tmpdir(), 'review-dispatch-4387-'));
+    git(dir, 'init', '-q', '--bare', '-b', 'main', 'origin.git');
+    git(dir, 'clone', '-q', 'origin.git', 'upstream');
+    const up = join(dir, 'upstream');
+    commit(up, 'a.txt', 'one\n');
+    git(up, 'push', '-q', 'origin', 'main');
+    git(dir, 'clone', '-q', '-b', 'main', 'origin.git', 'clone');
+    for (const f of behindFiles) commit(up, f, 'two\n');
+    git(up, 'push', '-q', 'origin', 'main');
+    return join(dir, 'clone');
+  }
+  const run = (root) => {
+    const calls = [];
+    dispatchReview({
+      pr: 1234, repo: 'chalbert/web-everything', root, home: '/home/test', checkoutExists: () => true,
+      readBrief: () => REAL_TEMPLATE_STUB, mintSessionId: () => '11111111-1111-4111-8111-111111111111',
+      spawnAgent: (argv, opts) => { calls.push({ argv, opts }); return ''; },
+      resolveSettingsEnv: () => ({}), sessionCwdFor: () => join(dir, 'session'), ensureSessionCwd: () => {},
+      isolateSession: () => ({}),
+    });
+    return calls;
+  };
+  let prevEnv;
+  afterEach(() => {
+    if (prevEnv === undefined) delete process.env.WE_DAEMON_MANAGED_CLONE; else process.env.WE_DAEMON_MANAGED_CLONE = prevEnv;
+    if (dir) rmSync(dir, { recursive: true, force: true });
+    dir = undefined;
+  });
+  const managed = () => { prevEnv = process.env.WE_DAEMON_MANAGED_CLONE; process.env.WE_DAEMON_MANAGED_CLONE = '1'; };
+
+  it('behind only in code OFF the review path: the review dispatches (before #4387: refused)', () => {
+    const root = behindClone('scripts/backlog/frontmatter.mjs', 'scripts/lane-pool.mjs', 'backlog/1-card.md');
+    managed();
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    try {
+      expect(run(root)).toHaveLength(1);
+      expect(stderr.mock.calls.map((c) => String(c[0])).join('')).toMatch(/3 commit\(s\) behind origin\/main .*tolerating the lag/);
+    } finally { stderr.mockRestore(); }
+    expect(git(root, 'rev-list', '--count', 'HEAD..origin/main').trim()).toBe('3'); // the clone is never moved
+  });
+
+  it('behind in a review-path file: still refuses, before spawning', () => {
+    const root = behindClone('scripts/lane-pool.mjs', 'scripts/operations/review-pr.mjs');
+    managed();
+    expect(() => run(root)).toThrow(/2 commit\(s\) behind origin\/main.*STALE code from this checkout/s);
   });
 });
 

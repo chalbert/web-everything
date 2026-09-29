@@ -403,6 +403,20 @@ export function fillReviewBrief(template, values = {}) {
 // default behavior. Read the guard's full history/design there, not here. Both of this guard's callers
 // (this file's `dispatchReview` below, and we:scripts/conveyor/reconcile-fix-dispatch.mjs) are unchanged.
 
+/** #4387 — the declared REVIEW CODE PATH: the review operation (review-pr, this dispatcher, the loop CLI), its
+ *  provider adapter, the lib judge/jury/review modules, and the staleness guard itself. A managed clone behind
+ *  `origin/main` only in files outside this set still dispatches a review (see `assertMainNotStale`'s
+ *  `dispatchPath`). A declared list, not the full import closure: that closure reaches ~190 files (the backlog,
+ *  lane-pool and conveyor libraries), so nearly every landed PR would touch it and the guard would keep refusing. */
+const REVIEW_CODE_PATH_RE = /^scripts\/(operations|lib|conveyor)\/[^/]*(review|judge|jury)[^/]*$/;
+const REVIEW_CODE_PATH_FILES = new Set(['scripts/operations/cli-adapter.mjs', 'scripts/lib/main-staleness.mjs']);
+
+/** PURE — is `path` (repo-relative) on the review code path? */
+export function isReviewCodePath(path) {
+  const p = String(path || '');
+  return REVIEW_CODE_PATH_FILES.has(p) || REVIEW_CODE_PATH_RE.test(p);
+}
+
 /**
  * Shape one dispatch request and verify the selected checkout before filling or spawning.
  *
@@ -481,8 +495,8 @@ export function dispatchReview({
   assertNotALaneCheckout(root);
   // #3439 — refuse (not silently spawn) when this checkout is behind origin/main: see `assertMainNotStale`.
   // `checkStaleness` undefined here falls straight through to that function's own default — no need to
-  // duplicate it.
-  assertMainNotStale(root, checkStaleness);
+  // duplicate it. #4387 — a managed clone refuses only when a behind file is on the review code path.
+  assertMainNotStale(root, checkStaleness, { dispatchPath: isReviewCodePath });
   // #xqa9ttq — validated HERE, before the brief is ever filled: an unrecognised name would otherwise reach
   // `review-loop-cli.mjs`'s own `--provider` parse INSIDE the dispatched session, where the refusal happens
   // minutes into a real dispatch instead of at the command line that requested it.
