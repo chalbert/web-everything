@@ -1,9 +1,31 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+// #4465 review — `cliRouteHeldItems`'s (a)/(b) routes ultimately call `cliSpawnHoldLand`, which spawns a REAL
+// detached `node` process via `defaultSpawnDetached`. A wiring test that exercises the real reserve/spawn
+// path (rather than just `typeof cliRouteHeldItems === 'function'`) must not actually spawn that process —
+// mock ONLY this one module, so `cliSpawnHoldLand`'s own argv construction and the REAL `reserveHoldRoute`/
+// `appendHoldFinding` primitives underneath it are still exercised for real. `vi.hoisted` is required here
+// (not a plain top-level `const`) because `vi.mock` itself is hoisted above every other statement in this
+// file, including ordinary `const` declarations — a factory that closes over an un-hoisted variable would
+// see it as `undefined` at mock-registration time.
+const { spawnCalls, fakeDetachedResult } = vi.hoisted(() => ({
+  spawnCalls: [],
+  fakeDetachedResult: { spawned: true, pid: 4242, logPath: '/tmp/fake-hold-route.log' },
+}));
+vi.mock('../../../scripts/operations/detached-dispatch.mjs', async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    defaultSpawnDetached: (argv, opts) => { spawnCalls.push({ argv, opts }); return fakeDetachedResult; },
+    deliveryDispatchLogPath: (slug) => `/tmp/fake-hold-route-${slug}.log`,
+  };
+});
+
 import {
   runBuildDispatchTick, settleBookkeeping, readKillSwitch, readDispatchOutcome, KILL_SWITCH_ENV,
   cliListSettledBuilds, cliListHolds, policyFrom,
@@ -11,7 +33,10 @@ import {
   primaryInfraStoreEnv, cliRetryInfraBlocked,
   // #4464 builder-cap-machine-wide
   cliPlanTick, BUILD_DAEMON_LANE_CAP_EXEMPT_VALUE,
+  // #4465 build-dispatch-hold-router
+  cliRouteHeldItems, cliSpawnHoldLand,
 } from '../build-dispatch-daemon.mjs';
+import { listHoldFindings } from '../../../scripts/conveyor/build-dispatch-hold-router.mjs';
 import { MAX_CONCURRENT_LANES_ENV } from '../../../scripts/lib/lane-concurrency.mjs';
 import {
   acquireBuildDispatchClaim, releaseBuildDispatchClaim, listBuildDispatchClaims,
@@ -318,6 +343,198 @@ describe('runBuildDispatchTick — #4131/#4382 build-orphan-adopt', () => {
     const r = await runBuildDispatchTick({ live: true, effects });
     expect(r.orphanAdoption).toEqual({ error: 'orphan-adopt: run-store unreadable' });
     expect(r.dispatched.length).toBeGreaterThan(0);
+  });
+});
+
+// #4465 — a held item's own route is classified EVERY tick (pure, cheap — visible on `--dry-run` too), and
+// acted on only when `live` — same optional-effect / best-effort posture as #4131/#4382's `adoptOrphans` and
+// #4348's `retryInfraBlocked` above, so asserted the same way.
+describe('runBuildDispatchTick — #4465 build-dispatch-hold-router wiring', () => {
+  let lockRoot;
+  beforeEach(() => { lockRoot = mkdtempSync(join(tmpdir(), 'bdd-claims-holdroute-')); });
+  afterEach(() => { rmSync(lockRoot, { recursive: true, force: true }); });
+
+  it('classifies every live hold into `holdRouting` on BOTH a dry-run and a live tick', async () => {
+    const dispatches = [];
+    const effects = {
+      ...effectsFor({ lockRoot, pid: 1, dispatches }),
+      listHolds: () => [
+        { num: '4295', reason: 'spec not buildable as written within declared scope: re-shaping needed' },
+        { num: '4380', reason: 'spec already done on main: commit b93d13e29 — card just needs resolving' },
+        { num: '9001', reason: 'wrapper-threw' },
+      ],
+    };
+    const dry = await runBuildDispatchTick({ live: false, effects });
+    const live = await runBuildDispatchTick({ live: true, effects });
+    for (const r of [dry, live]) {
+      expect(r.holdRouting).toEqual([
+        { num: '4295', route: 'out-of-scope', commit: null, reason: expect.stringContaining('not buildable') },
+        { num: '4380', route: 'already-done', commit: 'b93d13e29', reason: expect.stringContaining('already done') },
+        { num: '9001', route: 'other', commit: null, reason: 'wrapper-threw' },
+      ]);
+    }
+  });
+
+  it('a LIVE tick calls effects.routeHeldItems(holdRouting) exactly once; a DRY-RUN tick never calls it', async () => {
+    const dispatches = [];
+    let calls = 0;
+    let seenPlan = null;
+    const effects = {
+      ...effectsFor({ lockRoot, pid: 1, dispatches }),
+      listHolds: () => [{ num: '4380', reason: 'spec already done on main: commit b93d13e29' }],
+      routeHeldItems: async (plan) => { calls += 1; seenPlan = plan; return [{ num: '4380', route: 'already-done', action: 'landing-spawned' }]; },
+    };
+    const dry = await runBuildDispatchTick({ live: false, effects });
+    expect(calls).toBe(0);
+    expect(dry.holdRoutingResult).toBeNull();
+
+    const live = await runBuildDispatchTick({ live: true, effects });
+    expect(calls).toBe(1);
+    expect(seenPlan).toEqual([{ num: '4380', route: 'already-done', commit: 'b93d13e29', reason: 'spec already done on main: commit b93d13e29' }]);
+    expect(live.holdRoutingResult).toEqual([{ num: '4380', route: 'already-done', action: 'landing-spawned' }]);
+  });
+
+  // PR #2967 review (correctness) — routes (a)/(b) open self-merging PRs, so they obey the kill switch and the
+  // landing freeze exactly as `adoptOrphans` does; route (c) is a ledger append and still runs.
+  it('withholds the landable routes (never passed on, so no lease is spent) while the kill switch or a landing '
+    + 'freeze is on; route "other" still runs', async () => {
+    const dispatches = [];
+    const seen = [];
+    const base = {
+      ...effectsFor({ lockRoot, pid: 1, dispatches }),
+      listHolds: () => [
+        { num: '4295', reason: 'spec not buildable as written' },
+        { num: '4380', reason: 'spec already done on main: commit b93d13e29' },
+        { num: '9001', reason: 'wrapper-threw' },
+      ],
+      routeHeldItems: async (plan) => { seen.push(plan.map((p) => p.num)); return plan.map((p) => ({ num: p.num, route: p.route, action: 'x' })); },
+    };
+    const tooManyPrs = Array.from({ length: BUILD_DISPATCH_POLICY.maxOpenPrs + 1 }, (_, i) => ({ number: 9000 + i, labels: [], files: [], headRefName: `x-${i}` }));
+
+    await runBuildDispatchTick({ live: true, effects: base });
+    const killed = await runBuildDispatchTick({ live: true, effects: { ...base, killSwitch: () => ({ engaged: true, reason: 'operator' }) } });
+    const frozen = await runBuildDispatchTick({ live: true, effects: { ...base, fetchOpenPrs: async () => [{ repo: 'we', prs: tooManyPrs }] } });
+
+    expect(seen).toEqual([['4295', '4380', '9001'], ['9001'], ['9001']]);
+    for (const [r, why] of [[killed, /kill switch/], [frozen, /maxOpenPrs/]]) {
+      const withheld = r.holdRoutingResult.filter((o) => o.action === 'withheld-frozen');
+      expect(withheld.map((o) => o.num)).toEqual(['4295', '4380']);
+      expect(withheld[0].reason).toMatch(why);
+    }
+  });
+
+  it('an OLDER effects stub with no `routeHeldItems` at all behaves exactly as before this card — no call, no throw', async () => {
+    const dispatches = [];
+    const effects = { ...effectsFor({ lockRoot, pid: 1, dispatches }), listHolds: () => [{ num: '4380', reason: 'x' }] };
+    const r = await runBuildDispatchTick({ live: true, effects });
+    expect(r.holdRoutingResult).toBeNull();
+    expect(r.holdRouting).toEqual([{ num: '4380', route: 'other', commit: null, reason: 'x' }]);
+  });
+
+  it('a THROWING routing pass never fails this tick\'s own build-dispatch plan — best-effort, captured as `{error}`', async () => {
+    const dispatches = [];
+    const effects = {
+      ...effectsFor({ lockRoot, pid: 1, dispatches }),
+      listHolds: () => [{ num: '4380', reason: 'spec already done on main: commit b93d13e29' }],
+      routeHeldItems: async () => { throw new Error('hold-router: coordination root unreadable'); },
+    };
+    const r = await runBuildDispatchTick({ live: true, effects });
+    expect(r.holdRoutingResult).toEqual({ error: 'hold-router: coordination root unreadable' });
+    expect(r.dispatched.length).toBeGreaterThan(0);
+  });
+});
+
+// #4465 review — the ORIGINAL version of this describe block asserted only `typeof cliRouteHeldItems ===
+// 'function'`: it would stay green even if the wiring passed the wrong effect, or `cliSpawnHoldLand` built a
+// broken argv (wrong script path, missing `--commit`). These tests instead drive `cliRouteHeldItems` against
+// the REAL `reserveHoldRoute`/`appendHoldFinding` primitives (over a real temp coordination root) and the
+// REAL `cliSpawnHoldLand`, with only the one un-runnable-in-a-test step — the actual detached `node`
+// spawn — faked (see the `vi.mock` of `detached-dispatch.mjs` above).
+describe('cliRouteHeldItems (#4465 real IO wiring) — the real reserve/spawn/finding effects, not a stub', () => {
+  let coordRoot;
+  beforeEach(() => {
+    coordRoot = mkdtempSync(join(tmpdir(), 'bdd-holdroute-coord-'));
+    process.env.WE_COORDINATION_ROOT = coordRoot;
+    spawnCalls.length = 0;
+  });
+  afterEach(() => {
+    delete process.env.WE_COORDINATION_ROOT;
+    rmSync(coordRoot, { recursive: true, force: true });
+  });
+
+  it('is exported as an async function', () => {
+    expect(typeof cliRouteHeldItems).toBe('function');
+    expect(cliRouteHeldItems.constructor.name).toBe('AsyncFunction');
+  });
+
+  it("route 'other': really appends to the REAL JSON ledger under the real coordination root (never a stub) "
+    + 'and never touches spawnLand', async () => {
+    const outcomes = await cliRouteHeldItems([{ num: 'x9001', route: 'other', commit: null, reason: 'wrapper-threw' }]);
+    expect(outcomes).toEqual([{ num: 'x9001', route: 'other', action: 'finding-recorded' }]);
+    expect(listHoldFindings()).toEqual([expect.objectContaining({ num: 'x9001', reason: 'wrapper-threw' })]);
+    expect(spawnCalls).toHaveLength(0);
+  });
+
+  it("route 'already-done': really reserves the dedup lease through the REAL reserveHoldRoute (not a stub "
+    + 'that no-ops) before spawning the REAL cliSpawnHoldLand — the lease is actually persisted, with the '
+    + 'right resource key and route metadata, under the real coordination root', async () => {
+    const outcomes = await cliRouteHeldItems([{ num: 'x9002', route: 'already-done', commit: 'b93d13e29', reason: 'x' }]);
+    expect(outcomes).toEqual([{ num: 'x9002', route: 'already-done', action: 'landing-spawned' }]);
+    expect(spawnCalls).toHaveLength(1);
+    const { readLockEntry } = await import('../../../scripts/readiness/file-locks.mjs');
+    const { holdRouteLockRoot } = await import('../../../scripts/conveyor/build-dispatch-hold-router.mjs');
+    const entry = readLockEntry(holdRouteLockRoot(), 'we:x9002:already-done');
+    expect(entry?.meta).toMatchObject({ num: 'x9002', route: 'already-done' });
+    // A second reserve for the SAME item — even with an explicitly DIFFERENT owner string — finds this lease
+    // already held and is refused, proving it is a genuine reservation, not a no-op stub. `reserveHoldRoute`'s
+    // own DEFAULT owner is a fresh `randomUUID()` per call (#4465 review round 2 fix), so this daemon's own
+    // real long-lived-process call above and this contender's call are already two distinct owners by
+    // construction — no explicit override is even needed to prove dedup, but one is passed anyway for
+    // clarity.
+    const { reserveHoldRoute } = await import('../../../scripts/conveyor/build-dispatch-hold-router.mjs');
+    const contender = reserveHoldRoute({ num: 'x9002', route: 'already-done', owner: 'some-other-host:99999' });
+    expect(contender.ok).toBe(false);
+  });
+
+  it("route 'out-of-scope': also reserves + spawns through the real primitives", async () => {
+    const outcomes = await cliRouteHeldItems([{ num: 'x9003', route: 'out-of-scope', commit: null, reason: 'spec not buildable' }]);
+    expect(outcomes).toEqual([{ num: 'x9003', route: 'out-of-scope', action: 'landing-spawned' }]);
+    expect(spawnCalls).toHaveLength(1);
+    expect(spawnCalls[0].argv).toEqual(expect.arrayContaining(['--num=x9003', '--route=out-of-scope', '--reason=spec not buildable']));
+  });
+});
+
+// #4465 review — `cliSpawnHoldLand` itself had no test at all before this. These pin its argv construction —
+// the exact thing a wiring mistake (wrong script path, a dropped `--commit`) would break silently, since
+// nothing else reddens for it.
+describe('cliSpawnHoldLand (#4465) — the detached-landing argv construction', () => {
+  beforeEach(() => { spawnCalls.length = 0; });
+
+  it('always includes the land script\'s own path, --num and --route, and omits --commit/--reason when absent', async () => {
+    await cliSpawnHoldLand({ num: '4380', route: 'already-done', commit: null, reason: null });
+    expect(spawnCalls).toHaveLength(1);
+    const { argv } = spawnCalls[0];
+    expect(argv[0]).toMatch(/build-dispatch-hold-route-land\.mjs$/);
+    expect(argv).toEqual(expect.arrayContaining(['--num=4380', '--route=already-done']));
+    expect(argv.some((a) => a.startsWith('--commit='))).toBe(false);
+    expect(argv.some((a) => a.startsWith('--reason='))).toBe(false);
+  });
+
+  it('adds --commit=<sha> only when the routed entry carries one (route "already-done")', async () => {
+    await cliSpawnHoldLand({ num: '4380', route: 'already-done', commit: 'b93d13e29', reason: null });
+    expect(spawnCalls[0].argv).toEqual(expect.arrayContaining(['--commit=b93d13e29']));
+  });
+
+  it('adds --reason=<text> only when the routed entry carries one (route "out-of-scope")', async () => {
+    await cliSpawnHoldLand({ num: '4295', route: 'out-of-scope', commit: null, reason: 'spec not buildable as written' });
+    expect(spawnCalls[0].argv).toEqual(expect.arrayContaining(['--reason=spec not buildable as written']));
+  });
+
+  it('returns whatever defaultSpawnDetached reports, and passes a real cwd + logPath through', async () => {
+    const result = await cliSpawnHoldLand({ num: '4380', route: 'already-done', commit: 'b93d13e29', reason: null });
+    expect(result).toBe(fakeDetachedResult);
+    expect(typeof spawnCalls[0].opts.cwd).toBe('string');
+    expect(spawnCalls[0].opts.logPath).toBe('/tmp/fake-hold-route-hold-route-4380.log');
   });
 });
 
