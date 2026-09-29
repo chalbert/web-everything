@@ -4,7 +4,7 @@
  * is fs/git-adjacent behavior that a fake would just re-assert.
  */
 import { execFileSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -44,10 +44,17 @@ describe('a real planted pre-commit hook', () => {
     writeFileSync(hook, `#!/bin/sh\necho ran > ${JSON.stringify(marker)}\n`);
     chmodSync(hook, 0o755);
     writeFileSync(join(dir, 'a.txt'), 'v1\n');
-    execFileSync('git', ['add', 'a.txt'], { cwd: dir });
+    // A clean child env, built explicitly — never bare `process.env` (#4291 advisory review, correctness): this
+    // suite's own test process can itself be spawned under a caller's `laneEnv` (`probation-build-run.mjs`'s
+    // `runGate` hands `laneEnv` to `verify-lane.mjs`, which this suite runs under on a full-suite fallback), so
+    // a bare inherited env would silently carry GIT_CONFIG_COUNT/KEY/VALUE in here too and this "plain commit"
+    // RED step would never actually exercise a live hook.
+    const cleanEnv = { ...process.env };
+    for (const key of Object.keys(cleanEnv)) if (key.startsWith('GIT_CONFIG_')) delete cleanEnv[key];
+    execFileSync('git', ['add', 'a.txt'], { cwd: dir, env: cleanEnv });
 
-    // RED (the vulnerability): an ordinary commit, no env override, lets the planted hook run.
-    execFileSync('git', ['commit', '-m', 'plain commit'], { cwd: dir });
+    // RED (the vulnerability): an ordinary commit, no hooks-disabled override, lets the planted hook run.
+    execFileSync('git', ['commit', '-m', 'plain commit'], { cwd: dir, env: cleanEnv });
     expect(() => execFileSync('cat', [marker])).not.toThrow();
     rmSync(marker);
 
@@ -231,6 +238,38 @@ describe('resetHookSurface', () => {
     mkdirSync(join(dir, '.git', 'config'));
     writeFileSync(join(dir, '.git', 'config', 'x'), 'x');
     expect(resetHookSurface(dir, baseline).clean).toBe(false);
+  });
+
+  it('never deletes through a symlinked .git/hooks (#4291 advisory review, security/security)', () => {
+    const dir = makeRepo();
+    rmSync(join(dir, '.git', 'hooks'), { recursive: true, force: true });
+    const outside = mkdtempSync(join(tmpdir(), 'we-hook-surface-outside-'));
+    dirs.push(outside);
+    const sentinel = join(outside, 'sentinel.txt');
+    writeFileSync(sentinel, 'do-not-delete\n');
+    symlinkSync(outside, join(dir, '.git', 'hooks'));
+
+    const result = resetHookSurface(dir);
+
+    expect(result.clean).toBe(false); // no safe baseline — caller must refuse, never proceed
+    expect(readFileSync(sentinel, 'utf8')).toBe('do-not-delete\n'); // the link target was never touched
+  });
+
+  it('never deletes/writes through a symlinked .git (#4291 advisory review, security/security)', () => {
+    const dir = makeRepo();
+    const baseline = snapshotHookSurface(dir);
+    const outside = mkdtempSync(join(tmpdir(), 'we-hook-surface-outside-git-'));
+    dirs.push(outside);
+    const sentinel = join(outside, 'sentinel.txt');
+    writeFileSync(sentinel, 'do-not-delete\n');
+    rmSync(join(dir, '.git'), { recursive: true, force: true }); // simulate a worker having replaced `.git`
+    symlinkSync(outside, join(dir, '.git'));
+
+    const result = resetHookSurface(dir, baseline);
+
+    expect(result.clean).toBe(false);
+    expect(readFileSync(sentinel, 'utf8')).toBe('do-not-delete\n');
+    expect(existsSync(join(outside, 'config'))).toBe(false); // the config restore never wrote through the link
   });
 
   it('reports uncleanable leftovers rather than silently proceeding', () => {

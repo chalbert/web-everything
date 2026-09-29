@@ -199,6 +199,13 @@ function restoreRepoHooksPath(dir) {
  * added is gone, rather than hashed into the next dispatch's baseline). The file is removed and re-created, so a
  * `.git/config` symlink the worker planted is replaced, never written through.
  *
+ * `.git`/`.git/hooks` MUST be real directories, never followed through (#4291 advisory review, security/security):
+ * a worker sandboxed to the lane could replace either with a symlink pointing outside it, and the readdir+rmSync
+ * cleanup below would otherwise recurse into and delete the LINK TARGET's contents with this (unsandboxed)
+ * launcher's own permissions. Both are `lstatSync`'d BEFORE any read or write; if either exists and is not a
+ * real directory, this returns `clean: false` immediately, touching neither path — a missing `.git` or
+ * `.git/hooks` is not itself suspicious (a fresh/shallow clone may have neither yet) and falls through as usual.
+ *
  * @param {string} dir
  * @param {{configBytes?: Buffer|null}} [baseline]
  * @returns {{clean: boolean, leftover: string[], snapshot: {configHash: string|null, configBytes: Buffer|null, files: Record<string,string>}}}
@@ -207,6 +214,14 @@ function restoreRepoHooksPath(dir) {
  *   and after a tamper run no further git in the lane (not even the discard).
  */
 export function resetHookSurface(dir, baseline) {
+  for (const p of [join(dir, '.git'), join(dir, '.git', 'hooks')]) {
+    let st;
+    try { st = lstatSync(p); } catch { continue; } // missing is fine — nothing to protect yet, fall through
+    if (!st.isDirectory()) {
+      // A symlink (or a plain file) in place of a real directory — refuse without touching anything under it.
+      return { clean: false, leftover: [], snapshot: { configHash: null, configBytes: null, files: {} } };
+    }
+  }
   let restoreOk = true;
   if (baseline?.configBytes != null) {
     const configPath = join(dir, '.git', 'config');
