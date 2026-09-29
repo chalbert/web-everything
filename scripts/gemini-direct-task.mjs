@@ -92,6 +92,16 @@ export const AGY_CLI = 'agy';
 export const AGY_RESUME_PROMPT = 'Continue the task from where you left off and finish it. Do not restart from scratch or repeat already-completed work.';
 export const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;
 
+/**
+ * Model/effort compatibility otherwise remains agy's responsibility (see MODEL FAMILIES above).
+ * The supplied shared run-quality scorecard evidence reports 83/83 agy-claude review-seat calls on
+ * 2026-09-29 rejected --effort for claude-sonnet-4-6 with "invalid model selection (...): --effort is
+ * not supported for model \"claude-sonnet-4-6\"". claude-opus-4-6-thinking is included by inference
+ * from agy's other named Claude backend, not an independent live confirmation; revisit if a future
+ * live trial contradicts it. Every other model id, known or future, still forwards effort to agy.
+ */
+export const AGY_EFFORT_UNSUPPORTED_MODELS = Object.freeze(['claude-sonnet-4-6', 'claude-opus-4-6-thinking']);
+
 /** #4194 — the suffix a `--review` task carries in place of the edit instruction. agy has NO read-only mode (see
  *  the header: `--sandbox` confines only its shell, never its native file tools), and a review task carries
  *  UNTRUSTED PR text that may try to steer the agent. So a review run omits `--dangerously-skip-permissions`, and
@@ -139,7 +149,8 @@ export function buildAgyDirectTaskArgv({ addDirs = [], model, effort, sandbox = 
   }
   if (effort !== undefined) {
     if (!['low', 'medium', 'high'].includes(effort)) throw new TypeError('gemini-direct-task: effort must be low|medium|high');
-    argv.push('--effort', effort); // vocabulary only; agy validates model/effort combinations.
+    const modelSupportsEffort = !(typeof model === 'string' && AGY_EFFORT_UNSUPPORTED_MODELS.includes(model.trim()));
+    if (modelSupportsEffort) argv.push('--effort', effort); // vocabulary only; agy validates model/effort combinations for every other model.
   }
   if (typeof sandbox !== 'boolean') throw new TypeError('gemini-direct-task: sandbox must be boolean');
   if (sandbox) argv.push('--sandbox'); // shell only; native file tools bypass this confinement.
