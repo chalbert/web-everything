@@ -13,8 +13,8 @@
  * assumed) verification trail behind the swap — a `--safe-mode` swap was tried FIRST and independently
  * REJECTED after a real smoke test showed a `--settings=<hooks file>` layered on top of it never fires.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
+import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest';
+import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -95,7 +95,8 @@ import {
   resolveItemSpecPathBasename, fillMinimalBrief,
   buildPrBody, writePrBody, openPr, delegationForBuild,
   runConverge, parseConvergeEditResult, buildConvergeEditorArgv, runConvergeEdit,
-  convergeRoundTouchedFiles, commitConvergeRound, commitBuildTurn, coAuthorTrailerFor,
+  convergeRoundTouchedFiles, commitConvergeRound, commitBuildTurn, coAuthorTrailerFor, convergeScratchDir,
+  resetConvergeScratchDir,
   prefixOwnPathMentions, sanitizeOwnLocusMentions,
   decideParkMode, computeLaneDiffStats,
   resolveLanePath, runGateWithOneRetry, claimItem, runAgentToCompletion, acquireLane,
@@ -840,10 +841,15 @@ describe('runConverge (#3627 gap 3 — the real loop)', () => {
 
   beforeEach(() => {
     lane = mkdtempSync(join(tmpdir(), 'deliver-item-wrapper-converge-'));
+    // #4356 — the `init` state-file side effect is simulated inside `fakeRun` itself (below), not here: this
+    // block runs BEFORE `runConverge` is even called, and `runConverge` now wipes the lane's scratch dir at
+    // its own start (`resetConvergeScratchDir`) before making its first `init` call — a write here would just
+    // be wiped before the loop ever got to check for it.
   });
 
   afterEach(() => {
     rmSync(lane, { recursive: true, force: true });
+    rmSync(convergeScratchDir(lane), { recursive: true, force: true });
   });
 
   /** A scripted fake `run` — routes on argv shape, never on call order, so it stays correct regardless of how
@@ -856,19 +862,35 @@ describe('runConverge (#3627 gap 3 — the real loop)', () => {
   // a no-op, so it records a `git status` call but never a `git commit`). A string answers every call the same
   // way; a function `(callIndex) => string` answers per-call, for a test that needs different rounds to see
   // different porcelain output.
-  function fakeRun({ init, read = 'diff --git a/x b/x\n+hi\n', panel, redTeamPanel, editor, steps, gitStatus = '' }) {
+  // `onEditorCall` (#4356) — an optional side effect run right before the editor's canned reply is returned,
+  // for a test that needs to simulate something the tool-bearing editor turn itself did to the lane/scratch
+  // dir (the live #4055 shape: `runConvergeEdit`'s `claude` spawn deleting the wrapper's own bookkeeping).
+  function fakeRun({
+    init, read = 'diff --git a/x b/x\n+hi\n', panel, redTeamPanel, editor, steps, gitStatus = '', onEditorCall,
+  }) {
     let stepIdx = 0;
     let gitStatusCallIdx = 0;
     const calls = [];
     const fn = vi.fn((cmd, args = [], opts) => {
       calls.push({ cmd, args, opts });
-      if (cmd === 'node' && args[0] === 'scripts/converge-cli.mjs' && args[1] === 'init') return init;
+      if (cmd === 'node' && args[0] === 'scripts/converge-cli.mjs' && args[1] === 'init') {
+        // #4356 — a real `init` call writes the state file for real; this fake reproduces that ONE side
+        // effect (nothing else about `init` is faked) so the loop's own existence check has something real
+        // to find on its very first `step` call, the same as it would against the genuine CLI. Written here,
+        // never in a `beforeEach`, because `runConverge` now wipes the lane's scratch dir itself (via
+        // `resetConvergeScratchDir`) before ever making this call — a `beforeEach` write would just be wiped.
+        writeFileSync(join(convergeScratchDir(lane), '.converge-state.json'), '{}');
+        return init;
+      }
       if (cmd === 'bash') return read;
       if (cmd === 'node' && args[0] === 'skills-src/jury/panel-fanout.mjs') {
         const isRedTeam = args.some((a) => String(a).includes('-redteam'));
         return isRedTeam ? redTeamPanel : panel;
       }
-      if (cmd === 'claude') return editor;
+      if (cmd === 'claude') {
+        if (onEditorCall) onEditorCall();
+        return editor;
+      }
       if (cmd === 'git' && args[0] === 'status') {
         return typeof gitStatus === 'function' ? gitStatus(gitStatusCallIdx++) : gitStatus;
       }
@@ -991,7 +1013,8 @@ describe('runConverge (#3627 gap 3 — the real loop)', () => {
     const addCall = run.calls[addCallIdx];
     const commitCall = run.calls[commitCallIdx];
     expect(addCall.args.slice(2)).toEqual(commitCall.args.slice(4)); // add's paths equal commit's paths
-    expect(commitCall.args).toEqual(['commit', '-F', `${lane}/.converge-commit-msg-r1.txt`, '--', 'src/foo.mjs']);
+    // #4356 — the message file now lives in the per-lane scratch dir OUTSIDE the lane, never `${lane}/...`.
+    expect(commitCall.args).toEqual(['commit', '-F', `${convergeScratchDir(lane)}/.converge-commit-msg-r1.txt`, '--', 'src/foo.mjs']);
     expect(commitCall.args).not.toContain('-A');
     expect(commitCall.args).not.toContain('.converge-obs-1-0.json'); // this wrapper's own bookkeeping, never committed
     expect(commitCall.args).not.toContain('.pr-body.md'); // known lane-release scratch litter, never committed
@@ -1031,7 +1054,8 @@ describe('runConverge (#3627 gap 3 — the real loop)', () => {
       { run, ensureSettingsFile: () => '/fake/hooks.json', provider: { name: 'codex' } },
     );
 
-    const obs = JSON.parse(readFileSync(join(lane, '.converge-obs-1-0.json'), 'utf8'));
+    // #4356 — obs bookkeeping now lives in the per-lane scratch dir OUTSIDE the lane, never inside it.
+    const obs = JSON.parse(readFileSync(join(convergeScratchDir(lane), '.converge-obs-1-0.json'), 'utf8'));
     expect(obs.editResult.requestedProvider).toBe('codex');
     expect(obs.editResult.editorProvider).toBe('claude-restricted'); // the editor itself never changes — no Codex implementation exists yet
   });
@@ -1068,8 +1092,8 @@ describe('runConverge (#3627 gap 3 — the real loop)', () => {
     const commitCalls = indexed.filter((c) => c.cmd === 'git' && c.args[0] === 'commit');
     const stepCalls = indexed.filter((c) => c.cmd === 'node' && c.args[1] === 'step');
     expect(commitCalls.length).toBe(2); // one per accepted round, not one for the whole run
-    expect(commitCalls[0].args).toContain(`${lane}/.converge-commit-msg-r1.txt`);
-    expect(commitCalls[1].args).toContain(`${lane}/.converge-commit-msg-r2.txt`);
+    expect(commitCalls[0].args).toContain(`${convergeScratchDir(lane)}/.converge-commit-msg-r1.txt`);
+    expect(commitCalls[1].args).toContain(`${convergeScratchDir(lane)}/.converge-commit-msg-r2.txt`);
     // round 1's commit precedes round 1's own `step` call (which is what hands back round 2's edit action —
     // matches `converge-cli.mjs`'s own `read` action re-reading the lane fresh each round: round 2 must see
     // round 1's commit, not just uncommitted working-tree changes it happens to still be sitting on).
@@ -1121,6 +1145,151 @@ describe('runConverge (#3627 gap 3 — the real loop)', () => {
     const result = runConverge({ lane, item: '1234' }, { run, ensureSettingsFile: () => '/fake/hooks.json' });
 
     expect(result.convergeEditedLane).toBe(false);
+  });
+
+  // ==============================================================================================
+  // #4356 — live #4055/lane-4: three `step` calls against `.converge-state.json` succeeded; the fourth (the
+  // first `edit` action's own follow-up `step` call) failed with a raw `Command failed: node
+  // scripts/converge-cli.mjs step ...` right after `runConvergeEdit` ran a full Bash+Edit+Write turn with
+  // `cwd: lane` — the exact directory the state file used to live in, with no hook protecting that one path.
+  // This reproduces the shape (read → panel → red-team → edit, state file removed by the editor turn) and
+  // asserts the loop now fails CLEARLY and ATTRIBUTED — naming the missing path, the round, and the action
+  // that just ran — instead of letting whatever raw error the next `step` call throws bubble up unexplained.
+  // ==============================================================================================
+  it('#4356 surfaces a clear, attributed failure (naming the missing state file and the round/action it '
+    + 'happened after) when the converge state file vanishes mid-loop, instead of an opaque raw crash', () => {
+    // #4356 — computed BEFORE `runConverge` runs (it wipes+recreates this same dir at its own start via
+    // `resetConvergeScratchDir`); the state file itself gets created moments later by `fakeRun`'s own `init`
+    // handler, the real point in the sequence a real `init` call would have created it.
+    const statePath = `${convergeScratchDir(lane)}/.converge-state.json`;
+
+    const init = JSON.stringify({
+      action: 'read', round: 1, careLevel: 'elevated', jurorsPerLens: 1, roundCap: 5,
+      lenses: ['correctness'], seatableLenses: ['correctness'], mandatoryLenses: ['correctness'],
+      read: { command: 'git diff', cwd: lane },
+    });
+    const panelStep = JSON.stringify({
+      action: 'panel', round: 1, roundCap: 5,
+      panel: [{ lens: 'correctness', jurors: 1, mandatory: true, mandate: 'judge it' }],
+    });
+    const redTeamStep = JSON.stringify({
+      action: 'red-team', round: 1, roundCap: 5,
+      redTeam: { jury: [{ lens: 'correctness', prompt: 'try to break it' }] },
+    });
+    // The `step` call answering the red-team observation hands back the round's `edit` action — the exact
+    // point #4055/lane-4's real failure happened at (three prior `step` calls had already succeeded).
+    const editStep = JSON.stringify({ action: 'edit', round: 1, roundCap: 5, edit: { prompt: 'fix the findings' } });
+
+    const run = fakeRun({
+      init,
+      panel: JSON.stringify({ seats: [{ lens: 'correctness', ok: true, findings: [] }] }),
+      redTeamPanel: JSON.stringify({ seats: [{ lens: 'correctness', ok: true, findings: [] }] }),
+      editor: JSON.stringify({ result: JSON.stringify({ advanced: false, dismissed: [] }) }),
+      steps: [panelStep, redTeamStep, editStep],
+      // Simulate the tool-bearing editor turn removing the wrapper's own bookkeeping mid-round.
+      onEditorCall: () => rmSync(statePath, { force: true }),
+    });
+
+    // The clear, attributed message (naming the item, the round, and the action that just ran) is the whole
+    // point — it is also, by construction, never the raw `Command failed: node scripts/converge-cli.mjs
+    // step ...` shape the un-fixed loop let bubble up unexplained (#4055's real log line).
+    expect(() => runConverge(
+      { lane, item: '4356', goal: 'ship the thing' },
+      { run, ensureSettingsFile: () => '/fake/hooks.json' },
+    )).toThrow(/converge state file vanished for item #4356 after round 1 action 'edit'/);
+  });
+
+  // #4356 — the structural half of the fix: every one of this loop's own bookkeeping files must resolve
+  // OUTSIDE the lane's own working tree. This is NOT a claim that the sibling scratch dir is unreachable —
+  // the editor turn keeps its `Bash` tool, which is not confined to `cwd` — only that these files no longer
+  // sit in the ONE directory that turn is handed and already operating in every round, so it has no reason to
+  // stumble into them by name, by `ls`, or by a lane-wide `git status`/cleanup sweep (converge round-1
+  // red-team finding on an earlier draft of this test/docblock, which DID overclaim "no path-based way").
+  // Exercises read → panel → red-team → edit (advanced, so `commitConvergeRound` really runs) → land, so
+  // every file kind the loop writes (state, obs, material, panel, red-team, commit-message) gets created and
+  // checked — not just state/obs, which is all an earlier draft of this test covered.
+  it('#4356 keeps every kind of converge bookkeeping file OUTSIDE the lane\'s own working tree', () => {
+    const init = JSON.stringify({
+      action: 'read', round: 1, careLevel: 'elevated', jurorsPerLens: 1, roundCap: 5,
+      lenses: ['correctness'], seatableLenses: ['correctness'], mandatoryLenses: ['correctness'],
+      read: { command: 'git diff', cwd: lane },
+    });
+    const panelStep = JSON.stringify({
+      action: 'panel', round: 1, roundCap: 5,
+      panel: [{ lens: 'correctness', jurors: 1, mandatory: true, mandate: 'judge it' }],
+    });
+    const redTeamStep = JSON.stringify({
+      action: 'red-team', round: 1, roundCap: 5,
+      redTeam: { jury: [{ lens: 'correctness', prompt: 'try to break it' }] },
+    });
+    const editStep = JSON.stringify({ action: 'edit', round: 1, roundCap: 5, edit: { prompt: 'fix the findings' } });
+    const inviteStep = JSON.stringify({
+      action: 'invite', round: 1, roundCap: 5, invite: { lens: 'a11y', citedFinding: 'x' },
+    });
+    const landStep = JSON.stringify({ action: 'land', round: 1, roundCap: 5, verdict: 'land', dismissed: [] });
+    const run = fakeRun({
+      init,
+      panel: JSON.stringify({ seats: [{ lens: 'correctness', ok: true, findings: [] }] }),
+      redTeamPanel: JSON.stringify({ seats: [{ lens: 'correctness', ok: true, findings: [] }] }),
+      editor: JSON.stringify({ result: JSON.stringify({ advanced: true, dismissed: [] }) }),
+      steps: [panelStep, redTeamStep, editStep, inviteStep, landStep],
+      gitStatus: ' M src/foo.mjs\n', // a real touched file, so the accepted round actually commits
+    });
+
+    runConverge({ lane, item: '1234' }, { run, ensureSettingsFile: () => '/fake/hooks.json' });
+
+    const scratchDir = convergeScratchDir(lane);
+    expect(scratchDir.startsWith(lane)).toBe(false); // outside the lane, not a subdirectory of it
+    // #4356 converge round-2 red-team finding — the invite file belongs in this list too (claim-accuracy: an
+    // earlier draft's "every kind" claim left it untested).
+    const bookkeepingFiles = [
+      '.converge-state.json', '.converge-obs-1-0.json', '.converge-material-r1.txt',
+      '.converge-panel-r1.json', '.converge-redteam-r1.json', '.converge-commit-msg-r1.txt',
+      '.converge-invite-r1.json',
+    ];
+    for (const name of bookkeepingFiles) {
+      expect(existsSync(join(scratchDir, name))).toBe(true);
+      expect(existsSync(join(lane, name))).toBe(false);
+    }
+  });
+
+  // #4356 converge round-1 red-team finding, proven here (round 2 flagged that no test defended this claim
+  // yet): a lane slot recycled for a later item must not inherit the previous occupant's leftover scratch.
+  it('#4356 resetConvergeScratchDir sweeps a stale file left by a previous occupant of the same lane slot', () => {
+    const staleDir = convergeScratchDir(lane);
+    const staleFile = join(staleDir, '.converge-obs-3-7.json'); // a round/index a NEW run would never reach round 1
+    writeFileSync(staleFile, '{"stale": true}');
+    expect(existsSync(staleFile)).toBe(true);
+
+    const init = JSON.stringify({ action: 'edit', round: 1, roundCap: 5, edit: { prompt: 'fix the findings' } });
+    const landStep = JSON.stringify({ action: 'land', round: 1, roundCap: 5, verdict: 'land', dismissed: [] });
+    const run = fakeRun({
+      init, editor: JSON.stringify({ result: JSON.stringify({ advanced: false, dismissed: [] }) }),
+      steps: [landStep],
+    });
+
+    runConverge({ lane, item: '1234' }, { run, ensureSettingsFile: () => '/fake/hooks.json' });
+
+    expect(existsSync(staleFile)).toBe(false); // swept by the reset at the start of this run
+    expect(existsSync(join(convergeScratchDir(lane), '.converge-state.json'))).toBe(true); // this run's own state is still there
+  });
+
+  // #4356 converge round-2 red-team finding (SECURITY, unrecoverable in the un-fixed shape): an unconditional
+  // recursive+force `rmSync` on an unvalidated `lane`-derived path must refuse a shape it cannot prove safe,
+  // rather than trust every future caller to hand it an already-resolved one. `resolvePath` (used before
+  // `basename`/`dirname` ever see the value) already normalizes away a literal trailing `/..` or `/.` — e.g.
+  // `resolvePath('/tmp/x/..')` is `/tmp`, a normal safe basename, never a literal `..` — so those shapes
+  // cannot actually reach the guard below intact; what genuinely can is a missing/empty `lane` (which would
+  // otherwise silently resolve against `process.cwd()`) or one that resolves to the filesystem root itself.
+  it('#4356 refuses to resolve (and never wipes) a scratch dir for a missing, empty, or filesystem-root lane path', () => {
+    expect(() => resetConvergeScratchDir(undefined)).toThrow(/unsafe lane path/);
+    expect(() => resetConvergeScratchDir('')).toThrow(/unsafe lane path/);
+    expect(() => resetConvergeScratchDir('   ')).toThrow(/unsafe lane path/);
+    expect(() => resetConvergeScratchDir('/')).toThrow(/unsafe lane path/);
+    // A real, ordinary lane path is unaffected by any of the refusals above — proves the guard is narrow,
+    // not a blanket refusal that would also reject legitimate lanes.
+    expect(() => resetConvergeScratchDir(lane)).not.toThrow();
+    expect(existsSync(lane)).toBe(true);
   });
 });
 
@@ -1456,22 +1625,38 @@ describe('commitBuildTurn auto-fixes locus-prefix mentions before committing (#3
 });
 
 describe('commitConvergeRound (#3627 bug 14 helper — the actual per-round commit)', () => {
+  // #4356 — a real (if fake-content) lane path, not the bare `/lane` this block used to use: `convergeScratchDir`
+  // now resolves a REAL sibling directory (`dirname(lane)/.converge-scratch/<basename>`) and creates it, so the
+  // fake lane needs a `dirname` that genuinely exists and is writable (`/` on its own is neither, on a normal
+  // machine) — the same reason every OTHER real-lane test in this file uses `tmpdir()`-rooted paths. The
+  // basename carries `process.pid` (converge round-2 red-team finding), not a bare `'lane'` literal, so two
+  // vitest worker processes running this file's tests concurrently never resolve to the same scratch dir.
+  const FAKE_LANE = join(tmpdir(), `lane-${process.pid}`);
+
+  // #4356 converge round-1 red-team finding — `convergeScratchDir` really creates a directory on disk even
+  // for this block's fake lane path; every other real-lane describe block in this file cleans up what it
+  // creates, so this one does too, instead of leaving `tmpdir()/.converge-scratch/lane` behind for good.
+  afterAll(() => {
+    rmSync(convergeScratchDir(FAKE_LANE), { recursive: true, force: true });
+  });
+
   it('stages then commits explicit paths via `git add --` + `git commit -F <msgfile> -- <paths>`, never '
     + '`git add -A`, message names the round', () => {
     const run = vi.fn(() => '');
     const writeFile = vi.fn();
     const result = commitConvergeRound(
-      { lane: '/lane', item: '1234', round: 2 },
+      { lane: FAKE_LANE, item: '1234', round: 2 },
       { run, writeFile, touchedFiles: () => ['a.mjs', 'b.md'] },
     );
     expect(result).toEqual({ committed: true, paths: ['a.mjs', 'b.md'] });
     expect(writeFile).toHaveBeenCalledTimes(1);
     const [msgFile, message] = writeFile.mock.calls[0];
-    expect(msgFile).toBe('/lane/.converge-commit-msg-r2.txt');
+    // #4356 — the message file lives in the per-lane scratch dir OUTSIDE the lane, never `${FAKE_LANE}/...` directly.
+    expect(msgFile).toBe(`${convergeScratchDir(FAKE_LANE)}/.converge-commit-msg-r2.txt`);
     expect(message).toMatch(/round 2/);
     expect(run).toHaveBeenCalledTimes(2);
-    expect(run).toHaveBeenNthCalledWith(1, 'git', ['add', '--', 'a.mjs', 'b.md'], { cwd: '/lane' });
-    expect(run).toHaveBeenNthCalledWith(2, 'git', ['commit', '-F', msgFile, '--', 'a.mjs', 'b.md'], { cwd: '/lane' });
+    expect(run).toHaveBeenNthCalledWith(1, 'git', ['add', '--', 'a.mjs', 'b.md'], { cwd: FAKE_LANE });
+    expect(run).toHaveBeenNthCalledWith(2, 'git', ['commit', '-F', msgFile, '--', 'a.mjs', 'b.md'], { cwd: FAKE_LANE });
     expect(run.mock.calls[0][1]).not.toContain('-A');
     expect(run.mock.calls[0][1]).not.toContain('--all');
     expect(run.mock.calls[1][1]).not.toContain('-A');
@@ -1484,17 +1669,17 @@ describe('commitConvergeRound (#3627 bug 14 helper — the actual per-round comm
     const run = vi.fn(() => '');
     const writeFile = vi.fn();
     commitConvergeRound(
-      { lane: '/lane', item: '1234', round: 1 },
+      { lane: FAKE_LANE, item: '1234', round: 1 },
       { run, writeFile, touchedFiles: () => ['brand-new-fixture.mjs'] },
     );
-    expect(run).toHaveBeenNthCalledWith(1, 'git', ['add', '--', 'brand-new-fixture.mjs'], { cwd: '/lane' });
+    expect(run).toHaveBeenNthCalledWith(1, 'git', ['add', '--', 'brand-new-fixture.mjs'], { cwd: FAKE_LANE });
   });
 
   it('no-ops — writes no message file and calls `run` zero times — when there are no real touched files', () => {
     const run = vi.fn(() => '');
     const writeFile = vi.fn();
     const result = commitConvergeRound(
-      { lane: '/lane', item: '1234', round: 1 },
+      { lane: FAKE_LANE, item: '1234', round: 1 },
       { run, writeFile, touchedFiles: () => [] },
     );
     expect(result).toEqual({ committed: false, paths: [] });
