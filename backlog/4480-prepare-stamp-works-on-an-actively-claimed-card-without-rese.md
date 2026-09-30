@@ -2,9 +2,10 @@
 bornAs: xzseaif
 kind: story
 size: 1
-status: open
+status: active
 scope: ["we:scripts/backlog.mjs"]
 dateOpened: "2026-09-29"
+dateStarted: "2026-09-30"
 preparedDate: "2026-09-30"
 preparedAgainstSha: "0f1ba0821f0edb2d05f7a0ff08fb7749b7cc951e"
 tags: []
