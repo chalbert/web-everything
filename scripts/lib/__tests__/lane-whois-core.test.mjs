@@ -205,4 +205,27 @@ describe('isLaneAlreadyClean', () => {
     expect(isLaneAlreadyClean({ ...atTip, uncommittedCount: 'x' })).toBe(false);
     expect(isLaneAlreadyClean({ ...atTip, aheadCount: NaN })).toBe(false);
   });
+
+  // Exactly-zero: a negative/fractional count is corrupt input, not a clean lane.
+  it.each([[-1], [-5], [-0.5], [0.5], [Infinity], ['0']])('uncommittedCount %j is never already clean', (n) => {
+    expect(isLaneAlreadyClean({ ...atTip, uncommittedCount: n })).toBe(false);
+  });
+
+  it.each([[-1], [-5], [-0.5], [0.5], [Infinity], ['0']])('aheadCount %j is never already clean', (n) => {
+    expect(isLaneAlreadyClean({ ...atTip, aheadCount: n })).toBe(false);
+  });
+
+  it.each([
+    [{ trackedModified: 0 }],
+    [{ untracked: 0 }],
+    [{ trackedModified: -2, untracked: 2 }],
+    [{ trackedModified: 2, untracked: -2 }],
+  ])('per-component counts %j (partial or cancelling) are never already clean', (components) => {
+    expect(isLaneAlreadyClean({ ...atTip, ...components })).toBe(false);
+  });
+
+  it('both components exactly 0 at the tip → already clean; components omitted entirely → still clean (back-compat)', () => {
+    expect(isLaneAlreadyClean({ ...atTip, trackedModified: 0, untracked: 0 })).toBe(true);
+    expect(isLaneAlreadyClean(atTip)).toBe(true);
+  });
 });
