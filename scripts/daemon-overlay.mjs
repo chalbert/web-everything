@@ -75,6 +75,7 @@
 import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { mkdirSync, writeFileSync, readFileSync, statSync, rmSync, renameSync } from 'node:fs';
 import {
   addOverlay, removeOverlay, readOverlayState, appendOverlayEvent, overlayFilePath,
@@ -119,62 +120,127 @@ function warnSetAside(check) {
 // ── the add-guard lock — serializes check-then-register across concurrent `add`s (PR #2827 review) ──────────
 // A `mkdir` mutex next to the overlay state file, SEPARATE from the list's own millisecond mutex
 // (`daemon-overlays.mjs#withListLock`): it is held across a git fetch, so it must never block a rebuild's
-// auto-remove, which only takes the list mutex. The holder writes its pid; a dead holder (or one older than
-// ADD_GUARD_STALE_MS) is broken by renaming the dir aside first, so two waiters cannot both remove a live lock.
+// auto-remove, which only takes the list mutex. The holder's `owner` file carries a unique `<pid>:<uuid>` token,
+// written temp-file + rename so a reader never sees a partial one.
+//
+// A gone holder (dead pid, older than ADD_GUARD_STALE_MS, or an owner-less dir older than 5s) is recovered
+// under a SECOND mkdir mutex, `<lockDir>.recover`: while the dead dir exists no one can `mkdir` the lock, so
+// exclusivity is never released mid-recovery. The recoverer removes the dir only if token, inode and mtime are
+// all still what it inspected — a fresh holder (whose owner write changes token and mtime) is never removed.
+// Named, accepted residual: a recoverer paused between its re-check and its rename for > RECOVER_STALE_MS while
+// a replacement lock lands in that gap; closing it needs a true atomic compare-and-remove primitive.
 const ADD_GUARD_STALE_MS = 10 * 60_000;
+const ADD_GUARD_OWNERLESS_MS = 5_000;
+const ADD_GUARD_RECOVER_STALE_MS = 30_000;
 const sleep = (ms) => new Promise((r) => { setTimeout(r, ms); });
 
 function readAddGuardOwner(lockDir) {
   try { return readFileSync(join(lockDir, 'owner'), 'utf8').trim(); } catch { return ''; /* not written yet, or gone */ }
 }
 
-/** The owner string of a holder that is gone (dead pid, or stale), or `null` while it is live. */
-function addGuardGoneOwner(lockDir) {
-  const owner = readAddGuardOwner(lockDir);
-  const pid = Number(owner);
-  let ageMs;
-  try { ageMs = Date.now() - statSync(lockDir).mtimeMs; } catch { return null; /* already released */ }
-  if (ageMs > ADD_GUARD_STALE_MS) return owner;
-  if (!owner || !Number.isInteger(pid) || pid <= 0) return ageMs > 5_000 ? owner : null; // crashed before writing its pid
-  try { process.kill(pid, 0); return null; } catch (e) { return e.code === 'ESRCH' ? owner : null; }
+/** Write `token` as `dir`'s owner atomically (temp file + rename). */
+function writeAddGuardOwner(dir, token) {
+  const tmp = join(dir, `owner.tmp-${randomUUID()}`);
+  writeFileSync(tmp, token);
+  renameSync(tmp, join(dir, 'owner'));
 }
 
-async function withAddGuardLock(root, env, fn) {
+/** The pid prefix of an owner token; a legacy bare-pid owner parses too. NaN when unparseable. */
+function addGuardOwnerPid(token) {
+  const m = /^(\d+)(?::.*)?$/.exec(token);
+  return m ? Number(m[1]) : NaN;
+}
+
+/** Snapshot of the lock dir — `{token, ino, mtimeMs, gone}` — or `null` once it is released. `gone` is true for a
+ *  holder that is dead or stale; a fresh owner-less dir (a live holder between `mkdir` and its owner write) is NOT gone. */
+function inspectAddGuardLock(lockDir) {
+  let st;
+  try { st = statSync(lockDir); } catch { return null; }
+  const token = readAddGuardOwner(lockDir);
+  const ageMs = Date.now() - st.mtimeMs;
+  const snap = { token, ino: st.ino, mtimeMs: st.mtimeMs, gone: false };
+  if (ageMs > ADD_GUARD_STALE_MS) { snap.gone = true; return snap; }
+  const pid = addGuardOwnerPid(token);
+  if (!token || !Number.isInteger(pid) || pid <= 0) { snap.gone = ageMs > ADD_GUARD_OWNERLESS_MS; return snap; }
+  try { process.kill(pid, 0); } catch (e) { snap.gone = e.code === 'ESRCH'; }
+  return snap;
+}
+
+/** Take the `.recover` mutex (breaking one older than ADD_GUARD_RECOVER_STALE_MS) — returns our token, or `null`. */
+function takeRecoverMutex(recoverDir) {
+  for (let tries = 0; tries < 2; tries++) {
+    try {
+      mkdirSync(recoverDir);
+      const token = `${process.pid}:${randomUUID()}`;
+      writeAddGuardOwner(recoverDir, token);
+      return token;
+    } catch (e) {
+      if (!e || e.code !== 'EEXIST') throw e;
+      let ageMs;
+      try { ageMs = Date.now() - statSync(recoverDir).mtimeMs; } catch { continue; /* released meanwhile */ }
+      if (ageMs <= ADD_GUARD_RECOVER_STALE_MS) return null;
+      const aside = `${recoverDir}.stale-${process.pid}-${randomUUID()}`;
+      try { renameSync(recoverDir, aside); } catch { return null; /* someone else broke it first */ }
+      rmSync(aside, { recursive: true, force: true });
+    }
+  }
+  return null;
+}
+
+/** Remove the gone lock `seen` — serialised behind `.recover`, and only if it is still exactly what was inspected. */
+async function recoverAddGuardLock(lockDir, seen, hooks) {
+  const recoverDir = `${lockDir}.recover`;
+  const mine = takeRecoverMutex(recoverDir);
+  if (!mine) return false;
+  try {
+    await hooks.onPhase?.('removing', { lockDir, seen });
+    const now = inspectAddGuardLock(lockDir);
+    if (now && now.gone && now.token === seen.token && now.ino === seen.ino && now.mtimeMs === seen.mtimeMs) {
+      const aside = `${lockDir}.stale-${process.pid}-${randomUUID()}`;
+      try { renameSync(lockDir, aside); rmSync(aside, { recursive: true, force: true }); } catch { /* gone already */ }
+    }
+  } finally {
+    // Only our own mutex — a paused recoverer's was broken as stale and may now belong to someone else.
+    if (readAddGuardOwner(recoverDir) === mine) rmSync(recoverDir, { recursive: true, force: true });
+  }
+  await hooks.onPhase?.('removed', { lockDir, seen });
+  return true;
+}
+
+/** `hooks.onPhase?.(phase, ctx)` (awaited) is a test seam — phases `attempt`, `inspected`, `removing`, `removed`.
+ *  Production callers pass none. */
+export async function withAddGuardLock(root, env, fn, hooks = {}) {
   const lockDir = `${overlayFilePath(root, env)}.add-guard.lock`;
   mkdirSync(dirname(lockDir), { recursive: true });
   const waitMs = Number(env.WE_DAEMON_OVERLAY_ADD_GUARD_WAIT_MS) > 0 ? Number(env.WE_DAEMON_OVERLAY_ADD_GUARD_WAIT_MS) : 180_000;
   const deadline = Date.now() + waitMs;
+  const token = `${process.pid}:${randomUUID()}`;
   for (;;) {
+    await hooks.onPhase?.('attempt', { lockDir });
     try {
       mkdirSync(lockDir);
-      writeFileSync(join(lockDir, 'owner'), String(process.pid));
-      break;
     } catch (e) {
       if (!e || e.code !== 'EEXIST') throw e;
-      const goneOwner = addGuardGoneOwner(lockDir);
-      if (goneOwner !== null) {
-        const aside = `${lockDir}.stale-${process.pid}-${Date.now()}`;
-        try { renameSync(lockDir, aside); } catch { continue; /* someone else broke it first */ }
-        // Another waiter may have broken the dead lock and taken a fresh one between our check and our rename —
-        // then what we moved aside is a LIVE lock: put it back rather than delete it.
-        if (readAddGuardOwner(aside) !== goneOwner) {
-          try { renameSync(aside, lockDir); } catch { /* lockDir re-taken meanwhile — leave the moved one */ }
-        } else {
-          rmSync(aside, { recursive: true, force: true });
-        }
-        continue;
+      const seen = inspectAddGuardLock(lockDir);
+      if (!seen) continue; // released meanwhile
+      if (seen.gone) {
+        await hooks.onPhase?.('inspected', { lockDir, seen });
+        if (await recoverAddGuardLock(lockDir, seen, hooks)) continue;
       }
       if (Date.now() > deadline) {
         throw new Error(`add-guard lock ${lockDir} still held after ${waitMs}ms — another \`add\` is checking; retry`);
       }
-      await sleep(100);
+      await sleep(seen.gone ? 50 : 100);
+      continue;
     }
+    try { writeAddGuardOwner(lockDir, token); } catch (e) { rmSync(lockDir, { recursive: true, force: true }); throw e; }
+    break;
   }
   try {
     return await fn();
   } finally {
     // Release only our own lock — if it was broken as stale meanwhile, the dir now belongs to someone else.
-    if (readAddGuardOwner(lockDir) === String(process.pid)) rmSync(lockDir, { recursive: true, force: true });
+    if (readAddGuardOwner(lockDir) === token) rmSync(lockDir, { recursive: true, force: true });
   }
 }
 

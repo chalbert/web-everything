@@ -2203,17 +2203,21 @@ export async function dryRunRebuild({
  *  line, and the raw numbered-stage index lines (`<mode> <oid> <stage>\t<path>`) `--write-tree` always emits
  *  for a conflicted path regardless of message wording. A rename/delete conflict's message can name two paths
  *  on one line ("deleted in HEAD and renamed ... in <path>") — the stage lines still pin the single path that
- *  actually landed in the index, which is what matters for "which file", so they are the more reliable source;
- *  the message regex is the friendlier fallback when a message shape this doesn't anticipate still appears. */
+ *  actually landed in the index, which is what matters for "which file", so they are authoritative;
+ *  the message regex is only the fallback when no stage line is present. */
 function parseMergeTreeConflictFiles(output) {
-  const files = new Set();
+  const stagePaths = new Set();
+  const msgPaths = new Set();
   for (const line of String(output ?? '').split('\n')) {
     const stage = /^\d+\s+[0-9a-f]{7,40}\s+[123]\t(.+)$/.exec(line);
-    if (stage) { files.add(stage[1].trim()); continue; }
-    const msg = /^CONFLICT \([^)]*\):.* in (\S.*)$/.exec(line.trim());
-    if (msg) files.add(msg[1].trim());
+    if (stage) { stagePaths.add(stage[1].trim()); continue; }
+    // Non-greedy: the FIRST ` in ` ends the prose. A rename/delete message carries later ` in HEAD.` / ` in tree.`.
+    const msg = /^CONFLICT \([^)]*\):.*? in (\S.*)$/.exec(line.trim());
+    if (msg) msgPaths.add(msg[1].trim());
   }
-  return [...files];
+  // Stage lines are authoritative: when any exist the message text is never consulted (its wording can name
+  // refs and oids after the path).
+  return [...(stagePaths.size ? stagePaths : msgPaths)];
 }
 
 /**
@@ -2335,7 +2339,8 @@ export async function previewOverlayConflict({
     for (const o of existingOverlays) {
       const ovSha = verifyRev(scratchGit, `origin/${o.ref}^{commit}`);
       if (!ovSha) continue;
-      const d = scratchGit(['diff', '--name-only', mainSha, ovSha]);
+      // Three-dot: only what the overlay ITSELF changed since it branched — a two-dot diff would also count main's later edits.
+      const d = scratchGit(['diff', '--name-only', `${mainSha}...${ovSha}`]);
       if (d.status !== 0) continue;
       const touched = new Set(String(d.stdout ?? '').split('\n').filter(Boolean));
       if (files.some((f) => touched.has(f))) conflicting.push({ ref: o.ref, pr: o.pr ?? null });

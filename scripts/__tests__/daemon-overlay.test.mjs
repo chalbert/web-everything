@@ -10,11 +10,13 @@
  *   mutates the overlay state file either way).
  */
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { withAddGuardLock } from '../daemon-overlay.mjs';
+import { overlayFilePath } from '../lib/daemon-overlays.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CLI = resolve(HERE, '..', 'daemon-overlay.mjs');
@@ -244,5 +246,146 @@ describe('daemon-overlay.mjs add — the overlay-conflict guard', () => {
     expect(r.status).toBe(1);
     expect(r.stderr).toMatch(/merge-tree-failed/);
     expect(overlayStateFile(overlayDir, cloneDir)?.overlays ?? []).toEqual([]);
+  });
+});
+
+// ── withAddGuardLock — deterministic interleavings (PR #2827 review prevention guards) ───────────────────────
+const sleep = (ms) => new Promise((r) => { setTimeout(r, ms); });
+const deferred = () => { let resolve; const promise = new Promise((r) => { resolve = r; }); return { promise, resolve }; };
+
+/** A pid that is guaranteed dead: a child that already exited. */
+function deadPid() {
+  const r = spawnSync(process.execPath, ['-e', '']);
+  return r.pid;
+}
+
+function lockFixture(waitMs) {
+  const overlayDir = mktemp('we-overlay-lock-');
+  const env = { ...process.env, WE_DAEMON_OVERLAY_DIR: overlayDir };
+  if (waitMs) env.WE_DAEMON_OVERLAY_ADD_GUARD_WAIT_MS = String(waitMs);
+  const root = mktemp('we-overlay-lock-root-');
+  const lockDir = `${overlayFilePath(root, env)}.add-guard.lock`;
+  return { env, root, lockDir };
+}
+
+function backdate(dir, ageMs) {
+  const t = new Date(Date.now() - ageMs);
+  utimesSync(dir, t, t);
+}
+
+describe('withAddGuardLock', () => {
+  it('withAddGuardLock — three contenders stay exclusive through a paused stale recovery', async () => {
+    const { env, root, lockDir } = lockFixture();
+    mkdirSync(lockDir, { recursive: true });
+    writeFileSync(join(lockDir, 'owner'), String(deadPid())); // legacy bare pid of a dead holder
+
+    let active = 0;
+    let maxActive = 0;
+    let ran = 0;
+    const enter = async (hold) => {
+      active += 1; maxActive = Math.max(maxActive, active); ran += 1;
+      await hold; active -= 1;
+    };
+    const aInspected = deferred(); const releaseA1 = deferred();
+    const aRemoving = deferred(); const releaseA2 = deferred();
+    const bIn = deferred(); const gateB = deferred();
+    const cAtAttempt = deferred(); const gateC = deferred();
+
+    const a = withAddGuardLock(root, env, () => enter(sleep(20)), {
+      async onPhase(phase) {
+        if (phase === 'inspected') { aInspected.resolve(); await releaseA1.promise; }
+        if (phase === 'removing') { aRemoving.resolve(); await releaseA2.promise; }
+      },
+    });
+    await aInspected.promise;
+    const b = withAddGuardLock(root, env, () => { bIn.resolve(); return enter(gateB.promise); });
+    await bIn.promise;
+    const c = withAddGuardLock(root, env, () => enter(sleep(20)), {
+      async onPhase(phase) { if (phase === 'attempt') { cAtAttempt.resolve(); await gateC.promise; } },
+    });
+    await cAtAttempt.promise;
+
+    releaseA1.resolve();
+    await aRemoving.promise; // A holds the recovery mutex, between its inspection and its removal step
+    gateC.resolve();         // C tries to enter exactly now
+    await sleep(300);
+    expect(active).toBe(1);  // only B is inside
+    releaseA2.resolve();
+    await sleep(300);
+    expect(active).toBe(1);
+    gateB.resolve();
+    await Promise.all([a, b, c]);
+
+    expect(ran).toBe(3);
+    expect(maxActive).toBe(1);
+  });
+
+  it('withAddGuardLock — a fresh owner-less lock is never broken', async () => {
+    const { env, root, lockDir } = lockFixture(400);
+    mkdirSync(lockDir, { recursive: true }); // a live holder between mkdir and its owner write
+    await expect(withAddGuardLock(root, env, async () => 'x')).rejects.toThrow(/still held/);
+    expect(existsSync(lockDir)).toBe(true);
+
+    backdate(lockDir, 10_000); // now indistinguishable from a crashed holder
+    await expect(withAddGuardLock(root, env, async () => 'ok')).resolves.toBe('ok');
+  });
+
+  it('withAddGuardLock — a fresh owner-less lock is never broken when its holder writes its owner mid-recovery', async () => {
+    const { env, root, lockDir } = lockFixture(600);
+    mkdirSync(lockDir, { recursive: true });
+    backdate(lockDir, 10_000);
+    const inspected = deferred(); const release = deferred();
+    const contender = withAddGuardLock(root, env, async () => 'x', {
+      async onPhase(phase) { if (phase === 'inspected') { inspected.resolve(); await release.promise; } },
+    });
+    const settled = contender.catch((e) => e);
+    await inspected.promise;
+    const holderToken = `${process.pid}:holder`;
+    writeFileSync(join(lockDir, 'owner'), holderToken); // the holder finally writes its owner
+    release.resolve();
+
+    expect(String(await settled)).toMatch(/still held/);
+    expect(readFileSync(join(lockDir, 'owner'), 'utf8')).toBe(holderToken);
+  });
+
+  it('withAddGuardLock — release removes only our own token', async () => {
+    const { env, root, lockDir } = lockFixture();
+    const bIn = deferred(); const gateB = deferred();
+    let b;
+    await withAddGuardLock(root, env, async () => {
+      backdate(lockDir, 11 * 60_000); // pid is live, so age is the only stale path
+      b = withAddGuardLock(root, env, async () => { bIn.resolve(); await gateB.promise; });
+      await bIn.promise;
+    });
+    // A's finally has run: B's lock (same pid, different token) must be untouched.
+    expect(existsSync(lockDir)).toBe(true);
+    gateB.resolve();
+    await b;
+    expect(existsSync(lockDir)).toBe(false);
+  });
+
+  it('withAddGuardLock — a stale .recover mutex is broken and a resumed old recoverer does nothing', async () => {
+    const { env, root, lockDir } = lockFixture();
+    mkdirSync(lockDir, { recursive: true });
+    writeFileSync(join(lockDir, 'owner'), String(deadPid()));
+    const removing = deferred(); const releaseOld = deferred();
+    const bIn = deferred(); const gateB = deferred();
+
+    const old = withAddGuardLock(root, env, async () => 'old', {
+      async onPhase(phase) { if (phase === 'removing') { removing.resolve(); await releaseOld.promise; } },
+    });
+    await removing.promise; // the old recoverer holds `.recover`, then stalls
+    backdate(`${lockDir}.recover`, 60_000);
+
+    const b = withAddGuardLock(root, env, async () => { bIn.resolve(); await gateB.promise; });
+    await bIn.promise; // B broke the stale `.recover`, recovered the dead lock, and took a fresh one
+    const bToken = readFileSync(join(lockDir, 'owner'), 'utf8');
+
+    releaseOld.resolve();
+    await sleep(300); // the old recoverer resumes: token/inode/mtime changed, so it must not touch B's lock
+    expect(readFileSync(join(lockDir, 'owner'), 'utf8')).toBe(bToken);
+
+    gateB.resolve();
+    await expect(Promise.all([b, old])).resolves.toEqual([undefined, 'old']);
   });
 });

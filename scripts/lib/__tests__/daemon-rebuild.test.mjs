@@ -1199,6 +1199,65 @@ describe('previewOverlayConflict — the overlay-conflict guard', () => {
     expect(readOverlays(cloneDir, { env })).toEqual([]);
   });
 
+  it('previewOverlayConflict never mutates staged, unstaged or untracked state', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    advanceMain(originDir, (dir) => writeFile(dir, 'shared.mjs', 'export const X = 1;\n'));
+    pushBranch(originDir, 'lane/fix-procedure', (dir) => writeFile(dir, 'shared.mjs', 'export const X = 2;\n'));
+    pushBranch(originDir, 'lane/promote-stale-green', (dir) => writeFile(dir, 'shared.mjs', 'export const X = 3;\n'));
+    writeFile(cloneDir, 'staged.txt', 'staged sentinel\n');
+    gitOk(cloneDir, ['add', 'staged.txt']);
+    writeFile(cloneDir, 'README.md', 'unstaged edit\n');
+    writeFile(cloneDir, 'untracked.txt', 'untracked sentinel\n');
+    const snapshot = () => ({
+      index: readFileSync(join(cloneDir, '.git', 'index')).toString('base64'),
+      files: ['staged.txt', 'README.md', 'untracked.txt'].map((f) => readFileSync(join(cloneDir, f), 'utf8')),
+      status: gitOk(cloneDir, ['status', '--porcelain']),
+    });
+    const before = snapshot();
+
+    await previewOverlayConflict({
+      root: cloneDir, ref: 'lane/promote-stale-green', existingOverlays: [{ ref: 'lane/fix-procedure' }], env,
+    });
+
+    expect(snapshot()).toEqual(before);
+  });
+
+  it('previewOverlayConflict reports exact file names for a rename/delete conflict', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    const body = Array.from({ length: 30 }, (_, i) => `export const V${i} = ${i};\n`).join('');
+    advanceMain(originDir, (dir) => writeFile(dir, 'ren.mjs', body));
+    const oldMain = gitOk(originDir, ['rev-parse', 'main']).trim();
+    advanceMain(originDir, (dir) => rmSync(join(dir, 'ren.mjs')));
+    pushBranch(originDir, 'lane/renamer', (dir) => {
+      rmSync(join(dir, 'ren.mjs'));
+      writeFile(dir, 'renamed.mjs', `${body}export const EXTRA = 1;\n`);
+    }, { base: oldMain });
+
+    const check = await previewOverlayConflict({ root: cloneDir, ref: 'lane/renamer', existingOverlays: [], env });
+
+    expect(check.ok).toBe(true);
+    expect(check.clean).toBe(false);
+    expect(check.files).toEqual(['renamed.mjs']);
+  });
+
+  it('previewOverlayConflict conflicts with main advanced after an existing overlay branched, attributing to no overlay', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    advanceMain(originDir, (dir) => writeFile(dir, 'shared.mjs', 'export const X = 1;\n'));
+    const oldMain = gitOk(originDir, ['rev-parse', 'main']).trim();
+    pushBranch(originDir, 'lane/existing', (dir) => writeFile(dir, 'unrelated.mjs', 'u\n'), { base: oldMain });
+    advanceMain(originDir, (dir) => writeFile(dir, 'shared.mjs', 'export const X = 2;\n'));
+    pushBranch(originDir, 'lane/candidate', (dir) => writeFile(dir, 'shared.mjs', 'export const X = 3;\n'), { base: oldMain });
+
+    const check = await previewOverlayConflict({
+      root: cloneDir, ref: 'lane/candidate', existingOverlays: [{ ref: 'lane/existing', pr: null }], env,
+    });
+
+    expect(check.ok).toBe(true);
+    expect(check.clean).toBe(false);
+    expect(check.files).toEqual(['shared.mjs']);
+    expect(check.conflicting).toEqual([]);
+  });
+
   it('refuses a ref that does not resolve (typo / deleted branch), never a false "clean"', async () => {
     const { cloneDir, env } = makeFixture();
     const check = await previewOverlayConflict({ root: cloneDir, ref: 'lane/does-not-exist', existingOverlays: [], env });
