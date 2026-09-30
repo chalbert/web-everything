@@ -200,6 +200,14 @@ export const CLAIM_OWNED_FRONTMATTER_KEYS = Object.freeze([
 ]);
 
 /**
+ * Frontmatter keys a standalone PREPARE worker run may change: the card's own `scope:` (factual drift
+ * correction, #4658) plus the two stamps `prepare-stamp` writes. The prepare worker brief
+ * (`skills-src/conveyor/prepare-item-worker-brief.md`) names exactly these, and a contract test asserts it —
+ * one constant so the brief and the runner's tamper check cannot drift apart.
+ */
+export const PREPARE_OWNED_FRONTMATTER_KEYS = Object.freeze(['scope', 'preparedDate', 'preparedAgainstSha']);
+
+/**
  * The `---\n...\n---\n` frontmatter block's own text (no delimiters), or `''` if the file has none. PURE.
  * Accepts CRLF (`\r\n`) as well as LF line endings at both delimiters (#4395) — a card saved with CRLF
  * previously failed to match at all, so its frontmatter went invisible to every caller instead of parsed.

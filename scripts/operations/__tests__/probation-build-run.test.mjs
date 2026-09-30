@@ -857,6 +857,16 @@ describe('standalone prepare', () => {
     expect(calls.some(c => ['claim', 'resolve'].includes(c[0]))).toBe(false);
     expect(calls.some(c => c[0] === 'stamp')).toBe(true);
   });
+  it('accepts a worker that corrects the card\'s own scope: (#4658) and reaches opened-pr', async () => {
+    const { io, calls } = prepareIo({ postWorkerRaw: prepared.replace('scope: ["we:backlog-docs/probation.md"]', 'scope: ["we:scripts/real-touch-set.mjs"]') });
+    expect(await runProbationBuild(prepareArgs(), io)).toMatchObject({ outcome: 'opened-pr' });
+    expect(calls.some(c => c[0] === 'openPr')).toBe(true);
+  });
+  it('still refuses a worker that edits a frontmatter key outside the prepare allow-list', async () => {
+    const { io, calls } = prepareIo({ postWorkerRaw: prepared.replace('---\nstatus: open', '---\nblockedBy: [1]\nstatus: open') });
+    expect((await runProbationBuild(prepareArgs(), io)).outcome).not.toBe('opened-pr');
+    expect(calls.some(c => c[0] === 'openPr')).toBe(false);
+  });
   it.each([
     { numstat: `12\t0\t${path}\n1\t0\tscripts/code.mjs` },
     { postWorkerRaw: prepared.replace('status: open', 'status: resolved') },

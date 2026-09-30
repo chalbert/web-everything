@@ -83,7 +83,7 @@ import { hookSurfaceChanged, resetHookSurface, snapshotHookSurface, withHooksDis
 import { AGY_CLAUDE_MODEL_BY_TIER, PROBATION_WORKERS, PROVEN_TASK_ENVELOPES, isStatuteTierPath } from '../lib/provider-routing.mjs';
 import { isDocScopePath } from '../lib/dispatch-task-type.mjs';
 import {
-  buildCheckerArgv, parseCheckerVerdict, buildDocFixCommitMessage, buildDocFixTask, buildWorkerArgv, frontmatterTamperedBeyondClaim,
+  buildCheckerArgv, parseCheckerVerdict, buildDocFixCommitMessage, buildDocFixTask, buildWorkerArgv, frontmatterTamperedBeyondClaim, PREPARE_OWNED_FRONTMATTER_KEYS,
   healDiffWithinEnvelope, launchScorecardRow, newUntrackedPaths, summarizeNumstat,
 } from '../lib/probation-launcher.mjs';
 import { defaultPoolRoot, workspaceFor } from '../lib/lane-pool-paths.mjs';
@@ -394,7 +394,7 @@ export async function runProbationBuild(args, io) {
       // worker, so a worker forging `status:`/`dateStarted:` is tamper too.
       // Check the excluded card even on a no-change run.
       const postWorkerItem = io.findItem(num, lanePath);
-      if (preparing ? frontmatterTamperedBeyondClaim(item.raw, postWorkerItem?.raw, ['preparedDate', 'preparedAgainstSha']) : (postWorkerItem?.spec !== item.spec || postWorkerItem?.raw !== afterClaim?.raw)) {
+      if (preparing ? frontmatterTamperedBeyondClaim(item.raw, postWorkerItem?.raw, PREPARE_OWNED_FRONTMATTER_KEYS) : (postWorkerItem?.spec !== item.spec || postWorkerItem?.raw !== afterClaim?.raw)) {
         return abandon('escalated-needs-human', "not built: the worker edited the item's own backlog card — refusing", { diff: diffRow });
       }
       if (preparing && (!summary.files || summary.paths.some(p => p !== item.path))) {
@@ -501,7 +501,7 @@ export async function runProbationBuild(args, io) {
       const stamped = io.findItem(num, lanePath);
       const fm = parseYamlFrontmatter(stamped?.raw ?? '');
       if (!/^\d{4}-\d{2}-\d{2}$/.test(String(fm.preparedDate ?? '')) || fm.preparedAgainstSha !== baseSha) return abandon('gate-red', 'prepare-unstamped', { diff: diffRow });
-      if (frontmatterTamperedBeyondClaim(item.raw, stamped.raw, ['preparedDate', 'preparedAgainstSha'])
+      if (frontmatterTamperedBeyondClaim(item.raw, stamped.raw, PREPARE_OWNED_FRONTMATTER_KEYS)
         || summarizeNumstat(io.diffNumstat(lanePath, baseSha, [])).paths.some(p => p !== item.path)) {
         return abandon('gate-red', 'prepare changed fields or files outside its envelope', { diff: diffRow });
       }
