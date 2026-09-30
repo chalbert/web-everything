@@ -1,5 +1,5 @@
 /**
- * agy-launcher-probation — the routing half: the opened doc-fix / ci-heal / bugfix gate rows, the probation roster, the
+ * agy-launcher-probation — the routing half: the opened doc-fix / ci-heal / bugfix / build-new-feature gate rows, the probation roster, the
  * `ci-heal` taskType, and the pick riding on the routing record while Claude stays the fallback.
  */
 import { describe, expect, it } from 'vitest';
@@ -30,8 +30,8 @@ describe('ci-heal is its own taskType, with a bounded envelope', () => {
   it('the ci-heal envelope is smaller than bugfix', () => {
     expect(PROVEN_TASK_ENVELOPES['ci-heal']).toEqual({ maxLoc: 150, maxFiles: 3 });
   });
-  it('the gate opens doc-fix, ci-heal and bugfix on probation, but keeps build-new-feature closed', () => {
-    expect(CRITICAL_WORK_GATE.openForNonCritical).toMatchObject({ 'doc-fix': true, 'ci-heal': true, bugfix: true, 'build-new-feature': false });
+  it('the gate opens doc-fix, ci-heal and bugfix on probation, plus Codex features, but keeps conflict-resolution closed', () => {
+    expect(CRITICAL_WORK_GATE.openForNonCritical).toMatchObject({ 'doc-fix': true, 'ci-heal': true, bugfix: true, 'build-new-feature': true, 'conflict-resolution': false });
   });
 });
 
@@ -41,7 +41,8 @@ describe('selectProbationWorker', () => {
     expect(PROBATION_ROSTER['ci-heal']).toEqual(['antigravity-claude', 'codex', 'antigravity-gemini']);
     expect(PROBATION_WORKERS['antigravity-gemini']).toMatchObject({ simpleOnly: true, checker: 'codex', model: AGY_GEMINI_SIMPLE_MODEL });
     expect(PROBATION_ROSTER.bugfix).toEqual(['codex', 'antigravity-claude', 'antigravity-gemini']);
-    expect(PROBATION_ROSTER['build-new-feature']).toBeUndefined();
+    expect(PROBATION_ROSTER['build-new-feature']).toEqual(['codex']);
+    expect(PROBATION_ROSTER['conflict-resolution']).toBeUndefined();
   });
 
   it('with no history, picks the first roster worker, at the tier\'s agy Claude model, fully supervised', () => {
@@ -82,7 +83,7 @@ describe('selectProbationWorker', () => {
 
   it('refuses statute paths, a roster-less taskType, and a doc-fix outside its envelope', () => {
     expect(selectProbationWorker({ taskType: 'doc-fix', filesTouched: ['docs/agent/platform-decisions.md'] }).worker).toBeNull();
-    expect(selectProbationWorker({ taskType: 'build-new-feature', filesTouched: ['a.mjs'] }).worker).toBeNull();
+    expect(selectProbationWorker({ taskType: 'conflict-resolution', filesTouched: ['a.mjs'] }).worker).toBeNull();
     expect(selectProbationWorker({ taskType: 'doc-fix', filesTouched: ['a.md'], estimatedSize: 500 }).worker).toBeNull();
   });
 });
@@ -124,8 +125,21 @@ describe('selectProvider — an opened roster taskType keeps Claude as the recom
     expect(critical.auditTrail.find((a) => a.criterion === 'critical-work-gate').result).toBe('claude-only');
   });
 
-  it('a build-new-feature stays closed — no pick', () => {
-    const res = selectProvider({ taskType: 'build-new-feature' }, { kind: 'fix', filesTouched: ['a.mjs'], ...open });
+  it('default gate: non-critical build-new-feature starts with Codex on full-review probation; critical build-new-feature gets no pick', () => {
+    const context = { kind: 'build', filesTouched: ['a.mjs'], ...open };
+    const res = selectProvider({ taskType: 'build-new-feature' }, context);
+    expect(res.recommendation).toBe(RECOMMENDATIONS.CLAUDE);
+    expect(res.probationWorker).toMatchObject({ id: 'codex', supervision: 'full', review: 'full', runRating: 'required' });
+    expect(res.auditTrail.find((a) => a.criterion === 'critical-work-gate').result).toBe('open-non-critical');
+
+    const critical = selectProvider({ taskType: 'build-new-feature' }, { ...context, criticalWork: { critical: true, reasons: [] } });
+    expect(critical.recommendation).toBe(RECOMMENDATIONS.CLAUDE);
+    expect(critical.probationWorker).toBeNull();
+    expect(critical.auditTrail.find((a) => a.criterion === 'critical-work-gate').result).toBe('claude-only');
+  });
+
+  it('conflict-resolution stays closed — no pick', () => {
+    const res = selectProvider({ taskType: 'conflict-resolution' }, { kind: 'fix', filesTouched: ['a.mjs'], ...open });
     expect(res.recommendation).toBe(RECOMMENDATIONS.CLAUDE);
     expect(res.probationWorker).toBeNull();
   });

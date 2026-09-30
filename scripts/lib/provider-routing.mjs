@@ -273,8 +273,9 @@ export function externalTierEquivalent(provider, model) {
  * takes the Claude tier table — UNLESS every one of these holds:
  *
  *   1. the task's `taskType` row in `openForNonCritical` is `true` (an explicit, per-taskType operator switch;
- *      `doc-fix` and `ci-heal` are open on probation since 2026-09-27, `bugfix` (Codex only) since 2026-09-29,
- *      every other row is `false`);
+ *      `doc-fix` and `ci-heal` are open on probation since 2026-09-27, `bugfix` since 2026-09-29,
+ *      and `build-new-feature` (Codex only) since 2026-09-30;
+ *      `prepare` and `test-fix` are also open, while `conflict-resolution` stays closed);
  *   2. the caller supplied the critical-work verdict (`context.criticalWork`, from
  *      `we:scripts/lib/critical-work.mjs#criticalWorkVerdict`) and it says NOT critical — a missing verdict
  *      fails closed;
@@ -299,9 +300,11 @@ export const CRITICAL_WORK_GATE = Object.freeze({
   // PROBATION — non-critical work only, one of the PROBATION_ROSTER workers, full review on every result.
   // `bugfix` opened ON PROBATION to Codex and agy (operator, 2026-09-29): simple mechanical fixes
   // may use Gemini Flash with its Codex checker; full review on every non-critical result.
+  // `build-new-feature` opens to Codex only (operator, 2026-09-30 ~7:20 AM ET, #4519).
+  // agy awaits more build data; critical work stays on Claude and every result gets full review.
   openForNonCritical: Object.freeze({
     'prepare': true,
-    'build-new-feature': false,
+    'build-new-feature': true,
     'bugfix': true,
     'conflict-resolution': false,
     'doc-fix': true,
@@ -361,6 +364,7 @@ export const PROBATION_WORKERS = Object.freeze({
  */
 // @test-only-export-ok: Shared library exported for the probation launcher (agy-launcher-probation) and its own test
 export const PROBATION_ROSTER = Object.freeze({
+  'build-new-feature': Object.freeze(['codex']),
   'prepare': Object.freeze(['codex', 'antigravity-gemini']),
   'test-fix': Object.freeze(['antigravity-gemini']),
   'doc-fix': Object.freeze(['antigravity-claude', 'codex']),
