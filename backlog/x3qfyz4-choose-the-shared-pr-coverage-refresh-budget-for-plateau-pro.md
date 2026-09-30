@@ -1,7 +1,8 @@
 ---
 kind: decision
-status: open
+status: resolved
 dateOpened: "2026-09-30"
+dateResolved: "2026-09-30"
 tags: []
 ---
 
@@ -38,3 +39,8 @@ The external plan has newer September 29 caps alongside older Standing rules and
 ## Follow-ups
 
 Unqueued until the operator rules. Validate missing repo, exhausted budget, pagination interruption and simultaneous refresh clients in the dependent story. No live GitHub calls were made to prepare this proposal.
+
+## Operator ruling (2026-09-30 ~11:50 AM ET)
+
+- **Fork 1, coverage: B.** One shared, budget-limited REST refresh of all three repos (all authors), at most every 5 minutes, about 36 REST requests per hour including pagination. Existing lower limits and write reserves win. REST only: it must not spend the GraphQL budget.
+- **Fork 2, policy source: A now, B as the target.** The first slice shows the operator-designated sections of the plan file read-only, with dates and conflict warnings, and no automatic precedence. A later slice moves the rules into a structured, versioned Plateau policy document (each rule with an effective time and what it supersedes), then retires the plan file as the source.
