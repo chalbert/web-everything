@@ -77,6 +77,7 @@ function fakeIo({
   const tamperedSnapshot = { configHash: 'clean', files: { 'pre-commit': 'planted' } };
   const io = {
     log: () => {},
+    openBlockers: () => [],
     acquireLane: (o) => { calls.push(['acquireLane', o.lane, o.scope]); return lane; },
     resetHookSurface: (d, baseline) => { boom('resetHookSurface'); calls.push(baseline ? ['reset-hooks', d, baseline] : ['reset-hooks', d]); return { clean: baseline ? tamperRestoreClean : hookResetClean, leftover: hookResetClean ? [] : ['pre-commit'], snapshot: cleanSnapshot }; },
     snapshotHookSurface: (d) => { boom('snapshotHookSurface'); calls.push(['snapshot-hooks', d]); return hookTampered ? tamperedSnapshot : cleanSnapshot; },
