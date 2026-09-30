@@ -3,9 +3,10 @@ bornAs: xzvaya6
 kind: story
 size: 3
 parent: "4075"
-status: open
+status: active
 scope: ["we:scripts/conveyor/lease-reaper.mjs", "we:scripts/conveyor/__tests__/lease-reaper.test.mjs"]
 dateOpened: "2026-09-28"
+dateStarted: "2026-09-30"
 preparedDate: "2026-09-30"
 preparedAgainstSha: "1398f53dfb9a9e32fb73dfdd84e17d8a6a26803a"
 tags: []

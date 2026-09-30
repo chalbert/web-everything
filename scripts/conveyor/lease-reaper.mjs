@@ -427,6 +427,16 @@ function defaultGitStatusPorcelain(dir) {
  * a false "contained" costs real, lost work. See the `#4337 — a routine, CONTENT-FREE merge …` fixture in
  * `__tests__/lease-reaper.test.mjs` for this exact tradeoff pinned as an intentional test, not an unnoticed
  * side effect.
+ *
+ * #4339 — AGGREGATE-CONTAINMENT TIER (multi-commit squash): a GitHub squash of a lane with N>1 commits lands as
+ * ONE upstream commit whose patch-id equals none of the N lane commits, so `git cherry` prints N `+` lines even
+ * though the PR is fully landed. When cherry reports `+` lines (and no unaccounted merge commit exists in
+ * `sha..HEAD` — the veto above now runs on both paths), this compares the first token of `git patch-id --stable`
+ * over the lane's net diff (`merge-base HEAD sha`..HEAD) with that of `sha`'s own single-parent diff. Both ids
+ * must be non-empty and equal (`patch-id` prints nothing for an empty diff, so two empties never match); a
+ * merge `sha` skips the tier (`false`); any git-read failure is `null`. NOTE: `patch-id` ignores whitespace, so
+ * "equal" means patch-equivalent, not byte-identical — still the safe direction, since it only turns `false`
+ * into `true` when the lane's whole change matches a single-parent upstream commit.
  */
 export function defaultGitIsAncestor(dir, sha, { exec = execFileSync } = {}) {
   try {
@@ -468,28 +478,54 @@ export function defaultGitIsAncestor(dir, sha, { exec = execFileSync } = {}) {
       // DOES distinguish "proven not contained" from "unknown" deserves the honest answer.
       return null;
     }
-    if (!cherryContained) return false; // cherry itself already proved a genuine, unmatched `+` commit
-    // #4337 — cherry read "contained", but that alone is not proof: veto if HEAD's history holds a merge
+    // #4337 — cherry alone is not proof of containment either way: veto if HEAD's history holds a merge
     // commit `sha`'s history lacks. `--max-count=1` — existence is all that matters, not the full list.
     // `--end-of-options` (never a bare `--` ahead of the range) keeps this a REVISION range, not a pathspec —
     // `rev-list`, unlike `merge-base --is-ancestor`/`cherry` above, treats anything after a bare `--` as a
     // path, so this exact separator choice is load-bearing, not cosmetic; the trailing `--` with nothing after
     // it is the explicit, standard "no path filter" spelling.
+    // #4339 — this veto now runs on BOTH the cherry-contained and the cherry-unmatched (`+`) paths, since the
+    // aggregate tier below must never accept a lane whose history carries an unaccounted-for merge commit.
+    const gitRead = (args) => exec('git', args, {
+      cwd: dir,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: resolveChildTimeoutMs(),
+      killSignal: 'SIGKILL',
+    });
     try {
-      const mergeOut = exec(
-        'git',
-        ['rev-list', '--merges', '--max-count=1', '--end-of-options', `${sha}..HEAD`, '--'],
-        {
-          cwd: dir,
-          encoding: 'utf8',
-          stdio: ['ignore', 'pipe', 'pipe'],
-          timeout: resolveChildTimeoutMs(),
-          killSignal: 'SIGKILL',
-        },
-      );
-      return mergeOut.trim().length === 0; // a hit is an unaccounted-for merge commit — never "contained"
+      const mergeOut = gitRead(['rev-list', '--merges', '--max-count=1', '--end-of-options', `${sha}..HEAD`, '--']);
+      if (mergeOut.trim().length !== 0) return false; // an unaccounted-for merge commit — never "contained"
     } catch {
       return null; // inconclusive range read (unresolvable sha, timeout) — never guess, same contract as above
+    }
+    if (cherryContained) return true;
+    // #4339 — AGGREGATE TIER: cherry printed `+` lines, but a squash of N>1 lane commits is ONE upstream commit
+    // whose patch-id matches none of them individually. Compare the lane's whole net diff against `sha`'s own
+    // diff instead. Only a single-parent `sha` qualifies (a merge `sha`'s diff is not a squash's).
+    try {
+      const parents = gitRead(['rev-list', '--parents', '-n1', '--end-of-options', sha, '--']).trim().split(/\s+/);
+      if (parents.length !== 2) return false; // a merge (or root) `sha` — the tier does not apply
+      const base = gitRead(['merge-base', '--', 'HEAD', sha]).trim();
+      if (!base) return null;
+      const stablePatchId = (from, to) => {
+        const diff = gitRead(['diff', '--no-ext-diff', '--end-of-options', from, to, '--']);
+        const id = exec('git', ['patch-id', '--stable'], {
+          cwd: dir,
+          input: diff,
+          encoding: 'utf8',
+          stdio: ['pipe', 'pipe', 'pipe'],
+          timeout: resolveChildTimeoutMs(),
+          killSignal: 'SIGKILL',
+        });
+        return id.trim().split(/\s+/)[0] || '';
+      };
+      const laneId = stablePatchId(base, 'HEAD');
+      const landedId = stablePatchId(parents[1], sha);
+      // `patch-id` prints nothing for an empty diff — two empties must NOT read as equal.
+      return laneId !== '' && landedId !== '' && laneId === landedId;
+    } catch {
+      return null; // any git-read failure in the aggregate tier — unknown, never a guess
     }
   }
 }

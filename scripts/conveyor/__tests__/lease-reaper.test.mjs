@@ -1359,6 +1359,134 @@ describe('#4337 — defaultGitIsAncestor (via laneQuietSincePr, real git, no moc
   });
 });
 
+// #4339 — the multi-commit squash gap (guard 2 owed by #2835's review; guard 1 is already pinned by the
+// `THE BUG (#4337 …)` fixture above). A squash of N>1 lane commits is ONE upstream commit whose patch-id equals
+// none of the N, so `git cherry` alone reads `+` lines. Real-git fixtures, no mocked readers.
+describe('#4339 — defaultGitIsAncestor: multi-commit squash aggregate containment (real git)', () => {
+  const QUIET = DEFAULT_QUIET_MS;
+  const old = (msAgo) => new Date(NOW - msAgo).toISOString();
+  const quietTimestamps = { prMergedAt: old(QUIET + 3600_000), leaseAcquiredAt: old(QUIET + 3600_000), nowMs: NOW };
+  const git = (args, cwd) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  const commitFile = (dir, name, content, msg) => {
+    writeFileSync(join(dir, name), content);
+    git(['add', name], dir);
+    git(['commit', '-q', '-m', msg], dir);
+  };
+  const initRepo = (dir) => {
+    mkdirSync(dir, { recursive: true });
+    git(['init', '-q', '-b', 'main'], dir);
+    git(['config', 'user.email', 'test@example.com'], dir);
+    git(['config', 'user.name', 'Test'], dir);
+    commitFile(dir, 'base.txt', 'v0\n', 'C0');
+  };
+  const sha = (dir) => git(['rev-parse', 'HEAD'], dir).trim();
+  // Lane branch `lane` (left checked out) with commits `a` and `b`.
+  const laneWithTwoCommits = (dir) => {
+    initRepo(dir);
+    git(['checkout', '-q', '-b', 'lane'], dir);
+    commitFile(dir, 'a.txt', 'a\n', 'lane a');
+    commitFile(dir, 'b.txt', 'b\n', 'lane b');
+  };
+  // A single upstream commit off `main`'s C0 writing the given files, returns its sha; lane is re-checked out.
+  const squashOf = (dir, files, base = 'main') => {
+    git(['checkout', '-q', '-b', `landed-${Math.random().toString(36).slice(2)}`, base], dir);
+    for (const [n, c] of Object.entries(files)) writeFileSync(join(dir, n), c);
+    git(['add', '-A'], dir);
+    git(['commit', '-q', '-m', 'squash'], dir);
+    const out = sha(dir);
+    git(['checkout', '-q', 'lane'], dir);
+    return out;
+  };
+
+  let root;
+  beforeAll(() => { root = mkdtempSync(join(tmpdir(), 'we-lease-reaper-squash-')); });
+  afterAll(() => { rmSync(root, { recursive: true, force: true }); });
+
+  it('multi-commit squash: two distinct lane commits landed as ONE squash commit → true (cherry alone reads two `+` lines)', () => {
+    const dir = join(root, 'n2-squash');
+    laneWithTwoCommits(dir);
+    const landed = squashOf(dir, { 'a.txt': 'a\n', 'b.txt': 'b\n' });
+    const cherry = git(['cherry', '--', landed, 'HEAD'], dir).split('\n').filter(Boolean);
+    expect(cherry).toHaveLength(2);
+    expect(cherry.every((l) => l.startsWith('+'))).toBe(true);
+    expect(laneQuietSincePr(dir, { ...quietTimestamps, prMergeSha: landed })).toBe(true);
+  });
+
+  it('multi-commit squash: an incomplete squash (only `a`) → false', () => {
+    const dir = join(root, 'n2-incomplete');
+    laneWithTwoCommits(dir);
+    const landed = squashOf(dir, { 'a.txt': 'a\n' });
+    expect(laneQuietSincePr(dir, { ...quietTimestamps, prMergeSha: landed })).toBe(false);
+  });
+
+  it('multi-commit squash: same two files but different content in `b` → false', () => {
+    const dir = join(root, 'n2-different-content');
+    laneWithTwoCommits(dir);
+    const landed = squashOf(dir, { 'a.txt': 'a\n', 'b.txt': 'DIFFERENT\n' });
+    expect(laneQuietSincePr(dir, { ...quietTimestamps, prMergeSha: landed })).toBe(false);
+  });
+
+  it('multi-commit squash: the merge veto decides — {a,b} plus a content-free `merge other`, aggregate diff still equals the squash → false', () => {
+    const dir = join(root, 'n2-veto');
+    initRepo(dir);
+    git(['checkout', '-q', '-b', 'other'], dir);
+    commitFile(dir, 'other.txt', 'o\n', 'other upstream progress');
+    git(['checkout', '-q', '-b', 'lane', 'main'], dir);
+    commitFile(dir, 'a.txt', 'a\n', 'lane a');
+    commitFile(dir, 'b.txt', 'b\n', 'lane b');
+    git(['merge', '--no-ff', '-q', '-m', 'sync other', 'other'], dir);
+    const landed = squashOf(dir, { 'a.txt': 'a\n', 'b.txt': 'b\n' }, 'other');
+    // ground: merge-base(HEAD, landed) is `other`'s tip, so the aggregate diff really equals the squash diff
+    const base = git(['merge-base', 'HEAD', landed], dir).trim();
+    expect(git(['diff', '--name-only', base, 'HEAD'], dir).trim().split('\n').sort()).toEqual(['a.txt', 'b.txt']);
+    expect(git(['rev-list', '--merges', '--end-of-options', `${landed}..HEAD`, '--'], dir).trim()).not.toBe('');
+    expect(laneQuietSincePr(dir, { ...quietTimestamps, prMergeSha: landed })).toBe(false);
+  });
+
+  it('multi-commit squash: a merge-commit `sha` whose first-parent diff matches → false (the single-parent check skips the tier)', () => {
+    const dir = join(root, 'n2-merge-sha');
+    laneWithTwoCommits(dir);
+    git(['checkout', '-q', '-b', 'feat', 'main'], dir);
+    commitFile(dir, 'a.txt', 'a\n', 'feat squashed part 1');
+    writeFileSync(join(dir, 'b.txt'), 'b\n');
+    git(['add', 'b.txt'], dir);
+    git(['commit', '-q', '--amend', '--no-edit'], dir);
+    git(['checkout', '-q', '-b', 'landed', 'main'], dir);
+    git(['merge', '--no-ff', '-q', '-m', 'land feat', 'feat'], dir);
+    const landed = sha(dir);
+    git(['checkout', '-q', 'lane'], dir);
+    expect(git(['rev-list', '--parents', '-n1', landed], dir).trim().split(' ')).toHaveLength(3);
+    expect(laneQuietSincePr(dir, { ...quietTimestamps, prMergeSha: landed })).toBe(false);
+  });
+
+  it('multi-commit squash: a net-empty lane diff (commit then revert) vs an empty `sha` → false, two empty patch-ids never compare equal', () => {
+    const dir = join(root, 'n2-empty');
+    initRepo(dir);
+    git(['checkout', '-q', '-b', 'lane'], dir);
+    commitFile(dir, 'a.txt', 'a\n', 'lane add');
+    git(['revert', '--no-edit', 'HEAD'], dir);
+    git(['checkout', '-q', '-b', 'landed', 'main'], dir);
+    git(['commit', '-q', '--allow-empty', '-m', 'empty squash'], dir);
+    const landed = sha(dir);
+    git(['checkout', '-q', 'lane'], dir);
+    expect(laneQuietSincePr(dir, { ...quietTimestamps, prMergeSha: landed })).toBe(false);
+  });
+
+  it('multi-commit squash: an aggregate read failure (patch-id spawn throws) → null, never a guess', () => {
+    const exec = (bin, args) => {
+      if (args[0] === 'merge-base' && args[1] === '--is-ancestor') { const e = new Error('not an ancestor'); e.status = 1; throw e; }
+      if (args[0] === 'merge-base') return 'basesha\n';
+      if (args[0] === 'cherry') return '+ 1111\n+ 2222\n';
+      if (args[0] === 'rev-list' && args.includes('--merges')) return '';
+      if (args[0] === 'rev-list' && args.includes('--parents')) return 'deadbeef parentsha\n';
+      if (args[0] === 'diff') return 'some diff';
+      if (args[0] === 'patch-id') throw new Error('spawn ETIMEDOUT');
+      throw new Error(`unexpected git subcommand in test: ${args[0]}`);
+    };
+    expect(defaultGitIsAncestor('/x/lane-9', 'deadbeef', { exec })).toBeNull();
+  });
+});
+
 // #4337 — the new `git rev-list --merges` veto's OWN inconclusive-read path, pinned directly (an injected fake
 // `exec`, mirroring how every other axis in this file already tests its git-read failure contract) since
 // forcing a real `git rev-list` call to fail — while the two calls ahead of it in the SAME function (`git
