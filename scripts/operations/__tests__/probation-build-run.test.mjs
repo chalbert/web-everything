@@ -971,3 +971,14 @@ describe('Findings publication regressions', () => {
     expect(gateFailureDetail(' FAIL scripts/example.test.mjs > case\nAssertionError: nope')).toContain('vitest: FAIL');
   });
 });
+
+describe('parseArgs — operator pins keep the narrow worker allowlist (PR 3209 review)', () => {
+  it('rejects prepare on antigravity-claude and widened models for a pinned worker', () => {
+    expect(() => parseArgs(['--num=1', '--session=s', '--taskType=prepare', '--worker=antigravity-claude'])).toThrow(/prepare requires/);
+    expect(() => parseArgs(['--num=1', '--session=s', '--worker=antigravity-claude', '--model=claude-opus-4-6-thinking'])).toThrow(/disallowed model/);
+    expect(() => parseArgs(['--num=1', '--session=s', '--worker=codex', '--model=gpt-5.6-terra'])).toThrow(/disallowed model/);
+  });
+  it('resolves a default route for a non-critical doc-fix with no --worker (no gate crash)', () => {
+    expect(() => parseArgs(['--num=1', '--session=s', '--taskType=doc-fix'])).not.toThrow();
+  });
+});

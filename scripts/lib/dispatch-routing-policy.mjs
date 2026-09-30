@@ -70,6 +70,16 @@ export function resolveOperationRoute({ operation, taskType, available, gateClos
   return { ...selected, fallback: chain.slice(chain.indexOf(selected) + 1), source: 'routing-policy' };
 }
 
+/**
+ * The `--model` a `claude` CLI spawn gets: the tier ALIAS (haiku|sonnet|opus), never a pinned id, so a worker always runs the
+ * current model of its tier (see `dispatch-lane-io.mjs#CLAUDE_SPAWN_MODEL_BY_TIER`, #3906). Policy/record ids stay pinned for
+ * trust keys; only the spawn boundary maps them. A non-catalogue value passes through untouched.
+ */
+export function claudeSpawnAlias(model) {
+  if (!CATALOG.claude.includes(model)) return model;
+  return ['haiku', 'sonnet', 'opus'].find(tier => model.includes(tier)) ?? model;
+}
+
 /** Validate explicit CLI pins through the same provider-specific catalogue as policy aliases. */
 export function resolvePolicyModel(provider, model, policy = DEFAULT_ROUTING_POLICY) {
   return modelFor(policy, provider, model, 'explicit model');

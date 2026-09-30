@@ -1,3 +1,4 @@
+import { claudeSpawnAlias } from '../lib/dispatch-routing-policy.mjs';
 import { resolveOperationRoute, readRoutingPolicy, resolveDispatchRoute as decideDispatchRoute } from '../lib/dispatch-routing-policy-io.mjs';
 import { meteredAlreadyDone, alreadyDoneRequest } from '../lib/gh-metered-reads.mjs';
 import { readGitAlreadyDone } from '../lib/git-already-done.mjs';
@@ -1690,7 +1691,9 @@ export function routeDispatchProvider(request, {
       request = { ...request, probationWorker: null, table: { model: chosen.model, tier: Object.entries(CLAUDE_NATIVE_MODEL_BY_TIER).find(([, id]) => id === chosen.model)?.[0] ?? null, reason: 'routing-policy' } };
       return agent(request);
     }
-    if (!request.probationWorker && registry[kind]) return registry[kind].provider(request);
+    // An explicit Codex route whose probation launch is unavailable (probation off, or a task type the probation
+    // launcher does not run) still goes to the mechanical build wrapper, never on to the Claude agent below.
+    if (!probationLaunchDecision(request, probationLaunch).launch && registry[kind]) return registry[kind].provider({ ...request, probationWorker: null });
   }
   // agy-launcher-probation — FIRST: an opened, non-critical ci-heal the router gave a probation worker runs on that
   // worker (see `dispatch-providers/probation-worker.mjs#probationLaunchDecision` for every condition).
@@ -2266,7 +2269,7 @@ export function buildAgentArgv({
     const decision = resolveWorkerModel({ extraArgs: args, table, modelReason });
     if (decision.refusal) throw notApplied(`dispatch-lane: ${decision.refusal}`);
     args = decision.cleanArgs;
-    if (decision.model) modelArgs.push('--model', String(decision.model));
+    if (decision.model) modelArgs.push('--model', claudeSpawnAlias(String(decision.model)));
   } else {
     const explicit = extractModelFlag(args);
     const kind = payload?.launchKind ?? 'build';

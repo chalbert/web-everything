@@ -1360,7 +1360,10 @@ export function decideDispatchRoute(dispatch = {}, options = {}) {
   }) : null;
   const gateClosed = (roleGate && !roleGate.open) || record.auditTrail?.some(row => row.criterion === 'critical-work-gate' && row.result === 'claude-only');
   try {
-    const route = resolveOperationRoute({ operation: dispatch.kind, taskType: record.taskType ?? (dispatch.kind === 'prepare-item' ? 'prepare' : null), gateClosed, policy, vetoes: criticalWorkGate.kinds.includes(dispatch.kind) ? criticalMissesFor(options.scorecards ?? [], record.taskType) : [] });
+    // Critical-miss vetoes are scored per taskType and apply to EVERY routed operation, gated or not
+    // (prepare-item is role-path: no record.taskType, scored as 'prepare').
+    const vetoTaskType = record.taskType ?? (dispatch.kind === 'prepare-item' ? 'prepare' : dispatch.kind);
+    const route = resolveOperationRoute({ operation: dispatch.kind, taskType: record.taskType ?? (dispatch.kind === 'prepare-item' ? 'prepare' : null), gateClosed, policy, vetoes: criticalMissesFor(options.scorecards ?? [], vetoTaskType) });
     if (!route) {
       if (roleGate && !roleGate.open) record.probationWorker = null;
       return record;

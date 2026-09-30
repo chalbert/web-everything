@@ -775,11 +775,12 @@ function judgeTelemetryFrom(outcome, effective) {
  *   process streams.
  */
 export function createDefaultJudge({
-  provider, providerName = 'claude', cwd, model, operation = 'judge', resolveProvider = resolveJudgeProvider,
+  provider, providerName: factoryProviderName, cwd, model, operation = 'judge', resolveProvider = resolveJudgeProvider,
   checkProviderHold = defaultProviderQuotaHold,
   now = () => Date.now(),
   logGracefulOutcome = (line) => { try { process.stderr.write(`${line}\n`); } catch { /* best effort */ } },
 } = {}) {
+  const providerName = factoryProviderName ?? 'claude';
   return async (request) => {
     // #xqa9ttq — A REQUEST MAY PIN ITS OWN PROVIDER (`request.providerName`), overriding this factory's. This
     // is what lets ONE run seat a tool-free Codex juror (`review-pr`'s opt-in `judgeAdvisory` seat) while its
@@ -794,7 +795,9 @@ export function createDefaultJudge({
         + `${JUDGE_PROVIDER_NAMES.join('|')}`,
       );
     }
-    const configured = resolveOperationRoute({ operation: operation === 'judge' ? 'judge' : `judge:${operation}`, taskType: request?.mandate?.lens ?? request?.lens, available: JUDGE_PROVIDER_NAMES });
+    // An explicit pin (request-level provider, factory provider/providerName, or factory model) outranks the policy default.
+    const pinned = request?.providerName !== undefined || factoryProviderName !== undefined || provider !== undefined || model !== undefined;
+    const configured = pinned ? null : resolveOperationRoute({ operation: operation === 'judge' ? 'judge' : `judge:${operation}`, taskType: request?.mandate?.lens ?? request?.lens, available: JUDGE_PROVIDER_NAMES });
     const effectiveProviderName = configured?.provider ?? request?.providerName ?? providerName;
     // #xqa9ttq (PR #2115 review, CONFIRMED) - `allowedTools: []` is the explicit "no tools" signal
     // `assertNoCodexToolAllowlist` documents as tool-free. `assertSafeJudgeRequest` is shared with claude and

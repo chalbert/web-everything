@@ -112,3 +112,35 @@ it('a closed gate removes external providers from all later fallback entries too
   const policy = copy(); policy.operations.build = { provider: 'codex', model: 'default', fallback: [{ provider: 'claude', model: 'sonnet' }, { provider: 'codex', model: 'sol' }] };
   expect(resolveOperationRoute({ operation: 'build', policy, gateClosed: true })).toMatchObject({ provider: 'claude', fallback: [] });
 });
+
+describe('review-round regressions (PR 3209)', () => {
+  const miss = { provider: 'codex', model: 'gpt-6-astra', taskType: 'prepare', outcome: 'reworked' };
+  it('a recorded critical miss vetoes the prepare-item policy route through decideDispatchRoute', async () => {
+    const { criticalMissesFor } = await import('../critical-work.mjs');
+    const scorecards = [miss];
+    expect(criticalMissesFor(scorecards, 'prepare')).toHaveLength(1);
+    const route = decideDispatchRoute({ kind: 'prepare-item' }, { scorecards });
+    expect(route.policyRoute).toMatchObject({ provider: 'claude' });
+    expect(route.probationWorker ?? null).toBeNull();
+  });
+  it('Claude policy ids spawn as tier aliases, never pinned ids', async () => {
+    const { claudeSpawnAlias } = await import('../dispatch-routing-policy.mjs');
+    expect(['claude-haiku-4-5-20251001', 'claude-sonnet-5-5', 'claude-opus-5'].map(claudeSpawnAlias)).toEqual(['haiku', 'sonnet', 'opus']);
+    expect(claudeSpawnAlias('gpt-6-astra')).toBe('gpt-6-astra');
+  });
+  it('an env snapshot cannot loosen the critical-work gate', async () => {
+    const { trustedSnapshot } = await import('../dispatch-routing-policy-source.mjs');
+    const loose = copy(); loose.criticalWorkGate.kinds = [];
+    expect(trustedSnapshot(JSON.stringify(loose))).toBeNull();
+    expect(trustedSnapshot(JSON.stringify(copy()))).not.toBeNull();
+  });
+  it('an explicit Codex build route stays on the mechanical wrapper when probation launch is off', () => {
+    const policy = copy(); policy.operations.build = { provider: 'codex', model: 'default', fallback: [] };
+    const routing = decideDispatchRoute({ kind: 'build', scopePaths: ['we:docs/a.md'], size: 1, risk: 'low' }, { routingPolicy: policy });
+    const request = { launchKind: 'build', policyRoute: routing.policyRoute, probationWorker: routing.probationWorker, reportModel: vi.fn() };
+    const wrapper = vi.fn(() => 'pid:9'); const agent = vi.fn(() => 'claude-session');
+    const registry = { build: { runScript: 'x', provider: wrapper } };
+    expect(routeDispatchProvider(request, { probationLaunch: 'off', registry, scriptExists: () => true, providerAvailable: () => true, agent })).toBe('pid:9');
+    expect(agent).not.toHaveBeenCalled();
+  });
+});

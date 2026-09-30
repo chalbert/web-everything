@@ -1,10 +1,10 @@
 /** The only filesystem boundary for routing policy: reload, retain last-good, and forward snapshots. */
 import { readFileSync } from 'node:fs';
-import { ROUTING_POLICY_PATH } from './dispatch-routing-policy-source.mjs';
+import { ROUTING_POLICY_PATH, trustedSnapshot } from './dispatch-routing-policy-source.mjs';
 import { validateRoutingPolicy, DEFAULT_ROUTING_POLICY, resolveOperationRoute as resolvePureRoute, resolvePolicyModel as resolvePureModel } from './dispatch-routing-policy.mjs';
 import { decideDispatchRoute } from './dispatch-contracts.mjs';
 function initialPolicy() {
-  return process.env.WE_DISPATCH_ROUTING_SNAPSHOT ? JSON.parse(process.env.WE_DISPATCH_ROUTING_SNAPSHOT) : DEFAULT_ROUTING_POLICY;
+  return trustedSnapshot(process.env.WE_DISPATCH_ROUTING_SNAPSHOT) ?? DEFAULT_ROUTING_POLICY;
 }
 export function createRoutingPolicyReader({ path = ROUTING_POLICY_PATH, read = readFileSync, log = message => console.error(message), initial = initialPolicy() } = {}) {
   let good = validateRoutingPolicy(initial), seen, lastError;
