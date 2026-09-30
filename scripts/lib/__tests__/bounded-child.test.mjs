@@ -129,3 +129,9 @@ describe('installChildReaper', () => {
     expect(await waitFor(() => !alive(child) && !alive(reaperPid))).toBe(true);
   }, 20_000);
 });
+
+// The next error boundary must receive the full diagnostic, not only its first line.
+it('preserves multiline stderr and exit status for the tick/daemon logger', async () => {
+  await expect(runBounded(NODE, ['-e', 'console.error("heading\\nactual root cause"); process.exit(3)']))
+    .rejects.toMatchObject({ stderr: 'heading\nactual root cause\n', status: 3 });
+});

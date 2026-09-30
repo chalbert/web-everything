@@ -1521,7 +1521,8 @@ export function runGhSync(args, opts = {}) {
     const exhausted = primaryExhaustedResource(text);
     if (exhausted) {
       const probe = throttle.probeBudget || ((probeArgs) => exec(probeArgs, { ...execOpts, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }));
-      const until = resolveBudgetBlockUntil({ headers, resource: exhausted, probe });
+      // Strict-budget background readers cannot spend an extra diagnostic request; use headers/fallback.
+      const until = resolveBudgetBlockUntil({ headers, resource: exhausted, probe: env.WE_GH_THROTTLE_NO_BUDGET_PROBE === '1' ? () => '' : probe });
       if (until) {
         const rec = writeBudgetBlock(lockRoot, identity, exhausted, { untilMs: until.untilMs, nowMs: now(), source: until.source, op: opLabel, caller });
         recordGhCallLogEntry(logPath, { op: opLabel, attempt, points, outcome: 'budget_exhausted', resource: exhausted, until: rec.until, caller, w: isWrite });
@@ -1754,7 +1755,8 @@ export function runGhCliPassthrough(argv, { throttle = {}, spawn = spawnSync, bi
         const pr = spawn(bin, probeArgs, probeOpts);
         return pr && pr.status === 0 && pr.stdout ? pr.stdout.toString('utf8') : '';
       });
-      const until = resolveBudgetBlockUntil({ headers, resource: exhausted, probe });
+      // Strict-budget background readers cannot spend an extra diagnostic request; use headers/fallback.
+      const until = resolveBudgetBlockUntil({ headers, resource: exhausted, probe: env.WE_GH_THROTTLE_NO_BUDGET_PROBE === '1' ? () => '' : probe });
       if (until) {
         const rec = writeBudgetBlock(lockRoot, identity, exhausted, { untilMs: until.untilMs, nowMs: now(), source: until.source, op: opLabel, caller });
         recordGhCallLogEntry(logPath, { op: opLabel, attempt, points, outcome: 'budget_exhausted', resource: exhausted, until: rec.until, caller, w: isWrite, id: identity });

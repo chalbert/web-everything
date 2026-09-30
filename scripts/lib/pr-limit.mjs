@@ -127,10 +127,11 @@ export function countBackpressurePrs(prs) {
  *  @param {string} repoSlug - the gh `owner/repo` slug
  *  @param {{exec?: Function}} [o] - `exec` mirrors `runGhSync`'s own signature (tests inject a fake)
  *  @returns {Array|null} */
-export function fetchOpenPrs(repoSlug, { exec = runGhSync } = {}) {
+export function fetchOpenPrs(repoSlug, { exec = runGhSync, localOnly = false } = {}) {
   try {
     // #gh-graphql-budget — the host-shared open-PR snapshot first (null = not applicable → the direct read).
-    if (exec === runGhSync) { const shared = readSharedOpenPrs({ repo: repoSlug, fields: 'number,labels,headRefName,headRefOid,baseRefName' }); if (shared) return shared; }
+    if (exec === runGhSync) { const shared = readSharedOpenPrs({ repo: repoSlug, fields: 'number,labels,headRefName,headRefOid,baseRefName', cacheOnly: localOnly }); if (shared) return shared; }
+    if (localOnly) return null;
     const out = exec(
       ['pr', 'list', '--repo', repoSlug, '--state', 'open', '--json', 'number,labels,headRefName,headRefOid,baseRefName', '--limit', '100'],
       { throttle: { op: 'pr list (pr-limit)' }, encoding: 'utf8' },
@@ -151,9 +152,10 @@ export function fetchOpenPrs(repoSlug, { exec = runGhSync } = {}) {
  *  re-discovering the limit the hard way twice. Fail-SOFT: returns `null` (never `[]`, which would read as
  *  "zero commits" / mechanical-only) on any failure, so the caller can tell "unknown" apart from "empty".
  *  @returns {Array|null} */
-export function fetchPrCommits(repoSlug, number, { exec = runGhSync, headRefName, headRefOid, baseRefName, cwd, git } = {}) {
-  const local = readGitPrCommits(repoSlug, headRefName, { cwd, git, headRefOid, baseRefName });
+export function fetchPrCommits(repoSlug, number, { exec = runGhSync, headRefName, headRefOid, baseRefName, cwd, git, localOnly = false } = {}) {
+  const local = readGitPrCommits(repoSlug, headRefName, { cwd, git, headRefOid, baseRefName, localOnly });
   if (local !== null) return local;
+  if (localOnly) return null;
   try {
     const commits = meteredPrCommits(repoSlug, number, { exec });
     return Array.isArray(commits) ? commits : null;
@@ -170,15 +172,15 @@ export function fetchPrCommits(repoSlug, number, { exec = runGhSync, headRefName
  *  `review:accepted` (an already-accepted PR is excluded from the count regardless of authorship, so its
  *  commits are never worth fetching) — see {@link fetchPrCommits} for why a bulk commits fetch is unsafe. A
  *  PR whose commits lookup fails is DROPPED from the count (unknown authorship is never assumed AI). */
-export function countOpenPrsForRepo(repoKey, { exec, env = process.env, reposTable = CONSTELLATION_REPOS, git, cwd } = {}) {
+export function countOpenPrsForRepo(repoKey, { exec, env = process.env, reposTable = CONSTELLATION_REPOS, git, cwd, localOnly = false } = {}) {
   const meta = reposTable[repoKey];
   const limit = resolvePrLimit(repoKey, env);
   if (!meta) return { repoKey, slug: null, count: null, prNumbers: [], limit, unavailable: true };
-  const prs = fetchOpenPrs(meta.slug, { exec });
+  const prs = fetchOpenPrs(meta.slug, { exec, localOnly });
   if (prs === null) return { repoKey, slug: meta.slug, count: null, prNumbers: [], limit, unavailable: true };
   const enriched = prs
     .filter((pr) => !hasLabel(pr, REVIEW_LABELS.accepted))
-    .map((pr) => ({ ...pr, commits: fetchPrCommits(meta.slug, pr.number, { exec, headRefName: pr.headRefName, headRefOid: pr.headRefOid, baseRefName: pr.baseRefName, git, cwd: cwd ?? (meta.path ? meta.path.replace('$HOME', homedir()) : process.cwd()) }) }))
+    .map((pr) => ({ ...pr, commits: fetchPrCommits(meta.slug, pr.number, { exec, headRefName: pr.headRefName, headRefOid: pr.headRefOid, baseRefName: pr.baseRefName, git, localOnly, cwd: cwd ?? (meta.path ? meta.path.replace('$HOME', homedir()) : process.cwd()) }) }))
     .filter((pr) => Array.isArray(pr.commits));
   const counted = countBackpressurePrs(enriched);
   return { repoKey, slug: meta.slug, count: counted.length, prNumbers: counted.map((p) => p.number), limit, unavailable: false };
