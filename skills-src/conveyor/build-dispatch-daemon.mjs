@@ -45,6 +45,7 @@ import {
   acquireBuildDispatchClaim, releaseBuildDispatchClaim, listBuildDispatchClaims,
   listBuildDispatchHolds, placeBuildDispatchHold, releaseBuildDispatchHold, DEFAULT_BUILD_DISPATCH_HOLD_MINUTES,
 } from '../../scripts/conveyor/build-dispatch-claim.mjs';
+import { listFixDispatchClaims } from '../../scripts/conveyor/fix-claim-store.mjs';
 // #4465 — a held item's own route (already-done / out-of-scope / other) and the live sweep that acts on it.
 // See that file's own header for the three routes and why this daemon owns the sweep.
 import { planHoldRouting, routeHeldItems, reserveHoldRoute, appendHoldFinding } from '../../scripts/conveyor/build-dispatch-hold-router.mjs';
@@ -121,6 +122,17 @@ export function readDispatchOutcome(text) {
   const verdict = walk(parsed);
   if (!verdict) return { dispatching: false, reason: 'no verdict in dispatch-lane output' };
   return { dispatching: verdict.dispatching, reason: verdict.reason ?? verdict.why ?? null, lane: verdict.lane ?? null, sessionSlug: verdict.sessionSlug ?? null };
+}
+
+/**
+ * #4295 — the scopes of LIVE fix/ci-heal claims, as `planBuildDispatch`'s `fixInFlight`. A claim with no recorded
+ * scope (written before scope rode in `meta`) is skipped: unknown is not proven overlapping.
+ * @returns {Array<{pr:number, scope:string[]}>}
+ */
+export function liveFixInFlight() {
+  return listFixDispatchClaims(undefined, { liveOnly: true })
+    .filter((c) => Array.isArray(c.meta.scope) && c.meta.scope.length)
+    .map((c) => ({ pr: c.meta.pr, scope: c.meta.scope }));
 }
 
 /**
@@ -305,7 +317,10 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
   // derivation `dryRun` also calls — see its own docblock for why `runStoreInFlight`/`settledRows` ARE this
   // builder's own durable dispatch-lane run records, and why the two staying in sync matters.
   const dispatchedByBuilder = deriveDispatchedByBuilder(runStoreInFlight, settledRows);
-  const plan = planBuildDispatch({ candidates, inFlight, openPrs, externalBuilding, killSwitch: effects.killSwitch(), policy, dispatchedByBuilder });
+  const plan = planBuildDispatch({
+    candidates, inFlight, openPrs, externalBuilding, killSwitch: effects.killSwitch(), policy, dispatchedByBuilder,
+    fixInFlight: effects.listFixClaims ? effects.listFixClaims() : [],
+  });
 
   const dispatched = [];
   const failures = [];
@@ -820,6 +835,7 @@ function cliEffects() {
     predictRoute: cliPredictRoute,
     fetchOpenPrs: cliFetchOpenPrs,
     listClaims: () => listBuildDispatchClaims(),
+    listFixClaims: () => liveFixInFlight(),
     releaseClaim: ({ num }) => releaseBuildDispatchClaim({ num }),
     acquireClaim: ({ num, scope }) => acquireBuildDispatchClaim({ num, scope }),
     listRunStoreInFlight: () => [],
@@ -904,7 +920,7 @@ async function dryRun(flags) {
     const route = await cliPredictRoute(c.num, scope);
     reportCandidates.push({ num: c.num, lane: c.lane, scope, route, executor: route.executor });
   }
-  const ifFreed = planBuildDispatch({ candidates: reportCandidates, inFlight, openPrs: normalizeOpenPrs(openPrs), externalBuilding: core.building, killSwitch: cliKillSwitch(), policy, dispatchedByBuilder });
+  const ifFreed = planBuildDispatch({ candidates: reportCandidates, inFlight, openPrs: normalizeOpenPrs(openPrs), externalBuilding: core.building, killSwitch: cliKillSwitch(), policy, dispatchedByBuilder, fixInFlight: liveFixInFlight() });
   const focus = String(flags.focus || '').split(',').map(normNum).filter(Boolean);
   const rows = [];
   const nums = new Set([...ifFreed.dispatch.map((x) => x.num), ...ifFreed.hold.map((x) => x.num)]);

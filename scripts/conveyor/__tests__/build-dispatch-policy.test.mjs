@@ -123,6 +123,20 @@ describe('planBuildDispatch', () => {
     expect(r.hold[0]).toMatchObject({ rule: 'scope-vs-open-prs' });
     expect(r.hold[0].reason).toMatch(/we#2813/);
   });
+  it('#4295 holds a build whose scope overlaps a live FIX claim, naming the fix PR', () => {
+    const r = planBuildDispatch({
+      candidates: [cand('1', ['we:scripts/conveyor/x.mjs']), cand('2', ['we:docs/y.md'])],
+      fixInFlight: [{ pr: 88, scope: ['we:scripts/conveyor/'] }],
+      policy: { ...BUILD_DISPATCH_POLICY, maxConcurrentBuilds: 3 },
+    });
+    expect(r.hold.find((h) => h.num === '1')).toMatchObject({ rule: 'hot-file' });
+    expect(r.hold.find((h) => h.num === '1').reason).toMatch(/being fixed by PR #88/);
+    expect(r.dispatch.map((x) => x.num)).toEqual(['2']);
+  });
+  it('#4295 without fixInFlight behaves as before', () => {
+    const r = planBuildDispatch({ candidates: [cand('1', ['we:scripts/conveyor/x.mjs'])] });
+    expect(r.dispatch.map((x) => x.num)).toEqual(['1']);
+  });
   it('serialises hot files: against in-flight builds and within one tick', () => {
     const r = planBuildDispatch({
       candidates: [cand('1', ['plateau-app:src/main.ts']), cand('2', ['plateau-app:src/main.ts', 'plateau-app:src/x.ts']), cand('3', ['we:q'])],
