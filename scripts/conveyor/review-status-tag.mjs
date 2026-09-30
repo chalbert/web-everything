@@ -24,6 +24,7 @@
  * `fix-<pr>`, the same slugs `we:scripts/operations/review-dispatch.mjs#reviewSessionSlug` and
  * `we:scripts/operations/dispatch-lane.mjs`'s own `fix-${id}` mint), rather than sharing that binding.
  */
+import { latestCiHealEscalationForHead } from './ci-heal-escalation-mark.mjs';
 import { mintSessionSlug } from './session-slug.mjs';
 import { readLiveFixClaim, FIX_DRAFT_REASONS } from './fix-procedure.mjs';
 import { repoKeyForSlug } from '../lib/constellation-repos.mjs';
@@ -59,7 +60,7 @@ import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
  *  `fix-begin` time (mutually exclusive with `fixing`/each other and with `awaiting-ci` — see
  *  {@link deriveReviewStatus}'s own `fixClaim` branch for how a LIVE claim's recorded reason is read back so
  *  this reconciler's own periodic pass never fights `fix-begin`'s freshly-applied label). */
-export const STATUS_LABEL_RE = /^review-status:(reviewing|review-stalled|fixing|fix-stalled|fixing-conflict|fixing-conflict-stalled|healing-ci|ci-heal-stalled|awaiting-ci|draft-scope-change|draft-withdrawn)$/;
+export const STATUS_LABEL_RE = /^review-status:(reviewing|review-stalled|fixing|fix-stalled|fixing-conflict|fixing-conflict-stalled|healing-ci|ci-heal-stalled|awaiting-ci|draft-scope-change|draft-withdrawn|needs-human)$/;
 
 /**
  * `claude agents --json` states this module treats as LIVE — something is currently actioned, or stuck trying
@@ -86,10 +87,10 @@ const LIVE_STATES = Object.freeze({ working: 'reviewing', blocked: 'stalled' });
  * (`we:scripts/conveyor/reconcile-core.mjs#classifyPr`'s `ci-red` phase is its own branch ahead of the
  * `OWED`/`OWED_ELSEWHERE` table), so the ordering is precedence-in-name-only — it never actually shadows a
  * real ci-heal for a PR that also has a stale review/fix session row sitting in `claude agents --json`.
- * @param {{pr:number|string, agents?:Array<{name?:string, state?:string}>, isDraft?:boolean, mergeConflicted?:boolean, fixClaim?:object|null}} o
- * @returns {{role:'review'|'fix'|'ci-heal'|'draft', state:'reviewing'|'review-stalled'|'fixing'|'fix-stalled'|'fixing-conflict'|'fixing-conflict-stalled'|'healing-ci'|'ci-heal-stalled'|'awaiting-ci'|'draft-scope-change'|'draft-withdrawn'}|null}
+ * @param {{pr:number|string, agents?:Array<{name?:string, state?:string}>, isDraft?:boolean, mergeConflicted?:boolean, fixClaim?:object|null, escalation?:object|null}} o
+ * @returns {{role:'review'|'fix'|'ci-heal'|'draft', state:'reviewing'|'review-stalled'|'fixing'|'fix-stalled'|'fixing-conflict'|'fixing-conflict-stalled'|'healing-ci'|'ci-heal-stalled'|'awaiting-ci'|'draft-scope-change'|'draft-withdrawn'|'needs-human'}|null}
  */
-export function deriveReviewStatus({ pr, agents = [], repo = 'we', isDraft = false, mergeConflicted = false, fixClaim = null } = {}) {
+export function deriveReviewStatus({ pr, agents = [], repo = 'we', isDraft = false, mergeConflicted = false, fixClaim = null, escalation = null } = {}) {
   const reviewName = mintSessionSlug({ kind: 'review', id: pr, repo });
   const fixName = mintSessionSlug({ kind: 'fix', id: pr, repo });
   const ciHealName = mintSessionSlug({ kind: 'ci-heal', id: pr, repo });
@@ -118,6 +119,7 @@ export function deriveReviewStatus({ pr, agents = [], repo = 'we', isDraft = fal
     const matches = list.filter((a) => a?.name === name && Object.hasOwn(LIVE_STATES, a.state) && !isFinishedOverride(a));
     return matches.find((a) => a.state === 'working') ?? matches[0] ?? null;
   };
+  if (escalation?.outcome === 'needs-human') return { role: 'ci-heal', state: 'needs-human' };
   const review = liveFor(reviewName);
   if (review) return { role: 'review', state: review.state === 'working' ? 'reviewing' : 'review-stalled' };
   // fix procedure (operator-approved 2026-09-27) — a LIVE fix claim (`fix-procedure.mjs`) is `fixing` whoever
@@ -187,7 +189,7 @@ export function planStatusLabelChange({ status, currentLabels = [] } = {}) {
 // never carry `review-status:reviewing`.
 export function tagReviewStatus({
   pr, repo, listAgents = () => listAgentsWithReviewJobs(), provider = createGhProvider(),
-  agents: suppliedAgents, currentLabels: suppliedLabels,
+  agents: suppliedAgents, currentLabels: suppliedLabels, prState,
   // draft-first PRs (operator-approved 2026-09-27) — threaded straight to `deriveReviewStatus`; `false` by
   // default so every pre-existing caller/test of this function (none of which pass it) is unaffected.
   isDraft = false,
@@ -202,7 +204,11 @@ export function tagReviewStatus({
   const agents = suppliedAgents ?? listAgents();
   let fixClaim = null;
   try { fixClaim = readFixClaim({ repo: repoKey, pr: Number(pr) }); } catch { fixClaim = null; }
-  const status = deriveReviewStatus({ pr, agents, repo: repoKey, isDraft, mergeConflicted, fixClaim });
+  // Reuse the daemon snapshot; standalone CLI calls read the same head and comments fresh.
+  // A failed read throws before any label write, preserving an existing human signal.
+  const subject = prState ?? provider.readPrState?.(repo, pr);
+  const escalation = latestCiHealEscalationForHead(subject?.comments, subject?.headRefOid);
+  const status = deriveReviewStatus({ pr, agents, repo: repoKey, isDraft, mergeConflicted, fixClaim, escalation });
   const currentLabels = suppliedLabels ?? provider.readLabels(repo, pr);
   const plan = planStatusLabelChange({ status, currentLabels });
   if (!plan.add && plan.remove.length === 0) {

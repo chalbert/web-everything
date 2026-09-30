@@ -380,3 +380,35 @@ describe('realIo().discardChanges (#4338)', () => {
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 });
+
+describe('PR #3154 lane acquisition classification', () => {
+  it.each(['present', 'unknown', 'absent'])('origin %s is independently checked after acquire fails', async (state) => {
+    const { io, calls } = fakeIo({});
+    io.acquireLane = () => ({ path: null, reason: 'no lane: shared scan lock contention' });
+    io.probeOriginRef = vi.fn(() => ({ state, reason: state === 'unknown' ? 'DNS failed' : 'verified by origin' }));
+    const result = await runProbationHeal(args(), io);
+    expect(io.probeOriginRef).toHaveBeenCalledWith('lane/x');
+    expect(result.outcome).toBe(state === 'absent' ? 'escalated-needs-human' : 'blocked-on-infra');
+    expect(result.detail).toContain('lock contention');
+    expect(calls.filter(c => c[0] === 'escalate')).toHaveLength(state === 'absent' ? 1 : 0);
+    expect(calls.some(c => ['worker', 'push', 'reset-hooks'].includes(c[0]))).toBe(false);
+  });
+
+  it('real acquire adapter preserves subprocess diagnostics and probes exact origin ref with bounded IO', () => {
+    const run = vi.fn(() => ({ ok: false, status: 1, out: 'no free lane: all held/dirty' }));
+    const io = realIo({ session: 'probe', run });
+    expect(io.acquireLane({ ref: 'lane/4409', session: 'probe' })).toEqual({ path: null, reason: 'no free lane: all held/dirty' });
+    for (const [response, state] of [
+      [{ ok: false, status: 2, out: '' }, 'absent'],
+      [{ ok: false, status: 128, out: 'DNS failure' }, 'unknown'],
+      [{ ok: false, out: 'ETIMEDOUT' }, 'unknown'],
+      [{ ok: true, out: 'abc\trefs/heads/lane/4409\n' }, 'present'],
+      [{ ok: true, out: 'abc\trefs/heads/lane/other\n' }, 'unknown'],
+    ]) {
+      run.mockReturnValue(response);
+      expect(io.probeOriginRef('lane/4409').state).toBe(state);
+      expect(run.mock.calls.at(-1)[1]).toEqual(expect.arrayContaining(['ls-remote', '--exit-code', '--refs', 'origin', 'refs/heads/lane/4409']));
+      expect(run.mock.calls.at(-1)[2].timeout).toBe(30_000);
+    }
+  });
+});

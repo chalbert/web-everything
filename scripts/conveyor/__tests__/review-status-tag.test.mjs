@@ -418,3 +418,14 @@ it('tags only the matching repo session', () => {
   expect(tagReviewStatus({ pr: 49, repo: 'chalbert/frontierui', listAgents: () => agents, provider }).label).toBe('review-status:reviewing');
   expect(() => tagReviewStatus({ pr: 49, repo: 'other/repo' })).toThrow(/not a constellation repo/);
 });
+
+it('shows head-scoped needs-human after the worker exits and clears it on a new head', async () => {
+  const { buildCiHealEscalationComment } = await import('../ci-heal-escalation-mark.mjs');
+  const comments = [{ author: { login: 'web-everything' }, body: buildCiHealEscalationComment({ headSha: 'abc', outcome: 'needs-human', reason: 'origin ref verified absent' }) }];
+  const writes = [];
+  const provider = { ensureLabel() {}, setLabels: (_r, _p, delta) => writes.push(delta) };
+  const opts = { pr: 3154, repo: 'chalbert/web-everything', agents: [], provider, readFixClaim: () => null };
+  expect(tagReviewStatus({ ...opts, currentLabels: ['review-status:fixing'], prState: { comments, headRefOid: 'abc' } }).label).toBe('review-status:needs-human');
+  expect(tagReviewStatus({ ...opts, currentLabels: ['review-status:needs-human'], prState: { comments, headRefOid: 'def' } }).label).toBeNull();
+  expect(writes.at(-1).remove).toContain('review-status:needs-human');
+});
