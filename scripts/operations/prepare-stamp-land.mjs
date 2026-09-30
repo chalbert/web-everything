@@ -4,6 +4,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { prepareCardStatus } from '../conveyor/prepare-result.mjs';
+import { readField } from '../backlog/frontmatter.mjs';
 import { releaseHoldRoute, isValidHoldNum } from '../conveyor/build-dispatch-hold-router.mjs';
 import { acquireLane, releaseLane, runCmd, parseOpenPrResult } from './build-dispatch-hold-route-land.mjs';
 
@@ -23,17 +24,23 @@ export async function landPrepareStamp({ num }, {
     const cwd = lane.path;
     if (!cwd) throw new Error('lane acquisition returned no path');
     // Preserve the original PR's entire tree when repairing its head; otherwise start from fresh main.
+    const path = status.path;
+    if (!new RegExp(`^backlog/${num}-[^/]+\\.md$`).test(path ?? '')) throw new Error('invalid prepare card path');
+    run('git', ['fetch', 'origin', 'main'], cwd);
     run('git', ['fetch', 'origin', source ? source.headRefName : 'main'], cwd);
     if (source && run('git', ['rev-parse', 'FETCH_HEAD'], cwd).trim() !== source.headRefOid) {
       throw new Error('prepare PR changed during recovery; retry observation');
     }
+    // Trust boundary: the daemon runs this tree's scripts with its own credentials, so a PR head may change only its card.
+    if (source) {
+      const changed = run('git', ['diff', '--name-only', 'origin/main...FETCH_HEAD'], cwd).split('\n').map((f) => f.trim()).filter(Boolean);
+      if (changed.some((f) => f !== path)) throw new Error('prepare-unstamped: PR changes files beyond the card');
+    }
     run('git', ['checkout', '--detach', 'FETCH_HEAD'], cwd);
-    const path = status.path;
-    if (!new RegExp(`^backlog/${num}-[^/]+\\.md$`).test(path ?? '')) throw new Error('invalid prepare card path');
     const before = read(join(cwd, path), 'utf8');
     const card = prepareCardStatus(before);
     if (card.preparedDate) return { status: 'already-stamped' };
-    if (!card.hasSections || !/^status:\s*["']?open["']?\s*$/m.test(before)) {
+    if (!card.hasSections || readField(before, 'status') !== 'open') {
       throw new Error('prepare-unstamped: lane card is not open with all required sections');
     }
     run('node', [join(cwd, 'scripts/backlog.mjs'), 'prepare-stamp', String(num)], cwd);
@@ -57,9 +64,13 @@ export async function landPrepareStamp({ num }, {
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const num = process.argv.slice(2).find((a) => a.startsWith('--num='))?.slice(6);
-  landPrepareStamp({ num }).then((result) => console.log(JSON.stringify(result))).catch((error) => {
-    // A failed gate/open-pr remains recoverable; the next tick re-observes any PR before retrying.
+  landPrepareStamp({ num }).then((result) => {
+    // Success (or nothing left to stamp) frees the route so a later re-unstamped card can be recovered again.
     releaseHoldRoute({ num, route: 'prepare-stamp' });
+    console.log(JSON.stringify(result));
+  }).catch((error) => {
+    // A failure deliberately KEEPS the route reservation: the hold TTL is the retry backoff, so a card that
+    // fails deterministically is not re-spawned (lane + gate) on every daemon tick.
     console.error(String(error?.stack || error));
     process.exitCode = 1;
   });

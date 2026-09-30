@@ -4,7 +4,7 @@ import { prepareCardStatus } from '../../conveyor/prepare-result.mjs';
 
 const sections = '## Design\nMechanism.\n\n## MVP\nScope.\n\n## Test plan\nRegression.\n\n## Proof plan\nProbe.\n';
 const raw = `---\nstatus: open\n---\n${sections}`;
-function fixture({ source = false, missing = false, failStamp = false } = {}) {
+function fixture({ source = false, missing = false, failStamp = false, diffFiles = ['backlog/4544-card.md'] } = {}) {
   let card = missing ? '---\nstatus: open\n---\n' : raw;
   const calls = [];
   const deps = {
@@ -17,6 +17,7 @@ function fixture({ source = false, missing = false, failStamp = false } = {}) {
       if (args.includes('prepare-stamp') && !failStamp) card = card.replace('status: open', 'status: open\npreparedDate: "2026-09-30"');
       if (args[0] === 'rev-parse') return 'abc\n';
       if (args[0] === 'show') return card;
+      if (args[0] === 'diff') return `${diffFiles.join('\n')}\n`;
       if (args.includes('open-pr')) return JSON.stringify({ findings: { submit: { effects: [
         { type: 'open-pr.submit', status: 'applied', result: { pr: 99 } },
       ] } } });
@@ -53,6 +54,16 @@ describe('daemon prepare stamp landing', () => {
     await expect(landPrepareStamp({ num: '4544' }, deps)).rejects.toThrow('required sections');
     expect(calls.some((c) => c.args.includes('prepare-stamp'))).toBe(false);
   });
+  it('refuses a PR head that changes files beyond its card', async () => {
+    const { deps, calls } = fixture({ source: true, diffFiles: ['backlog/4544-card.md', 'scripts/backlog.mjs'] });
+    await expect(landPrepareStamp({ num: '4544' }, deps)).rejects.toThrow('beyond the card');
+    expect(calls.some((c) => c.args.includes('prepare-stamp'))).toBe(false);
+  });
+  it('does not let a body example status line reopen a resolved card', async () => {
+    const { deps } = fixture();
+    deps.read = () => raw.replace('status: open', 'status: resolved') + '\n```yaml\nstatus: open\n```\n';
+    await expect(landPrepareStamp({ num: '4544' }, deps)).rejects.toThrow('not open');
+  });
   it('does not reopen a resolved card', async () => {
     const { deps } = fixture();
     deps.read = () => raw.replace('status: open', 'status: resolved');
@@ -65,6 +76,13 @@ describe('prepare result shape', () => {
     expect(prepareCardStatus(raw).hasSections).toBe(true);
     expect(prepareCardStatus(raw.replace('Probe.', '')).hasSections).toBe(false);
     expect(prepareCardStatus(`---\nstatus: open\n---\n\x60\x60\x60md\n${sections}\x60\x60\x60\n`).hasSections).toBe(false);
+    const fenced = (open, close) => `---\nstatus: open\n---\n${open}md\n${sections}${close}\n`;
+    expect(prepareCardStatus(fenced('   \x60\x60\x60', '   \x60\x60\x60')).hasSections).toBe(false);
+    expect(prepareCardStatus(fenced('\x60\x60\x60', '\x60\x60\x60\x60')).hasSections).toBe(false);
     expect(prepareCardStatus(`<!--\n${sections}-->`).hasSections).toBe(false);
+  });
+  it('counts a fenced command as content under a real heading', () => {
+    const card = raw.replace('Probe.', '\x60\x60\x60sh\ncurl --fail http://localhost:3000/health\n\x60\x60\x60');
+    expect(prepareCardStatus(card).hasSections).toBe(true);
   });
 });
