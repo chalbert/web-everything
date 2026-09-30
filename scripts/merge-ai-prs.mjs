@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { execFileSyncThrottled as execFileSync } from './lib/gh-throttle.mjs';
 /**
  * merge-ai-prs.mjs — sweep OPEN pull requests and merge the AI-generated ones that are safe to land.
  *
@@ -126,7 +127,7 @@ import { OPEN_PR_LIST_LIMIT, isDegradedOpenPrListing, filterOpenPrsByLabel } fro
 import { collapseRollupToLatestPerName } from './lib/rollup-collapse.mjs';
 export { isAiAuthor, isAiCommit, isMechanicalMergeCommit, isDrainBookkeepingCommit } from './lib/ai-pr-authorship.mjs';
 export { isAiGeneratedPr, hasLabel };
-import { execFileSync, execFile, spawnSync } from 'node:child_process';
+import { execFile, spawnSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import { existsSync, readFileSync, writeFileSync, realpathSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';

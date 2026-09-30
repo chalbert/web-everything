@@ -142,8 +142,8 @@ describe('fetchOpenPrs / fetchPrCommits / countOpenPrsForRepo — the IO shell',
   const aiCommit = { authors: [{ name: 'Claude', email: 'noreply@anthropic.com' }], messageBody: '' };
   const humanCommit = { authors: [{ name: 'A Human', email: 'human@example.com' }], messageBody: '' };
 
-  it('fetchOpenPrs asks for number,labels,headRefName — deliberately NOT commits (the GraphQL node-limit footgun)', () => {
-    const exec = (args) => { expect(args).toEqual(expect.arrayContaining(['--json', 'number,labels,headRefName'])); expect(args).not.toContain('commits'); return '[]'; };
+  it('fetchOpenPrs asks for number,labels,headRefName,headRefOid — deliberately NOT commits (the GraphQL node-limit footgun)', () => {
+    const exec = (args) => { expect(args).toEqual(expect.arrayContaining(['--json', 'number,labels,headRefName,headRefOid'])); expect(args).not.toContain('commits'); return '[]'; };
     expect(fetchOpenPrs('o/n', { exec })).toEqual([]);
   });
 

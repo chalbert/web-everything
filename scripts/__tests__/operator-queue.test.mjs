@@ -9,6 +9,10 @@ vi.mock('node:child_process', () => {
   const execFileSync = vi.fn();
   return { execFileSync, default: { execFileSync } };
 });
+vi.mock('../lib/gh-throttle.mjs', async (original) => ({
+  ...await original(),
+  execFileSyncThrottled: (...args) => execFileSync(...args),
+}));
 afterEach(() => vi.restoreAllMocks());
 
 /** A path that never exists, so `main` never reads the real `.conveyor/unsupported-repo.json` sidecar. */

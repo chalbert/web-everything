@@ -35,6 +35,7 @@ const stage = (root) => {
   // #x5n4zn3 — `stand-down.mjs` now imports `../lib/bounded-child.mjs` (the shared per-child timeout budget its
   // own `gh` call reuses) — stage it too, same reason as every other transitive dependency above.
   copyFileSync(join(dirname(LEAF), 'bounded-child.mjs'), join(root, 'lib/bounded-child.mjs'));
+  symlinkSync(join(dirname(LEAF), 'gh-throttle.mjs'), join(root, 'lib/gh-throttle.mjs'));
   // #3383 — `stand-down.mjs` now also imports `../lib/marker-authorship.mjs` (the shared trusted-author gate
   // every marker counter runs a comment through) — stage it too, or the staged copy fails to import and
   // `main()` silently never runs (the exact failure mode this file's own header names).
@@ -66,7 +67,7 @@ beforeEach(() => {
   // Fake `gh` so the run never touches the network: every repo has zero open PRs.
   writeFileSync(join(dir, 'bin', 'gh'), '#!/bin/sh\necho "[]"\n');
   chmodSync(join(dir, 'bin', 'gh'), 0o755);
-  env = { ...process.env, PATH: `${join(dir, 'bin')}:${process.env.PATH}` };
+  env = { ...process.env, LANE_POOL_ROOT: join(dir, 'pool'), PATH: `${join(dir, 'bin')}:${process.env.PATH}` };
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 

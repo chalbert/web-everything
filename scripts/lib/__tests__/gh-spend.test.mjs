@@ -186,7 +186,7 @@ describe('persistSpendHours — hourly persistence, idempotent and cursor-safe',
     expect(unknownOnly).toMatch(/bucket used: unknown/);
     expect(text).toMatch(/attributed\*\s+estimated\s+unknown-inv\s+invocations\s+responses/);
     expect(text).toMatch(/review-daemon\.mjs/);
-    expect(text).toMatch(/can include traffic that bypasses gh-throttle/);
+    expect(text).toMatch(/Gate on total App GraphQL bucketUsed/);
     expect(JSON.parse(readFileSync(spendPaths(logPath).cursorPath, 'utf8')).offset).toBeGreaterThan(0);
   });
 
