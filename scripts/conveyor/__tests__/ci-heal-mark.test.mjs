@@ -90,6 +90,15 @@ describe('spawnCiHealRearm — hand a stale review:accepted back through rearm-r
     expect(calls[0].opts.cwd).toBe('/ws/we');
   });
 
+  it('spawnCiHealRearm passes --only-if=accepted by default and omits it when onlyIfAccepted:false', () => {
+    const a = spy();
+    spawnCiHealRearm({ pr: 2811, repo: 'chalbert/web-everything', spawn: a.spawn });
+    expect(a.calls[0].argv).toContain('--only-if=accepted');
+    const b = spy();
+    spawnCiHealRearm({ pr: 2811, repo: 'chalbert/web-everything', onlyIfAccepted: false, spawn: b.spawn });
+    expect(b.calls[0].argv).not.toContain('--only-if=accepted');
+  });
+
   it('a refused re-arm (nothing to re-arm — the common, no-accepted-label case) is reported, not thrown', () => {
     const { spawn } = spy(1, JSON.stringify({ ok: false, pr: 2811, reason: 'neither review:changes nor review:accepted is live' }));
     const out = spawnCiHealRearm({ pr: 2811, repo: 'chalbert/web-everything', spawn });

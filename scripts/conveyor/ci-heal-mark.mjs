@@ -137,12 +137,15 @@ export function postOrOweCiHealComment({ pr, body, headSha, repo, post = postPrC
  * follow-up: also re-armable from `review:accepted` alone, never just `review:changes`) — so this is safe to call
  * whenever the caller already knows (or merely suspects) an acceptance might be live; a PR with nothing to
  * re-arm just reports `{ok:false}` and changes nothing.
- * @param {{pr:number|string, repo?:string, cwd?:string, actor?:string, spawn?:Function}} o
+ * @param {{pr:number|string, repo?:string, cwd?:string, actor?:string, onlyIfAccepted?:boolean, spawn?:Function}} o
  * @returns {{ok:boolean, reason?:string}}
  */
-export function spawnCiHealRearm({ pr, repo, cwd, actor = 'conveyor CI-heal agent', spawn = spawnSync } = {}) {
+export function spawnCiHealRearm({ pr, repo, cwd, actor = 'conveyor CI-heal agent', onlyIfAccepted = true, spawn = spawnSync } = {}) {
   const args = [new URL('./rearm-review.mjs', import.meta.url).pathname, String(pr), `--actor=${actor}`];
   if (repo) args.push(`--repo=${repo}`);
+  // #4333 — validated at the CHILD's mutation boundary: both callers only ever re-arm a stale acceptance, so a
+  // `review:changes` verdict that lands between the caller's read and the child's read is never overwritten.
+  if (onlyIfAccepted) args.push('--only-if=accepted');
   try {
     // `spawnSync`-shaped (mirrors `restampAcceptance`'s own seam exactly) — NEVER throws on a non-zero exit, so
     // a refused re-arm (nothing to re-arm — the common case, no `review:accepted` live) is a plain `{ok:false}`
