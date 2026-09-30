@@ -1,8 +1,9 @@
 ---
 bornAs: x6qtydn
 kind: decision
-status: open
+status: resolved
 dateOpened: "2026-09-30"
+dateResolved: "2026-09-30"
 relatedTo: ["3007", "3216", "3179", "4284"]
 tags: [review-ledger, product-design]
 ---
@@ -32,3 +33,13 @@ Coordinate the write-failure subquestion with #3216 after #3255; do not duplicat
 ## Done when
 
 Ratify the human-label drift/command rule and command acknowledgement boundary; agree how #3216 carries the implementation consequence. Specify acceptance, hold, store outage, stale coverage and projection outage cases as conformance vectors. Codify the reusable rule and leave the phase-2 implementation/evidence gate with #3007/#4284.
+
+## Operator ruling (2026-09-30 ~9:05 AM ET)
+
+**Option B — the record wins; GitHub edits are observed, and only harmless ones act as commands.** Exact list:
+
+1. **External facts, always taken from the forge:** commits pushed (head SHA), CI results, merged/closed/reopened, conflicts and mergeability, PR opened or title/body edited, human comments and reviews, repo settings (required checks, branch protection).
+2. **Human edits that act as commands:** adding a hold label (`review:human`, or a blocked label) → a recorded hold. Converting a PR back to draft → a hold. **The operator's own GitHub "Approve" review** (from the operator's account, on the current head SHA) → counts as the human clearance, the same as today's "I approve N" ceremony. Anyone else's Approve is recorded only as a comment.
+3. **Everything else is recorded, then restored:** removing a hold; adding or removing any of our own labels (`review:accepted`, `review:pending`, `ready-to-merge`, `review-round`, `advisory:*`, `ci:*`, `review-status:*`). The edit is written to the record with its actor, then the label is put back to match the record.
+
+**Required with it (from the Opus design review):** every projection write carries its outbox receipt id, and `labeled` events record `sender`, so our own echoes are never mistaken for human edits. Route today's label writers through the command path before drift counting starts.
