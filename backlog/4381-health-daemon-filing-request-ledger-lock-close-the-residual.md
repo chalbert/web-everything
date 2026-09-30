@@ -3,10 +3,11 @@ bornAs: xbedfjd
 kind: story
 size: 2
 parent: "4075"
-status: open
+status: active
 blockedBy: ["4079"]
 scope: ["we:scripts/conveyor/health-file-request.mjs"]
 dateOpened: "2026-09-28"
+dateStarted: "2026-09-30"
 preparedDate: "2026-09-30"
 preparedAgainstSha: "3bc43906fdc5b16f5b14a6aa867692174ec66904"
 tags: [health-daemon]

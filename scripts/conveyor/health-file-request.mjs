@@ -39,7 +39,8 @@
  * every OTHER smell's filing, since the lane pool itself is what a filing request would need to land).
  */
 import {
-  existsSync, mkdirSync, readFileSync, renameSync, writeFileSync, statSync, unlinkSync,
+  existsSync, mkdirSync, readFileSync, renameSync, writeFileSync, unlinkSync,
+  openSync, closeSync, fstatSync, readSync, writeSync, ftruncateSync, readdirSync,
 } from 'node:fs';
 import { dirname, join } from 'node:path';
 // `scrubText` is health-watch-core.mjs's ONE redaction pass (tokens/paths/env-shaped values). Applied here too
@@ -224,63 +225,86 @@ function sleepSync(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
-/** A tiny exclusive-create lock around the ledger's read-modify-write ONLY — never held across a subprocess
- *  (`git`/`gh`/lane-pool) call, so the tick's own planning write and the landing pass's claim/finalize writes
- *  serialize into short, bounded transactions instead of racing into a lost update. A crash-held lock is
- *  reclaimed once it is older than `staleMs` (which must always outlast the longest real critical section this
- *  lock ever guards — a legitimate holder still working past `staleMs` gets reclaimed out from under it, same
- *  as any mtime-based staleness heuristic; that is why `staleMs` is generous relative to "a short read-modify-
- *  write" and never derived from how long any one caller happens to take).
+/** Zero-padded so lexical order == numeric order for the generation lock files. */
+const LOCK_GEN_WIDTH = 12;
+const LOCK_GEN_RE = /^ledger\.lock\.(\d+)$/;
+const genName = (gen) => `ledger.lock.${String(gen).padStart(LOCK_GEN_WIDTH, '0')}`;
+
+/** Read a lock file's mtime AND content from ONE fd so both describe the same file. null when absent. */
+function observeLockFile(path) {
+  let fd;
+  try { fd = openSync(path, 'r'); } catch (e) { if (e.code === 'ENOENT') return null; throw e; }
+  try {
+    const { mtimeMs } = fstatSync(fd);
+    const buf = Buffer.alloc(64);
+    const n = readSync(fd, buf, 0, 64, 0);
+    return { mtimeMs, content: buf.toString('utf8', 0, n) };
+  } finally { closeSync(fd); }
+}
+
+/** A tiny generation-CAS lock around the ledger's read-modify-write ONLY — never held across a subprocess
+ *  (`git`/`gh`/lane-pool) call, so the tick's planning write and the landing pass's claim/finalize writes
+ *  serialize into short, bounded transactions instead of racing into a lost update.
  *
- *  THE RECLAIM ITSELF IS SINGLE-WINNER, NOT FULLY RACE-FREE (residual, tracked as backlog #xbedfjd, blocked on
- *  this item): two waiters can both observe the SAME stale lock at the same moment, so reclaiming it can never
- *  be a plain `unlinkSync` — that is unconditional and would let a second waiter unlink the FIRST waiter's
- *  freshly-created lock (not the stale one it actually inspected) and then also enter the critical section,
- *  breaking mutual exclusion right when the lock exists to prevent that. The atomic-rename reclaim below fixes
- *  THAT double-reclaim case, but it still renames by the FIXED path (`lockPath`), not by the specific
- *  inode/content a waiter inspected as stale — so a narrower check-then-act window remains between the stale
- *  check and the rename, where a third process's freshly-recreated (non-stale) lock could in principle be the
- *  one actually renamed away. #xbedfjd tracks closing that gap with a content/generation-matched
- *  compare-and-swap; it is accepted as a known, bounded residual for this MVP in the meantime — not something
- *  papered over silently.
- *  Instead each waiter atomically RENAMES the stale lock to a name unique to itself
- *  (`renameSync(lockPath, myClaimPath)`): `rename(2)` is atomic, so of any waiters racing this exact rename
- *  FROM the same `lockPath`, exactly one succeeds — every other one's source is already gone by the time it
- *  runs and gets `ENOENT`. The winner then removes its own renamed-away copy and loops back to create the
- *  lock file fresh; every loser falls through to the normal sleep/retry path instead of assuming the stale
- *  lock is still theirs to take. */
-export function withLedgerLock(dir, fn, { staleMs = 60_000, timeoutMs = 10_000, sleepMs = 25 } = {}) {
-  mkdirSync(filingDir(dir), { recursive: true });
-  const lockPath = join(filingDir(dir), 'ledger.lock');
+ *  Lock state is a set of monotonic generation files `<filingDir>/ledger.lock.<gen>`; the highest gen is
+ *  "current" and holds `held:<pid>` or `released`. A waiter OBSERVES the current gen (mtime + content from one
+ *  fd), and if it is takeable (absent, `released`, or `held` older than `staleMs`) TAKES it by exclusively
+ *  creating (`wx`) gen `cur+1`. Only one process can ever create that name, so anyone who (re)created the lock
+ *  inside our observe->create window necessarily created the same name and our `wx` fails `EEXIST`: the swap
+ *  succeeds only if the current generation is still the one we inspected. No step ever removes or renames a lock
+ *  by path, so there is no window where the lock is absent-then-restored. Release overwrites our own gen file
+ *  (`r+`, never creates) with `released` and leaves it as a tombstone so its successor name can never be
+ *  re-created by a waiter holding a stale observation; the winner prunes older gens best-effort. A holder whose
+ *  gen was superseded writes only to its own old file — harmless to any successor.
+ *
+ *  A crash-held lock is reclaimed once older than `staleMs` (which must outlast the longest real critical
+ *  section — mtime staleness can still reclaim a live holder that runs past it; unchanged, out of scope).
+ *  A legacy bare `ledger.lock` (old scheme) is unlinked once if stale, waited on if fresh.
+ *
+ *  `hooks.afterObserve` is a test seam called between observe and take; production passes nothing. */
+export function withLedgerLock(dir, fn, { staleMs = 60_000, timeoutMs = 10_000, sleepMs = 25 } = {}, hooks = {}) {
+  const fdir = filingDir(dir);
+  mkdirSync(fdir, { recursive: true });
+  const legacyPath = join(fdir, 'ledger.lock');
   const deadline = Date.now() + timeoutMs;
+  let myPath;
+  let myGen;
   for (;;) {
-    try {
-      writeFileSync(lockPath, String(process.pid), { flag: 'wx' });
-      break;
-    } catch (e) {
-      if (e.code !== 'EEXIST') throw e;
-      let age = Infinity;
-      try { age = Date.now() - statSync(lockPath).mtimeMs; } catch { /* raced away between the failed create and this stat */ }
-      if (age > staleMs) {
-        const claimPath = `${lockPath}.reclaim-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const legacy = observeLockFile(legacyPath);
+    if (legacy) {
+      if (Date.now() - legacy.mtimeMs > staleMs) { try { unlinkSync(legacyPath); } catch { /* raced away */ } continue; }
+    } else {
+      const gens = readdirSync(fdir).map((f) => LOCK_GEN_RE.exec(f)).filter(Boolean).map((m) => Number(m[1]));
+      const cur = gens.length ? Math.max(...gens) : 0;
+      const obs = cur ? observeLockFile(join(fdir, genName(cur))) : null;
+      if (hooks.afterObserve) hooks.afterObserve({ cur, obs });
+      const takeable = cur === 0 || !obs || obs.content === 'released' || Date.now() - obs.mtimeMs > staleMs;
+      if (takeable) {
+        const path = join(fdir, genName(cur + 1));
         try {
-          // Atomic single-winner claim (see doc above) — never an unconditional unlink of `lockPath`.
-          renameSync(lockPath, claimPath);
-          try { unlinkSync(claimPath); } catch { /* already gone; irrelevant either way */ }
-          continue; // WE won the reclaim race — loop back and create the lock fresh.
-        } catch {
-          // We lost the reclaim race (another waiter's rename won first, or a live holder released it in
-          // between) — fall through to the ordinary deadline/sleep path rather than assuming it is still ours.
+          writeFileSync(path, `held:${process.pid}`, { flag: 'wx' });
+          myPath = path;
+          myGen = cur + 1;
+          break;
+        } catch (e) {
+          if (e.code !== 'EEXIST') throw e; // CAS refused: the generation moved on — re-observe
         }
       }
-      if (Date.now() > deadline) throw new Error(`health-file-request: timed out waiting for the ledger lock at ${lockPath}`);
-      sleepSync(sleepMs);
     }
+    if (Date.now() > deadline) throw new Error(`health-file-request: timed out waiting for the ledger lock at ${legacyPath}`);
+    sleepSync(sleepMs);
+  }
+  for (const f of readdirSync(fdir)) {
+    const m = LOCK_GEN_RE.exec(f);
+    if (m && Number(m[1]) < myGen) { try { unlinkSync(join(fdir, f)); } catch { /* already gone */ } }
   }
   try {
     return fn();
   } finally {
-    try { unlinkSync(lockPath); } catch { /* already gone */ }
+    try {
+      const fd = openSync(myPath, 'r+'); // never creates: a pruned gen just ENOENTs
+      try { writeSync(fd, 'released', 0); ftruncateSync(fd, 8); } finally { closeSync(fd); }
+    } catch { /* pruned/gone — nothing of ours left to release */ }
   }
 }
 
