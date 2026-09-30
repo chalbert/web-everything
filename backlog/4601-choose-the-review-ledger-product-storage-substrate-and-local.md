@@ -1,8 +1,9 @@
 ---
 bornAs: xhoof4g
 kind: decision
-status: open
+status: resolved
 dateOpened: "2026-09-30"
+dateResolved: "2026-09-30"
 relatedTo: ["2626", "2742", "3038", "3255"]
 tags: [review-ledger, product-design]
 ---
@@ -30,3 +31,12 @@ Recommend **B**, subject to restore, tenant isolation and transaction probes. Fi
 ## Done when
 
 Record the operator choice and rationale, define the acknowledged-write durability/backup promise and tested restore/export requirements, and route the build through #2742/#3038. Codify the ratified reusable rule under the named statute anchor. Do not mark the storage implementation done merely by resolving this card.
+
+## Operator ruling (2026-09-30 ~9:10 AM ET)
+
+**Ratified as recommended: a portable schema across stores.**
+- One event-log-plus-outbox schema, with a conformance suite that runs on SQLite, Cloudflare Durable Objects and Postgres.
+- Hosted product: Durable Objects first (one per company; Plateau already deploys to Cloudflare).
+- Self-hosted / enterprise tier (e.g. companies on self-hosted GitLab or Bitbucket): Postgres.
+- Local laptop SQLite: development and a queue of pending commands only. It is never a second authority.
+- A tested restore is required before the hosted store holds authoritative state.
