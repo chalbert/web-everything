@@ -2548,6 +2548,15 @@ describe('openPr (#3627 bug 1 — the real slug, never the literal <slug> placeh
     expect(refFlag).toBe('--ref=lane/3371b-do-the-thing');
   });
 
+  it('passes the exact dispatch identity and store to the producer before it opens the PR', () => {
+    const run = vi.fn(() => openPrEnvelope({ outcome: 'opened', pr: 3033 }));
+    openPr({ item: '4502', lane, park: { mode: 'park', label: 'review:human' },
+      report: { reason: 'x', filesTouched: [] }, slug: 'example', runId: 'dispatch-lane-build', effectKey: 'dispatch:0:0' }, { run });
+    expect(JSON.parse(run.mock.calls[0][2].env.WE_BUILD_PR_CONTEXT)).toEqual({
+      runId: 'dispatch-lane-build', key: 'dispatch:0:0', dir: expect.any(String),
+    });
+  });
+
   it('refuses (throws a named error) rather than opening a PR with no real slug', () => {
     expect(() => openPr({ item: '3371', attemptTag: '', lane, park: { mode: 'label-on-green' }, report: { reason: 'x', filesTouched: [] } }))
       .toThrow(/needs the item's real slug/);
@@ -3185,9 +3194,16 @@ describe('deliverItem (#3627 bug 13 — the success-path result string names the
     execFileSync.mockReset();
   });
 
+  it('refuses to publish a build with no durable dispatch identity', async () => {
+    await expect(deliverItem({ item: '9999', lane: 7, scope: [], sessionSlug: 'conveyor-9999', attemptTag: '' },
+      { spawn: vi.fn() }, { newSessionId: () => 'uuid-fixed' }))
+      .rejects.toThrow('requires a durable dispatch identity');
+    expect(execFileSync.mock.calls.some(c => c[0] === 'node' && c[1]?.[1] === 'open-pr')).toBe(false);
+  });
+
   it('uses the real `pr` field — never `number` — so the result names the actual PR, not "PR #undefined"', async () => {
     const result = await deliverItem(
-      { item: '9999', lane: 7, scope: [], sessionSlug: 'conveyor-9999', attemptTag: '' },
+      { item: '9999', lane: 7, scope: [], sessionSlug: 'conveyor-9999', attemptTag: '', runId: 'dispatch-lane-fixture', effectKey: 'dispatch:0:0' },
       { spawn: vi.fn() },
       { newSessionId: () => 'uuid-fixed' },
     );
@@ -3199,7 +3215,7 @@ describe('deliverItem (#3627 bug 13 — the success-path result string names the
   // the real spawned `provider.vendor` actually reaches the park decision and shows up in the real PR outcome.
   it('a Claude-executed delivery (provider.vendor="claude", the real registered CLAUDE_RESTRICTED_PROVIDER shape) opens label-on-green (ready-to-merge)', async () => {
     const result = await deliverItem(
-      { item: '9999', lane: 7, scope: [], sessionSlug: 'conveyor-9999', attemptTag: '' },
+      { item: '9999', lane: 7, scope: [], sessionSlug: 'conveyor-9999', attemptTag: '', runId: 'dispatch-lane-fixture', effectKey: 'dispatch:0:0' },
       { spawn: vi.fn(), vendor: 'claude' },
       { newSessionId: () => 'uuid-fixed' },
     );
@@ -3211,7 +3227,7 @@ describe('deliverItem (#3627 bug 13 — the success-path result string names the
 
   it('a non-Claude-executed delivery (provider.vendor="codex", the real registered CODEX_PROVIDER shape) is FORCED to review:pending — never lands unreviewed on label-on-green', async () => {
     const result = await deliverItem(
-      { item: '9999', lane: 7, scope: [], sessionSlug: 'conveyor-9999', attemptTag: '' },
+      { item: '9999', lane: 7, scope: [], sessionSlug: 'conveyor-9999', attemptTag: '', runId: 'dispatch-lane-fixture', effectKey: 'dispatch:0:0' },
       { spawn: vi.fn(), vendor: 'codex' },
       { newSessionId: () => 'uuid-fixed' },
     );
@@ -3265,7 +3281,7 @@ describe('deliverItem (#3627 bug 13 — the success-path result string names the
       tryReadDeliveryReport.mockReturnValue({ status: 'done', outcome: 'done', filesTouched: ['src/foo.tsx'], reason: 'did it' });
 
       const result = await deliverItem(
-        { item: '3604', lane: 7, scope: ['plateau-app:src/foo.tsx'], sessionSlug: 'conveyor-3604', attemptTag: '' },
+        { item: '3604', lane: 7, scope: ['plateau-app:src/foo.tsx'], sessionSlug: 'conveyor-3604', attemptTag: '', runId: 'dispatch-lane-fixture', effectKey: 'dispatch:0:0' },
         { spawn, vendor: 'codex' },
         { newSessionId: () => 'uuid-fixed' },
       );
@@ -3297,7 +3313,7 @@ describe('deliverItem (#3627 bug 13 — the success-path result string names the
       tryReadDeliveryReport.mockReturnValue({ status: 'done', outcome: 'blocked', filesTouched: [], reason: 'blockedBy 1 re-opened' });
 
       const result = await deliverItem(
-        { item: '3604', lane: 7, scope: ['plateau-app:src/foo.tsx'], sessionSlug: 'conveyor-3604', attemptTag: '' },
+        { item: '3604', lane: 7, scope: ['plateau-app:src/foo.tsx'], sessionSlug: 'conveyor-3604', attemptTag: '', runId: 'dispatch-lane-fixture', effectKey: 'dispatch:0:0' },
         { spawn: vi.fn(), vendor: 'codex' },
         { newSessionId: () => 'uuid-fixed' },
       );
@@ -3325,7 +3341,7 @@ describe('deliverItem (#3627 bug 13 — the success-path result string names the
       });
 
       const result = await deliverItem(
-        { item: '3604', lane: 7, scope: ['plateau-app:src/foo.tsx'], sessionSlug: 'conveyor-3604', attemptTag: '' },
+        { item: '3604', lane: 7, scope: ['plateau-app:src/foo.tsx'], sessionSlug: 'conveyor-3604', attemptTag: '', runId: 'dispatch-lane-fixture', effectKey: 'dispatch:0:0' },
         { spawn: vi.fn(), vendor: 'codex' },
         { newSessionId: () => 'uuid-fixed' },
       );

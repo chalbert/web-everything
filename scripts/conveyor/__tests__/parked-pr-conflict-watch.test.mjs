@@ -3421,3 +3421,11 @@ describe('#xconflres1 — statute-tier classification narrows to the ACTUALLY-co
     expect(r.supersededStandDown).toBeUndefined();
   });
 });
+
+it('skips a deferred discovery pass without posting a finding', () => {
+  const postFinding = vi.fn();
+  expect(watchParkedPrConflicts({
+    listPrs: () => ({ outcome: 'deferred-low-budget', deferred: true }), postFinding,
+  })).toEqual([]);
+  expect(postFinding).not.toHaveBeenCalled();
+});

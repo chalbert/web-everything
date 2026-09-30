@@ -370,12 +370,12 @@ describe('#4034 — routeDispatch wires the critical-work verdict and critical-m
     expect(out.probationWorker).toBeNull();
   });
 
-  it('#4081 with the DEFAULT gate offers untried agy Claude probation; build-new-feature stays closed', () => {
+  it('#4081 with the DEFAULT gate offers untried agy Claude probation; conflict-resolution stays closed', () => {
     const out = c.decideDispatchRoute(dispatch4081(), { scorecards: cleanCodexBugfixTrials() });
     expect(out).toMatchObject({ routed: 'claude', probationWorker: { id: 'antigravity-claude', review: 'full' } });
     expect(out.auditTrail.find((a) => a.criterion === 'critical-work-gate').result).toBe('open-non-critical');
-    const closed = c.decideDispatchRoute(dispatch4081({ kind: 'build' }), { scorecards: cleanCodexBugfixTrials() });
-    expect(closed).toMatchObject({ taskType: 'build-new-feature', routed: 'claude', probationWorker: null });
+    const closed = c.decideDispatchRoute(dispatch4081({ cause: 'conflict' }), { scorecards: cleanCodexBugfixTrials() });
+    expect(closed).toMatchObject({ taskType: 'conflict-resolution', routed: 'claude', probationWorker: null });
     expect(closed.auditTrail.find((a) => a.criterion === 'critical-work-gate').result).toBe('claude-only');
   });
 

@@ -176,7 +176,7 @@
  */
 
 import { execFileSync, spawnSync } from 'node:child_process';
-import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve, basename } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -190,6 +190,8 @@ import { classifyPrOpenFailure } from '../conveyor/infra-blocked.mjs';
 import { writeAllSync } from './write-all-sync.mjs';
 import { retryAfterMs } from '../readiness/model-proposer.mjs';
 import { createTelemetryRecorder } from '../operations/telemetry-store.mjs';
+import { isGhDeferred } from './gh-deferred.mjs';
+export { isGhDeferred } from './gh-deferred.mjs';
 import { markPrSnapshotDirty, repoFromGhArgs } from './pr-snapshot-store.mjs';
 
 // ── TUNING (env-overridable, mirroring heavy-admission.mjs's own resolve*() convention) ────────────────────
@@ -483,6 +485,78 @@ export function deriveGhCaller(throttle, env) {
     if (b && b !== 'gh-throttle.mjs') return b;
   }
   return 'unknown';
+}
+
+/** Operator ruling 2026-09-30: reserve GraphQL headroom for reviews and landing. */
+export const GH_PRIORITY_THRESHOLDS = Object.freeze({ background: 0.25, normal: 0.10, critical: 0 });
+export function ghCallerPriority(caller, args = []) {
+  const name = basename(String(caller).replace(/^we:/, '')).replace(/\.mjs(?=:|$)/, '');
+  if (/^(review-daemon|review-set-label|review-pr|merge-ai-prs)(:|$)/.test(name)) return 'critical';
+  if (/^pr-land(:|$)/.test(name) && (name.includes(':land') || args[0] === 'pr' && args[1] === 'merge')) return 'critical';
+  if (/^ci-heal(?:-run|-pr-dispatch)?(:|$)/.test(name) && (name.includes(':push') || classifyGhWrite(args))) return 'critical';
+  if (/^(dispatch-plan|parked-pr-conflict-watch|parked-pr-progress-watch|active-progress-watch|progress-board|lane-whois|reconcile-pass|reconcile-fix-dispatch|reconcile-snapshot)(:|$)/.test(name)) return 'background';
+  return 'normal';
+}
+
+function headroomPath(lockRoot, identity) {
+  return join(lockRoot, `headroom-${String(identity).replace(/[^A-Za-z0-9_-]/g, '_')}-graphql.json`);
+}
+
+/** Persist the last captured GraphQL response, separately for each authentication bucket. */
+export function recordGhHeadroom(lockRoot, identity, records) {
+  for (const r of records || []) {
+    if (r.res !== 'graphql' || !Number.isFinite(r.rem) || !Number.isFinite(r.limit) || r.limit <= 0 || !Number.isFinite(r.reset)) continue;
+    try {
+      mkdirSync(lockRoot, { recursive: true });
+      const path = headroomPath(lockRoot, identity);
+      const key = `headroom-${identity}`;
+      const nowMs = Date.now();
+      const locked = reserve(lockRoot, key, `${process.pid}:${randomUUID()}`, nowMs, new Date(nowMs).toISOString(), process.pid, 'unknown', 1);
+      if (!locked.ok) continue;
+      try {
+        let previous;
+        try { previous = JSON.parse(readFileSync(path, 'utf8')); } catch { /* first observation */ }
+        if (previous?.reset > r.reset || previous?.reset === r.reset && previous.rem <= r.rem) continue;
+        const tmp = `${path}.${randomUUID()}.tmp`;
+        writeFileSync(tmp, JSON.stringify(r));
+        renameSync(tmp, path);
+      } finally { releaseLockDir(lockRoot, key); }
+    } catch { /* best effort: missing evidence never invents exhaustion */ }
+  }
+}
+
+/** A non-error admission result; never a successful empty query or mutation. */
+export function ghPriorityAdmission({ lockRoot, identity, resource, caller, args, nowMs = Date.now(), deferrable = false }) {
+  const priority = ghCallerPriority(caller, args);
+  if (resource !== 'graphql' || priority === 'critical') return null;
+  // Only READ-ONLY discovery lists (or a whole-pass boundary, empty args) may be skipped: a deferred mutation would
+  // read as a completed write, and a deferred `pr view`-style read would hand a gate an object missing its fields.
+  const a = Array.isArray(args) ? args : [];
+  if (a.length && !((a[0] === 'pr' || a[0] === 'issue') && a[1] === 'list')) return null;
+  // Deferral is OPT-IN per call (`throttle.deferrable`): an unaudited `pr list` caller (a guard reading "no PRs" as
+  // safe, pr-land's existing-PR check) keeps its old run-or-throw behaviour instead of parsing a success-shaped
+  // deferral object. A whole-pass boundary (empty args) is itself the opt-in.
+  if (a.length && !deferrable) return null;
+  let budget;
+  try { budget = JSON.parse(readFileSync(headroomPath(lockRoot, identity), 'utf8')); } catch { return null; }
+  if (!(budget.reset * 1000 > nowMs) || !(budget.limit > 0) || !Number.isFinite(budget.rem) || budget.rem < 0) return null;
+  if (budget.rem / budget.limit >= GH_PRIORITY_THRESHOLDS[priority]) return null;
+  return { outcome: 'deferred-low-budget', deferred: true, priority, remaining: budget.rem, limit: budget.limit, reset: budget.reset };
+}
+
+/** Optional pass boundary: skip a discovery pass before local decisions can use incomplete GitHub facts. */
+export function deferGhPass(caller, { env = process.env, repo = process.cwd(), nowMs = Date.now(), warn } = {}) {
+  const lockRoot = ghThrottleLockRoot(repo, env);
+  return deferGhCall({ lockRoot, identity: ghAuthIdentity(env), resource: 'graphql', caller, args: [], nowMs, logPath: ghThrottleLogPath(lockRoot), op: 'discovery pass' }, warn);
+}
+
+function deferGhCall(context, warn = (message) => process.stderr.write(message)) {
+  const result = ghPriorityAdmission(context);
+  if (!result) return null;
+  recordGhCallLogEntry(context.logPath, { ...result, op: context.op, caller: context.caller, resource: context.resource, id: context.identity, attempt: 0, points: 0 });
+  const message = `gh-throttle: deferred-low-budget caller=${context.caller} priority=${result.priority} GraphQL=${result.remaining}/${result.limit}; skip this pass\n`;
+  warn(message);
+  return { ...result, message };
 }
 
 const SUBDIR = join('.admission', 'gh');
@@ -1346,6 +1420,8 @@ export function runGhSync(args, opts = {}) {
   // #gh-graphql-budget — the shared primary-budget backoff (see that section above).
   const resource = classifyGhResource(args);
   const identity = ghAuthIdentity((execOpts && execOpts.env) || env);
+  const deferred = deferGhCall({ lockRoot, identity, resource, caller, args, nowMs: now(), logPath, op: opLabel, deferrable: !!throttle.deferrable }, throttle.warn);
+  if (deferred) return execOpts?.encoding && execOpts.encoding !== 'buffer' ? JSON.stringify(deferred) : Buffer.from(JSON.stringify(deferred));
   const blocked = readBudgetBlock(lockRoot, identity, resource, now());
   if (blocked) {
     recordGhCallLogEntry(logPath, { op: opLabel, attempt: 0, points: 0, outcome: 'budget_blocked', resource, caller, w: isWrite });
@@ -1374,6 +1450,8 @@ export function runGhSync(args, opts = {}) {
     let result;
     let failure = null;
     try {
+      const deferred = deferGhCall({ lockRoot, identity, resource, caller, args, nowMs: now(), logPath, op: opLabel, deferrable: !!throttle.deferrable }, throttle.warn);
+      if (deferred) return execOpts?.encoding && execOpts.encoding !== 'buffer' ? JSON.stringify(deferred) : Buffer.from(JSON.stringify(deferred));
       // `GH_DEBUG=api` is added ONLY when this call opted into header calibration, and ONLY if the caller
       // did not already ask for a specific debug mode of its own — never silently overridden. It changes
       // nothing about a SUCCESSFUL call's stdout (see the module header). The #4375 capture, when on, lives
@@ -1386,9 +1464,11 @@ export function runGhSync(args, opts = {}) {
     } finally {
       if (acq.ok) failOpenGate('release', () => releaseGhSlotSync({ lockRoot, cap, owner }), gateOpts);
     }
+    if (!failure && isGhDeferred(result)) return result; // nested CLI deferral is not a landed write
     const captured = lastCapture;
+    if (captured) recordGhHeadroom(lockRoot, identity, rateLimitRecords(captured.responses));
     recordGhCallLogEntry(logPath, {
-      op: opLabel, attempt, points, outcome: 'call', ok: !failure, caller, w: isWrite, resource, id: identity, inv,
+      op: opLabel, attempt, points, outcome: 'call', ok: !failure, caller, priority: ghCallerPriority(caller, args), w: isWrite, resource, id: identity, inv,
       ...(captured ? { rl: rateLimitRecords(captured.responses) } : {}),
     });
     if (!failure) {
@@ -1540,6 +1620,8 @@ export function runGhCliPassthrough(argv, { throttle = {}, spawn = spawnSync, bi
     usedPersonalToken = false;
     identity = ghAuthIdentity(callEnv);
   }
+  const deferred = deferGhCall({ lockRoot, identity, resource, caller, args: argv, nowMs: now(), logPath, op: opLabel }, () => {});
+  if (deferred) return { status: 0, deferred: true, stdout: Buffer.from(JSON.stringify(deferred)), stderr: Buffer.from(deferred.message) };
   const blocked = readBudgetBlock(lockRoot, identity, resource, now());
   if (blocked) {
     recordGhCallLogEntry(logPath, { op: opLabel, attempt: 0, points: 0, outcome: 'budget_blocked', resource, caller, w: isWrite, id: identity });
@@ -1583,6 +1665,8 @@ export function runGhCliPassthrough(argv, { throttle = {}, spawn = spawnSync, bi
     }, { ...gateOpts, fallback: { ok: false } }) : { ok: false };
     let r;
     try {
+      const deferred = deferGhCall({ lockRoot, identity, resource, caller, args: argv, nowMs: now(), logPath, op: opLabel }, () => {});
+      if (deferred) return { status: 0, deferred: true, stdout: Buffer.from(JSON.stringify(deferred)), stderr: Buffer.from(deferred.message) };
       r = spawn(bin, argv, spawnOpts);
     } finally {
       if (acq.ok) failOpenGate('release', () => releaseGhSlotSync({ lockRoot, cap, owner }), gateOpts);
@@ -1593,6 +1677,7 @@ export function runGhCliPassthrough(argv, { throttle = {}, spawn = spawnSync, bi
     // Classify on the STRIPPED text (what the caller would have seen without debug): the raw trace includes
     // response bodies, and a PR title saying "API rate limit exceeded" must never trigger a retry or a block.
     const stripped = capture ? stripGhDebug(rawStderrText) : null;
+    if (stripped) recordGhHeadroom(lockRoot, identity, rateLimitRecords(stripped.responses));
     const stderrText = stripped ? stripped.stderr : rawStderrText;
     // Byte-for-byte: the original buffer is relayed whenever nothing was stripped (no utf8 round trip).
     const stderrOut = stripped && stripped.stderr !== rawStderrText ? Buffer.from(stripped.stderr, 'utf8') : (r.stderr || Buffer.alloc(0));
@@ -1618,7 +1703,7 @@ export function runGhCliPassthrough(argv, { throttle = {}, spawn = spawnSync, bi
     }
 
     recordGhCallLogEntry(logPath, {
-      op: opLabel, attempt, points, outcome: 'call', ok: !failed && !stdoutOverflow, caller, w: isWrite, resource, id: identity, inv,
+      op: opLabel, attempt, points, outcome: 'call', ok: !failed && !stdoutOverflow, caller, priority: ghCallerPriority(caller, argv), w: isWrite, resource, id: identity, inv,
       ...(outer ? { outer } : {}), ...(stripped ? { rl: rateLimitRecords(stripped.responses) } : {}),
     });
     // The call ran and spent points, so it is logged above before the overflow is raised.

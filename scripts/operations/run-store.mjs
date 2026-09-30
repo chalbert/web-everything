@@ -170,7 +170,7 @@ export function isRunRecordTerminal(record) {
  * #4089 — THE ROOT-CAUSE FIX for the gap `#4082`'s own card named verbatim: "Delete helpers exist but nothing
  * calls them" (`we:scripts/operations/run-store.mjs:121`, i.e. {@link deleteRun} itself) — measured live at 92
  * `.operations/runs/` entries with nothing ever pruning them. Deletes every TERMINAL ({@link isRunRecordTerminal})
- * run record whose file is at least `maxAgeMs` old (by mtime — a run record has no `finishedAt` field of its
+ * run record WITHOUT a PR result whose file is at least `maxAgeMs` old (by mtime — a run record has no `finishedAt` field of its
  * own to read instead). This is deliberately NOT scoped to any one conveyor session — unlike a completion
  * record or a delivery report (both keyed 1:1 by session slug), a run record's `id` is minted by whichever
  * declared operation started it (`newRunId(op)` — `we:scripts/operations/run.mjs`, `land-advance-cli.mjs`,
@@ -201,7 +201,8 @@ export function pruneTerminalRuns({ dir = resolveRunsDir(), maxAgeMs, now = Date
       corrupt.push(id); // a torn record — never silently deleted, see tryReadRun's own refusal policy
       continue;
     }
-    if (!record || !isRunRecordTerminal(record)) {
+    // PR evidence outlives the cursor. Without confirmed closure, retain conservatively forever.
+    if (!record || !isRunRecordTerminal(record) || record.effects.some(e => e?.result?.pr)) {
       kept.push(id);
       continue;
     }

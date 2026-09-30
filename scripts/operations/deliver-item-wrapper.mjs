@@ -128,6 +128,7 @@ import { primaryCheckoutForLanePath, repoProfileForLanePath, repoKeyForScope, re
 // #4349 — settle this delivery's OWN run-store effect on exit (see that file's own header for why this is
 // the thin seam, not a new store) and release/hold the build-dispatch claim a finished no-op dispatch used to
 // leave stranded for hours (`we:scripts/conveyor/build-dispatch-claim.mjs`'s own #4349 note).
+import { resolveRunsDir } from './run-store.mjs';
 import { settleDispatchEffect } from './deliver-item-settle.mjs';
 import { releaseBuildDispatchClaim, placeBuildDispatchHold } from '../conveyor/build-dispatch-claim.mjs';
 
@@ -562,11 +563,12 @@ export async function deliverItem(launch, provider = CLAUDE_RESTRICTED_PROVIDER,
     // `infra-blocked.mjs retry` every cycle (#2659's existing backoff/attempt-cap state machine, unchanged),
     // which resume-opens straight from the record pr-land already wrote — no lane, no rebuild, no second copy
     // of ref/sha/body kept here.
+    if (!runId || !effectKey) throw new Error('builder PR requires a durable dispatch identity before publishing');
     let prResult;
     try {
       prResult = spanAround('pr.open', { attributes: { item: String(item), park: parkDecision.label } },
         () => openPr({
-          item, attemptTag, lane: gate.lanePath, park: parkDecision, report, slug: foundForPr.slug,
+          item, attemptTag, runId, effectKey, lane: gate.lanePath, park: parkDecision, report, slug: foundForPr.slug,
           // #3903 main adaptation — the trial-evidence marker; see `delegationForBuild`.
           delegation: delegationForBuild(provider, scope),
         }));
@@ -2423,7 +2425,7 @@ export function writePrBody({ item, lane, report, delegation = null }, { writeFi
  *  `scaffold.mjs#slugFor`). `run` is injectable (mirrors `computeLaneDiffStats`/`decideParkMode`'s own
  *  pattern), so this is testable with no hidden dependency and no real `open-pr` process. Flags otherwise
  *  lifted verbatim from the live brief's step 8, both branches. */
-export function openPr({ item, attemptTag, lane, park, report, slug, delegation = null }, { run: runFn = run } = {}) {
+export function openPr({ item, attemptTag, lane, park, report, slug, delegation = null, runId, effectKey }, { run: runFn = run } = {}) {
   if (!slug) {
     throw new Error(`deliver-item-wrapper: openPr needs the item's real slug for #${item} — never substitutes a literal placeholder`);
   }
@@ -2447,7 +2449,9 @@ export function openPr({ item, attemptTag, lane, park, report, slug, delegation 
   ];
   args.push(park.mode === 'park' ? `--mode=park` : '--mode=label-on-green');
   if (park.mode === 'park') args.push(`--parkLabel=${park.label}`);
-  const out = runFn('node', args, { cwd: lane });
+  const out = runFn('node', args, { cwd: lane, ...(runId && effectKey ? { env: { ...process.env,
+    WE_BUILD_PR_CONTEXT: JSON.stringify({ runId, key: effectKey, dir: resolveRunsDir() }),
+  } } : {}) });
   // #3627 bug 13 (real fix) — `run.mjs open-pr --json` prints the FULL run-outcome envelope, never a flat
   // `{pr, url}` object; the actual submit result (the only place `.pr`/`.url` live) is buried at
   // `findings.submit.effects[0].result`. See `extractSubmitResult`'s own docblock for the full story.

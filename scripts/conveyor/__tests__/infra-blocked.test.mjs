@@ -140,6 +140,13 @@ describe('parseInfraStore — tolerant read', () => {
 });
 
 describe('recordInfraBlock — idempotent create with the resumable handle', () => {
+  it('retains the proven builder context through persistence and a new pushed attempt', () => {
+    const builderContext = JSON.stringify({ runId: 'dispatch-lane-build', key: 'dispatch:0:0', dir: '/tmp/runs' });
+    const rows = recordInfraBlock([], { num: '4502', ref: 'lane/4502b-example', sha: 'one', builderContext }, T0);
+    expect(parseInfraStore(serializeInfraStore(rows))[0].builderContext).toBe(builderContext);
+    const next = recordInfraBlock(rows, { num: '4502', ref: 'lane/4502c-example', sha: 'two', builderContext }, T0);
+    expect(parseInfraStore(serializeInfraStore(next))[0].builderContext).toBe(builderContext);
+  });
   it('records attempt=1 + the backoff schedule off the injected clock', () => {
     const s = recordInfraBlock([], { num: '2659', ref: 'lane/2659-x', sha: 'abc', base: 'main', cause: 'GitHub outage', body: 'B' }, T0);
     expect(s).toHaveLength(1);

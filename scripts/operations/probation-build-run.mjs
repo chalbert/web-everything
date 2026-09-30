@@ -94,6 +94,7 @@ import { clearScopeAndAppendFinding, sanitizeHoldReason, landRoute } from './bui
 import { extractSubmitResult } from './open-pr.mjs';
 import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 
+import { settleDispatchEffect } from './deliver-item-settle.mjs';
 import { prepareCardStatus } from '../conveyor/prepare-result.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -191,6 +192,8 @@ export function parseArgs(argv) {
       simpleOnly: def.simpleOnly || flash, checker: flash ? 'codex' : def.checker };
   }
   return {
+    runId: flags['run-id'] ?? null,
+    effectKey: flags['effect-key'] ?? null,
     num: flags.num ? String(flags.num) : null,
     session: String(flags.session ?? `probation-${flags.num ?? 'unknown'}-${worker?.id ?? 'unknown'}-${randomBytes(4).toString('hex')}`),
     taskType,
@@ -231,7 +234,13 @@ export async function runProbationBuild(args, io) {
     }
     if (declinedReason) detail = `worker-declined: ${declinedReason} — ${detail}`;
     log(`${outcome} — ${detail}`);
-    return { outcome, executor, pr: row.pr ?? null, detail, ...failure };
+    const result = { outcome, executor, pr: row.pr ?? null, detail, ...failure };
+    if (preparing) {
+      try { io.settlePrepare?.({ runId: args.runId, key: args.effectKey,
+        status: outcome === 'opened-pr' ? 'applied' : 'failed', result }); }
+      catch (e) { log(`prepare settlement failed: ${e?.message ?? e}`); }
+    }
+    return result;
   };
 
   // Mutable across the whole arc, read by the ONE catch at the bottom — #4291 plan review round 4
@@ -815,6 +824,7 @@ export function realIo({ session, env = process.env, repoRoot = WE_ROOT } = {}) 
         return { ok: false, blockedOnInfra: false, reason: `open-pr --json did not parse: ${e?.message ?? e}` };
       }
     },
+    settlePrepare: settleDispatchEffect,
     appendScorecard: (row) => {
       // Best-effort: a lost trial row must never fail a build that worked.
       try { appendScorecardRow(row, { requireLock: true }); } catch (e) { console.error(`probation-build-run: scorecard row not written: ${e?.message ?? e}`); }

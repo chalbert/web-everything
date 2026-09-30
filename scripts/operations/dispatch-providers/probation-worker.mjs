@@ -145,6 +145,9 @@ export function probationWorkerDetachedProvider(request, {
     throw notApplied(`dispatch-lane: refusing a probation launch for kind '${kind}' — this provider has no argv shape for it`);
   }
   if (['test-fix', 'prepare'].includes(worker.taskType)) argv.push(`--taskType=${worker.taskType}`);
+  if (kind === 'prepare-item' && request?.runId && request?.effectKey) {
+    argv.push(`--run-id=${request.runId}`, `--effect-key=${request.effectKey}`);
+  }
   const lane = Number(request?.lane);
   if (Number.isInteger(lane) && lane > 0) argv.push(`--lane=${lane}`);
   const scope = Array.isArray(request?.scope) ? request.scope.map(String).filter(Boolean) : [];

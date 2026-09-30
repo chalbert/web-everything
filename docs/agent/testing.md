@@ -2,6 +2,16 @@
 
 > Tier-1 reference. Read when writing or changing tests.
 
+## GitHub priority admission
+
+The throttle returns a JSON `deferred-low-budget` result without invoking GitHub when a fresh,
+identity-scoped GraphQL observation crosses the caller's reservation threshold (background 25%,
+normal 10%). CLI status is zero; stderr and the spend report distinguish a skipped pass from success.
+Use `isGhDeferred` from `we:scripts/lib/gh-deferred.mjs` before parsing query data or caching results;
+a deferred response is not an empty PR list. Discovery CLI passes can use `deferGhPass` to skip before
+making decisions. Critical review/drain callers still respect actual exhaustion and secondary backoff.
+Test with a temporary throttle root and injected subprocesses; never spend live GitHub quota to test scarcity.
+
 ## Standalone probation builds
 
 `scripts/operations/probation-build-run.mjs` accepts `--taskType=doc-fix|bugfix|test-fix|prepare` (doc-fix default),
@@ -610,6 +620,23 @@ A failed session listing remains unknown. The daemon's records live in the coord
 `build-dispatch-runs` store; scratch-started Claude transcripts live under dispatch project paths,
 even after the session changes into a lane. Lane-only transcript searches miss those sessions.
 
+
+### Builder postmortem accounting
+
+Stream headless JSONL and match the first user message plus the dispatch attempt identity.
+A session slug can be reused across attempts (observed for `conveyor-4341b`); join by
+run/effect ID, worker UUID, implementation repo/lane and timestamps instead. Distinguish
+preparation effects from build attempts: a `b` suffix alone does not prove a failed build.
+Pair tool IDs and union their intervals before subtracting from wall time. Coalesce usage
+by assistant message ID; split known external verify intervals from model/unobserved time
+when a resumed transcript spans the gate. Tool `is_error=false` does not establish green
+tests when output was piped through `tail` or a later report command succeeded. Intended
+mutation RED runs and changed-input reruns are not waste. `lastSeenLiveAt` is not completion,
+and `pr-opened` is not landed. Preserve unknown timings rather than converting them to zero.
+The 2026-09-30 worked example and source offsets are in
+`reports/2026-09-30-builder-postmortem.md`; operational metrics belong in the existing
+`run-rating.mjs` / `run-scorecard-store.mjs` machinery, not a parallel history store.
+
 ## Prepare PR isolation
 
 Prepare-item refs (`lane/<item>-prepare-item-*`) receive a fixed item-specific title from the open-pr producer,
@@ -643,3 +670,14 @@ classified by the daemon, and cannot spawn again without a remaining transient b
 A new starting marker prevents the previous failure from being mistaken for the newly running job.
 Historical probation evidence can accompany an item release under its exact `probationAttempt` key;
 this improves the recorded diagnosis but does not authorize a route release.
+
+Red-draft inactivity in `we:skills-src/conveyor/build-dispatch-daemon.mjs` is measured from the later of the current head commit’s committed date and the builder effect’s `lastSeenLiveAt`. Never age recovery from PR `updated_at`: labels, check reruns and advisory notes refresh it without author activity. Replay a recent PR metadata update with old author evidence, and separately assert that a live author, a recent commit or recent live observation prevents recovery. Missing both usable timestamps fails closed.
+
+### Preparation terminal handoff
+
+Prepare probation launches carry the original dispatch run ID and effect key into the terminal writer.
+A stamp on main invalidates prepare guards and holds before build planning; a positively live worker
+still retains ownership. Probe with an in-flight run on disk, duplicate terminal delivery, a restarted
+reader, and a stamped card at the next daemon tick. Held dispatch reads must not invoke the full planner.
+Use the integration Vitest config for we:scripts/operations/__tests__/dispatch-lane-integration.test.mjs;
+the default config excludes that file. Keep dead-PID and unknown-session crash recovery tests.

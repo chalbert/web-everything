@@ -224,7 +224,7 @@ export function attributeSpend(entries, { baselines = {}, learnedOpCost = {}, no
   return { invocations, gaps, baselines: baselinesOut, opCost };
 }
 
-function emptyDim() { return { attributed: 0, estimated: 0, unknown: 0, requests: 0, responses: 0 }; }
+function emptyDim() { return { attributed: 0, estimated: 0, unknown: 0, requests: 0, responses: 0, deferred: 0 }; }
 /** `map` must be a {@link dict} (or a JSON-parsed row map, where `__proto__` is already an own key). */
 function bump(map, key, patch) {
   const d = map[key] || (map[key] = emptyDim());
@@ -279,6 +279,14 @@ export function rollupSpendDetailed(entries, { hourMs = HOUR_MS, ...rest } = {})
     // Attributed points land on the row of the RESOURCE each response spent (a `pr create` can hit both buckets).
     for (const [res, pts] of Object.entries(inv.attributedByRes)) dims(row(h, inv.id, res), { attributed: pts });
     if (inv.kind === 'attributed' && !inv.dirty) bump(own.measuredByOp, `${inv.resource}|${inv.op}`, { attributed: inv.attributedByRes[inv.resource] || 0, requests: 1 });
+  }
+  for (const e of entries || []) {
+    if (e?.outcome !== 'deferred-low-budget' || !Number.isFinite(Date.parse(e.ts))) continue;
+    const r = row(hourStart(Date.parse(e.ts), hourMs), e.id || '?', e.resource || 'graphql');
+    r.deferred = (r.deferred || 0) + 1;
+    bump(r.byCaller, e.caller || 'unknown', { deferred: 1 });
+    bump(r.byOp, e.op || 'unknown', { deferred: 1 });
+    bump(r.byCallerOp, `${e.caller || 'unknown'} ${e.op || 'unknown'}`, { deferred: 1 });
   }
   const out = [...rows.values()].map((r) => (r.unknown ? { ...r, bucketUsed: null, attributed: null, unattributed: null, estimated: null } : r));
   out.sort((a, b) => a.hour.localeCompare(b.hour) || a.identity.localeCompare(b.identity) || a.resource.localeCompare(b.resource));
@@ -453,6 +461,7 @@ export function summarizeSpendRows(rows, { by = 'caller' } = {}) {
       sections.set(k, { identity: r.identity, resource: r.resource, hours: 0, unknownHours: 0, bucketUsed: 0, attributed: 0, estimated: 0, unattributed: 0, unknownRequests: 0, requests: 0, responses: 0, dims: dict() });
     }
     const s = sections.get(k);
+    s.deferred = (s.deferred || 0) + (r.deferred || 0);
     s.hours += 1;
     if (r.unknown) s.unknownHours += 1;
     else { s.bucketUsed += r.bucketUsed; s.attributed += r.attributed; s.estimated += r.estimated; s.unattributed += r.unattributed; }
@@ -477,10 +486,12 @@ export function renderSpendReport(sections, { hours, by }) {
     out.push(s.hours - s.unknownHours
       ? `  bucket used ${r1(s.bucketUsed)} = attributed ${r1(s.attributed)} + estimated ${r1(s.estimated)} + unattributed ${r1(s.unattributed)}`
       : '  bucket used: unknown (no header observations in range)');
+    if (s.deferred) out.push(`  deferred-low-budget: ${s.deferred} calls skipped (no API spend)`);
     if (s.unknownRequests) out.push(`  ${s.unknownRequests} invocations with UNKNOWN points (nothing observable to diff against)`);
     const w = Math.max(10, ...s.dims.slice(0, 25).map((d) => d.name.length));
     out.push(`  ${by.padEnd(w)}  attributed*  estimated  unknown-inv  invocations  responses`);
     for (const d of s.dims.slice(0, 25)) {
+      if (d.deferred) out.push(`  ${d.name}: deferred-low-budget ${d.deferred}`);
       // A caller with ONLY unknown invocations has no known points — `—`, never a zero that reads as "free".
       const pts = (v) => (d.unknown === d.requests && !d.attributed && !d.estimated ? '—' : r1(v));
       out.push(`  ${d.name.padEnd(w)}  ${pts(d.attributed).padStart(11)}  ${pts(d.estimated).padStart(9)}  ${String(d.unknown).padStart(11)}  ${String(d.requests).padStart(11)}  ${String(d.responses).padStart(9)}`);

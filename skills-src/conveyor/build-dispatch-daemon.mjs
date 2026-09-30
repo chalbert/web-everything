@@ -50,13 +50,15 @@ import { listFixDispatchClaims } from '../../scripts/conveyor/fix-claim-store.mj
 // #4465 — a held item's own route (already-done / out-of-scope / other) and the live sweep that acts on it.
 // See that file's own header for the three routes and why this daemon owns the sweep.
 import { planHoldRouting, routeHeldItems, reserveHoldRoute, releaseHoldRoute, appendHoldFinding } from '../../scripts/conveyor/build-dispatch-hold-router.mjs';
+import { readBuilderRuns, readAuthorship, backfillAuthorship } from '../../scripts/operations/build-pr-authorship.mjs';
 import { resolveCoordinationRoot } from '../../scripts/operations/coordination-root.mjs';
 // #4131/#4382 build-orphan-adopt — see that module's own header for the mechanism this closes.
-import { classifyClaimLiveness, settleOrphanRow, adoptOrphanedBuildClaims, findLatestBuildRow, decideOrphanAction, RESUME_SPAWN_GRACE_MS } from '../../scripts/conveyor/build-dispatch-orphan-adopt.mjs';
+import { classifyClaimLiveness, settleOrphanRow, adoptOrphanedBuildClaims, decideOrphanAction, RESUME_SPAWN_GRACE_MS } from '../../scripts/conveyor/build-dispatch-orphan-adopt.mjs';
 // #4464 builder-cap-machine-wide — see `cliPlanTick`'s own docblock for why this daemon's tick-core read is
 // exempted from the shared, machine-wide lane-count ceiling.
 import { isLeaseExpired, DEFAULT_LEASE_MINUTES } from '../../scripts/readiness/file-locks.mjs';
 import { defaultIsPidAlive } from '../../scripts/operations/detached-dispatch.mjs';
+import { settleDispatchEffect } from '../../scripts/operations/deliver-item-settle.mjs';
 import { prepareCardStatus } from '../../scripts/conveyor/prepare-result.mjs';
 import { CONSTELLATION_REPOS } from '../../scripts/lib/constellation-repos.mjs';
 import { MAX_CONCURRENT_LANES_ENV } from '../../scripts/lib/lane-concurrency.mjs';
@@ -211,6 +213,39 @@ export function deriveDispatchedByBuilder(runStoreRows = [], settledRows = []) {
  * Optional-chained so an older test stub (every fixture that predates this) behaves exactly as before.
  */
 export async function runBuildDispatchTick({ bookkeeping = {}, live = false, policy = BUILD_DISPATCH_POLICY, prepareEnabled = true, effects }) {
+  let holds = effects.listHolds?.() ?? [];
+  const prepareRows = effects.listPrepareInFlight?.() ?? [];
+  const prepareClaims = effects.listPrepareClaims?.() ?? [];
+  const prepareIsLive = (r) => r.row?.entry?.live === true
+    && !(r.row.entry.handle?.startsWith('pid:') && classifyClaimLiveness({ row: r.row,
+      isPidAlive: effects.isPidAlive ?? defaultIsPidAlive }).status === 'dead');
+  const isPrepareHold = h => ['prepare-unstamped', 'prepare-stamp-pending'].includes(h.reason);
+  const prepareStatus = new Map();
+  const completedPrepares = new Set();
+  const prepareReadErrors = new Map();
+  // Completion invalidates the cached prepare eligibility BEFORE the expensive plan.
+  // Probe only tracked attempts; live workers retain ownership even if a stamp is visible.
+  const trackedPrepares = new Set([...prepareRows.map(r => normNum(r.num)),
+    ...prepareClaims.map(c => normNum(c.meta.num)),
+    ...(bookkeeping.prepareGuards ?? []).filter(g => g.kind === 'prepare-item').map(g => normNum(g.num)),
+    ...holds.filter(isPrepareHold).map(h => normNum(h.num))]);
+  for (const num of trackedPrepares) {
+    if (prepareRows.some(r => normNum(r.num) === num && prepareIsLive(r))) continue;
+    try {
+      const claim = prepareClaims.find(c => normNum(c.meta.num) === num);
+      const status = await effects.readPrepareStatus?.({ num, claimedAt: claim?.meta?.claimedAt });
+      prepareStatus.set(num, status);
+      if (!status?.preparedDate) continue;
+      for (const r of prepareRows.filter(r => normNum(r.num) === num && r.row)) {
+        if (live) await effects.settlePrepareRow?.({ runId: r.row.runId, key: r.row.entry.key, outcome: 'prepare-completed' });
+      }
+      completedPrepares.add(num);
+      if (live && holds.some(h => normNum(h.num) === num && isPrepareHold(h))) effects.releasePrepareHold?.({ num });
+    } catch (e) { prepareReadErrors.set(num, e); }
+  }
+  holds = holds.filter(h => !isPrepareHold(h) || !completedPrepares.has(normNum(h.num)));
+  bookkeeping = { ...bookkeeping, prepareGuards: (bookkeeping.prepareGuards ?? [])
+    .filter(g => g.kind !== 'prepare-item' || !completedPrepares.has(normNum(g.num))) };
   const releases = effects.listPrepareReleases?.() ?? [];
   const allSettledPrepares = await effects.listSettledPrepares?.() ?? [];
   const failureRecords = effects.listPrepareFailures?.() ?? [];
@@ -226,7 +261,7 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
       && !failureRecords.some(f => f.num === failure.num && f.held && !f.completed && !releasedAttempt(releases, f.num, f.attempt))
       && !allSettledPrepares.some(r => r.num === failure.num && !releasedAttempt(releases, r.num, r.source))) released.add(failure.num);
   }
-  const holds = (effects.listHolds?.() ?? []).filter(h => {
+  holds = holds.filter(h => {
     if (!released.has(normNum(h.num)) || !h.reason?.startsWith('prepare-')) return true;
     if (live) effects.releasePrepareHold({ num: normNum(h.num) });
     return false;
@@ -243,8 +278,8 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
   // PR #2921 review — a resume spawns real gate/converge/PR work, so it obeys the SAME kill switch and landing
   // freeze a fresh dispatch does (`planBuildDispatch`'s own freeze rule, computed here with no candidates).
   // Still before this tick's own `listClaims()` read, so a claim released here frees its item this same tick.
-  // Computed once, LIVE only: every live effect below that spawns PR work obeys it.
-  const freeze = live ? planBuildDispatch({ openPrs, killSwitch: effects.killSwitch(), policy }).freeze : null;
+  // Compute for previews too: a dry-run must report the same freeze as a live tick.
+  const freeze = planBuildDispatch({ openPrs, killSwitch: effects.killSwitch(), policy }).freeze;
   let orphanAdoption = null;
   if (live && typeof effects.adoptOrphans === 'function') {
     try { orphanAdoption = await effects.adoptOrphans({ allowResume: !freeze.frozen, frozenReason: freeze.reasons.join('; ') }); }
@@ -253,8 +288,8 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
   // A delivered draft is still its builder's responsibility. This pass precedes candidate/hold
   // filtering: an "already delivers it" hold must never suppress repair of that very PR.
   let draftRecovery = null;
-  if (live && typeof effects.recoverDrafts === 'function') {
-    try { draftRecovery = await effects.recoverDrafts({ rawOpenPrs, allowResume: !freeze.frozen }); }
+  if (typeof effects.recoverDrafts === 'function') {
+    try { draftRecovery = await effects.recoverDrafts({ rawOpenPrs, allowResume: !freeze.frozen, dryRun: !live }); }
     catch (e) { draftRecovery = { error: String(e?.message || e).split('\n')[0] }; }
   }
   const runStoreInFlight = effects.listRunStoreInFlight();
@@ -345,6 +380,7 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
   // settle/release above would otherwise tighten rather than close.
   const candidates = spawn
     .filter((s) => !heldNums.has(normNum(s.num)))
+    .filter((s) => !prepareRows.some(r => normNum(r.num) === normNum(s.num) && !completedPrepares.has(normNum(s.num))))
     .map((s) => ({ num: normNum(s.num), lane: s.lane ?? null, scope: scopeByNum.get(normNum(s.num)) || [] }));
   for (const c of candidates) {
     c.route = effects.predictRoute ? await effects.predictRoute(c.num, c.scope) : null;
@@ -381,8 +417,6 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
   }
   // Separate durable claims use the existing lease primitive, without occupying build slots.
   // Run-store rows survive restarts; guards cover the interval before a dispatched lane is visible.
-  const prepareRows = effects.listPrepareInFlight?.() ?? [];
-  const prepareClaims = effects.listPrepareClaims?.() ?? [];
   const prepareSpawns = d.spawnPrepareItems ?? d.itemPrepareSpawns ?? [];
   const settledPrepares = new Map();
   for (const row of allSettledPrepares) {
@@ -402,7 +436,7 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
   const prepare = { route: fallback ? 'prepare-route-fallback' : 'probation', enabled: prepareEnabled, planned: [], launched: [], inFlight: [], failures: [], retired: [], held: [], stamping: [] };
   prepare.routeFailures = probationRecords.filter(r => r.taskType === 'prepare' && !r.pr && r.launchOutcome !== 'opened-pr')
     .map(r => ({ item: r.item, attempt: `${r.handle}:${r.scoredAt}`, cause: classifyPrepareFailure(r.evidence), evidence: r.evidence ?? { reason: r.launchOutcome } }));
-  const finishedPrepares = new Set();
+  const finishedPrepares = new Set(completedPrepares);
   const itemPrepareAttempts = { ...out?.nextState?.itemPrepareAttempts };
   // Observation stages (a failed status read, claim contention) say nothing about the prepare attempt itself:
   // they never hold, never file a card and never enter the ledger. The caller keeps the item out of dispatch
@@ -442,7 +476,10 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
     if (!tracked && !wasHeld && !currentSettled
       && !(bookkeeping.prepareGuards ?? []).some((g) => g.kind === 'prepare-item' && normNum(g.num) === num)) continue;
     try {
-      const status = await effects.readPrepareStatus?.({ num, claimedAt: claim?.meta?.claimedAt ?? settled?.startedAt });
+      if (prepareReadErrors.has(num)) throw prepareReadErrors.get(num);
+      const status = prepareStatus.has(num) ? prepareStatus.get(num)
+        : await effects.readPrepareStatus?.({ num, claimedAt: claim?.meta?.claimedAt ?? settled?.startedAt });
+      if (prepareRows.some(r => normNum(r.num) === num && prepareIsLive(r))) continue;
       const prDone = ['MERGED', 'CLOSED'].includes(status?.pr?.state);
       const awaitingPr = status?.pr?.state === 'OPEN';
       let why = status?.preparedDate ? 'prepared on main' : prDone ? `prepare PR ${status.pr.state.toLowerCase()}` : null;
@@ -524,7 +561,7 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
           (Number(bookkeeping.itemPrepareAttempts?.[num]) || 0) + 1);
       }
       if (why) {
-        if (live && worker) effects.settlePrepareRow?.({ runId: worker.runId, key: worker.entry.key,
+        if (live && worker && !completedPrepares.has(num)) effects.settlePrepareRow?.({ runId: worker.runId, key: worker.entry.key,
           outcome: why === 'prepare-session-dead' ? why : unstamped ? 'prepare-unstamped' : 'prepare-retired' });
         if (claim || worker) {
           if (live && claim) effects.releasePrepareClaim({ num });
@@ -1046,17 +1083,24 @@ const prepareClaimRoot = () => join(resolveCoordinationRoot(), 'item-prepare-dis
 
 export const DEFAULT_RED_DRAFT_MINUTES = 60;
 
+// PR metadata writes are daemon activity, not evidence that the author is still working.
+function lastDraftAuthorActivity(candidate) {
+  const dates = [candidate.headCommittedAt, candidate.authorLastSeenLiveAt]
+    .map(value => Date.parse(value)).filter(Number.isFinite);
+  return dates.length ? Math.max(...dates) : NaN;
+}
+
 /** Builder-only gate-failure recovery. Unknown liveness fails closed, including a crash between
  * reserving an attempt and recording its handle. The existing orphan retry policy supplies the cap.
  * State is PR-bound, never head-bound: a failed fix pushing another red head cannot reset its budget. */
 export async function recoverBuilderDrafts({
-  candidates, allowResume = true, staleMinutes = DEFAULT_RED_DRAFT_MINUTES, nowMs = Date.now(), effects,
+  candidates, allowResume = true, dryRun = false, staleMinutes = DEFAULT_RED_DRAFT_MINUTES, nowMs = Date.now(), effects,
 }) {
   if (!Number.isFinite(staleMinutes) || staleMinutes < 0) throw new Error('invalid red draft age');
   const results = [];
   for (const c of candidates) {
     try {
-      const at = Date.parse(c.updatedAt);
+      const at = lastDraftAuthorActivity(c);
       if (!c.isDraft || !c.builderAuthored || c.authorLive !== false || !c.failure
         || !Number.isFinite(at) || nowMs - at < staleMinutes * 60_000) continue;
       const state = effects.readState(c.pr) ?? { attempts: 0 };
@@ -1066,6 +1110,7 @@ export async function recoverBuilderDrafts({
         ? { action: 'exhausted' } // unknown spawn: surface it, never race a possibly live fix
         : decideOrphanAction({ resumable: true, attempts: state.attempts, allowResume });
       if (decision.action === 'leave') continue;
+      if (dryRun) { results.push({ pr: c.pr, num: c.num, action: decision.action, planned: true }); continue; }
       if (!effects.reserve(c).ok) continue;
       try {
         if (decision.action === 'exhausted') {
@@ -1095,16 +1140,13 @@ export async function recoverBuilderDrafts({
 
 /** Read current CI evidence only for drafts tied to a recorded builder result. REST checks are scoped
  * to the current head; a review permission gate is never a code failure. No label guesses CI colour. */
-export async function cliRecoverBuilderDrafts({ rawOpenPrs, allowResume, staleMinutes = Number(process.env.WE_BUILD_DAEMON_RED_DRAFT_MINUTES ?? DEFAULT_RED_DRAFT_MINUTES) }, io = {}) {
-  const { createFileRunStore } = await import('../../scripts/operations/run-store.mjs');
+export async function cliRecoverBuilderDrafts({ rawOpenPrs, allowResume, dryRun = false, staleMinutes = Number(process.env.WE_BUILD_DAEMON_RED_DRAFT_MINUTES ?? DEFAULT_RED_DRAFT_MINUTES) }, io = {}) {
   const { stampLiveness, defaultListAgents } = await import('../../scripts/operations/dispatch-lane-io.mjs');
   const { ghRestGetJson, ghRestGetPaged } = await import('../../scripts/lib/gh-rest-read.mjs');
   const { runGhSync } = await import('../../scripts/lib/gh-throttle.mjs');
   const { dispatchCiHeal } = await import('../../scripts/operations/ci-heal-pr-dispatch.mjs');
   const { freeLaneNumbers } = await import('../../scripts/conveyor/reconcile-fix-dispatch.mjs');
-  const store = io.store ?? createFileRunStore();
-  const runs = store.list().filter(id => id.startsWith('dispatch-lane')).map(id => ({ id, record: store.read(id) }));
-  const nums = new Set(runs.flatMap(r => (r.record.effects ?? []).filter(e => e.payload?.launchKind === 'build').map(e => normNum(e.payload.num))));
+  const runs = io.store ? io.store.list().filter(id => id.startsWith('dispatch-lane')).map(id => ({ id, record: io.store.read(id) })) : readBuilderRuns();
   let agents;
   const isLive = handle => stampLiveness({ runs: [{ handle }] }, {
     listAgents: () => (agents ??= (io.listAgents ?? defaultListAgents)()),
@@ -1116,19 +1158,25 @@ export async function cliRecoverBuilderDrafts({ rawOpenPrs, allowResume, staleMi
   const paged = io.paged ?? ghRestGetPaged;
   const gh = io.gh ?? runGhSync;
   const { parseAuthorActorId } = await import('../../scripts/lib/review-independence.mjs');
-  for (const pr of rawOpenPrs.find(r => r.repo === 'we')?.prs ?? []) {
+  const prs = rawOpenPrs.find(r => r.repo === 'we')?.prs ?? [];
+  const receipts = backfillAuthorship({ runs, prs, repo,
+    receipts: io.receipts ?? (io.store ? [] : readAuthorship()), persist: !dryRun && !io.store });
+  for (const pr of prs) {
     if (!pr.isDraft) continue;
-    const num = [...nums].find(n => prDeliversNum(pr, n));
-    if (!num) continue;
-    const row = findLatestBuildRow(runs, num);
-    // A branch name alone does not establish authorship. Require the wrapper's actual PR result.
-    const delivered = String(row?.entry.result?.pr ?? '').match(/(?:^|\/)(\d+)$/)?.[1];
-    if (Number(delivered) !== pr.number || isLive(row.entry.handle) !== false) continue;
+    const row = receipts.find(r => r.repo === repo && r.pr === pr.number);
+    if (!row || (row.ref && row.ref !== pr.headRefName) || isLive(row.entry.handle) !== false) continue;
+    const num = normNum(row.entry.payload.num);
+    const currentEntry = runs.find(r => r.id === row.runId)?.record?.effects?.find(e => e.key === row.entry.key);
     const p = api(`pulls/${pr.number}`);
     if (!p.draft || p.state !== 'open' || p.head?.repo?.full_name !== repo || p.head.ref !== pr.headRefName) continue;
     const author = parseAuthorActorId(p.body ?? '');
     if (author && isLive(author) !== false) continue;
-    if (Date.now() - Date.parse(p.updated_at) < staleMinutes * 60_000) continue;
+    const activity = {
+      headCommittedAt: api(`commits/${p.head.sha}`).commit?.committer?.date,
+      authorLastSeenLiveAt: currentEntry?.lastSeenLiveAt ?? row.entry.lastSeenLiveAt,
+    };
+    const at = lastDraftAuthorActivity(activity);
+    if (!Number.isFinite(at) || Date.now() - at < staleMinutes * 60_000) continue;
     const checks = [];
     for (let page = 1; ; page++) {
       const batch = api(`commits/${p.head.sha}/check-runs?filter=latest&per_page=100&page=${page}`).check_runs;
@@ -1149,13 +1197,13 @@ export async function cliRecoverBuilderDrafts({ rawOpenPrs, allowResume, staleMi
     }
     candidates.push({ pr: pr.number, num, itemNum: num, repo: 'we', laneRef: p.head.ref, headRefOid: p.head.sha,
       scope: (pr.files ?? []).map(f => `we:${f.path}`), isDraft: true, builderAuthored: true,
-      authorLive: false, updatedAt: p.updated_at, failure: { name: failed.name, firstError: firstError.split('\n').find(Boolean)?.slice(0, 2000) } });
+      authorLive: false, ...activity, failure: { name: failed.name, firstError: firstError.split('\n').find(Boolean)?.slice(0, 2000) } });
   }
   const dir = join(io.stateRoot ?? resolveCoordinationRoot(), 'build-red-draft-resumes');
   const path = pr => join(dir, `${pr}.json`);
   const route = c => ({ num: c.num, route: `red-draft-${c.pr}` });
   let lanes;
-  return recoverBuilderDrafts({ candidates, allowResume, staleMinutes, effects: {
+  return recoverBuilderDrafts({ candidates, allowResume, dryRun, staleMinutes, effects: {
     readState: pr => existsSync(path(pr)) ? JSON.parse(readFileSync(path(pr), 'utf8')) : null,
     writeState: (pr, state) => {
       mkdirSync(dir, { recursive: true });
@@ -1201,7 +1249,14 @@ function cliEffects() {
     stampPrepare: cliStampPrepare,
     placePrepareHold: (o) => placeBuildDispatchHold(o),
     releasePrepareHold: (o) => releaseBuildDispatchHold(o),
-    settlePrepareRow: settleOrphanRow,
+    settlePrepareRow: ({ runId, key, outcome }) => {
+      if (outcome !== 'prepare-completed') return settleOrphanRow({ runId, key, outcome });
+      const settled = settleDispatchEffect({ runId, key, status: 'applied', result: { outcome } });
+      if (!settled.settled && !['already-applied', 'already-failed'].includes(settled.reason)) {
+        throw new Error(`prepare settlement: ${settled.reason}`);
+      }
+      return settled;
+    },
     acquirePrepareClaim: (o) => acquireBuildDispatchClaim({ ...o, lockRoot: prepareClaimRoot() }),
     releasePrepareClaim: (o) => releaseBuildDispatchClaim({ ...o, lockRoot: prepareClaimRoot() }),
     planTick: cliPlanTick,
@@ -1334,6 +1389,7 @@ async function dryRun(flags) {
     // THAT.
     openItems: reportOpenItems(tick.plan.openItems),
     prepare: tick.prepare,
+    draftRecovery: tick.draftRecovery,
     wouldDispatchNow: tick.plan.dispatch.map((x) => x.num),
     wouldRetireClaims: tick.retired,
     dispatchHolds: tick.dispatchHolds, // #4349 — items excluded this tick by a non-PR terminal-outcome cooldown
