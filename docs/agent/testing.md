@@ -537,3 +537,12 @@ Operator rule (2026-09-29): every fresh daemon-launched Claude session must pass
 unresolvable model with `notApplied`. Its launch-kind table test covers every `LAUNCH_KINDS`
 member, plus review/inspect, and the provider test checks that kind survives request narrowing.
 Preserve routed choices; defaults use `workerTierFor` and `CLAUDE_SPAWN_MODEL_BY_TIER`.
+
+### Automatic item-prepare retirement
+
+Prepare claims reuse build claim locks and orphan PID classification, with the shared 15-minute heartbeat
+TTL plus confirmed dead ownership (a known live worker still wins). Retirement reads the card from remote
+main and checks this attempt's prepare PR; a failed read keeps the claim. Tests must cover stale run-store
+rows and prior guards so a retired claim actually frees capacity. A completed unstamped result is held as
+`prepare-unstamped`, including across daemon restarts and cooldown expiry; the hold clears when main carries
+a valid `preparedDate`. An open PR's committed stamp is checked separately while it awaits landing.

@@ -352,7 +352,7 @@ export function checkResumable({
  *  as "still in flight" again. Never touched on the RESUME path — the resumed wrapper settles the row itself
  *  (it is handed `--run-id`/`--effect-key`). A no-op when `row` gave no `runId`/`key` at all (the #4382 shape —
  *  nothing was ever found to settle). */
-function settleOrphanRow({ runId, key, outcome = 'orphan-released' }, store = createFileRunStore()) {
+export function settleOrphanRow({ runId, key, outcome = 'orphan-released' }, store = createFileRunStore()) {
   if (!runId || !key) return;
   try {
     const run = store.read(runId);
@@ -362,7 +362,7 @@ function settleOrphanRow({ runId, key, outcome = 'orphan-released' }, store = cr
     const next = resolveInFlight(run, key, {
       status: 'failed',
       result: { outcome },
-      error: `build-dispatch-orphan-adopt: wrapper pid confirmed dead by the kernel (${outcome})`,
+      error: `build-dispatch-orphan-adopt: dispatch retired (${outcome})`,
     });
     store.write(next);
   } catch { /* best-effort — never mask the release this settles alongside */ }

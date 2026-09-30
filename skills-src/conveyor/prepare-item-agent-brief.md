@@ -123,13 +123,19 @@ clears `needs-prepare` and makes the item build-eligible again. It is blocked fr
 the lane, so this splice lands via the one PR, never onto primary — do **not** hand-Edit `preparedDate`. **Do
 NOT `resolve`** — a prepared item is still open; resolving is the eventual build agent's job.
 
+Before proceeding, read `{{ITEM_SPEC_PATH}}` back from disk and verify its YAML frontmatter contains a
+non-empty `preparedDate`. This is mandatory: authored sections alone are not a prepared result. If
+`prepare-stamp` fails or the field is absent, stop with `prepare-unstamped`; do not publish a prepare PR.
+Recheck the committed card at `HEAD:{{ITEM_SPEC_PATH}}` before `open-pr`, so the stamp is in the PR itself.
+The daemon treats a completed unstamped result as failed and holds the card with reason `prepare-unstamped`.
+
 ### 4. Run the gate GREEN
 
 ```bash
 npm run check:standards
 ```
 
-The gate enforces the item shape (a well-formed body, a correct `scope:`, a real `preparedDate`). A red gate is a
+The gate checks item shape; it does not replace the explicit `preparedDate` check above. A red gate is a
 hard stop — fix the authoring until it is green.
 
 ### 5. Review your prepare pass — spawn an adversarial review subagent (converge BEFORE the PR)
