@@ -72,6 +72,7 @@ export function prepareRouteFallback(records = []) {
 
 export const BUILD_DISPATCH_DAEMON_LEASE_KEY = '<conveyor:build-dispatch-daemon-lease>';
 export const DEFAULT_INTERVAL_MS = 120_000;
+export const PREPARE_SESSION_DEAD_GRACE_MS = 20 * 60_000;
 // #4517 — bounds cliRetryInfraBlocked's execFileSync so a slow `pr-land --label-on-green` CI wait inside
 // `infra-blocked.mjs retry` can never stall a whole daemon tick past this. Well under DEFAULT_INTERVAL_MS
 // (120_000ms) so the rest of the tick (dispatch, liveness, claims) always keeps real headroom. A retry that
@@ -370,6 +371,7 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
   const fallback = prepareRouteFallback(await effects.listProbationPrepares?.() ?? []);
   const prepare = { route: fallback ? 'prepare-route-fallback' : 'probation', enabled: prepareEnabled, planned: [], launched: [], inFlight: [], failures: [], retired: [], held: [], stamping: [] };
   const finishedPrepares = new Set();
+  const itemPrepareAttempts = { ...out?.nextState?.itemPrepareAttempts };
   const inspectNums = new Set([...prepareClaims.map((c) => normNum(c.meta.num)),
     ...prepareBusy, ...prepareSpawns.map((s) => normNum(s.num)),
     ...(bookkeeping.prepareGuards ?? []).filter((g) => g.kind === 'prepare-item').map((g) => normNum(g.num)),
@@ -379,7 +381,7 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
     const settled = settledPrepares.get(num);
     // As with build retirement, an older attempt must not settle a fresh claim.
     // A `wrapper-failed` row is an infra failure, not an unstamped prepare: the base retried those.
-    const currentSettled = settled && settled.outcome !== 'wrapper-failed'
+    const currentSettled = settled && !['wrapper-failed', 'prepare-session-dead'].includes(settled.outcome)
       && (!claim?.meta?.claimedAt || settled.startedAt >= claim.meta.claimedAt);
     const wasHeld = holds.some((h) => normNum(h.num) === num && ['prepare-unstamped', 'prepare-stamp-pending'].includes(h.reason));
     const tracked = Boolean(claim) || prepareBusy.has(num);
@@ -392,6 +394,14 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
       const prDone = ['MERGED', 'CLOSED'].includes(status?.pr?.state);
       const awaitingPr = status?.pr?.state === 'OPEN';
       let why = status?.preparedDate ? 'prepared on main' : prDone ? `prepare PR ${status.pr.state.toLowerCase()}` : null;
+      const worker = prepareRows.find((r) => normNum(r.num) === num)?.row;
+      const now = effects.now?.() ?? Date.now();
+      const sessionDead = worker?.entry?.live === false
+        && (now > Date.parse(worker.entry.expectedBy)
+          || now - Date.parse(worker.entry.lastSeenLiveAt) > PREPARE_SESSION_DEAD_GRACE_MS);
+      if (!why && sessionDead && !(awaitingPr && status.pr.preparedDate)) {
+        why = 'prepare-session-dead';
+      }
       // An OPEN PR only shields the claim when it is stamped; an unstamped one must not outlive a dead worker.
       if (!why && claim && !(awaitingPr && status.pr.preparedDate) && isLeaseExpired(claim, effects.now?.() ?? Date.now(), DEFAULT_LEASE_MINUTES)) {
         // Probe the worker independently: the claim owner is the long-lived daemon, not the worker.
@@ -400,13 +410,18 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
         const ownerPid = host === (effects.hostname?.() ?? hostname()) ? claim.pid : null;
         const liveness = classifyClaimLiveness({ row: null, ownerPid,
           isPidAlive: effects.isPidAlive ?? defaultIsPidAlive });
-        const worker = prepareRows.find((r) => normNum(r.num) === num)?.row;
         const workerLiveness = worker && classifyClaimLiveness({ row: worker, ownerPid, isPidAlive: effects.isPidAlive ?? defaultIsPidAlive });
-        if (worker?.entry?.live === false || (worker?.entry?.handle?.startsWith('pid:') && workerLiveness?.status === 'dead')
+        // An explicitly dead session whose timing fields are absent/invalid can never trip the grace check above.
+        const deadUntimed = worker?.entry?.live === false
+          && !Number.isFinite(Date.parse(worker.entry.expectedBy)) && !Number.isFinite(Date.parse(worker.entry.lastSeenLiveAt));
+        if (deadUntimed || (worker?.entry?.handle?.startsWith('pid:') && workerLiveness?.status === 'dead')
           || (!worker && liveness.status === 'dead')) why = 'dead prepare owner past heartbeat TTL';
       }
       const wasUnstamped = holds.some((h) => normNum(h.num) === num && ['prepare-unstamped', 'prepare-stamp-pending'].includes(h.reason));
-      const ended = prDone || why === 'dead prepare owner past heartbeat TTL' || wasUnstamped
+      // A dead session that left sections behind is a finished-but-unstamped run: route it to stamp recovery.
+      const deadWithWork = why === 'prepare-session-dead' && status && !status.preparedDate
+        && (status.hasSections || (awaitingPr && status.pr.hasSections));
+      const ended = prDone || why === 'dead prepare owner past heartbeat TTL' || wasUnstamped || deadWithWork
         || (currentSettled && !prepareBusy.has(num));
       // An open, stamped PR is a valid finished agent run awaiting landing; main is not stamped yet.
       let unstamped = status && !status.preparedDate && ended && !(awaitingPr && status.pr.preparedDate);
@@ -442,14 +457,17 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
         prepare.failures.push({ num, stage: 'result', reason: 'prepare-unstamped' });
         why ??= 'prepare-unstamped';
       }
+      if (why === 'prepare-session-dead') {
+        prepare.failures.push({ num, stage: 'retirement', reason: why });
+        // The core may already have counted this guard's TTL retirement on this tick.
+        itemPrepareAttempts[num] = Math.max(Number(itemPrepareAttempts[num]) || 0,
+          (Number(bookkeeping.itemPrepareAttempts?.[num]) || 0) + 1);
+      }
       if (why) {
-        if (claim) {
-          if (live) {
-            effects.releasePrepareClaim({ num });
-            const row = prepareRows.find((r) => normNum(r.num) === num)?.row;
-            if (row) effects.settlePrepareRow?.({ runId: row.runId, key: row.entry.key,
-              outcome: unstamped ? 'prepare-unstamped' : 'prepare-retired' });
-          }
+        if (live && worker) effects.settlePrepareRow?.({ runId: worker.runId, key: worker.entry.key,
+          outcome: why === 'prepare-session-dead' ? why : unstamped ? 'prepare-unstamped' : 'prepare-retired' });
+        if (claim || worker) {
+          if (live && claim) effects.releasePrepareClaim({ num });
           prepare.retired.push({ num, why, released: live });
         }
         finishedPrepares.add(num);
@@ -534,6 +552,7 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
     holdRoutingResult,
     nextBookkeeping: settleBookkeeping(bookkeeping, {
       ...out?.nextState,
+      itemPrepareAttempts,
       prepareGuards: (out?.nextState?.prepareGuards ?? []).filter((g) => !finishedPrepares.has(normNum(g.num))),
     }, dispatched.map((x) => x.num), prepare.launched.map((x) => x.num)),
   };
