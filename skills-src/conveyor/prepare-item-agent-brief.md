@@ -222,7 +222,8 @@ node scripts/conveyor/learnings-drop.mjs \
 Then **STOP.** Do NOT run `gh pr merge`. Do NOT run a drain. Do NOT `release` the **lane** — the resident drain
 daemon lands the PR, and when it does the item is prepared, so the conveyor dispatches it to BUILD on a later
 tick. Return a one-line result: `#{{ITEM_NUM}} prepare-item → PR #<n> (ready-to-merge | escalated <label> |
-gate-red | could-not-prepare)`.
+gate-red | could-not-prepare)`, or, for the `already-done` exit (*The method*, step 1, no PR opened),
+`#{{ITEM_NUM}} prepare-item → already-done — <delivering commit>`.
 
 ---
 
@@ -232,6 +233,8 @@ gate-red | could-not-prepare)`.
    research, including an ambiguity that requires choosing a different goal. Factual drift alone is
    corrected in place (*The method*, step 2), not escalated. Do **not** stamp a false `preparedDate`. Leave the item un-stamped, open **no** PR, drop
    the hold (`prepare-release`), and return `#{{ITEM_NUM}} prepare-item → could-not-prepare — <reason>`.
+1a. **Already delivered** — *The method*, step 1: return `#{{ITEM_NUM}} prepare-item → already-done — <delivering
+   commit>`, release the hold, edit and stamp nothing, open no PR.
 2. **Gate red** — `check:standards` fails from your authoring and you cannot get it green. Report the failing
    check and stop; do not weaken a test to go green.
 3. **Statute-touching item** — `pr-land`'s rubric parks it `review:human` on its own. Let it — you still run the
