@@ -7,11 +7,7 @@ blockedBy: ["2350"]
 dateOpened: "2026-07-09"
 preparedDate: "2026-08-14"
 tags: [agent-memory, lane, hook, self-improving-loop]
-scope:
-  - we:scripts/memory-land-at-stop.mjs
-  - we:.claude/settings.json
-  - we:scripts/__tests__/
-  - we:skills-src/closing-session/SKILL.md
+
 scopeRationale: "One new hook script, its registration as the repo's FIRST Stop hook in we:.claude/settings.json, its unit test, and a one-line pointer in the close skill so the close does not re-grow the memory-PR exception it deliberately removed."
 ---
 
@@ -223,3 +219,12 @@ asserting. Still a 3 — none of those changes the shape of the file.
 - A malformed or unrecognised Stop payload fails **open**: exit 0, nothing spawned, session unaffected.
 - `we:skills-src/closing-session/SKILL.md` names the hook as what lands memory, and still says the close
   itself opens no PR.
+
+## Findings (standalone worker, 2026-09-29)
+
+The build-dispatch daemon held #2351 with:
+
+> worker-declined: The worker changed nothing and provided no final message.
+
+`scope:` was cleared above so this card is picked up by the existing unshaped-item auto-prepare path;
+a prepare pass re-scopes it against the finding.
