@@ -5,7 +5,7 @@
  *   when the range is gap-free. `rng` is injected so the choice is deterministic under test.
  */
 import { describe, it, expect } from 'vitest';
-import { nextNum, pad3, slugify, normalizeScope, renderItem } from '../scaffold.mjs';
+import { nextNum, pad3, slugify, normalizeScope, renderItem, GUARD_RELAXATION_HINT } from '../scaffold.mjs';
 
 describe('nextNum — random free-in-range allocation (#2292)', () => {
   it('picks a GAP below max, not max+1 (cuts the two-lanes-same-NNN collision)', () => {
@@ -76,5 +76,13 @@ describe('renderItem — `## Done when` skeleton (#2949)', () => {
     expect(out).toMatch(/\*\*Executable\*\*/);
     // digest paragraph comes before the heading, not after
     expect(out.indexOf('TODO digest')).toBeLessThan(out.indexOf('## Done when'));
+  });
+});
+
+describe('renderItem — guard-relaxation hint (#4409)', () => {
+  it('#4409 scaffold skeleton carries the pinned hint verbatim', () => {
+    const out = renderItem({ kind: 'story', size: 3, slug: 'x', title: 'X', today: '2026-07-27' });
+    expect(out).toContain(GUARD_RELAXATION_HINT);
+    expect(out.indexOf('## Done when')).toBeLessThan(out.indexOf(GUARD_RELAXATION_HINT));
   });
 });
