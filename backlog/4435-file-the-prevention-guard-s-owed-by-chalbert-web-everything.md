@@ -22,7 +22,7 @@ Idempotency key (do not edit): approval-prevention-key:chalbert/web-everything#2
 ## Design
 
 **Premise check (against `main` @ 7c08e4c13).** The guard is still owed, but its wording is stale. The card asks for a test
-"asserting the remaining capacity exactly" for a positive `buildingInFlight`. Since card x3vs6tu (2026-09-29) the cap no
+"asserting the remaining capacity exactly" for a positive `buildingInFlight`. Since card 4464 (2026-09-29) the cap no
 longer subtracts it: `planBuildDispatch` sets `busy = running.length` only (`we:scripts/conveyor/build-dispatch-policy.mjs:230-231`),
 and `externalBuilding` is returned purely as a logged signal (`:314`). So the only thing a positive `buildingInFlight`
 can still change is `plan.externalBuilding`, and the only daemon-level thing worth pinning is the wiring that feeds it:
@@ -48,7 +48,7 @@ comment at `:220`/`:227` ("reads buildingInFlight … for the cap") only if the 
 Musts only: the two assertions above in `we:skills-src/conveyor/__tests__/build-dispatch-daemon.test.mjs` (the card's declared scope). No production code
 change.
 
-Out of scope (see Follow-ups): renaming the stale x0jgunh test title, an operator-facing display of `externalBuilding`.
+Out of scope (see Follow-ups): renaming the stale 4342 test title, an operator-facing display of `externalBuilding`.
 
 ## Test plan
 
@@ -75,7 +75,7 @@ No live surface: this is a regression guard over pure daemon wiring, so the muta
 
 ## Follow-ups
 
-- Rename/re-comment the x0jgunh test at `:220` so its title no longer says the count is read "for the cap".
+- Rename/re-comment the 4342 test at `:220` so its title no longer says the count is read "for the cap".
 - Surface `plan.externalBuilding` in the `--dry-run` report line so operators can see the logged signal.
 
 ## Done when
