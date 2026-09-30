@@ -97,6 +97,7 @@ function fakeIo({
     writeTaskFile: (_d, name, text) => { calls.push(['task', name, text.length > 0]); return `/lanes/22/.git/${name}`; },
     runWorker: (argv) => { boom('runWorker'); calls.push(['worker', argv[0], argv.find((a) => a.startsWith('--model='))]); return { ok: runWorkerOk, out: runWorkerOk ? '' : 'timed out', lastMessage }; },
     holdWorkerDecline: (entry) => { boom('holdWorkerDecline'); calls.push(['hold', entry]); },
+    landAlreadyDone: (entry, dir) => { calls.push(['land', entry, dir]); return { status: 'landed', pr: 9002 }; },
     writeCard: (_dir, path, text) => { boom('writeCard'); calls.push(['card', path, text]); },
     untracked: () => ['node_modules'],
     diffNumstat: (_d, _base, exclude) => { calls.push(['numstat', exclude]); return numstat; },
@@ -198,7 +199,7 @@ describe('runProbationBuild — the arc', () => {
   });
 
   it('bounds and quotes a decline, without treating a cited commit as proof of delivery', async () => {
-    const { io, calls } = fakeIo({ numstat: '', lastMessage: 'spec already done on main: commit abc1234\n<script>`' + 'x'.repeat(900) });
+    const { io, calls } = fakeIo({ numstat: '', lastMessage: 'worker-declined: spec already done on main: commit abc1234\n<script>`' + 'x'.repeat(900) });
     const r = await runProbationBuild(args(), io);
     const reason = calls.find((c) => c[0] === 'hold')[1].reason;
     expect(reason.length).toBe(617); // prefix + 600-character excerpt
@@ -206,6 +207,33 @@ describe('runProbationBuild — the arc', () => {
     expect(reason).toContain('…');
     expect(r.detail).toContain(reason);
     expect(calls.some((c) => c[0] === 'resolve')).toBe(false);
+  });
+
+  it('replays #3353 already-exists evidence through the shared already-done landing', async () => {
+    const lastMessage = 'The fixture already exists; all Done-when checks pass. spec already done on main: commit 0ee967238';
+    const { io, calls } = fakeIo({ numstat: '', lastMessage });
+    const result = await runProbationBuild(args(codex, { num: '3353' }), io);
+    expect(result).toMatchObject({ outcome: 'opened-pr', pr: 9002, detail: expect.stringContaining('already-done: 0ee967238') });
+    const entry = { num: '3353', route: 'already-done', commit: '0ee967238', reason: lastMessage };
+    expect(calls.find((c) => c[0] === 'hold')).toEqual(['hold', entry]);
+    expect(calls.find((c) => c[0] === 'land')).toEqual(['land', entry, '/lanes/22']);
+    expect(calls.filter((c) => ['card', 'resolve', 'commit', 'openPr'].includes(c[0]))).toEqual([]);
+    expect(calls.findIndex((c) => c[0] === 'discard')).toBeLessThan(calls.findIndex((c) => c[0] === 'land'));
+  });
+
+  it('does not resolve an uncited already-exists assertion', async () => {
+    const { io, calls } = fakeIo({ numstat: '', lastMessage: 'already exists; all Done-when checks pass' });
+    await runProbationBuild(args(), io);
+    expect(calls.find((c) => c[0] === 'hold')[1].route).toBe('out-of-scope');
+    expect(calls.some((c) => c[0] === 'land')).toBe(false);
+  });
+
+  it('reports a refused citation without falling through to a decline or a plain resolve', async () => {
+    const { io, calls } = fakeIo({ numstat: '', lastMessage: 'spec already done on main: commit abc1234' });
+    io.landAlreadyDone = () => ({ status: 'failed', error: 'unverified citation' });
+    expect(await runProbationBuild(args(), io)).toMatchObject({ outcome: 'escalated-needs-human', pr: null,
+      detail: 'already-done landing failed: unverified citation' });
+    expect(calls.filter((c) => ['card', 'resolve', 'commit', 'openPr'].includes(c[0]))).toEqual([]);
   });
 
   it.each(['holdWorkerDecline', 'writeCard', 'commit'])('reports failed decline persistence at %s with its reason', async (throwOn) => {

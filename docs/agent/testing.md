@@ -424,6 +424,12 @@ The prepare trace records `dispatch-paused` before its other gates so an unscope
 
 ### Standalone worker declines
 
+No-change already-done reports must reach `planHoldRouting` before the decline prefix is added.
+The shared classifier requires `spec already done on main: commit <sha>`; the worker verifies
+Done-when against main and supplies that citation. Exercise the existing `landRoute` with a temporary
+Git origin: assert `graduatedTo`, unchanged scope, unrelated-citation refusal, and launch-checkout
+isolation. A bare already-exists assertion is insufficient and retains the decline path.
+
 Standalone no-change builds (#4552): replay with an empty implementation diff and a launcher report (Codex `lastMessage` or Gemini `events.finalResponse`). Assert the Findings note and scope removal on disk, the `worker-declined` dispatch hold, and the router lease that prevents duplicate landing. The card stays open; the existing verified PR path parks it `review:pending`. Missing final text must exercise the same path with a generic finding. Codex `--json` can emit JSONL before its pretty-printed report: replay that mixed stdout, prefer the report, and fall back to completed agent-message events or a fresh lane log before cleanup. Gemini uses result responses or per-step agent-response deltas. Never reuse an untouched prior-run log. Blocker references in decline Findings are advisory (`possible blocker: #NNN`); prepare verifies them before setting `blockedBy`.
 
 ## Claude subagent usage

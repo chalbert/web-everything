@@ -13,8 +13,9 @@
  *     1. claim the item in the lane (`we:scripts/backlog.mjs claim`);
  *     2. run the worker SYNCHRONOUSLY through its launcher (`gemini-direct-task.mjs` / `codex-direct-task.mjs`,
  *        both foreground-blocking by design) against the item's own spec text;
- *     No-change runs route worker-declined through the hold router: attach a Findings note, remove scope
- *     for preparation, and land only the card through the same verified, parked PR path (never resolve).
+ *     No-change runs first reuse the hold router's already-done classifier and citation-checked landing.
+ *     Otherwise route worker-declined: attach Findings, remove scope for preparation, and land only
+ *     the card through the same verified, parked PR path (never resolve a decline).
  *     3. bound the build diff to the selected taskType's envelope (`we:scripts/lib/provider-routing.mjs#PROVEN_TASK_ENVELOPES`);
  *     4. resolve the item (`we:scripts/operations/run.mjs resolve`) and commit everything — the worker's files
  *        plus the item's own now-resolved backlog card — in ONE commit, trailers naming the worker;
@@ -86,8 +87,9 @@ import { defaultPoolRoot, workspaceFor } from '../lib/lane-pool-paths.mjs';
 import { daemonCloneRoots, isDaemonCloneRealpath } from '../lib/daemon-clone-registry.mjs';
 import { placeBuildDispatchHold } from '../conveyor/build-dispatch-claim.mjs';
 import { planHoldRouting, reserveHoldRoute } from '../conveyor/build-dispatch-hold-router.mjs';
-import { clearScopeAndAppendFinding, sanitizeHoldReason } from './build-dispatch-hold-route-land.mjs';
+import { clearScopeAndAppendFinding, sanitizeHoldReason, landRoute } from './build-dispatch-hold-route-land.mjs';
 import { extractSubmitResult } from './open-pr.mjs';
+import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 /** Read-only launch checkout and pool reference — by script location, never cwd. */
@@ -330,7 +332,9 @@ export async function runProbationBuild(args, io) {
 
     const task = preparing ? io.readPrepareBrief(lanePath)
       .replaceAll('{{ITEM_NUM}}', String(num)).replaceAll('{{ITEM_SPEC_PATH}}', item.path)
-      .split('<!-- /probation-worker -->')[0] : buildDocFixTask({ num, title: item.title, spec: item.spec, scope: item.scope, taskType });
+      .split('<!-- /probation-worker -->')[0] : buildDocFixTask({ num, title: item.title, spec: item.spec, scope: item.scope, taskType }) +
+      '\nIf the work already exists, check every Done-when against main and find the delivering commit in git log. ' +
+      'When all checks pass, report "spec already done on main: commit <sha>" with the actual delivering SHA.\n';
     const taskFile = io.writeTaskFile(lanePath, 'probation-build-task.md', task);
     const preHookSurface = hookReset.snapshot;
     log(`running ${worker.launcher} --model=${worker.model}`);
@@ -372,6 +376,20 @@ export async function runProbationBuild(args, io) {
       return abandon('gate-red', 'prepare requires a card-only diff', { diff: diffRow });
     }
     if (!summary.files) {
+      // Classify the original report: prefixing it with worker-declined deliberately suppresses
+      // already-done in the shared router. Its landing pass owns citation validation and graduatedTo.
+      const [done] = planHoldRouting([{ num, reason: run.lastMessage }]);
+      if (done?.route === 'already-done') {
+        if (io.headSha(lanePath) !== baseSha) {
+          return abandon('escalated-needs-human', 'refused: worker moved HEAD before already-done routing', { diff: diffRow });
+        }
+        io.holdWorkerDecline(done);
+        io.discardChanges(lanePath, baseSha, preexisting);
+        const landed = io.landAlreadyDone(done, lanePath);
+        return finish(landed.status === 'landed' ? 'opened-pr' : 'escalated-needs-human', worker.executor,
+          landed.status === 'landed' ? `already-done: ${done.commit}; opened PR #${landed.pr}`
+            : `already-done landing failed: ${landed.error}`, { diff: diffRow, pr: landed.pr });
+      }
       declinedReason = sanitizeHoldReason(run.lastMessage, { max: 600 })
         || 'The worker changed nothing and provided no final message.';
       const [route] = planHoldRouting([{ num, reason: `worker-declined: ${declinedReason}` }]);
@@ -601,6 +619,13 @@ export function realIo({ session, env = process.env, repoRoot = WE_ROOT } = {}) 
       if (!held.ok) throw new Error('could not place worker-declined dispatch hold');
     },
     writeCard: (dir, path, text) => writeFileSync(join(dir, path), text),
+    landAlreadyDone: (entry, dir) => landRoute(entry, {
+      // Reuse the runner's acquired lane; keep every mutation in it and hooks disabled.
+      acquireFn: () => ({ path: dir }), releaseFn: () => {},
+      runFn: (bin, argv, cwd, { timeoutMs = resolveChildTimeoutMs() } = {}) => sh(bin, argv, {
+        cwd, env: laneEnv, timeout: timeoutMs, killSignal: 'SIGKILL',
+      }),
+    }),
     readCommittedCard: (dir, path) => sh('git', ['-C', dir, 'show', `HEAD:${path}`], { cwd: dir, env: laneEnv }),
     readPrepareBrief: (dir) => readFileSync(join(dir, 'skills-src/conveyor/prepare-item-agent-brief.md'), 'utf8'),
     stampPrepare: (n, dir) => node('scripts/backlog.mjs', ['prepare-stamp', String(n)], { cwd: dir, env: laneEnv }),
