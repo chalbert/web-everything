@@ -1,4 +1,5 @@
 ---
+bornAs: xak56ki
 kind: story
 size: 2
 tier: pinned
