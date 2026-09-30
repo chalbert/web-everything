@@ -28,16 +28,18 @@ every script-decidable step around it is a script you shell, per
 There is no separate skill for this yet (unlike decision-prepare, which delegates to
 `we:skills-src/prepare-decision-item/SKILL.md`) — the method is stated here, and if it changes, edit this brief.
 
-1. **Premise check against current `main`.** Is `{{ITEM_NUM}}` already done, superseded, or wrong? Grep the code
-   it names, check `git log` for the item number or its `bornAs` hash, read every cited `file:line`. If it is
-   already done, do **not** author a prepare pass — resolve it instead with `graduatedTo` set to the commit that
-   did it, land that via the normal PR path (skip the rest of this brief), and report. If the premise is
-   superseded or wrong, write that finding into the item body, open **no** PR, and escalate (*Escalations* #1) —
-   never author a prepare pass over a false premise.
-2. **Scope check.** Read the code `{{ITEM_NUM}}` touches. If its `scope:` frontmatter is missing or does not
-   match the real touch-set, correct it to the files you can see the work will actually touch. If the real fix
-   needs files far outside a plausible scope, say so in the item body and escalate rather than force a scope
-   that doesn't fit.
+1. **Premise check against current `main`.** Read the code and every cited `file:line`, and check
+   `git log` for `{{ITEM_NUM}}` or its `bornAs` hash. If the goal is already delivered, report
+   `already-done` with the delivering commit, release the hold, and stop without editing, stamping,
+   resolving, or opening a PR. A moved implementation or stale citation alone does not mean the goal
+   is false or delivered.
+2. **Correct factual drift** in the card itself: moved code, stale `file:line` citations, missing test
+   paths, and narrower or wider `scope:` supported by the current code. Preserve the original goal
+   and all other frontmatter except the preparation stamps. Record the old premise/scope, corrected
+   premise/scope, and source evidence in `## Progress`, then continue the prepare pass. Scope breadth
+   alone is not a stop reason. If a genuine unresolved judgment call / design fork remains after
+   research (including changing the goal), report `could-not-prepare` with the specific choice;
+   do not invent a goal or choose policy. See *Escalations* #1.
 3. **Author the prepare into the item body**, each a short, concrete section — never a placeholder or a restated
    title:
    - `## Design` — the mechanism, in prose, grounded in real `file:line` references to the code the item touches.
@@ -226,9 +228,9 @@ gate-red | could-not-prepare)`.
 
 ## Escalations — when you do NOT reach ready-to-merge
 
-1. **Cannot prepare honestly** — the premise is wrong/superseded (see *The method*, step 1) or the item is too
-   vague to author a real Design/MVP/Test-plan/Proof-plan for, OR a call in it turns on human judgment no
-   research resolves. Do **not** stamp a false `preparedDate`. Leave the item un-stamped, open **no** PR, drop
+1. **Cannot prepare honestly** — a genuine unresolved judgment call / design fork remains after
+   research, including an ambiguity that requires choosing a different goal. Factual drift alone is
+   corrected in place (*The method*, step 2), not escalated. Do **not** stamp a false `preparedDate`. Leave the item un-stamped, open **no** PR, drop
    the hold (`prepare-release`), and return `#{{ITEM_NUM}} prepare-item → could-not-prepare — <reason>`.
 2. **Gate red** — `check:standards` fails from your authoring and you cannot get it green. Report the failing
    check and stop; do not weaken a test to go green.
@@ -240,11 +242,9 @@ gate-red | could-not-prepare)`.
 
 ## Guardrails (the non-negotiables)
 
-- **Prepare, never build, never resolve — except the one premise-check exit.** You bring the item to "ready to
-  build" and stamp `preparedDate`; the build lifecycle picks it up later. **Never `resolve`** for that normal
-  path — a prepared item is still open. The ONE exception is *The method*, step 1: if the premise check finds
-  the item is ALREADY DONE, you resolve it with `graduatedTo` instead of authoring a prepare pass at all — that
-  is a different, narrower exit (skip the rest of this brief entirely), not a loophole in the rule above.
+- **Prepare, never build, never resolve.** Bring the item to "ready to build" and stamp `preparedDate`;
+  the build lifecycle picks it up later. An already-delivered goal takes the `already-done` exit in
+  *The method*, step 1, with its delivering commit; it is not another prepare pass.
 - **Never edit the primary checkout** — all work is in the acquired lane clone; `prepare-hold` / `prepare-stamp` /
   `prepare-release` all splice in the lane, never onto primary.
 - **Never merge** — you stop at `ready-to-merge`; the resident drain daemon is the sole writer to `main`.
