@@ -637,7 +637,9 @@ export function retirePrepareGuards(prepareGuards, { unshaped = [], decisions = 
  * @param {{ unshaped?:object[], decisions?:object[], investigations?:object[], needsPrepare?:object[], prs?:object[], livePrepareGuards?:object[], availableLanes?:Array<*>, maxConcurrentItemPrepares?:number, tick:number, now?:number|null, trace?:boolean, dispatchPaused?:boolean, pausedKinds?:string[]|null }} ctx
  * @returns {{ scopeSpawns:Array<{num:*, lane:*}>, decisionSpawns:Array<{num:*, lane:*}>, investigationSpawns:Array<{num:*, lane:*}>, itemPrepareSpawns:Array<{num:*, lane:*}>, newGuards:Array<object>, consumedLanes:Array<*>, notes:Array<{kind:string, num:*, text:string}> }}
  */
-export function planPrepareSpawns({ unshaped = [], decisions = [], investigations = [], needsPrepare = [], prs = [], livePrepareGuards = [], availableLanes = [], maxConcurrentItemPrepares = 2, itemPrepareAttempts = {}, itemPrepareRetryCap = DEFAULT_PREPARE_ITEM_RETRY_CAP, tick = 0, now = null, trace = false, dispatchPaused = false, pausedKinds = null } = {}) {
+export function planPrepareSpawns({ unshaped = [], decisions = [], investigations = [], needsPrepare = [], prepareHeldNums = [], prs = [], livePrepareGuards = [], availableLanes = [], maxConcurrentItemPrepares = 2, itemPrepareAttempts = {}, itemPrepareRetryCap = DEFAULT_PREPARE_ITEM_RETRY_CAP, tick = 0, now = null, trace = false, dispatchPaused = false, pausedKinds = null } = {}) {
+  const prepareHeld = new Set(prepareHeldNums.map(normNum));
+  livePrepareGuards = livePrepareGuards.filter((g) => g.kind !== 'prepare-item' || !prepareHeld.has(normNum(g.num)));
   const guardNums = new Set((Array.isArray(livePrepareGuards) ? livePrepareGuards : []).map((g) => normNum(g.num)));
   const lanes = [...(Array.isArray(availableLanes) ? availableLanes : [])];
   const scopeSpawns = [];
@@ -659,6 +661,7 @@ export function planPrepareSpawns({ unshaped = [], decisions = [], investigation
     };
     const paused = dispatchPaused === true || (Array.isArray(pausedKinds) && pausedKinds.includes(kind));
     if (blocked('dispatch-paused', paused, paused)) return;
+    if (blocked('prepare-held', prepareHeld.has(key), key)) return;
     if (blocked('prepare-guard', guardNums.has(key), { num: key, guards: [...guardNums] })) return; // live prepare-guard entry → already in flight
     const existingPr = openPrForNum(prs, num);
     if (blocked('existing-PR', !!existingPr, existingPr ?? null)) return; // open PR for an unscoped/un-prepared item → its in-flight prepare
@@ -685,7 +688,7 @@ export function planPrepareSpawns({ unshaped = [], decisions = [], investigation
   // Without this, the first two candidates in `plan.held` order held the cap forever when un-preparable.
   const attemptsOf = (num) => Number(itemPrepareAttempts?.[normNum(num)]) || 0;
   const itemCandidates = (Array.isArray(needsPrepare) ? needsPrepare : [])
-    .filter((p) => p?.num != null)
+    .filter((p) => p?.num != null && !prepareHeld.has(normNum(p.num)))
     .map((p, i) => ({ p, i, n: attemptsOf(p.num) }))
     .sort((a, b) => a.n - b.n || a.i - b.i)
     .map(({ p }) => p);
@@ -1271,7 +1274,9 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
   const build = retireBuildGuards(bookkeeping.buildGuards, {
     lanes, queue, tick, now, ttlTicks: cfg.buildTtlTicks, returnedBuildNums: signals.returnedBuildNums,
   });
-  const prepare = retirePrepareGuards(bookkeeping.prepareGuards, {
+  const prepareHeld = new Set((bookkeeping.prepareHeldNums ?? []).map(normNum));
+  const prepare = retirePrepareGuards((bookkeeping.prepareGuards ?? []).filter(
+    (g) => g.kind !== 'prepare-item' || !prepareHeld.has(normNum(g.num))), {
     unshaped: scopeOrSizeNeeded, decisions, investigations: heldGuardPending, needsPrepare: heldGuardPending, prs, tick, now, ttlTicks: cfg.prepareTtlTicks,
     lanes, itemPrepareTtlTicks: cfg.prepareItemTtlTicks,
   });
@@ -1459,6 +1464,7 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
     decisions,
     investigations,
     needsPrepare: needsPrepareHeld,
+    prepareHeldNums: [...prepareHeld],
     prs,
     livePrepareGuards: prepare.live,
     availableLanes,

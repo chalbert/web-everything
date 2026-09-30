@@ -558,3 +558,11 @@ main and checks this attempt's prepare PR; a failed read keeps the claim. Tests 
 rows and prior guards so a retired claim actually frees capacity. A completed unstamped result is held as
 `prepare-unstamped`, including across daemon restarts and cooldown expiry; the hold clears when main carries
 a valid `preparedDate`. An open PR's committed stamp is checked separately while it awaits landing.
+
+Prepare result recovery: pass durable prepare holds into tick-core before candidate selection (including
+its dispatch-lane re-read); filtering after its two-slot cap starves every later card. Held item guards
+are excluded from capacity. Replay two held queue leaders plus two eligible successors. The daemon
+uses `prepare-stamp-pending` for sectioned results and a detached lane worker to run `prepare-stamp`,
+verify the committed stamp and submit via `open-pr --mode=label-on-green`; only missing sections retain
+`prepare-unstamped`. Test fresh-main and existing-PR recovery, lane-local command paths, stale section
+observations, resolved cards, failed stamps, freeze/dry-run, and a fresh Node `--bogus-flag` boot.

@@ -1,3 +1,4 @@
+import { planPrepareSpawns } from '../../../scripts/conveyor/tick-core.mjs';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -36,7 +37,7 @@ import {
   // #4517 — infra-retry call bound
   INFRA_RETRY_TIMEOUT_MS, DEFAULT_INTERVAL_MS,
   // #4465 build-dispatch-hold-router
-  cliRouteHeldItems, cliSpawnHoldLand,
+  cliRouteHeldItems, cliSpawnHoldLand, cliStampPrepare,
   // xovjhwh — the shared attribution derivation `runBuildDispatchTick` and `dryRun` both call
   deriveDispatchedByBuilder,
 } from '../build-dispatch-daemon.mjs';
@@ -1212,7 +1213,7 @@ describe('build-dispatch-daemon.mjs boots as a fresh `node` process — the clas
     let stderr = '';
     let status = 0;
     try {
-      execFileSync('node', [ENTRY], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+      execFileSync('node', [ENTRY, '--bogus-flag'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
     } catch (e) {
       stderr = String(e.stderr ?? '');
       status = e.status;
@@ -1220,6 +1221,20 @@ describe('build-dispatch-daemon.mjs boots as a fresh `node` process — the clas
     expect(stderr).not.toMatch(/ReferenceError|before initialization/);
     expect(stderr).toMatch(/^usage: build-dispatch-daemon\.mjs/);
     expect(status).toBe(2);
+  });
+});
+
+describe('prepare stamp detached worker wiring', () => {
+  it('accepts the spawner ChildProcess pid and deduplicates subsequent ticks', async () => {
+    const reserve = vi.fn().mockReturnValueOnce({ ok: true }).mockReturnValue({ ok: false });
+    const release = vi.fn();
+    delete fakeDetachedResult.spawned;
+    try {
+      expect(await cliStampPrepare({ num: '4544' }, { reserve, release })).toEqual({ spawned: true, pid: 4242 });
+      expect(spawnCalls.at(-1).argv).toEqual([expect.stringContaining('/operations/prepare-stamp-land.mjs'), '--num=4544']);
+      expect(await cliStampPrepare({ num: '4544' }, { reserve, release })).toEqual({ pending: true });
+      expect(release).not.toHaveBeenCalled();
+    } finally { fakeDetachedResult.spawned = true; }
   });
 });
 
@@ -1253,6 +1268,52 @@ describe('automatic item preparation', () => {
     effects.readPrepareStatus = () => ({ preparedDate: null });
     effects.placePrepareHold = vi.fn();
   }
+  it('excludes two persistent holds before core planning, freeing both slots', async () => {
+    const effects = fixture();
+    effects.listHolds = () => ['4544', '4560'].map((num) => ({ num, reason: 'prepare-unstamped' }));
+    effects.readPrepareStatus = () => ({ preparedDate: null, hasSections: false });
+    effects.placePrepareHold = vi.fn();
+    effects.planTick = (bk) => {
+      const prep = planPrepareSpawns({ needsPrepare: ['4544', '4560', '4501', '4502'].map((num) => ({ num })),
+        prepareHeldNums: bk.prepareHeldNums, availableLanes: [1, 2] });
+      return { decisions: { spawnPrepareItems: prep.itemPrepareSpawns }, nextState: {} };
+    };
+    const tick = await runBuildDispatchTick({ live: true, effects });
+    expect(tick.prepare.launched.map((s) => s.num)).toEqual(['4501', '4502']);
+    expect(tick.prepare.inFlight).toEqual([]);
+  });
+  it('mechanically stamps sectioned results instead of holding them unstamped', async () => {
+    const effects = fixture();
+    claimed(effects);
+    effects.readPrepareStatus = () => ({ preparedDate: null, hasSections: true });
+    effects.stampPrepare = vi.fn(() => ({ spawned: true }));
+    const tick = await runBuildDispatchTick({ live: true, effects });
+    expect(effects.stampPrepare).toHaveBeenCalledWith(expect.objectContaining({ num: '4501' }));
+    expect(effects.placePrepareHold).toHaveBeenCalledWith({ num: '4501', reason: 'prepare-stamp-pending' });
+    expect(tick.prepare.failures).toEqual([]);
+    expect(tick.prepare.inFlight).not.toContain('4501');
+  });
+  it('holds incomplete results without attempting a mechanical stamp', async () => {
+    const effects = fixture();
+    claimed(effects);
+    effects.readPrepareStatus = () => ({ preparedDate: null, hasSections: false });
+    effects.stampPrepare = vi.fn();
+    const tick = await runBuildDispatchTick({ live: true, effects });
+    expect(effects.stampPrepare).not.toHaveBeenCalled();
+    expect(tick.prepare.held).toEqual([{ num: '4501', reason: 'prepare-unstamped' }]);
+  });
+  it('does not spawn stamp recovery during dry run or a freeze', async () => {
+    for (const live of [false, true]) {
+      const effects = fixture();
+      effects.listHolds = () => [{ num: '4544', reason: 'prepare-unstamped' }];
+      effects.readPrepareStatus = () => ({ hasSections: true, preparedDate: null });
+      effects.placePrepareHold = vi.fn();
+      effects.killSwitch = () => ({ engaged: true });
+      effects.stampPrepare = vi.fn();
+      await runBuildDispatchTick({ live, effects });
+      expect(effects.stampPrepare).not.toHaveBeenCalled();
+    }
+  });
   it('retires a dead owner past TTL and logs it; clears prior guards', async () => {
     const effects = fixture();
     claimed(effects);
