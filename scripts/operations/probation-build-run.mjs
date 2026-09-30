@@ -68,7 +68,8 @@
 
 import { randomBytes } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { summarizeAgyEvents } from '../gemini-direct-task.mjs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import matter from 'gray-matter';
@@ -489,6 +490,29 @@ export function openPrArgv({ num, attemptTag, slug, bodyFile, taskType = 'doc-fi
   ];
 }
 
+/** Accept a report alone or the launcher's JSONL followed by a pretty-printed report. */
+export function captureWorkerMessage(output, readLog = () => '') {
+  const lines = String(output ?? '').split('\n');
+  let report;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (!lines[i].startsWith('{')) continue;
+    try { report = JSON.parse(lines.slice(i).join('\n')); break; } catch { /* stream row */ }
+  }
+  const text = (value) => typeof value === 'string' && value.trim() ? value : '';
+  const reported = text(report?.lastMessage) || text(report?.events?.finalResponse);
+  if (reported) return reported;
+  const fromStream = (stream) => {
+    const events = String(stream).split('\n').flatMap((line) => {
+      try { return [JSON.parse(line)]; } catch { return []; }
+    });
+    const codex = events.filter((e) => e?.type === 'item.completed' && e.item?.type === 'agent_message'
+      && text(e.item.text)).at(-1)?.item.text;
+    const gemini = summarizeAgyEvents(events);
+    return text(codex) || text(gemini.finalResponse) || text(gemini.agentMessages.at(-1));
+  };
+  return fromStream(output) || fromStream(readLog(report?.logFile));
+}
+
 /** The real `io` for {@link runProbationBuild}. Every call is bounded and never throws past its own contract.
  *  x55dojc — `laneEnv` disables git hooks (see `../lib/git-hook-surface.mjs`) for every subprocess the
  *  LAUNCHER runs in the lane, so a planted hook can never fire with the launcher's own credentials. The worker
@@ -557,15 +581,24 @@ export function realIo({ session, env = process.env, repoRoot = WE_ROOT } = {}) 
       writeFileSync(p, text);
       return p;
     },
-    runWorker: (argv, dir) => {
+    runWorker: (argv, dir = process.cwd()) => {
       // SYNCHRONOUS on purpose: both launchers block until the model's turn ends (see their own headers).
       // `workerEnv`, never `laneEnv`: the worker's own git use keeps the repo's guard hooks (see `realIo`).
+      const launcher = argv.find((arg) => /(?:codex|gemini)-direct-task\.mjs$/.test(arg));
+      const provider = launcher?.includes('gemini-direct-task') ? 'gemini' : 'codex';
+      const logArg = argv.find((arg) => arg.startsWith('--log='));
+      const logPath = logArg ? resolve(dir, logArg.slice(6)) : join(dir, '.git', `${provider}-direct-task.jsonl`);
+      const signature = (path) => {
+        try { const s = statSync(path); return `${s.ino}:${s.size}:${s.mtimeMs}:${s.ctimeMs}`; } catch { return null; }
+      };
+      const before = signature(logPath);
       const r = trySh(process.execPath, argv, { cwd: dir, env: workerEnv, timeout: 70 * 60 * 1000 });
-      let lastMessage = '';
-      try {
-        const report = JSON.parse(r.out);
-        lastMessage = report.lastMessage ?? report.events?.finalResponse ?? '';
-      } catch { /* Missing/malformed reports use the generic no-change finding. */ }
+      // Capture now, before any lane cleanup. Never attribute an untouched previous run's log.
+      const lastMessage = captureWorkerMessage(r.out, (reportedPath) => {
+        const path = reportedPath ? resolve(dir, reportedPath) : logPath;
+        if (!reportedPath && signature(path) === before) return '';
+        try { return readFileSync(path, 'utf8'); } catch { return ''; }
+      });
       return { ok: r.ok, out: r.out.slice(-4000), lastMessage: typeof lastMessage === 'string' ? lastMessage : '' };
     },
     runChecker: (argv, dir) => {
