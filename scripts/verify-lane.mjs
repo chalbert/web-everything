@@ -264,7 +264,7 @@ else {
 //    compare-and-set below still refuses to stamp a result over a record for another sha (finding 1, the
 //    false-green guard).
 // xpnhz4o — `run` mode never touches the marker: it is the plain "run my selected gate now" call (the fix /
-// ci-heal briefs' `{{GATE_COMMAND}}`), whose caller never lands through pr-land's finish-guard, so recording (or
+// ci-heal `gateFor` form and the canary's gate; a dispatched fix/ci-heal agent uses `request`/`check` instead, #4369), whose caller never lands through pr-land's finish-guard, so recording (or
 // archiving) a marker would only couple it to whatever a previous occupant of this clone left behind.
 const preStart = MODE === 'run' ? null : readMarker();
 if (preStart && !preStart.corrupt && (preStart.status === 'green' || preStart.status === 'red') && preStart.sha && preStart.sha !== headSha) {

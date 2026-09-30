@@ -2775,7 +2775,9 @@ describe('#3960: the fix/ci-heal briefs fill repo-aware, and reproduce WE\'s pre
     // The exact literal `fix-agent-brief.md` hardcoded before #3960 (`"WE #{{ITEM_NUM}}: address …"`).
     expect(prompt).toContain('printf \'%s\\n\' "WE #2608: address review:changes on PR #701 — <one-line what you fixed>"');
     // xpnhz4o — the gate is the diff-selected verify-lane run, never the bare full suite.
-    expect(prompt).toContain(`node ${tokens.WE_ROOT}/scripts/verify-lane.mjs run --repo=.          # this repo's own gate`);
+    expect(prompt).toContain(`node ${tokens.WE_ROOT}/scripts/verify-lane.mjs request --repo=.`); // #4369 — request/check, never the guard-denied `run`
+    expect(prompt).toContain(`node ${tokens.WE_ROOT}/scripts/verify-lane.mjs check --wait=60000 --json --repo=.`);
+    expect(prompt).not.toContain(`verify-lane.mjs run --repo=.          #`);
     expect(prompt).not.toContain('npm run test:unit && npm run check:standards');
     // Landing-freeze fix (lane-leftover-reclaim) — `--repo=` is now `{{LANE_REPO}}`, an absolute path equal to
     // `{{WE_ROOT}}` for `we` (was the literal `.`, broken from a dispatched session's scratch cwd — #4174).
@@ -2787,7 +2789,9 @@ describe('#3960: the fix/ci-heal briefs fill repo-aware, and reproduce WE\'s pre
     const tokens = briefTokensForRepo('we', { itemNum: '2638', checkoutExists: () => true, readPackageJson: () => WE_PACKAGE_JSON });
     const { prompt } = fillBrief(CI_HEAL_BRIEF, { ...BASE_CI_HEAL_VALUES, ...tokens }, BRIEF_REQUIRED_BY_KIND['ci-heal'], undefined, REPO_AWARE_VALUE_PATTERNS);
     expect(prompt).toContain('printf \'%s\\n\' "WE #2638: CI-heal PR #743 — rebase onto main + repair the failing check"');
-    expect(prompt).toContain(`node ${tokens.WE_ROOT}/scripts/verify-lane.mjs run --repo=.          # this repo's own gate`);
+    expect(prompt).toContain(`node ${tokens.WE_ROOT}/scripts/verify-lane.mjs request --repo=.`); // #4369 — request/check, never the guard-denied `run`
+    expect(prompt).toContain(`node ${tokens.WE_ROOT}/scripts/verify-lane.mjs check --wait=60000 --json --repo=.`);
+    expect(prompt).not.toContain(`verify-lane.mjs run --repo=.          #`);
   });
 
   it('for plateau-app, every tool call is qualified with the WE checkout root, never the plateau checkout', () => {
@@ -2807,7 +2811,8 @@ describe('#3960: the fix/ci-heal briefs fill repo-aware, and reproduce WE\'s pre
     expect(prompt).toContain(`node "${tokens.WE_ROOT}/scripts/operations/completion-cli.mjs" report --repo=chalbert/plateau-app`);
     expect(prompt).not.toContain('node "/home/test/workspace/plateau-app/scripts');
     // The gate runs against the plateau lane (`--repo=.`), with WE's own verify-lane choosing plateau's scripts.
-    expect(prompt).toContain(`node ${tokens.WE_ROOT}/scripts/verify-lane.mjs run --repo=.          # this repo's own gate (chalbert/plateau-app's package.json`);
+    expect(prompt).toContain(`node ${tokens.WE_ROOT}/scripts/verify-lane.mjs request --repo=.`);
+    expect(prompt).toContain(`node ${tokens.WE_ROOT}/scripts/verify-lane.mjs check --wait=60000 --json --repo=.`);
     expect(prompt).toContain('printf \'%s\\n\' "PLATEAU #2608: address review:changes on PR #701 — <one-line what you fixed>"');
   });
 });
