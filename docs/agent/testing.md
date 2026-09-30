@@ -419,6 +419,10 @@ The prepare trace records `dispatch-paused` before its other gates so an unscope
 `scope` hold does not mask the pause. Whole-queue shaping errors appear on the affected entry as
 `error` with `eligible: false`; single-item invariant failures retain the CLI error contract.
 
+### Standalone worker declines
+
+Standalone no-change builds (#4552): replay with an empty implementation diff and a launcher report (Codex `lastMessage` or Gemini `events.finalResponse`). Assert the Findings note and scope removal on disk, the `worker-declined` dispatch hold, and the router lease that prevents duplicate landing. The card stays open; the existing verified PR path parks it `review:pending`. Missing final text must exercise the same path with a generic finding.
+
 ## Claude subagent usage
 
 `node scripts/operations/agent-usage-report.mjs --session=<id>` extracts usage automatically from

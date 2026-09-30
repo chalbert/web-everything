@@ -157,11 +157,13 @@ export function clearScopeAndAppendFinding(cardText, { num, reason, today = loca
   // No frontmatter → no `scope:` to clear, and the finding below would falsely claim it was: refuse (landOne
   // turns the throw into a `failed` result, so nothing lands).
   if (!fm) throw new Error(`clearScopeAndAppendFinding: card #${num} has no frontmatter — cannot clear its scope`);
-  const cleared = `---\n${fm[1].replace(SCOPE_KEY_RE, 'scope: []')}\n---${text.slice(fm[0].length)}`;
-  const quoted = sanitizeHoldReason(reason) || '(no reason recorded)';
+  const standalone = /^worker-declined(?:\s*:|$)/.test(String(reason ?? ''));
+  // Standalone declines remove the key: check:standards forbids an empty scope array.
+  const cleared = `---\n${fm[1].replace(SCOPE_KEY_RE, standalone ? '' : 'scope: []').trimEnd()}\n---${text.slice(fm[0].length)}`;
+  const quoted = sanitizeHoldReason(reason, { max: standalone ? 620 : MAX_REASON_CHARS }) || '(no reason recorded)';
   const section = [
     '',
-    `## Held finding — auto-routed by #4465 (${today})`,
+    standalone ? `## Findings (standalone worker, ${today})` : `## Held finding — auto-routed by #4465 (${today})`,
     '',
     `The build-dispatch daemon held #${num} with:`,
     '',

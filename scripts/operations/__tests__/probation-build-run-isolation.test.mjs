@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { listBuildDispatchHolds } from '../../conveyor/build-dispatch-claim.mjs';
+import { reserveHoldRoute } from '../../conveyor/build-dispatch-hold-router.mjs';
 import { WE_ROOT } from '../probation-build-run.mjs';
 
 const moduleUrl = pathToFileURL(join(WE_ROOT, 'scripts/operations/probation-build-run.mjs')).href;
@@ -16,7 +18,7 @@ function snapshot(dir) {
       : [[e.name, readFileSync(path).toString('base64')]];
   }));
 }
-function fixture() {
+function fixture({ report } = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'probation-isolation-')));
   const repo = join(root, 'wev-control');
   const lane = join(root, '.lanes/web-everything/lane-1');
@@ -49,7 +51,7 @@ function fixture() {
     put(join(dir, 'docs/probe.md'), 'Before\n');
     put(join(dir, 'scripts/backlog.mjs'), mutation.replace('CARD', "'../backlog/4291-probe.md'").replace('ROOT', "'../'"));
     put(join(dir, 'scripts/operations/run.mjs'), mutation.replace('CARD', "'../../backlog/4291-probe.md'").replace('ROOT', "'../../'"));
-    put(join(dir, 'scripts/codex-direct-task.mjs'), `import { writeFileSync } from 'node:fs'; writeFileSync('docs/probe.md', 'After\\n');`);
+    put(join(dir, 'scripts/codex-direct-task.mjs'), report ? `console.log(${JSON.stringify(JSON.stringify(report))});` : `import { writeFileSync } from 'node:fs'; writeFileSync('docs/probe.md', 'After\\n');`);
     put(join(dir, 'scripts/verify-lane.mjs'), 'console.log("gate green");');
     execFileSync('git', ['init', '-q', dir]);
     execFileSync('git', ['-C', dir, 'add', '.']);
@@ -64,7 +66,7 @@ function launch(f, extraEnv = {}, setup = '') {
     ${setup}
     console.log(JSON.stringify(await runProbationBuild(parseArgs(['--num=4291', '--worker=codex', '--session=probe']), io)));`;
   const env = { ...process.env, WE_DAEMON_OVERLAY_DIR: join(f.root, 'registry'),
-    GIT_AUTHOR_NAME: 'Fixture', GIT_AUTHOR_EMAIL: 'fixture@example.test', GIT_COMMITTER_NAME: 'Fixture', GIT_COMMITTER_EMAIL: 'fixture@example.test', ...extraEnv };
+    WE_COORDINATION_ROOT: join(f.root, 'coordination'), GIT_AUTHOR_NAME: 'Fixture', GIT_AUTHOR_EMAIL: 'fixture@example.test', GIT_COMMITTER_NAME: 'Fixture', GIT_COMMITTER_EMAIL: 'fixture@example.test', ...extraEnv };
   delete env.LANE_POOL_ROOT; // force repo-derived discovery, despite an unrelated caller cwd
   return JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', code], { cwd: f.scratch, env, encoding: 'utf8' }));
 }
@@ -79,6 +81,33 @@ describe('probation build checkout isolation', () => {
       expect(snapshot(f.repo)).toEqual(before);
       expect(readFileSync(join(f.lane, 'backlog/4291-probe.md'), 'utf8')).toContain(`status: ${mode === 'success' ? 'resolved' : 'open'}`);
       expect(readFileSync(join(f.lane, 'docs/probe.md'), 'utf8')).toBe(mode === 'success' ? 'After\n' : 'Before\n');
+    } finally { rmSync(f.root, { recursive: true, force: true }); }
+  });
+
+  it.each([
+    { lastMessage: 'Target files exist only on lane/mechanical-dispatcher; porting them exceeds the bugfix envelope.' },
+    {},
+  ])('persists a no-change finding and the real worker-declined hold (%j)', (report) => {
+    const f = fixture({ report });
+    try {
+      const before = snapshot(f.repo);
+      const result = launch(f);
+      const reason = report.lastMessage || 'The worker changed nothing and provided no final message.';
+      expect(result.outcome).toBe('opened-pr');
+      expect(result.detail).toContain(reason);
+      expect(snapshot(f.repo)).toEqual(before);
+      const card = readFileSync(join(f.lane, 'backlog/4291-probe.md'), 'utf8');
+      expect(card).toContain('## Findings (standalone worker, ');
+      expect(card).toContain(`> worker-declined: ${reason}`);
+      expect(card).toContain('status: open');
+      expect(card).not.toMatch(/^scope:/m);
+      expect(readFileSync(join(f.lane, 'docs/probe.md'), 'utf8')).toBe('Before\n');
+      const holds = listBuildDispatchHolds({ lockRoot: join(f.root, 'coordination/build-dispatch-holds') });
+      expect(holds.map((hold) => hold.meta)).toEqual(expect.arrayContaining([expect.objectContaining({ num: '4291', reason: `worker-declined: ${reason}` })]));
+      expect(reserveHoldRoute({ num: '4291', route: 'out-of-scope', lockRoot: join(f.root, 'coordination/build-dispatch-hold-routes') }).ok).toBe(false);
+      expect(readFileSync(join(f.lane, '.pr-body.md'), 'utf8')).toContain('no implementation change');
+      const changed = execFileSync('git', ['-C', f.lane, 'diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD'], { encoding: 'utf8' }).trim();
+      expect(changed).toBe('backlog/4291-probe.md');
     } finally { rmSync(f.root, { recursive: true, force: true }); }
   });
 
