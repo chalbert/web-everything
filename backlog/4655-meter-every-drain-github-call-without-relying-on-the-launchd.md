@@ -86,3 +86,19 @@ The sync guard read (`:3845`), discovery (`:4127`), commit reads (`:3831`) and m
 - Audit `we:daemon-edge.mjs:574` / `we:daemon-rebuild.mjs:897` / `we:scripts/lib/daemon-live-smoke.mjs` smoke shims for a reachable drain chain; file a card per confirmed path.
 - Authenticated Actions run counts in a network-enabled session (App-bucket spend attribution).
 - Consider a lint rule banning raw `gh` exec in drain-reachable modules.
+
+## Progress
+
+2026-09-30 — investigation in lane-43; implementation and required proof remain incomplete.
+
+- Confirmed `3dabd061b` removes only the synchronous throttle import from we:scripts/merge-ai-prs.mjs. Temporarily restored that adapter to attempt the pre-fix reproduction; removed the diagnostic edit afterwards because no drain tick reached execution. This is not a fix or an attribution claim.
+- Baseline: `npx vitest run we:scripts/lib/__tests__/gh-throttle.test.mjs` (strip the `we:` prefix when executing locally) passed all **81 tests** in **635 ms**.
+- Before-proof attempt: the normal couple-split drain soak, we:scripts/conveyor/soak/breaks/couple-split-by-unrelated-merge.soak.test.mjs, failed before tick 1 with `ENOTEMPTY` deleting a temporary Git fixture. Repeating with a different temporary root produced the same failure. The stale-label soak, we:scripts/conveyor/soak/breaks/ci-heal-loop-stale-label-review-gate.soak.test.mjs, reported an expected-failure pass despite the same setup crash: **zero ticks is not drain proof**.
+- A diagnostic-only preload retained temporary template repositories instead of deleting them; setup then failed cloning the simulator repository with `fatal: unable to read tree`. No tick bounds, assertions, repository tests, or gates were edited. Neither diagnostic run reproduces the historical 90-second timeout; its cause remains unproven.
+- Transport audit: discovery, manifest API reads, per-PR commits and default-branch reads use the raw async executor. Synchronous guards and mutations use the raw sync executor. In addition, the drain calls `mergePr` and `retargetStackedPrs` without supplying their injectable executor; both default to raw GitHub calls in we:scripts/lib/pr-merge-gate.mjs. A complete transport change must inject the metered executor there too. The raw lifecycle reads in we:scripts/lib/daemon-edge.mjs and we:scripts/lib/daemon-rebuild.mjs were confirmed in source, but no executing drain path to them was established; no scope expansion was made.
+- Production-proof attempt: a read-only authenticated `gh api graphql` rate-limit query failed with `error connecting to api.github.com`. No production pass, installation-labelled cost/reset observation, or matched before/after interval was obtained.
+- Required verification: `node we:scripts/verify-lane.mjs` (local execution without `we:`) selected **56 targets** for the temporary adapter change, then exited **1** before running them: `EPERM` writing its marker under we:.git/.lane-verify.*.tmp. This checkout's configured filesystem permissions make we:.git read-only. The marker gate was not bypassed.
+
+- Final card-only verification again failed at the read-only marker write. `npm run check:standards` initially failed creating the host admission directory; rerunning with an isolated temporary `LANE_POOL_ROOT` passed with **0 errors and 4,520 warnings**. `git diff --check` passed.
+
+No runtime change is retained. Keep this card open: the soak timeout reproduction, soak-safe synchronous/asynchronous transport, regression test, successful lane verification and production before/after proof are still owed. Resume in an environment where the normal Git-fixture soak, verification marker write and authenticated production observation can run.
