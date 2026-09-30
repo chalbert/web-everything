@@ -39,7 +39,7 @@ Lock state is a set of monotonic generation files `<filingDir>/ledger.lock.<gen>
 5. **Release**: open our own gen file with flag `r+` (never creates) and overwrite it with `released`; the file stays as a tombstone so the name `cur+1` can never be re-created by a waiter holding a stale observation. A holder whose gen was pruned/superseded gets ENOENT or writes to an old gen — harmless, never touches a successor.
 6. Test seam: optional 4th arg `hooks: { afterObserve }` called between step 1 and step 3; production passes nothing.
 
-Legacy `ledger.lock` (bare-pid file from the old scheme) is treated as gen 0 candidate: if present and stale it is unlinked once; if fresh, waited on. Doc comment above the function (lines 227-251) is rewritten to describe the CAS; the "known residual" paragraph and its `#xbedfjd` pointer are deleted. Known limit, documented: mtime-based staleness can still reclaim a live holder that runs past `staleMs` — unchanged and out of scope.
+Legacy `ledger.lock` (bare-pid file from the old scheme) is treated as gen 0 candidate: if present and stale it is unlinked once; if fresh, waited on. Doc comment above the function (lines 227-251) is rewritten to describe the CAS; the "known residual" paragraph and its `#4381` pointer are deleted. Known limit, documented: mtime-based staleness can still reclaim a live holder that runs past `staleMs` — unchanged and out of scope.
 
 ## MVP
 
