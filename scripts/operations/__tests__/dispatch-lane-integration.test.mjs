@@ -20,12 +20,13 @@
  * over a partial read. That model-versus-git mismatch is precisely #3264's shape, one layer down — so here
  * the store is the REAL one, the directory is a REAL directory, and the corrupt record is a REAL torn file.
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { inFlightDispatchesFor } from '../dispatch-lane-io.mjs';
-import { DISPATCH_EFFECT } from '../dispatch-lane.mjs';
+import { inFlightDispatchesFor, readTick } from '../dispatch-lane-io.mjs';
+import { DISPATCH_EFFECT, shapeDispatchRead } from '../dispatch-lane.mjs';
+import { settleDispatchEffect } from '../deliver-item-settle.mjs';
 import { createFileRunStore } from '../run-store.mjs';
 import { withRealRepo } from './helpers/real-repo.mjs';
 
@@ -134,6 +135,34 @@ describe('inFlightDispatchesFor against a real file-backed run store', () => {
   it('an empty runs directory is a clean zero', async () => {
     await withRunsDir(async (ctx) => {
       expect(inFlightDispatchesFor('3037', { store: ctx.store })).toEqual({ runs: [], unreadable: 0 });
+    });
+  });
+});
+
+
+describe('prepare terminal handoff on disk', () => {
+  it('holds unchanged live work without planning, settles once, and recovers after a reader restart', async () => {
+    await withRunsDir(async ({ store }) => {
+      const run = record('dispatch-lane-original', '4594');
+      run.effects[0].payload.launchKind = 'prepare-item';
+      store.write(run);
+      const runNode = vi.fn(() => { throw new Error('planner reached'); });
+      const read = () => readTick({ num: '4594',
+        listInFlightDispatches: key => inFlightDispatchesFor(key, { store }),
+        listAgents: () => [{ sessionId: run.effects[0].handle }],
+        recordLiveness: x => x, now: () => new Date('2026-08-13T09:01:00Z'), runNode,
+      });
+      for (let i = 0; i < 2; i++) {
+        expect(shapeDispatchRead(read(), { num: '4594' })).toMatchObject({ dispatching: false });
+      }
+      expect(runNode).not.toHaveBeenCalled();
+      const terminal = { runId: run.id, key: run.effects[0].key, status: 'applied', result: { outcome: 'prepare-completed' } };
+      expect(settleDispatchEffect(terminal, { store })).toEqual({ settled: true });
+      expect(settleDispatchEffect(terminal, { store })).toEqual({ settled: false, reason: 'already-applied' });
+      // A fresh reader gets eligibility from disk, with no listing/clock cooldown.
+      expect(() => read()).toThrow('planner reached');
+      expect(runNode).toHaveBeenCalledTimes(1);
+      expect(store.read(run.id).effects[0]).toMatchObject({ key: terminal.key, status: 'applied', result: terminal.result });
     });
   });
 });

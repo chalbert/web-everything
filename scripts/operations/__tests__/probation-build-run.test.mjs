@@ -832,6 +832,19 @@ describe('standalone prepare', () => {
     const empty = prepareIo({ numstat: '', lastMessage: 'could-not-prepare: scope is wrong' });
     expect((await runProbationBuild(prepareArgs(), empty.io)).detail).toContain('scope is wrong');
   });
+  it('persists both terminal outcomes against the original dispatch identity', async () => {
+    for (const succeeds of [true, false]) {
+      const { io } = prepareIo();
+      const terminal = [];
+      io.settlePrepare = entry => terminal.push(entry);
+      if (!succeeds) io.stampPrepare = () => ({ ok: false, out: 'stamp refused' });
+      const parsed = parseArgs(['--num=4291', '--worker=codex', '--taskType=prepare',
+        '--run-id=original', '--effect-key=original#2#0']);
+      const result = await runProbationBuild({ ...prepareArgs(), runId: parsed.runId, effectKey: parsed.effectKey }, io);
+      expect(terminal).toEqual([{ runId: 'original', key: 'original#2#0',
+        status: succeeds ? 'applied' : 'failed', result }]);
+    }
+  });
   it('accepts a card-only prepare, stamps it, and never claims or resolves', async () => {
     const { io, calls } = prepareIo();
     expect(await runProbationBuild(prepareArgs(), io)).toMatchObject({ outcome: 'opened-pr' });

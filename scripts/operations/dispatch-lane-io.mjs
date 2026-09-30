@@ -104,7 +104,7 @@ import { CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
 import { inFlight, notApplied } from './effect-executor.mjs';
 import { createFileRunStore } from './run-store.mjs';
 import { workerTierFor } from '../lib/provider-routing.mjs';
-import { DEFAULT_EXPECTED_WITHIN_MINUTES, DISPATCH_EFFECT, DISPATCH_LISTING_GRACE_MINUTES, LAUNCH_KINDS } from './dispatch-lane.mjs';
+import { dispatchStillHolds, DEFAULT_EXPECTED_WITHIN_MINUTES, DISPATCH_EFFECT, DISPATCH_LISTING_GRACE_MINUTES, LAUNCH_KINDS } from './dispatch-lane.mjs';
 // #3383 — the spawned session is a WORKER; a hook-driven tick-once must never run in it (see session-role.mjs).
 import { markWorkerEnv, workerMarkerSettingsEnv } from './session-role.mjs';
 // #3902 — the blocking-spawn primitive `spawnAgentToCompletion` (below) is built on, for the same reason
@@ -326,6 +326,14 @@ export function readTick({
     stdin = JSON.stringify({ ...payload, config: { ...payload.config, verbose } });
   }
 
+  // Local run-store lookup precedes the full planner. Only probe agents when a row exists.
+  // Re-read each invocation: terminal settlement invalidates this hold without a timer.
+  const inFlight = all ? null : recordLiveness(stampLiveness(listInFlightDispatches(key), { listAgents, isPidAlive }));
+  const observedAt = now().toISOString();
+  if (inFlight?.runs?.some(r => dispatchStillHolds(r, observedAt))) {
+    return { resolvedNum: key, launch: null, suppressed: null, nextState: JSON.parse(stdin).bookkeeping ?? {},
+      bookkeepingSource, droppedBookkeepingKeys: droppedKeys, inFlightDispatches: inFlight, observedAt };
+  }
   let tick;
   try {
     tick = JSON.parse(String(runNode([tickCli(root)], { cwd: root, input: stdin })));
@@ -556,6 +564,7 @@ export function readTick({
     droppedBookkeepingKeys: droppedKeys,
     // THIS OPERATION'S OWN in-flight dispatches for the item — see {@link inFlightDispatchesFor} — each row
     // carrying the live/gone/unknown answer {@link stampLiveness} got for its handle.
+    // Recheck after planning as another dispatcher may have launched during that read.
     inFlightDispatches: recordLiveness(stampLiveness(listInFlightDispatches(key), { listAgents, isPidAlive })),
     // WHEN THIS READ WAS TAKEN. The declaration ages the double-dispatch guard out (`dispatchStillHolds`) and
     // is pure, so the clock has to arrive as DATA rather than be read there. Omitted or unparseable → nothing
@@ -1469,9 +1478,8 @@ export function createDispatchSinks({
           num: payload?.num,
           // #4349 — the SAME identifiers the executor just handed this sink in `ctx`, forwarded onto the
           // request so a MECHANICAL provider (a wrapper, not an agent reading a brief) can settle its own
-          // effect once it knows its outcome. `undefined` for every non-`build` kind's provider (none of them
-          // read these fields) and for any caller that still calls this sink with one argument (a test) —
-          // `deliverItemDetachedProvider` below already treats an absent value as "omit the flag".
+          // effect once it knows its outcome. Build and probation prepare providers consume these fields;
+          // callers without executor context omit the flags rather than guessing an attempt identity.
           runId: ctx?.runId,
           effectKey: ctx?.key,
           // #3645/#3640 — WHICH KIND, WHICH LANE UNDER WHAT SCOPE, and (repairs) WHICH PR AND WHY. Already on

@@ -1294,6 +1294,48 @@ describe('automatic item preparation', () => {
     effects.readPrepareStatus = () => ({ preparedDate: null });
     effects.placePrepareHold = vi.fn();
   }
+  it.each([false, true])('reconciles a stamped prepare before next-tick planning (live=%s)', async (workerLive) => {
+    const row = { num: '4501', row: { runId: 'original', entry: {
+      key: 'original#2#0', live: workerLive, status: 'in-flight' } } };
+    const effects = fixture({ inFlight: [row] });
+    const bk = { prepareGuards: [{ num: '4501', kind: 'prepare-item', lane: 1, spawnedTick: 1 }] };
+    effects.readPrepareStatus = () => ({ preparedDate: '2026-09-30' });
+    effects.settlePrepareRow = vi.fn();
+    effects.acquireClaim = () => ({ ok: true });
+    effects.releaseClaim = vi.fn();
+    effects.planTick = vi.fn(b => ({ decisions: { admission: { queue: [{ num: '4501', scope: ['we:scripts/example.mjs'] }] }, spawnBuilds: b.prepareGuards.length ? [] : [{ num: '4501', lane: 1 }] }, nextState: b }));
+    const tick = await runBuildDispatchTick({ live: true, bookkeeping: bk, effects });
+    expect(tick.failures).toEqual([]);
+    if (workerLive) {
+      expect(effects.settlePrepareRow).not.toHaveBeenCalled();
+      expect(effects.dispatch).not.toHaveBeenCalled();
+    } else {
+      expect(effects.settlePrepareRow).toHaveBeenCalledWith({ runId: 'original', key: 'original#2#0', outcome: 'prepare-completed' });
+      expect(effects.planTick.mock.calls[0][0].prepareGuards).toEqual([]);
+      expect(tick.dispatched.map(r => r.num)).toEqual(['4501']);
+    }
+  });
+  it('does not clear a build hold when preparation completes', async () => {
+    const effects = fixture({ inFlight: [{ num: '4501', row: { runId: 'original', entry: { key: 'key', live: false } } }] });
+    effects.listHolds = () => [{ num: '4501', reason: 'gate-red' }];
+    effects.readPrepareStatus = () => ({ preparedDate: '2026-09-30' });
+    effects.settlePrepareRow = vi.fn();
+    effects.releasePrepareHold = vi.fn();
+    await runBuildDispatchTick({ live: true, effects });
+    expect(effects.releasePrepareHold).not.toHaveBeenCalled();
+    expect(effects.dispatch.mock.calls.some(([r]) => r.num === '4501')).toBe(false);
+  });
+  it('retains eligibility guards if durable completion cannot be written', async () => {
+    const effects = fixture({ inFlight: [{ num: '4501', row: { runId: 'original', entry: { key: 'key', live: false } } }] });
+    effects.readPrepareStatus = () => ({ preparedDate: '2026-09-30' });
+    effects.settlePrepareRow = vi.fn(() => { throw new Error('store unavailable'); });
+    const guard = { num: '4501', kind: 'prepare-item', spawnedTick: 1 };
+    const tick = await runBuildDispatchTick({ live: true, bookkeeping: { prepareGuards: [guard] }, effects });
+    expect(effects.settlePrepareRow).toHaveBeenCalledTimes(1);
+    expect(tick.prepare.inFlight).toContain('4501');
+    expect(tick.prepare.failures).toContainEqual({ num: '4501', stage: 'retirement', reason: 'store unavailable' });
+    expect(effects.dispatch.mock.calls.some(([r]) => r.num === '4501')).toBe(false);
+  });
   it('routes subsequent prepares through Sonnet after two durable probation failures', async () => {
     const effects = fixture();
     effects.listProbationPrepares = () => ['4322', '4325'].map(item => ({ item,

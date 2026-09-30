@@ -57,6 +57,7 @@ import { classifyClaimLiveness, settleOrphanRow, adoptOrphanedBuildClaims, findL
 // exempted from the shared, machine-wide lane-count ceiling.
 import { isLeaseExpired, DEFAULT_LEASE_MINUTES } from '../../scripts/readiness/file-locks.mjs';
 import { defaultIsPidAlive } from '../../scripts/operations/detached-dispatch.mjs';
+import { settleDispatchEffect } from '../../scripts/operations/deliver-item-settle.mjs';
 import { prepareCardStatus } from '../../scripts/conveyor/prepare-result.mjs';
 import { CONSTELLATION_REPOS } from '../../scripts/lib/constellation-repos.mjs';
 import { MAX_CONCURRENT_LANES_ENV } from '../../scripts/lib/lane-concurrency.mjs';
@@ -208,7 +209,39 @@ export function deriveDispatchedByBuilder(runStoreRows = [], settledRows = []) {
  * Optional-chained so an older test stub (every fixture that predates this) behaves exactly as before.
  */
 export async function runBuildDispatchTick({ bookkeeping = {}, live = false, policy = BUILD_DISPATCH_POLICY, prepareEnabled = true, effects }) {
-  const holds = effects.listHolds?.() ?? [];
+  let holds = effects.listHolds?.() ?? [];
+  const prepareRows = effects.listPrepareInFlight?.() ?? [];
+  const prepareClaims = effects.listPrepareClaims?.() ?? [];
+  const prepareIsLive = (r) => r.row?.entry?.live === true
+    && !(r.row.entry.handle?.startsWith('pid:') && classifyClaimLiveness({ row: r.row,
+      isPidAlive: effects.isPidAlive ?? defaultIsPidAlive }).status === 'dead');
+  const isPrepareHold = h => ['prepare-unstamped', 'prepare-stamp-pending'].includes(h.reason);
+  const prepareStatus = new Map();
+  const completedPrepares = new Set();
+  const prepareReadErrors = new Map();
+  // Completion invalidates the cached prepare eligibility BEFORE the expensive plan.
+  // Probe only tracked attempts; live workers retain ownership even if a stamp is visible.
+  const trackedPrepares = new Set([...prepareRows.map(r => normNum(r.num)),
+    ...prepareClaims.map(c => normNum(c.meta.num)),
+    ...(bookkeeping.prepareGuards ?? []).filter(g => g.kind === 'prepare-item').map(g => normNum(g.num)),
+    ...holds.filter(isPrepareHold).map(h => normNum(h.num))]);
+  for (const num of trackedPrepares) {
+    if (prepareRows.some(r => normNum(r.num) === num && prepareIsLive(r))) continue;
+    try {
+      const claim = prepareClaims.find(c => normNum(c.meta.num) === num);
+      const status = await effects.readPrepareStatus?.({ num, claimedAt: claim?.meta?.claimedAt });
+      prepareStatus.set(num, status);
+      if (!status?.preparedDate) continue;
+      for (const r of prepareRows.filter(r => normNum(r.num) === num && r.row)) {
+        if (live) await effects.settlePrepareRow?.({ runId: r.row.runId, key: r.row.entry.key, outcome: 'prepare-completed' });
+      }
+      completedPrepares.add(num);
+      if (live && holds.some(h => normNum(h.num) === num && isPrepareHold(h))) effects.releasePrepareHold?.({ num });
+    } catch (e) { prepareReadErrors.set(num, e); }
+  }
+  holds = holds.filter(h => !isPrepareHold(h) || !completedPrepares.has(normNum(h.num)));
+  bookkeeping = { ...bookkeeping, prepareGuards: (bookkeeping.prepareGuards ?? [])
+    .filter(g => g.kind !== 'prepare-item' || !completedPrepares.has(normNum(g.num))) };
   // Exclude held candidates BEFORE the tick core allocates its two prepare slots.
   bookkeeping = { ...bookkeeping, prepareHeldNums: holds.map((h) => normNum(h.num)) };
   const out = await effects.planTick(bookkeeping);
@@ -323,6 +356,7 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
   // settle/release above would otherwise tighten rather than close.
   const candidates = spawn
     .filter((s) => !heldNums.has(normNum(s.num)))
+    .filter((s) => !prepareRows.some(r => normNum(r.num) === normNum(s.num) && !completedPrepares.has(normNum(s.num))))
     .map((s) => ({ num: normNum(s.num), lane: s.lane ?? null, scope: scopeByNum.get(normNum(s.num)) || [] }));
   for (const c of candidates) {
     c.route = effects.predictRoute ? await effects.predictRoute(c.num, c.scope) : null;
@@ -359,8 +393,6 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
   }
   // Separate durable claims use the existing lease primitive, without occupying build slots.
   // Run-store rows survive restarts; guards cover the interval before a dispatched lane is visible.
-  const prepareRows = effects.listPrepareInFlight?.() ?? [];
-  const prepareClaims = effects.listPrepareClaims?.() ?? [];
   const prepareSpawns = d.spawnPrepareItems ?? d.itemPrepareSpawns ?? [];
   const settledPrepares = new Map();
   for (const row of await effects.listSettledPrepares?.() ?? []) {
@@ -370,7 +402,7 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
   const prepareBusy = new Set(prepareRows.map((r) => normNum(r.num)));
   const fallback = prepareRouteFallback(await effects.listProbationPrepares?.() ?? []);
   const prepare = { route: fallback ? 'prepare-route-fallback' : 'probation', enabled: prepareEnabled, planned: [], launched: [], inFlight: [], failures: [], retired: [], held: [], stamping: [] };
-  const finishedPrepares = new Set();
+  const finishedPrepares = new Set(completedPrepares);
   const itemPrepareAttempts = { ...out?.nextState?.itemPrepareAttempts };
   const inspectNums = new Set([...prepareClaims.map((c) => normNum(c.meta.num)),
     ...prepareBusy, ...prepareSpawns.map((s) => normNum(s.num)),
@@ -390,7 +422,10 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
     if (!tracked && !wasHeld && !currentSettled
       && !(bookkeeping.prepareGuards ?? []).some((g) => g.kind === 'prepare-item' && normNum(g.num) === num)) continue;
     try {
-      const status = await effects.readPrepareStatus?.({ num, claimedAt: claim?.meta?.claimedAt ?? settled?.startedAt });
+      if (prepareReadErrors.has(num)) throw prepareReadErrors.get(num);
+      const status = prepareStatus.has(num) ? prepareStatus.get(num)
+        : await effects.readPrepareStatus?.({ num, claimedAt: claim?.meta?.claimedAt ?? settled?.startedAt });
+      if (prepareRows.some(r => normNum(r.num) === num && prepareIsLive(r))) continue;
       const prDone = ['MERGED', 'CLOSED'].includes(status?.pr?.state);
       const awaitingPr = status?.pr?.state === 'OPEN';
       let why = status?.preparedDate ? 'prepared on main' : prDone ? `prepare PR ${status.pr.state.toLowerCase()}` : null;
@@ -464,7 +499,7 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
           (Number(bookkeeping.itemPrepareAttempts?.[num]) || 0) + 1);
       }
       if (why) {
-        if (live && worker) effects.settlePrepareRow?.({ runId: worker.runId, key: worker.entry.key,
+        if (live && worker && !completedPrepares.has(num)) effects.settlePrepareRow?.({ runId: worker.runId, key: worker.entry.key,
           outcome: why === 'prepare-session-dead' ? why : unstamped ? 'prepare-unstamped' : 'prepare-retired' });
         if (claim || worker) {
           if (live && claim) effects.releasePrepareClaim({ num });
@@ -1067,7 +1102,14 @@ function cliEffects() {
     stampPrepare: cliStampPrepare,
     placePrepareHold: (o) => placeBuildDispatchHold(o),
     releasePrepareHold: (o) => releaseBuildDispatchHold(o),
-    settlePrepareRow: settleOrphanRow,
+    settlePrepareRow: ({ runId, key, outcome }) => {
+      if (outcome !== 'prepare-completed') return settleOrphanRow({ runId, key, outcome });
+      const settled = settleDispatchEffect({ runId, key, status: 'applied', result: { outcome } });
+      if (!settled.settled && !['already-applied', 'already-failed'].includes(settled.reason)) {
+        throw new Error(`prepare settlement: ${settled.reason}`);
+      }
+      return settled;
+    },
     acquirePrepareClaim: (o) => acquireBuildDispatchClaim({ ...o, lockRoot: prepareClaimRoot() }),
     releasePrepareClaim: (o) => releaseBuildDispatchClaim({ ...o, lockRoot: prepareClaimRoot() }),
     planTick: cliPlanTick,
