@@ -2,6 +2,7 @@
 bornAs: xfmxjlr
 kind: story
 size: 3
+tier: pinned
 status: open
 scope: ["we:scripts/conveyor/build-dispatch-orphan-adopt.mjs", "we:skills-src/conveyor/build-dispatch-daemon.mjs", "we:scripts/conveyor/__tests__/build-dispatch-orphan-adopt.test.mjs", "we:skills-src/conveyor/__tests__/build-dispatch-daemon.test.mjs"]
 dateOpened: "2026-09-30"

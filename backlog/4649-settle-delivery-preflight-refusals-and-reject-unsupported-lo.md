@@ -2,6 +2,7 @@
 bornAs: xp12azn
 kind: story
 size: 3
+tier: pinned
 status: open
 scope: ["we:scripts/operations/deliver-item-wrapper.mjs", "we:scripts/operations/deliver-item-run.mjs", "we:scripts/operations/dispatch-lane.mjs", "we:scripts/operations/dispatch-lane-io.mjs", "we:scripts/operations/deliver-item-settle.mjs", "we:scripts/operations/effect-executor.mjs", "we:scripts/operations/__tests__/effect-executor.test.mjs", "we:scripts/operations/__tests__/dispatch-lane.test.mjs", "we:scripts/operations/__tests__/deliver-item-run.test.mjs", "we:scripts/operations/__tests__/deliver-item-wrapper.test.mjs"]
 dateOpened: "2026-09-30"
