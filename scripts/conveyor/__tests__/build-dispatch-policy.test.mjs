@@ -55,7 +55,7 @@ describe('planBuildDispatch', () => {
   // own durable in-flight builds do. Machine load is the separate load guard's (#4076) job. It still rides
   // through on the return value purely as a logged signal.
   it('never folds externalBuilding into the cap — it only bounds this builder\'s OWN in-flight builds', () => {
-    const r = planBuildDispatch({ candidates: [cand('1', ['we:a']), cand('2', ['we:b'])], externalBuilding: 2 });
+    const r = planBuildDispatch({ candidates: [cand('1', ['we:a']), cand('2', ['we:b'])], externalBuilding: 2, policy: { ...BUILD_DISPATCH_POLICY, maxConcurrentBuilds: 3 } });
     expect(r.dispatch.map((x) => x.num)).toEqual(['1', '2']);
     expect(r.busy).toBe(0);
     expect(r.externalBuilding).toBe(2);
@@ -127,6 +127,7 @@ describe('planBuildDispatch', () => {
     const r = planBuildDispatch({
       candidates: [cand('1', ['plateau-app:src/main.ts']), cand('2', ['plateau-app:src/main.ts', 'plateau-app:src/x.ts']), cand('3', ['we:q'])],
       inFlight: [{ num: '7', scope: ['we:q'], source: 'claim' }],
+      policy: { ...BUILD_DISPATCH_POLICY, maxConcurrentBuilds: 3 },
     });
     expect(r.dispatch.map((x) => x.num)).toEqual(['1']);
     expect(r.hold.find((h) => h.num === '2')).toMatchObject({ rule: 'hot-file' });
@@ -150,7 +151,8 @@ describe('planBuildDispatch', () => {
   });
   it('declares every operator rule with who enforces it', () => {
     expect(BUILD_DISPATCH_POLICY.rules.map((r) => r.id)).toEqual(['cap', 'wip-cap', 'landing-freeze', 'scope-vs-open-prs', 'hot-file', 'branch-name', 'scratch-prefix', 'draft-first', 'needs-prepare']);
-    expect(BUILD_DISPATCH_POLICY.maxConcurrentBuilds).toBe(3);
+    expect(BUILD_DISPATCH_POLICY.maxConcurrentBuilds).toBe(1);
+    expect(BUILD_DISPATCH_POLICY.maxConcurrentExternalBuilds).toBe(4);
     expect(BUILD_DISPATCH_POLICY.maxOpenItems).toBe(7);
   });
 });
@@ -343,5 +345,45 @@ describe('planBuildDispatch — wip-cap counts only the builder\'s own items (xo
     });
     expect(r.openItems).toEqual({ count: 1, cap: 1, nums: ['1'] });
     expect(r.hold).toEqual([expect.objectContaining({ num: '2', rule: 'wip-cap' })]);
+  });
+});
+
+
+describe('executor concurrency caps (#4531)', () => {
+  const candidate = (num, executor) => ({ ...cand(num, [`we:${num}`]), executor });
+  const running = [candidate('10', 'claude'), ...['codex', 'antigravity', 'codex', 'antigravity'].map((e, i) => candidate(String(20 + i), e))];
+  it('holds both classes at the default 1 Claude + 4 external boundary', () => {
+    const r = planBuildDispatch({ candidates: [candidate('1', 'claude'), candidate('2', 'codex')], inFlight: running });
+    expect(r.dispatch).toEqual([]);
+    expect(r.hold.map(h => [h.num, h.rule])).toEqual([['1', 'cap'], ['2', 'cap']]);
+  });
+  it('dispatches external work while Claude is full, decrementing the shared external cap within the tick', () => {
+    const r = planBuildDispatch({ candidates: [candidate('1', 'claude'), candidate('2', 'codex'), candidate('3', 'antigravity')], inFlight: running.slice(0, 4) });
+    expect(r.dispatch.map(c => c.num)).toEqual(['2']);
+    expect(r.hold.map(h => [h.num, h.rule])).toEqual([['1', 'cap'], ['3', 'cap']]);
+  });
+  it('admits Claude when the external cap is full', () => {
+    const r = planBuildDispatch({ candidates: [candidate('1', 'codex'), candidate('2', 'claude')], inFlight: running.slice(1) });
+    expect(r.dispatch.map(c => c.num)).toEqual(['2']);
+    expect(r.hold[0]).toMatchObject({ num: '1', rule: 'cap' });
+  });
+  it('holds a failed route prediction rather than dispatching on a guess', () => {
+    const r = planBuildDispatch({ candidates: [{ ...candidate('1', null), route: { error: 'missing item' } }] });
+    expect(r.dispatch).toEqual([]);
+    expect(r.hold[0]).toMatchObject({ rule: 'routing', reason: 'missing item' });
+  });
+  it('preserves known executors when deduping claims and run records in either order', () => {
+    for (const pair of [[{ num: '20' }, running[1]], [running[1], { num: '20' }]]) {
+      const r = planBuildDispatch({ candidates: [candidate('1', 'claude')], inFlight: pair });
+      expect(r.busy).toBe(1);
+      expect(r.inFlight[0].executor).toBe('codex');
+      expect(r.dispatch.map(c => c.num)).toEqual(['1']);
+    }
+  });
+  it('charges unknown executors to Claude and still enforces total own-item WIP across classes', () => {
+    const r = planBuildDispatch({ candidates: [candidate('1', 'claude'), candidate('2', 'codex')], inFlight: [{ num: '9' }] });
+    expect(r.dispatch.map(c => c.num)).toEqual(['2']);
+    const full = planBuildDispatch({ candidates: [candidate('2', 'codex')], inFlight: running.slice(0, 4), policy: { ...BUILD_DISPATCH_POLICY, maxOpenItems: 4 } });
+    expect(full.hold[0].rule).toBe('wip-cap');
   });
 });

@@ -39,6 +39,15 @@ agreement, not proof that two reviews covered identical content, and it does not
 Tests redirect `WE_VERDICT_LEDGER_DIR` and `CONVEYOR_JURY_DIR` into temporary directories and drive the
 runner with a read-only `gh` fixture; a file in place of the ledger directory probes real append failure.
 
+## Build-dispatch executor admission
+
+Candidate executor prediction must call `decideDispatchRoute` with the dispatch loader's scope, size,
+risk, tags and delivery-agent override, then `probationLaunchDecision` with the actual launch setting.
+`routing.executed` alone is the fallback: an enabled probation worker can actually execute the build.
+Test a real predicted external route with Claude capacity full, and preserve the run record's known
+executor when deduplicating it with an earlier executor-less claim. The total own-item WIP cap applies
+across both executor pools.
+
 ## Constellation conveyor probes
 
 Inject `exec` and `fetchOpenPrs` into `makeCliMechanicalPasses` to inspect each repo's argv

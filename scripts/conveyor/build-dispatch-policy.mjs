@@ -11,7 +11,7 @@
  *
  * THE OPERATOR RULES, as data (`BUILD_DISPATCH_POLICY`) — each row names who enforces it, so a rule that is
  * declared but not yet enforced by code is visible as such rather than silently assumed:
- *   - cap concurrent builds (default 3), counted over DURABLE in-flight evidence (claims + run records), so a
+ *   - cap concurrent builds by executor (Claude default 1, external default 4), counted over DURABLE in-flight evidence (claims + run records), so a
  *     daemon restart cannot reset the count;
  *   - wip-cap (#4353): cap OPEN ITEMS — build start until merge (durable in-flight ∪ delivered-by-open-PR),
  *     the UNION not the sum — separately from `maxConcurrentBuilds`, which only bounds machine load. An item
@@ -39,10 +39,11 @@
 
 import { normNum } from './queue-store.mjs';
 
-/** The declared policy. Numbers are defaults; the daemon may override `maxConcurrentBuilds`/`maxOpenPrs` from
+/** The declared policy. Numbers are defaults; the daemon may override the concurrency/open-item caps from
  *  flags, never the rule set itself. */
 export const BUILD_DISPATCH_POLICY = Object.freeze({
-  maxConcurrentBuilds: 3,
+  maxConcurrentBuilds: 1, // --max-concurrent: Claude, including unknown legacy executors
+  maxConcurrentExternalBuilds: 4, // Codex + Antigravity together
   maxOpenPrs: 12,
   // #4353 — open items from build start until MERGE (durable in-flight ∪ delivered-by-open-PR), a tighter,
   // separate cap from `maxConcurrentBuilds` (which only bounds builds actually running right now). Unmeasured
@@ -69,7 +70,7 @@ export const BUILD_DISPATCH_POLICY = Object.freeze({
   // (we:skills-src/conveyor/build-dispatch-daemon.mjs) — `planBuildDispatch` reads `globalFreezeLabels` only.
   globalFreezeLabels: Object.freeze(['blocked:daemon-bug']),
   rules: Object.freeze([
-    { id: 'cap', text: 'at most maxConcurrentBuilds builds in flight', enforcedBy: 'build-dispatch-policy.mjs' },
+    { id: 'cap', text: 'at most maxConcurrentBuilds Claude and maxConcurrentExternalBuilds external builds in flight', enforcedBy: 'build-dispatch-policy.mjs' },
     { id: 'wip-cap', text: 'at most maxOpenItems items open from build start until merge (durable in-flight ∪ delivered-by-open-PR)', enforcedBy: 'build-dispatch-policy.mjs' },
     { id: 'landing-freeze', text: 'no new build while open PRs > maxOpenPrs or any open PR carries a freeze label', enforcedBy: 'build-dispatch-policy.mjs' },
     { id: 'scope-vs-open-prs', text: "a build whose scope overlaps an open PR's files waits for that PR", enforcedBy: 'build-dispatch-policy.mjs' },
@@ -180,15 +181,19 @@ export function normalizeOpenPrs(byRepo) {
   return out;
 }
 
+function executorClass(executor) {
+  return executor === 'codex' || executor === 'antigravity' ? 'external' : 'claude';
+}
+
 /**
  * THE PLANNER. Given this tick's candidates (the tick core's `spawnBuilds`, each enriched with the item's
- * scope), the durable in-flight builds, and the open PRs, decide which to dispatch and why each other one waits.
+ * scope and executor predicted by dispatch routing), the durable in-flight builds, and the open PRs, decide which to dispatch and why each other one waits.
  *
  * @param {object} o
- * @param {Array<{num:string, lane?:number, scope:string[]}>} o.candidates  in tick-core order
+ * @param {Array<{num:string, lane?:number, scope:string[], executor?:string, route?:object}>} o.candidates  in tick-core order
  * @param {Array<{num:string, scope:string[], source:string, executor?:string|null}>} o.inFlight   durable
  *   in-flight builds — `executor` (card xao7080/#4518, `claude`/`antigravity`/`codex`/`null`) rides through
- *   unchanged for the caller's own reporting; this planner never reads or branches on it
+ *   used to count each executor class independently; unknown executors consume Claude capacity
  * @param {Array<{repo:string, number:number, files:Array, labels:string[], headRefName:string}>} o.openPrs
  * @param {number} [o.externalBuilding]  the conveyor's machine-wide "building" count — hand-dispatched workers,
  *   fix workers, ci-heal workers, stranded claims, AND this daemon's own builds, all folded into one tally with
@@ -247,14 +252,18 @@ export function planBuildDispatch({
     const k = normNum(f.num);
     if (!k) continue;
     const prev = inFlightByNum.get(k);
-    inFlightByNum.set(k, prev ? { ...prev, scope: [...new Set([...(prev.scope || []), ...(f.scope || [])])], source: `${prev.source}+${f.source}` } : { ...f, num: k });
+    inFlightByNum.set(k, prev ? { ...prev, executor: (['claude', 'codex', 'antigravity'].includes(prev.executor) ? prev.executor : f.executor ?? prev.executor), scope: [...new Set([...(prev.scope || []), ...(f.scope || [])])], source: `${prev.source}+${f.source}` } : { ...f, num: k });
   }
   const running = [...inFlightByNum.values()];
   // Card x3vs6tu (2026-09-29): the cap counts ONLY this builder's own durable in-flight builds — never
   // `externalBuilding` (machine-wide "building", not attributable to this builder). Kept as a logged signal
   // below (`externalBuilding` on the return value), never folded into `busy`/`slots` any more.
   const busy = running.length;
-  let slots = Math.max(0, policy.maxConcurrentBuilds - busy);
+  // Legacy `slots` reports Claude headroom; `slotsByClass` exposes both pools.
+  const caps = { claude: policy.maxConcurrentBuilds, external: policy.maxConcurrentExternalBuilds ?? BUILD_DISPATCH_POLICY.maxConcurrentExternalBuilds };
+  const counts = { claude: 0, external: 0 };
+  for (const r of running) counts[executorClass(r.executor)] += 1;
+  const slotsByClass = Object.fromEntries(Object.entries(caps).map(([kind, cap]) => [kind, Math.max(0, cap - counts[kind])]));
   const picked = [];
   // #4353 — a policy object missing `maxOpenItems` (a caller predating this field) must never silently disable
   // the cap: `>= undefined` is always false, so an unguarded read would fail OPEN. Falls back to the declared
@@ -310,15 +319,21 @@ export function planBuildDispatch({
       hold.push({ ...base, rule: 'wip-cap', reason: `${openItems.size} open items (cap ${maxOpenItems}): ${[...openItems].sort().join(', ')}` });
       continue;
     }
-    if (slots <= 0) { hold.push({ ...base, rule: 'cap', reason: `${busy + picked.length} builds in flight (cap ${policy.maxConcurrentBuilds})` }); continue; }
-    slots -= 1;
+    if (c.route?.error || c.route?.refusal) {
+      hold.push({ ...base, rule: 'routing', reason: c.route.error || c.route.refusal });
+      continue;
+    }
+    const kind = executorClass(c.executor);
+    if (slotsByClass[kind] <= 0) { hold.push({ ...base, rule: 'cap', reason: `${counts[kind]} ${kind} builds in flight (cap ${caps[kind]})` }); continue; }
+    slotsByClass[kind] -= 1;
+    counts[kind] += 1;
     openItems.add(num);
-    const pick = { ...base, scope: c.scope, source: 'this-tick' };
+    const pick = { ...base, scope: c.scope, source: 'this-tick', ...(c.executor ? { executor: c.executor } : {}) };
     picked.push(pick);
     dispatch.push(pick);
   }
   return {
-    freeze: { frozen, reasons: freezeReasons }, inFlight: running, busy, slots, dispatch, hold,
+    freeze: { frozen, reasons: freezeReasons }, inFlight: running, busy, slots: slotsByClass.claude, slotsByClass, dispatch, hold,
     // Card x3vs6tu — logged signal only (never gates `busy`/`slots` above): the machine-wide "building" count
     // the tick core passed in, visible to a dry-run/status line even though this cap no longer reads it.
     externalBuilding: Number(externalBuilding) || 0,
