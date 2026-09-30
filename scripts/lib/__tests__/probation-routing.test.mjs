@@ -193,3 +193,44 @@ describe('test-fix probation (#4551)', () => {
     expect(taskTypeFor({ kind: 'fix', scopePaths: filesTouched }).taskType).toBe('bugfix');
   });
 });
+
+// Operator decision 2026-09-30: exercise the real profile → verdict → probation pipeline.
+describe('gate/approval-only critical scope', () => {
+  it.each([
+    'we:skills-src/conveyor/build-dispatch-daemon.mjs',
+    'we:scripts/conveyor/tick-core.mjs',
+    'we:scripts/lib/dispatch-contracts.mjs',
+    'we:scripts/operations/dispatch-lane-io.mjs',
+    'we:scripts/lane-drain.mjs',
+  ])('ordinary machinery %s gets Codex with full review', (path) => {
+    const route = decideDispatchRoute({ kind: 'build', size: 2, scopePaths: [path] });
+    expect(route.outcome).toBe('routed');
+    expect(route.probationWorker).toMatchObject({ id: 'codex', review: 'full', supervision: 'full' });
+  });
+
+  it.each([
+    'we:scripts/review-set-label.mjs', 'we:scripts/lib/review-core.mjs',
+    'we:scripts/operations/review-pr.mjs', 'we:scripts/lib/advisory-labels.mjs',
+    'we:scripts/merge-ai-prs.mjs', 'we:scripts/pr-land.mjs',
+    'we:docs/agent/platform-decisions.md', 'we:AGENTS.md',
+    'we:scripts/lib/critical-work.mjs', 'we:scripts/lib/provider-routing.mjs',
+    'we:.github/branch-protection.json', 'we:.github/workflows/review-gate.yml',
+    'we:scripts/lib/credentials.mjs',
+  ])('protected surface %s stays Claude-only', (path) => {
+    const route = decideDispatchRoute({ kind: 'build', size: 2, scopePaths: [path] });
+    expect(route.outcome).toBe('routed');
+    expect(route.routed).toBe('claude');
+    expect(route.probationWorker).toBeNull();
+  });
+
+  it('ordinary bugfix plus tests is eligible despite derived correctness risk', () => {
+    const route = decideDispatchRoute({ kind: 'fix', size: 2, scopePaths: ['we:scripts/conveyor/health-watch.mjs', 'we:scripts/conveyor/__tests__/health-watch.test.mjs'] });
+    expect(route.probationWorker).toMatchObject({ id: 'codex', review: 'full' });
+  });
+
+  it.each([{ risk: 'high' }, { tags: ['security'] }])('preserves high-risk/security veto %j', (extra) => {
+    const route = decideDispatchRoute({ kind: 'build', size: 2, scopePaths: ['we:skills-src/conveyor/build-dispatch-daemon.mjs'], ...extra });
+    expect(route.outcome).toBe('routed');
+    expect(route.probationWorker).toBeNull();
+  });
+});

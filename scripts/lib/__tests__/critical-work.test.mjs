@@ -2,10 +2,8 @@
  * @file critical-work.test.mjs — unit tests for scripts/lib/critical-work.mjs (#4034).
  *
  * Verifies:
- *   - `criticalWorkVerdict` composes the EXISTING proxies (dispatch-risk, never-spot-check, human-required,
- *     gate-self, daemon-drain) rather than reimplementing them — asserted by calling the shared sources
- *     (`deriveRisk`/`deriveComplexity` from dispatch-contracts.mjs, `NEVER_SPOT_CHECK_PATH_PREFIXES` from
- *     dispatch-thresholds.mjs) directly alongside it.
+ *   - `criticalWorkVerdict` separates the gate/approval boundary from broad full-review proxies.
+ *     Explicit high risk, human-required and unknown scope still fail closed.
  *   - `isMissRecord`/`isCriticalMiss` read only the explicit `outcome` (never inferred from `findings`), and
  *     fail closed on missing scope evidence.
  *   - `criticalMissesFor` filters by taskType, accepts both the bare-array and `{records}` store shapes, and
@@ -26,20 +24,20 @@ import { deriveRisk, deriveComplexity } from '../dispatch-contracts.mjs';
 import { NEVER_SPOT_CHECK_PATH_PREFIXES } from '../dispatch-thresholds.mjs';
 
 describe('critical-work.mjs is pure (#4034)', () => {
-  it('imports only the four shared proxy/data sources and uses no impure primitive', () => {
+  it('imports only the shared proxy/data sources and uses no impure primitive', () => {
     const source = readFileSync('scripts/lib/critical-work.mjs', 'utf8');
     for (const forbidden of ['node:fs', 'Date.now', 'new Date', 'process.env', 'Math.random']) expect(source).not.toContain(forbidden);
     // #4200 — `constellation-repos.mjs` added: the plain, IO-free repo-key/dirs table (no fs/os/process import
     // of its own — see that file's own header), read here so the irreversible-group fix (below) has ONE source
     // for sibling-repo path aliases rather than a second, driftable copy of the list.
     expect([...source.matchAll(/from '([^']+)'/g)].map((m) => m[1])).toEqual([
-      './dispatch-contracts.mjs', './dispatch-thresholds.mjs', './gate-config.mjs', './constellation-repos.mjs',
+      './dispatch-thresholds.mjs', './gate-config.mjs', './constellation-repos.mjs',
     ]);
   });
 });
 
 describe('criticalWorkVerdict + isCriticalMiss — the dispatch-risk proxy (#4034)', () => {
-  it('is a critical miss for a reworked record whose task scores deriveRisk high', () => {
+  it('ordinary implementation plus tests is not critical merely because deriveRisk scores it high', () => {
     const taskType = 'bugfix';
     const filesTouched = ['scripts/lib/example.mjs', 'scripts/lib/__tests__/example.test.mjs'];
     const complexity = deriveComplexity(taskType, 0, filesTouched.length);
@@ -48,7 +46,8 @@ describe('criticalWorkVerdict + isCriticalMiss — the dispatch-risk proxy (#403
 
     const record = { outcome: 'reworked', taskType, filesTouched };
     expect(isMissRecord(record)).toBe(true);
-    expect(isCriticalMiss(record)).toBe(true);
+    expect(isCriticalMiss(record)).toBe(false);
+    expect(isCriticalMiss({ ...record, risk: 'high' })).toBe(true);
   });
 });
 
@@ -111,32 +110,31 @@ describe('isCriticalMiss — fails closed on missing scope evidence (#4034)', ()
 });
 
 describe('criticalWorkVerdict — real-card fixtures prove the we: prefix normalisation (#4034)', () => {
-  it('#4124 scope is critical via never-spot-check, gate-self and daemon-drain', () => {
+  it('#4124 scope remains critical because it includes the lander', () => {
     const verdict = criticalWorkVerdict({
       taskType: 'bugfix',
       filesTouched: ['we:scripts/merge-ai-prs.mjs', 'we:scripts/lane-drain.mjs', 'we:scripts/readiness/drain-lock.mjs'],
     });
     expect(verdict.critical).toBe(true);
     const proxies = verdict.reasons.map((r) => r.proxy);
-    expect(proxies).toEqual(expect.arrayContaining(['never-spot-check', 'gate-self', 'daemon-drain']));
+    expect(proxies).toEqual(expect.arrayContaining(['never-spot-check']));
   });
 
-  it('#4108 scope is critical via never-spot-check (irreversible) and gate-self', () => {
+  it('#4108 lander scope remains critical via irreversible', () => {
     const verdict = criticalWorkVerdict({ taskType: 'bugfix', filesTouched: ['we:scripts/merge-ai-prs.mjs'] });
     expect(verdict.critical).toBe(true);
     const proxies = verdict.reasons.map((r) => r.proxy);
-    expect(proxies).toEqual(expect.arrayContaining(['never-spot-check', 'gate-self']));
+    expect(proxies).toEqual(expect.arrayContaining(['never-spot-check']));
     const neverSpotCheck = verdict.reasons.find((r) => r.proxy === 'never-spot-check');
     expect(neverSpotCheck.detail).toContain('irreversible');
   });
 
-  it('#4131 scope is critical via daemon-drain', () => {
+  it('#4131 ordinary health-watch scope is non-critical', () => {
     const verdict = criticalWorkVerdict({
       taskType: 'bugfix',
       filesTouched: ['we:scripts/conveyor/health-watch-core.mjs', 'we:scripts/conveyor/health-watch.mjs'],
     });
-    expect(verdict.critical).toBe(true);
-    expect(verdict.reasons.some((r) => r.proxy === 'daemon-drain')).toBe(true);
+    expect(verdict).toEqual({ critical: false, reasons: [] });
   });
 
   it('#4081 scope is NOT critical', () => {

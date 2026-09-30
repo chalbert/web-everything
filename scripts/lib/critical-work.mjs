@@ -1,21 +1,15 @@
 /**
  * critical-work.mjs — IS THIS WORK CRITICAL, AND WAS THIS MISS ON CRITICAL WORK? (#4034, epic #3383)
  *
- * Fork 4 of decision #4029 (platform-decisions.md#delegation-trial-record-graduation, rule 5): "critical" is the
- * EXISTING dispatch-risk / never-spot-check / human-required proxy already computed for the work, never a new
- * bespoke scale. This module only COMPOSES those existing sources; it re-implements none of them:
+ * Operator decision 2026-09-30 ~11:15 ET: ordinary conveyor/daemon work may use Codex probation,
+ * with full review on every result. Critical scope is the gate/approval surface: review clearance,
+ * landing, required checks, statute/rules, credentials, and this gate itself. High-risk/security work
+ * and explicit human-required records remain critical; unknown scope still fails closed.
  *
- *   | proxy              | source (read directly, never copied)                                              |
- *   |--------------------|-----------------------------------------------------------------------------------|
- *   | `dispatch-risk`    | `dispatch-contracts.mjs#deriveRisk(...) === 'high'` (statute path or isHighStakesTask) |
- *   | `never-spot-check` | `dispatch-thresholds.mjs#NEVER_SPOT_CHECK_PATH_PREFIXES` (statute, gateSelf, irreversible) |
- *   | `human-required`   | `humanRequired: true` on the record, else `gate-config.mjs#isPrincipleSurface(path, null)` — the
- *   |                    | same predicate `review-escalation.mjs#scoreEscalation` derives `humanRequired` from, read with no
- *   |                    | diff yet (a statute path fails closed to "human", the leash floor is unconditional) |
- *   | `gate-self`        | `gate-config.mjs#isTrustChainPath` — the review gate's own policy + engine roster (the lander,
- *   |                    | the resident daemons, the dispatch loop)                                            |
- *   | `daemon-drain`     | {@link DAEMON_DRAIN_PATH_PREFIXES} / {@link DAEMON_DRAIN_NAME_RE} — the conveyor trees and any
- *   |                    | daemon or drain file the roster does not name yet (the one list this module owns)   |
+ * Review escalation and never-spot-check have broader purposes. Their dispatch/daemon rosters must
+ * NOT be imported wholesale here: requiring full review does not require a Claude-only builder.
+ * Scope is file-granular: a mixed lander file remains critical because a card cannot prove which
+ * function it will change. No daemon/drain name or conveyor-directory wildcard makes work critical.
  *
  * WHERE THIS IS READ. `dispatch-contracts.mjs#routeDispatch` computes {@link criticalWorkVerdict} for the task and
  * {@link criticalMissesFor} over the raw scorecards, and hands both to `provider-routing.mjs#selectProvider`, whose
@@ -30,22 +24,34 @@
  *
  * FAIL CLOSED. No declared scope → critical (`unknown-scope`). A miss row with no scope evidence → a critical miss.
  *
- * PURE: no fs, no process, no clock. Deterministic over its arguments. The one import cycle here
- * (dispatch-contracts ↔ this file) is safe: neither module reads the other's bindings at top level.
+ * PURE: no fs, no process, no clock. Deterministic over its arguments.
  */
 
-import { deriveRisk, deriveComplexity } from './dispatch-contracts.mjs';
-import { NEVER_SPOT_CHECK_PATH_PREFIXES, isNeverSpotCheckPath } from './dispatch-thresholds.mjs';
-import { isPrincipleSurface, isTrustChainPath } from './gate-config.mjs';
+import { NEVER_SPOT_CHECK_PATH_PREFIXES } from './dispatch-thresholds.mjs';
+import { isPrincipleSurface } from './gate-config.mjs';
 import { CONSTELLATION_REPOS } from './constellation-repos.mjs';
 
-/** The conveyor trees — every resident daemon's entry point and the tick/reconcile machinery they run. */
-// @test-only-export-ok: the critical-work table (#4034), read by its own test and the dispatch dry-run
-export const DAEMON_DRAIN_PATH_PREFIXES = Object.freeze(['scripts/conveyor/', 'skills-src/conveyor/']);
+/** The file-level gate/approval boundary, distinct from the broader full-review roster. */
+const CRITICAL_PATH_PREFIXES = Object.freeze({
+  statute: NEVER_SPOT_CHECK_PATH_PREFIXES.statute,
+  gateSelf: Object.freeze([
+    'scripts/check-standards', 'scripts/check-review-gate', 'scripts/guard-', 'scripts/verify-lane',
+    'scripts/lib/critical-work.mjs', 'scripts/lib/provider-routing.mjs', 'scripts/lib/gate-',
+    'scripts/review-set-label.mjs', 'scripts/review-core-cli.mjs',
+    'scripts/lib/review-core.mjs', 'scripts/lib/review-policy', 'scripts/lib/review-escalation.mjs',
+    'scripts/lib/review-independence.mjs', 'scripts/lib/advisory-labels.mjs',
+    'scripts/lib/verdict-ledger', 'scripts/lib/disposition-land-seam.mjs', 'scripts/lib/auto-land-seam.mjs',
+    'scripts/operations/review-pr', 'scripts/conveyor/advisory-label-sweep.mjs',
+    'scripts/conveyor/advisory-fix-mark.mjs',
+  ]),
+  irreversible: Object.freeze([
+    '.github/workflows/', '.github/branch-protection', '.github/required-check',
+    'scripts/pr-land', 'scripts/merge-ai-prs', 'scripts/operations/poc-land',
+  ]),
+});
 
-/** A daemon or drain file anywhere (`lane-drain.mjs`, `drain-lock.mjs`, `daemon-self-sync.mjs`, `tools/drain-daemon/`). */
-// @test-only-export-ok: the critical-work table (#4034), read by its own test and the dispatch dry-run
-export const DAEMON_DRAIN_NAME_RE = /(^|[/_.-])(daemons?|drain)([/_.-]|$)/i;
+/** Security-sensitive scope in any repo; security tags cover handling in otherwise ordinary files. */
+const SECURITY_PATH_RE = /(^|[/_.-])(secrets?|credentials?|branch-protection|required-checks?)([/_.-]|$)|(^|\/)\.env(?:[./]|$)/i;
 
 /** The confirmed-miss outcomes (#3949 writes `reworked` on a review:changes verdict; the red team #4195 too). */
 // @test-only-export-ok: the critical-work table (#4034)
@@ -95,7 +101,7 @@ function repoRelativeForm(f) {
 /**
  * Is this work critical? Pure.
  * @param {{taskType?: string, filesTouched?: string[], estimatedLoc?: number, acceptanceTestable?: boolean,
- *   risk?: string, humanRequired?: boolean}} work
+ *   risk?: string, humanRequired?: boolean, tags?: string[]}} work
  * @returns {{critical: boolean, reasons: Array<{proxy: string, detail: string}>}}
  */
 // @test-only-export-ok: the critical-work predicate (#4034), wired through dispatch-contracts.mjs#routeDispatch
@@ -109,14 +115,13 @@ export function criticalWorkVerdict(work = {}) {
     return { critical: true, reasons: [{ proxy: 'unknown-scope', detail: 'no declared scope: criticality cannot be ruled out (fail closed)' }] };
   }
 
-  const estimatedLoc = Number.isFinite(work?.estimatedLoc) ? work.estimatedLoc : 0;
-  const complexity = deriveComplexity(taskType, estimatedLoc, files.length);
-  const risk = deriveRisk(taskType, files, complexity, work?.acceptanceTestable !== false);
-  if (risk === 'high' || work?.risk === 'high') {
-    reasons.push({ proxy: 'dispatch-risk', detail: `deriveRisk is high${work?.risk === 'high' && risk !== 'high' ? ' (raised by the requested risk)' : ''}` });
+  // General dispatch risk also scores ordinary implementation+test bugfixes high. That affects care,
+  // not this operator's Claude-only boundary; only the declared high-risk flag is a critical override.
+  if (work?.risk === 'high') {
+    reasons.push({ proxy: 'dispatch-risk', detail: 'explicitly high-risk work' });
   }
 
-  const groups = Object.entries(NEVER_SPOT_CHECK_PATH_PREFIXES)
+  const groups = Object.entries(CRITICAL_PATH_PREFIXES)
     .filter(([name, prefixes]) => files.some((f) => {
       if (prefixes.some((prefix) => f.startsWith(prefix))) return true;
       // #4200 — ONLY `irreversible` recurs identically per repo (`.github/workflows/`, the deploy/land
@@ -127,7 +132,7 @@ export function criticalWorkVerdict(work = {}) {
       return relative != null && prefixes.some((prefix) => relative.startsWith(prefix));
     }))
     .map(([group]) => group);
-  if (groups.length || files.some(isNeverSpotCheckPath)) {
+  if (groups.length) {
     reasons.push({ proxy: 'never-spot-check', detail: groups.length ? groups.join(',') : 'statute-tier path' });
   }
 
@@ -136,11 +141,10 @@ export function criticalWorkVerdict(work = {}) {
     reasons.push({ proxy: 'human-required', detail: principle.length ? principle.join(',') : 'humanRequired on record' });
   }
 
-  const trust = files.filter((f) => isTrustChainPath(f));
-  if (trust.length) reasons.push({ proxy: 'gate-self', detail: trust.join(',') });
-
-  const daemon = files.filter((f) => DAEMON_DRAIN_PATH_PREFIXES.some((prefix) => f.startsWith(prefix)) || DAEMON_DRAIN_NAME_RE.test(f));
-  if (daemon.length) reasons.push({ proxy: 'daemon-drain', detail: daemon.join(',') });
+  const security = files.filter((f) => SECURITY_PATH_RE.test(f));
+  if (taskType === 'security-fix' || work?.tags?.includes('security') || security.length) {
+    reasons.push({ proxy: 'security', detail: security.length ? security.join(',') : 'security-critical task' });
+  }
 
   return { critical: reasons.length > 0, reasons };
 }
@@ -167,6 +171,7 @@ export function isCriticalMiss(record, evidence = {}) {
     filesTouched: Array.isArray(record.filesTouched) ? record.filesTouched : evidence?.filesTouched,
     humanRequired: record.humanRequired === true || evidence?.humanRequired === true,
     risk: record.risk ?? evidence?.risk,
+    tags: record.tags ?? evidence?.tags,
   }).critical;
 }
 
