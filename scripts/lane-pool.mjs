@@ -1827,6 +1827,9 @@ function cmdAcquire(repo) {
   // applied (log line + JSON `base`), so an orchestrator stacking a serial batch would believe the lane sits on
   // the predecessor tip when HEAD was never moved. Reject the combo BEFORE claiming any lane (touches nothing) —
   // failing loud beats silently misreporting for a primitive other automation trusts.
+  if (flags.purpose === 'conveyor-prepare-item' && (flags['no-reset'] || flags.reserve || (flags.base && flags.base !== 'origin/main'))) {
+    fail('prepare-item requires a fresh origin/main lane; no alternate base, reservation, or --no-reset');
+  }
   if (flags.base && flags['no-reset']) {
     fail(`--base=${flags.base} and --no-reset are mutually exclusive: --base resets the clone to that ref, which --no-reset would skip. Pass one or the other.`);
   }

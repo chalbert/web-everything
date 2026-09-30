@@ -2,7 +2,7 @@
  * @file scripts/operations/open-pr-io.mjs
  * @description THE IO SHELL of the `open-pr` declaration — one spawn of `we:scripts/pr-land.mjs`.
  *
- * IT SHELLS THE HOME AND DOES NOTHING ELSE. No `gh` call of its own, no GitHub API, no branch push: every one
+ * It validates prepare isolation before shelling the home. No `gh` call of its own, no GitHub API, no branch push: every one
  * of those already belongs to `pr-land.mjs`, and a second route to any of them is the bypass this operation
  * exists to close. If this file ever grows an `https` import, the operation has become the problem it names.
  *
@@ -13,11 +13,12 @@
  *
  * IMPURE by construction: `child_process`.
  */
-import { spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { classifySubmit } from './open-pr.mjs';
+import { prepareItemFromRef, preparePrTitle, verifyPreparePr } from './prepare-pr.mjs';
 
 /** The single home. Resolved from THIS file's location, never cwd — the lane being opened is not this repo. */
 export const PR_LAND_CLI = join(dirname(fileURLToPath(import.meta.url)), '..', 'pr-land.mjs');
@@ -29,9 +30,22 @@ export const OPEN_PR_TIMEOUT_MS = 30 * 60 * 1000;
  * The runner the declaration is injected with. ONE spawn; `spawn` is injected so every branch of
  * `classifySubmit` is reachable with no `gh`, no network and no PR.
  */
-export function createPrLandRunner({ spawn = spawnSync, cwd = process.cwd() } = {}) {
+export function createPrLandRunner({ spawn = spawnSync, cwd = process.cwd(),
+  git = (args) => execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }),
+} = {}) {
   return ({ argv }) => {
     let r;
+    const arg = (name) => argv.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3);
+    const item = prepareItemFromRef(arg('ref'));
+    if (item) {
+      try {
+        const sha = verifyPreparePr({ item, source: arg('sha') || 'HEAD', base: arg('base') || 'main', git });
+        argv = argv.filter((a) => !a.startsWith('--title=') && !a.startsWith('--sha='));
+        argv.push(`--title=${preparePrTitle(item)}`, `--sha=${sha}`);
+      } catch (e) {
+        return { outcome: 'refused', reason: String(e.message || e) };
+      }
+    }
     try {
       r = spawn(process.execPath, [PR_LAND_CLI, ...argv, '--json'], {
         encoding: 'utf8', timeout: OPEN_PR_TIMEOUT_MS, maxBuffer: 64 * 1024 * 1024, cwd,

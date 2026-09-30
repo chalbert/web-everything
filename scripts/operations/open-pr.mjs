@@ -27,6 +27,7 @@
  * holding a credential submits THAT, unedited. The same split as `record-verdict`, where the decision is made
  * here and the credentialed executor is CI.
  */
+import { prepareItemFromRef, preparePrTitle } from './prepare-pr.mjs';
 import { op } from './registry.mjs';
 // #3224/#3245 — the raw invocation this operation declares over, now that it can genuinely replace it.
 import { DECLARED_HOMES } from './declared-homes.mjs';
@@ -74,6 +75,8 @@ export const SUBMIT_OUTCOMES = Object.freeze(['opened', 'refused', 'unrun']);
  * verify marker is deliberately NOT among them: that decision has one home and this is not it.
  */
 export function planOpen({ ref, base, title, bodyFile, mode, parkLabel, sha = '', requireVerified = false, dryRun = false } = {}) {
+  const prepareItem = prepareItemFromRef(ref);
+  if (prepareItem) title = preparePrTitle(prepareItem);
   const problems = [];
   if (typeof ref !== 'string' || !/^lane\//.test(ref)) {
     problems.push(`\`ref\` must be a lane/* ref (the #1934 guard carve-out), got ${JSON.stringify(ref)}`);

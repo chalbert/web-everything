@@ -600,3 +600,13 @@ Prepare retirement probes the worker handle independently of the daemon-owned cl
 A failed session listing remains unknown. The daemon's records live in the coordination
 `build-dispatch-runs` store; scratch-started Claude transcripts live under dispatch project paths,
 even after the session changes into a lane. Lane-only transcript searches miss those sessions.
+
+## Prepare PR isolation
+
+Prepare-item refs (`lane/<item>-prepare-item-*`) receive a fixed item-specific title from the open-pr producer,
+never a commit subject. Other `-prepare-` refs (prepare-decision, prepare-stamp) are not guarded: decision
+prepares legitimately touch research files. Its submission boundary fetches origin/main, checks the full three-dot diff
+against the unique target card, rejects lane merge commits, and pins the observed source SHA before
+calling pr-land. Observation failures refuse publication. Prepare agents acquire fresh origin/main
+lanes and never merge another lane. Regression histories live in
+`we:scripts/operations/__tests__/prepare-pr.test.mjs`.

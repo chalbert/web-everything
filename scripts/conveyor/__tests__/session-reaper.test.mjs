@@ -77,7 +77,8 @@ import { OUTCOME_UNREADABLE } from '../hung-session.mjs';
 import { newCompletionRecord, applyCompletionUpdate, writeCompletion } from '../../operations/completion-store.mjs';
 import { newDeliveryReport, writeDeliveryReport } from '../../operations/delivery-report-store.mjs';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
+import { tmpdir } from 'node:os';
+import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 
 const bg = (over = {}) => ({ id: 'abc12345', cwd: '/repo', kind: 'background', startedAt: 1, sessionId: 'abc12345-0000-0000-0000-000000000000', name: 'conveyor-1', ...over });
@@ -2584,14 +2585,30 @@ describe('writeChatSpawnLink / tryReadChatSpawnLink — the link store', () => {
   // itself is — a lane, the primary checkout, a scratch clone) almost never shares with the daemon's own
   // dedicated clone the reaper actually runs from. The default is now machine-wide, under `~/.claude/`.
   it('defaults to a MACHINE-WIDE location under ~/.claude/, never REPO_ROOT-relative', () => {
-    const id = `we-test-chat-spawn-default-dir-${process.pid}-${Date.now()}`;
-    const defaultPath = join(homedir(), '.claude', 'we-chat-spawns', `${id}.json`);
+    // Run the default resolver with a private OS home, preserving real filesystem IO.
+    const home = mkdtempSync(join(tmpdir(), 'we-chat-spawn-home-'));
     try {
-      expect(writeChatSpawnLink({ spawnedSessionId: id, spawnedByChatSessionId: 'chat-1' })).toBe(true);
-      expect(existsSync(defaultPath)).toBe(true);
-      expect(tryReadChatSpawnLink(id)).toEqual({ ok: true, spawnedByChatSessionId: 'chat-1', recordedAtMs: expect.any(Number) });
+      execFileSync(process.execPath, ['--input-type=module', '-e', `
+        import os from 'node:os';
+        import { syncBuiltinESMExports } from 'node:module';
+        import assert from 'node:assert/strict';
+        import { existsSync } from 'node:fs';
+        import { join } from 'node:path';
+        os.homedir = () => process.argv[1];
+        syncBuiltinESMExports();
+        delete process.env.OPERATION_CHAT_SPAWNS_DIR;
+        const { writeChatSpawnLink, tryReadChatSpawnLink } = await import(process.argv[2]);
+        const id = 'we-test-chat-spawn-default-dir';
+        const recordedAt = '2026-09-30T00:00:00.000Z';
+        assert.equal(writeChatSpawnLink({ spawnedSessionId: id,
+          spawnedByChatSessionId: 'chat-1', now: () => recordedAt }), true);
+        assert.equal(existsSync(join(process.argv[1], '.claude', 'we-chat-spawns', id + '.json')), true);
+        assert.deepEqual(tryReadChatSpawnLink(id), {
+          ok: true, spawnedByChatSessionId: 'chat-1', recordedAtMs: Date.parse(recordedAt),
+        });
+      `, home, join(process.cwd(), 'scripts/conveyor/session-reaper.mjs')], { timeout: 10000, encoding: 'utf8' });
     } finally {
-      rmSync(defaultPath, { force: true });
+      rmSync(home, { recursive: true, force: true });
     }
   });
 });

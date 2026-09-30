@@ -88,7 +88,7 @@ claim, build, or **resolve** the item — a prepared story/task is **still open*
 
 ```bash
 export LANE_SESSION={{SESSION_SLUG}}
-LANE=$(node "{{WE_ROOT}}/scripts/lane-pool.mjs" acquire --lane={{LANE}} --purpose=conveyor-prepare-item \
+LANE=$(node "{{WE_ROOT}}/scripts/lane-pool.mjs" acquire --lane={{LANE}} --purpose=conveyor-prepare-item --base=origin/main \
   --session={{SESSION_SLUG}} --scope=we:{{ITEM_SPEC_PATH}}) && cd "$LANE"
 ```
 
@@ -96,6 +96,11 @@ LANE=$(node "{{WE_ROOT}}/scripts/lane-pool.mjs" acquire --lane={{LANE}} --purpos
   loud — report it and exit; the skill re-dispatches.
 - `--scope=…` declares this lane's file-scope: the one item's body. Prepare is **parallel-safe** with builds and
   other prepares — its scope is a single item's body, disjoint by construction from any builder's code scope.
+
+The acquired lane must be fresh from fetched `origin/main`: verify
+`git rev-parse HEAD` equals `git rev-parse origin/main` before editing. If unequal, stop and report it.
+Never use `--no-reset`, base on a predecessor lane, or merge another lane into this prepare.
+If another lane has needed work, wait for it to land and acquire a fresh lane from `origin/main`.
 
 ### 2. Prepare-hold the item (a hard local lock), then run the method in the lane
 
@@ -173,9 +178,15 @@ printf '%s\n' "WE #{{ITEM_NUM}}: prepare item — Design/MVP/Test plan/Proof pla
   "Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>" > <msgfile>
 git commit -F <msgfile> {{ITEM_SPEC_PATH}}
 
-node scripts/operations/run.mjs open-pr --ref=lane/{{ITEM_NUM}}-prepare-<slug> --sha=HEAD --base=main \
+node scripts/operations/run.mjs open-pr --ref=lane/{{ITEM_NUM}}-prepare-item-<slug> --sha=HEAD --base=main \
+  --title="WE #{{ITEM_NUM}}: prepare item — Design/MVP/Test plan/Proof plan/Follow-ups" \
   --bodyFile=<pr-body> --mode=label-on-green --json
 ```
+
+The producer checks the full PR diff against `origin/main` before any publication. Any file other than
+`{{ITEM_SPEC_PATH}}`, including another card, refuses the PR with the offending paths. A merge commit
+in the lane also refuses publication. Stop on refusal; reacquire fresh and reapply only this card.
+The title is fixed from the item identity, never derived from a commit subject.
 
 `--mode=label-on-green` opens the self-approved PR, waits for the required `test` check, applies `ready-to-merge`
 **only when green, then STOPS** (the resident drain lands it). This is the **default and expected** outcome: a
