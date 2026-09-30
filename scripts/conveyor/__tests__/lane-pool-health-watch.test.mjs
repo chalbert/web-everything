@@ -25,6 +25,7 @@ import {
   runLanePoolHealthWatch,
   resolveLanePoolRepoPath,
   reclaimFinishedLanes,
+  formatSalvageKeptLine,
 } from '../lane-pool-health-watch.mjs';
 
 describe('planLaneReap — pure', () => {
@@ -832,5 +833,13 @@ describe('watchLanePoolHealth — real git integration (proves the SAME shared c
     expect(result.reaped).toEqual([]); // but the actual mutation was cancelled by the fresh re-read
     expect(existsSync(join(dir, '.commit-msg.txt'))).toBe(true); // litter left in place too — never partial
     expect(existsSync(join(dir, 'raced-in.txt'))).toBe(true);
+  });
+});
+
+describe('formatSalvageKeptLine', () => {
+  it('prefers keptReason, then reason, then unknown', () => {
+    expect(formatSalvageKeptLine({ kept: true, keptReason: 'live agent', reason: 'other' })).toBe('live agent');
+    expect(formatSalvageKeptLine({ reason: 'only reason' })).toBe('only reason');
+    expect(formatSalvageKeptLine({})).toBe('unknown');
   });
 });

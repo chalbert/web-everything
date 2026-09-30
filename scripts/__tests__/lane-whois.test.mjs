@@ -270,6 +270,13 @@ describe('lane-whois — AFTER', () => {
     }
   });
 
+  it('a lane with no ledger session and a session-less foreign agent reports liveOwner:false (undefined ids never match)', () => {
+    writeFileSync(join(binDir, 'claude'), `#!/bin/sh\necho '[{"state":"working","cwd":"${lanePath(2)}"}]'\n`);
+    chmodSync(join(binDir, 'claude'), 0o755);
+    const r = runWhois(['--lane=1', '--json', `--repo=${referenceDir}`, '--name=whoispool', `--pool-root=${poolRoot}`]);
+    expect(JSON.parse(r.out).lanes[0].liveOwner).toBe(false);
+  });
+
   it('an UNLEASED lane with NO live agent reports liveOwner:false (unchanged default)', () => {
     expect(runPool(['acquire', '--lane=1', '--session=sess-c', ...poolArgs()]).code).toBe(0);
     expect(runPool(['release', '--lane=1', '--session=sess-c', ...poolArgs()]).code).toBe(0);

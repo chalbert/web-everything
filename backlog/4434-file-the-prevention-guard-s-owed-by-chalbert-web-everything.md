@@ -3,9 +3,10 @@ bornAs: xn96zu1
 kind: story
 size: 3
 parent: "4075"
-status: open
+status: active
 scope: ["we:scripts/lib/lane-salvage.mjs", "we:scripts/conveyor/lane-pool-health-watch.mjs", "we:scripts/lane-whois.mjs", "we:scripts/lib/__tests__/lane-salvage.test.mjs", "we:scripts/conveyor/__tests__/lane-pool-health-watch.test.mjs", "we:scripts/__tests__/lane-whois.test.mjs"]
 dateOpened: "2026-09-28"
+dateStarted: "2026-09-30"
 preparedDate: "2026-09-30"
 preparedAgainstSha: "50da0dc5c82df43f845c480c430b6e6430785afc"
 tags: []

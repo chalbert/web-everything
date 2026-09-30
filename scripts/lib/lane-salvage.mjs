@@ -299,20 +299,36 @@ function newestLitterMtimeMs(items) {
  *
  * Coverage this still keeps for a STAGED/WORKING-TREE DELETION (a path `dirtyPaths` reports as dirty that no
  * longer exists on disk to `stat`, e.g. `git rm`, or a plain `rm` of a tracked file): rather than reach for the
- * index's own unreliable mtime, an unstatable dirty path is itself treated as maximally fresh (`Date.now()`) —
- * git's porcelain reporting a path as dirty IS the fresh-activity signal; a missing mtime on that path is not
- * evidence of nothing having happened, it is only evidence the CONTENT itself is gone. `.git/logs/HEAD` needs
+ * index's own unreliable mtime, an unstatable dirty path is aged by the mtime of its nearest SURVIVING ancestor
+ * directory ({@link nearestAncestorMtimeMs}, bounded at the scanned dir) — `rm`/`git rm` bump the parent's mtime
+ * once and it then holds still, so a left-in-place deletion eventually reads quiet instead of "now" forever.
+ * Only when no ancestor can be statted does it fall back to `Date.now()` (fail-closed). `.git/logs/HEAD` needs
  * no such fallback: it is only ever written by a REAL ref-moving operation (commit/reset/checkout/merge), never
  * as a side effect of a read-only status call, so its own mtime is trustworthy exactly as read.
  */
+/** PURE-ish: mtime of the nearest existing ancestor directory of `path`, walking up but never above `stop`
+ *  (inclusive). `null` when none can be statted. `stat` is injectable for tests. */
+export function nearestAncestorMtimeMs(path, stop, stat = statSync) {
+  const root = resolve(stop);
+  let cur = dirname(resolve(path));
+  for (;;) {
+    if (cur !== root && !cur.startsWith(root + sep)) return null;
+    try { return stat(cur).mtimeMs; } catch { /* gone — try the parent */ }
+    if (cur === root) return null;
+    cur = dirname(cur);
+  }
+}
+
 export function newestContentMtimeMs(dir) {
   let newest = null;
   const bump = (m) => { if (Number.isFinite(m) && (newest === null || m > newest)) newest = m; };
   const statMtime = (p) => { try { return statSync(p).mtimeMs; } catch { return null; } };
   const scan = (d) => {
     for (const p of dirtyPaths(d)) {
-      const m = statMtime(join(d, p));
-      bump(m === null ? Date.now() : m); // unstatable (gone) dirty path — treat as freshly changed, never skipped
+      const full = join(d, p);
+      const m = statMtime(full);
+      // unstatable (gone) dirty path — age it by its nearest surviving ancestor; fail closed to "now", never skipped
+      bump(m === null ? (nearestAncestorMtimeMs(full, d) ?? Date.now()) : m);
     }
     const gitDir = resolve(d, git(d, ['rev-parse', '--git-dir']).trim());
     bump(statMtime(join(gitDir, 'logs', 'HEAD')));

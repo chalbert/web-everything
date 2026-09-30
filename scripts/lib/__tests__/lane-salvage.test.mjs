@@ -15,7 +15,7 @@ import { tmpdir } from 'node:os';
 import {
   salvageStamp, salvageRefNames, isWorktreeLitterPath, parseLsofCwds, pidsWithCwdIn, salvageEligibility,
   liveAgentInLane, deriveSalvageTargets, salvageLane, removeLitterWorktrees, listLitterWorktrees, laneLivenessGate,
-  listUnregisteredWorktreeLitter, newestContentMtimeMs, resolveSalvageQuietMs,
+  listUnregisteredWorktreeLitter, newestContentMtimeMs, nearestAncestorMtimeMs, resolveSalvageQuietMs,
 } from '../lane-salvage.mjs';
 
 describe('lane-salvage pure core', () => {
@@ -153,7 +153,7 @@ describe('newestContentMtimeMs (real git, #xl5xhmj)', () => {
   });
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-  it('a STAGED DELETION (the tracked path no longer exists on disk) still reads as recent, via the unstatable-path fallback', () => {
+  it('a STAGED DELETION (the tracked path no longer exists on disk) still reads as recent (a fresh deletion bumps its parent-dir mtime)', () => {
     // Back-date logs/HEAD first so the ONLY fresh signal left is the deletion itself — `bump` cannot stat a
     // path `git rm` already removed from the working tree, so this pins the fallback, not logs/HEAD.
     const old = new Date(Date.now() - 60 * 60_000);
@@ -163,6 +163,26 @@ describe('newestContentMtimeMs (real git, #xl5xhmj)', () => {
     const newest = newestContentMtimeMs(dir);
     expect(newest).not.toBeNull();
     expect(newest).toBeGreaterThanOrEqual(before - 5_000); // recent (within a few seconds), not the back-dated hour
+  });
+
+  it('an AGED deletion (parent dir mtime old) reads quiet — the deletion ages out instead of reading "now" forever', () => {
+    const old = new Date(Date.now() - 2 * 60 * 60_000);
+    git('rm', '-q', 'a.txt');
+    utimesSync(dir, old, old);
+    utimesSync(join(dir, '.git', 'logs', 'HEAD'), old, old);
+    expect(Date.now() - newestContentMtimeMs(dir)).toBeGreaterThanOrEqual(60 * 60_000);
+  });
+
+  it('a deletion whose parent dir is also gone uses the nearest SURVIVING ancestor', () => {
+    const old = new Date(Date.now() - 2 * 60 * 60_000);
+    mkdirSync(join(dir, 'sub', 'deep'), { recursive: true });
+    writeFileSync(join(dir, 'sub', 'deep', 'c.txt'), 'x\n');
+    git('add', '.');
+    git('commit', '-qm', 'sub');
+    rmSync(join(dir, 'sub'), { recursive: true, force: true });
+    utimesSync(dir, old, old);
+    utimesSync(join(dir, '.git', 'logs', 'HEAD'), old, old);
+    expect(Date.now() - newestContentMtimeMs(dir)).toBeGreaterThanOrEqual(60 * 60_000);
   });
 
   it('a genuinely quiet lane (nothing staged, HEAD reflog old) still reads as old — the original racy-index bug stays fixed', () => {
@@ -466,5 +486,24 @@ describe('salvageLane (real git)', () => {
     const rec = salvageLane({ dir: lane, lane: 5, pool: 'p', branchRef: 'origin/main', salvageRoot, now: new Date() });
     expect(rec.litter).toHaveLength(1);
     expect(readFileSync(join(rec.litter[0].dest, 'wip.txt'), 'utf8')).toBe('still being written\n');
+  });
+});
+
+describe('nearestAncestorMtimeMs', () => {
+  it('returns null when no ancestor up to the stop can be statted (caller fails closed to now)', () => {
+    const stat = () => { throw new Error('ENOENT'); };
+    expect(nearestAncestorMtimeMs('/lane/a/b/c.txt', '/lane', stat)).toBeNull();
+  });
+  it('never walks above the stop dir', () => {
+    const seen = [];
+    const stat = (p) => { seen.push(p); throw new Error('ENOENT'); };
+    nearestAncestorMtimeMs('/lane/a/c.txt', '/lane', stat);
+    expect(seen).toEqual(['/lane/a', '/lane']);
+  });
+});
+
+describe('liveAgentInLane — undefined session ids', () => {
+  it('undefined/null session ids never match an agent with no sessionId', () => {
+    expect(liveAgentInLane([{ state: 'working', cwd: '/elsewhere' }], '/pool/lane-1', [undefined, null])).toBe(false);
   });
 });
