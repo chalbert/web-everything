@@ -21,6 +21,7 @@ import { mkdtempSync, rmSync, writeFileSync, chmodSync, readFileSync, existsSync
 import { execFileSync, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { attributeSpend } from '../gh-spend.mjs';
 import {
   defaultShimDir, shimGhPath, resolveRealGhBinary, renderGhShimScript, ensureGhShim, ghShimPathOverride,
   buildGhShimSettingsEnv, looksLikeAppTokenAuthFailure, ensureSettingsFileEnv, ensureSettingsFilePermissions, sanitizeSpawnEnv,
@@ -883,5 +884,90 @@ describe('buildGhShimSettingsEnv — the composed, OPT-IN-GATED entry point a di
       });
       expect(result).toEqual({ PATH: '/shim:/opt/homebrew/bin' });
     });
+  });
+});
+
+// #4653: the generated artifact and its ledger survive loss of the generating checkout.
+describe('disposable checkout fallback metering', () => {
+  it.each(['entry', 'import', 'healthy', 'failure', 'unknown', 'nested', 'debug'])('observes %s through the adopted PATH without replay', (mode) => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), 'we-shim-meter-')));
+    try {
+      const checkout = join(dir, 'checkout');
+      const bin = join(dir, 'bin');
+      const ledger = join(dir, 'ledger');
+      mkdirSync(checkout);
+      const cli = join(checkout, 'throttle.mjs');
+      const dependency = join(checkout, 'dependency.mjs');
+      writeFileSync(dependency, 'export {};');
+      writeFileSync(cli, `import './dependency.mjs';
+import { spawnSync } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
+if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
+  const r = spawnSync(process.env.WE_GH_THROTTLE_GH_BIN, process.argv.slice(2), { stdio: 'inherit' });
+  process.exitCode = r.status;
+}`);
+      const realGh = join(dir, 'real-gh');
+      const count = join(dir, 'executions');
+      const secret = 'ghs_disposable_fixture_secret';
+      const trace = '* Request at now\n* Request to https://api.github.com/graphql\n> Authorization: Bearer ' + secret
+        + '\n\nprivate request body\n< HTTP/2.0 200 OK\n< X-Ratelimit-Used: 9\n< X-Ratelimit-Remaining: 91\n< X-Ratelimit-Limit: 100\n< X-Ratelimit-Reset: 123\n< X-Ratelimit-Resource: graphql\n< Set-Cookie: private-cookie\n\n'
+        + JSON.stringify({ data: { rateLimit: { cost: 3 }, private: 'private-response' } }) + '\n* Request took 1ms\n';
+      writeFileSync(realGh, `#!/usr/bin/env node
+const fs = require('node:fs');
+fs.appendFileSync(${JSON.stringify(count)}, 'call\\n');
+if (process.env.GH_TOKEN !== ${JSON.stringify(secret)}) process.exit(9);
+process.stdout.write('payload\\u0000bytes\\n');
+if (process.env.GH_DEBUG === 'api') process.stderr.write(${JSON.stringify(trace)});
+process.stderr.write(${JSON.stringify(mode === 'failure' ? 'Cannot find module unrelated-extension\n' : 'warning\n')});
+process.exitCode = ${mode === 'failure' ? 7 : 0};
+`);
+      chmodSync(realGh, 0o755);
+      const cachePath = join(dir, 'cache.json');
+      writeFileSync(cachePath, JSON.stringify({ v: 2, token: secret, installationId: '12345', expiresAt: new Date(Date.now() + 3600000).toISOString() }));
+      expect(ensureGhShim({ dir: bin, realGhPath: realGh, cachePath, ghThrottleCliPath: cli }).ok).toBe(true);
+      if (mode === 'import') rmSync(dependency);
+      else if (!['healthy', 'failure'].includes(mode)) rmSync(checkout, { recursive: true });
+      const env = {
+        ...process.env, PATH: ghShimPathOverride({ dir: bin }), GH_CALLER: 'disposable-probe',
+        WE_GH_THROTTLE_LOCK_ROOT: ledger, GH_DEBUG: mode === 'debug' ? 'api' : '',
+        WE_GH_THROTTLE_COST_HEADERS: mode === 'unknown' ? '0' : '1',
+        WE_GH_THROTTLE_OUTER_INV: mode === 'nested' ? 'outer-probe' : '',
+      };
+      // A new shell resolves a bare gh through the actual generated PATH, after checkout deletion.
+      const result = spawnSync('/bin/sh', ['-c', 'command -v gh; gh api graphql'], { env, encoding: 'utf8' });
+      expect(result.stdout).toBe(`${join(bin, 'gh')}\npayload\u0000bytes\n`);
+      expect(result.status).toBe(mode === 'failure' ? 7 : 0);
+      expect(readFileSync(count, 'utf8')).toBe('call\n');
+      if (['healthy', 'failure'].includes(mode)) {
+        expect(existsSync(join(ledger, 'calls.jsonl'))).toBe(false);
+        expect(result.stderr).toBe(mode === 'failure' ? 'Cannot find module unrelated-extension\n' : 'warning\n');
+      } else {
+        const raw = readFileSync(join(ledger, 'calls.jsonl'), 'utf8');
+        const rows = raw.trim().split('\n').map(JSON.parse);
+        expect(rows).toHaveLength(1);
+        expect(rows[0]).toMatchObject({
+          transport: 'shim-fallback', fallbackReason: mode === 'import' ? 'missing-import' : 'missing-entry',
+          caller: 'disposable-probe', id: 'app', installationId: '12345', authSource: 'app-cache', resource: 'graphql',
+          cost: mode === 'unknown' ? null : 3, costSource: mode === 'unknown' ? 'unknown' : 'response',
+        });
+        if (mode === 'nested') {
+          expect(rows[0].outer).toBe('outer-probe');
+          const outer = { ...rows[0], inv: 'outer-probe' };
+          delete outer.outer;
+          const spend = attributeSpend([rows[0], outer]);
+          expect(spend.invocations).toHaveLength(1);
+          expect(spend.invocations[0].responses).toHaveLength(1);
+          expect(spend.invocations[0].attributedByRes.graphql).toBe(3);
+        }
+        if (mode !== 'unknown') expect(rows[0].rl).toEqual([{ used: 9, rem: 91, limit: 100, reset: 123, res: 'graphql', cost: 3 }]);
+        for (const privateValue of [secret, 'private-cookie', 'private-response', 'private request body', 'Authorization']) {
+          expect(raw).not.toContain(privateValue);
+          if (mode !== 'debug') expect(result.stderr).not.toContain(privateValue);
+        }
+        if (mode === 'debug') expect(result.stderr).toContain(trace);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
