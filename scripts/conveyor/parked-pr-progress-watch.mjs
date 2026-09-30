@@ -252,7 +252,7 @@ export function defaultListParkedPrs({ exec = execFileSyncThrottled, repo = null
     '--json', 'number,headRefName,labels'];
   if (repo) argv.push('--repo', repo);
   // #x5n4zn3 — was bare (no timeout).
-  const out = exec('gh', argv, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024, timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL' });
+  const out = exec('gh', argv, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024, timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL', throttle: { deferrable: true } });
   if (isGhDeferred(out)) return JSON.parse(String(out));
   const parsed = JSON.parse(String(out || '[]'));
   return Array.isArray(parsed) ? parsed : [];

@@ -8,7 +8,7 @@
  *   every wired pass reader actually reads the snapshot instead of calling `gh`.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, writeFileSync, chmodSync, existsSync, readFileSync, utimesSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, chmodSync, existsSync, readFileSync, utimesSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -218,4 +218,13 @@ it('returns null (the Array|null contract) on a deferral unless the caller opts 
   const deferred = { outcome: 'deferred-low-budget', deferred: true, priority: 'normal' };
   expect(readSharedOpenPrs(opts({ fields: 'number', exec: () => JSON.stringify(deferred) }))).toBe(null);
   expect(existsSync(snapshotPath(dir, REPO))).toBe(false);
+});
+
+it('marks the snapshot refresh deferrable only when the caller opted in', () => {
+  const seen = [];
+  const exec = (_b, _a, o) => { seen.push(o.throttle.deferrable); return '[]'; };
+  readSharedOpenPrs(opts({ fields: 'number', exec, allowDeferred: true }));
+  rmSync(snapshotPath(dir, REPO), { force: true });
+  readSharedOpenPrs(opts({ fields: 'number', exec }));
+  expect(seen).toEqual([true, false]);
 });

@@ -90,14 +90,14 @@ function normalizeFields(fields) {
  * Fetch a fresh snapshot for `repo`: right-sized `--limit`, re-fetched larger only when the page came back
  * full. Throws the `gh` error unchanged.
  */
-export function fetchSnapshot({ repo, prevCount, exec = execFileSyncThrottled, nowMs = Date.now() }) {
+export function fetchSnapshot({ repo, prevCount, exec = execFileSyncThrottled, nowMs = Date.now(), deferrable = false }) {
   let limit = nextLimit(prevCount);
   for (;;) {
     const argv = ['pr', 'list', '--repo', repo, '--state', 'open', '--limit', String(limit), '--json', SNAPSHOT_FIELDS.join(',')];
     const out = exec('gh', argv, {
       encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 256 * 1024 * 1024,
       timeout: 120_000, killSignal: 'SIGKILL',
-      throttle: { op: 'pr list (snapshot)' },
+      throttle: { op: 'pr list (snapshot)', deferrable },
     });
     if (isGhDeferred(out)) return JSON.parse(String(out));
     const parsed = JSON.parse(String(out || '[]'));
@@ -149,7 +149,7 @@ export function readSharedOpenPrs({
       const again = servable(); // a concurrent refresher finished while we waited for the lock
       if (again) return { snap: again, fetched: false };
       const prev = readSnapshotFile(path);
-      const snap = fetchSnapshot({ repo, prevCount: prev?.count, exec, nowMs: now() });
+      const snap = fetchSnapshot({ repo, prevCount: prev?.count, exec, nowMs: now(), deferrable: allowDeferred });
       if (isGhDeferred(snap)) return { deferred: snap };
       writeJsonAtomic(path, snap);
       return { snap, fetched: true };

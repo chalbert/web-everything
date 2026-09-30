@@ -29,19 +29,31 @@ describe('priority admission', () => {
     expect(ghCallerPriority('someone-else')).toBe('normal');
   });
   it.each([[249, 'dispatch-plan.mjs', true], [250, 'dispatch-plan.mjs', false], [99, 'other', true], [100, 'other', false], [1, 'review-daemon', false]])('remaining=%s caller=%s deferred=%s', (rem, caller, deferred) => fixture(rem, throttle => {
-    const result = runGhSync(['pr', 'list'], { encoding: 'utf8', throttle: { ...throttle, caller } });
+    const result = runGhSync(['pr', 'list'], { encoding: 'utf8', throttle: { ...throttle, caller, deferrable: true } });
     expect(isGhDeferred(result)).toBe(deferred);
     expect(throttle.exec).toHaveBeenCalledTimes(deferred ? 0 : 1);
     if (deferred) expect(throttle.warn).toHaveBeenCalledWith(expect.stringContaining('skip this pass'));
   }));
-  it('CLI deferral exits zero and reports skipped work without spawning', () => fixture(20, throttle => {
-    const spawn = vi.fn();
+  it('an unaudited CLI passthrough `pr list` is never deferred (deferral is opt-in)', () => fixture(20, throttle => {
+    const spawn = vi.fn(() => ({ status: 0, stdout: Buffer.from('[]'), stderr: Buffer.from('') }));
     const result = runGhCliPassthrough(['pr', 'list'], { throttle, spawn });
-    expect(result.status).toBe(0);
-    expect(result.deferred).toBe(true);
-    expect(isGhDeferred(result.stdout)).toBe(true);
-    expect(String(result.stderr)).toContain('deferred-low-budget');
-    expect(spawn).not.toHaveBeenCalled();
+    expect(result.deferred).toBeUndefined();
+    expect(spawn).toHaveBeenCalledTimes(1);
+  }));
+  it('an unaudited runGhSync `pr list` (no throttle.deferrable) still executes below the threshold', () => fixture(5, throttle => {
+    const result = runGhSync(['pr', 'list'], { encoding: 'utf8', throttle: { ...throttle, caller: 'someone-else' } });
+    expect(isGhDeferred(result)).toBe(false);
+    expect(throttle.exec).toHaveBeenCalledTimes(1);
+  }));
+  it('a deferred call with encoding:buffer returns a Buffer', () => fixture(5, throttle => {
+    const result = runGhSync(['pr', 'list'], { encoding: 'buffer', throttle: { ...throttle, caller: 'someone-else', deferrable: true } });
+    expect(Buffer.isBuffer(result)).toBe(true);
+    expect(isGhDeferred(result)).toBe(true);
+  }));
+  it('deferral reports skipped work in the spend log without executing', () => fixture(20, throttle => {
+    const result = runGhSync(['pr', 'list'], { encoding: 'utf8', throttle: { ...throttle, deferrable: true } });
+    expect(isGhDeferred(result)).toBe(true);
+    expect(throttle.exec).not.toHaveBeenCalled();
     const entries = readFileSync(join(throttle.lockRoot, 'calls.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
     const sections = summarizeSpendRows(rollupSpend(entries));
     expect(sections[0].requests).toBe(0);
@@ -70,7 +82,7 @@ it.each([
   expect(cli.deferred).toBeUndefined();
 }));
 it('defers a discovery list without an options object instead of crashing', () => fixture(5, throttle => {
-  const result = runGhSync(['pr', 'list'], { throttle: { ...throttle, caller: 'someone-else' } });
+  const result = runGhSync(['pr', 'list'], { throttle: { ...throttle, caller: 'someone-else', deferrable: true } });
   expect(isGhDeferred(result)).toBe(true);
 }));
 it('isGhDeferred ignores large non-deferral payloads without parsing them', () => {

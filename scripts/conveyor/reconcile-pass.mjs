@@ -151,6 +151,7 @@ export function defaultReadPrs({ exec = execFileSyncThrottled, repo = null } = {
   const out = exec('gh', argv, {
     encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024,
     timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL',
+    throttle: { deferrable: true }, // this reader checks isGhDeferred below
   });
   if (isGhDeferred(out)) return JSON.parse(String(out));
   const parsed = JSON.parse(String(out || '[]'));
