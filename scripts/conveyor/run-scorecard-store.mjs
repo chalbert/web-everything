@@ -348,6 +348,36 @@ export function appendScorecard(row, io = {}) {
 }
 
 /**
+ * Append ONE judged probation-trial row unless a trial for the same launch (`{handle, pr}`) is already stored.
+ * The check re-reads the store INSIDE the append lock, so two concurrent judge sweeps cannot double-count a
+ * launch. Returns `null` when it skipped. The injected in-memory `io.write` branch is unlocked (no file) and
+ * is not claimed to be race-free.
+ * @param {object} row - a `dispatchKind: 'probation-trial'` row carrying the launch's `handle` and `pr`.
+ * @param {object} [io]
+ * @returns {object|null} the stored row, or `null` if the launch was already judged.
+ */
+export function appendScorecardUnlessJudged(row, io = {}) {
+  const stamped = { v: 1, outcome: null, scoredAt: new Date().toISOString(), ...row };
+  const verdict = validateScorecard(stamped);
+  if (!verdict.ok) {
+    throw new Error(`run-scorecard-store: refusing to append an invalid scorecard:\n  - ${verdict.errors.join('\n  - ')}`);
+  }
+  ensureMigrated(io);
+  let written = null;
+  const appendRow = () => {
+    const store = readStore(io);
+    const same = (r) => r?.dispatchKind === stamped.dispatchKind && (r.handle ?? null) === (stamped.handle ?? null) && (r.pr ?? null) === (stamped.pr ?? null);
+    if (store.records.some(same)) return;
+    store.records.push(stamped);
+    writeStore(store, io);
+    written = stamped;
+  };
+  if (io.write !== undefined) appendRow();
+  else withStoreLock(io.path ?? resolveScorecardStorePath(), appendRow, io.requireLock === true);
+  return written;
+}
+
+/**
  * FORK 2's aggregator — a 0-100 scalar published ONLY as an aggregate over a declared comparability class,
  * NEVER as a per-run headline. `rubricVersion`, `provider` and `model` are ALL REQUIRED (generalised past
  * the card's own `model × effort × dispatch-kind` sketch, which under-specified `model` as a bare string —

@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import * as storeModule from '../run-scorecard-store.mjs';
 import {
-  validateScorecard, readStore, writeStore, appendScorecard, meanScore,
+  validateScorecard, readStore, writeStore, appendScorecard, appendScorecardUnlessJudged, meanScore,
   resolveScorecardStorePath, LEGACY_IN_TREE_STORE, LEGACY_MIGRATION_ID,
   mergeLegacyStores, migrateLegacyStore, readLegacyStoreTexts,
 } from '../run-scorecard-store.mjs';
@@ -406,5 +406,19 @@ describe('readStore() — the lazy first-read migration of the DEFAULT store (#4
     const fresh = await import('../run-scorecard-store.mjs');
     fresh.readStore({ exists: () => false });
     expect(existsSync(fresh.resolveScorecardStorePath())).toBe(false);
+  });
+});
+
+describe('appendScorecardUnlessJudged', () => {
+  it('keeps one trial row per launch; a different launch still appends', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'scorecard-unless-judged-'));
+    try {
+      const io = { path: join(dir, 'run-scorecards.json') };
+      const trial = (o = {}) => ({ ...baseRow(), dispatchKind: 'probation-trial', outcome: 'landed', pr: 7, handle: 'h-7', ...o });
+      expect(appendScorecardUnlessJudged(trial(), io)).toMatchObject({ pr: 7 });
+      expect(appendScorecardUnlessJudged(trial(), io)).toBeNull();
+      expect(appendScorecardUnlessJudged(trial({ pr: 8, handle: 'h-8' }), io)).toMatchObject({ pr: 8 });
+      expect(readStore(io).records).toHaveLength(2);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 });

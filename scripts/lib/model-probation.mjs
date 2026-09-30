@@ -49,6 +49,8 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
+import { isCriticalMiss as realIsCriticalMiss } from './critical-work.mjs';
+import { readStore as readScorecardStore, appendScorecardUnlessJudged } from '../conveyor/run-scorecard-store.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -322,16 +324,25 @@ export function pendingProbationLaunches(records) {
  *   - merged → `landed`; closed unmerged → `rejected`;
  *   - open with `review:changes` → `reworked` (the review sent it back);
  *   - anything else (pending, accepted-but-not-merged, parked to a human) → `null`, judged on a later sweep.
- * @param {{state?: string, mergedAt?: string|null, labels?: Array<string|{name: string}>}|null} pr
+ * With `launchScoredAt` (the sweep), a label verdict only counts when `pr.reviewLabelAt` postdates it: a missing
+ * or older timestamp stays pending, so a stale label never judges a launch. Merge/close are unaffected.
+ * @param {{state?: string, mergedAt?: string|null, labels?: Array<string|{name: string}>, reviewLabelAt?: string|null}|null} pr
+ * @param {{launchScoredAt?: string}} [o]
  * @returns {'landed'|'reworked'|'rejected'|null}
  */
-export function trialOutcomeFromPr(pr) {
+export function trialOutcomeFromPr(pr, { launchScoredAt } = {}) {
   if (!pr || typeof pr !== 'object') return null;
   const state = String(pr.state ?? '').toUpperCase();
   if (state === 'MERGED' || (typeof pr.mergedAt === 'string' && pr.mergedAt)) return 'landed';
   if (state === 'CLOSED') return 'rejected';
   const labels = (Array.isArray(pr.labels) ? pr.labels : []).map((l) => (typeof l === 'string' ? l : l?.name));
-  return labels.includes('review:changes') ? 'reworked' : null;
+  if (!labels.includes('review:changes')) return null;
+  if (launchScoredAt !== undefined) {
+    const at = Date.parse(pr.reviewLabelAt);
+    const launched = Date.parse(launchScoredAt);
+    if (!Number.isFinite(at) || !Number.isFinite(launched) || at <= launched) return null;
+  }
+  return 'reworked';
 }
 
 /**
@@ -340,10 +351,15 @@ export function trialOutcomeFromPr(pr) {
  * `filesTouched` is the PR's changed files, so `critical-work.mjs#isCriticalMiss` judges a miss on its real scope
  * rather than failing closed for lack of one; `criticalMiss` stamps that answer on the row.
  * @param {object} launch - a `probation-launch` row.
+ * `isCriticalMiss` is REQUIRED (an omitted evaluator would fail open). A `landed` row is `independent-claude`
+ * only when `reviewed` (the PR carries `review:accepted`); otherwise `unreviewed-merge`, which is not counted.
  * @param {{outcome: 'landed'|'reworked'|'rejected', changedFiles?: string[]|null, scoredAt?: string,
- *   isCriticalMiss?: (row: object) => boolean}} o
+ *   reviewed?: boolean, isCriticalMiss: (row: object) => boolean}} o
  */
-export function judgedTrialRow(launch, { outcome, changedFiles = null, scoredAt, isCriticalMiss = () => false }) {
+export function judgedTrialRow(launch, { outcome, changedFiles = null, scoredAt, reviewed = false, isCriticalMiss }) {
+  if (typeof isCriticalMiss !== 'function') {
+    throw new TypeError('model-probation: a judged trial needs an isCriticalMiss evaluator (no fail-open default)');
+  }
   if (!['landed', 'reworked', 'rejected'].includes(outcome)) {
     throw new TypeError(`model-probation: a judged trial needs outcome landed|reworked|rejected, got ${JSON.stringify(outcome)}`);
   }
@@ -359,7 +375,7 @@ export function judgedTrialRow(launch, { outcome, changedFiles = null, scoredAt,
     score: null,
     deductions: [],
     outcome,
-    verifiedBy: 'independent-claude',
+    verifiedBy: outcome === 'landed' && !reviewed ? 'unreviewed-merge' : 'independent-claude',
     informative: false,
     executor: launch.executor ?? null,
     worker: launch.worker ?? null,
@@ -374,30 +390,57 @@ export function judgedTrialRow(launch, { outcome, changedFiles = null, scoredAt,
   return { ...row, criticalMiss: isCriticalMiss(row) === true };
 }
 
+/** `gh pr view --json files` caps at 100; a full list or a count mismatch means the scope is unknown. PURE. */
+const PR_FILES_CAP = 100;
+
 /**
  * THE SWEEP: judge every pending launch whose PR now carries a verdict, appending one trial row each. The IO is
- * handed in (`lookupPr` → `{state, mergedAt, labels, files}` or `null`; `append` writes one row). A lookup that
- * fails leaves the launch pending for the next sweep — never a guessed outcome. Promotion is untouched: this only
- * adds evidence rows, it never writes the registry.
+ * handed in (`lookupPr` → `{state, mergedAt, labels, files, changedFiles?, reviewLabelAt?}` or `null`; `append`
+ * writes one row and returns `null` if the launch was already judged). A lookup that throws or returns `null`
+ * counts as `failed`; one that answers without a verdict yet counts as `pending`. Never a guessed outcome. A
+ * merged PR without `review:accepted` stays pending until the label lands. A truncated file list is unknown
+ * scope (`filesTouched` omitted → fail closed). Promotion is untouched: this only adds evidence rows.
  * @param {Array<object>} records
- * @param {{lookupPr: (launch: object) => object|null, append?: (row: object) => void,
+ * @param {{lookupPr: (launch: object) => object|null, append?: (row: object) => object|null|void,
  *   isCriticalMiss?: (row: object) => boolean, now?: () => string}} io
- * @returns {{judged: object[], pending: object[]}}
+ * @returns {{judged: object[], pending: object[], failed: object[], skipped: object[]}}
  */
-export function judgePendingTrials(records, { lookupPr, append = () => {}, isCriticalMiss, now = () => new Date().toISOString() }) {
+export function judgePendingTrials(records, { lookupPr, append = () => {}, isCriticalMiss = realIsCriticalMiss, now = () => new Date().toISOString() }) {
   const judged = [];
   const pending = [];
+  const failed = [];
+  const skipped = [];
   for (const launch of pendingProbationLaunches(records)) {
     let pr = null;
     try { pr = lookupPr(launch); } catch { pr = null; }
-    const outcome = trialOutcomeFromPr(pr);
-    if (!outcome) { pending.push(launch); continue; }
-    const files = Array.isArray(pr.files) ? pr.files.map((f) => (typeof f === 'string' ? f : f?.path)) : null;
-    const row = judgedTrialRow(launch, { outcome, changedFiles: files, scoredAt: now(), isCriticalMiss });
-    append(row);
+    if (!pr || typeof pr !== 'object') { failed.push(launch); continue; }
+    const labels = (Array.isArray(pr.labels) ? pr.labels : []).map((l) => (typeof l === 'string' ? l : l?.name));
+    const reviewed = labels.includes('review:accepted');
+    const outcome = trialOutcomeFromPr(pr, { launchScoredAt: launch.scoredAt });
+    if (!outcome || (outcome === 'landed' && !reviewed)) { pending.push(launch); continue; }
+    let files = Array.isArray(pr.files) ? pr.files.map((f) => (typeof f === 'string' ? f : f?.path)) : null;
+    if (files && (files.length >= PR_FILES_CAP || (pr.changedFiles != null && pr.changedFiles !== files.length))) files = null;
+    const row = judgedTrialRow(launch, { outcome, changedFiles: files, scoredAt: now(), reviewed, isCriticalMiss });
+    if (append(row) === null) { skipped.push(launch); continue; }
     judged.push(row);
   }
-  return { judged, pending };
+  return { judged, pending, failed, skipped };
+}
+
+/**
+ * The `judge` command: sweep the store, print one line per judged trial plus the tally. `dryRun` writes nothing.
+ * The append goes through {@link appendScorecardUnlessJudged} (re-checks under the store lock).
+ * @param {{lookupPr: (launch: object) => object|null, io?: object, dryRun?: boolean, log?: (line: string) => void,
+ *   isCriticalMiss?: (row: object) => boolean, now?: () => string}} o
+ * @returns {{judged: number, pending: number, failed: number, skipped: number}}
+ */
+export function runJudge({ lookupPr, io = {}, dryRun = false, log = console.log, isCriticalMiss = realIsCriticalMiss, now }) {
+  const r = judgePendingTrials(readScorecardStore(io).records, {
+    lookupPr, isCriticalMiss, ...(now ? { now } : {}), append: dryRun ? () => {} : (row) => appendScorecardUnlessJudged(row, io),
+  });
+  for (const t of r.judged) log(`${dryRun ? '(dry run) ' : ''}PR #${t.pr} ${t.provider}/${t.model} · ${t.taskType}: ${t.outcome}${t.criticalMiss ? ' (critical miss)' : ''}`);
+  log(`${r.judged.length} judged, ${r.pending.length} awaiting a verdict, ${r.failed.length} lookups failed${r.skipped.length ? `, ${r.skipped.length} already judged` : ''}`);
+  return { judged: r.judged.length, pending: r.pending.length, failed: r.failed.length, skipped: r.skipped.length };
 }
 
 /**
@@ -502,19 +545,23 @@ if (IS_CLI) {
   }
   const storeFlag = rest.find((a) => a.startsWith('--store='));
   if (cmd === 'judge') {
-    const [{ readStore, appendScorecard }, { isCriticalMiss }, { execFileSync }] = await Promise.all([
-      import('../conveyor/run-scorecard-store.mjs'), import('./critical-work.mjs'), import('node:child_process'),
-    ]);
+    const { execFileSync } = await import('node:child_process');
     const io = storeFlag ? { path: storeFlag.slice('--store='.length) } : {};
     const dryRun = rest.includes('--dry-run');
-    const lookupPr = (launch) => JSON.parse(execFileSync('gh', [
-      'pr', 'view', String(launch.pr), ...(launch.repo ? ['--repo', launch.repo] : []), '--json', 'state,mergedAt,labels,files',
-    ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 60_000 }));
-    const { judged, pending } = judgePendingTrials(readStore(io).records, {
-      lookupPr, isCriticalMiss, append: dryRun ? () => {} : (row) => appendScorecard(row, io),
-    });
-    for (const t of judged) console.log(`${dryRun ? '(dry run) ' : ''}PR #${t.pr} ${t.provider}/${t.model} · ${t.taskType}: ${t.outcome}${t.criticalMiss ? ' (critical miss)' : ''}`);
-    console.log(`${judged.length} judged, ${pending.length} still awaiting a verdict`);
+    const gh = (args) => execFileSync('gh', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 60_000 });
+    const lookupPr = (launch) => {
+      const pr = JSON.parse(gh(['pr', 'view', String(launch.pr), ...(launch.repo ? ['--repo', launch.repo] : []),
+        '--json', 'state,mergedAt,labels,files,changedFiles']));
+      const names = (pr.labels ?? []).map((l) => l?.name);
+      const verdict = ['review:changes', 'review:accepted'].filter((n) => names.includes(n));
+      if (!verdict.length) return pr;
+      // `--json labels` has no timestamps: the newest `labeled` event for a verdict label still on the PR.
+      const events = JSON.parse(`[${gh(['api', '--paginate', `repos/${launch.repo ?? '{owner}/{repo}'}/issues/${launch.pr}/events`, '--jq', '.[] | select(.event=="labeled") | {at: .created_at, name: .label.name}'])
+        .trim().split('\n').filter(Boolean).join(',')}]`);
+      const at = events.filter((e) => verdict.includes(e.name)).map((e) => e.at).sort().pop() ?? null;
+      return { ...pr, reviewLabelAt: at };
+    };
+    runJudge({ lookupPr, io, dryRun });
     process.exit(0);
   }
   const [{ resolveScorecardStorePath }, { criticalMissesFor }, { CRITICAL_WORK_GATE }] = await Promise.all([

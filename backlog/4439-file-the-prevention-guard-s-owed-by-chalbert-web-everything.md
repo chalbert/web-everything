@@ -3,9 +3,10 @@ bornAs: xpsuizi
 kind: story
 size: 3
 parent: "4075"
-status: open
+status: active
 scope: ["we:scripts/lib/model-probation.mjs", "we:scripts/lib/__tests__/model-probation-trials.test.mjs", "we:scripts/conveyor/run-scorecard-store.mjs", "we:scripts/conveyor/__tests__/run-scorecard-store.test.mjs"]
 dateOpened: "2026-09-28"
+dateStarted: "2026-09-30"
 preparedDate: "2026-09-30"
 preparedAgainstSha: "74f3c74136d4605aedca5b439e1d05571cac736f"
 tags: []
