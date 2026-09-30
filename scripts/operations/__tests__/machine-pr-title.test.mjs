@@ -50,6 +50,20 @@ describe('machine PR titles', () => {
   });
 });
 
+describe('card titles citing other items never leak delivery identity', () => {
+  it.each(['Stop auto-resolve #3443 false positives', '#3443: fix thing', 'Fixes #12 and #abcdef', 'Planner build: fix #4400 routing'])(
+    'round-trips %s through the delivery extractors', (cardTitle) => {
+      for (const kind of ['prepare', 'build', 'gate-fix']) {
+        const ref = 'lane/4333-x';
+        const title = machinePrTitle({ item: 4333, kind, card: { title: cardTitle } });
+        expect(title).not.toMatch(/#(?!4333:)/);
+        expect(itemNumsFromPr(ref, title)).toEqual(['4333']);
+        if (kind !== 'prepare') expect(deliveredItemNumsFromPr(ref, title)).toEqual(['4333']);
+        expect(deliveredHashFromPr(ref, title)).toBeNull();
+      }
+    });
+});
+
 describe('origin/main card metadata', () => {
   it('reads the exact remote card, never the worktree or HEAD', () => {
     const calls = [];

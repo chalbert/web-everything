@@ -3,7 +3,8 @@ export const MACHINE_TITLE_LIMIT = 70;
 
 export function cleanTitle(value) {
   return String(value ?? '').replace(/[\p{Cc}\p{Cf}]/gu, ' ')
-    .replace(/[`$<>\\]/g, '').replace(/\s+/g, ' ').trim();
+    // `#` is dropped: delivery/open-PR extractors read every `#NNN` in a title as an item id.
+    .replace(/[`$<>\\#]/g, '').replace(/\s+/g, ' ').trim();
 }
 
 /** Best effort metadata only: failure must not bypass the prepare diff/isolation guard. */
@@ -24,7 +25,9 @@ export function machinePrTitle({ repo = 'WE', item, kind, card }) {
     build: 'delivery build', 'gate-fix': 'gate-failure fix',
     prevention: 'file the prevention guard(s) owed by an independent review' }[kind];
   let subject = cleanTitle(card?.title);
-  const guarded = /^File the prevention guard\(s\) owed by (\S+)#(\d+)'s independent review$/i.exec(subject);
+  // Matched on the raw title: cleanTitle drops the `#` this pattern anchors on.
+  const guarded = /^File the prevention guard\(s\) owed by (\S+)#(\d+)'s independent review$/i
+    .exec(String(card?.title ?? '').replace(/\s+/g, ' ').trim());
   if (guarded) {
     const guard = /^\d+\.\s+(?:`[^`]+`\s*—\s*)?(.+)$/m.exec(card.raw ?? '')?.[1];
     subject = `PR ${guarded[2]} — ${cleanTitle(guard) || 'review guards'}`;
