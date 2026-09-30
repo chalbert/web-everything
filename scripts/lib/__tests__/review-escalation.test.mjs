@@ -2747,3 +2747,60 @@ describe('#3184 — a fingerprint READ MISS is not proven staleness, and never r
     })).toBe(true);
   });
 });
+
+import { readFileSync as readFileSyncDev } from 'node:fs';
+import { resolve as resolveDev } from 'node:path';
+import {
+  parseDeviationDisclosure as parseDev, scoreEscalation as scoreDev, decideReviewGate as gateDev,
+} from '../review-escalation.mjs';
+import { resolveProducerReviewLabel as producerDev } from '../../pr-land.mjs';
+
+describe('deviation disclosure (#4502)', () => {
+  it('deviation: parses only a first non-blank line `Deviation: <text>`', () => {
+    expect(parseDev('Deviation: x')).toBe('x');
+    expect(parseDev('Deviation: x  \r\nrest')).toBe('x');
+    expect(parseDev('﻿\n\nDeviation: x')).toBe('x');
+    expect(parseDev('intro\nDeviation: x')).toBeNull();
+    expect(parseDev('```\nDeviation: x\n```')).toBeNull();
+    expect(parseDev('Deviation:   ')).toBeNull();
+    expect(parseDev('deviation: x')).toBeNull();
+    expect(parseDev(null)).toBeNull();
+  });
+
+  it('deviation: forces humanRequired with the verbatim reason, and null leaves the score unchanged', () => {
+    const files = ['docs/readme.md'];
+    const s = scoreDev({ changedFiles: files, deviation: 'x' });
+    expect(s.humanRequired).toBe(true);
+    expect(s.reasons).toContain('worker disclosed a rule deviation: x');
+    expect(scoreDev({ changedFiles: files, deviation: null })).toEqual(scoreDev({ changedFiles: files }));
+    expect(scoreDev({ changedFiles: files }).humanRequired).toBe(false);
+  });
+
+  it('deviation: #2942 / #2945 fixtures score humanRequired and producer label is review:human', () => {
+    for (const body of [
+      'Deviation: WE_LAND_UNVERIFIED override — full suite run locally\n\nbody',
+      'Deviation: soak waived — no real soak break\n\nbody',
+    ]) {
+      const deviation = parseDev(body);
+      const v = producerDev({ changedFiles: ['docs/readme.md'], diffLines: 3, deviation });
+      expect(v.label).toBe(REVIEW_LABELS.human);
+      expect(v.humanRequired).toBe(true);
+      expect(v.reasons.join('\n')).toContain(deviation);
+    }
+  });
+
+  it('deviation: gate re-parks an accept without a recorded human clearance, merges with one', () => {
+    const base = { escalate: true, humanRequired: true, labels: [REVIEW_LABELS.accepted], acceptedSha: 'abcdef1234', headSha: 'abcdef1234', deviation: 'x' };
+    const parked = gateDev(base);
+    expect(parked.action).toBe('park');
+    expect(parked.applyLabel).toBe(REVIEW_LABELS.human);
+    expect(gateDev({ ...base, operatorClearance: { actor: 'op' } }).action).toBe('merge');
+    expect(gateDev({ ...base, deviation: null, humanRequired: false }).action).toBe('merge');
+    expect(gateDev({ escalate: true, humanRequired: true, labels: [], deviation: 'x' }).applyLabel).toBe(REVIEW_LABELS.human);
+  });
+
+  it('deviation: the delivery-agent brief tells workers to put Deviation: on the first line', () => {
+    const brief = readFileSyncDev(resolveDev(process.cwd(), 'skills-src/conveyor/delivery-agent-brief.md'), 'utf8');
+    expect(brief).toContain('`Deviation: <what and why>`');
+  });
+});

@@ -425,6 +425,11 @@ fresh GREEN verification marker from the `verify-lane` run just above — so a l
 its verification is caught at the finish line instead of stranding silently. `WE_LAND_UNVERIFIED=1` is the
 documented break-glass if you ever must land on CI alone.
 
+**Disclose any rule deviation on the PR body's FIRST line** (#4502): whenever you take `WE_LAND_UNVERIFIED=1`, a
+soak/gate waiver, or otherwise break a rule, make the very first line of the PR body `Deviation: <what and why>`.
+The drain reads only that first line and parks the PR `review:human` for the operator — a deviating PR never
+auto-merges on your say-so. A `Deviation:` on any later line does not count.
+
 `--mode=label-on-green` is the **producer mode** you want: it opens the self-approved PR, **waits for the required
 `test` check, applies the `ready-to-merge` label ONLY once it is green, then STOPS**. It does **not** trigger a
 drain — the resident drain daemon lands the labelled PR on its next pass. The `ready-to-merge` label means

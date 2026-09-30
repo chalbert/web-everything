@@ -667,6 +667,23 @@ function unionPaths(cumulative, own) {
   return out;
 }
 
+/**
+ * #4502 — a worker PR that discloses a rule deviation parks for the operator. The disclosure is the FIRST
+ * non-blank line of the PR body, `Deviation: <text>` (case-sensitive prefix, non-empty text). A `Deviation:` on any
+ * later line (quoted docs, fenced examples) does not count. Pure. Returns the trimmed text, or `null`.
+ * @param {string|null|undefined} body
+ * @returns {string|null}
+ */
+export function parseDeviationDisclosure(body) {
+  if (typeof body !== 'string') return null;
+  const lines = body.replace(/^\uFEFF/, '').split(/\r?\n/);
+  const first = lines.find((l) => l.trim() !== '');
+  if (first === undefined) return null;
+  const m = /^Deviation:(.*)$/.exec(first.trimStart());
+  const text = m ? m[1].trim() : '';
+  return text === '' ? null : text;
+}
+
 export function scoreEscalation({
   changedFiles = [],
   diffLines = 0,
@@ -677,6 +694,7 @@ export function scoreEscalation({
   thresholds = {},
   diffHunks = null,
   basisNarrowed = true,
+  deviation = null,
 } = {}) {
   const t = { ...DEFAULT_THRESHOLDS, ...thresholds };
   const reasons = [];
@@ -741,7 +759,14 @@ export function scoreEscalation({
   const markedFiles = filesWith('marked-invariant').map((x) => x.file);
   const derivationFiles = gateBasis.filter(isPolicyDerivationPath);
   // @invariant human-gate-is-principle-surface (#human-is-principle-surface-not-path) — humanRequired fires ONLY when isPrincipleSurface says so; never re-add a bare path term
-  const humanRequired = gateBasis.some((f) => isPrincipleSurface(f, fileHunksOf(f)));
+  let humanRequired = gateBasis.some((f) => isPrincipleSurface(f, fileHunksOf(f)));
+  // #4502 — a disclosed rule deviation forces the human park regardless of file signals; the text rides
+  // `reasons` verbatim so the #2324 body block and park comment quote it with no new comment path.
+  if (typeof deviation === 'string' && deviation !== '') {
+    humanRequired = true;
+    reasons.push(`worker disclosed a rule deviation: ${deviation}`);
+    signals.deviation = deviation;
+  }
 
   // The additive marker term cannot read a file it has no diff section for — the whole diff was not computed, or the
   // cumulative hunks do not cover an own-delta-only path. Name those files on the verdict rather than letting "no
@@ -2801,7 +2826,7 @@ export function decideDurableEscalationRecord({ changed, verified, liveBody, rea
 export function decideReviewGate({
   escalate, humanRequired = false, labels = [], acceptedSha = null, headSha = null,
   acceptedDiff = null, headDiff = null, acceptedContribution = null, headContribution = null,
-  operatorClearance = null, headReadFailed = false, engineTier = false,
+  operatorClearance = null, headReadFailed = false, engineTier = false, deviation = null,
 } = {}) {
   // A reviewer verdict (whoever applied it — for a human-gated PR only a human can) always wins, and is checked
   // FIRST so it overrides even the sticky human gate below: review:accepted IS the human clearing the gate →
@@ -2903,6 +2928,17 @@ export function decideReviewGate({
         humanRequired: !!toHuman,
         revokesClearance,
         clearance: revokesClearance ? operatorClearance : null,
+      };
+    }
+    // #4502 — a PR that disclosed a rule deviation does not merge on a bare accept (an agent/auto accept may land
+    // before the drain scores the body): it needs a RECORDED human clearance (`operatorClearance`, parsed from the
+    // `clear-human` ceremony comment). Without one, re-park `review:human`.
+    if (deviation && !operatorClearance) {
+      return {
+        action: 'park',
+        reason: `worker disclosed a rule deviation (${deviation}) — review:accepted without a recorded human clearance does not merge; re-parking review:human`,
+        applyLabel: REVIEW_LABELS.human,
+        humanRequired: true,
       };
     }
     // #2412 layer 4 — an ENGINE-tier PR (the lander/daemon/dispatch-loop machinery, `isEngineTierPath`) is the
