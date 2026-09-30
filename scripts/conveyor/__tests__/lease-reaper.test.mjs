@@ -47,6 +47,7 @@ import {
   resolveLeaseItemNum,
   defaultGitIsAncestor,
   fetchSessionSignals,
+  buildLeaseSignalsFor,
 } from '../lease-reaper.mjs';
 import { DEFAULT_LEASE_TTL_MINUTES } from '../../lib/lane-lease.mjs';
 import { DISPATCH_GUARD_LISTING_GRACE_MINUTES } from '../../operations/dispatch-lane.mjs';

@@ -573,7 +573,7 @@ export function laneQuietSincePr(dir, {
  *   quietMs?:number, git?:Function, statusPorcelain?:Function, isAncestor?:Function}} o
  * @returns {{itemNum:string|null, prNum:string|null, itemNumSource:('session'|'branch-corroborated'|'branch-uncorroborated'|null)}}
  */
-export function resolveLeaseItemNum(lease, dir, { repoStates = null, nowMs, quietMs = DEFAULT_QUIET_MS, git, statusPorcelain, isAncestor } = {}) {
+export function resolveLeaseItemNum(lease, dir, { repoStates = null, nowMs, quietMs = DEFAULT_QUIET_MS, git, statusPorcelain, isAncestor, ownerAlive = null } = {}) {
   let itemNum = itemNumFromSession(lease?.session);
   const prNum = prNumFromSession(lease?.session);
   // #xkk4lv7 — round-1 convergence (standards-conformance + claim-accuracy, independently) — `itemNumSource`
@@ -595,7 +595,11 @@ export function resolveLeaseItemNum(lease, dir, { repoStates = null, nowMs, quie
     if (branchNum != null) {
       const branchDetail = repoStates?.detailsByItem?.get(branchNum) ?? null;
       if (branchDetail && (branchDetail.state === 'merged' || branchDetail.state === 'closed')) {
-        const corroborated = laneQuietSincePr(dir, {
+        // #4332 — liveness VETO (never a reap signal): a lease whose declared occupant is provably alive is not
+        // reaped off a branch-derived merged/closed verdict, which rests on acquisition age + a quiet window
+        // alone. Only exactly `true` vetoes; `false`/`null`/absent fall through to the quiet-window gate.
+        // `ttl-stale`/`pid-dead` in classifyReap still apply.
+        const corroborated = ownerAlive !== true && laneQuietSincePr(dir, {
           prMergeSha: branchDetail.sha,
           prMergedAt: branchDetail.mergedAt,
           leaseAcquiredAt: lease?.acquiredAt,
@@ -1254,6 +1258,42 @@ function readDetachedWrapperPids(store = createFileRunStore()) {
 export const LEASE_REAPER_ACTOR = 'lease-reaper';
 
 /**
+ * #4332 — the per-lease reap-signal builder `main()` drives (extracted so tests exercise the real wiring).
+ * `ownerAlive` is computed BEFORE item resolution so it can veto the branch-derived PR-terminal fallback.
+ */
+export function buildLeaseSignalsFor({ prStatesByRepo, sessionStates, sessionPidAlive, sessionAgents, wrapperPids, nowMs }) {
+  return (c) => {
+    // #x5wm9ot — an item-kind session (`conveyor-`/`prepare-`/`prepare-decision-`) checks `byItem` by its item
+    // number; a PR_KIND session (`review-`/`fix-`/`ci-heal-`/`inspect-`) checks `byPr` by its OWN PR number —
+    // never the other Map with the other kind's number (the exact bug this split fixes; see `matchSessionSlug`
+    // and `fetchPrStatesForRepo`'s own docblocks).
+    // #xkk4lv7 — `resolveLeaseItemNum` widens this to a THIRD population: a lease whose `session` matches
+    // NEITHER namespace (a bare `acquire --purpose=` with no dispatcher-recognizable `--session=`) falls
+    // through to the lane's own checked-out branch, corroborated per Fork 2/Option C — see its own docblock.
+    const repoStates = c.repoKey ? prStatesByRepo.get(c.repoKey) : null;
+    // #xbk2is9 — the lease's declared occupant (`workerSession`), read off the SAME listing
+    // `sessionStates`/`sessionPidAlive` were reduced from — see `ownerSessionAliveForLease`'s own doc.
+    const ownerAlive = ownerSessionAliveForLease(c.lease, sessionAgents, c.dir);
+    const { itemNum, prNum } = resolveLeaseItemNum(c.lease, c.dir, { repoStates, nowMs, ownerAlive });
+    const prState = repoStates
+      ? (itemNum != null ? repoStates.byItem.get(itemNum) : prNum != null ? repoStates.byPr.get(prNum) : null) ?? null
+      : null;
+    // #3383 — the lease's own session's REAL process-liveness read (`null` when unknown/unlisted), threaded
+    // into sessionGoneForLease's phantom-listing widening. Distinct from `pidAliveForLease` below, which
+    // remains the dormant future-`agentPid` axis (today's leases carry no durable per-agent pid at all).
+    const sessionPidAliveNow = c.lease?.session && sessionPidAlive.has(c.lease.session) ? sessionPidAlive.get(c.lease.session) : null;
+    // #3903 — a detached delivery wrapper's own pid (see `detachedWrapperPidsBySession`).
+    const wrapperPid = c.lease?.session ? wrapperPids.get(c.lease.session) : undefined;
+    const wrapperAlive = wrapperPid === undefined ? null : Boolean(defaultIsPidAlive(wrapperPid));
+    return {
+      prState,
+      sessionGone: sessionGoneForLease(c.lease, sessionStates, { nowMs, pidAlive: sessionPidAliveNow, wrapperAlive, ownerAlive }),
+      pidAlive: pidAliveForLease(c.lease),
+    };
+  };
+}
+
+/**
  * Delegate the actual reclamation to lane-pool's release (reserved-lane protection lives there). #4370 — the
  * child's journal line names the reaper (not a bare host:pid) and carries the reap classification as its
  * reason (`session-gone`, `pr-merged`, `ttl-stale`, …).
@@ -1318,35 +1358,7 @@ function main(argv) {
   const distinctRepoKeys = [...new Set(candidates.map((c) => c.repoKey).filter(Boolean))];
   const prStatesByRepo = new Map(distinctRepoKeys.map((repoKey) => [repoKey, fetchPrStatesForRepo(repoKey, flags)]));
 
-  const signalsFor = (c) => {
-    // #x5wm9ot — an item-kind session (`conveyor-`/`prepare-`/`prepare-decision-`) checks `byItem` by its item
-    // number; a PR_KIND session (`review-`/`fix-`/`ci-heal-`/`inspect-`) checks `byPr` by its OWN PR number —
-    // never the other Map with the other kind's number (the exact bug this split fixes; see `matchSessionSlug`
-    // and `fetchPrStatesForRepo`'s own docblocks).
-    // #xkk4lv7 — `resolveLeaseItemNum` widens this to a THIRD population: a lease whose `session` matches
-    // NEITHER namespace (a bare `acquire --purpose=` with no dispatcher-recognizable `--session=`) falls
-    // through to the lane's own checked-out branch, corroborated per Fork 2/Option C — see its own docblock.
-    const repoStates = c.repoKey ? prStatesByRepo.get(c.repoKey) : null;
-    const { itemNum, prNum } = resolveLeaseItemNum(c.lease, c.dir, { repoStates, nowMs });
-    const prState = repoStates
-      ? (itemNum != null ? repoStates.byItem.get(itemNum) : prNum != null ? repoStates.byPr.get(prNum) : null) ?? null
-      : null;
-    // #3383 — the lease's own session's REAL process-liveness read (`null` when unknown/unlisted), threaded
-    // into sessionGoneForLease's phantom-listing widening. Distinct from `pidAliveForLease` below, which
-    // remains the dormant future-`agentPid` axis (today's leases carry no durable per-agent pid at all).
-    const sessionPidAliveNow = c.lease?.session && sessionPidAlive.has(c.lease.session) ? sessionPidAlive.get(c.lease.session) : null;
-    // #3903 — a detached delivery wrapper's own pid (see `detachedWrapperPidsBySession`).
-    const wrapperPid = c.lease?.session ? wrapperPids.get(c.lease.session) : undefined;
-    const wrapperAlive = wrapperPid === undefined ? null : Boolean(defaultIsPidAlive(wrapperPid));
-    // #xbk2is9 — the lease's declared occupant (`workerSession`), read off the SAME listing
-    // `sessionStates`/`sessionPidAlive` were reduced from — see `ownerSessionAliveForLease`'s own doc.
-    const ownerAlive = ownerSessionAliveForLease(c.lease, sessionAgents, c.dir);
-    return {
-      prState,
-      sessionGone: sessionGoneForLease(c.lease, sessionStates, { nowMs, pidAlive: sessionPidAliveNow, wrapperAlive, ownerAlive }),
-      pidAlive: pidAliveForLease(c.lease),
-    };
-  };
+  const signalsFor = buildLeaseSignalsFor({ prStatesByRepo, sessionStates, sessionPidAlive, sessionAgents, wrapperPids, nowMs });
   const { reap, keep } = reapPlan(candidates, { nowMs, ttlMs, signalsFor });
 
   // Reclaim (unless dry-run). A single failed release is logged and skipped — the reaper is best-effort and one

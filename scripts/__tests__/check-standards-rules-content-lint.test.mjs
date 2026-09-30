@@ -16,7 +16,7 @@ import {
   findHarnessScaffoldingMarkers, scanHarnessScaffolding,
   findStaleRatifiedClaims,
   findDuplicateKeysPerScope, validateNoDuplicateManifestKeys,
-  findBuriedForkSections, findNonBatchableMarkers,
+  findBuriedForkSections, findNonBatchableMarkers, findTestPlanGaps, lintBacklogItemRendering,
   deriveResearchFreshness, addIsoDuration, RESEARCH_REVIEW_HORIZON_DEFAULT,
   validateCapabilityPresence, validateRetirementShape,
   validatePlugDualMode, PLUG_UNPLUGGED_TEST_ENFORCED,
@@ -673,5 +673,34 @@ describe('findRelativeNodeScriptsAfterLaneCd (#3960)', () => {
   it('a `cd` once tripped stays tripped for the rest of the file, across separate fenced blocks/headers', () => {
     const content = 'cd "$LANE"\n\n### later step\n\n```bash\nnode scripts/conveyor/x.mjs\n```\n';
     expect(findRelativeNodeScriptsAfterLaneCd([{ file: 'skills-src/conveyor/fix-agent-brief.md', content }]).errors).toHaveLength(1);
+  });
+});
+
+describe('findTestPlanGaps — #4332 Test-plan classification + condition coverage', () => {
+  const plan = (cases, design = '') => `## Design\n${design}\n## Test plan\n\n${cases.map((c) => `- ${c}`).join('\n')}\n`;
+  const fence = "```js\nif (pr.state === 'closed') skip();\n```";
+
+  it('(a) a case bullet with no capability/preservation marker is reported', () => {
+    expect(findTestPlanGaps(plan(['a test that does a thing'])).map((g) => g.kind)).toEqual(['unclassified-case']);
+  });
+  it('(b) a preservation bullet with no mutation mention is reported', () => {
+    expect(findTestPlanGaps(plan(["keeps working. GREEN on today's code."])).map((g) => g.kind)).toEqual(['preservation-without-mutation']);
+  });
+  it("(c) a Design fence comparing state to 'closed' whose Test plan never says closed is reported", () => {
+    expect(findTestPlanGaps(plan(['new thing. Red today: absent.'], fence))).toEqual([{ kind: 'untested-condition', detail: 'closed' }]);
+  });
+  it('(d) a fully-marked plan with every literal covered returns []', () => {
+    expect(findTestPlanGaps(plan(['closed PR is skipped. Red today: absent.', 'guard. GREEN today; mutation: drop it → fails.'], fence))).toEqual([]);
+  });
+  it('(e) no Test plan section returns []', () => {
+    expect(findTestPlanGaps(`## Design\n\n${fence}\n`)).toEqual([]);
+  });
+  it('(f) lintBacklogItemRendering warns for an open card and is silent for a resolved one', () => {
+    const body = plan(['a test that does a thing']);
+    const open = lintBacklogItemRendering({ item: { id: '9', kind: 'story', status: 'open' }, body });
+    expect(open.errors).toEqual([]);
+    expect(open.warnings.some((w) => /Test-plan gaps/.test(w))).toBe(true);
+    const done = lintBacklogItemRendering({ item: { id: '9', kind: 'story', status: 'resolved' }, body });
+    expect(done.warnings.some((w) => /Test-plan gaps/.test(w))).toBe(false);
   });
 });
