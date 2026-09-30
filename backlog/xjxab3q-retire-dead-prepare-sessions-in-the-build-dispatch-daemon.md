@@ -1,6 +1,5 @@
 ---
 kind: task
-size: 2
 preparedDate: "2026-09-30"
 status: resolved
 scope: ["we:skills-src/conveyor/"]
