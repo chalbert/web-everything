@@ -133,6 +133,7 @@
  * `markdown-it`/ephemeral-clone-CLI-test regression that discipline exists to prevent).
  */
 
+import { agyRunEvidence, readAgyHold, saveAgyHold, agyEvidenceError } from './antigravity-run-evidence.mjs';
 import { spawn as nodeSpawn } from 'node:child_process';
 import {
   mkdtempSync, mkdirSync, rmSync, writeFileSync,
@@ -606,7 +607,7 @@ export async function antigravityJudgeSpawn({
   mandate,
   input,
   shape,
-  model,
+  model = ANTIGRAVITY_MODEL,
   effort,
   allowedTools = null,
   cwd = null,
@@ -625,6 +626,7 @@ export async function antigravityJudgeSpawn({
   persistTranscript = persistAntigravityJudgeTranscript,
   // #3383 mechanical-dispatcher Gap 1 fix — see the call site below, right after `transcriptFile` is known.
   recordScorecard = recordAntigravityRunScorecard,
+  readHold = readAgyHold, saveHold = saveAgyHold,
 } = {}) {
   if (typeof mandate !== 'string' || !mandate.trim()) {
     throw new TypeError('antigravity-judge-spawn: `mandate` must be a non-empty string');
@@ -637,6 +639,11 @@ export async function antigravityJudgeSpawn({
   }
   assertNoAntigravityToolAllowlist(allowedTools);
 
+  const hold = readHold(model);
+  if (hold) {
+    recordScorecard({ provider: 'antigravity', model: 'unknown', ...hold, dispatchKind: 'advisory-review', kind: 'review', role: 'advisory-review' });
+    throw agyEvidenceError(hold);
+  }
   const workDir = mkTempDir(join(tmpdir(), 'antigravity-judge-'));
   const spawnCwd = cwd || workDir;
   const schemaFile = join(workDir, 'schema.json');
@@ -696,6 +703,11 @@ export async function antigravityJudgeSpawn({
       child.stdin?.on('error', () => { /* the child may exit before we finish writing; `close` reports it */ });
       child.stdin?.end(streamInput);
     });
+  } catch (error) {
+    const evidence = agyRunEvidence({ requestedModel: model });
+    error.telemetry = evidence;
+    recordScorecard({ ...evidence, model: 'unknown', provider: 'antigravity', dispatchKind: 'advisory-review', kind: 'review', role: 'advisory-review' });
+    throw error;
   } finally {
     try { removeFile(workDir, { recursive: true, force: true }); } catch { /* best-effort cleanup */ }
   }
@@ -716,26 +728,37 @@ export async function antigravityJudgeSpawn({
   // unparseable run is recorded too — exactly the run most worth capturing. Best-effort, never throws
   // (`recordAntigravityRunScorecard`'s own header) — a recording failure can never turn an otherwise-completed
   // judge call into a failed one.
+  const evidence = agyRunEvidence({ ...result, requestedModel: model });
+  let holdError;
+  try { saveHold(evidence); } catch (error) { holdError = error; }
   recordScorecard({
+    ...evidence,
     transcriptFile, dispatchKind: 'advisory-review', kind: 'review', role: 'advisory-review',
-    provider: 'antigravity', model, effort,
+    provider: 'antigravity', model: evidence.servedModel, effort,
   });
 
-  if (result.timedOut) {
-    let outcome = null;
-    try { outcome = parseAntigravityJudgeOutcome({ stdout: result.stdout, stderr: result.stderr }); } catch { outcome = null; }
-    if (!outcome) throw new JudgeTimeoutError({ timeoutMs, wallMs, stdout: result.stdout, stderr: result.stderr });
+  try {
+    if (holdError) throw holdError;
+    if (evidence.fallbackDecision !== 'none') throw agyEvidenceError(evidence);
+    if (result.timedOut) {
+      let outcome = null;
+      try { outcome = parseAntigravityJudgeOutcome({ stdout: result.stdout, stderr: result.stderr }); } catch { outcome = null; }
+      if (!outcome) throw new JudgeTimeoutError({ timeoutMs, wallMs, stdout: result.stdout, stderr: result.stderr });
+      return {
+        ...outcome, ...evidence, durationMs: wallMs, wallMs, timedOut: true,
+        loadedContextTokens: antigravityLoadedContextTokens(outcome.usage), argv, transcriptFile,
+      };
+    }
+    const outcome = parseAntigravityJudgeOutcome({
+      stdout: result.stdout,
+      stderr: result.stderr || (result.code === 0 ? '' : `exit code ${result.code}`),
+    });
     return {
-      ...outcome, durationMs: wallMs, wallMs, timedOut: true,
+      ...outcome, ...evidence, durationMs: wallMs, wallMs, timedOut: false,
       loadedContextTokens: antigravityLoadedContextTokens(outcome.usage), argv, transcriptFile,
     };
+  } catch (error) {
+    error.telemetry = { ...evidence, transcriptFile, wallMs };
+    throw error;
   }
-  const outcome = parseAntigravityJudgeOutcome({
-    stdout: result.stdout,
-    stderr: result.stderr || (result.code === 0 ? '' : `exit code ${result.code}`),
-  });
-  return {
-    ...outcome, durationMs: wallMs, wallMs, timedOut: false,
-    loadedContextTokens: antigravityLoadedContextTokens(outcome.usage), argv, transcriptFile,
-  };
 }
