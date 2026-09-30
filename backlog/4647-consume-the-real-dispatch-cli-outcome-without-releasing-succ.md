@@ -2,6 +2,7 @@
 bornAs: x34sep8
 kind: story
 size: 3
+tier: pinned
 status: open
 scope: ["we:skills-src/conveyor/build-dispatch-daemon.mjs", "we:skills-src/conveyor/__tests__/build-dispatch-daemon.test.mjs"]
 dateOpened: "2026-09-30"
