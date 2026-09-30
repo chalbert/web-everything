@@ -1,6 +1,6 @@
 import { planPrepareSpawns } from '../../../scripts/conveyor/tick-core.mjs';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -993,9 +993,11 @@ describe('kill switch + dispatch outcome', () => {
     expect(readKillSwitch({ env: {}, killFileExists: true, killFilePath: '/k' })).toEqual({ engaged: true, reason: 'kill file /k' });
   });
   it('finds the nested dispatch verdict and fails closed on junk', () => {
-    expect(readDispatchOutcome(JSON.stringify({ run: { verdict: { dispatching: true, lane: 3 } } }))).toMatchObject({ dispatching: true, lane: 3 });
+    expect(readDispatchOutcome(JSON.stringify({ run: { verdict: { dispatching: true, lane: 3 }, effects: [{ type: 'conveyor.dispatch-delivery-agent', status: 'in-flight', handle: 'session-123' }] } }))).toMatchObject({ dispatching: true, lane: 3 });
     expect(readDispatchOutcome('not json').dispatching).toBe(false);
     expect(readDispatchOutcome('{}').dispatching).toBe(false);
+    expect(readDispatchOutcome(JSON.stringify({ verdict: { dispatching: true } })).dispatching).toBe(false);
+    expect(readDispatchOutcome(JSON.stringify({ verdict: { dispatching: true }, effects: [{ type: 'conveyor.dispatch-delivery-agent', status: 'in-flight', handle: null }] })).dispatching).toBe(false);
   });
 });
 
@@ -1028,6 +1030,19 @@ describe('cliListSettledBuilds / cliListHolds (the real readers, not a stub)', (
     store.write({ ...newRunRecord({ id, op: 'dispatch-lane' }), pending: null, effects });
     return store;
   }
+
+  it.each([false, true])('observes old prepare sessions from the run store, including a failed listing (%s)', async (failed) => {
+    seedRun('dispatch-lane-4329', [{
+      key: 'dispatch:0:0', type: DISPATCH_EFFECT, stepIndex: 0, index: 0, status: 'in-flight',
+      payload: { num: '4329', launchKind: 'prepare-item' }, handle: '641f3cc9',
+      startedAt: '2026-09-30T05:12:57Z', error: null,
+    }]);
+    const rows = await cliListRunStoreInFlight({ launchKind: 'prepare-item', now: new Date('2026-10-01'),
+      listAgents: () => { if (failed) throw new Error('listing unavailable'); return []; },
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].row.entry.live).toBe(failed ? null : false);
+  });
 
   it('lists an `applied` build effect under the OUTCOME the wrapper actually settled it with', async () => {
     seedRun('dispatch-lane-1001', [{
@@ -1523,6 +1538,43 @@ describe('automatic item preparation', () => {
     expect(effects.listPrepareClaims()).toEqual([]);
     expect(tick.nextBookkeeping.prepareGuards).toEqual([]);
   });
+  it.each(['failed', 'in-flight'])('does not mistake a positive plan for a launch after a %s effect error', async (status) => {
+    const effects = fixture();
+    const reason = 'dispatch-lane: refusing to start an agent without a resolvable --model';
+    effects.dispatch = vi.fn(({ num }) => cliDispatch({ num, launchKind: 'prepare-item' }, {
+      exec: () => JSON.stringify({ run: {
+        findings: { read: { dispatching: true } }, verdict: { dispatching: true },
+        effects: [{ type: 'conveyor.dispatch-delivery-agent', status, handle: null, error: reason }],
+      } }),
+    }));
+    const tick = await runBuildDispatchTick({ live: true, effects });
+    expect(tick.prepare.failures).toEqual(['4501', '4502'].map(num => ({ num, stage: 'dispatch', reason })));
+    expect(tick.prepare.launched).toEqual([]);
+    expect(tick.prepare.inFlight).toEqual([]);
+    expect(effects.listPrepareClaims()).toEqual([]);
+    expect(tick.nextBookkeeping.prepareGuards).toEqual([]);
+  });
+  it.each([true, false, null])('uses Claude worker liveness (%s), independently of the live daemon owner', async (live) => {
+    const effects = fixture({ inFlight: [{ num: '4501', row: { runId: 'run', entry: {
+      key: 'dispatch:0:0', status: 'in-flight', handle: '9f40139a', live,
+    } } }] });
+    claimed(effects, '4501', { alive: true });
+    effects.settlePrepareRow = vi.fn();
+    const tick = await runBuildDispatchTick({ live: true, effects });
+    expect(tick.prepare.inFlight.includes('4501')).toBe(live !== false);
+    expect(tick.prepare.retired).toHaveLength(live === false ? 1 : 0);
+  });
+  it('keeps probation-only instructions out of the actual standalone prepare brief', async () => {
+    const root = resolve(fileURLToPath(import.meta.url), '../../../..');
+    const agent = readFileSync(join(root, 'skills-src/conveyor/prepare-item-agent-brief.md'), 'utf8');
+    const { realIo } = await import('../../../scripts/operations/probation-build-run.mjs');
+    const worker = realIo({ session: 'brief-test', repoRoot: root }).readPrepareBrief(root);
+    expect(agent).not.toMatch(/Probation worker mode|The runner owns|Do not claim, resolve, acquire another lane/);
+    expect(agent).toContain('node scripts/backlog.mjs prepare-stamp');
+    expect(agent).toContain('node scripts/operations/run.mjs open-pr');
+    expect(worker).toContain('The runner owns stamping');
+    expect(worker).not.toContain('## The arc');
+  });
   it('consumes the current tick-core spawnPrepareItems field', async () => {
     const effects = fixture();
     const plan = effects.planTick;
@@ -1558,7 +1610,7 @@ describe('automatic item preparation', () => {
         const read = assess(tick);
         expect(read.launchKind).toBe('prepare-item');
         expect(read.dispatching).toBe(true);
-        return JSON.stringify(read);
+        return JSON.stringify({ verdict: read, effects: [{ type: 'conveyor.dispatch-delivery-agent', status: 'in-flight', handle: 'session-4501' }] });
       },
     });
     expect(result.dispatching).toBe(true);

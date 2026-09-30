@@ -338,8 +338,7 @@ export async function runProbationBuild(args, io) {
     const excludeFromDiff = preparing ? [] : [...preexisting, item.path];
 
     const task = preparing ? io.readPrepareBrief(lanePath)
-      .replaceAll('{{ITEM_NUM}}', String(num)).replaceAll('{{ITEM_SPEC_PATH}}', item.path)
-      .split('<!-- /probation-worker -->')[0] : buildDocFixTask({ num, title: item.title, spec: item.spec, scope: item.scope, taskType }) +
+      .replaceAll('{{ITEM_NUM}}', String(num)).replaceAll('{{ITEM_SPEC_PATH}}', item.path) : buildDocFixTask({ num, title: item.title, spec: item.spec, scope: item.scope, taskType }) +
       '\nIf the work already exists, check every Done-when against main and find the delivering commit in git log. ' +
       'When all checks pass, report "spec already done on main: commit <sha>" with the actual delivering SHA.\n';
     let taskFile = io.writeTaskFile(lanePath, 'probation-build-task.md', task);
@@ -665,7 +664,7 @@ export function realIo({ session, env = process.env, repoRoot = WE_ROOT } = {}) 
       }),
     }),
     readCommittedCard: (dir, path) => sh('git', ['-C', dir, 'show', `HEAD:${path}`], { cwd: dir, env: laneEnv }),
-    readPrepareBrief: (dir) => readFileSync(join(dir, 'skills-src/conveyor/prepare-item-agent-brief.md'), 'utf8'),
+    readPrepareBrief: (dir) => readFileSync(join(dir, 'skills-src/conveyor/prepare-item-worker-brief.md'), 'utf8'),
     stampPrepare: (n, dir) => node('scripts/backlog.mjs', ['prepare-stamp', String(n)], { cwd: dir, env: laneEnv }),
     claim: (n, s, dir) => node('scripts/backlog.mjs', ['claim', String(n), `--session=${s}`], { cwd: dir, env: laneEnv }).ok,
     headSha: (dir) => sh('git', ['-C', dir, 'rev-parse', 'HEAD'], { cwd: dir, env: laneEnv }).trim(),

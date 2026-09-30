@@ -116,21 +116,23 @@ export function settleBookkeeping(prev = {}, next = {}, dispatchedNums = [], pre
   return out;
 }
 
-/** Find `dispatching` anywhere in dispatch-lane's `--json` output (its verdict nests under the run result). */
+/** A planning verdict is intent; only a persisted dispatch effect proves a launch. */
 export function readDispatchOutcome(text) {
   let parsed;
   try { parsed = JSON.parse(String(text ?? '')); } catch { return { dispatching: false, reason: 'unparseable dispatch-lane output' }; }
-  const seen = new Set();
-  const walk = (v) => {
-    if (!v || typeof v !== 'object' || seen.has(v)) return null;
-    seen.add(v);
-    if (typeof v.dispatching === 'boolean') return v;
-    for (const k of Object.keys(v)) { const r = walk(v[k]); if (r) return r; }
-    return null;
-  };
-  const verdict = walk(parsed);
-  if (!verdict) return { dispatching: false, reason: 'no verdict in dispatch-lane output' };
-  return { dispatching: verdict.dispatching, reason: verdict.reason ?? verdict.why ?? null, lane: verdict.lane ?? null, sessionSlug: verdict.sessionSlug ?? null };
+  const run = parsed?.run ?? parsed;
+  const verdict = run?.verdict;
+  if (!verdict || typeof verdict.dispatching !== 'boolean') return { dispatching: false, reason: 'no verdict in dispatch-lane output' };
+  const result = { dispatching: false, reason: verdict.reason ?? verdict.why ?? null,
+    lane: verdict.lane ?? null, sessionSlug: verdict.sessionSlug ?? null };
+  if (!verdict.dispatching) return result;
+  const effect = run.effects?.find(e => e.type === 'conveyor.dispatch-delivery-agent');
+  if (effect?.error) return { ...result, reason: effect.error };
+  if (!effect || !['in-flight', 'applied'].includes(effect.status)
+    || typeof effect.handle !== 'string' || !effect.handle.trim()) {
+    return { ...result, reason: `dispatch launch not confirmed (${effect?.status ?? 'missing effect'}; no running session)` };
+  }
+  return { ...result, dispatching: true, handle: effect.handle };
 }
 
 /**
@@ -383,14 +385,16 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
       let why = status?.preparedDate ? 'prepared on main' : prDone ? `prepare PR ${status.pr.state.toLowerCase()}` : null;
       // An OPEN PR only shields the claim when it is stamped; an unstamped one must not outlive a dead worker.
       if (!why && claim && !(awaitingPr && status.pr.preparedDate) && isLeaseExpired(claim, effects.now?.() ?? Date.now(), DEFAULT_LEASE_MINUTES)) {
-        // Reuse orphan adoption's owner-PID fallback; a remote/unknown owner cannot be probed locally.
+        // Probe the worker independently: the claim owner is the long-lived daemon, not the worker.
+        // A failed Claude listing stays unknown; use owner-PID fallback only when no worker row exists.
         const host = claim.owner?.slice(0, claim.owner.lastIndexOf(':'));
         const ownerPid = host === (effects.hostname?.() ?? hostname()) ? claim.pid : null;
         const liveness = classifyClaimLiveness({ row: null, ownerPid,
           isPidAlive: effects.isPidAlive ?? defaultIsPidAlive });
         const worker = prepareRows.find((r) => normNum(r.num) === num)?.row;
         const workerLiveness = worker && classifyClaimLiveness({ row: worker, ownerPid, isPidAlive: effects.isPidAlive ?? defaultIsPidAlive });
-        if (liveness.status === 'dead' && (!worker || workerLiveness.status === 'dead')) why = 'dead prepare owner past heartbeat TTL';
+        if (worker?.entry?.live === false || (worker?.entry?.handle?.startsWith('pid:') && workerLiveness?.status === 'dead')
+          || (!worker && liveness.status === 'dead')) why = 'dead prepare owner past heartbeat TTL';
       }
       const wasUnstamped = holds.some((h) => normNum(h.num) === num && ['prepare-unstamped', 'prepare-stamp-pending'].includes(h.reason));
       const ended = prDone || why === 'dead prepare owner past heartbeat TTL' || wasUnstamped
@@ -596,7 +600,7 @@ export async function cliFetchOpenPrs() {
 // xovjhwh converge round 2 — exported (was module-private) so a test can drive it against a real, broken
 // run-store directory the same way the sibling `cliListSettledBuilds` already is below, and pin the "degrades
 // to `[]`, never throws" claim `deriveDispatchedByBuilder`'s own docblock makes about this exact reader.
-export async function cliListRunStoreInFlight({ now = new Date(), launchKind = 'build' } = {}) {
+export async function cliListRunStoreInFlight({ now = new Date(), launchKind = 'build', listAgents } = {}) {
   const { createFileRunStore } = await import('../../scripts/operations/run-store.mjs');
   const { DISPATCH_EFFECT, dispatchStillHolds } = await import('../../scripts/operations/dispatch-lane.mjs');
   const store = createFileRunStore();
@@ -608,7 +612,7 @@ export async function cliListRunStoreInFlight({ now = new Date(), launchKind = '
     try { run = store.read(id); } catch { continue; }
     for (const e of run?.effects || []) {
       if (e?.status !== 'in-flight' || e.type !== DISPATCH_EFFECT || e.payload?.launchKind !== launchKind) continue;
-      if (!dispatchStillHolds(e, now.toISOString())) continue;
+      if (launchKind !== 'prepare-item' && !dispatchStillHolds(e, now.toISOString())) continue;
       // card xao7080 (#4518) — `e.dispatch.executor` is the durable field the io shell already writes at
       // dispatch time (`dispatch-lane-io.mjs`'s `inFlight({..., dispatch})`, #3717/#3906): the ACTUAL provider
       // (`claude`/`antigravity`/`codex`) that ran this in-flight build, never a guess. `null` for an older
@@ -616,6 +620,11 @@ export async function cliListRunStoreInFlight({ now = new Date(), launchKind = '
       // unknown" rather than defaulting to a wrong guess.
       rows.push({ num: normNum(e.payload.num), scope: e.payload.scope || [], source: `run ${id}`, executor: e.dispatch?.executor ?? null, ...(launchKind === 'prepare-item' ? { row: { runId: id, entry: e } } : {}) });
     }
+  }
+  if (launchKind === 'prepare-item' && rows.length) {
+    const { stampLiveness, defaultListAgents } = await import('../../scripts/operations/dispatch-lane-io.mjs');
+    const stamped = stampLiveness({ runs: rows.map(r => r.row.entry) }, { listAgents: listAgents ?? defaultListAgents });
+    rows.forEach((r, i) => { r.row.entry = stamped.runs[i]; });
   }
   return rows;
 }
@@ -678,6 +687,10 @@ export function cliDispatch({ num, bookkeeping, launchKind = 'build', prepareFal
     });
     return readDispatchOutcome(text);
   } catch (e) {
+    if (e?.stdout) {
+      const outcome = readDispatchOutcome(e.stdout);
+      if (!outcome.dispatching && outcome.reason && !['unparseable dispatch-lane output', 'no verdict in dispatch-lane output'].includes(outcome.reason)) return outcome;
+    }
     return { dispatching: false, reason: String(e?.stderr || e?.message || e).replace(/\s+/g, ' ').slice(0, 400) };
   } finally {
     try { rmSync(dir, { recursive: true, force: true }); } catch { /* best-effort */ }
