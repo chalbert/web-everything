@@ -749,6 +749,12 @@ export function parseFreeLanes(raw) {
 
 // Lazily required so importing the pure core pulls in NO node built-ins beyond scope-lease.mjs.
 async function main(argv) {
+  const { deferGhPass } = await import('../lib/gh-throttle.mjs');
+  const deferred = deferGhPass('dispatch-plan');
+  if (deferred) {
+    process.stdout.write(JSON.stringify({ ...deferred, launch: [], held: [] }) + '\n');
+    return;
+  }
   const { runBounded, installChildReaper, resolveChildTimeoutMs } = await import('../lib/bounded-child.mjs');
   const { fileURLToPath } = await import('node:url');
   const { dirname, join } = await import('node:path');

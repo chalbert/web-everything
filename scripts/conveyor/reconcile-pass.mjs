@@ -48,6 +48,7 @@
  * cannot corrupt anything, and a lease taken inside a one-shot read is a lease nothing releases when the process
  * is killed.
  */
+import { isGhDeferred } from '../lib/gh-deferred.mjs';
 import { repoKeyForSlug, CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
 // #2748 false-red follow-up (soak-replay-gate, PR #2775) — the repo's REQUIRED status-check names, live +
 // cached (`we:scripts/lib/required-status-checks.mjs`), so `planReconcile`'s `ci-red` branch means a REQUIRED
@@ -143,14 +144,16 @@ export const PR_LIST_LIMIT = 200;
 export function defaultReadPrs({ exec = execFileSyncThrottled, repo = null } = {}) {
   // #gh-graphql-budget — read the host-shared open-PR snapshot (one right-sized list per repo per TTL for the
   // whole fleet) instead of a private `gh pr list`; null = not applicable (tests, cwd repo) → the direct read below.
-  if (exec === execFileSyncThrottled) { const shared = readSharedOpenPrs({ repo, fields: PR_LIST_JSON_FIELDS }); if (shared) return shared; }
+  if (exec === execFileSyncThrottled) { const shared = readSharedOpenPrs({ repo, fields: PR_LIST_JSON_FIELDS, allowDeferred: true }); if (shared) return shared; }
   const argv = ['pr', 'list', '--state', 'open', '--limit', String(PR_LIST_LIMIT), '--json', PR_LIST_JSON_FIELDS];
   if (repo) argv.push('--repo', repo);
   // #x5n4zn3 — was bare (no timeout).
   const out = exec('gh', argv, {
     encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024,
     timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL',
+    throttle: { deferrable: true }, // this reader checks isGhDeferred below
   });
+  if (isGhDeferred(out)) return JSON.parse(String(out));
   const parsed = JSON.parse(String(out || '[]'));
   return Array.isArray(parsed) ? parsed : [];
 }
@@ -322,6 +325,7 @@ export function defaultReadMainRuns({
     encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 16 * 1024 * 1024,
     timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL',
   });
+  if (isGhDeferred(out)) return JSON.parse(String(out));
   const parsed = JSON.parse(String(out || '[]'));
   return (Array.isArray(parsed) ? parsed : []).filter((r) => r?.workflowName === workflowName);
 }
@@ -369,6 +373,7 @@ function readCommitCheckRuns(sha, { exec, repo, checkName = null }) {
     encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 16 * 1024 * 1024,
     timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL',
   });
+  if (isGhDeferred(out)) return JSON.parse(String(out));
   const parsed = JSON.parse(String(out || '[]'));
   return Array.isArray(parsed) ? parsed : [];
 }
@@ -1000,6 +1005,7 @@ export function runReconcilePass({
   // before) — only a caller-supplied value is normalised.
   const resolvedRepo = repo == null ? null : CONSTELLATION_REPOS[repoKey].slug;
   const rawPrs = readPrs({ repo: resolvedRepo });
+  if (isGhDeferred(rawPrs)) return { ...rawPrs, dispatch: [], refusals: [], notes: [rawPrs.message], prs: 0, agents: 0 };
   // #4501 — read the live required-check set (branch protection, cached; degrades to
   // FALLBACK_REQUIRED_STATUS_CHECKS if the live fetch fails) BEFORE enriching main-red facts, so BOTH
   // `enrichMainRed` below and `planReconcile` further down judge the SAME set. Moved up from just before
