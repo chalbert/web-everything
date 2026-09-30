@@ -186,7 +186,7 @@ describe('runProbationHeal — the arc', () => {
     const r = await runProbationHeal(args(), io);
     expect(r).toMatchObject({ outcome: 'healed', executor: 'antigravity' });
     expect(calls.find((c) => c[0] === 'worker')).toEqual(['worker', expect.stringMatching(/scripts\/gemini-direct-task\.mjs$/), '--model=claude-sonnet-4-6']);
-    expect(calls.find((c) => c[0] === 'commit')).toEqual(['commit', ['scripts/a.mjs'], expect.stringContaining('on probation (antigravity/claude-sonnet-4-6')]);
+    expect(calls.find((c) => c[0] === 'commit')).toEqual(['commit', ['scripts/a.mjs'], expect.stringContaining('ci-heal — red-ci: repair scripts/a.mjs')]);
     expect(calls.find((c) => c[0] === 'push')).toEqual(['push', 'lane/x', 'examined']);
     expect(calls.filter((c) => c[0] === 'scorecard')).toEqual([['scorecard', 'healed', 'antigravity', null, null]]);
     expect(calls.at(0)).toEqual(['completion', 'started', null]);

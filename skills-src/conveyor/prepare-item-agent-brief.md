@@ -176,19 +176,19 @@ for you via `--ref=... --sha=HEAD`. Open the PR through the canonical producer �
 `gh pr create`**:
 
 ```bash
-printf '%s\n' "WE #{{ITEM_NUM}}: prepare item — Design/MVP/Test plan/Proof plan/Follow-ups" "" \
+printf '%s\n' "WE #{{ITEM_NUM}}: prepare — <short card title>" "" \
   "Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>" > <msgfile>
 git commit -F <msgfile> {{ITEM_SPEC_PATH}}
 
 node scripts/operations/run.mjs open-pr --ref=lane/{{ITEM_NUM}}-prepare-item-<slug> --sha=HEAD --base=main \
-  --title="WE #{{ITEM_NUM}}: prepare item — Design/MVP/Test plan/Proof plan/Follow-ups" \
+  --title="WE #{{ITEM_NUM}}: prepare — <short card title>" \
   --bodyFile=<pr-body> --mode=label-on-green --json
 ```
 
 The producer checks the full PR diff against `origin/main` before any publication. Any file other than
 `{{ITEM_SPEC_PATH}}`, including another card, refuses the PR with the offending paths. A merge commit
 in the lane also refuses publication. Stop on refusal; reacquire fresh and reapply only this card.
-The title is fixed from the item identity, never derived from a commit subject.
+Use the card’s actual title as the subject, capped to about 70 characters including the stable prefix. Publication re-reads the card title.
 
 `--mode=label-on-green` opens the self-approved PR, waits for the required `test` check, applies `ready-to-merge`
 **only when green, then STOPS** (the resident drain lands it). This is the **default and expected** outcome: a

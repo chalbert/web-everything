@@ -397,7 +397,7 @@ then push HEAD to `{{LANE_REF}}` — this **updates the existing PR**, it does n
 `gh pr create`, never `pr-land` — the PR already exists; you are pushing a new head to it):
 
 ```bash
-printf '%s\n' "{{ATTRIBUTION}}: address review:changes on PR #{{PR_NUM}} — <one-line what you fixed>" "" \
+printf '%s\n' "{{ATTRIBUTION}}: fix — <specific correction> (PR {{PR_NUM}})" "" \
   "Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>" > <msgfile>
 git commit -F <msgfile> <explicit-paths>
 git push origin HEAD:refs/heads/{{LANE_REF}}

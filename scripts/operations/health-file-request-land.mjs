@@ -56,6 +56,7 @@
  * Usage:
  *   node scripts/operations/health-file-request-land.mjs [--state-root=DIR] [--json] [--dry-run] [--max=N]
  */
+import { machinePrTitle } from './machine-pr-title.mjs';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -174,7 +175,7 @@ export function landOne(entry, { runFn = runCmd, acquireFn = acquireLane, releas
       const filedCardFile = verdict?.rel ?? null;
       if (!filedCardFile) throw new Error(`health-file-request-land: file-item did not report a filed card path (${out.slice(0, 500)})`);
       runFn('git', ['add', '--', filedCardFile], lane);
-      runFn('git', ['commit', '-m', `WE #${filedCard}: health daemon filing request — ${entry.title}\n\nFiled by the health daemon's lane-bound landing pass (#4079); uncleared (--queue=false).\n`], lane);
+      runFn('git', ['commit', '-m', `${machinePrTitle({ item: filedCard, kind: 'file', card: entry })}\n\nFiled by the health daemon's lane-bound landing pass (#4079); uncleared (--queue=false).\n`], lane);
       // THE DURABLE HANDOFF POINT (#4079 review round 1, finding 1): push the commit to `entry.ref` on origin
       // BEFORE verify/open-pr can fail and strand it in a lane that gets hard-reset to `origin/main` on its
       // next acquire. `card`/`cardFile` (the outer, catch-visible variables) are only promoted AFTER this

@@ -50,6 +50,7 @@
  *                                                 # makes cards older than its oldest PR skip (merged-window-uncovered)
  */
 
+import { machinePrTitle } from '../operations/machine-pr-title.mjs';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -368,7 +369,7 @@ function applyViaLane(sig, minAgeHours) {
     const { applied, failed } = writeEdits(lane, release);
     if (!applied.length) return { applied, failed, pr: null };
     run('git', ['add', '--', 'backlog'], lane);
-    const msg = `backlog: release ${applied.length} orphaned claim(s) to open (#3913)\n\n${applied.map((a) => `- #${a.id} (${a.verb})`).join('\n')}\n`;
+    const msg = `${machinePrTitle({ item: applied[0].id, kind: 'release', subject: applied.map((a) => `orphaned claim ${a.id} (${a.verb})`).join(', ') })}\n\n${applied.map((a) => `- #${a.id} (${a.verb})`).join('\n')}\n`;
     run('git', ['commit', '-m', msg], lane);
     // Foreground verify — the lane-verify marker is what pr-land's finish-guard requires.
     execFileSync('node', [join(lane, 'scripts', 'operations', 'run.mjs'), 'verify', `--checkout=${lane}`], { cwd: lane, stdio: ['ignore', 'inherit', 'inherit'], timeout: VERIFY_TIMEOUT_MS, killSignal: 'SIGKILL' });
