@@ -3,9 +3,10 @@ bornAs: xx5zpnb
 kind: story
 size: 3
 parent: "4075"
-status: open
+status: active
 scope: ["we:scripts/daemon-overlay.mjs", "we:scripts/lib/__tests__/daemon-rebuild.test.mjs", "we:scripts/lib/daemon-rebuild.mjs", "we:scripts/__tests__/daemon-overlay.test.mjs"]
 dateOpened: "2026-09-27"
+dateStarted: "2026-09-30"
 preparedDate: "2026-09-30"
 preparedAgainstSha: "d93337a59ecc23f1f799806f89eb5ec0e41eac12"
 tags: []
