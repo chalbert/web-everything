@@ -584,6 +584,35 @@ export async function deliverItem(launch, provider = CLAUDE_RESTRICTED_PROVIDER,
     // ---- 7. Forward the optional learning, if the agent supplied one (REAL CLI surface). --------------------
     if (report.learning) dropLearning({ sessionSlug, learning: report.learning });
 
+    // #4357 — `openPr` RETURNS a refusal (`classifySubmit`'s `outcome: 'refused'|'unrun'`) rather than throwing;
+    // only `'opened'` is a success. Live #4125: a stale-verify `--requireVerified` refusal read as
+    // `finished — PR #null (review:pending)` and the lane was released/reset, stranding the built commits.
+    if (prResult.outcome !== 'opened') {
+      const reason = prResult.reason ?? prResult.outcome ?? 'unknown';
+      const message = describeOpenPrRefusal(prResult);
+      if (prResult.pr != null) {
+        // The PR EXISTS (post-open refusal: check-red, behind, conflict, …) — keep the `pr-opened` claim treatment
+        // (the daemon's PR-observed retirement owns it); no hold, no release. Only the message/status change.
+        settleTerminal('open-refused', { result: { reason, pr: prResult.pr } });
+        return finish(message, { status: 'error', outcome: 'open-refused', reason, pr: prResult.pr });
+      }
+      // No PR: keep the lane (releasing it resets it — how #4125's work became reflog-only) and pin the built HEAD
+      // under a durable ref, since a lane lease can still be reaped. Every git call is guarded so a git failure
+      // can never reach the inner catch (which would release the lane and settle `wrapper-threw`).
+      let sha = null;
+      let keepRef = null;
+      try { sha = String(run('git', ['rev-parse', 'HEAD'], { cwd: gate.lanePath })).trim() || null; } catch { /* sha stays null */ }
+      if (sha) {
+        const candidate = `refs/keep/${item}-${sha.slice(0, 8)}`;
+        try { run('git', ['update-ref', candidate, sha], { cwd: gate.lanePath }); keepRef = candidate; } catch { /* best-effort */ }
+      }
+      const detail = prResult.detail ?? null;
+      settleTerminal('open-refused', {
+        result: { reason, detail, lane: gate.lanePath, sha, keepRef }, releaseClaim: true, hold: `open-refused: ${reason}`,
+      });
+      return finish(message, { status: 'error', outcome: 'open-refused', reason, lane: gate.lanePath, sha, keepRef });
+    }
+
     // ---- 8. Exit. Same "never merge, never release, the drain lands it" contract as today. -----------------
     // `prResult` is `open-pr.mjs`'s `classifySubmit` shape — `.pr`, never `.number` — because `openPr` (above)
     // now runs it through `extractSubmitResult` before returning. It did NOT used to: `openPr` used to hand
@@ -2456,6 +2485,14 @@ export function openPr({ item, attemptTag, lane, park, report, slug, delegation 
   // `{pr, url}` object; the actual submit result (the only place `.pr`/`.url` live) is buried at
   // `findings.submit.effects[0].result`. See `extractSubmitResult`'s own docblock for the full story.
   return extractSubmitResult(JSON.parse(out));
+}
+
+/** #4357 — PURE. The `finished — …` text for a RETURNED (not thrown) non-`opened` `openPr` result: always names
+ *  the real reason/detail, never a bare `PR #null`. */
+export function describeOpenPrRefusal(prResult) {
+  const reason = prResult?.reason ?? prResult?.outcome ?? 'unknown';
+  const head = prResult?.pr != null ? `PR #${prResult.pr} open-refused` : 'open-refused';
+  return `${head} (${reason})${prResult?.detail ? `: ${prResult.detail}` : ''}`;
 }
 
 /**

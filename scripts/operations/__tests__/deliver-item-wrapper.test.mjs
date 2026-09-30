@@ -107,6 +107,8 @@ import {
   mergeSettleResult,
   // #4348-open-pr-retry
   classifyOpenPrFailure,
+  // #4357
+  describeOpenPrRefusal,
 } from '../deliver-item-wrapper.mjs';
 import { repoProfile } from '../../lib/repo-profile.mjs';
 // #4349 — real (never mocked) run-store + build-dispatch-claim reads, driven through a temp `OPERATION_RUNS_DIR`
@@ -3209,6 +3211,70 @@ describe('deliverItem (#3627 bug 13 — the success-path result string names the
     );
     expect(result.result).toContain('PR #4321');
     expect(result.result).not.toContain('undefined');
+  });
+
+  // #4357 — a RETURNED (not thrown) non-`opened` open-pr result must never read as `PR #null`.
+  describe('a refused / unrun open-pr result (#4357)', () => {
+    const launch = { item: '9999', lane: 7, scope: [], sessionSlug: 'conveyor-9999', attemptTag: '', runId: 'dispatch-lane-fixture', effectKey: 'dispatch:0:0' };
+    /** Re-stubs execFileSync so `open-pr` returns `submitResult`; `git` handled by `gitImpl`. */
+    const stubOpenPr = (submitResult, gitImpl = () => '') => {
+      const base = execFileSync.getMockImplementation();
+      execFileSync.mockImplementation((cmd, args = [], ...rest) => {
+        if (cmd === 'node' && String(args[0]).endsWith('scripts/operations/run.mjs') && args[1] === 'open-pr') {
+          return openPrEnvelope(submitResult);
+        }
+        if (cmd === 'git') return gitImpl(args);
+        return base(cmd, args, ...rest);
+      });
+    };
+    const laneReleases = () => execFileSync.mock.calls.filter(c => c[0] === 'node' && c[1]?.[0] === 'scripts/lane-pool.mjs' && c[1]?.[1] === 'release');
+    const sha = 'd7350a377aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    const unverified = { outcome: 'refused', reason: 'unverified', detail: 'verification is for 5348fd58, not d7350a37', pr: null };
+
+    it('refused with no pr: reports the real reason (never `PR #null`), keeps the lane, pins a keep ref', async () => {
+      stubOpenPr(unverified, (a) => (a[0] === 'rev-parse' ? `${sha}\n` : ''));
+      const result = await deliverItem(launch, { spawn: vi.fn() }, { newSessionId: () => 'uuid-fixed' });
+      expect(result.result).not.toContain('PR #null');
+      expect(result.result).toMatch(/^open-refused \(unverified\)/);
+      expect(result.result).toContain('5348fd58');
+      expect(laneReleases()).toHaveLength(0);
+      const keep = execFileSync.mock.calls.find(c => c[0] === 'git' && c[1]?.[0] === 'update-ref');
+      expect(keep[1]).toEqual(['update-ref', 'refs/keep/9999-d7350a37', sha]);
+      expect(keep[2]).toMatchObject({ cwd: lane });
+    });
+
+    it('a failing sha read / update-ref is swallowed — still open-refused, lane kept, never wrapper-threw', async () => {
+      stubOpenPr(unverified, (a) => { if (a[0] === 'rev-parse') throw new Error('git broke'); return ''; });
+      const result = await deliverItem(launch, { spawn: vi.fn() }, { newSessionId: () => 'uuid-fixed' });
+      expect(result.result).toMatch(/^open-refused \(unverified\)/);
+      expect(laneReleases()).toHaveLength(0);
+
+      stubOpenPr(unverified, (a) => { if (a[0] === 'update-ref') throw new Error('no'); return a[0] === 'rev-parse' ? `${sha}\n` : ''; });
+      const again = await deliverItem(launch, { spawn: vi.fn() }, { newSessionId: () => 'uuid-fixed' });
+      expect(again.result).toMatch(/^open-refused \(unverified\)/);
+      expect(laneReleases()).toHaveLength(0);
+    });
+
+    it('refused WITH a pr (post-open check-red): names the PR and the reason, not a success', async () => {
+      stubOpenPr({ outcome: 'refused', reason: 'check-red', detail: 'ci failed', pr: 777 });
+      const result = await deliverItem(launch, { spawn: vi.fn() }, { newSessionId: () => 'uuid-fixed' });
+      expect(result.result).toContain('PR #777');
+      expect(result.result).toContain('check-red');
+      expect(result.result).toContain('open-refused');
+      expect(execFileSync.mock.calls.some(c => c[0] === 'git' && c[1]?.[0] === 'update-ref')).toBe(false);
+    });
+
+    it('unrun with no pr: carries the classifier reason', async () => {
+      stubOpenPr({ outcome: 'unrun', reason: 'exit 3 with no parseable report', pr: null });
+      const result = await deliverItem(launch, { spawn: vi.fn() }, { newSessionId: () => 'uuid-fixed' });
+      expect(result.result).toContain('exit 3 with no parseable report');
+      expect(result.result).not.toMatch(/PR #(null|undefined)/);
+    });
+
+    it('describeOpenPrRefusal is pure and never emits a bare `PR #null`', () => {
+      expect(describeOpenPrRefusal({ outcome: 'refused', reason: 'unverified', detail: 'd', pr: null })).toBe('open-refused (unverified): d');
+      expect(describeOpenPrRefusal({ outcome: 'refused', reason: 'behind', pr: 5 })).toBe('PR #5 open-refused (behind)');
+    });
   });
 
   // #3850 Fork 2 — END-TO-END through the REAL `deliverItem`, not just `decideParkMode` in isolation: proves

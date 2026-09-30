@@ -3,9 +3,10 @@ bornAs: xtl3b09
 kind: story
 size: 3
 priority: high
-status: open
+status: active
 scope: ["we:scripts/operations/deliver-item-wrapper.mjs", "we:scripts/operations/__tests__/deliver-item-wrapper.test.mjs", "we:scripts/operations/__tests__/deliver-item-run.test.mjs"]
 dateOpened: "2026-09-28"
+dateStarted: "2026-09-30"
 preparedDate: "2026-09-30"
 preparedAgainstSha: "75d78f50e9b0e1f5c9daeccca8aa902db1cae9f2"
 tags: ["build-dispatch", "converge", "open-pr"]

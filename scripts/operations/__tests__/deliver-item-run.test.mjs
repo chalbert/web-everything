@@ -91,6 +91,16 @@ describe('runDeliverItemCli (injected `deliver` fake — no real process spawn)'
     expect(writeErr).not.toHaveBeenCalled();
   });
 
+  // #4357 — pins the contract: the `finished — …` line echoes the refusal reason, never `PR #null`.
+  it('echoes an open-refused result with its real reason in the finished line', async () => {
+    const deliver = vi.fn(async () => ({ item: '42', result: 'open-refused (unverified): verification is for 5348fd58' }));
+    const write = vi.fn();
+    await runDeliverItemCli(baseArgv, { deliver, write, writeErr: vi.fn() });
+    const line = write.mock.calls.map(c => c[0]).find(l => String(l).includes('finished'));
+    expect(line).toContain('open-refused (unverified)');
+    expect(line).not.toContain('PR #null');
+  });
+
   it('exits 1 when the injected `deliver` throws', async () => {
     const deliver = vi.fn(async () => { throw new Error('acquire refused'); });
     const write = vi.fn();
