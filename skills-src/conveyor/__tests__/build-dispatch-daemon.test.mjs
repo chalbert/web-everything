@@ -28,7 +28,7 @@ vi.mock('../../../scripts/operations/detached-dispatch.mjs', async (importOrigin
 
 import {
   runBuildDispatchTick, settleBookkeeping, readKillSwitch, readDispatchOutcome, KILL_SWITCH_ENV,
-  cliPredictRoute, cliListSettledBuilds, cliListRunStoreInFlight, cliListHolds, policyFrom,
+  cliReadPrepareStatus, cliPredictRoute, cliListSettledBuilds, cliListRunStoreInFlight, cliListHolds, policyFrom,
   // #4348-open-pr-retry
   primaryInfraStoreEnv, cliRetryInfraBlocked,
   // #4464 builder-cap-machine-wide
@@ -1077,6 +1077,24 @@ describe('cliListSettledBuilds / cliListHolds (the real readers, not a stub)', (
     expect(cliListHolds()).toEqual([{ num: '2001', reason: 'gate-red' }]);
   });
 
+  it('keeps prepare-unstamped holds past cooldown expiry while ordinary holds expire', () => {
+    const nowMs = Date.now() - 300 * 60_000;
+    placeBuildDispatchHold({ num: '2001', reason: 'prepare-unstamped', nowMs });
+    placeBuildDispatchHold({ num: '2002', reason: 'gate-red', nowMs });
+    expect(cliListHolds()).toEqual([{ num: '2001', reason: 'prepare-unstamped' }]);
+  });
+
+  it('reads completed prepare-item effects even when the agent supplied no outcome', async () => {
+    seedRun('dispatch-lane-prepare-ended', [{
+      key: 'dispatch:0:0', type: DISPATCH_EFFECT, stepIndex: 0, index: 0, status: 'applied',
+      payload: { num: '2001', launchKind: 'prepare-item' }, result: {}, error: null,
+    }]);
+    expect(await cliListSettledBuilds({ launchKind: 'prepare-item' })).toEqual([
+      expect.objectContaining({ num: '2001', outcome: 'prepare-ended' }),
+    ]);
+    expect(await cliListSettledBuilds()).toEqual([]);
+  });
+
   it('cliListHolds is empty with no holds placed', () => {
     expect(cliListHolds()).toEqual([]);
   });
@@ -1227,6 +1245,121 @@ describe('automatic item preparation', () => {
       releasePrepareClaim: (o) => releaseBuildDispatchClaim({ ...o, lockRoot }),
     };
   }
+  function claimed(effects, num = '4501', { age = 40, alive = false } = {}) {
+    acquireBuildDispatchClaim({ num, lockRoot, owner: 'host:10', pid: 10,
+      nowMs: Date.now() - age * 60_000 });
+    effects.hostname = () => 'host';
+    effects.isPidAlive = () => alive;
+    effects.readPrepareStatus = () => ({ preparedDate: null });
+    effects.placePrepareHold = vi.fn();
+  }
+  it('retires a dead owner past TTL and logs it; clears prior guards', async () => {
+    const effects = fixture();
+    claimed(effects);
+    const guard = { num: '4501', kind: 'prepare-item', spawnedTick: 0 };
+    const tick = await runBuildDispatchTick({ live: true, effects, bookkeeping: { prepareGuards: [guard] } });
+    expect(tick.prepare.retired).toEqual([{ num: '4501', why: 'dead prepare owner past heartbeat TTL', released: true }]);
+    expect(tick.prepare.inFlight).not.toContain('4501');
+    expect(tick.nextBookkeeping.prepareGuards.map((g) => g.num)).not.toContain('4501');
+    expect(effects.listPrepareClaims().map((c) => c.meta.num)).not.toContain('4501');
+  });
+  it.each([{ age: 40, alive: true }, { age: 1, alive: false }])('keeps a live or fresh claim: %j', async (state) => {
+    const effects = fixture();
+    claimed(effects, '4501', state);
+    const tick = await runBuildDispatchTick({ live: true, effects });
+    expect(tick.prepare.retired).toEqual([]);
+    expect(tick.prepare.inFlight).toContain('4501');
+  });
+  it('retires a prepared card even with a stale in-flight row and never prepares it again', async () => {
+    const effects = fixture({ inFlight: [{ num: '4501' }] });
+    claimed(effects, '4501', { alive: true });
+    effects.readPrepareStatus = ({ num }) => ({ preparedDate: num === '4501' ? '2026-09-29' : null });
+    const tick = await runBuildDispatchTick({ live: true, effects });
+    expect(tick.prepare.retired[0].why).toBe('prepared on main');
+    expect(tick.prepare.inFlight).not.toContain('4501');
+    expect(effects.dispatch.mock.calls.map(([r]) => r.num)).toEqual(['4502']);
+  });
+  it.each(['MERGED', 'CLOSED'])('retires a %s prepare PR and durably holds its unstamped card across restart', async (state) => {
+    const effects = fixture();
+    claimed(effects);
+    const holdRoot = join(lockRoot, 'holds');
+    effects.placePrepareHold = (o) => placeBuildDispatchHold({ ...o, lockRoot: holdRoot });
+    effects.listHolds = () => listBuildDispatchHolds({ lockRoot: holdRoot }).map((c) => c.meta);
+    effects.readPrepareStatus = ({ num }) => ({ preparedDate: null, pr: num === '4501' ? { state } : null });
+    const tick = await runBuildDispatchTick({ live: true, effects });
+    expect(tick.prepare.retired[0].why).toBe(`prepare PR ${state.toLowerCase()}`);
+    expect(tick.prepare.failures).toContainEqual({ num: '4501', stage: 'result', reason: 'prepare-unstamped' });
+    expect(effects.listHolds()[0].reason).toBe('prepare-unstamped');
+    await runBuildDispatchTick({ live: true, effects });
+    expect(effects.dispatch.mock.calls.map(([r]) => r.num)).toEqual(['4502']);
+  });
+  it('holds a settled unstamped run without a PR, but accepts a stamped open PR awaiting merge', async () => {
+    const effects = fixture();
+    effects.listSettledPrepares = () => ['4501', '4502'].map((num) => ({ num, startedAt: '2026-09-29', outcome: 'prepare-ended' }));
+    effects.placePrepareHold = vi.fn();
+    effects.readPrepareStatus = ({ num }) => ({ preparedDate: null, pr: num === '4502' ? { state: 'OPEN', preparedDate: '2026-09-29' } : null });
+    const tick = await runBuildDispatchTick({ live: true, effects });
+    expect(effects.placePrepareHold).toHaveBeenCalledTimes(1);
+    expect(effects.placePrepareHold).toHaveBeenCalledWith({ num: '4501', reason: 'prepare-unstamped' });
+    expect(tick.prepare.inFlight).toEqual(['4502']);
+    expect(effects.dispatch).not.toHaveBeenCalled();
+  });
+  it.each([true, false])('checks the worker independently of its dead owner (alive=%s)', async (alive) => {
+    const effects = fixture({ inFlight: [{ num: '4501', row: { runId: 'run', entry: {
+      key: 'dispatch:0:0', status: 'in-flight', handle: 'pid:123',
+    } } }] });
+    claimed(effects);
+    effects.isPidAlive = (pid) => pid === 123 && alive;
+    effects.settlePrepareRow = vi.fn();
+    const tick = await runBuildDispatchTick({ live: true, effects });
+    expect(tick.prepare.inFlight.includes('4501')).toBe(alive);
+    expect(tick.prepare.retired).toHaveLength(alive ? 0 : 1);
+    if (!alive) expect(effects.settlePrepareRow).toHaveBeenCalledWith({ runId: 'run', key: 'dispatch:0:0', outcome: 'prepare-unstamped' });
+  });
+  it('clears an unstamped hold only after main has the stamp', async () => {
+    const effects = fixture();
+    effects.listHolds = () => [{ num: '4501', reason: 'prepare-unstamped' }];
+    effects.readPrepareStatus = ({ num }) => ({ preparedDate: num === '4501' ? '2026-09-29' : null });
+    effects.releasePrepareHold = vi.fn();
+    await runBuildDispatchTick({ live: true, effects });
+    expect(effects.releasePrepareHold).toHaveBeenCalledWith({ num: '4501' });
+    expect(effects.dispatch.mock.calls.map(([r]) => r.num)).toEqual(['4502']);
+  });
+  it('dry-run logs retirement without releasing or placing holds', async () => {
+    const effects = fixture();
+    claimed(effects);
+    effects.readPrepareStatus = () => ({ preparedDate: null, pr: { state: 'MERGED' } });
+    effects.placePrepareHold = vi.fn();
+    const tick = await runBuildDispatchTick({ effects });
+    expect(tick.prepare.retired[0].released).toBe(false);
+    expect(effects.listPrepareClaims()).toHaveLength(1);
+    expect(effects.placePrepareHold).not.toHaveBeenCalled();
+  });
+  it('keeps claims on failed observations and ignores an older settled attempt', async () => {
+    const effects = fixture();
+    claimed(effects, '4501', { alive: true });
+    effects.listSettledPrepares = () => [{ num: '4501', startedAt: '2000-01-01', outcome: 'prepare-ended' }];
+    effects.placePrepareHold = vi.fn();
+    await runBuildDispatchTick({ live: true, effects });
+    expect(effects.placePrepareHold).not.toHaveBeenCalled();
+    effects.readPrepareStatus = () => { throw new Error('network unavailable'); };
+    const tick = await runBuildDispatchTick({ live: true, effects });
+    expect(tick.prepare.retired).toEqual([]);
+    expect(tick.prepare.inFlight).toContain('4501');
+  });
+  it('reads the stamp from remote main and an open PR head, ignoring older PRs', () => {
+    const exec = vi.fn((cmd, args) => {
+      if (cmd === 'git') return 'backlog/4501-card.md\n';
+      if (args[0] === 'pr') return JSON.stringify([
+        { state: 'MERGED', headRefName: 'lane/4501-prepare-old', createdAt: '2026-01-01' },
+        { state: 'OPEN', headRefName: 'lane/4501-prepare-new', headRefOid: 'abcd', createdAt: '2026-09-29' },
+      ]);
+      return JSON.stringify({ content: Buffer.from(args[1].endsWith('ref=main') ? '---\nstatus: open\n---' : '---\npreparedDate: 2026-09-29\n---').toString('base64') });
+    });
+    const status = cliReadPrepareStatus({ num: '4501', claimedAt: '2026-09-28' }, { exec });
+    expect(status.preparedDate).toBeNull();
+    expect(status.pr).toMatchObject({ state: 'OPEN', preparedDate: '2026-09-29' });
+  });
   it('launches two prepare-item dispatches, retaining only their guards; no repeat next tick or after restart', async () => {
     const effects = fixture();
     const tick = await runBuildDispatchTick({ live: true, effects });
