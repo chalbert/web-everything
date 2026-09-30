@@ -62,6 +62,14 @@ const CRITICAL_PATH_PREFIXES = Object.freeze({
     // The drain's land step: builds/spawns the merge sweep and clears review; plus the resident daemons that run it.
     'scripts/lane-drain.mjs', 'scripts/converge-daemon-pass.mjs', 'scripts/converge-daemon-install.mjs',
     'plateau-app/tools/drain-daemon/',
+    // Land, required-check, credential, approval-store and review-independence surface not named in any roster
+    // (PR #3124 round 2): the merge gate the lander consults, the check list, app-token minting, the land advance
+    // operation, authorship inputs, the human-approval store, and the main-push lock backstop.
+    'scripts/lib/pr-merge-gate.mjs', 'scripts/lib/required-status-checks.mjs', 'scripts/lib/verify-lane-gate.mjs',
+    'scripts/lib/github-app-', 'scripts/lib/forge-land-provider.mjs', 'scripts/operations/land-advance',
+    'scripts/operations/pr-land-reasons.mjs', 'scripts/lib/ai-pr-authorship.mjs', 'scripts/lib/marker-authorship.mjs',
+    'scripts/lib/verdict-totality.mjs', 'scripts/lib/trust-chain-tier.mjs', 'scripts/conveyor/hiccup-approve.mjs',
+    '.githooks/',
   ]),
   irreversible: Object.freeze([
     '.github/workflows/', '.github/branch-protection', '.github/required-check',

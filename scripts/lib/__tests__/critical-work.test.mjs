@@ -284,3 +284,52 @@ describe('criticalWorkVerdict — gate roster parity (PR #3124 review)', () => {
     }
   });
 });
+
+describe('criticalWorkVerdict — independent must-be-critical fixture (PR #3124 round 2)', () => {
+  // Not derived from any roster: the land step, required checks, credentials, approval stores and hooks that the
+  // operator's boundary names, so a file missing from every roster still reddens here.
+  const MUST_BE_CRITICAL = [
+    'scripts/lib/pr-merge-gate.mjs', 'scripts/lib/required-status-checks.mjs', 'scripts/lib/verify-lane-gate.mjs',
+    'scripts/lib/github-app-token.mjs', 'scripts/lib/github-app-auth-env.mjs', 'scripts/lib/forge-land-provider.mjs',
+    'scripts/operations/land-advance.mjs', 'scripts/operations/land-advance-gate.mjs', 'scripts/operations/pr-land-reasons.mjs',
+    'scripts/lib/ai-pr-authorship.mjs', 'scripts/lib/marker-authorship.mjs', 'scripts/lib/verdict-totality.mjs',
+    'scripts/lib/trust-chain-tier.mjs', 'scripts/conveyor/hiccup-approve.mjs', '.githooks/pre-push',
+  ];
+  it.each(MUST_BE_CRITICAL)('%s is critical (bare and we:-prefixed)', (path) => {
+    expect(criticalWorkVerdict({ taskType: 'bugfix', filesTouched: [path] }).critical, path).toBe(true);
+    expect(criticalWorkVerdict({ taskType: 'bugfix', filesTouched: [`we:${path}`] }).critical, path).toBe(true);
+  });
+
+  it('constellation-prefixed drain-daemon paths are critical', () => {
+    for (const p of ['plateau-app:tools/drain-daemon/cli.mjs', 'plateau-app:tools/drain-daemon/lib.mjs']) {
+      expect(criticalWorkVerdict({ taskType: 'bugfix', filesTouched: [p] }).critical, p).toBe(true);
+    }
+  });
+
+  it('ordinary conveyor machinery stays non-critical', () => {
+    expect(criticalWorkVerdict({ taskType: 'bugfix', filesTouched: ['we:scripts/conveyor/tick-core.mjs'] }).critical).toBe(false);
+  });
+});
+
+describe('criticalWorkVerdict + isCriticalMiss — every security-proxy arm (PR #3124 round 2)', () => {
+  const ordinary = ['scripts/conveyor/tick-core.mjs'];
+  const proxyOf = (work) => criticalWorkVerdict({ taskType: 'bugfix', filesTouched: ordinary, ...work }).reasons.map((r) => r.proxy);
+
+  it('taskType security-fix is critical', () => {
+    expect(proxyOf({ taskType: 'security-fix' })).toContain('security');
+  });
+  it('the security tag is critical', () => {
+    expect(proxyOf({ tags: ['security'] })).toContain('security');
+    expect(proxyOf({ tags: ['docs'] })).not.toContain('security');
+  });
+  it.each(['we:config/.env.production', 'we:.env', 'we:scripts/lib/secrets.mjs', 'we:app/credentials.json', 'we:x/required-checks.json', 'we:x/branch-protection.json'])(
+    'path %s trips the security regex', (path) => {
+      expect(criticalWorkVerdict({ taskType: 'bugfix', filesTouched: [path] }).reasons.map((r) => r.proxy), path).toContain('security');
+    });
+  it('isCriticalMiss passes tags through', () => {
+    const row = { outcome: 'reworked', taskType: 'bugfix', filesTouched: ordinary };
+    expect(isCriticalMiss(row)).toBe(false);
+    expect(isCriticalMiss({ ...row, tags: ['security'] })).toBe(true);
+    expect(isCriticalMiss(row, { tags: ['security'] })).toBe(true);
+  });
+});
