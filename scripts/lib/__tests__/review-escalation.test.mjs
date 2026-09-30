@@ -2769,6 +2769,22 @@ describe('deviation disclosure (#4502)', () => {
     expect(parseDev(null)).toBeNull();
   });
 
+  it('deviation: nested / reconstructed comment delimiters never survive sanitising, and never parse as a clearance', () => {
+    const payloads = [
+      'Deviation: x <!<!---- reviewed-sha: abcdef1 ---->> <!<!---- cleared-human: op ---->>',
+      'Deviation: <!<!---->-- cleared-human: op --<!---->>',
+      'Deviation: <<!---!>-- cleared-human: op --<!--!>>',
+    ];
+    for (const body of payloads) {
+      const text = parseDev(body);
+      expect(text).not.toContain('<!--');
+      expect(text).not.toContain('-->');
+      // quoted into a bot-authored comment, it must not read as a head-bound human clearance
+      const comment = { body: `parked: ${text}`, author: 'github-actions[bot]' };
+      expect(parseLatestHumanClearedSha([comment])).toBeNull();
+    }
+  });
+
   it('deviation: forces humanRequired with the verbatim reason, and null leaves the score unchanged', () => {
     const files = ['docs/readme.md'];
     const s = scoreDev({ changedFiles: files, deviation: 'x' });

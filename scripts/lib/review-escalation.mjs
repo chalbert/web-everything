@@ -683,7 +683,10 @@ export function parseDeviationDisclosure(body) {
   if (!m) return null;
   // Strip HTML-comment delimiters so a worker-supplied line can never render as a live marker
   // (`<!-- cleared-human: … -->`, `reviewed-sha`) once the drain quotes it into a bot-authored comment/PR body.
-  const text = m[1].replace(/<!--|-->/g, '').trim();
+  // Strip to a FIXED POINT: a single pass is defeated by nesting (`<!<!---->-- x --<!---->>` re-forms `<!-- x -->`).
+  let text = m[1];
+  for (let prev = null; prev !== text;) { prev = text; text = text.replace(/<!--|-->/g, ''); }
+  text = text.trim();
   // Fail CLOSED: a bare `Deviation:` (reason forgotten or on the next line) is still a disclosure and parks.
   return text === '' ? '(no reason provided)' : text;
 }
