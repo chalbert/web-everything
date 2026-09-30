@@ -16,7 +16,7 @@ Live 2026-09-29: orphan card x3hxr6i (from PR #2872) quoted reviewer prose that 
 
 ## Premise check (current `main`, 2026-09-30)
 
-Still open. No commit names #4457 or `x950qv1` beyond the filing/JIT-number commits. `boundCardText` (`we:scripts/operations/land-prevention-card.mjs:122-133`) strips invisibles, neutralizes `<!--`/`-->` and caps length, but does nothing for `[[`…`]]`. The wiki-link rule is `we:scripts/check-standards-rules.mjs:834` (`/\[\[[^\]]*\]\]/g`, run on prose with inline-code spans and fenced blocks already skipped). Orphan `x3hxr6i` no longer exists in the tree (the sweep, PR #2901, dropped it), so its exact text is not recoverable from `main`.
+Still open. No commit names #4457 or `4457` beyond the filing/JIT-number commits. `boundCardText` (`we:scripts/operations/land-prevention-card.mjs:122-133`) strips invisibles, neutralizes `<!--`/`-->` and caps length, but does nothing for `[[`…`]]`. The wiki-link rule is `we:scripts/check-standards-rules.mjs:834` (`/\[\[[^\]]*\]\]/g`, run on prose with inline-code spans and fenced blocks already skipped). Orphan `x3hxr6i` no longer exists in the tree (the sweep, PR #2901, dropped it), so its exact text is not recoverable from `main`.
 
 **Scope correction:** the frontmatter `scope:` named `we:scripts/lib/approval-prevention-notice.mjs`, but that file only *builds* the digest; the single chokepoint every card crosses before it is written is `boundLandPreventionCardInput` in `we:scripts/operations/land-prevention-card.mjs` (its header: "the one chokepoint"). Fixing it there covers the notice-builder's output without touching that file. Scope is corrected to the writer plus its test.
 

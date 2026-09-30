@@ -22,7 +22,7 @@ Filed mechanically by the unattended review loop (#2749) — every finding below
 
 ## Premise check (current `main`, 2026-09-30)
 
-All five guards are still owed — no commit names #4338 or `xzqw37h`, and none of the guards exists. Line numbers in the list above have drifted; the real anchors are below. One finding is reshaped: guard 1 as literally worded contradicts tested, intended behaviour (see Design §1).
+All five guards are still owed — no commit names #4338 or `4338`, and none of the guards exists. Line numbers in the list above have drifted; the real anchors are below. One finding is reshaped: guard 1 as literally worded contradicts tested, intended behaviour (see Design §1).
 
 ## Design
 
