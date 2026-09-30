@@ -35,6 +35,7 @@
  * (`process.kill`). Everything else here is PURE.
  */
 
+import { routingPolicyEnv } from '../lib/dispatch-routing-policy-io.mjs';
 import { spawn as nodeSpawn } from 'node:child_process';
 import { mkdirSync, openSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -140,7 +141,7 @@ export function defaultSpawnDetached(argv, { cwd, logPath, settingsEnv = null } 
 } = {}) {
   ensureDir(dirname(logPath));
   const fd = openLog(logPath);
-  const env = markWorkerEnv({ ...sanitizeSpawnEnv(process.env), ...(settingsEnv || {}) });
+  const env = markWorkerEnv({ ...sanitizeSpawnEnv(process.env), ...(settingsEnv || {}), ...routingPolicyEnv() });
   const child = spawn(process.execPath, argv, { cwd, detached: true, stdio: ['ignore', fd, fd], env });
   if (typeof child.unref === 'function') child.unref();
   return child;

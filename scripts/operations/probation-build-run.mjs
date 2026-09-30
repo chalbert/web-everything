@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { resolveOperationRoute, resolvePolicyModel, readRoutingPolicy } from '../lib/dispatch-routing-policy-io.mjs';
 import { classifyPrepareFailure } from '../conveyor/prepare-failure-policy.mjs';
 /**
  * @file scripts/operations/probation-build-run.mjs
@@ -173,21 +174,21 @@ export function parseArgs(argv) {
   }
   const taskType = flags.taskType ?? 'doc-fix';
   if (!['doc-fix', 'bugfix', 'test-fix', 'prepare'].includes(taskType)) throw new Error('taskType must be doc-fix or bugfix or test-fix or prepare');
+  const policy = readRoutingPolicy();
+  const configured = flags.worker ? null : resolveOperationRoute({ operation: taskType === 'prepare' ? 'prepare-item' : 'build', taskType, policy, gateClosed: taskType !== 'prepare' && policy.criticalWorkGate.kinds.includes('build'), available: ['codex', 'antigravity', 'agy-claude', 'agy-gemini'] });
   const supplied = typeof flags.worker === 'string'
     ? (Object.hasOwn(PROBATION_WORKERS, flags.worker) ? { id: flags.worker } : JSON.parse(flags.worker))
-    : null;
+    : configured ? { id: configured.provider === 'codex' ? 'codex' : configured.model.startsWith('claude-') ? 'antigravity-claude' : 'antigravity-gemini', model: configured.model } : null;
   let worker = null;
   if (supplied) {
     const def = Object.hasOwn(PROBATION_WORKERS, supplied.id) ? PROBATION_WORKERS[supplied.id] : null;
     if (!def) throw new Error('unknown probation worker');
     const defaultModel = def.model ?? AGY_CLAUDE_MODEL_BY_TIER.sonnet;
-    const model = flags.model ?? supplied.model ?? defaultModel;
-    const allowed = def.provider === 'antigravity'
-      ? [defaultModel, 'claude-sonnet-4-6', 'gemini-3.8-flash-high'] : [defaultModel];
-    if (taskType === 'prepare' && (!['codex', 'antigravity-gemini'].includes(def.id) || model !== defaultModel)) throw new Error('prepare requires a Codex or Gemini roster model');
-    if (!allowed.includes(model)) throw new Error(`disallowed model for ${def.id}: ${model}`);
-    // A Flash override must never bypass the simple-only/checker constraints.
-    const flash = model === 'gemini-3.8-flash-high';
+    let model;
+    try { model = resolvePolicyModel(def.provider, flags.model ?? supplied.model ?? defaultModel); }
+    catch (error) { throw new Error(`disallowed model for ${def.id}: ${error.message}`); }
+    // A Gemini override must never bypass the simple-only/checker constraints.
+    const flash = model.startsWith('gemini-');
     worker = { ...supplied, ...def, model, taskType,
       simpleOnly: def.simpleOnly || flash, checker: flash ? 'codex' : def.checker };
   }

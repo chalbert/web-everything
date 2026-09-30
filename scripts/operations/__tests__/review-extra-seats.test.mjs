@@ -1,3 +1,4 @@
+import { readRoutingPolicy } from '../../lib/dispatch-routing-policy-io.mjs';
 /**
  * #4194 — ADDED NON-CLAUDE REVIEW SEATS: advisory lenses + one extra juror routed to Codex/Gemini through the
  * direct-task scripts, BESIDE Claude's mandatory seats. No real codex/agy/git/GitHub process: every effect is a fake.
@@ -880,4 +881,17 @@ describe('#4194 createExtraSeatsIo — real effects, on a throwaway repo and sto
     // reported usage equals admission usage: exactly one slot left for codex
     expect(io.reserveCalls({ provider: 'codex', want: 5, dailyCap: 5, now }).callIds).toHaveLength(1);
   });
+});
+
+
+it('keeps distinct per-seat policy models in separate calls and reserves both under the provider cap', async () => {
+  const policy = structuredClone(readRoutingPolicy());
+  policy.operations['review-seat'] = { provider: 'codex', model: 'default', fallback: [] };
+  policy.operations['review-seat:claim-accuracy'] = { provider: 'codex', model: 'gpt-6-sol', fallback: [] };
+  const { io, calls } = fakeSeatIo();
+  const result = await runExtraSeats({ pr: 5, repo: REPO, lanePath: '/lane', loopPayload: LOOP_PAYLOAD, env: {}, routingPolicy: policy }, io);
+  expect(result.status).toBe('ran');
+  expect(calls.filter(c => c[0] === 'seat').map(c => c[1].model).sort()).toEqual(['gpt-6-astra', 'gpt-6-sol']);
+  expect(calls.filter(c => c[0] === 'reserve')).toEqual([['reserve', 'codex', 2, 2]]);
+  expect(result.seats.find(s => s.lens === 'claim-accuracy').model).toBe('gpt-6-sol');
 });

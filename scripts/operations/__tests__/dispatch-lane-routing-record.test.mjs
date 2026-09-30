@@ -435,7 +435,7 @@ describe('(e) buildAgentArgv with a table, and resolveWorkerModel\'s own shape',
   it.each([...LAUNCH_KINDS, 'review', 'inspect'])('%s always gets exactly one explicit model', (launchKind) => {
     const argv = buildAgentArgv({ payload: { ...payload, launchKind } });
     expect(argv.filter((arg) => arg === '--model')).toHaveLength(1);
-    expect(argv[argv.indexOf('--model') + 1]).toBe(launchKind === 'prepare-decision' ? 'opus' : 'sonnet');
+    expect(argv[argv.indexOf('--model') + 1]).toBe(launchKind === 'prepare-decision' ? 'opus' : launchKind === 'prepare-item' ? 'claude-sonnet-5-5' : 'sonnet');
   });
 
   it.each(LAUNCH_KINDS)('the Claude provider forwards the %s kind to model resolution', (launchKind) => {
@@ -444,7 +444,7 @@ describe('(e) buildAgentArgv with a table, and resolveWorkerModel\'s own shape',
       spawnAgent: (args) => { argv = args; return 'backgrounded · abc123 · worker'; },
     });
     expect(argv.filter((arg) => arg === '--model')).toHaveLength(1);
-    expect(argv[argv.indexOf('--model') + 1]).toBe(launchKind === 'prepare-decision' ? 'opus' : 'sonnet');
+    expect(argv[argv.indexOf('--model') + 1]).toBe(launchKind === 'prepare-decision' ? 'opus' : launchKind === 'prepare-item' ? 'claude-sonnet-5-5' : 'sonnet');
   });
 
   it.each([

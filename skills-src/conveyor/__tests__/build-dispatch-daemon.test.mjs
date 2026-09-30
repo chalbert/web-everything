@@ -1399,15 +1399,16 @@ describe('automatic item preparation', () => {
     expect(tick.prepare.failures).toContainEqual(expect.objectContaining({ num: '4501', stage: 'retirement', reason: 'store unavailable' }));
     expect(effects.dispatch.mock.calls.some(([r]) => r.num === '4501')).toBe(false);
   });
-  it('routes subsequent prepares through Sonnet after two durable probation failures', async () => {
+  it('uses the explicit Codex policy despite historical probation failures', async () => {
     const effects = fixture();
     effects.listProbationPrepares = () => ['4322', '4325'].map(item => ({ item,
       scoredAt: item, dispatchKind: 'probation-launch', taskType: 'prepare',
       repo: 'chalbert/web-everything', launchOutcome: 'gate-red', pr: null }));
     const tick = await runBuildDispatchTick({ live: true, effects });
-    expect(tick.prepare.route).toBe('prepare-route-fallback');
+    expect(tick.prepare.route).toBe('probation');
+    expect(tick.prepare.policyRoute).toMatchObject({ provider: 'codex', model: 'gpt-6-astra' });
     expect(effects.dispatch.mock.calls.length).toBeGreaterThan(0);
-    expect(effects.dispatch.mock.calls.every(([r]) => r.prepareFallback === true)).toBe(true);
+    expect(effects.dispatch.mock.calls.every(([r]) => r.prepareFallback === false)).toBe(true);
   });
   it('excludes two persistent holds before core planning, freeing both slots', async () => {
     const effects = fixture();
@@ -1925,18 +1926,15 @@ describe('automatic item preparation', () => {
     expect(result.dispatching).toBe(true);
   });
 
-  it('dispatch shell explicitly selects sonnet using the supported model override', async () => {
+  it('dispatch shell leaves model selection to the shared policy resolver', async () => {
     const { cliDispatch } = await import('../build-dispatch-daemon.mjs');
     const exec = vi.fn(() => JSON.stringify({ dispatching: true }));
     cliDispatch({ num: '4501', launchKind: 'prepare-item', bookkeeping: {} }, { exec });
     const [, argv, opts] = exec.mock.calls[0];
     expect(argv).toContain('dispatch-lane');
     expect(opts.env[MAX_CONCURRENT_LANES_ENV]).toBe(BUILD_DAEMON_LANE_CAP_EXEMPT_VALUE);
-    expect(argv).toContain('--modelReason=automatic item preparation uses sonnet');
-    const { agentArgsFromEnv, resolveWorkerModel } = await import('../../../scripts/operations/dispatch-lane-io.mjs');
-    const choice = resolveWorkerModel({ extraArgs: agentArgsFromEnv(opts.env), table: { tier: 'sonnet', model: 'sonnet' }, modelReason: 'automatic item preparation uses sonnet' });
-    expect(choice.model).toBe('sonnet');
-    expect(choice.refusal).toBeNull();
+    expect(argv.some(arg => arg.startsWith('--modelReason='))).toBe(false);
+    expect(opts.env.WE_DISPATCH_AGENT_ARGS).toBe(process.env.WE_DISPATCH_AGENT_ARGS);
   });
   it('boots with an unknown flag and exits 2 with usage', () => {
     try {
@@ -2010,14 +2008,14 @@ describe('probation prepare route circuit breaker', () => {
     expect(prepareRouteFallback([failed[0], row('24', 'opened-pr', 99), failed[1]])).toBe(true);
     expect(prepareRouteFallback([...failed, row('26', 'opened-pr', 99)])).toBe(true);
   });
-  it('disables probation only for fallback prepares and preserves explicit Sonnet argv', () => {
+  it('disables probation only for fallback prepares without overriding the policy model', () => {
     for (const launchKind of ['prepare-item', 'build']) {
       const exec = vi.fn(() => '{}');
       cliDispatch({ num: '4327', launchKind, prepareFallback: true }, { exec });
       const env = exec.mock.calls[0][2].env;
       if (launchKind === 'prepare-item') {
         expect(env.WE_PROBATION_LAUNCH).toBe('off');
-        expect(JSON.parse(env.WE_DISPATCH_AGENT_ARGS).slice(-2)).toEqual(['--model', 'sonnet']);
+        expect(env.WE_DISPATCH_AGENT_ARGS).toBe(process.env.WE_DISPATCH_AGENT_ARGS);
       } else expect(env.WE_PROBATION_LAUNCH).toBe(process.env.WE_PROBATION_LAUNCH);
     }
   });

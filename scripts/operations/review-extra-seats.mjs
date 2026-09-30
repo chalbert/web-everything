@@ -43,6 +43,7 @@
  * fakes (no real codex, agy, git or GitHub).
  */
 
+import { resolveOperationRoute, readRoutingPolicy } from '../lib/dispatch-routing-policy-io.mjs';
 import { spawn, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import {
@@ -542,7 +543,7 @@ export function renderSeatSummary(result) {
  * @param {ReturnType<typeof createExtraSeatsIo>} io
  * @returns {Promise<object>}
  */
-export async function runExtraSeats({ pr, repo, lanePath, loopPayload, env = process.env } = {}, io = createExtraSeatsIo({ env })) {
+export async function runExtraSeats({ pr, repo, lanePath, loopPayload, env = process.env, routingPolicy = readRoutingPolicy() } = {}, io = createExtraSeatsIo({ env })) {
   try {
     if (!extraSeatsEnabled(env)) return { status: 'disabled', reason: `${EXTRA_SEATS_ENV}=${env[EXTRA_SEATS_ENV]}` };
     const read = loopPayload?.findings?.read;
@@ -575,7 +576,7 @@ export async function runExtraSeats({ pr, repo, lanePath, loopPayload, env = pro
     }
     for (const u of unavailable) io.log(`added seats: skipping ${u.provider} — ${u.reason}`);
     const remainingCalls = (list) => list.reduce((sum, p) => sum + Math.max(0, caps[p] - usedByProvider[p]), 0);
-    let plan = reviewSeatRoutes({ available, scorecards: records, callsRemaining: remainingCalls(available) });
+    let plan = reviewSeatRoutes({ available, scorecards: records, callsRemaining: remainingCalls(available), routingPolicy });
 
     // RESERVE each distinct provider's ONE call under ITS OWN cap, before launching anything, so concurrent
     // reviews can never together overspend any one provider's budget. A provider that cannot be granted (another
@@ -589,7 +590,9 @@ export async function runExtraSeats({ pr, repo, lanePath, loopPayload, env = pro
       for (const p of wantedProviders) {
         let reservation;
         try {
-          reservation = io.reserveCalls({ provider: p, want: 1, dailyCap: caps[p], now });
+          const models = [...new Set(plan.routes.filter(r => r.provider === p).map(r => `${r.model}/${r.effort}`))];
+          reservation = io.reserveCalls({ provider: p, want: models.length, dailyCap: caps[p], now });
+          reservation.models = models;
         } catch (e) {
           return {
             status: 'skipped',
@@ -598,12 +601,12 @@ export async function runExtraSeats({ pr, repo, lanePath, loopPayload, env = pro
           };
         }
         usedByProvider[p] = reservation.used;
-        if (reservation.callIds.length) { callIdOf.set(p, reservation.callIds[0]); } else { anyDenied = true; available = available.filter((x) => x !== p); }
+        if (reservation.callIds.length === reservation.models.length) { callIdOf.set(p, new Map(reservation.models.map((model, index) => [model, reservation.callIds[index]]))); } else { anyDenied = true; available = available.filter((x) => x !== p); }
       }
       if (!anyDenied) break;
-      plan = reviewSeatRoutes({ available, scorecards: records, callsRemaining: remainingCalls(available) });
+      plan = reviewSeatRoutes({ available, scorecards: records, callsRemaining: remainingCalls(available), routingPolicy });
     }
-    const providerUsage = Object.fromEntries(REVIEW_SEAT_PROVIDERS.map((p) => [p, { usedToday: usedByProvider[p] + (callIdOf.has(p) ? 1 : 0), cap: caps[p] }]));
+    const providerUsage = Object.fromEntries(REVIEW_SEAT_PROVIDERS.map((p) => [p, { usedToday: usedByProvider[p] + (callIdOf.get(p)?.size ?? 0), cap: caps[p] }]));
     const totalUsedToday = Object.values(providerUsage).reduce((sum, u) => sum + u.usedToday, 0);
     const totalDailyCap = Object.values(providerUsage).reduce((sum, u) => sum + u.cap, 0);
     const skipped = plan.skipped.map((s) => ({
@@ -631,10 +634,15 @@ export async function runExtraSeats({ pr, repo, lanePath, loopPayload, env = pro
       io.writeFile(diffFile, read.diffText);
       io.writeFile(bodyFile, `# ${read.title ?? ''}\n\n${read.body ?? ''}\n`);
       const byProvider = new Map();
-      for (const r of plan.routes) byProvider.set(r.provider, [...(byProvider.get(r.provider) ?? []), r]);
-      const calls = [...byProvider.entries()].map(async ([provider, group]) => {
-        const callId = callIdOf.get(provider);
-        const taskFile = join(inputDir, `task-${provider}.md`);
+      for (const r of plan.routes) {
+        const key = `${r.provider}/${r.model}/${r.effort}`;
+        byProvider.set(key, [...(byProvider.get(key) ?? []), r]);
+      }
+      const calls = [...byProvider.values()].map(async (group) => {
+        const { provider, model: groupModel, effort: groupEffort } = group[0];
+        const callId = callIdOf.get(provider)?.get(`${groupModel}/${groupEffort}`);
+        const suffix = callIdOf.get(provider)?.size > 1 ? `-${groupModel}-${groupEffort}` : '';
+        const taskFile = join(inputDir, `task-${provider}${suffix}.md`);
         const inline = INLINE_BRIEF_PROVIDERS.includes(provider) ? { diffText: read.diffText, body: read.body ?? '' } : null;
         io.writeFile(taskFile, buildSeatTask({
           pr, repo, title: read.title, dir: scratch, diffFile, bodyFile, inline, changedFiles: read.netChangedFiles ?? [], seats: group,
@@ -1257,8 +1265,11 @@ export async function runRedTeam({ pr, repo, lanePath, loopPayload, env = proces
     let provider = null;
     let callId = null;
     let lastReason = null;
+    let configuredRoute = null;
     for (let attempt = 0; attempt <= REVIEW_SEAT_PROVIDERS.length && available.length && !callId; attempt += 1) {
-      const pick = selectReviewSeatProvider({ lens: RED_TEAM_SEAT.key, available, scorecards: records });
+      try { configuredRoute = resolveOperationRoute({ operation: 'review-seat', taskType: RED_TEAM_SEAT.key, available }); }
+      catch (error) { lastReason = error.message; break; }
+      const pick = configuredRoute ? { provider: configuredRoute.provider, reasoning: 'routing-policy' } : selectReviewSeatProvider({ lens: RED_TEAM_SEAT.key, available, scorecards: records });
       if (!pick.provider) { lastReason = pick.reasoning; break; }
       let reservation;
       try {
@@ -1271,7 +1282,8 @@ export async function runRedTeam({ pr, repo, lanePath, loopPayload, env = proces
       else { lastReason = `daily-cap: ${reservation.used}/${caps[pick.provider]} non-Claude seat calls used today for ${pick.provider}`; available = available.filter((x) => x !== pick.provider); }
     }
     if (!callId) return { status: 'skipped', reason: `${lastReason ?? 'no provider available'}${unavailable.length ? ` (${unavailable.join('; ')})` : ''}` };
-    const { model, effort } = RED_TEAM_MODELS[provider];
+    const { model: defaultModel, effort } = RED_TEAM_MODELS[provider];
+    const model = configuredRoute?.model ?? defaultModel;
     const claudeFindings = claudeFindingsFromLoop(loopPayload);
     const timeoutMs = resolveSeatTimeoutMs(env);
 
@@ -1388,8 +1400,10 @@ export function createRedTeamIo({ env = process.env, root = REPO_ROOT, storePath
     },
     runRecheck: async ({ pr, mandate, input, shape }) => {
       const { judgeSpawn } = await import('../lib/judge-spawn.mjs');
-      const out = await judgeSpawn({
-        mandate, input, shape, model: RECHECK_MODEL, effort: RECHECK_EFFORT, budget: RECHECK_BUDGET_USD,
+      const configured = resolveOperationRoute({ operation: 'review-recheck', available: ['claude', 'codex', 'antigravity'] });
+      const spawn = configured ? (await import('./cli-adapter.mjs')).resolveJudgeProvider(configured.provider) : judgeSpawn;
+      const out = await spawn({
+        mandate, input, shape, model: configured?.model ?? RECHECK_MODEL, effort: RECHECK_EFFORT, budget: RECHECK_BUDGET_USD,
         runId: `red-team-recheck-${pr}-${randomUUID()}`, lens: 'red-team-recheck', env, timeoutMs: 10 * 60 * 1000,
       });
       return out.value;

@@ -1053,7 +1053,7 @@ const CLAUDE_RESTRICTED_PROVIDER = {
   // attemptTag }` — `lane`/`sessionSlug`/`item`/`attemptTag` added by bug 7's fix, below.
   async spawn(
     {
-      sessionId, prompt, resumeSessionId = null, lane, sessionSlug, item, attemptTag,
+      sessionId, prompt, resumeSessionId = null, lane, sessionSlug, item, attemptTag, model = 'sonnet',
       // build-path-codex-isolation-locus — see `runAgentToCompletion`'s own docblock for what sets this.
       lanePathOverride = null,
     } = {},
@@ -1086,7 +1086,7 @@ const CLAUDE_RESTRICTED_PROVIDER = {
     const weLanePath = resolveLane(lane, { run: runFn });
     const lanePath = lanePathOverride || weLanePath;
     const argv = buildRestrictedProviderArgv({
-      sessionId, prompt, resumeSessionId, settingsFile, addDirs: lanePathOverride ? [weLanePath] : [],
+      sessionId, prompt, resumeSessionId, settingsFile, model, addDirs: lanePathOverride ? [weLanePath] : [],
     });
     // build-path-codex-isolation-locus — a foreign-repo lane never carried `delivery-report-cli.mjs` (it is a
     // plain clone of THAT repo, not WE) — stage it at its real repo-relative path before the agent's first
@@ -1196,7 +1196,7 @@ const CODEX_PROVIDER = {
   // what this spawns without a real `codex` process or a real filesystem.
   async spawn(
     {
-      sessionId, prompt, resumeSessionId = null, lane, sessionSlug, item, attemptTag,
+      sessionId, prompt, resumeSessionId = null, lane, sessionSlug, item, attemptTag, model = CODEX_DELIVERY_MODEL,
       // build-path-codex-isolation-locus — see `runAgentToCompletion`'s own docblock for what sets this.
       lanePathOverride = null,
     } = {},
@@ -1262,7 +1262,7 @@ const CODEX_PROVIDER = {
       );
     }
     const argv = buildCodexDeliveryArgv({
-      prompt, cwd: lanePath, denyPaths: deny, resumeThreadId, writableRoots: extraLanes,
+      prompt, cwd: lanePath, denyPaths: deny, resumeThreadId, writableRoots: extraLanes, model,
     });
     let stdout;
     try {
@@ -1285,12 +1285,12 @@ const CODEX_PROVIDER = {
       throw e;
     }
     // #3383 usage-ledger follow-up — best-effort, never throws; see that function's own header.
-    recordCodexTurnUsage(stdout);
+    recordCodexTurnUsage(stdout, { model });
     // #3383 mechanical-dispatcher Bug 2 fix — score + record THIS run's own scorecard; see
     // `fix-dispatch-wrapper.mjs#FIX_CODEX_PROVIDER`'s own equivalent call for the full root-cause account.
     // Best-effort, never throws (`recordCodexRunScorecard`'s own header).
     recordScorecard({
-      stdout, dispatchKind: 'build', role: 'delivery', provider: 'codex', model: CODEX_DELIVERY_MODEL,
+      stdout, dispatchKind: 'build', role: 'delivery', provider: 'codex', model,
       effort: CODEX_DELIVERY_EFFORT, item, handle: sessionSlug,
     });
     // Record the thread id on a FRESH spawn only — a resume re-announces the same id, so re-writing it is
@@ -2402,7 +2402,7 @@ export function buildPrBody({ item, report, delegation = null }) {
 export function delegationForBuild(provider, scope) {
   const vendor = String(provider?.vendor ?? 'claude');
   if (vendor === 'claude') return null;
-  const model = vendor === 'codex' ? CODEX_DELIVERY_MODEL : String(provider?.model ?? '');
+  const model = provider?.model ?? (vendor === 'codex' ? CODEX_DELIVERY_MODEL : '');
   const scopePaths = String(scope ?? '').split(',').map((s) => s.trim()).filter(Boolean);
   const derived = taskTypeFor({ kind: 'build', scopePaths });
   const taskType = DELEGATION_TASK_TYPES.includes(derived?.taskType) ? derived.taskType : 'other';

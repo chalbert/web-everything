@@ -1,3 +1,4 @@
+import { resolveOperationRoute, readRoutingPolicy, resolveDispatchRoute as decideDispatchRoute } from '../lib/dispatch-routing-policy-io.mjs';
 import { meteredAlreadyDone, alreadyDoneRequest } from '../lib/gh-metered-reads.mjs';
 import { readGitAlreadyDone } from '../lib/git-already-done.mjs';
 /**
@@ -57,7 +58,7 @@ import { execFileSync } from 'node:child_process';
 // these ran SIMULTANEOUSLY in a single `ps aux` snapshot, none logged anywhere, spending the shared `graphql`
 // bucket (8943 points/hour that hour, 6365.2 UNATTRIBUTED — `gh-spend.mjs report --hours=1 --by=caller`).
 import { execFileSyncThrottled } from '../lib/gh-throttle.mjs';
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { accessSync, constants, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { randomUUID } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
@@ -105,7 +106,7 @@ import { assertMainNotStale, behindFiles, gitRun, isCodePath } from '../lib/main
 import { CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
 import { inFlight, notApplied } from './effect-executor.mjs';
 import { createFileRunStore } from './run-store.mjs';
-import { workerTierFor } from '../lib/provider-routing.mjs';
+import { workerTierFor, PROBATION_WORKERS } from '../lib/provider-routing.mjs';
 import { dispatchStillHolds, DEFAULT_EXPECTED_WITHIN_MINUTES, DISPATCH_EFFECT, DISPATCH_LISTING_GRACE_MINUTES, LAUNCH_KINDS } from './dispatch-lane.mjs';
 // #3383 — the spawned session is a WORKER; a hook-driven tick-once must never run in it (see session-role.mjs).
 import { markWorkerEnv, workerMarkerSettingsEnv } from './session-role.mjs';
@@ -117,7 +118,7 @@ import { spawnToCompletion } from '../lib/spawn-to-completion.mjs';
 // (#3784) and the supervision-enforcement switch (OFF by default; turning it on is #4180). The decision itself
 // is `dispatch-contracts.mjs#decideDispatchRoute`; `dispatch-lane.mjs`'s pure `shapeDispatchRead` owns its
 // consequences (refuse on no route, hold on a supervision hold).
-import { decideDispatchRoute, supervisionEnforcementFrom, CLAUDE_NATIVE_MODEL_BY_TIER } from '../lib/dispatch-contracts.mjs';
+import { supervisionEnforcementFrom, CLAUDE_NATIVE_MODEL_BY_TIER } from '../lib/dispatch-contracts.mjs';
 import { readStore as readScorecardStore, resolveScorecardStorePath } from '../conveyor/run-scorecard-store.mjs';
 // #3840 — the ONE per-item provider override: the card's own `deliveryAgent:` marker and its required reason.
 import { readItemDeliveryAgentOverride } from './delivery-agent-marker.mjs';
@@ -1393,8 +1394,11 @@ export function createDispatchSinks({
   // bypasses the routing entirely, exactly as before.
   // agy-launcher-probation — `on`/`off`, read ONCE here like `modes` (see `probationLaunchFromEnv`).
   probationLaunch = probationLaunchFromEnv(),
+  providerAvailable = (provider) => provider === 'claude' || String(process.env.PATH ?? '').split(':').some(dir => {
+    try { accessSync(join(dir, provider === 'codex' ? 'codex' : 'agy'), constants.X_OK); return true; } catch { return false; }
+  }),
   provider = (request) => routeDispatchProvider(request, {
-    modes, registry, scriptExists, agent: (r) => defaultClaudeProvider(r, { spawnAgent }), probationLaunch,
+    modes, registry, scriptExists, providerAvailable, agent: (r) => defaultClaudeProvider(r, { spawnAgent }), probationLaunch,
   }),
   mintSessionId = () => randomUUID(),
   now = () => new Date(),
@@ -1468,10 +1472,13 @@ export function createDispatchSinks({
       // build-path-codex-isolation — WHAT ACTUALLY RAN IT, reported by the provider that started it (see
       // `dispatchExecutorFor`). `null` until a provider reports; the fallback below covers one that does not.
       let reportedExecutor = null;
+      let reportedModel = null;
       let handle;
       try {
         handle = await provider({
           reportExecutor: (v) => { reportedExecutor = v == null ? null : String(v); },
+          reportModel: (v) => { reportedModel = v; },
+          policyRoute: payload?.routing?.policyRoute ?? null,
           sessionId,
           cwd: sessionCwd,
           // Salvaged earlier work for this card/PR (see `we:scripts/lib/salvage-index.mjs`): one pointer line.
@@ -1550,7 +1557,7 @@ export function createDispatchSinks({
       const executor = dispatchExecutorFor({ route, reported: reportedExecutor });
       // ONE line on stderr naming what runs this dispatch — the dispatch LOG half of the same fact the record
       // carries below, so an operator reading the CLI output never has to reconcile two provider fields.
-      console.error(`dispatch-lane: #${payload?.num ?? '?'} ${payload?.launchKind ?? 'build'} → executor=${executor} (${route}, handle ${handleText})`);
+      console.error(`dispatch-lane: #${payload?.num ?? '?'} ${payload?.launchKind ?? 'build'} → model=${reportedModel ?? modelDecision?.model ?? 'unknown'} executor=${executor} (${route}, handle ${handleText})`);
       return inFlight({
         handle: handleText,
         expectedBy: new Date(now().getTime() + minutes * 60 * 1000).toISOString(),
@@ -1564,8 +1571,10 @@ export function createDispatchSinks({
           launchKind: payload?.launchKind ?? 'build',
           route,
           executor,
-          supervisorModel: modelDecision?.model ?? extractModelFlag(extraArgs.map(String)).value,
-          workerModel: modelDecision && !modelDecision.refusal
+          supervisorModel: reportedModel ?? modelDecision?.model ?? extractModelFlag(extraArgs.map(String)).value,
+          workerModel: reportedModel && payload?.routing?.policyRoute
+            ? { name: reportedModel, tier: null, source: 'routing-policy', tableTier: table?.tier ?? null, reason: 'resolved launch model' }
+            : modelDecision && !modelDecision.refusal
             ? { name: modelDecision.model, tier: modelDecision.tier, source: modelDecision.source, tableTier: modelDecision.tableTier, reason: modelDecision.reason }
             : null,
           criteriaRecommendation: payload?.routing?.routed ?? null,
@@ -1597,6 +1606,7 @@ export function createDispatchSinks({
  */
 export function workerModelTable(routing) {
   if (!routing || typeof routing !== 'object') return null;
+  if (routing.policyRoute?.provider === 'claude') return { tier: routing.tier, model: routing.policyRoute.model, reason: 'routing-policy' };
   const tier = routing.tier ?? null;
   const claudeRoute = CLAUDE_NATIVE_MODEL_IDS.has(routing.model) || routing.outcome === 'role';
   if (!claudeRoute || !tier || !Object.hasOwn(CLAUDE_SPAWN_MODEL_BY_TIER, tier)) return null;
@@ -1657,8 +1667,31 @@ export function routeDispatchProvider(request, {
   // agy-launcher-probation — `off` unless the sink says otherwise, so a direct caller never launches by accident.
   probationLaunch = 'off',
   probation = probationWorkerDetachedProvider,
+  providerAvailable = () => true,
 } = {}) {
   const kind = String(request?.launchKind || 'build');
+  if (request.policyRoute) {
+    // Launchability is checked BEFORE starting anything. A failed/indeterminate worker is never retried here.
+    const candidates = [request.policyRoute, ...request.policyRoute.fallback];
+    const workerFor = route => {
+      if (!request.probationWorker || route.provider === 'claude') return null;
+      const id = route.provider === 'codex' ? 'codex' : route.model.startsWith('claude-') ? 'antigravity-claude' : 'antigravity-gemini';
+      return { ...PROBATION_WORKERS[id], taskType: request.probationWorker.taskType, model: route.model };
+    };
+    const chosen = candidates.find(route => providerAvailable(route.provider) && (route.provider === 'claude'
+      || (probationLaunchDecision({ ...request, probationWorker: workerFor(route) }, probationLaunch).launch
+        && scriptExists(PROBATION_LAUNCHABLE_KINDS[kind].runScript))
+      || (route.provider === 'codex' && registry[kind]?.runScript && scriptExists(registry[kind].runScript))));
+    if (!chosen) throw notApplied(`routing policy: ${kind} has no available launch adapter in its fallback chain`);
+    request = { ...request, policyRoute: { ...chosen, fallback: [] }, probationWorker: workerFor(chosen) };
+    request.reportModel?.(chosen.model);
+    if (chosen !== candidates[0]) console.error(`routing-policy-fallback: ${kind} → ${chosen.provider}/${chosen.model} (primary adapter unavailable)`);
+    if (chosen.provider === 'claude') {
+      request = { ...request, probationWorker: null, table: { model: chosen.model, tier: Object.entries(CLAUDE_NATIVE_MODEL_BY_TIER).find(([, id]) => id === chosen.model)?.[0] ?? null, reason: 'routing-policy' } };
+      return agent(request);
+    }
+    if (!request.probationWorker && registry[kind]) return registry[kind].provider(request);
+  }
   // agy-launcher-probation — FIRST: an opened, non-critical ci-heal the router gave a probation worker runs on that
   // worker (see `dispatch-providers/probation-worker.mjs#probationLaunchDecision` for every condition).
   if (probationLaunchDecision(request, probationLaunch).launch) {
@@ -1678,6 +1711,7 @@ export function routeDispatchProvider(request, {
     }
     return entry.provider(request);
   }
+  request.reportModel?.(request.table?.model ?? null);
   return agent(request);
 }
 
@@ -1731,6 +1765,7 @@ export function defaultClaudeProvider(request, { spawnAgent = (argv, opts) => de
     table: request.table ?? null,
     modelReason: request.modelReason ?? null,
   });
+  request.reportModel?.(extractModelFlag(argv).value);
   const stdout = String(spawnAgent(argv, { cwd: request.cwd }) ?? '');
   return parseBackgroundedId(stdout) || request.sessionId;
 }
@@ -2212,6 +2247,11 @@ export function buildAgentArgv({
   // shim that override points at re-reads the shared token cache fresh on every `gh` call regardless of how
   // long the session has been running — so nothing is lost by never re-asserting it on resume.
   if (resumeSessionId) return ['--bg', '--resume', String(resumeSessionId), prompt];
+  if (!table && payload?.launchKind) {
+    const policy = readRoutingPolicy();
+    const configured = resolveOperationRoute({ operation: payload.launchKind, available: ['claude'], gateClosed: policy.criticalWorkGate.kinds.includes(payload.launchKind), policy });
+    if (configured) table = { model: configured.model, reason: 'routing-policy' };
+  }
   // NO `--session-id` — see this function's own header. `sessionId` is deliberately unreferenced here.
   void sessionId;
   // xgqz204 — the worker marker ALWAYS rides in `--settings`' env: `claude --bg` drops the spawner's ambient

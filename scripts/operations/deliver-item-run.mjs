@@ -51,6 +51,7 @@
  * process's own log file. The dispatch observer (`dispatch-lane-io.mjs#createDispatchObservers`) resolves the
  * effect off the merged PR exactly as it already did for the agent path — unchanged by this wiring.
  */
+import { resolveOperationRoute, resolvePolicyModel, readRoutingPolicy } from '../lib/dispatch-routing-policy-io.mjs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -107,6 +108,7 @@ export function parseDeliverItemRunArgv(argv = []) {
     sessionSlug: String(flags.session).trim(),
     attemptTag: String(flags.attempt ?? '').trim(),
     provider: String(flags.provider ?? '').trim(),
+    ...(flags.model ? { model: String(flags.model) } : {}),
     runId: String(flags['run-id'] ?? '').trim(),
     effectKey: String(flags['effect-key'] ?? '').trim(),
     resume: flags.resume === 'true',
@@ -166,7 +168,16 @@ export async function runDeliverItemCli(argv = [], {
     launch = parseDeliverItemRunArgv(argv);
     // #3580 — resolved BEFORE the delivery starts, so a bad `--provider=` exits here rather than after a lane
     // and a claim have already been taken (see `selectDeliveryAgentProvider`'s own docblock).
-    selected = selectProvider(launch.provider);
+    const policy = readRoutingPolicy();
+    const configured = launch.provider ? null : resolveOperationRoute({ operation: 'build', available: ['claude', 'codex'], gateClosed: policy.criticalWorkGate.kinds.includes('build'), policy });
+    selected = selectProvider(configured ? configured.provider === 'claude' ? 'claude-restricted' : configured.provider : launch.provider);
+    const pin = launch.model ?? configured?.model;
+    if (pin) {
+      const model = resolvePolicyModel(selected.name === 'claude-restricted' ? 'claude' : selected.name, pin, policy);
+      const underlying = selected.provider;
+      selected = { ...selected, provider: { ...underlying, model, spawn: request => underlying.spawn({ ...request, model }) } };
+      launch.model = model;
+    }
   } catch (e) {
     writeErr(`error: ${String(e?.message ?? e)}\n`);
     return { code: 1, result: null };

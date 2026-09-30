@@ -45,7 +45,7 @@ import {
 import {
   REPO_ROOT, agentArgsFromEnv, createDispatchSinks, resolveDispatchSettingsEnv,
 } from '../operations/dispatch-lane-io.mjs';
-import { decideDispatchRoute } from '../lib/dispatch-contracts.mjs';
+import { resolveDispatchRoute as decideDispatchRoute } from '../lib/dispatch-routing-policy-io.mjs';
 import { CONVEYOR_STATE_ROOT_ENV } from '../lib/daemon-last-good.mjs';
 import { stopSessionWithRetry } from './session-reaper.mjs';
 import { DEFAULT_HEALTH_CONFIG, renderInvestigationSection } from './health-watch-core.mjs';

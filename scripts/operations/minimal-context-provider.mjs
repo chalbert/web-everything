@@ -169,7 +169,7 @@ export const RESTRICTED_PROVIDER_TOOLS = 'Bash,Edit,Write,Read,Glob,Grep';
  * the agent cannot read it. Omitted → argv byte-identical to before.
  */
 export function buildRestrictedProviderArgv({
-  sessionId, prompt, resumeSessionId = null, settingsFile, tools = RESTRICTED_PROVIDER_TOOLS, addDirs = [],
+  sessionId, prompt, resumeSessionId = null, settingsFile, tools = RESTRICTED_PROVIDER_TOOLS, addDirs = [], model = 'sonnet',
 }) {
   const RESTRICTED_FLAGS = [
     '--restricted', '--tools', tools, '--strict-mcp-config',
@@ -178,7 +178,7 @@ export function buildRestrictedProviderArgv({
   ];
   return resumeSessionId
     ? [...RESTRICTED_FLAGS, '--resume', String(resumeSessionId), prompt]
-    : [...RESTRICTED_FLAGS, '--model', 'sonnet', '-p', '--session-id', String(sessionId), prompt];
+    : [...RESTRICTED_FLAGS, '--model', model, '-p', '--session-id', String(sessionId), prompt];
 }
 
 // ================================================================================================

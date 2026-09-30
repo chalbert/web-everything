@@ -97,8 +97,9 @@ export function fixDetachedProvider(request, {
   if (num) argv.push(`--num=${num}`);
   // mechanical-dispatcher (epic #3383) Part 2 — honour the TARGET ITEM's own `deliveryAgent:` marker, when
   // there is a known item to read one from (a repair with no `num` has no backlog card to carry a marker on).
-  const deliveryAgent = readDeliveryAgentMarker(num);
-  if (deliveryAgent) argv.push(`--provider=${deliveryAgent}`);
+  const deliveryAgent = request.policyRoute?.provider ?? readDeliveryAgentMarker(num);
+  if (deliveryAgent) argv.push(`--provider=${deliveryAgent === 'claude' ? 'claude-restricted' : deliveryAgent}`);
+  if (request.policyRoute?.model) argv.push(`--model=${request.policyRoute.model}`);
   // build-path-codex-isolation — the run record's ONE executor field comes from here: the vendor this wrapper
   // is actually told to run, never the router's recommendation (see dispatch-lane-io.mjs#dispatchExecutorFor).
   request?.reportExecutor?.(wrapperExecutorFor(deliveryAgent));
