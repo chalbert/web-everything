@@ -186,7 +186,7 @@ Description.
     expect(parsed.preparedDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
 
     const writtenContent = readFileSync(join(backlogDir, '9999-test-story.md'), 'utf8');
-    expect(readField(writtenContent, 'status')).toBe('open');
+    expect(readField(writtenContent, 'status')).toBe('active'); // #4480: stamping keeps the claim
     expect(readField(writtenContent, 'preparedDate')).toBe(parsed.preparedDate);
     expect(readField(writtenContent, 'preparedAgainstSha')).toBe(headSha);
   });

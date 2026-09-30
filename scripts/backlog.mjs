@@ -586,15 +586,18 @@ function prepareStamp() {
   const rel = `backlog/${file}`;
   const abs = join(DIR, file);
   const before = readFileSync(abs, 'utf8');
-  let after = setFrontmatterField(before, 'status', 'open', { after: ['kind', 'size'] });
+  // Only (re)write status for an absent/`open` card — an active/preparing/parked claim must survive stamping (#4480).
+  const curStatus = (readField(before, 'status') || '').trim().split(/\s+/)[0].replace(/^["']|["']$/g, '');
+  const status = curStatus || 'open';
+  let after = status === 'open' ? setFrontmatterField(before, 'status', 'open', { after: ['kind', 'size'] }) : before;
   if (after == null) die(`#${idFromName(file)} — could not splice frontmatter (no frontmatter block?)`);
   const today = localToday();
   after = setFrontmatterField(after, 'preparedDate', `"${today}"`, { after: ['status', 'dateStarted', 'dateOpened'] });
   const sha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: DIR, encoding: 'utf8' }).trim();
   after = setFrontmatterField(after, 'preparedAgainstSha', `"${sha}"`, { after: ['preparedDate'] });
   writeBacklogMd(abs, rel, after);
-  ok({ verb: 'prepare-stamp', num: idFromName(file), preparedDate: today, preparedAgainstSha: sha },
-    `${GRN}✓ prepare-stamped${RST} #${idFromName(file)} ${DIM}→ preparedDate ${today}, preparedAgainstSha ${sha.slice(0, 8)} (status: open; readiness now ranks it ✓ ready to ratify). Commit this item file + land the lane PR.${RST}`);
+  ok({ verb: 'prepare-stamp', num: idFromName(file), preparedDate: today, preparedAgainstSha: sha, status },
+    `${GRN}✓ prepare-stamped${RST} #${idFromName(file)} ${DIM}→ preparedDate ${today}, preparedAgainstSha ${sha.slice(0, 8)} (status: ${status}; readiness now ranks it ✓ ready to ratify). Commit this item file + land the lane PR.${RST}`);
 }
 
 /** prepare-release <NNN> — drop the prepare-hold (the preparer's clear point once the one lane→PR lands).
