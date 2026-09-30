@@ -35,7 +35,7 @@ Run the affected transport and drain soak suites and we:scripts/verify-lane.mjs.
 
 ## Premise check (2026-09-30, against `main` @ 4d568dec4)
 
-Holds. `we:scripts/merge-ai-prs.mjs:129` still imports raw `execFileSync, execFile, spawnSync` from `node:child_process`; the gh call sites bypass the meter: 27 sync `execFileSync('gh', …)` calls (e.g. `:1608`, `:1642`, `:3696`, `:3719`, `:3845`, `:4591`, `:4714`, `:4800`, `:5011`) and 6 async `execFileP('gh', …)` calls (`:3750`, `:3831` commits read, `:3888`, `:4127` discovery list, `:4147`; `execFileP = promisify(execFile)` at `:3402`). `git log` shows `3dabd061b` removed `import { execFileSyncThrottled as execFileSync }` (only that 3-line diff) and nothing has re-added it. `execFileSyncThrottled` (`we:scripts/lib/gh-throttle.mjs:1569`) exists but there is **no async throttled executor** in `we:gh-throttle.mjs` (only `runGhSync`, `:1403`, and the CLI passthrough). Raw reads at `we:daemon-edge.mjs:574` and `we:daemon-rebuild.mjs:897` are unchanged (`spawnSync('gh', …)`). No git log entry for #4655/xp83iru beyond the pin — not already done.
+Holds. `we:scripts/merge-ai-prs.mjs:129` still imports raw `execFileSync, execFile, spawnSync` from `node:child_process`; the gh call sites bypass the meter: 27 sync `execFileSync('gh', …)` calls (e.g. `:1608`, `:1642`, `:3696`, `:3719`, `:3845`, `:4591`, `:4714`, `:4800`, `:5011`) and 6 async `execFileP('gh', …)` calls (`:3750`, `:3831` commits read, `:3888`, `:4127` discovery list, `:4147`; `execFileP = promisify(execFile)` at `:3402`). `git log` shows `3dabd061b` removed `import { execFileSyncThrottled as execFileSync }` (only that 3-line diff) and nothing has re-added it. `execFileSyncThrottled` (`we:scripts/lib/gh-throttle.mjs:1569`) exists but there is **no async throttled executor** in `we:gh-throttle.mjs` (only `runGhSync`, `:1403`, and the CLI passthrough). Raw reads at `we:daemon-edge.mjs:574` and `we:daemon-rebuild.mjs:897` are unchanged (`spawnSync('gh', …)`). No git log entry for #4655/4655 beyond the pin — not already done.
 
 Scope check: frontmatter scope (`we:merge-ai-prs.mjs`, `we:gh-throttle.mjs`, `we:gh-throttle.test.mjs`) matches the real touch-set. The launchd-PATH transport test and any soak fix may add a new test file under `scripts/__tests__/`; the builder widens scope then (the audit of `we:daemon-edge.mjs` / `we:daemon-rebuild.mjs` widens only on a confirmed reachable path, per the card).
 
@@ -58,7 +58,7 @@ Musts only:
 - Drain soak passes with isolated admission root; adapter stays.
 - One observed production pass ledger capture (attempts, identity/installation provenance, cost or explicit `unknown`, reset data).
 
-OUT (Follow-ups): shim fallback metering (#xkcp5vc); regenerating the 162 stale shims; `daemon-edge`/`daemon-rebuild` raw reads unless a reachable chain is confirmed; any claim that attribution reduces consumption; Actions run counts.
+OUT (Follow-ups): shim fallback metering (#4653); regenerating the 162 stale shims; `daemon-edge`/`daemon-rebuild` raw reads unless a reachable chain is confirmed; any claim that attribution reduces consumption; Actions run counts.
 
 ## Test plan
 
@@ -81,7 +81,7 @@ The sync guard read (`:3845`), discovery (`:4127`), commit reads (`:3831`) and m
 
 ## Follow-ups
 
-- #xkcp5vc — stable fallback meter for shim missing-throttle fallback (already filed).
+- #4653 — stable fallback meter for shim missing-throttle fallback (already filed).
 - Meter gh calls in scripts the drain spawns (`we:scripts/review-set-label.mjs` via `spawnReviewSetLabel`/`restampAcceptance`) — own card per confirmed path.
 - Regenerate stale shims via their owner; verify active-process adoption separately.
 - Audit `we:daemon-edge.mjs:574` / `we:daemon-rebuild.mjs:897` / `we:scripts/lib/daemon-live-smoke.mjs` smoke shims for a reachable drain chain; file a card per confirmed path.
