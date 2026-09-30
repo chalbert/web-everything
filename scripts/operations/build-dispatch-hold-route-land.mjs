@@ -161,6 +161,11 @@ export function clearScopeAndAppendFinding(cardText, { num, reason, today = loca
   // Standalone declines remove the key: check:standards forbids an empty scope array.
   const cleared = `---\n${fm[1].replace(SCOPE_KEY_RE, standalone ? '' : 'scope: []').trimEnd()}\n---${text.slice(fm[0].length)}`;
   const quoted = sanitizeHoldReason(reason, { max: standalone ? 620 : MAX_REASON_CHARS }) || '(no reason recorded)';
+  // Advisory only: prepare must verify these references before setting blockedBy.
+  const blockers = standalone ? [...new Set([...String(reason).matchAll(
+    /#(\d+)\b[^.!?\n#]{0,160}\b(?:incomplete|unfinished|blocked|not (?:done|complete)|required|prerequisite)\b/gi,
+  ), ...String(reason).matchAll(/\b(?:blocked by|depends on|requires|waiting (?:for|on)|required|prerequisite)\s+#(\d+)\b/gi)]
+    .map((m) => m[1]).filter((id) => id !== String(num)))] : [];
   const section = [
     '',
     standalone ? `## Findings (standalone worker, ${today})` : `## Held finding — auto-routed by #4465 (${today})`,
@@ -168,6 +173,7 @@ export function clearScopeAndAppendFinding(cardText, { num, reason, today = loca
     `The build-dispatch daemon held #${num} with:`,
     '',
     `> ${quoted}`,
+    ...blockers.flatMap((id) => ['', `possible blocker: #${id}`]),
     '',
     "`scope:` was cleared above so this card is picked up by the existing unshaped-item auto-prepare path;",
     'a prepare pass re-scopes it against the finding.',

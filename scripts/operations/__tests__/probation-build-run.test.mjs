@@ -17,7 +17,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { withInfraLock } from '../../conveyor/infra-blocked.mjs';
-import { openPrArgv, parseArgs, realIo, runProbationBuild } from '../probation-build-run.mjs';
+import { captureWorkerMessage, openPrArgv, parseArgs, realIo, runProbationBuild } from '../probation-build-run.mjs';
 
 describe('realIo().findItem — the card\'s own scope is what the arc allowlists (#4291 advisory finding)', () => {
   const withCard = (text, fn) => {
@@ -694,11 +694,62 @@ describe('standalone final report capture', () => {
     const dir = mkdtempSync(join(tmpdir(), 'worker-report-'));
     try {
       const script = join(dir, 'report.mjs');
-      writeFileSync(script, `console.log(${JSON.stringify(JSON.stringify({ ...report, padding: 'x'.repeat(5000) }))});`);
+      writeFileSync(script, `console.log(${JSON.stringify(declineStream)}); console.log(${JSON.stringify(JSON.stringify({ ...report, padding: 'x'.repeat(5000) }, null, 2))});`);
       const result = realIo({ session: 'test' }).runWorker([script], dir);
       expect(result.ok).toBe(true);
       expect(result.lastMessage).toBe(report.lastMessage ?? report.events.finalResponse);
       expect(result.out).toHaveLength(4000);
     } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+});
+
+// Verbatim final two events from lane-16's #2351 run (2026-09-30 00:58Z).
+const declineStream = readFileSync(resolve('scripts/operations/__tests__/fixtures/codex-worker-declined.jsonl'), 'utf8');
+const declineMessage = JSON.parse(declineStream.split('\n')[0]).item.text;
+describe('streamed worker decline regression', () => {
+  it('captures the last completed agent message before turn.completed', () => {
+    const prefix = JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'Earlier update' } });
+    expect(captureWorkerMessage(`${prefix}\n${declineStream}`)).toBe(declineMessage);
+    expect(captureWorkerMessage(`noise\n${declineStream}malformed`)).toBe(declineMessage);
+  });
+  it.each([{ lastMessage: 'preferred report' }, { events: { finalResponse: 'preferred report' } }])(
+    'prefers the trailing launcher report over stream text', (report) => {
+      expect(captureWorkerMessage(declineStream + JSON.stringify(report, null, 2))).toBe('preferred report');
+    });
+  it.each(['codex', 'gemini'])('reads a fresh %s log before returning from the worker', (provider) => {
+    const dir = mkdtempSync(join(tmpdir(), 'worker-log-'));
+    try {
+      mkdirSync(join(dir, '.git'));
+      const script = join(dir, `${provider}-direct-task.mjs`);
+      const stream = provider === 'codex' ? declineStream : JSON.stringify({ event: 'result', result: { response: declineMessage } });
+      writeFileSync(script, `import { writeFileSync } from 'node:fs'; writeFileSync('.git/${provider}-direct-task.jsonl', ${JSON.stringify(stream)}); console.log('{}');`);
+      expect(realIo().runWorker([script], dir).lastMessage).toBe(declineMessage);
+      writeFileSync(script, "console.log('{}');");
+      expect(realIo().runWorker([script], dir).lastMessage).toBe('');
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+  it('falls back to a reported log and tolerates missing logs', () => {
+    expect(captureWorkerMessage('{"lastMessage":null,"logFile":"run.jsonl"}', (path) => {
+      expect(path).toBe('run.jsonl'); return declineStream;
+    })).toBe(declineMessage);
+    expect(captureWorkerMessage('bad output')).toBe('');
+  });
+  it('reassembles Gemini agent-response deltas when its terminal response is absent', () => {
+    const stream = ['No files ', 'changed.'].map((text_delta) => JSON.stringify({ event: 'step_update',
+      step_update: { step_type: 'agent_response', step_index: 1, text_delta } })).join('\n');
+    expect(captureWorkerMessage(stream)).toBe('No files changed.');
+  });
+  it.each(['Blocked by #2350.', 'Requires #2350.', '#2350 remains incomplete.'])('annotates blocker wording: %s', async (lastMessage) => {
+    const { io, calls } = fakeIo({ numstat: '', lastMessage });
+    await runProbationBuild(args(), io);
+    expect(calls.find((c) => c[0] === 'card')?.at(-1)).toContain('possible blocker: #2350');
+  });
+  it('carries the observed refusal into Findings with its possible blocker', async () => {
+    const { io, calls } = fakeIo({ numstat: '', lastMessage: captureWorkerMessage(declineStream) });
+    await runProbationBuild(args(), io);
+    const card = calls.find((c) => c[0] === 'card')?.at(-1);
+    expect(card).toContain('possible blocker: #2350');
+    expect(card).not.toContain('possible blocker: #2351');
+    expect(card).toContain('supervised cutover remains incomplete');
   });
 });
