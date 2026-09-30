@@ -35,24 +35,31 @@ Child 2 of #3922. Split the one supervise role into plan and supervise, each wit
 1. **Role Split**: Update `we:scripts/lib/dispatch-contracts.mjs` to define `PLANNER_ROLE` and `CHECKER_ROLE` (or keep `SUPERVISOR_ROLE` and split its usage) in the router, maintaining separate trust records for each.
 2. **Ladders**: Add separate `PLANNER_LADDERS` and `CHECKER_LADDERS` mapped to the profile `complexity` and `risk`. Map "card size 8+" to high complexity / high risk levels.
 3. **Checker Behavior**: Checker `newTasks` must be rejected. The `verdictFromSupervisorOutput` logic should reject payloads where `newTasks` is not empty.
-4. **Verification**: Resolve the `UNVERIFIED` flags in `SUPERVISOR_INVOCATIONS` by asserting tool-free behavior in the CLI runner bindings.
+4. **Checker trust record**: a PR-panel-found miss moves the checker's `{model, taskType, risk}` cell up to Opus; each clean review since is recorded against that cell. Trust records are read through `routingRecords` in `we:scripts/lib/dispatch-contracts.mjs` (already in scope); the miss and clean-review rows are written as scorecard rows with `role: 'checker'`, so no file outside `scope:` is needed.
+5. **Verification**: Resolve the `UNVERIFIED` flags in `SUPERVISOR_INVOCATIONS` only from a real observation — a live probe of each runner (agy, claude-native) whose command and recorded output are cited in the flag's `evidence` field. A flag with no recorded probe stays `UNVERIFIED`; it is never flipped by a mocked unit test.
 
 ## MVP
 
 - `PLANNER_ROLE` and `CHECKER_ROLE` defined and routed through distinct ladders in `we:scripts/lib/dispatch-contracts.mjs`.
 - Checker `newTasks` validation in `we:scripts/lib/dispatch-supervisor-contract.mjs`.
+- Checker miss-cell promotion: a PR-panel-found miss writes a checker miss row, and the ladder lookup for that `{model, taskType, risk}` cell then returns Opus.
+- Clean-review recording: a clean checker review writes a clean row against the cell, readable through `routingRecords`, so the operator can see the count since the miss.
 - Provide tests that prove planner and checker use different ladders and trust records.
-- Assert the UNVERIFIED flags as VERIFIED or FALSE.
+- Extend the status enum in `we:scripts/lib/dispatch-supervisor-contract.mjs` and the allow-list at `we:scripts/lib/__tests__/dispatch-supervisor-contract.test.mjs:85` with `'verified-by-live-probe'` and `'FALSE'`, and require an `evidence` citation on any flag using either value.
 
 ## Test plan
 
 - **Unit tests** in `we:scripts/lib/__tests__/dispatch-contracts.test.mjs` covering trust record splits and ladder lookups for plan vs checker.
-- **Unit tests** in `we:scripts/lib/__tests__/dispatch-supervisor-contract.test.mjs` asserting `newTasks` refusal and flag verification.
+- **Unit test** that a checker miss row moves only its own `{model, taskType, risk}` cell to Opus while the planner cell and other checker cells stay put.
+- **Unit test** that clean reviews are recorded and counted per cell after a miss.
+- **Unit tests** in `we:scripts/lib/__tests__/dispatch-supervisor-contract.test.mjs` asserting `newTasks` refusal.
+- **Unit test** that every `SUPERVISOR_INVOCATIONS` flag with status `verified-by-live-probe` or `FALSE` cites an `evidence` artifact (probe command plus recorded output or job id).
 
 ## Proof plan
 
 - A CLI command executing a mocked dispatch with a high card size selects an Opus planner.
-- A CLI command executing a mocked checker dispatch defaults to Sonnet.
+- A CLI command executing a mocked checker dispatch defaults to Sonnet, then selects Opus for the missed cell after a miss row is recorded.
+- A live tool-free probe per runner (agy with `--mode plan --json-schema`, claude-native with `--tools ""`): run a supervisor round, confirm no write tool is exposed, and record the command and output as the `evidence` for that runner's flags. Mocked dispatch does not count as proof here.
 
 ## Follow-ups
 
@@ -60,4 +67,8 @@ Child 2 of #3922. Split the one supervise role into plan and supervise, each wit
 
 ## Done when
 
-1. **Executable** — `npx vitest run we:scripts/lib/__tests__/dispatch-contracts.test.mjs` passes and demonstrates independent planner vs checker tier upgrades.
+1. **Executable** — this command, run from the repo root, passes, and the suite includes named tests for independent planner vs checker ladders, the checker miss-to-Opus promotion, clean-review recording, and `newTasks` refusal. The command is fenced because a `we:` prefix is a citation form, not a path: vitest treats it as a literal filter and finds no files.
+
+```
+npx vitest run scripts/lib/__tests__/dispatch-contracts.test.mjs scripts/lib/__tests__/dispatch-supervisor-contract.test.mjs
+```
