@@ -38,11 +38,8 @@
  * unreleased claim's reclaim, and only an explicit {@link releaseFixDispatchClaim} call (a refused/failed
  * attempt that spawned nothing, or — see the note below — a completion/reap signal) frees one early.
  *
- * RELEASE-ON-REAP IS NOT WIRED YET. `we:scripts/conveyor/session-reaper.mjs` is the natural caller once a
- * dispatched fix/ci-heal/resume session is confirmed gone, but that file is owned by another worker on this
- * epic and is out of this item's scope (#x0jphk5). {@link releaseFixDispatchClaim} is exported precisely so
- * that hook can be added there later with no change needed here — until it is, the TTL alone is what recovers
- * an abandoned claim.
+ * Confirmed terminal sessions are released by the daemon's pre-dispatch refresh sweep.
+ * Missing sessions retain the TTL grace; historical terminal rows cannot settle a new claim.
  *
  * CORRECTED (dup-heal-dispatch, 2026-09-27 LIVE INCIDENT): the resource key used to be `(repo, pr, headSha)` —
  * a NEW push to the SAME pr was, deliberately, a free/independent slot (see the old version of {@link
@@ -72,10 +69,9 @@
  * `we:skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs`'s own IO shell), it reads every held claim, checks
  * — via the SAME name-based liveness `bindAgents`'s own PATH 2 already trusts ({@link isClaimSessionLive}) —
  * whether a live, non-terminal session still carries that `(repo, kind, pr)`'s own session name, and
- * heartbeat-refreshes ONLY those. A claim whose session has actually finished (or was never confirmed live —
- * covering the spawn-listing lag right after a fresh dispatch, which the un-refreshed TTL already comfortably
- * outlasts, per this file's own `DEFAULT_FIX_DISPATCH_CLAIM_TTL_MINUTES` comment) is left to expire on the
- * plain TTL exactly as before — dead-holder recovery is unchanged.
+ * heartbeat-refreshes ONLY those. A terminal session from the current dispatch releases its claim;
+ * an unknown/missing session retains the plain TTL to cover spawn-listing lag. Old terminal sessions
+ * sharing the same name cannot release a new dispatch's claim.
  */
 import { hostname } from 'node:os';
 import {
@@ -86,6 +82,7 @@ import {
   fixDispatchSessionName, listFixDispatchClaims,
 } from './fix-claim-store.mjs';
 import { defaultListAgents } from '../operations/dispatch-lane-io.mjs';
+import { startedAtMs } from './reconcile-core.mjs';
 import { readHungInfo, resolveHungThresholdMs } from './hung-session.mjs';
 
 // The light store helpers live in `fix-claim-store.mjs` (no dispatch graph — see its header); re-exported here so
@@ -195,9 +192,9 @@ export const MAX_FIX_DISPATCH_CLAIM_REFRESH_MS = 4 * 60 * 60 * 1000;
  * whose `(repo, kind, pr)` still names a LIVE, non-terminal session ({@link isClaimSessionLive}, ONE shared
  * `agentsAll` read for the whole sweep — never one `claude agents --json --all` call per claim),
  * heartbeat-refreshes it (`file-locks.mjs#heartbeat`) so its TTL never lapses while the session is real. A
- * claim whose session is NOT confirmed live (already finished, or — the spawn-listing-lag case this file's own
- * `DEFAULT_FIX_DISPATCH_CLAIM_TTL_MINUTES` comment already covers — not yet visible in the listing) is left
- * untouched: the plain TTL still recovers it exactly as before this fix, dead-holder recovery unchanged.
+ * claim with a terminal session from this dispatch is released before overlap admission, even while its PR
+ * remains in review. Unknown/missing sessions retain the TTL grace; old terminal rows cannot release a new
+ * dispatch sharing their name. PR labels/head changes alone never release a live session's claim.
  *
  * PR #2789 review hardening:
  *  - HUNG: every candidate agent row is first run through `hung-session.mjs#readHungInfo` (injectable as
@@ -230,6 +227,7 @@ export function refreshLiveFixDispatchClaims({
     throw new TypeError('refreshLiveFixDispatchClaims: listAgentsAll must be synchronous (got a Promise)');
   }
   const refreshed = [];
+  const released = [];
   for (const entry of claims) {
     const { repo, pr, kind, headSha = null, claimedAt = null } = entry.meta;
     const claimedMs = Date.parse(claimedAt ?? '');
@@ -247,7 +245,22 @@ export function refreshLiveFixDispatchClaims({
         try { info = hungInfoFor(a, nowMs, hungThresholdMs); } catch { info = null; }
         return info?.hung === true ? { ...a, hung: true } : a;
       });
-    if (!isClaimSessionLive({ repo, pr, kind, agentsAll, name })) continue;
+    if (!isClaimSessionLive({ repo, pr, kind, agentsAll, name })) {
+      // A terminal row must belong to THIS dispatch, not an older round with the
+      // same reusable name. Missing/failed listings and the spawn-listing lag
+      // never release a claim. A live sibling above always wins over old rows.
+      const settled = agentsAll.some((a) =>
+        ['done', 'stopped', 'failed'].includes(a.state)
+        && Number.isFinite(claimedMs) && startedAtMs(a.startedAt) >= claimedMs);
+      if (settled) {
+        const current = readLockEntry(lockRoot, fixDispatchResource({ repo, pr, kind }));
+        if (current?.owner === entry.owner && current.meta?.claimedAt === claimedAt) {
+          const result = releaseFixDispatchClaim({ repo, pr, kind, owner: entry.owner, lockRoot });
+          if (result.released) released.push({ repo, pr, kind, owner: entry.owner });
+        }
+      }
+      continue;
+    }
     const resource = fixDispatchResource({ repo, pr, kind });
     const current = readLockEntry(lockRoot, resource);
     if (!current || current.owner !== entry.owner) continue;
@@ -259,5 +272,5 @@ export function refreshLiveFixDispatchClaims({
       repo, pr, kind, headSha, owner: entry.owner,
     });
   }
-  return { checked: claims.length, refreshed };
+  return { checked: claims.length, refreshed, ...(released.length ? { released } : {}) };
 }

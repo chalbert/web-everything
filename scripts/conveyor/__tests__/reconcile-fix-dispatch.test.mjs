@@ -1368,3 +1368,34 @@ describe('filterFixesByInFlightScope (#4295)', () => {
     expect(r.refusals).toEqual([]);
   });
 });
+
+describe('fair overlap queue', () => {
+  const scope = ['we:scripts/pr-land.mjs'];
+  const fx = (pr, hour, reviewHuman = false) => ({ pr, scope, reviewHuman, waitingSince: `2026-09-30T${hour}:00:00Z` });
+  it('grants the oldest waiter before a PR returning for round two, independent of input order', () => {
+    const queue = [fx(3103, '14'), fx(3090, '13'), fx(3033, '12')];
+    expect(filterFixesByInFlightScope(queue).planned.map((p) => p.pr)).toEqual([3033]);
+    expect(filterFixesByInFlightScope(queue.slice(0, 2)).planned.map((p) => p.pr)).toEqual([3090]);
+  });
+  it('prioritizes review:human only on a waiting-time tie', () => {
+    expect(filterFixesByInFlightScope([fx(1, '12'), fx(2, '12', true)]).planned[0].pr).toBe(2);
+    expect(filterFixesByInFlightScope([fx(1, '11'), fx(2, '12', true)]).planned[0].pr).toBe(1);
+  });
+  it('reports positions including older blocked waiters and deduplicates two claims for one PR', () => {
+    const claims = [{ meta: { pr: 3103, scope } }, { meta: { pr: 3103, scope } }];
+    const { refusals } = filterFixesByInFlightScope([fx(3090, '13'), fx(3033, '12')], [], claims);
+    expect(refusals[0].why).toContain('waiting 2nd behind #3103 on we:scripts/pr-land.mjs');
+    expect(refusals[1]).toMatchObject({ pr: 3090, queuePosition: 3 });
+    expect(refusals[1].why).toContain('waiting 3rd behind #3103, #3033');
+  });
+  it('does not bypass a blocked older waiter through another file', () => {
+    const older = { ...fx(1, '12'), scope: ['we:a', 'we:b'] };
+    expect(filterFixesByInFlightScope([older, { ...fx(2, '13'), scope: ['we:b'] }], [],
+      [{ meta: { pr: 3, scope: ['we:a'] } }]).planned).toEqual([]);
+  });
+  it('carries waiting age and human priority through scope planning', () => {
+    const { planned } = planFixesFromReconcile([{ kind: 'fix', prNumber: 3033, headRefName: 'feature',
+      files: ['scripts/pr-land.mjs'], labels: ['review:human'], waitingSince: '2026-09-30T12:00:00Z' }], () => null, () => []);
+    expect(planned[0]).toMatchObject({ waitingSince: '2026-09-30T12:00:00Z', reviewHuman: true });
+  });
+});
