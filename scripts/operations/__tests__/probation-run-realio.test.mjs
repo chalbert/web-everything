@@ -95,7 +95,8 @@ function recordingEnv() {
 
 describe.each([
   ['probation-build-run', buildRealIo, (io, dir, base) => {
-    io.acquireLane({ lane: 1, session: 's', scope: ['we:a.md'] });
+    // The preload exits without a path; acquisition now surfaces that refusal.
+    expect(() => io.acquireLane({ lane: 1, session: 's', scope: ['we:a.md'] })).toThrow('lane-pool returned no lane path');
     io.claim('1', 's', dir);
     io.headSha(dir);
     const pre = io.untracked(dir);

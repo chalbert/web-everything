@@ -66,7 +66,7 @@
 
 import { randomBytes } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import matter from 'gray-matter';
@@ -79,10 +79,12 @@ import {
   buildCheckerArgv, parseCheckerVerdict, buildDocFixCommitMessage, buildDocFixTask, buildWorkerArgv, frontmatterTamperedBeyondClaim,
   healDiffWithinEnvelope, launchScorecardRow, newUntrackedPaths, summarizeNumstat,
 } from '../lib/probation-launcher.mjs';
+import { defaultPoolRoot, workspaceFor } from '../lib/lane-pool-paths.mjs';
+import { daemonCloneRoots, isDaemonCloneRealpath } from '../lib/daemon-clone-registry.mjs';
 import { extractSubmitResult } from './open-pr.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-/** The WE checkout every tool is resolved from — by script location, never cwd. */
+/** Read-only launch checkout and pool reference — by script location, never cwd. */
 export const WE_ROOT = resolve(HERE, '..', '..');
 const REPO_SLUG = CONSTELLATION_REPOS[DEFAULT_REPO_KEY].slug;
 const GATE_TIMEOUT_MS = 20 * 60 * 1000;
@@ -315,7 +317,7 @@ export async function runProbationBuild(args, io) {
     const taskFile = io.writeTaskFile(lanePath, 'probation-build-task.md', task);
     const preHookSurface = hookReset.snapshot;
     log(`running ${worker.launcher} --model=${worker.model}`);
-    const run = io.runWorker(buildWorkerArgv({ worker, weRoot: WE_ROOT, dir: lanePath, taskFile }));
+    const run = io.runWorker(buildWorkerArgv({ worker, weRoot: lanePath, dir: lanePath, taskFile }), lanePath);
     workerRan = true;
     // x55dojc — checked BEFORE the `run.ok` gate below on purpose: even a worker that crashed or timed out
     // could have planted a hook before it did, so this must never be skipped just because the run itself
@@ -383,7 +385,7 @@ export async function runProbationBuild(args, io) {
         'Reject scope creep, weakened tests, incorrect fixes, or work that is not simple and mechanical.',
         item.spec, io.diffText(lanePath, baseSha),
       ].join('\n\n'));
-      const verdict = parseCheckerVerdict(io.runChecker(buildCheckerArgv({ checker: worker.checker, weRoot: WE_ROOT, dir: lanePath, taskFile: checkerTask })));
+      const verdict = parseCheckerVerdict(io.runChecker(buildCheckerArgv({ checker: worker.checker, weRoot: lanePath, dir: lanePath, taskFile: checkerTask }), lanePath));
       checkerRow = { provider: worker.checker, verdict: verdict.verdict, reason: verdict.reason };
       const checkerHooks = hookSurfaceChanged(postHookSurface, io.snapshotHookSurface(lanePath));
       if (checkerHooks.changed) {
@@ -454,7 +456,6 @@ function sh(bin, args, opts = {}) {
 function trySh(bin, args, opts = {}) {
   try { return { ok: true, out: sh(bin, args, opts) }; } catch (e) { return { ok: false, out: `${e?.stdout ?? ''}${e?.stderr ?? e?.message ?? ''}` }; }
 }
-const node = (script, args, opts) => trySh(process.execPath, [join(WE_ROOT, script), ...args], opts);
 
 /**
  * argv (after `node scripts/operations/run.mjs`) for opening a probation build's PR. PURE, and exported
@@ -478,19 +479,29 @@ export function openPrArgv({ num, attemptTag, slug, bodyFile, taskType = 'doc-fi
  *  x55dojc — `laneEnv` disables git hooks (see `../lib/git-hook-surface.mjs`) for every subprocess the
  *  LAUNCHER runs in the lane, so a planted hook can never fire with the launcher's own credentials. The worker
  *  gets `workerEnv` instead (#4291 advisory review): it keeps the repo's own `.githooks/pre-push` main-push guard. */
-export function realIo({ session, env = process.env } = {}) {
+export function realIo({ session, env = process.env, repoRoot = WE_ROOT } = {}) {
   const workerEnv = { ...env, LANE_SESSION: session };
   const laneEnv = withHooksDisabled(workerEnv);
+  // cwd alone is insufficient: backlog/operation tools derive their roots from import.meta.url.
+  // Daemon clones are allowed as read-only launch sources; every writer uses the lane's script copy.
+  const node = (script, args, opts) => trySh(process.execPath, [join(opts.cwd, script), ...args], opts);
   return {
     log: (m) => console.error(m),
     acquireLane: ({ lane, session: s, scope, taskType = 'doc-fix' }) => {
-      const args = ['acquire', `--repo=${WE_ROOT}`, `--purpose=probation-${taskType}-build`, `--session=${s}`, '--base=main'];
+      const args = ['acquire', `--repo=${repoRoot}`, `--purpose=probation-${taskType}-build`, `--session=${s}`, '--base=main'];
       if (lane) args.push(`--lane=${lane}`);
       if (scope?.length) args.push(`--scope=${scope.join(',')}`);
-      const r = node('scripts/lane-pool.mjs', args, { env: laneEnv, timeout: 15 * 60 * 1000 });
-      if (!r.ok) return null;
+      const r = node('scripts/lane-pool.mjs', args, { cwd: repoRoot, env: { ...laneEnv, LANE_POOL_ROOT: resolve(repoRoot, defaultPoolRoot(repoRoot, env)) }, timeout: 15 * 60 * 1000 });
+      if (!r.ok) throw new Error(`could not acquire a lane: ${r.out.trim()}`);
       const last = r.out.trim().split('\n').filter(Boolean).at(-1) ?? '';
-      return last.startsWith('/') ? last : null;
+      if (!last.startsWith('/')) throw new Error(`could not acquire a lane: ${r.out.trim() || 'lane-pool returned no lane path'}`);
+      const realLane = realpathSync(last);
+      const realRoot = realpathSync(repoRoot);
+      if (realLane === realRoot || realLane.startsWith(`${realRoot}/`)
+        || isDaemonCloneRealpath(realLane, daemonCloneRoots(workspaceFor(repoRoot), { env }))) {
+        throw new Error('refused: acquired lane is the launch checkout or a registered daemon clone');
+      }
+      return realLane;
     },
     resetHookSurface: (dir, baseline) => resetHookSurface(dir, baseline),
     snapshotHookSurface: (dir) => snapshotHookSurface(dir),
@@ -516,7 +527,7 @@ export function realIo({ session, env = process.env } = {}) {
       return { path, slug: name.slice(String(n).length + 1, -3), title: titleMatch ? titleMatch[1].trim() : '', spec: body, raw: text, scope };
     },
     claim: (n, s, dir) => node('scripts/backlog.mjs', ['claim', String(n), `--session=${s}`], { cwd: dir, env: laneEnv }).ok,
-    headSha: (dir) => sh('git', ['-C', dir, 'rev-parse', 'HEAD'], { env: laneEnv }).trim(),
+    headSha: (dir) => sh('git', ['-C', dir, 'rev-parse', 'HEAD'], { cwd: dir, env: laneEnv }).trim(),
     writeTaskFile: (dir, name, text) => {
       // Inside `.git`, so the task text never shows up in the build diff.
       const p = join(dir, '.git', name);
@@ -524,23 +535,23 @@ export function realIo({ session, env = process.env } = {}) {
       writeFileSync(p, text);
       return p;
     },
-    runWorker: (argv) => {
+    runWorker: (argv, dir) => {
       // SYNCHRONOUS on purpose: both launchers block until the model's turn ends (see their own headers).
       // `workerEnv`, never `laneEnv`: the worker's own git use keeps the repo's guard hooks (see `realIo`).
-      const r = trySh(process.execPath, argv, { env: workerEnv, timeout: 70 * 60 * 1000 });
+      const r = trySh(process.execPath, argv, { cwd: dir, env: workerEnv, timeout: 70 * 60 * 1000 });
       return { ok: r.ok, out: r.out.slice(-4000) };
     },
-    runChecker: (argv) => {
-      const r = trySh(process.execPath, argv, { env: workerEnv, timeout: 20 * 60 * 1000 });
+    runChecker: (argv, dir) => {
+      const r = trySh(process.execPath, argv, { cwd: dir, env: workerEnv, timeout: 20 * 60 * 1000 });
       if (!r.ok) return '';
       try { return JSON.parse(r.out).lastMessage ?? ''; } catch { return ''; }
     },
-    diffText: (dir, base) => sh('git', ['-C', dir, 'diff', '--no-renames', base], { env: laneEnv }),
-    untracked: (dir) => sh('git', ['-C', dir, 'ls-files', '--others', '--exclude-standard'], { env: laneEnv }).split('\n').filter(Boolean),
+    diffText: (dir, base) => sh('git', ['-C', dir, 'diff', '--no-renames', base], { cwd: dir, env: laneEnv }),
+    untracked: (dir) => sh('git', ['-C', dir, 'ls-files', '--others', '--exclude-standard'], { cwd: dir, env: laneEnv }).split('\n').filter(Boolean),
     diffNumstat: (dir, base, exclude = []) => {
-      const created = newUntrackedPaths(exclude, sh('git', ['-C', dir, 'ls-files', '--others', '--exclude-standard'], { env: laneEnv }).split('\n').filter(Boolean));
-      if (created.length) trySh('git', ['-C', dir, 'add', '--intent-to-add', '--', ...created], { env: laneEnv });
-      if (exclude.length) trySh('git', ['-C', dir, 'reset', '-q', '--', ...exclude], { env: laneEnv });
+      const created = newUntrackedPaths(exclude, sh('git', ['-C', dir, 'ls-files', '--others', '--exclude-standard'], { cwd: dir, env: laneEnv }).split('\n').filter(Boolean));
+      if (created.length) trySh('git', ['-C', dir, 'add', '--intent-to-add', '--', ...created], { cwd: dir, env: laneEnv });
+      if (exclude.length) trySh('git', ['-C', dir, 'reset', '-q', '--', ...exclude], { cwd: dir, env: laneEnv });
       // #4291 plan-review finding (security, round 8) — `--no-renames`, explicit and unconditional: with rename
       // detection on (a local `diff.renames` config, not this repo's own default), a renamed file's numstat
       // line reads `old => new` (or `{old => new}`) as ONE path string, which `summarizeNumstat` would then
@@ -549,7 +560,7 @@ export function realIo({ session, env = process.env } = {}) {
       // not by design. Forcing rename detection off makes a rename report as a plain delete + add — two
       // ordinary paths the allowlist checks exactly like any other change — so the safety no longer depends on
       // arithmetic on an opaque `a => b` string ever failing to match.
-      return sh('git', ['-C', dir, 'diff', '--no-renames', '--numstat', base], { env: laneEnv });
+      return sh('git', ['-C', dir, 'diff', '--no-renames', '--numstat', base], { cwd: dir, env: laneEnv });
     },
     // Undo ALL of this run's own changes back to `base` (the claim's stamp, any uncommitted diff, and a commit
     // already made alike — see the file docblock for why this, not `backlog.mjs release`, is the one undo this
@@ -558,10 +569,10 @@ export function realIo({ session, env = process.env } = {}) {
     // deliberately: this is the LAST-RESORT cleanup `abandon` calls from inside a `catch`, so a git hiccup here
     // must degrade (best-effort) rather than throw past it and skip the scorecard row / final report entirely.
     discardChanges: (dir, base, preexisting = []) => {
-      const listed = trySh('git', ['-C', dir, 'ls-files', '--others', '--exclude-standard'], { env: laneEnv });
+      const listed = trySh('git', ['-C', dir, 'ls-files', '--others', '--exclude-standard'], { cwd: dir, env: laneEnv });
       const created = listed.ok ? newUntrackedPaths(preexisting, listed.out.split('\n').filter(Boolean)) : [];
-      trySh('git', ['-C', dir, 'reset', '--hard', base], { env: laneEnv });
-      if (created.length) trySh('git', ['-C', dir, 'clean', '-f', '--', ...created], { env: laneEnv });
+      trySh('git', ['-C', dir, 'reset', '--hard', base], { cwd: dir, env: laneEnv });
+      if (created.length) trySh('git', ['-C', dir, 'clean', '-f', '--', ...created], { cwd: dir, env: laneEnv });
     },
     resolveItem: (n, dir) => {
       const r = node('scripts/operations/run.mjs', ['resolve', `--ref=${n}`, '--json'], { cwd: dir, env: laneEnv });
@@ -573,8 +584,8 @@ export function realIo({ session, env = process.env } = {}) {
     commit: (dir, paths, message) => {
       const msgFile = join(dir, '.git', 'probation-build-commit-msg.txt');
       writeFileSync(msgFile, message);
-      sh('git', ['-C', dir, 'add', '--', ...paths], { env: laneEnv });
-      sh('git', ['-C', dir, 'commit', '-F', msgFile, '--', ...paths], { env: laneEnv });
+      sh('git', ['-C', dir, 'add', '--', ...paths], { cwd: dir, env: laneEnv });
+      sh('git', ['-C', dir, 'commit', '-F', msgFile, '--', ...paths], { cwd: dir, env: laneEnv });
     },
     runGate: (dir) => {
       // The DEFAULT (marker-writing) mode — never `run` mode — so `open-pr --requireVerified=true` below finds
