@@ -10,10 +10,11 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import { mkdtempSync, readFileSync, existsSync, mkdirSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  runGhSync, runGhCliPassthrough, classifyGhResource, primaryExhaustedResource, ghAuthIdentity, readBudgetBlock,
+  runGhSync, runGhCliPassthrough, classifyGhResource, primaryExhaustedResource, ghAuthIdentity, ghAuthProvenance, readBudgetBlock,
   writeBudgetBlock, parseBudgetProbe, budgetProbeArgs, ghThrottleLogPath, MAX_BUDGET_BLOCK_MS,
 } from '../gh-throttle.mjs';
 
@@ -174,4 +175,45 @@ it.each(['sync', 'passthrough'])('strict-budget %s calls record exhaustion witho
   expect(probeBudget).not.toHaveBeenCalled();
   expect(sleep).not.toHaveBeenCalled();
   expect(readBudgetBlock(root, 'default', 'graphql', NOW)).toMatchObject({ source: 'fallback' });
+});
+
+describe('installation provenance (#4652)', () => {
+  const bound = (id, token) => ({ GH_TOKEN: token, WE_GH_AUTH_INSTALLATION: id,
+    WE_GH_AUTH_TOKEN_HASH: createHash('sha256').update(token).digest('hex'), WE_GH_AUTH_SOURCE: 'cache' });
+  it('rotation preserves the installation, other installations and fallback credentials do not', () => {
+    const first = bound('123', 'ghs_synthetic_first');
+    expect(ghAuthIdentity(first)).toBe('app-installation-123');
+    expect(ghAuthIdentity(bound('123', 'ghs_synthetic_rotated'))).toBe(ghAuthIdentity(first));
+    expect(ghAuthIdentity(bound('456', 'ghs_synthetic_second'))).toBe('app-installation-456');
+    expect(ghAuthProvenance(first)).toEqual({ kind: 'installation', installationId: '123', source: 'cache' });
+    expect(ghAuthProvenance({ ...first, GH_TOKEN: 'gho_synthetic_personal' })).toEqual({ kind: 'personal-token' });
+    expect(ghAuthProvenance({ ...first, GH_TOKEN: 'ghs_synthetic_unbound' })).toEqual({ kind: 'installation', installationId: null, source: 'unknown' });
+    expect(ghAuthProvenance({ GITHUB_ACTIONS: 'true', GITHUB_REPOSITORY: 'test/repo', GITHUB_TOKEN: 'ghs_synthetic_action' })).toEqual({ kind: 'actions', repository: 'test/repo' });
+    expect(ghAuthIdentity({ GH_TOKEN: 'ghs_synthetic_unknown', WE_GITHUB_APP_INSTALLATION_ID: '123' })).toBe('app');
+  });
+  it('records effective child provenance and never its token or binding hash', () => {
+    const lockRoot = tmp();
+    const env = bound('123', 'ghs_synthetic_child');
+    runGhSync(['pr', 'view', '1'], { env, throttle: throttleOpts(lockRoot, { exec: () => '{}' }) });
+    const raw = readFileSync(ghThrottleLogPath(lockRoot), 'utf8');
+    expect(JSON.parse(raw.trim())).toMatchObject({ id: 'app-installation-123', auth: { installationId: '123', source: 'cache' } });
+    expect(raw).not.toContain(env.GH_TOKEN);
+    expect(raw).not.toContain(env.WE_GH_AUTH_TOKEN_HASH);
+  });
+});
+
+
+it('CLI call records carry the effective installation provenance (#4652)', () => {
+  const lockRoot = tmp();
+  const token = 'ghs_synthetic_cli';
+  const env = { GH_TOKEN: token, WE_GH_AUTH_INSTALLATION: '987', WE_GH_AUTH_SOURCE: 'mint',
+    WE_GH_AUTH_TOKEN_HASH: createHash('sha256').update(token).digest('hex') };
+  runGhCliPassthrough(['pr', 'view', '1'], {
+    throttle: throttleOpts(lockRoot, { env, personalRoute: false }),
+    spawn: () => ({ status: 0, stdout: Buffer.from('{}'), stderr: Buffer.alloc(0) }),
+  });
+  const raw = readFileSync(ghThrottleLogPath(lockRoot), 'utf8');
+  expect(JSON.parse(raw.trim())).toMatchObject({ outcome: 'call', id: 'app-installation-987', auth: { kind: 'installation', installationId: '987', source: 'mint' } });
+  expect(raw).not.toContain(token);
+  expect(raw).not.toContain(env.WE_GH_AUTH_TOKEN_HASH);
 });

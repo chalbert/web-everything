@@ -2601,7 +2601,7 @@ describe('#3332: the planner\'s fix and CI-heal lists reach the spawner', () => 
     for (const name of BRIEF_REQUIRED_BY_KIND.fix) expect(prompt).not.toContain(`{{${name}}}`);
     // The io shell's `raw.repoTokens` (this suite's own real checkout) reached the brief — `{{ATTRIBUTION}}`
     // reproduces the pre-#3960 hardcoded `WE #{{ITEM_NUM}}` literal exactly.
-    expect(prompt).toContain('"WE #2608: address review:changes on PR #701');
+    expect(prompt).toContain('"WE #2608: fix — <specific correction> (PR 701)');
     // Landing-freeze fix (lane-leftover-reclaim) — `--repo=` is now an absolute path (`{{LANE_REPO}}` ==
     // `{{WE_ROOT}}` for `we`), never the literal `.`: a `.` resolved relative to THIS dispatched session's own
     // scratch cwd (never the checkout — #4174), which is exactly the "acquire --repo=. could not find the repo"
@@ -2627,7 +2627,7 @@ describe('#3332: the planner\'s fix and CI-heal lists reach the spawner', () => 
       ...WE_TOKENS('2638'),
     }));
     for (const name of BRIEF_REQUIRED_BY_KIND['ci-heal']) expect(prompt).not.toContain(`{{${name}}}`);
-    expect(prompt).toContain('"WE #2638: CI-heal PR #743');
+    expect(prompt).toContain('"WE #2638: ci-heal — <failing check and repair> (PR 743)');
     expect(run.findings.read.briefUnknownTokens).toEqual(['{{LIKE_THIS}}', '{{PLACEHOLDERS}}']);
     expect(run.findings.read.dispatchedGuard).toEqual({ pr: 743, num: '2638', lane: 6, spawnedTick: 5 });
   });
@@ -2773,7 +2773,7 @@ describe('#3960: the fix/ci-heal briefs fill repo-aware, and reproduce WE\'s pre
     const tokens = briefTokensForRepo('we', { itemNum: '2608', checkoutExists: () => true, readPackageJson: () => WE_PACKAGE_JSON });
     const { prompt } = fillBrief(FIX_BRIEF, { ...BASE_FIX_VALUES, ...tokens }, BRIEF_REQUIRED_BY_KIND.fix, undefined, REPO_AWARE_VALUE_PATTERNS);
     // The exact literal `fix-agent-brief.md` hardcoded before #3960 (`"WE #{{ITEM_NUM}}: address …"`).
-    expect(prompt).toContain('printf \'%s\\n\' "WE #2608: address review:changes on PR #701 — <one-line what you fixed>"');
+    expect(prompt).toContain('printf \'%s\\n\' "WE #2608: fix — <specific correction> (PR 701)"');
     // xpnhz4o — the gate is the diff-selected verify-lane run, never the bare full suite.
     expect(prompt).toContain(`node ${tokens.WE_ROOT}/scripts/verify-lane.mjs request --repo=.`); // #4369 — request/check, never the guard-denied `run`
     expect(prompt).toContain(`node ${tokens.WE_ROOT}/scripts/verify-lane.mjs check --wait=60000 --json --repo=.`);
@@ -2788,7 +2788,7 @@ describe('#3960: the fix/ci-heal briefs fill repo-aware, and reproduce WE\'s pre
   it('for WE, the ci-heal brief\'s {{ATTRIBUTION}} reproduces the pre-#3960 hardcoded literal exactly', () => {
     const tokens = briefTokensForRepo('we', { itemNum: '2638', checkoutExists: () => true, readPackageJson: () => WE_PACKAGE_JSON });
     const { prompt } = fillBrief(CI_HEAL_BRIEF, { ...BASE_CI_HEAL_VALUES, ...tokens }, BRIEF_REQUIRED_BY_KIND['ci-heal'], undefined, REPO_AWARE_VALUE_PATTERNS);
-    expect(prompt).toContain('printf \'%s\\n\' "WE #2638: CI-heal PR #743 — rebase onto main + repair the failing check"');
+    expect(prompt).toContain('printf \'%s\\n\' "WE #2638: ci-heal — <failing check and repair> (PR 743)"');
     expect(prompt).toContain(`node ${tokens.WE_ROOT}/scripts/verify-lane.mjs request --repo=.`); // #4369 — request/check, never the guard-denied `run`
     expect(prompt).toContain(`node ${tokens.WE_ROOT}/scripts/verify-lane.mjs check --wait=60000 --json --repo=.`);
     expect(prompt).not.toContain(`verify-lane.mjs run --repo=.          #`);
@@ -2813,7 +2813,7 @@ describe('#3960: the fix/ci-heal briefs fill repo-aware, and reproduce WE\'s pre
     // The gate runs against the plateau lane (`--repo=.`), with WE's own verify-lane choosing plateau's scripts.
     expect(prompt).toContain(`node ${tokens.WE_ROOT}/scripts/verify-lane.mjs request --repo=.`);
     expect(prompt).toContain(`node ${tokens.WE_ROOT}/scripts/verify-lane.mjs check --wait=60000 --json --repo=.`);
-    expect(prompt).toContain('printf \'%s\\n\' "PLATEAU #2608: address review:changes on PR #701 — <one-line what you fixed>"');
+    expect(prompt).toContain('printf \'%s\\n\' "PLATEAU #2608: fix — <specific correction> (PR 701)"');
   });
 });
 

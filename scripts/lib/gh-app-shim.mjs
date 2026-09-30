@@ -88,6 +88,7 @@ import { fileURLToPath } from 'node:url';
 import { defaultCachePath, resolveGithubAppEnvConfig } from './github-app-auth-env.mjs';
 import { primaryCheckout } from '../bootstrap-session.mjs';
 import { controlClonePath } from './automation-home.mjs';
+import { stripGhDebug, rateLimitRecords, ghAuthIdentity, classifyGhResource } from './gh-throttle.mjs';
 
 /**
  * #4200-ish (gh-shim-stable-path) — the absolute path to `we:scripts/lib/gh-throttle.mjs`, resolved through
@@ -288,7 +289,10 @@ export function renderGhShimScript({ realGhPath, cachePath, ghThrottleCliPath = 
 // it is paced by that module's shared cross-process concurrency cap, not execed directly.
 'use strict';
 const { spawnSync } = require('node:child_process');
-const { readFileSync, unlinkSync, existsSync } = require('node:fs');
+const { readFileSync, unlinkSync, existsSync, mkdirSync, appendFileSync } = require('node:fs');
+const { join, resolve } = require('node:path');
+const { homedir } = require('node:os');
+const { createHash, randomUUID } = require('node:crypto');
 const { pathToFileURL } = require('node:url');
 
 const REAL_GH = ${JSON.stringify(realGhPath)};
@@ -318,8 +322,57 @@ const GH_THROTTLE_CLI = ${JSON.stringify(ghThrottleCliPath)};
 function warnFallback(reason) {
   try { process.stderr.write('gh-shim: ' + reason + ' — falling back to direct, unthrottled gh\\n'); } catch { /* best-effort */ }
 }
-function runDirect(argv, env) {
-  return spawnSync(REAL_GH, argv, { stdio: ['inherit', 'pipe', 'pipe'], env, maxBuffer: ${JSON.stringify(SHIM_CAPTURE_MAX_BUFFER)} });
+// Embed the pure parsers at generation time: fallback has no checkout imports at runtime.
+const GH_DEBUG_GIT_LINE = /^\\[(\\S*\\/)?git( [^\\n]*)?\\]$/;
+${stripGhDebug.toString()}
+${rateLimitRecords.toString()}
+${ghAuthIdentity.toString()}
+${classifyGhResource.toString()}
+function runDirect(argv, env, fallbackReason) {
+  const capture = !env.GH_DEBUG && env.WE_GH_THROTTLE_COST_HEADERS !== '0';
+  const result = spawnSync(REAL_GH, argv, {
+    stdio: ['inherit', 'pipe', 'pipe'],
+    env: capture ? Object.assign({}, env, { GH_DEBUG: 'api' }) : env,
+    maxBuffer: ${JSON.stringify(SHIM_CAPTURE_MAX_BUFFER)},
+  });
+  const parsed = stripGhDebug(result.stderr ? result.stderr.toString('utf8') : '');
+  if (capture) result.stderr = Buffer.from(parsed.stderr);
+  // Only numeric rate observations and a query hash survive; never argv, bodies or raw headers.
+  const rl = rateLimitRecords(parsed.responses).map((r) => ({
+    ...r, res: ['graphql', 'core', 'search', 'integration_manifest'].includes(r.res) ? r.res : null,
+  }));
+  const costs = parsed.responses.map((r) => r.cost);
+  const cost = costs.length && costs.every((c) => Number.isInteger(c) && c >= 0)
+    ? costs.reduce((sum, c) => sum + c, 0) : null;
+  const clean = (value) => {
+    let text = String(value || 'unknown');
+    for (const secret of [env.GH_TOKEN, env.GITHUB_TOKEN]) if (secret) text = text.split(secret).join('[redacted]');
+    return text.replace(/(?:gh[pousr]_|github_pat_)[A-Za-z0-9_]+/g, '[redacted]').slice(0, 160);
+  };
+  const id = ghAuthIdentity(env);
+  const cachedAuth = token && env.GH_TOKEN === token;
+  const installation = cachedAuth ? cachedInstallationId : (id === 'app' ? env.WE_GITHUB_APP_INSTALLATION_ID : null);
+  const entry = {
+    ts: new Date().toISOString(), op: ['api', 'pr', 'issue', 'repo', 'auth', 'run', 'workflow'].includes(argv[0]) ? argv[0] : 'other',
+    attempt: 1, outcome: 'call', ok: !result.error && result.status === 0,
+    caller: clean(CALLER), id, inv: randomUUID(), resource: classifyGhResource(argv),
+    ...(env.WE_GH_THROTTLE_OUTER_INV ? { outer: clean(env.WE_GH_THROTTLE_OUTER_INV) } : {}),
+    transport: 'shim-fallback', fallbackReason, cost, costSource: cost === null ? 'unknown' : 'response', rl,
+    installationId: /^\\d+$/.test(String(installation || '')) ? String(installation) : null,
+    authSource: cachedAuth ? 'app-cache' : 'inherited',
+  };
+  try {
+    const home = env.HOME || homedir();
+    const expand = (p) => p.startsWith('~') ? join(home, p.slice(1)) : p;
+    const override = String(env.WE_GH_THROTTLE_LOCK_ROOT || '').trim();
+    const root = override ? resolve(expand(override))
+      : join(env.LANE_POOL_ROOT ? resolve(expand(env.LANE_POOL_ROOT)) : join(home, 'workspace', '.lanes'), '.admission', 'gh');
+    mkdirSync(root, { recursive: true });
+    appendFileSync(join(root, 'calls.jsonl'), JSON.stringify(entry) + '\\n', 'utf8');
+  } catch {
+    process.stderr.write('gh-shim: fallback ledger unavailable\\n');
+  }
+  return result;
 }
 // Does GH_THROTTLE_CLI's own module graph fail to load? Preloaded via \`--import\` in a fresh process with an
 // empty \`-e\` program — never run as the entry point, so its own \`import.meta.url === argv[1]\` guard keeps
@@ -368,7 +421,7 @@ const CALLER = deriveCaller(process.env);
 function runThrottled(argv, env) {
   if (!existsSync(GH_THROTTLE_CLI)) {
     warnFallback('throttle CLI not found at ' + GH_THROTTLE_CLI);
-    return runDirect(argv, env);
+    return runDirect(argv, env, 'missing-entry');
   }
   const result = spawnSync(process.execPath, [GH_THROTTLE_CLI, ...argv], {
     stdio: ['inherit', 'pipe', 'pipe'],
@@ -381,17 +434,19 @@ function runThrottled(argv, env) {
   // imports did) — same degrade.
   if (throttleCliMissing(result, env)) {
     warnFallback('throttle CLI at ' + GH_THROTTLE_CLI + ' failed to load (its checkout or one of its own imports is unavailable)');
-    return runDirect(argv, env);
+    return runDirect(argv, env, 'missing-import');
   }
   return result;
 }
 
+let cachedInstallationId = null;
 function freshCachedToken() {
   let cached;
   try { cached = JSON.parse(readFileSync(CACHE_PATH, 'utf8')); } catch { return null; }
   if (!cached || cached.v !== CACHE_VERSION || typeof cached.expiresAt !== 'string' || typeof cached.token !== 'string') return null;
   const expiresAtMs = Date.parse(cached.expiresAt);
   if (!Number.isFinite(expiresAtMs) || (expiresAtMs - REFRESH_BUFFER_MS) <= Date.now()) return null;
+  cachedInstallationId = cached.installationId ?? null;
   return cached.token;
 }
 

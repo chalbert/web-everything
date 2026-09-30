@@ -26,6 +26,7 @@
  * and is reused as-is by both run scripts.
  */
 
+import { machinePrTitle, boundedTitle } from '../operations/machine-pr-title.mjs';
 import { isTestPath } from './dispatch-task-type.mjs';
 import { DISPATCH_MACHINERY_PATHS, isStatuteTierPath, PROVEN_TASK_ENVELOPES } from './provider-routing.mjs';
 
@@ -168,9 +169,9 @@ export function buildDocFixTask({ num, title = '', spec, scope = [], taskType = 
  * one.
  * @param {{num: string|number, worker: object, taskType?: 'doc-fix'|'bugfix'}} o
  */
-export function buildDocFixCommitMessage({ num, worker, taskType = 'doc-fix' }) {
+export function buildDocFixCommitMessage({ num, worker, taskType = 'doc-fix', title }) {
   return [
-    `WE #${num}: ${taskType} build on probation (${worker.executor}/${worker.model})`,
+    machinePrTitle({ item: num, kind: taskType === 'prepare' ? 'prepare' : `${taskType}-build`, subject: title }),
     '',
     `Built by the ${worker.id} probation worker (agy-launcher-probation, #4291); the launcher claimed the item,`,
     'ran the gate, resolved it, and committed. Full review and a run rating are owed on this change.',
@@ -377,8 +378,8 @@ export function coAuthorTrailerForWorker(worker) {
  * trial record can tell a probation heal from a Claude one.
  * @param {{pr: number, reason: string, worker: object, item?: string|null}} o
  */
-export function buildHealCommitMessage({ pr, reason, worker, item = null }) {
-  const title = `${item ? `WE #${item}` : `PR #${pr}`}: CI-heal PR #${pr} on probation (${worker.executor}/${worker.model}, ${reason})`;
+export function buildHealCommitMessage({ pr, reason, worker, item = null, subject }) {
+  const title = boundedTitle(`${item ? `WE #${item}` : `PR #${pr}`}: ci-heal — `, subject || reason, ` (PR ${pr})`);
   return [
     title,
     '',

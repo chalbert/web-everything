@@ -122,13 +122,13 @@ describe('attribution', () => {
   });
   it('the commit message carries the worker, executor and model trailers', () => {
     const m = buildHealCommitMessage({ pr: 7, reason: 'behind', worker: agyClaude, item: '4001' });
-    expect(m.split('\n')[0]).toBe('WE #4001: CI-heal PR #7 on probation (antigravity/claude-sonnet-4-6, behind)');
+    expect(m.split('\n')[0]).toBe('WE #4001: ci-heal — behind (PR 7)');
     expect(m).toContain('Probation-Worker: antigravity-claude');
     expect(m).toContain('Executor: antigravity');
   });
   it('a doc-fix build commit message carries the same trailers, keyed to the item not a PR (#4291)', () => {
-    const m = buildDocFixCommitMessage({ num: 4291, worker: docFixCodex });
-    expect(m.split('\n')[0]).toBe('WE #4291: doc-fix build on probation (codex/gpt-6-astra)');
+    const m = buildDocFixCommitMessage({ num: 4291, worker: docFixCodex, title: 'Correct worker attribution' });
+    expect(m.split('\n')[0]).toBe('WE #4291: doc-fix-build — Correct worker attribution');
     expect(m).toContain('Probation-Worker: codex');
     expect(m).toContain('Executor: codex');
     expect(m).toContain('Co-Authored-By: Codex <noreply@openai.com>');

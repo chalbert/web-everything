@@ -13,8 +13,11 @@
  * feed (#095/#196/#197) and the human output are unchanged.
  */
 
+import { normalizeRelatedReport } from './lib/related-report.cjs';
+
 import { validateFidelityContract } from './lib/fidelity-contract.mjs';
 import { coversFile, isSubtreeEntry } from './readiness/scope-lease.mjs';
+import { GUARD_RELAXATION_HINT } from './backlog/scaffold.mjs';
 import { scrubPublish } from './lib/secret-scrub.mjs';
 // #3637 — the POC-branch registry's own `deliveryTarget:` predicate, so the gate and the scoped per-item
 // lint validate that field with the ONE function the dispatcher also uses (never a second copy of the rule).
@@ -414,7 +417,7 @@ export function validateBacklogItem(item, ctx) {
   if (item.relatedProject && !projectById.has(item.relatedProject))
     err(`Backlog item "${item.id}" relatedProject "${item.relatedProject}" does not resolve in projects.json`,
       dUnresolvedRef('Backlog', item.id, backlogFile, 'relatedProject', item.relatedProject, 'projects.json'));
-  if (item.relatedReport && !reportExists(item.relatedReport))
+  if (item.relatedReport && !reportExists(normalizeRelatedReport(item.relatedReport)))
     err(`Backlog item "${item.id}" relatedReport does not exist: ${item.relatedReport}`,
       dUnresolvedRef('Backlog', item.id, backlogFile, 'relatedReport', item.relatedReport, 'reports/'));
   if (item.crossRef && (!item.crossRef.url || !item.crossRef.label))
@@ -938,6 +941,34 @@ export function findUnquotedColonScalars(content) {
   return findings;
 }
 
+// ── Guard-relaxation gaps (#4409 — prevention guard from the #2892 independent review) ─────────────────
+// A card that loosens a refusal must say what happens on error (fail closed) and enumerate the non-code inputs
+// the loosening still treats cautiously. Prose heuristic → WARNING only. Scans only the card's top (before
+// `## Design` / `## Test plan` / `## Progress`), outside fenced code, with the scaffold hint line stripped.
+// Trigger: one sentence holding `refus*` AND a relaxing word. Returns `[{ kind, detail }]` ([] = no gaps).
+const GUARD_RELAX_REFUSE_RE = /\brefus\w*/i;
+const GUARD_RELAX_LOOSEN_RE = /\brelax\w*|\bloosen\w*|\btolerat\w*|\bskip\w* the (?:refusal|guard)\b/i;
+
+export function findGuardRelaxationGaps(body) {
+  const kept = [];
+  let inFence = false;
+  for (const line of String(body ?? '').split(/\r?\n/)) {
+    if (/^\s*```/.test(line)) { inFence = !inFence; continue; }
+    if (inFence) continue;
+    if (/^##\s+(?:design|test plan|progress)\b/i.test(line)) break;
+    if (line.trim() === GUARD_RELAXATION_HINT) continue;
+    kept.push(line);
+  }
+  const region = kept.join('\n');
+  const sentences = region.split(/\n\s*\n|\n(?=\s*(?:[-*]|\d+\.)\s|#)|(?<=[.!?])\s+/);
+  const triggered = sentences.some((t) => GUARD_RELAX_REFUSE_RE.test(t) && GUARD_RELAX_LOOSEN_RE.test(t));
+  if (!triggered) return [];
+  const gaps = [];
+  if (!/fail[- ]closed/i.test(region)) gaps.push({ kind: 'missing-fail-closed', detail: 'fail-closed' });
+  if (!/non[- ]code/i.test(region)) gaps.push({ kind: 'missing-non-code', detail: 'non-code' });
+  return gaps;
+}
+
 // ── Test-plan gaps (#4332 — prevention guards 2 + 3 from the #2833 independent review) ──────────────────
 // Two deterministic checks over a card's `## Test plan` section. (1) Classification: every case bullet says
 // whether it is a CAPABILITY case (fails on the base) or a PRESERVATION case (passes on both), and a
@@ -1077,6 +1108,16 @@ export function lintBacklogItemRendering({ item, body, pocRegistry = null }) {
           : `case "${g.detail}" is neither a capability (Red today) nor a preservation (GREEN today) case`).join('; ');
       warnings.push(`Backlog item "${id}" has Test-plan gaps — ${detail}. Classify each case as capability (fails on the base) ` +
         `or preservation (passes on both, naming its mutation proof), and give every design condition a case.`);
+    }
+  }
+
+  // Guard-relaxation gaps (#4409) — WARNING only, open/active cards.
+  if (item.status !== 'resolved') {
+    const relaxGaps = findGuardRelaxationGaps(body);
+    if (relaxGaps.length) {
+      warnings.push(`Backlog item "${id}" relaxes a refusal but its Must/digest text lacks ` +
+        `${relaxGaps.map((g) => `"${g.detail}"`).join(' and ')} — add a Must line for what happens on error ` +
+        `(fail closed) and one enumerating the non-code inputs (docs, config, data) the loosening must still treat cautiously.`);
     }
   }
 

@@ -13,6 +13,7 @@
  *
  * IMPURE by construction: `child_process`.
  */
+import { readMainCard, assertMachineTitle } from './machine-pr-title.mjs';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -41,7 +42,7 @@ export function createPrLandRunner({ spawn = spawnSync, cwd = process.cwd(),
       try {
         const sha = verifyPreparePr({ item, source: arg('sha') || 'HEAD', base: arg('base') || 'main', git });
         argv = argv.filter((a) => !a.startsWith('--title=') && !a.startsWith('--sha='));
-        argv.push(`--title=${preparePrTitle(item)}`, `--sha=${sha}`);
+        argv.push(`--title=${assertMachineTitle(preparePrTitle(item, readMainCard(item, git)))}`, `--sha=${sha}`);
       } catch (e) {
         return { outcome: 'refused', reason: String(e.message || e) };
       }

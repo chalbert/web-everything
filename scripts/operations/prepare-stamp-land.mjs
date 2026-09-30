@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 /** Daemon-owned prepare completion. All mutations run in an acquired lane through the normal PR producer. */
+import { machinePrTitle } from './machine-pr-title.mjs';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -46,7 +47,7 @@ export async function landPrepareStamp({ num }, {
     run('node', [join(cwd, 'scripts/backlog.mjs'), 'prepare-stamp', String(num)], cwd);
     if (!prepareCardStatus(read(join(cwd, path), 'utf8')).preparedDate) throw new Error('prepare-stamp did not stamp card');
     run('git', ['add', '--', path], cwd);
-    run('git', ['commit', '-m', `WE #${num}: complete prepare stamp`, '--', path], cwd);
+    run('git', ['commit', '-m', machinePrTitle({ item: num, kind: 'prepare-stamp', card: { title: /^#\s+(.+)$/m.exec(before)?.[1] } }), '--', path], cwd);
     if (!prepareCardStatus(run('git', ['show', `HEAD:${path}`], cwd)).preparedDate) throw new Error('stamp absent from HEAD');
     run('node', [join(cwd, 'scripts/operations/run.mjs'), 'verify', `--checkout=${cwd}`], cwd, { timeoutMs: 30 * 60_000 });
     const bodyFile = join(cwd, '.git', 'prepare-stamp-body.md');

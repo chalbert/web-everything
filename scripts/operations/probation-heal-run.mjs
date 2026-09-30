@@ -191,7 +191,7 @@ export async function runProbationHeal(args, io) {
       io.escalate({ pr, head: examinedHead, reason: `git-hook surface changed during the gate/checker window: ${detail}` });
       return finish('escalated-needs-human', executor, `refused: ${detail}`, { diff: diffRow, checker: checkerRow });
     }
-    io.commit(lanePath, summary.paths, buildHealCommitMessage({ pr, reason, worker, item: args.num }));
+    io.commit(lanePath, summary.paths, buildHealCommitMessage({ pr, reason, worker, item: args.num, subject: `${reason}: repair ${summary.paths.join(', ')}` }));
   } else if (!gate.pass || !rebaseMovedHead) {
     return finish('no-change', 'none', need.why);
   }
