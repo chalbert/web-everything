@@ -247,7 +247,7 @@ export function buildNeglectFindingBody({ pr, headRefName, holdLabel, parkedHour
 export function defaultListParkedPrs({ exec = execFileSyncThrottled, repo = null } = {}) {
   // #gh-graphql-budget — read the host-shared open-PR snapshot (one right-sized list per repo per TTL for the
   // whole fleet) instead of a private `gh pr list`; null = not applicable (tests, cwd repo) → the direct read below.
-  if (exec === execFileSyncThrottled) { const shared = readSharedOpenPrs({ repo, fields: 'number,headRefName,labels' }); if (shared) return shared; }
+  if (exec === execFileSyncThrottled) { const shared = readSharedOpenPrs({ repo, fields: 'number,headRefName,labels', allowDeferred: true }); if (shared) return shared; }
   const argv = ['pr', 'list', '--state', 'open', '--limit', String(PR_LIST_LIMIT),
     '--json', 'number,headRefName,labels'];
   if (repo) argv.push('--repo', repo);

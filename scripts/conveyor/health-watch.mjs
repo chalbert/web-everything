@@ -495,7 +495,8 @@ export function probePrs({ exec = run } = {}) {
     // stand-down markers. Both are already in the shared snapshot's field set, so the snapshot path costs nothing extra.
     const fields = 'number,title,headRefName,labels,statusCheckRollup,updatedAt,isDraft,mergeable,comments';
     const shared = exec === run ? readSharedOpenPrs({ repo: slug, fields }) : null;
-    const rows = shared || JSON.parse(exec('gh', ['pr', 'list', '--repo', slug, '--state', 'open', '--limit', '100', '--json', fields]));
+    const listed = shared || JSON.parse(exec('gh', ['pr', 'list', '--repo', slug, '--state', 'open', '--limit', '100', '--json', fields]));
+    const rows = Array.isArray(listed) ? listed : []; // a throttle deferral object = skip this repo's PR smells this pass
     for (const pr of rows) {
       out.push({
         repo: slug, number: pr.number, title: pr.title, headRefName: pr.headRefName, updatedAt: pr.updatedAt,

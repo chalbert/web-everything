@@ -210,6 +210,12 @@ describe('the pass readers are wired to the snapshot (a seeded fresh snapshot is
 
 it('preserves a non-error admission deferral without caching an empty snapshot', () => {
   const deferred = { outcome: 'deferred-low-budget', deferred: true, priority: 'background' };
-  expect(readSharedOpenPrs(opts({ fields: 'number', exec: () => JSON.stringify(deferred) }))).toEqual(deferred);
+  expect(readSharedOpenPrs(opts({ fields: 'number', exec: () => JSON.stringify(deferred), allowDeferred: true }))).toEqual(deferred);
+  expect(existsSync(snapshotPath(dir, REPO))).toBe(false);
+});
+
+it('returns null (the Array|null contract) on a deferral unless the caller opts in', () => {
+  const deferred = { outcome: 'deferred-low-budget', deferred: true, priority: 'normal' };
+  expect(readSharedOpenPrs(opts({ fields: 'number', exec: () => JSON.stringify(deferred) }))).toBe(null);
   expect(existsSync(snapshotPath(dir, REPO))).toBe(false);
 });

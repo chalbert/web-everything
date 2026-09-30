@@ -57,6 +57,26 @@ describe('priority admission', () => {
   }));
 });
 
+it.each([
+  ['pr comment', ['pr', 'comment', '1', '--body', 'x']],
+  ['pr edit', ['pr', 'edit', '1', '--add-label', 'x']],
+  ['pr merge', ['pr', 'merge', '1']],
+  ['pr view (non-list read)', ['pr', 'view', '1', '--json', 'mergeable']],
+])('never defers %s below the normal threshold — it still executes', (_n, args) => fixture(5, throttle => {
+  const result = runGhSync(args, { encoding: 'utf8', throttle: { ...throttle, caller: 'someone-else' } });
+  expect(isGhDeferred(result)).toBe(false);
+  expect(throttle.exec).toHaveBeenCalledTimes(1);
+  const cli = runGhCliPassthrough(args, { throttle: { ...throttle, caller: 'someone-else' }, spawn: vi.fn(() => ({ status: 0, stdout: Buffer.from(''), stderr: Buffer.from('') })) });
+  expect(cli.deferred).toBeUndefined();
+}));
+it('defers a discovery list without an options object instead of crashing', () => fixture(5, throttle => {
+  const result = runGhSync(['pr', 'list'], { throttle: { ...throttle, caller: 'someone-else' } });
+  expect(isGhDeferred(result)).toBe(true);
+}));
+it('isGhDeferred ignores large non-deferral payloads without parsing them', () => {
+  expect(isGhDeferred(JSON.stringify(Array.from({ length: 5000 }, (_, i) => ({ number: i }))))).toBe(false);
+  expect(isGhDeferred('not json deferred-low-budget')).toBe(false);
+});
 
 it('does not let an out-of-order response replenish the same budget window', () => fixture(20, throttle => {
   recordGhHeadroom(throttle.lockRoot, 'default', [{ res: 'graphql', rem: 900, limit: 1000, reset: (now + 60000) / 1000 }]);

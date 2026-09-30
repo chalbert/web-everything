@@ -529,6 +529,10 @@ export function recordGhHeadroom(lockRoot, identity, records) {
 export function ghPriorityAdmission({ lockRoot, identity, resource, caller, args, nowMs = Date.now() }) {
   const priority = ghCallerPriority(caller, args);
   if (resource !== 'graphql' || priority === 'critical') return null;
+  // Only READ-ONLY discovery lists (or a whole-pass boundary, empty args) may be skipped: a deferred mutation would
+  // read as a completed write, and a deferred `pr view`-style read would hand a gate an object missing its fields.
+  const a = Array.isArray(args) ? args : [];
+  if (a.length && !((a[0] === 'pr' || a[0] === 'issue') && a[1] === 'list')) return null;
   let budget;
   try { budget = JSON.parse(readFileSync(headroomPath(lockRoot, identity), 'utf8')); } catch { return null; }
   if (!(budget.reset * 1000 > nowMs) || !(budget.limit > 0) || !Number.isFinite(budget.rem) || budget.rem < 0) return null;
@@ -1413,7 +1417,7 @@ export function runGhSync(args, opts = {}) {
   const resource = classifyGhResource(args);
   const identity = ghAuthIdentity((execOpts && execOpts.env) || env);
   const deferred = deferGhCall({ lockRoot, identity, resource, caller, args, nowMs: now(), logPath, op: opLabel }, throttle.warn);
-  if (deferred) return execOpts.encoding ? JSON.stringify(deferred) : Buffer.from(JSON.stringify(deferred));
+  if (deferred) return execOpts?.encoding ? JSON.stringify(deferred) : Buffer.from(JSON.stringify(deferred));
   const blocked = readBudgetBlock(lockRoot, identity, resource, now());
   if (blocked) {
     recordGhCallLogEntry(logPath, { op: opLabel, attempt: 0, points: 0, outcome: 'budget_blocked', resource, caller, w: isWrite });
@@ -1443,7 +1447,7 @@ export function runGhSync(args, opts = {}) {
     let failure = null;
     try {
       const deferred = deferGhCall({ lockRoot, identity, resource, caller, args, nowMs: now(), logPath, op: opLabel }, throttle.warn);
-      if (deferred) return execOpts.encoding ? JSON.stringify(deferred) : Buffer.from(JSON.stringify(deferred));
+      if (deferred) return execOpts?.encoding ? JSON.stringify(deferred) : Buffer.from(JSON.stringify(deferred));
       // `GH_DEBUG=api` is added ONLY when this call opted into header calibration, and ONLY if the caller
       // did not already ask for a specific debug mode of its own — never silently overridden. It changes
       // nothing about a SUCCESSFUL call's stdout (see the module header). The #4375 capture, when on, lives

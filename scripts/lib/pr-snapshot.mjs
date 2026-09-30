@@ -116,12 +116,14 @@ function logHit(env, caller, repo) {
 /**
  * The shared open-PR read. Returns the projected PR array, or `null` when not applicable (see the file header).
  * @param {{repo:string|null, fields:string|string[], env?:NodeJS.ProcessEnv, nowMs?:number, exec?:Function,
- *   dir?:string, ttlMs?:number, caller?:string, lockWaitMs?:number}} o
+ *   dir?:string, ttlMs?:number, caller?:string, lockWaitMs?:number, allowDeferred?:boolean}} o
+ *   `allowDeferred`: opt in to receiving the truthy `{outcome:'deferred-low-budget'}` object (the caller MUST
+ *   check `isGhDeferred`); by default a deferral returns `null`, keeping the `Array|null` contract for every reader.
  * @returns {Array<object>|null}
  */
 export function readSharedOpenPrs({
   repo, fields, env = process.env, now = () => Date.now(), exec = execFileSyncThrottled,
-  dir = null, ttlMs = null, caller = null, lockWaitMs = LOCK_WAIT_MS,
+  dir = null, ttlMs = null, caller = null, lockWaitMs = LOCK_WAIT_MS, allowDeferred = false,
 } = {}) {
   if (!prSnapshotEnabled(env) && !dir) return null;
   if (!snapshotKey(repo)) return null;
@@ -156,7 +158,7 @@ export function readSharedOpenPrs({
     if (/withFileLock: timed out/.test(String(e?.message))) return null; // a stuck refresher → caller's direct read
     throw e;
   }
-  if (result.deferred) return result.deferred;
+  if (result.deferred) return allowDeferred ? result.deferred : null;
   if (!result.fetched) logHit(env, who, repo);
   return projectPrs(result.snap.prs, want);
 }
