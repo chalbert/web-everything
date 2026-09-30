@@ -2,9 +2,10 @@
 bornAs: x950qv1
 kind: story
 size: 1
-status: open
+status: active
 scope: ["we:scripts/operations/land-prevention-card.mjs", "we:scripts/operations/__tests__/land-prevention-card.test.mjs"]
 dateOpened: "2026-09-29"
+dateStarted: "2026-09-30"
 preparedDate: "2026-09-30"
 preparedAgainstSha: "c30c1b7399ebf54666a676354fea07810cb1f1a6"
 tags: []
