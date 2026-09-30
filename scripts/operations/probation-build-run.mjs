@@ -72,10 +72,10 @@ import { randomBytes } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { summarizeAgyEvents } from '../gemini-direct-task.mjs';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, extname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import matter from 'gray-matter';
-import { readField } from '../backlog/frontmatter.mjs';
+import { readField, removeFrontmatterField } from '../backlog/frontmatter.mjs';
 import { parseCard } from '../lib/priority-order.mjs';
 import { appendScorecard as appendScorecardRow } from '../conveyor/run-scorecard-store.mjs';
 import { CONSTELLATION_REPOS, DEFAULT_REPO_KEY } from '../lib/constellation-repos.mjs';
@@ -135,7 +135,7 @@ function declaredScopePaths(scope) {
  * Does `path` fall inside `scopeEntries` (from {@link declaredScopePaths})? PURE. #4291 plan-review finding
  * (correctness, round 9) — a scope entry ending in `/` is a DIRECTORY prefix (every path under it counts,
  * mirroring `we:scripts/lib/dispatch-task-type.mjs#isDocScopePath`'s own `DOC_PATH_PREFIXES` convention); any
- * other entry is an exact file path. Without this, an item scoped to a directory (a legitimate, ordinary
+ * other entry is an exact file path, except for narrow sibling test globs. Without this, an item scoped to a directory (a legitimate, ordinary
  * `scope:` shape) would have EVERY file the worker touches rejected as "out of scope" — after the worker
  * already spent its full synchronous run finding that out.
  * @param {string} path
@@ -143,7 +143,45 @@ function declaredScopePaths(scope) {
  * @returns {boolean}
  */
 function pathInScope(path, scopeEntries) {
-  return scopeEntries.some((entry) => (entry.endsWith('/') ? path.startsWith(entry) : path === entry));
+  return scopeEntries.some((entry) => {
+    // Only the prepare-owned test glob is supported; '*' never spans a directory.
+    const pattern = /^((?:.*\/)?__tests__\/[^/*]+)\*(\.test\.[cm]?[jt]sx?)$/.exec(entry);
+    if (pattern) return dirname(path) === dirname(entry) && path.startsWith(pattern[1]) && path.endsWith(pattern[2]);
+    return entry.endsWith('/') ? path.startsWith(entry) : path === entry;
+  });
+}
+
+/** Exact source entries own sibling __tests__ files, never arbitrary helpers or subdirectories. */
+function sourceTestPattern(source) {
+  if (!/\.[cm]?[jt]sx?$/.test(source) || /(?:\.test\.|\.spec\.|\*|(?:^|\/)__tests__\/)/.test(source)) return null;
+  const extension = extname(source);
+  return join(dirname(source), '__tests__', `${basename(source, extension)}*.test${extension}`);
+}
+
+function ownedTest(path, entries) {
+  return entries.some(source => {
+    return sourceTestPattern(source) && dirname(path) === join(dirname(source), '__tests__')
+      && basename(path).startsWith(basename(source, extname(source)))
+      && /\.test\.[cm]?[jt]sx?$/.test(path);
+  });
+}
+
+function prepareScopeValid(before, after) {
+  const original = parseYamlFrontmatter(before).scope ?? [];
+  const revised = parseYamlFrontmatter(after).scope ?? [];
+  return Array.isArray(original) && Array.isArray(revised)
+    && original.every(p => revised.includes(p))
+    && revised.every(p => original.includes(p) || (typeof p === 'string' && p.startsWith('we:')
+      && ownedTest(p.slice(3), declaredScopePaths(original))));
+}
+
+function missingTestScope(raw) {
+  const entries = declaredScopePaths(parseYamlFrontmatter(raw).scope);
+  return entries.flatMap(source => {
+    const pattern = sourceTestPattern(source);
+    return pattern && !entries.some(entry => entry !== source && ownedTest(entry, [source]))
+      ? [`we:${pattern}`] : [];
+  });
 }
 
 /** gray-matter's executable engines, each replaced by one that refuses. */
@@ -219,8 +257,9 @@ export async function runProbationBuild(args, io) {
   if (preparing && !['codex', 'antigravity-gemini'].includes(worker.id)) throw new Error('prepare requires codex or antigravity-gemini');
   const log = (m) => io.log(`probation-build-run #${num} [${worker.id}]: ${m}`);
   let declinedReason = null;
+  let couldNotPrepare = false;
   const finish = (outcome, executor, detail, row = {}) => {
-    const evidence = preparing && outcome !== 'opened-pr' ? {
+    const evidence = preparing && !['opened-pr', 'could-not-prepare'].includes(outcome) ? {
       error: detail, sessionAbsent: !workerRan,
       resultAuthored: Boolean(row.diff?.files), resultDiscarded: Boolean(row.resultDiscarded),
     } : null;
@@ -353,7 +392,11 @@ export async function runProbationBuild(args, io) {
     const excludeFromDiff = preparing ? [] : [...preexisting, item.path];
 
     const task = preparing ? io.readPrepareBrief(lanePath)
-      .replaceAll('{{ITEM_NUM}}', String(num)).replaceAll('{{ITEM_SPEC_PATH}}', item.path) : buildDocFixTask({ num, title: item.title, spec: item.spec, scope: item.scope, taskType }) +
+      .replaceAll('{{ITEM_NUM}}', String(num)).replaceAll('{{ITEM_SPEC_PATH}}', item.path)
+      .replace("Only edit that card's body and preparedDate/preparedAgainstSha; preserve all other frontmatter.",
+        'Only edit the card body, preparation stamps, and additive matching test scope entries; preserve all other frontmatter.') +
+      '\nThis matching-test addition is the sole permitted exception to the brief’s scope-preservation rule. Test scope is required before stamping: retain every existing scope entry and add the existing or planned matching test files (or the following narrow patterns). No unrelated scope changes are allowed.\n' +
+      declaredScopePaths(item.scope).map(sourceTestPattern).filter(Boolean).map(p => `we:${p}`).join('\n') : buildDocFixTask({ num, title: item.title, spec: item.spec, scope: item.scope, taskType }) +
       '\nIf the work already exists, check every Done-when against main and find the delivering commit in git log. ' +
       'When all checks pass, report "spec already done on main: commit <sha>" with the actual delivering SHA.\n';
     let taskFile = io.writeTaskFile(lanePath, 'probation-build-task.md', task);
@@ -394,8 +437,18 @@ export async function runProbationBuild(args, io) {
       // worker, so a worker forging `status:`/`dateStarted:` is tamper too.
       // Check the excluded card even on a no-change run.
       const postWorkerItem = io.findItem(num, lanePath);
-      if (preparing ? frontmatterTamperedBeyondClaim(item.raw, postWorkerItem?.raw, ['preparedDate', 'preparedAgainstSha']) : (postWorkerItem?.spec !== item.spec || postWorkerItem?.raw !== afterClaim?.raw)) {
+      if (preparing ? (frontmatterTamperedBeyondClaim(item.raw, postWorkerItem?.raw, ['preparedDate', 'preparedAgainstSha', 'scope']) || !prepareScopeValid(item.raw, postWorkerItem.raw)) : (postWorkerItem?.spec !== item.spec || postWorkerItem?.raw !== afterClaim?.raw)) {
         return abandon('escalated-needs-human', "not built: the worker edited the item's own backlog card — refusing", { diff: diffRow });
+      }
+      if (preparing && !summary.files && /\bcould-not-prepare\s*:/i.test(run.lastMessage ?? '')) {
+        if (io.headSha(lanePath) !== baseSha) return abandon('escalated-needs-human', 'refused: worker moved HEAD before prepare finding', { diff: diffRow });
+        couldNotPrepare = true;
+        declinedReason = sanitizeHoldReason(run.lastMessage, { max: 1200 });
+        const [route] = planHoldRouting([{ num, reason: `worker-declined: ${declinedReason}` }]);
+        io.holdWorkerDecline(route);
+        const unstamped = removeFrontmatterField(removeFrontmatterField(item.raw, 'preparedDate'), 'preparedAgainstSha');
+        io.writeCard(lanePath, item.path, clearScopeAndAppendFinding(unstamped, route));
+        break;
       }
       if (preparing && (!summary.files || summary.paths.some(p => p !== item.path))) {
         return abandon('gate-red', `prepare requires a card-only diff; worker report: ${sanitizeHoldReason(run.lastMessage, { max: 1200 }) || 'no final message'}`, { diff: diffRow });
@@ -437,7 +490,10 @@ export async function runProbationBuild(args, io) {
         // itself names.
         // An empty `--scope` is a whole-clone lease (lane-pool's own meaning), not deny-all — the card alone bounds it.
         // Gated on the RAW `--scope`: a lease naming only other repos' paths filters to `[]` but is still a lease.
-        const outOfScopePaths = summary.paths.filter((p) => !pathInScope(p, scopeEntries) || ((args.scope ?? []).length > 0 && !pathInScope(p, leasedEntries)));
+        const added = new Set(io.addedPaths?.(lanePath, baseSha) ?? []);
+        const allowed = (p, entries) => pathInScope(p, entries)
+          || (['bugfix', 'test-fix'].includes(taskType) && added.has(p) && !preexisting.includes(p) && ownedTest(p, entries));
+        const outOfScopePaths = summary.paths.filter((p) => !allowed(p, scopeEntries) || ((args.scope ?? []).length > 0 && !allowed(p, leasedEntries)));
         if (outOfScopePaths.length) {
           return abandon('gate-red', `not built: touched path(s) outside the item's own declared scope — a probation worker may edit only what the item names: ${outOfScopePaths.join(', ')}`, { diff: diffRow });
         }
@@ -481,7 +537,9 @@ export async function runProbationBuild(args, io) {
         }
 
         const resolved = preparing
-          ? (prepareCardStatus(postWorkerItem?.raw).hasSections
+          ? (missingTestScope(postWorkerItem.raw).length
+            ? { ok: false, out: `Missing test scope: ${missingTestScope(postWorkerItem.raw).join(', ')}` }
+            : prepareCardStatus(postWorkerItem?.raw).hasSections
             ? io.stampPrepare(num, lanePath)
             : { ok: false, out: 'Missing nonempty Design, MVP, Test plan, or Proof plan sections.' })
           : io.resolveItem(num, lanePath);
@@ -497,11 +555,11 @@ export async function runProbationBuild(args, io) {
       break;
     }
 
-    if (preparing) {
+    if (preparing && !couldNotPrepare) {
       const stamped = io.findItem(num, lanePath);
       const fm = parseYamlFrontmatter(stamped?.raw ?? '');
       if (!/^\d{4}-\d{2}-\d{2}$/.test(String(fm.preparedDate ?? '')) || fm.preparedAgainstSha !== baseSha) return abandon('gate-red', 'prepare-unstamped', { diff: diffRow });
-      if (frontmatterTamperedBeyondClaim(item.raw, stamped.raw, ['preparedDate', 'preparedAgainstSha'])
+      if (frontmatterTamperedBeyondClaim(item.raw, stamped.raw, ['preparedDate', 'preparedAgainstSha', 'scope']) || !prepareScopeValid(item.raw, stamped.raw)
         || summarizeNumstat(io.diffNumstat(lanePath, baseSha, [])).paths.some(p => p !== item.path)) {
         return abandon('gate-red', 'prepare changed fields or files outside its envelope', { diff: diffRow });
       }
@@ -529,7 +587,7 @@ export async function runProbationBuild(args, io) {
     const gate = io.runGate(lanePath);
     if (!gate.pass) return abandon('gate-red', `the gate is red after the build and the resolve: ${gate.failureDetail ?? gateFailureDetail(gate.output)}`, { diff: diffRow });
 
-    if (preparing) {
+    if (preparing && !couldNotPrepare) {
       const committed = parseYamlFrontmatter(io.readCommittedCard(lanePath, item.path));
       if (!committed.preparedDate || committed.preparedAgainstSha !== baseSha) {
         return abandon('gate-red', 'prepare-unstamped at HEAD', { diff: diffRow });
@@ -552,7 +610,7 @@ export async function runProbationBuild(args, io) {
         // being lost.
         return finish(submitted.blockedOnInfra ? 'blocked-on-infra' : 'escalated-needs-human', worker.executor, submitted.reason, { diff: diffRow });
       }
-      return finish('opened-pr', worker.executor, `opened PR #${submitted.pr}, parked review:pending — full review and a run rating are owed`, { diff: diffRow, pr: submitted.pr });
+      return finish(couldNotPrepare ? 'could-not-prepare' : 'opened-pr', worker.executor, `opened PR #${submitted.pr}, parked review:pending — full review and a run rating are owed`, { diff: diffRow, pr: submitted.pr });
     } catch (e) {
       return finish('escalated-needs-human', worker.executor, `unexpected error opening the PR (the build is committed, gate-green, in the lane): ${e?.message ?? e}`, { diff: diffRow });
     }
@@ -741,6 +799,7 @@ export function realIo({ session, env = process.env, repoRoot = WE_ROOT } = {}) 
       if (!r.ok) return '';
       try { return JSON.parse(r.out).lastMessage ?? ''; } catch { return ''; }
     },
+    addedPaths: (dir, base) => sh('git', ['-C', dir, 'diff', '--no-renames', '--diff-filter=A', '--name-only', base], { cwd: dir, env: laneEnv }).split('\n').filter(Boolean),
     diffText: (dir, base) => sh('git', ['-C', dir, 'diff', '--no-renames', base], { cwd: dir, env: laneEnv }),
     untracked: (dir) => sh('git', ['-C', dir, 'ls-files', '--others', '--exclude-standard'], { cwd: dir, env: laneEnv }).split('\n').filter(Boolean),
     diffNumstat: (dir, base, exclude = []) => {

@@ -809,6 +809,51 @@ describe('standalone prepare', () => {
     return fake;
   }
   const prepareArgs = () => args(codex, { taskType: 'prepare', scope: `we:${path}` });
+  it('replays #4397: records could-not-prepare without stamping or resolving', async () => {
+    const lastMessage = 'could-not-prepare: premise is stale; we:scripts/lib/lane-salvage.mjs uses copyLitterTreeSync/copyFileSync; FIFO timed out.';
+    const { io, calls } = prepareIo({ numstat: '', postWorkerRaw: ITEM_RAW, lastMessage });
+    const settled = [];
+    io.settlePrepare = entry => settled.push(entry);
+    const result = await runProbationBuild({ ...prepareArgs(), runId: 'builder', effectKey: 'prepare#1' }, io);
+    expect(result).toMatchObject({ outcome: 'could-not-prepare', pr: 9001 });
+    expect(result).not.toHaveProperty('cause');
+    expect(settled).toEqual([{ runId: 'builder', key: 'prepare#1', status: 'failed', result }]);
+    expect(calls.find(c => c[0] === 'card')?.at(-1)).toContain(lastMessage);
+    expect(calls.some(c => ['stamp', 'resolve', 'discard'].includes(c[0]))).toBe(false);
+    expect(calls.find(c => c[0] === 'commit')[1]).toEqual([path]);
+    expect(calls.some(c => c[0] === 'gate')).toBe(true);
+  });
+  it('requires declared test scope before stamping source preparation', async () => {
+    const raw = prepared.replace('we:backlog-docs/probation.md', 'we:scripts/merge-ai-prs.mjs');
+    const { io, calls } = prepareIo({ item: { path, raw, spec: raw, scope: ['we:scripts/merge-ai-prs.mjs'] }, postWorkerRaw: raw });
+    const tasks = [];
+    io.writeTaskFile = (_dir, _name, text) => { tasks.push(text); return '/tmp/task.md'; };
+    const result = await runProbationBuild(prepareArgs(), io);
+    expect(result.detail).toContain('test scope');
+    expect(calls.some(c => c[0] === 'stamp')).toBe(false);
+    expect(tasks[0]).toContain('we:scripts/__tests__/merge-ai-prs*.test.mjs');
+  });
+  it.each([
+    ['we:scripts/__tests__/merge-ai-prs*.test.mjs', true],
+    ['we:scripts/__tests__/merge-ai-prs-regression.test.mjs', true],
+    ['we:scripts/__tests__/unrelated.test.mjs', false],
+    ['frontierui:scripts/__tests__/merge-ai-prs.test.mjs', false],
+  ])('permits only matching additive prepare scope: %s', async (testScope, accepted) => {
+    const raw = prepared.replace('we:backlog-docs/probation.md', 'we:scripts/merge-ai-prs.mjs');
+    const revised = raw.replace('"we:scripts/merge-ai-prs.mjs"]', `"we:scripts/merge-ai-prs.mjs", "${testScope}"]`);
+    const { io, calls } = prepareIo({ item: { path, raw, spec: raw, scope: ['we:scripts/merge-ai-prs.mjs'] }, postWorkerRaw: revised });
+    expect((await runProbationBuild(prepareArgs(), io)).outcome).toBe(accepted ? 'opened-pr' : 'escalated-needs-human');
+    expect(calls.some(c => c[0] === 'stamp')).toBe(accepted);
+  });
+  it.each([
+    { lastMessage: 'No final answer', numstat: '', postWorkerRaw: ITEM_RAW },
+    { lastMessage: 'could-not-prepare: stale', numstat: '1\t0\tscripts/other.mjs', postWorkerRaw: ITEM_RAW },
+    { lastMessage: 'could-not-prepare: stale', numstat: '', postWorkerRaw: ITEM_RAW, runWorkerOk: false },
+  ])('does not misclassify an invalid prepare as a recorded finding', async options => {
+    const { io, calls } = prepareIo(options);
+    expect((await runProbationBuild(prepareArgs(), io)).outcome).not.toBe('could-not-prepare');
+    expect(calls.some(c => ['card', 'commit', 'openPr'].includes(c[0]))).toBe(false);
+  });
   it('replays #4325: feeds the rejected stamp diagnostic back before committing the repaired card', async () => {
     const { io, calls } = prepareIo();
     const stamp = io.stampPrepare;
@@ -960,4 +1005,88 @@ describe('Findings publication regressions', () => {
     expect(result.detail).toContain(failureDetail);
     expect(gateFailureDetail(' FAIL scripts/example.test.mjs > case\nAssertionError: nope')).toContain('vitest: FAIL');
   });
+});
+
+
+describe('owned new test scope (#4650)', () => {
+  const source = 'scripts/merge-ai-prs.mjs';
+  const test = 'scripts/__tests__/merge-ai-prs-merge-failure-isolation.test.mjs';
+  it.each([
+    [test, true, true],
+    ['scripts/__tests__/merge-ai-prs-regression.test.ts', true, true],
+    [test, false, false],
+    ['scripts/__tests__/unrelated.test.mjs', true, false],
+    ['other/__tests__/merge-ai-prs.test.mjs', true, false],
+    ['scripts/__tests__/merge-ai-prs-helper.mjs', true, false],
+    ['scripts/unrelated.mjs', true, false],
+  ])('replays #4389: %s new=%s accepted=%s', async (path, added, accepted) => {
+    const { io, calls } = fakeIo({ itemScope: [`we:${source}`], numstat: `1\t1\t${source}\n10\t0\t${path}` });
+    io.addedPaths = () => added ? [path] : [];
+    const result = await runProbationBuild(args(codex, { taskType: 'bugfix', scope: `we:${source}` }), io);
+    expect(result.outcome).toBe(accepted ? 'opened-pr' : 'gate-red');
+    expect(calls.some(c => c[0] === 'resolve')).toBe(accepted);
+  });
+  it('admits an owned new test in test-fix mode without admitting production edits', async () => {
+    const { io } = fakeIo({ itemScope: [`we:${source}`], numstat: `10\t0\t${test}` });
+    io.addedPaths = () => [test];
+    expect((await runProbationBuild(args(codex, { taskType: 'test-fix', scope: `we:${source}` }), io)).outcome).toBe('opened-pr');
+  });
+  it('does not widen a lease that excludes the owning source', async () => {
+    const { io } = fakeIo({ itemScope: [`we:${source}`], numstat: `10\t0\t${test}` });
+    io.addedPaths = () => [test];
+    expect((await runProbationBuild(args(codex, { taskType: 'bugfix', scope: 'we:scripts/other.mjs' }), io)).outcome).toBe('gate-red');
+  });
+});
+
+
+it('observes NEW tests through real Git numstat including staged and untracked additions', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'owned-test-git-'));
+  try {
+    execFileSync('git', ['clone', '--shared', '--quiet', resolve('.'), dir]);
+    const io = realIo();
+    const existing = 'scripts/operations/probation-build-run.mjs';
+    const fresh = 'scripts/operations/__tests__/probation-build-run-new-regression.test.mjs';
+    writeFileSync(join(dir, existing), readFileSync(join(dir, existing), 'utf8') + '\n// changed\n');
+    writeFileSync(join(dir, fresh), '// regression\n');
+    expect(io.diffNumstat(dir, 'HEAD')).toContain(fresh);
+    expect(io.addedPaths(dir, 'HEAD')).toEqual([fresh]);
+    execFileSync('git', ['add', '--', fresh], { cwd: dir });
+    expect(io.addedPaths(dir, 'HEAD')).toEqual([fresh]);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+it.each(['4397', '4389'])('replays incident #%s using its checkout card and real Git/file IO', async num => {
+  const dir = mkdtempSync(join(tmpdir(), `probation-${num}-replay-`));
+  try {
+    execFileSync('git', ['clone', '--shared', '--quiet', resolve('.'), dir]);
+    const real = realIo();
+    const item = real.findItem(num, dir);
+    const { io, calls } = fakeIo({ lane: dir, item });
+    for (const key of ['findItem', 'headSha', 'untracked', 'diffNumstat', 'addedPaths', 'writeCard']) io[key] = real[key];
+    const source = 'scripts/merge-ai-prs.mjs';
+    const test = 'scripts/__tests__/merge-ai-prs-merge-failure-isolation.test.mjs';
+    io.runWorker = () => {
+      if (num === '4389') {
+        writeFileSync(join(dir, source), readFileSync(join(dir, source), 'utf8') + '\n// replay worker diff\n');
+        writeFileSync(join(dir, test), '// replay regression addition\n');
+      }
+      return { ok: true, lastMessage: num === '4397'
+        ? 'could-not-prepare: premise stale; we:scripts/lib/lane-salvage.mjs uses copyLitterTreeSync/copyFileSync; real FIFO probe timed out.' : 'Built with regression test.' };
+    };
+    io.readPrepareBrief = real.readPrepareBrief;
+    const result = await runProbationBuild(parseArgs([`--num=${num}`, '--worker=codex',
+      `--taskType=${num === '4397' ? 'prepare' : 'bugfix'}`, `--scope=${num === '4397' ? `we:${item.path}` : `we:${source}`}`]), io);
+    expect(result.outcome).toBe(num === '4397' ? 'could-not-prepare' : 'opened-pr');
+    if (num === '4397') {
+      const recorded = readFileSync(join(dir, item.path), 'utf8');
+      expect(recorded).toContain('## Findings');
+      expect(recorded).toContain('copyLitterTreeSync/copyFileSync; real FIFO probe timed out.');
+      expect(recorded).toContain('status: open');
+      expect(calls.some(c => c[0] === 'resolve')).toBe(false);
+    } else {
+      expect(calls.find(c => c[0] === 'commit')[1]).toEqual(expect.arrayContaining([source, test]));
+    }
+    // Publication and gate callbacks are spies: no live model, commit, push, or PR occurs.
+    expect(calls.some(c => c[0] === 'gate')).toBe(true);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
