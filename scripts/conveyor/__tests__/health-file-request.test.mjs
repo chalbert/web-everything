@@ -326,6 +326,83 @@ describe('ledger IO', () => {
     expect(readFileSync(join(dir, 'filing', 'done.marker'), 'utf8')).toContain('A');
     expect(readFileSync(join(dir, 'filing', 'done.marker'), 'utf8')).toContain('B'); // both made progress — neither starved
   }, 10_000);
+
+  describe('withLedgerLock generation CAS (#4381)', () => {
+    const gen = (n) => join(dir, 'filing', `ledger.lock.${String(n).padStart(12, '0')}`);
+    const plantStale = (n, content = 'held:999999') => {
+      mkdirSync(join(dir, 'filing'), { recursive: true });
+      writeFileSync(gen(n), content);
+      utimesSync(gen(n), new Date(0), new Date(0));
+    };
+    const opts = { staleMs: 60_000, timeoutMs: 300, sleepMs: 5 };
+
+    it('a third process recreating the lock inside the observe->take window is never stolen from', () => {
+      plantStale(1);
+      let fired = false;
+      let ran = false;
+      expect(() => withLedgerLock(dir, () => { ran = true; }, opts, {
+        afterObserve: () => { if (!fired) { fired = true; writeFileSync(gen(2), 'held:424242'); } },
+      })).toThrow(/timed out/);
+      expect(fired).toBe(true);
+      expect(ran).toBe(false);
+      expect(readFileSync(gen(2), 'utf8')).toBe('held:424242'); // fresh lock untouched
+    });
+
+    it('two reclaimers + a third recreator never overlap in the critical section', () => {
+      plantStale(1);
+      let occupancy = 0;
+      let peak = 0;
+      let entered = 0;
+      const body = () => { occupancy += 1; entered += 1; peak = Math.max(peak, occupancy); occupancy -= 1; };
+      let thirdDone = false;
+      const third = () => { if (!thirdDone) { thirdDone = true; writeFileSync(gen(2), 'held:424242'); } };
+      // reclaimer A is refused (third recreated gen 2); reclaimer B, on the same stale observation, is too.
+      for (const label of ['A', 'B']) {
+        expect(() => withLedgerLock(dir, body, opts, { afterObserve: third }), label).toThrow(/timed out/);
+      }
+      expect(entered).toBe(0);
+      expect(peak).toBe(0);
+      // once the third releases, a reclaimer proceeds exactly once
+      writeFileSync(gen(2), 'released');
+      withLedgerLock(dir, body, opts);
+      expect(entered).toBe(1);
+      expect(peak).toBe(1);
+    });
+
+    it('release leaves a tombstone so a stale observer cannot re-create the successor name', () => {
+      withLedgerLock(dir, () => {});
+      expect(readFileSync(gen(1), 'utf8')).toBe('released');
+      expect(() => writeFileSync(gen(1), 'held:1', { flag: 'wx' })).toThrow(/EEXIST/);
+    });
+
+    it('a superseded holder releasing is harmless to its successor', () => {
+      let successorEntered = false;
+      withLedgerLock(dir, () => {
+        // A is reclaimed as stale by B while still inside its critical section
+        utimesSync(gen(1), new Date(0), new Date(0));
+        withLedgerLock(dir, () => {
+          successorEntered = true;
+          expect(existsSync(gen(1))).toBe(false); // pruned by B
+        }, opts);
+        writeFileSync(gen(2), 'held:777'); // a successor B' now holds the lock
+      }, opts);
+      expect(successorEntered).toBe(true);
+      expect(readFileSync(gen(2), 'utf8')).toBe('held:777'); // A's release never touched it
+    });
+
+    it('reclaims a stale legacy bare ledger.lock once and waits on a fresh one', () => {
+      mkdirSync(join(dir, 'filing'), { recursive: true });
+      const legacy = join(dir, 'filing', 'ledger.lock');
+      writeFileSync(legacy, '999999');
+      let ran = false;
+      expect(() => withLedgerLock(dir, () => { ran = true; }, opts)).toThrow(/timed out/); // fresh: waited on
+      expect(ran).toBe(false);
+      utimesSync(legacy, new Date(0), new Date(0));
+      withLedgerLock(dir, () => { ran = true; }, opts);
+      expect(ran).toBe(true);
+      expect(existsSync(legacy)).toBe(false);
+    });
+  });
 });
 
 describe('spliceFilingSection', () => {
