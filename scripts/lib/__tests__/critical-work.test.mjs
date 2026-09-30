@@ -255,3 +255,32 @@ describe('module load order (#4034)', () => {
     expect(typeof criticalWorkVerdict).toBe('function');
   });
 });
+
+describe('criticalWorkVerdict — gate roster parity (PR #3124 review)', () => {
+  it('every policy-tier TRUST_CHAIN home is critical', async () => {
+    const { TRUST_CHAIN } = await import('../gate-config.mjs');
+    const homes = TRUST_CHAIN.filter((m) => m.tier === 'policy').flatMap((m) => m.homes);
+    expect(homes.length).toBeGreaterThan(0);
+    for (const home of homes) {
+      expect(criticalWorkVerdict({ taskType: 'bugfix', filesTouched: [`we:${home}`] }).critical, home).toBe(true);
+    }
+  });
+
+  it('the gate-self group, `we:`-prefixed, reports never-spot-check', () => {
+    for (const path of ['we:scripts/review-runner.mjs', 'we:scripts/lib/dispatch-contracts.mjs', 'we:.claude/settings.json']) {
+      const verdict = criticalWorkVerdict({ taskType: 'bugfix', filesTouched: [path] });
+      expect(verdict.critical, path).toBe(true);
+      expect(verdict.reasons.find((r) => r.proxy === 'never-spot-check')?.detail, path).toContain('gateSelf');
+    }
+  });
+
+  it('every NEVER_SPOT_CHECK gateSelf entry is critical unless deliberately demoted with a reason', () => {
+    // Deliberate demotions (operator decision 2026-09-30): the dispatch loop's launcher is ordinary machinery.
+    const demoted = new Map([['scripts/lib/dispatch-', 'wildcard; only dispatch-contracts/-thresholds are gate (asserted above)'], ['scripts/operations/dispatch-lane', 'dispatch operation is conveyor machinery'], ['scripts/lane-pool', 'lane pool is conveyor machinery']]);
+    const entries = [...NEVER_SPOT_CHECK_PATH_PREFIXES.gateSelf, ...NEVER_SPOT_CHECK_PATH_PREFIXES.irreversible].filter((p) => !demoted.has(p));
+    for (const prefix of entries) {
+      const path = prefix.endsWith('/') ? `${prefix}x.yml` : /\.\w+$/.test(prefix) ? prefix : `${prefix}${prefix.endsWith('-') ? 'x' : ''}.mjs`;
+      expect(criticalWorkVerdict({ taskType: 'bugfix', filesTouched: [`we:${path}`] }).critical, path).toBe(true);
+    }
+  });
+});

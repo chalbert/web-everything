@@ -199,9 +199,8 @@ describe('gate/approval-only critical scope', () => {
   it.each([
     'we:skills-src/conveyor/build-dispatch-daemon.mjs',
     'we:scripts/conveyor/tick-core.mjs',
-    'we:scripts/lib/dispatch-contracts.mjs',
     'we:scripts/operations/dispatch-lane-io.mjs',
-    'we:scripts/lane-drain.mjs',
+    'we:scripts/conveyor/health-watch.mjs',
   ])('ordinary machinery %s gets Codex with full review', (path) => {
     const route = decideDispatchRoute({ kind: 'build', size: 2, scopePaths: [path] });
     expect(route.outcome).toBe('routed');
@@ -216,6 +215,20 @@ describe('gate/approval-only critical scope', () => {
     'we:scripts/lib/critical-work.mjs', 'we:scripts/lib/provider-routing.mjs',
     'we:.github/branch-protection.json', 'we:.github/workflows/review-gate.yml',
     'we:scripts/lib/credentials.mjs',
+    // PR #3124 review: the gate's own wiring/inputs, review-clearance code, harness config, and the drain.
+    'we:scripts/lib/dispatch-contracts.mjs', 'we:scripts/lib/dispatch-thresholds.mjs',
+    'we:scripts/conveyor/run-scorecard.mjs',
+    'we:scripts/review-runner.mjs', 'we:scripts/lib/review-runner-core.mjs',
+    'we:scripts/converge-daemon-pass.mjs', 'we:scripts/converge-daemon-install.mjs',
+    'we:scripts/lib/review-label-provider.mjs', 'we:scripts/lib/review-loop-policy.mjs',
+    'we:scripts/lib/review-skill-guard.mjs',
+    'we:.claude/settings.json', 'we:.claude/skills/review/SKILL.md',
+    'we:scripts/lib/__tests__/gate-invariants.test.mjs',
+    'we:scripts/lib/__tests__/review-policy.conformance.test.mjs',
+    'we:scripts/lib/__tests__/check-standards.conformance.test.mjs',
+    'we:scripts/lane-drain.mjs',
+    'plateau-app:tools/drain-daemon/cli.mjs', 'plateau-app:tools/drain-daemon/lib.mjs',
+    'plateau-app:tools/drain-daemon/daemon.mjs',
   ])('protected surface %s stays Claude-only', (path) => {
     const route = decideDispatchRoute({ kind: 'build', size: 2, scopePaths: [path] });
     expect(route.outcome).toBe('routed');

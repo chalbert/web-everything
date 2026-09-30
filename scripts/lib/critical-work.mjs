@@ -28,8 +28,17 @@
  */
 
 import { NEVER_SPOT_CHECK_PATH_PREFIXES } from './dispatch-thresholds.mjs';
-import { isPrincipleSurface } from './gate-config.mjs';
+import { isPrincipleSurface, TRUST_CHAIN } from './gate-config.mjs';
 import { CONSTELLATION_REPOS } from './constellation-repos.mjs';
+
+/**
+ * Every policy-tier TRUST_CHAIN home (review runner, policy contracts, conformance/invariant self-tests, …) is
+ * critical, DERIVED from the roster so a new policy member can never be silently left out (PR #3124 review).
+ * The engine tier is deliberately NOT derived wholesale: the dispatch loop is ordinary machinery by decision.
+ */
+const POLICY_TIER_HOMES = Object.freeze(new Set(
+  TRUST_CHAIN.filter((m) => m.tier === 'policy').flatMap((m) => m.homes ?? []),
+));
 
 /** The file-level gate/approval boundary, distinct from the broader full-review roster. */
 const CRITICAL_PATH_PREFIXES = Object.freeze({
@@ -43,6 +52,16 @@ const CRITICAL_PATH_PREFIXES = Object.freeze({
     'scripts/lib/verdict-ledger', 'scripts/lib/disposition-land-seam.mjs', 'scripts/lib/auto-land-seam.mjs',
     'scripts/operations/review-pr', 'scripts/conveyor/advisory-label-sweep.mjs',
     'scripts/conveyor/advisory-fix-mark.mjs',
+    // The gate's own wiring and inputs: the module that computes/passes the verdict, its threshold data, and the
+    // scorecard whose critical-miss vetoes feed it.
+    'scripts/lib/dispatch-contracts.mjs', 'scripts/lib/dispatch-thresholds.mjs', 'scripts/conveyor/run-scorecard',
+    'scripts/lib/model-capability-ratings', 'scripts/lib/poc-branches.json',
+    // Review-clearance code and the harness hooks/permissions/skills.
+    'scripts/review-runner', 'scripts/lib/review-runner-core.mjs', 'scripts/lib/review-label-provider.mjs',
+    'scripts/lib/review-loop-policy.mjs', 'scripts/lib/review-skill-guard.mjs', '.claude/',
+    // The drain's land step: builds/spawns the merge sweep and clears review; plus the resident daemons that run it.
+    'scripts/lane-drain.mjs', 'scripts/converge-daemon-pass.mjs', 'scripts/converge-daemon-install.mjs',
+    'plateau-app/tools/drain-daemon/',
   ]),
   irreversible: Object.freeze([
     '.github/workflows/', '.github/branch-protection', '.github/required-check',
@@ -124,6 +143,7 @@ export function criticalWorkVerdict(work = {}) {
   const groups = Object.entries(CRITICAL_PATH_PREFIXES)
     .filter(([name, prefixes]) => files.some((f) => {
       if (prefixes.some((prefix) => f.startsWith(prefix))) return true;
+      if (name === 'gateSelf' && POLICY_TIER_HOMES.has(f)) return true;
       // #4200 — ONLY `irreversible` recurs identically per repo (`.github/workflows/`, the deploy/land
       // mechanisms this rule exists to catch); `statute`/`gateSelf` name WE's OWN governance/gate files with
       // no sibling-repo equivalent, so they deliberately stay WE-relative-only, unchanged.
