@@ -159,7 +159,7 @@ describe('(a) the no-op proof — critical-work gate keeps build/fix/ci-heal on 
   // THE IMPORTANT CASE — clean, verified, recent Codex trials on record for every taskType this item's
   // build/fix/ci-heal dispatch could derive. Claude remains the recommendation, with probation picks on opened rows.
   describe('with CLEAN VERIFIED Codex trials on record for bugfix/build-new-feature/doc-fix', () => {
-    it('build stays closed; fix and ci-heal offer probation while all retain Claude routing', () => {
+    it('build, fix and ci-heal offer probation while all retain Claude routing', () => {
       for (const launchKind of ['build', 'fix']) {
         const read = runReadTick(launchKind, { scorecards: CODEX_TRIALS });
         expect(read.routing.outcome, launchKind).toBe('routed');
@@ -171,11 +171,11 @@ describe('(a) the no-op proof — critical-work gate keeps build/fix/ci-heal on 
         const gateEntry = read.routing.auditTrail.find((e) => e.criterion === 'critical-work-gate');
         expect(gateEntry, launchKind).toBeTruthy();
         expect(read.routing.taskType, launchKind).toBe(launchKind === 'fix' ? 'bugfix' : 'build-new-feature');
-        expect(gateEntry.result, launchKind).toBe(launchKind === 'fix' ? 'open-non-critical' : 'claude-only');
+        expect(gateEntry.result, launchKind).toBe('open-non-critical');
         if (launchKind === 'fix') {
           expect(read.routing.probationWorker).toMatchObject({ id: 'antigravity-claude', supervision: 'full', review: 'full' });
         } else {
-          expect(read.routing.probationWorker).toBeNull();
+          expect(read.routing.probationWorker).toMatchObject({ id: 'codex', supervision: 'full', review: 'full' });
         }
       }
       // agy-launcher-probation — `ci-heal` is its own taskType now, opened on probation: the gate opens for this
