@@ -25,6 +25,11 @@ function fixture(initial = { attempts: 0 }) {
 }
 
 describe('abandoned builder draft recovery', () => {
+  it('previews recovery without reserving, writing state, dispatching or escalating', async () => {
+    const f = fixture();
+    expect(await f.run({ dryRun: true })).toEqual([{ pr: 3033, num: '4502', action: 'resume', planned: true }]);
+    for (const name of ['reserve', 'writeState', 'dispatch', 'escalate', 'release']) expect(f.effects[name]).not.toHaveBeenCalled();
+  });
   it('dispatches a gate-failure fix on the SAME PR branch and persists its handle', async () => {
     const f = fixture();
     expect(await f.run()).toEqual([{ pr: 3033, num: '4502', action: 'resume' }]);
@@ -86,7 +91,7 @@ describe('abandoned builder draft recovery', () => {
     expect(f.effects.escalate).toHaveBeenCalledTimes(2);
     expect(f.effects.dispatch).not.toHaveBeenCalled();
   });
-  it('runs recovery before candidate holds, live only', async () => {
+  it('runs recovery before candidate holds and previews it without mutations', async () => {
     const effects = {
       listHolds: () => [{ num: '4502', reason: 'in-flight we#3033 already delivers it' }],
       planTick: async () => ({ decisions: {} }),
@@ -98,7 +103,7 @@ describe('abandoned builder draft recovery', () => {
     expect(tick.draftRecovery).toEqual(['recovered']);
     expect(effects.recoverDrafts).toHaveBeenCalledWith(expect.objectContaining({ allowResume: true }));
     await runBuildDispatchTick({ live: false, effects });
-    expect(effects.recoverDrafts).toHaveBeenCalledOnce();
+    expect(effects.recoverDrafts).toHaveBeenLastCalledWith(expect.objectContaining({ dryRun: true }));
   });
   it('boots the real daemon and rejects --bogus-flag with exit 2', () => {
     const out = spawnSync(process.execPath, ['skills-src/conveyor/build-dispatch-daemon.mjs', '--bogus-flag'], { encoding: 'utf8' });
@@ -145,6 +150,19 @@ describe('abandoned builder draft recovery', () => {
       expect(io.gh).toHaveBeenCalledWith(['pr', 'edit', '3033', '--repo', 'chalbert/web-everything', '--add-label', 'blocked:needs-human']);
       expect(io.gh).toHaveBeenCalledWith(['pr', 'comment', '3033', '--repo', 'chalbert/web-everything', '--body', expect.stringContaining('First error: ##[error]AssertionError: Done-when 2')]);
       expect(io.api).toHaveBeenCalledWith('commits/abc');
+      // A producer receipt survives a wrapper that never settled its run.
+      rmSync(join(dir, 'build-red-draft-resumes'), { recursive: true, force: true });
+      const receipt = { runId: 'dispatch-lane-test', entry: structuredClone(row),
+        repo: 'chalbert/web-everything', pr: 3033, ref: candidate.laneRef };
+      row.result = null;
+      row.status = 'in-flight';
+      io.dispatch.mockClear();
+      expect(await cliRecoverBuilderDrafts({ ...args, dryRun: true }, { ...io, receipts: [receipt] }))
+        .toEqual([{ pr: 3033, num: '4502', action: 'resume', planned: true }]);
+      expect(io.dispatch).not.toHaveBeenCalled();
+      // No receipt and no delivered result: even the exact same branch proves nothing.
+      expect(await cliRecoverBuilderDrafts({ ...args, dryRun: true }, io)).toEqual([]);
+      row.result = { pr: 3033 };
       // A manual lookalike branch stays outside the builder repair path.
       io.dispatch.mockClear();
       row.result.pr = 999;

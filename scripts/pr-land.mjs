@@ -77,6 +77,7 @@
  * state, which auto-retries with backoff and resume-opens the PR once infra recovers (nothing is stranded; the
  * drain stays the sole writer to main). A non-zero exit means `main` was left UNTOUCHED.
  */
+import { producerBuildContext, checkpointBuildPr } from './operations/build-pr-authorship.mjs';
 import { execFileSync } from 'node:child_process';
 import { readFileSync, realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -715,7 +716,7 @@ function runCli() {
     try {
       const root = primaryRootFromClone(REPO) || REPO;
       const path = infraStorePath(root);
-      recordInfraBlockIO({ num: itemNum, ref: REF, sha: refSha, base: BASE, repo: originSlugOf(REPO), cause, body: CREATE_BODY }, { path });
+      recordInfraBlockIO({ num: itemNum, ref: REF, sha: refSha, base: BASE, repo: originSlugOf(REPO), cause, body: CREATE_BODY, builderContext: process.env.WE_BUILD_PR_CONTEXT || null }, { path });
       recorded = infraHas(readInfraStore(path), itemNum);
     } catch { /* best-effort */ }
     emit({
@@ -884,6 +885,7 @@ function runCli() {
   //     drain will separately merge (and separately precheck-heal), was pure duplicated dead weight.
 
   // 3. Find an existing open PR for this head, else create a self-approved one.
+  const buildContext = producerBuildContext();
   let prNum = null;
   try { prNum = forge.listOpenByHead(REF)?.[0]?.number ?? null; } catch { /* gh may be absent */ }
   if (prNum == null) {
@@ -914,6 +916,7 @@ function runCli() {
 
     try { const out = forge.create(createParams); prNum = (out.match(/\/pull\/(\d+)/) || [])[1] ?? null; }
     catch (e) { return onCreateFailed(e); }
+    if (prNum != null) checkpointBuildPr(buildContext, { repo: originSlugOf(REPO), pr: prNum, ref: REF });
   } else if (LANE_MANIFEST || AUTHOR_MARKER || DELEGATION_MARKER_LINE) {
     // xnsk54v — an existing PR (a re-run, or one opened before the manifest was ready) may lack the manifest
     // block the drain reads. Best-effort embed it (idempotent — embedManifestInBody replaces in place); a gh

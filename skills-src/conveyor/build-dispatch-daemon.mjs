@@ -50,9 +50,10 @@ import { listFixDispatchClaims } from '../../scripts/conveyor/fix-claim-store.mj
 // #4465 — a held item's own route (already-done / out-of-scope / other) and the live sweep that acts on it.
 // See that file's own header for the three routes and why this daemon owns the sweep.
 import { planHoldRouting, routeHeldItems, reserveHoldRoute, releaseHoldRoute, appendHoldFinding } from '../../scripts/conveyor/build-dispatch-hold-router.mjs';
+import { readBuilderRuns, readAuthorship, backfillAuthorship } from '../../scripts/operations/build-pr-authorship.mjs';
 import { resolveCoordinationRoot } from '../../scripts/operations/coordination-root.mjs';
 // #4131/#4382 build-orphan-adopt — see that module's own header for the mechanism this closes.
-import { classifyClaimLiveness, settleOrphanRow, adoptOrphanedBuildClaims, findLatestBuildRow, decideOrphanAction, RESUME_SPAWN_GRACE_MS } from '../../scripts/conveyor/build-dispatch-orphan-adopt.mjs';
+import { classifyClaimLiveness, settleOrphanRow, adoptOrphanedBuildClaims, decideOrphanAction, RESUME_SPAWN_GRACE_MS } from '../../scripts/conveyor/build-dispatch-orphan-adopt.mjs';
 // #4464 builder-cap-machine-wide — see `cliPlanTick`'s own docblock for why this daemon's tick-core read is
 // exempted from the shared, machine-wide lane-count ceiling.
 import { isLeaseExpired, DEFAULT_LEASE_MINUTES } from '../../scripts/readiness/file-locks.mjs';
@@ -254,8 +255,8 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
   // PR #2921 review — a resume spawns real gate/converge/PR work, so it obeys the SAME kill switch and landing
   // freeze a fresh dispatch does (`planBuildDispatch`'s own freeze rule, computed here with no candidates).
   // Still before this tick's own `listClaims()` read, so a claim released here frees its item this same tick.
-  // Computed once, LIVE only: every live effect below that spawns PR work obeys it.
-  const freeze = live ? planBuildDispatch({ openPrs, killSwitch: effects.killSwitch(), policy }).freeze : null;
+  // Compute for previews too: a dry-run must report the same freeze as a live tick.
+  const freeze = planBuildDispatch({ openPrs, killSwitch: effects.killSwitch(), policy }).freeze;
   let orphanAdoption = null;
   if (live && typeof effects.adoptOrphans === 'function') {
     try { orphanAdoption = await effects.adoptOrphans({ allowResume: !freeze.frozen, frozenReason: freeze.reasons.join('; ') }); }
@@ -264,8 +265,8 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
   // A delivered draft is still its builder's responsibility. This pass precedes candidate/hold
   // filtering: an "already delivers it" hold must never suppress repair of that very PR.
   let draftRecovery = null;
-  if (live && typeof effects.recoverDrafts === 'function') {
-    try { draftRecovery = await effects.recoverDrafts({ rawOpenPrs, allowResume: !freeze.frozen }); }
+  if (typeof effects.recoverDrafts === 'function') {
+    try { draftRecovery = await effects.recoverDrafts({ rawOpenPrs, allowResume: !freeze.frozen, dryRun: !live }); }
     catch (e) { draftRecovery = { error: String(e?.message || e).split('\n')[0] }; }
   }
   const runStoreInFlight = effects.listRunStoreInFlight();
@@ -966,7 +967,7 @@ function lastDraftAuthorActivity(candidate) {
  * reserving an attempt and recording its handle. The existing orphan retry policy supplies the cap.
  * State is PR-bound, never head-bound: a failed fix pushing another red head cannot reset its budget. */
 export async function recoverBuilderDrafts({
-  candidates, allowResume = true, staleMinutes = DEFAULT_RED_DRAFT_MINUTES, nowMs = Date.now(), effects,
+  candidates, allowResume = true, dryRun = false, staleMinutes = DEFAULT_RED_DRAFT_MINUTES, nowMs = Date.now(), effects,
 }) {
   if (!Number.isFinite(staleMinutes) || staleMinutes < 0) throw new Error('invalid red draft age');
   const results = [];
@@ -982,6 +983,7 @@ export async function recoverBuilderDrafts({
         ? { action: 'exhausted' } // unknown spawn: surface it, never race a possibly live fix
         : decideOrphanAction({ resumable: true, attempts: state.attempts, allowResume });
       if (decision.action === 'leave') continue;
+      if (dryRun) { results.push({ pr: c.pr, num: c.num, action: decision.action, planned: true }); continue; }
       if (!effects.reserve(c).ok) continue;
       try {
         if (decision.action === 'exhausted') {
@@ -1011,16 +1013,13 @@ export async function recoverBuilderDrafts({
 
 /** Read current CI evidence only for drafts tied to a recorded builder result. REST checks are scoped
  * to the current head; a review permission gate is never a code failure. No label guesses CI colour. */
-export async function cliRecoverBuilderDrafts({ rawOpenPrs, allowResume, staleMinutes = Number(process.env.WE_BUILD_DAEMON_RED_DRAFT_MINUTES ?? DEFAULT_RED_DRAFT_MINUTES) }, io = {}) {
-  const { createFileRunStore } = await import('../../scripts/operations/run-store.mjs');
+export async function cliRecoverBuilderDrafts({ rawOpenPrs, allowResume, dryRun = false, staleMinutes = Number(process.env.WE_BUILD_DAEMON_RED_DRAFT_MINUTES ?? DEFAULT_RED_DRAFT_MINUTES) }, io = {}) {
   const { stampLiveness, defaultListAgents } = await import('../../scripts/operations/dispatch-lane-io.mjs');
   const { ghRestGetJson, ghRestGetPaged } = await import('../../scripts/lib/gh-rest-read.mjs');
   const { runGhSync } = await import('../../scripts/lib/gh-throttle.mjs');
   const { dispatchCiHeal } = await import('../../scripts/operations/ci-heal-pr-dispatch.mjs');
   const { freeLaneNumbers } = await import('../../scripts/conveyor/reconcile-fix-dispatch.mjs');
-  const store = io.store ?? createFileRunStore();
-  const runs = store.list().filter(id => id.startsWith('dispatch-lane')).map(id => ({ id, record: store.read(id) }));
-  const nums = new Set(runs.flatMap(r => (r.record.effects ?? []).filter(e => e.payload?.launchKind === 'build').map(e => normNum(e.payload.num))));
+  const runs = io.store ? io.store.list().filter(id => id.startsWith('dispatch-lane')).map(id => ({ id, record: io.store.read(id) })) : readBuilderRuns();
   let agents;
   const isLive = handle => stampLiveness({ runs: [{ handle }] }, {
     listAgents: () => (agents ??= (io.listAgents ?? defaultListAgents)()),
@@ -1032,21 +1031,22 @@ export async function cliRecoverBuilderDrafts({ rawOpenPrs, allowResume, staleMi
   const paged = io.paged ?? ghRestGetPaged;
   const gh = io.gh ?? runGhSync;
   const { parseAuthorActorId } = await import('../../scripts/lib/review-independence.mjs');
-  for (const pr of rawOpenPrs.find(r => r.repo === 'we')?.prs ?? []) {
+  const prs = rawOpenPrs.find(r => r.repo === 'we')?.prs ?? [];
+  const receipts = backfillAuthorship({ runs, prs, repo,
+    receipts: io.receipts ?? (io.store ? [] : readAuthorship()), persist: !dryRun && !io.store });
+  for (const pr of prs) {
     if (!pr.isDraft) continue;
-    const num = [...nums].find(n => prDeliversNum(pr, n));
-    if (!num) continue;
-    const row = findLatestBuildRow(runs, num);
-    // A branch name alone does not establish authorship. Require the wrapper's actual PR result.
-    const delivered = String(row?.entry.result?.pr ?? '').match(/(?:^|\/)(\d+)$/)?.[1];
-    if (Number(delivered) !== pr.number || isLive(row.entry.handle) !== false) continue;
+    const row = receipts.find(r => r.repo === repo && r.pr === pr.number);
+    if (!row || (row.ref && row.ref !== pr.headRefName) || isLive(row.entry.handle) !== false) continue;
+    const num = normNum(row.entry.payload.num);
+    const currentEntry = runs.find(r => r.id === row.runId)?.record?.effects?.find(e => e.key === row.entry.key);
     const p = api(`pulls/${pr.number}`);
     if (!p.draft || p.state !== 'open' || p.head?.repo?.full_name !== repo || p.head.ref !== pr.headRefName) continue;
     const author = parseAuthorActorId(p.body ?? '');
     if (author && isLive(author) !== false) continue;
     const activity = {
       headCommittedAt: api(`commits/${p.head.sha}`).commit?.committer?.date,
-      authorLastSeenLiveAt: row.entry.lastSeenLiveAt,
+      authorLastSeenLiveAt: currentEntry?.lastSeenLiveAt ?? row.entry.lastSeenLiveAt,
     };
     const at = lastDraftAuthorActivity(activity);
     if (!Number.isFinite(at) || Date.now() - at < staleMinutes * 60_000) continue;
@@ -1076,7 +1076,7 @@ export async function cliRecoverBuilderDrafts({ rawOpenPrs, allowResume, staleMi
   const path = pr => join(dir, `${pr}.json`);
   const route = c => ({ num: c.num, route: `red-draft-${c.pr}` });
   let lanes;
-  return recoverBuilderDrafts({ candidates, allowResume, staleMinutes, effects: {
+  return recoverBuilderDrafts({ candidates, allowResume, dryRun, staleMinutes, effects: {
     readState: pr => existsSync(path(pr)) ? JSON.parse(readFileSync(path(pr), 'utf8')) : null,
     writeState: (pr, state) => {
       mkdirSync(dir, { recursive: true });
@@ -1253,6 +1253,7 @@ async function dryRun(flags) {
     // THAT.
     openItems: reportOpenItems(tick.plan.openItems),
     prepare: tick.prepare,
+    draftRecovery: tick.draftRecovery,
     wouldDispatchNow: tick.plan.dispatch.map((x) => x.num),
     wouldRetireClaims: tick.retired,
     dispatchHolds: tick.dispatchHolds, // #4349 — items excluded this tick by a non-PR terminal-outcome cooldown
