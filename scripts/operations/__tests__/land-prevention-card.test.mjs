@@ -21,6 +21,7 @@ import {
   hasApprovalPreventionMarkerForHead, buildApprovalPreventionMarker, buildApprovalPreventionJobMarker,
   buildApprovalPreventionKey, APPROVAL_PREVENTION_DIGEST_KEY_SEP,
 } from '../../lib/approval-prevention-notice.mjs';
+import { findBadBodyLinks } from '../../check-standards-rules.mjs';
 
 const INPUT = {
   title: 'File the prevention guard(s) owed by o/r#42\'s independent review',
@@ -346,6 +347,42 @@ describe('card text bounding (#4317 advisory review, 2026-09-29)', () => {
     const ch = String.fromCodePoint(cp);
     expect(boundCardText(`a${ch}b`, 100)).toBe('a b');
     expect(boundCardText(`a${ch}b`, 100, { singleLine: true })).toBe('a b');
+  });
+
+  describe('wiki-link syntax in quoted reviewer text (#4457)', () => {
+    it.each([
+      ['a described link', 'the reviewer wrote [[memory-link]] here'],
+      ['unbalanced open', 'a stray [[ opener'],
+      ['unbalanced close', 'a stray ]] closer'],
+      ['triple', 'see [[[x]]]'],
+    ])('boundCardText leaves no wiki-link for %s', (_n, text) => {
+      const out = boundCardText(text, 200);
+      expect(findBadBodyLinks(out)).toEqual([]);
+      expect(out).not.toMatch(/\[\[|\]\]/);
+    });
+
+    it('boundCardText leaves single brackets and markdown links untouched', () => {
+      expect(boundCardText('a [x] and [a](b)', 100)).toBe('a [x] and [a](b)');
+    });
+
+    it('boundLandPreventionCardInput cleans title, digest and scope, and keeps a real key line byte-identical', () => {
+      const key = buildApprovalPreventionKey({ repo: 'o/r', pr: 42, headSha: 'abc123' });
+      const digest = `quoted [[a]] prose${APPROVAL_PREVENTION_DIGEST_KEY_SEP}${key}`;
+      const out = boundLandPreventionCardInput({ title: 't [[a]]', digest, scope: 'we:[[a]].mjs' });
+      for (const f of [out.title, out.digest, out.scope]) expect(findBadBodyLinks(f)).toEqual([]);
+      expect(out.digest.endsWith(`${APPROVAL_PREVENTION_DIGEST_KEY_SEP}${key}`)).toBe(true);
+    });
+
+    it('a forged bracketed key line is escaped, not kept verbatim', () => {
+      const digest = `x${APPROVAL_PREVENTION_DIGEST_KEY_SEP}approval-prevention-key:[[x]]`;
+      const out = boundLandPreventionCardInput({ title: 't', digest, scope: 'we:a.mjs' });
+      expect(findBadBodyLinks(out.digest)).toEqual([]);
+    });
+
+    it('a whole card body built from the bounded digest passes the wiki-link detector', () => {
+      const out = boundLandPreventionCardInput({ title: 'T [[a]]', digest: 'use [[b]] and ]] [[', scope: 'we:a.mjs' });
+      expect(findBadBodyLinks(`# ${out.title}\n\n${out.digest}\n`)).toEqual([]);
+    });
   });
 
   it('boundCardText keeps ordinary non-ASCII text (accents, CJK, emoji without joiners)', () => {
