@@ -48,6 +48,7 @@
  * `parked-pr-conflict-watch.mjs` and `duplicate-pr-watch.mjs` lines — the same "piggyback on a pass the
  * headless runner already ticks" shape, so neglect is checked every tick with no new cron/daemon.
  */
+import { isGhDeferred } from '../lib/gh-deferred.mjs';
 import { mintSessionSlug } from './session-slug.mjs';
 import { repoKeyForSlug } from '../lib/constellation-repos.mjs';
 import { resolve, join, dirname } from 'node:path';
@@ -252,6 +253,7 @@ export function defaultListParkedPrs({ exec = execFileSyncThrottled, repo = null
   if (repo) argv.push('--repo', repo);
   // #x5n4zn3 — was bare (no timeout).
   const out = exec('gh', argv, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024, timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL' });
+  if (isGhDeferred(out)) return JSON.parse(String(out));
   const parsed = JSON.parse(String(out || '[]'));
   return Array.isArray(parsed) ? parsed : [];
 }
@@ -334,7 +336,9 @@ export function watchNeglectedPrs({
   const threshold = thresholdHours ?? neglectThresholdHours(env);
   const repoKey = repo == null ? 'we' : repoKeyForSlug(repo);
   if (repoKey === null) throw new Error(`parked-pr-progress-watch: --repo ${repo} is not a constellation repo`);
-  const prs = scopePrsToQueue(listPrs({ repo }), { label: 'parked-pr-progress-watch', ...queueScope });
+  const listed = listPrs({ repo });
+  if (isGhDeferred(listed)) return []; // throttle already logged the skipped pass
+  const prs = scopePrsToQueue(listed, { label: 'parked-pr-progress-watch', ...queueScope });
   const candidates = prs.filter(isParkedCandidate);
   const results = [];
   if (!candidates.length) return results;

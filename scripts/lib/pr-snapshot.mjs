@@ -23,6 +23,7 @@
  * {@link MIN_LIMIT}), re-fetching larger only when the page came back full — so a repo with 14 open PRs costs 1
  * point per refresh instead of 2-5, and an empty repo 1 instead of 2-5.
  */
+import { isGhDeferred } from './gh-deferred.mjs';
 import { mkdirSync, readFileSync, readdirSync, statSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { writeJsonAtomic, withFileLock } from './atomic-json-file.mjs';
@@ -98,6 +99,7 @@ export function fetchSnapshot({ repo, prevCount, exec = execFileSyncThrottled, n
       timeout: 120_000, killSignal: 'SIGKILL',
       throttle: { op: 'pr list (snapshot)' },
     });
+    if (isGhDeferred(out)) return JSON.parse(String(out));
     const parsed = JSON.parse(String(out || '[]'));
     const prs = Array.isArray(parsed) ? parsed : [];
     if (prs.length >= limit && limit < MAX_LIMIT) { limit = Math.min(MAX_LIMIT, Math.max(limit * 2, 100)); continue; }
@@ -146,6 +148,7 @@ export function readSharedOpenPrs({
       if (again) return { snap: again, fetched: false };
       const prev = readSnapshotFile(path);
       const snap = fetchSnapshot({ repo, prevCount: prev?.count, exec, nowMs: now() });
+      if (isGhDeferred(snap)) return { deferred: snap };
       writeJsonAtomic(path, snap);
       return { snap, fetched: true };
     }, { timeoutMs: lockWaitMs, staleMs: LOCK_STALE_MS });
@@ -153,6 +156,7 @@ export function readSharedOpenPrs({
     if (/withFileLock: timed out/.test(String(e?.message))) return null; // a stuck refresher → caller's direct read
     throw e;
   }
+  if (result.deferred) return result.deferred;
   if (!result.fetched) logHit(env, who, repo);
   return projectPrs(result.snap.prs, want);
 }

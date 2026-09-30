@@ -787,3 +787,13 @@ it('defaultReadPullsForCommit reads the PR numbers GitHub associates with a comm
   execFileSyncThrottled.mockImplementationOnce(() => { throw new Error('404'); });
   expect(defaultReadPullsForCommit('deadbeef', {})).toEqual([]);
 });
+
+it('skips a deferred snapshot without enriching or planning from empty PR evidence', async () => {
+  const { runReconcilePass } = await import('../reconcile-pass.mjs');
+  const readAgents = vi.fn();
+  const result = runReconcilePass({
+    readPrs: () => ({ outcome: 'deferred-low-budget', deferred: true, message: 'skip this pass' }), readAgents,
+  });
+  expect(result).toMatchObject({ outcome: 'deferred-low-budget', dispatch: [], refusals: [] });
+  expect(readAgents).not.toHaveBeenCalled();
+});

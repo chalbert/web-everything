@@ -206,3 +206,10 @@ describe('the pass readers are wired to the snapshot (a seeded fresh snapshot is
     expect(JSON.parse(readFileSync(snapshotPath(dir, REPO), 'utf8')).count).toBe(14);
   });
 });
+
+
+it('preserves a non-error admission deferral without caching an empty snapshot', () => {
+  const deferred = { outcome: 'deferred-low-budget', deferred: true, priority: 'background' };
+  expect(readSharedOpenPrs(opts({ fields: 'number', exec: () => JSON.stringify(deferred) }))).toEqual(deferred);
+  expect(existsSync(snapshotPath(dir, REPO))).toBe(false);
+});

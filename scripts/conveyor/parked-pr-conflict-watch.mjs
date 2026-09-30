@@ -113,6 +113,7 @@
  * while one is live on this exact PR, and `CONFLICT_FIX_ROUND_CAP` already bounds repeated real-conflict rounds
  * — inventing a parallel per-sha marker here would duplicate a cap this population already inherits for free.
  */
+import { isGhDeferred } from '../lib/gh-deferred.mjs';
 import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
@@ -1365,6 +1366,7 @@ export function defaultListParkedPrs({ exec = execFileSyncThrottled, repo = null
   if (repo) argv.push('--repo', repo);
   // #x5n4zn3 — was bare (no timeout).
   const out = exec('gh', argv, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024, timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL' });
+  if (isGhDeferred(out)) return JSON.parse(String(out));
   const parsed = JSON.parse(String(out || '[]'));
   return Array.isArray(parsed) ? parsed : [];
 }
@@ -1466,7 +1468,9 @@ export function watchParkedPrConflicts({
   now = Date.now(),
   queueScope = {},
 } = {}) {
-  const prs = scopePrsToQueue(listPrs({ repo }), { label: 'parked-pr-conflict-watch', ...queueScope });
+  const listed = listPrs({ repo });
+  if (isGhDeferred(listed)) return []; // throttle already logged the skipped pass
+  const prs = scopePrsToQueue(listed, { label: 'parked-pr-conflict-watch', ...queueScope });
   const results = [];
   // xoh8fkw — resolved LAZILY, only once, only when a real write is about to happen (the common empty-sweep tick
   // never pays for the extra `gh repo view` call). `defaultListParkedPrs` above works fine with a null `repo`

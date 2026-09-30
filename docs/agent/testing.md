@@ -2,6 +2,16 @@
 
 > Tier-1 reference. Read when writing or changing tests.
 
+## GitHub priority admission
+
+The throttle returns a JSON `deferred-low-budget` result without invoking GitHub when a fresh,
+identity-scoped GraphQL observation crosses the caller's reservation threshold (background 25%,
+normal 10%). CLI status is zero; stderr and the spend report distinguish a skipped pass from success.
+Use `isGhDeferred` from `we:scripts/lib/gh-deferred.mjs` before parsing query data or caching results;
+a deferred response is not an empty PR list. Discovery CLI passes can use `deferGhPass` to skip before
+making decisions. Critical review/drain callers still respect actual exhaustion and secondary backoff.
+Test with a temporary throttle root and injected subprocesses; never spend live GitHub quota to test scarcity.
+
 ## Standalone probation builds
 
 `scripts/operations/probation-build-run.mjs` accepts `--taskType=doc-fix|bugfix|test-fix|prepare` (doc-fix default),

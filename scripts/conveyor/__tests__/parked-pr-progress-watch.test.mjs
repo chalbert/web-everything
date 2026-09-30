@@ -341,3 +341,13 @@ it('keeps sibling review history separate from WE', () => {
   expect(everDispatchedReviewOrFix({ pr: 49, agents })).toBe(false);
   expect(everDispatchedReviewOrFix({ pr: 49, agents, repo: 'plateau-app' })).toBe(true);
 });
+
+it('skips a deferred discovery pass without reading agents or posting a finding', () => {
+  const listAgents = vi.fn();
+  const postFinding = vi.fn();
+  expect(watchNeglectedPrs({
+    listPrs: () => ({ outcome: 'deferred-low-budget', deferred: true }), listAgents, postFinding,
+  })).toEqual([]);
+  expect(listAgents).not.toHaveBeenCalled();
+  expect(postFinding).not.toHaveBeenCalled();
+});
