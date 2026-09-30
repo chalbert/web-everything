@@ -74,6 +74,8 @@ import { summarizeAgyEvents } from '../gemini-direct-task.mjs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import matter from 'gray-matter';
+import { readField } from '../backlog/frontmatter.mjs';
+import { parseCard } from '../lib/priority-order.mjs';
 import { appendScorecard as appendScorecardRow } from '../conveyor/run-scorecard-store.mjs';
 import { CONSTELLATION_REPOS, DEFAULT_REPO_KEY } from '../lib/constellation-repos.mjs';
 import { hookSurfaceChanged, resetHookSurface, snapshotHookSurface, withHooksDisabled } from '../lib/git-hook-surface.mjs';
@@ -244,6 +246,9 @@ export async function runProbationBuild(args, io) {
   };
 
   try {
+    const blockers = io.openBlockers(num);
+    if (blockers.length) return finish('blocked', 'none', `blockedBy not resolved on main: ${blockers.map((n) => `#${n}`).join(', ')}`);
+
     lanePath = io.acquireLane({ lane: args.lane, session, scope: args.scope, taskType });
     if (!lanePath) return finish('not-applicable', 'none', 'could not acquire a lane for this build');
 
@@ -572,6 +577,20 @@ export function realIo({ session, env = process.env, repoRoot = WE_ROOT } = {}) 
   const node = (script, args, opts) => trySh(process.execPath, [join(opts.cwd, script), ...args], opts);
   return {
     log: (m) => console.error(m),
+    openBlockers(n) {
+      const item = this.findItem(n, repoRoot);
+      if (!item) throw new Error(`no backlog/${n}-*.md file in the launch checkout`);
+      parseYamlFrontmatter(item.raw); // Reject executable frontmatter before the shared card parser.
+      const { blockedBy: blockers } = parseCard(String(n), item.raw);
+      if (!blockers.length) return [];
+      // Read a single main snapshot, never a lane's unlanded resolution. Missing cards fail closed.
+      const main = sh('git', ['rev-parse', 'origin/main'], { cwd: repoRoot, env: laneEnv }).trim();
+      const paths = sh('git', ['ls-tree', '-r', '--name-only', main, '--', 'backlog/'], { cwd: repoRoot, env: laneEnv }).trim().split('\n');
+      return blockers.filter((id) => {
+        const path = paths.find((p) => p.startsWith(`backlog/${id}-`) && p.endsWith('.md'));
+        return !path || readField(sh('git', ['show', `${main}:${path}`], { cwd: repoRoot, env: laneEnv }), 'status') !== 'resolved';
+      });
+    },
     acquireLane: ({ lane, session: s, scope, taskType = 'doc-fix' }) => {
       const args = ['acquire', `--repo=${repoRoot}`, `--purpose=probation-${taskType}-build`, `--session=${s}`, '--base=main'];
       if (lane) args.push(`--lane=${lane}`);

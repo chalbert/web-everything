@@ -18,7 +18,7 @@ function snapshot(dir) {
       : [[e.name, readFileSync(path).toString('base64')]];
   }));
 }
-function fixture({ report } = {}) {
+function fixture({ report, blockerStatus } = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'probation-isolation-')));
   const repo = join(root, 'wev-control');
   const lane = join(root, '.lanes/web-everything/lane-1');
@@ -51,6 +51,11 @@ function fixture({ report } = {}) {
   for (const dir of [repo, lane]) {
     put(join(dir, '.gitignore'), '.env.local\n.claude/settings.local.json\n');
     put(join(dir, 'backlog/4291-probe.md'), '---\nstatus: open\nscope: ["we:docs/probe.md"]\n---\n\n# Probe\n\n## Done when\n\n1. Works.\n');
+    if (blockerStatus) {
+      const card = join(dir, 'backlog/4291-probe.md');
+      writeFileSync(card, readFileSync(card, 'utf8').replace('status: open', 'status: open\nblockedBy: [3353]'));
+      put(join(dir, 'backlog/3353-blocker.md'), `---\nstatus: ${blockerStatus}\n---\n# Blocker\n`);
+    }
     put(join(dir, 'docs/probe.md'), 'Before\n');
     put(join(dir, 'scripts/backlog.mjs'), mutation.replace('CARD', "'../backlog/4291-probe.md'").replace('ROOT', "'../'"));
     put(join(dir, 'scripts/operations/run.mjs'), mutation.replace('CARD', "'../../backlog/4291-probe.md'").replace('ROOT', "'../../'"));
@@ -59,6 +64,7 @@ function fixture({ report } = {}) {
     execFileSync('git', ['init', '-q', dir]);
     execFileSync('git', ['-C', dir, 'add', '.']);
     execFileSync('git', ['-C', dir, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', '-c', 'core.hooksPath=/dev/null', 'commit', '-qm', 'fixture']);
+    execFileSync('git', ['-C', dir, 'update-ref', 'refs/remotes/origin/main', 'HEAD']);
   }
   return { root, repo, lane, scratch };
 }
@@ -189,6 +195,33 @@ describe('probation build checkout isolation', () => {
       const before = snapshot(f.root);
       expect(launch(f, { RETURN_SOURCE: '1' }).detail).toContain('refused: acquired lane is the launch checkout or a registered daemon clone');
       expect(snapshot(f.root)).toEqual(before);
+    } finally { rmSync(f.root, { recursive: true, force: true }); }
+  });
+});
+
+
+describe('standalone blockedBy preflight', () => {
+  it('refuses an open main blocker before any lane, claim, worker or PR IO, despite a local resolution', () => {
+    const f = fixture({ blockerStatus: 'open' });
+    try {
+      writeFileSync(join(f.repo, 'backlog/3353-blocker.md'), '---\nstatus: resolved\n---\n# Blocker\n');
+      const before = snapshot(f.lane);
+      const result = launch(f, {}, `
+        for (const method of ['acquireLane', 'claim', 'runWorker', 'openPr']) {
+          io[method] = () => { throw new Error('unexpected IO: ' + method); };
+        }
+      `);
+      expect(result).toMatchObject({ outcome: 'blocked', executor: 'none', pr: null });
+      expect(result.detail).toContain('#3353');
+      expect(snapshot(f.lane)).toEqual(before);
+    } finally { rmSync(f.root, { recursive: true, force: true }); }
+  });
+
+  it.each(['resolved', undefined])('proceeds to lane acquisition with blocker status %s', (blockerStatus) => {
+    const f = fixture({ blockerStatus });
+    try {
+      const result = launch(f, {}, 'io.acquireLane = () => null;');
+      expect(result).toMatchObject({ outcome: 'not-applicable', detail: 'could not acquire a lane for this build' });
     } finally { rmSync(f.root, { recursive: true, force: true }); }
   });
 });

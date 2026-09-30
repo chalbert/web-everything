@@ -8,6 +8,9 @@
 roster names or legacy JSON in `--worker`, and an allowlisted `--model`. Each omitted session is
 generated independently. Different items use separate lane clones; do not reuse an explicit session
 and lane for simultaneous runs. Task files, worker logs, commit messages and PR bodies are lane-local.
+Before acquiring a lane or claiming, the runner reads the launch card’s `blockedBy` and checks blocker
+frontmatter on `origin/main`. Unresolved or missing blockers return `blocked` with their IDs; a local
+resolution does not count. The isolation tests cover this refusal and the resolved/no-blocker paths.
 Pool discovery uses `defaultPoolRoot` with the script checkout root, never the caller cwd.
 Mutation subprocesses must use both the lane cwd and the lane’s script copy: backlog and operation tools
 derive their roots from `import.meta.url`. Daemon clones remain read-only launch sources. The isolation
