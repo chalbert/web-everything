@@ -2,9 +2,10 @@
 bornAs: x89yzuj
 kind: story
 size: 2
-status: open
+status: active
 scope: ["we:skills-src/conveyor/fix-agent-brief.md", "we:skills-src/conveyor/fix-agent-ci-brief.md", "we:scripts/guard-bash.mjs", "we:scripts/__tests__/guard-bash.test.mjs", "we:skills-src/conveyor/__tests__/", "we:scripts/verify-lane.mjs", "we:skills-src/batch-backlog-items/parallel-execute.workflow.js"]
 dateOpened: "2026-09-28"
+dateStarted: "2026-09-30"
 preparedDate: "2026-09-30"
 preparedAgainstSha: "b781ee138b012663b7e1f22a38df436f7e35a6b5"
 tags: []
@@ -123,3 +124,8 @@ Before/after on the real surface, not only unit tests:
   command their kind's guard denies.
 - If `we:scripts/conveyor/verify-dispatch.mjs` does not enumerate sibling-repo lanes and the build only works around it, file the
   enumeration fix as its own item.
+
+## Progress
+
+- Both fix briefs' step 4 now use `we:scripts/verify-lane.mjs` `request` → `check --wait=60000 --json --repo=.` (unquoted path); red keyed to `check` output (exit 2). `gateFor` untouched (canary/profile tests green). Stale comments in `we:scripts/verify-lane.mjs` and `we:skills-src/batch-backlog-items/parallel-execute.workflow.js` corrected. Guard pins + brief-lint test added.
+- Residual risks (a) sibling-lane resolution by the verify runner and (b) marker-stamp vs `fix-procedure`/`pr-land` finish-guards: **NOT verified** in this session (no throwaway-lane live run). Still open.
