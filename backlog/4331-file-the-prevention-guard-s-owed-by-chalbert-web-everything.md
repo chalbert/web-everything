@@ -3,9 +3,10 @@ bornAs: xoebb7z
 kind: story
 size: 3
 parent: "4075"
-status: open
+status: active
 scope: ["we:scripts/conveyor/session-reaper.mjs", "we:scripts/conveyor/__tests__/session-reaper.test.mjs", "we:scripts/conveyor/guard-1c-mutation-check.mjs", "we:scripts/conveyor/__tests__/guard-1c-mutation-check.test.mjs"]
 dateOpened: "2026-09-27"
+dateStarted: "2026-09-30"
 preparedDate: "2026-09-30"
 preparedAgainstSha: "d72504a07100a8583235f6b0112aa87c9807f0ba"
 tags: []

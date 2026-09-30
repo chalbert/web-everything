@@ -1192,6 +1192,20 @@ describe('planBackstopCompletion Guard 1 (#4306) — (a)/(b)/(c) skip conditions
     );
     expect(rec).toMatchObject({ status: 'done', sessionId: 'A' });
   });
+
+  // #4331 — ISOLATED Guard 1(c) fixtures. The (c) tests above use `bStarted` (sessionId 'B', foreign to 'A'),
+  // so Guard 1(a) can refuse first and mask a deleted (c). These records are NOT foreign (legacy null id, or
+  // the reaped session's own id), so only (c) can refuse.
+  for (const [label, recSessionId] of [['legacy record (sessionId null)', null], ['matching-sessionId record', 'A']]) {
+    it(`Guard 1(c) isolated: ${label} with later startedAt refuses`, () => {
+      const rec = planBackstopCompletion(
+        { name: 'fix-2821', sessionId: 'A' }, { ...bStarted, sessionId: recSessionId },
+        () => '2026-09-27T20:54:34.000Z', false, false, false,
+        { lastActivityMs: Date.parse('2026-09-27T20:44:34.000Z') }, // before bStarted.startedAt (20:53:27)
+      );
+      expect(rec).toBeNull();
+    });
+  }
 });
 
 // #4306 (independent panel review, standards-conformance lens) — a DIRECT unit test of the IO helper
@@ -1470,6 +1484,67 @@ describe('runSessionReaperPass — the backstop-completion write (xbv32pg follow
       else process.env.CLAUDE_PROJECTS_DIR = previousProjectsDir;
       rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  // #4331 — pass-level Guard 1(c) with (a) and (b) provably inert: the row's sessionId equals the transcript
+  // filename and the record's (or the record's is null/legacy), and there is exactly ONE listing row. Only
+  // (c), reached through the real `resolveLastActivityMs(session)` wiring, can refuse.
+  for (const [label, recSessionId] of [['legacy record', null], ['matching-sessionId record', 'sess-A-isolated']]) {
+    it(`Guard 1(c) isolated: pass-level wiring refuses with a REAL transcript (${label})`, async () => {
+      const root = mkdtempSync(join(tmpdir(), 'session-reaper-guard1c-isolated-'));
+      const projects = join(root, 'projects');
+      const cwd = '/scratch/fix-2821-isolated-lane';
+      const sessionId = 'sess-A-isolated';
+      const slug = cwd.replaceAll('/', '-');
+      mkdirSync(join(projects, slug), { recursive: true });
+      const staleTs = new Date(Date.now() - 20 * 60_000).toISOString();
+      writeFileSync(join(projects, slug, `${sessionId}.jsonl`), `${JSON.stringify({ type: 'assistant', timestamp: staleTs, message: { content: [{ type: 'text', text: 'done' }] } })}\n`);
+
+      const previousProjectsDir = process.env.CLAUDE_PROJECTS_DIR;
+      vi.stubEnv('CLAUDE_PROJECTS_DIR', projects);
+      vi.resetModules();
+      try {
+        const { runSessionReaperPass: freshRunSessionReaperPass } = await import('../session-reaper.mjs');
+        const written = [];
+        const existingRecord = {
+          v: 1, session: 'fix-2821', kind: 'fix', pr: '2821', item: null, status: 'started', outcome: null,
+          verdict: null, label: null, runId: null, sessionId: recSessionId,
+          startedAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+        };
+        const result = freshRunSessionReaperPass({
+          listAgents: () => [{ id: 'a1', sessionId, cwd, kind: 'background', state: 'done', name: 'fix-2821' }],
+          groundTruthFor: () => null,
+          completionFor: () => null,
+          stop: ({ handle }) => ({ stopped: true, alreadyGone: false, output: `stopped ${handle}` }),
+          readCompletionRecord: () => existingRecord,
+          writeCompletionRecord: (rec) => { written.push(rec); },
+          log: () => {},
+        });
+        expect(result.stopped).toBe(1);
+        expect(written).toHaveLength(0);
+      } finally {
+        vi.unstubAllEnvs();
+        if (previousProjectsDir === undefined) delete process.env.CLAUDE_PROJECTS_DIR;
+        else process.env.CLAUDE_PROJECTS_DIR = previousProjectsDir;
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+  }
+
+  // #4331 Guard 1 — duplicate-code check (text-level). #4312 extracted the tail-read/newest-`ts`/mtime loop
+  // into `hung-session.mjs#readTranscriptTailActivity`; fail if the reaper re-grows its own copy.
+  it('Guard 1: no local transcript-timestamp loop in session-reaper.mjs', () => {
+    const src = readFileSync(join(process.cwd(), 'scripts/conveyor/session-reaper.mjs'), 'utf8');
+    const code = src.replace(/\/\*[\s\S]*?\*\//g, '').split('\n').map((l) => l.replace(/(^|\s)\/\/.*$/, '')).join('\n');
+    expect(code).not.toMatch(/entry\?\.ts\b/);
+    expect(code).not.toMatch(/\.ts\s*\?\?/);
+    const start = code.indexOf('export function resolveLastActivityMs');
+    expect(start).toBeGreaterThan(-1);
+    const end = code.indexOf('\n}\n', start);
+    const body = code.slice(start, end);
+    expect(body).toContain('readTranscriptTailActivity(');
+    expect(body).not.toMatch(/summarizeEntryFn\(/);
+    expect(body).not.toMatch(/\bstat(Fn|Sync)\(/);
   });
 
   it('`backstopCompletion: false` is a full rollback escape hatch — never calls writeCompletionRecord at all', () => {
