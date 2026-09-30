@@ -32,6 +32,8 @@ import { localToday } from '../lib/local-date.mjs';
 import { isValidHoldNum } from '../conveyor/build-dispatch-hold-router.mjs';
 import { normNum } from '../conveyor/queue-store.mjs';
 
+import { findUnmarkedLocusRefs } from '../check-standards-rules.mjs';
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = join(HERE, '..', '..');
 const VERIFY_TIMEOUT_MS = 30 * 60 * 1000;
@@ -131,14 +133,20 @@ export const MAX_REASON_CHARS = 500;
  *  length cap. Collapses every control character and line break (`\r`, `\n`, tabs, …) to one space, so the
  *  text stays ONE quoted line that cannot open a heading, list or new block; turns backticks into `'` so no
  *  code fence or inline code can open; escapes `<`/`>` so no HTML comment or tag can open; and caps the
- *  result at {@link MAX_REASON_CHARS}. */
+ *  result at {@link MAX_REASON_CHARS}. Strip local absolute paths and qualify remaining code references
+ *  with the same detector the standards gate uses before applying the length cap. */
 export function sanitizeHoldReason(reason, { max = MAX_REASON_CHARS } = {}) {
-  const flat = String(reason ?? '')
+  let flat = String(reason ?? '')
     .replace(/[\p{Cc}\p{Zl}\p{Zp}]+/gu, ' ')
+    .replace(/(?<![\w:/])(?:[A-Za-z]:[\\/]|\/(?!\/))[^\s`'"<>)]*/g, '[local path]')
     .replace(/`/g, "'")
     .replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/\s+/g, ' ')
     .trim();
+  for (const ref of findUnmarkedLocusRefs(flat).sort((a, b) => b.length - a.length)) {
+    const escaped = escapeRegExp(ref);
+    flat = flat.replace(new RegExp(`(?<![\\w./@-])(?<!(?:we|fui|plateau|webeverything|frontierui|plateau-app):)${escaped}(?![\\w./-])`, 'g'), `we:${ref}`);
+  }
   return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
 }
 
@@ -159,7 +167,8 @@ export function clearScopeAndAppendFinding(cardText, { num, reason, today = loca
   if (!fm) throw new Error(`clearScopeAndAppendFinding: card #${num} has no frontmatter — cannot clear its scope`);
   const standalone = /^worker-declined(?:\s*:|$)/.test(String(reason ?? ''));
   // Standalone declines remove the key: check:standards forbids an empty scope array.
-  const cleared = `---\n${fm[1].replace(SCOPE_KEY_RE, standalone ? '' : 'scope: []').trimEnd()}\n---${text.slice(fm[0].length)}`;
+  const builder = /^worker-declined: scope exceeds the [\w-]+ envelope — route to the builder/.test(String(reason ?? ''));
+  const cleared = builder ? text : `---\n${fm[1].replace(SCOPE_KEY_RE, standalone ? '' : 'scope: []').trimEnd()}\n---${text.slice(fm[0].length)}`;
   const quoted = sanitizeHoldReason(reason, { max: standalone ? 620 : MAX_REASON_CHARS }) || '(no reason recorded)';
   // Advisory only: prepare must verify these references before setting blockedBy.
   const blockers = standalone ? [...new Set([...String(reason).matchAll(
@@ -175,8 +184,10 @@ export function clearScopeAndAppendFinding(cardText, { num, reason, today = loca
     `> ${quoted}`,
     ...blockers.flatMap((id) => ['', `possible blocker: #${id}`]),
     '',
-    "`scope:` was cleared above so this card is picked up by the existing unshaped-item auto-prepare path;",
-    'a prepare pass re-scopes it against the finding.',
+    ...(builder ? ['Implementation changes were discarded. The card is held for the builder; its declared scope is preserved.'] : [
+      "`scope:` was cleared above so this card is picked up by the existing unshaped-item auto-prepare path;",
+      'a prepare pass re-scopes it against the finding.',
+    ]),
     '',
   ].join('\n');
   return `${cleared.replace(/\n+$/, '')}\n${section}`;

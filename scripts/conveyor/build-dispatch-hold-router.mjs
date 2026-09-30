@@ -56,6 +56,7 @@ const OUT_OF_SCOPE_RE = /spec (?:not buildable|superseded)/i;
 export function classifyHoldReason(reason) {
   const text = String(reason ?? '');
   // A decline is evidence for preparation, never proof that the spec was delivered.
+  if (/^worker-declined: scope exceeds the [\w-]+ envelope — route to the builder/.test(text)) return { route: 'other', commit: null };
   if (/^worker-declined(?:\s*:|$)/.test(text)) return { route: 'out-of-scope', commit: null };
   const doneMatch = ALREADY_DONE_RE.exec(text);
   if (doneMatch) return { route: 'already-done', commit: doneMatch[1] };

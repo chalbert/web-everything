@@ -12,12 +12,14 @@
  */
 import { execFileSync, spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
+import { symlinkSync, readdirSync, mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { clearScopeAndAppendFinding, sanitizeHoldReason } from '../build-dispatch-hold-route-land.mjs';
+import { scanRepoLocusPrefixes } from '../../check-standards-rules.mjs';
 import { withInfraLock } from '../../conveyor/infra-blocked.mjs';
-import { captureWorkerMessage, openPrArgv, parseArgs, realIo, runProbationBuild } from '../probation-build-run.mjs';
+import { gateFailureDetail, captureWorkerMessage, openPrArgv, parseArgs, realIo, runProbationBuild } from '../probation-build-run.mjs';
 
 describe('realIo().findItem — the card\'s own scope is what the arc allowlists (#4291 advisory finding)', () => {
   const withCard = (text, fn) => {
@@ -102,7 +104,7 @@ function fakeIo({
     writeCard: (_dir, path, text) => { boom('writeCard'); calls.push(['card', path, text]); },
     untracked: () => ['node_modules'],
     diffNumstat: (_d, _base, exclude) => { calls.push(['numstat', exclude]); return numstat; },
-    discardChanges: (_d, base) => calls.push(['discard', base]),
+    discardChanges: (_d, base) => { calls.push(['discard', base]); numstat = ''; },
     resolveItem: () => { boom('resolveItem'); calls.push(['resolve']); return resolveOk ? { ok: true } : { ok: false, reason: 'open-children' }; },
     commit: (_d, paths, msg) => { boom('commit'); calls.push(['commit', paths, msg.split('\n')[0]]); },
     runGate: () => { calls.push(['gate']); return { pass: gate, output: 'gate out' }; },
@@ -258,11 +260,15 @@ describe('runProbationBuild — the arc', () => {
     expect(calls.some((c) => c[0] === 'hold')).toBe(false);
   });
 
-  it('a build bigger than the doc-fix envelope is discarded, never resolved', async () => {
+  it('a build bigger than the doc-fix envelope lands Findings and holds for the builder', async () => {
     const { io, calls } = fakeIo({ numstat: '60\t50\tbacklog-docs/probation.md' });
     const r = await runProbationBuild(args(), io);
-    expect(r.outcome).toBe('gate-red');
+    expect(r.outcome).toBe('opened-pr');
     expect(r.detail).toMatch(/changed 110 lines/);
+    expect(calls.find(c => c[0] === 'hold')[1]).toMatchObject({ route: 'other' });
+    expect(calls.find(c => c[0] === 'card')[2]).toContain('route to the builder');
+    expect(calls.find(c => c[0] === 'card')[2]).toMatch(/^scope:/m);
+    expect(calls.find(c => c[0] === 'commit')[1]).toEqual(['backlog/4291-probation-launcher.md']);
     expect(calls.some((c) => c[0] === 'discard')).toBe(true);
     expect(calls.some((c) => c[0] === 'resolve')).toBe(false);
   });
@@ -583,7 +589,7 @@ describe('standalone task types and workers', () => {
     expect(() => parseArgs(['--taskType=ci-heal'])).toThrow('taskType');
   });
 
-  it.each([[200, 'opened-pr'], [300, 'gate-red']])('bugfix bounds a %i LOC source diff', async (loc, outcome) => {
+  it.each([[200, 'opened-pr'], [300, 'opened-pr']])('bugfix bounds a %i LOC source diff', async (loc, outcome) => {
     const { io, calls } = fakeIo({ itemScope: ['we:scripts/example.mjs'], numstat: `${loc}\t0\tscripts/example.mjs` });
     const rows = [];
     io.appendScorecard = (row) => rows.push(row);
@@ -592,13 +598,13 @@ describe('standalone task types and workers', () => {
     const result = await runProbationBuild(args(codex, { taskType: 'bugfix', scope: 'we:scripts/example.mjs' }), io);
     expect(result).toMatchObject({ outcome, pr: outcome === 'opened-pr' ? 9001 : null });
     expect(rows[0].taskType).toBe('bugfix');
-    if (outcome === 'opened-pr') expect(calls.find((c) => c[0] === 'commit')[2]).toContain('bugfix build');
+    if (loc === 200) expect(calls.find((c) => c[0] === 'commit')[2]).toContain('bugfix build');
     else expect(calls.some((c) => c[0] === 'discard')).toBe(true);
   });
 
   it('the default still refuses 200 documentation LOC', async () => {
     const { io } = fakeIo({ numstat: '200\t0\tbacklog-docs/probation.md' });
-    expect((await runProbationBuild(args(), io)).outcome).toBe('gate-red');
+    expect((await runProbationBuild(args(), io)).detail).toContain('route to the builder');
   });
 
   it('bugfix refuses statute paths even when explicitly scoped', async () => {
@@ -857,5 +863,82 @@ describe('standalone prepare', () => {
     io.stampPrepare = () => ({ ok: true });
     expect(await runProbationBuild(prepareArgs(), io)).toMatchObject({ detail: 'prepare-unstamped' });
     expect(calls.some(c => c[0] === 'commit')).toBe(false);
+  });
+});
+
+
+describe('Findings publication regressions', () => {
+  it('sanitises absolute paths and bare file:line with the real lane standards gate', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'findings-standards-'));
+    try {
+      execFileSync('git', ['clone', '--shared', '--quiet', resolve('.'), dir]);
+      symlinkSync(resolve('node_modules'), join(dir, 'node_modules'));
+      const file = 'backlog/' + readdirSync(join(dir, 'backlog')).find(f => f.startsWith('4331-'));
+      const original = readFileSync(join(dir, file), 'utf8');
+      const reason = 'worker-declined: guard too broad at session-reaper.mjs:453 in /Users/example/workspace/.lanes/lane-22/scripts/session-reaper.mjs:453';
+      const written = clearScopeAndAppendFinding(original, { num: '4331', reason });
+      expect(written).toContain('we:session-reaper.mjs:453');
+      expect(written).not.toContain('/Users/example');
+      expect(scanRepoLocusPrefixes([{ file, content: written }])).toEqual([]);
+      writeFileSync(join(dir, file), written);
+      const result = JSON.parse(execFileSync(process.execPath, ['scripts/check-standards.mjs', '--local', `--files=${file}`, '--json'], { cwd: dir, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 }));
+      expect(result.errors).toEqual([]);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  }, 60000);
+
+  it('preserves qualified paths and URLs, strips local paths, and caps after prefixing', () => {
+    const clean = sanitizeHoldReason('we:a.mjs fui:a.mjs a.mjs https://example.com/a.mjs /tmp/lane/a.mjs C:\\Users\\test\\a.mjs');
+    expect(clean).toBe('we:a.mjs fui:a.mjs we:a.mjs https://example.com/a.mjs [local path] [local path]');
+    expect(sanitizeHoldReason('a.mjs '.repeat(200), { max: 100 }).length).toBe(100);
+  });
+
+  it('lands only the card after a nine-file bugfix exceeds its envelope', async () => {
+    const paths = Array.from({ length: 9 }, (_, i) => `scripts/fixture-${i}.mjs`);
+    const { io, calls } = fakeIo({ itemScope: paths.map(p => `we:${p}`), numstat: paths.map(p => `1\t0\t${p}`).join('\n') });
+    const result = await runProbationBuild(args(codex, { taskType: 'bugfix', scope: paths.map(p => `we:${p}`).join(',') }), io);
+    expect(result.outcome).toBe('opened-pr');
+    expect(result.detail).toContain('scope exceeds the bugfix envelope — route to the builder');
+    expect(result.detail).toContain('touched 9 files (limit 4)');
+    expect(calls.find(c => c[0] === 'hold')[1]).toMatchObject({ route: 'other' });
+    expect(calls.find(c => c[0] === 'commit')[1]).toEqual(['backlog/4291-probation-launcher.md']);
+    expect(calls.findIndex(c => c[0] === 'discard')).toBeLessThan(calls.findIndex(c => c[0] === 'card'));
+    expect(calls.some(c => c[0] === 'resolve')).toBe(false);
+  });
+
+  it('refuses to publish Findings if discarding the implementation failed', async () => {
+    const { io, calls } = fakeIo({ numstat: '200\t0\tbacklog-docs/probation.md' });
+    io.discardChanges = () => {};
+    const result = await runProbationBuild(args(), io);
+    expect(result.outcome).toBe('gate-red');
+    expect(result.detail).toContain('could not discard');
+    expect(calls.some(c => ['card', 'commit', 'openPr'].includes(c[0]))).toBe(false);
+  });
+
+  it('extracts the first failure from a real gate subprocess before truncation', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'findings-gate-output-'));
+    try {
+      mkdirSync(join(dir, 'scripts'));
+      writeFileSync(join(dir, 'scripts/verify-lane.mjs'), `
+        console.log('check-standards — Web Everything');
+        console.log(' error missing locus prefix');
+        console.log('tail'.repeat(5000));
+        process.exitCode = 2;
+      `);
+      const gate = realIo().runGate(dir);
+      expect(gate.pass).toBe(false);
+      expect(gate.failureDetail).toBe('check:standards: error missing locus prefix');
+      expect(gate.output).not.toContain('missing locus prefix');
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('retains the failing check and first error even before a long output tail', async () => {
+    const output = 'check-standards — Web Everything\n\x1b[31m error\x1b[0m 2 code-path references lack a locus prefix\n' + 'tail\n'.repeat(4000);
+    const failureDetail = gateFailureDetail(output);
+    expect(failureDetail).toBe('check:standards: error 2 code-path references lack a locus prefix');
+    const { io } = fakeIo({ numstat: '', lastMessage: 'declined' });
+    io.runGate = () => ({ pass: false, output: output.slice(-12000), failureDetail });
+    const result = await runProbationBuild(args(), io);
+    expect(result.detail).toContain(failureDetail);
+    expect(gateFailureDetail(' FAIL scripts/example.test.mjs > case\nAssertionError: nope')).toContain('vitest: FAIL');
   });
 });

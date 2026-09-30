@@ -431,7 +431,23 @@ export async function runProbationBuild(args, io) {
           return abandon('gate-red', 'not built: statute-tier paths are refused', { diff: diffRow });
         }
         const fits = healDiffWithinEnvelope(summary, PROVEN_TASK_ENVELOPES[taskType]);
-        if (!fits.ok) return abandon('gate-red', `not built: ${fits.reason}`, { diff: diffRow });
+        if (!fits.ok) {
+          // A test-only boundary violation is still refused; only size overflow routes to the builder.
+          if (fits.reason.startsWith('test-fix refused')) return abandon('gate-red', `not built: ${fits.reason}`, { diff: diffRow });
+          if (io.headSha(lanePath) !== baseSha) {
+            return abandon('escalated-needs-human', 'refused: worker moved HEAD before envelope routing', { diff: diffRow });
+          }
+          declinedReason = `scope exceeds the ${taskType} envelope — route to the builder: ${fits.reason}`;
+          const [route] = planHoldRouting([{ num, reason: `worker-declined: ${declinedReason}` }]);
+          io.holdWorkerDecline(route);
+          io.discardChanges(lanePath, baseSha, preexisting);
+          if (summarizeNumstat(io.diffNumstat(lanePath, baseSha, excludeFromDiff), { exclude: excludeFromDiff }).files) {
+            return abandon('gate-red', 'could not discard the over-envelope implementation diff', { diff: diffRow });
+          }
+          io.writeCard(lanePath, item.path, clearScopeAndAppendFinding(item.raw, route));
+          summary = { files: 0, loc: 0, paths: [] };
+          break;
+        }
 
         if (worker.checker) {
           const checkerTask = io.writeTaskFile(lanePath, 'probation-build-check.md', [
@@ -490,13 +506,13 @@ export async function runProbationBuild(args, io) {
     if (io.headSha(lanePath) !== baseSha) {
       return abandon('escalated-needs-human', 'refused: worker or resolve moved HEAD before the launcher commit', { diff: diffRow });
     }
-    io.commit(lanePath, [...new Set([...summary.paths, item.path])], declinedReason ? `WE #${num}: record standalone worker decline and route to prepare\n` : buildDocFixCommitMessage({ num, worker, taskType }));
+    io.commit(lanePath, [...new Set([...summary.paths, item.path])], declinedReason ? `WE #${num}: record standalone worker Findings\n` : buildDocFixCommitMessage({ num, worker, taskType }));
 
     // The FINAL gate, on the commit that carries both the build and the resolve — the marker-writing mode
     // (unlike `probation-heal-run.mjs#runGate`'s marker-less `run` mode), because `open-pr --requireVerified=true`
     // below needs a fresh GREEN marker keyed to this exact HEAD.
     const gate = io.runGate(lanePath);
-    if (!gate.pass) return abandon('gate-red', 'the gate is red after the build and the resolve', { diff: diffRow });
+    if (!gate.pass) return abandon('gate-red', `the gate is red after the build and the resolve: ${gate.failureDetail ?? gateFailureDetail(gate.output)}`, { diff: diffRow });
 
     if (preparing) {
       const committed = parseYamlFrontmatter(io.readCommittedCard(lanePath, item.path));
@@ -534,6 +550,16 @@ export async function runProbationBuild(args, io) {
 }
 
 // ─── the real processes ────────────────────────────────────────────────────────────────────────────────────
+
+/** Keep the first failure before the subprocess output is truncated for the result. */
+export function gateFailureDetail(output) {
+  const lines = String(output ?? '').replace(/\x1b\[[0-9;]*m/g, '').split(/\r?\n/).map(line => line.trim());
+  const first = lines.find(line => /^(?:error\b|FAIL\b|Error:|npm error|[^\w\s]*\s*AssertionError:)/i.test(line));
+  const check = first?.startsWith('error ') && lines.some(line => line.includes('check-standards'))
+    ? 'check:standards'
+    : first?.startsWith('FAIL') ? 'vitest' : 'verify-lane';
+  return `${check}: ${(first || lines.find(line => line) || 'no diagnostic output').slice(0, 1500)}`;
+}
 
 function sh(bin, args, opts = {}) {
   return execFileSync(bin, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024, ...opts });
@@ -745,14 +771,16 @@ export function realIo({ session, env = process.env, repoRoot = WE_ROOT } = {}) 
       // The DEFAULT (marker-writing) mode — never `run` mode — so `open-pr --requireVerified=true` below finds
       // a fresh GREEN marker keyed to the commit this gate just verified.
       const r = node('scripts/verify-lane.mjs', ['--json'], { cwd: dir, env: laneEnv, timeout: GATE_TIMEOUT_MS });
-      return { pass: r.ok, output: r.out.slice(-12000) };
+      return { pass: r.ok, output: r.out.slice(-12000), failureDetail: r.ok ? null : gateFailureDetail(r.out) };
     },
     writePrBody: (dir, { num: n, worker: w, diff, taskType = 'doc-fix', declinedReason }) => {
       const bodyFile = join(dir, '.pr-body.md');
       writeFileSync(bodyFile, declinedReason ? [
         `Standalone worker declined #${n}; no implementation change.`, '',
         `> ${declinedReason}`, '',
-        'The hold router removed scope and attached the finding. A prepare pass or human must re-scope the card.',
+        declinedReason.startsWith('scope exceeds')
+          ? 'Implementation changes were discarded; the card is held for the builder with its scope preserved.'
+          : 'The hold router removed scope and attached the finding. A prepare pass or human must re-scope the card.',
         'Full review is owed; parked review:pending.', '',
       ].join('\n') : [
         `${taskType} build on probation (${w.executor}/${w.model}) for #${n} (agy-launcher-probation, #4291).`,
