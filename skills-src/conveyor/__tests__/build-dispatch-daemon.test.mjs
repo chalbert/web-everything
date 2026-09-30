@@ -1347,6 +1347,54 @@ describe('automatic item preparation', () => {
     expect(tick.prepare.retired).toEqual([]);
     expect(tick.prepare.inFlight).toContain('4501');
   });
+  it('never holds or probes a claim-less candidate that has no current-attempt evidence', async () => {
+    const effects = fixture();
+    effects.placePrepareHold = vi.fn();
+    effects.readPrepareStatus = vi.fn(() => ({ preparedDate: null, pr: { state: 'CLOSED' } }));
+    effects.listSettledPrepares = () => [{ num: '4502', startedAt: '2026-01-01', outcome: 'wrapper-failed' }];
+    const tick = await runBuildDispatchTick({ live: true, effects });
+    expect(effects.placePrepareHold).not.toHaveBeenCalled();
+    expect(effects.readPrepareStatus).not.toHaveBeenCalled();
+    expect(effects.dispatch.mock.calls.map(([r]) => r.num)).toEqual(['4501', '4502']);
+    expect(tick.prepare.held).toEqual([]);
+  });
+  it('does not let a held card whose file left main consume a prepare slot', async () => {
+    const effects = fixture();
+    effects.listHolds = () => [{ num: '4501', reason: 'prepare-unstamped' }];
+    effects.readPrepareStatus = ({ num }) => { if (num === '4501') throw new Error('prepare card #4501 not found on origin/main'); return { preparedDate: null }; };
+    const tick = await runBuildDispatchTick({ live: true, effects });
+    expect(tick.prepare.inFlight).not.toContain('4501');
+    expect(tick.prepare.failures).toContainEqual(expect.objectContaining({ num: '4501', stage: 'retirement' }));
+    expect(effects.dispatch.mock.calls.map(([r]) => r.num)).toEqual(['4502']);
+  });
+  it('retires a dead worker whose open PR carries no stamp, holding it', async () => {
+    const effects = fixture();
+    claimed(effects);
+    effects.readPrepareStatus = () => ({ preparedDate: null, pr: { state: 'OPEN', preparedDate: null } });
+    const tick = await runBuildDispatchTick({ live: true, effects });
+    expect(tick.prepare.retired).toHaveLength(1);
+    expect(effects.placePrepareHold).toHaveBeenCalledWith({ num: '4501', reason: 'prepare-unstamped' });
+    expect(tick.prepare.inFlight).not.toContain('4501');
+  });
+  it('keeps a dead-owner claim whose open PR is stamped (valid run awaiting landing)', async () => {
+    const effects = fixture();
+    claimed(effects);
+    effects.readPrepareStatus = () => ({ preparedDate: null, pr: { state: 'OPEN', preparedDate: '2026-09-29' } });
+    const tick = await runBuildDispatchTick({ live: true, effects });
+    expect(tick.prepare.retired).toEqual([]);
+    expect(tick.prepare.inFlight).toContain('4501');
+  });
+  it('ignores fork PRs when reading prepare status', () => {
+    const exec = vi.fn((cmd, args) => {
+      if (cmd === 'git') return 'backlog/4501-card.md\n';
+      if (args[0] === 'pr') {
+        expect(args.join(' ')).toContain('isCrossRepository');
+        return JSON.stringify([{ state: 'CLOSED', headRefName: 'lane/4501-prepare-x', createdAt: '2026-09-29', isCrossRepository: true }]);
+      }
+      return JSON.stringify({ content: Buffer.from('---\nstatus: open\n---').toString('base64') });
+    });
+    expect(cliReadPrepareStatus({ num: '4501', claimedAt: '2026-09-28' }, { exec }).pr).toBeNull();
+  });
   it('reads the stamp from remote main and an open PR head, ignoring older PRs', () => {
     const exec = vi.fn((cmd, args) => {
       if (cmd === 'git') return 'backlog/4501-card.md\n';

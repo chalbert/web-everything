@@ -340,13 +340,22 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
     const claim = prepareClaims.find((c) => normNum(c.meta.num) === num);
     const settled = settledPrepares.get(num);
     // As with build retirement, an older attempt must not settle a fresh claim.
-    const currentSettled = settled && (!claim?.meta?.claimedAt || settled.startedAt >= claim.meta.claimedAt);
+    // A `wrapper-failed` row is an infra failure, not an unstamped prepare: the base retried those.
+    const currentSettled = settled && settled.outcome !== 'wrapper-failed'
+      && (!claim?.meta?.claimedAt || settled.startedAt >= claim.meta.claimedAt);
+    const wasHeld = holds.some((h) => normNum(h.num) === num && h.reason === 'prepare-unstamped');
+    const tracked = Boolean(claim) || prepareBusy.has(num);
+    // A bare candidate (no claim, no in-flight row, no hold, no current settled attempt) has no evidence of a
+    // prepare attempt: skip it, so old PRs/rows never place a hold and the per-tick probe stays bounded.
+    if (!tracked && !wasHeld && !currentSettled
+      && !(bookkeeping.prepareGuards ?? []).some((g) => g.kind === 'prepare-item' && normNum(g.num) === num)) continue;
     try {
       const status = await effects.readPrepareStatus?.({ num, claimedAt: claim?.meta?.claimedAt ?? settled?.startedAt });
       const prDone = ['MERGED', 'CLOSED'].includes(status?.pr?.state);
       const awaitingPr = status?.pr?.state === 'OPEN';
       let why = status?.preparedDate ? 'prepared on main' : prDone ? `prepare PR ${status.pr.state.toLowerCase()}` : null;
-      if (!why && claim && !awaitingPr && isLeaseExpired(claim, effects.now?.() ?? Date.now(), DEFAULT_LEASE_MINUTES)) {
+      // An OPEN PR only shields the claim when it is stamped; an unstamped one must not outlive a dead worker.
+      if (!why && claim && !(awaitingPr && status.pr.preparedDate) && isLeaseExpired(claim, effects.now?.() ?? Date.now(), DEFAULT_LEASE_MINUTES)) {
         // Reuse orphan adoption's owner-PID fallback; a remote/unknown owner cannot be probed locally.
         const host = claim.owner?.slice(0, claim.owner.lastIndexOf(':'));
         const ownerPid = host === (effects.hostname?.() ?? hostname()) ? claim.pid : null;
@@ -388,8 +397,9 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
         prepareBusy.delete(num);
       } else if (claim || awaitingPr) prepareBusy.add(num);
     } catch (e) {
-      // Failed observations never mean unprepared/dead. Keep the item out of dispatch until a good read.
-      prepareBusy.add(num);
+      // Failed observations never mean unprepared/dead. Keep a tracked item out of dispatch until a good read;
+      // a held-only item whose card left main must not pin a prepare slot forever.
+      if (tracked) prepareBusy.add(num);
       prepare.failures.push({ num, stage: 'retirement', reason: String(e?.message || e) });
     }
   }
@@ -787,8 +797,9 @@ export function cliReadPrepareStatus({ num, claimedAt }, { exec = execFileSync }
   const preparedDate = readStamp('main');
   if (preparedDate) return { preparedDate };
   const prs = JSON.parse(exec('gh', ['pr', 'list', '--repo', CONSTELLATION_REPOS.we.slug, '--state', 'all',
-    '--search', `head:lane/${normNum(num)}-prepare-`, '--json', 'number,state,headRefName,headRefOid,createdAt', '--limit', '100'], opts));
-  const pr = prs.filter((p) => p.headRefName.startsWith(`lane/${normNum(num)}-prepare-`)
+    '--search', `head:lane/${normNum(num)}-prepare-`, '--json', 'number,state,headRefName,headRefOid,createdAt,isCrossRepository', '--limit', '100'], opts));
+  // Same-repo only: a fork PR with a lookalike branch name must never retire a claim or place a hold.
+  const pr = prs.filter((p) => !p.isCrossRepository && p.headRefName.startsWith(`lane/${normNum(num)}-prepare-`)
     && (!claimedAt || p.createdAt >= claimedAt)).sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
   return { preparedDate, pr: pr ? { ...pr, preparedDate: pr.state === 'OPEN' ? readStamp(pr.headRefOid) : null } : null };
 }
