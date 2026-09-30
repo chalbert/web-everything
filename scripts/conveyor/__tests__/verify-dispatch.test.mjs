@@ -10,7 +10,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { spawnSync, spawn as spawnProcess, execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, existsSync, readFileSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { laneNeedsVerifyDispatch, spawnGateBounded, runVerifyDispatch, GATE_STARTED_MARKER } from '../verify-dispatch.mjs';
@@ -429,4 +429,184 @@ describe('runVerifyDispatch — concurrent dispatch, never awaiting between lane
   // the first test above: its `expect(calls).toHaveLength(2)` plus the per-lane-name assertions ARE the
   // exactly-once-per-lane check, taken at the point both calls have already fired concurrently. Removed rather
   // than kept as dead weight.
+});
+
+// ── #4373: cap-bounded execution, onGateStarted wiring, and "no second chokepoint" ─────────────────────────
+// Tests only. Real concurrent gate execution is bounded by each spawned `verify-lane.mjs` child's own
+// `acquireSlotBlocking`, never by the daemon; these pin the properties that keep that safe.
+
+/** Run `fn` with `process.env` overridden (undefined deletes), restoring every key afterwards — the spawned
+ *  `verify-lane.mjs` children inherit `process.env`. */
+async function withEnv(overrides, fn) {
+  const saved = {};
+  for (const k of Object.keys(overrides)) {
+    saved[k] = process.env[k];
+    if (overrides[k] === undefined) delete process.env[k]; else process.env[k] = overrides[k];
+  }
+  try {
+    return await fn();
+  } finally {
+    for (const k of Object.keys(saved)) {
+      if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k];
+    }
+  }
+}
+
+/** A gate that logs `start`/`end` intervals to a shared file, so real overlap is measured independently of the
+ *  semaphore (`heldSlots` only scans `cap` files and could never exceed it by construction). */
+function writeIntervalGate(dir, logFile, sleepMs) {
+  const p = join(dir, 'interval-gate.mjs');
+  writeFileSync(
+    p,
+    [
+      `import { appendFileSync } from 'node:fs';`,
+      `const tag = process.argv[2];`,
+      `appendFileSync(${JSON.stringify(logFile)}, 'start ' + tag + ' ' + Date.now() + '\\n');`,
+      `await new Promise((r) => setTimeout(r, ${sleepMs}));`,
+      `appendFileSync(${JSON.stringify(logFile)}, 'end ' + tag + ' ' + Date.now() + '\\n');`,
+    ].join('\n'),
+    'utf8',
+  );
+  return p;
+}
+
+function peakOverlap(logFile) {
+  const events = readFileSync(logFile, 'utf8').trim().split('\n').map((l) => {
+    const [kind, , ts] = l.split(' ');
+    return { kind, ts: Number(ts) };
+  });
+  // Ends sort before starts at the same instant so back-to-back gates are not counted as overlapping.
+  events.sort((a, b) => a.ts - b.ts || (a.kind === 'end' ? -1 : 1));
+  let cur = 0; let peak = 0;
+  for (const e of events) { cur += e.kind === 'start' ? 1 : -1; peak = Math.max(peak, cur); }
+  return peak;
+}
+
+describe('runVerifyDispatch — real cap-bounded execution (#4373)', () => {
+  const CAP = 2;
+
+  for (const [label, n] of [['2×cap (4)', 4], ['3×cap (6)', 6]]) {
+    it(`#4373 peak concurrent gates ≤ cap with ${label} pending lanes, all reaching green`, async () => {
+      const logFile = join(base, 'intervals.log');
+      writeFileSync(logFile, '');
+      const gateScript = writeIntervalGate(base, logFile, 3000);
+      const dirs = [laneDir];
+      for (let i = 2; i <= n; i += 1) dirs.push(makeLane(join(poolDir, `lane-${i}`)));
+      dirs.forEach((d, i) => {
+        const gate = `node ${gateScript} lane-${i + 1}`;
+        expect(runVerifyLane(['request', `--repo=${d}`, `--gate=${gate}`, '--json'], d).code).toBe(0);
+      });
+
+      const result = await withEnv(
+        { LANE_POOL_ROOT: poolRoot, WE_HEAVY_ADMISSION_CAP: String(CAP), WE_HEAVY_ADMISSION: undefined, CI: undefined, WE_HEAVY_ADMISSION_HELD: undefined },
+        () => runVerifyDispatch({ poolRoot }),
+      );
+
+      const peak = peakOverlap(logFile);
+      console.info(`#4373 N=${n} cap=${CAP} measured peak gate overlap = ${peak}`);
+      expect(result.failures).toEqual([]);
+      expect(result.dispatched).toHaveLength(n);
+      expect(peak).toBeLessThanOrEqual(CAP);
+      expect(peak).toBeGreaterThanOrEqual(CAP); // overlap really happened, so the bound is not vacuous
+      for (const d of dirs) {
+        expect(JSON.parse(runVerifyLane(['check', `--repo=${d}`, '--json'], d).out).status).toBe('green');
+      }
+    }, 90_000);
+  }
+
+  it('#4373 an unslotted (admission off) lane is still counted in dispatched, not failures', async () => {
+    expect(runVerifyLane(['request', `--repo=${laneDir}`, '--gate=true', '--json'], laneDir).code).toBe(0);
+    const result = await withEnv(
+      { LANE_POOL_ROOT: poolRoot, WE_HEAVY_ADMISSION: 'off' },
+      () => runVerifyDispatch({ poolRoot }),
+    );
+    expect(result.failures).toEqual([]);
+    expect(result.dispatched).toHaveLength(1);
+    expect(JSON.parse(runVerifyLane(['check', `--repo=${laneDir}`, '--json'], laneDir).out).status).toBe('green');
+  }, 30_000);
+});
+
+describe('runVerifyDispatch — onGateStarted wiring (#4373)', () => {
+  /** Capture everything written to stderr while `fn` runs. */
+  async function captureStderr(fn) {
+    const lines = [];
+    const orig = process.stderr.write;
+    process.stderr.write = (chunk, ...rest) => { lines.push(String(chunk)); return orig.call(process.stderr, chunk, ...rest); };
+    try { await fn(); } finally { process.stderr.write = orig; }
+    return lines.join('');
+  }
+
+  it('#4373 runVerifyDispatch passes its own onGateStarted to spawnGate and logs one gate-started line per real lane', async () => {
+    expect(runVerifyLane(['request', `--repo=${laneDir}`, '--gate=true', '--json'], laneDir).code).toBe(0);
+    let received;
+    const spawnGate = (args, opts) => { received = opts; return spawnGateBounded(args, opts); };
+    const err = await withEnv(
+      { LANE_POOL_ROOT: poolRoot, WE_HEAVY_ADMISSION: undefined },
+      () => captureStderr(() => runVerifyDispatch({ poolRoot, spawnGate })),
+    );
+    expect(typeof received.onGateStarted).toBe('function');
+    const started = err.split('\n').filter((l) => l.includes('▶ gate started for flagtest/lane-1 @ '));
+    expect(started).toHaveLength(1);
+    expect(started[0]).toMatch(/@ [0-9a-f]{8} — \d{4}-\d{2}-\d{2}T[\d:.]+Z$/);
+  }, 30_000);
+
+  it('#4373 gate-started timestamp reflects gate start, not offer time', async () => {
+    const cli = resolve(process.cwd(), 'scripts/readiness/heavy-admission.mjs');
+    const env = { ...process.env, LANE_POOL_ROOT: poolRoot, WE_HEAVY_ADMISSION_CAP: '1' };
+    delete env.CI; delete env.WE_HEAVY_ADMISSION; delete env.WE_HEAVY_ADMISSION_HELD;
+    const holder = spawnProcess('node', [cli, 'run', '--owner=test-holder', `--repo=${poolRoot}`, '--', 'sleep', '2'], { env, stdio: 'ignore' });
+    const lockRoot = admissionLockRoot(poolRoot, env);
+    const pollDeadline = Date.now() + 10_000;
+    let entry;
+    while (Date.now() < pollDeadline) {
+      entry = heldSlots({ lockRoot, cap: 1 }).find((s) => s.owner === 'test-holder');
+      if (entry) break;
+      // eslint-disable-next-line no-await-in-loop -- deliberate poll
+      await new Promise((res) => setTimeout(res, 25));
+    }
+    expect(entry, 'the holder never showed up as holding the slot within 10s').toBeTruthy();
+    const holdEndsAt = Date.parse(entry.meta?.acquiredAt || entry.heartbeatAt) + 2000;
+
+    expect(runVerifyLane(['request', `--repo=${laneDir}`, '--gate=true', '--json'], laneDir).code).toBe(0);
+    const err = await withEnv(
+      { LANE_POOL_ROOT: poolRoot, WE_HEAVY_ADMISSION_CAP: '1', WE_HEAVY_ADMISSION: undefined, WE_HEAVY_ADMISSION_TIMEOUT_MS: '10000' },
+      () => captureStderr(() => runVerifyDispatch({ poolRoot })),
+    );
+    const line = err.split('\n').find((l) => l.includes('▶ gate started for flagtest/lane-1'));
+    expect(line).toBeTruthy();
+    const loggedAt = Date.parse(line.split(' — ').pop());
+    // The gate could only start once the holder released — never at offer time.
+    expect(loggedAt).toBeGreaterThanOrEqual(holdEndsAt - 300);
+    if (holder.exitCode === null && holder.signalCode === null) await new Promise((res) => holder.on('exit', res));
+  }, 30_000);
+});
+
+/** Strip `//` and block comments from JS source, string/template/regex-naive but string-aware. */
+function stripComments(src) {
+  let out = '';
+  let i = 0;
+  while (i < src.length) {
+    const c = src[i]; const d = src[i + 1];
+    if (c === '"' || c === "'" || c === '`') {
+      let j = i + 1;
+      while (j < src.length && src[j] !== c) j += src[j] === '\\' ? 2 : 1;
+      out += src.slice(i, j + 1); i = j + 1;
+    } else if (c === '/' && d === '/') {
+      while (i < src.length && src[i] !== '\n') i += 1;
+    } else if (c === '/' && d === '*') {
+      const j = src.indexOf('*/', i + 2);
+      i = j === -1 ? src.length : j + 2;
+    } else { out += c; i += 1; }
+  }
+  return out;
+}
+
+describe('verify-dispatch — no second admission chokepoint (#4373)', () => {
+  it('#4373 dispatch source code never references acquireSlotBlocking or tryAcquireSlot', () => {
+    // Source scan is the mechanism: the property is "a future edit must not add a call", with no runtime hook.
+    // Known limit: aliased or dynamic access (e.g. `mod['acquire' + 'SlotBlocking']`) is not caught.
+    const code = stripComments(readFileSync(SCRIPT, 'utf8'));
+    expect(code).not.toMatch(/\bacquireSlotBlocking\b/);
+    expect(code).not.toMatch(/\btryAcquireSlot\b/);
+  });
 });
