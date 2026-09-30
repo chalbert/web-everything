@@ -955,6 +955,13 @@ const prepareClaimRoot = () => join(resolveCoordinationRoot(), 'item-prepare-dis
 
 export const DEFAULT_RED_DRAFT_MINUTES = 60;
 
+// PR metadata writes are daemon activity, not evidence that the author is still working.
+function lastDraftAuthorActivity(candidate) {
+  const dates = [candidate.headCommittedAt, candidate.authorLastSeenLiveAt]
+    .map(value => Date.parse(value)).filter(Number.isFinite);
+  return dates.length ? Math.max(...dates) : NaN;
+}
+
 /** Builder-only gate-failure recovery. Unknown liveness fails closed, including a crash between
  * reserving an attempt and recording its handle. The existing orphan retry policy supplies the cap.
  * State is PR-bound, never head-bound: a failed fix pushing another red head cannot reset its budget. */
@@ -965,7 +972,7 @@ export async function recoverBuilderDrafts({
   const results = [];
   for (const c of candidates) {
     try {
-      const at = Date.parse(c.updatedAt);
+      const at = lastDraftAuthorActivity(c);
       if (!c.isDraft || !c.builderAuthored || c.authorLive !== false || !c.failure
         || !Number.isFinite(at) || nowMs - at < staleMinutes * 60_000) continue;
       const state = effects.readState(c.pr) ?? { attempts: 0 };
@@ -1037,7 +1044,12 @@ export async function cliRecoverBuilderDrafts({ rawOpenPrs, allowResume, staleMi
     if (!p.draft || p.state !== 'open' || p.head?.repo?.full_name !== repo || p.head.ref !== pr.headRefName) continue;
     const author = parseAuthorActorId(p.body ?? '');
     if (author && isLive(author) !== false) continue;
-    if (Date.now() - Date.parse(p.updated_at) < staleMinutes * 60_000) continue;
+    const activity = {
+      headCommittedAt: api(`commits/${p.head.sha}`).commit?.committer?.date,
+      authorLastSeenLiveAt: row.entry.lastSeenLiveAt,
+    };
+    const at = lastDraftAuthorActivity(activity);
+    if (!Number.isFinite(at) || Date.now() - at < staleMinutes * 60_000) continue;
     const checks = [];
     for (let page = 1; ; page++) {
       const batch = api(`commits/${p.head.sha}/check-runs?filter=latest&per_page=100&page=${page}`).check_runs;
@@ -1058,7 +1070,7 @@ export async function cliRecoverBuilderDrafts({ rawOpenPrs, allowResume, staleMi
     }
     candidates.push({ pr: pr.number, num, itemNum: num, repo: 'we', laneRef: p.head.ref, headRefOid: p.head.sha,
       scope: (pr.files ?? []).map(f => `we:${f.path}`), isDraft: true, builderAuthored: true,
-      authorLive: false, updatedAt: p.updated_at, failure: { name: failed.name, firstError: firstError.split('\n').find(Boolean)?.slice(0, 2000) } });
+      authorLive: false, ...activity, failure: { name: failed.name, firstError: firstError.split('\n').find(Boolean)?.slice(0, 2000) } });
   }
   const dir = join(io.stateRoot ?? resolveCoordinationRoot(), 'build-red-draft-resumes');
   const path = pr => join(dir, `${pr}.json`);
