@@ -18,7 +18,7 @@ Automatically show what is moving, observed landings today, a short trend and cu
 
 ## Premise check (2026-09-30, against WE `3762fa95f` and plateau-app `1888d29`)
 
-Still open and unbuilt. `we:contracts/plateau-progress-view.{schema,examples}.json` and `plateau-app:src/wip/progress-read.ts` do not exist. `WipSnapshot` is still `schema: 1` (`plateau-app:src/wip/types.ts:184`) and the relay and client both reject anything else (`plateau-app:wip-relay.js:211`, `plateau-app:src/wip/wip-source.ts:isSnapshot`). Nothing in `git log` for #4620 or `xr8m6gs` has landed code. Decision #4619 is resolved, and its recorded fork 1 is not needed here: this slice reads only local caches (option A), so it ships without the budgeted shared producer. Fork 2 is also not blocking: slice 1 uses the external plan read-only with conflict warnings (option A), as the design doc says.
+Still open and unbuilt. `we:contracts/plateau-progress-view.{schema,examples}.json` and `plateau-app:src/wip/progress-read.ts` do not exist. `WipSnapshot` is still `schema: 1` (`plateau-app:src/wip/types.ts:184`) and the relay and client both reject anything else (`plateau-app:wip-relay.js:211`, `plateau-app:src/wip/wip-source.ts:isSnapshot`). Nothing in `git log` for #4620 or `4620` has landed code. Decision #4619 is resolved, and its recorded fork 1 is not needed here: this slice reads only local caches (option A), so it ships without the budgeted shared producer. Fork 2 is also not blocking: slice 1 uses the external plan read-only with conflict warnings (option A), as the design doc says.
 
 ## Design
 
