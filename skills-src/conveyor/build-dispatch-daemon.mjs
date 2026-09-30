@@ -48,7 +48,7 @@ import {
 import { listFixDispatchClaims } from '../../scripts/conveyor/fix-claim-store.mjs';
 // #4465 — a held item's own route (already-done / out-of-scope / other) and the live sweep that acts on it.
 // See that file's own header for the three routes and why this daemon owns the sweep.
-import { planHoldRouting, routeHeldItems, reserveHoldRoute, appendHoldFinding } from '../../scripts/conveyor/build-dispatch-hold-router.mjs';
+import { planHoldRouting, routeHeldItems, reserveHoldRoute, releaseHoldRoute, appendHoldFinding } from '../../scripts/conveyor/build-dispatch-hold-router.mjs';
 import { resolveCoordinationRoot } from '../../scripts/operations/coordination-root.mjs';
 // #4131/#4382 build-orphan-adopt — see that module's own header for the mechanism this closes.
 import { classifyClaimLiveness, settleOrphanRow, adoptOrphanedBuildClaims } from '../../scripts/conveyor/build-dispatch-orphan-adopt.mjs';
@@ -56,7 +56,7 @@ import { classifyClaimLiveness, settleOrphanRow, adoptOrphanedBuildClaims } from
 // exempted from the shared, machine-wide lane-count ceiling.
 import { isLeaseExpired, DEFAULT_LEASE_MINUTES } from '../../scripts/readiness/file-locks.mjs';
 import { defaultIsPidAlive } from '../../scripts/operations/detached-dispatch.mjs';
-import { readField } from '../../scripts/backlog/frontmatter.mjs';
+import { prepareCardStatus } from '../../scripts/conveyor/prepare-result.mjs';
 import { CONSTELLATION_REPOS } from '../../scripts/lib/constellation-repos.mjs';
 import { MAX_CONCURRENT_LANES_ENV } from '../../scripts/lib/lane-concurrency.mjs';
 
@@ -195,6 +195,9 @@ export function deriveDispatchedByBuilder(runStoreRows = [], settledRows = []) {
  * Optional-chained so an older test stub (every fixture that predates this) behaves exactly as before.
  */
 export async function runBuildDispatchTick({ bookkeeping = {}, live = false, policy = BUILD_DISPATCH_POLICY, prepareEnabled = true, effects }) {
+  const holds = effects.listHolds?.() ?? [];
+  // Exclude held candidates BEFORE the tick core allocates its two prepare slots.
+  bookkeeping = { ...bookkeeping, prepareHeldNums: holds.map((h) => normNum(h.num)) };
   const out = await effects.planTick(bookkeeping);
   const d = out?.decisions || {};
   const admission = d.admission || {};
@@ -228,7 +231,6 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
     const prev = settledByNum.get(n);
     if (!prev || (typeof r.startedAt === 'string' && r.startedAt > (prev.startedAt || ''))) settledByNum.set(n, r);
   }
-  const holds = effects.listHolds?.() ?? [];
   const heldNums = new Set(holds.map((h) => normNum(h.num)));
   // #4465 — classify every LIVE hold (pure, cheap, every tick — never gated on `live`, so it is visible on a
   // `--dry-run` tick too) and, LIVE only, act on it (best-effort — a routing hiccup must never fail this
@@ -345,12 +347,12 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
     if (!settledPrepares.has(num) || row.startedAt > settledPrepares.get(num).startedAt) settledPrepares.set(num, row);
   }
   const prepareBusy = new Set(prepareRows.map((r) => normNum(r.num)));
-  const prepare = { enabled: prepareEnabled, planned: [], launched: [], inFlight: [], failures: [], retired: [], held: [] };
+  const prepare = { enabled: prepareEnabled, planned: [], launched: [], inFlight: [], failures: [], retired: [], held: [], stamping: [] };
   const finishedPrepares = new Set();
   const inspectNums = new Set([...prepareClaims.map((c) => normNum(c.meta.num)),
     ...prepareBusy, ...prepareSpawns.map((s) => normNum(s.num)),
     ...(bookkeeping.prepareGuards ?? []).filter((g) => g.kind === 'prepare-item').map((g) => normNum(g.num)),
-    ...holds.filter((h) => h.reason === 'prepare-unstamped').map((h) => normNum(h.num))]);
+    ...holds.filter((h) => ['prepare-unstamped', 'prepare-stamp-pending'].includes(h.reason)).map((h) => normNum(h.num))]);
   for (const num of inspectNums) {
     const claim = prepareClaims.find((c) => normNum(c.meta.num) === num);
     const settled = settledPrepares.get(num);
@@ -358,7 +360,7 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
     // A `wrapper-failed` row is an infra failure, not an unstamped prepare: the base retried those.
     const currentSettled = settled && settled.outcome !== 'wrapper-failed'
       && (!claim?.meta?.claimedAt || settled.startedAt >= claim.meta.claimedAt);
-    const wasHeld = holds.some((h) => normNum(h.num) === num && h.reason === 'prepare-unstamped');
+    const wasHeld = holds.some((h) => normNum(h.num) === num && ['prepare-unstamped', 'prepare-stamp-pending'].includes(h.reason));
     const tracked = Boolean(claim) || prepareBusy.has(num);
     // A bare candidate (no claim, no in-flight row, no hold, no current settled attempt) has no evidence of a
     // prepare attempt: skip it, so old PRs/rows never place a hold and the per-tick probe stays bounded.
@@ -380,11 +382,30 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
         const workerLiveness = worker && classifyClaimLiveness({ row: worker, ownerPid, isPidAlive: effects.isPidAlive ?? defaultIsPidAlive });
         if (liveness.status === 'dead' && (!worker || workerLiveness.status === 'dead')) why = 'dead prepare owner past heartbeat TTL';
       }
-      const wasUnstamped = holds.some((h) => normNum(h.num) === num && h.reason === 'prepare-unstamped');
+      const wasUnstamped = holds.some((h) => normNum(h.num) === num && ['prepare-unstamped', 'prepare-stamp-pending'].includes(h.reason));
       const ended = prDone || why === 'dead prepare owner past heartbeat TTL' || wasUnstamped
         || (currentSettled && !prepareBusy.has(num));
       // An open, stamped PR is a valid finished agent run awaiting landing; main is not stamped yet.
-      const unstamped = status && !status.preparedDate && ended && !(awaitingPr && status.pr.preparedDate);
+      let unstamped = status && !status.preparedDate && ended && !(awaitingPr && status.pr.preparedDate);
+      const recoverable = unstamped && (status.hasSections || (awaitingPr && status.pr.hasSections));
+      if (recoverable) {
+        // Mechanical completion is separate from agent capacity. A failed spawn is retried next tick.
+        if (live) effects.placePrepareHold({ num, reason: 'prepare-stamp-pending' });
+        heldNums.add(num);
+        why = 'prepare stamp recovery';
+        finishedPrepares.add(num);
+        prepareBusy.delete(num);
+        unstamped = false;
+        if (live && prepareEnabled && !plan.freeze.frozen) {
+          try {
+            const result = await effects.stampPrepare({ num, status });
+            prepare.stamping.push({ num, ...result });
+          } catch (e) {
+            prepare.failures.push({ num, stage: 'stamp', reason: String(e?.message || e) });
+          }
+        }
+      }
+      if (wasUnstamped && awaitingPr && status.pr.preparedDate) why ??= 'stamped prepare PR awaiting landing';
       if (status?.preparedDate && wasUnstamped) {
         if (live) effects.releasePrepareHold({ num });
         heldNums.delete(num);
@@ -422,6 +443,7 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
     if (g.kind === 'prepare-item' && !finishedPrepares.has(normNum(g.num))
       && (bookkeeping.prepareGuards ?? []).some((old) => guardId(old) === guardId(g))) prepareBusy.add(normNum(g.num));
   }
+  for (const num of heldNums) prepareBusy.delete(num);
   prepare.inFlight = [...prepareBusy];
   if (prepareEnabled && !plan.freeze.frozen) {
     for (const pick of prepareSpawns) {
@@ -627,7 +649,7 @@ export async function cliListSettledBuilds({ launchKind = 'build' } = {}) {
 export function cliListHolds() {
   // An unstamped result needs a corrected card, not a cooldown followed by the identical prepare.
   return listBuildDispatchHolds({ holdMinutes: Infinity })
-    .filter((h) => h.meta.reason === 'prepare-unstamped' || !isLeaseExpired(h, Date.now(), DEFAULT_BUILD_DISPATCH_HOLD_MINUTES))
+    .filter((h) => ['prepare-unstamped', 'prepare-stamp-pending'].includes(h.meta.reason) || !isLeaseExpired(h, Date.now(), DEFAULT_BUILD_DISPATCH_HOLD_MINUTES))
     .map((h) => ({ num: normNum(h.meta.num), reason: h.meta.reason ?? null }));
 }
 
@@ -802,21 +824,41 @@ export function cliReadPrepareStatus({ num, claimedAt }, { exec = execFileSync }
   const paths = exec('git', ['ls-tree', '-r', '--name-only', 'origin/main', '--', 'backlog/'], opts).trim().split('\n');
   const path = paths.find((p) => p.startsWith(`backlog/${normNum(num)}-`) && p.endsWith('.md'));
   if (!path) throw new Error(`prepare card #${num} not found on origin/main`);
-  const readStamp = (ref) => {
+  const readCard = (ref) => {
     const file = JSON.parse(exec('gh', ['api', `repos/${CONSTELLATION_REPOS.we.slug}/contents/${path}?ref=${encodeURIComponent(ref)}`], opts));
     if (file.encoding !== undefined && file.encoding !== 'base64') throw new Error('unreadable prepare card encoding');
     if (typeof file.content !== 'string') throw new Error('prepare card content unavailable');
-    const stamp = readField(Buffer.from(file.content, 'base64').toString('utf8'), 'preparedDate');
-    return /^\d{4}-\d{2}-\d{2}$/.test(stamp ?? '') ? stamp : null;
+    return prepareCardStatus(Buffer.from(file.content, 'base64').toString('utf8'));
   };
-  const preparedDate = readStamp('main');
-  if (preparedDate) return { preparedDate };
+  const main = readCard('main');
+  if (main.preparedDate) return { ...main, path };
   const prs = JSON.parse(exec('gh', ['pr', 'list', '--repo', CONSTELLATION_REPOS.we.slug, '--state', 'all',
     '--search', `head:lane/${normNum(num)}-prepare-`, '--json', 'number,state,headRefName,headRefOid,createdAt,isCrossRepository', '--limit', '100'], opts));
   // Same-repo only: a fork PR with a lookalike branch name must never retire a claim or place a hold.
   const pr = prs.filter((p) => !p.isCrossRepository && p.headRefName.startsWith(`lane/${normNum(num)}-prepare-`)
     && (!claimedAt || p.createdAt >= claimedAt)).sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
-  return { preparedDate, pr: pr ? { ...pr, preparedDate: pr.state === 'OPEN' ? readStamp(pr.headRefOid) : null } : null };
+  return { ...main, path, pr: pr ? { ...pr, ...(pr.state === 'OPEN' ? readCard(pr.headRefOid) : { preparedDate: null }) } : null };
+}
+
+/** Detached lane-bound recovery: never run the gate/PR wait inside a daemon tick. */
+export async function cliStampPrepare({ num }, { reserve = reserveHoldRoute, release = releaseHoldRoute } = {}) {
+  const entry = { num, route: 'prepare-stamp' };
+  if (!reserve(entry).ok) return { pending: true };
+  try {
+    const { defaultSpawnDetached, deliveryDispatchLogPath } = await import('../../scripts/operations/detached-dispatch.mjs');
+    const result = defaultSpawnDetached([
+      join(SCRIPTS, 'operations', 'prepare-stamp-land.mjs'), `--num=${num}`,
+    ], { cwd: REPO_ROOT, logPath: deliveryDispatchLogPath(`prepare-stamp-${num}`, REPO_ROOT) });
+    // The shared spawner returns ChildProcess, not a dispatch verdict. Wait for actual spawn/error.
+    if (typeof result?.once === 'function') {
+      await new Promise((resolveSpawn, reject) => { result.once('spawn', resolveSpawn); result.once('error', reject); });
+    }
+    if (!result?.pid) throw new Error('prepare stamp worker did not spawn');
+    return { spawned: true, pid: result.pid };
+  } catch (e) {
+    release(entry);
+    throw e;
+  }
 }
 
 const prepareClaimRoot = () => join(resolveCoordinationRoot(), 'item-prepare-dispatch-claims');
@@ -826,6 +868,7 @@ function cliEffects() {
     listPrepareClaims: () => listBuildDispatchClaims({ lockRoot: prepareClaimRoot(), ignoreExpiry: true }),
     listSettledPrepares: () => cliListSettledBuilds({ launchKind: 'prepare-item' }),
     readPrepareStatus: cliReadPrepareStatus,
+    stampPrepare: cliStampPrepare,
     placePrepareHold: (o) => placeBuildDispatchHold(o),
     releasePrepareHold: (o) => releaseBuildDispatchHold(o),
     settlePrepareRow: settleOrphanRow,

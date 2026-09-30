@@ -264,6 +264,26 @@ describe('retirePrepareGuards — NEVER on Agent-return; scope-committed / PR-te
   });
 });
 
+it('full tick drops held guards before lane allocation and advances past held queue leaders', () => {
+  const result = planTick({ state: { queue: [], lanes: [], prs: [] },
+    plan: { launch: [], held: [1, 2, 3, 4].map((num) => ({ num, reason: 'needs-prepare' })) },
+    freeLanes: [7, 8], bookkeeping: { tick: 1, prepareHeldNums: ['1', '2'],
+      prepareGuards: [1, 2].map((num, i) => ({ num, kind: 'prepare-item', lane: 7 + i, spawnedTick: 0 })) },
+    config: { maxConcurrentLanes: 10 },
+  });
+  expect(result.decisions.spawnPrepareItems.map((s) => s.num)).toEqual([3, 4]);
+  expect(result.nextState.prepareGuards.map((s) => s.num)).toEqual([3, 4]);
+});
+
+it('held prepares consume neither guards, proposed slots nor lanes', () => {
+  const result = planPrepareSpawns({
+    needsPrepare: [1, 2, 3, 4].map((num) => ({ num })), prepareHeldNums: ['1', '2'],
+    livePrepareGuards: [1, 2].map((num) => ({ num, kind: 'prepare-item' })),
+    availableLanes: [7, 8],
+  });
+  expect(result.itemPrepareSpawns).toEqual([{ num: 3, lane: 7 }, { num: 4, lane: 8 }]);
+});
+
 describe('planPrepareSpawns — union re-dispatch gate + lane exclusion (SKILL §3b/§3e)', () => {
   it('spawns ONE prepare-item agent per held needs-prepare candidate (#4504)', () => {
     const r = planPrepareSpawns({ needsPrepare: [{ num: 99 }], availableLanes: [5], tick: 0 });

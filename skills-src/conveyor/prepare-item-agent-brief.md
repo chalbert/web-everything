@@ -140,7 +140,12 @@ Before proceeding, read `{{ITEM_SPEC_PATH}}` back from disk and verify its YAML 
 non-empty `preparedDate`. This is mandatory: authored sections alone are not a prepared result. If
 `prepare-stamp` fails or the field is absent, stop with `prepare-unstamped`; do not publish a prepare PR.
 Recheck the committed card at `HEAD:{{ITEM_SPEC_PATH}}` before `open-pr`, so the stamp is in the PR itself.
-The daemon treats a completed unstamped result as failed and holds the card with reason `prepare-unstamped`.
+The daemon independently checks completed results on main and the attempt's open PR. If Design, MVP,
+Test plan and Proof plan are present with content but the stamp is absent, it runs the sanctioned
+`prepare-stamp` in an acquired lane and submits the change through `open-pr --mode=label-on-green`.
+This mechanical recovery uses `prepare-stamp-pending`; it does not occupy an agent prepare slot.
+Only missing sections retain `prepare-unstamped`. Both holds exclude only their own card before planning.
+The Codex probation route already delegates stamping and committed-stamp verification to its runner.
 
 ### 4. Run the gate GREEN
 
