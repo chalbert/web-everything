@@ -228,3 +228,16 @@ it('marks the snapshot refresh deferrable only when the caller opted in', () => 
   readSharedOpenPrs(opts({ fields: 'number', exec }));
   expect(seen).toEqual([true, false]);
 });
+
+it('cache-only planner reads never wait for or initiate a snapshot refresh', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'snapshot-local-'));
+  let calls = 0;
+  const exec = () => { calls++; throw new Error('network forbidden'); };
+  try {
+    expect(readSharedOpenPrs({ repo: REPO, fields: 'number', dir, exec, cacheOnly: true })).toBeNull();
+    expect(calls).toBe(0);
+    writeFileSync(snapshotPath(dir, REPO), JSON.stringify({ v: PR_SNAPSHOT_VERSION, repo: REPO, fields: ['number'], fetchedAtMs: Date.now(), prs: [{ number: 42 }], count: 1 }));
+    expect(readSharedOpenPrs({ repo: REPO, fields: 'number', dir, exec, cacheOnly: true })).toEqual([{ number: 42 }]);
+    expect(calls).toBe(0);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

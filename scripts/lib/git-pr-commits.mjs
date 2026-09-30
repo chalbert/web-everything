@@ -9,7 +9,7 @@ export function isGithubRemoteFor(remoteUrl, repoSlug) {
   return new RegExp(`^(?:https://(?:[^@/]+@)?github\\.com/|git@github\\.com:|ssh://git@github\\.com/)${escapeRe(repoSlug)}$`).test(remote);
 }
 
-export function readGitPrCommits(repoSlug, head, { cwd = process.cwd(), git = execFileSync, headRefOid, baseRefName } = {}) {
+export function readGitPrCommits(repoSlug, head, { cwd = process.cwd(), git = execFileSync, headRefOid, baseRefName, localOnly = false } = {}) {
   // Only provable inputs take the git path: the head identity (oid) and a `main` base are both required,
   // otherwise the host answers (a stacked/release-based PR's commit range differs from origin/main..head).
   if (!headRefOid || baseRefName !== 'main') return null;
@@ -22,7 +22,7 @@ export function readGitPrCommits(repoSlug, head, { cwd = process.cwd(), git = ex
     // Never read a sibling repo's refs as if they belonged to the requested repo.
     if (!isGithubRemoteFor(run(['remote', 'get-url', 'origin']), repoSlug)) return null;
     run(['check-ref-format', `refs/heads/${head}`]);
-    run(['fetch', '--no-tags', 'origin', '+refs/heads/main:refs/remotes/origin/main', `+refs/heads/${head}:refs/remotes/origin/${head}`]);
+    if (!localOnly) run(['fetch', '--no-tags', 'origin', '+refs/heads/main:refs/remotes/origin/main', `+refs/heads/${head}:refs/remotes/origin/${head}`]);
     if (run(['rev-parse', '--is-shallow-repository']).trim() !== 'false') return null;
     if (run(['rev-parse', `origin/${head}`]).trim() !== headRefOid) return null;
     const raw = run(['log', '-z', '--format=%H%x00%an%x00%ae%x00%B%x00%(trailers:key=Co-Authored-By,valueonly,separator=%x1f)', `origin/main..origin/${head}`, '--']);

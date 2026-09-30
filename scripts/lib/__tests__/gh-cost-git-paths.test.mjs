@@ -160,3 +160,15 @@ describe('review-round hardening (#3103)', () => {
     expect(readGitAlreadyDone('4386', { git, cwd: '/lane-only-fixture', filter: (p) => p })).toEqual({ done: false, pr: null, checked: true });
   });
 });
+
+it('the planner reads PR commit facts locally and does not fetch or fall back to GitHub', () => {
+  const git = gitFixture('');
+  const exec = vi.fn(() => { throw new Error('network forbidden'); });
+  expect(fetchPrCommits('chalbert/web-everything', 1, { git, exec, localOnly: true,
+    headRefName: 'lane/x-test', headRefOid: OID, baseRefName: 'main' })).toEqual([]);
+  expect(git.mock.calls.some(([, args]) => args[0] === 'fetch')).toBe(false);
+  expect(exec).not.toHaveBeenCalled();
+  expect(fetchPrCommits('chalbert/web-everything', 1, { git: () => { throw new Error('missing object'); }, exec,
+    localOnly: true, headRefName: 'lane/x-test', headRefOid: OID, baseRefName: 'main' })).toBeNull();
+  expect(exec).not.toHaveBeenCalled();
+});
