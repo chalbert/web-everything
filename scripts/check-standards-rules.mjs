@@ -938,6 +938,68 @@ export function findUnquotedColonScalars(content) {
   return findings;
 }
 
+// ── Test-plan gaps (#4332 — prevention guards 2 + 3 from the #2833 independent review) ──────────────────
+// Two deterministic checks over a card's `## Test plan` section. (1) Classification: every case bullet says
+// whether it is a CAPABILITY case (fails on the base) or a PRESERVATION case (passes on both), and a
+// preservation case names its mutation proof. (2) Condition coverage: every quoted state literal compared in a
+// fenced code block of `## Design` / `## Interfaces & protocol` (`state === 'closed'`, `status: 'merged'`,
+// `case 'x':`) appears as a word in the Test plan. Pure; returns `[{ kind, detail }]` ([] = no gaps or no
+// Test plan). Only literals compared against a state/status identifier are collected, to avoid a false-positive flood.
+const TEST_PLAN_CAPABILITY_RE = /\bRED\b|\bred today\b|\bfails?\b[^.\n]*\bbefore\b/i;
+const TEST_PLAN_PRESERVATION_RE = /\bgreen (?:on )?today\b|\bpasses on (?:today|both)\b|\bguards? a regression\b|\bregression guard\b|\bpreservation\b/i;
+const TEST_PLAN_STATE_LITERAL_RE = /\b(?:state|status)\w*\s*(?:===|!==|==|!=|:)\s*['"]([\w-]+)['"]|\bcase\s+['"]([\w-]+)['"]\s*:/g;
+
+function sectionLines(lines, headingRe) {
+  const out = [];
+  let inside = false;
+  for (const line of lines) {
+    const h = /^##\s+(.*)$/.exec(line);
+    if (h) { inside = headingRe.test(h[1].trim()); continue; }
+    if (inside) out.push(line);
+  }
+  return out;
+}
+
+export function findTestPlanGaps(body) {
+  const lines = String(body ?? '').split(/\r?\n/);
+  const plan = sectionLines(lines, /^test plan\b/i);
+  if (!plan.length) return [];
+  const gaps = [];
+
+  // Case bullets: a top-level list item plus its indented/continuation lines.
+  const bullets = [];
+  for (const line of plan) {
+    if (/^(?:[-*]|\d+\.)\s+/.test(line)) bullets.push(line);
+    else if (bullets.length && line.trim()) bullets[bullets.length - 1] += ' ' + line.trim();
+  }
+  for (const b of bullets) {
+    const label = b.replace(/^(?:[-*]|\d+\.)\s+/, '').slice(0, 60);
+    const capability = TEST_PLAN_CAPABILITY_RE.test(b);
+    const preservation = TEST_PLAN_PRESERVATION_RE.test(b);
+    if (!capability && !preservation) {
+      gaps.push({ kind: 'unclassified-case', detail: label });
+    } else if (preservation && !capability && !/mutation/i.test(b)) {
+      gaps.push({ kind: 'preservation-without-mutation', detail: label });
+    }
+  }
+
+  // Condition coverage: literals compared inside code fences of the design sections.
+  const design = [...sectionLines(lines, /^design\b/i), ...sectionLines(lines, /^interfaces\s*&\s*protocol\b/i)];
+  const literals = new Set();
+  let inFence = false;
+  for (const line of design) {
+    if (/^\s*```/.test(line)) { inFence = !inFence; continue; }
+    if (!inFence) continue;
+    for (const m of line.matchAll(TEST_PLAN_STATE_LITERAL_RE)) literals.add(m[1] ?? m[2]);
+  }
+  const planText = plan.join('\n');
+  for (const lit of literals) {
+    const re = new RegExp(`(?<![\\w-])${lit.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w-])`, 'i');
+    if (!re.test(planText)) gaps.push({ kind: 'untested-condition', detail: lit });
+  }
+  return gaps;
+}
+
 // ── Per-item backlog RENDERING lint (#845) ────────────────────────────────────
 // The structural/rendering checks that operate on ONE backlog item in isolation — no registry/cross-item
 // context needed, so they're cheap enough to run on every edit (a scoped `check:standards --item NNN`
@@ -1001,6 +1063,20 @@ export function lintBacklogItemRendering({ item, body, pocRegistry = null }) {
         `body — if it's a live design fork, carve it to a type:decision item that blocks this one; if it's ` +
         `already resolved or deferred elsewhere, reframe the heading or cite the decision (#NNN). ` +
         `See docs/agent/backlog-workflow.md → the carve rule.`);
+    }
+  }
+
+  // Test-plan gaps (#4332) — WARNING only, open/active cards (the resolved corpus predates the rule).
+  if (item.status !== 'resolved') {
+    const planGaps = findTestPlanGaps(body);
+    if (planGaps.length) {
+      const detail = planGaps.map((g) => g.kind === 'untested-condition'
+        ? `design condition '${g.detail}' has no Test-plan case`
+        : g.kind === 'preservation-without-mutation'
+          ? `preservation case "${g.detail}" names no mutation proof`
+          : `case "${g.detail}" is neither a capability (Red today) nor a preservation (GREEN today) case`).join('; ');
+      warnings.push(`Backlog item "${id}" has Test-plan gaps — ${detail}. Classify each case as capability (fails on the base) ` +
+        `or preservation (passes on both, naming its mutation proof), and give every design condition a case.`);
     }
   }
 

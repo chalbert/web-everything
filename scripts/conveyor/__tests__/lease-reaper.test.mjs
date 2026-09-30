@@ -47,6 +47,7 @@ import {
   resolveLeaseItemNum,
   defaultGitIsAncestor,
   fetchSessionSignals,
+  buildLeaseSignalsFor,
 } from '../lease-reaper.mjs';
 import { DEFAULT_LEASE_TTL_MINUTES } from '../../lib/lane-lease.mjs';
 import { DISPATCH_GUARD_LISTING_GRACE_MINUTES } from '../../operations/dispatch-lane.mjs';
@@ -1525,5 +1526,73 @@ describe('#xkk4lv7 — resolveLeaseItemNum + reapPlan through the REAL resolutio
     const resolverOpts = { git: () => 'lane/8100-abandoned-attempt' };
     const result = resolveLeaseItemNum(lease, '/x/lane-b', { repoStates, nowMs: NOW, ...resolverOpts });
     expect(result).toEqual({ itemNum: null, prNum: null, itemNumSource: null });
+  });
+});
+
+// #4332 review:changes repair — the liveness VETO in `resolveLeaseItemNum` and its `buildLeaseSignalsFor` wiring.
+describe('resolveLeaseItemNum / buildLeaseSignalsFor — #4332 ownerAlive veto', () => {
+  const QUIET = DEFAULT_QUIET_MS;
+  const old = (msAgo) => new Date(NOW - msAgo).toISOString();
+  const BRANCH = 'lane/2825-soak-gate-merge-base';
+  const mergedStates = (state = 'MERGED') => fetchPrStatesForRepo('we', {}, {
+    exec: () => JSON.stringify([{
+      number: 500, headRefName: BRANCH, state,
+      mergedAt: old(QUIET + 3600_000), mergeCommit: { oid: 'deadbeef' },
+    }]),
+  });
+  const resolverOpts = { git: () => BRANCH, statusPorcelain: () => '', isAncestor: () => true };
+  const lease = { session: 'Mac:12345', acquiredAt: old(QUIET + 7200_000), workerSession: 'live-owner' };
+
+  it('merged branch PR + quiet window satisfied + ownerAlive=true → vetoed: no itemNum, no reap-grade itemNumSource', () => {
+    const r = resolveLeaseItemNum(lease, '/x/lane-2', { repoStates: mergedStates(), nowMs: NOW, ownerAlive: true, ...resolverOpts });
+    expect(r.itemNum).toBeNull();
+    expect(r.itemNumSource).toBeNull();
+  });
+
+  it.each([[false], [null], [undefined]])('preservation twin: ownerAlive=%s → still corroborated (branch-corroborated)', (ownerAlive) => {
+    const r = resolveLeaseItemNum(lease, '/x/lane-2', { repoStates: mergedStates(), nowMs: NOW, ownerAlive, ...resolverOpts });
+    expect(r.itemNum).toBe('2825');
+    expect(r.itemNumSource).toBe('branch-corroborated');
+  });
+
+  it('closed branch PR follows the same veto', () => {
+    const r = resolveLeaseItemNum(lease, '/x/lane-2', { repoStates: mergedStates('CLOSED'), nowMs: NOW, ownerAlive: true, ...resolverOpts });
+    expect(r.itemNumSource).not.toBe('branch-corroborated');
+  });
+
+  describe('buildLeaseSignalsFor — production wiring (real git lane, ownerAlive computed before resolution)', () => {
+    let dir; let sha;
+    beforeAll(() => {
+      dir = mkdtempSync(join(tmpdir(), 'lease-reaper-4332-'));
+      const g = (...a) => execFileSync('git', a, { cwd: dir, encoding: 'utf8' }).trim();
+      g('init', '-q'); g('config', 'user.email', 't@t'); g('config', 'user.name', 't');
+      g('checkout', '-q', '-b', BRANCH);
+      writeFileSync(join(dir, 'f'), 'x'); g('add', 'f'); g('commit', '-q', '-m', 'c');
+      sha = g('rev-parse', 'HEAD');
+    });
+    afterAll(() => rmSync(dir, { recursive: true, force: true }));
+    const build = (agents) => {
+      const repoStates = fetchPrStatesForRepo('we', {}, { exec: () => JSON.stringify([{
+        number: 500, headRefName: BRANCH, state: 'MERGED', mergedAt: old(QUIET + 3600_000), mergeCommit: { oid: sha },
+      }]) });
+      return buildLeaseSignalsFor({
+        prStatesByRepo: new Map([['we', repoStates]]),
+        sessionStates: new Map(), sessionPidAlive: new Map(), sessionAgents: agents, wrapperPids: new Map(), nowMs: NOW,
+      });
+    };
+    const cand = () => ({ pool: 'web-everything', lane: 2, dir, repoKey: 'we', lease });
+    it('live occupant listed → veto: no pr-terminal prState, lease kept', () => {
+      const sig = build([{ kind: 'interactive', sessionId: 'live-owner', cwd: dir }])(cand());
+      expect(sig.prState).toBeNull();
+    });
+    it('twin: occupant absent/null listing → same lease reaped on pr-merged', () => {
+      expect(build([])(cand()).prState).toBe('merged');
+      expect(build(null)(cand()).prState).toBe('merged');
+    });
+    it('session-kind lease (conveyor-<n>) is untouched by the veto: item resolves from the session name', () => {
+      const sessionLease = { session: 'conveyor-2825', acquiredAt: old(QUIET + 7200_000), workerSession: 'live-owner' };
+      const sig = build([{ kind: 'interactive', sessionId: 'live-owner', cwd: dir }])({ ...cand(), lease: sessionLease });
+      expect(sig.prState).toBe('merged');
+    });
   });
 });
