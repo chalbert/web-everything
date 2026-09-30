@@ -1567,13 +1567,47 @@ describe('automatic item preparation', () => {
   });
   it.each([true, false, null])('uses Claude worker liveness (%s), independently of the live daemon owner', async (live) => {
     const effects = fixture({ inFlight: [{ num: '4501', row: { runId: 'run', entry: {
-      key: 'dispatch:0:0', status: 'in-flight', handle: '9f40139a', live,
+      key: 'dispatch:0:0', status: 'in-flight', handle: '9f40139a', live, expectedBy: '2026-01-01T00:00:00Z',
     } } }] });
     claimed(effects, '4501', { alive: true });
     effects.settlePrepareRow = vi.fn();
     const tick = await runBuildDispatchTick({ live: true, effects });
     expect(tick.prepare.inFlight.includes('4501')).toBe(live !== false);
     expect(tick.prepare.retired).toHaveLength(live === false ? 1 : 0);
+  });
+  it.each([
+    { live: false, deadline: -1, lastSeen: 1, retired: true },
+    { live: false, deadline: 60, lastSeen: 21, retired: true },
+    { live: false, deadline: 60, lastSeen: 5, retired: false },
+    { live: true, deadline: -1, lastSeen: 30, retired: false },
+    { live: null, deadline: -1, lastSeen: 30, retired: false },
+  ])('retires only confirmed dead sessions beyond a deadline or grace: %j', async ({ live, deadline, lastSeen, retired }) => {
+    const now = Date.now();
+    const entry = { key: 'dispatch:0:0', live, handle: 'worker-session',
+      expectedBy: new Date(now + deadline * 60_000).toISOString(),
+      lastSeenLiveAt: new Date(now - lastSeen * 60_000).toISOString() };
+    const effects = fixture({ inFlight: [{ num: '4501', row: { runId: 'run', entry } }] });
+    claimed(effects, '4501', { alive: true });
+    effects.now = () => now;
+    effects.settlePrepareRow = vi.fn();
+    const bookkeeping = { itemPrepareAttempts: { '4501': 1 },
+      prepareGuards: [{ num: '4501', kind: 'prepare-item', spawnedTick: 0 }] };
+    const tick = await runBuildDispatchTick({ live: true, effects, bookkeeping });
+    expect(tick.prepare.inFlight.includes('4501')).toBe(!retired);
+    expect(effects.listPrepareClaims().some(c => c.meta.num === '4501')).toBe(!retired);
+    expect(tick.nextBookkeeping.prepareGuards.some(g => g.num === '4501')).toBe(!retired);
+    if (retired) {
+      expect(tick.prepare.failures).toContainEqual({ num: '4501', stage: 'retirement', reason: 'prepare-session-dead' });
+      expect(effects.settlePrepareRow).toHaveBeenCalledWith({ runId: 'run', key: entry.key, outcome: 'prepare-session-dead' });
+      expect(tick.nextBookkeeping.itemPrepareAttempts['4501']).toBe(2);
+      expect(effects.placePrepareHold).not.toHaveBeenCalled();
+      expect(effects.dispatch.mock.calls.some(([r]) => r.num === '4501')).toBe(false);
+      effects.listPrepareInFlight = () => [];
+      effects.listSettledPrepares = () => [{ num: '4501', outcome: 'prepare-session-dead', startedAt: new Date(now).toISOString() }];
+      const next = await runBuildDispatchTick({ live: true, effects, bookkeeping: tick.nextBookkeeping });
+      expect(next.prepare.launched.some(r => r.num === '4501')).toBe(true);
+      expect(effects.placePrepareHold).not.toHaveBeenCalled();
+    } else expect(effects.settlePrepareRow).not.toHaveBeenCalled();
   });
   it('keeps probation-only instructions out of the actual standalone prepare brief', async () => {
     const root = resolve(fileURLToPath(import.meta.url), '../../../..');
