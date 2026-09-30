@@ -151,9 +151,9 @@ No new approval/merge/stop buttons are needed. This is observability plus the ex
 
 ## Decision forks: coverage budget and home of standing rules
 
-**Coverage fork (existing #x3qfyz4, fork 1).** A: passive local caches only, explicitly incomplete when the shared producer is absent or stale. B: one budget-limited shared producer reconciliation across three repos/all authors, with its proposed five-minute ceiling and 36 REST requests/hour allowance, pagination included. Existing lower limits and write reserves win. Those numbers are an unratified proposal from the existing card, not an authorized new spend policy. The page and publisher add no GitHub calls under either option. Ship passive cache reads now; complete coverage latency/backfill and any additional producer budget wait for this ruling. The refresh proposal must be tested against the producer's actual pagination cost before ratification.
+**Coverage fork (existing #4619, fork 1).** A: passive local caches only, explicitly incomplete when the shared producer is absent or stale. B: one budget-limited shared producer reconciliation across three repos/all authors, with its proposed five-minute ceiling and 36 REST requests/hour allowance, pagination included. Existing lower limits and write reserves win. Those numbers are an unratified proposal from the existing card, not an authorized new spend policy. The page and publisher add no GitHub calls under either option. Ship passive cache reads now; complete coverage latency/backfill and any additional producer budget wait for this ruling. The refresh proposal must be tested against the producer's actual pagination cost before ratification.
 
-**Policy-source fork (#x3qfyz4, fork 2).** The plan file contains conflicting snapshots: later September 29 limits differ from the older Standing rules/Overnight sections. Latest prose is not automatically authoritative machine policy. This needs an explicit ruling, not a silent parser heuristic.
+**Policy-source fork (#4619, fork 2).** The plan file contains conflicting snapshots: later September 29 limits differ from the older Standing rules/Overnight sections. Latest prose is not automatically authoritative machine policy. This needs an explicit ruling, not a silent parser heuristic.
 
 - **A — Keep the external plan as the read-only source.** Publish operator-designated sections with dates, revisions and conflict warnings. Smallest change, but the instructions remain prose and can diverge from effective daemon settings.
 - **B — Structured, versioned Plateau policy document; recommended eventual target.** Operator-maintained priorities/rules with explicit effective time and supersession, projected read-only in `/wip`; WE defines its shape. Import is reviewed before activation. Better provenance and machine comparison, but migration and authority must be agreed. The progress work alone does not make this document control daemons.
@@ -180,11 +180,11 @@ Design-only verification for this change: run `node we:scripts/verify-lane.mjs` 
 
 ## Filed work
 
-- Decision #x3qfyz4 — shared PR completeness budget and rule/priority source (two forks).
-- Slice 1: #xr8m6gs — Ship a progress-first Plateau overview that replaces the manual plan scoreboard.
-- Slice 2: #xvmk4h4 — Show every running job and builder hold with its actual owner and executor.
-- Slice 3: #xk6vumo — Show all three repos open PRs grouped by what each is waiting on.
-- Slice 4: #x38a7l2 — Count confirmed deliveries by kind and show durable progress trends.
-- Slice 5: #xj5krcc — Show system health API budget overnight stop evidence and the ruled policy source.
+- Decision #4619 — shared PR completeness budget and rule/priority source (two forks).
+- Slice 1: #4620 — Ship a progress-first Plateau overview that replaces the manual plan scoreboard.
+- Slice 2: #4624 — Show every running job and builder hold with its actual owner and executor.
+- Slice 3: #4623 — Show all three repos open PRs grouped by what each is waiting on.
+- Slice 4: #4621 — Count confirmed deliveries by kind and show durable progress trends.
+- Slice 5: #4622 — Show system health API budget overnight stop evidence and the ruled policy source.
 
 The new filing pass used `node we:scripts/operations/run.mjs file-item` with `--queue=false`; its content was then consolidated into the six overlapping card IDs already present in the working tree. Only this pass’s newly created duplicate cards were removed; existing IDs were preserved. All six remain unqueued. Dependency edges are recorded on the stories; the event-ledger dependency applies to complete delivery history, not the initial overview or cache-based PR view.

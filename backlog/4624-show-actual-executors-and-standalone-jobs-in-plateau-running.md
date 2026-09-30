@@ -1,9 +1,10 @@
 ---
+bornAs: xvmk4h4
 kind: story
 locus: plateau-app
 size: 5
 status: open
-blockedBy: ["xr8m6gs", "4340"]
+blockedBy: ["4620", "4340"]
 scope: ["plateau-app:src/wip/progress-runs.ts", "plateau-app:src/wip/progress-runs.test.ts", "plateau-app:src/wip/progress-read.ts", "plateau-app:src/wip/wip-view.ts", "plateau-app:src/wip/wip-view.test.ts", "plateau-app:scripts/wip-publish.ts"]
 dateOpened: "2026-09-30"
 tags: []

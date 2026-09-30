@@ -1,4 +1,5 @@
 ---
+bornAs: xr8m6gs
 kind: story
 locus: plateau-app
 size: 5

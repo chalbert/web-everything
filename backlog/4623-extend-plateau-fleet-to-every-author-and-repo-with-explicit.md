@@ -1,9 +1,10 @@
 ---
+bornAs: xk6vumo
 kind: story
 locus: plateau-app
 size: 5
 status: open
-blockedBy: ["xr8m6gs"]
+blockedBy: ["4620"]
 scope: ["plateau-app:src/wip/progress-prs.ts", "plateau-app:src/wip/progress-prs.test.ts", "plateau-app:src/wip/progress-read.ts", "plateau-app:src/wip/wip-view.ts", "plateau-app:src/wip/wip-view.test.ts", "plateau-app:src/wip/wip-decide.ts", "plateau-app:src/wip/wip-decide.test.ts", "plateau-app:scripts/wip-publish.ts", "plateau-app:wip-relay.js", "plateau-app:src/wip/wip-relay-contract.test.ts"]
 dateOpened: "2026-09-30"
 tags: []

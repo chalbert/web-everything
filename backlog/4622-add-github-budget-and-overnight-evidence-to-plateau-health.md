@@ -1,9 +1,10 @@
 ---
+bornAs: xj5krcc
 kind: story
 locus: plateau-app
 size: 5
 status: open
-blockedBy: ["xr8m6gs", "x3qfyz4", "4340"]
+blockedBy: ["4620", "4619", "4340"]
 scope: ["plateau-app:src/wip/progress-health.ts", "plateau-app:src/wip/progress-health.test.ts", "plateau-app:src/wip/progress-policy.ts", "plateau-app:src/wip/progress-policy.test.ts", "plateau-app:src/wip/progress-read.ts", "plateau-app:src/wip/wip-view.ts", "plateau-app:src/wip/wip-view.test.ts", "plateau-app:scripts/wip-publish.ts"]
 dateOpened: "2026-09-30"
 tags: []
@@ -18,7 +19,7 @@ Follow we:docs/agent/plateau-progress-view.md. WE owns the declarative wire cont
 
 ## MVP
 
-Add proposed Plateau health/policy adapters named in scope. Read persisted health episodes and stamps, runner/drain status and gh-spend ledgers only. Keep App/personal and REST/GraphQL budgets separate with observation/reset times and unattributed gaps. Distinguish process heartbeat from completed tick/pass and intentional pause. Show desired overnight mode separately from observed stop, affected jobs, reason, last/next check. If no controller observation exists, show unknown and shape the producer follow-up during preparation; never infer stopped from prose or a kill switch alone. Implement the rules source selected by #x3qfyz4 without changing daemon policy.
+Add proposed Plateau health/policy adapters named in scope. Read persisted health episodes and stamps, runner/drain status and gh-spend ledgers only. Keep App/personal and REST/GraphQL budgets separate with observation/reset times and unattributed gaps. Distinguish process heartbeat from completed tick/pass and intentional pause. Show desired overnight mode separately from observed stop, affected jobs, reason, last/next check. If no controller observation exists, show unknown and shape the producer follow-up during preparation; never infer stopped from prose or a kill switch alone. Implement the rules source selected by #4619 without changing daemon policy.
 
 ## Done when
 

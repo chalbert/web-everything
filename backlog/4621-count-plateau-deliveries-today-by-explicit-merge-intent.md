@@ -1,9 +1,10 @@
 ---
+bornAs: x38a7l2
 kind: story
 locus: plateau-app
 size: 5
 status: open
-blockedBy: ["xr8m6gs", "4281"]
+blockedBy: ["4620", "4281"]
 scope: ["plateau-app:src/wip/progress-delivery.ts", "plateau-app:src/wip/progress-delivery.test.ts", "plateau-app:src/wip/progress-history.ts", "plateau-app:src/wip/progress-history.test.ts", "plateau-app:src/wip/progress-read.ts", "plateau-app:src/wip/wip-view.ts", "plateau-app:src/wip/wip-view.test.ts"]
 dateOpened: "2026-09-30"
 tags: []
