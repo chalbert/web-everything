@@ -22,7 +22,7 @@ Filed mechanically by the unattended review loop (#2749) — every finding below
 
 ## Premise check (against `main` f98b0805)
 
-Still open and still true. `git log --all --grep` for `4326`/`xig5d0r` finds only the JIT-numbering commit; none of the five guards exists. Checked each cited site on current `main`:
+Still open and still true. `git log --all --grep` for `4326`/`4326` finds only the JIT-numbering commit; none of the five guards exists. Checked each cited site on current `main`:
 
 - `we:scripts/conveyor/reconcile-core.mjs:1490` sets `base.altBranch = pauseState.pause.alt` whenever `concurrentAuthorPauseState` returns a not-held pause (`:297-307`). That function always picks the LAST pause comment and never expires it, so every later dispatch for the same PR re-carries the alt branch. The only existing assertions on `altBranch` are the positive ones (`we:scripts/conveyor/__tests__/fix-procedure.test.mjs:324-333`, `:377-387`).
 - `we:scripts/conveyor/review-status-tag.mjs:97-101`: the `fixClaim` early return sits ahead of `liveFor(fixName)`. `we:scripts/conveyor/__tests__/fix-procedure.test.mjs:252` and `we:scripts/conveyor/__tests__/review-status-tag.test.mjs:197-217` test a claim alone or a session alone, never both together.
