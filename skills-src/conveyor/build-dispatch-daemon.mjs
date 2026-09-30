@@ -625,6 +625,9 @@ export async function cliListRunStoreInFlight({ now = new Date(), launchKind = '
     const { stampLiveness, defaultListAgents } = await import('../../scripts/operations/dispatch-lane-io.mjs');
     const stamped = stampLiveness({ runs: rows.map(r => r.row.entry) }, { listAgents: listAgents ?? defaultListAgents });
     rows.forEach((r, i) => { r.row.entry = stamped.runs[i]; });
+    // A handle-less row with unknown liveness (a launch that failed or timed out before a session existed) has no
+    // worker to probe, so nothing but the clock backstop can ever age it out; keep that one guard for it.
+    return rows.filter((r) => r.row.entry.live != null || r.row.entry.handle || dispatchStillHolds(r.row.entry, now.toISOString()));
   }
   return rows;
 }

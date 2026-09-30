@@ -1044,6 +1044,17 @@ describe('cliListSettledBuilds / cliListHolds (the real readers, not a stub)', (
     expect(rows[0].row.entry.live).toBe(failed ? null : false);
   });
 
+  it.each([['past its deadline', '2026-10-01', 0], ['still inside its deadline', '2026-09-30T05:20:00Z', 1]])(
+    'ages out a handle-less prepare row of unknown liveness (%s)', async (_label, now, expected) => {
+      seedRun('dispatch-lane-4330', [{
+        key: 'dispatch:0:0', type: DISPATCH_EFFECT, stepIndex: 0, index: 0, status: 'in-flight',
+        payload: { num: '4330', launchKind: 'prepare-item' }, handle: null,
+        startedAt: '2026-09-30T05:12:57Z', error: null,
+      }]);
+      const rows = await cliListRunStoreInFlight({ launchKind: 'prepare-item', now: new Date(now), listAgents: () => [] });
+      expect(rows).toHaveLength(expected);
+    });
+
   it('lists an `applied` build effect under the OUTCOME the wrapper actually settled it with', async () => {
     seedRun('dispatch-lane-1001', [{
       key: 'dispatch:0:0', type: DISPATCH_EFFECT, stepIndex: 0, index: 0, status: 'applied',
