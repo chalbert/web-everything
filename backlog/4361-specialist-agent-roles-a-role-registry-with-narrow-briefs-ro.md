@@ -3,9 +3,10 @@ bornAs: xs57vx3
 kind: story
 size: 3
 parent: "4305"
-status: open
+status: active
 scope: ["we:skills-src/conveyor/role-test-soak-author-brief.md", "we:skills-src/conveyor/delivery-agent-brief.md", "we:skills-src/conveyor/brief-rule-ledger.json", "we:skills-src/conveyor/__tests__/role-test-soak-author-brief.test.mjs"]
 dateOpened: "2026-09-28"
+dateStarted: "2026-09-30"
 preparedDate: "2026-09-30"
 preparedAgainstSha: "75d78f50e9b0e1f5c9daeccca8aa902db1cae9f2"
 tags: []
