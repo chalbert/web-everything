@@ -4794,6 +4794,7 @@ async function runCli() {
       // permits a merge; it only lets the gate know that a re-imposed `review:human` is overriding a human's
       // recorded clearance, so the re-hold can be announced instead of landing silently.
       let operatorClearance = null;
+      let humanClearedShaForGate = null; // #4502 — trusted, head-bound clearance the deviation gate requires
       if (hasReviewLabel(v.prLabels, REVIEW_LABELS.accepted)) {
         try {
           const d = JSON.parse(execFileSync('gh', ['pr', 'view', String(v.num), ...repoFlag(v.repo), '--json', 'headRefOid,headRefName,comments'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim() || '{}');
@@ -4803,6 +4804,7 @@ async function runCli() {
           acceptedDiff = parseReviewedDiff(d.comments || []);
           acceptedContribution = parseReviewedContribution(d.comments || []);
           operatorClearance = parseOperatorClearance(d.comments || []);
+          humanClearedShaForGate = parseLatestHumanClearedSha(d.comments || []);
         } catch { /* fetch miss → SHAs null → gate fails open */ }
         // #x169fqe — the LIVE diff, read only when the accept actually recorded a fingerprint to compare it
         // against AND the head has moved. Both conditions keep this off the common path: a pre-#x169fqe accept
@@ -4875,7 +4877,7 @@ async function runCli() {
       // `#2410` ships that writer — do not re-inline the computation here when that day comes, keep it in one
       // named, tested place.
       const engineTier = engineTierForCandidate(score);
-      const gate = decideReviewGate({ escalate: score.escalate, humanRequired: score.humanRequired, labels: v.prLabels, acceptedSha, headSha: liveHeadSha, acceptedDiff, headDiff: liveHeadDiff, acceptedContribution, headContribution: liveHeadContribution, operatorClearance, headReadFailed: liveDiffReadFailed, engineTier, deviation: v.deviation });
+      const gate = decideReviewGate({ escalate: score.escalate, humanRequired: score.humanRequired, labels: v.prLabels, acceptedSha, headSha: liveHeadSha, acceptedDiff, headDiff: liveHeadDiff, acceptedContribution, headContribution: liveHeadContribution, operatorClearance, headReadFailed: liveDiffReadFailed, engineTier, deviation: v.deviation, humanClearedSha: humanClearedShaForGate });
       v.escalated = score.escalate ? 'yes' : 'no';
       // #2365 — gate.humanRequired (not score.humanRequired): decideReviewGate's verdict is the sticky one (#2362
       // makes an already-applied review:human label win even when a rebase narrows the diff back to

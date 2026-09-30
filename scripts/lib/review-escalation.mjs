@@ -680,8 +680,12 @@ export function parseDeviationDisclosure(body) {
   const first = lines.find((l) => l.trim() !== '');
   if (first === undefined) return null;
   const m = /^Deviation:(.*)$/.exec(first.trimStart());
-  const text = m ? m[1].trim() : '';
-  return text === '' ? null : text;
+  if (!m) return null;
+  // Strip HTML-comment delimiters so a worker-supplied line can never render as a live marker
+  // (`<!-- cleared-human: … -->`, `reviewed-sha`) once the drain quotes it into a bot-authored comment/PR body.
+  const text = m[1].replace(/<!--|-->/g, '').trim();
+  // Fail CLOSED: a bare `Deviation:` (reason forgotten or on the next line) is still a disclosure and parks.
+  return text === '' ? '(no reason provided)' : text;
 }
 
 export function scoreEscalation({
@@ -2827,7 +2831,7 @@ export function decideDurableEscalationRecord({ changed, verified, liveBody, rea
 export function decideReviewGate({
   escalate, humanRequired = false, labels = [], acceptedSha = null, headSha = null,
   acceptedDiff = null, headDiff = null, acceptedContribution = null, headContribution = null,
-  operatorClearance = null, headReadFailed = false, engineTier = false, deviation = null,
+  operatorClearance = null, headReadFailed = false, engineTier = false, deviation = null, humanClearedSha = null,
 } = {}) {
   // A reviewer verdict (whoever applied it — for a human-gated PR only a human can) always wins, and is checked
   // FIRST so it overrides even the sticky human gate below: review:accepted IS the human clearing the gate →
@@ -2932,9 +2936,12 @@ export function decideReviewGate({
       };
     }
     // #4502 — a PR that disclosed a rule deviation does not merge on a bare accept (an agent/auto accept may land
-    // before the drain scores the body): it needs a RECORDED human clearance (`operatorClearance`, parsed from the
-    // `clear-human` ceremony comment). Without one, re-park `review:human`.
-    if (deviation && !operatorClearance) {
+    // before the drain scores the body): it needs a RECORDED human clearance BOUND TO THE LIVE HEAD —
+    // `humanClearedSha` from `parseLatestHumanClearedSha` (trusted-author gated, `reviewed-sha` + `cleared-human`
+    // in the SAME comment). The bare `operatorClearance` is forgeable/stale and is NOT accepted here. Without
+    // one, re-park `review:human`.
+    const deviationCleared = !!(humanClearedSha && headSha && String(humanClearedSha).toLowerCase() === String(headSha).toLowerCase());
+    if (deviation && !deviationCleared) {
       return {
         action: 'park',
         reason: `worker disclosed a rule deviation (${deviation}) — review:accepted without a recorded human clearance does not merge; re-parking review:human`,
