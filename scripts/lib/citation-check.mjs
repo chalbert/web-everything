@@ -1133,6 +1133,48 @@ export function findDanglingSymbolAnchors(text, { readRepoFile }) {
 }
 
 /**
+ * Gate 5e — relative markdown links (`](../x.md)`, `](x.md#frag)`) must resolve to a file in the tree.
+ *
+ * `findDanglingSymbolAnchors` only sees `<repo>:<path>#<symbol>`; a bare relative link was never resolved,
+ * so a link written as a same-directory target while the file lives elsewhere read as a real cite. Only
+ * the FILE is checked — heading fragments are out of scope. Skipped: URLs, `mailto:`, site-absolute `/…`,
+ * pure `#frag`, and `<repo>:` refs (gate 5's job). A target escaping the repo root is reported as missing
+ * WITHOUT calling `exists`. Backlog→backlog `.md` links that are missing are also WARNed by
+ * `findBadBodyLinks`; that overlap is accepted deliberately.
+ *
+ * @param text the file body (raw).
+ * @param opts.fromDir repo-relative posix dir of the file holding the links (e.g. `backlog`).
+ * @param opts.exists (repoRelPath) => boolean
+ * @returns array of `{ link, resolved, reason: 'missing-file' }`.
+ */
+export function findDanglingMarkdownLinks(text, { fromDir, exists }) {
+  const findings = [];
+  if (typeof text !== 'string' || text === '') return findings;
+  const prose = text
+    .replace(/^(\s*)(`{3,}|~{3,})[^\n]*\n[\s\S]*?^\s*\2[`~]*[ \t]*$/gm, '')
+    .replace(/`[^`\n]*`/g, '');
+  const seen = new Set();
+  for (const m of prose.matchAll(/\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)/g)) {
+    const link = m[1];
+    if (seen.has(link)) continue;
+    seen.add(link);
+    if (/^(?:[a-z][a-z0-9+.-]*:|\/|#)/i.test(link)) continue; // URL, mailto:, <repo>:, site-absolute, fragment
+    let target = link.split('#')[0].split('?')[0];
+    if (target === '') continue;
+    try { target = decodeURIComponent(target); } catch { /* keep raw */ }
+    const parts = [];
+    let escapes = false;
+    for (const seg of `${fromDir}/${target}`.split('/')) {
+      if (seg === '' || seg === '.') continue;
+      if (seg === '..') { if (parts.length === 0) { escapes = true; break; } parts.pop(); } else parts.push(seg);
+    }
+    const resolved = parts.join('/');
+    if (escapes || !exists(resolved)) findings.push({ link, resolved: escapes ? link : resolved, reason: 'missing-file' });
+  }
+  return findings;
+}
+
+/**
  * Gate 5c — a resolved item's `graduatedTo` target must exist.
  *
  * `graduatedTo` is the one field that asserts something OUTSIDE the item's own diff: *this shipped, and it

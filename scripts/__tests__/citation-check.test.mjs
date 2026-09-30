@@ -37,6 +37,7 @@ import {
   REPO_PREFIXES,
   makeRepoResolver,
   findDanglingSymbolAnchors,
+  findDanglingMarkdownLinks,
   findDanglingGraduatedTargets,
   parseIdentifierSpan,
   codeSpans,
@@ -1130,3 +1131,42 @@ describe('findDanglingGraduatedTargets (gate 5c — the #2756 class)', () => {
   });
 });
 
+
+describe('findDanglingMarkdownLinks (gate 5e — relative markdown links must resolve)', () => {
+  const run = (text, present = [], fromDir = 'backlog') => {
+    const calls = [];
+    const out = findDanglingMarkdownLinks(text, { fromDir, exists: (p) => (calls.push(p), present.includes(p)) });
+    return { out, calls };
+  };
+
+  it('flags a relative link to a missing file', () => {
+    const { out } = run('[x](platform-decisions.md#a)');
+    expect(out).toEqual([{ link: 'platform-decisions.md#a', resolved: 'backlog/platform-decisions.md', reason: 'missing-file' }]);
+  });
+  it('passes a resolving link, incl. ../ traversal', () => {
+    expect(run('[x](../docs/agent/platform-decisions.md#a)', ['docs/agent/platform-decisions.md']).out).toEqual([]);
+  });
+  it('ignores non-relative targets', () => {
+    const text = '[a](https://x.y/z) [b](mailto:a@b.c) [c](/site/path/) [d](#frag) [e](we:x/y.md)';
+    const { out, calls } = run(text);
+    expect(out).toEqual([]);
+    expect(calls).toEqual([]);
+  });
+  it('ignores code', () => {
+    expect(run('```\n[x](gone.md)\n```\nand `[y](gone2.md)`').out).toEqual([]);
+  });
+  it('treats one .. from backlog as the repo root, two as an escape (exists never called)', () => {
+    expect(run('[x](../README.md)').out[0].resolved).toBe('README.md');
+    const { out, calls } = run('[x](../../etc/passwd)');
+    expect(out).toHaveLength(1);
+    expect(calls).toEqual([]);
+  });
+  it('dedupes the same link', () => {
+    expect(run('[a](gone.md) and [b](gone.md)').out).toHaveLength(1);
+  });
+  it('is wired into scanAnchors via emit2', () => {
+    const src = readFileSync('scripts/check-standards.mjs', 'utf8');
+    expect(src).toMatch(/import \{[^}]*findDanglingMarkdownLinks[^}]*\}/);
+    expect(src).toContain("kind: 'citation-markdown-link'");
+  });
+});
