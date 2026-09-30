@@ -55,7 +55,8 @@ export default {
     const argvLog = join(dir, 'argv.log');
     writeFileSync(join(bin, 'gh'), [
       '#!/bin/sh',
-      `printf '%s\\n' "$*" >> '${argvLog}'`,
+      // One line per invocation: the graphql query argument itself spans several lines.
+      `{ printf '%s' "$*" | tr '\\n' ' '; printf '\\n'; } >> '${argvLog}'`,
       "echo '[]'",
       '',
     ].join('\n'));

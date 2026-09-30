@@ -47,19 +47,26 @@ export default {
       }
       writeFileSync(queueFile, JSON.stringify(cleared));
       writeFileSync(join(bin, 'gh'), [
-        '#!/bin/sh', `printf '%s\\n' "$*" >> '${argvLog}'`, "echo '[]'", '',
+        // One line per invocation: the graphql query argument itself spans several lines.
+        '#!/bin/sh', `{ printf '%s' "$*" | tr '\\n' ' '; printf '\\n'; } >> '${argvLog}'`, "echo '[]'", '',
       ].join('\n'));
       chmodSync(join(bin, 'gh'), 0o755);
       const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, WE_GH_THROTTLE_LOCK_ROOT: join(dir, 'throttle') };
       // Exercise the default policy regardless of the operator's local tuning.
       delete env.WE_DISPATCH_PLAN_ALREADY_DONE_NOT_DONE_COOLDOWN_MS;
       delete env.WE_DISPATCH_PLAN_ALREADY_DONE_DONE_COOLDOWN_MS;
+      // A full-history checkout answers already-done from git with zero searches. Run the planner from a scratch
+      // repo whose origin cannot be fetched, so it takes the metered GitHub fallback this probe is about.
+      const repoDir = join(dir, 'repo');
+      mkdirSync(repoDir);
+      execFileSync('git', ['init', '-q'], { cwd: repoDir });
+      execFileSync('git', ['remote', 'add', 'origin', 'file:///nonexistent/github.com/soak/fixture.git'], { cwd: repoDir });
       const countCalls = () => existsSync(argvLog)
-        ? readFileSync(argvLog, 'utf8').split('\n').filter((line) => /^pr list\b/.test(line) && line.includes('--search')).length : 0;
+        ? readFileSync(argvLog, 'utf8').split('\n').filter((line) => /^api graphql\b/.test(line) && line.includes('is:merged')).length : 0;
       const counts = [];
       for (let run = 0; run < 2; run++) {
         const out = execFileSync(process.execPath, [FIXTURE, REPO_ROOT, backlogDir, queueFile, cacheFile], {
-          encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env, timeout: 65_000, killSignal: 'SIGKILL',
+          encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env, cwd: repoDir, timeout: 65_000, killSignal: 'SIGKILL',
         });
         log?.(out.trim());
         const report = JSON.parse(out.trim().split('\n').pop());
