@@ -231,6 +231,17 @@ describe('lane-whois — AFTER', () => {
     expect(report.lanes[0].holderAlive).toBe(true);
   });
 
+  it('ledger entry without a session and session-less foreign agent reports liveOwner:false', () => {
+    writeFileSync(join(lanePath(1), '.git', 'lane-history.jsonl'), JSON.stringify({ event: 'release', at: '2026-09-28T00:00:00Z', holder: 'legacy-holder' }) + '\n');
+    writeFileSync(join(binDir, 'claude'), `#!/bin/sh\necho '[{"state":"working","cwd":"${lanePath(2)}"}]'\n`);
+    const r = runWhois(['--lane=1', '--json', `--repo=${referenceDir}`, '--name=whoispool', `--pool-root=${poolRoot}`]);
+    expect(r.code).toBe(0);
+    const row = JSON.parse(r.out).lanes[0];
+    expect(row.lastHolder.holder).toBe('legacy-holder');
+    expect(row.lastHolder.session).toBeUndefined();
+    expect(row.liveOwner).toBe(false);
+  });
+
   // #4544 — `liveOwner` stays fail-safe (any listed entry), but `liveWorker` is true only for a RUNNING session.
   const whoisWithListing = (sess, entry) => {
     expect(runPool(['acquire', '--lane=1', `--session=${sess}`, ...poolArgs()]).code).toBe(0);

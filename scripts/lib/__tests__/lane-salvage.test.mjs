@@ -15,7 +15,7 @@ import { tmpdir } from 'node:os';
 import {
   salvageStamp, salvageRefNames, isWorktreeLitterPath, parseLsofCwds, pidsWithCwdIn, salvageEligibility,
   liveAgentInLane, deriveSalvageTargets, salvageLane, removeLitterWorktrees, listLitterWorktrees, laneLivenessGate,
-  listUnregisteredWorktreeLitter, newestContentMtimeMs, resolveSalvageQuietMs,
+  listUnregisteredWorktreeLitter, newestContentMtimeMs, resolveSalvageQuietMs, nearestAncestorMtimeMs,
 } from '../lane-salvage.mjs';
 
 describe('lane-salvage pure core', () => {
@@ -41,6 +41,19 @@ describe('lane-salvage pure core', () => {
     expect(liveAgentInLane(agents, '/pool/lane-3')).toBe(true);
     expect(liveAgentInLane(agents, '/pool/lane-4')).toBe(false);
     expect(liveAgentInLane([{ state: 'working', cwd: '/elsewhere', sessionId: 's1' }], '/pool/lane-5', ['s1'])).toBe(true);
+  });
+
+  it('undefined/null session ids never match an agent with no sessionId', () => {
+    expect(liveAgentInLane([{ state: 'working', cwd: '/elsewhere' }], '/pool/lane-1', [undefined, null])).toBe(false);
+  });
+
+  it('nearest ancestor lookup stops at the lane even when every stat throws', () => {
+    const seen = [];
+    expect(nearestAncestorMtimeMs('/pool/lane-1/gone/a.txt', '/pool/lane-1', (p) => {
+      seen.push(p);
+      throw new Error('unstatable');
+    })).toBeNull();
+    expect(seen).toEqual(['/pool/lane-1/gone', '/pool/lane-1']);
   });
 
   it('eligibility refuses lease, live owner, live pid, and a recently touched lane', () => {
@@ -135,8 +148,8 @@ describe('laneLivenessGate (#xl5xhmj)', () => {
 // own docblock for why an ordering fix inside this ONE function could not close the race: an EARLIER, unrelated
 // `git status` elsewhere in the same call chain — `laneReclaimPreservationProof`'s own `gitStatusSummary` in
 // `cmdReclaim` — races the index just as much as this function's own call would). These tests prove BOTH halves
-// still hold without it: a staged/working-tree DELETION (no file left to stat) still reads as fresh via the
-// unstatable-path fallback, and a genuinely quiet lane still reads as quiet.
+// still hold without it: a fresh DELETION reads as recent via its surviving ancestor mtime,
+// while aged deletions and genuinely quiet lanes read as quiet.
 describe('newestContentMtimeMs (real git, #xl5xhmj)', () => {
   let dir;
   const git = (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
@@ -153,9 +166,9 @@ describe('newestContentMtimeMs (real git, #xl5xhmj)', () => {
   });
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-  it('a STAGED DELETION (the tracked path no longer exists on disk) still reads as recent, via the unstatable-path fallback', () => {
+  it('a STAGED DELETION (the tracked path no longer exists on disk) still reads as recent, via the surviving ancestor mtime', () => {
     // Back-date logs/HEAD first so the ONLY fresh signal left is the deletion itself — `bump` cannot stat a
-    // path `git rm` already removed from the working tree, so this pins the fallback, not logs/HEAD.
+    // path `git rm` already removed from the working tree, so this pins the ancestor mtime, not logs/HEAD.
     const old = new Date(Date.now() - 60 * 60_000);
     utimesSync(join(dir, '.git', 'logs', 'HEAD'), old, old);
     git('rm', '-q', 'a.txt'); // staged deletion — a.txt no longer exists on disk to stat
@@ -163,6 +176,26 @@ describe('newestContentMtimeMs (real git, #xl5xhmj)', () => {
     const newest = newestContentMtimeMs(dir);
     expect(newest).not.toBeNull();
     expect(newest).toBeGreaterThanOrEqual(before - 5_000); // recent (within a few seconds), not the back-dated hour
+  });
+
+  it.each(['staged file', 'removed parent directory'])('aged deletion reads quiet: %s', (shape) => {
+    mkdirSync(join(dir, 'nested', 'gone'), { recursive: true });
+    writeFileSync(join(dir, 'nested', 'gone', 'tracked.txt'), 'tracked\n');
+    writeFileSync(join(dir, 'nested', 'gone', 'retained.txt'), 'retained\n');
+    git('add', '.');
+    git('commit', '-qm', 'nested file');
+    if (shape === 'staged file') git('rm', '-q', 'nested/gone/tracked.txt');
+    else rmSync(join(dir, 'nested'), { recursive: true });
+    const old = new Date(Date.now() - 2 * 60 * 60_000);
+    const ancestor = shape === 'staged file' ? join(dir, 'nested', 'gone') : dir;
+    utimesSync(ancestor, old, old);
+    utimesSync(join(dir, '.git', 'logs', 'HEAD'), old, old);
+    // Repeated scans leave the deletion in place; observing it must never refresh its age.
+    for (let i = 0; i < 3; i++) {
+      expect(Date.now() - newestContentMtimeMs(dir)).toBeGreaterThanOrEqual(60 * 60_000);
+      expect(laneLivenessGate({ dir, quietMs: 30 * 60_000, readAgents: () => [], readCwds: () => [] }).eligible).toBe(true);
+      expect(git('status', '--porcelain')).toContain('D ');
+    }
   });
 
   it('a genuinely quiet lane (nothing staged, HEAD reflog old) still reads as old — the original racy-index bug stays fixed', () => {
