@@ -581,3 +581,15 @@ Two consecutive attempts without a PR activate `prepare-route-fallback`: subsequ
 probation and retain explicit Claude Sonnet argv. Re-reading history across ticks/restarts does not
 reset this route; a newer successful probation prepare clears it. Test the diagnostic repair through
 the parked-PR path, bounded refusal, and the daemon's dispatch environment as well as its route decision.
+
+### Prepare launch evidence and brief boundaries
+
+Standalone Claude prepares use `skills-src/conveyor/prepare-item-agent-brief.md`; probation's
+runner reads `skills-src/conveyor/prepare-item-worker-brief.md`. Keep these separate: worker-only
+instructions delegate stamping and publishing to a runner that standalone sessions do not have.
+Dispatch success requires a persisted effect with a handle, never the planning verdict alone;
+regress failed effects through the CLI reader and assert immediate claim release with the error.
+Prepare retirement probes the worker handle independently of the daemon-owned claim PID.
+A failed session listing remains unknown. The daemon's records live in the coordination
+`build-dispatch-runs` store; scratch-started Claude transcripts live under dispatch project paths,
+even after the session changes into a lane. Lane-only transcript searches miss those sessions.
