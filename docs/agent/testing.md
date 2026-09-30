@@ -21,6 +21,13 @@ the card path does. Decision preparation remains a Claude judgment role.
 Flash keeps the Codex read-only checker; a checker refusal undoes the attempt.
 `test-fix` uses Flash without a separate simple flag and refuses non-test worker diffs.
 The CI-heal decision currently has no structured failing-file list; do not infer one from check names.
+Standalone Findings are publication text: strip absolute local paths, qualify code references using the
+standards locus detector, and cap the final excerpt. The temporary-lane regression runs the actual
+file-scoped standards gate on a written card. Envelope refusals discard and verify removal of the worker
+diff before writing a card-only finding; preserve scope and hold for the builder rather than routing
+these cards to auto-prepare. Capture the first gate error before truncating subprocess output, so the
+runner result names the failed check even when the output tail only contains the summary.
+
 
 Verify parallel isolation with the integration test
 `scripts/__tests__/lane-pool-acquire-shares-scan-cache.test.mjs` (the three concurrent acquirers case).
