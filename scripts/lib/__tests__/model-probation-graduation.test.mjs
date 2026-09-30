@@ -71,4 +71,20 @@ describe('graduationProgress', () => {
     expect(text).toContain('(ci-heal, opened on probation: 0 trials by any provider)');
     expect(text).toContain('trials 2/20');
   });
+
+  it('called with NO critical-miss reader it fails closed: qualifying evidence plus a real miss is never graduatable', () => {
+    const rows = [...many(20, {}), trial({ outcome: 'reworked', informative: true, filesTouched: undefined, scoredAt: '2026-09-01T00:00:00Z' })];
+    const t = graduationProgress(rows).triples[0];
+    expect(t.criteria.trials.met).toBe(true);
+    expect(t.criteria.informative.met).toBe(true);
+    expect(t.criteria.criticalMisses).toMatchObject({ have: null, met: false });
+    expect(t.eligibleForPromotionReview).toBe(false);
+    expect(t.next).toMatch(/critical-miss reader/);
+    expect(t.next).not.toMatch(/null/);
+    const text = renderGraduationProgress(graduationProgress(rows));
+    expect(text).toContain('critical-miss reader not supplied');
+    expect(text).not.toMatch(/null/);
+    // with the real reader the same evidence counts the miss.
+    expect(graduationProgress(rows, { criticalMissesFor }).triples[0].criteria.criticalMisses).toMatchObject({ have: 1, met: false });
+  });
 });

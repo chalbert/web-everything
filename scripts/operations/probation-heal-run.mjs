@@ -38,7 +38,7 @@ import { CONSTELLATION_REPOS, DEFAULT_REPO_KEY } from '../lib/constellation-repo
 import { hookSurfaceChanged, resetHookSurface, snapshotHookSurface, withHooksDisabled } from '../lib/git-hook-surface.mjs';
 import {
   buildCheckerArgv, buildCheckerTask, buildCiHealTask, buildHealCommitMessage, buildWorkerArgv,
-  healDiffWithinEnvelope, launchScorecardRow, newUntrackedPaths, parseCheckerVerdict, summarizeNumstat, workerNeeded,
+  healDiffPathsAllowed, healDiffWithinEnvelope, launchScorecardRow, newUntrackedPaths, parseCheckerVerdict, summarizeNumstat, workerNeeded,
 } from '../lib/probation-launcher.mjs';
 
 import { PROVEN_TASK_ENVELOPES } from '../lib/provider-routing.mjs';
@@ -158,6 +158,11 @@ export async function runProbationHeal(args, io) {
       io.discardChanges(lanePath, baseSha, preexisting);
       return finish('gate-red', executor, `not pushed: ${fits.reason}`, { diff: diffRow });
     }
+    const pathsOk = healDiffPathsAllowed(summary.paths, { scope: args.scope });
+    if (!pathsOk.ok) {
+      io.discardChanges(lanePath, baseSha, preexisting);
+      return finish('gate-red', executor, `not pushed: ${pathsOk.reason}`, { diff: diffRow });
+    }
     gate = io.runGate(lanePath);
     if (!gate.pass) return finish('gate-red', executor, 'the gate is still red after the worker\'s repair', { diff: diffRow });
     if (worker.checker) {
@@ -266,22 +271,23 @@ export function realIo({ session, env = process.env } = {}) {
       if (!r.ok) return '';
       try { return JSON.parse(r.out).lastMessage ?? ''; } catch { return ''; }
     },
-    untracked: (dir) => sh('git', ['-C', dir, 'ls-files', '--others', '--exclude-standard'], { env: laneEnv }).split('\n').filter(Boolean),
+    untracked: (dir) => sh('git', ['-C', dir, 'ls-files', '-z', '--others', '--exclude-standard'], { env: laneEnv }).split('\0').filter(Boolean),
     diffNumstat: (dir, base, preexisting = []) => {
-      const created = newUntrackedPaths(preexisting, sh('git', ['-C', dir, 'ls-files', '--others', '--exclude-standard'], { env: laneEnv }).split('\n').filter(Boolean));
+      const created = newUntrackedPaths(preexisting, sh('git', ['-C', dir, 'ls-files', '-z', '--others', '--exclude-standard'], { env: laneEnv }).split('\0').filter(Boolean));
       if (created.length) trySh('git', ['-C', dir, 'add', '--intent-to-add', '--', ...created], { env: laneEnv });
       // The launcher intent-adds every untracked file for its own diff; take the pre-existing ones back out of the
       // index so no intent-to-add entry for a file the worker never wrote is left in the lane.
       if (preexisting.length) trySh('git', ['-C', dir, 'reset', '-q', '--', ...preexisting], { env: laneEnv });
-      // `--no-renames`: a rename's numstat line reads `old => new`, one path string `commit`'s `git add` rejects.
-      return sh('git', ['-C', dir, 'diff', '--no-renames', '--numstat', base], { env: laneEnv });
+      // `--no-renames`: a rename becomes an explicit delete + add (both paths listed), never `old => new`, one path
+      // string `commit`'s `git add` rejects. `-z`: NUL-delimited, so no path is ever C-quoted.
+      return sh('git', ['-C', dir, 'diff', '--no-renames', '-z', '--numstat', base], { env: laneEnv });
     },
     diffText: (dir, base) => sh('git', ['-C', dir, 'diff', base], { env: laneEnv }),
     // Undo ONLY the worker's own changes: reset tracked files, and delete just the untracked paths it created.
     // `trySh` throughout: a git hiccup listing untracked files must not skip the reset below.
     discardChanges: (dir, base, preexisting = []) => {
-      const listed = trySh('git', ['-C', dir, 'ls-files', '--others', '--exclude-standard'], { env: laneEnv });
-      const created = listed.ok ? newUntrackedPaths(preexisting, listed.out.split('\n').filter(Boolean)) : [];
+      const listed = trySh('git', ['-C', dir, 'ls-files', '-z', '--others', '--exclude-standard'], { env: laneEnv });
+      const created = listed.ok ? newUntrackedPaths(preexisting, listed.out.split('\0').filter(Boolean)) : [];
       trySh('git', ['-C', dir, 'reset', '--hard', base], { env: laneEnv });
       if (created.length) trySh('git', ['-C', dir, 'clean', '-f', '--', ...created], { env: laneEnv });
     },

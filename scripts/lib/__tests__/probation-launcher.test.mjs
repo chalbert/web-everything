@@ -2,10 +2,14 @@
  * agy-launcher-probation — the pure launcher decisions: argv, task text, the checker verdict, the diff bound,
  * when a model is needed at all, the trailers, and the launch scorecard row.
  */
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   buildCheckerArgv, buildCiHealTask, buildDocFixCommitMessage, buildDocFixTask, buildHealCommitMessage,
-  buildWorkerArgv, coAuthorTrailerForWorker, frontmatterTamperedBeyondClaim, healDiffWithinEnvelope,
+  buildWorkerArgv, coAuthorTrailerForWorker, frontmatterTamperedBeyondClaim, healDiffPathsAllowed, healDiffWithinEnvelope,
   launchScorecardRow, newUntrackedPaths, parseCheckerVerdict, summarizeNumstat, workerNeeded,
 } from '../probation-launcher.mjs';
 import { PROVEN_TASK_ENVELOPES } from '../provider-routing.mjs';
@@ -184,5 +188,60 @@ describe('frontmatterTamperedBeyondClaim — a doc-fix worker rewriting a field 
     const beforeCrlf = before.replace(/\n/g, '\r\n');
     const afterCrlf = '---\r\nstatus: active\r\nscope: ["we:a.md"]\r\ndateOpened: "2026-09-27"\r\ndateStarted: "2026-09-28"\r\n---\r\n\r\nbody text';
     expect(frontmatterTamperedBeyondClaim(beforeCrlf, afterCrlf)).toBe(false);
+  });
+});
+
+describe('healDiffPathsAllowed (#4338)', () => {
+  it('rejects a statute-tier path even in a tiny diff', () => {
+    const r = healDiffPathsAllowed(['docs/agent/platform-decisions.md']);
+    expect(r.ok).toBe(false);
+    expect(r.reason).toMatch(/statute-tier/);
+  });
+  it('rejects dispatch machinery', () => {
+    expect(healDiffPathsAllowed(['scripts/lib/provider-routing.mjs']).ok).toBe(false);
+  });
+  it('rejects a path outside a non-empty scope; a dir-prefix entry and an exact entry allow theirs', () => {
+    expect(healDiffPathsAllowed(['scripts/b.mjs'], { scope: ['we:scripts/a.mjs'] }).ok).toBe(false);
+    expect(healDiffPathsAllowed(['scripts/a.mjs'], { scope: ['we:scripts/a.mjs'] }).ok).toBe(true);
+    expect(healDiffPathsAllowed(['scripts/lib/x.mjs'], { scope: ['we:scripts/lib/'] }).ok).toBe(true);
+  });
+  it('an empty scope applies only the statute/machinery checks', () => {
+    expect(healDiffPathsAllowed(['scripts/anything.mjs'], { scope: [] }).ok).toBe(true);
+    expect(healDiffPathsAllowed(['scripts/anything.mjs']).ok).toBe(true);
+  });
+  it('a foreign-repo scope entry never allowlists a same-named WE path', () => {
+    expect(healDiffPathsAllowed(['docs/a.md'], { scope: ['frontierui:docs/a.md'] }).ok).toBe(true); // no WE entry → unscoped
+    expect(healDiffPathsAllowed(['docs/a.md'], { scope: ['frontierui:docs/a.md', 'we:docs/b.md'] }).ok).toBe(false);
+  });
+});
+
+describe('summarizeNumstat — NUL-delimited input (#4338)', () => {
+  it('parses `-z` records, keeping spaces in a path and counting a binary as one file, zero lines', () => {
+    const z = '3\t1\tdir/a b.mjs\0-\t-\timg.png\0';
+    expect(summarizeNumstat(z)).toEqual({ files: 2, loc: 4, paths: ['dir/a b.mjs', 'img.png'] });
+  });
+  it('still parses the newline shape', () => {
+    expect(summarizeNumstat('2\t1\ta.mjs\n')).toMatchObject({ files: 1, loc: 3 });
+  });
+});
+
+describe('the real diff listing, in a temp repository (#4338)', () => {
+  it('a rename plus a non-ASCII file yield both old and new paths, unquoted, and `git add` accepts them', async () => {
+    const { realIo } = await import('../../operations/probation-heal-run.mjs');
+    const dir = mkdtempSync(join(tmpdir(), 'numstat-'));
+    try {
+      const git = (...a) => execFileSync('git', ['-C', dir, ...a], { encoding: 'utf8' });
+      git('init', '-q'); git('config', 'user.email', 't@t'); git('config', 'user.name', 't');
+      writeFileSync(join(dir, 'old.txt'), 'one\ntwo\nthree\n');
+      git('add', '.'); git('commit', '-qm', 'base');
+      const base = git('rev-parse', 'HEAD').trim();
+      renameSync(join(dir, 'old.txt'), join(dir, 'new.txt'));
+      writeFileSync(join(dir, 'café ✓.txt'), 'x\n');
+      const io = realIo({ session: 't' });
+      const summary = summarizeNumstat(io.diffNumstat(dir, base, []));
+      expect(summary.paths).toEqual(expect.arrayContaining(['old.txt', 'new.txt', 'café ✓.txt']));
+      expect(summary.paths.some((p) => p.includes('"') || p.includes('\\'))).toBe(false);
+      expect(() => git('add', '--', ...summary.paths)).not.toThrow();
+    } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 });
