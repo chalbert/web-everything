@@ -3,10 +3,11 @@ bornAs: x1q7emf
 kind: story
 size: 3
 parent: "4075"
-status: active
+status: resolved
 scope: ["we:scripts/backlog/scaffold.mjs", "we:scripts/check-standards-rules.mjs", "we:scripts/backlog/__tests__/scaffold.test.mjs", "we:scripts/__tests__/check-standards-rules-content-lint.test.mjs"]
 dateOpened: "2026-09-28"
 dateStarted: "2026-09-30"
+dateResolved: "2026-09-30"
 preparedDate: "2026-09-30"
 preparedAgainstSha: "791a95f338b860408ea254f16d51be92d05246a3"
 tags: []
