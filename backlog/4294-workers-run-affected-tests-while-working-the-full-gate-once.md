@@ -35,7 +35,7 @@ which is exactly what #3321's original local-green-before-land requirement exist
 not the local gate, is now the backstop that makes a full local run unnecessary as the default.
 
 Codified as a statute anchor:
-[we:docs/agent/platform-decisions.md#local-gate-never-full-suite-by-default](platform-decisions.md#local-gate-never-full-suite-by-default).
+[we:docs/agent/platform-decisions.md#local-gate-never-full-suite-by-default](../docs/agent/platform-decisions.md#local-gate-never-full-suite-by-default).
 This item's own original scope (a targeted mid-work step for the generic build/delivery briefs) is UNCHANGED
 and still open — the amendment only corrects what the TERMINAL gate itself was assumed to run.
 

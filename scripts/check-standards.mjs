@@ -103,7 +103,7 @@ import {
   findDanglingMemoryHashSlugs,
   makeMemoizedLineCounter, CITATION_GATES_ENFORCED,
   findUnresolvedIdentifiers, buildIdentifierIndex, isIndexableSourcePath, PROVENANCE_ESCAPE_MARKERS,
-  makeRepoResolver, findDanglingSymbolAnchors, findDanglingGraduatedTargets,
+  makeRepoResolver, findDanglingSymbolAnchors, findDanglingMarkdownLinks, findDanglingGraduatedTargets,
   HASH_PATH_CITE_SOURCE, findHashPathCitesInGrepLines,
   BACKLOG_GLOB_CITE_SOURCE, buildBacklogResolvableIds,
   findDanglingBacklogGlobCitesInGrepLines,
@@ -1693,6 +1693,11 @@ try {
           `citation form (it survives a file growing or being reformatted, which a \`:<line>\` cite does ` +
           `not) — keep it pointing at a real definition.`,
           { kind: 'citation-symbol-anchor', file: rel });
+      for (const f of findDanglingMarkdownLinks(readFileSync(join(abs, name), 'utf8'),
+        { fromDir: dir.replace(/\/$/, ''), exists: (p) => existsSync(join(ROOT, p)) }))
+        emit2(`${rel}: markdown link \`${f.link}\` does not resolve — no such file at \`${f.resolved}\`. ` +
+          `Relative links resolve from this file's own directory; repoint it (or use a \`we:<path>\` ref).`,
+          { kind: 'citation-markdown-link', file: rel });
     }
   };
   scanAnchors('backlog/', ['.md']);
