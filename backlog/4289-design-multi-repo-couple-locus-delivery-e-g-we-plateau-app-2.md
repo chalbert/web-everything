@@ -78,7 +78,7 @@ This reuses existing research rather than inventing a new standard/research topi
 | we:backlog/2662-webcases-viewer-durable-source-registry-add-a-source-carved-.md:10 | Earlier real mixed-scope case: WE backlog contract plus Plateau source registry. The occurrence demonstrates demand; it is not proof that #2662's coupled build shipped or that its independent blocker is cleared. |
 | we:scripts/lane-manifest-write.mjs:9 and :15; we:scripts/readiness/couple-plan.mjs:66–98 | Existing manifest/paired-opening route for option (c), with pinned impl tip and safe fallback. Existing transport is broader than this mechanical builder's admission capability. |
 | we:scripts/lane-drain.mjs:421–444 | Stop-on-failure and reporting of already-landed repos. Ordered completion is not cross-repo atomicity. |
-| `git log --oneline --` for #4289: `1ebb14c50` | The card was JIT-numbered from `x83eb25` to #4289; the wrapper still cites its provisional identity. |
+| `git log --oneline --` for #4289: `1ebb14c50` | The card was JIT-numbered from `4289` to #4289; the wrapper still cites its provisional identity. |
 
 Statute overlap: the proposed admission rule composes with we:docs/agent/platform-decisions.md:2869 (`#pr-flow-rollout-mechanism`, deferred-merge rider), retaining custom drain authority and coupled ordering, and with :5511 (`#conveyor-multi-repo-model`), treating refusal as missing capability rather than a forbidden repo. Neither citation proves this wrapper already builds a couple. No standing agent document is changed by this preparation.
 

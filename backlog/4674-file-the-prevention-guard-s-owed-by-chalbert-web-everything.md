@@ -1,4 +1,5 @@
 ---
+bornAs: xgf9hl7
 kind: story
 size: 3
 status: open
