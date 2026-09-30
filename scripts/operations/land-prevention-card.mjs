@@ -119,17 +119,17 @@ const INVISIBLE_CHARS_RE = /(?![\n\t])[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu;
  * @param {{singleLine?: boolean}} [o]
  * @returns {string}
  */
-export function boundCardText(text, max, { singleLine = false } = {}) {
+export function boundCardText(text, max, { singleLine = false, escapeWikiLinks = true } = {}) {
   let s = String(text ?? '')
     // A SPACE, never '': joining the text around a control char could mint a new bare path (`foo\u0007.mjs` →
     // `foo.mjs`) that the #883 locus-prefix write gate would then refuse.
     .replace(INVISIBLE_CHARS_RE, ' ')
     .replace(/<!--/g, '&lt;!--')
-    .replace(/-->/g, '--&gt;')
-    // Quoted reviewer prose can describe wiki-link syntax; check-standards rejects any `[[…]]` in a card body (#4457).
-    // A backslash after each bracket that precedes the same bracket leaves no adjacent pair, and renders as the literal.
-    .replace(/\[(?=\[)/g, '[\\')
-    .replace(/\](?=\])/g, ']\\');
+    .replace(/-->/g, '--&gt;');
+  // Quoted reviewer prose can describe wiki-link syntax; check-standards rejects any `[[…]]` in a card body (#4457).
+  // A backslash after each bracket that precedes the same bracket leaves no adjacent pair, and renders as the literal.
+  // Body text only: a YAML double-quoted frontmatter value (`scope`) must NOT get it — `\[` is an invalid YAML escape.
+  if (escapeWikiLinks) s = s.replace(/\[(?=\[)/g, '[\\').replace(/\](?=\])/g, ']\\');
   if (singleLine) s = s.replace(/[\n\t]+/g, ' ');
   if (s.length <= max) return s;
   const note = ` … [truncated: ${s.length - max} chars over the ${max}-char cap]`;
@@ -159,7 +159,7 @@ export function boundLandPreventionCardInput(input) {
   const body = isKey ? digest.slice(0, at) : digest;
   // Scope is capped by dropping WHOLE entries, never by slicing one mid-path (a sliced entry would be a fake path
   // in the frontmatter `scope:` the conveyor uses to keep lanes apart).
-  const scopeEntries = boundCardText(input.scope, Number.MAX_SAFE_INTEGER, { singleLine: true }).split(',');
+  const scopeEntries = boundCardText(input.scope, Number.MAX_SAFE_INTEGER, { singleLine: true, escapeWikiLinks: false }).split(',');
   let scope = '';
   for (const entry of scopeEntries) {
     const next = scope ? `${scope},${entry}` : entry;

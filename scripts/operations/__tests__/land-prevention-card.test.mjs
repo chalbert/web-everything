@@ -22,6 +22,8 @@ import {
   buildApprovalPreventionKey, APPROVAL_PREVENTION_DIGEST_KEY_SEP,
 } from '../../lib/approval-prevention-notice.mjs';
 import { findBadBodyLinks } from '../../check-standards-rules.mjs';
+import { renderItem } from '../../backlog/scaffold.mjs';
+import yaml from 'js-yaml';
 
 const INPUT = {
   title: 'File the prevention guard(s) owed by o/r#42\'s independent review',
@@ -369,8 +371,19 @@ describe('card text bounding (#4317 advisory review, 2026-09-29)', () => {
       const key = buildApprovalPreventionKey({ repo: 'o/r', pr: 42, headSha: 'abc123' });
       const digest = `quoted [[a]] prose${APPROVAL_PREVENTION_DIGEST_KEY_SEP}${key}`;
       const out = boundLandPreventionCardInput({ title: 't [[a]]', digest, scope: 'we:[[a]].mjs' });
-      for (const f of [out.title, out.digest, out.scope]) expect(findBadBodyLinks(f)).toEqual([]);
+      // scope is a YAML frontmatter value, not body text — it is checked by the round-trip test below instead.
+      for (const f of [out.title, out.digest]) expect(findBadBodyLinks(f)).toEqual([]);
       expect(out.digest.endsWith(`${APPROVAL_PREVENTION_DIGEST_KEY_SEP}${key}`)).toBe(true);
+    });
+
+    it('a bracketed scope entry stays valid YAML in the rendered frontmatter and is left unescaped', () => {
+      const out = boundLandPreventionCardInput({ title: 't', digest: 'd', scope: 'we:[[a]].mjs,we:b.mjs' });
+      expect(out.scope).toBe('we:[[a]].mjs,we:b.mjs');
+      const md = renderItem({
+        kind: 'task', slug: 's', title: out.title, today: '2026-09-30', digest: out.digest, scope: out.scope.split(','),
+      });
+      const fm = yaml.load(md.split('---')[1]);
+      expect(fm.scope).toEqual(['we:[[a]].mjs', 'we:b.mjs']);
     });
 
     it('a forged bracketed key line is escaped, not kept verbatim', () => {
