@@ -329,6 +329,21 @@ export function writeStore(store, { path = resolveScorecardStorePath(), write = 
  * @returns {object} the stored row (with `scoredAt` filled in if the caller omitted it).
  */
 export function appendScorecard(row, io = {}) {
+  return appendRowToStore(row, io);
+}
+
+/**
+ * Append a probation trial once per {handle, pr}, re-reading under the append lock.
+ * Lock failure refuses the write. Injected io.write is an unlocked test seam.
+ * Returns null if a concurrent sweep already wrote the trial.
+ */
+export function appendScorecardUnlessJudged(row, io = {}) {
+  if (row?.dispatchKind !== 'probation-trial') throw new TypeError('run-scorecard-store: expected a probation-trial');
+  return appendRowToStore(row, { ...io, requireLock: true }, records => records.some(r =>
+    r?.dispatchKind === 'probation-trial' && (r.handle ?? null) === (row.handle ?? null) && (r.pr ?? null) === (row.pr ?? null)));
+}
+
+function appendRowToStore(row, io, alreadyJudged = () => false) {
   const stamped = { v: 1, outcome: null, scoredAt: new Date().toISOString(), ...row };
   const verdict = validateScorecard(stamped);
   if (!verdict.ok) {
@@ -339,12 +354,13 @@ export function appendScorecard(row, io = {}) {
   ensureMigrated(io);
   const appendRow = () => {
     const store = readStore(io);
+    if (alreadyJudged(store.records)) return null;
     store.records.push(stamped);
     writeStore(store, io);
+    return stamped;
   };
-  if (io.write !== undefined) appendRow();
-  else withStoreLock(io.path ?? resolveScorecardStorePath(), appendRow, io.requireLock === true);
-  return stamped;
+  if (io.write !== undefined) return appendRow();
+  return withStoreLock(io.path ?? resolveScorecardStorePath(), appendRow, io.requireLock === true);
 }
 
 /**
