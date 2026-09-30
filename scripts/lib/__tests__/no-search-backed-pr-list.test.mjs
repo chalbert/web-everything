@@ -35,6 +35,9 @@ const ALLOWLIST = {
   // `resolvePrBouncedViaGh`: `--search 'head:lane/<item>-' --state all`, a branch-PREFIX lookup against the same
   // unbounded PR history (`--head` is exact-match only), called only by the one-off backfill, never a polling loop.
   'scripts/conveyor/run-rating.mjs': ['--search'],
+  // `cliReadPrepareStatus`: `--search 'head:lane/<item>-prepare-' --state all`, the same branch-PREFIX lookup
+  // (`--head` is exact-match only; the prepare slug is unknown), run only when main's card carries no stamp yet.
+  'skills-src/conveyor/build-dispatch-daemon.mjs': ['--search'],
 };
 
 function trackedSourceFiles() {
