@@ -1,4 +1,5 @@
 ---
+bornAs: x34sep8
 kind: story
 size: 3
 status: open
