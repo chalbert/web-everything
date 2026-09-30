@@ -1,4 +1,4 @@
-import { meteredAlreadyDone } from '../lib/gh-metered-reads.mjs';
+import { meteredAlreadyDone, alreadyDoneRequest } from '../lib/gh-metered-reads.mjs';
 import { readGitAlreadyDone } from '../lib/git-already-done.mjs';
 /**
  * @file scripts/operations/dispatch-lane-io.mjs
@@ -2898,7 +2898,7 @@ export function defaultCheckAlreadyDone(num, { exec = execFileSyncThrottled, env
       const remote = String(execFileSync('git', ['remote', 'get-url', 'origin'], { cwd, encoding: 'utf8', timeout: 5000 })).trim();
       const slug = remote.match(/github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?$/)?.[1];
       if (slug) {
-        const matches = filterAlreadyDoneCandidates(meteredAlreadyDone(slug, key), key);
+        const matches = filterAlreadyDoneCandidates(meteredAlreadyDone(slug, key, { opts: { stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 4 * 1024 * 1024, timeout: prListTimeoutMs(env), killSignal: 'SIGKILL' } }), key);
         return { done: matches.length > 0, pr: matches[0] ?? null, checked: true };
       }
     } catch { return { done: false, pr: null, checked: false }; }
@@ -3000,7 +3000,10 @@ export async function defaultCheckAlreadyDoneAsync(num, { execFileFn = execFileT
       const remote = String(execFileSync('git', ['remote', 'get-url', 'origin'], { cwd, encoding: 'utf8', timeout: 5000 })).trim();
       const slug = remote.match(/github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?$/)?.[1];
       if (slug) {
-        const matches = filterAlreadyDoneCandidates(meteredAlreadyDone(slug, key), key);
+        // Awaited through the injectable executor (not a bare runGhSync) so the #3460 bounds ride along and a test can inject.
+        const req = alreadyDoneRequest(slug, key, { stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 4 * 1024 * 1024, timeout: prListTimeoutMs(env), killSignal: 'SIGKILL' });
+        const { stdout } = await execFileFn('gh', req.args, req.opts);
+        const matches = filterAlreadyDoneCandidates(JSON.parse(String(stdout)), key);
         return { done: matches.length > 0, pr: matches[0] ?? null, checked: true };
       }
     } catch { return { done: false, pr: null, checked: false }; }

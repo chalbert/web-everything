@@ -316,10 +316,12 @@ export function classifyGhWrite(args) {
     const methodIdx = a.indexOf('--method');
     const method = methodIdx >= 0 ? String(a[methodIdx + 1] || '').toUpperCase() : null;
     if (method) return method !== 'GET' && method !== 'HEAD';
-    // `gh api graphql -f query=…` is POST only because of the flag; a query with no `mutation` is a read.
-    if (a[1] === 'graphql') {
-      const q = a.find((t) => typeof t === 'string' && t.startsWith('query='));
-      if (q && !/\bmutation\b/.test(q)) return false;
+    // `gh api graphql -f query=…` is POST only because of the flag. Read exemption is an ALLOWLIST: only an
+    // inline `-f/--raw-field query=<text with no mutation>` and no `--input`/`@file` value anywhere. A `query=@file`
+    // token or `--input` hides the text, so it stays a write.
+    if (a[1] === 'graphql' && !a.includes('--input') && !a.some((t) => typeof t === 'string' && /^(query=)?@/.test(t) && t !== '@')) {
+      const qi = a.findIndex((t, i) => (t === '-f' || t === '--raw-field') && typeof a[i + 1] === 'string' && a[i + 1].startsWith('query=') && !a[i + 1].startsWith('query=@'));
+      if (qi >= 0 && !/\bmutation\b/i.test(a[qi + 1])) return false;
     }
     return a.some((t) => t === '-f' || t === '-F' || t === '--field' || t === '--raw-field' || t === '--input');
   }

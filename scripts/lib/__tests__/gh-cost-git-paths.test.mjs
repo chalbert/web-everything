@@ -135,3 +135,28 @@ describe('read-only graphql is not a write', () => {
     for (const [argv] of exec.mock.calls) expect(classifyGhWrite(argv)).toBe(false);
   });
 });
+
+describe('review-round hardening (#3103)', () => {
+  it('a graphql query whose text is hidden (@file / --input) stays a write', () => {
+    expect(classifyGhWrite(['api', 'graphql', '-F', 'query=@q.graphql'])).toBe(true);
+    expect(classifyGhWrite(['api', 'graphql', '-f', 'query=query { viewer { login } }', '--input', 'body.json'])).toBe(true);
+  });
+  it('meteredAlreadyDone forwards the caller subprocess bounds to the exec', () => {
+    const exec = vi.fn(() => '[]');
+    meteredAlreadyDone('o/n', '1', { exec, opts: { timeout: 123, killSignal: 'SIGKILL', maxBuffer: 4096 } });
+    expect(exec.mock.calls[0][1]).toMatchObject({ timeout: 123, killSignal: 'SIGKILL', maxBuffer: 4096, encoding: 'utf8' });
+  });
+  it.each(['(a+)+$', '.*', 'x1;y', ''])('falls back on an unsafe bornAs %j', (bornAs) => {
+    expect(readGitAlreadyDone('4386', { git: gitFixture(), bornAs, filter: (p) => p })).toBeNull();
+  });
+  it('falls back for merged PRs outside main ancestry (a non-main long-lived base exists)', () => {
+    const base = gitFixture('');
+    const git = vi.fn((f, args, o) => (args[0] === 'ls-remote' ? 'aaa\trefs/heads/main\nbbb\trefs/heads/release/1.0\n' : base(f, args, o)));
+    expect(readGitAlreadyDone('4386', { git, cwd: '/other-base-fixture', filter: (p) => p })).toBeNull();
+  });
+  it('still answers locally when only main and lane/* heads exist', () => {
+    const base = gitFixture('');
+    const git = vi.fn((f, args, o) => (args[0] === 'ls-remote' ? 'aaa\trefs/heads/main\nbbb\trefs/heads/lane/x\n' : base(f, args, o)));
+    expect(readGitAlreadyDone('4386', { git, cwd: '/lane-only-fixture', filter: (p) => p })).toEqual({ done: false, pr: null, checked: true });
+  });
+});

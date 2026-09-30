@@ -5,11 +5,15 @@ import { execFileSync } from 'node:child_process';
 // fetch is a blocking network round-trip. `origin/main` does not need to be fresher than this for an exclusion check.
 const FETCH_TTL_MS = 60_000;
 const lastFetch = new Map();
+const otherBasesCache = new Map(); // fetchKey → {at, value}; same TTL as the fetch, one ls-remote per window
 
 export function readGitAlreadyDone(num, { git = execFileSync, cwd = process.cwd(), filter, bornAs, now = Date.now } = {}) {
   const key = String(num ?? '').trim();
   if (!/^\d+$/.test(key)) return null;
+  // `bornAs` is interpolated into a RegExp and a git pathspec below — only the JIT `x…` alias shape is safe.
+  if (bornAs != null && !/^x[a-z0-9]+$/.test(String(bornAs))) return null;
   const run = (args) => String(git('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 15_000, maxBuffer: 64 * 1024 * 1024 }));
+  let otherBases = false;
   try {
     if (run(['rev-parse', '--is-shallow-repository']).trim() !== 'false') return null;
     const remote = run(['remote', 'get-url', 'origin']).trim();
@@ -19,6 +23,16 @@ export function readGitAlreadyDone(num, { git = execFileSync, cwd = process.cwd(
     if (!(now() - (lastFetch.get(fetchKey) ?? -Infinity) < FETCH_TTL_MS)) {
       run(['fetch', '--no-tags', 'origin', '+refs/heads/main:refs/remotes/origin/main']);
       lastFetch.set(fetchKey, now());
+    }
+    // A PR merged into another base branch (a release branch) never appears in main's history, yet the GitHub
+    // search counts it. Any long-lived origin branch besides main / `lane/*` PR heads means a negative answer
+    // from main alone is unprovable — fall back to the host. (Positive answers below stay valid regardless.)
+    const cached = otherBasesCache.get(fetchKey);
+    if (cached && now() - cached.at < FETCH_TTL_MS) otherBases = cached.value;
+    else {
+      const heads = run(['ls-remote', '--heads', 'origin']).split('\n').map((l) => l.split('\trefs/heads/')[1]).filter(Boolean);
+      otherBases = heads.some((h) => h !== 'main' && !h.startsWith('lane/'));
+      otherBasesCache.set(fetchKey, { at: now(), value: otherBases });
     }
     const aliases = new Set([key, bornAs].filter(Boolean));
     const numbering = run(['log', 'origin/main', '--format=%s', '--grep=JIT-number']);
@@ -57,6 +71,6 @@ export function readGitAlreadyDone(num, { git = execFileSync, cwd = process.cwd(
       // cannot be disproved locally: preserve the old guard by asking GitHub for this case.
       return null;
     }
-    return { done: false, pr: null, checked: true };
+    return otherBases ? null : { done: false, pr: null, checked: true };
   } catch { return null; }
 }
