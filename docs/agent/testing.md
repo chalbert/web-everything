@@ -681,7 +681,7 @@ still retains ownership. Probe with an in-flight run on disk, duplicate terminal
 reader, and a stamped card at the next daemon tick. Held dispatch reads must not invoke the full planner.
 Use the integration Vitest config for we:scripts/operations/__tests__/dispatch-lane-integration.test.mjs;
 the default config excludes that file. Keep dead-PID and unknown-session crash recovery tests.
-=======
+
 ## GitHub spend regression probes
 
 Use TOTAL App GraphQL counter movement over a named wall-clock window as the success metric.
@@ -696,4 +696,9 @@ fall back unless that body is available. Older nonstandard merges are irrelevant
 ancestry proves they predate the item's creation (including its bornAs/JIT-number alias).
 PR-limit fixtures should compare the existing authorship classifier over git's author, message,
 and parsed co-author trailers, and assert no GitHub invocation on a successful git read.
->>>>>>> 1ebeba32b (Cut GitHub GraphQL spend: real meter, already-done and pr-limit from git)
+
+Already-done CLI fixtures must run in their own git checkout: complete history proves zero host
+calls; shallow history exercises the metered GraphQL fallback. Preserve exact stale-ID call counts
+and cache replay assertions on that fallback. Keep the fake host's throttle store private so another
+suite cannot consume its budget. Numbering fixtures likewise pass a private `lockRoot` to the real
+mutex instead of acquiring the developer's shared drain lock.
