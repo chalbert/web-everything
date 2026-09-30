@@ -994,7 +994,7 @@ export function findTestPlanGaps(body) {
   }
   const planText = plan.join('\n');
   for (const lit of literals) {
-    const re = new RegExp(`(?<![\\w-])${lit.replace(/[.*+?^${}()|[\]\\]/g, '\\// ── Per-item backlog RENDERING lint (#845)')}(?![\\w-])`, 'i');
+    const re = new RegExp(`(?<![\\w-])${lit.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w-])`, 'i');
     if (!re.test(planText)) gaps.push({ kind: 'untested-condition', detail: lit });
   }
   return gaps;
