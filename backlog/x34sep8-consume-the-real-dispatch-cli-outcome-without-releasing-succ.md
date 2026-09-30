@@ -5,6 +5,7 @@ status: open
 scope: ["we:skills-src/conveyor/build-dispatch-daemon.mjs", "we:skills-src/conveyor/__tests__/build-dispatch-daemon.test.mjs"]
 dateOpened: "2026-09-30"
 tags: []
+relatedReport: reports/2026-09-30-builder-launch-misread-root-causes.md
 ---
 
 # Consume the real dispatch CLI outcome without releasing successful build claims
