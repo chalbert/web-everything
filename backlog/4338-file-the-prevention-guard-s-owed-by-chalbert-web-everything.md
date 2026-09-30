@@ -2,9 +2,10 @@
 bornAs: xzqw37h
 kind: story
 size: 3
-status: open
+status: active
 scope: ["we:scripts/operations/probation-heal-run.mjs", "we:scripts/lib/model-probation.mjs", "we:scripts/lib/probation-launcher.mjs", "we:scripts/operations/__tests__/probation-heal-run.test.mjs", "we:scripts/lib/__tests__/model-probation.test.mjs", "we:scripts/lib/__tests__/probation-launcher.test.mjs", "we:scripts/lib/__tests__/model-probation-graduation.test.mjs"]
 dateOpened: "2026-09-27"
+dateStarted: "2026-09-30"
 preparedDate: "2026-09-30"
 preparedAgainstSha: "4b83f97d310842cbedba1bc0cc2481775fe52550"
 tags: []

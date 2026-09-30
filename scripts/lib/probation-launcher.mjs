@@ -27,7 +27,7 @@
  */
 
 import { isTestPath } from './dispatch-task-type.mjs';
-import { PROVEN_TASK_ENVELOPES } from './provider-routing.mjs';
+import { DISPATCH_MACHINERY_PATHS, isStatuteTierPath, PROVEN_TASK_ENVELOPES } from './provider-routing.mjs';
 
 /** The launcher scripts a probation worker may name, repo-relative. */
 export const PROBATION_LAUNCHERS = Object.freeze(['scripts/gemini-direct-task.mjs', 'scripts/codex-direct-task.mjs']);
@@ -265,8 +265,12 @@ export function summarizeNumstat(numstat, { exclude = [] } = {}) {
   const skip = new Set(exclude);
   const paths = [];
   let loc = 0;
-  for (const line of String(numstat ?? '').split('\n')) {
-    const m = /^(\d+|-)\t(\d+|-)\t(.+)$/.exec(line.trim());
+  const text = String(numstat ?? '');
+  // `git diff -z --numstat --no-renames` records are `added\tdeleted\tpath\0` (paths verbatim, never C-quoted); the
+  // newline shape is kept for callers (the build arc) that still read the plain output.
+  const nul = text.includes('\0');
+  for (const line of text.split(nul ? '\0' : '\n')) {
+    const m = /^(\d+|-)\t(\d+|-)\t([\s\S]+)$/.exec(nul ? line.replace(/^\n/, '') : line.trim());
     if (!m || skip.has(m[3])) continue;
     paths.push(m[3]);
     loc += (m[1] === '-' ? 0 : Number(m[1])) + (m[2] === '-' ? 0 : Number(m[2]));
@@ -299,6 +303,42 @@ export function healDiffWithinEnvelope(summary, envelope = PROVEN_TASK_ENVELOPES
   if (summary.files > envelope.maxFiles) return { ok: false, reason: `the heal touched ${summary.files} files (limit ${envelope.maxFiles})` };
   if (summary.loc > envelope.maxLoc) return { ok: false, reason: `the heal changed ${summary.loc} lines (limit ${envelope.maxLoc})` };
   return { ok: true, reason: `${summary.files} file(s), ${summary.loc} line(s) — within the ci-heal envelope` };
+}
+
+/**
+ * The scope entries that name a path in THIS (WE) lane: bare paths and explicit `we:` entries, prefix stripped.
+ * PURE. A foreign-repo entry (`frontierui:docs/a.md`) must never allowlist a same-named WE path. Mirrors
+ * `probation-build-run.mjs#declaredScopePaths`.
+ * @param {string[]} scope
+ * @returns {string[]}
+ */
+function weScopeEntries(scope) {
+  return (scope || []).map(String)
+    .filter((p) => !/^[a-z][\w-]*:/.test(p) || p.startsWith('we:'))
+    .map((p) => p.replace(/^we:/, ''));
+}
+
+/**
+ * Post-diff PATH gate for a heal, next to {@link healDiffWithinEnvelope}. PURE. A small diff can still be the
+ * wrong diff: reject when any path is statute-tier, dispatch machinery, or (with a non-empty scope) outside the
+ * dispatch's declared scope. A scope entry ending in `/` is a directory prefix; an empty scope applies only the
+ * statute/machinery checks.
+ * @param {string[]} paths
+ * @param {{scope?: string[]}} [o]
+ * @returns {{ok: boolean, reason: string}}
+ */
+export function healDiffPathsAllowed(paths, { scope = [] } = {}) {
+  const list = Array.isArray(paths) ? paths : [];
+  const statute = list.find(isStatuteTierPath);
+  if (statute) return { ok: false, reason: `the heal touched a statute-tier path (${statute})` };
+  const machinery = list.find((p) => DISPATCH_MACHINERY_PATHS.includes(p));
+  if (machinery) return { ok: false, reason: `the heal touched dispatch machinery (${machinery})` };
+  const entries = weScopeEntries(scope);
+  if (entries.length) {
+    const outside = list.find((p) => !entries.some((e) => (e.endsWith('/') ? p.startsWith(e) : p === e)));
+    if (outside) return { ok: false, reason: `the heal touched a path outside the dispatch's declared scope (${outside})` };
+  }
+  return { ok: true, reason: 'every path is allowed' };
 }
 
 /**

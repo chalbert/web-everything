@@ -408,7 +408,7 @@ export function judgePendingTrials(records, { lookupPr, append = () => {}, isCri
  *   registry?: {entries: object[]}}} [o]
  * @returns {{numbers: object, triples: object[], providers: object[]}}
  */
-export function graduationProgress(records, { numbers = GRADUATION_NUMBERS, criticalMissesFor = () => [], registry = { entries: [] } } = {}) {
+export function graduationProgress(records, { numbers = GRADUATION_NUMBERS, criticalMissesFor = null, registry = { entries: [] } } = {}) {
   const rows = Array.isArray(records) ? records : [];
   const groups = new Map();
   for (const r of rows.filter(isWorkTrialRow)) {
@@ -425,14 +425,17 @@ export function graduationProgress(records, { numbers = GRADUATION_NUMBERS, crit
     const outcomes = {};
     for (const r of judged) outcomes[r.outcome] = (outcomes[r.outcome] ?? 0) + 1;
     const informative = verified.filter((r) => r.informative === true).length;
-    const misses = criticalMissesFor(g.rows, g.taskType).filter((m) => m.provider === g.provider && m.model === g.model).length;
+    // Fail closed: no reader means the veto cannot be evaluated, never "zero misses".
+    const misses = typeof criticalMissesFor === 'function'
+      ? criticalMissesFor(g.rows, g.taskType).filter((m) => m.provider === g.provider && m.model === g.model).length
+      : null;
     const own = mean(ratings.filter((x) => x.taskType === g.taskType && x.provider === g.provider && x.model === g.model).map((x) => x.score));
     const claude = mean(ratings.filter((x) => x.taskType === g.taskType && CLAUDE_PROVIDERS.includes(x.provider)).map((x) => x.score));
     const ratingStatus = own == null || claude == null ? 'not-measured' : own >= claude ? 'met' : 'not-met';
     const criteria = {
       trials: { have: verified.length, need: numbers.minTrials, met: verified.length >= numbers.minTrials },
       informative: { have: informative, need: numbers.minInformative, met: informative >= numbers.minInformative },
-      criticalMisses: { have: misses, max: numbers.maxCriticalMisses, met: misses <= numbers.maxCriticalMisses },
+      criticalMisses: { have: misses, max: numbers.maxCriticalMisses, met: misses != null && misses <= numbers.maxCriticalMisses },
       runRating: { own, claude, status: ratingStatus, met: ratingStatus === 'met' },
     };
     const eligible = Object.values(criteria).every((c) => c.met);
@@ -446,7 +449,7 @@ export function graduationProgress(records, { numbers = GRADUATION_NUMBERS, crit
         : Object.entries(criteria).filter(([, c]) => !c.met).map(([k, c]) => (
           k === 'trials' ? `${c.need - c.have} more verified trial(s)`
             : k === 'informative' ? 'one informative trial (a confirmed catch or a documented severity disagreement)'
-              : k === 'criticalMisses' ? `${c.have} critical miss(es) on record — a veto`
+              : k === 'criticalMisses' ? (c.have == null ? 'a critical-miss reader (not supplied, so the veto cannot be checked)' : `${c.have} critical miss(es) on record — a veto`)
                 : c.status === 'not-measured' ? 'run ratings for this worker and for Claude on this task type' : 'a run rating no worse than Claude\'s'
         )).join('; '),
     };
@@ -483,7 +486,7 @@ export function renderGraduationProgress(report, { openedTaskTypes = [] } = {}) 
   lines.push('', 'Per task type x provider/model:');
   for (const t of report.triples) {
     const c = t.criteria;
-    lines.push(`  ${t.provider}/${t.model} · ${t.taskType} [${t.status}] — trials ${c.trials.have}/${c.trials.need}, informative ${c.informative.have}/${c.informative.need}, critical misses ${c.criticalMisses.have}, run rating ${c.runRating.status}${t.launched ? `, ${t.launched} launched awaiting review` : ''}`);
+    lines.push(`  ${t.provider}/${t.model} · ${t.taskType} [${t.status}] — trials ${c.trials.have}/${c.trials.need}, informative ${c.informative.have}/${c.informative.need}, critical misses ${c.criticalMisses.have == null ? 'unknown (critical-miss reader not supplied)' : c.criticalMisses.have}, run rating ${c.runRating.status}${t.launched ? `, ${t.launched} launched awaiting review` : ''}`);
     lines.push(`      next: ${t.next}`);
   }
   return lines.join('\n');

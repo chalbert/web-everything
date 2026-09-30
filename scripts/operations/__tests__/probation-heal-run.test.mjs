@@ -2,13 +2,18 @@
  * agy-launcher-probation — the launch half: the env switch, the provider, the router branch, and the whole heal
  * arc of `probation-heal-run.mjs` over a fake `io` (no git, no gh, no model).
  */
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import {
   PROBATION_BUILD_RUN_SCRIPT, PROBATION_HEAL_RUN_SCRIPT, probationLaunchDecision, probationLaunchFromEnv,
   probationWorkerDetachedProvider,
 } from '../dispatch-providers/probation-worker.mjs';
 import { routeDispatchProvider } from '../dispatch-lane-io.mjs';
-import { parseArgs, runProbationHeal } from '../probation-heal-run.mjs';
+import { pendingProbationLaunches } from '../../lib/model-probation.mjs';
+import { parseArgs, realIo, runProbationHeal } from '../probation-heal-run.mjs';
 
 const agyClaude = { id: 'antigravity-claude', provider: 'antigravity', model: 'claude-sonnet-4-6', executor: 'antigravity', launcher: 'scripts/gemini-direct-task.mjs', checker: null, taskType: 'ci-heal' };
 const agyGemini = { ...agyClaude, id: 'antigravity-gemini', model: 'gemini-3.8-flash-high', checker: 'codex' };
@@ -141,6 +146,7 @@ function fakeIo({
   pushOk = true, state = 'OPEN', hookResetClean = true, hookTampered = false, tamperRestoreClean = true,
 } = {}) {
   const calls = [];
+  const rows = [];
   const gates = [...gate];
   let head = 'examined';
   const cleanSnapshot = { configHash: 'clean', files: {} };
@@ -168,9 +174,9 @@ function fakeIo({
     push: (_d, ref, lease) => { calls.push(['push', ref, lease]); return pushOk; },
     markHealed: (m) => calls.push(['mark', m.reason]),
     escalate: (e) => calls.push(['escalate', e.reason]),
-    appendScorecard: (r) => calls.push(['scorecard', r.launchOutcome, r.executor, r.outcome, r.verifiedBy]),
+    appendScorecard: (r) => { calls.push(['scorecard', r.launchOutcome, r.executor, r.outcome, r.verifiedBy]); rows.push(r); },
   };
-  return { io, calls };
+  return { io, calls, rows };
 }
 const args = (worker = agyClaude, reason = 'red-ci') => parseArgs(['--pr=2811', '--session=ci-heal-2811', `--reason=${reason}`, `--worker=${JSON.stringify(worker)}`, '--lane=9']);
 
@@ -303,5 +309,74 @@ describe('test-fix launches (#4551)', () => {
     expect((await runProbationHeal(input, mixed.io)).outcome).toBe('gate-red');
     expect(mixed.calls.some((c) => c[0] === 'discard')).toBe(true);
     expect(mixed.calls.some((c) => ['commit', 'push', 'checker'].includes(c[0]))).toBe(false);
+  });
+});
+
+describe('dead ends are never judgeable trials (#4338)', () => {
+  const deadEnds = [
+    ['gate-red: envelope overflow', { numstat: '100\t60\tscripts/a.mjs' }, args()],
+    ['gate-red: gate still red', { gate: [false, false] }, args()],
+    ['gate-red: checker reject', { checker: 'REJECT\nno' }, args(agyGemini)],
+    ['escalated-needs-human: hook tamper', { hookTampered: true }, args()],
+  ];
+  it.each(deadEnds)('%s appends a row that is never picked up for judging', async (_n, opts, a) => {
+    const { io, rows } = fakeIo(opts);
+    const r = await runProbationHeal(a, io);
+    expect(r.outcome).toMatch(/^(gate-red|escalated-needs-human)$/);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ outcome: null, verifiedBy: null });
+    expect(rows[0].launchOutcome).not.toBe('healed');
+    expect(pendingProbationLaunches(rows)).toEqual([]);
+  });
+  it('the mechanical / no-op path appends no row at all', async () => {
+    const { io, rows } = fakeIo({ gate: [true] });
+    await runProbationHeal(args(agyClaude, 'behind'), io);
+    expect(rows).toEqual([]);
+  });
+});
+
+describe('post-diff path gate (#4338)', () => {
+  it.each([
+    ['a statute-tier doc', '1\t0\tdocs/agent/platform-decisions.md', []],
+    ['dispatch machinery', '1\t0\tscripts/lib/provider-routing.mjs', []],
+    ['a path outside a non-empty scope', '1\t0\tscripts/b.mjs', ['we:scripts/a.mjs']],
+  ])('%s in a small diff is discarded pre-push', async (_n, numstat, scope) => {
+    const { io, calls } = fakeIo({ numstat });
+    const r = await runProbationHeal({ ...args(), scope }, io);
+    expect(r.outcome).toBe('gate-red');
+    expect(r.detail).toMatch(/^not pushed: /);
+    expect(calls.some((c) => c[0] === 'discard')).toBe(true);
+    expect(calls.some((c) => c[0] === 'commit' || c[0] === 'push')).toBe(false);
+  });
+  it('an in-scope diff under a non-empty scope still heals', async () => {
+    const { io, calls } = fakeIo();
+    const r = await runProbationHeal({ ...args(), scope: ['we:scripts/a.mjs'] }, io);
+    expect(r.outcome).toBe('healed');
+    expect(calls.some((c) => c[0] === 'push')).toBe(true);
+  });
+});
+
+describe('realIo().discardChanges (#4338)', () => {
+  it('removes the worker\'s intent-added new file, reverts a tracked edit, and keeps a pre-existing untracked file', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'discard-'));
+    try {
+      const git = (...a) => execFileSync('git', ['-C', dir, ...a], { encoding: 'utf8' });
+      git('init', '-q'); git('config', 'user.email', 't@t'); git('config', 'user.name', 't');
+      writeFileSync(join(dir, 'tracked.txt'), 'original\n');
+      git('add', '.'); git('commit', '-qm', 'base');
+      const base = git('rev-parse', 'HEAD').trim();
+      writeFileSync(join(dir, 'keep.txt'), 'mine\n');
+      const io = realIo({ session: 't' });
+      const preexisting = io.untracked(dir);
+      expect(preexisting).toEqual(['keep.txt']);
+      writeFileSync(join(dir, 'tracked.txt'), 'edited\n');
+      writeFileSync(join(dir, 'new.txt'), 'worker\n');
+      io.diffNumstat(dir, base, preexisting); // intent-adds new.txt, as the arc does
+      expect(git('ls-files')).toContain('new.txt');
+      io.discardChanges(dir, base, preexisting);
+      expect(existsSync(join(dir, 'new.txt'))).toBe(false);
+      expect(readFileSync(join(dir, 'tracked.txt'), 'utf8')).toBe('original\n');
+      expect(readFileSync(join(dir, 'keep.txt'), 'utf8')).toBe('mine\n');
+    } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 });
