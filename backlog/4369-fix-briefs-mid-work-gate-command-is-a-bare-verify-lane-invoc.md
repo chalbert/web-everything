@@ -2,10 +2,11 @@
 bornAs: x89yzuj
 kind: story
 size: 2
-status: active
+status: resolved
 scope: ["we:skills-src/conveyor/fix-agent-brief.md", "we:skills-src/conveyor/fix-agent-ci-brief.md", "we:scripts/guard-bash.mjs", "we:scripts/__tests__/guard-bash.test.mjs", "we:skills-src/conveyor/__tests__/", "we:scripts/verify-lane.mjs", "we:skills-src/batch-backlog-items/parallel-execute.workflow.js"]
 dateOpened: "2026-09-28"
 dateStarted: "2026-09-30"
+dateResolved: "2026-09-30"
 preparedDate: "2026-09-30"
 preparedAgainstSha: "b781ee138b012663b7e1f22a38df436f7e35a6b5"
 tags: []
