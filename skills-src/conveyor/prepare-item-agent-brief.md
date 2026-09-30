@@ -178,7 +178,7 @@ printf '%s\n' "WE #{{ITEM_NUM}}: prepare item — Design/MVP/Test plan/Proof pla
   "Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>" > <msgfile>
 git commit -F <msgfile> {{ITEM_SPEC_PATH}}
 
-node scripts/operations/run.mjs open-pr --ref=lane/{{ITEM_NUM}}-prepare-<slug> --sha=HEAD --base=main \
+node scripts/operations/run.mjs open-pr --ref=lane/{{ITEM_NUM}}-prepare-item-<slug> --sha=HEAD --base=main \
   --title="WE #{{ITEM_NUM}}: prepare item — Design/MVP/Test plan/Proof plan/Follow-ups" \
   --bodyFile=<pr-body> --mode=label-on-green --json
 ```

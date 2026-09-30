@@ -1,6 +1,11 @@
-/** Prepare PR invariants shared by the planner and its pre-publication IO guard. */
+/**
+ * Prepare PR invariants shared by the planner and its pre-publication IO guard.
+ * Keyed on the distinct `-prepare-item-` token, NOT the shared `-prepare-` prefix: prepare-decision
+ * (`lane/<n>-prepare-<slug>`, legitimately touches researchTopics/research-descriptions) and prepare-stamp
+ * (`lane/<n>-prepare-stamp`) share that prefix and must keep their own title and diff.
+ */
 export function prepareItemFromRef(ref) {
-  return /^lane\/([a-z0-9]+)-prepare-/.exec(ref ?? '')?.[1] ?? null;
+  return /^lane\/([a-z0-9]+)-prepare-item-/.exec(ref ?? '')?.[1] ?? null;
 }
 
 export function preparePrTitle(item) {

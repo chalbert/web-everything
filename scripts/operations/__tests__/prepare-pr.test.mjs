@@ -1,13 +1,14 @@
 import { describe, it, expect, vi } from 'vitest';
-import { execFileSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { planOpen } from '../open-pr.mjs';
 import { createPrLandRunner } from '../open-pr-io.mjs';
+import { prepareItemFromRef } from '../prepare-pr.mjs';
 
 const title = 'WE #4368: prepare item — Design/MVP/Test plan/Proof plan/Follow-ups';
-const request = (extra = {}) => ({ ref: 'lane/4368-prepare-mid-work-guard', base: 'main',
+const request = (extra = {}) => ({ ref: 'lane/4368-prepare-item-mid-work-guard', base: 'main',
   sha: 'HEAD', bodyFile: '/tmp/body.md', mode: 'label-on-green', ...extra });
 
 describe('prepare PR publication', () => {
@@ -81,4 +82,83 @@ describe('prepare PR publication', () => {
     expect(createPrLandRunner({ git, spawn })({ argv: planOpen(request()).argv })).toEqual({ outcome: 'refused', reason: 'fetch unavailable' });
     expect(spawn).not.toHaveBeenCalled();
   });
+});
+
+describe('prepare guard scope (only prepare-item PRs are guarded)', () => {
+  const briefRef = (name) => readFileSync(join(process.cwd(), 'skills-src/conveyor', name), 'utf8')
+    .match(/open-pr --ref=(lane\/\S+)/)[1].replace('{{ITEM_NUM}}', '4400').replace('<slug>', 'x');
+
+  it('every conveyor brief `--ref=` template is either guarded (prepare-item) or exempt (all others)', () => {
+    expect(prepareItemFromRef(briefRef('prepare-item-agent-brief.md'))).toBe('4400');
+    expect(prepareItemFromRef(briefRef('prepare-decision-agent-brief.md'))).toBeNull();
+  });
+
+  it.each(['lane/4400-prepare-x', 'lane/4400-prepare-stamp', 'lane/4400-scope-x', undefined])(
+    'leaves %s untouched: no card-only guard, no title override', (ref) => {
+      expect(prepareItemFromRef(ref)).toBeNull();
+    });
+
+  it('lets a decision-shaped prepare (card + research files) through to pr-land unchanged', () => {
+    const git = vi.fn(() => { throw new Error('guard must not run'); });
+    const spawn = vi.fn(() => ({ status: 0, stdout: '{}' }));
+    const argv = planOpen(request({ ref: 'lane/4400-prepare-decision-x', title: 'WE #4400: author decision forks' })).argv;
+    createPrLandRunner({ git, spawn })({ argv });
+    expect(git).not.toHaveBeenCalled();
+    expect(spawn.mock.calls[0][1]).toContain('--title=WE #4400: author decision forks');
+  });
+
+  it('the default git runner has an explicit large maxBuffer (no 1 MB ENOBUFS cliff on the backlog listing)', () => {
+    const src = readFileSync(join(process.cwd(), 'scripts/operations/open-pr-io.mjs'), 'utf8');
+    expect(src).toMatch(/execFileSync\('git', args, \{[^}]*maxBuffer: 64 \* 1024 \* 1024/);
+  });
+});
+
+describe('lane-pool acquire --purpose=conveyor-prepare-item', () => {
+  const SCRIPT = join(process.cwd(), 'scripts/lane-pool.mjs');
+  const g = (args, cwd) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
+  const ident = ['-c', 'user.email=t@t.com', '-c', 'user.name=t'];
+
+  function withPool(run) {
+    const root = mkdtempSync(join(tmpdir(), 'prepare-acquire-'));
+    const origin = join(root, 'origin.git');
+    const reference = join(root, 'reference');
+    const poolRoot = join(root, 'pool');
+    const common = [`--origin=${origin}`, `--reference=${reference}`, '--name=preptest', '--branch=main', '--no-install'];
+    const pool = (args) => {
+      const r = spawnSync('node', [SCRIPT, ...args, ...common], { encoding: 'utf8', env: { ...process.env, LANE_POOL_ROOT: poolRoot } });
+      return { code: r.status ?? 1, out: String(r.stdout || ''), err: String(r.stderr || '') };
+    };
+    try {
+      g(['init', '--quiet', '--bare', '--initial-branch=main', origin]);
+      g(['clone', '--quiet', origin, reference]);
+      writeFileSync(join(reference, 'f.txt'), 'main\n');
+      g(['add', 'f.txt'], reference);
+      g([...ident, 'commit', '--quiet', '-m', 'main'], reference);
+      g(['push', '--quiet', 'origin', 'main'], reference);
+      g(['checkout', '--quiet', '-b', 'lane/pred'], reference);
+      writeFileSync(join(reference, 'f.txt'), 'predecessor\n');
+      g([...ident, 'commit', '--quiet', '-am', 'pred'], reference);
+      g(['push', '--quiet', 'origin', 'lane/pred'], reference);
+      g(['checkout', '--quiet', 'main'], reference);
+      expect(pool(['provision', '--count=2']).code).toBe(0);
+      run({ pool, originMain: g(['rev-parse', 'main'], reference) });
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  }
+  const prepare = ['acquire', '--purpose=conveyor-prepare-item'];
+
+  it.each([
+    ['an alternate --base', ['--base=lane/pred']],
+    ['--no-reset', ['--no-reset']],
+    ['--reserve', ['--reserve', '--lane=1']],
+  ])('refuses %s', (_label, extra) => withPool(({ pool }) => {
+    const r = pool([...prepare, ...extra]);
+    expect(r.code).not.toBe(0);
+    expect(r.err).toMatch(/prepare-item requires a fresh origin\/main lane/);
+  }));
+
+  it.each([[[]], [['--base=origin/main']]])('starts at origin/main with args %j (omitted or explicit base)', (extra) => withPool(({ pool, originMain }) => {
+    const r = pool([...prepare, ...extra, '--json']);
+    expect(r.code).toBe(0);
+    expect(g(['rev-parse', 'HEAD'], JSON.parse(r.out).path)).toBe(originMain);
+  }));
 });

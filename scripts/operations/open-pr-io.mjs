@@ -31,7 +31,7 @@ export const OPEN_PR_TIMEOUT_MS = 30 * 60 * 1000;
  * `classifySubmit` is reachable with no `gh`, no network and no PR.
  */
 export function createPrLandRunner({ spawn = spawnSync, cwd = process.cwd(),
-  git = (args) => execFileSync('git', args, { cwd, encoding: 'utf8' }),
+  git = (args) => execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }),
 } = {}) {
   return ({ argv }) => {
     let r;
