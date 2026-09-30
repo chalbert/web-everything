@@ -79,6 +79,18 @@ Illustrative first screen (values are examples, not measured status):
 > Preparing: Make lane recovery safe after interruption.
 > 2 held for overlapping files; 1 needs preparation; 1 awaits Claude capacity.
 
+
+### Per-PR waiting chain (operator, 2026-09-30 ~11:30 AM: "This is the type of information that would be valuable in plateau")
+
+For every open PR, the Flow and holds section shows its **waiting chain**, not just its labels:
+- **Waiting on right now:** CI, the review daemon, the fix daemon, a conflict fix, or the operator — and **why**.
+- **Queue and blocker:** when the fix daemon serializes overlapping PRs, show the order and the blocking PR plus the shared file, e.g. "#3033 waits behind #3103 — both touch we:scripts/pr-land.mjs".
+- **Holder:** which daemon holds the PR (fix claim, live session) and since when.
+- **Next steps:** e.g. "then the fix daemon applies the advisory changes, then review:human → operator".
+- **Rough ETA** where one can be derived from recent step durations.
+
+Source data, with no extra GitHub API calls: the fix-dispatch-daemon log ("refused scope-overlap … overlaps in-flight fix PR #N — serializing", "reconcile-refused live-process"), review-status/merge-status labels already in the snapshot, fix-dispatch claims, and dispatch run records.
+
 ## Proposed data contract
 
 Canonical artifacts to add in slice 1: `we:contracts/plateau-progress-view.schema.json` and `we:contracts/plateau-progress-view.examples.json`. Names are proposed, not existing files. Existing `plateau-app:src/wip/types.ts` becomes a consumer of the WE definition; Plateau retains runtime validation. The contract is declarative and versioned; this design doc describes semantics until the schema lands.

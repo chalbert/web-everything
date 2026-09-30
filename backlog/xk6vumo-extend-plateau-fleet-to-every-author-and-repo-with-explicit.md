@@ -36,3 +36,7 @@ Run focused PR adapter/view/relay/decision tests and phone a11y checks. Compare 
 Filed with `--queue=false`: design reviewed by the operator and producer seams proven during preparation before scheduling. No prepared stamp is claimed. Scope lists predicted files, including new adapters and tests; revise it during preparation if an existing producer needs a separate change. Record testing lessons and uncovered producer gaps here, not in shared agent docs.
 
 Existing #4057 owns the Fleet PR panel. Reconcile its scope before dispatch and extend that panel if it has landed; this story replaces its automatic stale/orphan-to-Needs-you routing with explicit human escalation. The passive cache MVP does not need the refresh-budget ruling; any new shared refresh spending does.
+
+## Operator addition (2026-09-30 ~11:30 AM ET)
+
+Include the **per-PR waiting chain** (see we:docs/agent/plateau-progress-view.md, "Per-PR waiting chain"): what the PR waits on right now and why, its place in any serialization queue with the blocking PR and the shared file, the holding daemon and since when, the next steps, and a rough ETA. Built from fix-dispatch logs, labels, claims and run records, with no extra GitHub calls.
