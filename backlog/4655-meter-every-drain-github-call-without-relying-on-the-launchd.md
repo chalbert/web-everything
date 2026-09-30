@@ -2,6 +2,7 @@
 bornAs: xp83iru
 kind: story
 size: 5
+tier: pinned
 status: open
 scope: ["we:scripts/merge-ai-prs.mjs", "we:scripts/lib/gh-throttle.mjs", "we:scripts/lib/__tests__/gh-throttle.test.mjs"]
 dateOpened: "2026-09-30"
