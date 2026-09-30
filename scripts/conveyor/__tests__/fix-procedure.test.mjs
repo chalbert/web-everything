@@ -250,6 +250,8 @@ describe('pushes while a claim is live', () => {
     };
     const cases = [
       ['push.default=matching', { 'config --get push.default': 'matching\n' }, 'git push', ['*', 'lane/mine']],
+      // remote.<name>.push overrides push.default, so matching must not widen a configured specific refspec
+      ['remote.we.push specific + push.default=matching', { 'config --get push.default': 'matching\n', 'config --get-all remote.we.push': 'HEAD:refs/heads/lane/ok\n' }, 'git push', ['lane/mine', 'lane/ok']],
       ['push.default=matching, remote-only push', { 'config --get push.default': 'matching\n' }, 'git push we', ['*', 'lane/mine']],
       ['remote.we.push glob', { 'config --get-all remote.we.push': 'refs/heads/*:refs/heads/*\n' }, 'git push', ['*', 'lane/mine']],
       ['remote.we.push single refspec', { 'config --get-all remote.we.push': 'HEAD:refs/heads/lane/claimed\n' }, 'git push', ['lane/mine', 'lane/claimed']],
@@ -329,10 +331,52 @@ describe('pushes while a claim is live', () => {
       const a = repo();
       expect(await verdict('git push origin lane/ok && git push origin lane/claimed', a)).toMatch(/fix-4326/);
     });
+    // PR #3172 review — parity: every spelling `canonicalGitOp` reads as a push is parsed, so the claim is enforced.
+    const GLOBAL_FLAG_PUSHES = [
+      'git --no-pager push origin lane/claimed',
+      'git --git-dir=.git push origin lane/claimed',
+      'git --work-tree=. push origin lane/claimed',
+      'git -C . --no-pager push origin lane/claimed',
+      '/usr/bin/git --no-pager push origin lane/claimed',
+      'env GIT_TRACE=0 git --no-pager push origin lane/claimed',
+      'sudo git -c core.x=1 push origin lane/claimed',
+    ];
+    for (const cmd of GLOBAL_FLAG_PUSHES) {
+      it(`refuses a claimed push spelled with global flags: ${cmd}`, async () => {
+        claim('we', 4326, 'lane/claimed');
+        const dir = repo();
+        expect(parseGitPushes(cmd).length).toBe(1);
+        expect(await verdict(`MAIN_PUSH_OK=1 ${cmd}`, dir)).toMatch(/fix-4326/);
+      });
+    }
+    it('an echoed "git push" in a later segment does not block a valid earlier push', async () => {
+      claim('we', 4326, 'lane/claimed');
+      const dir = repo();
+      execFileSync('git', ['checkout', '-q', 'lane/claimed'], { cwd: dir });
+      expect(await verdict('git push origin lane/ok && echo "git push"', dir)).toBeNull();
+      // and the real claimed push is still refused when it is the real one
+      expect(await verdict('git push origin lane/claimed && echo "git push"', dir)).toMatch(/fix-4326/);
+    });
+    it('a leading or mid-command cd fails closed, for bare AND explicit pushes', async () => {
+      claim('we', 4326, 'lane/claimed');
+      const dir = repo();
+      expect(pushTargetUnreliable(parseGitPushes('cd foo && git push')[0])).toBe(true);
+      expect(await verdict('cd foo && MAIN_PUSH_OK=1 git push', dir)).toMatch(/fix-4326/);
+      expect(await verdict('cd foo && MAIN_PUSH_OK=1 git push origin lane/claimed', dir)).toMatch(/fix-4326/);
+      expect(await verdict('echo x; cd foo && MAIN_PUSH_OK=1 git push origin lane/claimed', dir)).toMatch(/fix-4326/);
+      // an explicit push to an unclaimed branch after a cd is still allowed
+      expect(await verdict('cd foo && MAIN_PUSH_OK=1 git push origin lane/ok', dir)).toBeNull();
+    });
+    it('other HEAD-changing spellings make an implicit push unreliable', () => {
+      for (const c of ['gh pr checkout 123 && git push', 'git worktree add ../w x && git push', 'git -C x checkout y && git push', 'gh co 1 && git push origin HEAD']) {
+        expect(pushTargetUnreliable(parseGitPushes(c)[0]), c).toBe(true);
+      }
+      expect(pushTargetUnreliable(parseGitPushes('gh pr checkout 123 && git push origin lane/ok')[0])).toBe(false);
+    });
     it('parseGitPushes reads every push with its own -C dir', () => {
       expect(parseGitPushes('git -C /a push origin x && git -C /b push up y').map(({ before, ...p }) => p)).toEqual([
-        { remote: 'origin', refspecs: ['x'], all: false, dir: '/a' },
-        { remote: 'up', refspecs: ['y'], all: false, dir: '/b' },
+        { remote: 'origin', refspecs: ['x'], all: false, dir: '/a', retarget: false },
+        { remote: 'up', refspecs: ['y'], all: false, dir: '/b', retarget: false },
       ]);
       expect(parseGitPushes('git status')).toEqual([]);
       expect(pushTargetUnreliable(parseGitPushes('git checkout x && git push')[0])).toBe(true);
