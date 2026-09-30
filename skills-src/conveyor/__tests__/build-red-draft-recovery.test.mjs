@@ -9,7 +9,8 @@ import { MAX_RESUME_ATTEMPTS } from '../../../scripts/conveyor/build-dispatch-or
 const nowMs = Date.parse('2026-09-30T12:00:00Z');
 const candidate = {
   num: '4502', pr: 3033, laneRef: 'lane/4502-delivery', isDraft: true,
-  builderAuthored: true, authorLive: false, updatedAt: '2026-09-30T01:06:00Z',
+  builderAuthored: true, authorLive: false, headCommittedAt: '2026-09-30T01:06:00Z',
+  authorLastSeenLiveAt: '2026-09-30T02:00:00Z', updatedAt: '2026-09-30T11:59:00Z',
   failure: { name: 'test-shard (2)', firstError: 'AssertionError: Done-when 2' },
 };
 function fixture(initial = { attempts: 0 }) {
@@ -34,8 +35,9 @@ describe('abandoned builder draft recovery', () => {
   });
   it.each([
     { authorLive: true }, { authorLive: null }, { builderAuthored: false },
-    { isDraft: false }, { failure: null }, { updatedAt: '2026-09-30T11:30:00Z' },
-    { updatedAt: 'unreadable' },
+    { isDraft: false }, { failure: null }, { headCommittedAt: '2026-09-30T11:30:00Z' },
+    { authorLastSeenLiveAt: '2026-09-30T11:30:00Z' },
+    { headCommittedAt: 'unreadable', authorLastSeenLiveAt: undefined },
   ])('leaves ineligible evidence alone: %j', async change => {
     const f = fixture();
     expect(await f.run({ candidates: [{ ...candidate, ...change }] })).toEqual([]);
@@ -43,7 +45,7 @@ describe('abandoned builder draft recovery', () => {
   });
   it('uses the configured inactivity threshold', async () => {
     const f = fixture();
-    await f.run({ candidates: [{ ...candidate, updatedAt: '2026-09-30T11:30:00Z' }], staleMinutes: 20 });
+    await f.run({ candidates: [{ ...candidate, headCommittedAt: '2026-09-30T11:30:00Z' }], staleMinutes: 20 });
     expect(f.effects.dispatch).toHaveBeenCalledOnce();
   });
   it('escalates the exhausted budget with the failing check and first error, once', async () => {
@@ -104,14 +106,17 @@ describe('abandoned builder draft recovery', () => {
   });
   it('wires REST check evidence, same-branch dispatch, durable retries and the needs-human label', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'builder-draft-'));
-    const row = { type: 'conveyor.dispatch-delivery-agent', handle: 'pid:99999',
+    const row = { type: 'conveyor.dispatch-delivery-agent', handle: 'pid:99999', lastSeenLiveAt: candidate.authorLastSeenLiveAt,
       payload: { launchKind: 'build', num: '4502' }, result: { pr: 3033 }, status: 'applied' };
+    let headCommittedAt = candidate.headCommittedAt;
+    let authorLive = false;
     const io = {
       stateRoot: dir, store: { list: () => ['dispatch-lane-test'], read: () => ({ effects: [row] }) },
-      isPidAlive: () => false, listAgents: () => [],
+      isPidAlive: () => authorLive, listAgents: () => [],
       api: vi.fn(path => path.startsWith('pulls/')
-        ? { draft: true, state: 'open', updated_at: candidate.updatedAt,
+        ? { draft: true, state: 'open', updated_at: new Date().toISOString(),
           head: { ref: candidate.laneRef, sha: 'abc', repo: { full_name: 'chalbert/web-everything' } } }
+        : path === 'commits/abc' ? { commit: { committer: { date: headCommittedAt } } }
         : { check_runs: [
           { id: 1, name: 'review-gate', conclusion: 'failure' },
           { id: 2, name: 'test-shard (2)', conclusion: 'failure', details_url: 'https://github.com/chalbert/web-everything/actions/runs/123/job/456' },
@@ -122,11 +127,24 @@ describe('abandoned builder draft recovery', () => {
     };
     const args = { rawOpenPrs: [{ repo: 'we', prs: [{ ...candidate, number: 3033, headRefName: candidate.laneRef, files: [{ path: 'scripts/a.mjs' }] }] }], allowResume: true };
     try {
+      authorLive = true;
+      expect(await cliRecoverBuilderDrafts(args, io)).toEqual([]);
+      expect(io.dispatch).not.toHaveBeenCalled();
+      authorLive = false;
+      headCommittedAt = new Date().toISOString();
+      expect(await cliRecoverBuilderDrafts(args, io)).toEqual([]);
+      expect(io.dispatch).not.toHaveBeenCalled();
+      headCommittedAt = candidate.headCommittedAt;
+      row.lastSeenLiveAt = new Date().toISOString();
+      expect(await cliRecoverBuilderDrafts(args, io)).toEqual([]);
+      expect(io.dispatch).not.toHaveBeenCalled();
+      row.lastSeenLiveAt = candidate.authorLastSeenLiveAt;
       for (let i = 0; i < MAX_RESUME_ATTEMPTS + 1; i++) await cliRecoverBuilderDrafts(args, io);
       expect(io.dispatch).toHaveBeenCalledTimes(MAX_RESUME_ATTEMPTS);
       expect(io.dispatch).toHaveBeenCalledWith(expect.objectContaining({ pr: 3033, itemNum: '4502', laneRef: candidate.laneRef, lane: 8, reason: 'red-ci' }));
       expect(io.gh).toHaveBeenCalledWith(['pr', 'edit', '3033', '--repo', 'chalbert/web-everything', '--add-label', 'blocked:needs-human']);
       expect(io.gh).toHaveBeenCalledWith(['pr', 'comment', '3033', '--repo', 'chalbert/web-everything', '--body', expect.stringContaining('First error: ##[error]AssertionError: Done-when 2')]);
+      expect(io.api).toHaveBeenCalledWith('commits/abc');
       // A manual lookalike branch stays outside the builder repair path.
       io.dispatch.mockClear();
       row.result.pr = 999;
