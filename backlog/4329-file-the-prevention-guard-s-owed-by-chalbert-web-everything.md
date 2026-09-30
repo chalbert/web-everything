@@ -3,9 +3,10 @@ bornAs: xm36ez1
 kind: story
 size: 3
 parent: "4075"
-status: open
+status: active
 scope: ["we:scripts/operations/run.mjs", "we:scripts/operations/__tests__/run.test.mjs"]
 dateOpened: "2026-09-27"
+dateStarted: "2026-09-30"
 preparedDate: "2026-09-30"
 preparedAgainstSha: "e2370f38045cdff5ff33e40dd312f310fff7f1af"
 tags: []
