@@ -392,10 +392,6 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
           || now - Date.parse(worker.entry.lastSeenLiveAt) > PREPARE_SESSION_DEAD_GRACE_MS);
       if (!why && sessionDead && !(awaitingPr && status.pr.preparedDate)) {
         why = 'prepare-session-dead';
-        prepare.failures.push({ num, stage: 'retirement', reason: why });
-        // The core may already have counted this guard's TTL retirement on this tick.
-        itemPrepareAttempts[num] = Math.max(Number(itemPrepareAttempts[num]) || 0,
-          (Number(bookkeeping.itemPrepareAttempts?.[num]) || 0) + 1);
       }
       // An OPEN PR only shields the claim when it is stamped; an unstamped one must not outlive a dead worker.
       if (!why && claim && !(awaitingPr && status.pr.preparedDate) && isLeaseExpired(claim, effects.now?.() ?? Date.now(), DEFAULT_LEASE_MINUTES)) {
@@ -406,11 +402,17 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
         const liveness = classifyClaimLiveness({ row: null, ownerPid,
           isPidAlive: effects.isPidAlive ?? defaultIsPidAlive });
         const workerLiveness = worker && classifyClaimLiveness({ row: worker, ownerPid, isPidAlive: effects.isPidAlive ?? defaultIsPidAlive });
-        if ((worker?.entry?.live == null && worker?.entry?.handle?.startsWith('pid:') && workerLiveness?.status === 'dead')
+        // An explicitly dead session whose timing fields are absent/invalid can never trip the grace check above.
+        const deadUntimed = worker?.entry?.live === false
+          && !Number.isFinite(Date.parse(worker.entry.expectedBy)) && !Number.isFinite(Date.parse(worker.entry.lastSeenLiveAt));
+        if (deadUntimed || (worker?.entry?.handle?.startsWith('pid:') && workerLiveness?.status === 'dead')
           || (!worker && liveness.status === 'dead')) why = 'dead prepare owner past heartbeat TTL';
       }
       const wasUnstamped = holds.some((h) => normNum(h.num) === num && ['prepare-unstamped', 'prepare-stamp-pending'].includes(h.reason));
-      const ended = prDone || why === 'dead prepare owner past heartbeat TTL' || wasUnstamped
+      // A dead session that left sections behind is a finished-but-unstamped run: route it to stamp recovery.
+      const deadWithWork = why === 'prepare-session-dead' && status && !status.preparedDate
+        && (status.hasSections || (awaitingPr && status.pr.hasSections));
+      const ended = prDone || why === 'dead prepare owner past heartbeat TTL' || wasUnstamped || deadWithWork
         || (currentSettled && !prepareBusy.has(num));
       // An open, stamped PR is a valid finished agent run awaiting landing; main is not stamped yet.
       let unstamped = status && !status.preparedDate && ended && !(awaitingPr && status.pr.preparedDate);
@@ -445,6 +447,12 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
         prepare.held.push({ num, reason: 'prepare-unstamped' });
         prepare.failures.push({ num, stage: 'result', reason: 'prepare-unstamped' });
         why ??= 'prepare-unstamped';
+      }
+      if (why === 'prepare-session-dead') {
+        prepare.failures.push({ num, stage: 'retirement', reason: why });
+        // The core may already have counted this guard's TTL retirement on this tick.
+        itemPrepareAttempts[num] = Math.max(Number(itemPrepareAttempts[num]) || 0,
+          (Number(bookkeeping.itemPrepareAttempts?.[num]) || 0) + 1);
       }
       if (why) {
         if (live && worker) effects.settlePrepareRow?.({ runId: worker.runId, key: worker.entry.key,
