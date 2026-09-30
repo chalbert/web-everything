@@ -38,7 +38,7 @@ import {
   // #4517 — infra-retry call bound
   INFRA_RETRY_TIMEOUT_MS, DEFAULT_INTERVAL_MS,
   // #4465 build-dispatch-hold-router
-  cliRouteHeldItems, cliSpawnHoldLand, cliStampPrepare, cliPrepareFailureEvidence,
+  cliRouteHeldItems, cliSpawnHoldLand, cliStampPrepare, cliReadStampFailure, STAMP_RECOVERY_LEASE_MINUTES, cliPrepareFailureEvidence,
   // xovjhwh — the shared attribution derivation `runBuildDispatchTick` and `dryRun` both call
   deriveDispatchedByBuilder,
 } from '../build-dispatch-daemon.mjs';
@@ -1275,8 +1275,29 @@ describe('prepare stamp detached worker wiring', () => {
     expect(reserve).not.toHaveBeenCalled();
     const out = await cliStampPrepare({ num: '1' }, { ...options, releases: () => [{ target: '1', attempt: 'stamp:1:a' }] });
     expect(out.spawned).toBe(true);
-    expect(reserve).toHaveBeenCalledWith(expect.objectContaining({ leaseMinutes: Infinity }));
+    expect(reserve).toHaveBeenCalledWith(expect.objectContaining({ leaseMinutes: STAMP_RECOVERY_LEASE_MINUTES }));
     expect(options.markStarting).toHaveBeenCalledWith('1');
+  });
+
+  it('reserves with a finite lease that survives JSON, so a crashed worker with no terminal record is reclaimed', () => {
+    expect(Number.isFinite(STAMP_RECOVERY_LEASE_MINUTES)).toBe(true);
+    expect(JSON.parse(JSON.stringify({ leaseMinutes: STAMP_RECOVERY_LEASE_MINUTES })).leaseMinutes).toBe(STAMP_RECOVERY_LEASE_MINUTES);
+  });
+
+  it('cliReadStampFailure reads only the latest terminal line: a new starting marker masks an older failure', () => {
+    const root = mkdtempSync(join(tmpdir(), 'stamp-log-'));
+    try {
+      const num = '9991';
+      const dir = join(root, '.operations', 'delivery-dispatch-logs');
+      mkdirSync(dir, { recursive: true });
+      const log = join(dir, `prepare-stamp-${num}.log`);
+      const failed = JSON.stringify({ status: 'failed', attempt: 'stamp:9991:a', error: 'bad card' });
+      const starting = JSON.stringify({ status: 'starting' });
+      writeFileSync(log, [failed, starting, 'null', ''].join('\n'));
+      expect(cliReadStampFailure(num, root)).toBeNull();
+      writeFileSync(log, [starting, failed, 'null', ''].join('\n'));
+      expect(cliReadStampFailure(num, root)).toMatchObject({ attempt: 'stamp:9991:a' });
+    } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
   it('accepts the spawner ChildProcess pid and deduplicates subsequent ticks', async () => {
@@ -1473,7 +1494,47 @@ describe('automatic item preparation', () => {
     const tick = await runBuildDispatchTick({ live: true, effects });
     expect(tick.prepare.retired).toEqual([]);
     expect(effects.listPrepareClaims().map(c => c.meta.num)).toContain('4501');
-    expect(tick.prepare.failures).toContainEqual(expect.objectContaining({ cause: 'infra-transient' }));
+    expect(tick.prepare.failures).toContainEqual(expect.objectContaining({ cause: 'daemon-observation' }));
+  });
+  it('an unclassified observation error (502, ETIMEDOUT, hang up) never holds, files a card or writes the ledger', async () => {
+    for (const message of ['gh: HTTP 502', 'ETIMEDOUT', 'socket hang up']) {
+      const effects = fixture();
+      claimed(effects, '4501', { alive: true });
+      const recordPrepareFailure = vi.fn();
+      effects.recordPrepareFailure = recordPrepareFailure;
+      effects.placePrepareHold = vi.fn();
+      effects.readPrepareStatus = () => { throw new Error(message); };
+      const tick = await runBuildDispatchTick({ live: true, effects });
+      expect(tick.prepare.failures).toContainEqual(expect.objectContaining({ num: '4501', stage: 'retirement', cause: 'daemon-observation' }));
+      expect(recordPrepareFailure).not.toHaveBeenCalled();
+      expect(effects.placePrepareHold).not.toHaveBeenCalled();
+      expect(tick.prepare.held).toEqual([]);
+    }
+  });
+  it('claim contention neither holds nor files a card, and only blocks the item this tick', async () => {
+    const effects = fixture();
+    effects.acquirePrepareClaim = () => ({ ok: false, reason: 'held' });
+    effects.recordPrepareFailure = vi.fn();
+    effects.placePrepareHold = vi.fn();
+    const tick = await runBuildDispatchTick({ live: true, effects });
+    expect(tick.prepare.failures).toContainEqual(expect.objectContaining({ stage: 'claim', cause: 'daemon-observation' }));
+    expect(effects.recordPrepareFailure).not.toHaveBeenCalled();
+    expect(effects.placePrepareHold).not.toHaveBeenCalled();
+  });
+  it('a release of the latest attempt is not undone by an older unreleased failure', async () => {
+    const effects = fixture();
+    effects.listHolds = () => [{ num: '4501', reason: 'prepare-unstamped' }];
+    effects.listSettledPrepares = () => [
+      { num: '4501', source: 'run:old', startedAt: '2026-09-28', outcome: 'prepare-unstamped' },
+      { num: '4501', source: 'run:new', startedAt: '2026-09-30', outcome: 'prepare-unstamped' },
+    ];
+    effects.listPrepareReleases = () => [{ target: '4501', attempt: 'run:new' }];
+    effects.readPrepareStatus = () => ({ preparedDate: null });
+    const tick = await runBuildDispatchTick({ live: true, effects });
+    expect(effects.releasePrepareHold).toHaveBeenCalledWith({ num: '4501' });
+    expect(effects.placePrepareHold).not.toHaveBeenCalled();
+    expect(tick.prepare.failures).toEqual([]);
+    expect(tick.prepare.launched.map(r => r.num)).toContain('4501');
   });
   it('never holds or probes a claim-less candidate that has no current-attempt evidence', async () => {
     const effects = fixture();

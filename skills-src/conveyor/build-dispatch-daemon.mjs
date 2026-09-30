@@ -386,12 +386,14 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
   const prepareSpawns = d.spawnPrepareItems ?? d.itemPrepareSpawns ?? [];
   const settledPrepares = new Map();
   for (const row of allSettledPrepares) {
-    if (releasedAttempt(releases, row.num, row.source)) continue;
     if (failureRecords.some(f => f.num === row.num && f.attempt === row.source && f.retry)
       && !prepareClaims.some(c => normNum(c.meta.num) === normNum(row.num))) continue;
     const num = normNum(row.num);
     if (!settledPrepares.has(num) || row.startedAt > settledPrepares.get(num).startedAt) settledPrepares.set(num, row);
   }
+  // Release applies to the LATEST attempt only: pick it first, then drop it. Filtering releases before picking
+  // would let an older unreleased failure resurface and re-hold an item whose latest attempt was released.
+  for (const [num, row] of settledPrepares) if (releasedAttempt(releases, row.num, row.source)) settledPrepares.delete(num);
   const prepareBusy = new Set(prepareRows.map((r) => normNum(r.num)));
   const probationRecords = (await effects.listProbationPrepares?.() ?? []).map(row => ({
     ...row, evidence: row.evidence ?? releases.find(r => r.probationAttempt === `${row.handle}:${row.scoredAt}`)?.failureEvidence,
@@ -402,7 +404,15 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
     .map(r => ({ item: r.item, attempt: `${r.handle}:${r.scoredAt}`, cause: classifyPrepareFailure(r.evidence), evidence: r.evidence ?? { reason: r.launchOutcome } }));
   const finishedPrepares = new Set();
   const itemPrepareAttempts = { ...out?.nextState?.itemPrepareAttempts };
+  // Observation stages (a failed status read, claim contention) say nothing about the prepare attempt itself:
+  // they never hold, never file a card and never enter the ledger. The caller keeps the item out of dispatch
+  // for this tick only, and the next tick simply re-observes.
+  const OBSERVATION_STAGES = new Set(['retirement', 'claim']);
   const failPrepare = async (num, stage, reason, evidence = {}, attempt = null) => {
+    if (OBSERVATION_STAGES.has(stage)) {
+      prepare.failures.push({ num, stage, reason, cause: 'daemon-observation', retry: true });
+      return { num, stage, cause: 'daemon-observation', retry: true, held: false };
+    }
     evidence = { ...evidence, reason };
     const input = { num, stage, attempt: attempt ?? `${stage}:${num}:${reason}`, evidence };
     const failure = live && effects.recordPrepareFailure
@@ -974,12 +984,15 @@ export function cliReadPrepareStatus({ num, claimedAt }, { exec = execFileSync }
   return { ...main, path, pr: pr ? { ...pr, ...(pr.state === 'OPEN' ? readCard(pr.headRefOid) : { preparedDate: null }) } : null };
 }
 
-export function cliReadStampFailure(num) {
-  const path = join(REPO_ROOT, '.operations', 'delivery-dispatch-logs', `prepare-stamp-${num}.log`);
+export const STAMP_RECOVERY_LEASE_MINUTES = 6 * 60;
+
+export function cliReadStampFailure(num, root = REPO_ROOT) {
+  const path = join(root, '.operations', 'delivery-dispatch-logs', `prepare-stamp-${num}.log`);
   if (!existsSync(path)) return null;
   for (const line of readFileSync(path, 'utf8').split('\n').reverse()) {
     let result;
     try { result = JSON.parse(line); } catch { continue; }
+    if (!result || typeof result !== 'object') continue;
     if (result.status === 'failed' && result.attempt && result.error) return result;
     if (['submitted', 'already-stamped', 'starting'].includes(result.status)) return null;
   }
@@ -998,7 +1011,9 @@ export async function cliStampPrepare({ num }, {
   releases = () => readPrepareReleases(join(SCRIPTS, 'conveyor', 'prepare-failure-releases.json'), REPO_ROOT),
   failures = () => Object.values(readFailureState().failures),
 } = {}) {
-  const entry = { num, route: 'prepare-stamp', leaseMinutes: Infinity };
+  // Finite on purpose: JSON has no Infinity (it serializes to null, which reads back as an already-expired
+  // lease), and a worker killed before it writes a terminal record must not strand the item forever.
+  const entry = { num, route: 'prepare-stamp', leaseMinutes: STAMP_RECOVERY_LEASE_MINUTES };
   const terminal = readFailure(num);
   if (terminal) {
     const retriable = failures().some(f => f.num === String(num) && f.attempt === terminal.attempt && f.retry);

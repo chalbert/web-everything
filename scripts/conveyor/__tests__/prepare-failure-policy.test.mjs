@@ -2,7 +2,30 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { classifyPrepareFailure, recordPrepareFailure, readFailureState, validatePrepareRelease, releasedAttempt } from '../prepare-failure-policy.mjs';
+import { classifyPrepareFailure, recordPrepareFailure, readFailureState, validatePrepareRelease, releasedAttempt, readPrepareReleases } from '../prepare-failure-policy.mjs';
+import { writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+
+describe('readPrepareReleases against a real git history', () => {
+  it('keeps ancestor entries and drops non-ancestor or malformed ones without throwing', () => {
+    const repo = mkdtempSync(join(tmpdir(), 'prepare-releases-'));
+    try {
+      const git = (...args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' }).trim();
+      git('init', '-q');
+      git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '--allow-empty', '-q', '-m', 'fix');
+      const fixCommit = git('rev-parse', 'HEAD');
+      const good = { target: '1', attempt: 'run:a', cause: 'result-lost', evidence: 'x', fixCommit };
+      const notAncestor = { ...good, attempt: 'run:b', fixCommit: 'f'.repeat(40) };
+      const path = join(repo, 'releases.json');
+      writeFileSync(path, JSON.stringify({ releases: [good, notAncestor, { target: '1' }] }));
+      const invalid = [];
+      expect(readPrepareReleases(path, repo, { onInvalid: entry => invalid.push(entry) })).toEqual([good]);
+      expect(invalid).toHaveLength(2);
+      writeFileSync(path, 'not json');
+      expect(readPrepareReleases(path, repo)).toEqual([]);
+    } finally { rmSync(repo, { recursive: true, force: true }); }
+  });
+});
 
 describe('prepare failure evidence and durable decisions', () => {
   let dir, path, fileCard;

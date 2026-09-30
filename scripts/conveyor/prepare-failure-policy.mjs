@@ -23,12 +23,23 @@ export function validatePrepareRelease(entry, verifyCommit) {
   if (!verifyCommit(entry.fixCommit)) throw new Error('prepare release refused: fix commit is not an ancestor of this daemon');
   return entry;
 }
-export function readPrepareReleases(path, root) {
-  const entries = JSON.parse(readFileSync(path, 'utf8')).releases;
-  return entries.map(entry => validatePrepareRelease(entry, sha => {
-    try { execFileSync('git', ['merge-base', '--is-ancestor', sha, 'HEAD'], { cwd: root, stdio: 'ignore' }); return true; }
-    catch { return false; }
-  }));
+/** An entry that fails validation (malformed, or its fix commit is not in this daemon's ancestry — a shallow
+ * clone, a stale HEAD) is simply NOT a release: the item stays held. It must never throw, because this runs at
+ * the top of every build-dispatch tick and one bad entry would halt all daemon work. */
+export function readPrepareReleases(path, root, { onInvalid = () => {} } = {}) {
+  let entries;
+  try { entries = JSON.parse(readFileSync(path, 'utf8')).releases; } catch (error) { onInvalid(null, error); return []; }
+  if (!Array.isArray(entries)) return [];
+  const releases = [];
+  for (const entry of entries) {
+    try {
+      releases.push(validatePrepareRelease(entry, sha => {
+        try { execFileSync('git', ['merge-base', '--is-ancestor', sha, 'HEAD'], { cwd: root, stdio: 'ignore' }); return true; }
+        catch { return false; }
+      }));
+    } catch (error) { onInvalid(entry, error); }
+  }
+  return releases;
 }
 export function releasedAttempt(releases, target, attempt) {
   return releases.some(r => r.target === String(target) && r.attempt === attempt);
