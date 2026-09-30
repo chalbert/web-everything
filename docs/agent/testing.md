@@ -647,8 +647,29 @@ calling pr-land. Observation failures refuse publication. Prepare agents acquire
 lanes and never merge another lane. Regression histories live in
 `we:scripts/operations/__tests__/prepare-pr.test.mjs`.
 
-
 Builder red-draft recovery: test the raw draft snapshot before normalization (the build-policy projection drops draft metadata). GitHub REST check-runs responses contain a `check_runs` array, unlike the bare arrays returned by annotations and pull files. Exercise that IO shape, author liveness, durable PR-level retry accounting, exact branch forwarding, and comment plus `blocked:needs-human` construction. The recovery pass runs before in-flight holds; dry runs never dispatch. `WE_BUILD_DAEMON_RED_DRAFT_MINUTES` defaults to 60.
+
+## Prepare failure diagnosis and release
+
+`we:scripts/conveyor/prepare-failure-policy.mjs` records evidence and cause per attempt in the
+coordination-root prepare failure ledger. Only observed rate-limit/network faults permit two automatic
+retries; wrapper errors, timeouts and missing output alone are unknown. Unknowns reserve a prevention
+landing job once per cause and stay held. A pending/failed filing is not a landed card: inspect its
+record and job output, never blindly respawn it.
+
+Release through `we:scripts/conveyor/prepare-failure-releases.json`: cite the exact attempt, known cause,
+report evidence and full fix commit. The daemon verifies the commit is in its own ancestry before
+applying the data. A later attempt is not covered by an earlier release. Route entries use target
+`route:prepare` and exact scorecard `handle:scoredAt` keys; every failed probation attempt must be covered
+before the latched route returns. Neither elapsed time nor a later successful run clears that latch.
+The incident report `reports/2026-09-30-prepare-failures-root-causes.md` distinguishes worker cause from
+claim retirement: dead-session cleanup frees capacity but does not prove why authoring failed.
+
+Stamp-recovery reservations do not expire. A terminal recovery error is recorded in its dispatch log,
+classified by the daemon, and cannot spawn again without a remaining transient budget or a cited fix.
+A new starting marker prevents the previous failure from being mistaken for the newly running job.
+Historical probation evidence can accompany an item release under its exact `probationAttempt` key;
+this improves the recorded diagnosis but does not authorize a route release.
 
 Red-draft inactivity in `we:skills-src/conveyor/build-dispatch-daemon.mjs` is measured from the later of the current head commit’s committed date and the builder effect’s `lastSeenLiveAt`. Never age recovery from PR `updated_at`: labels, check reruns and advisory notes refresh it without author activity. Replay a recent PR metadata update with old author evidence, and separately assert that a live author, a recent commit or recent live observation prevents recovery. Missing both usable timestamps fails closed.
 

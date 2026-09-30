@@ -169,5 +169,6 @@ describe('abandoned builder draft recovery', () => {
       await cliRecoverBuilderDrafts(args, io);
       expect(io.dispatch).not.toHaveBeenCalled();
     } finally { rmSync(dir, { recursive: true, force: true }); }
-  });
+    // The first call cold-imports the whole dispatch IO stack, which alone exceeds vitest's 5s default.
+  }, 60_000);
 });
