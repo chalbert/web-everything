@@ -10,9 +10,17 @@ export function meteredPrCommits(repo, number, { exec = runGhSync } = {}) {
       nodes { commit { oid messageHeadline messageBody authors(first:100){nodes{name email}} } }
     }}}
   }`;
-  const raw = exec(['api', 'graphql', '--paginate', '--slurp', '-f', `query=${query}`, '-f', `owner=${owner}`, '-f', `name=${name}`, '-F', `number=${number}`, '--jq', '[.[].data.repository.pullRequest.commits.nodes[] | .commit | .authors = .authors.nodes]'],
+  // gh rejects `--slurp` together with `--jq`, so the pages come back raw and are projected here.
+  const raw = exec(['api', 'graphql', '--paginate', '--slurp', '-f', `query=${query}`, '-f', `owner=${owner}`, '-f', `name=${name}`, '-F', `number=${number}`],
     { encoding: 'utf8', throttle: { op: 'pr view commits (pr-limit)' } });
-  return JSON.parse(String(raw));
+  const pages = JSON.parse(String(raw));
+  const commits = [];
+  for (const page of Array.isArray(pages) ? pages : [pages]) {
+    const nodes = page?.data?.repository?.pullRequest?.commits?.nodes;
+    if (!Array.isArray(nodes)) throw new Error('unexpected commits response shape');
+    for (const { commit } of nodes) commits.push({ ...commit, authors: commit.authors?.nodes ?? [] });
+  }
+  return commits;
 }
 
 export function meteredAlreadyDone(repo, key, { exec = runGhSync } = {}) {

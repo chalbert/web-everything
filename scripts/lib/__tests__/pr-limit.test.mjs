@@ -69,6 +69,7 @@ describe('isExemptPath / isExemptChangeset', () => {
 describe('countBackpressurePrs', () => {
   const aiCommit = { authors: [{ name: 'Claude', email: 'noreply@anthropic.com' }], messageBody: '' };
   const humanCommit = { authors: [{ name: 'A Human', email: 'human@example.com' }], messageBody: '' };
+  const commitsPage = (c) => JSON.stringify([{ data: { repository: { pullRequest: { commits: { nodes: c.map((commit) => ({ commit: { ...commit, authors: { nodes: commit.authors } } })) } } } } }]);
 
   it('counts an AI-generated, not-yet-accepted PR', () => {
     const prs = [{ number: 1, commits: [aiCommit], labels: [] }];
@@ -141,9 +142,10 @@ describe('decideOpenPr — the five required behaviours', () => {
 describe('fetchOpenPrs / fetchPrCommits / countOpenPrsForRepo — the IO shell', () => {
   const aiCommit = { authors: [{ name: 'Claude', email: 'noreply@anthropic.com' }], messageBody: '' };
   const humanCommit = { authors: [{ name: 'A Human', email: 'human@example.com' }], messageBody: '' };
+  const commitsPage = (c) => JSON.stringify([{ data: { repository: { pullRequest: { commits: { nodes: c.map((commit) => ({ commit: { ...commit, authors: { nodes: commit.authors } } })) } } } } }]);
 
   it('fetchOpenPrs asks for number,labels,headRefName,headRefOid — deliberately NOT commits (the GraphQL node-limit footgun)', () => {
-    const exec = (args) => { expect(args).toEqual(expect.arrayContaining(['--json', 'number,labels,headRefName,headRefOid'])); expect(args).not.toContain('commits'); return '[]'; };
+    const exec = (args) => { expect(args).toEqual(expect.arrayContaining(['--json', 'number,labels,headRefName,headRefOid,baseRefName'])); expect(args).not.toContain('commits'); return '[]'; };
     expect(fetchOpenPrs('o/n', { exec })).toEqual([]);
   });
 
@@ -152,8 +154,8 @@ describe('fetchOpenPrs / fetchPrCommits / countOpenPrsForRepo — the IO shell',
     expect(fetchOpenPrs('o/n', { exec: () => 'not json' })).toBeNull();
   });
 
-  it('fetchPrCommits fetches ONE PR at a time via `gh pr view <n> --json commits`', () => {
-    const exec = (args) => { expect(args).toEqual(['pr', 'view', '42', '--repo', 'o/n', '--json', 'commits']); return JSON.stringify({ commits: [aiCommit] }); };
+  it('fetchPrCommits fetches ONE PR at a time via the metered GraphQL read', () => {
+    const exec = (args) => { expect(args.slice(0, 2)).toEqual(['api', 'graphql']); expect(args).toContain('number=42'); return commitsPage([aiCommit]); };
     expect(fetchPrCommits('o/n', 42, { exec })).toEqual([aiCommit]);
   });
 
@@ -167,10 +169,10 @@ describe('fetchOpenPrs / fetchPrCommits / countOpenPrsForRepo — the IO shell',
     const exec = (args) => {
       calls.push(args);
       if (args[1] === 'list') return JSON.stringify([{ number: 1, labels: [] }, { number: 2, labels: [{ name: 'review:accepted' }] }, { number: 3, labels: [] }]);
-      if (args[0] === 'pr' && args[1] === 'view') {
-        const num = args[2];
-        if (num === '1') return JSON.stringify({ commits: [aiCommit] });
-        if (num === '3') return JSON.stringify({ commits: [humanCommit] });
+      if (args[0] === 'api' && args[1] === 'graphql') {
+        const num = args.find((a) => a.startsWith('number='));
+        if (num === 'number=1') return commitsPage([aiCommit]);
+        if (num === 'number=3') return commitsPage([humanCommit]);
       }
       throw new Error(`unexpected call: ${JSON.stringify(args)}`);
     };
@@ -178,7 +180,7 @@ describe('fetchOpenPrs / fetchPrCommits / countOpenPrsForRepo — the IO shell',
     expect(result).toEqual({ repoKey: 'we', slug: 'chalbert/web-everything', count: 1, prNumbers: [1], limit: 15, unavailable: false });
     // Exactly one list call + one commits call per NOT-accepted PR (#2 is skipped — already accepted).
     expect(calls.filter((a) => a[1] === 'list')).toHaveLength(1);
-    expect(calls.filter((a) => a[0] === 'pr' && a[1] === 'view')).toHaveLength(2);
+    expect(calls.filter((a) => a[0] === 'api' && a[1] === 'graphql')).toHaveLength(2);
   });
 
   it('countOpenPrsForRepo is unavailable when the list call fails, and unknown for an unrecognized repo key', () => {

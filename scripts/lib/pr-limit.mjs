@@ -130,9 +130,9 @@ export function countBackpressurePrs(prs) {
 export function fetchOpenPrs(repoSlug, { exec = runGhSync } = {}) {
   try {
     // #gh-graphql-budget — the host-shared open-PR snapshot first (null = not applicable → the direct read).
-    if (exec === runGhSync) { const shared = readSharedOpenPrs({ repo: repoSlug, fields: 'number,labels,headRefName,headRefOid' }); if (shared) return shared; }
+    if (exec === runGhSync) { const shared = readSharedOpenPrs({ repo: repoSlug, fields: 'number,labels,headRefName,headRefOid,baseRefName' }); if (shared) return shared; }
     const out = exec(
-      ['pr', 'list', '--repo', repoSlug, '--state', 'open', '--json', 'number,labels,headRefName,headRefOid', '--limit', '100'],
+      ['pr', 'list', '--repo', repoSlug, '--state', 'open', '--json', 'number,labels,headRefName,headRefOid,baseRefName', '--limit', '100'],
       { throttle: { op: 'pr list (pr-limit)' }, encoding: 'utf8' },
     );
     const rows = JSON.parse(String(out ?? '[]'));
@@ -151,16 +151,11 @@ export function fetchOpenPrs(repoSlug, { exec = runGhSync } = {}) {
  *  re-discovering the limit the hard way twice. Fail-SOFT: returns `null` (never `[]`, which would read as
  *  "zero commits" / mechanical-only) on any failure, so the caller can tell "unknown" apart from "empty".
  *  @returns {Array|null} */
-export function fetchPrCommits(repoSlug, number, { exec = runGhSync, headRefName, headRefOid, cwd, git } = {}) {
-  const local = readGitPrCommits(repoSlug, headRefName, { cwd, git, headRefOid });
+export function fetchPrCommits(repoSlug, number, { exec = runGhSync, headRefName, headRefOid, baseRefName, cwd, git } = {}) {
+  const local = readGitPrCommits(repoSlug, headRefName, { cwd, git, headRefOid, baseRefName });
   if (local !== null) return local;
   try {
-    if (exec === runGhSync) return meteredPrCommits(repoSlug, number);
-    const out = exec(
-      ['pr', 'view', String(number), '--repo', repoSlug, '--json', 'commits'],
-      { throttle: { op: 'pr view commits (pr-limit)' }, encoding: 'utf8' },
-    );
-    const commits = JSON.parse(String(out ?? '{}'))?.commits;
+    const commits = meteredPrCommits(repoSlug, number, { exec });
     return Array.isArray(commits) ? commits : null;
   } catch {
     return null;
@@ -183,7 +178,7 @@ export function countOpenPrsForRepo(repoKey, { exec, env = process.env, reposTab
   if (prs === null) return { repoKey, slug: meta.slug, count: null, prNumbers: [], limit, unavailable: true };
   const enriched = prs
     .filter((pr) => !hasLabel(pr, REVIEW_LABELS.accepted))
-    .map((pr) => ({ ...pr, commits: fetchPrCommits(meta.slug, pr.number, { exec, headRefName: pr.headRefName, headRefOid: pr.headRefOid, git, cwd: cwd ?? (meta.path ? meta.path.replace('$HOME', homedir()) : process.cwd()) }) }))
+    .map((pr) => ({ ...pr, commits: fetchPrCommits(meta.slug, pr.number, { exec, headRefName: pr.headRefName, headRefOid: pr.headRefOid, baseRefName: pr.baseRefName, git, cwd: cwd ?? (meta.path ? meta.path.replace('$HOME', homedir()) : process.cwd()) }) }))
     .filter((pr) => Array.isArray(pr.commits));
   const counted = countBackpressurePrs(enriched);
   return { repoKey, slug: meta.slug, count: counted.length, prNumbers: counted.map((p) => p.number), limit, unavailable: false };

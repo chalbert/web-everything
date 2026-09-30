@@ -316,6 +316,11 @@ export function classifyGhWrite(args) {
     const methodIdx = a.indexOf('--method');
     const method = methodIdx >= 0 ? String(a[methodIdx + 1] || '').toUpperCase() : null;
     if (method) return method !== 'GET' && method !== 'HEAD';
+    // `gh api graphql -f query=…` is POST only because of the flag; a query with no `mutation` is a read.
+    if (a[1] === 'graphql') {
+      const q = a.find((t) => typeof t === 'string' && t.startsWith('query='));
+      if (q && !/\bmutation\b/.test(q)) return false;
+    }
     return a.some((t) => t === '-f' || t === '-F' || t === '--field' || t === '--raw-field' || t === '--input');
   }
   return false;
