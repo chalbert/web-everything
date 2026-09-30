@@ -3497,6 +3497,7 @@ export function basisTouchesEngineTier(score) {
  */
 /**
  * The `gh-error` detail for a failed `gh pr list`: the error's first line PLUS gh's own last stderr line.
+ * Also used by the per-PR merge catch to preserve the merge failure's stderr cause.
  * `execFile`'s message is only "Command failed: gh pr list …" — the actual cause (secondary rate limit, 401,
  * a crashing wrapper) lives in stderr and was being dropped (live 2026-09-27 ~04:04Z: every drain pass logged a
  * bare gh-error for 20 minutes and nobody could tell it was a GitHub rate-limit storm).
@@ -3506,6 +3507,14 @@ export function ghListErrText(e) {
   const lines = String((e && e.stderr) || '').split('\n').map((l) => l.trim()).filter(Boolean);
   const cause = lines.length ? lines[lines.length - 1].slice(0, 300) : '';
   return cause && !head.includes(cause) ? `${head} — gh: ${cause}` : head;
+}
+
+/**
+ * Partial success exits 0 while JSON `failed` stays populated; `ok` still means no duplicate ids.
+ * A failure with no landed PRs exits 2. Duplicate ids always take precedence (exit 3).
+ */
+export function passExitCode({ dup = [], failed = [], mergedCount = 0 } = {}) {
+  return dup?.length ? 3 : (failed.length && mergedCount === 0 ? 2 : 0);
 }
 
 export function engineTierForCandidate(score) { // `score` names the real future param — unused until #3493 unblocks
@@ -5473,7 +5482,7 @@ async function runCli() {
           for (const id of landedIdsForCandidate(c, { isLocalRepo, openPrNums: otherOpenPrNums(c.repo, c.num) })) landedThisPass.add(id);
           if (!AS_JSON) process.stderr.write(`  ✓ merged ${repoTag(c.repo)}${c.num}${c.item ? ` (#${c.item})` : ''}\n`);
         } catch (e) {
-          const detail = String(e.message || e).split('\n')[0];
+          const detail = ghListErrText(e);
           // #2683 — CONTENDED-FALLBACK idempotency recovery. If the merge write raced past the mutex (the
           // never-hang fallback ran `fn` un-locked) and LOST to a concurrent lander, `gh pr merge` throws here on
           // an already-merged PR. Re-probe: if it is now MERGED, this is the SAME safe idempotent no-op as the
@@ -5496,7 +5505,7 @@ async function runCli() {
           // built earlier is NEVER posted here — `postMergeTrace` is simply not called on this path — so this
           // PR never carries a "landed head ... — merged by drain" claim it did not earn. The failure is
           // still fully reported: `failedMerges` below drives both the per-pass stderr line and the sweep's
-          // own JSON `failed` array (a non-zero exit when any fill), which is what a false-positive trace
+          // own JSON `failed` array (exit 2 only when nothing landed), which is what a false-positive trace
           // comment used to silently paper over (confirmed live on chalbert/web-everything#2596, 2026-09-24).
           const cc = remaining.find((x) => sameCand(x, c)); if (cc) cc.decision = 'skip'; // stays blocking its dependents; not retried this pass
           noteSplit(`merge failed: ${detail}`);
@@ -5846,7 +5855,8 @@ async function runCli() {
     if (AS_JSON) writeAllSync(1, JSON.stringify(result) + '\n');
     // #2318 — a duplicate id surviving on main is a LOUD failure (exit 3), distinct from a merge failure (exit 2):
     // main is in a globally-red state until it is resolved by hand, so the drain must never exit 0 over it.
-    process.exit((duplicateIdsOnMain && duplicateIdsOnMain.length) ? 3 : (failedMerges.length ? 2 : 0));
+    const exitCode = passExitCode({ dup: duplicateIdsOnMain, failed: failedMerges, mergedCount: result.merged.length });
+    process.exit(exitCode);
   }
 
   // WATCH: re-sweep on a fixed interval, landing PRs as they become eligible, until `--max-idle` consecutive
@@ -5953,5 +5963,6 @@ async function runCli() {
   // A red-main freeze already emitted its own stop payload (above) — don't double-emit; just exit 5.
   if (redMainStopped) process.exit(5);
   if (AS_JSON) writeAllSync(1, JSON.stringify({ ok: lastDup.length === 0, watch: true, label, interval: INTERVAL, maxIdle: MAX_IDLE, passes: passes.length, merged: allMerged, lastFailed, ...(lastDup.length ? { duplicateIdsOnMain: lastDup } : {}) }) + '\n');
-  process.exit(lastDup.length ? 3 : (lastFailed.length ? 2 : 0));
+  const exitCode = passExitCode({ dup: lastDup, failed: lastFailed, mergedCount: allMerged.length });
+  process.exit(exitCode);
 }
