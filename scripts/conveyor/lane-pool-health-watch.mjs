@@ -512,6 +512,8 @@ export function reclaimFinishedLanes({ whois, reclaimLane, dryRun, salvageEnable
     // is this call site's OWN fail-closed requirement (see above) — both must hold before a reclaim is skipped.
     if (expectedBranch !== null && isLaneAlreadyClean({
       uncommittedCount,
+      trackedModified,
+      untracked,
       aheadCount: row.ahead?.count ?? null,
       headSha: row.headSha ?? null,
       branchTipSha: row.branchTipSha ?? null,

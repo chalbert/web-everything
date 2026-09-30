@@ -8,6 +8,7 @@ vi.mock('node:child_process', async (importOriginal) => {
   return { ...actual, execFileSync, default: { ...actual.default, execFileSync } };
 });
 import { execFileSync } from 'node:child_process';
+vi.mock('../../lib/gh-throttle.mjs', async (original) => ({ ...await original(), execFileSyncThrottled: (...args) => execFileSync(...args) }));
 import { main } from '../operator-queue.mjs';
 import { CONSTELLATION_REPOS } from '../../lib/constellation-repos.mjs';
 import { recordUnsupported } from '../../conveyor/unsupported-repo.mjs';

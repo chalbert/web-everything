@@ -510,7 +510,7 @@ function laneItemPrompt(it, laneDirs) {
     // stale (see the #3321 comment below step 6) — so this names the raw home deliberately, exactly like
     // {{GATE_COMMAND}} in the fix/ci-heal briefs.
     `   session, raw or through heavy-admission). In the WE clone run \`node scripts/verify-lane.mjs run --repo=.\``,
-    `   — the SAME diff-selected gate the fix/ci-heal briefs use for {{GATE_COMMAND}}. It runs ONLY the tests`,
+    `   — the SAME diff-selected gate the fix/ci-heal verify runner runs (their agents use request/check, #4369). It runs ONLY the tests`,
     `   your diff reaches (\`vitest related\` on the files changed vs origin/main — working tree included — plus`,
     `   any test naming a changed file) and a check:standards scoped to those same files`,
     `   (\`--local --files=<changed>\`); it falls back to the FULL suite BY ITSELF, and prints why, only for a`,

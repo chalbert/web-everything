@@ -17,6 +17,8 @@ import {
   defaultReadRequiredContexts, defaultReadHeadCommittedAt, triggerCiForPr, clearStaleCheckingLabel,
   sweepMissingRunRecovery, formatMissingRunReport, reconcileAcceptanceAfterRebase, defaultReadPrLabels,
 } from '../ci-red-recovery-watch.mjs';
+import { restampAcceptance } from '../../merge-ai-prs.mjs';
+import { spawnCiHealRearm } from '../ci-heal-mark.mjs';
 import { REVIEW_LABELS } from '../../lib/review-escalation.mjs';
 
 const failingCheck = (completedAt) => ({ __typename: 'CheckRun', name: 'test', status: 'COMPLETED', conclusion: 'FAILURE', completedAt });
@@ -323,6 +325,25 @@ describe('ci-red-recovery-watch — reconcileAcceptanceAfterRebase (#2811)', () 
     });
     expect(out).toEqual({ attempted: true, restamped: false, rearmed: true });
     expect(rearm).toHaveBeenCalledWith(expect.objectContaining({ pr: 2811, repo: 'chalbert/web-everything', cwd: '/repo' }));
+  });
+
+  it('reconcileAcceptanceAfterRebase — real restamp/rearm children never receive a literal null repo', () => {
+    const argvs = [];
+    const fakeSpawn = (cmd, argv) => { argvs.push(argv); return { status: 1, stdout: 'refused', stderr: '' }; };
+    const out = reconcileAcceptanceAfterRebase({
+      prNumber: 2826, newHead: 'a19e50b56', repo: null, root: '/repo',
+      readLabels: readLabels([{ name: REVIEW_LABELS.accepted }]),
+      restamp: (a) => restampAcceptance({ ...a, spawn: fakeSpawn }),
+      rearm: (a) => spawnCiHealRearm({ ...a, spawn: fakeSpawn }),
+    });
+    expect(out.attempted).toBe(true);
+    expect(argvs).toHaveLength(2); // restamp child, then rearm child (restamp refused)
+    for (const argv of argvs) {
+      for (const el of argv) {
+        expect(String(el)).not.toMatch(/^--repo=(null|undefined)$/);
+        expect(el).not.toBe('null');
+      }
+    }
   });
 
   it('defaultReadPrLabels asks gh pr view --json labels for the exact PR, --repo included when given', () => {

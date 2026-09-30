@@ -46,7 +46,8 @@ function isNonTerminal(agent) {
 export function isProcessAlive(session, processRows) {
   const pid = Number(session?.pid);
   const rowsGiven = Array.isArray(processRows);
-  if (Number.isInteger(pid) && pid > 0) return rowsGiven && processRows.some((p) => Number(p?.pid) === pid);
+  // An unavailable snapshot is "unknown" (`null`), never "confirmed dead" — same as the sessionId branch below.
+  if (Number.isInteger(pid) && pid > 0) return rowsGiven ? processRows.some((p) => Number(p?.pid) === pid) : null;
   const sid = session?.sessionId ? String(session.sessionId) : '';
   // `!rowsGiven` (the probe itself never ran/failed) is "unknown" — a successfully-read but genuinely EMPTY
   // snapshot (`[]`, no rows at all) is a definite "not found" via `.some()` on an empty array, same as

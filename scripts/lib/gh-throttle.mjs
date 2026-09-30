@@ -316,6 +316,13 @@ export function classifyGhWrite(args) {
     const methodIdx = a.indexOf('--method');
     const method = methodIdx >= 0 ? String(a[methodIdx + 1] || '').toUpperCase() : null;
     if (method) return method !== 'GET' && method !== 'HEAD';
+    // `gh api graphql -f query=…` is POST only because of the flag. Read exemption is an ALLOWLIST: only an
+    // inline `-f/--raw-field query=<text with no mutation>` and no `--input`/`@file` value anywhere. A `query=@file`
+    // token or `--input` hides the text, so it stays a write.
+    if (a[1] === 'graphql' && !a.includes('--input') && !a.some((t) => typeof t === 'string' && /^(query=)?@/.test(t) && t !== '@')) {
+      const qi = a.findIndex((t, i) => (t === '-f' || t === '--raw-field') && typeof a[i + 1] === 'string' && a[i + 1].startsWith('query=') && !a[i + 1].startsWith('query=@'));
+      if (qi >= 0 && !/\bmutation\b/i.test(a[qi + 1])) return false;
+    }
     return a.some((t) => t === '-f' || t === '-F' || t === '--field' || t === '--raw-field' || t === '--input');
   }
   return false;
@@ -792,7 +799,31 @@ export function stripGhDebug(text) {
         if (h) headers[h[1].toLowerCase()] = h[2].trim();
       }
     }
-    if (status != null) responses.push({ status, headers });
+    if (status != null) {
+      // Parse only the response JSON, never persist payloads, variables or credentials.
+      let cost = null;
+      try {
+        const body = JSON.parse(lines.slice(lastHeaderLine + 1, blockEnd).join('\n').trim());
+        const value = body?.data?.rateLimit?.cost;
+        if (Number.isInteger(value) && value >= 0) cost = value;
+      } catch { /* truncated/non-JSON response: cost remains unknown */ }
+      const queryStart = lines.slice(i, blockEnd).indexOf('GraphQL query:');
+      const queryEnd = lines.slice(i, blockEnd).findIndex((l) => l.startsWith('GraphQL variables:'));
+      let shape = queryStart >= 0 && queryEnd > queryStart
+        ? createHash('sha256').update(lines.slice(i + queryStart + 1, i + queryEnd).join('\n')).digest('hex').slice(0, 16) : null;
+      if (!shape) {
+        // gh api prints its JSON request rather than the native GraphQL query/variables form.
+        const beforeResponse = lines.slice(i + 1, blockEnd).join('\n').split(/\n< HTTP\//)[0];
+        const jsonStart = beforeResponse.indexOf('\n{');
+        if (jsonStart >= 0) {
+          try {
+            const request = JSON.parse(beforeResponse.slice(jsonStart).trim());
+            if (typeof request.query === 'string') shape = createHash('sha256').update(request.query).digest('hex').slice(0, 16);
+          } catch { /* non-JSON request or partial trace */ }
+        }
+      }
+      responses.push({ status, headers, ...(cost !== null ? { cost } : {}), ...(shape ? { shape } : {}) });
+    }
     if (end !== -1) { i = end + 1; continue; }
     i = lastHeaderLine + 1;
     if (i < lines.length && lines[i] === '' && i < lines.length - 1) i += 1;
@@ -808,7 +839,7 @@ export function rateLimitRecords(responses) {
     const h = r && r.headers;
     if (!h || h['x-ratelimit-used'] == null) continue;
     const num = (k) => (h[k] != null && Number.isFinite(Number(h[k])) ? Number(h[k]) : null);
-    out.push({ used: num('x-ratelimit-used'), rem: num('x-ratelimit-remaining'), limit: num('x-ratelimit-limit'), reset: num('x-ratelimit-reset'), res: h['x-ratelimit-resource'] || null });
+    out.push({ used: num('x-ratelimit-used'), rem: num('x-ratelimit-remaining'), limit: num('x-ratelimit-limit'), reset: num('x-ratelimit-reset'), res: h['x-ratelimit-resource'] || null, ...(Number.isInteger(r.cost) && r.cost >= 0 ? { cost: r.cost } : {}), ...(r.shape ? { shape: r.shape } : {}) });
   }
   return out;
 }

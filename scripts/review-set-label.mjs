@@ -234,13 +234,16 @@ export { decideParkToHuman, findContradictoryReviewVerdicts, decideContradictory
  *     a gate re-derive. REFUSED unless a live `review:accepted` is already on the PR: a re-stamp may only carry
  *     an acceptance ACROSS a head move, never manufacture one.
  * @param {{to:('accepted'|'changes'|'rearm'|'clear-human'), currentLabels?:Array, findingCount?:number|null,
- *   reason?:string}} o - `currentLabels` is the observed label array (string or `{name}` shape, per
+ *   reason?:string, requireLive?:(null|'accepted')}} o - `currentLabels` is the observed label array (string or `{name}` shape, per
  *   `hasReviewLabel`). `findingCount` and `reason` are the #3334 decision inputs: how many findings the juror
  *   raised (tri-state — `null` is UNKNOWN and never refuses) and the reason the caller stated, if any. They are
- *   ARGUMENTS, never fetched: this function is pure and stays pure.
+ *   ARGUMENTS, never fetched: this function is pure and stays pure. `requireLive` (#4333, `rearm` only) is the
+ *   opt-in live-state precondition: `'accepted'` refuses the re-arm unless `review:accepted` is live in
+ *   `currentLabels` (the caller's OWN fresh read), so a `review:changes` verdict that landed after a caller's
+ *   earlier read is never swapped to pending.
  * @returns {{allowed:boolean, addLabel:string, removeLabels:string[], keepsHuman:boolean, reason:string}}
  */
-export function decideSetLabel({ to, currentLabels = [], findingCount = null, reason = '' } = {}) {
+export function decideSetLabel({ to, currentLabels = [], findingCount = null, reason = '', requireLive = null } = {}) {
   // we:scripts/review-set-label.mjs#decideSetLabel — only the targets in the closed set are valid.
   if (!REVIEW_LABEL_TARGETS.includes(to)) {
     throw new Error(
@@ -339,6 +342,16 @@ export function decideSetLabel({ to, currentLabels = [], findingCount = null, re
   if (to === 'rearm') {
     const wasChanges = hasReviewLabel(currentLabels, REVIEW_LABELS.changes);
     const wasAccepted = hasReviewLabel(currentLabels, REVIEW_LABELS.accepted);
+    if (requireLive === 'accepted' && !wasAccepted) {
+      return {
+        allowed: false,
+        addLabel: '',
+        removeLabels: [],
+        keepsHuman: isHuman,
+        reason: 'review:accepted is not live — an accepted-only re-arm refuses to touch any other verdict '
+          + '(#4333); nothing was changed',
+      };
+    }
     if (!wasChanges && !wasAccepted) {
       return {
         allowed: false,
@@ -888,6 +901,9 @@ export function runReviewLabelCli({
   // only. Optional and validated here (fail closed on a malformed SHA) so a caller who does not have it yet —
   // there are none in this repo, but nothing stops a future one — still gets the pre-#x9krtkb re-read fallback.
   const newHeadArg = (argv.find((a) => a.startsWith('--new-head=')) || '').slice('--new-head='.length).trim();
+  // #4333 — `--only-if=accepted` (rearm only): the child's own fresh read must still show `review:accepted`.
+  const onlyIfArg = argv.find((a) => a.startsWith('--only-if='));
+  const onlyIf = onlyIfArg === undefined ? null : onlyIfArg.slice('--only-if='.length);
 
   // we:scripts/review-set-label.mjs#runReviewLabelCli — validate every input BEFORE any gh call (fail closed).
   const REPO_RE = /^[\w.-]+\/[\w.-]+$/;
@@ -898,6 +914,12 @@ export function runReviewLabelCli({
   // --repo is optional. An ABSENT --repo fails here only when it is REQUIRED; when optional it is derived below.
   if (repo ? !REPO_RE.test(repo) : !repoOptional) {
     fail('invalid --repo — expected <owner/name>');
+  }
+  if (onlyIf !== null && onlyIf !== 'accepted') {
+    fail("invalid --only-if — expected 'accepted'");
+  }
+  if (onlyIf !== null && to !== 'rearm') {
+    fail('--only-if is only valid with the rearm target');
   }
   if (newHeadArg && !/^[0-9a-f]{7,40}$/i.test(newHeadArg)) {
     fail('invalid --new-head — expected a git commit SHA (7-40 hex chars)');
@@ -1113,6 +1135,7 @@ export function runReviewLabelCli({
     currentLabels,
     findingCount: bounceEvidence.findingCount,
     reason: clearReason || bounceEvidence.reason,
+    requireLive: onlyIf,
   });
   if (!decision.allowed) {
     emit(`${JSON.stringify(refusalResult({ pr: Number(pr), decision }))}\n`);

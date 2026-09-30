@@ -681,3 +681,24 @@ still retains ownership. Probe with an in-flight run on disk, duplicate terminal
 reader, and a stamped card at the next daemon tick. Held dispatch reads must not invoke the full planner.
 Use the integration Vitest config for we:scripts/operations/__tests__/dispatch-lane-integration.test.mjs;
 the default config excludes that file. Keep dead-PID and unknown-session crash recovery tests.
+
+## GitHub spend regression probes
+
+Use TOTAL App GraphQL counter movement over a named wall-clock window as the success metric.
+Per-caller counter deltas include concurrent traffic and are not query costs. The metered read
+queries in `we:scripts/lib/gh-metered-reads.mjs` include `rateLimit { cost }`; the throttle
+records that response cost and a query hash without storing request variables or response bodies.
+Historical ledger rows without cost remain estimates and cannot supply a measured per-shape projection.
+
+Git-derived already-done results must preserve the body-disclaimer exclusion. Default GitHub
+merge commits contain a title, not the original PR body; a potentially implementing match must
+fall back unless that body is available. Older nonstandard merges are irrelevant only when git
+ancestry proves they predate the item's creation (including its bornAs/JIT-number alias).
+PR-limit fixtures should compare the existing authorship classifier over git's author, message,
+and parsed co-author trailers, and assert no GitHub invocation on a successful git read.
+
+Already-done CLI fixtures must run in their own git checkout: complete history proves zero host
+calls; shallow history exercises the metered GraphQL fallback. Preserve exact stale-ID call counts
+and cache replay assertions on that fallback. Keep the fake host's throttle store private so another
+suite cannot consume its budget. Numbering fixtures likewise pass a private `lockRoot` to the real
+mutex instead of acquiring the developer's shared drain lock.

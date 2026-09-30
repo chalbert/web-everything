@@ -34,7 +34,7 @@
 | `{{REASON}}` | why it fired — `red-ci` (a required check went red) or `behind` (BEHIND + parked) — for the durable comment |
 | `{{REPO}}` | the target repo's gh slug (e.g. `chalbert/web-everything`) — every `--repo=` flag below |
 | `{{LANE_REPO}}` | what `lane-pool.mjs --repo=` itself expects — an absolute checkout path always (equal to `{{WE_ROOT}}` for WE, a sibling's own checkout otherwise; landing-freeze fix — was `.` for WE, which broke from this dispatch's own scratch cwd) |
-| `{{GATE_COMMAND}}` | the diff-selected gate for the target repo — `node <WE_ROOT>/scripts/verify-lane.mjs run --repo=.` (`gateFor(...)`, `we:scripts/lib/repo-profile.mjs`; xpnhz4o) |
+| `{{GATE_COMMAND}}` | informational only — the sibling-repo-aware synchronous `run` form (`gateFor(...)`, `we:scripts/lib/repo-profile.mjs`); a dispatched agent does NOT run it (the guard denies it) and uses `verify-lane.mjs request` / `check` in step 4 |
 | `{{WE_ROOT}}` | the absolute WE checkout that owns every tool this brief runs (`ci-heal-mark.mjs`, `lane-pool.mjs`, …) |
 | `{{ATTRIBUTION}}` | the commit-title reference — `WE #{{ITEM_NUM}}`-shaped for WE today, `PR #{{PR_NUM}}` for an item-less heal |
 
@@ -282,27 +282,37 @@ as "closes"/"fixes" the item itself — it heals CI on an already-open PR, it do
 ### 4. Run the gate GREEN (the item's own locus gate)
 
 ```bash
-{{GATE_COMMAND}}          # this repo's own gate ({{REPO}}'s package.json — gateFor(...) in scripts/lib/repo-profile.mjs)
+node {{WE_ROOT}}/scripts/verify-lane.mjs request --repo=.                        # returns almost instantly — nothing has run yet
+node {{WE_ROOT}}/scripts/verify-lane.mjs check --wait=60000 --json --repo=.     # blocks (bounded) until the verify runner settles the marker
 ```
 
-**Run it in the FOREGROUND with an explicit Bash `timeout: 600000`** (the 10-minute max) — never
-`run_in_background`, and never `sleep`-poll its `tasks/<id>.output` file (`we:scripts/guard-bash.mjs` denies that
-in an agent session, #x36vidg). If the tool still moves it to the background, re-run it once in the foreground.
+A dispatched agent cannot run the gate itself: `we:scripts/guard-bash.mjs` denies any `verify-lane.mjs` invocation
+except `request` / `check` / `reset` (#3105) — including a bare `run --repo=.` and `run` wrapped in
+`heavy-admission.mjs`. Write the script path **unquoted** (the guard needs whitespace right after `.mjs`; a
+quoted path is denied). Do not run `verify-lane.mjs run` here; `request` stamps a marker the verify runner
+(`we:scripts/conveyor/verify-dispatch.mjs`) picks up and settles with the same diff-selected gate.
+
+Read the verdict from the **`check` output** (status / exit code), never from the `request` call (which always
+exits 0): `green` → proceed; `red` (exit 2) → the hard stop below; `running` (the `--wait` ceiling elapsed) →
+call `check --wait=60000` again, bounded — never `sleep`-poll; any other status follows the table in
+[delivery-agent-brief.md](delivery-agent-brief.md). Use the Bash tool's foreground `timeout: 600000`, never
+`run_in_background`, and never `sleep`-poll a `tasks/<id>.output` file (#x36vidg).
+
 After the re-push, do NOT wait for the new CI run to go green (no `gh pr checks --watch`, no `sleep` loop on
 `gh pr checks`/`statusCheckRollup`) — the ci-heal tally comment is your last write; report and exit.
 
 If the heal also touches a WE-side file (docs, the backlog item itself, WE-side glue) — i.e. `{{SCOPE}}` names
 anything outside `{{REPO}}` — additionally run `npm run check:standards` from `{{WE_ROOT}}` before re-pushing:
-`{{GATE_COMMAND}}` is `{{REPO}}`'s own gate and does not check WE's cross-repo invariants. For WE itself
-(`{{REPO}}` == WE), `{{GATE_COMMAND}}` already includes WE's own check:standards (scoped to your diff), so this is
+the gate is `{{REPO}}`'s own gate and does not check WE's cross-repo invariants. For WE itself
+(`{{REPO}}` == WE), the gate already includes WE's own check:standards (scoped to your diff), so this is
 a no-op today.
 
-**`{{GATE_COMMAND}}` is the diff-selected gate** (`verify-lane.mjs run`, xpnhz4o): it runs **only the tests your
+**The gate is the diff-selected gate** (`verify-lane.mjs`, xpnhz4o): it runs **only the tests your
 diff reaches** (`vitest related` on the files changed vs `origin/main`, working tree included, plus the tests that
-name a changed file) and a check:standards scoped to those files. It falls back to the full suite **by itself** —
-and prints `FULL SUITE (fallback)` with the reason — when a config / setup / dependency / shared-test-helper file
-changed. **Never run the full suite yourself** (`npm run test:unit`, `npm test`, a bare `vitest run`): it takes
-10+ minutes, several fixers doing it at once starved the host, CI runs it anyway, and the Bash guard denies it.
+name a changed file) and a check:standards scoped to those files. It falls back to the full suite **by itself**
+when a config / setup / dependency / shared-test-helper file changed. **Never run the full suite yourself**
+(`npm run test:unit`, `npm test`, a bare `vitest run`): the verify runner runs the same gate for you, CI runs it
+anyway, and the Bash guard denies it.
 
 A red gate is a hard stop: do **not** re-push, and report the completion record and report `#{{ITEM_NUM}} →
 ci-heal gate-red`:

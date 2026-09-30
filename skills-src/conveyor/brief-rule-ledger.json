@@ -3134,6 +3134,48 @@
           "text": "session's `claude` invocation before you ever start — the whole `gh` CLI (not just `gh pr merge`; a label edit"
         }
       ]
+    },
+    {
+      "id": "role-test-soak-author",
+      "status": "judgment",
+      "summary": "Specialist test & soak-break author role (#4361): no script decides whether a scenario is a real live case or whether a waiver is warranted.",
+      "lines": [
+        {
+          "brief": "skills-src/conveyor/role-test-soak-author-brief.md",
+          "key": "d2e44f0eb8",
+          "text": "the fix and green after it. You do not re-implement the fix and you do not open a PR."
+        },
+        {
+          "brief": "skills-src/conveyor/role-test-soak-author-brief.md",
+          "key": "177b52892c",
+          "text": "never write a scenario that a unit test already covers. Set `fixedBy` to the builder's fix so the proof can revert it."
+        },
+        {
+          "brief": "skills-src/conveyor/role-test-soak-author-brief.md",
+          "key": "4a910a8919",
+          "text": "Run `node \"$LANE/scripts/conveyor/soak/red-green.mjs\" --break=<id>` from the lane you were handed. It must print"
+        },
+        {
+          "brief": "skills-src/conveyor/role-test-soak-author-brief.md",
+          "key": "5e3b443bfa",
+          "text": "write one line for the PR body instead: `soak-waiver: <specific reason>`. Never use a waiver because the"
+        },
+        {
+          "brief": "skills-src/conveyor/role-test-soak-author-brief.md",
+          "key": "b04423491a",
+          "text": "- Never edit the fix itself; if the break shows the fix is wrong, say so when you hand the lane back."
+        },
+        {
+          "brief": "skills-src/conveyor/role-test-soak-author-brief.md",
+          "key": "6f13b55483",
+          "text": "- Never commit, push, or open a PR; the builder's wrapper does that."
+        },
+        {
+          "brief": "skills-src/conveyor/role-test-soak-author-brief.md",
+          "key": "588dadf1f9",
+          "text": "- Always leave the lane's other files untouched."
+        }
+      ]
     }
   ]
 }

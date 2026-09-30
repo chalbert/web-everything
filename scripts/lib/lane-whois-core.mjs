@@ -189,15 +189,18 @@ export function keepMarkerApplies(marker, fingerprint) {
  * already on — this predicate only removes the wasted process tree for that no-op, it changes no resulting git
  * state versus before #4344. Neither this fix nor `reclaim` refreshes a lane's knowledge of `origin/<branch>` —
  * that stays owned by `we:scripts/lane-pool.mjs#cmdRefresh` / an explicit fetch elsewhere, exactly as before.
- * FAILS CLOSED on malformed/missing input, on EVERY field (#4344 review): a `null`/non-numeric count, a missing
+ * FAILS CLOSED on malformed/missing input, on EVERY field (#4344 review): a count that is not exactly zero (`null`, non-numeric, negative), a missing
  * sha, or (at `reclaimFinishedLanes`'s call site in `we:scripts/conveyor/lane-pool-health-watch.mjs` — see that
  * function) a missing `expectedBranch`
  * all read as "not already clean" (falls through to a real reclaim), never as "assume clean". Omitting a count
  * is deliberately NOT the same as passing `0` — a caller that forgets to supply it must never silently pass.
  * @param {object} p
- * @param {number} [p.uncommittedCount] - required to be a real, finite number to pass at all; anything else
- *   (omitted, `null`, `NaN`, a string) fails closed.
+ * @param {number} [p.uncommittedCount] - must be exactly `0` to pass; anything else (omitted, `null`, `NaN`, a
+ *   string, a negative or fractional number) fails closed.
  * @param {number} [p.aheadCount] - same requirement as `uncommittedCount`.
+ * @param {number} [p.trackedModified] - optional component of `uncommittedCount`; when this or `untracked` is
+ *   supplied, BOTH must be exactly `0` (so components cancelling to a `0` sum fail closed).
+ * @param {number} [p.untracked] - see `trackedModified`.
  * @param {string|null} [p.headSha] - this lane's current `HEAD` sha.
  * @param {string|null} [p.branchTipSha] - the pool branch's tip sha, as read from THIS lane's own clone (never
  *   a fresh fetch — the same locally-known ref `aheadCount` was already computed against).
@@ -207,10 +210,13 @@ export function keepMarkerApplies(marker, fingerprint) {
  * @returns {boolean}
  */
 export function isLaneAlreadyClean({
-  uncommittedCount = null, aheadCount = null, headSha = null, branchTipSha = null, branch = null, expectedBranch = null,
+  uncommittedCount = null, aheadCount = null, trackedModified, untracked, headSha = null, branchTipSha = null, branch = null,
+  expectedBranch = null,
 } = {}) {
-  if (!Number.isFinite(uncommittedCount) || !Number.isFinite(aheadCount)) return false;
-  if (uncommittedCount > 0 || aheadCount > 0) return false;
+  // Exactly zero, never "not positive": a negative (or fractional) count is corrupt input, not a clean lane.
+  if (uncommittedCount !== 0 || aheadCount !== 0) return false;
+  // Components, when either is supplied, must BOTH be exactly 0 — a `-2 + 2` sum of `0` must not read as clean.
+  if ((trackedModified !== undefined || untracked !== undefined) && (trackedModified !== 0 || untracked !== 0)) return false;
   if (!headSha || !branchTipSha || headSha !== branchTipSha) return false;
   if (expectedBranch != null && branch !== expectedBranch) return false;
   return true;

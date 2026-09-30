@@ -34,6 +34,29 @@ describe('isProcessAlive', () => {
   });
 });
 
+describe.each([
+  ['pid', { pid: 123 }, (alive) => [psRow('node x', alive ? 123 : 1)]],
+  ['sessionId', { sessionId: 'sid-z' }, (alive) => [psRow(alive ? 'claude --resume=sid-z' : 'node x')]],
+])('isProcessAlive identity parity (%s)', (_name, session, rows) => {
+  it.each([
+    ['unavailable snapshot', () => null, null],
+    ['empty snapshot', () => [], false],
+    ['matching snapshot', () => rows(true), true],
+    ['nonmatching snapshot', () => rows(false), false],
+  ])('%s', (_label, snapshot, expected) => {
+    expect(isProcessAlive(session, snapshot())).toBe(expected);
+  });
+});
+
+describe('isProcessAlive unavailable probe with a pid', () => {
+  it('answers null for { pid: 123 } with a null snapshot', () => {
+    expect(isProcessAlive({ pid: 123 }, null)).toBe(null);
+  });
+  it('findGhostAgentSessions does not flag a pid-bearing session when the probe never ran', () => {
+    expect(findGhostAgentSessions([agent({ pid: 123 })], null)).toEqual([]);
+  });
+});
+
 describe('findGhostAgentSessions', () => {
   it('flags the real live-incident shape: a `state:working`, 20+-day-old session with no matching process', () => {
     const ghosts = findGhostAgentSessions([

@@ -775,7 +775,7 @@ export function restampAcceptance({ pr, repo, newHead, cwd, spawn = spawnSync })
   try {
     const r = spawn(process.execPath, [
       new URL('./review-set-label.mjs', import.meta.url).pathname,
-      String(pr), `--repo=${repo}`, '--to=restamp', '--actor=drain',
+      String(pr), ...(repo ? [`--repo=${repo}`] : []), '--to=restamp', '--actor=drain',
       '--channel=drain-rebase', `--reason=head moved to ${newHead} by this drain's own content-preserving rebase`,
       // #x9krtkb (bug 2) — `newHead` used to reach the child ONLY inside `--reason`'s free text, which
       // `review-set-label.mjs` never parsed back out: it re-derived the head from its OWN fresh `gh pr view`,

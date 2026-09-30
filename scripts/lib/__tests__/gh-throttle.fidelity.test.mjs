@@ -121,13 +121,13 @@ describe('stripGhDebug — golden fixtures from the pinned real gh binary (#4309
     expect(stderr).toBe(fx('pr-view-404.plain.stderr'));
     expect(responses).toHaveLength(1);
     expect(responses[0].status).toBe(200); // GraphQL NOT_FOUND is an HTTP 200 with an `errors` body
-    expect(rateLimitRecords(responses)).toEqual([{ used: 37, rem: 4963, limit: 5000, reset: 1790615715, res: 'graphql' }]);
+    expect(rateLimitRecords(responses)).toEqual([{ used: 37, rem: 4963, limit: 5000, reset: 1790615715, res: 'graphql', shape: expect.stringMatching(/^[0-9a-f]{16}$/) }]);
   });
 
   it('a success: nothing of the trace survives, one GraphQL response captured', () => {
     const { stderr, responses } = stripGhDebug(fx('pr-view-success.debug.stderr'));
     expect(stderr).toBe('');
-    expect(rateLimitRecords(responses)).toEqual([{ used: 36, rem: 4964, limit: 5000, reset: 1790615715, res: 'graphql' }]);
+    expect(rateLimitRecords(responses)).toEqual([{ used: 36, rem: 4964, limit: 5000, reset: 1790615715, res: 'graphql', shape: expect.stringMatching(/^[0-9a-f]{16}$/) }]);
   });
 
   it('a paginated `pr list`: two request blocks, both stripped, one rl record per HTTP response', () => {
@@ -419,7 +419,7 @@ describe('runGhSync — cost-header capture on the real exec (#4375)', () => {
     const { dir } = fakeGh();
     const err = catchErr(() => runGhSync(['pr', 'create'], { env: envFor(NOT_FOUND), encoding: 'utf8', stdio: 'pipe', throttle: tuning(dir, { calibrateHeaders: true }) }));
     expect(err.stderr).toBe(fx('pr-view-404.debug.stderr'));
-    expect(readLog(join(dir, 'locks'))[0].rl).toEqual([{ used: 37, rem: 4963, limit: 5000, reset: 1790615715, res: 'graphql' }]);
+    expect(readLog(join(dir, 'locks'))[0].rl).toEqual([{ used: 37, rem: 4963, limit: 5000, reset: 1790615715, res: 'graphql', shape: expect.stringMatching(/^[0-9a-f]{16}$/) }]);
   });
 
   it('stdout over the caller\'s maxBuffer still raises ENOBUFS (the trace headroom never loosens the cap), and is logged', () => {

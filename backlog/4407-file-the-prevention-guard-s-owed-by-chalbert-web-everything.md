@@ -3,9 +3,11 @@ bornAs: x0kopyt
 kind: story
 size: 3
 parent: "4075"
-status: open
+status: resolved
 scope: ["we:scripts/lib/lane-whois-core.mjs", "we:scripts/lib/__tests__/lane-whois-core.test.mjs", "we:scripts/conveyor/lane-pool-health-watch.mjs", "we:scripts/conveyor/__tests__/lane-pool-health-watch.test.mjs"]
 dateOpened: "2026-09-28"
+dateStarted: "2026-09-30"
+dateResolved: "2026-09-30"
 preparedDate: "2026-09-30"
 preparedAgainstSha: "c3129f76022d7e2e039ab1d2106685c7c5841862"
 tags: []

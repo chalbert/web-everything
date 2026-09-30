@@ -340,26 +340,68 @@ export function repoKeyForCheckout(cwd, { remote = 'origin', exec = execFileSync
  * @returns {null | {remote: ?string, refspecs: string[], all: boolean, dir: ?string}}
  */
 export function parseGitPush(cmd) {
+  const first = parseGitPushes(cmd)[0];
+  if (!first) return null;
+  const { before, retarget, ...push } = first; // eslint-disable-line no-unused-vars
+  return push;
+}
+
+/** A `cd` anywhere before a push, including as the command's first word (`cd d && git push`). */
+const CD_BEFORE = /(?:^|[;&|\n]\s*)cd(?:\s|$)/;
+
+/**
+ * Every `git push` in a shell command, in order (each read exactly as {@link parseGitPush} reads the first one,
+ * with its own remote / refspecs / `-C <dir>`). Pure. `[]` when there is no push. `before` is the text that
+ * precedes the push in the command — what {@link pushTargetUnreliable} inspects.
+ * `retarget` is set when a `cd` precedes the push (anywhere, including as the command's first word) or `--git-dir` /
+ * `--work-tree` is given: the push then runs in a repo the hook never resolved.
+ * @returns {Array<{remote: ?string, refspecs: string[], all: boolean, dir: ?string, before: string, retarget: boolean}>}
+ */
+export function parseGitPushes(cmd, prefix = '') {
+  const text = String(cmd ?? '');
   const ARG = String.raw`(?:"[^"]*"|'[^']*'|\S+)`;
-  const m = new RegExp(String.raw`\bgit\b((?:\s+-[Cc]\s+${ARG})*)\s+push\b([^;&|\n]*)`).exec(String(cmd ?? ''));
-  if (!m) return null;
+  // Any git GLOBAL option may sit between `git` and `push` (`--no-pager`, `--git-dir=…`, `-C d`, `-c k=v`, …) — the
+  // same spellings `guard-bash.mjs#canonicalGitOp` peels, so a push it recognises is always parsed here too.
+  const GLOBAL = String.raw`(?:\s+(?:-[Cc]\s+${ARG}|--(?:git-dir|work-tree|namespace|exec-path|super-prefix|config-env)(?:=${ARG}|\s+${ARG})|--?[A-Za-z][\w-]*(?:=${ARG})?))*`;
+  const re = new RegExp(String.raw`\bgit\b(${GLOBAL})\s+push\b([^;&|\n]*)`, 'g');
   const unq = (t) => t.replace(/^['"]|['"]$/g, '');
-  const dirs = [...m[1].matchAll(new RegExp(String.raw`-C\s+(${ARG})`, 'g'))].map((d) => unq(d[1]));
-  const toks = m[2].trim().split(/\s+/).filter(Boolean).map(unq);
   const VALUED = new Set(['-o', '--push-option', '--receive-pack', '--exec', '--repo']);
-  let remote = null;
-  let all = false;
-  const pos = [];
-  for (let i = 0; i < toks.length; i += 1) {
-    const t = toks[i];
-    if (t.startsWith('--repo=')) { remote = t.slice('--repo='.length) || null; continue; }
-    if (VALUED.has(t)) { if (t === '--repo') remote = toks[i + 1] ?? null; i += 1; continue; }
-    if (t === '--all' || t === '--mirror' || t === '--branches') { all = true; continue; }
-    if (t.startsWith('-')) continue;
-    pos.push(t);
+  const out = [];
+  for (const m of text.matchAll(re)) {
+    const dirs = [...m[1].matchAll(new RegExp(String.raw`-C\s+(${ARG})`, 'g'))].map((d) => unq(d[1]));
+    const toks = m[2].trim().split(/\s+/).filter(Boolean).map(unq);
+    let remote = null;
+    let all = false;
+    const pos = [];
+    for (let i = 0; i < toks.length; i += 1) {
+      const t = toks[i];
+      if (t.startsWith('--repo=')) { remote = t.slice('--repo='.length) || null; continue; }
+      if (VALUED.has(t)) { if (t === '--repo') remote = toks[i + 1] ?? null; i += 1; continue; }
+      if (t === '--all' || t === '--mirror' || t === '--branches') { all = true; continue; }
+      if (t.startsWith('-')) continue;
+      pos.push(t);
+    }
+    if (!remote && pos.length) remote = pos.shift();
+    const before = prefix ? `${prefix} ; ${text.slice(0, m.index)}` : text.slice(0, m.index);
+    // `--git-dir` / `--work-tree` re-point git at another repo, exactly as a preceding `cd` does.
+    out.push({ remote, refspecs: pos, all, dir: dirs.length ? dirs[dirs.length - 1] : null, before, retarget: /--(?:git-dir|work-tree)\b/.test(m[1]) || CD_BEFORE.test(before) });
   }
-  if (!remote && pos.length) remote = pos.shift();
-  return { remote, refspecs: pos, all, dir: dirs.length ? dirs[dirs.length - 1] : null };
+  return out;
+}
+
+/**
+ * Is this push's implicit target unresolvable from the hook's point of view? The hook resolves targets BEFORE the
+ * command runs, so a bare / `<remote>`-only / `HEAD` push that FOLLOWS a `git checkout` / `git switch` (or a `cd`
+ * / `gh pr checkout` / `git worktree`, or `--git-dir`) updates a branch the hook never saw. Pure. An explicit ref is
+ * always resolved exactly, so it is never unreliable.
+ */
+export function pushTargetUnreliable(push) {
+  if (!push) return false;
+  const implicit = !push.refspecs.length || push.refspecs.some((r) => /^(?:\+?[^:]*:)?(?:HEAD|@)$/.test(r) || /^\+?(?:HEAD|@)$/.test(r));
+  if (!implicit) return false;
+  const before = push.before ?? '';
+  return Boolean(push.retarget) || CD_BEFORE.test(before)
+    || /\bgit\b[^;&|\n]*\s(?:checkout|switch|worktree)\b/.test(before) || /\bgh\s+(?:pr\s+checkout|co)\b/.test(before);
 }
 
 /**
@@ -371,9 +413,22 @@ export function parseGitPush(cmd) {
  * `null` when the command has no push. `exec` is injectable for tests.
  * @returns {null | {repoKey: ?string, branches: string[]}}
  */
-export function resolvePushDestination(cmd, { cwd: baseCwd = process.cwd(), exec = execFileSync } = {}) {
+export function resolvePushDestination(cmd, opts = {}) {
   const push = parseGitPush(cmd);
-  if (!push) return null;
+  return push ? resolveParsedPush(push, opts) : null;
+}
+
+/** Every push in the command resolved separately (each in its own `-C` checkout / remote), in order. */
+export function resolvePushDestinations(cmd, opts = {}) {
+  return parseGitPushes(cmd, opts.prefix).map((push) => {
+    const dest = resolveParsedPush(push, opts);
+    // A push that runs after a `cd` / with `--git-dir` lands in a repo we did not resolve: its repo key is unknown (null =
+    // matched against every live claim), even when its refspec is explicit.
+    return { ...dest, ...(push.retarget ? { repoKey: null } : {}), unreliable: pushTargetUnreliable(push) };
+  });
+}
+
+function resolveParsedPush(push, { cwd: baseCwd = process.cwd(), exec = execFileSync } = {}) {
   const cwd = push.dir ? resolve(baseCwd, push.dir) : baseCwd;
   const git = (args) => {
     try { return String(exec('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 5000 }) ?? '').trim() || null; } catch { return null; }
@@ -387,9 +442,23 @@ export function resolvePushDestination(cmd, { cwd: baseCwd = process.cwd(), exec
       || (b && git(['config', '--get', `branch.${b}.remote`])) || 'origin';
   }
   const repoKey = /[:/]/.test(remote) ? repoKeyFromRemoteUrl(remote) : repoKeyForCheckout(cwd, { remote, exec });
-  const implicit = () => {
+  // `configured` — the push names no refspec at all (bare / `<remote>`-only), so `remote.<name>.push` and
+  // `push.default=matching` decide what is updated. An explicit `HEAD` refspec is never widened by either.
+  const implicit = ({ configured = false } = {}) => {
     const b = currentBranch();
     const out = [];
+    if (configured) {
+      const cfgSpecs = (git(['config', '--get-all', `remote.${remote}.push`]) ?? '').split('\n').map((x) => x.trim()).filter(Boolean);
+      for (const spec of cfgSpecs) {
+        const sp = spec.replace(/^\+/, '');
+        if (sp.includes('*')) { out.push('*'); continue; }
+        const dst = sp.includes(':') ? sp.slice(sp.indexOf(':') + 1) : sp;
+        if (dst && dst !== 'HEAD' && dst !== '@') out.push(normalizeBranch(dst));
+      }
+      // `matching` updates every branch that exists on both sides — unknowable cheaply, so every branch.
+      // …but only when no `remote.<name>.push` refspec is configured: that setting overrides `push.default`.
+      if (!cfgSpecs.length && git(['config', '--get', 'push.default']) === 'matching') out.push('*');
+    }
     if (b) out.push(b);
     const pushRef = git(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{push}']);
     if (pushRef) out.push(pushRef.startsWith(`${remote}/`) ? pushRef.slice(remote.length + 1) : pushRef);
@@ -399,7 +468,7 @@ export function resolvePushDestination(cmd, { cwd: baseCwd = process.cwd(), exec
   };
   const branches = [];
   if (push.all) branches.push('*');
-  else if (!push.refspecs.length) branches.push(...implicit());
+  else if (!push.refspecs.length) branches.push(...implicit({ configured: true }));
   for (const spec of push.refspecs) {
     const s = spec.replace(/^\+/, '');
     if (s.includes('*')) { branches.push('*'); continue; }

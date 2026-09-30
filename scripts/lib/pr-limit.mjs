@@ -26,6 +26,8 @@ import { isAiGeneratedPr, hasLabel } from './ai-pr-authorship.mjs'; // the zero-
 import { REVIEW_LABELS } from './review-escalation.mjs';
 import { runGhSync } from './gh-throttle.mjs';
 import { readSharedOpenPrs } from './pr-snapshot.mjs';
+import { meteredPrCommits } from './gh-metered-reads.mjs';
+import { readGitPrCommits } from './git-pr-commits.mjs';
 import { writeAllSync } from './write-all-sync.mjs';
 
 // ── LIMITS (defaults + per-repo env override) ───────────────────────────────────────────────────────────
@@ -119,7 +121,7 @@ export function countBackpressurePrs(prs) {
   return list.filter((pr) => isAiGeneratedPr(pr) && !hasLabel(pr, REVIEW_LABELS.accepted));
 }
 
-/** Fetch a repo's open PRs (`number,labels,headRefName` — deliberately NOT `commits`, see {@link fetchPrCommits})
+/** Fetch a repo's open PRs (`number,labels,headRefName,headRefOid` — deliberately NOT `commits`, see {@link fetchPrCommits})
  *  through the shared throttle. Fail-SOFT: any gh/auth/network hiccup returns `null` (never throws), so a
  *  transient `gh` failure degrades to "unknown count", not "block everything".
  *  @param {string} repoSlug - the gh `owner/repo` slug
@@ -128,9 +130,9 @@ export function countBackpressurePrs(prs) {
 export function fetchOpenPrs(repoSlug, { exec = runGhSync } = {}) {
   try {
     // #gh-graphql-budget — the host-shared open-PR snapshot first (null = not applicable → the direct read).
-    if (exec === runGhSync) { const shared = readSharedOpenPrs({ repo: repoSlug, fields: 'number,labels,headRefName' }); if (shared) return shared; }
+    if (exec === runGhSync) { const shared = readSharedOpenPrs({ repo: repoSlug, fields: 'number,labels,headRefName,headRefOid,baseRefName' }); if (shared) return shared; }
     const out = exec(
-      ['pr', 'list', '--repo', repoSlug, '--state', 'open', '--json', 'number,labels,headRefName', '--limit', '100'],
+      ['pr', 'list', '--repo', repoSlug, '--state', 'open', '--json', 'number,labels,headRefName,headRefOid,baseRefName', '--limit', '100'],
       { throttle: { op: 'pr list (pr-limit)' }, encoding: 'utf8' },
     );
     const rows = JSON.parse(String(out ?? '[]'));
@@ -149,13 +151,11 @@ export function fetchOpenPrs(repoSlug, { exec = runGhSync } = {}) {
  *  re-discovering the limit the hard way twice. Fail-SOFT: returns `null` (never `[]`, which would read as
  *  "zero commits" / mechanical-only) on any failure, so the caller can tell "unknown" apart from "empty".
  *  @returns {Array|null} */
-export function fetchPrCommits(repoSlug, number, { exec = runGhSync } = {}) {
+export function fetchPrCommits(repoSlug, number, { exec = runGhSync, headRefName, headRefOid, baseRefName, cwd, git } = {}) {
+  const local = readGitPrCommits(repoSlug, headRefName, { cwd, git, headRefOid, baseRefName });
+  if (local !== null) return local;
   try {
-    const out = exec(
-      ['pr', 'view', String(number), '--repo', repoSlug, '--json', 'commits'],
-      { throttle: { op: 'pr view commits (pr-limit)' }, encoding: 'utf8' },
-    );
-    const commits = JSON.parse(String(out ?? '{}'))?.commits;
+    const commits = meteredPrCommits(repoSlug, number, { exec });
     return Array.isArray(commits) ? commits : null;
   } catch {
     return null;
@@ -170,7 +170,7 @@ export function fetchPrCommits(repoSlug, number, { exec = runGhSync } = {}) {
  *  `review:accepted` (an already-accepted PR is excluded from the count regardless of authorship, so its
  *  commits are never worth fetching) — see {@link fetchPrCommits} for why a bulk commits fetch is unsafe. A
  *  PR whose commits lookup fails is DROPPED from the count (unknown authorship is never assumed AI). */
-export function countOpenPrsForRepo(repoKey, { exec, env = process.env, reposTable = CONSTELLATION_REPOS } = {}) {
+export function countOpenPrsForRepo(repoKey, { exec, env = process.env, reposTable = CONSTELLATION_REPOS, git, cwd } = {}) {
   const meta = reposTable[repoKey];
   const limit = resolvePrLimit(repoKey, env);
   if (!meta) return { repoKey, slug: null, count: null, prNumbers: [], limit, unavailable: true };
@@ -178,7 +178,7 @@ export function countOpenPrsForRepo(repoKey, { exec, env = process.env, reposTab
   if (prs === null) return { repoKey, slug: meta.slug, count: null, prNumbers: [], limit, unavailable: true };
   const enriched = prs
     .filter((pr) => !hasLabel(pr, REVIEW_LABELS.accepted))
-    .map((pr) => ({ ...pr, commits: fetchPrCommits(meta.slug, pr.number, { exec }) }))
+    .map((pr) => ({ ...pr, commits: fetchPrCommits(meta.slug, pr.number, { exec, headRefName: pr.headRefName, headRefOid: pr.headRefOid, baseRefName: pr.baseRefName, git, cwd: cwd ?? (meta.path ? meta.path.replace('$HOME', homedir()) : process.cwd()) }) }))
     .filter((pr) => Array.isArray(pr.commits));
   const counted = countBackpressurePrs(enriched);
   return { repoKey, slug: meta.slug, count: counted.length, prNumbers: counted.map((p) => p.number), limit, unavailable: false };

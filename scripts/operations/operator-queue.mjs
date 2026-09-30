@@ -1,3 +1,4 @@
+import { execFileSyncThrottled as execFileSync } from '../lib/gh-throttle.mjs';
 /**
  * @file Read-only operator queue: the SOLE authority on which human-gated PRs are worth the operator's time.
  *
@@ -25,7 +26,6 @@
  * labels, reusing `countStandDownComments`/`STAND_DOWN_MARKER` rather than re-deriving the match rule — and never
  * duplicates a PR already shown in NEEDS YOU.
  */
-import { execFileSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';

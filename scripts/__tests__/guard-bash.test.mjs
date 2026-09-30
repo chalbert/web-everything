@@ -334,6 +334,24 @@ describe('guard-bash — a dispatched agent may not run the gate directly, only 
     expect(dispatchedAgentVerificationReason('npm run test:unit', 'fix')).toMatch(/mechanically-dispatched fix agent/);
     expect(dispatchedAgentVerificationReason('node scripts/verify-lane.mjs --gate=true', 'ci-heal')).toMatch(/mechanically-dispatched ci-heal agent/);
   });
+  it("the fix/ci-heal briefs' request/check gate shape is permitted; run, quoted-path and wrapped run stay denied (#4369)", () => {
+    const permitted = [
+      'node /we/scripts/verify-lane.mjs request --repo=.',
+      'node /we/scripts/verify-lane.mjs check --wait=60000 --json --repo=.',
+    ];
+    const denied = [
+      'node /we/scripts/verify-lane.mjs run --repo=.',
+      'node "/we/scripts/verify-lane.mjs" request --repo=.',
+      'node /we/scripts/readiness/heavy-admission.mjs run -- node /we/scripts/verify-lane.mjs run --repo=.',
+    ];
+    for (const kind of ['fix', 'ci-heal']) {
+      for (const c of permitted) {
+        expect(dispatchedAgentVerificationReason(c, kind)).toBeNull();
+        expect(decide(c, { dispatchKind: kind })).toBeNull();
+      }
+      for (const c of denied) expect(dispatchedAgentVerificationReason(c, kind)).not.toBeNull();
+    }
+  });
   it('never fires for an interactive (non-dispatched) session — no WE_DISPATCH_KIND', () => {
     expect(dispatchedAgentVerificationReason('npm run check:standards', null)).toBeNull();
     expect(dispatchedAgentVerificationReason('npm run check:standards', undefined)).toBeNull();
