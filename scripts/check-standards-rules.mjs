@@ -1002,6 +1002,105 @@ export function findTestPlanGaps(body) {
   return gaps;
 }
 
+/**
+ * Guard 1 (#4438): parse the numbered items under `**Must (MVP):**` inside `## Explicit MVP cut`
+ * (when present), and verify each Must is cited by number in `## Done when`.
+ * Citing forms: `Must N`, `Musts A, B`, or a range `Musts A-B` (or `Musts A to B`, `Musts A through B`).
+ * Returns `[{ must: number }]` for each uncited Must. Cards with no `## Explicit MVP cut` or no numbered Musts return `[]`.
+ */
+export function findMustWithoutDoneWhen(body) {
+  if (typeof body !== 'string' || body === '') return [];
+  const lines = body.split(/\r?\n/);
+  const mvpLines = sectionLines(lines, /^explicit mvp cut\b/i);
+  if (!mvpLines.length) return [];
+
+  const mustNumbers = [];
+  let insideMust = false;
+  for (const line of mvpLines) {
+    if (/^\s*\*\*(?!Must\b)[^*]+\*\*/i.test(line)) {
+      insideMust = false;
+    } else if (/^\s*\*\*Must(?:\s*\([^)]+\))?:?\*\*/i.test(line)) {
+      insideMust = true;
+      continue;
+    }
+    if (insideMust) {
+      const m = line.match(/^\s{0,2}(\d+)\.\s+/);
+      if (m) {
+        mustNumbers.push(parseInt(m[1], 10));
+      }
+    }
+  }
+  if (!mustNumbers.length) return [];
+
+  const doneWhenLines = sectionLines(lines, /^done when\b/i);
+  const doneWhenText = doneWhenLines.join('\n');
+  const cited = new Set();
+
+  const mustMatches = doneWhenText.matchAll(/\bMusts?\s+((?:[0-9\s,\-–]|and|to|through)+)/gi);
+  for (const m of mustMatches) {
+    let snippet = m[1];
+    const rangeRe = /(\d+)\s*(?:-|–|\bto\b|\bthrough\b)\s*(\d+)/g;
+    let rm;
+    while ((rm = rangeRe.exec(snippet)) !== null) {
+      const start = parseInt(rm[1], 10);
+      const end = parseInt(rm[2], 10);
+      for (let n = Math.min(start, end); n <= Math.max(start, end); n++) {
+        cited.add(n);
+      }
+    }
+    snippet = snippet.replace(rangeRe, ' ');
+    const numRe = /\b(\d+)\b/g;
+    let nm;
+    while ((nm = numRe.exec(snippet)) !== null) {
+      cited.add(parseInt(nm[1], 10));
+    }
+  }
+
+  const gaps = [];
+  for (const n of mustNumbers) {
+    if (!cited.has(n)) {
+      gaps.push({ must: n });
+    }
+  }
+  return gaps;
+}
+
+/**
+ * Guard 2 (#4438): extract `we:backlog/<id>[-slug][.md]` refs from body (prose and backticks),
+ * including bare `we:backlog/<id>`, using id shape `[0-9]{1,5}|x[0-9a-z]{6,7}`.
+ * Flag any ref whose `<id>` is not in `knownIds` (resolvable backlog ids).
+ * Escape marker: a ref immediately followed by `(pending-lane)` is exempt.
+ * Returns `[{ id: string, ref: string }]`. Returns `[]` if knownIds is missing or empty body.
+ */
+export function findDanglingBacklogRefs(body, knownIds) {
+  if (typeof body !== 'string' || body === '' || !knownIds) return [];
+  const idSet = knownIds instanceof Set ? knownIds : new Set(knownIds);
+  const hasId = (id) => idSet.has(id) || idSet.has(Number(id));
+
+  const findings = [];
+  const seenRefs = new Set();
+
+  const refRe = /\bwe:backlog\/([0-9]{1,5}|x[0-9a-z]{6,7}(?![0-9a-z]))(?:-[a-z0-9_-]+)?(?:\.md)?/gi;
+  let m;
+  while ((m = refRe.exec(body)) !== null) {
+    const fullRef = m[0];
+    const targetId = m[1];
+
+    const rest = body.slice(m.index + fullRef.length);
+    if (/^(?::\d+)?[`"']?\s*\(pending-lane\)/i.test(rest)) {
+      continue;
+    }
+
+    if (!hasId(targetId)) {
+      if (!seenRefs.has(fullRef)) {
+        seenRefs.add(fullRef);
+        findings.push({ id: targetId, ref: fullRef });
+      }
+    }
+  }
+  return findings;
+}
+
 // ── Per-item backlog RENDERING lint (#845) ────────────────────────────────────
 // The structural/rendering checks that operate on ONE backlog item in isolation — no registry/cross-item
 // context needed, so they're cheap enough to run on every edit (a scoped `check:standards --item NNN`
@@ -1015,7 +1114,7 @@ export function findTestPlanGaps(body) {
 // run file-driven (a malformed-YAML item is skipped by the loader, so it isn't in the item array at all),
 // so each caller runs `findUnquotedColonScalars(content)` over the raw file itself. Also excludes the
 // digest-length nudge (validateBacklogItem owns it) and the blockedBy cycle walk (a graph-level check).
-export function lintBacklogItemRendering({ item, body, pocRegistry = null }) {
+export function lintBacklogItemRendering({ item, body, pocRegistry = null, knownBacklogIds = null }) {
   const errors = [];
   const warnings = [];
   const id = item.id;
@@ -1179,6 +1278,26 @@ export function lintBacklogItemRendering({ item, body, pocRegistry = null }) {
   if (item.deliveryTarget != null && pocRegistry) {
     const verdict = validateDeliveryTarget(pocRegistry, item.deliveryTarget);
     if (!verdict.ok) errors.push(`Backlog item "${id}" ${verdict.error}`);
+  }
+
+  // Must without Done-when (#4438) — WARNING only, open/active cards (resolved corpus predates rule).
+  if (item.status !== 'resolved') {
+    const mustGaps = findMustWithoutDoneWhen(body);
+    if (mustGaps.length) {
+      const missing = mustGaps.map((g) => `Must ${g.must}`).join(', ');
+      warnings.push(`Backlog item "${id}" has MVP Must item(s) not cited by number in Done when — ${missing}. ` +
+        `Cite each Must by number in a Done-when clause (e.g. Must 1, Musts 1, 3, or Musts 1-4).`);
+    }
+  }
+
+  // Dangling backlog refs (#4438) — WARNING only, open/active cards, skipped when knownBacklogIds absent.
+  if (item.status !== 'resolved' && knownBacklogIds) {
+    const danglingRefs = findDanglingBacklogRefs(body, knownBacklogIds);
+    if (danglingRefs.length) {
+      const refs = danglingRefs.map((r) => r.ref).join(', ');
+      warnings.push(`Backlog item "${id}" references dangling backlog item(s) (${refs}) — ` +
+        `the target does not exist. If this is a sibling card in flight in the same PR/lane, append \`(pending-lane)\` to exempt it.`);
+    }
   }
 
   return { errors, warnings };

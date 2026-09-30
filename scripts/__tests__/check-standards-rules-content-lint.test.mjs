@@ -17,11 +17,13 @@ import {
   findStaleRatifiedClaims,
   findDuplicateKeysPerScope, validateNoDuplicateManifestKeys,
   findBuriedForkSections, findNonBatchableMarkers, findTestPlanGaps, lintBacklogItemRendering,
+  findMustWithoutDoneWhen, findDanglingBacklogRefs,
   deriveResearchFreshness, addIsoDuration, RESEARCH_REVIEW_HORIZON_DEFAULT,
   validateCapabilityPresence, validateRetirementShape,
   validatePlugDualMode, PLUG_UNPLUGGED_TEST_ENFORCED,
   findRelativeNodeScriptsAfterLaneCd, WE_ONLY_LANE_CONVEYOR_BRIEFS,
 } from '../check-standards-rules.mjs';
+import { buildBacklogResolvableIds } from '../lib/citation-check.mjs';
 import { require, ROOT, SRC } from './fixtures/check-standards-rules-fixtures.mjs';
 
 describe('module-resolution exports-lock (#274/#271)', () => {
@@ -702,5 +704,104 @@ describe('findTestPlanGaps — #4332 Test-plan classification + condition covera
     expect(open.warnings.some((w) => /Test-plan gaps/.test(w))).toBe(true);
     const done = lintBacklogItemRendering({ item: { id: '9', kind: 'story', status: 'resolved' }, body });
     expect(done.warnings.some((w) => /Test-plan gaps/.test(w))).toBe(false);
+  });
+});
+
+describe('findMustWithoutDoneWhen — #4438 Must items cited in Done-when', () => {
+  const card = (musts, doneWhen) =>
+    `## Explicit MVP cut\n\n**Must (MVP):**\n${musts.map((m, i) => `${i + 1}. ${m}`).join('\n')}\n\n## Done when\n\n${doneWhen}\n`;
+
+  it('card with Musts 1-3 and Done-when citing only "Must 1" and "Must 3" → exactly one gap (Must 2)', () => {
+    const body = card(['Must item one', 'Must item two', 'Must item three'], '1. **Executable** — Must 1 is met.\n2. **Must** — Must 3 is met.');
+    expect(findMustWithoutDoneWhen(body)).toEqual([{ must: 2 }]);
+  });
+
+  it('matching forms: Must 2, Musts 1, 3, and Musts 1-4 each cite the numbers they name; prose-only coverage is NOT a citation', () => {
+    // Must 2
+    const bodySingle = card(['First', 'Second'], '1. **Executable** — Must 2 is satisfied.');
+    expect(findMustWithoutDoneWhen(bodySingle)).toEqual([{ must: 1 }]);
+
+    // Musts 1, 3
+    const bodyList = card(['First', 'Second', 'Third'], '1. **Executable** — Musts 1, 3 are satisfied.');
+    expect(findMustWithoutDoneWhen(bodyList)).toEqual([{ must: 2 }]);
+
+    // Musts 1-4
+    const bodyRange = card(['One', 'Two', 'Three', 'Four', 'Five'], '1. **Executable** — Musts 1-4 are satisfied.');
+    expect(findMustWithoutDoneWhen(bodyRange)).toEqual([{ must: 5 }]);
+
+    // Prose-only coverage is NOT a citation
+    const bodyProse = card(['The chokepoint logging'], '1. **Executable** — the chokepoint logging works end to end.');
+    expect(findMustWithoutDoneWhen(bodyProse)).toEqual([{ must: 1 }]);
+  });
+
+  it('all cited, and no-MVP-section cards, → [] (mutation proof: dropping range parsing makes Musts 1-4 fail)', () => {
+    const allCited = card(['One', 'Two', 'Three', 'Four'], '1. **Executable** — Musts 1-4 are satisfied.');
+    expect(findMustWithoutDoneWhen(allCited)).toEqual([]);
+
+    const noMvpSection = '## Design\n\nDesign text\n\n## Done when\n\n1. Done.\n';
+    expect(findMustWithoutDoneWhen(noMvpSection)).toEqual([]);
+
+    const noNumberedMusts = '## Explicit MVP cut\n\nNo numbered items\n\n## Done when\n\n1. Done.\n';
+    expect(findMustWithoutDoneWhen(noNumberedMusts)).toEqual([]);
+  });
+});
+
+describe('findDanglingBacklogRefs — #4438 Dangling backlog references in body', () => {
+  it('we:backlog/9999-nope.md with knownIds lacking 9999 → one gap; same ref with knownIds containing it → none; provisional xabc123 id present → none; a ref to a graduated card bornAs hash, with knownIds from buildBacklogResolvableIds, → none', () => {
+    const body = 'See we:backlog/9999-nope.md for details.';
+    expect(findDanglingBacklogRefs(body, new Set(['4380']))).toEqual([
+      { id: '9999', ref: 'we:backlog/9999-nope.md' },
+    ]);
+
+    expect(findDanglingBacklogRefs(body, new Set(['9999']))).toEqual([]);
+
+    const provisionalBody = 'See we:backlog/xabc123-some-task.md for details.';
+    expect(findDanglingBacklogRefs(provisionalBody, new Set(['xabc123']))).toEqual([]);
+
+    const resolvableIds = buildBacklogResolvableIds([{ num: '4438', bornAs: 'xppaab9' }]);
+    const bornAsBody = 'See we:backlog/xppaab9-old-slug.md for details.';
+    expect(findDanglingBacklogRefs(bornAsBody, resolvableIds)).toEqual([]);
+  });
+
+  it('escape: the ref followed by (pending-lane) → none', () => {
+    const body = 'See we:backlog/9999-nope.md (pending-lane) for sibling.';
+    expect(findDanglingBacklogRefs(body, new Set())).toEqual([]);
+
+    const backticked = 'See `we:backlog/9999-nope.md` (pending-lane) for sibling.';
+    expect(findDanglingBacklogRefs(backticked, new Set())).toEqual([]);
+  });
+});
+
+describe('lintBacklogItemRendering integration (#4438 findMustWithoutDoneWhen / findDanglingBacklogRefs)', () => {
+  const cardBody =
+    '## Explicit MVP cut\n\n**Must (MVP):**\n1. First\n2. Second\n\n## Done when\n\n1. Must 1.\n\n' +
+    'Reference: we:backlog/9999-nope.md.\n';
+
+  it('both gaps surface in warnings (not errors) for an open card', () => {
+    const res = lintBacklogItemRendering({
+      item: { id: '999', kind: 'story', status: 'open' },
+      body: cardBody,
+      knownBacklogIds: new Set(['999']),
+    });
+    expect(res.errors).toEqual([]);
+    expect(res.warnings.some((w) => /Must 2/.test(w))).toBe(true);
+    expect(res.warnings.some((w) => /we:backlog\/9999-nope\.md/.test(w))).toBe(true);
+  });
+
+  it('resolved card yields neither, and omitting knownBacklogIds skips guard 2 only', () => {
+    const resolved = lintBacklogItemRendering({
+      item: { id: '999', kind: 'story', status: 'resolved' },
+      body: cardBody,
+      knownBacklogIds: new Set(['999']),
+    });
+    expect(resolved.warnings.some((w) => /Must 2/.test(w))).toBe(false);
+    expect(resolved.warnings.some((w) => /9999-nope/.test(w))).toBe(false);
+
+    const omitted = lintBacklogItemRendering({
+      item: { id: '999', kind: 'story', status: 'open' },
+      body: cardBody,
+    });
+    expect(omitted.warnings.some((w) => /Must 2/.test(w))).toBe(true);
+    expect(omitted.warnings.some((w) => /9999-nope/.test(w))).toBe(false);
   });
 });

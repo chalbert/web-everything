@@ -27,6 +27,8 @@ import { TIERS } from './lib/build-queue.mjs';
 // #3637 — the declared POC branches, so this scoped lint validates `deliveryTarget:` with the SAME predicate
 // the whole-repo gate uses (a green scoped run must never disagree with `check:standards`).
 import { readRegistry as readPocRegistry } from './lib/poc-branches.mjs';
+// #4438 — build resolvable backlog ids for the dangling-ref check.
+import { buildBacklogResolvableIds } from './lib/citation-check.mjs';
 
 const require = createRequire(import.meta.url);
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -49,6 +51,7 @@ const num = target.match(/^(\d{1,4}|x[0-9a-z]{6})/)?.[1];
 // scan must still catch.
 const loadBacklog = require(join(ROOT, 'src/_data/backlog.js'));
 const backlog = (typeof loadBacklog === 'function' ? loadBacklog() : loadBacklog) || [];
+const knownBacklogIds = buildBacklogResolvableIds(backlog);
 let item = backlog.find((b) => b.num === num || b.id === target);
 
 // Locate the file (the loader item carries its id; otherwise glob by the NNN prefix).
@@ -88,7 +91,7 @@ for (const h of findUnquotedColonScalars(content)) {
 }
 
 // Body rendering checks (raw HTML, bad links, buried fork, mis-flagged batchable) — shared with the gate.
-const rendering = lintBacklogItemRendering({ item, body, pocRegistry: readPocRegistry() });
+const rendering = lintBacklogItemRendering({ item, body, pocRegistry: readPocRegistry(), knownBacklogIds });
 errors.push(...rendering.errors);
 warnings.push(...rendering.warnings);
 

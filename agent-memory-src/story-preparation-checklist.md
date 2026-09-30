@@ -18,6 +18,7 @@ anything that a story should have."*
    the slices and the seam rather than forcing a number.
 3. **Acceptance criteria** — a `## Done when` list of TESTABLE statements. "The guard works" is not one; the
    observable condition that proves it is. If none can be stated testably, that is a finding about the card.
+   Every MVP Must is cited by number in a Done-when clause.
 4. **The decided design** — an approach, not a menu. A real fork must be NAMED as an open decision, never
    picked silently and never split away: a buried fork handed to a builder is exactly what the split rubric
    refuses.

@@ -3,9 +3,10 @@ bornAs: xppaab9
 kind: story
 size: 3
 parent: "4075"
-status: open
-scope: ["we:backlog/4377-provider-allowance-gate-every-model-spawn-checks-a-live-allo.md"]
+status: resolved
+scope: ["we:scripts/check-standards-rules.mjs", "we:scripts/check-standards.mjs", "we:scripts/check-backlog-item.mjs", "we:agent-memory-src/story-preparation-checklist.md", "we:scripts/__tests__/check-standards-rules-content-lint.test.mjs"]
 dateOpened: "2026-09-28"
+dateResolved: "2026-09-30"
 preparedDate: "2026-09-30"
 preparedAgainstSha: "577ae7270910faca246326a32db914fb1c6a6dcf"
 tags: []
@@ -32,6 +33,18 @@ Idempotency key (do not edit): approval-prevention-key:chalbert/web-everything#2
   longer exists. Dropped from the MVP with this evidence.
 - **Citation drift.** The three `4377:<line>` cites point at the review's snapshot of that card; its current line
   numbers differ. The substance (Must list at `## Explicit MVP cut`, `we:backlog/<id>` refs in prose) still exists.
+- **Delivery (2026-09-30).**
+  - Delivered Guard 1 (`findMustWithoutDoneWhen`) in `we:scripts/check-standards-rules.mjs`, parsing numbered items under `**Must (MVP):**` in `## Explicit MVP cut` and checking for citation by number in `## Done when` (e.g. `Must N`, `Musts A, B`, `Musts A-B`). Wired into `lintBacklogItemRendering` as a WARNING for non-resolved cards.
+  - Delivered Guard 2 (`findDanglingBacklogRefs`) in `we:scripts/check-standards-rules.mjs`, extracting `we:backlog/<id>[-slug][.md]` refs and verifying resolution against `knownBacklogIds` with `(pending-lane)` escape marker exemption. Plumbed `knownBacklogIds` via `buildBacklogResolvableIds(backlog)` in `we:scripts/check-standards.mjs` and `we:scripts/check-backlog-item.mjs`.
+  - Added review-lens checklist line to `we:agent-memory-src/story-preparation-checklist.md`.
+  - Added comprehensive unit and integration tests in `we:scripts/__tests__/check-standards-rules-content-lint.test.mjs`.
+- **Proof:**
+  - Before: `node we:scripts/check-backlog-item.mjs 4377` reported clean (0 warnings); `npm run check:standards` reported 0 error(s), 4547 warning(s).
+  - After: `node we:scripts/check-backlog-item.mjs 4377` correctly emitted 1 warning for Guard 1: `Backlog item "4377-provider-allowance-gate-every-model-spawn-checks-a-live-allo" has MVP Must item(s) not cited by number in Done when — Must 1, Must 2, Must 3, Must 4, Must 5. Cite each Must by number in a Done-when clause (e.g. Must 1, Musts 1, 3, or Musts 1-4).`, and 0 warnings for Guard 2 (negative example: `we:backlog/4380` correctly resolves).
+  - After: `npm run check:standards` stays green with 0 error(s), 4550 warning(s) (+3 warnings: 4377 uncited Musts, 4438 sample ref, and 3443 dangling ref).
+  - Executable test: `npx vitest run check-standards-rules-content-lint -t "findMustWithoutDoneWhen|findDanglingBacklogRefs"` passes (7 passed | 100 skipped).
+  - All 107 tests in `we:scripts/__tests__/check-standards-rules-content-lint.test.mjs` pass.
+  - `node we:scripts/verify-lane.mjs` passes green.
 
 ## Design
 
