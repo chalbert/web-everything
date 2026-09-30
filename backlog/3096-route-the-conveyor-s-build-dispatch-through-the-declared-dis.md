@@ -8,8 +8,7 @@ dateOpened: "2026-08-13"
 preparedDate: "2026-08-25"
 blockedBy: ["3353"]
 relatedTo: ["3037", "3095", "3097", "3118", "3147", "3165", "3239", "3331", "3332", "2612"]
-scope:
-  - we:skills-src/conveyor/SKILL.md
+
 scopeRationale: "Switches the conveyor SKILL's dispatch bridge — BOTH the step-3 build half and the step-3b prepare half, the latter absorbed from #3147 — to call the already-declared operation. ONE file, and `scope:` now names it at FILE level rather than the directory, so this slice is provably disjoint from #3353's. The scripts/operations/ half (five liveness hardenings + the first live dispatch) was split out to #3353 on 2026-08-26 and is no longer in this card's touch-set."
 tags: [plateau-loop, delivery, operations, conveyor, dispatch]
 ---
@@ -339,3 +338,12 @@ today** — re-run at `c8d92db7`, the counts are unchanged from `9f9cb310`:
    identical both runs — and it moves most days; the one error there is the pre-existing stranded-hash card
    `backlog/3350-*.md`, unrelated to this item. Run it **twice** and compare: the loader is
    non-deterministic in the presence of any malformed card.)
+
+## Findings (standalone worker, 2026-09-29)
+
+The build-dispatch daemon held #3096 with:
+
+> worker-declined: No changes made. #3096 still declares 'blockedBy: ["3353"]', and #3353 remains 'status: open'. The spec explicitly requires that prerequisite—including live-dispatch acceptance—to be completed before this routing change. I preserved the existing backlog-file modification. No tests, commits, pushes, or PR actions were performed.
+
+`scope:` was cleared above so this card is picked up by the existing unshaped-item auto-prepare path;
+a prepare pass re-scopes it against the finding.
