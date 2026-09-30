@@ -100,6 +100,7 @@
  * transcript's mtime) is INJECTED on the input records by `we:scripts/conveyor/reconcile-pass.mjs`, so every
  * branch below is reachable in a test with no network and no credential.
  */
+import { OPERATOR_ANSWER_MARKER, isOperatorAnswerStandDownSuperseded, latestOperatorAnswer } from './stand-down-answer-core.mjs';
 import { classifyPr } from '../progress-board.mjs';
 import { reduceCheckState } from '../operations/pr-status.mjs';
 import { isForeignCompletionSessionId } from '../operations/completion-record.mjs';
@@ -316,7 +317,7 @@ export function concurrentAuthorPauseState({ comments, headRefOid = null, now = 
  * it raises no finding.
  */
 export const BOOKKEEPING_MARKERS = Object.freeze([
-  REARM_COMMENT_MARKER, CI_HEAL_COMMENT_MARKER, STAND_DOWN_MARKER, SUPERSEDE_STAND_DOWN_MARKER,
+  REARM_COMMENT_MARKER, CI_HEAL_COMMENT_MARKER, STAND_DOWN_MARKER, SUPERSEDE_STAND_DOWN_MARKER, OPERATOR_ANSWER_MARKER,
   // #xkmu3gv — the two new completed-round markers. Neither is a reviewer speaking, so neither may ever count as
   // a finding (`countFindings`) or the pass would read its OWN handback comment as fresh work to fix.
   CONFLICT_FIX_COMMENT_MARKER, ADVISORY_FIX_COMMENT_MARKER,
@@ -626,7 +627,7 @@ export function isAwaitingPermission(agent) {
  *
  * #3383 — ALSO requires {@link isTrustedMarkerAuthor} (automation OR the repo operator) before a stand-down
  * counts at all. This function re-derives the leading-line match itself (rather than calling
- * `stand-down.mjs#countTerminalStandDowns`, which now carries the identical requirement) so its own two
+ * `stand-down.mjs#countTerminalStandDowns`, which now carries the identical requirement) so its own three
  * supersede exclusions can run inline — but that means the trusted-author gate must be repeated here too, or a
  * comment from ANY GitHub account with this exact leading line would count as terminal again, the precise
  * adversarial-coverage-review finding this item closes (WE's PRs are public; a forged stand-down here
@@ -647,6 +648,7 @@ export function countUnresolvedStandDowns(comments) {
     if (isConcurrentAuthorStandDown(c)) continue;
     if (isStandDownSuperseded(comments, i)) continue;
     if (isAdvisoryMechanismStandDownSuperseded(comments, i)) continue;
+    if (isOperatorAnswerStandDownSuperseded(comments, i)) continue;
     n += 1;
   }
   return n;
@@ -1354,7 +1356,9 @@ export function planReconcile({
     if (!Number.isInteger(prNumber) || prNumber <= 0) continue; // not a PR record; nothing to key on.
 
     // The evidence every row carries, so a reader never has to go back to the listing to audit a verdict.
+    const operatorAnswer = latestOperatorAnswer(pr?.comments);
     const base = {
+      ...(operatorAnswer ? { operatorAnswer } : {}),
       prNumber,
       headRefName: pr?.headRefName ?? null,
       headRefOid: pr?.headRefOid ?? null,
@@ -1437,28 +1441,30 @@ export function planReconcile({
     );
 
     // ── REFUSAL 1 — `stood-down` is TERMINAL. No decay, no clock: `now` is not read on this path, so the same
-    // PR returns the same refusal a week later. A person clearing the marker is the intended exit.
+    // PR returns the same refusal a week later unless an operator answer or supersede resolves it.
     //
     // `countUnresolvedStandDowns`, NOT the raw stand-down count — #xu2krte Fork 2 (review-human statute
-    // amendment) UNIONED with xaer296 (epic #3383)'s own advisory-mechanism supersede. Two independent, narrow
-    // predicates each exclude a DIFFERENT population of provably-non-current stand-down:
+    // amendment), the advisory-mechanism supersede, and the explicit operator-answer ceremony. Three independent
+    // predicates exclude provably resolved stand-downs:
+    //   - `isOperatorAnswerStandDownSuperseded` — a trusted operator ceremony answers this exact comment.
     //   - `isStandDownSuperseded` — a parked-PR conflict watch stand-down the watch ITSELF later re-classified
     //     safe, evidenced by a LATER, self-authored supersede comment on the thread.
     //   - `isAdvisoryMechanismStandDownSuperseded` (xaer296) — a fix agent's OWN "cannot reproduce" stand-down
     //     in ADVISORY-FIX MODE, where the thread already proves (an earlier, self-authored advisory-fix mark
     //     postdating the latest advisory note) that there was genuinely nothing left to fix — a mechanism
     //     failure (the old count-based "is this addressed" test never caught up), not a real judgment call.
-    // Both require the comment's OWN `author.login` (or GitHub's `viewerDidAuthor`, kept as an additional
+    // The two automation supersedes require the comment's OWN `author.login` (or GitHub's `viewerDidAuthor`, kept as an additional
     // accepted path) to match this repo's own automation — never a body substring anyone could forge.
     // `viewerDidAuthor` ALONE is not READ-stable enough here — see `stand-down.mjs#AUTOMATION_LOGINS`'s own
-    // docblock for the live incident that proved it. A stand-down neither predicate excludes — including EVERY fix agent's genuine
+    // docblock for the live incident that proved it. Operator answers require a trusted login, never viewerDidAuthor alone.
+    // A stand-down none of these predicates excludes — including an unanswered fix agent's genuine
     // needs-judgment/gate-red/lane-ref-gone escalation outside the advisory-fix shape above, and any human
     // `/finish` stand-down — stays terminal exactly as before.
     const stoodDown = countUnresolvedStandDowns(pr?.comments);
     if (stoodDown > 0) {
       refuse('stood-down', {
         standDowns: stoodDown,
-        why: 'a fix agent already stopped here to ask a question — re-dispatching would re-ask it forever. Terminal for this pass; a human clears the marker.',
+        why: 'a fix agent already stopped here to ask a question — re-dispatching would re-ask it forever. Terminal until an explicit operator answer is recorded with stand-down-answer.mjs.',
       });
       continue;
     }

@@ -66,6 +66,7 @@
  * infra-blocked recovery / the lease-reaper / the session-reaper / the hiccup sink — best-effort, never gating
  * the tick.
  */
+import { withOperatorAnswer } from './stand-down-answer-core.mjs';
 import { withSalvageHint } from '../lib/salvage-index.mjs';
 import { repoKeyForSlug, CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
 import { repoProfile, briefTokensForRepo } from '../lib/repo-profile.mjs';
@@ -273,6 +274,7 @@ export function planFixesFromReconcile(dispatchEntries, findItemFn, loadItems, r
         ...(entry.labels?.includes('review:human') ? { reviewHuman: true } : {}),
         itemNum: null, pr, laneRef: headRefName, scope: itemlessScope, scopeSource: 'pr-diff',
         isConflict: isConflictItemless, body: entry.body ?? null, headRefOid: entry.headRefOid ?? null,
+        ...(entry.operatorAnswer ? { operatorAnswer: entry.operatorAnswer } : {}),
         ...(entry.altBranch ? { altBranch: entry.altBranch } : {}), // fix procedure — a saved repair to recover first.
       });
       continue;
@@ -376,6 +378,7 @@ export function planFixesFromReconcile(dispatchEntries, findItemFn, loadItems, r
       // belongs to THIS pr before trusting it (see that function's own docblock).
       headRefOid: entry.headRefOid ?? null,
       // fix procedure — the saved alt branch of a concurrent-author pause this PR re-armed from, if any.
+      ...(entry.operatorAnswer ? { operatorAnswer: entry.operatorAnswer } : {}),
       ...(entry.altBranch ? { altBranch: entry.altBranch } : {}),
     });
   }
@@ -740,7 +743,7 @@ export function tryResumeFix(planned, {
   const releaseOurClaim = () => releaseClaim({ repo, pr: planned.pr, kind: 'fix', owner: claimOwner, lockRoot: claimRoot });
 
   const resumeArgv = buildAgentArgv({
-    payload: { prompt: buildResumePrompt({ pr: planned.pr, itemNum: planned.itemNum, cwd: candidateCwd }) },
+    payload: { prompt: withOperatorAnswer(buildResumePrompt({ pr: planned.pr, itemNum: planned.itemNum, cwd: candidateCwd }), planned.operatorAnswer) },
     resumeSessionId: candidate,
   });
   // #4174 — same "never `root` itself" cwd as the fresh-dispatch spawn below; see this function's own new
@@ -928,7 +931,7 @@ export function dispatchFix(planned, {
     const argv = buildAgentArgv({
       sessionId,
       // fix procedure — a re-armed concurrent-author pause hands the next fixer the saved alt branch to start from.
-      payload: { prompt: withAltBranchHint(withSalvageHint(prompt, { cards: [planned.itemNum], prs: [planned.pr] }), planned.altBranch), sessionSlug },
+      payload: { prompt: withAltBranchHint(withSalvageHint(withOperatorAnswer(prompt, planned.operatorAnswer), { cards: [planned.itemNum], prs: [planned.pr] }), planned.altBranch), sessionSlug },
       // #3606 — see this function's own docblock: without this the fix agent reads a correctly-filled brief as an
       // unfilled template and self-aborts (3/3 live).
       systemPromptFile: DISPATCHED_AGENT_SYSTEM_PROMPT_FILE,
