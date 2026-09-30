@@ -132,7 +132,9 @@ export function readDispatchOutcome(text) {
   if (!verdict || typeof verdict.dispatching !== 'boolean') return { dispatching: false, reason: 'no verdict in dispatch-lane output' };
   const result = { dispatching: false, reason: verdict.reason ?? verdict.why ?? null,
     lane: verdict.lane ?? null, sessionSlug: verdict.sessionSlug ?? null };
-  if (!verdict.dispatching) return result;
+  // A planner declining to launch (lane cap, plan re-read race, freeze) is a typed refusal, not a failed
+  // prepare: the caller retries next tick instead of holding. Only launch/parse failures fall through untyped.
+  if (!verdict.dispatching) return { ...result, refused: true };
   const effect = run.effects?.find(e => e.type === 'conveyor.dispatch-delivery-agent');
   if (effect?.error) return { ...result, reason: effect.error };
   if (!effect || !['in-flight', 'applied'].includes(effect.status)
@@ -441,7 +443,7 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
   // Observation stages (a failed status read, claim contention) say nothing about the prepare attempt itself:
   // they never hold, never file a card and never enter the ledger. The caller keeps the item out of dispatch
   // for this tick only, and the next tick simply re-observes.
-  const OBSERVATION_STAGES = new Set(['retirement', 'claim']);
+  const OBSERVATION_STAGES = new Set(['retirement', 'claim', 'dispatch-refused']);
   const failPrepare = async (num, stage, reason, evidence = {}, attempt = null) => {
     if (OBSERVATION_STAGES.has(stage)) {
       prepare.failures.push({ num, stage, reason, cause: 'daemon-observation', retry: true });
@@ -530,7 +532,7 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
             const result = await effects.stampPrepare({ num, status });
             prepare.stamping.push({ num, ...result });
           } catch (e) {
-            await failPrepare(num, 'stamp', String(e?.message || e), {}, e.prepareAttempt);
+            await failPrepare(num, 'stamp', String(e?.message || e), {}, e.prepareAttempt ?? new Date().toISOString());
           }
         }
       }
@@ -604,7 +606,7 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
         prepare.launched.push({ num, lane: res.lane ?? pick.lane, sessionSlug: res.sessionSlug ?? null });
       } else {
         effects.releasePrepareClaim({ num });
-        await failPrepare(num, 'dispatch', res?.reason ?? 'not dispatched', res?.evidence ?? {}, res?.attempt ?? new Date().toISOString());
+        await failPrepare(num, res?.refused ? 'dispatch-refused' : 'dispatch', res?.reason ?? 'not dispatched', res?.evidence ?? {}, res?.attempt ?? new Date().toISOString());
       }
     }
   }
@@ -797,27 +799,34 @@ export function cliPrepareFailureEvidence(entry, { projects = join(homedir(), '.
   if (entry.result?.evidence) return entry.result.evidence;
   const evidence = { error: entry.result?.detail ?? entry.error ?? null };
   const handle = entry.handle;
-  if (!handle || handle.startsWith('pid:') || !existsSync(projects)) return evidence;
-  for (const project of readdirSync(projects, { withFileTypes: true })) {
-    if (!project.isDirectory()) continue;
-    const dir = join(projects, project.name);
-    const file = readdirSync(dir).find(name => name.startsWith(handle) && name.endsWith('.jsonl'));
-    if (!file) continue;
-    let terminal = '';
-    for (const line of readFileSync(join(dir, file), 'utf8').split('\n')) {
-      if (!line.trim()) continue;
-      let row;
-      try { row = JSON.parse(line); } catch { continue; } // a transcript may end in a partial write
-      if (row.type !== 'assistant') continue;
-      const content = row.message?.content;
-      const text = Array.isArray(content) ? content.filter(c => c.type === 'text').map(c => c.text).join('\n') : '';
-      if (text) terminal = text;
+  // A short handle would prefix-match another session's transcript and misattribute its evidence.
+  if (!handle || handle.startsWith('pid:') || handle.length < 6) return evidence;
+  // Runs on every tick for every settled prepare row: an unreadable dir or a transcript rotated mid-scan
+  // must degrade to the base evidence, never throw out of the tick.
+  try {
+    if (!existsSync(projects)) return evidence;
+    for (const project of readdirSync(projects, { withFileTypes: true })) {
+      if (!project.isDirectory()) continue;
+      const dir = join(projects, project.name);
+      let file;
+      try { file = readdirSync(dir).find(name => name.startsWith(handle) && name.endsWith('.jsonl')); } catch { continue; }
+      if (!file) continue;
+      let terminal = '';
+      for (const line of readFileSync(join(dir, file), 'utf8').split('\n')) {
+        if (!line.trim()) continue;
+        let row;
+        try { row = JSON.parse(line); } catch { continue; } // a transcript may end in a partial write
+        if (row.type !== 'assistant') continue;
+        const content = row.message?.content;
+        const text = Array.isArray(content) ? content.filter(c => c.type === 'text').map(c => c.text).join('\n') : '';
+        if (text) terminal = text;
+      }
+      evidence.terminal = terminal;
+      evidence.transcript = join(dir, file);
+      evidence.stoppedBeforeCompletion = /runner owns/i.test(terminal) && /no stamp|did not.*(?:stamp|commit|PR)/is.test(terminal);
+      return evidence;
     }
-    evidence.terminal = terminal;
-    evidence.transcript = join(dir, file);
-    evidence.stoppedBeforeCompletion = /runner owns/i.test(terminal) && /no stamp|did not.*(?:stamp|commit|PR)/is.test(terminal);
-    return evidence;
-  }
+  } catch { /* fall through to the base evidence */ }
   return evidence;
 }
 

@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { classifyPrepareFailure, recordPrepareFailure, readFailureState, validatePrepareRelease, releasedAttempt, readPrepareReleases } from '../prepare-failure-policy.mjs';
-import { writeFileSync } from 'node:fs';
+import { writeFileSync, readdirSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 
 describe('readPrepareReleases against a real git history', () => {
@@ -60,6 +60,11 @@ describe('prepare failure evidence and durable decisions', () => {
     for (const num of ['1', '2', '1']) await recordPrepareFailure({ num, attempt: 'a', stage: 'result', evidence: { causeKey: 'missing-worker-result' } }, { path, fileCard });
     expect(fileCard).toHaveBeenCalledTimes(1);
     expect(Object.values(readFailureState(path).failures).every(f => f.held && !f.retry && f.prevention.status === 'queued')).toBe(true);
+  });
+  it('a corrupt ledger degrades to empty state and keeps the bytes for diagnosis instead of throwing', () => {
+    writeFileSync(path, '{"failures": {');
+    expect(readFailureState(path)).toEqual({ failures: {}, cards: {} });
+    expect(readdirSync(dir).some(n => n.includes('.corrupt-'))).toBe(true);
   });
   it('records filing failure without claiming success or blind respawning', async () => {
     fileCard.mockImplementation(() => { throw new Error('spawn refused'); });

@@ -46,7 +46,12 @@ export function releasedAttempt(releases, target, attempt) {
 }
 export const failureStatePath = () => join(resolveCoordinationRoot(), 'prepare-failures.json');
 export function readFailureState(path = failureStatePath()) {
-  return existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : { failures: {}, cards: {} };
+  if (!existsSync(path)) return { failures: {}, cards: {} };
+  try { return JSON.parse(readFileSync(path, 'utf8')); } catch {
+    // A truncated ledger must not throw out of every daemon tick; keep the bytes for diagnosis and start empty.
+    try { renameSync(path, `${path}.corrupt-${Date.now()}`); } catch { /* best effort */ }
+    return { failures: {}, cards: {} };
+  }
 }
 function save(state, path) {
   mkdirSync(dirname(path), { recursive: true });

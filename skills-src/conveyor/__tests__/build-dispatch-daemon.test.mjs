@@ -1,7 +1,7 @@
 import { recordPrepareFailure, readFailureState } from '../../../scripts/conveyor/prepare-failure-policy.mjs';
 import { planPrepareSpawns } from '../../../scripts/conveyor/tick-core.mjs';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -1252,6 +1252,18 @@ describe('build-dispatch-daemon.mjs boots as a fresh `node` process — the clas
 });
 
 describe('prepare transcript evidence', () => {
+  it('degrades to the base evidence when the transcript dir is unreadable or the handle is too short to attribute', () => {
+    const projects = mkdtempSync(join(tmpdir(), 'prepare-transcript-'));
+    try {
+      mkdirSync(join(projects, 'scratch'));
+      writeFileSync(join(projects, 'scratch', 'abcdef-session.jsonl'), '');
+      expect(cliPrepareFailureEvidence({ handle: 'abc', error: 'boom' }, { projects })).toEqual({ error: 'boom' });
+      chmodSync(join(projects, 'scratch'), 0o000);
+      expect(() => cliPrepareFailureEvidence({ handle: 'abcdef', error: 'boom' }, { projects })).not.toThrow();
+      expect(cliPrepareFailureEvidence({ handle: 'abcdef', error: 'boom' }, { projects })).toEqual({ error: 'boom' });
+      expect(() => cliPrepareFailureEvidence({ handle: 'abcdef' }, { projects: join(projects, 'nope') })).not.toThrow();
+    } finally { chmodSync(join(projects, 'scratch'), 0o755); rmSync(projects, { recursive: true, force: true }); }
+  });
   it('uses assistant terminal output, never a prompt that describes hypothetical failures', () => {
     const projects = mkdtempSync(join(tmpdir(), 'prepare-transcript-'));
     try {
@@ -1536,6 +1548,7 @@ describe('automatic item preparation', () => {
     const tick = await runBuildDispatchTick({ live: true, effects });
     expect(tick.prepare.retired).toEqual([]);
     expect(effects.listPrepareClaims().map(c => c.meta.num)).toContain('4501');
+    expect(tick.prepare.inFlight).toContain('4501');
     expect(tick.prepare.failures).toContainEqual(expect.objectContaining({ cause: 'daemon-observation' }));
   });
   it('an unclassified observation error (502, ETIMEDOUT, hang up) never holds, files a card or writes the ledger', async () => {
@@ -1724,6 +1737,47 @@ describe('automatic item preparation', () => {
     expect(fileCard).toHaveBeenCalledTimes(1);
     expect(effects.listPrepareClaims()).toEqual([]);
     expect(tick.nextBookkeeping.prepareGuards).toEqual([]);
+  });
+  it.each(['lane cap reached', 'not planned this tick', 'frozen', 'kill switch engaged'])('a planner refusal (%s) neither holds nor files a card and retries next tick', async (reason) => {
+    const effects = fixture();
+    effects.dispatch = vi.fn(({ num }) => cliDispatch({ num, launchKind: 'prepare-item' }, {
+      exec: () => JSON.stringify({ run: { verdict: { dispatching: false, reason } } }),
+    }));
+    effects.recordPrepareFailure = vi.fn();
+    effects.placePrepareHold = vi.fn();
+    const tick = await runBuildDispatchTick({ live: true, effects });
+    expect(tick.prepare.failures).toEqual(['4501', '4502'].map(num => expect.objectContaining({ num, stage: 'dispatch-refused', reason, retry: true })));
+    expect(effects.recordPrepareFailure).not.toHaveBeenCalled();
+    expect(effects.placePrepareHold).not.toHaveBeenCalled();
+    expect(tick.prepare.held).toEqual([]);
+    expect(effects.listPrepareClaims()).toEqual([]);
+  });
+  it('bounds repeated transient stamp-spawn failures across ticks', async () => {
+    const effects = fixture();
+    const path = join(lockRoot, 'failures.json');
+    effects.recordPrepareFailure = input => recordPrepareFailure(input, { path, fileCard: vi.fn(() => ({ ok: true })) });
+    const outcomes = [];
+    for (let i = 0; i < 4; i++) {
+      const before = Object.keys(readFailureState(path).failures).length;
+      const failure = await (async () => {
+        const rec = await effects.recordPrepareFailure({ num: '4501', stage: 'stamp', attempt: `t${i}`, evidence: { error: 'ECONNRESET' } });
+        return rec;
+      })();
+      outcomes.push({ retry: failure.retry, grew: Object.keys(readFailureState(path).failures).length > before });
+    }
+    expect(outcomes.filter(o => o.retry).length).toBeLessThan(4);
+    expect(outcomes.at(-1).retry).toBe(false);
+  });
+  it('a stamp-spawn error without a terminal attempt gets a fresh attempt id each tick', async () => {
+    const effects = fixture();
+    claimed(effects);
+    effects.readPrepareStatus = () => ({ preparedDate: null, hasSections: true });
+    effects.stampPrepare = vi.fn(() => { throw new Error('ECONNRESET'); });
+    const recordFn = vi.fn(async input => ({ ...input, cause: 'infra-transient', retry: true, held: false }));
+    effects.recordPrepareFailure = recordFn;
+    await runBuildDispatchTick({ live: true, effects });
+    const attempt = recordFn.mock.calls[0][0].attempt;
+    expect(attempt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
   it.each(['failed', 'in-flight'])('does not mistake a positive plan for a launch after a %s effect error', async (status) => {
     const effects = fixture();
