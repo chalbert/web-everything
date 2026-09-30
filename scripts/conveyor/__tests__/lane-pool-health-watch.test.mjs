@@ -96,6 +96,18 @@ describe('reclaimFinishedLanes — pure decision (#4344 already-clean skip)', ()
     expect(outcomes).toEqual([{ lane: 10, reclaimed: false, alreadyClean: true, reason: 'already clean at the pool branch tip — nothing to reclaim' }]);
   });
 
+  it('components that cancel to a zero sum (-2 + 2) at the tip still get a real reclaim call — never skipped as clean', () => {
+    const whois = wrap([{
+      lane: 12, exists: true, verdict: 'finished-reclaimable',
+      uncommitted: { trackedModified: -2, untracked: 2 }, ahead: { count: 0 },
+      headSha: 'tip-sha', branchTipSha: 'tip-sha', branch: 'main',
+    }]);
+    const calls = [];
+    const outcomes = reclaimFinishedLanes({ whois, reclaimLane: recordingReclaim(calls), dryRun: false });
+    expect(calls).toEqual([{ lane: 12, dryRun: false }]);
+    expect(outcomes).toEqual([{ lane: 12, reclaimed: true }]);
+  });
+
   it('a lane with no uncommitted/ahead content but BEHIND the tip still gets a real reclaim call — never silently skipped', () => {
     const whois = wrap([{
       lane: 11, exists: true, verdict: 'finished-reclaimable',
