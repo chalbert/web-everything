@@ -1,0 +1,30 @@
+import { selectProbationWorker } from '../../lib/provider-routing.mjs';
+import { describe, it, expect } from 'vitest';
+import { decideDispatchRoute } from '../../lib/dispatch-contracts.mjs';
+import { routeDispatchProvider } from '../dispatch-lane-io.mjs';
+import { probationWorkerDetachedProvider } from '../dispatch-providers/probation-worker.mjs';
+
+describe('prepare probation routing', () => {
+  it('routes prepare-item to Codex with Sonnet fallback and launches prepare mode', () => {
+    const route = decideDispatchRoute({ kind: 'prepare-item', scopePaths: ['we:scripts/lib/example.mjs'] });
+    expect(route).toMatchObject({ tier: 'sonnet', probationWorker: { id: 'codex', taskType: 'prepare' } });
+    const request = { launchKind: 'prepare-item', probationWorker: route.probationWorker, num: '123', sessionSlug: 'prepare-123' };
+    expect(routeDispatchProvider(request, { probationLaunch: 'on', scriptExists: () => true, probation: () => 'probation', agent: () => 'claude' })).toBe('probation');
+    let argv;
+    probationWorkerDetachedProvider(request, { spawnDetached: (a) => { argv = a; return { pid: 123 }; }, logPathFor: () => '/tmp/unused' });
+    expect(argv).toContain('--taskType=prepare');
+    expect(argv[0]).toMatch(/probation-build-run.mjs$/);
+    expect(routeDispatchProvider({ ...request, probationWorker: null }, { agent: () => 'claude' })).toBe('claude');
+  });
+  it('offers Gemini only for simple preparation when Codex is vetoed', () => {
+    const codex = selectProbationWorker({ taskType: 'prepare' }).worker;
+    const vetoes = [{ provider: codex.provider, model: codex.model, taskType: 'prepare' }];
+    expect(selectProbationWorker({ taskType: 'prepare', vetoes }).worker).toBeNull();
+    expect(selectProbationWorker({ taskType: 'prepare', vetoes, simple: true }).worker).toMatchObject({ id: 'antigravity-gemini', checker: 'codex' });
+  });
+  it('keeps prepare-decision on Claude', () => {
+    const route = decideDispatchRoute({ kind: 'prepare-decision' });
+    expect(route).toMatchObject({ tier: 'opus', outcome: 'role' });
+    expect(route.probationWorker).toBeUndefined();
+  });
+});
