@@ -19,6 +19,7 @@ import {
   serializeQueue,
   readQueueFile,
   writeQueueFile,
+  writeQueueFileIfAbsent,
   pinnedStateRoot,
   queuePath,
   resolveQueuePath,
@@ -283,6 +284,34 @@ describe('decouple-primary-checkout — one-release legacy read + one-time migra
     writeQueueFile(removeFromQueue(readQueueFile(w.canonical), '42'), w.canonical);
     expect(migrateLegacyQueue({ env: w.env, root: w.lane })).toMatchObject({ migrated: false, reason: 'canonical-exists', count: 1 });
     expect(readQueueFile(w.canonical).map((e) => e.num)).toEqual(['3604']);
+  });
+
+  it('migrate preserves a canonical queue created inside the check→publish window', () => {
+    const w = world();
+    const r = migrateLegacyQueue({
+      env: w.env, root: w.lane,
+      hooks: { beforePublish: () => writeQueueFile([{ num: '7', addedAt: 'T9' }], w.canonical) },
+    });
+    expect(r).toMatchObject({ migrated: false, reason: 'canonical-exists', count: 1 });
+    expect(readFileSync(w.canonical, 'utf8')).toBe(serializeQueue([{ num: '7', addedAt: 'T9' }]));
+  });
+
+  it('migrate never resurrects a legacy entry the winning canonical queue omits', () => {
+    const w = world();
+    migrateLegacyQueue({
+      env: w.env, root: w.lane,
+      hooks: { beforePublish: () => writeQueueFile([{ num: '7', addedAt: 'T9' }], w.canonical) },
+    });
+    expect(readQueueFile(w.canonical).map((e) => e.num)).toEqual(['7']);
+  });
+
+  it('migrate: writeQueueFileIfAbsent publishes once, never overwrites, leaves no temp files', () => {
+    const w = world();
+    const first = [{ num: '1', addedAt: 'A' }];
+    expect(writeQueueFileIfAbsent(first, w.canonical)).toBe(true);
+    expect(writeQueueFileIfAbsent([{ num: '2', addedAt: 'B' }], w.canonical)).toBe(false);
+    expect(readFileSync(w.canonical, 'utf8')).toBe(serializeQueue(first));
+    expect(readdirSync(join(w.canonical, '..')).filter((f) => f.endsWith('.tmp'))).toEqual([]);
   });
 
   it('migrate with no legacy file is a no-op', () => {
