@@ -31,6 +31,7 @@
  */
 
 import { readFileSync, writeFileSync, renameSync, mkdirSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { dirname } from 'node:path';
 import { homedir } from 'node:os';
 import { mintInstallationToken, getInstallationInfo } from './github-app-token.mjs';
@@ -149,6 +150,8 @@ export function resolveGithubAppEnvConfig(env = process.env) {
  * reused (live-caught 2026-09-23: a pre-check probe cached an unvalidated token, and both daemons applied it
  * on restart until it was deleted by hand). Bump this whenever what "validated" means changes.
  */
+// Identity fields are additive to v2 so existing shim readers can still consume the token.
+// This reader additionally requires matching App and installation IDs before reuse.
 export const CACHE_VERSION = 2;
 
 /** Pure: is a cached token still safe to use `bufferMs` before its own real expiry? No token cached at all
@@ -249,7 +252,7 @@ export async function ensureFreshGithubAppEnv({
   listRepos = defaultListInstallationRepos,
   getInstallationInfo: getInstallationInfoFn = getInstallationInfo,
   required,
-  setEnv = (token) => { process.env.GH_TOKEN = token; },
+  setEnv = (token) => { env.GH_TOKEN = token; },
   log = console,
   statusPath = defaultStatusPath(),
   writeStatus = writeStatusFile,
@@ -272,7 +275,9 @@ export async function ensureFreshGithubAppEnv({
   if (!config) return record({ applied: false, reason: 'not-configured' });
 
   let cached = readCache(cachePath);
-  if (!isCacheFresh(cached, now)) {
+  let source = 'cache';
+  if (!isCacheFresh(cached, now) || typeof cached.token !== 'string' || !cached.token || cached.installationId !== config.installationId || cached.appId !== config.appId) {
+    source = 'mint';
     let minted;
     try {
       minted = await mint({ appId: config.appId, installationId: config.installationId, privateKeyPath: config.privateKeyPath, now });
@@ -328,11 +333,15 @@ export async function ensureFreshGithubAppEnv({
       );
       return record({ applied: false, reason: 'insufficient-access', missingPermissions, missingRepos });
     }
-    cached = { v: CACHE_VERSION, token: minted.token, expiresAt: minted.expiresAt };
+    cached = { v: CACHE_VERSION, appId: config.appId, installationId: config.installationId, token: minted.token, expiresAt: minted.expiresAt };
     writeCache(cachePath, cached);
   }
 
   setEnv(cached.token);
+  // Bind provenance to the credential actually applied; inherited metadata cannot label a fallback token.
+  env.WE_GH_AUTH_SOURCE = source;
+  env.WE_GH_AUTH_INSTALLATION = String(cached.installationId);
+  env.WE_GH_AUTH_TOKEN_HASH = createHash('sha256').update(cached.token).digest('hex');
   return record({ applied: true, reason: 'ok' });
 }
 

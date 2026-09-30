@@ -888,7 +888,7 @@ describe('wireSelfSyncAndAppAuth — self-sync, then token refresh, then the tic
       readState: emptyState,
       authOpts: {
         env: { WE_GITHUB_APP_ID: 'a', WE_GITHUB_APP_INSTALLATION_ID: 'b', WE_GITHUB_APP_PRIVATE_KEY_PATH: '/k' },
-        readCache: () => ({ v: 2, expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString() }), // fresh cache → no real mint
+        readCache: () => ({ v: 2, appId: 'a', installationId: 'b', token: 'ghs_synthetic_runner', expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString() }), // fresh cache → no real mint
         setEnv: () => { order.push('token-refresh'); },
         log: { error: () => {} },
       },
@@ -959,7 +959,7 @@ describe('wireSelfSyncAndAppAuth — self-sync is OPT-IN (never mutates an inter
       sync: syncWouldMerge(calls),
       authOpts: {
         env: { WE_GITHUB_APP_ID: 'a', WE_GITHUB_APP_INSTALLATION_ID: 'b', WE_GITHUB_APP_PRIVATE_KEY_PATH: '/k' },
-        readCache: () => ({ v: 2, expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString() }),
+        readCache: () => ({ v: 2, appId: 'a', installationId: 'b', token: 'ghs_synthetic_runner', expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString() }),
         setEnv: () => { calls.push('token-refresh'); },
         log: { error: () => {} },
       },
