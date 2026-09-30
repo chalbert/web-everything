@@ -753,3 +753,51 @@ describe('streamed worker decline regression', () => {
     expect(card).toContain('supervised cutover remains incomplete');
   });
 });
+
+
+describe('standalone prepare', () => {
+  const path = 'backlog/4291-probation-launcher.md';
+  const prepared = ITEM_RAW + '\n## Design\nConcrete preparation.\n';
+  function prepareIo(options = {}) {
+    const fake = fakeIo({ numstat: `12\t0\t${path}`, postWorkerRaw: prepared, ...options });
+    fake.io.readCommittedCard = () => fake.io.findItem().raw;
+    fake.io.readPrepareBrief = () => '# Prepare {{ITEM_NUM}}: {{ITEM_SPEC_PATH}}';
+    fake.io.stampPrepare = () => {
+      fake.calls.push(['stamp']);
+      const read = fake.io.findItem;
+      fake.io.findItem = (...a) => {
+        const item = read(...a);
+        return { ...item, raw: item.raw.replace('---\n', '---\npreparedDate: "2026-09-30"\npreparedAgainstSha: "base-sha"\n') };
+      };
+      return { ok: true };
+    };
+    return fake;
+  }
+  const prepareArgs = () => args(codex, { taskType: 'prepare', scope: `we:${path}` });
+  it('accepts a card-only prepare, stamps it, and never claims or resolves', async () => {
+    const { io, calls } = prepareIo();
+    expect(await runProbationBuild(prepareArgs(), io)).toMatchObject({ outcome: 'opened-pr' });
+    expect(calls.some(c => ['claim', 'resolve'].includes(c[0]))).toBe(false);
+    expect(calls.some(c => c[0] === 'stamp')).toBe(true);
+  });
+  it.each([
+    { numstat: `12\t0\t${path}\n1\t0\tscripts/code.mjs` },
+    { postWorkerRaw: prepared.replace('status: open', 'status: resolved') },
+  ])('refuses edits outside the card envelope: %j', async (options) => {
+    const { io, calls } = prepareIo(options);
+    expect((await runProbationBuild(prepareArgs(), io)).outcome).not.toBe('opened-pr');
+    expect(calls.some(c => c[0] === 'openPr')).toBe(false);
+  });
+  it('refuses a committed card without stamps', async () => {
+    const { io, calls } = prepareIo();
+    io.readCommittedCard = () => prepared;
+    expect(await runProbationBuild(prepareArgs(), io)).toMatchObject({ detail: 'prepare-unstamped at HEAD' });
+    expect(calls.some(c => c[0] === 'openPr')).toBe(false);
+  });
+  it('refuses an unstamped result even when the stamp command reports success', async () => {
+    const { io, calls } = prepareIo();
+    io.stampPrepare = () => ({ ok: true });
+    expect(await runProbationBuild(prepareArgs(), io)).toMatchObject({ detail: 'prepare-unstamped' });
+    expect(calls.some(c => c[0] === 'commit')).toBe(false);
+  });
+});

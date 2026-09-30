@@ -44,6 +44,7 @@ export const PROBATION_BUILD_RUN_SCRIPT = join(REPO_ROOT, 'scripts', 'operations
  */
 export const PROBATION_LAUNCHABLE_KINDS = Object.freeze({
   'ci-heal': Object.freeze({ taskType: 'ci-heal', runScript: PROBATION_HEAL_RUN_SCRIPT }),
+  'prepare-item': Object.freeze({ taskType: 'prepare', runScript: PROBATION_BUILD_RUN_SCRIPT }),
   build: Object.freeze({ taskType: 'doc-fix', runScript: PROBATION_BUILD_RUN_SCRIPT }),
 });
 
@@ -84,7 +85,7 @@ export function probationLaunchDecision(request, launch) {
   const entry = PROBATION_LAUNCHABLE_KINDS[kind];
   if (!entry) return { launch: false, why: `kind '${kind}' has no probation launcher yet` };
   // Each kind keeps its original taskType; both existing launchers also enforce the test-fix envelope (#4551).
-  if (worker.taskType !== entry.taskType && worker.taskType !== 'test-fix') {
+  if (worker.taskType !== entry.taskType && !(kind !== 'prepare-item' && worker.taskType === 'test-fix')) {
     return { launch: false, why: `kind '${kind}' only launches a '${entry.taskType}' worker, got taskType '${worker.taskType}'` };
   }
   const repo = String(request?.repo ?? 'we');
@@ -127,7 +128,7 @@ export function probationWorkerDetachedProvider(request, {
   // plan review round 2: the earlier single shared fallback made that misreading possible even though it was
   // never reachable).
   let argv;
-  if (kind === 'build') {
+  if (kind === 'build' || kind === 'prepare-item') {
     if (!num) throw notApplied('dispatch-lane: refusing a probation doc-fix build launch with no item number');
     const script = runScript ?? PROBATION_LAUNCHABLE_KINDS.build.runScript;
     argv = [String(script), `--num=${num}`, `--session=${sessionSlug}`, `--worker=${JSON.stringify(worker)}`];
@@ -143,7 +144,7 @@ export function probationWorkerDetachedProvider(request, {
   } else {
     throw notApplied(`dispatch-lane: refusing a probation launch for kind '${kind}' — this provider has no argv shape for it`);
   }
-  if (worker.taskType === 'test-fix') argv.push('--taskType=test-fix');
+  if (['test-fix', 'prepare'].includes(worker.taskType)) argv.push(`--taskType=${worker.taskType}`);
   const lane = Number(request?.lane);
   if (Number.isInteger(lane) && lane > 0) argv.push(`--lane=${lane}`);
   const scope = Array.isArray(request?.scope) ? request.scope.map(String).filter(Boolean) : [];

@@ -1,3 +1,16 @@
+# Probation worker mode — prepare item {{ITEM_NUM}}
+
+When this brief is supplied by probation-build-run, this section is the entire worker task.
+Read {{ITEM_SPEC_PATH}} and the code it names. Check the premise and author concrete
+## Design, ## MVP, ## Test plan, ## Proof plan, and ## Follow-ups sections in that card.
+Only edit that card's body and preparedDate/preparedAgainstSha; preserve all other frontmatter.
+If scope needs correction or a judgment call is unresolved, report could-not-prepare and stop.
+Do not claim, resolve, acquire another lane, stamp, commit, push, or open a PR.
+The runner owns stamping and checks, then opens a parked review:pending PR.
+If you cannot honestly prepare it, leave no diff and explain why.
+
+<!-- /probation-worker -->
+
 # Conveyor prepare-item agent brief (template) — full prepare pass on ONE story/task, stop at ready-to-merge (#4504)
 
 > **This is a TEMPLATE, not a runnable skill.** The `/conveyor` skill instantiates it — filling the

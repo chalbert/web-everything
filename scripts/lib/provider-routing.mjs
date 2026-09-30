@@ -193,6 +193,7 @@ export const DEFAULT_BACKDOWN_THRESHOLDS = Object.freeze({
  */
 // @test-only-export-ok: Shared library exported for interactive Claude sessions and conveyor runners
 export const PROVEN_TASK_ENVELOPES = Object.freeze({
+  'prepare': Object.freeze({ maxLoc: 1000, maxFiles: 1 }),
   'test-fix': Object.freeze({ maxLoc: 150, maxFiles: 3, testOnly: true }),
   'doc-fix': Object.freeze({ maxLoc: 100, maxFiles: 2 }),
   'bugfix': Object.freeze({ maxLoc: 250, maxFiles: 4 }),
@@ -293,12 +294,13 @@ export function externalTierEquivalent(provider, model) {
  */
 // @test-only-export-ok: Shared library exported for the mechanical dispatch path (#3906) and its own test
 export const CRITICAL_WORK_GATE = Object.freeze({
-  kinds: Object.freeze(['build', 'fix', 'ci-heal']),
+  kinds: Object.freeze(['build', 'fix', 'ci-heal', 'prepare-item']),
   // agy-launcher-probation (operator, 2026-09-27): `doc-fix` and the new `ci-heal` taskType are opened ON
   // PROBATION — non-critical work only, one of the PROBATION_ROSTER workers, full review on every result.
   // `bugfix` opened ON PROBATION to Codex and agy (operator, 2026-09-29): simple mechanical fixes
   // may use Gemini Flash with its Codex checker; full review on every non-critical result.
   openForNonCritical: Object.freeze({
+    'prepare': true,
     'build-new-feature': false,
     'bugfix': true,
     'conflict-resolution': false,
@@ -359,6 +361,7 @@ export const PROBATION_WORKERS = Object.freeze({
  */
 // @test-only-export-ok: Shared library exported for the probation launcher (agy-launcher-probation) and its own test
 export const PROBATION_ROSTER = Object.freeze({
+  'prepare': Object.freeze(['codex', 'antigravity-gemini']),
   'test-fix': Object.freeze(['antigravity-gemini']),
   'doc-fix': Object.freeze(['antigravity-claude', 'codex']),
   'ci-heal': Object.freeze(['antigravity-claude', 'codex', 'antigravity-gemini']),

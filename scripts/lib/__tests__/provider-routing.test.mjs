@@ -1317,12 +1317,13 @@ describe('EXTERNAL_WORKER_CANDIDATES, externalTierEquivalent and the critical-wo
     expect(externalTierEquivalent('gemini', 'gemini-3.1-pro')).toBeNull();
   });
 
-  it('CRITICAL_WORK_GATE holds exactly build, fix and ci-heal, basis #4034; doc-fix, ci-heal and bugfix are open (probation, 2026-09-29)', () => {
-    expect(CRITICAL_WORK_GATE.kinds).toEqual(['build', 'fix', 'ci-heal']);
+  it('CRITICAL_WORK_GATE holds build, fix, ci-heal and prepare-item, basis #4034; doc-fix, ci-heal and bugfix are open (probation, 2026-09-29)', () => {
+    expect(CRITICAL_WORK_GATE.kinds).toEqual(['build', 'fix', 'ci-heal', 'prepare-item']);
     expect(CRITICAL_WORK_GATE.basis).toBe('#4034');
     const rows = CRITICAL_WORK_GATE.openForNonCritical;
-    expect(Object.keys(rows).sort()).toEqual(['bugfix', 'build-new-feature', 'ci-heal', 'conflict-resolution', 'doc-fix', 'test-fix'].sort());
-    expect(Object.entries(rows).filter(([, v]) => v === true).map(([k]) => k).sort()).toEqual(['bugfix', 'ci-heal', 'doc-fix', 'test-fix']);
+    expect(Object.keys(rows).sort()).toEqual(['bugfix', 'build-new-feature', 'ci-heal', 'conflict-resolution', 'doc-fix', 'prepare', 'test-fix'].sort());
+    expect(Object.entries(rows).filter(([, v]) => v === true).map(([k]) => k).sort()).toEqual(['bugfix', 'ci-heal', 'doc-fix', 'prepare', 'test-fix']);
+    expect(PROBATION_ROSTER.prepare).toEqual(['codex', 'antigravity-gemini']);
     expect(PROBATION_ROSTER.bugfix).toEqual(['codex', 'antigravity-claude', 'antigravity-gemini']);
     expect(rows['build-new-feature']).toBe(false);
     expect(rows['conflict-resolution']).toBe(false);
