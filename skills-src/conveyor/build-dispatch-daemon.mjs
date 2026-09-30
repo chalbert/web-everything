@@ -29,7 +29,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir, hostname, homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -59,6 +59,15 @@ import { defaultIsPidAlive } from '../../scripts/operations/detached-dispatch.mj
 import { prepareCardStatus } from '../../scripts/conveyor/prepare-result.mjs';
 import { CONSTELLATION_REPOS } from '../../scripts/lib/constellation-repos.mjs';
 import { MAX_CONCURRENT_LANES_ENV } from '../../scripts/lib/lane-concurrency.mjs';
+
+import { resolveScorecardStorePath } from '../../scripts/conveyor/run-scorecard-store.mjs';
+
+/** Durable attempt history: repeated ticks and Claude runs cannot reset or double-count failures. */
+export function prepareRouteFallback(records = []) {
+  const attempts = records.filter(r => r.dispatchKind === 'probation-launch' && r.taskType === 'prepare' && r.repo === CONSTELLATION_REPOS.we.slug)
+    .sort((a, b) => String(a.scoredAt).localeCompare(String(b.scoredAt)));
+  return attempts.length >= 2 && attempts.slice(-2).every(r => !r.pr && r.launchOutcome !== 'opened-pr');
+}
 
 export const BUILD_DISPATCH_DAEMON_LEASE_KEY = '<conveyor:build-dispatch-daemon-lease>';
 export const DEFAULT_INTERVAL_MS = 120_000;
@@ -347,7 +356,8 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
     if (!settledPrepares.has(num) || row.startedAt > settledPrepares.get(num).startedAt) settledPrepares.set(num, row);
   }
   const prepareBusy = new Set(prepareRows.map((r) => normNum(r.num)));
-  const prepare = { enabled: prepareEnabled, planned: [], launched: [], inFlight: [], failures: [], retired: [], held: [], stamping: [] };
+  const fallback = prepareRouteFallback(await effects.listProbationPrepares?.() ?? []);
+  const prepare = { route: fallback ? 'prepare-route-fallback' : 'probation', enabled: prepareEnabled, planned: [], launched: [], inFlight: [], failures: [], retired: [], held: [], stamping: [] };
   const finishedPrepares = new Set();
   const inspectNums = new Set([...prepareClaims.map((c) => normNum(c.meta.num)),
     ...prepareBusy, ...prepareSpawns.map((s) => normNum(s.num)),
@@ -459,7 +469,7 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
         continue;
       }
       let res;
-      try { res = await effects.dispatch({ num, bookkeeping, launchKind: 'prepare-item' }); }
+      try { res = await effects.dispatch({ num, bookkeeping, launchKind: 'prepare-item', prepareFallback: fallback }); }
       catch (e) { res = { dispatching: false, reason: String(e?.message || e) }; }
       if (res?.dispatching) {
         prepareBusy.add(num);
@@ -653,7 +663,7 @@ export function cliListHolds() {
     .map((h) => ({ num: normNum(h.meta.num), reason: h.meta.reason ?? null }));
 }
 
-export function cliDispatch({ num, bookkeeping, launchKind = 'build' }, { exec = execFileSync } = {}) {
+export function cliDispatch({ num, bookkeeping, launchKind = 'build', prepareFallback = false }, { exec = execFileSync } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'build-dispatch-daemon-'));
   const file = join(dir, 'bookkeeping.json');
   try {
@@ -664,7 +674,7 @@ export function cliDispatch({ num, bookkeeping, launchKind = 'build' }, { exec =
     writeFileSync(file, JSON.stringify({ bookkeeping: bookkeeping || {} }), { mode: 0o600 });
     const text = exec('node', [join(SCRIPTS, 'operations', 'run.mjs'), 'dispatch-lane', `--num=${num}`, `--bookkeepingFile=${file}`, '--json', ...(launchKind === 'prepare-item' ? ['--modelReason=automatic item preparation uses sonnet'] : [])], {
       encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 32 * 1024 * 1024, cwd: REPO_ROOT,
-      env: { ...process.env, [MAX_CONCURRENT_LANES_ENV]: BUILD_DAEMON_LANE_CAP_EXEMPT_VALUE, WE_BUILD_DISPATCH_MODE: process.env.WE_BUILD_DISPATCH_MODE || 'mechanical', ...(launchKind === 'prepare-item' ? { WE_DISPATCH_AGENT_ARGS: JSON.stringify([...JSON.parse(process.env.WE_DISPATCH_AGENT_ARGS || '[]'), '--model', 'sonnet']) } : {}) },
+      env: { ...process.env, ...(launchKind === 'prepare-item' && prepareFallback ? { WE_PROBATION_LAUNCH: 'off' } : {}), [MAX_CONCURRENT_LANES_ENV]: BUILD_DAEMON_LANE_CAP_EXEMPT_VALUE, WE_BUILD_DISPATCH_MODE: process.env.WE_BUILD_DISPATCH_MODE || 'mechanical', ...(launchKind === 'prepare-item' ? { WE_DISPATCH_AGENT_ARGS: JSON.stringify([...JSON.parse(process.env.WE_DISPATCH_AGENT_ARGS || '[]'), '--model', 'sonnet']) } : {}) },
     });
     return readDispatchOutcome(text);
   } catch (e) {
@@ -865,6 +875,10 @@ const prepareClaimRoot = () => join(resolveCoordinationRoot(), 'item-prepare-dis
 
 function cliEffects() {
   return {
+    listProbationPrepares: () => {
+      const path = resolveScorecardStorePath();
+      return existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')).records : [];
+    },
     listPrepareClaims: () => listBuildDispatchClaims({ lockRoot: prepareClaimRoot(), ignoreExpiry: true }),
     listSettledPrepares: () => cliListSettledBuilds({ launchKind: 'prepare-item' }),
     readPrepareStatus: cliReadPrepareStatus,

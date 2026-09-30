@@ -566,3 +566,18 @@ uses `prepare-stamp-pending` for sectioned results and a detached lane worker to
 verify the committed stamp and submit via `open-pr --mode=label-on-green`; only missing sections retain
 `prepare-unstamped`. Test fresh-main and existing-PR recovery, lane-local command paths, stale section
 observations, resolved cards, failed stamps, freeze/dry-run, and a fresh Node `--bogus-flag` boot.
+
+
+### Probation prepare validation and fallback
+
+A prepare worker's clean exit is not a landable result. Require the substantive card sections, run
+`prepare-stamp` in the acquired lane, and return a rejected stamp's diagnostic to the worker once
+before abandoning. The #4325 regression produced 43 lines but lost them to the guarded writer's
+locus-prefix validation; briefs must teach repository-prefixed code references. A no-diff result
+must retain the worker's final explanation (#4322's old launcher log omitted it).
+
+The build dispatcher reads durable `probation-launch` scorecard rows for WE `taskType: prepare`.
+Two consecutive attempts without a PR activate `prepare-route-fallback`: subsequent prepares disable
+probation and retain explicit Claude Sonnet argv. Re-reading history across ticks/restarts does not
+reset this route; a newer successful probation prepare clears it. Test the diagnostic repair through
+the parked-PR path, bounded refusal, and the daemon's dispatch environment as well as its route decision.
