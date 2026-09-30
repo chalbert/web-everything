@@ -1,3 +1,4 @@
+import { assertMachineTitle } from '../operations/machine-pr-title.mjs';
 /**
  * @file scripts/lib/forge-land-provider.mjs
  * @description THE PROVIDER PORT for the land arc (#3174 Fork 2=(b)) — the `gh` operations
@@ -82,7 +83,7 @@ export function mergeMethodFlag(method) {
  *  pr-land itself) is what flips it back with `gh pr ready` once required checks go green (draft-first PRs). */
 export function buildCreateArgs({ base, head, title, body, draft }) {
   const args = ['pr', 'create', '--base', base, '--head', head];
-  if (title != null) args.push('--title', title);
+  if (title != null) args.push('--title', assertMachineTitle(title));
   // A title with no body must still carry a body — otherwise gh prompts interactively (fails headless, #2176).
   if (body != null) args.push('--body', body);
   else if (title != null) args.push('--body', '');

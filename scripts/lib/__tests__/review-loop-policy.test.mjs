@@ -423,10 +423,8 @@ describe('buildPreventionFilingInput — the file-item card the loop files for i
     expect(buildPreventionFilingInput({ repo: 'o/r', pr: 1, findings, queue: 'false' }).queue).toBe('false');
   });
 
-  it('an empty/absent findings list still returns a well-shaped (if empty) input rather than throwing', () => {
-    const input = buildPreventionFilingInput({ repo: 'o/r', pr: 1, findings: [] });
-    expect(input.scope).toBe('');
-    expect(typeof input.digest).toBe('string');
+  it('refuses an empty finding list rather than filing a generic card', () => {
+    expect(() => buildPreventionFilingInput({ repo: 'o/r', pr: 1, findings: [] })).toThrow(/finding subject/);
   });
 
   it('PR #2766 advisory (antigravity): a finding on a TEST file scopes that test file once, never a doubled '

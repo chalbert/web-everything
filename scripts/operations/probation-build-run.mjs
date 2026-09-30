@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { machinePrTitle } from './machine-pr-title.mjs';
 import { classifyPrepareFailure } from '../conveyor/prepare-failure-policy.mjs';
 /**
  * @file scripts/operations/probation-build-run.mjs
@@ -521,7 +522,7 @@ export async function runProbationBuild(args, io) {
     if (io.headSha(lanePath) !== baseSha) {
       return abandon('escalated-needs-human', 'refused: worker or resolve moved HEAD before the launcher commit', { diff: diffRow });
     }
-    io.commit(lanePath, [...new Set([...summary.paths, item.path])], declinedReason ? `WE #${num}: record standalone worker Findings\n` : buildDocFixCommitMessage({ num, worker, taskType }));
+    io.commit(lanePath, [...new Set([...summary.paths, item.path])], declinedReason ? `${machinePrTitle({ item: num, kind: 'findings', card: item })}\n` : buildDocFixCommitMessage({ num, worker, taskType, title: item.title }));
 
     // The FINAL gate, on the commit that carries both the build and the resolve — the marker-writing mode
     // (unlike `probation-heal-run.mjs#runGate`'s marker-less `run` mode), because `open-pr --requireVerified=true`
@@ -596,7 +597,7 @@ export function openPrArgv({ num, attemptTag, slug, bodyFile, taskType = 'doc-fi
   const ref = `lane/${num}${attemptTag ?? ''}-${taskType === 'prepare' ? 'prepare-' : ''}${slug}`;
   return [
     'open-pr', `--ref=${ref}`, '--sha=HEAD', '--base=main', `--bodyFile=${bodyFile}`,
-    `--title=WE #${num}: ${taskType} build — ${slug}`,
+    `--title=${machinePrTitle({ item: num, kind: taskType === 'prepare' ? 'prepare' : `${taskType}-build`, subject: slug.replace(/-/g, ' ') })}`,
     '--mode=park', '--parkLabel=review:pending', '--requireVerified=true', '--json',
   ];
 }

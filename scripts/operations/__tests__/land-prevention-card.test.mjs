@@ -27,7 +27,7 @@ import yaml from 'js-yaml';
 
 const INPUT = {
   title: 'File the prevention guard(s) owed by o/r#42\'s independent review',
-  kind: 'story', size: '3', digest: 'the digest text', scope: 'we:a.mjs', parent: '4075', queue: 'true',
+  kind: 'story', size: '3', digest: '1. Reject malformed flags', scope: 'we:a.mjs', parent: '4075', queue: 'true',
   session: 'prevention-card-test',
 };
 
@@ -87,6 +87,7 @@ describe('landPreventionCard — the real acquire → file-item → commit → v
     const result = await landPreventionCard(INPUT, {
       exec, write: () => {}, mkTmp: () => '/tmp/land-prevention-card-x', rmTmp: () => {}, writeFile: (p, c) => written.push({ p, c }),
     });
+    expect(written.find(({ p }) => p.endsWith('commit-msg.txt')).c.split('\n')[0]).toBe('WE #9001: prevention — Reject malformed flags (from #42 review)');
     expect(result).toEqual({ ok: true, step: 'done', num: 9001, rel: 'backlog/9001-file-the-prevention.md', pr: 5555, url: 'https://github.com/chalbert/web-everything/pull/5555', reason: null });
 
     // acquire — a real lane, never the daemon clone that spawned this job.
@@ -100,7 +101,7 @@ describe('landPreventionCard — the real acquire → file-item → commit → v
     expect(calls[1].opts.cwd).toBe('/workspace/.lanes/web-everything/lane-7');
     expect(calls[1].args[0]).toBe('/workspace/.lanes/web-everything/lane-7/scripts/operations/run.mjs');
     expect(calls[1].args).toContain('file-item');
-    expect(calls[1].args).toContain('--title=' + INPUT.title);
+    expect(calls[1].args).toContain('--title=Prevention — Reject malformed flags (from o/r#42 review)');
     // git add + commit, in the lane, of exactly the filed card.
     expect(calls[2].cmd).toBe('git');
     expect(calls[2].args).toEqual(['-C', '/workspace/.lanes/web-everything/lane-7', 'add', '--', 'backlog/9001-file-the-prevention.md']);
@@ -131,7 +132,7 @@ describe('landPreventionCard — the real acquire → file-item → commit → v
   // `--scope=` flag) instead of the real reason. The fix moved here with the rest of the seam: `e.stdout`
   // carries a real, structured `file-item` payload on an ordinary refusal, and it wins whenever it parses.
   it('#2766 regression, preserved at its new home: a real file-item refusal reports its own `.error`, never a leaked argv fragment', async () => {
-    const digest = 'multi\nline\ndigest\ntext';
+    const digest = 'multi\nline\ndigest\ntext\n1. Reject malformed flags';
     const realError = 'locus-prefix: 1 bare code-path ref(s) lack a <repo>: prefix (#883)';
     const refusalStdout = JSON.stringify({ stopped: 'effect-halted', error: realError });
     const { exec, calls } = scriptedExec([
