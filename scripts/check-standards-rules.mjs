@@ -13,6 +13,8 @@
  * feed (#095/#196/#197) and the human output are unchanged.
  */
 
+import { normalizeRelatedReport } from './lib/related-report.cjs';
+
 import { validateFidelityContract } from './lib/fidelity-contract.mjs';
 import { coversFile, isSubtreeEntry } from './readiness/scope-lease.mjs';
 import { scrubPublish } from './lib/secret-scrub.mjs';
@@ -414,7 +416,7 @@ export function validateBacklogItem(item, ctx) {
   if (item.relatedProject && !projectById.has(item.relatedProject))
     err(`Backlog item "${item.id}" relatedProject "${item.relatedProject}" does not resolve in projects.json`,
       dUnresolvedRef('Backlog', item.id, backlogFile, 'relatedProject', item.relatedProject, 'projects.json'));
-  if (item.relatedReport && !reportExists(item.relatedReport))
+  if (item.relatedReport && !reportExists(normalizeRelatedReport(item.relatedReport)))
     err(`Backlog item "${item.id}" relatedReport does not exist: ${item.relatedReport}`,
       dUnresolvedRef('Backlog', item.id, backlogFile, 'relatedReport', item.relatedReport, 'reports/'));
   if (item.crossRef && (!item.crossRef.url || !item.crossRef.label))

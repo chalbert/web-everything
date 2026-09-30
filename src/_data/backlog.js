@@ -22,6 +22,7 @@
 const { readdirSync, readFileSync, existsSync } = require('node:fs');
 const { join } = require('node:path');
 const matter = require('gray-matter');
+const { normalizeRelatedReport } = require('../../scripts/lib/related-report.cjs');
 const MarkdownIt = require('markdown-it');
 
 const md = new MarkdownIt({ html: true, linkify: true, typographer: true });
@@ -336,7 +337,7 @@ function derive(text, { isReport = false } = {}) {
 }
 
 function loadReport(relPath) {
-  const p = join(ROOT, relPath);
+  const p = join(ROOT, normalizeRelatedReport(relPath));
   if (!existsSync(p)) return null;
   const { content } = matter(readFileSync(p, 'utf8')); // reports have no frontmatter
   return derive(content, { isReport: true });
