@@ -2,9 +2,10 @@
 bornAs: x3bt7x7
 kind: story
 size: 3
-status: open
+status: active
 scope: ["we:scripts/conveyor/build-dispatch-policy.mjs", "we:scripts/conveyor/build-dispatch-claim.mjs", "we:scripts/conveyor/fix-dispatch-claim.mjs", "we:scripts/readiness/overlap-chain.mjs", "we:scripts/conveyor/reconcile-fix-dispatch.mjs", "we:scripts/operations/ci-heal-pr-dispatch.mjs", "we:skills-src/conveyor/build-dispatch-daemon.mjs", "we:scripts/conveyor/fix-claim-store.mjs"]
 dateOpened: "2026-09-27"
+dateStarted: "2026-09-29"
 preparedDate: "2026-09-29"
 preparedAgainstSha: "f78f36733292bf3b20b80da2c345658d15e497bc"
 tags: []

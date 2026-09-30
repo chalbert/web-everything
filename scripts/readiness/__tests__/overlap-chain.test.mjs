@@ -10,7 +10,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import {
-  DEFAULT_DEPTH_CAP, createStackPlan, planNextItem, recheckAtPush, applyRebase, recordPushed, dropItem,
+  DEFAULT_DEPTH_CAP, createStackPlan, planNextItem, recheckAtPush, applyRebase, recordPushed, dropItem, overlapsInFlight,
 } from '../overlap-chain.mjs';
 
 const push = (plan, id, files = [], tips = { we: { sha: `sha-${id}`, ref: `lane/x-${id}` } }) =>
@@ -302,5 +302,26 @@ describe('plan round-trips through JSON (the CLI persists it between seams)', ()
     expect(b.stacked).toBe(true);
     expect(b.base).toBe('A');
     expect(b.baseTips.we.sha).toBe('sha-A');
+  });
+});
+
+describe('overlapsInFlight (#4295) — the shared build/fix dispatch overlap predicate', () => {
+  it('hits on an equal path and names the in-flight item', () => {
+    expect(overlapsInFlight(['we:a/x.mjs'], [{ id: 7, scope: ['we:a/x.mjs'] }])).toEqual({ hit: 'we:a/x.mjs', with: 7 });
+  });
+  it('hits on a directory prefix in either direction', () => {
+    expect(overlapsInFlight(['we:scripts/conveyor/x.mjs'], [{ id: 1, scope: ['we:scripts/conveyor/'] }])).toMatchObject({ with: 1 });
+    expect(overlapsInFlight(['we:scripts/'], [{ id: 2, scope: ['we:scripts/conveyor/x.mjs'] }])).toMatchObject({ with: 2 });
+  });
+  it('does not treat a sibling name sharing a string prefix as overlap', () => {
+    expect(overlapsInFlight(['we:scripts/conv'], [{ id: 1, scope: ['we:scripts/conveyor/x.mjs'] }])).toBeNull();
+  });
+  it('never overlaps across repos', () => {
+    expect(overlapsInFlight(['plateau-app:src/a.ts'], [{ id: 1, scope: ['we:src/a.ts'] }])).toBeNull();
+  });
+  it('is null for empty inputs', () => {
+    expect(overlapsInFlight([], [{ id: 1, scope: ['we:a'] }])).toBeNull();
+    expect(overlapsInFlight(['we:a'], [])).toBeNull();
+    expect(overlapsInFlight(['we:a'], [{ id: 1 }])).toBeNull();
   });
 });

@@ -95,9 +95,11 @@ import { BRIEF_REQUIRED_BY_KIND, OPTIONAL_BRIEF_PLACEHOLDERS, REPO_AWARE_VALUE_P
 import { parseAuthorActorId } from '../lib/review-independence.mjs';
 import { laneRefItemNum } from './lease-reaper.mjs';
 import {
-  acquireFixDispatchClaim, releaseFixDispatchClaim, readFixDispatchClaim, fixDispatchClaimOwner,
+  acquireFixDispatchClaim, releaseFixDispatchClaim, readFixDispatchClaim, fixDispatchClaimOwner, listFixDispatchClaims,
 } from './fix-dispatch-claim.mjs';
 import { readLiveFixClaim, withAltBranchHint } from './fix-procedure.mjs';
+import { overlapsInFlight } from '../readiness/overlap-chain.mjs';
+import { listBuildDispatchClaims } from './build-dispatch-claim.mjs';
 import { runReconcilePass, resolveLaneHead } from './reconcile-pass.mjs';
 import { readUnsupported, recordUnsupported } from './unsupported-repo.mjs';
 import { readPrsFromFile } from './open-pr-fetch.mjs';
@@ -718,7 +720,7 @@ export function tryResumeFix(planned, {
   // `headSha` (see `fix-dispatch-claim.mjs`'s own header for the live incident that made keying on the head
   // sha wrong — a still-live session's OWN push used to rotate its claim out from under it).
   const claim = acquireClaim({
-    repo, pr: planned.pr, kind: 'fix', headSha: planned.headRefOid, owner: claimOwner, lockRoot: claimRoot,
+    repo, pr: planned.pr, kind: 'fix', headSha: planned.headRefOid, scope: planned.scope, owner: claimOwner, lockRoot: claimRoot,
   });
   if (!claim.ok) {
     return {
@@ -886,7 +888,7 @@ export function dispatchFix(planned, {
     };
   }
   const claim = acquireClaim({
-    repo, pr: planned.pr, kind: 'fix', headSha: planned.headRefOid, owner: claimOwner, lockRoot: claimRoot,
+    repo, pr: planned.pr, kind: 'fix', headSha: planned.headRefOid, scope: planned.scope, owner: claimOwner, lockRoot: claimRoot,
   });
   if (!claim.ok) {
     return {
@@ -1060,6 +1062,9 @@ export function runReconcileFixDispatch({
   readPrComments = defaultReadPrComments,
   postQueueCapComment = postNoteComment,
   notifyQueueCapOperator = notifyDesktopChecked,
+  // #4295 — live in-flight claims the scope-overlap filter reads; injectable so tests never touch the real sidecar.
+  listBuildClaims = () => listBuildDispatchClaims(),
+  listFixClaims = () => listFixDispatchClaims(undefined, { liveOnly: true }),
 } = {}) {
   const repoKey = repo == null ? 'we' : repoKeyForSlug(repo);
   if (repoKey === null) throw new Error(`reconcile-fix-dispatch: --repo ${repo} is not a constellation repo`);
@@ -1103,8 +1108,13 @@ export function runReconcileFixDispatch({
     const reviews = readUnsupported({ path: unsupportedPath }).filter((row) => row.repo === repoKey && row.action === 'review');
     recordUnsupported({ repo: repoKey, rows: [...reviews, ...ciHealRefusals], path: unsupportedPath });
   }
-  const { planned, refusals: planRefusals } = planFixesFromReconcile(dispatchEntries, findItemFn, loadItems, resolveFallbackScope, repoKey, fetchItemlessDiffPaths, resolveCardScopeAtRef);
-  const refusals = [...ciHealRefusals, ...planRefusals];
+  const { planned: plannedAll, refusals: planRefusals } = planFixesFromReconcile(dispatchEntries, findItemFn, loadItems, resolveFallbackScope, repoKey, fetchItemlessDiffPaths, resolveCardScopeAtRef);
+  // #4295 — serialize against live build claims, live fix claims, and earlier fixes this pass.
+  const scopeFilter = filterFixesByInFlightScope(
+    plannedAll, listBuildClaims(), listFixClaims(),
+  );
+  const planned = scopeFilter.planned;
+  const refusals = [...ciHealRefusals, ...planRefusals, ...scopeFilter.refusals];
 
   // Lanes: THIS repo's own pool (`profile.lanePoolRepo` — `.` for WE, an absolute checkout path for a sibling
   // repo), never the WE pool for a non-WE repo (#x33jgwt).
@@ -1416,4 +1426,43 @@ if (IS_CLI) {
       process.stdout.write(lines.join('\n') + '\n');
     }
   }
+}
+
+/**
+ * #4295 — refuse a planned fix whose declared scope overlaps work already in flight, so build+fix and fix+fix on
+ * the same files serialize instead of racing. Pure. In-flight = a live BUILD claim (`meta.{num,scope}`; the same
+ * item's own claim is exempt — a fix for item N never blocks on N's own build), a live FIX/ci-heal claim on a
+ * DIFFERENT PR (`meta.{pr,scope}`), or an earlier fix accepted in THIS pass. A claim with no scope never blocks
+ * (unknown, not proven overlapping). The refusal is transient (`scope-overlap`): re-planned next pass.
+ * @param {Array<{pr:number, itemNum:string|null, scope:string[]}>} planned
+ * @param {Array<{meta?:{num?:string, scope?:string[]}}>} buildClaims
+ * @param {Array<{meta?:{pr?:number, scope?:string[]}}>} fixClaims
+ * @returns {{planned:Array<object>, refusals:Array<{pr:number, kind:'scope-overlap', why:string}>}}
+ */
+export function filterFixesByInFlightScope(planned, buildClaims = [], fixClaims = []) {
+  const accepted = [];
+  const refusals = [];
+  const picked = [];
+  for (const entry of planned) {
+    const inFlight = [
+      ...buildClaims
+        .filter((c) => !(entry.itemNum != null && String(c.meta?.num) === String(entry.itemNum)))
+        .map((c) => ({ id: `build #${c.meta?.num}`, scope: c.meta?.scope })),
+      ...fixClaims
+        .filter((c) => c.meta?.pr !== entry.pr)
+        .map((c) => ({ id: `fix PR #${c.meta?.pr}`, scope: c.meta?.scope })),
+      ...picked,
+    ];
+    const hit = overlapsInFlight(entry.scope, inFlight);
+    if (hit) {
+      refusals.push({
+        pr: entry.pr, kind: 'scope-overlap',
+        why: `${hit.hit} overlaps in-flight ${hit.with} — serializing, retrying next pass`,
+      });
+      continue;
+    }
+    accepted.push(entry);
+    picked.push({ id: `fix PR #${entry.pr}`, scope: entry.scope });
+  }
+  return { planned: accepted, refusals };
 }

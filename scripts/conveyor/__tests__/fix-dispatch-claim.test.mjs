@@ -364,7 +364,7 @@ describe('runReconcileFixDispatch — a `held` result returns its popped lane to
       }),
       findItemFn: () => null,
       loadItems: () => [],
-      fetchItemlessDiffPaths: () => ['we:x'],
+      fetchItemlessDiffPaths: (pr) => [pr === 50 ? 'we:x' : 'we:y'], // disjoint — #4295 would serialize identical scopes
       pickFreeLanes: () => [3], // exactly ONE lane in the pool — the second entry can only dispatch if it's returned.
       tryResume: () => ({ resumed: false, resumeAttempt: null }),
       dispatch: (entry) => {
@@ -483,5 +483,23 @@ describe('dispatchFix and dispatchCiHeal acquire independent claims for the same
     expect(dispatchFix(planned, { ...fixOpts, mintSessionId: () => 'sid-b', claimOwner: 'dispatcher-B' })).toMatchObject({ held: true });
     expect(await dispatchCiHeal(planned, { ...healOpts, claimOwner: 'dispatcher-B' })).toMatchObject({ held: true });
     expect(spawnCalls).toEqual(['fix', 'ci-heal']);
+  });
+});
+
+describe('#4295 — fix claims carry scope; the list can be live-only', () => {
+  it('acquireFixDispatchClaim stores meta.scope', () => {
+    acquireFixDispatchClaim({ repo: 'we', pr: 5, scope: ['we:scripts/a.mjs'], lockRoot: claimRoot, nowMs: T0 });
+    expect(listFixDispatchClaims(claimRoot)[0].meta.scope).toEqual(['we:scripts/a.mjs']);
+  });
+  it('omits meta.scope when none is given', () => {
+    acquireFixDispatchClaim({ repo: 'we', pr: 5, lockRoot: claimRoot, nowMs: T0 });
+    expect(listFixDispatchClaims(claimRoot)[0].meta.scope).toBeUndefined();
+  });
+  it('liveOnly excludes an expired claim', () => {
+    acquireFixDispatchClaim({ repo: 'we', pr: 5, scope: ['we:a'], lockRoot: claimRoot, nowMs: T0, nowIso: iso(T0) });
+    const later = T0 + (DEFAULT_FIX_DISPATCH_CLAIM_TTL_MINUTES + 5) * 60_000;
+    expect(listFixDispatchClaims(claimRoot, { liveOnly: true, nowMs: T0 + 1000 })).toHaveLength(1);
+    expect(listFixDispatchClaims(claimRoot, { liveOnly: true, nowMs: later })).toHaveLength(0);
+    expect(listFixDispatchClaims(claimRoot)).toHaveLength(1);
   });
 });
