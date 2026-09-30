@@ -610,6 +610,23 @@ A failed session listing remains unknown. The daemon's records live in the coord
 `build-dispatch-runs` store; scratch-started Claude transcripts live under dispatch project paths,
 even after the session changes into a lane. Lane-only transcript searches miss those sessions.
 
+
+### Builder postmortem accounting
+
+Stream headless JSONL and match the first user message plus the dispatch attempt identity.
+A session slug can be reused across attempts (observed for `conveyor-4341b`); join by
+run/effect ID, worker UUID, implementation repo/lane and timestamps instead. Distinguish
+preparation effects from build attempts: a `b` suffix alone does not prove a failed build.
+Pair tool IDs and union their intervals before subtracting from wall time. Coalesce usage
+by assistant message ID; split known external verify intervals from model/unobserved time
+when a resumed transcript spans the gate. Tool `is_error=false` does not establish green
+tests when output was piped through `tail` or a later report command succeeded. Intended
+mutation RED runs and changed-input reruns are not waste. `lastSeenLiveAt` is not completion,
+and `pr-opened` is not landed. Preserve unknown timings rather than converting them to zero.
+The 2026-09-30 worked example and source offsets are in
+`reports/2026-09-30-builder-postmortem.md`; operational metrics belong in the existing
+`run-rating.mjs` / `run-scorecard-store.mjs` machinery, not a parallel history store.
+
 ## Prepare PR isolation
 
 Prepare-item refs (`lane/<item>-prepare-item-*`) receive a fixed item-specific title from the open-pr producer,
