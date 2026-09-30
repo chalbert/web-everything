@@ -4,7 +4,7 @@
  *   sanctioned `MAIN_PUSH_OK=1` escape passes through. The stdin/JSON I/O is the boundary; `decide` is pure.
  */
 import { describe, it, expect, afterAll } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync, readFileSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import {
@@ -3442,4 +3442,74 @@ describe('#xpt9fvd — the guard-bash CLI protects a clone discovered via the da
   it('ALLOWS the sanctioned overlay CLI invoked with --clone=<path> from a lane', () => {
     expect(runHook(`node scripts/daemon-overlay.mjs add --clone=${fakeClone} --ref=lane/fix`, lane)).toBeNull();
   });
+});
+
+// #4368 — the briefs' documented gate/mid-work commands are parsed out of the markdown and run through the
+// guard, so an edit that makes a brief document a shape the guard denies (or renames the test it cites) reddens
+// here instead of drifting silently. Fail-loud by design: a missing marker/fence/body throws, never skips.
+describe('briefs document commands the guard does not deny (#4368)', () => {
+  const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+  const KINDS = ['build', 'fix', 'ci-heal'];
+  const readBrief = (name) => readFileSync(join(ROOT, 'skills-src', 'conveyor', name), 'utf8');
+
+  /** First ```bash fence after `marker` (a line prefix), as one command with `\` continuations joined. */
+  function extractFenceAfter(markdown, marker, label) {
+    const lines = markdown.split('\n');
+    const at = lines.findIndex((l) => l.startsWith(marker));
+    if (at < 0) throw new Error(`${label}: marker "${marker}" not found in the brief`);
+    const open = lines.findIndex((l, i) => i > at && l.trim() === '```bash');
+    if (open < 0) throw new Error(`${label}: no bash fence follows "${marker}"`);
+    const close = lines.findIndex((l, i) => i > open && l.trim() === '```');
+    if (close < 0) throw new Error(`${label}: bash fence after "${marker}" is unclosed`);
+    const body = lines.slice(open + 1, close).join('\n').replace(/\\\n\s*/g, ' ').trim();
+    if (!body) throw new Error(`${label}: bash fence after "${marker}" is empty`);
+    return body;
+  }
+
+  const MARKER = '**Mid-work check';
+  const extractMidWorkCommand = (md) => extractFenceAfter(md, MARKER, 'mid-work check')
+    .replace(/<touched-file-1>/, 'scripts/guard-bash.mjs')
+    .replace(/<touched-file-2>\s*…/, 'scripts/lib/verify-lane-gate.mjs');
+
+  const brief = readBrief('delivery-agent-brief.md');
+  const cmd = extractMidWorkCommand(brief);
+
+  it("the delivery brief's mid-work command is the admitted wrapper form, not denied for any dispatch kind", () => {
+    expect(cmd.startsWith('node scripts/readiness/heavy-admission.mjs run --')).toBe(true);
+    expect(isAdmittedWrapperRun(cmd)).toBe(true);
+    for (const kind of KINDS) expect(dispatchedAgentVerificationReason(cmd, kind)).toBeNull();
+  });
+  it('the extracted command keeps --run and --passWithNoTests (the guard ignores them)', () => {
+    expect(cmd).toContain('--run');
+    expect(cmd).toContain('--passWithNoTests');
+  });
+  it('dropping the wrapper from the documented command IS denied (mutation proof)', () => {
+    const mutated = cmd.replace('node scripts/readiness/heavy-admission.mjs run -- ', '');
+    for (const kind of KINDS) expect(dispatchedAgentVerificationReason(mutated, kind)).not.toBeNull();
+  });
+  it('the guard test the brief cites by title exists in this file', () => {
+    const flat = brief.replace(/\s+/g, ' ');
+    const m = flat.match(/\*"(.+?)"\*/);
+    expect(m, 'brief no longer cites a guard test title as *"…"*').not.toBeNull();
+    const title = m[1].replace(/`/g, '');
+    const self = readFileSync(fileURLToPath(import.meta.url), 'utf8').replace(/`/g, '');
+    expect(self).toContain(`it('${title}'`);
+  });
+  it('extractMidWorkCommand fails loud on a missing marker, missing fence, unclosed fence, or empty fence', () => {
+    expect(() => extractMidWorkCommand('# nothing here')).toThrow(/not found/);
+    expect(() => extractMidWorkCommand(`${MARKER} x\n\nprose only`)).toThrow(/no bash fence/);
+    expect(() => extractMidWorkCommand(`${MARKER} x\n\`\`\`bash\nnode a`)).toThrow(/unclosed/);
+    expect(() => extractMidWorkCommand(`${MARKER} x\n\`\`\`bash\n\n\`\`\``)).toThrow(/empty/);
+  });
+
+  // #4369 has landed: the fix briefs' step-4 gate fence (request/check) must also pass the guard.
+  for (const name of ['fix-agent-brief.md', 'fix-agent-ci-brief.md']) {
+    it(`${name}'s step-4 gate commands are not denied for any dispatch kind`, () => {
+      const fence = extractFenceAfter(readBrief(name), '### 4. Run the gate GREEN', name)
+        .replaceAll('{{WE_ROOT}}', ROOT);
+      const cmds = fence.split('\n').map((l) => l.replace(/\s+#.*$/, '').trim()).filter(Boolean);
+      expect(cmds.length).toBeGreaterThan(0);
+      for (const c of cmds) for (const kind of KINDS) expect(dispatchedAgentVerificationReason(c, kind)).toBeNull();
+    });
+  }
 });
