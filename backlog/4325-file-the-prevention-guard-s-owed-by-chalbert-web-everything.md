@@ -3,9 +3,10 @@ bornAs: xfbqcsu
 kind: story
 size: 3
 parent: "4075"
-status: open
+status: active
 scope: ["we:scripts/conveyor/health-smells/ghost-sessions-inflate-cap.mjs", "we:scripts/operations/deliver-item-wrapper.mjs", "we:scripts/conveyor/health-smells/__tests__/ghost-sessions-inflate-cap.test.mjs", "we:scripts/operations/__tests__/deliver-item-wrapper.test.mjs"]
 dateOpened: "2026-09-27"
+dateStarted: "2026-09-30"
 preparedDate: "2026-09-30"
 preparedAgainstSha: "3875062efca5bc31599ffb24f3ee315b5c2d9bcc"
 tags: []

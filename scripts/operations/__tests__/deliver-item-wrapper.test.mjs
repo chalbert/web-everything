@@ -108,6 +108,7 @@ import {
   // #4348-open-pr-retry
   classifyOpenPrFailure,
 } from '../deliver-item-wrapper.mjs';
+import { REPO_ROOT } from '../minimal-context-provider.mjs';
 import { repoProfile } from '../../lib/repo-profile.mjs';
 // #4349 — real (never mocked) run-store + build-dispatch-claim reads, driven through a temp `OPERATION_RUNS_DIR`
 // / `WE_COORDINATION_ROOT` in the new describe block below.
@@ -2555,6 +2556,22 @@ describe('openPr (#3627 bug 1 — the real slug, never the literal <slug> placeh
     expect(JSON.parse(run.mock.calls[0][2].env.WE_BUILD_PR_CONTEXT)).toEqual({
       runId: 'dispatch-lane-build', key: 'dispatch:0:0', dir: expect.any(String),
     });
+  });
+
+  it.each([
+    [{ mode: 'label-on-green' }, ['--mode=label-on-green']],
+    [{ mode: 'park', label: 'review:human' }, ['--mode=park', '--parkLabel=review:human']],
+  ])('passes the exact argv and cwd to run (%j)', (park, modeArgs) => {
+    const run = vi.fn(() => openPrEnvelope({ outcome: 'opened', pr: 5 }));
+    openPr({ item: '4325', attemptTag: '', lane, park, report: { reason: 'x', filesTouched: [] }, slug: 'x' }, { run });
+    expect(run).toHaveBeenCalledTimes(1);
+    const [cmd, args, opts] = run.mock.calls[0];
+    expect(cmd).toBe('node');
+    expect(args).toEqual([
+      `${REPO_ROOT}scripts/operations/run.mjs`, 'open-pr', '--ref=lane/4325-x', '--sha=HEAD', '--base=main',
+      `--bodyFile=${join(lane, '.pr-body.md')}`, '--requireVerified=true', '--json', ...modeArgs,
+    ]);
+    expect(opts.cwd).toBe(lane);
   });
 
   it('refuses (throws a named error) rather than opening a PR with no real slug', () => {
