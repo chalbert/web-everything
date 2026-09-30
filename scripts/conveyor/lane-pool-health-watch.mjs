@@ -459,7 +459,7 @@ function healthWatchActor() {
 }
 
 /**
- * #4370 — PURE: whois rows for lanes with a LIVE worker (a `claude agents` hit by cwd or ledger session) but
+ * #4370 — PURE: whois rows for lanes with a RUNNING worker (a `claude agents` hit by cwd or ledger session that is actually running, not merely listed — #4544) but
  * NO lease — the lane-21 shape (the reaper released it four times while its worker kept building). Lane
  * numbers only, so the health probe can lift it off this tick's JSON line with a flat regex.
  * @param {{lanes?: Array<object>}|null} whois
@@ -467,7 +467,7 @@ function healthWatchActor() {
  */
 export function workersWithoutLease(whois) {
   return (whois && Array.isArray(whois.lanes) ? whois.lanes : [])
-    .filter((row) => row && row.exists && !row.lease && row.liveOwner === true)
+    .filter((row) => row && row.exists && !row.lease && row.liveWorker === true)
     .map((row) => row.lane);
 }
 

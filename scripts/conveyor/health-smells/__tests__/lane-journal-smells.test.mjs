@@ -22,13 +22,14 @@ beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'lane-journal-smells-')); })
 afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
 
 describe('lane-worker-without-lease', () => {
-  it('workersWithoutLease picks unleased lanes with a live owner only', () => {
+  it('workersWithoutLease picks unleased lanes with a running worker only (#4544)', () => {
     expect(workersWithoutLease({
       lanes: [
-        { lane: 21, exists: true, lease: null, liveOwner: true },
-        { lane: 22, exists: true, lease: { session: 's' }, liveOwner: true },
-        { lane: 23, exists: true, lease: null, liveOwner: false },
+        { lane: 21, exists: true, lease: null, liveOwner: true, liveWorker: true },
+        { lane: 22, exists: true, lease: { session: 's' }, liveOwner: true, liveWorker: true },
+        { lane: 23, exists: true, lease: null, liveOwner: false, liveWorker: false },
         { lane: 24, exists: false },
+        { lane: 25, exists: true, lease: null, liveOwner: true, liveWorker: false },
       ],
     })).toEqual([21]);
     expect(workersWithoutLease(null)).toEqual([]);

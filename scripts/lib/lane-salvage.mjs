@@ -97,18 +97,24 @@ export function parseLsofCwds(text) {
   return out;
 }
 
-/** PURE: does any not-finished `claude agents` entry belong to this lane — its session is one of `sessionIds`,
- *  or its cwd is the lane or anywhere inside it (a `.claude/worktrees/<x>` agent counts)? An entry with no
- *  state at all counts as live: only an explicit terminal state proves a session finished. */
-export function liveAgentInLane(agents, dir, sessionIds = []) {
+/** PURE: the not-finished `claude agents` entries that belong to this lane — the session is one of `sessionIds`,
+ *  or its cwd is the lane or anywhere inside it (a `.claude/worktrees/<x>` agent counts). An entry with no
+ *  state at all is kept: only an explicit terminal state proves a session finished. The ONE match rule shared by
+ *  {@link liveAgentInLane} (fail-safe) and whois's stricter `liveWorker` (#4544). */
+export function agentsInLane(agents, dir, sessionIds = []) {
   const DONE = new Set(['done', 'failed', 'stopped', 'completed', 'killed']);
   const root = resolve(dir);
   const ids = new Set(sessionIds.filter(Boolean));
-  return (Array.isArray(agents) ? agents : []).some((a) => {
+  return (Array.isArray(agents) ? agents : []).filter((a) => {
     if (!a || DONE.has(a.state)) return false;
     const cwd = typeof a.cwd === 'string' ? resolve(a.cwd) : '';
     return ids.has(a.sessionId) || cwd === root || cwd.startsWith(root + sep);
   });
+}
+
+/** PURE: does any not-finished `claude agents` entry belong to this lane? Fail-safe: a merely-listed entry counts. */
+export function liveAgentInLane(agents, dir, sessionIds = []) {
+  return agentsInLane(agents, dir, sessionIds).length > 0;
 }
 
 /** `claude agents --json`, FAIL-CLOSED: `null` when it cannot be read (callers then refuse to salvage). */

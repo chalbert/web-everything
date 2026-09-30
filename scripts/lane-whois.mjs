@@ -50,7 +50,22 @@ import { guardedPoolRoot } from './lib/lane-pool-paths.mjs';
 import { LEASE_FILENAME, isLeaseStale, describeLease, laneHolderSlug, DEFAULT_LEASE_TTL_MINUTES } from './lib/lane-lease.mjs';
 import { readLaneHistory, lastLaneHistoryEntry, readLaneJournal } from './lib/lane-history.mjs';
 import { claudeProjectsRoot, scanLaneTranscripts, summarizeLaneTouches } from './lib/lane-transcript-attribution.mjs';
-import { liveAgentInLane } from './lib/lane-salvage.mjs';
+import { liveAgentInLane, agentsInLane } from './lib/lane-salvage.mjs';
+
+// #4544 — the `claude agents --json` vocabulary for "actually running", observed on a live host: background
+// sessions carry `state: "working"`; interactive ones carry `status: "busy"` (an idle one is `status: "idle"`,
+// with no `state`). Anything else — absent, idle, unknown — is merely LISTED, not a worker.
+const RUNNING_STATES = new Set(['working']);
+const RUNNING_STATUSES = new Set(['busy']);
+/** A running entry that exposes a last-activity time is stale (hung) once it is older than this. */
+export const WORKER_ACTIVE_WINDOW_MS = 10 * 60_000;
+
+/** PURE: is this listed agent entry actually running (explicit running state, and recently active when it says when)? */
+export function isRunningAgent(a, nowMs = Date.now(), windowMs = WORKER_ACTIVE_WINDOW_MS) {
+  if (!a || !(RUNNING_STATES.has(a.state) || RUNNING_STATUSES.has(a.status))) return false;
+  const at = [a.lastActivityAt, a.updatedAt].find((t) => Number.isFinite(t));
+  return at === undefined || nowMs - at <= windowMs;
+}
 import {
   guessCardIds, classifyLaneVerdict, holderPresumedAlive, prsMatchingCard, keepMarkerApplies, formatLaneTimeline,
 } from './lib/lane-whois-core.mjs';
@@ -404,6 +419,10 @@ export function whoisForLane({
   // correctly saw it as live (2026-09-28 evidence, lane-18).
   const liveOwner = liveAgentInLane(agents, dir, [lease?.ownerSession, last?.ownerSession, last?.workerSession, last?.session]);
   const holderAlive = leaseTtlAlive || liveOwner;
+  // #4544 — STRICTER than `liveOwner` (alert polarity: a false positive is noise): the matched session must be
+  // actually running, not merely listed. `liveOwner`/`holderAlive` stay fail-safe for the reclaim gates.
+  const liveWorker = agentsInLane(agents, dir, [lease?.ownerSession, last?.ownerSession, last?.workerSession, last?.session])
+    .some((a) => isRunningAgent(a, nowMs));
 
   const { trackedModifiedPaths, untrackedPaths } = gitStatusSummary(dir);
   const dirtyPaths = [...trackedModifiedPaths, ...untrackedPaths];
@@ -467,6 +486,7 @@ export function whoisForLane({
     lease: lease ? { ...lease, describe: describeLease(lease), holder: laneHolderSlug(lease) } : null,
     holderAlive,
     liveOwner,
+    liveWorker,
     lastHolder: last || (bestAttribution ? {
       source: 'transcript-attribution',
       sessionId: bestAttribution.sessionId,
@@ -572,7 +592,7 @@ function printReport(report) {
   for (const row of report.lanes) {
     if (!row.exists) { console.log(`lane-${row.lane}: (missing)`); continue; }
     console.log(`\nlane-${row.lane}  [${row.verdict}] — ${row.reason}`);
-    console.log(`  lease: ${row.lease ? row.lease.describe : '(none)'}${row.holderAlive ? ' — holder ALIVE' : ''}${row.liveOwner ? ' (live session found)' : ''}`);
+    console.log(`  lease: ${row.lease ? row.lease.describe : '(none)'}${row.holderAlive ? ' — holder ALIVE' : ''}${row.liveOwner ? ' (live session found)' : ''}${row.liveWorker ? ' (running)' : ''}`);
     if (row.lastHolder) {
       if (row.lastHolder.event) {
         console.log(`  last holder (ledger): ${row.lastHolder.event} @ ${row.lastHolder.ts} session=${row.lastHolder.session || row.lastHolder.ownerSession || '?'}${row.lastHolder.item ? ` item=${row.lastHolder.item}` : ''}${row.lastHolder.pr ? ` pr=${row.lastHolder.pr}` : ''}`);

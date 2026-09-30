@@ -3,9 +3,10 @@ bornAs: xx0x4zv
 kind: story
 size: 2
 tier: pinned
-status: open
+status: active
 scope: ["we:scripts/lane-whois.mjs", "we:scripts/conveyor/health-smells/lane-worker-without-lease.mjs", "we:scripts/conveyor/lane-pool-health-watch.mjs"]
 dateOpened: "2026-09-29"
+dateStarted: "2026-09-29"
 preparedDate: "2026-09-29"
 preparedAgainstSha: "b1a4328ada9e8b0de9bf553460896a89e127bb2b"
 tags: []

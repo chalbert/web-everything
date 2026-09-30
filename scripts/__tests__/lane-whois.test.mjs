@@ -231,6 +231,45 @@ describe('lane-whois — AFTER', () => {
     expect(report.lanes[0].holderAlive).toBe(true);
   });
 
+  // #4544 — `liveOwner` stays fail-safe (any listed entry), but `liveWorker` is true only for a RUNNING session.
+  const whoisWithListing = (sess, entry) => {
+    expect(runPool(['acquire', '--lane=1', `--session=${sess}`, ...poolArgs()]).code).toBe(0);
+    expect(runPool(['release', '--lane=1', `--session=${sess}`, ...poolArgs()]).code).toBe(0);
+    writeFileSync(join(binDir, 'claude'), `#!/bin/sh\necho '[${JSON.stringify({ sessionId: sess, cwd: lanePath(1), ...entry })}]'\n`);
+    chmodSync(join(binDir, 'claude'), 0o755);
+    const r = runWhois(['--lane=1', '--json', `--repo=${referenceDir}`, '--name=whoispool', `--pool-root=${poolRoot}`]);
+    expect(r.code).toBe(0);
+    return JSON.parse(r.out).lanes[0];
+  };
+
+  it('liveWorker is false for a listed but idle session, while liveOwner stays true (#4544)', () => {
+    const row = whoisWithListing('sess-i', { status: 'idle' });
+    expect(row.liveOwner).toBe(true);
+    expect(row.liveWorker).toBe(false);
+  });
+
+  it('liveWorker is true for a working background session (#4544)', () => {
+    expect(whoisWithListing('sess-w', { state: 'working' }).liveWorker).toBe(true);
+  });
+
+  it('liveWorker is true for a busy interactive session (#4544)', () => {
+    expect(whoisWithListing('sess-bz', { status: 'busy' }).liveWorker).toBe(true);
+  });
+
+  it('liveWorker is false for a working entry whose last activity is older than the window (#4544)', () => {
+    const row = whoisWithListing('sess-h', { state: 'working', lastActivityAt: Date.now() - 60 * 60_000 });
+    expect(row.liveOwner).toBe(true);
+    expect(row.liveWorker).toBe(false);
+  });
+
+  it('liveWorker is false for an entry with no state or an unknown state, while liveOwner is true (#4544)', () => {
+    for (const [sess, entry] of [['sess-n', {}], ['sess-u', { state: 'mystery' }]]) {
+      const row = whoisWithListing(sess, entry);
+      expect(row.liveOwner).toBe(true);
+      expect(row.liveWorker).toBe(false);
+    }
+  });
+
   it('an UNLEASED lane with NO live agent reports liveOwner:false (unchanged default)', () => {
     expect(runPool(['acquire', '--lane=1', '--session=sess-c', ...poolArgs()]).code).toBe(0);
     expect(runPool(['release', '--lane=1', '--session=sess-c', ...poolArgs()]).code).toBe(0);
