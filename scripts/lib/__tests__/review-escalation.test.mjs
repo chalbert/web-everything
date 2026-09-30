@@ -2759,7 +2759,7 @@ describe('deviation disclosure (#4502)', () => {
   it('deviation: parses only a first non-blank line `Deviation: <text>`', () => {
     expect(parseDev('Deviation: x')).toBe('x');
     expect(parseDev('Deviation: x  \r\nrest')).toBe('x');
-    expect(parseDev('﻿\n\nDeviation: x')).toBe('x');
+    expect(parseDev('\uFEFF\n\nDeviation: x')).toBe('x');
     expect(parseDev('intro\nDeviation: x')).toBeNull();
     expect(parseDev('```\nDeviation: x\n```')).toBeNull();
     expect(parseDev('Deviation:   ')).toBeNull();

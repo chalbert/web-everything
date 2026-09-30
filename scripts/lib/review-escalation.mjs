@@ -759,11 +759,12 @@ export function scoreEscalation({
   const markedFiles = filesWith('marked-invariant').map((x) => x.file);
   const derivationFiles = gateBasis.filter(isPolicyDerivationPath);
   // @invariant human-gate-is-principle-surface (#human-is-principle-surface-not-path) — humanRequired fires ONLY when isPrincipleSurface says so; never re-add a bare path term
-  let humanRequired = gateBasis.some((f) => isPrincipleSurface(f, fileHunksOf(f)));
+  const humanRequired = gateBasis.some((f) => isPrincipleSurface(f, fileHunksOf(f)));
+  let humanForced = humanRequired;
   // #4502 — a disclosed rule deviation forces the human park regardless of file signals; the text rides
   // `reasons` verbatim so the #2324 body block and park comment quote it with no new comment path.
   if (typeof deviation === 'string' && deviation !== '') {
-    humanRequired = true;
+    humanForced = true;
     reasons.push(`worker disclosed a rule deviation: ${deviation}`);
     signals.deviation = deviation;
   }
@@ -829,7 +830,7 @@ export function scoreEscalation({
   // #2567 — the advisory CARE-LEVEL, derived from the same signals. ADDITIVE: existing callers that only read
   // escalate/humanRequired/reasons/signals are unchanged; the care-level is the new advisory dial (it tells the
   // AI panel how hard to look — `panelRigorForCareLevel` — and never changes route or land).
-  const careLevel = deriveCareLevel({ signals, humanRequired });
+  const careLevel = deriveCareLevel({ signals, humanRequired: humanForced });
 
   // #2890 — passthrough, not a signal: `producerReviewLabel(score)` and any other caller that receives this
   // verdict object gets `diffHunks` for free, without a second signature change, once a future detector reads it.
@@ -848,7 +849,7 @@ export function scoreEscalation({
   // #2635 roster recompute) can select over the SAME honest basis this scored, instead of the own-delta.
   // #3343 — `basisUntrusted` rides the verdict so a consumer (and the human who has to clear a `review:human`)
   // can tell a verdict scored on the PR's own file set from one scored on the base tip. Never a permission.
-  return { escalate: reasons.length > 0, humanRequired, careLevel, reasons, signals, basisFiles, basisUntrusted, diffHunks: hunks, diffHunksBasisFiles };
+  return { escalate: reasons.length > 0, humanRequired: humanForced, careLevel, reasons, signals, basisFiles, basisUntrusted, diffHunks: hunks, diffHunksBasisFiles };
 }
 
 /**
