@@ -3,9 +3,10 @@ bornAs: xp83iru
 kind: story
 size: 5
 tier: pinned
-status: open
+status: resolved
 scope: ["we:scripts/merge-ai-prs.mjs", "we:scripts/lib/gh-throttle.mjs", "we:scripts/lib/__tests__/gh-throttle.test.mjs"]
 dateOpened: "2026-09-30"
+dateResolved: "2026-09-30"
 preparedDate: "2026-09-30"
 preparedAgainstSha: "4d568dec4b66cde77cd794ad679de3fb7caffa12"
 tags: []
