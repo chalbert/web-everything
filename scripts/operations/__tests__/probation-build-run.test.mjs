@@ -66,7 +66,7 @@ function fakeIo({
   itemScope = ['we:backlog-docs/probation.md'],
   lane = '/lanes/22', item = { path: 'backlog/4291-probation-launcher.md', slug: 'probation-launcher', title: 'Probation launcher', spec: '## Done when\n\n1. it works.', raw: ITEM_RAW, scope: itemScope },
   claimOk = true, numstat = '1\t20\tbacklog-docs/probation.md', gate = true, resolveOk = true, openPr: openPrResult = { ok: true, pr: 9001, url: 'https://x/9001' },
-  throwOn = null, postWorkerSpec = null, postWorkerRaw = null, claimTamperedRaw = null, runWorkerOk = true,
+  throwOn = null, postWorkerSpec = null, postWorkerRaw = null, claimTamperedRaw = null, runWorkerOk = true, lastMessage = undefined,
   headShaSequence = null, throwOnHeadShaCall = null, hookResetClean = true, hookTampered = false, tamperRestoreClean = true,
 } = {}) {
   const calls = [];
@@ -95,7 +95,9 @@ function fakeIo({
     // `throwOnHeadShaCall` (e.g. `2`) throws on that ONE call only — the post-claim read after a successful claim.
     headSha: () => { boom('headSha'); headShaCalls += 1; if (headShaCalls === throwOnHeadShaCall) throw new Error('headSha exploded'); return headShaSequence ? headShaSequence[headShaCalls - 1] ?? headShaSequence.at(-1) : 'base-sha'; },
     writeTaskFile: (_d, name, text) => { calls.push(['task', name, text.length > 0]); return `/lanes/22/.git/${name}`; },
-    runWorker: (argv) => { boom('runWorker'); calls.push(['worker', argv[0], argv.find((a) => a.startsWith('--model='))]); return { ok: runWorkerOk, out: runWorkerOk ? '' : 'timed out' }; },
+    runWorker: (argv) => { boom('runWorker'); calls.push(['worker', argv[0], argv.find((a) => a.startsWith('--model='))]); return { ok: runWorkerOk, out: runWorkerOk ? '' : 'timed out', lastMessage }; },
+    holdWorkerDecline: (entry) => { boom('holdWorkerDecline'); calls.push(['hold', entry]); },
+    writeCard: (_dir, path, text) => { boom('writeCard'); calls.push(['card', path, text]); },
     untracked: () => ['node_modules'],
     diffNumstat: (_d, _base, exclude) => { calls.push(['numstat', exclude]); return numstat; },
     discardChanges: (_d, base) => calls.push(['discard', base]),
@@ -170,12 +172,61 @@ describe('runProbationBuild — the arc', () => {
     expect(calls.some((c) => c[0] === 'scorecard')).toBe(false);
   });
 
-  it('the worker changes nothing → not-applicable, the claim is undone by a reset, one launch row', async () => {
-    const { io, calls } = fakeIo({ numstat: '' });
+  it.each([
+    'Target files exist only on lane/mechanical-dispatcher; porting them exceeds the bugfix envelope.',
+    undefined,
+    '   ',
+  ])('no change records the reason (%s), routes the hold and opens a card-only PR', async (lastMessage) => {
+    const { io, calls } = fakeIo({ numstat: '', lastMessage });
     const r = await runProbationBuild(args(), io);
-    expect(r.outcome).toBe('not-applicable');
-    expect(calls.some((c) => c[0] === 'discard')).toBe(true);
-    expect(calls.find((c) => c[0] === 'scorecard')).toBeTruthy();
+    const reason = lastMessage?.trim() || 'The worker changed nothing and provided no final message.';
+    expect(r).toMatchObject({ outcome: 'opened-pr', pr: 9001 });
+    expect(r.detail).toContain(reason);
+    expect(calls.find((c) => c[0] === 'hold')?.[1]).toEqual({ num: '4291', route: 'out-of-scope', commit: null, reason: `worker-declined: ${reason}` });
+    const card = calls.find((c) => c[0] === 'card')?.[2];
+    expect(card).toContain('## Findings (standalone worker, ');
+    expect(card).toContain(`> worker-declined: ${reason}`);
+    expect(card).toContain('status: open');
+    expect(card).not.toMatch(/^scope:/m);
+    expect(calls.find((c) => c[0] === 'commit')?.[1]).toEqual(['backlog/4291-probation-launcher.md']);
+    expect(calls.some((c) => ['discard', 'resolve'].includes(c[0]))).toBe(false);
+    expect(calls.filter((c) => c[0] === 'scorecard')).toHaveLength(1);
+    // Once the routed card lands, a fresh standalone attempt skips it until it is re-scoped.
+    const retry = fakeIo({ itemScope: [] });
+    expect((await runProbationBuild(args(), retry.io)).outcome).toBe('not-applicable');
+    expect(retry.calls.some((c) => c[0] === 'worker')).toBe(false);
+  });
+
+  it('bounds and quotes a decline, without treating a cited commit as proof of delivery', async () => {
+    const { io, calls } = fakeIo({ numstat: '', lastMessage: 'spec already done on main: commit abc1234\n<script>`' + 'x'.repeat(900) });
+    const r = await runProbationBuild(args(), io);
+    const reason = calls.find((c) => c[0] === 'hold')[1].reason;
+    expect(reason.length).toBe(617); // prefix + 600-character excerpt
+    expect(reason).not.toMatch(/[\n<`]/);
+    expect(reason).toContain('…');
+    expect(r.detail).toContain(reason);
+    expect(calls.some((c) => c[0] === 'resolve')).toBe(false);
+  });
+
+  it.each(['holdWorkerDecline', 'writeCard', 'commit'])('reports failed decline persistence at %s with its reason', async (throwOn) => {
+    const { io, calls } = fakeIo({ numstat: '', lastMessage: 'Wrong target branch.', throwOn });
+    const r = await runProbationBuild(args(), io);
+    expect(r.outcome).toBe('escalated-needs-human');
+    expect(r.detail).toContain('Wrong target branch.');
+    expect(calls.some((c) => c[0] === 'openPr')).toBe(false);
+  });
+
+  it('a failed decline PR preserves the gated card commit and reports the reason', async () => {
+    const { io, calls } = fakeIo({ numstat: '', lastMessage: 'Wrong target.', openPr: { ok: false, reason: 'PR refused' } });
+    const r = await runProbationBuild(args(), io);
+    expect(r).toMatchObject({ outcome: 'escalated-needs-human', detail: expect.stringContaining('Wrong target.') });
+    expect(calls.some((c) => c[0] === 'discard')).toBe(false);
+  });
+
+  it('rejects card tampering even when there is no implementation diff', async () => {
+    const { io, calls } = fakeIo({ numstat: '', postWorkerRaw: ITEM_RAW.replace('open', 'resolved') });
+    expect((await runProbationBuild(args(), io)).outcome).toBe('escalated-needs-human');
+    expect(calls.some((c) => c[0] === 'hold')).toBe(false);
   });
 
   it('a build bigger than the doc-fix envelope is discarded, never resolved', async () => {
@@ -631,5 +682,23 @@ describe('test-fix build (#4551)', () => {
     expect((await runProbationBuild(input, mixed.io)).outcome).toBe('gate-red');
     expect(mixed.calls.some((c) => c[0] === 'discard')).toBe(true);
     expect(mixed.calls.some((c) => c[0] === 'commit')).toBe(false);
+  });
+});
+
+
+describe('standalone final report capture', () => {
+  it.each([
+    { lastMessage: 'Codex declined: wrong target branch.' },
+    { events: { finalResponse: 'Gemini declined: wrong target branch.' } },
+  ])('parses the whole launcher report before truncating diagnostic output', (report) => {
+    const dir = mkdtempSync(join(tmpdir(), 'worker-report-'));
+    try {
+      const script = join(dir, 'report.mjs');
+      writeFileSync(script, `console.log(${JSON.stringify(JSON.stringify({ ...report, padding: 'x'.repeat(5000) }))});`);
+      const result = realIo({ session: 'test' }).runWorker([script], dir);
+      expect(result.ok).toBe(true);
+      expect(result.lastMessage).toBe(report.lastMessage ?? report.events.finalResponse);
+      expect(result.out).toHaveLength(4000);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 });

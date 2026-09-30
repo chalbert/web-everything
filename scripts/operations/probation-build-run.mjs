@@ -13,6 +13,8 @@
  *     1. claim the item in the lane (`we:scripts/backlog.mjs claim`);
  *     2. run the worker SYNCHRONOUSLY through its launcher (`gemini-direct-task.mjs` / `codex-direct-task.mjs`,
  *        both foreground-blocking by design) against the item's own spec text;
+ *     No-change runs route worker-declined through the hold router: attach a Findings note, remove scope
+ *     for preparation, and land only the card through the same verified, parked PR path (never resolve).
  *     3. bound the build diff to the selected taskType's envelope (`we:scripts/lib/provider-routing.mjs#PROVEN_TASK_ENVELOPES`);
  *     4. resolve the item (`we:scripts/operations/run.mjs resolve`) and commit everything — the worker's files
  *        plus the item's own now-resolved backlog card — in ONE commit, trailers naming the worker;
@@ -66,7 +68,7 @@
 
 import { randomBytes } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import matter from 'gray-matter';
@@ -79,10 +81,15 @@ import {
   buildCheckerArgv, parseCheckerVerdict, buildDocFixCommitMessage, buildDocFixTask, buildWorkerArgv, frontmatterTamperedBeyondClaim,
   healDiffWithinEnvelope, launchScorecardRow, newUntrackedPaths, summarizeNumstat,
 } from '../lib/probation-launcher.mjs';
+import { defaultPoolRoot, workspaceFor } from '../lib/lane-pool-paths.mjs';
+import { daemonCloneRoots, isDaemonCloneRealpath } from '../lib/daemon-clone-registry.mjs';
+import { placeBuildDispatchHold } from '../conveyor/build-dispatch-claim.mjs';
+import { planHoldRouting, reserveHoldRoute } from '../conveyor/build-dispatch-hold-router.mjs';
+import { clearScopeAndAppendFinding, sanitizeHoldReason } from './build-dispatch-hold-route-land.mjs';
 import { extractSubmitResult } from './open-pr.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-/** The WE checkout every tool is resolved from — by script location, never cwd. */
+/** Read-only launch checkout and pool reference — by script location, never cwd. */
 export const WE_ROOT = resolve(HERE, '..', '..');
 const REPO_SLUG = CONSTELLATION_REPOS[DEFAULT_REPO_KEY].slug;
 const GATE_TIMEOUT_MS = 20 * 60 * 1000;
@@ -196,6 +203,7 @@ export async function runProbationBuild(args, io) {
   if (!['doc-fix', 'bugfix', 'test-fix'].includes(taskType)) throw new Error('taskType must be doc-fix or bugfix or test-fix');
   if (!num || !session || !worker?.id) throw new Error('probation-build-run: --num, --session and --worker are required');
   const log = (m) => io.log(`probation-build-run #${num} [${worker.id}]: ${m}`);
+  let declinedReason = null;
   const finish = (outcome, executor, detail, row = {}) => {
     // One `probation-launch` row per build the WORKER actually ran — an item that could never be claimed or
     // found is not a trial of it.
@@ -204,6 +212,7 @@ export async function runProbationBuild(args, io) {
         worker: { ...worker, taskType }, checker: checkerRow, pr: row.pr ?? null, repo: REPO_SLUG, handle: session, item: num, launchOutcome: outcome, diff: row.diff ?? null,
       }));
     }
+    if (declinedReason) detail = `worker-declined: ${declinedReason} — ${detail}`;
     log(`${outcome} — ${detail}`);
     return { outcome, executor, pr: row.pr ?? null, detail };
   };
@@ -315,7 +324,7 @@ export async function runProbationBuild(args, io) {
     const taskFile = io.writeTaskFile(lanePath, 'probation-build-task.md', task);
     const preHookSurface = hookReset.snapshot;
     log(`running ${worker.launcher} --model=${worker.model}`);
-    const run = io.runWorker(buildWorkerArgv({ worker, weRoot: WE_ROOT, dir: lanePath, taskFile }));
+    const run = io.runWorker(buildWorkerArgv({ worker, weRoot: lanePath, dir: lanePath, taskFile }), lanePath);
     workerRan = true;
     // x55dojc — checked BEFORE the `run.ok` gate below on purpose: even a worker that crashed or timed out
     // could have planted a hook before it did, so this must never be skipped just because the run itself
@@ -336,34 +345,6 @@ export async function runProbationBuild(args, io) {
 
     const summary = summarizeNumstat(io.diffNumstat(lanePath, baseSha, excludeFromDiff), { exclude: excludeFromDiff });
     const diffRow = { files: summary.files, loc: summary.loc };
-    if (!summary.files) return abandon('not-applicable', 'the worker changed nothing', { diff: diffRow });
-
-    // #4291 plan-review finding (security) — a doc-fix worker is TOLD to touch documentation only, but nothing
-    // upstream enforces it: a hostile or mistaken spec could steer it into a test/config/CI file that still fits
-    // the tiny envelope. Every path it actually touched (never `item.path` — checked separately below, because
-    // a `.md` backlog card would otherwise pass this exact check too) must be a documentation path.
-    const nonDocPaths = summary.paths.filter((p) => !isDocScopePath(p));
-    if (taskType === 'doc-fix' && nonDocPaths.length) {
-      return abandon('gate-red', `not built: touched non-documentation path(s) — a doc-fix worker may edit documentation only: ${nonDocPaths.join(', ')}`, { diff: diffRow });
-    }
-    // #4291 plan-review finding (security, rounds 4-7) — `isDocScopePath` accepts ANY `.md`/`docs/` path, which
-    // is too wide on its own (round 5 named `CLAUDE.md`, round 6 named `GEMINI.md` against an earlier denylist
-    // fallback that no longer exists — see the "no declared scope" refusal above). The ALLOWLIST is the item's
-    // own declared `scope:`, guaranteed non-empty by that refusal: the worker may touch ONLY the paths the item
-    // itself names.
-    // An empty `--scope` is a whole-clone lease (lane-pool's own meaning), not deny-all — the card alone bounds it.
-    // Gated on the RAW `--scope`: a lease naming only other repos' paths filters to `[]` but is still a lease.
-    const outOfScopePaths = summary.paths.filter((p) => !pathInScope(p, scopeEntries) || ((args.scope ?? []).length > 0 && !pathInScope(p, leasedEntries)));
-    if (outOfScopePaths.length) {
-      return abandon('gate-red', `not built: touched path(s) outside the item's own declared scope — a probation worker may edit only what the item names: ${outOfScopePaths.join(', ')}`, { diff: diffRow });
-    }
-
-    if (summary.paths.some(isStatuteTierPath)) {
-      return abandon('gate-red', 'not built: statute-tier paths are refused', { diff: diffRow });
-    }
-    const fits = healDiffWithinEnvelope(summary, PROVEN_TASK_ENVELOPES[taskType]);
-    if (!fits.ok) return abandon('gate-red', `not built: ${fits.reason}`, { diff: diffRow });
-
     // #4291 plan-review finding (correctness/security) — `item.path` is excluded from the diff/envelope above
     // (it is the CLAIM's own bookkeeping, not the worker's change), which means a worker that rewrites the
     // item's own file directly — disobeying "do not resolve the backlog item" — would otherwise be invisible
@@ -372,29 +353,64 @@ export async function runProbationBuild(args, io) {
     // #4291 advisory finding (codex-correctness) — compared byte for byte against the POST-CLAIM read, never the
     // pre-claim one with the claim-owned keys allowed: those keys may change through `claim`, not through the
     // worker, so a worker forging `status:`/`dateStarted:` is tamper too.
+    // Check the excluded card even on a no-change run.
     const postWorkerItem = io.findItem(num, lanePath);
     if (postWorkerItem?.spec !== item.spec || postWorkerItem?.raw !== afterClaim?.raw) {
-      return abandon('escalated-needs-human', 'not built: the worker edited the item\'s own backlog card — refusing', { diff: diffRow });
+      return abandon('escalated-needs-human', "not built: the worker edited the item's own backlog card — refusing", { diff: diffRow });
     }
-
-    if (worker.checker) {
-      const checkerTask = io.writeTaskFile(lanePath, 'probation-build-check.md', [
-        `Check this ${taskType} against its spec. Answer APPROVE or REJECT on the first line, then reasons.`,
-        'Reject scope creep, weakened tests, incorrect fixes, or work that is not simple and mechanical.',
-        item.spec, io.diffText(lanePath, baseSha),
-      ].join('\n\n'));
-      const verdict = parseCheckerVerdict(io.runChecker(buildCheckerArgv({ checker: worker.checker, weRoot: WE_ROOT, dir: lanePath, taskFile: checkerTask })));
-      checkerRow = { provider: worker.checker, verdict: verdict.verdict, reason: verdict.reason };
-      const checkerHooks = hookSurfaceChanged(postHookSurface, io.snapshotHookSurface(lanePath));
-      if (checkerHooks.changed) {
-        if (!io.resetHookSurface(lanePath, preHookSurface).clean) baseSha = null;
-        return abandon('escalated-needs-human', `refused: checker changed the git-hook surface: ${checkerHooks.reason}`, { diff: diffRow });
+    if (!summary.files) {
+      declinedReason = sanitizeHoldReason(run.lastMessage, { max: 600 })
+        || 'The worker changed nothing and provided no final message.';
+      const [route] = planHoldRouting([{ num, reason: `worker-declined: ${declinedReason}` }]);
+      io.holdWorkerDecline(route);
+      // Start from the pre-claim card: this is a finding, never a resolved build or abandoned active claim.
+      io.writeCard(lanePath, item.path, clearScopeAndAppendFinding(item.raw, route));
+    } else {
+      // #4291 plan-review finding (security) — a doc-fix worker is TOLD to touch documentation only, but nothing
+      // upstream enforces it: a hostile or mistaken spec could steer it into a test/config/CI file that still fits
+      // the tiny envelope. Every path it actually touched (never `item.path` — checked separately below, because
+      // a `.md` backlog card would otherwise pass this exact check too) must be a documentation path.
+      const nonDocPaths = summary.paths.filter((p) => !isDocScopePath(p));
+      if (taskType === 'doc-fix' && nonDocPaths.length) {
+        return abandon('gate-red', `not built: touched non-documentation path(s) — a doc-fix worker may edit documentation only: ${nonDocPaths.join(', ')}`, { diff: diffRow });
       }
-      if (!verdict.approved) return abandon('gate-red', `the ${worker.checker} checker did not approve: ${verdict.reason}`, { diff: diffRow });
-    }
+      // #4291 plan-review finding (security, rounds 4-7) — `isDocScopePath` accepts ANY `.md`/`docs/` path, which
+      // is too wide on its own (round 5 named `CLAUDE.md`, round 6 named `GEMINI.md` against an earlier denylist
+      // fallback that no longer exists — see the "no declared scope" refusal above). The ALLOWLIST is the item's
+      // own declared `scope:`, guaranteed non-empty by that refusal: the worker may touch ONLY the paths the item
+      // itself names.
+      // An empty `--scope` is a whole-clone lease (lane-pool's own meaning), not deny-all — the card alone bounds it.
+      // Gated on the RAW `--scope`: a lease naming only other repos' paths filters to `[]` but is still a lease.
+      const outOfScopePaths = summary.paths.filter((p) => !pathInScope(p, scopeEntries) || ((args.scope ?? []).length > 0 && !pathInScope(p, leasedEntries)));
+      if (outOfScopePaths.length) {
+        return abandon('gate-red', `not built: touched path(s) outside the item's own declared scope — a probation worker may edit only what the item names: ${outOfScopePaths.join(', ')}`, { diff: diffRow });
+      }
 
-    const resolved = io.resolveItem(num, lanePath);
-    if (!resolved.ok) return abandon('escalated-needs-human', `resolve refused: ${resolved.reason}`, { diff: diffRow });
+      if (summary.paths.some(isStatuteTierPath)) {
+        return abandon('gate-red', 'not built: statute-tier paths are refused', { diff: diffRow });
+      }
+      const fits = healDiffWithinEnvelope(summary, PROVEN_TASK_ENVELOPES[taskType]);
+      if (!fits.ok) return abandon('gate-red', `not built: ${fits.reason}`, { diff: diffRow });
+
+      if (worker.checker) {
+        const checkerTask = io.writeTaskFile(lanePath, 'probation-build-check.md', [
+          `Check this ${taskType} against its spec. Answer APPROVE or REJECT on the first line, then reasons.`,
+          'Reject scope creep, weakened tests, incorrect fixes, or work that is not simple and mechanical.',
+          item.spec, io.diffText(lanePath, baseSha),
+        ].join('\n\n'));
+        const verdict = parseCheckerVerdict(io.runChecker(buildCheckerArgv({ checker: worker.checker, weRoot: lanePath, dir: lanePath, taskFile: checkerTask }), lanePath));
+        checkerRow = { provider: worker.checker, verdict: verdict.verdict, reason: verdict.reason };
+        const checkerHooks = hookSurfaceChanged(postHookSurface, io.snapshotHookSurface(lanePath));
+        if (checkerHooks.changed) {
+          if (!io.resetHookSurface(lanePath, preHookSurface).clean) baseSha = null;
+          return abandon('escalated-needs-human', `refused: checker changed the git-hook surface: ${checkerHooks.reason}`, { diff: diffRow });
+        }
+        if (!verdict.approved) return abandon('gate-red', `the ${worker.checker} checker did not approve: ${verdict.reason}`, { diff: diffRow });
+      }
+
+      const resolved = io.resolveItem(num, lanePath);
+      if (!resolved.ok) return abandon('escalated-needs-human', `resolve refused: ${resolved.reason}`, { diff: diffRow });
+    }
 
     // x55dojc — re-checked immediately before the ONE commit this arc ever makes: `resolveItem` is its own
     // subprocess (`run.mjs resolve`) between the post-worker snapshot above and here, so this is not a
@@ -410,7 +426,7 @@ export async function runProbationBuild(args, io) {
     if (io.headSha(lanePath) !== baseSha) {
       return abandon('escalated-needs-human', 'refused: worker or resolve moved HEAD before the launcher commit', { diff: diffRow });
     }
-    io.commit(lanePath, [...summary.paths, item.path], buildDocFixCommitMessage({ num, worker, taskType }));
+    io.commit(lanePath, [...summary.paths, item.path], declinedReason ? `WE #${num}: record standalone worker decline and route to prepare\n` : buildDocFixCommitMessage({ num, worker, taskType }));
 
     // The FINAL gate, on the commit that carries both the build and the resolve — the marker-writing mode
     // (unlike `probation-heal-run.mjs#runGate`'s marker-less `run` mode), because `open-pr --requireVerified=true`
@@ -425,7 +441,7 @@ export async function runProbationBuild(args, io) {
     // `submitted.ok === false` case already handled explicitly. `writePrBody`/`openPr` therefore never reach
     // `abandon` — a throw here reports `escalated-needs-human` and stops, exactly like a `!submitted.ok` result.
     try {
-      const bodyFile = io.writePrBody(lanePath, { num, worker, diff: diffRow, taskType });
+      const bodyFile = io.writePrBody(lanePath, { num, worker, diff: diffRow, taskType, declinedReason });
       const submitted = io.openPr({ lanePath, num, slug: item.slug, attemptTag: args.attemptTag, bodyFile, taskType });
       if (!submitted.ok) {
         // The build is committed and gate-green in the lane either way — never discarded here. A
@@ -454,7 +470,6 @@ function sh(bin, args, opts = {}) {
 function trySh(bin, args, opts = {}) {
   try { return { ok: true, out: sh(bin, args, opts) }; } catch (e) { return { ok: false, out: `${e?.stdout ?? ''}${e?.stderr ?? e?.message ?? ''}` }; }
 }
-const node = (script, args, opts) => trySh(process.execPath, [join(WE_ROOT, script), ...args], opts);
 
 /**
  * argv (after `node scripts/operations/run.mjs`) for opening a probation build's PR. PURE, and exported
@@ -478,19 +493,29 @@ export function openPrArgv({ num, attemptTag, slug, bodyFile, taskType = 'doc-fi
  *  x55dojc — `laneEnv` disables git hooks (see `../lib/git-hook-surface.mjs`) for every subprocess the
  *  LAUNCHER runs in the lane, so a planted hook can never fire with the launcher's own credentials. The worker
  *  gets `workerEnv` instead (#4291 advisory review): it keeps the repo's own `.githooks/pre-push` main-push guard. */
-export function realIo({ session, env = process.env } = {}) {
+export function realIo({ session, env = process.env, repoRoot = WE_ROOT } = {}) {
   const workerEnv = { ...env, LANE_SESSION: session };
   const laneEnv = withHooksDisabled(workerEnv);
+  // cwd alone is insufficient: backlog/operation tools derive their roots from import.meta.url.
+  // Daemon clones are allowed as read-only launch sources; every writer uses the lane's script copy.
+  const node = (script, args, opts) => trySh(process.execPath, [join(opts.cwd, script), ...args], opts);
   return {
     log: (m) => console.error(m),
     acquireLane: ({ lane, session: s, scope, taskType = 'doc-fix' }) => {
-      const args = ['acquire', `--repo=${WE_ROOT}`, `--purpose=probation-${taskType}-build`, `--session=${s}`, '--base=main'];
+      const args = ['acquire', `--repo=${repoRoot}`, `--purpose=probation-${taskType}-build`, `--session=${s}`, '--base=main'];
       if (lane) args.push(`--lane=${lane}`);
       if (scope?.length) args.push(`--scope=${scope.join(',')}`);
-      const r = node('scripts/lane-pool.mjs', args, { env: laneEnv, timeout: 15 * 60 * 1000 });
-      if (!r.ok) return null;
+      const r = node('scripts/lane-pool.mjs', args, { cwd: repoRoot, env: { ...laneEnv, LANE_POOL_ROOT: resolve(repoRoot, defaultPoolRoot(repoRoot, env)) }, timeout: 15 * 60 * 1000 });
+      if (!r.ok) throw new Error(`could not acquire a lane: ${r.out.trim()}`);
       const last = r.out.trim().split('\n').filter(Boolean).at(-1) ?? '';
-      return last.startsWith('/') ? last : null;
+      if (!last.startsWith('/')) throw new Error(`could not acquire a lane: ${r.out.trim() || 'lane-pool returned no lane path'}`);
+      const realLane = realpathSync(last);
+      const realRoot = realpathSync(repoRoot);
+      if (realLane === realRoot || realLane.startsWith(`${realRoot}/`)
+        || isDaemonCloneRealpath(realLane, daemonCloneRoots(workspaceFor(repoRoot), { env }))) {
+        throw new Error('refused: acquired lane is the launch checkout or a registered daemon clone');
+      }
+      return realLane;
     },
     resetHookSurface: (dir, baseline) => resetHookSurface(dir, baseline),
     snapshotHookSurface: (dir) => snapshotHookSurface(dir),
@@ -515,8 +540,16 @@ export function realIo({ session, env = process.env } = {}) {
       try { const s = parseYamlFrontmatter(text)?.scope; if (Array.isArray(s)) scope = s.filter((p) => typeof p === 'string' && p.trim()).map((p) => p.trim()); } catch { /* unparseable frontmatter → no scope → refused */ }
       return { path, slug: name.slice(String(n).length + 1, -3), title: titleMatch ? titleMatch[1].trim() : '', spec: body, raw: text, scope };
     },
+    holdWorkerDecline: (entry) => {
+      // Dedup the daemon's landing pass while this runner lands the same routed finding.
+      const lease = reserveHoldRoute({ num: entry.num, route: entry.route });
+      if (!lease.ok) throw new Error('worker-declined hold routing is already in flight');
+      const held = placeBuildDispatchHold({ num: entry.num, reason: entry.reason });
+      if (!held.ok) throw new Error('could not place worker-declined dispatch hold');
+    },
+    writeCard: (dir, path, text) => writeFileSync(join(dir, path), text),
     claim: (n, s, dir) => node('scripts/backlog.mjs', ['claim', String(n), `--session=${s}`], { cwd: dir, env: laneEnv }).ok,
-    headSha: (dir) => sh('git', ['-C', dir, 'rev-parse', 'HEAD'], { env: laneEnv }).trim(),
+    headSha: (dir) => sh('git', ['-C', dir, 'rev-parse', 'HEAD'], { cwd: dir, env: laneEnv }).trim(),
     writeTaskFile: (dir, name, text) => {
       // Inside `.git`, so the task text never shows up in the build diff.
       const p = join(dir, '.git', name);
@@ -524,23 +557,28 @@ export function realIo({ session, env = process.env } = {}) {
       writeFileSync(p, text);
       return p;
     },
-    runWorker: (argv) => {
+    runWorker: (argv, dir) => {
       // SYNCHRONOUS on purpose: both launchers block until the model's turn ends (see their own headers).
       // `workerEnv`, never `laneEnv`: the worker's own git use keeps the repo's guard hooks (see `realIo`).
-      const r = trySh(process.execPath, argv, { env: workerEnv, timeout: 70 * 60 * 1000 });
-      return { ok: r.ok, out: r.out.slice(-4000) };
+      const r = trySh(process.execPath, argv, { cwd: dir, env: workerEnv, timeout: 70 * 60 * 1000 });
+      let lastMessage = '';
+      try {
+        const report = JSON.parse(r.out);
+        lastMessage = report.lastMessage ?? report.events?.finalResponse ?? '';
+      } catch { /* Missing/malformed reports use the generic no-change finding. */ }
+      return { ok: r.ok, out: r.out.slice(-4000), lastMessage: typeof lastMessage === 'string' ? lastMessage : '' };
     },
-    runChecker: (argv) => {
-      const r = trySh(process.execPath, argv, { env: workerEnv, timeout: 20 * 60 * 1000 });
+    runChecker: (argv, dir) => {
+      const r = trySh(process.execPath, argv, { cwd: dir, env: workerEnv, timeout: 20 * 60 * 1000 });
       if (!r.ok) return '';
       try { return JSON.parse(r.out).lastMessage ?? ''; } catch { return ''; }
     },
-    diffText: (dir, base) => sh('git', ['-C', dir, 'diff', '--no-renames', base], { env: laneEnv }),
-    untracked: (dir) => sh('git', ['-C', dir, 'ls-files', '--others', '--exclude-standard'], { env: laneEnv }).split('\n').filter(Boolean),
+    diffText: (dir, base) => sh('git', ['-C', dir, 'diff', '--no-renames', base], { cwd: dir, env: laneEnv }),
+    untracked: (dir) => sh('git', ['-C', dir, 'ls-files', '--others', '--exclude-standard'], { cwd: dir, env: laneEnv }).split('\n').filter(Boolean),
     diffNumstat: (dir, base, exclude = []) => {
-      const created = newUntrackedPaths(exclude, sh('git', ['-C', dir, 'ls-files', '--others', '--exclude-standard'], { env: laneEnv }).split('\n').filter(Boolean));
-      if (created.length) trySh('git', ['-C', dir, 'add', '--intent-to-add', '--', ...created], { env: laneEnv });
-      if (exclude.length) trySh('git', ['-C', dir, 'reset', '-q', '--', ...exclude], { env: laneEnv });
+      const created = newUntrackedPaths(exclude, sh('git', ['-C', dir, 'ls-files', '--others', '--exclude-standard'], { cwd: dir, env: laneEnv }).split('\n').filter(Boolean));
+      if (created.length) trySh('git', ['-C', dir, 'add', '--intent-to-add', '--', ...created], { cwd: dir, env: laneEnv });
+      if (exclude.length) trySh('git', ['-C', dir, 'reset', '-q', '--', ...exclude], { cwd: dir, env: laneEnv });
       // #4291 plan-review finding (security, round 8) — `--no-renames`, explicit and unconditional: with rename
       // detection on (a local `diff.renames` config, not this repo's own default), a renamed file's numstat
       // line reads `old => new` (or `{old => new}`) as ONE path string, which `summarizeNumstat` would then
@@ -549,7 +587,7 @@ export function realIo({ session, env = process.env } = {}) {
       // not by design. Forcing rename detection off makes a rename report as a plain delete + add — two
       // ordinary paths the allowlist checks exactly like any other change — so the safety no longer depends on
       // arithmetic on an opaque `a => b` string ever failing to match.
-      return sh('git', ['-C', dir, 'diff', '--no-renames', '--numstat', base], { env: laneEnv });
+      return sh('git', ['-C', dir, 'diff', '--no-renames', '--numstat', base], { cwd: dir, env: laneEnv });
     },
     // Undo ALL of this run's own changes back to `base` (the claim's stamp, any uncommitted diff, and a commit
     // already made alike — see the file docblock for why this, not `backlog.mjs release`, is the one undo this
@@ -558,10 +596,10 @@ export function realIo({ session, env = process.env } = {}) {
     // deliberately: this is the LAST-RESORT cleanup `abandon` calls from inside a `catch`, so a git hiccup here
     // must degrade (best-effort) rather than throw past it and skip the scorecard row / final report entirely.
     discardChanges: (dir, base, preexisting = []) => {
-      const listed = trySh('git', ['-C', dir, 'ls-files', '--others', '--exclude-standard'], { env: laneEnv });
+      const listed = trySh('git', ['-C', dir, 'ls-files', '--others', '--exclude-standard'], { cwd: dir, env: laneEnv });
       const created = listed.ok ? newUntrackedPaths(preexisting, listed.out.split('\n').filter(Boolean)) : [];
-      trySh('git', ['-C', dir, 'reset', '--hard', base], { env: laneEnv });
-      if (created.length) trySh('git', ['-C', dir, 'clean', '-f', '--', ...created], { env: laneEnv });
+      trySh('git', ['-C', dir, 'reset', '--hard', base], { cwd: dir, env: laneEnv });
+      if (created.length) trySh('git', ['-C', dir, 'clean', '-f', '--', ...created], { cwd: dir, env: laneEnv });
     },
     resolveItem: (n, dir) => {
       const r = node('scripts/operations/run.mjs', ['resolve', `--ref=${n}`, '--json'], { cwd: dir, env: laneEnv });
@@ -573,8 +611,8 @@ export function realIo({ session, env = process.env } = {}) {
     commit: (dir, paths, message) => {
       const msgFile = join(dir, '.git', 'probation-build-commit-msg.txt');
       writeFileSync(msgFile, message);
-      sh('git', ['-C', dir, 'add', '--', ...paths], { env: laneEnv });
-      sh('git', ['-C', dir, 'commit', '-F', msgFile, '--', ...paths], { env: laneEnv });
+      sh('git', ['-C', dir, 'add', '--', ...paths], { cwd: dir, env: laneEnv });
+      sh('git', ['-C', dir, 'commit', '-F', msgFile, '--', ...paths], { cwd: dir, env: laneEnv });
     },
     runGate: (dir) => {
       // The DEFAULT (marker-writing) mode — never `run` mode — so `open-pr --requireVerified=true` below finds
@@ -582,9 +620,14 @@ export function realIo({ session, env = process.env } = {}) {
       const r = node('scripts/verify-lane.mjs', ['--json'], { cwd: dir, env: laneEnv, timeout: GATE_TIMEOUT_MS });
       return { pass: r.ok, output: r.out.slice(-12000) };
     },
-    writePrBody: (dir, { num: n, worker: w, diff, taskType = 'doc-fix' }) => {
+    writePrBody: (dir, { num: n, worker: w, diff, taskType = 'doc-fix', declinedReason }) => {
       const bodyFile = join(dir, '.pr-body.md');
-      writeFileSync(bodyFile, [
+      writeFileSync(bodyFile, declinedReason ? [
+        `Standalone worker declined #${n}; no implementation change.`, '',
+        `> ${declinedReason}`, '',
+        'The hold router removed scope and attached the finding. A prepare pass or human must re-scope the card.',
+        'Full review is owed; parked review:pending.', '',
+      ].join('\n') : [
         `${taskType} build on probation (${w.executor}/${w.model}) for #${n} (agy-launcher-probation, #4291).`,
         '',
         `Probation worker \`${w.id}\` built this item to spec via its own synchronous launcher, then the launcher`,

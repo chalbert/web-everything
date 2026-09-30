@@ -8,6 +8,10 @@
 roster names or legacy JSON in `--worker`, and an allowlisted `--model`. Each omitted session is
 generated independently. Different items use separate lane clones; do not reuse an explicit session
 and lane for simultaneous runs. Task files, worker logs, commit messages and PR bodies are lane-local.
+Pool discovery uses `defaultPoolRoot` with the script checkout root, never the caller cwd.
+Mutation subprocesses must use both the lane cwd and the lane’s script copy: backlog and operation tools
+derive their roots from `import.meta.url`. Daemon clones remain read-only launch sources. The isolation
+test snapshots every launch-checkout file, including `.git`, across success and pre-worker failure.
 Flash keeps the Codex read-only checker; a checker refusal undoes the attempt.
 `test-fix` uses Flash without a separate simple flag and refuses non-test worker diffs.
 The CI-heal decision currently has no structured failing-file list; do not infer one from check names.
@@ -414,6 +418,10 @@ and persists the runner's bounded diagnostic verbose window, even if liveness re
 The prepare trace records `dispatch-paused` before its other gates so an unscoped item's build
 `scope` hold does not mask the pause. Whole-queue shaping errors appear on the affected entry as
 `error` with `eligible: false`; single-item invariant failures retain the CLI error contract.
+
+### Standalone worker declines
+
+Standalone no-change builds (#4552): replay with an empty implementation diff and a launcher report (Codex `lastMessage` or Gemini `events.finalResponse`). Assert the Findings note and scope removal on disk, the `worker-declined` dispatch hold, and the router lease that prevents duplicate landing. The card stays open; the existing verified PR path parks it `review:pending`. Missing final text must exercise the same path with a generic finding.
 
 ## Claude subagent usage
 
