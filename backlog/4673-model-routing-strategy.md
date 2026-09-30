@@ -1,4 +1,5 @@
 ---
+bornAs: x6ayr4k
 kind: decision
 status: open
 dateOpened: "2026-09-30"
@@ -60,7 +61,7 @@ Screen: clear — separate fresh-context review found operational policy, not a 
 
 Settled authority: `we:docs/agent/platform-decisions.md#delegation-trial-record-graduation`, `#model-probation-graduation-criteria`, `#planner-build-plan-and-execute`, `#config-extends-platform-default` and `#monetization`. Miss handling keeps the statute's tooling-attribution and restoration rules. The monetization anchor governs product margin; it does not prohibit a capped development API trial. No new codified rule is proposed. Configuration does not authorize weaker permissions or checks; mechanical routing does not replace interactive orchestration judgment.
 
-#3922's typed-step planner and #3996–#4011's relevant build slices are reused, not re-decided. #3575 covers decomposition. #4305/#4376 (`xv0h3mp`) own configurable delivery policy. The reported `lane/model-routing` ref was not present locally or in remote-tracking refs; inspect it before implementing any policy changes. #2732, #3021 and #2811 in this request are PR references, not their unrelated same-number backlog cards.
+#3922's typed-step planner and #3996–#4011's relevant build slices are reused, not re-decided. #3575 covers decomposition. #4305/#4376 (`4376`) own configurable delivery policy. The reported `lane/model-routing` ref was not present locally or in remote-tracking refs; inspect it before implementing any policy changes. #2732, #3021 and #2811 in this request are PR references, not their unrelated same-number backlog cards.
 
 ## Follow-ups
 
@@ -76,7 +77,7 @@ The required lane-verification command was attempted; the sandbox denied its Git
 
 ## Preparation acceptance
 
-One linked research report, options and a recommendation, independent skeptic and classification passes incorporated, then `node we:scripts/backlog.mjs prepare-stamp x6ayr4k`. Run `npm run check:standards` and `node we:scripts/verify-lane.mjs`. Remain open for human judgment; do not commit, push or open a PR in this job.
+One linked research report, options and a recommendation, independent skeptic and classification passes incorporated, then `node we:scripts/backlog.mjs prepare-stamp 4673`. Run `npm run check:standards` and `node we:scripts/verify-lane.mjs`. Remain open for human judgment; do not commit, push or open a PR in this job.
 
 ### Review jury (provisional — pre-registered #2638)
 

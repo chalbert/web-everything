@@ -29,7 +29,7 @@ Idempotency key (do not edit): approval-prevention-key:chalbert/web-everything#2
 
 ## Progress
 
-- 2026-09-30 prepare pass. **Premise check:** not delivered. `git log` for `4439`/`xpsuizi` shows only the JIT renumber commit; `judgedTrialRow`, `judgePendingTrials` and the inline `judge` CLI still have every gap below on `origin/main` (74f3c7413).
+- 2026-09-30 prepare pass. **Premise check:** not delivered. `git log` for `4439`/`4439` shows only the JIT renumber commit; `judgedTrialRow`, `judgePendingTrials` and the inline `judge` CLI still have every gap below on `origin/main` (74f3c7413).
 - **Citation drift corrected** (goal unchanged): the card's `:338/:344/:503/:595` refer to an older file. Today `we:scripts/lib/model-probation.mjs` is 531 lines: `trialOutcomeFromPr` is `:328`, `judgedTrialRow` `:346`, `judgePendingTrials` `:387`, the `judge` CLI `:503-521` with the inline `gh pr view` lookup at `:510` (no `:595` exists; guard 3 belongs at `:510`/`:395`).
 - **Scope corrected:** old `scope:` named `we:scripts/lib/__tests__/model-probation.test.mjs`, which holds only registry tests. The trial tests live in `we:scripts/lib/__tests__/model-probation-trials.test.mjs`. Guard 2's "under the append lock" also needs a small helper in `we:scripts/conveyor/run-scorecard-store.mjs` (its `appendScorecard` at `:331` already holds the lock), so that file and its test join the scope.
 
