@@ -22,7 +22,7 @@ import {
   acquireFixClaim, releaseFixClaim, heartbeatFixClaim, readLiveFixClaim, pushRefusal, isClaimHolder,
   fixBegin, fixEnd, withAltBranchHint, repoKeyFromRemoteUrl, repoKeyForCheckout, DEFAULT_FIX_CLAIM_TTL_MINUTES,
   FIX_BEGIN_MARKER, FIX_END_MARKER, FIXING_LABEL, STOOD_DOWN_LABEL, parseGitPush, resolvePushDestination,
-  refuseHeldPush,
+  refuseHeldPush, parseGitPushes, resolvePushDestinations, pushTargetUnreliable,
 } from '../fix-procedure.mjs';
 import { acquireFixDispatchClaim, refreshLiveFixDispatchClaims } from '../fix-dispatch-claim.mjs';
 import { fixDispatchClaimRoot } from '../fix-claim-store.mjs';
@@ -37,7 +37,8 @@ import { deriveReviewStatus } from '../review-status-tag.mjs';
 import { dispatchFix } from '../reconcile-fix-dispatch.mjs';
 import { dispatchCiHeal } from '../../operations/ci-heal-pr-dispatch.mjs';
 import { DISPATCH_EFFECT } from '../../operations/dispatch-lane.mjs';
-import { reason as guardReason } from '../../guard-bash.mjs';
+import { reason as guardReason, decide as guardDecide, computeFixClaimCtx } from '../../guard-bash.mjs';
+import { execFileSync } from 'node:child_process';
 
 let root;
 beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'fix-procedure-test-')); });
@@ -236,6 +237,152 @@ describe('pushes while a claim is live', () => {
     const inDir = (cmd, args, opts) => { seen.push(opts.cwd); return tracking(cmd, args); };
     expect(resolvePushDestination('git -C ../other push', { cwd: '/w/lane', exec: inDir })).toEqual({ repoKey: 'we', branches: ['main', BRANCH] });
     expect(new Set(seen)).toEqual(new Set(['/w/other']));
+  });
+
+  // Destination matrix (#4326 item 4): every potentially updated claimed branch must be named.
+  describe('resolvePushDestination: push.default / remote.<name>.push', () => {
+    const urls = { 'remote get-url we': 'https://github.com/chalbert/web-everything.git\n' };
+    const repoCfg = (extra) => (cmd, args) => {
+      const map = { ...urls, 'symbolic-ref -q --short HEAD': 'lane/mine\n', 'config --get branch.lane/mine.remote': 'we\n', ...extra };
+      const k = args.join(' ');
+      if (k in map) return map[k];
+      throw new Error(`no ${k}`);
+    };
+    const cases = [
+      ['push.default=matching', { 'config --get push.default': 'matching\n' }, 'git push', ['*', 'lane/mine']],
+      // remote.<name>.push overrides push.default, so matching must not widen a configured specific refspec
+      ['remote.we.push specific + push.default=matching', { 'config --get push.default': 'matching\n', 'config --get-all remote.we.push': 'HEAD:refs/heads/lane/ok\n' }, 'git push', ['lane/mine', 'lane/ok']],
+      ['push.default=matching, remote-only push', { 'config --get push.default': 'matching\n' }, 'git push we', ['*', 'lane/mine']],
+      ['remote.we.push glob', { 'config --get-all remote.we.push': 'refs/heads/*:refs/heads/*\n' }, 'git push', ['*', 'lane/mine']],
+      ['remote.we.push single refspec', { 'config --get-all remote.we.push': 'HEAD:refs/heads/lane/claimed\n' }, 'git push', ['lane/mine', 'lane/claimed']],
+      ['push.default=current', { 'config --get push.default': 'current\n' }, 'git push', ['lane/mine']],
+      ['push.default=upstream', { 'config --get push.default': 'upstream\n', 'config --get branch.lane/mine.merge': 'refs/heads/lane/claimed\n' }, 'git push', ['lane/mine', 'lane/claimed']],
+      ['push.default=simple', { 'config --get push.default': 'simple\n' }, 'git push', ['lane/mine']],
+      // matching never widens an EXPLICIT HEAD refspec
+      ['matching + explicit HEAD refspec', { 'config --get push.default': 'matching\n' }, 'git push we HEAD', ['lane/mine']],
+    ];
+    for (const [name, cfg, cmd, branches] of cases) {
+      it(name, () => {
+        const got = resolvePushDestination(cmd, { cwd: '/lane', exec: repoCfg(cfg) });
+        expect(got.repoKey).toBe('we');
+        expect([...got.branches].sort()).toEqual([...branches].sort());
+      });
+    }
+  });
+
+  // #4326 items 3 + 5 — the REAL decide()/reason() against real throwaway git repos and a real claim store.
+  describe('the hook against real repos (computeFixClaimCtx -> decide)', () => {
+    const WE_URL = 'https://github.com/chalbert/web-everything.git';
+    const mkRepo = (url = WE_URL) => {
+      const dir = mkdtempSync(join(tmpdir(), 'fix-push-repo-'));
+      const g = (...a) => execFileSync('git', a, { cwd: dir, stdio: 'ignore' });
+      g('init', '-q', '-b', 'main'); g('config', 'user.email', 't@t'); g('config', 'user.name', 't');
+      g('commit', '-q', '--allow-empty', '-m', 'init'); g('remote', 'add', 'origin', url);
+      g('branch', 'lane/claimed'); g('branch', 'lane/ok');
+      return dir;
+    };
+    const dirs = [];
+    const repo = (url) => { const d = mkRepo(url); dirs.push(d); return d; };
+    afterEach(() => { while (dirs.length) rmSync(dirs.pop(), { recursive: true, force: true }); });
+    const verdict = async (cmd, cwd, caller = { sessionId: 'sess-worker' }) => {
+      const ctx = await computeFixClaimCtx(cmd, { caller, cwd, deps: { lockRoot: root } });
+      return guardDecide(cmd, { cwd, ...ctx });
+    };
+    const claim = (repoKey, pr, branch) => acquireFixClaim({ repo: repoKey, pr, who: `fix-${pr}`, sessionId: 'sess-fixer', branch, lockRoot: root, nowMs: Date.now() });
+
+    it('`git checkout <claimed> && MAIN_PUSH_OK=1 git push` is refused while a foreign claim is live', async () => {
+      claim('we', 4326, 'lane/claimed');
+      const dir = repo();
+      expect(await verdict('git checkout lane/claimed && MAIN_PUSH_OK=1 git push', dir)).toMatch(/fix-4326 holds the fix claim/);
+      expect(await verdict('git switch lane/claimed && MAIN_PUSH_OK=1 git push', dir)).toMatch(/fix-4326/);
+    });
+    it('a plain bare push from an unclaimed own lane stays allowed with a claim live elsewhere', async () => {
+      claim('we', 4326, 'lane/claimed');
+      const dir = repo();
+      execFileSync('git', ['checkout', '-q', 'lane/ok'], { cwd: dir });
+      expect(await verdict('MAIN_PUSH_OK=1 git push', dir)).toBeNull();
+    });
+    it('no claim held: the checkout-then-push is allowed', async () => {
+      const dir = repo();
+      expect(await verdict('git checkout lane/claimed && MAIN_PUSH_OK=1 git push', dir)).toBeNull();
+    });
+    it('the claim HOLDER may still push', async () => {
+      claim('we', 4326, 'lane/claimed');
+      const dir = repo();
+      expect(await verdict('git checkout lane/claimed && MAIN_PUSH_OK=1 git push', dir, { sessionId: 'sess-fixer' })).toBeNull();
+    });
+    it('reason() alone, ctx pinned: an unreliable push is refused, a reliable one is not', () => {
+      const claimed = [{ branch: BRANCH, message: 'push refused: fix-2811 holds the fix claim' }];
+      expect(guardReason('MAIN_PUSH_OK=1 git push', { fixPushes: [{ repoKey: 'we', targets: ['lane/other'], claimed, unreliable: true }] })).toMatch(/fix-2811/);
+      expect(guardReason('MAIN_PUSH_OK=1 git push', { fixPushes: [{ repoKey: 'we', targets: ['lane/other'], claimed, unreliable: false }] })).toBeNull();
+    });
+    it('two pushes to different repos, claim only on the second destination -> refused; no claim -> allowed', async () => {
+      const a = repo(WE_URL);
+      const b = repo('https://github.com/chalbert/frontierui.git');
+      const cmd = `git -C ${a} push origin lane/ok && git -C ${b} push origin lane/claimed`;
+      expect(await verdict(cmd, a)).toBeNull();
+      claim('frontierui', 77, 'lane/claimed');
+      expect(await verdict(cmd, a)).toMatch(/fix-77 holds the fix claim/);
+      // the claim is in repo B only: the same branch pushed to repo A is fine
+      expect(await verdict(`git -C ${a} push origin lane/claimed`, a)).toBeNull();
+    });
+    it('two pushes in ONE repo: an innocent first push no longer hides a claimed second', async () => {
+      claim('we', 4326, 'lane/claimed');
+      const a = repo();
+      expect(await verdict('git push origin lane/ok && git push origin lane/claimed', a)).toMatch(/fix-4326/);
+    });
+    // PR #3172 review — parity: every spelling `canonicalGitOp` reads as a push is parsed, so the claim is enforced.
+    const GLOBAL_FLAG_PUSHES = [
+      'git --no-pager push origin lane/claimed',
+      'git --git-dir=.git push origin lane/claimed',
+      'git --work-tree=. push origin lane/claimed',
+      'git -C . --no-pager push origin lane/claimed',
+      '/usr/bin/git --no-pager push origin lane/claimed',
+      'env GIT_TRACE=0 git --no-pager push origin lane/claimed',
+      'sudo git -c core.x=1 push origin lane/claimed',
+    ];
+    for (const cmd of GLOBAL_FLAG_PUSHES) {
+      it(`refuses a claimed push spelled with global flags: ${cmd}`, async () => {
+        claim('we', 4326, 'lane/claimed');
+        const dir = repo();
+        expect(parseGitPushes(cmd).length).toBe(1);
+        expect(await verdict(`MAIN_PUSH_OK=1 ${cmd}`, dir)).toMatch(/fix-4326/);
+      });
+    }
+    it('an echoed "git push" in a later segment does not block a valid earlier push', async () => {
+      claim('we', 4326, 'lane/claimed');
+      const dir = repo();
+      execFileSync('git', ['checkout', '-q', 'lane/claimed'], { cwd: dir });
+      expect(await verdict('git push origin lane/ok && echo "git push"', dir)).toBeNull();
+      // and the real claimed push is still refused when it is the real one
+      expect(await verdict('git push origin lane/claimed && echo "git push"', dir)).toMatch(/fix-4326/);
+    });
+    it('a leading or mid-command cd fails closed, for bare AND explicit pushes', async () => {
+      claim('we', 4326, 'lane/claimed');
+      const dir = repo();
+      expect(pushTargetUnreliable(parseGitPushes('cd foo && git push')[0])).toBe(true);
+      expect(await verdict('cd foo && MAIN_PUSH_OK=1 git push', dir)).toMatch(/fix-4326/);
+      expect(await verdict('cd foo && MAIN_PUSH_OK=1 git push origin lane/claimed', dir)).toMatch(/fix-4326/);
+      expect(await verdict('echo x; cd foo && MAIN_PUSH_OK=1 git push origin lane/claimed', dir)).toMatch(/fix-4326/);
+      // an explicit push to an unclaimed branch after a cd is still allowed
+      expect(await verdict('cd foo && MAIN_PUSH_OK=1 git push origin lane/ok', dir)).toBeNull();
+    });
+    it('other HEAD-changing spellings make an implicit push unreliable', () => {
+      for (const c of ['gh pr checkout 123 && git push', 'git worktree add ../w x && git push', 'git -C x checkout y && git push', 'gh co 1 && git push origin HEAD']) {
+        expect(pushTargetUnreliable(parseGitPushes(c)[0]), c).toBe(true);
+      }
+      expect(pushTargetUnreliable(parseGitPushes('gh pr checkout 123 && git push origin lane/ok')[0])).toBe(false);
+    });
+    it('parseGitPushes reads every push with its own -C dir', () => {
+      expect(parseGitPushes('git -C /a push origin x && git -C /b push up y').map(({ before, ...p }) => p)).toEqual([
+        { remote: 'origin', refspecs: ['x'], all: false, dir: '/a', retarget: false },
+        { remote: 'up', refspecs: ['y'], all: false, dir: '/b', retarget: false },
+      ]);
+      expect(parseGitPushes('git status')).toEqual([]);
+      expect(pushTargetUnreliable(parseGitPushes('git checkout x && git push')[0])).toBe(true);
+      expect(pushTargetUnreliable(parseGitPushes('git checkout x && git push origin HEAD:refs/heads/lane/x')[0])).toBe(false);
+      expect(pushTargetUnreliable(parseGitPushes('git push')[0])).toBe(false);
+    });
   });
 
   it('the dispatcher refuses to spawn a fixer while any fix claim is live', () => {
