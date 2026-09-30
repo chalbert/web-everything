@@ -1,4 +1,5 @@
 ---
+bornAs: xp1wbuo
 kind: story
 size: 8
 status: open

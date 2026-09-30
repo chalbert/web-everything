@@ -1,4 +1,5 @@
 ---
+bornAs: x3eknop
 kind: story
 size: 3
 status: open
