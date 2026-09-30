@@ -3,10 +3,11 @@ bornAs: xx604u2
 kind: story
 size: 3
 parent: "4075"
-status: active
+status: resolved
 scope: ["we:scripts/lib/citation-check.mjs", "we:scripts/check-standards.mjs", "we:scripts/__tests__/citation-check.test.mjs", "we:docs/agent/backlog-workflow.md", "we:backlog/4294-workers-run-affected-tests-while-working-the-full-gate-once.md"]
 dateOpened: "2026-09-28"
 dateStarted: "2026-09-30"
+dateResolved: "2026-09-30"
 preparedDate: "2026-09-30"
 preparedAgainstSha: "81e0381e1786203cbba3b37a554b28586fe4e868"
 tags: []
