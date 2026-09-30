@@ -6,7 +6,7 @@ dateOpened: "2026-09-27"
 preparedDate: "2026-09-30"
 preparedAgainstSha: "1ef20904e5391d5a16ef4c07133b6502c08c44c5"
 relatedTo: ["4620", "2662"]
-relatedReport: "we:reports/2026-09-30-builder-launch-misread-root-causes.md"
+relatedReport: reports/2026-09-30-builder-launch-misread-root-causes.md
 tags: []
 ---
 
@@ -90,7 +90,7 @@ Seven-question classification: (1) operational delivery policy, not a new plug/b
 - Add prepare/scaffold mixed-scope diagnosis and scope-safe decomposition proposals. Predicted touch-set: we:scripts/backlog/scaffold.mjs, we:scripts/readiness/ and corresponding tests. Coordinate with the already-filed admission/settlement story in the incident report; do not duplicate its terminal-state work.
 - Coupled-wrapper capability: predicted touch-set we:scripts/operations/deliver-item-wrapper.mjs, we:scripts/operations/__tests__/deliver-item-wrapper.test.mjs, we:scripts/readiness/lane-manifest.mjs and we:scripts/readiness/couple-plan.mjs plus their tests, narrowed after design. Keep actual implementation under its owning operational tooling boundary; this card does not relocate legacy machinery or authorize runtime in a standards contract.
 - Testing lesson: a pure locus probe proves routing only. Real lease ownership, paired CI, partial merge recovery and deployed relay/client/publisher compatibility need their own observed proofs. Record them on the implementing cards, not shared agent docs.
-- Metadata integration: `relatedReport` above is deliberately `we:`-qualified per this job. The current report loader joins the value literally (we:src/_data/backlog.js:338), and the visibility checker strips only an unqualified report prefix (we:scripts/check-standards.mjs:1339). The qualified prose citations remain readable; machine report-link resolution needs a separate compatible normalization fix, not an unprefixed path or a shared-loader edit in this preparation.
+- Metadata integration: `relatedReport` is unprefixed because the report loader joins the value literally (we:src/_data/backlog.js:338) and the checker only resolves an unqualified path (we:scripts/check-standards.mjs:1339), which conflicts with the `we:` path rule; a normalization fix is filed separately.
 
 ## Done when (preparation only)
 
