@@ -58,6 +58,15 @@ agreement, not proof that two reviews covered identical content, and it does not
 Tests redirect `WE_VERDICT_LEDGER_DIR` and `CONVEYOR_JURY_DIR` into temporary directories and drive the
 runner with a read-only `gh` fixture; a file in place of the ledger directory probes real append failure.
 
+## Build-dispatch prepare retirement
+
+A live daemon PID does not prove its prepare worker is live. Probe dispatch-entry `live`,
+`expectedBy`, and `lastSeenLiveAt` independently: an explicitly dead session retires past its
+expected deadline or after 20 minutes without a live observation. Settlement records
+`prepare-session-dead`, clears the claim and guard, and increments `itemPrepareAttempts`
+without double-counting a same-tick TTL retirement. Keep this outcome retryable rather than
+turning it into a permanent `prepare-unstamped` hold on the next tick.
+
 ## Build-dispatch executor admission
 
 Candidate executor prediction must call `decideDispatchRoute` with the dispatch loader's scope, size,
@@ -610,6 +619,8 @@ against the unique target card, rejects lane merge commits, and pins the observe
 calling pr-land. Observation failures refuse publication. Prepare agents acquire fresh origin/main
 lanes and never merge another lane. Regression histories live in
 `we:scripts/operations/__tests__/prepare-pr.test.mjs`.
+
+Builder red-draft recovery: test the raw draft snapshot before normalization (the build-policy projection drops draft metadata). GitHub REST check-runs responses contain a `check_runs` array, unlike the bare arrays returned by annotations and pull files. Exercise that IO shape, author liveness, durable PR-level retry accounting, exact branch forwarding, and comment plus `blocked:needs-human` construction. The recovery pass runs before in-flight holds; dry runs never dispatch. `WE_BUILD_DAEMON_RED_DRAFT_MINUTES` defaults to 60.
 
 ## Prepare failure diagnosis and release
 

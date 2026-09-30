@@ -10,7 +10,8 @@
  *   table + #4034 critical-work gate decide everything else inside dispatch-lane — this file routes nothing).
  *
  * WHAT IT IS NOT. It runs NO other pass: no scope/decision prepare, fix/ci-heal spawns, no reconcile, no watchers — those have
- *   their own daemons (review, fix-dispatch, pass-daemons) or stay with runner.mjs. It never edits runner.mjs.
+ *   their own daemons (review, fix-dispatch, pass-daemons) or stay with runner.mjs.
+ *   Exception: an abandoned red builder draft is recovered here through the existing PR repair dispatcher. It never edits runner.mjs.
  *
  * SAFETY:
  *   - ONE singleton lease under its own key ({@link BUILD_DISPATCH_DAEMON_LEASE_KEY}, #3877 keyed leases), with
@@ -29,7 +30,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, writeFileSync, rmSync, readFileSync, readdirSync, mkdirSync, appendFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, writeFileSync, rmSync, readFileSync, readdirSync, mkdirSync, appendFileSync, renameSync } from 'node:fs';
 import { tmpdir, hostname, homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -51,7 +52,7 @@ import { listFixDispatchClaims } from '../../scripts/conveyor/fix-claim-store.mj
 import { planHoldRouting, routeHeldItems, reserveHoldRoute, releaseHoldRoute, appendHoldFinding } from '../../scripts/conveyor/build-dispatch-hold-router.mjs';
 import { resolveCoordinationRoot } from '../../scripts/operations/coordination-root.mjs';
 // #4131/#4382 build-orphan-adopt — see that module's own header for the mechanism this closes.
-import { classifyClaimLiveness, settleOrphanRow, adoptOrphanedBuildClaims } from '../../scripts/conveyor/build-dispatch-orphan-adopt.mjs';
+import { classifyClaimLiveness, settleOrphanRow, adoptOrphanedBuildClaims, findLatestBuildRow, decideOrphanAction, RESUME_SPAWN_GRACE_MS } from '../../scripts/conveyor/build-dispatch-orphan-adopt.mjs';
 // #4464 builder-cap-machine-wide — see `cliPlanTick`'s own docblock for why this daemon's tick-core read is
 // exempted from the shared, machine-wide lane-count ceiling.
 import { isLeaseExpired, DEFAULT_LEASE_MINUTES } from '../../scripts/readiness/file-locks.mjs';
@@ -74,6 +75,7 @@ export function prepareRouteFallback(records = [], releases = []) {
 
 export const BUILD_DISPATCH_DAEMON_LEASE_KEY = '<conveyor:build-dispatch-daemon-lease>';
 export const DEFAULT_INTERVAL_MS = 120_000;
+export const PREPARE_SESSION_DEAD_GRACE_MS = 20 * 60_000;
 // #4517 — bounds cliRetryInfraBlocked's execFileSync so a slow `pr-land --label-on-green` CI wait inside
 // `infra-blocked.mjs retry` can never stall a whole daemon tick past this. Well under DEFAULT_INTERVAL_MS
 // (120_000ms) so the rest of the tick (dispatch, liveness, claims) always keeps real headroom. A retry that
@@ -236,7 +238,8 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
   const admission = d.admission || {};
   const scopeByNum = new Map((admission.queue || []).map((r) => [normNum(r.num), Array.isArray(r.scope) ? r.scope : []]));
   const clearedNums = new Set((admission.cleared || []).map((r) => normNum(r.num)));
-  const openPrs = normalizeOpenPrs(await effects.fetchOpenPrs());
+  const rawOpenPrs = await effects.fetchOpenPrs();
+  const openPrs = normalizeOpenPrs(rawOpenPrs);
   // PR #2921 review — a resume spawns real gate/converge/PR work, so it obeys the SAME kill switch and landing
   // freeze a fresh dispatch does (`planBuildDispatch`'s own freeze rule, computed here with no candidates).
   // Still before this tick's own `listClaims()` read, so a claim released here frees its item this same tick.
@@ -246,6 +249,13 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
   if (live && typeof effects.adoptOrphans === 'function') {
     try { orphanAdoption = await effects.adoptOrphans({ allowResume: !freeze.frozen, frozenReason: freeze.reasons.join('; ') }); }
     catch (e) { orphanAdoption = { error: String(e?.message || e).split('\n')[0] }; }
+  }
+  // A delivered draft is still its builder's responsibility. This pass precedes candidate/hold
+  // filtering: an "already delivers it" hold must never suppress repair of that very PR.
+  let draftRecovery = null;
+  if (live && typeof effects.recoverDrafts === 'function') {
+    try { draftRecovery = await effects.recoverDrafts({ rawOpenPrs, allowResume: !freeze.frozen }); }
+    catch (e) { draftRecovery = { error: String(e?.message || e).split('\n')[0] }; }
   }
   const runStoreInFlight = effects.listRunStoreInFlight();
   const settledRows = effects.listSettledBuilds?.() ?? [];
@@ -391,6 +401,7 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
   prepare.routeFailures = probationRecords.filter(r => r.taskType === 'prepare' && !r.pr && r.launchOutcome !== 'opened-pr')
     .map(r => ({ item: r.item, attempt: `${r.handle}:${r.scoredAt}`, cause: classifyPrepareFailure(r.evidence), evidence: r.evidence ?? { reason: r.launchOutcome } }));
   const finishedPrepares = new Set();
+  const itemPrepareAttempts = { ...out?.nextState?.itemPrepareAttempts };
   const failPrepare = async (num, stage, reason, evidence = {}, attempt = null) => {
     evidence = { ...evidence, reason };
     const input = { num, stage, attempt: attempt ?? `${stage}:${num}:${reason}`, evidence };
@@ -410,8 +421,9 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
     const claim = prepareClaims.find((c) => normNum(c.meta.num) === num);
     const settled = settledPrepares.get(num);
     // As with build retirement, an older attempt must not settle a fresh claim.
-    // A wrapper failure needs evidence too; an exception alone is not transient.
-    const currentSettled = settled
+    // A wrapper failure needs evidence too; an exception alone is not transient. A dead-session retirement is
+    // settled by its own branch below, so it must not also be read as an unstamped prepare.
+    const currentSettled = settled && settled.outcome !== 'prepare-session-dead'
       && (!claim?.meta?.claimedAt || settled.startedAt >= claim.meta.claimedAt);
     const wasHeld = holds.some((h) => normNum(h.num) === num && ['prepare-unstamped', 'prepare-stamp-pending'].includes(h.reason));
     const tracked = Boolean(claim) || prepareBusy.has(num);
@@ -424,6 +436,14 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
       const prDone = ['MERGED', 'CLOSED'].includes(status?.pr?.state);
       const awaitingPr = status?.pr?.state === 'OPEN';
       let why = status?.preparedDate ? 'prepared on main' : prDone ? `prepare PR ${status.pr.state.toLowerCase()}` : null;
+      const worker = prepareRows.find((r) => normNum(r.num) === num)?.row;
+      const now = effects.now?.() ?? Date.now();
+      const sessionDead = worker?.entry?.live === false
+        && (now > Date.parse(worker.entry.expectedBy)
+          || now - Date.parse(worker.entry.lastSeenLiveAt) > PREPARE_SESSION_DEAD_GRACE_MS);
+      if (!why && sessionDead && !(awaitingPr && status.pr.preparedDate)) {
+        why = 'prepare-session-dead';
+      }
       // An OPEN PR only shields the claim when it is stamped; an unstamped one must not outlive a dead worker.
       if (!why && claim && !(awaitingPr && status.pr.preparedDate) && isLeaseExpired(claim, effects.now?.() ?? Date.now(), DEFAULT_LEASE_MINUTES)) {
         // Probe the worker independently: the claim owner is the long-lived daemon, not the worker.
@@ -432,13 +452,18 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
         const ownerPid = host === (effects.hostname?.() ?? hostname()) ? claim.pid : null;
         const liveness = classifyClaimLiveness({ row: null, ownerPid,
           isPidAlive: effects.isPidAlive ?? defaultIsPidAlive });
-        const worker = prepareRows.find((r) => normNum(r.num) === num)?.row;
         const workerLiveness = worker && classifyClaimLiveness({ row: worker, ownerPid, isPidAlive: effects.isPidAlive ?? defaultIsPidAlive });
-        if (worker?.entry?.live === false || (worker?.entry?.handle?.startsWith('pid:') && workerLiveness?.status === 'dead')
+        // An explicitly dead session whose timing fields are absent/invalid can never trip the grace check above.
+        const deadUntimed = worker?.entry?.live === false
+          && !Number.isFinite(Date.parse(worker.entry.expectedBy)) && !Number.isFinite(Date.parse(worker.entry.lastSeenLiveAt));
+        if (deadUntimed || (worker?.entry?.handle?.startsWith('pid:') && workerLiveness?.status === 'dead')
           || (!worker && liveness.status === 'dead')) why = 'dead prepare owner past heartbeat TTL';
       }
       const wasUnstamped = holds.some((h) => normNum(h.num) === num && ['prepare-unstamped', 'prepare-stamp-pending'].includes(h.reason));
-      const ended = prDone || why === 'dead prepare owner past heartbeat TTL' || wasUnstamped
+      // A dead session that left sections behind is a finished-but-unstamped run: route it to stamp recovery.
+      const deadWithWork = why === 'prepare-session-dead' && status && !status.preparedDate
+        && (status.hasSections || (awaitingPr && status.pr.hasSections));
+      const ended = prDone || why === 'dead prepare owner past heartbeat TTL' || wasUnstamped || deadWithWork
         || (currentSettled && !prepareBusy.has(num));
       // An open, stamped PR is a valid finished agent run awaiting landing; main is not stamped yet.
       let unstamped = status && !status.preparedDate && ended && !(awaitingPr && status.pr.preparedDate);
@@ -482,14 +507,17 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
         if (failure.held) prepare.held.push({ num, reason: 'prepare-unstamped' });
         why ??= 'prepare-unstamped';
       }
+      if (why === 'prepare-session-dead') {
+        prepare.failures.push({ num, stage: 'retirement', reason: why });
+        // The core may already have counted this guard's TTL retirement on this tick.
+        itemPrepareAttempts[num] = Math.max(Number(itemPrepareAttempts[num]) || 0,
+          (Number(bookkeeping.itemPrepareAttempts?.[num]) || 0) + 1);
+      }
       if (why) {
-        if (claim) {
-          if (live) {
-            effects.releasePrepareClaim({ num });
-            const row = prepareRows.find((r) => normNum(r.num) === num)?.row;
-            if (row) effects.settlePrepareRow?.({ runId: row.runId, key: row.entry.key,
-              outcome: unstamped ? 'prepare-unstamped' : 'prepare-retired' });
-          }
+        if (live && worker) effects.settlePrepareRow?.({ runId: worker.runId, key: worker.entry.key,
+          outcome: why === 'prepare-session-dead' ? why : unstamped ? 'prepare-unstamped' : 'prepare-retired' });
+        if (claim || worker) {
+          if (live && claim) effects.releasePrepareClaim({ num });
           prepare.retired.push({ num, why, released: live });
         }
         finishedPrepares.add(num);
@@ -567,12 +595,14 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
     // per live claim), or an `{error}` on a best-effort failure, `null` on a dry-run tick or an older effects
     // stub with no such call.
     orphanAdoption,
+    draftRecovery,
     // #4465 — `planHoldRouting`'s own plan (always present, pure) plus `routeHeldItems`'s outcome array (or an
     // `{error}` on a best-effort failure), `null` on a dry-run tick or an older effects stub with no such call.
     holdRouting,
     holdRoutingResult,
     nextBookkeeping: settleBookkeeping(bookkeeping, {
       ...out?.nextState,
+      itemPrepareAttempts,
       prepareGuards: (out?.nextState?.prepareGuards ?? []).filter((g) => !finishedPrepares.has(normNum(g.num))),
     }, dispatched.map((x) => x.num), prepare.launched.map((x) => x.num)),
   };
@@ -999,6 +1029,143 @@ export async function cliStampPrepare({ num }, {
 
 const prepareClaimRoot = () => join(resolveCoordinationRoot(), 'item-prepare-dispatch-claims');
 
+export const DEFAULT_RED_DRAFT_MINUTES = 60;
+
+/** Builder-only gate-failure recovery. Unknown liveness fails closed, including a crash between
+ * reserving an attempt and recording its handle. The existing orphan retry policy supplies the cap.
+ * State is PR-bound, never head-bound: a failed fix pushing another red head cannot reset its budget. */
+export async function recoverBuilderDrafts({
+  candidates, allowResume = true, staleMinutes = DEFAULT_RED_DRAFT_MINUTES, nowMs = Date.now(), effects,
+}) {
+  if (!Number.isFinite(staleMinutes) || staleMinutes < 0) throw new Error('invalid red draft age');
+  const results = [];
+  for (const c of candidates) {
+    try {
+      const at = Date.parse(c.updatedAt);
+      if (!c.isDraft || !c.builderAuthored || c.authorLive !== false || !c.failure
+        || !Number.isFinite(at) || nowMs - at < staleMinutes * 60_000) continue;
+      const state = effects.readState(c.pr) ?? { attempts: 0 };
+      if (state.notified || (state.handle && await effects.isLive(state.handle) !== false)) continue;
+      if (state.pending && nowMs - (state.pendingAt ?? 0) < RESUME_SPAWN_GRACE_MS) continue;
+      const decision = state.pending
+        ? { action: 'exhausted' } // unknown spawn: surface it, never race a possibly live fix
+        : decideOrphanAction({ resumable: true, attempts: state.attempts, allowResume });
+      if (decision.action === 'leave') continue;
+      if (!effects.reserve(c).ok) continue;
+      try {
+        if (decision.action === 'exhausted') {
+          await effects.escalate(c, (state.pending
+            ? 'Builder gate-failure fix launch is unconfirmed; human inspection required.\n'
+            : `Builder gate-failure fix budget exhausted (${state.attempts} attempts).\n`)
+            + `Failing check: ${c.failure.name}\nFirst error: ${c.failure.firstError}`);
+          effects.writeState(c.pr, { ...state, notified: true });
+        } else {
+          const pending = { attempts: state.attempts + 1, pending: true, pendingAt: nowMs };
+          effects.writeState(c.pr, pending);
+          const out = await effects.dispatch(c);
+          if (out?.held) {
+            effects.writeState(c.pr, state); // no attempt was launched
+            results.push({ pr: c.pr, action: 'held', reason: out.reason });
+            continue;
+          }
+          if (!out?.agentId) throw new Error('fix dispatch returned no probeable handle');
+          effects.writeState(c.pr, { attempts: pending.attempts, handle: out.agentId });
+        }
+        results.push({ pr: c.pr, num: c.num, action: decision.action });
+      } finally { effects.release(c); }
+    } catch (e) { results.push({ pr: c.pr, action: 'error', error: String(e.message || e) }); }
+  }
+  return results;
+}
+
+/** Read current CI evidence only for drafts tied to a recorded builder result. REST checks are scoped
+ * to the current head; a review permission gate is never a code failure. No label guesses CI colour. */
+export async function cliRecoverBuilderDrafts({ rawOpenPrs, allowResume, staleMinutes = Number(process.env.WE_BUILD_DAEMON_RED_DRAFT_MINUTES ?? DEFAULT_RED_DRAFT_MINUTES) }, io = {}) {
+  const { createFileRunStore } = await import('../../scripts/operations/run-store.mjs');
+  const { stampLiveness, defaultListAgents } = await import('../../scripts/operations/dispatch-lane-io.mjs');
+  const { ghRestGetJson, ghRestGetPaged } = await import('../../scripts/lib/gh-rest-read.mjs');
+  const { runGhSync } = await import('../../scripts/lib/gh-throttle.mjs');
+  const { dispatchCiHeal } = await import('../../scripts/operations/ci-heal-pr-dispatch.mjs');
+  const { freeLaneNumbers } = await import('../../scripts/conveyor/reconcile-fix-dispatch.mjs');
+  const store = io.store ?? createFileRunStore();
+  const runs = store.list().filter(id => id.startsWith('dispatch-lane')).map(id => ({ id, record: store.read(id) }));
+  const nums = new Set(runs.flatMap(r => (r.record.effects ?? []).filter(e => e.payload?.launchKind === 'build').map(e => normNum(e.payload.num))));
+  let agents;
+  const isLive = handle => stampLiveness({ runs: [{ handle }] }, {
+    listAgents: () => (agents ??= (io.listAgents ?? defaultListAgents)()),
+    ...(io.isPidAlive ? { isPidAlive: io.isPidAlive } : {}),
+  }).runs[0].live;
+  const candidates = [];
+  const repo = CONSTELLATION_REPOS.we.slug;
+  const api = io.api ?? (path => ghRestGetJson(`repos/${repo}/${path}`).json);
+  const paged = io.paged ?? ghRestGetPaged;
+  const gh = io.gh ?? runGhSync;
+  const { parseAuthorActorId } = await import('../../scripts/lib/review-independence.mjs');
+  for (const pr of rawOpenPrs.find(r => r.repo === 'we')?.prs ?? []) {
+    if (!pr.isDraft) continue;
+    const num = [...nums].find(n => prDeliversNum(pr, n));
+    if (!num) continue;
+    const row = findLatestBuildRow(runs, num);
+    // A branch name alone does not establish authorship. Require the wrapper's actual PR result.
+    const delivered = String(row?.entry.result?.pr ?? '').match(/(?:^|\/)(\d+)$/)?.[1];
+    if (Number(delivered) !== pr.number || isLive(row.entry.handle) !== false) continue;
+    const p = api(`pulls/${pr.number}`);
+    if (!p.draft || p.state !== 'open' || p.head?.repo?.full_name !== repo || p.head.ref !== pr.headRefName) continue;
+    const author = parseAuthorActorId(p.body ?? '');
+    if (author && isLive(author) !== false) continue;
+    if (Date.now() - Date.parse(p.updated_at) < staleMinutes * 60_000) continue;
+    const checks = [];
+    for (let page = 1; ; page++) {
+      const batch = api(`commits/${p.head.sha}/check-runs?filter=latest&per_page=100&page=${page}`).check_runs;
+      if (!Array.isArray(batch)) throw new Error('unreadable check-runs response');
+      checks.push(...batch);
+      if (batch.length < 100) break;
+    }
+    const failed = checks.find(c => c.name !== 'review-gate' && ['failure', 'timed_out', 'cancelled', 'action_required'].includes(c.conclusion));
+    if (!failed) continue;
+    const annotations = paged(`repos/${repo}/check-runs/${failed.id}/annotations`);
+    let firstError = annotations.find(a => a.annotation_level === 'failure')?.message
+      || failed.output?.summary || failed.output?.text || 'No error detail published by the check.';
+    // GitHub Actions often publishes no annotations; retrieve the job's actual first error.
+    const job = /\/job\/(\d+)/.exec(failed.details_url ?? '')?.[1];
+    if (job && !annotations.some(a => a.annotation_level === 'failure')) {
+      const log = String(gh(['run', 'view', '--repo', repo, '--job', job, '--log-failed']));
+      firstError = log.split('\n').find(line => /##\[error\]|AssertionError|(?:^|\s)FAIL\s|Error:/.test(line)) || firstError;
+    }
+    candidates.push({ pr: pr.number, num, itemNum: num, repo: 'we', laneRef: p.head.ref, headRefOid: p.head.sha,
+      scope: (pr.files ?? []).map(f => `we:${f.path}`), isDraft: true, builderAuthored: true,
+      authorLive: false, updatedAt: p.updated_at, failure: { name: failed.name, firstError: firstError.split('\n').find(Boolean)?.slice(0, 2000) } });
+  }
+  const dir = join(io.stateRoot ?? resolveCoordinationRoot(), 'build-red-draft-resumes');
+  const path = pr => join(dir, `${pr}.json`);
+  const route = c => ({ num: c.num, route: `red-draft-${c.pr}` });
+  let lanes;
+  return recoverBuilderDrafts({ candidates, allowResume, staleMinutes, effects: {
+    readState: pr => existsSync(path(pr)) ? JSON.parse(readFileSync(path(pr), 'utf8')) : null,
+    writeState: (pr, state) => {
+      mkdirSync(dir, { recursive: true });
+      const tmp = `${path(pr)}.${process.pid}.tmp`;
+      writeFileSync(tmp, JSON.stringify(state));
+      renameSync(tmp, path(pr));
+    },
+    isLive,
+    reserve: c => (io.reserve ?? reserveHoldRoute)(route(c)),
+    release: c => (io.release ?? releaseHoldRoute)(route(c)),
+    dispatch: async c => {
+      const lane = (lanes ??= (io.freeLanes ?? freeLaneNumbers)()).shift();
+      if (!lane) return { held: true, reason: 'no-lane' };
+      // The builder invokes the existing PR repair primitive directly. Its brief acquires the PR's
+      // own ref and pushes back there; it never creates a second delivery PR or clears human review.
+      return (io.dispatch ?? dispatchCiHeal)({ ...c, lane, reason: 'red-ci' });
+    },
+    escalate: async (c, body) => {
+      // Comment first: a failed label write retries the evidence rather than silently marking done.
+      gh(['pr', 'comment', String(c.pr), '--repo', repo, '--body', body]);
+      gh(['pr', 'edit', String(c.pr), '--repo', repo, '--add-label', 'blocked:needs-human']);
+    },
+  } });
+}
+
 function cliEffects() {
   return {
     completePrepareFailures,
@@ -1045,6 +1212,7 @@ function cliEffects() {
     // #4131/#4382 build-orphan-adopt — only called by `runBuildDispatchTick` when `live`, and BEFORE this same
     // tick's own claim retirement read — see that function's own docblock.
     adoptOrphans: (o) => adoptOrphanedBuildClaims(o),
+    recoverDrafts: cliRecoverBuilderDrafts,
     // #4465 — only called by `runBuildDispatchTick` when `live` (never on a `--dry-run` tick).
     routeHeldItems: (plan) => cliRouteHeldItems(plan),
   };
@@ -1223,7 +1391,7 @@ async function live(flags) {
       // or for an older record with none) so the operator's tick line names WHO is running each build without
       // reading scorecards. Additive over the previous bare-num array — nothing on `main` parses this stdout
       // JSON as a strict array-of-strings today (grepped 2026-09-29).
-      process.stdout.write(`${JSON.stringify({ at: new Date().toISOString(), status: r.statusLine, freeze: r.plan.freeze, inFlight: r.plan.inFlight.map((f) => ({ num: f.num, executor: f.executor ?? null })), openItems: reportOpenItems(r.plan.openItems), dispatched: r.dispatched, prepare: r.prepare, hold: r.plan.hold, dispatchHolds: r.dispatchHolds, failures: r.failures, retired: r.retired, infraRetry: r.infraRetry, orphanAdoption: r.orphanAdoption, holdRouting: r.holdRouting, holdRoutingResult: r.holdRoutingResult })}\n`);
+      process.stdout.write(`${JSON.stringify({ at: new Date().toISOString(), status: r.statusLine, freeze: r.plan.freeze, inFlight: r.plan.inFlight.map((f) => ({ num: f.num, executor: f.executor ?? null })), openItems: reportOpenItems(r.plan.openItems), dispatched: r.dispatched, prepare: r.prepare, hold: r.plan.hold, dispatchHolds: r.dispatchHolds, failures: r.failures, retired: r.retired, infraRetry: r.infraRetry, orphanAdoption: r.orphanAdoption, draftRecovery: r.draftRecovery, holdRouting: r.holdRouting, holdRoutingResult: r.holdRoutingResult })}\n`);
     },
     onTickError: (e) => console.error(`build-dispatch-daemon: tick failed (non-fatal): ${String(e?.message || e).split('\n')[0]}`),
   });
@@ -1237,6 +1405,7 @@ async function main(argv) {
   if (flags.live) return live(flags);
   console.error('usage: build-dispatch-daemon.mjs --dry-run [--json] [--focus=N,M]   (read-only: what it would dispatch now)\n'
     + '       build-dispatch-daemon.mjs --live [--once] [--self-sync] [--no-prepare] [--max-concurrent=1] [--max-concurrent-external=4] [--max-open-prs=12] [--max-open-items=7] [--interval-ms=120000]\n'
+    + 'red draft age env: WE_BUILD_DAEMON_RED_DRAFT_MINUTES (default 60)\n'
     + 'caps env: WE_BUILD_DAEMON_MAX_CONCURRENT (Claude), WE_BUILD_DAEMON_MAX_CONCURRENT_EXTERNAL (Codex/agy); flags win\n'
     + `kill switch: ${KILL_SWITCH_ENV}=1 or touch <coordination root>/${KILL_SWITCH_FILENAME}`);
   process.exit(2);
