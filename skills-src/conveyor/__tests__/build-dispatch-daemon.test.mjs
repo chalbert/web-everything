@@ -28,7 +28,7 @@ vi.mock('../../../scripts/operations/detached-dispatch.mjs', async (importOrigin
 });
 
 import {
-  runBuildDispatchTick, settleBookkeeping, readKillSwitch, readDispatchOutcome, KILL_SWITCH_ENV,
+  prepareRouteFallback, cliDispatch, runBuildDispatchTick, settleBookkeeping, readKillSwitch, readDispatchOutcome, KILL_SWITCH_ENV,
   cliReadPrepareStatus, cliPredictRoute, cliListSettledBuilds, cliListRunStoreInFlight, cliListHolds, policyFrom,
   // #4348-open-pr-retry
   primaryInfraStoreEnv, cliRetryInfraBlocked,
@@ -1268,6 +1268,16 @@ describe('automatic item preparation', () => {
     effects.readPrepareStatus = () => ({ preparedDate: null });
     effects.placePrepareHold = vi.fn();
   }
+  it('routes subsequent prepares through Sonnet after two durable probation failures', async () => {
+    const effects = fixture();
+    effects.listProbationPrepares = () => ['4322', '4325'].map(item => ({ item,
+      scoredAt: item, dispatchKind: 'probation-launch', taskType: 'prepare',
+      repo: 'chalbert/web-everything', launchOutcome: 'gate-red', pr: null }));
+    const tick = await runBuildDispatchTick({ live: true, effects });
+    expect(tick.prepare.route).toBe('prepare-route-fallback');
+    expect(effects.dispatch.mock.calls.length).toBeGreaterThan(0);
+    expect(effects.dispatch.mock.calls.every(([r]) => r.prepareFallback === true)).toBe(true);
+  });
   it('excludes two persistent holds before core planning, freeing both slots', async () => {
     const effects = fixture();
     effects.listHolds = () => ['4544', '4560'].map((num) => ({ num, reason: 'prepare-unstamped' }));
@@ -1618,6 +1628,33 @@ describe('executor prediction and independent caps (#4531)', () => {
     } catch (error) {
       expect(error.status).toBe(2);
       expect(error.stderr).toContain('usage:');
+    }
+  });
+});
+
+
+describe('probation prepare route circuit breaker', () => {
+  const row = (item, launchOutcome = 'gate-red', pr = null) => ({
+    item, scoredAt: `2026-09-30T03:${item}:00Z`, dispatchKind: 'probation-launch',
+    taskType: 'prepare', repo: 'chalbert/web-everything', launchOutcome, pr,
+  });
+  it('requires consecutive failed prepare attempts; survives rereads and ignores unrelated rows', () => {
+    const failed = [row('22'), row('25', 'escalated-needs-human')];
+    expect(prepareRouteFallback(failed.slice(0, 1))).toBe(false);
+    expect(prepareRouteFallback(failed)).toBe(true);
+    expect(prepareRouteFallback([...failed, { ...row('26'), taskType: 'doc-fix' }])).toBe(true);
+    expect(prepareRouteFallback([failed[0], row('24', 'opened-pr', 99), failed[1]])).toBe(false);
+    expect(prepareRouteFallback([...failed, row('26', 'opened-pr', 99)])).toBe(false);
+  });
+  it('disables probation only for fallback prepares and preserves explicit Sonnet argv', () => {
+    for (const launchKind of ['prepare-item', 'build']) {
+      const exec = vi.fn(() => '{}');
+      cliDispatch({ num: '4327', launchKind, prepareFallback: true }, { exec });
+      const env = exec.mock.calls[0][2].env;
+      if (launchKind === 'prepare-item') {
+        expect(env.WE_PROBATION_LAUNCH).toBe('off');
+        expect(JSON.parse(env.WE_DISPATCH_AGENT_ARGS).slice(-2)).toEqual(['--model', 'sonnet']);
+      } else expect(env.WE_PROBATION_LAUNCH).toBe(process.env.WE_PROBATION_LAUNCH);
     }
   });
 });

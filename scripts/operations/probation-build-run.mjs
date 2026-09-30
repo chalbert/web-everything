@@ -93,6 +93,8 @@ import { clearScopeAndAppendFinding, sanitizeHoldReason, landRoute } from './bui
 import { extractSubmitResult } from './open-pr.mjs';
 import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 
+import { prepareCardStatus } from '../conveyor/prepare-result.mjs';
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 /** Read-only launch checkout and pool reference — by script location, never cwd. */
 export const WE_ROOT = resolve(HERE, '..', '..');
@@ -340,112 +342,129 @@ export async function runProbationBuild(args, io) {
       .split('<!-- /probation-worker -->')[0] : buildDocFixTask({ num, title: item.title, spec: item.spec, scope: item.scope, taskType }) +
       '\nIf the work already exists, check every Done-when against main and find the delivering commit in git log. ' +
       'When all checks pass, report "spec already done on main: commit <sha>" with the actual delivering SHA.\n';
-    const taskFile = io.writeTaskFile(lanePath, 'probation-build-task.md', task);
+    let taskFile = io.writeTaskFile(lanePath, 'probation-build-task.md', task);
+    let summary, diffRow, postHookSurface;
     const preHookSurface = hookReset.snapshot;
-    log(`running ${worker.launcher} --model=${worker.model}`);
-    const run = io.runWorker(buildWorkerArgv({ worker, weRoot: lanePath, dir: lanePath, taskFile }), lanePath);
-    workerRan = true;
-    // x55dojc — checked BEFORE the `run.ok` gate below on purpose: even a worker that crashed or timed out
-    // could have planted a hook before it did, so this must never be skipped just because the run itself
-    // failed.
-    const postHookSurface = io.snapshotHookSurface(lanePath);
-    const hookCheck = hookSurfaceChanged(preHookSurface, postHookSurface);
-    if (hookCheck.changed) {
-      log(`SECURITY: the worker's own run changed the lane's git-hook surface — refusing, discarding, never committing/pushing: ${hookCheck.reason}`);
-      // The pre-worker config comes back (the whole file, not just hooksPath) BEFORE `abandon`'s discard runs git.
-      // If it could not, no git runs in the lane at all: `baseSha = null` skips the discard, and a human gets it.
-      if (!io.resetHookSurface(lanePath, preHookSurface).clean) baseSha = null;
-      return abandon('escalated-needs-human', `refused: ${hookCheck.reason}${baseSha == null ? ' (the lane config could not be restored — the lane was NOT discarded; quarantine it)' : ''}`, {});
-    }
-    // #4291 plan-review finding (correctness, round 2) — a worker that crashed or timed out but still left a
-    // partial, envelope-sized diff must never be treated as a clean build: a resolved item + an opened PR would
-    // credit a failed run as a success. `run.ok` (not just "did it change anything") gates everything after it.
-    if (!run.ok) return abandon('escalated-needs-human', `not built: the worker did not finish cleanly: ${String(run.out ?? '').slice(0, 300)}`, {});
+    // A guarded stamp validates authored prose too (e.g. locus prefixes). Let the
+    // same worker repair that concrete diagnostic before discarding its result.
+    for (let attempt = 0; attempt < (preparing ? 2 : 1); attempt++) {
+      log(`running ${worker.launcher} --model=${worker.model}`);
+      const run = io.runWorker(buildWorkerArgv({ worker, weRoot: lanePath, dir: lanePath, taskFile }), lanePath);
+      workerRan = true;
+      // x55dojc — checked BEFORE the `run.ok` gate below on purpose: even a worker that crashed or timed out
+      // could have planted a hook before it did, so this must never be skipped just because the run itself
+      // failed.
+      postHookSurface = io.snapshotHookSurface(lanePath);
+      const hookCheck = hookSurfaceChanged(preHookSurface, postHookSurface);
+      if (hookCheck.changed) {
+        log(`SECURITY: the worker's own run changed the lane's git-hook surface — refusing, discarding, never committing/pushing: ${hookCheck.reason}`);
+        // The pre-worker config comes back (the whole file, not just hooksPath) BEFORE `abandon`'s discard runs git.
+        // If it could not, no git runs in the lane at all: `baseSha = null` skips the discard, and a human gets it.
+        if (!io.resetHookSurface(lanePath, preHookSurface).clean) baseSha = null;
+        return abandon('escalated-needs-human', `refused: ${hookCheck.reason}${baseSha == null ? ' (the lane config could not be restored — the lane was NOT discarded; quarantine it)' : ''}`, {});
+      }
+      // #4291 plan-review finding (correctness, round 2) — a worker that crashed or timed out but still left a
+      // partial, envelope-sized diff must never be treated as a clean build: a resolved item + an opened PR would
+      // credit a failed run as a success. `run.ok` (not just "did it change anything") gates everything after it.
+      if (!run.ok) return abandon('escalated-needs-human', `not built: the worker did not finish cleanly: ${String(run.out ?? '').slice(0, 300)}`, {});
 
-    const summary = summarizeNumstat(io.diffNumstat(lanePath, baseSha, excludeFromDiff), { exclude: excludeFromDiff });
-    const diffRow = { files: summary.files, loc: summary.loc };
-    // #4291 plan-review finding (correctness/security) — `item.path` is excluded from the diff/envelope above
-    // (it is the CLAIM's own bookkeeping, not the worker's change), which means a worker that rewrites the
-    // item's own file directly — disobeying "do not resolve the backlog item" — would otherwise be invisible
-    // to every check above AND silently committed. Re-read the item and require BOTH its BODY (the spec text)
-    // and its frontmatter to be unchanged from before the worker ran.
-    // #4291 advisory finding (codex-correctness) — compared byte for byte against the POST-CLAIM read, never the
-    // pre-claim one with the claim-owned keys allowed: those keys may change through `claim`, not through the
-    // worker, so a worker forging `status:`/`dateStarted:` is tamper too.
-    // Check the excluded card even on a no-change run.
-    const postWorkerItem = io.findItem(num, lanePath);
-    if (preparing ? frontmatterTamperedBeyondClaim(item.raw, postWorkerItem?.raw, ['preparedDate', 'preparedAgainstSha']) : (postWorkerItem?.spec !== item.spec || postWorkerItem?.raw !== afterClaim?.raw)) {
-      return abandon('escalated-needs-human', "not built: the worker edited the item's own backlog card — refusing", { diff: diffRow });
-    }
-    if (preparing && (!summary.files || summary.paths.some(p => p !== item.path))) {
-      return abandon('gate-red', 'prepare requires a card-only diff', { diff: diffRow });
-    }
-    if (!summary.files) {
-      // Classify the original report: prefixing it with worker-declined deliberately suppresses
-      // already-done in the shared router. Its landing pass owns citation validation and graduatedTo.
-      const [done] = planHoldRouting([{ num, reason: run.lastMessage }]);
-      if (done?.route === 'already-done') {
-        if (io.headSha(lanePath) !== baseSha) {
-          return abandon('escalated-needs-human', 'refused: worker moved HEAD before already-done routing', { diff: diffRow });
+      summary = summarizeNumstat(io.diffNumstat(lanePath, baseSha, excludeFromDiff), { exclude: excludeFromDiff });
+      diffRow = { files: summary.files, loc: summary.loc };
+      // #4291 plan-review finding (correctness/security) — `item.path` is excluded from the diff/envelope above
+      // (it is the CLAIM's own bookkeeping, not the worker's change), which means a worker that rewrites the
+      // item's own file directly — disobeying "do not resolve the backlog item" — would otherwise be invisible
+      // to every check above AND silently committed. Re-read the item and require BOTH its BODY (the spec text)
+      // and its frontmatter to be unchanged from before the worker ran.
+      // #4291 advisory finding (codex-correctness) — compared byte for byte against the POST-CLAIM read, never the
+      // pre-claim one with the claim-owned keys allowed: those keys may change through `claim`, not through the
+      // worker, so a worker forging `status:`/`dateStarted:` is tamper too.
+      // Check the excluded card even on a no-change run.
+      const postWorkerItem = io.findItem(num, lanePath);
+      if (preparing ? frontmatterTamperedBeyondClaim(item.raw, postWorkerItem?.raw, ['preparedDate', 'preparedAgainstSha']) : (postWorkerItem?.spec !== item.spec || postWorkerItem?.raw !== afterClaim?.raw)) {
+        return abandon('escalated-needs-human', "not built: the worker edited the item's own backlog card — refusing", { diff: diffRow });
+      }
+      if (preparing && (!summary.files || summary.paths.some(p => p !== item.path))) {
+        return abandon('gate-red', `prepare requires a card-only diff; worker report: ${sanitizeHoldReason(run.lastMessage, { max: 1200 }) || 'no final message'}`, { diff: diffRow });
+      }
+      if (!summary.files) {
+        // Classify the original report: prefixing it with worker-declined deliberately suppresses
+        // already-done in the shared router. Its landing pass owns citation validation and graduatedTo.
+        const [done] = planHoldRouting([{ num, reason: run.lastMessage }]);
+        if (done?.route === 'already-done') {
+          if (io.headSha(lanePath) !== baseSha) {
+            return abandon('escalated-needs-human', 'refused: worker moved HEAD before already-done routing', { diff: diffRow });
+          }
+          io.holdWorkerDecline(done);
+          io.discardChanges(lanePath, baseSha, preexisting);
+          const landed = io.landAlreadyDone(done, lanePath);
+          return finish(landed.status === 'landed' ? 'opened-pr' : 'escalated-needs-human', worker.executor,
+            landed.status === 'landed' ? `already-done: ${done.commit}; opened PR #${landed.pr}`
+              : `already-done landing failed: ${landed.error}`, { diff: diffRow, pr: landed.pr });
         }
-        io.holdWorkerDecline(done);
-        io.discardChanges(lanePath, baseSha, preexisting);
-        const landed = io.landAlreadyDone(done, lanePath);
-        return finish(landed.status === 'landed' ? 'opened-pr' : 'escalated-needs-human', worker.executor,
-          landed.status === 'landed' ? `already-done: ${done.commit}; opened PR #${landed.pr}`
-            : `already-done landing failed: ${landed.error}`, { diff: diffRow, pr: landed.pr });
-      }
-      declinedReason = sanitizeHoldReason(run.lastMessage, { max: 600 })
-        || 'The worker changed nothing and provided no final message.';
-      const [route] = planHoldRouting([{ num, reason: `worker-declined: ${declinedReason}` }]);
-      io.holdWorkerDecline(route);
-      // Start from the pre-claim card: this is a finding, never a resolved build or abandoned active claim.
-      io.writeCard(lanePath, item.path, clearScopeAndAppendFinding(item.raw, route));
-    } else {
-      // #4291 plan-review finding (security) — a doc-fix worker is TOLD to touch documentation only, but nothing
-      // upstream enforces it: a hostile or mistaken spec could steer it into a test/config/CI file that still fits
-      // the tiny envelope. Every path it actually touched (never `item.path` — checked separately below, because
-      // a `.md` backlog card would otherwise pass this exact check too) must be a documentation path.
-      const nonDocPaths = summary.paths.filter((p) => !isDocScopePath(p));
-      if (taskType === 'doc-fix' && nonDocPaths.length) {
-        return abandon('gate-red', `not built: touched non-documentation path(s) — a doc-fix worker may edit documentation only: ${nonDocPaths.join(', ')}`, { diff: diffRow });
-      }
-      // #4291 plan-review finding (security, rounds 4-7) — `isDocScopePath` accepts ANY `.md`/`docs/` path, which
-      // is too wide on its own (round 5 named `CLAUDE.md`, round 6 named `GEMINI.md` against an earlier denylist
-      // fallback that no longer exists — see the "no declared scope" refusal above). The ALLOWLIST is the item's
-      // own declared `scope:`, guaranteed non-empty by that refusal: the worker may touch ONLY the paths the item
-      // itself names.
-      // An empty `--scope` is a whole-clone lease (lane-pool's own meaning), not deny-all — the card alone bounds it.
-      // Gated on the RAW `--scope`: a lease naming only other repos' paths filters to `[]` but is still a lease.
-      const outOfScopePaths = summary.paths.filter((p) => !pathInScope(p, scopeEntries) || ((args.scope ?? []).length > 0 && !pathInScope(p, leasedEntries)));
-      if (outOfScopePaths.length) {
-        return abandon('gate-red', `not built: touched path(s) outside the item's own declared scope — a probation worker may edit only what the item names: ${outOfScopePaths.join(', ')}`, { diff: diffRow });
-      }
-
-      if (summary.paths.some(isStatuteTierPath)) {
-        return abandon('gate-red', 'not built: statute-tier paths are refused', { diff: diffRow });
-      }
-      const fits = healDiffWithinEnvelope(summary, PROVEN_TASK_ENVELOPES[taskType]);
-      if (!fits.ok) return abandon('gate-red', `not built: ${fits.reason}`, { diff: diffRow });
-
-      if (worker.checker) {
-        const checkerTask = io.writeTaskFile(lanePath, 'probation-build-check.md', [
-          `Check this ${taskType} against its spec. Answer APPROVE or REJECT on the first line, then reasons.`,
-          'Reject scope creep, weakened tests, incorrect fixes, or work that is not simple and mechanical.',
-          item.spec, io.diffText(lanePath, baseSha),
-        ].join('\n\n'));
-        const verdict = parseCheckerVerdict(io.runChecker(buildCheckerArgv({ checker: worker.checker, weRoot: lanePath, dir: lanePath, taskFile: checkerTask }), lanePath));
-        checkerRow = { provider: worker.checker, verdict: verdict.verdict, reason: verdict.reason };
-        const checkerHooks = hookSurfaceChanged(postHookSurface, io.snapshotHookSurface(lanePath));
-        if (checkerHooks.changed) {
-          if (!io.resetHookSurface(lanePath, preHookSurface).clean) baseSha = null;
-          return abandon('escalated-needs-human', `refused: checker changed the git-hook surface: ${checkerHooks.reason}`, { diff: diffRow });
+        declinedReason = sanitizeHoldReason(run.lastMessage, { max: 600 })
+          || 'The worker changed nothing and provided no final message.';
+        const [route] = planHoldRouting([{ num, reason: `worker-declined: ${declinedReason}` }]);
+        io.holdWorkerDecline(route);
+        // Start from the pre-claim card: this is a finding, never a resolved build or abandoned active claim.
+        io.writeCard(lanePath, item.path, clearScopeAndAppendFinding(item.raw, route));
+      } else {
+        // #4291 plan-review finding (security) — a doc-fix worker is TOLD to touch documentation only, but nothing
+        // upstream enforces it: a hostile or mistaken spec could steer it into a test/config/CI file that still fits
+        // the tiny envelope. Every path it actually touched (never `item.path` — checked separately below, because
+        // a `.md` backlog card would otherwise pass this exact check too) must be a documentation path.
+        const nonDocPaths = summary.paths.filter((p) => !isDocScopePath(p));
+        if (taskType === 'doc-fix' && nonDocPaths.length) {
+          return abandon('gate-red', `not built: touched non-documentation path(s) — a doc-fix worker may edit documentation only: ${nonDocPaths.join(', ')}`, { diff: diffRow });
         }
-        if (!verdict.approved) return abandon('gate-red', `the ${worker.checker} checker did not approve: ${verdict.reason}`, { diff: diffRow });
+        // #4291 plan-review finding (security, rounds 4-7) — `isDocScopePath` accepts ANY `.md`/`docs/` path, which
+        // is too wide on its own (round 5 named `CLAUDE.md`, round 6 named `GEMINI.md` against an earlier denylist
+        // fallback that no longer exists — see the "no declared scope" refusal above). The ALLOWLIST is the item's
+        // own declared `scope:`, guaranteed non-empty by that refusal: the worker may touch ONLY the paths the item
+        // itself names.
+        // An empty `--scope` is a whole-clone lease (lane-pool's own meaning), not deny-all — the card alone bounds it.
+        // Gated on the RAW `--scope`: a lease naming only other repos' paths filters to `[]` but is still a lease.
+        const outOfScopePaths = summary.paths.filter((p) => !pathInScope(p, scopeEntries) || ((args.scope ?? []).length > 0 && !pathInScope(p, leasedEntries)));
+        if (outOfScopePaths.length) {
+          return abandon('gate-red', `not built: touched path(s) outside the item's own declared scope — a probation worker may edit only what the item names: ${outOfScopePaths.join(', ')}`, { diff: diffRow });
+        }
+
+        if (summary.paths.some(isStatuteTierPath)) {
+          return abandon('gate-red', 'not built: statute-tier paths are refused', { diff: diffRow });
+        }
+        const fits = healDiffWithinEnvelope(summary, PROVEN_TASK_ENVELOPES[taskType]);
+        if (!fits.ok) return abandon('gate-red', `not built: ${fits.reason}`, { diff: diffRow });
+
+        if (worker.checker) {
+          const checkerTask = io.writeTaskFile(lanePath, 'probation-build-check.md', [
+            `Check this ${taskType} against its spec. Answer APPROVE or REJECT on the first line, then reasons.`,
+            'Reject scope creep, weakened tests, incorrect fixes, or work that is not simple and mechanical.',
+            item.spec, io.diffText(lanePath, baseSha),
+          ].join('\n\n'));
+          const verdict = parseCheckerVerdict(io.runChecker(buildCheckerArgv({ checker: worker.checker, weRoot: lanePath, dir: lanePath, taskFile: checkerTask }), lanePath));
+          checkerRow = { provider: worker.checker, verdict: verdict.verdict, reason: verdict.reason };
+          const checkerHooks = hookSurfaceChanged(postHookSurface, io.snapshotHookSurface(lanePath));
+          if (checkerHooks.changed) {
+            if (!io.resetHookSurface(lanePath, preHookSurface).clean) baseSha = null;
+            return abandon('escalated-needs-human', `refused: checker changed the git-hook surface: ${checkerHooks.reason}`, { diff: diffRow });
+          }
+          if (!verdict.approved) return abandon('gate-red', `the ${worker.checker} checker did not approve: ${verdict.reason}`, { diff: diffRow });
+        }
+
+        const resolved = preparing
+          ? (prepareCardStatus(postWorkerItem?.raw).hasSections
+            ? io.stampPrepare(num, lanePath)
+            : { ok: false, out: 'Missing nonempty Design, MVP, Test plan, or Proof plan sections.' })
+          : io.resolveItem(num, lanePath);
+        if (preparing && !resolved.ok && attempt === 0) {
+          const diagnostic = resolved.reason ?? resolved.out ?? 'stamp failed';
+          log(`prepare validation failed; returning to worker: ${diagnostic}`);
+          taskFile = io.writeTaskFile(lanePath, 'probation-build-task.md', `${task}\n\nYour card failed prepare validation. Repair the card in place, preserving the completed sections. The runner will retry stamping.\n${diagnostic}`);
+          continue;
+        }
+        if (!resolved.ok) return abandon('escalated-needs-human', `${preparing ? 'prepare-unstamped' : 'resolve refused'}: ${resolved.reason ?? resolved.out ?? ''}`, { diff: diffRow });
       }
 
-      const resolved = preparing ? io.stampPrepare(num, lanePath) : io.resolveItem(num, lanePath);
-      if (!resolved.ok) return abandon('escalated-needs-human', `${preparing ? 'prepare-unstamped' : 'resolve refused'}: ${resolved.reason ?? resolved.out ?? ''}`, { diff: diffRow });
+      break;
     }
 
     if (preparing) {

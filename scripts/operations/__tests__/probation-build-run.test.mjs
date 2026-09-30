@@ -786,7 +786,7 @@ describe('streamed worker decline regression', () => {
 
 describe('standalone prepare', () => {
   const path = 'backlog/4291-probation-launcher.md';
-  const prepared = ITEM_RAW + '\n## Design\nConcrete preparation.\n';
+  const prepared = ITEM_RAW + '\n## Design\nConcrete preparation.\n## MVP\nBounded change.\n## Test plan\nReplay the failure.\n## Proof plan\nProbe the CLI.\n';
   function prepareIo(options = {}) {
     const fake = fakeIo({ numstat: `12\t0\t${path}`, postWorkerRaw: prepared, ...options });
     fake.io.readCommittedCard = () => fake.io.findItem().raw;
@@ -803,6 +803,29 @@ describe('standalone prepare', () => {
     return fake;
   }
   const prepareArgs = () => args(codex, { taskType: 'prepare', scope: `we:${path}` });
+  it('replays #4325: feeds the rejected stamp diagnostic back before committing the repaired card', async () => {
+    const { io, calls } = prepareIo();
+    const stamp = io.stampPrepare;
+    let attempts = 0;
+    const tasks = [];
+    io.writeTaskFile = (_dir, _name, text) => { tasks.push(text); return '/lanes/22/.git/task.md'; };
+    io.stampPrepare = () => ++attempts === 1
+      ? { ok: false, out: 'locus-prefix: 6 bare code-path refs lack a <repo>: prefix' } : stamp();
+    expect(await runProbationBuild(prepareArgs(), io)).toMatchObject({ outcome: 'opened-pr', pr: 9001 });
+    expect(tasks[1]).toContain('locus-prefix: 6 bare code-path refs');
+    expect(calls.filter(c => c[0] === 'worker')).toHaveLength(2);
+    expect(calls.filter(c => c[0] === 'commit')).toHaveLength(1);
+    expect(calls.some(c => c[0] === 'discard')).toBe(false);
+  });
+  it('bounds failed validation repairs and preserves a no-diff worker explanation', async () => {
+    const { io, calls } = prepareIo();
+    io.stampPrepare = () => ({ ok: false, out: 'locus-prefix' });
+    expect((await runProbationBuild(prepareArgs(), io)).outcome).toBe('escalated-needs-human');
+    expect(calls.filter(c => c[0] === 'worker')).toHaveLength(2);
+    expect(calls.some(c => c[0] === 'commit')).toBe(false);
+    const empty = prepareIo({ numstat: '', lastMessage: 'could-not-prepare: scope is wrong' });
+    expect((await runProbationBuild(prepareArgs(), empty.io)).detail).toContain('scope is wrong');
+  });
   it('accepts a card-only prepare, stamps it, and never claims or resolves', async () => {
     const { io, calls } = prepareIo();
     expect(await runProbationBuild(prepareArgs(), io)).toMatchObject({ outcome: 'opened-pr' });
@@ -816,6 +839,12 @@ describe('standalone prepare', () => {
     const { io, calls } = prepareIo(options);
     expect((await runProbationBuild(prepareArgs(), io)).outcome).not.toBe('opened-pr');
     expect(calls.some(c => c[0] === 'openPr')).toBe(false);
+  });
+  it('never stamps a card with missing substantive sections', async () => {
+    const { io, calls } = prepareIo({ postWorkerRaw: ITEM_RAW + '\n## Design\nOnly a design.\n' });
+    expect((await runProbationBuild(prepareArgs(), io)).detail).toContain('Missing nonempty');
+    expect(calls.filter(c => c[0] === 'worker')).toHaveLength(2);
+    expect(calls.some(c => ['stamp', 'commit', 'openPr'].includes(c[0]))).toBe(false);
   });
   it('refuses a committed card without stamps', async () => {
     const { io, calls } = prepareIo();
