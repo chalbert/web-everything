@@ -1,8 +1,9 @@
 ---
 bornAs: x5hq3h1
 kind: decision
-status: open
+status: resolved
 dateOpened: "2026-09-30"
+dateResolved: "2026-09-30"
 relatedTo: ["3174", "4086"]
 tags: [review-ledger, product-design]
 ---
@@ -30,3 +31,7 @@ Recommend **B**. Include host-instance identity for enterprise/self-hosted conne
 ## Done when
 
 Ratify initial provider coverage, tenant-qualified identity and required capability categories. Record portable conformance vectors for identical PR numbers across hosts, repo rename/transfer and unsupported head-conditional merge. Preserve the sole merge writer and live external checks; no provider support may be advertised from interface tests alone.
+
+## Operator ruling (2026-09-30 ~9:15 AM ET)
+
+**Ratified B:** GitHub only for now, behind a clean host-adapter boundary, with a small fake second host in the tests to keep the boundary honest. **"Facts derived from git"** (merges, commits, co-author trailers, conflict checks through git) is a standard capability every adapter gets. That is what keeps a second host cheap. GitLab or Bitbucket get built when a real customer needs them.
