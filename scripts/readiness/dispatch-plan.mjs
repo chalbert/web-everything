@@ -76,6 +76,7 @@
  * codified in a sibling statute PR).
  */
 
+import { planningRead } from '../lib/planning-snapshot.mjs';
 import { childFailure } from '../lib/child-failure.mjs';
 import { getCachedVerdict, readAlreadyDoneCacheState, resolveAlreadyDoneCacheStorePath,
   ALREADY_DONE_NOT_DONE_COOLDOWN_MS, ALREADY_DONE_DONE_COOLDOWN_MS } from './already-done-cache.mjs';
@@ -774,7 +775,7 @@ async function main(argv) {
   // which left test-spawned runs scanning the real lane pool for an hour after vitest had died.
   installChildReaper({ log });
   const childTimeoutMs = resolveChildTimeoutMs(process.env);
-  const runJson = async (cmd, args, what) => {
+  const runJson = async (cmd, args, what) => planningRead(args, async () => {
     let out;
     try {
       out = await runBounded(cmd, args, { timeoutMs: childTimeoutMs });
@@ -783,7 +784,7 @@ async function main(argv) {
     }
     try { return JSON.parse(out); }
     catch (e) { fail(`could not parse ${what} JSON: ${String(e.message || e).split('\n')[0]}`); }
-  };
+  });
 
   // #x7xv2xt — FIXTURE MODE never touches the real lane pool. `--backlog-dir` means "a synthetic corpus", so the
   // shared pool (`lane-pool.mjs list --acquirable`, `scope-lease-collect.mjs`) is off-limits: free lanes come
@@ -935,7 +936,7 @@ async function main(argv) {
 
   // 2. THE ACTIVE LEASES — reuse the live scope-lease collector. Each lease's held scope = predicted ∪ observed.
   //    Fixture mode (#x7xv2xt) skips it: a synthetic corpus has no real leases.
-  const picture = fixtureMode ? { leases: [] } : await runJson('node', [SCOPE_COLLECT_CLI, '--json'], 'scope-lease-collect');
+  const picture = fixtureMode ? { leases: [] } : await runJson('node', [SCOPE_COLLECT_CLI, '--json', '--no-track-attempts'], 'scope-lease-collect');
   const leases = (Array.isArray(picture?.leases) ? picture.leases : []).map((l) => ({
     lane: l.lane,
     scope: toRepoRelative([...(l.predicted || []), ...(l.observed || [])]),

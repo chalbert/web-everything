@@ -95,25 +95,31 @@ export const DEFAULT_HEARTBEAT_INTERVAL_MS = 30_000;
  *   onTickError?: (error:Error, tick:number) => void,
  *   intervalMs?: number,
  *   maxTicks?: number,
+ *   fixedCadence?: boolean, // builder opt-in; subtract elapsed work from the interval
+ *   now?: () => number, // monotonic milliseconds
  * }} o
  * @returns {Promise<{ticks:number, stoppedReason:string}>}
  */
 export async function runDaemonLoop({
   tickOnce, sleep, isAlive = () => true, onTick = () => {}, onTickError = () => {},
   intervalMs = DEFAULT_INTERVAL_MS, maxTicks = Infinity,
+  fixedCadence = false, now = () => performance.now(),
 }) {
   if (typeof tickOnce !== 'function') throw new TypeError('runDaemonLoop requires a tickOnce effect');
   let tick = 0;
   for (;;) {
+    const started = now();
     try {
       const result = await tickOnce();
-      onTick(result, tick);
+      onTick(result, tick, { elapsedMs: Math.round(now() - started), intervalMs });
     } catch (error) {
-      onTickError(error, tick);
+      onTickError(error, tick, { elapsedMs: Math.round(now() - started), intervalMs });
     }
     if (!isAlive()) return { ticks: tick + 1, stoppedReason: 'lease-lost' };
     if (tick + 1 >= maxTicks) return { ticks: tick + 1, stoppedReason: 'max-ticks' };
-    await sleep(intervalMs);
+    // Start-to-start cadence: long rounds consume their interval. Never overlap or replay missed ticks.
+    await sleep(fixedCadence ? Math.max(0, intervalMs - (now() - started)) : intervalMs);
+    if (fixedCadence && !isAlive()) return { ticks: tick + 1, stoppedReason: 'lease-lost' };
     tick += 1;
   }
 }
