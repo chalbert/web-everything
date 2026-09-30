@@ -610,3 +610,6 @@ against the unique target card, rejects lane merge commits, and pins the observe
 calling pr-land. Observation failures refuse publication. Prepare agents acquire fresh origin/main
 lanes and never merge another lane. Regression histories live in
 `we:scripts/operations/__tests__/prepare-pr.test.mjs`.
+
+
+Builder red-draft recovery: test the raw draft snapshot before normalization (the build-policy projection drops draft metadata). GitHub REST check-runs responses contain a `check_runs` array, unlike the bare arrays returned by annotations and pull files. Exercise that IO shape, author liveness, durable PR-level retry accounting, exact branch forwarding, and comment plus `blocked:needs-human` construction. The recovery pass runs before in-flight holds; dry runs never dispatch. `WE_BUILD_DAEMON_RED_DRAFT_MINUTES` defaults to 60.
