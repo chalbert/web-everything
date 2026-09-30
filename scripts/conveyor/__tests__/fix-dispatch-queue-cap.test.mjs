@@ -15,8 +15,9 @@ import { NOTE_COMMENT_MARKER } from '../reconcile-note-comment.mjs';
 
 const FRESH = () => ({ fresh: true, behind: 0 });
 const item = { num: '3438', slug: 'wire-reconcile-pass', specPath: 'backlog/3438-wire-reconcile-pass.md', scope: ['we:scripts/conveyor/reconcile-fix-dispatch.mjs'] };
-const findItemStub = (key) => (key === '3438' ? item : null);
-const fixEntries = (prs) => prs.map((pr, i) => ({ kind: 'fix', prNumber: pr, headRefName: `lane/3438-wire-reconcile-pass-${i}` }));
+// #4295 — one scope-DISJOINT item per owed fix, so the overlap filter (correctly) doesn't serialize them.
+const findItemStub = (key) => (key === '3438' ? item : /^900\d$/.test(key) ? { num: key, slug: 'x', specPath: `backlog/${key}-x.md`, scope: [`we:scripts/x${key}.mjs`] } : null);
+const fixEntries = (prs) => prs.map((pr, i) => ({ kind: 'fix', prNumber: pr, headRefName: `lane/900${i}-x` }));
 const reconcileStub = (entries) => () => ({ dispatch: entries, refusals: [], notes: [], prs: entries.length, agents: 0 });
 const WE_PROFILE = () => ({ capabilities: { fix: true, ciHeal: true }, lanePoolRepo: '.' });
 

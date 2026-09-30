@@ -105,7 +105,7 @@ export async function dispatchCiHeal(planned, {
   // `ci-heal` claim for the same PR never share one slot (dup-heal-dispatch: `headSha` no longer part of the
   // claim's identity — see `fix-dispatch-claim.mjs`'s own header for the live incident this fixes).
   const claim = acquireClaim({
-    repo, pr: planned.pr, kind: 'ci-heal', headSha: planned.headRefOid, owner: claimOwner, lockRoot: claimRoot,
+    repo, pr: planned.pr, kind: 'ci-heal', headSha: planned.headRefOid, scope: planned.scope, owner: claimOwner, lockRoot: claimRoot,
   });
   if (!claim.ok) {
     return { held: true, reason: claim.reason, heldBy: claim.heldBy };

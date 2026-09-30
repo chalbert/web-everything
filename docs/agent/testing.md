@@ -4,7 +4,7 @@
 
 ## Standalone probation builds
 
-`scripts/operations/probation-build-run.mjs` accepts `--taskType=doc-fix|bugfix|test-fix` (doc-fix default),
+`scripts/operations/probation-build-run.mjs` accepts `--taskType=doc-fix|bugfix|test-fix|prepare` (doc-fix default),
 roster names or legacy JSON in `--worker`, and an allowlisted `--model`. Each omitted session is
 generated independently. Different items use separate lane clones; do not reuse an explicit session
 and lane for simultaneous runs. Task files, worker logs, commit messages and PR bodies are lane-local.
@@ -12,6 +12,9 @@ Pool discovery uses `defaultPoolRoot` with the script checkout root, never the c
 Mutation subprocesses must use both the lane cwd and the lane’s script copy: backlog and operation tools
 derive their roots from `import.meta.url`. Daemon clones remain read-only launch sources. The isolation
 test snapshots every launch-checkout file, including `.git`, across success and pre-worker failure.
+Prepare edits only the target card body and preparation stamps, never claims/resolves it, and verifies
+the runner-authored stamp before opening a parked PR. Its implementation scope does not bound preparation;
+the card path does. Decision preparation remains a Claude judgment role.
 Flash keeps the Codex read-only checker; a checker refusal undoes the attempt.
 `test-fix` uses Flash without a separate simple flag and refuses non-test worker diffs.
 The CI-heal decision currently has no structured failing-file list; do not infer one from check names.

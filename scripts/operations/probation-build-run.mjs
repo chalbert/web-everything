@@ -58,7 +58,7 @@
  * every other conveyor delivery arc's own EXIT step) or on failure (matching `probation-heal-run.mjs`, which
  * never releases the lane either — the lease reaper reclaims it).
  *
- * Operator CLI: --num=<item> --taskType=doc-fix|bugfix|test-fix --worker=<roster id|JSON> [--model=<allowed id>].
+ * Operator CLI: --num=<item> --taskType=doc-fix|bugfix|test-fix|prepare --worker=<roster id|JSON> [--model=<allowed id>].
  * Omitted taskType remains doc-fix; omitted session gets a random per-run identity. Worker names resolve
  * from PROBATION_WORKERS (agy Claude defaults to Sonnet). Flash is for simple mechanical work and requires
  * a read-only Codex APPROVE. No enclosing Claude session is started.
@@ -96,7 +96,8 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 export const WE_ROOT = resolve(HERE, '..', '..');
 const REPO_SLUG = CONSTELLATION_REPOS[DEFAULT_REPO_KEY].slug;
 const GATE_TIMEOUT_MS = 20 * 60 * 1000;
-/** The ordinary build arc only calls plain `claim`/`resolve` — never `prepare-stamp`, never `resolve` with
+/** Build modes call plain `claim`/`resolve`; prepare mode uses its separate two-key allowlist below.
+ *  Build modes never call `prepare-stamp` or `resolve` with
  *  `--graduated-to=`/`--codified-to=` — so its own frontmatter-tamper checks allow only what THOSE two calls
  *  can legitimately produce (#4291 plan-review finding, round 8; see `frontmatterTamperedBeyondClaim`'s own
  *  docblock for why this must be narrower than the shared default). */
@@ -165,7 +166,7 @@ export function parseArgs(argv) {
     else flags[a.slice(2, eq)] = a.slice(eq + 1);
   }
   const taskType = flags.taskType ?? 'doc-fix';
-  if (!['doc-fix', 'bugfix', 'test-fix'].includes(taskType)) throw new Error('taskType must be doc-fix or bugfix or test-fix');
+  if (!['doc-fix', 'bugfix', 'test-fix', 'prepare'].includes(taskType)) throw new Error('taskType must be doc-fix or bugfix or test-fix or prepare');
   const supplied = typeof flags.worker === 'string'
     ? (Object.hasOwn(PROBATION_WORKERS, flags.worker) ? { id: flags.worker } : JSON.parse(flags.worker))
     : null;
@@ -177,6 +178,7 @@ export function parseArgs(argv) {
     const model = flags.model ?? supplied.model ?? defaultModel;
     const allowed = def.provider === 'antigravity'
       ? [defaultModel, 'claude-sonnet-4-6', 'gemini-3.8-flash-high'] : [defaultModel];
+    if (taskType === 'prepare' && (!['codex', 'antigravity-gemini'].includes(def.id) || model !== defaultModel)) throw new Error('prepare requires a Codex or Gemini roster model');
     if (!allowed.includes(model)) throw new Error(`disallowed model for ${def.id}: ${model}`);
     // A Flash override must never bypass the simple-only/checker constraints.
     const flash = model === 'gemini-3.8-flash-high';
@@ -203,8 +205,10 @@ export function parseArgs(argv) {
 export async function runProbationBuild(args, io) {
   const { num, session, worker } = args;
   const taskType = args.taskType ?? 'doc-fix';
-  if (!['doc-fix', 'bugfix', 'test-fix'].includes(taskType)) throw new Error('taskType must be doc-fix or bugfix or test-fix');
+  if (!['doc-fix', 'bugfix', 'test-fix', 'prepare'].includes(taskType)) throw new Error('taskType must be doc-fix or bugfix or test-fix or prepare');
   if (!num || !session || !worker?.id) throw new Error('probation-build-run: --num, --session and --worker are required');
+  const preparing = taskType === 'prepare';
+  if (preparing && !['codex', 'antigravity-gemini'].includes(worker.id)) throw new Error('prepare requires codex or antigravity-gemini');
   const log = (m) => io.log(`probation-build-run #${num} [${worker.id}]: ${m}`);
   let declinedReason = null;
   const finish = (outcome, executor, detail, row = {}) => {
@@ -254,13 +258,16 @@ export async function runProbationBuild(args, io) {
 
     const item = io.findItem(num, lanePath);
     if (!item) return finish('not-applicable', 'none', `no backlog/${num}-*.md file in this checkout`);
+    if (preparing && parseYamlFrontmatter(item.raw).status !== 'open') {
+      return finish('not-applicable', 'none', 'prepare requires an open card');
+    }
 
     // Captured BEFORE the claim, so the check right after it can tell "claim only edited the working tree"
     // (the assumption every `abandon` below rests on) apart from "claim also committed", which would move
     // HEAD and quietly invalidate treating `baseSha` as the true pre-claim state.
     const preClaimSha = io.headSha(lanePath);
 
-    if (!io.claim(num, session, lanePath)) {
+    if (!preparing && !io.claim(num, session, lanePath)) {
       return finish('not-applicable', 'none', 'the item could not be claimed (already active/resolved, or a blocker reopened)');
     }
 
@@ -310,7 +317,7 @@ export async function runProbationBuild(args, io) {
     // lane, never the dispatch's `--scope` argument: a stale or overridden dispatch scope must not widen what
     // the worker may touch. `--scope` is what the lane LEASED, so a touched path must fall inside BOTH: the card
     // grants the edit, the lease keeps it off files a sibling lane may hold.
-    const scopeEntries = declaredScopePaths(item.scope);
+    const scopeEntries = preparing ? [item.path] : declaredScopePaths(item.scope);
     const leasedEntries = declaredScopePaths(args.scope);
     if (!scopeEntries.length) {
       return abandon('not-applicable', 'the item declares no scope: — refusing before running any worker; a probation build needs a declared scope to bound what the worker may touch', {}, 'none');
@@ -321,9 +328,11 @@ export async function runProbationBuild(args, io) {
     // left in, it would inflate the doc-fix envelope's file/line count with an unrelated frontmatter edit
     // (agy-launcher plan review, #4291). It is added to the final commit explicitly and separately, exactly
     // once.
-    const excludeFromDiff = [...preexisting, item.path];
+    const excludeFromDiff = preparing ? [] : [...preexisting, item.path];
 
-    const task = buildDocFixTask({ num, title: item.title, spec: item.spec, scope: item.scope, taskType }) +
+    const task = preparing ? io.readPrepareBrief(lanePath)
+      .replaceAll('{{ITEM_NUM}}', String(num)).replaceAll('{{ITEM_SPEC_PATH}}', item.path)
+      .split('<!-- /probation-worker -->')[0] : buildDocFixTask({ num, title: item.title, spec: item.spec, scope: item.scope, taskType }) +
       '\nIf the work already exists, check every Done-when against main and find the delivering commit in git log. ' +
       'When all checks pass, report "spec already done on main: commit <sha>" with the actual delivering SHA.\n';
     const taskFile = io.writeTaskFile(lanePath, 'probation-build-task.md', task);
@@ -360,8 +369,11 @@ export async function runProbationBuild(args, io) {
     // worker, so a worker forging `status:`/`dateStarted:` is tamper too.
     // Check the excluded card even on a no-change run.
     const postWorkerItem = io.findItem(num, lanePath);
-    if (postWorkerItem?.spec !== item.spec || postWorkerItem?.raw !== afterClaim?.raw) {
+    if (preparing ? frontmatterTamperedBeyondClaim(item.raw, postWorkerItem?.raw, ['preparedDate', 'preparedAgainstSha']) : (postWorkerItem?.spec !== item.spec || postWorkerItem?.raw !== afterClaim?.raw)) {
       return abandon('escalated-needs-human', "not built: the worker edited the item's own backlog card — refusing", { diff: diffRow });
+    }
+    if (preparing && (!summary.files || summary.paths.some(p => p !== item.path))) {
+      return abandon('gate-red', 'prepare requires a card-only diff', { diff: diffRow });
     }
     if (!summary.files) {
       // Classify the original report: prefixing it with worker-declined deliberately suppresses
@@ -427,8 +439,18 @@ export async function runProbationBuild(args, io) {
         if (!verdict.approved) return abandon('gate-red', `the ${worker.checker} checker did not approve: ${verdict.reason}`, { diff: diffRow });
       }
 
-      const resolved = io.resolveItem(num, lanePath);
-      if (!resolved.ok) return abandon('escalated-needs-human', `resolve refused: ${resolved.reason}`, { diff: diffRow });
+      const resolved = preparing ? io.stampPrepare(num, lanePath) : io.resolveItem(num, lanePath);
+      if (!resolved.ok) return abandon('escalated-needs-human', `${preparing ? 'prepare-unstamped' : 'resolve refused'}: ${resolved.reason ?? resolved.out ?? ''}`, { diff: diffRow });
+    }
+
+    if (preparing) {
+      const stamped = io.findItem(num, lanePath);
+      const fm = parseYamlFrontmatter(stamped?.raw ?? '');
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(fm.preparedDate ?? '')) || fm.preparedAgainstSha !== baseSha) return abandon('gate-red', 'prepare-unstamped', { diff: diffRow });
+      if (frontmatterTamperedBeyondClaim(item.raw, stamped.raw, ['preparedDate', 'preparedAgainstSha'])
+        || summarizeNumstat(io.diffNumstat(lanePath, baseSha, [])).paths.some(p => p !== item.path)) {
+        return abandon('gate-red', 'prepare changed fields or files outside its envelope', { diff: diffRow });
+      }
     }
 
     // x55dojc — re-checked immediately before the ONE commit this arc ever makes: `resolveItem` is its own
@@ -445,13 +467,20 @@ export async function runProbationBuild(args, io) {
     if (io.headSha(lanePath) !== baseSha) {
       return abandon('escalated-needs-human', 'refused: worker or resolve moved HEAD before the launcher commit', { diff: diffRow });
     }
-    io.commit(lanePath, [...summary.paths, item.path], declinedReason ? `WE #${num}: record standalone worker decline and route to prepare\n` : buildDocFixCommitMessage({ num, worker, taskType }));
+    io.commit(lanePath, [...new Set([...summary.paths, item.path])], declinedReason ? `WE #${num}: record standalone worker decline and route to prepare\n` : buildDocFixCommitMessage({ num, worker, taskType }));
 
     // The FINAL gate, on the commit that carries both the build and the resolve — the marker-writing mode
     // (unlike `probation-heal-run.mjs#runGate`'s marker-less `run` mode), because `open-pr --requireVerified=true`
     // below needs a fresh GREEN marker keyed to this exact HEAD.
     const gate = io.runGate(lanePath);
     if (!gate.pass) return abandon('gate-red', 'the gate is red after the build and the resolve', { diff: diffRow });
+
+    if (preparing) {
+      const committed = parseYamlFrontmatter(io.readCommittedCard(lanePath, item.path));
+      if (!committed.preparedDate || committed.preparedAgainstSha !== baseSha) {
+        return abandon('gate-red', 'prepare-unstamped at HEAD', { diff: diffRow });
+      }
+    }
 
     // #4291 plan-review finding (claim-accuracy, round 2) — a SEPARATE try/catch starts here, deliberately NOT
     // covered by the outer one's `abandon`: everything above this point undoes on ANY error, but the commit is
@@ -500,7 +529,7 @@ function trySh(bin, args, opts = {}) {
  * @returns {string[]}
  */
 export function openPrArgv({ num, attemptTag, slug, bodyFile, taskType = 'doc-fix' }) {
-  const ref = `lane/${num}${attemptTag ?? ''}-${slug}`;
+  const ref = `lane/${num}${attemptTag ?? ''}-${taskType === 'prepare' ? 'prepare-' : ''}${slug}`;
   return [
     'open-pr', `--ref=${ref}`, '--sha=HEAD', '--base=main', `--bodyFile=${bodyFile}`,
     `--title=WE #${num}: ${taskType} build — ${slug}`,
@@ -597,6 +626,9 @@ export function realIo({ session, env = process.env, repoRoot = WE_ROOT } = {}) 
         cwd, env: laneEnv, timeout: timeoutMs, killSignal: 'SIGKILL',
       }),
     }),
+    readCommittedCard: (dir, path) => sh('git', ['-C', dir, 'show', `HEAD:${path}`], { cwd: dir, env: laneEnv }),
+    readPrepareBrief: (dir) => readFileSync(join(dir, 'skills-src/conveyor/prepare-item-agent-brief.md'), 'utf8'),
+    stampPrepare: (n, dir) => node('scripts/backlog.mjs', ['prepare-stamp', String(n)], { cwd: dir, env: laneEnv }),
     claim: (n, s, dir) => node('scripts/backlog.mjs', ['claim', String(n), `--session=${s}`], { cwd: dir, env: laneEnv }).ok,
     headSha: (dir) => sh('git', ['-C', dir, 'rev-parse', 'HEAD'], { cwd: dir, env: laneEnv }).trim(),
     writeTaskFile: (dir, name, text) => {
@@ -689,7 +721,7 @@ export function realIo({ session, env = process.env, repoRoot = WE_ROOT } = {}) 
         `${taskType} build on probation (${w.executor}/${w.model}) for #${n} (agy-launcher-probation, #4291).`,
         '',
         `Probation worker \`${w.id}\` built this item to spec via its own synchronous launcher, then the launcher`,
-        `ran the gate, resolved the item and committed. ${diff.files} file(s), ${diff.loc} line(s) changed —`,
+        `ran the gate, ${taskType === 'prepare' ? 'stamped the preparation' : 'resolved the item'} and committed. ${diff.files} file(s), ${diff.loc} line(s) changed —`,
         `within the proven \`${taskType}\` envelope.`,
         '',
         'Full review and a run rating are owed on this change; promotion out of probation stays an explicit',

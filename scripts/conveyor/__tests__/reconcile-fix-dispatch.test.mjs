@@ -10,7 +10,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
   dispatchFix, fetchCardScopeAtRef, fetchPrDiffPaths, fetchPrDiffScope, fixBriefPath, freeLaneNumbers, isSafeFallbackScopeEntry, planFixesFromReconcile, runReconcileFixDispatch,
-  findResumeCandidate, buildResumePrompt, tryResumeFix,
+  findResumeCandidate, buildResumePrompt, tryResumeFix, filterFixesByInFlightScope,
 } from '../reconcile-fix-dispatch.mjs';
 import { CONFLICT_LABEL } from '../parked-pr-conflict-watch.mjs';
 import { DISPATCHED_AGENT_SYSTEM_PROMPT_FILE, dispatchSessionCwd } from '../../operations/dispatch-lane-io.mjs';
@@ -26,7 +26,9 @@ const REAL_TEMPLATE_STUB = [
 ].join('\n');
 
 const item3438 = { num: '3438', slug: 'wire-reconcile-pass', specPath: 'backlog/3438-wire-reconcile-pass.md', scope: ['we:scripts/conveyor/reconcile-fix-dispatch.mjs'] };
-const findItemStub = (key, _loadItems) => (key === '3438' ? item3438 : null);
+// #4295 — a second, scope-DISJOINT item so multi-PR dispatch tests aren't (correctly) serialized by the overlap filter.
+const item3439 = { num: '3439', slug: 'other-thing', specPath: 'backlog/3439-other-thing.md', scope: ['we:scripts/other.mjs'] };
+const findItemStub = (key, _loadItems) => (key === '3438' ? item3438 : key === '3439' ? item3439 : null);
 
 describe('planFixesFromReconcile', () => {
   it('narrows to `kind:\'fix\'` entries and plans one per dispatchable PR', () => {
@@ -815,7 +817,7 @@ describe('runReconcileFixDispatch — read reconcile-pass, plan, assign a lane, 
   it('dispatches every dispatchable fix entry and assigns each its own free lane, in order', () => {
     const entries = [
       { kind: 'fix', prNumber: 1764, headRefName: 'lane/3438-wire-reconcile-pass' },
-      { kind: 'fix', prNumber: 1765, headRefName: 'lane/3438-wire-reconcile-pass-b' },
+      { kind: 'fix', prNumber: 1765, headRefName: 'lane/3439-other-thing' },
     ];
     const dispatched = [];
     const result = runReconcileFixDispatch({
@@ -829,7 +831,7 @@ describe('runReconcileFixDispatch — read reconcile-pass, plan, assign a lane, 
     });
     expect(dispatched).toEqual([
       { itemNum: '3438', pr: 1764, laneRef: 'lane/3438-wire-reconcile-pass', scope: item3438.scope, scopeSource: 'item', isConflict: false, body: null, headRefOid: null, lane: 2 },
-      { itemNum: '3438', pr: 1765, laneRef: 'lane/3438-wire-reconcile-pass-b', scope: item3438.scope, scopeSource: 'item', isConflict: false, body: null, headRefOid: null, lane: 9 },
+      { itemNum: '3439', pr: 1765, laneRef: 'lane/3439-other-thing', scope: item3439.scope, scopeSource: 'item', isConflict: false, body: null, headRefOid: null, lane: 9 },
     ]);
     expect(result.dispatched).toHaveLength(2);
     expect(result.refusals).toEqual([]);
@@ -838,7 +840,7 @@ describe('runReconcileFixDispatch — read reconcile-pass, plan, assign a lane, 
   it('refuses `no-lane` for a planned fix once the free lanes run out, rather than dispatching two agents onto one lane', () => {
     const entries = [
       { kind: 'fix', prNumber: 1764, headRefName: 'lane/3438-wire-reconcile-pass' },
-      { kind: 'fix', prNumber: 1765, headRefName: 'lane/3438-wire-reconcile-pass-b' },
+      { kind: 'fix', prNumber: 1765, headRefName: 'lane/3439-other-thing' },
     ];
     const dispatched = [];
     const result = runReconcileFixDispatch({
@@ -874,7 +876,7 @@ describe('runReconcileFixDispatch — read reconcile-pass, plan, assign a lane, 
       // Entry 1: conflict-caused; its `tryResume` call throws (e.g. a transient `claude agents --json` read).
       { kind: 'fix', prNumber: 1764, headRefName: 'lane/3438-wire-reconcile-pass', labels: [CONFLICT_LABEL], body: 'stamped', headRefOid: 'sha' },
       // Entry 2: an unrelated ordinary bounce that must still be processed in the SAME tick.
-      { kind: 'fix', prNumber: 1765, headRefName: 'lane/3438-wire-reconcile-pass-b' },
+      { kind: 'fix', prNumber: 1765, headRefName: 'lane/3439-other-thing' },
     ];
     const dispatchCalls = [];
     const result = runReconcileFixDispatch({
@@ -893,7 +895,7 @@ describe('runReconcileFixDispatch — read reconcile-pass, plan, assign a lane, 
     // Entry 1 is refused individually; entry 2 still dispatches — the whole pass did NOT abort.
     expect(dispatchCalls).toEqual([1765]);
     expect(result.dispatched).toEqual([
-      { sessionId: 's-1765', sessionSlug: 'fix-1765', pr: 1765, itemNum: '3438', lane: 2, unknownTokens: [], resumed: false },
+      { sessionId: 's-1765', sessionSlug: 'fix-1765', pr: 1765, itemNum: '3439', lane: 2, unknownTokens: [], resumed: false },
     ]);
     expect(result.refusals).toEqual([
       { pr: 1764, kind: 'dispatch-failed', why: 'claude agents --json --all: transient listing failure' },
@@ -905,7 +907,7 @@ describe('runReconcileFixDispatch — read reconcile-pass, plan, assign a lane, 
       // Entry 1: conflict-caused, and (per the injected `tryResume` stub below) resumes successfully.
       { kind: 'fix', prNumber: 1764, headRefName: 'lane/3438-wire-reconcile-pass', labels: [CONFLICT_LABEL], body: 'stamped', headRefOid: 'sha' },
       // Entry 2: an ordinary bounce that DOES need a lane.
-      { kind: 'fix', prNumber: 1765, headRefName: 'lane/3438-wire-reconcile-pass-b' },
+      { kind: 'fix', prNumber: 1765, headRefName: 'lane/3439-other-thing' },
     ];
     const tryResumeCalls = [];
     const dispatchCalls = [];
@@ -938,7 +940,7 @@ describe('runReconcileFixDispatch — read reconcile-pass, plan, assign a lane, 
     ]);
     expect(result.dispatched).toEqual([
       { sessionId: 'cand', sessionSlug: null, pr: 1764, itemNum: '3438', lane: null, unknownTokens: [], resumed: true },
-      { sessionId: 's-1765', sessionSlug: 'fix-1765', pr: 1765, itemNum: '3438', lane: 7, unknownTokens: [], resumed: false },
+      { sessionId: 's-1765', sessionSlug: 'fix-1765', pr: 1765, itemNum: '3439', lane: 7, unknownTokens: [], resumed: false },
     ]);
     expect(result.refusals).toEqual([]); // no `no-lane` refusal — the pool never actually ran dry
   });
@@ -1334,5 +1336,35 @@ describe('runReconcileFixDispatch — item-less PRs (#xmtbdgs multi-repo slice 6
     });
     expect(result.dispatched).toEqual([]);
     expect(result.refusals).toEqual([{ pr: 2220, kind: 'no-scope', why: expect.any(String) }]);
+  });
+});
+
+describe('filterFixesByInFlightScope (#4295)', () => {
+  const fx = (pr, scope, itemNum = null) => ({ pr, itemNum, scope });
+  it('refuses a fix overlapping a live build claim as scope-overlap', () => {
+    const r = filterFixesByInFlightScope([fx(1, ['we:scripts/conveyor/x.mjs'])], [{ meta: { num: '9', scope: ['we:scripts/conveyor/'] } }], []);
+    expect(r.planned).toEqual([]);
+    expect(r.refusals[0]).toMatchObject({ pr: 1, kind: 'scope-overlap' });
+    expect(r.refusals[0].why).toMatch(/build #9/);
+  });
+  it('exempts the same item\'s own build claim', () => {
+    const r = filterFixesByInFlightScope([fx(1, ['we:a.mjs'], '9')], [{ meta: { num: '9', scope: ['we:a.mjs'] } }], []);
+    expect(r.planned).toHaveLength(1);
+  });
+  it('refuses the second of two overlapping fixes in one pass', () => {
+    const r = filterFixesByInFlightScope([fx(1, ['we:a/x']), fx(2, ['we:a/'])], [], []);
+    expect(r.planned.map((p) => p.pr)).toEqual([1]);
+    expect(r.refusals[0]).toMatchObject({ pr: 2, kind: 'scope-overlap' });
+  });
+  it('refuses against a live fix claim on another PR, but not its own PR or a scopeless claim', () => {
+    const claims = [{ meta: { pr: 3, scope: ['we:a/x'] } }, { meta: { pr: 4 } }, { meta: { pr: 1, scope: ['we:a/x'] } }];
+    expect(filterFixesByInFlightScope([fx(2, ['we:a/x'])], [], claims).refusals).toHaveLength(1);
+    expect(filterFixesByInFlightScope([fx(1, ['we:a/x'])], [], [claims[2]]).planned).toHaveLength(1);
+    expect(filterFixesByInFlightScope([fx(2, ['we:a/x'])], [], [claims[1]]).planned).toHaveLength(1);
+  });
+  it('passes disjoint scopes', () => {
+    const r = filterFixesByInFlightScope([fx(1, ['we:a/x']), fx(2, ['we:b/y'])], [{ meta: { num: '9', scope: ['we:c/'] } }], []);
+    expect(r.planned).toHaveLength(2);
+    expect(r.refusals).toEqual([]);
   });
 });

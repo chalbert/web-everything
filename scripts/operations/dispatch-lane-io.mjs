@@ -125,7 +125,7 @@ import { DISPATCH_PROVIDER_REGISTRY, dispatchModesFromEnv, dispatchProviderEntry
 // agy-launcher-probation — the probation-worker launcher (Codex / Antigravity-Claude / Antigravity-Gemini) for an
 // opened, non-critical ci-heal. See {@link routeDispatchProvider}.
 import {
-  PROBATION_HEAL_RUN_SCRIPT, probationLaunchDecision, probationLaunchFromEnv, probationWorkerDetachedProvider,
+  PROBATION_LAUNCHABLE_KINDS, probationLaunchDecision, probationLaunchFromEnv, probationWorkerDetachedProvider,
 } from './dispatch-providers/probation-worker.mjs';
 // #3645/#4212 — the detached-wrapper handle primitives. `defaultIsPidAlive`/`detachedHandlePid` let a `pid:<n>`
 // handle (a mechanical build's own PID, not a `claude` session id) answer its own liveness from the KERNEL
@@ -1652,8 +1652,9 @@ export function routeDispatchProvider(request, {
   // agy-launcher-probation — FIRST: an opened, non-critical ci-heal the router gave a probation worker runs on that
   // worker (see `dispatch-providers/probation-worker.mjs#probationLaunchDecision` for every condition).
   if (probationLaunchDecision(request, probationLaunch).launch) {
-    if (!scriptExists(PROBATION_HEAL_RUN_SCRIPT)) {
-      throw notApplied(`dispatch-lane: the probation launcher ${PROBATION_HEAL_RUN_SCRIPT} is not in this checkout — refusing before any process starts`);
+    const runScript = PROBATION_LAUNCHABLE_KINDS[kind].runScript;
+    if (!scriptExists(runScript)) {
+      throw notApplied(`dispatch-lane: the probation launcher ${runScript} is not in this checkout — refusing before any process starts`);
     }
     return probation(request);
   }

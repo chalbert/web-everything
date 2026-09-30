@@ -8,7 +8,7 @@
 import {
   PROVEN_TASK_ENVELOPES, isStatuteTierPath, isHighStakesTask, isWithinProvenEnvelope,
   selectProvider, selectSupervisionLevel, RECOMMENDATIONS, CLAUDE_TIERS, SUPERVISION_LEVELS, AGY_CLAUDE_MODEL_BY_TIER,
-  workerTierFor,
+  workerTierFor, selectProbationWorker, CRITICAL_WORK_GATE,
 } from './provider-routing.mjs';
 import { scrubPublish } from './secret-scrub.mjs';
 import { thresholdsForRisk, neverSpotCheck, spotCheckSample } from './dispatch-thresholds.mjs';
@@ -1144,6 +1144,14 @@ export function decideDispatchRoute(dispatch = {}, { scorecards = [], enforceSup
         supervisionHold: null,
         auditTrail: [audit('role-path', derivation.role, `kind=${kind}`, derivation.reason)],
       };
+      // Preparation edits the card, not its eventual implementation scope. The launcher enforces that
+      // single-card envelope; judgment roles (especially prepare-decision) never enter this roster.
+      if (kind === 'prepare-item' && (criticalWorkGate ?? CRITICAL_WORK_GATE).openForNonCritical?.prepare) {
+        const picked = selectProbationWorker({ taskType: 'prepare', filesTouched: [], estimatedSize: 0, simple: dispatch.simple === true, scorecards: routingRecords(scorecards), vetoes: criticalMissesFor(scorecards, 'prepare') });
+        record.probationWorker = picked.worker;
+        record.tier = CLAUDE_TIERS.SONNET;
+        record.auditTrail.push(...picked.auditTrail);
+      }
       // A role dispatch has no provider decision to override, and the marker is not read for these kinds (see
       // `MARKER_KINDS`), so `override` is `null` here: minting a route for it would be the guess this card removes.
       return record;

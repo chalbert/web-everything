@@ -38,6 +38,7 @@
  */
 
 import { normNum } from './queue-store.mjs';
+import { parseScopeEntry, pathsOverlap, firstScopeOverlap, overlapsInFlight } from '../readiness/overlap-chain.mjs';
 
 /** The declared policy. Numbers are defaults; the daemon may override the concurrency/open-item caps from
  *  flags, never the rule set itself. */
@@ -87,43 +88,10 @@ export const BUILD_DISPATCH_POLICY = Object.freeze({
   ]),
 });
 
-/**
- * Split a repo-qualified scope entry (`plateau-app:src/x.ts`, `we:scripts/`) into `{ repo, path }`. An entry
- * with no known prefix is a WE path (the backlog's own convention). Returns `null` for an empty entry.
- * @param {string} entry
- */
-export function parseScopeEntry(entry) {
-  const s = String(entry ?? '').trim();
-  if (!s) return null;
-  const m = /^([A-Za-z0-9._-]+):(.*)$/.exec(s);
-  const repo = m ? m[1] : 'we';
-  const path = (m ? m[2] : s).replace(/^\.\//, '').trim();
-  if (!path) return null;
-  return { repo: repo === 'plateau' ? 'plateau-app' : repo, path };
-}
+export { parseScopeEntry };
 
-/** Two paths overlap when equal, or when one is a directory prefix of the other (segment boundary). */
-export function pathsOverlap(a, b) {
-  const x = String(a).replace(/\/+$/, '');
-  const y = String(b).replace(/\/+$/, '');
-  if (!x || !y) return false;
-  return x === y || y.startsWith(`${x}/`) || x.startsWith(`${y}/`);
-}
-
-/**
- * The first overlapping pair between two scope lists, or `null`. Both lists hold repo-qualified entries
- * (or `{repo,path}` objects); entries in different repos never overlap.
- */
-export function firstScopeOverlap(scopeA, scopeB) {
-  const as = (scopeA || []).map((e) => (typeof e === 'string' ? parseScopeEntry(e) : e)).filter(Boolean);
-  const bs = (scopeB || []).map((e) => (typeof e === 'string' ? parseScopeEntry(e) : e)).filter(Boolean);
-  for (const a of as) {
-    for (const b of bs) {
-      if (a.repo === b.repo && pathsOverlap(a.path, b.path)) return `${a.repo}:${a.path}`;
-    }
-  }
-  return null;
-}
+// One overlap definition, shared with fix dispatch (#4295) — lives in the pure chain planner.
+export { pathsOverlap, firstScopeOverlap };
 
 /**
  * The branch-name rule: the first path segment of a ref must not start with a digit (`lane/2385-x` is fine,
@@ -208,6 +176,8 @@ function executorClass(executor) {
  *   for 30+ minutes while 116 items sat queued — the old `max(durable in-flight, externalBuilding)` math let a
  *   machine-wide count that had nothing to do with this builder's own concurrency hold every candidate. At the
  *   operator's chosen cap of 3 the builder would never build at all while ANY other worker ran anywhere.
+ * @param {Array<{pr:number, scope:string[]}>} [o.fixInFlight]  #4295 — live FIX/ci-heal claims' scopes; a candidate
+ *   overlapping one is held `hot-file`. Separate from `inFlight` (fix claims have no item `num`).
  * @param {{engaged:boolean, reason?:string}} [o.killSwitch]
  * @param {object} [o.policy]
  * @param {Iterable<string>|null} [o.dispatchedByBuilder] card xovjhwh (operator decision 2026-09-29): the set of
@@ -227,7 +197,7 @@ function executorClass(executor) {
  */
 export function planBuildDispatch({
   candidates = [], inFlight = [], openPrs = [], externalBuilding = 0, killSwitch = { engaged: false }, policy = BUILD_DISPATCH_POLICY,
-  dispatchedByBuilder = null,
+  dispatchedByBuilder = null, fixInFlight = [],
 } = {}) {
   const hold = [];
   const dispatch = [];
@@ -307,6 +277,11 @@ export function planBuildDispatch({
         const hit = firstScopeOverlap(c.scope, r.scope);
         if (hit) { blocked = { rule: 'hot-file', reason: `${hit} is already being built by #${r.num}` }; break; }
       }
+    }
+    if (!blocked) {
+      // #4295 — a live FIX claim (`[{pr, scope}]`) is in-flight work too: never build beside a fixer on the same file.
+      const fx = overlapsInFlight(c.scope, fixInFlight.map((f) => ({ id: f.pr, scope: f.scope })));
+      if (fx) blocked = { rule: 'hot-file', reason: `${fx.hit} is already being fixed by PR #${fx.with}` };
     }
     if (blocked) { hold.push({ ...base, ...blocked }); continue; }
     // #4353 wip-cap — checked BEFORE the plain concurrency `cap` below, inside the SAME per-candidate loop

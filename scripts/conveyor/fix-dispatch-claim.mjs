@@ -109,12 +109,12 @@ export function fixDispatchClaimOwner({ host = hostname(), pid = process.pid } =
  * file's own header for why that TTL, not PID liveness, is the ONLY reclaim floor here (and for
  * {@link refreshLiveFixDispatchClaims}, which is what keeps a genuinely still-working session's claim from
  * ever reaching that TTL in the first place).
- * @param {{repo:string, pr:number, kind?:string, headSha?:string|null, owner?:string, sessionId?:string|null,
+ * @param {{repo:string, pr:number, kind?:string, headSha?:string|null, scope?:string[]|null, owner?:string, sessionId?:string|null,
  *   pid?:number, host?:string, nowMs?:number, nowIso?:string, leaseMinutes?:number, lockRoot?:string}} o
  * @returns {{ok:boolean, reason:string, heldBy:string|null, resource:string, lockRoot:string}}
  */
 export function acquireFixDispatchClaim({
-  repo, pr, kind = 'fix', headSha = null, owner = fixDispatchClaimOwner(), sessionId = null,
+  repo, pr, kind = 'fix', headSha = null, scope = null, owner = fixDispatchClaimOwner(), sessionId = null,
   pid = process.pid, host = hostname(), nowMs = Date.now(), nowIso = new Date(nowMs).toISOString(),
   leaseMinutes = DEFAULT_FIX_DISPATCH_CLAIM_TTL_MINUTES, lockRoot = fixDispatchClaimRoot(),
 } = {}) {
@@ -131,6 +131,8 @@ export function acquireFixDispatchClaim({
     ? prior.meta.claimedAt : nowIso;
   const meta = {
     host, sessionId, repo, pr, kind, headSha: headSha ?? null, claimedAt,
+    // #4295 — declared scope (repo-qualified) so build/fix dispatch can serialize on overlap; omitted when unknown.
+    ...(Array.isArray(scope) && scope.length ? { scope: scope.map(String) } : {}),
   };
   // `pidLiveness` is ALWAYS 'unknown' — see this file's own header for why a fast PID-dead reclaim would be
   // actively wrong here (the acquiring dispatcher's own exit is expected completion, not a crash).

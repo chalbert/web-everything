@@ -67,6 +67,57 @@ function intersects(listA, listB) {
 }
 
 /**
+ * Split a repo-qualified scope entry (`plateau-app:src/x.ts`, `we:scripts/`) into `{ repo, path }`. An entry with
+ * no known prefix is a WE path (the backlog's own convention). `null` for an empty entry.
+ */
+export function parseScopeEntry(entry) {
+  const s = String(entry ?? '').trim();
+  if (!s) return null;
+  const m = /^([A-Za-z0-9._-]+):(.*)$/.exec(s);
+  const repo = m ? m[1] : 'we';
+  const path = (m ? m[2] : s).replace(/^\.\//, '').trim();
+  if (!path) return null;
+  return { repo: repo === 'plateau' ? 'plateau-app' : repo, path };
+}
+
+/** Two paths overlap when equal, or when one is a directory prefix of the other (segment boundary). */
+export function pathsOverlap(a, b) {
+  const x = String(a).replace(/\/+$/, '');
+  const y = String(b).replace(/\/+$/, '');
+  if (!x || !y) return false;
+  return x === y || y.startsWith(`${x}/`) || x.startsWith(`${y}/`);
+}
+
+/**
+ * The first overlapping pair between two scope lists, or `null`. Entries are repo-qualified strings or
+ * `{repo,path}` objects; entries in different repos never overlap. Directory-prefix rule (a superset of the
+ * exact-match `intersects` the batch planner uses) — the ONE overlap definition for concurrent dispatch.
+ */
+export function firstScopeOverlap(scopeA, scopeB) {
+  const parse = (list) => (list || []).map((e) => (typeof e === 'string' ? parseScopeEntry(e) : e)).filter(Boolean);
+  const bs = parse(scopeB);
+  for (const a of parse(scopeA)) {
+    for (const b of bs) {
+      if (a.repo === b.repo && pathsOverlap(a.path, b.path)) return `${a.repo}:${a.path}`;
+    }
+  }
+  return null;
+}
+
+/**
+ * Does `files` overlap any in-flight item's scope? `inFlight` is `[{id, scope}]`; returns
+ * `{hit, with}` (first overlapping path, and the in-flight item's `id`) or `null`. Pure. Dispatch SERIALIZES on
+ * a hit (holds the later item) — it cannot stack, since a concurrent predecessor has no pushed tip yet.
+ */
+export function overlapsInFlight(files, inFlight) {
+  for (const r of inFlight || []) {
+    const hit = firstScopeOverlap(files, r?.scope);
+    if (hit) return { hit, with: r.id };
+  }
+  return null;
+}
+
+/**
  * Create a fresh stack plan. JSON-serializable (arrays/objects only — the CLI round-trips it to a scratch
  * file between seams).
  * @param {{supported:boolean, depthCap?:number}} opts  `supported` = the capability-marker verdict read off
