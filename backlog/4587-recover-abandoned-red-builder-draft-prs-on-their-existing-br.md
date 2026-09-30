@@ -1,4 +1,5 @@
 ---
+bornAs: x0my26i
 kind: story
 size: 3
 status: resolved
