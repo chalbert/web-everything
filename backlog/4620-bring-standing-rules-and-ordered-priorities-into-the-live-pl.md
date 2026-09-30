@@ -3,6 +3,7 @@ bornAs: xr8m6gs
 kind: story
 locus: plateau-app
 size: 5
+tier: pinned
 status: open
 scope: ["we:contracts/plateau-progress-view.schema.json", "we:contracts/plateau-progress-view.examples.json", "plateau-app:src/wip/types.ts", "plateau-app:src/wip/wip-read.ts", "plateau-app:src/wip/wip-model.ts", "plateau-app:src/wip/wip-view.ts", "plateau-app:src/wip/wip-view.css", "plateau-app:src/wip/wip-source.ts", "plateau-app:src/wip/wip-live.ts", "plateau-app:src/wip/progress-read.ts", "plateau-app:src/wip/progress-read.test.ts", "plateau-app:src/wip/wip-model.test.ts", "plateau-app:src/wip/wip-view.test.ts", "plateau-app:src/wip/wip-relay-contract.test.ts", "plateau-app:scripts/wip-publish.ts", "plateau-app:wip-relay.js"]
 dateOpened: "2026-09-30"
