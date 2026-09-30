@@ -667,6 +667,30 @@ function unionPaths(cumulative, own) {
   return out;
 }
 
+/**
+ * #4502 — a worker PR that discloses a rule deviation parks for the operator. The disclosure is the FIRST
+ * non-blank line of the PR body, `Deviation: <text>` (case-sensitive prefix, non-empty text). A `Deviation:` on any
+ * later line (quoted docs, fenced examples) does not count. Pure. Returns the trimmed text, or `null`.
+ * @param {string|null|undefined} body
+ * @returns {string|null}
+ */
+export function parseDeviationDisclosure(body) {
+  if (typeof body !== 'string') return null;
+  const lines = body.replace(/^\uFEFF/, '').split(/\r?\n/);
+  const first = lines.find((l) => l.trim() !== '');
+  if (first === undefined) return null;
+  const m = /^Deviation:(.*)$/.exec(first.trimStart());
+  if (!m) return null;
+  // Strip HTML-comment delimiters so a worker-supplied line can never render as a live marker
+  // (`<!-- cleared-human: … -->`, `reviewed-sha`) once the drain quotes it into a bot-authored comment/PR body.
+  // Strip to a FIXED POINT: a single pass is defeated by nesting (`<!<!---->-- x --<!---->>` re-forms `<!-- x -->`).
+  let text = m[1];
+  for (let prev = null; prev !== text;) { prev = text; text = text.replace(/<!--|-->/g, ''); }
+  text = text.trim();
+  // Fail CLOSED: a bare `Deviation:` (reason forgotten or on the next line) is still a disclosure and parks.
+  return text === '' ? '(no reason provided)' : text;
+}
+
 export function scoreEscalation({
   changedFiles = [],
   diffLines = 0,
@@ -677,6 +701,7 @@ export function scoreEscalation({
   thresholds = {},
   diffHunks = null,
   basisNarrowed = true,
+  deviation = null,
 } = {}) {
   const t = { ...DEFAULT_THRESHOLDS, ...thresholds };
   const reasons = [];
@@ -742,6 +767,14 @@ export function scoreEscalation({
   const derivationFiles = gateBasis.filter(isPolicyDerivationPath);
   // @invariant human-gate-is-principle-surface (#human-is-principle-surface-not-path) — humanRequired fires ONLY when isPrincipleSurface says so; never re-add a bare path term
   const humanRequired = gateBasis.some((f) => isPrincipleSurface(f, fileHunksOf(f)));
+  let humanForced = humanRequired;
+  // #4502 — a disclosed rule deviation forces the human park regardless of file signals; the text rides
+  // `reasons` verbatim so the #2324 body block and park comment quote it with no new comment path.
+  if (typeof deviation === 'string' && deviation !== '') {
+    humanForced = true;
+    reasons.push(`worker disclosed a rule deviation: ${deviation}`);
+    signals.deviation = deviation;
+  }
 
   // The additive marker term cannot read a file it has no diff section for — the whole diff was not computed, or the
   // cumulative hunks do not cover an own-delta-only path. Name those files on the verdict rather than letting "no
@@ -804,7 +837,7 @@ export function scoreEscalation({
   // #2567 — the advisory CARE-LEVEL, derived from the same signals. ADDITIVE: existing callers that only read
   // escalate/humanRequired/reasons/signals are unchanged; the care-level is the new advisory dial (it tells the
   // AI panel how hard to look — `panelRigorForCareLevel` — and never changes route or land).
-  const careLevel = deriveCareLevel({ signals, humanRequired });
+  const careLevel = deriveCareLevel({ signals, humanRequired: humanForced });
 
   // #2890 — passthrough, not a signal: `producerReviewLabel(score)` and any other caller that receives this
   // verdict object gets `diffHunks` for free, without a second signature change, once a future detector reads it.
@@ -823,7 +856,7 @@ export function scoreEscalation({
   // #2635 roster recompute) can select over the SAME honest basis this scored, instead of the own-delta.
   // #3343 — `basisUntrusted` rides the verdict so a consumer (and the human who has to clear a `review:human`)
   // can tell a verdict scored on the PR's own file set from one scored on the base tip. Never a permission.
-  return { escalate: reasons.length > 0, humanRequired, careLevel, reasons, signals, basisFiles, basisUntrusted, diffHunks: hunks, diffHunksBasisFiles };
+  return { escalate: reasons.length > 0, humanRequired: humanForced, careLevel, reasons, signals, basisFiles, basisUntrusted, diffHunks: hunks, diffHunksBasisFiles };
 }
 
 /**
@@ -2801,7 +2834,7 @@ export function decideDurableEscalationRecord({ changed, verified, liveBody, rea
 export function decideReviewGate({
   escalate, humanRequired = false, labels = [], acceptedSha = null, headSha = null,
   acceptedDiff = null, headDiff = null, acceptedContribution = null, headContribution = null,
-  operatorClearance = null, headReadFailed = false, engineTier = false,
+  operatorClearance = null, headReadFailed = false, engineTier = false, deviation = null, humanClearedSha = null,
 } = {}) {
   // A reviewer verdict (whoever applied it — for a human-gated PR only a human can) always wins, and is checked
   // FIRST so it overrides even the sticky human gate below: review:accepted IS the human clearing the gate →
@@ -2903,6 +2936,20 @@ export function decideReviewGate({
         humanRequired: !!toHuman,
         revokesClearance,
         clearance: revokesClearance ? operatorClearance : null,
+      };
+    }
+    // #4502 — a PR that disclosed a rule deviation does not merge on a bare accept (an agent/auto accept may land
+    // before the drain scores the body): it needs a RECORDED human clearance BOUND TO THE LIVE HEAD —
+    // `humanClearedSha` from `parseLatestHumanClearedSha` (trusted-author gated, `reviewed-sha` + `cleared-human`
+    // in the SAME comment). The bare `operatorClearance` is forgeable/stale and is NOT accepted here. Without
+    // one, re-park `review:human`.
+    const deviationCleared = !!(humanClearedSha && headSha && String(humanClearedSha).toLowerCase() === String(headSha).toLowerCase());
+    if (deviation && !deviationCleared) {
+      return {
+        action: 'park',
+        reason: `worker disclosed a rule deviation (${deviation}) — review:accepted without a recorded human clearance does not merge; re-parking review:human`,
+        applyLabel: REVIEW_LABELS.human,
+        humanRequired: true,
       };
     }
     // #2412 layer 4 — an ENGINE-tier PR (the lander/daemon/dispatch-loop machinery, `isEngineTierPath`) is the

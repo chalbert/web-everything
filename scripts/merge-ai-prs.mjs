@@ -140,7 +140,7 @@ import { healNnnCollision } from './lib/nnn-collision-heal.mjs';
 // fingerprint reader (`parseReviewedDiff`), #2832/#984's hold-invariant helpers (`READY_TO_MERGE_LABEL`,
 // `isReviewHoldLabel`, `decideParkReadyStrip`), #2890's null-contract diff mapper (`diffHunksFrom`), and
 // #x9xqexm's contribution fingerprint reader (`parseReviewedContribution`). None supersedes another.
-import { scoreEscalation, diffHunksFrom, decideReviewGate, REVIEW_LABELS, REVIEW_LABEL_META, reconcileEscalationReasonBlock, decideDurableEscalationRecord, bodyHasEscalationReason, shouldApplyReviewLabel, hasUnclearedReviewLabel, hasReviewLabel, parseReviewedSha, parseReviewedDiff, parseReviewedContribution, parseOperatorClearance, parseLatestHumanClearedSha, shouldReparkForTestTampering, buildClearanceRevocationComment, READY_TO_MERGE_LABEL, isReviewHoldLabel, decideParkReadyStrip, isEngineTierPath,
+import { scoreEscalation, parseDeviationDisclosure, diffHunksFrom, decideReviewGate, REVIEW_LABELS, REVIEW_LABEL_META, reconcileEscalationReasonBlock, decideDurableEscalationRecord, bodyHasEscalationReason, shouldApplyReviewLabel, hasUnclearedReviewLabel, hasReviewLabel, parseReviewedSha, parseReviewedDiff, parseReviewedContribution, parseOperatorClearance, parseLatestHumanClearedSha, shouldReparkForTestTampering, buildClearanceRevocationComment, READY_TO_MERGE_LABEL, isReviewHoldLabel, decideParkReadyStrip, isEngineTierPath,
   // #2766/#2767 — the mutual-exclusivity park decision (imported HERE, the leaf module, never from
   // `review-set-label.mjs`, which itself imports `computeNetDiffText` FROM this file — a back-import would
   // be a circular module cycle). `review-set-label.mjs` re-exports both for discoverability under the
@@ -1561,6 +1561,7 @@ export function buildDrainVerdicts({ prsByRepo, readOf, repos = [], requiredChec
       // #2447 — the body's own `graduatedTo:` note, extracted now so the escalation pass (which no longer holds `p`)
       // can derive the resolution basis without keeping the whole body on every verdict. `null` for nearly all PRs.
       v.bodyGraduatedTo = graduatedToFromBody(p.body);
+      v.deviation = parseDeviationDisclosure(p.body);
       verdicts.push(v);
     }
   }
@@ -4603,7 +4604,7 @@ async function runCli() {
       // `null` when it was not — including the no-clone path this block skipped entirely. Finding 4 — the hunks
       // are always CUMULATIVE while `changedFiles` may be de-inflated to `v.base…head`; the verdict's
       // `diffHunksBasisFiles` (= `humanBasisFiles`, same basis as the hunks) is what a detector pairs them with.
-      const score = scoreEscalation({ changedFiles, diffLines, humanBasisFiles, cumulativeDiffLines, dismissedFindings: v.dismissedFindings, crossRepo: v.crossRepo, diffHunks, basisNarrowed });
+      const score = scoreEscalation({ changedFiles, diffLines, humanBasisFiles, cumulativeDiffLines, dismissedFindings: v.dismissedFindings, crossRepo: v.crossRepo, diffHunks, basisNarrowed, deviation: v.deviation });
       // #2766/#2767 — this PR's OWN changed-file set, stamped onto the verdict (best-effort — whatever this
       // pass already scored, never a new `gh` call) so a LATER sibling verdict in this SAME batch can ask
       // "did this PR's own commits touch the file my test-gaming finding cites?" without re-fetching — the
@@ -4793,6 +4794,7 @@ async function runCli() {
       // permits a merge; it only lets the gate know that a re-imposed `review:human` is overriding a human's
       // recorded clearance, so the re-hold can be announced instead of landing silently.
       let operatorClearance = null;
+      let humanClearedShaForGate = null; // #4502 — trusted, head-bound clearance the deviation gate requires
       if (hasReviewLabel(v.prLabels, REVIEW_LABELS.accepted)) {
         try {
           const d = JSON.parse(execFileSync('gh', ['pr', 'view', String(v.num), ...repoFlag(v.repo), '--json', 'headRefOid,headRefName,comments'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim() || '{}');
@@ -4802,6 +4804,7 @@ async function runCli() {
           acceptedDiff = parseReviewedDiff(d.comments || []);
           acceptedContribution = parseReviewedContribution(d.comments || []);
           operatorClearance = parseOperatorClearance(d.comments || []);
+          humanClearedShaForGate = parseLatestHumanClearedSha(d.comments || []);
         } catch { /* fetch miss → SHAs null → gate fails open */ }
         // #x169fqe — the LIVE diff, read only when the accept actually recorded a fingerprint to compare it
         // against AND the head has moved. Both conditions keep this off the common path: a pre-#x169fqe accept
@@ -4874,7 +4877,7 @@ async function runCli() {
       // `#2410` ships that writer — do not re-inline the computation here when that day comes, keep it in one
       // named, tested place.
       const engineTier = engineTierForCandidate(score);
-      const gate = decideReviewGate({ escalate: score.escalate, humanRequired: score.humanRequired, labels: v.prLabels, acceptedSha, headSha: liveHeadSha, acceptedDiff, headDiff: liveHeadDiff, acceptedContribution, headContribution: liveHeadContribution, operatorClearance, headReadFailed: liveDiffReadFailed, engineTier });
+      const gate = decideReviewGate({ escalate: score.escalate, humanRequired: score.humanRequired, labels: v.prLabels, acceptedSha, headSha: liveHeadSha, acceptedDiff, headDiff: liveHeadDiff, acceptedContribution, headContribution: liveHeadContribution, operatorClearance, headReadFailed: liveDiffReadFailed, engineTier, deviation: v.deviation, humanClearedSha: humanClearedShaForGate });
       v.escalated = score.escalate ? 'yes' : 'no';
       // #2365 — gate.humanRequired (not score.humanRequired): decideReviewGate's verdict is the sticky one (#2362
       // makes an already-applied review:human label win even when a rebase narrows the diff back to

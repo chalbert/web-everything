@@ -96,7 +96,7 @@ import { findDuplicateIds, summarizeDuplicates } from './lib/duplicate-id-tripwi
 // the review caught (#2890-review-r2 finding 3); a source guard in pr-land.test.mjs holds that shut.
 import { computeNetDiffSignals } from './merge-ai-prs.mjs';
 import {
-  scoreEscalation, producerReviewLabel, shouldApplyReviewLabel, REVIEW_LABEL_META, REVIEW_LABELS,
+  scoreEscalation, parseDeviationDisclosure, producerReviewLabel, shouldApplyReviewLabel, REVIEW_LABEL_META, REVIEW_LABELS,
   reconcileEscalationReasonBlock, reconcileRoster, ROSTER_TIMING,
   isReviewHoldLabel, READY_TO_MERGE_LABEL, readyMergeConflictsWithHold, hasUnclearedReviewLabel,
 } from './lib/review-escalation.mjs'; // #2307 — deterministic review-escalation label AT PR-OPEN; #2635 — roster bind+reconcile; #2832 — hold/ready self-consistency
@@ -583,13 +583,13 @@ export function classifyChecks(rows) {
  * @returns {{label:string|null, apply:boolean, reasons:string[], humanRequired:boolean}}
  */
 export function resolveProducerReviewLabel({
-  changedFiles = [], diffLines = 0, humanBasisFiles = null, cumulativeDiffLines = null, dismissedFindings = 0, crossRepo = false, currentLabels = [], diffHunks = null, basisNarrowed = true,
+  changedFiles = [], diffLines = 0, humanBasisFiles = null, cumulativeDiffLines = null, dismissedFindings = 0, crossRepo = false, currentLabels = [], diffHunks = null, basisNarrowed = true, deviation = null,
 } = {}) {
   // #3343 — `basisNarrowed` comes from `computeNetDiffSignals`: `false` means the cumulative file set is the
   // un-narrowed base TIP, so it may name files only upstream touched. It never relaxes the human gate (see
   // `scoreEscalation`); it only makes that fact visible on the verdict. Default `true` — a caller that supplies
   // nothing scores exactly as before.
-  const score = scoreEscalation({ changedFiles, diffLines, humanBasisFiles, cumulativeDiffLines, dismissedFindings, crossRepo, diffHunks, basisNarrowed });
+  const score = scoreEscalation({ changedFiles, diffLines, humanBasisFiles, cumulativeDiffLines, dismissedFindings, crossRepo, diffHunks, basisNarrowed, deviation });
   const label = producerReviewLabel(score);
   // #2635 — expose the advisory care-level too, so the caller can recompute the jury roster (`resolveJuryPlan`)
   // for the SAME care band this rubric scored, then bind + reconcile it against the pre-registered roster.
@@ -1022,7 +1022,7 @@ function runCli() {
     // un-narrowed base TIP. `scored:false` means nothing was measured at all, which is a different fact from a
     // measurement taken on the wrong basis — don't stamp the un-narrowed reason on an empty score.
     const basisNarrowed = sig.scored ? sig.basisNarrowed !== false : true;
-    const rubric = resolveProducerReviewLabel({ changedFiles, diffLines, humanBasisFiles, cumulativeDiffLines, dismissedFindings, crossRepo, currentLabels, diffHunks, basisNarrowed });
+    const rubric = resolveProducerReviewLabel({ changedFiles, diffLines, humanBasisFiles, cumulativeDiffLines, dismissedFindings, crossRepo, currentLabels, diffHunks, basisNarrowed, deviation: parseDeviationDisclosure(BODY) });
 
     // #2635 — BIND + RECONCILE the jury roster against the REAL diff. The pre-registered roster (the item's
     // charter roster) rides the lane manifest when a prepare-time slice recorded it (`preRegisteredLenses`);

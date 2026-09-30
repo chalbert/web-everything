@@ -3,9 +3,10 @@ bornAs: xh9yqt2
 kind: story
 size: 3
 tier: pinned
-status: open
+status: active
 scope: ["we:scripts/lib/review-escalation.mjs", "we:scripts/pr-land.mjs", "we:scripts/merge-ai-prs.mjs", "we:skills-src/conveyor/delivery-agent-brief.md"]
 dateOpened: "2026-09-29"
+dateStarted: "2026-09-29"
 preparedDate: "2026-09-29"
 preparedAgainstSha: "2bfaad8764471712f05d22b82cad0fa116a609cb"
 tags: []
