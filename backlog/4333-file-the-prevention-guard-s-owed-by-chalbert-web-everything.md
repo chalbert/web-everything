@@ -3,9 +3,10 @@ bornAs: xrm17bt
 kind: story
 size: 3
 parent: "4075"
-status: open
+status: active
 scope: ["we:scripts/conveyor/ci-red-recovery-watch.mjs", "we:scripts/conveyor/ci-heal-mark.mjs", "we:scripts/conveyor/rearm-review.mjs", "we:scripts/review-set-label.mjs", "we:scripts/merge-ai-prs.mjs", "we:scripts/__tests__/merge-ai-prs-acceptance-restamp-and-review-coverage.test.mjs", "we:scripts/conveyor/__tests__/ci-red-recovery-watch.test.mjs", "we:scripts/conveyor/__tests__/ci-heal-mark.test.mjs", "we:scripts/conveyor/__tests__/rearm-review.test.mjs", "we:scripts/__tests__/review-set-label.test.mjs"]
 dateOpened: "2026-09-27"
+dateStarted: "2026-09-30"
 preparedDate: "2026-09-30"
 preparedAgainstSha: "a3c0a91aa598975278b069804080e07bda640b71"
 tags: []

@@ -87,6 +87,15 @@ describe('restampAcceptance (#3202 — the re-stamp reads the PR\'s OWN tree)', 
     return { calls, spawn };
   };
 
+  it('restampAcceptance omits --repo when repo is falsy', () => {
+    for (const repo of [null, undefined, '']) {
+      const { calls, spawn } = spy();
+      restampAcceptance({ pr: 42, repo, newHead: 'f5bc7940', spawn });
+      expect(calls[0].argv.some((a) => String(a).startsWith('--repo'))).toBe(false);
+      expect(calls[0].argv).not.toContain('--repo=null');
+    }
+  });
+
   it('pins the child to the sibling repo\'s clone — the wrong-tree fingerprint this exists to prevent', () => {
     const { calls, spawn } = spy();
     const out = restampAcceptance({ pr: 42, repo: 'plateau-app', newHead: 'f5bc7940', cwd: '/ws/plateau-app', spawn });

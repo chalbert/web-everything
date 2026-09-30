@@ -2837,6 +2837,79 @@ describe('runReviewLabelCli — restamp stamps the CALLER-asserted --new-head, n
   });
 });
 
+describe('decideSetLabel — rearm requireLive (#4333)', () => {
+  it('rearm with requireLive:\'accepted\' refuses when only review:changes is live', () => {
+    const d = decideSetLabel({ to: 'rearm', currentLabels: [{ name: REVIEW_LABELS.changes }], requireLive: 'accepted' });
+    expect(d.allowed).toBe(false);
+    expect(d.removeLabels).toEqual([]);
+    expect(d.addLabel).toBe('');
+  });
+
+  it('rearm with requireLive:\'accepted\' still re-arms a live review:accepted', () => {
+    const d = decideSetLabel({ to: 'rearm', currentLabels: [{ name: REVIEW_LABELS.accepted }], requireLive: 'accepted' });
+    expect(d.allowed).toBe(true);
+    expect(d.addLabel).toBe(REVIEW_LABELS.pending);
+  });
+
+  it('rearm without requireLive still re-arms review:changes', () => {
+    expect(decideSetLabel({ to: 'rearm', currentLabels: [{ name: REVIEW_LABELS.changes }] }).allowed).toBe(true);
+  });
+});
+
+describe('runReviewLabelCli — --only-if=accepted interleaving (#4333)', () => {
+  // The caller read `accepted`; by the child's own read a reviewer has flipped it to `changes`.
+  function run(argv, labels) {
+    const calls = [];
+    const provider = {
+      name: 'stub',
+      currentRepo: () => 'o/n',
+      readPrState: () => ({ labels: labels.map((name) => ({ name })), headRefOid: 'a'.repeat(40), headRefName: 'lane/x', state: 'OPEN', body: '', comments: [] }),
+      readLabels: () => labels.map((name) => ({ name })),
+      setLabels: () => { calls.push('setLabels'); },
+      postComment: () => { calls.push('postComment'); },
+    };
+    const chunks = [];
+    const realExit = process.exit.bind(process);
+    process.exit = (code) => { const e = new Error('process.exit'); e.exitCode = code; throw e; };
+    let exitCode = 0;
+    try {
+      runReviewLabelCli({
+        defaultActor: 'test', usage: 'usage: test', fixedTo: 'rearm', buildComment: () => '# body',
+        successResult: (o) => ({ ok: true, ...o }), refusalResult: ({ decision }) => ({ ok: false, reason: decision.reason }),
+        emit: (l) => chunks.push(String(l)), provider, argv,
+      });
+    } catch (e) { if (typeof e.exitCode === 'number') exitCode = e.exitCode; else throw e; }
+    finally { process.exit = realExit; }
+    return { exitCode, calls, payload: JSON.parse(chunks.join('') || '{}') };
+  }
+
+  it('interleaving: only-if=accepted, child\'s read returns changes → refused, setLabels never called', () => {
+    const { exitCode, calls, payload } = run(['9', '--repo=o/n', '--only-if=accepted'], [REVIEW_LABELS.changes]);
+    expect(exitCode).toBe(1);
+    expect(payload.ok).toBe(false);
+    expect(calls).toEqual([]);
+  });
+
+  it('only-if=accepted with a live acceptance still re-arms', () => {
+    const { exitCode, calls } = run(['9', '--repo=o/n', '--only-if=accepted'], [REVIEW_LABELS.accepted]);
+    expect(exitCode).toBe(0);
+    expect(calls).toContain('setLabels');
+  });
+
+  it('without the flag a live review:changes is still re-armed (fix-agent path)', () => {
+    const { exitCode, calls } = run(['9', '--repo=o/n'], [REVIEW_LABELS.changes]);
+    expect(exitCode).toBe(0);
+    expect(calls).toContain('setLabels');
+  });
+
+  it('only-if fails closed on any value other than accepted, before any write', () => {
+    const { exitCode, calls, payload } = run(['9', '--repo=o/n', '--only-if=changes'], [REVIEW_LABELS.changes]);
+    expect(exitCode).not.toBe(0);
+    expect(payload.error).toMatch(/--only-if/);
+    expect(calls).toEqual([]);
+  });
+});
+
 /**
  * #2897 — WHERE A `--body-file` MAY LIVE.
  *
