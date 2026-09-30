@@ -471,9 +471,10 @@ export function routeDispatch(profile, options = {}) {
       ownAudit.push(audit(kind === 'build' ? 'build-supervisor-tier' : 'story-kind-tier', out.tier, `kind=${kind}, risk=${profile.risk}, statute=${profile.filesTouched.some(isStatuteTierPath)}`, high ? 'Story rung is raise-only for high-risk or statute work.' : tableTier.reason));
     } else {
       const task = { taskType: profile.taskType };
-      // #4034 — critical is derived from the existing proxies over the task's own profile; the miss vetoes come from
+      // Operator decision 2026-09-30: critical uses gate/approval scope and declared risk, not the broader
+      // correctness-risk heuristic. Direct profile callers retain their explicit risk. Miss vetoes come from
       // the RAW scorecards, because `routingRecords` projects away the scope evidence a miss row may carry.
-      const criticalWork = criticalWorkVerdict({ taskType: profile.taskType, filesTouched: profile.filesTouched, estimatedLoc: profile.estimatedLoc, acceptanceTestable: profile.acceptanceTestable, risk: profile.risk });
+      const criticalWork = criticalWorkVerdict({ taskType: profile.taskType, filesTouched: profile.filesTouched, estimatedLoc: profile.estimatedLoc, acceptanceTestable: profile.acceptanceTestable, risk: options.criticalRisk ?? profile.risk, tags });
       const criticalMisses = criticalMissesFor(scorecards, profile.taskType);
       const context = { risk: profile.risk, filesTouched: [...profile.filesTouched], estimatedSize: profile.estimatedLoc, acceptanceTestable: profile.acceptanceTestable, scorecards: records, kind, tags, criticalWork, criticalMisses, simple: simple === true, ...(criticalWorkGate ? { criticalWorkGate } : {}) };
       const selected = selectProvider(task, context);
@@ -1212,7 +1213,7 @@ export function decideDispatchRoute(dispatch = {}, { scorecards = [], enforceSup
     // agy-launcher-probation — a `behind` CI heal (a rebase, no failing test to diagnose) is the one SIMPLE task
     // today; only a simple task may go to the Antigravity-Gemini probation worker (#3922).
     const simple = kind === 'ci-heal' && String(dispatch?.reason ?? '').trim() === 'behind';
-    const out = routeDispatch(built.profile, { stage: 'task', scorecards, taskKey: dispatch?.taskKey, kind, tags, criticalWorkGate, simple });
+    const out = routeDispatch(built.profile, { stage: 'task', scorecards, taskKey: dispatch?.taskKey, kind, tags, criticalWorkGate, simple, criticalRisk: dispatch?.risk ?? 'low' });
     if (out.role === 'refused') {
       return routeRefused(kind, derivation, `the router refused this dispatch: ${out.auditTrail.map((a) => a.reasoning).join('; ')}`);
     }

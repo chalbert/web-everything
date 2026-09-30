@@ -88,7 +88,7 @@ describe('judgePendingTrials through the real scorecard store', () => {
     expect(after).toMatchObject({ provider: 'codex', model: 'gpt-6-astra', taskType: 'ci-heal', launched: 1, verified: 1, outcomes: { landed: 1 } });
 
     // Idempotent: a second sweep adds nothing for 101; 102 is judged once its review sends it back.
-    prs[102] = { state: 'OPEN', labels: [{ name: 'review:changes' }], files: [{ path: 'scripts/conveyor/drain.mjs' }] };
+    prs[102] = { state: 'OPEN', labels: [{ name: 'review:changes' }], files: [{ path: 'scripts/review-set-label.mjs' }] };
     const second = sweep();
     expect(second.judged.map((r) => [r.pr, r.outcome, r.criticalMiss])).toEqual([[102, 'reworked', true]]);
     expect(sweep().judged).toEqual([]);
