@@ -283,3 +283,25 @@ describe('runProbationHeal — the arc', () => {
     expect(calls.find((c) => c[0] === 'scorecard')).toEqual(['scorecard', 'escalated-needs-human', 'antigravity', null, null]);
   });
 });
+
+
+describe('test-fix launches (#4551)', () => {
+  const worker = { ...agyGemini, taskType: 'test-fix' };
+  it.each(['build', 'ci-heal'])('launches %s with test-fix preserved in argv', (launchKind) => {
+    const request = { launchKind, repo: 'we', probationWorker: worker, num: '4551', pr: 2811, sessionSlug: 'test-fix' };
+    expect(probationLaunchDecision(request, 'on').launch).toBe(true);
+    const spawnDetached = vi.fn(() => ({ pid: 777 }));
+    probationWorkerDetachedProvider(request, { spawnDetached, logPathFor: () => '/dev/null' });
+    expect(spawnDetached.mock.calls[0][0]).toContain('--taskType=test-fix');
+  });
+  it('checks a test-only heal with Codex and refuses a mixed heal before committing', async () => {
+    const approved = fakeIo({ numstat: '2\t1\tscripts/a.test.mjs' });
+    const input = parseArgs(['--pr=2811', '--session=test-fix', `--worker=${JSON.stringify(worker)}`]);
+    expect((await runProbationHeal(input, approved.io)).outcome).toBe('healed');
+    expect(approved.calls.some((c) => c[0] === 'checker')).toBe(true);
+    const mixed = fakeIo({ numstat: '2\t1\tscripts/a.test.mjs\n1\t0\tsrc/a.mjs' });
+    expect((await runProbationHeal(input, mixed.io)).outcome).toBe('gate-red');
+    expect(mixed.calls.some((c) => c[0] === 'discard')).toBe(true);
+    expect(mixed.calls.some((c) => ['commit', 'push', 'checker'].includes(c[0]))).toBe(false);
+  });
+});

@@ -615,3 +615,21 @@ it('restores checker hook tampering before undoing a rejected Flash build', asyn
   expect(restore).toBeGreaterThan(-1);
   expect(discard).toBeGreaterThan(restore);
 });
+
+
+describe('test-fix build (#4551)', () => {
+  it('runs Flash with the Codex checker and rejects production paths', async () => {
+    const input = parseArgs(['--num=4551', '--taskType=test-fix', '--worker=antigravity-gemini']);
+    expect(input.worker).toMatchObject({ taskType: 'test-fix', model: 'gemini-3.8-flash-high', checker: 'codex' });
+    const run = fakeIo({ itemScope: ['scripts/a.test.mjs'], numstat: '1\t1\tscripts/a.test.mjs' });
+    let checked = false;
+    run.io.diffText = () => 'test diff';
+    run.io.runChecker = () => { checked = true; return 'APPROVE'; };
+    expect((await runProbationBuild(input, run.io)).outcome).toBe('opened-pr');
+    expect(checked).toBe(true);
+    const mixed = fakeIo({ itemScope: ['scripts/a.test.mjs', 'src/a.mjs'], numstat: '1\t1\tscripts/a.test.mjs\n1\t0\tsrc/a.mjs' });
+    expect((await runProbationBuild(input, mixed.io)).outcome).toBe('gate-red');
+    expect(mixed.calls.some((c) => c[0] === 'discard')).toBe(true);
+    expect(mixed.calls.some((c) => c[0] === 'commit')).toBe(false);
+  });
+});

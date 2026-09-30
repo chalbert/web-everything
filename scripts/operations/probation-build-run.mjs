@@ -55,7 +55,7 @@
  * every other conveyor delivery arc's own EXIT step) or on failure (matching `probation-heal-run.mjs`, which
  * never releases the lane either — the lease reaper reclaims it).
  *
- * Operator CLI: --num=<item> --taskType=doc-fix|bugfix --worker=<roster id|JSON> [--model=<allowed id>].
+ * Operator CLI: --num=<item> --taskType=doc-fix|bugfix|test-fix --worker=<roster id|JSON> [--model=<allowed id>].
  * Omitted taskType remains doc-fix; omitted session gets a random per-run identity. Worker names resolve
  * from PROBATION_WORKERS (agy Claude defaults to Sonnet). Flash is for simple mechanical work and requires
  * a read-only Codex APPROVE. No enclosing Claude session is started.
@@ -155,7 +155,7 @@ export function parseArgs(argv) {
     else flags[a.slice(2, eq)] = a.slice(eq + 1);
   }
   const taskType = flags.taskType ?? 'doc-fix';
-  if (!['doc-fix', 'bugfix'].includes(taskType)) throw new Error('taskType must be doc-fix or bugfix');
+  if (!['doc-fix', 'bugfix', 'test-fix'].includes(taskType)) throw new Error('taskType must be doc-fix or bugfix or test-fix');
   const supplied = typeof flags.worker === 'string'
     ? (Object.hasOwn(PROBATION_WORKERS, flags.worker) ? { id: flags.worker } : JSON.parse(flags.worker))
     : null;
@@ -193,7 +193,7 @@ export function parseArgs(argv) {
 export async function runProbationBuild(args, io) {
   const { num, session, worker } = args;
   const taskType = args.taskType ?? 'doc-fix';
-  if (!['doc-fix', 'bugfix'].includes(taskType)) throw new Error('taskType must be doc-fix or bugfix');
+  if (!['doc-fix', 'bugfix', 'test-fix'].includes(taskType)) throw new Error('taskType must be doc-fix or bugfix or test-fix');
   if (!num || !session || !worker?.id) throw new Error('probation-build-run: --num, --session and --worker are required');
   const log = (m) => io.log(`probation-build-run #${num} [${worker.id}]: ${m}`);
   const finish = (outcome, executor, detail, row = {}) => {

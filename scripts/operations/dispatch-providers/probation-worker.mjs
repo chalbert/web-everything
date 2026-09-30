@@ -83,9 +83,8 @@ export function probationLaunchDecision(request, launch) {
   if (!worker) return { launch: false, why: 'no probation worker on the request' };
   const entry = PROBATION_LAUNCHABLE_KINDS[kind];
   if (!entry) return { launch: false, why: `kind '${kind}' has no probation launcher yet` };
-  // #4291 — a kind launches ONLY the taskType it owns: `build` never launches a `ci-heal` worker (or any other
-  // taskType a future roster row might offer it) and vice versa, even though both carry a `probationWorker`.
-  if (worker.taskType !== entry.taskType) {
+  // Each kind keeps its original taskType; both existing launchers also enforce the test-fix envelope (#4551).
+  if (worker.taskType !== entry.taskType && worker.taskType !== 'test-fix') {
     return { launch: false, why: `kind '${kind}' only launches a '${entry.taskType}' worker, got taskType '${worker.taskType}'` };
   }
   const repo = String(request?.repo ?? 'we');
@@ -144,6 +143,7 @@ export function probationWorkerDetachedProvider(request, {
   } else {
     throw notApplied(`dispatch-lane: refusing a probation launch for kind '${kind}' — this provider has no argv shape for it`);
   }
+  if (worker.taskType === 'test-fix') argv.push('--taskType=test-fix');
   const lane = Number(request?.lane);
   if (Number.isInteger(lane) && lane > 0) argv.push(`--lane=${lane}`);
   const scope = Array.isArray(request?.scope) ? request.scope.map(String).filter(Boolean) : [];

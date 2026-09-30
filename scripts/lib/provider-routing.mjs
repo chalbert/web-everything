@@ -67,6 +67,7 @@
  */
 
 import { isUsableForExploration } from './model-capability-ratings.mjs';
+import { isTestPath } from './dispatch-task-type.mjs';
 import { CODEX_MODEL } from './codex-model-routing.mjs';
 
 // ── EXPLORATION SIGNAL ONLY — advisory benchmarks, separate from supervision ──
@@ -192,6 +193,7 @@ export const DEFAULT_BACKDOWN_THRESHOLDS = Object.freeze({
  */
 // @test-only-export-ok: Shared library exported for interactive Claude sessions and conveyor runners
 export const PROVEN_TASK_ENVELOPES = Object.freeze({
+  'test-fix': Object.freeze({ maxLoc: 150, maxFiles: 3, testOnly: true }),
   'doc-fix': Object.freeze({ maxLoc: 100, maxFiles: 2 }),
   'bugfix': Object.freeze({ maxLoc: 250, maxFiles: 4 }),
   'conflict-resolution': Object.freeze({ maxLoc: 200, maxFiles: 3 }),
@@ -301,6 +303,7 @@ export const CRITICAL_WORK_GATE = Object.freeze({
     'bugfix': true,
     'conflict-resolution': false,
     'doc-fix': true,
+    'test-fix': true,
     'ci-heal': true,
   }),
   basis: '#4034',
@@ -341,7 +344,7 @@ function decideCriticalWorkGate(gate, kind, taskType, context) {
  * WHO runs the work (`provider`/`model`, the trust unit), WHAT reports it on the run record (`executor`, the
  * #2815 field), and WHICH synchronous launcher script runs it. `checker` names the second provider that must
  * pass the result before it is pushed (Gemini only: #3922 lets it take simple steps under a Claude/Codex check).
- * `simpleOnly` rows are offered only when the caller says the task is simple.
+ * `simpleOnly` rows require a simple task; test-fix satisfies this through its enforced test-only envelope.
  */
 // @test-only-export-ok: Shared library exported for the probation launcher (agy-launcher-probation) and its own test
 export const PROBATION_WORKERS = Object.freeze({
@@ -356,6 +359,7 @@ export const PROBATION_WORKERS = Object.freeze({
  */
 // @test-only-export-ok: Shared library exported for the probation launcher (agy-launcher-probation) and its own test
 export const PROBATION_ROSTER = Object.freeze({
+  'test-fix': Object.freeze(['antigravity-gemini']),
   'doc-fix': Object.freeze(['antigravity-claude', 'codex']),
   'ci-heal': Object.freeze(['antigravity-claude', 'codex', 'antigravity-gemini']),
   'bugfix': Object.freeze(['codex', 'antigravity-claude', 'antigravity-gemini']),
@@ -367,7 +371,7 @@ export const PROBATION_ROSTER = Object.freeze({
  * Refuses (returns `worker: null`) for statute-tier paths, judgment taskTypes, a scope outside the proven
  * envelope (not checked for `ci-heal`: the heal's own diff is unknown up front, so the launcher bounds it after
  * the run instead), and a taskType with no roster row. Otherwise, over the roster:
- *   1. drop a `simpleOnly` worker unless `simple === true`;
+ *   1. drop a `simpleOnly` worker unless `simple === true` or the taskType is `test-fix`;
  *   2. drop a worker whose exact {provider, model, taskType} triple has a critical miss (`vetoes`, #4034);
  *   3. rank a worker whose most recent JUDGED trial for this taskType was not clean after one whose was (a
  *      launch row still awaiting its review has no outcome yet and is not a failure);
@@ -391,12 +395,15 @@ export function selectProbationWorker({ taskType, tier = CLAUDE_TIERS.SONNET, si
   if (taskType !== 'ci-heal' && !isWithinProvenEnvelope(taskType, estimatedSize, filesTouched.length)) {
     return none(`scope (${filesTouched.length} files, ${estimatedSize} LOC) exceeds the proven '${taskType}' envelope`);
   }
+  if (taskType === 'test-fix' && (!filesTouched.length || !filesTouched.every(isTestPath))) {
+    return none('test-fix requires only test paths; use the normal route for production changes');
+  }
   const records = Array.isArray(scorecards) ? scorecards : [];
   const candidates = [];
   roster.forEach((id, order) => {
     const def = PROBATION_WORKERS[id];
     const model = def.model ?? AGY_CLAUDE_MODEL_BY_TIER[tier] ?? AGY_CLAUDE_MODEL_BY_TIER.sonnet;
-    if (def.simpleOnly && simple !== true) {
+    if (def.simpleOnly && simple !== true && taskType !== 'test-fix') {
       auditTrail.push({ criterion: `probation-candidate:${id}`, result: 'skipped', dataConsulted: `simple=${simple === true}`, reasoning: 'offered only for a simple task' });
       return;
     }
