@@ -42,8 +42,11 @@ function fixture({ report } = {}) {
     const text = readFileSync(card, 'utf8');
     if (process.cwd() !== fileURLToPath(new URL(ROOT, import.meta.url)).replace(/\\/$/, '')) throw new Error('wrong writer cwd');
     if (process.argv[2] === 'claim') writeFileSync(card, text.replace('status: open', 'status: active'));
-    if (process.argv[2] === 'resolve') writeFileSync(card, text.replace('status: active', 'status: resolved'));
-    if (process.argv[2] === 'open-pr') console.log(JSON.stringify({ findings: { submit: { effects: [{ result: { pr: 9001 } }] } } }));
+    if (process.argv[2] === 'resolve') {
+      const graduated = process.argv.find(a => a.startsWith('--graduated-to='))?.split('=')[1];
+      writeFileSync(card, text.replace(/status: (active|open)/, 'status: resolved' + (graduated ? '\\ngraduatedTo: ' + graduated : '')));
+    }
+    if (process.argv[2] === 'open-pr') console.log(JSON.stringify({ findings: { submit: { effects: [{ type: 'open-pr.submit', status: 'applied', result: { outcome: 'opened', pr: 9001, url: 'https://example.test/pr/9001' } }] } } }));
   `;
   for (const dir of [repo, lane]) {
     put(join(dir, '.gitignore'), '.env.local\n.claude/settings.local.json\n');
@@ -72,6 +75,42 @@ function launch(f, extraEnv = {}, setup = '') {
 }
 
 describe('probation build checkout isolation', () => {
+  it.each([true, false])('runs the real already-done landing with a delivering citation=%s', (delivering) => {
+    const f = fixture({ report: {} });
+    try {
+      const git = (argv) => execFileSync('git', ['-C', f.lane, ...argv], { encoding: 'utf8', stdio: 'pipe' }).trim();
+      git(['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', '-c', 'core.hooksPath=/dev/null',
+        'commit', '--amend', '-m', delivering ? 'WE #4291: deliver probe' : 'WE #9999: unrelated delivery']);
+      const sha = git(['rev-parse', 'HEAD']);
+      git(['branch', '-M', 'main']);
+      const origin = join(f.root, 'origin.git');
+      execFileSync('git', ['init', '--bare', '--initial-branch=main', origin], { stdio: 'pipe' });
+      git(['remote', 'add', 'origin', origin]);
+      git(['push', 'origin', 'main']);
+      const before = snapshot(f.repo);
+      // Preserve the fixture tree: inject only the launcher's captured report, then run real git,
+      // real routing/landing, and lane-local backlog/verify/open-pr fixture CLIs.
+      const result = launch(f, {}, `io.runWorker = () => ({ ok: true, lastMessage: ${JSON.stringify(`already exists; all Done-when checks pass. spec already done on main: commit ${sha}`)} });`);
+      expect(snapshot(f.repo)).toEqual(before);
+      const card = readFileSync(join(f.lane, 'backlog/4291-probe.md'), 'utf8');
+      if (delivering) {
+        expect(result).toMatchObject({ outcome: 'opened-pr', pr: 9001 });
+        expect(card).toContain('status: resolved');
+        expect(card).toContain(`graduatedTo: ${sha}`);
+        expect(git(['diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD'])).toBe('backlog/4291-probe.md');
+      } else {
+        expect(result.outcome).toBe('escalated-needs-human');
+        expect(result.detail).toContain('refusing to auto-resolve');
+        expect(card).toContain('status: open');
+        expect(card).not.toContain('graduatedTo:');
+        expect(git(['rev-parse', 'HEAD'])).toBe(sha);
+      }
+      expect(card).toContain('scope:');
+      expect(card).not.toContain('## Findings');
+      expect(reserveHoldRoute({ num: '4291', route: 'already-done', lockRoot: join(f.root, 'coordination/build-dispatch-hold-routes') }).ok).toBe(false);
+    } finally { rmSync(f.root, { recursive: true, force: true }); }
+  });
+
   it.each(['success', 'early failure'])('keeps a registered daemon clone byte-clean on %s from an unrelated cwd', (mode) => {
     const f = fixture();
     try {
