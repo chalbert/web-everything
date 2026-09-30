@@ -2,10 +2,11 @@
 bornAs: x74f2cl
 kind: story
 size: 3
-status: active
+status: resolved
 scope: ["we:scripts/conveyor/verify-dispatch.mjs", "we:scripts/conveyor/__tests__/verify-dispatch.test.mjs", "we:scripts/verify-lane.mjs", "we:scripts/readiness/heavy-admission.mjs"]
 dateOpened: "2026-09-28"
 dateStarted: "2026-09-30"
+dateResolved: "2026-09-30"
 preparedDate: "2026-09-30"
 preparedAgainstSha: "2ee6ce2d65e030fc51ba7a9d6e3d6ad2c961d050"
 tags: []
