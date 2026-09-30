@@ -599,6 +599,15 @@ describe('withFixDispatchClaimRefresh — dup-heal-dispatch: refreshes live clai
     expect(result).toEqual({ ok: true });
   });
 
+  it('logs settled overlap releases before running the next admission pass', async () => {
+    const log = { error: vi.fn() };
+    const refresh = () => ({ refreshed: [], released: [{ repo: 'we', pr: 3103, kind: 'fix' }] });
+    const wrapped = withFixDispatchClaimRefresh({ tickOnce: async () => {
+      expect(log.error).toHaveBeenCalledWith(expect.stringContaining('released settled claim fix-3103 (we) — overlap slot free'));
+    } }, { log, refresh });
+    await wrapped.tickOnce();
+  });
+
   it('logs one line per refreshed claim', async () => {
     const log = { error: vi.fn() };
     const refresh = () => ({ checked: 1, refreshed: [{ repo: 'we', pr: 2784, kind: 'ci-heal', owner: 'Mac:123' }] });

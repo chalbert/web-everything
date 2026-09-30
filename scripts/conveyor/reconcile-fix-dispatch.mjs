@@ -269,6 +269,8 @@ export function planFixesFromReconcile(dispatchEntries, findItemFn, loadItems, r
       }
       const isConflictItemless = Array.isArray(entry.labels) && entry.labels.includes(CONFLICT_LABEL);
       planned.push({
+        ...(entry.waitingSince ? { waitingSince: entry.waitingSince } : {}),
+        ...(entry.labels?.includes('review:human') ? { reviewHuman: true } : {}),
         itemNum: null, pr, laneRef: headRefName, scope: itemlessScope, scopeSource: 'pr-diff',
         isConflict: isConflictItemless, body: entry.body ?? null, headRefOid: entry.headRefOid ?? null,
         ...(entry.altBranch ? { altBranch: entry.altBranch } : {}), // fix procedure — a saved repair to recover first.
@@ -367,6 +369,8 @@ export function planFixesFromReconcile(dispatchEntries, findItemFn, loadItems, r
     // as it always has.
     const isConflict = Array.isArray(entry.labels) && entry.labels.includes(CONFLICT_LABEL);
     planned.push({
+      ...(entry.waitingSince ? { waitingSince: entry.waitingSince } : {}),
+      ...(entry.labels?.includes('review:human') ? { reviewHuman: true } : {}),
       itemNum: itemNumOut, pr, laneRef: headRefName, scope, scopeSource, isConflict, body: entry.body ?? null,
       // #xu2krte security review finding — needed by `tryResumeFix` to confirm a resume CANDIDATE actually
       // belongs to THIS pr before trusting it (see that function's own docblock).
@@ -1432,7 +1436,8 @@ if (IS_CLI) {
  * #4295 — refuse a planned fix whose declared scope overlaps work already in flight, so build+fix and fix+fix on
  * the same files serialize instead of racing. Pure. In-flight = a live BUILD claim (`meta.{num,scope}`; the same
  * item's own claim is exempt — a fix for item N never blocks on N's own build), a live FIX/ci-heal claim on a
- * DIFFERENT PR (`meta.{pr,scope}`), or an earlier fix accepted in THIS pass. A claim with no scope never blocks
+ * DIFFERENT PR (`meta.{pr,scope}`), or an older waiter in THIS pass. Order is current waiting episode,
+ * then review:human on ties, then PR number. A claim with no scope never blocks
  * (unknown, not proven overlapping). The refusal is transient (`scope-overlap`): re-planned next pass.
  * @param {Array<{pr:number, itemNum:string|null, scope:string[]}>} planned
  * @param {Array<{meta?:{num?:string, scope?:string[]}}>} buildClaims
@@ -1443,7 +1448,11 @@ export function filterFixesByInFlightScope(planned, buildClaims = [], fixClaims 
   const accepted = [];
   const refusals = [];
   const picked = [];
-  for (const entry of planned) {
+  const waitingTime = (entry) => Date.parse(entry.waitingSince) || Number.MAX_SAFE_INTEGER;
+  const queue = [...planned].sort((a, b) => waitingTime(a) - waitingTime(b)
+    || Number(Boolean(b.reviewHuman)) - Number(Boolean(a.reviewHuman)) || a.pr - b.pr);
+  const ordinal = (n) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? 'th' : ({ 1: 'st', 2: 'nd', 3: 'rd' }[n % 10] ?? 'th')}`;
+  for (const entry of queue) {
     const inFlight = [
       ...buildClaims
         .filter((c) => !(entry.itemNum != null && String(c.meta?.num) === String(entry.itemNum)))
@@ -1453,16 +1462,21 @@ export function filterFixesByInFlightScope(planned, buildClaims = [], fixClaims 
         .map((c) => ({ id: `fix PR #${c.meta?.pr}`, scope: c.meta?.scope })),
       ...picked,
     ];
-    const hit = overlapsInFlight(entry.scope, inFlight);
+    const blockers = inFlight.filter((c) => overlapsInFlight(entry.scope, [c]));
+    const hit = overlapsInFlight(entry.scope, blockers);
+    // Even a blocked waiter retains its place: a younger PR must not bypass it
+    // through a second file in its scope. Deduplicate claims for the same fixer.
+    const ahead = [...new Set(blockers.map((c) => c.id))];
+    picked.push({ id: `fix PR #${entry.pr}`, scope: entry.scope });
     if (hit) {
       refusals.push({
         pr: entry.pr, kind: 'scope-overlap',
-        why: `${hit.hit} overlaps in-flight ${hit.with} — serializing, retrying next pass`,
+        queuePosition: ahead.length + 1,
+        why: `${hit.hit} overlaps in-flight ${hit.with} — waiting ${ordinal(ahead.length + 1)} behind ${ahead.map((id) => id.replace('fix PR ', '')).join(', ')} on ${hit.hit} — serializing, retrying next pass`,
       });
       continue;
     }
     accepted.push(entry);
-    picked.push({ id: `fix PR #${entry.pr}`, scope: entry.scope });
   }
   return { planned: accepted, refusals };
 }

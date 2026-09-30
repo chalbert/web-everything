@@ -26,7 +26,7 @@ import {
   isClaimSessionLive, listFixDispatchClaims, refreshLiveFixDispatchClaims, MAX_FIX_DISPATCH_CLAIM_REFRESH_MS,
 } from '../fix-dispatch-claim.mjs';
 import { heartbeat } from '../../readiness/file-locks.mjs';
-import { dispatchFix, tryResumeFix } from '../reconcile-fix-dispatch.mjs';
+import { dispatchFix, tryResumeFix, filterFixesByInFlightScope } from '../reconcile-fix-dispatch.mjs';
 import { dispatchCiHeal } from '../../operations/ci-heal-pr-dispatch.mjs';
 import { buildAuthorActorMarker } from '../../lib/review-independence.mjs';
 
@@ -501,5 +501,39 @@ describe('#4295 — fix claims carry scope; the list can be live-only', () => {
     expect(listFixDispatchClaims(claimRoot, { liveOnly: true, nowMs: T0 + 1000 })).toHaveLength(1);
     expect(listFixDispatchClaims(claimRoot, { liveOnly: true, nowMs: later })).toHaveLength(0);
     expect(listFixDispatchClaims(claimRoot)).toHaveLength(1);
+  });
+});
+
+describe('overlap claim settlement', () => {
+  const scope = ['we:scripts/pr-land.mjs'];
+  const claim = () => acquireFixDispatchClaim({ repo: 'we', pr: 3103, scope, owner: 'A', lockRoot: claimRoot, nowMs: T0 });
+  const sweep = (agents) => refreshLiveFixDispatchClaims({ lockRoot: claimRoot,
+    listAgentsAll: () => agents, hungInfoFor: () => null, nowMs: T0 + 1000, nowIso: () => iso(T0 + 1000) });
+  it('releases the overlap slot on settle while the PR remains in review', () => {
+    claim();
+    const waiting = [{ pr: 3033, scope }];
+    expect(filterFixesByInFlightScope(waiting, [], listFixDispatchClaims(claimRoot)).planned).toEqual([]);
+    sweep([{ name: 'fix-3103', state: 'done', startedAt: T0 + 1 }, { name: 'review-3103', state: 'working' }]);
+    expect(readFixDispatchClaim({ repo: 'we', pr: 3103, lockRoot: claimRoot })).toBeNull();
+    expect(filterFixesByInFlightScope(waiting, [], listFixDispatchClaims(claimRoot)).planned).toEqual(waiting);
+  });
+  it.each([
+    [],
+    [{ name: 'fix-3103', state: 'done', startedAt: T0 - 1 }],
+    [{ name: 'fix-3103', state: 'done' }],
+    [{ name: 'fix-3103', state: 'done', startedAt: T0 + 1 }, { name: 'fix-3103', state: 'working' }],
+  ].map((agents) => ({ agents })))('retains the claim during lag, an old terminal row, or a live sibling (%j)', ({ agents }) => {
+    claim();
+    sweep(agents);
+    expect(readFixDispatchClaim({ repo: 'we', pr: 3103, lockRoot: claimRoot })).not.toBeNull();
+  });
+  it('does not release a replacement claim from the same daemon owner', () => {
+    claim();
+    refreshLiveFixDispatchClaims({ lockRoot: claimRoot, nowMs: T0 + 1000, listAgentsAll: () => {
+      releaseFixDispatchClaim({ repo: 'we', pr: 3103, owner: 'A', lockRoot: claimRoot });
+      acquireFixDispatchClaim({ repo: 'we', pr: 3103, owner: 'A', scope, lockRoot: claimRoot, nowMs: T0 + 500 });
+      return [{ name: 'fix-3103', state: 'done', startedAt: T0 + 1 }];
+    } });
+    expect(readFixDispatchClaim({ repo: 'we', pr: 3103, lockRoot: claimRoot }).meta.claimedAt).toBe(iso(T0 + 500));
   });
 });

@@ -107,7 +107,7 @@ import { NEGOTIATION_ROUND_CAP } from '../lib/jury-core.mjs';
 import { countRearmComments, REARM_COMMENT_MARKER } from './rearm-review.mjs';
 // #3383 — see this module's own REFUSAL 3 note below, and `advisory-round-count.mjs`'s header for the
 // `#2117`/`#2298` incident this closes.
-import { countAdvisoryComments } from './advisory-round-count.mjs';
+import { countAdvisoryComments, ADVISORY_NOTE_MARKER } from './advisory-round-count.mjs';
 import { countCiHealComments, CI_HEAL_COMMENT_MARKER } from './ci-heal-mark.mjs';
 import { latestCiHealEscalationForHead, CI_HEAL_ESCALATION_MARKER } from './ci-heal-escalation-mark.mjs';
 import {
@@ -478,6 +478,28 @@ export function countFindings(comments) {
     n += 1;
   }
   return n;
+}
+
+/** Current finding episode, not PR creation/update time: a new round goes to the back
+ * of the overlap queue. Bookkeeping comments cannot move a waiting PR backwards. */
+export function fixWaitingSince(comments) {
+  const trusted = (Array.isArray(comments) ? comments : []).filter(isTrustedMarkerAuthor);
+  const findings = trusted.filter((c) => countFindings([c]) > 0);
+  // Prefer the actual review episode. Queue-cap notices and operator chatter must
+  // not reset its age. Legacy unstructured findings use their first dated note.
+  const reviews = findings.filter((c) => c.body.trimStart().startsWith(ADVISORY_NOTE_MARKER)
+    || c.body.trimStart().startsWith('🔁 review — changes requested'));
+  const times = (reviews.length ? reviews : findings)
+    .map((c) => Date.parse(c?.createdAt)).filter(Number.isFinite);
+  if (!times.length) return null;
+  // A consumed turn cannot retain priority if its session settles without a new
+  // verdict. Begin/end markers prove it consumed a turn; end timestamps put it
+  // behind arrivals that waited while that turn was running.
+  const turns = trusted.filter((c) => [FIX_BEGIN_MARKER, FIX_END_MARKER]
+    .some((marker) => c.body?.trimStart().startsWith(marker)))
+    .map((c) => Date.parse(c.createdAt)).filter(Number.isFinite);
+  const findingTime = reviews.length ? Math.max(...times) : Math.min(...times);
+  return new Date(Math.max(findingTime, ...turns)).toISOString();
 }
 
 /**
@@ -2181,6 +2203,11 @@ export function planReconcile({
     });
   }
 
+  for (const entry of dispatch) {
+    if (entry.kind !== 'fix') continue;
+    const since = fixWaitingSince(prs.find((pr) => Number(pr?.number) === entry.prNumber)?.comments);
+    if (since) entry.waitingSince = since;
+  }
   return { dispatch, refusals, notes };
 }
 

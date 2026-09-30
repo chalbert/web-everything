@@ -29,8 +29,9 @@
  *   say when.
  */
 import { describe, it, expect } from 'vitest';
+import { FIX_BEGIN_MARKER, FIX_END_MARKER } from '../fix-procedure.mjs';
 import {
-  planReconcile, countFindings, bindAgents, assessLiveness, isAwaitingPermission, startedAtMs,
+  planReconcile, fixWaitingSince, countFindings, bindAgents, assessLiveness, isAwaitingPermission, startedAtMs,
   REFUSAL_KINDS, DISPATCH_KINDS, selectStatusCandidates, markSelfReportedDone, markHungSessions,
   markAuthExpiredSessions, markIdleFinishedSessions, markBgIsolationStalls, CI_HEAL_ROUND_CAP,
   CONFLICT_FIX_ROUND_CAP, ADVISORY_FIX_ROUND_CAP, CONFLICT_FIX_ABSOLUTE_CEILING, foldReviewRefusalInto,
@@ -3147,5 +3148,26 @@ describe('draft-first PRs — reconcile-core.mjs (operator-approved 2026-09-27)'
       for (const r of plan.refusals) expect(REFUSAL_KINDS).toContain(r.kind);
       for (const d of plan.dispatch) expect(DISPATCH_KINDS).toContain(d.kind);
     }
+  });
+});
+
+describe('fix waiting episode', () => {
+  it('projects the review episode into an actual fix dispatch row', () => {
+    const comments = [{ body: '🔁 review — changes requested', author: { login: 'web-everything' }, createdAt: '2026-09-30T12:00:00Z' }];
+    const result = planReconcile({ prs: [pr1563({ comments })], agents: [], durableCounts: {}, now: NOW });
+    expect(result.dispatch[0]).toMatchObject({ kind: 'fix', waitingSince: '2026-09-30T12:00:00.000Z' });
+  });
+
+  const note = (hour, body = '🔁 review — changes requested\nPlease fix', author = 'web-everything') => ({
+    body, author: { login: author }, createdAt: `2026-09-30T${hour}:00:00Z`,
+  });
+  it('consumes a turn even when a fixer settles without a new verdict', () => {
+    expect(fixWaitingSince([note('12'), note('14', FIX_BEGIN_MARKER), note('15', FIX_END_MARKER)])).toBe('2026-09-30T15:00:00.000Z');
+  });
+
+  it('retains waiting age across bookkeeping and moves a new finding round to the back', () => {
+    const comments = [note('12'), note('13', REARM_COMMENT_MARKER), note('14', 'untrusted', 'stranger'), note('16', 'queue-cap: waiting')];
+    expect(fixWaitingSince(comments)).toBe('2026-09-30T12:00:00.000Z');
+    expect(fixWaitingSince([...comments, note('15')])).toBe('2026-09-30T15:00:00.000Z');
   });
 });
