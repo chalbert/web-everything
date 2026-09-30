@@ -103,9 +103,17 @@ function groupInvocations(entries) {
     const head = (g.records.find((r) => !r.e.outer) || g.records[0]).e;
     const ts = Math.max(...g.records.map((r) => r.t));
     const responses = [];
+    const knownResponses = new Set();
     for (const r of g.records) {
       if (!Array.isArray(r.e.rl)) continue;
-      for (const x of r.e.rl) responses.push({ ...x, t: r.t });
+      for (const x of r.e.rl) {
+        if (Number.isInteger(x.cost) && x.cost >= 0) {
+          const signature = JSON.stringify([x.res, x.reset, x.used, x.cost, x.shape]);
+          if (knownResponses.has(signature)) continue; // outer capture and nested shim echo
+          knownResponses.add(signature);
+        }
+        responses.push({ ...x, t: r.t });
+      }
     }
     // MEASURED means at least one usable header observation — an empty or malformed `rl` is as unmeasured as an
     // absent one (PR #2851 review), never an "attributed" invocation that silently costs zero.
@@ -153,7 +161,7 @@ export function attributeSpend(entries, { baselines = {}, learnedOpCost = {}, no
       if (!isObservation(r)) continue;
       const wk = `${inv.id}|${r.res}|${r.reset}`;
       if (!windows.has(wk)) windows.set(wk, []);
-      windows.get(wk).push({ used: r.used, t: r.t, res: r.res, inv });
+      windows.get(wk).push({ used: r.used, t: r.t, res: r.res, cost: r.cost, inv });
     }
   }
   const gaps = [];
@@ -163,10 +171,18 @@ export function attributeSpend(entries, { baselines = {}, learnedOpCost = {}, no
     const carried = baselines[wk];
     let prev = carried && Number.isFinite(carried.used) && carried.used <= obs[0].used ? carried : null;
     for (const o of obs) {
-      if (!prev) { o.inv.baselineOnly += 1; prev = o; continue; }
+      if (!prev) {
+        if (Number.isInteger(o.cost) && o.cost >= 0 && o.used >= o.cost) prev = { used: o.used - o.cost, t: o.t };
+        else { o.inv.baselineOnly += 1; prev = o; continue; }
+      }
       const delta = Math.max(0, o.used - prev.used);
-      const attributed = Math.min(delta, MAX_ATTRIBUTED_PER_RESPONSE);
-      o.inv.attributedByRes[o.res] = (o.inv.attributedByRes[o.res] || 0) + attributed;
+      // In-band cost belongs to THIS response; shared-counter deltas do not.
+      const attributed = Number.isInteger(o.cost) && o.cost >= 0
+        ? Math.min(delta, o.cost) : Math.min(delta, MAX_ATTRIBUTED_PER_RESPONSE);
+      // Caller columns report the actual response cost even if overlapping counter
+      // observations leave a smaller gap. Totals still use only observed bucket movement.
+      const callerCost = Number.isInteger(o.cost) && o.cost >= 0 ? o.cost : attributed;
+      o.inv.attributedByRes[o.res] = (o.inv.attributedByRes[o.res] || 0) + callerCost;
       // Keyed on the INVOCATION's hour (not the record's) so a row's gaps and its callers' points always agree.
       gaps.push({ id: o.inv.id, res: o.res, fromT: prev.t, toT: o.t, hour: hourStart(o.inv.ts, hourMs), delta, attributed, estimated: 0, unattributed: delta - attributed, members: [], closer: o.inv });
       prev = o;
@@ -497,7 +513,7 @@ export function renderSpendReport(sections, { hours, by }) {
       out.push(`  ${d.name.padEnd(w)}  ${pts(d.attributed).padStart(11)}  ${pts(d.estimated).padStart(9)}  ${String(d.unknown).padStart(11)}  ${String(d.requests).padStart(11)}  ${String(d.responses).padStart(9)}`);
     }
   }
-  out.push('', '* attributed = delta-based estimate from X-Ratelimit-Used; can include traffic that bypasses gh-throttle.');
+  out.push('', '* attributed uses in-band rateLimit.cost where recorded; legacy/unknown costs remain delta estimates, never a success metric. Gate on total App GraphQL bucketUsed.');
   return out.join('\n') + '\n';
 }
 

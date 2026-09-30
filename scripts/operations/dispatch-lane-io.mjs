@@ -1,3 +1,5 @@
+import { meteredAlreadyDone, alreadyDoneRequest } from '../lib/gh-metered-reads.mjs';
+import { readGitAlreadyDone } from '../lib/git-already-done.mjs';
 /**
  * @file scripts/operations/dispatch-lane-io.mjs
  * @description THE IO SHELL of the `dispatch-lane` declaration (#3037, under epic #3029) — the tick reader its
@@ -2884,9 +2886,23 @@ export function filterAlreadyDoneCandidates(prs, num) {
  *   `graphql` bucket live, 2026-09-29.
  * @returns {{done: boolean, pr: object|null, checked: boolean}}
  */
-export function defaultCheckAlreadyDone(num, { exec = execFileSyncThrottled, env = process.env } = {}) {
+export function defaultCheckAlreadyDone(num, { exec = execFileSyncThrottled, env = process.env, git, cwd, bornAs } = {}) {
+  if (git || exec === execFileSyncThrottled) {
+    const local = readGitAlreadyDone(num, { git, cwd, bornAs, filter: filterAlreadyDoneCandidates });
+    if (local !== null) return local;
+  }
   const key = String(num ?? '').trim();
   if (!key) return { done: false, pr: null, checked: false };
+  if (exec === execFileSyncThrottled) {
+    try {
+      const remote = String(execFileSync('git', ['remote', 'get-url', 'origin'], { cwd, encoding: 'utf8', timeout: 5000 })).trim();
+      const slug = remote.match(/github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?$/)?.[1];
+      if (slug) {
+        const matches = filterAlreadyDoneCandidates(meteredAlreadyDone(slug, key, { opts: { stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 4 * 1024 * 1024, timeout: prListTimeoutMs(env), killSignal: 'SIGKILL' } }), key);
+        return { done: matches.length > 0, pr: matches[0] ?? null, checked: true };
+      }
+    } catch { return { done: false, pr: null, checked: false }; }
+  }
   let raw;
   try {
     raw = exec('gh', [
@@ -2972,9 +2988,26 @@ async function execFileThrottledAsync(file, args, opts = {}) {
  *   assertable in a test; defaults to {@link execFileThrottledAsync}, never the bare promisified `execFile`.
  * @returns {Promise<{done: boolean, pr: object|null, checked: boolean}>}
  */
-export async function defaultCheckAlreadyDoneAsync(num, { execFileFn = execFileThrottledAsync, env = process.env } = {}) {
+export async function defaultCheckAlreadyDoneAsync(num, { execFileFn = execFileThrottledAsync, env = process.env, git, cwd, bornAs } = {}) {
+  if (git || execFileFn === execFileThrottledAsync) {
+    const local = readGitAlreadyDone(num, { git, cwd, bornAs, filter: filterAlreadyDoneCandidates });
+    if (local !== null) return local;
+  }
   const key = String(num ?? '').trim();
   if (!key) return { done: false, pr: null, checked: false };
+  if (execFileFn === execFileThrottledAsync) {
+    try {
+      const remote = String(execFileSync('git', ['remote', 'get-url', 'origin'], { cwd, encoding: 'utf8', timeout: 5000 })).trim();
+      const slug = remote.match(/github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?$/)?.[1];
+      if (slug) {
+        // Awaited through the injectable executor (not a bare runGhSync) so the #3460 bounds ride along and a test can inject.
+        const req = alreadyDoneRequest(slug, key, { stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 4 * 1024 * 1024, timeout: prListTimeoutMs(env), killSignal: 'SIGKILL' });
+        const { stdout } = await execFileFn('gh', req.args, req.opts);
+        const matches = filterAlreadyDoneCandidates(JSON.parse(String(stdout)), key);
+        return { done: matches.length > 0, pr: matches[0] ?? null, checked: true };
+      }
+    } catch { return { done: false, pr: null, checked: false }; }
+  }
   let raw;
   try {
     ({ stdout: raw } = await execFileFn('gh', [

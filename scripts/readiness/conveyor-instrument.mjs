@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { execFileSyncThrottled as execFileSync } from '../lib/gh-throttle.mjs';
 /**
  * @file scripts/readiness/conveyor-instrument.mjs
  * @description The CONVEYOR WALL-CLOCK INSTRUMENT (WE #2680, epic #2612 / program #2606). Measures WHERE
@@ -48,7 +49,6 @@
  *   appends the mid-span setup-done mark that enables the authoring/setup decomposition.
  */
 
-import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync, mkdirSync, renameSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join, resolve } from 'node:path';

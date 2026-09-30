@@ -729,7 +729,8 @@ describe('numberPendingHashesIfAny / hasPendingHashFiles — xb94mt5 (number on 
     write(QUEUED_REL, JSON.stringify({ queued: [] }));
     git('add', 'backlog', '.claude', '.gitignore'); git('commit', '-qm', 'seed (simulates an earlier failed-push land)');
 
-    const out = numberPendingHashesIfAny(repo);
+    // Exercise the real mutex in this fixture, never the developer's shared drain lock.
+    const out = numberPendingHashesIfAny(repo, { lockRoot: join(repo, '.git', 'drain-locks') });
 
     expect(out.attempted).toBe(true);
     expect(out.numbered.assigned).toEqual([{ hash: 'xhash01', nnn: '2201' }]); // max+1 over {2200} → 2201
