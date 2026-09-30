@@ -204,6 +204,7 @@ export function parseInfraStore(text) {
       repo: e.repo != null ? String(e.repo) : null,
       cause: e.cause != null ? String(e.cause) : 'infra',
       body: typeof e.body === 'string' ? e.body : null,
+      ...(typeof e.builderContext === 'string' ? { builderContext: e.builderContext } : {}),
       attempt: Number.isFinite(Number(e.attempt)) ? Math.max(1, Math.floor(Number(e.attempt))) : 1,
       refusals: Number.isFinite(Number(e.refusals)) ? Math.max(0, Math.floor(Number(e.refusals))) : 0,
       firstFailedAt: e.firstFailedAt != null ? String(e.firstFailedAt) : null,
@@ -229,7 +230,7 @@ export function infraHas(store, num) {
  * `attempt = 1`, `firstFailedAt = lastAttemptAt = now`, `nextRetryAt = now + backoff(1)`. `now` is injected.
  * @returns {Array<object>} a NEW array (never mutates the input)
  */
-export function recordInfraBlock(store, { num, ref, sha = null, base = 'main', repo = null, cause = 'infra', body = null } = {}, now = Date.now(), backoff = {}) {
+export function recordInfraBlock(store, { num, ref, sha = null, base = 'main', repo = null, cause = 'infra', body = null, builderContext = null } = {}, now = Date.now(), backoff = {}) {
   const s = Array.isArray(store) ? store : [];
   if (normNum(num) === '' || !ref) return s;
   if (infraHas(s, num)) {
@@ -241,7 +242,7 @@ export function recordInfraBlock(store, { num, ref, sha = null, base = 'main', r
     const cur = s.find((e) => normNum(e?.num) === key);
     if (sha == null || String(sha) === String(cur?.sha ?? '')) return s;
     return s.map((e) => (normNum(e?.num) === key
-      ? { ...e, ref: String(ref), sha: String(sha), body: typeof body === 'string' ? body : e.body, refusals: 0 }
+      ? { ...e, ref: String(ref), sha: String(sha), body: typeof body === 'string' ? body : e.body, builderContext, refusals: 0 }
       : e));
   }
   const nowMs = toMs(now) || Number(now) || Date.now();
@@ -253,6 +254,7 @@ export function recordInfraBlock(store, { num, ref, sha = null, base = 'main', r
     repo: repo != null ? String(repo) : null,
     cause: String(cause || 'infra'),
     body: typeof body === 'string' ? body : null,
+    ...(typeof builderContext === 'string' ? { builderContext } : {}),
     attempt: 1,
     refusals: 0,
     firstFailedAt: iso(nowMs),
@@ -687,7 +689,7 @@ function resumeOpen(entry, { cwd = INFRA_ROOT, localSlug = null } = {}) {
     // #x5n4zn3 — was bare (no timeout). `pr-land.mjs --label-on-green` has its OWN internal wait-for-green
     // deadline (`--timeout-min`, default 15 min) — this outer bound must exceed that, with margin for gh/push
     // overhead, or it would kill a wait pr-land itself would have given up on cleanly moments later.
-    const res = parse(execFileSync('node', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 32 * 1024 * 1024, timeout: 20 * 60_000, killSignal: 'SIGKILL' }));
+    const res = parse(execFileSync('node', args, { cwd, env: { ...process.env, WE_BUILD_PR_CONTEXT: entry.builderContext || '' }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 32 * 1024 * 1024, timeout: 20 * 60_000, killSignal: 'SIGKILL' }));
     return { ok: true, prNumber: res.pr ?? null, detail: res.detail || 'resume-opened' };
   } catch (e) {
     const res = parse(e.stdout);
