@@ -4,12 +4,13 @@
  * (`lane/<n>-prepare-<slug>`, legitimately touches researchTopics/research-descriptions) and prepare-stamp
  * (`lane/<n>-prepare-stamp`) share that prefix and must keep their own title and diff.
  */
+import { machinePrTitle } from './machine-pr-title.mjs';
 export function prepareItemFromRef(ref) {
   return /^lane\/([a-z0-9]+)-prepare-item-/.exec(ref ?? '')?.[1] ?? null;
 }
 
-export function preparePrTitle(item) {
-  return `WE #${item}: prepare item — Design/MVP/Test plan/Proof plan/Follow-ups`;
+export function preparePrTitle(item, card) {
+  return machinePrTitle({ item, kind: 'prepare', card });
 }
 
 /** git is injected for tests; every failed observation refuses publication. */

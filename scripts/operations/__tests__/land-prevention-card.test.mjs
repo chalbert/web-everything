@@ -87,6 +87,7 @@ describe('landPreventionCard — the real acquire → file-item → commit → v
     const result = await landPreventionCard(INPUT, {
       exec, write: () => {}, mkTmp: () => '/tmp/land-prevention-card-x', rmTmp: () => {}, writeFile: (p, c) => written.push({ p, c }),
     });
+    expect(written.find(({ p }) => p.endsWith('commit-msg.txt')).c.split('\n')[0]).toBe('WE #9001: prevention — PR 42 — review guards');
     expect(result).toEqual({ ok: true, step: 'done', num: 9001, rel: 'backlog/9001-file-the-prevention.md', pr: 5555, url: 'https://github.com/chalbert/web-everything/pull/5555', reason: null });
 
     // acquire — a real lane, never the daemon clone that spawned this job.

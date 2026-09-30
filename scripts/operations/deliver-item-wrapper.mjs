@@ -93,6 +93,7 @@
  *      remains the DEFAULT (see `DEFAULT_DELIVERY_AGENT_PROVIDER_NAME`); Codex is opt-in by name, and the
  *      operator chose to build it ahead of `#3581`'s ratified reviewer-first sequencing gate knowingly.
  */
+import { machinePrTitle, readMainCard } from './machine-pr-title.mjs';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, basename, join, resolve as resolvePath } from 'node:path';
@@ -2143,7 +2144,9 @@ export function commitBuildTurn(
   // `repoProfileForLanePath` returns `null` for a lane it cannot place (an unrecognized pool-dir basename, or a
   // synthetic test path) — falls back to `'WE'`, byte-identical to every existing caller/test.
   const repoTag = repoProfileForLanePath(lane)?.canonicalPrefix?.toUpperCase() ?? 'WE';
-  const subject = phase === 'gate-fix' ? `${repoTag} #${item}: gate-failure fix` : `${repoTag} #${item}: delivery build`;
+  const subject = machinePrTitle({ repo: repoTag, item, kind: phase === 'gate-fix' ? 'gate-fix' : 'build',
+    card: readMainCard(item, (args) => runFn('git', args, { cwd: lane })),
+  });
   const body = phase === 'gate-fix'
     ? "Commits the delivery agent's fix after a red gate resumed it for one retry (#3383/#3565) — the wrapper "
       + "makes this commit on the agent's behalf; the agent itself never runs git.\n"

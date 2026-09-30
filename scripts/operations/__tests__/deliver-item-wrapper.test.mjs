@@ -1499,9 +1499,10 @@ describe('commitBuildTurn (#3565 — the wrapper commits the agent\'s OWN turn; 
     expect(msgFile).toBe('/lane/.delivery-commit-msg-build.txt');
     expect(message).toMatch(/delivery build/);
     expect(message).toMatch(/Co-Authored-By: Codex <noreply@openai\.com>/);
-    expect(run).toHaveBeenCalledTimes(2);
-    expect(run).toHaveBeenNthCalledWith(1, 'git', ['add', '--', 'a.mjs', 'b.md'], { cwd: '/lane' });
-    expect(run).toHaveBeenNthCalledWith(2, 'git', ['commit', '-F', msgFile, '--', 'a.mjs', 'b.md'], { cwd: '/lane' });
+    expect(run).toHaveBeenCalledTimes(3);
+    expect(run).toHaveBeenNthCalledWith(1, 'git', ['ls-tree', '-r', '--name-only', 'origin/main', '--', 'backlog/'], { cwd: '/lane' });
+    expect(run).toHaveBeenNthCalledWith(2, 'git', ['add', '--', 'a.mjs', 'b.md'], { cwd: '/lane' });
+    expect(run).toHaveBeenNthCalledWith(3, 'git', ['commit', '-F', msgFile, '--', 'a.mjs', 'b.md'], { cwd: '/lane' });
     expect(run.mock.calls[1][1]).not.toContain('-A');
     expect(run.mock.calls[1][1]).not.toContain('--all');
   });
@@ -1515,7 +1516,15 @@ describe('commitBuildTurn (#3565 — the wrapper commits the agent\'s OWN turn; 
       { lane: '/lane', item: '1234' },
       { run, writeFile, touchedFiles: () => ['brand-new-file.mjs'] },
     );
-    expect(run).toHaveBeenNthCalledWith(1, 'git', ['add', '--', 'brand-new-file.mjs'], { cwd: '/lane' });
+    expect(run).toHaveBeenNthCalledWith(2, 'git', ['add', '--', 'brand-new-file.mjs'], { cwd: '/lane' });
+  });
+
+  it.each(['build', 'gate-fix'])('uses origin/main card text in the %s commit', (phase) => {
+    const run = vi.fn((_cmd, args) => args[0] === 'ls-tree' ? 'backlog/4333-card.md' : args[0] === 'show' ? '# Guard acceptance rearm\n' : '');
+    const writeFile = vi.fn();
+    commitBuildTurn({ lane: '/lane', item: '4333', phase }, { run, writeFile, touchedFiles: () => ['fix.mjs'] });
+    expect(writeFile.mock.calls[0][1].split('\n')[0]).toBe(`WE #4333: ${phase} — Guard acceptance rearm`);
+    expect(run).toHaveBeenCalledWith('git', ['show', 'origin/main:backlog/4333-card.md'], { cwd: '/lane' });
   });
 
   it('names the gate-fix phase distinctly (own message file, own text) for a resumed turn\'s commit', () => {

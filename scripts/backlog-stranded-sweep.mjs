@@ -73,7 +73,10 @@ export function idTokenOf(stem) {
  * noise again, which is the failure mode this whole sweep exists to avoid.
  */
 export function isAnnotationPr({ headRefName = '', title = '' } = {}) {
-  const t = String(title || '');
+  const machineKind = /^\s*(?:WE|FUI|PLATEAU) #[a-z0-9]+: (prepare|build|gate-fix|prevention) — /i.exec(String(title || ''))?.[1]?.toLowerCase();
+  if (machineKind === 'prepare' || machineKind === 'prevention') return true;
+  // A card's prose can itself say 'file', 'prepare scope', etc.; it is display metadata.
+  const t = machineKind ? '' : String(title || '');
   if (/\b(author|prepare|prepared|preparing)\s+scope\b/i.test(t)) return true;
   if (/\bscope:\s*for\b/i.test(t)) return true;
   if (/\bprepare\b.*\b(decision|fork|forks|placement|research)\b/i.test(t)) return true;

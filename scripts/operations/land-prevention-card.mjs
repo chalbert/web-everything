@@ -67,6 +67,7 @@
  *   node scripts/operations/land-prevention-card.mjs --title=<t> --kind=<k> --size=<n> --digest=<d> \
  *     --scope=<s> [--parent=<NNN>] --queue=<true|false> --session=<slug>
  */
+import { machinePrTitle } from './machine-pr-title.mjs';
 import { execFileSync } from 'node:child_process';
 import { writeFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -363,7 +364,10 @@ export async function landPreventionCard(input, {
     try {
       exec('git', ['-C', lane, 'add', '--', rel], {});
       const msgPath = scratchFile('commit-msg.txt');
-      writeFile(msgPath, `WE #${num ?? '?'}: file the prevention guard(s) owed by an independent review\n\n`
+      const item = num ?? /^(x[0-9a-z]{6})-/.exec(basename(rel))?.[1] ?? '?';
+      // This card is being created now and cannot exist on origin/main yet.
+      const subject = machinePrTitle({ item, kind: 'prevention', card: { title: input.title, raw: input.digest } });
+      writeFile(msgPath, `${subject}\n\n`
         + 'Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>\n', 'utf8');
       exec('git', ['-C', lane, 'commit', '-F', msgPath], {});
     } catch (e) {
