@@ -3,9 +3,10 @@ bornAs: xx9swng
 kind: story
 size: 3
 parent: "4075"
-status: open
+status: active
 scope: ["we:scripts/conveyor/queue-store.mjs", "we:scripts/conveyor/__tests__/queue-store.test.mjs"]
 dateOpened: "2026-09-27"
+dateStarted: "2026-09-30"
 preparedDate: "2026-09-30"
 preparedAgainstSha: "107aeae93c8f83232346b4beaf8c7d6917d8e642"
 tags: []

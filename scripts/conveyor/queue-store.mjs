@@ -37,7 +37,7 @@
  *   `{ queue: [...] }` wrapper both parse tolerantly, so a hand-edited sidecar never wedges a read.
  */
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync, statSync, linkSync, unlinkSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join, dirname, resolve } from 'node:path';
 import { automationStateRoot, legacyStateRoots } from '../lib/automation-home.mjs';
@@ -269,10 +269,11 @@ export function readQueueFile(path = resolveQueuePath()) {
  * (once it does, the new home is authoritative and a legacy entry the operator has since removed must never be
  * resurrected); unions every legacy file found, first-seen `addedAt` wins. The legacy files are left untouched
  * (they may sit in the operator's checkout, which the automation never writes). Idempotent.
- * @param {{env?:NodeJS.ProcessEnv, root?:string, dryRun?:boolean}} [o]
+ * @param {{env?:NodeJS.ProcessEnv, root?:string, dryRun?:boolean, hooks?:{beforePublish?:(path:string)=>void}}} [o]
+ *   `hooks.beforePublish` is a test seam fired right before the publish, to open the check→publish race window.
  * @returns {{migrated:boolean, reason:string, path:string, from:string[], count:number, queue:Array}}
  */
-export function migrateLegacyQueue({ env = process.env, root = QUEUE_ROOT, dryRun = false } = {}) {
+export function migrateLegacyQueue({ env = process.env, root = QUEUE_ROOT, dryRun = false, hooks = {} } = {}) {
   const path = resolveQueuePath(env);
   if (existsSync(path)) return { migrated: false, reason: 'canonical-exists', path, from: [], count: readQueueFile(path).length, queue: [] };
   const from = legacyQueuePaths({ env, root });
@@ -283,7 +284,13 @@ export function migrateLegacyQueue({ env = process.env, root = QUEUE_ROOT, dryRu
     try { entries = parseQueue(readFileSync(f, 'utf8')); } catch { entries = []; }
     for (const e of entries) queue = addToQueue(queue, e.num, e.addedAt);
   }
-  if (!dryRun) writeQueueFile(queue, path);
+  if (!dryRun) {
+    hooks.beforePublish?.(path);
+    // Create-if-absent: a canonical file that appeared since the check above is authoritative, never overwritten.
+    if (!writeQueueFileIfAbsent(queue, path)) {
+      return { migrated: false, reason: 'canonical-exists', path, from: [], count: readQueueFile(path).length, queue: [] };
+    }
+  }
   return { migrated: !dryRun, reason: dryRun ? 'dry-run' : 'migrated', path, from, count: queue.length, queue };
 }
 
@@ -315,4 +322,28 @@ export function writeQueueFile(queue, path = resolveQueuePath()) {
   const tmp = `${path}.${process.pid}.${Date.now()}.tmp`;
   writeFileSync(tmp, serializeQueue(queue));
   renameSync(tmp, path);
+}
+
+/**
+ * Publish the queue at `path` ONLY IF nothing exists there (atomic create-if-absent, unlike `writeQueueFile`'s
+ * overwriting `rename`). Writes the temp file, then `link`s it into place — `link` fails with EEXIST rather than
+ * replace, and the destination appears fully written. Returns true if published, false if `path` already existed.
+ * On filesystems without hard links it falls back to a re-checked `rename` (narrower, not closed, window).
+ */
+export function writeQueueFileIfAbsent(queue, path = resolveQueuePath()) {
+  mkdirSync(dirname(path), { recursive: true });
+  const tmp = `${path}.${process.pid}.${Date.now()}.tmp`;
+  writeFileSync(tmp, serializeQueue(queue));
+  try {
+    linkSync(tmp, path);
+    return true;
+  } catch (err) {
+    if (err.code === 'EEXIST') return false;
+    if (!['EPERM', 'ENOTSUP', 'EXDEV'].includes(err.code)) throw err;
+    if (existsSync(path)) return false;
+    renameSync(tmp, path);
+    return true;
+  } finally {
+    try { unlinkSync(tmp); } catch { /* already renamed away */ }
+  }
 }
