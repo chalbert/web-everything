@@ -59,3 +59,11 @@ New `we:scripts/operations/__tests__/fake-claude-etxtbsy.test.mjs` (unit tier):
 ## Done when
 
 1. **Executable** — `for i in $(seq 50); do npx vitest run --config we:vitest.integration.config.ts fake-claude-sessions || exit 1; done` exits 0 on Linux, and `npx vitest run fake-claude-etxtbsy` passes (it fails before this lands because `retryEtxtbsy` / `fake.exec` do not exist).
+
+## Findings (standalone worker, 2026-09-30)
+
+The build-dispatch daemon held #4388 with:
+
+> worker-declined: scope exceeds the test-fix envelope — route to the builder: the heal changed 210 lines (limit 150)
+
+Implementation changes were discarded. The card is held for the builder; its declared scope is preserved.
