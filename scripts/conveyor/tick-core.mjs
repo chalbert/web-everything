@@ -147,6 +147,7 @@
  *   mechanism.
  */
 
+import { childFailure } from '../lib/child-failure.mjs';
 import { mintSessionSlug } from './session-slug.mjs';
 import { normNum } from './queue-store.mjs';
 import { capToConcurrency, resolveMaxConcurrentLanes } from '../lib/lane-concurrency.mjs';
@@ -1882,7 +1883,7 @@ async function main(argv) {
       // (a hung `list --acquirable` burning the drain's whole 45-min pass cap).
       out = execFileSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024, timeout: resolveChildTimeoutMs() * 2, killSignal: 'SIGKILL' });
     } catch (e) {
-      fail(`${what} failed: ${String(e.message || e).split('\n')[0]}`);
+      fail(`${what} failed: ${childFailure(e)}`);
     }
     try { return JSON.parse(out); }
     catch (e) { fail(`could not parse ${what} JSON: ${String(e.message || e).split('\n')[0]}`); }

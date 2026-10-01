@@ -13,6 +13,7 @@ import { cleanLaneLitter } from '../../lib/lane-litter.mjs';
 
 import {
   DISABLE_ENV_VAR,
+  formatSalvageKeptLine,
   planLaneReap,
   summarizeHealth,
   defaultListLaneStatus,
@@ -26,6 +27,16 @@ import {
   resolveLanePoolRepoPath,
   reclaimFinishedLanes,
 } from '../lane-pool-health-watch.mjs';
+
+describe('formatSalvageKeptLine', () => {
+  it.each([
+    [{ kept: true, keptReason: 'live agent', reason: 'fallback' }, 'live agent'],
+    [{ kept: true, reason: 'fallback' }, 'fallback'],
+    [{ kept: true }, 'unknown'],
+  ])('prints the kept reason with existing fallback precedence: %j', (outcome, reason) => {
+    expect(formatSalvageKeptLine(outcome)).toBe(reason);
+  });
+});
 
 describe('planLaneReap — pure', () => {
   it('reaps an unleased lane whose entire porcelain output is allowlisted litter', () => {

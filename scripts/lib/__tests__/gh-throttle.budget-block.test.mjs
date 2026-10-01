@@ -157,6 +157,25 @@ describe('a landed write marks the shared open-PR snapshot dirty', () => {
   });
 });
 
+it.each(['sync', 'passthrough'])('strict-budget %s calls record exhaustion without a diagnostic network probe', mode => {
+  const root = tmp();
+  const env = { WE_GH_THROTTLE_NO_BUDGET_PROBE: '1' };
+  const probeBudget = vi.fn(() => probeAt0());
+  const sleep = vi.fn();
+  const throttle = throttleOpts(root, { env, probeBudget, maxAttempts: 1, sleep });
+  if (mode === 'sync') {
+    const exec = vi.fn(() => { throw Object.assign(new Error(EXHAUSTED), { stderr: EXHAUSTED, status: 1 }); });
+    expect(() => runGhSync(['api', 'graphql'], { throttle: { ...throttle, exec } })).toThrow();
+    expect(exec).toHaveBeenCalledTimes(1);
+  } else {
+    const spawn = vi.fn(() => ({ status: 1, stdout: Buffer.from(''), stderr: Buffer.from(EXHAUSTED) }));
+    expect(runGhCliPassthrough(['api', 'graphql'], { env, throttle, spawn }).status).toBe(1);
+    expect(spawn).toHaveBeenCalledTimes(1);
+  }
+  expect(probeBudget).not.toHaveBeenCalled();
+  expect(sleep).not.toHaveBeenCalled();
+  expect(readBudgetBlock(root, 'default', 'graphql', NOW)).toMatchObject({ source: 'fallback' });
+});
 
 describe('installation provenance (#4652)', () => {
   const bound = (id, token) => ({ GH_TOKEN: token, WE_GH_AUTH_INSTALLATION: id,

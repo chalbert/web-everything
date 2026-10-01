@@ -718,6 +718,11 @@ export function runLanePoolHealthWatch({ env = process.env, ...opts } = {}) {
   return watchLanePoolHealth({ salvageMax, lowWater, ...opts, reclaimEnabled, salvageEnabled, retention });
 }
 
+/** Reason text for a kept salvage candidate in the plain CLI summary. */
+export function formatSalvageKeptLine(o) {
+  return o.keptReason || o.reason || 'unknown';
+}
+
 const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
 if (IS_CLI) {
   const argv = process.argv.slice(2);
@@ -796,7 +801,7 @@ if (IS_CLI) {
             else if (o.reclaimed) timestampedStderr(`    lane-${o.lane}: reset — content already on a remote ref, nothing to salvage (${o.reason || ''})\n`);
             else if (o.wouldSalvage) timestampedStderr(`    lane-${o.lane}: would salvage → reset (${o.reason || ''})\n`);
             else if (dryRun && o.wouldReclaim) timestampedStderr(`    lane-${o.lane}: would reset — content already on a remote ref (${o.reason || ''})\n`);
-            else timestampedStderr(`    lane-${o.lane}: kept — ${o.keptReason || o.reason || 'unknown'}\n`);
+            else timestampedStderr(`    lane-${o.lane}: kept — ${formatSalvageKeptLine(o)}\n`);
           }
         }
       }

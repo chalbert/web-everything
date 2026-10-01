@@ -76,7 +76,8 @@
  * codified in a sibling statute PR).
  */
 
-import { getCachedVerdict, recordVerdicts, readAlreadyDoneCacheState, writeAlreadyDoneCacheState,
+import { childFailure } from '../lib/child-failure.mjs';
+import { getCachedVerdict, readAlreadyDoneCacheState, resolveAlreadyDoneCacheStorePath,
   ALREADY_DONE_NOT_DONE_COOLDOWN_MS, ALREADY_DONE_DONE_COOLDOWN_MS } from './already-done-cache.mjs';
 import { scopesOverlap, normScope } from './scope-lease.mjs';
 import { isGroupingKind } from '../check-standards-rules.mjs';
@@ -749,12 +750,6 @@ export function parseFreeLanes(raw) {
 
 // Lazily required so importing the pure core pulls in NO node built-ins beyond scope-lease.mjs.
 async function main(argv) {
-  const { deferGhPass } = await import('../lib/gh-throttle.mjs');
-  const deferred = deferGhPass('dispatch-plan');
-  if (deferred) {
-    process.stdout.write(JSON.stringify({ ...deferred, launch: [], held: [] }) + '\n');
-    return;
-  }
   const { runBounded, installChildReaper, resolveChildTimeoutMs } = await import('../lib/bounded-child.mjs');
   const { fileURLToPath } = await import('node:url');
   const { dirname, join } = await import('node:path');
@@ -784,7 +779,7 @@ async function main(argv) {
     try {
       out = await runBounded(cmd, args, { timeoutMs: childTimeoutMs });
     } catch (e) {
-      fail(`${what} failed: ${String(e.message || e).split('\n')[0]}`);
+      fail(`${what} failed: ${childFailure(e)}`);
     }
     try { return JSON.parse(out); }
     catch (e) { fail(`could not parse ${what} JSON: ${String(e.message || e).split('\n')[0]}`); }
@@ -901,73 +896,41 @@ async function main(argv) {
     };
   });
 
-  // 1.5 ALREADY-DONE GROUND TRUTH (#3457/#3460, Fork 2(b)) — AGE-GATED enrichment: only items that have sat
-  //     `open`/`active` past `ALREADY_DONE_AGE_GATE_MS` spend a `gh pr list --search` call, so the common case
-  //     (a freshly-cleared or freshly-claimed item) never pays for a check that could not possibly find
-  //     anything yet. Reuses the SAME checker + query shape `we:scripts/operations/dispatch-lane.mjs`'s
-  //     pre-spawn guard uses (`defaultCheckAlreadyDone` in `we:scripts/operations/dispatch-lane-io.mjs`), so
-  //     the two #3457/#3460 chokepoints can never disagree about what "done" means. Covers BOTH populations
-  //     the sidecar can put an item in: a normal ready `queue` row, AND a `cleared-but-not-ready` id (#2613) —
-  //     the exact shape a RESOLVED item stuck in `.conveyor/queue.json` takes (`build-queue --json` hard-
-  //     filters to not-yet-resolved rows, so a resolved-but-still-cleared item never reaches `queue` at all;
-  //     see this file's own header and #3460's live acceptance case). Skipped entirely when `--no-ground-truth`
-  //     is passed (mirrors the sibling session-reaper fix's own rollback escape hatch) or `gh` cannot run.
-  //     Per-item cooldowns in already-done-cache.mjs reuse successful verdicts across ticks (30 min for
-  //     not-done, 24h for done). `--no-already-done-cache` bypasses ALL cache reads/writes for a fresh sweep.
-  // `notReady` id (normalized, string-keyed) → the merged PR the ground-truth pass found for it, when it did.
-  // Kept separate from `queue` rows because a `cleared-but-not-ready` id has no row of its own to carry a
-  // field on — it is appended to `plan.held` as a bare id further down, past `dispatchPlan` itself.
+  // Local git facts first; only a detached, exclusive two-item refresh may contact GitHub.
+  // Cached positives hold both ready and not-ready rows. Unknowns stay unknown; the dispatch
+  // attempt still runs its mandatory already-done guard before launching any worker.
   const alreadyDoneNotReady = new Map();
+  let groundTruth = { checkedLocally: 0, cached: 0, pending: 0, refresh: { started: false, ids: [] } };
   if (!flags['no-ground-truth']) {
-    const { defaultCheckAlreadyDoneAsync } = await import('../operations/dispatch-lane-io.mjs');
+    const { readLocalDoneFacts, localDoneVerdict, startAlreadyDoneRefresh } = await import('./already-done-refresh.mjs');
     const nowMs = Date.now();
-    const staleQueueRows = queue.filter((row) => isStaleEnoughForGroundTruth(byNum.get(String(row.num)), nowMs));
-    const staleNotReadyIds = notReady.filter((id) => isStaleEnoughForGroundTruth(byNum.get(String(id)), nowMs));
-    const useCache = !flags['no-already-done-cache'];
-    const cacheState = useCache ? readAlreadyDoneCacheState() : null;
-    // Unset/blank/non-numeric overrides fall back; zero forces rechecks on every tick.
+    const cacheState = readAlreadyDoneCacheState();
+    const facts = readLocalDoneFacts();
     const cooldownMs = (env, fallback) => env?.trim() && Number(env) >= 0 ? Number(env) : fallback;
     const cacheOptions = {
       notDoneCooldownMs: cooldownMs(process.env.WE_DISPATCH_PLAN_ALREADY_DONE_NOT_DONE_COOLDOWN_MS, ALREADY_DONE_NOT_DONE_COOLDOWN_MS),
       doneCooldownMs: cooldownMs(process.env.WE_DISPATCH_PLAN_ALREADY_DONE_DONE_COOLDOWN_MS, ALREADY_DONE_DONE_COOLDOWN_MS),
     };
-    const queueMisses = staleQueueRows.filter((row) => {
-      const verdict = useCache ? getCachedVerdict(cacheState, row.num, nowMs, cacheOptions) : null;
-      if (verdict?.done && verdict.pr) row.alreadyDonePr = verdict.pr;
-      return verdict === null;
-    });
-    const notReadyMisses = staleNotReadyIds.filter((id) => {
-      const verdict = useCache ? getCachedVerdict(cacheState, id, nowMs, cacheOptions) : null;
-      if (verdict?.done && verdict.pr) alreadyDoneNotReady.set(String(id), verdict.pr);
-      return verdict === null;
-    });
-    // CONCURRENT submission, not a sequential await loop (epic #3383, live incident 2026-09-04) — the
-    // original sequential round-trips pushed a 69-item tick past 60-140s, starving the ~120s tick budget.
-    // The checker now bounds/attributes its calls through gh-throttle (#4415); the cooldown additionally
-    // limits submissions to cache misses. Same fail-soft contract, query shape, and matcher.
-    const [queueVerdicts, notReadyVerdicts] = await Promise.all([
-      Promise.all(queueMisses.map((row) => defaultCheckAlreadyDoneAsync(row.num))),
-      Promise.all(notReadyMisses.map((id) => defaultCheckAlreadyDoneAsync(id))),
-    ]);
-    const verdictsById = new Map();
-    queueMisses.forEach((row, i) => {
-      const verdict = queueVerdicts[i];
-      if (verdict.done && verdict.pr) row.alreadyDonePr = verdict.pr;
-      verdictsById.set(row.num, verdict);
-    });
-    notReadyMisses.forEach((id, i) => {
-      const verdict = notReadyVerdicts[i];
-      if (verdict.done && verdict.pr) alreadyDoneNotReady.set(String(id), verdict.pr);
-      verdictsById.set(id, verdict);
-    });
-    // The cache write is an OPTIMIZATION, not a correctness requirement — fail-soft on it exactly like every
-    // other best-effort read/write in this pass (the read above already fails open inside
-    // `readAlreadyDoneCacheState`). An unwritable `.conveyor` (read-only checkout, full disk, permissions)
-    // must never take down a whole dispatch-plan tick just because it could not persist a cooldown hint; the
-    // next tick simply re-checks the same items, same as it always has.
-    if (useCache) {
-      try { writeAlreadyDoneCacheState(recordVerdicts(cacheState, verdictsById, nowMs)); } catch { /* best-effort */ }
+    const pending = [];
+    const rows = new Map(queue.map(row => [String(row.num), row]));
+    for (const id of new Set([...rows.keys(), ...notReady.map(String)])) {
+      const item = byNum.get(id);
+      if (!isStaleEnoughForGroundTruth(item, nowMs)) continue;
+      const cached = flags['no-already-done-cache'] ? null : getCachedVerdict(cacheState, id, nowMs, cacheOptions);
+      const local = localDoneVerdict(id, item?.bornAs, facts);
+      // A cached positive always wins; a local negative is only relative to origin/main.
+      const verdict = cached || local;
+      if (cached) groundTruth.cached++;
+      else if (local) groundTruth.checkedLocally++;
+      else pending.push(id);
+      if (verdict?.done && verdict.pr) {
+        if (rows.has(id)) rows.get(id).alreadyDonePr = verdict.pr;
+        else alreadyDoneNotReady.set(id, verdict.pr);
+      }
     }
+    groundTruth.pending = pending.length;
+    groundTruth.refresh = startAlreadyDoneRefresh(pending, resolveAlreadyDoneCacheStorePath());
+    if (groundTruth.refresh.error) log(`already-done refresh unavailable: ${groundTruth.refresh.error}`);
   }
 
   // 2. THE ACTIVE LEASES — reuse the live scope-lease collector. Each lease's held scope = predicted ∪ observed.
@@ -1011,7 +974,7 @@ async function main(argv) {
       // nothing carrying unreconciled drift, so there is nothing to hold on. Skip rather than shelling out
       // with a `null` branch name and relying on the fail-open catch to clean it up.
       if (!branch) throw new Error('no POC branch registered and no --drift-branch given — nothing to check');
-      const out = await runBounded('node', [DRIFT_CLI, 'check', `--branch=${branch}`, `--target=${target}`, '--json'], { timeoutMs: childTimeoutMs });
+      const out = await runBounded('node', [DRIFT_CLI, 'check', `--branch=${branch}`, `--target=${target}`, '--no-fetch', '--json'], { timeoutMs: childTimeoutMs });
       const verdict = JSON.parse(out);
       if (verdict?.status === 'blocked') {
         driftBlockedScope = scope;
@@ -1084,7 +1047,7 @@ async function main(argv) {
   if (!flags['no-pr-limit-check']) {
     try {
       const { countOpenPrsForRepo, isGlobalOffLive, decideOpenPr } = await import('../lib/pr-limit.mjs');
-      const { count: openCount, limit } = countOpenPrsForRepo('we');
+      const { count: openCount, limit } = countOpenPrsForRepo('we', { localOnly: true });
       prLimitHeld = !decideOpenPr({ repoKey: 'we', limit, openCount, globalOff: isGlobalOffLive() }).allowed;
     } catch (e) {
       log(`  ⚠ pr-limit check skipped (${String(e.message || e).split('\n')[0]}) — dispatch proceeds unheld on this axis`);
@@ -1095,6 +1058,8 @@ async function main(argv) {
   const maxConcurrentLanes = resolveMaxConcurrentLanes(process.env);
   const plan = dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, driftGraduationItem, maxConcurrentLanes, dispatchPaused, dispatchPausedKinds, sizePolicy, preparePolicy, prLimitHeld, trace: true });
   // Surface cleared-but-not-ready ids as held entries so a clear never silently vanishes (#2613 review, 2b).
+  plan.groundTruth = groundTruth;
+
   // #3457/#3460: a `notReady` id the ground-truth pass above CONFIRMED already done (the exact `#3435` live
   // shape — a RESOLVED item whose sidecar clear was never removed) is surfaced as `already-done`, naming the
   // merged PR, instead of the generic `cleared-but-not-ready` — turning "silently listed with no reason" into

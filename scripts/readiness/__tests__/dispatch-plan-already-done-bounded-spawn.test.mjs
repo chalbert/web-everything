@@ -1,9 +1,4 @@
-/**
- * Spawn budget for the already-done pass: complete git history needs no GitHub calls;
- * incomplete history uses one metered search per stale id, never per lane or known PR.
- * Real isolated repositories keep the CLI away from the developer checkout and network.
- * Cache, bypass, done-verdict replay and write-failure assertions cover both queue populations.
- */
+/** Real CLI checks: one local snapshot, two background searches maximum, and durable verdict replay. */
 import { describe, it, expect } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync } from 'node:fs';
@@ -96,196 +91,87 @@ function buildFixture({ completeHistory = false } = {}) {
   const origin = join(fixtureRoot, 'github.com', 'fixture', 'dispatch');
   git('clone', '--bare', fixtureRoot, origin);
   git('remote', 'add', 'origin', origin);
+  git('fetch', 'origin');
   if (!completeHistory) writeFileSync(join(fixtureRoot, '.git', 'shallow'), git('rev-parse', 'HEAD'));
   return { fixtureRoot, backlogDir, queueFile, fillerPrs };
 }
 
-describe('dispatch-plan.mjs already-done ground truth — spawn count is LINEAR in stale ids, never multiplicative (#3457/#3460, x3xz8qp)', () => {
-  it('uses complete git history for all stale ids with zero GitHub calls', () => {
-    const { fixtureRoot, backlogDir, queueFile, fillerPrs } = buildFixture({ completeHistory: true });
-    const fakeGh = withAlreadyDoneHost({ prs: fillerPrs });
-    try {
-      const cacheFile = join(fixtureRoot, 'already-done-cache.json');
-      const env = { ...process.env, ...fakeGh.env, CONVEYOR_QUEUE_FILE: queueFile,
-        WE_DISPATCH_PLAN_ALREADY_DONE_CACHE_FILE: cacheFile };
-      const args = [PLAN_CLI, '--json', `--backlog-dir=${backlogDir}`, '--free-lanes=1',
-        '--no-drift-check', '--no-pause-check', '--no-pr-limit-check'];
-      const plan = JSON.parse(execFileSync('node', args, { cwd: fixtureRoot, timeout: 50_000, encoding: 'utf8', env }));
-      expect(plan.launch.length + plan.held.length).toBeGreaterThanOrEqual(N_READY);
-      expect(fakeGh.calls()).toEqual([]);
-      const cache = JSON.parse(readFileSync(cacheFile, 'utf8'));
-      expect(Object.keys(cache.items)).toHaveLength(N_READY + N_NOT_READY);
-      for (const entry of Object.values(cache.items)) expect(entry).toMatchObject({ done: false });
-    } finally {
-      fakeGh.cleanup();
-      rmSync(fixtureRoot, { recursive: true, force: true });
-    }
-  }, 60_000);
+async function waitRefresh(cacheFile) {
+  const deadline = Date.now() + 20000;
+  while (existsSync(`${cacheFile}.refresh-lock`)) {
+    if (Date.now() > deadline) throw new Error('refresh did not settle');
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
+}
+function fixtureRun(f, fakeGh, cacheFile, extra = [], extraEnv = {}) {
+  return JSON.parse(execFileSync('node', [PLAN_CLI, '--json', `--backlog-dir=${f.backlogDir}`, '--free-lanes=1',
+    '--no-drift-check', '--no-pause-check', '--no-pr-limit-check', ...extra], {
+    cwd: f.fixtureRoot, timeout: 10000, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024,
+    env: { ...process.env, ...fakeGh.env, CONVEYOR_QUEUE_FILE: f.queueFile,
+      WE_DISPATCH_PLAN_ALREADY_DONE_CACHE_FILE: cacheFile, ...extraEnv },
+  }));
+}
 
-  it('spends exactly one `gh` spawn per stale id, regardless of free-lane count or how many PRs `gh` already knows about', () => {
-    const { fixtureRoot, backlogDir, queueFile, fillerPrs } = buildFixture();
-    const fakeGh = withAlreadyDoneHost({ prs: fillerPrs });
+describe('dispatch-plan bounded enrichment', () => {
+  it('uses complete local history with zero GitHub calls and no network fetch', () => {
+    const f = buildFixture({ completeHistory: true });
+    const gh = withAlreadyDoneHost({ prs: [] });
     try {
-      const env = { ...process.env, ...fakeGh.env, CONVEYOR_QUEUE_FILE: queueFile,
-        WE_DISPATCH_PLAN_ALREADY_DONE_CACHE_FILE: join(fixtureRoot, 'already-done-cache.json') };
-      // A LARGE explicit free-lane list — a second fan-out dimension in the very same tick. If the already-done
-      // pass ever regressed to checking each stale id once per free lane (or per known PR), this is exactly
-      // the shape that would multiply it out.
-      const freeLanes = Array.from({ length: 80 }, (_, i) => 9000 + i).join(',');
-      const out = execFileSync(
-        'node',
-        [PLAN_CLI, '--json', `--backlog-dir=${backlogDir}`, `--free-lanes=${freeLanes}`, '--no-drift-check', '--no-pause-check', '--no-pr-limit-check'],
-        { cwd: fixtureRoot, timeout: 50_000, encoding: 'utf8', env, maxBuffer: 32 * 1024 * 1024 },
-      );
-      const plan = JSON.parse(out);
-      // Sanity: the fixture actually reached the dispatcher (all ready items present, held or launched).
-      const allNums = [...plan.launch.map((l) => String(l.num)), ...plan.held.map((h) => String(h.num))];
-      expect(allNums.length).toBeGreaterThanOrEqual(N_READY);
-
-      const calls = searchCalls(fakeGh);
-      // Exactly one metered GraphQL search per stale id (60 ready + 10 not-ready) — the INHERENT linear cost,
-      // pinned exactly so a duplicate fallback per free lane cannot slip through.
-      expect(calls.length).toBe(N_READY + N_NOT_READY);
-      // Every recorded call really is the age-gated already-done search, not some other `gh` verb.
-      for (const c of calls) expect(c.argv).toEqual(expect.arrayContaining(['api', 'graphql', '--jq']));
-    } finally {
-      fakeGh.cleanup();
-      rmSync(fixtureRoot, { recursive: true, force: true });
-    }
-  }, 60_000);
-
-  it('`--no-ground-truth` drops the spawn count to zero — the escape hatch really disables the axis', () => {
-    const { fixtureRoot, backlogDir, queueFile, fillerPrs } = buildFixture();
-    const fakeGh = withAlreadyDoneHost({ prs: fillerPrs });
+      const plan = fixtureRun(f, gh, join(f.fixtureRoot, 'cache'));
+      expect(plan.groundTruth.checkedLocally).toBe(N_READY + N_NOT_READY);
+      expect(plan.groundTruth.pending).toBe(0);
+      expect(gh.calls()).toEqual([]);
+    } finally { gh.cleanup(); rmSync(f.fixtureRoot, { recursive: true, force: true }); }
+  });
+  it('cold queues refresh only two ids; later ticks rotate and respect cached verdicts', async () => {
+    const f = buildFixture(); const gh = withAlreadyDoneHost({ prs: [] });
+    const cacheFile = join(f.fixtureRoot, 'cache');
     try {
-      const env = { ...process.env, ...fakeGh.env, CONVEYOR_QUEUE_FILE: queueFile,
-        WE_DISPATCH_PLAN_ALREADY_DONE_CACHE_FILE: join(fixtureRoot, 'already-done-cache.json') };
-      execFileSync(
-        'node',
-        [PLAN_CLI, '--json', `--backlog-dir=${backlogDir}`, '--free-lanes=1', '--no-drift-check', '--no-pause-check', '--no-ground-truth', '--no-pr-limit-check'],
-        { cwd: fixtureRoot, timeout: 50_000, encoding: 'utf8', env, maxBuffer: 32 * 1024 * 1024 },
-      );
-      expect(searchCalls(fakeGh).length).toBe(0);
-    } finally {
-      fakeGh.cleanup();
-      rmSync(fixtureRoot, { recursive: true, force: true });
-    }
-  }, 60_000);
-
-  it('second run makes zero additional already-done calls within the cooldown', () => {
-    const { fixtureRoot, backlogDir, queueFile, fillerPrs } = buildFixture();
-    const fakeGh = withAlreadyDoneHost({ prs: fillerPrs });
+      const first = fixtureRun(f, gh, cacheFile);
+      expect(first.groundTruth.pending).toBe(70);
+      expect(first.groundTruth.refresh.ids).toHaveLength(2);
+      await waitRefresh(cacheFile);
+      expect(searchCalls(gh)).toHaveLength(2);
+      const second = fixtureRun(f, gh, cacheFile);
+      expect(second.groundTruth.cached).toBe(2);
+      expect(second.groundTruth.refresh.ids.some(id => first.groundTruth.refresh.ids.includes(id))).toBe(false);
+      await waitRefresh(cacheFile);
+      expect(searchCalls(gh)).toHaveLength(4);
+    } finally { await waitRefresh(cacheFile); gh.cleanup(); rmSync(f.fixtureRoot, { recursive: true, force: true }); }
+  });
+  it.each([['--no-already-done-cache'], []])('cache bypass/zero cooldown retain the two-check ceiling: %j', async extra => {
+    const f = buildFixture(); const gh = withAlreadyDoneHost({ prs: [] }); const cacheFile = join(f.fixtureRoot, 'cache');
     try {
-      const env = { ...process.env, ...fakeGh.env, CONVEYOR_QUEUE_FILE: queueFile,
-        WE_DISPATCH_PLAN_ALREADY_DONE_CACHE_FILE: join(fixtureRoot, 'already-done-cache.json') };
-      const freeLanes = Array.from({ length: 80 }, (_, i) => 9000 + i).join(',');
-      const args = [PLAN_CLI, '--json', `--backlog-dir=${backlogDir}`, `--free-lanes=${freeLanes}`, '--no-drift-check', '--no-pause-check', '--no-pr-limit-check'];
-      for (let run = 0; run < 2; run++) {
-        const out = execFileSync('node', args, { cwd: fixtureRoot, timeout: 50_000, encoding: 'utf8', env, maxBuffer: 32 * 1024 * 1024 });
-        const plan = JSON.parse(out);
-        expect(plan.launch.length + plan.held.length).toBeGreaterThanOrEqual(N_READY);
-        const calls = searchCalls(fakeGh);
-        expect(calls.length).toBe(N_READY + N_NOT_READY);
-        for (const c of calls) expect(c.argv).toEqual(expect.arrayContaining(['api', 'graphql', '--jq']));
+      for (let i = 0; i < 2; i++) {
+        const plan = fixtureRun(f, gh, cacheFile, extra, { WE_DISPATCH_PLAN_ALREADY_DONE_NOT_DONE_COOLDOWN_MS: '0' });
+        expect(plan.groundTruth.cached).toBe(0);
+        expect(plan.groundTruth.refresh.ids).toHaveLength(2);
+        await waitRefresh(cacheFile);
       }
-    } finally {
-      fakeGh.cleanup();
-      rmSync(fixtureRoot, { recursive: true, force: true });
-    }
-  }, 60_000);
-
-  it('`--no-already-done-cache` bypasses the cache — the second run still spends the full N calls', () => {
-    const { fixtureRoot, backlogDir, queueFile, fillerPrs } = buildFixture();
-    const fakeGh = withAlreadyDoneHost({ prs: fillerPrs });
+      expect(searchCalls(gh)).toHaveLength(4);
+    } finally { await waitRefresh(cacheFile); gh.cleanup(); rmSync(f.fixtureRoot, { recursive: true, force: true }); }
+  });
+  it('replays confirmed positives for ready AND not-ready rows without rechecking either', async () => {
+    const f = buildFixture(); const gh = withAlreadyDoneHost({ prs: [] }); const cacheFile = join(f.fixtureRoot, 'cache');
     try {
-      const cacheFile = join(fixtureRoot, 'already-done-cache.json');
-      const env = { ...process.env, ...fakeGh.env, CONVEYOR_QUEUE_FILE: queueFile, WE_DISPATCH_PLAN_ALREADY_DONE_CACHE_FILE: cacheFile };
-      const args = [PLAN_CLI, '--json', `--backlog-dir=${backlogDir}`, '--free-lanes=1', '--no-drift-check', '--no-pause-check', '--no-pr-limit-check', '--no-already-done-cache'];
-      for (let run = 0; run < 2; run++) {
-        execFileSync('node', args, { cwd: fixtureRoot, timeout: 50_000, encoding: 'utf8', env, maxBuffer: 32 * 1024 * 1024 });
-      }
-      // Every id checked TWICE (once per run) — the flag is a real bypass, not a no-op read of an empty cache.
-      expect(searchCalls(fakeGh).length).toBe((N_READY + N_NOT_READY) * 2);
-      // And the flag never even writes the store — no file materializes at the path it would otherwise use.
-      expect(existsSync(cacheFile)).toBe(false);
-    } finally {
-      fakeGh.cleanup();
-      rmSync(fixtureRoot, { recursive: true, force: true });
-    }
-  }, 60_000);
-
-  it('a zero not-done cooldown (env override) forces a full recheck on every run', () => {
-    const { fixtureRoot, backlogDir, queueFile, fillerPrs } = buildFixture();
-    const fakeGh = withAlreadyDoneHost({ prs: fillerPrs });
+      const pr = { number: 30000, url: 'https://github.com/fixture/dispatch/pull/30000' };
+      writeFileSync(cacheFile, JSON.stringify({ items: Object.fromEntries(['8000', '8105'].map(id => [id, { done: true, pr, checkedAt: new Date().toISOString() }])) }));
+      const plan = fixtureRun(f, gh, cacheFile);
+      for (const id of ['8000', '8105']) expect(plan.held.find(h => String(h.num) === id)?.reason).toBe('already-done');
+      expect(plan.held.find(h => String(h.num) === '8105').alreadyDonePr).toEqual(pr);
+      expect(plan.groundTruth.refresh.ids).not.toContain('8000');
+      expect(plan.groundTruth.refresh.ids).not.toContain('8105');
+    } finally { await waitRefresh(cacheFile); gh.cleanup(); rmSync(f.fixtureRoot, { recursive: true, force: true }); }
+  });
+  it('unwritable cache exposes pending checks without crashing or doing inline network IO', () => {
+    const f = buildFixture(); const gh = withAlreadyDoneHost({ prs: [] });
     try {
-      const env = { ...process.env, ...fakeGh.env, CONVEYOR_QUEUE_FILE: queueFile,
-        WE_DISPATCH_PLAN_ALREADY_DONE_CACHE_FILE: join(fixtureRoot, 'already-done-cache.json'),
-        WE_DISPATCH_PLAN_ALREADY_DONE_NOT_DONE_COOLDOWN_MS: '0' };
-      const args = [PLAN_CLI, '--json', `--backlog-dir=${backlogDir}`, '--free-lanes=1', '--no-drift-check', '--no-pause-check', '--no-pr-limit-check'];
-      for (let run = 0; run < 2; run++) {
-        execFileSync('node', args, { cwd: fixtureRoot, timeout: 50_000, encoding: 'utf8', env, maxBuffer: 32 * 1024 * 1024 });
-      }
-      // A `0` override is a valid, deliberate "never trust the cache" setting (env-parsing treats it as
-      // `>= 0`, not as unset/blank/non-numeric) — every id is a miss on both runs, same as `--no-ground-truth`
-      // for the not-done population specifically.
-      expect(searchCalls(fakeGh).length).toBe((N_READY + N_NOT_READY) * 2);
-    } finally {
-      fakeGh.cleanup();
-      rmSync(fixtureRoot, { recursive: true, force: true });
-    }
-  }, 60_000);
-
-  it('a cached done:true verdict replays end to end on the second run, with zero extra gh calls for that id', () => {
-    const { fixtureRoot, backlogDir, queueFile, fillerPrs } = buildFixture();
-    // Item 8105 (one of the N_NOT_READY cleared-but-blocked fixture items — the ONE population whose
-    // already-done hold surfaces `alreadyDonePr` in the plan JSON, per `dispatch-plan.mjs`'s own
-    // `plan.held.push(pr ? { num, reason: 'already-done', alreadyDonePr: pr } : …)`) has a real merged PR that
-    // closes it out. The fake `gh` returns this same list on EVERY metered search call; the real matcher
-    // (`filterAlreadyDoneCandidates`) picks it out only for the id whose number is in its title.
-    const donePr = { number: 30000, state: 'MERGED', headRefName: 'lane/8105-fixture-done', title: 'WE #8105: fixture already-done', mergedAt: '2026-01-01T00:00:00Z' };
-    const fakeGh = withAlreadyDoneHost({ prs: [...fillerPrs, donePr] });
-    try {
-      const env = { ...process.env, ...fakeGh.env, CONVEYOR_QUEUE_FILE: queueFile,
-        WE_DISPATCH_PLAN_ALREADY_DONE_CACHE_FILE: join(fixtureRoot, 'already-done-cache.json') };
-      const args = [PLAN_CLI, '--json', `--backlog-dir=${backlogDir}`, '--free-lanes=1', '--no-drift-check', '--no-pause-check', '--no-pr-limit-check'];
-      const plans = [0, 1].map(() => JSON.parse(execFileSync('node', args, { cwd: fixtureRoot, timeout: 50_000, encoding: 'utf8', env, maxBuffer: 32 * 1024 * 1024 })));
-      for (const plan of plans) {
-        const held = plan.held.find((h) => String(h.num) === '8105');
-        expect(held).toMatchObject({ reason: 'already-done' });
-        expect(held.alreadyDonePr?.number).toBe(30000);
-      }
-      // Run 1: every stale id is a cache miss (N calls, including 8105). Run 2: 8105's done:true verdict is
-      // served from the cache (24h cooldown) — zero ADDITIONAL calls for it, even though every other id (still
-      // done:false, 30-minute cooldown) is unaffected either way inside this test's tight timing.
-      const totalCalls = searchCalls(fakeGh).length;
-      expect(totalCalls).toBe(N_READY + N_NOT_READY); // not doubled — 8105 (and everything else) hit cache on run 2
-    } finally {
-      fakeGh.cleanup();
-      rmSync(fixtureRoot, { recursive: true, force: true });
-    }
-  }, 60_000);
-
-  it('an unwritable cache store degrades to a plain miss on every id — the tick never crashes', () => {
-    const { fixtureRoot, backlogDir, queueFile, fillerPrs } = buildFixture();
-    const fakeGh = withAlreadyDoneHost({ prs: fillerPrs });
-    try {
-      // A cache path whose PARENT is a plain file, not a directory — `mkdirSync(dirname(path), {recursive:true})`
-      // throws ENOTDIR/EEXIST, exercising the fail-soft `try/catch` around `writeAlreadyDoneCacheState` in
-      // `dispatch-plan.mjs`. Before that guard existed, this crashed the whole tick.
-      const blocker = join(fixtureRoot, 'not-a-directory');
-      writeFileSync(blocker, 'not a directory');
-      const cacheFile = join(blocker, 'already-done-cache.json');
-      const env = { ...process.env, ...fakeGh.env, CONVEYOR_QUEUE_FILE: queueFile, WE_DISPATCH_PLAN_ALREADY_DONE_CACHE_FILE: cacheFile };
-      const args = [PLAN_CLI, '--json', `--backlog-dir=${backlogDir}`, '--free-lanes=1', '--no-drift-check', '--no-pause-check', '--no-pr-limit-check'];
-      const out = execFileSync('node', args, { cwd: fixtureRoot, timeout: 50_000, encoding: 'utf8', env, maxBuffer: 32 * 1024 * 1024 });
-      const plan = JSON.parse(out);
-      expect(plan.held.length + plan.launch.length).toBeGreaterThanOrEqual(N_READY);
-      expect(searchCalls(fakeGh).length).toBe(N_READY + N_NOT_READY);
-      expect(existsSync(cacheFile)).toBe(false);
-    } finally {
-      fakeGh.cleanup();
-      rmSync(fixtureRoot, { recursive: true, force: true });
-    }
-  }, 60_000);
-
+      const blocker = join(f.fixtureRoot, 'blocker'); writeFileSync(blocker, 'file');
+      const plan = fixtureRun(f, gh, join(blocker, 'cache'));
+      expect(plan.groundTruth.refresh.started).toBe(false);
+      expect(plan.groundTruth.refresh.error).toBeTruthy();
+      expect(plan.groundTruth.pending).toBe(70);
+      expect(gh.calls()).toEqual([]);
+    } finally { gh.cleanup(); rmSync(f.fixtureRoot, { recursive: true, force: true }); }
+  });
 });
