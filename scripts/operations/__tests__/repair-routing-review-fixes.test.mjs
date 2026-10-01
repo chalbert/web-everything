@@ -111,6 +111,43 @@ describe('critical-work signals reach the fix route', () => {
   });
 });
 
+describe('dispatchFix sibling repos stay native (the WE-relative gate cannot judge them)', () => {
+  it.each(['frontierui', 'plateau-app'])('a %s fix never reaches Codex, whatever its item number matches in the WE backlog', repo => {
+    const spawned = [];
+    const result = dispatchFix({ ...planned, scope: [`${repo}:src/a.ts`] }, {
+      ...base({ routeFix: undefined }), repo, root: dir,
+      home: dir, checkoutExists: () => true, readPackageJson: () => ({ scripts: {} }),
+      spawnCodex: () => { throw new Error('must not start Codex'); },
+      spawnAgent: argv => { spawned.push(argv); return 'backgrounded · abc12345\n'; },
+    });
+    expect(result.provider ?? 'claude').toBe('claude');
+    expect(spawned).toHaveLength(1);
+  });
+
+  it('the default routeFix returns no policy route for a sibling repo and never reads the WE card', () => {
+    let routed = 0;
+    dispatchFix({ ...planned, scope: ['frontierui:src/a.ts'] }, {
+      ...base({ routeFix: undefined }), repo: 'frontierui', root: '/no/such/root',
+      home: dir, checkoutExists: () => true, readPackageJson: () => ({ scripts: {} }),
+      spawnCodex: () => { routed += 1; return 'x'; },
+      spawnAgent: () => 'backgrounded · abc12345\n',
+    });
+    expect(routed).toBe(0);
+  });
+});
+
+describe('createDispatchSinks error classification', () => {
+  it('an UNKNOWN-outcome launch failure carries `.indeterminate` so dispatchCiHeal keeps its claim', async () => {
+    const sinks = createDispatchSinks({
+      root: '/primary/webeverything',
+      spawnAgent: () => { throw new Error('boom: something odd'); },
+    });
+    const err = await sinks[DISPATCH_EFFECT]({ prompt: 'p', sessionSlug: 's', num: '1' }).catch(e => e);
+    expect(err.message).toMatch(/UNKNOWN/);
+    expect(err.indeterminate).toBe(true);
+  });
+});
+
 describe('dispatchCiHeal', () => {
   const healPlanned = { itemNum: '2638', pr: 743, laneRef: 'lane/2638-x', scope: ['we:scripts/a.mjs'], lane: 9, headRefOid: 'sha' };
   const readBrief = () => 'heal {{PR_NUM}} {{ITEM_NUM}} {{LANE_REF}} {{LANE}} {{SESSION_SLUG}} {{SCOPE}} {{REASON}}';

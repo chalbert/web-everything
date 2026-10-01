@@ -863,7 +863,10 @@ export function dispatchFix(planned, {
   modelReason = null,
   readRoutingSignals = cardRoutingSignals,
   routeFix = p => {
-    // A sibling repo's item number names a card in ITS backlog, not WE's: never look it up in WE's directory.
+    // Native Claude only (no policy route) when the WE-relative critical-work gate cannot judge the PR: a sibling
+    // repo (its item number names a card in ITS backlog, not WE's, and the gate's statute/gateSelf prefixes are
+    // WE-relative — same boundary `dispatchCiHeal` keeps), or an item-less PR (no card to read tags/risk from).
+    if (repo !== 'we' || !p.itemNum) return null;
     const signals = readRoutingSignals(root, p.itemNum);
     return resolveDispatchRoute({ kind: "fix", scopePaths: p.scope, risk: p.risk === 'high' || signals.risk === 'high' ? 'high' : p.risk, tags: signals.tags, size: p.size, cause: p.cause }, { scorecards: defaultReadScorecards() });
   },
