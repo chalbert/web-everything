@@ -1,10 +1,12 @@
 {
   "_howTo": [
-    "To move operation X to model Y, edit operations.X: {\"provider\":\"codex\",\"model\":\"Y\",\"fallback\":[{\"provider\":\"claude\",\"model\":\"sonnet\"}]}. Once explicit, edit its model line to change Y.",
+    "To change operation X's model or effort, edit its one line in operations (or operations.X:taskType / taskTypes); provider, model, effort and fallback resolve together.",
     "An entry with inherit:true preserves the existing evidence/tier router. taskTypes entries override inherited operations; operations may also use operation:taskType keys (review-seat:security, for example).",
     "Aliases below resolve to explicit model IDs. Edit criticalWorkGate.kinds to change which operations require the existing critical-work check. A closed gate takes the Claude fallback.",
     "Fallbacks are tried in order for unavailable providers BEFORE launch. Never retry an indeterminate or already-started launch. Invalid edits retain the last good policy and log the validation error.",
-    "Review operation judges use judge:<operation> (for example judge:review-pr); review-seat:<lens> selects an added seat. Native agent-only adapters take the first Claude entry; unsupported or missing adapters take the declared fallback. Existing CLI pins remain explicit per-run choices."
+    "Review operation judges use judge:<operation> (for example judge:review-pr); review-seat:<lens> selects an added seat. Native agent-only adapters take the first Claude entry; unsupported or missing adapters take the declared fallback. Existing CLI pins remain explicit per-run choices.",
+    "Astra effort correctness is unproven (see CODEX_TIER_EFFORT in we:scripts/lib/codex-model-routing.mjs): effort is a cost/latency dial until measured.",
+    "Operator 2026-09-30: Gemini only with confidence of value. smallPrepare controls the <=3, explicitly well-scoped, no-design prepare exception; widen it here as evidence arrives. Unknown size/design stays Codex."
   ],
   "version": 1,
   "aliases": {
@@ -24,7 +26,7 @@
     "antigravity": {
       "sonnet": "claude-sonnet-4-6",
       "opus": "claude-opus-4-6-thinking",
-      "flash": "gemini-3.8-flash-high",
+      "flash": "gemini-3.8-flash",
       "pro": "gemini-3.1-pro"
     },
     "agy-claude": {
@@ -32,7 +34,7 @@
       "opus": "claude-opus-4-6-thinking"
     },
     "agy-gemini": {
-      "flash": "gemini-3.8-flash-high",
+      "flash": "gemini-3.8-flash",
       "pro": "gemini-3.1-pro"
     }
   },
@@ -55,49 +57,55 @@
     "reason": "a non-Claude worker takes gated work only for a non-critical task of an opened taskType"
   },
   "operations": {
-    "*": {
-      "inherit": true
-    },
-    "build": {
-      "inherit": true
-    },
-    "fix": {
-      "inherit": true
-    },
-    "ci-heal": {
-      "inherit": true
-    },
-    "prepare": {
-      "inherit": true
-    },
-    "prepare-decision": {
-      "inherit": true
-    },
-    "investigate": {
-      "inherit": true
-    },
-    "review": {
-      "inherit": true
-    },
-    "review-seat": {
-      "inherit": true
-    },
-    "judge": {
-      "inherit": true
-    },
-    "prepare-item": {
-      "provider": "codex",
-      "model": "default",
+    "*": {"inherit": true,"effort": {"claude": "medium","codex": "medium","antigravity": "medium","agy-claude": "medium","agy-gemini": "medium"}},
+    "build": {"provider": "codex","model": "astra","effort": {"claude": "high","codex": "high","antigravity": "high","agy-claude": "high","agy-gemini": "high"},"fallback": [{"provider": "claude","model": "sonnet","effort": "high"}]},
+    "fix": {"provider": "codex","model": "astra","effort": {"claude": "high","codex": "high","antigravity": "high","agy-claude": "high","agy-gemini": "high"},"fallback": [{"provider": "claude","model": "sonnet","effort": "high"}]},
+    "ci-heal": {"provider": "codex","model": "astra","effort": {"claude": "high","codex": "high","antigravity": "high","agy-claude": "high","agy-gemini": "high"},"fallback": [{"provider": "claude","model": "sonnet","effort": "high"}]},
+    "prepare": {"provider": "codex","model": "astra","effort": {"claude": "low","codex": "low","antigravity": "low","agy-claude": "low","agy-gemini": "low"},"fallback": [{"provider": "claude","model": "sonnet","effort": "low"}]},
+    "prepare-decision": {"provider": "codex","model": "astra","effort": {"claude": "high","codex": "high","antigravity": "high","agy-claude": "high","agy-gemini": "high"},"fallback": [{"provider": "claude","model": "sonnet","effort": "high"}]},
+    "investigate": {"provider": "codex","model": "astra","effort": {"claude": "high","codex": "high","antigravity": "high","agy-claude": "high","agy-gemini": "high"},"fallback": [{"provider": "claude","model": "sonnet","effort": "high"}]},
+    "review": {"inherit": true,"effort": {"claude": "high","codex": "high","antigravity": "high","agy-claude": "high","agy-gemini": "high"}},
+    "review-seat": {"inherit": true,"effort": {"claude": "high","codex": "medium","antigravity": "high","agy-claude": "medium","agy-gemini": "low"}},
+    "judge": {"inherit": true,"effort": {"claude": "high","codex": "high","antigravity": "high","agy-claude": "high","agy-gemini": "high"}},
+    "prepare-item": {"provider": "codex","model": "astra","effort": {"claude": "low","codex": "low","antigravity": "low","agy-claude": "low","agy-gemini": "low"},"fallback": [{"provider": "claude","model": "sonnet","effort": "low"}]},
+    "review-recheck": {"inherit": true,"effort": {"claude": "high","codex": "high","antigravity": "high","agy-claude": "high","agy-gemini": "high"}},
+    "build:doc-fix": {"provider": "codex","model": "astra","effort": {"claude": "low","codex": "low","antigravity": "low","agy-claude": "low","agy-gemini": "low"},"fallback": [{"provider": "claude","model": "sonnet","effort": "low"}]},
+    "build:test-fix": {"provider": "agy-gemini","model": "flash","effort": {"claude": "low","codex": "low","antigravity": "low","agy-claude": "low","agy-gemini": "low"},"fallback": [{"provider": "claude","model": "sonnet","effort": "low"}]},
+    "fix:doc-fix": {"provider": "codex","model": "astra","effort": {"claude": "low","codex": "low","antigravity": "low","agy-claude": "low","agy-gemini": "low"},"fallback": [{"provider": "claude","model": "sonnet","effort": "low"}]},
+    "prevention-card": {"provider": "codex","model": "astra","effort": {"claude": "low","codex": "low","antigravity": "low","agy-claude": "low","agy-gemini": "low"},"fallback": [{"provider": "claude","model": "sonnet","effort": "low"}]},
+    "prepare-card": {"provider": "codex","model": "astra","effort": {"claude": "low","codex": "low","antigravity": "low","agy-claude": "low","agy-gemini": "low"},"fallback": [{"provider": "claude","model": "sonnet","effort": "low"}]},
+    "doc-fix": {"provider": "codex","model": "astra","effort": {"claude": "low","codex": "low","antigravity": "low","agy-claude": "low","agy-gemini": "low"},"fallback": [{"provider": "claude","model": "sonnet","effort": "low"}]},
+    "review-seat:red-team": {"inherit": true,"effort": {"claude": "high","codex": "high","antigravity": "high","agy-claude": "high","agy-gemini": "high"}}
+  },
+  "taskTypes": {
+    "doc-fix": {"provider": "codex","model": "astra","effort": {"claude": "low","codex": "low","antigravity": "low","agy-claude": "low","agy-gemini": "low"},"fallback": [{"provider": "claude","model": "sonnet","effort": "low"}]},
+    "prevention-card": {"provider": "codex","model": "astra","effort": {"claude": "low","codex": "low","antigravity": "low","agy-claude": "low","agy-gemini": "low"},"fallback": [{"provider": "claude","model": "sonnet","effort": "low"}]},
+    "prepare-card": {"provider": "codex","model": "astra","effort": {"claude": "low","codex": "low","antigravity": "low","agy-claude": "low","agy-gemini": "low"},"fallback": [{"provider": "claude","model": "sonnet","effort": "low"}]},
+    "bugfix": {"provider": "codex","model": "astra","effort": {"claude": "high","codex": "high","antigravity": "high","agy-claude": "high","agy-gemini": "high"},"fallback": [{"provider": "claude","model": "sonnet","effort": "high"}]},
+    "build-new-feature": {"provider": "codex","model": "astra","effort": {"claude": "high","codex": "high","antigravity": "high","agy-claude": "high","agy-gemini": "high"},"fallback": [{"provider": "claude","model": "sonnet","effort": "high"}]},
+    "design": {"provider": "codex","model": "astra","effort": {"claude": "high","codex": "high","antigravity": "high","agy-claude": "high","agy-gemini": "high"},"fallback": [{"provider": "claude","model": "sonnet","effort": "high"}]},
+    "diagnosis": {"provider": "codex","model": "astra","effort": {"claude": "high","codex": "high","antigravity": "high","agy-claude": "high","agy-gemini": "high"},"fallback": [{"provider": "claude","model": "sonnet","effort": "high"}]},
+    "test-fix": {"provider": "agy-gemini","model": "flash","effort": {"claude": "low","codex": "low","antigravity": "low","agy-claude": "low","agy-gemini": "low"},"fallback": [{"provider": "claude","model": "sonnet","effort": "low"}]}
+  },
+  "smallPrepare": {
+    "maxSize": 3,
+    "route": {
+      "provider": "agy-gemini",
+      "model": "pro",
+      "effort": {
+        "claude": "low",
+        "codex": "low",
+        "antigravity": "low",
+        "agy-claude": "low",
+        "agy-gemini": "low"
+      },
       "fallback": [
         {
           "provider": "claude",
-          "model": "sonnet"
+          "model": "sonnet",
+          "effort": "low"
         }
       ]
-    },
-    "review-recheck": {
-      "inherit": true
     }
-  },
-  "taskTypes": {}
+  }
 }

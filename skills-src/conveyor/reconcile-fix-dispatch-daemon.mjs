@@ -777,6 +777,7 @@ export function buildCliDaemonEffects({ owner, intervalMs = DEFAULT_INTERVAL_MS,
       // `fix`/`ci-heal` but the dispatch itself refused (no-lane, held, dispatch-failed, unsupported-repo,
       // no-scope). A `tick-failed` entry is already printed via the per-repo loop above — skip it here so it
       // is never printed twice.
+      for (const d of dispatched) if (d.provider) log.error(`reconcile-fix-dispatch-daemon: ${d.sessionSlug} → ${d.provider}/${d.model} effort=${d.effort} handle=${d.agentId}`);
       for (const r of refusals) if (r?.kind !== 'tick-failed') log.error(formatRefusalLine('refused', r));
       // `reconcileRefusals` = a PR `reconcile-core.mjs#planReconcile` refused OUTRIGHT, never even offered to
       // `fix`/`ci-heal` (owed-ci-rerun, no-findings, live-process, cap-exhausted, stood-down, owed-elsewhere,

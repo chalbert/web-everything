@@ -150,3 +150,6 @@ it('passes the most recently posted valid answer even when older holds are answe
   const newerAnswer = trusted(buildOperatorAnswer({ ...record, standDownId: newerStop.id, reason: 'Second question answered first.' }));
   expect(latestOperatorAnswer([stop, newerStop, newerAnswer, answer])).toEqual(record);
 });
+
+// These legacy cases exercise the native adapter; Codex routing has a dedicated dry-run suite.
+vi.mock('../../lib/dispatch-provider-availability.mjs', () => ({ dispatchProviderAvailable: provider => provider === 'claude' }));

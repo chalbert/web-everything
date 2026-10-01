@@ -1054,7 +1054,7 @@ const CLAUDE_RESTRICTED_PROVIDER = {
   // attemptTag }` — `lane`/`sessionSlug`/`item`/`attemptTag` added by bug 7's fix, below.
   async spawn(
     {
-      sessionId, prompt, resumeSessionId = null, lane, sessionSlug, item, attemptTag, model = 'sonnet',
+      sessionId, prompt, resumeSessionId = null, lane, sessionSlug, item, attemptTag, model = 'sonnet', effort = 'medium',
       // build-path-codex-isolation-locus — see `runAgentToCompletion`'s own docblock for what sets this.
       lanePathOverride = null,
     } = {},
@@ -1087,7 +1087,7 @@ const CLAUDE_RESTRICTED_PROVIDER = {
     const weLanePath = resolveLane(lane, { run: runFn });
     const lanePath = lanePathOverride || weLanePath;
     const argv = buildRestrictedProviderArgv({
-      sessionId, prompt, resumeSessionId, settingsFile, model, addDirs: lanePathOverride ? [weLanePath] : [],
+      sessionId, prompt, resumeSessionId, settingsFile, model, effort, addDirs: lanePathOverride ? [weLanePath] : [],
     });
     // build-path-codex-isolation-locus — a foreign-repo lane never carried `delivery-report-cli.mjs` (it is a
     // plain clone of THAT repo, not WE) — stage it at its real repo-relative path before the agent's first
@@ -1197,7 +1197,7 @@ const CODEX_PROVIDER = {
   // what this spawns without a real `codex` process or a real filesystem.
   async spawn(
     {
-      sessionId, prompt, resumeSessionId = null, lane, sessionSlug, item, attemptTag, model = CODEX_DELIVERY_MODEL,
+      sessionId, prompt, resumeSessionId = null, lane, sessionSlug, item, attemptTag, model = CODEX_DELIVERY_MODEL, effort = CODEX_DELIVERY_EFFORT,
       // build-path-codex-isolation-locus — see `runAgentToCompletion`'s own docblock for what sets this.
       lanePathOverride = null,
     } = {},
@@ -1263,7 +1263,7 @@ const CODEX_PROVIDER = {
       );
     }
     const argv = buildCodexDeliveryArgv({
-      prompt, cwd: lanePath, denyPaths: deny, resumeThreadId, writableRoots: extraLanes, model,
+      prompt, cwd: lanePath, denyPaths: deny, resumeThreadId, writableRoots: extraLanes, model, effort,
     });
     let stdout;
     try {
@@ -1292,7 +1292,7 @@ const CODEX_PROVIDER = {
     // Best-effort, never throws (`recordCodexRunScorecard`'s own header).
     recordScorecard({
       stdout, dispatchKind: 'build', role: 'delivery', provider: 'codex', model,
-      effort: CODEX_DELIVERY_EFFORT, item, handle: sessionSlug,
+      effort, item, handle: sessionSlug,
     });
     // Record the thread id on a FRESH spawn only — a resume re-announces the same id, so re-writing it is
     // noise. Best-effort by construction (`writeCodexThreadId` never throws): losing the crumb costs the
