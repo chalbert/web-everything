@@ -864,10 +864,12 @@ describe('fetchSessionSignals — #xbk2is9 the three-way `agents` null contract 
     expect(result.pidAlive.size).toBe(0);
   });
   it('--no-check-sessions disables the axis with no exec call at all — states/agents both null', () => {
-    const exec = () => { throw new Error('must not be called'); };
+    const exec = vi.fn();
     const result = fetchSessionSignals({ 'no-check-sessions': true }, { exec });
+    expect(exec).not.toHaveBeenCalled();
     expect(result.states).toBe(null);
     expect(result.agents).toBe(null);
+    expect(result.pidAlive.size).toBe(0);
   });
   it('a valid listing with interactive rows but ZERO background rows → `states` degrades to null (#1921), but `agents` is the REAL array — the whole reason this function returns both', () => {
     const exec = (cmd) => {

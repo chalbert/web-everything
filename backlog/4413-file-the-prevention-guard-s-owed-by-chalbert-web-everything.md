@@ -3,9 +3,10 @@ bornAs: x56mcj7
 kind: story
 size: 3
 parent: "4075"
-status: open
+status: resolved
 scope: ["we:scripts/conveyor/__tests__/lease-reaper.test.mjs"]
 dateOpened: "2026-09-28"
+dateResolved: "2026-09-30"
 preparedDate: "2026-09-30"
 preparedAgainstSha: "34c31da60813d2553402f46535413125bb9b30f1"
 tags: []
@@ -40,6 +41,14 @@ Musts only: rewrite the single test at `:866` to use a `vi.fn()` spy and assert 
 ## Proof plan
 
 Mutation before/after on the live code in the lane: (1) with the original test, delete the `:1265` early-return line locally and run the file: the test still passes (demonstrates the gap); (2) with the new spy test, same mutation: the test fails on `expect(exec).not.toHaveBeenCalled()`; (3) restore `we:scripts/conveyor/lease-reaper.mjs` via `git checkout` on it: green. Paste the three run outcomes in the PR body. Do not commit the mutation.
+
+## Progress
+
+- 2026-09-30: Replaced the throwing stub in the scoped test with `vi.fn()`, asserted zero exec calls, and asserted an empty `pidAlive` map alongside the existing null states/agents assertions.
+- Before proof: temporarily removed the `no-check-sessions` early return from `we:scripts/conveyor/lease-reaper.mjs`. Running `npx vitest run we:scripts/conveyor/__tests__/lease-reaper.test.mjs -t "no-check-sessions disables"` (strip the `we:` locus prefix when executing) against the original test exited 0: 1 passed, 172 skipped. The swallowed `must not be called` error demonstrated the gap.
+- After proof: the same mutation and focused command with the spy test exited 1: 1 failed, 172 skipped, specifically at `expect(exec).not.toHaveBeenCalled()` with one recorded `claude agents --json --all` call.
+- Restored the runtime file byte-for-byte in a `finally` block after each mutation; its git diff is empty. The focused command then exited 0 (1 passed, 172 skipped), and the full `we:scripts/conveyor/__tests__/lease-reaper.test.mjs` run exited 0 (173 passed). No runtime change or helper file is retained.
+- Required lane gate: `node we:scripts/verify-lane.mjs` (strip `we:` when executing) exited 0 and recorded green at `79ae244c`: 173 tests passed; `npm run check:standards` reported 0 errors and 4559 warnings.
 
 ## Follow-ups
 
