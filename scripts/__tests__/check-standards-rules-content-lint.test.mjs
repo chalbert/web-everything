@@ -705,6 +705,40 @@ describe('findTestPlanGaps — #4332 Test-plan classification + condition covera
   });
 });
 
+describe('findTestPlanGaps — #4431 negative-claim-without-case', () => {
+  const card = (design, cases) => `## Design\n\n${design}\n\n## Test plan\n\n${cases.map((c) => `- ${c}`).join('\n')}\n`;
+  const claim = 'A `changes` verdict must never flip the panel.';
+  const unrelated = ['routes normally. Red today: absent.'];
+
+  it('flags a claim whose identifiers the Test plan never names', () => {
+    expect(findTestPlanGaps(card(claim, unrelated))).toEqual([{ kind: 'negative-claim-without-case', detail: 'A `changes` verdict must never flip the panel.' }]);
+  });
+  it('does not flag a claim with no backticked/quoted token', () => {
+    expect(findTestPlanGaps(card('A verdict must never flip the panel.', unrelated))).toEqual([]);
+  });
+  it('detects a hard-wrapped claim', () => {
+    expect(findTestPlanGaps(card('A `changes` verdict\nmust never flip\nthe panel.', unrelated)).map((g) => g.kind)).toEqual(['negative-claim-without-case']);
+  });
+  it('is cleared when the Test plan names the identifier (mutation: drop the bullet → gap)', () => {
+    const covered = ['`changes` verdict keeps the panel. Red today: absent.'];
+    expect(findTestPlanGaps(card(claim, covered))).toEqual([]);
+    expect(findTestPlanGaps(card(claim, unrelated))).toHaveLength(1);
+  });
+  it('ignores claims inside a code fence', () => {
+    expect(findTestPlanGaps(card('```js\n// `changes` must never flip\n```', unrelated))).toEqual([]);
+  });
+  it('returns [] with no Test plan', () => {
+    expect(findTestPlanGaps(`## Design\n\n${claim}\n`)).toEqual([]);
+  });
+  it('lintBacklogItemRendering warns for open cards only', () => {
+    const body = card(claim, unrelated);
+    const open = lintBacklogItemRendering({ item: { id: '9', kind: 'story', status: 'open' }, body });
+    expect(open.warnings.some((w) => /negative claim/.test(w))).toBe(true);
+    const done = lintBacklogItemRendering({ item: { id: '9', kind: 'story', status: 'resolved' }, body });
+    expect(done.warnings.some((w) => /negative claim/.test(w))).toBe(false);
+  });
+});
+
 describe('findGuardRelaxationGaps — #4409 guard-relaxation Must lines', () => {
   const kinds = (b) => findGuardRelaxationGaps(b).map((g) => g.kind);
   const fence = '```\nRelax the refusal only when X\nfail-closed non-code\n```';

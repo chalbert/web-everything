@@ -53,6 +53,8 @@ Reduction in `we:scripts/operations/review-pr.mjs` labels each mandatory row wit
 
 One coherent implementation delivers the `none`/`low` Sonnet branch, unchanged native fallback, new probation identity/role, same-ledger cap accounting, stable one-in-five comparison, isolated trial recording, and accurate panel provenance. Elevated/high remain native in this slice. Advisory outcomes remain non-blocking.
 
+**Must (reason-token strictness):** routing to a non-native provider requires every care-level reason token to be recognized and at least one present; an unknown or empty reason set routes to native Claude. An unrecognized reason token must never read as `low` — `careLevelFromReasons` tolerates unknown tokens, so the selector validates tokens itself (a test feeds an unknown token and an empty set and asserts native). Fail closed on any allowance ambiguity as before.
+
 Implement in dependency order: pure selector and registry; validated recorder; executor composing existing reservation/transport helpers; request metadata and adapter integration; reduction/provenance and end-to-end fixtures. Reuse `we:scripts/gemini-direct-task.mjs` and `we:scripts/conveyor/run-scorecard-store.mjs` without modifying their contracts. A positive runtime allowance signal is a rollout prerequisite owned by #4377, not a fabricated success condition in this MVP. This preparation itself neither enables the route nor enrolls the model.
 
 ## Test plan
