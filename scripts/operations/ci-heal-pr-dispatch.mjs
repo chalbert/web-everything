@@ -144,7 +144,9 @@ export async function dispatchCiHeal(planned, {
       ITEM_NUM: planned.itemNum ?? '', PR_NUM: planned.pr, LANE_REF: planned.laneRef, LANE: planned.lane,
       SESSION_SLUG: sessionSlug, SCOPE: planned.scope.join(','), REASON: reason, ...tokens,
     }, BRIEF_REQUIRED_BY_KIND['ci-heal'], [...OPTIONAL_BRIEF_PLACEHOLDERS, 'ITEM_NUM', 'SCOPE'], REPO_AWARE_VALUE_PATTERNS);
-    const route = routeHeal({ scope: planned.scope, reason });
+    // Sibling repos stay on the native Claude path: the gate's statute/gateSelf prefixes are WE-relative and no
+    // sibling declares its own critical surface yet, so a sibling heal cannot be judged non-critical safely.
+    const route = repo === 'we' ? routeHeal({ scope: planned.scope, reason }) : null;
 
     const out = await sinks[DISPATCH_EFFECT]({
       launchKind: 'ci-heal', laneRef: planned.laneRef, prompt: withAltBranchHint(prompt, planned.altBranch), sessionSlug, num: planned.itemNum ?? undefined, lane: planned.lane, scope: planned.scope,
@@ -162,7 +164,9 @@ export async function dispatchCiHeal(planned, {
     if (selected) stampClaim({ repo, pr: planned.pr, kind: 'ci-heal', owner: claimOwner, lockRoot: claimRoot, route: selected, handle: out?.handle });
     return { ...(selected ?? {}), agentId: out?.handle ?? null, sessionSlug, pr: planned.pr, itemNum: planned.itemNum ?? null, lane: planned.lane, unknownTokens };
   } catch (e) {
-    releaseOurClaim();
+    // An indeterminate detached launch (a worker may be running, pid unconfirmed) keeps the claim so the next
+    // tick cannot launch a duplicate repair; every other failure left nothing live, so release.
+    if (!e?.indeterminate) releaseOurClaim();
     throw e;
   }
 }

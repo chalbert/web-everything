@@ -226,12 +226,14 @@ export function refreshLiveFixDispatchClaims({
   const claims = listFixDispatchClaims(lockRoot);
   if (!claims.length) return { checked: 0, refreshed: [] };
   let listed;
+  let listingFailed = false;
   try { listed = listAgentsAll(); }
   catch (error) {
     // A native listing outage must not expire a live detached worker's claim.
     // Native claims retain their ordinary unknown-session TTL grace.
     if (!claims.some(entry => detachedHandlePid(entry.meta?.handle))) throw error;
     listed = [];
+    listingFailed = true;
   }
   if (listed && typeof listed.then === 'function') {
     throw new TypeError('refreshLiveFixDispatchClaims: listAgentsAll must be synchronous (got a Promise)');
@@ -259,6 +261,8 @@ export function refreshLiveFixDispatchClaims({
     if (kind === 'fixing') name = entry.meta.who ? String(entry.meta.who) : null;
     else { try { name = fixDispatchSessionName({ repo, pr, kind }); } catch { name = null; } }
     if (!name) continue;
+    // An empty list from a FAILED listing is not proof a native session is dead: leave it to its own TTL.
+    if (listingFailed) continue;
     const agentsAll = (Array.isArray(listed) ? listed : []).filter((a) => a && String(a.name ?? '') === name)
       .map((a) => {
         let info = null;

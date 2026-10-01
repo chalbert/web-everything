@@ -13,8 +13,11 @@ export function codexBriefDetachedProvider(request, { spawnDetached = defaultSpa
   try { write(path, JSON.stringify({ ...request, policyRoute: route }), { mode: 0o600 }); }
   catch (error) { throw notApplied(`Codex repair request could not be written: ${error.message}`); }
   const argv = [CODEX_BRIEF_RUN_SCRIPT, `--request=${path}`, `--model=${route.model}`, `--effort=${route.effort}`];
-  const child = spawnDetached(argv, { cwd: request.cwd, logPath: logPathFor(request.sessionSlug), settingsEnv: request.settingsEnv });
-  if (!Number.isInteger(child?.pid) || child.pid <= 0) throw new Error('Codex repair started without a pid; launch is indeterminate');
+  let child;
+  // A synchronous spawn failure (ENOENT, EACCES) means no process exists: definitely not applied, safe to retry.
+  try { child = spawnDetached(argv, { cwd: request.cwd, logPath: logPathFor(request.sessionSlug), settingsEnv: request.settingsEnv }); }
+  catch (error) { throw notApplied(`Codex repair could not be spawned: ${error.message}`); }
+  if (!Number.isInteger(child?.pid) || child.pid <= 0) throw Object.assign(new Error('Codex repair started without a pid; launch is indeterminate'), { indeterminate: true });
   request.reportExecutor?.('codex');
   request.reportModel?.(route.model);
   request.reportEffort?.(route.effort);

@@ -1355,7 +1355,7 @@ export function decideDispatchRoute(dispatch = {}, options = {}) {
   const record = decideDispatchRouteLegacy(dispatch, { ...options, criticalWorkGate });
   if (record.outcome === 'refused' || record.refusal || record.override) return record;
   const roleGate = record.outcome === 'role' ? decideCriticalWorkGate(criticalWorkGate, dispatch.kind, dispatch.kind === 'prepare-item' ? 'prepare' : dispatch.kind, {
-    criticalWork: criticalWorkVerdict({ filesTouched: dispatch.cardPath ? [dispatch.cardPath] : dispatch.scopePaths, risk: dispatch.risk }),
+    criticalWork: criticalWorkVerdict({ filesTouched: dispatch.cardPath ? [dispatch.cardPath] : dispatch.scopePaths, risk: dispatch.risk, tags: dispatch.tags }),
     criticalMisses: criticalMissesFor(options.scorecards ?? [], dispatch.kind === 'prepare-item' ? 'prepare' : dispatch.kind),
   }) : null;
   const gateClosed = (roleGate && !roleGate.open) || record.auditTrail?.some(row => row.criterion === 'critical-work-gate' && row.result === 'claude-only');

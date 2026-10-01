@@ -77,7 +77,7 @@ import { resolvePrWorkUnit, isSafeFallbackScopeEntry } from './pr-work-unit.mjs'
 import { execFileSyncThrottled } from '../lib/gh-throttle.mjs';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import matter from 'gray-matter';
@@ -800,6 +800,18 @@ export function tryResumeFix(planned, {
   };
 }
 
+export function cardRoutingSignals(root, itemNum, { readDir = readdirSync, readFile = (p) => readFileSync(p, 'utf8') } = {}) {
+  // The planner carries no tags/risk, so the critical-work gate would never see a `security` tag or `risk: high`.
+  // Read them off the item's own card. An item whose card cannot be read FAILS CLOSED (high risk → native Claude).
+  if (!itemNum) return { tags: [], risk: undefined };
+  try {
+    const name = readDir(join(root, 'backlog')).find(n => n.startsWith(`${itemNum}-`) && n.endsWith('.md'));
+    if (!name) return { tags: [], risk: 'high' };
+    const data = matter(readFile(join(root, 'backlog', name))).data ?? {};
+    return { tags: Array.isArray(data.tags) ? data.tags.map(String) : [], risk: data.risk === 'high' ? 'high' : undefined };
+  } catch { return { tags: [], risk: 'high' }; }
+}
+
 /**
  * we:scripts/conveyor/reconcile-fix-dispatch.mjs#dispatchFix — DISPATCH ONE FRESH FIX AGENT for one planned
  * entry that either isn't a conflict-caused resume candidate, or whose {@link tryResumeFix} attempt did not
@@ -849,7 +861,11 @@ export function dispatchFix(planned, {
   spawnAgent = defaultSpawnAgent,
   extraArgs = [],
   modelReason = null,
-  routeFix = p => resolveDispatchRoute({ kind: "fix", scopePaths: p.scope, risk: p.risk, size: p.size, cause: p.cause }, { scorecards: defaultReadScorecards() }),
+  routeFix = p => {
+    // A sibling repo's item number names a card in ITS backlog, not WE's: never look it up in WE's directory.
+    const signals = repo === 'we' ? cardRoutingSignals(root, p.itemNum) : { tags: [], risk: undefined };
+    return resolveDispatchRoute({ kind: "fix", scopePaths: p.scope, risk: p.risk === 'high' || signals.risk === 'high' ? 'high' : p.risk, tags: signals.tags, size: p.size, cause: p.cause }, { scorecards: defaultReadScorecards() });
+  },
   providerAvailable = dispatchProviderAvailable,
   spawnCodex = codexBriefDetachedProvider,
   stampClaim = stampFixDispatchClaim,
@@ -908,8 +924,11 @@ export function dispatchFix(planned, {
   }
   const routing = routeFix(planned);
   if (routing?.refusal) throw new Error(routing.refusal);
+  // An explicit, reasoned model pin (extraArgs `--model`/`--model=` with modelReason) is the caller's deliberate
+  // choice of a NATIVE model: only a Claude route can honour it, so a Codex route never preempts it.
+  const pinnedModel = Boolean(modelReason) && extraArgs.some(arg => arg === '--model' || String(arg).startsWith('--model='));
   const candidates = routing?.policyRoute ? [routing.policyRoute, ...routing.policyRoute.fallback] : [];
-  const selected = candidates.find(route => ['claude', 'codex'].includes(route.provider) && providerAvailable(route.provider));
+  const selected = candidates.find(route => ['claude', 'codex'].includes(route.provider) && !(pinnedModel && route.provider === 'codex') && providerAvailable(route.provider));
   if (candidates.length && !selected) throw new Error("routing policy: fix has no available provider");
   const claim = acquireClaim({
     repo, pr: planned.pr, kind: 'fix', route: selected, headSha: planned.headRefOid, scope: planned.scope, owner: claimOwner, lockRoot: claimRoot,
@@ -982,11 +1001,22 @@ export function dispatchFix(planned, {
     launchAttempted = true;
     // #x0jphk5 — the claim is DELIBERATELY NOT released here on success: see this function's own docblock for
     // why it must outlive this call (the 26+s listing-lag window a fresh spawn is exposed to).
+    // Everything from here on must be non-throwing: the session already exists, and a throw would lose its id.
+    // Read the launched model/effort off argv defensively — a missing or off-catalog `--model` reports as-is.
+    const flagValue = (name) => {
+      const eq = argv.find(arg => typeof arg === 'string' && arg.startsWith(`${name}=`));
+      if (eq) return eq.slice(name.length + 1);
+      const at = argv.indexOf(name);
+      return at >= 0 ? argv[at + 1] : undefined;
+    };
+    const launchedModel = flagValue('--model');
+    let reportedModel = launchedModel ?? selected?.model;
+    try { if (launchedModel) reportedModel = resolvePolicyModel('claude', launchedModel); } catch { /* keep the raw value */ }
     const result = {
       sessionId, agentId: parseBackgroundedId(stdout),
       sessionSlug, pr: planned.pr, itemNum: planned.itemNum, lane: planned.lane, unknownTokens,
-      provider: 'claude', model: resolvePolicyModel('claude', argv[argv.indexOf('--model') + 1]),
-      effort: argv.find(arg => arg.startsWith('--effort='))?.slice(9) ?? argv[argv.indexOf('--effort') + 1],
+      provider: 'claude', model: reportedModel,
+      effort: flagValue('--effort'),
       resumed: false, ...(resumeAttempt ? { resumeAttempt } : {}),
     };
     stampClaim({ repo, pr: planned.pr, kind: 'fix', owner: claimOwner, lockRoot: claimRoot, route: result, handle: result.agentId });
