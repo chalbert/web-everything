@@ -282,6 +282,23 @@ function newestLitterMtimeMs(items) {
   return newest;
 }
 
+/** Nearest statable parent mtime, bounded by the scanned lane/worktree root (inclusive).
+ * Returns null when no ancestor within that boundary can be statted; callers remain fail-closed.
+ */
+export function nearestAncestorMtimeMs(path, stop, stat = statSync) {
+  const root = resolve(stop);
+  let parent = dirname(resolve(path));
+  while (parent === root || parent.startsWith(root.endsWith(sep) ? root : root + sep)) {
+    try {
+      const mtime = stat(parent).mtimeMs;
+      if (Number.isFinite(mtime)) return mtime;
+    } catch { /* try the next surviving ancestor, never above the scanned root */ }
+    if (parent === root) break;
+    parent = dirname(parent);
+  }
+  return null;
+}
+
 /**
  * Newest mtime (ms) across the lane's dirty paths, its HEAD reflog, each litter worktree's own, and (#4273)
  * any UNREGISTERED content under `.claude/worktrees/` too — a lane touched only there is not quiet.
@@ -299,9 +316,10 @@ function newestLitterMtimeMs(items) {
  *
  * Coverage this still keeps for a STAGED/WORKING-TREE DELETION (a path `dirtyPaths` reports as dirty that no
  * longer exists on disk to `stat`, e.g. `git rm`, or a plain `rm` of a tracked file): rather than reach for the
- * index's own unreliable mtime, an unstatable dirty path is itself treated as maximally fresh (`Date.now()`) —
- * git's porcelain reporting a path as dirty IS the fresh-activity signal; a missing mtime on that path is not
- * evidence of nothing having happened, it is only evidence the CONTENT itself is gone. `.git/logs/HEAD` needs
+ * index's own unreliable mtime, use the nearest surviving ancestor directory's mtime, bounded by the
+ * scanned lane/worktree root. A deletion updates its parent directory; that stable timestamp lets the
+ * deletion eventually age out. Only when no ancestor can be statted do we fall back to Date.now()
+ * (fail-closed). `.git/logs/HEAD` needs
  * no such fallback: it is only ever written by a REAL ref-moving operation (commit/reset/checkout/merge), never
  * as a side effect of a read-only status call, so its own mtime is trustworthy exactly as read.
  */
@@ -312,7 +330,7 @@ export function newestContentMtimeMs(dir) {
   const scan = (d) => {
     for (const p of dirtyPaths(d)) {
       const m = statMtime(join(d, p));
-      bump(m === null ? Date.now() : m); // unstatable (gone) dirty path — treat as freshly changed, never skipped
+      bump(m ?? nearestAncestorMtimeMs(join(d, p), d) ?? Date.now());
     }
     const gitDir = resolve(d, git(d, ['rev-parse', '--git-dir']).trim());
     bump(statMtime(join(gitDir, 'logs', 'HEAD')));
