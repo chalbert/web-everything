@@ -16,7 +16,7 @@
  *        header). The key is now `(repo, kind, pr)`, with `headSha` carried only as diagnostic `meta` — these
  *        tests prove the SAME head-sha-rotation scenario is now refused.
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -537,6 +537,3 @@ describe('overlap claim settlement', () => {
     expect(readFixDispatchClaim({ repo: 'we', pr: 3103, lockRoot: claimRoot }).meta.claimedAt).toBe(iso(T0 + 500));
   });
 });
-
-// These legacy cases exercise the native adapter; Codex routing has a dedicated dry-run suite.
-vi.mock('../../lib/dispatch-provider-availability.mjs', () => ({ dispatchProviderAvailable: provider => provider === 'claude' }));

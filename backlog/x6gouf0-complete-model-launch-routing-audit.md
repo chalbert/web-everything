@@ -7,11 +7,11 @@ tags: [routing, dispatch]
 
 # Complete the model launch routing audit
 
-The 2026-09-30 operator request routes review fixes and CI heals now and tracks each remaining launch site separately. This is also the draft PR-body audit; no PR was opened.
+The launch-site audit tracks each remaining adapter separately. The operator-approved 2026-10-01 split keeps the shared routing core and defers review-fix and CI-heal routing to #xa7tqgw.
 
 ## Draft PR body
 
-The review-fix dispatcher bypassed policy and CI-heal adapters referenced absent wrapper runners. Non-critical repairs now select Codex Astra with high effort and run the existing filled brief in a detached session. Critical work retains the existing Claude gate. Unavailable or quota-held providers select only a declared pre-launch fallback. Provider, model and effort travel together through argv, claims and run records. An indeterminate launch never retries on another provider.
+The shared policy resolves provider, explicit model and effort together, with ordered pre-launch fallbacks. Card-only preparation retains its bounded worker path. Every policy-routed dispatch kind receives the critical-work gate, including prepare-decision and investigate, using card security tags and declared risk. Reasoned explicit model pins remain accepted and reported. Review fixes and CI heals retain the main dispatch and claim lifecycle.
 
 The policy declares per-provider effort, low for mechanical/card edits, medium by default, high for diagnosis/design/hard fixes. Prepares of size >=5 or with a design question use Astra/high. Gemini is limited to explicitly well-scoped size <=3 prepares with designQuestion:false and test-only fixes; its defaults can be widened in the JSON file. Astra effort remains a cost/latency dial with no proven correctness gain.
 
@@ -21,9 +21,9 @@ Audit method: git grep for native background/headless Claude, Codex exec, agy/Ge
 
 | Site | Disposition |
 | --- | --- |
-| we:scripts/conveyor/reconcile-fix-dispatch.mjs fresh fix | Routed here; preserves operator-answer injection and the full repair brief. |
+| we:scripts/conveyor/reconcile-fix-dispatch.mjs fresh fix | Unchanged Claude path; Codex routing deferred to #xa7tqgw. |
 | we:scripts/conveyor/reconcile-fix-dispatch.mjs resume | Intentionally resumes the original native session with its original provider/settings; extra flags would fork a fresh session. No new provider choice. |
-| we:scripts/operations/ci-heal-pr-dispatch.mjs and we:scripts/operations/dispatch-lane-io.mjs | Routed here, including the Codex brief adapter, actual fallback effort and claim metadata. |
+| we:scripts/operations/ci-heal-pr-dispatch.mjs and we:scripts/operations/dispatch-lane-io.mjs | Repair routing and claim lifecycle unchanged; Codex adapter deferred to #xa7tqgw. |
 | we:scripts/operations/dispatch-providers/build.mjs and we:scripts/operations/deliver-item-run.mjs | Existing resolver now passes effort through the restricted Claude/Codex delivery worker. |
 | we:scripts/operations/probation-build-run.mjs and we:scripts/operations/probation-heal-run.mjs | Existing resolver now carries worker effort into we:scripts/lib/probation-launcher.mjs and scorecards. |
 | we:scripts/operations/cli-adapter.mjs | Existing judge resolver now carries selected and fallback effort. Explicit per-run pins retain precedence. |
@@ -55,7 +55,7 @@ Status/read-only CLI calls (agent listing/logs/stop/auth), transcript readers, t
 
 ## Validation and limitations
 
-The repair routing dry run at we:scripts/operations/__tests__/repair-routing-dry-run.test.mjs asserts the actual detached argv, filled operator answer, fix protocol, claim metadata, assigned lane and critical/unavailable fallback. It does not claim a paid model completed a real repair. The new executor still needs production lifecycle observation before merge, per we:docs/agent/prototype-based-dev.md. The operator requested a dry run and an uncommitted diff, so no real repair, commit, push or PR was performed.
+The shared effort argv regression remains at we:scripts/operations/__tests__/repair-routing-dry-run.test.mjs. Repair-only code and tests moved out with #xa7tqgw. Card signal regressions exercise the dispatch reader for prepare, prepare-decision and investigate; the pin regression exercises the actual native argv builder and reporting callback.
 
 Validation on 2026-09-30: `npm run check:standards` passed with zero errors. The full `node we:scripts/verify-lane.mjs` run reported 24,763 passed, 24 failed and 35 skipped. Two failures (the fake native CLI rejecting effort, and detached claim refresh depending on native listing) were corrected and passed targeted reruns. The remaining 22 failures concern sandbox-denied process inspection (`ps`, including caller attribution) or writes to the home-level drain-lock directory. The full gate remains red; no tests or admission rules were weakened. Routing, effort validation/last-good retention, argv, repair dry-run and claim lifecycle checks pass targeted runs.
 
@@ -77,23 +77,10 @@ Rerun we:scripts/verify-lane.mjs in an environment permitted to inspect processe
 
 Keep default-snapshot tests separate from legacy evidence-router tests: a policy default change must not erase coverage of cold-start and promotion rules. Preserve provider pins on resume, and keep model-specific agy effort support distinct from its generic enum. Unknown prepare metadata stays on Codex.
 
-## PR #3311 round 2 — prevention record (2026-10-01)
+## PR #3311 split (operator approved 2026-10-01)
 
-The correctness, security and Codex correctness findings share one root: a sibling repair
-cannot be classified by WE-relative critical paths. Both repair entry points now use
-we:scripts/lib/dispatch-routing-policy-io.mjs#routeRepairForRepo before invoking routing.
-Sibling repairs retain native Claude; no sibling item number reads a WE card. Missing WE
-item identity fails closed as high risk. The coverage finding's suggested Codex outcome
-conflicts with this security boundary; its no-cross-repository-card-read assertion is retained.
-
-The launch-certainty finding is repaired at we:scripts/operations/dispatch-lane-io.mjs:
-every unknown provider failure carries indeterminate=true and its original cause through
-the sink. Definite pre-spawn refusals retain notApplied. CI-heal therefore keeps its claim
-when a worker might exist and blocks the next tick.
-
-Prevention delivered in we:scripts/operations/__tests__/repair-routing-review-fixes.test.mjs:
-the fix/ci-heal × WE/Frontier UI/Plateau App matrix; default sibling fixes with a colliding
-security/high-risk WE card and an uncalled card-reader spy; item-less fail-closed dispatch;
-real card security/high/low routing; and CI-heal through createDispatchSinks and the Codex
-provider with a missing PID, plus unmarked unknown errors and definite ENOENT failures.
-These cover all five round-2 findings without relaxing the critical-work gate.
+The repair routing and its round-2/round-3 acceptance requirements moved to
+[#xa7tqgw](/backlog/xa7tqgw-route-review-fixes-and-ci-heals-to-codex-split-from-3311/).
+Review fixes and CI heals retain their existing Claude dispatch path in this PR.
+The shared policy, effort selection, card-only preparation, launch records and this
+launch-site audit remain in scope.

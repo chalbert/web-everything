@@ -31,7 +31,7 @@
  * real subprocess cost does not belong in the ~2000-file unit pool) and `vitest.integration.config.ts`'s
  * `test.include` (so `npm run test:integration:vitest`, CI's own gate, still runs it before merge).
  */
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -269,6 +269,3 @@ describe('#xu2krte end-to-end — a REAL merge conflict, dispatched through the 
     });
   });
 });
-
-// These legacy cases exercise the native adapter; Codex routing has a dedicated dry-run suite.
-vi.mock('../../lib/dispatch-provider-availability.mjs', () => ({ dispatchProviderAvailable: provider => provider === 'claude' }));

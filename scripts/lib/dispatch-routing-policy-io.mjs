@@ -44,11 +44,3 @@ export function routingPolicyEnv() {
 export function resolveOperationEffort(operation, provider, taskType, policy = readRoutingPolicy()) {
   return operationEffort(operation, provider, taskType, policy);
 }
-
-/** Repairs stay native until their repository has a critical-work gate.
- * Invoke routing lazily so sibling item numbers never read WE backlog cards.
- * A null route selects the existing native Claude launch path.
- */
-export function routeRepairForRepo(repo, resolve) {
-  return repo === 'we' ? resolve() : null;
-}

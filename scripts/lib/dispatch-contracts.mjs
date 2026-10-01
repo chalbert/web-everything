@@ -1354,10 +1354,14 @@ export function decideDispatchRoute(dispatch = {}, options = {}) {
   const criticalWorkGate = options.criticalWorkGate ?? policy.criticalWorkGate;
   const record = decideDispatchRouteLegacy(dispatch, { ...options, criticalWorkGate });
   if (record.outcome === 'refused' || record.refusal || record.override) return record;
-  const roleGate = record.outcome === 'role' ? decideCriticalWorkGate(criticalWorkGate, dispatch.kind, dispatch.kind === 'prepare-item' ? 'prepare' : dispatch.kind, {
+  // PR #3311 split: repair dispatch retains the main evidence/tier path.
+  if (['fix', 'ci-heal'].includes(dispatch.kind)) return record;
+  // Every policy-routed kind needs a verdict, including roles and future operation names.
+  // Keep the inherited evidence router unchanged when no explicit policy route exists.
+  const roleGate = decideCriticalWorkGate({ ...criticalWorkGate, kinds: [...new Set([...criticalWorkGate.kinds, dispatch.kind])] }, dispatch.kind, record.taskType ?? (dispatch.kind === 'prepare-item' ? 'prepare' : dispatch.kind), {
     criticalWork: criticalWorkVerdict({ filesTouched: dispatch.cardPath ? [dispatch.cardPath] : dispatch.scopePaths, risk: dispatch.risk, tags: dispatch.tags }),
     criticalMisses: criticalMissesFor(options.scorecards ?? [], dispatch.kind === 'prepare-item' ? 'prepare' : dispatch.kind),
-  }) : null;
+  });
   const gateClosed = (roleGate && !roleGate.open) || record.auditTrail?.some(row => row.criterion === 'critical-work-gate' && row.result === 'claude-only');
   try {
     // Critical-miss vetoes are scored per taskType and apply to EVERY routed operation, gated or not
@@ -1378,7 +1382,7 @@ export function decideDispatchRoute(dispatch = {}, options = {}) {
     record.spotCheck = null;
     record.probationWorker = null;
     if (tier) record.tier = tier;
-    if (route.provider !== 'claude' && (dispatch.kind === 'prepare-item' || dispatch.kind === 'ci-heal' || (dispatch.kind === 'build' && ['doc-fix', 'test-fix'].includes(record.taskType)))) {
+    if (route.provider !== 'claude' && (dispatch.kind === 'prepare-item' || (dispatch.kind === 'build' && ['doc-fix', 'test-fix'].includes(record.taskType)))) {
       const id = route.provider === 'codex' ? 'codex' : route.model.startsWith('claude-') ? 'antigravity-claude' : 'antigravity-gemini';
       record.probationWorker = { ...PROBATION_WORKERS[id], model: route.model, effort: route.effort, taskType: dispatch.kind === 'prepare-item' ? 'prepare' : record.taskType };
     }

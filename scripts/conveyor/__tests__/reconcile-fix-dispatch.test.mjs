@@ -1141,7 +1141,7 @@ describe('#3606 — dispatchFix always passes the dispatched-agent system prompt
         readBrief: () => '# fix brief for {{PR_NUM}} (item {{ITEM_NUM}}) lane {{LANE}} {{SESSION_SLUG}} {{SCOPE}} {{LANE_REF}}',
         mintSessionId: () => '11111111-1111-4111-8111-111111111111',
         spawnAgent: (argv) => { calls.push(argv); return ''; },
-        extraArgs: ['--model', 'sonnet'], modelReason: 'test explicit pin',
+        extraArgs: ['--model', 'sonnet'],
       },
     );
     const argv = calls[0];
@@ -1399,6 +1399,3 @@ describe('fair overlap queue', () => {
     expect(planned[0]).toMatchObject({ waitingSince: '2026-09-30T12:00:00Z', reviewHuman: true });
   });
 });
-
-// These legacy cases exercise the native adapter; Codex routing has a dedicated dry-run suite.
-vi.mock('../../lib/dispatch-provider-availability.mjs', () => ({ dispatchProviderAvailable: provider => provider === 'claude' }));

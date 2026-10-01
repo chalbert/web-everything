@@ -1,4 +1,3 @@
-import { codexBriefDetachedProvider } from './dispatch-providers/codex-brief.mjs';
 import { dispatchProviderAvailable } from '../lib/dispatch-provider-availability.mjs';
 import { claudeSpawnAlias, resolvePolicyEffort } from '../lib/dispatch-routing-policy.mjs';
 import { resolvePolicyModel, resolveOperationEffort, resolveOperationRoute, readRoutingPolicy, resolveDispatchRoute as decideDispatchRoute } from '../lib/dispatch-routing-policy-io.mjs';
@@ -61,7 +60,7 @@ import { execFileSync } from 'node:child_process';
 // these ran SIMULTANEOUSLY in a single `ps aux` snapshot, none logged anywhere, spending the shared `graphql`
 // bucket (8943 points/hour that hour, 6365.2 UNATTRIBUTED — `gh-spend.mjs report --hours=1 --by=caller`).
 import { execFileSyncThrottled } from '../lib/gh-throttle.mjs';
-import { accessSync, constants, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { randomUUID } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
@@ -1502,7 +1501,6 @@ export function createDispatchSinks({
           // agent reading a brief) needs them as data. The `claude --bg` path ignores all five.
           launchKind: payload?.launchKind,
           lane: payload?.lane,
-          laneRef: payload?.laneRef,
           scope: payload?.scope,
           pr: payload?.pr,
           reason: payload?.reason,
@@ -1546,10 +1544,9 @@ export function createDispatchSinks({
         // INDETERMINATE. The entry stays `in-flight` with a NULL handle: something may be running and cannot be
         // observed. The replay guard refuses it and `inFlightEntries` reports it under `unknown`, which is
         // exactly right — a person finds out what happened and closes it out.
-        throw Object.assign(new Error(
-          `dispatch failed and whether an agent started is UNKNOWN: ${String((e && e.message) || e).split('\n')[0]}`,
-          { cause: e },
-        ), { indeterminate: true });
+        throw new Error(
+          `claude --bg failed and whether an agent started is UNKNOWN: ${String((e && e.message) || e).split('\n')[0]}`,
+        );
       }
       const minutes = Number(payload.expectedWithinMinutes) > 0
         ? Number(payload.expectedWithinMinutes)
@@ -1677,7 +1674,6 @@ export function routeDispatchProvider(request, {
   probationLaunch = 'off',
   probation = probationWorkerDetachedProvider,
   providerAvailable = () => true,
-  codexBrief = codexBriefDetachedProvider,
 } = {}) {
   const kind = String(request?.launchKind || 'build');
   if (request.policyRoute) {
@@ -1688,8 +1684,8 @@ export function routeDispatchProvider(request, {
       const id = route.provider === 'codex' ? 'codex' : route.model.startsWith('claude-') ? 'antigravity-claude' : 'antigravity-gemini';
       return { ...PROBATION_WORKERS[id], taskType: request.probationWorker.taskType, model: route.model, effort: route.effort };
     };
-    const chosen = candidates.find(route => providerAvailable(route.provider) && (route.provider === 'claude'
-      || (route.provider === 'codex' && ['fix', 'ci-heal'].includes(kind) && request.prompt && request.lane && request.pr)
+    const pinnedModel = Boolean(String(request.modelReason ?? '').trim()) && extractModelFlag(request.extraArgs ?? []).found;
+    const chosen = candidates.find(route => (!pinnedModel || route.provider === 'claude') && providerAvailable(route.provider) && (route.provider === 'claude'
       || (probationLaunchDecision({ ...request, probationWorker: workerFor(route) }, probationLaunch).launch
         && scriptExists(PROBATION_LAUNCHABLE_KINDS[kind].runScript))
       || (route.provider === 'codex' && registry[kind]?.runScript && scriptExists(registry[kind].runScript))));
@@ -1702,7 +1698,6 @@ export function routeDispatchProvider(request, {
       request = { ...request, probationWorker: null, table: { model: chosen.model, effort: chosen.effort, tier: Object.entries(CLAUDE_NATIVE_MODEL_BY_TIER).find(([, id]) => id === chosen.model)?.[0] ?? null, reason: 'routing-policy' } };
       return agent(request);
     }
-    if (chosen.provider === 'codex' && ['fix', 'ci-heal'].includes(kind) && request.prompt && request.lane && request.pr) return codexBrief(request);
     // An explicit Codex route whose probation launch is unavailable (probation off, or a task type the probation
     // launcher does not run) still goes to the mechanical build wrapper, never on to the Claude agent below.
     if (!probationLaunchDecision(request, probationLaunch).launch && registry[kind]) return registry[kind].provider({ ...request, probationWorker: null });
@@ -1780,7 +1775,10 @@ export function defaultClaudeProvider(request, { spawnAgent = (argv, opts) => de
     table: request.table ?? null,
     modelReason: request.modelReason ?? null,
   });
-  request.reportModel?.(request.policyRoute ? resolvePolicyModel('claude', extractModelFlag(argv).value) : extractModelFlag(argv).value);
+  const launchedModel = extractModelFlag(argv).value;
+  let reportedModel = launchedModel;
+  try { if (request.policyRoute) reportedModel = resolvePolicyModel('claude', launchedModel); } catch { /* Explicit reasoned pins may name models outside the policy catalogue. */ }
+  request.reportModel?.(reportedModel);
   request.reportEffort?.(argv.find(arg => arg.startsWith('--effort='))?.slice(9) ?? argv[argv.indexOf('--effort') + 1]);
   const stdout = String(spawnAgent(argv, { cwd: request.cwd }) ?? '');
   return parseBackgroundedId(stdout) || request.sessionId;

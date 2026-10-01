@@ -11,7 +11,7 @@
  *   4. the fix daemon's claim-refresh sweep no longer throws on a `fixing` claim (it used to mint a session slug
  *      for the unknown kind).
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname, sep } from 'node:path';
@@ -770,6 +770,3 @@ describe('the CLI and its documented invocations name the repo', () => {
     expect(offenders).toEqual([]);
   });
 });
-
-// These legacy cases exercise the native adapter; Codex routing has a dedicated dry-run suite.
-vi.mock('../../lib/dispatch-provider-availability.mjs', () => ({ dispatchProviderAvailable: provider => provider === 'claude' }));
