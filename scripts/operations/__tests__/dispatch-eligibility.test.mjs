@@ -90,10 +90,10 @@ describe('dispatch-eligibility agrees with the live admission path', () => {
     expect(report[1].gates.at(-1)).toEqual({ name: 'blockedBy', pass: false, observed: ['8999'] });
     expect(report[2].gates).toHaveLength(1); // no invented passes after a short-circuit
     expect(report[3].markers.deliveryAgent).toBeNull();
-    // #3906 — the report names WHO would run each dispatchable item: Claude, on the tier table's model.
+    // The report names the policy-selected executor; native adapter prediction stays available separately.
     for (const row of report.filter((r) => r.eligible)) {
-      expect(row.route).toMatchObject({ outcome: 'routed', routed: 'claude', executed: 'claude', tier: 'sonnet' });
-      expect(row.plannedWorkerModel).toMatchObject({ tier: 'sonnet', model: 'sonnet' });
+      expect(row.route).toMatchObject({ outcome: 'routed', routed: 'codex', executed: 'codex', model: 'gpt-6-astra', tier: 'sonnet' });
+      expect(row.plannedWorkerModel).toBeNull(); // native-only tier prediction is absent for an explicit Codex route
     }
   });
 

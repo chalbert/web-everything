@@ -23,7 +23,7 @@ const docFixCodex = { id: 'codex', provider: 'codex', model: 'gpt-6-astra', exec
 describe('buildWorkerArgv', () => {
   it('runs the worker\'s own launcher synchronously in the lane, with its model, no gate, JSON out', () => {
     expect(buildWorkerArgv({ worker: agyClaude, weRoot: '/we', dir: '/lane', taskFile: '/lane/.git/t.md', timeoutMs: 1000 })).toEqual([
-      '/we/scripts/gemini-direct-task.mjs', '--dir=/lane', '--task-file=/lane/.git/t.md', '--model=claude-sonnet-4-6', '--timeout-ms=1000', '--gate=none', '--json',
+      '/we/scripts/gemini-direct-task.mjs', '--dir=/lane', '--task-file=/lane/.git/t.md', '--model=claude-sonnet-4-6', '--effort=medium', '--timeout-ms=1000', '--gate=none', '--json',
     ]);
     expect(buildWorkerArgv({ worker: codex, weRoot: '/we', dir: '/lane', taskFile: '/t' })[0]).toBe('/we/scripts/codex-direct-task.mjs');
   });
