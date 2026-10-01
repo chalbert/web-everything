@@ -30,6 +30,7 @@
  *      health watch's own last-tick-completed age.
  */
 
+import { foldPrAttempts } from './health-pr-attempts.mjs';
 import { isHighEntropyToken } from '../lib/secret-scrub.mjs';
 import { NOTIFY_EVEN_IN_SHADOW } from './health-smells-notify-list.mjs';
 
@@ -238,6 +239,7 @@ export function foldDaemonMemory(prev, sample, now) {
   mem.recentTicks = [...(mem.recentTicks || [])];
   mem.prRefusals = { ...(mem.prRefusals || {}) };
   mem.intervalMs = parsed.intervalMs ?? mem.intervalMs ?? sample.defaultIntervalMs ?? 120_000;
+  mem.prAttempts = foldPrAttempts(prev?.prAttempts, sample, now, mem.intervalMs);
   mem.restarts += parsed.restarts;
   if (sample.sizeBytes !== mem.lastSize || !prev) mem.lastGrowthAt = Math.min(sample.mtimeMs, now);
   mem.lastSize = sample.sizeBytes;

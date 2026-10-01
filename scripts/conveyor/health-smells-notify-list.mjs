@@ -39,6 +39,7 @@ export const NOTIFY_EVEN_IN_SHADOW = new Set([
   'gh-call-failures',
   'gh-graphql-budget',
   'duplicate-live-sessions',    // already approved above too — listed once, a Set
+  'repeated-pr-attempts', // Operator rule, 2026-09-30: surface repeated trials per PR.
   'pr-no-owner',
   'daemon-silent',
 ]);

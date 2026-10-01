@@ -45,6 +45,7 @@ import { fileURLToPath } from 'node:url';
 import {
   DEFAULT_HEALTH_CONFIG, emptyHealthState, runHealthTick, renderEpisodeReport, renderHealthSection, summarizeDiagnosisOutput, scrubText, scrubDeep, parsePsOutput, MINUTE, HOUR,
 } from './health-watch-core.mjs';
+import { daemonJobsRoot } from '../operations/run-store.mjs';
 import { SMELLS } from './health-smells/index.mjs';
 import { healthDir, healthSectionLines } from './health-watch-section.mjs';
 import { runInvestigations } from './health-investigate-dispatch.mjs';
@@ -149,6 +150,25 @@ export function probeDaemonLogs(logsDir, cursors = {}) {
     nextCursors[name] = { ino: st.ino, size: start + consumed };
   }
   return { samples: out, cursors: nextCursors };
+}
+
+/** Local run evidence only; fixture ticks never inspect host records. */
+export function probeOperationRuns({ roots = [REPO_ROOT, ...daemonCloneRoots(workspaceOf(REPO_ROOT))], jobsRoot = daemonJobsRoot() } = {}) {
+  const dirs = roots.map((root) => join(root, '.operations', 'runs'));
+  if (jobsRoot && existsSync(jobsRoot)) {
+    for (const entry of readdirSync(jobsRoot, { withFileTypes: true })) {
+      if (entry.isDirectory()) dirs.push(join(jobsRoot, entry.name));
+    }
+  }
+  const records = [];
+  for (const dir of new Set(dirs)) {
+    if (!existsSync(dir)) continue;
+    for (const name of readdirSync(dir).filter((n) => n.endsWith('.json'))) {
+      const rec = readJson(join(dir, name), null);
+      if (rec) records.push(rec);
+    }
+  }
+  return records;
 }
 
 function pidAlive(pid) {
@@ -726,6 +746,7 @@ export async function tick(flags = {}) {
   // #4370 — fs-only, every tick. A fixture tick (any of the fixture-dir flags) reads only an explicit
   // `--lane-pool-root`, never the host's real pool.
   const fixtureTick = flags['logs-dir'] || flags['lock-root'] || flags['state-root'];
+  probes.operationRuns = attempt('operationRuns', () => probeOperationRuns(fixtureTick ? { roots: [flags['state-root'] || logsDir], jobsRoot: null } : {}));
   probes.laneJournal = attempt('laneJournal', () => probeLaneJournal({
     poolRoot: flags['lane-pool-root'] || (fixtureTick ? null : defaultPoolRoot(REPO_ROOT)), now,
   }));
