@@ -1135,6 +1135,13 @@ export function shapeDispatchRead(raw, { num, expectedWithinMinutes } = {}) {
     inFlightRuns: [], agedOutRuns, dispatching: false, lane: null, sessionSlug: null, prompt: null,
     briefUnknownTokens: [], itemSpecPath: null, scope: [], dispatchedGuard: null, routing, holdReason,
   });
+  const unsupportedLocus = launchKind === 'build' && raw.locus?.multiRepo
+    ? { kind: 'unsupported-locus', keys: raw.locus.keys } : null;
+  // Preserve the supported/legacy admission trace; this capability adds a refusal only.
+  if (unsupportedLocus && blocked('locus', true, unsupportedLocus)) {
+    return notRouted(null, `#${resolvedNum} has unsupported-locus: scope spans more than one repo `
+      + `(${unsupportedLocus.keys.join(', ')}). Multi-repo delivery is unsupported; see #4289.`);
+  }
   const derivedTaskType = taskTypeFor({ kind: launchKind, cause: null, scopePaths: scope });
   if (blocked('task-type', derivedTaskType.outcome === 'refused', derivedTaskType)) {
     return notRouted(null,

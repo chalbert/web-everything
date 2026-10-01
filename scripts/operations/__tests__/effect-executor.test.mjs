@@ -19,7 +19,12 @@ import { describe, it, expect } from 'vitest';
 
 import { advance, advanceWhileRunning, runStatus, startRun } from '../engine.mjs';
 import { LEDGER_EFFECT_TYPE, applyPendingEffects, createEffectExecutor, inFlight, inFlightEntries, notApplied, resolveInFlight } from '../effect-executor.mjs';
-import { createMemoryRunStore } from '../run-store.mjs';
+import { createMemoryRunStore, createFileRunStore } from '../run-store.mjs';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { spawnSync } from 'node:child_process';
 import { createRegistry, op } from '../registry.mjs';
 import { driveRun, outcomePayload, renderOutcome, runOperationCli } from '../cli-adapter.mjs';
 import { effect } from '../step-kinds.mjs';
@@ -1067,5 +1072,60 @@ describe('an effect retried by both populations counts in both', () => {
     // invariant is scoped to entries created at or after this change.
     expect(e.attempts).toBe(4);
     expect(e.autoAttempts + e.humanAttempts + e.unknownAttempts).toBe(1);
+  });
+});
+
+
+describe('#4649 early child settlement', () => {
+  it.each(['applied', 'failed'])('preserves an early %s settlement and other fresh fields', async (status) => {
+    const store = createMemoryRunStore();
+    const run = atDispatchStep();
+    store.write(run);
+    const outcome = await applyPendingEffects(run, { store, sinks: {
+      'start.build': () => {
+        const fresh = resolveInFlight(store.read(run.id), KEY, { status, result: { outcome: 'child-finished' }, error: status === 'failed' ? 'original refusal' : null });
+        fresh.evidence = { child: true };
+        store.write(fresh);
+        return inFlight({ handle: 'pid:1234' });
+      },
+      'note.write': () => { throw new Error('must not advance inside dispatch'); },
+    } });
+    expect(store.read(run.id).effects[0]).toMatchObject({ status, result: { outcome: 'child-finished' } });
+    expect(store.read(run.id).evidence).toEqual({ child: true });
+    expect(outcome.run).toEqual(store.read(run.id));
+    expect(outcome.inFlight).toEqual([]);
+    if (status === 'failed') expect(outcome.error?.message).toBe('original refusal');
+    else expect(outcome.applied).toContain(KEY);
+  });
+});
+
+
+describe('#4649 cross-process settlement ordering', () => {
+  it.each(['applied', 'failed'])('keeps the real child %s write after its sink returns a handle', async (status) => {
+    const dir = mkdtempSync(join(tmpdir(), 'settle-order-4649-'));
+    try {
+      const store = createFileRunStore(dir);
+      const run = atDispatchStep();
+      store.write(run);
+      let calls = 0;
+      const outcome = await applyPendingEffects(run, { store, sinks: {
+        'start.build': () => {
+          calls++;
+          const child = spawnSync(process.execPath, ['--input-type=module', '-e',
+            `import { settleDispatchEffect } from ${JSON.stringify(pathToFileURL(resolve('scripts/operations/deliver-item-settle.mjs')).href)};
+             console.log(JSON.stringify(settleDispatchEffect(${JSON.stringify({ runId: run.id, key: KEY, status, result: { outcome: 'child-terminal' }, error: status === 'failed' ? 'child preflight refusal' : null })})));`],
+          { env: { ...process.env, OPERATION_RUNS_DIR: dir }, encoding: 'utf8', timeout: 10000 });
+          expect(child.status, child.stderr).toBe(0);
+          expect(JSON.parse(child.stdout)).toEqual({ settled: true });
+          return inFlight({ handle: 'pid:1234' });
+        },
+        'note.write': () => { throw new Error('must not run during dispatch'); },
+      } });
+      expect(calls).toBe(1);
+      expect(store.read(run.id).effects[0]).toMatchObject({ status, result: { outcome: 'child-terminal' }, handle: null });
+      expect(outcome.run).toEqual(store.read(run.id));
+      expect(outcome.inFlight).toEqual([]);
+      if (status === 'failed') expect(outcome.error?.message).toBe('child preflight refusal');
+    } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 });

@@ -1838,5 +1838,1388 @@
         "status": "observed"
       }
     }
+  },
+  "health-stale": {
+    "description": "Fresh heartbeat does not renew completion or expired budget evidence.",
+    "snapshot": {
+      "schema": 2,
+      "snapshotId": "publisher-boot-1:7",
+      "publisherId": "publisher-boot-1",
+      "sequence": 7,
+      "observedAt": "2026-09-30T16:00:00Z",
+      "timeZone": "America/Toronto",
+      "coverage": {
+        "repos": {
+          "web-everything": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          },
+          "plateau-app": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          },
+          "frontierui": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          }
+        },
+        "collections": {
+          "runs": {
+            "total": 0,
+            "included": 0,
+            "complete": true,
+            "source": "runs"
+          },
+          "holds": {
+            "total": 0,
+            "included": 0,
+            "complete": true,
+            "source": "holds"
+          },
+          "actions": {
+            "total": 0,
+            "included": 0,
+            "complete": true,
+            "source": "actions"
+          }
+        }
+      },
+      "sources": {
+        "runs": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "holds": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "pullRequests": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "deliveries": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "partial",
+          "complete": false,
+          "reason": "Rotated local drain history; repo identity unavailable.",
+          "cursor": null
+        },
+        "actions": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "policy": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        }
+      },
+      "summary": {
+        "moving": {
+          "value": 0,
+          "unit": "logical-work",
+          "source": "runs",
+          "complete": true
+        },
+        "jobs": {
+          "value": 0,
+          "unit": "jobs",
+          "source": "runs",
+          "complete": true
+        },
+        "held": {
+          "value": 0,
+          "unit": "cards",
+          "source": "holds",
+          "complete": true
+        },
+        "openPullRequests": {
+          "value": 0,
+          "unit": "pull-requests",
+          "source": "pullRequests",
+          "complete": true
+        },
+        "mergedToday": {
+          "value": 3,
+          "unit": "merged-prs",
+          "source": "deliveries",
+          "complete": false
+        },
+        "humanPending": {
+          "value": 0,
+          "unit": "human-actions",
+          "source": "actions",
+          "complete": true
+        },
+        "humanActionable": {
+          "value": 0,
+          "unit": "human-actions",
+          "source": "actions",
+          "complete": true
+        }
+      },
+      "runs": [],
+      "holds": [],
+      "actions": [],
+      "items": [],
+      "deliveries": {
+        "source": "deliveries",
+        "provenance": "observed by local drain",
+        "complete": false,
+        "historyStart": "2026-09-30T14:00:00Z",
+        "today": {
+          "start": "2026-09-30T04:00:00Z",
+          "end": "2026-09-30T16:00:00Z",
+          "count": 3,
+          "complete": false
+        },
+        "trend": {
+          "status": "comparable",
+          "reason": null,
+          "current": {
+            "start": "2026-09-30T15:00:00Z",
+            "end": "2026-09-30T16:00:00Z",
+            "count": 2,
+            "complete": true
+          },
+          "previous": {
+            "start": "2026-09-30T14:00:00Z",
+            "end": "2026-09-30T15:00:00Z",
+            "count": 1,
+            "complete": true
+          }
+        }
+      },
+      "policy": {
+        "sourceKind": "external-plan",
+        "revision": "sha256:example-plan",
+        "observedAt": "2026-09-30T16:00:00Z",
+        "effectiveAt": null,
+        "readOnly": true,
+        "priorities": [
+          {
+            "description": "Restore reliable review progress.",
+            "refs": [
+              "we:4620"
+            ]
+          }
+        ],
+        "sections": [
+          {
+            "id": "standing",
+            "title": "Standing rules",
+            "text": "Keep review work moving.",
+            "sourceDate": "2026-09-29"
+          }
+        ],
+        "conflicts": [],
+        "status": "observed"
+      },
+      "health": {
+        "episodes": {
+          "rows": [
+            {
+              "status": "observed",
+              "reason": "Only persisted evidence is available; absent fields are unknown.",
+              "id": "episode:review",
+              "severity": "warning",
+              "rawSeverity": "warn",
+              "description": "Review completion is overdue.",
+              "systemOwner": "review",
+              "openedAt": "2026-09-30T12:00:00Z",
+              "lastRemediation": {
+                "status": "observed",
+                "reason": "Only persisted evidence is available; absent fields are unknown.",
+                "attemptedAt": "2026-09-30T12:00:00Z",
+                "description": "Retry queued.",
+                "result": "failed",
+                "rawResult": "retry-exhausted"
+              },
+              "escalation": {
+                "status": "observed",
+                "reason": "Only persisted evidence is available; absent fields are unknown.",
+                "humanOnly": false,
+                "actionRef": null,
+                "description": "System retry owns recovery."
+              },
+              "freshness": {
+                "observedAt": "2026-09-30T16:00:00Z",
+                "lastSuccessAt": "2026-09-30T16:00:00Z",
+                "expectedEveryMs": 120000,
+                "staleAfterMs": 600000,
+                "status": "fresh",
+                "complete": true,
+                "reason": null
+              }
+            }
+          ],
+          "freshness": {
+            "observedAt": "2026-09-30T16:00:00Z",
+            "lastSuccessAt": "2026-09-30T16:00:00Z",
+            "expectedEveryMs": 120000,
+            "staleAfterMs": 600000,
+            "status": "fresh",
+            "complete": true,
+            "reason": null
+          }
+        },
+        "daemons": {
+          "rows": [
+            {
+              "status": "stale",
+              "reason": "Retained completed-work or response evidence is stale.",
+              "id": "review",
+              "heartbeatAt": "2026-09-30T16:00:00Z",
+              "completedTickAt": "2026-09-30T12:00:00Z",
+              "completedPassAt": "2026-09-30T12:00:00Z",
+              "expectedEveryMs": 120000,
+              "pause": {
+                "status": "observed",
+                "reason": "Only persisted evidence is available; absent fields are unknown.",
+                "paused": false,
+                "since": null,
+                "rawState": "running"
+              },
+              "rawState": "running",
+              "freshness": {
+                "observedAt": "2026-09-30T16:00:00Z",
+                "lastSuccessAt": "2026-09-30T16:00:00Z",
+                "expectedEveryMs": 120000,
+                "staleAfterMs": 600000,
+                "status": "fresh",
+                "complete": true,
+                "reason": null
+              }
+            }
+          ],
+          "freshness": {
+            "observedAt": "2026-09-30T16:00:00Z",
+            "lastSuccessAt": "2026-09-30T16:00:00Z",
+            "expectedEveryMs": 120000,
+            "staleAfterMs": 600000,
+            "status": "fresh",
+            "complete": true,
+            "reason": null
+          }
+        },
+        "budgetWindows": {
+          "rows": [
+            {
+              "status": "stale",
+              "reason": "Retained completed-work or response evidence is stale.",
+              "identity": {
+                "kind": "app",
+                "id": "app:review",
+                "rawKind": null
+              },
+              "resource": "graphql",
+              "responseObservedAt": "2026-09-30T12:00:00Z",
+              "resetAt": "2026-09-30T13:00:00Z",
+              "limit": 5000,
+              "remaining": 100,
+              "used": 4900,
+              "coverage": {
+                "status": "observed",
+                "reason": "Only persisted evidence is available; absent fields are unknown.",
+                "measured": 40,
+                "estimated": 3,
+                "unattributed": 2,
+                "unit": "requests"
+              },
+              "freshness": {
+                "observedAt": "2026-09-30T12:00:00Z",
+                "lastSuccessAt": "2026-09-30T12:00:00Z",
+                "expectedEveryMs": 120000,
+                "staleAfterMs": 600000,
+                "status": "stale",
+                "complete": true,
+                "reason": "Reset expired without another response observation."
+              }
+            }
+          ],
+          "freshness": {
+            "observedAt": "2026-09-30T16:00:00Z",
+            "lastSuccessAt": "2026-09-30T16:00:00Z",
+            "expectedEveryMs": 120000,
+            "staleAfterMs": 600000,
+            "status": "fresh",
+            "complete": true,
+            "reason": null
+          }
+        },
+        "overnight": {
+          "status": "observed",
+          "reason": "Only persisted evidence is available; absent fields are unknown.",
+          "desiredMode": "stop",
+          "policyRevision": "sha256:example-plan",
+          "observedState": "running",
+          "affectedJobRefs": [
+            "runner:job-7"
+          ],
+          "since": "2026-09-30T12:00:00Z",
+          "lastCheckAt": "2026-09-30T16:00:00Z",
+          "nextCheckAt": null,
+          "freshness": {
+            "observedAt": "2026-09-30T16:00:00Z",
+            "lastSuccessAt": "2026-09-30T16:00:00Z",
+            "expectedEveryMs": 120000,
+            "staleAfterMs": 600000,
+            "status": "fresh",
+            "complete": true,
+            "reason": null
+          }
+        }
+      }
+    }
+  },
+  "health-unknown": {
+    "description": "Unavailable stores and absent overnight producer remain unknown.",
+    "snapshot": {
+      "schema": 2,
+      "snapshotId": "publisher-boot-1:7",
+      "publisherId": "publisher-boot-1",
+      "sequence": 7,
+      "observedAt": "2026-09-30T16:00:00Z",
+      "timeZone": "America/Toronto",
+      "coverage": {
+        "repos": {
+          "web-everything": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          },
+          "plateau-app": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          },
+          "frontierui": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          }
+        },
+        "collections": {
+          "runs": {
+            "total": 0,
+            "included": 0,
+            "complete": true,
+            "source": "runs"
+          },
+          "holds": {
+            "total": 0,
+            "included": 0,
+            "complete": true,
+            "source": "holds"
+          },
+          "actions": {
+            "total": 0,
+            "included": 0,
+            "complete": true,
+            "source": "actions"
+          }
+        }
+      },
+      "sources": {
+        "runs": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "holds": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "pullRequests": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "deliveries": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "partial",
+          "complete": false,
+          "reason": "Rotated local drain history; repo identity unavailable.",
+          "cursor": null
+        },
+        "actions": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "policy": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        }
+      },
+      "summary": {
+        "moving": {
+          "value": 0,
+          "unit": "logical-work",
+          "source": "runs",
+          "complete": true
+        },
+        "jobs": {
+          "value": 0,
+          "unit": "jobs",
+          "source": "runs",
+          "complete": true
+        },
+        "held": {
+          "value": 0,
+          "unit": "cards",
+          "source": "holds",
+          "complete": true
+        },
+        "openPullRequests": {
+          "value": 0,
+          "unit": "pull-requests",
+          "source": "pullRequests",
+          "complete": true
+        },
+        "mergedToday": {
+          "value": 3,
+          "unit": "merged-prs",
+          "source": "deliveries",
+          "complete": false
+        },
+        "humanPending": {
+          "value": 0,
+          "unit": "human-actions",
+          "source": "actions",
+          "complete": true
+        },
+        "humanActionable": {
+          "value": 0,
+          "unit": "human-actions",
+          "source": "actions",
+          "complete": true
+        }
+      },
+      "runs": [],
+      "holds": [],
+      "actions": [],
+      "items": [],
+      "deliveries": {
+        "source": "deliveries",
+        "provenance": "observed by local drain",
+        "complete": false,
+        "historyStart": "2026-09-30T14:00:00Z",
+        "today": {
+          "start": "2026-09-30T04:00:00Z",
+          "end": "2026-09-30T16:00:00Z",
+          "count": 3,
+          "complete": false
+        },
+        "trend": {
+          "status": "comparable",
+          "reason": null,
+          "current": {
+            "start": "2026-09-30T15:00:00Z",
+            "end": "2026-09-30T16:00:00Z",
+            "count": 2,
+            "complete": true
+          },
+          "previous": {
+            "start": "2026-09-30T14:00:00Z",
+            "end": "2026-09-30T15:00:00Z",
+            "count": 1,
+            "complete": true
+          }
+        }
+      },
+      "policy": {
+        "sourceKind": "external-plan",
+        "revision": "sha256:example-plan",
+        "observedAt": "2026-09-30T16:00:00Z",
+        "effectiveAt": null,
+        "readOnly": true,
+        "priorities": [
+          {
+            "description": "Restore reliable review progress.",
+            "refs": [
+              "we:4620"
+            ]
+          }
+        ],
+        "sections": [
+          {
+            "id": "standing",
+            "title": "Standing rules",
+            "text": "Keep review work moving.",
+            "sourceDate": "2026-09-29"
+          }
+        ],
+        "conflicts": [],
+        "status": "observed"
+      },
+      "health": {
+        "episodes": {
+          "rows": null,
+          "freshness": {
+            "observedAt": null,
+            "lastSuccessAt": null,
+            "expectedEveryMs": null,
+            "staleAfterMs": null,
+            "status": "unavailable",
+            "complete": false,
+            "reason": "Persisted source is missing or unreadable."
+          }
+        },
+        "daemons": {
+          "rows": null,
+          "freshness": {
+            "observedAt": null,
+            "lastSuccessAt": null,
+            "expectedEveryMs": null,
+            "staleAfterMs": null,
+            "status": "unavailable",
+            "complete": false,
+            "reason": "Persisted source is missing or unreadable."
+          }
+        },
+        "budgetWindows": {
+          "rows": null,
+          "freshness": {
+            "observedAt": null,
+            "lastSuccessAt": null,
+            "expectedEveryMs": null,
+            "staleAfterMs": null,
+            "status": "unavailable",
+            "complete": false,
+            "reason": "Persisted source is missing or unreadable."
+          }
+        },
+        "overnight": {
+          "status": "unknown",
+          "reason": "No structured controller producer is available.",
+          "desiredMode": "stop",
+          "policyRevision": "sha256:example-plan",
+          "observedState": null,
+          "affectedJobRefs": null,
+          "since": null,
+          "lastCheckAt": null,
+          "nextCheckAt": null,
+          "freshness": {
+            "observedAt": null,
+            "lastSuccessAt": null,
+            "expectedEveryMs": null,
+            "staleAfterMs": null,
+            "status": "unavailable",
+            "complete": false,
+            "reason": "Persisted source is missing or unreadable."
+          }
+        }
+      }
+    }
+  },
+  "health-conflict": {
+    "description": "Policy and observed control conflicts remain visible, including unknown raw codes.",
+    "snapshot": {
+      "schema": 2,
+      "snapshotId": "publisher-boot-1:7",
+      "publisherId": "publisher-boot-1",
+      "sequence": 7,
+      "observedAt": "2026-09-30T16:00:00Z",
+      "timeZone": "America/Toronto",
+      "coverage": {
+        "repos": {
+          "web-everything": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          },
+          "plateau-app": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          },
+          "frontierui": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          }
+        },
+        "collections": {
+          "runs": {
+            "total": 0,
+            "included": 0,
+            "complete": true,
+            "source": "runs"
+          },
+          "holds": {
+            "total": 0,
+            "included": 0,
+            "complete": true,
+            "source": "holds"
+          },
+          "actions": {
+            "total": 0,
+            "included": 0,
+            "complete": true,
+            "source": "actions"
+          }
+        }
+      },
+      "sources": {
+        "runs": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "holds": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "pullRequests": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "deliveries": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "partial",
+          "complete": false,
+          "reason": "Rotated local drain history; repo identity unavailable.",
+          "cursor": null
+        },
+        "actions": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "policy": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        }
+      },
+      "summary": {
+        "moving": {
+          "value": 0,
+          "unit": "logical-work",
+          "source": "runs",
+          "complete": true
+        },
+        "jobs": {
+          "value": 0,
+          "unit": "jobs",
+          "source": "runs",
+          "complete": true
+        },
+        "held": {
+          "value": 0,
+          "unit": "cards",
+          "source": "holds",
+          "complete": true
+        },
+        "openPullRequests": {
+          "value": 0,
+          "unit": "pull-requests",
+          "source": "pullRequests",
+          "complete": true
+        },
+        "mergedToday": {
+          "value": 3,
+          "unit": "merged-prs",
+          "source": "deliveries",
+          "complete": false
+        },
+        "humanPending": {
+          "value": 0,
+          "unit": "human-actions",
+          "source": "actions",
+          "complete": true
+        },
+        "humanActionable": {
+          "value": 0,
+          "unit": "human-actions",
+          "source": "actions",
+          "complete": true
+        }
+      },
+      "runs": [],
+      "holds": [],
+      "actions": [],
+      "items": [],
+      "deliveries": {
+        "source": "deliveries",
+        "provenance": "observed by local drain",
+        "complete": false,
+        "historyStart": "2026-09-30T14:00:00Z",
+        "today": {
+          "start": "2026-09-30T04:00:00Z",
+          "end": "2026-09-30T16:00:00Z",
+          "count": 3,
+          "complete": false
+        },
+        "trend": {
+          "status": "comparable",
+          "reason": null,
+          "current": {
+            "start": "2026-09-30T15:00:00Z",
+            "end": "2026-09-30T16:00:00Z",
+            "count": 2,
+            "complete": true
+          },
+          "previous": {
+            "start": "2026-09-30T14:00:00Z",
+            "end": "2026-09-30T15:00:00Z",
+            "count": 1,
+            "complete": true
+          }
+        }
+      },
+      "policy": {
+        "sourceKind": "external-plan",
+        "revision": "sha256:example-plan",
+        "observedAt": "2026-09-30T16:00:00Z",
+        "effectiveAt": null,
+        "readOnly": true,
+        "priorities": [
+          {
+            "description": "Restore reliable review progress.",
+            "refs": [
+              "we:4620"
+            ]
+          }
+        ],
+        "sections": [
+          {
+            "id": "standing",
+            "title": "Standing rules",
+            "text": "Keep review work moving.",
+            "sourceDate": "2026-09-29"
+          }
+        ],
+        "conflicts": [
+          {
+            "sectionIds": [
+              "standing",
+              "overnight"
+            ],
+            "description": "Selected sections disagree on overnight operation."
+          }
+        ],
+        "status": "observed"
+      },
+      "health": {
+        "episodes": {
+          "rows": [
+            {
+              "status": "observed",
+              "reason": "Only persisted evidence is available; absent fields are unknown.",
+              "id": "episode:review",
+              "severity": "warning",
+              "rawSeverity": "warn",
+              "description": "Review completion is overdue.",
+              "systemOwner": "review",
+              "openedAt": "2026-09-30T12:00:00Z",
+              "lastRemediation": {
+                "status": "observed",
+                "reason": "Only persisted evidence is available; absent fields are unknown.",
+                "attemptedAt": "2026-09-30T12:00:00Z",
+                "description": "Retry queued.",
+                "result": "failed",
+                "rawResult": "retry-exhausted"
+              },
+              "escalation": {
+                "status": "observed",
+                "reason": "Only persisted evidence is available; absent fields are unknown.",
+                "humanOnly": false,
+                "actionRef": null,
+                "description": "System retry owns recovery."
+              },
+              "freshness": {
+                "observedAt": "2026-09-30T16:00:00Z",
+                "lastSuccessAt": "2026-09-30T16:00:00Z",
+                "expectedEveryMs": 120000,
+                "staleAfterMs": 600000,
+                "status": "fresh",
+                "complete": true,
+                "reason": null
+              }
+            }
+          ],
+          "freshness": {
+            "observedAt": "2026-09-30T16:00:00Z",
+            "lastSuccessAt": "2026-09-30T16:00:00Z",
+            "expectedEveryMs": 120000,
+            "staleAfterMs": 600000,
+            "status": "fresh",
+            "complete": true,
+            "reason": null
+          }
+        },
+        "daemons": {
+          "rows": [
+            {
+              "status": "observed",
+              "reason": "Only persisted evidence is available; absent fields are unknown.",
+              "id": "review",
+              "heartbeatAt": "2026-09-30T16:00:00Z",
+              "completedTickAt": "2026-09-30T12:00:00Z",
+              "completedPassAt": "2026-09-30T12:00:00Z",
+              "expectedEveryMs": 120000,
+              "pause": {
+                "status": "observed",
+                "reason": "Only persisted evidence is available; absent fields are unknown.",
+                "paused": false,
+                "since": null,
+                "rawState": "running"
+              },
+              "rawState": "running",
+              "freshness": {
+                "observedAt": "2026-09-30T16:00:00Z",
+                "lastSuccessAt": "2026-09-30T16:00:00Z",
+                "expectedEveryMs": 120000,
+                "staleAfterMs": 600000,
+                "status": "fresh",
+                "complete": true,
+                "reason": null
+              }
+            }
+          ],
+          "freshness": {
+            "observedAt": "2026-09-30T16:00:00Z",
+            "lastSuccessAt": "2026-09-30T16:00:00Z",
+            "expectedEveryMs": 120000,
+            "staleAfterMs": 600000,
+            "status": "fresh",
+            "complete": true,
+            "reason": null
+          }
+        },
+        "budgetWindows": {
+          "rows": [
+            {
+              "status": "observed",
+              "reason": "Only persisted evidence is available; absent fields are unknown.",
+              "identity": {
+                "kind": "app",
+                "id": "app:review",
+                "rawKind": null
+              },
+              "resource": "graphql",
+              "responseObservedAt": "2026-09-30T12:00:00Z",
+              "resetAt": "2026-09-30T13:00:00Z",
+              "limit": 5000,
+              "remaining": 100,
+              "used": 4900,
+              "coverage": {
+                "status": "observed",
+                "reason": "Only persisted evidence is available; absent fields are unknown.",
+                "measured": 40,
+                "estimated": 3,
+                "unattributed": 2,
+                "unit": "requests"
+              },
+              "freshness": {
+                "observedAt": "2026-09-30T16:00:00Z",
+                "lastSuccessAt": "2026-09-30T16:00:00Z",
+                "expectedEveryMs": 120000,
+                "staleAfterMs": 600000,
+                "status": "fresh",
+                "complete": true,
+                "reason": null
+              }
+            }
+          ],
+          "freshness": {
+            "observedAt": "2026-09-30T16:00:00Z",
+            "lastSuccessAt": "2026-09-30T16:00:00Z",
+            "expectedEveryMs": 120000,
+            "staleAfterMs": 600000,
+            "status": "fresh",
+            "complete": true,
+            "reason": null
+          }
+        },
+        "overnight": {
+          "status": "conflict",
+          "reason": "Desired stop conflicts with observed active workers.",
+          "desiredMode": "stop",
+          "policyRevision": "sha256:example-plan",
+          "observedState": "controller-vNext:active",
+          "affectedJobRefs": [
+            "runner:job-7"
+          ],
+          "since": "2026-09-30T12:00:00Z",
+          "lastCheckAt": "2026-09-30T16:00:00Z",
+          "nextCheckAt": null,
+          "freshness": {
+            "observedAt": "2026-09-30T16:00:00Z",
+            "lastSuccessAt": "2026-09-30T16:00:00Z",
+            "expectedEveryMs": 120000,
+            "staleAfterMs": 600000,
+            "status": "fresh",
+            "complete": true,
+            "reason": null
+          }
+        }
+      }
+    }
+  },
+  "health-stop-pending": {
+    "description": "A stop request is not proof of stopped workers.",
+    "snapshot": {
+      "schema": 2,
+      "snapshotId": "publisher-boot-1:7",
+      "publisherId": "publisher-boot-1",
+      "sequence": 7,
+      "observedAt": "2026-09-30T16:00:00Z",
+      "timeZone": "America/Toronto",
+      "coverage": {
+        "repos": {
+          "web-everything": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          },
+          "plateau-app": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          },
+          "frontierui": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          }
+        },
+        "collections": {
+          "runs": {
+            "total": 0,
+            "included": 0,
+            "complete": true,
+            "source": "runs"
+          },
+          "holds": {
+            "total": 0,
+            "included": 0,
+            "complete": true,
+            "source": "holds"
+          },
+          "actions": {
+            "total": 0,
+            "included": 0,
+            "complete": true,
+            "source": "actions"
+          }
+        }
+      },
+      "sources": {
+        "runs": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "holds": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "pullRequests": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "deliveries": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "partial",
+          "complete": false,
+          "reason": "Rotated local drain history; repo identity unavailable.",
+          "cursor": null
+        },
+        "actions": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "policy": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        }
+      },
+      "summary": {
+        "moving": {
+          "value": 0,
+          "unit": "logical-work",
+          "source": "runs",
+          "complete": true
+        },
+        "jobs": {
+          "value": 0,
+          "unit": "jobs",
+          "source": "runs",
+          "complete": true
+        },
+        "held": {
+          "value": 0,
+          "unit": "cards",
+          "source": "holds",
+          "complete": true
+        },
+        "openPullRequests": {
+          "value": 0,
+          "unit": "pull-requests",
+          "source": "pullRequests",
+          "complete": true
+        },
+        "mergedToday": {
+          "value": 3,
+          "unit": "merged-prs",
+          "source": "deliveries",
+          "complete": false
+        },
+        "humanPending": {
+          "value": 0,
+          "unit": "human-actions",
+          "source": "actions",
+          "complete": true
+        },
+        "humanActionable": {
+          "value": 0,
+          "unit": "human-actions",
+          "source": "actions",
+          "complete": true
+        }
+      },
+      "runs": [],
+      "holds": [],
+      "actions": [],
+      "items": [],
+      "deliveries": {
+        "source": "deliveries",
+        "provenance": "observed by local drain",
+        "complete": false,
+        "historyStart": "2026-09-30T14:00:00Z",
+        "today": {
+          "start": "2026-09-30T04:00:00Z",
+          "end": "2026-09-30T16:00:00Z",
+          "count": 3,
+          "complete": false
+        },
+        "trend": {
+          "status": "comparable",
+          "reason": null,
+          "current": {
+            "start": "2026-09-30T15:00:00Z",
+            "end": "2026-09-30T16:00:00Z",
+            "count": 2,
+            "complete": true
+          },
+          "previous": {
+            "start": "2026-09-30T14:00:00Z",
+            "end": "2026-09-30T15:00:00Z",
+            "count": 1,
+            "complete": true
+          }
+        }
+      },
+      "policy": {
+        "sourceKind": "external-plan",
+        "revision": "sha256:example-plan",
+        "observedAt": "2026-09-30T16:00:00Z",
+        "effectiveAt": null,
+        "readOnly": true,
+        "priorities": [
+          {
+            "description": "Restore reliable review progress.",
+            "refs": [
+              "we:4620"
+            ]
+          }
+        ],
+        "sections": [
+          {
+            "id": "standing",
+            "title": "Standing rules",
+            "text": "Keep review work moving.",
+            "sourceDate": "2026-09-29"
+          }
+        ],
+        "conflicts": [],
+        "status": "observed"
+      },
+      "health": {
+        "episodes": {
+          "rows": [
+            {
+              "status": "observed",
+              "reason": "Only persisted evidence is available; absent fields are unknown.",
+              "id": "episode:review",
+              "severity": "warning",
+              "rawSeverity": "warn",
+              "description": "Review completion is overdue.",
+              "systemOwner": "review",
+              "openedAt": "2026-09-30T12:00:00Z",
+              "lastRemediation": {
+                "status": "observed",
+                "reason": "Only persisted evidence is available; absent fields are unknown.",
+                "attemptedAt": "2026-09-30T12:00:00Z",
+                "description": "Retry queued.",
+                "result": "failed",
+                "rawResult": "retry-exhausted"
+              },
+              "escalation": {
+                "status": "observed",
+                "reason": "Only persisted evidence is available; absent fields are unknown.",
+                "humanOnly": false,
+                "actionRef": null,
+                "description": "System retry owns recovery."
+              },
+              "freshness": {
+                "observedAt": "2026-09-30T16:00:00Z",
+                "lastSuccessAt": "2026-09-30T16:00:00Z",
+                "expectedEveryMs": 120000,
+                "staleAfterMs": 600000,
+                "status": "fresh",
+                "complete": true,
+                "reason": null
+              }
+            }
+          ],
+          "freshness": {
+            "observedAt": "2026-09-30T16:00:00Z",
+            "lastSuccessAt": "2026-09-30T16:00:00Z",
+            "expectedEveryMs": 120000,
+            "staleAfterMs": 600000,
+            "status": "fresh",
+            "complete": true,
+            "reason": null
+          }
+        },
+        "daemons": {
+          "rows": [
+            {
+              "status": "observed",
+              "reason": "Only persisted evidence is available; absent fields are unknown.",
+              "id": "review",
+              "heartbeatAt": "2026-09-30T16:00:00Z",
+              "completedTickAt": "2026-09-30T12:00:00Z",
+              "completedPassAt": "2026-09-30T12:00:00Z",
+              "expectedEveryMs": 120000,
+              "pause": {
+                "status": "observed",
+                "reason": "Only persisted evidence is available; absent fields are unknown.",
+                "paused": false,
+                "since": null,
+                "rawState": "running"
+              },
+              "rawState": "running",
+              "freshness": {
+                "observedAt": "2026-09-30T16:00:00Z",
+                "lastSuccessAt": "2026-09-30T16:00:00Z",
+                "expectedEveryMs": 120000,
+                "staleAfterMs": 600000,
+                "status": "fresh",
+                "complete": true,
+                "reason": null
+              }
+            }
+          ],
+          "freshness": {
+            "observedAt": "2026-09-30T16:00:00Z",
+            "lastSuccessAt": "2026-09-30T16:00:00Z",
+            "expectedEveryMs": 120000,
+            "staleAfterMs": 600000,
+            "status": "fresh",
+            "complete": true,
+            "reason": null
+          }
+        },
+        "budgetWindows": {
+          "rows": [
+            {
+              "status": "observed",
+              "reason": "Only persisted evidence is available; absent fields are unknown.",
+              "identity": {
+                "kind": "app",
+                "id": "app:review",
+                "rawKind": null
+              },
+              "resource": "graphql",
+              "responseObservedAt": "2026-09-30T12:00:00Z",
+              "resetAt": "2026-09-30T13:00:00Z",
+              "limit": 5000,
+              "remaining": 100,
+              "used": 4900,
+              "coverage": {
+                "status": "observed",
+                "reason": "Only persisted evidence is available; absent fields are unknown.",
+                "measured": 40,
+                "estimated": 3,
+                "unattributed": 2,
+                "unit": "requests"
+              },
+              "freshness": {
+                "observedAt": "2026-09-30T16:00:00Z",
+                "lastSuccessAt": "2026-09-30T16:00:00Z",
+                "expectedEveryMs": 120000,
+                "staleAfterMs": 600000,
+                "status": "fresh",
+                "complete": true,
+                "reason": null
+              }
+            }
+          ],
+          "freshness": {
+            "observedAt": "2026-09-30T16:00:00Z",
+            "lastSuccessAt": "2026-09-30T16:00:00Z",
+            "expectedEveryMs": 120000,
+            "staleAfterMs": 600000,
+            "status": "fresh",
+            "complete": true,
+            "reason": null
+          }
+        },
+        "overnight": {
+          "status": "pending",
+          "reason": "Stop requested; affected worker still running. Next check is unknown.",
+          "desiredMode": "stop",
+          "policyRevision": "sha256:example-plan",
+          "observedState": "running",
+          "affectedJobRefs": [
+            "runner:job-7"
+          ],
+          "since": "2026-09-30T12:00:00Z",
+          "lastCheckAt": "2026-09-30T16:00:00Z",
+          "nextCheckAt": null,
+          "freshness": {
+            "observedAt": "2026-09-30T16:00:00Z",
+            "lastSuccessAt": "2026-09-30T16:00:00Z",
+            "expectedEveryMs": 120000,
+            "staleAfterMs": 600000,
+            "status": "fresh",
+            "complete": true,
+            "reason": null
+          }
+        }
+      }
+    }
   }
 }

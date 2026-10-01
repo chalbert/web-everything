@@ -386,6 +386,7 @@ export function decideSetLabel({ to, currentLabels = [], findingCount = null, re
       // `redteam:accepted` the PR still carries from before the fix.
       removeLabels: [REVIEW_LABELS.changes, REVIEW_LABELS.accepted, REVIEW_LABELS.redteamAccepted, READY_TO_MERGE_LABEL],
       keepsHuman: isHuman,
+      rearmFrom: wasChanges ? REVIEW_LABELS.changes : REVIEW_LABELS.accepted,
       reason: isHuman
         ? 're-armed — review:human KEPT as the sole hold (gate-self stays human-ceremony-only); review:pending '
           + 'NOT added — the human hold already says an independent review is owed (#x01u7az)'

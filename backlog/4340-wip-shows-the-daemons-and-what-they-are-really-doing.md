@@ -2,9 +2,11 @@
 bornAs: xfodvzc
 kind: story
 size: 3
-status: open
+status: resolved
 scope: ["plateau:src/wip/wip-read.ts", "plateau:src/wip/wip-model.ts", "plateau:src/wip/wip-view.ts", "plateau:src/wip/types.ts", "plateau:wip-relay.js", "plateau:src/wip/wip-relay-contract.test.ts", "plateau:src/wip/wip-read.test.ts", "plateau:src/wip/wip-model.test.ts", "plateau:src/wip/wip-view.test.ts", "plateau:src/wip/wip-view.hostile.test.ts"]
 dateOpened: "2026-09-28"
+dateResolved: "2026-10-01"
+graduatedTo: "https://github.com/chalbert/plateau-app/pull/190"
 preparedDate: "2026-09-30"
 preparedAgainstSha: "6025c3536f4df5989ec664206727f8d3a923f3d4"
 tags: []

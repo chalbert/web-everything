@@ -24,6 +24,17 @@ const FIXTURE = JSON.parse(readFileSync(
   join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'open-prs-rest-vs-graphql.json'), 'utf8',
 ));
 
+function guardPrReads(row, reads = new Set()) {
+  return new Proxy(row, {
+    get(target, key, receiver) {
+      reads.add(key);
+      expect(BUILD_DISPATCH_PR_FIELDS, `PR field ${String(key)} is outside the supplied contract`).toContain(key);
+      expect(Object.hasOwn(target, key), `PR field ${String(key)} is missing from the supplied row`).toBe(true);
+      return Reflect.get(target, key, receiver);
+    },
+  });
+}
+
 describe('shared open-PR discovery', () => {
   it('pins the deduplicated union and proves every standalone field is included', () => {
     expect(PR_LIST_LIMIT).toBe(200);
@@ -62,8 +73,40 @@ describe('shared open-PR discovery', () => {
 });
 
 describe('fetchOpenPrsRest — build-dispatch daemon field parity (#4351 follow-up, guided by #4309 spend accounting)', () => {
-  it('BUILD_DISPATCH_PR_FIELDS names exactly what build-dispatch-policy.mjs reads off a PR', () => {
+  it('BUILD_DISPATCH_PR_FIELDS pins the five fields supplied by the REST mapper', () => {
     expect(BUILD_DISPATCH_PR_FIELDS).toEqual(['number', 'headRefName', 'labels', 'files', 'isDraft']);
+  });
+
+  it('guards the real normalizer against reads outside the REST producer contract', () => {
+    const reads = new Set();
+    const prs = FIXTURE.restPulls.map((p) => {
+      const row = restPullToBuildDispatchShape(p, FIXTURE.restFiles[String(p.number)]);
+      expect(Reflect.ownKeys(row).sort()).toEqual([...BUILD_DISPATCH_PR_FIELDS].sort());
+      return guardPrReads(row, reads);
+    });
+    const normalized = normalizeOpenPrs([{ repo: 'we', prs }]);
+    expect(normalized.length).toBeGreaterThan(0);
+    expect(normalized).toEqual(normalizeOpenPrs([{ repo: 'we', prs: FIXTURE.graphql }]));
+    expect([...reads].sort()).toEqual(['files', 'headRefName', 'labels', 'number']);
+  });
+
+  it('rejects an undeclared optional read and records the offending field', () => {
+    const p = FIXTURE.restPulls[0];
+    const reads = new Set();
+    const row = guardPrReads(restPullToBuildDispatchShape(p, FIXTURE.restFiles[String(p.number)]), reads);
+    expect(() => row.body).toThrow('PR field body is outside the supplied contract');
+    expect([...reads]).toEqual(['body']);
+  });
+
+  it('rejects a missing own field even when normalization would tolerate undefined', () => {
+    const p = FIXTURE.restPulls[0];
+    const row = restPullToBuildDispatchShape(p, FIXTURE.restFiles[String(p.number)]);
+    delete row.headRefName;
+    expect(normalizeOpenPrs([{ repo: 'we', prs: [row] }])[0].headRefName).toBe('');
+    // An inherited value must not satisfy the producer's own-property contract either.
+    Object.setPrototypeOf(row, { headRefName: undefined });
+    expect(() => normalizeOpenPrs([{ repo: 'we', prs: [guardPrReads(row)] }]))
+      .toThrow('PR field headRefName is missing from the supplied row');
   });
 
   it('maps a REST pulls item + its own files page to exactly what the old GraphQL query returned', () => {
