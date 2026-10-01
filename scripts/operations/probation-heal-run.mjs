@@ -29,6 +29,7 @@
  * real processes.
  */
 
+import { parseAgyReportEvidence } from '../lib/antigravity-run-evidence.mjs';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -82,11 +83,12 @@ export async function runProbationHeal(args, io) {
   if (!Number.isInteger(pr) || pr <= 0 || !session || !worker?.id) throw new Error('probation-heal-run: --pr, --session and --worker are required');
   const log = (m) => io.log(`probation-heal-run PR #${pr} [${worker.id}]: ${m}`);
   const complete = (status, outcome) => io.completion({ pr, session, item: args.num, status, outcome });
+  let modelEvidence = {};
   const finish = (outcome, executor, detail, row = {}) => {
     complete('done', outcome);
     // One `probation-launch` row per heal the WORKER actually ran — a rebase-only heal is not a trial of it.
     if (executor === worker.executor) {
-      io.appendScorecard(launchScorecardRow({ worker, pr, repo: REPO_SLUG, handle: session, item: args.num, launchOutcome: outcome, ...row }));
+      io.appendScorecard(launchScorecardRow({ worker, modelEvidence, pr, repo: REPO_SLUG, handle: session, item: args.num, launchOutcome: outcome, ...row }));
     }
     log(`${outcome} — ${detail}`);
     return { outcome, executor, detail };
@@ -141,6 +143,7 @@ export async function runProbationHeal(args, io) {
     const preHookSurface = hookReset.snapshot;
     log(`running ${worker.launcher} --model=${worker.model}`);
     const run = io.runWorker(buildWorkerArgv({ worker, weRoot: WE_ROOT, dir: lanePath, taskFile }));
+    modelEvidence = run.modelEvidence ?? {};
     executor = worker.executor;
     // x55dojc — checked BEFORE anything else the worker's run unlocks (the diff read, the gate, a commit):
     // any change to the lane's git-hook surface refuses outright, regardless of whether the worker also
@@ -209,7 +212,7 @@ function sh(bin, args, opts = {}) {
   return execFileSync(bin, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024, ...opts });
 }
 function trySh(bin, args, opts = {}) {
-  try { return { ok: true, out: sh(bin, args, opts) }; } catch (e) { return { ok: false, status: e.status, out: `${e?.stdout ?? ''}${e?.stderr ?? ''}` || String(e?.message ?? e) }; }
+  try { return { ok: true, out: sh(bin, args, opts) }; } catch (e) { return { ok: false, status: e.status, stdout: String(e?.stdout ?? ''), out: `${e?.stdout ?? ''}${e?.stderr ?? ''}` || String(e?.message ?? e) }; }
 }
 const node = (script, args, opts) => trySh(process.execPath, [join(WE_ROOT, script), ...args], opts);
 
@@ -278,7 +281,7 @@ export function realIo({ session, env = process.env, run = trySh } = {}) {
       // SYNCHRONOUS on purpose: both launchers block until the model's turn ends (see their headers).
       // `workerEnv`, never `laneEnv`: the worker's own git use keeps the repo's guard hooks (see `realIo`).
       const r = trySh(process.execPath, argv, { env: workerEnv, timeout: 70 * 60 * 1000 });
-      return { ok: r.ok, out: r.out.slice(-4000) };
+      return { modelEvidence: parseAgyReportEvidence(r.stdout ?? r.out), ok: r.ok, out: r.out.slice(-4000) };
     },
     runChecker: (argv) => {
       const r = trySh(process.execPath, argv, { env: workerEnv, timeout: 20 * 60 * 1000 });

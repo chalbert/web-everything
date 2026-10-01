@@ -44,9 +44,10 @@
  * nothing.
  */
 
+import { pickAgyEvidence } from '../lib/antigravity-run-evidence.mjs';
 import { advance, runStatus, startRun } from './engine.mjs';
 import { applyPendingEffects, inFlightEntries } from './effect-executor.mjs';
-import { totalJudgeSpend, withStepFinish, withStepStart } from './run-record.mjs';
+import { normalizeJudgeTelemetry, totalJudgeSpend, withStepFinish, withStepStart } from './run-record.mjs';
 import { isReadOnlyOperation, validateInput } from './registry.mjs';
 import { assertNoForbiddenArgv, EFFORT_LEVELS, judgeSpawn } from '../lib/judge-spawn.mjs';
 // #xqa9ttq — `requireAllProperties` comes from `codex-judge-spawn.mjs`, NOT `../lib/jury-core.mjs`, and that
@@ -729,7 +730,8 @@ function judgeTelemetryFrom(outcome, effective) {
     usage: outcome.usage,
     transcriptFile: outcome.transcriptFile,
     timedOut: outcome.timedOut,
-    model: effective.model,
+    model: outcome.servedModel ?? effective.model,
+    ...pickAgyEvidence(outcome),
   };
 }
 
@@ -876,7 +878,9 @@ export function createDefaultJudge({
       } catch (e) {
         const reason = `spawn failed — ${String(e?.message ?? e).slice(0, 500)}`;
         logGracefulOutcome(`judge seat crashed, recorded as skipped — ${spawnProviderName}: ${reason}`);
-        return skipOutcome(reason, { provider: spawnProviderName, crashed: true });
+        return e?.telemetry
+          ? judgeOutcome({ summary: `skipped: ${reason}`, findings: [], skipped: { provider: spawnProviderName, reason } }, judgeTelemetryFrom(e.telemetry, effective))
+          : skipOutcome(reason, { provider: spawnProviderName, crashed: true });
       }
     }
 
@@ -992,7 +996,15 @@ export async function driveRun({ run, registry, store, sinks, judge, resume = nu
       // THE SPAWN, in the caller, between two `advance` calls — the declaration declared it and did not act.
       // Its cost rides back on the resume; `advance` stamps the row with the request's own lens/model/effort.
       const stepIndex = current.cursor;
-      const { value, telemetry } = unwrapJudgeOutcome(await judge(current.pending.request));
+      let returned;
+      try { returned = await judge(current.pending.request); } catch (e) {
+        if (e?.telemetry) {
+          current = { ...current, telemetry: [...(current.telemetry ?? []), normalizeJudgeTelemetry({ step: current.pending.step, stepIndex, telemetry: { ...e.telemetry, model: e.telemetry.servedModel, lens: current.pending.request?.lens } })] };
+          store.write(current);
+        }
+        throw e;
+      }
+      const { value, telemetry } = unwrapJudgeOutcome(returned);
       current = advance(current, {
         registry,
         resume: { step: current.pending.step, value, ...(telemetry ? { telemetry } : {}) },

@@ -400,11 +400,12 @@ export function buildHealCommitMessage({ pr, reason, worker, item = null, subjec
  * only moves `selectProbationWorker`'s rotation on and shows up in the probation report as "launched".
  * @param {object} o
  */
-export function launchScorecardRow({ worker, pr, repo, handle, item = null, launchOutcome, checker = null, diff = null, scoredAt }) {
+export function launchScorecardRow({ worker, pr, repo, handle, item = null, launchOutcome, checker = null, diff = null, scoredAt, modelEvidence = {} }) {
   return {
     rubricVersion: 'probation-launch.1',
     provider: worker.provider,
-    model: worker.model,
+    model: worker.provider === 'antigravity' ? (modelEvidence.servedModel ?? 'unknown') : worker.model,
+    ...(worker.provider === 'antigravity' ? { requestedModel: worker.model, servedModel: 'unknown', servedBackend: 'unknown', modelEvidence: 'unavailable', ...modelEvidence } : {}),
     subjectClass: 'work-agent',
     dispatchKind: 'probation-launch',
     taskType: worker.taskType,

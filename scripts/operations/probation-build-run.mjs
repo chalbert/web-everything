@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { parseAgyReportEvidence } from '../lib/antigravity-run-evidence.mjs';
 import { machinePrTitle } from './machine-pr-title.mjs';
 import { classifyPrepareFailure } from '../conveyor/prepare-failure-policy.mjs';
 /**
@@ -220,6 +221,7 @@ export async function runProbationBuild(args, io) {
   if (preparing && !['codex', 'antigravity-gemini'].includes(worker.id)) throw new Error('prepare requires codex or antigravity-gemini');
   const log = (m) => io.log(`probation-build-run #${num} [${worker.id}]: ${m}`);
   let declinedReason = null;
+  let modelEvidence = {};
   const finish = (outcome, executor, detail, row = {}) => {
     const evidence = preparing && outcome !== 'opened-pr' ? {
       error: detail, sessionAbsent: !workerRan,
@@ -230,7 +232,7 @@ export async function runProbationBuild(args, io) {
     // found is not a trial of it.
     if (executor === worker.executor) {
       io.appendScorecard({ ...launchScorecardRow({
-        worker: { ...worker, taskType }, checker: checkerRow, pr: row.pr ?? null, repo: REPO_SLUG, handle: session, item: num, launchOutcome: outcome, diff: row.diff ?? null,
+        worker: { ...worker, taskType }, modelEvidence, checker: checkerRow, pr: row.pr ?? null, repo: REPO_SLUG, handle: session, item: num, launchOutcome: outcome, diff: row.diff ?? null,
       }), ...failure });
     }
     if (declinedReason) detail = `worker-declined: ${declinedReason} — ${detail}`;
@@ -365,6 +367,7 @@ export async function runProbationBuild(args, io) {
     for (let attempt = 0; attempt < (preparing ? 2 : 1); attempt++) {
       log(`running ${worker.launcher} --model=${worker.model}`);
       const run = io.runWorker(buildWorkerArgv({ worker, weRoot: lanePath, dir: lanePath, taskFile }), lanePath);
+      modelEvidence = run.modelEvidence ?? {};
       workerRan = true;
       // x55dojc — checked BEFORE the `run.ok` gate below on purpose: even a worker that crashed or timed out
       // could have planted a hook before it did, so this must never be skipped just because the run itself
@@ -581,7 +584,7 @@ function sh(bin, args, opts = {}) {
   return execFileSync(bin, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024, ...opts });
 }
 function trySh(bin, args, opts = {}) {
-  try { return { ok: true, out: sh(bin, args, opts) }; } catch (e) { return { ok: false, out: `${e?.stdout ?? ''}${e?.stderr ?? e?.message ?? ''}` }; }
+  try { return { ok: true, out: sh(bin, args, opts) }; } catch (e) { return { ok: false, stdout: String(e?.stdout ?? ''), out: `${e?.stdout ?? ''}${e?.stderr ?? e?.message ?? ''}` }; }
 }
 
 /**
@@ -735,7 +738,7 @@ export function realIo({ session, env = process.env, repoRoot = WE_ROOT } = {}) 
         if (!reportedPath && signature(path) === before) return '';
         try { return readFileSync(path, 'utf8'); } catch { return ''; }
       });
-      return { ok: r.ok, out: r.out.slice(-4000), lastMessage: typeof lastMessage === 'string' ? lastMessage : '' };
+      return { modelEvidence: parseAgyReportEvidence(r.stdout ?? r.out), ok: r.ok, out: r.out.slice(-4000), lastMessage: typeof lastMessage === 'string' ? lastMessage : '' };
     },
     runChecker: (argv, dir) => {
       const r = trySh(process.execPath, argv, { cwd: dir, env: workerEnv, timeout: 20 * 60 * 1000 });
