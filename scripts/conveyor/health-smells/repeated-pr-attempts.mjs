@@ -2,7 +2,7 @@
  * A single smell aggregates actions; no extra GitHub reads. Existing gated self-sync
  * owns clone recovery; the watch's alert path escalates persistent failures.
  */
-import { ATTEMPT_WINDOW_MS, MIN_PR_ATTEMPTS, recordPrAttempts } from '../health-pr-attempts.mjs';
+import { ATTEMPT_WINDOW_MS, MIN_PR_ATTEMPTS, recordPrAttempts, isExpectedPrWait } from '../health-pr-attempts.mjs';
 
 export default {
   id: 'repeated-pr-attempts', scope: 'repo', cadence: 'every-tick',
@@ -11,7 +11,7 @@ export default {
   evaluate({ operationRuns }, { now, daemons }) {
     const groups = new Map();
     const logs = Object.values(daemons).flatMap((m) => m.prAttempts ?? [])
-      .filter((r) => r.at > now - ATTEMPT_WINDOW_MS && r.at <= now);
+      .filter((r) => r.at > now - ATTEMPT_WINDOW_MS && r.at <= now && !isExpectedPrWait(r));
     // Logs and records can describe the same attempts without a shared ID. Use the
     // larger evidence set per PR/action, a conservative lower bound, not their sum.
     const sources = new Map();

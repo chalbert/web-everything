@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, appendFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { foldDaemonMemory, stepEpisodes, emptyHealthState } from '../../health-watch-core.mjs';
+import { foldDaemonMemory, stepEpisodes, emptyHealthState, runHealthTick } from '../../health-watch-core.mjs';
 import { probeDaemonLogs, probeOperationRuns } from '../../health-watch.mjs';
 import { recordPrAttempts, ATTEMPT_WINDOW_MS } from '../../health-pr-attempts.mjs';
 import smell from '../repeated-pr-attempts.mjs';
@@ -17,6 +17,64 @@ const fold = (text, prev, at = NOW, bootstrap = false) => foldDaemonMemory(prev,
 const evaluate = (mem, now = NOW, operationRuns = []) => smell.evaluate({ operationRuns }, { now, daemons: { review: mem } });
 
 describe('repeated attempts on the same PR', () => {
+  const refusal = (pr, reason) => `reconcile-fix-dispatch-daemon: reconcile-refused ${reason.split(': ')[0]} chalbert/web-everything PR #${pr} — ${reason.split(': ').slice(1).join(': ')}\n`;
+  const waits = [
+    [3215, "cap-exhausted: the PR's own durable attempt count is 5 against a cap of 5 — auto-repair is exhausted here and a person must take it"],
+    [3215, 'scope-overlap: we:scripts/lib/gh-throttle.mjs overlaps in-flight fix PR #3245 — waiting 2nd behind #3245 on we:scripts/lib/gh-throttle.mjs — serializing, retrying next pass'],
+    [3253, 'draft: PR is still a draft — no independent review is dispatched until it is promoted to ready for review, which happens once its required checks are all green (draft-first PRs)'],
+    [3253, 'human-gated: review:human — awaiting the human ceremony'],
+    [3253, 'already-reviewed-head: this exact head (`abc`) already carries a `reviewed-sha` accept marker from a prior review'],
+    [3215, 'ci-heal-escalated: ci-heal already escalated this exact head (`abc`) to a human — re-dispatching would re-ask the identical already-answered question'],
+  ];
+
+  it.each(waits)('ignores the recorded expected wait on #%i: %s', (pr, reason) => {
+    expect(evaluate(fold((tick + refusal(pr, reason)).repeat(8)))).toEqual([]);
+    // Before this fix the rows were already persisted; neither cursor reset nor
+    // waiting for the hour window to expire should be needed to clear them.
+    const mem = { prAttempts: Array.from({ length: 8 }, () => ({
+      pr: `chalbert/web-everything#${pr}`, action: 'fix-dispatch', reason, at: NOW,
+    })) };
+    expect(evaluate(mem)).toEqual([]);
+  });
+
+  it('closes false #3215/#3253 episodes through two normal clean ticks', () => {
+    const results = [3215, 3253].map(pr => ({ subject: `chalbert/web-everything#${pr}`, breach: true }));
+    let state = stepEpisodes(emptyHealthState(), [{ smell, results }], NOW - 1).state;
+    state.daemons = { fix: { prAttempts: waits.map(([pr, reason]) => ({
+      pr: `chalbert/web-everything#${pr}`, action: 'fix-dispatch', reason, at: NOW,
+    })) } };
+    const first = runHealthTick(state, { daemonLogs: [] }, [smell], NOW);
+    expect(first.transitions.filter(t => t.type === 'closed')).toHaveLength(0);
+    const second = runHealthTick(first.state, { daemonLogs: [] }, [smell], NOW + 1);
+    expect(second.transitions.filter(t => t.type === 'closed').map(t => t.episode.subject).sort())
+      .toEqual(results.map(r => r.subject).sort());
+  });
+
+  it('keeps newer machine failures on a human-gated PR and unnamed overlap refusals', () => {
+    const held = waits.map(([pr, reason]) => refusal(pr, reason)).join('');
+    const failures = [
+      'dispatch-failed: review-dispatch child crashed',
+      'dispatch-failed: fix-dispatch refused unexpectedly',
+      'missing-run-cap-exhausted: recovery cap exhausted',
+      'dispatch-failed: open-pr submit failed',
+      'scope-overlap: fix-dispatch cannot determine blocker',
+    ].map(reason => refusal(3253, reason)).join('');
+    const result = smell.evaluate({ prs: [{ repo: 'chalbert/web-everything', number: 3253,
+      labels: [{ name: 'review:human' }] }] }, { now: NOW, daemons: { fix: fold(held + failures) } });
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ subject: 'chalbert/web-everything#3253', breach: true, measure: { attempts: 5 } });
+  });
+
+  it('does not treat a failed action or failed effect as a wait just because its error mentions a gate', () => {
+    const reason = waits[0][1];
+    const mem = fold(`fix-daemon: chalbert/web-everything#3215 failed (non-fatal): ${reason}\n`.repeat(5));
+    expect(evaluate(mem)[0].breach).toBe(true);
+    const records = Array.from({ length: 5 }, (_, i) => ({ id: `run-${i}`, op: 'open-pr',
+      input: { repo: 'chalbert/web-everything', pr: 3215 }, effects: [{ key: 'submit', status: 'failed',
+        lastAttemptAt: new Date(NOW).toISOString(), error: reason }] }));
+    expect(evaluate(fold(''), NOW, records)[0].breach).toBe(true);
+  });
+
   it('replays #3176 and opens an episode on attempt five, regardless of other PR progress', () => {
     let mem;
     for (let i = 0; i < 5; i++) mem = fold(tick + failure(8 + i), mem, NOW - (4 - i) * 120_000);
