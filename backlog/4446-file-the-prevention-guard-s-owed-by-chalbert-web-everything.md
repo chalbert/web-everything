@@ -3,10 +3,11 @@ bornAs: xtmhllw
 kind: story
 size: 3
 parent: "4075"
-status: active
+status: resolved
 scope: ["we:scripts/operations/cli-adapter.mjs", "we:scripts/operations/review-job.mjs", "we:scripts/operations/__tests__/review-pr.test.mjs", "we:scripts/operations/__tests__/judge-provider-selection.test.mjs", "we:scripts/operations/__tests__/judge-provider-port.test.mjs", "we:scripts/operations/__tests__/review-job.test.mjs"]
 dateOpened: "2026-09-28"
 dateStarted: "2026-10-01"
+dateResolved: "2026-10-01"
 preparedDate: "2026-09-30"
 preparedAgainstSha: "bc9db934c4b93158341ba01a74dccb71583765fc"
 tags: []
