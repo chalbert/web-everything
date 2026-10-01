@@ -3,185 +3,85 @@ bornAs: xh701hj
 kind: story
 size: 8
 status: open
-scope: ["we:scripts/operations/review-pr.mjs", "we:scripts/lib/provider-routing.mjs", "we:scripts/lib/model-probation.mjs", "we:scripts/operations/review-extra-seats.mjs", "we:scripts/gemini-direct-task.mjs", "we:scripts/conveyor/log-delegation-trial.mjs"]
+scope: ["we:scripts/operations/review-pr.mjs", "we:scripts/operations/cli-adapter.mjs", "we:scripts/operations/review-extra-seats.mjs", "we:scripts/lib/provider-routing.mjs", "we:scripts/lib/model-probation.mjs", "we:scripts/lib/model-probation.json", "we:scripts/conveyor/log-delegation-trial.mjs", "we:scripts/operations/__tests__/review-pr.test.mjs", "we:scripts/operations/__tests__/review-pr-routing.test.mjs", "we:scripts/operations/__tests__/cli-adapter*.test.mjs", "we:scripts/operations/__tests__/review-extra-seats.test.mjs", "we:scripts/lib/__tests__/provider-routing.test.mjs", "we:scripts/lib/__tests__/model-probation.test.mjs", "we:scripts/conveyor/__tests__/log-delegation-trial.test.mjs"]
 dateOpened: "2026-09-28"
+preparedDate: "2026-09-30"
+preparedAgainstSha: "b1e5ed4e294f5ca43e9e7da64fcf8d468bf478f4"
 tags: []
 ---
 
 # Route review seats by risk to Antigravity-Claude (Sonnet 4.6 / Opus 4.6), on probation with native-Claude spot checks
 
-we:scripts/operations/review-pr.mjs's two MANDATORY seats (judge=correctness, judgeSecurity=security) spawn as native Claude judges today with no provider field — hardcoded, not caller-negotiable — while every existing non-Claude seat (Codex/Antigravity) is deliberately kept advisory-only, so every PR pays >=2 native-Claude mandatory seats regardless of care level; most PRs today are backlog/docs-only card PRs paying that same cost, and Claude tokens are the binding constraint (Codex out until Oct 3). This card routes the MANDATORY seats themselves by the care level we:scripts/operations/review-pr.mjs already derives (we:scripts/review-core-cli.mjs's buildShapePlan/careLevel): none/low -> agy-claude Sonnet 4.6, elevated -> agy-claude Opus 4.6 (we:scripts/lib/provider-routing.mjs's AGY_CLAUDE_MODEL_BY_TIER, already pinned), high -> unchanged native Claude. Recorded as probation trials of a new we:scripts/lib/model-probation.mjs role (mandatory-review, deliberately NOT in NEVER_BLOCKING_ROLES, per #model-probation-graduation-criteria clause 3's already-anticipated 'future blocking/gating reviewer role'), with a 1-in-5 native-Claude spot check comparing verdicts; disagreements are informative trials, promotion stays a human decision. MVP cut: low care-level only, Sonnet 4.6, spot check + trial recording; elevated/Opus and real allowance-gate fallback are follow-up slices.
+Route the two mandatory review seats by verified PR care level, preserving their correctness/security authority. The bounded MVP is `none`/`low` → Antigravity-Claude Sonnet 4.6 with a stable one-in-five native-Claude comparison; `elevated` and `high` retain the existing native path. Unknown availability falls back to native Claude. The original operator direction recorded here on 2026-09-28 authorizes this low-care probation experiment; it does not grant general trust or automatic promotion. The full direction remains elevated → Opus 4.6 with native checks on every accept, high → native Claude.
 
-**Lineage note:** conceptually a "model routing + probation" dimension instance of the
-policy-as-configurable-dimensions epic (`4376`, `#4305`) — no `parent:` frontmatter link is set because
-`4376` lives only on `origin/lane/cost-capture-and-policy-design` and does not yet resolve to an item on
-`main`; wire the `parent:` field once that epic lands, rather than filing a card whose parent link is
-currently unresolvable.
+## Progress
+
+Preparation research against the acquired checkout (no implementation or live provider dispatch performed):
+
+- **Old premise:** mandatory providers were hardcoded in the panel reduction, care level was available at that site, and all PRs necessarily paid two native-Claude calls. **Corrected:** `we:scripts/operations/review-pr.mjs#buildReviewJudgeRequest` declares a tool-bearing request without a provider pin; `judge` and `judgeSecurity` suspend for the adapter to execute it. `we:scripts/operations/cli-adapter.mjs#createDefaultJudge` already supports explicit pins and configured operation routes. Reduction's `provider` field labels results; changing it cannot route a call. The verified shape is `findings.read.earnedShape`, produced by `we:scripts/operations/review-pr.mjs#shapeReadFinding` after checking the net changed files. Default native behavior remains, but unconditional runtime-cost and current allowance claims were not established by this research.
+- **Old scope:** six source files, no tests, including a presumed transport change but omitting the execution adapter and probation data. **Corrected scope:** add `we:scripts/operations/cli-adapter.mjs` and `we:scripts/lib/model-probation.json`, and matching tests for every source/data entry. Reuse `we:scripts/gemini-direct-task.mjs` without editing it; remove it from the predicted touch-set. Add planned `we:scripts/operations/__tests__/review-pr-routing.test.mjs` to exercise the adapter through actual review requests.
+- **Test-scope repair:** the previous scope mapped `we:scripts/operations/cli-adapter.mjs` only to planned review-routing integration coverage. Add planned `we:scripts/operations/__tests__/cli-adapter*.test.mjs` for adapter-local regression coverage as required by prepare validation, retaining the integration suite. Source evidence: `we:scripts/operations/cli-adapter.mjs#createDefaultJudge` owns explicit-pin precedence and tool-bearing provider guards; no matching adapter-local test file currently exists in this checkout.
+- **Old logging premise:** `we:scripts/conveyor/log-delegation-trial.mjs#logDelegationTrial` accepted arbitrary dispatch kinds and review-lens task types. **Corrected:** it fixes `dispatchKind` to `session-delegation` and validates a closed task-type enum. Add a separate validated mandatory-review recorder in that module; preserve delegation semantics. Its existing backing store, `we:scripts/conveyor/run-scorecard-store.mjs#appendScorecard`, supports generic dispatch kinds and additional evidence fields.
+- **Old cap/advisory premise:** one shared daily cap and missing Antigravity advisory candidates. **Corrected:** `we:scripts/operations/review-extra-seats.mjs#resolveProviderCap`, `reservationLedgerFileFor`, and `createExtraSeatsIo` enforce separate provider caps with locked reservations. Its `seatRows` currently filters only `review-seat`; mandatory rows must also participate in usage/holds without participating in advisory provider rankings. `we:scripts/lib/provider-routing.mjs#REVIEW_SEAT_PROVIDERS` already lists `codex`, `agy-claude`, and `agy-gemini`; that old follow-up is delivered and removed.
+- **Transport evidence:** `we:scripts/gemini-direct-task.mjs` supports `--review`, model passthrough, model/backend evidence, quota holds and Claude effort compatibility. It is an open-ended direct-task transport, not a schema-constrained judge. `we:scripts/operations/cli-adapter.mjs` rejects tool-bearing requests sent to its existing tool-free Antigravity judge provider. Reuse the direct-task review adapter in `we:scripts/operations/review-extra-seats.mjs#seatCallArgv` with explicit output validation; do not merely change `providerName` on the existing mandatory request.
+- **Probation remains unbuilt:** `we:scripts/lib/model-probation.mjs#PROBATION_ROLES` still contains only delivery/advisory-review, and `we:scripts/lib/model-probation.json` has no Sonnet mandatory-review identity. No delivering commit is identified for this goal.
+- **Lineage drift:** #4376 and the allowance-gate epic #4377 now exist in this checkout. The former is the policy-dimensions umbrella; the latter owns the real availability gauge. Their existence replaces the old remote-only/not-yet-filed claims. Relationship frontmatter is unchanged in this preparation-only task.
 
 ## Design
 
-**Where the mandatory seats stand today.** `we:scripts/operations/review-pr.mjs`'s two `MANDATORY_LENSES`
-seats (`judge` → `correctness`, `judgeSecurity` → `security`) are built with no `provider` field at all — every
-OTHER seat in the same `reduce` (`judgeAdvisory`/`judgeCorrectnessAdvisory` → `codex`/`codex, advisory`;
-`judgeAntigravityReview` → `antigravity, advisory`) carries one, and the file's own comments say the mandatory
-pair is "not caller-negotiable" by design: a `changes` verdict from any added seat must never flip the whole
-panel, so every added seat (Codex, and the existing Antigravity fifth seat at `gemini-3.1-pro` via
-`we:scripts/lib/antigravity-judge-spawn.mjs`'s `ANTIGRAVITY_MODEL`) is deliberately kept OUT of
-`MANDATORY_LENSES`/`PANEL_LENSES`. The care-level dial (`we:scripts/review-core-cli.mjs`'s `buildShapePlan`,
-reading `we:scripts/lib/review-escalation.mjs`'s `CARE_LEVELS`) today only scales the ADVISORY panel's rigor —
-the two mandatory seats run unconditionally regardless of care level. So a backlog-only, docs-only card PR pays
-the exact same 2 native-Claude mandatory seats as a daemon/security change. Today's own evidence: most PRs
-filed this session were backlog/docs-only card PRs, each paying that same >=2-native-Claude-seat cost, while
-Claude tokens are the binding constraint and Codex is out of allowance until Oct 3.
+**Authority and risk.** Keep the two mandatory lenses and the existing panel verdict rules. In `we:scripts/operations/review-pr.mjs`, derive routing input from the read finding's earned care level and the caller's declared level, taking the more conservative level. Never downgrade an explicitly elevated/high request. Missing/degraded net-diff evidence stays native; the existing under-declaration refusal remains. Preserve existing explicit provider/model configuration precedence in `we:scripts/operations/cli-adapter.mjs`; the new risk route is a bounded default, not a way to override an operator pin or open a new high-care route.
 
-**Why this needs a genuinely new probation role, not a reuse of an existing one.**
-`we:scripts/lib/model-probation.mjs` today tracks exactly two roles — `PROBATION_ROLES = ['delivery',
-'advisory-review']` — and `NEVER_BLOCKING_ROLES = ['advisory-review']` asserts that role can structurally never
-gate a merge, whatever its status (`assertRoleNeverBlocks`). Neither existing role fits what this card asks
-for: `advisory-review` is defined to never gate, and `delivery` means code-authoring dispatch, not staffing a
-review judge seat. This is not an oversight to route around — `#model-probation-graduation-criteria`
-(`we:docs/agent/platform-decisions.md#model-probation-graduation-criteria`, `#3654`) clause 3 already
-anticipates exactly this: "any future blocking/gating reviewer role would earn the strictest bar, should one
-come to exist." This card is that role coming to exist, under the strictest bar clause 3 already names, and
-under the operator's own 2026-09-28 direction authorizing it to gate low-care-level PRs specifically as a bounded
-probation trial — never an unsupervised general grant.
+Add a pure mandatory-route selector and a distinct `MANDATORY_REVIEW_SEAT_DISPATCH_KIND` (proposed value `mandatory-review-seat`) in `we:scripts/lib/provider-routing.mjs`. Read `AGY_CLAUDE_MODEL_BY_TIER.sonnet`, currently `claude-sonnet-4-6`, rather than duplicate the model literal in dispatch code. Keep advisory ranking's strict `review-seat` filter unchanged. The selector consumes care, probation status, availability and explicit-pin state; it returns the selected route plus an auditable reason.
 
-**The routing rule, by care level (full design):**
+**Execution boundary.** `we:scripts/operations/review-pr.mjs#buildReviewJudgeRequest` retains the native request and supplies mandatory-seat routing metadata containing the PR/repository, pinned head/base, lens, verified care and same review material. In `we:scripts/operations/cli-adapter.mjs#createDefaultJudge`, recognize that metadata only for this review operation and delegate the bounded route to an executor in `we:scripts/operations/review-extra-seats.mjs`. Keep normal judge guards and other operations intact. The native fallback uses the original tool-bearing request, with the routing marker removed to prevent recursion.
 
-1. **`none`/`low`** (backlog-only, docs, small non-daemon changes, per `we:scripts/review-core-cli.mjs`'s
-   `careLevelFromReasons`) — both mandatory seats (`judge`, `judgeSecurity`) route to `agy-claude` at
-   `we:scripts/lib/provider-routing.mjs`'s `AGY_CLAUDE_MODEL_BY_TIER.sonnet` (`'claude-sonnet-4-6'`, already
-   pinned there), dispatched through the EXISTING escape hatch `we:scripts/gemini-direct-task.mjs` already
-   proves works for routing a Claude model string through the Antigravity CLI (its own docblock: "this same
-   escape hatch can route Claude through" Antigravity, e.g. `--model=claude-sonnet-4-6`) — no new transport.
-2. **`elevated`** — both mandatory seats route to `agy-claude` at `AGY_CLAUDE_MODEL_BY_TIER.opus`
-   (`'claude-opus-4-6-thinking'`, the pinned AGY model per `we:scripts/lib/provider-routing.mjs`) — "Opus 4.6 on
-   agy is still not too bad" per the operator's own 2026-09-28 direction.
-3. **`high`** (daemon/gate/security/statute) — unchanged: native Claude, exactly today's behavior. No routing
-   change ever reaches this tier.
-4. **Spot check.** A stable 1-in-5 sample per PR (a per-PR hash tie-break, mirroring the existing
-   `stableLensHash` shape `we:scripts/lib/provider-routing.mjs`'s `selectReviewSeatProvider` already uses for a
-   different purpose) runs a PARALLEL native-Claude judge on the same lens and diff; on `elevated`, EVERY
-   `accept` verdict additionally gets a native-Claude spot check (the operator's own explicit ask). A
-   disagreement between the two verdicts is recorded as an informative trial — never silently resolved, never
-   auto-escalated to block the PR by itself. Promotion out of probation is never decided by this card; it stays
-   a human ratification once real trial-count data exists, exactly as `#model-probation-graduation-criteria`
-   requires for every `{provider, model, role}` triple.
-5. **Trial recording.** Every dispatched mandatory-seat verdict is logged through the existing
-   `we:scripts/conveyor/log-delegation-trial.mjs` machinery under a NEW `dispatchKind` distinct from today's
-   `REVIEW_SEAT_DISPATCH_KIND` (`'review-seat'`, `we:scripts/lib/provider-routing.mjs`) — proposed
-   `'mandatory-review-seat'` — so a mandatory-seat trial can never be read by `selectReviewSeatProvider`'s
-   `rowsFor` (which filters strictly on `dispatchKind`) and pollute the UNRELATED advisory-seat provider-pick
-   history; `taskType` reuses `reviewSeatTaskType(lens)` verbatim (already namespaced `review-lens:<lens>`, no
-   collision given the different `dispatchKind`).
-6. **Fallback on exhausted allowance.** When `agy` is out of allowance, the seat falls back to native Claude.
-   The real allowance check is a REAL, gated dependency this card does NOT build: a "provider allowance gate"
-   card is being authored in a sibling PR this same session, per the operator's direction — it does not yet
-   have an id and is NOT claimed as filed here (per the "a deferral sentence must carry the id of a card that
-   already exists" discipline; this one does not exist yet, so it is named honestly as a gap, not a hand-off).
-   Until it lands, this card's own MVP (below) fails closed to native Claude on ANY allowance ambiguity —
-   never a silent skip of the seat.
-7. **Shared cap accounting.** An `agy-claude` mandatory-seat call counts against the SAME shared/per-provider
-   daily budget `we:scripts/operations/review-extra-seats.mjs` already tracks (`DAILY_CAP_ENV`,
-   `DEFAULT_DAILY_CAP`, the per-provider split from `#2817`) — composed with, never a second parallel cap.
-8. **Docblocks that assert the mandatory pair is "not caller-negotiable"** (`we:scripts/operations/review-pr.mjs`,
-   beside the `JUDGE_STEPS` construction) must be updated alongside the code change — this card is the
-   ratification-track exception to that invariant, not a silent contradiction of it left for a future reader to
-   discover.
+The new executor composes existing scratch-checkout, reservation, direct-task argv and parsing helpers from `we:scripts/operations/review-extra-seats.mjs`. Invoke `we:scripts/gemini-direct-task.mjs` in review mode against the pinned subject commit; supply the same mandate, full net diff and PR context to both providers. Do not accept an abbreviated/truncated brief as equivalent evidence: fall back to native if the material exceeds the existing inline envelope. Validate the returned mandatory answer against `REVIEW_JUDGE_SHAPE` from `we:scripts/operations/review-pr.mjs` before returning the normal judge outcome. An advisory seat's smaller answer shape or a zero-finding skip is not a valid mandatory answer. The direct-task helper already handles unsupported Claude effort flags; reuse its behavior.
 
-## MVP cut
+**Availability and spend.** Use the `agy-claude` provider's existing locked reservation ledger and cap through `we:scripts/operations/review-extra-seats.mjs#createExtraSeatsIo`. Count each physical mandatory call once, by call ID, alongside advisory/red-team calls; expand usage and hold readers to include the new dispatch kind while leaving advisory quality selection separate. No second cap or ledger is introduced. Refused reservations, active holds, missing CLI, malformed responses, model/backend mismatch, timeouts and dispatch errors fall back to the original native seat. If native execution also fails, the review fails; it never silently accepts or skips a mandatory lens.
 
-**Must (MVP):**
-- `none`/`low` care-level PRs' two mandatory seats (`judge`, `judgeSecurity`) route to `agy-claude` Sonnet 4.6
-  (`AGY_CLAUDE_MODEL_BY_TIER.sonnet`) via the existing `we:scripts/gemini-direct-task.mjs` transport. `elevated`
-  and `high` are unchanged from today (design points 2–3 are Could).
-- 1-in-5 stable spot check against a parallel native-Claude run on the same lens/diff; disagreement recorded,
-  never auto-blocking (design point 4, the `none`/`low` half only — the "every accept on elevated" clause needs
-  elevated routing to exist first, so it rides with that Could).
-- `we:scripts/lib/model-probation.mjs` declares the new `mandatory-review` role: added to `PROBATION_ROLES`,
-  explicitly NOT added to `NEVER_BLOCKING_ROLES`, entry `since`/`owner` pointing at this card (design point
-  "why this needs a genuinely new role").
-- Trial recording via the new `'mandatory-review-seat'` dispatchKind (design point 5).
-- Fail-closed fallback to native Claude on any allowance/availability ambiguity — the blunt placeholder for
-  design point 6 until the real allowance-gate card exists and lands.
-- The `we:scripts/operations/review-pr.mjs` docblocks asserting "not caller-negotiable" are updated to describe
-  the new, bounded, care-level-gated exception (design point 8).
+Availability is tri-state: confirmed available, unavailable, unknown. A successful CLI version probe or absence of a historical quota failure is not a live allowance gauge. Until #4377 supplies a real positive availability result, unknown routes to native; this implementation must not invent a positive gauge to make its live proof pass. This makes the cost-saving rollout conditional on that dependency while allowing the routing/fallback plumbing to be built and tested. Keep explicit reasons visible in the review evidence.
 
-**Could (follow-up, already designed above — not built now):**
-- `elevated` → Opus 4.6 routing (design point 2) and the "every accept on elevated" spot-check clause (the
-  second half of design point 4) — both depend on the Opus branch existing.
-- Wiring to the real provider-allowance-gate card once it is filed and lands, replacing the MVP's blunt
-  fail-closed fallback with the actual allowance check (design point 6).
-- Extending `we:scripts/lib/provider-routing.mjs`'s `REVIEW_SEAT_PROVIDERS`/`selectReviewSeatProvider` (`#4194`)
-  to formally include `antigravity` as a candidate for the unrelated ADDED (advisory) seat axis — a real, but
-  separate and smaller, piece of work this card's MVP does not need.
-- Surfacing this new role's trial stats in `we:scripts/conveyor/run-rating.mjs` / the graduation-progress
-  report — genuinely useful once several trials exist to compare, mirroring `4385`'s own Could-cut reasoning
-  ("a rule can be applied and later measured; it cannot be measured before it exists").
+**Sampling and comparison.** A deterministic hash of repository plus PR number modulo five selects one cohort, stable across retries and heads. Selected PRs compare each routed mandatory lens against a parallel native-Claude judge using the same pinned input; start both independently, without sharing findings. Persist the selection before launching. The primary Antigravity answer alone supplies that lens's verdict; comparison disagreement is recorded and displayed, without adding a blocking lens. Native comparison failure is an explicit incomplete comparison, never agreement. When the primary falls back, identify the actual native decision and the failed Antigravity attempt separately; never report that as a successful provider comparison. Preserve the existing sequential independence between correctness and security steps.
 
-**Size:** the MVP is one new probation role + one care-level branch + one dispatch path already proven by
-`we:scripts/gemini-direct-task.mjs` + one new dispatchKind for logging — within this card's own `size: 8`, no
-split needed.
+**Probation and records.** Add `mandatory-review` to `we:scripts/lib/model-probation.mjs#PROBATION_ROLES`, never to `NEVER_BLOCKING_ROLES`. Add `{provider: antigravity, model: claude-sonnet-4-6}` with that role on probation, owner `4374`, and its actual enrollment date to `we:scripts/lib/model-probation.json`. The accounting route key remains `agy-claude`; the probation identity uses transport provider `antigravity`. Store both explicitly, so neither quota accounting nor registry lookup guesses an alias. Unlisted/malformed status routes native.
 
-## Interfaces
+Add a dedicated mandatory-trial export in `we:scripts/conveyor/log-delegation-trial.mjs`, retaining `logDelegationTrial` and its CLI unchanged. Use the existing shared scorecard store with dispatch kind `mandatory-review-seat`, a dedicated rubric version, null score, zero evaluated criteria, and empty deductions. Validate and scrub its text fields. Record call/attempt ID, run/PR/repository, pinned revisions, changed files, lens/task type (`reviewSeatTaskType(lens)`), route provider, probation identity/status/role at dispatch, requested/served model evidence, primary outcome, fallback reason, sample selection, comparison ID and comparison outcome. Record unsuccessful attempts as such. Agreement is nullable unless both comparable verdicts exist; a documented disagreement is informative, an unrun check is not. Idempotency keys bind run, revision, lens and attempt so recording retries do not inflate the population. A recording failure must surface as an incomplete trial and be retryable, not silently claim that probation evidence exists.
 
-- `we:scripts/lib/model-probation.mjs` — `PROBATION_ROLES` gains `'mandatory-review'`; `NEVER_BLOCKING_ROLES`
-  is explicitly NOT changed to include it (the whole point of this role is that it CAN gate, under the
-  care-level bound above); a new registry entry (`we:scripts/lib/model-probation.json`) for `{provider:
-  'antigravity', model: 'claude-sonnet-4-6'}` (and later `'claude-opus-4-6-thinking'`) with `roles:
-  {'mandatory-review': 'probation'}`.
-- `we:scripts/operations/review-pr.mjs` — the `judge`/`judgeSecurity` steps in the `JUDGE_STEPS` reduce gain a
-  care-level-conditional `provider` resolution (reading `buildShapePlan`'s `careLevel`, already computed at
-  this call site) instead of their current unconditional native path.
-- `we:scripts/lib/provider-routing.mjs` — `AGY_CLAUDE_MODEL_BY_TIER` is read (not changed) for the MVP; a new
-  exported `dispatchKind` constant (proposed `MANDATORY_REVIEW_SEAT_DISPATCH_KIND = 'mandatory-review-seat'`)
-  sits beside the existing `REVIEW_SEAT_DISPATCH_KIND`.
-- `we:scripts/gemini-direct-task.mjs` — reused verbatim as the dispatch transport (`--model=claude-sonnet-4-6`
-  pattern already demonstrated); no changes to this file are anticipated for the MVP beyond a caller passing
-  the right model string.
-- `we:scripts/conveyor/log-delegation-trial.mjs` — gains the mandatory-seat call site, logging `{provider:
-  'antigravity', model, taskType: reviewSeatTaskType(lens), dispatchKind:
-  'mandatory-review-seat', verdict, spotCheckVerdict, agreed}` per dispatched seat.
-- `we:scripts/operations/review-extra-seats.mjs` — `DAILY_CAP_ENV`/`DEFAULT_DAILY_CAP` accounting is read, not
-  duplicated, for the shared/per-provider budget these new calls also spend from.
+Reduction in `we:scripts/operations/review-pr.mjs` labels each mandatory row with its actual execution provider/model, including fallback, while continuing to derive blocking status from the original mandatory lenses. Update misleading provider/role docblocks alongside these changes. Promotion remains a separate human ruling under `we:docs/agent/platform-decisions.md#model-probation-graduation-criteria`; this card sets no graduation threshold and never promotes based on comparison counts.
 
-## Tasks
+## MVP
 
-1. Add `'mandatory-review'` to `we:scripts/lib/model-probation.mjs`'s `PROBATION_ROLES`; add the registry entry
-   for `{antigravity, claude-sonnet-4-6}`; unit test that it is NOT in `NEVER_BLOCKING_ROLES` and that
-   `statusFor` reads it correctly (Must).
-2. Wire `we:scripts/operations/review-pr.mjs`'s `judge`/`judgeSecurity` steps to resolve `provider` from
-   `careLevel` (`none`/`low` → agy-claude sonnet via `we:scripts/gemini-direct-task.mjs`; `elevated`/`high` →
-   unchanged) and update the adjacent "not caller-negotiable" docblocks (Must for `none`/`low`; the
-   `elevated` branch is Could).
-3. Add the 1-in-5 stable spot-check sampler (per-PR hash) and the disagreement-recording path (Must for the
-   `none`/`low` half; the "every accept on elevated" clause is Could).
-4. Add `MANDATORY_REVIEW_SEAT_DISPATCH_KIND` and wire `we:scripts/conveyor/log-delegation-trial.mjs` logging
-   for every dispatched mandatory seat (Must).
-5. Fail-closed fallback to native Claude on any allowance/availability ambiguity, with a named TODO pointing at
-   the not-yet-filed provider-allowance-gate card for the real check (Must for the placeholder; Could once that
-   card exists and lands).
-6. File the `elevated` → Opus 4.6 branch, the `REVIEW_SEAT_PROVIDERS` antigravity extension, and the run-rating
-   trial-stats surfacing as their own follow-up slices once this MVP lands (Could, already designed above).
+One coherent implementation delivers the `none`/`low` Sonnet branch, unchanged native fallback, new probation identity/role, same-ledger cap accounting, stable one-in-five comparison, isolated trial recording, and accurate panel provenance. Elevated/high remain native in this slice. Advisory outcomes remain non-blocking.
 
-## Delivery shape
+Implement in dependency order: pure selector and registry; validated recorder; executor composing existing reservation/transport helpers; request metadata and adapter integration; reduction/provenance and end-to-end fixtures. Reuse `we:scripts/gemini-direct-task.mjs` and `we:scripts/conveyor/run-scorecard-store.mjs` without modifying their contracts. A positive runtime allowance signal is a rollout prerequisite owned by #4377, not a fabricated success condition in this MVP. This preparation itself neither enables the route nor enrolls the model.
 
-One PR for the MVP (Must items 1, 2's `none`/`low` half, 3's `none`/`low` half, 4, 5) — a single coherent
-behavior change (new role + one care-level branch + logging + fail-closed fallback), reviewed and landed
-together since the branch is meaningless without the role existing and vice versa. The Could items are
-follow-up slices, `blockedBy` this card wherever a real dependency exists (the Opus branch and the elevated
-spot-check clause structurally need this card's `none`/`low` plumbing first).
+## Test plan
 
-## Done when
+Every predicted source/data edit has a matching test in scope:
 
-1. **Must** — a `none`/`low` care-level PR's two mandatory review seats (`judge`, `judgeSecurity`) dispatch to
-   `agy-claude` Sonnet 4.6 by default; a 1-in-5 stable spot check runs a parallel native-Claude judge on the
-   same lens/diff and records any disagreement without auto-blocking; `we:scripts/lib/model-probation.mjs`
-   declares the `mandatory-review` role (never in `NEVER_BLOCKING_ROLES`); every dispatch is logged as a trial
-   under the new `mandatory-review-seat` dispatchKind, which cannot collide with existing `review-seat` rows;
-   any allowance ambiguity fails closed to native Claude. Proven on a REAL low-care-level PR (this card's own
-   PR, or the next `none`/`low` PR after this lands) as live evidence — per this repo's own "prove on the live
-   case, never a private workaround" discipline (`4385`'s own Done-when uses the identical proof
-   requirement) — not unit tests alone.
-2. **Could** — `elevated` → Opus 4.6 routing, the "every accept on elevated" spot-check clause, and the real
-   provider-allowance-gate wiring, once that sibling card exists and lands.
+| Source/data | Existing or planned test and required cases |
+| --- | --- |
+| `we:scripts/operations/review-pr.mjs` | Existing `we:scripts/operations/__tests__/review-pr.test.mjs`: earned vs declared care, degraded input, unchanged lens floor, actual provider labels, primary `changes` blocks, comparison `changes` alone does not. |
+| `we:scripts/operations/cli-adapter.mjs` | Planned `we:scripts/operations/__tests__/cli-adapter-routing.test.mjs` (covered by scoped `we:scripts/operations/__tests__/cli-adapter*.test.mjs`): adapter-local explicit-pin precedence, tool-bearing provider guards, and unchanged non-review operation routing. Retain planned `we:scripts/operations/__tests__/review-pr-routing.test.mjs`: construct real review requests and exercise `createDefaultJudge` with injected provider/transport IO; bounded routing, existing pins, parallel independent comparison, valid mandatory output, native fallback exactly once, and native failure propagation. |
+| `we:scripts/operations/review-extra-seats.mjs` | Existing `we:scripts/operations/__tests__/review-extra-seats.test.mjs`: shared per-provider reservation contention, distinct call counting across dispatch kinds, quota holds, exhausted/unknown availability, full-material limits, pinned scratch checkout, review-mode argv, model mismatch, timeout, malformed output and incomplete comparison. |
+| `we:scripts/lib/provider-routing.mjs` | Existing `we:scripts/lib/__tests__/provider-routing.test.mjs`: care/status/availability matrix, stable cohort fixtures, different repositories, explicit pins, model mapping and proof that mandatory rows cannot change advisory ranking. |
+| `we:scripts/lib/model-probation.mjs` and `we:scripts/lib/model-probation.json` | Existing `we:scripts/lib/__tests__/model-probation.test.mjs`: valid new identity/role, missing or malformed entry stays unvalidated, advisory remains never-blocking, mandatory role is not declared never-blocking, enrollment does not grant trust to another model. |
+| `we:scripts/conveyor/log-delegation-trial.mjs` | Existing `we:scripts/conveyor/__tests__/log-delegation-trial.test.mjs`: mandatory row validation/store round trip, identity mapping, nullable comparison, failed attempts, scrub refusal, retry idempotency and write failure; delegation CLI/enums/dispatch kind unchanged. |
+
+Run the scoped suites using their existing test harness, plus existing `we:scripts/__tests__/gemini-direct-task.test.mjs` as unchanged-transport regression coverage. Inject IO and use temporary stores; unit tests must not spend real provider quota or alter the live probation registry. Run `npm run check:standards` for implementation completion. The probation preparation runner owns this card's stamping and checks.
+
+## Proof plan
+
+Before enabling the production default, exercise the real adapter path against a real pinned `none`/`low` PR in an acquired lane under the implementation's normal review entry point. Observe the actual shape, both mandatory requests, argv/model evidence, validated answers, posted panel and stored trial rows. A private direct-task call bypassing the adapter is insufficient. With unknown allowance, first prove visible native fallback; a live Antigravity success requires #4377's positive availability evidence. Do not report the cost-saving branch proven while every real request falls back.
+
+Use a PR in the deterministic sample cohort to observe independent native comparisons on the same revision and lenses. Capture run/call IDs, revision, route and probation identity, actual served model evidence, comparison status and ledger delta. Confirm one reservation per actual Antigravity call and no advisory-ranking contamination. For disagreement and outage/error paths, controlled injected fixtures are acceptable but must be labeled staged; never claim a manufactured disagreement as real calibration evidence. Verify elevated/high real-request fixtures stay on the existing native path. Record native failures as review failures and incomplete evidence as incomplete, not success.
+
+The live record must demonstrate the production path end to end before graduation from experiment, consistent with `we:docs/agent/prototype-based-dev.md`. No live dispatch, review post, promotion or rollout is part of preparing this card.
+
+## Follow-ups
+
+- #4377 owns live allowance gauges and the declared fallback chain. Wire its actual availability result into this selector when available; until then retain the conservative native result for unknown availability.
+- #4376 is the existing policy-dimensions umbrella. Coordinate this bounded review rule with that policy surface; do not build a competing configuration system here.
+- Elevated → Opus 4.6 and a native comparison on every elevated accept remain outside this MVP. They require a separately scoped follow-up after low-care evidence exists; no new follow-up card is claimed filed by this preparation.
+- Mandatory-role graduation reporting in `we:scripts/conveyor/run-rating.mjs` remains a later slice after real trials exist. Do not inherit advisory/delivery trust or automatically graduate this new role.
+- The advisory Antigravity-candidate extension is no longer a follow-up: the current selector already supports both Antigravity route keys.
