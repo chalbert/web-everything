@@ -66,6 +66,18 @@ function ctxFor(instance, completionsDir) {
 }
 
 describe('createFakeClaude — spawn/list/stop through the real production seams', () => {
+  it('accepts routed effort on a real launch and still rejects invalid flags and effort', () => {
+    fake = createFakeClaude();
+    const argv = bg(1, 'fix-effort', { table: { model: 'claude-sonnet-5-5', effort: 'high' } });
+    expect(argv).toContain('--effort');
+    expect(defaultSpawnAgent(argv, { env: envFor(fake) })).toMatch(/backgrounded/);
+    expect(fake.sessions()[0].argv).toEqual(argv);
+    for (const flags of [['--effort', 'invalid'], ['--not-a-cli-option']]) {
+      expect(() => defaultSpawnAgent(['--bg', ...flags, 'brief'], { env: envFor(fake) })).toThrow();
+    }
+    expect(fake.sessions()).toHaveLength(1);
+  });
+
   it('a real `--bg` dispatch is listed with a genuinely live pid', () => {
     fake = createFakeClaude();
     const stdout = defaultSpawnAgent(bg(1, 'review-501'), { env: envFor(fake) });
