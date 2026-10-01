@@ -42,7 +42,8 @@ import {
   healDiffPathsAllowed, healDiffWithinEnvelope, launchScorecardRow, newUntrackedPaths, parseCheckerVerdict, summarizeNumstat, workerNeeded,
 } from '../lib/probation-launcher.mjs';
 
-import { PROVEN_TASK_ENVELOPES } from '../lib/provider-routing.mjs';
+import { resolveOperationRoute, resolvePolicyModel, readRoutingPolicy } from '../lib/dispatch-routing-policy-io.mjs';
+import { PROBATION_WORKERS, PROVEN_TASK_ENVELOPES } from '../lib/provider-routing.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 /** The WE checkout every tool is resolved from — by script location, never cwd. */
@@ -59,7 +60,10 @@ export function parseArgs(argv) {
     if (eq === -1) flags[a.slice(2)] = true;
     else flags[a.slice(2, eq)] = a.slice(eq + 1);
   }
-  const worker = typeof flags.worker === 'string' ? JSON.parse(flags.worker) : null;
+  const policy = readRoutingPolicy();
+  const configured = flags.worker ? null : resolveOperationRoute({ operation: 'ci-heal', taskType: flags.taskType ?? 'ci-heal', policy, gateClosed: false, available: ['codex', 'antigravity'] });
+  const worker = typeof flags.worker === 'string' ? JSON.parse(flags.worker) : configured ? { ...PROBATION_WORKERS[configured.provider === 'codex' ? 'codex' : configured.model.startsWith('claude-') ? 'antigravity-claude' : 'antigravity-gemini'], model: configured.model, taskType: flags.taskType ?? 'ci-heal' } : null;
+  if (worker) worker.model = resolvePolicyModel(worker.provider, worker.model, policy);
   return {
     pr: Number(flags.pr),
     session: String(flags.session ?? ''),

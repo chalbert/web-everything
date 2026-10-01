@@ -1317,9 +1317,9 @@ describe('EXTERNAL_WORKER_CANDIDATES, externalTierEquivalent and the critical-wo
     expect(externalTierEquivalent('gemini', 'gemini-3.1-pro')).toBeNull();
   });
 
-  it('CRITICAL_WORK_GATE holds build, fix, ci-heal and prepare-item, basis #4034; doc-fix, ci-heal, bugfix and features are open (probation, 2026-09-30)', () => {
-    expect(CRITICAL_WORK_GATE.kinds).toEqual(['build', 'fix', 'ci-heal', 'prepare-item']);
-    expect(CRITICAL_WORK_GATE.basis).toBe('#4034');
+  it('CRITICAL_WORK_GATE holds build, fix and ci-heal; doc-fix, ci-heal, bugfix and features are open (probation, 2026-09-30)', () => {
+    expect(CRITICAL_WORK_GATE.kinds).toEqual(['build', 'fix', 'ci-heal']);
+    expect(CRITICAL_WORK_GATE.basis).toBe('operator 2026-09-30');
     const rows = CRITICAL_WORK_GATE.openForNonCritical;
     expect(Object.keys(rows).sort()).toEqual(['bugfix', 'build-new-feature', 'ci-heal', 'conflict-resolution', 'doc-fix', 'prepare', 'test-fix'].sort());
     expect(Object.entries(rows).filter(([, v]) => v === true).map(([k]) => k).sort()).toEqual(['bugfix', 'build-new-feature', 'ci-heal', 'doc-fix', 'prepare', 'test-fix']);

@@ -44,6 +44,7 @@
  * nothing.
  */
 
+import { resolveOperationRoute } from '../lib/dispatch-routing-policy-io.mjs';
 import { pickAgyEvidence } from '../lib/antigravity-run-evidence.mjs';
 import { advance, runStatus, startRun } from './engine.mjs';
 import { applyPendingEffects, inFlightEntries } from './effect-executor.mjs';
@@ -776,11 +777,12 @@ function judgeTelemetryFrom(outcome, effective) {
  *   process streams.
  */
 export function createDefaultJudge({
-  provider, providerName = 'claude', cwd, model, resolveProvider = resolveJudgeProvider,
+  provider, providerName: factoryProviderName, cwd, model, operation = 'judge', resolveProvider = resolveJudgeProvider,
   checkProviderHold = defaultProviderQuotaHold,
   now = () => Date.now(),
   logGracefulOutcome = (line) => { try { process.stderr.write(`${line}\n`); } catch { /* best effort */ } },
 } = {}) {
+  const providerName = factoryProviderName ?? 'claude';
   return async (request) => {
     // #xqa9ttq — A REQUEST MAY PIN ITS OWN PROVIDER (`request.providerName`), overriding this factory's. This
     // is what lets ONE run seat a tool-free Codex juror (`review-pr`'s opt-in `judgeAdvisory` seat) while its
@@ -795,7 +797,10 @@ export function createDefaultJudge({
         + `${JUDGE_PROVIDER_NAMES.join('|')}`,
       );
     }
-    const effectiveProviderName = request?.providerName ?? providerName;
+    // An explicit pin (request-level provider, factory provider/providerName, or factory model) outranks the policy default.
+    const pinned = request?.providerName !== undefined || factoryProviderName !== undefined || provider !== undefined || model !== undefined;
+    const configured = pinned ? null : resolveOperationRoute({ operation: operation === 'judge' ? 'judge' : `judge:${operation}`, taskType: request?.mandate?.lens ?? request?.lens, available: JUDGE_PROVIDER_NAMES });
+    const effectiveProviderName = configured?.provider ?? request?.providerName ?? providerName;
     // #xqa9ttq (PR #2115 review, CONFIRMED) - `allowedTools: []` is the explicit "no tools" signal
     // `assertNoCodexToolAllowlist` documents as tool-free. `assertSafeJudgeRequest` is shared with claude and
     // rejects [], so the empty array is dropped for an effectively-codex request ONLY, before the guard runs;
@@ -812,7 +817,7 @@ export function createDefaultJudge({
     // the seat(s) they are steering with `--model`); a request whose effective provider is tool-free (via
     // `request.providerName` or this factory's own) would otherwise carry that Claude model name onto the
     // other CLI's own model flag verbatim.
-    const effective = (model && !TOOL_FREE_JUDGE_PROVIDER_NAMES.includes(effectiveProviderName)) ? { ...declared, model } : declared;
+    const effective = configured ? { ...declared, providerName: configured.provider, model: configured.model } : (model && !TOOL_FREE_JUDGE_PROVIDER_NAMES.includes(effectiveProviderName)) ? { ...declared, model } : declared;
     assertSafeJudgeRequest(effective);
     // #xqa9ttq/#3383 — TOOL-FREE ONLY, ENFORCED HERE TOO, not only inside each provider's own spawn module. A
     // caller that injects its own `provider` function bypasses `resolveProvider` entirely, so this check is the
@@ -845,7 +850,12 @@ export function createDefaultJudge({
       let spawnProviderName = effectiveProviderName;
       let holdReason = primaryHold;
       if (primaryHold) {
-        const fallbackName = PROVIDER_QUOTA_FALLBACK[effectiveProviderName];
+        let fallbackName = configured ? null : PROVIDER_QUOTA_FALLBACK[effectiveProviderName];
+        if (configured) {
+          for (const route of configured.fallback) {
+            if (!await checkProviderHold(route.provider, at)) { fallbackName = route.provider; break; }
+          }
+        }
         const fallbackHold = fallbackName ? await checkProviderHold(fallbackName, at) : null;
         if (fallbackName && !fallbackHold) {
           // The fallback is usable: spend IT instead of skipping outright. `effective` needs no rebuilding —
@@ -869,12 +879,13 @@ export function createDefaultJudge({
         return skipOutcome(holdReason);
       }
       const spawnProvider = spawnProviderName === effectiveProviderName
-        ? (request?.providerName !== undefined ? resolveProvider(request.providerName) : (provider ?? resolveProvider(providerName)))
+        ? (configured ? resolveProvider(effectiveProviderName) : request?.providerName !== undefined ? resolveProvider(request.providerName) : (provider ?? resolveProvider(providerName)))
         : resolveProvider(spawnProviderName);
       try {
-        const outcome = await spawnProvider(buildProviderRequest(effective, cwd, spawnProviderName));
+        const actual = configured && spawnProviderName !== effectiveProviderName ? { ...effective, model: configured.fallback.find(route => route.provider === spawnProviderName)?.model } : effective;
+        const outcome = await spawnProvider(buildProviderRequest(actual, cwd, spawnProviderName));
         // NOT a spread of `outcome` — see the ordinary path's own note just below.
-        return judgeOutcome(outcome.value, judgeTelemetryFrom(outcome, effective));
+        return judgeOutcome(outcome.value, judgeTelemetryFrom(outcome, actual));
       } catch (e) {
         const reason = `spawn failed — ${String(e?.message ?? e).slice(0, 500)}`;
         logGracefulOutcome(`judge seat crashed, recorded as skipped — ${spawnProviderName}: ${reason}`);
@@ -889,7 +900,7 @@ export function createDefaultJudge({
     // `provider` stub injected at the FACTORY level (there for a DIFFERENT seat's test) must not silently
     // intercept it. Absent a request-level override, behaviour is BYTE-IDENTICAL to before this card: the
     // factory's own injected `provider` wins over its own `providerName`.
-    const resolvedProvider = request?.providerName !== undefined
+    const resolvedProvider = configured ? resolveProvider(effectiveProviderName) : request?.providerName !== undefined
       ? resolveProvider(request.providerName)
       : (provider ?? resolveProvider(providerName));
     // #3383 mechanical-dispatcher Gap 2 root cause fix — see `buildProviderRequest`'s own comment for the full
