@@ -97,10 +97,17 @@ export async function runProbationHeal(args, io) {
   if (!head || head.state !== 'OPEN') return finish('not-applicable', 'none', 'the PR is not open');
   const examinedHead = head.headRefOid;
 
-  const lanePath = io.acquireLane({ ref: head.headRefName, lane: args.lane, session, scope: args.scope });
+  const acquired = io.acquireLane({ ref: head.headRefName, lane: args.lane, session, scope: args.scope });
+  const lanePath = typeof acquired === 'string' ? acquired : acquired?.path;
   if (!lanePath) {
-    io.escalate({ pr, head: examinedHead, reason: `lane ref gone — ${head.headRefName} no longer resolves` });
-    return finish('not-applicable', 'none', 'could not acquire a lane on the PR head');
+    const failure = acquired?.reason || 'lane acquire returned no path (no diagnostics)';
+    const remote = io.probeOriginRef(head.headRefName);
+    const detail = `${failure}; origin ref ${remote.state}: ${remote.reason || head.headRefName}`;
+    if (remote.state === 'absent') {
+      io.escalate({ pr, head: examinedHead, reason: `origin ref verified absent — ${head.headRefName}; ${detail}` });
+      return finish('escalated-needs-human', 'none', detail);
+    }
+    return finish('blocked-on-infra', 'none', `${detail}; retry on a later tick`);
   }
 
   // x55dojc — force a known-clean git-hook baseline BEFORE any rebase/worker/commit runs in this lane, so a
@@ -184,7 +191,7 @@ export async function runProbationHeal(args, io) {
       io.escalate({ pr, head: examinedHead, reason: `git-hook surface changed during the gate/checker window: ${detail}` });
       return finish('escalated-needs-human', executor, `refused: ${detail}`, { diff: diffRow, checker: checkerRow });
     }
-    io.commit(lanePath, summary.paths, buildHealCommitMessage({ pr, reason, worker, item: args.num }));
+    io.commit(lanePath, summary.paths, buildHealCommitMessage({ pr, reason, worker, item: args.num, subject: `${reason}: repair ${summary.paths.join(', ')}` }));
   } else if (!gate.pass || !rebaseMovedHead) {
     return finish('no-change', 'none', need.why);
   }
@@ -202,7 +209,7 @@ function sh(bin, args, opts = {}) {
   return execFileSync(bin, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024, ...opts });
 }
 function trySh(bin, args, opts = {}) {
-  try { return { ok: true, out: sh(bin, args, opts) }; } catch (e) { return { ok: false, out: `${e?.stdout ?? ''}${e?.stderr ?? e?.message ?? ''}` }; }
+  try { return { ok: true, out: sh(bin, args, opts) }; } catch (e) { return { ok: false, status: e.status, out: `${e?.stdout ?? ''}${e?.stderr ?? ''}` || String(e?.message ?? e) }; }
 }
 const node = (script, args, opts) => trySh(process.execPath, [join(WE_ROOT, script), ...args], opts);
 
@@ -211,7 +218,7 @@ const node = (script, args, opts) => trySh(process.execPath, [join(WE_ROOT, scri
  *  LAUNCHER runs in the lane, so a planted hook can never fire with the launcher's own credentials. The worker
  *  and checker get `workerEnv` instead (#4291 advisory review): they keep the repo's own `.githooks/pre-push`
  *  main-push guard. */
-export function realIo({ session, env = process.env } = {}) {
+export function realIo({ session, env = process.env, run = trySh } = {}) {
   const workerEnv = { ...env, LANE_SESSION: session };
   const laneEnv = withHooksDisabled(workerEnv);
   return {
@@ -230,10 +237,17 @@ export function realIo({ session, env = process.env } = {}) {
       const args = ['acquire', `--repo=${WE_ROOT}`, '--purpose=probation-ci-heal', `--session=${s}`, `--base=${ref}`];
       if (lane) args.push(`--lane=${lane}`);
       if (scope?.length) args.push(`--scope=${scope.join(',')}`);
-      const r = node('scripts/lane-pool.mjs', args, { env: laneEnv, timeout: 15 * 60 * 1000 });
-      if (!r.ok) return null;
+      const r = run(process.execPath, [join(WE_ROOT, 'scripts/lane-pool.mjs'), ...args], { env: laneEnv, timeout: 15 * 60 * 1000 });
+      if (!r.ok) return { path: null, reason: r.out.trim() || 'lane acquire failed without output' };
       const last = r.out.trim().split('\n').filter(Boolean).at(-1) ?? '';
-      return last.startsWith('/') ? last : null;
+      return last.startsWith('/') ? last : { path: null, reason: `lane acquire returned no path: ${r.out.trim()}` };
+    },
+    probeOriginRef: (ref) => {
+      const fullRef = `refs/heads/${ref}`;
+      const r = run('git', ['-C', WE_ROOT, 'ls-remote', '--exit-code', '--refs', 'origin', fullRef], { env: laneEnv, timeout: 30_000 });
+      if (r.ok && r.out.split('\n').some((line) => line.split('\t')[1] === fullRef)) return { state: 'present', reason: r.out.trim() };
+      if (!r.ok && r.status === 2) return { state: 'absent', reason: 'git ls-remote --exit-code returned 2 (no matching ref)' };
+      return { state: 'unknown', reason: r.out.trim() || 'remote probe did not establish presence or absence' };
     },
     rebaseOntoMain: (dir) => {
       if (!trySh('git', ['-C', dir, 'fetch', 'origin', 'main'], { env: laneEnv }).ok) return false;

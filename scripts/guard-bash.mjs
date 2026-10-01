@@ -2795,7 +2795,7 @@ function globMatch(tokens, s) {
   return t === tokens.length;
 }
 
-export function reason(segment, { primaryCwd = false, staleBehind = 0, foreignLiveLease = false, markedLeaseSlug = null, contestedHolderSlug = null, dispatchKind = null, cwd = null, daemonCloneRoots = [], fixClaimedBranches = [], pushTargets = [] } = {}) {
+export function reason(segment, { primaryCwd = false, staleBehind = 0, foreignLiveLease = false, markedLeaseSlug = null, contestedHolderSlug = null, dispatchKind = null, cwd = null, daemonCloneRoots = [], fixClaimedBranches = [], pushTargets = [], fixPushes = [] } = {}) {
   const s = segment.trim();
   if (!s) return null;
 
@@ -3037,6 +3037,21 @@ export function reason(segment, { primaryCwd = false, staleBehind = 0, foreignLi
     const targets = [...[...pushHead.matchAll(/(?:refs\/heads\/)?(lane\/[^\s:'"]+)/g)].map((m) => m[1]), ...pushTargets];
     const hit = fixClaimedBranches.find((c) => targets.includes(c.branch) || targets.includes('*'));
     if (hit) return hit.message;
+  }
+  // Per-push form (`computeFixClaimCtx`): EVERY `git push` in the command is resolved against the claims of ITS OWN
+  // repo, so a claim on the second push's destination is not hidden behind an innocent first push. `decide` runs
+  // this segment-wise but denies the whole command, so a segment holding any push checks every entry. A push whose
+  // implicit target the hook could not see (it follows a `checkout`/`switch`) is refused outright when a foreign
+  // claim is live in its repo — fail-closed, narrowed to that case so concurrent fixers' plain pushes still pass.
+  if (fixPushes.length && pushHeads.some((h) => /^git\s+push\b/.test(h))) {
+    for (const p of fixPushes) {
+      if (p.segment != null && p.segment !== s) continue; // a push is judged only in the segment it runs in
+      const claimed = p.claimed ?? [];
+      if (!claimed.length) continue;
+      const hit = claimed.find((c) => (p.targets ?? []).includes(c.branch) || (p.targets ?? []).includes('*'));
+      if (hit) return hit.message;
+      if (p.unreliable) return `${claimed[0].message} (this push follows a \`checkout\`/\`switch\`/\`cd\` in the same command, so its target cannot be resolved while a fix claim is live in the repo — run the checkout in its own command, or push an explicit \`HEAD:refs/heads/<lane>\`)`;
+    }
   }
 
   // A raw `gh pr merge` or its REST equivalent bypasses `pr-merge-gate.mjs`'s `assertMayMerge` — the ONE
@@ -3542,6 +3557,56 @@ export function mergeBreakGlassUsed(command, ctx = {}) {
   return !!(wouldDeny && /assertMayMerge/.test(wouldDeny));
 }
 
+/**
+ * The fix-claim half of the hook's context, per `git push` in `cmd`: `fixPushes: [{segment, repoKey, targets,
+ * claimed, unreliable}]`, each push resolved in ITS OWN repo/checkout against the live claims the caller does not
+ * hold. `segment` is the exact command segment the push sits in (the one `decide` later hands `reason`), so a push
+ * is only ever judged in its own segment — a `git push` inside a later `echo "…"` cannot block an earlier, valid
+ * push. `claimed` is empty (and the push therefore allowed) when no foreign claim is live in that repo. Lazy-loads
+ * fix-procedure; `deps.fp` injects it (and `deps.lockRoot` the claim store) for tests. Fail-OPEN on any error.
+ */
+export async function computeFixClaimCtx(cmd, { caller = {}, cwd = process.cwd(), deps = {} } = {}) {
+  try {
+    const fp = deps.fp ?? await import('./conveyor/fix-procedure.mjs');
+    const lockOpt = deps.lockRoot ? { lockRoot: deps.lockRoot } : {};
+    const live = fp.listLiveFixClaims(lockOpt).filter((e) => !fp.isClaimHolder(e, caller));
+    if (!live.length) return { fixPushes: [] };
+    const execOpt = deps.exec ? { exec: deps.exec } : {};
+    // The SAME segmentation `decide` uses (heredoc bodies dropped, quote-aware split, nested commands), so each
+    // push can be tied to the segment it runs in. A command the parser cannot represent is denied by `decide`
+    // before `reason` runs; here it just falls back to the whole text (`segment: null` = matches any segment).
+    let segs = null;
+    try {
+      const hd = heredocScan(cmd);
+      const parsed = parseSegments(hd.text);
+      if (!hd.unterminated && !parsed.unterminated) {
+        const list = parsed.segments.slice();
+        if (parsed.continued) list.push(...parseSegments(hd.text, { spliceContinuations: false }).segments);
+        segs = withNestedCommands(list, hd.text).map((x) => String(x).trim());
+      }
+    } catch { segs = null; }
+    const units = segs ? segs.map((seg, i) => ({ seg, prefix: segs.slice(0, i).join(' ; ') })) : [{ seg: null, prefix: '' }];
+    const fixPushes = [];
+    for (const { seg, prefix } of units) {
+      for (const dest of fp.resolvePushDestinations(seg ?? cmd, { cwd, prefix, ...execOpt })) {
+        fixPushes.push({
+          segment: seg,
+          repoKey: dest.repoKey ?? null,
+          targets: dest.branches ?? [],
+          unreliable: Boolean(dest.unreliable),
+          // The repo is the one the push GOES TO (its remote, or a URL), never assumed `origin`.
+          claimed: live.filter((e) => e.meta?.branch && (dest.repoKey == null || e.meta.repo === dest.repoKey)).map((e) => ({
+            branch: e.meta.branch,
+            message: fp.pushRefusal({ repo: e.meta.repo, branch: e.meta.branch, ...caller, ...lockOpt })?.message
+              ?? `push to ${e.meta.branch} refused: another fixer holds the fix claim on PR #${e.meta.pr}`,
+          })),
+        });
+      }
+    }
+    return { fixPushes };
+  } catch { return { fixPushes: [] }; }
+}
+
 /** First deny reason across a command's `&&`/`|`/`;`-separated segments, or null. Pure. `ctx` is passed to
  *  each `reason` call (carries `primaryCwd` for the #2302 rule, `staleBehind` for the #2323 rule,
  *  `foreignLiveLease` for the #2367 rule, and `dispatchKind` for the #3105/#3627 dispatched-session rules). */
@@ -3724,7 +3789,6 @@ if (IS_CLI) {
   let agentSession = false;
   let effectiveCwd = null;
   let daemonRoots = [];
-  let fixClaimedBranches = [];
   let hookSessionId = null;
   try {
     const ev = JSON.parse(readFileSync(0, 'utf8'));
@@ -3778,27 +3842,11 @@ if (IS_CLI) {
   // fix procedure — only pay for the claim-store read when the command could be a `git push` (a bare one names
   // no lane ref, so the gate cannot key on `lane/`). Loaded lazily so every other Bash call keeps this hook's
   // import graph unchanged; the git reads run only when some claim is live. Fail-OPEN on any error.
-  let pushTargets = [];
+  let fixPushes = [];
   if (/\bgit\b/.test(cmd) && /\bpush\b/.test(cmd)) {
-    try {
-      const fp = await import('./conveyor/fix-procedure.mjs');
-      const caller = { sessionId: hookSessionId, who: process.env.WE_FIX_WHO || null, token: process.env.WE_FIX_TOKEN || null };
-      const live = fp.listLiveFixClaims().filter((e) => !fp.isClaimHolder(e, caller));
-      if (live.length) {
-        // The repo is the one the push GOES TO (its remote, or a URL), never assumed `origin`; the targets
-        // include what a bare push updates implicitly.
-        const dest = fp.resolvePushDestination(cmd, { cwd: effectiveCwd || process.cwd() });
-        const repoKey = dest?.repoKey ?? null;
-        pushTargets = dest?.branches ?? [];
-        fixClaimedBranches = live.filter((e) => e.meta?.branch && (repoKey == null || e.meta.repo === repoKey)).map((e) => ({
-          branch: e.meta.branch,
-          message: fp.pushRefusal({ repo: e.meta.repo, branch: e.meta.branch, ...caller })?.message
-            ?? `push to ${e.meta.branch} refused: another fixer holds the fix claim on PR #${e.meta.pr}`,
-        }));
-      }
-    } catch { fixClaimedBranches = []; pushTargets = []; }
+    ({ fixPushes } = await computeFixClaimCtx(cmd, { caller: { sessionId: hookSessionId, who: process.env.WE_FIX_WHO || null, token: process.env.WE_FIX_TOKEN || null }, cwd: effectiveCwd || process.cwd() }));
   }
-  const guardCtx = { primaryCwd, staleBehind, foreignLiveLease, markedLeaseSlug, contestedHolderSlug, runInBackground, dispatchKind, agentSession, cwd: effectiveCwd, daemonCloneRoots: daemonRoots, fixClaimedBranches, pushTargets };
+  const guardCtx = { primaryCwd, staleBehind, foreignLiveLease, markedLeaseSlug, contestedHolderSlug, runInBackground, dispatchKind, agentSession, cwd: effectiveCwd, daemonCloneRoots: daemonRoots, fixPushes };
   const r = decide(cmd, guardCtx);
   if (r) {
     // #3311 — the deny is ALL-OR-NOTHING, so name the state-producing steps it takes down with it. Computed

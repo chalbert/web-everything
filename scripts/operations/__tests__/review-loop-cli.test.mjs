@@ -1114,3 +1114,23 @@ describe('runReviewLoopOnce — the mechanized branch renders a QUEUED landing j
     expect(out.lines.join('\n')).toMatch(/prevention guard\(s\) queued for landing via a lane \(tracking pid:99999\)/);
   });
 });
+
+describe('descriptive prevention titles preserve filing identity', () => {
+  it('finds a legacy heading and a renamed heading only for the same review, head and guard', () => {
+    const root = mkdtempSync(join(tmpdir(), 'prevention-title-'));
+    const finding = { file: 'scripts/a.mjs', line: 12, prevention: 'old guard', preventionCaptured: false };
+    const title = 'Prevention — old guard (from o/r#1 review)';
+    try {
+      mkdirSync(join(root, 'backlog'));
+      for (const heading of ["File the prevention guard(s) owed by o/r#1's independent review", title]) {
+        writeFileSync(join(root, 'backlog', 'x123abc-card.md'),
+          `---\nstatus: open\n---\n# ${heading}\n\nreviewed head \`${HEAD_A}\`\n1. \`we:scripts/a.mjs:12\` — old guard\n`);
+        expect(findFiledPreventionCard({ title }, { root, head: HEAD_A, findings: [finding] }).filed)
+          .toEqual([{ num: 'x123abc', path: 'backlog/x123abc-card.md' }]);
+        expect(findFiledPreventionCard({ title: title.replace('#1 review', '#2 review') },
+          { root, head: HEAD_A, findings: [finding] }).filed).toEqual([]);
+        expect(findFiledPreventionCard({ title }, { root, head: HEAD_B, findings: [finding] }).filed).toEqual([]);
+      }
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+});

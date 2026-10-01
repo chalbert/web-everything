@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { relatedReportRefs } from './lib/related-report.cjs';
 /**
  * check-standards.mjs — consistency & convention validator for Web Everything.
  *
@@ -1335,9 +1336,7 @@ const reportFiles = existsSync(REPORTS) ? readdirSync(REPORTS).filter((f) => f.e
 // own split), so it must never subset the shared variable those scanners also read.
 const scopedReportFiles = SCOPE_TO_FILES ? reportFiles.filter((f) => EFFECTIVE_FILES.has(`reports/${f}`)) : reportFiles;
 const researchIds = new Set(research.map((r) => r.id).filter(Boolean));
-const backlogReportRefs = new Set(
-  backlog.map((b) => b.relatedReport).filter(Boolean).map((p) => p.replace(/^reports\//, '')),
-);
+const backlogReportRefs = relatedReportRefs(backlog);
 {
   const { errors: re } = validateReportsNotHidden(reportFiles, { researchIds, backlogReportRefs });
   for (const e of re) err(e.message, e.descriptor);

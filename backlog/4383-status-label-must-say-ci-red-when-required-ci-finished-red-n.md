@@ -2,8 +2,10 @@
 bornAs: xggb0ep
 kind: task
 status: open
-scope: ["we:scripts/conveyor/review-status-tag.mjs"]
+scope: ["we:scripts/conveyor/review-status-tag.mjs", "we:scripts/conveyor/__tests__/review-status-tag.test.mjs", "we:scripts/lib/review-label-provider.mjs"]
 dateOpened: "2026-09-28"
+preparedDate: "2026-09-30"
+preparedAgainstSha: "b63802c2c7e5e5b7f00cdbe00d14883884a31c42"
 tags: []
 ---
 
@@ -11,19 +13,37 @@ tags: []
 
 WE PR #2865 carried `review-status:awaiting-ci` for ~1h while every check had completed and the required `soak-replay-gate` check was FAILED (a draft PR, so fixers correctly skip it) — the operator read the label as "still waiting" when CI had actually finished red.
 
-## Full design
+## Progress
+**Old premise**: The card stated that `we:scripts/conveyor/review-status-tag.mjs` derives the label from the PR's check-run states, and merely fails to distinguish pending vs completed-red. Scope was only `we:scripts/conveyor/review-status-tag.mjs`.
+**Corrected premise & scope**: `we:scripts/conveyor/review-status-tag.mjs` does *not* currently read check-run states at all; its `deriveReviewStatus` just blindly yields `awaiting-ci` if the PR is a draft. Furthermore, `PR_STATE_FIELDS` in `we:scripts/lib/review-label-provider.mjs` does not fetch `statusCheckRollup`. The scope must expand to include the provider file to fetch check states, and the test file `we:scripts/conveyor/__tests__/review-status-tag.test.mjs`.
 
-`we:scripts/conveyor/review-status-tag.mjs` derives the `review-status:*` label from the PR's check-run states, but its derivation does not distinguish two different situations that both currently render as `awaiting-ci`:
+## Design
 
-- **pending** — one or more required checks have not finished yet (genuinely still waiting).
-- **completed-red** — every check has finished, and a REQUIRED check (e.g. `soak-replay-gate`) finished FAILED.
+1. **Fetch CI state**: Add `statusCheckRollup` to `PR_STATE_FIELDS` in `we:scripts/lib/review-label-provider.mjs`.
+2. **Derivation fix**: In `we:scripts/conveyor/review-status-tag.mjs`, update `tagReviewStatus` to read `subject?.statusCheckRollup` and pass the check states down into `deriveReviewStatus`. Update `STATUS_LABEL_RE` to include `review-status:ci-red`.
+3. **Status logic**: In `deriveReviewStatus`, when no live agents are actioning the PR, inspect the checks instead of blindly defaulting to `awaiting-ci` for drafts. Distinguish:
+   - **pending**: one or more required checks have not finished yet. Yields `awaiting-ci`.
+   - **completed-red**: all checks finished, and a required check failed. Yields `ci-red` on a non-draft PR.
+   - **all-green**: unchanged existing behavior.
+4. **Owed-to-author signal**: On a draft PR with `completed-red` CI, emit `review-status:needs-human` (this is the existing repo signal for attributing an action to the author) instead of `awaiting-ci` or `ci-red`, so the red state is attributed to the author rather than silently parked.
 
-Fix the derivation in `we:scripts/conveyor/review-status-tag.mjs` to emit a distinct `review-status:ci-red` label (rather than `awaiting-ci`) when the completed-red case is detected, so the label always reflects "still running" vs "finished, and it's red." On a draft PR (where fixers deliberately skip driving required checks), also apply the owed-to-author signal so the red state is attributed to the author rather than silently parked. Add unit tests covering: all-pending (unchanged `awaiting-ci`), all-green (unchanged existing green label), and completed-with-a-required-failure on both a draft and a non-draft PR (new `ci-red` path).
+## MVP
 
-## Explicit MVP cut
+The derivation fix in `we:scripts/conveyor/review-status-tag.mjs` (fetching `statusCheckRollup`, passing it, and evaluating pending vs completed-red required checks) plus the `ci-red` label constant/emission and the `needs-human` (owed-to-author) marking on a draft PR. Unit tests in `we:scripts/conveyor/__tests__/review-status-tag.test.mjs` for the cases: all-pending, all-green, completed-red draft, completed-red non-draft. Expanded scope includes `we:scripts/lib/review-label-provider.mjs`. Not MVP-blocking: historical backfill.
 
-MVP = the derivation fix in `we:scripts/conveyor/review-status-tag.mjs` (pending vs completed-red required checks) plus the `ci-red` label constant/emission and the owed-to-author marking on a draft PR, with unit tests for the four cases above (all-pending, all-green, completed-red draft, completed-red non-draft). Not MVP-blocking: any historical backfill of the label on already-open PRs (e.g. re-tagging WE PR #2865 itself) — the fix applies going forward on the next label-derivation pass.
+## Test plan
 
-## Done when
+Run `npx vitest run we:scripts/conveyor/__tests__/review-status-tag.test.mjs`.
+Add test cases in `deriveReviewStatus` for:
+- `statusCheckRollup` missing or pending (returns `awaiting-ci` if draft).
+- `statusCheckRollup` completed red on non-draft (returns `ci-red`).
+- `statusCheckRollup` completed red on draft (returns `needs-human`).
+- `statusCheckRollup` completed green (returns `null` so next phases can run).
 
-1. **Executable** — TODO: a command that fails before this item lands and passes after.
+## Proof plan
+
+Run `node we:scripts/conveyor/review-status-tag.mjs <pr>` on a draft PR known to have finished red (like WE PR #2865) and observe it correctly outputs `{ changed: true, label: "review-status:needs-human" }` instead of `awaiting-ci`. Observe the script executes correctly with real `gh` output containing the new `statusCheckRollup` field.
+
+## Follow-ups
+
+- Check if other daemon stages (like `we:scripts/conveyor/reconcile-core.mjs` or `we:scripts/conveyor/ci-red-recovery-watch.mjs`) need to consume `review-status:ci-red` or if they already handle CI red natively using their own check states.

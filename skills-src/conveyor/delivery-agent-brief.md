@@ -151,6 +151,9 @@ leftover work as new backlog items (`scaffold` with `blockedBy` + a digest) rath
   `index.mjs` — [`SKILL.md#daemon-soak-harness`](SKILL.md)) or add `soak-waiver: <reason>` to the PR body. This
   is now mechanically gated (`soak-replay-gate`, #4075), not just written here — the CI check goes red if
   neither is present on a PR that touches daemon-soak scope and reads as a bug fix.
+  If the soak break is sizeable, it can be handed to a specialist session: see
+  [`role-test-soak-author-brief.md`](role-test-soak-author-brief.md) for WHEN to request that role (until the
+  request mechanism exists, write the break yourself as above).
 - **Any scaffolded item must itself pass build-brief discipline** (statute:
   [we:docs/agent/platform-decisions.md#build-brief-discipline](../../../docs/agent/platform-decisions.md#build-brief-discipline),
   #2819): name the edge-cases the new item's build should handle or reject, require an

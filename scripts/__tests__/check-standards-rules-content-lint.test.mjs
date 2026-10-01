@@ -16,7 +16,7 @@ import {
   findHarnessScaffoldingMarkers, scanHarnessScaffolding,
   findStaleRatifiedClaims,
   findDuplicateKeysPerScope, validateNoDuplicateManifestKeys,
-  findBuriedForkSections, findNonBatchableMarkers, findTestPlanGaps, lintBacklogItemRendering,
+  findBuriedForkSections, findNonBatchableMarkers, findTestPlanGaps, findGuardRelaxationGaps, lintBacklogItemRendering,
   deriveResearchFreshness, addIsoDuration, RESEARCH_REVIEW_HORIZON_DEFAULT,
   validateCapabilityPresence, validateRetirementShape,
   validatePlugDualMode, PLUG_UNPLUGGED_TEST_ENFORCED,
@@ -702,5 +702,48 @@ describe('findTestPlanGaps — #4332 Test-plan classification + condition covera
     expect(open.warnings.some((w) => /Test-plan gaps/.test(w))).toBe(true);
     const done = lintBacklogItemRendering({ item: { id: '9', kind: 'story', status: 'resolved' }, body });
     expect(done.warnings.some((w) => /Test-plan gaps/.test(w))).toBe(false);
+  });
+});
+
+describe('findGuardRelaxationGaps — #4409 guard-relaxation Must lines', () => {
+  const kinds = (b) => findGuardRelaxationGaps(b).map((g) => g.kind);
+  const fence = '```\nRelax the refusal only when X\nfail-closed non-code\n```';
+  it('#4409 relaxing card missing both phrases warns', () => {
+    expect(kinds('Relax the refusal only when X.\n')).toEqual(['missing-fail-closed', 'missing-non-code']);
+  });
+  it('#4409 only fail-closed present → exactly one gap (non-code)', () => {
+    expect(kinds('Relax the refusal only when X.\n\n## Must\n\n- Fail-closed on error.\n')).toEqual(['missing-non-code']);
+  });
+  it('#4409 a freshly scaffolded, relaxing card still warns', async () => {
+    const { renderItem } = await import('../backlog/scaffold.mjs');
+    const out = renderItem({ kind: 'story', size: 3, slug: 'x', title: 'X', digest: 'Relax the refusal only when X.', today: '2026-07-27' });
+    expect(kinds(out)).toEqual(['missing-fail-closed', 'missing-non-code']);
+  });
+  it('#4409 a freshly scaffolded, non-relaxing card has no gap (hint does not trigger)', async () => {
+    const { renderItem } = await import('../backlog/scaffold.mjs');
+    expect(kinds(renderItem({ kind: 'story', size: 3, slug: 'x', title: 'X', digest: 'Add a thing.', today: '2026-07-27' }))).toEqual([]);
+  });
+  it('#4409 non-relaxing card → no gap', () => {
+    expect(kinds('Add a retry loop to the fetcher.\n')).toEqual([]);
+  });
+  it('#4409 relaxing card with both phrases → no gap', () => {
+    expect(kinds('Relax the refusal only when X.\n\n- Must fail closed on error.\n- Enumerate non-code inputs.\n')).toEqual([]);
+  });
+  it('#4409 unrelated card with only-when and no refus → no gap', () => {
+    expect(kinds('Run the job only when the cache is cold.\n')).toEqual([]);
+  });
+  it('#4409 a relaxing sentence inside a fenced block does not trigger', () => {
+    expect(kinds(`Add a thing.\n\n${fence}\n`)).toEqual([]);
+  });
+  it('#4409 phrases inside a fenced block do not satisfy', () => {
+    expect(kinds(`Relax the refusal only when X.\n\n${fence}\n`)).toEqual(['missing-fail-closed', 'missing-non-code']);
+  });
+  it('#4409 Design-section prose is not scanned', () => {
+    expect(kinds('Add a thing.\n\n## Design\n\nRelax the refusal only when X.\n')).toEqual([]);
+  });
+  it('#4409 lintBacklogItemRendering warns for open, silent for resolved', () => {
+    const body = 'Relax the refusal only when X.\n';
+    expect(lintBacklogItemRendering({ item: { id: '9', kind: 'story', status: 'open' }, body }).warnings.some((w) => /relaxes a refusal/.test(w))).toBe(true);
+    expect(lintBacklogItemRendering({ item: { id: '9', kind: 'story', status: 'resolved' }, body }).warnings.some((w) => /relaxes a refusal/.test(w))).toBe(false);
   });
 });

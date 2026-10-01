@@ -2,9 +2,11 @@
 bornAs: xig5d0r
 kind: story
 size: 3
-status: open
+status: resolved
 scope: ["we:scripts/conveyor/reconcile-core.mjs", "we:scripts/conveyor/review-status-tag.mjs", "we:scripts/guard-bash.mjs", "we:scripts/conveyor/fix-procedure.mjs", "we:scripts/conveyor/__tests__/reconcile-core.test.mjs", "we:scripts/conveyor/__tests__/review-status-tag.test.mjs", "we:scripts/__tests__/guard-bash.test.mjs", "we:scripts/conveyor/__tests__/fix-procedure.test.mjs"]
 dateOpened: "2026-09-27"
+dateStarted: "2026-09-30"
+dateResolved: "2026-09-30"
 preparedDate: "2026-09-30"
 preparedAgainstSha: "f98b0805569a5b4c7afc244fa5b02263d5fd83ec"
 tags: []

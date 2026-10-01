@@ -117,7 +117,7 @@ describe('ensureFreshGithubAppEnv — the IO shell, every effect injected', () =
   });
 
   it('cache already fresh — reads it, mints NOTHING, and sets env from the cached token', async () => {
-    const cached = { v: CACHE_VERSION, token: 'ghs_cached', expiresAt: '2026-09-23T13:00:00Z' };
+    const cached = { v: CACHE_VERSION, appId: CONFIGURED_ENV.WE_GITHUB_APP_ID, installationId: CONFIGURED_ENV.WE_GITHUB_APP_INSTALLATION_ID, token: 'ghs_cached', expiresAt: '2026-09-23T13:00:00Z' };
     const readCache = vi.fn(() => cached);
     const writeCache = vi.fn();
     const mint = vi.fn();
@@ -144,13 +144,13 @@ describe('ensureFreshGithubAppEnv — the IO shell, every effect injected', () =
       appId: '5037855', installationId: '163880042',
       privateKeyPath: '/Users/x/.secrets/github-apps/web-everything.pem', now: NOW,
     });
-    expect(writeCache).toHaveBeenCalledWith(expect.any(String), { v: CACHE_VERSION, token: 'ghs_fresh', expiresAt: '2026-09-23T13:00:00Z' });
+    expect(writeCache).toHaveBeenCalledWith(expect.any(String), { v: CACHE_VERSION, appId: CONFIGURED_ENV.WE_GITHUB_APP_ID, installationId: CONFIGURED_ENV.WE_GITHUB_APP_INSTALLATION_ID, token: 'ghs_fresh', expiresAt: '2026-09-23T13:00:00Z' });
     expect(setEnv).toHaveBeenCalledWith('ghs_fresh');
   });
 
   it('cache expiring within the buffer — mints a fresh one rather than trusting the stale entry', async () => {
     const expiresAt = new Date(NOW + REFRESH_BUFFER_MS - 1000).toISOString();
-    const readCache = vi.fn(() => ({ v: CACHE_VERSION, token: 'ghs_stale', expiresAt }));
+    const readCache = vi.fn(() => ({ v: CACHE_VERSION, appId: CONFIGURED_ENV.WE_GITHUB_APP_ID, installationId: CONFIGURED_ENV.WE_GITHUB_APP_INSTALLATION_ID, token: 'ghs_stale', expiresAt }));
     const writeCache = vi.fn();
     const mint = vi.fn().mockResolvedValue({ token: 'ghs_new', expiresAt: '2026-09-23T14:00:00Z', permissions: FULL_PERMS });
     const setEnv = vi.fn();
@@ -395,7 +395,7 @@ describe('ensureFreshGithubAppEnv — records its outcome to the status file on 
   });
 
   it('a live apply (cache hit) is recorded as applied:true', async () => {
-    const cached = { v: CACHE_VERSION, token: 'ghs_cached', expiresAt: '2026-09-23T13:00:00Z' };
+    const cached = { v: CACHE_VERSION, appId: CONFIGURED_ENV.WE_GITHUB_APP_ID, installationId: CONFIGURED_ENV.WE_GITHUB_APP_INSTALLATION_ID, token: 'ghs_cached', expiresAt: '2026-09-23T13:00:00Z' };
     const writeStatus = vi.fn();
     await ensureFreshGithubAppEnv({
       env: CONFIGURED_ENV, now: NOW, readCache: () => cached, writeCache: vi.fn(), setEnv: vi.fn(),
@@ -439,7 +439,7 @@ describe('ensureFreshGithubAppEnv — records its outcome to the status file on 
     const blocker = join(dir, 'blocker-file');
     writeFileSync(blocker, 'x', 'utf8');
     const badStatusPath = join(blocker, 'status.json');
-    const cached = { v: CACHE_VERSION, token: 'ghs_cached', expiresAt: '2026-09-23T13:00:00Z' };
+    const cached = { v: CACHE_VERSION, appId: CONFIGURED_ENV.WE_GITHUB_APP_ID, installationId: CONFIGURED_ENV.WE_GITHUB_APP_INSTALLATION_ID, token: 'ghs_cached', expiresAt: '2026-09-23T13:00:00Z' };
     try {
       const result = await ensureFreshGithubAppEnv({
         env: CONFIGURED_ENV, now: NOW, readCache: () => cached, writeCache: vi.fn(), setEnv: vi.fn(),
@@ -458,7 +458,7 @@ describe('readGithubAppStatus / the real writeStatusFile default — round trip 
     // uses a CONFIGURED env reaching a real recorded reason instead.
     const dir = mkdtempSync(join(tmpdir(), 'we-app-status-'));
     const statusPath = join(dir, 'status.json');
-    const cached = { v: CACHE_VERSION, token: 'ghs_cached', expiresAt: '2026-09-23T13:00:00Z' };
+    const cached = { v: CACHE_VERSION, appId: CONFIGURED_ENV.WE_GITHUB_APP_ID, installationId: CONFIGURED_ENV.WE_GITHUB_APP_INSTALLATION_ID, token: 'ghs_cached', expiresAt: '2026-09-23T13:00:00Z' };
     try {
       const result = await ensureFreshGithubAppEnv({
         env: CONFIGURED_ENV, now: Date.parse('2026-09-23T12:00:00Z'), readCache: () => cached, writeCache: vi.fn(),
@@ -473,5 +473,24 @@ describe('readGithubAppStatus / the real writeStatusFile default — round trip 
 
   it('a missing status file reads as null, not a thrown error', () => {
     expect(readGithubAppStatus('/definitely/does/not/exist/status.json')).toBeNull();
+  });
+});
+
+describe('installation-bound cache provenance (#4652)', () => {
+  const NOW = Date.parse('2026-09-23T12:00:00Z');
+  it.each([undefined, '999'])('remints a cache with missing or different installation %s', async (installationId) => {
+    const env = { ...CONFIGURED_ENV };
+    const mint = vi.fn(async () => ({ token: 'ghs_synthetic_rotated', expiresAt: '2026-09-23T13:00:00Z', permissions: REQUIRED_APP_PERMISSIONS }));
+    const writeCache = vi.fn();
+    await ensureFreshGithubAppEnv({ env, now: NOW,
+      readCache: () => ({ v: CACHE_VERSION, appId: env.WE_GITHUB_APP_ID, installationId, token: 'ghs_synthetic_old', expiresAt: '2026-09-23T13:00:00Z' }),
+      mint, writeCache, getInstallationInfo: async () => ({ repositorySelection: 'all' }), ...NOOP_STATUS,
+    });
+    expect(mint).toHaveBeenCalledOnce();
+    expect(env.GH_TOKEN).toBe('ghs_synthetic_rotated');
+    expect(env.WE_GH_AUTH_INSTALLATION).toBe(CONFIGURED_ENV.WE_GITHUB_APP_INSTALLATION_ID);
+    expect(env.WE_GH_AUTH_SOURCE).toBe('mint');
+    expect(writeCache.mock.calls[0][1].installationId).toBe(env.WE_GH_AUTH_INSTALLATION);
+    expect(env.WE_GH_AUTH_TOKEN_HASH).toMatch(/^[a-f0-9]{64}$/);
   });
 });

@@ -1,3 +1,4 @@
+import { preventionCardTitle } from '../operations/machine-pr-title.mjs';
 /**
  * @file scripts/lib/approval-prevention-notice.mjs
  * @description THE APPROVAL-TIME PREVENTION-FILING DEFAULT (operator, 2026-09-27, ~8:05 AM ET, verbatim:
@@ -381,7 +382,7 @@ export function buildApprovalPreventionFilingInput({
       );
     }, basenamesQualified);
   return {
-    title: `File the prevention guard(s) owed by ${repo}#${pr}'s independent review`,
+    title: preventionCardTitle({ repo, pr, digest }),
     kind: 'story',
     size: '3',
     // The key is appended AFTER the #883 rewrite so that pass can never alter it (a later lookup matches it byte

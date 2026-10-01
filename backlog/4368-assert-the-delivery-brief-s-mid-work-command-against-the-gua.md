@@ -2,9 +2,11 @@
 bornAs: x3zp8nf
 kind: story
 size: 2
-status: open
+status: resolved
 scope: ["we:skills-src/conveyor/delivery-agent-brief.md", "we:scripts/guard-bash.mjs", "we:scripts/__tests__/guard-bash.test.mjs"]
 dateOpened: "2026-09-28"
+dateStarted: "2026-09-30"
+dateResolved: "2026-09-30"
 preparedDate: "2026-09-30"
 preparedAgainstSha: "b13659525cbcf14cf39ca707cbb7727c377e5cdd"
 tags: []

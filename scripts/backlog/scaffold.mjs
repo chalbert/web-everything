@@ -8,6 +8,14 @@
  * agent only fills the digest + body. PURE — the CLI does the globbing and the write.
  */
 
+/**
+ * Authoring hint emitted in the `## Done when` skeleton (#4409). Pinned verbatim by a test; the
+ * guard-relaxation lint (`findGuardRelaxationGaps`) strips this exact line before scanning so a
+ * hint left in place can never trigger or satisfy it.
+ */
+export const GUARD_RELAXATION_HINT =
+  'Hint: a card that loosens a refusal needs two Must lines — what happens on error (refuse), and every input kind besides source code (docs, config, data) that the loosening must still treat cautiously.';
+
 /** Zero-pad a number to the repo's 3-digit `NNN` convention (`7` → `"007"`). */
 export const pad3 = (n) => String(n).padStart(3, '0');
 
@@ -102,6 +110,6 @@ export function renderItem(spec) {
   // implementing lane to invent at review time (docs/agent/backlog-workflow.md → the determinism
   // ladder). Emits one `**Executable**` TODO line; the author fills in a real tier-1 command, or drops
   // to tier-2/3 (or an explicit "why not" line) when no command applies.
-  const doneWhen = '## Done when\n\n1. **Executable** — TODO: a command that fails before this item lands and passes after.\n';
+  const doneWhen = '## Done when\n\n1. **Executable** — TODO: a command that fails before this item lands and passes after.\n\n' + `${GUARD_RELAXATION_HINT}\n`;
   return `${fm.join('\n')}\n# ${title}\n\n${lead}\n\n${doneWhen}`;
 }

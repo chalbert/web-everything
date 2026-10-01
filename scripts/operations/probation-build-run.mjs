@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { machinePrTitle } from './machine-pr-title.mjs';
 import { classifyPrepareFailure } from '../conveyor/prepare-failure-policy.mjs';
 /**
  * @file scripts/operations/probation-build-run.mjs
@@ -83,7 +84,7 @@ import { hookSurfaceChanged, resetHookSurface, snapshotHookSurface, withHooksDis
 import { AGY_CLAUDE_MODEL_BY_TIER, PROBATION_WORKERS, PROVEN_TASK_ENVELOPES, isStatuteTierPath } from '../lib/provider-routing.mjs';
 import { isDocScopePath } from '../lib/dispatch-task-type.mjs';
 import {
-  buildCheckerArgv, parseCheckerVerdict, buildDocFixCommitMessage, buildDocFixTask, buildWorkerArgv, frontmatterTamperedBeyondClaim,
+  buildCheckerArgv, parseCheckerVerdict, buildDocFixCommitMessage, buildDocFixTask, buildWorkerArgv, frontmatterTamperedBeyondClaim, PREPARE_OWNED_FRONTMATTER_KEYS,
   healDiffWithinEnvelope, launchScorecardRow, newUntrackedPaths, summarizeNumstat,
 } from '../lib/probation-launcher.mjs';
 import { defaultPoolRoot, workspaceFor } from '../lib/lane-pool-paths.mjs';
@@ -164,15 +165,6 @@ function ownedTest(path, entries) {
       && basename(path).startsWith(basename(source, extname(source)))
       && /\.test\.[cm]?[jt]sx?$/.test(path);
   });
-}
-
-function prepareScopeValid(before, after) {
-  const original = parseYamlFrontmatter(before).scope ?? [];
-  const revised = parseYamlFrontmatter(after).scope ?? [];
-  return Array.isArray(original) && Array.isArray(revised)
-    && original.every(p => revised.includes(p))
-    && revised.every(p => original.includes(p) || (typeof p === 'string' && p.startsWith('we:')
-      && ownedTest(p.slice(3), declaredScopePaths(original))));
 }
 
 function missingTestScope(raw) {
@@ -392,10 +384,8 @@ export async function runProbationBuild(args, io) {
     const excludeFromDiff = preparing ? [] : [...preexisting, item.path];
 
     const task = preparing ? io.readPrepareBrief(lanePath)
-      .replaceAll('{{ITEM_NUM}}', String(num)).replaceAll('{{ITEM_SPEC_PATH}}', item.path)
-      .replace("Only edit that card's body and preparedDate/preparedAgainstSha; preserve all other frontmatter.",
-        'Only edit the card body, preparation stamps, and additive matching test scope entries; preserve all other frontmatter.') +
-      '\nThis matching-test addition is the sole permitted exception to the brief’s scope-preservation rule. Test scope is required before stamping: retain every existing scope entry and add the existing or planned matching test files (or the following narrow patterns). No unrelated scope changes are allowed.\n' +
+      .replaceAll('{{ITEM_NUM}}', String(num)).replaceAll('{{ITEM_SPEC_PATH}}', item.path) +
+      '\nTest scope is required before stamping: after any factual scope correction (#4658), the card scope must also list the existing or planned matching test file for each source entry (or one of the following narrow patterns).\n' +
       declaredScopePaths(item.scope).map(sourceTestPattern).filter(Boolean).map(p => `we:${p}`).join('\n') : buildDocFixTask({ num, title: item.title, spec: item.spec, scope: item.scope, taskType }) +
       '\nIf the work already exists, check every Done-when against main and find the delivering commit in git log. ' +
       'When all checks pass, report "spec already done on main: commit <sha>" with the actual delivering SHA.\n';
@@ -437,7 +427,7 @@ export async function runProbationBuild(args, io) {
       // worker, so a worker forging `status:`/`dateStarted:` is tamper too.
       // Check the excluded card even on a no-change run.
       const postWorkerItem = io.findItem(num, lanePath);
-      if (preparing ? (frontmatterTamperedBeyondClaim(item.raw, postWorkerItem?.raw, ['preparedDate', 'preparedAgainstSha', 'scope']) || !prepareScopeValid(item.raw, postWorkerItem.raw)) : (postWorkerItem?.spec !== item.spec || postWorkerItem?.raw !== afterClaim?.raw)) {
+      if (preparing ? frontmatterTamperedBeyondClaim(item.raw, postWorkerItem?.raw, PREPARE_OWNED_FRONTMATTER_KEYS) : (postWorkerItem?.spec !== item.spec || postWorkerItem?.raw !== afterClaim?.raw)) {
         return abandon('escalated-needs-human', "not built: the worker edited the item's own backlog card — refusing", { diff: diffRow });
       }
       if (preparing && !summary.files && /\bcould-not-prepare\s*:/i.test(run.lastMessage ?? '')) {
@@ -559,7 +549,7 @@ export async function runProbationBuild(args, io) {
       const stamped = io.findItem(num, lanePath);
       const fm = parseYamlFrontmatter(stamped?.raw ?? '');
       if (!/^\d{4}-\d{2}-\d{2}$/.test(String(fm.preparedDate ?? '')) || fm.preparedAgainstSha !== baseSha) return abandon('gate-red', 'prepare-unstamped', { diff: diffRow });
-      if (frontmatterTamperedBeyondClaim(item.raw, stamped.raw, ['preparedDate', 'preparedAgainstSha', 'scope']) || !prepareScopeValid(item.raw, stamped.raw)
+      if (frontmatterTamperedBeyondClaim(item.raw, stamped.raw, PREPARE_OWNED_FRONTMATTER_KEYS)
         || summarizeNumstat(io.diffNumstat(lanePath, baseSha, [])).paths.some(p => p !== item.path)) {
         return abandon('gate-red', 'prepare changed fields or files outside its envelope', { diff: diffRow });
       }
@@ -579,7 +569,7 @@ export async function runProbationBuild(args, io) {
     if (io.headSha(lanePath) !== baseSha) {
       return abandon('escalated-needs-human', 'refused: worker or resolve moved HEAD before the launcher commit', { diff: diffRow });
     }
-    io.commit(lanePath, [...new Set([...summary.paths, item.path])], declinedReason ? `WE #${num}: record standalone worker Findings\n` : buildDocFixCommitMessage({ num, worker, taskType }));
+    io.commit(lanePath, [...new Set([...summary.paths, item.path])], declinedReason ? `${machinePrTitle({ item: num, kind: 'findings', card: item })}\n` : buildDocFixCommitMessage({ num, worker, taskType, title: item.title }));
 
     // The FINAL gate, on the commit that carries both the build and the resolve — the marker-writing mode
     // (unlike `probation-heal-run.mjs#runGate`'s marker-less `run` mode), because `open-pr --requireVerified=true`
@@ -654,7 +644,7 @@ export function openPrArgv({ num, attemptTag, slug, bodyFile, taskType = 'doc-fi
   const ref = `lane/${num}${attemptTag ?? ''}-${taskType === 'prepare' ? 'prepare-' : ''}${slug}`;
   return [
     'open-pr', `--ref=${ref}`, '--sha=HEAD', '--base=main', `--bodyFile=${bodyFile}`,
-    `--title=WE #${num}: ${taskType} build — ${slug}`,
+    `--title=${machinePrTitle({ item: num, kind: taskType === 'prepare' ? 'prepare' : `${taskType}-build`, subject: slug.replace(/-/g, ' ') })}`,
     '--mode=park', '--parkLabel=review:pending', '--requireVerified=true', '--json',
   ];
 }

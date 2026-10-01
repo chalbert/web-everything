@@ -34,6 +34,7 @@
  * IMPURE by construction: `fs`, `git`, `gh` (via `pr-land.mjs`).
  */
 
+import { machinePrTitle } from './machine-pr-title.mjs';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
@@ -330,9 +331,8 @@ export async function recordPrepVerdict({
   }
 
   const clean = isCleanPrepReview({ confidence, risks, fixApplied });
-  const commitMessage = clean
-    ? `review-prep: independent review of #${item} — confidence ${confidence}, no corrections owed`
-    : `review-prep: independent review of #${item} — confidence ${confidence}, corrections recorded`;
+  const commitMessage = machinePrTitle({ item, kind: 'review-prep',
+    card: { title: /^#\s+(.+)$/m.exec(stagedContent)?.[1] } });
 
   let sha;
   try {

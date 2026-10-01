@@ -1,3 +1,4 @@
+import { preventionCardTitle } from '../operations/machine-pr-title.mjs';
 /**
  * @file scripts/lib/review-loop-policy.mjs
  * @description THE CONCRETE UNATTENDED-CONFIRM POLICY for `review-pr` (#3072's remaining slice) — and the pure
@@ -351,7 +352,7 @@ export function buildPreventionFilingInput({ repo, pr, findings = [], parent = '
       );
     }, basenamesQualified);
   return {
-    title: `File the prevention guard(s) owed by ${repo}#${pr}'s independent review`,
+    title: preventionCardTitle({ repo, pr, digest }),
     kind: 'story',
     size: '3',
     digest,
