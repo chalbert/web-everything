@@ -20,6 +20,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { safeBranchDirName, mergeCommitMessage, syncOnePocBranchOnce, runPocBranchSync, DEFAULT_LOCK_WAIT_MS } from '../poc-branch-sync.mjs';
+import { withPocLandLock } from '../../readiness/drain-lock.mjs';
 
 // ── 1. the pure core ─────────────────────────────────────────────────────────────────────────────────────────
 
@@ -205,6 +206,9 @@ let root;
 beforeAll(() => { root = mkdtempSync(join(tmpdir(), 'we-poc-branch-sync-real-')); });
 afterAll(() => { rmSync(root, { recursive: true, force: true }); });
 
+// Keep the real mutex, but never contend with the developer's drain lock.
+const withFixtureLock = (fn, opts) => withPocLandLock(fn, { ...opts, lockRoot: join(root, 'locks') });
+
 /** A bare `origin` plus a `main` (target) and `feature` (standing in for a POC branch) branch, seeded exactly
  *  like `branch-sync.test.mjs#buildConflictFixture` — both branches touch `shared.txt` so they collide once
  *  merged. Returns a CLONE checked out on an unrelated third branch (`scratch`) — proving this module needs NO
@@ -259,7 +263,7 @@ describe('poc-branch-sync.mjs — REAL clean-merge-succeeds proof (no fakes, rea
     const entry = { branch: 'feature', target: 'main' };
     const beforeStatus = git(['status', '--porcelain'], clone).trim();
 
-    const r = syncOnePocBranchOnce({ entry, cwd: clone, now: Date.now(), appendLog: () => {} });
+    const r = syncOnePocBranchOnce({ entry, cwd: clone, now: Date.now(), appendLog: () => {}, withLock: withFixtureLock });
 
     expect(r).toMatchObject({ branch: 'feature', status: 'synced' });
     expect(r.sha).toMatch(/^[0-9a-f]{40}$/);
@@ -283,7 +287,7 @@ describe('poc-branch-sync.mjs — REAL conflict-escalates proof (no fakes, real 
     const featureTipBefore = git(['rev-parse', 'feature'], bare).trim();
     const notifies = [];
     const common = {
-      entry, cwd: clone, appendLog: () => {}, notify: (e) => notifies.push(e),
+      entry, cwd: clone, appendLog: () => {}, notify: (e) => notifies.push(e), withLock: withFixtureLock,
       maxAttempts: 2, backoff: { baseMs: 1, factor: 2, capMs: 5 },
     };
 

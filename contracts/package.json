@@ -15,7 +15,9 @@
   },
   "files": [
     "*.ts",
-    "!*.test.ts"
+    "!*.test.ts",
+    "plateau-progress-view.schema.json",
+    "plateau-progress-view.examples.json"
   ],
   "scripts": {
     "prepublishOnly": "node -e \"if(require('./package.json').version==='0.0.0'){console.error('Refusing to publish @webeverything/contracts at placeholder version 0.0.0 — bump the version first (npm version …), per #877.');process.exit(1)}\""
@@ -55,6 +57,8 @@
     "./webcompliance": "./webcompliance.ts",
     "./webprocess": "./webprocess.ts",
     "./webtheme": "./webtheme.ts",
-    "./plug-parity": "./plug-parity.ts"
+    "./plug-parity": "./plug-parity.ts",
+    "./plateau-progress-view.schema.json": "./plateau-progress-view.schema.json",
+    "./plateau-progress-view.examples.json": "./plateau-progress-view.examples.json"
   }
 }
