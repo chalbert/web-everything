@@ -41,7 +41,7 @@ import {
 import {
   agentArgsFromEnv, briefPath, createDispatchSinks, defaultLoadItems, defaultReadScorecards, findItem, REPO_ROOT,
 } from './dispatch-lane-io.mjs';
-import { resolveDispatchRoute as decideDispatchRoute } from '../lib/dispatch-routing-policy-io.mjs';
+import { resolveDispatchRoute as decideDispatchRoute, routeRepairForRepo } from '../lib/dispatch-routing-policy-io.mjs';
 import { assertMainNotStale } from './review-dispatch.mjs';
 import { armSelfReexecOnFastForward } from '../lib/main-staleness.mjs';
 import { repoKeyForSlug } from '../lib/constellation-repos.mjs';
@@ -146,7 +146,7 @@ export async function dispatchCiHeal(planned, {
     }, BRIEF_REQUIRED_BY_KIND['ci-heal'], [...OPTIONAL_BRIEF_PLACEHOLDERS, 'ITEM_NUM', 'SCOPE'], REPO_AWARE_VALUE_PATTERNS);
     // Sibling repos stay on the native Claude path: the gate's statute/gateSelf prefixes are WE-relative and no
     // sibling declares its own critical surface yet, so a sibling heal cannot be judged non-critical safely.
-    const route = repo === 'we' ? routeHeal({ scope: planned.scope, reason }) : null;
+    const route = routeRepairForRepo(repo, () => routeHeal({ scope: planned.scope, reason }));
 
     const out = await sinks[DISPATCH_EFFECT]({
       launchKind: 'ci-heal', laneRef: planned.laneRef, prompt: withAltBranchHint(prompt, planned.altBranch), sessionSlug, num: planned.itemNum ?? undefined, lane: planned.lane, scope: planned.scope,

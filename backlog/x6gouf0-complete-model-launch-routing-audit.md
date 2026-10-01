@@ -76,3 +76,24 @@ The required `node we:scripts/verify-lane.mjs` then ran the full suite: 24,874 p
 Rerun we:scripts/verify-lane.mjs in an environment permitted to inspect processes and use the existing home-level lock root before landing. Keep these environment limitations visible rather than replacing the real-process assertions with mocks.
 
 Keep default-snapshot tests separate from legacy evidence-router tests: a policy default change must not erase coverage of cold-start and promotion rules. Preserve provider pins on resume, and keep model-specific agy effort support distinct from its generic enum. Unknown prepare metadata stays on Codex.
+
+## PR #3311 round 2 — prevention record (2026-10-01)
+
+The correctness, security and Codex correctness findings share one root: a sibling repair
+cannot be classified by WE-relative critical paths. Both repair entry points now use
+we:scripts/lib/dispatch-routing-policy-io.mjs#routeRepairForRepo before invoking routing.
+Sibling repairs retain native Claude; no sibling item number reads a WE card. Missing WE
+item identity fails closed as high risk. The coverage finding's suggested Codex outcome
+conflicts with this security boundary; its no-cross-repository-card-read assertion is retained.
+
+The launch-certainty finding is repaired at we:scripts/operations/dispatch-lane-io.mjs:
+every unknown provider failure carries indeterminate=true and its original cause through
+the sink. Definite pre-spawn refusals retain notApplied. CI-heal therefore keeps its claim
+when a worker might exist and blocks the next tick.
+
+Prevention delivered in we:scripts/operations/__tests__/repair-routing-review-fixes.test.mjs:
+the fix/ci-heal × WE/Frontier UI/Plateau App matrix; default sibling fixes with a colliding
+security/high-risk WE card and an uncalled card-reader spy; item-less fail-closed dispatch;
+real card security/high/low routing; and CI-heal through createDispatchSinks and the Codex
+provider with a missing PID, plus unmarked unknown errors and definite ENOENT failures.
+These cover all five round-2 findings without relaxing the critical-work gate.

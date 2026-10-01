@@ -1546,9 +1546,10 @@ export function createDispatchSinks({
         // INDETERMINATE. The entry stays `in-flight` with a NULL handle: something may be running and cannot be
         // observed. The replay guard refuses it and `inFlightEntries` reports it under `unknown`, which is
         // exactly right — a person finds out what happened and closes it out.
-        throw new Error(
-          `claude --bg failed and whether an agent started is UNKNOWN: ${String((e && e.message) || e).split('\n')[0]}`,
-        );
+        throw Object.assign(new Error(
+          `dispatch failed and whether an agent started is UNKNOWN: ${String((e && e.message) || e).split('\n')[0]}`,
+          { cause: e },
+        ), { indeterminate: true });
       }
       const minutes = Number(payload.expectedWithinMinutes) > 0
         ? Number(payload.expectedWithinMinutes)

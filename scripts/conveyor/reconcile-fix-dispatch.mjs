@@ -66,7 +66,7 @@
  * infra-blocked recovery / the lease-reaper / the session-reaper / the hiccup sink — best-effort, never gating
  * the tick.
  */
-import { resolvePolicyModel, resolveDispatchRoute } from '../lib/dispatch-routing-policy-io.mjs';
+import { resolvePolicyModel, resolveDispatchRoute, routeRepairForRepo } from '../lib/dispatch-routing-policy-io.mjs';
 import { dispatchProviderAvailable } from '../lib/dispatch-provider-availability.mjs';
 import { codexBriefDetachedProvider } from '../operations/dispatch-providers/codex-brief.mjs';
 import { withOperatorAnswer } from './stand-down-answer-core.mjs';
@@ -803,7 +803,7 @@ export function tryResumeFix(planned, {
 export function cardRoutingSignals(root, itemNum, { readDir = readdirSync, readFile = (p) => readFileSync(p, 'utf8') } = {}) {
   // The planner carries no tags/risk, so the critical-work gate would never see a `security` tag or `risk: high`.
   // Read them off the item's own card. An item whose card cannot be read FAILS CLOSED (high risk → native Claude).
-  if (!itemNum) return { tags: [], risk: undefined };
+  if (!itemNum) return { tags: [], risk: 'high' };
   try {
     const name = readDir(join(root, 'backlog')).find(n => n.startsWith(`${itemNum}-`) && n.endsWith('.md'));
     if (!name) return { tags: [], risk: 'high' };
@@ -861,9 +861,10 @@ export function dispatchFix(planned, {
   spawnAgent = defaultSpawnAgent,
   extraArgs = [],
   modelReason = null,
+  readRoutingSignals = cardRoutingSignals,
   routeFix = p => {
     // A sibling repo's item number names a card in ITS backlog, not WE's: never look it up in WE's directory.
-    const signals = repo === 'we' ? cardRoutingSignals(root, p.itemNum) : { tags: [], risk: undefined };
+    const signals = readRoutingSignals(root, p.itemNum);
     return resolveDispatchRoute({ kind: "fix", scopePaths: p.scope, risk: p.risk === 'high' || signals.risk === 'high' ? 'high' : p.risk, tags: signals.tags, size: p.size, cause: p.cause }, { scorecards: defaultReadScorecards() });
   },
   providerAvailable = dispatchProviderAvailable,
@@ -922,7 +923,7 @@ export function dispatchFix(planned, {
       pr: planned.pr, itemNum: planned.itemNum, lane: planned.lane,
     };
   }
-  const routing = routeFix(planned);
+  const routing = routeRepairForRepo(repo, () => routeFix(planned));
   if (routing?.refusal) throw new Error(routing.refusal);
   // An explicit, reasoned model pin (extraArgs `--model`/`--model=` with modelReason) is the caller's deliberate
   // choice of a NATIVE model: only a Claude route can honour it, so a Codex route never preempts it.
