@@ -3,10 +3,11 @@ bornAs: xs3q6bf
 kind: story
 size: 3
 parent: "4075"
-status: active
+status: resolved
 scope: ["we:scripts/lib/isolation-provider.mjs", "we:scripts/lib/__tests__/isolation-provider.test.mjs", "we:scripts/operations/codex-delivery-provider.mjs", "we:scripts/operations/__tests__/codex-delivery-provider.test.mjs", "we:scripts/operations/__tests__/codex-delivery-provider-sandbox.test.mjs"]
 dateOpened: "2026-09-29"
 dateStarted: "2026-10-01"
+dateResolved: "2026-10-01"
 preparedDate: "2026-10-01"
 preparedAgainstSha: "bc2058219cef9235eb00e7a03ce4c2d20fd3bbaa"
 tags: []
