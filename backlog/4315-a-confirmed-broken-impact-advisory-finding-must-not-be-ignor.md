@@ -4,9 +4,10 @@ kind: story
 size: 8
 priority: high
 parent: "4075"
-status: open
+status: resolved
 scope: ["we:scripts/lib/jury-core.mjs", "we:scripts/lib/__tests__/jury-core.test.mjs", "we:scripts/lib/disposition-judge.mjs", "we:scripts/lib/__tests__/disposition-judge.test.mjs", "we:scripts/lib/jury-ledger.mjs", "we:scripts/lib/__tests__/jury-ledger.test.mjs", "we:scripts/operations/review-pr.mjs", "we:scripts/operations/__tests__/review-pr.test.mjs", "we:scripts/operations/review-pr-io.mjs", "we:scripts/operations/__tests__/review-pr-io.test.mjs", "we:scripts/review-set-label.mjs", "we:scripts/__tests__/review-set-label.test.mjs", "we:scripts/lib/review-loop-policy.mjs", "we:scripts/lib/__tests__/review-loop-policy.test.mjs"]
 dateOpened: "2026-09-28"
+dateResolved: "2026-10-01"
 preparedDate: "2026-09-30"
 preparedAgainstSha: "b1e5ed4e294f5ca43e9e7da64fcf8d468bf478f4"
 tags: []
