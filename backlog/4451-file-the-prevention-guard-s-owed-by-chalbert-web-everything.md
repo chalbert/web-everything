@@ -3,9 +3,10 @@ bornAs: xw9pg4u
 kind: story
 size: 3
 parent: "4075"
-status: open
+status: active
 scope: ["we:scripts/check-standards.mjs", "we:scripts/check-standards-rules.mjs", "we:scripts/__tests__/check-standards-frontmatter-parse.test.mjs", "we:scripts/check-backlog-item.mjs"]
 dateOpened: "2026-09-28"
+dateStarted: "2026-10-01"
 preparedDate: "2026-09-30"
 preparedAgainstSha: "bc9db934c4b93158341ba01a74dccb71583765fc"
 tags: []

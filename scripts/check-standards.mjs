@@ -57,7 +57,7 @@ import {
   validateModuleResolutionLock,
   validateRenderersNotPublished, validateReferenceRuntimeForms,
   validateNoDuplicateManifestKeys,
-  findUnquotedColonScalars, lintBacklogItemRendering,
+  findUnquotedColonScalars, describeUnparseableFrontmatter, lintBacklogItemRendering,
   RESEARCH_REVIEW_HORIZON_DEFAULT, deriveResearchFreshness,
   validateCapabilityPresence, validateRetirementShape,
   validatePlugDualMode, validateTemplateA11y, validateBlockImplConformance,
@@ -941,7 +941,13 @@ mark("6d-bis. Per-item RENDERING lints (#290 raw-HTML · #441 buried-fork · mis
 // the typo at author time and prompt the quote-fix.
 for (const file of readdirSync(join(ROOT, 'backlog')).filter((f) => f.endsWith('.md'))) {
   const raw = readFileSync(join(ROOT, 'backlog', file), 'utf8');
-  const hits = findUnquotedColonScalars(raw);
+  const { colonHits: hits, parseReason } = describeUnparseableFrontmatter(raw);
+  // Non-colon parse failure (unclosed quote, tab indent, bad flow collection…) — the colon scan found nothing
+  // to name, but the loader still SKIPS the item (#4451).
+  if (!hits.length && parseReason) {
+    err(`Backlog item "${file.replace(/\.md$/, '')}" has unparseable frontmatter — ${parseReason}. ` +
+      `The loader silently SKIPS the whole item, so no other rule ever sees it. Fix the YAML.`);
+  }
   for (const h of hits) {
     err(`Backlog item "${file.replace(/\.md$/, '')}" has an unquoted colon in frontmatter — ` +
       `\`${h.key}: ${h.value}\` (line ${h.line}). YAML reads the embedded \`: \` as a nested mapping ` +
@@ -983,7 +989,7 @@ mark("6d-quinquies. Unquoted-colon scalar in frontmatter (#453)");
   for (const file of readdirSync(join(ROOT, 'backlog')).filter((f) => f.endsWith('.md'))) {
     let raw, body = '';
     try { const fm = matterFm(readFileSync(join(ROOT, 'backlog', file), 'utf8')); raw = fm.data; body = fm.content; }
-    catch { continue; } // a malformed-YAML item is already reported by the unquoted-colon scan above
+    catch { continue; } // a malformed-YAML item is already reported by the frontmatter-parse scan above
     const id = file.replace(/\.md$/, '');
     // #4448 guard 3 — validate the RAW field here (the loader drops unknown/wrong-typed fields and would hide it).
     const selfNum = (/^(\d+)-/.exec(id) || [])[1];
