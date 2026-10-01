@@ -195,6 +195,9 @@ export function isUnsalvagedDestructiveUnpushed(entry) {
   if (!entry || !DESTRUCTIVE_LANE_ACTIONS.has(entry.action) || entry.salvagedTo) return false;
   // Litter cleanup only removes allowlisted untracked files; an unchanged HEAD loses no commits.
   if (entry.action === 'litter-delete' && entry.headBefore && entry.headBefore === entry.headAfter) return false;
+  // An explicit `unpushed: false` is the caller's stronger proof (e.g. a reclaim whose reproof says the work is
+  // preserved elsewhere); leftover dirty files / patch-equivalent commits in the snapshot must not override it.
+  if (entry.unpushed === false) return false;
   const dirty = entry.workDirtyBefore ?? entry.dirtyBefore;
   if (dirty > 0) return true;
   if (entry.headBefore && entry.headBefore === entry.headAfter) return false;

@@ -58,6 +58,15 @@ describe('remote reachability and actual destruction', () => {
     expect(lost(entry({ action: 'litter-delete', headAfter: sha, dirtyBefore: 2,
       removed: ['.pr-body.md', '.delivery-commit-msg-build.txt'], unpushedCommitsBefore: 1 }))).toBe(false);
   });
+  it('honors an explicit unpushed:false (preserved reclaim/salvage) despite dirty files or unpushed commits', () => {
+    for (const action of ['reclaim-reset', 'salvage-reset']) {
+      expect(lost(entry({ action, unpushed: false, dirtyBefore: 2 }))).toBe(false);
+      expect(lost(entry({ action, unpushed: false, workDirtyBefore: 2 }))).toBe(false);
+      expect(lost(entry({ action, unpushed: false, unpushedCommitsBefore: 1 }))).toBe(false);
+      expect(lost(entry({ action, unpushed: true, dirtyBefore: 2 }))).toBe(true);
+      expect(lost(entry({ action, unpushed: true, unpushedCommitsBefore: 1 }))).toBe(true);
+    }
+  });
   it('closes old pushed episodes through the normal clean path; retains lost commits and unknown dirty work', () => {
     const entries = [entry(), entry({ lane: 39, headBefore: 'f'.repeat(40) }),
       entry({ lane: 33, dirtyBefore: 2, unpushedCommitsBefore: 0 }),
