@@ -163,6 +163,22 @@ describe('dispatchCiHeal', () => {
     expect(routed).toBe(0);
   });
 
+  it.each([
+    ['a security-tagged card', { tags: ['security'] }, 'claude'],
+    ['a risk: high card', { tags: [], risk: 'high' }, 'claude'],
+    ['an item-less / unreadable card (fails closed)', { tags: [], risk: 'high' }, 'claude'],
+    ['a plain low-risk card', { tags: [], risk: undefined }, 'codex'],
+  ])('the DEFAULT routeHeal for %s routes %s provider', async (_n, signals, provider) => {
+    let seen;
+    const sinks = { [DISPATCH_EFFECT]: async payload => { seen = payload.routing; return { handle: 'a' }; } };
+    await dispatchCiHeal(healPlanned, {
+      readBrief, sinks, claimRoot, claimOwner: 'o', readFixClaim: () => null,
+      home: dir, checkoutExists: () => true, readPackageJson: () => ({ scripts: {} }),
+      readRoutingSignals: () => signals,
+    }).catch(() => {});
+    expect(seen?.policyRoute?.provider).toBe(provider);
+  });
+
   it('retains the claim after an indeterminate launch, releases it after a definite failure', async () => {
     const run = (error) => dispatchCiHeal(healPlanned, {
       readBrief, claimRoot, claimOwner: 'o', readFixClaim: () => null,
@@ -280,7 +296,7 @@ describe('round 2 repository repair boundary', () => {
         ? spawnDetached()
         : codexBriefDetachedProvider(request, { spawnDetached }),
     }));
-    const options = { ...base(), sinks, readBrief: () => brief + ' {{REASON}}' };
+    const options = { ...base(), sinks, readBrief: () => brief + ' {{REASON}}', readRoutingSignals: () => ({ tags: [], risk: undefined }) };
     const key = { repo: 'we', pr: planned.pr, kind: 'ci-heal', lockRoot: claimRoot };
     const launch = dispatchCiHeal(planned, options);
     if (failure === 'ENOENT') {

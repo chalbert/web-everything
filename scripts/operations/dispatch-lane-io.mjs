@@ -1780,7 +1780,10 @@ export function defaultClaudeProvider(request, { spawnAgent = (argv, opts) => de
     table: request.table ?? null,
     modelReason: request.modelReason ?? null,
   });
-  request.reportModel?.(request.policyRoute ? resolvePolicyModel('claude', extractModelFlag(argv).value) : extractModelFlag(argv).value);
+  // An accepted off-catalog reasoned pin must not throw at report time (after buildAgentArgv already took it): keep the raw value.
+  let reportedModel = extractModelFlag(argv).value;
+  if (request.policyRoute) { try { reportedModel = resolvePolicyModel('claude', reportedModel); } catch { /* keep the raw pin */ } }
+  request.reportModel?.(reportedModel);
   request.reportEffort?.(argv.find(arg => arg.startsWith('--effort='))?.slice(9) ?? argv[argv.indexOf('--effort') + 1]);
   const stdout = String(spawnAgent(argv, { cwd: request.cwd }) ?? '');
   return parseBackgroundedId(stdout) || request.sessionId;

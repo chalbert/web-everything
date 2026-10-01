@@ -47,7 +47,7 @@ import { armSelfReexecOnFastForward } from '../lib/main-staleness.mjs';
 import { repoKeyForSlug } from '../lib/constellation-repos.mjs';
 import { repoProfile, briefTokensForRepo } from '../lib/repo-profile.mjs';
 import { resolvePrWorkUnit } from '../conveyor/pr-work-unit.mjs';
-import { freeLaneNumbers, fetchPrDiffPaths, queueBudgetFrom, queueCapWhy } from '../conveyor/reconcile-fix-dispatch.mjs'; // queueBudgetFrom/queueCapWhy: card xkyw1x4
+import { freeLaneNumbers, fetchPrDiffPaths, cardRoutingSignals, queueBudgetFrom, queueCapWhy } from '../conveyor/reconcile-fix-dispatch.mjs'; // queueBudgetFrom/queueCapWhy: card xkyw1x4
 import { runReconcilePass } from '../conveyor/reconcile-pass.mjs';
 import { readUnsupported, recordUnsupported } from '../conveyor/unsupported-repo.mjs';
 import { readPrsFromFile } from '../conveyor/open-pr-fetch.mjs';
@@ -88,10 +88,14 @@ export async function dispatchCiHeal(planned, {
   // read at this io edge (the same router the tick uses). Its `probationWorker` rides the effect payload; the
   // sink's router launches it when the gate is open, the heal is not critical, and launching is on. Never throws:
   // an unroutable heal simply carries no worker and takes the unchanged Claude path.
+  readRoutingSignals = cardRoutingSignals,
   routeHeal = (p) => {
     try {
+      // Same critical-work inputs as `dispatchFix`: the card's tags/risk, failing CLOSED (high risk → native Claude)
+      // for an item-less PR or an unreadable card — never a Codex heal of security/high-risk work.
+      const signals = readRoutingSignals(root, p.itemNum);
       return decideDispatchRoute(
-        { kind: 'ci-heal', scopePaths: p.scope ?? [], reason: p.reason ?? 'red-ci' },
+        { kind: 'ci-heal', scopePaths: p.scope ?? [], reason: p.reason ?? 'red-ci', tags: signals.tags, risk: signals.risk },
         { scorecards: defaultReadScorecards() },
       );
     } catch { return null; }
@@ -146,7 +150,7 @@ export async function dispatchCiHeal(planned, {
     }, BRIEF_REQUIRED_BY_KIND['ci-heal'], [...OPTIONAL_BRIEF_PLACEHOLDERS, 'ITEM_NUM', 'SCOPE'], REPO_AWARE_VALUE_PATTERNS);
     // Sibling repos stay on the native Claude path: the gate's statute/gateSelf prefixes are WE-relative and no
     // sibling declares its own critical surface yet, so a sibling heal cannot be judged non-critical safely.
-    const route = routeRepairForRepo(repo, () => routeHeal({ scope: planned.scope, reason }));
+    const route = routeRepairForRepo(repo, () => routeHeal({ scope: planned.scope, reason, itemNum: planned.itemNum }));
 
     const out = await sinks[DISPATCH_EFFECT]({
       launchKind: 'ci-heal', laneRef: planned.laneRef, prompt: withAltBranchHint(prompt, planned.altBranch), sessionSlug, num: planned.itemNum ?? undefined, lane: planned.lane, scope: planned.scope,
