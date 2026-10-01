@@ -1,3 +1,4 @@
+import { relatedReportRefs } from '../lib/related-report.cjs';
 /**
  * @file scripts/__tests__/check-standards-rules-registry-validators.test.mjs
  * @description Split from check-standards-rules.test.mjs (#3383 test-speedup): the lifecycle/tier/
@@ -536,7 +537,7 @@ describe('real data stays clean (per family)', () => {
     const REPORTS = join(ROOT, 'reports');
     const reportFiles = existsSync(REPORTS) ? readdirSync(REPORTS).filter((f) => f.endsWith('.md')) : [];
     const researchIds = new Set(research.map((r) => r.id).filter(Boolean));
-    const backlogReportRefs = new Set(backlog.map((b) => b.relatedReport).filter(Boolean).map((p) => p.replace(/^reports\//, '')));
+    const backlogReportRefs = relatedReportRefs(backlog);
     const { errors } = validateReportsNotHidden(reportFiles, { researchIds, backlogReportRefs });
     expect(errors.map((e) => e.message)).toEqual([]);
   });

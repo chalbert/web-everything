@@ -92,6 +92,8 @@ import {
 import { tmpdir, homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 
+import { admissionLockRoot } from './readiness/heavy-admission.mjs';
+
 import {
   CODEX_EFFORT_MAP, CODEX_MODEL, CODEX_TIER_EFFORT, assertCodexModel, resolveCodexEffort,
 } from './lib/codex-model-routing.mjs';
@@ -152,6 +154,8 @@ export {
  *   false — see file header for why this script's default differs from the judge role's.
  * @param {string[]} [opts.addDirs] - forwarded as repeated `--add-dir`, for a task that legitimately needs to
  *   touch more than one directory (rare; most callers leave this empty).
+ * @param {string[]} [opts.writableRoots] - edit-only gitdir, admission lock root and private temp root.
+ * @param {string} [opts.tempRoot] - edit-only fixture temp directory, pinned in the child shell environment.
  * @returns {string[]} argv AFTER the `codex` binary name.
  */
 export function buildCodexDirectTaskArgv({
@@ -161,6 +165,8 @@ export function buildCodexDirectTaskArgv({
   effort = CODEX_TIER_EFFORT.sonnet,
   ephemeral = false,
   addDirs = [],
+  writableRoots = [],
+  tempRoot,
   review = false,
 } = {}) {
   if (typeof cwd !== 'string' || !cwd.trim()) {
@@ -195,6 +201,20 @@ export function buildCodexDirectTaskArgv({
       throw new TypeError(`codex-direct-task: \`effort\` must be one of ${Object.keys(CODEX_EFFORT_MAP).join('|')}, got ${JSON.stringify(effort)}`);
     }
     argv.push('-c', `model_reasoning_effort=${mapped}`);
+  }
+  // #4665 — grant only the edit job's bookkeeping/fixture roots, never the whole lane pool.
+  // JSON string/array encoding is also valid TOML for these paths; argv is passed without a shell.
+  if (!review) {
+    if (!Array.isArray(writableRoots) || writableRoots.some((p) => typeof p !== 'string' || !p.trim())) {
+      throw new TypeError('codex-direct-task: `writableRoots` must contain non-empty paths');
+    }
+    argv.push('-c', 'sandbox_workspace_write.network_access=true');
+    if (writableRoots.length) argv.push('-c', `sandbox_workspace_write.writable_roots=${JSON.stringify(writableRoots)}`);
+    if (tempRoot) {
+      for (const name of ['TMPDIR', 'TMP', 'TEMP']) {
+        argv.push('-c', `shell_environment_policy.set.${name}=${JSON.stringify(tempRoot)}`);
+      }
+    }
   }
   // NO POSITIONAL PROMPT — see file header. Everything rides stdin, closed via `.end()`.
   return argv;
@@ -622,6 +642,10 @@ export async function runCodexDirectExec({
   stream = true,
   spawnFn = nodeSpawn,
   cli = CODEX_CLI,
+  gitDir = join(dir, '.git'),
+  writableRoots = [],
+  tempRoot,
+  env = process.env,
   review = false,
 } = {}) {
   // Inside `.git/` — NEVER inside the working tree. A real live run against this very script found the bug
@@ -629,15 +653,16 @@ export async function runCodexDirectExec({
   // `captureDiff`'s output with the SCRIPT's own bookkeeping instead of only the task's real changes. Mirrors
   // `we:scripts/lane-pool.mjs`'s own `DEPS_MARKER`/`LEASE_MARKER` convention — inside `.git/` is "never
   // tracked or git-cleaned... never seen by `git status --porcelain`" for exactly this reason.
-  const outputLastMessageFile = join(dir, '.git', 'codex-direct-task-last-message.txt');
-  const argv = buildCodexDirectTaskArgv({ cwd: dir, outputLastMessageFile, model, effort, ephemeral, review });
+  const outputLastMessageFile = join(gitDir, 'codex-direct-task-last-message.txt');
+  const argv = buildCodexDirectTaskArgv({ cwd: dir, outputLastMessageFile, model, effort, ephemeral, review, writableRoots, tempRoot });
   const prompt = buildCodexPrompt(task, { review });
   writeFileSync(logFile, ''); // truncate/create — this run owns the file from byte 0.
 
   return new Promise((resolvePromise, reject) => {
     let child;
     try {
-      child = spawnFn(cli, argv, { cwd: dir, stdio: ['pipe', 'pipe', 'pipe'], detached: true });
+      child = spawnFn(cli, argv, { cwd: dir, stdio: ['pipe', 'pipe', 'pipe'], detached: true,
+        env: !review && tempRoot ? { ...env, TMPDIR: tempRoot, TMP: tempRoot, TEMP: tempRoot } : env });
     } catch (e) {
       reject(new Error(`codex-direct-task: could not start \`${cli}\`: ${e.message}`));
       return;
@@ -785,7 +810,7 @@ export async function codexDirectTask({
   const startSha = execFn('git', ['-C', targetDir, 'rev-parse', 'HEAD']).trim();
   // Same `.git/`-hiding reasoning as `outputLastMessageFile` above — the default log file must never leak
   // into `captureDiff`'s output. A caller-supplied `--log=<path>` is trusted as-is (their choice, their risk).
-  const gitDir = logFile ? null : execFn('git', ['-C', targetDir, 'rev-parse', '--absolute-git-dir']).trim();
+  const gitDir = execFn('git', ['-C', targetDir, 'rev-parse', '--absolute-git-dir']).trim();
   const resolvedLogFile = logFile || join(gitDir, 'codex-direct-task.jsonl');
   mkdirSync(dirname(resolvedLogFile), { recursive: true });
 
@@ -794,8 +819,13 @@ export async function codexDirectTask({
   // `buildCodexDirectTaskArgv` defaults on its own when `model` is omitted).
   const resolvedEffort = resolveCodexEffort({ tier, effort });
 
+  // A private temp root isolates concurrent fixture repositories. Keep it for manual resume/debugging,
+  // just like the persisted Codex session and log; review mode allocates no new writable roots.
+  const tempRoot = review ? undefined : mkdtempSync(join(tmpdir(), 'we-codex-task-tmp-'));
+  const writableRoots = review ? [] : [gitDir, resolve(admissionLockRoot(resolve(targetDir), env)), tempRoot];
   const run = await runCodexDirectExec({
     dir: targetDir, task, model, effort: resolvedEffort, ephemeral, timeoutMs, logFile: resolvedLogFile, stream, spawnFn, review,
+    gitDir, writableRoots, tempRoot, env,
   });
   const events = parseJsonlEvents(run.stdout);
   const summary = summarizeEvents(events);

@@ -131,7 +131,7 @@ export function recordCodexRunScorecard({
  */
 export function recordAntigravityRunScorecard({
   transcriptFile, dispatchKind, kind = dispatchKind, role, provider = 'antigravity', model, effort = null,
-  item = null, handle = null,
+  item = null, handle = null, requestedModel, servedModel, servedBackend, modelEvidence, quotaState, quotaResetsAt, fallbackDecision,
 } = {}, {
   scoreTranscript = scoreAntigravityJudgeTranscriptFile,
   classify = classifySubject,
@@ -148,7 +148,7 @@ export function recordAntigravityRunScorecard({
       handle,
       subjectClass,
       provider,
-      model,
+      model, requestedModel, servedModel, servedBackend, modelEvidence, quotaState, quotaResetsAt, fallbackDecision,
       effort,
       dispatchKind,
       probationStatus,

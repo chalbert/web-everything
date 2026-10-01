@@ -130,7 +130,20 @@ jobs:
       # repo PAT/App-token secret is provisioned for this step (a credential action, out of an agent's
       # reach — file/track separately), land it via `gh workflow run ci.yml --ref <branch>` to backfill
       # the check, or an admin merge override.
+      - name: Name the changed baselines
+        id: baseline-title
+        working-directory: web-everything
+        run: |
+          node --input-type=module <<'JS'
+          import { execFileSync } from 'node:child_process';
+          import { appendFileSync } from 'node:fs';
+          import { visualBaselineTitle } from './scripts/operations/machine-pr-title.mjs';
+          const paths = execFileSync('git', ['ls-files', '--modified', '--deleted', '--others', '--exclude-standard', '-z', '--', 'tests/visual/rendered-site-visual.spec.ts-snapshots/'], { encoding: 'utf8' }).split('\0').filter(Boolean);
+          appendFileSync(process.env.GITHUB_OUTPUT, `title=${visualBaselineTitle(paths) ?? ''}\n`);
+          JS
+
       - name: Open baseline-refresh PR
+        if: steps.baseline-title.outputs.title != ''
         uses: peter-evans/create-pull-request@22a9089034f40e5a961c8808d113e2c98fb63676 # v7
         with:
           path: web-everything
@@ -138,8 +151,8 @@ jobs:
           base: ${{ github.event.inputs.branch || 'main' }}
           branch: visual-baselines/refresh-${{ github.run_id }}
           add-paths: tests/visual/rendered-site-visual.spec.ts-snapshots/
-          commit-message: "chore(visual): refresh linux baselines [update-visual-baselines workflow]"
-          title: "chore(visual): refresh linux baselines"
+          commit-message: ${{ steps.baseline-title.outputs.title }}
+          title: ${{ steps.baseline-title.outputs.title }}
           body: |
             Regenerated `-chromium-linux` Playwright snapshot baselines via the
             "Update visual baselines (linux)" workflow (run [`${{ github.run_id }}`](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})), against base branch `${{ github.event.inputs.branch || 'main' }}`.

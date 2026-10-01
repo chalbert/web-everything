@@ -9,30 +9,13 @@
  * change between two observations is what was spent in between. Daemon calls made through `runGhSync` carry the
  * same `rl` since #4375; a line without one (capture off, a non-piped stderr, an older line) can only be ESTIMATED.
  *
- * THREE COUNTS, NEVER MIXED:
- *   - invocations — one per logical gh command (retries share an `inv`; a nested shim record carrying
- *     `outer: <inv>` joins its outer record). Exact.
- *   - HTTP responses — the `rl` elements. Exact for passthrough calls, zero for the rest.
- *   - points — only for a window with a real header observation to diff against. Per window, observations are
- *     sorted by `used`; a response's ATTRIBUTED cost is its `used` minus the previous observation's, capped at
- *     {@link MAX_ATTRIBUTED_PER_RESPONSE}. The gap's RESIDUAL (delta − attributed) is where invocations with no
- *     `rl` that fell in that gap get their ESTIMATED points (learned per-op average, else a static guess) —
- *     scaled down to fit, never added on top. What is left is UNATTRIBUTED. So, per observable gap,
- *     attributed + estimated + unattributed = the bucket's `used` change, always.
- *   - UNKNOWN — an invocation with nothing observable to diff against (a pre-#4309 log line, capture switched
- *     off, a gap-less stretch). Reported as a count, never coerced to an estimate or to a zero.
- *
- * READ "ATTRIBUTED" AS A DELTA-BASED ESTIMATE, NOT A CEILING: calls that bypass the throttle entirely (a
- * daemon's bare `execFileSync('gh')`, the shim's unthrottled fallback) spend from the same bucket, and a gap's
- * whole delta is attributed to the observed response that closes it (only the per-response cap limits this).
- * Bypass traffic therefore lands in `unattributed` only when it falls in a gap with no other logged response.
- *
- * The first observation of a window has nothing to diff against: it becomes the baseline (its own cost is
- * unknown), and baselines carry across the hourly-persistence boundary (the persisted cursor's `baselines`) —
- * neither edge is treated as a fresh start from an implicit zero.
+ * Counter movement is bucket evidence, never exclusive per-caller cost. Only in-band costs
+ * are attributed; legacy response costs remain unknown. Estimates consume gap residuals.
+ * Installation-labelled identities stay separate; legacy `app` means unknown installation.
+ * Reports expose read coverage and baseline windows, not a claim of complete API capture.
  *
  * Usage:
- *   node scripts/lib/gh-spend.mjs report [--hours=24] [--by=caller|op|caller+op] [--json] [--log=PATH]
+ *   node scripts/lib/gh-spend.mjs report [--hours=24 | --start=ISO --end=ISO] [--by=caller|op|caller+op] [--json] [--log=PATH]
  */
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, renameSync, statSync, writeFileSync, appendFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -42,7 +25,7 @@ import { pathToFileURL } from 'node:url';
 import { classifyGhResource, ghThrottleLockRoot, ghThrottleLogPath } from './gh-throttle.mjs';
 
 export const HOUR_MS = 60 * 60_000;
-/** Cap on the points one HTTP response can be attributed — no single GitHub request costs more in practice. */
+/** Legacy export retained for consumers; never used to infer per-response cost. */
 export const MAX_ATTRIBUTED_PER_RESPONSE = 50;
 /** How far back measured calls teach the per-op average used to estimate unmeasured ones. */
 export const LEARN_WINDOW_MS = 24 * HOUR_MS;
@@ -106,24 +89,30 @@ function groupInvocations(entries) {
     const knownResponses = new Set();
     for (const r of g.records) {
       if (!Array.isArray(r.e.rl)) continue;
+      const seenInRecord = [];
       for (const x of r.e.rl) {
-        if (Number.isInteger(x.cost) && x.cost >= 0) {
-          const signature = JSON.stringify([x.res, x.reset, x.used, x.cost, x.shape]);
+        if (isObservation(x)) {
+          const signature = JSON.stringify([r.e.id || '?', x.res, x.reset, x.used, x.cost, x.shape]);
           if (knownResponses.has(signature)) continue; // outer capture and nested shim echo
-          knownResponses.add(signature);
+          seenInRecord.push(signature);
         }
-        responses.push({ ...x, t: r.t });
+        responses.push({ ...x, id: r.e.id || '?', t: r.t });
       }
+      for (const signature of seenInRecord) knownResponses.add(signature);
     }
     // MEASURED means at least one usable header observation — an empty or malformed `rl` is as unmeasured as an
     // absent one (PR #2851 review), never an "attributed" invocation that silently costs zero.
-    const observations = responses.filter(isObservation).length;
-    const idRec = g.records.find((r) => r.e.id) || g.records[0];
-    out.push({
-      key: g.key, ts, id: idRec.e.id || '?', resource: entryResource(head), caller: head.caller || 'unknown',
-      op: String(head.op || '?'), measured: observations > 0, observations, responses, attributedByRes: dict(),
-      baselineOnly: 0, kind: null, estimated: 0, estimateRaw: 0,
-    });
+    const identities = [...new Set(responses.length ? responses.map((r) => r.id) : [head.id || '?'])];
+    for (const [index, id] of identities.entries()) {
+      const own = responses.filter((r) => r.id === id);
+      const observations = own.filter(isObservation).length;
+      out.push({
+        key: g.key, ts, id, requests: index === 0 ? 1 : 0,
+        resource: entryResource(head), caller: head.caller || 'unknown',
+        op: String(head.op || '?'), measured: observations > 0, observations, responses: own,
+        attributedByRes: dict(), baselineOnly: 0, kind: null, estimated: 0, estimateRaw: 0,
+      });
+    }
   }
   return out;
 }
@@ -161,16 +150,17 @@ export function attributeSpend(entries, { baselines = {}, learnedOpCost = {}, no
       if (!isObservation(r)) continue;
       const wk = `${inv.id}|${r.res}|${r.reset}`;
       if (!windows.has(wk)) windows.set(wk, []);
-      windows.get(wk).push({ used: r.used, t: r.t, res: r.res, cost: r.cost, inv });
+      windows.get(wk).push({ used: r.used, t: r.t, res: r.res, cost: r.cost, limit: r.limit, inv });
     }
   }
   const gaps = [];
   const baselinesOut = { ...baselines };
   for (const [wk, obs] of windows) {
-    obs.sort((a, b) => a.used - b.used || a.t - b.t);
+    obs.sort((a, b) => a.t - b.t || a.used - b.used);
     const carried = baselines[wk];
-    let prev = carried && Number.isFinite(carried.used) && carried.used <= obs[0].used ? carried : null;
+    let prev = carried && Number.isFinite(carried.used) && carried.t <= obs[0].t ? carried : null;
     for (const o of obs) {
+      if (prev && o.used < prev.used) { o.inv.stale = true; continue; }
       if (!prev) {
         if (Number.isInteger(o.cost) && o.cost >= 0 && o.used >= o.cost) prev = { used: o.used - o.cost, t: o.t };
         else { o.inv.baselineOnly += 1; prev = o; continue; }
@@ -178,7 +168,7 @@ export function attributeSpend(entries, { baselines = {}, learnedOpCost = {}, no
       const delta = Math.max(0, o.used - prev.used);
       // In-band cost belongs to THIS response; shared-counter deltas do not.
       const attributed = Number.isInteger(o.cost) && o.cost >= 0
-        ? Math.min(delta, o.cost) : Math.min(delta, MAX_ATTRIBUTED_PER_RESPONSE);
+        ? Math.min(delta, o.cost) : 0;
       // Caller columns report the actual response cost even if overlapping counter
       // observations leave a smaller gap. Totals still use only observed bucket movement.
       const callerCost = Number.isInteger(o.cost) && o.cost >= 0 ? o.cost : attributed;
@@ -187,13 +177,13 @@ export function attributeSpend(entries, { baselines = {}, learnedOpCost = {}, no
       gaps.push({ id: o.inv.id, res: o.res, fromT: prev.t, toT: o.t, hour: hourStart(o.inv.ts, hourMs), delta, attributed, estimated: 0, unattributed: delta - attributed, members: [], closer: o.inv });
       prev = o;
     }
-    const last = obs[obs.length - 1];
-    baselinesOut[wk] = { used: last.used, t: last.t };
+    const last = prev;
+    baselinesOut[wk] = { used: last.used, t: last.t, ...(Number.isFinite(last.limit) ? { limit: last.limit } : {}) };
   }
   // 2. Measured invocations are attributed (unless every observation they carried was a window's first, bare baseline).
   for (const inv of invocations) {
     if (!inv.measured) continue;
-    inv.kind = inv.baselineOnly === inv.observations ? 'unknown' : 'attributed';
+    inv.kind = inv.responses.every((r) => Number.isInteger(r.cost) && r.cost >= 0) && !inv.stale ? 'attributed' : 'unknown';
   }
   // 3. Unmeasured invocations get an estimate ONLY inside an observed gap's residual (same identity, resource
   //    and hour), scaled down to fit; anything outside every observed gap is UNKNOWN.
@@ -265,7 +255,7 @@ export function rollupSpendDetailed(entries, { hourMs = HOUR_MS, ...rest } = {})
     const k = `${hourMs0}|${id}|${res}`;
     if (!rows.has(k)) {
       rows.set(k, {
-        hour: new Date(hourMs0).toISOString(), identity: id, resource: res, unknown: true,
+        accountingVersion: 2, hour: new Date(hourMs0).toISOString(), identity: id, resource: res, unknown: true,
         bucketUsed: 0, attributed: 0, unattributed: 0, estimated: 0, unknownRequests: 0, requests: 0, responses: 0,
         byCaller: dict(), byOp: dict(), byCallerOp: dict(), measuredByOp: dict(),
       });
@@ -285,11 +275,11 @@ export function rollupSpendDetailed(entries, { hourMs = HOUR_MS, ...rest } = {})
       bump(r.byCallerOp, `${inv.caller} ${inv.op}`, patch);
     };
     const own = row(h, inv.id, inv.resource);
-    own.requests += 1;
+    own.requests += inv.requests;
     own.responses += inv.responses.length;
-    if (inv.kind === 'unknown') own.unknownRequests += 1;
+    if (inv.kind === 'unknown') own.unknownRequests += inv.requests;
     dims(own, {
-      requests: 1, responses: inv.responses.length, unknown: inv.kind === 'unknown' ? 1 : 0,
+      requests: inv.requests, responses: inv.responses.length, unknown: inv.kind === 'unknown' ? inv.requests : 0,
       estimated: inv.kind === 'estimated' ? inv.estimated : 0,
     });
     // Attributed points land on the row of the RESOURCE each response spent (a `pr create` can hit both buckets).
@@ -306,7 +296,7 @@ export function rollupSpendDetailed(entries, { hourMs = HOUR_MS, ...rest } = {})
   }
   const out = [...rows.values()].map((r) => (r.unknown ? { ...r, bucketUsed: null, attributed: null, unattributed: null, estimated: null } : r));
   out.sort((a, b) => a.hour.localeCompare(b.hour) || a.identity.localeCompare(b.identity) || a.resource.localeCompare(b.resource));
-  return { rows: out, baselines, opCost };
+  return { rows: out, baselines, opCost, staleInvocations: invocations.filter((i) => i.stale).length };
 }
 
 /** The persisted row key — one row per closed hour per identity per resource. */
@@ -318,7 +308,7 @@ export function spendRowKey(r) {
 export function learnedOpCostFromRows(rows, { now = Date.now(), windowMs = LEARN_WINDOW_MS } = {}) {
   const out = {};
   for (const r of rows || []) {
-    if (now - Date.parse(r.hour) > windowMs) continue;
+    if (r.accountingVersion !== 2 || now - Date.parse(r.hour) > windowMs) continue;
     for (const [k, v] of Object.entries(r.measuredByOp || {})) out[k] = { pts: (out[k]?.pts || 0) + v.attributed, n: (out[k]?.n || 0) + v.requests };
   }
   return out;
@@ -445,26 +435,58 @@ export function persistSpendHours({ logPath = ghThrottleLogPath(ghThrottleLockRo
   return { rowsWritten: fresh.length, consumedLines: consumed.length, offset: end };
 }
 
-/** Rows for the last `hours`: persisted closed hours, plus a live rollup of what the cursor has not consumed yet. */
-export function collectSpendRows({ logPath = ghThrottleLogPath(ghThrottleLockRoot()), hours = 24, now = Date.now(), maxBytes = 16 * 1024 * 1024, hourMs = HOUR_MS } = {}) {
-  const { hourlyPath, cursorPath } = spendPaths(logPath);
-  const since = hourStart(now, hourMs) - (hours - 1) * hourMs;
-  const persisted = readSpendRows(hourlyPath);
-  const keys = new Set(persisted.map(spendRowKey));
-  let live = [];
-  if (existsSync(logPath)) {
-    const st = statSync(logPath);
-    const { size } = st;
-    const cursor = readCursor(cursorPath);
-    let offset = resumeOffset(logPath, st, cursor);
-    let skipFirstPartial = false;
-    if (size - offset > maxBytes) { offset = size - maxBytes; skipFirstPartial = true; }
-    const entries = completeLines(readTailBuf(logPath, offset, size), offset, { skipFirstPartial }).map((l) => l.entry).filter(Boolean);
-    live = rollupSpend(entries, { baselines: cursor.baselines, learnedOpCost: learnedOpCostFromRows(persisted, { now }), now, hourMs })
-      .filter((r) => !keys.has(spendRowKey(r)));
-  }
-  return [...persisted, ...live].filter((r) => Date.parse(r.hour) >= since)
+/** Compatibility array API; use collectSpendReport for interval and coverage metadata. */
+export function collectSpendRows(opts = {}) {
+  return collectSpendReport(opts).rows;
+}
+
+/** Bounded raw replay. Explicit intervals never substitute whole persisted hours for partial hours. */
+export function collectSpendReport({ logPath = ghThrottleLogPath(ghThrottleLockRoot()), hours = 24,
+  now = Date.now(), start, end = now, maxBytes = 16 * 1024 * 1024, hourMs = HOUR_MS } = {}) {
+  const explicit = start !== undefined;
+  const until = typeof end === 'number' ? end : Date.parse(end);
+  const since = explicit ? (typeof start === 'number' ? start : Date.parse(start))
+    : hourStart(until, hourMs) - (hours - 1) * hourMs;
+  if (!Number.isFinite(since) || !Number.isFinite(until) || since > until || (explicit && since === until)) throw new Error('Invalid spend interval: start must precede end');
+  const { hourlyPath } = spendPaths(logPath);
+  const size = existsSync(logPath) ? statSync(logPath).size : 0;
+  const offset = Math.max(0, size - maxBytes);
+  const lines = size ? completeLines(readTailBuf(logPath, offset, size), offset, { skipFirstPartial: offset > 0 }) : [];
+  const entries = lines.map((l) => l.entry).filter((e) => e && Number.isFinite(Date.parse(e.ts)) && Date.parse(e.ts) < until);
+  const before = entries.filter((e) => Date.parse(e.ts) < since);
+  const selected = entries.filter((e) => Date.parse(e.ts) >= since);
+  const { baselines } = attributeSpend(before, { now: until });
+  const detail = rollupSpendDetailed(selected, { baselines, now: until, hourMs });
+  const keys = new Set(detail.rows.map(spendRowKey));
+  const hourlySize = existsSync(hourlyPath) ? statSync(hourlyPath).size : 0;
+  const persisted = explicit ? [] : readSpendRows(hourlyPath).filter((r) =>
+    Date.parse(r.hour) >= since && Date.parse(r.hour) + hourMs <= until);
+  // Legacy rows retain bucket evidence, but their old delta attribution cannot become measured costs.
+  const historical = persisted.filter((r) => !keys.has(spendRowKey(r))).map((r) => {
+    if (r.accountingVersion === 2) return { ...r, provenance: 'persisted' };
+    const migrated = { ...r, provenance: 'persisted-legacy', attributed: r.unknown ? null : 0,
+      estimated: r.unknown ? null : 0, unattributed: r.bucketUsed, unknownRequests: r.requests, measuredByOp: {} };
+    for (const field of ['byCaller', 'byOp', 'byCallerOp']) migrated[field] = Object.fromEntries(
+      Object.entries(r[field] || {}).map(([k, d]) => [k, { ...d, attributed: 0, estimated: 0, unknown: d.requests }]));
+    return migrated;
+  });
+  const unreadBytes = size - (lines.at(-1)?.end ?? offset);
+  const skippedBytes = lines[0]?.start ?? offset;
+  const rows = [...historical, ...detail.rows.map((r) => ({ ...r, provenance: 'live' }))]
     .sort((a, b) => a.hour.localeCompare(b.hour) || a.identity.localeCompare(b.identity) || a.resource.localeCompare(b.resource));
+  return { rows, interval: { start: new Date(since).toISOString(), end: new Date(until).toISOString(),
+    semantics: explicit ? 'explicit-half-open' : 'UTC-clock-hours-half-open' },
+    coverage: { logPath, hourlyPath, sizeBytes: size, skippedBytes, unreadBytes,
+      hourlySizeBytes: hourlySize, hourlyTailTruncated: !explicit && hourlySize > 4 * 1024 * 1024,
+      staleInvocations: detail.staleInvocations,
+      expiredResetObservations: selected.reduce((n, e) => n + (e.rl || []).filter((r) => Number.isFinite(r.reset) && r.reset * 1000 < Date.parse(e.ts)).length, 0),
+      invalidLines: lines.filter((l) => !l.entry || !Number.isFinite(Date.parse(l.entry.ts))).length,
+      readComplete: existsSync(logPath) && skippedBytes === 0 && unreadBytes === 0 && lines.every((l) => l.entry && Number.isFinite(Date.parse(l.entry.ts))),
+      captureComplete: false, persistedRows: historical.length,
+      persistedLiveOverlap: persisted.filter((r) => keys.has(spendRowKey(r))).length,
+      baselines, resetWindows: detail.baselines,
+      baselineCoverage: 'Only observed counters; gaps crossing the start and unobserved edges have unknown interval cost',
+      total: rows.some((r) => !r.unknown) ? 'observed-only' : 'unknown' } };
 }
 
 /** PURE: aggregate rows per `(identity, resource)` and per the chosen dimension. */
@@ -486,6 +508,7 @@ export function summarizeSpendRows(rows, { by = 'caller' } = {}) {
   }
   return [...sections.values()].map((s) => ({
     ...s,
+    ...(s.unknownHours === s.hours ? { bucketUsed: null, attributed: null, estimated: null, unattributed: null } : {}),
     dims: Object.entries(s.dims).map(([name, d]) => ({ name, ...d }))
       .sort((a, b) => (b.attributed + b.estimated) - (a.attributed + a.estimated) || b.requests - a.requests),
   }));
@@ -494,9 +517,15 @@ export function summarizeSpendRows(rows, { by = 'caller' } = {}) {
 const r1 = (n) => (n == null ? '—' : String(Math.round(n * 10) / 10));
 
 /** PURE: the human report text. */
-export function renderSpendReport(sections, { hours, by }) {
-  const out = [`GitHub API spend — last ${hours}h, by ${by}`];
-  if (!sections.length) return `${out[0]}\n(no gh calls logged in range)\n`;
+export function renderSpendReport(sections, { hours, by, interval, coverage } = {}) {
+  const out = [`GitHub API spend — ${interval?.semantics === 'explicit-half-open' ? 'explicit interval' : `${hours} UTC clock hours`}, by ${by}`];
+  if (interval) out.push(`[${interval.start}, ${interval.end}) — ${interval.semantics}`);
+  if (coverage) out.push(`Log: ${coverage.logPath}; hourly: ${coverage.hourlyPath}`,
+    `Read coverage: ${coverage.readComplete ? 'complete file read' : 'INCOMPLETE'}; skipped ${coverage.skippedBytes} bytes; unread ${coverage.unreadBytes} bytes; persisted rows ${coverage.persistedRows}; persisted/live overlap ${coverage.persistedLiveOverlap}`,
+    `API capture completeness: unknown. ${coverage.baselineCoverage}`,
+    `Hourly tail truncated: ${coverage.hourlyTailTruncated}; stale invocations: ${coverage.staleInvocations}; observations after their reset: ${coverage.expiredResetObservations}`,
+    `Reset windows: ${JSON.stringify(coverage.resetWindows)}; preceding baselines: ${JSON.stringify(coverage.baselines)}`);
+  if (!sections.length) return `${out.join('\n')}\n(no gh calls observed in range; spend unknown)\n`;
   for (const s of sections) {
     out.push('', `[${s.identity} · ${s.resource}] ${s.requests} invocations · ${s.responses} HTTP responses · ${s.hours - s.unknownHours}/${s.hours} hours observable`);
     out.push(s.hours - s.unknownHours
@@ -513,7 +542,7 @@ export function renderSpendReport(sections, { hours, by }) {
       out.push(`  ${d.name.padEnd(w)}  ${pts(d.attributed).padStart(11)}  ${pts(d.estimated).padStart(9)}  ${String(d.unknown).padStart(11)}  ${String(d.requests).padStart(11)}  ${String(d.responses).padStart(9)}`);
     }
   }
-  out.push('', '* attributed uses in-band rateLimit.cost where recorded; legacy/unknown costs remain delta estimates, never a success metric. Gate on total App GraphQL bucketUsed.');
+  out.push('', '* attributed uses only in-band rateLimit.cost; legacy costs are UNKNOWN. Bucket movement is observed evidence, not a complete installation budget. Legacy app identity means unknown installation.');
   return out.join('\n') + '\n';
 }
 
@@ -529,16 +558,17 @@ function parseFlags(argv) {
 function main(argv) {
   const [cmd, ...rest] = argv;
   if (cmd !== 'report') {
-    process.stderr.write('usage: node scripts/lib/gh-spend.mjs report [--hours=24] [--by=caller|op|caller+op] [--json] [--log=PATH]\n');
+    process.stderr.write('usage: node scripts/lib/gh-spend.mjs report [--hours=24 | --start=ISO --end=ISO] [--by=caller|op|caller+op] [--json] [--log=PATH]\n');
     process.exitCode = 2;
     return;
   }
   const flags = parseFlags(rest);
   const hours = Math.max(1, Math.floor(Number(flags.hours) || 24));
   const by = ['caller', 'op', 'caller+op'].includes(flags.by) ? flags.by : 'caller';
-  const rows = collectSpendRows({ ...(flags.log ? { logPath: flags.log } : {}), hours });
+  const report = collectSpendReport({ ...(flags.log ? { logPath: flags.log } : {}), hours, ...(flags.start ? { start: flags.start } : {}), ...(flags.end ? { end: flags.end } : {}) });
+  const { rows } = report;
   const sections = summarizeSpendRows(rows, { by });
-  process.stdout.write(flags.json ? `${JSON.stringify({ hours, by, sections, rows }, null, 2)}\n` : renderSpendReport(sections, { hours, by }));
+  process.stdout.write(flags.json ? `${JSON.stringify({ hours, by, sections, ...report }, null, 2)}\n` : renderSpendReport(sections, { hours, by, ...report }));
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] || '').href) main(process.argv.slice(2));

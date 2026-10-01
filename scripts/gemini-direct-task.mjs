@@ -56,7 +56,7 @@
  *
  * Events carry `event`, not Codex's `type`. Completed step_update tools carry tool_name/tool_info;
  * only the last result carries terminal status, final response/error and inline token usage. No result
- * means terminal:null, including killed runs. No USD or quota signal exists; no rollout-file lookup.
+ * means terminal:null, including killed runs. No USD figure exists; quota failures are reported through terminal errors/stderr.
  * No model/effort recommendation has been validated for THIS open-ended coding-task role. Unlike Codex's
  * ratified #x8wbivt pin, there is no default pin or invented tier ladder: model/effort are optional
  * passthroughs. agy validates model/effort combinations itself; judge-role results do not validate this role.
@@ -82,6 +82,7 @@
  *   node scripts/gemini-direct-task.mjs --help
  */
 
+import { pickAgyEvidence, agyRunEvidence, readAgyHold, saveAgyHold } from './lib/antigravity-run-evidence.mjs';
 import { spawn as nodeSpawn, execFileSync } from 'node:child_process';
 import { mkdtempSync, existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -408,6 +409,7 @@ export function runGate({ dir, mode, execFn = defaultExecFn }) {
  */
 export async function runAgyDirectExec({
   dir, task, model, effort, addDirs, sandbox = false, timeoutMs = DEFAULT_TIMEOUT_MS,
+  readHold = readAgyHold, saveHold = saveAgyHold,
   logFile, stream = true, spawnFn = nodeSpawn, cli = AGY_CLI, resumeConversationId = null, review = false,
 } = {}) {
   let argv = [];
@@ -420,6 +422,8 @@ export async function runAgyDirectExec({
     // A killed process can leave a partial final line. Separate attempts before appending new JSONL.
     if (resumeConversationId !== null) appendFileSync(logFile, '\n');
     else writeFileSync(logFile, '');
+    const hold = readHold(model);
+    if (hold) return { stdout: '', stderr: `agy quota exhausted: ${hold.fallbackDecision} until ${hold.quotaResetsAt}`, code: 1, timedOut: false, argv, ...hold };
   } catch (e) {
     return { stdout: '', stderr: e.message, code: null, timedOut: false, argv };
   }
@@ -449,7 +453,13 @@ export async function runAgyDirectExec({
       settled = true;
       clearTimeout(timer);
       removeSignalListeners();
-      resolvePromise({ stdout: out, stderr: err, code, timedOut, argv });
+      const evidence = agyRunEvidence({ stdout: out, stderr: err, requestedModel: model });
+      try { saveHold(evidence); } catch (e) { err += `quota hold persistence failed: ${e.message}`; code = 1; }
+      if (evidence.fallbackDecision !== 'none') {
+        code = 1;
+        err += `agy: ${evidence.fallbackDecision}; quota reset ${evidence.quotaResetsAt ?? 'unknown'}`;
+      }
+      resolvePromise({ stdout: out, stderr: err, code, timedOut, argv, ...evidence });
     };
     const recordError = (e) => { err += `${e.message}\n`; };
     try {
@@ -534,7 +544,7 @@ export async function geminiDirectTask({
   let resumeConversationId = null;
   // A terminal result is a completed failure/success, not a mid-run crash. Without an init ID there
   // is nothing safe to resume; --continue could select another concurrent task's conversation.
-  if ((run.timedOut || (run.code !== 0 && summary.terminal === null))
+  if (run.quotaState !== 'exhausted' && !['skip-backend-mismatch', 'skip-model-mismatch'].includes(run.fallbackDecision) && (run.timedOut || (run.code !== 0 && summary.terminal === null))
       && typeof summary.conversationId === 'string' && summary.conversationId.trim()
       && !summary.conversationId.trim().startsWith('-')) {
     resumeConversationId = summary.conversationId;
@@ -561,6 +571,7 @@ export async function geminiDirectTask({
       realOrigin: scratch.realOrigin,
       originWired: scratch.originWired,
     } : { created: false },
+    ...agyRunEvidence({ requestedModel: model }), ...pickAgyEvidence(run),
     startSha, argv: run.argv, logFile: resolvedLogFile, exitCode: run.code, timedOut: run.timedOut,
     resumed: resumeConversationId !== null, resumeConversationId,
     events: summary, diff, gate: gateResult,
@@ -631,6 +642,7 @@ export function formatReport(report) {
       ...report.events.toolErrors.map((t) => `  ${t.name}: ${t.output ?? '<no output>'}`),
     ] : []),
     `tool calls: ${report.events.toolCalls.length}  files touched (informational): ${report.events.filesTouched.length}`,
+    `model: requested=${report.requestedModel ?? 'unknown'} reported=${report.servedModel ?? 'unknown'} backend=${report.servedBackend ?? 'unknown'} evidence=${report.modelEvidence ?? 'unavailable'} decision=${report.fallbackDecision ?? 'none'}`,
     `log: ${report.logFile}`,
     `usage (tokens only): ${JSON.stringify(report.events.usage)}`,
   ];

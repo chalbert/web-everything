@@ -475,7 +475,9 @@ describe('pr-land.mjs source wiring — draft-first PRs applied at the park crea
   it('the create params carry `draft` computed via resolveDraft, threaded from PLAN.mode and the --no-draft flag', () => {
     expect(src).toMatch(/const DRAFT_OPT_OUT = !!flags\['no-draft'\];/);
     expect(src).toMatch(/const DRAFT = resolveDraft\(\{ mode: PLAN\.mode, optOut: DRAFT_OPT_OUT \}\);/);
-    expect(src).toMatch(/const createParams = \{ base: BASE, head: REF, title: derivedTitle, body: CREATE_BODY, draft: DRAFT \};/);
+    expect(src).toMatch(/const createParams = \{ base: BASE, head: REF, body: CREATE_BODY, draft: DRAFT,/);
+    expect(src).toMatch(/get title\(\) \{ return publicationTitle\(/);
+    expect(src).toMatch(/if \(DRY_RUN\) \{\s+const createArgs = buildCreateArgs\(createParams\);/);
   });
   it('the parked emit result surfaces `draft` for observability', () => {
     expect(src).toMatch(/draft: DRAFT,/);

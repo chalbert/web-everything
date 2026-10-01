@@ -337,7 +337,7 @@ you rebased, push with `--force-with-lease` to update the existing PR's head —
 open a new one (never `gh pr create`, never `pr-land` — the PR already exists):
 
 ```bash
-printf '%s\n' "{{ATTRIBUTION}}: CI-heal PR #{{PR_NUM}} — rebase onto main + repair the failing check" "" \
+printf '%s\n' "{{ATTRIBUTION}}: ci-heal — <failing check and repair> (PR {{PR_NUM}})" "" \
   "Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>" > <msgfile>
 git commit -F <msgfile> <explicit-paths>   # omit if the rebase alone healed it and there is nothing new to commit
 git push --force-with-lease origin HEAD:refs/heads/{{LANE_REF}}

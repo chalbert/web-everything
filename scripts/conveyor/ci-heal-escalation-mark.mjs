@@ -51,7 +51,7 @@
 import { resolve } from 'node:path';
 import { isTrustedMarkerAuthor } from '../lib/marker-authorship.mjs';
 import { createGhProvider } from '../lib/review-label-provider.mjs';
-import { STATUS_LABEL_RE } from './review-status-tag.mjs';
+import { applyReviewStatus } from './review-status-tag.mjs';
 import { isBudgetRefusal, postPrComment, recordOwedWrite, resolveOwedRepo } from './ci-heal-owed.mjs';
 
 /**
@@ -134,6 +134,12 @@ export function parseCiHealEscalations(comments) {
   return out;
 }
 
+// The old acquire-null branch asserted absence without checking origin. These exact legacy
+// records are not evidence of a human decision; retry through the corrected verifier.
+export function isUnverifiedLaneEscalation(e) {
+  return e?.outcome === 'needs-human' && /^lane ref gone — .+ no longer resolves$/.test(e.reason);
+}
+
 /**
  * we:scripts/conveyor/ci-heal-escalation-mark.mjs#latestCiHealEscalationForHead — is THIS EXACT head already
  * escalated? Pure. The head-scoping is what makes this auto-re-arm: a new push changes `pr.headRefOid`, no
@@ -148,7 +154,7 @@ export function parseCiHealEscalations(comments) {
 export function latestCiHealEscalationForHead(comments, headSha) {
   const sha = typeof headSha === 'string' ? headSha.trim().toLowerCase() : '';
   if (!sha) return null;
-  const matches = parseCiHealEscalations(comments).filter((e) => e.headSha === sha);
+  const matches = parseCiHealEscalations(comments).filter((e) => e.headSha === sha && !isUnverifiedLaneEscalation(e));
   return matches.length ? matches[matches.length - 1] : null;
 }
 
@@ -216,7 +222,7 @@ if (IS_CLI) {
   if (!posted.commented) {
     process.stderr.write(`⚠ CI-heal escalation on PR #${pr} refused by the GitHub budget — recorded owed (head ${flags.head}); the next ci-heal-pr-dispatch tick posts it\n`);
   }
-  // Clear a stale `review-status:fixing`/`review-status:fix-stalled` label IMMEDIATELY — this session is about
+  // Replace a stale `review-status:fixing`/`review-status:fix-stalled` label IMMEDIATELY — this session is about
   // to exit, and waiting for the next scheduled `review-status-tag.mjs` tick (still driven by a LIVE-agent read
   // that, this instant, still sees this very process as "working") would leave the PR reading "still being
   // fixed" for however long that tick is away. See the file header's "clear/replace the fixing label as soon as
@@ -228,10 +234,7 @@ if (IS_CLI) {
     // conveyor primitive, is not WE-only).
     const targetRepo = repo || provider.currentRepo();
     const current = provider.readLabels(targetRepo, pr);
-    const stale = (Array.isArray(current) ? current : [])
-      .map((l) => (typeof l === 'string' ? l : l?.name))
-      .filter((n) => n && STATUS_LABEL_RE.test(n));
-    if (stale.length) provider.setLabels(targetRepo, pr, { remove: stale });
+    applyReviewStatus({ pr, repo: targetRepo, state: flags.outcome === 'needs-human' ? 'needs-human' : null, provider, currentLabels: current });
   } catch {
     // Cosmetic only (review-status-tag.mjs's own docblock: "nothing reads this label back to decide anything") —
     // a failed clear here is never worth failing the escalation itself over; the next scheduled tick still

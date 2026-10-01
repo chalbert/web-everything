@@ -77,6 +77,7 @@
  * state, which auto-retries with backoff and resume-opens the PR once infra recovers (nothing is stranded; the
  * drain stays the sole writer to main). A non-zero exit means `main` was left UNTOUCHED.
  */
+import { publicationTitle, readMainCard } from './operations/machine-pr-title.mjs';
 import { producerBuildContext, checkpointBuildPr } from './operations/build-pr-authorship.mjs';
 import { execFileSync } from 'node:child_process';
 import { readFileSync, realpathSync } from 'node:fs';
@@ -753,18 +754,24 @@ function runCli() {
   // Derive a title when none was passed: `--fill` can't autofill for a lane/* head (it's remote-only, so
   // gh can't diff it locally). Use the source commit's subject — a meaningful, always-available title —
   // so the create never needs `--fill` and a `--body-file` (the #2170 dismissals) always ships. When the
-  // source has multiple commits, its own HEAD subject is the natural PR title.
-  const derivedTitle = TITLE ?? (tryGit(['log', '-1', '--format=%s', SRC]) || `land ${REF}`);
+  // source has multiple commits, validate its HEAD subject; legacy boilerplate needs real card metadata.
+  const sourceTitle = TITLE ?? tryGit(['log', '-1', '--format=%s', SRC]);
+  const titleItem = /^(?:WE|FUI|PLATEAU) #([a-z0-9]+):/i.exec(sourceTitle ?? '')?.[1];
   // ONE source of truth for the create params — the dry-run render below still needs the built ARGV (via
   // buildCreateArgs directly, nothing is executed there), while the real create goes through the port with
   // these same semantic params so the two never drift apart.
   // draft-first PRs — scoped to `park` only; see `DRAFT_OPT_OUT`'s own comment for why `land`/`label-on-green`
   // are excluded (their poll loop has no `'DRAFT'` branch and would spin to timeout).
   const DRAFT = resolveDraft({ mode: PLAN.mode, optOut: DRAFT_OPT_OUT });
-  const createParams = { base: BASE, head: REF, title: derivedTitle, body: CREATE_BODY, draft: DRAFT };
-  const createArgs = buildCreateArgs(createParams);
+  // Existing PRs keep their title even when their latest commit is a merge/repair. Only CREATE (or its
+  // dry-run preview) reads this getter, so absent title metadata cannot block landing an existing PR.
+  const createParams = { base: BASE, head: REF, body: CREATE_BODY, draft: DRAFT,
+    get title() { return publicationTitle({ title: sourceTitle,
+      card: titleItem ? readMainCard(titleItem, gitC) : null }); },
+  };
 
   if (DRY_RUN) {
+    const createArgs = buildCreateArgs(createParams);
     emit({
       repo: REPO, merged: false, reason: 'dry-run', ref: REF, base: BASE, method: METHOD,
       plan: [

@@ -93,6 +93,7 @@
  *      remains the DEFAULT (see `DEFAULT_DELIVERY_AGENT_PROVIDER_NAME`); Codex is opt-in by name, and the
  *      operator chose to build it ahead of `#3581`'s ratified reviewer-first sequencing gate knowingly.
  */
+import { machinePrTitle, readMainCard } from './machine-pr-title.mjs';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, basename, join, resolve as resolvePath } from 'node:path';
@@ -1988,8 +1989,9 @@ export function commitConvergeRound(
   const paths = touchedFiles(lane, { run: runFn });
   if (!paths.length) return { committed: false, paths: [] };
   const msgFile = `${convergeScratchDir(lane)}/.converge-commit-msg-r${round}.txt`;
-  const message = `WE #${item}: converge round ${round} revision\n\n`
-    + 'Commits the accepted editor findings from this round of the #3627 delivery-pipeline converge loop '
+  const message = `${machinePrTitle({ repo: repoProfileForLanePath(lane)?.canonicalPrefix?.toUpperCase() ?? 'WE', item, kind: 'fix',
+    card: readMainCard(item, (args) => runFn('git', args, { cwd: lane })), subject: `revise ${paths.join(', ')}` })}\n\n`
+    + `Commits the accepted editor findings from round ${round} of the #3627 delivery-pipeline converge loop `
     + '(runConvergeEdit reported advanced:true) before the loop continues and before the PR opens.\n';
   writeFile(msgFile, message);
   runFn('git', ['add', '--', ...paths], { cwd: lane });
@@ -2143,7 +2145,10 @@ export function commitBuildTurn(
   // `repoProfileForLanePath` returns `null` for a lane it cannot place (an unrecognized pool-dir basename, or a
   // synthetic test path) — falls back to `'WE'`, byte-identical to every existing caller/test.
   const repoTag = repoProfileForLanePath(lane)?.canonicalPrefix?.toUpperCase() ?? 'WE';
-  const subject = phase === 'gate-fix' ? `${repoTag} #${item}: gate-failure fix` : `${repoTag} #${item}: delivery build`;
+  const subject = machinePrTitle({ repo: repoTag, item, kind: phase === 'gate-fix' ? 'gate-fix' : 'build',
+    card: readMainCard(item, (args) => runFn('git', args, { cwd: lane })),
+    subject: `update ${paths.join(', ')}`,
+  });
   const body = phase === 'gate-fix'
     ? "Commits the delivery agent's fix after a red gate resumed it for one retry (#3383/#3565) — the wrapper "
       + "makes this commit on the agent's behalf; the agent itself never runs git.\n"

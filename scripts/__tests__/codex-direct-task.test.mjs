@@ -56,6 +56,27 @@ describe('defaultExecFn — real child-process output buffering', () => {
 });
 
 describe('buildCodexDirectTaskArgv — pure argv for agentic/workspace-write mode', () => {
+  it('#4665 encodes exact edit roots and temp environment without shell interpolation', () => {
+    const roots = ['/lane/.git', '/pool/.admission/heavy', '/tmp/a "quoted" \\ root'];
+    const argv = buildCodexDirectTaskArgv({ cwd: '/lane', writableRoots: roots, tempRoot: roots[2] });
+    expect(argv).toContain('sandbox_workspace_write.network_access=true');
+    const encoded = argv.find((v) => v.startsWith('sandbox_workspace_write.writable_roots='));
+    expect(JSON.parse(encoded.split('=').slice(1).join('='))).toEqual(roots);
+    for (const name of ['TMPDIR', 'TMP', 'TEMP']) {
+      expect(argv).toContain(`shell_environment_policy.set.${name}=${JSON.stringify(roots[2])}`);
+    }
+    expect(argv).not.toContain('danger-full-access');
+    expect(argv).not.toContain('--dangerously-bypass-approvals-and-sandbox');
+    expect(() => buildCodexDirectTaskArgv({ cwd: '/lane', writableRoots: [''] })).toThrow(/writableRoots/);
+  });
+
+  it('#4665 leaves read-only argv unchanged even when edit roots are supplied', () => {
+    const argv = buildCodexDirectTaskArgv({ cwd: '/lane', review: true, writableRoots: ['/lane/.git'], tempRoot: '/tmp/job' });
+    expect(argv).toEqual(buildCodexDirectTaskArgv({ cwd: '/lane', review: true }));
+    expect(flagValue(argv, '-s')).toBe('read-only');
+    expect(argv.some((v) => /sandbox_workspace_write|shell_environment_policy/.test(v))).toBe(false);
+  });
+
   it('always carries exec, --json, workspace-write sandbox, and -C, never a positional prompt', () => {
     const argv = buildCodexDirectTaskArgv({ cwd: '/tmp/scratch' });
     expect(argv[0]).toBe('exec');
@@ -757,6 +778,12 @@ describe('runCodexDirectExec / codexDirectTask — the orchestrator, over an inj
       expect(report.logFile.startsWith(join(worktree, '.git') + '/')).toBe(false);
       expect(readFileSync(report.logFile, 'utf8')).toBe(stdout);
       expect(report.diff.hasChanges).toBe(false);
+      expect(flagValue(seen.argv, '-o')).toBe(join(gitDir, 'codex-direct-task-last-message.txt'));
+      const roots = JSON.parse(seen.argv.find((v) => v.startsWith('sandbox_workspace_write.writable_roots=')).split('=').slice(1).join('='));
+      expect(roots[0]).toBe(gitDir);
+      expect(roots[2]).toBe(seen.opts.env.TMPDIR);
+      expect(statSync(roots[2]).isDirectory()).toBe(true);
+      rmSync(roots[2], { recursive: true, force: true });
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -813,6 +840,36 @@ describe('runCodexDirectExec / codexDirectTask — the orchestrator, over an inj
       expect(r.timedOut).toBe(true);
     } finally {
       groupKill.mockRestore();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('#4665 isolates each edit run, honors the pool override, and leaves review permissions alone', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'we-codex-permissions-test-'));
+    const allocated = [];
+    const env = { ...process.env, LANE_POOL_ROOT: join(dir, 'pool override'), TMPDIR: '/old/tmp' };
+    const execFn = (bin, args) => args.includes('--absolute-git-dir') ? join(dir, 'metadata') : args.includes('rev-parse') ? 'sha' : '';
+    try {
+      for (const review of [false, false, true]) {
+        const { fn: spawnFn, seen } = fakeSpawn('{}\n');
+        await codexDirectTask({ dir, task: 't', review, env, execFn, spawnFn, stream: false });
+        if (review) {
+          expect(seen.opts.env).toBe(env);
+          expect(flagValue(seen.argv, '-s')).toBe('read-only');
+          expect(seen.argv.some((v) => /sandbox_workspace_write|shell_environment_policy/.test(v))).toBe(false);
+        } else {
+          const root = seen.opts.env.TMPDIR;
+          expect(allocated).not.toContain(root);
+          allocated.push(root);
+          expect(statSync(root).isDirectory()).toBe(true);
+          expect(seen.opts.env).toMatchObject({ LANE_POOL_ROOT: env.LANE_POOL_ROOT, TMP: root, TEMP: root });
+          expect(seen.argv).toContain('sandbox_workspace_write.network_access=true');
+          expect(seen.argv).toContain(`sandbox_workspace_write.writable_roots=${JSON.stringify([join(dir, 'metadata'), join(env.LANE_POOL_ROOT, '.admission', 'heavy'), root])}`);
+          expect(seen.argv).toContain(`shell_environment_policy.set.TMPDIR=${JSON.stringify(root)}`);
+        }
+      }
+    } finally {
+      for (const root of allocated) rmSync(root, { recursive: true, force: true });
       rmSync(dir, { recursive: true, force: true });
     }
   });

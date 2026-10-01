@@ -209,3 +209,10 @@ describe('#4352 — postOrOweCiHealEscalation', () => {
     expect(owedWriteAlreadyLive([{ body: other, author: AUTOMATION }], rec)).toBe(false);
   });
 });
+
+it('re-arms legacy acquire-null escalations without deleting comments or moving the head', () => {
+  const body = buildCiHealEscalationComment({ headSha: HEAD, outcome: 'needs-human', reason: 'lane ref gone — lane/4409-prepare-item-guard-relaxation-lint no longer resolves' });
+  expect(latestCiHealEscalationForHead([{ body, author: AUTOMATION }], HEAD)).toBeNull();
+  const verified = buildCiHealEscalationComment({ headSha: HEAD, outcome: 'needs-human', reason: 'origin ref verified absent — lane/4409' });
+  expect(latestCiHealEscalationForHead([{ body: verified, author: AUTOMATION }], HEAD)?.outcome).toBe('needs-human');
+});

@@ -1497,11 +1497,12 @@ describe('commitBuildTurn (#3565 — the wrapper commits the agent\'s OWN turn; 
     expect(writeFile).toHaveBeenCalledTimes(1);
     const [msgFile, message] = writeFile.mock.calls[0];
     expect(msgFile).toBe('/lane/.delivery-commit-msg-build.txt');
-    expect(message).toMatch(/delivery build/);
+    expect(message).toMatch(/build — update a.mjs, b.md/);
     expect(message).toMatch(/Co-Authored-By: Codex <noreply@openai\.com>/);
-    expect(run).toHaveBeenCalledTimes(2);
-    expect(run).toHaveBeenNthCalledWith(1, 'git', ['add', '--', 'a.mjs', 'b.md'], { cwd: '/lane' });
-    expect(run).toHaveBeenNthCalledWith(2, 'git', ['commit', '-F', msgFile, '--', 'a.mjs', 'b.md'], { cwd: '/lane' });
+    expect(run).toHaveBeenCalledTimes(3);
+    expect(run).toHaveBeenNthCalledWith(1, 'git', ['ls-tree', '-r', '--name-only', 'origin/main', '--', 'backlog/'], { cwd: '/lane' });
+    expect(run).toHaveBeenNthCalledWith(2, 'git', ['add', '--', 'a.mjs', 'b.md'], { cwd: '/lane' });
+    expect(run).toHaveBeenNthCalledWith(3, 'git', ['commit', '-F', msgFile, '--', 'a.mjs', 'b.md'], { cwd: '/lane' });
     expect(run.mock.calls[1][1]).not.toContain('-A');
     expect(run.mock.calls[1][1]).not.toContain('--all');
   });
@@ -1515,7 +1516,15 @@ describe('commitBuildTurn (#3565 — the wrapper commits the agent\'s OWN turn; 
       { lane: '/lane', item: '1234' },
       { run, writeFile, touchedFiles: () => ['brand-new-file.mjs'] },
     );
-    expect(run).toHaveBeenNthCalledWith(1, 'git', ['add', '--', 'brand-new-file.mjs'], { cwd: '/lane' });
+    expect(run).toHaveBeenNthCalledWith(2, 'git', ['add', '--', 'brand-new-file.mjs'], { cwd: '/lane' });
+  });
+
+  it.each(['build', 'gate-fix'])('uses origin/main card text in the %s commit', (phase) => {
+    const run = vi.fn((_cmd, args) => args[0] === 'ls-tree' ? 'backlog/4333-card.md' : args[0] === 'show' ? '# Guard acceptance rearm\n' : '');
+    const writeFile = vi.fn();
+    commitBuildTurn({ lane: '/lane', item: '4333', phase }, { run, writeFile, touchedFiles: () => ['fix.mjs'] });
+    expect(writeFile.mock.calls[0][1].split('\n')[0]).toBe(`WE #4333: ${phase} — Guard acceptance rearm`);
+    expect(run).toHaveBeenCalledWith('git', ['show', 'origin/main:backlog/4333-card.md'], { cwd: '/lane' });
   });
 
   it('names the gate-fix phase distinctly (own message file, own text) for a resumed turn\'s commit', () => {
@@ -1528,7 +1537,7 @@ describe('commitBuildTurn (#3565 — the wrapper commits the agent\'s OWN turn; 
     expect(result).toEqual({ committed: true, paths: ['fix.mjs'] });
     const [msgFile, message] = writeFile.mock.calls[0];
     expect(msgFile).toBe('/lane/.delivery-commit-msg-gate-fix.txt');
-    expect(message).toMatch(/gate-failure fix/);
+    expect(message).toMatch(/gate-fix — update fix.mjs/);
     expect(message).toMatch(/Co-Authored-By: Claude Sonnet 5 <noreply@anthropic\.com>/);
   });
 
@@ -1567,7 +1576,7 @@ describe('commitBuildTurn (#3565 — the wrapper commits the agent\'s OWN turn; 
     );
     expect(result).toEqual({ committed: true, paths: ['src/foo.tsx'] });
     const [, message] = writeFile.mock.calls[0];
-    expect(message).toMatch(/^PLATEAU #3604: delivery build/);
+    expect(message).toMatch(/^PLATEAU #3604: build — update src\/foo/);
     expect(message).not.toMatch(/^WE #/);
   });
 });
@@ -1786,9 +1795,9 @@ describe('commitConvergeRound (#3627 bug 14 helper — the actual per-round comm
     // #4356 — the message file lives in the per-lane scratch dir OUTSIDE the lane, never `${FAKE_LANE}/...` directly.
     expect(msgFile).toBe(`${convergeScratchDir(FAKE_LANE)}/.converge-commit-msg-r2.txt`);
     expect(message).toMatch(/round 2/);
-    expect(run).toHaveBeenCalledTimes(2);
-    expect(run).toHaveBeenNthCalledWith(1, 'git', ['add', '--', 'a.mjs', 'b.md'], { cwd: FAKE_LANE });
-    expect(run).toHaveBeenNthCalledWith(2, 'git', ['commit', '-F', msgFile, '--', 'a.mjs', 'b.md'], { cwd: FAKE_LANE });
+    expect(run).toHaveBeenCalledTimes(3);
+    expect(run).toHaveBeenNthCalledWith(2, 'git', ['add', '--', 'a.mjs', 'b.md'], { cwd: FAKE_LANE });
+    expect(run).toHaveBeenNthCalledWith(3, 'git', ['commit', '-F', msgFile, '--', 'a.mjs', 'b.md'], { cwd: FAKE_LANE });
     expect(run.mock.calls[0][1]).not.toContain('-A');
     expect(run.mock.calls[0][1]).not.toContain('--all');
     expect(run.mock.calls[1][1]).not.toContain('-A');
@@ -1804,7 +1813,7 @@ describe('commitConvergeRound (#3627 bug 14 helper — the actual per-round comm
       { lane: FAKE_LANE, item: '1234', round: 1 },
       { run, writeFile, touchedFiles: () => ['brand-new-fixture.mjs'] },
     );
-    expect(run).toHaveBeenNthCalledWith(1, 'git', ['add', '--', 'brand-new-fixture.mjs'], { cwd: FAKE_LANE });
+    expect(run).toHaveBeenNthCalledWith(2, 'git', ['add', '--', 'brand-new-fixture.mjs'], { cwd: FAKE_LANE });
   });
 
   it('no-ops — writes no message file and calls `run` zero times — when there are no real touched files', () => {

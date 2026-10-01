@@ -44,6 +44,7 @@
  */
 
 import { resolveOperationRoute, readRoutingPolicy } from '../lib/dispatch-routing-policy-io.mjs';
+import { agyRunEvidence, pickAgyEvidence } from '../lib/antigravity-run-evidence.mjs';
 import { spawn, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import {
@@ -439,6 +440,8 @@ export function classifySeatCall(provider, run) {
   const text = provider === 'codex' ? (report?.lastMessage ?? '') : (report?.events?.finalResponse ?? '');
   const errText = [run.error, run.stderr, report?.events?.errorMessage, provider === 'codex' && report?.exitCode ? text : '']
     .filter(Boolean).join(' ').slice(0, 2000);
+  if (report?.quotaState === 'exhausted') return { status: 'quota-exhausted', text, error: errText || report.fallbackDecision };
+  if (['skip-backend-mismatch', 'skip-model-mismatch'].includes(report?.fallbackDecision)) return { status: 'error', text, error: 'agy model/backend mismatch; verdict skipped' };
   if (run.timedOut || report?.timedOut) return { status: 'timeout', text, error: 'seat call hit its wall' };
   if (QUOTA_RE.test(errText) && !extractAnswerJson(text)) return { status: 'quota-exhausted', text, error: errText.slice(0, MAX_TEXT) };
   if (!report) return { status: 'error', text, error: (errText || `exit ${run.exitCode}`).slice(0, MAX_TEXT) };
@@ -467,9 +470,12 @@ function publishable(text) {
  * @returns {Array<object>}
  */
 export function buildSeatRows({
-  callId, pr, repo, provider, model, effort, seats, call, parsed, claudeFindings, claudeVerdict = null, quota = {}, durationMs = null,
+  callId, pr, repo, provider, model, effort, seats, call, parsed, claudeFindings, claudeVerdict = null, quota = {}, durationMs = null, evidence = {},
   changedFiles = null,
 }) {
+  const provenance = provider?.startsWith('agy-')
+    ? { ...agyRunEvidence({ requestedModel: model }), ...pickAgyEvidence(evidence) }
+    : pickAgyEvidence(evidence);
   return seats.map((s) => {
     const seatParse = parsed?.[s.key] ?? { ok: false, verdict: null, findings: [] };
     const status = call.status === 'ok' && !seatParse.ok ? 'unparseable' : call.status;
@@ -485,7 +491,8 @@ export function buildSeatRows({
     });
     const confirmed = findings.filter((f) => f.confirmedByClaude === true).length;
     return {
-      provider, model, effort,
+      provider, model: provenance.servedModel ?? model, effort,
+      ...provenance,
       subjectClass: 'work-agent',
       dispatchKind: REVIEW_SEAT_DISPATCH_KIND,
       rubricVersion: REVIEW_SEAT_RUBRIC,
@@ -659,6 +666,7 @@ export async function runExtraSeats({ pr, repo, lanePath, loopPayload, env = pro
         const parsed = call.status === 'ok' ? repoRelativeFindings(parseSeatAnswer(call.text, group), scratch) : {};
         const quota = { usedPercent: run?.report?.quotaUsedPercent ?? null, resetsAt: toIsoInstant(run?.report?.quotaResetsAt) };
         const rows = buildSeatRows({
+          evidence: run?.report ?? {},
           callId, pr, repo, provider, model, effort, seats: group, call, parsed, claudeFindings, claudeVerdict, quota, durationMs: io.now() - t0,
           changedFiles: read.netChangedFiles ?? null,
         });
@@ -1293,6 +1301,7 @@ export async function runRedTeam({ pr, repo, lanePath, loopPayload, env = proces
     let headMessage = '';
     let durationMs = null;
     let quota = {};
+    let evidence = {};
     try {
       scratch = io.makeScratch({ lanePath, rev, pr });
       try { headMessage = io.readHeadMessage(scratch) ?? ''; } catch { headMessage = ''; }
@@ -1312,12 +1321,14 @@ export async function runRedTeam({ pr, repo, lanePath, loopPayload, env = proces
       durationMs = io.now() - t0;
       call = classifySeatCall(provider, run);
       if (call.status === 'ok') parsed = repoRelativeFindings(parseSeatAnswer(call.text, [RED_TEAM_SEAT]), scratch);
+      evidence = run?.report ?? {};
       quota = { usedPercent: run?.report?.quotaUsedPercent ?? null, resetsAt: toIsoInstant(run?.report?.quotaResetsAt) };
     } finally {
       if (scratch) { try { io.removeScratch(scratch); } catch { /* harmless */ } }
     }
 
     const [seatRow] = buildSeatRows({
+      evidence,
       callId, pr, repo, provider, model, effort, seats: [RED_TEAM_SEAT], call, parsed, claudeFindings, claudeVerdict: verdict, quota, durationMs,
       changedFiles: read.netChangedFiles ?? null,
     });
