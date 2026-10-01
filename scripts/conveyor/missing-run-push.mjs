@@ -1,0 +1,79 @@
+/** Recover PR checks with a synchronize event, never workflow_dispatch (#3209).
+ * Uses a scratch bare repository: no daemon checkout, index or branch is changed.
+ * A marked recovery tip is never nudged again, even if posting its comment failed.
+ */
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { execFileSyncThrottled, ghAuthIdentity } from '../lib/gh-throttle.mjs';
+import { pushRefusal } from './fix-procedure.mjs';
+
+export const RECOVERY_COMMIT_MARKER = 'Conveyor-Missing-Run-Recovery:';
+
+export function recoveryPushCredential(token, env = {}) {
+  if (!token) return false;
+  // Unknown installation tokens include Actions' default GITHUB_TOKEN. Only trust
+  // the token-bound provenance set by our installation-token minting code.
+  if (token.startsWith('ghs_')) return ghAuthIdentity({ ...env, GH_TOKEN: token }).startsWith('app-installation-');
+  return /^(ghp_|github_pat_|gho_)/.test(token);
+}
+
+export function pushMissingRunCommit(d, {
+  repo, defaultBranch = 'main', exec = execFileSyncThrottled, env = process.env,
+  checkClaim = pushRefusal,
+} = {}) {
+  const action = 'pull-request-push';
+  const defer = (error) => ({ ok: false, action, deferred: true, error });
+  let scratch;
+  let stage = 'preflight';
+  const opts = { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 120000, killSignal: 'SIGKILL', env };
+  try {
+    if (!/^[\w.-]+\/[\w.-]+$/.test(repo || '') || !Number.isSafeInteger(d?.prNumber)
+      || !/^[a-f0-9]{40}$/.test(d?.headSha || '') || !d?.headRefName?.startsWith('lane/')) {
+      return defer('recovery requires a repository, PR number, exact head SHA and lane branch');
+    }
+    // Bypass the shared listing: a cached UNKNOWN or a head changed by a fixer is
+    // not authority to mutate. Conflicts belong to the conflict-repair dispatcher.
+    const pr = JSON.parse(exec('gh', ['api', `repos/${repo}/pulls/${d.prNumber}`], opts));
+    if (pr.state !== 'open' || pr.head?.sha !== d.headSha || pr.head?.ref !== d.headRefName
+      || pr.head?.repo?.full_name !== repo || pr.base?.ref !== defaultBranch) return defer('PR head, repository, base or state changed');
+    if (pr.mergeable !== true) return defer(pr.mergeable === false ? 'PR has merge conflicts; conflict repair must run first' : 'PR mergeability is unknown; retry after GitHub recalculates');
+    const claim = () => checkClaim({ repo, branch: d.headRefName });
+    const held = claim();
+    if (held) return defer(held.message);
+    stage = 'credential';
+    const token = String(env.GH_TOKEN || env.GITHUB_TOKEN || exec('gh', ['auth', 'token', '--hostname', 'github.com'], opts)).trim();
+    if (!recoveryPushCredential(token, env)) return defer('push requires a PAT, user OAuth token, or verified conveyor App installation token');
+    scratch = mkdtempSync(join(tmpdir(), 'we-missing-run-'));
+    // Pin git to the credential just validated, overriding stored helpers and auth
+    // headers. The secret is only in the child environment, never argv or logs.
+    const gitEnv = Object.fromEntries(Object.entries(env).filter(([key]) => !key.startsWith('GIT_')));
+    const gitOpts = { ...opts, cwd: scratch, env: { ...gitEnv, WE_CI_PUSH_TOKEN: token,
+      GIT_TERMINAL_PROMPT: '0', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' } };
+    const git = (...args) => String(exec('git', ['-c', 'http.extraHeader=', '-c', 'credential.helper=',
+      '-c', 'credential.helper=!f() { echo username=x-access-token; printf "password=%s\\n" "$WE_CI_PUSH_TOKEN"; }; f', ...args], gitOpts)).trim();
+    stage = 'fetch';
+    git('init', '--bare', '.');
+    const remote = `https://github.com/${repo}.git`;
+    const ref = `refs/heads/${d.headRefName}`;
+    git('fetch', '--no-tags', remote, ref);
+    if (git('rev-parse', 'FETCH_HEAD') !== d.headSha) return defer('branch moved before recovery');
+    const message = git('show', '-s', '--format=%B', d.headSha);
+    if (message.split('\n').some(line => line.startsWith(RECOVERY_COMMIT_MARKER))) return defer('recovery commit still has no PR checks; needs ci-heal, not another empty commit');
+    const tree = git('rev-parse', `${d.headSha}^{tree}`);
+    stage = 'commit-tree';
+    const newHeadSha = git('-c', 'user.name=Web Everything', '-c', 'user.email=conveyor@users.noreply.github.com',
+      'commit-tree', tree, '-p', d.headSha, '-m', `ci: recover missing PR checks\n\n${RECOVERY_COMMIT_MARKER} ${d.headSha}`);
+    if (!/^[a-f0-9]{40}$/.test(newHeadSha)) throw new Error('invalid commit');
+    const heldAtPush = claim();
+    if (heldAtPush) return defer(heldAtPush.message);
+    stage = 'push';
+    git('push', `--force-with-lease=${ref}:${d.headSha}`, remote, `${newHeadSha}:${ref}`);
+    return { ok: true, action, newHeadSha };
+  } catch {
+    // exec errors carry argv/env; never serialize a credential-bearing child error.
+    return { ok: false, action, error: `missing-run recovery failed during ${stage}` };
+  } finally {
+    if (scratch) rmSync(scratch, { recursive: true, force: true });
+  }
+}

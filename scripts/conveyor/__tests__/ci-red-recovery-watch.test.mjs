@@ -778,60 +778,11 @@ describe('ci-red-recovery-watch — defaultReadRequiredContexts / defaultReadHea
 });
 
 describe('ci-red-recovery-watch — triggerCiForPr', () => {
-  it('refreshes a behind-main PR through rebaseDropManifest (refreshOntoMain) — NEVER the raw update-branch REST endpoint', () => {
-    const exec = vi.fn(() => '');
-    const refresh = vi.fn(() => ({ ok: true, action: 'rebased' }));
-    const result = triggerCiForPr({ prNumber: 2729, headRefName: 'lane/x', baseRefName: 'main', preferUpdateBranch: true }, { repo: 'chalbert/web-everything', exec, refresh, root: '/r' });
-    expect(result).toEqual({ ok: true, action: 'rebase-onto-main' });
-    expect(refresh).toHaveBeenCalledWith('lane/x', { base: 'origin/main', root: '/r' });
+  it('refuses incomplete targets without dispatching a workflow', () => {
+    const exec = vi.fn();
+    expect(triggerCiForPr({ prNumber: 3209 }, { repo: 'chalbert/web-everything', exec }))
+      .toMatchObject({ ok: false, deferred: true, action: 'pull-request-push' });
     expect(exec).not.toHaveBeenCalled();
-  });
-
-  it('never rebases a STACKED PR (base is another lane) onto main — dispatches the workflow instead', () => {
-    const exec = vi.fn(() => '');
-    const refresh = vi.fn(() => ({ ok: true, action: 'rebased' }));
-    const result = triggerCiForPr({ prNumber: 2729, headRefName: 'lane/x', baseRefName: 'lane/parent', preferUpdateBranch: true }, { repo: 'chalbert/web-everything', exec, refresh });
-    expect(refresh).not.toHaveBeenCalled();
-    expect(result).toEqual({ ok: true, action: 'workflow-dispatch' });
-  });
-
-  it('never emits an update-branch call, even with repo omitted (no repos/null path)', () => {
-    const exec = vi.fn(() => '');
-    const refresh = vi.fn(() => ({ ok: true, action: 'current' }));
-    triggerCiForPr({ prNumber: 2729, headRefName: 'lane/x', baseRefName: 'main', preferUpdateBranch: true }, { exec, refresh });
-    triggerCiForPr({ prNumber: 2729, headRefName: 'lane/x', preferUpdateBranch: false }, { exec, refresh });
-    expect(exec).toHaveBeenCalled();
-    for (const [, argv] of exec.mock.calls) {
-      expect(argv.join(' ')).not.toMatch(/update-branch|repos\/null/);
-    }
-  });
-
-  it('falls through to gh workflow run when the refresh found the branch already current (no push → no new run)', () => {
-    const exec = vi.fn(() => '');
-    const refresh = vi.fn(() => ({ ok: true, action: 'current' }));
-    const result = triggerCiForPr({ prNumber: 2729, headRefName: 'lane/x', baseRefName: 'main', preferUpdateBranch: true }, { repo: 'chalbert/web-everything', exec, refresh });
-    expect(result).toEqual({ ok: true, action: 'workflow-dispatch', refresh: 'current' });
-    expect(exec).toHaveBeenCalledWith('gh', ['workflow', 'run', 'CI', '--ref', 'lane/x', '--repo', 'chalbert/web-everything'], expect.anything());
-  });
-
-  it('falls through to gh workflow run when the refresh could not rebase (a real conflict), recording why', () => {
-    const exec = vi.fn(() => '');
-    const refresh = vi.fn(() => ({ ok: false, action: 'skip', error: 'conflict in a.js' }));
-    const result = triggerCiForPr({ prNumber: 2729, headRefName: 'lane/x', baseRefName: 'main', preferUpdateBranch: true }, { repo: 'chalbert/web-everything', exec, refresh });
-    expect(result).toEqual({ ok: true, action: 'workflow-dispatch', refresh: 'skip', refreshError: 'conflict in a.js' });
-  });
-
-  it('falls back to gh workflow run on the PR\'s own branch when not behind main', () => {
-    const exec = vi.fn(() => '');
-    const result = triggerCiForPr({ prNumber: 2729, headRefName: 'lane/4166-x', preferUpdateBranch: false }, { repo: 'chalbert/web-everything', exec });
-    expect(result).toEqual({ ok: true, action: 'workflow-dispatch' });
-    expect(exec).toHaveBeenCalledWith('gh', ['workflow', 'run', 'CI', '--ref', 'lane/4166-x', '--repo', 'chalbert/web-everything'], expect.anything());
-  });
-
-  it('reports a failed trigger with its real error text, never throwing', () => {
-    const exec = vi.fn(() => { throw Object.assign(new Error('Command failed'), { stderr: 'workflow not found' }); });
-    const result = triggerCiForPr({ prNumber: 1, headRefName: 'lane/x', preferUpdateBranch: false }, { exec });
-    expect(result).toEqual({ ok: false, action: 'workflow-dispatch', error: 'workflow not found' });
   });
 });
 
@@ -877,7 +828,7 @@ describe('ci-red-recovery-watch — sweepMissingRunRecovery (PR #2729 fixture: z
     const result = sweepMissingRunRecovery({
       readOpenPrs, readRequiredContexts, readHeadCommittedAt, readAheadBy, readComments, trigger, clearLabel, now: NOW,
     });
-    expect(result.dispatch).toEqual([expect.objectContaining({ prNumber: 2729, kind: 'trigger-ci', preferUpdateBranch: true })]);
+    expect(result.dispatch).toEqual([expect.objectContaining({ prNumber: 2729, kind: 'trigger-ci' })]);
     expect(result.applied).toEqual([]);
     expect(trigger).not.toHaveBeenCalled();
     expect(clearLabel).not.toHaveBeenCalled();
@@ -897,7 +848,7 @@ describe('ci-red-recovery-watch — sweepMissingRunRecovery (PR #2729 fixture: z
       trigger, postComment, clearLabel, now: NOW,
     });
     expect(trigger).toHaveBeenCalledTimes(1);
-    expect(trigger).toHaveBeenCalledWith(expect.objectContaining({ prNumber: 2729, preferUpdateBranch: true }), expect.anything());
+    expect(trigger).toHaveBeenCalledWith(expect.objectContaining({ prNumber: 2729 }), expect.anything());
     expect(postComment).toHaveBeenCalledWith(2729, expect.objectContaining({ ok: true, action: 'update-branch' }));
     expect(clearLabel).toHaveBeenCalledWith(2729, expect.objectContaining({ currentLabels: ['review:accepted', 'checking'] }));
     expect(result.applied).toEqual([expect.objectContaining({ prNumber: 2729, ok: true, action: 'update-branch', labelCleared: true })]);
@@ -915,6 +866,20 @@ describe('ci-red-recovery-watch — sweepMissingRunRecovery (PR #2729 fixture: z
     expect(postComment).toHaveBeenCalledWith(2729, expect.objectContaining({ ok: false }));
     expect(clearLabel).not.toHaveBeenCalled();
     expect(result.applied).toEqual([expect.objectContaining({ prNumber: 2729, ok: false, labelCleared: false })]);
+  });
+
+  it('does not spend a retry or change labels when the fresh preflight defers recovery', () => {
+    const postComment = vi.fn();
+    const clearLabel = vi.fn();
+    const result = sweepMissingRunRecovery({
+      apply: true, readOpenPrs: () => [PR_2729], readRequiredContexts: () => ['test'],
+      readHeadCommittedAt: () => '2026-09-26T14:20:26Z', readComments: () => [], now: NOW,
+      trigger: () => ({ ok: false, action: 'pull-request-push', deferred: true, error: 'mergeability unknown' }),
+      postComment, clearLabel,
+    });
+    expect(result.applied).toEqual([expect.objectContaining({ deferred: true, labelCleared: false })]);
+    expect(postComment).not.toHaveBeenCalled();
+    expect(clearLabel).not.toHaveBeenCalled();
   });
 
   it('required-context read failure does not trigger recovery for a partially reported PR', () => {
@@ -939,7 +904,7 @@ describe('ci-red-recovery-watch — sweepMissingRunRecovery (PR #2729 fixture: z
       readHeadCommittedAt: () => '2026-09-26T14:20:26Z', readAheadBy: () => 3, readComments: () => [],
       trigger, postComment: vi.fn(), clearLabel: vi.fn(() => true), now: NOW,
     });
-    expect(trigger).toHaveBeenCalledWith(expect.objectContaining({ prNumber: 2729, baseRefName: 'main', preferUpdateBranch: true }), expect.anything());
+    expect(trigger).toHaveBeenCalledWith(expect.objectContaining({ prNumber: 2729, baseRefName: 'main' }), expect.anything());
     expect(result.applied).toEqual([expect.objectContaining({ prNumber: 2729, ok: true, action: 'rebase-onto-main' })]);
   });
 

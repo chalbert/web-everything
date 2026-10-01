@@ -951,7 +951,7 @@ export function buildMissingRunCandidates(prs, { requiredContexts = DEFAULT_REQU
     if (!Number.isInteger(prNumber) || prNumber <= 0) continue;
     // #2793 — a real git conflict can never produce a merge ref, so it can never produce a required-check run
     // either; leave it entirely to the conflict-resolution path rather than burning this pass's own retry cap.
-    if (String(pr?.mergeable ?? '').toUpperCase() === 'CONFLICTING') continue;
+    if (['CONFLICTING', 'UNKNOWN'].includes(String(pr?.mergeable ?? '').toUpperCase())) continue;
     const roll = Array.isArray(pr?.statusCheckRollup) ? pr.statusCheckRollup : [];
     const allMissing = unknown
       ? !roll.some((c) => c?.workflowName === workflowName)
@@ -992,13 +992,11 @@ export function isMissingRunOverdue({ headCommittedAt, now = Date.now(), thresho
  *   3. This head sha already used up its trigger-attempt cap → `missing-run-cap-exhausted`: a mechanical
  *      trigger that has not produced a real check run after this many tries is no longer "GitHub hasn't
  *      noticed yet" — hand it to a human/ci-heal instead.
- *   4. Otherwise → `trigger-ci` dispatch. `preferUpdateBranch` (true when `aheadBy > 0`) tells the IO shell to
- *      prefer a `rebaseDropManifest` refresh onto `main` (whose push starts a fresh run AND closes the same
- *      staleness {@link planMainRedRebases} exists to fix) over a bare `gh workflow run` dispatch — never the
- *      raw `update-branch` REST endpoint (PR #2740 review).
+ *   4. Otherwise → `trigger-ci`: the IO shell rechecks mergeability and the exact head,
+ *      then pushes a guarded empty commit with a workflow-triggering identity.
  * @param {object} o
  * @param {Array<{prNumber:number, headRefName?:(string|null), headSha?:(string|null),
- *   headCommittedAt?:(string|null), aheadBy?:(number|null), triggerAttemptsForSha?:number}>} [o.candidates]
+ *   headCommittedAt?:(string|null), triggerAttemptsForSha?:number}>} [o.candidates]
  * @param {number} [o.now]
  * @param {number} [o.thresholdMs]
  * @param {number} [o.maxRetriesPerSha]
@@ -1033,7 +1031,6 @@ export function planMissingRunRecoveries({
     }
     dispatch.push({
       ...base, baseRefName: c?.baseRefName ?? null, attempts, kind: 'trigger-ci',
-      preferUpdateBranch: Number.isFinite(c?.aheadBy) ? c.aheadBy > 0 : false,
       why: `PR #${prNumber}'s head sha ${base.headSha ?? '?'} has had NO required-check run at all since its head commit, past the missing-run threshold — triggering CI`,
     });
   }
@@ -1063,6 +1060,9 @@ export function countMissingRunComments(comments, headSha = null) {
     const body = typeof c === 'string' ? c : c?.body;
     if (typeof body !== 'string' || !body.trimStart().startsWith(MISSING_RUN_COMMENT_MARKER)) continue;
     if (!isTrustedMarkerAuthor(c)) continue;
+    // Old dispatch attempts cannot produce evaluated PR checks; do not let their
+    // exhausted budget prevent the corrected recovery method from running.
+    if (/via workflow-dispatch|trigger CI \(workflow-dispatch/.test(body)) continue;
     if (headSha && !missingRunBodyHasExactLine(body, `sha: ${headSha}`)) continue;
     n += 1;
   }
@@ -1077,22 +1077,22 @@ export function countMissingRunComments(comments, headSha = null) {
  * @returns {string}
  */
 export function buildMissingRunComment({
-  headRefName = null, headSha = null, ok = true, action = 'workflow-dispatch', error = null,
-  refresh = null, refreshError = null,
+  headRefName = null, headSha = null, ok = true, action = 'pull-request-push', error = null,
+  refresh = null, refreshError = null, newHeadSha = null,
 } = {}) {
-  // When a behind-main refresh was attempted but did not push (already current / a real conflict), say so — the
-  // trigger then fell back to a workflow dispatch, and a reader needs to know the branch is still behind.
+  // Preserve refresh details when rendering historical attempts.
   const refreshNote = refresh
     ? ` (refresh onto main first: ${refresh}${refreshError ? ` — ${refreshError}` : ''})`
     : '';
   const outcome = ok
-    ? `this head had no required-check run at all — triggered CI via ${action}${refreshNote}.`
+    ? `this head had no required-check run at all — requested CI via ${action}; PR checks must still be observed${refreshNote}.`
     : `attempted to trigger CI (${action}${refreshNote}) and it FAILED: ${error ?? '(no error text captured)'} — this attempt still counts toward the retry cap so a persistently-failing trigger cannot retry forever; once capped, this is left for a human/ci-heal look instead.`;
   return [
     MISSING_RUN_COMMENT_MARKER,
     '',
     `branch: ${headRefName ?? '(unknown)'}`,
     `sha: ${headSha ?? '(unknown)'}`,
+    ...(newHeadSha ? [`recovery-sha: ${newHeadSha}`] : []),
     `conveyor missing-run-recovery ${outcome}`,
   ].join('\n');
 }
