@@ -9,6 +9,7 @@ import {
   existsSync, lstatSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, unlinkSync, utimesSync,
   writeFileSync,
 } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { writeJsonAtomic, withFileLock } from '../atomic-json-file.mjs';
@@ -184,4 +185,29 @@ describe('withFileLock', () => {
     expect(existsSync(lockPath)).toBe(true);
     expect(readFileSync(lockPath, 'utf8')).toBe(String(process.pid));
   });
+});
+
+it('#4429 private temporary and replacement files under permissive umask', () => {
+  const result = JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', `
+    import { writeJsonAtomic } from ${JSON.stringify(join(process.cwd(), 'scripts/lib/atomic-json-file.mjs'))};
+    import { mkdtempSync, statSync, renameSync, chmodSync, readdirSync, rmSync } from 'node:fs';
+    import { tmpdir } from 'node:os';
+    import { join } from 'node:path';
+    process.umask(0);
+    const dir = mkdtempSync(join(tmpdir(), 'atomic-private-'));
+    const target = join(dir, 'out.json');
+    const modes = [];
+    try {
+      for (let i = 0; i < 2; i++) {
+        if (i) chmodSync(target, 0o666);
+        writeJsonAtomic(target, { i }, { mode: 0o600, renameSyncFn: (tmp, dest) => {
+          modes.push(statSync(tmp).mode & 0o777);
+          renameSync(tmp, dest);
+        } });
+        modes.push(statSync(target).mode & 0o777);
+      }
+      console.log(JSON.stringify({ modes, files: readdirSync(dir) }));
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  `], { encoding: 'utf8' }));
+  expect(result).toEqual({ modes: [0o600, 0o600, 0o600, 0o600], files: ['out.json'] });
 });

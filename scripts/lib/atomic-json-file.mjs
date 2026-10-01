@@ -56,9 +56,10 @@ import { sleepSyncMs } from '../readiness/drain-lock.mjs';
  * @param {unknown} data
  * @param {{
  *   writeFileSyncFn?: Function, renameSyncFn?: Function, readFileSyncFn?: Function, unlinkSyncFn?: Function,
- *   realpathSyncFn?: Function,
+ *   realpathSyncFn?: Function, mode?: number,
  * }} [io] - injectable fs calls, same DI seam this repo's other IO-shell functions already use; only ever
- *   exercised by tests — every real caller keeps using the module's own real `node:fs` functions by default.
+ *   exercised by tests. Optional mode sets temporary-file creation permissions (preserved by rename);
+ *   omitted mode retains the default write behavior and process umask.
  */
 export function writeJsonAtomic(path, data, {
   writeFileSyncFn = writeFileSync,
@@ -66,13 +67,14 @@ export function writeJsonAtomic(path, data, {
   readFileSyncFn = readFileSync,
   unlinkSyncFn = unlinkSync,
   realpathSyncFn = realpathSync,
+  mode,
 } = {}) {
   const text = `${JSON.stringify(data, null, 2)}\n`;
   JSON.parse(text); // validate the in-memory render before any disk write — throws loud on unserializable input
   let realPath = path;
   try { realPath = realpathSyncFn(path); } catch { /* doesn't exist yet, or unresolvable — write `path` directly */ }
   const tmp = `${realPath}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`;
-  writeFileSyncFn(tmp, text, 'utf8');
+  writeFileSyncFn(tmp, text, mode === undefined ? 'utf8' : { encoding: 'utf8', mode });
   try {
     JSON.parse(readFileSyncFn(tmp, 'utf8')); // validate the BYTES ON DISK, not just the string still in memory
   } catch (e) {
