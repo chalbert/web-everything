@@ -3,9 +3,11 @@ bornAs: xpyelm4
 kind: story
 size: 3
 parent: "4075"
-status: open
+status: resolved
 scope: ["we:scripts/conveyor/ci-heal-owed.mjs", "we:scripts/conveyor/__tests__/ci-heal-owed.test.mjs"]
 dateOpened: "2026-09-29"
+dateStarted: "2026-10-01"
+dateResolved: "2026-10-01"
 preparedDate: "2026-10-01"
 preparedAgainstSha: "07bb7c5142d6cbc26c11e22d05e1e29d9ce9c44e"
 tags: []
@@ -30,6 +32,7 @@ Idempotency key (do not edit): approval-prevention-key:chalbert/web-everything#2
 - Corrected premise/scope: the reader now starts at `we:scripts/conveyor/ci-heal-owed.mjs:111`; the guard is still absent. The two-file change scope remains accurate, including its matching existing test file. The canonical mapping in `we:scripts/lib/constellation-repos.mjs:32` is already imported by the implementation and needs no edit. Unknown/missing repository keys must also be rejected so canonical lookup cannot accidentally accept an absent slug or an inherited property.
 - Source evidence: the reader currently checks kind, integer PR, head, body, and optional repo filter, then returns the parsed record. The flush consumes its slug for the PR read at `we:scripts/conveyor/ci-heal-owed.mjs:200` and comment post at `we:scripts/conveyor/ci-heal-owed.mjs:218`. Existing malformed-file coverage in `we:scripts/conveyor/__tests__/ci-heal-owed.test.mjs` does not test repository/slug consistency.
 - Preparation probe: created one temporary record with repo `we` and slug `outsider/wrong`, read it, then called the real `flushOwedWrites` with an injected exec recorder returning an open PR with no comments. The reader accepted the slug; the recorder observed both a PR view and comment targeting `outsider/wrong`, and the result contained one posted record. No GitHub process was invoked, and the temporary directory was removed. This confirms the gap remains undelivered.
+- Delivered: `readOwedWrites` now skips any record whose repo key is not an own key of `CONSTELLATION_REPOS` or whose stored slug differs from the canonical slug, and returns the canonical slug. New table-driven and real-flush tests fail without the guard (13 failures) and pass with it; `we:ci-heal-pr-dispatch.test.mjs` still passes.
 
 ## Design
 
@@ -52,7 +55,7 @@ In `we:scripts/conveyor/__tests__/ci-heal-owed.test.mjs`:
 - Accept each canonical key/slug pair for both supported kinds, preserving the record fields and repository filtering behavior.
 - Call the real `flushOwedWrites` on a fresh tampered-only directory with an exec spy: assert zero calls and empty posted/cleared/dropped/kept arrays. Assert the rejected file remains unchanged. Add a canonical control that reads and posts through the canonical slug and clears successfully, proving the flush has not simply been disabled.
 
-Run this focused suite and the existing caller regression suite in `we:scripts/operations/__tests__/ci-heal-pr-dispatch.test.mjs`, which already covers flush-before-reconcile, dedupe, closed PRs, retry bounds, and repo isolation. The caller suite is validation-only, outside the edit scope.
+Run this focused suite and the existing caller regression suite in `we:scripts/operations/__tests__/we:ci-heal-pr-dispatch.test.mjs`, which already covers flush-before-reconcile, dedupe, closed PRs, retry bounds, and repo isolation. The caller suite is validation-only, outside the edit scope.
 
 ## Proof plan
 

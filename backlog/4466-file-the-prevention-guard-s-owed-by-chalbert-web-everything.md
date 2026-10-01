@@ -4,21 +4,60 @@ kind: story
 size: 3
 parent: "4075"
 status: open
-scope: ["we:scripts/lib/gh-throttle.mjs", "we:scripts/lib/__tests__/gh-throttle.test.mjs"]
+scope: ["we:scripts/lib/__tests__/gh-throttle.fidelity.test.mjs", "we:eslint.config.mjs", "we:__tests__/eslint.config*.test.mjs", "we:package.json", "we:package-lock.json", "we:scripts/lib/__tests__/library-no-undef.test.mjs"]
 dateOpened: "2026-09-29"
+preparedDate: "2026-10-01"
+preparedAgainstSha: "ef097d284ddcfeb70dc92f158750fc1a1dc90663"
 tags: []
 ---
 
 # File the prevention guard(s) owed by chalbert/web-everything#2918's independent review
 
-Filed mechanically ON APPROVAL (operator rule, 2026-09-27 — "prevention outstanding should be filed by default on approval") — this accept verdict named the guard(s) below as owed. None of them blocked the approval; the debt is tracked here instead:
-
-1. `we:scripts/lib/gh-throttle.mjs:770` — Add a fidelity test that feeds a truncated trace to `spawnWithGhDebugCapture` and asserts the settled error contains only gh's own error line. Also consider having `strip` drop everything after an unclosed `* Request at` block when the result is a signal or timeout kill.
-2. `we:scripts/lib/gh-throttle.mjs:792` — A unit test explicitly asserting that a successful execFileSync emulation with stderr output does NOT leak that output to process.stderr.
-3. `we:scripts/lib/gh-throttle.mjs:778` — A static analysis lint (e.g. ESLint's no-undef rule) enabled on all library files to statically catch undefined variable and function references before execution.
+Filed mechanically ON APPROVAL (operator rule, 2026-09-27 — "prevention outstanding should be filed by default on approval"). Preserve the goal: executable prevention for truncated debug-trace leakage, incorrect successful stderr relay, and undefined library references. The review's original behavioral premises are corrected below against the current implementation.
 
 Idempotency key (do not edit): approval-prevention-key:chalbert/web-everything#2918@28e088df7ee14f66ad9e5e4ce75556a21b4dd29f
 
+## Progress
+
+Preparation research against checkout ef097d284ddcfeb70dc92f158750fc1a1dc90663:
+
+- **Old premise/scope:** the review cited capture, settlement, and an undefined-reference risk at historical lines 770, 792, and 778 of `we:scripts/lib/gh-throttle.mjs`. It requested preserving only gh's error from a truncated trace, suggested dropping unclosed blocks, and assumed successful exec emulation must never write stderr. Scope named only `we:scripts/lib/gh-throttle.mjs` and `we:scripts/lib/__tests__/gh-throttle.test.mjs`.
+- **Corrected truncation premise:** `stripGhDebug` at `we:scripts/lib/gh-throttle.mjs:776` already drops unclosed blocks, including error-looking text in their tail. Commit 9cb84ccad delivered that behavior for #4428; `we:scripts/lib/__tests__/gh-throttle.test.mjs:861` and `we:scripts/lib/__tests__/gh-throttle.fidelity.test.mjs:163` already test the parser. Preserve this fail-closed contract. An error before a truncated block survives; an error embedded in its unclosed tail cannot safely be recovered. The remaining guard must exercise capture AND settlement, now at `we:scripts/lib/gh-throttle.mjs:884` and `we:scripts/lib/gh-throttle.mjs:906`, rather than duplicate parser-only coverage.
+- **Corrected relay premise:** `we:scripts/lib/__tests__/gh-throttle.fidelity.test.mjs:361` already compares successful warning relay with raw Node when `stdio` is omitted. A direct Node v22.1.0 subprocess probe observed one `process.stderr.write` containing `warning\n` with omitted `stdio`, and no writes with explicit `stdio: 'pipe'`. Thus the owed no-leak assertion applies to explicit piped stdio, not every successful call. A direct capture/settle probe with SIGTERM preserved a pre-trace gh error and removed a sentinel trace body; a separate unclosed-tail probe returned empty stderr. These were local synthetic probes, not live GitHub requests.
+- **Corrected lint premise/scope:** `we:package.json` has no ESLint dependency or lint command, and no root ESLint configuration exists. The undefined-reference guard remains owed. Production JavaScript under `we:scripts/lib/` includes both ESM and CommonJS. Extend scope to a planned `we:eslint.config.mjs`, dependency manifests, and a planned `we:scripts/lib/__tests__/library-no-undef.test.mjs`. That test covers the config, dependency availability, and full production-library scan. The existing `we:scripts/lib/__tests__/gh-throttle.fidelity.test.mjs` is the matching behavioral test home; no runtime change is currently justified. This is partial prior delivery, not an already-done item.
+
+## Design
+
+1. Extend `we:scripts/lib/__tests__/gh-throttle.fidelity.test.mjs` with deterministic capture-to-settlement cases using the exported `spawnWithGhDebugCapture` and `settleLikeExecFileSync` from `we:scripts/lib/gh-throttle.mjs`. Inject spawn results for a signal and an ETIMEDOUT error. Include a genuine error before an unclosed request block, sentinel request/response payloads, and error-looking text inside the unclosed tail. Assert sanitized stderr, sanitized `output[2]`, no trace in the settled message, and retained status/signal/error code. Do not demand retention of text inside an unclosed block or change the parser's existing newline behavior.
+2. Extend the existing fake-gh subprocess oracle in `we:scripts/lib/__tests__/gh-throttle.fidelity.test.mjs`: successful stdout plus a real warning, explicit `stdio: 'pipe'` and explicit piped arrays, Buffer and UTF-8 output. Compare raw `execFileSync` with `runGhSync`; explicitly assert neither writes to the parent's stderr. Retain the existing omitted-stdio test, which requires relay.
+3. Add ESLint and its globals definitions as direct development dependencies in `we:package.json` and `we:package-lock.json`. Configure only undefined-reference checking in planned `we:eslint.config.mjs`, with Node globals and format-appropriate ESM/CommonJS parsing. Cover production JavaScript recursively under `we:scripts/lib/`; exclude test and fixture directories because they are not production libraries. Do not use regular-expression name detection, a gh-throttle-only allowlist, or a blanket undefined-name suppression.
+4. Planned `we:scripts/lib/__tests__/library-no-undef.test.mjs` invokes the real ESLint API against that production roster and requires zero lint/parse errors. Exercise the same config with in-memory positive and negative examples. This makes static analysis an executable test in the existing Vitest suite: `we:vitest.config.ts` includes script tests, and `we:.github/workflows/ci.yml:129` runs the sharded suite. No additional CI workflow or shared standards-gate mutation is needed.
+
+## MVP
+
+- Add the missing capture/settlement and explicit-pipe success guards in `we:scripts/lib/__tests__/gh-throttle.fidelity.test.mjs` without changing the observed runtime contract.
+- Add the ESLint config, locked direct dependencies, and executable production-library scan described above. Test the manifest/config integration in `we:scripts/lib/__tests__/library-no-undef.test.mjs`, so every non-test scope entry has a matching test.
+- Require the whole production-library scan to run, not merely a configured rule. If its first execution finds additional real defects, report exact files and expand the implementation touch-set and matching tests before fixing them; do not silently waive them or claim the all-library guard passes. Preparation has not run this not-yet-installed scanner.
+
+## Test plan
+
+- Capture/settlement matrix: signal termination, timeout error, request-side truncation, response-side truncation, Buffer/string stderr, pre-trace error retained, unclosed-tail content removed, and the settled error fields preserved. Keep a complete-block control where gh's following error survives.
+- Success relay matrix: omitted stdio retains the current raw-Node oracle; explicit pipe string and array suppress parent writes while preserving stdout. Restore stderr spies in cleanup. Use the existing fake subprocess and injected spawn seams; no credentials or network required.
+- Static analysis: an undefined function in an unexecuted branch and an undefined value must fail with `no-undef`; imported/local bindings, parameters, Node globals, and CommonJS bindings must pass. Check nested-file discovery, both module formats, fixture exclusions, parse-error failure, and a nonempty production roster containing `we:scripts/lib/gh-throttle.mjs`. Run the real scan, not just synthetic snippets.
+- Run the affected Vitest files through the repository's admission wrapper, then the runner's required standards checks. Preparation adds no implementation and delegates those checks to the runner as instructed.
+
+## Proof plan
+
+Run from WE root (repository prefixes below identify paths; strip `we:` when passing filesystem arguments): use the admission wrapper `we:scripts/readiness/heavy-admission.mjs` to run Vitest against `we:scripts/lib/__tests__/gh-throttle.fidelity.test.mjs` and planned `we:scripts/lib/__tests__/library-no-undef.test.mjs`.
+
+Record passing deterministic cases separately from any credential-gated live fidelity cases. For red/green evidence, temporarily mutate capture to retain raw stderr: the new truncation cases must fail. Temporarily make settlement relay explicit-pipe success stderr: the no-leak test must fail. Inject an undefined call in an unexecuted branch of a temporary production-library file: the real library scan must fail and name the file and identifier. Remove each mutation and show the same command passing. Existing correct runtime behavior means the new fidelity cases need not fail on the baseline; the mutation evidence proves their prevention value.
+
 ## Done when
 
-1. **Executable** — TODO: a command that fails before this item lands and passes after.
+All three prevention obligations have executable coverage: capture/settlement cannot leak truncated traces, explicit-pipe success cannot relay warnings, and undefined production-library references fail the normal test suite. The targeted tests and required standards checks pass, with red/green mutation evidence recorded. Preserve default-stdio Node fidelity and the already-delivered fail-closed parser behavior.
+
+## Follow-ups
+
+- Broader lint rules and static analysis outside `we:scripts/lib/` are separate work; this item adds undefined-reference detection only.
+- Coordinate overlapping undefined-reference prevention with #4460; its conveyor scope is outside this library-only guard.
+- Any defects exposed by the initial full-library scan require explicit source/test scope correction before implementation; they must not become silent suppressions or an unreported incomplete gate.

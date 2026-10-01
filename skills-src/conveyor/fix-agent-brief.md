@@ -255,6 +255,20 @@ gh pr view {{PR_NUM}} --json baseRefName --repo {{REPO}} --jq .baseRefName
 never fetch or merge it speculatively anywhere else in the repair, and only when it actually blocks the gate
 right now, never pre-emptively.**
 
+When this catch-up is needed, use a real merge of the live PR base. Preserve upstream commit identities;
+never cherry-pick a range of main commits or reconstruct upstream merges. Save local repairs in a commit
+first. A failed merge needs resolution (or `git merge --abort` before the stand-down below); after resolving,
+complete the merge and rerun the ancestry check against the saved `BASE_SHA` before the gate.
+
+```bash
+BASE_REF=$(gh pr view {{PR_NUM}} --repo {{REPO}} --json baseRefName --jq .baseRefName)
+test -n "$BASE_REF" || exit 1
+git fetch origin "$BASE_REF" || exit 1
+BASE_SHA=$(git rev-parse FETCH_HEAD) || exit 1
+git merge --no-edit "$BASE_SHA" || exit 1
+git merge-base --is-ancestor "$BASE_SHA" HEAD || exit 1
+```
+
 If `origin/main` advanced under the lane and a **conflict**
 blocks the gate, resolve it the `/finish` way (regenerate derived artifacts, take-main for coordination JSON) —
 or, if it is a genuine same-line code overlap you cannot safely resolve, **record the stand-down on the PR

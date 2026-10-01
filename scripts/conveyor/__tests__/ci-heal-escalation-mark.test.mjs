@@ -12,8 +12,9 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   buildCiHealEscalationComment, parseCiHealEscalations, latestCiHealEscalationForHead,
-  CI_HEAL_ESCALATION_MARKER, CI_HEAL_ESCALATION_OUTCOMES, postOrOweCiHealEscalation,
+  composeCiHealEscalation, CI_HEAL_ESCALATION_MARKER, CI_HEAL_ESCALATION_OUTCOMES, postOrOweCiHealEscalation,
 } from '../ci-heal-escalation-mark.mjs';
+import { collectCiAuthDiagnosis } from '../ci-auth-diagnosis.mjs';
 import { owedWriteAlreadyLive } from '../ci-heal-owed.mjs';
 import { budgetBlockedMessage } from '../../lib/gh-throttle.mjs';
 
@@ -215,4 +216,65 @@ it('re-arms legacy acquire-null escalations without deleting comments or moving 
   expect(latestCiHealEscalationForHead([{ body, author: AUTOMATION }], HEAD)).toBeNull();
   const verified = buildCiHealEscalationComment({ headSha: HEAD, outcome: 'needs-human', reason: 'origin ref verified absent — lane/4409' });
   expect(latestCiHealEscalationForHead([{ body: verified, author: AUTOMATION }], HEAD)?.outcome).toBe('needs-human');
+});
+
+it('#4545 renders credential evidence after the existing marker fields', () => {
+  const body = buildCiHealEscalationComment({ headSha: HEAD, outcome: 'needs-human', reason: 'Bad credentials',
+    authDiagnosis: { status: 'resolved', repo: 'chalbert/web-everything', runId: 36632379377, attempt: 1,
+      revision: 'b'.repeat(40), job: 'build', step: 'Checkout FUI (sibling)', secret: 'FUI_READ_TOKEN',
+      updatedAt: '2026-09-30T00:00:00Z', observedAt: '2026-10-01T00:00:00Z', repositorySecret: true } });
+  expect(body).toContain('gh secret set FUI_READ_TOKEN --repo chalbert/web-everything');
+  expect(latestCiHealEscalationForHead([{ body, author: AUTOMATION }], HEAD)).toMatchObject({ outcome: 'needs-human', reason: 'Bad credentials' });
+});
+
+describe('#4545 real CLI composition and owed-body preservation', () => {
+  const flags = { head: HEAD, outcome: 'needs-human', reason: 'Bad credentials', repo: 'chalbert/web-everything', run: '36632379377', attempt: '1' };
+  function collect(input) {
+    return collectCiAuthDiagnosis(input, { now: () => '2026-10-01T00:00:00Z', read: (args) => {
+      if (args[0] === 'secret') return JSON.stringify([{ name: 'FUI_READ_TOKEN', updatedAt: '2026-09-30T00:00:00Z' }]);
+      if (args[0] === 'run') return 'build\tCheckout FUI (sibling)\t##[error]Bad credentials';
+      if (args[1].includes('/contents/')) return JSON.stringify({ encoding: 'base64', content: Buffer.from('jobs:\n  build:\n    steps:\n      - name: Checkout FUI (sibling)\n        uses: actions/checkout@v4\n        with:\n          repository: chalbert/frontierui\n          token: ${{ secrets.FUI_READ_TOKEN }}').toString('base64') });
+      if (args[1].includes('/jobs?')) return JSON.stringify({ total_count: 1, jobs: [{ id: 42, run_id: Number(flags.run), run_attempt: 1, head_sha: HEAD, name: 'build', conclusion: 'failure', steps: [{ number: 2, name: 'Checkout FUI (sibling)', conclusion: 'failure' }] }] });
+      return JSON.stringify({ id: Number(flags.run), run_attempt: 1, head_sha: HEAD, repository: { full_name: flags.repo }, path: '.github/workflows/ci.yml', event: 'push' });
+    } });
+  }
+  it('renders the incident through the collector used by the CLI and preserves it on a budget refusal', () => {
+    const body = composeCiHealEscalation(flags, { collect });
+    expect(body).toContain('Checkout FUI (sibling)');
+    expect(body).toContain('2026-09-30T00:00:00Z');
+    expect(body).toContain('gh secret set FUI_READ_TOKEN --repo chalbert/web-everything');
+    let record;
+    const out = postOrOweCiHealEscalation({ pr: 2999, body, headSha: HEAD, repo: { key: 'we', slug: flags.repo },
+      post: () => { throw new Error(budgetBlockedMessage({ resource: 'graphql', until: 'soon' })); },
+      owe: (r) => { record = r; return r; } });
+    expect(out.commented).toBe(false);
+    expect(record.body).toBe(body);
+    expect(owedWriteAlreadyLive([{ body, author: AUTOMATION }], record)).toBe(true);
+    expect(latestCiHealEscalationForHead([{ body, author: AUTOMATION }], HEAD)).toMatchObject({ headSha: HEAD, outcome: 'needs-human', reason: flags.reason });
+  });
+  it('failed enrichment retains original escalation and never emits command errors', () => {
+    const body = composeCiHealEscalation(flags, { collect: () => { throw new Error('CANARY_SECRET_VALUE'); } });
+    expect(body).toContain('enrichment unavailable');
+    expect(body).not.toContain('CANARY_SECRET_VALUE');
+    expect(latestCiHealEscalationForHead([{ body, author: AUTOMATION }], HEAD)?.reason).toBe(flags.reason);
+  });
+  it('legacy invocations do no reads and produce the identical body', () => {
+    const { run, attempt, ...legacy } = flags;
+    expect(composeCiHealEscalation(legacy, { collect: () => { throw new Error('must not read'); } })).toBe(buildCiHealEscalationComment({ headSha: HEAD, outcome: legacy.outcome, reason: legacy.reason }));
+  });
+  it('brief passes diagnosed run and attempt alongside captured head on the needs-human auth exit', () => {
+    const brief = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../../../skills-src/conveyor/fix-agent-ci-brief.md'), 'utf8');
+    expect(brief).toContain('CI_AUTH_ARGS=(--run="$AUTH_RUN" --attempt="$AUTH_ATTEMPT")');
+    expect(brief).toContain('--head="$EXAMINED_HEAD" --outcome=needs-human "${CI_AUTH_ARGS[@]}"');
+    expect(brief.indexOf('CI_AUTH_ARGS=()')).toBeLessThan(brief.indexOf('CI_AUTH_ARGS=(--run='));
+    expect(brief).toContain('the healer never executes it');
+  });
+});
+
+it('#4545 malformed enrichment cannot prevent the original escalation', () => {
+  const body = composeCiHealEscalation({ head: HEAD, outcome: 'needs-human', run: '123', attempt: '1' },
+    { collect: () => ({ failures: { bad: 'CANARY_SECRET_VALUE' } }) });
+  expect(body).toContain('enrichment unavailable');
+  expect(body).not.toContain('CANARY_SECRET_VALUE');
+  expect(latestCiHealEscalationForHead([{ body, author: AUTOMATION }], HEAD)?.outcome).toBe('needs-human');
 });

@@ -107,7 +107,8 @@ export function recordOwedWrite({ repo, slug, pr, kind, headSha, body }, { dir =
   return record;
 }
 
-/** Every well-formed owed record in `dir` (optionally for one repo key). A malformed file is skipped, never thrown. */
+/** Every well-formed owed record in `dir` (optionally for one repo key). A malformed file, or one whose repo key/slug
+ *  disagrees with `CONSTELLATION_REPOS`, is skipped (left on disk), never thrown. */
 export function readOwedWrites({ dir = owedDir(), repo = null } = {}) {
   let names;
   try { names = readdirSync(dir); } catch { return []; }
@@ -116,8 +117,13 @@ export function readOwedWrites({ dir = owedDir(), repo = null } = {}) {
     try {
       const r = JSON.parse(readFileSync(join(dir, name), 'utf8'));
       if (!r || !OWED_KINDS.includes(r.kind) || !Number.isInteger(r.pr) || !r.headSha || !r.body) continue;
+      // The stored slug is never trusted: it must equal the canonical slug of an OWN constellation key, so a
+      // tampered/stale file cannot redirect the flush's PR read and comment post to an outside repo.
+      if (typeof r.repo !== 'string' || !Object.hasOwn(CONSTELLATION_REPOS, r.repo)) continue;
+      const slug = CONSTELLATION_REPOS[r.repo].slug;
+      if (r.slug !== slug) continue;
       if (repo && r.repo !== repo) continue;
-      out.push(r);
+      out.push({ ...r, slug });
     } catch { /* malformed — skip */ }
   }
   return out;

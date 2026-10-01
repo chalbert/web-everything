@@ -6,11 +6,11 @@
  *   flush (post / dedupe / moot / bound) is pinned through its real caller in `ci-heal-pr-dispatch.test.mjs`.
  */
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  isBudgetRefusal, resolveOwedRepo, recordOwedWrite, readOwedWrites, clearOwedWrite, owedWriteAlreadyLive, owedDir,
+  isBudgetRefusal, resolveOwedRepo, recordOwedWrite, readOwedWrites, clearOwedWrite, owedWriteAlreadyLive, owedDir, flushOwedWrites,
 } from '../ci-heal-owed.mjs';
 import { budgetBlockedMessage } from '../../lib/gh-throttle.mjs';
 
@@ -95,5 +95,84 @@ describe('owedWriteAlreadyLive', () => {
     expect(owedWriteAlreadyLive([{ body: rec.body, author: { login: 'mallory' } }], rec)).toBe(false);
     expect(owedWriteAlreadyLive([{ body: `> ${rec.body}`, author: { login: 'web-everything' } }], rec)).toBe(false);
     expect(owedWriteAlreadyLive([{ body: 'MARK\n\nno head line', author: { login: 'web-everything' } }], rec)).toBe(false);
+  });
+});
+
+describe('readOwedWrites — repo/slug consistency guard', () => {
+  const base = { repo: 'we', slug: 'chalbert/web-everything', pr: 5, kind: 'ci-heal', headSha: HEAD, body: 'b' };
+  const withTmp = (fn) => {
+    const dir = mkdtempSync(join(tmpdir(), 'owed-'));
+    try { return fn(dir); } finally { rmSync(dir, { recursive: true, force: true }); }
+  };
+  /** Persist a canonical record, then overwrite its file with `mutate(record)` — tampering on disk, not via the writer. */
+  const tamper = (dir, mutate, rec = base) => {
+    const written = recordOwedWrite(rec, { dir });
+    const file = join(dir, `${rec.repo}__${rec.pr}__${rec.kind}.json`);
+    writeFileSync(file, JSON.stringify(mutate({ ...written })) + '\n');
+    return file;
+  };
+
+  it.each([
+    ['an outside slug', { slug: 'outsider/wrong' }],
+    ['another constellation repo slug', { slug: 'chalbert/frontierui' }],
+    ['a case-variant slug', { slug: 'Chalbert/Web-Everything' }],
+    ['a missing slug', { slug: undefined }],
+    ['an empty slug', { slug: '' }],
+    ['a non-string slug', { slug: 42 }],
+    ['an unknown repo key with a missing slug', { repo: 'nope', slug: undefined }],
+    ['an unknown repo key', { repo: 'nope' }],
+    ['a missing repo key', { repo: undefined }],
+    ['a non-string repo key', { repo: 7 }],
+    ['an inherited-property repo key (toString)', { repo: 'toString', slug: undefined }],
+    ['an inherited-property repo key (__proto__)', { repo: '__proto__', slug: undefined }],
+  ])('skips a record with %s, with and without the repo filter, keeping a valid neighbour', (_label, patch) => {
+    withTmp((dir) => {
+      tamper(dir, (r) => ({ ...r, ...patch }));
+      recordOwedWrite({ ...base, pr: 6 }, { dir });
+      expect(readOwedWrites({ dir }).map((r) => r.pr)).toEqual([6]);
+      expect(readOwedWrites({ dir, repo: 'we' }).map((r) => r.pr)).toEqual([6]);
+      if (typeof patch.repo === 'string') expect(readOwedWrites({ dir, repo: patch.repo })).toEqual([]);
+    });
+  });
+
+  it.each([
+    ['we', 'chalbert/web-everything'],
+    ['frontierui', 'chalbert/frontierui'],
+    ['plateau-app', 'chalbert/plateau-app'],
+  ])('accepts the canonical %s record for both kinds and keeps the repo filter', (repo, slug) => {
+    withTmp((dir) => {
+      for (const kind of ['ci-heal', 'ci-heal-escalation']) recordOwedWrite({ ...base, repo, slug, kind }, { dir });
+      const all = readOwedWrites({ dir });
+      expect(all).toHaveLength(2);
+      for (const r of all) expect(r).toMatchObject({ repo, slug, pr: 5, headSha: HEAD, body: 'b' });
+      expect(readOwedWrites({ dir, repo })).toHaveLength(2);
+      expect(readOwedWrites({ dir, repo: repo === 'we' ? 'frontierui' : 'we' })).toEqual([]);
+    });
+  });
+
+  it('flush on a tampered-only dir makes zero gh calls, reports nothing, and leaves the file untouched', () => {
+    withTmp((dir) => {
+      const file = tamper(dir, (r) => ({ ...r, slug: 'outsider/wrong' }));
+      const before = readFileSync(file, 'utf8');
+      const calls = [];
+      const res = flushOwedWrites({ repo: 'we', dir, exec: (...a) => { calls.push(a); return '{}'; } });
+      expect(calls).toHaveLength(0);
+      expect(res).toEqual({ posted: [], cleared: [], dropped: [], kept: [] });
+      expect(readFileSync(file, 'utf8')).toBe(before);
+    });
+  });
+
+  it('control: flush on a canonical record reads and posts through the canonical slug, then clears', () => {
+    withTmp((dir) => {
+      recordOwedWrite(base, { dir });
+      const calls = [];
+      const exec = (cmd, args) => { calls.push(args); return args[1] === 'view' ? JSON.stringify({ state: 'OPEN', comments: [] }) : ''; };
+      const res = flushOwedWrites({ repo: 'we', dir, exec });
+      expect(res.posted).toHaveLength(1);
+      expect(calls).toHaveLength(2);
+      expect(calls[0]).toContain('chalbert/web-everything');
+      expect(calls[1]).toContain('--repo=chalbert/web-everything');
+      expect(readOwedWrites({ dir })).toEqual([]);
+    });
   });
 });
