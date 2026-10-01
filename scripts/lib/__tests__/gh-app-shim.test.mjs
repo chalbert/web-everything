@@ -911,7 +911,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
       const secret = 'ghs_disposable_fixture_secret';
       const trace = '* Request at now\n* Request to https://api.github.com/graphql\n> Authorization: Bearer ' + secret
         + '\n\nprivate request body\n< HTTP/2.0 200 OK\n< X-Ratelimit-Used: 9\n< X-Ratelimit-Remaining: 91\n< X-Ratelimit-Limit: 100\n< X-Ratelimit-Reset: 123\n< X-Ratelimit-Resource: graphql\n< Set-Cookie: private-cookie\n\n'
-        + JSON.stringify({ data: { rateLimit: { cost: 3 }, private: 'private-response' } }) + '\n* Request took 1ms\n';
+        + JSON.stringify({ data: { rateLimit: { cost: 3 }, private: 'private-response' } }) + '\n\n* Request took 1ms\n';
       writeFileSync(realGh, `#!/usr/bin/env node
 const fs = require('node:fs');
 fs.appendFileSync(${JSON.stringify(count)}, 'call\\n');

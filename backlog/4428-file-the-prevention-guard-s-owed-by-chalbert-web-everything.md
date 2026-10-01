@@ -3,9 +3,10 @@ bornAs: xkq7e0a
 kind: story
 size: 3
 parent: "4075"
-status: open
+status: active
 scope: ["we:scripts/lib/gh-throttle.mjs", "we:scripts/lib/gh-spend.mjs", "we:scripts/lib/__tests__/gh-throttle.test.mjs", "we:scripts/lib/__tests__/gh-spend.test.mjs"]
 dateOpened: "2026-09-28"
+dateStarted: "2026-09-30"
 preparedDate: "2026-09-30"
 preparedAgainstSha: "59f603470d049093b7c0fcae1a2f00bda7cd41ba"
 tags: []
