@@ -84,6 +84,7 @@ import {
   buildTrackedPathIndex, scopeBasenameMismatches, scopeBasenameMismatchMessage,
   checkLeashPin,
   findRelativeNodeScriptsAfterLaneCd,
+  scopeMissingTestFile, bodyDeliverablesMissingFromScope, deferredBlockedByFindings,
   dirLevelScopeFinding,
 } from './check-standards-rules.mjs';
 // #3637 — the declared POC branches, so a `deliveryTarget:` naming an UNregistered one is a gate error.
@@ -980,12 +981,15 @@ mark("6d-quinquies. Unquoted-colon scalar in frontmatter (#453)");
         .split('\0').filter(Boolean));
   } catch { /* non-git environment — the scope-path WARN below is simply not emitted */ }
   for (const file of readdirSync(join(ROOT, 'backlog')).filter((f) => f.endsWith('.md'))) {
-    let raw;
-    try { raw = matterFm(readFileSync(join(ROOT, 'backlog', file), 'utf8')).data; }
+    let raw, body = '';
+    try { const fm = matterFm(readFileSync(join(ROOT, 'backlog', file), 'utf8')); raw = fm.data; body = fm.content; }
     catch { continue; } // a malformed-YAML item is already reported by the unquoted-colon scan above
+    const id = file.replace(/\.md$/, '');
+    // #4448 guard 3 — validate the RAW field here (the loader drops unknown/wrong-typed fields and would hide it).
+    const selfNum = (/^(\d+)-/.exec(id) || [])[1];
+    for (const msg of deferredBlockedByFindings(raw, seenNums, selfNum)) err(`Backlog item "${id}" ${msg}`);
     const scope = raw?.scope;
     if (scope === undefined) continue;
-    const id = file.replace(/\.md$/, '');
     if (!Array.isArray(scope)) {
       err(`Backlog item "${id}" scope must be an array of repo-qualified path prefixes (e.g. ["we:src/backlog-view/", "we:docs/agent/"])`);
       continue;
@@ -1042,6 +1046,13 @@ mark("6d-quinquies. Unquoted-colon scalar in frontmatter (#453)");
     // redden exactly that greenfield case.
     for (const finding of scopeBasenameMismatches(raw, trackedIndex))
       warn(scopeBasenameMismatchMessage(id, finding));
+
+    // ── #4448 guards 4 + 5 — scope vs. what the card commits to. WARN only; `scopeRationale:` clears both. ──
+    for (const f of scopeMissingTestFile(raw, trackedIndex, body))
+      warn(`Backlog item "${id}" scopes "${f.entry}" and mandates a test plan, but its tracked test "we:${f.testPath}" is not in scope: — the lease will not cover the test the build must edit (#4448). Add it, or add a \`scopeRationale:\` note.`);
+    const undeclared = bodyDeliverablesMissingFromScope(raw, body);
+    if (undeclared.length)
+      warn(`Backlog item "${id}" names deliverable${undeclared.length > 1 ? 's' : ''} ${JSON.stringify(undeclared)} under ## MVP / ## Done when that ${undeclared.length > 1 ? 'are' : 'is'} missing from scope: (#4448). Add ${undeclared.length > 1 ? 'them' : 'it'}, or add a \`scopeRationale:\` note.`);
   }
 }
 
