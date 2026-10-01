@@ -1,7 +1,8 @@
 ---
 bornAs: x6ayr4k
 kind: decision
-status: open
+status: resolved
+dateResolved: "2026-09-30"
 dateOpened: "2026-09-30"
 preparedDate: "2026-09-30"
 preparedAgainstSha: "687731ec899232739f800c482543c1224a53b581"
@@ -27,6 +28,17 @@ Validate this candidate experiment and its net benefit. Scripts first, qualified
 | (c) Broaden cheap routing immediately from benchmark/price claims | Potential immediate capacity relief | Unmeasured escapes, tool failures and frontier rework; no evidence for trust |
 
 **Recommendation: (b).** Initial cases are exact transforms, reader-facing corrections and supplied-data card drafts, then the existing test-only route. One Flash-class and one hosted open-weight candidate are comparison targets; a local version follows only after measured host headroom. Model, backend, thresholds and budget remain configurable, not standards mandates. No model is installed or dispatched by this card's preparation.
+
+## Operator ruling (2026-09-30 ~8:10 PM ET)
+
+**Option (b), narrowed** — as presented to the operator (option "B"), verbatim answer "B":
+
+1. **Stage 0 + stages 1–2 with Gemini Flash only** (already-paid allowance, no new integration): join every worker/checker/review/retry call to its card, step and attempt; move deterministic work to scripts; run the paired qualification on text work (exact transforms, reader-facing corrections, supplied-data card drafts) and the existing Flash test-only route after probing its 210-LOC envelope row and the unreadable-checker row.
+2. **One small, capped hosted open-weight trial** alongside, with a recorded API-spend ceiling; nothing it produces lands on its own.
+3. **"Open weight" means a cheap open-weight model on a cloud API** (operator clarification, same evening). **Local inference is kept for later** only as a way to use spare overnight compute on the operator's planned Mac Studio (96 GB): batch work, not running local agents ("if we can find some use for overnight compute we may as well use it").
+4. **Priority:** the largest measured cost is orchestration (15.13B of 17.67B observed tokens), so reducing orchestration — the builder running on its own — is pushed hardest, ahead of model swaps.
+
+The dossier thresholds, independent checking, existing trust eligibility and explicit human promotion stand exactly as recommended above. Operator quality rule carried with it (same day): use Gemini only where the value is confident — "good to use tokens but not if quality is poor".
 
 ## Why this isn't a classic fork (and is still a decision)
 
