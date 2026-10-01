@@ -24,7 +24,7 @@ Idempotency key (do not edit): approval-prevention-key:chalbert/web-everything#2
 ## Progress
 
 - **Premise check (2026-09-30, against `main` @ 577ae727).** Guards 1 and 2 are NOT delivered (no detector for either in
-  `we:scripts/check-standards-rules.mjs`; `git log --grep` finds no commit for #4438 / `xppaab9` beyond the JIT renumber).
+  `we:scripts/check-standards-rules.mjs`; `git log --grep` finds no commit for #4438 / `4438` beyond the JIT renumber).
   Guard 3 IS delivered in current form: `workItem` was superseded by the single `kind` axis (#466/#487,
   `we:scripts/check-standards-rules.mjs:216-222`), and `we:scripts/check-standards-rules.mjs:446-455` already errors on
   a story with no `size` and a task with one; `kind` presence + enum is checked just above. The cited card 4377 carries

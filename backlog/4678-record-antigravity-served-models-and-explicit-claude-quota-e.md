@@ -1,4 +1,5 @@
 ---
+bornAs: xtmprx7
 kind: story
 size: 5
 status: active
