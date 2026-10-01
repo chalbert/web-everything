@@ -6,6 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { corpusOverwriteTargets, reason } from '../guard-bash.mjs';
+import { loadLedger } from '../conveyor/brief-rule-ledger.mjs';
 
 const GUARD = join(dirname(fileURLToPath(import.meta.url)), '..', 'guard-bash.mjs');
 const OVERWRITE = /Don't overwrite backlog\|reports/;
@@ -16,6 +17,9 @@ function hook(command) {
     encoding: 'utf8',
     env: { ...process.env, WE_DISPATCH_KIND: 'fix' },
   });
+  expect(run.error).toBeUndefined();
+  expect(run.status).toBe(0);
+  expect(run.stderr).toBe('');
   return run.stdout;
 }
 
@@ -47,6 +51,64 @@ describe('corpusOverwriteTargets — shell writes that replace a card (#4070)', 
     'echo hi > /tmp/backlog/x.md',                              // scratch
   ])('leaves %j alone', (cmd) => {
     expect(corpusOverwriteTargets(cmd)).toEqual([]);
+  });
+});
+
+describe('resolved directory writes and documented limits (#4416)', () => {
+  const denied = [
+    ['cp /tmp/draft.md backlog/x.md', ['backlog/x.md']],
+    ...['backlog', 'reports'].flatMap((dir) => [
+      [`cp /tmp/draft.md ${dir}`, [`${dir}/draft.md`]],
+      [`cp /tmp/draft.md ${dir}/`, [`${dir}/draft.md`]],
+      [`cp /tmp/a.md /tmp/b.md /tmp/notes.txt ${dir}/`, [`${dir}/a.md`, `${dir}/b.md`]],
+      [`cp '/tmp/draft card.md' '${dir}/nested folder/'`, [`${dir}/nested folder/draft card.md`]],
+      [`cp /tmp/draft.md '${dir}/spaced card.md'`, [`${dir}/spaced card.md`]],
+      [`env FOO=1 gcp -f -- /tmp/draft.md ./${dir}/`, [`./${dir}/draft.md`]],
+      [`install -m 644 /tmp/draft.md ${dir}/`, [`${dir}/draft.md`]],
+      [`ginstall -m 644 /tmp/draft.md ${dir}`, [`${dir}/draft.md`]],
+      [`mv /tmp/draft.md ${dir}/`, [`${dir}/draft.md`]],
+      [`gmv /tmp/draft.md ${dir}`, [`${dir}/draft.md`]],
+    ]),
+  ];
+  it.each(denied)('denies %s through detector, reason and hook JSON', (command, targets) => {
+    expect(corpusOverwriteTargets(command)).toEqual(targets);
+    const why = reason(command);
+    const output = JSON.parse(hook(command)).hookSpecificOutput;
+    expect(output.permissionDecision).toBe('deny');
+    for (const target of targets) {
+      expect(why).toContain(target);
+      expect(JSON.stringify(output)).toContain(target);
+    }
+    expect(why).toMatch(/Edit\/Write tools/);
+    expect(JSON.stringify(output)).toMatch(/Edit\/Write tools/);
+  });
+
+  it.each([
+    'cp backlog/a.md /tmp/', 'cp /tmp/a.md /tmp/backlog/',
+    'cp /tmp/a.txt reports/', 'cat reports/a.md',
+    'mv backlog/a.md backlog/b.md', 'mv backlog/a.md reports/',
+    'git mv backlog/a.md backlog/b.md',
+    'git commit -m "never echo > backlog/spaced card.md"',
+  ])('preserves allowed control %s', (command) => {
+    expect(corpusOverwriteTargets(command)).toEqual([]);
+    expect(reason(command)).toBeNull();
+    expect(hook(command)).toBe('');
+  });
+
+  it.each([
+    ['cp -t backlog /tmp/a.md', '-t'],
+    ['cp --target-directory backlog /tmp/a.md', '--target-directory'],
+    ['cp --target-directory=reports /tmp/a.md', '--target-directory'],
+    ['dd if=/tmp/a.md of=backlog/a.md', 'dd of='],
+    ['rsync /tmp/a.md reports/', 'rsync'],
+    ['ln -sf /tmp/a.md backlog/a.md', 'ln -sf'],
+    ['cp /tmp/a.md backlog/nested', 'bare nested directories'],
+    ['node -e "require(\'fs\').writeFileSync(\'backlog/a.md\', \'x\')"', 'interpreter'],
+  ])('pins residual %s to its ledger limitation %s', (command, limitation) => {
+    expect(corpusOverwriteTargets(command)).toEqual([]);
+    expect(reason(command)).toBeNull();
+    expect(hook(command)).toBe('');
+    expect(loadLedger().rules.find((r) => r.id === 'card-edit-via-tools').gap).toContain(limitation);
   });
 });
 
