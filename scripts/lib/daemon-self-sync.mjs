@@ -88,7 +88,9 @@
  *   4. Run the real tick under the read lock (try/finally — the lock is released whether the tick returns or
  *      throws), and release it before doing anything else.
  *   5. `hasStaleRefusal(result)` (#3383 bug 1, unchanged in spirit) ⇒ AFTER the read lock is released, call
- *      `rebuild()` again (the SAME gated path, never a raw merge) — adopted ⇒ `onRestart`.
+ *      `rebuild()` again (the SAME gated path, never a raw merge). Adoption with imported changes restarts
+ *      immediately, without the normal debounce. Otherwise re-discover under a fresh read lock once in this
+ *      pass; do not sleep away the opportunity the successful rebuild just created.
  * `selfSyncCheckout` (the old merge-based IO) is no longer called anywhere on this path — kept exported only
  * because nothing else in this codebase imports it privately, and removing a public export for no functional
  * reason is its own kind of breakage. `sync`/`gate` stay ACCEPTED options (runner.mjs forwards them) but are
@@ -489,13 +491,13 @@ export function withSelfSync(effects, {
   let closure;
   let closureBuilt = false;
   const loggedHeads = new Set();
-  const restartGate = (headNow) => {
+  const restartGate = (headNow, { urgent = false } = {}) => {
     if (!closureBuilt) {
       closureBuilt = true;
       try { closure = importClosure({ root, entries }); } catch { closure = null; }
     }
     const changedFiles = diffFiles({ root, from: bootSha, to: headNow, ...(timeoutMs != null ? { timeoutMs } : {}) });
-    const d = decideRestart({ changedFiles, closure, uptimeMs: now() - bootAt, minIntervalMs: minRestartIntervalMs });
+    const d = decideRestart({ changedFiles, closure, uptimeMs: now() - bootAt, minIntervalMs: urgent ? 0 : minRestartIntervalMs });
     if (!d.restart && !loggedHeads.has(`${headNow}:${d.reason}`)) {
       loggedHeads.add(`${headNow}:${d.reason}`);
       log.error?.(d.reason === 'min-interval'
@@ -549,59 +551,69 @@ export function withSelfSync(effects, {
         log.error?.(`daemon-self-sync: rebuild did not move the clone (${rebuildResult.reason}) — ticking on the current code`);
       }
 
-      // 2. Acquire the READ lock — refused (a writer, possibly a sibling process's rebuild, is active) means
-      //    skip this tick entirely rather than ever read a tree mid-move.
-      const acquired = acquireRead(root, cloneLockOpts());
-      if (!acquired.ok) {
-        log.error?.(`daemon-self-sync: read lock refused (${acquired.reason}) — skipping this tick, never reading a tree mid-move (#4044)`);
-        return skippedTick(acquired.reason);
-      }
-      let released = false;
-      const releaseOnce = () => {
-        if (released) return;
-        released = true;
-        releaseRead(root, cloneLockOpts());
-      };
+      // A stale refusal gets one immediate re-discovery after a successful gated rebuild.
+      // Never reuse the old plan (some reviews may already have started), and never loop
+      // indefinitely if main moves again. Imported changes must restart without the
+      // ordinary restart debounce: retrying in the old process would use stale modules.
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        // 2. Acquire the READ lock — refused (a writer, possibly a sibling process's rebuild, is active) means
+        //    skip this tick entirely rather than ever read a tree mid-move.
+        const acquired = acquireRead(root, cloneLockOpts());
+        if (!acquired.ok) {
+          log.error?.(`daemon-self-sync: read lock refused (${acquired.reason}) — skipping this tick, never reading a tree mid-move (#4044)`);
+          return skippedTick(acquired.reason);
+        }
+        let released = false;
+        const releaseOnce = () => {
+          if (released) return;
+          released = true;
+          releaseRead(root, cloneLockOpts());
+        };
 
-      let tickResult;
-      try {
-        // 3. Under the read lock: a quarantined clone never runs children, never restarts onto it.
-        const rebuildState = readState(root, env);
-        if (rebuildState.quarantine) {
+        let tickResult;
+        try {
+          // 3. Under the read lock: a quarantined clone never runs children, never restarts onto it.
+          const rebuildState = readState(root, env);
+          if (rebuildState.quarantine) {
+            releaseOnce();
+            log.error?.('daemon-self-sync: the clone is quarantined (#4044) — skipping this tick, never running children off a rejected tree');
+            return skippedTick('quarantine');
+          }
+
+          // #3383 bug 2 (unchanged in spirit) — HEAD moved since THIS process's own boot even though it never
+          // did the rebuilding itself (a sibling process sharing this clone did). Safe to restart unconditionally
+          // here: any HEAD change visible under the read lock is always an ADOPTED build — xa4qo7n: the writer
+          // only moves `root`'s HEAD after its candidate's live smoke has already passed elsewhere (unlocked), so
+          // a rejected build never lands on `root` in the first place.
+          const headNow = readHead(syncOpts());
+          if (bootSha != null && headNow != null && headNow !== bootSha && restartGate(headNow, { urgent: attempt > 0 }).restart) {
+            releaseOnce();
+            log.error?.(`daemon-self-sync: HEAD moved from ${bootSha} to ${headNow} since this process booted (an adopted rebuild) — restarting onto the new code (#4044)`);
+            return onRestart({ merged: false, commits: 0, reason: 'head-moved', headSha: headNow });
+          }
+
+          // 4. Run the real tick under the read lock.
+          tickResult = await tick(...args);
+        } finally {
           releaseOnce();
-          log.error?.('daemon-self-sync: the clone is quarantined (#4044) — skipping this tick, never running children off a rejected tree');
-          return skippedTick('quarantine');
         }
 
-        // #3383 bug 2 (unchanged in spirit) — HEAD moved since THIS process's own boot even though it never
-        // did the rebuilding itself (a sibling process sharing this clone did). Safe to restart unconditionally
-        // here: any HEAD change visible under the read lock is always an ADOPTED build — xa4qo7n: the writer
-        // only moves `root`'s HEAD after its candidate's live smoke has already passed elsewhere (unlocked), so
-        // a rejected build never lands on `root` in the first place.
-        const headNow = readHead(syncOpts());
-        if (bootSha != null && headNow != null && headNow !== bootSha && restartGate(headNow).restart) {
-          releaseOnce();
-          log.error?.(`daemon-self-sync: HEAD moved from ${bootSha} to ${headNow} since this process booted (an adopted rebuild) — restarting onto the new code (#4044)`);
-          return onRestart({ merged: false, commits: 0, reason: 'head-moved', headSha: headNow });
+        // 5. #3383 bug 1 (unchanged in spirit) — this SAME tick's own result shows it hit the stale-main refusal
+        //    (origin/main moved mid-tick). Rebuild IMMEDIATELY (never a raw merge) rather than wait out the rest
+        //    of `intervalMs` to lose the same race again — always AFTER the read lock above is released.
+        if (attempt === 0 && typeof hasStaleRefusal === 'function' && hasStaleRefusal(tickResult)) {
+          const r2 = await rebuild();
+          if (r2 && r2.moved && r2.adopted) {
+            if (restartGate(r2.head, { urgent: true }).restart) {
+              log.error?.(`daemon-self-sync: tick hit the stale-main refusal — rebuild adopted ${r2.head} immediately, restarting onto the new code (#3383/#4044), instead of waiting the full interval to lose the same race again`);
+              return onRestart(r2);
+            }
+            log.error?.('daemon-self-sync: stale-main recovery adopted a build with no imported changes — retrying discovery once in this pass');
+            continue;
+          }
         }
-
-        // 4. Run the real tick under the read lock.
-        tickResult = await tick(...args);
-      } finally {
-        releaseOnce();
+        return tickResult;
       }
-
-      // 5. #3383 bug 1 (unchanged in spirit) — this SAME tick's own result shows it hit the stale-main refusal
-      //    (origin/main moved mid-tick). Rebuild IMMEDIATELY (never a raw merge) rather than wait out the rest
-      //    of `intervalMs` to lose the same race again — always AFTER the read lock above is released.
-      if (typeof hasStaleRefusal === 'function' && hasStaleRefusal(tickResult)) {
-        const r2 = await rebuild();
-        if (r2 && r2.moved && r2.adopted && restartGate(r2.head).restart) {
-          log.error?.(`daemon-self-sync: tick hit the stale-main refusal — rebuild adopted ${r2.head} immediately, restarting onto the new code (#3383/#4044), instead of waiting the full interval to lose the same race again`);
-          return onRestart(r2);
-        }
-      }
-      return tickResult;
     },
   };
 }
