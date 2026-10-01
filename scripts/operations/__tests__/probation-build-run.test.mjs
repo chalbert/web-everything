@@ -1069,12 +1069,18 @@ it.each(['4397', '4389'])('replays incident #%s using its checkout card and real
   const dir = mkdtempSync(join(tmpdir(), `probation-${num}-replay-`));
   try {
     execFileSync('git', ['clone', '--shared', '--quiet', resolve('.'), dir]);
+    // Replay the card as it stood at the incident, not the live checkout: once the real card was resolved on
+    // main (#4389 landed via #3231) this replay went red on main for every PR.
+    const INCIDENT_CARD_SHA = { 4397: 'e300ee2c5', 4389: 'eb9322888' };
+    execFileSync('git', ['checkout', INCIDENT_CARD_SHA[num], '--', `:(glob)backlog/${num}-*.md`], { cwd: dir });
     const real = realIo();
     const item = real.findItem(num, dir);
     const { io, calls } = fakeIo({ lane: dir, item });
     for (const key of ['findItem', 'headSha', 'untracked', 'diffNumstat', 'addedPaths', 'writeCard']) io[key] = real[key];
     const source = 'scripts/merge-ai-prs.mjs';
-    const test = 'scripts/__tests__/merge-ai-prs-merge-failure-isolation.test.mjs';
+    // A path that can never exist on main: the incident's real regression test has since landed (#3231), and an
+    // edit to an EXISTING out-of-scope test is correctly refused, which turned this replay red on main.
+    const test = 'scripts/__tests__/merge-ai-prs-incident-4389-replay.test.mjs';
     io.runWorker = () => {
       if (num === '4389') {
         writeFileSync(join(dir, source), readFileSync(join(dir, source), 'utf8') + '\n// replay worker diff\n');
