@@ -409,8 +409,11 @@ export function runGate({ dir, mode, execFn = defaultExecFn }) {
  */
 export async function runAgyDirectExec({
   dir, task, model, effort, addDirs, sandbox = false, timeoutMs = DEFAULT_TIMEOUT_MS,
-  readHold = readAgyHold, saveHold = saveAgyHold,
   logFile, stream = true, spawnFn = nodeSpawn, cli = AGY_CLI, resumeConversationId = null, review = false,
+  // Injected processes must not consume or publish the host's real quota observations.
+  // Callers exercising quota behavior can inject both store operations explicitly.
+  readHold = spawnFn === nodeSpawn ? readAgyHold : () => null,
+  saveHold = spawnFn === nodeSpawn ? saveAgyHold : () => {},
 } = {}) {
   let argv = [];
   let stdinLine;
