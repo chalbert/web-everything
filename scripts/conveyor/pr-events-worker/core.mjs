@@ -106,7 +106,9 @@ export function parseGithubEvent(eventName, payload, { deliveryId = null, receiv
 }
 
 /** Fold only received evidence. Field clocks protect concurrent bootstrap imports. */
-export function foldObservation(storage, event) {
+export function foldObservation(storage, observed) {
+  // GitHub spells a repo one way, an operator may type another: the projection identifies a repo case-insensitively.
+  const event = { ...observed, repo: String(observed.repo).toLowerCase() };
   const { repo, seq, sha, type } = event;
   const key = (...parts) => JSON.stringify(parts);
   const put = (bucket, k, value) => storage.putProjection(bucket, k, value);
@@ -155,7 +157,7 @@ export function foldObservation(storage, event) {
       } else assign('state', event.state);
     }
     if (type === 'pull_request_review') row.review = { sha, state: event.state, action: event.action, seq };
-    row.seq = seq;
+    row.seq = Math.max(row.seq, seq);
     put('prs', rowKey, row);
   }
 }
@@ -195,7 +197,7 @@ export function validateBootstrap(input) {
     return { number: p.number, sha: p.sha, draft: p.draft, labels: [...new Set(p.labels)], state: 'open' };
   });
   if (new Set(prs.map((p) => p.number)).size !== prs.length || (input.status === 'failed' && prs.length)) throw new Error('invalid bootstrap PRs');
-  return { repo: input.repo, importId: input.importId, baseCursor: input.baseCursor, status: input.status, prs };
+  return { repo: input.repo.toLowerCase(), importId: input.importId, baseCursor: input.baseCursor, status: input.status, prs };
 }
 
 /**
@@ -240,8 +242,11 @@ export function createEventLog(storage, { maxEvents = DEFAULT_MAX_EVENTS, retent
         return { ...previous.result, duplicate: true };
       }
       if (input.baseCursor > head()) throw new Error('future bootstrap cursor');
-      for (const pr of input.prs) log.append({ ...pr, number: undefined, prs: [pr.number], repo: input.repo,
-        type: 'bootstrap', action: 'seed', baseCursor: input.baseCursor, at: new Date(now).toISOString() }, now);
+      // Seeds fold straight into the projection: they are a baseline, not feed events, so they never enter the
+      // replay ring, never advance `head`, and never refresh the feed-health clocks (a seed must not mask a dead
+      // webhook). Their field clock is the cursor the listing was taken at, so any later delivery wins.
+      for (const pr of input.prs) foldObservation(storage, { ...pr, number: undefined, prs: [pr.number], repo: input.repo,
+        type: 'bootstrap', action: 'seed', baseCursor: input.baseCursor, seq: input.baseCursor });
       const result = { repo: input.repo, status: input.status, baseCursor: input.baseCursor, cursor: head(), importId: input.importId };
       storage.putProjection('bootstrap', input.repo, result);
       storage.putProjection('imports', importKey, { input: JSON.stringify(input), result });

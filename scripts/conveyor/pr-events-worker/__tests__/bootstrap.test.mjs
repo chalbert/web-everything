@@ -31,11 +31,11 @@ it('validates repo identity and compact fields; idempotency survives pruning and
   const h = harness();
   const input = { repo: 'o/r', importId: 'seed', baseCursor: 0, status: 'complete', prs: [{ number: 1, sha: 'a', draft: false, labels: [], state: 'open' }] };
   for (const invalid of [{ ...input, repo: '../wrong' }, { ...input, baseCursor: -1 }, { ...input, prs: [{ ...input.prs[0], draft: null }] }, { ...input, prs: [input.prs[0], input.prs[0]] }]) expect(() => validateBootstrap(invalid)).toThrow();
-  expect(h.log.bootstrap(input)).toMatchObject({ cursor: 1, duplicate: false });
-  expect(h.log.bootstrap(input)).toMatchObject({ cursor: 1, duplicate: true });
+  expect(h.log.bootstrap(input)).toMatchObject({ cursor: 0, duplicate: false });
+  expect(h.log.bootstrap(input)).toMatchObject({ cursor: 0, duplicate: true });
   expect(() => h.log.bootstrap({ ...input, baseCursor: 1 })).toThrow('conflict');
   expect(() => h.log.bootstrap({ ...input, importId: 'future', baseCursor: 9 })).toThrow('future');
-  expect(h.log.readPrs().stateCursor).toBe(1);
+  expect(h.log.readPrs().stateCursor).toBe(0);
 });
 it('field clocks preserve concurrent head, close and labels while filling unobserved fields', async () => {
   const h = harness();
@@ -46,4 +46,30 @@ it('field clocks preserve concurrent head, close and labels while filling unobse
     return JSON.stringify([row]);
   } });
   expect(h.log.readPrs().prs[0]).toMatchObject({ sha: 'new', state: 'closed', merged: false, labels: null, labelChanges: { 'new-label': true }, draft: false });
+});
+const seed = { repo: 'o/r', importId: 'seed', baseCursor: 0, status: 'complete', prs: [{ number: 1, sha: 'a', draft: false, labels: [], state: 'open' }] };
+it('never opens a storage transaction inside another one (Durable Object transactionSync cannot nest)', () => {
+  const storage = createMemoryStorage(), open = storage.transaction;
+  let depth = 0;
+  storage.transaction = (fn) => { if (depth) throw new Error('nested storage transaction'); depth++; try { return open(fn); } finally { depth--; } };
+  const log = createEventLog(storage);
+  expect(log.bootstrap(seed)).toMatchObject({ duplicate: false });
+  expect(log.readPrs().prs).toHaveLength(1);
+});
+it('seeds the projection without touching the replay ring or the feed-health clocks', () => {
+  const log = createEventLog(createMemoryStorage());
+  log.append({ repo: 'o/r', prs: [2], type: 'pull_request', action: 'opened', sha: 'x' }, 1000);
+  const before = log.read(0);
+  log.bootstrap({ ...seed, baseCursor: 1 }, 5000);
+  expect(log.read(0)).toEqual(before);
+  expect(log.read(0)).toMatchObject({ head: 1, lastEventAt: 1000, lastDeliveryAt: 1000 });
+  expect(log.readPrs().prs.map((p) => p.number).sort()).toEqual([1, 2]);
+});
+it('unifies bootstrap and webhook repository casing', () => {
+  const log = createEventLog(createMemoryStorage());
+  log.bootstrap({ ...seed, repo: 'Owner/Repo' });
+  log.append({ repo: 'owner/repo', prs: [1], type: 'pull_request', action: 'closed', merged: true, sha: 'a' });
+  const { prs } = log.readPrs();
+  expect(prs).toHaveLength(1);
+  expect(prs[0]).toMatchObject({ repo: 'owner/repo', number: 1, state: 'closed', merged: true });
 });
