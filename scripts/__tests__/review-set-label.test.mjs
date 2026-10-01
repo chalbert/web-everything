@@ -1,3 +1,5 @@
+import { normalizeFinding, referralFindingKey, mandatoryReferralReviewer, renderReferralRecord } from '../lib/jury-core.mjs';
+import { assertMandatoryReferralsCleared } from '../review-set-label.mjs';
 /**
  * @file review-set-label.test.mjs — proof of the PURE `decideSetLabel` (#2470, increment 2). The `gh` calls are
  *   the I/O boundary (the CLI's concern); the verdict → label-swap decision — including INVARIANT 2 (a
@@ -1047,7 +1049,7 @@ const fs = require('fs');
 const a = process.argv.slice(2);
 fs.appendFileSync(process.env.GH_CALL_LOG, a.slice(0, 2).join(' ') + '\\n');
 if (a[0] === 'pr' && a[1] === 'view') {
-  process.stdout.write(JSON.stringify({ labels: [{ name: 'review:human' }], headRefOid: 'f'.repeat(40), state: 'OPEN' }));
+  process.stdout.write(JSON.stringify({ labels: [{ name: 'review:human' }], comments: [], headRefOid: 'f'.repeat(40), state: 'OPEN' }));
   process.exit(0);
 }
 process.exit(0);
@@ -1150,7 +1152,7 @@ if (a[0] === 'pr' && a[1] === 'view') {
   const labels = fs.existsSync(process.env.GH_EDIT_FLAG)
     ? [{ name: 'review:accepted' }, { name: 'ready-to-merge' }]
     : [{ name: 'review:human' }, { name: 'review:pending' }, { name: 'ready-to-merge' }];
-  process.stdout.write(JSON.stringify({ labels, headRefOid: process.env.GH_HEAD_SHA, state: 'OPEN' }));
+  process.stdout.write(JSON.stringify({ labels, comments: [], headRefOid: process.env.GH_HEAD_SHA, state: 'OPEN' }));
   process.exit(0);
 }
 if (a[0] === 'pr' && a[1] === 'edit') { fs.writeFileSync(process.env.GH_EDIT_FLAG, '1'); process.exit(0); }
@@ -1226,7 +1228,7 @@ process.exit(0);
       // carries `review:human`/`review:pending` and NOT `review:accepted`, so the durable record (with its
       // marker) goes first, where an orphan is inert. The dedicated ordering suite below owns that property; the
       // pin is kept here so a silent re-flip cannot pass this end-to-end test.
-      .toEqual(['pr view', 'pr comment', 'pr edit', 'pr view']);
+      .toEqual(['pr view', 'pr comment', 'pr view', 'pr edit', 'pr view']);
 
     // 3. The durable comment — the honesty tax as it is actually posted, not as the module describes it.
     const comment = readFileSync(join(dir, 'comment.md'), 'utf8');
@@ -1296,7 +1298,7 @@ const fs = require('fs');
 const a = process.argv.slice(2);
 fs.appendFileSync(process.env.GH_CALL_LOG, a.slice(0, 2).join(' ') + '\\n');
 if (a[0] === 'pr' && a[1] === 'view') {
-  process.stdout.write(JSON.stringify({ labels: [{ name: 'review:pending' }], headRefOid: 'f'.repeat(40), state: '${state}' }));
+  process.stdout.write(JSON.stringify({ labels: [{ name: 'review:pending' }], comments: [], headRefOid: 'f'.repeat(40), state: '${state}' }));
   process.exit(0);
 }
 process.exit(0);
@@ -1378,7 +1380,7 @@ verb="$1 $2"
 printf '%s\\n' "$verb" >> "$GH_CALL_LOG"
 if [ "$verb" = 'pr view' ]; then
   if [ -f "$GH_EDIT_FLAG" ]; then labels="$GH_LABELS_AFTER"; else labels="$GH_LABELS_BEFORE"; fi
-  printf '{"labels":%s,"headRefOid":"%s","state":"OPEN"}' "$labels" "$GH_HEAD_SHA"
+  printf '{"labels":%s,"comments":[],"headRefOid":"%s","state":"OPEN"}' "$labels" "$GH_HEAD_SHA"
   exit 0
 fi
 if [ "$verb" = "$GH_FAIL_ON" ]; then
@@ -1540,7 +1542,7 @@ exit 0
     const r = runHarness(NOT_YET_ACCEPTED);
     expect(r.status).toBe(0);
     expect(r.payload).toMatchObject({ ok: true, to: 'accepted' });
-    expect(verbs()).toEqual(['pr view', 'pr comment', 'pr edit', 'pr view']);
+    expect(verbs()).toEqual(['pr view', 'pr comment', 'pr view', 'pr edit', 'pr view']);
     expect(verbs().indexOf('pr comment')).toBeLessThan(verbs().indexOf('pr edit'));
     // And the acceptance it records is the one the drain will honour: marker at the live head, label live.
     expect(parseReviewedSha(posted())).toBe(NEW_SHA);
@@ -1589,7 +1591,7 @@ exit 0
     const r = runCli({ ...ALREADY_ACCEPTED, failOn: 'pr edit' });
     expect(r.status).not.toBe(0);
     // The swap was attempted FIRST and failed, so the run exited before writing anything durable.
-    expect(verbs()).toEqual(['pr view', 'pr edit']);
+    expect(verbs()).toEqual(['pr view', 'pr view', 'pr edit']);
     expect(verbs()).not.toContain('pr comment');
     expect(posted()).toEqual([]);
 
@@ -1610,7 +1612,7 @@ exit 0
     const r = runHarness(ALREADY_ACCEPTED);
     expect(r.status).toBe(0);
     // Swap first HERE — the inverse of the not-yet-accepted case above, and deliberately so.
-    expect(verbs()).toEqual(['pr view', 'pr edit', 'pr comment', 'pr view']);
+    expect(verbs()).toEqual(['pr view', 'pr view', 'pr edit', 'pr comment', 'pr view']);
     expect(verbs().indexOf('pr edit')).toBeLessThan(verbs().indexOf('pr comment'));
     const comments = [PRIOR_ACCEPT_COMMENT, ...posted()];
     expect(parseReviewedSha(comments)).toBe(NEW_SHA);
@@ -1685,7 +1687,7 @@ fs.appendFileSync(process.env.GH_CALL_LOG, JSON.stringify(a) + '\\n');
 if (a[0] === 'pr' && a[1] === 'view') {
   process.stdout.write(JSON.stringify({
     labels: JSON.parse(process.env.GH_PR_LABELS).map((name) => ({ name })),
-    headRefOid: process.env.GH_HEAD_SHA,
+    comments: [], headRefOid: process.env.GH_HEAD_SHA,
     headRefName: 'lane/x',
     state: 'OPEN',
     body: process.env.GH_PR_BODY,
@@ -1991,7 +1993,7 @@ describe('the write arc and its #2964 ordering', () => {
       currentRepo: () => 'o/n',
       readPrState: () => {
         calls.push('readPrState');
-        return { labels: labels.map((name) => ({ name })), headRefOid: 'a'.repeat(40), headRefName: 'lane/x', state: 'OPEN', body, title };
+        return { labels: labels.map((name) => ({ name })), comments: [], headRefOid: 'a'.repeat(40), headRefName: 'lane/x', state: 'OPEN', body, title };
       },
       readLabels: () => { calls.push('readLabels'); return labels.map((name) => ({ name })); },
       setLabels: (_r, _p, spec) => { calls.push('setLabels'); calls.push(spec); },
@@ -3197,7 +3199,7 @@ describe('#3334 route 1/3 — the direct CLI refuses a reasonless bounce and wri
       currentRepo: () => 'o/n',
       readPrState: () => {
         calls.push('readPrState');
-        return { labels: labels.map((name) => ({ name })), headRefOid: 'a'.repeat(40), headRefName: 'lane/x', state: 'OPEN', body: '' };
+        return { labels: labels.map((name) => ({ name })), comments: [], headRefOid: 'a'.repeat(40), headRefName: 'lane/x', state: 'OPEN', body: '' };
       },
       readLabels: () => labels.map((name) => ({ name })),
       setLabels: () => { calls.push('setLabels'); },
@@ -3304,7 +3306,7 @@ describe('#3334 route 2/3 — review-pr\'s record step, whose argv carries the r
     const provider = {
       name: 'stub',
       currentRepo: () => 'o/n',
-      readPrState: () => ({ labels: labels.map((name) => ({ name })), headRefOid: 'a'.repeat(40), headRefName: 'lane/x', state: 'OPEN', body: '' }),
+      readPrState: () => ({ labels: labels.map((name) => ({ name })), comments: [], headRefOid: 'a'.repeat(40), headRefName: 'lane/x', state: 'OPEN', body: '' }),
       readLabels: () => labels.map((name) => ({ name })),
       setLabels: () => { calls.push('setLabels'); },
       postComment: () => { calls.push('postComment'); },
@@ -3411,5 +3413,48 @@ describe('#3334 route 3/3 — the credential-less transport refuses before a req
     const here = dirname(fileURLToPath(import.meta.url));
     expect(importGraph(resolve(here, '..', 'operations', 'record-verdict.mjs')).external).toEqual([]);
     expect(importGraph(resolve(here, '..', 'lib', 'reasonless-bounce.mjs')).external).toEqual([]);
+  });
+});
+
+describe('#4315 direct acceptance boundary', () => {
+  function referralState() {
+    const original = { summary: 'broken', verdict: 'CONFIRMED', impactIfUnfixed: 'broken' };
+    const record = { version: 1, repo: 'o/r', pr: 7, head: 'a'.repeat(40), runId: 'run-label-referral',
+      reviewer: mandatoryReferralReviewer('run-label-referral'), authorBody: '<!-- authored-by-actor: author -->', attempted: true,
+      referrals: [{ key: referralFindingKey('judgeAdvisory', original), seat: 'judgeAdvisory', original, finding: normalizeFinding(original) }], rulings: [] };
+    const state = { labels: ['review:human'], headRefOid: record.head, state: 'OPEN', body: record.authorBody,
+      comments: [{ body: renderReferralRecord(record) }] };
+    return { record, state };
+  }
+  it.each(['accepted', 'restamp', 'clear-human'])('%s refuses a missing ruling before any write', to => {
+    const { state } = referralState(), writes = [];
+    const exit = vi.spyOn(process, 'exit').mockImplementation(() => { throw new Error('exit'); });
+    const output = [];
+    try {
+      expect(() => runReviewLabelCli({ argv: ['7', '--repo=o/r', `--to=${to}`, '--actor=operator', '--reason=generic clearance'],
+        allowClearHuman: true, defaultActor: 'operator', emit: x => output.push(x),
+        provider: { readPrState: () => state, postComment: () => writes.push('post'), setLabels: () => writes.push('label') },
+        buildComment: () => 'accept', successResult: x => x, refusalResult: x => x,
+      })).toThrow();
+      expect(output.join('')).toContain('mandatory referral hold');
+      expect(writes).toEqual([]);
+    } finally { exit.mockRestore(); }
+  });
+  it('rejects stale, forged, unavailable, partial, conflicting and unreadable-card records', () => {
+    const { record, state } = referralState();
+    const rule = { id: 'r1', key: record.referrals[0].key, reviewerId: record.reviewer.id, lens: 'correctness',
+      result: 'not-real', rationale: 'Verified diff', evidence: ['diff'] };
+    record.rulings = [rule]; state.comments.push({ body: renderReferralRecord(record) });
+    expect(assertMandatoryReferralsCleared(state, { repo: 'o/r', pr: 7 }).pending).toEqual([]);
+    expect(() => assertMandatoryReferralsCleared({ ...state, headRefOid: 'b'.repeat(40) })).toThrow();
+    expect(() => assertMandatoryReferralsCleared({ ...state, comments: undefined })).toThrow();
+    expect(() => assertMandatoryReferralsCleared({ ...state, comments: [...state.comments, { body: '<!-- mandatory-referrals-v1: truncated' }] })).toThrow();
+    const forged = { ...record, rulings: [{ ...rule, reviewerId: 'advisory-seat' }] };
+    expect(() => assertMandatoryReferralsCleared({ ...state, comments: [{ body: `<!-- mandatory-referrals-v1: ${encodeURIComponent(JSON.stringify(forged))} -->` }] })).toThrow();
+    record.rulings.push({ ...rule, id: 'r2', result: 'card', card: 'we:backlog/no-such-card.md' });
+    state.comments.push({ body: renderReferralRecord(record) });
+    expect(() => assertMandatoryReferralsCleared(state)).toThrow();
+    record.rulings[1].supersedes = 'r1';
+    expect(() => assertMandatoryReferralsCleared({ ...state, comments: [{ body: renderReferralRecord(record) }] })).toThrow();
   });
 });

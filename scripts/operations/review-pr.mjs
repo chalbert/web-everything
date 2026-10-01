@@ -1,3 +1,4 @@
+import { requiresMandatoryReferral } from '../lib/jury-core.mjs';
 /**
  * @file scripts/operations/review-pr.mjs
  * @description THE `review-pr` DECLARATION — the first real operation on the engine (#3035, under epic #3029).
@@ -853,6 +854,7 @@ export const REVIEW_EFFECTS = Object.freeze({
   LABEL: 'review.label-swap',
   LEDGER: LEDGER_EFFECT_TYPE,
   NOTICE: 'review.notice',
+  MANDATORY_REFERRALS: 'review.mandatory-referrals',
   ADVISORY_NOTE: 'review.advisory-note',
   // `advise`'s SECOND effect: the `advisory:accepted` / `advisory:changes` label. Its own type for the same reason
   // as `ADVISORY_NOTE` — never `LABEL`, which is the real ceremony's `review:*` swap.
@@ -1058,6 +1060,7 @@ export function shapeReadFinding(raw, { pr, repo, careLevel } = {}) {
   const earnedShape = assertDeclaredShapeHolds({ careLevel, netChangedFiles, pr, repo });
 
   return {
+    hasReferralRecord: JSON.stringify(raw.comments ?? []).includes('mandatory-referrals-v1'),
     priorRounds: Number(raw?.priorRounds) || 0,
     pr: Number(detail.pr) || Number(pr) || 0,
     repo: String(detail.repo || repo || ''),
@@ -1608,6 +1611,9 @@ export function planRecordDecision(view) {
   const repo = view.input.repo;
   const actor = view.input.actor;
   const to = answer === 'accept' ? 'accepted' : 'changes';
+  if (verdict.pendingReferrals?.length || (to === 'accepted' && verdict.blockedReferrals?.length)) {
+    throw new Error('Mandatory finding-specific ruling required before recording acceptance; resume the referral review.');
+  }
 
   // ── THE PURE-CORE GUARD (property 2 in the file header) ──────────────────────────────────────────────────
   // INVARIANT 2 lives in `decideSetLabel`, imported, unbypassable. On a `review:human` PR `to:'accepted'` comes
@@ -2057,7 +2063,7 @@ export function reviewPrOperation({
       actor: { type: 'string', required: false, default: 'operator' },
     },
     // The reduction IS the run's verdict — declared, not inferred by a caller reading findings.
-    verdictFrom: 'reduce',
+    verdictFrom: 'referralVerdict',
 
     // #3316 — THE SKILL THAT OWNS THE REST OF THIS RUN. This operation is the one the defect was measured on:
     // a session invoked it bare, reached `confirm`, did not know how to proceed, and escalated to a human while
@@ -2312,8 +2318,9 @@ export function reviewPrOperation({
         /** @type {Object<string, Array<object>>} #x6t2z6h — the same per lens, MINUS the findings whose cited file
          *  is not in the net set. This is what the VERDICT reduces; `lensFindings` is what is PUBLISHED. */
         const lensAdmitted = {};
-        // #xqa9ttq (PR #2117 review, CONFIRMED) - what the PANEL REDUCER is handed. Excludes the opt-in advisory Codex seat: derivePanelVerdict's prevention scan is NOT scoped to mandatoryLenses, so an advisory-only prevention-shaped finding would flip the verdict off `accept`, contradicting the seat's advisory-only design. The seat is still PUBLISHED via lensAdmitted/lensVerdicts/findings.
+        // #xqa9ttq (PR #2117 review, CONFIRMED) - what the PANEL REDUCER is handed. Excludes the opt-in advisory Codex seat: derivePanelVerdict's prevention scan is NOT scoped to mandatoryLenses, so an advisory-only prevention-shaped finding would flip the verdict off `accept`, contradicting the seat's advisory-only design. The seat is still PUBLISHED via lensAdmitted/lensVerdicts/findings. CONFIRMED broken/unrecoverable findings separately request a mandatory ruling before this filter (#4315).
         const verdictAdmitted = {};
+        const referrals = [];
         /** @type {Array<object>} #x6t2z6h — the downgraded ones, kept so `confirm` can name the count. */
         const unverifiableCitations = [];
         let citationScopeEnforced = false;
@@ -2339,6 +2346,9 @@ export function reviewPrOperation({
               + 'That is `unrun`, not an accept: coercing it to zero findings would record a clean bill from a '
               + 'juror that may have reported blockers. Re-run the review; do not record a verdict on this run.',
             );
+          }
+          for (const original of answer.findings ?? []) {
+            if (requiresMandatoryReferral(original)) referrals.push({ seat: seat.step, original });
           }
           const scoped = scopeFindingsToCitedFiles(answer.findings, { scope: citationScope });
           const raw = scoped.findings;
@@ -2414,6 +2424,7 @@ export function reviewPrOperation({
         });
         return {
           verdict,
+          referrals,
           // WHERE THE LOOP STANDS, distinct from what this round decided. "converged" and "exhausted" both end
           // the loop and mean opposite things, so a caller must never have to infer one from the other. The
           // round comes from the durable ledger, so it needs no new state and survives a dead session.
@@ -2444,6 +2455,29 @@ export function reviewPrOperation({
       },
     }),
 
+    // Publish and read back before any acceptance or awaiting-advisory mutation. The effect
+    // owns one bounded evidence review and reuses the PR record on restart/another checkout.
+    mandatoryReferrals: effectStep({
+      reads: ['findings.reduce', 'findings.read'],
+      effects: (view) => view.findings.reduce.referrals.length || view.findings.read.hasReferralRecord
+        ? [{ type: REVIEW_EFFECTS.MANDATORY_REFERRALS, idempotent: true,
+          payload: { read: view.findings.read, referrals: view.findings.reduce.referrals } }] : [],
+    }),
+    referralVerdict: compute({
+      reads: ['findings.reduce', 'findings.mandatoryReferrals'],
+      fn: (view) => {
+        const basis = view.findings.reduce;
+        const state = view.findings.mandatoryReferrals.effects[0]?.result;
+        if (!state) return basis;
+        const pendingReferrals = state.pending ?? ['unreadable-referral-result'];
+        const blockedReferrals = state.blocked ?? [];
+        return { ...basis, pendingReferrals, blockedReferrals,
+          verdict: pendingReferrals.length ? 'needs-human'
+            : blockedReferrals.length && basis.verdict !== 'needs-human' ? 'changes' : basis.verdict,
+          humanRequired: basis.humanRequired || pendingReferrals.length > 0 };
+      },
+    }),
+
     // ── 5. advise ───────────────────────────────────────────────────────────────────────────────────────────
     // #xlw02hw — THE AUTOMATIC PRE-HUMAN-CEREMONY NOTE. An `effect` step, NOT a `confirm` — it runs the moment
     // `reduce` has a verdict, unconditionally, with no operator and no `--resume` of any kind required (see the
@@ -2455,7 +2489,7 @@ export function reviewPrOperation({
       reads: ['input.pr', 'input.repo', 'findings.read', 'verdict'],
       effects: (view) => {
         const read = view.findings.read;
-        if (read.humanRequired !== true) return [];
+        if (read.humanRequired !== true || view.verdict.pendingReferrals?.length) return [];
         const effects = [{
           type: REVIEW_EFFECTS.ADVISORY_NOTE,
           payload: {
@@ -2538,7 +2572,7 @@ export function reviewPrOperation({
           + `${v.humanRequired ? ' (gate-self: review:human)' : ''}. `
           + `Record which verdict? (${CONFIRM_OPTIONS.join(' | ')}; \`abstain\` writes nothing)`;
       },
-      of: (view) => (view.findings.read.humanRequired ? CONFIRM_ACTORS.HUMAN : CONFIRM_ACTORS.AGENT),
+      of: (view) => (view.verdict.humanRequired ? CONFIRM_ACTORS.HUMAN : CONFIRM_ACTORS.AGENT),
       options: [...CONFIRM_OPTIONS],
     }),
 

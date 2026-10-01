@@ -1,3 +1,4 @@
+import { mandatoryReferralState } from './lib/jury-core.mjs';
 /**
  * review-set-label.mjs — swap a PR's review label, INVARIANT-2 guarded (#2470, increment 2 of 2). Also the
  * SINGLE HOME of the shared review-label CLI harness (#2644): a PURE `decideSetLabel` decides the swap for a
@@ -1015,6 +1016,7 @@ export function runReviewLabelCli({
   let prComments = [];
   try {
     const parsed = provider.readPrState(repo, pr);
+    if (['accepted', 'restamp', 'clear-human'].includes(to)) assertMandatoryReferralsCleared(parsed, { repo, pr });
     currentLabels = Array.isArray(parsed.labels) ? parsed.labels : [];
     headSha = typeof parsed.headRefOid === 'string' ? parsed.headRefOid : '';
     // #2979 — the branch name the NET diff is resolved against (see the fingerprint block below). Same gh call,
@@ -1290,6 +1292,11 @@ export function runReviewLabelCli({
   const removals = presentRemoveLabels(decision.removeLabels, currentLabels);
   const applySwap = () => {
     try {
+      if (['accepted', 'restamp', 'clear-human'].includes(to)) {
+        const fresh = provider.readPrState(repo, pr);
+        if (fresh.headRefOid !== headSha && !(to === 'restamp' && newHeadArg && !mandatoryReferralState(fresh.comments).records.length)) throw new Error('head changed before acceptance; hold retained');
+        assertMandatoryReferralsCleared(fresh, { repo, pr });
+      }
       provider.setLabels(repo, pr, { add: decision.addLabel, remove: removals });
     } catch (e) {
       fail(ghErr(e, 'gh pr edit failed'), 1);
@@ -1878,4 +1885,22 @@ function fail(message, code = 2) {
 /** we:scripts/review-set-label.mjs#ghErr — the last non-empty line of a `gh` failure (stderr wins). */
 function ghErr(e, fallback) {
   return String((e && (e.stderr || e.message)) || e).split('\n').filter(Boolean).pop() || fallback;
+}
+
+
+/** A deferral is discharged only by an existing readable backlog card, never an intention to file. */
+export function referralCardReadable(ref, root = process.cwd()) {
+  if (!/^we:backlog\/[^/]+\.md$/.test(ref ?? '')) return false;
+  try { return /^---\r?\n[\s\S]+?\r?\n---\r?\n/.test(readFileSync(`${root}/${ref.slice(3)}`, 'utf8')); }
+  catch { return false; }
+}
+
+/** Fail closed at every acceptance entry point using the fresh durable PR record. */
+export function assertMandatoryReferralsCleared(state, { repo, pr, cardReadable = referralCardReadable } = {}) {
+  const result = mandatoryReferralState(state.comments, { repo, pr, head: state.headRefOid,
+    body: typeof state.body === 'string' ? state.body : '', createdAt: state.createdAt, cardReadable });
+  if (result.pending.length || result.blocked.length) {
+    throw new Error(`mandatory referral hold: ${[...result.pending, ...result.blocked].join(', ')}; record finding-specific mandatory rulings before acceptance`);
+  }
+  return result;
 }
