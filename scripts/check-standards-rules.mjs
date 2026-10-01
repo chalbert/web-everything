@@ -1031,6 +1031,49 @@ export function findTestPlanGaps(body) {
   return gaps;
 }
 
+// Must-without-Done-when (#4438) — every numbered MVP Must must be cited BY NUMBER in a `## Done when` clause
+// (`Must 2`, `Musts 1, 3`, `Musts 1-4`). Prose-only coverage is deliberately NOT a citation: substance matching is
+// unreliable, and adding the number is the cheap fix. Returns one `{ must, text }` per uncited Must.
+const MUST_CITE_RE = /\bMusts?\s+(\d+(?:\s*[-\u2013]\s*\d+)?(?:\s*(?:,|and|&)\s*\d+(?:\s*[-\u2013]\s*\d+)?)*)/gi;
+export function findMustWithoutDoneWhen(body) {
+  const lines = String(body ?? '').split(/\r?\n/);
+  const cut = sectionLines(lines, /^explicit mvp cut\b/i);
+  const musts = [];
+  let inMust = false;
+  for (const line of cut) {
+    if (/^\*\*\s*Must\b/i.test(line)) { inMust = true; continue; }
+    if (/^\*\*/.test(line)) { inMust = false; continue; }
+    if (!inMust) continue;
+    const m = /^(\d+)\.\s+(.*)$/.exec(line);
+    if (m) musts.push({ must: Number(m[1]), text: m[2].trim().slice(0, 60) });
+  }
+  if (!musts.length) return [];
+  const cited = new Set();
+  for (const m of sectionLines(lines, /^done when\b/i).join('\n').matchAll(MUST_CITE_RE)) {
+    for (const part of m[1].split(/\s*(?:,|and|&)\s*/i)) {
+      const r = /^(\d+)(?:\s*[-\u2013]\s*(\d+))?$/.exec(part.trim());
+      if (!r) continue;
+      const lo = Number(r[1]), hi = r[2] ? Number(r[2]) : lo;
+      for (let n = lo; n <= hi && n - lo < 100; n++) cited.add(n);
+    }
+  }
+  return musts.filter((x) => !cited.has(x.must));
+}
+
+// Dangling `we:backlog/<id>` prose refs (#4438) — an id in no file on main (landed num or `bornAs` hash, via
+// `buildBacklogResolvableIds`). A ref followed by `(pending-lane)` is exempt (a sibling still in flight).
+const BACKLOG_PROSE_REF_RE = /we:backlog\/([0-9]{1,5}|x[0-9a-z]{6,7})(?![0-9A-Za-z])(?:-[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.md)?(\s*\(pending-lane\))?/g;
+export function findDanglingBacklogRefs(body, knownIds) {
+  const seen = new Set();
+  const gaps = [];
+  for (const m of String(body ?? '').matchAll(BACKLOG_PROSE_REF_RE)) {
+    if (m[2] || knownIds.has(m[1]) || seen.has(m[1])) continue;
+    seen.add(m[1]);
+    gaps.push({ id: m[1] });
+  }
+  return gaps;
+}
+
 // ── Per-item backlog RENDERING lint (#845) ────────────────────────────────────
 // The structural/rendering checks that operate on ONE backlog item in isolation — no registry/cross-item
 // context needed, so they're cheap enough to run on every edit (a scoped `check:standards --item NNN`
@@ -1044,7 +1087,7 @@ export function findTestPlanGaps(body) {
 // run file-driven (a malformed-YAML item is skipped by the loader, so it isn't in the item array at all),
 // so each caller runs `findUnquotedColonScalars(content)` over the raw file itself. Also excludes the
 // digest-length nudge (validateBacklogItem owns it) and the blockedBy cycle walk (a graph-level check).
-export function lintBacklogItemRendering({ item, body, pocRegistry = null }) {
+export function lintBacklogItemRendering({ item, body, pocRegistry = null, knownBacklogIds = null }) {
   const errors = [];
   const warnings = [];
   const id = item.id;
@@ -1108,6 +1151,22 @@ export function lintBacklogItemRendering({ item, body, pocRegistry = null }) {
           : `case "${g.detail}" is neither a capability (Red today) nor a preservation (GREEN today) case`).join('; ');
       warnings.push(`Backlog item "${id}" has Test-plan gaps — ${detail}. Classify each case as capability (fails on the base) ` +
         `or preservation (passes on both, naming its mutation proof), and give every design condition a case.`);
+    }
+  }
+
+  // Must-without-Done-when + dangling backlog refs (#4438) — WARNING only, open/active cards.
+  if (item.status !== 'resolved') {
+    const uncited = findMustWithoutDoneWhen(body);
+    if (uncited.length) {
+      warnings.push(`Backlog item "${id}" has MVP Must(s) no Done-when clause cites by number — ` +
+        `${uncited.map((g) => `Must ${g.must} ("${g.text}")`).join('; ')}. Cite each as \`Must N\`, \`Musts A, B\` or \`Musts A-B\` in ## Done when.`);
+    }
+    if (knownBacklogIds) {
+      const dangling = findDanglingBacklogRefs(body, knownBacklogIds);
+      if (dangling.length) {
+        warnings.push(`Backlog item "${id}" references \`we:backlog/<id>\` card(s) that resolve to no file — ` +
+          `${dangling.map((g) => g.id).join(', ')}. Fix the id, or mark a sibling still in flight with \`(pending-lane)\` right after the ref.`);
+      }
     }
   }
 
