@@ -40,6 +40,12 @@ describe('replay of PR #2708 (real event sequence)', () => {
     expect(all.find((e) => e.action === 'closed')).toMatchObject({ type: 'pull_request', merged: true, prs: [2708] });
     // Real ordering: the post-merge push's check_suite completes AFTER the close (02:13:36 vs 02:13:32).
     expect(all.at(-1)).toMatchObject({ type: 'check_suite', action: 'completed' });
+    const [pr] = h.log.readPrs().prs;
+    expect(pr).toMatchObject({ number: 2708, state: 'closed', merged: true, labels: null,
+      labelChanges: { 'review:pending': false, 'review:accepted': true, 'ready-to-merge': true } });
+    expect(pr.checks).toContainEqual(expect.objectContaining({ name: 'review-gate', sha: pr.sha, conclusion: 'success' }));
+    expect(pr.suites).toContainEqual(expect.objectContaining({ app: 'github-actions', sha: pr.sha, conclusion: 'success' }));
+    expect(all.some((event) => event.sha === null)).toBe(true); // Keep missing historical SHAs unknown.
     expect(all.filter((e) => e.label === 'review:pending')).toHaveLength(2); // labeled + unlabeled
   });
 

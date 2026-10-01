@@ -27,7 +27,7 @@
  */
 
 export const ACCEPTED_EVENTS = Object.freeze({
-  pull_request: new Set(['opened', 'synchronize', 'ready_for_review', 'closed', 'labeled', 'unlabeled', 'reopened']),
+  pull_request: new Set(['opened', 'synchronize', 'ready_for_review', 'converted_to_draft', 'closed', 'labeled', 'unlabeled', 'reopened']),
   check_suite: new Set(['completed']),
   check_run: new Set(['completed']),
   pull_request_review: new Set(['submitted', 'dismissed']),
@@ -87,7 +87,9 @@ export function parseGithubEvent(eventName, payload, { deliveryId = null, receiv
     const rec = { ...base, prs: Number.isInteger(payload.number) ? [payload.number] : prNumbers([pr]), sha: pr.head?.sha || null };
     if (action === 'labeled' || action === 'unlabeled') rec.label = payload.label?.name || null;
     if (action === 'closed') rec.merged = pr.merged === true;
-    if (pr.draft === true) rec.draft = true;
+    if (typeof pr.draft === 'boolean') rec.draft = pr.draft;
+    if (Array.isArray(pr.labels)) rec.labels = pr.labels.map((l) => l.name).filter((n) => typeof n === 'string');
+    if (['open', 'closed'].includes(pr.state)) rec.state = pr.state;
     return rec;
   }
   if (eventName === 'check_suite') {
@@ -103,18 +105,104 @@ export function parseGithubEvent(eventName, payload, { deliveryId = null, receiv
   return { ...base, prs: prNumbers([payload.pull_request]), sha: rv.commit_id || null, state: rv.state ? String(rv.state).toLowerCase() : null };
 }
 
+/** Fold only received evidence. Field clocks protect concurrent bootstrap imports. */
+export function foldObservation(storage, event) {
+  const { repo, seq, sha, type } = event;
+  const key = (...parts) => JSON.stringify(parts);
+  const put = (bucket, k, value) => storage.putProjection(bucket, k, value);
+  const get = (bucket, k) => storage.getProjection(bucket, k);
+  if (type === 'check_run' || type === 'check_suite') {
+    // Preserve explicit attachment evidence across later empty-array deliveries.
+    // A null SHA is not a join key: unrelated unknown-head observations stay separate.
+    const checkKey = key(repo, sha, type, type === 'check_run' ? event.name : event.app,
+      sha ? null : [...(event.prs || [])].sort((a, b) => a - b));
+    const previous = get('checks', checkKey);
+    put('checks', checkKey, { ...event, prs: [...new Set([...(previous?.prs || []), ...(event.prs || [])])] });
+  }
+  const associated = sha ? get('shas', key(repo, sha)) || [] : [];
+  const numbers = [...new Set([...(event.prs || []), ...((type === 'check_run' || type === 'check_suite') ? associated : [])])];
+  for (const number of numbers) {
+    const rowKey = key(repo, number);
+    const row = get('prs', rowKey) || { repo, number, sha: null, draft: null, labels: null,
+      state: null, merged: null, review: null, checks: [], suites: [], seq: 0, fields: {}, labelChanges: {} };
+    const assign = (field, value) => {
+      if (value !== undefined && (type !== 'bootstrap' || (row.fields[field] || 0) <= event.baseCursor)) {
+        row[field] = value; row.fields[field] = seq;
+      }
+    };
+    if (type === 'pull_request' || type === 'bootstrap') {
+      if (sha) {
+        assign('sha', sha);
+        put('shas', key(repo, sha), [...new Set([...(get('shas', key(repo, sha)) || []), number])]);
+      }
+      assign('draft', event.draft);
+      assign('labels', event.labels);
+      if (event.labels !== undefined && row.fields.labels === seq) row.labelChanges = {};
+      if (event.label && !event.labels) {
+        row.labelChanges = { ...row.labelChanges, [event.label]: event.action === 'labeled' };
+        if (row.labels !== null) assign('labels', event.action === 'labeled'
+          ? [...new Set([...row.labels, event.label])] : row.labels.filter((l) => l !== event.label));
+        else row.fields.labels = seq;
+      }
+      if (event.action === 'closed') {
+        assign('state', 'closed'); assign('merged', event.merged ?? null);
+      } else if (['opened', 'reopened'].includes(event.action) || type === 'bootstrap') {
+        assign('state', 'open'); assign('merged', false);
+      } else assign('state', event.state);
+    }
+    if (type === 'pull_request_review') row.review = { sha, state: event.state, action: event.action, seq };
+    row.seq = seq;
+    put('prs', rowKey, row);
+  }
+}
+
+function snapshot(storage) {
+  const checks = storage.listProjection('checks');
+  return storage.listProjection('prs').map(({ fields, ...row }) => {
+    const matches = checks.filter((c) => c.repo === row.repo &&
+      ((c.prs || []).includes(row.number) || (c.sha && (storage.getProjection('shas', JSON.stringify([row.repo, c.sha])) || []).includes(row.number))));
+    return { ...row, seq: Math.max(row.seq, ...matches.map((c) => c.seq)),
+      checks: matches.filter((c) => c.type === 'check_run'), suites: matches.filter((c) => c.type === 'check_suite') };
+  });
+}
+
+export function validateBootstrap(input) {
+  if (!input || typeof input !== 'object' || !/^[A-Za-z0-9][\w.-]*\/[A-Za-z0-9][\w.-]*$/.test(input.repo || '') ||
+      typeof input.importId !== 'string' || !/^[\w.-]{1,128}$/.test(input.importId) ||
+      !Number.isSafeInteger(input.baseCursor) || input.baseCursor < 0 ||
+      !['complete', 'truncated', 'failed'].includes(input.status) || !Array.isArray(input.prs)) throw new Error('invalid bootstrap');
+  const prs = input.prs.map((p) => {
+    if (!p || !Number.isSafeInteger(p.number) || p.number <= 0 || typeof p.sha !== 'string' || !p.sha ||
+        typeof p.draft !== 'boolean' || p.state !== 'open' || !Array.isArray(p.labels) ||
+        !p.labels.every((l) => typeof l === 'string')) throw new Error('invalid bootstrap PR');
+    return { number: p.number, sha: p.sha, draft: p.draft, labels: [...new Set(p.labels)], state: 'open' };
+  });
+  if (new Set(prs.map((p) => p.number)).size !== prs.length || (input.status === 'failed' && prs.length)) throw new Error('invalid bootstrap PRs');
+  return { repo: input.repo, importId: input.importId, baseCursor: input.baseCursor, status: input.status, prs };
+}
+
 /**
  * The event log over a tiny storage interface — ONE implementation of the cursor rules, shared by the Durable
  * Object (SQLite storage, `worker.mjs`) and the in-memory store the tests and local harness use.
  *
  * storage: { getMeta(k), setMeta(k, v), hasDelivery(id), insert(seq, id, at, json), range(afterSeq, limit),
- *            minSeq(), prune(throughSeq, olderThanMs) }
+ *            minSeq(), prune(throughSeq, olderThanMs), transaction(fn),
+ *            getProjection(bucket, key), putProjection(bucket, key, value), listProjection(bucket) }
  */
 export function createEventLog(storage, { maxEvents = DEFAULT_MAX_EVENTS, retentionMs = DEFAULT_RETENTION_MS } = {}) {
   const head = () => Number(storage.getMeta('head') || 0);
-  return {
+  storage.transaction(() => {
+    if (!storage.getMeta('projectionVersion')) {
+      const boundary = storage.minSeq();
+      for (const body of storage.range(0, Number.MAX_SAFE_INTEGER)) foldObservation(storage, JSON.parse(body));
+      storage.setMeta('coverage', JSON.stringify({ partial: true, observedSince: boundary ?? head() + 1,
+        retainedReplayBoundary: boundary, historyComplete: false }));
+      storage.setMeta('projectionVersion', '1');
+    }
+  });
+  const log = {
     /** Append one compact record. Returns `{ seq, duplicate }`. */
-    append(record, now = Date.now()) {
+    append(record, now = Date.now()) { return storage.transaction(() => {
       storage.setMeta('lastDeliveryAt', String(now));
       if (record.id && storage.hasDelivery(record.id)) return { seq: null, duplicate: true };
       const seq = head() + 1;
@@ -122,9 +210,31 @@ export function createEventLog(storage, { maxEvents = DEFAULT_MAX_EVENTS, retent
       storage.insert(seq, record.id || null, now, JSON.stringify(stored));
       storage.setMeta('head', String(seq));
       storage.setMeta('lastEventAt', String(now));
+      foldObservation(storage, stored);
       storage.prune(seq - maxEvents, now - retentionMs);
       return { seq, duplicate: false };
-    },
+    }); },
+    bootstrap(raw, now = Date.now()) { return storage.transaction(() => {
+      const input = validateBootstrap(raw);
+      const importKey = JSON.stringify([input.repo, input.importId]);
+      const previous = storage.getProjection('imports', importKey);
+      if (previous) {
+        if (previous.input !== JSON.stringify(input)) throw new Error('import ID conflict');
+        return { ...previous.result, duplicate: true };
+      }
+      if (input.baseCursor > head()) throw new Error('future bootstrap cursor');
+      for (const pr of input.prs) log.append({ ...pr, number: undefined, prs: [pr.number], repo: input.repo,
+        type: 'bootstrap', action: 'seed', baseCursor: input.baseCursor, at: new Date(now).toISOString() }, now);
+      const result = { repo: input.repo, status: input.status, baseCursor: input.baseCursor, cursor: head(), importId: input.importId };
+      storage.putProjection('bootstrap', input.repo, result);
+      storage.putProjection('imports', importKey, { input: JSON.stringify(input), result });
+      return { ...result, duplicate: false };
+    }); },
+    readPrs(cursor, limit) { return storage.transaction(() => {
+      const envelope = log.read(cursor, limit);
+      return { ...envelope, prs: snapshot(storage), stateCursor: envelope.head,
+        coverage: { ...JSON.parse(storage.getMeta('coverage')), bootstrap: storage.listProjection('bootstrap') } };
+    }); },
     /** A verified delivery we chose not to store (ping, ignored action) still proves the pipe is alive. */
     touch(now = Date.now()) { storage.setMeta('lastDeliveryAt', String(now)); },
     read(cursor, limit = DEFAULT_PAGE_LIMIT) {
@@ -145,6 +255,7 @@ export function createEventLog(storage, { maxEvents = DEFAULT_MAX_EVENTS, retent
       return { cursor: next, events: rows, reset: false, gap, more: next < h, ...meta };
     },
   };
+  return log;
 }
 
 const numOrNull = (v) => (v == null || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
@@ -152,9 +263,17 @@ const numOrNull = (v) => (v == null || v === '' || !Number.isFinite(Number(v)) ?
 /** The in-memory storage (tests + local harness). Same contract as the Durable Object's SQL storage.
  *  @test-only-export-ok: the Worker uses its SQL storage; this is the unit-test / local-replay backend by design. */
 export function createMemoryStorage() {
-  const meta = new Map();
+  let meta = new Map();
+  let projection = new Map();
   let rows = []; // { seq, id, at, json } ascending
   return {
+    transaction(fn) {
+      const saved = [new Map(meta), structuredClone(rows), structuredClone(projection)];
+      try { return fn(); } catch (error) { [meta, rows, projection] = saved; throw error; }
+    },
+    getProjection: (bucket, key) => structuredClone(projection.get(JSON.stringify([bucket, key])) ?? null),
+    putProjection: (bucket, key, value) => { projection.set(JSON.stringify([bucket, key]), structuredClone(value)); },
+    listProjection: (bucket) => [...projection].filter(([k]) => JSON.parse(k)[0] === bucket).map(([, v]) => structuredClone(v)),
     getMeta: (k) => (meta.has(k) ? meta.get(k) : null),
     setMeta: (k, v) => { meta.set(k, v); },
     hasDelivery: (id) => rows.some((r) => r.id === id),
@@ -197,7 +316,17 @@ export async function handleRequest(request, env, { getLog, now = () => Date.now
     return json(202, { stored: !res.duplicate, seq: res.seq, duplicate: res.duplicate });
   }
 
-  if (url.pathname === '/events') {
+  if (url.pathname === '/prs/bootstrap') {
+    if (request.method !== 'POST') return json(405, { error: 'method not allowed' });
+    if (!env.PR_EVENTS_BOOTSTRAP_TOKEN) return json(503, { error: 'bootstrap token not configured' });
+    if (!timingSafeEqual(request.headers.get('authorization') || '', `Bearer ${env.PR_EVENTS_BOOTSTRAP_TOKEN}`)) return json(401, { error: 'unauthorized' });
+    let input;
+    try { input = validateBootstrap(await request.json()); } catch { return json(400, { error: 'invalid bootstrap' }); }
+    const log = await getLog();
+    try { return json(200, await log.bootstrap(input, now())); } catch { return json(409, { error: 'bootstrap rejected' }); }
+  }
+
+  if (url.pathname === '/events' || url.pathname === '/prs') {
     if (request.method !== 'GET') return json(405, { error: 'method not allowed' });
     if (!env.PR_EVENTS_READ_TOKEN) return json(503, { error: 'read token not configured' });
     const auth = request.headers.get('authorization') || '';
@@ -207,7 +336,7 @@ export async function handleRequest(request, env, { getLog, now = () => Date.now
     const cursor = c == null || c === '' ? null : (/^\d+$/.test(c) ? Number(c) : null);
     const limit = Number(url.searchParams.get('limit')) || DEFAULT_PAGE_LIMIT;
     const log = await getLog();
-    return json(200, { ...(await log.read(cursor, limit)), now: now() });
+    return json(200, { ...(await (url.pathname === '/prs' ? log.readPrs(cursor, limit) : log.read(cursor, limit))), now: now() });
   }
 
   return json(404, { error: 'not found' });
