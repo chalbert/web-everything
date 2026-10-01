@@ -61,6 +61,7 @@
 import { createHash } from 'node:crypto';
 import { SELECTION_FLAG, pinnedMergeBase, decideLocalSelection, referencedTestNeedles } from '../readiness/test-selection.mjs';
 import { isPolicyCorePath } from './gate-config.mjs';
+import { isAllowlistedLitterPath } from './lane-litter.mjs';
 
 /** The pathspecs `testsNaming` greps — every vitest test-file suffix (PR #2680 review: one list, pinned by a test). */
 export const VITEST_TEST_PATHSPECS = Object.freeze(['*.test.ts', '*.test.tsx', '*.test.js', '*.test.jsx', '*.test.mjs', '*.test.cjs', '*.test.mts', '*.test.cts']);
@@ -147,7 +148,16 @@ export function resolveDefaultGate({ base = 'origin/main', runGit, env = process
   const diff = localChangedSet({ base, runGit });
   const changedFiles = diff ? diff.changedFiles : null;
   const optOut = String(env?.[SELECTION_FLAG] ?? '') === '0';
-  const local = decideLocalSelection({ changedFiles, deletedFiles: diff ? diff.deletedFiles : [], optOut });
+  // #4540: only untracked allowlist matches are scratch; tracked names remain real inputs.
+  // Keep the original diff for standards scoping and diagnostics.
+  const untracked = new Set(diff?.untrackedFiles ?? []);
+  const keepForVitest = (path) => !untracked.has(path) || !isAllowlistedLitterPath(path);
+  const vitestChangedFiles = changedFiles?.filter(keepForVitest) ?? null;
+  const vitestDeletedFiles = (diff?.deletedFiles ?? []).filter(keepForVitest);
+  const scratchOnly = !optOut && changedFiles?.length > 0 && vitestChangedFiles.length === 0;
+  const local = scratchOnly
+    ? { mode: 'shrink', relatedFiles: [], triggerFiles: [], deletedSourceFiles: [], reasons: ['untracked lane scratch only — no Vitest targets remain'] }
+    : decideLocalSelection({ changedFiles: vitestChangedFiles, deletedFiles: vitestDeletedFiles, optOut });
 
   // #1937: scope only the local, non-authoritative fast-fail — the central, unscoped check:standards CI runs
   // against the real merged tree remains the actual authority and is untouched by this local shrink.
@@ -166,21 +176,21 @@ export function resolveDefaultGate({ base = 'origin/main', runGit, env = process
     }
     const decision = { ...local, changedFiles, referencedTests, targets };
     // `--passWithNoTests`: a diff whose files no test reaches (docs, a backlog card) is a pass, not a failure.
-    // PR #2680 review — a diff of ONLY deleted non-source files leaves no target, and `vitest related` with no
+    // Deletions or excluded untracked scratch can leave no target, and `vitest related` with no
     // positional file is an error (a false red); there is nothing for vitest to run, so say so and skip it.
     const vitestCmd = targets.length
       ? `npx vitest related ${targets.map(shellQuote).join(' ')} --run --passWithNoTests`
-      : `echo ${shellQuote('verify-lane: no remaining changed file for vitest to relate — vitest half skipped (deletions only)')}`;
+      : `echo ${shellQuote('verify-lane: no remaining changed file for vitest to relate — vitest half skipped (deletions or excluded untracked scratch)')}`;
     return { ...composeGate({ vitestCmd, checkStandardsCmd, scripts }), decision };
   }
   return { ...composeGate({ vitestCmd: 'npm run test:unit', checkStandardsCmd, scripts }), decision: { ...local, changedFiles, referencedTests: [], targets: [] } };
 }
 
 /**
- * The working-tree changed set against the pinned merge-base: `{changedFiles, deletedFiles}`, or `null` when git
+ * The working-tree changed set against the pinned merge-base: `{changedFiles, deletedFiles, untrackedFiles}`, or `null` when git
  * cannot answer (the caller then runs the full suite). Pure given `runGit`.
  * @param {{base: string, runGit: (args: string[]) => string}} args
- * @returns {{changedFiles: string[], deletedFiles: string[]}|null}
+ * @returns {{changedFiles: string[], deletedFiles: string[], untrackedFiles: string[]}|null}
  */
 export function localChangedSet({ base = 'origin/main', runGit }) {
   const mergeBase = pinnedMergeBase({ base, runGit });
@@ -190,7 +200,7 @@ export function localChangedSet({ base = 'origin/main', runGit }) {
     const tracked = lines(runGit(['diff', '--name-only', mergeBase]));
     const deletedFiles = lines(runGit(['diff', '--name-only', '--diff-filter=D', mergeBase]));
     const untracked = lines(runGit(['ls-files', '--others', '--exclude-standard']));
-    return { changedFiles: Array.from(new Set([...tracked, ...untracked])).sort(), deletedFiles };
+    return { changedFiles: Array.from(new Set([...tracked, ...untracked])).sort(), deletedFiles, untrackedFiles: untracked };
   } catch {
     return null;
   }

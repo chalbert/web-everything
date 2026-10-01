@@ -2,9 +2,10 @@
 bornAs: x88m779
 kind: story
 size: 2
-status: open
+status: resolved
 scope: ["we:scripts/lib/verify-lane-gate.mjs", "we:scripts/lib/__tests__/verify-lane-gate.test.mjs"]
 dateOpened: "2026-09-29"
+dateResolved: "2026-10-01"
 preparedDate: "2026-10-01"
 preparedAgainstSha: "2eaedba64725229983194fbcc3a3ac06cc6fe221"
 tags: []
@@ -15,6 +16,22 @@ tags: []
 Split from #4473 MVP item (3). Exclude paths matching the shared lane-litter allowlist from the local Vitest selection input and reference-name discovery. Preserve the complete changed set for standards scoping and diagnostics, and preserve independent verification-invalidation behavior. Match full repository-relative paths using the existing matcher; do not infer scratch status from a basename.
 
 ## Progress
+
+Implementation proof (2026-10-01):
+
+- **Red:** added the mixed-diff regression first, then executed `npm run test:unit --` with `we:scripts/lib/__tests__/verify-lane-gate.test.mjs` (documentation prefix removed). Exit 1: 72 passed, one failed with five assertion failures. The captured grep argv contained `we:.commit-msg.txt`; related targets contained that scratch path; its fake grep hit selected `we:scripts/scratch.test.mjs`. The complete standards argument remained intact.
+- **Green:** reran that exact admitted command after implementation: 83/83 tests passed. The same file plus `we:scripts/readiness/__tests__/test-selection-local.test.mjs` and `we:scripts/readiness/__tests__/test-selection.test.mjs` passed 125/125 tests across three files. Coverage includes all shared file-shaped allowlist entries, wildcard matches, nested/unknown/directory-child retention, tracked-versus-untracked names, deleted entries, config/backlog/policy-core combinations, opt-out, and the 300-target boundary after filtering and reference expansion. The scratch-only test executes the emitted echo command and observes successful output; it also rejects any grep invocation. Existing hashing and revision-invalidation tests pass unchanged.
+- **Gate command probes:** injected Git runner, no grep hits, identical inputs before/after. Paths below carry the documentation-only `we:` prefix; actual argv uses repository-relative paths.
+
+| Input | Before Vitest half | After Vitest half | Standards half (unchanged) |
+| --- | --- | --- | --- |
+| Mixed: untracked `we:.commit-msg.txt` plus tracked `we:scripts/example.mjs` | `npx vitest related` targeting both paths, `--run --passWithNoTests` | Same command targeting only `we:scripts/example.mjs` | `npm run check:standards -- --local` with both original paths in `--files` |
+| Scratch only: untracked `we:.commit-msg.txt` | `npx vitest related` targeting scratch, `--run --passWithNoTests` | `echo 'verify-lane: no remaining changed file for vitest to relate — vitest half skipped (deletions or excluded untracked scratch)'` | `npm run check:standards -- --local` with `we:.commit-msg.txt` in `--files` |
+| Scratch only, explicit selection opt-out | `npm run test:unit` | `npm run test:unit` | Same scoped scratch argument |
+| Truly empty diff | `npm run test:unit` | `npm run test:unit` | Unscoped `npm run check:standards` |
+
+- **Required checks:** `npm run check:standards` exited 0, zero errors (4590 warnings). Executed `node we:scripts/verify-lane.mjs` with the documentation prefix removed: 71 test files / 4355 tests passed, followed by scoped standards with zero errors; the verifier exited 0 and recorded green. No helper files, shared agent docs, allowlist, shared selector, hashing, or invalidation implementation changes.
+
 
 Preparation research confirmed the gap with a direct Node invocation of `resolveDefaultGate` using an injected Git runner. A changed set containing `we:.commit-msg.txt` and illustrative `we:scripts/example.mjs` produced both Vitest targets and both grep needles. Scratch alone produced a one-target related invocation; a genuinely empty diff produced the full gate. These are observations of command construction, not an executed Vitest run.
 
