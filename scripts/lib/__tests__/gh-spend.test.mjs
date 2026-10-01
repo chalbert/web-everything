@@ -122,6 +122,16 @@ describe('rollupSpend — the three counts, never mixed', () => {
     expect(core.attributed).toBe(2);
     expect(core.byCaller['session:abcd1234'].attributed).toBe(2);
   });
+
+  it('counts ALL of an invocation\'s responses on its head resource row; a baseline-only resource adds no row (#4428)', () => {
+    const create = { ...shim(2, 101), op: 'pr create', rl: [{ ...rl(101), cost: 1 }, { ...rl(7, 'core'), cost: 2 }] };
+    const rows = rollupSpend([shim(1, 100), { ...shim(1, 5), rl: [rl(5, 'core')] }, create], { now: T0 + HOURS(1) });
+    // 1 (baseline call) + 1 (core-only baseline, head resource graphql) + the create's 2 responses, all on graphql
+    expect(rows.find((r) => r.resource === 'graphql').responses).toBe(4);
+    expect(rows.find((r) => r.resource === 'core').responses).toBe(0);
+    const baselineOnly = rollupSpend([{ ...shim(1, 5), rl: [rl(5, 'core')] }], { now: T0 + HOURS(1) });
+    expect(baselineOnly.find((r) => r.resource === 'core')).toBeUndefined();
+  });
 });
 
 function HOURS(n) { return n * 60 * 60_000; }
@@ -193,6 +203,19 @@ describe('persistSpendHours — hourly persistence, idempotent and cursor-safe',
   it('rollupSpendDetailed hands back the last `used` per window for the next pass', () => {
     const { baselines } = rollupSpendDetailed([shim(1, 100), shim(2, 104)], { now: T0 + HOURS(1) });
     expect(baselines[`app|graphql|${RESET}`].used).toBe(104);
+  });
+  it('keeps one invocation together across the hour boundary (#4428)', () => {
+    const { logPath, hourlyPath } = setup();
+    const a = { ...shim(59, 100), inv: 'X', rl: [rl(100)] };
+    const b = { ...shim(61, 103), inv: 'X', rl: [rl(103)] };
+    write(logPath, [a, b]);
+    persistSpendHours({ logPath, now: T0 + 70 * 60_000 }); // 10:00 closed; X straddles into 11:00
+    write(logPath, [shim(130, 110)]);
+    persistSpendHours({ logPath, now: T0 + 190 * 60_000 });
+    const rows = readSpendRows(hourlyPath);
+    // X counts once (not once per tick) plus the later, separate invocation; all 3 responses are preserved
+    expect(rows.reduce((n, r) => n + r.requests, 0)).toBe(2);
+    expect(rows.reduce((n, r) => n + r.responses, 0)).toBe(3);
   });
 });
 

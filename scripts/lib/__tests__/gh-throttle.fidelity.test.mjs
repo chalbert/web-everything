@@ -160,16 +160,15 @@ describe('stripGhDebug — golden fixtures from the pinned real gh binary (#4309
     expect(rateLimitRecords(responses)[0].rem).toBe(0);
   });
 
-  it('an UNCLOSED block (DERIVED: gh killed / its output cut mid-body) is stripped only through its last header line + one blank', () => {
+  it('an UNCLOSED block (DERIVED: gh killed / its output cut mid-body) fails closed: the whole tail is dropped (#4428)', () => {
     const full = fx('pr-view-success.debug.stderr');
     const cut = full.slice(0, full.indexOf('"repository"')); // headers complete, body cut mid-way
     const { stderr, responses } = stripGhDebug(cut);
-    expect(stderr.startsWith('{\n  "data": {')).toBe(true); // the partial body is KEPT, never silently dropped
-    expect(stderr).not.toMatch(/^[<>*] /m);
+    expect(stderr).toBe('');
     expect(responses).toHaveLength(1);
-    // cut before any response: the request headers go, the rest stays
+    // cut before any response: the request side (incl. body) is dropped too, so is anything after it
     const reqOnly = full.slice(0, full.indexOf('GraphQL query:')) + 'error connecting to api.github.com\n';
-    expect(stripGhDebug(reqOnly).stderr).toBe('error connecting to api.github.com\n');
+    expect(stripGhDebug(reqOnly).stderr).toBe('');
   });
 
   it('text with no trace at all (a spawn error, a caller\'s plain stderr) passes through unchanged', () => {

@@ -412,9 +412,19 @@ export function persistSpendHours({ logPath = ghThrottleLogPath(ghThrottleLockRo
   const cutoff = hourStart(now - graceMs, hourMs); // every hour strictly before this one is closed
   const consumed = [];
   let end = lines.length ? lines[0].start : offset; // a skipped torn first line is never re-read
+  // An invocation (same grouping key as groupInvocations) with a record at/after the cutoff is still open: keep ALL
+  // its records for a later tick so it is never split into two rows that each count it.
+  const invKey = (e) => (e?.outer ? `inv:${e.outer}` : e?.inv ? `inv:${e.inv}` : null);
+  const openKeys = new Set();
+  for (const l of lines) {
+    const t = Date.parse(l.entry?.ts || '');
+    const k = invKey(l.entry);
+    if (k && Number.isFinite(t) && t >= cutoff) openKeys.add(k);
+  }
   for (const l of lines) {
     const t = Date.parse(l.entry?.ts || '');
     if (Number.isFinite(t) && t >= cutoff) break;
+    if (openKeys.has(invKey(l.entry))) break;
     if (l.entry) consumed.push(l.entry);
     end = l.end;
   }
