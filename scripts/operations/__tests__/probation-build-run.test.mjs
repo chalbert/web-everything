@@ -1079,10 +1079,6 @@ it.each(['4397', '4389'])('replays incident #%s using its checkout card and real
   const dir = mkdtempSync(join(tmpdir(), `probation-${num}-replay-`));
   try {
     execFileSync('git', ['clone', '--shared', '--quiet', resolve('.'), dir]);
-    // Replay the card as it stood at the incident, not the live checkout: once the real card was resolved on
-    // main (#4389 landed via #3231) this replay went red on main for every PR.
-    const INCIDENT_CARD_SHA = { 4397: 'e300ee2c5', 4389: 'eb9322888' };
-    execFileSync('git', ['checkout', INCIDENT_CARD_SHA[num], '--', `:(glob)backlog/${num}-*.md`], { cwd: dir });
     const real = realIo();
     const item = real.findItem(num, dir);
     const { io, calls } = fakeIo({ lane: dir, item });
