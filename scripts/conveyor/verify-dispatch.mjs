@@ -119,6 +119,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
+import { randomUUID } from 'node:crypto';
 import { readVerifyMarker, VERIFY_FILENAME, verifyFinishBody, verificationInfrastructureFailure } from '../lib/lane-verify.mjs';
 import { writeAllSync } from '../lib/write-all-sync.mjs';
 import { resolveCeilingMs as resolveAdmissionCeilingMs } from '../readiness/heavy-admission.mjs';
@@ -251,6 +252,20 @@ function markerFor(laneDir) {
   return readVerifyMarker(gitDir);
 }
 
+/** Is the on-disk `running` marker still the request THIS dispatch owns? With a `runId` (the dispatcher always
+ *  passes one) ownership is exact even before the gate started — when `startedAt` is still unknown, which is the
+ *  queue-phase kill: the marker is ours only if our child stamped it (`runId` matches) or the child never got to
+ *  restamp and it is still byte-for-byte the request we observed (`requestStartedAt`). A newer same-sha/suites/
+ *  tree request has neither, so it is left alone. Without a `runId` (a caller that predates it) the old
+ *  `startedAt` comparison applies. */
+function ownsMarker(current, expected) {
+  if (expected.runId) {
+    if (current.runId === expected.runId) return true;
+    return !current.runId && !!expected.requestStartedAt && current.startedAt === expected.requestStartedAt;
+  }
+  return !expected.startedAt || current.startedAt === expected.startedAt;
+}
+
 /** A killed child cannot write its result. Settle only the still-owned request; never requeue it silently. */
 export function recordKilledVerification(dir, expected, error, ceilingMs) {
   const infrastructure = verificationInfrastructureFailure({ exitCode: error?.status, signal: error?.signal,
@@ -258,10 +273,14 @@ export function recordKilledVerification(dir, expected, error, ceilingMs) {
   if (!infrastructure) return;
   const gitDir = tryGit(['rev-parse', '--absolute-git-dir'], dir) || join(dir, '.git');
   const current = readVerifyMarker(gitDir);
-  if (!current || current.status !== 'running' || current.sha !== expected.sha
-      || current.suites !== expected.suites || current.treeHash !== expected.treeHash
-      || (expected.startedAt && current.startedAt !== expected.startedAt)) return;
-  const finished = verifyFinishBody(current, { sha: expected.sha, exitCode: error?.status,
+  if (!current || current.status !== 'running') return;
+  // A marker bearing OUR runId was stamped by our own child, so it is ours whatever tree/sha that child captured at
+  // its start (the agent may have edited the tree after `request`). Anything else must still match, field for
+  // field, the request we observed — and settle under that request's sha.
+  const ours = !!expected.runId && current.runId === expected.runId;
+  if (!ours && (current.sha !== expected.sha || current.suites !== expected.suites
+      || current.treeHash !== expected.treeHash || !ownsMarker(current, expected))) return;
+  const finished = verifyFinishBody(current, { sha: ours ? current.sha : expected.sha, exitCode: error?.status,
     infrastructure, finishedAt: new Date().toISOString(), treeHash: null });
   const path = join(gitDir, VERIFY_FILENAME);
   const tmp = `${path}.${process.pid}.tmp`;
@@ -436,9 +455,12 @@ export async function runVerifyDispatch({ dryRun = false, spawnGate = spawnGateB
   //    execution at the cap.
   const results = await Promise.allSettled(
     pending.map(({ pool, lane, dir, headSha, suites, marker }) => {
-      let owned = { ...marker, startedAt: null };
+      // `runId` rides into the marker via the child's own start stamp (`--run-id`), so a queue-phase kill — before
+      // `onGateStarted` could capture a `startedAt` — can still tell this run's marker from a newer request's.
+      const runId = randomUUID();
+      let owned = { ...marker, startedAt: null, requestStartedAt: marker.startedAt ?? null, runId };
       log(`  dispatching verify for ${pool}/lane-${lane} @ ${String(headSha).slice(0, 8)} (suites: ${suites || 'default'})…`);
-      const args = [VERIFY_LANE_CLI, `--repo=${dir}`, '--json'];
+      const args = [VERIFY_LANE_CLI, `--repo=${dir}`, '--json', `--run-id=${runId}`];
       if (suites) args.push(`--gate=${suites}`);
       return spawnGate(args, {
         queueCeilingMs: QUEUE_PHASE_CEILING_MS,
@@ -448,7 +470,7 @@ export async function runVerifyDispatch({ dryRun = false, spawnGate = spawnGateB
         // can be shown from real evidence rather than assumed from the code shape.
         onGateStarted: () => {
           const started = markerFor(dir);
-          if (started?.sha === headSha && started?.suites === suites && started?.treeHash === marker.treeHash) owned = started;
+          if (started?.runId === runId) owned = started;
           log(`  ▶ gate started for ${pool}/lane-${lane} @ ${String(headSha).slice(0, 8)} — ${new Date().toISOString()}`);
         },
       }).catch((error) => {

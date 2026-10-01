@@ -634,3 +634,106 @@ describe('killed verification ownership', () => {
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 });
+
+describe('killed verification ownership — queue phase (null startedAt), run identity', () => {
+  const kill = { signal: 'SIGKILL', timedOutPhase: 'queue' };
+  const setup = () => {
+    const root = mkdtempSync(join(tmpdir(), 'killed-verify-queue-'));
+    makeLane(root);
+    const path = join(root, '.git', '.lane-verify');
+    const base = { sha: git(['rev-parse', 'HEAD'], root), status: 'running', suites: 'true', treeHash: 'same', finishedAt: null, exitCode: null };
+    // What the dispatcher owns the instant it spawns the child: the request it observed, no gate-start yet.
+    const owned = { ...base, startedAt: null, requestStartedAt: 't0', runId: 'run-1' };
+    return { root, path, base, owned };
+  };
+
+  it('never overwrites a newer same-sha/suites/tree request when the kill lands before gate start', () => {
+    const { root, path, base, owned } = setup();
+    try {
+      const newer = { ...base, startedAt: 't-newer' };
+      writeFileSync(path, JSON.stringify(newer));
+      recordKilledVerification(root, owned, kill, 1000);
+      expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual(newer);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it('never overwrites a marker stamped by a different run', () => {
+    const { root, path, base, owned } = setup();
+    try {
+      const other = { ...base, startedAt: 't1', runId: 'run-2' };
+      writeFileSync(path, JSON.stringify(other));
+      recordKilledVerification(root, owned, kill, 1000);
+      expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual(other);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it.each([
+    ['the pristine request the child never got to restamp', { startedAt: 't0' }],
+    ['the marker the killed child itself restamped', { startedAt: 't1', runId: 'run-1' }],
+  ])('still settles %s as an infrastructure failure', (_label, extra) => {
+    const { root, path, base, owned } = setup();
+    try {
+      writeFileSync(path, JSON.stringify({ ...base, ...extra }));
+      recordKilledVerification(root, owned, kill, 1000);
+      expect(JSON.parse(readFileSync(path, 'utf8'))).toMatchObject({ status: 'infrastructure-failure',
+        infrastructure: { reason: 'verify-timeout', phase: 'queue', ceilingMs: 1000 } });
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it('settles a marker our child restamped even when the tree/sha it captured differs from the request (edited after `request`)', () => {
+    const { root, path, base, owned } = setup();
+    try {
+      writeFileSync(path, JSON.stringify({ ...base, treeHash: 'edited-after-request', startedAt: 't1', runId: 'run-1' }));
+      recordKilledVerification(root, owned, { signal: 'SIGKILL', timedOutPhase: 'gate' }, 1000);
+      expect(JSON.parse(readFileSync(path, 'utf8'))).toMatchObject({ status: 'infrastructure-failure', sha: base.sha });
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+});
+
+describe('runVerifyDispatch — run identity wiring (a fake spawnGate, a real marker)', () => {
+  const killed = (phase) => Object.assign(new Error('killed'), { status: null, signal: 'SIGKILL', timedOutPhase: phase });
+  const dispatchKilled = async ({ phase, mutate = () => {} }) => {
+    expect(runVerifyLane(['request', `--repo=${laneDir}`, '--gate=true', '--json'], laneDir).code).toBe(0);
+    const markerPath = join(laneDir, '.git', '.lane-verify');
+    const requested = JSON.parse(readFileSync(markerPath, 'utf8'));
+    let runId;
+    const spawnGate = (args, opts) => {
+      const flag = args.find((a) => a.startsWith('--run-id='));
+      runId = flag?.slice('--run-id='.length);
+      mutate({ markerPath, requested, runId, opts });
+      return Promise.reject(killed(phase));
+    };
+    await runVerifyDispatch({ poolRoot, spawnGate });
+    return { runId, requested, after: JSON.parse(readFileSync(markerPath, 'utf8')) };
+  };
+
+  it('passes a fresh uuid --run-id to every verify-lane child', async () => {
+    const { runId } = await dispatchKilled({ phase: 'queue' });
+    expect(runId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+  });
+
+  it('a queue-phase kill of a never-restamped request settles it', async () => {
+    const { after } = await dispatchKilled({ phase: 'queue' });
+    expect(after).toMatchObject({ status: 'infrastructure-failure', infrastructure: { phase: 'queue' } });
+  });
+
+  it('a gate-phase kill of the marker our child restamped (runId, new startedAt, edited tree) settles it', async () => {
+    const { after } = await dispatchKilled({
+      phase: 'gate',
+      mutate: ({ markerPath, requested, runId, opts }) => {
+        writeFileSync(markerPath, JSON.stringify({ ...requested, startedAt: 't-child', treeHash: 'edited-after-request', runId }));
+        opts.onGateStarted();
+      },
+    });
+    expect(after).toMatchObject({ status: 'infrastructure-failure', infrastructure: { phase: 'gate' } });
+  });
+
+  it('a queue-phase kill never touches a newer same-sha/suites/tree request the agent re-filed meanwhile', async () => {
+    const { after } = await dispatchKilled({
+      phase: 'queue',
+      mutate: ({ markerPath, requested }) => writeFileSync(markerPath, JSON.stringify({ ...requested, startedAt: 't-newer' })),
+    });
+    expect(after).toMatchObject({ status: 'running', startedAt: 't-newer' });
+    expect(after.runId).toBeUndefined();
+  });
+});

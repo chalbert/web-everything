@@ -247,18 +247,20 @@ turn's window) runs the gate for you:
 
 ```bash
 node scripts/verify-lane.mjs request              # returns almost instantly — nothing has run yet — @operation-home-ok: #xab3jh7 — request has no operation-level equivalent yet; folding it in is #xab3jh7
-# Await this single check to completion (use the tool completion notification if it yields).
-node scripts/verify-lane.mjs check --wait=9600000 --json   # one wait; returns as soon as the marker settles — @operation-home-ok: #xab3jh7 — check has no operation-level equivalent yet; folding it in is #xab3jh7
+# One bounded blocking call (fits the Bash tool's `timeout: 600000`); re-run it on `timeout` — see below.
+node scripts/verify-lane.mjs check --wait=540000 --json   # returns as soon as the marker settles — @operation-home-ok: #xab3jh7 — check has no operation-level equivalent yet; folding it in is #xab3jh7
 ```
 
 `--wait=<ms>` (#4358) polls the marker **internally** and returns the FIRST result that is genuinely final —
 never the old "one bare `check`, then come back and ask again next turn" loop. `running` is the ONLY status it
 actually spends the ceiling waiting out (the one status a background process can still move off of); every
 other status ends the wait **immediately** instead of burning the ceiling on something more waiting cannot
-change (see the status table below for what each one means and what to do about it). Run ONE `check --wait=9600000` per request: 160 minutes covers admission + execution ceilings.
-Use the tool's `timeout: 600000`; if it yields a task/session handle, await that SAME process's completion
-notification. Do not spawn another wait, poll output files, or repeat checks across turns. A final timeout
-requires one diagnostic log inspection and a stalled-request report, not another wait or automatic reset.
+change (see the status table below for what each one means and what to do about it). Every `check --wait=540000` is ONE blocking foreground call that fits the Bash tool's `timeout: 600000`
+ceiling (a longer wait would be killed by the tool before a 30+ minute gate settles). On `timeout` (still
+`running` after 9 minutes) run the SAME call again; stop after 18 consecutive `timeout`s (~160 minutes: the
+admission + execution ceilings, after which the dispatcher itself settles a hung run as `infrastructure-failure`)
+and report the stalled request once. Never `sleep`, never `run_in_background`, never poll output files, and never
+`reset` or re-`request` automatically.
 
 **Read `check`'s `status`/`ok`, never just its exit code — and never read `ok:true` alone as "settled".**
 `{sha, status, reason, ok, detail}` — `status` is `green` (ok — the only one that satisfies this gate) / `red`
@@ -266,7 +268,7 @@ requires one diagnostic log inspection and a stalled-request report, not another
 marker itself is torn; `request` again) / `absent` (ok:false — nothing was ever requested for this HEAD, or the
 marker is for an older commit; `request` it, don't just re-`check --wait=`) / `break-glass` (`ok:true`, but an
 OVERRIDE, not a verified result — only relevant if `WE_LAND_UNVERIFIED=1` is set) / `timeout` (ok:false,
-`--wait=` only — the total budget elapsed while still `running`; report the stall, do not poll again) / `head-moved` (ok:false,
+`--wait=` only — this call's 9-minute wait elapsed while still `running`; re-run the same `check --wait=540000`, up to 18 consecutive times, then report the stall) / `head-moved` (ok:false,
 `--wait=` only — a new commit landed on the lane mid-wait; re-`request` for the new HEAD).
 
 ### 6. Converge your diff — run `/converge` against the lane clone (BEFORE the PR)
@@ -391,11 +393,12 @@ git commit -F <msgfile> <explicit-paths>
 # request-then-WAIT shape as step 5 — you cannot run this yourself (guard-bash denies it); request it, then let
 # `check --wait=` block (bounded, internally-polling) until it settles GREEN. Do NOT interpret a `timeout` or a
 # lingering `running` status as a failure: it means the runner hasn't finished yet (or hasn't picked it up), not
-# of a test failure — report the stalled request; do not repeat the wait. A `head-moved` result means the commit below is no
+# of a test failure — re-run the same bounded `check` (up to 18 consecutive `timeout`s), then report the stalled
+# request. A `head-moved` result means the commit below is no
 # longer HEAD (something else moved it) — re-`request` for the new HEAD before re-checking.
 node scripts/verify-lane.mjs request              # targets HEAD as of the commit you just made — @operation-home-ok: #xab3jh7 — request has no operation-level equivalent yet; folding it in is #xab3jh7
-# … wait on later turns, repeating if the gate outruns one ceiling …
-node scripts/verify-lane.mjs check --wait=9600000 --json   # proceed ONLY once status is `green`; `red` is a hard stop (see *Escalations*) — @operation-home-ok: #xab3jh7 — check has no operation-level equivalent yet; folding it in is #xab3jh7
+# … re-run the SAME bounded check on `timeout` if the gate outruns one 9-minute wait (never sleep-poll) …
+node scripts/verify-lane.mjs check --wait=540000 --json   # proceed ONLY once status is `green`; `red` is a hard stop (see *Escalations*) — @operation-home-ok: #xab3jh7 — check has no operation-level equivalent yet; folding it in is #xab3jh7
 
 node scripts/operations/run.mjs open-pr --ref=lane/{{ITEM_NUM}}{{ATTEMPT_TAG}}-<slug> --sha=HEAD --base={{DELIVERY_BASE}} \
   --bodyFile=<pr-body> --mode=label-on-green --requireVerified=true --json

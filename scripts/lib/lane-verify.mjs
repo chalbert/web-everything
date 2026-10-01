@@ -239,7 +239,7 @@ export const DEFAULT_VERIFY_TTL_MINUTES = 30;
  *  `computeWorkingTreeHash`) the IO shell computed BEFORE this call — carried through so a later `request`/
  *  `verify` can tell "the tree is byte-identical to what this record verified" apart from "same commit, tree
  *  moved since"; omitted/`null` (every existing caller) never enables that fast path. */
-export function verifyStartBody({ sha, suites, startedAt, treeHash }) {
+export function verifyStartBody({ sha, suites, startedAt, treeHash, runId }) {
   return {
     sha: sha || null,
     status: 'running',
@@ -248,6 +248,9 @@ export function verifyStartBody({ sha, suites, startedAt, treeHash }) {
     suites: suites || null,
     exitCode: null,
     treeHash: treeHash ?? null,
+    // `runId` (optional) identifies the dispatcher run that stamped this marker, so the dispatcher can later tell
+    // its own marker from a newer same-sha/suites/tree `request`. Omitted when absent — existing shapes unchanged.
+    ...(runId ? { runId } : {}),
   };
 }
 
@@ -318,9 +321,11 @@ export function isVerifyAbandoned(record, nowMs, ttlMs = DEFAULT_VERIFY_TTL_MINU
  *  item (tool-call COUNT) — only the ceiling below needs to stay conservative. */
 export const DEFAULT_WAIT_POLL_INTERVAL_MS = 2_000;
 
-/** One wait covers the default 120-minute admission budget, five-minute queue buffer,
- *  30-minute execution budget and five-minute dispatch margin. The tool may yield its
- *  process handle; callers await that same process's completion notification, never launch another wait. */
+/** The most ONE wait may ever block: the default 120-minute admission budget, five-minute queue buffer,
+ *  30-minute execution budget and five-minute dispatch margin. A dispatched agent's foreground tool call is
+ *  killed at the Bash tool's own `timeout` (10 minutes), so the conveyor briefs never ask for the whole budget in
+ *  one call — they chain `check --wait=540000` calls (each fits that window) up to this total; this constant is
+ *  only the clamp for callers that genuinely can block that long. */
 export const MAX_SAFE_WAIT_MS = 160 * 60_000;
 
 /** Clamp a requested `--wait=<ms>` to {@link MAX_SAFE_WAIT_MS}. Pure, and pulled out of `verify-lane.mjs`
@@ -422,7 +427,7 @@ export async function waitForVerifySettle({
     if (elapsed >= ceilingMs) {
       return {
         sha: headSha, status: 'timeout', reason: 'wait-timeout', ok: false,
-        detail: `still not settled after waiting ${elapsed}ms (ceiling ${ceilingMs}ms) — last read: ${v.status} (${v.reason}). Inspect the verify-daemon log and report the stalled request; do not repeat the wait or reset automatically.`,
+        detail: `still not settled after waiting ${elapsed}ms (ceiling ${ceilingMs}ms) — last read: ${v.status} (${v.reason}). Still running: re-run the same bounded \`check --wait=\` (the dispatcher's own ceilings settle a hung request as an infrastructure-failure); never reset or re-request automatically.`,
         settled: false, waited: { ms: elapsed, polls }, lastStatus: v.status, lastReason: v.reason,
       };
     }
@@ -542,8 +547,15 @@ export function verifyGateDecision({ record, headSha, nowMs = Date.now(), ttlMs 
   }
   const infrastructure = rec?.infrastructure || verificationInfrastructureFailure({ exitCode: rec?.exitCode, signal: rec?.signal });
   if (matches && (rec.status === 'infrastructure-failure' || (rec.status === 'red' && infrastructure))) {
-    return { ok: false, status: 'infrastructure-failure', reason: infrastructure?.reason || 'verify-infrastructure',
-      detail: infrastructure?.detail || 'verification infrastructure failed; no test verdict. Inspect the runner log before retrying.' };
+    const reason = infrastructure?.reason || 'verify-infrastructure';
+    const detail = infrastructure?.detail || 'verification infrastructure failed; no test verdict. Inspect the runner log before retrying.';
+    if (requireVerified) return { ok: false, status: 'infrastructure-failure', reason, detail };
+    // Advisory mode — same contract as a red marker below: a killed/timed-out gate is a terminal record with no TTL
+    // escape, so blocking here would wedge every CI-gated flow on each kill until a manual reset. This caller opted
+    // out of mandatory verification, so report it honestly (status stays `infrastructure-failure`) but do not block;
+    // the PR's required CI check gates the merge.
+    return { ok: true, status: 'infrastructure-failure', reason,
+      detail: `${detail} This caller opted out of mandatory verification (--no-require-verified / WE_REQUIRE_VERIFIED=0) — not blocking here; the PR's required CI check gates the merge.` };
   }
   if (matches && rec.status === 'red') {
     if (requireVerified) {

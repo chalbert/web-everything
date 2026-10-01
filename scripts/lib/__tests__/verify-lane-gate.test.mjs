@@ -15,7 +15,7 @@ import { execSync } from 'node:child_process';
 import { LANE_RELEASE_LITTER_ALLOWLIST } from '../lane-litter.mjs';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { resolveDefaultGate, canScopeCheckStandards, composeGate, describeGate, laneRelevantChangeSince, computeWorkingTreeHash, stableTreeHash, FULL_GATE, MAX_RELATED_TARGETS } from '../verify-lane-gate.mjs';
+import { explicitGateRefusal, resolveDefaultGate, canScopeCheckStandards, composeGate, describeGate, laneRelevantChangeSince, computeWorkingTreeHash, stableTreeHash, FULL_GATE, MAX_RELATED_TARGETS } from '../verify-lane-gate.mjs';
 
 /** A synthetic git runner for the xpnhz4o working-tree changed set: `merge-base` resolves to a fixed sha;
  *  `diff --name-only <sha>` returns the (working-tree) changed files; `--diff-filter=D` the deleted ones;
@@ -655,4 +655,50 @@ describe('fix-3311 selection replay', () => {
     expect(decision.mode).toBe('blocked');
     expect(command).toBeNull();
   });
+});
+
+describe('explicitGateRefusal — an agent-supplied gate must be an affected-test shape', () => {
+  it.each([
+    'npx vitest related scripts/a.test.mjs scripts/b.mjs --run',
+    "npx vitest related 'scripts/a.test.mjs' 'scripts/b.mjs' --run --bail=1",
+    'npx vitest run scripts/a.test.mjs',
+    'vitest run',
+    'npm run test:unit',
+    'npm test',
+    'npx vitest related scripts/a.mjs --run && npm run check:standards -- --local --files=scripts/a.mjs',
+    'npm run test:unit && npm run check:standards',
+  ])('accepts %j', (gate) => expect(explicitGateRefusal(gate)).toBeNull());
+
+  // The adversarial-review bypasses: each of these runs no real tests (or runs attacker-chosen code) yet records green.
+  it.each([
+    'npx vitest run --passWithNoTests zzz-nonexistent',
+    'npx vitest related ghost.ts --run --passWithNoTests',
+    'npx vitest run --config /tmp/evil.mjs x',
+    'npx vitest run -c /tmp/evil.mjs x',
+    'npx vitest run x --reporter=./evil.mjs',
+    'npx vitest run x --root /tmp/elsewhere',
+    'npx vitest run x --exclude "**/*"',
+    'npx vitest run x -t zzznomatch',
+    'npm run test:unit -- -t zzznomatch',
+    'npm run test:unit:evil',
+    'npm test -- --passWithNoTests',
+  ])('refuses the silencing/redirecting form %j', (gate) => expect(explicitGateRefusal(gate)).not.toBeNull());
+
+  it.each([
+    ['', /empty/],
+    ['true', /every `&&` segment/],
+    ['exit 0', /every `&&` segment/],
+    ['echo ok', /every `&&` segment/],
+    ['npx vitest related scripts/a.mjs --run || true', /shell operator/],
+    ['npx vitest related scripts/a.mjs --run; true', /shell operator/],
+    ['npx vitest related scripts/a.mjs --run | cat', /shell operator/],
+    ['npx vitest related scripts/a.mjs --run & true', /shell operator/],
+    ['npx vitest related scripts/a.mjs --run > /dev/null', /shell operator/],
+    ['npx vitest run $(echo x)', /shell operator/],
+    ['npx vitest related scripts/a.mjs --run && true', /every `&&` segment/],
+    ['npm run check:standards', /runs no tests/],
+    ['npx vitest related --run', /names no target/],
+    ['npx vitest related --run && npm run check:standards', /names no target/],
+    ['npx vitest related --run --passWithNoTests && npm run check:standards', /not an allowed flag/],
+  ])('refuses %j', (gate, why) => expect(explicitGateRefusal(gate)).toMatch(why));
 });

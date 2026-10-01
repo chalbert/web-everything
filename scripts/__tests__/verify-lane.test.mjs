@@ -880,6 +880,13 @@ describe('verify-lane reset (x4jcqm4) — clearing a stale marker without a leas
   });
 });
 
+it('--run-id is stamped into the running marker the gate sees (dispatcher run identity)', () => {
+  const seen = join(dir, 'seen-marker.json');
+  const out = execFileSync('node', [VERIFY_LANE, `--gate=cp ${marker()} ${seen}`, '--run-id=run-abc', '--json'], { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  expect(JSON.parse(out.trim().split('\n').pop()).status).toBe('green');
+  expect(JSON.parse(readFileSync(seen, 'utf8'))).toMatchObject({ status: 'running', runId: 'run-abc' });
+});
+
 describe('fix-3311: killed gates are infrastructure failures', () => {
   it.each(['exit 137', 'kill -KILL $$'])('records %s without fabricating a test failure or an OOM cause', (gate) => {
     const { code, json } = runVerify(gate);
@@ -890,6 +897,53 @@ describe('fix-3311: killed gates are infrastructure failures', () => {
     const record = JSON.parse(readFileSync(marker(), 'utf8'));
     expect(record.status).toBe('infrastructure-failure');
     expect(record.infrastructure.signal).toBe('SIGKILL');
+  });
+});
+
+describe('request with an explicit --gate when the default selection is blocked', () => {
+  const blockDefault = () => {
+    execFileSync('git', ['branch', 'origin/main'], { cwd: dir });
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ scripts: { 'test:unit': 'echo must-not-run' } }));
+  };
+  const request = (gate) => spawnSync('node', [VERIFY_LANE, 'request', `--gate=${gate}`, '--json'], { cwd: dir, encoding: 'utf8' });
+
+  it.each(['true', 'exit 0', 'npx vitest related src/a.test.ts --run || true', 'npx vitest related --run',
+    'npx vitest related ghost.ts --run --passWithNoTests'])(
+    'refuses weak gate %j and records no marker', (gate) => {
+      blockDefault();
+      const r = request(gate);
+      expect(r.status).toBe(3);
+      expect(JSON.parse(r.stdout)).toMatchObject({ status: 'gate-refused', reason: 'explicit-gate-not-affected-test' });
+      expect(existsSync(marker())).toBe(false);
+    });
+
+  it('accepts an affected-test gate and stamps the request', () => {
+    blockDefault();
+    const r = request('npx vitest related src/a.test.ts --run');
+    expect(r.status).toBe(0);
+    expect(JSON.parse(r.stdout)).toMatchObject({ status: 'requested' });
+    expect(JSON.parse(readFileSync(marker(), 'utf8'))).toMatchObject({ status: 'running', suites: 'npx vitest related src/a.test.ts --run' });
+  });
+
+  it('a dispatcher child (--run-id) re-checks at run time: a gate accepted for a docs-only diff does not run once the tree reaches package.json', () => {
+    execFileSync('git', ['branch', 'origin/main'], { cwd: dir });
+    writeFileSync(join(dir, 'notes.md'), 'docs-only: `true` is accepted at request time\n');
+    expect(request('true').status).toBe(0);
+    // The agent now edits a dependency file; the dispatcher's child must refuse instead of recording a green.
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ scripts: { 'test:unit': 'echo must-not-run' } }));
+    const r = spawnSync('node', [VERIFY_LANE, '--gate=true', '--run-id=run-x', '--json'], { cwd: dir, encoding: 'utf8' });
+    expect(r.status).toBe(3);
+    expect(JSON.parse(r.stdout)).toMatchObject({ status: 'gate-refused', reason: 'explicit-gate-not-affected-test' });
+    // Terminal red — not left `running`, so the dispatcher does not re-spawn the same refusal every sweep.
+    expect(JSON.parse(readFileSync(marker(), 'utf8'))).toMatchObject({ status: 'red', exitCode: 3 });
+  });
+
+  it('leaves an explicit gate alone when the default selection is NOT blocked (pre-existing capability)', () => {
+    execFileSync('git', ['branch', 'origin/main'], { cwd: dir });
+    writeFileSync(join(dir, 'notes.md'), 'a docs-only change selects (not blocks) the default gate\n');
+    const r = request('true');
+    expect(r.status).toBe(0);
+    expect(JSON.parse(r.stdout)).toMatchObject({ status: 'requested' });
   });
 });
 

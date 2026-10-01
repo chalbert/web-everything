@@ -408,6 +408,52 @@ export function testsNaming(needles, runGit) {
   }
 }
 
+const VITEST_SEGMENT = /^(?:npx\s+)?vitest\s+(related|run)(?=\s|$)/;
+/** The whole-suite test commands, exactly — `npm test` is what `composeGate` emits for a sibling repo with no `test:unit`. */
+const FULL_TEST_SEGMENT = /^npm\s+(?:run\s+test:unit|test)$/;
+const CHECK_STANDARDS_SEGMENT = /^npm\s+run\s+check:standards(?=\s|$)/;
+/** The only vitest flags an explicit gate may carry. Anything else can silence or redirect the run:
+ *  `--passWithNoTests`, `--config`/`--root`/`--dir` (point at other code), `--reporter` (arbitrary module),
+ *  `--exclude`, `-t`/`--testNamePattern` (select zero tests). */
+const ALLOWED_VITEST_FLAG = /^--(?:run|bail(?:=\d+)?)$/;
+
+/**
+ * When the DEFAULT local selection is blocked (config / dependency / unknown / oversized diff — the highest-risk
+ * surfaces), an agent must supply its own `--gate`. That string becomes the recorded `suites` and a green marker
+ * satisfies the mandatory landing check, so it may not be an arbitrary command (`true`, `exit 0`, `vitest … || true`).
+ * Accept only `&&`-joined segments of `vitest related|run <targets…> [--run|--bail]` / `npm run test:unit` /
+ * `npm test` / `npm run check:standards …`, at least one of which really runs tests (`vitest related` needs at
+ * least one target; no flag that can silence or redirect the run — see {@link ALLOWED_VITEST_FLAG}; the whole-suite
+ * commands take no arguments), with no `;`, `|`, `||`, lone `&`, backticks, `$(…)` or redirections. A SHAPE check,
+ * not proof of strength — CI still runs the full suite. Pure.
+ * @param {string} gate
+ * @returns {string|null} a refusal reason, or `null` when the gate shape is acceptable
+ */
+export function explicitGateRefusal(gate) {
+  const text = String(gate ?? '').trim();
+  if (!text) return 'the explicit gate is empty';
+  if (/[;|`<>\n\r]|\$\(/.test(text) || text.replaceAll('&&', '').includes('&')) {
+    return 'the explicit gate contains a shell operator other than `&&` (`;`, `|`, `||`, `&`, backticks, `$(…)`, redirection)';
+  }
+  let runsTests = false;
+  for (const segment of text.split('&&').map((s) => s.trim())) {
+    const vitest = VITEST_SEGMENT.exec(segment);
+    if (vitest) {
+      const tokens = segment.slice(vitest[0].length).split(/\s+/).filter(Boolean);
+      const badFlag = tokens.find((t) => t.startsWith('-') && !ALLOWED_VITEST_FLAG.test(t));
+      if (badFlag) return `\`${badFlag}\` is not an allowed flag in an explicit gate (only --run and --bail; others can silence or redirect the run)`;
+      if (vitest[1] === 'related' && !tokens.some((t) => !t.startsWith('-'))) return '`vitest related` in the explicit gate names no target file';
+      runsTests = true;
+    } else if (FULL_TEST_SEGMENT.test(segment)) {
+      runsTests = true;
+    } else if (!CHECK_STANDARDS_SEGMENT.test(segment)) {
+      return 'every `&&` segment of the explicit gate must be `vitest related|run <targets>`, `npm run test:unit` / `npm test` (no arguments) or `npm run check:standards`';
+    }
+  }
+  if (!runsTests) return 'the explicit gate runs no tests (check:standards alone is not an affected-test gate)';
+  return null;
+}
+
 /**
  * One human-readable block describing what the default gate decided — printed by `verify-lane.mjs` before the
  * gate runs, so an agent (and the operator reading its transcript) can see whether this was a SELECTED run or a

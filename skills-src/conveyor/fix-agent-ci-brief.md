@@ -305,7 +305,7 @@ as "closes"/"fixes" the item itself — it heals CI on an already-open PR, it do
 
 ```bash
 node {{WE_ROOT}}/scripts/verify-lane.mjs request --repo=.                        # returns almost instantly — nothing has run yet
-node {{WE_ROOT}}/scripts/verify-lane.mjs check --wait=9600000 --json --repo=.     # blocks (bounded) until the verify runner settles the marker
+node {{WE_ROOT}}/scripts/verify-lane.mjs check --wait=540000 --json --repo=.     # blocks (bounded, fits one foreground call) until the verify runner settles the marker
 ```
 
 A dispatched agent cannot run the gate itself: `we:scripts/guard-bash.mjs` denies any `verify-lane.mjs` invocation
@@ -317,11 +317,13 @@ quoted path is denied). Do not run `verify-lane.mjs run` here; `request` stamps 
 Read the verdict from the **`check` output**, never the `request` acknowledgement:
 `green` → proceed; `red` (exit 2) → the hard stop below; `infrastructure-failure` → report the
 signal/ceiling evidence, without claiming a test failure or automatically resetting/re-requesting.
-`timeout` → report the stalled request and inspect the daemon log once; do not repeat the wait.
-Run ONE `check --wait=9600000` for each request (160 minutes covers admission + execution ceilings).
-Use the Bash tool's `timeout: 600000`. If the tool yields a task/session handle before completion,
-await that SAME process through the tool's completion notification; do not launch another check,
-read output files in a loop, or batch repeated waits into turns. Keep the session pending until completion.
+`timeout` (the 9-minute wait elapsed with the request still `running`) → run the SAME `check --wait=540000`
+again. Every call is ONE blocking foreground call that fits the Bash tool's `timeout: 600000` ceiling, so a
+gate that legitimately takes 30+ minutes is waited out in chunks, never in a call the tool would kill. Stop after
+18 consecutive `timeout`s (~160 minutes: the admission + execution ceilings, after which the dispatcher itself
+kills a hung run and settles the marker as `infrastructure-failure`) and report the stalled request once.
+Never `sleep`, never `run_in_background`, never read output files in a loop (#x36vidg), and never `reset` or
+re-`request` automatically.
 Other statuses follow [we:skills-src/conveyor/delivery-agent-brief.md](delivery-agent-brief.md).
 
 After the re-push, do NOT wait for the new CI run to go green (no `gh pr checks --watch`, no `sleep` loop on
@@ -336,7 +338,11 @@ a no-op today.
 **The gate is the diff-selected gate** (`verify-lane.mjs`, xpnhz4o): it runs **only the tests your
 diff reaches** (`vitest related` on the files changed vs `origin/main`, working tree included, plus the tests that
 name a changed file) and a check:standards scoped to those files. Shared helpers use the graph and reference discovery. Unknown, unsafe or oversized selections
-return `selection-required`; inspect the scope and supply an explicit affected-test gate, or report the blocker.
+return `selection-required`; inspect the scope and supply an explicit affected-test gate, or report the blocker. In that blocked case `request --gate=…` accepts only an
+affected-test shape — `&&`-joined `npx vitest related <files…> --run` / `vitest run <files…>` (only the `--run`/`--bail`
+flags: never `--passWithNoTests`, `--config`, `--reporter`, `-t`…) / `npm run test:unit` / `npm test` (no arguments) /
+`npm run check:standards` segments, no `||`, `;`, `|` or redirection — and refuses anything else (`gate-refused`; a refusal
+at run time leaves a red marker).
 A default local selection never expands into the full suite. **Never run the full suite yourself**
 (`npm run test:unit`, `npm test`, a bare `vitest run`): the verify runner runs the same gate for you, CI runs it
 anyway, and the Bash guard denies it.

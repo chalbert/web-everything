@@ -38,9 +38,10 @@
  *     but ONLY while the marker is `running` — the one status a background process can still move off of. Returns the
  *     instant it settles green/red, and returns everything else (`absent`/`corrupt`/`break-glass`/`head-moved`)
  *     IMMEDIATELY too — waiting longer can never change any of those. A bounded "timeout" is returned only if it is
- *     still `running` when <ms> elapses (clamped to a safe ceiling well under this tool's own foreground window — see
- *     MAX_SAFE_WAIT_MS / waitForVerifySettle in lib/lane-verify.mjs). Replaces the old "request, then `check` again
- *     next turn, repeat" loop with ONE call per wait in the common case: same sanctioned `check` subcommand
+ *     still `running` when <ms> elapses (clamped to the total verify budget — see MAX_SAFE_WAIT_MS /
+ *     waitForVerifySettle in lib/lane-verify.mjs; a dispatched agent keeps each call under its Bash `timeout` by
+ *     using `--wait=540000` and re-running on `timeout`). Replaces the old "request, then `check` again
+ *     next turn, repeat" loop with ONE blocking call per wait: same sanctioned `check` subcommand
  *     (`we:scripts/guard-bash.mjs`'s allowlist matches on the subcommand word, not the flags after it, so this needed
  *     no guard change), just a flag that does the polling for you instead of handing it back to the caller's own turn
  *     loop.
@@ -67,7 +68,7 @@ import { VERIFY_FILENAME, VERIFY_PREVIOUS_FILENAME, verifyStartBody, verifyFinis
 import { LEASE_FILENAME, isLeaseStale, isConfirmedOwnLease } from './lib/lane-lease.mjs';
 import { defaultPoolRoot } from './lib/lane-pool-paths.mjs';
 import { writeAllSync } from './lib/write-all-sync.mjs';
-import { resolveDefaultGate, describeGate, laneRelevantChangeSinceForRecord, computeWorkingTreeHash, stableTreeHash } from './lib/verify-lane-gate.mjs';
+import { resolveDefaultGate, explicitGateRefusal, describeGate, laneRelevantChangeSinceForRecord, computeWorkingTreeHash, stableTreeHash } from './lib/verify-lane-gate.mjs';
 import { admissionLockRoot, resolveCap, resolveTimeoutMs, acquireSlotBlocking, releaseOwnedSlot, ADMISSION_HELD_ENV, classifyCommandKind } from './readiness/heavy-admission.mjs';
 
 // ── tiny arg parsing (matches push-if-green.mjs / lane-pool.mjs) ─────────────────────────────────────
@@ -244,8 +245,33 @@ function readCheckoutScripts() {
   try { return Object.keys(JSON.parse(readFileSync(join(REPO, 'package.json'), 'utf8')).scripts || {}); } catch { return undefined; }
 }
 let GATE;
-if (typeof flags.gate === 'string') GATE = flags.gate;
-else {
+if (typeof flags.gate === 'string') {
+  GATE = flags.gate;
+  // A `request` (the only path a dispatched agent has) whose DEFAULT selection is blocked is the high-risk case —
+  // config/dependency/unknown/oversized diffs used to force the full suite. The agent-supplied gate must then be an
+  // affected-test shape, never an arbitrary command that would record a green for the surfaces that most need one.
+  // The dispatcher's own child (`--run-id`) re-checks at run time: the tree may have moved since `request`, and a gate
+  // accepted for a docs-only diff must not run, and record a green, once the diff reaches a config/dependency file.
+  const dispatchedChild = MODE === 'verify' && typeof flags['run-id'] === 'string';
+  if (MODE === 'request' || dispatchedChild) {
+    // Only a KNOWN diff whose selection is blocked counts; an unresolvable diff (no `origin/main`) is unchanged.
+    let defaultBlocked = false;
+    try {
+      const { decision } = resolveDefaultGate({ runGit: git, env: process.env, scripts: readCheckoutScripts() });
+      defaultBlocked = decision.mode === 'blocked' && Array.isArray(decision.changedFiles) && decision.changedFiles.length > 0;
+    } catch { /* cannot tell ⇒ unchanged behaviour */ }
+    const refusal = defaultBlocked ? explicitGateRefusal(GATE) : null;
+    if (refusal) {
+      // A dispatched child must leave a TERMINAL record (red, exit 3) — leaving the `running` request as it was would
+      // make the dispatcher re-spawn this same refusal on every sweep. A plain `request` records nothing.
+      if (dispatchedChild) {
+        writeMarker(verifyFinishBody(verifyStartBody({ sha: headSha, suites: GATE, startedAt: new Date().toISOString(), treeHash: null }),
+          { finishedAt: new Date().toISOString(), exitCode: 3, sha: headSha, suites: GATE, treeHash: null }));
+      }
+      emit({ sha: headSha, status: 'gate-refused', reason: 'explicit-gate-not-affected-test', ok: false, detail: `${refusal}. The default selection is blocked for this diff, so supply an affected-test gate such as \`--gate="npx vitest related <files> --run"\`; ${dispatchedChild ? 'recorded a red marker so it is not re-dispatched' : 'no marker was recorded'}.` }, 3);
+    }
+  }
+} else {
   const resolved = resolveDefaultGate({ runGit: git, env: process.env, scripts: readCheckoutScripts() });
   if (resolved.decision.mode === 'blocked') emit({ sha: headSha, status: 'selection-required', reason: 'local-selection-bound', ok: false, detail: describeGate(resolved) }, 3);
   GATE = resolved.command;
@@ -313,7 +339,7 @@ if (cacheHit) {
   emit({ sha: headSha, status: 'green', reason: 'cached', exitCode: preStart.exitCode ?? null, detail: cachedDetail }, 0);
 }
 
-if (MODE !== 'run') writeMarker(verifyStartBody({ sha: headSha, suites: GATE, startedAt: new Date().toISOString(), treeHash: currentTreeHash }));
+if (MODE !== 'run') writeMarker(verifyStartBody({ sha: headSha, suites: GATE, startedAt: new Date().toISOString(), treeHash: currentTreeHash, runId: typeof flags['run-id'] === 'string' ? flags['run-id'] : undefined }));
 
 // #3105 — `request` stops HERE: the marker is stamped, nothing has run yet, and this call already returns
 // (`emit` calls `process.exit`). The actual suite run is picked up by `scripts/conveyor/verify-dispatch.mjs`
