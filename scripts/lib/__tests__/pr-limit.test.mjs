@@ -177,15 +177,24 @@ describe('fetchOpenPrs / fetchPrCommits / countOpenPrsForRepo — the IO shell',
       throw new Error(`unexpected call: ${JSON.stringify(args)}`);
     };
     const result = countOpenPrsForRepo('we', { exec, env: {} });
-    expect(result).toEqual({ repoKey: 'we', slug: 'chalbert/web-everything', count: 1, prNumbers: [1], limit: 15, unavailable: false });
+    expect(result).toEqual({ repoKey: 'we', slug: 'chalbert/web-everything', count: 1, prNumbers: [1], limit: 15, unavailable: false, unresolved: 0 });
     // Exactly one list call + one commits call per NOT-accepted PR (#2 is skipped — already accepted).
     expect(calls.filter((a) => a[1] === 'list')).toHaveLength(1);
     expect(calls.filter((a) => a[0] === 'api' && a[1] === 'graphql')).toHaveLength(2);
   });
 
+  it('countOpenPrsForRepo reports PRs whose commits could not be read as unresolved — an undercount is never silent', () => {
+    const exec = (args) => {
+      if (args[1] === 'list') return JSON.stringify([{ number: 1, labels: [] }, { number: 3, labels: [] }]);
+      if (args[0] === 'api' && args[1] === 'graphql' && args.includes('number=1')) return commitsPage([aiCommit]);
+      throw new Error('commits unreadable');
+    };
+    expect(countOpenPrsForRepo('we', { exec, env: {} })).toMatchObject({ count: 1, prNumbers: [1], unavailable: false, unresolved: 1 });
+  });
+
   it('countOpenPrsForRepo is unavailable when the list call fails, and unknown for an unrecognized repo key', () => {
     expect(countOpenPrsForRepo('we', { exec: () => { throw new Error('boom'); }, env: {} }).unavailable).toBe(true);
-    expect(countOpenPrsForRepo('not-a-repo', { env: {} })).toEqual({ repoKey: 'not-a-repo', slug: null, count: null, prNumbers: [], limit: Infinity, unavailable: true });
+    expect(countOpenPrsForRepo('not-a-repo', { env: {} })).toEqual({ repoKey: 'not-a-repo', slug: null, count: null, prNumbers: [], limit: Infinity, unavailable: true, unresolved: 0 });
   });
 });
 

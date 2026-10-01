@@ -175,15 +175,17 @@ export function fetchPrCommits(repoSlug, number, { exec = runGhSync, headRefName
 export function countOpenPrsForRepo(repoKey, { exec, env = process.env, reposTable = CONSTELLATION_REPOS, git, cwd, localOnly = false } = {}) {
   const meta = reposTable[repoKey];
   const limit = resolvePrLimit(repoKey, env);
-  if (!meta) return { repoKey, slug: null, count: null, prNumbers: [], limit, unavailable: true };
+  if (!meta) return { repoKey, slug: null, count: null, prNumbers: [], limit, unavailable: true, unresolved: 0 };
   const prs = fetchOpenPrs(meta.slug, { exec, localOnly });
-  if (prs === null) return { repoKey, slug: meta.slug, count: null, prNumbers: [], limit, unavailable: true };
+  if (prs === null) return { repoKey, slug: meta.slug, count: null, prNumbers: [], limit, unavailable: true, unresolved: 0 };
   const enriched = prs
     .filter((pr) => !hasLabel(pr, REVIEW_LABELS.accepted))
-    .map((pr) => ({ ...pr, commits: fetchPrCommits(meta.slug, pr.number, { exec, headRefName: pr.headRefName, headRefOid: pr.headRefOid, baseRefName: pr.baseRefName, git, localOnly, cwd: cwd ?? (meta.path ? meta.path.replace('$HOME', homedir()) : process.cwd()) }) }))
-    .filter((pr) => Array.isArray(pr.commits));
-  const counted = countBackpressurePrs(enriched);
-  return { repoKey, slug: meta.slug, count: counted.length, prNumbers: counted.map((p) => p.number), limit, unavailable: false };
+    .map((pr) => ({ ...pr, commits: fetchPrCommits(meta.slug, pr.number, { exec, headRefName: pr.headRefName, headRefOid: pr.headRefOid, baseRefName: pr.baseRefName, git, localOnly, cwd: cwd ?? (meta.path ? meta.path.replace('$HOME', homedir()) : process.cwd()) }) }));
+  // A PR whose commits could not be read (local-only mode with its head not fetched) is unknown, not absent:
+  // `unresolved` lets a caller tell an undercount from a true count instead of silently failing open.
+  const unresolved = enriched.filter((pr) => !Array.isArray(pr.commits)).length;
+  const counted = countBackpressurePrs(enriched.filter((pr) => Array.isArray(pr.commits)));
+  return { repoKey, slug: meta.slug, count: counted.length, prNumbers: counted.map((p) => p.number), limit, unavailable: false, unresolved };
 }
 
 /** Every constellation repo's live count, in one call (the shape both the CLI `status`/`dry-run` and the

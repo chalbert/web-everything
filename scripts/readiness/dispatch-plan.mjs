@@ -930,7 +930,7 @@ async function main(argv) {
       }
     }
     groundTruth.pending = pending.length;
-    groundTruth.refresh = startAlreadyDoneRefresh(pending, resolveAlreadyDoneCacheStorePath());
+    groundTruth.refresh = startAlreadyDoneRefresh(pending, resolveAlreadyDoneCacheStorePath(), { readOnly: Boolean(flags['no-already-done-cache']) });
     if (groundTruth.refresh.error) log(`already-done refresh unavailable: ${groundTruth.refresh.error}`);
   }
 
@@ -1048,7 +1048,12 @@ async function main(argv) {
   if (!flags['no-pr-limit-check']) {
     try {
       const { countOpenPrsForRepo, isGlobalOffLive, decideOpenPr } = await import('../lib/pr-limit.mjs');
-      const { count: openCount, limit } = countOpenPrsForRepo('we', { localOnly: true });
+      // Cache/local-only read first (no gh). An unavailable or incomplete local count (cold snapshot, PR head not
+      // fetched locally) is UNKNOWN, not "under the limit": fall back to the one networked count so the
+      // backpressure hold never silently fails open on a stale cache.
+      let counted = countOpenPrsForRepo('we', { localOnly: true });
+      if (counted.unavailable || counted.unresolved > 0) counted = countOpenPrsForRepo('we');
+      const { count: openCount, limit } = counted;
       prLimitHeld = !decideOpenPr({ repoKey: 'we', limit, openCount, globalOff: isGlobalOffLive() }).allowed;
     } catch (e) {
       log(`  ⚠ pr-limit check skipped (${String(e.message || e).split('\n')[0]}) — dispatch proceeds unheld on this axis`);
