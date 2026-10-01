@@ -4,22 +4,65 @@ kind: story
 size: 3
 parent: "4075"
 status: open
-scope: ["we:scripts/lib/gh-rest-read.mjs", "we:scripts/lane-whois.mjs", "we:scripts/lib/__tests__/gh-rest-read.test.mjs", "we:scripts/__tests__/lane-whois.test.mjs"]
+scope: ["we:scripts/lib/gh-rest-read.mjs", "we:scripts/lane-whois.mjs", "we:scripts/lib/__tests__/gh-rest-read.test.mjs", "we:scripts/__tests__/lane-whois.test.mjs", "we:scripts/lib/atomic-json-file.mjs", "we:scripts/lib/__tests__/atomic-json-file.test.mjs"]
 dateOpened: "2026-09-29"
+preparedDate: "2026-10-01"
+preparedAgainstSha: "083d206bd2195ed354172c5dda23872f5bd192e0"
 tags: []
 ---
 
 # File the prevention guard(s) owed by chalbert/web-everything#2896's independent review
 
-Filed mechanically ON APPROVAL (operator rule, 2026-09-27 — "prevention outstanding should be filed by default on approval") — this accept verdict named the guard(s) below as owed. None of them blocked the approval; the debt is tracked here instead:
-
-1. `we:scripts/lib/gh-rest-read.mjs:128` — Create the cache dir with mode 0o700 and write files with 0o600, then add a test that asserts the modes. Longer term, add a lint rule that flags `mkdirSync` / `writeJsonAtomic` calls under ~/.claude that carry no explicit mode.
-2. `we:scripts/lane-whois.mjs:330` — Validate `ghRepo` against /^[\w.-]+\/[\w.-]+$/ before building the path. Put this validation inside `ghRestGetJson` for `repos/` paths so every converted caller inherits it.
-3. `we:scripts/lib/gh-rest-read.mjs:125` — A lint rule enforcing that any `JSON.parse` of HTTP bodies or cached equivalents must fall back to a safe default if the string is empty, or a unit test that explicitly asserts the 304 path handles the exact same empty-body boundary cases as the 200 path.
-4. `we:scripts/lane-whois.mjs:355` — TypeScript strict null checks or a structural linter that flags inconsistent null-guards on the same object within a single function.
+Filed mechanically ON APPROVAL (operator rule, 2026-09-27 — "prevention outstanding should be filed by default on approval"). Preserve the four prevention obligations: private ETag cache writes, repository-path validation, empty-body parity between fresh and cached responses, and consistent null handling in the REST pull mapper. The approval was not blocked by this debt.
 
 Idempotency key (do not edit): approval-prevention-key:chalbert/web-everything#2896@fed7b23ffd24f01c243d72e8c11a0c7b76ac6dc8
 
+## Progress
+
+Preparation research against checkout `083d206bd2195ed354172c5dda23872f5bd192e0`:
+
+- **Old premise/scope:** two implementation files and their two test files; cache mode and parse references at we:scripts/lib/gh-rest-read.mjs:128 and we:scripts/lib/gh-rest-read.mjs:125, repository interpolation and null guards at we:scripts/lane-whois.mjs:330 and we:scripts/lane-whois.mjs:355. The filing also proposed broader linting or TypeScript enforcement.
+- **Corrected premise:** the defects remain, but the relevant cache writes are now we:scripts/lib/gh-rest-read.mjs:135-136, and the inconsistent parses are we:scripts/lib/gh-rest-read.mjs:129-131. Repository interpolation is we:scripts/lane-whois.mjs:343; mixed guarded and unguarded accesses are in `restPullToListShape` at we:scripts/lane-whois.mjs:375-377. `fetchAllPrs` catches mapping failures and returns an empty evidence list at we:scripts/lane-whois.mjs:352-355; preserve that behavior.
+- **Corrected scope:** add we:scripts/lib/atomic-json-file.mjs and its existing matching test we:scripts/lib/__tests__/atomic-json-file.test.mjs. Its `writeJsonAtomic` options currently expose injected IO functions but no file mode, and the temporary write at we:scripts/lib/atomic-json-file.mjs:75 uses only an encoding. Private final files require private temporary writes, not a chmod after rename. Keep the existing source/test pairs for the REST reader and whois shell. Use a focused structural guard in the whois test for obligation 4; a repository-wide type migration is unnecessary for this local debt.
+- **Observed evidence:** a hermetic Node probe with injected HTTP responses and a disposable cache directory returned `null` for an empty 200, then threw `SyntaxError` for its cached 304. Newly created cache directory/file modes were 0755/0644 under the probe's current umask. A malformed repository query delimiter reached the injected executor. Passing `null` to the mapper threw `TypeError`. No network calls or operator cache reads were needed.
+- **Existing coverage:** we:scripts/lib/__tests__/gh-rest-read.test.mjs already covers normal 200/304, identity/context separation, placeholder endpoints, pagination, mapping fixtures, and a PATH-faked GitHub CLI through the real throttle. It does not cover these permission/empty-body/invalid-repository boundaries. we:scripts/__tests__/lane-whois.test.mjs covers the CLI and lane evidence behavior. No implementation or preparation stamp is changed in this preparation pass.
+
+## Design
+
+1. **Private cache creation.** In we:scripts/lib/gh-rest-read.mjs create the cache directory with explicit mode 0700. Add an optional `mode` to the existing third argument of `writeJsonAtomic` in we:scripts/lib/atomic-json-file.mjs, document it there, and pass 0600 from the ETag writer. Apply the mode at temporary-file creation so rename preserves it; retain the existing default call behavior for other callers, symlink resolution, validation, cleanup, and best-effort cache failure behavior. This covers new directories and every newly written cache file, including replacements. Existing directory permission migration is a follow-up, not an implicit recursive chmod of an operator-selected root.
+2. **Validate before interpolating and before executing.** In we:scripts/lane-whois.mjs validate a supplied nonempty `ghRepo` as a complete owner/repository string against `/^[\w.-]+\/[\w.-]+$/`, additionally rejecting dot-only `.` and `..` segments. Do this before the outer cache lookup; invalid values return no PR evidence without issuing a request or writing a cache. Preserve the current absent/empty repository fallback. In we:scripts/lib/gh-rest-read.mjs validate the owner and repository segments of every `repos/` endpoint before cache IO or execution, throwing on invalid segments. Permit the existing exact `{owner}` and `{repo}` placeholders in their respective positions. Preserve endpoint suffixes, queries, pagination, and non-repository endpoints. The caller-side full-slug check is also necessary: after interpolation an extra slash in a slug is indistinguishable from a legitimate endpoint suffix. The shared validator cannot reconstruct that boundary.
+3. **One JSON-body contract.** In we:scripts/lib/gh-rest-read.mjs use the same empty-string fallback for fresh and cached JSON: empty string becomes `null`; valid JSON is parsed normally; whitespace-only and malformed nonempty JSON continue to throw. This preserves the existing 200 behavior rather than silently widening tolerated payloads. Keep cache envelope validation and non-304 error propagation unchanged.
+4. **Executable null-guard prevention.** In we:scripts/lane-whois.mjs make the mapper's nullish-input rejection explicit before field access, then remove its misleading partial guards. Retain optional handling of nullable `head`, `title`, and `body`, and preserve the outer all-or-empty evidence behavior. In we:scripts/__tests__/lane-whois.test.mjs add a focused structural check using the existing TypeScript parser to inspect this function: require a dominating nullish rejection before unguarded accesses to the parameter. Exercise the checker on an unsafe mixed-guard fixture and a safe early-rejection fixture, then on the real function. This is the structural-linter alternative from the original obligation, bounded to the owed function; do not invent a general data-flow analyzer or migrate the shell to TypeScript.
+
+## MVP
+
+- Extend we:scripts/lib/atomic-json-file.mjs with the optional write mode and corresponding tests in we:scripts/lib/__tests__/atomic-json-file.test.mjs.
+- Add explicit cache permissions, repository endpoint validation, and shared body parsing in we:scripts/lib/gh-rest-read.mjs, with regressions in we:scripts/lib/__tests__/gh-rest-read.test.mjs.
+- Add full repository-slug validation and explicit mapper rejection in we:scripts/lane-whois.mjs; add caller, null-input, and structural guard cases in we:scripts/__tests__/lane-whois.test.mjs.
+- Deliver these as one bounded prevention change. No runtime-standard API, rendered-page, or fixture catalogue changes are needed.
+
+## Test plan
+
+- **Atomic writer:** we:scripts/lib/__tests__/atomic-json-file.test.mjs must inspect the temporary file before rename and the final file after rename for mode 0600, including replacement of an existing permissive file. Retain existing default-options, symlink, malformed-write, and rename-failure cleanup tests.
+- **Cache permissions:** we:scripts/lib/__tests__/gh-rest-read.test.mjs must create a previously nonexistent cache child directory and assert directory/file permission bits, plus a subsequent replacement write. Run permission probes under a permissive umask in an isolated child process so the host umask cannot make an omitted mode accidentally pass. Assert no leftover temporary files. Use disposable directories and explicit test environment/lock roots.
+- **JSON parity:** in we:scripts/lib/__tests__/gh-rest-read.test.mjs run fresh 200 then thrown 304 cases for empty string, literal `null`, array, and object bodies. Both paths must agree. For whitespace-only and malformed nonempty cached strings, seed a valid cache envelope directly and assert both read paths throw. Retain the unconditional-304 and original-error identity checks.
+- **Repository boundary:** in we:scripts/lib/__tests__/gh-rest-read.test.mjs cover normal slugs, dots/hyphens/underscores, placeholders, pagination queries, and non-repository endpoints. Reject missing owner/repository, dot traversal, encoded separators, whitespace, and query/fragment delimiters embedded in the repository segments; assert zero executor calls and no cache writes. In we:scripts/__tests__/lane-whois.test.mjs additionally reject full slugs with extra segments or trailing slashes, even when an outer cache is fresh; verify absent repository uses placeholders and valid explicit repositories still fetch.
+- **Null handling:** in we:scripts/__tests__/lane-whois.test.mjs assert explicit rejection for null/undefined mapper inputs and retention of existing nullable-field defaults for valid pull objects. An injected list containing a null element must yield no PR evidence through `fetchAllPrs`, without escaping an exception. Run the structural checker fixtures and real-function assertion. Keep the REST/GraphQL shape fixture and real-throttle fake-CLI test in we:scripts/lib/__tests__/gh-rest-read.test.mjs green.
+
+## Proof plan
+
+Before implementation, add the regressions and capture failures for permissive modes, empty cached body, invalid repository reaching execution, and the mixed-guard structural check. Some behavior-preservation tests (null rejection and outer empty evidence) should already pass; do not report those as newly fixed behavior.
+
+Run the three matching suites with Vitest: we:scripts/lib/__tests__/gh-rest-read.test.mjs, we:scripts/lib/__tests__/atomic-json-file.test.mjs, and we:scripts/__tests__/lane-whois.test.mjs. The executable command is `npx vitest run` followed by those three repository-relative paths (remove the documentation-only `we:` prefix when invoking). Record before/after outcomes and exact test names. Then run `npm run check:standards` as the implementation gate.
+
+Repeat the disposable-cache probe through the real writer with injected responses: record 0700/0600 creation modes, equal empty-200/304 results, zero subprocess calls for malformed repository inputs, and unchanged conservative whois handling of malformed pull lists. Run the existing PATH-faked CLI/real-throttle integration to prove valid requests and conditional cache hits still traverse the production path. No live GitHub mutation or real operator cache is required. The preparation runner owns preparation stamping and checks.
+
 ## Done when
 
-1. **Executable** — TODO: a command that fails before this item lands and passes after.
+All four prevention obligations have executable regression guards; the focused suites and implementation standards gate pass; the before/after evidence demonstrates each actual fix. Every changed source has its matching test declared in scope. The broader lint ideas remain visible below rather than being silently treated as delivered.
+
+## Follow-ups
+
+- Generalize explicit-mode linting for writes beneath the operator's Claude configuration directory only after defining its path-resolution coverage and exemptions; this card supplies concrete permission regressions first, as the original filing requested.
+- Consider wider HTTP-body parsing and null-guard linting after the focused guard has evidence of usefulness. This card uses the original test alternative for JSON parsing and the focused structural alternative for null handling.
+- Separately assess permission repair for pre-existing cache directories and the outer whois PR-list cache. Neither is covered by the original ETag creation-mode request; avoid claiming that new-file permissions repair historical data exposure.
