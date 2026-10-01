@@ -89,6 +89,7 @@ own step 0/step-per-exit shape already prevents for a `review:changes` repair:
 # in mid-session — a revision this session never actually examined — and permanently stamp the escalation
 # marker against it, silently suppressing healing on a head nobody ever diagnosed.
 EXAMINED_HEAD="$(gh pr view {{PR_NUM}} --repo {{REPO}} --json headRefOid --jq .headRefOid)"
+CI_AUTH_ARGS=() # populated only for a diagnosed CI authentication failure
 
 node "{{WE_ROOT}}/scripts/operations/completion-cli.mjs" report --repo={{REPO}} --session={{SESSION_SLUG}} --kind=ci-heal --pr={{PR_NUM}} --item={{ITEM_NUM}} --status=started
 ```
@@ -198,6 +199,18 @@ gh pr checks {{PR_NUM}} --repo {{REPO}}          # which required check is red
 gh run view <run-id> --log-failed --repo {{REPO}} # the failing step's log (optional, for a non-obvious break)
 ```
 
+- For **CI authentication failures** (for example Bad credentials at Checkout FUI), capture the diagnosed
+  `AUTH_RUN` and `AUTH_ATTEMPT` from that run's metadata, keeping the original `$EXAMINED_HEAD`.
+  When operator credential replacement is required, prepare read-only enrichment for the existing
+  **needs-human** exit below:
+  ```bash
+  CI_AUTH_ARGS=(--run="$AUTH_RUN" --attempt="$AUTH_ATTEMPT")
+  ```
+  That exit passes this array to the marker alongside the captured head. The marker identifies the failed
+  step's reference and consuming repository; a 401 does not establish expiry. Unresolved ownership or
+  unavailable logs must stay unresolved; never guess a rotation target from the checkout destination.
+  The displayed repository-scoped rotation command prompts the operator for a replacement; the healer never executes it.
+
 - If a clean rebase already fixes it (the failure was purely BEHIND against the new main), no code change is
   needed — proceed to the gate.
 - If a real break remains (a flake, or a genuine interaction with what landed on `main`), repair **only** that, in
@@ -237,13 +250,13 @@ gh run view <run-id> --log-failed --repo {{REPO}} # the failing step's log (opti
     STRUCTURED signal, not prose: `reconcile-core.mjs`'s escalation refusal reads this exact outcome as "dispatch
     the review this PR was always owed, in parallel" — unlike `needs-human` below, it never durably blocks
     review dispatch.
-  - **`needs-human`** — the diff itself is genuinely wrong and needs a design call, or you are simply unsure
+  - **`needs-human`** — operator credential replacement is required, the diff itself is genuinely wrong and needs a design call, or you are simply unsure
     (never for the review-gate-only case above — that is ALWAYS `not-a-ci-break`, never this). Report and stop:
     ```bash
     node "{{WE_ROOT}}/scripts/operations/completion-cli.mjs" report --repo={{REPO}} --session={{SESSION_SLUG}} --status=done --outcome=escalated-needs-human
     node "{{WE_ROOT}}/scripts/conveyor/fix-procedure.mjs" fix-end {{PR_NUM}} --repo={{REPO}} --who={{SESSION_SLUG}}
     node "{{WE_ROOT}}/scripts/conveyor/ci-heal-escalation-mark.mjs" {{PR_NUM}} --repo={{REPO}} \
-      --head="$EXAMINED_HEAD" --outcome=needs-human --reason="<name the actual finding>"
+      --head="$EXAMINED_HEAD" --outcome=needs-human "${CI_AUTH_ARGS[@]}" --reason="<name the actual finding>"
     ```
     Then report `#{{ITEM_NUM}} → ci-heal escalated (needs human)`. The review gate (if any) still
     owes a human verdict; a human handles it via `/finish`.
