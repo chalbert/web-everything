@@ -16,3 +16,10 @@ Live case 2026-10-01: PR #3336 has sat review-status:awaiting-ci since 3:04 PM E
 1. **Executable** — TODO: a command that fails before this item lands and passes after.
 
 Hint: a card that loosens a refusal needs two Must lines — what happens on error (refuse), and every input kind besides source code (docs, config, data) that the loosening must still treat cautiously.
+
+## Root cause found (orchestrator, 2026-10-01 6:50 PM ET)
+
+Two readers disagree about a CANCELLED required check, so #3336 loops forever:
+- the reconcile planner reads the draft's required checks as GREEN (CANCELLED not counted as failing), so it plans `promote-draft` and never plans a CI heal;
+- the pre-promote re-check in we:scripts/operations/promote-draft-pr-dispatch.mjs reads the same head as RED ("1 of 4 check(s) concluded failing") and refuses with `stale-check-refused` every tick (fix-dispatch daemon log, about every 3 minutes since 3:04 PM ET).
+The health watch opened `draft-not-promoted` and `red-pr-unattended` episodes for #3336, but in shadow mode, so nothing acted. Fix: one shared classifier for a check conclusion, used by both readers; a CANCELLED required check means "re-run it" (or CI heal), never green and never a silent refusal. Test: replay #3336's rollup through both readers, assert they agree, and assert a re-run is dispatched.
