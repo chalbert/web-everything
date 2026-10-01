@@ -3,9 +3,10 @@ bornAs: xpsuizi
 kind: story
 size: 3
 parent: "4075"
-status: open
+status: resolved
 scope: ["we:scripts/lib/model-probation.mjs", "we:scripts/lib/__tests__/model-probation-trials.test.mjs", "we:scripts/conveyor/run-scorecard-store.mjs", "we:scripts/conveyor/__tests__/run-scorecard-store.test.mjs"]
 dateOpened: "2026-09-28"
+dateResolved: "2026-09-30"
 preparedDate: "2026-09-30"
 preparedAgainstSha: "74f3c74136d4605aedca5b439e1d05571cac736f"
 tags: []
@@ -32,6 +33,13 @@ Idempotency key (do not edit): approval-prevention-key:chalbert/web-everything#2
 - 2026-09-30 prepare pass. **Premise check:** not delivered. `git log` for `4439`/`4439` shows only the JIT renumber commit; `judgedTrialRow`, `judgePendingTrials` and the inline `judge` CLI still have every gap below on `origin/main` (74f3c7413).
 - **Citation drift corrected** (goal unchanged): the card's `:338/:344/:503/:595` refer to an older file. Today `we:scripts/lib/model-probation.mjs` is 531 lines: `trialOutcomeFromPr` is `:328`, `judgedTrialRow` `:346`, `judgePendingTrials` `:387`, the `judge` CLI `:503-521` with the inline `gh pr view` lookup at `:510` (no `:595` exists; guard 3 belongs at `:510`/`:395`).
 - **Scope corrected:** old `scope:` named `we:scripts/lib/__tests__/model-probation.test.mjs`, which holds only registry tests. The trial tests live in `we:scripts/lib/__tests__/model-probation-trials.test.mjs`. Guard 2's "under the append lock" also needs a small helper in `we:scripts/conveyor/run-scorecard-store.mjs` (its `appendScorecard` at `:331` already holds the lock), so that file and its test join the scope.
+
+- 2026-09-30 implementation: delivered all five guards in the declared scope. Label verdicts require a valid timestamp strictly after launch; merged launches await acceptance; direct unreviewed merges are uncounted; incomplete scope fails closed; omitted direct evaluators throw and sweeps use the real classifier. Extracted `runJudge`, separated failed/pending/skipped results, and made trial deduplication run on the store re-read inside a required append lock.
+- **Before proof:** added regression cases, then ran `npx vitest run we:scripts/lib/__tests__/model-probation-trials.test.mjs we:scripts/conveyor/__tests__/run-scorecard-store.test.mjs` (prefixes removed for execution) against unchanged production modules: **14 failed, 55 passed**. Failures covered stale/missing/equal timestamps, omitted evaluator, incomplete scope, unreviewed merge, failed/skipped accounting, missing `runJudge`, and missing locked helper.
+- **After proof:** the same focused command, including an additional real CLI regression, passes **70/70**. Eight concurrent child-process writers for one launch produce exactly one trial while preserving the earlier launch's row; repeat append returns null. CLI regression covers paginated fresh/stale label events, ignored non-current verdict labels, events-call failure, changed-file count mismatch, dry-run immutability, and idempotent real writes.
+- **Deterministic CLI before/after:** ran `node we:scripts/lib/model-probation.mjs judge --dry-run --store=<temporary-store>` with a stub `gh` first on PATH. Before (unreviewed MERGED PR 101 plus failing lookup 102): `(dry run) PR #101 codex/gpt-6-astra · ci-heal: landed` then `1 judged, 1 still awaiting a verdict`. After with those same two launches: `0 judged, 1 awaiting a verdict, 1 lookups failed`. After with only PR 101: `0 judged, 1 awaiting a verdict, 0 lookups failed`. Temporary store and stub were outside the repository to honor the no-helper-files instruction, and were deleted after the probe. No live GitHub calls or registry writes.
+
+- **Gates:** `npm run check:standards` passed (0 errors, 4547 warnings). `node we:scripts/verify-lane.mjs` ran its wider selected dependency set: 181 files, **7923 passed / 7 failed / 8 skipped**, recorded red. Six failures are real process-table probes in `we:scripts/operations/__tests__/restart-runner-io-real.test.mjs` and `we:scripts/operations/__tests__/clear-stuck-session-io-real.test.mjs`; direct `ps -p $$ -o pid=,ppid=,command=` fails with `Operation not permitted` in this sandbox. The seventh, in `we:scripts/lib/__tests__/antigravity-judge-spawn.test.mjs`, is transcript persistence to its default home directory. Re-running all three files with `ANTIGRAVITY_JUDGE_TRANSCRIPT_DIR` set to a writable temporary directory passes the entire Antigravity suite and leaves exactly the six process-table failures (**70 passed / 6 failed**). Temporary transcripts were removed. No gate/test was weakened, no out-of-scope code was changed, and the red lane marker remains honest; full green verification needs process-table access outside this sandbox.
 
 ## Design
 
@@ -69,6 +77,9 @@ All in `we:scripts/lib/__tests__/model-probation-trials.test.mjs` unless noted; 
 - `npm run check:standards` green.
 
 ## Follow-ups
+
+- Re-run `node we:scripts/verify-lane.mjs` with real process-table access and `ANTIGRAVITY_JUDGE_TRANSCRIPT_DIR` pointing at writable temporary storage; this sandbox cannot complete the six real-process assertions. Keep those assertions intact.
+- Test lesson: subprocess imports in these Vitest tests use a filesystem path resolved from `import.meta.dirname`; the test environment can transform `import.meta.url` into an HTTP URL that native Node cannot import.
 
 - Schedule the `judge` sweep (daemon tick) instead of manual runs.
 - Back-fill `reviewLabelAt` / re-verify trial rows written before this change.
