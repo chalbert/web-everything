@@ -7,7 +7,7 @@ import { planOpen } from '../open-pr.mjs';
 import { createPrLandRunner } from '../open-pr-io.mjs';
 import { prepareItemFromRef } from '../prepare-pr.mjs';
 
-const title = 'WE #4368: prepare item — Design/MVP/Test plan/Proof plan/Follow-ups';
+const title = 'WE #4368: prepare — [subject unavailable for 4368]';
 const request = (extra = {}) => ({ ref: 'lane/4368-prepare-item-mid-work-guard', base: 'main',
   sha: 'HEAD', bodyFile: '/tmp/body.md', mode: 'label-on-green', ...extra });
 
@@ -28,7 +28,7 @@ describe('prepare PR publication', () => {
     try {
       git(['init', '-q']);
       mkdirSync(join(cwd, 'backlog'));
-      for (const id of ['4368', '4341']) writeFileSync(join(cwd, `backlog/${id}-card.md`), 'original\n');
+      for (const id of ['4368', '4341']) writeFileSync(join(cwd, `backlog/${id}-card.md`), '# Original card title\n');
       const snapshot = (parents = [], message = 'prepare') => {
         git(['add', '.']);
         const tree = git(['write-tree']).trim();
@@ -51,8 +51,20 @@ describe('prepare PR publication', () => {
     const spawn = vi.fn(() => ({ status: 0, stdout: '{}' }));
     createPrLandRunner({ cwd, git, spawn })({ argv: planOpen(request()).argv });
     expect(spawn).toHaveBeenCalledOnce();
-    expect(spawn.mock.calls[0][1]).toContain(`--title=${title}`);
+    expect(spawn.mock.calls[0][1]).toContain('--title=WE #4368: prepare — Original card title');
     expect(spawn.mock.calls[0][1]).toContain(`--sha=${sha}`);
+  }));
+
+  it('refuses publication when the card content read fails', () => fixture(({ cwd, git, snapshot, main, edit }) => {
+    edit('backlog/4368-card.md');
+    snapshot([main]);
+    const spawn = vi.fn(() => ({ status: 0, stdout: '{}' }));
+    const metadataUnavailable = (args) => {
+      if (args[0] === 'show') throw new Error('card unavailable');
+      return git(args);
+    };
+    expect(createPrLandRunner({ cwd, git: metadataUnavailable, spawn })({ argv: planOpen(request()).argv })).toMatchObject({ outcome: 'refused', reason: expect.stringMatching(/specific change subject/) });
+    expect(spawn).not.toHaveBeenCalled();
   }));
 
   it.each(['backlog/4341-card.md', 'unrelated.mjs'])('refuses inherited %s before spawning pr-land', (path) => fixture(({ cwd, git, snapshot, main, edit }) => {

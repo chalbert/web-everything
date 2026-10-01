@@ -133,7 +133,7 @@ describe('runProbationBuild — the arc', () => {
     const r = await runProbationBuild(args(), io);
     expect(r).toMatchObject({ outcome: 'opened-pr', executor: 'codex' });
     expect(calls.find((c) => c[0] === 'worker')).toEqual(['worker', expect.stringMatching(/scripts\/codex-direct-task\.mjs$/), '--model=gpt-6-astra']);
-    expect(calls.find((c) => c[0] === 'commit')).toEqual(['commit', ['backlog-docs/probation.md', 'backlog/4291-probation-launcher.md'], expect.stringContaining('doc-fix build on probation (codex/gpt-6-astra)')]);
+    expect(calls.find((c) => c[0] === 'commit')).toEqual(['commit', ['backlog-docs/probation.md', 'backlog/4291-probation-launcher.md'], expect.stringContaining('WE #4291: doc-fix-build — ')]);
     expect(calls.find((c) => c[0] === 'openPr')).toEqual(['openPr', 'probation-launcher', '']);
     expect(calls.filter((c) => c[0] === 'scorecard')).toEqual([['scorecard', 'opened-pr', 'codex', null, null, '4291', 9001]]);
     expect(calls.some((c) => c[0] === 'discard')).toBe(false);
@@ -598,7 +598,7 @@ describe('standalone task types and workers', () => {
     const result = await runProbationBuild(args(codex, { taskType: 'bugfix', scope: 'we:scripts/example.mjs' }), io);
     expect(result).toMatchObject({ outcome, pr: outcome === 'opened-pr' ? 9001 : null });
     expect(rows[0].taskType).toBe('bugfix');
-    if (loc === 200) expect(calls.find((c) => c[0] === 'commit')[2]).toContain('bugfix build');
+    if (loc === 200) expect(calls.find((c) => c[0] === 'commit')[2]).toContain('bugfix-build — Probation launcher');
     else expect(calls.some((c) => c[0] === 'discard')).toBe(true);
   });
 
@@ -630,7 +630,7 @@ describe('standalone task types and workers', () => {
       const bodyFile = realIo().writePrBody(dir, { num: '1', worker: codex, diff: { loc: 200, files: 1 }, taskType: 'bugfix' });
       expect(readFileSync(bodyFile, 'utf8')).toContain('within the proven `bugfix` envelope');
       expect(openPrArgv({ num: '1', slug: 'fix', bodyFile, taskType: 'bugfix' })).toEqual(expect.arrayContaining([
-        '--title=WE #1: bugfix build — fix', '--requireVerified=true', '--parkLabel=review:pending',
+        '--title=WE #1: bugfix-build — fix', '--requireVerified=true', '--parkLabel=review:pending',
       ]));
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
@@ -856,6 +856,16 @@ describe('standalone prepare', () => {
     expect(await runProbationBuild(prepareArgs(), io)).toMatchObject({ outcome: 'opened-pr' });
     expect(calls.some(c => ['claim', 'resolve'].includes(c[0]))).toBe(false);
     expect(calls.some(c => c[0] === 'stamp')).toBe(true);
+  });
+  it('accepts a worker that corrects the card\'s own scope: (#4658) and reaches opened-pr', async () => {
+    const { io, calls } = prepareIo({ postWorkerRaw: prepared.replace('scope: ["we:backlog-docs/probation.md"]', 'scope: ["we:scripts/real-touch-set.mjs"]') });
+    expect(await runProbationBuild(prepareArgs(), io)).toMatchObject({ outcome: 'opened-pr' });
+    expect(calls.some(c => c[0] === 'openPr')).toBe(true);
+  });
+  it('still refuses a worker that edits a frontmatter key outside the prepare allow-list', async () => {
+    const { io, calls } = prepareIo({ postWorkerRaw: prepared.replace('---\nstatus: open', '---\nblockedBy: [1]\nstatus: open') });
+    expect((await runProbationBuild(prepareArgs(), io)).outcome).not.toBe('opened-pr');
+    expect(calls.some(c => c[0] === 'openPr')).toBe(false);
   });
   it.each([
     { numstat: `12\t0\t${path}\n1\t0\tscripts/code.mjs` },

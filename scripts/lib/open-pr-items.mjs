@@ -45,7 +45,7 @@ export function itemNumsFromPr(headRefName = '', title = '') {
     const slug = laneMatch[1].replace(/^batch-\d{4}-\d{2}-\d{2}/, '');
     for (const m of slug.matchAll(/(?:^|[-/])(\d{2,5})(?=$|[-/])/g)) nums.add(m[1]);
   }
-  for (const m of String(title).matchAll(/#(\d{2,5})\b/g)) nums.add(m[1]);
+  for (const m of String(title).replace(/\(from #\d+ review\)/g, '').matchAll(/#(\d{2,5})\b/g)) nums.add(m[1]);
   return [...nums].map((n) => n.padStart(3, '0'));
 }
 

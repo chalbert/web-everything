@@ -12,7 +12,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   attributeSpend, rollupSpend, rollupSpendDetailed, persistSpendHours, collectSpendRows, summarizeSpendRows, renderSpendReport,
-  readSpendRows, spendPaths, MAX_ATTRIBUTED_PER_RESPONSE,
+  readSpendRows, spendPaths, collectSpendReport,
 } from '../gh-spend.mjs';
 import { runGhSync, ghThrottleLogPath } from '../gh-throttle.mjs';
 
@@ -33,16 +33,16 @@ describe('rollupSpend — conservation (#4309)', () => {
     const [row] = rollupSpend(entries, { now: T0 + HOURS(1) });
     expect(row.bucketUsed).toBe(10);
     expect(conserve(row)).toBe(10);
-    expect(row.attributed).toBe(10); // the whole delta lands on the observed response (the documented over-attribution)
-    expect(row.estimated).toBe(0); // the daemon's 3-point estimate is scaled INTO the (empty) residual
-    expect(row.unattributed).toBe(0);
+    expect(row.attributed).toBe(0); // legacy shared-counter movement is never measured caller cost
+    expect(row.estimated).toBe(3); // estimate consumes the observed residual
+    expect(row.unattributed).toBe(7);
   });
 
   it('estimates are scaled DOWN to fit the residual when they exceed it', () => {
-    // delta 100: the closing response is capped at 50, leaving a 50-point residual for 30 × ~3-point daemon lists.
-    const entries = [shim(1, 100), ...Array.from({ length: 30 }, (_, i) => daemon(2 + i * 0.01)), shim(3, 200)];
+    // delta 100: an explicit 50-point response leaves 50 for 30 × 3-point estimates.
+    const entries = [shim(1, 100), ...Array.from({ length: 30 }, (_, i) => daemon(2 + i * 0.01)), shim(3, 200, { rl: [{ ...rl(200), cost: 50 }] })];
     const [row] = rollupSpend(entries, { now: T0 + HOURS(1) });
-    expect(row.attributed).toBe(MAX_ATTRIBUTED_PER_RESPONSE);
+    expect(row.attributed).toBe(50);
     expect(row.estimated).toBeCloseTo(50, 6);
     expect(row.unattributed).toBeCloseTo(0, 6);
     expect(conserve(row)).toBeCloseTo(100, 6);
@@ -52,9 +52,9 @@ describe('rollupSpend — conservation (#4309)', () => {
   it('what the estimates do not cover stays UNATTRIBUTED (bypass traffic)', () => {
     const entries = [shim(1, 100), daemon(2), daemon(2.5), shim(3, 180)];
     const [row] = rollupSpend(entries, { now: T0 + HOURS(1) });
-    expect(row.attributed).toBe(50);
+    expect(row.attributed).toBe(0);
     expect(row.estimated).toBe(6);
-    expect(row.unattributed).toBe(24);
+    expect(row.unattributed).toBe(74);
     expect(conserve(row)).toBe(80);
   });
 
@@ -74,7 +74,7 @@ describe('rollupSpend — conservation (#4309)', () => {
     const fresh = rollupSpend([shim(1, 900)], { now: T0 + HOURS(1) });
     expect(fresh[0].unknown).toBe(true); // 900 is NOT charged to that call
     const carried = rollupSpend([shim(1, 900)], { now: T0 + HOURS(1), baselines: { [`app|graphql|${RESET}`]: { used: 897, t: T0 - 60_000 } } });
-    expect(carried[0].attributed).toBe(3);
+    expect(carried[0]).toMatchObject({ bucketUsed: 3, attributed: 0, unattributed: 3, unknownRequests: 1 });
   });
 
   it('the running baseline carries across an hour boundary inside one pass', () => {
@@ -82,7 +82,7 @@ describe('rollupSpend — conservation (#4309)', () => {
     const rows = rollupSpend(entries, { now: T0 + HOURS(2) });
     expect(rows.map((r) => r.hour)).toEqual(['2026-09-28T10:00:00.000Z', '2026-09-28T11:00:00.000Z']);
     expect(rows[0].unknown).toBe(true);
-    expect(rows[1].attributed).toBe(4);
+    expect(rows[1]).toMatchObject({ bucketUsed: 4, attributed: 0, unattributed: 4 });
   });
 });
 
@@ -92,7 +92,7 @@ describe('rollupSpend — the three counts, never mixed', () => {
     const inner = { ...shim(2, 105), inv: 'IN1', outer: 'OUT1', caller: 'node' };
     const rows = rollupSpend([shim(1, 100), inner, outer], { now: T0 + HOURS(1) });
     expect(rows[0].requests).toBe(2);
-    expect(rows[0].byCaller['ci-heal-mark.mjs']).toMatchObject({ requests: 1, attributed: 5, estimated: 0 });
+    expect(rows[0].byCaller['ci-heal-mark.mjs']).toMatchObject({ requests: 1, attributed: 0, estimated: 0, unknown: 1 });
     expect(rows[0].estimated).toBe(0); // the outer record is covered by its inner measurement — never estimated on top
   });
 
@@ -107,7 +107,7 @@ describe('rollupSpend — the three counts, never mixed', () => {
   });
 
   it('learns a per-op average from measured calls and uses it for unmeasured ones', () => {
-    const entries = [shim(1, 100), shim(2, 102), shim(3, 104), daemon(3.5, 'pr view'), shim(4, 110)];
+    const entries = [shim(1, 100), shim(2, 102, { rl: [{ ...rl(102), cost: 2 }] }), shim(3, 104, { rl: [{ ...rl(104), cost: 2 }] }), daemon(3.5, 'pr view'), shim(4, 110)];
     const { invocations } = attributeSpend(entries, { now: T0 + HOURS(1) });
     const d = invocations.find((i) => i.caller === 'review-daemon.mjs');
     // measured `pr view`s at 2 and 2 points (the first was a bare baseline); the 6-point gap is NOT learned from —
@@ -116,7 +116,7 @@ describe('rollupSpend — the three counts, never mixed', () => {
   });
 
   it('a response on another bucket lands on THAT resource\'s row', () => {
-    const create = { ...shim(2, 101), op: 'pr create', rl: [rl(101), rl(7, 'core')] };
+    const create = { ...shim(2, 101), op: 'pr create', rl: [{ ...rl(101), cost: 1 }, { ...rl(7, 'core'), cost: 2 }] };
     const rows = rollupSpend([shim(1, 100), { ...shim(1, 5), rl: [rl(5, 'core')] }, create], { now: T0 + HOURS(1) });
     const core = rows.find((r) => r.resource === 'core');
     expect(core.attributed).toBe(2);
@@ -146,7 +146,7 @@ describe('persistSpendHours — hourly persistence, idempotent and cursor-safe',
     expect(later.rowsWritten).toBe(1);
     const rows = readSpendRows(hourlyPath);
     expect(rows.map((r) => r.hour)).toEqual(['2026-09-28T10:00:00.000Z', '2026-09-28T11:00:00.000Z']);
-    expect(rows[1].attributed).toBe(7); // baseline 103 carried across the persistence boundary via the cursor: 107-103 + 110-107
+    expect(rows[1].bucketUsed).toBe(7); // baseline 103 carried across the persistence boundary via the cursor: 107-103 + 110-107
   });
 
   it('a crash between the append and the cursor write re-appends nothing (rows are keyed hour+identity+resource)', () => {
@@ -173,20 +173,20 @@ describe('persistSpendHours — hourly persistence, idempotent and cursor-safe',
     persistSpendHours({ logPath, now: T0 + 90 * 60_000 });
     const rows = collectSpendRows({ logPath, hours: 24, now: T0 + 90 * 60_000 });
     expect(rows).toHaveLength(2);
-    expect(rows[1].attributed).toBe(5); // the live hour, diffed against the cursor's carried baseline
+    expect(rows[1]).toMatchObject({ bucketUsed: 5, attributed: 0 }); // the live hour, diffed against the cursor's carried baseline
     const sections = summarizeSpendRows(rows, { by: 'caller' });
     const text = renderSpendReport(sections, { hours: 24, by: 'caller' });
     // 10:10 is a bare baseline; 10:20 closes a 10-point gap (under the cap, so the daemon's estimate scales to 0);
     // 11:10 closes a 5-point gap against the baseline carried in the cursor.
-    expect(text).toMatch(/bucket used 15 = attributed 15 \+ estimated 0 \+ unattributed 0/);
-    expect(text).toMatch(/1 invocations with UNKNOWN points/);
+    expect(text).toMatch(/bucket used 15 = attributed 0 \+ estimated 3 \+ unattributed 12/);
+    expect(text).toMatch(/3 invocations with UNKNOWN points/);
     // an all-unknown caller shows `—`, never a zero that reads as "cost nothing"
     const unknownOnly = renderSpendReport(summarizeSpendRows(rollupSpend([daemon(5)], { now: T0 + HOURS(1) }), { by: 'caller' }), { hours: 1, by: 'caller' });
     expect(unknownOnly).toMatch(/review-daemon\.mjs\s+—\s+—\s+1\s+1\s+0/);
     expect(unknownOnly).toMatch(/bucket used: unknown/);
     expect(text).toMatch(/attributed\*\s+estimated\s+unknown-inv\s+invocations\s+responses/);
     expect(text).toMatch(/review-daemon\.mjs/);
-    expect(text).toMatch(/Gate on total App GraphQL bucketUsed/);
+    expect(text).toMatch(/not a complete installation budget/);
     expect(JSON.parse(readFileSync(spendPaths(logPath).cursorPath, 'utf8')).offset).toBeGreaterThan(0);
   });
 
@@ -285,7 +285,7 @@ describe('rollupSpend over real runGhSync log lines (#4375)', () => {
   const trace = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'gh-debug', 'pr-view-success.debug.stderr'), 'utf8');
   const withUsed = (used) => Buffer.from(trace.replace('X-Ratelimit-Used: 36', `X-Ratelimit-Used: ${used}`));
 
-  it('two successful daemon calls → the second is ATTRIBUTED its real delta, nothing UNKNOWN past the baseline', () => {
+  it('two legacy daemon calls expose counter movement with UNKNOWN caller costs', () => {
     const lockRoot = mkdtempSync(join(tmpdir(), 'gh-spend-sync-'));
     const spawn = vi.fn()
       .mockReturnValueOnce({ status: 0, stdout: Buffer.from('[]'), stderr: withUsed(36), output: [], error: null })
@@ -295,7 +295,98 @@ describe('rollupSpend over real runGhSync log lines (#4375)', () => {
     runGhSync(['pr', 'view', '1'], { stdio: 'pipe', throttle });
     const entries = readFileSync(ghThrottleLogPath(lockRoot), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
     const [row] = rollupSpend(entries, { now: Date.now() + HOURS(1) });
-    expect(row).toMatchObject({ identity: 'app', resource: 'graphql', requests: 2, responses: 2, bucketUsed: 4, attributed: 4 });
-    expect(row.byCaller['reconcile-fix-dispatch-daemon.mjs']).toMatchObject({ requests: 2, attributed: 4, unknown: 1 }); // the first is the window baseline
+    expect(row).toMatchObject({ identity: 'app', resource: 'graphql', requests: 2, responses: 2, bucketUsed: 4, attributed: 0, unattributed: 4 });
+    expect(row.byCaller['reconcile-fix-dispatch-daemon.mjs']).toMatchObject({ requests: 2, attributed: 0, unknown: 2 }); // the first is the window baseline
+  });
+});
+
+describe('installation and legacy evidence (#4652)', () => {
+  it('keeps two installations separate through mixed nested wrappers and deduplicates echoes', () => {
+    const one = shim(2, 110, { id: 'app-installation-1', inv: 'inner', outer: 'outer', rl: [{ ...rl(110), cost: 1 }] });
+    const two = shim(2, 900, { id: 'app-installation-2', inv: 'outer', rl: [{ ...rl(900), cost: 3 }] });
+    const echo = { ...one, inv: 'echo' };
+    const rows = rollupSpend([one, two, echo]);
+    expect(rows.map((r) => [r.identity, r.attributed, r.responses])).toEqual([
+      ['app-installation-1', 1, 1], ['app-installation-2', 3, 1],
+    ]);
+    expect(rows.reduce((sum, r) => sum + r.requests, 0)).toBe(1);
+  });
+
+  it('does not credit interleaved invisible traffic to legacy callers or learn its cost', () => {
+    const result = rollupSpendDetailed([shim(1, 100), shim(2, 140)]);
+    expect(result.rows[0]).toMatchObject({ bucketUsed: 40, attributed: 0, unattributed: 40, unknownRequests: 2 });
+    expect(result.opCost).toEqual({});
+  });
+
+  it('does not sort stale counters into apparent new spending or regress a carried baseline', () => {
+    const result = rollupSpendDetailed([shim(1, 110), shim(2, 90), shim(3, 112)], {
+      baselines: { [`app|graphql|${RESET}`]: { used: 100, t: T0 } },
+    });
+    expect(result.rows[0].bucketUsed).toBe(12);
+    expect(result.baselines[`app|graphql|${RESET}`].used).toBe(112);
+    expect(result.rows[0].unknownRequests).toBe(3);
+  });
+});
+
+describe('bounded interval replay and coverage (#4654)', () => {
+  function log(entries) {
+    const logPath = join(mkdtempSync(join(tmpdir(), 'spend-interval-')), 'calls.jsonl');
+    writeFileSync(logPath, entries.map((e) => JSON.stringify(e)).join('\n') + '\n');
+    return logPath;
+  }
+  it('distinguishes clock hour from trailing duration and excludes the end and future records', () => {
+    // Same shape as 17:48–18:48Z, using the suite clock at 10:00Z.
+    const logPath = log([shim(40, 100), shim(49, 103), shim(65, 107), shim(107, 110), shim(108, 120), shim(120, 150)]);
+    const now = T0 + 108 * 60_000;
+    const clock = collectSpendReport({ logPath, hours: 1, now });
+    const trailing = collectSpendReport({ logPath, start: at(48), end: at(108) });
+    expect(clock.interval).toEqual({ start: at(60), end: at(108), semantics: 'UTC-clock-hours-half-open' });
+    expect(trailing.interval).toEqual({ start: at(48), end: at(108), semantics: 'explicit-half-open' });
+    expect(clock.rows.reduce((s, r) => s + r.requests, 0)).toBe(2);
+    expect(trailing.rows.reduce((s, r) => s + r.requests, 0)).toBe(3);
+    expect(trailing.rows.reduce((s, r) => s + r.bucketUsed, 0)).toBe(10);
+    const full = rollupSpend([shim(49, 103), shim(65, 107), shim(107, 110)], {
+      baselines: attributeSpend([shim(40, 100)]).baselines,
+    });
+    expect(trailing.rows.map(({ provenance, ...row }) => row)).toEqual(full);
+    expect(trailing.coverage.baselines[`app|graphql|${RESET}`].used).toBe(100);
+    expect(trailing.coverage.captureComplete).toBe(false);
+  });
+
+  it('exposes skipped, invalid and unread bytes instead of claiming a complete zero', () => {
+    const logPath = log([shim(1, 100), shim(2, 100)]);
+    appendFileSync(logPath, 'invalid\n{"partial":');
+    const report = collectSpendReport({ logPath, start: at(0), end: at(10), maxBytes: 100 });
+    expect(report.coverage).toMatchObject({ readComplete: false, captureComplete: false, total: 'unknown', invalidLines: 1 });
+    expect(report.coverage.skippedBytes).toBeGreaterThan(0);
+    expect(report.coverage.unreadBytes).toBeGreaterThan(0);
+    const text = renderSpendReport([], { hours: 1, by: 'caller', ...report });
+    expect(text).toContain(logPath);
+    expect(text).toContain(at(10));
+    expect(text).toContain('INCOMPLETE');
+    expect(text).toContain('spend unknown');
+  });
+
+  it('replays late appends over persisted overlap and marks old row cost as unknown', () => {
+    const logPath = log([shim(1, 100), shim(2, 101)]);
+    persistSpendHours({ logPath, now: T0 + HOURS(2) });
+    appendFileSync(logPath, JSON.stringify(shim(3, 105)) + '\n');
+    const report = collectSpendReport({ logPath, hours: 3, now: T0 + HOURS(2) });
+    expect(report.rows[0]).toMatchObject({ bucketUsed: 5, requests: 3, provenance: 'live' });
+    expect(report.coverage.persistedLiveOverlap).toBe(1);
+    const legacy = { ...report.rows[0], accountingVersion: undefined, attributed: 5 };
+    writeFileSync(spendPaths(logPath).hourlyPath, JSON.stringify(legacy) + '\n');
+    writeFileSync(logPath, '');
+    const old = collectSpendReport({ logPath, hours: 3, now: T0 + HOURS(2) });
+    expect(old.rows[0]).toMatchObject({ identity: 'app', provenance: 'persisted-legacy', attributed: 0, unattributed: 5, unknownRequests: 3 });
+  });
+
+  it('keeps reset windows independent and observed zero distinct from missing baselines', () => {
+    const logPath = log([shim(1, 100), shim(2, 100), shim(3, 5, { rl: [rl(5, 'graphql', RESET + 3600)] })]);
+    const report = collectSpendReport({ logPath, start: at(1.5), end: at(4) });
+    expect(report.rows[0]).toMatchObject({ bucketUsed: 0, unknown: false, unknownRequests: 2 });
+    expect(Object.keys(report.coverage.resetWindows)).toHaveLength(2);
+    const missing = collectSpendReport({ logPath, start: at(3), end: at(4) });
+    expect(missing.rows[0]).toMatchObject({ bucketUsed: null, unknown: true });
   });
 });

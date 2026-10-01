@@ -246,6 +246,8 @@ export function findFiledPreventionCard({ title }, { root = SCAFFOLD_ROOT, head 
     return { filed: [], uncovered: owed };
   }
   const heading = `# ${title}\n`;
+  const source = /\(from (\S+#\d+) review\)$/.exec(title)?.[1];
+  const legacyHeading = source ? `# File the prevention guard(s) owed by ${source}'s independent review` : null;
   const cards = [];
   for (const name of names) {
     let text;
@@ -254,10 +256,12 @@ export function findFiledPreventionCard({ title }, { root = SCAFFOLD_ROOT, head 
     } catch {
       continue;
     }
-    if (!(text.startsWith(heading) || text.includes(`\n${heading}`))) continue;
+    const actualHeading = /^# .+$/m.exec(text)?.[0];
+    if (actualHeading !== heading.trimEnd() && !(source && (
+      actualHeading === legacyHeading || actualHeading?.endsWith(` (from ${source} review)`)))) continue;
     if (head && !text.includes(preventionHeadMarker(head))) continue;
     // A closed card tracks nothing any more — a guard it named is owed again.
-    if (/^status:\s*"?(?:resolved|closed|done|wontfix|superseded)\b/m.test(text.split(heading)[0])) continue;
+    if (/^status:\s*"?(?:resolved|closed|done|wontfix|superseded)\b/m.test(text.split(actualHeading)[0])) continue;
     cards.push({ num: name.replace(/-.*$/, '').replace(/\.md$/, ''), path: `backlog/${name}`, text });
   }
   const covers = (card, f) => cardCoversGuard(card.text, f);

@@ -22,6 +22,7 @@
  *   node scripts/operations/build-dispatch-hold-route-land.mjs --num=<n> --route=<already-done|out-of-scope>
  *     [--commit=<sha>] [--reason=<text>] [--json]
  */
+import { machinePrTitle } from './machine-pr-title.mjs';
 import { execFileSync } from 'node:child_process';
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -289,9 +290,14 @@ export function landOne({ num, route, commit = null, reason = null }, {
       // Best-effort: the bornAs lookup is a BONUS second candidate id, never a reason to fail the whole check
       // if the card can't be read for some unrelated reason — the primary `#<num>` match still applies.
       let bornAs = null;
+      let deliveredCard = null;
       try {
         const cardFileForBornAs = findCardFileName(listCardNames(lane), num);
-        if (cardFileForBornAs) bornAs = extractBornAs(readFile(join(lane, 'backlog', cardFileForBornAs), 'utf8'));
+        if (cardFileForBornAs) {
+          const raw = readFile(join(lane, 'backlog', cardFileForBornAs), 'utf8');
+          bornAs = extractBornAs(raw);
+          deliveredCard = { title: /^#\s+(.+)$/m.exec(raw)?.[1], raw };
+        }
       } catch { /* best-effort — fall through with bornAs: null */ }
       if (!commitReferencesItem(commitMessage, [num, bornAs])) {
         throw new Error(`landOne: cited commit ${commit} is on main but its own message never references #${num}${bornAs ? ` or #${bornAs}` : ''} — refusing to auto-resolve on an unrelated-but-real citation`);
@@ -307,14 +313,14 @@ export function landOne({ num, route, commit = null, reason = null }, {
         throw new Error(`landOne: cited commit ${commit} mentions #${num} but its subject does not deliver it (a related, follow-up or partial commit) — refusing to auto-resolve`);
       }
       runFn('node', [join(lane, 'scripts', 'backlog.mjs'), 'resolve', String(num), `--graduated-to=${commit}`], lane);
-      msg = `WE #${num}: auto-resolve — build-dispatch hold cited commit ${commit} as already landing the spec\n\nRouted by #4465's hold router; no agent turn.\n`;
+      msg = `${machinePrTitle({ item: num, kind: 'auto-resolve', card: deliveredCard, subject: commitMessage.split('\n')[0].replace(/^[^:]+: /, '') })}\n\nRouted by #4465's hold router; no agent turn.\n`;
     } else {
       const cardFile = findCardFileName(listCardNames(lane), num);
       if (!cardFile) throw new Error(`landOne: no backlog card found for #${num}`);
       const cardPath = join(lane, 'backlog', cardFile);
       const text = readFile(cardPath, 'utf8');
       writeFile(cardPath, clearScopeAndAppendFinding(text, { num, reason }));
-      msg = `WE #${num}: auto-route to prepare — build-dispatch hold found the spec out of scope / superseded\n\nRouted by #4465's hold router; scope cleared for auto-prepare, finding attached to the card.\n`;
+      msg = `${machinePrTitle({ item: num, kind: 'auto-route', card: { title: /^#\s+(.+)$/m.exec(text)?.[1] }, subject: reason || cardFile.replace(/-/g, ' ') })}\n\nRouted by #4465's hold router; scope cleared for auto-prepare, finding attached to the card.\n`;
     }
     runFn('git', ['add', '--', 'backlog'], lane);
     runFn('git', ['commit', '-m', msg], lane);

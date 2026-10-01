@@ -1202,13 +1202,32 @@ export function primaryExhaustedResource(text) {
   return /GraphQL:/i.test(s) ? 'graphql' : 'core';
 }
 
-/** A stable, NON-SECRET label for the auth identity whose bucket a call spends: `app` for a GitHub App
- *  installation token (`ghs_…`), a short hash for any other explicit token, `default` for gh's own stored login. */
+/** A non-secret bucket label: bound installation ID, Actions repository, unknown installation (`app`),
+ *  a hash for personal tokens, or `default` for gh's own stored login. */
 export function ghAuthIdentity(env = process.env) {
   const token = String((env && (env.GH_TOKEN || env.GITHUB_TOKEN)) || '');
   if (!token) return 'default';
-  if (token.startsWith('ghs_')) return 'app';
+  if (token.startsWith('ghs_')) {
+    const hash = createHash('sha256').update(token).digest('hex');
+    if (env.WE_GH_AUTH_TOKEN_HASH === hash && /^\d+$/.test(env.WE_GH_AUTH_INSTALLATION || '')) {
+      return `app-installation-${env.WE_GH_AUTH_INSTALLATION}`;
+    }
+    if (env.GITHUB_ACTIONS === 'true' && token === env.GITHUB_TOKEN && /^[\w.-]+\/[\w.-]+$/.test(env.GITHUB_REPOSITORY || '')) {
+      return `actions-${env.GITHUB_REPOSITORY}`;
+    }
+    return 'app'; // legacy/unknown installation, never inferred from configured App credentials
+  }
   return `t-${createHash('sha256').update(token).digest('hex').slice(0, 12)}`;
+}
+
+/** Allowlisted, non-secret provenance for the effective child credential. */
+export function ghAuthProvenance(env = process.env) {
+  const id = ghAuthIdentity(env);
+  if (id.startsWith('app-installation-')) return { kind: 'installation', installationId: id.slice(17),
+    source: ['mint', 'cache'].includes(env.WE_GH_AUTH_SOURCE) ? env.WE_GH_AUTH_SOURCE : 'inherited' };
+  if (id.startsWith('actions-')) return { kind: 'actions', repository: id.slice(8) };
+  if (id === 'app') return { kind: 'installation', installationId: null, source: 'unknown' };
+  return { kind: id === 'default' ? 'stored-login' : 'personal-token' };
 }
 
 /** Env keys that, per `gh`'s own documented precedence, make `gh auth token` echo back an EXPLICIT env token
@@ -1499,7 +1518,7 @@ export function runGhSync(args, opts = {}) {
     const captured = lastCapture;
     if (captured) recordGhHeadroom(lockRoot, identity, rateLimitRecords(captured.responses));
     recordGhCallLogEntry(logPath, {
-      op: opLabel, attempt, points, outcome: 'call', ok: !failure, caller, priority: ghCallerPriority(caller, args), w: isWrite, resource, id: identity, inv,
+      op: opLabel, attempt, points, outcome: 'call', ok: !failure, caller, priority: ghCallerPriority(caller, args), w: isWrite, resource, id: identity, auth: ghAuthProvenance(execOpts.env || env), inv,
       ...(captured ? { rl: rateLimitRecords(captured.responses) } : {}),
     });
     if (!failure) {
@@ -1629,7 +1648,7 @@ export function runGhCliPassthrough(argv, { throttle = {}, spawn = spawnSync, bi
   const personalRouteEnabled = throttle.personalRoute != null ? !!throttle.personalRoute : resolvePersonalRouteEnabled(env);
   const originalIdentity = ghAuthIdentity(env);
   const isRead = classifyGhRead(argv);
-  const eligibleForPersonalRoute = personalRouteEnabled && isRead && (originalIdentity === 'app' || originalIdentity === 'default');
+  const eligibleForPersonalRoute = personalRouteEnabled && isRead && (originalIdentity === 'app' || originalIdentity.startsWith('app-installation-') || originalIdentity === 'default');
   let callEnv = env;
   let usedPersonalToken = false;
   if (eligibleForPersonalRoute) {
@@ -1722,7 +1741,7 @@ export function runGhCliPassthrough(argv, { throttle = {}, spawn = spawnSync, bi
     // known exhausted (review-2026-09-28 finding).
     if (failed && usedPersonalToken && !appFallbackTried && looksLikeGhAuthFailure(stderrText)) {
       appFallbackTried = true;
-      recordGhCallLogEntry(logPath, { op: opLabel, attempt, points: 0, outcome: 'personal_token_rejected', caller, w: isWrite, resource, id: identity, inv, ...(outer ? { outer } : {}) });
+      recordGhCallLogEntry(logPath, { op: opLabel, attempt, points: 0, outcome: 'personal_token_rejected', caller, w: isWrite, resource, id: identity, auth: ghAuthProvenance(callEnv), inv, ...(outer ? { outer } : {}) });
       callEnv = env;
       usedPersonalToken = false;
       identity = ghAuthIdentity(callEnv);
@@ -1735,7 +1754,7 @@ export function runGhCliPassthrough(argv, { throttle = {}, spawn = spawnSync, bi
     }
 
     recordGhCallLogEntry(logPath, {
-      op: opLabel, attempt, points, outcome: 'call', ok: !failed && !stdoutOverflow, caller, priority: ghCallerPriority(caller, argv), w: isWrite, resource, id: identity, inv,
+      op: opLabel, attempt, points, outcome: 'call', ok: !failed && !stdoutOverflow, caller, priority: ghCallerPriority(caller, argv), w: isWrite, resource, id: identity, auth: ghAuthProvenance(callEnv), inv,
       ...(outer ? { outer } : {}), ...(stripped ? { rl: rateLimitRecords(stripped.responses) } : {}),
     });
     // The call ran and spent points, so it is logged above before the overflow is raised.

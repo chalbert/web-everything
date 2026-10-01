@@ -381,7 +381,7 @@ export function runReviewTick({
     const agents = dispatchedThisTick.has(Number(c.prNumber)) ? undefined : (rawAgents ?? undefined);
     try {
       tagStatus({
-        pr: c.prNumber, repo, agents, currentLabels: labelsByPr.get(Number(c.prNumber)),
+        pr: c.prNumber, repo, agents, prState: (rawPrs ?? []).find(p => Number(p.number) === Number(c.prNumber)), currentLabels: labelsByPr.get(Number(c.prNumber)),
         isDraft: isDraftByPr.get(Number(c.prNumber)), mergeConflicted: mergeConflictedByPr.get(Number(c.prNumber)),
       });
     }
