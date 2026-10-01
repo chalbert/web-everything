@@ -82,6 +82,14 @@ describe('check-standards.mjs — per-file scanners use scopedReaddir instead of
   });
 });
 
+describe('check-standards.mjs — 6f-ii-e blank-line citation scan is scoped (#4454)', () => {
+  it('6f-ii-e scans through scopedReaddir', () => {
+    const block = between(src, '── 6f-ii-e. BLANK-LINE CITATION', '── 6f-iii. PROVENANCE gate');
+    const scanBlank = between(block, 'const scanBlank = (dir, exts) => {', "scanBlank('backlog/'");
+    expect(scanBlank).toContain('scopedReaddir(dir, exts)');
+  });
+});
+
 describe('check-standards.mjs — the default no-flag run is untouched (#4168)', () => {
   it('SCOPE_TO_FILES is false whenever --local is absent, exactly like LOCAL_MODE', () => {
     // SCOPE_TO_FILES is defined as `LOCAL_MODE && !!LOCAL_FILES` — with no `--local` flag LOCAL_MODE is
