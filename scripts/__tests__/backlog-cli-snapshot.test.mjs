@@ -350,6 +350,38 @@ describe('backlog.mjs CLI — overlap-yield-config (#4308)', () => {
     expect(readFileSync(configPath(), 'utf8')).toBe(before);
   });
 
+  // #4417 item 6 — only the literal strings true/false are accepted; everything else is a usage error.
+  it('--set-enabled accepts only literal true/false — yes/1/TRUE are refused, file untouched', () => {
+    const before = readFileSync(configPath(), 'utf8');
+    for (const bad of ['yes', '1', 'TRUE']) {
+      expect(run(['overlap-yield-config', `--set-enabled=${bad}`]).code, `--set-enabled=${bad}`).toBe(1);
+    }
+    expect(readFileSync(configPath(), 'utf8')).toBe(before);
+  });
+
+  it('a negative or non-finite --set-window is refused, file untouched', () => {
+    const before = readFileSync(configPath(), 'utf8');
+    expect(run(['overlap-yield-config', '--set-window=-5']).code).toBe(1);
+    expect(run(['overlap-yield-config', '--set-window=Infinity']).code).toBe(1);
+    expect(readFileSync(configPath(), 'utf8')).toBe(before);
+  });
+
+  // #4417 item 2 — the primary-checkout lane-guard refusal. A copy of scripts/ under a `webeverything` dir
+  // (a PRIMARY_REPOS name) resolves as the shared primary checkout.
+  it('refuses to mutate the config from a primary checkout (lane-guard), file untouched', () => {
+    const primary = join(clone, 'ws', 'webeverything');
+    cpSync(WE_SCRIPTS_DIR, join(primary, 'scripts'), { recursive: true });
+    const cfg = join(primary, 'scripts', 'drain-overlap-yield-config.json');
+    const before = readFileSync(cfg, 'utf8');
+    let code = 0; let out = '';
+    try {
+      out = execFileSync('node', [join(primary, 'scripts', 'backlog.mjs'), 'overlap-yield-config', '--set-window=7', '--json'], { cwd: primary, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: childEnv() });
+    } catch (e) { code = e.status; out = `${e.stdout || ''}${e.stderr || ''}`; }
+    expect(code).toBe(1);
+    expect(out).toContain('BLOCKED');
+    expect(readFileSync(cfg, 'utf8')).toBe(before);
+  });
+
 });
 
 // #2747 — the deliverable is that the REAL CLI stamps the OPERATOR's calendar day, not the runtime's UTC

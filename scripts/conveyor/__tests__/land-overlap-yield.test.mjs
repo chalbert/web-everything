@@ -6,6 +6,7 @@ import {
   overlapYieldWaits, outranksForLand, overlapRowKey, windowMsAtLabelTime, validateOverlapYieldConfig,
   resolveOverlapYieldSettings, parseOverlapYieldOverrides, DEFAULT_OVERLAP_YIELD_CONFIG,
   isExemptItem, computeOverlapContext, writeOverlapYieldConfig,
+  isShallowRepository, gitHistoryConfigAtReader, readyToMergeLabelTimeMs,
 } from '../land-overlap-yield.mjs';
 
 const T0 = Date.parse('2026-09-28T12:00:00Z');
@@ -245,6 +246,17 @@ describe('isExemptItem — rule 5 (2026-09-29 review coverage finding)', () => {
     expect(isExemptItem(999, { backlogDir: '/x', readdir: () => [], readFile: () => { throw new Error('nope'); } })).toBe(false);
     expect(isExemptItem(999, { backlogDir: '/x', readdir: () => { throw new Error('ENOENT'); }, readFile: () => '' })).toBe(false);
   });
+  // #4417 item 8 — the card's wording asked for a bare `<id>.md`; the real convention is `<id>-<slug>.md` (every
+  // card file in backlog/ is number, hyphen, slug), so a hyphen-less file is deliberately NOT matched.
+  it('matches only the `<id>-` prefix: a hyphen-less `<id>.md` and a longer-id collision are NOT exempt', () => {
+    const exemptText = '---\npriority: high\n---\n';
+    const bare = fakeIo(['100.md'], { '100.md': exemptText });
+    expect(isExemptItem(100, { backlogDir: '/x', ...bare })).toBe(false);
+    const collide = fakeIo(['1000-a.md'], { '1000-a.md': exemptText });
+    expect(isExemptItem(100, { backlogDir: '/x', ...collide })).toBe(false);
+    const real = fakeIo(['1000-a.md', '100-a.md'], { '1000-a.md': '---\nkind: story\n---\n', '100-a.md': exemptText });
+    expect(isExemptItem(100, { backlogDir: '/x', ...real })).toBe(true);
+  });
   it('a null itemId is NOT exempt (no IO at all)', () => {
     expect(isExemptItem(null, { backlogDir: '/x', readdir: () => { throw new Error('must not be called'); } })).toBe(false);
   });
@@ -335,5 +347,97 @@ describe('writeOverlapYieldConfig — degrades to an unlocked write, honestly re
     const result = writeOverlapYieldConfig({ path, patch: { windowMinutes: -5 } });
     expect(result.ok).toBe(false);
     expect(result.errors.length).toBeGreaterThan(0);
+  });
+});
+
+// #4417 items 3/4/5 — the impure git/gh shells, driven through a mocked `exec` (no real git/gh).
+describe('isShallowRepository — each answer maps to a distinct value', () => {
+  it('true → true, false → false, garbage → null, throw → null', () => {
+    expect(isShallowRepository({ exec: () => 'true\n' })).toBe(true);
+    expect(isShallowRepository({ exec: () => 'false\n' })).toBe(false);
+    expect(isShallowRepository({ exec: () => 'maybe' })).toBeNull();
+    expect(isShallowRepository({ exec: () => { throw new Error('not a repo'); } })).toBeNull();
+  });
+});
+
+describe('gitHistoryConfigAtReader — fallbacks and memoization', () => {
+  /** An exec fake dispatching on the git subcommand; counts every call. */
+  const fakeGit = ({ shallow = 'false', revList = 'abc123', show = '{"enabled":true,"windowMinutes":20}' } = {}) => {
+    const calls = [];
+    const exec = (_cmd, args) => {
+      calls.push(args[0]);
+      if (args[0] === 'rev-parse') return shallow;
+      if (args[0] === 'rev-list') { if (revList instanceof Error) throw revList; return revList; }
+      if (args[0] === 'show') { if (show instanceof Error) throw show; return show; }
+      throw new Error(`unexpected ${args[0]}`);
+    };
+    return { exec, calls };
+  };
+
+  it('a shallow clone is untrusted (and never reads history)', () => {
+    const { exec, calls } = fakeGit({ shallow: 'true' });
+    expect(gitHistoryConfigAtReader({ exec })(T0)).toEqual({ trusted: false });
+    expect(calls).toEqual(['rev-parse']);
+  });
+  it('an unreadable shallow answer is untrusted too', () => {
+    expect(gitHistoryConfigAtReader({ exec: fakeGit({ shallow: 'garbage' }).exec })(T0)).toEqual({ trusted: false });
+  });
+  it('no commit at/before readyAt → trusted, windowMinutes null', () => {
+    expect(gitHistoryConfigAtReader({ exec: fakeGit({ revList: '' }).exec })(T0)).toEqual({ trusted: true, windowMinutes: null });
+  });
+  it('a good commit → trusted with that commit\'s window', () => {
+    expect(gitHistoryConfigAtReader({ exec: fakeGit().exec })(T0)).toEqual({ trusted: true, windowMinutes: 20 });
+  });
+  it('an invalid config at that commit → trusted, windowMinutes null', () => {
+    expect(gitHistoryConfigAtReader({ exec: fakeGit({ show: '{"enabled":"yes"}' }).exec })(T0)).toEqual({ trusted: true, windowMinutes: null });
+  });
+  it('`git show` throwing → trusted, windowMinutes null (distinct from rev-list throwing → untrusted)', () => {
+    expect(gitHistoryConfigAtReader({ exec: fakeGit({ show: new Error('bad path') }).exec })(T0)).toEqual({ trusted: true, windowMinutes: null });
+    expect(gitHistoryConfigAtReader({ exec: fakeGit({ revList: new Error('bad ref') }).exec })(T0)).toEqual({ trusted: false });
+  });
+  it('memoizes per exact ms — a repeat call does not re-invoke exec; a different ms does', () => {
+    const { exec, calls } = fakeGit();
+    const configAt = gitHistoryConfigAtReader({ exec });
+    configAt(T0); configAt(T0);
+    expect(calls.filter((c) => c === 'rev-list')).toHaveLength(1);
+    configAt(T0 + 1);
+    expect(calls.filter((c) => c === 'rev-list')).toHaveLength(2);
+  });
+});
+
+describe('readyToMergeLabelTimeMs — event parsing and the by-sha cache', () => {
+  let dir;
+  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'ready-at-')); });
+  afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
+  const events = (...list) => JSON.stringify(list.map(([name, at, ev = 'labeled']) => ({ event: ev, label: { name }, created_at: at })));
+  const counting = (out) => { let n = 0; return { exec: () => { n++; if (out instanceof Error) throw out; return out; }, count: () => n }; };
+
+  it('the LAST ready-to-merge add wins; other labels and non-labeled events are ignored', () => {
+    const g = counting(events(
+      ['ready-to-merge', '2026-09-28T10:00:00Z'],
+      ['review:pending', '2026-09-28T11:00:00Z'],
+      ['ready-to-merge', '2026-09-28T09:00:00Z', 'unlabeled'],
+      ['ready-to-merge', '2026-09-28T12:00:00Z'],
+    ));
+    expect(readyToMergeLabelTimeMs({ repo: 'o/r', num: 1, sha: 'a1a1a1a1', exec: g.exec, dir })).toBe(Date.parse('2026-09-28T12:00:00Z'));
+  });
+  it('a second call with the same sha is served from cache (exec once); a new sha re-reads', () => {
+    const g = counting(events(['ready-to-merge', '2026-09-28T10:00:00Z']));
+    const call = (sha) => readyToMergeLabelTimeMs({ repo: 'o/r', num: 1, sha, exec: g.exec, dir });
+    expect(call('a1a1a1a1')).toBe(call('a1a1a1a1'));
+    expect(g.count()).toBe(1);
+    call('b2b2b2b2');
+    expect(g.count()).toBe(2);
+  });
+  it('empty events → null; invalid JSON → null; exec throwing → null', () => {
+    expect(readyToMergeLabelTimeMs({ repo: 'o/r', num: 1, sha: 'e1e1e1e1', exec: counting('[]').exec, dir })).toBeNull();
+    expect(readyToMergeLabelTimeMs({ repo: 'o/r', num: 2, sha: 'e2e2e2e2', exec: counting('not json').exec, dir })).toBeNull();
+    expect(readyToMergeLabelTimeMs({ repo: 'o/r', num: 3, sha: 'e3e3e3e3', exec: counting(new Error('gh down')).exec, dir })).toBeNull();
+  });
+  it('no slug or no sha → null without calling exec', () => {
+    const g = counting('[]');
+    expect(readyToMergeLabelTimeMs({ repo: null, num: 1, sha: 'a1a1a1a1', exec: g.exec, dir })).toBeNull();
+    expect(readyToMergeLabelTimeMs({ repo: 'o/r', num: 1, sha: '', exec: g.exec, dir })).toBeNull();
+    expect(g.count()).toBe(0);
   });
 });

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { planLabelDrain, isPassIdle, buildOverlapRows } from '../merge-ai-prs.mjs';
-import { overlapRowKey } from '../conveyor/land-overlap-yield.mjs';
+import { overlapRowKey, overlapYieldWaits } from '../conveyor/land-overlap-yield.mjs';
+import { embedManifestInBody } from '../readiness/lane-manifest.mjs';
 
 // #4308 — `planLabelDrain`'s `overlapContext` is a PRECOMPUTED `Map` (built by
 // `we:scripts/conveyor/land-overlap-yield.mjs#computeOverlapContext`, exercised on its own in that module's own
@@ -111,5 +112,50 @@ describe('buildOverlapRows — #4308 row-shape wiring (2026-09-29 review finding
     const verdicts = [{ num: 5, repo: 'we', decision: 'skip', item: null, blockedBy: [], stackParents: [] }];
     const { candidateRows } = buildOverlapRows({ candidates: verdicts, verdicts, openPrContext });
     expect(candidateRows).toEqual([]);
+  });
+
+  // Items 1/11 (#4417) — a non-candidate Y has NO verdict, so its deps must come from its own body's manifest.
+  it('derives dependsOn from the body manifest of a PR present in openPrContext but absent from verdicts', () => {
+    const body = embedManifestInBody('Y body', { item: 200, blockedBy: [100], stackParents: [150] });
+    const openPrContext = { prsByRepo: new Map([['we', [{ ...rawPr(20), body }]]]) };
+    const { openPrRows } = buildOverlapRows({ candidates: [], verdicts: [], openPrContext });
+    expect([...openPrRows[0].dependsOn].sort((a, b) => a - b)).toEqual([100, 150]);
+  });
+
+  it('unions body deps with verdict deps (verdict never replaced) and tolerates a missing/invalid manifest', () => {
+    const body = embedManifestInBody('', { item: 200, blockedBy: [100] });
+    const openPrContext = { prsByRepo: new Map([['we', [{ ...rawPr(20), body }, { ...rawPr(21), body: 'no manifest here' }, rawPr(22)]]]) };
+    const verdicts = [{ num: 20, repo: 'we', decision: 'skip', item: 200, blockedBy: [7], stackParents: [] }];
+    const { openPrRows } = buildOverlapRows({ candidates: [], verdicts, openPrContext });
+    const byNum = (n) => openPrRows.find((r) => r.number === n);
+    expect([...byNum(20).dependsOn].sort((a, b) => a - b)).toEqual([7, 100]);
+    expect([...byNum(21).dependsOn]).toEqual([]);
+    expect([...byNum(22).dependsOn]).toEqual([]);
+  });
+
+  // Item 7 (#4417) — end to end: raw listing → buildOverlapRows → overlapYieldWaits → planLabelDrain.
+  it('X does not yield to a larger overlapping non-candidate Y whose body declares blockedBy X', () => {
+    const NOW = Date.parse('2026-09-28T12:00:00Z');
+    const big = [{ path: 'shared.mjs', additions: 100, deletions: 0 }];
+    const small = [{ path: 'shared.mjs', additions: 1, deletions: 0 }];
+    const yBody = embedManifestInBody('', { item: 200, blockedBy: [100] });
+    const openPrContext = { prsByRepo: new Map([['we', [
+      { ...rawPr(1, { files: small }) },
+      { ...rawPr(2, { files: big, labels: [{ name: 'review:pending' }] }), body: yBody },
+    ]]]) };
+    const x = { num: 1, repo: 'we', decision: 'merge', item: 100, blockedBy: [], stackParents: [], headSha: 'abc' };
+    const { candidateRows, openPrRows } = buildOverlapRows({ candidates: [x], verdicts: [x], openPrContext });
+    const rows = candidateRows.map((r) => ({ ...r, readyAtMs: NOW, windowMs: 45 * 60_000 }));
+    const waits = overlapYieldWaits({ candidates: rows, openPrs: openPrRows, nowMs: NOW });
+    expect(waits.size).toBe(0);
+    const { ready, deferred } = planLabelDrain([x], { overlapContext: waits });
+    expect(ready.map((c) => c.num)).toEqual([1]);
+    expect(deferred).toEqual([]);
+
+    // Control: without the declared dependency, the SAME fixture does yield — the dependency is what frees X.
+    const noDep = { prsByRepo: new Map([['we', [openPrContext.prsByRepo.get('we')[0], { ...openPrContext.prsByRepo.get('we')[1], body: '' }]]]) };
+    const ctl = buildOverlapRows({ candidates: [x], verdicts: [x], openPrContext: noDep });
+    const ctlWaits = overlapYieldWaits({ candidates: ctl.candidateRows.map((r) => ({ ...r, readyAtMs: NOW, windowMs: 45 * 60_000 })), openPrs: ctl.openPrRows, nowMs: NOW });
+    expect(ctlWaits.get(overlapRowKey({ repo: 'we', number: 1 }))?.yieldTo).toBe(2);
   });
 });
