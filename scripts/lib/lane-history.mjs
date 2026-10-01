@@ -33,6 +33,7 @@ import {
 import { join, basename, dirname, resolve } from 'node:path';
 import { hostname } from 'node:os';
 import { execFileSync } from 'node:child_process';
+import { planLitterCleanup } from './lane-litter.mjs';
 
 /** The ledger's filename, inside `<lane>/.git/`. */
 export const LANE_HISTORY_FILENAME = 'lane-history.jsonl';
@@ -191,7 +192,16 @@ export const DESTRUCTIVE_LANE_ACTIONS = Object.freeze(new Set([
  * before-state had unpushed work and no salvage bundle. The `lane-destructive-unpushed` smell's predicate.
  */
 export function isUnsalvagedDestructiveUnpushed(entry) {
-  return !!entry && DESTRUCTIVE_LANE_ACTIONS.has(entry.action) && entry.unpushed === true && !entry.salvagedTo;
+  if (!entry || !DESTRUCTIVE_LANE_ACTIONS.has(entry.action) || entry.salvagedTo) return false;
+  // Litter cleanup only removes allowlisted untracked files; an unchanged HEAD loses no commits.
+  if (entry.action === 'litter-delete' && entry.headBefore && entry.headBefore === entry.headAfter) return false;
+  const dirty = entry.workDirtyBefore ?? entry.dirtyBefore;
+  if (dirty > 0) return true;
+  if (entry.headBefore && entry.headBefore === entry.headAfter) return false;
+  if (entry.remoteReachableNow === true) return false;
+  if (Number.isFinite(entry.unpushedCommitsBefore)) return entry.unpushedCommitsBefore > 0;
+  // Old journals / failed probes remain conservative. Ahead of ONE upstream is not proof of loss.
+  return entry.unpushed === true;
 }
 
 /** A rotated journal: `.lane-journal.<UTC stamp>.jsonl` — the stamp sorts lexically in time order. */
@@ -251,6 +261,7 @@ export function laneJournalEntry({
   const after = headAfter !== undefined ? headAfter : before?.head;
   if (after) entry.headAfter = after;
   if (Number.isFinite(before?.dirty)) entry.dirtyBefore = before.dirty;
+  if (Number.isFinite(before?.workDirty)) entry.workDirtyBefore = before.workDirty;
   if (Number.isFinite(before?.ahead)) entry.aheadBefore = before.ahead;
   if (Number.isFinite(before?.unpushedCommits)) entry.unpushedCommitsBefore = before.unpushedCommits;
   const unpushedValue = typeof unpushed === 'boolean' ? unpushed : before?.unpushed;
@@ -285,7 +296,7 @@ export function destructiveActionVerdict({ unpushed, ownerGone = null, override 
 
 const snapshotGit = (dir, args) => {
   try {
-    return execFileSync('git', args, { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 30_000, maxBuffer: 64 * 1024 * 1024 }).trim();
+    return execFileSync('git', args, { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 30_000, maxBuffer: 64 * 1024 * 1024 }).trimEnd();
   } catch { return null; }
 };
 
@@ -332,7 +343,7 @@ export function laneHead(dir) {
 }
 
 /**
- * IO: the lane's state right now — `{ head, dirty, ahead, unpushedCommits, unpushed }`. `ahead` is commits
+ * IO: the lane's state right now. `workDirty` excludes allowlisted untracked litter from `dirty`. `ahead` is commits
  * past `branchRef`; `unpushedCommits` is commits on NO remote ref at all (a pushed `lane/*` branch counts as
  * pushed); `unpushed` is either of those or any dirty file. Every field is `null` when its read failed — the
  * journal then says "unknown", never a guessed zero. Never throws.
@@ -341,6 +352,7 @@ export function laneStateSnapshot(dir, branchRef = 'origin/main') {
   const head = laneHead(dir);
   const porcelain = snapshotGit(dir, ['status', '--porcelain']);
   const dirty = porcelain === null ? null : porcelain.split('\n').filter(Boolean).length;
+  const workDirty = porcelain === null ? null : planLitterCleanup(porcelain).leaveDirty.length;
   // `origin/x` is spelled out as `refs/remotes/origin/x`: a stray LOCAL branch/tag named `origin/x` would
   // otherwise win the short-name lookup and hide unpushed commits from the shortcut below.
   const remoteRef = branchRef.startsWith('origin/') ? `refs/remotes/${branchRef}` : null;
@@ -353,7 +365,20 @@ export function laneStateSnapshot(dir, branchRef = 'origin/main') {
     : snapshotGit(dir, ['rev-list', '--count', 'HEAD', '--not', '--remotes']);
   const unpushedCommits = unpushedRaw === null ? null : Number(unpushedRaw) || 0;
   const unpushed = dirty === null || unpushedCommits === null ? null : dirty > 0 || unpushedCommits > 0;
-  return { head, dirty, ahead, unpushedCommits, unpushed };
+  return { head, dirty, workDirty, ahead, unpushedCommits, unpushed };
+}
+
+/**
+ * IO: reconcile a past alert with present remote reachability. This is recovery evidence, NOT a claim
+ * that the ref existed at reset time. Never rewrite the journal's at-time commit count; failed reads
+ * leave its conservative verdict intact. No fetch, reset, or other repository mutation.
+ */
+export function reconcileLaneJournalEntry(dir, entry) {
+  if (!isUnsalvagedDestructiveUnpushed(entry) || !SHA_RE.test(entry.headBefore || '')) return entry;
+  // A pushed commit cannot recover discarded file edits; avoid a subprocess that cannot clear the alert.
+  if ((entry.workDirtyBefore ?? entry.dirtyBefore) > 0) return entry;
+  const refs = snapshotGit(dir, ['for-each-ref', `--contains=${entry.headBefore}`, '--format=%(refname)', 'refs/remotes/']);
+  return refs ? { ...entry, remoteReachableNow: true } : entry;
 }
 
 /** IO: rename the live journal aside once it is over the size cap. Best-effort. */

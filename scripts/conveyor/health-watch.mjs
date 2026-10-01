@@ -55,7 +55,7 @@ import {
 
 export { healthDir, healthSectionLines };
 import { CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
-import { laneJournalPath, readLaneJournalTail } from '../lib/lane-history.mjs';
+import { laneJournalPath, readLaneJournalTail, reconcileLaneJournalEntry } from '../lib/lane-history.mjs';
 import { defaultPoolRoot } from '../lib/lane-pool-paths.mjs';
 // #4317 — the same "which paths are DAEMON clones" registry `guard-lane.mjs`/`guard-bash.mjs` already use, so
 // this probe's notion of "a daemon clone" can never drift from the guards'.
@@ -398,7 +398,7 @@ export function probeLanePools(logsDir) {
 
 /**
  * #4370 — the `lane-destructive-unpushed` smell's input: the recent tail of every pool's lane lifecycle journal
- * (`<poolRoot>/<pool>/.lane-journal.jsonl`), entries newer than `windowMs` only. fs-only, cheap. `[]` when no
+ * (`<poolRoot>/<pool>/.lane-journal.jsonl`), entries newer than `windowMs` only. Rechecks candidate commits against local remote refs. `[]` when no
  * pool has a journal yet.
  * @returns {Array<{pool:string, entries:Array<object>}>}
  */
@@ -412,7 +412,8 @@ export function probeLaneJournal({ poolRoot, now = Date.now(), windowMs = 24 * 6
       const t = Date.parse(e?.ts);
       return Number.isFinite(t) && now - t <= windowMs;
     });
-    out.push({ pool, entries });
+    out.push({ pool, entries: entries.map((e) => Number.isInteger(e.lane)
+      ? reconcileLaneJournalEntry(join(poolDir, `lane-${e.lane}`), e) : e) });
   }
   return out;
 }
