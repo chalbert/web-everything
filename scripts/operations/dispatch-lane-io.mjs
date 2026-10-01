@@ -1,5 +1,7 @@
-import { claudeSpawnAlias } from '../lib/dispatch-routing-policy.mjs';
-import { resolveOperationRoute, readRoutingPolicy, resolveDispatchRoute as decideDispatchRoute } from '../lib/dispatch-routing-policy-io.mjs';
+import { codexBriefDetachedProvider } from './dispatch-providers/codex-brief.mjs';
+import { dispatchProviderAvailable } from '../lib/dispatch-provider-availability.mjs';
+import { claudeSpawnAlias, resolvePolicyEffort } from '../lib/dispatch-routing-policy.mjs';
+import { resolvePolicyModel, resolveOperationEffort, resolveOperationRoute, readRoutingPolicy, resolveDispatchRoute as decideDispatchRoute } from '../lib/dispatch-routing-policy-io.mjs';
 import { meteredAlreadyDone, alreadyDoneRequest } from '../lib/gh-metered-reads.mjs';
 import { readGitAlreadyDone } from '../lib/git-already-done.mjs';
 /**
@@ -512,6 +514,7 @@ export function readTick({
       cause: null,
       scopePaths: Array.isArray(item?.scope) ? item.scope : [],
       size: item?.size ?? null,
+      designQuestion: item?.designQuestion, wellScoped: item?.wellScoped,
       risk: item?.risk ?? null,
       // #3857 — a `security` tag raises the worker to Opus; carried through `findItem` for this read.
       tags: Array.isArray(item?.tags) ? item.tags : [],
@@ -1021,6 +1024,8 @@ export function findItem(key, loadItems, pocRegistry = null) {
     // the ABSENCE of the field, and it keeps the resolved-item shape byte-identical for every unsized card.
     ...(it.size == null || it.size === '' ? {} : { size: it.size }),
     ...(it.risk == null ? {} : { risk: it.risk }),
+    ...(typeof it.designQuestion === 'boolean' ? { designQuestion: it.designQuestion } : {}),
+    ...(typeof it.wellScoped === 'boolean' ? { wellScoped: it.wellScoped } : {}),
     // #3857/#3906 — the card's `tags:`, for the tier table's `security` row. Spread for the same reason.
     ...(Array.isArray(it.tags) && it.tags.length ? { tags: it.tags.map(String) } : {}),
     // #3637 — WHICH BRANCH this item delivers to. Absent ⇒ `main` ⇒ today's behaviour, byte-identical. The
@@ -1395,9 +1400,7 @@ export function createDispatchSinks({
   // bypasses the routing entirely, exactly as before.
   // agy-launcher-probation — `on`/`off`, read ONCE here like `modes` (see `probationLaunchFromEnv`).
   probationLaunch = probationLaunchFromEnv(),
-  providerAvailable = (provider) => provider === 'claude' || String(process.env.PATH ?? '').split(':').some(dir => {
-    try { accessSync(join(dir, provider === 'codex' ? 'codex' : 'agy'), constants.X_OK); return true; } catch { return false; }
-  }),
+  providerAvailable = dispatchProviderAvailable,
   provider = (request) => routeDispatchProvider(request, {
     modes, registry, scriptExists, providerAvailable, agent: (r) => defaultClaudeProvider(r, { spawnAgent }), probationLaunch,
   }),
@@ -1474,11 +1477,13 @@ export function createDispatchSinks({
       // `dispatchExecutorFor`). `null` until a provider reports; the fallback below covers one that does not.
       let reportedExecutor = null;
       let reportedModel = null;
+      let reportedEffort = null;
       let handle;
       try {
         handle = await provider({
           reportExecutor: (v) => { reportedExecutor = v == null ? null : String(v); },
           reportModel: (v) => { reportedModel = v; },
+          reportEffort: (v) => { reportedEffort = v; },
           policyRoute: payload?.routing?.policyRoute ?? null,
           sessionId,
           cwd: sessionCwd,
@@ -1497,6 +1502,7 @@ export function createDispatchSinks({
           // agent reading a brief) needs them as data. The `claude --bg` path ignores all five.
           launchKind: payload?.launchKind,
           lane: payload?.lane,
+          laneRef: payload?.laneRef,
           scope: payload?.scope,
           pr: payload?.pr,
           reason: payload?.reason,
@@ -1572,6 +1578,7 @@ export function createDispatchSinks({
           launchKind: payload?.launchKind ?? 'build',
           route,
           executor,
+          effort: reportedEffort ?? payload?.routing?.effort ?? table?.effort ?? null,
           supervisorModel: reportedModel ?? modelDecision?.model ?? extractModelFlag(extraArgs.map(String)).value,
           workerModel: reportedModel && payload?.routing?.policyRoute
             ? { name: reportedModel, tier: null, source: 'routing-policy', tableTier: table?.tier ?? null, reason: 'resolved launch model' }
@@ -1607,7 +1614,7 @@ export function createDispatchSinks({
  */
 export function workerModelTable(routing) {
   if (!routing || typeof routing !== 'object') return null;
-  if (routing.policyRoute?.provider === 'claude') return { tier: routing.tier, model: routing.policyRoute.model, reason: 'routing-policy' };
+  if (routing.policyRoute?.provider === 'claude') return { tier: routing.tier, model: routing.policyRoute.model, effort: routing.policyRoute.effort, reason: 'routing-policy' };
   const tier = routing.tier ?? null;
   const claudeRoute = CLAUDE_NATIVE_MODEL_IDS.has(routing.model) || routing.outcome === 'role';
   if (!claudeRoute || !tier || !Object.hasOwn(CLAUDE_SPAWN_MODEL_BY_TIER, tier)) return null;
@@ -1669,6 +1676,7 @@ export function routeDispatchProvider(request, {
   probationLaunch = 'off',
   probation = probationWorkerDetachedProvider,
   providerAvailable = () => true,
+  codexBrief = codexBriefDetachedProvider,
 } = {}) {
   const kind = String(request?.launchKind || 'build');
   if (request.policyRoute) {
@@ -1677,20 +1685,23 @@ export function routeDispatchProvider(request, {
     const workerFor = route => {
       if (!request.probationWorker || route.provider === 'claude') return null;
       const id = route.provider === 'codex' ? 'codex' : route.model.startsWith('claude-') ? 'antigravity-claude' : 'antigravity-gemini';
-      return { ...PROBATION_WORKERS[id], taskType: request.probationWorker.taskType, model: route.model };
+      return { ...PROBATION_WORKERS[id], taskType: request.probationWorker.taskType, model: route.model, effort: route.effort };
     };
     const chosen = candidates.find(route => providerAvailable(route.provider) && (route.provider === 'claude'
+      || (route.provider === 'codex' && ['fix', 'ci-heal'].includes(kind) && request.prompt && request.lane && request.pr)
       || (probationLaunchDecision({ ...request, probationWorker: workerFor(route) }, probationLaunch).launch
         && scriptExists(PROBATION_LAUNCHABLE_KINDS[kind].runScript))
       || (route.provider === 'codex' && registry[kind]?.runScript && scriptExists(registry[kind].runScript))));
     if (!chosen) throw notApplied(`routing policy: ${kind} has no available launch adapter in its fallback chain`);
     request = { ...request, policyRoute: { ...chosen, fallback: [] }, probationWorker: workerFor(chosen) };
     request.reportModel?.(chosen.model);
+    request.reportEffort?.(chosen.effort);
     if (chosen !== candidates[0]) console.error(`routing-policy-fallback: ${kind} → ${chosen.provider}/${chosen.model} (primary adapter unavailable)`);
     if (chosen.provider === 'claude') {
-      request = { ...request, probationWorker: null, table: { model: chosen.model, tier: Object.entries(CLAUDE_NATIVE_MODEL_BY_TIER).find(([, id]) => id === chosen.model)?.[0] ?? null, reason: 'routing-policy' } };
+      request = { ...request, probationWorker: null, table: { model: chosen.model, effort: chosen.effort, tier: Object.entries(CLAUDE_NATIVE_MODEL_BY_TIER).find(([, id]) => id === chosen.model)?.[0] ?? null, reason: 'routing-policy' } };
       return agent(request);
     }
+    if (chosen.provider === 'codex' && ['fix', 'ci-heal'].includes(kind) && request.prompt && request.lane && request.pr) return codexBrief(request);
     // An explicit Codex route whose probation launch is unavailable (probation off, or a task type the probation
     // launcher does not run) still goes to the mechanical build wrapper, never on to the Claude agent below.
     if (!probationLaunchDecision(request, probationLaunch).launch && registry[kind]) return registry[kind].provider({ ...request, probationWorker: null });
@@ -1768,7 +1779,8 @@ export function defaultClaudeProvider(request, { spawnAgent = (argv, opts) => de
     table: request.table ?? null,
     modelReason: request.modelReason ?? null,
   });
-  request.reportModel?.(extractModelFlag(argv).value);
+  request.reportModel?.(request.policyRoute ? resolvePolicyModel('claude', extractModelFlag(argv).value) : extractModelFlag(argv).value);
+  request.reportEffort?.(argv.find(arg => arg.startsWith('--effort='))?.slice(9) ?? argv[argv.indexOf('--effort') + 1]);
   const stdout = String(spawnAgent(argv, { cwd: request.cwd }) ?? '');
   return parseBackgroundedId(stdout) || request.sessionId;
 }
@@ -2253,7 +2265,7 @@ export function buildAgentArgv({
   if (!table && payload?.launchKind) {
     const policy = readRoutingPolicy();
     const configured = resolveOperationRoute({ operation: payload.launchKind, available: ['claude'], gateClosed: policy.criticalWorkGate.kinds.includes(payload.launchKind), policy });
-    if (configured) table = { model: configured.model, reason: 'routing-policy' };
+    if (configured) table = { model: configured.model, effort: configured.effort, reason: 'routing-policy' };
   }
   // NO `--session-id` — see this function's own header. `sessionId` is deliberately unreferenced here.
   void sessionId;
@@ -2265,6 +2277,15 @@ export function buildAgentArgv({
   // honoured only with a reason (see {@link resolveWorkerModel}), and never left riding alongside.
   let args = extraArgs.map(String);
   const modelArgs = [];
+  const effortArgs = [];
+  let explicitEffort;
+  for (let i = 0; i < args.length; i += 1) {
+    if (args[i] === '--effort') explicitEffort = args[++i] ?? '';
+    else if (args[i].startsWith('--effort=')) explicitEffort = args[i].slice(9);
+  }
+  const effort = explicitEffort ?? table?.effort ?? resolveOperationEffort(payload?.launchKind ?? 'build', 'claude');
+  try { resolvePolicyEffort('claude', effort); } catch (error) { throw notApplied(error.message); }
+  if (explicitEffort === undefined) effortArgs.push('--effort', effort);
   if (table) {
     const decision = resolveWorkerModel({ extraArgs: args, table, modelReason });
     if (decision.refusal) throw notApplied(`dispatch-lane: ${decision.refusal}`);
@@ -2298,9 +2319,9 @@ export function buildAgentArgv({
     // honour the last one anyway).
     '--settings', JSON.stringify(worktreeSettings ? { env: sessionEnv, worktree: worktreeSettings } : { env: sessionEnv }),
     ...(systemPromptFile ? ['--append-system-prompt-file', String(systemPromptFile)] : []),
-    ...(table ? modelArgs : []),
+    ...(table ? [...effortArgs, ...modelArgs] : []),
     ...args,
-    ...(!table ? modelArgs : []),
+    ...(!table ? [...effortArgs, ...modelArgs] : []),
     prompt,
   ];
 }

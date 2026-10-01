@@ -51,7 +51,8 @@
  * process's own log file. The dispatch observer (`dispatch-lane-io.mjs#createDispatchObservers`) resolves the
  * effect off the merged PR exactly as it already did for the agent path — unchanged by this wiring.
  */
-import { resolveOperationRoute, resolvePolicyModel, readRoutingPolicy } from '../lib/dispatch-routing-policy-io.mjs';
+import { resolvePolicyEffort } from '../lib/dispatch-routing-policy.mjs';
+import { resolveOperationEffort, resolveOperationRoute, resolvePolicyModel, readRoutingPolicy } from '../lib/dispatch-routing-policy-io.mjs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -109,6 +110,7 @@ export function parseDeliverItemRunArgv(argv = []) {
     attemptTag: String(flags.attempt ?? '').trim(),
     provider: String(flags.provider ?? '').trim(),
     ...(flags.model ? { model: String(flags.model) } : {}),
+    ...(flags.effort ? { effort: String(flags.effort) } : {}),
     runId: String(flags['run-id'] ?? '').trim(),
     effectKey: String(flags['effect-key'] ?? '').trim(),
     resume: flags.resume === 'true',
@@ -171,13 +173,16 @@ export async function runDeliverItemCli(argv = [], {
     const policy = readRoutingPolicy();
     const configured = launch.provider ? null : resolveOperationRoute({ operation: 'build', available: ['claude', 'codex'], gateClosed: policy.criticalWorkGate.kinds.includes('build'), policy });
     selected = selectProvider(configured ? configured.provider === 'claude' ? 'claude-restricted' : configured.provider : launch.provider);
+    const providerName = selected.name === 'claude-restricted' ? 'claude' : selected.name;
     const pin = launch.model ?? configured?.model;
-    if (pin) {
-      const model = resolvePolicyModel(selected.name === 'claude-restricted' ? 'claude' : selected.name, pin, policy);
-      const underlying = selected.provider;
-      selected = { ...selected, provider: { ...underlying, model, spawn: request => underlying.spawn({ ...request, model }) } };
-      launch.model = model;
-    }
+    const model = pin ? resolvePolicyModel(providerName, pin, policy) : undefined;
+    const effort = resolvePolicyEffort(providerName, launch.effort ?? configured?.effort ?? resolveOperationEffort('build', providerName, undefined, policy));
+    launch.effort = effort;
+    if (model) launch.model = model;
+    const underlying = selected.provider;
+    selected = { ...selected, provider: { ...underlying, ...(model ? { model } : {}), effort,
+      spawn: request => underlying.spawn({ ...request, ...(model ? { model } : {}), effort }) } };
+
   } catch (e) {
     writeErr(`error: ${String(e?.message ?? e)}\n`);
     return { code: 1, result: null };

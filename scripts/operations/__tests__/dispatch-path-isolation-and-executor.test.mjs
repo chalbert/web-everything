@@ -217,3 +217,6 @@ describe('(c) dispatch-lane refuses to run from stale code', () => {
     expect(assertFresh).toHaveBeenCalledTimes(1);
   });
 });
+
+// These legacy cases exercise the native adapter; Codex routing has a dedicated dry-run suite.
+vi.mock('../../lib/dispatch-provider-availability.mjs', () => ({ dispatchProviderAvailable: provider => provider === 'claude' }));

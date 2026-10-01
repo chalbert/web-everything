@@ -553,10 +553,10 @@ describe('runProbationBuild — the arc', () => {
     expect(calls.some((c) => c[0] === 'discard' || c[0] === 'commit')).toBe(false);
   });
 
-  it('refuses with no num, session or worker', async () => {
+  it('refuses missing identity and resolves an omitted worker from policy', async () => {
     await expect(runProbationBuild(parseArgs(['--session=s', '--worker={"id":"codex"}']), fakeIo().io)).rejects.toThrow();
     await expect(runProbationBuild(parseArgs(['--num=1', '--session=', '--worker={"id":"codex"}']), fakeIo().io)).rejects.toThrow();
-    await expect(runProbationBuild(parseArgs(['--num=1', '--session=s']), fakeIo().io)).rejects.toThrow();
+    await expect(runProbationBuild(parseArgs(['--num=1', '--session=s']), fakeIo().io)).resolves.toMatchObject({ executor: 'codex' });
   });
 });
 

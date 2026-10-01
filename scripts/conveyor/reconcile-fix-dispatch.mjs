@@ -66,6 +66,9 @@
  * infra-blocked recovery / the lease-reaper / the session-reaper / the hiccup sink — best-effort, never gating
  * the tick.
  */
+import { resolvePolicyModel, resolveDispatchRoute } from '../lib/dispatch-routing-policy-io.mjs';
+import { dispatchProviderAvailable } from '../lib/dispatch-provider-availability.mjs';
+import { codexBriefDetachedProvider } from '../operations/dispatch-providers/codex-brief.mjs';
 import { withOperatorAnswer } from './stand-down-answer-core.mjs';
 import { withSalvageHint } from '../lib/salvage-index.mjs';
 import { repoKeyForSlug, CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
@@ -74,7 +77,7 @@ import { resolvePrWorkUnit, isSafeFallbackScopeEntry } from './pr-work-unit.mjs'
 import { execFileSyncThrottled } from '../lib/gh-throttle.mjs';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import matter from 'gray-matter';
@@ -82,7 +85,7 @@ import { createQueueBudget } from '../readiness/heavy-queue-projection.mjs'; // 
 
 import {
   agentArgsFromEnv, assertNotALaneCheckout, buildAgentArgv, defaultLoadItems, defaultListAgents,
-  defaultSpawnAgent, DISPATCHED_AGENT_SYSTEM_PROMPT_FILE, findItem, normalizeHandle, parseBackgroundedId,
+  defaultReadScorecards, defaultSpawnAgent, DISPATCHED_AGENT_SYSTEM_PROMPT_FILE, findItem, normalizeHandle, parseBackgroundedId,
   resolveGhShimSettingsEnv, resumeSucceeded, REPO_ROOT,
   // #4174 — the SAME "never spawn into `root` itself" fix `dispatch-lane-io.mjs#createDispatchSinks` applies;
   // this file is a SEPARATE fresh-dispatch call site (see `dispatchFix`'s own docblock), so it needs the same
@@ -96,7 +99,7 @@ import { BRIEF_REQUIRED_BY_KIND, OPTIONAL_BRIEF_PLACEHOLDERS, REPO_AWARE_VALUE_P
 import { parseAuthorActorId } from '../lib/review-independence.mjs';
 import { laneRefItemNum } from './lease-reaper.mjs';
 import {
-  acquireFixDispatchClaim, releaseFixDispatchClaim, readFixDispatchClaim, fixDispatchClaimOwner, listFixDispatchClaims,
+  stampFixDispatchClaim, acquireFixDispatchClaim, releaseFixDispatchClaim, readFixDispatchClaim, fixDispatchClaimOwner, listFixDispatchClaims,
 } from './fix-dispatch-claim.mjs';
 import { readLiveFixClaim, withAltBranchHint } from './fix-procedure.mjs';
 import { overlapsInFlight } from '../readiness/overlap-chain.mjs';
@@ -845,6 +848,15 @@ export function dispatchFix(planned, {
   mintSessionId = () => randomUUID(),
   spawnAgent = defaultSpawnAgent,
   extraArgs = [],
+  modelReason = null,
+  routeFix = p => resolveDispatchRoute({ kind: "fix", scopePaths: p.scope, risk: p.risk, size: p.size, cause: p.cause }, { scorecards: defaultReadScorecards() }),
+  providerAvailable = dispatchProviderAvailable,
+  spawnCodex = codexBriefDetachedProvider,
+  stampClaim = stampFixDispatchClaim,
+  writeRunRecord = (cwd, row) => {
+    try { writeFileSync(join(cwd, 'run.json'), JSON.stringify(row)); }
+    catch (error) { console.error(`fix run record could not be written: ${error.message}`); }
+  },
   resumeAttempt = null,
   // #x8mpubm — same never-throwing, opt-in-gated resolver `we:scripts/operations/dispatch-lane-io.mjs`'s own
   // `createDispatchSinks` uses for a fresh build dispatch; a fix dispatch is a SEPARATE fresh-dispatch call
@@ -894,8 +906,13 @@ export function dispatchFix(planned, {
       pr: planned.pr, itemNum: planned.itemNum, lane: planned.lane,
     };
   }
+  const routing = routeFix(planned);
+  if (routing?.refusal) throw new Error(routing.refusal);
+  const candidates = routing?.policyRoute ? [routing.policyRoute, ...routing.policyRoute.fallback] : [];
+  const selected = candidates.find(route => ['claude', 'codex'].includes(route.provider) && providerAvailable(route.provider));
+  if (candidates.length && !selected) throw new Error("routing policy: fix has no available provider");
   const claim = acquireClaim({
-    repo, pr: planned.pr, kind: 'fix', headSha: planned.headRefOid, scope: planned.scope, owner: claimOwner, lockRoot: claimRoot,
+    repo, pr: planned.pr, kind: 'fix', route: selected, headSha: planned.headRefOid, scope: planned.scope, owner: claimOwner, lockRoot: claimRoot,
   });
   if (!claim.ok) {
     return {
@@ -903,6 +920,7 @@ export function dispatchFix(planned, {
       pr: planned.pr, itemNum: planned.itemNum, lane: planned.lane,
     };
   }
+  let launchAttempted = false;
   try {
     const sessionSlug = sessionSlugFor(planned.itemNum, 'fix', planned.pr, '', repo);
     // #3960 — the repo-aware quintet, computed once from `repo`'s own profile (never re-derived here). The
@@ -928,8 +946,20 @@ export function dispatchFix(planned, {
     // #4174 — THE FIX: this session's cwd is a scratch directory outside `root`, never `root` itself (see
     // `dispatchSessionCwd`'s own header at the io shell for why — the identical bug `createDispatchSinks` had).
     const sessionCwd = ensureSessionCwd(sessionCwdFor(sessionId));
+    const filledPrompt = withAltBranchHint(withSalvageHint(withOperatorAnswer(prompt, planned.operatorAnswer), { cards: [planned.itemNum], prs: [planned.pr] }), planned.altBranch);
+    if (selected?.provider === 'codex') {
+      launchAttempted = true;
+      const agentId = spawnCodex({ policyRoute: selected, prompt: filledPrompt, sessionSlug, sessionId,
+        cwd: sessionCwd, repo, pr: planned.pr, lane: planned.lane, laneRef: planned.laneRef, scope: planned.scope,
+        launchKind: 'fix', systemPromptFile: DISPATCHED_AGENT_SYSTEM_PROMPT_FILE, settingsEnv: resolveSettingsEnv(sessionCwd) });
+      stampClaim({ repo, pr: planned.pr, kind: 'fix', owner: claimOwner, lockRoot: claimRoot, route: selected, handle: agentId });
+      return { sessionId, agentId, sessionSlug, pr: planned.pr, itemNum: planned.itemNum, lane: planned.lane, unknownTokens,
+        provider: selected.provider, model: selected.model, effort: selected.effort, resumed: false, ...(resumeAttempt ? { resumeAttempt } : {}) };
+    }
     const argv = buildAgentArgv({
       sessionId,
+      table: selected ? { model: selected.model, effort: selected.effort, reason: 'routing-policy' } : null,
+      modelReason,
       // fix procedure — a re-armed concurrent-author pause hands the next fixer the saved alt branch to start from.
       payload: { prompt: withAltBranchHint(withSalvageHint(withOperatorAnswer(prompt, planned.operatorAnswer), { cards: [planned.itemNum], prs: [planned.pr] }), planned.altBranch), sessionSlug, launchKind: 'fix' },
       // #3606 — see this function's own docblock: without this the fix agent reads a correctly-filled brief as an
@@ -949,17 +979,23 @@ export function dispatchFix(planned, {
     // discards `--session-id` and assigns its own, so the minted uuid addresses nothing; `agentId` is what
     // `claude agents`/`logs`/`stop` take. `sessionId` stays on the result for callers that already read it.
     const stdout = String(spawnAgent(argv, { cwd: sessionCwd }) ?? '');
+    launchAttempted = true;
     // #x0jphk5 — the claim is DELIBERATELY NOT released here on success: see this function's own docblock for
     // why it must outlive this call (the 26+s listing-lag window a fresh spawn is exposed to).
-    return {
+    const result = {
       sessionId, agentId: parseBackgroundedId(stdout),
       sessionSlug, pr: planned.pr, itemNum: planned.itemNum, lane: planned.lane, unknownTokens,
+      provider: 'claude', model: resolvePolicyModel('claude', argv[argv.indexOf('--model') + 1]),
+      effort: argv.find(arg => arg.startsWith('--effort='))?.slice(9) ?? argv[argv.indexOf('--effort') + 1],
       resumed: false, ...(resumeAttempt ? { resumeAttempt } : {}),
     };
+    stampClaim({ repo, pr: planned.pr, kind: 'fix', owner: claimOwner, lockRoot: claimRoot, route: result, handle: result.agentId });
+    writeRunRecord(sessionCwd, result);
+    return result;
   } catch (e) {
     // #x0jphk5 — nothing was actually spawned: release so a legitimate retry for this same PR is never blocked
     // by our own failed attempt.
-    releaseClaim({ repo, pr: planned.pr, kind: 'fix', owner: claimOwner, lockRoot: claimRoot });
+    if (!launchAttempted || e?.notApplied) releaseClaim({ repo, pr: planned.pr, kind: 'fix', owner: claimOwner, lockRoot: claimRoot });
     throw e;
   }
 }
