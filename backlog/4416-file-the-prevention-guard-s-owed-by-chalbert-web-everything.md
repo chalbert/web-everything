@@ -4,23 +4,75 @@ kind: story
 size: 3
 parent: "4075"
 status: open
-scope: ["we:skills-src/conveyor/brief-rule-ledger.json", "we:scripts/guard-bash.mjs", "we:scripts/__tests__/guard-bash.test.mjs"]
+scope: ["we:skills-src/conveyor/brief-rule-ledger.json", "we:scripts/conveyor/__tests__/brief-rule-ledger.test.mjs", "we:scripts/guard-bash.mjs", "we:scripts/__tests__/guard-bash.test.mjs", "we:scripts/__tests__/guard-bash-card-overwrite.test.mjs"]
 dateOpened: "2026-09-29"
+preparedDate: "2026-10-01"
+preparedAgainstSha: "07bb7c5142d6cbc26c11e22d05e1e29d9ce9c44e"
 tags: []
 ---
 
 # File the prevention guard(s) owed by chalbert/web-everything#2897's independent review
 
-Filed mechanically ON APPROVAL (operator rule, 2026-09-27 — "prevention outstanding should be filed by default on approval") — this accept verdict named the guard(s) below as owed. None of them blocked the approval; the debt is tracked here instead:
+Filed mechanically ON APPROVAL (operator rule, 2026-09-27 — "prevention outstanding should be filed by default on approval"). The independent review of chalbert/web-everything#2897 owed two prevention guards: verify that ledger hook enforcers have real registrations, and pin shell-overwrite coverage and its gaps. The review also requested a separate follow-up for the missing project-level completion Stop registration. These debts did not block the original approval.
 
-1. `we:skills-src/conveyor/brief-rule-ledger.json:95` — Add a deterministic check (a test, or a check:standards rule) that every `kind: hook` enforcer in the ledger is registered in `we:.claude/settings.json` or a wrapper settings constant. Alternatively, add a per-rule `coverage` field naming which dispatch kinds are covered, and mark the rule `enforced` only when all kinds are.
-2. `we:scripts/guard-bash.mjs:1775` — Add table-driven negative-space cases to we:guard-bash-card-overwrite.test.mjs: a directory destination, `-t`, `dd of=`, `rsync`, `ln -sf`. Either deny them or list each in the ledger `gap`. A lint requiring every `enforced` ledger rule to carry a `gap` field is an option.
-3. `we:skills-src/conveyor/brief-rule-ledger.json:1` — Add a ledger test asserting that each `kind: hook` enforcer's script path appears in we:.claude/settings.json or in DELIVERY_HOOKS_SETTINGS, or carries an explicit `registeredIn` field. File the missing we:.claude/settings.json Stop registration as its own card.
-4. `we:scripts/guard-bash.mjs:1749` — A path-resolution helper that infers the full file path from the source when the destination is a directory, coupled with a regex update to allow spaces (`[^'")]*` instead of `[^\s'")]*`).
-5. `we:scripts/guard-bash.mjs:1777` — A deterministic `check:standards` test for shell guards that asserts both `cp src destFile` and `cp src destDir/` are properly blocked.
+The implementation target is `we:scripts/guard-bash.mjs#corpusOverwriteTargets`; the focused regression home is `we:scripts/__tests__/guard-bash-card-overwrite.test.mjs`. The ledger and its existing test are `we:skills-src/conveyor/brief-rule-ledger.json` and `we:scripts/conveyor/__tests__/brief-rule-ledger.test.mjs`.
 
 Idempotency key (do not edit): approval-prevention-key:chalbert/web-everything#2897@7d139ac6d005823f36a4da77f4c0167bd0bf9b65
 
 ## Done when
 
-1. **Executable** — TODO: a command that fails before this item lands and passes after.
+1. **Executable:** the focused Vitest invocation in Test plan passes with new assertions that fail on the preparation baseline: directory-target copies and quoted spaced card paths are denied, and the Git hook requires verified registration metadata.
+2. Every ledger `kind: hook` enforcer resolves to a command registration in project settings or the delivery settings constant, or to a verified explicit Git registration. Removing the only applicable registration fails the test with the enforcer ID and script path. A mere prose mention does not pass.
+3. Explicit-file and directory-target copies of a Markdown source into either corpus are denied through the detector, `reason()`, and the actual hook JSON protocol. Reading/copying out, scratch destinations, non-Markdown files and the existing corpus rename exemption retain their current behavior.
+4. The negative-space table covers directory destinations, `-t`, `dd of=`, `rsync`, and `ln -sf`. Every allowed residual is named in the ledger's `card-edit-via-tools` gap and tested as a documented limit; the ledger no longer claims unrestricted shell-write coverage.
+5. The separate completion Stop registration debt is linked to an existing matching card or filed at implementation time. This preparation neither changes hook settings nor files another card.
+
+## Progress
+
+- **Preparation baseline:** inspected commit `07bb7c5142d6cbc26c11e22d05e1e29d9ce9c44e`. The goal is not already delivered. The focused overwrite and ledger tests still originate in delivering commit `7d139ac6d` for #4070, without the requested prevention cases.
+- **Old premise/scope:** three scope entries named the ledger, the Bash guard and its broad test. Review citations placed overwrite logic at lines 1749–1777 and named a nonexistent root-level focused test. They treated all hook enforcers as settings-based, and offered overlapping alternatives for registration and coverage checks.
+- **Corrected premise/scope:** the predicate and detector now live at `we:scripts/guard-bash.mjs:1774` and `we:scripts/guard-bash.mjs:1787`; `we:scripts/guard-bash.mjs:1749` is unrelated editor handling. Add the existing focused test `we:scripts/__tests__/guard-bash-card-overwrite.test.mjs` and ledger test `we:scripts/conveyor/__tests__/brief-rule-ledger.test.mjs` to scope. The latter tests both ledger data and its registration invariant; the former and `we:scripts/__tests__/guard-bash.test.mjs` cover the guard source. No standards-checker production change is required for the review's explicitly permitted test solution.
+- **Source evidence:** `we:scripts/conveyor/brief-rule-ledger.mjs#validateLedger` checks rule structure, and `missingEnforcerFiles` checks existence, not registration. The committed-ledger tests likewise do not inspect settings. `we:scripts/operations/deliver-item-wrapper.mjs:252` exports `DELIVERY_HOOKS_SETTINGS`, whose Stop event contains the completion guard; `we:.claude/settings.json` lacks that Stop command. Conversely, the passive-wait and Monitor guards are project registrations absent from delivery settings. A union check proves registration somewhere, not coverage of all dispatch kinds.
+- **Git exception:** the ledger calls the Git push guard `kind: hook`, correctly, but it belongs to neither settings object. Its actual command registration is `we:.githooks/pre-push:15`. A blanket settings-only assertion would falsely reject it. Use the review's permitted explicit `registeredIn` escape, verified against that file rather than accepted as an unchecked string.
+- **Observed probe:** imported `corpusOverwriteTargets` and `reason()` and supplied seven command strings without executing the copies. An explicit-file copy was detected and denied; a directory-target copy, `-t`, `dd of=`, `rsync`, `ln -sf`, and a quoted spaced destination all returned no target and null reason. Sending explicit-file and directory-copy payloads to the actual `we:scripts/guard-bash.mjs` process under dispatch kind `fix` reproduced deny JSON versus empty stdout, respectively, with exit 0 for both. This is a protocol-level gap, not merely an absent unit assertion.
+
+## Design
+
+Keep the existing enforcement policy and implement the review's bounded test-and-gap approach. This is tooling work, with no standard/API vocabulary change or runtime dispatch cutover.
+
+1. **Registration invariant:** add a test-local validator to `we:scripts/conveyor/__tests__/brief-rule-ledger.test.mjs`. Read the project settings JSON and import the real `DELIVERY_HOOKS_SETTINGS` from `we:scripts/operations/deliver-item-wrapper.mjs`. Traverse actual command-hook entries; normalize ledger `ref` by dropping its symbol fragment and match the script as a command argument, not a substring anywhere in serialized settings. Return diagnostics naming each unregistered hook. Non-hook enforcers remain outside this check. Add `registeredIn` to the Git enforcer in `we:skills-src/conveyor/brief-rule-ledger.json`, using the ledger's existing repository-relative data convention to identify `we:.githooks/pre-push`. Verify that file exists and its executable command invokes the exact referenced script; comments or a missing path cannot satisfy the exception. Restrict this exception to the Git registration, not arbitrary files. This test asserts registration existence only; extend the completion-record gap to state the delivery-only registration limitation rather than claiming all dispatch kinds are protected.
+2. **Directory resolution:** retain the pure `corpusOverwriteTargets(segment) -> string[]` interface in `we:scripts/guard-bash.mjs`, its existing tokenization, wrapper peeling and supported copy/move/install family. Introduce a pure helper taking source operands and a destination token. For an unambiguous directory token (trailing slash, or a path ending in the corpus directory name), form each destination from that directory plus the source basename before applying the existing corpus/scratch predicates. Preserve spelling sufficiently to identify the written path in the denial. Process every source for multi-source copies. Do not introduce filesystem reads or infer arbitrary extensionless files to be directories. Directory discovery for bare nested paths, aliases and dynamically assembled paths stays an explicit gap.
+3. **Spaces and existing exemptions:** allow whitespace inside already-tokenized quoted corpus paths by removing the whitespace exclusion from `CORPUS_FILE_TARGET`. Do not scan raw quoted prose as a write. Preserve the existing corpus-to-corpus move exemption and scratch exclusion. Existing `reason()` and hook consumers receive resolved targets through the unchanged detector API.
+4. **Bounded negative space:** directory-copy and spaced-path cases become denied. Add table rows for target-directory flags (short and long spellings), `dd of=`, `rsync`, and `ln -sf`; record these as unsupported in the `card-edit-via-tools` gap, alongside interpreter file APIs and ambiguous directory resolution. Narrow the enforcer summary's current "any shell write" claim. Each residual row must assert both its current detector/reason outcome and the corresponding named ledger limitation. Closing these additional parsers is outside this slice; documenting them is explicitly allowed by the original review. No new requirement that every enforced rule have a gap, and no new all-dispatch coverage schema.
+
+Read-only registration dependencies are `we:.claude/settings.json`, `we:scripts/operations/deliver-item-wrapper.mjs`, and `we:.githooks/pre-push`; their registration behavior does not change here. Existing consumers of the guard and ledger retain their interfaces. Scope lists the files to change or run as matching regression coverage.
+
+## MVP
+
+1. Extend the focused overwrite table with red directory and spaced-path cases and explicit residual rows. Extend the existing ledger test with registration fixtures and a committed-ledger assertion.
+2. Add verified Git registration metadata, correct shell-write claims/gaps, and record the completion hook's limited registration in the ledger. Leave imperative-line keys and rule statuses intact.
+3. Implement lexical directory target inference and the token-level spaced-path correction in the existing detector. Exercise the real hook, not only the helper.
+4. Run the focused suites and mutation checks described below. Locate or file the separate project Stop registration follow-up during implementation and link it here.
+
+Land tests, data corrections and the guard fix together: the new assertions are intentionally red without the corresponding changes. Size 3 remains appropriate for one detector change, one registration regression and ledger metadata, with no new shell parser or dispatch migration. Independent review of this preparation remains the runner's parked-review step; this card does not assert that review has occurred.
+
+## Test plan
+
+- **Source/test pairing:** `we:scripts/guard-bash.mjs` → `we:scripts/__tests__/guard-bash-card-overwrite.test.mjs` plus `we:scripts/__tests__/guard-bash.test.mjs`; `we:skills-src/conveyor/brief-rule-ledger.json` → `we:scripts/conveyor/__tests__/brief-rule-ledger.test.mjs`.
+- In the focused overwrite test, cover both corpora; direct filename versus directory with/without trailing slash; multiple source operands; quoted spaces in source basename/destination; wrapped commands; supported copy/install/move variants; and scratch/read-only/non-Markdown/rename controls. Include trailing-slash nested directories and explicitly pin bare nested directories as unresolved. A non-Markdown source copied to a directory must not acquire a Markdown target merely because another operand is a card.
+- Feed new denied cases through `reason()` and the real hook helper, asserting `hookSpecificOutput.permissionDecision === 'deny'`, the target and Edit/Write remedy. Exit code alone is insufficient: a denied PreToolUse hook exits 0. Allowed controls must have empty stdout; assert successful process exit and inspect stderr so a crash cannot masquerade as allow.
+- Registration fixtures: project-only, wrapper-only, fragment-bearing refs, verified Git metadata, non-hook entries, missing registration, wrong script basename, settings prose mention, comment-only Git mention, nonexistent metadata path. Delete the sole command registration from cloned fixture settings and require an enforcer-specific failure. Run the same validator on committed inputs.
+- Execute from the WE lane: `npx vitest run we:scripts/__tests__/guard-bash-card-overwrite.test.mjs we:scripts/__tests__/guard-bash.test.mjs we:scripts/conveyor/__tests__/brief-rule-ledger.test.mjs`, removing the visible `we:` repository labels from filesystem arguments. The runner owns preparation checks; implementation also runs `npm run check:standards` through the repository's required admission path.
+
+## Proof plan
+
+1. Preserve a before/after transcript from the focused tests: new directory/spaced-path expectations must fail against the baseline detector, then pass after the fix. Keep the existing explicit-file case green throughout.
+2. Demonstrate registration-test sensitivity with in-memory mutations: remove all applicable registrations for one enforcer and require failure; remove the Git metadata or its executable invocation and require failure. This avoids a decorative test that only confirms file existence.
+3. Spawn the actual guard with Bash hook payloads for explicit-file and directory-target copies. On the baseline, record deny JSON versus empty stdout; after implementation, both must yield deny JSON naming the computed target. These payload probes never execute shell writes to real cards.
+4. Show every residual command family beside its passing limitation assertion and matching ledger gap. Green tests certify the stated boundary, not complete Bash write prevention or all-provider registration coverage. Attach focused-suite and standards results for independent review.
+
+## Follow-ups
+
+- Locate or file the separately requested project-level completion Stop registration card at implementation time. It should pair `we:.claude/settings.json` with `we:scripts/__tests__/guard-stop-completion-record.test.mjs` and verify the actual Stop event, preserving the existing delivery registration. No matching separate card was found by the preparation search for the completion guard and Stop-registration wording.
+- Additional parser coverage remains explicitly owed/documented: target-directory options, `dd`, `rsync`, `ln`, interpreter file APIs and filesystem-dependent directory resolution. Track further closures separately; this item must not imply that gap documentation blocks those commands.
+- Registration presence across the union of project and delivery settings is not dispatch/provider coverage. A broader coverage model remains separate from this deterministic regression and must not be inferred from its passing result.
