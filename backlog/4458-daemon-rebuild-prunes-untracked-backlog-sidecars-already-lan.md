@@ -2,9 +2,10 @@
 bornAs: xvnwljh
 kind: story
 size: 2
-status: open
+status: resolved
 scope: ["we:scripts/lib/daemon-rebuild.mjs", "we:scripts/lib/__tests__/daemon-rebuild.test.mjs"]
 dateOpened: "2026-09-29"
+dateResolved: "2026-10-01"
 preparedDate: "2026-09-30"
 preparedAgainstSha: "940b7dd328d118b0c398a2f1fcef96608629ce01"
 tags: []
