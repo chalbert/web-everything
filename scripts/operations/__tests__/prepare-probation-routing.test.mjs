@@ -24,9 +24,14 @@ describe('prepare probation routing', () => {
     expect(selectProbationWorker({ taskType: 'prepare', vetoes }).worker).toBeNull();
     expect(selectProbationWorker({ taskType: 'prepare', vetoes, simple: true }).worker).toMatchObject({ id: 'antigravity-gemini', checker: 'codex' });
   });
-  it('keeps prepare-decision on Claude', () => {
-    const route = decideDispatchRoute({ kind: 'prepare-decision' });
+  it('routes prepare-decision to Astra at high effort', () => {
+    const route = decideDispatchRoute({ kind: 'prepare-decision', scopePaths: ['we:backlog/9001-card.md'] });
     expect(route).toMatchObject({ tier: 'opus', outcome: 'role' });
-    expect(route.probationWorker).toBeUndefined();
+    expect(route.probationWorker).toBeNull();
+    expect(route.policyRoute).toMatchObject({ provider: 'codex', model: 'gpt-6-astra', effort: 'high' });
   });
+});
+
+it.each(['prepare-item', 'prepare-decision', 'investigate'])('%s fails closed with unknown scope', kind => {
+  expect(decideDispatchRoute({ kind }).policyRoute.provider).toBe('claude');
 });

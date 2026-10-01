@@ -22,7 +22,7 @@
 
 import { execFileSync } from 'node:child_process';
 import {
-  appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync,
+  appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -221,9 +221,24 @@ export function createWorld({ repos = ['we'], lanes = 3, clockStartOffsetMs = 0 
   // (i) one merged env
   const ghBinDir = rawGh.env.PATH.split(':')[0];
   const claudeBinDir = rawClaude.env.PATH.split(':')[0];
+  // These scenarios script Claude sessions (including Claude-specific auth failures). Keep the
+  // production policy and exercise its declared fallback, with only our fake provider installed.
+  // Never let a developer's real Codex/agy binary turn a soak into a paid, unscripted launch.
+  const toolsDir = join(root, 'tools');
+  mkdirSync(toolsDir);
+  const linked = new Set(['claude', 'codex', 'agy']);
+  for (const dir of String(process.env.PATH ?? '').split(':').filter(Boolean)) {
+    let names;
+    try { names = readdirSync(dir); } catch { continue; }
+    for (const name of names) {
+      if (linked.has(name)) continue;
+      symlinkSync(resolve(dir, name), join(toolsDir, name));
+      linked.add(name);
+    }
+  }
   const env = {
     ...process.env,
-    PATH: [ghBinDir, claudeBinDir, process.env.PATH].join(':'),
+    PATH: [ghBinDir, claudeBinDir, toolsDir].join(':'),
     NODE_OPTIONS: clock.env.NODE_OPTIONS,
     HOME: home,
     SIM_CLOCK_FILE: clock.env.SIM_CLOCK_FILE,
@@ -277,6 +292,9 @@ export function createWorld({ repos = ['we'], lanes = 3, clockStartOffsetMs = 0 
   const claudeResolved = resolveBin('claude');
   if (claudeResolved !== join(claudeBinDir, 'claude')) {
     throw new Error(`world: the fake \`claude\` did not win PATH — resolves to ${claudeResolved || '(nothing)'}. Refusing to run.`);
+  }
+  for (const provider of ['codex', 'agy']) {
+    if (resolveBin(provider)) throw new Error(`world: unscripted provider ${provider} is on PATH. Refusing to run.`);
   }
 
   // (d, continued) provision N lanes via the REAL scripts/lane-pool.mjs, from the sim clone. `--no-install`

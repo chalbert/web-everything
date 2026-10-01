@@ -62,7 +62,7 @@ export function parseArgs(argv) {
   }
   const policy = readRoutingPolicy();
   const configured = flags.worker ? null : resolveOperationRoute({ operation: 'ci-heal', taskType: flags.taskType ?? 'ci-heal', policy, gateClosed: false, available: ['codex', 'antigravity'] });
-  const worker = typeof flags.worker === 'string' ? JSON.parse(flags.worker) : configured ? { ...PROBATION_WORKERS[configured.provider === 'codex' ? 'codex' : configured.model.startsWith('claude-') ? 'antigravity-claude' : 'antigravity-gemini'], model: configured.model, taskType: flags.taskType ?? 'ci-heal' } : null;
+  const worker = typeof flags.worker === 'string' ? JSON.parse(flags.worker) : configured ? { ...PROBATION_WORKERS[configured.provider === 'codex' ? 'codex' : configured.model.startsWith('claude-') ? 'antigravity-claude' : 'antigravity-gemini'], model: configured.model, effort: configured.effort, taskType: flags.taskType ?? 'ci-heal' } : null;
   if (worker) worker.model = resolvePolicyModel(worker.provider, worker.model, policy);
   return {
     pr: Number(flags.pr),

@@ -3,9 +3,11 @@ bornAs: xs3q6bf
 kind: story
 size: 3
 parent: "4075"
-status: open
+status: resolved
 scope: ["we:scripts/lib/isolation-provider.mjs", "we:scripts/lib/__tests__/isolation-provider.test.mjs", "we:scripts/operations/codex-delivery-provider.mjs", "we:scripts/operations/__tests__/codex-delivery-provider.test.mjs", "we:scripts/operations/__tests__/codex-delivery-provider-sandbox.test.mjs"]
 dateOpened: "2026-09-29"
+dateStarted: "2026-10-01"
+dateResolved: "2026-10-01"
 preparedDate: "2026-10-01"
 preparedAgainstSha: "bc2058219cef9235eb00e7a03ce4c2d20fd3bbaa"
 tags: []
@@ -24,6 +26,7 @@ Idempotency key (do not edit): approval-prevention-key:chalbert/web-everything#2
 - Preparation research against `bc2058219cef9235eb00e7a03ce4c2d20fd3bbaa`: no implementation or sandbox probe performed during this preparation.
 - **Old premise/scope:** the review cited `we:scripts/operations/codex-delivery-provider.mjs:1210` and scoped only that provider and `we:scripts/operations/__tests__/codex-delivery-provider.test.mjs`. It asked whether the extra writable WE lane also permitted a hook write, with a conditional permission fix.
 - **Corrected premise/scope:** the provider now delegates profile generation to `buildNativeDenyCodexArgs` in `we:scripts/lib/isolation-provider.mjs:356`. Its permission entries at lines 366–368 combine supplied denies with root-level write grants; they add no Git-metadata exclusion. Add that shared source and its existing matching test, `we:scripts/lib/__tests__/isolation-provider.test.mjs`, plus the planned live test `we:scripts/operations/__tests__/codex-delivery-provider-sandbox.test.mjs`. Retain provider scope for the fresh/resume contract and accurate comments.
+- **Evidence (2026-10-01, codex-cli 0.155.1, macOS Seatbelt, `codex sandbox -P locked`):** the original profile was already safe. With a standalone WE root granted via `writableRoots`, a write under its backlog directory succeeded; creating and overwriting files under its `.git/hooks`, `mv` of `.git`, and `rm -rf .git` all returned `Operation not permitted`; an ungranted sibling write was denied. No builder permission change was made. Fixtures under `/tmp` made every write succeed (ambient temp is writable), so they must live under `$HOME`. The live suite (4 tests, `we:scripts/operations/__tests__/codex-delivery-provider-sandbox.test.mjs`) passes with `WE_TEST_SANDBOX=0 WE_CODEX_SANDBOX_TEST=1` (vitest setup otherwise strips `WE_*` and fakes HOME). Unit suites pass; `check:standards` not run by the agent. Not covered: linked-worktree `.git` files, symlink aliases.
 - **Source evidence:** `we:scripts/operations/deliver-item-wrapper.mjs:1266` supplies `extraLanes` as `writableRoots`; `we:scripts/operations/codex-delivery-provider.mjs:345` accepts it and line 367 forwards it. `we:scripts/lib/__tests__/isolation-provider.test.mjs:271` covers the shared builder but has no writable-root hook protection case. `we:scripts/operations/__tests__/codex-delivery-provider.test.mjs:77` and line 139 cover fresh/resume argv with mocked process execution, not OS enforcement. The shared builder's latest history entry is `9990ff189` (#4348), the commit named by the original review. The owed regression is not present in these sources/tests; actual sandbox write behavior remains to be measured, not inferred from the map.
 
 ## Design

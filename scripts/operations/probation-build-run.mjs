@@ -209,7 +209,7 @@ export function parseArgs(argv) {
   const configured = flags.worker ? null : resolveOperationRoute({ operation: taskType === 'prepare' ? 'prepare-item' : 'build', taskType, policy, gateClosed: false, available: ['codex', 'antigravity', 'agy-claude', 'agy-gemini'] });
   const supplied = typeof flags.worker === 'string'
     ? (Object.hasOwn(PROBATION_WORKERS, flags.worker) ? { id: flags.worker } : JSON.parse(flags.worker))
-    : configured ? { id: configured.provider === 'codex' ? 'codex' : configured.model.startsWith('claude-') ? 'antigravity-claude' : 'antigravity-gemini', model: configured.model } : null;
+    : configured ? { id: configured.provider === 'codex' ? 'codex' : configured.model.startsWith('claude-') ? 'antigravity-claude' : 'antigravity-gemini', model: configured.model, effort: configured.effort } : null;
   let worker = null;
   if (supplied) {
     const def = Object.hasOwn(PROBATION_WORKERS, supplied.id) ? PROBATION_WORKERS[supplied.id] : null;
