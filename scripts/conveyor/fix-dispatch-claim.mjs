@@ -231,7 +231,7 @@ export function refreshLiveFixDispatchClaims({
     // A native listing outage must not expire a live detached worker's claim.
     // Native claims retain their ordinary unknown-session TTL grace.
     if (!claims.some(entry => detachedHandlePid(entry.meta?.handle))) throw error;
-    listed = [];
+    listed = null;
   }
   if (listed && typeof listed.then === 'function') {
     throw new TypeError('refreshLiveFixDispatchClaims: listAgentsAll must be synchronous (got a Promise)');
@@ -259,6 +259,8 @@ export function refreshLiveFixDispatchClaims({
     if (kind === 'fixing') name = entry.meta.who ? String(entry.meta.who) : null;
     else { try { name = fixDispatchSessionName({ repo, pr, kind }); } catch { name = null; } }
     if (!name) continue;
+    // Listing outage: a native claim's liveness is unknowable, so leave it to its TTL grace (never "dead").
+    if (listed === null) continue;
     const agentsAll = (Array.isArray(listed) ? listed : []).filter((a) => a && String(a.name ?? '') === name)
       .map((a) => {
         let info = null;

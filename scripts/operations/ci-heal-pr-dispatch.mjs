@@ -144,7 +144,8 @@ export async function dispatchCiHeal(planned, {
       ITEM_NUM: planned.itemNum ?? '', PR_NUM: planned.pr, LANE_REF: planned.laneRef, LANE: planned.lane,
       SESSION_SLUG: sessionSlug, SCOPE: planned.scope.join(','), REASON: reason, ...tokens,
     }, BRIEF_REQUIRED_BY_KIND['ci-heal'], [...OPTIONAL_BRIEF_PLACEHOLDERS, 'ITEM_NUM', 'SCOPE'], REPO_AWARE_VALUE_PATTERNS);
-    const route = routeHeal({ scope: planned.scope, reason });
+    // The critical-work gate only understands WE-relative scopes; a sibling repo's heal keeps the unchanged Claude path.
+    const route = repo === 'we' ? routeHeal({ scope: planned.scope, reason }) : null;
 
     const out = await sinks[DISPATCH_EFFECT]({
       launchKind: 'ci-heal', laneRef: planned.laneRef, prompt: withAltBranchHint(prompt, planned.altBranch), sessionSlug, num: planned.itemNum ?? undefined, lane: planned.lane, scope: planned.scope,

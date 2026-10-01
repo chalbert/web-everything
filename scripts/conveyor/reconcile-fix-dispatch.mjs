@@ -909,7 +909,11 @@ export function dispatchFix(planned, {
   const routing = routeFix(planned);
   if (routing?.refusal) throw new Error(routing.refusal);
   const candidates = routing?.policyRoute ? [routing.policyRoute, ...routing.policyRoute.fallback] : [];
-  const selected = candidates.find(route => ['claude', 'codex'].includes(route.provider) && providerAvailable(route.provider));
+  // An explicit model/effort pin (or its reason) is a native-Claude launch contract the Codex path cannot honor,
+  // so a pinned dispatch only considers the Claude route.
+  const explicitPin = Boolean(modelReason) || extraArgs.some(arg => /^--(model|effort)(=|$)/.test(String(arg)));
+  const selected = candidates.find(route => ['claude', 'codex'].includes(route.provider)
+    && !(explicitPin && route.provider !== 'claude') && providerAvailable(route.provider));
   if (candidates.length && !selected) throw new Error("routing policy: fix has no available provider");
   const claim = acquireClaim({
     repo, pr: planned.pr, kind: 'fix', route: selected, headSha: planned.headRefOid, scope: planned.scope, owner: claimOwner, lockRoot: claimRoot,
@@ -985,8 +989,7 @@ export function dispatchFix(planned, {
     const result = {
       sessionId, agentId: parseBackgroundedId(stdout),
       sessionSlug, pr: planned.pr, itemNum: planned.itemNum, lane: planned.lane, unknownTokens,
-      provider: 'claude', model: resolvePolicyModel('claude', argv[argv.indexOf('--model') + 1]),
-      effort: argv.find(arg => arg.startsWith('--effort='))?.slice(9) ?? argv[argv.indexOf('--effort') + 1],
+      provider: 'claude', ...launchedClaudeSettings(argv),
       resumed: false, ...(resumeAttempt ? { resumeAttempt } : {}),
     };
     stampClaim({ repo, pr: planned.pr, kind: 'fix', owner: claimOwner, lockRoot: claimRoot, route: result, handle: result.agentId });
@@ -1518,4 +1521,22 @@ export function filterFixesByInFlightScope(planned, buildClaims = [], fixClaims 
     accepted.push(entry);
   }
   return { planned: accepted, refusals };
+}
+
+/**
+ * Model/effort of a launched native Claude fix, read back off the argv for reporting. NEVER throws: it runs after
+ * `spawnAgent` has already started a live session, so a `--model=<id>` form, a non-catalog id or a missing flag
+ * must degrade to the raw value (or `undefined`), never discard the result and leave the claim unstamped.
+ */
+function launchedClaudeSettings(argv) {
+  const flag = (name) => {
+    const joined = argv.find(arg => String(arg).startsWith(`${name}=`));
+    if (joined) return String(joined).slice(name.length + 1);
+    const at = argv.indexOf(name);
+    return at >= 0 ? argv[at + 1] : undefined;
+  };
+  const model = flag('--model');
+  let resolved = model;
+  try { if (model) resolved = resolvePolicyModel('claude', model); } catch { /* non-catalog pin: report it verbatim */ }
+  return { model: resolved, effort: flag('--effort') };
 }
