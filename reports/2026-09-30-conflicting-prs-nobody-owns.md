@@ -1,23 +1,28 @@
 # Conflicting PRs Nobody Owns (Diagnosis)
 
+Why PRs #3176 and #3215 (both conflicting) showed no owner. Each causal claim names the code that produces it; where the evidence does not settle the cause, this report says so.
+
 ## Root Causes & Evidence
 
-**1. How the phase is derived (`we:scripts/conveyor/reconcile-core.mjs` phase logic)**
-The phase is derived in `we:scripts/progress-board.mjs` by `classifyPr`, which evaluates labels in strict precedence: `review:changes` (`bounced`) > `review:human` (without `review:accepted` → `needs-human`) > `ci:failed` (`ci-red`) > `mergeStateStatus === 'DIRTY'` (`conflicted`) > `review:pending` (`needs-review`) > `review:accepted` (`queued`).
+**1. How the phase is derived (`we:scripts/progress-board.mjs#classifyPr`)**
+Labels are checked in strict order: `review:changes` (`bounced`) > `review:human` without `review:accepted` (`needs-human`) > `ci-red` > `mergeStateStatus` of `DIRTY` or `BEHIND` (`conflicted`) > `review:pending` (`needs-review`) > `review:accepted` (`queued`). The reconcile pass (`we:scripts/conveyor/reconcile-core.mjs`) consumes this phase; it does not derive it.
 
-**2. Why a conflicting PR with `review:changes` read as `queued`**
-It didn't. The log lines the user observed (`reconcile-refused nothing-owed chalbert/web-everything PR #3176 — phase 'queued'`) occurred *before* the PRs received `review:changes`. GitHub event logs confirm that PR 3215 was labeled `review:accepted` at `22:51:01Z` and PR 3176 was similarly labeled earlier. Because `review:accepted` supersedes `review:human` in `classifyPr`, they evaluated to `queued`. Once `we:scripts/conveyor/parked-pr-conflict-watch.mjs` subsequently applied `review:changes` (at `22:56:15Z` for 3215), `classifyPr` correctly returned `bounced`. Today, they evaluate to `bounced` and are correctly dispatched as `fix` targets (currently blocked only by `scope-overlap` with PR #3209 in `we:scripts/conveyor/reconcile-fix-dispatch.mjs`).
+**2. Why the log read `phase 'queued'` for #3176/#3215 — cause NOT settled**
+The refusal lines (`reconcile-refused nothing-owed … phase 'queued'`) came before `review:changes` was applied (PR 3215 got `review:accepted` at `22:51:01Z`, `review:changes` at `22:56:15Z`). Since `classifyPr` checks `DIRTY`/`BEHIND` before `review:accepted`, a PR read as `queued` was **not** seen as `DIRTY`/`BEHIND` at that moment. Two candidates remain, and the logs do not say which applied:
+- `mergeStateStatus` was `UNKNOWN`, stale or cached (GitHub computes it lazily after a push to the base).
+- The PR sat in the queued-conflict grace window (`we:scripts/conveyor/parked-pr-conflict-watch.mjs#isQueuedConflictTarget`).
+Follow-up: card `xzv8r3e`. Once `review:changes` landed, `classifyPr` correctly returned `bounced`.
 
-**3. Are `review:human` PRs deliberately skipped by conflict repair?**
-No. They are explicitly handled by `we:scripts/conveyor/parked-pr-conflict-watch.mjs` under `#xu2krte Fork 2 (review-human statute amendment)`. The `recheckCandidate` branch (line 1509) specifically targets parked, conflicting PRs with `review:human`.
+**3. Are `review:human` PRs skipped by conflict repair?**
+No. `we:scripts/conveyor/parked-pr-conflict-watch.mjs` handles them under `#xu2krte Fork 2` (the `recheckCandidate` branch targets parked, conflicting `review:human` PRs).
 
-**4. Is the contradictory label set (`review:human` AND `review:changes`) a bug?**
-No, it is the intentional design of Fork 2. The conflict watcher posts a finding (which applies `review:changes`) to dispatch a mechanical conflict fix, but explicitly preserves `review:human` so the final merged result still undergoes human review (`we:scripts/conveyor/parked-pr-conflict-watch.mjs`, line 1240: "do **not** touch any `review:*` label — `review:human` stays").
+**4. Is the label set `review:human` + `review:changes` a bug?**
+No, it is Fork 2's design. The watcher posts a finding (which applies `review:changes`) to dispatch a mechanical conflict fix, and leaves `review:human` in place so a human still reviews the merged result.
 
-**5. What "live pid" session was bound to #3176?**
-The `live-process` refusal happens when a PR has a stale `review-status:reviewing` label or an active claim. PR 3176 received `review-status:reviewing` at `20:32:52Z` and it was not cleared until `23:00:37Z`, preventing dispatch during that window.
+**5. What blocked dispatch on #3176 — NOT identified**
+A `live-process` refusal is derived in `we:scripts/conveyor/reconcile-core.mjs#assessLiveness` only from a bound session whose agent listing has `pidAlive === true`. It never reads the `review-status:reviewing` label; that label is an *output* of the same state (`we:scripts/conveyor/review-status-tag.mjs`), and the reconcile pass already re-derives and clears stale ones every tick. So the label (`20:32:52Z` to `23:00:37Z` on #3176) shows a session was bound, but this report did not identify which session or why its pid stayed live. That is the open question; a label sweep would not answer it, and none is proposed.
 
 ## Fix Design
-No code changes are required for the phase logic or label set, as they are functioning as designed. However, the orchestrator should:
-1. Ensure stale `review-status:reviewing` labels are swept more aggressively to prevent false `live-process` blocks.
-2. Consider adding log clarity when a PR transitions from `queued` to `bounced` to avoid operator confusion.
+No code change to the phase logic or label set: they work as designed.
+1. Settle item 2 (card `xzv8r3e`): make the refusal log name the `mergeStateStatus` it saw, so a `queued` read on a conflicting PR is diagnosable.
+2. Next time a `live-process` refusal outlasts its session, capture the bound session id and pid from `assessLiveness` at that moment, before the label clears.

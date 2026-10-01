@@ -2,16 +2,15 @@
 kind: story
 size: 2
 status: open
-scope: ["we:scripts/conveyor/reconcile-core.mjs"]
+scope: ["we:scripts/progress-board.mjs"]
 dateOpened: "2026-09-30"
 tags: []
-relatedReport: we:reports/2026-09-30-conflicting-prs-nobody-owns.md
 ---
 
-# Prevent temporary queued phase evaluation during label churn
+# Pin why a conflicting PR can read `queued` in `classifyPr`
 
-Address operator confusion caused by PRs temporarily reading as 'queued' during review:accepted label churn before conflict watchers apply review:changes.
+Diagnosis: `we:reports/2026-09-30-conflicting-prs-nobody-owns.md`. `classifyPr` in `we:scripts/progress-board.mjs` returns `conflicted` for `DIRTY`/`BEHIND` before it reaches `review:accepted` → `queued`, so a conflicting PR should not read `queued`. Find which input made #3176/#3215 read `queued` (a stale or `UNKNOWN` `mergeStateStatus`, or the queued-conflict grace window in `we:scripts/conveyor/parked-pr-conflict-watch.mjs`) and make the refusal log name it.
 
 ## Done when
 
-1. **Executable** — TODO: a command that fails before this item lands and passes after.
+1. **Executable** — a unit test next to `we:scripts/progress-board.mjs` feeds `classifyPr` a `review:accepted` PR with `mergeStateStatus: 'UNKNOWN'` and asserts the chosen behaviour (`conflicted` or an explicit `unknown` phase, not silent `queued`); it fails before this item lands and passes after.
