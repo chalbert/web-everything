@@ -1414,7 +1414,8 @@ export function planReconcile({
       // `{path, additions, deletions}` objects for every consumer to re-derive. `null` (not `[]`) when the
       // shell's own read did not carry `files` at all (an older caller, or a `--prs-file` snapshot built before
       // this field existed) — a caller must tell "not fetched" apart from "genuinely no files changed".
-      files: Array.isArray(pr?.files)
+      // gh's GraphQL files connection stops at 100: force a full diff read at the cap.
+      files: Array.isArray(pr?.files) && pr.files.length < 100
         ? pr.files.map((f) => (typeof f?.path === 'string' ? f.path : String(f ?? ''))).filter(Boolean)
         : null,
     };
@@ -2212,7 +2213,9 @@ export function planReconcile({
 
   for (const entry of dispatch) {
     if (entry.kind !== 'fix') continue;
-    const since = fixWaitingSince(prs.find((pr) => Number(pr?.number) === entry.prNumber)?.comments);
+    const sourcePr = prs.find((pr) => Number(pr?.number) === entry.prNumber);
+    // Older/hand-opened PRs may lack an episode marker; creation still bounds starvation.
+    const since = fixWaitingSince(sourcePr?.comments) || sourcePr?.createdAt;
     if (since) entry.waitingSince = since;
   }
   return { dispatch, refusals, notes };
