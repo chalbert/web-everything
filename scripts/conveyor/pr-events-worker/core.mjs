@@ -98,7 +98,7 @@ export function parseGithubEvent(eventName, payload, { deliveryId = null, receiv
   }
   if (eventName === 'check_run') {
     const r = payload.check_run || {};
-    return { ...base, prs: prNumbers(r.pull_requests), sha: r.head_sha || null, conclusion: r.conclusion || null, name: r.name || null };
+    return { ...base, prs: prNumbers(r.pull_requests), sha: r.head_sha || null, conclusion: r.conclusion || null, name: r.name || null, app: r.app?.slug || null };
   }
   // pull_request_review
   const rv = payload.review || {};
@@ -114,7 +114,8 @@ export function foldObservation(storage, event) {
   if (type === 'check_run' || type === 'check_suite') {
     // Preserve explicit attachment evidence across later empty-array deliveries.
     // A null SHA is not a join key: unrelated unknown-head observations stay separate.
-    const checkKey = key(repo, sha, type, type === 'check_run' ? event.name : event.app,
+    // A check run is identified by name AND app: two apps may report the same name for the same SHA.
+    const checkKey = key(repo, sha, type, type === 'check_run' ? [event.name, event.app ?? null] : event.app,
       sha ? null : [...(event.prs || [])].sort((a, b) => a - b));
     const previous = get('checks', checkKey);
     put('checks', checkKey, { ...event, prs: [...new Set([...(previous?.prs || []), ...(event.prs || [])])] });
@@ -136,6 +137,9 @@ export function foldObservation(storage, event) {
         put('shas', key(repo, sha), [...new Set([...(get('shas', key(repo, sha)) || []), number])]);
       }
       assign('draft', event.draft);
+      // Legacy events stored `draft` only when true, so these transitions carry no field: the action itself is the evidence.
+      if (event.draft === undefined && event.action === 'ready_for_review') assign('draft', false);
+      if (event.draft === undefined && event.action === 'converted_to_draft') assign('draft', true);
       assign('labels', event.labels);
       if (event.labels !== undefined && row.fields.labels === seq) row.labelChanges = {};
       if (event.label && !event.labels) {
@@ -157,10 +161,23 @@ export function foldObservation(storage, event) {
 }
 
 function snapshot(storage) {
-  const checks = storage.listProjection('checks');
+  // One pass over checks, one SHA→PRs lookup per distinct (repo, sha): bounded by distinct SHAs, never PRs × checks.
+  const byPr = new Map();
+  const shaPrs = new Map();
+  const attach = (c, number) => {
+    const k = JSON.stringify([c.repo, number]);
+    if (!byPr.has(k)) byPr.set(k, new Set());
+    byPr.get(k).add(c);
+  };
+  for (const c of storage.listProjection('checks')) {
+    for (const number of c.prs || []) attach(c, number);
+    if (!c.sha) continue;
+    const shaKey = JSON.stringify([c.repo, c.sha]);
+    if (!shaPrs.has(shaKey)) shaPrs.set(shaKey, storage.getProjection('shas', shaKey) || []);
+    for (const number of shaPrs.get(shaKey)) attach(c, number);
+  }
   return storage.listProjection('prs').map(({ fields, ...row }) => {
-    const matches = checks.filter((c) => c.repo === row.repo &&
-      ((c.prs || []).includes(row.number) || (c.sha && (storage.getProjection('shas', JSON.stringify([row.repo, c.sha])) || []).includes(row.number))));
+    const matches = [...(byPr.get(JSON.stringify([row.repo, row.number])) || [])];
     return { ...row, seq: Math.max(row.seq, ...matches.map((c) => c.seq)),
       checks: matches.filter((c) => c.type === 'check_run'), suites: matches.filter((c) => c.type === 'check_suite') };
   });

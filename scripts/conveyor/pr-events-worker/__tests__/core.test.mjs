@@ -273,3 +273,43 @@ it('retains explicit check associations without lifecycle evidence and does not 
     { number: 5, sha: null, checks: [{ sha: null, conclusion: 'success' }] },
   ]);
 });
+
+it('keeps same-name check runs from different apps independent (and records the run app)', () => {
+  const run = parseGithubEvent('check_run', { action: 'completed', repository: REPO,
+    check_run: { name: 'ci', head_sha: 'a', conclusion: 'failure', app: { slug: 'app-one' }, pull_requests: [{ number: 1 }] } });
+  expect(run).toMatchObject({ type: 'check_run', name: 'ci', app: 'app-one' });
+  const log = createEventLog(createMemoryStorage());
+  log.append(lifecycle('opened', { head: { sha: 'a' } }));
+  log.append({ ...check('a', [1], 'o/r', 'check_run', 'failure'), app: 'app-one' });
+  log.append({ ...check('a', [1], 'o/r', 'check_run', 'success'), app: 'app-two' });
+  expect(log.readPrs().prs[0].checks.map((c) => [c.app, c.conclusion]).sort()).toEqual([['app-one', 'failure'], ['app-two', 'success']]);
+  log.append({ ...check('a', [1], 'o/r', 'check_run', 'success'), app: 'app-one' });
+  expect(log.readPrs().prs[0].checks.map((c) => [c.app, c.conclusion]).sort()).toEqual([['app-one', 'success'], ['app-two', 'success']]);
+});
+
+it('migrates legacy-shaped lifecycle events (no draft field) to a correct or null draft', () => {
+  const legacy = (action) => ({ repo: 'o/r', type: 'pull_request', action, prs: [1], sha: 'a' });
+  const log = createEventLog(createMemoryStorage());
+  log.append({ ...legacy('opened'), draft: true });
+  log.append(legacy('ready_for_review'));
+  expect(log.readPrs().prs[0].draft).toBe(false);
+  log.append(legacy('converted_to_draft'));
+  expect(log.readPrs().prs[0].draft).toBe(true);
+  const unknown = createEventLog(createMemoryStorage());
+  unknown.append(legacy('synchronize'));
+  expect(unknown.readPrs().prs[0].draft).toBeNull();
+});
+
+it('reads /prs with SQL lookups bounded by distinct SHAs, not PRs x checks', () => {
+  const base = createMemoryStorage();
+  let reads = 0;
+  const storage = { ...base, getProjection: (...a) => { reads += 1; return base.getProjection(...a); } };
+  const log = createEventLog(storage);
+  for (let pr = 1; pr <= 40; pr += 1) log.append(lifecycle('opened', { head: { sha: `s${pr % 4}` } }, 'o/r', pr));
+  for (let i = 0; i < 100; i += 1) log.append({ ...check(`s${i % 4}`), name: `job-${i}` });
+  reads = 0;
+  const { prs } = log.readPrs();
+  expect(reads).toBeLessThanOrEqual(8);
+  expect(prs).toHaveLength(40);
+  expect(prs.every((p) => p.checks.length === 25)).toBe(true);
+});
