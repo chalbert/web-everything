@@ -115,7 +115,7 @@ import { join, dirname, resolve as resolvePath, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash, randomBytes } from 'node:crypto';
 
-import matter from 'gray-matter';
+import { createRequire } from 'node:module';
 import { idFromName, isHash, isNum } from '../backlog/id.mjs';
 
 import { withWriteLock } from './daemon-clone-lock.mjs';
@@ -432,7 +432,9 @@ function pruneLandedBacklogSidecars({ git, root, paths, mainSha, alert }) {
       try {
         // Validate YAML as well as the scalar convention: duplicate keys, mismatched quotes,
         // malformed documents, aliases/merges and body examples cannot authorize unlinking.
-        const data = matter(fm[0]).data;
+        // gray-matter is loaded lazily (only when a landing blob is actually validated) so merely importing this
+        // module never needs node_modules — throwaway script-tree clones (e.g. backlog.mjs CLI tests) have none.
+        const data = createRequire(import.meta.url)('gray-matter')(fm[0]).data;
         const lines = fm[1].split(/\r?\n/).filter((line) => /^bornAs:/.test(line));
         if (lines.length !== 1 || !/^bornAs:[ \t]*(?:x[0-9a-z]{6}|'x[0-9a-z]{6}'|"x[0-9a-z]{6}")[ \t]*$/.test(lines[0])) continue;
         // Same scalar convention as backlog/frontmatter.mjs readField, after stricter validation.
