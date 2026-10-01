@@ -364,6 +364,95 @@ describe('withSelfSync — mid-tick stale refusal reacts immediately (#3383 bug 
   });
 });
 
+describe('withSelfSync — bounded stale recovery while main moves', () => {
+  function harness({ imported = false, refuseAgain = false, quarantineRetry = false, lockRetry = false } = {}) {
+    let head = 'boot';
+    let origin = 'boot';
+    let readLocked = false;
+    const events = [];
+    const stale = { failed: [{ error: 'STALE code from this checkout' }] };
+    const success = { dispatched: [{ prNumber: 3176 }], failed: [] };
+    const tick = vi.fn(() => {
+      expect(readLocked).toBe(true);
+      events.push('discover');
+      if (tick.mock.calls.length === 1 || refuseAgain) origin = `main-${tick.mock.calls.length}`;
+      try {
+        assertMainNotStale('/fake', () => head === origin
+          ? { fresh: true, behind: 0 }
+          : { action: 'warn', behind: 1, dirty: false }, {
+          listBehindFiles: () => ['child.mjs'], lastGood: () => null, write: () => {},
+        });
+        return success;
+      } catch (error) {
+        expect(isStaleMainRefusalMessage(error.message)).toBe(true);
+        return stale;
+      }
+    });
+    const rebuild = vi.fn(async () => {
+      expect(readLocked).toBe(false);
+      events.push('rebuild');
+      if (rebuild.mock.calls.length === 1) return { moved: false, reason: 'up-to-date' };
+      head = origin;
+      return { moved: true, adopted: true, head };
+    });
+    const onRestart = vi.fn(() => 'restarted');
+    const wrapped = withSelfSync({ tickOnce: tick }, {
+      root: '/fake', rebuild, onRestart, readHead: () => head,
+      now: () => 0, minRestartIntervalMs: 600_000,
+      diffFiles: ({ from, to }) => from === to ? [] : [imported ? 'daemon.mjs' : 'child.mjs'],
+      importClosure: () => ({ complete: true, files: new Set(['daemon.mjs']) }),
+      acquireRead: () => {
+        events.push('lock');
+        if (lockRetry && tick.mock.calls.length) return { ok: false, reason: 'writer-active' };
+        readLocked = true;
+        return { ok: true };
+      },
+      releaseRead: () => { events.push('unlock'); readLocked = false; },
+      readState: () => ({ quarantine: quarantineRetry && tick.mock.calls.length > 0 }),
+      hasStaleRefusal: (r) => r.failed?.some((f) => isStaleMainRefusalMessage(f.error)),
+      log: { error: vi.fn() },
+    });
+    return { wrapped, events, tick, rebuild, onRestart, stale, success };
+  }
+
+  it('re-discovers in the same pass after gated adoption, under a fresh read lock', async () => {
+    const h = harness();
+    await expect(h.wrapped.tickOnce('payload')).resolves.toBe(h.success);
+    expect(h.events).toEqual(['rebuild', 'lock', 'discover', 'unlock', 'rebuild', 'lock', 'discover', 'unlock']);
+    expect(h.tick.mock.calls).toEqual([['payload'], ['payload']]);
+    expect(h.onRestart).not.toHaveBeenCalled();
+  });
+
+  it('ignores the restart debounce when stale recovery requires freshly loaded modules', async () => {
+    const h = harness({ imported: true });
+    await expect(h.wrapped.tickOnce()).resolves.toBe('restarted');
+    expect(h.tick).toHaveBeenCalledTimes(1);
+    expect(h.onRestart).toHaveBeenCalledTimes(1);
+  });
+
+  it('bounds recovery if main moves again during the retry', async () => {
+    const h = harness({ refuseAgain: true });
+    await expect(h.wrapped.tickOnce()).resolves.toBe(h.stale);
+    expect(h.tick).toHaveBeenCalledTimes(2);
+    expect(h.rebuild).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([{ quarantineRetry: true }, { lockRetry: true }])('rechecks safety before retry: %j', async (opts) => {
+    const h = harness(opts);
+    expect(await h.wrapped.tickOnce()).toMatchObject({ skipped: true });
+    expect(h.tick).toHaveBeenCalledTimes(1);
+  });
+
+  it('50 moving-main passes deliver owed reviews without waiting for another interval', async () => {
+    for (let pass = 0; pass < 50; pass += 1) {
+      const h = harness();
+      const result = await h.wrapped.tickOnce();
+      expect(result.dispatched).toEqual([{ prNumber: 3176 }]);
+      expect(h.rebuild).toHaveBeenCalledTimes(2);
+    }
+  });
+});
+
 describe('selfSyncCheckout — REAL git (temp repos)', () => {
   let dir;
   const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
