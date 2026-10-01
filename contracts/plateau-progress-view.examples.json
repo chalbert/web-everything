@@ -1,0 +1,1842 @@
+{
+  "partial-history": {
+    "description": "Three observed local-drain merges; no global or full-day completeness claim.",
+    "snapshot": {
+      "schema": 2,
+      "snapshotId": "publisher-boot-1:7",
+      "publisherId": "publisher-boot-1",
+      "sequence": 7,
+      "observedAt": "2026-09-30T16:00:00Z",
+      "timeZone": "America/Toronto",
+      "coverage": {
+        "repos": {
+          "web-everything": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          },
+          "plateau-app": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          },
+          "frontierui": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          }
+        },
+        "collections": {
+          "runs": {
+            "total": 0,
+            "included": 0,
+            "complete": true,
+            "source": "runs"
+          },
+          "holds": {
+            "total": 0,
+            "included": 0,
+            "complete": true,
+            "source": "holds"
+          },
+          "actions": {
+            "total": 0,
+            "included": 0,
+            "complete": true,
+            "source": "actions"
+          }
+        }
+      },
+      "sources": {
+        "runs": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "holds": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "pullRequests": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "deliveries": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "partial",
+          "complete": false,
+          "reason": "Rotated local drain history; repo identity unavailable.",
+          "cursor": null
+        },
+        "actions": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "policy": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        }
+      },
+      "summary": {
+        "moving": {
+          "value": 0,
+          "unit": "logical-work",
+          "source": "runs",
+          "complete": true
+        },
+        "jobs": {
+          "value": 0,
+          "unit": "jobs",
+          "source": "runs",
+          "complete": true
+        },
+        "held": {
+          "value": 0,
+          "unit": "cards",
+          "source": "holds",
+          "complete": true
+        },
+        "openPullRequests": {
+          "value": 0,
+          "unit": "pull-requests",
+          "source": "pullRequests",
+          "complete": true
+        },
+        "mergedToday": {
+          "value": 3,
+          "unit": "merged-prs",
+          "source": "deliveries",
+          "complete": false
+        },
+        "humanPending": {
+          "value": 0,
+          "unit": "human-actions",
+          "source": "actions",
+          "complete": true
+        },
+        "humanActionable": {
+          "value": 0,
+          "unit": "human-actions",
+          "source": "actions",
+          "complete": true
+        }
+      },
+      "runs": [],
+      "holds": [],
+      "actions": [],
+      "items": [],
+      "deliveries": {
+        "source": "deliveries",
+        "provenance": "observed by local drain",
+        "complete": false,
+        "historyStart": "2026-09-30T14:00:00Z",
+        "today": {
+          "start": "2026-09-30T04:00:00Z",
+          "end": "2026-09-30T16:00:00Z",
+          "count": 3,
+          "complete": false
+        },
+        "trend": {
+          "status": "comparable",
+          "reason": null,
+          "current": {
+            "start": "2026-09-30T15:00:00Z",
+            "end": "2026-09-30T16:00:00Z",
+            "count": 2,
+            "complete": true
+          },
+          "previous": {
+            "start": "2026-09-30T14:00:00Z",
+            "end": "2026-09-30T15:00:00Z",
+            "count": 1,
+            "complete": true
+          }
+        }
+      },
+      "policy": {
+        "sourceKind": "external-plan",
+        "revision": "sha256:example-plan",
+        "observedAt": "2026-09-30T16:00:00Z",
+        "effectiveAt": null,
+        "readOnly": true,
+        "priorities": [
+          {
+            "description": "Restore reliable review progress.",
+            "refs": [
+              "we:4620"
+            ]
+          }
+        ],
+        "sections": [
+          {
+            "id": "standing",
+            "title": "Standing rules",
+            "text": "Keep review work moving.",
+            "sourceDate": "2026-09-29"
+          }
+        ],
+        "conflicts": [],
+        "status": "observed"
+      }
+    }
+  },
+  "stale-cache": {
+    "description": "Publisher is fresh while PR evidence is two hours old.",
+    "snapshot": {
+      "schema": 2,
+      "snapshotId": "publisher-boot-1:7",
+      "publisherId": "publisher-boot-1",
+      "sequence": 7,
+      "observedAt": "2026-09-30T16:00:00Z",
+      "timeZone": "America/Toronto",
+      "coverage": {
+        "repos": {
+          "web-everything": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          },
+          "plateau-app": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          },
+          "frontierui": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          }
+        },
+        "collections": {
+          "runs": {
+            "total": 0,
+            "included": 0,
+            "complete": true,
+            "source": "runs"
+          },
+          "holds": {
+            "total": 0,
+            "included": 0,
+            "complete": true,
+            "source": "holds"
+          },
+          "actions": {
+            "total": 0,
+            "included": 0,
+            "complete": true,
+            "source": "actions"
+          }
+        }
+      },
+      "sources": {
+        "runs": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "holds": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "pullRequests": {
+          "observedAt": "2026-09-30T14:00:00Z",
+          "lastSuccessAt": "2026-09-30T14:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "stale",
+          "complete": false,
+          "reason": "Cache read failed; retain aged evidence.",
+          "cursor": null
+        },
+        "deliveries": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "partial",
+          "complete": false,
+          "reason": "Rotated local drain history; repo identity unavailable.",
+          "cursor": null
+        },
+        "actions": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "policy": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        }
+      },
+      "summary": {
+        "moving": {
+          "value": 0,
+          "unit": "logical-work",
+          "source": "runs",
+          "complete": true
+        },
+        "jobs": {
+          "value": 0,
+          "unit": "jobs",
+          "source": "runs",
+          "complete": true
+        },
+        "held": {
+          "value": 0,
+          "unit": "cards",
+          "source": "holds",
+          "complete": true
+        },
+        "openPullRequests": {
+          "value": 1,
+          "unit": "pull-requests",
+          "source": "pullRequests",
+          "complete": false
+        },
+        "mergedToday": {
+          "value": 3,
+          "unit": "merged-prs",
+          "source": "deliveries",
+          "complete": false
+        },
+        "humanPending": {
+          "value": 0,
+          "unit": "human-actions",
+          "source": "actions",
+          "complete": true
+        },
+        "humanActionable": {
+          "value": 0,
+          "unit": "human-actions",
+          "source": "actions",
+          "complete": true
+        }
+      },
+      "runs": [],
+      "holds": [],
+      "actions": [],
+      "items": [],
+      "deliveries": {
+        "source": "deliveries",
+        "provenance": "observed by local drain",
+        "complete": false,
+        "historyStart": "2026-09-30T14:00:00Z",
+        "today": {
+          "start": "2026-09-30T04:00:00Z",
+          "end": "2026-09-30T16:00:00Z",
+          "count": 3,
+          "complete": false
+        },
+        "trend": {
+          "status": "comparable",
+          "reason": null,
+          "current": {
+            "start": "2026-09-30T15:00:00Z",
+            "end": "2026-09-30T16:00:00Z",
+            "count": 2,
+            "complete": true
+          },
+          "previous": {
+            "start": "2026-09-30T14:00:00Z",
+            "end": "2026-09-30T15:00:00Z",
+            "count": 1,
+            "complete": true
+          }
+        }
+      },
+      "policy": {
+        "sourceKind": "external-plan",
+        "revision": "sha256:example-plan",
+        "observedAt": "2026-09-30T16:00:00Z",
+        "effectiveAt": null,
+        "readOnly": true,
+        "priorities": [
+          {
+            "description": "Restore reliable review progress.",
+            "refs": [
+              "we:4620"
+            ]
+          }
+        ],
+        "sections": [
+          {
+            "id": "standing",
+            "title": "Standing rules",
+            "text": "Keep review work moving.",
+            "sourceDate": "2026-09-29"
+          }
+        ],
+        "conflicts": [],
+        "status": "observed"
+      }
+    }
+  },
+  "missing-trend-baseline": {
+    "description": "Current hour is observed; previous hour is unknown, not zero.",
+    "snapshot": {
+      "schema": 2,
+      "snapshotId": "publisher-boot-1:7",
+      "publisherId": "publisher-boot-1",
+      "sequence": 7,
+      "observedAt": "2026-09-30T16:00:00Z",
+      "timeZone": "America/Toronto",
+      "coverage": {
+        "repos": {
+          "web-everything": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          },
+          "plateau-app": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          },
+          "frontierui": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          }
+        },
+        "collections": {
+          "runs": {
+            "total": 0,
+            "included": 0,
+            "complete": true,
+            "source": "runs"
+          },
+          "holds": {
+            "total": 0,
+            "included": 0,
+            "complete": true,
+            "source": "holds"
+          },
+          "actions": {
+            "total": 0,
+            "included": 0,
+            "complete": true,
+            "source": "actions"
+          }
+        }
+      },
+      "sources": {
+        "runs": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "holds": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "pullRequests": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "deliveries": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "partial",
+          "complete": false,
+          "reason": "Rotated local drain history; repo identity unavailable.",
+          "cursor": null
+        },
+        "actions": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "policy": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        }
+      },
+      "summary": {
+        "moving": {
+          "value": 0,
+          "unit": "logical-work",
+          "source": "runs",
+          "complete": true
+        },
+        "jobs": {
+          "value": 0,
+          "unit": "jobs",
+          "source": "runs",
+          "complete": true
+        },
+        "held": {
+          "value": 0,
+          "unit": "cards",
+          "source": "holds",
+          "complete": true
+        },
+        "openPullRequests": {
+          "value": 0,
+          "unit": "pull-requests",
+          "source": "pullRequests",
+          "complete": true
+        },
+        "mergedToday": {
+          "value": 3,
+          "unit": "merged-prs",
+          "source": "deliveries",
+          "complete": false
+        },
+        "humanPending": {
+          "value": 0,
+          "unit": "human-actions",
+          "source": "actions",
+          "complete": true
+        },
+        "humanActionable": {
+          "value": 0,
+          "unit": "human-actions",
+          "source": "actions",
+          "complete": true
+        }
+      },
+      "runs": [],
+      "holds": [],
+      "actions": [],
+      "items": [],
+      "deliveries": {
+        "source": "deliveries",
+        "provenance": "observed by local drain",
+        "complete": false,
+        "historyStart": "2026-09-30T15:00:00Z",
+        "today": {
+          "start": "2026-09-30T04:00:00Z",
+          "end": "2026-09-30T16:00:00Z",
+          "count": 3,
+          "complete": false
+        },
+        "trend": {
+          "status": "collecting-history",
+          "reason": "Previous hour is not covered.",
+          "current": {
+            "start": "2026-09-30T15:00:00Z",
+            "end": "2026-09-30T16:00:00Z",
+            "count": 2,
+            "complete": true
+          },
+          "previous": {
+            "start": "2026-09-30T14:00:00Z",
+            "end": "2026-09-30T15:00:00Z",
+            "count": null,
+            "complete": false
+          }
+        }
+      },
+      "policy": {
+        "sourceKind": "external-plan",
+        "revision": "sha256:example-plan",
+        "observedAt": "2026-09-30T16:00:00Z",
+        "effectiveAt": null,
+        "readOnly": true,
+        "priorities": [
+          {
+            "description": "Restore reliable review progress.",
+            "refs": [
+              "we:4620"
+            ]
+          }
+        ],
+        "sections": [
+          {
+            "id": "standing",
+            "title": "Standing rules",
+            "text": "Keep review work moving.",
+            "sourceDate": "2026-09-29"
+          }
+        ],
+        "conflicts": [],
+        "status": "observed"
+      }
+    }
+  },
+  "conflicting-plan": {
+    "description": "Both plan sections are retained; no effective runtime limit is asserted.",
+    "snapshot": {
+      "schema": 2,
+      "snapshotId": "publisher-boot-1:7",
+      "publisherId": "publisher-boot-1",
+      "sequence": 7,
+      "observedAt": "2026-09-30T16:00:00Z",
+      "timeZone": "America/Toronto",
+      "coverage": {
+        "repos": {
+          "web-everything": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          },
+          "plateau-app": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          },
+          "frontierui": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          }
+        },
+        "collections": {
+          "runs": {
+            "total": 0,
+            "included": 0,
+            "complete": true,
+            "source": "runs"
+          },
+          "holds": {
+            "total": 0,
+            "included": 0,
+            "complete": true,
+            "source": "holds"
+          },
+          "actions": {
+            "total": 0,
+            "included": 0,
+            "complete": true,
+            "source": "actions"
+          }
+        }
+      },
+      "sources": {
+        "runs": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "holds": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "pullRequests": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "deliveries": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "partial",
+          "complete": false,
+          "reason": "Rotated local drain history; repo identity unavailable.",
+          "cursor": null
+        },
+        "actions": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "policy": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        }
+      },
+      "summary": {
+        "moving": {
+          "value": 0,
+          "unit": "logical-work",
+          "source": "runs",
+          "complete": true
+        },
+        "jobs": {
+          "value": 0,
+          "unit": "jobs",
+          "source": "runs",
+          "complete": true
+        },
+        "held": {
+          "value": 0,
+          "unit": "cards",
+          "source": "holds",
+          "complete": true
+        },
+        "openPullRequests": {
+          "value": 0,
+          "unit": "pull-requests",
+          "source": "pullRequests",
+          "complete": true
+        },
+        "mergedToday": {
+          "value": 3,
+          "unit": "merged-prs",
+          "source": "deliveries",
+          "complete": false
+        },
+        "humanPending": {
+          "value": 0,
+          "unit": "human-actions",
+          "source": "actions",
+          "complete": true
+        },
+        "humanActionable": {
+          "value": 0,
+          "unit": "human-actions",
+          "source": "actions",
+          "complete": true
+        }
+      },
+      "runs": [],
+      "holds": [],
+      "actions": [],
+      "items": [],
+      "deliveries": {
+        "source": "deliveries",
+        "provenance": "observed by local drain",
+        "complete": false,
+        "historyStart": "2026-09-30T14:00:00Z",
+        "today": {
+          "start": "2026-09-30T04:00:00Z",
+          "end": "2026-09-30T16:00:00Z",
+          "count": 3,
+          "complete": false
+        },
+        "trend": {
+          "status": "comparable",
+          "reason": null,
+          "current": {
+            "start": "2026-09-30T15:00:00Z",
+            "end": "2026-09-30T16:00:00Z",
+            "count": 2,
+            "complete": true
+          },
+          "previous": {
+            "start": "2026-09-30T14:00:00Z",
+            "end": "2026-09-30T15:00:00Z",
+            "count": 1,
+            "complete": true
+          }
+        }
+      },
+      "policy": {
+        "sourceKind": "external-plan",
+        "revision": "sha256:example-plan",
+        "observedAt": "2026-09-30T16:00:00Z",
+        "effectiveAt": null,
+        "readOnly": true,
+        "priorities": [
+          {
+            "description": "Restore reliable review progress.",
+            "refs": [
+              "we:4620"
+            ]
+          }
+        ],
+        "sections": [
+          {
+            "id": "older",
+            "title": "Standing rules",
+            "text": "Allow two builds.",
+            "sourceDate": "2026-09-28"
+          },
+          {
+            "id": "newer",
+            "title": "Later limits",
+            "text": "Allow four builds.",
+            "sourceDate": "2026-09-29"
+          }
+        ],
+        "conflicts": [
+          {
+            "sectionIds": [
+              "older",
+              "newer"
+            ],
+            "description": "Build limits disagree; no authority selected."
+          }
+        ],
+        "status": "conflict"
+      }
+    }
+  },
+  "cold-history": {
+    "description": "No observations: unknown merge counts and collecting history.",
+    "snapshot": {
+      "schema": 2,
+      "snapshotId": "publisher-boot-1:7",
+      "publisherId": "publisher-boot-1",
+      "sequence": 7,
+      "observedAt": "2026-09-30T16:00:00Z",
+      "timeZone": "America/Toronto",
+      "coverage": {
+        "repos": {
+          "web-everything": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          },
+          "plateau-app": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          },
+          "frontierui": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          }
+        },
+        "collections": {
+          "runs": {
+            "total": 0,
+            "included": 0,
+            "complete": true,
+            "source": "runs"
+          },
+          "holds": {
+            "total": 0,
+            "included": 0,
+            "complete": true,
+            "source": "holds"
+          },
+          "actions": {
+            "total": 0,
+            "included": 0,
+            "complete": true,
+            "source": "actions"
+          }
+        }
+      },
+      "sources": {
+        "runs": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "holds": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "pullRequests": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "deliveries": {
+          "observedAt": null,
+          "lastSuccessAt": null,
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "unavailable",
+          "complete": false,
+          "reason": "Cold history.",
+          "cursor": null
+        },
+        "actions": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "policy": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        }
+      },
+      "summary": {
+        "moving": {
+          "value": 0,
+          "unit": "logical-work",
+          "source": "runs",
+          "complete": true
+        },
+        "jobs": {
+          "value": 0,
+          "unit": "jobs",
+          "source": "runs",
+          "complete": true
+        },
+        "held": {
+          "value": 0,
+          "unit": "cards",
+          "source": "holds",
+          "complete": true
+        },
+        "openPullRequests": {
+          "value": 0,
+          "unit": "pull-requests",
+          "source": "pullRequests",
+          "complete": true
+        },
+        "mergedToday": {
+          "value": null,
+          "unit": "merged-prs",
+          "source": "deliveries",
+          "complete": false
+        },
+        "humanPending": {
+          "value": 0,
+          "unit": "human-actions",
+          "source": "actions",
+          "complete": true
+        },
+        "humanActionable": {
+          "value": 0,
+          "unit": "human-actions",
+          "source": "actions",
+          "complete": true
+        }
+      },
+      "runs": [],
+      "holds": [],
+      "actions": [],
+      "items": [],
+      "deliveries": {
+        "source": "deliveries",
+        "provenance": "observed by local drain",
+        "complete": false,
+        "historyStart": null,
+        "today": {
+          "start": "2026-09-30T04:00:00Z",
+          "end": "2026-09-30T16:00:00Z",
+          "count": null,
+          "complete": false
+        },
+        "trend": {
+          "status": "collecting-history",
+          "reason": "No drain history yet.",
+          "current": {
+            "start": "2026-09-30T15:00:00Z",
+            "end": "2026-09-30T16:00:00Z",
+            "count": null,
+            "complete": false
+          },
+          "previous": {
+            "start": "2026-09-30T14:00:00Z",
+            "end": "2026-09-30T15:00:00Z",
+            "count": null,
+            "complete": false
+          }
+        }
+      },
+      "policy": {
+        "sourceKind": "external-plan",
+        "revision": "sha256:example-plan",
+        "observedAt": "2026-09-30T16:00:00Z",
+        "effectiveAt": null,
+        "readOnly": true,
+        "priorities": [
+          {
+            "description": "Restore reliable review progress.",
+            "refs": [
+              "we:4620"
+            ]
+          }
+        ],
+        "sections": [
+          {
+            "id": "standing",
+            "title": "Standing rules",
+            "text": "Keep review work moving.",
+            "sourceDate": "2026-09-29"
+          }
+        ],
+        "conflicts": [],
+        "status": "observed"
+      }
+    }
+  },
+  "pending-review-without-human-action": {
+    "description": "Daemon-owned flow with zero human pending/actionable counts and no actions.",
+    "snapshot": {
+      "schema": 2,
+      "snapshotId": "publisher-boot-1:7",
+      "publisherId": "publisher-boot-1",
+      "sequence": 7,
+      "observedAt": "2026-09-30T16:00:00Z",
+      "timeZone": "America/Toronto",
+      "coverage": {
+        "repos": {
+          "web-everything": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          },
+          "plateau-app": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          },
+          "frontierui": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          }
+        },
+        "collections": {
+          "runs": {
+            "total": 0,
+            "included": 0,
+            "complete": true,
+            "source": "runs"
+          },
+          "holds": {
+            "total": 0,
+            "included": 0,
+            "complete": true,
+            "source": "holds"
+          },
+          "actions": {
+            "total": 0,
+            "included": 0,
+            "complete": true,
+            "source": "actions"
+          }
+        }
+      },
+      "sources": {
+        "runs": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "holds": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "pullRequests": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "deliveries": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "partial",
+          "complete": false,
+          "reason": "Rotated local drain history; repo identity unavailable.",
+          "cursor": null
+        },
+        "actions": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "policy": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        }
+      },
+      "summary": {
+        "moving": {
+          "value": 0,
+          "unit": "logical-work",
+          "source": "runs",
+          "complete": true
+        },
+        "jobs": {
+          "value": 0,
+          "unit": "jobs",
+          "source": "runs",
+          "complete": true
+        },
+        "held": {
+          "value": 0,
+          "unit": "cards",
+          "source": "holds",
+          "complete": true
+        },
+        "openPullRequests": {
+          "value": 1,
+          "unit": "pull-requests",
+          "source": "pullRequests",
+          "complete": true
+        },
+        "mergedToday": {
+          "value": 3,
+          "unit": "merged-prs",
+          "source": "deliveries",
+          "complete": false
+        },
+        "humanPending": {
+          "value": 0,
+          "unit": "human-actions",
+          "source": "actions",
+          "complete": true
+        },
+        "humanActionable": {
+          "value": 0,
+          "unit": "human-actions",
+          "source": "actions",
+          "complete": true
+        }
+      },
+      "runs": [],
+      "holds": [],
+      "actions": [],
+      "items": [
+        {
+          "num": "4620",
+          "title": "Restore reliable review progress.",
+          "kind": "story",
+          "size": 5,
+          "status": "active",
+          "group": "doing",
+          "reason": "Waiting for the review daemon.",
+          "order": 1,
+          "pr": {
+            "number": 123,
+            "url": "https://github.com/chalbert/web-everything/pull/123",
+            "ci": "passing",
+            "review": "pending"
+          }
+        }
+      ],
+      "deliveries": {
+        "source": "deliveries",
+        "provenance": "observed by local drain",
+        "complete": false,
+        "historyStart": "2026-09-30T14:00:00Z",
+        "today": {
+          "start": "2026-09-30T04:00:00Z",
+          "end": "2026-09-30T16:00:00Z",
+          "count": 3,
+          "complete": false
+        },
+        "trend": {
+          "status": "comparable",
+          "reason": null,
+          "current": {
+            "start": "2026-09-30T15:00:00Z",
+            "end": "2026-09-30T16:00:00Z",
+            "count": 2,
+            "complete": true
+          },
+          "previous": {
+            "start": "2026-09-30T14:00:00Z",
+            "end": "2026-09-30T15:00:00Z",
+            "count": 1,
+            "complete": true
+          }
+        }
+      },
+      "policy": {
+        "sourceKind": "external-plan",
+        "revision": "sha256:example-plan",
+        "observedAt": "2026-09-30T16:00:00Z",
+        "effectiveAt": null,
+        "readOnly": true,
+        "priorities": [
+          {
+            "description": "Restore reliable review progress.",
+            "refs": [
+              "we:4620"
+            ]
+          }
+        ],
+        "sections": [
+          {
+            "id": "standing",
+            "title": "Standing rules",
+            "text": "Keep review work moving.",
+            "sourceDate": "2026-09-29"
+          }
+        ],
+        "conflicts": [],
+        "status": "observed"
+      }
+    }
+  },
+  "red-ci-without-human-action": {
+    "description": "Daemon-owned flow with zero human pending/actionable counts and no actions.",
+    "snapshot": {
+      "schema": 2,
+      "snapshotId": "publisher-boot-1:7",
+      "publisherId": "publisher-boot-1",
+      "sequence": 7,
+      "observedAt": "2026-09-30T16:00:00Z",
+      "timeZone": "America/Toronto",
+      "coverage": {
+        "repos": {
+          "web-everything": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          },
+          "plateau-app": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          },
+          "frontierui": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          }
+        },
+        "collections": {
+          "runs": {
+            "total": 0,
+            "included": 0,
+            "complete": true,
+            "source": "runs"
+          },
+          "holds": {
+            "total": 0,
+            "included": 0,
+            "complete": true,
+            "source": "holds"
+          },
+          "actions": {
+            "total": 0,
+            "included": 0,
+            "complete": true,
+            "source": "actions"
+          }
+        }
+      },
+      "sources": {
+        "runs": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "holds": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "pullRequests": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "deliveries": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "partial",
+          "complete": false,
+          "reason": "Rotated local drain history; repo identity unavailable.",
+          "cursor": null
+        },
+        "actions": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "policy": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        }
+      },
+      "summary": {
+        "moving": {
+          "value": 0,
+          "unit": "logical-work",
+          "source": "runs",
+          "complete": true
+        },
+        "jobs": {
+          "value": 0,
+          "unit": "jobs",
+          "source": "runs",
+          "complete": true
+        },
+        "held": {
+          "value": 0,
+          "unit": "cards",
+          "source": "holds",
+          "complete": true
+        },
+        "openPullRequests": {
+          "value": 1,
+          "unit": "pull-requests",
+          "source": "pullRequests",
+          "complete": true
+        },
+        "mergedToday": {
+          "value": 3,
+          "unit": "merged-prs",
+          "source": "deliveries",
+          "complete": false
+        },
+        "humanPending": {
+          "value": 0,
+          "unit": "human-actions",
+          "source": "actions",
+          "complete": true
+        },
+        "humanActionable": {
+          "value": 0,
+          "unit": "human-actions",
+          "source": "actions",
+          "complete": true
+        }
+      },
+      "runs": [],
+      "holds": [],
+      "actions": [],
+      "items": [
+        {
+          "num": "4620",
+          "title": "Restore reliable review progress.",
+          "kind": "story",
+          "size": 5,
+          "status": "active",
+          "group": "doing",
+          "reason": "Waiting for CI repair.",
+          "order": 1,
+          "pr": {
+            "number": 123,
+            "url": "https://github.com/chalbert/web-everything/pull/123",
+            "ci": "failing",
+            "review": null
+          }
+        }
+      ],
+      "deliveries": {
+        "source": "deliveries",
+        "provenance": "observed by local drain",
+        "complete": false,
+        "historyStart": "2026-09-30T14:00:00Z",
+        "today": {
+          "start": "2026-09-30T04:00:00Z",
+          "end": "2026-09-30T16:00:00Z",
+          "count": 3,
+          "complete": false
+        },
+        "trend": {
+          "status": "comparable",
+          "reason": null,
+          "current": {
+            "start": "2026-09-30T15:00:00Z",
+            "end": "2026-09-30T16:00:00Z",
+            "count": 2,
+            "complete": true
+          },
+          "previous": {
+            "start": "2026-09-30T14:00:00Z",
+            "end": "2026-09-30T15:00:00Z",
+            "count": 1,
+            "complete": true
+          }
+        }
+      },
+      "policy": {
+        "sourceKind": "external-plan",
+        "revision": "sha256:example-plan",
+        "observedAt": "2026-09-30T16:00:00Z",
+        "effectiveAt": null,
+        "readOnly": true,
+        "priorities": [
+          {
+            "description": "Restore reliable review progress.",
+            "refs": [
+              "we:4620"
+            ]
+          }
+        ],
+        "sections": [
+          {
+            "id": "standing",
+            "title": "Standing rules",
+            "text": "Keep review work moving.",
+            "sourceDate": "2026-09-29"
+          }
+        ],
+        "conflicts": [],
+        "status": "observed"
+      }
+    }
+  },
+  "schema-1-compatibility": {
+    "description": "Legacy snapshot stays readable without invented progress sections.",
+    "snapshot": {
+      "schema": 1,
+      "observedAt": "2026-09-30T16:00:00Z",
+      "scope": {
+        "epic": "3383",
+        "title": "Delivery",
+        "found": true,
+        "total": 0,
+        "resolved": 0,
+        "parked": 0
+      },
+      "runners": [
+        {
+          "name": "dispatcher",
+          "state": "absent",
+          "heartbeatAt": null,
+          "lastTickAt": null,
+          "tick": null
+        },
+        {
+          "name": "fix-dispatch",
+          "state": "absent",
+          "heartbeatAt": null,
+          "lastTickAt": null,
+          "tick": null
+        },
+        {
+          "name": "review",
+          "state": "absent",
+          "heartbeatAt": null,
+          "lastTickAt": null,
+          "tick": null
+        },
+        {
+          "name": "drain",
+          "state": "absent",
+          "heartbeatAt": null,
+          "lastTickAt": null,
+          "tick": null
+        }
+      ],
+      "counts": {
+        "needs-you": 0,
+        "doing": 0,
+        "queued": 0,
+        "backlog": 0
+      },
+      "items": [],
+      "degraded": [],
+      "machineHealth": null,
+      "runningNow": null
+    }
+  },
+  "moving-and-held": {
+    "description": "Separate logical-work, job and held-card units with stable identities and owning next steps.",
+    "snapshot": {
+      "schema": 2,
+      "snapshotId": "publisher-boot-1:7",
+      "publisherId": "publisher-boot-1",
+      "sequence": 7,
+      "observedAt": "2026-09-30T16:00:00Z",
+      "timeZone": "America/Toronto",
+      "coverage": {
+        "repos": {
+          "web-everything": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          },
+          "plateau-app": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          },
+          "frontierui": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          }
+        },
+        "collections": {
+          "runs": {
+            "total": 1,
+            "included": 1,
+            "complete": true,
+            "source": "runs"
+          },
+          "holds": {
+            "total": 1,
+            "included": 1,
+            "complete": true,
+            "source": "holds"
+          },
+          "actions": {
+            "total": 0,
+            "included": 0,
+            "complete": true,
+            "source": "actions"
+          }
+        }
+      },
+      "sources": {
+        "runs": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "holds": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "pullRequests": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "deliveries": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "partial",
+          "complete": false,
+          "reason": "Rotated local drain history; repo identity unavailable.",
+          "cursor": null
+        },
+        "actions": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "policy": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        }
+      },
+      "summary": {
+        "moving": {
+          "value": 1,
+          "unit": "logical-work",
+          "source": "runs",
+          "complete": true
+        },
+        "jobs": {
+          "value": 1,
+          "unit": "jobs",
+          "source": "runs",
+          "complete": true
+        },
+        "held": {
+          "value": 1,
+          "unit": "cards",
+          "source": "holds",
+          "complete": true
+        },
+        "openPullRequests": {
+          "value": 0,
+          "unit": "pull-requests",
+          "source": "pullRequests",
+          "complete": true
+        },
+        "mergedToday": {
+          "value": 3,
+          "unit": "merged-prs",
+          "source": "deliveries",
+          "complete": false
+        },
+        "humanPending": {
+          "value": 0,
+          "unit": "human-actions",
+          "source": "actions",
+          "complete": true
+        },
+        "humanActionable": {
+          "value": 0,
+          "unit": "human-actions",
+          "source": "actions",
+          "complete": true
+        }
+      },
+      "runs": [
+        {
+          "runId": "runner:job-7",
+          "logicalWorkId": "we:4620",
+          "parentRunId": null,
+          "repo": "chalbert/web-everything",
+          "cardRefs": [
+            "we:4620"
+          ],
+          "prRefs": [],
+          "description": "Preparing the progress overview.",
+          "role": "prepare",
+          "state": "working",
+          "rawState": null,
+          "startedAt": "2026-09-30T15:45:00Z",
+          "lastActivityAt": "2026-09-30T16:00:00Z",
+          "observedAt": "2026-09-30T16:00:00Z",
+          "nextStep": "Publish the prepared contract."
+        }
+      ],
+      "holds": [
+        {
+          "workRef": "we:4624",
+          "description": "Waiting for the progress contract.",
+          "owner": "builder",
+          "rawReason": "blockedBy",
+          "normalizedReason": "prerequisite",
+          "since": "2026-09-30T15:00:00Z",
+          "asOf": "2026-09-30T16:00:00Z",
+          "nextStep": "Recheck after the contract lands.",
+          "relatedRefs": [
+            "we:4620"
+          ]
+        }
+      ],
+      "actions": [],
+      "items": [],
+      "deliveries": {
+        "source": "deliveries",
+        "provenance": "observed by local drain",
+        "complete": false,
+        "historyStart": "2026-09-30T14:00:00Z",
+        "today": {
+          "start": "2026-09-30T04:00:00Z",
+          "end": "2026-09-30T16:00:00Z",
+          "count": 3,
+          "complete": false
+        },
+        "trend": {
+          "status": "comparable",
+          "reason": null,
+          "current": {
+            "start": "2026-09-30T15:00:00Z",
+            "end": "2026-09-30T16:00:00Z",
+            "count": 2,
+            "complete": true
+          },
+          "previous": {
+            "start": "2026-09-30T14:00:00Z",
+            "end": "2026-09-30T15:00:00Z",
+            "count": 1,
+            "complete": true
+          }
+        }
+      },
+      "policy": {
+        "sourceKind": "external-plan",
+        "revision": "sha256:example-plan",
+        "observedAt": "2026-09-30T16:00:00Z",
+        "effectiveAt": null,
+        "readOnly": true,
+        "priorities": [
+          {
+            "description": "Restore reliable review progress.",
+            "refs": [
+              "we:4620"
+            ]
+          }
+        ],
+        "sections": [
+          {
+            "id": "standing",
+            "title": "Standing rules",
+            "text": "Keep review work moving.",
+            "sourceDate": "2026-09-29"
+          }
+        ],
+        "conflicts": [],
+        "status": "observed"
+      }
+    }
+  }
+}
