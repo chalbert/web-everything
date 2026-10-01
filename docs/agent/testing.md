@@ -2,6 +2,10 @@
 
 > Tier-1 reference. Read when writing or changing tests.
 
+Injected Gemini subprocess tests must set `ANTIGRAVITY_QUOTA_DIR` to a per-test temporary directory:
+real backend holds otherwise prevent even the fake child from starting. Real POC branch-sync fixtures
+must pass a temporary `lockRoot` through `withPocLandLock`, preserving the mutex without touching host locks.
+
 ## GitHub priority admission
 
 The throttle returns a JSON `deferred-low-budget` result without invoking GitHub when a fresh,

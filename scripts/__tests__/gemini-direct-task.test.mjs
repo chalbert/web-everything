@@ -1,5 +1,5 @@
 /** Mechanical tests only. Supplied live agy 1.2.2 streams are literal fixtures; real git regressions; no real agy processes. */
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'node:events';
 import { mkdtempSync, rmSync, readFileSync, writeFileSync, statSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -18,8 +18,11 @@ function tempDir() {
   tempDirs.push(dir);
   return dir;
 }
+// Injected process fixtures must not consume the operator's live backend quota holds.
+beforeEach(() => { vi.stubEnv('ANTIGRAVITY_QUOTA_DIR', tempDir()); });
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
   vi.useRealTimers();
   process.exitCode = 0;
   for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
