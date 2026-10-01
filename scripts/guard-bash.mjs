@@ -1771,8 +1771,18 @@ export function isFileWriteRedirect(segment) {
 
 /** A backlog|reports `.md` file as a WRITE TARGET — relative (`backlog/x.md`, `./reports/y.md`) or absolute
  *  (`/…/lane-3/backlog/x.md`). Anchored on a path boundary so `mybacklog/x.md` is not a card. */
-const CORPUS_FILE_TARGET = /(?:^|\/)(?:backlog|reports)\/[^\s'")]*\.md$/;
+const CORPUS_FILE_TARGET = /(?:^|\/)(?:backlog|reports)\/[^'")]*\.md$/;
 const COPY_PROGRAMS = new Set(['cp', 'gcp', 'install', 'ginstall', 'mv', 'gmv']);
+
+/** Lexical only: a trailing slash or the corpus directory itself identifies a directory.
+ * Bare nested directories need filesystem knowledge and remain outside this detector. */
+function copyDestinationTargets(sources, destination) {
+  const dest = unquote(destination);
+  const directory = /\/$/.test(dest) || /(?:^|\/)(?:backlog|reports)$/.test(dest);
+  return directory
+    ? sources.map((source) => `${dest.replace(/\/+$/, '')}/${unquote(source).replace(/^.*\//, '')}`)
+    : [dest];
+}
 
 /** #4070 — every backlog|reports `.md` path `segment` OVERWRITES from the shell, scratch excluded. Pure.
  *  The `>>`/`tee`/`sed -i`/`perl -pi` arm in `reason()` already covered appends and in-place edits; a
@@ -1796,9 +1806,12 @@ export function corpusOverwriteTargets(segment) {
       args.push(rest[i]);
     }
     const files = fileOperands(args, new Set(['-S', '--suffix', '-m', '--mode', '-o', '--owner', '-g', '--group']));
-    const dest = files.length >= 2 ? unquote(files[files.length - 1]) : '';
-    const fromOutside = files.slice(0, -1).some((f) => !CORPUS_FILE_TARGET.test(unquote(f)));
-    if (CORPUS_FILE_TARGET.test(dest) && !isScratch(dest) && (!prog.endsWith('mv') || fromOutside)) out.push(dest);
+    const sources = files.slice(0, -1);
+    const fromOutside = sources.some((f) => !CORPUS_FILE_TARGET.test(unquote(f)));
+    if (files.length >= 2 && (!prog.endsWith('mv') || fromOutside)) {
+      out.push(...copyDestinationTargets(sources, files[files.length - 1])
+        .filter((dest) => CORPUS_FILE_TARGET.test(dest) && !isScratch(dest)));
+    }
   }
   return [...new Set(out)];
 }
