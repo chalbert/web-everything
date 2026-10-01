@@ -3,10 +3,11 @@ bornAs: xpyelm4
 kind: story
 size: 3
 parent: "4075"
-status: active
+status: resolved
 scope: ["we:scripts/conveyor/ci-heal-owed.mjs", "we:scripts/conveyor/__tests__/ci-heal-owed.test.mjs"]
 dateOpened: "2026-09-29"
 dateStarted: "2026-10-01"
+dateResolved: "2026-10-01"
 preparedDate: "2026-10-01"
 preparedAgainstSha: "07bb7c5142d6cbc26c11e22d05e1e29d9ce9c44e"
 tags: []
