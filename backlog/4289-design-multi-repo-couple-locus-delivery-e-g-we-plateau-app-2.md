@@ -1,7 +1,8 @@
 ---
 bornAs: x83eb25
 kind: decision
-status: open
+status: resolved
+dateResolved: "2026-09-30"
 dateOpened: "2026-09-27"
 preparedDate: "2026-09-30"
 preparedAgainstSha: "1ef20904e5391d5a16ef4c07133b6502c08c44c5"
@@ -13,6 +14,10 @@ tags: []
 # Prepare multi-repo delivery: split #4620 at its contract seam, preserve coupled delivery
 
 **Proposed disposition — awaiting operator confirmation, not ruled:** use option **(a) for #4620**, with a validated WE contract predecessor and a Plateau consumer successor. Preserve coupled delivery as a supported approach; do not turn the wrapper's missing capability into a permanent ban. Prepare/scaffold must diagnose an unsupported mixed scope and propose a valid decomposition before dispatch.
+
+## Operator ruling (2026-09-30 ~9:10 PM ET)
+
+**Option (a) for #4620, (b) kept as a future feature** — operator: "Ok, make sure you file b for future feature". Authored now: the WE contract predecessor x9jwbpi (schema 2 + validated examples + test); #4620 trimmed to its plateau-app scope and blocked by x9jwbpi; the prepare-time mixed-repo diagnosis story x8brxr6; and the coupled-delivery future-feature epic x4ank3f (unqueued). Coupled delivery is a supported future approach, not a ban.
 
 ## Supported approaches and recommendation
 
