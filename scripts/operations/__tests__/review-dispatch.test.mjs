@@ -148,7 +148,7 @@ describe('dispatchReview — the composition: plan → fill → mint → spawn',
       '-n', 'review-1234',
       '--settings', JSON.stringify({ env: { WE_CONVEYOR_WORKER: '1' }, worktree: { bgIsolation: 'none' } }), // xgqz204 — the worker marker, always
       '--append-system-prompt-file', REVIEW_DISPATCH_SYSTEM_PROMPT_FILE,
-      '--model', 'sonnet',
+      '--effort', 'high', '--model', 'sonnet',
       ...DISALLOWED_TOOLS_ARGV,
       '# brief for 1234 in chalbert/web-everything\n'
       + 'acquire: node scripts/lane-pool.mjs acquire --session=review-1234\n'
@@ -259,7 +259,7 @@ describe('dispatchReview — the composition: plan → fill → mint → spawn',
       '-n', 'review-1234',
       '--settings', JSON.stringify({ env: { WE_CONVEYOR_WORKER: '1' }, worktree: { bgIsolation: 'none' } }), // xgqz204 — the worker marker, always
       '--append-system-prompt-file', REVIEW_DISPATCH_SYSTEM_PROMPT_FILE,
-      '--model', 'sonnet',
+      '--effort', 'high', '--model', 'sonnet',
       ...DISALLOWED_TOOLS_ARGV,
       '--permission-mode', 'plan',
       '# brief for 1234 in chalbert/web-everything\n'

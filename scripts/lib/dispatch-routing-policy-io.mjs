@@ -1,7 +1,7 @@
 /** The only filesystem boundary for routing policy: reload, retain last-good, and forward snapshots. */
 import { readFileSync } from 'node:fs';
 import { ROUTING_POLICY_PATH, trustedSnapshot } from './dispatch-routing-policy-source.mjs';
-import { validateRoutingPolicy, DEFAULT_ROUTING_POLICY, resolveOperationRoute as resolvePureRoute, resolvePolicyModel as resolvePureModel } from './dispatch-routing-policy.mjs';
+import { validateRoutingPolicy, DEFAULT_ROUTING_POLICY, resolveOperationRoute as resolvePureRoute, resolvePolicyModel as resolvePureModel, operationEffort } from './dispatch-routing-policy.mjs';
 import { decideDispatchRoute } from './dispatch-contracts.mjs';
 function initialPolicy() {
   return trustedSnapshot(process.env.WE_DISPATCH_ROUTING_SNAPSHOT) ?? DEFAULT_ROUTING_POLICY;
@@ -39,4 +39,8 @@ export function resolveDispatchRoute(dispatch, options = {}) {
 }
 export function routingPolicyEnv() {
   return { WE_DISPATCH_ROUTING_SNAPSHOT: JSON.stringify(readRoutingPolicy()) };
+}
+
+export function resolveOperationEffort(operation, provider, taskType, policy = readRoutingPolicy()) {
+  return operationEffort(operation, provider, taskType, policy);
 }

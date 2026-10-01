@@ -561,6 +561,7 @@ export async function geminiDirectTask({
   const diff = captureDiff({ dir: targetDir, startSha, execFn });
   const gateResult = runGate({ dir: targetDir, mode: gate, execFn });
   return {
+    model, effort: effort ?? null,
     dir: targetDir,
     scratch: scratch ? {
       created: true,

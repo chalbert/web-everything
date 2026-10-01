@@ -122,7 +122,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 describe('buildRestrictedProviderArgv', () => {
   it('#4348 — addDirs adds one `--add-dir <dir>` pair each, on both branches, before -p/--resume', () => {
     const fresh = buildRestrictedProviderArgv({ sessionId: 'u', prompt: 'p', settingsFile: '/s.json', addDirs: ['/we/lane-7'] });
-    expect(fresh.slice(-8)).toEqual(['--add-dir', '/we/lane-7', '--model', 'sonnet', '-p', '--session-id', 'u', 'p']);
+    expect(fresh.slice(-10)).toEqual(['--add-dir', '/we/lane-7', '--model', 'sonnet', '--effort', 'medium', '-p', '--session-id', 'u', 'p']);
     const resume = buildRestrictedProviderArgv({ prompt: 'p', resumeSessionId: 'u', settingsFile: '/s.json', addDirs: ['/we/lane-7'] });
     expect(resume.slice(-5)).toEqual(['--add-dir', '/we/lane-7', '--resume', 'u', 'p']);
   });
@@ -135,7 +135,7 @@ describe('buildRestrictedProviderArgv', () => {
     expect(argv).toEqual([
       '--restricted', '--tools', 'Bash,Edit,Write,Read,Glob,Grep', '--strict-mcp-config',
       '--disable-slash-commands', '--settings', '/repo/.operations/hooks.json',
-      '--model', 'sonnet', '-p', '--session-id', 'session-1', 'build item #1234',
+      '--model', 'sonnet', '--effort', 'medium', '-p', '--session-id', 'session-1', 'build item #1234',
     ]);
   });
 

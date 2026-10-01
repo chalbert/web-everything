@@ -94,6 +94,7 @@ export function ciHealDetachedProvider(request, {
   // there is a known item to read one from.
   const deliveryAgent = request.policyRoute?.provider ?? readDeliveryAgentMarker(num);
   if (deliveryAgent) argv.push(`--provider=${deliveryAgent === 'claude' ? 'claude-restricted' : deliveryAgent}`);
+  if (request.policyRoute?.effort) argv.push(`--effort=${request.policyRoute.effort}`);
   if (request.policyRoute?.model) argv.push(`--model=${request.policyRoute.model}`);
   // build-path-codex-isolation — the run record's ONE executor field comes from here: the vendor this wrapper
   // is actually told to run, never the router's recommendation (see dispatch-lane-io.mjs#dispatchExecutorFor).
