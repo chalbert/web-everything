@@ -633,3 +633,11 @@ describe('isPreventionOutstandingClear', () => {
     })).toBe(false);
   });
 });
+
+describe('#4315 mandatory referral hold', () => {
+  it('never auto-answers a pending referral, even if a caller misaddresses a clean confirm', () => {
+    for (const verdict of ['accept', 'changes', 'needs-human', 'prevention-outstanding']) {
+      expect(reviewLoopAutoConfirm({ of: 'agent' }, { verdict: { verdict, pendingReferrals: ['finding-key'] } })).toBeNull();
+    }
+  });
+});
