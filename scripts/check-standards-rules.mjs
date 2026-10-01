@@ -1028,6 +1028,39 @@ export function findTestPlanGaps(body) {
     const re = new RegExp(`(?<![\\w-])${lit.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w-])`, 'i');
     if (!re.test(planText)) gaps.push({ kind: 'untested-condition', detail: lit });
   }
+  gaps.push(...findNegativeClaimGaps(design, planText));
+  return gaps;
+}
+
+// Negative-claim coverage (#4431): a Design sentence saying "never / cannot / fails closed" should have a
+// Test-plan case. Heuristic: the claim's backticked/quoted identifiers (minus short words and care-level words)
+// must appear in the Test plan. A claim with no extractable identifier is not reported (unfixable noise).
+const NEGATIVE_CLAIM_RE = /\bnever\b|\bcannot\b|\bfails? closed\b/i;
+const NEGATIVE_CLAIM_SKIP_TOKENS = /^(?:none|low|high|elevated)$/i;
+
+function findNegativeClaimGaps(design, planText) {
+  const paragraphs = [];
+  let current = [];
+  let inFence = false;
+  const flush = () => { if (current.length) paragraphs.push(current.join(' ')); current = []; };
+  for (const line of design) {
+    if (/^\s*```/.test(line)) { flush(); inFence = !inFence; continue; }
+    if (inFence) continue;
+    if (!line.trim()) flush(); else current.push(line.trim());
+  }
+  flush();
+  const gaps = [];
+  for (const para of paragraphs) {
+    for (const sentence of para.split(/(?<=[.?!])\s+/)) {
+      if (!NEGATIVE_CLAIM_RE.test(sentence)) continue;
+      const tokens = [...sentence.matchAll(/`([^`]+)`|"([^"]+)"/g)]
+        .flatMap((m) => (m[1] ?? m[2]).match(/[A-Za-z_][\w-]*/g) ?? [])
+        .filter((t) => t.length > 4 && !NEGATIVE_CLAIM_SKIP_TOKENS.test(t));
+      if (!tokens.length) continue;
+      const covered = tokens.some((t) => new RegExp(`(?<![\\w-])${t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w-])`, 'i').test(planText));
+      if (!covered) gaps.push({ kind: 'negative-claim-without-case', detail: sentence.slice(0, 60) });
+    }
+  }
   return gaps;
 }
 
@@ -1103,7 +1136,9 @@ export function lintBacklogItemRendering({ item, body, pocRegistry = null }) {
     if (planGaps.length) {
       const detail = planGaps.map((g) => g.kind === 'untested-condition'
         ? `design condition '${g.detail}' has no Test-plan case`
-        : g.kind === 'preservation-without-mutation'
+        : g.kind === 'negative-claim-without-case'
+          ? `negative claim "${g.detail}" has no Test-plan case — name a Test-plan case that exercises the claim's identifiers`
+          : g.kind === 'preservation-without-mutation'
           ? `preservation case "${g.detail}" names no mutation proof`
           : `case "${g.detail}" is neither a capability (Red today) nor a preservation (GREEN today) case`).join('; ');
       warnings.push(`Backlog item "${id}" has Test-plan gaps — ${detail}. Classify each case as capability (fails on the base) ` +

@@ -3,9 +3,10 @@ bornAs: xmace53
 kind: story
 size: 3
 parent: "4075"
-status: open
+status: active
 scope: ["we:backlog/4374-route-review-seats-by-risk-to-antigravity-claude-sonnet-4-6.md", "we:scripts/check-standards-rules.mjs", "we:scripts/__tests__/check-standards-rules-content-lint.test.mjs"]
 dateOpened: "2026-09-28"
+dateStarted: "2026-10-01"
 preparedDate: "2026-09-30"
 preparedAgainstSha: "c7b7f1cb259e3e2a1363784296ddb1e24b6f1f3d"
 tags: []
