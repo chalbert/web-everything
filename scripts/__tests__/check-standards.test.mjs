@@ -24,6 +24,7 @@ import { loadAdapters } from '../lib/adapters-loader.cjs';
 import {
   buildGraduatedKinds, validateBacklogItem, isCanonicalGraduated, dirLevelScopeFinding,
   buildTrackedPathIndex, scopeBasenameMismatches, scopeBasenameMismatchMessage, SCOPE_BASENAME_MAX_SUGGESTIONS,
+  scopeMissingTestFile, bodyDeliverablesMissingFromScope, deferredBlockedByFindings,
 } from '../check-standards-rules.mjs';
 
 const require = createRequire(import.meta.url);
@@ -549,5 +550,58 @@ describe('#3337 scope entry basename matches a tracked file at a different path'
     // The WARN itself must never be silenced by a try/catch. The `git ls-files` read above legitimately has
     // one (a non-git environment is a silent no-op, by design), so scan only the window around the call.
     expect(gate.slice(Math.max(0, callIdx - 200), callIdx + 200)).not.toMatch(/try\s*\{/);
+  });
+});
+
+describe('#4448 scope-vs-body guards + deferredBlockedBy', () => {
+  const INDEX = buildTrackedPathIndex(['scripts/foo.mjs', 'scripts/__tests__/foo.test.mjs', 'src/a/b.ts']);
+  const PLAN = '## Test plan\n\n1. x\n';
+  const open = (scope, extra) => ({ status: 'open', scope, ...extra });
+
+  it('scopeMissingTestFile flags a scoped source whose tracked sibling test is unscoped', () => {
+    expect(scopeMissingTestFile(open(['we:scripts/foo.mjs']), INDEX, PLAN))
+      .toEqual([{ entry: 'we:scripts/foo.mjs', testPath: 'scripts/__tests__/foo.test.mjs' }]);
+  });
+  it('scopeMissingTestFile is silent when covered, greenfield, no test mandate, resolved, or rationalised', () => {
+    expect(scopeMissingTestFile(open(['we:scripts/foo.mjs', 'we:scripts/__tests__/foo.test.mjs']), INDEX, PLAN)).toEqual([]);
+    expect(scopeMissingTestFile(open(['we:scripts/foo.mjs', 'we:scripts/__tests__/']), INDEX, PLAN)).toEqual([]);
+    expect(scopeMissingTestFile(open(['we:src/a/b.ts']), INDEX, PLAN)).toEqual([]);
+    expect(scopeMissingTestFile(open(['we:scripts/foo.mjs']), INDEX, '## MVP\n')).toEqual([]);
+    expect(scopeMissingTestFile(open(['we:scripts/foo.mjs'], { status: 'resolved' }), INDEX, PLAN)).toEqual([]);
+    expect(scopeMissingTestFile(open(['we:scripts/foo.mjs'], { scopeRationale: 'why' }), INDEX, PLAN)).toEqual([]);
+  });
+
+  it('bodyDeliverablesMissingFromScope flags MVP / Done-when deliverables absent from scope', () => {
+    const body = '## MVP\n\nEdit `we:scripts/x.mjs`.\n\n## Done when\n\n1. `we:docs/y.md` and `we:docs/y.md`\n';
+    expect(bodyDeliverablesMissingFromScope(open(['we:scripts/z.mjs']), body)).toEqual(['we:scripts/x.mjs', 'we:docs/y.md']);
+  });
+  it('bodyDeliverablesMissingFromScope is silent when covered, read-only sections, or non-files', () => {
+    const body = '## Design\n\nSee `we:scripts/readiness/scope-lease.mjs`.\n\n## MVP\n\n`we:scripts/x.mjs` `we:docs` `we:a/*.md`\n\n## Follow-ups\n\n`we:q.mjs`\n';
+    expect(bodyDeliverablesMissingFromScope(open(['we:scripts/x.mjs']), body)).toEqual([]);
+    expect(bodyDeliverablesMissingFromScope(open(['we:scripts/']), '## MVP\n`we:scripts/x.mjs`')).toEqual([]);
+    expect(bodyDeliverablesMissingFromScope(open(['we:b.mjs'], { scopeRationale: 'r' }), '## MVP\n`we:scripts/x.mjs`')).toEqual([]);
+  });
+
+  it('deferredBlockedByFindings flags non-array, unresolved, self and duplicate-of-blockedBy edges', () => {
+    const known = new Set(['10', '20']);
+    expect(deferredBlockedByFindings({ deferredBlockedBy: '10' }, known, '5')).toHaveLength(1);
+    expect(deferredBlockedByFindings({ deferredBlockedBy: ['99'] }, known, '5')[0]).toMatch(/does not resolve/);
+    expect(deferredBlockedByFindings({ deferredBlockedBy: ['5'] }, new Set(['5']), '5')[0]).toMatch(/self-edge/);
+    expect(deferredBlockedByFindings({ deferredBlockedBy: ['10'], blockedBy: ['10'] }, known, '5')[0]).toMatch(/also in blockedBy/);
+  });
+  it('deferredBlockedByFindings is silent for a clean array or an absent field', () => {
+    expect(deferredBlockedByFindings({ deferredBlockedBy: ['10'] }, new Set(['10']), '5')).toEqual([]);
+    expect(deferredBlockedByFindings({}, new Set(), '5')).toEqual([]);
+  });
+
+  it('corpus ratchet: guards 4 + 5 over the real backlog stay within the measured ceiling', () => {
+    const matter = require('gray-matter');
+    const tracked = buildTrackedPathIndex(execFileSync('git', ['ls-files', '-z'], { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }).split('\0').filter(Boolean));
+    let n = 0;
+    for (const f of readdirSync(join(ROOT, 'backlog')).filter((x) => x.endsWith('.md'))) {
+      let fm; try { fm = matter(readFileSync(join(ROOT, 'backlog', f), 'utf8')); } catch { continue; }
+      n += scopeMissingTestFile(fm.data, tracked, fm.content).length + bodyDeliverablesMissingFromScope(fm.data, fm.content).length;
+    }
+    expect(n).toBeLessThanOrEqual(190); // measured at build (2026-10-01); lower as the corpus is backfilled
   });
 });
