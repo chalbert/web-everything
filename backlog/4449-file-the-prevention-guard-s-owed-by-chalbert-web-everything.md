@@ -3,10 +3,11 @@ bornAs: xuojjv7
 kind: story
 size: 3
 parent: "4075"
-status: active
+status: resolved
 scope: ["we:scripts/guard-bash.mjs", "we:scripts/__tests__/guard-bash.test.mjs", "we:skills-src/conveyor/delivery-agent-brief.md"]
 dateOpened: "2026-09-28"
 dateStarted: "2026-09-30"
+dateResolved: "2026-09-30"
 preparedDate: "2026-09-30"
 preparedAgainstSha: "bc9db934c4b93158341ba01a74dccb71583765fc"
 tags: []
