@@ -2,9 +2,10 @@
 bornAs: xzbrscd
 kind: story
 size: 2
-status: open
+status: resolved
 scope: ["we:.github/workflows/soak-replay-gate.yml", "we:scripts/lib/__tests__/soak-replay-gate-workflow.test.mjs"]
 dateOpened: "2026-09-29"
+dateResolved: "2026-10-01"
 preparedDate: "2026-09-30"
 preparedAgainstSha: "8d012f575a1bac47a9e1bd01d5b0fe3dac525209"
 tags: []
@@ -16,6 +17,11 @@ The gate must read the current PR body on every execution, including a rerun aft
 
 ## Progress
 
+- Implementation proof (2026-10-01, checkout HEAD `01bb3d9489728ce59e93e6d4639d6df0ca840b8f`): added we:scripts/lib/__tests__/soak-replay-gate-workflow.test.mjs, which parses and executes the actual workflow shell with temporary command substitutes and the real evaluator. Before changing the workflow, 15 of 16 tests failed: both CLI branches observed exits `[1, 1, 1]` with a fixed empty event body and `[0, 0, 0]` with a fixed event waiver, despite changing the API response. The script-absent bootstrap passed.
+- After changing we:.github/workflows/soak-replay-gate.yml, both branches observe `[1, 0, 1]` as only the API body changes, with one authenticated API request per execution and constant title/base/head inputs. Exact captured arguments preserve modern SHA transport and legacy merge-base/file-status transport. Null/empty/whitespace-only waivers stay red; multiline quotes/backticks/dollar substitutions remain literal; retrieval failure emits a diagnostic and never invokes the evaluator or uses the stale event waiver. The bootstrap remains distinct and skips retrieval.
+- Targeted verification: `npx vitest run` for we:scripts/lib/__tests__/soak-replay-gate-workflow.test.mjs, we:scripts/lib/__tests__/soak-replay-gate.test.mjs, and we:scripts/__tests__/soak-replay-gate-cli.test.mjs passed all 59 tests (16 workflow, 32 evaluator, 11 CLI).
+- Final local verification: `npm run check:standards` passed with 0 errors (4589 warnings). Running `node we:scripts/verify-lane.mjs` from this checkout selected the workflow regression plus we:scripts/operations/__tests__/pr-status.test.mjs: 62 tests passed; its standards pass also had 0 errors, and the lane marker was recorded green. `git diff --check` passed. The requested resolve operation closes the local implementation handoff; the live evidence obligation below remains explicit.
+- Live Actions proof and independent review remain outstanding: this job explicitly prohibits commits, pushes, and opening a PR, so the changed workflow cannot be published to an authorized disposable test PR here. No live edited-event/rerun result, run URL, or workflow provenance is claimed. The local shell replay is regression evidence, not completion of the live Proof plan; a human will review the diff and arrange that delivery evidence.
 - Original premise/scope: the 2026-09-29 report says the worker for #4312 (PR #2939) added a waiver after a failed run, reran it, and remained blocked; PR #2938 reportedly cleared on rerun. The card proposed both a live body fetch and an `edited` trigger, scoped to we:.github/workflows/soak-replay-gate.yml and we:scripts/lib/soak-replay-gate.mjs. These incident reports have not been independently replayed during preparation.
 - Corrected premise: we:.github/workflows/soak-replay-gate.yml:38 already includes `edited`. Its lines 62–65 bind title/body and base/head SHAs from the event; lines 82–86 pass that body to both CLI branches. The missing behavior is refreshing the body at execution time, not adding an event type. This supports the stale-input mechanism, without establishing why the two historical reports differed.
 - Corrected scope: change the workflow transport and add its matching test, we:scripts/lib/__tests__/soak-replay-gate-workflow.test.mjs (planned). The pure evaluator in we:scripts/lib/soak-replay-gate.mjs already accepts a supplied body and recognizes non-empty waivers; no evaluator change is required. The omitted consumer, we:scripts/soak-replay-gate-cli.mjs, was inspected: its existing `--pr` branch fetches title, body, **and files** (lines 88–96), bypassing the merge-base branch (lines 113–116). Switching CI wholesale to that mode would change more than the body source.
