@@ -486,7 +486,7 @@ describe('dispatchFix — the composition: plan → fill → mint → spawn', ()
       // #3606 — the standing-identity system prompt, without which a correctly-filled brief reads as an
       // unfilled template and the agent self-aborts (live 3/3: fix-2127/fix-2130/fix-2003).
       '--append-system-prompt-file', DISPATCHED_AGENT_SYSTEM_PROMPT_FILE,
-      '--model', 'sonnet',
+      '--effort', 'high', '--model', 'sonnet',
       '# fix brief for 1764 (item 3438)\n'
       + 'acquire: node scripts/lane-pool.mjs acquire --lane=9 --session=fix-1764 '
       + '--scope=we:scripts/conveyor/reconcile-fix-dispatch.mjs --base=lane/3438-wire-reconcile-pass\n'
@@ -1141,7 +1141,7 @@ describe('#3606 — dispatchFix always passes the dispatched-agent system prompt
         readBrief: () => '# fix brief for {{PR_NUM}} (item {{ITEM_NUM}}) lane {{LANE}} {{SESSION_SLUG}} {{SCOPE}} {{LANE_REF}}',
         mintSessionId: () => '11111111-1111-4111-8111-111111111111',
         spawnAgent: (argv) => { calls.push(argv); return ''; },
-        extraArgs: ['--model', 'sonnet'],
+        extraArgs: ['--model', 'sonnet'], modelReason: 'test explicit pin',
       },
     );
     const argv = calls[0];
@@ -1399,3 +1399,6 @@ describe('fair overlap queue', () => {
     expect(planned[0]).toMatchObject({ waitingSince: '2026-09-30T12:00:00Z', reviewHuman: true });
   });
 });
+
+// These legacy cases exercise the native adapter; Codex routing has a dedicated dry-run suite.
+vi.mock('../../lib/dispatch-provider-availability.mjs', () => ({ dispatchProviderAvailable: provider => provider === 'claude' }));

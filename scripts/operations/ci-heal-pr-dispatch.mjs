@@ -52,7 +52,7 @@ import { runReconcilePass } from '../conveyor/reconcile-pass.mjs';
 import { readUnsupported, recordUnsupported } from '../conveyor/unsupported-repo.mjs';
 import { readPrsFromFile } from '../conveyor/open-pr-fetch.mjs';
 import {
-  acquireFixDispatchClaim, releaseFixDispatchClaim, fixDispatchClaimOwner,
+  stampFixDispatchClaim, acquireFixDispatchClaim, releaseFixDispatchClaim, fixDispatchClaimOwner,
 } from '../conveyor/fix-dispatch-claim.mjs';
 import { readLiveFixClaim, withAltBranchHint } from '../conveyor/fix-procedure.mjs';
 import { flushOwedWrites } from '../conveyor/ci-heal-owed.mjs';
@@ -79,6 +79,7 @@ export async function dispatchCiHeal(planned, {
   // own corrected header for why this replaces the `guardedDispatch` this docblock used to (wrongly) describe).
   claimOwner = fixDispatchClaimOwner(),
   acquireClaim = acquireFixDispatchClaim,
+  stampClaim = stampFixDispatchClaim,
   releaseClaim = releaseFixDispatchClaim,
   claimRoot,
   // fix procedure — injectable live fix-claim read (`fix-procedure.mjs#readLiveFixClaim`); a test stubs it.
@@ -143,9 +144,12 @@ export async function dispatchCiHeal(planned, {
       ITEM_NUM: planned.itemNum ?? '', PR_NUM: planned.pr, LANE_REF: planned.laneRef, LANE: planned.lane,
       SESSION_SLUG: sessionSlug, SCOPE: planned.scope.join(','), REASON: reason, ...tokens,
     }, BRIEF_REQUIRED_BY_KIND['ci-heal'], [...OPTIONAL_BRIEF_PLACEHOLDERS, 'ITEM_NUM', 'SCOPE'], REPO_AWARE_VALUE_PATTERNS);
+    // Sibling repos stay on the native Claude path: the gate's statute/gateSelf prefixes are WE-relative and no
+    // sibling declares its own critical surface yet, so a sibling heal cannot be judged non-critical safely.
     const route = repo === 'we' ? routeHeal({ scope: planned.scope, reason }) : null;
+
     const out = await sinks[DISPATCH_EFFECT]({
-      launchKind: 'ci-heal', prompt: withAltBranchHint(prompt, planned.altBranch), sessionSlug, num: planned.itemNum ?? undefined, lane: planned.lane, scope: planned.scope,
+      launchKind: 'ci-heal', laneRef: planned.laneRef, prompt: withAltBranchHint(prompt, planned.altBranch), sessionSlug, num: planned.itemNum ?? undefined, lane: planned.lane, scope: planned.scope,
       pr: planned.pr, reason, repo, probationWorker: route?.probationWorker ?? null, routing: route,
     });
     if (out?.held) {
@@ -156,9 +160,13 @@ export async function dispatchCiHeal(planned, {
     }
     // #x0jphk5 — deliberately NOT released here: see `dispatchFix`'s own docblock (`reconcile-fix-dispatch.mjs`)
     // for why a claim on a successful spawn must outlive this call.
-    return { agentId: out?.handle ?? null, sessionSlug, pr: planned.pr, itemNum: planned.itemNum ?? null, lane: planned.lane, unknownTokens };
+    const selected = out?.dispatch ? { provider: out.dispatch.executor, model: out.dispatch.supervisorModel, effort: out.dispatch.effort } : null;
+    if (selected) stampClaim({ repo, pr: planned.pr, kind: 'ci-heal', owner: claimOwner, lockRoot: claimRoot, route: selected, handle: out?.handle });
+    return { ...(selected ?? {}), agentId: out?.handle ?? null, sessionSlug, pr: planned.pr, itemNum: planned.itemNum ?? null, lane: planned.lane, unknownTokens };
   } catch (e) {
-    releaseOurClaim();
+    // An indeterminate detached launch (a worker may be running, pid unconfirmed) keeps the claim so the next
+    // tick cannot launch a duplicate repair; every other failure left nothing live, so release.
+    if (!e?.indeterminate) releaseOurClaim();
     throw e;
   }
 }

@@ -1355,7 +1355,7 @@ export function decideDispatchRoute(dispatch = {}, options = {}) {
   const record = decideDispatchRouteLegacy(dispatch, { ...options, criticalWorkGate });
   if (record.outcome === 'refused' || record.refusal || record.override) return record;
   const roleGate = record.outcome === 'role' ? decideCriticalWorkGate(criticalWorkGate, dispatch.kind, dispatch.kind === 'prepare-item' ? 'prepare' : dispatch.kind, {
-    criticalWork: criticalWorkVerdict({ filesTouched: dispatch.cardPath ? [dispatch.cardPath] : dispatch.scopePaths, risk: dispatch.risk }),
+    criticalWork: criticalWorkVerdict({ filesTouched: dispatch.cardPath ? [dispatch.cardPath] : dispatch.scopePaths, risk: dispatch.risk, tags: dispatch.tags }),
     criticalMisses: criticalMissesFor(options.scorecards ?? [], dispatch.kind === 'prepare-item' ? 'prepare' : dispatch.kind),
   }) : null;
   const gateClosed = (roleGate && !roleGate.open) || record.auditTrail?.some(row => row.criterion === 'critical-work-gate' && row.result === 'claude-only');
@@ -1363,7 +1363,7 @@ export function decideDispatchRoute(dispatch = {}, options = {}) {
     // Critical-miss vetoes are scored per taskType and apply to EVERY routed operation, gated or not
     // (prepare-item is role-path: no record.taskType, scored as 'prepare').
     const vetoTaskType = record.taskType ?? (dispatch.kind === 'prepare-item' ? 'prepare' : dispatch.kind);
-    const route = resolveOperationRoute({ operation: dispatch.kind, taskType: record.taskType ?? (dispatch.kind === 'prepare-item' ? 'prepare' : null), gateClosed, policy, vetoes: criticalMissesFor(options.scorecards ?? [], vetoTaskType) });
+    const route = resolveOperationRoute({ operation: dispatch.kind, size: dispatch.size, designQuestion: dispatch.designQuestion, wellScoped: dispatch.wellScoped, taskType: record.taskType ?? (dispatch.kind === 'prepare-item' ? 'prepare' : null), gateClosed, policy, vetoes: criticalMissesFor(options.scorecards ?? [], vetoTaskType) });
     if (!route) {
       if (roleGate && !roleGate.open) record.probationWorker = null;
       return record;
@@ -1371,6 +1371,7 @@ export function decideDispatchRoute(dispatch = {}, options = {}) {
     const tier = Object.entries(CLAUDE_NATIVE_MODEL_BY_TIER).find(([, model]) => model === route.model)?.[0];
     record.policyRoute = route;
     record.model = route.model;
+    record.effort = route.effort;
     record.routed = route.provider;
     record.executed = route.provider;
     record.supervision = SUPERVISION_LEVELS.FULL;
@@ -1379,7 +1380,7 @@ export function decideDispatchRoute(dispatch = {}, options = {}) {
     if (tier) record.tier = tier;
     if (route.provider !== 'claude' && (dispatch.kind === 'prepare-item' || dispatch.kind === 'ci-heal' || (dispatch.kind === 'build' && ['doc-fix', 'test-fix'].includes(record.taskType)))) {
       const id = route.provider === 'codex' ? 'codex' : route.model.startsWith('claude-') ? 'antigravity-claude' : 'antigravity-gemini';
-      record.probationWorker = { ...PROBATION_WORKERS[id], model: route.model, taskType: dispatch.kind === 'prepare-item' ? 'prepare' : record.taskType };
+      record.probationWorker = { ...PROBATION_WORKERS[id], model: route.model, effort: route.effort, taskType: dispatch.kind === 'prepare-item' ? 'prepare' : record.taskType };
     }
     record.auditTrail.push(audit('routing-policy', `${route.provider}/${route.model}`, 'we:scripts/lib/dispatch-routing-policy.json', gateClosed ? 'Critical-work gate requires the Claude fallback.' : 'Operator policy selects this explicit provider/model; supervision remains full.'));
     return record;

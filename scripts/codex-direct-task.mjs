@@ -852,6 +852,7 @@ export async function codexDirectTask({
   }
 
   return {
+    model, effort: resolvedEffort,
     dir: targetDir,
     scratch: scratch ? {
       created: true,

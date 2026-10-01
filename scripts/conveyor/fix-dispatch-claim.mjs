@@ -1,3 +1,4 @@
+import { detachedHandlePid, defaultIsPidAlive } from '../operations/detached-dispatch.mjs';
 /**
  * @file scripts/conveyor/fix-dispatch-claim.mjs
  * @description #x0jphk5 (parent #4075, epic #3383) — THE REAL PER-(REPO, KIND, PR) CLAIM the fix-dispatch
@@ -111,7 +112,7 @@ export function fixDispatchClaimOwner({ host = hostname(), pid = process.pid } =
  * @returns {{ok:boolean, reason:string, heldBy:string|null, resource:string, lockRoot:string}}
  */
 export function acquireFixDispatchClaim({
-  repo, pr, kind = 'fix', headSha = null, scope = null, owner = fixDispatchClaimOwner(), sessionId = null,
+  repo, pr, kind = 'fix', headSha = null, scope = null, route = null, owner = fixDispatchClaimOwner(), sessionId = null,
   pid = process.pid, host = hostname(), nowMs = Date.now(), nowIso = new Date(nowMs).toISOString(),
   leaseMinutes = DEFAULT_FIX_DISPATCH_CLAIM_TTL_MINUTES, lockRoot = fixDispatchClaimRoot(),
 } = {}) {
@@ -127,6 +128,7 @@ export function acquireFixDispatchClaim({
   const claimedAt = prior?.owner === owner && prior?.meta?.claimedAt && !isLeaseExpired(prior, nowMs, leaseMinutes)
     ? prior.meta.claimedAt : nowIso;
   const meta = {
+    ...(route ? { provider: route.provider, model: route.model, effort: route.effort } : {}),
     host, sessionId, repo, pr, kind, headSha: headSha ?? null, claimedAt,
     // #4295 — declared scope (repo-qualified) so build/fix dispatch can serialize on overlap; omitted when unknown.
     ...(Array.isArray(scope) && scope.length ? { scope: scope.map(String) } : {}),
@@ -215,6 +217,7 @@ export const MAX_FIX_DISPATCH_CLAIM_REFRESH_MS = 4 * 60 * 60 * 1000;
 export function refreshLiveFixDispatchClaims({
   lockRoot = fixDispatchClaimRoot(),
   listAgentsAll = () => defaultListAgents({ all: true }),
+  isPidAlive = defaultIsPidAlive,
   hungInfoFor = readHungInfo,
   hungThresholdMs = resolveHungThresholdMs(),
   nowIso = () => new Date().toISOString(),
@@ -222,7 +225,16 @@ export function refreshLiveFixDispatchClaims({
 } = {}) {
   const claims = listFixDispatchClaims(lockRoot);
   if (!claims.length) return { checked: 0, refreshed: [] };
-  const listed = listAgentsAll();
+  let listed;
+  let listingFailed = false;
+  try { listed = listAgentsAll(); }
+  catch (error) {
+    // A native listing outage must not expire a live detached worker's claim.
+    // Native claims retain their ordinary unknown-session TTL grace.
+    if (!claims.some(entry => detachedHandlePid(entry.meta?.handle))) throw error;
+    listed = [];
+    listingFailed = true;
+  }
   if (listed && typeof listed.then === 'function') {
     throw new TypeError('refreshLiveFixDispatchClaims: listAgentsAll must be synchronous (got a Promise)');
   }
@@ -232,6 +244,16 @@ export function refreshLiveFixDispatchClaims({
     const { repo, pr, kind, headSha = null, claimedAt = null } = entry.meta;
     const claimedMs = Date.parse(claimedAt ?? '');
     if (Number.isFinite(claimedMs) && nowMs - claimedMs > MAX_FIX_DISPATCH_CLAIM_REFRESH_MS) continue;
+    const detachedPid = detachedHandlePid(entry.meta.handle);
+    if (detachedPid && isPidAlive(detachedPid)) {
+      const resource = fixDispatchResource({ repo, pr, kind });
+      const current = readLockEntry(lockRoot, resource);
+      if (current?.owner === entry.owner && current.meta?.handle === entry.meta.handle) {
+        heartbeat(lockRoot, resource, current.owner, nowIso(), current.pid, current.meta);
+        refreshed.push({ repo, pr, kind, headSha, owner: entry.owner });
+      }
+      continue;
+    }
     // fix-procedure (`kind:'fixing'`, `we:scripts/conveyor/fix-procedure.mjs`): the holder's session name is
     // `meta.who`, not a minted slug — minting one would THROW on the unknown kind and crash this whole sweep.
     // A claim whose name cannot be resolved is skipped (left to its own TTL), never thrown over.
@@ -239,6 +261,8 @@ export function refreshLiveFixDispatchClaims({
     if (kind === 'fixing') name = entry.meta.who ? String(entry.meta.who) : null;
     else { try { name = fixDispatchSessionName({ repo, pr, kind }); } catch { name = null; } }
     if (!name) continue;
+    // An empty list from a FAILED listing is not proof a native session is dead: leave it to its own TTL.
+    if (listingFailed) continue;
     const agentsAll = (Array.isArray(listed) ? listed : []).filter((a) => a && String(a.name ?? '') === name)
       .map((a) => {
         let info = null;
@@ -273,4 +297,16 @@ export function refreshLiveFixDispatchClaims({
     });
   }
   return { checked: claims.length, refreshed, ...(released.length ? { released } : {}) };
+}
+
+/** Stamp only our own live claim after the launch boundary resolves availability. */
+export function stampFixDispatchClaim({ repo, pr, kind, owner, lockRoot = fixDispatchClaimRoot(), route, handle }) {
+  try {
+    const resource = fixDispatchResource({ repo, pr, kind });
+    const current = readLockEntry(lockRoot, resource);
+    if (!current || current.owner !== owner) return false;
+    heartbeat(lockRoot, resource, owner, new Date().toISOString(), current.pid, { ...current.meta,
+      provider: route.provider, model: route.model, effort: route.effort, handle });
+    return true;
+  } catch { return false; }
 }
