@@ -460,6 +460,8 @@ export function classifyGhRead(argvRaw) {
     // EVERY method given must be GET/HEAD (not just the one pflag keeps), no payload, no unrecognized flag.
     const { methods, payload, unknown } = scanGhApiFlags(args);
     if (unknown || payload) return false;
+    // `every` is true for an EMPTY list ON PURPOSE: no method + no payload is gh's own GET, and requiring an
+    // explicit `--method GET` would push every plain `gh api repos/o/n` read onto the App budget.
     return methods.every((m) => m === 'GET' || m === 'HEAD');
   }
   return false;
@@ -1298,11 +1300,29 @@ export function looksLikeGhAuthFailure(text) {
 }
 
 /**
+ * Is `text` the personal identity being unable to SERVE a read — HTTP 404 (repo/resource invisible to the
+ * personal login) or an HTTP 403 that is NOT a rate limit (SSO/SAML, no access)? The personal identity is only
+ * a BONUS bucket, so such a read takes the same once-only App fallback as a rejected token (what the App path
+ * did before routing was enabled). A rate-limit 403 is excluded: it keeps its own budget path.
+ * @param {string|null|undefined} text
+ * @returns {boolean}
+ */
+export function looksLikePersonalAccessDenial(text) {
+  const s = String(text ?? '');
+  if (isRateLimitShaped(s)) return false;
+  return /HTTP 404/.test(s) || /HTTP 403/.test(s);
+}
+
+/**
  * Env kill-switch / opt-in for routing a classified read onto the operator's personal identity (see
  * {@link runGhCliPassthrough}) — OFF BY DEFAULT. Unlike this module's other `WE_GH_THROTTLE_*` tuning (which
  * only adjusts an already-active behavior), this changes WHICH GitHub account a call authenticates as, so it
  * stays inert until explicitly turned on (`WE_GH_THROTTLE_PERSONAL_ROUTE=1`) — every existing caller/test, and
  * every host that has not opted in, sees byte-identical behavior to before this card landed.
+ *
+ * SCOPE (TOLERATED, not endorsed): opting in routes reads of ANY repo/search the operator's personal login can
+ * reach onto that login — routing is not pinned to `-R/--repo` or the App's installation repos. The opt-in is
+ * the only guard; tightening it is a tracked follow-up (pinned by a test so the change is a visible diff).
  * @param {NodeJS.ProcessEnv} env
  * @returns {boolean}
  */
@@ -1750,7 +1770,7 @@ export function runGhCliPassthrough(argv, { throttle = {}, spawn = spawnSync, bi
     // to the original (App) identity ONCE, transparently — but check that identity's own budget block FIRST,
     // so a personal-token rejection can never turn into a second, doomed call against an App bucket already
     // known exhausted (review-2026-09-28 finding).
-    if (failed && usedPersonalToken && !appFallbackTried && looksLikeGhAuthFailure(stderrText)) {
+    if (failed && usedPersonalToken && !appFallbackTried && (looksLikeGhAuthFailure(stderrText) || looksLikePersonalAccessDenial(stderrText))) {
       appFallbackTried = true;
       recordGhCallLogEntry(logPath, { op: opLabel, attempt, points: 0, outcome: 'personal_token_rejected', caller, w: isWrite, resource, id: identity, auth: ghAuthProvenance(callEnv), inv, ...(outer ? { outer } : {}) });
       callEnv = env;

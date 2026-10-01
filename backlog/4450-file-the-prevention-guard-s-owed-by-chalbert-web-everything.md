@@ -3,9 +3,11 @@ bornAs: xw93qky
 kind: story
 size: 3
 parent: "4075"
-status: open
+status: resolved
 scope: ["we:scripts/lib/gh-throttle.mjs", "we:scripts/lib/__tests__/gh-throttle.personal-route.test.mjs", "we:scripts/lib/__tests__/gh-throttle.test.mjs", "we:scripts/lib/__tests__/helpers/secret-absence.mjs"]
 dateOpened: "2026-09-28"
+dateStarted: "2026-10-01"
+dateResolved: "2026-10-01"
 preparedDate: "2026-09-30"
 preparedAgainstSha: "bc9db934c4b93158341ba01a74dccb71583765fc"
 tags: []
