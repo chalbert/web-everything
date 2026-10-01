@@ -3,9 +3,10 @@ bornAs: xtmhllw
 kind: story
 size: 3
 parent: "4075"
-status: open
+status: active
 scope: ["we:scripts/operations/cli-adapter.mjs", "we:scripts/operations/review-job.mjs", "we:scripts/operations/__tests__/review-pr.test.mjs", "we:scripts/operations/__tests__/judge-provider-selection.test.mjs", "we:scripts/operations/__tests__/judge-provider-port.test.mjs", "we:scripts/operations/__tests__/review-job.test.mjs"]
 dateOpened: "2026-09-28"
+dateStarted: "2026-10-01"
 preparedDate: "2026-09-30"
 preparedAgainstSha: "bc9db934c4b93158341ba01a74dccb71583765fc"
 tags: []
@@ -37,6 +38,8 @@ Idempotency key (do not edit): approval-prevention-key:chalbert/web-everything#2
 - 2026-09-30 prepare pass. Premise check: no commit on `main` delivers these guards (`git log` for `4446`/`xtmhllw` shows only the JIT-numbering commit). Citations drifted: the card's line numbers are stale (`we:scripts/operations/cli-adapter.mjs:866/101/710/681/864` now sit at 715 / 862-865 / 823 / 880 / 862; `we:scripts/operations/review-job.mjs:197/199/180` now at 198). Scope drift corrected: `scope:` named `we:scripts/operations/__tests__/cli-adapter.test.mjs`, which does not exist; the `createDefaultJudge` tests live in `we:scripts/operations/__tests__/judge-provider-selection.test.mjs` (cwd/model withholding, ~L384) and `we:scripts/operations/__tests__/judge-provider-port.test.mjs` (graceful path, ~L138). Scope now names those two. Goal unchanged.
 - Already delivered: guard 5 (branch-coverage floor on changed lines) — `we:scripts/lib/diff-branch-coverage.mjs` (`DIFF_BRANCH_COVERAGE_FLOOR = 80`, #2876). Nothing to build; recorded under Design.
 - Duplicates: guards 2 + 7 + 10 are one fix (crash-label matching) with one test; guards 3 + 8 + 9 are one fix (cwd keyed on seat) with one test.
+
+- 2026-10-01 build. A (crash label: last line-anchored `error: `) and B (cwd keyed on `TOOL_FREE_JUDGE_PROVIDER_NAMES`) done, with tests. C: the characterization test was RED — the skip showed only in the verdict `summary`, not the posted write-up (the advisory row read `accept`). Minimal fix: `reduce` records `skippedSeats` on the verdict and `renderVerdictWriteUp` prints a "Skipped seats" line. D: table test added (graceful ⇒ advisory; mandatory seats falsy). Mutation proof for D not run.
 
 ## Design
 

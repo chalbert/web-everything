@@ -711,9 +711,10 @@ function buildProviderRequest(effective, cwd, effectiveProviderName) {
     runId: effective.runId,
     lens: effective.lens,
     ...(effective.allowedTools ? { allowedTools: effective.allowedTools } : {}),
+    // #4446 - keyed on the tool-free capability (codex AND antigravity), not on a provider-name literal.
     // #xqa9ttq (PR #2117 review, CONFIRMED) - a codex request NEVER receives the factory's lane cwd: the seat
     // is tool-free and diff-only, and `-C <lane>` would load the untrusted PR checkout's AGENTS.md into it.
-    ...(cwd && effectiveProviderName !== 'codex' ? { cwd } : {}),
+    ...(cwd && !TOOL_FREE_JUDGE_PROVIDER_NAMES.includes(effectiveProviderName) ? { cwd } : {}),
   };
 }
 

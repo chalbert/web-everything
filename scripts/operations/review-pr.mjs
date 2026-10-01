@@ -1556,6 +1556,9 @@ export function renderVerdictWriteUp({ read, verdict, answer, actor, reason = ''
     // the whole panel. It is deliberately still a NOT-A-PANEL disclosure: `${lenses.length}` separate
     // `judge` steps is not the same thing as `judgePanel` (#3050), and a reader who believes it was gets a
     // false picture of the concurrency, the budget and the roster this verdict came from.
+    ...(Array.isArray(verdict.skippedSeats) && verdict.skippedSeats.length
+      ? [`**Skipped seats (did not judge — their rows above are not a verdict):** ${verdict.skippedSeats.map((k) => `\`${k.lens}\` — ${k.reason}`).join('; ')}`, '']
+      : []),
     `**Lenses:** ${lenses.map((l) => `\`${l}\``).join(' + ')} — ${lenses.length} juror(s), one per lens, each a `
       + 'separate `judge` step spawned with its own derived session id (#3028) and its own tools (#3319). They '
       + 'ran SEQUENTIALLY and neither saw the other\'s findings; this is not a `judgePanel` fan-out (#3050). '
@@ -2316,6 +2319,7 @@ export function reviewPrOperation({
         let citationScopeEnforced = false;
         const lenses = [];
         const summaries = [];
+        const skippedSeats = [];
         for (const seat of seats) {
           const answer = seat.answer && typeof seat.answer === 'object' ? seat.answer : {};
           // #x6t2z6h — REFUSE A WRONGLY-TYPED `findings`, for exactly the reason #x0p5k2q refuses a silent
@@ -2362,6 +2366,8 @@ export function reviewPrOperation({
           lensAdmitted[seat.lens] = [...(lensAdmitted[seat.lens] ?? []), ...scoped.admitted];
           if (!ADVISORY_SEAT_STEPS.includes(seat.step)) verdictAdmitted[seat.lens] = [...(verdictAdmitted[seat.lens] ?? []), ...scoped.admitted];
           summaries.push(`${seat.lens}: ${seatSummary}`);
+          // #4446 — a gracefully skipped advisory seat is surfaced, never silently an `accept` row.
+          if (answer.skipped) skippedSeats.push({ lens: seat.lens, reason: String(answer.skipped.reason ?? seatSummary) });
         }
 
         // TAGGED WITH THEIR LENS, by `buildPanelFindings` — so a merged list never loses which juror said it.
@@ -2433,6 +2439,7 @@ export function reviewPrOperation({
           citationScopeEnforced,
           unverifiableCitations: unverifiableCitations.length,
           summary: summaries.join(' | '),
+          skippedSeats,
         };
       },
     }),

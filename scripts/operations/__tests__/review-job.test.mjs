@@ -64,6 +64,13 @@ describe('crashLabelFromLoop — card x5s8b47\'s second defect: the real crash m
     })).toBe('error: judgeAdvisory spawn failed — codex quota exhausted');
   });
 
+  it('finds the `error: ` line anywhere in multi-line stdout; the LAST such line wins; mid-line text is not matched (#4446)', () => {
+    const noise = '(node) [DEP0040] DeprecationWarning: punycode';
+    expect(crashLabelFromLoop({ stdout: 'progress line\nmore\nerror: boom', stderr: noise })).toBe('error: boom');
+    expect(crashLabelFromLoop({ stdout: 'error: echoed sub-error\nprogress\nerror: real crash\n', stderr: noise })).toBe('error: real crash');
+    expect(crashLabelFromLoop({ stdout: 'stderr said error: x', stderr: noise })).toBe(noise);
+  });
+
   it('falls back to stderr, then stdout, when stdout carries no deliberate `error: ` line — unchanged from before', () => {
     expect(crashLabelFromLoop({ stdout: '', stderr: 'a real stderr crash' })).toBe('a real stderr crash');
     expect(crashLabelFromLoop({ stdout: 'some other stdout, no error prefix', stderr: '' })).toBe('some other stdout, no error prefix');

@@ -390,6 +390,14 @@ describe('createDefaultJudge - a codex-routed request never carries the lane cwd
     expect(codexJudgeSpawnCalls[0].cwd).toBeUndefined();
   });
 
+  it('a request pinned to antigravity (tool-free) never receives the factory\'s lane cwd either (#4446)', async () => {
+    antigravityJudgeSpawnCalls.length = 0;
+    const judgeFn = createDefaultJudge({ cwd: '/some/lane' });
+    await judgeFn({ mandate: 'm', input: 'i', shape: { type: 'object' }, providerName: 'antigravity' });
+    expect(antigravityJudgeSpawnCalls).toHaveLength(1);
+    expect(antigravityJudgeSpawnCalls[0].cwd).toBeUndefined();
+  });
+
   it('a factory whose OWN provider is codex never receives the lane cwd either', async () => {
     codexJudgeSpawnCalls.length = 0;
     const judgeFn = createDefaultJudge({ providerName: 'codex', cwd: '/some/lane' });
