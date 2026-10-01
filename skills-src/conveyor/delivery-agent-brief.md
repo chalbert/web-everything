@@ -190,7 +190,7 @@ node scripts/readiness/heavy-admission.mjs run -- npx vitest related <touched-fi
 **Keep `--run --passWithNoTests` on it, always.** Without `--run`, `vitest` can drop into watch mode on a TTY
 shell and hang inside the admission wrapper. Without `--passWithNoTests`, a touch-set with no covering tests at
 all (a doc, a config, a helper nothing tests directly) exits non-zero — a false red on a harmless case, not a
-real failure.
+real failure. The guard enforces the `--run` half mechanically: an admitted `vitest` command without it is denied.
 
 This is the **admitted-wrapper** shape `we:scripts/guard-bash.mjs` already sanctions for a dispatched agent — its
 head is `node heavy-admission.mjs run`, never the raw `npx vitest …` head `dispatchedAgentVerificationReason`
