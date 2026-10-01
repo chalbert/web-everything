@@ -1,11 +1,15 @@
 /**
  * @file deliver-item-run.test.mjs — the restartable per-dispatch CLI entry point
- * (`we:scripts/operations/deliver-item-run.mjs`), unit-level only: argv parsing, provider selection, and the
- * CLI's exit-code mapping via an injected `deliver` fake. No real process spawn anywhere in this file — every
- * assertion below exercises pure functions or an injected fake, never `../deliver-item-wrapper.mjs`'s real
- * `deliverItem` (which would spawn a real `claude`/`codex` CLI).
+ * (`we:scripts/operations/deliver-item-run.mjs`): argv/CLI tests plus isolated real-process
+ * preflight regressions. The mixed-locus child must terminate before any agent can spawn.
  */
 import { describe, it, expect, vi } from 'vitest';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, readdirSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { createFileRunStore, newRunRecord } from '../run-store.mjs';
 import {
   parseDeliverItemRunArgv, selectDeliveryAgentProvider, runDeliverItemCli,
 } from '../deliver-item-run.mjs';
@@ -91,26 +95,125 @@ describe('runDeliverItemCli (injected `deliver` fake — no real process spawn)'
     expect(writeErr).not.toHaveBeenCalled();
   });
 
-  it('exits 1 when the injected `deliver` throws', async () => {
+  it('#4649 exits 1 and settles the original error when deliver throws', async () => {
     const deliver = vi.fn(async () => { throw new Error('acquire refused'); });
     const write = vi.fn();
     const writeErr = vi.fn();
-    const { code, result } = await runDeliverItemCli(baseArgv, { deliver, write, writeErr });
+    const settle = vi.fn();
+    const { code, result } = await runDeliverItemCli([...baseArgv, '--run-id=run-42', '--effect-key=dispatch'], { deliver, write, writeErr, settle });
     expect(code).toBe(1);
     expect(result).toBeNull();
     expect(writeErr).toHaveBeenCalledWith(expect.stringContaining('acquire refused'));
+    expect(writeErr.mock.calls.flat().join('')).not.toContain('released');
+    expect(settle).toHaveBeenCalledTimes(1);
+    expect(settle).toHaveBeenCalledWith({ runId: 'run-42', key: 'dispatch', status: 'failed', error: 'acquire refused', result: { outcome: 'wrapper-threw' } });
   });
 
   it('exits 1 on a bad `--provider=`, BEFORE `deliver` is ever called', async () => {
+    const settle = vi.fn();
     const deliver = vi.fn(async () => ({ item: '42', result: 'should never run' }));
     const write = vi.fn();
     const writeErr = vi.fn();
     const { code, result } = await runDeliverItemCli([...baseArgv, '--provider=not-a-real-provider'], {
-      deliver, write, writeErr,
+      deliver, write, writeErr, settle,
     });
     expect(code).toBe(1);
     expect(result).toBeNull();
     expect(deliver).not.toHaveBeenCalled();
     expect(writeErr).toHaveBeenCalledWith(expect.stringContaining('--provider must be one of'));
+    expect(settle).toHaveBeenCalledTimes(1);
+    expect(settle.mock.calls[0][0]).toMatchObject({ status: 'failed', error: expect.stringContaining('--provider must be one of') });
+  });
+});
+
+
+describe('#4649 real process preflight boundaries', () => {
+  // The incident scope, before #4289 split #4620, preserved independently of the live card.
+  const scope = ['we:contracts/plateau-progress-view.schema.json', 'we:contracts/plateau-progress-view.examples.json',
+    ...['types.ts', 'wip-read.ts', 'wip-model.ts', 'wip-view.ts', 'wip-view.css', 'wip-source.ts', 'wip-live.ts',
+      'progress-read.ts', 'progress-read.test.ts', 'wip-model.test.ts', 'wip-view.test.ts', 'wip-source.test.ts',
+      'wip-publish.ts', 'wip-publish.test.ts', 'wip-api.ts', 'wip-read.test.ts', 'wip-view.hostile.test.ts']
+      .map((path) => `plateau-app:src/wip/${path}`),
+    'plateau-app:tools/drain-daemon/cli.mjs', 'plateau-app:src/wip/wip-relay-contract.test.ts',
+    'plateau-app:scripts/wip-publish.ts', 'plateau-app:wip-relay.js'];
+
+  function isolated() {
+    const dir = mkdtempSync(join(tmpdir(), 'preflight-4649-'));
+    const pool = join(dir, 'pool');
+    const lease = join(pool, 'lane-15', '.git', '.lane-lease');
+    mkdirSync(join(pool, 'lane-15', '.git'), { recursive: true });
+    const before = JSON.stringify({ session: 'foreign-holder', holder: 'foreign-holder', reserved: true, acquiredAt: new Date().toISOString(), pid: process.pid });
+    writeFileSync(lease, before);
+    return { dir, pool, lease, before, env: { ...process.env, LANE_POOL_ROOT: pool,
+      OPERATION_RUNS_DIR: join(dir, 'runs'), WE_COORDINATION_ROOT: join(dir, 'coord'),
+      OPERATION_TELEMETRY_DIR: join(dir, 'telemetry'), WE_BACKLOG_DIR: join(dir, 'backlog') } };
+  }
+
+  it('the actual child settles failed, releases its claim and leaves the foreign lease byte-identical', () => {
+    const f = isolated();
+    try {
+      const store = createFileRunStore(f.env.OPERATION_RUNS_DIR);
+      store.write({ ...newRunRecord({ id: 'mixed-child', op: 'dispatch-lane' }),
+        effects: [{ key: 'dispatch', type: 'conveyor.dispatch-delivery-agent', stepIndex: 0, index: 0,
+          status: 'in-flight', payload: { num: '4620', launchKind: 'build' }, result: null, error: null }] });
+      const claimModule = pathToFileURL(resolve('scripts/conveyor/build-dispatch-claim.mjs')).href;
+      const seed = spawnSync(process.execPath, ['--input-type=module', '-e',
+        `import { acquireBuildDispatchClaim } from ${JSON.stringify(claimModule)}; acquireBuildDispatchClaim({ num: '4620', scope: [] });`], { env: f.env, encoding: 'utf8' });
+      expect(seed.status, seed.stderr).toBe(0);
+      const child = spawnSync(process.execPath, ['scripts/operations/deliver-item-run.mjs', '--num=4620', '--lane=15',
+        '--session=conveyor-4620', '--provider=claude-restricted', `--scope=${scope.join(',')}`, '--run-id=mixed-child', '--effect-key=dispatch'],
+      { env: f.env, encoding: 'utf8', timeout: 15000 });
+      console.log(JSON.stringify({ probe: '4649-child-state', exit: child.status, effect: store.read('mixed-child').effects[0] }));
+      expect(child.status, child.stderr).toBe(1);
+      expect(child.stderr).toContain('more than one repo (we, plateau-app)');
+      expect(child.stderr).not.toContain('released');
+      const entry = store.read('mixed-child').effects[0];
+      expect(entry).toMatchObject({ status: 'failed', result: { outcome: 'unsupported-locus' }, error: expect.stringContaining('#4289') });
+      const claims = spawnSync(process.execPath, ['--input-type=module', '-e',
+        `import { listBuildDispatchClaims } from ${JSON.stringify(claimModule)}; console.log(JSON.stringify(listBuildDispatchClaims()));`], { env: f.env, encoding: 'utf8' });
+      expect(claims.status, claims.stderr).toBe(0);
+      expect(JSON.parse(claims.stdout)).toEqual([]);
+      expect(readFileSync(f.lease, 'utf8')).toBe(f.before);
+      expect(readdirSync(f.pool)).toEqual(['lane-15']);
+      console.log(JSON.stringify({ probe: '4649-child', exit: child.status, status: entry.status, outcome: entry.result.outcome, error: entry.error, claims: [], foreignLeaseUnchanged: true }));
+    } finally { rmSync(f.dir, { recursive: true, force: true }); }
+  });
+
+  it('actual operation CLI reads mixed scope from the temporary backlog and declares zero effects', () => {
+    const f = isolated();
+    try {
+      mkdirSync(f.env.WE_BACKLOG_DIR, { recursive: true });
+      writeFileSync(join(f.env.WE_BACKLOG_DIR, '4620-mixed-locus.md'), `---\nkind: story\nsize: 5\nstatus: open\nscope: ${JSON.stringify(scope)}\n---\n# Mixed locus\n`);
+      // The operation/reader/loader/store are real. Only external planner/GitHub reads are supplied;
+      // every unexpected subprocess fails, and every async spawn is fatal (no detached child can exist).
+      const preload = `import cp from 'node:child_process';
+        import { syncBuiltinESMExports } from 'node:module';
+        cp.execFileSync = (cmd, args = []) => {
+          if (String(args[0]).endsWith('/conveyor/tick-core.mjs')) return JSON.stringify({ decisions: { spawnBuilds: [{ num: '4620', lane: 15 }] }, nextState: {} });
+          if (cmd === 'git') return '';
+          throw new Error('unexpected subprocess: ' + cmd + ' ' + args.join(' '));
+        };
+        cp.spawnSync = (cmd, args, opts) => { if (cmd === 'git') return { status: 0, stdout: args[0] === 'symbolic-ref' ? 'main' : args[0] === 'rev-list' ? '0' : '', stderr: '' }; if (cmd === 'gh') return { status: 0, stdout: '[]', stderr: '' }; throw new Error('unexpected sync spawn: ' + cmd); };
+        cp.spawn = () => { process.stderr.write('UNEXPECTED_DETACHED_SPAWN'); process.exit(91); };
+        syncBuiltinESMExports();`;
+      const cli = spawnSync(process.execPath, ['--import', `data:text/javascript,${encodeURIComponent(preload)}`,
+        'scripts/operations/run.mjs', 'dispatch-lane', '--num=4620', '--json'],
+      { env: f.env, encoding: 'utf8', timeout: 20000 });
+      const observed = JSON.parse(cli.stdout);
+      console.log(JSON.stringify({ probe: '4649-cli-state', exit: cli.status, dispatching: observed.verdict?.dispatching, inFlight: observed.inFlight, stopped: observed.stopped }));
+      expect(cli.status, cli.stderr).toBe(0);
+      const output = JSON.parse(cli.stdout);
+      expect(output.verdict.dispatching).toBe(false);
+      expect(output.findings.read.gates).toContainEqual({ name: 'locus', pass: false, observed: { kind: 'unsupported-locus', keys: ['we', 'plateau-app'] } });
+      expect(JSON.stringify(output)).toContain('#4289');
+      const store = createFileRunStore(f.env.OPERATION_RUNS_DIR);
+      const records = readdirSync(f.env.OPERATION_RUNS_DIR).filter((name) => name.endsWith('.json')).map((name) => store.read(name.slice(0, -5)));
+      expect(records.length).toBeGreaterThan(0);
+      expect(records.flatMap((run) => run.effects)).toEqual([]);
+      expect(readFileSync(f.lease, 'utf8')).toBe(f.before);
+      expect(readdirSync(f.pool)).toEqual(['lane-15']);
+      expect(cli.stderr).not.toContain('UNEXPECTED_DETACHED_SPAWN');
+      console.log(JSON.stringify({ probe: '4649-dispatch-cli', stopped: output.stopped, verdict: output.verdict, locus: output.findings.read.gates.find((gate) => gate.name === 'locus'), effects: [], foreignLeaseUnchanged: true }));
+    } finally { rmSync(f.dir, { recursive: true, force: true }); }
   });
 });
