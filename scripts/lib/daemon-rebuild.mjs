@@ -12,12 +12,13 @@
  * TREE object without touching the index or working tree at all; `git commit-tree` mints a commit object from
  * that tree with explicit parents — both are pure object-database operations that can run in a bare scratch
  * repo, can be retried freely, and can be killed mid-flight with ZERO effect on any real checkout (nothing on
- * disk outside `.git/objects` and a scratch dir is ever touched while the build is COMPUTED). Only the very
- * last step, `git reset --hard <finalSha>`, ever moves the working tree — and it moves it in ONE atomic jump
+ * disk outside `.git/objects` and a scratch dir is ever touched while the build is COMPUTED). The
+ * adoption step, `git reset --hard <finalSha>`, moves the tracked working tree — and it moves it in ONE atomic jump
  * from the old good commit straight to the new one. A killed rebuild therefore never leaves a half-merge: either
  * the `reset --hard` completed (new tree, in full) or it didn't run yet (old tree, in full). `git clean` is
  * NEVER called anywhere in this file — a daemon clone can have build artifacts, node_modules, or other
- * gitignored state a bystander process depends on, and wiping it is not this module's business.
+ * gitignored state a bystander process depends on, and wiping it is not this module's business. The narrow
+ * exception is post-fetch pruning of untracked provisional backlog cards proven landed on pinned main.
  *
  * DETERMINISM. The identity `daemon-rebuild <daemon-rebuild@localhost>` and `GIT_AUTHOR_DATE`/
  * `GIT_COMMITTER_DATE` pinned to `@<the later of the two parents' committer dates> +0000` (see
@@ -107,12 +108,15 @@
 import { spawnSync } from 'node:child_process';
 import {
   mkdtempSync, rmSync, readFileSync, writeFileSync, renameSync, mkdirSync, appendFileSync, statSync, unlinkSync,
-  existsSync, symlinkSync,
+  existsSync, symlinkSync, lstatSync,
 } from 'node:fs';
 import { tmpdir, hostname, homedir } from 'node:os';
 import { join, dirname, resolve as resolvePath, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash, randomBytes } from 'node:crypto';
+
+import matter from 'gray-matter';
+import { idFromName, isHash, isNum } from '../backlog/id.mjs';
 
 import { withWriteLock } from './daemon-clone-lock.mjs';
 import {
@@ -402,6 +406,59 @@ function collectUntrackedPaths(git) {
   return String(r.stdout ?? '').split('\0').filter(Boolean);
 }
 
+/** Locked, post-fetch exception to untracked preservation: only main-proven birth identities. */
+function pruneLandedBacklogSidecars({ git, root, paths, mainSha, alert }) {
+  const candidates = paths.filter((path) => /^backlog\/[^/]+\.md$/.test(path)
+    && isHash(idFromName(path.slice('backlog/'.length, -3))));
+  if (!candidates.length) return;
+  const failed = (detail) => alert('backlog-sidecar-prune-failed', { mainSha, ...detail });
+  if (!mainSha) { failed({ error: 'Cannot resolve fetched main commit; retaining sidecars' }); return; }
+  try {
+    // Grep is only a blob prefilter, NEVER deletion evidence. Pin every read to this one commit.
+    const hashes = [...new Set(candidates.map((path) => idFromName(path.slice(8, -3))))];
+    const matches = git(['grep', '--no-textconv', '-l', '-z', '-F', ...hashes.flatMap((hash) => ['-e', hash]), mainSha, '--', 'backlog']);
+    if (matches.status === 1) return;
+    if (matches.status !== 0) throw new Error('Cannot search fetched main backlog blobs');
+    const landed = new Map();
+    for (const match of String(matches.stdout ?? '').split('\0').filter(Boolean)) {
+      const path = match.slice(mainSha.length + 1);
+      if (!match.startsWith(`${mainSha}:`) || !/^backlog\/[^/]+\.md$/.test(path)
+        || !isNum(idFromName(path.slice(8, -3)))) continue;
+      const blob = git(['show', `${mainSha}:${path}`]);
+      if (blob.status !== 0) { failed({ landedPath: path, error: 'Cannot read landing evidence; retaining dependent sidecars' }); continue; }
+      const content = String(blob.stdout ?? '');
+      const fm = content.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
+      if (!fm) continue;
+      try {
+        // Validate YAML as well as the scalar convention: duplicate keys, mismatched quotes,
+        // malformed documents, aliases/merges and body examples cannot authorize unlinking.
+        const data = matter(fm[0]).data;
+        const lines = fm[1].split(/\r?\n/).filter((line) => /^bornAs:/.test(line));
+        if (lines.length !== 1 || !/^bornAs:[ \t]*(?:x[0-9a-z]{6}|'x[0-9a-z]{6}'|"x[0-9a-z]{6}")[ \t]*$/.test(lines[0])) continue;
+        // Same scalar convention as backlog/frontmatter.mjs readField, after stricter validation.
+        // Keep the editor/transition module out of the daemon's runtime dependency closure.
+        const hash = lines[0].slice('bornAs:'.length).trim().replace(/^["']|["']$/g, '');
+        if (isHash(hash) && data.bornAs === hash) landed.set(hash, path);
+      } catch (error) { failed({ landedPath: path, error: `Invalid landing frontmatter: ${error.message}` }); }
+    }
+    for (const path of candidates) {
+      const hash = idFromName(path.slice(8, -3));
+      const landedPath = landed.get(hash);
+      if (!landedPath) continue;
+      try {
+        const current = collectUntrackedPaths(git);
+        if (current === null) throw new Error('Cannot recheck untracked membership; retaining sidecar');
+        if (!current.includes(path)) continue;
+        if (!lstatSync(join(root, 'backlog')).isDirectory() || !lstatSync(join(root, path)).isFile()) continue;
+        unlinkSync(join(root, path));
+        alert('backlog-sidecar-pruned', { path, hash, landedPath, mainSha });
+      } catch (error) {
+        if (error.code !== 'ENOENT') failed({ path, hash, landedPath, error: String(error.message || error) });
+      }
+    }
+  } catch (error) { failed({ error: String(error.message || error) }); }
+}
+
 /**
  * PURE: is `root`'s current tree safe for {@link rebuildClone} to move with `git reset --hard`? Fail-closed at
  * every read — an unreadable `status` refuses outright, since we cannot then trust anything else. Precedence
@@ -419,7 +476,8 @@ function collectUntrackedPaths(git) {
  * as `untracked` on EVERY result (safe or not) — {@link doRebuild} uses it, after the plan is computed and
  * just before its one `reset --hard`, to refuse with `untracked-collision` if the incoming tree actually has
  * content at one of those paths (the one case a `reset --hard` WOULD silently overwrite something); every
- * other kept untracked path is only reported (`untracked-kept`), never deleted.
+ * other kept untracked path is only reported (`untracked-kept`). The sole deletion exception is a
+ * provisional backlog sidecar proven landed on fetched main, pruned under the write lock before planning.
  * @param {{git:(args:string[])=>{status:number,stdout:string,stderr:string}}} o
  * @returns {{safe:boolean, reason?:string, detail?:Array<string>|string, untracked:Array<string>}}
  */
@@ -1358,12 +1416,6 @@ async function prepareRebuild({
     alert(unsafe.reason, unsafe.detail);
     return terminal({ moved: false, reason: unsafe.reason });
   }
-  // Report kept untracked paths on EVERY tick that gets this far — including no-op (`up-to-date`,
-  // `still-rejected`) ticks — not only when the tree moves. `reset --hard` never removes them, so an
-  // unexpected file (nothing daemon-written should be here: `.conveyor/` and host-local settings are
-  // gitignored, and ignored paths are not listed) keeps showing up in the alert log for as long as it stays.
-  if (unsafe.untracked.length > 0) alert('untracked-kept', { paths: unsafe.untracked });
-
   const prevHead = verifyRev(git, 'HEAD');
   if (!prevHead) {
     alert('head-unresolved');
@@ -1381,10 +1433,21 @@ async function prepareRebuild({
   const overlaysBefore = overlayState.overlays;
   const fetchResult = fetchMainAndOverlays({ git, overlays: overlaysBefore });
   if (!fetchResult.ok) {
+    if (unsafe.untracked.length > 0) alert('untracked-kept', { paths: unsafe.untracked });
     alert('fetch-failed');
     return terminal({ moved: false, reason: 'fetch-failed' });
   }
   for (const ref of fetchResult.goneRefs) alert('overlay-ref-gone-on-fetch', { ref });
+
+  const fetchedMainSha = verifyRev(git, 'origin/main^{commit}');
+  pruneLandedBacklogSidecars({ git, root, paths: unsafe.untracked, mainSha: fetchedMainSha, alert });
+  const remaining = collectUntrackedPaths(git);
+  if (remaining === null) {
+    alert('status-failed', 'Post-cleanup ls-files --others failed');
+    return terminal({ moved: false, reason: 'status-failed' });
+  }
+  unsafe.untracked = remaining;
+  if (remaining.length > 0) alert('untracked-kept', { paths: remaining });
 
   // ── Step 3: plan + apply list edits ─────────────────────────────────────────────────────────────────
   const plan = await planRebuild({
