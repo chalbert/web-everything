@@ -47,6 +47,7 @@ import {
   JUDGE_STEPS,
   SECURITY_LENS,
   DEFAULT_LENS,
+  ADVISORY_SEAT_STEPS,
   buildReviewJudgeRequest,
   // #3344 — the lens-floor guard and the seat roster it reads.
   CALLER_CHOSEN_LENS,
@@ -2998,6 +2999,38 @@ describe('#xqa9ttq — the opt-in Codex advisory seat (judgeAdvisory)', () => {
       expect(run.verdict.lensVerdicts[ADVISORY_JUDGE_LENS]).toBe('accept');
       expect(run.verdict.lenses).toEqual([DEFAULT_LENS, SECURITY_LENS, ADVISORY_JUDGE_LENS]);
     });
+
+    // #4446 guard 1 — characterization: a skipped seat is reported AS skipped (never silently an 'accept').
+    it('#4446 — the skipped reason is visible in the verdict summary and the posted write-up', () => {
+      const { registry } = registryFor({}, { codexAdvisory: true });
+      const reason = 'quota exhausted on its last seat call';
+      const { run } = atConfirm({
+        registry, input: BASE_INPUT, id: 'run-codex-advisory-skip-visible',
+        answers: {
+          [JUDGE_STEPS[0]]: CLEAN_ANSWER, [JUDGE_STEPS[1]]: CLEAN_ANSWER,
+          judgeAdvisory: { summary: `skipped: ${reason}`, findings: [], skipped: { provider: 'codex', reason } },
+        },
+      });
+      expect(run.verdict.verdict).toBe('accept');
+      expect(run.verdict.summary).toContain(`${ADVISORY_JUDGE_LENS}: skipped: ${reason}`);
+      const body = renderVerdictWriteUp({ read: run.findings.read, verdict: run.verdict, answer: 'accept', actor: 'op' });
+      expect(body).toContain('Skipped seats');
+      expect(body).toContain(reason);
+    });
+  });
+});
+
+// ── #4446 guard 4 — `gracefulOnUnavailable` is set ONLY on advisory seats ──────────────────────────────────────
+describe('#4446 — gracefulOnUnavailable implies an advisory seat; no mandatory seat ever carries it', () => {
+  it('over every seat step reachable at confirm time', () => {
+    const { registry } = registryFor({}, { codexAdvisory: true, correctnessAdvisory: true, antigravityReview: true });
+    const { requests } = atConfirm({ registry, input: BASE_INPUT, id: 'run-graceful-table' });
+    const steps = Object.keys(requests);
+    for (const step of [...JUDGE_STEPS, ...ADVISORY_SEAT_STEPS]) expect(steps).toContain(step);
+    for (const step of steps) {
+      if (requests[step].gracefulOnUnavailable) expect(ADVISORY_SEAT_STEPS).toContain(step);
+      if (JUDGE_STEPS.includes(step)) expect(requests[step].gracefulOnUnavailable).toBeFalsy();
+    }
   });
 });
 

@@ -194,8 +194,8 @@ export function parseReviewLoopStdout(stdout) {
  * @returns {string}
  */
 export function crashLabelFromLoop({ stdout, stderr } = {}) {
-  const out = String(stdout ?? '').trim();
-  if (out.startsWith('error: ')) return out;
+  const errorLines = String(stdout ?? '').split('\n').map((l) => l.trim()).filter((l) => l.startsWith('error: '));
+  if (errorLines.length) return errorLines[errorLines.length - 1];
   return String(stderr || stdout || '');
 }
 
