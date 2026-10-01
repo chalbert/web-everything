@@ -11,6 +11,8 @@
  *   being correct can never silently drift from what ships.
  */
 import { describe, it, expect } from 'vitest';
+import { execSync } from 'node:child_process';
+import { LANE_RELEASE_LITTER_ALLOWLIST } from '../lane-litter.mjs';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { resolveDefaultGate, canScopeCheckStandards, composeGate, describeGate, laneRelevantChangeSince, computeWorkingTreeHash, stableTreeHash, FULL_GATE, MAX_RELATED_TARGETS } from '../verify-lane-gate.mjs';
@@ -37,6 +39,97 @@ function fakeGit(changedFiles, { deleted = [], untracked = [], grepHits = {} } =
     throw new Error(`unexpected git invocation in test: ${args.join(' ')}`);
   };
 }
+
+describe('#4540 — untracked lane scratch selection', () => {
+  it('filters scratch before both related targets and reference discovery, preserving standards inputs', () => {
+    const grepCalls = [];
+    const git = fakeGit(['scripts/example.mjs'], {
+      untracked: ['.commit-msg.txt'],
+      grepHits: {
+        '.commit-msg.txt': ['scripts/scratch.test.mjs'],
+        'example.mjs': ['scripts/example.test.mjs'],
+      },
+    });
+    const { command, decision } = resolveDefaultGate({
+      runGit: (args) => { if (args[0] === 'grep') grepCalls.push(args); return git(args); },
+      env: {},
+    });
+    expect.soft(grepCalls.flat()).not.toContain('.commit-msg.txt');
+    expect.soft(decision.relatedFiles).toEqual(['scripts/example.mjs']);
+    expect.soft(decision.targets).toEqual(['scripts/example.mjs', 'scripts/example.test.mjs']);
+    expect.soft(decision.referencedTests).toEqual(['scripts/example.test.mjs']);
+    expect(decision.changedFiles).toEqual(['.commit-msg.txt', 'scripts/example.mjs']);
+    expect(command).toBe("npx vitest related 'scripts/example.mjs' 'scripts/example.test.mjs' --run --passWithNoTests && npm run check:standards -- --local --files='.commit-msg.txt,scripts/example.mjs'");
+  });
+  it('scratch-only skips successfully without grep, while opt-out still runs the full suite', () => {
+    for (const optOut of [false, true]) {
+      const git = fakeGit([], { untracked: ['.commit-msg.txt'] });
+      const { command, decision } = resolveDefaultGate({
+        runGit: (args) => { expect(args[0]).not.toBe('grep'); return git(args); },
+        env: optOut ? { WE_DIFF_TEST_SELECTION: '0' } : {},
+      });
+      expect(decision.changedFiles).toEqual(['.commit-msg.txt']);
+      expect(decision).toMatchObject({ mode: optOut ? 'full' : 'shrink', relatedFiles: [], triggerFiles: [], deletedSourceFiles: [], targets: [], referencedTests: [] });
+      expect(command.split(' && ')[1]).toBe("npm run check:standards -- --local --files='.commit-msg.txt'");
+      if (optOut) expect(command.split(' && ')[0]).toBe('npm run test:unit');
+      else {
+        expect(decision.reasons.join(' ')).toMatch(/scratch only/);
+        expect(execSync(command.split(' && ')[0], { encoding: 'utf8' })).toMatch(/vitest half skipped.*scratch/);
+      }
+    }
+  });
+
+  it('uses shared full-path patterns without excluding nested names, unknown names or directory children', () => {
+    const scratch = LANE_RELEASE_LITTER_ALLOWLIST.filter((p) => !p.endsWith('/')).map((p) => p.replaceAll('*', '4540'));
+    const retained = ['scripts/.commit-msg.txt', '.unknown-scratch-4540.txt', '.conveyor/state.json'];
+    const { decision } = resolveDefaultGate({ runGit: fakeGit([], { untracked: [...scratch, ...retained] }), env: {} });
+    expect(decision.targets).toEqual([...retained].sort());
+    expect(decision.changedFiles).toEqual([...new Set([...scratch, ...retained])].sort());
+  });
+
+  it.each([false, true])('preserves an allowlisted name when tracked (untracked=%s)', (untracked) => {
+    const file = '.pr-body.md';
+    const { decision } = resolveDefaultGate({
+      runGit: fakeGit(untracked ? [] : [file], { untracked: untracked ? [file] : [] }), env: {},
+    });
+    expect(decision.targets).toEqual(untracked ? [] : [file]);
+    expect(decision.relatedFiles).toEqual(untracked ? [] : [file]);
+    expect(decision.changedFiles).toEqual([file]);
+  });
+
+  it.each([
+    ['package.json', [], 'full', true],
+    ['scripts/gone.mjs', ['scripts/gone.mjs'], 'full', true],
+    ['backlog/100-example.md', [], 'shrink', false],
+    ['scripts/lib/review-escalation.mjs', [], 'shrink', false],
+    ['.pr-body.md', ['.pr-body.md'], 'shrink', true],
+  ])('preserves selection and standards for scratch plus %s', (file, deleted, mode, scoped) => {
+    const { decision, command } = resolveDefaultGate({
+      runGit: fakeGit([file], { deleted, untracked: ['.commit-msg.txt'] }), env: {},
+    });
+    expect(decision.mode).toBe(mode);
+    expect(decision.changedFiles).toEqual(['.commit-msg.txt', file].sort());
+    expect(decision.targets).not.toContain('.commit-msg.txt');
+    expect(decision.targets).not.toContain(deleted[0]);
+    expect(command.includes('--local --files=')).toBe(scoped);
+    if (scoped) expect(command).toContain("--files='" + ['.commit-msg.txt', file].sort().join(',') + "'");
+    if (file === 'package.json') expect(decision.triggerFiles).toEqual([file]);
+    if (file === 'scripts/gone.mjs') expect(decision.deletedSourceFiles).toEqual([file]);
+  });
+
+  it('applies the target limit after scratch filtering and reference expansion', () => {
+    const pattern = LANE_RELEASE_LITTER_ALLOWLIST.find((p) => p.includes('*'));
+    const scratch = Array.from({ length: MAX_RELATED_TARGETS }, (_, i) => pattern.replaceAll('*', String(i)));
+    const files = Array.from({ length: MAX_RELATED_TARGETS - 1 }, (_, i) => 'scripts/m' + i + '.mjs');
+    for (const extra of [1, 2]) {
+      const refs = Array.from({ length: extra }, (_, i) => 'scripts/ref' + i + '.test.mjs');
+      const { decision } = resolveDefaultGate({ runGit: fakeGit(files, { untracked: scratch, grepHits: { 'm0.mjs': refs } }), env: {} });
+      expect(decision.mode).toBe(extra === 1 ? 'shrink' : 'full');
+      expect(decision.targets).toHaveLength(extra === 1 ? MAX_RELATED_TARGETS : 0);
+    }
+  });
+
+});
 
 describe('resolveDefaultGate (xpnhz4o) — the LOCAL gate runs only the diff-selected tests', () => {
   it('a scripts/ change (the everyday PR) SELECTS: vitest related on it + the tests naming it, never `npm run test:unit`', () => {
