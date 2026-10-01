@@ -548,6 +548,19 @@ export function fmtAge(ms) {
   return h < 48 ? `${h}h${String(m % 60).padStart(2, '0')}m` : `${Math.floor(h / 24)}d`;
 }
 
+/** PURE: a backtick delimiter one longer than the longest backtick run in `text` (min `min`), so untrusted
+ *  text can never close the fence / inline span it sits in. */
+export function fenceFor(text, min = 3) {
+  const longest = Math.max(0, ...(String(text ?? '').match(/`+/g) || []).map((r) => r.length));
+  return '`'.repeat(Math.max(min, longest + 1));
+}
+
+/** PURE: `text` as a fenced block whose fence cannot be closed from inside. */
+function fenced(text, info = '') {
+  const fence = fenceFor(text);
+  return [`${fence}${info}`, text, fence];
+}
+
 /**
  * PURE (#4078): the "Agent investigation" section of an episode report — `[]` when no investigation was ever
  * considered. `ep.investigationStatus` is the dispatcher's own line (running / held / stopped); `ep.investigation`
@@ -573,7 +586,10 @@ export function renderInvestigationSection(ep) {
     '',
   );
   for (const ev of Array.isArray(inv.evidence) ? inv.evidence : []) {
-    lines.push(`Evidence — \`${scrubText(ev.command)}\``, '', '```', scrubText(ev.output), '```', '');
+    const cmd = scrubText(ev.command);
+    const out = scrubText(ev.output);
+    const span = fenceFor(cmd, 1);
+    lines.push(`Evidence — ${span}${cmd.startsWith('`') || cmd.endsWith('`') ? ` ${cmd} ` : cmd}${span}`, '', ...fenced(out), '');
   }
   return lines;
 }
@@ -592,13 +608,11 @@ export function renderEpisodeReport(ep, { now, smell, diagnosis = null, plan = [
     '',
     '## Measurements',
     '',
-    '```json',
-    scrubText(JSON.stringify(ep.measure ?? {}, null, 2)),
-    '```',
+    ...fenced(scrubText(JSON.stringify(ep.measure ?? {}, null, 2)), 'json'),
     '',
   ];
   if (diagnosis) {
-    lines.push('## Deterministic diagnosis', '', `\`${diagnosis.command}\` → exit ${diagnosis.code}${diagnosis.timedOut ? ' (timed out)' : ''}`, '', '```', scrubText(diagnosis.output || '').slice(0, 4000), '```', '');
+    lines.push('## Deterministic diagnosis', '', `\`${diagnosis.command}\` → exit ${diagnosis.code}${diagnosis.timedOut ? ' (timed out)' : ''}`, '', ...fenced(scrubText(diagnosis.output || '').slice(0, 4000)), '');
   }
   lines.push(...renderInvestigationSection(ep));
   const suppressed = plan.filter((p) => p.key === ep.key && p.suppressed);

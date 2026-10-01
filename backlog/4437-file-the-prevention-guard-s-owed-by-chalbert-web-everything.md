@@ -3,9 +3,10 @@ bornAs: xoo506d
 kind: story
 size: 3
 parent: "4075"
-status: open
+status: active
 scope: ["we:scripts/conveyor/health-investigate-plan.mjs", "we:scripts/conveyor/health-investigate-dispatch.mjs", "we:scripts/conveyor/health-watch-core.mjs", "we:scripts/conveyor/health-watch.mjs", "we:scripts/conveyor/__tests__/health-investigate-dispatch.test.mjs", "we:scripts/conveyor/__tests__/health-watch-core.test.mjs", "we:scripts/conveyor/__tests__/health-watch.test.mjs"]
 dateOpened: "2026-09-28"
+dateStarted: "2026-10-01"
 preparedDate: "2026-09-30"
 preparedAgainstSha: "235bc9ce646f256e235f00860ab0460c7d450435"
 tags: []
@@ -35,6 +36,7 @@ Idempotency key (do not edit): approval-prevention-key:chalbert/web-everything#2
 - Citation drift corrected (goal unchanged): guard 1 `pruneLedger` is `we:scripts/conveyor/health-investigate-plan.mjs:144` (card said `:108`); guard 2 is steps 3–4 of `runInvestigations` at `we:scripts/conveyor/health-investigate-dispatch.mjs:253-268` plus the report write in `we:scripts/conveyor/health-watch.mjs` (card said `:247`); guard 3 `createInvestigationSinks` is `:145-153` (card said `:77`); guard 4 catch block is `:245` (card said `:222`); guard 5 fence is `renderInvestigationSection` at `we:scripts/conveyor/health-watch-core.mjs:574` and `scrubInvestigationText` at `we:scripts/conveyor/health-investigate-plan.mjs:179` (card said line 563).
 - Scope corrected: dropped the plan test file (it does not exist — plan tests live in `we:scripts/conveyor/__tests__/health-investigate-dispatch.test.mjs`); added `we:scripts/conveyor/health-watch.mjs` and `we:scripts/conveyor/__tests__/health-watch.test.mjs` (guard 2's closed-episode report write lives there). Guards 1 and 6 are the same defect (see Design).
 - Review round 1 (adversarial subagent) folded in: reap-by-name made a Must with a no-false-reap test; token channel and mint order specified; token-readability residual made explicit with a Read/Grep/Glob deny; `reportedAt` semantics pinned; tick-test seam stated; `dontAsk` smoke added to the proof plan.
+- 2026-10-01 built: all seven guards (prune keeps open-episode tombstones; closed-same-tick findings via `closedEpisodes`; default `--permission-mode=dontAsk`; indeterminate dispatch holds the slot and is reaped by name via `claude agents`; `fenceFor` longest-run+1 fences; env-pinned state root beats `--state-root`; per-dispatch sha256 capability token + Read/Grep/Glob scratch deny) with their regression tests in the three scoped test files; the three scoped vitest files pass.
 
 ## Design
 

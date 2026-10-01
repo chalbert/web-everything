@@ -881,7 +881,10 @@ export async function tick(flags = {}) {
   let investigations = null;
   if (!flags['no-investigate']) {
     try {
-      investigations = await runInvestigations({ dir, state, smells: SMELLS, config, now, dryRun: !!flags['dry-run'] });
+      investigations = await runInvestigations({
+        dir, state, smells: SMELLS, config, now, dryRun: !!flags['dry-run'],
+        closedEpisodes: result.transitions.filter((t) => t.type === 'closed').map((t) => t.episode),
+      });
     } catch (e) { probeErrors.investigate = scrubText(String(e?.message || e).split('\n')[0]); }
   }
 
