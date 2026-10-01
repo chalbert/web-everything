@@ -47,6 +47,7 @@
  * actually let finish and CONCLUDE failed, never one merely superseded by the next push.
  * @see we:docs/agent/platform-decisions.md#deterministic-core-thin-judgment
  */
+import { mainBreakEscalationForHead } from './ci-heal-escalation-mark.mjs';
 import { isTrustedMarkerAuthor } from '../lib/marker-authorship.mjs';
 import { latestRequiredCheck, isRequiredCheckFailed } from '../merge-ai-prs.mjs';
 import { FALLBACK_REQUIRED_STATUS_CHECKS } from '../lib/required-status-checks.mjs';
@@ -295,7 +296,12 @@ export function mainLatestGreenShaForCheck({ failingCheckName = null, mainLatest
  *
  * PR #2793 review (CONFIRMED): "the check is green on main's latest run" alone is the ORDINARY state of a
  * healthy `main` — it excused almost any PR-owned failure behind main as `owed-ci-rerun`, starving `ci-heal`.
- * ALL of these must hold:
+ * The trusted #3239 legacy escalation supplies an alternative attribution when the
+ * historical run was cancelled/unreadable: the same head/check must record an
+ * unrelated card-only failure reproduced on main, and the green result must be
+ * newer than that diagnosis. Known green at the merge base still vetoes recovery.
+ * The existing head change supersedes the escalation only after refresh succeeds.
+ * Otherwise ALL of these must hold:
  *   1. {@link isMainLatestCheckGreen} — the check passes on main's own latest completed run.
  *   2. `prContainsMainGreenSha === false` — the PR does NOT already contain the commit that green run built
  *      (read off `compare`, not `aheadBy`, which measures main's CURRENT tip and can be newer than the last
@@ -319,10 +325,17 @@ export function mainLatestGreenShaForCheck({ failingCheckName = null, mainLatest
  */
 export function isMainGreenFixOwed({
   failingCheckName = null, mainLatestCheckRuns = null, prContainsMainGreenSha = null, mergeBaseCheckRuns = null,
-  mergeBaseRunConclusion = null,
+  mergeBaseRunConclusion = null, comments = [], headSha = null,
 } = {}) {
   if (!isMainLatestCheckGreen({ failingCheckName, mainLatestCheckRuns })) return false;
   if (prContainsMainGreenSha !== false) return false;
+  if (isMainLatestCheckGreen({ failingCheckName, mainLatestCheckRuns: mergeBaseCheckRuns })) return false;
+  // #3239: cancelled main runs can leave no historical red check to read. A
+  // trusted, head/check-specific diagnosis supplies attribution, but recovery must
+  // still be observed AFTER that diagnosis and the green commit must be absent.
+  const escalation = mainBreakEscalationForHead(comments, headSha, failingCheckName);
+  const green = collapseMainCheckRunsToLatestPerName(mainLatestCheckRuns).get(failingCheckName);
+  if (escalation && Date.parse(green?.completed_at) > Date.parse(escalation.createdAt)) return true;
   if (!Array.isArray(mergeBaseCheckRuns)) return false;
   const atBase = collapseMainCheckRunsToLatestPerName(mergeBaseCheckRuns).get(failingCheckName);
   const conclusion = String(atBase?.conclusion || '').toLowerCase();
@@ -385,6 +398,7 @@ export const MERGE_BASE_FINISHED_RUN_CONCLUSIONS = Object.freeze(['success', 'fa
 export function isPrCiFailureOwedRerun({
   requiredCheckCompletedAt, aheadBy, mainRedWindows, failingCheckName = null, mainLatestCheckRuns = null,
   prContainsMainGreenSha = null, mergeBaseCheckRuns = null, mergeBaseRunConclusion = null,
+  comments = [], headSha = null,
 } = {}) {
   const behind = Number.isFinite(aheadBy) ? aheadBy : null;
   if (behind === 0) return false; // already current — neither path below can still owe a rerun (point 2).
@@ -392,6 +406,7 @@ export function isPrCiFailureOwedRerun({
   if (attribution === 'main-red') return true;
   return isMainGreenFixOwed({
     failingCheckName, mainLatestCheckRuns, prContainsMainGreenSha, mergeBaseCheckRuns, mergeBaseRunConclusion,
+    comments, headSha,
   });
 }
 
@@ -454,7 +469,7 @@ export function planMainRedRebases({
     // landing-freeze fix — see this function's own docblock and `isMainGreenFixOwed`'s (PR #2793 review: main
     // green alone is not proof; the candidate must carry the per-PR merge-base / containment evidence too).
     const mainGreenForCheck = attribution !== 'main-red' && isMainGreenFixOwed({
-      failingCheckName: base.failingCheckName, mainLatestCheckRuns,
+      failingCheckName: base.failingCheckName, mainLatestCheckRuns, comments: c?.comments, headSha: base.headSha,
       prContainsMainGreenSha: c?.prContainsMainGreenSha ?? null, mergeBaseCheckRuns: c?.mergeBaseCheckRuns ?? null,
       mergeBaseRunConclusion: c?.mergeBaseRunConclusion ?? null,
     });

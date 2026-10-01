@@ -1671,6 +1671,7 @@ export function planReconcile({
       // NOT re-capped or specially reset: the cap is simply never consulted on this path, so the very next tick
       // this fires it reads `owed-ci-rerun` instead, with no separate "re-arm" bookkeeping needed.
       if (!mergeDirty && !rebaseCapExhausted && isPrCiFailureOwedRerun({
+        comments: pr?.comments, headSha: pr?.headRefOid,
         requiredCheckCompletedAt: base.requiredCheckCompletedAt,
         aheadBy: base.aheadByOnMain,
         mainRedWindows,

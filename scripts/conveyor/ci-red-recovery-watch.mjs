@@ -76,7 +76,7 @@ import {
   buildMissingRunCandidates, planMissingRunRecoveries, countMissingRunComments, buildMissingRunComment,
   DEFAULT_MAIN_RED_ATTRIBUTED_CHECKS, failingRequiredCheckForAttribution, isAnyRequiredCheckFailed,
   // landing-freeze fix (2026-09-27) — see `main-red-recovery.mjs`'s own "LANDING-FREEZE FIX" section header.
-  mainLatestGreenShaForCheck, isMainGreenFixOwed,
+  mainLatestGreenShaForCheck, isMainGreenFixOwed, isMainLatestCheckGreen,
 } from './main-red-recovery.mjs';
 import {
   defaultReadMainRuns, defaultReadAheadBy, defaultReadMainLatestCheckRuns, defaultReadMainGreenFixFacts,
@@ -243,13 +243,19 @@ export function sweepCiRedRecovery({
     if (!(c.aheadBy > 0)) return c;
     const attribution = classifyCiFailureAttribution({ failureCompletedAt: c.failureCompletedAt, mainRedWindows });
     let withFacts = c;
+    let comments;
     if (attribution !== 'main-red') {
       const greenSha = mainLatestGreenShaForCheck({ failingCheckName: c.failingCheckName, mainLatestCheckRuns });
       if (!greenSha) return c;
       withFacts = { ...c, ...readMainGreenFixFacts(c.headSha, { repo, greenSha, checkName: c.failingCheckName }) };
+      if (withFacts.prContainsMainGreenSha !== false || isMainLatestCheckGreen({
+        failingCheckName: c.failingCheckName, mainLatestCheckRuns: withFacts.mergeBaseCheckRuns,
+      })) return withFacts;
+      comments = readComments(c.prNumber, { repo });
+      withFacts.comments = comments;
       if (!isMainGreenFixOwed({ failingCheckName: c.failingCheckName, mainLatestCheckRuns, ...withFacts })) return withFacts;
     }
-    const comments = readComments(c.prNumber, { repo });
+    comments ??= readComments(c.prNumber, { repo });
     return { ...withFacts, rebaseAttemptsForSha: countRebaseOntoMainComments(comments, c.headSha) };
   });
   const plan = planMainRedRebases({ candidates, mainRedWindows, mainLatestCheckRuns, maxRebaseRetriesPerSha });
