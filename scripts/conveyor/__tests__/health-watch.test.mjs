@@ -472,6 +472,62 @@ describe('tick() — forced lane-starvation fixture', () => {
   });
 });
 
+describe('tick() — an episode that closes in the same tick its investigation findings landed (#4437)', () => {
+  it('keeps the findings in the rewritten closed report, exactly once, and does not append them again', async () => {
+    const stateRoot = join(dir, 'state');
+    const logsDir = join(dir, 'logs');
+    const lockRoot = join(dir, 'locks');
+    const syncDir = join(dir, 'self-sync');
+    for (const d of [logsDir, lockRoot, syncDir]) mkdirSync(d, { recursive: true });
+    const poolLog = join(logsDir, 'lane-pool-health-watch-we.log');
+    const fixLog = join(logsDir, 'fix-dispatch-daemon.log');
+    const noLaneBlock = (n) => [
+      `fix-dispatch-daemon: tick (${n}) — dispatched 0, refused 3`,
+      ...[1, 2, 3].map((i) => `fix-dispatch-daemon: refused no-lane chalbert/web-everything PR #${2600 + n * 10 + i} — no free lane in the pool`),
+      '',
+    ].join('\n');
+    writeFileSync(poolLog, `${JSON.stringify({ checked: true, health: { total: 2, leased: 2, acquirable: 0, dirtyUnleased: 0 } })}\n`);
+    writeFileSync(fixLog, noLaneBlock(1));
+    const flags = { 'state-root': stateRoot, 'logs-dir': logsDir, 'lock-root': lockRoot, 'self-sync-dir': syncDir, 'no-gh': true, 'no-diagnose': true };
+    await tick(flags);
+    appendFileSync(fixLog, noLaneBlock(2));
+    await tick(flags);
+
+    const hdir = healthDir(stateRoot);
+    const mdName = readdirSync(join(hdir, 'episodes')).find((f) => f.includes('lane-starvation') && f.endsWith('.md'));
+    const episodeId = mdName.replace(/\.md$/, '');
+    // A running entry with no handle/session (so no real `claude` is ever invoked) whose findings are already recorded.
+    mkdirSync(join(hdir, 'investigations'), { recursive: true });
+    writeFileSync(join(hdir, 'investigations', 'ledger.json'), JSON.stringify([{
+      episodeId, key: 'lane-starvation::lane-pool:we', smell: 'lane-starvation', subject: 'lane-pool:we',
+      session: null, handle: null, startedAt: Date.now(), deadlineAt: Date.now() + 20 * 60_000, status: 'running',
+    }]));
+    writeFileSync(join(hdir, 'investigations', `${episodeId}.json`), JSON.stringify({
+      recordedAt: '2026-09-28T12:00:00.000Z',
+      evidence: [{ command: 'stale-state', output: 'ZZ-EVIDENCE-LINE' }],
+      recommendation: { whatIsWrong: 'ZZ-WHAT-IS-WRONG', productChange: 'p', nextStep: 'n' },
+    }));
+
+    // Healthy again: three clean ticks (closeAfter) — the last one closes the episode and rewrites its report.
+    writeFileSync(poolLog, `${JSON.stringify({ checked: true, health: { total: 10, leased: 1, acquirable: 9, dirtyUnleased: 0 } })}\n`);
+    appendFileSync(fixLog, 'fix-dispatch-daemon: tick (3) — dispatched 3, refused 0\n');
+    let closed = null;
+    for (let i = 1; i <= 6 && !closed; i += 1) {
+      const t = await tick({ ...flags, now: new Date(Date.now() + i * 2 * 3_600_000).toISOString() });
+      closed = t.transitions.find((x) => x.type === 'closed' && x.key.startsWith('lane-starvation')) ?? null;
+    }
+    expect(closed).not.toBeNull();
+    const report = () => readFileSync(join(hdir, 'episodes', mdName), 'utf8');
+    expect(report().match(/## Agent investigation/g)).toHaveLength(1);
+    expect(report().match(/ZZ-WHAT-IS-WRONG/g)).toHaveLength(1);
+    expect(report().match(/ZZ-EVIDENCE-LINE/g)).toHaveLength(1);
+    expect(JSON.parse(readFileSync(join(hdir, 'investigations', 'ledger.json'), 'utf8'))[0].reportedAt).toBeTruthy();
+
+    await tick({ ...flags, now: new Date(Date.now() + 20 * 3_600_000).toISOString() });
+    expect(report().match(/## Agent investigation/g)).toHaveLength(1);
+  });
+});
+
 // ── probeDaemonStatus (the declared #4067 daemon-status read as the daemon inventory) ───────────────────────
 
 describe('probeDaemonStatus', () => {

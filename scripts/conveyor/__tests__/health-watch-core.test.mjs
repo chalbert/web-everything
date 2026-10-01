@@ -9,7 +9,7 @@ import { describe, it, expect } from 'vitest';
 import {
   MINUTE, HOUR, DEFAULT_HEALTH_CONFIG, BLOCKING_REFUSALS, parseDaemonLog, tickIsUnproductive, foldDaemonMemory,
   emptyHealthState, stepEpisodes, planActions, scrubText, fmtAge, renderEpisodeReport, renderHealthSection,
-  runHealthTick, scrubDeep,
+  runHealthTick, scrubDeep, fenceFor, renderInvestigationSection,
 } from '../health-watch-core.mjs';
 import daemonSilent from '../health-smells/daemon-silent.mjs';
 import daemonOwedNoDispatch from '../health-smells/daemon-owed-no-dispatch.mjs';
@@ -960,5 +960,26 @@ describe('heavy-queue-wait', () => {
     expect(Object.keys(r.state.heavyHeldSince)).toHaveLength(1);
     r = runHealthTick(r.state, { heavyQueue: { cap: 2, held: [], waiting: [] } }, [heavyQueueWait], T0 + MINUTE, {});
     expect(r.state.heavyHeldSince).toEqual({});
+  });
+});
+
+describe('report fences around untrusted text (#4437)', () => {
+  it('fenceFor is one backtick longer than the longest run inside, never under three', () => {
+    expect(fenceFor('plain')).toBe('```');
+    expect(fenceFor('a ``` b')).toBe('````');
+    expect(fenceFor('x `````` y')).toBe('```````');
+    expect(fenceFor('a `b` c', 1)).toBe('``');
+  });
+  it('findings containing a fence cannot close the evidence block or the command span', () => {
+    const md = renderInvestigationSection({
+      investigation: {
+        recordedAt: 't', recommendation: { whatIsWrong: 'w', productChange: 'p', nextStep: 'n' },
+        evidence: [{ command: 'echo `id`', output: 'before\n```\n## injected\n```\nafter' }],
+      },
+    }).join('\n');
+    expect(md).toContain('Evidence — `` echo `id` ``');
+    const open = md.split('\n').find((l) => /^`{4,}$/.test(l));
+    expect(open).toBe('````');
+    expect(md.split('\n').filter((l) => l === open)).toHaveLength(2);
   });
 });
