@@ -149,8 +149,41 @@ describe('missing-run PR-event recovery', () => {
   });
   it('never invokes git with an unverified installation credential', () => {
     const { result, calls } = fixture({ env: { GH_TOKEN: 'ghs_actions' } });
-    expect(result.deferred).toBe(true);
+    // Structural, not transient: a counted failure so the per-sha cap hands the PR off (no free deferral).
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining('push requires a PAT') });
+    expect(result.deferred).toBeUndefined();
     expect(calls).toHaveLength(1);
+  });
+  it('falls back to `gh auth token` when no token env is set, and counts an ineligible one', () => {
+    const run = (authToken) => {
+      const calls = [];
+      const exec = vi.fn((cmd, args) => {
+        calls.push([cmd, ...args].join(' '));
+        if (cmd === 'gh' && args[0] === 'api') return JSON.stringify(pr);
+        if (cmd === 'gh' && args[0] === 'auth') return `${authToken}\n`;
+        if (args.includes('FETCH_HEAD')) return sha;
+        if (args.includes('commit-tree')) return next;
+        if (args.includes(`${sha}^{tree}`)) return 'b'.repeat(40);
+        if (args.includes('show')) return 'fix';
+        return '';
+      });
+      return { result: pushMissingRunCommit(d, { repo, exec, env: {}, checkClaim: () => null }), calls };
+    };
+    const bad = run('ghs_unbound');
+    expect(bad.calls).toContain('gh auth token --hostname github.com');
+    expect(bad.result).toMatchObject({ ok: false, error: expect.stringContaining('push requires a PAT') });
+    expect(bad.result.deferred).toBeUndefined();
+    const good = run('ghp_from_gh_cli');
+    expect(good.calls).toContain('gh auth token --hostname github.com');
+    expect(good.result.ok).toBe(true);
+  });
+  it('honours a non-default defaultBranch when judging stacked PRs', () => {
+    const onDev = { ...pr, base: { ref: 'develop' } };
+    const run = (defaultBranch) => pushMissingRunCommit(d, { repo, defaultBranch, env: { GH_TOKEN: 'ghp_test-secret' }, checkClaim: () => null,
+      exec: (cmd, args) => (cmd === 'gh' ? JSON.stringify(onDev)
+        : args.includes('FETCH_HEAD') ? sha : args.includes('commit-tree') ? next : args.includes('show') ? 'fix' : args.includes(`${sha}^{tree}`) ? 'b'.repeat(40) : '') });
+    expect(run('main')).toMatchObject({ ok: false, error: expect.stringContaining('stacked or from a fork') });
+    expect(run('develop')).toEqual({ ok: true, action: 'pull-request-push', newHeadSha: next });
   });
   it('isolates git from inherited repository, config and index overrides', () => {
     const { calls } = fixture({ env: { GH_TOKEN: 'ghp_test-secret', GIT_DIR: '/daemon/.git',

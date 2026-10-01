@@ -35,7 +35,10 @@ export default {
       pr: { number, headRefName: `lane/p${number}`, baseRefName: base, headRefOid: sha, mergeable: 'MERGEABLE', statusCheckRollup: [], labels: [] },
       live: { state: 'open', mergeable: true, head: { sha, ref: `lane/p${number}`, repo: { full_name: headRepo } }, base: { ref: base } },
     });
-    const cases = [mk(9001, 'a'.repeat(40), 'lane/other', REPO), mk(9002, 'b'.repeat(40), 'main', 'someone/web-everything')];
+    // Case 9003 is a healthy PR on main whose daemon token is an unbound `ghs_` (Actions-style) installation
+    // token: the credential is structurally ineligible to push, so it must be counted and handed off too.
+    const cases = [mk(9001, 'a'.repeat(40), 'lane/other', REPO), mk(9002, 'b'.repeat(40), 'main', 'someone/web-everything'),
+      { ...mk(9003, 'c'.repeat(40), 'main', REPO), env: { GH_TOKEN: 'ghs_actions' } }];
     const comments = new Map(cases.map((c) => [c.pr.number, []]));
     const exec = (cmd, args) => {
       if (cmd !== 'gh') throw new Error('structural refusal must never reach git');
@@ -48,7 +51,7 @@ export default {
       last = sweepMissingRunRecovery({
         apply: true, repo: REPO, readOpenPrs: () => cases.map((c) => c.pr), readRequiredContexts: () => ['test'],
         readHeadCommittedAt: () => '2026-09-26T14:20:26Z', readComments: (n) => comments.get(n), now,
-        trigger: (d, o) => pushMissingRunCommit(d, { ...o, exec, env: { GH_TOKEN: 'ghp_x' }, checkClaim: () => null }),
+        trigger: (d, o) => pushMissingRunCommit(d, { ...o, exec, env: cases.find((c) => c.pr.number === d.prNumber).env ?? { GH_TOKEN: 'ghp_x' }, checkClaim: () => null }),
         postComment: (n, o) => comments.get(n).push({ body: `🚦 conveyor missing-run-recovery\n\nsha: ${o.headSha}\n${o.error}`, author: { login: 'web-everything' } }),
         clearLabel: () => false,
       });

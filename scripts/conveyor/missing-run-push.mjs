@@ -48,7 +48,9 @@ export function pushMissingRunCommit(d, {
     if (held) return defer(held.message);
     stage = 'credential';
     const token = String(env.GH_TOKEN || env.GITHUB_TOKEN || exec('gh', ['auth', 'token', '--hostname', 'github.com'], opts)).trim();
-    if (!recoveryPushCredential(token, env)) return defer('push requires a PAT, user OAuth token, or verified conveyor App installation token');
+    // An ineligible credential is structural (config, not a race): count it so the per-sha cap hands the PR
+    // off instead of re-planning it every tick forever.
+    if (!recoveryPushCredential(token, env)) return { ok: false, action, error: 'push requires a PAT, user OAuth token, or verified conveyor App installation token' };
     scratch = mkdtempSync(join(tmpdir(), 'we-missing-run-'));
     // Pin git to the credential just validated, overriding stored helpers and auth
     // headers. The secret is only in the child environment, never argv or logs.
