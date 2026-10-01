@@ -2597,6 +2597,30 @@ describe('buildVerdictComment — a restamp carries a human clearance forward (#
  * extraction in `we:scripts/lib/review-escalation.mjs` for the identical reason (see that function's docstring).
  */
 describe('decideRestampHumanClearance (#x9krtkb — is a restamp carrying a human clearance owed?)', () => {
+  it('replays #3253: human clearance survives the rebase proof but not the subsequent CI source repair', () => {
+    // Observed contribution hashes: original ef097d284..95cb21654; rebased dda3ff327..190ea9097;
+    // repaired dda3ff327..f2247f0ab. The first two match; the source-literal repair changes the third.
+    const original = '95cb216548ba6b8e702c49527745ccd50355a7d6';
+    const contribution = '27381bade5815ad928b373dff9ead23134402e24f9ea2a69dbc3405164c182dc';
+    const comments = [{ author: { login: 'web-everything' }, body: [
+      buildReviewedShaMarker(original),
+      buildReviewedDiffMarker('be21b72e986d883b6ac7ab615b855b8469ce7db910e17fd94b23f8b509169c50'),
+      buildReviewedContributionMarker(contribution), buildClearedHumanMarker('chalbert'),
+    ].join('\n') }];
+    expect(decideRestampHumanClearance({ comments, headSha: '190ea9097', headDiff: contribution }))
+      .toEqual({ actor: 'chalbert', sha: original });
+    expect(decideRestampHumanClearance({ comments,
+      headSha: 'f2247f0abf422ce9259b71e418098f8b9da8d942',
+      headDiff: '95b268fd31b4879c6c278f72e6a69862e717509aeeb0ce50e0da1aa06a3ec9a6',
+    })).toBeNull();
+    const cleared = decideSetLabel({ to: 'clear-human', currentLabels: ['review:human'], reason: 'I approve' });
+    expect(cleared.addLabel).toBe('review:accepted');
+    const rearmed = decideSetLabel({ to: 'rearm', currentLabels: [cleared.addLabel], requireLive: 'accepted' });
+    expect(rearmed.addLabel).toBe('review:pending');
+    expect(rearmed.rearmFrom).toBe('review:accepted');
+    expect(rearmed.removeLabels).toContain('review:accepted');
+  });
+
   const NEW_HEAD = '1f27fd19f6841d9df5c9f8ce7b4b4f3b8319bc54';
   const HUMAN_SHA = 'f1dbbc3170b7dcbabf6c3ea19c469e3c636231b6';
   const DIFF = 'd'.repeat(64);
