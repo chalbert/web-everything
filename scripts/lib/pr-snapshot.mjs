@@ -123,7 +123,7 @@ function logHit(env, caller, repo) {
  */
 export function readSharedOpenPrs({
   repo, fields, env = process.env, now = () => Date.now(), exec = execFileSyncThrottled,
-  dir = null, ttlMs = null, caller = null, lockWaitMs = LOCK_WAIT_MS, allowDeferred = false,
+  dir = null, ttlMs = null, caller = null, lockWaitMs = LOCK_WAIT_MS, allowDeferred = false, cacheOnly = false,
 } = {}) {
   if (!prSnapshotEnabled(env) && !dir) return null;
   if (!snapshotKey(repo)) return null;
@@ -142,6 +142,7 @@ export function readSharedOpenPrs({
   const hit = servable();
   if (hit) { logHit(env, who, repo); return projectPrs(hit.prs, want); }
 
+  if (cacheOnly) return null;
   mkdirSync(root, { recursive: true });
   let result = null;
   try {

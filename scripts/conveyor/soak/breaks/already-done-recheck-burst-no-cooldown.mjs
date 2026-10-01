@@ -1,8 +1,7 @@
 /**
  * @file breaks/already-done-recheck-burst-no-cooldown.mjs — #xp12dod. The planner searched every stale id
  * on every tick, exhausting the shared GitHub budget even after burst attribution/concurrency was fixed.
- * Run its real CLI twice with ten stale items and a shared cache: first run must search every id, second
- * must search none. A fake gh logs argv and returns successful empty results; no live GitHub calls occur.
+ * Run its real CLI twice with ten stale items and a shared cache: each run checks at most two ids and never repeats a cached id. A fake gh logs argv and returns successful empty results; no live GitHub calls occur.
  */
 import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, existsSync, readFileSync, rmSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -74,16 +73,21 @@ export default {
           violations.push({ invariant: 'planner-threw', detail: report.error });
           return { violations };
         }
+        const deadline = Date.now() + 15000;
+        while (existsSync(`${cacheFile}.refresh-lock`) && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 25));
+        if (existsSync(`${cacheFile}.refresh-lock`)) throw new Error('refresh worker did not finish');
         counts.push(countCalls());
       }
       const firstRunCalls = counts[0];
       const secondRunCalls = counts[1] - counts[0];
-      if (firstRunCalls !== COUNT) {
-        violations.push({ invariant: 'first-run-budget', detail: `expected ${COUNT} searches, got ${firstRunCalls}` });
+      if (firstRunCalls !== 2) {
+        violations.push({ invariant: 'first-run-budget', detail: `expected 2 searches, got ${firstRunCalls}` });
       }
-      if (secondRunCalls > 0) {
+      if (secondRunCalls > 2) {
         violations.push({ invariant: 'recheck-burst', detail: `second tick repeated ${secondRunCalls} searches inside the cooldown (first tick: ${firstRunCalls})` });
       }
+      const searches = readFileSync(argvLog, 'utf8').split('\n').filter(line => /is:merged/.test(line));
+      if (new Set(searches).size !== searches.length) violations.push({ invariant: 'cooldown', detail: 'a cached item was searched again' });
       return { violations, report: { firstRunCalls, secondRunCalls } };
     } catch (e) {
       violations.push({ invariant: 'crash', detail: String(e?.stderr || e?.message || e).split('\n')[0] });

@@ -29,6 +29,7 @@
  *   and are unit-tested in we:skills-src/conveyor/__tests__/build-dispatch-daemon.test.mjs.
  */
 
+import { childFailure } from '../../scripts/lib/child-failure.mjs';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, writeFileSync, rmSync, readFileSync, readdirSync, mkdirSync, appendFileSync, renameSync } from 'node:fs';
 import { tmpdir, hostname, homedir } from 'node:os';
@@ -1473,7 +1474,7 @@ async function live(flags) {
       // JSON as a strict array-of-strings today (grepped 2026-09-29).
       process.stdout.write(`${JSON.stringify({ at: new Date().toISOString(), status: r.statusLine, freeze: r.plan.freeze, inFlight: r.plan.inFlight.map((f) => ({ num: f.num, executor: f.executor ?? null })), openItems: reportOpenItems(r.plan.openItems), dispatched: r.dispatched, prepare: r.prepare, hold: r.plan.hold, dispatchHolds: r.dispatchHolds, failures: r.failures, retired: r.retired, infraRetry: r.infraRetry, orphanAdoption: r.orphanAdoption, draftRecovery: r.draftRecovery, holdRouting: r.holdRouting, holdRoutingResult: r.holdRoutingResult })}\n`);
     },
-    onTickError: (e) => console.error(`build-dispatch-daemon: tick failed (non-fatal): ${String(e?.message || e).split('\n')[0]}`),
+    onTickError: (e) => console.error(`build-dispatch-daemon: tick failed (non-fatal): ${childFailure(e, { singleLine: true })}`),
   });
   console.error(`build-dispatch-daemon: stopped (${stoppedReason}).`);
   release();
