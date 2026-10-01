@@ -377,14 +377,21 @@ export async function applyPendingEffects(run, { sinks, store, stepIndex = null,
             'running work as an unknown outcome. Refusing.',
           );
         }
-        // The handle arrives now, which is the earliest anything can know it. The status was already written.
-        current = withEntry(current, live.key, { handle: result.handle, expectedBy: result.expectedBy, error: null,
-          ...(result.dispatch === undefined ? {} : { dispatch: result.dispatch }) });
-        store.write(current);
-        inFlightKeys.push(live.key);
-        // HALT, exactly as a failure does. Effect N+1 must not run while N is still going — the ordering
-        // guarantee is about the WORK, not about the sink call returning.
-        return { run: current, applied, skipped, inFlight: inFlightKeys, halted: current.effects.find((x) => x.key === live.key), error: null };
+        // Re-read after the sink: a fast child can already have settled this effect. Never replace
+        // that terminal fact (or another entry's fresh state) with the parent's pre-spawn snapshot.
+        current = store.read(current.id);
+        const fresh = current.effects.find((entry) => entry.key === live.key);
+        if (fresh?.status === 'in-flight') {
+          current = withEntry(current, live.key, { handle: result.handle, expectedBy: result.expectedBy,
+            ...(result.dispatch === undefined ? {} : { dispatch: result.dispatch }) });
+          store.write(current);
+          inFlightKeys.push(live.key);
+        }
+        // A child failure must halt the driver too, otherwise it can retry this failed effect immediately.
+        const settled = current.effects.find((entry) => entry.key === live.key);
+        if (settled?.status === 'applied') applied.push(live.key);
+        return { run: current, applied, skipped, inFlight: inFlightKeys, halted: settled,
+          error: settled?.status === 'failed' ? new Error(settled.error || 'dispatch child failed') : null };
       }
       // A dispatch sink that returns an ordinary value finished synchronously after all. Recording `applied`
       // supersedes the pre-sink `in-flight` and is honest: the work is done, so there is nothing to observe.

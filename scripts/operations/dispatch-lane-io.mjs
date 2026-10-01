@@ -94,7 +94,7 @@ import { readJsonConfig, withTrustedDirs, withoutTrustedDirs, TRUST_PATH } from 
 import { writeJsonAtomic, withFileLock } from '../lib/atomic-json-file.mjs';
 // #3637 — the POC-branch registry, so an item's `deliveryTarget:` resolves against DECLARED branches only.
 import { readRegistry as readPocRegistry, validateDeliveryTarget } from '../lib/poc-branches.mjs';
-import { briefTokensForRepo, repoKeyForScope } from '../lib/repo-profile.mjs';
+import { briefTokensForRepo, repoKeyForScope, deliveryLocusForScope } from '../lib/repo-profile.mjs';
 import { buildGhShimSettingsEnv, sanitizeSpawnEnv, ensureSettingsFilePermissions } from '../lib/gh-app-shim.mjs';
 // #x9fbg1x — turns OFF Claude Code's own background-session worktree-isolation guard for THIS dispatch's
 // scratch cwd only (never the primary checkout, never a lane clone shared across dispatches) — see that
@@ -560,6 +560,7 @@ export function readTick({
     alreadyDone,
     // #3717/#3906 — the routing record (`decideDispatchRoute`'s answer), or `null` when nothing was cleared.
     routing,
+    locus: launchKind === 'build' ? deliveryLocusForScope(item?.scope) : null,
     // #3840/#3906 — the item's `deliveryAgent:` override as read, with whether it was handed to the router.
     deliveryAgentOverride,
     // #3857/#3906 — the worker model the tier table plans for this dispatch (`{tier, model, reason}`), or

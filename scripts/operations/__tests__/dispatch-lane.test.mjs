@@ -3499,3 +3499,18 @@ it('tags sibling PR dispatches', () => {
 
 // Native argv cases must never launch an installed external worker.
 vi.mock('../../lib/dispatch-provider-availability.mjs', () => ({ dispatchProviderAvailable: provider => provider === 'claude' }));
+
+
+describe('#4649 locus admission', () => {
+  it('refuses mixed repositories with a typed gate and no effects', () => {
+    const raw = tickRead({ locus: { multiRepo: true, keys: ['we', 'plateau-app'] } });
+    const verdict = shapeDispatchRead(raw, { num: '3037' });
+    expect(verdict.dispatching).toBe(false);
+    expect(verdict.holdReason).toContain('#4289');
+    expect(verdict.gates).toContainEqual({ name: 'locus', pass: false, observed: { kind: 'unsupported-locus', keys: ['we', 'plateau-app'] } });
+    expect(runTo(raw).run.effects).toEqual([]);
+  });
+  it.each([undefined, { multiRepo: false, keys: ['we'] }, { multiRepo: false, keys: ['plateau-app'] }])('preserves supported/legacy reads: %j', (locus) => {
+    expect(runTo(tickRead({ locus })).run.verdict.dispatching).toBe(true);
+  });
+});
