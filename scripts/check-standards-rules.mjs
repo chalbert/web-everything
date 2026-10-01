@@ -13,6 +13,7 @@
  * feed (#095/#196/#197) and the human output are unchanged.
  */
 
+import { createRequire } from 'node:module';
 import { normalizeRelatedReport } from './lib/related-report.cjs';
 
 import { validateFidelityContract } from './lib/fidelity-contract.mjs';
@@ -22,6 +23,8 @@ import { scrubPublish } from './lib/secret-scrub.mjs';
 // #3637 — the POC-branch registry's own `deliveryTarget:` predicate, so the gate and the scoped per-item
 // lint validate that field with the ONE function the dispatcher also uses (never a second copy of the rule).
 import { validateDeliveryTarget } from './lib/poc-branches.mjs';
+
+const requireCjs = createRequire(import.meta.url);
 
 /** #2866: literal invisible characters are forbidden even in Markdown prose and fixtures.
  * Use visible Unicode escapes to document/test them. Offsets use zero-based UTF-16 code units.
@@ -939,6 +942,23 @@ export function findUnquotedColonScalars(content) {
     }
   }
   return findings;
+}
+
+// ── Unparseable frontmatter, any cause (#4451) ───────────────────────────────────────────────────────────
+// The colon scan above covers ONE cause of a loader-skipped item. An unclosed quote, a tab indent or a bad
+// flow collection also vanish the card (src/_data/backlog.js drops it and only warns), so the required-field
+// rule never sees it. This runs the SAME parser the loader uses (gray-matter) over the raw file, so "gate says
+// unparseable" and "loader skipped it" cannot disagree. Returns `{ colonHits, parseReason }`: `colonHits` is the
+// colon scan's findings (the gate prints those and skips the generic message to avoid a duplicate error);
+// `parseReason` is the parser's message, or null when it parses (or there is no frontmatter to parse).
+export function describeUnparseableFrontmatter(content) {
+  const colonHits = findUnquotedColonScalars(content);
+  let parseReason = null;
+  if (typeof content === 'string') {
+    try { requireCjs('gray-matter')(content); }
+    catch (e) { parseReason = String(e?.reason || e?.message || e).split('\n')[0]; }
+  }
+  return { colonHits, parseReason };
 }
 
 // ── Guard-relaxation gaps (#4409 — prevention guard from the #2892 independent review) ─────────────────
@@ -3789,6 +3809,94 @@ export function scopeBasenameMismatchMessage(id, finding) {
     `it alongside an item that writes the very same file. Fix the path — or, if this item genuinely CREATES the ` +
     `file at the path as written, leave it and add a short \`scopeRationale:\` note saying so, which clears ` +
     `this flag.`;
+}
+
+// ── scope-vs-body consistency guards + `deferredBlockedBy` (#4448) ─────────────────────────────
+// Pure rules over RAW frontmatter (+ body), same escapes as the siblings above: `status: resolved` skipped, a
+// non-empty `scopeRationale:` clears the finding. Warn-only at the call site — the false-positive budget is
+// the existing warning corpus, and an error would redden every historical card.
+
+const SOURCE_EXT_RE = /\.(mjs|ts)$/;
+const isTestPath = (p) => /(^|\/)__tests__\//.test(p) || /\.test\.[a-z]+$/.test(p);
+
+function scopeEscaped(item) {
+  if (item?.status === 'resolved') return true;
+  return typeof item?.scopeRationale === 'string' && item.scopeRationale.trim() !== '';
+}
+
+/** Guard 4. A scoped `we:` source file whose sibling test is TRACKED but unscoped, when the body mandates tests
+ * (`## Test plan`). Sibling convention only (`<dir>/__tests__/<base>.test.<ext>`, or top-level
+ * `scripts/__tests__/`) — low recall by design; greenfield (no tracked test) stays silent.
+ * @returns {{entry: string, testPath: string}[]} */
+export function scopeMissingTestFile(item, index, body) {
+  const scope = item?.scope;
+  if (!Array.isArray(scope) || scopeEscaped(item)) return [];
+  if (!/^##\s+Test plan\b/mi.test(typeof body === 'string' ? body : '')) return [];
+  const paths = index?.paths;
+  if (!(paths instanceof Set) || paths.size === 0) return [];
+  const findings = [];
+  for (const entry of scope) {
+    if (typeof entry !== 'string' || !entry.startsWith(SCOPE_LOCAL_REPO_PREFIX) || isSubtreeEntry(entry)) continue;
+    const path = entry.slice(SCOPE_LOCAL_REPO_PREFIX.length);
+    if (!SOURCE_EXT_RE.test(path) || isTestPath(path)) continue;
+    const slash = path.lastIndexOf('/');
+    const dir = path.slice(0, slash + 1), file = path.slice(slash + 1);
+    const dot = file.lastIndexOf('.');
+    const base = file.slice(0, dot), ext = file.slice(dot + 1);
+    const candidates = [`${dir}__tests__/${base}.test.${ext}`, `scripts/__tests__/${base}.test.mjs`];
+    const testPath = candidates.find((c) => paths.has(c));
+    if (!testPath) continue;
+    if (scope.some((s) => typeof s === 'string' && coversFile(s, `${SCOPE_LOCAL_REPO_PREFIX}${testPath}`))) continue;
+    findings.push({ entry, testPath });
+  }
+  return findings;
+}
+
+/** The body text of the `## MVP` / `## Done when` sections only (the sections that commit to deliverables). */
+function deliverableSections(body) {
+  const out = [];
+  let on = false;
+  for (const line of String(body || '').split('\n')) {
+    const h = /^##\s+(.*?)\s*$/.exec(line);
+    if (h) { on = /^(MVP|Done when)\b/i.test(h[1]); continue; }
+    if (on) out.push(line);
+  }
+  return out.join('\n');
+}
+
+/** Guard 5. Backtick-quoted `we:<file>` tokens under `## MVP` / `## Done when` that `scope:` does not cover.
+ * File-shaped tokens only (must carry an extension). @returns {string[]} */
+export function bodyDeliverablesMissingFromScope(item, body) {
+  const scope = item?.scope;
+  if (!Array.isArray(scope) || scopeEscaped(item)) return [];
+  const missing = new Set();
+  for (const m of deliverableSections(body).matchAll(/`(we:[^`\s]+)`/g)) {
+    const token = m[1];
+    if (!/\.[A-Za-z0-9]+$/.test(token) || /[*?]/.test(token)) continue;
+    if (scope.some((s) => typeof s === 'string' && coversFile(s, token))) continue;
+    missing.add(token);
+  }
+  return [...missing];
+}
+
+/** Guard 3. Validates the optional RAW `deferredBlockedBy` array: edges deliberately withheld from `blockedBy`
+ * (so the dispatcher does not hold the item) but kept machine-visible. Never gates readiness.
+ * @param {Set<string>|Iterable<string>} knownNums ids that resolve to a real item.
+ * @returns {string[]} one message per problem. */
+export function deferredBlockedByFindings(item, knownNums, selfId) {
+  const raw = item?.deferredBlockedBy;
+  if (raw === undefined) return [];
+  if (!Array.isArray(raw)) return ['deferredBlockedBy must be an array of NNN ids (e.g. ["079"])'];
+  const known = knownNums instanceof Set ? knownNums : new Set(knownNums || []);
+  const blocked = new Set(Array.isArray(item?.blockedBy) ? item.blockedBy.map(String) : []);
+  const out = [];
+  for (const v of raw) {
+    const id = String(v);
+    if (selfId !== undefined && id === String(selfId)) out.push(`deferredBlockedBy "${id}" is a self-edge`);
+    else if (!known.has(id)) out.push(`deferredBlockedBy "${id}" does not resolve to a backlog item`);
+    else if (blocked.has(id)) out.push(`deferredBlockedBy "${id}" is also in blockedBy — a withheld edge cannot be both`);
+  }
+  return out;
 }
 
 // ── `--all` inside a git hook (#3196) ──────────────────────────────────────────────────────────

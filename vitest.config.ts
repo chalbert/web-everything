@@ -99,6 +99,7 @@ export default defineConfig({
       },
     },
     include: [
+      'contracts/**/*.test.ts', // Declarative wire-contract conformance.
       // #1047: WE's plug tests relocated to FUI (the canonical impl home) when `we:plugs/` was deleted.
       'blocks/**/__tests__/**/*.test.{ts,tsx}',
       'src/**/__tests__/**/*.test.{ts,tsx}', // build-time data files (e.g. burndown accounting)
