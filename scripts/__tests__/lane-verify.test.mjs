@@ -1095,3 +1095,21 @@ describe('resolveWaitCeilingMs — the SAME clamp verify-lane.mjs applies to a r
     expect(resolveWaitCeilingMs(10_000_000)).toBe(MAX_SAFE_WAIT_MS);
   });
 });
+
+describe('fix-3311: one wait for the entire verify budget', () => {
+  it('waits across a 30-minute run in one invocation then reports legacy exit 137 honestly', async () => {
+    let elapsed = 0;
+    const sha = 'fix3311';
+    const result = await waitForVerifySettle({ headSha: sha, readHead: () => sha,
+      readRecord: () => elapsed < 31 * 60_000
+        ? { sha, status: 'running', startedAt: new Date().toISOString() }
+        : { sha, status: 'red', exitCode: 137 },
+      ceilingMs: resolveWaitCeilingMs(160 * 60_000),
+      now: () => elapsed, sleep: async (ms) => { elapsed += ms; },
+    });
+    expect(result).toMatchObject({ status: 'infrastructure-failure', reason: 'verify-signal', ok: false, settled: true });
+    expect(result.waited.ms).toBe(31 * 60_000);
+    expect(result.detail).toContain('SIGKILL');
+    expect(verifyGateDecision({ record: { sha, status: 'red', exitCode: 137 }, headSha: sha, requireVerified: false }).ok).toBe(false);
+  });
+});

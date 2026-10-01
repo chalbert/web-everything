@@ -61,7 +61,7 @@ describe('#4540 — untracked lane scratch selection', () => {
     expect(decision.changedFiles).toEqual(['.commit-msg.txt', 'scripts/example.mjs']);
     expect(command).toBe("npx vitest related 'scripts/example.mjs' 'scripts/example.test.mjs' --run --passWithNoTests && npm run check:standards -- --local --files='.commit-msg.txt,scripts/example.mjs'");
   });
-  it('scratch-only skips successfully without grep, while opt-out still runs the full suite', () => {
+  it('scratch-only skips successfully without grep, while opt-out requires an explicit gate', () => {
     for (const optOut of [false, true]) {
       const git = fakeGit([], { untracked: ['.commit-msg.txt'] });
       const { command, decision } = resolveDefaultGate({
@@ -69,9 +69,9 @@ describe('#4540 — untracked lane scratch selection', () => {
         env: optOut ? { WE_DIFF_TEST_SELECTION: '0' } : {},
       });
       expect(decision.changedFiles).toEqual(['.commit-msg.txt']);
-      expect(decision).toMatchObject({ mode: optOut ? 'full' : 'shrink', relatedFiles: [], triggerFiles: [], deletedSourceFiles: [], targets: [], referencedTests: [] });
-      expect(command.split(' && ')[1]).toBe("npm run check:standards -- --local --files='.commit-msg.txt'");
-      if (optOut) expect(command.split(' && ')[0]).toBe('npm run test:unit');
+      expect(decision).toMatchObject({ mode: optOut ? 'blocked' : 'shrink', relatedFiles: [], triggerFiles: [], deletedSourceFiles: [], targets: [], referencedTests: [] });
+      if (!optOut) expect(command.split(' && ')[1]).toBe("npm run check:standards -- --local --files='.commit-msg.txt'");
+      if (optOut) expect(command).toBeNull();
       else {
         expect(decision.reasons.join(' ')).toMatch(/scratch only/);
         expect(execSync(command.split(' && ')[0], { encoding: 'utf8' })).toMatch(/vitest half skipped.*scratch/);
@@ -98,8 +98,8 @@ describe('#4540 — untracked lane scratch selection', () => {
   });
 
   it.each([
-    ['package.json', [], 'full', true],
-    ['scripts/gone.mjs', ['scripts/gone.mjs'], 'full', true],
+    ['package.json', [], 'blocked', true],
+    ['scripts/gone.mjs', ['scripts/gone.mjs'], 'blocked', true],
     ['backlog/100-example.md', [], 'shrink', false],
     ['scripts/lib/review-escalation.mjs', [], 'shrink', false],
     ['.pr-body.md', ['.pr-body.md'], 'shrink', true],
@@ -111,6 +111,7 @@ describe('#4540 — untracked lane scratch selection', () => {
     expect(decision.changedFiles).toEqual(['.commit-msg.txt', file].sort());
     expect(decision.targets).not.toContain('.commit-msg.txt');
     expect(decision.targets).not.toContain(deleted[0]);
+    if (mode === 'blocked') { expect(command).toBeNull(); return; }
     expect(command.includes('--local --files=')).toBe(scoped);
     if (scoped) expect(command).toContain("--files='" + ['.commit-msg.txt', file].sort().join(',') + "'");
     if (file === 'package.json') expect(decision.triggerFiles).toEqual([file]);
@@ -124,8 +125,8 @@ describe('#4540 — untracked lane scratch selection', () => {
     for (const extra of [1, 2]) {
       const refs = Array.from({ length: extra }, (_, i) => 'scripts/ref' + i + '.test.mjs');
       const { decision } = resolveDefaultGate({ runGit: fakeGit(files, { untracked: scratch, grepHits: { 'm0.mjs': refs } }), env: {} });
-      expect(decision.mode).toBe(extra === 1 ? 'shrink' : 'full');
-      expect(decision.targets).toHaveLength(extra === 1 ? MAX_RELATED_TARGETS : 0);
+      expect(decision.mode).toBe(extra === 1 ? 'shrink' : 'blocked');
+      expect(decision.targets).toHaveLength(MAX_RELATED_TARGETS - 1 + extra);
     }
   });
 
@@ -158,18 +159,18 @@ describe('resolveDefaultGate (xpnhz4o) — the LOCAL gate runs only the diff-sel
 
   it.each([
     ['package.json'], ['package-lock.json'], ['vitest.config.ts'], ['vitest.setup.ts'], ['vitest.shared.ts'],
-    ['tsconfig.json'], ['scripts/__tests__/helpers/fake-gh.mjs'], ['scripts/operations/__tests__/import-graph.mjs'],
-  ])('FALLBACK: %s (config / setup / dependency / shared test helper) runs the FULL suite and says why', (file) => {
+    ['tsconfig.json'],
+  ])('FALLBACK: %s (config / setup / dependency / shared test helper) blocks automatic full-suite escalation and says why', (file) => {
     const { command, decision } = resolveDefaultGate({ runGit: fakeGit(['scripts/a.mjs', file]), env: {} });
-    expect(decision.mode).toBe('full');
+    expect(decision.mode).toBe('blocked');
     expect(decision.triggerFiles).toEqual([file]);
     expect(decision.reasons.join(' ')).toContain(file);
-    expect(command.startsWith('npm run test:unit && ')).toBe(true);
+    expect(command).toBeNull();
   });
 
-  it('FALLBACK: a deleted source file runs the full suite (its importers are unfindable); a deleted TEST file does not', () => {
+  it('FALLBACK: a deleted source file requires an explicit gate (its importers are unfindable); a deleted TEST file does not', () => {
     const src = resolveDefaultGate({ runGit: fakeGit(['scripts/gone.mjs'], { deleted: ['scripts/gone.mjs'] }), env: {} });
-    expect(src.decision.mode).toBe('full');
+    expect(src.decision.mode).toBe('blocked');
     expect(src.decision.deletedSourceFiles).toEqual(['scripts/gone.mjs']);
     const test = resolveDefaultGate({ runGit: fakeGit(['scripts/a.mjs', 'scripts/__tests__/gone.test.mjs'], { deleted: ['scripts/__tests__/gone.test.mjs'] }), env: {} });
     expect(test.decision.mode).toBe('shrink');
@@ -208,32 +209,32 @@ describe('resolveDefaultGate (xpnhz4o) — the LOCAL gate runs only the diff-sel
     expect(command).toMatch(/--passWithNoTests && npm run check:standards$/);
   });
 
-  it('an explicit opt-out (WE_DIFF_TEST_SELECTION=0) runs the full suite; check:standards still scopes', () => {
+  it('an explicit opt-out (WE_DIFF_TEST_SELECTION=0) requires an explicit gate', () => {
     const { command, decision } = resolveDefaultGate({ runGit: fakeGit(['docs/readme.md']), env: { WE_DIFF_TEST_SELECTION: '0' } });
-    expect(decision.mode).toBe('full');
-    expect(command).toBe("npm run test:unit && npm run check:standards -- --local --files='docs/readme.md'");
+    expect(decision.mode).toBe('blocked');
+    expect(command).toBeNull();
   });
 
-  it('FAIL-SAFE: a git failure (no computable diff) falls back to FULL_GATE, never shrinks or scopes', () => {
+  it('FAIL-SAFE: a git failure (no computable diff) requires an explicit affected-test gate, never shrinks or scopes', () => {
     const { command, decision } = resolveDefaultGate({ runGit: () => { throw new Error('no such ref'); }, env: {} });
-    expect(decision.mode).toBe('full');
+    expect(decision.mode).toBe('blocked');
     expect(decision.changedFiles).toBe(null);
-    expect(command).toBe(FULL_GATE);
+    expect(command).toBeNull();
   });
 
-  it('FAIL-SAFE: an empty changed set falls back to FULL_GATE', () => {
+  it('FAIL-SAFE: an empty changed set requires an explicit affected-test gate', () => {
     const { command, decision } = resolveDefaultGate({ runGit: fakeGit([]), env: {} });
-    expect(decision.mode).toBe('full');
+    expect(decision.mode).toBe('blocked');
     expect(decision.changedFiles).toEqual([]);
-    expect(command).toBe(FULL_GATE);
+    expect(command).toBeNull();
   });
 
-  it('a diff too large to pass to `vitest related` (over MAX_RELATED_TARGETS) falls back to the full suite and says so', () => {
+  it('a diff too large to pass to `vitest related` (over MAX_RELATED_TARGETS) blocks full-suite escalation and says so', () => {
     const many = Array.from({ length: MAX_RELATED_TARGETS + 1 }, (_, i) => `scripts/m${i}.mjs`);
     const { command, decision } = resolveDefaultGate({ runGit: fakeGit(many), env: {} });
-    expect(decision.mode).toBe('full');
-    expect(decision.reasons.join(' ')).toMatch(/over 300/);
-    expect(command.startsWith('npm run test:unit && ')).toBe(true);
+    expect(decision.mode).toBe('blocked');
+    expect(decision.reasons.join(' ')).toMatch(/limit 300/);
+    expect(command).toBeNull();
   });
 
   it('describeGate SAYS which it was: SELECTED with counts, or FULL SUITE (fallback) with the reason', () => {
@@ -241,9 +242,9 @@ describe('resolveDefaultGate (xpnhz4o) — the LOCAL gate runs only the diff-sel
     expect(sel).toMatch(/^verify-lane gate: SELECTED tests only — 1 changed path/);
     expect(sel).toContain('CI still runs the full suite');
     const full = describeGate(resolveDefaultGate({ runGit: fakeGit(['package.json']), env: {} }));
-    expect(full).toMatch(/^verify-lane gate: FULL SUITE \(fallback\)/);
+    expect(full).toMatch(/^verify-lane gate: BLOCKED selection/);
     expect(full).toContain('package.json');
-    expect(full).toContain('command: npm run test:unit');
+    expect(full).toContain('No local full suite');
   });
 });
 
@@ -267,8 +268,8 @@ describe('resolveDefaultGate per-repo scripts (#3919) — only run the npm scrip
     expect(we.gateReasons).toEqual([]);
   });
 
-  it('a WE checkout with an empty diff still gets exactly FULL_GATE', () => {
-    expect(resolveDefaultGate({ runGit: fakeGit([]), env: {}, scripts: WE_SCRIPTS }).command).toBe(FULL_GATE);
+  it('a WE checkout with an empty diff requires an explicit gate', () => {
+    expect(resolveDefaultGate({ runGit: fakeGit([]), env: {}, scripts: WE_SCRIPTS }).command).toBeNull();
   });
 
   it.each(cases)('a frontierui checkout ($name) has test:unit + check:standards, so its gate is unchanged too', ({ files }) => {
@@ -277,7 +278,8 @@ describe('resolveDefaultGate per-repo scripts (#3919) — only run the npm scrip
   });
 
   it.each(cases)('a plateau-app checkout ($name) runs `npm test` and skips the missing check:standards', ({ files }) => {
-    const { command, gateReasons } = resolveDefaultGate({ runGit: fakeGit(files), env: {}, scripts: PLATEAU_APP_SCRIPTS });
+    const { command, gateReasons, decision } = resolveDefaultGate({ runGit: fakeGit(files), env: {}, scripts: PLATEAU_APP_SCRIPTS });
+    if (decision.mode === 'blocked') { expect(command).toBeNull(); return; }
     expect(command).toBe('npm test');
     expect(command).not.toContain('test:unit');
     expect(command).not.toContain('check:standards');
@@ -627,5 +629,30 @@ describe('stableTreeHash (#4473, PR #2982 round-2 review) — record a tree hash
     expect(stableTreeHash(null, null)).toBeNull();
     expect(stableTreeHash('a', undefined)).toBeNull();
     expect(stableTreeHash()).toBeNull();
+  });
+});
+
+describe('fix-3311 selection replay', () => {
+  it('selects all five observed shared helpers through graph inputs and reference discovery', () => {
+    const helpers = [
+      'scripts/conveyor/__tests__/sim/world.mjs',
+      'scripts/lib/__tests__/fixtures/inherited-routing-policy.json',
+      'scripts/lib/__tests__/inherited-routing-policy.mjs',
+      'scripts/operations/__tests__/helpers/fake-claude-shim.mjs',
+      'scripts/operations/__tests__/helpers/fake-claude.mjs',
+    ];
+    const ref = 'scripts/operations/__tests__/repair-routing-review-fixes.test.mjs';
+    const { command, decision } = resolveDefaultGate({ runGit: fakeGit(helpers, {
+      grepHits: { 'fake-claude.mjs': [ref] },
+    }), env: {} });
+    expect(decision.mode).toBe('shrink');
+    expect(decision.targets).toEqual([...helpers, ref].sort());
+    expect(command).toContain('vitest related');
+    expect(command).not.toContain('npm run test:unit');
+  });
+  it('also bounds long path arguments below the target-count limit', () => {
+    const { command, decision } = resolveDefaultGate({ runGit: fakeGit(['scripts/' + 'a'.repeat(33000) + '.mjs']), env: {} });
+    expect(decision.mode).toBe('blocked');
+    expect(command).toBeNull();
   });
 });

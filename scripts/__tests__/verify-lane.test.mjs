@@ -879,3 +879,25 @@ describe('verify-lane reset (x4jcqm4) — clearing a stale marker without a leas
     }
   });
 });
+
+describe('fix-3311: killed gates are infrastructure failures', () => {
+  it.each(['exit 137', 'kill -KILL $$'])('records %s without fabricating a test failure or an OOM cause', (gate) => {
+    const { code, json } = runVerify(gate);
+    expect(code).toBe(3);
+    expect(json).toMatchObject({ status: 'infrastructure-failure', reason: 'verify-signal' });
+    expect(json.detail).toContain('SIGKILL');
+    expect(json.detail).toContain('sender/cause unknown');
+    const record = JSON.parse(readFileSync(marker(), 'utf8'));
+    expect(record.status).toBe('infrastructure-failure');
+    expect(record.infrastructure.signal).toBe('SIGKILL');
+  });
+});
+
+it('an unscopable default request refuses before stamping a runnable marker', () => {
+  execFileSync('git', ['branch', 'origin/main'], { cwd: dir });
+  writeFileSync(join(dir, 'package.json'), JSON.stringify({ scripts: { 'test:unit': 'echo must-not-run' } }));
+  const r = spawnSync('node', [VERIFY_LANE, 'request', '--json'], { cwd: dir, encoding: 'utf8' });
+  expect(r.status).toBe(3);
+  expect(JSON.parse(r.stdout)).toMatchObject({ status: 'selection-required', reason: 'local-selection-bound' });
+  expect(existsSync(marker())).toBe(false);
+});

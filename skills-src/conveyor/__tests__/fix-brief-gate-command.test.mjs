@@ -34,7 +34,7 @@ for (const [file, kind] of [['fix-agent-brief.md', 'fix'], ['fix-agent-ci-brief.
 
     it('names a verify-lane request and a check in its bash fences', () => {
       expect(gateLines.some((c) => /verify-lane\.mjs request\b/.test(c))).toBe(true);
-      expect(gateLines.some((c) => /verify-lane\.mjs check --wait=60000 --json\b/.test(c))).toBe(true);
+      expect(gateLines.some((c) => /verify-lane\.mjs check --wait=9600000 --json\b/.test(c))).toBe(true);
     });
 
     it('no gate/verify command in a bash fence is denied for this kind', () => {
@@ -46,5 +46,15 @@ for (const [file, kind] of [['fix-agent-brief.md', 'fix'], ['fix-agent-ci-brief.
       expect(step4).toMatch(/`check` output/);
       expect(step4).toMatch(/`red` \(exit 2\)/);
     });
+  });
+}
+
+for (const file of ['fix-agent-brief.md', 'fix-agent-ci-brief.md', 'delivery-agent-brief.md']) {
+  it(`${file} instructs one budget-sized wait and completion notification`, () => {
+    const text = readFileSync(join(HERE, '..', file), 'utf8');
+    expect(text).toMatch(/ONE .*check --wait=9600000/);
+    expect(text).toMatch(/completion\s+notification/);
+    expect(text).not.toMatch(/call `check --wait=.*again|--wait=60000/);
+    expect(text).toContain('infrastructure-failure');
   });
 }

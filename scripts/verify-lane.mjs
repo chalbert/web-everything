@@ -20,8 +20,8 @@
  * THE DEFAULT GATE IS DIFF-DRIVEN (#3372). Rather than an unconditional `npm run test:unit`, the default gate
  * decides off the lane's actual `git diff` against `origin/main` via `scripts/readiness/test-selection.mjs`
  * (#2681), using its LOCAL policy (xpnhz4o, `decideLocalSelection`): the working-tree diff runs only
- * `npx vitest related <changed files + tests naming them>`; only a config / setup / dependency / shared-test-helper
- * change, a deleted source file, or an empty/unresolvable diff falls back to the FULL `npm run test:unit` — and
+ * `npx vitest related <changed files + tests naming them>` (including shared helpers). A config/setup/dependency
+ * change, a deleted source file, or an empty/unresolvable diff now requires an explicit affected-test gate;
  * the gate prints which of the two it chose, and why, before it starts. CI still runs the full suite.
  * See `scripts/lib/verify-lane-gate.mjs` for the decision core and why defaulting the shrink at THIS call site
  * does not conflict with #2681's own "not defaulted [on the CI merge gate]" DoD.
@@ -63,7 +63,7 @@ import { writeFileSync, renameSync, existsSync, readFileSync, readdirSync, unlin
 import { execFileSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { VERIFY_FILENAME, VERIFY_PREVIOUS_FILENAME, verifyStartBody, verifyFinishBody, verifyGateDecision, readVerifyMarker, resolveVerifyOptions, waitForVerifySettle, resolveWaitCeilingMs } from './lib/lane-verify.mjs';
+import { VERIFY_FILENAME, VERIFY_PREVIOUS_FILENAME, verifyStartBody, verifyFinishBody, verificationInfrastructureFailure, verifyGateDecision, readVerifyMarker, resolveVerifyOptions, waitForVerifySettle, resolveWaitCeilingMs } from './lib/lane-verify.mjs';
 import { LEASE_FILENAME, isLeaseStale, isConfirmedOwnLease } from './lib/lane-lease.mjs';
 import { defaultPoolRoot } from './lib/lane-pool-paths.mjs';
 import { writeAllSync } from './lib/write-all-sync.mjs';
@@ -141,7 +141,7 @@ if (MODE === 'check') {
     }
     const ceilingMs = resolveWaitCeilingMs(requestedMs);
     if (ceilingMs < requestedMs) {
-      process.stderr.write(`⚠ --wait=${requestedMs}ms clamped to ${ceilingMs}ms — a single blocking wait must stay inside this tool's own safe foreground window.\n`);
+      process.stderr.write(`⚠ --wait=${requestedMs}ms clamped to ${ceilingMs}ms — a single blocking wait must stay inside the queue-plus-execution budget.\n`);
     }
     const result = await waitForVerifySettle({
       readRecord: readMarker,
@@ -247,6 +247,7 @@ let GATE;
 if (typeof flags.gate === 'string') GATE = flags.gate;
 else {
   const resolved = resolveDefaultGate({ runGit: git, env: process.env, scripts: readCheckoutScripts() });
+  if (resolved.decision.mode === 'blocked') emit({ sha: headSha, status: 'selection-required', reason: 'local-selection-bound', ok: false, detail: describeGate(resolved) }, 3);
   GATE = resolved.command;
   // xpnhz4o — always SAY whether this is a selected run or a full-suite fallback, and why (stderr, so `--json`
   // stdout stays one parseable document).
@@ -267,7 +268,7 @@ else {
 // ci-heal `gateFor` form and the canary's gate; a dispatched fix/ci-heal agent uses `request`/`check` instead, #4369), whose caller never lands through pr-land's finish-guard, so recording (or
 // archiving) a marker would only couple it to whatever a previous occupant of this clone left behind.
 const preStart = MODE === 'run' ? null : readMarker();
-if (preStart && !preStart.corrupt && (preStart.status === 'green' || preStart.status === 'red') && preStart.sha && preStart.sha !== headSha) {
+if (preStart && !preStart.corrupt && (['green', 'red', 'infrastructure-failure'].includes(preStart.status)) && preStart.sha && preStart.sha !== headSha) {
   writeFileSync(join(GIT_DIR, VERIFY_PREVIOUS_FILENAME), `${JSON.stringify(preStart, null, 2)}\n`);
 }
 
@@ -368,16 +369,20 @@ if (admission.timedOut) {
 const preGateTreeHash = MODE === 'run' ? null : treeHashNow();
 process.stderr.write(`⏱ gate execution starting (suites: ${GATE})\n`);
 let exitCode = 0;
+let signal = null;
 try {
   // xaipsbs — the gate's own `npm run test:unit` / `check:standards` are wrapped in `heavy-admission.mjs run`;
   // this flag makes those nested wrappers pass through instead of asking for a second slot for the same work.
   execSync(GATE, { cwd: REPO, stdio: 'inherit', env: { ...process.env, [ADMISSION_HELD_ENV]: '1' } });
 } catch (e) {
+  signal = e?.signal || null;
   exitCode = Number.isFinite(e && e.status) ? e.status : 2;
 } finally {
   if (admission.ok) releaseOwnedSlot({ lockRoot: ADMISSION_LOCK_ROOT, cap: ADMISSION_CAP, owner: REPO });
 }
 
+const infrastructure = verificationInfrastructureFailure({ exitCode, signal });
+if (MODE === 'run' && infrastructure) emit({ sha: headSha, status: 'infrastructure-failure', reason: infrastructure.reason, exitCode, infrastructure, detail: infrastructure.detail }, 3);
 if (MODE === 'run') {
   emit({ sha: headSha, status: exitCode === 0 ? 'green' : 'red', reason: 'run', exitCode, detail: exitCode === 0 ? 'gate passed (run mode — no marker recorded).' : `gate FAILED (exit ${exitCode}) — run mode, no marker recorded.` }, exitCode === 0 ? 0 : 2);
 }
@@ -409,12 +414,13 @@ const startBody = onDisk && !onDisk.corrupt && onDisk.sha === headSha
 // The tree hash is recorded only if the tree held still from start, through the admission wait, to gate exit.
 const finished = verifyFinishBody(startBody, {
   finishedAt: new Date().toISOString(),
-  exitCode,
+  exitCode, signal, infrastructure,
   sha: headSha,
   suites: GATE,
   treeHash: stableTreeHash(currentTreeHash, preGateTreeHash, treeHashNow()),
 });
 writeMarker(finished);
+if (infrastructure) emit({ sha: headSha, status: finished.status, reason: infrastructure.reason, exitCode, infrastructure, detail: infrastructure.detail }, 3);
 
 emit(
   { sha: headSha, status: finished.status, reason: finished.status, exitCode, detail: finished.status === 'green' ? `suites passed — recorded green for ${headSha.slice(0, 8)} (delivery may proceed).` : `suites FAILED (exit ${exitCode}) — recorded red for ${headSha.slice(0, 8)}; the finish-guard will refuse to land until this is green.` },
