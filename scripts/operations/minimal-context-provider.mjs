@@ -32,6 +32,7 @@
  * `deliver-item-wrapper.mjs`'s own convention) so every export here is unit-testable with no real subprocess.
  */
 import { execFileSync } from 'node:child_process';
+import { claudeSpawnAlias } from '../lib/dispatch-routing-policy.mjs';
 import { mkdirSync, writeFileSync } from 'node:fs';
 
 // #3383 — the delivery-telemetry recorder. Imported here, in the ONE module all six dispatch wrappers share,
@@ -169,7 +170,7 @@ export const RESTRICTED_PROVIDER_TOOLS = 'Bash,Edit,Write,Read,Glob,Grep';
  * the agent cannot read it. Omitted → argv byte-identical to before.
  */
 export function buildRestrictedProviderArgv({
-  sessionId, prompt, resumeSessionId = null, settingsFile, tools = RESTRICTED_PROVIDER_TOOLS, addDirs = [],
+  sessionId, prompt, resumeSessionId = null, settingsFile, tools = RESTRICTED_PROVIDER_TOOLS, addDirs = [], model = 'sonnet',
 }) {
   const RESTRICTED_FLAGS = [
     '--restricted', '--tools', tools, '--strict-mcp-config',
@@ -178,7 +179,7 @@ export function buildRestrictedProviderArgv({
   ];
   return resumeSessionId
     ? [...RESTRICTED_FLAGS, '--resume', String(resumeSessionId), prompt]
-    : [...RESTRICTED_FLAGS, '--model', 'sonnet', '-p', '--session-id', String(sessionId), prompt];
+    : [...RESTRICTED_FLAGS, '--model', claudeSpawnAlias(model), '-p', '--session-id', String(sessionId), prompt];
 }
 
 // ================================================================================================

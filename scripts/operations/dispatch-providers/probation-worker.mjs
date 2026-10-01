@@ -161,5 +161,6 @@ export function probationWorkerDetachedProvider(request, {
   }
   // #2815's one `executor` field — the vendor the run script spawns. A no-op until that field lands.
   request?.reportExecutor?.(worker.executor);
+  request?.reportModel?.(worker.model);
   return `${DETACHED_HANDLE_PREFIX}${pid}`;
 }

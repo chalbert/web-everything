@@ -472,13 +472,14 @@ export const OPERATIONS = Object.freeze({
  * @param {(o: object) => Function} [o.factory] - the judge builder, injected so a test can supply the spawn.
  * @returns {(flags: {cwd: (string|null), model: (string|null), provider: (string|null)}) => Function} `runOperationCli`'s `makeJudge`.
  */
-export function createCliJudgeFactory({ env = process.env, factory = createDefaultJudge } = {}) {
+export function createCliJudgeFactory({ env = process.env, factory = createDefaultJudge, operation } = {}) {
   // THE FLAG WINS, and the env var is the fallback — the explicit act beats the ambient one. `|| null` on both,
   // never a fallback to this process's directory: see the `makeJudge` note at the call site.
   return ({ cwd, model, provider } = {}) => factory({
     cwd: cwd || env.JUDGE_LANE_CWD || null,
     model: model || null,
     providerName: provider || env.JUDGE_PROVIDER || 'claude',
+    ...(operation ? { operation } : {}),
   });
 }
 
@@ -604,7 +605,7 @@ if (IS_CLI) {
     // juror the driver's own working tree — the very tree the parent was mid-review of, and one the juror's
     // mandate tells it to mutate. `null` makes the refusal fire, which is what the caller wanted all along. A
     // tool-free juror ignores `cwd`, so every existing operation is unaffected.
-    makeJudge: createCliJudgeFactory(),
+    makeJudge: createCliJudgeFactory({ operation: declaration.name }),
     newRunId: () => newRunId(declaration.name),
   })
     .then((outcome) => {

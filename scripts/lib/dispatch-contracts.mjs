@@ -5,10 +5,10 @@
  * validation and composition; provider fitness and supervision remain router policy.
  * Invalid boundary inputs fail closed, including malformed or cyclic objects.
  */
-import {
+import { DEFAULT_ROUTING_POLICY, resolveOperationRoute, PROBATION_WORKERS,
   PROVEN_TASK_ENVELOPES, isStatuteTierPath, isHighStakesTask, isWithinProvenEnvelope,
   selectProvider, selectSupervisionLevel, RECOMMENDATIONS, CLAUDE_TIERS, SUPERVISION_LEVELS, AGY_CLAUDE_MODEL_BY_TIER,
-  workerTierFor, selectProbationWorker, CRITICAL_WORK_GATE,
+  workerTierFor, selectProbationWorker, CRITICAL_WORK_GATE, decideCriticalWorkGate,
 } from './provider-routing.mjs';
 import { scrubPublish } from './secret-scrub.mjs';
 import { thresholdsForRisk, neverSpotCheck, spotCheckSample } from './dispatch-thresholds.mjs';
@@ -1113,7 +1113,7 @@ function executedVendorFor(override) {
  * @returns {object} the routing record — see the file's own test for the exact shape.
  */
 // @wired-by-3717: has a runtime caller — the G2 dispatcher wiring (see `decideDispatchRoute`)
-export function decideDispatchRoute(dispatch = {}, { scorecards = [], enforceSupervision = false, sizePolicy: rawSizePolicy = DEFAULT_SIZE_POLICY, promotions: rawPromotions = DEFAULT_PROMOTIONS, criticalWorkGate } = {}) {
+function decideDispatchRouteLegacy(dispatch = {}, { scorecards = [], enforceSupervision = false, sizePolicy: rawSizePolicy = DEFAULT_SIZE_POLICY, promotions: rawPromotions = DEFAULT_PROMOTIONS, criticalWorkGate } = {}) {
   try {
     const kind = String(dispatch?.kind ?? '').trim();
     const scopePaths = Array.isArray(dispatch?.scopePaths) ? dispatch.scopePaths.map(String) : [];
@@ -1345,4 +1345,45 @@ function normalizeOverride(dispatch, kind) {
   // ci-heal providers, so requested and executed are the same vendor; a fallback for a kind a vendor cannot run is
   // #3658's and is not built yet.
   return { value: { requestedVendor: vendor, executedVendor: vendor, reason }, refusal: null };
+}
+
+/** Resolve once before dispatch; preserve the existing risk, supervision and override calculations. */
+// @wired-by-3717: has a runtime caller — the G2 dispatcher wiring (see `decideDispatchRoute`)
+export function decideDispatchRoute(dispatch = {}, options = {}) {
+  const policy = options.routingPolicy ?? DEFAULT_ROUTING_POLICY;
+  const criticalWorkGate = options.criticalWorkGate ?? policy.criticalWorkGate;
+  const record = decideDispatchRouteLegacy(dispatch, { ...options, criticalWorkGate });
+  if (record.outcome === 'refused' || record.refusal || record.override) return record;
+  const roleGate = record.outcome === 'role' ? decideCriticalWorkGate(criticalWorkGate, dispatch.kind, dispatch.kind === 'prepare-item' ? 'prepare' : dispatch.kind, {
+    criticalWork: criticalWorkVerdict({ filesTouched: dispatch.cardPath ? [dispatch.cardPath] : dispatch.scopePaths, risk: dispatch.risk }),
+    criticalMisses: criticalMissesFor(options.scorecards ?? [], dispatch.kind === 'prepare-item' ? 'prepare' : dispatch.kind),
+  }) : null;
+  const gateClosed = (roleGate && !roleGate.open) || record.auditTrail?.some(row => row.criterion === 'critical-work-gate' && row.result === 'claude-only');
+  try {
+    // Critical-miss vetoes are scored per taskType and apply to EVERY routed operation, gated or not
+    // (prepare-item is role-path: no record.taskType, scored as 'prepare').
+    const vetoTaskType = record.taskType ?? (dispatch.kind === 'prepare-item' ? 'prepare' : dispatch.kind);
+    const route = resolveOperationRoute({ operation: dispatch.kind, taskType: record.taskType ?? (dispatch.kind === 'prepare-item' ? 'prepare' : null), gateClosed, policy, vetoes: criticalMissesFor(options.scorecards ?? [], vetoTaskType) });
+    if (!route) {
+      if (roleGate && !roleGate.open) record.probationWorker = null;
+      return record;
+    }
+    const tier = Object.entries(CLAUDE_NATIVE_MODEL_BY_TIER).find(([, model]) => model === route.model)?.[0];
+    record.policyRoute = route;
+    record.model = route.model;
+    record.routed = route.provider;
+    record.executed = route.provider;
+    record.supervision = SUPERVISION_LEVELS.FULL;
+    record.spotCheck = null;
+    record.probationWorker = null;
+    if (tier) record.tier = tier;
+    if (route.provider !== 'claude' && (dispatch.kind === 'prepare-item' || dispatch.kind === 'ci-heal' || (dispatch.kind === 'build' && ['doc-fix', 'test-fix'].includes(record.taskType)))) {
+      const id = route.provider === 'codex' ? 'codex' : route.model.startsWith('claude-') ? 'antigravity-claude' : 'antigravity-gemini';
+      record.probationWorker = { ...PROBATION_WORKERS[id], model: route.model, taskType: dispatch.kind === 'prepare-item' ? 'prepare' : record.taskType };
+    }
+    record.auditTrail.push(audit('routing-policy', `${route.provider}/${route.model}`, 'we:scripts/lib/dispatch-routing-policy.json', gateClosed ? 'Critical-work gate requires the Claude fallback.' : 'Operator policy selects this explicit provider/model; supervision remains full.'));
+    return record;
+  } catch (error) {
+    return { ...record, outcome: 'refused', refusal: error.message };
+  }
 }

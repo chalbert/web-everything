@@ -117,6 +117,7 @@
  * shapes individually is the game this file was already losing.
  */
 
+import { resolveOperationRoute, readRoutingPolicy } from '../lib/dispatch-routing-policy-io.mjs';
 import { repoKeyForSlug, CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
 import { repoProfile } from '../lib/repo-profile.mjs';
 import { execFileSync } from 'node:child_process';
@@ -227,7 +228,7 @@ export function reviewSeatKey(seat) {
  * @returns {{routes: Array<{seat:string, lens:string, key:string, provider:string, model:string, effort:string, reasoning:string}>,
  *   skipped: Array<{seat:string, lens:string, key:string, reason:string}>}}
  */
-export function reviewSeatRoutes({ available = REVIEW_SEAT_PROVIDERS, scorecards = [], callsRemaining = Infinity } = {}) {
+export function reviewSeatRoutes({ available = REVIEW_SEAT_PROVIDERS, scorecards = [], callsRemaining = Infinity, routingPolicy = readRoutingPolicy() } = {}) {
   const seats = [
     { seat: 'extra-juror', lens: EXTRA_JUROR_MANDATE },
     ...ROUTED_ADVISORY_LENSES.map((lens) => ({ seat: 'advisory-lens', lens })),
@@ -240,13 +241,16 @@ export function reviewSeatRoutes({ available = REVIEW_SEAT_PROVIDERS, scorecards
   let usable = [...available];
   const plannedLoad = {};
   for (const s of seats) {
-    const pick = selectReviewSeatProvider({ lens: s.key, available: usable, scorecards, plannedLoad });
+    let configured;
+    try { configured = resolveOperationRoute({ operation: 'review-seat', taskType: s.key, available: usable, policy: routingPolicy }); }
+    catch (error) { skipped.push({ ...s, reason: error.message }); continue; }
+    const pick = configured ? { provider: configured.provider, reasoning: 'routing-policy' } : selectReviewSeatProvider({ lens: s.key, available: usable, scorecards, plannedLoad });
     if (!pick.provider) { skipped.push({ ...s, reason: pick.reasoning }); continue; }
     plannedLoad[pick.provider] = (plannedLoad[pick.provider] ?? 0) + 1;
     // One call left: every later seat rides the call this first pick already costs.
     if (callsRemaining < 2) usable = [pick.provider];
     const { model, effort } = REVIEW_SEAT_MODELS[pick.provider];
-    routes.push({ ...s, provider: pick.provider, model, effort, reasoning: pick.reasoning });
+    routes.push({ ...s, provider: pick.provider, model: configured?.model ?? model, effort, reasoning: pick.reasoning });
   }
   return { routes, skipped };
 }

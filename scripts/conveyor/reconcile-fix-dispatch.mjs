@@ -931,7 +931,7 @@ export function dispatchFix(planned, {
     const argv = buildAgentArgv({
       sessionId,
       // fix procedure — a re-armed concurrent-author pause hands the next fixer the saved alt branch to start from.
-      payload: { prompt: withAltBranchHint(withSalvageHint(withOperatorAnswer(prompt, planned.operatorAnswer), { cards: [planned.itemNum], prs: [planned.pr] }), planned.altBranch), sessionSlug },
+      payload: { prompt: withAltBranchHint(withSalvageHint(withOperatorAnswer(prompt, planned.operatorAnswer), { cards: [planned.itemNum], prs: [planned.pr] }), planned.altBranch), sessionSlug, launchKind: 'fix' },
       // #3606 — see this function's own docblock: without this the fix agent reads a correctly-filled brief as an
       // unfilled template and self-aborts (3/3 live).
       systemPromptFile: DISPATCHED_AGENT_SYSTEM_PROMPT_FILE,

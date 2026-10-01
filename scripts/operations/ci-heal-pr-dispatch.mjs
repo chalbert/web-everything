@@ -41,7 +41,7 @@ import {
 import {
   agentArgsFromEnv, briefPath, createDispatchSinks, defaultLoadItems, defaultReadScorecards, findItem, REPO_ROOT,
 } from './dispatch-lane-io.mjs';
-import { decideDispatchRoute } from '../lib/dispatch-contracts.mjs';
+import { resolveDispatchRoute as decideDispatchRoute } from '../lib/dispatch-routing-policy-io.mjs';
 import { assertMainNotStale } from './review-dispatch.mjs';
 import { armSelfReexecOnFastForward } from '../lib/main-staleness.mjs';
 import { repoKeyForSlug } from '../lib/constellation-repos.mjs';
@@ -146,7 +146,7 @@ export async function dispatchCiHeal(planned, {
     const route = repo === 'we' ? routeHeal({ scope: planned.scope, reason }) : null;
     const out = await sinks[DISPATCH_EFFECT]({
       launchKind: 'ci-heal', prompt: withAltBranchHint(prompt, planned.altBranch), sessionSlug, num: planned.itemNum ?? undefined, lane: planned.lane, scope: planned.scope,
-      pr: planned.pr, reason, repo, probationWorker: route?.probationWorker ?? null,
+      pr: planned.pr, reason, repo, probationWorker: route?.probationWorker ?? null, routing: route,
     });
     if (out?.held) {
       // #x0jphk5 — the SINK's own (separate, unrelated) guard refused it: nothing was spawned under OUR claim
