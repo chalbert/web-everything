@@ -1084,7 +1084,9 @@ it.each(['4397', '4389'])('replays incident #%s using its checkout card and real
     const { io, calls } = fakeIo({ lane: dir, item });
     for (const key of ['findItem', 'headSha', 'untracked', 'diffNumstat', 'addedPaths', 'writeCard']) io[key] = real[key];
     const source = 'scripts/merge-ai-prs.mjs';
-    const test = 'scripts/__tests__/merge-ai-prs-merge-failure-isolation.test.mjs';
+    // Must be a path ABSENT from the clone: #4389's real regression test now lives on main, so reusing its name
+    // would make the worker's write a modification, not the added file this replay exercises.
+    const test = 'scripts/__tests__/merge-ai-prs-replay-regression.test.mjs';
     io.runWorker = () => {
       if (num === '4389') {
         writeFileSync(join(dir, source), readFileSync(join(dir, source), 'utf8') + '\n// replay worker diff\n');
