@@ -471,14 +471,16 @@ describe('antigravityJudgeSpawn — exercised over an injected spawn (real temp 
     const spy = (o) => { seen = o; return null; };
     const r = await antigravityJudgeSpawn({
       mandate: 'm', input: 'i', shape: SHAPE, model: 'gemini-3.1-pro', effort: 'low', spawnFn: fn, recordScorecard: spy,
+      transcriptDir: mkdtempSync(join(tmpdir(), 'agy-scorecard-test-')),
     });
     expect(seen).toMatchObject({
       dispatchKind: 'advisory-review', kind: 'review', role: 'advisory-review', provider: 'antigravity',
-      model: 'gemini-3.1-pro', effort: 'low',
+      model: 'unknown', requestedModel: 'gemini-3.1-pro', servedModel: 'unknown', modelEvidence: 'unavailable', effort: 'low',
     });
     // the SAME transcriptFile this run's own return value reports — never raw stdout.
     expect(seen.transcriptFile).toBe(r.transcriptFile);
     expect(typeof seen.transcriptFile).toBe('string');
+    rmSync(seen.transcriptFile, { force: true });
   });
 
   it('the silent-tool-denial failure (#3633 probe 7) surfaces as a rejection, never a clean empty answer', async () => {

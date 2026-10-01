@@ -31,6 +31,7 @@
 
 import { PLANNING_SNAPSHOT_ENV } from '../../scripts/lib/planning-snapshot.mjs';
 import { createPhaseTimer } from '../../scripts/lib/phase-timer.mjs';
+import { resolveOperationRoute, routingPolicyEnv } from '../../scripts/lib/dispatch-routing-policy-io.mjs';
 import { childFailure } from '../../scripts/lib/child-failure.mjs';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, writeFileSync, rmSync, readFileSync, readdirSync, mkdirSync, appendFileSync, renameSync } from 'node:fs';
@@ -223,7 +224,7 @@ export async function runBuildDispatchTick(options) {
   catch (error) { error.timings = timer.snapshot(); throw error; }
 }
 
-async function runTimedBuildDispatchTick({ bookkeeping = {}, live = false, policy = BUILD_DISPATCH_POLICY, prepareEnabled = true, effects, timer = createPhaseTimer() }) {
+async function runTimedBuildDispatchTick({ bookkeeping = {}, live = false, policy = BUILD_DISPATCH_POLICY, prepareEnabled = true, routingPolicy, effects, timer = createPhaseTimer() }) {
   effects = timer.wrap(effects);
   let holds = effects.listHolds?.() ?? [];
   const prepareRows = effects.listPrepareInFlight?.() ?? [];
@@ -444,8 +445,9 @@ async function runTimedBuildDispatchTick({ bookkeeping = {}, live = false, polic
   const probationRecords = (await effects.listProbationPrepares?.() ?? []).map(row => ({
     ...row, evidence: row.evidence ?? releases.find(r => r.probationAttempt === `${row.handle}:${row.scoredAt}`)?.failureEvidence,
   }));
-  const fallback = prepareRouteFallback(probationRecords, releases);
-  const prepare = { route: fallback ? 'prepare-route-fallback' : 'probation', enabled: prepareEnabled, planned: [], launched: [], inFlight: [], failures: [], retired: [], held: [], stamping: [] };
+  const configuredPrepare = resolveOperationRoute({ operation: 'prepare-item', taskType: 'prepare', policy: routingPolicy });
+  const fallback = configuredPrepare ? configuredPrepare.provider === 'claude' : prepareRouteFallback(probationRecords, releases);
+  const prepare = { policyRoute: configuredPrepare, route: fallback ? 'prepare-route-fallback' : 'probation', enabled: prepareEnabled, planned: [], launched: [], inFlight: [], failures: [], retired: [], held: [], stamping: [] };
   prepare.routeFailures = probationRecords.filter(r => r.taskType === 'prepare' && !r.pr && r.launchOutcome !== 'opened-pr')
     .map(r => ({ item: r.item, attempt: `${r.handle}:${r.scoredAt}`, cause: classifyPrepareFailure(r.evidence), evidence: r.evidence ?? { reason: r.launchOutcome } }));
   const finishedPrepares = new Set(completedPrepares);
@@ -862,9 +864,9 @@ export function cliDispatch({ num, bookkeeping, launchKind = 'build', prepareFal
     // prepare can disappear and be reported as the build-only needs-prepare hold.
     // Its model override travels in JSON argv plus a recorded reason, not a run.mjs control flag.
     writeFileSync(file, JSON.stringify({ bookkeeping: bookkeeping || {} }), { mode: 0o600 });
-    const text = exec('node', [join(SCRIPTS, 'operations', 'run.mjs'), 'dispatch-lane', `--num=${num}`, `--bookkeepingFile=${file}`, '--json', ...(launchKind === 'prepare-item' ? ['--modelReason=automatic item preparation uses sonnet'] : [])], {
+    const text = exec('node', [join(SCRIPTS, 'operations', 'run.mjs'), 'dispatch-lane', `--num=${num}`, `--bookkeepingFile=${file}`, '--json'], {
       encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 32 * 1024 * 1024, cwd: REPO_ROOT,
-      env: { ...process.env, ...(launchKind === 'prepare-item' && prepareFallback ? { WE_PROBATION_LAUNCH: 'off' } : {}), [MAX_CONCURRENT_LANES_ENV]: BUILD_DAEMON_LANE_CAP_EXEMPT_VALUE, WE_BUILD_DISPATCH_MODE: process.env.WE_BUILD_DISPATCH_MODE || 'mechanical', ...(launchKind === 'prepare-item' ? { WE_DISPATCH_AGENT_ARGS: JSON.stringify([...JSON.parse(process.env.WE_DISPATCH_AGENT_ARGS || '[]'), '--model', 'sonnet']) } : {}) },
+      env: { ...process.env, ...routingPolicyEnv(), ...(launchKind === 'prepare-item' && prepareFallback ? { WE_PROBATION_LAUNCH: 'off' } : {}), [MAX_CONCURRENT_LANES_ENV]: BUILD_DAEMON_LANE_CAP_EXEMPT_VALUE, WE_BUILD_DISPATCH_MODE: process.env.WE_BUILD_DISPATCH_MODE || 'mechanical' },
     });
     return readDispatchOutcome(text);
   } catch (e) {
@@ -988,7 +990,7 @@ export async function cliRouteHeldItems(plan) {
  *  recomputes it at dispatch time. */
 export async function cliPredictRoute(num, scope, { root = REPO_ROOT, env = process.env, loadItems, scorecards, sizePolicy, promotions } = {}) {
   try {
-    const { decideDispatchRoute } = await import('../../scripts/lib/dispatch-contracts.mjs');
+    const { resolveDispatchRoute: decideDispatchRoute } = await import('../../scripts/lib/dispatch-routing-policy-io.mjs');
     const io = await import('../../scripts/operations/dispatch-lane-io.mjs');
     const { readItemDeliveryAgentOverride } = await import('../../scripts/operations/delivery-agent-marker.mjs');
     const { probationLaunchDecision, probationLaunchFromEnv } = await import('../../scripts/operations/dispatch-providers/probation-worker.mjs');

@@ -11,7 +11,7 @@
  * replace it (per [docs/agent/platform-decisions.md#delegation-trial-record-graduation] "Reach", #3690).
  *
  * PURE MODULE ARCHITECTURE (per [docs/agent/platform-decisions.md#deterministic-core-thin-judgment]):
- *   • Zero filesystem (fs) or process environment reads at import or execution time.
+ *   • The default gate is a validated policy snapshot at module load; selectors remain pure over inputs.
  *   • Callers explicitly load and pass in scorecard records (from the shared scorecard store — `run-scorecard-store.mjs#readStore`, #4155
  *     or in-memory fixtures) and backdown thresholds.
  *   • Fully deterministic: identical arguments produce byte-identical return objects every time.
@@ -65,6 +65,9 @@
  * build, only of it reconciling an already-known target. This is a documented judgment call for whoever
  * dispatches work, not a coded gate on `taskType`; re-derive once real build-new-feature trial data exists.
  */
+
+import { DEFAULT_ROUTING_POLICY } from './dispatch-routing-policy.mjs';
+export { DEFAULT_ROUTING_POLICY, resolveOperationRoute } from './dispatch-routing-policy.mjs';
 
 import { isUsableForExploration } from './model-capability-ratings.mjs';
 import { isTestPath } from './dispatch-task-type.mjs';
@@ -294,26 +297,7 @@ export function externalTierEquivalent(provider, model) {
  * To open one taskType, flip its row to `true` — one line, reviewed like any other change.
  */
 // @test-only-export-ok: Shared library exported for the mechanical dispatch path (#3906) and its own test
-export const CRITICAL_WORK_GATE = Object.freeze({
-  kinds: Object.freeze(['build', 'fix', 'ci-heal', 'prepare-item']),
-  // agy-launcher-probation (operator, 2026-09-27): `doc-fix` and the new `ci-heal` taskType are opened ON
-  // PROBATION — non-critical work only, one of the PROBATION_ROSTER workers, full review on every result.
-  // `bugfix` opened ON PROBATION to Codex and agy (operator, 2026-09-29): simple mechanical fixes
-  // may use Gemini Flash with its Codex checker; full review on every non-critical result.
-  // `build-new-feature` opens to Codex only (operator, 2026-09-30 ~7:20 AM ET, #4519).
-  // agy awaits more build data; critical work stays on Claude and every result gets full review.
-  openForNonCritical: Object.freeze({
-    'prepare': true,
-    'build-new-feature': true,
-    'bugfix': true,
-    'conflict-resolution': false,
-    'doc-fix': true,
-    'test-fix': true,
-    'ci-heal': true,
-  }),
-  basis: '#4034',
-  reason: 'a non-Claude worker takes build/fix/ci-heal work only for a non-critical task of an opened taskType (#4034)',
-});
+export const CRITICAL_WORK_GATE = DEFAULT_ROUTING_POLICY.criticalWorkGate;
 
 /**
  * Decide the critical-work gate for one dispatch. Pure. Returns `null` when the kind is not gated (the gate does
@@ -323,7 +307,7 @@ export const CRITICAL_WORK_GATE = Object.freeze({
  * @param {string} taskType
  * @param {object} context
  */
-function decideCriticalWorkGate(gate, kind, taskType, context) {
+export function decideCriticalWorkGate(gate, kind, taskType, context) {
   if (!gate.kinds.includes(kind)) return null;
   const rows = gate.openForNonCritical && typeof gate.openForNonCritical === 'object' ? gate.openForNonCritical : {};
   const closed = (why) => ({ open: false, reason: `kind '${kind}' is gated: ${why}`, vetoes: [] });

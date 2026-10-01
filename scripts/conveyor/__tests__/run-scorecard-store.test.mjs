@@ -408,3 +408,24 @@ describe('readStore() — the lazy first-read migration of the DEFAULT store (#4
     expect(existsSync(fresh.resolveScorecardStorePath())).toBe(false);
   });
 });
+
+
+it('#4439 appends a launch trial once under concurrent file-store writers', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'judge-race-'));
+  try {
+    const io = { path: join(dir, 'store.json') };
+    const row = { ...baseRow(), dispatchKind: 'probation-trial', pr: 101 };
+    expect(storeModule.appendScorecardUnlessJudged(row, io)).toMatchObject(row);
+    expect(storeModule.appendScorecardUnlessJudged(row, io)).toBeNull();
+    const { spawn } = await import('node:child_process');
+    const moduleUrl = resolve(import.meta.dirname, '../run-scorecard-store.mjs');
+    const run = () => new Promise((ok, fail) => {
+      const child = spawn(process.execPath, ['--input-type=module', '-e',
+        `import { appendScorecardUnlessJudged } from ${JSON.stringify(moduleUrl)}; appendScorecardUnlessJudged(${JSON.stringify({ ...row, pr: 102 })}, ${JSON.stringify(io)});`], { stdio: ['ignore', 'pipe', 'pipe'] });
+      let err = ''; child.stderr.on('data', chunk => { err += chunk; });
+      child.on('error', fail); child.on('exit', code => code === 0 ? ok() : fail(Error(err)));
+    });
+    await Promise.all(Array.from({ length: 8 }, run));
+    expect(readStore(io).records.map(r => r.pr)).toEqual([101, 102]);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

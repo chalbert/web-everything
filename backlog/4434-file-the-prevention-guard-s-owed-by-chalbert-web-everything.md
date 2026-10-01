@@ -3,9 +3,10 @@ bornAs: xn96zu1
 kind: story
 size: 3
 parent: "4075"
-status: open
+status: resolved
 scope: ["we:scripts/lib/lane-salvage.mjs", "we:scripts/conveyor/lane-pool-health-watch.mjs", "we:scripts/lane-whois.mjs", "we:scripts/lib/__tests__/lane-salvage.test.mjs", "we:scripts/conveyor/__tests__/lane-pool-health-watch.test.mjs", "we:scripts/__tests__/lane-whois.test.mjs"]
 dateOpened: "2026-09-28"
+dateResolved: "2026-09-30"
 preparedDate: "2026-09-30"
 preparedAgainstSha: "50da0dc5c82df43f845c480c430b6e6430785afc"
 tags: []
@@ -65,4 +66,33 @@ Deliberately OUT (see Follow-ups): the two lint rules / write-gate for guards 3 
 
 - F1: a write-gate / lint rule flagging `.includes(<expr that can be undefined>)` where the array comes from optional chaining (`[a?.x, b?.y].includes(...)`) — heuristic only, needs its own design and a false-positive budget (guards 3 and 4 as literally worded).
 - F2: generalize "unstatable dirty path ⇒ fresh" in any other liveness reader that copies this fallback (none found in this pass; audit only).
+- Testing lesson: `git rm` removes empty ancestor directories; retain a tracked sibling when a fixture must distinguish immediate-parent aging from a removed-parent ancestor walk.
 - F3: a `git mv` preserves the file's mtime, so a fresh rename can already read old — existing gap in the same reader, separate fix.
+
+## Progress
+
+2026-09-30 — implemented M1–M3 within the declared scope. Missing dirty paths now use a bounded nearest-surviving-ancestor mtime; unstatable ancestors still fail closed. Extracted `formatSalvageKeptLine` and retained the CLI prefix/indent. Added session-less foreign-agent regressions at the shared guard and real whois CLI, with no new lint gate.
+
+Before/after real-git proof (inline Node probe importing `newestContentMtimeMs` and `laneLivenessGate`, empty agent/cwd readers, 30-minute quiet period; tracked file deleted with `git rm`, root and HEAD reflog backdated two hours):
+
+```json
+{"ageMinutes":0,"eligible":false,"reason":"lane content changed 0 min ago (< 30 min quiet period)"}
+{"ageMinutes":120,"eligible":true,"reason":"unleased, no live owner or process, quiet"}
+```
+
+The disposable repository was under the system temporary directory, outside the checkout, to honor the job's no-helper-files instruction. No live pool was touched.
+
+Formatter inline Node proof: `["live agent","fallback","unknown"]` for keptReason plus reason, reason only, and neither. CLI change in we:scripts/conveyor/lane-pool-health-watch.mjs:
+
+```diff
+-            else timestampedStderr(`    lane-${o.lane}: kept — ${o.keptReason || o.reason || 'unknown'}\n`);
++            else timestampedStderr(`    lane-${o.lane}: kept — ${formatSalvageKeptLine(o)}\n`);
+```
+
+Regression proof: both aged-deletion cases failed against the original fallback (age near zero versus the required one hour), and all three formatter cases failed because the export did not exist. The first staged-deletion fixture exposed that `git rm` removes empty parent directories; adding a retained tracked sibling made that case specifically exercise a surviving immediate parent, and the corrected fixture was rerun red before implementation. Each aged-deletion case now performs three scans and liveness checks with the deletion still present, pinning the persistent-deletion behavior without a wall-clock sleep. The existing fresh-deletion and racy-index regressions remain intact; a throwing-stat helper test proves the ancestor walk stops at the scanned root and returns null.
+
+Mutation proof: removing `sessionIds.filter(Boolean)` in we:scripts/lib/lane-salvage.mjs reddened exactly the two selected session-less-agent cases (pure `liveAgentInLane` and real whois CLI: expected false, received true; 2 failed). Restoring the perpetual `Date.now()` deletion fallback reddened exactly the two selected aged-deletion cases (2 failed). Both mutations were restored immediately afterward. The complete three-file suite passed before mutation: **3 files, 138 tests**; the wider lane gate also passed all three scoped suites after restoration.
+
+Wider verification: `node we:scripts/verify-lane.mjs` ran its selected dependency/reference set: **138 files passed, 2 failed; 5,954 tests passed, 6 failed**. All six failures are real-process-table assertions in we:scripts/operations/__tests__/clear-stuck-session-io-real.test.mjs and we:scripts/operations/__tests__/restart-runner-io-real.test.mjs. A direct `/bin/ps -p $$ -o ppid=,command=` probe exited 126 with `/bin/bash: /bin/ps: Operation not permitted`; this sandbox cannot supply the real process table those tests require. No tests, gates, or out-of-scope implementation were changed to conceal that limitation. The lane verification marker remains red and needs a rerun in an environment that permits process-table reads.
+
+Final checks: `npm run check:standards` passed with **0 errors** (4,547 warnings); `git diff --check` passed. `node we:scripts/operations/run.mjs resolve --ref=4434` completed successfully with one effect applied, setting this card to resolved. No commit, push, or PR was created. Wider verification still requires the process-table-capable rerun noted above.

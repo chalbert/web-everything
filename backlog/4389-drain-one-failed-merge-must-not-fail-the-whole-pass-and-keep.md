@@ -2,9 +2,10 @@
 bornAs: xipsrr8
 kind: story
 size: 2
-status: open
+status: resolved
 scope: ["we:scripts/merge-ai-prs.mjs"]
 dateOpened: "2026-09-28"
+dateResolved: "2026-09-30"
 preparedDate: "2026-09-30"
 preparedAgainstSha: "445845d1a57de4d8bfc1caddb252bab0fce12aaf"
 tags: []
@@ -54,6 +55,10 @@ Fixture: the existing gh-error test's shim only answers `pr list` → `[]`, so i
 
 ## Follow-ups
 
+- Re-run `node we:scripts/verify-lane.mjs` in an environment allowing real `ps` reads. This sandbox denies them; the existing we:scripts/operations/__tests__/restart-runner-io-real.test.mjs and we:scripts/operations/__tests__/clear-stuck-session-io-real.test.mjs need that capability. No test or gate was weakened.
+
+- Test fixture lesson: isolate the subprocess's `os.homedir()` as well as git/gh; disabling the whole-pass lease alone does not isolate the merge-write lock. Keep temporary shims outside the repo.
+
 - Find what actually happened to #2880 in the 2026-09-28 pass (dependent of #2879? deferred?) — the catch already continues, so the incident's second-PR miss has another cause.
 - Decide whether a failed PR should keep blocking its stacked dependents for the pass (comment at 5498) or only its true `blockedBy` edge.
 - Watch-mode `lastFailed` keeps only the last pass's failures; an earlier unretried failure is dropped from the final exit/JSON.
@@ -61,3 +66,14 @@ Fixture: the existing gh-error test's shim only answers `pr list` → `[]`, so i
 ## Done when
 
 1. **Executable** — `npx vitest run we:scripts/__tests__/merge-ai-prs-merge-failure-isolation.test.mjs` fails before this item lands and passes after.
+
+
+## Progress
+
+- 2026-09-30: implemented only the scoped drain change in we:scripts/merge-ai-prs.mjs and its new regression suite we:scripts/__tests__/merge-ai-prs-merge-failure-isolation.test.mjs. The merge catch reuses `ghListErrText`; both exit sites use `passExitCode`, with the watch using cumulative merges. Cascade ordering and rebased-pending behavior remain unchanged.
+- **Before:** ran the new suite against the checkout's unmodified implementation at `c4e9f83274d41d7ae0bc3415a152a51feb0c7642` (the available baseline, rather than the card's older prepared SHA). Result: **10 failed, 1 passed**; the both-fail exit-2 guard passed. Actual non-dry-run CLI, fake gh/git: attempts `[2879,2880]`, JSON `merged:[{num:2880,repo:null,headSha:"sha-2880"}]`, `failed:[{num:2879,repo:null,headSha:"sha-2879",detail:"Command failed: gh pr merge 2879 --merge --delete-branch --match-head-commit sha-2879"}]`, `ok:true`, **exit 2**.
+- **After:** same CLI fixture and assertions: **11 tests passed**. Attempts `[2879,2880]`, same merged/failed identities and `ok:true`, but detail is `Command failed: gh pr merge 2879 --merge --delete-branch --match-head-commit sha-2879 — gh: GraphQL: Pull request is not mergeable`, **exit 0**. Both failures still attempt both PRs, record two failures, merge none, and exit **2**. No real GitHub merge failure was induced; this is the deterministic fake-gh proof required by the card.
+- **Watch/soak guard:** two consecutive real CLI sweeps attempt `[2879,2880,2879]`; the second sweep only fails. Before: cumulative `merged:[2880]`, `lastFailed:[2879]`, exit **2**. After: the same buckets with stderr preserved, exit **0**. The pure table pins duplicate precedence (3 even with partial success), no-land failures (2), partial success (0), and empty passes (0). Executing the production catch's rebased branch records `pendingRebased:[2879]`, no failures, and exit **0** through the helper.
+- Reproduce the JSON evidence with `DRAIN_ISOLATION_PROOF=1 npx vitest run we:scripts/__tests__/merge-ai-prs-merge-failure-isolation.test.mjs` (strip the `we:` namespace for a shell path). Temporary shims and state are created outside the repo and removed after each run. The fixture isolates `os.homedir()` for the subprocess's real locks; no production lock bypass was added. The deliberately minimal fixture has no derived-artifact project, so its post-land regeneration reports non-fatal failures; those are separate from merge results.
+- **Wider verification:** `node we:scripts/verify-lane.mjs` ran its selected dependency suite: **211 files passed, 2 failed; 10,778 tests passed, 6 failed**. The new 11-test regression suite passed again. All six failures are in the two existing real-process-table suites named in Follow-ups; direct `ps -p $$ -o pid=,ppid=,command=` returned `Operation not permitted` (exit 126). This environment restriction cannot be repaired within this card's scope or the session's permissions; the verification marker remains red, not bypassed. Since verification chains standards after successful tests, `npm run check:standards` was launched separately.
+- **Final gates:** the first standards run caught two `exit-wraps-call` violations introduced by nesting the pure helper in `process.exit`. Fixed both sites by computing `exitCode` first, then exiting with the value; no gate suppression. `npm run check:standards` then passed with **0 errors** (4,547 warnings). Re-ran `node we:scripts/verify-lane.mjs` after this fix: **211 files / 10,778 tests passed**, including all **11** new regression tests; the same **2 files / 6 real-process-table tests failed** under the confirmed sandbox restriction. `git diff --check` passed. No shared agent docs or repo helper files were created or edited.

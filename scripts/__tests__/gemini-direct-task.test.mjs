@@ -745,7 +745,7 @@ describe('runAgyDirectExec / geminiDirectTask — injected process mechanics', (
     expect(spawnFn).toHaveBeenCalledTimes(1);
     expect(report.argv).toEqual(seen.argv);
     expect(report.logFile).toBe(join(dir, 'git-metadata', 'gemini-direct-task.jsonl'));
-    expect(Object.keys(report).sort()).toEqual(['dir', 'scratch', 'startSha', 'argv', 'logFile', 'exitCode', 'timedOut', 'resumed', 'resumeConversationId', 'events', 'diff', 'gate'].sort());
+    expect(Object.keys(report).sort()).toEqual(['dir', 'scratch', 'startSha', 'argv', 'logFile', 'exitCode', 'timedOut', 'resumed', 'resumeConversationId', 'events', 'diff', 'gate', 'requestedModel', 'servedModel', 'servedBackend', 'modelEvidence', 'quotaState', 'quotaResetsAt', 'fallbackDecision'].sort());
     expect(calls[0].args).toEqual(['-C', dir, 'rev-parse', 'HEAD']);
     expect(calls.some((c) => c.args.includes('clone'))).toBe(false);
     expect(calls.some((c) => c.args.join(' ') === `-C ${dir} diff startsha123`)).toBe(true);

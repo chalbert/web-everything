@@ -54,7 +54,7 @@ const CRITICAL_PATH_PREFIXES = Object.freeze({
     'scripts/conveyor/advisory-fix-mark.mjs',
     // The gate's own wiring and inputs: the module that computes/passes the verdict, its threshold data, and the
     // scorecard whose critical-miss vetoes feed it.
-    'scripts/lib/dispatch-contracts.mjs', 'scripts/lib/dispatch-thresholds.mjs', 'scripts/conveyor/run-scorecard',
+    'scripts/lib/dispatch-contracts.mjs', 'scripts/lib/dispatch-thresholds.mjs', 'scripts/lib/dispatch-routing-policy', 'scripts/conveyor/run-scorecard',
     'scripts/lib/model-capability-ratings', 'scripts/lib/poc-branches.json',
     // Review-clearance code and the harness hooks/permissions/skills.
     'scripts/review-runner', 'scripts/lib/review-runner-core.mjs', 'scripts/lib/review-label-provider.mjs',

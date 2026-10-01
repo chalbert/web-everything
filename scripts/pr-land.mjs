@@ -767,7 +767,7 @@ function runCli() {
   // dry-run preview) reads this getter, so absent title metadata cannot block landing an existing PR.
   const createParams = { base: BASE, head: REF, body: CREATE_BODY, draft: DRAFT,
     get title() { return publicationTitle({ title: sourceTitle,
-      card: titleItem ? readMainCard(titleItem, git) : null }); },
+      card: titleItem ? readMainCard(titleItem, gitC) : null }); },
   };
 
   if (DRY_RUN) {
