@@ -62,10 +62,11 @@ describe('buildCiHealComment — the durable comment body (#2666)', () => {
     expect(countCiHealComments([{ body, author: AUTOMATION }])).toBe(1); // round-trips: what we post, we count
   });
 
-  it('states that only CI was repaired — the review gate was NOT touched', () => {
+  it('distinguishes the CI repair record from the subsequent acceptance re-arm', () => {
     const body = buildCiHealComment({ reason: 'behind' });
     expect(body).toContain('review:human');
-    expect(body.toLowerCase()).toContain('not touched');
+    expect(body).toContain('a live `review:accepted` may be re-armed separately');
+    expect(body).not.toContain('was NOT touched');
   });
 });
 
