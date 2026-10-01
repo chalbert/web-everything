@@ -86,19 +86,47 @@ describe('missing-run PR-event recovery', () => {
     expect(calls).toHaveLength(1);
   });
   it.each([
-    { ...pr, state: 'closed' }, { ...pr, base: { ref: 'lane/parent' } },
+    { ...pr, state: 'closed' },
     { ...pr, head: { ...pr.head, sha: next } },
-    { ...pr, head: { ...pr.head, repo: { full_name: 'someone/fork' } } },
-  ])('refuses a changed or foreign PR', live => {
+  ])('defers (free, transient) when the PR head or state changed', live => {
     expect(fixture({ live }).calls).toHaveLength(1);
     expect(fixture({ live }).result.deferred).toBe(true);
   });
   it('does not push after a fetch race, or after a previous recovery even if its comment was lost', () => {
-    for (const options of [{ fetched: next }, { message: `ci: recovery\n\n${RECOVERY_COMMIT_MARKER} old` }]) {
-      const { result, calls } = fixture(options);
-      expect(result.deferred).toBe(true);
-      expect(calls.some(c => c.args.includes('push') || c.args.includes('commit-tree'))).toBe(false);
+    // A fetch race is transient (deferred, free). A marked tip is terminal: a counted failure so the cap can hand it off.
+    const race = fixture({ fetched: next });
+    expect(race.result.deferred).toBe(true);
+    const marked = fixture({ message: `ci: recovery\n\n${RECOVERY_COMMIT_MARKER} old` });
+    expect(marked.result).toMatchObject({ ok: false, error: expect.stringContaining('needs ci-heal') });
+    expect(marked.result.deferred).toBeUndefined();
+    for (const { calls } of [race, marked]) expect(calls.some(c => c.args.includes('push') || c.args.includes('commit-tree'))).toBe(false);
+  });
+  it('reports a stacked or fork PR as a counted failure (not a free deferral) and never pushes', () => {
+    const stacked = fixture({ live: { ...pr, base: { ref: 'lane/other' } } });
+    const fork = fixture({ live: { ...pr, head: { ...pr.head, repo: { full_name: 'someone/web-everything' } } } });
+    for (const { result, calls } of [stacked, fork]) {
+      expect(result).toMatchObject({ ok: false, action: 'pull-request-push', error: expect.stringContaining('stacked or from a fork') });
+      expect(result.deferred).toBeUndefined();
+      expect(calls.every(c => c.cmd === 'gh')).toBe(true);
     }
+  });
+  it('never calls the raw update-branch endpoint (it reintroduces the .lane-manifest.json collision)', () => {
+    const scenarios = [{}, { failPush: true }, { fetched: next }, { live: { ...pr, base: { ref: 'lane/other' } } }];
+    for (const options of scenarios) {
+      const { calls } = fixture(options);
+      for (const c of calls) expect([c.cmd, ...c.args].join(' ')).not.toMatch(/update-branch|rebase|merge/);
+    }
+  });
+  it('reports a failed fetch with its stage-named error without throwing or leaking the credential', () => {
+    const exec = vi.fn((cmd, args) => {
+      if (cmd === 'gh') return JSON.stringify(pr);
+      if (args.includes('fetch')) throw new Error('fatal: ghp_test-secret rejected');
+      return '';
+    });
+    let result;
+    expect(() => { result = pushMissingRunCommit(d, { repo, exec, env: { GH_TOKEN: 'ghp_test-secret' }, checkClaim: () => null }); }).not.toThrow();
+    expect(result).toEqual({ ok: false, action: 'pull-request-push', error: 'missing-run recovery failed during fetch' });
+    expect(JSON.stringify(result)).not.toContain('ghp_test-secret');
   });
   it('checks fixer ownership again immediately before pushing', () => {
     const checkClaim = vi.fn().mockReturnValueOnce(null).mockReturnValueOnce({ message: 'fixer holds claim' });

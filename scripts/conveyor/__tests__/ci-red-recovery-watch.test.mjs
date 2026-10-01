@@ -949,6 +949,43 @@ describe('ci-red-recovery-watch — sweepMissingRunRecovery (PR #2729 fixture: z
     expect(trigger).not.toHaveBeenCalled();
   });
 
+  // Review of PR #3253: a stacked or fork PR was deferred (free) every tick, so no marker ever tripped the cap.
+  it('a stacked PR and a fork PR reach a bounded, recorded outcome within the cap across repeated ticks', async () => {
+    const { pushMissingRunCommit } = await import('../missing-run-push.mjs');
+    const repo = 'chalbert/web-everything';
+    const mk = (number, sha, base, headRepo) => ({
+      pr: { number, headRefName: `lane/p${number}`, baseRefName: base, headRefOid: sha, mergeable: 'MERGEABLE', statusCheckRollup: [], labels: [] },
+      live: { state: 'open', mergeable: true, head: { sha, ref: `lane/p${number}`, repo: { full_name: headRepo } }, base: { ref: base } },
+    });
+    const cases = [mk(9001, 'a'.repeat(40), 'lane/other', repo), mk(9002, 'b'.repeat(40), 'main', 'someone/web-everything')];
+    const comments = new Map(cases.map(c => [c.pr.number, []]));
+    const exec = vi.fn((cmd, args) => {
+      if (cmd !== 'gh') throw new Error('structural refusal must never reach git');
+      const n = Number(args[1].split('/').pop());
+      return JSON.stringify(cases.find(c => c.pr.number === n).live);
+    });
+    const outcomes = [];
+    for (let tick = 0; tick < 5; tick++) {
+      const result = sweepMissingRunRecovery({
+        apply: true, repo, readOpenPrs: () => cases.map(c => c.pr), readRequiredContexts: () => ['test'],
+        readHeadCommittedAt: () => '2026-09-26T14:20:26Z', readComments: n => comments.get(n), now: NOW,
+        trigger: (d, o) => pushMissingRunCommit(d, { ...o, exec, env: { GH_TOKEN: 'ghp_x' }, checkClaim: () => null }),
+        // Mirror the durable marker the real postComment writes (trusted author, exact sha line).
+        postComment: (n, o) => comments.get(n).push({ body: `🚦 conveyor missing-run-recovery\n\nsha: ${o.headSha}\n${o.error}`, author: { login: 'web-everything' } }),
+        clearLabel: () => false,
+      });
+      outcomes.push(result);
+    }
+    for (const c of cases) {
+      const n = c.pr.number;
+      const attempted = outcomes.filter(r => r.applied.some(a => a.prNumber === n)).length;
+      expect(attempted).toBe(2); // the cap, then no more
+      expect(comments.get(n)).toHaveLength(2);
+      expect(outcomes.at(-1).refusals).toContainEqual(expect.objectContaining({ prNumber: n, kind: 'missing-run-cap-exhausted' }));
+      expect(outcomes.at(-1).applied.some(a => a.prNumber === n)).toBe(false);
+    }
+  });
+
   it('never flags a PR whose required checks have actually reported', () => {
     const green = { ...PR_2729, statusCheckRollup: [{ __typename: 'CheckRun', name: 'test', status: 'COMPLETED', conclusion: 'SUCCESS' }] };
     const result = sweepMissingRunRecovery({

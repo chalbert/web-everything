@@ -35,8 +35,13 @@ export function pushMissingRunCommit(d, {
     // Bypass the shared listing: a cached UNKNOWN or a head changed by a fixer is
     // not authority to mutate. Conflicts belong to the conflict-repair dispatcher.
     const pr = JSON.parse(exec('gh', ['api', `repos/${repo}/pulls/${d.prNumber}`], opts));
-    if (pr.state !== 'open' || pr.head?.sha !== d.headSha || pr.head?.ref !== d.headRefName
-      || pr.head?.repo?.full_name !== repo || pr.base?.ref !== defaultBranch) return defer('PR head, repository, base or state changed');
+    if (pr.state !== 'open' || pr.head?.sha !== d.headSha || pr.head?.ref !== d.headRefName) return defer('PR head or state changed');
+    // A stacked or fork PR can never be recovered by this path. Unlike the transient
+    // deferrals, report it as a counted failure so the sweep posts a marker and the
+    // per-sha cap hands it off instead of re-planning it every tick forever.
+    if (pr.head?.repo?.full_name !== repo || pr.base?.ref !== defaultBranch) {
+      return { ok: false, action, error: `PR is stacked or from a fork (base ${pr.base?.ref ?? '?'}, head repo ${pr.head?.repo?.full_name ?? '?'}); missing-run push recovery only handles same-repo PRs on ${defaultBranch}` };
+    }
     if (pr.mergeable !== true) return defer(pr.mergeable === false ? 'PR has merge conflicts; conflict repair must run first' : 'PR mergeability is unknown; retry after GitHub recalculates');
     const claim = () => checkClaim({ repo, branch: d.headRefName });
     const held = claim();
@@ -59,7 +64,7 @@ export function pushMissingRunCommit(d, {
     git('fetch', '--no-tags', remote, ref);
     if (git('rev-parse', 'FETCH_HEAD') !== d.headSha) return defer('branch moved before recovery');
     const message = git('show', '-s', '--format=%B', d.headSha);
-    if (message.split('\n').some(line => line.startsWith(RECOVERY_COMMIT_MARKER))) return defer('recovery commit still has no PR checks; needs ci-heal, not another empty commit');
+    if (message.split('\n').some(line => line.startsWith(RECOVERY_COMMIT_MARKER))) return { ok: false, action, error: 'recovery commit still has no PR checks; needs ci-heal, not another empty commit' };
     const tree = git('rev-parse', `${d.headSha}^{tree}`);
     stage = 'commit-tree';
     const newHeadSha = git('-c', 'user.name=Web Everything', '-c', 'user.email=conveyor@users.noreply.github.com',
