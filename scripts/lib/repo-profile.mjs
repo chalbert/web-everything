@@ -211,6 +211,14 @@ export function repoKeyForScope(scope) {
   return null;
 }
 
+/** Pure delivery capability data, shared by admission and the wrapper backstop. */
+export function deliveryLocusForScope(scope) {
+  const entries = String(scope ?? '').split(',').map((entry) => entry.trim()).filter(Boolean);
+  const keys = [...new Set(entries.map((entry) => repoKeyForScope(entry) ?? 'we'))];
+  if (!keys.length) keys.push('we');
+  return { multiRepo: keys.length > 1, keys };
+}
+
 /**
  * xftsbsg (epic #3383) — THE REAL PRIMARY CHECKOUT a lane clone's own absolute PATH belongs to, given nothing
  * but that path: the pool-dir basename directly above `lane-<N>` (`.lanes/<basename>/lane-<N>`) is exactly

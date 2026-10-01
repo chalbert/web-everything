@@ -125,7 +125,7 @@ import { isAllowlistedLitterPath } from '../lib/lane-litter.mjs';
 // `defaultDeliveryDenyPaths()` defaults to ITS OWN module's checkout root, which is always WE (these scripts
 // live only in `we:scripts/operations/`), so a frontierui/plateau-app build denied the wrong repo's primary
 // checkout entirely — the one the deny-map exists to seal off was left wide open to the Codex sandbox.
-import { primaryCheckoutForLanePath, repoProfileForLanePath, repoKeyForScope, repoProfile } from '../lib/repo-profile.mjs';
+import { primaryCheckoutForLanePath, repoProfileForLanePath, deliveryLocusForScope, repoProfile } from '../lib/repo-profile.mjs';
 // #4349 — settle this delivery's OWN run-store effect on exit (see that file's own header for why this is
 // the thin seam, not a new store) and release/hold the build-dispatch claim a finished no-op dispatch used to
 // leave stranded for hours (`we:scripts/conveyor/build-dispatch-claim.mjs`'s own #4349 note).
@@ -364,50 +364,53 @@ export async function deliverItem(launch, provider = CLAUDE_RESTRICTED_PROVIDER,
       try { releaseBuildDispatchClaim({ num: item }); } catch { /* best-effort */ }
     }
   };
-  const claudeSessionId = newSessionId(); // the Claude CLI's own --session-id — see the docblock above.
-
-  // build-path-codex-isolation-locus — WHICH REPO this item's own `scope:` actually names, resolved ONCE, up
-  // front, before anything is acquired. See `resolveDeliveryLocus`'s own docblock for the couple-repo refusal
-  // this can throw.
-  const locus = resolveDeliveryLocus(scope);
-  const implProfile = locus.profile && locus.profile.key !== 'we' ? locus.profile : null;
-  if (locus.multiRepo) {
-    throw new Error(
-      `deliver-item-wrapper: #${item}'s scope spans more than one non-we repo (${locus.keys.join(', ')}) — a `
-      + 'multi-repo "couple" build (as opposed to a single non-we locus, which this wrapper already handles) '
-      + 'is a design decision this wrapper defers rather than guesses at (merge order, which repo\'s gate '
-      + 'governs, one PR or two) — see we:backlog/x83eb25-design-multi-repo-couple-locus-delivery-e-g-we-'
-      + 'plateau-app-2.md. Do not dispatch this item mechanically until that decision is ratified.',
-    );
-  }
-
-  // ---- 0. Telemetry (#3383) — the root `dispatch` span for this whole delivery, and the ambient recorder
-  // every shared helper below (`acquireLane`, `runVerifyOperation`) emits its own spans into. The trace id is
-  // DERIVED from the item, so this delivery, a later fix dispatch against its PR, and the review that lands
-  // it all join without anything being passed between those three separate processes. `attemptTag` rides as
-  // an attribute rather than as part of the trace id — attempt 2 of #3441 belongs in the SAME trace as
-  // attempt 1, which is what makes "how many attempts did this item take" answerable at all.
-  //
-  // Nothing below is in a `try` for telemetry's sake: every call on the recorder is already never-throwing by
-  // construction (see `telemetry-store.mjs`'s purity discipline), and a `restoreTelemetry()` in the outermost
-  // `finally` is the only cleanup this needs.
-  const tel = recorderFor({ kind: 'build', item, attributes: { item: String(item), sessionSlug } });
-  const restoreTelemetry = setActiveRecorder(tel);
-  const root = tel.startSpan('dispatch', {
-    attributes: { item: String(item), lane: String(lane), attemptTag: attemptTag || null, scope: scope || null },
-  });
-
-  let implLanePath = null; // build-path-codex-isolation-locus — in scope for the outer catch's release too.
+  let laneAcquired = false;
+  let implLanePath = null;
+  let restoreTelemetry = () => {};
+  let root;
+  let terminalOutcome = 'wrapper-threw';
   try {
-  // ---- 1. Acquire + claim (REAL CLI surface, verbatim from the live brief's own step 1/2) -----------------
-  // `claudeSessionId` threaded through — see `acquireLane`'s own docblock (#3627 secondary finding, live
-  // #3371 attempt 4) for why `--adopt` needs the delivery agent's own future session id, not whatever this
-  // wrapper process itself inherited.
-  // PR #2921 review — a resume re-leases the SAME lane without resetting it (the reset would wipe the finished
-  // commit being resumed), and skips the item claim below (the item is already `active` from the attempt being
-  // resumed; re-claiming it is refused and would settle this resume as `wrapper-threw`).
-  acquireLane({ lane, sessionSlug, scope, item, claudeSessionId, noReset: resume });
-  try {
+    const claudeSessionId = newSessionId(); // the Claude CLI's own --session-id — see the docblock above.
+
+    // build-path-codex-isolation-locus — WHICH REPO this item's own `scope:` actually names, resolved ONCE, up
+    // front, before anything is acquired. See `resolveDeliveryLocus`'s own docblock for the couple-repo refusal
+    // this can throw.
+    const locus = resolveDeliveryLocus(scope);
+    const implProfile = locus.profile && locus.profile.key !== 'we' ? locus.profile : null;
+    if (locus.multiRepo) {
+      terminalOutcome = 'unsupported-locus';
+      throw new Error(
+        `deliver-item-wrapper: #${item}'s scope spans more than one repo (${locus.keys.join(', ')}) — a `
+        + 'multi-repo "couple" build (as opposed to a single non-we locus, which this wrapper already handles) '
+        + 'is a design decision this wrapper defers rather than guesses at (merge order, which repo\'s gate '
+        + 'governs, one PR or two) — see #4289. Multi-repo delivery is unsupported.',
+      );
+    }
+
+    // ---- 0. Telemetry (#3383) — the root `dispatch` span for this whole delivery, and the ambient recorder
+    // every shared helper below (`acquireLane`, `runVerifyOperation`) emits its own spans into. The trace id is
+    // DERIVED from the item, so this delivery, a later fix dispatch against its PR, and the review that lands
+    // it all join without anything being passed between those three separate processes. `attemptTag` rides as
+    // an attribute rather than as part of the trace id — attempt 2 of #3441 belongs in the SAME trace as
+    // attempt 1, which is what makes "how many attempts did this item take" answerable at all.
+    //
+    // Telemetry setup is inside the same settlement region as every other preflight step.
+    // The outermost finally restores the ambient recorder even when setup fails.
+    const tel = recorderFor({ kind: 'build', item, attributes: { item: String(item), sessionSlug } });
+    restoreTelemetry = setActiveRecorder(tel);
+    root = tel.startSpan('dispatch', {
+      attributes: { item: String(item), lane: String(lane), attemptTag: attemptTag || null, scope: scope || null },
+    });
+
+    // ---- 1. Acquire + claim (REAL CLI surface, verbatim from the live brief's own step 1/2) -----------------
+    // `claudeSessionId` threaded through — see `acquireLane`'s own docblock (#3627 secondary finding, live
+    // #3371 attempt 4) for why `--adopt` needs the delivery agent's own future session id, not whatever this
+    // wrapper process itself inherited.
+    // PR #2921 review — a resume re-leases the SAME lane without resetting it (the reset would wipe the finished
+    // commit being resumed), and skips the item claim below (the item is already `active` from the attempt being
+    // resumed; re-claiming it is refused and would settle this resume as `wrapper-threw`).
+    acquireLane({ lane, sessionSlug, scope, item, claudeSessionId, noReset: resume });
+    laneAcquired = true;
     // build-path-codex-isolation-locus — a single non-`we` locus (`implProfile` set above) ALSO gets an
     // implementation lane in ITS OWN repo's own pool — see `acquireImplLane`'s own docblock. This is the fix
     // for the live #3604 finding: the wrapper used to acquire ONLY the WE lane above, for every item
@@ -604,27 +607,11 @@ export async function deliverItem(launch, provider = CLAUDE_RESTRICTED_PROVIDER,
       status: 'ok', outcome: 'pr-opened', pr: prResult.pr ?? null, park: parkDecision.label,
     });
   } catch (e) {
-    // A wrapper-side failure (acquire refused, claim refused, gate script itself threw) is NOT the agent's
-    // outcome — it never reached the agent, or the agent's own report is irrelevant to it. Release what was
-    // acquired and surface the raw error; there is no report to interpret.
-    releaseClaimAndLane({ item, lane, sessionSlug, best_effort: true, implLanePath });
-    throw e;
-  }
-  } catch (e) {
-    // #3383 — the root span closes `error` on ANY escape, including the rethrow above; this is the outer of
-    // two catches so telemetry never alters what a failure does, only records that it happened.
-    //
-    // Settle + release/hold live HERE, not beside the inner catch's `releaseClaimAndLane`: `acquireLane` (a few
-    // lines into the outer `try`) can itself throw before the inner `try` ever opens, so settling only there
-    // would miss that case. This also runs on the RE-THROW from the inner catch above — `settleTerminal`'s own
-    // `settledOnce` guard is what keeps a second call here from re-releasing or re-holding anything.
-    //
-    // `wrapper-threw` means a definite, caught-by-us failure — never the genuinely-unknown "killed with no
-    // trace" case #3073's fail-closed rule protects (that case runs no JS at all). It gets a hold like every
-    // other non-PR outcome: a deterministic throw is exactly as re-dispatch-loop-prone as `not-ready`, with no
-    // finer-grained reason available than the outcome name itself.
-    settleTerminal('wrapper-threw', { error: String(e?.message ?? e), releaseClaim: true, hold: 'wrapper-threw' });
-    root.fail(e, { outcome: 'wrapper-threw' });
+    // Only this attempt's successful acquisition authorizes lane cleanup. Preflight and acquisition
+    // refusals still settle the dispatch and release its build claim, without touching another lease.
+    if (laneAcquired) releaseClaimAndLane({ item, lane, sessionSlug, best_effort: true, implLanePath });
+    settleTerminal(terminalOutcome, { error: String(e?.message ?? e), releaseClaim: true, hold: terminalOutcome });
+    root?.fail(e, { outcome: terminalOutcome });
     throw e;
   } finally {
     restoreTelemetry();
@@ -736,12 +723,9 @@ function releaseClaimAndLane({ item, lane, sessionSlug, best_effort = false, imp
  * @returns {{profile: ReturnType<typeof repoProfile>|null, multiRepo: boolean, keys?: string[]}}
  */
 export function resolveDeliveryLocus(scope) {
-  const entries = String(scope ?? '').split(',').map((s) => s.trim()).filter(Boolean);
-  const keys = new Set();
-  for (const entry of entries) keys.add(repoKeyForScope(entry) ?? 'we');
-  if (keys.size === 0) return { profile: repoProfile('we'), multiRepo: false };
-  if (keys.size > 1) return { profile: null, multiRepo: true, keys: [...keys] };
-  return { profile: repoProfile([...keys][0]), multiRepo: false };
+  const { multiRepo, keys } = deliveryLocusForScope(scope);
+  if (multiRepo) return { profile: null, multiRepo, keys };
+  return { profile: repoProfile(keys[0]), multiRepo: false };
 }
 
 /**
