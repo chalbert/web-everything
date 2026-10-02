@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { readReviewCiGate } from '../lib/review-ci-gate-io.mjs';
 /**
  * @file scripts/operations/review-dispatch.mjs
  * @description `#3279` — DISPATCH AN INDEPENDENT REVIEW OF A PR TO A FRESH SESSION.
@@ -532,6 +533,7 @@ export function planReviewDispatch({ pr, repo, checkoutExists = existsSync, home
  * @returns {{sessionId: string, sessionSlug: string, pr: number, repo: string, prompt: string, unknownTokens: string[]}}
  */
 export function dispatchReview({
+  ciGate = readReviewCiGate,
   pr, repo, root = REPO_ROOT,
   readBrief = (r) => readFileSync(reviewBriefPath(r), 'utf8'),
   mintSessionId = () => randomUUID(),
@@ -578,6 +580,8 @@ export function dispatchReview({
       + 'Opt in with REVIEW_PR_CODEX_ADVISORY=1 in the environment instead.',
     );
   }
+  const ci = ciGate({ repo: planned.repo, pr: planned.pr });
+  if (!ci?.allowed) return { pr: planned.pr, repo: planned.repo, headSha: ci?.headSha ?? null, skipped: `review-ci: ${ci?.reason ?? 'unreadable-ci'}`, ci };
   const { prompt, unknownTokens } = fillReviewBrief(readBrief(root), {
     PR: planned.pr, REPO: planned.repo, LANE_REPO: planned.laneRepo, SESSION_SLUG: planned.sessionSlug, JUDGE_PROVIDER: judgeProvider,
     // #4174 — the checkout this dispatch is FROM, same as `root` always was; needed now that the session's
