@@ -40,6 +40,7 @@
 import { deriveSessionId, sessionSeed } from './judge-spawn.mjs';
 import { decideClearerIndependence, parseAuthorActorId } from './review-independence.mjs';
 import { CARE_LEVELS } from './review-escalation.mjs';
+import { isTrustedMarkerAuthor } from './marker-authorship.mjs';
 // #2438's labelled data fence (#2967 moved it to a leaf so this module can reach it — `review-core.mjs`,
 // where it used to live, imports THIS module, so importing back would be a cycle).
 import { FENCED_DATA_RULE, fenceUntrusted } from './mandate-fence.mjs';
@@ -2361,12 +2362,20 @@ export function renderReferralRecord(record) {
     + `<!-- ${REFERRAL_RECORD_MARKER}: ${encodeURIComponent(JSON.stringify(record))} -->`;
 }
 
-/** Fold snapshots monotonically: omission, conflicts and malformed/partial records never clear a hold. */
+/**
+ * Fold snapshots monotonically: omission, conflicts and malformed/partial records never clear a hold.
+ *
+ * Only a comment from a trusted author ({@link isTrustedMarkerAuthor}: the automation or the operator) is read.
+ * `referralRecordState` pools rulings across every same-head record, so an untrusted commenter's forged record
+ * would otherwise clear another record's hold. An untrusted comment is skipped outright — not counted as
+ * malformed — so posting one can neither clear nor wedge a hold. A bare string has no author and is skipped too.
+ */
 export function readReferralRecords(comments) {
   const records = new Map();
   const seen = new Set();
   let malformed = !Array.isArray(comments);
   for (const comment of Array.isArray(comments) ? comments : []) {
+    if (!isTrustedMarkerAuthor(comment)) continue;
     const body = typeof comment === 'string' ? comment : comment?.body ?? '';
     if (!body.includes(REFERRAL_RECORD_MARKER)) continue;
     const matches = [...body.matchAll(/<!-- mandatory-referrals-v1: ([^\s]+) -->/g)];

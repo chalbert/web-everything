@@ -445,16 +445,33 @@ export function isPreWriteRefusal(text) {
   return PRE_WRITE_REFUSALS.some((p) => s.includes(p));
 }
 
-/** Verify in the isolated juror checkout, on the pinned PR head, before and after the one turn. */
+/**
+ * The default referral judge. A tool-free turn (`allowedTools` null/empty — every referral without a
+ * `confirmationRequired` claim) needs no checkout and is delegated untouched. A tool-bearing turn runs only in
+ * the isolated juror checkout, pinned on the reviewed PR head, with no tracked edit before the turn, and the
+ * turn must leave the checkout exactly as it found it (same `status --porcelain` incl. untracked files), so a
+ * steered Bash turn cannot leave edits or files behind. Comparing to the pre-turn snapshot, instead of demanding
+ * an empty status, keeps ordinary unignored lane litter (`.pr-body.md`, `.review-*-output.json`, …) from parking
+ * a legitimate confirmation.
+ */
 export async function runReferralJudge(request, { exec = execFileSync, judge = judgeSpawn } = {}) {
-  const check = () => {
-    if (!request.cwd || String(exec('git', ['rev-parse', 'HEAD'], { cwd: request.cwd, encoding: 'utf8' })).trim() !== request.head) {
+  if (!Array.isArray(request.allowedTools) || !request.allowedTools.length) return judge(request);
+  const git = (...args) => String(exec('git', args, { cwd: request.cwd, encoding: 'utf8' })).trim();
+  const pinned = () => {
+    if (!request.cwd || git('rev-parse', 'HEAD') !== request.head) {
       throw new Error('mandatory confirmation requires a checkout on the reviewed PR head');
     }
   };
-  check();
+  pinned();
+  if (git('status', '--porcelain', '--untracked-files=no') !== '') {
+    throw new Error('mandatory confirmation requires a clean checkout; tracked files are already modified');
+  }
+  const before = git('status', '--porcelain', '--untracked-files=all');
   const answer = await judge(request);
-  check();
+  pinned();
+  if (git('status', '--porcelain', '--untracked-files=all') !== before) {
+    throw new Error('mandatory confirmation requires a clean checkout; the tool-bearing turn changed the working tree');
+  }
   return answer;
 }
 
@@ -571,14 +588,21 @@ export function createReviewPrSinks({
         }
         try {
           const request = buildReviewJudgeRequest({ read, lens: 'correctness' });
+          // Tools are the exception, not the default: only a confirmationRequired claim (a tool-less seat's
+          // CONFIRMED that needs reproducing) earns one tool-bearing turn, pinned by runReferralJudge to the
+          // reviewed head in a clean checkout. Every other referral keeps the tool-free, diff-only pass
+          // (`allowedTools: null`, no checkout needed), exactly as before this card.
+          const needsTools = record.referrals.some(f => f.confirmationRequired);
           const answer = await referralJudge({ ...request, runId: record.runId,
             lens: 'mandatory-referral-correctness', sessionId: record.reviewer.id,
-            // One tool-bearing turn, isolated by judgeSpawn's lane guard and pinned by runReferralJudge.
-            cwd: read.referralCwd, head: read.netBasis.rev,
+            ...(needsTools ? { cwd: read.referralCwd, head: read.netBasis.rev } : { allowedTools: null }),
             mandate: request.mandate + '\nIndependently verify every referral in the input. Return exactly one '
-              + 'block, card, or not-real ruling per key, with rationale and evidence references. For confirmationRequired '
-              + 'claims, reproduce on the checked-out PR head using tools. Not reproduced means not-real (advisory only); '
-              + 'reproduced means block or card and evidence must name the command and observed result. '
+              + 'block, card, or not-real ruling per key, with rationale and evidence references. '
+              + (needsTools
+                ? 'For confirmationRequired claims, reproduce on the checked-out PR head using tools. Not reproduced '
+                  + 'means not-real (advisory only); reproduced means block or card and evidence must name the command '
+                  + 'and observed result. '
+                : '')
               + 'A general accept is not a ruling. card requires an existing durable we:backlog/*.md reference. Do not recursively refer findings.',
             input: request.input + '\nUntrusted reported findings:\n' + JSON.stringify(record.referrals),
             shape: { type: 'object', additionalProperties: false, required: ['rulings'], properties: {

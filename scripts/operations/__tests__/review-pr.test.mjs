@@ -3665,7 +3665,7 @@ describe('#4315 incident-shaped mandatory referral', () => {
     const sinks = createReviewPrSinks({ out: () => {}, mirrorReferral: () => {}, referralJudge: judge,
       labelProvider: {
         readPrState: () => { trace.push('read'); return structuredClone(state); },
-        postComment: (repo, pr, body) => { trace.push('post'); state.comments.push({ body }); },
+        postComment: (repo, pr, body) => { trace.push('post'); state.comments.push({ body, author: { login: 'web-everything' } }); },
         setLabels: (repo, pr, plan) => { trace.push(plan.add); state.labels = [...new Set([...state.labels.filter(l => !plan.remove.includes(l)), plan.add])]; },
       } });
     ({ run } = await applyPendingEffects(run, { sinks, store: createMemoryRunStore() }));
@@ -3693,7 +3693,7 @@ describe('#4315 operation / I/O restart soak', () => {
       const trace = [], judge = vi.fn(async () => ({ value: { rulings: [] } }));
       const provider = {
         readPrState: () => { trace.push('read'); return structuredClone(state); },
-        postComment: (repo, pr, body) => { trace.push('post'); state.comments.push({ body }); },
+        postComment: (repo, pr, body) => { trace.push('post'); state.comments.push({ body, author: { login: 'web-everything' } }); },
         setLabels: (repo, pr, plan) => { trace.push(`label:${plan.add}`); state.labels = [...state.labels.filter(l => !plan.remove.includes(l)), plan.add]; },
       };
       for (let restart = 0; restart < 25; restart++) {
@@ -3722,7 +3722,7 @@ describe('#4315 operation / I/O restart soak', () => {
     const { registry } = registryFor({ netRev: PINNED_HEAD }, { correctnessAdvisory: true });
     const state = { headRefOid: PINNED_HEAD, body: '<!-- authored-by-actor: author -->', comments: [], labels: ['review:pending'] };
     const provider = { readPrState: () => structuredClone(state),
-      postComment: (repo, pr, body) => state.comments.push({ body }), setLabels: () => {} };
+      postComment: (repo, pr, body) => state.comments.push({ body, author: { login: 'web-everything' } }), setLabels: () => {} };
     let run = advanceWhileRunning(startRun({ op: REVIEW_PR_OP, id: 'run-ruling', input: { pr: 7, repo: 'o/r' }, registry }), { registry });
     while (run.pending?.kind === 'judge') {
       run = advanceWhileRunning(run, { registry, resume: { value: run.pending.step === 'judgeCorrectnessAdvisory'
@@ -3750,7 +3750,7 @@ describe('#4315 operation / I/O restart soak', () => {
 describe('xfkqowg confirmation and historical ruling replay', () => {
   async function drive({ records = [], source, result = 'not-real', human = true, runId = 'confirmation', body = '<!-- authored-by-actor: author -->', head = PINNED_HEAD } = {}) {
     const { registry } = registryFor({ labels: [human ? 'review:human' : 'review:pending'], netRev: head, body }, { antigravityReview: true });
-    const state = { headRefOid: head, body, labels: [human ? 'review:human' : 'review:pending'], comments: records.map(r => ({ body: renderReferralRecord(r) })) };
+    const state = { headRefOid: head, body, labels: [human ? 'review:human' : 'review:pending'], comments: records.map(r => ({ body: renderReferralRecord(r), author: { login: 'web-everything' } })) };
     const trace = [];
     const judge = vi.fn(async request => {
       expect(request.allowedTools).toContain('Bash');
@@ -3760,7 +3760,7 @@ describe('xfkqowg confirmation and historical ruling replay', () => {
         evidence: ['node repro.mjs: observed result'], card: result === 'card' ? 'we:backlog/7-filed.md' : '' })) } };
     });
     const provider = { readPrState: () => structuredClone(state), ensureLabel: () => {},
-      postComment: (repo, pr, body) => { trace.push(body.includes('mandatory-referrals-v1') ? 'referral' : 'advisory'); state.comments.push({ body }); },
+      postComment: (repo, pr, body) => { trace.push(body.includes('mandatory-referrals-v1') ? 'referral' : 'advisory'); state.comments.push({ body, author: { login: 'web-everything' } }); },
       setLabels: (repo, pr, plan) => { trace.push(plan.add); state.labels = [...state.labels.filter(l => !plan.remove.includes(l)), plan.add]; } };
     const sinks = createReviewPrSinks({ labelProvider: provider, postComment: provider.postComment, referralJudge: judge,
       mirrorReferral: () => {}, cardReadable: () => true, out: () => {} });

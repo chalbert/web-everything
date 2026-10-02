@@ -1022,7 +1022,7 @@ describe('#4315 durable referral effects', () => {
       postComment: (repo, pr, body) => {
         trace.push('post');
         if (failure === 'post') throw new Error('post unavailable');
-        if (failure !== 'read-back') state.comments.push({ body });
+        if (failure !== 'read-back') state.comments.push({ body, author: { login: 'web-everything' } });
         if (failure === 'changed-head') state.headRefOid = 'b'.repeat(40);
       },
       setLabels: (repo, pr, plan) => { trace.push(`label:${plan.add}`); state.labels = [...state.labels.filter(l => !plan.remove.includes(l)), plan.add]; },
@@ -1063,11 +1063,31 @@ describe('#4315 durable referral effects', () => {
     await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX);
     const old = readReferralRecords(h.state.comments).records[0];
     const next = { ...old, runId: 'new-record', reviewer: mandatoryReferralReviewer('new-record'), attempted: false, rulings: [] };
-    h.state.comments.push({ body: renderReferralRecord(next) });
+    h.state.comments.push({ body: renderReferralRecord(next), author: { login: 'web-everything' } });
     const result = await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, { ...CTX, runId: 'next' });
     expect(result.pending).toEqual([]);
     expect(h.judge).toHaveBeenCalledTimes(1);
     expect(h.state.comments).toHaveLength(4);
+  });
+  it.each([null, '/not/the/pr/head'])('keeps a plain (non-confirmation) referral tool-free with no checkout, referralCwd=%s', async cwd => {
+    const h = harness();
+    h.payload.read.referralCwd = cwd;
+    const result = await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX);
+    expect(result.pending).toEqual([]);
+    const request = h.judge.mock.calls[0][0];
+    expect(request.allowedTools).toBeNull();
+    expect(request).not.toHaveProperty('cwd');
+    expect(request.mandate).not.toContain('using tools');
+  });
+  it('gives a record mixing confirmation and plain referrals the tool-bearing turn (one turn per record)', async () => {
+    const h = harness();
+    h.payload.read.referralCwd = '/isolated/lane-9';
+    h.payload.referrals.push({ seat: 'judgeCorrectnessAdvisory', confirmationRequired: true,
+      original: { summary: 'second', file: 'x.mjs', verdict: 'CONFIRMED', impactIfUnfixed: 'broken' } });
+    await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX);
+    expect(h.judge).toHaveBeenCalledTimes(1);
+    expect(h.judge.mock.calls[0][0]).toMatchObject({ cwd: '/isolated/lane-9', head: h.state.headRefOid });
+    expect(h.judge.mock.calls[0][0].allowedTools).toContain('Bash');
   });
   it('gives confirmation claims tools and the pinned checkout in one durable attempt', async () => {
     const h = harness();
@@ -1096,17 +1116,47 @@ describe('#4315 durable referral effects', () => {
 });
 
 describe('confirmation checkout pin', () => {
-  it('probes the checkout before and after the tool-bearing turn', async () => {
-    const exec = vi.fn(() => 'a'.repeat(40)), judge = vi.fn(async () => ({ value: {} }));
-    const request = { cwd: '/isolated/lane-9', head: 'a'.repeat(40), allowedTools: ['Bash'] };
+  const head = 'a'.repeat(40);
+  const request = { cwd: '/isolated/lane-9', head, allowedTools: ['Bash'] };
+  // A fake git: `rev-parse` answers `rev`; `status --untracked-files=no` answers `tracked`; `status
+  // --untracked-files=all` answers `dirty`. Read per call, so a test can change an answer mid-turn.
+  const fakeGit = (state) => vi.fn((cmd, args) => (args[0] === 'rev-parse' ? state.rev
+    : args.includes('--untracked-files=no') ? state.tracked : state.dirty));
+  it('probes the checkout head and tree before and after the tool-bearing turn', async () => {
+    const state = { rev: head, tracked: '', dirty: '' }, exec = fakeGit(state), judge = vi.fn(async () => ({ value: {} }));
     await runReferralJudge(request, { exec, judge });
-    expect(exec).toHaveBeenCalledTimes(2);
+    expect(exec).toHaveBeenCalledTimes(5);
     expect(judge).toHaveBeenCalledWith(request);
-    exec.mockReturnValue('b'.repeat(40)); judge.mockClear();
+    state.rev = 'b'.repeat(40); judge.mockClear();
     await expect(runReferralJudge(request, { exec, judge })).rejects.toThrow(/PR head/);
     expect(judge).not.toHaveBeenCalled();
-    exec.mockReturnValueOnce('a'.repeat(40));
+    state.rev = head;
+    judge.mockImplementationOnce(async () => { state.rev = 'b'.repeat(40); return { value: {} }; });
     await expect(runReferralJudge(request, { exec, judge })).rejects.toThrow(/PR head/);
     expect(judge).toHaveBeenCalledTimes(1);
+  });
+  it('refuses a checkout with tracked edits before the turn, and a turn that changes the tree', async () => {
+    const state = { rev: head, tracked: ' M scripts/x.mjs', dirty: ' M scripts/x.mjs' }, exec = fakeGit(state), judge = vi.fn(async () => ({ value: {} }));
+    await expect(runReferralJudge(request, { exec, judge })).rejects.toThrow(/clean checkout/);
+    expect(judge).not.toHaveBeenCalled();
+    state.tracked = ''; state.dirty = '';
+    judge.mockImplementationOnce(async () => { state.dirty = '?? injected.sh'; return { value: {} }; });
+    await expect(runReferralJudge(request, { exec, judge })).rejects.toThrow(/clean checkout/);
+    judge.mockImplementationOnce(async () => { state.dirty = ' M scripts/y.mjs'; return { value: {} }; });
+    state.dirty = '';
+    await expect(runReferralJudge(request, { exec, judge })).rejects.toThrow(/clean checkout/);
+    expect(judge).toHaveBeenCalledTimes(2);
+  });
+  it('tolerates pre-existing unignored lane litter that the turn leaves untouched', async () => {
+    const state = { rev: head, tracked: '', dirty: '?? .pr-body.md\n?? .review-loop-output.json' };
+    const judge = vi.fn(async () => ({ value: {} }));
+    await expect(runReferralJudge(request, { exec: fakeGit(state), judge })).resolves.toEqual({ value: {} });
+  });
+  it.each([null, undefined, []])('delegates a tool-free turn (allowedTools=%j) with no checkout or git probe', async allowedTools => {
+    const exec = vi.fn(), judge = vi.fn(async () => ({ value: {} })), tool = { ...request, allowedTools };
+    delete tool.cwd;
+    await runReferralJudge(tool, { exec, judge });
+    expect(exec).not.toHaveBeenCalled();
+    expect(judge).toHaveBeenCalledWith(tool);
   });
 });
