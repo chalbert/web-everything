@@ -140,7 +140,7 @@ import { healNnnCollision } from './lib/nnn-collision-heal.mjs';
 // fingerprint reader (`parseReviewedDiff`), #2832/#984's hold-invariant helpers (`READY_TO_MERGE_LABEL`,
 // `isReviewHoldLabel`, `decideParkReadyStrip`), #2890's null-contract diff mapper (`diffHunksFrom`), and
 // #x9xqexm's contribution fingerprint reader (`parseReviewedContribution`). None supersedes another.
-import { scoreEscalation, parseDeviationDisclosure, diffHunksFrom, decideReviewGate, REVIEW_LABELS, REVIEW_LABEL_META, reconcileEscalationReasonBlock, decideDurableEscalationRecord, bodyHasEscalationReason, shouldApplyReviewLabel, hasUnclearedReviewLabel, hasReviewLabel, parseReviewedSha, parseReviewedDiff, parseReviewedContribution, parseOperatorClearance, parseLatestHumanClearedSha, shouldReparkForTestTampering, buildClearanceRevocationComment, READY_TO_MERGE_LABEL, isReviewHoldLabel, decideParkReadyStrip, isEngineTierPath,
+import { scoreEscalation, parseDeviationDisclosure, diffHunksFrom, decideReviewGate, acceptanceCoversHead, REVIEW_LABELS, REVIEW_LABEL_META, reconcileEscalationReasonBlock, decideDurableEscalationRecord, bodyHasEscalationReason, shouldApplyReviewLabel, hasUnclearedReviewLabel, hasReviewLabel, parseReviewedSha, parseReviewedDiff, parseReviewedContribution, parseOperatorClearance, parseLatestHumanClearedSha, shouldReparkForTestTampering, buildClearanceRevocationComment, READY_TO_MERGE_LABEL, isReviewHoldLabel, decideParkReadyStrip, isEngineTierPath,
   // #2766/#2767 — the mutual-exclusivity park decision (imported HERE, the leaf module, never from
   // `review-set-label.mjs`, which itself imports `computeNetDiffText` FROM this file — a back-import would
   // be a circular module cycle). `review-set-label.mjs` re-exports both for discoverability under the
@@ -551,6 +551,73 @@ export function planCiLifecycleLabelUpdate({ currentLabels = [], desired, owned 
 export function hasStaleReviewPendingBesideAccept({ currentLabels = [] } = {}) {
   const has = (name) => hasLabel({ labels: currentLabels }, name);
   return has('review:accepted') && has('review:pending');
+}
+
+/**
+ * Read the evidence used by BOTH drain review writers. A failed view is not missing review evidence:
+ * let it throw so callers defer without changing labels. PR #3432 exceeded Node's default 1 MiB buffer.
+ * Git reads must use the PR's own clone; an unavailable sibling clone cannot supply coverage proof.
+ */
+export function readDrainAcceptance({ pr, repo, cwd, local = false, exec = execFileSync, netDiff = computeNetDiffText }) {
+  const d = JSON.parse(exec('gh', ['pr', 'view', String(pr), ...(repo ? ['--repo', repo] : []),
+    '--json', 'headRefOid,headRefName,comments'], {
+    encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024,
+  }));
+  if (!d || typeof d.headRefOid !== 'string' || !d.headRefOid.trim() || !Array.isArray(d.comments)) {
+    throw new Error('incomplete PR head/comments verification response');
+  }
+  const evidence = {
+    headSha: d.headRefOid,
+    acceptedSha: parseReviewedSha(d.comments),
+    acceptedDiff: parseReviewedDiff(d.comments),
+    acceptedContribution: parseReviewedContribution(d.comments),
+    operatorClearance: parseOperatorClearance(d.comments),
+    humanClearedSha: parseLatestHumanClearedSha(d.comments),
+    headDiff: null, headContribution: null, headReadFailed: false,
+  };
+  const { acceptedSha, headSha, acceptedDiff, acceptedContribution } = evidence;
+  const liveDiffReadOwed = !!((acceptedDiff || acceptedContribution) && acceptedSha
+    && !headSha.startsWith(acceptedSha) && !acceptedSha.startsWith(headSha));
+  if (liveDiffReadOwed && d.headRefName && (local || cwd)) {
+    try {
+      const net = netDiff({
+        exec: (cmd, args, opts) => exec(cmd, args, { cwd, ...opts }),
+        rev: d.headRefName, fetchExtraRefs: [d.headRefName],
+      });
+      evidence.headDiff = net?.scored ? net.text : null;
+      evidence.headContribution = evidence.headDiff;
+    } catch { /* An owed but unreadable diff is not proof of staleness (#3184). */ }
+  }
+  evidence.headReadFailed = liveDiffReadOwed && !evidence.headDiff;
+  return evidence;
+}
+
+/** Unreadable verification defers this pass before any review-label writer runs. */
+export function decideDrainReviewGate({ labels, ...gateInputs }, readOptions) {
+  let evidence = {};
+  if (hasReviewLabel(labels, REVIEW_LABELS.accepted)) {
+    try { evidence = readDrainAcceptance(readOptions); }
+    catch (error) {
+      return { action: 'defer', applyLabel: null,
+        reason: `review acceptance verification unreadable — merge deferred this pass: ${error.message || error}` };
+    }
+  }
+  return decideReviewGate({ ...gateInputs, labels, ...evidence });
+}
+
+/** Label coexistence alone cannot clear pending: require the merge gate's coverage proof first. */
+export function reconcileDrainReviewPending({ currentLabels, dryRun = false, ...readOptions }, {
+  spawn = spawnReviewSetLabel,
+} = {}) {
+  if (!hasStaleReviewPendingBesideAccept({ currentLabels })) return { ok: false, reason: 'no label collision' };
+  try {
+    const coverage = acceptanceCoversHead(readDrainAcceptance(readOptions));
+    if (!coverage.covers) return { ok: false, reason: coverage.reason };
+    if (dryRun) return { ok: true };
+    return spawn({ pr: readOptions.pr, repo: readOptions.repo, to: 'accepted', cwd: readOptions.cwd });
+  } catch (error) {
+    return { ok: false, reason: `review acceptance verification unreadable: ${error.message || error}` };
+  }
 }
 
 /**
@@ -4070,20 +4137,15 @@ async function runCli() {
       //    notice the contradiction. Every PR (not just AI-generated ones — the contradiction can happen on
       //    any parked-then-accepted PR), best-effort, never fatal to the sweep.
       if (hasStaleReviewPendingBesideAccept({ currentLabels: p.labels })) {
-        if (DRY_RUN) {
+        const out = reconcileDrainReviewPending({
+          currentLabels: p.labels, pr: p.number, repo: repo || localSlug,
+          cwd: siblingCloneDir(repo), local: isLocalRepo(repo), dryRun: DRY_RUN,
+        });
+        if (out.ok) {
           touched = true;
-          if (!AS_JSON) process.stderr.write(`  🏷 ${repoTag(repo)}${p.number} would clear stale review:pending beside review:accepted\n`);
-        } else {
-          // #1671 review finding — review-set-label.mjs needs the single-token `--repo=` form and (for a
-          // sibling repo) a pinned cwd; `repoFlag()` is the wrong shape for it (that's the gh-CLI helper).
-          // `spawnReviewSetLabel` is the shared, correctly-shaped spawn point (mirrors `restampAcceptance`).
-          const out = spawnReviewSetLabel({ pr: p.number, repo: repo || localSlug, to: 'accepted', cwd: siblingCloneDir(repo) });
-          if (out.ok) {
-            touched = true;
-            if (!AS_JSON) process.stderr.write(`  🏷 ${repoTag(repo)}${p.number} cleared stale review:pending beside review:accepted\n`);
-          } else if (!AS_JSON) {
-            process.stderr.write(`  · ${repoTag(repo)}${p.number} stale review:pending NOT cleared (${out.reason}) — self-clear refusal or a label race, non-fatal, the next pass retries\n`);
-          }
+          if (!AS_JSON) process.stderr.write(`  🏷 ${repoTag(repo)}${p.number} ${DRY_RUN ? 'would clear' : 'cleared'} stale review:pending beside review:accepted — acceptance covers head\n`);
+        } else if (!AS_JSON) {
+          process.stderr.write(`  · ${repoTag(repo)}${p.number} stale review:pending NOT cleared (${out.reason}) — the next pass retries\n`);
         }
       }
       if (touched) reconciled.push(p.number);
@@ -4780,92 +4842,6 @@ async function runCli() {
         if (!AS_JSON) process.stderr.write(`  ⏸ ${repoTag(v.repo)}${v.num} parked — anti-test-gaming gate tripped (HUMAN required): ${gaming.reasons.join('; ')}\n`);
         continue;
       }
-      // #2409 — the reviewed-commit gate. A `review:accepted` verdict only vouches for the tree the reviewer
-      // looked at (the head SHA `review-set-label.mjs` stamped into the accept comment). Before the land cascade
-      // honours the accept, read that reviewed SHA back plus the PR's LIVE head, and hand both to
-      // `decideReviewGate` — it refuses to merge a stale acceptance whose head advanced past the reviewed tree
-      // (the PR #368 hole). Fetched LAZILY, only for a PR that actually carries `review:accepted` (a small
-      // subset), so the common non-accepted candidate pays no extra gh hop. Any fetch miss → both SHAs stay
-      // null → the gate fails OPEN (never blocks a land on a transient read failure).
-      let acceptedSha = null;
-      let liveHeadSha = null;
-      let acceptedDiff = null;
-      let liveHeadDiff = null;
-      let liveHeadRef = null;
-      // #x9xqexm — the base-independent CONTRIBUTION fingerprints, read from the same comment scan and computed
-      // from the same live net-diff text as their `*Diff` siblings (no extra gh or git hop).
-      let acceptedContribution = null;
-      let liveHeadContribution = null;
-      // #3184 — DID THIS PASS OWE A LIVE COMPARISON AND FAIL TO MAKE IT? `liveHeadDiff === null` cannot answer
-      // that: it is equally the shape of "this accept recorded no fingerprint, so there was nothing to read".
-      // Collapsing the two is the whole defect — the gate then reports an unread head as a head it watched
-      // advance, and revokes an operator clearance on that. Set true ONLY for the second case: a marker WAS
-      // recorded, the head HAS moved, and we still hold no live fingerprint.
-      let liveDiffReadFailed = false;
-      // #xmnl36p — the OPERATOR CLEARANCE record, read from the SAME comment scan (no extra gh hop). It never
-      // permits a merge; it only lets the gate know that a re-imposed `review:human` is overriding a human's
-      // recorded clearance, so the re-hold can be announced instead of landing silently.
-      let operatorClearance = null;
-      let humanClearedShaForGate = null; // #4502 — trusted, head-bound clearance the deviation gate requires
-      if (hasReviewLabel(v.prLabels, REVIEW_LABELS.accepted)) {
-        try {
-          const d = JSON.parse(execFileSync('gh', ['pr', 'view', String(v.num), ...repoFlag(v.repo), '--json', 'headRefOid,headRefName,comments'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim() || '{}');
-          liveHeadSha = typeof d.headRefOid === 'string' ? d.headRefOid : null;
-          liveHeadRef = typeof d.headRefName === 'string' ? d.headRefName : null;
-          acceptedSha = parseReviewedSha(d.comments || []);
-          acceptedDiff = parseReviewedDiff(d.comments || []);
-          acceptedContribution = parseReviewedContribution(d.comments || []);
-          operatorClearance = parseOperatorClearance(d.comments || []);
-          humanClearedShaForGate = parseLatestHumanClearedSha(d.comments || []);
-        } catch { /* fetch miss → SHAs null → gate fails open */ }
-        // #x169fqe — the LIVE diff, read only when the accept actually recorded a fingerprint to compare it
-        // against AND the head has moved. Both conditions keep this off the common path: a pre-#x169fqe accept
-        // (no fingerprint) never pays the hop, and neither does an accept whose head never moved. A miss leaves
-        // the live diff null, which still fails CLOSED — the accept is not honoured, a false re-park and never
-        // a false honour. #3184 — but the miss is now RECORDED (`liveDiffReadFailed`) rather than collapsed
-        // into the same `null` a marker-less accept produces, because the gate's re-park writes a label the
-        // operator cannot undo, and it may only write it on staleness it actually observed.
-        // THE REPO GUARD IS LOAD-BEARING (PR #1087 review, blocker 1). The drain sweeps PRs from THREE repos in
-        // one process with no `chdir`, so every git read must be pinned to that PR's own clone via `escCwd` —
-        // exactly as the two `computeNetDiff*` calls above already do. The first cut of this block omitted both
-        // the `cwd` and the `isLocalRepo(v.repo) || escCwd` guard, so a sibling-repo PR resolved its refs against
-        // the LOCAL WE CHECKOUT. Lane branches share the `lane/<NNN>-<slug>` naming across the constellation, so
-        // a same-named local ref genuinely scores rather than failing closed — and if that wrong-repo diff's
-        // fingerprint happened to match the recorded one, the drain would honour the accept and land the sibling
-        // PR's real, unreviewed head. That is the one direction this gate may never fail in.
-        // #x9xqexm — `|| acceptedContribution`: an accept that recorded ONLY the contribution marker (or, later,
-        // only that one) must still pay for the live read, or its escape can never fire. Either marker present
-        // is enough; neither present still costs nothing.
-        // #3184 — the read is OWED whenever a recorded marker could still rescue this accept and the head has
-        // actually moved. Split out of the `if` below (whose condition is otherwise unchanged, repo guard and
-        // all) purely so the miss can be recorded: the guard's own failure — a sibling-repo PR with no clone to
-        // read from — is ALSO "could not read the live side", and it must not be reported as proven staleness
-        // either. Every clause here was already in the shipped condition; only `isLocalRepo(v.repo) || escCwd`
-        // is held back, because it decides whether the read is POSSIBLE, not whether it is owed.
-        const liveDiffReadOwed = !!((acceptedDiff || acceptedContribution) && liveHeadRef && liveHeadSha && acceptedSha
-            && !liveHeadSha.startsWith(acceptedSha) && !acceptedSha.startsWith(liveHeadSha));
-        if (liveDiffReadOwed && (isLocalRepo(v.repo) || escCwd)) {
-          try {
-            // #2979 — the NET diff, matching what `review-set-label.mjs` fingerprinted at accept time. It MUST be
-            // the same basis on both sides: `gh pr diff`'s three-dot output still lists a sibling lane's file
-            // that has since landed on main (#2450), so fingerprinting it made the accept go stale every time
-            // ANY other lane landed — nothing to do with this PR's own content.
-            const net = computeNetDiffText({
-              exec: (cmd, args, opts) => execFileSync(cmd, args, { cwd: escCwd, ...opts }),
-              rev: liveHeadRef,
-              fetchExtraRefs: [liveHeadRef],
-            });
-            liveHeadDiff = net && net.scored ? net.text : null;
-            // Same bytes, second digest — `acceptanceCoversHead` normalizes each with its own function.
-            liveHeadContribution = liveHeadDiff;
-          } catch { /* miss → null → recorded as a read failure just below, NOT as proven staleness */ }
-        }
-        // Covers all three ways the live side can be missing after an owed read: the `computeNetDiffText` throw
-        // above, an unscored result (`net.scored` false → `liveHeadDiff` null with no exception), and the repo
-        // guard refusing the read outright. The verdict is `park` in every one of them, exactly as before —
-        // this flag changes only the REASON and, for a re-hold that would revoke a clearance, the label write.
-        liveDiffReadFailed = liveDiffReadOwed && !liveHeadDiff;
-      }
       // #2412 layer 4 — this PR's basis (the SAME set `score` scored blast-radius/gate-self over, #3317) touches
       // ENGINE-tier trust-chain machinery iff any basis file matches `isEngineTierPath` — that real computation
       // is `basisTouchesEngineTier` below (extracted + directly tested, round-2 #1920 review finding: this
@@ -4889,7 +4865,16 @@ async function runCli() {
       // `#2410` ships that writer — do not re-inline the computation here when that day comes, keep it in one
       // named, tested place.
       const engineTier = engineTierForCandidate(score);
-      const gate = decideReviewGate({ escalate: score.escalate, humanRequired: score.humanRequired, labels: v.prLabels, acceptedSha, headSha: liveHeadSha, acceptedDiff, headDiff: liveHeadDiff, acceptedContribution, headContribution: liveHeadContribution, operatorClearance, headReadFailed: liveDiffReadFailed, engineTier, deviation: v.deviation, humanClearedSha: humanClearedShaForGate });
+      const gate = decideDrainReviewGate({
+        escalate: score.escalate, humanRequired: score.humanRequired, labels: v.prLabels,
+        engineTier, deviation: v.deviation,
+      }, { pr: v.num, repo: v.repo, cwd: escCwd, local: isLocalRepo(v.repo) });
+      if (gate.action === 'defer') {
+        v.decision = 'skip';
+        v.reason = gate.reason;
+        process.stderr.write(`  ⏸ ${repoTag(v.repo)}${v.num} ${gate.reason}\n`);
+        continue;
+      }
       v.escalated = score.escalate ? 'yes' : 'no';
       // #2365 — gate.humanRequired (not score.humanRequired): decideReviewGate's verdict is the sticky one (#2362
       // makes an already-applied review:human label win even when a rebase narrows the diff back to

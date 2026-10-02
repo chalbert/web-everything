@@ -48,6 +48,9 @@
  * cannot corrupt anything, and a lease taken inside a one-shot read is a lease nothing releases when the process
  * is killed.
  */
+import { collapseRollupToLatestPerName } from '../lib/rollup-collapse.mjs';
+import { FAILING_CONCLUSIONS, NON_BLOCKING_CONCLUSIONS, reduceCheckState } from '../operations/pr-status.mjs';
+import { checksArgv, parseJsonLines, GH_TIMEOUT_MS } from '../operations/pr-status-io.mjs';
 import { isGhDeferred } from '../lib/gh-deferred.mjs';
 import { readTimeoutBudget } from './timeout-retry-state.mjs';
 import { createHash } from 'node:crypto';
@@ -957,7 +960,7 @@ export function formatReport({ dispatch = [], refusals = [], notes = [] } = {}) 
       lines.push(`  → ${kind.padEnd(6)} PR #${d.prNumber} (${d.headRefName ?? '?'}) — ${d.why}`);
     }
   }
-  for (const kind of REFUSAL_KINDS) {
+  for (const kind of [...REFUSAL_KINDS, 'check-read-failed']) {
     for (const r of refusals.filter((x) => x.kind === kind)) {
       // The BIND EVIDENCE rides on the line itself for the liveness kinds. A refusal a reader cannot audit is
       // the thing this pass was built to remove.
@@ -969,6 +972,73 @@ export function formatReport({ dispatch = [], refusals = [], notes = [] } = {}) 
   }
   for (const n of notes) lines.push(`  ! ${n.text}`);
   return lines.join('\n');
+}
+
+/** Read the complete exact-head REST feed, including main-red attribution evidence. */
+export function defaultReadChecks({ repo, sha }, { exec = execFileSyncThrottled } = {}) {
+  return parseJsonLines(exec('gh', checksArgv({ repo, sha }), {
+    encoding: 'utf8', timeout: GH_TIMEOUT_MS, maxBuffer: 32 * 1024 * 1024,
+    throttle: { op: 'pr-status-checks', repo },
+  }));
+}
+
+/**
+ * Hydrate truncated or incomplete check input from the exact-head REST feed. Unknown evidence is withheld from the
+ * CI-consuming branches (heal, promotion) via an `unchecked` verdict, but never removes the PR from planning.
+ */
+function hydrateChecks(prs, { repo, requiredChecks, readChecks }) {
+  const cache = new Map();
+  const ready = [], refusals = [];
+  for (const pr of prs) {
+    const runs = Array.isArray(pr.statusCheckRollup) ? pr.statusCheckRollup : [];
+    const missing = (requiredChecks ?? []).filter(name => !runs.some(run => run?.name === name));
+    if (runs.length < 100 && !missing.length) { ready.push(pr); continue; }
+    const sha = pr.headRefOid;
+    const key = `${repo}/${sha}`;
+    if (!cache.has(key)) {
+      try {
+        if (!isSha(sha)) throw new Error('missing or invalid exact head SHA');
+        const rows = readChecks({ repo, sha });
+        if (!Array.isArray(rows) || rows.some(row => !row || !Number.isSafeInteger(row.id)
+          || typeof row.name !== 'string' || !row.name || typeof row.status !== 'string'
+          || !['queued', 'in_progress', 'completed', 'waiting', 'requested', 'pending'].includes(row.status.toLowerCase())
+          || (row.conclusion != null && typeof row.conclusion !== 'string')
+          || (row.completed_at != null && !Number.isFinite(Date.parse(row.completed_at))))) {
+          throw new Error('malformed check runs');
+        }
+        const unreadable = collapseRollupToLatestPerName(rows).filter(row => (!requiredChecks?.length || requiredChecks.includes(row.name))
+          && row.status.toLowerCase() === 'completed'
+          && !['success', ...FAILING_CONCLUSIONS, ...NON_BLOCKING_CONCLUSIONS].includes(row.conclusion?.toLowerCase()));
+        if (unreadable.length) throw new Error(`unreadable conclusions: ${unreadable.map(row => row.name).join(', ')}`);
+        // Absent required names are not a read failure: observed red/pending evidence must still reach the
+        // reducer (red precedence, so a cancelled check heals). Only when NOTHING observed speaks for the
+        // missing names is the evidence incomplete — the reducer then reports `unchecked`, which never heals
+        // or promotes, and the refusal below keeps that visible.
+        const absent = (requiredChecks ?? []).filter(name => !rows.some(row => row.name === name));
+        const observed = collapseRollupToLatestPerName(rows).some(row => (!requiredChecks?.length || requiredChecks.includes(row.name))
+          && (row.status.toLowerCase() !== 'completed' || FAILING_CONCLUSIONS.includes(row.conclusion?.toLowerCase())));
+        cache.set(key, { rows: rows.map(row => ({ ...row, status: row.status.toUpperCase(),
+          conclusion: row.conclusion?.toUpperCase() ?? null, completedAt: row.completed_at ?? null })),
+        ...(absent.length && !observed ? { incomplete: `missing required checks: ${absent.join(', ')}` } : {}) });
+      } catch (error) { cache.set(key, { error: String(error?.message ?? error) }); }
+    }
+    const result = cache.get(key);
+    const refused = result.error ?? result.incomplete;
+    if (refused) {
+      refusals.push({ kind: 'check-read-failed', prNumber: pr.number, headRefOid: sha,
+        why: `required-check hydration refused for ${repo}@${sha}: ${refused}` });
+    }
+    // The refusal withholds CI evidence only. The PR stays in planning for every branch that does not consume
+    // it (conflict-fix, review dispatch, stand-down, label reconciliation): an unreadable read swaps the
+    // truncated snapshot for an empty rollup (`unchecked`, never green or red), never drops the PR. The one thing
+    // a refused hydration must NOT discard is evidence already in hand that says red or pending: that is a
+    // positive observation, so a cancelled or still-running required check seen in the known snapshot keeps
+    // scheduling recovery on this tick. A truncated snapshot that merely looks green is NOT kept — a later,
+    // unread rerun could contradict it, so it stays `unchecked`.
+    const known = runs.length && ['red', 'pending'].includes(reduceCheckState(runs, requiredChecks).state) ? runs : null;
+    ready.push({ ...pr, statusCheckRollup: refused && known ? known : result.error ? [] : result.rows });
+  }
+  return { prs: ready, refusals };
 }
 
 /**
@@ -994,7 +1064,7 @@ export function runReconcilePass({
   now = Date.now(), repo = null, defaultBranch = 'main',
   // #2748 false-red follow-up — injectable so a test can supply a fixture with no network, matching every
   // other reader in this file. Defaults to the live, cached branch-protection read.
-  readRequiredChecks = getRequiredStatusChecks,
+  readRequiredChecks = getRequiredStatusChecks, readChecks = defaultReadChecks,
   // #2787-live-incident (2026-09-27) — `origin/<defaultBranch>`'s own current tip, read PURELY LOCALLY (no `gh`
   // call at all): `reconcile-core.mjs#planReconcile`'s conflict-fix cap needs it to tell "the same conflict,
   // still stuck" apart from "a fresh conflict, main moved on" (see that function's own `mainSha` param).
@@ -1026,7 +1096,10 @@ export function runReconcilePass({
   // from the PR's own defect. Costs nothing beyond what `readPrs` already fetched when nothing is `ci:failed`.
   // #4501 — `requiredChecks` now threaded through so this enrichment judges the SAME live-required set
   // `planReconcile` uses below, instead of silently falling back to `DEFAULT_MAIN_RED_ATTRIBUTED_CHECKS`.
-  const { prs: redPrs, mainRedWindows, mainLatestCheckRuns } = enrichMainRed(rawPrs, { repo: resolvedRepo, defaultBranch, requiredChecks });
+  const hydrated = hydrateChecks(rawPrs, {
+    repo: resolvedRepo ?? CONSTELLATION_REPOS[repoKey].slug, requiredChecks, readChecks,
+  });
+  const { prs: redPrs, mainRedWindows, mainLatestCheckRuns } = enrichMainRed(hydrated.prs, { repo: resolvedRepo, defaultBranch, requiredChecks });
   // live incident, PR #2752 (#4034/#2748) — attach `alreadyLandedInMain` to any PR carrying
   // `merge-status:conflicting` whose own content is already, file-by-file, present on `main`. Costs nothing
   // beyond the label scan `readPrs` already fetched every field for when no PR carries that label.
@@ -1042,8 +1115,8 @@ export function runReconcilePass({
     repo: repoKey, prs, agents, durableCounts: durableCountsFrom(prs), now, defaultBranch, mainRedWindows,
     mainLatestCheckRuns, requiredChecks, mainSha,
   });
-  return { ...plan, prs: prs.length, agents: agents.length,
-    openPrFiles: prs.map((pr) => ({ pr: pr.number, files: Array.isArray(pr.files) && pr.files.length < 100
+  return { ...plan, refusals: [...hydrated.refusals, ...plan.refusals], prs: rawPrs.length, agents: agents.length,
+    openPrFiles: rawPrs.map((pr) => ({ pr: pr.number, files: Array.isArray(pr.files) && pr.files.length < 100
       ? pr.files.map((file) => typeof file === 'string' ? file : file.path) : null })),
   };
 }

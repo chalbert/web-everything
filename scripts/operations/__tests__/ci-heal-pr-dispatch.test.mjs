@@ -668,3 +668,54 @@ describe('xng7q1p retry reservation and restart soak', () => {
     expect(timeoutGithubEffects({ exec: () => '' }).request(e, e.jobs[0])).toEqual({ status: 'ambiguous' });
   });
 });
+
+it('xxh4zw8 replay soak reaches one exact-head heal sink, holds subsequent ticks, and never promotes unknown evidence', async () => {
+  const { runReconcilePass } = await import('../../conveyor/reconcile-pass.mjs');
+  const { runReconcilePromoteDraftDispatch } = await import('../promote-draft-pr-dispatch.mjs');
+  const sha = '4ecb5deb362c81aa28de162db4616bb4c2009347';
+  const required = ['test', 'smoke', 'daemon-soak', 'soak-replay-gate'];
+  const rows = required.map((name, i) => ({ id: 110460009383 + i, name, status: 'completed',
+    conclusion: name === 'smoke' ? 'cancelled' : 'success', completed_at: '2026-10-01T10:00:00Z' }));
+  const pr = { number: 3336, headRefOid: sha, headRefName: 'lane/3336-replay', isDraft: true, labels: [], comments: [],
+    statusCheckRollup: Array.from({ length: 100 }, (_, i) => ({ name: i ? 'review-gate' : 'soak-replay-gate', status: 'COMPLETED', conclusion: 'SUCCESS' })) };
+  const claims = [], plannedCalls = [], readyCalls = [];
+  const { calls, sinks } = recordingSink();
+  const dir = mkdtempSync(join(tmpdir(), 'xxh4zw8-dispatch-'));
+  let held = false;
+  const reconcile = readChecks => runReconcilePass({ repo: 'we', readPrs: () => [pr], readChecks,
+    readRequiredChecks: () => ({ checks: required }), readAgents: () => [], enrich: a => a,
+    enrichMainRed: prs => ({ prs, mainRedWindows: [] }), enrichAlreadyLanded: prs => prs,
+    enrichBaseRef: prs => prs, enrichSystemFix: prs => prs, enrichFixClaims: prs => prs, resolveMainSha: () => null });
+  try {
+    for (let tick = 0; tick < 25; tick++) {
+      const plan = reconcile(() => rows);
+      expect(plan.dispatch.map(d => d.kind)).toEqual(['ci-heal']);
+      const result = await runReconcileCiHealDispatch({ root: '/repo', repo: 'we', reconcile: () => plan,
+        unsupportedPath: join(dir, 'unsupported.json'), flushOwed: () => ({}), checkStaleness: FRESH,
+        pickFreeLanes: () => [7], resolveWorkUnit: () => ({ itemNum: null, scope: [] }),
+        dispatch: (planned, opts) => {
+          plannedCalls.push(planned);
+          return dispatchCiHeal(planned, { ...opts, readBrief: () => TEMPLATE, sinks, readFixClaim: () => null,
+            routeHeal: () => null, acquireClaim: claim => {
+              claims.push(claim);
+              if (held) return { ok: false, reason: 'already-held' };
+              held = true;
+              return { ok: true };
+            }, releaseClaim: () => { held = false; } });
+        } });
+      expect(result.dispatched).toHaveLength(tick ? 0 : 1);
+      if (tick) expect(result.refusals[0].kind).toBe('held');
+      runReconcilePromoteDraftDispatch({ root: '/repo', reconcile: () => plan, checkStaleness: FRESH,
+        provider: { ready: n => readyCalls.push(n) }, readHeadCheckState: () => { throw new Error('no promotion owed'); } });
+    }
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ pr: 3336, launchKind: 'ci-heal', lane: 7 });
+    expect(plannedCalls[0]).toMatchObject({ pr: 3336, headRefOid: sha });
+    expect(claims[0]).toMatchObject({ repo: 'we', pr: 3336, headSha: sha });
+    const unreadable = reconcile(() => { throw new Error('unreadable checks'); });
+    expect(unreadable.dispatch).toEqual([]);
+    runReconcilePromoteDraftDispatch({ root: '/repo', reconcile: () => unreadable, checkStaleness: FRESH,
+      provider: { ready: n => readyCalls.push(n) } });
+    expect(readyCalls).toEqual([]);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
