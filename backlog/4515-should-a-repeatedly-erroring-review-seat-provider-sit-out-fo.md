@@ -3,7 +3,7 @@ bornAs: x0tjpbx
 kind: story
 size: 3
 status: open
-scope: ["we:scripts/lib/provider-routing.mjs", "we:scripts/operations/review-extra-seats.mjs"]
+scope: ["we:scripts/lib/provider-routing.mjs", "we:scripts/lib/__tests__/provider-routing.test.mjs", "we:scripts/operations/review-extra-seats.mjs", "we:scripts/operations/__tests__/review-extra-seats.test.mjs"]
 dateOpened: "2026-09-29"
 preparedDate: "2026-10-02"
 preparedAgainstSha: "007f69ee090e641e9fbbd1bb7f08b711f761c2cb"
