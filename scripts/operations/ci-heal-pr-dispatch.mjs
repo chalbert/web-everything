@@ -36,17 +36,22 @@
  */
 import { readFileSync, mkdirSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { writeJsonAtomic, withFileLock } from '../lib/atomic-json-file.mjs';
 import { ghThrottleLockRoot, execFileSyncThrottled } from '../lib/gh-throttle.mjs';
 import { CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
 import { createFileItemReader, createFileItemSinks } from './file-item-io.mjs';
 import { planScaffold, SCAFFOLD_EFFECT } from './scaffold.mjs';
+import { pollHealAttempts } from './probation-heal-run.mjs';
+import { readAgyHold } from '../lib/antigravity-run-evidence.mjs';
+import { providerQuotaHold } from '../lib/provider-quota-hold.mjs';
+import { resolveScorecardStorePath } from '../conveyor/run-scorecard-store.mjs';
+
 import {
   BRIEF_REQUIRED_BY_KIND, OPTIONAL_BRIEF_PLACEHOLDERS, REPO_AWARE_VALUE_PATTERNS, fillBrief, sessionSlugFor, DISPATCH_EFFECT,
 } from './dispatch-lane.mjs';
 import {
-  agentArgsFromEnv, briefPath, createDispatchSinks, defaultLoadItems, defaultReadScorecards, findItem, REPO_ROOT,
+  agentArgsFromEnv, briefPath, createDispatchSinks, defaultLoadItems, findItem, REPO_ROOT,
 } from './dispatch-lane-io.mjs';
 import { resolveDispatchRoute as decideDispatchRoute } from '../lib/dispatch-routing-policy-io.mjs';
 import { assertMainNotStale } from './review-dispatch.mjs';
@@ -63,6 +68,32 @@ import {
 } from '../conveyor/fix-dispatch-claim.mjs';
 import { readLiveFixClaim, withAltBranchHint } from '../conveyor/fix-procedure.mjs';
 import { flushOwedWrites } from '../conveyor/ci-heal-owed.mjs';
+
+function readHealQuotaScores() {
+  try {
+    const store = JSON.parse(readFileSync(resolveScorecardStorePath(), 'utf8'));
+    if (!Array.isArray(store.records)) throw new Error('quota scorecards have no records array');
+    return store.records;
+  } catch (e) { if (e.code === 'ENOENT') return []; throw e; }
+}
+
+/** Read current holds once at the CI-heal boundary. A read error is a visible refusal. */
+export function routeAvailableCiHeal(p, { readHolds = readAgyHold, readScores = readHealQuotaScores, now = Date.now() } = {}) {
+  try {
+    const scorecards = readScores();
+    if (!Array.isArray(scorecards)) throw new Error('quota scorecards unreadable');
+    const availability = {
+      'antigravity-claude': readHolds('claude-sonnet-4-6', { now }),
+      'antigravity-gemini': readHolds('gemini-3.1-pro', { now }),
+      codex: providerQuotaHold(scorecards, 'codex', now),
+    };
+    const route = decideDispatchRoute({ kind: 'ci-heal', scopePaths: p.scope ?? [], reason: p.reason ?? 'red-ci' }, { scorecards, ciHealAvailability: availability });
+    if (!route.probationWorker && providerQuotaHold(scorecards, 'claude', now)) return { ...route, outcome: 'refused', refusal: 'native Claude quota held; no eligible CI-heal route' };
+    // Empty scopes already use the native unfenced heal path; retain that behavior after checking its pool.
+    if (!(p.scope ?? []).length && route.outcome === 'refused') return { ...route, outcome: 'degraded', refusal: null, probationWorker: null };
+    return route;
+  } catch (e) { return { outcome: 'refused', refusal: `CI-heal quota evidence unreadable: ${e.message}` }; }
+}
 
 /**
  * @param {{itemNum:(string|null), pr:number, laneRef:string, scope:string[], lane:number, reason?:string, repo?:string, headRefOid?:string|null}} planned - a `planFixesFromReconcile`
@@ -84,7 +115,7 @@ export async function dispatchCiHeal(planned, {
   readPackageJson,
   // #x0jphk5 — injectable claim seam, mirroring `reconcile-fix-dispatch.mjs#dispatchFix`'s own (see this file's
   // own corrected header for why this replaces the `guardedDispatch` this docblock used to (wrongly) describe).
-  claimOwner = fixDispatchClaimOwner(),
+  claimOwner = `${fixDispatchClaimOwner()}:${randomUUID()}`,
   acquireClaim = acquireFixDispatchClaim,
   releaseClaim = releaseFixDispatchClaim,
   claimRoot,
@@ -92,19 +123,15 @@ export async function dispatchCiHeal(planned, {
   readFixClaim = ({ repo: r, pr }) => readLiveFixClaim({ repo: r, pr, ...(claimRoot ? { lockRoot: claimRoot } : {}) }),
   // agy-launcher-probation — THE ROUTE for this heal: `decideDispatchRoute` over the heal's own scope and reason,
   // read at this io edge (the same router the tick uses). Its `probationWorker` rides the effect payload; the
-  // sink's router launches it when the gate is open, the heal is not critical, and launching is on. Never throws:
-  // an unroutable heal simply carries no worker and takes the unchanged Claude path.
-  routeHeal = (p) => {
-    try {
-      return decideDispatchRoute(
-        { kind: 'ci-heal', scopePaths: p.scope ?? [], reason: p.reason ?? 'red-ci' },
-        { scorecards: defaultReadScorecards() },
-      );
-    } catch { return null; }
-  },
+  // sink launches it when the gate is open, the heal is not critical, and launching is on. Quota read
+  // errors and an exhausted eligible roster refuse visibly; no exception silently selects a default.
+  routeHeal = routeAvailableCiHeal,
+  pollAttempts = pollHealAttempts,
 } = {}) {
   // fix procedure (operator-approved 2026-09-27) — a live FIX CLAIM means another fixer owns this PR's repair;
   // never spawn a ci-heal beside it (the planner already refuses `fix-claimed`; this re-checks at spawn time).
+  const pending = pollAttempts({ repo, pr: planned.pr }).find(row => row.status !== 'resolved');
+  if (pending) return { held: true, reason: pending.error ?? 'CI-heal attempt is still running' };
   const fixClaim = readFixClaim({ repo, pr: planned.pr });
   if (fixClaim) return { held: true, reason: 'fix-claimed', heldBy: fixClaim.meta?.who ?? fixClaim.owner ?? null };
   // #x0jphk5 — acquire BEFORE building anything below; refuse loud (never throw) when another dispatcher
@@ -151,8 +178,10 @@ export async function dispatchCiHeal(planned, {
       SESSION_SLUG: sessionSlug, SCOPE: planned.scope.join(','), REASON: reason, ...tokens,
     }, BRIEF_REQUIRED_BY_KIND['ci-heal'], [...OPTIONAL_BRIEF_PLACEHOLDERS, 'ITEM_NUM', 'SCOPE'], REPO_AWARE_VALUE_PATTERNS);
     const route = repo === 'we' ? routeHeal({ scope: planned.scope, reason }) : null;
+    if (route?.outcome === 'refused') { releaseOurClaim(); return { held: true, reason: route.refusal }; }
     const out = await sinks[DISPATCH_EFFECT]({
       launchKind: 'ci-heal', prompt: withAltBranchHint(prompt, planned.altBranch), sessionSlug, num: planned.itemNum ?? undefined, lane: planned.lane, scope: planned.scope,
+      headRefOid: planned.headRefOid, claimOwner, claimRoot,
       pr: planned.pr, reason, repo, probationWorker: route?.probationWorker ?? null, routing: route,
     });
     if (out?.held) {
@@ -243,6 +272,7 @@ export async function runReconcileCiHealDispatch({
   retryTimeout = dispatchTimeoutRetry,
   flushTimeouts = flushTimeoutFollowups,
   timeoutHold = readTimeoutHold,
+  pollAttempts = pollHealAttempts,
 } = {}) {
   const repoKey = repo == null ? 'we' : repoKeyForSlug(repo);
   if (repoKey === null) throw new Error(`ci-heal-pr-dispatch: --repo ${repo} is not a constellation repo`);
@@ -250,6 +280,7 @@ export async function runReconcileCiHealDispatch({
   // the target repo; see `runReconcileFixDispatch`'s identical note for why this runs for every repo.
   assertMainNotStale(root, checkStaleness);
   // #4352 — retry any budget-refused CI-heal/escalation comment owed on this repo (see the docblock above).
+  const healObservations = pollAttempts({ repo: repoKey });
   const owedFlush = flushOwed(repoKey);
   const timeoutFollowups = await flushTimeouts({ root, repo: CONSTELLATION_REPOS[repoKey].slug });
   const reconciled = reconcile({ repo, ...(prsFile ? { readPrs: () => readPrsFromFile(prsFile) } : {}) });
@@ -293,6 +324,9 @@ export async function runReconcileCiHealDispatch({
   for (const entry of ciHealEntries) {
     const hold = timeoutHold({ repo: CONSTELLATION_REPOS[repoKey].slug, pr: entry.prNumber, head: entry.headRefOid });
     if (hold) { refusals.push({ pr: entry.prNumber, kind: 'ci-timeout-rerun', ...hold }); continue; }
+    const unsettled = healObservations.find(row => row.pr === entry.prNumber && row.status !== 'resolved');
+    if (unsettled) { refusals.push({ prNumber: entry.prNumber, kind: 'heal-unsettled', why: unsettled.error ?? 'owned wrapper still running' }); continue; }
+    if ((owedFlush.kept ?? []).some(row => row.pr === entry.prNumber)) { refusals.push({ prNumber: entry.prNumber, kind: 'heal-accounting-owed', why: 'durable heal accounting is not confirmed' }); continue; }
     const q = queueBudget.tryAdmit('ci-heal', { id: entry.prNumber });
     if (!q.admit) {
       refusals.push({ pr: entry.prNumber, kind: 'queue-cap', why: queueCapWhy(q) });

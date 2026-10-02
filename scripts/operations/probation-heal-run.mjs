@@ -29,9 +29,9 @@
  * real processes.
  */
 
-import { parseAgyReportEvidence } from '../lib/antigravity-run-evidence.mjs';
+import { parseAgyReportEvidence, pickAgyEvidence } from '../lib/antigravity-run-evidence.mjs';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync, readdirSync, renameSync, openSync, closeSync, fstatSync, readSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { appendScorecard as appendScorecardRow } from '../conveyor/run-scorecard-store.mjs';
@@ -44,6 +44,137 @@ import {
 
 import { resolveOperationRoute, resolvePolicyModel, readRoutingPolicy } from '../lib/dispatch-routing-policy-io.mjs';
 import { PROBATION_WORKERS, PROVEN_TASK_ENVELOPES } from '../lib/provider-routing.mjs';
+
+import { DISPATCH_LISTING_GRACE_MINUTES } from './dispatch-lane.mjs';
+import { execFileSyncThrottled } from '../lib/gh-throttle.mjs';
+import { randomUUID } from 'node:crypto';
+import { hostname } from 'node:os';
+import { resolveCoordinationRoot } from './coordination-root.mjs';
+import { withCompletionLock, newCompletionRecord, applyCompletionUpdate, writeCompletion } from './completion-store.mjs';
+import { releaseFixDispatchClaim } from '../conveyor/fix-dispatch-claim.mjs';
+import { buildCiHealComment, handBackCiHealReview } from '../conveyor/ci-heal-mark.mjs';
+import { recordOwedWrite, clearOwedWrite, owedWriteAlreadyLive, postPrComment } from '../conveyor/ci-heal-owed.mjs';
+
+const LISTING_GRACE_MS = DISPATCH_LISTING_GRACE_MINUTES * 60_000;
+function probeHealPid(pid) {
+  try { process.kill(pid, 0); return true; }
+  catch (error) { return error.code === 'ESRCH' ? false : null; }
+}
+
+/** Attempt evidence shares the coordination sidecar across dispatcher and wrapper checkouts. */
+export const healAttemptsDir = () => join(resolveCoordinationRoot(), 'ci-heal-attempts');
+function attemptPath(id, dir) {
+  if (!/^[a-zA-Z0-9_-]+$/.test(id ?? '')) throw new Error('invalid CI-heal attempt identity');
+  return join(dir, `${id}.json`);
+}
+export function readHealAttempt(id, { dir = healAttemptsDir() } = {}) {
+  const row = JSON.parse(readFileSync(attemptPath(id, dir), 'utf8'));
+  if (row.attemptId !== id || row.repo !== 'we' || !Number.isInteger(row.pr) || row.pr <= 0 || !row.session || !Number.isFinite(Date.parse(row.startedAt)) || !/^[a-f0-9]{40}$/.test(row.headSha ?? '') || (row.terminal && (typeof row.terminal.outcome !== 'string' || typeof row.terminal.pushed !== 'boolean'))) throw new Error('unreadable CI-heal ownership');
+  return row;
+}
+function saveAttempt(row, dir) {
+  mkdirSync(dir, { recursive: true });
+  const path = attemptPath(row.attemptId, dir), tmp = `${path}.${randomUUID()}.tmp`;
+  writeFileSync(tmp, JSON.stringify(row) + '\n');
+  renameSync(tmp, path);
+  return row;
+}
+export function beginHealAttempt(request, { dir = healAttemptsDir(), now = () => new Date().toISOString(), logPathFor = () => null, readHead = pr => realIo().prHead(pr) } = {}) {
+  const attemptId = randomUUID();
+  const headSha = request.headRefOid ?? readHead(request.pr)?.headRefOid;
+  if (!/^[a-f0-9]{40}$/.test(headSha ?? '')) throw new Error('CI-heal attempt requires the examined PR head before launch');
+  return saveAttempt({ attemptId, repo: 'we', pr: Number(request.pr), headSha, session: request.sessionSlug,
+    startedAt: now(), host: hostname(), logPath: logPathFor(`${request.sessionSlug}-${attemptId}`), runId: request.runId ?? null, effectKey: request.effectKey ?? null,
+    claimOwner: request.claimOwner ?? null, claimRoot: request.claimRoot ?? null,
+    worker: request.probationWorker, handle: null, terminal: null, published: false }, dir);
+}
+export function bindHealAttempt(id, handle, { dir = healAttemptsDir() } = {}) {
+  return withCompletionLock(id, () => {
+    const row = readHealAttempt(id, { dir });
+    if (row.host !== hostname() || !/^pid:[1-9][0-9]*$/.test(handle) || (row.handle && row.handle !== handle)) throw new Error('ambiguous CI-heal wrapper ownership');
+    return saveAttempt({ ...row, handle }, dir);
+  }, { dir });
+}
+
+/** Publication is confirmed by a trusted read; an ambiguous write remains owed and blocks new attempts. */
+export function publishHealAttempt(row, { readComments = r => JSON.parse(execFileSyncThrottled('gh', ['pr', 'view', String(r.pr), '--repo', REPO_SLUG, '--json', 'comments'], { encoding: 'utf8', timeout: 30_000, stdio: ['ignore', 'pipe', 'pipe'] })).comments,
+  post = args => postPrComment({ ...args, exec: execFileSyncThrottled }), owe = recordOwedWrite, clear = clearOwedWrite } = {}) {
+  const body = buildCiHealComment({ attemptId: row.attemptId, headSha: row.headSha,
+    failed: !row.terminal.pushed, detail: `${row.terminal.detail}\nexit: ${row.terminal.exitCode ?? 'unknown'}; signal: ${row.terminal.signal ?? 'unknown'}; quota: ${row.terminal.quotaState ?? 'unknown'}; reset: ${row.terminal.quotaResetsAt ?? 'unknown'}`, reason: 'red-ci' });
+  const rec = { repo: row.repo, slug: REPO_SLUG, pr: row.pr, kind: 'ci-heal', headSha: row.headSha, attemptId: row.attemptId, body };
+  owe(rec); // Write BEFORE the external operation, including reads that can fail.
+  const comments = readComments(row);
+  if (!Array.isArray(comments)) throw new Error('CI-heal trusted comments unreadable');
+  if (!owedWriteAlreadyLive(comments, rec)) {
+    post({ pr: row.pr, repo: rec.slug, body });
+    if (!owedWriteAlreadyLive(readComments(row), rec)) throw new Error('CI-heal durable publication not confirmed');
+  }
+  clear(rec);
+}
+
+export function finishHealAttempt(id, terminal, { dir = healAttemptsDir(), publish = publishHealAttempt,
+  complete = row => {
+    const record = newCompletionRecord({ session: `ci-heal-${row.attemptId}`, sessionId: row.attemptId, kind: 'ci-heal', pr: row.pr, now: () => row.startedAt });
+    writeCompletion(applyCompletionUpdate(record, { status: 'done', outcome: row.terminal.outcome }), join(dir, 'completions'));
+  }, release = releaseFixDispatchClaim } = {}) {
+  return withCompletionLock(id, () => {
+    let row = readHealAttempt(id, { dir });
+    if (row.settled === true) return row;
+    if (!row.terminal) row = saveAttempt({ ...row, terminal: { ...terminal, detail: String(terminal.detail ?? 'unknown').slice(-4000) } }, dir);
+    if (!row.published) {
+      publish(row);
+      row = saveAttempt({ ...row, published: true }, dir);
+    }
+    complete(row);
+    if (row.claimOwner) release({ repo: row.repo, pr: row.pr, kind: 'ci-heal', owner: row.claimOwner, ...(row.claimRoot ? { lockRoot: row.claimRoot } : {}) });
+    return saveAttempt({ ...row, settled: true }, dir);
+  }, { dir });
+}
+
+function attemptLogTail(path) {
+  if (!path) return 'unknown (no attempt log)';
+  let fd;
+  try {
+    fd = openSync(path, 'r');
+    const size = fstatSync(fd).size, buffer = Buffer.alloc(Math.min(size, 2000));
+    readSync(fd, buffer, 0, buffer.length, Math.max(0, size - buffer.length));
+    return buffer.toString('utf8') || 'unknown (empty attempt log)';
+  } catch (error) { return `unknown (attempt log unavailable: ${error.code ?? 'read error'})`; }
+  finally { if (fd !== undefined) closeSync(fd); }
+}
+
+/** Only an owned, positively dead wrapper past grace can acquire an orphan terminal outcome. */
+export function observeHealAttempt(id, { dir = healAttemptsDir(), handle, pr, repo = 'we', isPidAlive = probeHealPid,
+  now = () => new Date(), settle = (attemptId, terminal) => finishHealAttempt(attemptId, terminal, { dir }) } = {}) {
+  try {
+    const row = readHealAttempt(id, { dir });
+    if (row.host !== hostname() || (handle && row.handle !== handle) || (pr != null && row.pr !== pr) || row.repo !== repo) throw new Error('ambiguous CI-heal wrapper ownership');
+    if (!row.terminal) {
+      if (!/^pid:[1-9][0-9]*$/.test(row.handle ?? '')) throw new Error('unknown CI-heal wrapper handle');
+      const live = isPidAlive(Number(row.handle.slice(4)));
+      if (live === true) return { status: 'running', result: null };
+      if (live !== false) throw new Error('unknown CI-heal wrapper liveness');
+      const age = now().getTime() - Date.parse(row.startedAt);
+      if (!Number.isFinite(age)) throw new Error('unknown CI-heal start time');
+      if (age < LISTING_GRACE_MS) return { status: 'running', result: null };
+    }
+    const terminal = row.terminal ?? { outcome: 'executor-failed', pushed: false, exitCode: null, signal: null, quotaState: 'unknown',
+      detail: `owned wrapper ${row.handle} exited without terminal publication; exit, signal and quota cause unknown; diagnostics: ${attemptLogTail(row.logPath)}` };
+    const settled = settle(id, terminal);
+    return { status: 'resolved', result: { attemptId: id, ...settled.terminal }, error: settled.terminal.pushed ? undefined : settled.terminal.detail };
+  } catch (error) { return { status: 'unresolved', error: String(error.message ?? error) }; }
+}
+
+/** The reconcile poll uses exactly the observer boundary, including its fail-closed persistence checks. */
+export function pollHealAttempts({ repo = 'we', pr, dir = healAttemptsDir(), observe = observeHealAttempt } = {}) {
+  let names;
+  try { names = readdirSync(dir); } catch (e) { if (e.code === 'ENOENT') return []; throw e; }
+  return names.filter(n => n.endsWith('.json')).flatMap(name => {
+    const row = readHealAttempt(name.slice(0, -5), { dir });
+    if (row.repo !== repo || (pr != null && row.pr !== pr)) return [];
+    return [{ pr: row.pr, attemptId: row.attemptId, ...observe(row.attemptId, { dir, repo, pr: row.pr, handle: row.handle }) }];
+  });
+}
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 /** The WE checkout every tool is resolved from — by script location, never cwd. */
@@ -65,6 +196,7 @@ export function parseArgs(argv) {
   const worker = typeof flags.worker === 'string' ? JSON.parse(flags.worker) : configured ? { ...PROBATION_WORKERS[configured.provider === 'codex' ? 'codex' : configured.model.startsWith('claude-') ? 'antigravity-claude' : 'antigravity-gemini'], model: configured.model, effort: configured.effort, taskType: flags.taskType ?? 'ci-heal' } : null;
   if (worker) worker.model = resolvePolicyModel(worker.provider, worker.model, policy);
   return {
+    attemptId: flags['heal-attempt'] ?? null,
     pr: Number(flags.pr),
     session: String(flags.session ?? ''),
     reason: String(flags.reason ?? 'red-ci'),
@@ -83,13 +215,37 @@ export function parseArgs(argv) {
  * @param {object} io - see {@link realIo} for the shape.
  */
 export async function runProbationHeal(args, io) {
+  if (!Number.isInteger(args.pr) || args.pr <= 0 || !args.session || !args.worker?.id) throw new Error('probation-heal-run: --pr, --session and --worker are required');
+  // An ownership refusal is not this process's attempt to settle. Keep it outside the exception boundary.
+  if (args.attemptId) io.bindAttempt?.(args.attemptId, `pid:${process.pid}`);
+  const evidence = { executor: 'none', pushed: false };
+  try { return await runHealArc(args, io, evidence); }
+  catch (error) {
+    if (error.healPersistence) throw error;
+    const terminal = { outcome: 'executor-failed', ...evidence,
+      exitCode: error.status ?? null, signal: error.signal ?? null, quotaState: evidence.quotaState ?? 'unknown',
+      ...pickAgyEvidence(evidence),
+      ...parseAgyReportEvidence(error.stdout ?? ''), ...pickAgyEvidence(error.telemetry),
+      detail: String(error.stderr || error.message || error).slice(-4000) };
+    io.settleAttempt?.(args.attemptId, terminal);
+    io.completion({ pr: args.pr, session: args.session, item: args.num, status: 'done', outcome: terminal.outcome });
+    io.log(`CI-heal executor failed: ${terminal.detail}`);
+    return terminal;
+  }
+}
+
+async function runHealArc(args, io, evidence) {
   const { pr, session, reason, worker } = args;
-  if (!Number.isInteger(pr) || pr <= 0 || !session || !worker?.id) throw new Error('probation-heal-run: --pr, --session and --worker are required');
   const log = (m) => io.log(`probation-heal-run PR #${pr} [${worker.id}]: ${m}`);
   const complete = (status, outcome) => io.completion({ pr, session, item: args.num, status, outcome });
   let modelEvidence = {};
+  let pushed = false;
+  let workerEvidence = {};
   const finish = (outcome, executor, detail, row = {}) => {
-    complete('done', outcome);
+    try {
+      io.settleAttempt?.(args.attemptId, { outcome, executor, detail, pushed, ...workerEvidence, ...modelEvidence });
+      complete('done', outcome);
+    } catch (error) { error.healPersistence = true; throw error; }
     // One `probation-launch` row per heal the WORKER actually ran — a rebase-only heal is not a trial of it.
     if (executor === worker.executor) {
       io.appendScorecard(launchScorecardRow({ worker, modelEvidence, pr, repo: REPO_SLUG, handle: session, item: args.num, launchOutcome: outcome, ...row }));
@@ -102,6 +258,7 @@ export async function runProbationHeal(args, io) {
   const head = io.prHead(pr);
   if (!head || head.state !== 'OPEN') return finish('not-applicable', 'none', 'the PR is not open');
   const examinedHead = head.headRefOid;
+  if (args.attemptId) io.validateAttempt?.(args.attemptId, { pr, session, headSha: examinedHead });
 
   const acquired = io.acquireLane({ ref: head.headRefName, lane: args.lane, session, scope: args.scope });
   const lanePath = typeof acquired === 'string' ? acquired : acquired?.path;
@@ -146,8 +303,11 @@ export async function runProbationHeal(args, io) {
     const taskFile = io.writeTaskFile(lanePath, 'probation-heal-task.md', task);
     const preHookSurface = hookReset.snapshot;
     log(`running ${worker.launcher} --model=${worker.model}`);
+    evidence.executor = worker.executor;
     const run = io.runWorker(buildWorkerArgv({ worker, weRoot: WE_ROOT, dir: lanePath, taskFile }));
     modelEvidence = run.modelEvidence ?? {};
+    Object.assign(evidence, modelEvidence);
+    workerEvidence = { exitCode: run.status ?? null, signal: run.signal ?? null, diagnostics: String(run.out ?? 'unknown').slice(-4000), quotaState: 'unknown' };
     executor = worker.executor;
     // x55dojc — checked BEFORE anything else the worker's run unlocks (the diff read, the gate, a commit):
     // any change to the lane's git-hook surface refuses outright, regardless of whether the worker also
@@ -166,7 +326,7 @@ export async function runProbationHeal(args, io) {
     }
     const summary = summarizeNumstat(io.diffNumstat(lanePath, baseSha, preexisting), { exclude: preexisting });
     diffRow = { files: summary.files, loc: summary.loc };
-    if (!summary.files) return finish('escalated-needs-human', executor, `the worker changed nothing (${run.ok ? 'it finished' : 'it failed'})`, { diff: diffRow });
+    if (!summary.files) return finish('escalated-needs-human', executor, `the worker changed nothing (${run.ok ? 'it finished' : 'it failed'}); ${String(run.out || 'exit cause unknown').slice(-4000)}`, { diff: diffRow });
     const fits = healDiffWithinEnvelope(summary, PROVEN_TASK_ENVELOPES[worker.taskType ?? 'ci-heal']);
     if (!fits.ok) {
       io.discardChanges(lanePath, baseSha, preexisting);
@@ -206,7 +366,9 @@ export async function runProbationHeal(args, io) {
   if (!io.push(lanePath, head.headRefName, examinedHead)) {
     return finish('blocked-on-infra', executor, 'the push was refused (the PR head moved, or the remote is unreachable)', { diff: diffRow, checker: checkerRow });
   }
-  io.markHealed({ pr, reason });
+  pushed = true;
+  evidence.pushed = true;
+  io.markHealed({ pr, reason, attemptId: args.attemptId, headSha: io.headSha(lanePath), cwd: lanePath });
   return finish(executor === 'mechanical' ? 'no-change' : 'healed', executor, executor === 'mechanical' ? 'the rebase alone healed it; pushed' : 'repaired and pushed; a full review is owed', { diff: diffRow, checker: checkerRow });
 }
 
@@ -216,7 +378,7 @@ function sh(bin, args, opts = {}) {
   return execFileSync(bin, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024, ...opts });
 }
 function trySh(bin, args, opts = {}) {
-  try { return { ok: true, out: sh(bin, args, opts) }; } catch (e) { return { ok: false, status: e.status, stdout: String(e?.stdout ?? ''), out: `${e?.stdout ?? ''}${e?.stderr ?? ''}` || String(e?.message ?? e) }; }
+  try { return { ok: true, out: sh(bin, args, opts) }; } catch (e) { return { ok: false, status: e.status, signal: e.signal, stdout: String(e?.stdout ?? ''), out: `${e?.stdout ?? ''}${e?.stderr ?? ''}` || String(e?.message ?? e) }; }
 }
 const node = (script, args, opts) => trySh(process.execPath, [join(WE_ROOT, script), ...args], opts);
 
@@ -229,12 +391,19 @@ export function realIo({ session, env = process.env, run = trySh } = {}) {
   const workerEnv = { ...env, LANE_SESSION: session };
   const laneEnv = withHooksDisabled(workerEnv);
   return {
+    bindAttempt: bindHealAttempt,
+    validateAttempt: (id, expected) => {
+      const row = readHealAttempt(id);
+      if (row.pr !== expected.pr || row.session !== expected.session || row.headSha !== expected.headSha) throw new Error('CI-heal attempt examined head/ownership changed before worker launch');
+    },
+    settleAttempt: (id, terminal) => { if (id) return finishHealAttempt(id, terminal); },
     log: (m) => console.error(m),
     completion: ({ pr, session: s, item, status, outcome }) => {
       const args = ['report', `--repo=${REPO_SLUG}`, `--session=${s}`, '--kind=ci-heal', `--pr=${pr}`, `--status=${status}`];
       if (item) args.push(`--item=${item}`);
       if (outcome) args.push(`--outcome=${outcome}`);
-      node('scripts/operations/completion-cli.mjs', args);
+      const result = node('scripts/operations/completion-cli.mjs', args);
+      if (!result.ok) throw new Error(`CI-heal completion failed: ${result.out}`);
     },
     prHead: (pr) => {
       const r = trySh('gh', ['pr', 'view', String(pr), '--repo', REPO_SLUG, '--json', 'headRefOid,headRefName,state']);
@@ -285,7 +454,7 @@ export function realIo({ session, env = process.env, run = trySh } = {}) {
       // SYNCHRONOUS on purpose: both launchers block until the model's turn ends (see their headers).
       // `workerEnv`, never `laneEnv`: the worker's own git use keeps the repo's guard hooks (see `realIo`).
       const r = trySh(process.execPath, argv, { env: workerEnv, timeout: 70 * 60 * 1000 });
-      return { modelEvidence: parseAgyReportEvidence(r.stdout ?? r.out), ok: r.ok, out: r.out.slice(-4000) };
+      return { modelEvidence: parseAgyReportEvidence(r.stdout ?? r.out), ok: r.ok, status: r.status ?? null, signal: r.signal ?? null, out: r.out.slice(-4000) };
     },
     runChecker: (argv) => {
       const r = trySh(process.execPath, argv, { env: workerEnv, timeout: 20 * 60 * 1000 });
@@ -319,7 +488,9 @@ export function realIo({ session, env = process.env, run = trySh } = {}) {
       sh('git', ['-C', dir, 'commit', '-F', msgFile, '--', ...paths], { env: laneEnv });
     },
     push: (dir, ref, examinedHead) => trySh('git', ['-C', dir, 'push', `--force-with-lease=refs/heads/${ref}:${examinedHead}`, 'origin', `HEAD:refs/heads/${ref}`], { env: laneEnv }).ok,
-    markHealed: ({ pr, reason }) => node('scripts/conveyor/ci-heal-mark.mjs', [String(pr), `--repo=${REPO_SLUG}`, `--reason=${reason}`]),
+    markHealed: ({ pr, reason, attemptId, headSha, cwd }) => attemptId
+      ? handBackCiHealReview({ pr, repo: REPO_SLUG, headSha, cwd, exec: execFileSyncThrottled })
+      : node('scripts/conveyor/ci-heal-mark.mjs', [String(pr), `--repo=${REPO_SLUG}`, `--reason=${reason}`]),
     escalate: ({ pr, head, reason }) => node('scripts/conveyor/ci-heal-escalation-mark.mjs', [String(pr), `--repo=${REPO_SLUG}`, `--head=${head}`, '--outcome=needs-human', `--reason=${reason}`]),
     appendScorecard: (row) => {
       // Best-effort: a lost trial row must never fail a heal that worked.
@@ -331,6 +502,7 @@ export function realIo({ session, env = process.env, run = trySh } = {}) {
 const IS_CLI = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (IS_CLI) {
   const args = parseArgs(process.argv.slice(2));
+  if (!args.attemptId) args.attemptId = beginHealAttempt({ pr: args.pr, sessionSlug: args.session, probationWorker: args.worker }).attemptId;
   runProbationHeal(args, realIo({ session: args.session }))
     .then((r) => { console.log(JSON.stringify(r)); })
     .catch((e) => { console.error(`probation-heal-run: ${e?.message ?? e}`); process.exitCode = 1; });
