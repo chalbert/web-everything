@@ -1,9 +1,10 @@
 ---
 kind: story
 size: 3
-status: open
+status: resolved
 scope: ["we:scripts/operations/dispatch-providers/probation-worker.mjs", "we:scripts/operations/probation-heal-run.mjs", "we:scripts/operations/dispatch-lane-io.mjs", "we:scripts/operations/ci-heal-pr-dispatch.mjs", "we:scripts/lib/provider-routing.mjs", "we:scripts/lib/dispatch-contracts.mjs", "we:scripts/conveyor/ci-heal-mark.mjs", "we:scripts/operations/__tests__/probation-heal-run.test.mjs", "we:scripts/operations/__tests__/dispatch-lane-integration.test.mjs", "we:scripts/operations/__tests__/ci-heal-pr-dispatch.test.mjs", "we:scripts/lib/__tests__/provider-routing.test.mjs", "we:scripts/conveyor/__tests__/ci-heal-mark.test.mjs", "we:scripts/conveyor/__tests__/reconcile-core.test.mjs", "we:scripts/conveyor/ci-heal-owed.mjs", "we:scripts/conveyor/__tests__/ci-heal-owed.test.mjs", "we:scripts/operations/__tests__/dispatch-lane-build-wiring.test.mjs"]
 dateOpened: "2026-10-01"
+dateResolved: "2026-10-02"
 preparedDate: "2026-10-01"
 preparedAgainstSha: "197ececcec2edbd007de7ea4b38f68b962d0e025"
 tags: []
