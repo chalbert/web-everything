@@ -57,3 +57,11 @@ The four scoped Vitest suites pass with the new red-to-green assertions: tool-le
 ## Follow-ups
 
 Capture the historical #3432 artifacts if accessible and reconcile reported run/comment counts with persisted snapshots. Put any replay or testing lessons here, not in shared agent documentation. Broader finding-identity changes (the current key includes normalized summary text at `we:scripts/lib/jury-core.mjs:2273`) require separate evidence and scope; this card must not merge different findings heuristically to suppress a loop.
+
+## Root cause found (orchestrator, 2026-10-02 ~7:30 AM ET)
+
+Decoded the 51 `mandatory-referrals-v1` records on #3432. Each round writes three records under ONE fresh mandatory reviewer id (e.g. a30c21ad at 10:10Z, f6d233a7 at 09:33Z): opened, attempted, then a `not-real` ruling on the same head (495e86acb). The record then says "start a fresh review-pr"; the fresh run opens a NEW record with a NEW reviewer id and EMPTY rulings, and the referral check in we:scripts/lib/jury-core.mjs (around line 2320) reads only the current record's rulings, so the finding is pending again and the tool-less juror re-raises it. Rulings never carry across runs, so the run never reduces to a verdict and the advisory step never posts. Fix: a ruling on the same finding key for the same head carries into later runs (with the independence check still applied to the ruling's own reviewer), and a tool-less juror's finding cannot be CONFIRMED.
+
+## Operator ruling (2026-10-02, via claude-code-chat: "ok")
+
+Add a confirmation turn: when a juror without tools reports a finding as CONFIRMED broken, a tool-bearing verifier gets one turn to reproduce it on the PR head before it counts. Reproduced: it stays CONFIRMED and needs a ruling as today. Not reproduced: it is downgraded to an advisory note and never blocks the run. Cost is paid only when such a claim is made. Giving read-only tools to every reviewer stays a later option, not part of this card.
