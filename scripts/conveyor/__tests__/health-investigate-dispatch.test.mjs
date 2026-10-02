@@ -223,6 +223,7 @@ describe('health-investigate on the declared dispatch-lane operation', () => {
     const sinks = createInvestigationSinks({
       root, stateRoot: '/state', agentArgs: [],
       spawnAgent: (argv) => { spawned.push(argv); return 'backgrounded · abc123\n'; },
+      providerAvailable: p => p === 'claude',
       mintSessionId: () => 'sess-4078',
       now: () => new Date(NOW),
       sessionCwdFor: () => '/scratch/sess-4078',
@@ -262,6 +263,7 @@ describe('health-investigate on the declared dispatch-lane operation', () => {
       const sinks = createInvestigationSinks({
         root: '/w', stateRoot: '/state', agentArgs, ...extra,
         spawnAgent: (argv) => { spawned.push(argv); return 'backgrounded · abc123\n'; },
+        providerAvailable: p => p === 'claude',
         mintSessionId: () => 's', now: () => new Date(NOW), sessionCwdFor: () => '/scratch/s', ensureSessionCwd: (d) => d,
         grantLanePermission: () => {}, ensureWorktreeIsolation: () => {}, resolveSettingsEnv: () => ({}),
       });

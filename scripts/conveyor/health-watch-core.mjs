@@ -386,9 +386,9 @@ export function stepEpisodes(state, evaluations, now, { config = DEFAULT_HEALTH_
         applyClean(ep, key);
       }
     }
-    // A subject that disappeared from this smell's results is a clean sample for it.
+    // Disappeared subjects are clean unless the descriptor declares incomplete coverage unknown.
     for (const [key, ep] of Object.entries(next.episodes)) {
-      if (ep.smell === smell.id && !seen.has(key)) applyClean(ep, key);
+      if (ep.smell === smell.id && !seen.has(key) && !smell.missingSubjectsUnknown) applyClean(ep, key);
     }
 
     function applyClean(ep, key) {

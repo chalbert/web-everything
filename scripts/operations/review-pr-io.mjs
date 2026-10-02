@@ -1,3 +1,9 @@
+import { normalizeFinding, referralFindingKey, mandatoryReferralReviewer, validateReferralRecord,
+  readReferralRecords, mandatoryReferralState, renderReferralRecord } from '../lib/jury-core.mjs';
+import { judgeSpawn } from '../lib/judge-spawn.mjs';
+import { appendJuryEvent } from '../lib/jury-ledger.mjs';
+import { decideParkToHuman, referralCardReadable } from '../review-set-label.mjs';
+import { buildReviewJudgeRequest } from './review-pr.mjs';
 /**
  * @file scripts/operations/review-pr-io.mjs
  * @description THE IO SHELL of the `review-pr` declaration (#3035, under epic #3029) — the reader its `read`
@@ -278,6 +284,7 @@ export function readPr({
     // commit and the ref. It is the SAME candidate the diff was taken from and not the PR's `headRefOid`:
     // `headRefOid` is GitHub's view of the head, which can differ from the ref this clone actually diffed, and
     // recording it would pin the basis to a tree that was never read.
+    comments: view.comments,
     net: { ...netPaths, revSha: revParseCommit(gitExec, netPaths.rev) },
     diff: netText,
   };
@@ -456,6 +463,9 @@ export function isPreWriteRefusal(text) {
  */
 export function createReviewPrSinks({
   root = REPO_ROOT,
+  referralJudge = judgeSpawn,
+  mirrorReferral = (record) => appendJuryEvent(`${record.repo}#${record.pr}`, { type: 'mandatory-referrals', round: 0, record }, { root }),
+  cardReadable = (ref) => referralCardReadable(ref, root),
   // #xstdout-json — A `--json` CALLER WANTS STDOUT TO BE ONE PARSEABLE DOCUMENT, END TO END. The `NOTICE`
   // sink below is the one sink in this file that writes a human-readable line through `out`, and until now it
   // did so UNCONDITIONALLY to stdout — so `review-loop-cli.mjs --json` (and `run.mjs review-pr --json` on its
@@ -486,6 +496,101 @@ export function createReviewPrSinks({
   setLabels = createGhProvider().setLabels,
 } = {}) {
   return {
+    [REVIEW_EFFECTS.MANDATORY_REFERRALS]: async (payload, ctx) => {
+      const { read } = payload;
+      const fresh = () => {
+        const state = labelProvider.readPrState(read.repo, read.pr);
+        if (state.headRefOid !== read.netBasis.rev) throw new Error('mandatory referral: reviewed head changed; hold retained');
+        if (!Array.isArray(state.comments)) throw new Error('mandatory referral: comments unavailable; hold retained');
+        return state;
+      };
+      const context = (state) => ({ repo: read.repo, pr: read.pr, head: state.headRefOid,
+        body: typeof state.body === 'string' ? state.body : '', createdAt: state.createdAt, cardReadable });
+      const park = (state) => {
+        const plan = decideParkToHuman({ currentLabels: labelNames(state.labels) });
+        const remove = plan.removeLabels.filter(l => labelNames(state.labels).includes(l));
+        if (remove.length || !labelNames(state.labels).includes(plan.addLabel)) {
+          labelProvider.setLabels(read.repo, read.pr, { add: plan.addLabel, remove });
+        }
+      };
+      const persist = (record) => {
+        fresh();
+        labelProvider.postComment(read.repo, read.pr, renderReferralRecord(record));
+        const state = fresh();
+        const parsed = readReferralRecords(state.comments);
+        if (parsed.malformed || !parsed.records.some(r => JSON.stringify(r) === JSON.stringify(record))) {
+          throw new Error('mandatory referral: post read-back failed; hold retained');
+        }
+        mirrorReferral(record);
+        return state;
+      };
+      let state = fresh();
+      const prior = readReferralRecords(state.comments);
+      if (prior.malformed) { park(state); return mandatoryReferralState(state.comments, context(state)); }
+      const existing = prior.records.filter(r => r.head === read.netBasis.rev && r.repo === read.repo && r.pr === read.pr);
+      const covered = new Set(existing.flatMap(r => r.referrals.map(f => f.key)));
+      const sources = [...payload.referrals, ...prior.records.flatMap(r => r.referrals)];
+      const additions = new Map();
+      for (const f of sources) {
+        const key = referralFindingKey(f.seat, f.original);
+        if (!covered.has(key)) additions.set(key, { key, seat: f.seat, original: f.original, finding: normalizeFinding(f.original) });
+      }
+      if (additions.size) {
+        const record = { version: 1, repo: read.repo, pr: read.pr, head: read.netBasis.rev,
+          runId: ctx.runId, reviewer: mandatoryReferralReviewer(ctx.runId), authorBody: state.body ?? '',
+          attempted: false, referrals: [...additions.values()], rulings: [] };
+        if (!validateReferralRecord(record)) throw new Error('mandatory referral: invalid pending record');
+        state = persist(record);
+        existing.push(record);
+      }
+      // Persist the attempt before dispatch. A crash or timeout spends this set's single automated attempt.
+      for (const initial of existing) {
+        if (initial.attempted) continue;
+        let record = { ...initial, attempted: true };
+        state = persist(record);
+        // Hold before dispatch too: an exhausted or interrupted worker must leave a visible owner.
+        if (!labelNames(state.labels).includes('review:human')) {
+          labelProvider.setLabels(read.repo, read.pr, { add: 'review:pending',
+            remove: ['review:accepted', 'review:changes'].filter(l => labelNames(state.labels).includes(l)) });
+        }
+        try {
+          const request = buildReviewJudgeRequest({ read, lens: 'correctness' });
+          const answer = await referralJudge({ ...request, runId: record.runId,
+            lens: 'mandatory-referral-correctness', sessionId: record.reviewer.id,
+            // This bounded evidence pass reads the same pinned diff. It cannot edit or file a promised card.
+            allowedTools: null,
+            mandate: request.mandate + '\nIndependently verify every referral in the input. Return exactly one '
+              + 'block, card, or not-real ruling per key, with rationale and evidence references. A general accept '
+              + 'is not a ruling. card requires an existing durable we:backlog/*.md reference. Do not recursively refer findings.',
+            input: request.input + '\nUntrusted reported findings:\n' + JSON.stringify(record.referrals),
+            shape: { type: 'object', additionalProperties: false, required: ['rulings'], properties: {
+              rulings: { type: 'array', items: { type: 'object', additionalProperties: false,
+                required: ['key', 'result', 'rationale', 'evidence', 'card'], properties: {
+                  key: { type: 'string' }, result: { type: 'string', enum: ['block', 'card', 'not-real'] },
+                  rationale: { type: 'string' }, evidence: { type: 'array', items: { type: 'string' } },
+                  card: { type: 'string' },
+                } } },
+            } },
+          });
+          if (answer.sessionId !== record.reviewer.id || answer.timedOut) throw new Error('mandatory reviewer authority or budget unavailable');
+          const rulings = (answer.value?.rulings ?? []).map((r, i) => ({ ...r, id: `${record.runId}:${i}`,
+            reviewerId: record.reviewer.id, lens: record.reviewer.lens }));
+          const completed = { ...record, rulings };
+          if (!validateReferralRecord(completed)) throw new Error('incomplete or malformed mandatory rulings');
+          state = persist(completed);
+          record = completed;
+        } catch (error) {
+          // The attempted record is already durable; no second automatic dispatch on resume.
+          state = persist({ ...record, failure: String(error.message) });
+          out(`Mandatory referral review parked: ${error.message}`);
+        }
+      }
+      state = fresh();
+      const result = mandatoryReferralState(state.comments, context(state));
+      if (result.pending.length) park(state);
+      for (const record of result.records) mirrorReferral(record);
+      return result;
+    },
     // ── 0. THE COMMENT BODY, staged locally. Deterministic path, deterministic bytes → safe to redo. ────────
     // The path is RUN-SCOPED (`reviewBodyPath`) so two runs on the same PR in one checkout cannot cross-stage.
     // Deterministic PER RUN is still deterministic for a replay, which is what `idempotent: true` asserts.

@@ -12,7 +12,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
-  mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, readdirSync, statSync, existsSync, utimesSync,
+  mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, readdirSync, statSync, existsSync, utimesSync, symlinkSync, lstatSync, chmodSync,
 } from 'node:fs';
 import { tmpdir, hostname } from 'node:os';
 import { join, dirname } from 'node:path';
@@ -24,6 +24,7 @@ import {
   isDaemonManagedClone, daemonConveyorStateRoot, materializeCandidate, removeCandidate, previewOverlayConflict,
 } from '../daemon-rebuild.mjs';
 import { addOverlay, readOverlays, overlayFilePath } from '../daemon-overlays.mjs';
+import { acquireRead, releaseRead } from '../daemon-clone-lock.mjs';
 import { gitRun } from '../main-staleness.mjs';
 
 const tempDirs = [];
@@ -1861,4 +1862,201 @@ describe('isDaemonManagedClone / daemonConveyorStateRoot', () => {
     expect(daemonConveyorStateRoot({ WE_DAEMON_STATE_DIR: '/s' })).toBe(join('/s', 'conveyor-state'));
     expect(daemonConveyorStateRoot({ WE_DAEMON_STATE_DIR: '/s', CONVEYOR_STATE_ROOT: '/op' })).toBe('/op');
   });
+});
+
+
+describe('landed backlog sidecar cleanup (#4458)', () => {
+  it('prunes landed sidecars on a current HEAD and repeated ticks are idempotent', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    const mainSha = advanceMain(originDir, (dir) => writeFile(dir, 'backlog/123-landed.md', '---\nbornAs: xabc123\n---\nNumbered content\n'));
+    gitOk(cloneDir, ['fetch', '-q', 'origin']);
+    gitOk(cloneDir, ['reset', '--hard', mainSha]);
+    writeFile(cloneDir, 'backlog/xabc123-original.md', 'different provisional bytes\n');
+    writeFile(cloneDir, 'backlog/xdef456-unlanded.md', 'survivor\n');
+    const opts = { root: cloneDir, env, runSmoke: passSmoke(), prState: async () => null, lockOpts: LOCK_OPTS };
+    const first = await rebuildClone(opts);
+    expect(first.reason).toBe('up-to-date');
+    expect(existsSync(join(cloneDir, 'backlog/xabc123-original.md'))).toBe(false);
+    expect(first.alerts.filter((a) => a.kind === 'backlog-sidecar-pruned')).toEqual([{
+      kind: 'backlog-sidecar-pruned', detail: { path: 'backlog/xabc123-original.md', hash: 'xabc123', landedPath: 'backlog/123-landed.md', mainSha },
+    }]);
+    expect(first.alerts.find((a) => a.kind === 'untracked-kept').detail.paths).toEqual(['backlog/xdef456-unlanded.md']);
+    for (let tick = 0; tick < 3; tick++) {
+      const again = await rebuildClone(opts);
+      expect(again.reason).toBe('up-to-date');
+      expect(again.alerts.map((a) => a.kind)).toEqual(['untracked-kept']);
+      expect(readFileSync(join(cloneDir, 'backlog/xdef456-unlanded.md'), 'utf8')).toBe('survivor\n');
+    }
+    expect(gitOk(cloneDir, ['rev-parse', 'HEAD']).trim()).toBe(mainSha);
+  });
+
+  it('uses freshly fetched main only, accepts quoted scalars, and preserves unsafe evidence and paths', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    const evidence = {
+      '101-single.md': "---\nbornAs: 'xabc123'\n---\n",
+      '102-double.md': '---\nbornAs: "xdef456"\n---\n',
+      '103-prefix.md': '---\nbornAs: xghi789extra\n---\n',
+      '104-body.md': '---\nstatus: open\n---\nbornAs: xjkl012\n',
+      '105-duplicate.md': '---\nbornAs: xmno345\nbornAs: xmno345\n---\n',
+      '106-malformed.md': '---\nbornAs: xpqr678\nbroken: [\n---\n',
+      '107-quote.md': '---\nbornAs: "xstu901\n---\n',
+      '108-delimiter.md': '---\nbornAs: xvwx234\n---oops\n',
+      'xyza567-proof.md': '---\nbornAs: xyza567\n---\n',
+      '109-nested.md': '---\nexample:\n  bornAs: xbcd890\n---\n',
+    };
+    const mainSha = advanceMain(originDir, (dir) => {
+      for (const [name, text] of Object.entries(evidence)) writeFile(dir, `backlog/${name}`, text);
+      writeFile(dir, 'backlog/xabc123-tracked.md', 'tracked\n');
+      writeFile(dir, '.gitignore', 'backlog/xabc123-ignored.md\n');
+    });
+    // Get ignore/tracked sentinels without adopting the newly fetched landing evidence.
+    gitOk(cloneDir, ['fetch', '-q', 'origin']);
+    gitOk(cloneDir, ['reset', '--hard', mainSha]);
+    advanceMain(originDir, (dir) => writeFile(dir, 'backlog/110-fresh.md', '---\nbornAs: xcde123\n---\n'));
+    pushBranch(originDir, 'lane/evidence', (dir) => writeFile(dir, 'backlog/111-overlay.md', '---\nbornAs: xefg456\n---\n'));
+    addOverlay(cloneDir, { ref: 'lane/evidence' }, { env });
+    const survivors = [
+      'backlog/xghi789-copy.md', 'backlog/xjkl012-copy.md', 'backlog/xmno345-copy.md',
+      'backlog/xpqr678-copy.md', 'backlog/xstu901-copy.md', 'backlog/xvwx234-copy.md',
+      'backlog/xyza567-copy.md', 'backlog/xbcd890-copy.md', 'backlog/xefg456-copy.md',
+      'backlog/xfgh789-copy.md', 'backlog/xabc123-ignored.md', 'backlog/xabc123-nested/file.md',
+      'backlog/xabc123-copy.txt', 'backlog/xabc1234-copy.md', 'other/xabc123-copy.md',
+      'backlog/999-local.md',
+    ];
+    for (const path of survivors) writeFile(cloneDir, path, 'sentinel\n');
+    writeFile(cloneDir, 'backlog/998-local-evidence.md', '---\nbornAs: xfgh789\n---\n');
+    mkdirSync(join(cloneDir, 'backlog/xabc123-directory.md'));
+    symlinkSync('../README.md', join(cloneDir, 'backlog/xabc123-symlink.md'));
+    const removed = ['backlog/xabc123-copy.md', 'backlog/xdef456-copy.md', 'backlog/xcde123-copy.md'];
+    for (const path of removed) writeFile(cloneDir, path, 'old content\n');
+    const result = await rebuildClone({ root: cloneDir, env, runSmoke: passSmoke(), prState: async () => null, lockOpts: LOCK_OPTS });
+    expect(result.adopted).toBe(true);
+    expect(result.alerts.filter((a) => a.kind === 'backlog-sidecar-pruned').map((a) => a.detail.path).sort()).toEqual(removed.sort());
+    for (const path of removed) expect(existsSync(join(cloneDir, path))).toBe(false);
+    for (const path of survivors) expect(readFileSync(join(cloneDir, path), 'utf8')).toBe('sentinel\n');
+    expect(lstatSync(join(cloneDir, 'backlog/xabc123-directory.md')).isDirectory()).toBe(true);
+    expect(lstatSync(join(cloneDir, 'backlog/xabc123-symlink.md')).isSymbolicLink()).toBe(true);
+    expect(readFileSync(join(cloneDir, 'backlog/xabc123-tracked.md'), 'utf8')).toBe('tracked\n');
+  });
+
+  it.each(['fetch', 'search', 'blob', 'main-sha', 'recheck', 'unlink', 'tracked', 'refresh', 'absent', 'parent-symlink'])(
+    'fails closed for %s without inventing successful deletions', async (failure) => {
+      const { originDir, cloneDir, env } = makeFixture();
+      advanceMain(originDir, (dir) => writeFile(dir, 'backlog/123-landed.md', '---\nbornAs: xabc123\n---\n'));
+      const path = 'backlog/xabc123-copy.md';
+      writeFile(cloneDir, path, 'sentinel\n');
+      let inventories = 0;
+      let changed = false;
+      const run = (args, opts) => {
+        if ((failure === 'main-sha' && args[0] === 'rev-parse' && args.includes('origin/main^{commit}'))
+          || (failure === 'fetch' && args[0] === 'fetch') || (failure === 'search' && args[0] === 'grep')
+          || (failure === 'blob' && args[0] === 'show' && args[1].endsWith(':backlog/123-landed.md')))
+          return { status: 2, stdout: '', stderr: 'injected failure' };
+        if (args[0] === 'ls-files' && args.includes('--others')) {
+          inventories++;
+          if (failure === 'recheck' && inventories === 2) return { status: 1, stdout: '', stderr: 'inventory unavailable' };
+          if (inventories === 2) {
+            if (failure === 'tracked') { gitOk(cloneDir, ['add', path]); changed = true; }
+            if (failure === 'unlink') { chmodSync(join(cloneDir, 'backlog'), 0o555); changed = true; }
+            if (failure === 'absent') rmSync(join(cloneDir, path));
+            if (failure === 'parent-symlink') {
+              const external = mktemp('we-sidecar-external-');
+              writeFile(external, 'xabc123-copy.md', 'sentinel\n');
+              rmSync(join(cloneDir, 'backlog'), { recursive: true });
+              symlinkSync(external, join(cloneDir, 'backlog'));
+              // A stale inventory must still fail the filesystem type check.
+              return { status: 0, stdout: `${path}\0`, stderr: '' };
+            }
+          }
+          if (failure === 'refresh' && inventories === 3) return { status: 1, stdout: '', stderr: 'inventory unavailable' };
+        }
+        return gitRun(args, opts);
+      };
+      let result;
+      try {
+        result = await rebuildClone({ root: cloneDir, env, run, runSmoke: passSmoke(), prState: async () => null, lockOpts: LOCK_OPTS });
+      } finally {
+        if (failure === 'unlink' && changed) chmodSync(join(cloneDir, 'backlog'), 0o755);
+      }
+      if (failure === 'refresh') {
+        expect(result.reason).toBe('status-failed');
+        expect(existsSync(join(cloneDir, path))).toBe(false);
+      } else {
+        expect(result.alerts.filter((a) => a.kind === 'backlog-sidecar-pruned')).toEqual([]);
+        if (failure !== 'absent') expect(readFileSync(join(cloneDir, path), 'utf8')).toBe('sentinel\n');
+      }
+      if (['search', 'blob', 'main-sha', 'recheck', 'unlink'].includes(failure)) expect(result.alerts.some((a) => a.kind === 'backlog-sidecar-prune-failed')).toBe(true);
+      if (failure === 'fetch') {
+        expect(result.reason).toBe('fetch-failed');
+        expect(result.alerts.find((a) => a.kind === 'untracked-kept').detail.paths).toContain(path);
+      }
+      if (failure === 'tracked') { expect(changed).toBe(true); expect(result.reason).toBe('dirty'); }
+    },
+  );
+
+  it('keeps a collision sentinel and dry run preserves sidecar bytes, index and refs', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    advanceMain(originDir, (dir) => {
+      writeFile(dir, 'backlog/123-landed.md', '---\nbornAs: xabc123\n---\n');
+      writeFile(dir, 'collision.txt', 'incoming\n');
+    });
+    writeFile(cloneDir, 'backlog/xabc123-copy.md', 'provisional\n');
+    writeFile(cloneDir, 'collision.txt', 'sentinel\n');
+    const before = { index: readFileSync(join(cloneDir, '.git/index')), refs: gitOk(cloneDir, ['show-ref']) };
+    await dryRunRebuild({ root: cloneDir, env, prState: async () => null });
+    expect(readFileSync(join(cloneDir, 'backlog/xabc123-copy.md'), 'utf8')).toBe('provisional\n');
+    expect(readFileSync(join(cloneDir, '.git/index'))).toEqual(before.index);
+    expect(gitOk(cloneDir, ['show-ref'])).toBe(before.refs);
+    const result = await rebuildClone({ root: cloneDir, env, runSmoke: passSmoke(), prState: async () => null, lockOpts: LOCK_OPTS });
+    expect(result.reason).toBe('untracked-collision');
+    expect(readFileSync(join(cloneDir, 'collision.txt'), 'utf8')).toBe('sentinel\n');
+    expect(existsSync(join(cloneDir, 'backlog/xabc123-copy.md'))).toBe(false);
+    expect(result.alerts.find((a) => a.kind === 'untracked-kept').detail.paths).toEqual(['collision.txt']);
+  });
+
+  it('refreshes the inventory before cached-ready collision checks', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    const path = 'backlog/xabc123-copy.md';
+    const target = advanceMain(originDir, (dir) => {
+      writeFile(dir, 'backlog/123-landed.md', '---\nbornAs: xabc123\n---\n');
+      writeFile(dir, path, 'tracked incoming\n');
+    });
+    const readOpts = { lockRoot: env.WE_DAEMON_CLONE_LOCK_ROOT, owner: 'sidecar-test-reader' };
+    const opts = { root: cloneDir, env, prState: async () => null, lockOpts: { waitMs: 30, pollMs: 5 } };
+    const first = await rebuildClone({ ...opts, runSmoke: async () => {
+      expect(acquireRead(cloneDir, readOpts).ok).toBe(true);
+      return { verdict: 'pass', attempts: 1, smoke: { results: [] } };
+    } });
+    expect(first.reason).toBe('tick-in-progress');
+    releaseRead(cloneDir, readOpts);
+    writeFile(cloneDir, path, 'provisional\n');
+    const runSmoke = passSmoke();
+    const second = await rebuildClone({ ...opts, runSmoke });
+    expect(second.reason).toBe('ready-adopted');
+    expect(runSmoke).not.toHaveBeenCalled();
+    expect(second.alerts.some((a) => a.kind === 'backlog-sidecar-pruned')).toBe(true);
+    expect(second.alerts.some((a) => a.kind === 'untracked-kept')).toBe(false);
+    expect(gitOk(cloneDir, ['rev-parse', 'HEAD']).trim()).toBe(target);
+    expect(readFileSync(join(cloneDir, path), 'utf8')).toBe('tracked incoming\n');
+  });
+
+
+  it('pins landing reads even if origin/main changes after the evidence search', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    const oldHead = gitOk(cloneDir, ['rev-parse', 'HEAD']).trim();
+    const mainSha = advanceMain(originDir, (dir) => writeFile(dir, 'backlog/123-landed.md', '---\nbornAs: xabc123\n---\n'));
+    writeFile(cloneDir, 'backlog/xabc123-copy.md', 'provisional\n');
+    const proofReads = [];
+    const run = (args, opts) => {
+      const result = gitRun(args, opts);
+      if (args[0] === 'grep') gitOk(cloneDir, ['update-ref', 'refs/remotes/origin/main', oldHead]);
+      if (args[0] === 'show' && args[1].includes(':backlog/')) proofReads.push(args[1]);
+      return result;
+    };
+    const result = await rebuildClone({ root: cloneDir, env, run, runSmoke: passSmoke(), prState: async () => null, lockOpts: LOCK_OPTS });
+    expect(proofReads).toEqual([`${mainSha}:backlog/123-landed.md`]);
+    expect(result.alerts.find((a) => a.kind === 'backlog-sidecar-pruned').detail.mainSha).toBe(mainSha);
+    expect(existsSync(join(cloneDir, 'backlog/xabc123-copy.md'))).toBe(false);
+  });
+
 });

@@ -61,6 +61,7 @@ import { defaultPoolRoot } from '../lib/lane-pool-paths.mjs';
 // this probe's notion of "a daemon clone" can never drift from the guards'.
 import { daemonCloneRoots } from '../lib/daemon-clone-registry.mjs';
 import { workspaceOf } from '../lib/automation-home.mjs';
+import { collectCredentialInventory, normalizeInventory } from './credential-inventory.mjs';
 import { readGithubAppStatus, defaultCachePath } from '../lib/github-app-auth-env.mjs';
 import { resolvePrLimit, readLimitState, isGlobalOffNow } from '../lib/pr-limit.mjs';
 import { ghThrottleLockRoot, ghThrottleLogPath, budgetProbeArgs } from '../lib/gh-throttle.mjs';
@@ -722,7 +723,7 @@ function acquireTickLock(dir) {
  * One tick: probe → pure core → diagnoses → write state, reports, stamp.
  * @returns {Promise<object>} a summary (also what `--json` prints)
  */
-export async function tick(flags = {}) {
+export async function tick(flags = {}, { collectInventory = collectCredentialInventory } = {}) {
   const started = Date.now();
   const now = flags.now ? Date.parse(flags.now) : started;
   const dir = healthDir(flags['state-root']);
@@ -812,6 +813,18 @@ export async function tick(flags = {}) {
 
   const ghCache = prev.ghCache || {};
   const ghDue = !flags['no-gh'] && (flags['force-gh'] || !ghCache.at || now - ghCache.at >= GH_CADENCE_MS);
+  // Inventory has its own cadence stamp: unrelated GitHub failures cannot cause repeated log scans.
+  const inventoryDue = !flags['no-gh'] && (flags['force-gh'] || !prev.credentialInventoryAt || now - prev.credentialInventoryAt >= GH_CADENCE_MS);
+  if (flags['credential-inventory-fixture'] || inventoryDue) {
+    try {
+      probes.credentialInventory = normalizeInventory(flags['credential-inventory-fixture']
+        ? JSON.parse(readFileSync(flags['credential-inventory-fixture'], 'utf8'))
+        : collectInventory({ now, cache: prev.credentialInventoryCache || [], budgetMs: 20_000 }));
+      const errors = probes.credentialInventory.repositories.flatMap((r) => ['secrets', 'ci'].flatMap((kind) =>
+        r[kind].complete ? [] : [`${r.repo}:${kind}:${r[kind].errors.join(',') || 'incomplete'}`]));
+      if (errors.length) probeErrors.credentialInventory = errors.join('; ');
+    } catch { probeErrors.credentialInventory = 'unavailable'; }
+  }
   if (ghDue) {
     const prs = attempt('prs', () => probePrs());
     const agents = attempt('agents', () => probeAgents());
@@ -861,6 +874,10 @@ export async function tick(flags = {}) {
   delete state.silences;
   state.cursors = logs ? { ...(prev.cursors || {}), ...logs.cursors } : prev.cursors;
   state.ghCache = { at: ghCache.at ?? null };
+  if (probes.credentialInventory) {
+    state.credentialInventoryAt = now;
+    state.credentialInventoryCache = probes.credentialInventory.ciFindings;
+  }
 
   // Deterministic diagnoses (allowed in shadow mode) — hard timeout each.
   const diagnoses = [];

@@ -174,3 +174,142 @@ describe('handleRequest', () => {
     expect((await handleRequest(new Request('https://x/'), env, opts)).status).toBe(404);
   });
 });
+
+it('reads signed lifecycle evidence through the authenticated PR snapshot', async () => {
+  const log = createEventLog(createMemoryStorage());
+  const env = { GITHUB_WEBHOOK_SECRET: 'test', PR_EVENTS_READ_TOKEN: 'read' };
+  const body = JSON.stringify({ repository: REPO, action: 'opened', number: 4281,
+    pull_request: { head: { sha: 'head' }, draft: false, labels: [], state: 'open' } });
+  await handleRequest(new Request('https://test/github/webhook', { method: 'POST', body,
+    headers: { 'x-github-event': 'pull_request', 'x-hub-signature-256': await signBody('test', body) } }), env, { getLog: () => log });
+  const response = await handleRequest(new Request('https://test/prs?cursor=0', { headers: { authorization: 'Bearer read' } }), env, { getLog: () => log });
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({ cursor: 1, stateCursor: 1, prs: [{ number: 4281, sha: 'head', draft: false, labels: [], state: 'open' }] });
+});
+
+const lifecycle = (action, pr = {}, repo = 'o/r', number = 1) => parseGithubEvent('pull_request', {
+  repository: { full_name: repo }, number, action, pull_request: pr,
+});
+const check = (sha, prs = [], repo = 'o/r', type = 'check_run', conclusion = 'success') => ({
+  repo, type, sha, prs, name: 'ci', app: 'app', conclusion, action: 'completed',
+});
+
+it('folds lifecycle, explicit false, label snapshots/deltas, unknown legacy fields and reviews', () => {
+  const log = createEventLog(createMemoryStorage());
+  const state = () => log.readPrs().prs[0];
+  log.append(lifecycle('opened', { head: { sha: 'a' }, draft: true, labels: [{ name: 'one' }] }));
+  log.append(lifecycle('ready_for_review', { draft: false }));
+  expect(state().draft).toBe(false);
+  log.append(lifecycle('converted_to_draft', { draft: true }));
+  log.append({ ...lifecycle('labeled'), label: 'two' });
+  log.append({ ...lifecycle('unlabeled'), label: 'one' });
+  expect(state()).toMatchObject({ sha: 'a', draft: true, labels: ['two'] });
+  log.append(lifecycle('synchronize', { head: { sha: 'b' } }));
+  log.append({ repo: 'o/r', type: 'pull_request_review', prs: [1], sha: 'a', state: 'approved', action: 'submitted' });
+  log.append({ repo: 'o/r', type: 'pull_request_review', prs: [1], sha: 'a', state: 'dismissed', action: 'dismissed' });
+  expect(state()).toMatchObject({ sha: 'b', review: { sha: 'a', state: 'dismissed', seq: 8 } });
+  log.append(lifecycle('closed', { merged: false }));
+  expect(state()).toMatchObject({ state: 'closed', merged: false });
+  log.append(lifecycle('reopened'));
+  expect(state()).toMatchObject({ state: 'open', merged: false });
+  log.append(lifecycle('closed', { merged: true, labels: [] }));
+  expect(state()).toMatchObject({ state: 'closed', merged: true, labels: [] });
+  const legacy = createEventLog(createMemoryStorage());
+  legacy.append({ ...lifecycle('labeled'), label: 'partial' });
+  expect(legacy.readPrs().prs[0]).toMatchObject({ sha: null, labels: null, draft: null, state: null, labelChanges: { partial: true } });
+});
+
+it('associates late, empty and multiple checks by repo/SHA, separates suites/runs and never guesses null SHAs', () => {
+  const log = createEventLog(createMemoryStorage(), { maxEvents: 2 });
+  log.append(check('a')); // unmatched until lifecycle arrives
+  log.append(lifecycle('opened', { head: { sha: 'a' } }));
+  log.append(lifecycle('opened', { head: { sha: 'a' } }, 'o/r', 2));
+  log.append(lifecycle('opened', { head: { sha: 'a' } }, 'other/r'));
+  log.append(lifecycle('synchronize', { head: { sha: 'b' } }));
+  log.append(check('b', [1], 'o/r', 'check_run', 'failure'));
+  log.append(check('a', [], 'o/r', 'check_suite'));
+  log.append(check(null));
+  log.append(check('explicit', [1, 2]));
+  log.append({ ...check('a'), id: 'dedup' });
+  expect(log.append({ ...check('a', [], 'o/r', 'check_run', 'failure'), id: 'dedup' }).duplicate).toBe(true);
+  const rows = log.readPrs(0).prs;
+  expect(rows[0]).toMatchObject({ sha: 'b', checks: [expect.objectContaining({ sha: 'a', conclusion: 'success' }), expect.objectContaining({ sha: 'b', conclusion: 'failure' }), expect.objectContaining({ sha: 'explicit' })], suites: [expect.objectContaining({ sha: 'a' })] });
+  expect(rows[1].checks.map((c) => c.sha)).toEqual(['a', 'explicit']);
+  expect(rows[2].checks).toEqual([]);
+  expect(log.readPrs(0).gap).toBe(true);
+  expect(rows.flatMap((r) => r.checks).some((c) => c.sha === null)).toBe(false);
+});
+
+it('exposes snapshot coverage with independent delta positions and fails closed on read/write credentials', async () => {
+  const log = createEventLog(createMemoryStorage(), { maxEvents: 2 });
+  const env = { PR_EVENTS_READ_TOKEN: 'read', PR_EVENTS_BOOTSTRAP_TOKEN: 'write' };
+  const request = (path, token = 'read', method = 'GET', bindings = env) => handleRequest(new Request(`https://test${path}`, {
+    method, headers: token ? { authorization: `Bearer ${token}` } : {},
+  }), bindings, { getLog: () => log, now: () => 123 });
+  for (let i = 0; i < 4; i++) log.append(lifecycle('synchronize', { head: { sha: String(i) } }));
+  for (const query of ['', '?cursor=bad', '?cursor=999']) {
+    expect(await (await request(`/prs${query}`)).json()).toMatchObject({ cursor: 4, stateCursor: 4, head: 4, events: [], reset: true, gap: false, more: false, now: 123,
+      prs: [{ sha: '3', draft: null, labels: null, review: null, checks: [], suites: [] }],
+      coverage: { partial: true, historyComplete: false, observedSince: 1, retainedReplayBoundary: null, bootstrap: [] } });
+  }
+  expect(await (await request('/prs?cursor=0&limit=1')).json()).toMatchObject({ cursor: 3, stateCursor: 4, gap: true, more: true, reset: false, events: [{ seq: 3 }] });
+  expect((await request('/prs', null)).status).toBe(401);
+  expect((await request('/prs', 'bad')).status).toBe(401);
+  expect((await request('/prs', 'read', 'GET', {})).status).toBe(503);
+  expect((await request('/prs/bootstrap', 'read', 'POST')).status).toBe(401);
+  expect((await request('/prs/bootstrap', 'write', 'POST', {})).status).toBe(503);
+  expect((await request('/prs/bootstrap', 'write', 'POST')).status).toBe(400);
+});
+
+
+it('retains explicit check associations without lifecycle evidence and does not join null heads', () => {
+  const log = createEventLog(createMemoryStorage());
+  log.append(check('unseen', [4]));
+  log.append(check('unseen', [], 'o/r', 'check_run', 'failure'));
+  log.append(check(null, [5]));
+  log.append(check(null, [], 'o/r', 'check_run', 'failure'));
+  expect(log.readPrs().prs).toMatchObject([
+    { number: 4, sha: null, checks: [{ sha: 'unseen', conclusion: 'failure' }] },
+    { number: 5, sha: null, checks: [{ sha: null, conclusion: 'success' }] },
+  ]);
+});
+
+it('keeps same-name check runs from different apps independent (and records the run app)', () => {
+  const run = parseGithubEvent('check_run', { action: 'completed', repository: REPO,
+    check_run: { name: 'ci', head_sha: 'a', conclusion: 'failure', app: { slug: 'app-one' }, pull_requests: [{ number: 1 }] } });
+  expect(run).toMatchObject({ type: 'check_run', name: 'ci', app: 'app-one' });
+  const log = createEventLog(createMemoryStorage());
+  log.append(lifecycle('opened', { head: { sha: 'a' } }));
+  log.append({ ...check('a', [1], 'o/r', 'check_run', 'failure'), app: 'app-one' });
+  log.append({ ...check('a', [1], 'o/r', 'check_run', 'success'), app: 'app-two' });
+  expect(log.readPrs().prs[0].checks.map((c) => [c.app, c.conclusion]).sort()).toEqual([['app-one', 'failure'], ['app-two', 'success']]);
+  log.append({ ...check('a', [1], 'o/r', 'check_run', 'success'), app: 'app-one' });
+  expect(log.readPrs().prs[0].checks.map((c) => [c.app, c.conclusion]).sort()).toEqual([['app-one', 'success'], ['app-two', 'success']]);
+});
+
+it('migrates legacy-shaped lifecycle events (no draft field) to a correct or null draft', () => {
+  const legacy = (action) => ({ repo: 'o/r', type: 'pull_request', action, prs: [1], sha: 'a' });
+  const log = createEventLog(createMemoryStorage());
+  log.append({ ...legacy('opened'), draft: true });
+  log.append(legacy('ready_for_review'));
+  expect(log.readPrs().prs[0].draft).toBe(false);
+  log.append(legacy('converted_to_draft'));
+  expect(log.readPrs().prs[0].draft).toBe(true);
+  const unknown = createEventLog(createMemoryStorage());
+  unknown.append(legacy('synchronize'));
+  expect(unknown.readPrs().prs[0].draft).toBeNull();
+});
+
+it('reads /prs with SQL lookups bounded by distinct SHAs, not PRs x checks', () => {
+  const base = createMemoryStorage();
+  let reads = 0;
+  const storage = { ...base, getProjection: (...a) => { reads += 1; return base.getProjection(...a); } };
+  const log = createEventLog(storage);
+  for (let pr = 1; pr <= 40; pr += 1) log.append(lifecycle('opened', { head: { sha: `s${pr % 4}` } }, 'o/r', pr));
+  for (let i = 0; i < 100; i += 1) log.append({ ...check(`s${i % 4}`), name: `job-${i}` });
+  reads = 0;
+  const { prs } = log.readPrs();
+  expect(reads).toBeLessThanOrEqual(8);
+  expect(prs).toHaveLength(40);
+  expect(prs.every((p) => p.checks.length === 25)).toBe(true);
+});

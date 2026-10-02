@@ -667,6 +667,10 @@ describe('main-red-recovery — buildMissingRunCandidates / isMissingRunOverdue 
     expect(buildHungCandidates([PR_2729], { requiredCheck: 'test', workflowName: 'CI' })).toEqual([]);
   });
 
+  it('defers UNKNOWN mergeability without burning a recovery attempt', () => {
+    expect(buildMissingRunCandidates([{ ...PR_2729, mergeable: 'UNKNOWN' }], { requiredContexts: REQUIRED_CONTEXTS })).toEqual([]);
+  });
+
   it('a PR with zero rollup entries for EVERY required context is a candidate', () => {
     const candidates = buildMissingRunCandidates([PR_2729], { requiredContexts: REQUIRED_CONTEXTS });
     expect(candidates).toEqual([{
@@ -730,7 +734,7 @@ describe('main-red-recovery — buildMissingRunCandidates / isMissingRunOverdue 
 
   it('the missing-run marker records a fallen-back refresh outcome', () => {
     expect(buildMissingRunComment({ headSha: 'sha-a', ok: true, action: 'workflow-dispatch', refresh: 'skip', refreshError: 'conflict' }))
-      .toContain('triggered CI via workflow-dispatch (refresh onto main first: skip — conflict)');
+      .toContain('requested CI via workflow-dispatch; PR checks must still be observed (refresh onto main first: skip — conflict)');
   });
 
   it('isMissingRunOverdue: false before the threshold, true past it, false on an unreadable timestamp', () => {
@@ -739,21 +743,21 @@ describe('main-red-recovery — buildMissingRunCandidates / isMissingRunOverdue 
     expect(isMissingRunOverdue({ headCommittedAt: 'not-a-date', now: NOW })).toBe(false);
   });
 
-  it('GREEN after the fix: planMissingRunRecoveries dispatches trigger-ci for #2729, preferring update-branch when it is behind main', () => {
+  it('plans a PR-event recovery for an overdue head even when it is behind main', () => {
     const candidates = buildMissingRunCandidates([PR_2729], { requiredContexts: REQUIRED_CONTEXTS })
       .map((c) => ({ ...c, headCommittedAt: HEAD_COMMITTED_AT, aheadBy: 3, triggerAttemptsForSha: 0 }));
     const plan = planMissingRunRecoveries({ candidates, now: NOW });
     expect(plan.dispatch).toEqual([expect.objectContaining({
-      prNumber: 2729, kind: 'trigger-ci', preferUpdateBranch: true,
+      prNumber: 2729, kind: 'trigger-ci',
     })]);
     expect(plan.refusals).toEqual([]);
   });
 
-  it('prefers a bare workflow dispatch (preferUpdateBranch: false) once the PR already has main\'s tip (aheadBy: 0)', () => {
+  it('requests a PR-event recovery once the PR already has main\'s tip (aheadBy: 0)', () => {
     const candidates = buildMissingRunCandidates([PR_2729], { requiredContexts: REQUIRED_CONTEXTS })
       .map((c) => ({ ...c, headCommittedAt: HEAD_COMMITTED_AT, aheadBy: 0, triggerAttemptsForSha: 0 }));
     const plan = planMissingRunRecoveries({ candidates, now: NOW });
-    expect(plan.dispatch).toEqual([expect.objectContaining({ prNumber: 2729, preferUpdateBranch: false })]);
+    expect(plan.dispatch).toEqual([expect.objectContaining({ prNumber: 2729, kind: 'trigger-ci' })]);
   });
 
   it('refuses not-overdue for a head committed just now', () => {
@@ -785,7 +789,7 @@ describe('main-red-recovery — countMissingRunComments / buildMissingRunComment
   it('counts a trusted marker scoped to the given head sha, ignoring an unrelated sha', () => {
     const comments = [
       { body: buildMissingRunComment({ headSha: 'sha-a', ok: true, action: 'update-branch' }), author: AUTOMATION },
-      { body: buildMissingRunComment({ headSha: 'sha-b', ok: true, action: 'workflow-dispatch' }), author: AUTOMATION },
+      { body: buildMissingRunComment({ headSha: 'sha-b', ok: true, action: 'pull-request-push' }), author: AUTOMATION },
     ];
     expect(countMissingRunComments(comments, 'sha-a')).toBe(1);
     expect(countMissingRunComments(comments, 'sha-b')).toBe(1);
@@ -794,8 +798,8 @@ describe('main-red-recovery — countMissingRunComments / buildMissingRunComment
 
   it('counts EVERY attempt regardless of outcome — a persistently failing trigger must still trip the cap', () => {
     const comments = [
-      { body: buildMissingRunComment({ headSha: 'sha-a', ok: false, action: 'workflow-dispatch', error: 'workflow not found' }), author: AUTOMATION },
-      { body: buildMissingRunComment({ headSha: 'sha-a', ok: false, action: 'workflow-dispatch', error: 'workflow not found' }), author: AUTOMATION },
+      { body: buildMissingRunComment({ headSha: 'sha-a', ok: false, action: 'pull-request-push', error: 'workflow not found' }), author: AUTOMATION },
+      { body: buildMissingRunComment({ headSha: 'sha-a', ok: false, action: 'pull-request-push', error: 'workflow not found' }), author: AUTOMATION },
     ];
     expect(countMissingRunComments(comments, 'sha-a')).toBe(2);
   });
@@ -813,7 +817,7 @@ describe('main-red-recovery — countMissingRunComments / buildMissingRunComment
   it('the built comment always leads with the stable marker, whatever the outcome', () => {
     expect(buildMissingRunComment({ headRefName: 'lane/x', headSha: 'sha-a', ok: true, action: 'update-branch' }))
       .toMatch(new RegExp(`^${MISSING_RUN_COMMENT_MARKER.replace(/[()]/g, '\\$&')}`));
-    expect(buildMissingRunComment({ ok: false, action: 'workflow-dispatch', error: 'boom' })).toContain('boom');
+    expect(buildMissingRunComment({ ok: false, action: 'pull-request-push', error: 'boom' })).toContain('boom');
   });
 });
 

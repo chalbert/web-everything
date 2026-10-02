@@ -4,12 +4,14 @@ kind: story
 locus: plateau-app
 size: 5
 tier: pinned
-status: open
+status: resolved
 scope: ["plateau-app:src/wip/types.ts", "plateau-app:src/wip/wip-read.ts", "plateau-app:src/wip/wip-model.ts", "plateau-app:src/wip/wip-view.ts", "plateau-app:src/wip/wip-view.css", "plateau-app:src/wip/wip-source.ts", "plateau-app:src/wip/wip-live.ts", "plateau-app:src/wip/progress-read.ts", "plateau-app:src/wip/progress-read.test.ts", "plateau-app:src/wip/wip-model.test.ts", "plateau-app:src/wip/wip-view.test.ts", "plateau-app:src/wip/wip-source.test.ts", "plateau-app:src/wip/wip-publish.ts", "plateau-app:src/wip/wip-publish.test.ts", "plateau-app:src/wip/wip-api.ts", "plateau-app:src/wip/wip-read.test.ts", "plateau-app:src/wip/wip-view.hostile.test.ts", "plateau-app:tools/drain-daemon/cli.mjs", "plateau-app:src/wip/wip-relay-contract.test.ts", "plateau-app:scripts/wip-publish.ts", "plateau-app:wip-relay.js"]
 dateOpened: "2026-09-30"
 preparedDate: "2026-09-30"
 preparedAgainstSha: "3762fa95fd94c655c8196cd047c820f3f09f4b67"
 blockedBy: ["x9jwbpi"]
+dateResolved: "2026-10-01"
+graduatedTo: "https://github.com/chalbert/plateau-app/pull/189"
 tags: []
 ---
 

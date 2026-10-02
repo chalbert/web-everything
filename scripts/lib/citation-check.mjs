@@ -480,6 +480,78 @@ export function makeMemoizedLineCounter(readFileText) {
 }
 
 /**
+ * Split a source file into its real lines, with the same trailing-newline handling as `countSourceLines`
+ * (the final `\n` is a terminator, not an extra empty line). `splitSourceLines(t).length === countSourceLines(t)`.
+ * @param text the file body.
+ * @returns the lines (empty array for an empty / non-string input).
+ */
+export function splitSourceLines(text) {
+  if (typeof text !== 'string' || text === '') return [];
+  const lines = text.split('\n');
+  if (text.endsWith('\n')) lines.pop();
+  return lines;
+}
+
+/**
+ * Memoizing line reader for `findBlankLineLoci`'s injected `readLines` — same one-read-per-distinct-path
+ * rationale as `makeMemoizedLineCounter` (#2863). Unreadable files cache `null`.
+ * @param readFileText (relPath:string) => string — throws or returns non-string for an unreadable file.
+ * @returns (relPath:string) => string[]|null
+ */
+export function makeMemoizedLineReader(readFileText) {
+  const cache = new Map();
+  return (relPath) => {
+    if (cache.has(relPath)) return cache.get(relPath);
+    let lines;
+    try {
+      const text = readFileText(relPath);
+      lines = typeof text === 'string' ? splitSourceLines(text) : null;
+    } catch {
+      lines = null;
+    }
+    cache.set(relPath, lines);
+    return lines;
+  };
+}
+
+/**
+ * Gate 6f-ii-e — a `we:<path>:<line>` cite whose START line is blank. Gate 5 (`findDanglingLoci`) only
+ * bounds-checks, so a cite into a file that was later edited stays green while pointing at unrelated text.
+ * A deterministic gate cannot judge what a card MEANT to point at, but a blank line is never it — the
+ * cheapest drift signal. Only the start line of a range `a-b` is checked (a range may legitimately span
+ * blanks). A cite that drifts onto unrelated NON-blank text still passes: this is the cheap slice, not the
+ * content-aware check. Same locus regex and skips as `findDanglingLoci`; missing / unreadable / out-of-range
+ * targets yield no finding (gate 5 owns those).
+ *
+ * @param text the file body (raw).
+ * @param opts.fileExists (relPath:string) => boolean
+ * @param opts.readLines  (relPath:string) => string[]|null — the file's lines (see `splitSourceLines`).
+ * @returns array of `{ locus, path, line }` — one per distinct blank-start-line locus.
+ */
+export function findBlankLineLoci(text, { fileExists, readLines }) {
+  const findings = [];
+  if (typeof text !== 'string' || text === '') return findings;
+  const isInRepoPath = (p) => typeof p === 'string' && p !== '' && !p.startsWith('/') && !p.split('/').includes('..');
+  const rx = /\b(we|fui|plateau):([A-Za-z0-9._\-/]+\/[A-Za-z0-9._\-]+):(\d+)(?:-(\d+))?\b/g;
+  const seen = new Set();
+  for (const m of text.matchAll(rx)) {
+    const [, prefix, path, startStr, endStr] = m;
+    if (CROSS_REPO_LOCI.has(`${prefix}:`)) continue;
+    if (!isInRepoPath(path)) continue;
+    const locus = endStr ? `${prefix}:${path}:${startStr}-${endStr}` : `${prefix}:${path}:${startStr}`;
+    if (seen.has(locus)) continue;
+    seen.add(locus);
+    if (!fileExists(path)) continue;
+    const lines = readLines(path);
+    if (!Array.isArray(lines)) continue;
+    const line = Number(startStr);
+    if (line < 1 || line > lines.length) continue;
+    if (lines[line - 1].trim() === '') findings.push({ locus, path, line });
+  }
+  return findings;
+}
+
+/**
  * Gate 3 — hash-slug outside the at-land rewrite scope. A `xNNNNNN` hash-slug citation living in a dir the
  * hash→NNN rewriter never touches (reports/, the two research dirs) will dangle permanently once the item
  * lands with a real NNN. We match only the two citation FORMS the drift takes — a `#xNNNNNN` cross-ref and

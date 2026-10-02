@@ -51,7 +51,9 @@
  * process's own log file. The dispatch observer (`dispatch-lane-io.mjs#createDispatchObservers`) resolves the
  * effect off the merged PR exactly as it already did for the agent path — unchanged by this wiring.
  */
-import { resolveOperationRoute, resolvePolicyModel, readRoutingPolicy } from '../lib/dispatch-routing-policy-io.mjs';
+import { settleDispatchEffect } from './deliver-item-settle.mjs';
+import { resolvePolicyEffort } from '../lib/dispatch-routing-policy.mjs';
+import { resolveOperationEffort, resolveOperationRoute, resolvePolicyModel, readRoutingPolicy } from '../lib/dispatch-routing-policy-io.mjs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -109,6 +111,7 @@ export function parseDeliverItemRunArgv(argv = []) {
     attemptTag: String(flags.attempt ?? '').trim(),
     provider: String(flags.provider ?? '').trim(),
     ...(flags.model ? { model: String(flags.model) } : {}),
+    ...(flags.effort ? { effort: String(flags.effort) } : {}),
     runId: String(flags['run-id'] ?? '').trim(),
     effectKey: String(flags['effect-key'] ?? '').trim(),
     resume: flags.resume === 'true',
@@ -150,20 +153,28 @@ export function selectDeliveryAgentProvider(flagValue) {
  * string for every outcome it reasons about (`not-ready`, `blocked-mid-build`, `gate-red`, `gate-blocked`,
  * `PR #N`) and releases the lane and claim itself in each; those are exit 0, because the mechanism worked. Only
  * a wrapper-side throw — acquire refused, claim refused, the gate script itself crashed — is a non-zero exit,
- * and `deliverItem`'s own catch has already best-effort released what it held before it rethrows.
+ * and the wrapper attempts cleanup only for resources it acquired. This CLI also settles an identified
+ * dispatch on preflight/delivery failure; an already-terminal wrapper result is preserved.
  *
  * @param {string[]} argv
- * @param {{deliver?: Function, write?: Function, writeErr?: Function}} [io]
+ * @param {{deliver?: Function, settle?: Function, write?: Function, writeErr?: Function, selectProvider?: Function}} [io]
  * @returns {Promise<{code: number, result: object|null}>}
  */
 export async function runDeliverItemCli(argv = [], {
   deliver = deliverItem,
+  settle = settleDispatchEffect,
   write = (line) => process.stdout.write(line),
   writeErr = (line) => process.stderr.write(line),
   selectProvider = selectDeliveryAgentProvider,
 } = {}) {
   let launch;
   let selected;
+  const settleFailure = (e) => {
+    try {
+      settle({ runId: launch?.runId, key: launch?.effectKey, status: 'failed',
+        error: String(e?.message ?? e), result: { outcome: 'wrapper-threw' } });
+    } catch { /* best-effort; retain the original failure */ }
+  };
   try {
     launch = parseDeliverItemRunArgv(argv);
     // #3580 — resolved BEFORE the delivery starts, so a bad `--provider=` exits here rather than after a lane
@@ -171,14 +182,18 @@ export async function runDeliverItemCli(argv = [], {
     const policy = readRoutingPolicy();
     const configured = launch.provider ? null : resolveOperationRoute({ operation: 'build', available: ['claude', 'codex'], gateClosed: policy.criticalWorkGate.kinds.includes('build'), policy });
     selected = selectProvider(configured ? configured.provider === 'claude' ? 'claude-restricted' : configured.provider : launch.provider);
+    const providerName = selected.name === 'claude-restricted' ? 'claude' : selected.name;
     const pin = launch.model ?? configured?.model;
-    if (pin) {
-      const model = resolvePolicyModel(selected.name === 'claude-restricted' ? 'claude' : selected.name, pin, policy);
-      const underlying = selected.provider;
-      selected = { ...selected, provider: { ...underlying, model, spawn: request => underlying.spawn({ ...request, model }) } };
-      launch.model = model;
-    }
+    const model = pin ? resolvePolicyModel(providerName, pin, policy) : undefined;
+    const effort = resolvePolicyEffort(providerName, launch.effort ?? configured?.effort ?? resolveOperationEffort('build', providerName, undefined, policy));
+    launch.effort = effort;
+    if (model) launch.model = model;
+    const underlying = selected.provider;
+    selected = { ...selected, provider: { ...underlying, ...(model ? { model } : {}), effort,
+      spawn: request => underlying.spawn({ ...request, ...(model ? { model } : {}), effort }) } };
+
   } catch (e) {
+    settleFailure(e);
     writeErr(`error: ${String(e?.message ?? e)}\n`);
     return { code: 1, result: null };
   }
@@ -192,8 +207,9 @@ export async function runDeliverItemCli(argv = [], {
     write(`deliver-item-run: #${launch.item} finished — ${result?.result ?? '(no result reported)'}\n`);
     return { code: 0, result };
   } catch (e) {
+    settleFailure(e);
     writeErr(
-      `deliver-item-run: #${launch.item} FAILED (lane and claim released best-effort by the wrapper): `
+      `deliver-item-run: #${launch.item} FAILED: `
       + `${String(e?.message ?? e)}\n`,
     );
     return { code: 1, result: null };

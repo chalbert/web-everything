@@ -37,6 +37,8 @@
  *
  * Pure, unit-tested through `review-core.mjs`'s re-exports in `we:scripts/lib/__tests__/review-core.test.mjs`.
  */
+import { deriveSessionId, sessionSeed } from './judge-spawn.mjs';
+import { decideClearerIndependence, parseAuthorActorId } from './review-independence.mjs';
 import { CARE_LEVELS } from './review-escalation.mjs';
 // #2438's labelled data fence (#2967 moved it to a leaf so this module can reach it — `review-core.mjs`,
 // where it used to live, imports THIS module, so importing back would be a cycle).
@@ -1465,12 +1467,13 @@ export function derivePanelVerdict({ lensVerdicts = {}, humanRequired = false, c
  * / round / panel contracts it references (a `finding` event carries a `Finding`; a `verdict` event carries a
  * `VERDICTS` value), single-sources "what a jury event is" so the writer and every reader agree by construction.
  *
- * Five event types — the F4 logbook events named in #2641's body:
+ * The F4 logbook events plus the mandatory-referral protocol (#4315):
  *   • `roster-picked`   — the jury roster was chosen: the jurors (id / lens / charter, optional method).
  *   • `juror-running`   — a rostered juror started its pass (its lifecycle moved pending → running).
  *   • `finding`         — a juror reported one finding (the canonical `Finding` shape).
  *   • `verdict`         — a juror reported its current verdict (a `VERDICTS` value).
  *   • `round-advanced`  — the editor↔reviewer negotiation loop advanced to a new round.
+ *   • `mandatory-referrals` — versioned finding-specific referrals, attempt and ruling history (#4315).
  *
  * Every event carries `type` and an integer `round` (the round it belongs to; `round-advanced` names the NEW,
  * ≥1 round). `at` (an ISO-8601 timestamp) is OPTIONAL in the schema — the durable-log writer (#2641) stamps it;
@@ -1478,13 +1481,14 @@ export function derivePanelVerdict({ lensVerdicts = {}, humanRequired = false, c
  * NORMALIZING: it returns a clean event built from KNOWN fields only, so no caller-junk is persisted to the log.
  */
 
-/** The five append-only jury-ledger event types (#2654). A frozen enum so every writer/reader names them once. */
+/** The append-only jury-ledger event types (#2654, #4315). A frozen enum so every writer/reader names them once. */
 export const JURY_EVENT_TYPES = Object.freeze({
   ROSTER_PICKED: 'roster-picked',
   JUROR_RUNNING: 'juror-running',
   FINDING: 'finding',
   VERDICT: 'verdict',
   ROUND_ADVANCED: 'round-advanced',
+  MANDATORY_REFERRALS: 'mandatory-referrals',
 });
 
 /** Every jury-ledger event type, in lifecycle order — the membership set `validateJuryEvent` dispatches on. */
@@ -1657,6 +1661,12 @@ export function validateJuryEvent(raw) {
           event.reviewedSha = sha;
         }
       }
+      break;
+    }
+    case JURY_EVENT_TYPES.MANDATORY_REFERRALS: {
+      requireRound(raw, event, errors, 0);
+      if (!validateReferralRecord(raw.record)) errors.push('invalid mandatory referral record');
+      else event.record = JSON.parse(JSON.stringify(raw.record));
       break;
     }
     case JURY_EVENT_TYPES.JUROR_RUNNING: {
@@ -2247,4 +2257,138 @@ export function recordFloorRun({ findings = [], jurorCount = 1, rounds = 1, toke
     truncatedCount: Math.max(0, list.length - kept.length),
     cost: Object.freeze({ jurorCount, rounds, tokens, wallTimeMs }),
   });
+}
+
+
+/** #4315: a verification request, independent of disposition, outcome or prevention. */
+export function requiresMandatoryReferral(raw) {
+  const f = normalizeFinding(raw);
+  return f?.verdict === 'CONFIRMED' && ['broken', 'unrecoverable'].includes(f.impactIfUnfixed);
+}
+
+/** Stable source identity; the outer record supplies repository, PR, head and run. */
+export function referralFindingKey(seat, raw) {
+  const f = normalizeFinding(raw);
+  if (!f) throw new TypeError('referral requires a normalized finding');
+  return JSON.stringify([seat, f.file ?? '', f.line ?? '', f.summary.trim().replace(/\s+/g, ' ')]);
+}
+
+/** The actual independent follow-up seat, never a reviewer role asserted by finding prose. */
+export function mandatoryReferralReviewer(runId) {
+  return { id: deriveSessionId(sessionSeed([runId, 'mandatory-referral-correctness'])), lens: 'correctness' };
+}
+
+const supersededRulings = (ruling) => ruling.supersedes == null ? []
+  : Array.isArray(ruling.supersedes) ? ruling.supersedes : [ruling.supersedes];
+
+/** Versioned snapshot of the append-only referral history, mirrored into the jury ledger. */
+export function validateReferralRecord(r) {
+  try {
+    if (!r || r.version !== 1 || !/^[^/\s]+\/[^/\s]+$/.test(r.repo)
+      || !Number.isInteger(r.pr) || r.pr < 1 || !/^[a-f0-9]{40}$/.test(r.head)
+      || typeof r.authorBody !== 'string' || typeof r.runId !== 'string' || !r.runId.trim() || typeof r.attempted !== 'boolean'
+      || !Array.isArray(r.referrals) || !r.referrals.length || !Array.isArray(r.rulings)) return false;
+    const reviewer = mandatoryReferralReviewer(r.runId);
+    if (r.reviewer?.id !== reviewer.id || r.reviewer?.lens !== reviewer.lens) return false;
+    const keys = new Set();
+    for (const f of r.referrals) {
+      if (!f || typeof f.seat !== 'string' || !f.seat || !requiresMandatoryReferral(f.original)
+        || JSON.stringify(normalizeFinding(f.original)) !== JSON.stringify(f.finding)
+        || f.key !== referralFindingKey(f.seat, f.original) || keys.has(f.key)) return false;
+      keys.add(f.key);
+    }
+    const ids = new Set();
+    for (const rli of r.rulings) {
+      if (!rli || typeof rli.id !== 'string' || !rli.id || ids.has(rli.id)
+        || !keys.has(rli.key) || rli.reviewerId !== reviewer.id || rli.lens !== reviewer.lens
+        || !['block', 'card', 'not-real'].includes(rli.result)
+        || typeof rli.rationale !== 'string' || !rli.rationale.trim()
+        || !Array.isArray(rli.evidence) || !rli.evidence.length
+        || rli.evidence.some(e => typeof e !== 'string' || !e.trim())
+        || (rli.result === 'card' && !/^we:backlog\/[^/]+\.md$/.test(rli.card ?? ''))
+        || supersededRulings(rli).some(id => !ids.has(id)
+          || r.rulings.find(x => x.id === id)?.key !== rli.key)) return false;
+      ids.add(rli.id);
+    }
+    return true;
+  } catch { return false; }
+}
+
+/** Resolve this obligation only. Ordinary findings and all other acceptance gates remain intact. */
+export function referralRecordState(record, { head = record?.head, body = record?.authorBody ?? '', createdAt = '', cardReadable = () => false } = {}) {
+  if (!validateReferralRecord(record)) return { pending: ['malformed-referral-record'], blocked: [], rulings: [] };
+  const pending = [], blocked = [], rulings = [];
+  const independent = decideClearerIndependence({ authorId: parseAuthorActorId(body), clearerId: record.reviewer.id, prCreatedAt: createdAt });
+  for (const f of record.referrals) {
+    const history = record.rulings.filter(r => r.key === f.key);
+    const active = history.filter(r => !history.some(next => supersededRulings(next).includes(r.id)));
+    const r = active.length === 1 ? active[0] : null;
+    if (head !== record.head || independent.independent !== true || !r
+      || (r.result === 'card' && !cardReadable(r.card))) pending.push(f.key);
+    else { rulings.push(r); if (r.result === 'block') blocked.push(f.key); }
+  }
+  return { pending, blocked, rulings };
+}
+
+export const REFERRAL_RECORD_MARKER = 'mandatory-referrals-v1';
+
+/** Encode data so a finding cannot close the structured comment delimiter. */
+export function renderReferralRecord(record) {
+  if (!validateReferralRecord(record)) throw new TypeError('invalid mandatory referral record');
+  return `Mandatory review owner: ${record.reviewer.id} (${record.reviewer.lens}).\n`
+    + `CONFIRMED broken/unrecoverable findings require a finding-specific block/card/not-real ruling.\n`
+    + record.referrals.map(f => `- ${f.key}: ${f.finding.summary}`).join('\n')
+    + `\nAttempt recorded: ${record.attempted}. Reason: ${record.failure ?? 'mandatory finding-specific review required'}. Rulings: ${JSON.stringify(record.rulings)}\n`
+    + `Record any missing finding-specific rulings with the mandatory reviewer identified above, retaining prior rulings and explicit supersedes IDs. Then start a fresh review-pr --pr=${record.pr} --repo=${record.repo}; it reuses this PR record without another automated attempt. card requires a readable backlog reference.\n`
+    + `<!-- ${REFERRAL_RECORD_MARKER}: ${encodeURIComponent(JSON.stringify(record))} -->`;
+}
+
+/** Fold snapshots monotonically: omission, conflicts and malformed/partial records never clear a hold. */
+export function readReferralRecords(comments) {
+  const records = new Map();
+  const seen = new Set();
+  let malformed = !Array.isArray(comments);
+  for (const comment of Array.isArray(comments) ? comments : []) {
+    const body = typeof comment === 'string' ? comment : comment?.body ?? '';
+    if (!body.includes(REFERRAL_RECORD_MARKER)) continue;
+    const matches = [...body.matchAll(/<!-- mandatory-referrals-v1: ([^\s]+) -->/g)];
+    if (!matches.length || body.split('<!-- mandatory-referrals-v1:').length - 1 !== matches.length) malformed = true;
+    for (const match of matches) {
+      try {
+        const r = JSON.parse(decodeURIComponent(match[1]));
+        if (!validateReferralRecord(r)) { malformed = true; continue; }
+        const snapshot = JSON.stringify(r);
+        if (seen.has(snapshot)) continue;
+        seen.add(snapshot);
+        const id = JSON.stringify([r.repo, r.pr, r.head, r.runId]);
+        const previous = records.get(id);
+        if (previous && (previous.authorBody !== r.authorBody || JSON.stringify(previous.referrals) !== JSON.stringify(r.referrals)
+          || (previous.attempted && !r.attempted)
+          || JSON.stringify(r.rulings.slice(0, previous.rulings.length)) !== JSON.stringify(previous.rulings))) {
+          malformed = true; continue;
+        }
+        records.set(id, r);
+      } catch { malformed = true; }
+    }
+  }
+  return { records: [...records.values()], malformed };
+}
+
+/** Shared fresh-read acceptance boundary and replay state. */
+export function mandatoryReferralState(comments, context = {}) {
+  const { records, malformed } = readReferralRecords(comments);
+  const pending = malformed ? ['malformed-referral-record'] : [];
+  if (records.length && Object.hasOwn(context, 'head') && !/^[a-f0-9]{40}$/.test(context.head ?? '')) {
+    pending.push('unavailable-reviewed-head');
+  }
+  const blocked = [];
+  // A newer head must review the same source finding again; old clearance is never carried forward.
+  const currentKeys = new Set(records.filter(r => r.head === context.head).flatMap(r => r.referrals.map(f => f.key)));
+  for (const r of records) {
+    if (context.repo && (r.repo !== context.repo || r.pr !== Number(context.pr))) { pending.push('wrong-subject'); continue; }
+    const state = referralRecordState(r, context);
+    pending.push(...state.pending.filter(key => r.head === context.head || !currentKeys.has(key)));
+    blocked.push(...state.blocked);
+  }
+  return { records, pending: [...new Set(pending)], blocked: [...new Set(blocked)], malformed };
 }

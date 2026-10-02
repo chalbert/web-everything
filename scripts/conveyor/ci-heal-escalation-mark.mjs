@@ -160,6 +160,27 @@ export function latestCiHealEscalationForHead(comments, headSha) {
   return matches.length ? matches[matches.length - 1] : null;
 }
 
+/** Recorded attribution is evidence only, never permission to ignore a required check.
+ * Legacy #3239 records the check and card-only diagnosis in prose. Match that narrow
+ * shape; arbitrary needs-human reasons (including conflicts) remain terminal.
+ * A successful refresh supersedes this through the existing head-scoped mechanism.
+ */
+export function mainBreakEscalationForHead(comments, headSha, failingCheckName) {
+  const escalation = latestCiHealEscalationForHead(comments, headSha);
+  if (!escalation || !failingCheckName || escalation.outcome !== 'needs-human') return null;
+  // #3241 records the main reproduction directly, rather than naming a shard.
+  // Only the test aggregate is attributed by this legacy test-file diagnosis.
+  if (failingCheckName === 'test' && /^red is main's own break: \S+\.test\.[cm]?[jt]s .+ fails on main [0-9a-f]{7,40} too; PR only edits one backlog card, already up to date with main$/.test(escalation.reason)) return escalation;
+  const recordedCheck = /^required (.+?) red on unrelated /.exec(escalation.reason)?.[1];
+  // CI's required `test` aggregate includes the matrix shards; the legacy reason
+  // spells `test-shard 4`, while GitHub calls the job `test-shard (4)`.
+  const shard = /^test-shard (\d+)$/.exec(recordedCheck || '')?.[1];
+  if (recordedCheck !== failingCheckName &&
+      !(shard && (failingCheckName === 'test' || failingCheckName === `test-shard (${shard})`))) return null;
+  if (!/; PR diff is (?:one backlog card|backlog-only|card-only); reproduces after rebase onto main(?:;|$)/.test(escalation.reason)) return null;
+  return escalation;
+}
+
 /**
  * we:scripts/conveyor/ci-heal-escalation-mark.mjs#postOrOweCiHealEscalation — post the escalation comment; on a
  * BUDGET refusal, record it owed for `ci-heal-pr-dispatch.mjs#runReconcileCiHealDispatch`'s next-tick flush

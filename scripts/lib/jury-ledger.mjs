@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { mandatoryReferralState, renderReferralRecord } from './jury-core.mjs';
 /**
  * jury-ledger.mjs — the DURABLE jury event LOG + the ONE SHARED FOLD (#2641, F4 = logbook slice of epic #2636).
  *
@@ -239,7 +240,8 @@ export function serializeJuryEvent(rawEvent, { nowIso } = {}) {
 /**
  * Parse the durable log TEXT into a normalized event array. PURE + tolerant: a blank / unparseable / schema-invalid
  * line is SKIPPED (never throws), so a partially-written or hand-edited log still folds to whatever is valid. The
- * append-only order is preserved.
+ * append-only order is preserved. A corrupt mandatory-referral line is retained as an invalid sentinel
+ * so the referral fold fails closed instead of treating a lost ruling as clearance (#4315).
  * @param {string} text
  * @returns {object[]}
  */
@@ -249,9 +251,13 @@ export function parseJuryLog(text) {
     const trimmed = line.trim();
     if (!trimmed) continue;
     let parsed;
-    try { parsed = JSON.parse(trimmed); } catch { continue; }
+    try { parsed = JSON.parse(trimmed); } catch {
+      if (trimmed.includes('mandatory-referrals')) out.push({ type: 'mandatory-referrals', record: null });
+      continue;
+    }
     const ev = normalizeJuryEvent(parsed);
     if (ev) out.push(ev);
+    else if (parsed?.type === 'mandatory-referrals') out.push({ type: 'mandatory-referrals', record: null });
   }
   return out;
 }
@@ -385,7 +391,7 @@ function strictestVerdict(verdicts) {
  * @param {Array<object>} events - the raw (or normalized) append-only jury events.
  * @returns {FoldedLedger}
  */
-export function foldJuryLedger(events) {
+export function foldJuryLedger(events, referralContext = {}) {
   const stream = (Array.isArray(events) ? events : []).map(normalizeJuryEvent).filter(Boolean);
 
   /** @type {Map<string, FoldedJuror>} roster order preserved by insertion. */
@@ -480,7 +486,13 @@ export function foldJuryLedger(events) {
   let findingCount = 0;
   for (const j of jurorList) { counts[j.status] += 1; findingCount += j.findings.length; }
 
-  return { rosterKnown, round, jurors: jurorList, lensVerdicts, panelVerdict, counts, findingCount, reviewedSha };
+  const referralEvents = (events ?? []).filter(e => e?.type === 'mandatory-referrals');
+  const referralComments = referralEvents.map(e => {
+    try { return { body: renderReferralRecord(e.record) }; }
+    catch { return { body: 'mandatory-referrals-v1: malformed' }; }
+  });
+  const referralState = mandatoryReferralState(referralComments, { head: rosterKnown ? reviewedSha : referralEvents.at(-1)?.record?.head, ...referralContext });
+  return { referralState, rosterKnown, round, jurors: jurorList, lensVerdicts, panelVerdict, counts, findingCount, reviewedSha };
 }
 
 /**

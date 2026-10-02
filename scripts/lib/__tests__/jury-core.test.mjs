@@ -1,3 +1,4 @@
+import { requiresMandatoryReferral, referralFindingKey, mandatoryReferralReviewer, validateReferralRecord, referralRecordState, renderReferralRecord, readReferralRecords } from '../jury-core.mjs';
 /**
  * @file jury-core.test.mjs — proof of the #2654 (S2 of epic #2649) append-only JURY-LEDGER EVENT VOCABULARY:
  *   the `JURY_EVENT_TYPES` / `JUROR_STATUSES` enums and the pure `validateJuryEvent` / `normalizeJuryEvent`
@@ -72,13 +73,14 @@ import {
 } from '../jury-core.mjs';
 
 describe('jury-ledger event vocabulary (#2654)', () => {
-  it('names exactly the five F4 logbook event types', () => {
+  it('names the F4 logbook events and the mandatory referral record', () => {
     expect(JURY_EVENT_TYPE_LIST).toEqual([
       'roster-picked',
       'juror-running',
       'finding',
       'verdict',
       'round-advanced',
+      'mandatory-referrals',
     ]);
     // frozen enum — no silent re-derivation of the vocabulary
     expect(Object.isFrozen(JURY_EVENT_TYPES)).toBe(true);
@@ -1563,5 +1565,66 @@ describe('recordFloorRun — the floor pass records its verdict and its cost (#3
     expect(Object.isFrozen(record)).toBe(true);
     expect(Object.isFrozen(record.cost)).toBe(true);
     expect(Object.isFrozen(record.findings)).toBe(true);
+  });
+});
+
+describe('#4315 mandatory referral protocol', () => {
+  const finding = { summary: 'merge resolution lost', file: 'scripts/conveyor/lease-reaper.mjs', verdict: 'CONFIRMED', impactIfUnfixed: 'broken' };
+  const record = () => {
+    const seat = 'judgeCorrectnessAdvisory';
+    return { version: 1, repo: 'o/r', pr: 7, head: 'a'.repeat(40), runId: 'run-referral',
+      authorBody: '<!-- authored-by-actor: author -->', reviewer: mandatoryReferralReviewer('run-referral'),
+      attempted: true, referrals: [{ key: referralFindingKey(seat, finding), seat, original: finding, finding: normalizeFinding(finding) }], rulings: [] };
+  };
+  const rule = (r, result = 'not-real') => ({ id: 'r1', key: r.referrals[0].key, reviewerId: r.reviewer.id,
+    lens: 'correctness', result, rationale: 'Verified against the pinned diff', evidence: ['diff:lease-reaper'],
+    ...(result === 'card' ? { card: 'we:backlog/4315-example.md' } : {}) });
+  it.each(['broken', 'unrecoverable'])('refers %s regardless of outcome, prevention or disposition', impactIfUnfixed => {
+    for (const outcome of ['fixed', 'skipped', 'no_change_needed', undefined]) {
+      expect(requiresMandatoryReferral({ ...finding, impactIfUnfixed, outcome, disposition: 'nit', prevention: 'captured #7' })).toBe(true);
+    }
+  });
+  it.each([{ impactIfUnfixed: 'degraded' }, { impactIfUnfixed: 'cosmetic' }, { impactIfUnfixed: 'critical' },
+    { verdict: 'PLAUSIBLE' }, { verdict: undefined }, { impactIfUnfixed: undefined }])('does not widen referral tags: %j', patch => {
+    expect(requiresMandatoryReferral({ ...finding, ...patch })).toBe(false);
+  });
+  it('round trips source bytes and requires actual roster identity and evidence', () => {
+    const r = record();
+    expect(readReferralRecords([{ body: renderReferralRecord(r) }]).records).toEqual([r]);
+    expect(referralRecordState(r).pending).toEqual([r.referrals[0].key]);
+    r.rulings = [rule(r)];
+    expect(referralRecordState(r).pending).toEqual([]);
+    for (const patch of [{ reviewerId: 'advisory-author' }, { lens: 'security' }, { key: 'wrong' }, { evidence: [] }, { rationale: '' }, { result: 'accept' }]) {
+      expect(validateReferralRecord({ ...r, rulings: [{ ...r.rulings[0], ...patch }] })).toBe(false);
+    }
+    expect(referralRecordState(r, { body: `<!-- authored-by-actor: ${r.reviewer.id} -->` }).pending).toHaveLength(1);
+    expect(referralRecordState(r, { body: '' }).pending).toHaveLength(1);
+  });
+  it('requires a current head and readable card; block never grants acceptance', () => {
+    for (const result of ['block', 'card', 'not-real']) {
+      const r = record(); r.rulings = [rule(r, result)];
+      expect(referralRecordState(r, { head: 'b'.repeat(40), cardReadable: () => true }).pending).toHaveLength(1);
+      const state = referralRecordState(r, { cardReadable: () => true });
+      expect(state.pending).toEqual([]);
+      expect(state.blocked).toHaveLength(result === 'block' ? 1 : 0);
+      if (result === 'card') expect(referralRecordState(r).pending).toHaveLength(1);
+    }
+  });
+  it('preserves conflicts until explicit supersession, and fails closed on omissions/corruption', () => {
+    const r = record(), pending = renderReferralRecord(r);
+    r.rulings = [rule(r), { ...rule(r, 'block'), id: 'r2' }];
+    expect(referralRecordState(r).pending).toHaveLength(1);
+    const conflict = renderReferralRecord(r);
+    const resolution = { ...r, rulings: [...r.rulings, { ...rule(r), id: 'r3', supersedes: ['r1', 'r2'] }] };
+    expect(readReferralRecords([conflict, renderReferralRecord(resolution)]).malformed).toBe(false);
+    expect(referralRecordState(resolution).pending).toEqual([]);
+    r.rulings[1].supersedes = 'r1';
+    expect(referralRecordState(r).blocked).toHaveLength(1);
+    const completed = renderReferralRecord(r);
+    expect(readReferralRecords([pending, completed, completed, pending]).malformed).toBe(false);
+    expect(readReferralRecords([completed + '\n<!-- mandatory-referrals-v1: partial']).malformed).toBe(true);
+    expect(readReferralRecords([completed, pending]).malformed).toBe(true);
+    expect(readReferralRecords([pending, '<!-- mandatory-referrals-v1: %truncated']).malformed).toBe(true);
+    expect(validateJuryEvent({ type: 'mandatory-referrals', round: 0, record: r }).event.record).toEqual(r);
   });
 });

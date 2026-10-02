@@ -3,9 +3,11 @@ bornAs: xu97sqw
 kind: story
 size: 3
 parent: "4075"
-status: open
+status: resolved
 scope: ["we:scripts/check-standards.mjs", "we:scripts/check-standards-rules.mjs", "we:scripts/__tests__/check-standards.test.mjs", "we:docs/agent/backlog-workflow.md"]
 dateOpened: "2026-09-28"
+dateStarted: "2026-10-01"
+dateResolved: "2026-10-01"
 preparedDate: "2026-09-30"
 preparedAgainstSha: "bc9db934c4b93158341ba01a74dccb71583765fc"
 tags: []
@@ -35,6 +37,7 @@ Idempotency key (do not edit): approval-prevention-key:chalbert/web-everything#2
 - **Stale premise corrected:** the cited `4364:141`, `4364:72`, `4364:6`, `4366:57`, `4366:6` line numbers no longer land on the guard text (both cards were re-prepared and rewritten since #2858's review). The five guards are therefore defined here from the card's own wording, not from those lines.
 - **Scope corrected:** old `scope:` listed the two *source* cards (`we:backlog/4364-…`, `we:backlog/4366-…`), which the build never edits (they are where the findings were observed). New scope is the real write-set: the standards gate, its rules module, its test file, and the authoring doc.
 - **Cut decision:** guard 2 (same backtick function name, different parameter lists across sections) is deferred to Follow-ups — see MVP.
+- **Built (2026-10-01):** guards 1 (authoring-doc checklist bullet), 3 (`deferredBlockedByFindings`, error), 4 (`scopeMissingTestFile`, warn), 5 (`bodyDeliverablesMissingFromScope`, warn) shipped with unit tests; guard 2 deferred (Follow-ups). Corpus ratchet ceiling for guards 4+5 measured at 190 findings.
 
 ## Design
 

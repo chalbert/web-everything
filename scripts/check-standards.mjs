@@ -57,7 +57,7 @@ import {
   validateModuleResolutionLock,
   validateRenderersNotPublished, validateReferenceRuntimeForms,
   validateNoDuplicateManifestKeys,
-  findUnquotedColonScalars, lintBacklogItemRendering,
+  findUnquotedColonScalars, describeUnparseableFrontmatter, lintBacklogItemRendering,
   RESEARCH_REVIEW_HORIZON_DEFAULT, deriveResearchFreshness,
   validateCapabilityPresence, validateRetirementShape,
   validatePlugDualMode, validateTemplateA11y, validateBlockImplConformance,
@@ -84,6 +84,7 @@ import {
   buildTrackedPathIndex, scopeBasenameMismatches, scopeBasenameMismatchMessage,
   checkLeashPin,
   findRelativeNodeScriptsAfterLaneCd,
+  scopeMissingTestFile, bodyDeliverablesMissingFromScope, deferredBlockedByFindings,
   dirLevelScopeFinding,
 } from './check-standards-rules.mjs';
 // #3637 — the declared POC branches, so a `deliveryTarget:` naming an UNregistered one is a gate error.
@@ -108,6 +109,7 @@ import {
   HASH_PATH_CITE_SOURCE, findHashPathCitesInGrepLines,
   BACKLOG_GLOB_CITE_SOURCE, buildBacklogResolvableIds,
   findDanglingBacklogGlobCitesInGrepLines,
+  findBlankLineLoci, makeMemoizedLineReader,
 } from './lib/citation-check.mjs';
 import { TRUST_CHAIN, POLICY_SPEC_BASENAMES } from './lib/gate-config.mjs';
 // #2892 — the leash-pin rule asserts against the REAL rubric, not a copy of its predicate.
@@ -940,7 +942,13 @@ mark("6d-bis. Per-item RENDERING lints (#290 raw-HTML · #441 buried-fork · mis
 // the typo at author time and prompt the quote-fix.
 for (const file of readdirSync(join(ROOT, 'backlog')).filter((f) => f.endsWith('.md'))) {
   const raw = readFileSync(join(ROOT, 'backlog', file), 'utf8');
-  const hits = findUnquotedColonScalars(raw);
+  const { colonHits: hits, parseReason } = describeUnparseableFrontmatter(raw);
+  // Non-colon parse failure (unclosed quote, tab indent, bad flow collection…) — the colon scan found nothing
+  // to name, but the loader still SKIPS the item (#4451).
+  if (!hits.length && parseReason) {
+    err(`Backlog item "${file.replace(/\.md$/, '')}" has unparseable frontmatter — ${parseReason}. ` +
+      `The loader silently SKIPS the whole item, so no other rule ever sees it. Fix the YAML.`);
+  }
   for (const h of hits) {
     err(`Backlog item "${file.replace(/\.md$/, '')}" has an unquoted colon in frontmatter — ` +
       `\`${h.key}: ${h.value}\` (line ${h.line}). YAML reads the embedded \`: \` as a nested mapping ` +
@@ -980,12 +988,15 @@ mark("6d-quinquies. Unquoted-colon scalar in frontmatter (#453)");
         .split('\0').filter(Boolean));
   } catch { /* non-git environment — the scope-path WARN below is simply not emitted */ }
   for (const file of readdirSync(join(ROOT, 'backlog')).filter((f) => f.endsWith('.md'))) {
-    let raw;
-    try { raw = matterFm(readFileSync(join(ROOT, 'backlog', file), 'utf8')).data; }
-    catch { continue; } // a malformed-YAML item is already reported by the unquoted-colon scan above
+    let raw, body = '';
+    try { const fm = matterFm(readFileSync(join(ROOT, 'backlog', file), 'utf8')); raw = fm.data; body = fm.content; }
+    catch { continue; } // a malformed-YAML item is already reported by the frontmatter-parse scan above
+    const id = file.replace(/\.md$/, '');
+    // #4448 guard 3 — validate the RAW field here (the loader drops unknown/wrong-typed fields and would hide it).
+    const selfNum = (/^(\d+)-/.exec(id) || [])[1];
+    for (const msg of deferredBlockedByFindings(raw, seenNums, selfNum)) err(`Backlog item "${id}" ${msg}`);
     const scope = raw?.scope;
     if (scope === undefined) continue;
-    const id = file.replace(/\.md$/, '');
     if (!Array.isArray(scope)) {
       err(`Backlog item "${id}" scope must be an array of repo-qualified path prefixes (e.g. ["we:src/backlog-view/", "we:docs/agent/"])`);
       continue;
@@ -1042,6 +1053,13 @@ mark("6d-quinquies. Unquoted-colon scalar in frontmatter (#453)");
     // redden exactly that greenfield case.
     for (const finding of scopeBasenameMismatches(raw, trackedIndex))
       warn(scopeBasenameMismatchMessage(id, finding));
+
+    // ── #4448 guards 4 + 5 — scope vs. what the card commits to. WARN only; `scopeRationale:` clears both. ──
+    for (const f of scopeMissingTestFile(raw, trackedIndex, body))
+      warn(`Backlog item "${id}" scopes "${f.entry}" and mandates a test plan, but its tracked test "we:${f.testPath}" is not in scope: — the lease will not cover the test the build must edit (#4448). Add it, or add a \`scopeRationale:\` note.`);
+    const undeclared = bodyDeliverablesMissingFromScope(raw, body);
+    if (undeclared.length)
+      warn(`Backlog item "${id}" names deliverable${undeclared.length > 1 ? 's' : ''} ${JSON.stringify(undeclared)} under ## MVP / ## Done when that ${undeclared.length > 1 ? 'are' : 'is'} missing from scope: (#4448). Add ${undeclared.length > 1 ? 'them' : 'it'}, or add a \`scopeRationale:\` note.`);
   }
 }
 
@@ -1816,6 +1834,41 @@ try {
 }
 
 mark("6f-ii-d. DANGLING BACKLOG-GLOB CITATION (#4318)");
+// ── 6f-ii-e. BLANK-LINE CITATION (#4454) ───────────────────────────────────────────────────────────
+// Gate 5 only bounds-checks a `we:<path>:<line>` cite, so a cite into an edited file stays green while it
+// points at unrelated text. A deterministic gate cannot judge an English claim about control flow; the
+// cheapest mechanical drift signal is that the cited START line is blank (never what a card meant to point
+// at). Pure detector: findBlankLineLoci (scripts/lib/citation-check.mjs). A cite drifting onto unrelated
+// NON-blank text still passes — the content-aware check is a follow-up.
+//
+// DELIBERATELY OUTSIDE the Rust-port branch above (same reasoning as 6f-ii-b/c/d): a new detector the port
+// doesn't know must never silently not-run, and findDanglingLoci stays byte-identical for the parity test.
+// Per-file and stateless, so `scopedReaddir` safely narrows it under `--local --files`. WARN via
+// CITATION_GATES_ENFORCED — the historical corpus carries pre-gate hits.
+try {
+  const emit5 = CITATION_GATES_ENFORCED ? err : warn;
+  const relExists5 = (p) => existsSync(join(ROOT, p));
+  const readLines5 = makeMemoizedLineReader((p) => readFileSync(join(ROOT, p), 'utf8'));
+  const scanBlank = (dir, exts) => {
+    const abs = join(ROOT, dir);
+    for (const name of scopedReaddir(dir, exts)) {
+      const rel = `${dir}${name}`;
+      for (const f of findBlankLineLoci(readFileSync(join(abs, name), 'utf8'), { fileExists: relExists5, readLines: readLines5 }))
+        emit5(`${rel}: cites \`${f.locus}\` but line ${f.line} of that file is blank — a blank line is never ` +
+          `what a citation meant to point at, so the cited file has drifted since the cite was written (#4454). ` +
+          `Re-grep the line and re-point the cite, or use the drift-immune \`we:<path>#<symbol>\` form.`,
+          { kind: 'citation-blank-line', file: rel });
+    }
+  };
+  scanBlank('backlog/', ['.md']);
+  scanBlank('docs/agent/', ['.md']);
+  scanBlank('reports/', ['.md']);
+  scanBlank('agent-memory-src/', ['.md']);
+} catch (e) {
+  err(`blank-line citation gate failed: ${e.message}`);
+}
+
+mark("6f-ii-e. BLANK-LINE CITATION (#4454)");
 // ── 6f-iii. PROVENANCE gate (#3026) — a backticked identifier in prose must resolve, or be marked ──
 // The one citation form the #2821 subset cannot reach. Gates 3/5/10 are all LOCUS-shaped (a path, a line,
 // an anchor); a bare `` `validateTodoMarkerBlock` `` in a sentence is none of those, so the highest-frequency

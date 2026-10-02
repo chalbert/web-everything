@@ -90,8 +90,8 @@ export function buildCiHealComment({ actor = 'conveyor CI-heal agent', reason = 
     ...(head ? [`head: ${head}`] : []),
     '',
     `${why}; ${actor} rebased onto current \`main\`, repaired the failing check, and re-pushed HEAD.`,
-    'Only the CI axis was repaired — the review gate (`review:human` / `review:pending`) was NOT touched. A human ' +
-      '`/review` (or the drain AI-review) still verdicts as before; the drain lands it once green and reviewed.',
+    'This records the CI repair, not a review verdict. Existing `review:human` / `review:pending` holds stay in place; ' +
+      'a live `review:accepted` may be re-armed separately for review. The drain lands it once green and reviewed.',
   ].join('\n');
 }
 

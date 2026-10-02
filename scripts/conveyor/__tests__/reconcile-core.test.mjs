@@ -3152,6 +3152,13 @@ describe('draft-first PRs — reconcile-core.mjs (operator-approved 2026-09-27)'
 });
 
 describe('fix waiting episode', () => {
+  it('ages a PR without an episode marker from its creation, and refuses a capped file snapshot', () => {
+    const source = pr1563({ createdAt: '2026-09-29T12:00:00Z',
+      files: Array.from({ length: 100 }, (_, i) => ({ path: `file-${i}` })) });
+    const result = planReconcile({ prs: [source], agents: [], durableCounts: {}, now: NOW });
+    expect(result.dispatch[0]).toMatchObject({ kind: 'fix', waitingSince: source.createdAt, files: null });
+  });
+
   it('projects the review episode into an actual fix dispatch row', () => {
     const comments = [{ body: '🔁 review — changes requested', author: { login: 'web-everything' }, createdAt: '2026-09-30T12:00:00Z' }];
     const result = planReconcile({ prs: [pr1563({ comments })], agents: [], durableCounts: {}, now: NOW });

@@ -14,7 +14,7 @@ describe('operation routing policy', () => {
   it('resolves aliases, ordered availability fallback, and inherited routes', () => {
     expect(resolveOperationRoute({ operation: 'prepare-item' })).toMatchObject({ provider: 'codex', model: 'gpt-6-astra', fallback: [{ provider: 'claude', model: 'claude-sonnet-5-5' }] });
     expect(resolveOperationRoute({ operation: 'prepare-item', available: ['claude'] })).toMatchObject({ provider: 'claude', model: 'claude-sonnet-5-5', fallback: [] });
-    expect(resolveOperationRoute({ operation: 'build' })).toBeNull();
+    expect(resolveOperationRoute({ operation: 'build' })).toMatchObject({ provider: 'codex', effort: 'high' });
     expect(() => resolveOperationRoute({ operation: 'prepare-item', available: [] })).toThrow(/no available route/);
   });
   it.each([
@@ -48,20 +48,20 @@ describe('operation routing policy', () => {
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
   it('supports task types and per-seat operation keys without changing code', () => {
-    const policy = copy(); policy.taskTypes.bugfix = { provider: 'codex', model: 'gpt-6-sol', fallback: [] };
+    const policy = copy(); policy.operations.fix = { inherit: true }; policy.taskTypes.bugfix = { provider: 'codex', model: 'gpt-6-sol', fallback: [] };
     policy.operations['review-seat:security'] = { provider: 'agy-claude', model: 'opus', fallback: [] };
     expect(resolveOperationRoute({ operation: 'fix', taskType: 'bugfix', policy })).toMatchObject({ provider: 'codex', model: 'gpt-6-sol' });
     expect(resolveOperationRoute({ operation: 'review-seat', taskType: 'security', policy })).toMatchObject({ provider: 'agy-claude', model: 'claude-opus-4-6-thinking' });
   });
-  it('keeps the critical gate ahead of an explicit provider override, and reads its kinds from policy', () => {
+  it('keeps the critical gate ahead of an explicit provider override, even if the policy omits the operation kind', () => {
     const policy = copy(); policy.operations.build = { provider: 'codex', model: 'default', fallback: [{ provider: 'claude', model: 'opus' }] };
     const dispatch = { kind: 'build', scopePaths: ['we:scripts/lib/critical-work.mjs'], size: 1, risk: 'high' };
     expect(decideDispatchRoute(dispatch, { routingPolicy: policy }).policyRoute).toMatchObject({ provider: 'claude', model: 'claude-opus-5' });
     policy.criticalWorkGate.kinds = [];
-    expect(decideDispatchRoute(dispatch, { routingPolicy: policy }).policyRoute).toMatchObject({ provider: 'codex', model: 'gpt-6-astra' });
+    expect(decideDispatchRoute(dispatch, { routingPolicy: policy }).policyRoute).toMatchObject({ provider: 'claude', model: 'claude-opus-5' });
   });
   it('prepare policy reaches the actual launcher and reports the selected fallback model', () => {
-    const routing = decideDispatchRoute({ kind: 'prepare-item' });
+    const routing = decideDispatchRoute({ kind: 'prepare-item', cardPath: 'we:backlog/9001-card.md' });
     const request = { launchKind: 'prepare-item', policyRoute: routing.policyRoute, probationWorker: routing.probationWorker, reportModel: vi.fn() };
     const probation = vi.fn(() => 'pid:123'); const agent = vi.fn(() => 'claude-session');
     expect(routeDispatchProvider(request, { probationLaunch: 'on', scriptExists: () => true, probation, agent })).toBe('pid:123');
@@ -80,7 +80,7 @@ describe('operation routing policy', () => {
 it('a child uses the inherited last-good snapshot even while the policy file is syntactically broken', () => {
   const dir = mkdtempSync(join(tmpdir(), 'routing-policy-child-'));
   try {
-    for (const file of ['dispatch-routing-policy-source.mjs', 'dispatch-routing-policy.mjs']) copyFileSync(`scripts/lib/${file}`, join(dir, file));
+    for (const file of ['dispatch-routing-policy-source.mjs', 'codex-model-routing.mjs', 'dispatch-routing-policy.mjs']) copyFileSync(`scripts/lib/${file}`, join(dir, file));
     writeFileSync(join(dir, 'dispatch-routing-policy.json'), '{broken edit');
     const moduleUrl = pathToFileURL(join(dir, 'dispatch-routing-policy.mjs')).href;
     const result = execFileSync(process.execPath, ['--input-type=module', '-e', `import { resolveOperationRoute } from ${JSON.stringify(moduleUrl)}; console.log(JSON.stringify(resolveOperationRoute({operation:'prepare-item'})));`], {
@@ -143,4 +143,63 @@ describe('review-round regressions (PR 3209)', () => {
     expect(routeDispatchProvider(request, { probationLaunch: 'off', registry, scriptExists: () => true, providerAvailable: () => true, agent })).toBe('pid:9');
     expect(agent).not.toHaveBeenCalled();
   });
+});
+
+it('adapts effort and provider to bounded prepares, design and mechanical work', () => {
+  expect(resolveOperationRoute({ operation: 'prepare-item', size: 3, wellScoped: true, designQuestion: false })).toMatchObject({ provider: 'agy-gemini', effort: 'low' });
+  for (const context of [{ size: 5 }, { size: 2, designQuestion: true }, {}]) {
+    expect(resolveOperationRoute({ operation: 'prepare-item', ...context })).toMatchObject({ provider: 'codex', model: 'gpt-6-astra' });
+  }
+  expect(resolveOperationRoute({ operation: 'prepare-item', size: 5 }).effort).toBe('high');
+  expect(resolveOperationRoute({ operation: 'build', taskType: 'doc-fix' }).effort).toBe('low');
+  expect(resolveOperationRoute({ operation: 'build', taskType: 'test-fix' })).toMatchObject({ provider: 'agy-gemini', model: 'gemini-3.8-flash', effort: 'low' });
+  expect(resolveOperationRoute({ operation: 'ci-heal' })).toBeNull();
+  expect(resolveOperationRoute({ operation: 'fix' })).toBeNull();
+});
+
+it.each(['codex', 'claude', 'antigravity', 'agy-claude', 'agy-gemini'])('rejects unknown %s effort and retains the last good edit', provider => {
+  const good = copy(); let contents = JSON.stringify(good); const log = vi.fn();
+  const reader = createRoutingPolicyReader({ read: () => contents, log });
+  const before = reader();
+  good.operations.fix.effort[provider] = 'impossible'; contents = JSON.stringify(good);
+  expect(() => validateRoutingPolicy(good)).toThrow(/unknown effort "impossible"/);
+  expect(reader()).toBe(before);
+  expect(log).toHaveBeenCalledWith(expect.stringContaining('keeping last good policy'));
+});
+
+it('accepts every shared Codex effort key and rejects a non-Codex ultra effort', async () => {
+  const { CODEX_EFFORT_MAP } = await import('../codex-model-routing.mjs');
+  for (const effort of Object.keys(CODEX_EFFORT_MAP)) {
+    const policy = copy(); policy.operations.build.effort.codex = effort;
+    expect(resolveOperationRoute({ operation: 'build', policy: validateRoutingPolicy(policy) }).effort).toBe(effort);
+  }
+  const policy = copy(); policy.operations.build.effort.claude = 'ultra';
+  expect(() => validateRoutingPolicy(policy)).toThrow(/unknown effort "ultra" for claude/);
+});
+
+it('accepts and reports a reasoned explicit model pin through the selected native fallback', async () => {
+  const { defaultClaudeProvider } = await import('../../operations/dispatch-lane-io.mjs');
+  const routing = decideDispatchRoute({ kind: 'prepare-item', cardPath: 'we:backlog/9001-card.md' });
+  for (const pin of ['claude-custom-explicit-pin', 'opus']) {
+    const spawnAgent = vi.fn(() => 'backgrounded · abc12345');
+    const reportModel = vi.fn();
+    const probation = vi.fn(() => { throw new Error('must honor the native model pin'); });
+    routeDispatchProvider({ launchKind: 'prepare-item', prompt: 'prepare',
+      policyRoute: routing.policyRoute, probationWorker: routing.probationWorker,
+      extraArgs: ['--model', pin], modelReason: 'operator selected this model for this run', reportModel,
+    }, { probationLaunch: 'on', scriptExists: () => true, probation,
+      agent: request => defaultClaudeProvider(request, { spawnAgent }) });
+    expect(spawnAgent.mock.calls[0][0]).toEqual(expect.arrayContaining(['--model', pin]));
+    expect(reportModel).toHaveBeenLastCalledWith(pin === 'opus' ? 'claude-opus-5' : pin);
+    expect(probation).not.toHaveBeenCalled();
+  }
+});
+
+it.each(['fix', 'ci-heal'])('%s retains inherited repair routing despite a global task-type policy', kind => {
+  const policy = copy();
+  const dispatch = { kind, scopePaths: ['we:scripts/example.mjs'], risk: 'low', size: 2 };
+  const inherited = decideDispatchRoute(dispatch, { routingPolicy: { ...policy, taskTypes: {} } });
+  const routed = decideDispatchRoute(dispatch, { routingPolicy: policy });
+  expect(routed).toEqual(inherited);
+  expect(routed.policyRoute).toBeUndefined();
 });
