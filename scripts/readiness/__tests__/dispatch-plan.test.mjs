@@ -1368,6 +1368,16 @@ describe('readPrLimitHeld — the per-round PR count stays local and bounded (xb
     expect(r.held).toBe(true);
   });
 
+  it('PRs the per-round cap leaves unresolved count toward the limit, so the bound never fails the hold open', async () => {
+    const { countOpts } = setup();
+    // limit above the cap: 3 resolved + 5 unresolved = 8 possible AI PRs ≥ 6, so intake stays held on a cold cache
+    countOpts.env = { WE_PR_LIMIT_WE: String(DISPATCH_PR_COUNT_API_CAP + 3) };
+    const r = await readPrLimitHeld({ countOpts, isGlobalOff: () => false });
+    expect(r.counted.unresolved).toBeGreaterThan(0);
+    expect(r.counted.count).toBeLessThan(DISPATCH_PR_COUNT_API_CAP + 3);
+    expect(r.held).toBe(true);
+  });
+
   it('global-off lifts the hold regardless of the count', async () => {
     const { countOpts } = setup();
     countOpts.env = { WE_PR_LIMIT_WE: '0' };

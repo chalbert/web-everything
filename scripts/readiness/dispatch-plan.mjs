@@ -280,7 +280,10 @@ export async function readPrLimitHeld({ countOpts = {}, isGlobalOff } = {}) {
   const { countOpenPrsForDispatch, isGlobalOffLive, decideOpenPr } = await import('../lib/pr-limit.mjs');
   const counted = countOpenPrsForDispatch('we', countOpts);
   const globalOff = isGlobalOff ? isGlobalOff() : isGlobalOffLive();
-  const held = !decideOpenPr({ repoKey: 'we', limit: counted.limit, openCount: counted.count, globalOff }).allowed;
+  // The cap can leave PRs unresolved; each is possibly AI-authored, so count it toward the limit (upper bound) until a
+  // later round resolves it from the cache — otherwise the bound would make the hold silently fail open.
+  const openCount = counted.count === null ? null : counted.count + (counted.unresolved ?? 0);
+  const held = !decideOpenPr({ repoKey: 'we', limit: counted.limit, openCount, globalOff }).allowed;
   return { held, counted };
 }
 
