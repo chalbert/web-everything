@@ -1,4 +1,4 @@
-import { requiresMandatoryReferral, referralFindingKey, mandatoryReferralReviewer, validateReferralRecord, referralRecordState, renderReferralRecord, readReferralRecords } from '../jury-core.mjs';
+import { mandatoryReferralState, requiresMandatoryReferral, referralFindingKey, mandatoryReferralReviewer, validateReferralRecord, referralRecordState, renderReferralRecord, readReferralRecords } from '../jury-core.mjs';
 /**
  * @file jury-core.test.mjs — proof of the #2654 (S2 of epic #2649) append-only JURY-LEDGER EVENT VOCABULARY:
  *   the `JURY_EVENT_TYPES` / `JUROR_STATUSES` enums and the pure `validateJuryEvent` / `normalizeJuryEvent`
@@ -1609,6 +1609,26 @@ describe('#4315 mandatory referral protocol', () => {
       expect(state.blocked).toHaveLength(result === 'block' ? 1 : 0);
       if (result === 'card') expect(referralRecordState(r).pending).toHaveLength(1);
     }
+  });
+  it('carries exact-key same-head rulings across runs using the ruling reviewer independence', () => {
+    const old = record(); old.rulings = [rule(old)];
+    const next = { ...record(), runId: 'fresh-run', reviewer: mandatoryReferralReviewer('fresh-run'), rulings: [] };
+    const comments = [old, next].map(renderReferralRecord);
+    const context = { head: old.head, body: old.authorBody, repo: old.repo, pr: old.pr };
+    expect(mandatoryReferralState(comments, context).pending).toEqual([]);
+    // The new reviewer being the author cannot invalidate an independent OLD ruling.
+    expect(mandatoryReferralState(comments, { ...context, body: `<!-- authored-by-actor: ${next.reviewer.id} -->` }).pending).toEqual([]);
+    expect(mandatoryReferralState(comments, { ...context, body: `<!-- authored-by-actor: ${old.reviewer.id} -->` }).pending).toHaveLength(1);
+    expect(mandatoryReferralState(comments, { ...context, head: 'b'.repeat(40) }).pending).toHaveLength(1);
+    next.rulings = [{ ...rule(next, 'block'), id: 'other-ruling' }];
+    expect(mandatoryReferralState([old, next].map(renderReferralRecord), context).pending).toHaveLength(1);
+    next.rulings = [{ ...rule(next), id: 'other-ruling' }];
+    expect(mandatoryReferralState([old, next].map(renderReferralRecord), context).pending).toEqual([]);
+    next.referrals[0] = { ...next.referrals[0], original: { ...finding, summary: 'different finding' } };
+    next.referrals[0].finding = normalizeFinding(next.referrals[0].original);
+    next.referrals[0].key = referralFindingKey(next.referrals[0].seat, next.referrals[0].original);
+    next.rulings = [];
+    expect(mandatoryReferralState([old, next].map(renderReferralRecord), context).pending).toEqual([next.referrals[0].key]);
   });
   it('preserves conflicts until explicit supersession, and fails closed on omissions/corruption', () => {
     const r = record(), pending = renderReferralRecord(r);

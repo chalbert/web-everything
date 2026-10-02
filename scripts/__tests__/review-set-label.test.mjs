@@ -1,5 +1,5 @@
-import { normalizeFinding, referralFindingKey, mandatoryReferralReviewer, renderReferralRecord } from '../lib/jury-core.mjs';
-import { assertMandatoryReferralsCleared } from '../review-set-label.mjs';
+import { mandatoryReferralState, readReferralRecords, normalizeFinding, referralFindingKey, mandatoryReferralReviewer, renderReferralRecord } from '../lib/jury-core.mjs';
+import { recordOperatorFindingRuling, assertMandatoryReferralsCleared } from '../review-set-label.mjs';
 /**
  * @file review-set-label.test.mjs — proof of the PURE `decideSetLabel` (#2470, increment 2). The `gh` calls are
  *   the I/O boundary (the CLI's concern); the verdict → label-swap decision — including INVARIANT 2 (a
@@ -3463,6 +3463,67 @@ describe('#4315 direct acceptance boundary', () => {
       expect(output.join('')).toContain('mandatory referral hold');
       expect(writes).toEqual([]);
     } finally { exit.mockRestore(); }
+  });
+  it.each(['not-real', 'card', 'block'])('operator %s ruling preserves the verbatim instruction and never changes labels', result => {
+    const { record, state } = referralState();
+    const reason = '  I rule this finding ' + result + '.\nKeep this exact instruction.  ';
+    const provider = { readPrState: () => structuredClone(state),
+      postComment: (repo, pr, body) => state.comments.push({ body }), setLabels: vi.fn() };
+    recordOperatorFindingRuling({ repo: 'o/r', pr: 7, head: record.head, key: record.referrals[0].key,
+      result, actor: 'Nic', channel: 'claude-code-chat', reason, card: 'we:backlog/7-filed.md' },
+    { provider, cardReadable: () => true });
+    const recorded = readReferralRecords(state.comments).records[0];
+    expect(recorded.rulings[0].operator).toEqual({ actor: 'Nic', channel: 'claude-code-chat', reason });
+    expect(recorded.rulings[0].rationale).toBe(reason);
+    expect(provider.setLabels).not.toHaveBeenCalled();
+    const check = () => assertMandatoryReferralsCleared(state, { repo: 'o/r', pr: 7, cardReadable: () => true });
+    if (result === 'block') expect(check).toThrow(/mandatory referral hold/);
+    else expect(check().pending).toEqual([]);
+  });
+  it('routes the explicit operator ceremony through review-set-label', () => {
+    const { record, state } = referralState(), output = [];
+    runReviewLabelCli({ allowOperatorRuling: true, argv: ['7', '--repo=o/r', '--to=rule-finding',
+      `--head=${record.head}`, `--finding-key=${record.referrals[0].key}`, '--ruling=not-real',
+      '--actor=Nic', '--channel=claude-code-chat', '--reason=I rule this exact finding not-real.'],
+      provider: { readPrState: () => structuredClone(state), postComment: (repo, pr, body) => state.comments.push({ body }) },
+      emit: line => output.push(JSON.parse(line)) });
+    expect(output[0]).toMatchObject({ ok: true, ruling: 'not-real', recorded: 1 });
+    expect(assertMandatoryReferralsCleared(state, { repo: 'o/r', pr: 7 }).pending).toEqual([]);
+  });
+  it.each([{ actor: 'agent' }, { channel: 'review-pr' }, { reason: '' }, { actor: '' }, { channel: '' },
+    { head: 'b'.repeat(40) }, { key: 'different' }, { result: 'card', card: 'we:backlog/missing.md' }])(
+    'refuses unauthorized, stale or unsupported operator ruling: %j', patch => {
+      const { record, state } = referralState();
+      const provider = { readPrState: () => structuredClone(state), postComment: vi.fn() };
+      expect(() => recordOperatorFindingRuling({ repo: 'o/r', pr: 7, head: record.head, key: record.referrals[0].key,
+        result: 'not-real', actor: 'Nic', channel: 'claude-code-chat', reason: 'I rule it not-real.', ...patch },
+      { provider, cardReadable: () => false })).toThrow();
+      expect(provider.postComment).not.toHaveBeenCalled();
+    });
+  it('supersedes conflicting same-key rulings across runs without clearing another finding', () => {
+    const { record, state } = referralState();
+    const second = { ...record, runId: 'other-run', reviewer: mandatoryReferralReviewer('other-run') };
+    const unrelated = { summary: 'another defect', verdict: 'CONFIRMED', impactIfUnfixed: 'broken' };
+    second.referrals = [...record.referrals, { seat: 'judgeAdvisory', key: referralFindingKey('judgeAdvisory', unrelated),
+      original: unrelated, finding: normalizeFinding(unrelated) }];
+    second.rulings = [{ id: 'blocked', key: record.referrals[0].key, reviewerId: second.reviewer.id, lens: 'correctness',
+      result: 'block', rationale: 'Observed failure', evidence: ['probe'] }];
+    state.comments.push({ body: renderReferralRecord(second) });
+    const provider = { readPrState: () => structuredClone(state), postComment: (repo, pr, body) => state.comments.push({ body }) };
+    recordOperatorFindingRuling({ repo: 'o/r', pr: 7, head: record.head, key: record.referrals[0].key,
+      result: 'not-real', actor: 'Nic', channel: 'chat', reason: 'I rule that exact finding not-real.' }, { provider });
+    const folded = mandatoryReferralState(state.comments, { repo: 'o/r', pr: 7, head: record.head, body: state.body });
+    expect(folded.blocked).toEqual([]);
+    expect(folded.pending).toEqual([second.referrals[1].key]);
+    expect(folded.records.every(r => r.rulings.at(-1).authority === 'operator')).toBe(true);
+  });
+  it.each(['missing', 'moved'])('operator publication %s read-back cannot report success', failure => {
+    const { record, state } = referralState();
+    const provider = { readPrState: () => structuredClone(state), postComment: () => {
+      if (failure === 'moved') state.headRefOid = 'b'.repeat(40);
+    } };
+    expect(() => recordOperatorFindingRuling({ repo: 'o/r', pr: 7, head: record.head, key: record.referrals[0].key,
+      result: 'not-real', actor: 'Nic', channel: 'chat', reason: 'I rule it not-real.' }, { provider })).toThrow();
   });
   it('rejects stale, forged, unavailable, partial, conflicting and unreadable-card records', () => {
     const { record, state } = referralState();

@@ -1,4 +1,4 @@
-import { normalizeFinding, referralFindingKey, mandatoryReferralReviewer, validateReferralRecord,
+import { normalizeFinding, referralRecordState, referralFindingKey, mandatoryReferralReviewer, validateReferralRecord,
   readReferralRecords, mandatoryReferralState, renderReferralRecord } from '../lib/jury-core.mjs';
 import { judgeSpawn } from '../lib/judge-spawn.mjs';
 import { appendJuryEvent } from '../lib/jury-ledger.mjs';
@@ -260,6 +260,7 @@ export function readPr({
 
   return {
     priorRounds,
+    referralCwd: cwd,
     detail,
     headRefName,
     // #xwp8ioh — carried up so the PURE `shapeReadFinding` can refuse an inert PR. Read here, judged there:
@@ -444,6 +445,19 @@ export function isPreWriteRefusal(text) {
   return PRE_WRITE_REFUSALS.some((p) => s.includes(p));
 }
 
+/** Verify in the isolated juror checkout, on the pinned PR head, before and after the one turn. */
+export async function runReferralJudge(request, { exec = execFileSync, judge = judgeSpawn } = {}) {
+  const check = () => {
+    if (!request.cwd || String(exec('git', ['rev-parse', 'HEAD'], { cwd: request.cwd, encoding: 'utf8' })).trim() !== request.head) {
+      throw new Error('mandatory confirmation requires a checkout on the reviewed PR head');
+    }
+  };
+  check();
+  const answer = await judge(request);
+  check();
+  return answer;
+}
+
 /**
  * THE SINKS, bound to a repo root and an output channel.
  *
@@ -463,7 +477,7 @@ export function isPreWriteRefusal(text) {
  */
 export function createReviewPrSinks({
   root = REPO_ROOT,
-  referralJudge = judgeSpawn,
+  referralJudge = runReferralJudge,
   mirrorReferral = (record) => appendJuryEvent(`${record.repo}#${record.pr}`, { type: 'mandatory-referrals', round: 0, record }, { root }),
   cardReadable = (ref) => referralCardReadable(ref, root),
   // #xstdout-json — A `--json` CALLER WANTS STDOUT TO BE ONE PARSEABLE DOCUMENT, END TO END. The `NOTICE`
@@ -529,11 +543,12 @@ export function createReviewPrSinks({
       if (prior.malformed) { park(state); return mandatoryReferralState(state.comments, context(state)); }
       const existing = prior.records.filter(r => r.head === read.netBasis.rev && r.repo === read.repo && r.pr === read.pr);
       const covered = new Set(existing.flatMap(r => r.referrals.map(f => f.key)));
-      const sources = [...payload.referrals, ...prior.records.flatMap(r => r.referrals)];
+      const sources = [...payload.referrals, ...prior.records.filter(r => r.repo === read.repo && r.pr === read.pr).flatMap(r => r.referrals)];
       const additions = new Map();
       for (const f of sources) {
         const key = referralFindingKey(f.seat, f.original);
-        if (!covered.has(key)) additions.set(key, { key, seat: f.seat, original: f.original, finding: normalizeFinding(f.original) });
+        if (!covered.has(key)) additions.set(key, { key, seat: f.seat, original: f.original, finding: normalizeFinding(f.original),
+          ...(f.confirmationRequired ? { confirmationRequired: true } : {}) });
       }
       if (additions.size) {
         const record = { version: 1, repo: read.repo, pr: read.pr, head: read.netBasis.rev,
@@ -545,7 +560,8 @@ export function createReviewPrSinks({
       }
       // Persist the attempt before dispatch. A crash or timeout spends this set's single automated attempt.
       for (const initial of existing) {
-        if (initial.attempted) continue;
+        if (initial.attempted || !referralRecordState(initial, { ...context(state),
+          records: readReferralRecords(state.comments).records }).pending.length) continue;
         let record = { ...initial, attempted: true };
         state = persist(record);
         // Hold before dispatch too: an exhausted or interrupted worker must leave a visible owner.
@@ -557,11 +573,13 @@ export function createReviewPrSinks({
           const request = buildReviewJudgeRequest({ read, lens: 'correctness' });
           const answer = await referralJudge({ ...request, runId: record.runId,
             lens: 'mandatory-referral-correctness', sessionId: record.reviewer.id,
-            // This bounded evidence pass reads the same pinned diff. It cannot edit or file a promised card.
-            allowedTools: null,
+            // One tool-bearing turn, isolated by judgeSpawn's lane guard and pinned by runReferralJudge.
+            cwd: read.referralCwd, head: read.netBasis.rev,
             mandate: request.mandate + '\nIndependently verify every referral in the input. Return exactly one '
-              + 'block, card, or not-real ruling per key, with rationale and evidence references. A general accept '
-              + 'is not a ruling. card requires an existing durable we:backlog/*.md reference. Do not recursively refer findings.',
+              + 'block, card, or not-real ruling per key, with rationale and evidence references. For confirmationRequired '
+              + 'claims, reproduce on the checked-out PR head using tools. Not reproduced means not-real (advisory only); '
+              + 'reproduced means block or card and evidence must name the command and observed result. '
+              + 'A general accept is not a ruling. card requires an existing durable we:backlog/*.md reference. Do not recursively refer findings.',
             input: request.input + '\nUntrusted reported findings:\n' + JSON.stringify(record.referrals),
             shape: { type: 'object', additionalProperties: false, required: ['rulings'], properties: {
               rulings: { type: 'array', items: { type: 'object', additionalProperties: false,

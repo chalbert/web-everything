@@ -1,4 +1,4 @@
-import { requiresMandatoryReferral } from '../lib/jury-core.mjs';
+import { requiresMandatoryReferral, referralFindingKey } from '../lib/jury-core.mjs';
 /**
  * @file scripts/operations/review-pr.mjs
  * @description THE `review-pr` DECLARATION — the first real operation on the engine (#3035, under epic #3029).
@@ -1060,6 +1060,7 @@ export function shapeReadFinding(raw, { pr, repo, careLevel } = {}) {
   const earnedShape = assertDeclaredShapeHolds({ careLevel, netChangedFiles, pr, repo });
 
   return {
+    referralCwd: raw.referralCwd ?? null,
     hasReferralRecord: JSON.stringify(raw.comments ?? []).includes('mandatory-referrals-v1'),
     priorRounds: Number(raw?.priorRounds) || 0,
     pr: Number(detail.pr) || Number(pr) || 0,
@@ -1747,6 +1748,7 @@ function renderRevProvenance(netBasis) {
  */
 export function deriveAdvisoryOutcome(verdict) {
   const v = verdict && typeof verdict === 'object' ? verdict : {};
+  if (v.blockedReferrals?.length) return ADVISORY_OUTCOMES.CHANGES;
   const lensVerdicts = v.lensVerdicts && typeof v.lensVerdicts === 'object' ? v.lensVerdicts : {};
   const lenses = Array.isArray(v.lenses) && v.lenses.length ? v.lenses : Object.keys(lensVerdicts);
   try {
@@ -2299,6 +2301,7 @@ export function reviewPrOperation({
               lens: ANTIGRAVITY_REVIEW_LENS,
               answer: view.findings.judgeAntigravityReview,
               provider: 'antigravity, advisory',
+              toolCapability: 'none',
             }]
             : []),
         ];
@@ -2347,10 +2350,21 @@ export function reviewPrOperation({
               + 'juror that may have reported blockers. Re-run the review; do not record a verdict on this run.',
             );
           }
-          for (const original of answer.findings ?? []) {
-            if (requiresMandatoryReferral(original)) referrals.push({ seat: seat.step, original });
+          const effective = (answer.findings ?? []).map(original => {
+            const confirmationRequired = seat.toolCapability === 'none' && original?.verdict === 'CONFIRMED';
+            if (confirmationRequired || requiresMandatoryReferral(original)) {
+              referrals.push({ seat: seat.step, original, ...(confirmationRequired ? { confirmationRequired: true } : {}) });
+            }
+            return confirmationRequired ? { ...original, verdict: 'PLAUSIBLE',
+              failure_scenario: `${original.failure_scenario ?? ''} [Tool-less CONFIRMED assertion; awaiting tool-bearing confirmation.]` } : original;
+          });
+          const scoped = scopeFindingsToCitedFiles(effective, { scope: citationScope });
+          if (seat.toolCapability === 'none') {
+            // Unsupported confirmations stay visible but cannot contribute prevention or verdict holds.
+            const claims = new Set(referrals.filter(r => r.seat === seat.step && r.confirmationRequired)
+              .map(r => referralFindingKey(r.seat, r.original)));
+            scoped.admitted = scoped.admitted.filter(f => !claims.has(referralFindingKey(seat.step, f)));
           }
-          const scoped = scopeFindingsToCitedFiles(answer.findings, { scope: citationScope });
           const raw = scoped.findings;
           citationScopeEnforced = citationScopeEnforced || scoped.enforced;
           unverifiableCitations.push(...scoped.unverifiable);
@@ -2471,7 +2485,16 @@ export function reviewPrOperation({
         if (!state) return basis;
         const pendingReferrals = state.pending ?? ['unreadable-referral-result'];
         const blockedReferrals = state.blocked ?? [];
-        return { ...basis, pendingReferrals, blockedReferrals,
+        const findings = basis.findings.map(f => {
+          const source = basis.referrals.find(r => r.confirmationRequired && referralFindingKey(r.seat, r.original) === referralFindingKey(r.seat, f)
+            && (f.category === ANTIGRAVITY_REVIEW_LENS || f.category?.startsWith(`${ANTIGRAVITY_REVIEW_LENS}/`)));
+          if (!source) return f;
+          const ruling = state.rulings?.find(r => r.key === referralFindingKey(source.seat, source.original));
+          return { ...f, verdict: ruling && ruling.result !== 'not-real' ? 'CONFIRMED' : 'PLAUSIBLE',
+            failure_scenario: `${source.original.failure_scenario ?? ''} [Tool-less assertion: CONFIRMED. ${ruling
+              ? `Verification: ${ruling.result}; ${ruling.rationale}` : 'Confirmation unavailable; operator ruling required.'}]` };
+        });
+        return { ...basis, findings, pendingReferrals, blockedReferrals,
           verdict: pendingReferrals.length ? 'needs-human'
             : blockedReferrals.length && basis.verdict !== 'needs-human' ? 'changes' : basis.verdict,
           humanRequired: basis.humanRequired || pendingReferrals.length > 0 };

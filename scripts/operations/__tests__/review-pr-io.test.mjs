@@ -1,4 +1,4 @@
-import { referralFindingKey } from '../../lib/jury-core.mjs';
+import { referralFindingKey, readReferralRecords, renderReferralRecord, mandatoryReferralReviewer } from '../../lib/jury-core.mjs';
 /**
  * @file review-pr-io.test.mjs — the `review-pr` io shell (#3035): the four sinks, with no `gh` and no network.
  *
@@ -20,7 +20,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import {
-  PR_VIEW_FIELDS, createReviewPrReader, createReviewPrSinks, filePrView, ghPrView, isPreWriteRefusal, priorRoundsFor,
+  runReferralJudge, PR_VIEW_FIELDS, createReviewPrReader, createReviewPrSinks, filePrView, ghPrView, isPreWriteRefusal, priorRoundsFor,
   prViewFileName, readPr, resolveViewReader, revParseCommit, reviewBodyPath, reviewSidecarDir,
   resolveSubjectCheckout,
 } from '../review-pr-io.mjs';
@@ -1058,6 +1058,30 @@ describe('#4315 durable referral effects', () => {
     expect(h.trace.indexOf('post')).toBeLessThan(h.trace.indexOf('judge'));
     expect(h.trace.slice(0, h.trace.indexOf('judge'))).toContain('read');
   });
+  it('skips an unattempted new record already covered by another run ruling', async () => {
+    const h = harness();
+    await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX);
+    const old = readReferralRecords(h.state.comments).records[0];
+    const next = { ...old, runId: 'new-record', reviewer: mandatoryReferralReviewer('new-record'), attempted: false, rulings: [] };
+    h.state.comments.push({ body: renderReferralRecord(next) });
+    const result = await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, { ...CTX, runId: 'next' });
+    expect(result.pending).toEqual([]);
+    expect(h.judge).toHaveBeenCalledTimes(1);
+    expect(h.state.comments).toHaveLength(4);
+  });
+  it('gives confirmation claims tools and the pinned checkout in one durable attempt', async () => {
+    const h = harness();
+    h.payload.read.referralCwd = '/isolated/lane-9';
+    h.payload.referrals[0].confirmationRequired = true;
+    h.payload.referrals[0].seat = 'judgeAntigravityReview';
+    const result = await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX);
+    expect(result.pending).toEqual([]);
+    const request = h.judge.mock.calls[0][0];
+    expect(request.allowedTools).toContain('Bash');
+    expect(request).toMatchObject({ cwd: '/isolated/lane-9', head: h.state.headRefOid });
+    expect(request.mandate).toContain('reproduce on the checked-out PR head using tools');
+    expect(result.records[0].referrals[0].confirmationRequired).toBe(true);
+  });
   it('posts and reads back rulings before returning clearance, then reuses them', async () => {
     const h = harness();
     const result = await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX);
@@ -1068,5 +1092,21 @@ describe('#4315 durable referral effects', () => {
     expect(h.trace.at(-1)).toBe('mirror:true');
     await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, { ...CTX, runId: 'another-checkout' });
     expect(h.judge).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('confirmation checkout pin', () => {
+  it('probes the checkout before and after the tool-bearing turn', async () => {
+    const exec = vi.fn(() => 'a'.repeat(40)), judge = vi.fn(async () => ({ value: {} }));
+    const request = { cwd: '/isolated/lane-9', head: 'a'.repeat(40), allowedTools: ['Bash'] };
+    await runReferralJudge(request, { exec, judge });
+    expect(exec).toHaveBeenCalledTimes(2);
+    expect(judge).toHaveBeenCalledWith(request);
+    exec.mockReturnValue('b'.repeat(40)); judge.mockClear();
+    await expect(runReferralJudge(request, { exec, judge })).rejects.toThrow(/PR head/);
+    expect(judge).not.toHaveBeenCalled();
+    exec.mockReturnValueOnce('a'.repeat(40));
+    await expect(runReferralJudge(request, { exec, judge })).rejects.toThrow(/PR head/);
+    expect(judge).toHaveBeenCalledTimes(1);
   });
 });
