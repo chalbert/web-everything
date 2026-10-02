@@ -573,6 +573,45 @@ describe('xng7q1p retry reservation and restart soak', () => {
     expect(await dispatchTimeoutRetry(fresh, { dir, repo: e.repo, effects })).toMatchObject({ status: 'requested' });
     expect(requests).toBe(1);
   }));
+  it('releases a fresh reservation when observation fails before any request is sent, so the next tick can retry', async () => harness(async (dir) => {
+    const e = evidence(); let fail = true; let requests = 0;
+    const effects = {
+      observe: (ev, j) => { if (fail) throw new Error('github 502'); return observe(ev, j); },
+      request: () => { requests++; return { status: 'confirmed' }; },
+    };
+    const opts = { dir, repo: e.repo, effects };
+    expect(await dispatchTimeoutRetry(e, opts)).toMatchObject({ reason: 'retry-observation-unknown:github 502' });
+    expect(requests).toBe(0);
+    fail = false;
+    expect(await dispatchTimeoutRetry(e, opts)).toMatchObject({ status: 'requested' });
+    expect(requests).toBe(1);
+  }));
+  it('releases a fresh reservation when the observed job is stale or closed, before any request is sent', async () => harness(async (dir) => {
+    const e = evidence(); let stale = true; let requests = 0;
+    const effects = {
+      observe: (ev, j) => (stale ? { ...observe(ev, j), open: false } : observe(ev, j)),
+      request: () => { requests++; return { status: 'confirmed' }; },
+    };
+    const opts = { dir, repo: e.repo, effects };
+    expect(await dispatchTimeoutRetry(e, opts)).toMatchObject({ reason: 'stale-head-or-job' });
+    expect(requests).toBe(0);
+    stale = false;
+    expect(await dispatchTimeoutRetry(e, opts)).toMatchObject({ status: 'requested' });
+    expect(requests).toBe(1);
+  }));
+  it('an observation failure on an ALREADY-pending (sent, ambiguous) reservation never releases it', async () => harness(async (dir) => {
+    const e = evidence(); let broken = false;
+    const effects = {
+      observe: (ev, j) => { if (broken) throw new Error('github 502'); return observe(ev, j); },
+      request: () => ({ status: 'ambiguous', reason: 'timeout' }),
+    };
+    const opts = { dir, repo: e.repo, effects };
+    expect(await dispatchTimeoutRetry(e, opts)).toMatchObject({ reason: 'retry-outcome-pending' });
+    broken = true;
+    expect(await dispatchTimeoutRetry(e, opts)).toMatchObject({ reason: 'retry-observation-unknown:github 502' });
+    broken = false;
+    expect(await dispatchTimeoutRetry(e, opts)).toMatchObject({ reason: 'retry-outcome-pending' });
+  }));
   it('GitHub effect names the repository and confirms only HTTP 201', async () => {
     const calls = [];
     const e = evidence();

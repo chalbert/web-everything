@@ -553,12 +553,21 @@ export async function dispatchTimeoutRetry(evidence, {
   }
   if (selected.waiting) return refuse('waiting-for-new-attempt');
   const target = selected.pending?.target ?? selected.target;
+  // A reservation THIS call created has had no request sent yet, so an early refusal must release it:
+  // left `pending` it would read as an ambiguous in-flight request and wedge every later tick on
+  // `retry-outcome-pending`. A reservation inherited from an earlier call (`selected.pending`) may have
+  // been sent, so it is never released here.
+  const releaseFresh = () => {
+    if (reservation) timeoutTransaction(path, initial, (state) => {
+      if (state.requests[reservation.id]?.status === 'pending') state.requests[reservation.id].status = 'rejected';
+    });
+  };
   let observed;
   try { observed = await effects.observe(evidence, target); }
-  catch (error) { return refuse(`retry-observation-unknown:${error.message}`); }
+  catch (error) { releaseFresh(); return refuse(`retry-observation-unknown:${error.message}`); }
   const bound = observed.repo === repo && observed.head === evidence.head && observed.runHead === evidence.head
     && observed.run === target.run && observed.jobRun === target.run && observed.job === target.job;
-  if (!bound || !observed.open) return refuse('stale-head-or-job');
+  if (!bound || !observed.open) { releaseFresh(); return refuse('stale-head-or-job'); }
   if (selected.pending) {
     if (observed.attempt <= target.attempt) return refuse('retry-outcome-pending');
     timeoutTransaction(path, initial, (state) => {
