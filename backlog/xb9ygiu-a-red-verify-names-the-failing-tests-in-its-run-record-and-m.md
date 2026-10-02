@@ -1,9 +1,10 @@
 ---
 kind: story
 size: 2
-status: open
+status: resolved
 scope: ["we:scripts/verify-lane.mjs", "we:scripts/lib/lane-verify.mjs", "we:scripts/lib/verify-failures.mjs", "we:scripts/operations/verify-io.mjs", "we:scripts/operations/verify.mjs", "we:scripts/__tests__/verify-lane.test.mjs", "we:scripts/__tests__/lane-verify.test.mjs", "we:scripts/lib/__tests__/verify-failures.test.mjs", "we:scripts/operations/__tests__/verify.test.mjs", "we:scripts/operations/__tests__/verify-integration.test.mjs"]
 dateOpened: "2026-10-01"
+dateResolved: "2026-10-01"
 preparedDate: "2026-10-01"
 preparedAgainstSha: "026425e9e4a9c067851692c796ec0620879dabcb"
 tags: []
