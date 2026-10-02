@@ -3,10 +3,11 @@ kind: story
 locus: webeverything
 size: 2
 parent: "4624"
-status: open
+status: resolved
 blockedBy: ["x9jwbpi"]
 scope: ["we:contracts/plateau-progress-view.schema.json", "we:contracts/plateau-progress-view.examples.json", "we:contracts/plateau-progress-view.test.ts"]
 dateOpened: "2026-10-01"
+dateResolved: "2026-10-02"
 preparedDate: "2026-10-02"
 preparedAgainstSha: "19fed1922fd32ca0639b0950a14f493451049118"
 tags: []
@@ -28,6 +29,16 @@ Premise checked 2026-10-02 against WE `19fed1922fd32ca0639b0950a14f493451049118`
 - Corrected context: the contract now has 13 named examples and a strict calendar-valid timestamp definition at we:contracts/plateau-progress-view.schema.json:1505. Reuse that definition for new evidence rather than copying the older lexical timestamp pattern at :266. Existing strict evidence mutation tests at we:contracts/plateau-progress-view.test.ts:116 and :140 are the available pattern. Preserve the newer health examples as well as schema-1/2 compatibility.
 - Plateau is a consumer already: we:../plateau-app/src/wip/progress-read.ts:52 projects runs but :56 fixes parent to null and derives repo from a PR or the WE work-item fallback (otherwise null); :58-59 emits basic role/state/time without executor evidence. Holds remain explicitly unavailable at we:../plateau-app/src/wip/wip-model.ts:358 and empty at :377. Its count/unknown-state regressions exist at we:../plateau-app/src/wip/progress-read.test.ts:24. These are downstream work, not reasons to add runtime to this scope.
 - Corrected scope remains the same three explicit WE files, including the conformance test. The resolved predecessor is recorded at we:backlog/x9jwbpi-publish-the-plateau-progress-view-contract-schema-2-with-val.md:4; retain the existing dependency edge and reconcile landed revisions before implementation. No goal or ratified decision changes.
+
+### Implementation proof (2026-10-02)
+
+- Reconciled the resolved prerequisite and current contract: all 13 original schema-1/2 and health fixtures remain byte-for-byte equivalent as parsed JSON. Only the three scoped contract files plus this bookkeeping card changed.
+- Red before: added mutations in we:contracts/plateau-progress-view.test.ts before changing the schema. Vitest reported 157 failed / 600 passed (757 total): invalid extensions were accepted, with no schema error path. The shell log-tail wrapper returned 0, so its status is not claimed as the Vitest exit status; the test summary is the red evidence.
+- Green after: `npx vitest run we:contracts/plateau-progress-view.test.ts` (drop the prefix to execute) exited 0: 759/759 tests passed, including the two added fixture cases. Mutations assert both instance path and keyword. Observed rejection examples: `/runs/0/executor` → `type`; `/runs/0/reportedModel/observedAt` → `pattern` at `#/definitions/healthInstant/pattern`; `/runs/0/reportedModel/evidenceKind` → `const`. Capacity mutations assert `/holds/0/capacity/used` and `/holds/0/capacity/limit` with `minimum` or `type`; file mutations assert `/holds/0/overlap/files/0/path` with `pattern`.
+- Independent Node/Ajv loading of we:contracts/plateau-progress-view.schema.json and we:contracts/plateau-progress-view.examples.json exited 0: all 15 named snapshots validated, and deep comparison against HEAD confirmed all 13 prior examples unchanged. No Plateau or UI loaded. New vectors cover all seven executor families, two repos/authors, parent-child linkage, cardless/unmatched work, explicit unknowns, requested/reported mismatch, and overlap/preparation/capacity holds.
+- Regression proof covers missing/null extensions, complete closed evidence, bad types/unknown keys/missing members, calendar-invalid instants and valid leap days, negative/fractional/string/boolean counts, measured zero/unknown/over-limit capacity, safe repo-qualified files versus absolute/traversal/bare references, and unassigned preparation with unknown raw codes. Existing negative-count, unsupported-major, source-freshness and health regressions remain intact.
+- Final gates: `npm run check:standards` exited 0 (0 errors, 5,228 warnings). `node we:scripts/verify-lane.mjs` exited 0: 2 suites / 774 tests passed, including the additionally selected we:scripts/operations/__tests__/deliver-item-run.test.mjs; its local standards pass had 0 errors / 771 warnings. `git diff --check` exited 0. No helper files, product/runtime changes or shared agent documentation edits.
+- These are declarative hand-off and compatibility proofs only. Live discovery, source joins, liveness/deduplication, relay/browser acceptance, the 120-second soak and phone proof remain assigned to downstream cards; this slice makes no deployed-product claim.
 
 ## Design
 
