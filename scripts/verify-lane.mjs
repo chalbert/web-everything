@@ -9,7 +9,7 @@
  * that the verification was BACKGROUNDABLE and yielding mid-run LOOKED complete.
  *
  * This is the sanctioned "run your checks" step for the build flow, and it removes that footgun two ways:
- *   1. It runs the suites in the FOREGROUND (`stdio:'inherit'`), blocking until they exit — "background then
+ *   1. It runs the suites in the FOREGROUND (streaming stdout/stderr), waiting until they exit — "background then
  *      yield" is no longer the path of least resistance, because the tool itself is a blocking call.
  *   2. It writes a lifecycle MARKER (`.git/.lane-verify`, keyed to HEAD): `running` at start, rewritten to
  *      `green`/`red` at finish. If the process is killed mid-run, the marker is stranded at `running` — so the
@@ -20,8 +20,8 @@
  * THE DEFAULT GATE IS DIFF-DRIVEN (#3372). Rather than an unconditional `npm run test:unit`, the default gate
  * decides off the lane's actual `git diff` against `origin/main` via `scripts/readiness/test-selection.mjs`
  * (#2681), using its LOCAL policy (xpnhz4o, `decideLocalSelection`): the working-tree diff runs only
- * `npx vitest related <changed files + tests naming them>`; only a config / setup / dependency / shared-test-helper
- * change, a deleted source file, or an empty/unresolvable diff falls back to the FULL `npm run test:unit` — and
+ * `npx vitest related <changed files + tests naming them>` (including shared helpers). A config/setup/dependency
+ * change, a deleted source file, or an empty/unresolvable diff now requires an explicit affected-test gate;
  * the gate prints which of the two it chose, and why, before it starts. CI still runs the full suite.
  * See `scripts/lib/verify-lane-gate.mjs` for the decision core and why defaulting the shrink at THIS call site
  * does not conflict with #2681's own "not defaulted [on the CI merge gate]" DoD.
@@ -38,9 +38,10 @@
  *     but ONLY while the marker is `running` — the one status a background process can still move off of. Returns the
  *     instant it settles green/red, and returns everything else (`absent`/`corrupt`/`break-glass`/`head-moved`)
  *     IMMEDIATELY too — waiting longer can never change any of those. A bounded "timeout" is returned only if it is
- *     still `running` when <ms> elapses (clamped to a safe ceiling well under this tool's own foreground window — see
- *     MAX_SAFE_WAIT_MS / waitForVerifySettle in lib/lane-verify.mjs). Replaces the old "request, then `check` again
- *     next turn, repeat" loop with ONE call per wait in the common case: same sanctioned `check` subcommand
+ *     still `running` when <ms> elapses (clamped to the total verify budget — see MAX_SAFE_WAIT_MS /
+ *     waitForVerifySettle in lib/lane-verify.mjs; a dispatched agent keeps each call under its Bash `timeout` by
+ *     using `--wait=540000` and re-running on `timeout`). Replaces the old "request, then `check` again
+ *     next turn, repeat" loop with ONE blocking call per wait: same sanctioned `check` subcommand
  *     (`we:scripts/guard-bash.mjs`'s allowlist matches on the subcommand word, not the flags after it, so this needed
  *     no guard change), just a flag that does the polling for you instead of handing it back to the caller's own turn
  *     loop.
@@ -58,16 +59,17 @@
  * accepted; 2 = red (suites failed — marker recorded red) / `check` verdict not-ok; 3 = usage / git error (no
  * marker written) / `reset` refused because a FOREIGN lease is live (own live lease no longer refuses, #3378).
  */
-import { execSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
+import { createFailureCollector } from './lib/verify-failures.mjs';
 import { writeFileSync, renameSync, existsSync, readFileSync, readdirSync, unlinkSync, lstatSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { VERIFY_FILENAME, VERIFY_PREVIOUS_FILENAME, verifyStartBody, verifyFinishBody, verifyGateDecision, readVerifyMarker, resolveVerifyOptions, waitForVerifySettle, resolveWaitCeilingMs } from './lib/lane-verify.mjs';
+import { VERIFY_FILENAME, VERIFY_PREVIOUS_FILENAME, verifyStartBody, verifyFinishBody, verificationInfrastructureFailure, verifyGateDecision, readVerifyMarker, resolveVerifyOptions, waitForVerifySettle, resolveWaitCeilingMs } from './lib/lane-verify.mjs';
 import { LEASE_FILENAME, isLeaseStale, isConfirmedOwnLease } from './lib/lane-lease.mjs';
 import { defaultPoolRoot } from './lib/lane-pool-paths.mjs';
 import { writeAllSync } from './lib/write-all-sync.mjs';
-import { resolveDefaultGate, describeGate, laneRelevantChangeSinceForRecord, computeWorkingTreeHash, stableTreeHash } from './lib/verify-lane-gate.mjs';
+import { resolveDefaultGate, explicitGateRefusal, describeGate, laneRelevantChangeSinceForRecord, computeWorkingTreeHash, stableTreeHash } from './lib/verify-lane-gate.mjs';
 import { admissionLockRoot, resolveCap, resolveTimeoutMs, acquireSlotBlocking, releaseOwnedSlot, ADMISSION_HELD_ENV, classifyCommandKind } from './readiness/heavy-admission.mjs';
 
 // ── tiny arg parsing (matches push-if-green.mjs / lane-pool.mjs) ─────────────────────────────────────
@@ -141,7 +143,7 @@ if (MODE === 'check') {
     }
     const ceilingMs = resolveWaitCeilingMs(requestedMs);
     if (ceilingMs < requestedMs) {
-      process.stderr.write(`⚠ --wait=${requestedMs}ms clamped to ${ceilingMs}ms — a single blocking wait must stay inside this tool's own safe foreground window.\n`);
+      process.stderr.write(`⚠ --wait=${requestedMs}ms clamped to ${ceilingMs}ms — a single blocking wait must stay inside the queue-plus-execution budget.\n`);
     }
     const result = await waitForVerifySettle({
       readRecord: readMarker,
@@ -163,7 +165,7 @@ if (MODE === 'check') {
     record: bareCheckRecord, headSha, breakGlass: VERIFY_BREAK_GLASS, requireVerified: REQUIRE_VERIFIED,
     laneRelevantChangeSince: laneRelevantChangeSinceForRecord({ record: bareCheckRecord, headSha, base: 'origin/main', runGit: git }),
   });
-  emit({ sha: headSha, status: v.status, reason: v.reason, ok: v.ok, detail: v.detail }, v.ok ? 0 : 2);
+  emit({ sha: headSha, ...v }, v.ok ? 0 : 2);
 }
 
 // #3378 review (rounds 2-4) — `isConfirmedOwnLease` itself now refuses an `ownerSession` match that is either
@@ -244,9 +246,35 @@ function readCheckoutScripts() {
   try { return Object.keys(JSON.parse(readFileSync(join(REPO, 'package.json'), 'utf8')).scripts || {}); } catch { return undefined; }
 }
 let GATE;
-if (typeof flags.gate === 'string') GATE = flags.gate;
-else {
+if (typeof flags.gate === 'string') {
+  GATE = flags.gate;
+  // A `request` (the only path a dispatched agent has) whose DEFAULT selection is blocked is the high-risk case —
+  // config/dependency/unknown/oversized diffs used to force the full suite. The agent-supplied gate must then be an
+  // affected-test shape, never an arbitrary command that would record a green for the surfaces that most need one.
+  // The dispatcher's own child (`--run-id`) re-checks at run time: the tree may have moved since `request`, and a gate
+  // accepted for a docs-only diff must not run, and record a green, once the diff reaches a config/dependency file.
+  const dispatchedChild = MODE === 'verify' && typeof flags['run-id'] === 'string';
+  if (MODE === 'request' || dispatchedChild) {
+    // Only a KNOWN diff whose selection is blocked counts; an unresolvable diff (no `origin/main`) is unchanged.
+    let defaultBlocked = false;
+    try {
+      const { decision } = resolveDefaultGate({ runGit: git, env: process.env, scripts: readCheckoutScripts() });
+      defaultBlocked = decision.mode === 'blocked' && Array.isArray(decision.changedFiles) && decision.changedFiles.length > 0;
+    } catch { /* cannot tell ⇒ unchanged behaviour */ }
+    const refusal = defaultBlocked ? explicitGateRefusal(GATE) : null;
+    if (refusal) {
+      // A dispatched child must leave a TERMINAL record (red, exit 3) — leaving the `running` request as it was would
+      // make the dispatcher re-spawn this same refusal on every sweep. A plain `request` records nothing.
+      if (dispatchedChild) {
+        writeMarker(verifyFinishBody(verifyStartBody({ sha: headSha, suites: GATE, startedAt: new Date().toISOString(), treeHash: null }),
+          { finishedAt: new Date().toISOString(), exitCode: 3, sha: headSha, suites: GATE, treeHash: null }));
+      }
+      emit({ sha: headSha, status: 'gate-refused', reason: 'explicit-gate-not-affected-test', ok: false, detail: `${refusal}. The default selection is blocked for this diff, so supply an affected-test gate such as \`--gate="npx vitest related <files> --run"\`; ${dispatchedChild ? 'recorded a red marker so it is not re-dispatched' : 'no marker was recorded'}.` }, 3);
+    }
+  }
+} else {
   const resolved = resolveDefaultGate({ runGit: git, env: process.env, scripts: readCheckoutScripts() });
+  if (resolved.decision.mode === 'blocked') emit({ sha: headSha, status: 'selection-required', reason: 'local-selection-bound', ok: false, detail: describeGate(resolved) }, 3);
   GATE = resolved.command;
   // xpnhz4o — always SAY whether this is a selected run or a full-suite fallback, and why (stderr, so `--json`
   // stdout stays one parseable document).
@@ -267,7 +295,7 @@ else {
 // ci-heal `gateFor` form and the canary's gate; a dispatched fix/ci-heal agent uses `request`/`check` instead, #4369), whose caller never lands through pr-land's finish-guard, so recording (or
 // archiving) a marker would only couple it to whatever a previous occupant of this clone left behind.
 const preStart = MODE === 'run' ? null : readMarker();
-if (preStart && !preStart.corrupt && (preStart.status === 'green' || preStart.status === 'red') && preStart.sha && preStart.sha !== headSha) {
+if (preStart && !preStart.corrupt && (['green', 'red', 'infrastructure-failure'].includes(preStart.status)) && preStart.sha && preStart.sha !== headSha) {
   writeFileSync(join(GIT_DIR, VERIFY_PREVIOUS_FILENAME), `${JSON.stringify(preStart, null, 2)}\n`);
 }
 
@@ -312,7 +340,7 @@ if (cacheHit) {
   emit({ sha: headSha, status: 'green', reason: 'cached', exitCode: preStart.exitCode ?? null, detail: cachedDetail }, 0);
 }
 
-if (MODE !== 'run') writeMarker(verifyStartBody({ sha: headSha, suites: GATE, startedAt: new Date().toISOString(), treeHash: currentTreeHash }));
+if (MODE !== 'run') writeMarker(verifyStartBody({ sha: headSha, suites: GATE, startedAt: new Date().toISOString(), treeHash: currentTreeHash, runId: typeof flags['run-id'] === 'string' ? flags['run-id'] : undefined }));
 
 // #3105 — `request` stops HERE: the marker is stamped, nothing has run yet, and this call already returns
 // (`emit` calls `process.exit`). The actual suite run is picked up by `scripts/conveyor/verify-dispatch.mjs`
@@ -355,7 +383,7 @@ if (admission.timedOut) {
   process.stderr.write(`heavy-command admission: acquired slot-${admission.slot} after waiting ${admission.waitedMs}ms (cap=${ADMISSION_CAP}).\n`);
 }
 
-// 3. Run the gate in the FOREGROUND, blocking until it exits (inherited stdio — the agent sees the output live).
+// 3. Run the gate in the FOREGROUND, waiting until it exits (forwarded stdio — the agent sees the output live).
 // #3383 (Skeptic review, 2026-09-14) — an UNCONDITIONAL marker, unlike the two admission log lines above
 // (which only print when there is something to report: a real wait, or a fail-open). This one always fires,
 // the instant before the gate itself starts, so a caller watching this process's stderr in real time
@@ -368,18 +396,36 @@ if (admission.timedOut) {
 const preGateTreeHash = MODE === 'run' ? null : treeHashNow();
 process.stderr.write(`⏱ gate execution starting (suites: ${GATE})\n`);
 let exitCode = 0;
+let signal = null;
+const collector = createFailureCollector({ cwd: REPO });
 try {
   // xaipsbs — the gate's own `npm run test:unit` / `check:standards` are wrapped in `heavy-admission.mjs run`;
   // this flag makes those nested wrappers pass through instead of asking for a second slot for the same work.
-  execSync(GATE, { cwd: REPO, stdio: 'inherit', env: { ...process.env, [ADMISSION_HELD_ENV]: '1' } });
+  ({ exitCode, signal } = await new Promise((resolveGate, reject) => {
+    const child = spawn(GATE, { shell: true, cwd: REPO, stdio: ['inherit', 'pipe', 'pipe'], env: { ...process.env, [ADMISSION_HELD_ENV]: '1' } });
+    for (const [name, fd] of [['stdout', 1], ['stderr', 2]]) {
+      child[name].on('data', chunk => {
+        collector.push(chunk, name);
+        // Flush each chunk before the terminal JSON; no pending writable queue can overtake it.
+        writeAllSync(fd, chunk);
+      });
+    }
+    child.on('error', reject);
+    child.on('close', (code, closeSignal) => resolveGate({ exitCode: Number.isFinite(code) ? code : 2, signal: closeSignal || null }));
+  }));
 } catch (e) {
+  signal = e?.signal || null;
   exitCode = Number.isFinite(e && e.status) ? e.status : 2;
 } finally {
   if (admission.ok) releaseOwnedSlot({ lockRoot: ADMISSION_LOCK_ROOT, cap: ADMISSION_CAP, owner: REPO });
 }
 
+const diagnostic = exitCode === 0 ? {} : { failureDetails: collector.finish() };
+
+const infrastructure = verificationInfrastructureFailure({ exitCode, signal });
+if (MODE === 'run' && infrastructure) emit({ sha: headSha, status: 'infrastructure-failure', reason: infrastructure.reason, exitCode, infrastructure, detail: infrastructure.detail }, 3);
 if (MODE === 'run') {
-  emit({ sha: headSha, status: exitCode === 0 ? 'green' : 'red', reason: 'run', exitCode, detail: exitCode === 0 ? 'gate passed (run mode — no marker recorded).' : `gate FAILED (exit ${exitCode}) — run mode, no marker recorded.` }, exitCode === 0 ? 0 : 2);
+  emit({ sha: headSha, status: exitCode === 0 ? 'green' : 'red', reason: 'run', exitCode, ...diagnostic, detail: exitCode === 0 ? 'gate passed (run mode — no marker recorded).' : `gate FAILED (exit ${exitCode}) — run mode, no marker recorded.` }, exitCode === 0 ? 0 : 2);
 }
 
 // 4. Rewrite the marker to its terminal green/red form — for the sha THIS run actually verified.
@@ -409,14 +455,16 @@ const startBody = onDisk && !onDisk.corrupt && onDisk.sha === headSha
 // The tree hash is recorded only if the tree held still from start, through the admission wait, to gate exit.
 const finished = verifyFinishBody(startBody, {
   finishedAt: new Date().toISOString(),
-  exitCode,
+  ...diagnostic,
+  exitCode, signal, infrastructure,
   sha: headSha,
   suites: GATE,
   treeHash: stableTreeHash(currentTreeHash, preGateTreeHash, treeHashNow()),
 });
 writeMarker(finished);
+if (infrastructure) emit({ sha: headSha, status: finished.status, reason: infrastructure.reason, exitCode, infrastructure, detail: infrastructure.detail }, 3);
 
 emit(
-  { sha: headSha, status: finished.status, reason: finished.status, exitCode, detail: finished.status === 'green' ? `suites passed — recorded green for ${headSha.slice(0, 8)} (delivery may proceed).` : `suites FAILED (exit ${exitCode}) — recorded red for ${headSha.slice(0, 8)}; the finish-guard will refuse to land until this is green.` },
+  { sha: headSha, status: finished.status, reason: finished.status, exitCode, ...diagnostic, detail: finished.status === 'green' ? `suites passed — recorded green for ${headSha.slice(0, 8)} (delivery may proceed).` : `suites FAILED (exit ${exitCode}) — recorded red for ${headSha.slice(0, 8)}; the finish-guard will refuse to land until this is green.` },
   finished.status === 'green' ? 0 : 2,
 );

@@ -54,6 +54,7 @@ export function buildWorkerArgv({ worker, weRoot, dir, taskFile, timeoutMs = PRO
     `--dir=${dir}`,
     `--task-file=${taskFile}`,
     `--model=${worker.model}`,
+    `--effort=${worker.effort ?? "medium"}`,
     `--timeout-ms=${timeoutMs}`,
     '--gate=none',
     '--json',
@@ -404,6 +405,7 @@ export function launchScorecardRow({ worker, pr, repo, handle, item = null, laun
   return {
     rubricVersion: 'probation-launch.1',
     provider: worker.provider,
+    effort: worker.effort ?? 'medium',
     model: worker.provider === 'antigravity' ? (modelEvidence.servedModel ?? 'unknown') : worker.model,
     ...(worker.provider === 'antigravity' ? { requestedModel: worker.model, servedModel: 'unknown', servedBackend: 'unknown', modelEvidence: 'unavailable', ...modelEvidence } : {}),
     subjectClass: 'work-agent',

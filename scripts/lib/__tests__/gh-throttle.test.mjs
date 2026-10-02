@@ -25,7 +25,7 @@ import {
   acquireGhSlotSync, releaseGhSlotSync, ghThrottleStatus,
   decideGhPointsSpend, acquireGhPointsSync, ghThrottleLogPath, recordGhCallLogEntry,
   acquireGhWriteBudgetSync, classifyGhWrite, deriveGhCaller,
-  runGhSync, execFileSyncThrottled, runGhCliPassthrough, stripGhDebug,
+  runGhSync, execFileSyncThrottled, runGhCliPassthrough, stripGhDebug, scanGhApiFlags,
 } from '../gh-throttle.mjs';
 
 function readJsonl(path) {
@@ -881,5 +881,23 @@ describe('stripGhDebug — fail-closed truncation and section-aware parsing (#44
     const out = stripGhDebug([...head, 'q', '', ...resp(200, ['< x-ratelimit-used: 3'], body), 'real error'].join('\n'));
     expect(out.responses).toEqual([{ status: 200, headers: { 'x-ratelimit-used': '3' } }]);
     expect(out.stderr).toBe('real error');
+  });
+});
+
+describe('scanGhApiFlags — exact parsed state per spelling (not just the classifyGhRead boolean)', () => {
+  it.each([
+    ['plain read', ['api', 'repos/o/n'], { methods: [], payload: false, unknown: false }],
+    ['--method=post (inline, uppercased)', ['api', '--method=post', 'r'], { methods: ['POST'], payload: false, unknown: false }],
+    ['--method get (separate)', ['api', '--method', 'get', 'r'], { methods: ['GET'], payload: false, unknown: false }],
+    ['-XPOST (attached)', ['api', '-XPOST', 'r'], { methods: ['POST'], payload: false, unknown: false }],
+    ['-iXPOST (clustered bool)', ['api', '-iXPOST', 'r'], { methods: ['POST'], payload: false, unknown: false }],
+    ['repeated --method keeps every one, in order', ['api', '--method', 'GET', 'r', '--method', 'POST'], { methods: ['GET', 'POST'], payload: false, unknown: false }],
+    ['-fk=v (attached payload)', ['api', 'r', '-fk=v'], { methods: [], payload: true, unknown: false }],
+    ['--input=f', ['api', 'r', '--input=f'], { methods: [], payload: true, unknown: false }],
+    ['-- never stops the scan', ['api', '--', '-XPOST', 'r'], { methods: ['POST'], payload: false, unknown: false }],
+    ['unknown short letter -z', ['api', '-z', 'r'], { methods: [], payload: false, unknown: true }],
+    ['value flag swallows the next arg (-H -XPOST is a header value)', ['api', '-H', '-XPOST', 'r'], { methods: [], payload: false, unknown: false }],
+  ])('%s', (_label, argv, expected) => {
+    expect(scanGhApiFlags(argv)).toEqual(expected);
   });
 });

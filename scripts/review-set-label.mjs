@@ -1,3 +1,4 @@
+import { mandatoryReferralState } from './lib/jury-core.mjs';
 /**
  * review-set-label.mjs — swap a PR's review label, INVARIANT-2 guarded (#2470, increment 2 of 2). Also the
  * SINGLE HOME of the shared review-label CLI harness (#2644): a PURE `decideSetLabel` decides the swap for a
@@ -73,7 +74,7 @@ import {
   // human-clearance detector and the accepted SHA to compare against — it already binds the `reviewed-sha` and
   // `cleared-human` markers to the SAME comment (see its own docstring), so the SHA it returns IS
   // `parseReviewedSha`'s answer whenever it is non-null; a second independent parse would only ever agree.
-  parseReviewedDiff, parseReviewedContribution, parseOperatorClearance,
+  parseReviewedSha, parseReviewedDiff, parseReviewedContribution, parseOperatorClearance,
   parseLatestHumanClearedSha, acceptanceCoversHead,
   // #x9krtkc (mutual-exclusivity fix, #2766/#2767) — the automated-escalation park decision and its detector,
   // re-exported below for the same reason `REASONLESS_BOUNCE_REFUSAL` is: this file is the SINGLE label home
@@ -385,6 +386,7 @@ export function decideSetLabel({ to, currentLabels = [], findingCount = null, re
       // `redteam:accepted` the PR still carries from before the fix.
       removeLabels: [REVIEW_LABELS.changes, REVIEW_LABELS.accepted, REVIEW_LABELS.redteamAccepted, READY_TO_MERGE_LABEL],
       keepsHuman: isHuman,
+      rearmFrom: wasChanges ? REVIEW_LABELS.changes : REVIEW_LABELS.accepted,
       reason: isHuman
         ? 're-armed — review:human KEPT as the sole hold (gate-self stays human-ceremony-only); review:pending '
           + 'NOT added — the human hold already says an independent review is owed (#x01u7az)'
@@ -885,7 +887,7 @@ export function runReviewLabelCli({
   let repo = (argv.find((a) => a.startsWith('--repo=')) || '').slice('--repo='.length);
   const actorArg = (argv.find((a) => a.startsWith('--actor=')) || '').slice('--actor='.length);
   const actor = actorArg || defaultActor;
-  const clearReason = (argv.find((a) => a.startsWith('--reason=')) || '').slice('--reason='.length).trim();
+  let clearReason = (argv.find((a) => a.startsWith('--reason=')) || '').slice('--reason='.length).trim();
   // #3007 — the SURFACE, read here so the ledger row can record it. The rendered COMMENT gets its channel
   // from the caller's `buildComment` closure (#2898); this read is only for the durable row, and it is the
   // same argv flag, so the two can never name different surfaces.
@@ -901,6 +903,13 @@ export function runReviewLabelCli({
   // only. Optional and validated here (fail closed on a malformed SHA) so a caller who does not have it yet —
   // there are none in this repo, but nothing stops a future one — still gets the pre-#x9krtkb re-read fallback.
   const newHeadArg = (argv.find((a) => a.startsWith('--new-head=')) || '').slice('--new-head='.length).trim();
+  // #xan09na — opt-in head-bound carry. Legacy drain callers remain a separate migration.
+  const expectHeadFlag = argv.find((a) => a === '--expect-head' || a.startsWith('--expect-head='));
+  const expectedHead = expectHeadFlag?.slice('--expect-head='.length).toLowerCase();
+  const guardedRestamp = expectHeadFlag !== undefined || (to === 'restamp' && channelArg === 'ci-heal');
+  if (guardedRestamp && (to !== 'restamp' || !/^[0-9a-f]{40}$/.test(expectedHead || '') || newHeadArg)) {
+    fail('guarded restamp requires --expect-head=<full 40-hex SHA> and cannot use --new-head');
+  }
   // #4333 — `--only-if=accepted` (rearm only): the child's own fresh read must still show `review:accepted`.
   const onlyIfArg = argv.find((a) => a.startsWith('--only-if='));
   const onlyIf = onlyIfArg === undefined ? null : onlyIfArg.slice('--only-if='.length);
@@ -1015,6 +1024,7 @@ export function runReviewLabelCli({
   let prComments = [];
   try {
     const parsed = provider.readPrState(repo, pr);
+    if (['accepted', 'restamp', 'clear-human'].includes(to)) assertMandatoryReferralsCleared(parsed, { repo, pr });
     currentLabels = Array.isArray(parsed.labels) ? parsed.labels : [];
     headSha = typeof parsed.headRefOid === 'string' ? parsed.headRefOid : '';
     // #2979 — the branch name the NET diff is resolved against (see the fingerprint block below). Same gh call,
@@ -1036,6 +1046,8 @@ export function runReviewLabelCli({
   } catch (e) {
     fail(ghErr(e, 'gh pr view failed'), 1);
   }
+
+  if (guardedRestamp && headSha !== expectedHead) fail('live head differs from --expect-head', 1);
 
   // #x9krtkb (bug 2) — THE OVERRIDE. `restamp` alone trusts an explicit `--new-head` over the `headRefOid` this
   // process just re-read, because for `restamp` alone that read can be racing the very push that produced the
@@ -1161,6 +1173,7 @@ export function runReviewLabelCli({
   // can therefore only ever cost a false re-park, never honour an accept it should not. Computed only for a
   // verdict that actually records an acceptance, so a `changes` verdict pays nothing.
   let reviewedDiff = '';
+  let diffScored = false;
   if (to === 'accepted' || to === 'clear-human' || to === 'restamp') {
     try {
       // `exec` MUST be execFileSync-shaped — `(cmd, argsArray, opts)`. Passing a shell-exec here is the exact
@@ -1185,11 +1198,35 @@ export function runReviewLabelCli({
       // too, so the process's location is the contract, not any single read's.
       const net = computeNetDiffText({
         exec: execFileSyncThrottled,
-        rev: headRefName,
-        fetchExtraRefs: headRefName ? [headRefName] : [],
+        rev: guardedRestamp ? expectedHead : headRefName,
+        fetchExtraRefs: guardedRestamp ? [] : headRefName ? [headRefName] : [],
       });
-      reviewedDiff = net && net.scored ? net.text : '';
+      diffScored = !!net?.scored && (!guardedRestamp || net.rev === expectedHead);
+      reviewedDiff = diffScored ? net.text : '';
     } catch { reviewedDiff = ''; /* miss → no marker → SHA-identity fallback (the stricter path) */ }
+  }
+
+  const carryEvidence = (comments) => {
+    const trusted = (Array.isArray(comments) ? comments : []).filter(isTrustedMarkerAuthor);
+    const latest = trusted.findLast((c) => parseReviewedSha([c]));
+    const acceptance = latest ? [latest] : [];
+    return {
+      acceptedSha: parseReviewedSha(acceptance),
+      acceptedDiff: parseReviewedDiff(acceptance),
+      acceptedContribution: parseReviewedContribution(acceptance),
+      humanClearedSha: parseLatestHumanClearedSha(acceptance),
+      // Detect a superseding trusted verdict even if it happens to repeat the same markers.
+      trustedComments: trusted,
+    };
+  };
+  const originalEvidence = guardedRestamp ? carryEvidence(prComments) : null;
+  if (guardedRestamp) {
+    const coverage = acceptanceCoversHead({ ...originalEvidence, headSha: expectedHead,
+      headDiff: reviewedDiff, headContribution: reviewedDiff });
+    if (!diffScored) fail('CI-heal carry unproven: net diff is unscored', 1);
+    if (!originalEvidence.acceptedDiff && !originalEvidence.acceptedContribution) fail('CI-heal carry unproven: trusted digest missing', 1);
+    if (!coverage.covers) fail('CI-heal carry unproven: ' + coverage.reason, 1);
+    clearReason = `CI-heal acceptance carried from ${originalEvidence.acceptedSha} to ${expectedHead}; existing coverage proof passed. ${clearReason}`.trim();
   }
 
   // #x9krtkb (bug 1) — DOES THIS RESTAMP OWE A CARRIED HUMAN CLEARANCE? See `decideRestampHumanClearance`'s own
@@ -1255,6 +1292,23 @@ export function runReviewLabelCli({
   // SAME verdict from the SAME `to` to decide whether the row it finds is this round's row. A private copy of
   // the ternary here is what made that comparison unsound (PR #1149 review): the two sides must agree by
   // construction, not by both happening to be maintained.
+  // Re-read BEFORE the first durable write, including the shadow ledger. A replacement
+  // verdict/clearance cannot be carried using evidence captured before it arrived.
+  if (guardedRestamp) {
+    try {
+      const fresh = provider.readPrState(repo, pr);
+      if (fresh.headRefOid !== expectedHead || classifyPrLiveness({ state: fresh.state }).outcome !== 'reviewable') {
+        throw new Error('head or PR state changed before CI-heal carry');
+      }
+      const liveDecision = decideSetLabel({ to: 'restamp', currentLabels: fresh.labels });
+      if (!liveDecision.allowed) throw new Error(liveDecision.reason);
+      if (JSON.stringify(carryEvidence(fresh.comments)) !== JSON.stringify(originalEvidence)) {
+        throw new Error('review verdict changed before CI-heal carry');
+      }
+      assertMandatoryReferralsCleared(fresh, { repo, pr });
+    } catch (e) { fail(ghErr(e, 'CI-heal carry state unreadable'), 1); }
+  }
+
   const ledgerVerdict = verdictForLabelTarget(to);
   try {
     const appended = appendVerdict(buildVerdictRecord({
@@ -1290,6 +1344,11 @@ export function runReviewLabelCli({
   const removals = presentRemoveLabels(decision.removeLabels, currentLabels);
   const applySwap = () => {
     try {
+      if (['accepted', 'restamp', 'clear-human'].includes(to)) {
+        const fresh = provider.readPrState(repo, pr);
+        if (fresh.headRefOid !== headSha && !(to === 'restamp' && newHeadArg && !mandatoryReferralState(fresh.comments).records.length)) throw new Error('head changed before acceptance; hold retained');
+        assertMandatoryReferralsCleared(fresh, { repo, pr });
+      }
       provider.setLabels(repo, pr, { add: decision.addLabel, remove: removals });
     } catch (e) {
       fail(ghErr(e, 'gh pr edit failed'), 1);
@@ -1346,7 +1405,8 @@ export function runReviewLabelCli({
   // #x8xf5rl — the order now comes from the PURE `writeOrder`, so the property this block spends forty lines
   // explaining is finally assertable. The steps themselves are unchanged; only the choosing moved.
   const acceptanceAlreadyLive = hasReviewLabel(currentLabels, REVIEW_LABELS.accepted);
-  const steps = { comment: postComment, swap: applySwap };
+  // Guarded carry leaves the live acceptance label alone; its fresh-state check already ran before the ledger.
+  const steps = { comment: postComment, swap: guardedRestamp ? () => {} : applySwap };
   for (const step of writeOrder({ acceptanceAlreadyLive })) { steps[step](); }
 
   // #4258-shape — THE APPROVAL-TIME PREVENTION-FILING DEFAULT (operator, 2026-09-27). Runs ONLY for the two
@@ -1600,7 +1660,9 @@ export function buildVerdictComment({
   // PR a human had just cleared minutes earlier.
   const carriedClearanceNote = carriesHumanClearance
     ? ` The HUMAN clearance ${humanClearance.actor} granted (reviewed-sha ${String(humanClearance.sha).slice(0, 12)}…) `
-      + 'is carried forward to this head: the drain\'s own content-preserving rebase moved the tree, and the '
+      + (channel === 'ci-heal'
+        ? 'is carried forward to this head after the CI-heal coverage proof passed: the '
+        : 'is carried forward to this head: the drain\'s own content-preserving rebase moved the tree, and the ')
       + 'reviewed diff/contribution is unchanged, so that clearance still covers it (#x9krtkb). No new review '
       + 'ran here — `review:human` stays cleared on the strength of the ORIGINAL clearance, not a fresh one.'
     : '';
@@ -1656,6 +1718,7 @@ export function buildVerdictComment({
     heading,
     '',
     attribution + independenceNote,
+    ...(to === 'restamp' && reason ? ['', String(reason)] : []),
     ...(text ? ['', text] : []),
   ].join('\n'));
   return marker ? `${prose}\n\n${marker}` : prose;
@@ -1878,4 +1941,22 @@ function fail(message, code = 2) {
 /** we:scripts/review-set-label.mjs#ghErr — the last non-empty line of a `gh` failure (stderr wins). */
 function ghErr(e, fallback) {
   return String((e && (e.stderr || e.message)) || e).split('\n').filter(Boolean).pop() || fallback;
+}
+
+
+/** A deferral is discharged only by an existing readable backlog card, never an intention to file. */
+export function referralCardReadable(ref, root = process.cwd()) {
+  if (!/^we:backlog\/[^/]+\.md$/.test(ref ?? '')) return false;
+  try { return /^---\r?\n[\s\S]+?\r?\n---\r?\n/.test(readFileSync(`${root}/${ref.slice(3)}`, 'utf8')); }
+  catch { return false; }
+}
+
+/** Fail closed at every acceptance entry point using the fresh durable PR record. */
+export function assertMandatoryReferralsCleared(state, { repo, pr, cardReadable = referralCardReadable } = {}) {
+  const result = mandatoryReferralState(state.comments, { repo, pr, head: state.headRefOid,
+    body: typeof state.body === 'string' ? state.body : '', createdAt: state.createdAt, cardReadable });
+  if (result.pending.length || result.blocked.length) {
+    throw new Error(`mandatory referral hold: ${[...result.pending, ...result.blocked].join(', ')}; record finding-specific mandatory rulings before acceptance`);
+  }
+  return result;
 }

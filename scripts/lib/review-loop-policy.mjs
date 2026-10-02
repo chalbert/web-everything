@@ -147,6 +147,7 @@ const UNATTENDED_ANSWER = CONFIRM_OPTIONS.includes('changes') ? 'changes' : (() 
  * @returns {{value: string}|null}
  */
 export function reviewLoopAutoConfirm(pending, run) {
+  if (run?.verdict?.pendingReferrals?.length) return null;
   if (!pending || pending.of !== CONFIRM_ACTORS.AGENT) return null;
   if (run?.verdict?.verdict === VERDICTS.ACCEPT) return { value: 'accept' };
   // #2749 FIX — `prevention-outstanding` NEVER auto-answers `accept` (nor `changes`: no editor round can file a

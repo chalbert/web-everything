@@ -7,7 +7,9 @@ import {
   AGY_CLAUDE_MODEL_BY_TIER, AGY_GEMINI_SIMPLE_MODEL, AGY_MODEL_CATALOG_CHECK, CRITICAL_WORK_GATE, PROBATION_ROSTER,
   PROBATION_WORKERS, PROVEN_TASK_ENVELOPES, RECOMMENDATIONS, selectProbationWorker, selectProvider,
 } from '../provider-routing.mjs';
-import { decideDispatchRoute } from '../dispatch-contracts.mjs';
+import { decideDispatchRoute as currentRoute } from '../dispatch-contracts.mjs';
+import { inheritedRoutingPolicy } from './inherited-routing-policy.mjs';
+const decideDispatchRoute = (dispatch, options) => currentRoute(dispatch, { routingPolicy: inheritedRoutingPolicy, ...options });
 import { taskTypeFor } from '../dispatch-task-type.mjs';
 import { CODEX_MODEL } from '../codex-model-routing.mjs';
 

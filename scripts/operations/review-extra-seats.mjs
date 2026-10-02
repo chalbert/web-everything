@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { providerQuotaHold, QUOTA_COOLOFF_MS, CODEX_QUOTA_FULL_PERCENT } from '../lib/provider-quota-hold.mjs';
 /**
  * @file scripts/operations/review-extra-seats.mjs
  * @description #4194 (epic #3383, delivery-plan track A2) — RUN THE ADDED NON-CLAUDE REVIEW SEATS FOR ONE PR.
@@ -43,7 +44,7 @@
  * fakes (no real codex, agy, git or GitHub).
  */
 
-import { resolveOperationRoute, readRoutingPolicy } from '../lib/dispatch-routing-policy-io.mjs';
+import { resolveOperationEffort, resolveOperationRoute, readRoutingPolicy } from '../lib/dispatch-routing-policy-io.mjs';
 import { agyRunEvidence, pickAgyEvidence } from '../lib/antigravity-run-evidence.mjs';
 import { spawn, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -110,9 +111,9 @@ export function resolveProviderCap(provider, env = process.env) {
 export const SEAT_TIMEOUT_ENV = 'WE_REVIEW_EXTRA_SEAT_TIMEOUT_MS';
 export const DEFAULT_SEAT_TIMEOUT_MS = 12 * 60 * 1000;
 /** How long a provider sits out after a quota hit that reported no reset time. */
-export const QUOTA_COOLOFF_MS = 60 * 60 * 1000;
+export { QUOTA_COOLOFF_MS, CODEX_QUOTA_FULL_PERCENT } from '../lib/provider-quota-hold.mjs';
 /** Codex's own quota gauge: at or above this, treat the provider as exhausted until its reset. */
-export const CODEX_QUOTA_FULL_PERCENT = 98;
+
 export const REVIEW_SEAT_RUBRIC = 'review-seat.1';
 /** Where the operator's day starts and ends (the cap is per day). */
 export const CAP_TIMEZONE = 'America/New_York';
@@ -245,21 +246,7 @@ export function reserveSeatCalls({ ledger, records, want, dailyCap, now, newId, 
  * @returns {string|null} the reason, or null when usable. PURE.
  */
 export function quotaHold(records, provider, now) {
-  const rows = seatRows(records).filter((r) => r.provider === provider)
-    .sort((a, b) => String(b.scoredAt ?? '').localeCompare(String(a.scoredAt ?? '')));
-  const last = rows[0];
-  if (!last) return null;
-  const resetAt = Date.parse(last.quotaResetsAt ?? '');
-  if (last.status === 'quota-exhausted') {
-    const until = Number.isFinite(resetAt) ? resetAt : Date.parse(last.scoredAt ?? '') + QUOTA_COOLOFF_MS;
-    if (Number.isFinite(until) && now < until) return `quota exhausted on its last seat call (${last.scoredAt}); sitting out until ${new Date(until).toISOString()}`;
-    return null;
-  }
-  if (typeof last.quotaUsedPercent === 'number' && last.quotaUsedPercent >= CODEX_QUOTA_FULL_PERCENT
-    && Number.isFinite(resetAt) && now < resetAt) {
-    return `quota gauge at ${last.quotaUsedPercent}% on its last seat call; sitting out until ${new Date(resetAt).toISOString()}`;
-  }
-  return null;
+  return providerQuotaHold(seatRows(records), provider, now);
 }
 
 /** How long a HELD provider sits out before this module allows exactly one real call through to test whether
@@ -1290,7 +1277,8 @@ export async function runRedTeam({ pr, repo, lanePath, loopPayload, env = proces
       else { lastReason = `daily-cap: ${reservation.used}/${caps[pick.provider]} non-Claude seat calls used today for ${pick.provider}`; available = available.filter((x) => x !== pick.provider); }
     }
     if (!callId) return { status: 'skipped', reason: `${lastReason ?? 'no provider available'}${unavailable.length ? ` (${unavailable.join('; ')})` : ''}` };
-    const { model: defaultModel, effort } = RED_TEAM_MODELS[provider];
+    const { model: defaultModel, effort: defaultEffort } = RED_TEAM_MODELS[provider];
+    const effort = configuredRoute?.effort ?? resolveOperationEffort("review-seat", provider, RED_TEAM_SEAT.key);
     const model = configuredRoute?.model ?? defaultModel;
     const claudeFindings = claudeFindingsFromLoop(loopPayload);
     const timeoutMs = resolveSeatTimeoutMs(env);
@@ -1414,7 +1402,7 @@ export function createRedTeamIo({ env = process.env, root = REPO_ROOT, storePath
       const configured = resolveOperationRoute({ operation: 'review-recheck', available: ['claude', 'codex', 'antigravity'] });
       const spawn = configured ? (await import('./cli-adapter.mjs')).resolveJudgeProvider(configured.provider) : judgeSpawn;
       const out = await spawn({
-        mandate, input, shape, model: configured?.model ?? RECHECK_MODEL, effort: RECHECK_EFFORT, budget: RECHECK_BUDGET_USD,
+        mandate, input, shape, model: configured?.model ?? RECHECK_MODEL, effort: configured?.effort ?? resolveOperationEffort("review-recheck", "claude"), budget: RECHECK_BUDGET_USD,
         runId: `red-team-recheck-${pr}-${randomUUID()}`, lens: 'red-team-recheck', env, timeoutMs: 10 * 60 * 1000,
       });
       return out.value;

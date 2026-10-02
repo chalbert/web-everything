@@ -3,9 +3,10 @@ bornAs: xtx1z8m
 kind: story
 size: 3
 parent: "4075"
-status: open
+status: resolved
 scope: ["we:scripts/conveyor/__tests__/open-pr-fetch.test.mjs"]
 dateOpened: "2026-09-29"
+dateResolved: "2026-10-01"
 preparedDate: "2026-10-01"
 preparedAgainstSha: "bc2058219cef9235eb00e7a03ce4c2d20fd3bbaa"
 tags: []
@@ -28,6 +29,9 @@ Idempotency key (do not edit): approval-prevention-key:chalbert/web-everything#2
 
 ## Progress
 
+- Verification (2026-10-01): `npm run check:standards` passed with **0 errors** (5017 warnings). The required lane verifier at `we:scripts/verify-lane.mjs` passed the selected 24-test suite and scoped standards gate, recording **green**. `git diff --check` passed; implementation changes are confined to the declared test, with this card carrying the requested proof and lifecycle update.
+- Implementation (2026-10-01): added the local Proxy guard and three regression cases in `we:scripts/conveyor/__tests__/open-pr-fetch.test.mjs`. The real REST mapper's own keys independently match the five-field contract; its guarded rows normalize to nonempty GraphQL-equivalent results with exactly `files`, `headRefName`, `labels`, and `number` observed. Negative controls name undeclared `body` and missing own `headRefName`, including an inherited undefined value that the normalizer would otherwise tolerate. Existing mapping, fetch, and parity coverage remains intact.
+- Before/after mutation proof (2026-10-01): in a disposable archive of HEAD, inserted `void pr.body;` only in the PR loop of `we:scripts/conveyor/build-dispatch-policy.mjs`. Baseline focused suite: **21/21 passed**, exit 0. Copied in the new scoped test with the identical mutation: **22 passed, 2 failed**, exit 1; the new contract test failed with `PR field body is outside the supplied contract` (the missing-field control also encountered that earlier read). Restored the production module in the disposable copy: **24/24 passed**, exit 0. The actual checkout's unmutated focused suite also passed **24/24**, exit 0. All runs used the admission wrapper specified below, with the local binary directory added to PATH because the standalone shell initially could not find Vitest. No production mutation or helper file enters the delivered diff.
 - Original premise/scope: the approval owed a dynamic property-access guard at `we:scripts/conveyor/__tests__/open-pr-fetch.test.mjs:65`; the predicted touch-set was that test file alone.
 - Verified premise/scope: the location still exists, but currently asserts a literal five-field constant rather than dynamically observing the consumer. The parity test at `we:scripts/conveyor/__tests__/open-pr-fetch.test.mjs:74` compares two normalized inputs and cannot detect a new optional read missing from both. The guard remains owed; retain the test-only scope. That scope already names the matching existing test, and no production source edit is needed.
 - Source evidence: `we:scripts/conveyor/open-pr-fetch.mjs:47` supplies the five-field contract; `restPullToBuildDispatchShape` at `we:scripts/conveyor/open-pr-fetch.mjs:58` produces those fields. `normalizeOpenPrs` at `we:scripts/conveyor/build-dispatch-policy.mjs:136` reads four top-level properties. `isDraft` is supplied but unused, so observed reads must be a subset of the producer contract, not equal to all five fields.

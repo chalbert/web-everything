@@ -47,6 +47,7 @@
  * actually let finish and CONCLUDE failed, never one merely superseded by the next push.
  * @see we:docs/agent/platform-decisions.md#deterministic-core-thin-judgment
  */
+import { mainBreakEscalationForHead } from './ci-heal-escalation-mark.mjs';
 import { isTrustedMarkerAuthor } from '../lib/marker-authorship.mjs';
 import { latestRequiredCheck, isRequiredCheckFailed } from '../merge-ai-prs.mjs';
 import { FALLBACK_REQUIRED_STATUS_CHECKS } from '../lib/required-status-checks.mjs';
@@ -295,7 +296,12 @@ export function mainLatestGreenShaForCheck({ failingCheckName = null, mainLatest
  *
  * PR #2793 review (CONFIRMED): "the check is green on main's latest run" alone is the ORDINARY state of a
  * healthy `main` — it excused almost any PR-owned failure behind main as `owed-ci-rerun`, starving `ci-heal`.
- * ALL of these must hold:
+ * The trusted #3239 legacy escalation supplies an alternative attribution when the
+ * historical run was cancelled/unreadable: the same head/check must record an
+ * unrelated card-only failure reproduced on main, and the green result must be
+ * newer than that diagnosis. Known green at the merge base still vetoes recovery.
+ * The existing head change supersedes the escalation only after refresh succeeds.
+ * Otherwise ALL of these must hold:
  *   1. {@link isMainLatestCheckGreen} — the check passes on main's own latest completed run.
  *   2. `prContainsMainGreenSha === false` — the PR does NOT already contain the commit that green run built
  *      (read off `compare`, not `aheadBy`, which measures main's CURRENT tip and can be newer than the last
@@ -319,10 +325,17 @@ export function mainLatestGreenShaForCheck({ failingCheckName = null, mainLatest
  */
 export function isMainGreenFixOwed({
   failingCheckName = null, mainLatestCheckRuns = null, prContainsMainGreenSha = null, mergeBaseCheckRuns = null,
-  mergeBaseRunConclusion = null,
+  mergeBaseRunConclusion = null, comments = [], headSha = null,
 } = {}) {
   if (!isMainLatestCheckGreen({ failingCheckName, mainLatestCheckRuns })) return false;
   if (prContainsMainGreenSha !== false) return false;
+  if (isMainLatestCheckGreen({ failingCheckName, mainLatestCheckRuns: mergeBaseCheckRuns })) return false;
+  // #3239: cancelled main runs can leave no historical red check to read. A
+  // trusted, head/check-specific diagnosis supplies attribution, but recovery must
+  // still be observed AFTER that diagnosis and the green commit must be absent.
+  const escalation = mainBreakEscalationForHead(comments, headSha, failingCheckName);
+  const green = collapseMainCheckRunsToLatestPerName(mainLatestCheckRuns).get(failingCheckName);
+  if (escalation && Date.parse(green?.completed_at) > Date.parse(escalation.createdAt)) return true;
   if (!Array.isArray(mergeBaseCheckRuns)) return false;
   const atBase = collapseMainCheckRunsToLatestPerName(mergeBaseCheckRuns).get(failingCheckName);
   const conclusion = String(atBase?.conclusion || '').toLowerCase();
@@ -385,6 +398,7 @@ export const MERGE_BASE_FINISHED_RUN_CONCLUSIONS = Object.freeze(['success', 'fa
 export function isPrCiFailureOwedRerun({
   requiredCheckCompletedAt, aheadBy, mainRedWindows, failingCheckName = null, mainLatestCheckRuns = null,
   prContainsMainGreenSha = null, mergeBaseCheckRuns = null, mergeBaseRunConclusion = null,
+  comments = [], headSha = null,
 } = {}) {
   const behind = Number.isFinite(aheadBy) ? aheadBy : null;
   if (behind === 0) return false; // already current — neither path below can still owe a rerun (point 2).
@@ -392,6 +406,7 @@ export function isPrCiFailureOwedRerun({
   if (attribution === 'main-red') return true;
   return isMainGreenFixOwed({
     failingCheckName, mainLatestCheckRuns, prContainsMainGreenSha, mergeBaseCheckRuns, mergeBaseRunConclusion,
+    comments, headSha,
   });
 }
 
@@ -454,7 +469,7 @@ export function planMainRedRebases({
     // landing-freeze fix — see this function's own docblock and `isMainGreenFixOwed`'s (PR #2793 review: main
     // green alone is not proof; the candidate must carry the per-PR merge-base / containment evidence too).
     const mainGreenForCheck = attribution !== 'main-red' && isMainGreenFixOwed({
-      failingCheckName: base.failingCheckName, mainLatestCheckRuns,
+      failingCheckName: base.failingCheckName, mainLatestCheckRuns, comments: c?.comments, headSha: base.headSha,
       prContainsMainGreenSha: c?.prContainsMainGreenSha ?? null, mergeBaseCheckRuns: c?.mergeBaseCheckRuns ?? null,
       mergeBaseRunConclusion: c?.mergeBaseRunConclusion ?? null,
     });
@@ -951,7 +966,7 @@ export function buildMissingRunCandidates(prs, { requiredContexts = DEFAULT_REQU
     if (!Number.isInteger(prNumber) || prNumber <= 0) continue;
     // #2793 — a real git conflict can never produce a merge ref, so it can never produce a required-check run
     // either; leave it entirely to the conflict-resolution path rather than burning this pass's own retry cap.
-    if (String(pr?.mergeable ?? '').toUpperCase() === 'CONFLICTING') continue;
+    if (['CONFLICTING', 'UNKNOWN'].includes(String(pr?.mergeable ?? '').toUpperCase())) continue;
     const roll = Array.isArray(pr?.statusCheckRollup) ? pr.statusCheckRollup : [];
     const allMissing = unknown
       ? !roll.some((c) => c?.workflowName === workflowName)
@@ -992,13 +1007,11 @@ export function isMissingRunOverdue({ headCommittedAt, now = Date.now(), thresho
  *   3. This head sha already used up its trigger-attempt cap → `missing-run-cap-exhausted`: a mechanical
  *      trigger that has not produced a real check run after this many tries is no longer "GitHub hasn't
  *      noticed yet" — hand it to a human/ci-heal instead.
- *   4. Otherwise → `trigger-ci` dispatch. `preferUpdateBranch` (true when `aheadBy > 0`) tells the IO shell to
- *      prefer a `rebaseDropManifest` refresh onto `main` (whose push starts a fresh run AND closes the same
- *      staleness {@link planMainRedRebases} exists to fix) over a bare `gh workflow run` dispatch — never the
- *      raw `update-branch` REST endpoint (PR #2740 review).
+ *   4. Otherwise → `trigger-ci`: the IO shell rechecks mergeability and the exact head,
+ *      then pushes a guarded empty commit with a workflow-triggering identity.
  * @param {object} o
  * @param {Array<{prNumber:number, headRefName?:(string|null), headSha?:(string|null),
- *   headCommittedAt?:(string|null), aheadBy?:(number|null), triggerAttemptsForSha?:number}>} [o.candidates]
+ *   headCommittedAt?:(string|null), triggerAttemptsForSha?:number}>} [o.candidates]
  * @param {number} [o.now]
  * @param {number} [o.thresholdMs]
  * @param {number} [o.maxRetriesPerSha]
@@ -1033,7 +1046,6 @@ export function planMissingRunRecoveries({
     }
     dispatch.push({
       ...base, baseRefName: c?.baseRefName ?? null, attempts, kind: 'trigger-ci',
-      preferUpdateBranch: Number.isFinite(c?.aheadBy) ? c.aheadBy > 0 : false,
       why: `PR #${prNumber}'s head sha ${base.headSha ?? '?'} has had NO required-check run at all since its head commit, past the missing-run threshold — triggering CI`,
     });
   }
@@ -1063,6 +1075,9 @@ export function countMissingRunComments(comments, headSha = null) {
     const body = typeof c === 'string' ? c : c?.body;
     if (typeof body !== 'string' || !body.trimStart().startsWith(MISSING_RUN_COMMENT_MARKER)) continue;
     if (!isTrustedMarkerAuthor(c)) continue;
+    // Old dispatch attempts cannot produce evaluated PR checks; do not let their
+    // exhausted budget prevent the corrected recovery method from running.
+    if (/via workflow-dispatch|trigger CI \(workflow-dispatch/.test(body)) continue;
     if (headSha && !missingRunBodyHasExactLine(body, `sha: ${headSha}`)) continue;
     n += 1;
   }
@@ -1077,22 +1092,22 @@ export function countMissingRunComments(comments, headSha = null) {
  * @returns {string}
  */
 export function buildMissingRunComment({
-  headRefName = null, headSha = null, ok = true, action = 'workflow-dispatch', error = null,
-  refresh = null, refreshError = null,
+  headRefName = null, headSha = null, ok = true, action = 'pull-request-push', error = null,
+  refresh = null, refreshError = null, newHeadSha = null,
 } = {}) {
-  // When a behind-main refresh was attempted but did not push (already current / a real conflict), say so — the
-  // trigger then fell back to a workflow dispatch, and a reader needs to know the branch is still behind.
+  // Preserve refresh details when rendering historical attempts.
   const refreshNote = refresh
     ? ` (refresh onto main first: ${refresh}${refreshError ? ` — ${refreshError}` : ''})`
     : '';
   const outcome = ok
-    ? `this head had no required-check run at all — triggered CI via ${action}${refreshNote}.`
+    ? `this head had no required-check run at all — requested CI via ${action}; PR checks must still be observed${refreshNote}.`
     : `attempted to trigger CI (${action}${refreshNote}) and it FAILED: ${error ?? '(no error text captured)'} — this attempt still counts toward the retry cap so a persistently-failing trigger cannot retry forever; once capped, this is left for a human/ci-heal look instead.`;
   return [
     MISSING_RUN_COMMENT_MARKER,
     '',
     `branch: ${headRefName ?? '(unknown)'}`,
     `sha: ${headSha ?? '(unknown)'}`,
+    ...(newHeadSha ? [`recovery-sha: ${newHeadSha}`] : []),
     `conveyor missing-run-recovery ${outcome}`,
   ].join('\n');
 }

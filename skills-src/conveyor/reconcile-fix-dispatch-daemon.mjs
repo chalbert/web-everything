@@ -297,18 +297,13 @@ export function defaultReadNotesForRepo({ repo, reconcile = runReconcilePass, re
 }
 
 /**
- * we:skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs#defaultNoteCommentDryRun — #4191: this repo's own
- * "land the write path OFF, prove it live, then turn it on" convention (see the delivery plan's "Routing
- * decisions" — supervision enforcement lands OFF until real miss data), applied to a brand-new PR-write action.
- * Dry-run (compute + log the comment that WOULD post, never call `gh`) unless `WE_CONVEYOR_POST_NOTE_COMMENTS=1`
- * is set in the daemon's own environment — an explicit operator opt-in, never this card's own default. This
- * card's own Done-when already accepts a QUEUED comment payload as sufficient (we:backlog/4191-*.md, item 1's
- * own parenthetical), so nothing this card is scored on is lost by defaulting to dry-run.
+ * Notes are the visible explanation for a refused PR, so production posts by default.
+ * An explicit WE_CONVEYOR_POST_NOTE_COMMENTS=0 retains the diagnostic dry-run mode.
  * @param {NodeJS.ProcessEnv} [env]
  * @returns {boolean}
  */
 export function defaultNoteCommentDryRun(env = process.env) {
-  return env?.WE_CONVEYOR_POST_NOTE_COMMENTS !== '1';
+  return env?.WE_CONVEYOR_POST_NOTE_COMMENTS === '0';
 }
 
 /**
@@ -317,8 +312,7 @@ export function defaultNoteCommentDryRun(env = process.env) {
  * per-repo isolation via {@link forEachRepo}), then plan — and, unless `dryRun`, actually post — exactly ONE
  * durable PR comment per note episode ({@link planNoteComment}, `we:scripts/conveyor/reconcile-note-comment.mjs`)
  * that a trusted principal has not already posted. `dryRun` defaults to {@link defaultNoteCommentDryRun}'s own
- * env-gated answer; a test (or the live proof) passes `dryRun: true` explicitly regardless of environment, per
- * this card's own PROOF section ("don't post real PR comments in tests or the proof").
+ * env-gated answer; diagnostic callers may pass `dryRun: true` explicitly.
  * @param {{repos?:string[], tick?:Function, postComment?:Function, dryRun?:boolean}} [o]
  * @returns {{repos:Array<object>, notes:Array<object>, refusals:Array<object>, comments:Array<object>}}
  *   `comments` — one row per note this tick saw, `{repo, prNumber, kind, key, body?, alreadyPosted, posted,
@@ -772,6 +766,9 @@ export function buildCliDaemonEffects({ owner, intervalMs = DEFAULT_INTERVAL_MS,
       // required by the card and matched by the soak scenario/live-proof read; never merely implied by an
       // empty `dispatched` count.
       if (authPaused) log.error(`reconcile-fix-dispatch-daemon: ${authPauseReason ?? 'paused: Claude login expired — run /login'}`);
+      for (const r of repos) for (const rank of (r.result?.scopeRanks ?? [])) {
+        log.error(`reconcile-fix-dispatch-daemon: scope-rank ${r.repo} PR #${rank.pr} — rank ${rank.rank}, blocks ${rank.blocks}, age ${rank.ageHours}h, score ${rank.score}, aged-FIFO ${rank.aged}`);
+      }
       for (const r of repos) if (r.error) log.error(`reconcile-fix-dispatch-daemon: ${r.repo} tick failed (non-fatal, other repos unaffected): ${r.error}`);
       // #x0mn6x0 — ONE LINE PER REFUSAL, never just the count above. `refusals` = a PR the plan offered to
       // `fix`/`ci-heal` but the dispatch itself refused (no-lane, held, dispatch-failed, unsupported-repo,

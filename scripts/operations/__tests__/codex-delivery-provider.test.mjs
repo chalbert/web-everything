@@ -154,6 +154,16 @@ describe('buildCodexDeliveryArgv — the resume shape', () => {
     ]);
   });
 
+  it('4443: nonempty writableRoots yield identical permission args on fresh and resume, with no -s', () => {
+    const o = { prompt: 'P', cwd: LANE, denyPaths: DENY, writableRoots: ['/Users/x/we-lane'] };
+    const fresh = buildCodexDeliveryArgv(o);
+    const resumed = buildCodexDeliveryArgv({ ...o, resumeThreadId: 'tid' });
+    expect(fresh).toContain('permissions={locked={extends=":workspace",filesystem={"/Users/x/workspace/webeverything/**"="deny","/Users/x/we-lane"="write"}}}');
+    expect(fresh.slice(3)).toEqual(resumed.slice(3));
+    expect(fresh).not.toContain('-s');
+    expect(resumed).not.toContain('--add-dir');
+  });
+
   // `codex exec resume --help`'s real flag list has no `-C`. Passing one is an argv error, not a no-op, so the
   // resume's working root MUST come from the spawned process's own `cwd` option instead.
   it('omits `-C` — `codex exec resume` does not accept it; cwd rides the spawn options', () => {

@@ -206,7 +206,7 @@ let root;
 beforeAll(() => { root = mkdtempSync(join(tmpdir(), 'we-poc-branch-sync-real-')); });
 afterAll(() => { rmSync(root, { recursive: true, force: true }); });
 
-// Exercise the real mutex without sharing the operator's drain-lock directory.
+// Keep the real mutex, but never contend with the developer's drain lock.
 const withFixtureLock = (fn, opts) => withPocLandLock(fn, { ...opts, lockRoot: join(root, 'locks') });
 
 /** A bare `origin` plus a `main` (target) and `feature` (standing in for a POC branch) branch, seeded exactly

@@ -18,7 +18,7 @@ const item = { num: '3438', slug: 'wire-reconcile-pass', specPath: 'backlog/3438
 // #4295 — one scope-DISJOINT item per owed fix, so the overlap filter (correctly) doesn't serialize them.
 const findItemStub = (key) => (key === '3438' ? item : /^900\d$/.test(key) ? { num: key, slug: 'x', specPath: `backlog/${key}-x.md`, scope: [`we:scripts/x${key}.mjs`] } : null);
 const fixEntries = (prs) => prs.map((pr, i) => ({ kind: 'fix', prNumber: pr, headRefName: `lane/900${i}-x` }));
-const reconcileStub = (entries) => () => ({ dispatch: entries, refusals: [], notes: [], prs: entries.length, agents: 0 });
+const reconcileStub = (entries) => () => ({ dispatch: entries.map((entry) => ({ ...entry, files: entry.files ?? [`scripts/pr-${entry.prNumber}.mjs`] })), refusals: [], notes: [], prs: entries.length, agents: 0 });
 const WE_PROFILE = () => ({ capabilities: { fix: true, ciHeal: true }, lanePoolRepo: '.' });
 
 function runFix(prs, queueAdmission, o = {}) {
@@ -357,7 +357,7 @@ describe('#4229 — runReconcileFixDispatch: the durable count survives across p
       const result = runReconcileFixDispatch({
         root: '/repo',
         reconcile: () => ({
-          dispatch: [{ kind: 'fix', prNumber: realPr, headRefName: realHeadRef }], refusals: [], notes: [], prs: 1, agents: 0,
+          dispatch: [{ kind: 'fix', prNumber: realPr, headRefName: realHeadRef, files: ['scripts/conveyor/parked-pr-conflict-watch.mjs'] }], refusals: [], notes: [], prs: 1, agents: 0,
         }),
         findItemFn: (key) => (key === 'xu38vlf' ? item2756 : null),
         loadItems: () => [],

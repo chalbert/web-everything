@@ -5,6 +5,7 @@ import { mkdtempSync, rmSync, readFileSync, writeFileSync, statSync } from 'node
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { readAgyHold, saveAgyHold } from '../lib/antigravity-run-evidence.mjs';
 import {
   AGY_CLI, AGY_RESUME_PROMPT, AGY_EFFORT_UNSUPPORTED_MODELS, DEFAULT_TIMEOUT_MS, buildAgyDirectTaskArgv, buildAgyPrompt, buildAgyStdinLine,
   buildScratchCloneArgv, planDepsInstall, parseJsonlLine, parseJsonlEvents, summarizeAgyEvents,
@@ -18,9 +19,12 @@ function tempDir() {
   tempDirs.push(dir);
   return dir;
 }
-// Injected process fixtures must not consume the operator's live backend quota holds.
-beforeEach(() => { vi.stubEnv('ANTIGRAVITY_QUOTA_DIR', tempDir()); });
+// Exercise the real quota reader without inheriting or changing the host's holds.
+beforeEach(() => {
+  vi.stubEnv('ANTIGRAVITY_QUOTA_DIR', tempDir());
+});
 afterEach(() => {
+  vi.unstubAllEnvs();
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
   vi.useRealTimers();
@@ -513,6 +517,30 @@ function fakeExec(calls = []) {
 }
 
 describe('runAgyDirectExec / geminiDirectTask — injected process mechanics', () => {
+  it('isolates injected processes from persisted host quota reads and writes', async () => {
+    const dir = tempDir();
+    vi.stubEnv('ANTIGRAVITY_QUOTA_DIR', join(dir, 'quota'));
+    saveAgyHold({ requestedModel: 'gemini-3.1-pro', servedBackend: 'google', quotaState: 'exhausted',
+      quotaResetsAt: new Date(Date.now() + 60_000).toISOString() });
+    const { fn } = fakeSpawn(jsonl([{ event: 'init', init: { model: 'claude-sonnet-4-6' } }]),
+      { stderr: 'Individual quota reached. Resets in 1h.' });
+    const result = await runAgyDirectExec({ dir, task: 't', logFile: join(dir, 'run.jsonl'), stream: false, spawnFn: fn });
+    expect(fn).toHaveBeenCalledOnce();
+    expect(result.fallbackDecision).toBe('skip-quota-exhausted');
+    expect(readAgyHold('claude-sonnet-4-6')).toBeNull();
+    expect(readAgyHold('gemini-3.1-pro')).not.toBeNull();
+  });
+
+  it('still enforces persisted quota holds before a real process launch', async () => {
+    const dir = tempDir();
+    vi.stubEnv('ANTIGRAVITY_QUOTA_DIR', join(dir, 'quota'));
+    saveAgyHold({ requestedModel: 'gemini-3.1-pro', servedBackend: 'google', quotaState: 'exhausted',
+      quotaResetsAt: new Date(Date.now() + 60_000).toISOString() });
+    const result = await runAgyDirectExec({ dir, task: 't', logFile: join(dir, 'run.jsonl'), stream: false,
+      cli: join(dir, 'must-not-launch') });
+    expect(result).toMatchObject({ code: 1, fallbackDecision: 'skip-quota-hold', modelEvidence: 'not-launched' });
+  });
+
   it('recovers the init UUID after SIGKILL and resumes once with a fresh budget and no task replay', async () => {
     vi.useFakeTimers();
     const dir = tempDir();
@@ -748,7 +776,7 @@ describe('runAgyDirectExec / geminiDirectTask — injected process mechanics', (
     expect(spawnFn).toHaveBeenCalledTimes(1);
     expect(report.argv).toEqual(seen.argv);
     expect(report.logFile).toBe(join(dir, 'git-metadata', 'gemini-direct-task.jsonl'));
-    expect(Object.keys(report).sort()).toEqual(['dir', 'scratch', 'startSha', 'argv', 'logFile', 'exitCode', 'timedOut', 'resumed', 'resumeConversationId', 'events', 'diff', 'gate', 'requestedModel', 'servedModel', 'servedBackend', 'modelEvidence', 'quotaState', 'quotaResetsAt', 'fallbackDecision'].sort());
+    expect(Object.keys(report).sort()).toEqual(['model', 'effort', 'dir', 'scratch', 'startSha', 'argv', 'logFile', 'exitCode', 'timedOut', 'resumed', 'resumeConversationId', 'events', 'diff', 'gate', 'requestedModel', 'servedModel', 'servedBackend', 'modelEvidence', 'quotaState', 'quotaResetsAt', 'fallbackDecision'].sort());
     expect(calls[0].args).toEqual(['-C', dir, 'rev-parse', 'HEAD']);
     expect(calls.some((c) => c.args.includes('clone'))).toBe(false);
     expect(calls.some((c) => c.args.join(' ') === `-C ${dir} diff startsha123`)).toBe(true);

@@ -20,7 +20,7 @@ it('replays the builder dry-run before/after with identical historical prepare f
   const snapshots = [];
   for (const [label, policy] of [['before', previous], ['after', current]]) {
     const tick = await runBuildDispatchTick({ live: false, effects, routingPolicy: policy });
-    const route = decideDispatchRoute({ kind: 'prepare-item' }, { routingPolicy: policy });
+    const route = decideDispatchRoute({ kind: 'prepare-item', cardPath: 'we:backlog/4501-card.md' }, { routingPolicy: policy });
     const fallback = tick.prepare.route === 'prepare-route-fallback';
     const selected = routeDispatchProvider({ launchKind: 'prepare-item', policyRoute: route.policyRoute, probationWorker: route.probationWorker, table: { model: 'sonnet' } }, {
       probationLaunch: fallback ? 'off' : 'on', scriptExists: () => true,
@@ -33,4 +33,9 @@ it('replays the builder dry-run before/after with identical historical prepare f
   expect(snapshots[1]).toMatchObject({ provider: 'codex', model: 'gpt-6-astra', launched: 0 });
   expect(snapshots[1].planned).toEqual(snapshots[0].planned);
   console.log(JSON.stringify({ builderDryRunReplay: snapshots }, null, 2));
+});
+
+it('routes a card-less prepare to Claude through the fail-closed gate', () => {
+  const route = decideDispatchRoute({ kind: 'prepare-item' }, { routingPolicy: readRoutingPolicy() });
+  expect(route.policyRoute).toMatchObject({ provider: 'claude' });
 });

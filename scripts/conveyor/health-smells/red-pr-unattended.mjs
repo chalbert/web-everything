@@ -29,6 +29,7 @@ export default {
   action: 'investigate',
   redForMs: 60 * MINUTE,
   ignoreChecks: ['review-gate'],
+  escalateAfterMs: 60 * MINUTE,
   recommendationHint: 'A red PR has no fixer; the fix-dispatch daemon log names why it refuses it.',
   evaluate({ prs, agents }, { now, daemons }) {
     const live = (agents || []).filter((a) => a.state !== 'done' && a.state !== 'stopped' && a.state !== 'failed');

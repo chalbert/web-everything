@@ -34,7 +34,7 @@ for (const [file, kind] of [['fix-agent-brief.md', 'fix'], ['fix-agent-ci-brief.
 
     it('names a verify-lane request and a check in its bash fences', () => {
       expect(gateLines.some((c) => /verify-lane\.mjs request\b/.test(c))).toBe(true);
-      expect(gateLines.some((c) => /verify-lane\.mjs check --wait=60000 --json\b/.test(c))).toBe(true);
+      expect(gateLines.some((c) => /verify-lane\.mjs check --wait=540000 --json\b/.test(c))).toBe(true);
     });
 
     it('no gate/verify command in a bash fence is denied for this kind', () => {
@@ -46,5 +46,22 @@ for (const [file, kind] of [['fix-agent-brief.md', 'fix'], ['fix-agent-ci-brief.
       expect(step4).toMatch(/`check` output/);
       expect(step4).toMatch(/`red` \(exit 2\)/);
     });
+  });
+}
+
+for (const file of ['fix-agent-brief.md', 'fix-agent-ci-brief.md', 'delivery-agent-brief.md']) {
+  it(`${file} instructs bounded waits that are feasible inside the Bash tool's foreground timeout`, () => {
+    const text = readFileSync(join(HERE, '..', file), 'utf8');
+    const waits = [...text.matchAll(/check --wait=(\d+)/g)].map((m) => Number(m[1]));
+    const toolTimeouts = [...text.matchAll(/`timeout: (\d+)`/g)].map((m) => Number(m[1]));
+    expect(waits.length).toBeGreaterThan(0);
+    expect(toolTimeouts.length).toBeGreaterThan(0);
+    // A wait longer than the tool's own timeout is killed before it can settle: every instructed wait must fit.
+    for (const wait of waits) expect(wait).toBeLessThan(Math.min(...toolTimeouts));
+    // …and the chunks must cover the dispatcher's admission + execution budget (~160 minutes), stated in the brief.
+    expect(text).toMatch(/18 consecutive `timeout`s/);
+    expect(Math.max(...waits) * 18).toBeGreaterThanOrEqual(150 * 60_000);
+    expect(text).not.toMatch(/--wait=9600000|--wait=60000|completion\s+notification/);
+    expect(text).toContain('infrastructure-failure');
   });
 }

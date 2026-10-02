@@ -14,7 +14,7 @@
  * REJECTED after a real smoke test showed a `--settings=<hooks file>` layered on top of it never fires.
  */
 import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest';
-import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -122,7 +122,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 describe('buildRestrictedProviderArgv', () => {
   it('#4348 — addDirs adds one `--add-dir <dir>` pair each, on both branches, before -p/--resume', () => {
     const fresh = buildRestrictedProviderArgv({ sessionId: 'u', prompt: 'p', settingsFile: '/s.json', addDirs: ['/we/lane-7'] });
-    expect(fresh.slice(-8)).toEqual(['--add-dir', '/we/lane-7', '--model', 'sonnet', '-p', '--session-id', 'u', 'p']);
+    expect(fresh.slice(-10)).toEqual(['--add-dir', '/we/lane-7', '--model', 'sonnet', '--effort', 'medium', '-p', '--session-id', 'u', 'p']);
     const resume = buildRestrictedProviderArgv({ prompt: 'p', resumeSessionId: 'u', settingsFile: '/s.json', addDirs: ['/we/lane-7'] });
     expect(resume.slice(-5)).toEqual(['--add-dir', '/we/lane-7', '--resume', 'u', 'p']);
   });
@@ -135,7 +135,7 @@ describe('buildRestrictedProviderArgv', () => {
     expect(argv).toEqual([
       '--restricted', '--tools', 'Bash,Edit,Write,Read,Glob,Grep', '--strict-mcp-config',
       '--disable-slash-commands', '--settings', '/repo/.operations/hooks.json',
-      '--model', 'sonnet', '-p', '--session-id', 'session-1', 'build item #1234',
+      '--model', 'sonnet', '--effort', 'medium', '-p', '--session-id', 'session-1', 'build item #1234',
     ]);
   });
 
@@ -3463,6 +3463,26 @@ describe('deliverItem (#4349 — settles its run-store effect + releases/holds t
     return store;
   }
 
+  it('#4649 settles a mixed-locus preflight without acquiring or releasing any lane', async () => {
+    const store = seedInFlightRun('mixed-locus');
+    acquireBuildDispatchClaim({ num: '9001', scope: [] });
+    execFileSync.mockClear();
+    await expect(deliverItem({ item: '9001', lane: 7, scope: 'we:a,plateau-app:b', sessionSlug: 'conveyor-9001', runId: 'mixed-locus', effectKey: 'dispatch:0:0' }, { spawn: vi.fn() })).rejects.toThrow(/more than one repo/);
+    expect(store.read('mixed-locus').effects[0]).toMatchObject({ status: 'failed', result: { outcome: 'unsupported-locus' }, error: expect.stringContaining('#4289') });
+    expect(listBuildDispatchClaims()).toEqual([]);
+    expect(execFileSync).not.toHaveBeenCalled();
+  });
+
+  it('#4649 settles a session preflight throw with the original reason', async () => {
+    const store = seedInFlightRun('session-throws');
+    acquireBuildDispatchClaim({ num: '9001', scope: [] });
+    execFileSync.mockClear();
+    await expect(deliverItem({ item: '9001', lane: 7, scope: 'we:a', sessionSlug: 'conveyor-9001', runId: 'session-throws', effectKey: 'dispatch:0:0' }, { spawn: vi.fn() }, { newSessionId: () => { throw new Error('session preflight refused'); } })).rejects.toThrow('session preflight refused');
+    expect(store.read('session-throws').effects[0]).toMatchObject({ status: 'failed', error: 'session preflight refused' });
+    expect(listBuildDispatchClaims()).toEqual([]);
+    expect(execFileSync).not.toHaveBeenCalled();
+  });
+
   it('PR #2921 review — a RESUMED delivery re-leases its lane with --no-reset, never re-claims the (already '
     + 'active) item, reuses the prior done report, and settles the ORIGINAL row from its own outcome — never '
     + '`wrapper-threw`', async () => {
@@ -3890,10 +3910,13 @@ describe('deliverItem (#4349 — settles its run-store effect + releases/holds t
     expect(listBuildDispatchHolds()[0].meta.reason).toBe('stale/superseded');
   });
 
-  // `acquireLane` itself sits OUTSIDE the inner try/catch; settlement must still fire on that early a refusal,
-  // not just on a failure from inside the inner try.
-  it('settles `failed` + releases the claim even when `acquireLane` itself throws, BEFORE the inner '
-    + 'try/catch (and therefore before `releaseClaimAndLane` ever runs)', async () => {
+  // Acquisition itself can refuse before this attempt owns any resource.
+  it('settles `failed` + releases the claim even when `acquireLane` itself throws, before this attempt '
+    + 'owns a lane (and therefore without any release attempt)', async () => {
+    mkdirSync(join(lane, '.git'), { recursive: true });
+    const lease = join(lane, '.git', '.lane-lease');
+    const foreign = JSON.stringify({ holder: 'foreign-owner', reserved: true });
+    writeFileSync(lease, foreign);
     const store = seedInFlightRun('dispatch-lane-9001c');
     acquireBuildDispatchClaim({ num: '9001', scope: [] });
     execFileSync.mockImplementation((cmd, args = []) => {
@@ -3921,5 +3944,7 @@ describe('deliverItem (#4349 — settles its run-store effect + releases/holds t
     // otherwise get re-tried every ~2 minutes with no cooldown at all).
     expect(listBuildDispatchHolds().map((h) => h.meta.num)).toEqual(['9001']);
     expect(listBuildDispatchHolds()[0].meta.reason).toBe('wrapper-threw');
+    expect(readFileSync(lease, 'utf8')).toBe(foreign);
+    expect(execFileSync.mock.calls.some(([, args]) => args?.[1] === 'release')).toBe(false);
   });
 });

@@ -2,9 +2,10 @@
 bornAs: xnoooq9
 kind: story
 size: 8
-status: open
+status: resolved
 scope: ["we:scripts/conveyor/credential-inventory.mjs", "we:scripts/conveyor/__tests__/credential-inventory*.test.mjs", "we:scripts/conveyor/health-smells/credential-inventory-stale.mjs", "we:scripts/conveyor/health-smells/__tests__/credential-inventory-stale*.test.mjs", "we:scripts/conveyor/health-watch.mjs", "we:scripts/conveyor/__tests__/health-watch.test.mjs"]
 dateOpened: "2026-09-28"
+dateResolved: "2026-10-01"
 preparedDate: "2026-09-30"
 preparedAgainstSha: "b1e5ed4e294f5ca43e9e7da64fcf8d468bf478f4"
 tags: []
@@ -18,6 +19,50 @@ visible before another silent outage. The MVP provides rotation-review signals a
 repository-secret metadata alone cannot promise advance warning of actual token expiry.
 
 ## Progress
+
+Implementation and proof, 2026-10-01:
+
+- Added the import-safe, read-only collector and metadata normalizer in
+  we:scripts/conveyor/credential-inventory.mjs; added the independent secret-age / CI-auth descriptor in
+  we:scripts/conveyor/health-smells/credential-inventory-stale.mjs and GitHub-cadenced collection in
+  we:scripts/conveyor/health-watch.mjs. Commands use argument arrays, GET-only metadata requests,
+  bounded output/child time, a 20-second collection budget, and a default 20-run scan limit per repository.
+  Failed-log text is inspected in memory and never included in returned or watcher-persisted data.
+- **Necessary scope extension:** we:scripts/conveyor/health-watch-core.mjs previously treated every omitted
+  subject as clean. The new core-driven hysteresis test demonstrated that an unknown sample advanced closure.
+  Added an opt-in `missingSubjectsUnknown` descriptor property; only this new smell enables it. This preserves
+  independent unknown subjects without altering existing smells or weakening their tests. Coverage lives in
+  we:scripts/conveyor/health-smells/__tests__/credential-inventory-stale.test.mjs and the actual watcher tests.
+- **Before:** direct dynamic imports of both proposed modules returned `ERR_MODULE_NOT_FOUND`.
+  Inspection of the existing probe list and disk-discovered smells found no repository-secret-age source.
+- **Fixture proof:** the collector suite exercises all repositories, pagination, duplicates, empty listings,
+  malformed/denied/partial/timeout/output-limited responses, lookback edges, run limits, case-insensitive
+  signatures versus ordinary failures/401, cache reuse, new attempts, retry after unavailable logs, and
+  fake secret canaries in extra API fields, logs and process errors. The descriptor suite runs through the
+  real health core. The watcher suite opens both subjects, preserves unknown samples, closes after two
+  complete clean samples, checks metadata-only persisted cache and report output, and verifies independent
+  cadence, no-GitHub and fixture suppression despite another probe failing.
+- **Live metadata proof:** `node we:scripts/conveyor/credential-inventory.mjs` used the existing caller identity,
+  with no grant/auth/workflow changes. Secret collection completed for all three repositories: WE 4,
+  Frontier UI 0, Plateau 6. Separate GET requests to each repository's Actions secrets metadata endpoint
+  (100 rows per page, one page each) matched all names/timestamps and counts. Plateau `FUI_READ_TOKEN`
+  was updated `2026-09-28T22:55:25Z`; WE's was updated `2026-09-29T21:49:34Z`. These are update timestamps,
+  not verified rotation, ownership, last use or issuer expiry. CLI exit 1 correctly represented incomplete
+  WE CI coverage while retaining all successfully collected metadata; the other two CI scans were complete.
+- **Live due-tick proof:** invoked the installed `tick()` with isolated temporary health state and real inventory
+  collection, pre-stamping the unrelated GitHub probes' cadence and disabling notification/diagnosis delivery.
+  No token-cache contents were read. The tick exited 0, stamped the inventory sample, and its actual health
+  report opened WE's secret-age subject for `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN`, and `NPM_TOKEN`
+  (91 days since update). WE CI coverage reported `unavailable,timeout,incomplete`; the persisted successful
+  run cache was empty. CI signature detection is **fixture-proven only**, not a demonstrated live auth failure.
+  Temporary proof state was removed. No credentials were rotated and no external writes were performed.
+- **Checks so far:** collector suite passed 10 tests; descriptor and watcher suites passed 68 tests after
+  fixing the unknown-subject and operator-report issues uncovered by those tests.
+  `npm run check:standards` passed with 0 errors (existing repository warnings remain).
+  Required `node we:scripts/verify-lane.mjs` completed **green** at HEAD `43692f76`; its wider selected
+  suites and standards gate passed (0 standards errors). `git diff --check` passed.
+  Sandbox-only `ps` test failures: **none observed**.
+
 
 Preparation research, 2026-09-30 (no implementation or preparation stamp):
 
@@ -165,6 +210,13 @@ issuer expiry, credential ownership, and last verified use remain unknown unless
    delivery or external writes are needed. Record coverage limitations and all commands/results when building.
 
 ## Follow-ups
+
+- Unknown coverage must not be represented by an omitted subject unless the health descriptor opts into
+  `missingSubjectsUnknown`: the core's historical default treats disappeared subjects as clean. Keep the
+  core-driven regression in we:scripts/conveyor/health-smells/__tests__/credential-inventory-stale.test.mjs.
+- Repeat live CI validation when retained failed-step logs are accessible within the collection budget.
+  The current identity proved repository-secret metadata access, but WE CI coverage remained incomplete.
+
 
 - Extend inventory to organization/environment secrets, declared owner, consuming source/workflow,
   credential kind (static versus minted), issuer expiry, last verified use, and per-entry rotation instructions.
