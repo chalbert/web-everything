@@ -31,9 +31,10 @@ export default {
   probes: ['prs'],
   openAfter: 1,
   closeAfter: 1,
-  severity: 'high',
+  severity: 'medium',
   action: 'investigate',
   greenForMs: 15 * MINUTE,
+  escalateAfterMs: 60 * MINUTE,
   recommendationHint: 'A draft PR has read all-green for a while with nothing promoting it — check the promote-draft-pr-dispatch pass is actually ticking.',
   evaluate({ prs }, { now }) {
     const out = [];
