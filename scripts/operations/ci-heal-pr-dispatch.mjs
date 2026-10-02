@@ -34,7 +34,6 @@
  * match) could never recognize a real non-WE heal session as live, so a genuinely in-flight sibling-repo heal
  * would have been re-planned every tick. Threading `repo` through here is what makes the two sides agree.
  */
-import { randomUUID } from 'node:crypto';
 import { pollHealAttempts } from './probation-heal-run.mjs';
 import { readAgyHold } from '../lib/antigravity-run-evidence.mjs';
 import { providerQuotaHold } from '../lib/provider-quota-hold.mjs';
@@ -109,7 +108,10 @@ export async function dispatchCiHeal(planned, {
   readPackageJson,
   // #x0jphk5 — injectable claim seam, mirroring `reconcile-fix-dispatch.mjs#dispatchFix`'s own (see this file's
   // own corrected header for why this replaces the `guardedDispatch` this docblock used to (wrongly) describe).
-  claimOwner = `${fixDispatchClaimOwner()}:${randomUUID()}`,
+  // Stable per-process owner, NOT per-dispatch: a native session's claim is never released on spawn, so a re-dispatch
+  // after reconcile frees an auth-dead/hung session must re-acquire it reentrantly (soak `claude-auth-expired`).
+  // An unsettled probation attempt is already held off by `pollAttempts` above, so two owners never overlap.
+  claimOwner = fixDispatchClaimOwner(),
   acquireClaim = acquireFixDispatchClaim,
   releaseClaim = releaseFixDispatchClaim,
   claimRoot,
