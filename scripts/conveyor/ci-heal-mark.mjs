@@ -1,13 +1,15 @@
 /**
  * ci-heal-mark.mjs — post the durable CI-HEAL comment on a conveyor PR that a CI-heal agent has rebased + repaired
  * (#2666). This is the CI-half sibling of `rearm-review.mjs`, with ONE deliberate difference: it posts a durable
- * marker comment but makes NO LABEL SWAP on the ORDINARY path — a CI-heal repairs only the CI axis, so it must
+ * marker comment and restores missing review routing after a heal. A CI-heal repairs only the CI axis, so it must
  * NEVER touch a live `review:human` / `review:pending` / `review:changes` (the human review gate stays exactly as
  * it was).
  *
  * An existing acceptance is carried only through the shared CLI's head-bound coverage proof.
  * Failed proof/restamp falls back to the existing accepted-only rearm; other live verdicts remain protected.
  * Both operations are best-effort and report their outcomes separately from the durable heal comment.
+ * Without a live review or merge-path label, a fresh, head-bound read permits adding review:pending.
+ * CI lifecycle labels alone are insufficient: the drain removes them when checks turn green.
  *
  * WHY A DURABLE COMMENT (the whole point — mirrors #2643). The conveyor bounds auto CI-heal at N attempts per PR so
  * a genuinely-broken diff can't flap forever. That cap must survive a conveyor RESTART, which wipes the in-session
@@ -162,6 +164,37 @@ export function spawnCiHealRestamp({ pr, repo, cwd, headSha, actor = 'conveyor C
   } catch (e) { return { ok: false, reason: String(e.message || e) }; }
 }
 
+// Unknown/malformed labels are not evidence of an absent routing label. Keep any
+// review disposition (including future ones) and the producer's merge-path label.
+function missingHealRouting(labels) {
+  return Array.isArray(labels)
+    && labels.every(label => label && typeof label.name === 'string' && label.name.length > 0)
+    && !labels.some(({ name }) => name.startsWith('review:') || name === 'ready-to-merge');
+}
+
+/** Add only the missing hold; never swap a verdict or manufacture merge clearance. */
+function restoreHealRouting({ pr, repo, headSha }) {
+  if (!/^[0-9a-f]{40}$/.test(headSha || '')) return {};
+  const repoArgs = repo ? [`--repo=${repo}`] : [];
+  const gh = args => execFileSync('gh', args, {
+    stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8',
+    timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL',
+  });
+  const read = () => JSON.parse(gh(['pr', 'view', String(pr), ...repoArgs, '--json', 'state,isDraft,headRefOid,labels']));
+  // This read is at the mutation boundary, after the caller's label observation.
+  const live = read();
+  if (live.state !== 'OPEN' || live.isDraft !== false || live.headRefOid !== headSha || !missingHealRouting(live.labels)) return {};
+  gh(['pr', 'edit', String(pr), ...repoArgs, '--add-label', REVIEW_LABELS.pending]);
+  const after = read();
+  if (after.state !== 'OPEN' || after.isDraft !== false || after.headRefOid !== headSha
+    || !Array.isArray(after.labels) || !after.labels.every(label => label && typeof label.name === 'string')
+    || !hasReviewLabel(after.labels, REVIEW_LABELS.pending)
+    || after.labels.some(({ name }) => (name.startsWith('review:') && name !== REVIEW_LABELS.pending) || name === 'ready-to-merge')) {
+    throw new Error('CI-heal routing restoration could not be verified');
+  }
+  return { restored: REVIEW_LABELS.pending };
+}
+
 // ── IO SHELL (runs only as a CLI — the pure exports above stay side-effect-free on import) ────────────────────────
 const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(new URL(import.meta.url).pathname);
 if (IS_CLI) {
@@ -207,6 +240,7 @@ if (IS_CLI) {
   }
   let rearmed = false;
   let restamped = false;
+  let restored;
   let carryReason;
   try {
     const viewArgs = ['pr', 'view', String(pr), '--json', 'labels'];
@@ -224,11 +258,15 @@ if (IS_CLI) {
         carryReason = carry.reason;
         rearmed = spawnCiHealRearm(handback).ok;
       }
+    } else if (missingHealRouting(labels)) {
+      ({ restored } = restoreHealRouting({
+        pr, repo: typeof flags.repo === 'string' ? flags.repo : owedRepo?.slug, headSha,
+      }));
     }
   } catch (e) {
     carryReason = String(e.message || e);
     // Best-effort (see the header) — an unreadable label state or a failed rearm never fails this CLI's own
     // exit code; the stale acceptance (if any) is caught by the next push through this same path, or by a human.
   }
-  process.stdout.write(JSON.stringify({ ok: true, pr, commented: posted.commented, ...(posted.owed ? { owed: true } : {}), restamped, rearmed, ...(carryReason ? { carryReason } : {}) }) + '\n');
+  process.stdout.write(JSON.stringify({ ok: true, pr, commented: posted.commented, ...(posted.owed ? { owed: true } : {}), restamped, rearmed, ...(restored ? { restored } : {}), ...(carryReason ? { carryReason } : {}) }) + '\n');
 }
