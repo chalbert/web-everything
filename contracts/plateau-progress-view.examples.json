@@ -3221,5 +3221,923 @@
         }
       }
     }
+  },
+  "executor-families-and-structured-holds": {
+    "description": "Synthetic build, prepare, standalone Codex, Gemini/agy, fix, ci-heal and review; two repos/authors, parent-child linkage, cardless/unmatched work, model mismatch and unknown attribution. Shape vectors only, not live coverage.",
+    "snapshot": {
+      "schema": 2,
+      "snapshotId": "publisher-boot-1:7",
+      "publisherId": "publisher-boot-1",
+      "sequence": 7,
+      "observedAt": "2026-09-30T16:00:00Z",
+      "timeZone": "America/Toronto",
+      "coverage": {
+        "repos": {
+          "web-everything": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          },
+          "plateau-app": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          },
+          "frontierui": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          }
+        },
+        "collections": {
+          "runs": {
+            "total": 7,
+            "included": 7,
+            "complete": true,
+            "source": "runs"
+          },
+          "holds": {
+            "total": 3,
+            "included": 3,
+            "complete": true,
+            "source": "holds"
+          },
+          "actions": {
+            "total": 0,
+            "included": 0,
+            "complete": true,
+            "source": "actions"
+          }
+        }
+      },
+      "sources": {
+        "runs": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "holds": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "pullRequests": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "deliveries": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "partial",
+          "complete": false,
+          "reason": "Rotated local drain history; repo identity unavailable.",
+          "cursor": null
+        },
+        "actions": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "policy": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        }
+      },
+      "summary": {
+        "moving": {
+          "value": null,
+          "unit": "logical-work",
+          "source": "runs",
+          "complete": false
+        },
+        "jobs": {
+          "value": 7,
+          "unit": "jobs",
+          "source": "runs",
+          "complete": true
+        },
+        "held": {
+          "value": 3,
+          "unit": "cards",
+          "source": "holds",
+          "complete": true
+        },
+        "openPullRequests": {
+          "value": 0,
+          "unit": "pull-requests",
+          "source": "pullRequests",
+          "complete": true
+        },
+        "mergedToday": {
+          "value": 3,
+          "unit": "merged-prs",
+          "source": "deliveries",
+          "complete": false
+        },
+        "humanPending": {
+          "value": 0,
+          "unit": "human-actions",
+          "source": "actions",
+          "complete": true
+        },
+        "humanActionable": {
+          "value": 0,
+          "unit": "human-actions",
+          "source": "actions",
+          "complete": true
+        }
+      },
+      "runs": [
+        {
+          "runId": "runner:session-0",
+          "logicalWorkId": "we:4620",
+          "parentRunId": null,
+          "repo": "chalbert/web-everything",
+          "cardRefs": [
+            "we:4620"
+          ],
+          "prRefs": [],
+          "description": "Synthetic build observation.",
+          "role": "build",
+          "state": "working",
+          "rawState": null,
+          "startedAt": "2026-09-30T15:45:00Z",
+          "lastActivityAt": "2026-09-30T16:00:00Z",
+          "observedAt": "2026-09-30T16:00:00Z",
+          "nextStep": "Publish the prepared contract.",
+          "owner": "alice",
+          "author": "alice",
+          "origin": "runner",
+          "supervisor": {
+            "identity": "runner:supervisor",
+            "provider": null,
+            "source": "runs",
+            "observedAt": "2026-09-30T16:00:00Z"
+          },
+          "executor": {
+            "identity": "runner:session-0",
+            "provider": "openai",
+            "source": "runs",
+            "observedAt": "2026-09-30T16:00:00Z"
+          },
+          "requestedModel": {
+            "provider": "openai",
+            "model": "configured-model",
+            "source": "runs",
+            "observedAt": "2026-09-30T16:00:00Z",
+            "evidenceKind": "requested"
+          },
+          "reportedModel": {
+            "provider": "provider-vNext",
+            "model": "served-model",
+            "source": "runs",
+            "observedAt": "2026-09-30T16:00:00Z",
+            "evidenceKind": "reported"
+          }
+        },
+        {
+          "runId": "runner:session-1",
+          "logicalWorkId": "plateau-app:sample",
+          "parentRunId": null,
+          "repo": "chalbert/plateau-app",
+          "cardRefs": [
+            "plateau-app:sample"
+          ],
+          "prRefs": [],
+          "description": "Synthetic prepare observation.",
+          "role": "prepare",
+          "state": "working",
+          "rawState": null,
+          "startedAt": "2026-09-30T15:45:00Z",
+          "lastActivityAt": "2026-09-30T16:00:00Z",
+          "observedAt": "2026-09-30T16:00:00Z",
+          "nextStep": "Publish the prepared contract.",
+          "owner": "bob",
+          "author": "bob",
+          "origin": "runner",
+          "supervisor": {
+            "identity": "runner:supervisor",
+            "provider": null,
+            "source": "runs",
+            "observedAt": "2026-09-30T16:00:00Z"
+          },
+          "executor": {
+            "identity": "runner:session-1",
+            "provider": "anthropic",
+            "source": "runs",
+            "observedAt": "2026-09-30T16:00:00Z"
+          },
+          "requestedModel": {
+            "provider": "anthropic",
+            "model": "configured-model",
+            "source": "runs",
+            "observedAt": "2026-09-30T16:00:00Z",
+            "evidenceKind": "requested"
+          },
+          "reportedModel": {
+            "provider": "provider-vNext",
+            "model": "served-model",
+            "source": "runs",
+            "observedAt": "2026-09-30T16:00:00Z",
+            "evidenceKind": "reported"
+          }
+        },
+        {
+          "runId": "codex:session-2",
+          "logicalWorkId": null,
+          "parentRunId": null,
+          "repo": "chalbert/web-everything",
+          "cardRefs": [],
+          "prRefs": [],
+          "description": "Synthetic standalone observation.",
+          "role": "standalone",
+          "state": "working",
+          "rawState": null,
+          "startedAt": "2026-09-30T15:45:00Z",
+          "lastActivityAt": "2026-09-30T16:00:00Z",
+          "observedAt": "2026-09-30T16:00:00Z",
+          "nextStep": "Publish the prepared contract.",
+          "owner": "alice",
+          "author": "alice",
+          "origin": "codex",
+          "supervisor": null,
+          "executor": {
+            "identity": "codex:session-2",
+            "provider": "openai",
+            "source": "runs",
+            "observedAt": "2026-09-30T16:00:00Z"
+          },
+          "requestedModel": {
+            "provider": "openai",
+            "model": "configured-model",
+            "source": "runs",
+            "observedAt": "2026-09-30T16:00:00Z",
+            "evidenceKind": "requested"
+          },
+          "reportedModel": {
+            "provider": "provider-vNext",
+            "model": "served-model",
+            "source": "runs",
+            "observedAt": "2026-09-30T16:00:00Z",
+            "evidenceKind": "reported"
+          }
+        },
+        {
+          "runId": "agy:session-3",
+          "logicalWorkId": null,
+          "parentRunId": null,
+          "repo": null,
+          "cardRefs": [],
+          "prRefs": [],
+          "description": "Synthetic standalone observation.",
+          "role": "standalone",
+          "state": "working",
+          "rawState": null,
+          "startedAt": "2026-09-30T15:45:00Z",
+          "lastActivityAt": "2026-09-30T16:00:00Z",
+          "observedAt": "2026-09-30T16:00:00Z",
+          "nextStep": "Publish the prepared contract.",
+          "owner": null,
+          "author": null,
+          "origin": "agy",
+          "supervisor": null,
+          "executor": {
+            "identity": null,
+            "provider": "google",
+            "source": "runs",
+            "observedAt": "2026-09-30T16:00:00Z"
+          },
+          "requestedModel": {
+            "provider": "google",
+            "model": "configured-model",
+            "source": "runs",
+            "observedAt": "2026-09-30T16:00:00Z",
+            "evidenceKind": "requested"
+          },
+          "reportedModel": null
+        },
+        {
+          "runId": "runner:session-4",
+          "logicalWorkId": "we:4620",
+          "parentRunId": null,
+          "repo": "chalbert/web-everything",
+          "cardRefs": [
+            "we:4620"
+          ],
+          "prRefs": [],
+          "description": "Synthetic fix observation.",
+          "role": "fix",
+          "state": "working",
+          "rawState": null,
+          "startedAt": "2026-09-30T15:45:00Z",
+          "lastActivityAt": "2026-09-30T16:00:00Z",
+          "observedAt": "2026-09-30T16:00:00Z",
+          "nextStep": "Publish the prepared contract.",
+          "owner": "alice",
+          "author": "alice",
+          "origin": "runner",
+          "supervisor": {
+            "identity": "runner:supervisor",
+            "provider": null,
+            "source": "runs",
+            "observedAt": "2026-09-30T16:00:00Z"
+          },
+          "executor": {
+            "identity": "runner:session-4",
+            "provider": "openai",
+            "source": "runs",
+            "observedAt": "2026-09-30T16:00:00Z"
+          },
+          "requestedModel": {
+            "provider": "openai",
+            "model": "configured-model",
+            "source": "runs",
+            "observedAt": "2026-09-30T16:00:00Z",
+            "evidenceKind": "requested"
+          },
+          "reportedModel": {
+            "provider": "provider-vNext",
+            "model": "served-model",
+            "source": "runs",
+            "observedAt": "2026-09-30T16:00:00Z",
+            "evidenceKind": "reported"
+          }
+        },
+        {
+          "runId": "runner:session-5",
+          "logicalWorkId": "plateau-app:sample",
+          "parentRunId": null,
+          "repo": "chalbert/plateau-app",
+          "cardRefs": [
+            "plateau-app:sample"
+          ],
+          "prRefs": [],
+          "description": "Synthetic ci-heal observation.",
+          "role": "ci-heal",
+          "state": "working",
+          "rawState": null,
+          "startedAt": "2026-09-30T15:45:00Z",
+          "lastActivityAt": "2026-09-30T16:00:00Z",
+          "observedAt": "2026-09-30T16:00:00Z",
+          "nextStep": "Publish the prepared contract.",
+          "owner": "bob",
+          "author": "bob",
+          "origin": "runner",
+          "supervisor": {
+            "identity": "runner:supervisor",
+            "provider": null,
+            "source": "runs",
+            "observedAt": "2026-09-30T16:00:00Z"
+          },
+          "executor": {
+            "identity": "runner:session-5",
+            "provider": "anthropic",
+            "source": "runs",
+            "observedAt": "2026-09-30T16:00:00Z"
+          },
+          "requestedModel": {
+            "provider": "anthropic",
+            "model": "configured-model",
+            "source": "runs",
+            "observedAt": "2026-09-30T16:00:00Z",
+            "evidenceKind": "requested"
+          },
+          "reportedModel": {
+            "provider": "provider-vNext",
+            "model": "served-model",
+            "source": "runs",
+            "observedAt": "2026-09-30T16:00:00Z",
+            "evidenceKind": "reported"
+          }
+        },
+        {
+          "runId": "runner:session-6",
+          "logicalWorkId": "we:4620",
+          "parentRunId": "runner:session-0",
+          "repo": "chalbert/web-everything",
+          "cardRefs": [
+            "we:4620"
+          ],
+          "prRefs": [],
+          "description": "Synthetic review observation.",
+          "role": "review",
+          "state": "working",
+          "rawState": null,
+          "startedAt": "2026-09-30T15:45:00Z",
+          "lastActivityAt": "2026-09-30T16:00:00Z",
+          "observedAt": "2026-09-30T16:00:00Z",
+          "nextStep": "Publish the prepared contract.",
+          "owner": "alice",
+          "author": "alice",
+          "origin": "runner",
+          "supervisor": {
+            "identity": "runner:supervisor",
+            "provider": null,
+            "source": "runs",
+            "observedAt": "2026-09-30T16:00:00Z"
+          },
+          "executor": {
+            "identity": "runner:session-6",
+            "provider": "provider-vNext",
+            "source": "runs",
+            "observedAt": "2026-09-30T16:00:00Z"
+          },
+          "requestedModel": {
+            "provider": "provider-vNext",
+            "model": "configured-model",
+            "source": "runs",
+            "observedAt": "2026-09-30T16:00:00Z",
+            "evidenceKind": "requested"
+          },
+          "reportedModel": {
+            "provider": "provider-vNext",
+            "model": "served-model",
+            "source": "runs",
+            "observedAt": "2026-09-30T16:00:00Z",
+            "evidenceKind": "reported"
+          }
+        }
+      ],
+      "holds": [
+        {
+          "workRef": "we:synthetic-overlap",
+          "description": "Waiting for the progress contract.",
+          "owner": null,
+          "rawReason": "scheduler-vNext:overlap",
+          "normalizedReason": "overlap",
+          "since": "2026-09-30T15:00:00Z",
+          "asOf": "2026-09-30T16:00:00Z",
+          "nextStep": "Recheck after the contract lands.",
+          "relatedRefs": [
+            "we:4620"
+          ],
+          "sourceEvidence": {
+            "source": "holds",
+            "observedAt": "2026-09-30T16:00:00Z"
+          },
+          "overlap": {
+            "counterpart": {
+              "workRef": "we:4620",
+              "runId": "runner:session-0"
+            },
+            "files": [
+              {
+                "repo": "we",
+                "path": "contracts/plateau-progress-view.schema.json"
+              }
+            ]
+          },
+          "capacity": null
+        },
+        {
+          "workRef": "we:synthetic-preparation",
+          "description": "Waiting for the progress contract.",
+          "owner": null,
+          "rawReason": "scheduler-vNext:preparation",
+          "normalizedReason": "preparation",
+          "since": "2026-09-30T15:00:00Z",
+          "asOf": "2026-09-30T16:00:00Z",
+          "nextStep": "Recheck after the contract lands.",
+          "relatedRefs": [
+            "we:4620"
+          ],
+          "sourceEvidence": {
+            "source": "holds",
+            "observedAt": "2026-09-30T16:00:00Z"
+          },
+          "overlap": null,
+          "capacity": null
+        },
+        {
+          "workRef": "we:synthetic-capacity",
+          "description": "Waiting for the progress contract.",
+          "owner": null,
+          "rawReason": "scheduler-vNext:capacity",
+          "normalizedReason": "capacity",
+          "since": "2026-09-30T15:00:00Z",
+          "asOf": "2026-09-30T16:00:00Z",
+          "nextStep": "Recheck after the contract lands.",
+          "relatedRefs": [
+            "we:4620"
+          ],
+          "sourceEvidence": {
+            "source": "holds",
+            "observedAt": "2026-09-30T16:00:00Z"
+          },
+          "overlap": null,
+          "capacity": {
+            "used": 3,
+            "limit": 2,
+            "unit": "jobs",
+            "source": "holds",
+            "observedAt": "2026-09-30T16:00:00Z"
+          }
+        }
+      ],
+      "actions": [],
+      "items": [],
+      "deliveries": {
+        "source": "deliveries",
+        "provenance": "observed by local drain",
+        "complete": false,
+        "historyStart": "2026-09-30T14:00:00Z",
+        "today": {
+          "start": "2026-09-30T04:00:00Z",
+          "end": "2026-09-30T16:00:00Z",
+          "count": 3,
+          "complete": false
+        },
+        "trend": {
+          "status": "comparable",
+          "reason": null,
+          "current": {
+            "start": "2026-09-30T15:00:00Z",
+            "end": "2026-09-30T16:00:00Z",
+            "count": 2,
+            "complete": true
+          },
+          "previous": {
+            "start": "2026-09-30T14:00:00Z",
+            "end": "2026-09-30T15:00:00Z",
+            "count": 1,
+            "complete": true
+          }
+        }
+      },
+      "policy": {
+        "sourceKind": "external-plan",
+        "revision": "sha256:example-plan",
+        "observedAt": "2026-09-30T16:00:00Z",
+        "effectiveAt": null,
+        "readOnly": true,
+        "priorities": [
+          {
+            "description": "Restore reliable review progress.",
+            "refs": [
+              "we:4620"
+            ]
+          }
+        ],
+        "sections": [
+          {
+            "id": "standing",
+            "title": "Standing rules",
+            "text": "Keep review work moving.",
+            "sourceDate": "2026-09-29"
+          }
+        ],
+        "conflicts": [],
+        "status": "observed"
+      }
+    }
+  },
+  "executor-and-hold-unknowns": {
+    "description": "Synthetic explicit unknown attribution, overlap and capacity; measured zero differs from null.",
+    "snapshot": {
+      "schema": 2,
+      "snapshotId": "publisher-boot-1:7",
+      "publisherId": "publisher-boot-1",
+      "sequence": 7,
+      "observedAt": "2026-09-30T16:00:00Z",
+      "timeZone": "America/Toronto",
+      "coverage": {
+        "repos": {
+          "web-everything": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          },
+          "plateau-app": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          },
+          "frontierui": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          }
+        },
+        "collections": {
+          "runs": {
+            "total": 1,
+            "included": 1,
+            "complete": true,
+            "source": "runs"
+          },
+          "holds": {
+            "total": 3,
+            "included": 3,
+            "complete": true,
+            "source": "holds"
+          },
+          "actions": {
+            "total": 0,
+            "included": 0,
+            "complete": true,
+            "source": "actions"
+          }
+        }
+      },
+      "sources": {
+        "runs": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "holds": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "pullRequests": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "deliveries": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "partial",
+          "complete": false,
+          "reason": "Rotated local drain history; repo identity unavailable.",
+          "cursor": null
+        },
+        "actions": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "policy": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        }
+      },
+      "summary": {
+        "moving": {
+          "value": null,
+          "unit": "logical-work",
+          "source": "runs",
+          "complete": false
+        },
+        "jobs": {
+          "value": 1,
+          "unit": "jobs",
+          "source": "runs",
+          "complete": true
+        },
+        "held": {
+          "value": 3,
+          "unit": "cards",
+          "source": "holds",
+          "complete": true
+        },
+        "openPullRequests": {
+          "value": 0,
+          "unit": "pull-requests",
+          "source": "pullRequests",
+          "complete": true
+        },
+        "mergedToday": {
+          "value": 3,
+          "unit": "merged-prs",
+          "source": "deliveries",
+          "complete": false
+        },
+        "humanPending": {
+          "value": 0,
+          "unit": "human-actions",
+          "source": "actions",
+          "complete": true
+        },
+        "humanActionable": {
+          "value": 0,
+          "unit": "human-actions",
+          "source": "actions",
+          "complete": true
+        }
+      },
+      "runs": [
+        {
+          "runId": "runner:session-0",
+          "logicalWorkId": "we:4620",
+          "parentRunId": null,
+          "repo": "chalbert/web-everything",
+          "cardRefs": [
+            "we:4620"
+          ],
+          "prRefs": [],
+          "description": "Synthetic build observation.",
+          "role": "build",
+          "state": "working",
+          "rawState": null,
+          "startedAt": "2026-09-30T15:45:00Z",
+          "lastActivityAt": "2026-09-30T16:00:00Z",
+          "observedAt": "2026-09-30T16:00:00Z",
+          "nextStep": "Publish the prepared contract.",
+          "owner": null,
+          "author": null,
+          "origin": null,
+          "supervisor": null,
+          "executor": {
+            "identity": null,
+            "provider": null,
+            "source": "runs",
+            "observedAt": null
+          },
+          "requestedModel": null,
+          "reportedModel": null
+        }
+      ],
+      "holds": [
+        {
+          "workRef": "we:synthetic-overlap",
+          "description": "Waiting for the progress contract.",
+          "owner": null,
+          "rawReason": "scheduler-vNext:overlap",
+          "normalizedReason": "overlap",
+          "since": "2026-09-30T15:00:00Z",
+          "asOf": "2026-09-30T16:00:00Z",
+          "nextStep": "Recheck after the contract lands.",
+          "relatedRefs": [
+            "we:4620"
+          ],
+          "sourceEvidence": null,
+          "overlap": {
+            "counterpart": null,
+            "files": null
+          },
+          "capacity": {
+            "used": null,
+            "limit": 0,
+            "unit": "jobs",
+            "source": "holds",
+            "observedAt": null
+          }
+        },
+        {
+          "workRef": "we:synthetic-preparation",
+          "description": "Waiting for the progress contract.",
+          "owner": null,
+          "rawReason": "scheduler-vNext:preparation",
+          "normalizedReason": "preparation",
+          "since": "2026-09-30T15:00:00Z",
+          "asOf": "2026-09-30T16:00:00Z",
+          "nextStep": "Recheck after the contract lands.",
+          "relatedRefs": [
+            "we:4620"
+          ],
+          "sourceEvidence": null,
+          "overlap": {
+            "counterpart": null,
+            "files": null
+          },
+          "capacity": {
+            "used": null,
+            "limit": 0,
+            "unit": "jobs",
+            "source": "holds",
+            "observedAt": null
+          }
+        },
+        {
+          "workRef": "we:synthetic-capacity",
+          "description": "Waiting for the progress contract.",
+          "owner": null,
+          "rawReason": "scheduler-vNext:capacity",
+          "normalizedReason": "capacity",
+          "since": "2026-09-30T15:00:00Z",
+          "asOf": "2026-09-30T16:00:00Z",
+          "nextStep": "Recheck after the contract lands.",
+          "relatedRefs": [
+            "we:4620"
+          ],
+          "sourceEvidence": null,
+          "overlap": {
+            "counterpart": null,
+            "files": null
+          },
+          "capacity": {
+            "used": null,
+            "limit": 0,
+            "unit": "jobs",
+            "source": "holds",
+            "observedAt": null
+          }
+        }
+      ],
+      "actions": [],
+      "items": [],
+      "deliveries": {
+        "source": "deliveries",
+        "provenance": "observed by local drain",
+        "complete": false,
+        "historyStart": "2026-09-30T14:00:00Z",
+        "today": {
+          "start": "2026-09-30T04:00:00Z",
+          "end": "2026-09-30T16:00:00Z",
+          "count": 3,
+          "complete": false
+        },
+        "trend": {
+          "status": "comparable",
+          "reason": null,
+          "current": {
+            "start": "2026-09-30T15:00:00Z",
+            "end": "2026-09-30T16:00:00Z",
+            "count": 2,
+            "complete": true
+          },
+          "previous": {
+            "start": "2026-09-30T14:00:00Z",
+            "end": "2026-09-30T15:00:00Z",
+            "count": 1,
+            "complete": true
+          }
+        }
+      },
+      "policy": {
+        "sourceKind": "external-plan",
+        "revision": "sha256:example-plan",
+        "observedAt": "2026-09-30T16:00:00Z",
+        "effectiveAt": null,
+        "readOnly": true,
+        "priorities": [
+          {
+            "description": "Restore reliable review progress.",
+            "refs": [
+              "we:4620"
+            ]
+          }
+        ],
+        "sections": [
+          {
+            "id": "standing",
+            "title": "Standing rules",
+            "text": "Keep review work moving.",
+            "sourceDate": "2026-09-29"
+          }
+        ],
+        "conflicts": [],
+        "status": "observed"
+      }
+    }
   }
 }
