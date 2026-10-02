@@ -2354,17 +2354,22 @@ export function renderReferralRecord(record) {
  *
  * Only a comment from a trusted author ({@link isTrustedMarkerAuthor}: the automation or the operator) is read.
  * `referralRecordState` pools rulings across every same-head record, so an untrusted commenter's forged record
- * would otherwise clear another record's hold. An untrusted comment is skipped outright — not counted as
- * malformed — so posting one can neither clear nor wedge a hold. A bare string has no author and is skipped too.
+ * would otherwise clear another record's hold. An untrusted comment that names the marker is therefore never read
+ * as a record, but it IS flagged `malformed` (a hold), not skipped — operator decision on PR #3507: anything that
+ * looks like a referral record and cannot be read cleanly is a flagged hold. A bare string has no author, so it is
+ * untrusted too. A comment that never names the marker is ignored.
  */
 export function readReferralRecords(comments) {
   const records = new Map();
   const seen = new Set();
   let malformed = !Array.isArray(comments);
   for (const comment of Array.isArray(comments) ? comments : []) {
-    if (!isTrustedMarkerAuthor(comment)) continue;
     const body = typeof comment === 'string' ? comment : comment?.body ?? '';
     if (!body.includes(REFERRAL_RECORD_MARKER)) continue;
+    // Fail closed: a record-shaped comment from an author outside the trusted principals is never read as a record
+    // (it cannot clear another record's hold), but it is flagged malformed so it stays a visible hold a person
+    // clears — it must not vanish. Cost: any commenter can park a PR; the failure mode is "needs a human", never "clear".
+    if (!isTrustedMarkerAuthor(comment)) { malformed = true; continue; }
     // Only the comment's own final line is structured data. Summaries and rationales
     // may quote arbitrary marker-shaped text; they cannot inject a second record.
     const trailer = body.trimEnd().split('\n').at(-1);

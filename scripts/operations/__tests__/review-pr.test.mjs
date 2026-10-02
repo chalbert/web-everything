@@ -3819,6 +3819,25 @@ describe('xfkqowg tool-less advisory and historical ruling replay', () => {
     expect(run.status).not.toBe('failed');
     expect(run.findings.reduce.referrals).toEqual([]);
   });
+  it.each([
+    ['no summary', { file: NET_PATHS[0], verdict: 'CONFIRMED' }],
+    ['empty summary', { summary: '  ', file: NET_PATHS[0], verdict: 'CONFIRMED' }],
+    ['non-object entry', 'CONFIRMED'],
+    ['null entry', null],
+    ['no verdict', { summary: 'claim', file: NET_PATHS[0] }],
+  ])('a malformed finding (%s) from ANY seat never throws in the reduce step and is never read as a clean bill', async (_name, malformed) => {
+    const { registry } = registryFor({ labels: ['review:human'], netRev: PINNED_HEAD, body: '<!-- authored-by-actor: author -->', comments: [] },
+      { antigravityReview: true, codexAdvisory: true, correctnessAdvisory: true });
+    let run = advanceWhileRunning(startRun({ op: REVIEW_PR_OP, id: 'malformed-every-seat', input: { pr: 7, repo: 'o/r' }, registry }), { registry });
+    const seats = [];
+    while (run.pending?.kind === 'judge') {
+      seats.push(run.pending.step);
+      run = advanceWhileRunning(run, { registry, resume: { value: { summary: 'reported claim', findings: [malformed] } } });
+    }
+    expect(seats.length).toBeGreaterThan(2);
+    expect(run.status).not.toBe('failed');
+    expect(run.findings.reduce.referrals.every(r => r.original && typeof r.original.summary === 'string' && r.original.summary.trim())).toBe(true);
+  });
   it('does not spend a confirmation turn on a PLAUSIBLE tool-less claim', async () => {
     const { run, judge } = await drive({ source: { summary: 'tentative', file: 'outside.md', verdict: 'PLAUSIBLE', impactIfUnfixed: 'broken' } });
     expect(run.findings.reduce.referrals).toEqual([]);

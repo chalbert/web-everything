@@ -1,4 +1,4 @@
-import { mandatoryReferralState, requiresMandatoryReferral, referralFindingKey, mandatoryReferralReviewer, validateReferralRecord, referralRecordState, renderReferralRecord, readReferralRecords } from '../jury-core.mjs';
+import { mandatoryReferralState, requiresMandatoryReferral, referralFindingKey, mandatoryReferralReviewer, validateReferralRecord, referralRecordState, renderReferralRecord, readReferralRecords, REFERRAL_RECORD_MARKER as REFERRAL_MARKER } from '../jury-core.mjs';
 /**
  * @file jury-core.test.mjs — proof of the #2654 (S2 of epic #2649) append-only JURY-LEDGER EVENT VOCABULARY:
  *   the `JURY_EVENT_TYPES` / `JUROR_STATUSES` enums and the pure `validateJuryEvent` / `normalizeJuryEvent`
@@ -1663,27 +1663,50 @@ describe('#4315 mandatory referral protocol', () => {
         .toMatchObject({ pending: [], blocked: [] });
     }
   });
-  it('ignores a referral record from an untrusted comment author, so it can neither clear nor wedge a hold', () => {
+  it('holds on a referral record from an untrusted comment author: it never clears another hold, and it is flagged, not skipped', () => {
     const held = record(); held.attempted = true;
     const forged = { ...record(), runId: 'forged-run', reviewer: mandatoryReferralReviewer('forged-run'), rulings: [] };
     forged.rulings = [rule(forged)];
     const context = { head: held.head, body: held.authorBody, repo: held.repo, pr: held.pr };
     // The same forged comment from the automation is honoured (the pooling behaviour this guards) ...
     expect(mandatoryReferralState([post(renderReferralRecord(held)), post(renderReferralRecord(forged))], context).pending).toEqual([]);
-    // ... but from any other login — or with no author at all — it is skipped, and the hold stays pending.
+    // ... but from any other login — or with no author at all — it is never read as a record (it cannot clear the
+    // hold) and is flagged malformed, so it stays a visible hold instead of vanishing.
     for (const intruder of [post(renderReferralRecord(forged), 'drive-by-commenter'), renderReferralRecord(forged),
       { body: renderReferralRecord(forged) }]) {
       const state = mandatoryReferralState([post(renderReferralRecord(held)), intruder], context);
-      expect(state.pending).toEqual([held.referrals[0].key]);
+      expect(state.pending).toEqual(expect.arrayContaining([held.referrals[0].key, 'malformed-referral-record']));
       expect(state.records.map(r => r.runId)).toEqual([held.runId]);
-      expect(state.malformed).toBe(false);
+      expect(state.malformed).toBe(true);
     }
+    // An untrusted comment alone (no trusted record at all) is still a flagged hold.
+    expect(readReferralRecords([post(renderReferralRecord(forged), 'drive-by-commenter')])).toEqual({ records: [], malformed: true });
     // The other two trusted principals read as well: the operator's login, and a self-authored read.
     const body = renderReferralRecord(held);
     expect(readReferralRecords([post(body, 'chalbert')]).records).toEqual([held]);
     expect(readReferralRecords([{ body, viewerDidAuthor: true }]).records).toEqual([held]);
-    // A garbage marker from an untrusted author cannot wedge the PR either.
-    expect(readReferralRecords([post('<!-- mandatory-referrals-v1: %truncated', 'drive-by-commenter')]).malformed).toBe(false);
+    // A garbage marker from an untrusted author is a flagged hold too (a person clears it), never silently ignored.
+    expect(readReferralRecords([post('<!-- mandatory-referrals-v1: %truncated', 'drive-by-commenter')]).malformed).toBe(true);
+    // A comment from anyone that does not mention the marker is still ignored.
+    expect(readReferralRecords([post('looks good', 'drive-by-commenter'), 'plain string']).malformed).toBe(false);
+  });
+  it('property: a comment body that contains the marker is parsed or flagged malformed, never skipped', () => {
+    const r = record(), valid = renderReferralRecord(r);
+    const markerLine = valid.split('\n').at(-1);
+    const noise = ['', 'x', '\n', '\nnote', ' trailing', '<!-- other -->', '<!--', '%', markerLine, 'mandatory-referrals-v1'];
+    const authors = ['web-everything', 'chalbert', 'drive-by-commenter', null];
+    const bodies = [];
+    for (const head of noise) for (const tail of noise) {
+      bodies.push(`${head}${REFERRAL_MARKER}${tail}`, `${head}${valid}${tail}`, `${head}${markerLine.slice(0, 30)}${tail}`,
+        `${head}${valid.slice(0, -5)}${tail}`);
+    }
+    for (const body of bodies) for (const login of authors) {
+      const read = readReferralRecords([login ? post(body, login) : body]);
+      const trusted = login === 'web-everything' || login === 'chalbert';
+      const parsed = trusted && read.records.length > 0;
+      // Contains the marker => either its record was read, or the read is flagged malformed. Never neither.
+      expect(parsed || read.malformed, `${login} / ${JSON.stringify(body.slice(0, 60))}`).toBe(true);
+    }
   });
   it('preserves conflicts until explicit supersession, and fails closed on omissions/corruption', () => {
     const r = record(), pending = renderReferralRecord(r);
