@@ -371,6 +371,8 @@ export function stepEpisodes(state, evaluations, now, { config = DEFAULT_HEALTH_
             openedAt: null, lastBreachAt: null, id: null, tracked: null, remindedAt: null, samples: 0,
           };
         }
+        // A clean observation breaks the duration clock even when close hysteresis keeps the episode.
+        if (ep.cleanStreak > 0 && ep.severity === 'medium' && smell.escalateAfterMs !== undefined) ep.firstBreachAt = now;
         ep.breachStreak += 1; ep.cleanStreak = 0; ep.lastBreachAt = now; ep.samples += 1;
         ep.measure = r.measure ?? {}; ep.summary = r.summary ?? ''; ep.recommendation = r.recommendation ?? smell.recommendationHint ?? '';
         if (ep.status === 'pending' && ep.breachStreak >= openAfter) {
@@ -382,13 +384,21 @@ export function stepEpisodes(state, evaluations, now, { config = DEFAULT_HEALTH_
           ep.status = opens.length > cfg.flapMax ? 'flapping' : 'open';
           emit(ep.status === 'flapping' ? 'flapping' : 'opened', key);
         }
+        if (ep.status !== 'pending' && ep.severity === 'medium'
+          && Number.isFinite(smell.escalateAfterMs) && smell.escalateAfterMs > 0
+          && Number.isFinite(ep.firstBreachAt) && ep.firstBreachAt <= now
+          && now - ep.firstBreachAt >= smell.escalateAfterMs) {
+          ep.severity = 'high';
+          ep.escalatedAt = now;
+          emit('escalated', key);
+        }
       } else if (ep) {
         applyClean(ep, key);
       }
     }
-    // A subject that disappeared from this smell's results is a clean sample for it.
+    // Disappeared subjects are clean unless the descriptor declares incomplete coverage unknown.
     for (const [key, ep] of Object.entries(next.episodes)) {
-      if (ep.smell === smell.id && !seen.has(key)) applyClean(ep, key);
+      if (ep.smell === smell.id && !seen.has(key) && !smell.missingSubjectsUnknown) applyClean(ep, key);
     }
 
     function applyClean(ep, key) {
@@ -468,11 +478,22 @@ export function planActions(transitions, smellsById, {
         const off = mode === 'shadow' ? 'shadow mode (filing dispatch is off — config `fileDispatch`)' : 'filing dispatch is off (config `fileDispatch`)';
         plan.push({ kind: 'file', key: t.key, suppressed: fileDispatch === true ? null : off });
       }
-    } else if (t.type === 'reminder' || t.type === 'silence-expired') {
+    } else if (t.type === 'escalated' || t.type === 'reminder' || t.type === 'silence-expired') {
+      // Duration-policy episodes stay quiet until high, including silence expiry.
+      if ((t.type === 'escalated' || smell.escalateAfterMs !== undefined) && (ep.severity !== 'high' || ep.tracked)) continue;
       plan.push({ kind: 'notify', key: t.key, reason: t.type, suppressed: shadowSuppressed ? 'shadow mode' : null });
     }
   }
-  return plan;
+  // A delayed confirmed breach can escalate on the same tick as expiry and the four-hour reminder.
+  // stepEpisodes has already consumed that reminder; retain only one delivery for this key.
+  const durationKeys = new Set(transitions.filter(t => smellsById[t.episode?.smell]?.escalateAfterMs !== undefined).map(t => t.key));
+  const notified = new Set();
+  return plan.filter((p) => {
+    if (p.kind !== 'notify' || !durationKeys.has(p.key)) return true;
+    if (notified.has(p.key)) return false;
+    notified.add(p.key);
+    return true;
+  });
 }
 
 // ── 5. Rendering ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -601,6 +622,7 @@ export function renderEpisodeReport(ep, { now, smell, diagnosis = null, plan = [
     '',
     `- Status: **${ep.status}**${ep.tracked ? ` (tracked by card ${ep.tracked.card ?? '?'}, quiet)` : ''} · severity ${ep.severity} · mode ${mode}`,
     `- Opened: ${ep.openedAt ? new Date(ep.openedAt).toISOString() : '—'} (${fmtAge(now - (ep.openedAt ?? now))} ago) · last breach ${ep.lastBreachAt ? new Date(ep.lastBreachAt).toISOString() : '—'}`,
+    ...(Number.isFinite(ep.escalatedAt) ? [`- Duration escalated to high: ${new Date(ep.escalatedAt).toISOString()}`] : []),
     '',
     '## What is wrong',
     '',

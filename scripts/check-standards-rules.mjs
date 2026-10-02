@@ -13,6 +13,7 @@
  * feed (#095/#196/#197) and the human output are unchanged.
  */
 
+import { createRequire } from 'node:module';
 import { normalizeRelatedReport } from './lib/related-report.cjs';
 
 import { validateFidelityContract } from './lib/fidelity-contract.mjs';
@@ -22,6 +23,8 @@ import { scrubPublish } from './lib/secret-scrub.mjs';
 // #3637 — the POC-branch registry's own `deliveryTarget:` predicate, so the gate and the scoped per-item
 // lint validate that field with the ONE function the dispatcher also uses (never a second copy of the rule).
 import { validateDeliveryTarget } from './lib/poc-branches.mjs';
+
+const requireCjs = createRequire(import.meta.url);
 
 /** #2866: literal invisible characters are forbidden even in Markdown prose and fixtures.
  * Use visible Unicode escapes to document/test them. Offsets use zero-based UTF-16 code units.
@@ -939,6 +942,23 @@ export function findUnquotedColonScalars(content) {
     }
   }
   return findings;
+}
+
+// ── Unparseable frontmatter, any cause (#4451) ───────────────────────────────────────────────────────────
+// The colon scan above covers ONE cause of a loader-skipped item. An unclosed quote, a tab indent or a bad
+// flow collection also vanish the card (src/_data/backlog.js drops it and only warns), so the required-field
+// rule never sees it. This runs the SAME parser the loader uses (gray-matter) over the raw file, so "gate says
+// unparseable" and "loader skipped it" cannot disagree. Returns `{ colonHits, parseReason }`: `colonHits` is the
+// colon scan's findings (the gate prints those and skips the generic message to avoid a duplicate error);
+// `parseReason` is the parser's message, or null when it parses (or there is no frontmatter to parse).
+export function describeUnparseableFrontmatter(content) {
+  const colonHits = findUnquotedColonScalars(content);
+  let parseReason = null;
+  if (typeof content === 'string') {
+    try { requireCjs('gray-matter')(content); }
+    catch (e) { parseReason = String(e?.reason || e?.message || e).split('\n')[0]; }
+  }
+  return { colonHits, parseReason };
 }
 
 // ── Guard-relaxation gaps (#4409 — prevention guard from the #2892 independent review) ─────────────────

@@ -34,8 +34,8 @@ export function readLocalDoneFacts({ cwd = process.cwd(), git = execFileSync } =
     let ambiguous = false;
     for (let i = 0; i < messages.length; i += 2) {
       const message = messages[i + 1];
-      for (const token of message.match(/[a-z0-9]+/gi) || []) mentioned.add(token);
-      for (const m of message.matchAll(/\b(x[a-z0-9]+)→#(\d+)\b/g)) (aliases[m[2]] ||= []).push(m[1]);
+      for (const token of message.match(/[a-z0-9]+/gi) || []) mentioned.add(token.toLowerCase());
+      for (const m of message.matchAll(/\b(x[a-z0-9]+)→#(\d+)\b/g)) (aliases[m[2]] ||= []).push(m[1].toLowerCase());
       if (messages[i].trim().split(/\s+/).length > 1 && !/^Merge pull request #\d+ from /.test(message)) ambiguous = true;
     }
     return { mentioned, aliases, ambiguous, shallow, otherBases: refs.some(r => !/^refs\/remotes\/origin\/(main|HEAD|lane\/.*)$/.test(r)), messages };
@@ -50,7 +50,7 @@ export function readLocalDoneFacts({ cwd = process.cwd(), git = execFileSync } =
 export function localDoneVerdict(id, bornAs, facts) {
   if (!facts || facts.shallow || facts.otherBases) return null;
   if (facts.ambiguous) return null;
-  const aliases = [String(id), bornAs, ...(facts.aliases[String(id)] || [])].filter(Boolean);
+  const aliases = [String(id), bornAs, ...(facts.aliases[String(id)] || [])].filter(Boolean).map(a => String(a).toLowerCase());
   if (aliases.some(alias => facts.mentioned.has(alias))) return null;
   return { done: false, pr: null, checked: true };
 }
@@ -59,7 +59,8 @@ export function localDoneVerdict(id, bornAs, facts) {
  * @test-only-export-ok: dynamically imported by the dispatch-plan CLI shell.
  * The worker is detached deliberately: its bounded lifetime and log belong to the enrichment job.
  */
-export function startAlreadyDoneRefresh(ids, cachePath, { cwd = process.cwd(), env = process.env } = {}) {
+const LOCK_MAX_AGE_MS = 60000;
+export function startAlreadyDoneRefresh(ids, cachePath, { cwd = process.cwd(), env = process.env, readOnly = false } = {}) {
   if (!ids.length) return { started: false, ids: [] };
   const lock = `${cachePath}.refresh-lock`;
   try {
@@ -68,7 +69,9 @@ export function startAlreadyDoneRefresh(ids, cachePath, { cwd = process.cwd(), e
     let lockAge = Infinity;
     try { lockAge = Date.now() - statSync(lock).mtimeMs; } catch (e) { if (e.code !== 'ENOENT') throw e; }
     if (lockAge !== Infinity) {
-      if (Number.isInteger(prior?.pid) && prior.pid > 0) {
+      // The worker's guardian SIGKILLs it at 15s, so a lock older than this is dead no matter who now owns its
+      // recorded pid (a recycled pid must not hold the lock — and enrichment — forever).
+      if (lockAge < LOCK_MAX_AGE_MS && Number.isInteger(prior?.pid) && prior.pid > 0) {
         try { process.kill(prior.pid, 0); return { started: false, ids: [] }; }
         catch (e) { if (e.code !== 'ESRCH') return { started: false, ids: [] }; }
       }
@@ -80,7 +83,7 @@ export function startAlreadyDoneRefresh(ids, cachePath, { cwd = process.cwd(), e
     // The parent's pid covers the small reservation-to-worker handoff window.
     writeFileSync(fd, JSON.stringify({ pid: process.pid, at: Date.now() })); closeSync(fd);
     const selected = selectRefreshIds(ids, readJson(`${cachePath}.attempts`, {}));
-    const payload = { ids: selected, cachePath, lock, cwd };
+    const payload = { ids: selected, cachePath, lock, cwd, readOnly };
     const log = openSync(`${cachePath}.refresh.log`, 'a');
     let child;
     try {
@@ -94,18 +97,18 @@ export function startAlreadyDoneRefresh(ids, cachePath, { cwd = process.cwd(), e
   }
 }
 
-export async function refreshAlreadyDone({ ids, cachePath, check, now = Date.now }) {
+export async function refreshAlreadyDone({ ids, cachePath, check, now = Date.now, readOnly = false }) {
   const attempts = readJson(`${cachePath}.attempts`, {});
   for (const id of selectRefreshIds(ids, attempts)) {
     attempts[id] = now();
     writeFileSync(`${cachePath}.attempts`, JSON.stringify(attempts));
     const verdict = await check(id);
-    if (verdict.checked) writeAlreadyDoneCacheState(recordVerdicts(readAlreadyDoneCacheState(cachePath), new Map([[id, verdict]]), now()), cachePath);
+    if (verdict.checked && !readOnly) writeAlreadyDoneCacheState(recordVerdicts(readAlreadyDoneCacheState(cachePath), new Map([[id, verdict]]), now()), cachePath);
   }
 }
 
 async function main(payload) {
-  const { ids, cachePath, lock, cwd } = payload;
+  const { ids, cachePath, lock, cwd, readOnly } = payload;
   writeFileSync(lock, JSON.stringify({ pid: process.pid, at: Date.now() }));
   // A separate guardian can terminate synchronous throttle/subprocess waits too. Never increase tick timeout.
   const guard = spawn(process.execPath, ['-e', `setTimeout(()=>{try{process.kill(-${process.pid},'SIGKILL')}catch{}},15000)`], { stdio: 'ignore' });
@@ -116,7 +119,7 @@ async function main(payload) {
     const remote = String(execFileSync('git', ['remote', 'get-url', 'origin'], { cwd, encoding: 'utf8', timeout: 1000 })).trim();
     const slug = remote.match(/github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?$/)?.[1];
     if (!slug) return;
-    await refreshAlreadyDone({ ids, cachePath, check: async id => {
+    await refreshAlreadyDone({ ids, cachePath, readOnly, check: async id => {
       try {
         const req = alreadyDoneRequest(slug, id);
         const raw = runGhSync(req.args, { ...req.opts, timeout: 3000, killSignal: 'SIGKILL', maxBuffer: 4 * 1024 * 1024,

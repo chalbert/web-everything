@@ -129,7 +129,7 @@ import { classifyPr as classifyPrLifecycle } from './pr-watch.mjs';
 // straight off each row (`pr.isDraft`) to gate review dispatch off drafts and to plan the `promote-draft`
 // effect once a draft's required checks are green. Costs nothing extra beyond this one query, same as `files`
 // above.
-export const PR_LIST_JSON_FIELDS = 'number,headRefName,headRefOid,baseRefName,labels,statusCheckRollup,mergeStateStatus,comments,body,files,isDraft';
+export const PR_LIST_JSON_FIELDS = 'number,headRefName,headRefOid,baseRefName,labels,statusCheckRollup,mergeStateStatus,comments,body,files,isDraft,createdAt';
 
 /** How many open PRs one pass reads. The board's own `OPEN_LIMIT` is 30; a reconciler that silently stopped at
  *  the default page would leave the overflow unowned, which is this item's defect wearing a smaller hat. */
@@ -1036,7 +1036,10 @@ export function runReconcilePass({
     repo: repoKey, prs, agents, durableCounts: durableCountsFrom(prs), now, defaultBranch, mainRedWindows,
     mainLatestCheckRuns, requiredChecks, mainSha,
   });
-  return { ...plan, prs: prs.length, agents: agents.length };
+  return { ...plan, prs: prs.length, agents: agents.length,
+    openPrFiles: prs.map((pr) => ({ pr: pr.number, files: Array.isArray(pr.files) && pr.files.length < 100
+      ? pr.files.map((file) => typeof file === 'string' ? file : file.path) : null })),
+  };
 }
 
 /**

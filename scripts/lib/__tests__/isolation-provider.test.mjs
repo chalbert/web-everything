@@ -280,6 +280,16 @@ describe('buildNativeDenyCodexArgs', () => {
     ]);
   });
 
+  it('4443: writableRoots add only write entries after the denies; omitted/empty leaves the argv unchanged', () => {
+    const base = buildNativeDenyCodexArgs(['/deny/x']);
+    expect(buildNativeDenyCodexArgs(['/deny/x'], { writableRoots: [] })).toEqual(base);
+    const args = buildNativeDenyCodexArgs(['/deny/x'], { writableRoots: ['/we/lane 1', '/we/lane-2'] });
+    expect(args[2]).toBe(
+      'permissions={locked={extends=":workspace",filesystem={"/deny/x"="deny","/we/lane 1"="write","/we/lane-2"="write"}}}',
+    );
+    expect(args).not.toContain('-s');
+  });
+
   it('always includes project_doc_max_bytes=0, per Probe 14f (mandatory alongside the deny)', () => {
     const args = buildNativeDenyCodexArgs(['/one/path']);
     expect(args).toContain('project_doc_max_bytes=0');

@@ -35,7 +35,9 @@ import {
   REPO_ROOT, readTick, createDispatchSinks, buildAgentArgv, workerModelTable, resolveWorkerModel,
   defaultReadScorecards, defaultClaudeProvider,
 } from '../dispatch-lane-io.mjs';
-import { decideDispatchRoute } from '../../lib/dispatch-contracts.mjs';
+import { decideDispatchRoute as currentRoute } from '../../lib/dispatch-contracts.mjs';
+import { inheritedRoutingPolicy } from '../../lib/__tests__/inherited-routing-policy.mjs';
+const decideDispatchRoute = (dispatch, options) => currentRoute(dispatch, { routingPolicy: inheritedRoutingPolicy, ...options });
 
 /** A root that is not lane-shaped — `assertNotALaneCheckout` refuses those, and this suite is not about it. */
 const PRIMARY = '/primary/webeverything';
@@ -523,7 +525,7 @@ describe('(e) buildAgentArgv with a table, and resolveWorkerModel\'s own shape',
     expect(argv).toEqual([
       '--bg', '-n', 'conveyor-9001',
       '--settings', JSON.stringify({ env: { WE_CONVEYOR_WORKER: '1' } }),
-      '--model', 'opus', '# build #9001',
+      '--effort', 'high', '--model', 'opus', '# build #9001',
     ]);
   });
 
@@ -590,4 +592,13 @@ describe('(g) defaultReadScorecards', () => {
     expect(defaultReadScorecards({ readStore: () => null })).toEqual([]);
     expect(defaultReadScorecards({ readStore: () => undefined })).toEqual([]);
   });
+});
+
+// These regressions prove the inherited tier/evidence router, not today's explicit operator defaults.
+vi.mock('../../lib/dispatch-routing-policy-io.mjs', async importOriginal => {
+  const actual = await importOriginal();
+  const { inheritedRoutingPolicy: policy } = await import('../../lib/__tests__/inherited-routing-policy.mjs');
+  return { ...actual, readRoutingPolicy: () => policy,
+    resolveOperationRoute: options => actual.resolveOperationRoute({ ...options, policy }),
+    resolveDispatchRoute: (dispatch, options) => actual.resolveDispatchRoute(dispatch, { ...options, routingPolicy: policy }) };
 });

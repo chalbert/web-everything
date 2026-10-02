@@ -23,6 +23,8 @@ import {
   buildAnchorOwners,
   findAnchorRulingMismatches,
   findDanglingLoci,
+  findBlankLineLoci,
+  splitSourceLines,
   findOutOfScopeHashSlugs,
   findDanglingMemoryHashSlugs,
   countSourceLines,
@@ -1168,5 +1170,42 @@ describe('findDanglingMarkdownLinks (gate 5e — relative markdown links must re
     const src = readFileSync('scripts/check-standards.mjs', 'utf8');
     expect(src).toMatch(/import \{[^}]*findDanglingMarkdownLinks[^}]*\}/);
     expect(src).toContain("kind: 'citation-markdown-link'");
+  });
+});
+
+describe('findBlankLineLoci — gate 6f-ii-e (cited start line is blank)', () => {
+  const files = {
+    'scripts/a.mjs': 'one\n\nthree\n   \nfive\n',
+    'scripts/b.mjs': 'x\ny\n',
+  };
+  const fileExists = (p) => Object.hasOwn(files, p);
+  const run = (text, spy = []) =>
+    findBlankLineLoci(text, { fileExists, readLines: (p) => { spy.push(p); return splitSourceLines(files[p]); } });
+
+  it('flags an empty cited line', () => {
+    expect(run('see we:scripts/a.mjs:2')).toEqual([{ locus: 'we:scripts/a.mjs:2', path: 'scripts/a.mjs', line: 2 }]);
+  });
+  it('flags a whitespace-only cited line', () => {
+    expect(run('see we:scripts/a.mjs:4')).toEqual([{ locus: 'we:scripts/a.mjs:4', path: 'scripts/a.mjs', line: 4 }]);
+  });
+  it('passes a cite on a non-blank line', () => {
+    expect(run('see we:scripts/a.mjs:3')).toHaveLength(0);
+  });
+  it('range: blank start flags; blank end alone passes', () => {
+    expect(run('we:scripts/a.mjs:2-3')).toHaveLength(1);
+    expect(run('we:scripts/a.mjs:3-4')).toHaveLength(0);
+  });
+  it('skips cross-repo, absolute, `..` and missing files without reading', () => {
+    const spy = [];
+    const text = 'fui:scripts/a.mjs:2 plateau:scripts/a.mjs:2 we:/etc/x/y:2 we:../a/b.mjs:2 we:scripts/nope.mjs:2';
+    expect(run(text, spy)).toHaveLength(0);
+    expect(spy).toHaveLength(0);
+  });
+  it('dedupes a locus cited twice', () => {
+    expect(run('we:scripts/a.mjs:2 and again we:scripts/a.mjs:2')).toHaveLength(1);
+  });
+  it('does not read the trailing terminator as a blank line; far past EOF also yields nothing', () => {
+    expect(run('we:scripts/b.mjs:3')).toHaveLength(0);
+    expect(run('we:scripts/b.mjs:999')).toHaveLength(0);
   });
 });

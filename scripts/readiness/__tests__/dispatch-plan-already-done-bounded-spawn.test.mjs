@@ -151,6 +151,23 @@ describe('dispatch-plan bounded enrichment', () => {
       expect(searchCalls(gh)).toHaveLength(4);
     } finally { await waitRefresh(cacheFile); gh.cleanup(); rmSync(f.fixtureRoot, { recursive: true, force: true }); }
   });
+  it('--no-already-done-cache never writes the verdict cache, even from the background worker', async () => {
+    const f = buildFixture(); const gh = withAlreadyDoneHost({ prs: [] }); const cacheFile = join(f.fixtureRoot, 'cache');
+    try {
+      fixtureRun(f, gh, cacheFile, ['--no-already-done-cache']);
+      await waitRefresh(cacheFile);
+      expect(searchCalls(gh)).toHaveLength(2); // the sweep ran...
+      expect(existsSync(cacheFile)).toBe(false); // ...but persisted nothing
+    } finally { await waitRefresh(cacheFile); gh.cleanup(); rmSync(f.fixtureRoot, { recursive: true, force: true }); }
+  });
+  it('--no-ground-truth makes zero gh spawns and starts no refresh', () => {
+    const f = buildFixture(); const gh = withAlreadyDoneHost({ prs: [] });
+    try {
+      const plan = fixtureRun(f, gh, join(f.fixtureRoot, 'cache'), ['--no-ground-truth']);
+      expect(plan.groundTruth.refresh.started).toBe(false);
+      expect(gh.calls()).toEqual([]);
+    } finally { gh.cleanup(); rmSync(f.fixtureRoot, { recursive: true, force: true }); }
+  });
   it('replays confirmed positives for ready AND not-ready rows without rechecking either', async () => {
     const f = buildFixture(); const gh = withAlreadyDoneHost({ prs: [] }); const cacheFile = join(f.fixtureRoot, 'cache');
     try {

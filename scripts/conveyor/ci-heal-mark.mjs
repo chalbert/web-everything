@@ -1,23 +1,17 @@
 /**
  * ci-heal-mark.mjs — post the durable CI-HEAL comment on a conveyor PR that a CI-heal agent has rebased + repaired
  * (#2666). This is the CI-half sibling of `rearm-review.mjs`, with ONE deliberate difference: it posts a durable
- * marker comment but makes NO LABEL SWAP on the ORDINARY path — a CI-heal repairs only the CI axis, so it must
+ * marker comment and restores missing review routing after a heal. A CI-heal repairs only the CI axis, so it must
  * NEVER touch a live `review:human` / `review:pending` / `review:changes` (the human review gate stays exactly as
  * it was).
  *
- * THE ONE EXCEPTION (#2811, chalbert/web-everything PR #2811 live incident): `review:accepted`. A CI-heal
- * REBASES AND RE-PUSHES the head (this file's own `buildCiHealComment` says so verbatim: "rebased onto current
- * `main`, repaired the failing check, and re-pushed HEAD") — so if the PR was `review:accepted` when the heal
- * started, that acceptance is now a claim about a commit that no longer exists. #2811 lived through exactly this:
- * a review ran and accepted while `main`'s own CI was red (the legitimate `owed-ci-rerun` parallel-dispatch path,
- * `reconcile-core.mjs`'s own docblock), then a LATER ci-heal (`ci-heal-2811`, 19:09:25Z) rebased + re-pushed onto
- * a fresh required-check failure — and `review:accepted` simply stayed on the PR, because nothing here ever
- * re-armed a stale acceptance the way `rearm-review.mjs` already re-arms a stale `review:changes` bounce. So the
- * hand-back below ALSO re-arms — through the identical, already-invariant-guarded `rearm-review.mjs` swap — but
- * ONLY when `review:accepted` is what it finds; `review:pending`/`review:changes`/`review:human` are still never
- * touched here, unchanged from before this item. This is best-effort, exactly like the comment post above: a
- * failed re-arm never fails the heal, and the SAME stale acceptance is caught by any later push through this
- * same path, or by a human's own `/review`.
+ * An existing acceptance is carried only through the shared CLI's head-bound coverage proof.
+ * Failed proof/restamp falls back to the existing accepted-only rearm; other live verdicts remain protected.
+ * Both operations are best-effort and report their outcomes separately from the durable heal comment.
+ * Without a live review or merge-path label, a fresh, head-bound read permits adding review:pending.
+ * CI lifecycle labels alone are insufficient: the drain removes them when checks turn green.
+ * `--restore-routing-only` repairs historical routing loss on the freshly read PR head,
+ * posting only a restoration explanation, with no heal marker, restamp, or rearm.
  *
  * WHY A DURABLE COMMENT (the whole point — mirrors #2643). The conveyor bounds auto CI-heal at N attempts per PR so
  * a genuinely-broken diff can't flap forever. That cap must survive a conveyor RESTART, which wipes the in-session
@@ -35,6 +29,7 @@
 import { resolve } from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
+import { writeAllSync } from '../lib/write-all-sync.mjs';
 import { isTrustedMarkerAuthor } from '../lib/marker-authorship.mjs';
 import { REVIEW_LABELS, hasReviewLabel } from '../lib/review-escalation.mjs';
 import { isBudgetRefusal, postPrComment, recordOwedWrite, resolveOwedRepo } from './ci-heal-owed.mjs';
@@ -90,8 +85,8 @@ export function buildCiHealComment({ actor = 'conveyor CI-heal agent', reason = 
     ...(head ? [`head: ${head}`] : []),
     '',
     `${why}; ${actor} rebased onto current \`main\`, repaired the failing check, and re-pushed HEAD.`,
-    'Only the CI axis was repaired — the review gate (`review:human` / `review:pending`) was NOT touched. A human ' +
-      '`/review` (or the drain AI-review) still verdicts as before; the drain lands it once green and reviewed.',
+    'This records the CI repair, not a review verdict. Existing `review:human` / `review:pending` holds stay in place; ' +
+      'a live `review:accepted` may be re-armed separately for review. The drain lands it once green and reviewed.',
   ].join('\n');
 }
 
@@ -103,9 +98,10 @@ export function buildCiHealComment({ actor = 'conveyor CI-heal agent', reason = 
  * @returns {string}
  */
 export function resolveHealHead({ headFlag, cwd, exec = execFileSync } = {}) {
-  if (typeof headFlag === 'string' && /^[0-9a-f]{7,40}$/i.test(headFlag.trim())) return headFlag.trim().toLowerCase();
+  if (typeof headFlag === 'string' && /^[0-9a-f]{40}$/i.test(headFlag.trim())) return headFlag.trim().toLowerCase();
+  if (headFlag !== undefined && !/^[0-9a-f]{7,39}$/i.test(headFlag.trim())) return '';
   try {
-    const sha = String(exec('git', ['rev-parse', 'HEAD'], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })).trim();
+    const sha = String(exec('git', ['rev-parse', '--verify', headFlag ? `${headFlag.trim()}^{commit}` : 'HEAD'], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })).trim();
     return /^[0-9a-f]{40}$/i.test(sha) ? sha.toLowerCase() : '';
   } catch { return ''; }
 }
@@ -158,6 +154,55 @@ export function spawnCiHealRearm({ pr, repo, cwd, actor = 'conveyor CI-heal agen
   }
 }
 
+/** Head-bound carry through the shared review write boundary; no new review is granted. */
+export function spawnCiHealRestamp({ pr, repo, cwd, headSha, actor = 'conveyor CI-heal agent', spawn = spawnSync } = {}) {
+  if (!/^[0-9a-f]{40}$/.test(headSha || '')) return { ok: false, reason: 'heal head is not a full commit SHA' };
+  const args = [new URL('../review-set-label.mjs', import.meta.url).pathname, String(pr),
+    '--to=restamp', `--expect-head=${headSha}`, `--actor=${actor}`, '--channel=ci-heal',
+    '--reason=CI-heal hand-back; carry the existing review only if coverage is proven.'];
+  if (repo) args.push(`--repo=${repo}`);
+  try {
+    const r = spawn(process.execPath, args, { encoding: 'utf8', cwd });
+    return r.status === 0 ? { ok: true } : { ok: false, reason: String(r.stdout || r.stderr || `exit ${r.status}`).trim() };
+  } catch (e) { return { ok: false, reason: String(e.message || e) }; }
+}
+
+// Unknown/malformed labels are not evidence of an absent routing label. Keep any
+// review disposition (including future ones) and the producer's merge-path label.
+function missingHealRouting(labels) {
+  return Array.isArray(labels)
+    && labels.every(label => label && typeof label.name === 'string' && label.name.length > 0)
+    && !labels.some(({ name }) => name.startsWith('review:') || name === 'ready-to-merge');
+}
+
+/** Add only the missing hold; never swap a verdict or manufacture merge clearance. */
+function restoreHealRouting({ pr, repo, headSha, currentHead = false }) {
+  const skip = reason => ({ skipped: true, reason });
+  const repoArgs = repo ? [`--repo=${repo}`] : [];
+  const gh = args => execFileSync('gh', args, {
+    stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8',
+    timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL',
+  });
+  const read = () => JSON.parse(gh(['pr', 'view', String(pr), ...repoArgs, '--json', 'state,isDraft,headRefOid,labels']));
+  if (currentHead) headSha = read().headRefOid;
+  if (!/^[0-9a-f]{40}$/.test(headSha || '')) return skip('PR head is not a full commit SHA');
+  // This read is at the mutation boundary, after the caller's label observation.
+  const live = read();
+  if (live.state !== 'OPEN') return skip('PR is not open');
+  if (live.isDraft !== false) return skip('PR is draft or draft status is unknown');
+  if (live.headRefOid !== headSha) return skip('PR head changed during restoration');
+  if (!missingHealRouting(live.labels)) return skip('PR has a review:* or ready-to-merge label, or labels are unreadable');
+  gh(['pr', 'edit', String(pr), ...repoArgs, '--add-label', REVIEW_LABELS.pending]);
+  const after = read();
+  if (after.state !== 'OPEN' || after.isDraft !== false || after.headRefOid !== headSha
+    || !Array.isArray(after.labels) || !after.labels.every(label => label && typeof label.name === 'string')
+    || !hasReviewLabel(after.labels, REVIEW_LABELS.pending)
+    || after.labels.some(({ name }) => (name.startsWith('review:') && name !== REVIEW_LABELS.pending) || name === 'ready-to-merge')) {
+    throw new Error('CI-heal routing restoration could not be verified');
+  }
+  return { restored: REVIEW_LABELS.pending };
+}
+
 // ── IO SHELL (runs only as a CLI — the pure exports above stay side-effect-free on import) ────────────────────────
 const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(new URL(import.meta.url).pathname);
 if (IS_CLI) {
@@ -177,7 +222,20 @@ if (IS_CLI) {
   };
   const pr = Number(positionals[0]);
   if (!Number.isInteger(pr) || pr <= 0) {
-    fail('usage: ci-heal-mark.mjs <pr> [--repo=<owner/name>] [--reason=<red-ci|behind>] [--actor=<name>] [--head=<sha>]  (pr must be a positive integer)');
+    fail('usage: ci-heal-mark.mjs <pr> [--repo=<owner/name>] [--restore-routing-only] [--reason=<red-ci|behind>] [--actor=<name>] [--head=<sha>]  (pr must be a positive integer)');
+  }
+  if (flags['restore-routing-only']) {
+    const repo = typeof flags.repo === 'string' ? flags.repo : undefined;
+    try {
+      const result = restoreHealRouting({ pr, repo, currentHead: true });
+      if (result.restored) {
+        postPrComment({ pr, repo, body: 'Review routing restored: this PR had lost all routing labels after an earlier CI heal (fixed by #3475); added review:pending so review picks it up.' });
+      }
+      writeAllSync(1, JSON.stringify({ pr, ...result, reason: result.reason || 'Missing review routing restored' }) + '\n');
+    } catch (e) {
+      fail(`could not restore review routing on PR #${pr}: ${String(e.message || e).split('\n')[0]}`);
+    }
+    process.exit(0);
   }
   const headSha = resolveHealHead({ headFlag: typeof flags.head === 'string' ? flags.head : undefined });
   const body = buildCiHealComment({
@@ -201,25 +259,35 @@ if (IS_CLI) {
   if (!posted.commented) {
     process.stderr.write(`⚠ CI-heal comment on PR #${pr} refused by the GitHub budget — recorded owed (head ${headSha}); the next ci-heal-pr-dispatch tick posts it\n`);
   }
-  // #2811 — THE ONE EXCEPTION (see this file's own header): a rebase+re-push just moved the head, so a live
-  // `review:accepted` is now stale. Best-effort, never fatal to a heal that already succeeded — a read miss or
-  // a refused re-arm both fall through to `rearmed: false` and the heal still reports `ok: true`.
   let rearmed = false;
+  let restamped = false;
+  let restored;
+  let carryReason;
   try {
     const viewArgs = ['pr', 'view', String(pr), '--json', 'labels'];
     if (typeof flags.repo === 'string') viewArgs.push(`--repo=${flags.repo}`);
     const raw = execFileSync('gh', viewArgs, { stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8', timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL' });
     const labels = JSON.parse(raw || '{}').labels;
     if (hasReviewLabel(labels, REVIEW_LABELS.accepted)) {
-      const result = spawnCiHealRearm({
-        pr, repo: typeof flags.repo === 'string' ? flags.repo : undefined,
-        actor: typeof flags.actor === 'string' ? flags.actor : undefined,
-      });
-      rearmed = result.ok;
+      const handback = {
+        pr, repo: typeof flags.repo === 'string' ? flags.repo : owedRepo?.slug,
+        cwd: process.cwd(), actor: typeof flags.actor === 'string' ? flags.actor : undefined,
+      };
+      const carry = spawnCiHealRestamp({ ...handback, headSha });
+      restamped = carry.ok;
+      if (!restamped) {
+        carryReason = carry.reason;
+        rearmed = spawnCiHealRearm(handback).ok;
+      }
+    } else if (missingHealRouting(labels)) {
+      ({ restored } = restoreHealRouting({
+        pr, repo: typeof flags.repo === 'string' ? flags.repo : owedRepo?.slug, headSha,
+      }));
     }
-  } catch {
+  } catch (e) {
+    carryReason = String(e.message || e);
     // Best-effort (see the header) — an unreadable label state or a failed rearm never fails this CLI's own
     // exit code; the stale acceptance (if any) is caught by the next push through this same path, or by a human.
   }
-  process.stdout.write(JSON.stringify({ ok: true, pr, commented: posted.commented, ...(posted.owed ? { owed: true } : {}), rearmed }) + '\n');
+  process.stdout.write(JSON.stringify({ ok: true, pr, commented: posted.commented, ...(posted.owed ? { owed: true } : {}), restamped, rearmed, ...(restored ? { restored } : {}), ...(carryReason ? { carryReason } : {}) }) + '\n');
 }

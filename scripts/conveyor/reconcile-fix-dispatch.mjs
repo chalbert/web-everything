@@ -228,13 +228,16 @@ export function planFixesFromReconcile(dispatchEntries, findItemFn, loadItems, r
     // its own item number never resolved (no backlog card anywhere) and the separate diff-read fallback kept
     // coming back empty.
     let diffReadFailed = false;
-    const entryFiles = Array.isArray(entry.files) ? entry.files.filter((p) => typeof p === 'string' && p) : null;
+    let cachedDiffPaths;
+    const entryFiles = Array.isArray(entry.files) && entry.files.length < 100 ? entry.files.filter((p) => typeof p === 'string' && p) : null;
     const fetchDiffPathsForEntry = (prNum) => {
+      if (cachedDiffPaths !== undefined) return cachedDiffPaths;
       if (entryFiles) return entryFiles; // trusted — already fetched, possibly genuinely empty.
       let out;
       try { out = fetchItemlessDiffPaths(prNum); } catch { diffReadFailed = true; return []; }
       if (out === null) { diffReadFailed = true; return []; }
-      return Array.isArray(out) ? out : [];
+      cachedDiffPaths = Array.isArray(out) ? out : [];
+      return cachedDiffPaths;
     };
     const prefix = (repoProfile(repo) || {}).canonicalPrefix || repo;
     const resolveFallbackScopeForEntry = (prNum, itemKey) => {
@@ -272,6 +275,7 @@ export function planFixesFromReconcile(dispatchEntries, findItemFn, loadItems, r
       planned.push({
         ...(entry.waitingSince ? { waitingSince: entry.waitingSince } : {}),
         ...(entry.labels?.includes('review:human') ? { reviewHuman: true } : {}),
+        overlapScope: fetchDiffPathsForEntry(pr).map((path) => `${prefix}:${path}`),
         itemNum: null, pr, laneRef: headRefName, scope: itemlessScope, scopeSource: 'pr-diff',
         isConflict: isConflictItemless, body: entry.body ?? null, headRefOid: entry.headRefOid ?? null,
         ...(entry.operatorAnswer ? { operatorAnswer: entry.operatorAnswer } : {}),
@@ -369,10 +373,16 @@ export function planFixesFromReconcile(dispatchEntries, findItemFn, loadItems, r
     // just-detected fresh bounce has not done yet). ONLY this population is offered resume-preference in
     // `tryResumeFix` below; an ordinary reviewer-finding bounce never carries this label and dispatches exactly
     // as it always has.
+    const changedPaths = fetchDiffPathsForEntry(pr);
+    if (diffReadFailed) {
+      refusals.push({ pr, kind: 'scope-read-failed', why: `PR #${pr} changed-file read failed — retrying next pass` });
+      continue;
+    }
     const isConflict = Array.isArray(entry.labels) && entry.labels.includes(CONFLICT_LABEL);
     planned.push({
       ...(entry.waitingSince ? { waitingSince: entry.waitingSince } : {}),
       ...(entry.labels?.includes('review:human') ? { reviewHuman: true } : {}),
+      overlapScope: changedPaths.map((path) => `${prefix}:${path}`),
       itemNum: itemNumOut, pr, laneRef: headRefName, scope, scopeSource, isConflict, body: entry.body ?? null,
       // #xu2krte security review finding — needed by `tryResumeFix` to confirm a resume CANDIDATE actually
       // belongs to THIS pr before trusting it (see that function's own docblock).
@@ -727,7 +737,7 @@ export function tryResumeFix(planned, {
   // `headSha` (see `fix-dispatch-claim.mjs`'s own header for the live incident that made keying on the head
   // sha wrong — a still-live session's OWN push used to rotate its claim out from under it).
   const claim = acquireClaim({
-    repo, pr: planned.pr, kind: 'fix', headSha: planned.headRefOid, scope: planned.scope, owner: claimOwner, lockRoot: claimRoot,
+    repo, pr: planned.pr, kind: 'fix', headSha: planned.headRefOid, scope: planned.overlapScope ?? planned.scope, owner: claimOwner, lockRoot: claimRoot,
   });
   if (!claim.ok) {
     return {
@@ -895,7 +905,7 @@ export function dispatchFix(planned, {
     };
   }
   const claim = acquireClaim({
-    repo, pr: planned.pr, kind: 'fix', headSha: planned.headRefOid, scope: planned.scope, owner: claimOwner, lockRoot: claimRoot,
+    repo, pr: planned.pr, kind: 'fix', headSha: planned.headRefOid, scope: planned.overlapScope ?? planned.scope, owner: claimOwner, lockRoot: claimRoot,
   });
   if (!claim.ok) {
     return {
@@ -1116,9 +1126,30 @@ export function runReconcileFixDispatch({
     recordUnsupported({ repo: repoKey, rows: [...reviews, ...ciHealRefusals], path: unsupportedPath });
   }
   const { planned: plannedAll, refusals: planRefusals } = planFixesFromReconcile(dispatchEntries, findItemFn, loadItems, resolveFallbackScope, repoKey, fetchItemlessDiffPaths, resolveCardScopeAtRef);
-  // #4295 — serialize against live build claims, live fix claims, and earlier fixes this pass.
+  // Refresh existing PR claims too: a prepare's old declared implementation scope must
+  // not survive as ownership. Reuse the reconcile snapshot, then one read per missing PR.
+  const prefix = profile.canonicalPrefix || repoKey;
+  const actualScopes = new Map((reconciled.openPrFiles ?? []).filter((p) => Array.isArray(p.files))
+    .map((p) => [Number(p.pr), p.files.map((path) => `${prefix}:${path}`)]));
+  for (const entry of plannedAll) actualScopes.set(entry.pr, entry.overlapScope);
+  const claims = listFixClaims().map((claim) => {
+    if (!plannedAll.length) return claim;
+    const claimRepo = claim.meta?.repo;
+    if (claimRepo && repoKeyForSlug(claimRepo) !== repoKey) return claim;
+    const pr = Number(claim.meta?.pr);
+    if (!Number.isFinite(pr)) return claim;
+    if (!actualScopes.has(pr)) {
+      let files;
+      try { files = fetchItemlessDiffPaths(pr); } catch { files = null; }
+      actualScopes.set(pr, Array.isArray(files) ? files.map((path) => `${prefix}:${path}`) : null);
+    }
+    // A failed observation retains the conservative live claim, never an empty fence.
+    const scope = actualScopes.get(pr);
+    return scope ? { ...claim, meta: { ...claim.meta, scope } } : claim;
+  });
+  // Serialize against live claims and higher-ranked waiters, including blocked ones.
   const scopeFilter = filterFixesByInFlightScope(
-    plannedAll, listBuildClaims(), listFixClaims(),
+    plannedAll, listBuildClaims(), claims,
   );
   const planned = scopeFilter.planned;
   const refusals = [...ciHealRefusals, ...planRefusals, ...scopeFilter.refusals];
@@ -1202,7 +1233,7 @@ export function runReconcileFixDispatch({
     }
   }
 
-  return { dispatched, refusals, reconcileRefusals: reconciled.refusals.length, reconcileRefusalDetails: reconciled.refusals };
+  return { dispatched, refusals, scopeRanks: scopeFilter.ranks, reconcileRefusals: reconciled.refusals.length, reconcileRefusalDetails: reconciled.refusals };
 }
 
 /** Card xkyw1x4 — a `queueAdmission` option may be a queue BUDGET already (`createQueueBudget`'s object — the
@@ -1429,6 +1460,7 @@ if (IS_CLI) {
         const itemLabel = d.itemNum ? `item #${d.itemNum}` : 'no backlog item';
         lines.push(`  → fix    PR #${d.pr} (${itemLabel}) — ${who} (${d.sessionSlug}), ${laneInfo}`);
       }
+      for (const rank of (result.scopeRanks ?? [])) lines.push(`  scope-rank PR #${rank.pr} — rank ${rank.rank}, blocks ${rank.blocks}, age ${rank.ageHours}h, score ${rank.score}, aged-FIFO ${rank.aged}`);
       for (const r of result.refusals) lines.push(`  ✗ ${r.kind} PR #${r.prNumber ?? r.pr} — ${r.why}`);
       process.stdout.write(lines.join('\n') + '\n');
     }
@@ -1436,24 +1468,43 @@ if (IS_CLI) {
 }
 
 /**
- * #4295 — refuse a planned fix whose declared scope overlaps work already in flight, so build+fix and fix+fix on
+ * #4295 — refuse a planned fix whose changed-file scope overlaps work already in flight, so build+fix and fix+fix on
  * the same files serialize instead of racing. Pure. In-flight = a live BUILD claim (`meta.{num,scope}`; the same
  * item's own claim is exempt — a fix for item N never blocks on N's own build), a live FIX/ci-heal claim on a
- * DIFFERENT PR (`meta.{pr,scope}`), or an older waiter in THIS pass. Order is current waiting episode,
- * then review:human on ties, then PR number. A claim with no scope never blocks
+ * DIFFERENT PR (`meta.{pr,scope}`), or a higher-ranked waiter in THIS pass. Rank counts distinct overlapping waiters plus
+ * one age point per hour. After 24 hours, FIFO takes precedence over all unpromoted
+ * work: a finite older population cannot be starved by new arrivals of any fan-out.
+ * Ties retain waiting episode, review:human, then PR number. A claim with no scope never blocks
  * (unknown, not proven overlapping). The refusal is transient (`scope-overlap`): re-planned next pass.
  * @param {Array<{pr:number, itemNum:string|null, scope:string[]}>} planned
  * @param {Array<{meta?:{num?:string, scope?:string[]}}>} buildClaims
  * @param {Array<{meta?:{pr?:number, scope?:string[]}}>} fixClaims
  * @returns {{planned:Array<object>, refusals:Array<{pr:number, kind:'scope-overlap', why:string}>}}
  */
-export function filterFixesByInFlightScope(planned, buildClaims = [], fixClaims = []) {
+export function filterFixesByInFlightScope(planned, buildClaims = [], fixClaims = [], { now = Date.now() } = {}) {
   const accepted = [];
   const refusals = [];
   const picked = [];
-  const waitingTime = (entry) => Date.parse(entry.waitingSince) || Number.MAX_SAFE_INTEGER;
-  const queue = [...planned].sort((a, b) => waitingTime(a) - waitingTime(b)
-    || Number(Boolean(b.reviewHuman)) - Number(Boolean(a.reviewHuman)) || a.pr - b.pr);
+  const waitingTime = (entry) => {
+    const ms = Date.parse(entry.waitingSince);
+    return Number.isFinite(ms) ? ms : Number.MAX_SAFE_INTEGER;
+  };
+  const scopeFor = (entry) => entry.overlapScope ?? entry.scope;
+  const ranks = planned.map((entry) => {
+    const blocks = new Set(planned.filter((other) => other.pr !== entry.pr
+      && overlapsInFlight(scopeFor(other), [{ scope: scopeFor(entry) }])).map((other) => other.pr)).size;
+    const ageHours = Math.max(0, Math.floor((now - waitingTime(entry)) / 3_600_000));
+    return { pr: entry.pr, blocks, ageHours, score: blocks + ageHours, aged: ageHours >= 24 };
+  });
+  const rankByPr = new Map(ranks.map((rank) => [rank.pr, rank]));
+  const queue = [...planned].sort((a, b) => {
+    const ar = rankByPr.get(a.pr), br = rankByPr.get(b.pr);
+    return Number(br.aged) - Number(ar.aged)
+      || (!ar.aged ? br.score - ar.score : 0)
+      || waitingTime(a) - waitingTime(b)
+      || Number(Boolean(b.reviewHuman)) - Number(Boolean(a.reviewHuman)) || a.pr - b.pr;
+  });
+  const orderedRanks = queue.map((entry, index) => ({ ...rankByPr.get(entry.pr), rank: index + 1 }));
   const ordinal = (n) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? 'th' : ({ 1: 'st', 2: 'nd', 3: 'rd' }[n % 10] ?? 'th')}`;
   for (const entry of queue) {
     const inFlight = [
@@ -1465,12 +1516,12 @@ export function filterFixesByInFlightScope(planned, buildClaims = [], fixClaims 
         .map((c) => ({ id: `fix PR #${c.meta?.pr}`, scope: c.meta?.scope })),
       ...picked,
     ];
-    const blockers = inFlight.filter((c) => overlapsInFlight(entry.scope, [c]));
-    const hit = overlapsInFlight(entry.scope, blockers);
-    // Even a blocked waiter retains its place: a younger PR must not bypass it
+    const blockers = inFlight.filter((c) => overlapsInFlight(scopeFor(entry), [c]));
+    const hit = overlapsInFlight(scopeFor(entry), blockers);
+    // Even a blocked waiter retains its place: a lower-ranked PR must not bypass it
     // through a second file in its scope. Deduplicate claims for the same fixer.
     const ahead = [...new Set(blockers.map((c) => c.id))];
-    picked.push({ id: `fix PR #${entry.pr}`, scope: entry.scope });
+    picked.push({ id: `fix PR #${entry.pr}`, scope: scopeFor(entry) });
     if (hit) {
       refusals.push({
         pr: entry.pr, kind: 'scope-overlap',
@@ -1481,5 +1532,5 @@ export function filterFixesByInFlightScope(planned, buildClaims = [], fixClaims 
     }
     accepted.push(entry);
   }
-  return { planned: accepted, refusals };
+  return { planned: accepted, refusals, ranks: orderedRanks };
 }

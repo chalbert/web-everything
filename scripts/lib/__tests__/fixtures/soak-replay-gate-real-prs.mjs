@@ -118,3 +118,42 @@ export const REAL_PRS = {
     ]
   }
 };
+
+// Captured read-only on 2026-10-01 from https://github.com/chalbert/web-everything/pull/2939
+// Includes the later waiver workaround; this is not the original pre-waiver event payload.
+export const PR_2939_SNAPSHOT = {
+  "body": "## What\n\nExtract one shared low-level primitive (`readTranscriptTailActivity`, `scripts/conveyor/hung-session.mjs`) —\nbounded transcript-tail read → newest-parseable-entry-timestamp → mtime-fallback — that\n`hung-session.mjs#readHungInfo`/`#readIdleFinishedInfo` and `session-reaper.mjs#resolveLastActivityMs` all\ncall, instead of three near-duplicate copies of the same dozen lines (#4312).\n\n## Design note — this took two extra converge rounds to get right\n\nThe obvious first draft unified all three call sites onto the most tolerant per-line-skip behavior. A\nmandatory-lens review (security) correctly caught that this is unsafe for `readHungInfo`/`readIdleFinishedInfo`\nspecifically: they derive a pending-tool-call verdict from the same `entries` a dropped line would be missing\nfrom, and can act on that destructively (reaping a live session). A second round then found the fix itself was\nincomplete (only handled the tail's newest line, not any position) and a third found a throw-safety hole\n(`for...of` running outside the guarding try/catch on a malformed IO result).\n\nThe final design: the primitive stays tolerant and exposes `hadUnparseableLine`; each CALLER decides what to\ndo with it.\n- `readHungInfo`/`readIdleFinishedInfo`: refuse the whole read (no-signal) if `hadUnparseableLine` — their\n  exact pre-#4312 behavior (their old single try/catch around `.map()` already aborted on any bad line,\n  anywhere in the tail).\n- `resolveLastActivityMs`: ignores the flag entirely — its own exact pre-#4312 tolerant behavior, since it\n  never reads `entries` for anything.\n\nNet result: a **true no-behavior-change dedupe** for all three call sites, not \"no behavior change for the\npaths that happened to be tested\" (the first draft's weaker claim).\n\n## Proof (red/green)\n\nThis is a refactor, not a bug fix, so \"red before\" means \"the new tests can't run yet\" (the primitive doesn't\nexist), not \"the old code answers wrong\" — verified directly:\n\n**Before** (source swapped to `origin/main`, new test files kept in place):\n```\n❯ scripts/conveyor/__tests__/hung-session.test.mjs  (63 tests | 7 failed) 208ms\n   ❯ readTranscriptTailActivity … degenerate input never throws\n   ❯ readTranscriptTailActivity … an unresolvable transcript answers null, never a guess\n   ❯ readTranscriptTailActivity … an unreadable tail answers null, never a guess\n   ❯ readTranscriptTailActivity … one unparseable line never aborts the scan …\n   ❯ readTranscriptTailActivity … hadUnparseableLine is false when every line in the tail parses cleanly\n   ❯ readTranscriptTailActivity … hadUnparseableLine is true regardless of WHERE the bad line sits …\n   ❯ readTranscriptTailActivity … falls back to mtime when nothing in the tail carries a parseable timestamp …\n Test Files  1 failed | 1 passed (2)\n      Tests  7 failed | 349 passed (356)\n```\nEvery OTHER new test (including the `readHungInfo`/`readIdleFinishedInfo`/`resolveLastActivityMs`\nposition-independence cases) already passed against the OLD code — exactly what \"no behavior change\" predicts.\n\n**After** (source restored):\n```\n✓ scripts/conveyor/__tests__/hung-session.test.mjs  (64 tests) 166ms\n✓ scripts/conveyor/__tests__/session-reaper.test.mjs  (293 tests) 528ms\n Test Files  2 passed (2)\n      Tests  357 passed (357)\n```\n\n## Gate\n\n`node scripts/verify-lane.mjs check` — green on the final commit HEAD (`vitest related` on the touched files +\n`npm run check:standards`).\n\n## Converge\n\nDriven through `/converge` (`scripts/converge-cli.mjs`), care=elevated. Round 1: panel (5 lenses) accepted with\ntwo carve-out findings (already fixed before red-team); red-team (5 lenses) ran clean. **Verdict: `land`.**\n\n## Process note (for the operator, not load-bearing on the diff)\n\nTwo earlier `/converge` runs in this session ended `escalate` with `reason: \"stale-observations\"` — a driving\nmistake on my part (recapturing the diff mid-round without going back through a `read` step, and later\nsubmitting a `redTeamResult` without the round's `lensResults` in the same payload — `converge-core.mjs`\nrequires both together, per its \"malformed observation\" guard). Neither was a finding about the code; both are\ndisclosed here for anyone auditing the session, not because they bear on this PR's correctness.\n\nsoak-waiver: behavior-preserving refactor, not a bug fix. Verified on 2026-09-29 against origin/main: all three call sites (readHungInfo, readIdleFinishedInfo, resolveLastActivityMs) behave the same before and after, so there is no live defect for a soak break to re-introduce. The gate matched the word \"bug\" in \"This is a refactor, not a bug fix.\"\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\n\n<!-- authored-by-actor: bd616854-1f67-4f80-8be5-40fe1456e3bf -->\n\n",
+  "files": [
+    {
+      "path": "backlog/4312-extract-a-shared-transcript-tail-last-activity-primitive-ded.md",
+      "additions": 113,
+      "deletions": 2,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "scripts/conveyor/__tests__/hung-session.test.mjs",
+      "additions": 133,
+      "deletions": 1,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "scripts/conveyor/__tests__/session-reaper.test.mjs",
+      "additions": 14,
+      "deletions": 0,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "scripts/conveyor/hung-session.mjs",
+      "additions": 95,
+      "deletions": 60,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "scripts/conveyor/session-reaper.mjs",
+      "additions": 24,
+      "deletions": 34,
+      "changeType": "MODIFIED"
+    }
+  ],
+  "title": "WE #4312: extract shared transcript-tail last-activity primitive"
+};

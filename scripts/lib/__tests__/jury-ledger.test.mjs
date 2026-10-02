@@ -1,3 +1,4 @@
+import { normalizeFinding, referralFindingKey, mandatoryReferralReviewer } from '../jury-core.mjs';
 /**
  * @file jury-ledger.test.mjs — proof of the #2641 (F4 = logbook, epic #2636) DURABLE jury LOG + the ONE SHARED
  *   FOLD. Covers the PURE pieces directly (the fold, the event builders, log serialize/parse, the subject-slug +
@@ -6,7 +7,7 @@
  *   rules (roster ∘ status ∘ latest-verdict ∘ finding-supersede ∘ diversity-selection) are pinned here.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
+import { appendFileSync, mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -434,5 +435,33 @@ describe('#2864 — buildReviewLedgerEvents is the REAL writer, so the sha must 
     const events = buildReviewLedgerEvents(args);
     expect(events[0]).not.toHaveProperty('reviewedSha');
     expect(foldJuryLedger(events).reviewedSha).toBe(null);
+  });
+});
+
+describe('#4315 durable referral replay', () => {
+  it('retains provenance, explicit supersession and partial-write holds through a real store restart', () => {
+    const root = mkdtempSync(join(tmpdir(), 'jury-referrals-'));
+    try {
+      const original = { summary: 'broken merge', file: 'x.mjs', verdict: 'CONFIRMED', impactIfUnfixed: 'broken', outcome: 'fixed' };
+      const r = { version: 1, repo: 'o/r', pr: 7, head: 'a'.repeat(40), runId: 'run-ledger-referral',
+        reviewer: mandatoryReferralReviewer('run-ledger-referral'), authorBody: '<!-- authored-by-actor: author -->', attempted: true,
+        referrals: [{ seat: 'judgeAdvisory', key: referralFindingKey('judgeAdvisory', original), original, finding: normalizeFinding(original) }], rulings: [] };
+      const append = () => expect(appendJuryEvent('o/r#7', { type: 'mandatory-referrals', round: 0, record: r }, { root }).ok).toBe(true);
+      const read = () => foldJuryLedger(readJuryLog('o/r#7', { root }), { cardReadable: () => true });
+      append(); append();
+      expect(read().referralState.pending).toEqual([r.referrals[0].key]);
+      expect(read().referralState.records[0].referrals[0].original).toEqual(original);
+      for (const [i, result] of ['block', 'card', 'not-real'].entries()) {
+        r.rulings.push({ id: String(i), key: r.referrals[0].key, reviewerId: r.reviewer.id, lens: 'correctness',
+          result, rationale: 'Independent evidence', evidence: ['diff'], ...(i ? { supersedes: String(i - 1) } : {}),
+          ...(result === 'card' ? { card: 'we:backlog/7-debt.md' } : {}) });
+        append();
+        expect(read().referralState.pending).toEqual([]);
+        expect(read().referralState.blocked).toHaveLength(result === 'block' ? 1 : 0);
+      }
+      expect(foldJuryLedger(readJuryLog('o/r#7', { root }), { head: 'b'.repeat(40) }).referralState.pending).toHaveLength(1);
+      appendFileSync(juryLogPath('o/r#7', root), '{"type":"mandatory-referrals","record":');
+      expect(read().referralState.pending).toContain('malformed-referral-record');
+    } finally { rmSync(root, { recursive: true, force: true }); }
   });
 });

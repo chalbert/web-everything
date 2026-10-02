@@ -4,7 +4,7 @@
  *   temp dirs (node:fs mkdtempSync), plus one end-to-end `tick()` run against a forced lane-starvation fixture.
  *   `tick()` also reads the real GitHub App status file from the home dir — read-only, harmless, left alone.
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync, appendFileSync, mkdirSync, readdirSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -15,6 +15,19 @@ import {
   probePrs, probeStaleState, probeMergedPrs, probeProcesses, probeMachineLoad, probeGhShimLanes,
   probeBgIsolationStalls, probeUntrackedBacklogCards, persistGhSpend,
 } from '../health-watch.mjs';
+
+
+// Keep the shell, persistence and real detector registry intact; supply deterministic probe results
+// at the core boundary and intercept the OS transport so regression runs never ping the operator.
+const episodeReplay = vi.hoisted(() => ({ probes: null, send: vi.fn(() => ({ ok: true })) }));
+vi.mock('../health-watch-core.mjs', async (original) => {
+  const real = await original();
+  return { ...real, runHealthTick: (state, probes, ...args) =>
+    real.runHealthTick(state, episodeReplay.probes ?? probes, ...args) };
+});
+vi.mock('../branch-sync.mjs', async (original) => ({
+  ...await original(), notifyDesktopChecked: episodeReplay.send,
+}));
 
 let dir;
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'health-watch-test-')); });
@@ -947,3 +960,118 @@ describe('tick() — gh spend persistence (#4309)', () => {
   });
 });
 
+
+// #4378 — actual state/report boundary, no live credential access.
+describe('credential inventory tick integration', () => {
+  it('opens both findings, preserves unknowns, closes after two clean samples, and stores metadata only', async () => {
+    const fixture = join(dir, 'inventory.json');
+    const stateRoot = join(dir, 'inventory-state');
+    const lockRoot = join(dir, 'inventory-locks'); mkdirSync(lockRoot);
+    const syncDir = join(dir, 'inventory-sync'); mkdirSync(syncDir);
+    const flags = { 'state-root': stateRoot, 'lock-root': lockRoot, 'self-sync-dir': syncDir, 'logs-dir': join(dir, 'inventory-logs'), 'no-gh': true, 'no-diagnose': true, 'credential-inventory-fixture': fixture, now: '2026-10-01T12:00:00Z' };
+    const sample = { checkedAt: flags.now, repositories: [{ repo: 'a/b', secrets: { complete: true }, ci: { complete: true } }], secrets: [{ repo: 'a/b', name: 'FUI_READ_TOKEN', updated_at: '2026-01-01T00:00:00Z', value: 'SECRET_CANARY' }], ciFindings: [{ repo: 'a/b', runId: 42, attempt: 1, workflow: 'CI', observedAt: flags.now, badCredentials: true, logs: 'SECRET_CANARY' }] };
+    const collectInventory = () => { throw Error('live collection forbidden'); };
+    const run = async () => { writeFileSync(fixture, JSON.stringify(sample)); return tick(flags, { collectInventory }); };
+    const first = await run();
+    expect(first.transitions.filter((t) => t.key.startsWith('credential-inventory-stale::') && t.type === 'opened')).toHaveLength(2);
+    expect(first.section.join('\n')).toContain('FUI_READ_TOKEN');
+    let stored = readFileSync(join(healthDir(stateRoot), 'state.json'), 'utf8');
+    expect(stored).not.toContain('SECRET_CANARY'); expect(JSON.parse(stored).credentialInventoryCache).toHaveLength(1);
+    sample.repositories[0].secrets = { complete: false, errors: ['denied'] }; sample.repositories[0].ci = { complete: false, errors: ['unavailable'] }; sample.secrets = []; sample.ciFindings = [];
+    const partial = await run(); expect(partial.probeErrors.credentialInventory).toContain('denied');
+    expect(partial.transitions.filter((t) => t.type === 'closed' && t.key.startsWith('credential-inventory-stale::'))).toHaveLength(0);
+    sample.repositories[0].secrets.complete = true; sample.repositories[0].ci.complete = true;
+    expect((await run()).transitions.filter((t) => t.type === 'closed' && t.key.startsWith('credential-inventory-stale::'))).toHaveLength(0);
+    expect((await run()).transitions.filter((t) => t.type === 'closed' && t.key.startsWith('credential-inventory-stale::'))).toHaveLength(2);
+    delete flags['credential-inventory-fixture'];
+    expect((await tick(flags, { collectInventory })).probeErrors.credentialInventory).toBeUndefined();
+  }, 30000);
+});
+
+describe('credential inventory cadence', () => {
+  it('samples when independently due despite another probe error, skips non-due/no-gh and fixture collection', async () => {
+    const stateRoot = join(dir, 'cadence-state'); const hd = healthDir(stateRoot); mkdirSync(hd, { recursive: true });
+    const lockRoot = join(dir, 'cadence-locks'); mkdirSync(lockRoot);
+    const empty = join(dir, 'empty.json'); writeFileSync(empty, '{}');
+    const flags = { 'state-root': stateRoot, 'lock-root': lockRoot, 'logs-dir': join(dir, 'logs'), 'self-sync-dir': join(dir, 'sync'), 'no-diagnose': true, 'graphql-budget-fixture': join(dir, 'absent.json'), 'rest-budget-fixture': empty, now: '2026-10-01T12:00:00Z' };
+    // Other GitHub probes have already sampled; inventory is independently due.
+    writeFileSync(join(hd, 'state.json'), JSON.stringify({ ghCache: { at: Date.parse(flags.now) } }));
+    let calls = 0;
+    const collectInventory = () => { calls++; return { repositories: [{ repo: 'a/b', secrets: { complete: true }, ci: { complete: true } }] }; };
+    const first = await tick(flags, { collectInventory }); expect(calls).toBe(1); expect(first.probeErrors.graphqlBudget).toBeTruthy();
+    await tick(flags, { collectInventory }); expect(calls).toBe(1);
+    await tick({ ...flags, 'force-gh': true, 'no-gh': true }, { collectInventory }); expect(calls).toBe(1);
+    await tick({ ...flags, 'credential-inventory-fixture': empty }, { collectInventory }); expect(calls).toBe(1);
+  }, 30000);
+});
+
+
+describe('xyx5mea isolated shell replay', () => {
+  const hour = 3_600_000;
+  const cases = [
+    ['draft-not-promoted', 3336, 1790882705935],
+    ['red-pr-unattended', 3373, 1790894455629],
+    ['repeated-pr-attempts', 3336, 1790882705935],
+  ];
+  afterEach(() => { episodeReplay.probes = null; episodeReplay.send.mockClear(); });
+
+  it.each(cases)('%s replays captured timing, delivery and restart dedupe', async (smell, number, start) => {
+    const flags = { 'state-root': join(dir, 'state'), 'logs-dir': join(dir, 'logs'),
+      'lock-root': join(dir, 'locks'), 'self-sync-dir': join(dir, 'sync'),
+      'no-gh': true, 'no-diagnose': true };
+    for (const name of ['logs-dir', 'lock-root', 'self-sync-dir']) mkdirSync(flags[name], { recursive: true });
+    const statePath = join(healthDir(flags['state-root']), 'state.json');
+    const key = `${smell}::chalbert/web-everything#${number}`;
+    function input(now) {
+      return {
+        prs: smell === 'repeated-pr-attempts' ? [] : [{
+          repo: 'chalbert/web-everything', number, isDraft: smell === 'draft-not-promoted',
+          statusCheckRollup: [{ name: 'test', status: 'COMPLETED',
+            conclusion: smell === 'draft-not-promoted' ? 'SUCCESS' : 'FAILURE',
+            completedAt: new Date(start - hour).toISOString() }],
+        }],
+        agents: [], daemonLogs: [],
+        operationRuns: smell !== 'repeated-pr-attempts' ? [] : Array.from({ length: 5 }, (_, i) => ({
+          id: `run-${i}`, op: 'open-pr', input: { repo: 'chalbert/web-everything', pr: number },
+          effects: [{ key: 'submit', status: 'failed', lastAttemptAt: new Date(now).toISOString(), error: 'submit failed' }],
+        })),
+      };
+    }
+    async function at(now, extra = {}) {
+      episodeReplay.probes = input(now);
+      return tick({ ...flags, now: new Date(now).toISOString(), ...extra });
+    }
+    episodeReplay.send.mockClear();
+    for (const now of [start, start + hour - 1]) {
+      const r = await at(now);
+      expect(r.plan.filter(p => p.kind === 'notify')).toEqual([]);
+      expect(JSON.parse(readFileSync(statePath, 'utf8')).episodes[key].severity).toBe('medium');
+    }
+    expect(episodeReplay.send).not.toHaveBeenCalled();
+    const before = readFileSync(statePath, 'utf8');
+    const dry = await at(start + hour, { 'dry-run': true });
+    expect(dry.plan.filter(p => p.kind === 'notify')).toEqual([
+      { kind: 'notify', key, reason: 'escalated', suppressed: null },
+    ]);
+    expect(dry.notifications).toEqual([]);
+    expect(readFileSync(statePath, 'utf8')).toBe(before);
+    const quiet = await at(start + hour, { 'no-notify': true });
+    expect(quiet.notifications).toEqual([]);
+    expect(episodeReplay.send).not.toHaveBeenCalled();
+    // Restore the below-threshold snapshot to exercise a normal send of this same transition.
+    writeFileSync(statePath, before);
+    const high = await at(start + hour);
+    expect(high.transitions).toContainEqual({ type: 'escalated', key });
+    expect(high.notifications).toEqual([{ key, ok: true, error: null }]);
+    expect(episodeReplay.send).toHaveBeenCalledTimes(1);
+    const episode = JSON.parse(readFileSync(statePath, 'utf8')).episodes[key];
+    expect(episode).toMatchObject({ severity: 'high', escalatedAt: start + hour, firstBreachAt: start });
+    const report = readFileSync(join(healthDir(flags['state-root']), 'episodes', `${episode.id}.md`), 'utf8');
+    expect(report).toContain('high');
+    expect(report).toContain('escalated');
+    const restart = await at(start + hour + 1);
+    expect(restart.notifications).toEqual([]);
+    expect(restart.transitions.filter(t => t.type === 'escalated')).toEqual([]);
+    expect(episodeReplay.send).toHaveBeenCalledTimes(1);
+  });
+});

@@ -13,15 +13,16 @@
  *   byte-identical to every `gh-throttle.mjs` test written before this card (see that file's own env
  *   assertions) — the regression pin for the rest of the suite.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   classifyGhRead, personalGhToken, resetPersonalGhTokenCacheForTest, looksLikeGhAuthFailure,
   resolvePersonalRouteEnabled, runGhCliPassthrough, ghAuthIdentity, writeBudgetBlock, readBudgetBlock,
-  ghThrottleLogPath,
+  ghThrottleLogPath, looksLikePersonalAccessDenial,
 } from '../gh-throttle.mjs';
+import { expectSecretAbsent, snapshotEnv } from './helpers/secret-absence.mjs';
 
 const tmp = () => mkdtempSync(join(tmpdir(), 'gh-personal-route-'));
 // #4309's cost-header capture defaults ON and always sets an explicit `env` key (to add `GH_DEBUG=api`) — kept
@@ -104,8 +105,12 @@ describe('classifyGhRead — the conservative read allowlist', () => {
 
 describe("personalGhToken — the operator's own gh CLI login, never the App/logged token", () => {
   beforeEach(() => resetPersonalGhTokenCacheForTest());
+  afterEach(() => vi.unstubAllEnvs());
 
   it('strips GH_TOKEN/GITHUB_TOKEN before shelling the real binary, and returns only what it reads back', () => {
+    // Seed sentinels so the toBeUndefined assertions below are real (the test otherwise never sets these keys).
+    vi.stubEnv('GH_TOKEN', 'sentinel-gh-token');
+    vi.stubEnv('GITHUB_TOKEN', 'sentinel-github-token');
     const exec = vi.fn((bin, args, opts) => {
       expect(opts.env.GH_TOKEN).toBeUndefined();
       expect(opts.env.GITHUB_TOKEN).toBeUndefined();
@@ -321,5 +326,62 @@ describe('runGhCliPassthrough — the gh read/App-write identity split (we:backl
     runGhCliPassthrough(['pr', 'list'], { throttle: { lockRoot, env: APP_ENV, personalRoute: true, personalToken: PERSONAL_TOKEN }, spawn });
     const lines = readFileSync(ghThrottleLogPath(lockRoot), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
     expect(lines[0].id).toBe(personalIdentity);
+  });
+
+  // PR #2885 review — a routed read the personal identity cannot serve (404, or a 403 that is not a rate limit)
+  // takes the same once-only App fallback as a rejected token: the personal identity is only a bonus bucket.
+  it.each([
+    ['404', 'GraphQL: Could not resolve to a Repository (HTTP 404)'],
+    ['non-rate-limit 403', 'HTTP 403: Resource protected by organization SAML enforcement'],
+  ])('personal %s falls back once to the App', (_label, stderr) => {
+    const lockRoot = tmp();
+    const spawn = vi.fn((bin, argv, opts) => (opts.env
+      ? { status: 1, stdout: Buffer.alloc(0), stderr: Buffer.from(stderr) }
+      : { status: 0, stdout: Buffer.from('ok'), stderr: Buffer.alloc(0) }));
+    const r = runGhCliPassthrough(['pr', 'list'], {
+      throttle: { lockRoot, env: APP_ENV, personalRoute: true, personalToken: PERSONAL_TOKEN, sleep: () => {} }, spawn,
+    });
+    expect(r.status).toBe(0);
+    expect(spawn).toHaveBeenCalledTimes(2);
+    expect(spawn.mock.calls[0][2].env.GH_TOKEN).toBe(PERSONAL_TOKEN);
+    expect(spawn.mock.calls[1][2].env).toBeUndefined();
+  });
+
+  it('a 404 fallback does not retry against an App bucket already known exhausted', () => {
+    const lockRoot = tmp();
+    writeBudgetBlock(lockRoot, 'app', 'graphql', { untilMs: Date.now() + 3600_000, nowMs: Date.now() });
+    const spawn = vi.fn(() => ({ status: 1, stdout: Buffer.alloc(0), stderr: Buffer.from('HTTP 404: Not Found') }));
+    const r = runGhCliPassthrough(['pr', 'list'], {
+      throttle: { lockRoot, env: APP_ENV, personalRoute: true, personalToken: PERSONAL_TOKEN, sleep: () => {} }, spawn,
+    });
+    expect(spawn).toHaveBeenCalledTimes(1);
+    expect(r.stderr.toString()).toMatch(/shared backoff until/);
+  });
+
+  it('looksLikePersonalAccessDenial: 404 and plain 403 yes; rate-limit 403, 500, empty no', () => {
+    expect(looksLikePersonalAccessDenial('HTTP 404: Not Found')).toBe(true);
+    expect(looksLikePersonalAccessDenial('HTTP 403: Forbidden')).toBe(true);
+    expect(looksLikePersonalAccessDenial('HTTP 403: API rate limit exceeded for user ID 1.')).toBe(false);
+    expect(looksLikePersonalAccessDenial('HTTP 500: Server Error')).toBe(false);
+    expect(looksLikePersonalAccessDenial('')).toBe(false);
+  });
+
+  // Maps the routing block's "the token is never logged" claim to a test.
+  it('the personal token is absent from the sidecar log, relayed stderr and process.env after a routed read', () => {
+    const lockRoot = tmp();
+    const envBefore = snapshotEnv();
+    const spawn = vi.fn(() => ({ status: 0, stdout: Buffer.from('ok'), stderr: Buffer.alloc(0) }));
+    const r = runGhCliPassthrough(['pr', 'list'], { throttle: { lockRoot, env: APP_ENV, personalRoute: true, personalToken: PERSONAL_TOKEN }, spawn });
+    expect(spawn.mock.calls[0][2].env.GH_TOKEN).toBe(PERSONAL_TOKEN); // the routed path really ran
+    expectSecretAbsent(PERSONAL_TOKEN, { logPath: ghThrottleLogPath(lockRoot), sinks: [r.stdout, r.stderr], envBefore });
+  });
+
+  // Pin: routing is NOT restricted to a target repo today — tolerated (opt-in is the only guard); a future
+  // restriction must flip this test deliberately.
+  it('personal route is unrestricted by target repo today (tolerated, see follow-up)', () => {
+    const lockRoot = tmp();
+    const spawn = vi.fn(() => ({ status: 0, stdout: Buffer.from('ok'), stderr: Buffer.alloc(0) }));
+    runGhCliPassthrough(['-R', 'other/repo', 'pr', 'list'], { throttle: { lockRoot, env: APP_ENV, personalRoute: true, personalToken: PERSONAL_TOKEN }, spawn });
+    expect(spawn.mock.calls[0][2].env.GH_TOKEN).toBe(PERSONAL_TOKEN);
   });
 });

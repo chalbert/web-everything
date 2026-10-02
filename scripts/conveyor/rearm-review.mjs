@@ -121,6 +121,21 @@ export function conflictFixTargetTrailer(ref, sha) {
   return sha ? `\n\n<!-- conveyor-conflict-fix-target: ${ref}@${sha} -->` : '';
 }
 
+/** Render the observed verdict transition; a CI heal is not necessarily a bounced review. */
+export function buildRearmComment({ actor, decision }) {
+  return [
+    REARM_COMMENT_MARKER,
+    '',
+    `${decision.rearmFrom === 'review:accepted'
+      ? 'The previously accepted PR was re-pushed and its acceptance is being re-armed for review'
+      : 'The `review:changes` bounce was repaired and re-pushed'} by ${actor}; ${decision.keepsHuman
+      ? '`review:human` is KEPT as the sole hold — `review:pending` was not added (an independent review is already owed while the human hold stands; only a human `/review` ceremony clears it).'
+      : 'the PR is re-armed `review:pending` (an independent re-review is owed).'}`,
+    '',
+    'The fix agent did NOT clear the review — a human `/review` (or the drain AI-review convergence pass) re-verdicts.',
+  ].join('\n');
+}
+
 // we:scripts/conveyor/rearm-review.mjs — allow importing the pure decider without running the CLI (the test file
 // imports this module). The standard main check used across the conveyor scripts.
 const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(new URL(import.meta.url).pathname);
@@ -170,15 +185,7 @@ if (IS_CLI) {
           // `conflict-fix-round-count.mjs#countStaleConflictFixRounds`'s own docblock. Omitted (no trailer at
           // all) when the local sha is unresolvable — see `resolveLocalRefSha`'s own docblock.
         ].join('\n') + conflictFixTargetTrailer(mainRefArg, resolveLocalRefSha(mainRefArg))
-      : ({ actor, decision }) => [
-          REARM_COMMENT_MARKER,
-          '',
-          `The \`review:changes\` bounce was repaired and re-pushed by ${actor}; ${decision.keepsHuman
-            ? '`review:human` is KEPT as the sole hold — `review:pending` was not added (an independent review is already owed while the human hold stands; only a human `/review` ceremony clears it).'
-            : 'the PR is re-armed `review:pending` (an independent re-review is owed).'}`,
-          '',
-          'The fix agent did NOT clear the review — a human `/review` (or the drain AI-review convergence pass) re-verdicts.',
-        ].join('\n'),
+      : buildRearmComment,
     successResult: ({ pr, labels }) => ({ ok: true, pr, rearmed: true, labels, round: isConflictRound ? 'conflict' : 'ordinary' }),
     refusalResult: ({ pr, decision }) => ({ ok: false, pr, reason: decision.reason }),
   });

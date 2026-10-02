@@ -245,7 +245,9 @@ describe('#4194 cost controls — kill switch, cap, quota', () => {
   it('card xn2wf9t — per-provider caps are resolved and counted separately, with codex\'s own legacy fallback', () => {
     expect(resolveProviderCap('codex', {})).toBe(PROVIDER_CAP_DEFAULT.codex);
     expect(resolveProviderCap('agy-claude', {})).toBe(PROVIDER_CAP_DEFAULT['agy-claude']);
-    expect(resolveProviderCap('agy-gemini', {})).toBe(PROVIDER_CAP_DEFAULT['agy-gemini']);
+    expect(PROVIDER_CAP_DEFAULT).toEqual({ codex: 80, 'agy-claude': 300, 'agy-gemini': 0 });
+    expect(resolveProviderCap('agy-gemini', {})).toBe(0);
+    expect(resolveProviderCap('agy-gemini', { [PROVIDER_CAP_ENV['agy-gemini']]: '5' })).toBe(5);
     expect(resolveProviderCap('codex', { [PROVIDER_CAP_ENV.codex]: '5' })).toBe(5);
     // codex alone falls back to the OLD shared env for one release; the antigravity backends never do.
     expect(resolveProviderCap('codex', { [DAILY_CAP_ENV]: '7' })).toBe(7);
@@ -258,7 +260,7 @@ describe('#4194 cost controls — kill switch, cap, quota', () => {
     const usage = reviewSeatCapUsage(records, NOW, { [PROVIDER_CAP_ENV.codex]: '2' });
     expect(usage.codex).toEqual({ usedToday: 2, cap: 2, fraction: 1 });
     expect(usage['agy-claude']).toEqual({ usedToday: 1, cap: PROVIDER_CAP_DEFAULT['agy-claude'], fraction: expect.any(Number) });
-    expect(usage['agy-gemini']).toEqual({ usedToday: 0, cap: PROVIDER_CAP_DEFAULT['agy-gemini'], fraction: 0 });
+    expect(usage['agy-gemini']).toEqual({ usedToday: 0, cap: 0, fraction: null });
     expect(callsUsedTodayForProvider(records, NOW, 'codex')).toBe(2);
   });
 
@@ -356,9 +358,11 @@ describe('#4194 the direct-task scripts in --review mode', () => {
       return child;
     };
     const dir = mkdtempSync(join(tmpdir(), 'we-agy-review-'));
+    // Hermetic: never read or write the host's real agy quota-hold evidence (a live hold returns before spawnFn).
+    const hold = { readHold: () => null, saveHold: () => {} };
     try {
-      await runAgyDirectExec({ dir, task: 'Review it', review: true, timeoutMs: 60_000, logFile: join(dir, 'log.jsonl'), stream: false, spawnFn, readHold: () => null, saveHold: () => {} });
-      await runAgyDirectExec({ dir, task: 'Review it', review: true, timeoutMs: 60_000, logFile: join(dir, 'log.jsonl'), stream: false, spawnFn, readHold: () => null, saveHold: () => {}, resumeConversationId: 'c-1' });
+      await runAgyDirectExec({ dir, task: 'Review it', review: true, timeoutMs: 60_000, logFile: join(dir, 'log.jsonl'), stream: false, spawnFn, ...hold });
+      await runAgyDirectExec({ dir, task: 'Review it', review: true, timeoutMs: 60_000, logFile: join(dir, 'log.jsonl'), stream: false, spawnFn, resumeConversationId: 'c-1', ...hold });
     } finally { rmSync(dir, { recursive: true, force: true }); }
     expect(argvs).toHaveLength(2);
     for (const a of argvs) expect(a).not.toContain('--dangerously-skip-permissions');
@@ -495,9 +499,26 @@ describe('#4194 runExtraSeats — the arc, with fakes', () => {
     expect(rows.some((row) => row.provider === 'codex')).toBe(true);
   });
 
+  it.each([undefined, 'invalid', '-1'])('Gemini defaults off with cap %s, logs the ruling, and routes every seat to other providers', async (cap) => {
+    const { io, calls, rows } = fakeSeatIo();
+    const env = cap === undefined ? {} : { [PROVIDER_CAP_ENV['agy-gemini']]: cap };
+    const r = await runExtraSeats({ pr: 5, repo: REPO, lanePath: '/lane', loopPayload: LOOP_PAYLOAD, env }, io);
+    expect(r.status).toBe('ran');
+    expect(rows).toHaveLength(3);
+    expect(rows.every((row) => ['codex', 'agy-claude'].includes(row.provider))).toBe(true);
+    expect(calls.filter((c) => c[0] === 'seat').every((c) => c[1].provider !== 'agy-gemini')).toBe(true);
+    expect(calls).toContainEqual(['log', 'added seats: skipping agy-gemini — daily-cap: off by default (operator ruling 2026-10-02: Gemini too weak for review until Gemini 4)']);
+  });
+
+  it('an explicit Gemini zero cap logs ordinary cap exhaustion, not the default ruling', async () => {
+    const { io, calls } = fakeSeatIo();
+    await runExtraSeats({ pr: 5, repo: REPO, lanePath: '/lane', loopPayload: LOOP_PAYLOAD, env: { [PROVIDER_CAP_ENV['agy-gemini']]: '0' } }, io);
+    expect(calls).toContainEqual(['log', 'added seats: skipping agy-gemini — daily-cap: 0/0 non-Claude seat calls already used today for agy-gemini']);
+  });
+
   it('runs all three providers in parallel, writes one evidence row per seat, stamps Claude confirmation, cleans up', async () => {
     const { io, calls, rows } = fakeSeatIo();
-    const r = await runExtraSeats({ pr: 5, repo: REPO, lanePath: '/lane', loopPayload: LOOP_PAYLOAD, env: {} }, io);
+    const r = await runExtraSeats({ pr: 5, repo: REPO, lanePath: '/lane', loopPayload: LOOP_PAYLOAD, env: { [PROVIDER_CAP_ENV['agy-gemini']]: '5' } }, io);
     expect(r.status).toBe('ran');
     expect(r.rowsWritten).toBe(3);
     expect(rows.map((x) => `${x.seat}:${x.lens}@${x.provider}`).sort()).toEqual([
@@ -517,13 +538,13 @@ describe('#4194 runExtraSeats — the arc, with fakes', () => {
     // Card xn2wf9t — per-provider usage is reported, not just a shared total.
     expect(r.providerUsage.codex).toMatchObject({ usedToday: 1, cap: PROVIDER_CAP_DEFAULT.codex });
     expect(r.providerUsage['agy-claude']).toMatchObject({ usedToday: 1, cap: PROVIDER_CAP_DEFAULT['agy-claude'] });
-    expect(r.providerUsage['agy-gemini']).toMatchObject({ usedToday: 1, cap: PROVIDER_CAP_DEFAULT['agy-gemini'] });
+    expect(r.providerUsage['agy-gemini']).toMatchObject({ usedToday: 1, cap: 5 });
   });
 
   it('each antigravity seat gets an inline brief; the codex seat (OS read-only sandbox) reads the checkout', async () => {
     const written = new Map();
     const { io } = fakeSeatIo({ writeFile: (p, text) => written.set(p, text) });
-    const r = await runExtraSeats({ pr: 5, repo: REPO, lanePath: '/lane', loopPayload: LOOP_PAYLOAD, env: {} }, io);
+    const r = await runExtraSeats({ pr: 5, repo: REPO, lanePath: '/lane', loopPayload: LOOP_PAYLOAD, env: { [PROVIDER_CAP_ENV['agy-gemini']]: '5' } }, io);
     expect(r.status).toBe('ran');
     const claude = [...written].find(([p]) => p.endsWith('task-agy-claude.md'))[1];
     const gemini = [...written].find(([p]) => p.endsWith('task-agy-gemini.md'))[1];
@@ -551,7 +572,7 @@ describe('#4194 runExtraSeats — the arc, with fakes', () => {
         return { timedOut: true, report: null };
       },
     });
-    const r = await runExtraSeats({ pr: 5, repo: REPO, lanePath: '/lane', loopPayload: LOOP_PAYLOAD, env: {} }, io);
+    const r = await runExtraSeats({ pr: 5, repo: REPO, lanePath: '/lane', loopPayload: LOOP_PAYLOAD, env: { [PROVIDER_CAP_ENV['agy-gemini']]: '5' } }, io);
     expect(r.status).toBe('ran');
     expect(rows.find((x) => x.provider === 'codex').status).toBe('error');
     expect(rows.find((x) => x.provider === 'agy-claude').status).toBe('timeout');

@@ -117,7 +117,7 @@
  * shapes individually is the game this file was already losing.
  */
 
-import { resolveOperationRoute, readRoutingPolicy } from '../lib/dispatch-routing-policy-io.mjs';
+import { resolveOperationEffort, resolveOperationRoute, readRoutingPolicy } from '../lib/dispatch-routing-policy-io.mjs';
 import { repoKeyForSlug, CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
 import { repoProfile } from '../lib/repo-profile.mjs';
 import { execFileSync } from 'node:child_process';
@@ -250,7 +250,7 @@ export function reviewSeatRoutes({ available = REVIEW_SEAT_PROVIDERS, scorecards
     // One call left: every later seat rides the call this first pick already costs.
     if (callsRemaining < 2) usable = [pick.provider];
     const { model, effort } = REVIEW_SEAT_MODELS[pick.provider];
-    routes.push({ ...s, provider: pick.provider, model: configured?.model ?? model, effort, reasoning: pick.reasoning });
+    routes.push({ ...s, provider: pick.provider, model: configured?.model ?? model, effort: configured?.effort ?? resolveOperationEffort("review-seat", pick.provider, s.key, routingPolicy), reasoning: pick.reasoning });
   }
   return { routes, skipped };
 }
