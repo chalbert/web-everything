@@ -21,7 +21,7 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const REPO_ROOT = resolve(fileURLToPath(import.meta.url), '..', '..', '..', '..', '..');
-const REPO = 'chalbert/web-everything';
+const REPO = 'timeout-fixture/example';
 const HEAD = 'c'.repeat(40);
 
 export default {

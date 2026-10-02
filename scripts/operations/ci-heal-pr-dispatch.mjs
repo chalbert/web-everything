@@ -36,9 +36,9 @@
  */
 import { readFileSync, mkdirSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { createHash } from 'node:crypto';
+import { timeoutStateDir, timeoutKey, readTimeoutStates, readTimeoutBudget } from '../conveyor/timeout-retry-state.mjs';
 import { writeJsonAtomic, withFileLock } from '../lib/atomic-json-file.mjs';
-import { ghThrottleLockRoot, execFileSyncThrottled } from '../lib/gh-throttle.mjs';
+import { execFileSyncThrottled } from '../lib/gh-throttle.mjs';
 import { CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
 import { createFileItemReader, createFileItemSinks } from './file-item-io.mjs';
 import { planScaffold, SCAFFOLD_EFFECT } from './scaffold.mjs';
@@ -391,13 +391,9 @@ if (IS_CLI) {
     });
 }
 
-const timeoutStateDir = () => join(ghThrottleLockRoot(), 'ci-timeout-reruns');
-const timeoutKey = ({ repo, pr, head, signature }) => createHash('sha256')
-  .update(JSON.stringify([repo, pr, head, signature])).digest('hex');
-
 function timeoutTransaction(path, initial, fn) {
   return withFileLock(`${path}.lock`, () => {
-    const state = existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : structuredClone(initial);
+    const state = existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : (typeof initial === 'function' ? initial() : structuredClone(initial));
     if (state.version !== 1 || !Array.isArray(state.requests)) throw new Error('corrupt-timeout-state');
     const result = fn(state);
     writeJsonAtomic(path, state);
@@ -440,15 +436,8 @@ function confirmedTimeouts(state) { return state.requests.filter((r) => r.status
 
 /** An ambiguous request must not become an agent heal just because this tick's evidence read failed. */
 export function readTimeoutHold({ repo, pr, head, dir = timeoutStateDir() }) {
-  if (!existsSync(dir)) return null;
-  try {
-    for (const name of readdirSync(dir).filter((n) => n.endsWith('.json'))) {
-      const state = JSON.parse(readFileSync(join(dir, name), 'utf8'));
-      if (state.evidence.repo === repo && state.evidence.pr === pr && state.evidence.head === head
-          && state.requests.some((r) => r.status === 'pending')) return { status: 'refused', reason: 'retry-outcome-pending' };
-    }
-    return null;
-  } catch (error) { return { status: 'refused', reason: `timeout-state-unreadable:${error.message}` }; }
+  const budget = readTimeoutBudget({ repo, pr, head, dir });
+  return budget.pending ? { status: 'refused', reason: budget.reason ?? 'retry-outcome-pending' } : null;
 }
 
 /** Persist the card identity BEFORE writing it. Replay goes through the same guarded file-item sink
@@ -502,6 +491,8 @@ export async function flushTimeoutFollowups({ root = REPO_ROOT, repo, dir = time
     try {
       const state = JSON.parse(readFileSync(path, 'utf8'));
       if (state.evidence.repo !== repo || state.card?.filed) continue;
+      const canonical = join(dir, `${timeoutKey(state.evidence)}.json`);
+      if (path !== canonical && existsSync(canonical)) continue;
       const pending = state.requests.find((r) => r.status === 'pending');
       if (pending) {
         const observed = await effects.observe(state.evidence, pending.target);
@@ -534,7 +525,12 @@ export async function dispatchTimeoutRetry(evidence, {
       || !evidence.jobs?.length) return refuse('invalid-timeout-evidence');
   mkdirSync(dir, { recursive: true });
   const path = join(dir, `${timeoutKey(evidence)}.json`);
-  const initial = { version: 1, evidence, requests: [] };
+  // Import legacy per-signature spend under the new per-head lock on first access.
+  const initial = () => {
+    const legacy = readTimeoutStates(evidence, dir);
+    return { version: 1, evidence, card: legacy.find((state) => state.card)?.card,
+      requests: legacy.flatMap((state) => state.requests).map((request, id) => ({ ...request, id })) };
+  };
   let reservation;
   const selected = timeoutTransaction(path, initial, (state) => {
     if (confirmedTimeouts(state) >= 2) return { exhausted: true, card: state.card?.payload.num };
@@ -543,7 +539,7 @@ export async function dispatchTimeoutRetry(evidence, {
     const target = evidence.jobs.find((j) => !state.requests.some((r) => r.status === 'confirmed'
       && r.target.run === j.run && r.target.job === j.job && r.target.attempt === j.attempt));
     if (!target) return { waiting: true };
-    reservation = { id: state.requests.length, target, status: 'pending', outcome: 'reserved; API outcome unknown' };
+    reservation = { id: state.requests.length, signature: evidence.signature, target, status: 'pending', outcome: 'reserved; API outcome unknown' };
     state.requests.push(reservation);
     return { target };
   });

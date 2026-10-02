@@ -1834,9 +1834,16 @@ export function planReconcile({
           continue;
         }
       }
+      const retryBudget = pr.timeoutRetryBudget;
+      if (retryBudget?.pending) {
+        const why = `PR #${prNumber}: timeout retry needs your decision — ${retryBudget.reason ?? 'request outcome remains unresolved'}; no further rerun or heal is safe`;
+        refuse('ci-heal-escalated', { ...withPhase, why });
+        notes.push({ kind: 'timeout-retry-needs-human', prNumber, text: why });
+        continue;
+      }
       // xng7q1p: same-head mechanical retries never consume or rewrite heal markers.
       // All main-red, escalation and live-owner guards above retain precedence.
-      if (pr.timeoutRetry?.eligible && pr.timeoutRetry.head === pr.headRefOid && pr.timeoutRetry.pr === prNumber) {
+      if (retryBudget?.confirmed < 2 && pr.timeoutRetry?.eligible && pr.timeoutRetry.head === pr.headRefOid && pr.timeoutRetry.pr === prNumber) {
         dispatch.push({ ...base, ...withPhase, kind: 'ci-timeout-rerun', timeoutRetry: pr.timeoutRetry,
           why: 'complete timeout inventory and unchanged dependency closure; independent retry budget' });
         continue;

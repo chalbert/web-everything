@@ -3238,7 +3238,22 @@ describe('operator send-back renews a bounded durable fix budget', () => {
 describe('xng7q1p mechanical timeout precedence', () => {
   const head = 'a'.repeat(40);
   const pr = (extra = {}) => pr1563({ number: 3415, headRefOid: head, labels: [], comments: [], statusCheckRollup: redRollup,
+    timeoutRetryBudget: { confirmed: 0, pending: false },
     timeoutRetry: { eligible: true, repo: 'chalbert/web-everything', pr: 3415, head, signature: 'timeout', jobs: [{ run: 10, job: 20, attempt: 1 }] }, ...extra });
+  it('does not authorize retries without an observed budget', () => {
+    const result = planReconcile({ prs: [pr({ timeoutRetryBudget: undefined })], now: NOW });
+    expect(result.dispatch.map((row) => row.kind)).toEqual(['ci-heal']);
+  });
+  it('exhausted per-head retries fall through to normal healing', () => {
+    const result = planReconcile({ prs: [pr({ timeoutRetryBudget: { confirmed: 2, pending: false } })], now: NOW });
+    expect(result.dispatch.map((row) => row.kind)).toEqual(['ci-heal']);
+  });
+  it('an unresolved request becomes a visible human escalation, never another rerun or heal', () => {
+    const result = planReconcile({ prs: [pr({ timeoutRetryBudget: { confirmed: 0, pending: true } })], now: NOW });
+    expect(result.dispatch).toEqual([]);
+    expect(result.refusals[0].kind).toBe('ci-heal-escalated');
+    expect(result.notes).toContainEqual(expect.objectContaining({ kind: 'timeout-retry-needs-human', text: expect.stringContaining('needs your decision') }));
+  });
   it('keeps live fix ownership ahead of retries', () => {
     const result = planReconcile({ prs: [pr({ fixClaim: { who: 'fixer' } })], now: NOW });
     expect(result.dispatch).toEqual([]);

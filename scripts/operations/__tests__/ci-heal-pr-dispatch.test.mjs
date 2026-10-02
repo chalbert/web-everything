@@ -12,7 +12,7 @@
  * `held` test uses a sink that behaves as that guard does and asserts the module passes it through unchanged.
  */
 
-import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
@@ -25,6 +25,8 @@ import { dispatchCiHeal, runReconcileCiHealDispatch, dispatchTimeoutRetry, flush
 import { readUnsupported } from '../../conveyor/unsupported-repo.mjs';
 import { flushOwedWrites, readOwedWrites, recordOwedWrite, OWED_MAX_AGE_MS } from '../../conveyor/ci-heal-owed.mjs';
 import { buildCiHealComment } from '../../conveyor/ci-heal-mark.mjs';
+import { enrichPrsWithTimeoutEvidence } from '../../conveyor/reconcile-pass.mjs';
+import { readTimeoutBudget } from '../../conveyor/timeout-retry-state.mjs';
 import { planReconcile } from '../../conveyor/reconcile-core.mjs';
 
 it.each([0, 3])('xng7q1p: eligible PR with %i heals retries without a lane or heal', async (count) => {
@@ -37,7 +39,7 @@ it.each([0, 3])('xng7q1p: eligible PR with %i heals retries without a lane or he
   const plan = planReconcile({ prs: [{ number: 3415, state: 'OPEN', headRefOid: head,
     headRefName: 'lane/example', labels: [{ name: 'ci:failed' }], comments,
     statusCheckRollup: [{ name: 'test', status: 'COMPLETED', conclusion: 'FAILURE' }],
-    timeoutRetry: evidence,
+    timeoutRetry: evidence, timeoutRetryBudget: { confirmed: 0, pending: false },
   }], requiredChecks: ['test'] });
   expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'ci-timeout-rerun' })]);
   const calls = [];
@@ -509,6 +511,51 @@ describe('xng7q1p retry reservation and restart soak', () => {
     const exhausted = await dispatchTimeoutRetry({ ...next, jobs: [{ ...next.jobs[0], job: 22, attempt: 3 }] }, opts);
     expect(exhausted).toMatchObject({ reason: 'timeout-retries-exhausted', card: expect.any(String) });
     expect(requests).toBe(2);
+  }));
+  it('preserves legacy signature spend when initializing the per-head ledger', async () => harness(async (dir) => {
+    const e = evidence();
+    for (let i = 0; i < 2; i++) writeFileSync(join(dir, `legacy-${i}.json`), JSON.stringify({ version: 1,
+      evidence: { ...e, signature: `old-${i}` }, requests: [{ id: 0, target: { ...e.jobs[0], job: 20 + i }, status: 'confirmed' }] }));
+    expect(readTimeoutBudget({ ...e, dir })).toEqual({ confirmed: 2, pending: false });
+    expect(await dispatchTimeoutRetry(e, { dir, repo: e.repo, fileFollowup: async () => {},
+      effects: { observe, request: () => { throw new Error('budget already spent'); } } }))
+      .toMatchObject({ reason: 'timeout-retries-exhausted' });
+    expect(readTimeoutBudget({ ...e, dir })).toEqual({ confirmed: 2, pending: false });
+  }));
+  it('different signatures on one head share two requests and a new head receives a fresh budget', async () => harness(async (dir) => {
+    const e = evidence(); let requests = 0;
+    const opts = { dir, repo: e.repo, effects: { observe, request: () => { requests++; return { status: 'confirmed' }; } }, fileFollowup: async () => {} };
+    for (let i = 0; i < 5; i++) {
+      const result = await dispatchTimeoutRetry({ ...e, signature: `failure-set-${i}`, jobs: [{ ...e.jobs[0], job: 20 + i, attempt: 1 + i }] }, opts);
+      expect(result.status).toBe(i < 2 ? 'requested' : 'refused');
+    }
+    expect(requests).toBe(2);
+    expect(readTimeoutBudget({ ...e, dir })).toEqual({ confirmed: 2, pending: false });
+    expect(await dispatchTimeoutRetry({ ...e, head: 'b'.repeat(40) }, opts)).toMatchObject({ status: 'requested' });
+    expect(requests).toBe(3);
+  }));
+  it.each(['confirmed', 'ambiguous'])('planner and dispatch reach a terminal action after %s requests', async (status) => harness(async (dir) => {
+    const e = evidence(); let requests = 0;
+    const opts = { dir, repo: e.repo, effects: { observe, request: () => { requests++; return { status }; } }, fileFollowup: async () => {} };
+    let lastPlan;
+    for (let tick = 0; tick < 5; tick++) {
+      const next = { ...e, signature: `failure-${tick}`, jobs: [{ ...e.jobs[0], job: 20 + tick, attempt: 1 + tick }] };
+      const pr = { number: e.pr, headRefOid: e.head, state: 'OPEN', labels: [], comments: [],
+        statusCheckRollup: [{ name: 'test', status: 'COMPLETED', conclusion: 'FAILURE', detailsUrl: `https://github.com/${e.repo}/actions/runs/10/job/20` }] };
+      const prs = enrichPrsWithTimeoutEvidence([pr], { repo: e.repo, enabled: true, read: () => next,
+        readBudget: (identity) => readTimeoutBudget({ ...identity, dir }) });
+      lastPlan = planReconcile({ prs, requiredChecks: ['test'] });
+      await runReconcileCiHealDispatch({ checkStaleness: FRESH, reconcile: () => lastPlan,
+        flushOwed: () => ({}), flushTimeouts: async () => [], pickFreeLanes: () => [],
+        unsupportedPath: join(dir, 'unsupported'), retryTimeout: (entry) => dispatchTimeoutRetry(entry, opts),
+        dispatch: () => { throw new Error('no lane available'); } });
+    }
+    expect(requests).toBe(status === 'confirmed' ? 2 : 1);
+    if (status === 'confirmed') expect(lastPlan.dispatch.map((row) => row.kind)).toEqual(['ci-heal']);
+    else {
+      expect(lastPlan.dispatch).toEqual([]);
+      expect(lastPlan.notes).toContainEqual(expect.objectContaining({ kind: 'timeout-retry-needs-human' }));
+    }
   }));
   it('ambiguous API outcomes stay reserved until a newer attempt is observed', async () => harness(async (dir) => {
     const e = evidence(); let requests = 0; let attempt = 1;

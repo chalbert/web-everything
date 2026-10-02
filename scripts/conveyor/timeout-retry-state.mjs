@@ -1,0 +1,28 @@
+/** Shared, read-only per-head retry budget for enrichment and dispatch. */
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { createHash } from 'node:crypto';
+import { ghThrottleLockRoot } from '../lib/gh-throttle.mjs';
+
+export const timeoutStateDir = () => join(ghThrottleLockRoot(), 'ci-timeout-reruns');
+export const timeoutKey = ({ repo, pr, head }) => createHash('sha256')
+  .update(JSON.stringify([repo, pr, head])).digest('hex');
+
+export function readTimeoutStates(evidence, dir = timeoutStateDir()) {
+  const canonical = join(dir, `${timeoutKey(evidence)}.json`);
+  if (!existsSync(dir)) return [];
+  const paths = existsSync(canonical) ? [canonical]
+    : readdirSync(dir).filter((name) => name.endsWith('.json')).map((name) => join(dir, name));
+  return paths.map((path) => JSON.parse(readFileSync(path, 'utf8'))).filter((state) => {
+    if (state.version !== 1 || !state.evidence || !Array.isArray(state.requests)) throw new Error('corrupt-timeout-state');
+    return ['repo', 'pr', 'head'].every((key) => state.evidence[key] === evidence[key]);
+  });
+}
+
+export function readTimeoutBudget({ dir = timeoutStateDir(), ...evidence }) {
+  try {
+    const requests = readTimeoutStates(evidence, dir).flatMap((state) => state.requests);
+    return { confirmed: requests.filter((r) => r.status === 'confirmed').length,
+      pending: requests.some((r) => r.status === 'pending') };
+  } catch (error) { return { pending: true, reason: `timeout-state-unreadable:${error.message}` }; }
+}

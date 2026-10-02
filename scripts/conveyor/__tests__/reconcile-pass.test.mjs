@@ -820,6 +820,26 @@ describe('xng7q1p conservative timeout evidence', () => {
     'package-lock.json', '.github/workflows/ci.yml', 'fixtures/value.mjs'])('refuses changed input %s', (filename) => {
     const e = fixture(); e.changed = [{ filename }]; expect(classify(e).eligible).toBe(false);
   });
+  it.each([
+    "import { vi } from 'vitest'; await vi.importActual('./subject.mjs');",
+    "import { vi } from 'vitest'; await vi.importMock('./subject.mjs');",
+    "import { vi as v } from 'vitest'; await v.importActual('./subject.mjs');",
+    "import { vi } from 'vitest'; const { importActual: load } = vi; await load('./subject.mjs');",
+    "import { vi } from 'vitest'; await vi['importMock']('./subject.mjs');",
+    "import { vi } from 'vitest'; await vi[loader]('./subject.mjs');",
+    "await import('./subject.mjs');",
+  ])('refuses changed dependencies loaded at runtime: %s', (source) => {
+    const e = fixture(); e.sources['unit.test.mjs'] = source;
+    e.changed = [{ filename: 'subject.mjs' }];
+    expect(classify(e)).toMatchObject({ eligible: false, reason: 'unknown-dependency-edge:unit.test.mjs' });
+  });
+  it('bounds whitespace-heavy logs, oversized logs and oversized lines without accepting partial inventories', () => {
+    const started = performance.now();
+    expect(parseTimeoutFailures(' \n'.repeat(512 * 1024) + log()).complete).toBe(true);
+    expect(performance.now() - started).toBeLessThan(1000);
+    expect(parseTimeoutFailures('\n'.repeat(2 * 1024 * 1024) + log()).complete).toBe(false);
+    expect(parseTimeoutFailures(' '.repeat(16 * 1024 + 1) + log()).complete).toBe(false);
+  });
   it('checks the old name of a renamed dependency', () => {
     const e = fixture(); e.changed = [{ filename: 'renamed.mjs', previous_filename: 'leaf.mjs' }];
     expect(classify(e).reason).toBe('changed-dependency:leaf.mjs');
@@ -851,7 +871,7 @@ describe('xng7q1p conservative timeout evidence', () => {
     const pr = { number: 3415, headRefOid: head, state: 'OPEN', labels: [],
       statusCheckRollup: [{ name: 'test', status: 'COMPLETED', conclusion: 'FAILURE',
         detailsUrl: `https://github.com/${repo}/actions/runs/10/job/20` }] };
-    const prs = enrichPrsWithTimeoutEvidence([pr], { repo, enabled: true, read: () => classify(e) });
+    const prs = enrichPrsWithTimeoutEvidence([pr], { repo, enabled: true, readBudget: () => ({ confirmed: 0, pending: false }), read: () => classify(e) });
     const out = timeoutPlanReconcile({ prs, requiredChecks: ['test'] });
     expect(out.dispatch[0]).toMatchObject({ kind: 'ci-timeout-rerun', timeoutRetry: { signature: classify(e).signature } });
   });
@@ -899,7 +919,7 @@ it('xng7q1p immutable GitHub reads feed enrichment → planner without checkout-
   };
   const pr = { number:3415,headRefOid:head,state:'OPEN',labels:[],statusCheckRollup:[{
     name:'test',status:'COMPLETED',conclusion:'FAILURE',detailsUrl:`https://github.com/${repo}/actions/runs/10/job/20`}] };
-  const prs = enrichPrsWithTimeoutEvidence([pr], {repo,enabled:true,read:(p,o)=>readTimeoutEvidence(p,{...o,exec,ts:timeoutTs})});
+  const prs = enrichPrsWithTimeoutEvidence([pr], {repo,enabled:true,readBudget: () => ({ confirmed: 0, pending: false }),read:(p,o)=>readTimeoutEvidence(p,{...o,exec,ts:timeoutTs})});
   expect(timeoutPlanReconcile({prs,requiredChecks:['test']}).dispatch[0].kind).toBe('ci-timeout-rerun');
   expect(calls.filter((p)=>p===`${prefix}/pulls/3415`)).toHaveLength(2);
   data[`${prefix}/pulls/3415`].changed_files = 101;

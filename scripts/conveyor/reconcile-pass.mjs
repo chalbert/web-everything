@@ -49,6 +49,7 @@
  * is killed.
  */
 import { isGhDeferred } from '../lib/gh-deferred.mjs';
+import { readTimeoutBudget } from './timeout-retry-state.mjs';
 import { createHash } from 'node:crypto';
 import { posix } from 'node:path';
 import { createRequire } from 'node:module';
@@ -1100,16 +1101,28 @@ if (IS_CLI) {
  * ANSI colour and GitHub timestamps are transport, not part of a test's identity.
  */
 export function parseTimeoutFailures(log) {
-  const text = String(log).replace(/\x1b\[[0-9;]*m/g, '').replace(/^\d{4}-\d\d-\d\dT\S+\s/gm, '');
-  const summaries = [...text.matchAll(/^\s*Tests\s+(\d+) failed\b/gm)];
-  const blocks = [...text.matchAll(/^\s*FAIL\s+(\S+\.(?:test|spec)\.[cm]?[jt]sx?)\s+>\s+([^\n]+)\n([\s\S]*?)(?=^\s*FAIL\s|^\s*Test Files\s|$(?![\s\S]))/gm)];
-  if (summaries.length !== 1 || !/\bDuration\s+[\d.]+/.test(text)
-      || blocks.length !== Number(summaries[0][1]) || !blocks.length
-      || /Failed Suites|Unhandled Errors|Unhandled Rejection|\btruncated\b/i.test(text)) {
-    return { complete: false, reason: 'incomplete-failure-inventory', failures: [] };
+  const incomplete = () => ({ complete: false, reason: 'incomplete-failure-inventory', failures: [] });
+  // Reject, never truncate: partial inventories must not authorize a rerun.
+  if (typeof log !== 'string' || log.length > 2 * 1024 * 1024) return incomplete();
+  const lines = log.split('\n');
+  if (lines.some((line) => line.length > 16 * 1024)) return incomplete();
+  const failures = [];
+  let summaryCount = 0, failedCount = 0, duration = false, current = null;
+  for (const raw of lines) {
+    const line = raw.replace(/\x1b\[[0-9;]*m/g, '').replace(/^\d{4}-\d\d-\d\dT[^ \t]+[ \t]/, '').trim();
+    if (/Failed Suites|Unhandled Errors|Unhandled Rejection|\btruncated\b/i.test(line)) return incomplete();
+    const summary = /^Tests[ \t]+(\d+) failed\b/.exec(line);
+    if (summary) { summaryCount++; failedCount = Number(summary[1]); }
+    if (/^Duration[ \t]+[\d.]+/.test(line)) duration = true;
+    if (/^FAIL[ \t]/.test(line)) {
+      const match = /^FAIL[ \t]+([^ \t]+\.(?:test|spec)\.[cm]?[jt]sx?)[ \t]+>[ \t]+(.+)$/.exec(line);
+      if (!match) return incomplete();
+      current = { path: match[1], name: match[2], kind: 'other' };
+      failures.push(current);
+    } else if (/^Test Files[ \t]/.test(line)) current = null;
+    else if (current && /^Error: Test timed out in \d+ms\./.test(line)) current.kind = 'test-timeout';
   }
-  const failures = blocks.map(([, path, name, body]) => ({ path, name: name.trim(),
-    kind: /^Error: Test timed out in \d+ms\./m.test(body.trim()) ? 'test-timeout' : 'other' }));
+  if (summaryCount !== 1 || !duration || !failures.length || failures.length !== failedCount) return incomplete();
   return { complete: true, failures };
 }
 
@@ -1141,6 +1154,11 @@ export function timeoutImpact({ changed, sources, roots, head, sourceHead }, ts)
       }
       // Computed imports, require, code generation and ambient IO defeat static closure.
       if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) unknown = true;
+      // Vitest's runtime loaders bypass import declarations, including aliases/destructuring.
+      // Fail closed on references as well as calls; native dynamic imports already do the same.
+      if ((ts.isIdentifier(node) || ts.isStringLiteral(node))
+          && ['importActual', 'importMock'].includes(node.text)) unknown = true;
+      if (ts.isElementAccessExpression(node) && !ts.isStringLiteral(node.argumentExpression)) unknown = true;
       if (ts.isIdentifier(node) && /^(require|eval|Function|process|global|globalThis|window|document|fetch|XMLHttpRequest|WebSocket|Worker|importScripts|Deno|Bun)$/.test(node.text)) unknown = true;
       if (ts.isMetaProperty(node)) unknown = true;
       if (ts.isShorthandPropertyAssignment(node) && ['setupFiles', 'globalSetup'].includes(node.name.text)) unknown = true;
@@ -1278,15 +1296,17 @@ export function readTimeoutEvidence(pr, { repo, exec = execFileSyncThrottled, ts
 }
 
 export function enrichPrsWithTimeoutEvidence(prs, {
-  repo, read = readTimeoutEvidence, enabled = process.env.WE_CI_TIMEOUT_RERUN_ENABLED === '1',
+  repo, read = readTimeoutEvidence, readBudget = readTimeoutBudget, enabled = process.env.WE_CI_TIMEOUT_RERUN_ENABLED === '1',
 } = {}) {
   // New mechanical infrastructure stays opt-in until the card's controlled live proof passes.
   if (!enabled) return prs;
   return prs.map((pr) => {
     if (!(pr.statusCheckRollup ?? []).some((c) => ['failure', 'timed_out'].includes(String(c.conclusion).toLowerCase()))) return pr;
+    const timeoutRetryBudget = readBudget({ repo, pr: pr.number, head: pr.headRefOid });
     if (!(pr.statusCheckRollup ?? []).some((c) => c.detailsUrl?.startsWith(`https://github.com/${repo}/actions/runs/`))) {
-      return { ...pr, timeoutRetry: { eligible: false, reason: 'missing-check-origin' } };
+      return { ...pr, timeoutRetryBudget, timeoutRetry: { eligible: false, reason: 'missing-check-origin' } };
     }
-    return { ...pr, timeoutRetry: read(pr, { repo }) };
+    return { ...pr, timeoutRetry: read(pr, { repo }),
+      timeoutRetryBudget };
   });
 }
