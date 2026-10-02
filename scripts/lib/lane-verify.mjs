@@ -125,6 +125,7 @@
  */
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { constants } from 'node:os';
 
 /** The marker lives in the lane clone's `.git/` (like `.lane-lease`): never tracked, never `git clean`-ed,
  *  invisible to `git status`, one-per-lane. */
@@ -238,7 +239,7 @@ export const DEFAULT_VERIFY_TTL_MINUTES = 30;
  *  `computeWorkingTreeHash`) the IO shell computed BEFORE this call — carried through so a later `request`/
  *  `verify` can tell "the tree is byte-identical to what this record verified" apart from "same commit, tree
  *  moved since"; omitted/`null` (every existing caller) never enables that fast path. */
-export function verifyStartBody({ sha, suites, startedAt, treeHash }) {
+export function verifyStartBody({ sha, suites, startedAt, treeHash, runId }) {
   return {
     sha: sha || null,
     status: 'running',
@@ -247,6 +248,9 @@ export function verifyStartBody({ sha, suites, startedAt, treeHash }) {
     suites: suites || null,
     exitCode: null,
     treeHash: treeHash ?? null,
+    // `runId` (optional) identifies the dispatcher run that stamped this marker, so the dispatcher can later tell
+    // its own marker from a newer same-sha/suites/tree `request`. Omitted when absent — existing shapes unchanged.
+    ...(runId ? { runId } : {}),
   };
 }
 
@@ -260,19 +264,37 @@ export function verifyStartBody({ sha, suites, startedAt, treeHash }) {
  *  green for a tree it never verified — the exact false-green this guard exists to kill. So `sha` is passed
  *  explicitly and wins. `prev` supplies only `startedAt`/`suites` (audit fields); `base.sha` is a fallback for
  *  legacy callers that pass their own start body as `prev`. */
-export function verifyFinishBody(prev, { finishedAt, exitCode, sha, treeHash, suites } = {}) {
+/** Classify process termination without inventing an OOM/host-load diagnosis from a signal alone. */
+export function verificationInfrastructureFailure({ exitCode, signal, timedOutPhase, ceilingMs } = {}) {
+  const inferred = Number.isInteger(exitCode) && exitCode > 128
+    ? Object.entries(constants.signals).find(([, n]) => n === exitCode - 128)?.[0] : null;
+  const killedBy = signal || inferred;
+  if (!timedOutPhase && !killedBy) return null;
+  return {
+    reason: timedOutPhase ? 'verify-timeout' : 'verify-signal',
+    signal: killedBy || 'SIGKILL',
+    ...(timedOutPhase ? { phase: timedOutPhase, ceilingMs } : {}),
+    detail: timedOutPhase
+      ? `verification infrastructure failure: dispatcher killed the process tree with SIGKILL after the ${ceilingMs}ms ${timedOutPhase}-phase ceiling; no test verdict. Inspect the verify-daemon log before explicitly retrying.`
+      : `verification infrastructure failure: ${killedBy}${signal ? '' : ` (shell exit ${exitCode})`}; sender/cause unknown (not proof of OOM or a timeout); no test verdict. Inspect host and verify-daemon logs before explicitly retrying.`,
+  };
+}
+
+export function verifyFinishBody(prev, { finishedAt, exitCode, sha, treeHash, suites, signal, infrastructure } = {}) {
   const base = prev && typeof prev === 'object' ? prev : {};
-  const green = Number(exitCode) === 0;
+  const failure = infrastructure || verificationInfrastructureFailure({ exitCode, signal });
+  const green = exitCode != null && Number(exitCode) === 0 && !failure;
   return {
     sha: sha ?? base.sha ?? null,
-    status: green ? 'green' : 'red',
+    status: failure ? 'infrastructure-failure' : green ? 'green' : 'red',
+    ...(failure ? { infrastructure: failure } : {}),
     startedAt: base.startedAt ?? null,
     finishedAt: finishedAt || null,
     // #4473 — `suites` is part of the cache key too, so the gate THIS run executed wins (PR #2982 round-2 review):
     // an overlapping `request --gate=<other>` re-stamps the shared marker with ITS command, and inheriting that
     // would relabel this run's green as a green for a gate that never ran.
     suites: suites ?? base.suites ?? null,
-    exitCode: Number.isFinite(Number(exitCode)) ? Number(exitCode) : null,
+    exitCode: exitCode != null && Number.isFinite(Number(exitCode)) ? Number(exitCode) : null,
     // #4473 — the cache key. Like `sha`, an explicit `treeHash` (the hash the run itself captured) WINS over
     // `base.treeHash` (PR #2982 review): `base` is usually re-read off the shared on-disk marker, which an
     // overlapping `request` can have re-stamped with a NEWER, unverified tree's hash — inheriting it would publish
@@ -299,11 +321,12 @@ export function isVerifyAbandoned(record, nowMs, ttlMs = DEFAULT_VERIFY_TTL_MINU
  *  item (tool-call COUNT) — only the ceiling below needs to stay conservative. */
 export const DEFAULT_WAIT_POLL_INTERVAL_MS = 2_000;
 
-/** The hard ceiling a `--wait=<ms>` request is clamped to, regardless of what was asked for. #4358's own risk
- *  note: "a literal in-process blocking wait must stay inside the tool's own safe foreground window" — the
- *  same ~120s window `we:scripts/guard-bash.mjs` cites for why a raw gate run gets silently auto-backgrounded.
- *  90s leaves real margin under that window for process/IO overhead on either side of the wait itself. */
-export const MAX_SAFE_WAIT_MS = 90_000;
+/** The most ONE wait may ever block: the default 120-minute admission budget, five-minute queue buffer,
+ *  30-minute execution budget and five-minute dispatch margin. A dispatched agent's foreground tool call is
+ *  killed at the Bash tool's own `timeout` (10 minutes), so the conveyor briefs never ask for the whole budget in
+ *  one call — they chain `check --wait=540000` calls (each fits that window) up to this total; this constant is
+ *  only the clamp for callers that genuinely can block that long. */
+export const MAX_SAFE_WAIT_MS = 160 * 60_000;
 
 /** Clamp a requested `--wait=<ms>` to {@link MAX_SAFE_WAIT_MS}. Pure, and pulled out of `verify-lane.mjs`
  *  specifically so the clamp itself — not just the stderr warning that mentions it — has a direct unit test. */
@@ -316,8 +339,8 @@ export function resolveWaitCeilingMs(requestedMs) {
  * Pure except for the injected IO/clock/sleep, so it is unit-testable with a fake clock and fake marker reads,
  * no real timers and no real git. Poll until the FIRST result that is genuinely final:
  *
- *   - **Only `green`/`red` may end a wait as `settled`** (`result.settled === true`) — the two states a
- *     synchronous suite run actually produces at finish.
+ *   - **`green`/`red`/`infrastructure-failure` end a wait as `settled`** (`result.settled === true`) — the terminal states a
+ *     run produces at finish (settled does not imply passed).
  *   - **A HEAD move mid-wait** (the tracked sha stops being current — a new commit landed on the lane) is its
  *     own distinct case (`status: 'head-moved'`), never folded into "still pending": a marker keyed to a sha
  *     that is no longer HEAD can never settle for THIS wait, no matter how much longer it runs.
@@ -392,7 +415,7 @@ export async function waitForVerifySettle({
       : undefined;
     const v = verifyGateDecision({ record: currentRecord, headSha, breakGlass, requireVerified, laneRelevantChangeSince });
 
-    if (v.status === 'green' || v.status === 'red') {
+    if (v.status === 'green' || v.status === 'red' || v.status === 'infrastructure-failure') {
       return { ...v, sha: headSha, settled: true, waited: { ms: now() - startedAt, polls } };
     }
     // Only `running` keeps polling — see the function doc above for why. Everything else ends NOW, unsettled.
@@ -404,7 +427,7 @@ export async function waitForVerifySettle({
     if (elapsed >= ceilingMs) {
       return {
         sha: headSha, status: 'timeout', reason: 'wait-timeout', ok: false,
-        detail: `still not settled after waiting ${elapsed}ms (ceiling ${ceilingMs}ms) — last read: ${v.status} (${v.reason}). Poll \`check --wait=\` again.`,
+        detail: `still not settled after waiting ${elapsed}ms (ceiling ${ceilingMs}ms) — last read: ${v.status} (${v.reason}). Still running: re-run the same bounded \`check --wait=\` (the dispatcher's own ceilings settle a hung request as an infrastructure-failure); never reset or re-request automatically.`,
         settled: false, waited: { ms: elapsed, polls }, lastStatus: v.status, lastReason: v.reason,
       };
     }
@@ -521,6 +544,18 @@ export function verifyGateDecision({ record, headSha, nowMs = Date.now(), ttlMs 
       ok: false, status: 'running', reason: 'verify-unfinished',
       detail: `verification for ${String(headSha).slice(0, 8)} is UNFINISHED (${abandoned ? 'abandoned — a backgrounded run that never completed' : 'still in-flight'}; started ${rec.startedAt || '?'}). A half-run verification must not look complete — re-run \`node scripts/verify-lane.mjs\` to completion (foreground, blocking) before landing.`,
     };
+  }
+  const infrastructure = rec?.infrastructure || verificationInfrastructureFailure({ exitCode: rec?.exitCode, signal: rec?.signal });
+  if (matches && (rec.status === 'infrastructure-failure' || (rec.status === 'red' && infrastructure))) {
+    const reason = infrastructure?.reason || 'verify-infrastructure';
+    const detail = infrastructure?.detail || 'verification infrastructure failed; no test verdict. Inspect the runner log before retrying.';
+    if (requireVerified) return { ok: false, status: 'infrastructure-failure', reason, detail };
+    // Advisory mode — same contract as a red marker below: a killed/timed-out gate is a terminal record with no TTL
+    // escape, so blocking here would wedge every CI-gated flow on each kill until a manual reset. This caller opted
+    // out of mandatory verification, so report it honestly (status stays `infrastructure-failure`) but do not block;
+    // the PR's required CI check gates the merge.
+    return { ok: true, status: 'infrastructure-failure', reason,
+      detail: `${detail} This caller opted out of mandatory verification (--no-require-verified / WE_REQUIRE_VERIFIED=0) — not blocking here; the PR's required CI check gates the merge.` };
   }
   if (matches && rec.status === 'red') {
     if (requireVerified) {
