@@ -123,7 +123,7 @@ import { OPEN_PR_LIST_LIMIT, isDegradedOpenPrListing, filterOpenPrsByLabel } fro
 // #2925/#xkfv491 (we:backlog/fix-review-ciheal-deadlock) — see this file's own re-export note (further down,
 // beside `latestRequiredCheck`) for why `collapseRollupToLatestPerName`/`rollupRowKind` now live in their own
 // dependency-free `./lib/rollup-collapse.mjs` rather than here.
-import { collapseRollupToLatestPerName } from './lib/rollup-collapse.mjs';
+import { collapseRollupToLatestPerName, rollupRowKind } from './lib/rollup-collapse.mjs';
 export { isAiAuthor, isAiCommit, isMechanicalMergeCommit, isDrainBookkeepingCommit } from './lib/ai-pr-authorship.mjs';
 export { isAiGeneratedPr, hasLabel };
 import { execFileSync, execFile, spawnSync } from 'node:child_process';
@@ -431,8 +431,11 @@ export async function resolveRequiredCheck(pr, { repo = null, requiredCheck = 't
       || !Number.isSafeInteger(run.id) || run.id <= 0 || typeof run.status !== 'string')) {
       throw new Error('invalid check-run evidence for the requested head/name');
     }
+    // The REST read replaces only CheckRun evidence. A legacy commit status of the same name is a different
+    // source the check-runs endpoint never returns, so dropping it would delete the only verdict when the head
+    // has no check-run; it stays listed and `latestRequiredCheck` ranks any CheckRun above it.
     resolved.statusCheckRollup = [
-      ...rollup.filter((row) => (row?.name || row?.context) !== requiredCheck),
+      ...rollup.filter((row) => (row?.name || row?.context) !== requiredCheck || rollupRowKind(row) === 'StatusContext'),
       ...runs.map((run) => ({ ...run, __typename: 'CheckRun', conclusion: run.status === 'completed' ? run.conclusion : null })),
     ];
   } catch (error) {

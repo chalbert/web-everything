@@ -54,6 +54,34 @@ describe('required checks beyond the gh listing context cap (#3432)', () => {
     expect(exec.mock.calls[0][1][1]).toBe(`repos/owner/other/commits/${sha}/check-runs?check_name=unit%20%2F%20test&filter=latest&per_page=100`);
   });
 
+  describe('required commit-status (StatusContext) evidence survives the direct read', () => {
+    const status = (state) => ({ __typename: 'StatusContext', context: 'test', state });
+
+    it.each([
+      ['SUCCESS', isRequiredCheckGreen, isRequiredCheckFailed],
+      ['FAILURE', isRequiredCheckFailed, isRequiredCheckGreen],
+    ])('keeps a listed %s status when the head has no check-run of that name', async (state, expected, other) => {
+      const resolved = await resolveRequiredCheck(pr([...reviews(99), status(state)]), { repo, exec: async () => response([]) });
+      expect(resolved.requiredCheckReadError).toBeUndefined();
+      expect(expected(resolved)).toBe(true);
+      expect(other(resolved)).toBe(false);
+    });
+
+    it('still lets a REST check-run outrank a listed status of the same name', async () => {
+      const resolved = await resolveRequiredCheck(pr([...reviews(99), status('SUCCESS')]), {
+        repo, exec: async () => response([run({ conclusion: 'failure' })]),
+      });
+      expect(isRequiredCheckFailed(resolved)).toBe(true);
+    });
+
+    it('does not carry a listed check-run of that name over the REST read', async () => {
+      const resolved = await resolveRequiredCheck(pr([...reviews(98), status('SUCCESS'), { __typename: 'CheckRun', name: 'test', conclusion: 'SUCCESS' }]), {
+        repo, exec: async () => response([run({ conclusion: 'failure' })]),
+      });
+      expect(isRequiredCheckFailed(resolved)).toBe(true);
+    });
+  });
+
   it('does not read directly when the required check is present below the cap', async () => {
     const exec = vi.fn();
     const listed = pr([{ name: 'test', conclusion: 'FAILURE' }]);
