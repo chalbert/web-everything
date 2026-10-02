@@ -872,7 +872,6 @@ it.each([
   ['transport', () => { throw new Error('HTTP 502'); }],
   ['malformed', () => ({ check_runs: [] })],
   ['empty', () => []],
-  ['incomplete', () => xxRuns().filter(row => row.name !== 'test')],
   ['bad ID', () => xxRuns().map(row => ({ ...row, id: '123' }))],
   ['unreadable', () => xxRuns().map(row => ({ ...row, conclusion: row.name === 'test' ? null : row.conclusion }))],
 ])('xxh4zw8 %s hydration refuses visibly, never heals unknown evidence, and allows unrelated progress', async (_, readChecks) => {
@@ -880,9 +879,31 @@ it.each([
   const good = { ...xxPr(), number: 3337, statusCheckRollup: xxRuns().map(row => ({ ...row, conclusion: 'SUCCESS', status: 'COMPLETED' })) };
   const plan = runReconcilePass({ ...xxOptions(), readChecks, readPrs: () => [xxPr(), good] });
   expect(plan.dispatch.map(d => [d.prNumber, d.kind])).toEqual([[3337, 'promote-draft']]);
-  expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'check-read-failed', prNumber: 3336, why: expect.any(String) })]);
+  expect(plan.refusals.filter(r => r.kind === 'check-read-failed'))
+    .toEqual([expect.objectContaining({ prNumber: 3336, why: expect.any(String) })]);
   expect(formatReport(plan)).toContain('required-check hydration refused');
   expect(plan.prs).toBe(2);
+});
+
+it('xxh4zw8 an authoritative cancelled check with absent required jobs still heals', async () => {
+  const { runReconcilePass } = await import('../reconcile-pass.mjs');
+  const readChecks = () => xxRuns().filter(row => row.name === 'smoke');
+  const plan = runReconcilePass({ ...xxOptions(), readChecks });
+  expect(plan.dispatch.map(d => [d.prNumber, d.kind])).toEqual([[3336, 'ci-heal']]);
+  expect(plan.refusals).toEqual([]);
+});
+
+it.each([
+  ['absent evidence', () => xxRuns().filter(row => row.name === 'soak-replay-gate')],
+  ['unreadable read', () => { throw new Error('HTTP 502'); }],
+])('xxh4zw8 %s withholds CI evidence but keeps the PR in non-CI planning', async (_, readChecks) => {
+  const { runReconcilePass } = await import('../reconcile-pass.mjs');
+  const pr = { ...xxPr(), isDraft: false, labels: [{ name: 'review:changes' }],
+    comments: [{ body: '🔁 review — changes requested\nPlease fix', author: { login: 'web-everything' }, createdAt: '2026-10-01T09:00:00Z' }] };
+  const plan = runReconcilePass({ ...xxOptions(), readChecks, readPrs: () => [pr] });
+  expect(plan.dispatch.map(d => [d.prNumber, d.kind])).toEqual([[3336, 'fix']]);
+  expect(plan.refusals.filter(r => r.kind === 'check-read-failed'))
+    .toEqual([expect.objectContaining({ prNumber: 3336 })]);
 });
 
 it('xxh4zw8 hydration collapses superseded cancellations and unreadable conclusions before classification', async () => {
@@ -901,5 +922,5 @@ it('xxh4zw8 malformed JSON-lines read is refused and failed identical-head reads
     readChecks: args => defaultReadChecks(args, { exec }) });
   expect(exec).toHaveBeenCalledTimes(1);
   expect(plan.dispatch).toEqual([]);
-  expect(plan.refusals.map(r => r.kind)).toEqual(['check-read-failed', 'check-read-failed']);
+  expect(plan.refusals.filter(r => r.kind === 'check-read-failed')).toHaveLength(2);
 });

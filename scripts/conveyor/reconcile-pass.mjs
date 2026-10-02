@@ -978,7 +978,10 @@ export function defaultReadChecks({ repo, sha }, { exec = execFileSyncThrottled 
   }));
 }
 
-/** Incomplete evidence must not reach any planner branch, including label-derived CI healing. */
+/**
+ * Hydrate truncated or incomplete check input from the exact-head REST feed. Unknown evidence is withheld from the
+ * CI-consuming branches (heal, promotion) via an `unchecked` verdict, but never removes the PR from planning.
+ */
 function hydrateChecks(prs, { repo, requiredChecks, readChecks }) {
   const cache = new Map();
   const ready = [], refusals = [];
@@ -1003,17 +1006,28 @@ function hydrateChecks(prs, { repo, requiredChecks, readChecks }) {
           && row.status.toLowerCase() === 'completed'
           && !['success', ...FAILING_CONCLUSIONS, ...NON_BLOCKING_CONCLUSIONS].includes(row.conclusion?.toLowerCase()));
         if (unreadable.length) throw new Error(`unreadable conclusions: ${unreadable.map(row => row.name).join(', ')}`);
+        // Absent required names are not a read failure: observed red/pending evidence must still reach the
+        // reducer (red precedence, so a cancelled check heals). Only when NOTHING observed speaks for the
+        // missing names is the evidence incomplete — the reducer then reports `unchecked`, which never heals
+        // or promotes, and the refusal below keeps that visible.
         const absent = (requiredChecks ?? []).filter(name => !rows.some(row => row.name === name));
-        if (absent.length) throw new Error(`missing required checks: ${absent.join(', ')}`);
+        const observed = collapseRollupToLatestPerName(rows).some(row => (!requiredChecks?.length || requiredChecks.includes(row.name))
+          && (row.status.toLowerCase() !== 'completed' || FAILING_CONCLUSIONS.includes(row.conclusion?.toLowerCase())));
         cache.set(key, { rows: rows.map(row => ({ ...row, status: row.status.toUpperCase(),
-          conclusion: row.conclusion?.toUpperCase() ?? null, completedAt: row.completed_at ?? null })) });
+          conclusion: row.conclusion?.toUpperCase() ?? null, completedAt: row.completed_at ?? null })),
+        ...(absent.length && !observed ? { incomplete: `missing required checks: ${absent.join(', ')}` } : {}) });
       } catch (error) { cache.set(key, { error: String(error?.message ?? error) }); }
     }
     const result = cache.get(key);
-    if (result.error) {
+    const refused = result.error ?? result.incomplete;
+    if (refused) {
       refusals.push({ kind: 'check-read-failed', prNumber: pr.number, headRefOid: sha,
-        why: `required-check hydration refused for ${repo}@${sha}: ${result.error}` });
-    } else ready.push({ ...pr, statusCheckRollup: result.rows });
+        why: `required-check hydration refused for ${repo}@${sha}: ${refused}` });
+    }
+    // The refusal withholds CI evidence only. The PR stays in planning for every branch that does not consume
+    // it (conflict-fix, review dispatch, stand-down, label reconciliation): an unreadable read swaps the
+    // truncated snapshot for an empty rollup (`unchecked`, never green or red), never drops the PR.
+    ready.push({ ...pr, statusCheckRollup: result.error ? [] : result.rows });
   }
   return { prs: ready, refusals };
 }
