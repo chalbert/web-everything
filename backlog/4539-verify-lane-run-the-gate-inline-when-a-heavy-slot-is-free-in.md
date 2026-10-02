@@ -3,7 +3,7 @@ bornAs: x5awn7x
 kind: story
 size: 3
 status: open
-scope: ["we:scripts/verify-lane.mjs", "we:scripts/readiness/heavy-admission.mjs", "we:scripts/conveyor/verify-dispatch.mjs", "we:scripts/lib/lane-verify.mjs", "we:scripts/guard-bash.mjs"]
+scope: ["we:scripts/verify-lane.mjs", "we:scripts/readiness/heavy-admission.mjs", "we:scripts/conveyor/verify-dispatch.mjs", "we:scripts/lib/lane-verify.mjs", "we:scripts/guard-bash.mjs", "we:scripts/__tests__/verify-lane.test.mjs", "we:scripts/readiness/__tests__/heavy-admission.test.mjs", "we:scripts/conveyor/__tests__/verify-dispatch.test.mjs", "we:scripts/__tests__/lane-verify.test.mjs", "we:scripts/__tests__/guard-bash.test.mjs"]
 dateOpened: "2026-09-29"
 preparedDate: "2026-10-02"
 preparedAgainstSha: "bc2b51e50a781b4ab6e1840d64121052aedc6b19"
