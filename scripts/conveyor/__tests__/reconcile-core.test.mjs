@@ -3179,6 +3179,26 @@ describe('fix waiting episode', () => {
   });
 });
 
+it('xxh4zw8 complete hydrated cancellation heals while caps, claims and stand-downs retain refusal', () => {
+  const requiredChecks = ['test', 'smoke', 'daemon-soak', 'soak-replay-gate'];
+  const pr = { number: 3336, isDraft: true, headRefName: 'lane/3336-replay', headRefOid: '4ecb5deb362c81aa28de162db4616bb4c2009347',
+    labels: [], comments: [], statusCheckRollup: requiredChecks.map((name, i) => ({ id: 100 + i, name,
+      status: 'COMPLETED', conclusion: name === 'smoke' ? 'CANCELLED' : 'SUCCESS' })) };
+  const plan = override => planReconcile({ prs: [{ ...pr, ...override }], requiredChecks, agents: [], now: NOW });
+  expect(plan({}).dispatch.map(d => d.kind)).toEqual(['ci-heal']);
+  for (const [override, kind] of [
+    [{ comments: Array.from({ length: CI_HEAL_ROUND_CAP }, () => ({ body: buildCiHealComment({ reason: 'red-ci' }), author: AUTOMATION })) }, 'cap-exhausted'],
+    [{ comments: [{ body: STAND_DOWN_MARKER, author: AUTOMATION }] }, 'stood-down'],
+    [{ fixClaim: { who: 'another-fixer' } }, 'fix-claimed'],
+  ]) {
+    expect(plan(override).dispatch).toEqual([]);
+    expect(plan(override).refusals.map(r => r.kind)).toContain(kind);
+  }
+  const latest = { id: 200, name: 'smoke', status: 'COMPLETED', conclusion: 'SUCCESS' };
+  for (const statusCheckRollup of [[latest, ...pr.statusCheckRollup], [...pr.statusCheckRollup, latest]]) {
+    expect(plan({ statusCheckRollup }).dispatch.map(d => d.kind)).toEqual(['promote-draft']);
+  }
+});
 
 describe('operator send-back renews a bounded durable fix budget', () => {
   const round = () => ({ body: ADVISORY_NOTE_MARKER, author: AUTOMATION });

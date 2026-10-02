@@ -8,12 +8,13 @@
  *   question (#3343) — all exported from `scripts/merge-ai-prs.mjs` (plus one from
  *   `scripts/lib/review-escalation.mjs`).
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { classifyPr, needsAcceptanceRestamp, restampAcceptance, computeNetDiffSignals, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, LAND_REASON, applyEscalationRelief, REVIEW_COVERAGE_KIND, REVIEW_COVERAGE_GAP_META, reviewRecordKind, recordedReviewRecords, readReviewRecord, reviewCoverageGaps, buildReviewCoverageReason } from '../merge-ai-prs.mjs';
-import { decideReviewGate, REVIEW_LABELS } from '../lib/review-escalation.mjs';
+import { readDrainAcceptance, decideDrainReviewGate, reconcileDrainReviewPending, classifyPr, needsAcceptanceRestamp, restampAcceptance, computeNetDiffSignals, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, LAND_REASON, applyEscalationRelief, REVIEW_COVERAGE_KIND, REVIEW_COVERAGE_GAP_META, reviewRecordKind, recordedReviewRecords, readReviewRecord, reviewCoverageGaps, buildReviewCoverageReason } from '../merge-ai-prs.mjs';
+import { normalizeDiffFingerprint, normalizeContributionFingerprint, decideReviewGate, REVIEW_LABELS } from '../lib/review-escalation.mjs';
 
 
 /**
@@ -358,34 +359,48 @@ describe('#3308 — the announcement surface', () => {
 });
 
 describe('#3184 — the drain records a fingerprint READ MISS instead of collapsing it into a marker-less null', () => {
-  // The pure verdict is pinned in `scripts/lib/__tests__/review-escalation.test.mjs`. What belongs HERE is the
-  // drain's half of Done-when 4: the CALLER must tell `decideReviewGate` which kind of `null` it is holding.
-  // The gate cannot infer it — "this accept recorded no fingerprint" and "a fingerprint was recorded and this
-  // pass could not read the live side" arrive as the same `headDiff: null`, and the whole defect is the drain
-  // handing over one story for both. Source-level for the same reason the #x9xqexm block above is: the read
-  // sits inline in `runCli`'s per-candidate loop behind two `execFileSync` calls, with no other observable seam.
   const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'merge-ai-prs.mjs'), 'utf8');
 
-  it('the drain hands the gate an explicit read-failed signal, not a bare null', () => {
-    expect(src).toMatch(/headReadFailed:\s*liveDiffReadFailed/);
+  it.each(['throw', 'unscored', 'missing clone', 'missing ref'])('records an owed diff read miss: %s', (mode) => {
+    const netDiff = vi.fn(() => {
+      if (mode === 'throw') throw new Error('git unavailable');
+      return { scored: false };
+    });
+    const view = acceptanceView();
+    if (mode === 'missing ref') delete view.headRefName;
+    const evidence = readDrainAcceptance({
+      ...acceptanceOptions(view), local: mode !== 'missing clone', netDiff,
+    });
+    expect(evidence.headReadFailed).toBe(true);
+    expect(evidence.headDiff).toBe(null);
+    if (mode === 'missing clone' || mode === 'missing ref') expect(netDiff).not.toHaveBeenCalled();
+    // The explicit signal reaches the gate: an unread fingerprint is never proven staleness.
+    const gate = decideDrainReviewGate({ labels: [REVIEW_LABELS.accepted], escalate: true }, {
+      ...acceptanceOptions(view), local: mode !== 'missing clone', netDiff,
+    });
+    expect(gate.action).toBe('park');
+    expect(gate.reason).toContain('could not be read');
   });
 
-  it('the signal is derived from an OWED read, so a marker-less accept can never raise it', () => {
-    // `liveDiffReadOwed` is the predicate that separates the two nulls. It must require a recorded marker —
-    // without that clause an accept that stamped no fingerprint reports a read miss it never owed, and the
-    // #3184 tier would swallow every pre-#x169fqe stale re-park.
-    expect(src).toMatch(/const liveDiffReadOwed = !!\(\(acceptedDiff \|\| acceptedContribution\)/);
-    // …and the miss is the owed read coming back empty, in EITHER of its three ways (throw, unscored result,
-    // or the repo guard refusing the read). Assigning anything else here — a constant, or the catch alone —
-    // loses one of them.
-    expect(src).toMatch(/liveDiffReadFailed = liveDiffReadOwed && !liveHeadDiff;/);
+  it('a marker-less accept never reports an owed fingerprint read', () => {
+    const view = acceptanceView();
+    view.comments = [{ viewerDidAuthor: true, body: `<!-- reviewed-sha: ${REVIEWED} -->` }];
+    const netDiff = vi.fn();
+    expect(readDrainAcceptance({ ...acceptanceOptions(view), netDiff }).headReadFailed).toBe(false);
+    expect(netDiff).not.toHaveBeenCalled();
   });
 
-  it('the repo guard still gates the READ itself — a sibling PR never resolves refs against the local clone', () => {
-    // PR #1087 blocker 1, unchanged by #3184: the guard was split out of the condition so the miss could be
-    // RECORDED, never so the read could happen without it. It must still stand between the owed read and the
-    // `computeNetDiffText` call.
-    expect(src).toMatch(/if \(liveDiffReadOwed && \(isLocalRepo\(v\.repo\) \|\| escCwd\)\) \{/);
+  it('pins diff reads to the sibling clone', () => {
+    const exec = vi.fn((cmd) => cmd === 'gh' ? JSON.stringify(acceptanceView()) : 'git result');
+    readDrainAcceptance({ pr: 3432, repo: 'chalbert/frontierui', cwd: '/ws/frontierui', exec,
+      netDiff: ({ exec: git, rev, fetchExtraRefs }) => {
+        expect(rev).toBe('lane/3432');
+        expect(fetchExtraRefs).toEqual(['lane/3432']);
+        git('git', ['diff'], { encoding: 'utf8' });
+        return { scored: true, text: REVIEWED_DIFF };
+      },
+    });
+    expect(exec.mock.calls[1][2].cwd).toBe('/ws/frontierui');
   });
 
   it('a suppressed re-park is STILL not waivable by the relief valve — staleAcceptance carries it', () => {
@@ -498,3 +513,111 @@ describe('computeNetDiffSignals carries the basis trust question (#3343)', () =>
   });
 });
 
+
+
+// PR #3432 incident shape: 164 comments, >1 MiB view, mechanically moved head, identical contribution.
+const REVIEWED = 'a'.repeat(40);
+const REBASED = 'b'.repeat(40);
+const REVIEWED_DIFF = 'diff --git a/example.js b/example.js\n--- a/example.js\n+++ b/example.js\n@@ -1 +1 @@\n-old\n+new\n';
+function acceptanceView() {
+  return { headRefOid: REBASED, headRefName: 'lane/3432', comments: [{ viewerDidAuthor: true,
+    body: `✅ review — accepted\n<!-- reviewed-sha: ${REVIEWED} -->\n<!-- reviewed-diff: ${normalizeDiffFingerprint(REVIEWED_DIFF)} -->\n<!-- reviewed-contribution: ${normalizeContributionFingerprint(REVIEWED_DIFF)} -->`,
+  }] };
+}
+function acceptanceOptions(view = acceptanceView()) {
+  return { pr: 3432, repo: 'chalbert/web-everything', local: true,
+    exec: () => JSON.stringify(view), netDiff: () => ({ scored: true, text: REVIEWED_DIFF }) };
+}
+
+describe('PR #3432 — drain acceptance verification and pending reconciliation', () => {
+  const labels = [REVIEW_LABELS.accepted, REVIEW_LABELS.pending];
+
+  it('reads a real subprocess response larger than 1 MiB and keeps the rebased PR accepted', () => {
+    const view = acceptanceView();
+    view.comments.unshift(...Array.from({ length: 163 }, () => ({ body: 'x'.repeat(9500) })));
+    const payload = JSON.stringify(view);
+    expect(Buffer.byteLength(payload)).toBeGreaterThan(1024 * 1024);
+    expect(view.comments).toHaveLength(164);
+    const exec = (cmd, args, opts) => {
+      expect(cmd).toBe('gh');
+      expect(opts.maxBuffer).toBe(64 * 1024 * 1024);
+      expect(args).toEqual(['pr', 'view', '3432', '--repo', 'chalbert/web-everything', '--json', 'headRefOid,headRefName,comments']);
+      // Real pipe buffering, with precisely the options the production reader supplies.
+      return execFileSync(process.execPath, ['-e', 'process.stdout.write(require("node:fs").readFileSync(0))'], {
+        ...opts, stdio: ['pipe', 'pipe', 'pipe'], input: payload,
+      });
+    };
+    const options = { ...acceptanceOptions(view), exec };
+    const evidence = readDrainAcceptance(options);
+    expect(evidence.acceptedSha).toBe(REVIEWED);
+    expect(evidence.headSha).toBe(REBASED);
+    expect(normalizeDiffFingerprint(evidence.headDiff)).toBe(evidence.acceptedDiff);
+    expect(normalizeContributionFingerprint(evidence.headContribution)).toBe(evidence.acceptedContribution);
+    const gate = decideDrainReviewGate({ labels, escalate: true }, options);
+    expect(gate.action).toBe('merge');
+    expect(gate.applyLabel).toBeUndefined();
+    const spawn = vi.fn(() => ({ ok: true }));
+    expect(reconcileDrainReviewPending({ currentLabels: labels, ...options }, { spawn }).ok).toBe(true);
+    expect(spawn).toHaveBeenCalledOnce();
+    expect(spawn.mock.calls[0][0].to).toBe('accepted');
+    expect(decideDrainReviewGate({ labels: [REVIEW_LABELS.accepted], escalate: true }, options).action).toBe('merge');
+  });
+
+  it.each(['ENOBUFS', 'network unavailable', 'invalid JSON', 'missing head', 'missing comments'])('defers an unreadable view without a label write: %s', (failure) => {
+    const exec = vi.fn(() => {
+      if (failure === 'invalid JSON') return '{';
+      if (failure === 'missing head') return '{"comments":[]}';
+      if (failure === 'missing comments') return JSON.stringify({ headRefOid: REBASED });
+      throw new Error(failure);
+    });
+    const options = { ...acceptanceOptions(), exec };
+    const gate = decideDrainReviewGate({ labels, escalate: true }, options);
+    expect(gate).toMatchObject({ action: 'defer', applyLabel: null });
+    expect(gate.reason).toContain('merge deferred this pass');
+    if (failure === 'ENOBUFS' || failure === 'network unavailable') expect(gate.reason).toContain(failure);
+    const spawn = vi.fn();
+    expect(reconcileDrainReviewPending({ currentLabels: labels, ...options }, { spawn }).ok).toBe(false);
+    expect(spawn).not.toHaveBeenCalled();
+    expect(exec.mock.calls.every(([cmd, args]) => cmd === 'gh' && args[1] === 'view')).toBe(true);
+  });
+
+  it.each(['no markers', 'changed content', 'unreadable diff'])('does not clear pending without coverage: %s', (failure) => {
+    const view = acceptanceView();
+    if (failure === 'no markers') view.comments = [];
+    const options = { ...acceptanceOptions(view), netDiff: () => failure === 'unreadable diff'
+      ? { scored: false } : { scored: true, text: REVIEWED_DIFF.replace('+new', '+unreviewed') } };
+    const spawn = vi.fn();
+    expect(reconcileDrainReviewPending({ currentLabels: labels, ...options }, { spawn }).ok).toBe(false);
+    expect(spawn).not.toHaveBeenCalled();
+    expect(decideDrainReviewGate({ labels, escalate: true }, options).action).toBe('park');
+  });
+
+  it('uses SHA coverage without a diff read and keeps dry-run free of writes', () => {
+    const view = acceptanceView();
+    view.headRefOid = REVIEWED;
+    const netDiff = vi.fn();
+    const spawn = vi.fn();
+    expect(reconcileDrainReviewPending({ currentLabels: labels, dryRun: true,
+      ...acceptanceOptions(view), netDiff }, { spawn }).ok).toBe(true);
+    expect(netDiff).not.toHaveBeenCalled();
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('preserves the deviation gate and its trusted head-bound human clearance', () => {
+    const view = acceptanceView();
+    view.headRefOid = REVIEWED;
+    const inputs = { labels: [REVIEW_LABELS.accepted], escalate: true, deviation: 'changed delivery scope' };
+    expect(decideDrainReviewGate(inputs, acceptanceOptions(view)).action).toBe('park');
+    view.comments[0].body += '\n<!-- cleared-human: operator -->';
+    expect(decideDrainReviewGate(inputs, acceptanceOptions(view)).action).toBe('merge');
+    view.comments[0].viewerDidAuthor = false;
+    view.comments[0].author = { login: 'untrusted-worker' };
+    expect(decideDrainReviewGate(inputs, acceptanceOptions(view)).action).toBe('park');
+  });
+
+  it('wires unreadable verification to a logged skip before the label-writing gate branches', () => {
+    const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'merge-ai-prs.mjs'), 'utf8');
+    expect(src).toMatch(/const gate = decideDrainReviewGate\([\s\S]*?if \(gate.action === 'defer'\) \{\s*v.decision = 'skip';\s*v.reason = gate.reason;\s*process.stderr.write\([\s\S]*?continue;\s*\}/);
+    expect(src).toContain('const out = reconcileDrainReviewPending({');
+  });
+});

@@ -2835,8 +2835,10 @@ describe('deviation disclosure (#4502)', () => {
   it('deviation: the drain hands parsed deviation + trusted humanClearedSha to the gate (wiring)', () => {
     const src = readFileSyncDev(resolveDev(process.cwd(), 'scripts/merge-ai-prs.mjs'), 'utf8');
     expect(src).toContain('v.deviation = parseDeviationDisclosure(p.body)');
-    expect(src).toMatch(/humanClearedShaForGate = parseLatestHumanClearedSha\(/);
-    expect(src).toMatch(/decideReviewGate\(\{[^\n]*deviation: v\.deviation, humanClearedSha: humanClearedShaForGate/);
+    expect(src).toMatch(/humanClearedSha: parseLatestHumanClearedSha\(d\.comments\)/);
+    expect(src).toMatch(/decideDrainReviewGate\(\{[\s\S]*?deviation: v\.deviation/);
+    expect(src).toContain('evidence = readDrainAcceptance(readOptions)');
+    expect(src).toContain('decideReviewGate({ ...gateInputs, labels, ...evidence })');
   });
 
   it('deviation: the delivery-agent brief tells workers to put Deviation: on the first line', () => {
