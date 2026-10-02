@@ -22,6 +22,7 @@ scope:
   - "we:scripts/conveyor/__tests__/run-rating.test.mjs"
   - "we:scripts/conveyor/__tests__/concurrent-baseline-comparison.test.mjs"
   - "we:scripts/lib/__tests__/probation-launcher.test.mjs"
+  - "we:scripts/lib/__tests__/model-probation.test.mjs"
   - "we:scripts/lib/__tests__/model-probation-trials.test.mjs"
   - "we:scripts/operations/__tests__/probation-build-run.test.mjs"
   - "we:scripts/operations/__tests__/probation-heal-run.test.mjs"
