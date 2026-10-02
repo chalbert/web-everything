@@ -504,8 +504,10 @@ function handleApi(store, rest) {
         return oid && oid.startsWith(sha);
       });
       if (!pr) return { stderr: `fake-gh: unsupported api path ${path} (no open PR has head ${sha})\n`, exitCode: 1 };
-      const runs = (pr.checks ?? []).filter((c) => !checkName || c.name === checkName).map((c) => ({
-        name: c.name, status: String(c.status).toLowerCase(), conclusion: c.conclusion ? String(c.conclusion).toLowerCase() : null,
+      // Real GitHub always returns a numeric run `id`, and `reconcile-pass.mjs#hydrateChecks` rejects rows without
+      // one as malformed — so the simulator numbers each check by its position on the PR (stable per head).
+      const runs = (pr.checks ?? []).map((c, index) => ({ c, id: index + 1 })).filter(({ c }) => !checkName || c.name === checkName).map(({ c, id }) => ({
+        id, name: c.name, status: String(c.status).toLowerCase(), conclusion: c.conclusion ? String(c.conclusion).toLowerCase() : null,
         started_at: c.startedAt, completed_at: c.completedAt, head_sha: sha,
       }));
       return jsonResult({ total_count: runs.length, check_runs: runs }, jq, { compact: true });
