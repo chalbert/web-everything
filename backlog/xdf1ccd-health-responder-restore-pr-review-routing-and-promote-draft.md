@@ -35,6 +35,8 @@ This is independently deliverable after slice 1: the adapter and its detector ex
 
 ## Test plan and replay
 
+Include an explicit unresolved stand-down and intentional-withdrawal negative: neither restore-hold nor promotion may write. A review-loop resume comes only from #x8d8wlw's operator-resolution ceremony through this same promotion owner; ordinary draft detection cannot clear that hold.
+
 D1/D2 (#3336/#3311), L1–L7 (#3239/#3389/#3390/#3391/#3392/#3463/#3471). Assert one promotion only when fresh current-head checks are green; intentional draft/fix hold blocks it. #3389 supplies a stale marker/current-head mismatch. Test live human label and live fix claim arriving between read/write, incomplete diff, unknown actor, ambiguous response, current target already satisfied and restart. Label restoration must use the actual escalation rubric for source, docs, config, data and statute/leash diffs; no test may equate backlog-only with agent clearance.
 
 Primary executable checks (new test entrypoints are expected to be absent before this story):

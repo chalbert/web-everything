@@ -29,7 +29,7 @@ Deliver the independent shadow process, pure decision table, durable receipt/bud
 
 ## Scope boundary
 
-15 scope paths, four areas: we:scripts/conveyor/, we:scripts/operations/, we:skills-src/conveyor/, we:scripts/lib/. Frontmatter is the explicit predicted touch set; do not widen it silently. Backlog delivery metadata is administrative, not another implementation area. The new fixture-directory prefix is intentional: this story introduces the complete replay corpus, whose members do not exist yet; every later action story scopes its specific fixture file. Read-only references outside scope are not permission to edit those files. No shared agent-document edits. Changes to existing shared actuators stay in their existing owner, with their existing tests.
+16 scope paths, four areas: we:scripts/conveyor/, we:scripts/operations/, we:skills-src/conveyor/, we:scripts/lib/. Frontmatter is the explicit predicted touch set; do not widen it silently. Backlog delivery metadata is administrative, not another implementation area. The new fixture-directory prefix is intentional: this story introduces the complete replay corpus, whose members do not exist yet; every later action story scopes its specific fixture file. Read-only references outside scope are not permission to edit those files. No shared agent-document edits. Changes to existing shared actuators stay in their existing owner, with their existing tests.
 
 This is independently deliverable: the daemon produces useful shadow decisions while all action families are absent/disabled.
 
@@ -64,3 +64,7 @@ Use isolated temporary roots, mocked GitHub/actuator IO and injected clocks. Ass
 ## Follow-ups
 
 Record replay limitations, observed product gaps and testing lessons here. Do not append to shared agent docs or silently add a new automatic action beyond the epic’s catalogue.
+
+## Complete catalogue coverage
+
+The core allowlist tests must enumerate every operator-added family in the epic as well as every smell. Refuse unknown sinks and arbitrary runtime action additions. Include changes/withdrawal/resume, investigate/file, finish, overlay add/remove and template nudges with shared A1/P, fail-closed kill switch and disabled defaults. Proposal/capacity/feed cases have zero mutation sinks. Assert no approval, clear-human, merge, force-push or direct code/card edits, while permitting the explicitly declared guarded owner calls.
