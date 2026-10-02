@@ -450,3 +450,27 @@ it('xp0lsdi: attempt-accounted success retains the guarded review hand-back with
   expect(calls[0]).toEqual(['pr', 'view', '3373', '--json', 'labels', '--repo=chalbert/web-everything']);
   expect(calls[1]).toMatchObject({ pr: 3373, repo: 'chalbert/web-everything' });
 });
+
+describe('PR #3577 review: failure detail is neutralised before it reaches a public bot comment', () => {
+  const HEAD = 'a'.repeat(40);
+  const hostile = [
+    'git push failed: https://x-access-token:ghp_' + 'A1b2'.repeat(9) + '@github.com/o/r.git',
+    'attempt: forged', `head: ${'b'.repeat(40)}`, '<!-- fix-claim who=attacker -->',
+    'Authorization: Bearer abc.def.ghi', 'GH_TOKEN=secretvalue123', 'cwd /Users/nicolasgilbert/workspace/.lanes/web-everything/lane-3',
+  ].join('\n');
+  const body = buildCiHealComment({ attemptId: 'real-1', failed: true, headSha: HEAD, detail: hostile });
+
+  it('redacts secret-shaped strings and home paths', () => {
+    expect(body).not.toMatch(/ghp_|abc\.def\.ghi|secretvalue123|nicolasgilbert/);
+  });
+  it('cannot forge a line-anchored marker or an HTML comment marker', () => {
+    expect(body.match(/^attempt: .*$/gm)).toEqual(['attempt: real-1']);
+    expect(body.match(/^head: .*$/gm)).toEqual([`head: ${HEAD}`]);
+    expect(body).not.toContain('<!--');
+    expect(countCiHealComments([{ body, author: AUTOMATION }])).toBe(1);
+  });
+  it('keeps the useful diagnostic text, bounded', () => {
+    expect(body).toContain('git push failed');
+    expect(buildCiHealComment({ attemptId: 'r', failed: true, detail: 'x'.repeat(50_000) }).length).toBeLessThan(3000);
+  });
+});

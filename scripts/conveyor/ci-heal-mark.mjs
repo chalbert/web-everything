@@ -75,6 +75,30 @@ export function countCiHealComments(comments) {
 }
 
 /**
+ * we:scripts/conveyor/ci-heal-mark.mjs#sanitizeForPublicComment — make untrusted worker/log text safe to quote in a
+ * public comment posted under the trusted automation login (#3577 review). Redacts secret-shaped strings, URL
+ * credentials and home paths, defuses HTML-comment markers and @mentions, drops control characters, keeps only the
+ * last `max` characters, and indents every line so none can start with a line-anchored marker (`attempt:`/`head:`)
+ * that a trusted-marker reader would take as authoritative. Pure.
+ * @param {unknown} text
+ * @param {{max?:number}} [o]
+ * @returns {string}
+ */
+export function sanitizeForPublicComment(text, { max = 1000 } = {}) {
+  const tail = String(text ?? '').replace(/\r/g, '').slice(-max);
+  return tail
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '')
+    .replace(/(\/\/)[^/\s:@]+:[^/\s@]+@/g, '$1[redacted]@')
+    .replace(/\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9_-]{16,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_-]{20,})/g, '[redacted]')
+    .replace(/\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{8,}/gi, '$1 [redacted]')
+    .replace(/\b([A-Za-z][A-Za-z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|API_?KEY|AUTH|CREDENTIAL)[A-Za-z0-9_]*)\s*[=:]\s*\S+/gi, '$1=[redacted]')
+    .replace(/(?:\/Users|\/home)\/[^/\s]+/g, '~')
+    .replace(/<!--|-->/g, '[comment]')
+    .replace(/@(?=[A-Za-z0-9])/g, '@​')
+    .split('\n').map((line) => `    ${line}`).join('\n');
+}
+
+/**
  * we:scripts/conveyor/ci-heal-mark.mjs#buildCiHealComment — the durable comment body a completed heal posts. Its
  * FIRST line MUST be {@link CI_HEAL_COMMENT_MARKER} (single-sourced) so posting and counting can never drift. Pure.
  *
@@ -95,7 +119,7 @@ export function buildCiHealComment({ actor = 'conveyor CI-heal agent', reason = 
     ...(attemptId ? [`attempt: ${attemptId}`] : []),
     ...(head ? [`head: ${head}`] : []),
     '',
-    failed ? `The executor did not complete a repair. ${String(detail).slice(-4000)}. Exit/quota evidence is unknown unless explicitly recorded. CI remains unproven.` : `${why}; ${actor} rebased onto current \`main\`, repaired the failing check, and re-pushed HEAD.`,
+    failed ? `The executor did not complete a repair. Diagnostics (untrusted, redacted, truncated):\n\n${sanitizeForPublicComment(detail)}\n\nExit/quota evidence is unknown unless explicitly recorded. CI remains unproven.` : `${why}; ${actor} rebased onto current \`main\`, repaired the failing check, and re-pushed HEAD.`,
     'This records the CI repair, not a review verdict. Existing `review:human` / `review:pending` holds stay in place; ' +
       'a live `review:accepted` may be re-armed separately for review. The drain lands it once green and reviewed.',
   ].join('\n');

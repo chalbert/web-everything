@@ -14,7 +14,7 @@ import {
 import { createDispatchObservers, routeDispatchProvider } from '../dispatch-lane-io.mjs';
 import { DISPATCH_EFFECT } from '../dispatch-lane.mjs';
 import { pendingProbationLaunches } from '../../lib/model-probation.mjs';
-import { beginHealAttempt, bindHealAttempt, readHealAttempt, finishHealAttempt, observeHealAttempt, pollHealAttempts, publishHealAttempt, parseArgs, realIo, runProbationHeal } from '../probation-heal-run.mjs';
+import { beginHealAttempt, bindHealAttempt, failHealAttempt, readHealAttempt, finishHealAttempt, observeHealAttempt, pollHealAttempts, publishHealAttempt, parseArgs, realIo, runProbationHeal } from '../probation-heal-run.mjs';
 
 const agyClaude = { id: 'antigravity-claude', provider: 'antigravity', model: 'claude-sonnet-4-6', executor: 'antigravity', launcher: 'scripts/gemini-direct-task.mjs', checker: null, taskType: 'ci-heal' };
 const agyGemini = { ...agyClaude, id: 'antigravity-gemini', model: 'gemini-3.8-flash-high', checker: 'codex' };
@@ -607,4 +607,61 @@ it('xp0lsdi: an ownership refusal cannot be caught as permission to settle someo
   const { io } = fakeIo(); io.settleAttempt = vi.fn(); io.bindAttempt = () => { throw new Error('ambiguous ownership'); };
   await expect(runProbationHeal({ ...args(), attemptId: 'foreign-attempt' }, io)).rejects.toThrow('ambiguous ownership');
   expect(io.settleAttempt).not.toHaveBeenCalled();
+});
+
+describe('PR #3577 review: attempt rows never become a permanent CI-heal barrier', () => {
+  const request = () => ({ launchKind: 'ci-heal', headRefOid: captured3373.headRefOid, pr: 3373, sessionSlug: 'ci-heal-3373', probationWorker: agyClaude, cwd: '/scratch' });
+  const unresolved = (h) => pollHealAttempts({ dir: h.dir, observe: h.observe }).filter(r => r.status !== 'resolved');
+
+  it('a spawn that throws before any process exists settles the attempt as failed, so nothing stays pending', () => {
+    const h = attemptHarness();
+    const boom = Object.assign(new Error('spawn EAGAIN'), { code: 'EAGAIN' });
+    expect(() => probationWorkerDetachedProvider(request(), {
+      spawnDetached: () => { throw boom; }, logPathFor: () => '/dev/null',
+      beginAttempt: (r, o) => beginHealAttempt(r, { ...o, dir: h.dir, now: () => '2026-10-02T00:00:00Z' }),
+      failAttempt: (id, detail) => failHealAttempt(id, detail, { dir: h.dir, publish: row => publishHealAttempt(row, h.publication), complete: () => {} }),
+    })).toThrow(boom);
+    const [row] = pollHealAttempts({ dir: h.dir, observe: h.observe });
+    expect(row.status).toBe('resolved');
+    expect(readHealAttempt(row.attemptId, { dir: h.dir })).toMatchObject({ settled: true, terminal: { outcome: 'executor-failed', pushed: false } });
+    expect(unresolved(h)).toEqual([]);
+    expect(h.published).toHaveLength(1); // one cap-counted failure marker
+    // a failed settlement must never mask the original launch error
+    expect(() => probationWorkerDetachedProvider(request(), {
+      spawnDetached: () => { throw boom; }, logPathFor: () => '/dev/null',
+      beginAttempt: (r, o) => beginHealAttempt(r, { ...o, dir: h.dir, now: () => '2026-10-02T00:00:00Z' }),
+      failAttempt: () => { throw new Error('settle failed'); },
+    })).toThrow(boom);
+  });
+
+  it('a spawn that reports no pid stays fail-closed inside the grace window, then ages out to a settled failure', () => {
+    const h = attemptHarness();
+    expect(() => probationWorkerDetachedProvider(request(), {
+      spawnDetached: () => ({}), logPathFor: () => '/dev/null',
+      beginAttempt: (r, o) => beginHealAttempt(r, { ...o, dir: h.dir, now: () => '2026-10-02T00:00:00Z' }),
+      failAttempt: () => { throw new Error('ambiguous launches must not be settled eagerly'); },
+    })).toThrow(/no pid/);
+    const early = () => pollHealAttempts({ dir: h.dir, observe: (id, o) => h.observe(id, { ...o, now: () => new Date('2026-10-02T00:00:30Z') }) });
+    expect(early()[0].status).toBe('unresolved');
+    const late = pollHealAttempts({ dir: h.dir, observe: h.observe });
+    expect(late[0].status).toBe('resolved');
+    expect(late[0].result.outcome).toBe('executor-failed');
+    expect(unresolved(h)).toEqual([]);
+  });
+
+  it('a settled row written by another host is resolved; only the liveness probe depends on the host', () => {
+    const h = attemptHarness();
+    const { attemptId } = h.start();
+    bindHealAttempt(attemptId, 'pid:43273', { dir: h.dir });
+    h.settle(attemptId, { outcome: 'executor-failed', pushed: false, exitCode: 1, signal: null, quotaState: 'unknown', detail: 'x' });
+    const path = join(h.dir, `${attemptId}.json`);
+    writeFileSync(path, JSON.stringify({ ...JSON.parse(readFileSync(path, 'utf8')), host: 'old-name.local' }) + '\n');
+    expect(h.observe(attemptId, { repo: 'we', pr: 3373, handle: 'pid:43273' }).status).toBe('resolved');
+    // a live-looking row with no terminal on a foreign host is still refused — its pid means nothing here
+    const second = h.start().attemptId;
+    bindHealAttempt(second, 'pid:51', { dir: h.dir });
+    const p2 = join(h.dir, `${second}.json`);
+    writeFileSync(p2, JSON.stringify({ ...JSON.parse(readFileSync(p2, 'utf8')), host: 'old-name.local' }) + '\n');
+    expect(h.observe(second, { repo: 'we', pr: 3373 }).status).toBe('unresolved');
+  });
 });

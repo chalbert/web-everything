@@ -131,6 +131,11 @@ export function finishHealAttempt(id, terminal, { dir = healAttemptsDir(), publi
   }, { dir });
 }
 
+/** A launch that threw before any wrapper existed: settle the row as a failed attempt so it cannot block the PR. */
+export function failHealAttempt(id, detail, opts = {}) {
+  return finishHealAttempt(id, { outcome: 'executor-failed', pushed: false, exitCode: null, signal: null, quotaState: 'unknown', detail: String(detail) }, opts);
+}
+
 function attemptLogTail(path) {
   if (!path) return 'unknown (no attempt log)';
   let fd;
@@ -148,18 +153,28 @@ export function observeHealAttempt(id, { dir = healAttemptsDir(), handle, pr, re
   now = () => new Date(), settle = (attemptId, terminal) => finishHealAttempt(attemptId, terminal, { dir }) } = {}) {
   try {
     const row = readHealAttempt(id, { dir });
-    if (row.host !== hostname() || (handle && row.handle !== handle) || (pr != null && row.pr !== pr) || row.repo !== repo) throw new Error('ambiguous CI-heal wrapper ownership');
+    // The host only matters to the pid liveness probe below; a row that already has a terminal outcome (or never
+    // had a process) is settled from its own record, so a renamed host can never strand an old row (#3577 review).
+    if ((handle && row.handle !== handle) || (pr != null && row.pr !== pr) || row.repo !== repo) throw new Error('ambiguous CI-heal wrapper ownership');
+    let detail = null;
     if (!row.terminal) {
-      if (!/^pid:[1-9][0-9]*$/.test(row.handle ?? '')) throw new Error('unknown CI-heal wrapper handle');
-      const live = isPidAlive(Number(row.handle.slice(4)));
-      if (live === true) return { status: 'running', result: null };
-      if (live !== false) throw new Error('unknown CI-heal wrapper liveness');
       const age = now().getTime() - Date.parse(row.startedAt);
       if (!Number.isFinite(age)) throw new Error('unknown CI-heal start time');
-      if (age < LISTING_GRACE_MS) return { status: 'running', result: null };
+      if (!/^pid:[1-9][0-9]*$/.test(row.handle ?? '')) {
+        // The launch never bound a wrapper: inside the grace window it may still be binding (fail closed), past it
+        // no process can be waited for, so it settles as a failure instead of holding the PR forever (#3577 review).
+        if (age < LISTING_GRACE_MS) throw new Error('unknown CI-heal wrapper handle');
+        detail = `launch never bound a wrapper handle; whether a process started cannot be told; diagnostics: ${attemptLogTail(row.logPath)}`;
+      } else {
+        if (row.host !== hostname()) throw new Error('ambiguous CI-heal wrapper ownership');
+        const live = isPidAlive(Number(row.handle.slice(4)));
+        if (live === true) return { status: 'running', result: null };
+        if (live !== false) throw new Error('unknown CI-heal wrapper liveness');
+        if (age < LISTING_GRACE_MS) return { status: 'running', result: null };
+        detail = `owned wrapper ${row.handle} exited without terminal publication; exit, signal and quota cause unknown; diagnostics: ${attemptLogTail(row.logPath)}`;
+      }
     }
-    const terminal = row.terminal ?? { outcome: 'executor-failed', pushed: false, exitCode: null, signal: null, quotaState: 'unknown',
-      detail: `owned wrapper ${row.handle} exited without terminal publication; exit, signal and quota cause unknown; diagnostics: ${attemptLogTail(row.logPath)}` };
+    const terminal = row.terminal ?? { outcome: 'executor-failed', pushed: false, exitCode: null, signal: null, quotaState: 'unknown', detail };
     const settled = settle(id, terminal);
     return { status: 'resolved', result: { attemptId: id, ...settled.terminal }, error: settled.terminal.pushed ? undefined : settled.terminal.detail };
   } catch (error) { return { status: 'unresolved', error: String(error.message ?? error) }; }

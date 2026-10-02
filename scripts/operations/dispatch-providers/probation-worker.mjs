@@ -25,7 +25,7 @@
  * or `codex` — the vendor the run script will actually spawn, never a guess.
  */
 
-import { beginHealAttempt, bindHealAttempt } from '../probation-heal-run.mjs';
+import { beginHealAttempt, bindHealAttempt, failHealAttempt } from '../probation-heal-run.mjs';
 import { join } from 'node:path';
 import { normNum } from '../../conveyor/queue-store.mjs';
 import { notApplied } from '../effect-executor.mjs';
@@ -115,6 +115,7 @@ export function probationWorkerDetachedProvider(request, {
   runScript,
   beginAttempt = beginHealAttempt,
   bindAttempt = bindHealAttempt,
+  failAttempt = failHealAttempt,
 } = {}) {
   const worker = request?.probationWorker;
   const kind = String(request?.launchKind ?? '');
@@ -162,7 +163,17 @@ export function probationWorkerDetachedProvider(request, {
     argv.push(`--heal-attempt=${attempt.attemptId}`);
     request.reportAttempt?.(attempt.attemptId);
   }
-  const child = spawnDetached(argv, { cwd: request?.cwd ?? REPO_ROOT, logPath: attempt?.logPath ?? logPathFor(sessionSlug), settingsEnv: request?.settingsEnv });
+  let child;
+  try {
+    child = spawnDetached(argv, { cwd: request?.cwd ?? REPO_ROOT, logPath: attempt?.logPath ?? logPathFor(sessionSlug), settingsEnv: request?.settingsEnv });
+  } catch (error) {
+    // A throw here means no wrapper exists, so the row begun above would otherwise stay handle-less and hold the
+    // PR's CI-heal forever (#3577 review). Settling is best-effort: it must never mask the launch error itself.
+    if (attempt) {
+      try { failAttempt(attempt.attemptId, `launch failed before any wrapper started: ${error?.message ?? error}`); } catch { /* the original error wins */ }
+    }
+    throw error;
+  }
   const pid = Number(child?.pid);
   if (!Number.isInteger(pid) || pid <= 0) {
     const subject = kind === 'build' ? `#${num}` : `PR #${normNum(request?.pr)}`;
