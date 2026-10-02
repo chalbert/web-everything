@@ -1,9 +1,10 @@
 ---
 kind: story
 size: 3
-status: open
+status: resolved
 scope: ["we:scripts/operations/ci-heal-pr-dispatch.mjs", "we:scripts/operations/__tests__/ci-heal-pr-dispatch.test.mjs", "we:scripts/operations/__tests__/priority-sync.test.mjs", "we:scripts/conveyor/reconcile-core.mjs", "we:scripts/conveyor/reconcile-pass.mjs", "we:scripts/conveyor/__tests__/reconcile-core.test.mjs", "we:scripts/conveyor/__tests__/reconcile-pass.test.mjs", "we:scripts/conveyor/ci-timeout-rerun.mjs", "we:scripts/conveyor/__tests__/ci-timeout-rerun.test.mjs", "we:scripts/conveyor/__fixtures__/ci-timeout-rerun/**"]
 dateOpened: "2026-10-02"
+dateResolved: "2026-10-02"
 preparedDate: "2026-10-02"
 preparedAgainstSha: "566a646a0a000c4b3c0c83111cf01d809e6db314"
 tags: []
