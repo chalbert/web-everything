@@ -30,9 +30,12 @@
  *      one), and — unlike the bare word "fix" — a heading is a deliberate authoring choice, not incidental
  *      vocabulary, so it does not over-fire on feature PRs (checked against #2744-#2756, #2766, #2767, #2769,
  *      #2770 — none carry one);
- *   3. the word bug/broke/broken/regression/incident anywhere in the body (catches the residual case that
+ *   3. the word bug/broke/broken/regression/incident in the body, except bounded explicit denials
+ *      such as "not a bug fix" (catches the residual case that
  *      matches neither — #2762 "review-daemon: print why each held PR got no review…" has no `fix`-shaped title
  *      and no matching header, but its body says "…made that look like a discovery **bug**").
+ * Only the negated mention is masked; independent words, titles, and headings still count. Unsupported
+ * language such as "not only a bug" retains its signal. This is not general language classification.
  * This is a RECALL-FAVORING heuristic, not a precise one, by design: a false POSITIVE (a feature PR
  * misclassified as a fix) costs the author one `soak-waiver: not a bug fix` line; a false NEGATIVE (a real
  * daemon fix that slips past undetected) is exactly the failure this gate exists to close. When in doubt, this
@@ -49,6 +52,8 @@ export const SOAK_BREAKS_DIR_PREFIX = 'scripts/conveyor/soak/breaks/';
 const FIX_TITLE_RE = /\bfix(e[sd])?\b/i;
 const FIX_HEADER_RE = /^#{1,6}\s*(fix|root cause|what broke|problem|incident)\b/im;
 const FIX_WORD_RE = /\b(bug|broke|broken|regression|incident)\b/i;
+// Same-line, adjacent words only: never consume punctuation, intervening words, or another mention.
+const NEGATED_FIX_WORD_RE = /\b(?:not|no|isn['’]t|wasn['’]t|is[ \t]+not|was[ \t]+not)[ \t]+(?:a[n]?[ \t]+)?(?:bug|broke|broken|regression|incident)\b/gi;
 
 // `soak-waiver: <reason>` — anywhere in the PR body, one per line, reason required non-empty (after trim).
 // Same-line whitespace only ([ \t], never \s) around the captured reason: \s also matches the newline that
@@ -77,7 +82,7 @@ const WAIVER_RE = /^[ \t]*(?:[-*+]|\d+[.)])?[ \t]*[*_]{0,3}soak-waiver[*_]{0,3}[
 export function isLikelyDaemonBugFix({ title = '', body = '' } = {}) {
   const t = String(title || '');
   const b = String(body || '');
-  return FIX_TITLE_RE.test(t) || FIX_HEADER_RE.test(b) || FIX_WORD_RE.test(b);
+  return FIX_TITLE_RE.test(t) || FIX_HEADER_RE.test(b) || FIX_WORD_RE.test(b.replace(NEGATED_FIX_WORD_RE, ' '));
 }
 
 /**

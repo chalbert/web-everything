@@ -3,9 +3,10 @@ bornAs: xp12azn
 kind: story
 size: 3
 tier: pinned
-status: open
+status: resolved
 scope: ["we:scripts/lib/repo-profile.mjs", "we:scripts/lib/__tests__/repo-profile-locus.test.mjs", "we:scripts/operations/deliver-item-wrapper.mjs", "we:scripts/operations/deliver-item-run.mjs", "we:scripts/operations/dispatch-lane.mjs", "we:scripts/operations/dispatch-lane-io.mjs", "we:scripts/operations/deliver-item-settle.mjs", "we:scripts/operations/effect-executor.mjs", "we:scripts/operations/__tests__/effect-executor.test.mjs", "we:scripts/operations/__tests__/dispatch-lane.test.mjs", "we:scripts/operations/__tests__/deliver-item-run.test.mjs", "we:scripts/operations/__tests__/deliver-item-wrapper.test.mjs"]
 dateOpened: "2026-09-30"
+dateResolved: "2026-10-01"
 preparedDate: "2026-09-30"
 preparedAgainstSha: "6439a623962b76d3cdbd94102d0465869541fd14"
 tags: []
@@ -69,4 +70,26 @@ Named future items (builder files them, not prepare): a generic compare-and-swap
 
 The diagnosis-only lane could not run its gates: the sandbox denied the verifier marker and the standards admission lock. Run both gates in the implementing lane with normal repository permissions; do not bypass either.
 
+Testing lesson (2026-10-01): an early child failure must halt the parent driver as well as preserve the stored terminal status; otherwise the driver may immediately retry the effect. The isolated CLI probe supplies external reads, so it cannot substitute for normal observer ticks.
+
 Keep serializer-to-consumer and process-lifecycle probes at the real boundary; helper-only fixtures did not reveal this incident. Record testing lessons here, not in shared agent documentation.
+
+
+## Progress
+
+2026-10-01 — Scoped implementation in the review checkout; no commit, push or PR.
+
+- Before: the new regressions against the original implementation reported 12 failures (three supported/legacy admission controls passed). The missing shared locus function, admitted mixed scope, unsettled wrapper preflight, false CLI release claim, and both early-child terminal states reverting to `in-flight` were observed.
+- Real-process before probe: temporarily restored the four original production modules from HEAD, ran the boundary tests, and restored the working edits in a `finally` block. The actual child exited 1 with the old “lane and claim released best-effort” text; the temporary run record remained `{status:"in-flight", result:null, error:null}`. The actual operation CLI returned `dispatching:true`, lane 15 and “cleared for build on lane 15”; the existing lane-checkout sink guard then refused it. No agent was launched for the before probe.
+- After: shared `deliveryLocusForScope` in we:scripts/lib/repo-profile.mjs feeds we:scripts/operations/dispatch-lane-io.mjs. The pure declaration records `{name:"locus",pass:false,observed:{kind:"unsupported-locus",keys:["we","plateau-app"]}}` and declares zero effects. Single-repo and legacy reads retain their behavior.
+- After: we:scripts/operations/deliver-item-wrapper.mjs settles session/locus/telemetry/acquisition preflight errors and limits lane cleanup to a successful acquisition. we:scripts/operations/deliver-item-run.mjs provides an idempotent settlement backstop, including provider selection errors, without asserting cleanup happened.
+- After: we:scripts/operations/effect-executor.mjs re-reads the durable run after the dispatch sink and preserves child terminal state and other fresh fields. A child failure returns an error to halt the parent driver instead of immediately retrying the failed dispatch. The remaining read/write CAS window is explicitly documented in we:scripts/operations/deliver-item-settle.mjs.
+- Real-process after probe: we:scripts/operations/__tests__/deliver-item-run.test.mjs runs the actual child with the historical 23-path #4620 scope. It exits 1; the on-disk effect becomes `failed`, result `unsupported-locus`, with “more than one repo (we, plateau-app)” and #4289 in the original error. The real build claim disappears; the seeded foreign lane lease remains byte-identical; no additional lane appears.
+- Operation boundary after probe: the same test runs `node we:scripts/operations/run.mjs dispatch-lane --num=4620 --json` against a temporary backlog/run store/pool. The actual loader, IO locus wiring, declaration, serializer and persistence run; external planner/Git/GitHub reads are fixture inputs and async spawning is a fatal tripwire. Output is `stopped:"complete"`, `dispatching:false`, `inFlight:[]`, the typed locus gate above, and zero stored effects. Foreign lease bytes are unchanged. This is a CLI boundary regression, **not** a normal daemon tick or the required observer soak.
+- Final targeted verification: **601/601 passed** across the five scoped suites, including both real file-store/child-process ordering cases (`applied` and `failed`). The supported trace compatibility correction also passed **294/294** tests across we:scripts/operations/__tests__/dispatch-eligibility.test.mjs and we:scripts/operations/__tests__/dispatch-lane.test.mjs without editing or weakening the eligibility test: only an unsupported locus adds a blocking trace entry.
+- `node we:scripts/verify-lane.mjs` was run twice. The final run selected 101 targets, executed 184 suites, and reported **8,884 passed / 6 failed** (8,890 tests). The remaining failures are three each in we:scripts/operations/__tests__/restart-runner-io-real.test.mjs and we:scripts/operations/__tests__/clear-stuck-session-io-real.test.mjs. Direct `/bin/ps` execution returns “Operation not permitted” in this sandbox; those production readers catch the denied call and return `null`, matching the failed real-process assertions. The marker remains red; no test, gate, permission check or process-liveness guard was weakened.
+- Standalone `npm run check:standards` completed successfully: **0 errors**, 5,065 warnings. `git diff --check` is clean. All implementation/test edits are within the declared file scope; only the permitted locus test file was added. Shared agent documents were not edited.
+- Verification lesson: run heavy suites and the standalone standards command as separate tool jobs. The chained invocation retained an admission slot while the nested standards process waited; the waiting jobs were cancelled, their own PID-specific admission state was cleaned up, and the normal gates were rerun. No other lane's lease was released and admission was not bypassed.
+- Soak remains pending: no disposable observer-controlled deployment has been identified. Requested the instance/observer while continuing implementation. No deployment, elapsed break, normal ticks or supported delivery is claimed. Done-when 2 remains unsatisfied; the card must not be represented as complete on unit/boundary evidence alone.
+
+Resolution is intentionally pending: the final lane gate is red under sandbox process-table restrictions and the required deployed observer soak has not occurred. `node we:scripts/operations/run.mjs resolve --ref=4649` has not been run because the card's Done-when criteria are not yet met. No commit, push or PR was created.

@@ -879,3 +879,106 @@ describe('verify-lane reset (x4jcqm4) — clearing a stale marker without a leas
     }
   });
 });
+
+describe('red diagnostics transport', () => {
+  const gate = `printf ' FAIL  example.test.ts > outer > broken\n'; exit 1`;
+  function invoke(args) {
+    const result = spawnSync('node', [VERIFY_LANE, ...args, '--json'], { cwd: dir, encoding: 'utf8' });
+    return { code: result.status, json: JSON.parse(result.stdout.trim().split('\n').at(-1)), stdout: result.stdout };
+  }
+  it('streams the evidence and round trips marker, check and wait; green clears', () => {
+    const ran = invoke([`--gate=${gate}`]);
+    expect(ran.code).toBe(2);
+    expect(ran.stdout).toContain(' FAIL  example.test.ts');
+    const disk = JSON.parse(readFileSync(marker(), 'utf8'));
+    expect(ran.json.failureDetails).toEqual(disk.failureDetails);
+    expect(disk.failureDetails.tests).toEqual([{ file: 'example.test.ts', name: 'outer > broken' }]);
+    for (const args of [['check'], ['check', '--wait=100']]) {
+      expect(invoke(args).json.failureDetails).toEqual(disk.failureDetails);
+    }
+    expect(invoke([`--gate=printf ' FAIL  example.test.ts > fake\\n'`]).json.failureDetails).toBeUndefined();
+    expect(JSON.parse(readFileSync(marker(), 'utf8')).failureDetails).toBeUndefined();
+  });
+  it('marker-free run returns its own diagnostics without writing a marker', () => {
+    const result = invoke(['run', `--gate=${gate}`]);
+    expect(result.code).toBe(2);
+    expect(result.json.failureDetails.tests[0].name).toBe('outer > broken');
+    expect(existsSync(marker())).toBe(false);
+  });
+});
+
+it('--run-id is stamped into the running marker the gate sees (dispatcher run identity)', () => {
+  const seen = join(dir, 'seen-marker.json');
+  const out = execFileSync('node', [VERIFY_LANE, `--gate=cp ${marker()} ${seen}`, '--run-id=run-abc', '--json'], { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  expect(JSON.parse(out.trim().split('\n').pop()).status).toBe('green');
+  expect(JSON.parse(readFileSync(seen, 'utf8'))).toMatchObject({ status: 'running', runId: 'run-abc' });
+});
+
+describe('fix-3311: killed gates are infrastructure failures', () => {
+  it.each(['exit 137', 'kill -KILL $$'])('records %s without fabricating a test failure or an OOM cause', (gate) => {
+    const { code, json } = runVerify(gate);
+    expect(code).toBe(3);
+    expect(json).toMatchObject({ status: 'infrastructure-failure', reason: 'verify-signal' });
+    expect(json.detail).toContain('SIGKILL');
+    expect(json.detail).toContain('sender/cause unknown');
+    const record = JSON.parse(readFileSync(marker(), 'utf8'));
+    expect(record.status).toBe('infrastructure-failure');
+    expect(record.infrastructure.signal).toBe('SIGKILL');
+  });
+});
+
+describe('request with an explicit --gate when the default selection is blocked', () => {
+  const blockDefault = () => {
+    execFileSync('git', ['branch', 'origin/main'], { cwd: dir });
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ scripts: { 'test:unit': 'echo must-not-run' } }));
+  };
+  const request = (gate) => spawnSync('node', [VERIFY_LANE, 'request', `--gate=${gate}`, '--json'], { cwd: dir, encoding: 'utf8' });
+
+  it.each(['true', 'exit 0', 'npx vitest related src/a.test.ts --run || true', 'npx vitest related --run',
+    'npx vitest related ghost.ts --run --passWithNoTests'])(
+    'refuses weak gate %j and records no marker', (gate) => {
+      blockDefault();
+      const r = request(gate);
+      expect(r.status).toBe(3);
+      expect(JSON.parse(r.stdout)).toMatchObject({ status: 'gate-refused', reason: 'explicit-gate-not-affected-test' });
+      expect(existsSync(marker())).toBe(false);
+    });
+
+  it('accepts an affected-test gate and stamps the request', () => {
+    blockDefault();
+    const r = request('npx vitest related src/a.test.ts --run');
+    expect(r.status).toBe(0);
+    expect(JSON.parse(r.stdout)).toMatchObject({ status: 'requested' });
+    expect(JSON.parse(readFileSync(marker(), 'utf8'))).toMatchObject({ status: 'running', suites: 'npx vitest related src/a.test.ts --run' });
+  });
+
+  it('a dispatcher child (--run-id) re-checks at run time: a gate accepted for a docs-only diff does not run once the tree reaches package.json', () => {
+    execFileSync('git', ['branch', 'origin/main'], { cwd: dir });
+    writeFileSync(join(dir, 'notes.md'), 'docs-only: `true` is accepted at request time\n');
+    expect(request('true').status).toBe(0);
+    // The agent now edits a dependency file; the dispatcher's child must refuse instead of recording a green.
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ scripts: { 'test:unit': 'echo must-not-run' } }));
+    const r = spawnSync('node', [VERIFY_LANE, '--gate=true', '--run-id=run-x', '--json'], { cwd: dir, encoding: 'utf8' });
+    expect(r.status).toBe(3);
+    expect(JSON.parse(r.stdout)).toMatchObject({ status: 'gate-refused', reason: 'explicit-gate-not-affected-test' });
+    // Terminal red — not left `running`, so the dispatcher does not re-spawn the same refusal every sweep.
+    expect(JSON.parse(readFileSync(marker(), 'utf8'))).toMatchObject({ status: 'red', exitCode: 3 });
+  });
+
+  it('leaves an explicit gate alone when the default selection is NOT blocked (pre-existing capability)', () => {
+    execFileSync('git', ['branch', 'origin/main'], { cwd: dir });
+    writeFileSync(join(dir, 'notes.md'), 'a docs-only change selects (not blocks) the default gate\n');
+    const r = request('true');
+    expect(r.status).toBe(0);
+    expect(JSON.parse(r.stdout)).toMatchObject({ status: 'requested' });
+  });
+});
+
+it('an unscopable default request refuses before stamping a runnable marker', () => {
+  execFileSync('git', ['branch', 'origin/main'], { cwd: dir });
+  writeFileSync(join(dir, 'package.json'), JSON.stringify({ scripts: { 'test:unit': 'echo must-not-run' } }));
+  const r = spawnSync('node', [VERIFY_LANE, 'request', '--json'], { cwd: dir, encoding: 'utf8' });
+  expect(r.status).toBe(3);
+  expect(JSON.parse(r.stdout)).toMatchObject({ status: 'selection-required', reason: 'local-selection-bound' });
+  expect(existsSync(marker())).toBe(false);
+});

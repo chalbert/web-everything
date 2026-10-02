@@ -1,11 +1,9 @@
 ---
 bornAs: xk6vumo
-kind: story
+kind: epic
 locus: plateau-app
-size: 5
 status: open
 blockedBy: ["4620"]
-scope: ["plateau-app:src/wip/types.ts", "plateau-app:src/wip/progress-prs.ts", "plateau-app:src/wip/progress-prs.test.ts", "plateau-app:src/wip/progress-read.ts", "plateau-app:src/wip/progress-read.test.ts", "plateau-app:src/wip/wip-read.ts", "plateau-app:src/wip/wip-read.test.ts", "plateau-app:src/wip/wip-model.ts", "plateau-app:src/wip/wip-model.test.ts", "plateau-app:src/wip/wip-view.ts", "plateau-app:src/wip/wip-view.css", "plateau-app:src/wip/wip-view.test.ts", "plateau-app:src/wip/wip-view.hostile.test.ts", "plateau-app:src/wip/wip-source.ts", "plateau-app:src/wip/wip-source.test.ts", "plateau-app:src/wip/wip-live.ts", "plateau-app:src/wip/wip-live.test.ts", "plateau-app:src/wip/wip-api.ts", "plateau-app:src/wip/wip-api.test.ts", "plateau-app:src/wip/wip-publish.ts", "plateau-app:src/wip/wip-publish.test.ts", "plateau-app:src/wip/wip-relay-contract.test.ts", "plateau-app:scripts/wip-publish.ts", "plateau-app:wip-relay.js", "plateau-app:scripts/wip-relay.test.mjs", "plateau-app:tests/wip-progress.spec.ts"]
 dateOpened: "2026-09-30"
 preparedDate: "2026-10-01"
 preparedAgainstSha: "bbc6bd0264cc3794d0f78f0c8d3dbb76ec6f92fa"
@@ -14,9 +12,11 @@ tags: []
 
 # Show all three repos open PRs grouped by what each is waiting on
 
-Keep every open PR across web-everything, plateau-app and frontierui visible regardless of author, card or branch name. Show the per-PR waiting chain: current wait and reason, queue/blocker/shared file, holder and since when, next steps, and an evidence-based rough ETA. Machine waits remain flow; only explicit human work enters Needs you. The requested behavior is in we:docs/agent/plateau-progress-view.md:83–92 and its Classification section.
+Coordinate the contract, passive collection, waiting-chain evidence, cached transport and phone UI slices to keep every open PR across web-everything, plateau-app and frontierui visible regardless of author, card or branch name. Show the per-PR waiting chain: current wait and reason, queue/blocker/shared file, holder and since when, next steps, and an evidence-based rough ETA. Machine waits remain flow; only explicit human work enters Needs you. The requested behavior is in we:docs/agent/plateau-progress-view.md:83–92 and its Classification section.
 
 ## Progress
+
+The original preparation below is retained as design lineage. The split report at the end records newer source observations and the filed predecessors; its dependency wiring supersedes the earlier proposed-only split. No implementation is claimed.
 
 Preparation inspected WE `bbc6bd0264cc3794d0f78f0c8d3dbb76ec6f92fa` and the local Plateau sibling `29db1bb1df050b7134c7aa03c241a737f83a454e`; these are source observations, not a deployed-product probe. Read the worker brief from local main. No runtime implementation or network refresh was performed.
 
@@ -25,13 +25,13 @@ Preparation inspected WE `bbc6bd0264cc3794d0f78f0c8d3dbb76ec6f92fa` and the loca
 - **Waiting-chain evidence:** the dispatcher already orders candidates by waiting time, human-review tie-break and PR number, then emits `queuePosition` and a reason naming blockers/shared file (we:scripts/conveyor/reconcile-fix-dispatch.mjs:1450–1485). This is an observed pass's order, not a durable global FIFO. Its CLI formatter preserves repo/PR/reason but not a separate structured queue-position field (we:skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs:674–678,765–780). Do not invent a queue by sorting PR update times.
 - **Holder evidence:** claims are keyed by repo/kind/PR, not head SHA (we:scripts/conveyor/fix-claim-store.mjs:30–56). Current acquisition preserves `meta.claimedAt` across live refreshes (we:scripts/conveyor/fix-dispatch-claim.mjs:122–132); heartbeat time is not start time. Read/list helpers default to including expired claims and can silently skip corrupt entries (we:scripts/conveyor/fix-claim-store.mjs:87–102). Distinguish expired/unreadable evidence from proven absence; do not treat a lease as proof of an actively working process.
 - **Scope correction:** the original scope omitted wire types, CSS, source/client acceptance, dev API and paging transport tests. Add those implementation seams and a browser proof test; remove speculative decision-controller edits because this slice links existing forks rather than changing decision commands. The proposed adapter and browser test do not exist yet. This remains a Plateau implementation scope; the separate WE contract increment below must precede it.
-- **Dependency drift:** #4620 is prepared but its contract half was split to x9jwbpi (we:backlog/4620-bring-standing-rules-and-ordered-priorities-into-the-live-pl.md:20–22; we:backlog/x9jwbpi-publish-the-plateau-progress-view-contract-schema-2-with-val.md:12). No progress schema files exist in this checkout or local main. Current consumers still require schema 1 (we:../plateau-app/src/wip/types.ts:184; we:../plateau-app/src/wip/wip-source.ts:37; we:../plateau-app/wip-relay.js:211). Design below targets the prepared interface, not an asserted landed contract. Keep `blockedBy: ["4620"]`; recheck the in-flight contract and #4620 before build.
+- **Dependency drift:** #4620 is prepared but its contract half was split to x9jwbpi (we:backlog/4620-bring-standing-rules-and-ordered-priorities-into-the-live-pl.md:20–22; we:backlog/x9jwbpi-publish-the-plateau-progress-view-contract-schema-2-with-val.md:13). No progress schema files exist in this checkout or local main. Current consumers still require schema 1 (we:../plateau-app/src/wip/types.ts:184; we:../plateau-app/src/wip/wip-source.ts:37; we:../plateau-app/wip-relay.js:211). Design below targets the prepared interface, not an asserted landed contract. Keep `blockedBy: ["4620"]`; recheck the in-flight contract and #4620 before build.
 
 ## Design
 
 ### Contract dependency and per-repo split
 
-Placement follows we:docs/agent/platform-decisions.md:143 (#constellation-placement) and :1165 (#surface-contract-not-computation). The recorded #4289 option-a split is explicit in we:backlog/x9jwbpi-publish-the-plateau-progress-view-contract-schema-2-with-val.md:12. Do not dispatch mixed-locus scope or place product readers/classifiers in WE.
+Placement follows we:docs/agent/platform-decisions.md:143 (#constellation-placement) and :1165 (#surface-contract-not-computation). The recorded #4289 option-a split is explicit in we:backlog/x9jwbpi-publish-the-plateau-progress-view-contract-schema-2-with-val.md:13. Do not dispatch mixed-locus scope or place product readers/classifiers in WE.
 
 1. **WE predecessor, proposed, not filed here:** extend x9jwbpi's landed schema/examples/conformance test at we:contracts/plateau-progress-view.schema.json, we:contracts/plateau-progress-view.examples.json and we:contracts/plateau-progress-view.test.ts with the PR collection, waiting chain and cached-page request/response shapes described below. If the in-flight contract already includes them, verify its vectors instead of creating duplicate work. An independently useful result validates examples without Plateau and rejects malformed refs, missing freshness and inconsistent collection counts. Land this before the Plateau consumer; add its dependency before dispatch if a new card is necessary. Do not edit x9jwbpi or #4620 in this preparation.
 2. **Plateau successor, this card:** consume that revision after #4620. Its prerequisites are the schema-2 envelope (`snapshotId`, publisher boot identity, sequence, source freshness and repo coverage), shared collector/section-failure boundary, summary/actions projection, schema-1 fallback and relay/client rollout from #4620. This card adds PR rows, waiting-chain adapters, cached paging and the Flow UI. The frontmatter scope is deliberately the canonical Plateau-locus partition; all evidence paths in this body use the requested WE-relative prefix.
@@ -94,3 +94,39 @@ Implementation proof is outstanding; preparation does not claim a working produc
 ## Preparation verification
 
 2026-10-01: `node we:scripts/backlog.mjs prepare-stamp 4623` wrote the preparation date and inspected WE SHA; status stays open. `node we:scripts/check-backlog-item.mjs 4623` passed without warnings; diff whitespace check passed. Required `node we:scripts/verify-lane.mjs` passed: no related executable tests for this card-only edit, followed by `npm run check:standards` with 0 errors and 4,609 repository-wide warnings. Product tests/proofs above remain future implementation acceptance, not claimed results. Only this card changed; no implementation, shared-doc edit, commit, push or PR.
+
+## Split report — 2026-10-01
+
+User-authorized backlog-only split after the PR-size gate refused the 26-path build. This inline report replaces a separate report artifact to honor that scope. Converted #4623 in place to an open, unsized epic; retained its #4620 blocker, goal and complete prepared Design/Test/Proof plan. All children were created through `node we:scripts/operations/run.mjs scaffold` with single-quoted values, explicit parent, scope, digest and dependency edges. Machine scope keys retain each owning repo qualifier; prose source paths use the requested WE-relative prefix.
+
+### Investigation update
+
+Read actual Plateau source at SHA `2a38182a53a32e12633c135dc4daecff5e5b101d`. Schema 2 now exists at we:../plateau-app/src/wip/types.ts:201, the passive count reader at we:../plateau-app/src/wip/progress-read.ts:70 and shared collection calls at we:../plateau-app/src/wip/wip-read.ts:445. The legacy open-PR fetch still exists at :409, and the model still collapses per-card PRs at we:../plateau-app/src/wip/wip-model.ts:152. No proposed PR/chain/page adapter exists yet; their homes are additions at these inspected boundaries. The existing ask injection, cached API, relay validation and view provide separate testable seams, cited on each child.
+
+The x9jwbpi card is resolved and its schema/examples/conformance artifacts now exist. The requested PR collection, chain and page contract still needs the filed increment below. #4620 remains open: retain it as an actual collection prerequisite, not just a prose mention. Existing CSS already wraps descriptions at we:../plateau-app/src/wip/wip-view.css:197; build probes must supersede older clamp assumptions. These are source observations, not deployed proof.
+
+### Could split
+
+| Story | Deliverable / size | Predicted scope | Paths / areas | Blocked by |
+| --- | --- | --- | --- | --- |
+| [#xr61n39](/backlog/xr61n39-extend-the-plateau-progress-contract-with-pr-collections-and/) | WE contract / 3 | `we:contracts/plateau-progress-view.schema.json`, `we:contracts/plateau-progress-view.examples.json`, `we:contracts/plateau-progress-view.test.ts` | 3 / 1 | None; #x9jwbpi resolved |
+| [#x6jc6u7](/backlog/x6jc6u7-collect-and-classify-every-cached-pr-across-the-three-platea/) | Passive collection and classification / 3 | `we:../plateau-app/src/wip/types.ts`, `we:../plateau-app/src/wip/progress-prs.ts`, `we:../plateau-app/src/wip/progress-prs.test.ts`, `we:../plateau-app/src/wip/progress-read.ts`, `we:../plateau-app/src/wip/progress-read.test.ts`, `we:../plateau-app/src/wip/wip-read.ts`, `we:../plateau-app/src/wip/wip-read.test.ts`, `we:../plateau-app/src/wip/wip-model.ts`, `we:../plateau-app/src/wip/wip-model.test.ts` | 9 / 1 | #4620, #xr61n39 |
+| [#xacsn2d](/backlog/xacsn2d-enrich-plateau-pr-waits-with-local-blocker-holder-and-eta-ev/) | Waiting-chain evidence and ETA / 3 | `we:../plateau-app/src/wip/progress-prs.ts`, `we:../plateau-app/src/wip/progress-prs.test.ts`, `we:../plateau-app/src/wip/progress-waits.ts`, `we:../plateau-app/src/wip/progress-waits.test.ts`, `we:../plateau-app/src/wip/wip-read.ts`, `we:../plateau-app/src/wip/wip-read.test.ts` | 6 / 1 | #x6jc6u7 |
+| [#xrxb9uc](/backlog/xrxb9uc-serve-snapshot-bound-cached-pr-pages-through-the-plateau-rel/) | Cached page transport / 5 | `we:../plateau-app/src/wip/progress-pages.ts`, `we:../plateau-app/src/wip/progress-pages.test.ts`, `we:../plateau-app/src/wip/wip-source.ts`, `we:../plateau-app/src/wip/wip-source.test.ts`, `we:../plateau-app/src/wip/wip-live.ts`, `we:../plateau-app/src/wip/wip-live.test.ts`, `we:../plateau-app/src/wip/wip-api.ts`, `we:../plateau-app/src/wip/wip-api.test.ts`, `we:../plateau-app/src/wip/wip-publish.ts`, `we:../plateau-app/src/wip/wip-publish.test.ts`, `we:../plateau-app/src/wip/wip-agent.test.ts`, `we:../plateau-app/src/wip/wip-relay-contract.test.ts`, `we:../plateau-app/scripts/wip-publish.ts`, `we:../plateau-app/wip-relay.js`, `we:../plateau-app/scripts/wip-relay.test.mjs` | 15 / 3 | #x6jc6u7 |
+| [#xnwxew9](/backlog/xnwxew9-render-all-plateau-pr-waits-and-cached-pages-in-the-phone-fl/) | Phone Flow and end-to-end proof / 3 | `we:../plateau-app/src/wip/wip-view.ts`, `we:../plateau-app/src/wip/wip-view.css`, `we:../plateau-app/src/wip/wip-view.test.ts`, `we:../plateau-app/src/wip/wip-view.hostile.test.ts`, `we:../plateau-app/tests/wip-progress.spec.ts` | 5 / 2 | #xacsn2d, #xrxb9uc |
+
+Counts include the named implementation/test touch sets; reserving one card close-out adds one path and at most one area, so the largest slice remains 16 paths / 4 areas. Re-estimation totals 17 points, replacing the original underestimated 5; no epic points remain. Exact frontmatter scopes are file-level to avoid serializing unrelated work. New files are identified as proposed on their cards rather than cited as existing.
+
+### DAG and incremental delivery
+
+`(4620 + xr61n39) → x6jc6u7; x6jc6u7 → (xacsn2d ∥ xrxb9uc); (xacsn2d + xrxb9uc) → xnwxew9`. Arrows mean predecessor blocks successor. Parent edges are grouping only. #x9jwbpi is a satisfied predecessor recorded as lineage, not a stale blocker on the now-startable contract slice.
+
+The contract delivers independently validated fixtures. Collection delivers a passive summary/actions projection and replayable full local membership with new wire fields held until consumer acceptance. Waiting evidence and transport can proceed independently on disjoint files: unknown-compatible chain data makes this safe. Transport exposes accepted cached membership through bounded read-only requests while the existing UI keeps working. The final view joins them and owns the complete browser proof. Each slice is size ≤5 and batchable once its blockers resolve; none is immediately dispatched by this split.
+
+### Could not split
+
+| Candidate | Failed condition | Unblocking action |
+| --- | --- | --- |
+| None within #4623's MVP | No unresolved design fork or uninvestigated required seam remains. | None. Richer producer timestamps/history/author enrichment remain the already-recorded Follow-ups, not hidden implementation prerequisites. |
+
+All five split-safety conditions hold: volume rather than a design fork, five named homes, bounded re-estimated stories, independent chain/transport branches, and compatible fixture-driven intermediate states. No implementation, shared agent doc changes, commits, pushes or PRs are part of this work.

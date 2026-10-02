@@ -358,3 +358,24 @@ describe('realSleep — regression (live-caught 3x already this epic: #3870, #38
     expect(Date.now() - start).toBeGreaterThanOrEqual(15); // loose bound — real timers, not fake ones
   });
 });
+
+describe('builder start-to-start cadence', () => {
+  it('subtracts work, includes failures, and never overlaps or bursts after an overrun', async () => {
+    let clock = 0;
+    const starts = []; const sleeps = [];
+    const durations = [30_000, 180_000, 10_000, 5_000];
+    await runDaemonLoop({ fixedCadence: true, intervalMs: 120_000, maxTicks: 4, now: () => clock,
+      tickOnce: async () => { starts.push(clock); clock += durations[starts.length - 1]; if (starts.length === 2) throw new Error('slow failure'); },
+      sleep: async ms => { sleeps.push(ms); clock += ms; },
+    });
+    expect(starts).toEqual([0, 120_000, 300_000, 420_000]);
+    expect(sleeps).toEqual([90_000, 0, 110_000]);
+  });
+  it('does not start another tick if its lease is lost during sleep', async () => {
+    let alive = true;
+    const tickOnce = vi.fn();
+    await runDaemonLoop({ fixedCadence: true, tickOnce, isAlive: () => alive,
+      sleep: async () => { alive = false; } });
+    expect(tickOnce).toHaveBeenCalledTimes(1);
+  });
+});

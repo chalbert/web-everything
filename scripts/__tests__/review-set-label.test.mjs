@@ -2597,6 +2597,30 @@ describe('buildVerdictComment — a restamp carries a human clearance forward (#
  * extraction in `we:scripts/lib/review-escalation.mjs` for the identical reason (see that function's docstring).
  */
 describe('decideRestampHumanClearance (#x9krtkb — is a restamp carrying a human clearance owed?)', () => {
+  it('replays #3253: human clearance survives the rebase proof but not the subsequent CI source repair', () => {
+    // Observed contribution hashes: original ef097d284..95cb21654; rebased dda3ff327..190ea9097;
+    // repaired dda3ff327..f2247f0ab. The first two match; the source-literal repair changes the third.
+    const original = '95cb216548ba6b8e702c49527745ccd50355a7d6';
+    const contribution = '27381bade5815ad928b373dff9ead23134402e24f9ea2a69dbc3405164c182dc';
+    const comments = [{ author: { login: 'web-everything' }, body: [
+      buildReviewedShaMarker(original),
+      buildReviewedDiffMarker('be21b72e986d883b6ac7ab615b855b8469ce7db910e17fd94b23f8b509169c50'),
+      buildReviewedContributionMarker(contribution), buildClearedHumanMarker('chalbert'),
+    ].join('\n') }];
+    expect(decideRestampHumanClearance({ comments, headSha: '190ea9097', headDiff: contribution }))
+      .toEqual({ actor: 'chalbert', sha: original });
+    expect(decideRestampHumanClearance({ comments,
+      headSha: 'f2247f0abf422ce9259b71e418098f8b9da8d942',
+      headDiff: '95b268fd31b4879c6c278f72e6a69862e717509aeeb0ce50e0da1aa06a3ec9a6',
+    })).toBeNull();
+    const cleared = decideSetLabel({ to: 'clear-human', currentLabels: ['review:human'], reason: 'I approve' });
+    expect(cleared.addLabel).toBe('review:accepted');
+    const rearmed = decideSetLabel({ to: 'rearm', currentLabels: [cleared.addLabel], requireLive: 'accepted' });
+    expect(rearmed.addLabel).toBe('review:pending');
+    expect(rearmed.rearmFrom).toBe('review:accepted');
+    expect(rearmed.removeLabels).toContain('review:accepted');
+  });
+
   const NEW_HEAD = '1f27fd19f6841d9df5c9f8ce7b4b4f3b8319bc54';
   const HUMAN_SHA = 'f1dbbc3170b7dcbabf6c3ea19c469e3c636231b6';
   const DIFF = 'd'.repeat(64);
@@ -3456,5 +3480,132 @@ describe('#4315 direct acceptance boundary', () => {
     expect(() => assertMandatoryReferralsCleared(state)).toThrow();
     record.rulings[1].supersedes = 'r1';
     expect(() => assertMandatoryReferralsCleared({ ...state, comments: [{ body: renderReferralRecord(record) }] })).toThrow();
+  });
+});
+
+// #xan09na — exercise the shared write boundary with real immutable Git objects and a local forge.
+describe('guarded CI-heal restamp write boundary', () => {
+  const script = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'review-set-label.mjs');
+  const context = Array.from({ length: 10 }, (_, i) => `// stable ${i}\n`).join('');
+  let dir, git, reviewedBase, reviewedHead, healedBase, healedHead, reviewedDiff, healedDiff;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'guarded-restamp-'));
+    git = (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    git('init', '-b', 'main'); git('config', 'user.name', 'Replay'); git('config', 'user.email', 'replay@example.test');
+    writeFileSync(join(dir, 'source.js'), context + 'export const value = 1;\n');
+    git('add', '.'); git('commit', '-m', 'base'); reviewedBase = git('rev-parse', 'HEAD');
+    git('checkout', '-b', 'lane');
+    writeFileSync(join(dir, 'source.js'), context + 'export const value = 2;\n');
+    git('commit', '-am', 'reviewed contribution'); reviewedHead = git('rev-parse', 'HEAD');
+    reviewedDiff = git('diff', reviewedBase, reviewedHead);
+    git('checkout', 'main');
+    // Shift the source context without changing the PR's own addition/removal.
+    writeFileSync(join(dir, 'source.js'), '// upstream context\n' + context + 'export const value = 1;\n');
+    git('commit', '-am', 'base movement'); healedBase = git('rev-parse', 'HEAD');
+    git('checkout', 'lane'); git('rebase', 'main'); healedHead = git('rev-parse', 'HEAD');
+    healedDiff = git('diff', healedBase, healedHead);
+    git('remote', 'add', 'origin', dir);
+    mkdirSync(join(dir, 'bin'));
+    writeFileSync(join(dir, 'bin', 'gh'), `#!${process.execPath}
+const fs = require('node:fs');
+const a = process.argv.slice(2), s = JSON.parse(fs.readFileSync('state.json', 'utf8'));
+fs.appendFileSync('calls.jsonl', JSON.stringify(a) + '\\n');
+if (a[0] === 'pr' && a[1] === 'view') {
+ s.reads = (s.reads || 0) + 1;
+ if (s.reads === 2 && s.race === 'unreadable') process.exit(1);
+ if (s.reads === 2 && s.race === 'head') s.headRefOid = 'f'.repeat(40);
+ if (s.reads === 2 && s.race === 'closed') s.state = 'CLOSED';
+ if (s.reads === 2 && s.race === 'verdict') s.labels = [{name:'review:changes'}];
+ if (s.reads === 2 && s.race === 'human') s.labels.push({name:'review:human'});
+ if (s.reads === 2 && s.race === 'acceptance') s.comments.push({...s.comments[0], id:'replacement'});
+ console.log(JSON.stringify(s));
+} else if (a[0] === 'pr' && a[1] === 'comment') {
+ s.comments.push({author:{login:'web-everything'}, body: fs.readFileSync(a[a.indexOf('--body-file') + 1], 'utf8')});
+} else { console.error('unexpected forge mutation', a); process.exit(1); }
+fs.writeFileSync('state.json', JSON.stringify(s));
+`);
+    chmodSync(join(dir, 'bin', 'gh'), 0o755);
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  function run({ mode = 'plain', expected = healedHead, labels = ['review:accepted'], race, state = 'OPEN', extra = [] } = {}) {
+    let comment = { author: { login: 'web-everything' }, body: buildVerdictComment({
+      to: mode === 'human' ? 'clear-human' : 'accepted', actor: 'original reviewer', headSha: reviewedHead, reviewedDiff,
+    }) };
+    if (mode === 'untrusted') comment.author.login = 'mallory';
+    if (mode === 'no-digests') comment.body = buildReviewedShaMarker(reviewedHead);
+    let comments = mode === 'missing' ? [] : [comment];
+    if (mode === 'older-digest') comments.push({ author: comment.author, body: buildReviewedShaMarker(reviewedHead) });
+    const original = { state, headRefOid: healedHead, headRefName: 'lane', labels: labels.map(name => ({ name })), comments, race };
+    writeFileSync(join(dir, 'state.json'), JSON.stringify(original));
+    const r = spawnSync(process.execPath, [script, '42', '--repo=chalbert/web-everything', '--to=restamp', '--actor=CI healer', '--channel=ci-heal',
+      ...(expected === null ? [] : [`--expect-head=${expected}`]), ...extra], {
+      cwd: dir, encoding: 'utf8', env: { ...process.env, PATH: `${join(dir, 'bin')}:${process.env.PATH}`,
+        WE_VERDICT_LEDGER_DIR: join(dir, 'ledger'), WE_GH_THROTTLE_LOCK_ROOT: join(dir, 'lock') },
+    });
+    const final = JSON.parse(readFileSync(join(dir, 'state.json'), 'utf8'));
+    const ledger = existsSync(join(dir, 'ledger')) ? readdirSync(join(dir, 'ledger')).flatMap(f =>
+      readFileSync(join(dir, 'ledger', f), 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse)) : [];
+    const calls = existsSync(join(dir, 'calls.jsonl')) ? readFileSync(join(dir, 'calls.jsonl'), 'utf8').trim().split('\n').map(JSON.parse) : [];
+    return { r, original, final, ledger, calls, added: final.comments.slice(comments.length + (race === 'acceptance' && final.reads >= 2 ? 1 : 0)) };
+  }
+  function refused(result) {
+    expect(result.r.status, result.r.stdout + result.r.stderr).not.toBe(0);
+    expect(result.added).toEqual([]);
+    expect(result.ledger).toEqual([]);
+    expect(result.calls.every(a => a[1] === 'view')).toBe(true);
+  }
+
+  it.each(['plain', 'human'])('carries %s acceptance through base movement with exact proven-head markers', mode => {
+    expect(normalizeDiffFingerprint(reviewedDiff)).not.toBe(normalizeDiffFingerprint(healedDiff));
+    expect(normalizeContributionFingerprint(reviewedDiff)).toBe(normalizeContributionFingerprint(healedDiff));
+    const result = run({ mode });
+    expect(result.r.status, result.r.stdout + result.r.stderr).toBe(0);
+    expect(result.added).toHaveLength(1);
+    expect(parseReviewedSha(result.added)).toBe(healedHead);
+    expect(parseReviewedDiff(result.added)).toBe(normalizeDiffFingerprint(healedDiff));
+    expect(parseReviewedContribution(result.added)).toBe(normalizeContributionFingerprint(healedDiff));
+    expect(parseLatestHumanClearedSha(result.added)).toBe(mode === 'human' ? healedHead : null);
+    expect(result.added[0].body).toContain(reviewedHead);
+    expect(result.added[0].body).not.toContain("drain's own");
+    expect(result.ledger).toHaveLength(1);
+    expect(result.ledger[0].coverage.headSha).toBe(healedHead);
+    expect(result.calls.map(a => a[1])).toEqual(['view', 'view', 'comment', 'view']);
+  });
+
+  it.each(['source.js', 'source.test.js', 'README.md', 'config.json', 'data.json'])('refuses an actual contribution change in %s', file => {
+    writeFileSync(join(dir, file), file === 'source.js' ? '// upstream context\n' + context + 'export const value = 1 + 1;\n' : 'changed contribution\n');
+    git('add', file); git('commit', '-m', 'CI repair changes contribution'); healedHead = git('rev-parse', 'HEAD');
+    refused(run({ mode: 'human' }));
+  });
+  it.each(['missing', 'untrusted', 'no-digests', 'older-digest'])('refuses %s acceptance evidence', mode => refused(run({ mode })));
+  it.each([null, '', 'prefix', 'incorrect', 'bare', 'override'])('refuses %s expected head', kind => {
+    refused(run({ expected: kind === 'prefix' ? healedHead.slice(0, 10) : kind === 'incorrect' ? 'a'.repeat(40) : kind === 'override' ? healedHead : kind === 'bare' ? null : kind,
+      extra: kind === 'bare' ? ['--expect-head'] : kind === 'override' ? [`--new-head=${healedHead}`] : [] }));
+  });
+  it.each(['head', 'verdict', 'human', 'acceptance', 'closed', 'unreadable'])('refuses %s replacement at the pre-write read', race => refused(run({ race, mode: 'human' })));
+  it.each([['review:human'], ['review:accepted', 'review:human'], ['review:accepted', 'review:changes'], ['review:pending']])('refuses live labels %j', (...labels) => refused(run({ labels })));
+  it('refuses a closed PR', () => refused(run({ state: 'CLOSED' })));
+  it('refuses an unresolvable commit even with matching live head', () => {
+    healedHead = 'b'.repeat(40);
+    refused(run());
+  });
+  it('refuses git diff errors without writing even when the head equals the accepted SHA', () => {
+    healedHead = reviewedHead;
+    const realGit = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
+    writeFileSync(join(dir, 'bin', 'git'), `#!${process.execPath}
+const cp = require('node:child_process');
+if(process.argv[2] === 'diff') process.exit(1);
+const r = cp.spawnSync(${JSON.stringify(realGit)}, process.argv.slice(2), {stdio:'inherit'}); process.exit(r.status ?? 1);
+`);
+    chmodSync(join(dir, 'bin', 'git'), 0o755);
+    refused(run());
+  });
+  it('scores the expected commit even if the branch now points to different content', () => {
+    writeFileSync(join(dir, 'source.js'), 'export const value = 999;\n'); git('commit', '-am', 'local branch moved');
+    const result = run();
+    expect(result.r.status, result.r.stdout + result.r.stderr).toBe(0);
+    expect(parseReviewedDiff(result.added)).toBe(normalizeDiffFingerprint(healedDiff));
+    expect(parseReviewedSha(result.added)).toBe(healedHead);
   });
 });

@@ -6,6 +6,9 @@
  * actual gap it was built to close.
  */
 import { describe, it, expect } from 'vitest';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
 import {
   isLikelyDaemonBugFix,
   addsOrChangesSoakBreak,
@@ -14,7 +17,7 @@ import {
   filePaths,
   SOAK_BREAKS_DIR_PREFIX,
 } from '../soak-replay-gate.mjs';
-import { REAL_PRS } from './fixtures/soak-replay-gate-real-prs.mjs';
+import { REAL_PRS, PR_2939_SNAPSHOT } from './fixtures/soak-replay-gate-real-prs.mjs';
 
 describe('isLikelyDaemonBugFix', () => {
   it('is true for a conventional-commit fix()-shaped title', () => {
@@ -267,4 +270,100 @@ describe('evaluateSoakReplayGate — live proof against real merged/open PRs (fr
       expect(v.reason).toMatch(new RegExp(SOAK_BREAKS_DIR_PREFIX.replace(/\//g, '\\/')));
     },
   );
+});
+
+
+describe('bounded denial mentions (#4503)', () => {
+  const tokens = ['bug', 'broke', 'broken', 'regression', 'incident'];
+  const denials = ['not', 'no', "isn't", "wasn't", 'is not', 'was not', 'isn’t', 'wasn’t'];
+  it.each(denials.flatMap((negator) => ['', 'a ', 'an '].map((article) => `${negator} ${article}`)))(
+    'suppresses only explicit mentions after %s', (prefix) => {
+      for (const token of tokens) {
+        for (const body of [prefix + token, (prefix + token).toUpperCase(), (prefix + token).replaceAll(' ', '\t')]) {
+          expect(isLikelyDaemonBugFix({ title: 'Refactor', body }), body).toBe(false);
+        }
+      }
+    },
+  );
+  it('suppresses repeated denials without state leaking between calls', () => {
+    const body = "not a bug fix; no regression\nisn’t broken; wasn't an incident";
+    expect(isLikelyDaemonBugFix({ body })).toBe(false);
+    expect(isLikelyDaemonBugFix({ body })).toBe(false);
+  });
+  it.each(tokens)('retains the positive token %s', (body) => {
+    expect(isLikelyDaemonBugFix({ body })).toBe(true);
+  });
+  it.each([
+    'not a bug fix, but a regression was corrected',
+    'no bug here; a bug elsewhere was fixed',
+    'a bug was fixed, though this was not a regression',
+    'not a bug fix\na regression was corrected',
+    'a regression was corrected\nnot a bug fix',
+    'not only a bug', 'not a minor bug', 'not\na bug', 'not a\nbug',
+    'not, a bug', 'not a: bug', 'noteworthy bug', 'cannot bug', 'no_bug bug',
+    'notable regression', 'nobody broke',
+  ])('retains independent or unsupported signals: %s', (body) => {
+    expect(isLikelyDaemonBugFix({ title: 'Refactor', body })).toBe(true);
+  });
+  it.each(['Fix', 'Root cause', 'What broke', 'Problem', 'Incident'])(
+    'preserves the independent %s heading', (heading) => {
+      expect(isLikelyDaemonBugFix({ body: `## ${heading}\nnot a bug fix` })).toBe(true);
+    },
+  );
+  it('preserves a fix-shaped title despite a denial', () => {
+    expect(isLikelyDaemonBugFix({ title: 'fix: daemon', body: 'not a bug fix' })).toBe(true);
+  });
+});
+
+// Derived replay, NOT a recovered original event: remove only the entire later waiver line.
+const snapshotLines = PR_2939_SNAPSHOT.body.split('\n');
+const waiverLineIndex = snapshotLines.findIndex((line) => line.startsWith('soak-waiver:'));
+const noWaiver2939 = {
+  ...PR_2939_SNAPSHOT,
+  body: snapshotLines.filter((_, index) => index !== waiverLineIndex).join('\n'),
+};
+
+function replayCli(pr) {
+  const child = spawnSync(process.execPath, [
+    resolve(dirname(fileURLToPath(import.meta.url)), '../../soak-replay-gate-cli.mjs'),
+    `--title=${pr.title}`, `--body=${pr.body}`, `--files-json=${JSON.stringify(pr.files)}`, '--json',
+  ], { encoding: 'utf8' });
+  expect(child.error).toBeUndefined();
+  expect(child.stderr).toBe('');
+  return { status: child.status, verdict: JSON.parse(child.stdout) };
+}
+
+describe('PR #2939 derived no-waiver replay (#4503)', () => {
+  it('removes exactly one waiver line and preserves every other line, title, and files', () => {
+    expect(snapshotLines.filter((line) => line.startsWith('soak-waiver:'))).toHaveLength(1);
+    expect(extractSoakWaiver(PR_2939_SNAPSHOT.body)).toBeTruthy();
+    const restored = noWaiver2939.body.split('\n');
+    restored.splice(waiverLineIndex, 0, snapshotLines[waiverLineIndex]);
+    expect(restored.join('\n')).toBe(PR_2939_SNAPSHOT.body);
+    expect(noWaiver2939.title).toBe(PR_2939_SNAPSHOT.title);
+    expect(noWaiver2939.files).toEqual(PR_2939_SNAPSHOT.files);
+    expect(addsOrChangesSoakBreak(noWaiver2939.files)).toBe(false);
+    expect(extractSoakWaiver(noWaiver2939.body)).toBeNull();
+  });
+  it('passes as non-applicable without a waiver or a new break', () => {
+    expect(isLikelyDaemonBugFix(noWaiver2939)).toBe(false);
+    expect(evaluateSoakReplayGate(noWaiver2939)).toMatchObject({ applicable: false, ok: true });
+    expect(evaluateSoakReplayGate(noWaiver2939).waiver).toBeUndefined();
+  });
+  it('passes through the unchanged CLI without a waiver', () => {
+    expect(replayCli(noWaiver2939)).toMatchObject({
+      status: 0, verdict: { applicable: false, ok: true, waiver: null },
+    });
+  });
+  it('still requires evidence for a mixed denial plus affirmative signal in the same scope', () => {
+    const mixed = { ...noWaiver2939, body: 'not a bug fix, but a regression was corrected' };
+    expect(evaluateSoakReplayGate(mixed)).toMatchObject({ applicable: true, ok: false });
+    expect(replayCli(mixed)).toMatchObject({ status: 1, verdict: { applicable: true, ok: false, waiver: null } });
+    expect(evaluateSoakReplayGate({ ...mixed, files: [...mixed.files, `${SOAK_BREAKS_DIR_PREFIX}case.mjs`] }))
+      .toMatchObject({ applicable: true, ok: true });
+    expect(evaluateSoakReplayGate({ ...mixed, body: `${mixed.body}\nsoak-waiver: covered by pure replay` }))
+      .toMatchObject({ applicable: true, ok: true, waiver: 'covered by pure replay' });
+    expect(evaluateSoakReplayGate({ ...mixed, files: ['README.md'] }))
+      .toMatchObject({ applicable: false, ok: true });
+  });
 });

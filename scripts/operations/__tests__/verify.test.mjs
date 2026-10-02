@@ -263,3 +263,18 @@ describe('createChecksRunner', () => {
     expect(createChecksRunner({ spawn })({ cwd: '/x', mode: 'run' }).checks[0].outcome).toBe('unrun');
   });
 });
+
+it('preserves failure evidence through classification, shaping and actionable assessment', () => {
+  const failureDetails = { tests: [{ file: 'suite.test.ts', name: 'nested > broken' }], summary: 'assertion failed', truncated: false };
+  const stdout = JSON.stringify({ status: 'red', sha: 'abc', exitCode: 1, failureDetails });
+  const classified = classifyVerifyResult({ status: 2, stdout });
+  const verdict = assessChecks(finding([check(classified)]));
+  expect(verdict.ok).toBe(false);
+  expect(verdict.checks[0].failureDetails).toEqual(failureDetails);
+  expect(verdict.blocking[0].detail).toContain('suite.test.ts > nested > broken');
+  for (const over of [{ signal: 'SIGTERM' }, { status: 3 }, { stdout: 'bad' }]) {
+    const result = classifyVerifyResult({ status: 2, stdout, ...over });
+    expect(result.outcome).toBe('unrun');
+    expect(result.failureDetails).toBeUndefined();
+  }
+});
