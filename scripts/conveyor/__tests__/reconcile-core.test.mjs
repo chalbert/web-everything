@@ -3171,3 +3171,59 @@ describe('fix waiting episode', () => {
     expect(fixWaitingSince([...comments, note('15')])).toBe('2026-09-30T15:00:00.000Z');
   });
 });
+
+
+describe('operator send-back renews a bounded durable fix budget', () => {
+  const round = () => ({ body: ADVISORY_NOTE_MARKER, author: AUTOMATION });
+  const verdict = (over = {}) => ({
+    id: 'operator-send-back', createdAt: '2026-10-01T11:00:53Z',
+    author: { login: 'chalbert' },
+    body: '🔁 review — changes requested\n\nRecorded by chalbert via claude-code-chat.\n\nTwo required changes.',
+    ...over,
+  });
+  const plan = (comments, extra = {}) => planReconcile({
+    prs: [pr1563({ comments, labels: lbl('review:changes', 'review:human') })], now: NOW, ...extra,
+  });
+  const burned = () => Array.from({ length: 5 }, round);
+
+  it('dispatches after the operator sends a capped PR back, including after restart', () => {
+    const comments = [...burned(), verdict()];
+    for (let restart = 0; restart < 2; restart++) {
+      const result = plan(comments);
+      expect(result.dispatch).toEqual([expect.objectContaining({ kind: 'fix',
+        operatorFixBudget: { verdictId: 'operator-send-back', cap: 7, attempts: 5 } })]);
+    }
+    expect(plan([...comments, round()]).dispatch[0]).toMatchObject({ kind: 'fix', attempts: 6 });
+    const exhausted = plan([...comments, round(), round()]);
+    expect(exhausted.dispatch).toHaveLength(0);
+    expect(exhausted.refusals[0]).toMatchObject({ kind: 'cap-exhausted', attempts: 7, cap: 7 });
+    expect(exhausted.notes[0]).toMatchObject({ kind: 'round-cap-exhausted', cap: 7 });
+  });
+
+  it('cannot extend the grant by switching from advisory rounds to rearm rounds', () => {
+    const rearm = { body: REARM_COMMENT_MARKER, author: AUTOMATION };
+    expect(plan([...burned(), verdict(), rearm, rearm]).refusals[0])
+      .toMatchObject({ kind: 'cap-exhausted', attempts: 7, cap: 7 });
+  });
+
+  it.each([
+    { author: AUTOMATION, viewerDidAuthor: true },
+    { author: { login: 'outsider' } },
+    { author: undefined },
+    { id: undefined },
+    { createdAt: undefined },
+    { body: 'quoted: 🔁 review — changes requested\n\nRecorded by chalbert via claude-code-chat.' },
+    { body: '🔁 review — changes requested\n\nRecorded by agent (unattended review-loop).' },
+  ])('does not grant a budget to forged or agent-authored records: %j', (over) => {
+    const result = plan([...burned(), verdict(over)]);
+    expect(result.dispatch).toHaveLength(0);
+    expect(result.refusals[0]).toMatchObject({ kind: 'cap-exhausted', cap: 5 });
+  });
+
+  it('a later operator decision gets its own allowance without accumulating unused grants', () => {
+    const comments = [...burned(), verdict(), verdict({ id: 'second' }), round(), round()];
+    expect(plan(comments).refusals[0]).toMatchObject({ kind: 'cap-exhausted', cap: 7 });
+    expect(plan([...comments, verdict({ id: 'third' })]).dispatch[0])
+      .toMatchObject({ kind: 'fix', operatorFixBudget: { verdictId: 'third', cap: 9, attempts: 7 } });
+  });
+});
