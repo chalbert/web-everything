@@ -91,10 +91,10 @@ export const PROVIDER_CAP_ENV = Object.freeze({
   'agy-gemini': 'WE_REVIEW_SEAT_CAP_AGY_GEMINI',
 });
 /** The default cap per provider when its own env var (and, for codex only, the legacy shared one) is unset.
- *  Codex's default (80) matches the shared cap the operator had already raised the daemon plist to; both
- *  antigravity backends default far higher (300) — the operator's own "never below 90%" reading of both
- *  allowances, "use and see how it goes". */
-export const PROVIDER_CAP_DEFAULT = Object.freeze({ codex: 80, 'agy-claude': 300, 'agy-gemini': 300 });
+ *  Codex's default (80) matches the shared cap the operator had already raised the daemon plist to; agy-claude
+ *  keeps its default of 300. Gemini is off by default under the operator ruling of 2026-10-02:
+ *  Gemini too weak for review until Gemini 4; its own env cap can explicitly enable it. */
+export const PROVIDER_CAP_DEFAULT = Object.freeze({ codex: 80, 'agy-claude': 300, 'agy-gemini': 0 });
 /** The daily call cap for ONE provider: its own env var, else (codex only) the legacy shared env var, else its
  *  own default. Never throws; an unparseable or negative value is treated as unset. PURE. */
 export function resolveProviderCap(provider, env = process.env) {
@@ -565,7 +565,16 @@ export async function runExtraSeats({ pr, repo, lanePath, loopPayload, env = pro
       if (!io.cliAvailable(p)) { unavailable.push({ provider: p, reason: `${p} CLI not found on PATH` }); continue; }
       const hold = quotaHoldOrProbe(records, p, now, env);
       if (hold) { unavailable.push({ provider: p, reason: hold }); continue; }
-      if (usedByProvider[p] >= caps[p]) { unavailable.push({ provider: p, reason: `daily-cap: ${usedByProvider[p]}/${caps[p]} non-Claude seat calls already used today for ${p}` }); continue; }
+      if (usedByProvider[p] >= caps[p]) {
+        const explicitCap = Number(env?.[PROVIDER_CAP_ENV[p]]);
+        const offByDefault = p === 'agy-gemini' && caps[p] === 0
+          && !(Number.isInteger(explicitCap) && explicitCap >= 0);
+        const reason = offByDefault
+          ? 'off by default (operator ruling 2026-10-02: Gemini too weak for review until Gemini 4)'
+          : `${usedByProvider[p]}/${caps[p]} non-Claude seat calls already used today for ${p}`;
+        unavailable.push({ provider: p, reason: `daily-cap: ${reason}` });
+        continue;
+      }
       available.push(p);
     }
     for (const u of unavailable) io.log(`added seats: skipping ${u.provider} — ${u.reason}`);
