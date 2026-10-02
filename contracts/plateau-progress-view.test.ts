@@ -285,3 +285,283 @@ describe('executor provenance and hold evidence', () => {
     expect(validate(value)).toBe(true);
   });
 });
+
+describe('PR collection capability regressions', () => {
+  it.each([null, {}, 'unavailable', [null]])('rejects malformed supplied PR rows %j', pullRequests => {
+    expect(validate({ ...snapshot(), pullRequests })).toBe(false);
+  });
+  it('requires matching coverage when PR rows are supplied', () => {
+    expect(validate({ ...snapshot(), pullRequests: [] })).toBe(false);
+  });
+  it('rejects malformed supplied PR coverage', () => {
+    const value = snapshot();
+    Object.assign(value.coverage.collections, { pullRequests: {} });
+    expect(validate(value)).toBe(false);
+  });
+  it.each(['prPageRequest', 'prPageResponse', 'prPageRestart'])('declares standalone %s', name => {
+    expect(schema.definitions).toHaveProperty(name);
+  });
+});
+
+// Fixture-only relationship assertions: no runtime validator or classification algorithm.
+const pageAjv = new Ajv({ allErrors: true, strict: false });
+const pageValidators = Object.fromEntries(['prPageRequest', 'prPageResponse', 'prPageRestart'].map(name => [name,
+  pageAjv.compile({ definitions: schema.definitions, $ref: `#/definitions/${name}` }),
+]));
+const prSnapshot = () => structuredClone(examples['pr-complete-cross-repo'].snapshot);
+type PrSnapshot = ReturnType<typeof prSnapshot>;
+type Row = PrSnapshot['pullRequests'][number];
+type Coverage = PrSnapshot['coverage']['collections']['pullRequests'];
+type Exchange = typeof examples['pr-unknown-total-pages']['exchanges'][number] |
+  typeof examples['pr-restart-old-snapshot']['exchanges'][number];
+const identity = (row: Row) => `${row.repo}#${row.number}`;
+function conformRows(rows: Row[], coverage: Coverage, value: PrSnapshot) {
+  expect(coverage.included).toBe(rows.length);
+  expect(coverage.included).toBeLessThanOrEqual(coverage.cached);
+  if (coverage.total !== null) expect(coverage.cached).toBeLessThanOrEqual(coverage.total);
+  expect(new Set(rows.map(identity)).size).toBe(rows.length);
+  expect(value.sources).toHaveProperty(coverage.source);
+  expect(coverage.freshness).toEqual(Reflect.get(value.sources, coverage.source));
+  if (coverage.complete) {
+    expect(coverage.total).not.toBeNull();
+    expect(coverage.cached).toBe(coverage.total);
+    expect(coverage.freshness.complete).toBe(true);
+  }
+  for (const row of rows) {
+    expect(row.url).toBe(`https://github.com/${row.repo}/pull/${row.number}`);
+    for (const source of [...row.sources, row.ci.source, row.review.source,
+      ...row.waitingChain.blockers.map(blocker => blocker.source)]) {
+      expect(Object.hasOwn(value.sources, source)).toBe(true);
+      expect(row.sources).toContain(source);
+    }
+    expect(row.waitReasons).toContain(row.primaryWait);
+    if (row.primaryWait === 'ready') {
+      expect(row.draft).toBe(false);
+      expect(row.ci.state.value).toBe('success');
+      expect(row.review.state.value).toBe('approved');
+      for (const evidence of [row.ci, row.review]) {
+        expect(evidence.observedHeadSha.value).toBe(row.headSha);
+        expect(evidence.observedAt.value).not.toBeNull();
+      }
+    }
+    const chain = row.waitingChain;
+    expect(chain.nextSteps.map(step => step.order)).toEqual(chain.nextSteps.map((_, i) => i + 1));
+    for (const instant of [row.waitSince.value, chain.holder.claimedAt.value,
+      row.ci.observedAt.value, row.review.observedAt.value,
+      ...chain.blockers.map(blocker => blocker.observedAt.value)]) {
+      if (instant !== null) expect(Date.parse(instant)).toBeLessThanOrEqual(Date.parse(value.observedAt));
+    }
+    if (chain.holder.liveness === 'active') {
+      expect(chain.holder.identity.value).not.toBeNull();
+      expect(chain.holder.claimedAt.value).not.toBeNull();
+      expect(chain.holder.leaseExpiresAt.value).not.toBeNull();
+      expect(Date.parse(chain.holder.leaseExpiresAt.value!)).toBeGreaterThan(Date.parse(value.observedAt));
+    }
+    if (chain.eta.milliseconds.value !== null) {
+      expect(chain.eta.sampleCount).toBeGreaterThan(0);
+      expect(chain.eta.sampleWindow.value).not.toBeNull();
+      expect(chain.eta.method.value).not.toBeNull();
+      expect(chain.eta.uncertainty.value).not.toBeNull();
+    }
+    const window = chain.eta.sampleWindow.value;
+    if (window) {
+      expect(Date.parse(window.start)).toBeLessThan(Date.parse(window.end));
+      expect(Date.parse(window.end)).toBeLessThanOrEqual(Date.parse(value.observedAt));
+    }
+  }
+}
+function conformExchanges(value: PrSnapshot, exchanges: Exchange[]) {
+  const expectedIdentity = { snapshotId: value.snapshotId, publisherId: value.publisherId, sequence: value.sequence };
+  const seen: Row[] = [];
+  const cursors = new Set<string>();
+  let next: string | null = null;
+  for (const { request, result } of exchanges) {
+    expect(pageValidators.prPageRequest(request)).toBe(true);
+    const restart = result.kind === 'pr-page-restart';
+    expect(pageValidators[restart ? 'prPageRestart' : 'prPageResponse'](result)).toBe(true);
+    expect(request.identity).toEqual(expectedIdentity);
+    expect(result.identity).toEqual(request.identity);
+    expect(result.cursor).toBe(request.cursor);
+    expect(result.collection).toBe(request.collection);
+    if ('replacement' in result) {
+      if (result.replacement) {
+        expect(result.replacement).not.toEqual(request.identity);
+        if (result.reason === 'publisher-restart') expect(result.replacement.publisherId).not.toBe(request.identity.publisherId);
+      }
+      continue;
+    }
+    expect(request.cursor).toBe(next);
+    const coverage = value.coverage.collections.pullRequests;
+    expect({ ...result.coverage, included: coverage.included }).toEqual(coverage);
+    conformRows(result.rows, result.coverage, value);
+    for (const row of result.rows) {
+      const initial = value.pullRequests.find(r => identity(r) === identity(row));
+      if (initial) expect(row).toEqual(initial);
+    }
+    seen.push(...result.rows);
+    expect(new Set(seen.map(identity)).size).toBe(seen.length);
+    next = result.nextCursor;
+    if (next !== null) {
+      expect(cursors.has(next)).toBe(false);
+      cursors.add(next);
+      expect(seen.length).toBeLessThan(coverage.cached);
+    } else expect(seen.length).toBe(coverage.cached);
+  }
+  if (seen.length) {
+    expect(next).toBeNull();
+    for (const row of value.pullRequests) expect(seen).toContainEqual(row);
+  }
+}
+const prEntries = [
+  ...entries(prSnapshot().pullRequests, ['pullRequests']),
+  { path: ['coverage', 'collections', 'pullRequests'], value: prSnapshot().coverage.collections.pullRequests },
+  ...entries(prSnapshot().coverage.collections.pullRequests, ['coverage', 'collections', 'pullRequests']),
+];
+
+describe('PR waiting and cached-page conformance', () => {
+  for (const [name, example] of Object.entries(examples)) {
+    if (!('pullRequests' in example.snapshot)) continue;
+    it(`validates relationships in ${name}`, () => {
+      const value = example.snapshot as PrSnapshot;
+      conformRows(value.pullRequests, value.coverage.collections.pullRequests, value);
+      if ('exchanges' in example) conformExchanges(value, example.exchanges);
+    });
+  }
+  for (const { path, value: field } of prEntries) {
+    if (field !== null && typeof field === 'object' && !Array.isArray(field)) {
+      it(`closes structured evidence ${path.join('.')}`, () => {
+        const value = prSnapshot();
+        replace(value, path, { ...field, transcript: 'forbidden payload' });
+        expect(validate(value)).toBe(false);
+      });
+      it.each(Object.keys(field))(`requires ${path.join('.')}.%s`, key => {
+        const value = prSnapshot();
+        const changed = { ...field };
+        Reflect.deleteProperty(changed, key);
+        replace(value, path, changed);
+        expect(validate(value)).toBe(false);
+      });
+      if ('value' in field && field.value === null) {
+        it(`requires reason for unknown ${path.join('.')}`, () => {
+          const value = prSnapshot();
+          replace(value, [...path, 'reason'], null);
+          expect(validate(value)).toBe(false);
+        });
+      }
+    }
+    if (typeof field === 'number') {
+      it.each([-1, 1.5])(`rejects invalid count/duration ${path.join('.')}: %s`, invalid => {
+        const value = prSnapshot(); replace(value, path, invalid);
+        expect(validate(value)).toBe(false);
+      });
+    }
+    if (typeof field === 'string' && /^2026-/.test(field)) {
+      it.each(['yesterday', '2026-02-29T00:00:00Z', '2026-09-30T24:00:00Z'])(
+        `rejects invalid instant ${path.join('.')}: %s`, invalid => {
+          const value = prSnapshot(); replace(value, path, invalid);
+          expect(validate(value)).toBe(false);
+        });
+    }
+  }
+  it.each(['/tmp/secret', '~/secret', '../secret', 'a/../secret', './secret', 'C:/secret', 'a\\secret', 'a//secret'])(
+    'rejects hostile shared file %s', invalid => {
+      const value = prSnapshot(); value.pullRequests[0].waitingChain.blockers[0].file.path = invalid;
+      expect(validate(value)).toBe(false);
+    });
+  it.each(['alpha', '/alpha', '../alpha', 'example/alpha/more'])('rejects malformed repository %s', repo => {
+    const value = prSnapshot(); value.pullRequests[0].repo = repo;
+    expect(validate(value)).toBe(false);
+  });
+  const mutations: [string, (value: PrSnapshot) => void][] = [
+    ['included mismatch', v => { v.coverage.collections.pullRequests.included = 1; }],
+    ['above cached', v => { v.coverage.collections.pullRequests.cached = 1; }],
+    ['above total', v => { v.coverage.collections.pullRequests.total = 1; }],
+    ['duplicate identity', v => { v.pullRequests[1] = structuredClone(v.pullRequests[0]); }],
+    ['missing source join', v => { v.pullRequests[0].ci.source = 'missing'; }],
+    ['false completeness', v => { Reflect.set(v.coverage.collections.pullRequests, 'total', null); }],
+    ['incomplete source', v => { v.sources.pullRequests.complete = false; v.coverage.collections.pullRequests.freshness.complete = false; }],
+    ['old-head readiness', v => { v.pullRequests[1].ci.observedHeadSha.value = 'b'.repeat(40); }],
+    ['missing-CI readiness', v => { Reflect.set(v.pullRequests[1].ci.state, 'value', null); }],
+    ['expired active holder', v => { v.pullRequests[0].waitingChain.holder.liveness = 'active'; }],
+    ['unordered next steps', v => { v.pullRequests[0].waitingChain.nextSteps.reverse(); }],
+    ['unmeasured ETA', v => { v.pullRequests[1].waitingChain.eta.sampleCount = 0; }],
+    ['inverted sample window', v => { v.pullRequests[1].waitingChain.eta.sampleWindow.value!.start = v.observedAt; }],
+    ['future wait start', v => { Reflect.set(v.pullRequests[0].waitSince, 'value', '2099-01-01T00:00:00Z'); }],
+  ];
+  it.each(mutations)('rejects cross-field %s', (_name, mutate) => {
+    const value = prSnapshot(); mutate(value);
+    expect(() => conformRows(value.pullRequests, value.coverage.collections.pullRequests, value)).toThrow();
+  });
+  it('retains unknown universe through final partial page and historical head evidence', () => {
+    const value = examples['pr-unknown-total-pages'];
+    expect(value.exchanges.at(-1)!.result).toMatchObject({ nextCursor: null, coverage: { total: null, cached: 3, complete: false } });
+    expect(value.snapshot.pullRequests[0].ci.observedHeadSha.value).not.toBe(value.snapshot.pullRequests[0].headSha);
+    expect(value.snapshot.pullRequests[0].waitSince.value).toBeNull();
+    expect(value.snapshot.pullRequests[0].waitingChain.holder.claimedAt.value).not.toBe(value.snapshot.observedAt);
+  });
+  it.each(['identity', 'cursor', 'membership', 'counts', 'early-end', 'cycle', 'duplicate', 'changed-row'])(
+    'rejects page inconsistency: %s', mutation => {
+      const value = structuredClone(examples['pr-unknown-total-pages']);
+      const result = value.exchanges[1].result;
+      if (mutation === 'identity') result.identity.publisherId = 'different-boot';
+      if (mutation === 'cursor') result.cursor = 'wrong';
+      if (mutation === 'membership') result.coverage.cached++;
+      if (mutation === 'counts') result.coverage.included++;
+      if (mutation === 'early-end') result.nextCursor = null;
+      if (mutation === 'cycle') result.nextCursor = 'opaque-1';
+      if (mutation === 'duplicate') result.rows[0] = structuredClone(value.exchanges[0].result.rows[0]);
+      if (mutation === 'changed-row') value.exchanges[0].result.rows[0].description = 'Changed within snapshot';
+      expect(() => conformExchanges(value.snapshot as PrSnapshot, value.exchanges)).toThrow();
+    });
+  for (const example of [examples['pr-unknown-total-pages'], examples['pr-restart-old-snapshot']]) {
+    for (const [index, exchange] of example.exchanges.entries()) {
+      for (const [side, message] of Object.entries(exchange)) {
+        const validator = pageValidators[side === 'request' ? 'prPageRequest' : 'replacement' in message ? 'prPageRestart' : 'prPageResponse'];
+        it.each(Object.keys(message))(`requires page ${message.kind} ${index} %s`, key => {
+          const value = structuredClone(message); Reflect.deleteProperty(value, key);
+          expect(validator(value)).toBe(false);
+        });
+        it(`rejects transcript and root-envelope use of ${message.kind} ${index}`, () => {
+          expect(validator({ ...message, transcript: 'not permitted' })).toBe(false);
+          expect(validate(message)).toBe(false);
+        });
+      }
+    }
+  }
+});
+
+describe('strict PR page and identity wire boundaries', () => {
+  it.each([
+    [['pullRequests', 0, 'number'], 0],
+    [['pullRequests', 0, 'headSha'], 'short-sha'],
+    [['pullRequests', 0, 'url'], 'file:///private/secret'],
+    [['pullRequests', 0, 'waitingChain'], {}],
+    [['pullRequests', 0, 'waitingChain', 'queuePosition', 'value'], 0],
+    [['coverage', 'collections', 'pullRequests', 'freshness'], {}],
+  ] as [Path, unknown][])('rejects malformed supplied %j', (path, invalid) => {
+    const value = prSnapshot(); replace(value, path, invalid);
+    expect(validate(value)).toBe(false);
+  });
+  it.each([
+    [['identity', 'sequence'], -1], [['identity', 'sequence'], 0.5],
+    [['identity', 'snapshotId'], ''], [['identity', 'publisherId'], ''],
+    [['collection'], 'runs'], [['cursor'], ''], [['nextCursor'], ''],
+    [['rows'], null], [['rows', 0, 'waitingChain'], {}],
+    [['coverage', 'cached'], -1], [['coverage', 'included'], 0.5],
+    [['coverage', 'freshness', 'observedAt'], '2026-02-29T00:00:00Z'],
+  ] as [Path, unknown][])('rejects malformed standalone response %j', (path, invalid) => {
+    const value = structuredClone(examples['pr-unknown-total-pages'].exchanges[0].result);
+    replace(value, path, invalid);
+    expect(pageValidators.prPageResponse(value)).toBe(false);
+  });
+  it('rejects restart with a non-replacement identity or wrong publisher boot', () => {
+    for (const name of ['pr-restart-old-snapshot', 'pr-restart-publisher-restart'] as const) {
+      const value = structuredClone(examples[name]);
+      value.exchanges[0].result.replacement = structuredClone(value.exchanges[0].request.identity);
+      expect(() => conformExchanges(value.snapshot as PrSnapshot, value.exchanges)).toThrow();
+    }
+    const value = structuredClone(examples['pr-restart-invalid-cursor'].exchanges[0].result);
+    value.reason = 'invented';
+    expect(pageValidators.prPageRestart(value)).toBe(false);
+  });
+});

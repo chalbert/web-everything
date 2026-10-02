@@ -2,9 +2,10 @@
 kind: story
 size: 3
 parent: "4623"
-status: open
+status: resolved
 scope: ["we:contracts/plateau-progress-view.schema.json", "we:contracts/plateau-progress-view.examples.json", "we:contracts/plateau-progress-view.test.ts"]
 dateOpened: "2026-10-01"
+dateResolved: "2026-10-02"
 preparedDate: "2026-10-02"
 preparedAgainstSha: "fff15e8125add8c05a28a86a32f914cc0bb15ed5"
 tags: []
@@ -22,6 +23,16 @@ Preparation inspected WE HEAD `fff15e8125add8c05a28a86a32f914cc0bb15ed5` and the
 - **Compatibility drift:** preserve the newer optional health section too (we:contracts/plateau-progress-view.schema.json:1481–1503; we:contracts/plateau-progress-view.test.ts:107). The unchanged examples include schema-1 fallback and pending-stop health evidence (we:contracts/plateau-progress-view.examples.json:1541,2857). The original test-plan phrase “Red today expected” was not an observed failure: baseline `npx vitest run we:contracts/plateau-progress-view.test.ts` (execute without the locus prefix) passed **591 tests** during preparation. New capability tests still need to be authored and demonstrated failing during implementation.
 - **Plateau seam:** current cached PR reading returns only a measure and freshness, not PR rows (we:../plateau-app/src/wip/progress-read.ts:66–78). Current progress types declare runs/holds/actions coverage and no independent PR array (we:../plateau-app/src/wip/types.ts:264–275); the model emits those collections and a cached PR count (we:../plateau-app/src/wip/wip-model.ts:359–377). The relay already checks schema-2 identity and source joins (we:../plateau-app/wip-relay.js:760–782). Thus this is an additive contract, not initial schema creation or a completed consumer rollout.
 - **Old scope → corrected scope:** retain all three WE paths, including the conformance test; no Plateau implementation path belongs in this story. The parent already filed separate collection, enrichment, transport and UI successors with their tests (we:backlog/4623-extend-plateau-fleet-to-every-author-and-repo-with-explicit.md:112–122). This preparation changes only this card and does not alter its goal or a ratified decision.
+
+### Implementation proof (2026-10-02)
+
+- Source checkout: `e8ffa79c46f8e76fcbfb3e3aca60c3956a992098`. Before schema edits, the nine added capability regressions in we:contracts/plateau-progress-view.test.ts actually failed: six malformed/missing-coverage cases were accepted and three standalone page definitions were absent. The other **759 tests passed** (768 total), superseding preparation’s older 591-test baseline.
+- Added strictly validated optional PR rows, paired paged coverage, waiting evidence and standalone request/response/restart definitions in we:contracts/plateau-progress-view.schema.json. Nullable facts require reasons; structured evidence is closed and shared files require safe repo-qualified relative references. The existing non-paging collection definition is unchanged. Shape validation and fixture-only arithmetic, source joins, temporal/head and paging checks remain explicitly separate from Plateau runtime computation.
+- Named fixtures in we:contracts/plateau-progress-view.examples.json: `pr-complete-cross-repo`, `pr-empty`, `pr-partial-known`, `pr-unknown-total-pages`, and `pr-restart-{old-snapshot,publisher-restart,invalid-cursor}`. They cover cardless/null-author rows, equal numbers across repos, old-head CI, PR/build overlap, expired/stale holders, unknown wait starts/queue positions, measured/unknown ETA, three-page traversal and replacement snapshots. All **15 pre-existing examples** were compared structurally against the source SHA and are unchanged, including schema 1, optional health and the intervening provenance extension.
+- After: focused `npx vitest run we:contracts/plateau-progress-view.test.ts` (locus removed for execution) passed **1,265 tests**. Deliberate mutations reject malformed nested fields, unexplained unknowns, hostile paths/transcript fields, false readiness/completeness, incorrect counts, duplicate identities, absent source joins, expired active claims, invalid ETA samples, changed rows, cursor cycles and incompatible restarts. The exhausted partial cache still has `total: null`, `cached: 3`, `complete: false`.
+- Upstream re-probe: local Plateau HEAD `a497ad18d04c64d3622bc549824918da632218c5` still declares only runs/holds/actions collection coverage at we:../plateau-app/src/wip/types.ts:268; we:../plateau-app/src/wip/progress-read.ts:70–78 returns a measure/source, not PR rows. No consumer rollout is claimed.
+- Independence: the conformance test imports only Vitest, Ajv and the two scoped JSON artifacts; the successful run needed no Plateau process, sibling import, credentials, server or GitHub calls. Free-text secret detection and runtime ETA/classification/transport are not claimed by these schema checks. No helper files or shared agent docs were created or changed.
+- Verification: full `npm run check:standards` passed with **0 errors, 5,248 warnings**. Initial `node we:scripts/verify-lane.mjs` (locus removed) passed both the contract suite and the additional operation-run regression suite (**1,261 tests** before the final 19 boundary cases), plus its scoped standards gate (**0 errors**). Final rerun after the 19 boundary cases and this card’s proof entry: `node we:scripts/verify-lane.mjs` returned **green / exit 0**; full `npm run check:standards` again returned **0 errors, 5,248 warnings / exit 0**. `git diff --check` also passed.
 
 ## Design
 
