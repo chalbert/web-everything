@@ -772,6 +772,9 @@ export function buildCliDaemonEffects({ owner, intervalMs = DEFAULT_INTERVAL_MS,
       // required by the card and matched by the soak scenario/live-proof read; never merely implied by an
       // empty `dispatched` count.
       if (authPaused) log.error(`reconcile-fix-dispatch-daemon: ${authPauseReason ?? 'paused: Claude login expired — run /login'}`);
+      for (const r of repos) for (const rank of (r.result?.scopeRanks ?? [])) {
+        log.error(`reconcile-fix-dispatch-daemon: scope-rank ${r.repo} PR #${rank.pr} — rank ${rank.rank}, blocks ${rank.blocks}, age ${rank.ageHours}h, score ${rank.score}, aged-FIFO ${rank.aged}`);
+      }
       for (const r of repos) if (r.error) log.error(`reconcile-fix-dispatch-daemon: ${r.repo} tick failed (non-fatal, other repos unaffected): ${r.error}`);
       // #x0mn6x0 — ONE LINE PER REFUSAL, never just the count above. `refusals` = a PR the plan offered to
       // `fix`/`ci-heal` but the dispatch itself refused (no-lane, held, dispatch-failed, unsupported-repo,
