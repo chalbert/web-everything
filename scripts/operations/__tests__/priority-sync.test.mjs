@@ -620,7 +620,9 @@ describe('the declaration', () => {
     const { buildCliSpec } = await import('../cli-adapter.mjs');
     expect(buildCliSpec(r.declaration).usage).toMatch(/--ref=<string>, default origin\/main.*--apply=<boolean>, default false/);
     expect(Object.keys(r.sinks)).toEqual([PRIORITY_SYNC_EFFECT]);
-  });
+  // Real cold runner integration: 1.645 s isolated locally; historical shard exceeded 5 s.
+  // Bound this import/registration check independently; all registration/help/sink assertions stay real.
+  }, 30_000);
 });
 
 describe('check-priority: the unwritten why warns, it does not fail', () => {

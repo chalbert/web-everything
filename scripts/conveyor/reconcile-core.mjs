@@ -189,7 +189,7 @@ import {
 // gate below), so the review this pass would otherwise dispatch the moment CI finishes is instead HELD until
 // this fires and un-drafts it — closing the "6 of 26 PRs got reviewed before their own first CI run even
 // finished" measurement (operator, 2026-09-27) that motivated this whole feature.
-export const DISPATCH_KINDS = Object.freeze(['fix', 'review', 'ci-heal', 'convert-advisory', 'promote-draft']);
+export const DISPATCH_KINDS = Object.freeze(['fix', 'review', 'ci-heal', 'ci-timeout-rerun', 'convert-advisory', 'promote-draft']);
 
 /**
  * we:scripts/conveyor/reconcile-core.mjs#REFUSAL_KINDS — every reason this pass declines to dispatch. Frozen and
@@ -1834,6 +1834,22 @@ export function planReconcile({
           continue;
         }
       }
+      const retryBudget = pr.timeoutRetryBudget;
+      if (retryBudget?.pending) {
+        const why = `PR #${prNumber}: timeout retry needs your decision — ${retryBudget.reason ?? 'request outcome remains unresolved'}; no further rerun or heal is safe`;
+        refuse('ci-heal-escalated', { ...withPhase, why });
+        notes.push({ kind: 'timeout-retry-needs-human', prNumber, text: why });
+        continue;
+      }
+      // xng7q1p: same-head mechanical retries never consume or rewrite heal markers.
+      // All main-red, escalation and live-owner guards above retain precedence.
+      if (retryBudget?.confirmed < 2 && pr.timeoutRetry?.eligible && pr.timeoutRetry.head === pr.headRefOid && pr.timeoutRetry.pr === prNumber) {
+        dispatch.push({ ...base, ...withPhase, kind: 'ci-timeout-rerun', timeoutRetry: pr.timeoutRetry,
+          why: 'complete timeout inventory and unchanged dependency closure; independent retry budget' });
+        continue;
+      }
+      if (pr.timeoutRetry && !pr.timeoutRetry.eligible) notes.push({ kind: 'timeout-retry-ineligible', prNumber,
+        text: `PR #${prNumber}: ${pr.timeoutRetry.reason}` });
       const ciHealAttempts = countCiHealComments(pr?.comments);
       if (ciHealAttempts >= ciHealCap) {
         refuse('cap-exhausted', {
