@@ -3,7 +3,7 @@ bornAs: xamy1gk
 kind: story
 size: 3
 status: open
-scope: ["we:scripts/lib/probation-launcher.mjs", "we:scripts/operations/probation-build-run.mjs", "we:scripts/operations/__tests__/probation-build-run.test.mjs"]
+
 dateOpened: "2026-09-30"
 tags: []
 ---
@@ -15,3 +15,12 @@ Live 2026-09-30: Codex prepare runs of #3996 and #4003 through we:scripts/operat
 ## Done when
 
 1. **Executable** — TODO: a command that fails before this item lands and passes after.
+
+## Findings (standalone worker, 2026-10-02)
+
+The build-dispatch daemon held #4670 with:
+
+> worker-declined: could-not-prepare: #4670 leaves a policy choice unresolved: which metadata may preparation workers change, and under what conditions may they re-estimate 'size' or remove 'blockedBy' dependencies? The premise about #4658 is incorrect: both current preparation briefs explicitly preserve other frontmatter. A direct probe of 'we:scripts/lib/probation-launcher.mjs' confirmed that scope changes pass, while 'size', 'blockedBy', and 'status' changes are refused. 'we:scripts/operations/__tests__/probation-build-run.test.mjs:910' explicitly tests refusal of 'blockedBy' edits. The generic refusal and disc…
+
+`scope:` was cleared above so this card is picked up by the existing unshaped-item auto-prepare path;
+a prepare pass re-scopes it against the finding.
