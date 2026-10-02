@@ -48,7 +48,13 @@
  * cannot corrupt anything, and a lease taken inside a one-shot read is a lease nothing releases when the process
  * is killed.
  */
+import { collapseRollupToLatestPerName } from '../lib/rollup-collapse.mjs';
+import { FAILING_CONCLUSIONS, NON_BLOCKING_CONCLUSIONS } from '../operations/pr-status.mjs';
+import { checksArgv, parseJsonLines, GH_TIMEOUT_MS } from '../operations/pr-status-io.mjs';
 import { isGhDeferred } from '../lib/gh-deferred.mjs';
+import { createHash } from 'node:crypto';
+import { posix } from 'node:path';
+import { createRequire } from 'node:module';
 import { repoKeyForSlug, CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
 // #2748 false-red follow-up (soak-replay-gate, PR #2775) — the repo's REQUIRED status-check names, live +
 // cached (`we:scripts/lib/required-status-checks.mjs`), so `planReconcile`'s `ci-red` branch means a REQUIRED
@@ -953,7 +959,7 @@ export function formatReport({ dispatch = [], refusals = [], notes = [] } = {}) 
       lines.push(`  → ${kind.padEnd(6)} PR #${d.prNumber} (${d.headRefName ?? '?'}) — ${d.why}`);
     }
   }
-  for (const kind of REFUSAL_KINDS) {
+  for (const kind of [...REFUSAL_KINDS, 'check-read-failed']) {
     for (const r of refusals.filter((x) => x.kind === kind)) {
       // The BIND EVIDENCE rides on the line itself for the liveness kinds. A refusal a reader cannot audit is
       // the thing this pass was built to remove.
@@ -965,6 +971,68 @@ export function formatReport({ dispatch = [], refusals = [], notes = [] } = {}) 
   }
   for (const n of notes) lines.push(`  ! ${n.text}`);
   return lines.join('\n');
+}
+
+/** Read the complete exact-head REST feed, including main-red attribution evidence. */
+export function defaultReadChecks({ repo, sha }, { exec = execFileSyncThrottled } = {}) {
+  return parseJsonLines(exec('gh', checksArgv({ repo, sha }), {
+    encoding: 'utf8', timeout: GH_TIMEOUT_MS, maxBuffer: 32 * 1024 * 1024,
+    throttle: { op: 'pr-status-checks', repo },
+  }));
+}
+
+/**
+ * Hydrate truncated or incomplete check input from the exact-head REST feed. Unknown evidence is withheld from the
+ * CI-consuming branches (heal, promotion) via an `unchecked` verdict, but never removes the PR from planning.
+ */
+function hydrateChecks(prs, { repo, requiredChecks, readChecks }) {
+  const cache = new Map();
+  const ready = [], refusals = [];
+  for (const pr of prs) {
+    const runs = Array.isArray(pr.statusCheckRollup) ? pr.statusCheckRollup : [];
+    const missing = (requiredChecks ?? []).filter(name => !runs.some(run => run?.name === name));
+    if (runs.length < 100 && !missing.length) { ready.push(pr); continue; }
+    const sha = pr.headRefOid;
+    const key = `${repo}/${sha}`;
+    if (!cache.has(key)) {
+      try {
+        if (!isSha(sha)) throw new Error('missing or invalid exact head SHA');
+        const rows = readChecks({ repo, sha });
+        if (!Array.isArray(rows) || rows.some(row => !row || !Number.isSafeInteger(row.id)
+          || typeof row.name !== 'string' || !row.name || typeof row.status !== 'string'
+          || !['queued', 'in_progress', 'completed', 'waiting', 'requested', 'pending'].includes(row.status.toLowerCase())
+          || (row.conclusion != null && typeof row.conclusion !== 'string')
+          || (row.completed_at != null && !Number.isFinite(Date.parse(row.completed_at))))) {
+          throw new Error('malformed check runs');
+        }
+        const unreadable = collapseRollupToLatestPerName(rows).filter(row => (!requiredChecks?.length || requiredChecks.includes(row.name))
+          && row.status.toLowerCase() === 'completed'
+          && !['success', ...FAILING_CONCLUSIONS, ...NON_BLOCKING_CONCLUSIONS].includes(row.conclusion?.toLowerCase()));
+        if (unreadable.length) throw new Error(`unreadable conclusions: ${unreadable.map(row => row.name).join(', ')}`);
+        // Absent required names are not a read failure: observed red/pending evidence must still reach the
+        // reducer (red precedence, so a cancelled check heals). Only when NOTHING observed speaks for the
+        // missing names is the evidence incomplete — the reducer then reports `unchecked`, which never heals
+        // or promotes, and the refusal below keeps that visible.
+        const absent = (requiredChecks ?? []).filter(name => !rows.some(row => row.name === name));
+        const observed = collapseRollupToLatestPerName(rows).some(row => (!requiredChecks?.length || requiredChecks.includes(row.name))
+          && (row.status.toLowerCase() !== 'completed' || FAILING_CONCLUSIONS.includes(row.conclusion?.toLowerCase())));
+        cache.set(key, { rows: rows.map(row => ({ ...row, status: row.status.toUpperCase(),
+          conclusion: row.conclusion?.toUpperCase() ?? null, completedAt: row.completed_at ?? null })),
+        ...(absent.length && !observed ? { incomplete: `missing required checks: ${absent.join(', ')}` } : {}) });
+      } catch (error) { cache.set(key, { error: String(error?.message ?? error) }); }
+    }
+    const result = cache.get(key);
+    const refused = result.error ?? result.incomplete;
+    if (refused) {
+      refusals.push({ kind: 'check-read-failed', prNumber: pr.number, headRefOid: sha,
+        why: `required-check hydration refused for ${repo}@${sha}: ${refused}` });
+    }
+    // The refusal withholds CI evidence only. The PR stays in planning for every branch that does not consume
+    // it (conflict-fix, review dispatch, stand-down, label reconciliation): an unreadable read swaps the
+    // truncated snapshot for an empty rollup (`unchecked`, never green or red), never drops the PR.
+    ready.push({ ...pr, statusCheckRollup: result.error ? [] : result.rows });
+  }
+  return { prs: ready, refusals };
 }
 
 /**
@@ -986,10 +1054,11 @@ export function runReconcilePass({
   enrichSystemFix = enrichPrsWithSystemFixFacts,
   // fix procedure — attaches each PR's live fix claim (see {@link enrichPrsWithFixClaims}). Injectable like the rest.
   enrichFixClaims = enrichPrsWithFixClaims,
+  enrichTimeouts = enrichPrsWithTimeoutEvidence,
   now = Date.now(), repo = null, defaultBranch = 'main',
   // #2748 false-red follow-up — injectable so a test can supply a fixture with no network, matching every
   // other reader in this file. Defaults to the live, cached branch-protection read.
-  readRequiredChecks = getRequiredStatusChecks,
+  readRequiredChecks = getRequiredStatusChecks, readChecks = defaultReadChecks,
   // #2787-live-incident (2026-09-27) — `origin/<defaultBranch>`'s own current tip, read PURELY LOCALLY (no `gh`
   // call at all): `reconcile-core.mjs#planReconcile`'s conflict-fix cap needs it to tell "the same conflict,
   // still stuck" apart from "a fresh conflict, main moved on" (see that function's own `mainSha` param).
@@ -1021,7 +1090,10 @@ export function runReconcilePass({
   // from the PR's own defect. Costs nothing beyond what `readPrs` already fetched when nothing is `ci:failed`.
   // #4501 — `requiredChecks` now threaded through so this enrichment judges the SAME live-required set
   // `planReconcile` uses below, instead of silently falling back to `DEFAULT_MAIN_RED_ATTRIBUTED_CHECKS`.
-  const { prs: redPrs, mainRedWindows, mainLatestCheckRuns } = enrichMainRed(rawPrs, { repo: resolvedRepo, defaultBranch, requiredChecks });
+  const hydrated = hydrateChecks(rawPrs, {
+    repo: resolvedRepo ?? CONSTELLATION_REPOS[repoKey].slug, requiredChecks, readChecks,
+  });
+  const { prs: redPrs, mainRedWindows, mainLatestCheckRuns } = enrichMainRed(hydrated.prs, { repo: resolvedRepo, defaultBranch, requiredChecks });
   // live incident, PR #2752 (#4034/#2748) — attach `alreadyLandedInMain` to any PR carrying
   // `merge-status:conflicting` whose own content is already, file-by-file, present on `main`. Costs nothing
   // beyond the label scan `readPrs` already fetched every field for when no PR carries that label.
@@ -1029,15 +1101,16 @@ export function runReconcilePass({
   // #4265 — attach each stacked PR's own base ref's current tip, purely locally, no `gh` cost.
   const baseRefPrs = enrichBaseRef(alreadyLandedPrs, { defaultBranch });
   // #4263 — re-check any `waiting-on-system-fix` escalation's named fix PR for having since landed.
-  const prs = enrichFixClaims(enrichSystemFix(baseRefPrs, { repo: resolvedRepo }), { repo: repoKey });
+  const prs = enrichTimeouts(enrichFixClaims(enrichSystemFix(baseRefPrs, { repo: resolvedRepo }), { repo: repoKey }),
+    { repo: CONSTELLATION_REPOS[repoKey].slug });
   const agents = enrich(readAgents({}));
   const mainSha = resolveMainSha(defaultBranch);
   const plan = planReconcile({
     repo: repoKey, prs, agents, durableCounts: durableCountsFrom(prs), now, defaultBranch, mainRedWindows,
     mainLatestCheckRuns, requiredChecks, mainSha,
   });
-  return { ...plan, prs: prs.length, agents: agents.length,
-    openPrFiles: prs.map((pr) => ({ pr: pr.number, files: Array.isArray(pr.files) && pr.files.length < 100
+  return { ...plan, refusals: [...hydrated.refusals, ...plan.refusals], prs: rawPrs.length, agents: agents.length,
+    openPrFiles: rawPrs.map((pr) => ({ pr: pr.number, files: Array.isArray(pr.files) && pr.files.length < 100
       ? pr.files.map((file) => typeof file === 'string' ? file : file.path) : null })),
   };
 }
@@ -1089,4 +1162,199 @@ if (IS_CLI) {
   }
   if (flags.json) process.stdout.write(JSON.stringify(result) + '\n');
   else process.stdout.write(formatReport(result) + '\n');
+}
+
+/** xng7q1p: complete Vitest failure inventories only; a timeout substring is not evidence.
+ * ANSI colour and GitHub timestamps are transport, not part of a test's identity.
+ */
+export function parseTimeoutFailures(log) {
+  const text = String(log).replace(/\x1b\[[0-9;]*m/g, '').replace(/^\d{4}-\d\d-\d\dT\S+\s/gm, '');
+  const summaries = [...text.matchAll(/^\s*Tests\s+(\d+) failed\b/gm)];
+  const blocks = [...text.matchAll(/^\s*FAIL\s+(\S+\.(?:test|spec)\.[cm]?[jt]sx?)\s+>\s+([^\n]+)\n([\s\S]*?)(?=^\s*FAIL\s|^\s*Test Files\s|$(?![\s\S]))/gm)];
+  if (summaries.length !== 1 || !/\bDuration\s+[\d.]+/.test(text)
+      || blocks.length !== Number(summaries[0][1]) || !blocks.length
+      || /Failed Suites|Unhandled Errors|Unhandled Rejection|\btruncated\b/i.test(text)) {
+    return { complete: false, reason: 'incomplete-failure-inventory', failures: [] };
+  }
+  const failures = blocks.map(([, path, name, body]) => ({ path, name: name.trim(),
+    kind: /^Error: Test timed out in \d+ms\./m.test(body.trim()) ? 'test-timeout' : 'other' }));
+  return { complete: true, failures };
+}
+
+/** Conservative impact walk. All changed input categories use the same closure; non-source
+ * changes and unresolved/ambient edges refuse. No "docs are harmless" exemption.
+ * Sources are immutable, head-bound blobs supplied by the reader, never the checkout's worktree.
+ */
+export function timeoutImpact({ changed, sources, roots, head, sourceHead }, ts) {
+  if (head !== sourceHead || !Array.isArray(roots) || !roots.length) return 'unbound-impact-evidence';
+  const paths = changed.flatMap((f) => [f.filename, f.previous_filename].filter(Boolean));
+  if (paths.some((p) => !/\.[cm]?[jt]sx?$/.test(p)
+      || /(^|\/)(?:[^/]*config[^/]*|[^/]*setup[^/]*|fixtures?|data|__fixtures__)(\/|\.)/i.test(p))) {
+    return 'changed-input-impact-unknown';
+  }
+  const seen = new Set();
+  const visit = (path) => {
+    if (paths.includes(path)) return `changed-dependency:${path}`;
+    if (seen.has(path)) return null;
+    seen.add(path);
+    const source = sources[path];
+    if (typeof source !== 'string') return `unresolved-dependency:${path}`;
+    const parsed = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true);
+    if (parsed.parseDiagnostics.length) return `unparseable-dependency:${path}`;
+    let unknown = false;
+    const imports = [];
+    const scan = (node) => {
+      if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
+        if (node.moduleSpecifier) imports.push(node.moduleSpecifier.text);
+      }
+      // Computed imports, require, code generation and ambient IO defeat static closure.
+      if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) unknown = true;
+      if (ts.isIdentifier(node) && /^(require|eval|Function|process|global|globalThis|window|document|fetch|XMLHttpRequest|WebSocket|Worker|importScripts|Deno|Bun)$/.test(node.text)) unknown = true;
+      if (ts.isMetaProperty(node)) unknown = true;
+      if (ts.isShorthandPropertyAssignment(node) && ['setupFiles', 'globalSetup'].includes(node.name.text)) unknown = true;
+      if (ts.isPropertyAssignment(node) && ['setupFiles', 'globalSetup'].includes(node.name.text)) {
+        const values = ts.isArrayLiteralExpression(node.initializer) ? [...node.initializer.elements] : [node.initializer];
+        if (values.some((v) => !ts.isStringLiteral(v))) unknown = true;
+        else imports.push(...values.map((v) => v.text));
+      }
+      ts.forEachChild(node, scan);
+    };
+    scan(parsed);
+    if (unknown) return `unknown-dependency-edge:${path}`;
+    // Include setup/globalSetup literal entries even though these are not import declarations.
+    for (const m of source.matchAll(/\b(?:setupFiles|globalSetup)\s*:\s*(\[[^\]]*\]|['"][^'"]+['"])/g)) {
+      for (const s of m[1].matchAll(/['"]([^'"]+)['"]/g)) imports.push(s[1]);
+    }
+    for (const spec of imports) {
+      if (spec === 'vitest' || spec === 'vitest/config') continue;
+      if (!spec.startsWith('.')) return `unknown-external-dependency:${spec}`;
+      const base = posix.normalize(posix.join(posix.dirname(path), spec));
+      const candidates = [base, ...['.ts', '.mjs', '.js', '.tsx', '/index.ts', '/index.js'].map((ext) => base + ext)];
+      const resolved = candidates.find((p) => Object.hasOwn(sources, p));
+      if (!resolved) return `unresolved-dependency:${base}`;
+      const reason = visit(resolved);
+      if (reason) return reason;
+    }
+    return null;
+  };
+  for (const root of roots) { const reason = visit(root); if (reason) return reason; }
+  return null;
+}
+
+export function classifyTimeoutEvidence(evidence, { repo, pr, head, ts }) {
+  const no = (reason) => ({ eligible: false, reason });
+  if (!evidence || evidence.repo !== repo || evidence.pr !== pr || evidence.head !== head) return no('wrong-repo-pr-head');
+  if (!evidence.diffComplete || !Array.isArray(evidence.changed) || !evidence.checksComplete) return no('incomplete-diff-or-checks');
+  if (!evidence.roots?.length) return no('unknown-test-configuration');
+  if (!evidence.jobs?.length || !evidence.failedChecks?.length) return no('missing-failed-jobs');
+  const covered = new Set();
+  const failures = [];
+  for (const job of evidence.jobs) {
+    if (job.repo !== repo || job.head !== head || !Number.isSafeInteger(job.run) || !Number.isSafeInteger(job.job)
+        || !Number.isSafeInteger(job.attempt) || job.attempt < 1 || job.status !== 'completed' || job.conclusion !== 'failure'
+        || job.logJob !== job.job || job.logAttempt !== job.attempt || !job.workflow) return no('unbound-or-nonterminal-job');
+    const inventory = parseTimeoutFailures(job.log);
+    if (!inventory.complete) return no(inventory.reason);
+    if (inventory.failures.some((f) => f.kind !== 'test-timeout')) return no('mixed-failure-kinds');
+    covered.add(job.job);
+    failures.push(...inventory.failures);
+  }
+  if (evidence.failedChecks.some((id) => !covered.has(id)) || covered.size !== evidence.failedChecks.length) return no('unaccounted-failing-check');
+  const reason = timeoutImpact({ ...evidence, roots: [...(evidence.roots ?? []), ...failures.map((f) => f.path)] }, ts);
+  if (reason) return no(reason);
+  const signature = createHash('sha256').update(JSON.stringify(failures.map((f) => [f.path, f.name, f.kind]).sort())).digest('hex');
+  return { eligible: true, repo, pr, head, signature, failures, jobs: evidence.jobs.map(({ log, ...job }) => job) };
+}
+
+/** Repository-explicit, bounded, read-only collector. Any pagination/truncation/head race refuses.
+ * This deliberately declines logs with aggregate/build failures: every failed check must carry a
+ * complete test inventory. That includes the historical #3415 aggregate "test" failure.
+ */
+export function readTimeoutEvidence(pr, { repo, exec = execFileSyncThrottled, ts } = {}) {
+  const deadline = Date.now() + 15_000;
+  const api = (path, raw = false) => {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) throw new Error('evidence-read-deadline');
+    const value = exec('gh', ['api', path], { encoding: 'utf8', timeout: remaining, maxBuffer: 16 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] });
+    return raw ? String(value) : JSON.parse(value);
+  };
+  const head = pr.headRefOid;
+  try {
+    const pull = api(`repos/${repo}/pulls/${pr.number}`);
+    if (pull.head.sha !== head || pull.state !== 'open') throw new Error('stale-head');
+    const changed = [];
+    for (let page = 1; page <= 30; page++) {
+      const batch = api(`repos/${repo}/pulls/${pr.number}/files?per_page=100&page=${page}`);
+      changed.push(...batch);
+      if (batch.length < 100) break;
+    }
+    if (changed.length !== pull.changed_files || changed.length >= 3000) throw new Error('incomplete-diff');
+    const checks = [];
+    let total;
+    for (let page = 1; page <= 30; page++) {
+      const batch = api(`repos/${repo}/commits/${head}/check-runs?per_page=100&page=${page}&filter=latest`);
+      total = batch.total_count;
+      checks.push(...batch.check_runs);
+      if (checks.length >= total) break;
+    }
+    if (checks.length !== total) throw new Error('incomplete-checks');
+    const statuses = api(`repos/${repo}/commits/${head}/status`);
+    if (statuses.total_count !== 0) throw new Error('unaccounted-commit-status');
+    if (checks.some((c) => c.status !== 'completed')) throw new Error('checks-pending');
+    const failed = checks.filter((c) => !['success', 'skipped', 'neutral'].includes(c.conclusion));
+    const jobs = failed.map((c) => {
+      const match = c.details_url?.match(/^https:\/\/github\.com\/([^/]+\/[^/]+)\/actions\/runs\/(\d+)\/job\/(\d+)$/);
+      if (!match || match[1] !== repo) throw new Error('unknown-check-origin');
+      const job = api(`repos/${repo}/actions/jobs/${match[3]}`);
+      const run = api(`repos/${repo}/actions/runs/${match[2]}`);
+      if (job.id !== Number(match[3]) || job.run_id !== run.id || run.head_sha !== head || job.head_sha !== head
+          || run.repository.full_name !== repo || job.run_attempt !== run.run_attempt) throw new Error('wrong-run-head-attempt');
+      return { repo, head, run: run.id, job: job.id, attempt: job.run_attempt, workflow: run.path,
+        status: job.status, conclusion: job.conclusion, logJob: job.id, logAttempt: job.run_attempt,
+        url: job.html_url, log: api(`repos/${repo}/actions/jobs/${job.id}/logs`, true) };
+    });
+    // Refuse incomplete/mixed inventories before the more expensive immutable source reads.
+    if (!jobs.length || jobs.some((j) => !parseTimeoutFailures(j.log).complete)) throw new Error('incomplete-failure-inventory');
+    const tree = api(`repos/${repo}/git/trees/${head}?recursive=1`);
+    if (tree.truncated) throw new Error('truncated-source-tree');
+    const sourceEntries = tree.tree.filter((e) => e.type === 'blob' && /\.[cm]?[jt]sx?$/.test(e.path));
+    const roots = sourceEntries.filter((e) => /(^|\/)(?:vitest|vite)\.config\./.test(e.path)).map((e) => e.path);
+    if (!roots.length) throw new Error('unknown-test-configuration');
+    // Lazy blob map: the classifier's dependency walk reads only the reachable closure.
+    const entries = new Map(sourceEntries.map((e) => [e.path, e.sha]));
+    let reads = 0;
+    const cache = {};
+    const sources = new Proxy(Object.fromEntries([...entries.keys()].map((p) => [p, null])), {
+      get(target, path) {
+        if (!entries.has(path)) return undefined;
+        if (!Object.hasOwn(cache, path)) {
+          if (++reads > 100) throw new Error('impact-read-budget');
+          const blob = api(`repos/${repo}/git/blobs/${entries.get(path)}`);
+          if (blob.encoding !== 'base64') throw new Error('unknown-blob-encoding');
+          cache[path] = Buffer.from(blob.content, 'base64').toString('utf8');
+        }
+        return cache[path];
+      },
+    });
+    const parser = ts ?? createRequire(import.meta.url)('typescript');
+    const result = classifyTimeoutEvidence({ repo, pr: pr.number, head, sourceHead: head, changed, diffComplete: true,
+      checksComplete: true, failedChecks: jobs.map((j) => j.job), jobs, sources, roots }, { repo, pr: pr.number, head, ts: parser });
+    const after = api(`repos/${repo}/pulls/${pr.number}`);
+    if (after.head.sha !== head || after.base.sha !== pull.base.sha || after.changed_files !== pull.changed_files) throw new Error('stale-head-or-diff');
+    return result;
+  } catch (error) { return { eligible: false, reason: `timeout-evidence:${error.message}` }; }
+}
+
+export function enrichPrsWithTimeoutEvidence(prs, {
+  repo, read = readTimeoutEvidence, enabled = process.env.WE_CI_TIMEOUT_RERUN_ENABLED === '1',
+} = {}) {
+  // New mechanical infrastructure stays opt-in until the card's controlled live proof passes.
+  if (!enabled) return prs;
+  return prs.map((pr) => {
+    if (!(pr.statusCheckRollup ?? []).some((c) => ['failure', 'timed_out'].includes(String(c.conclusion).toLowerCase()))) return pr;
+    if (!(pr.statusCheckRollup ?? []).some((c) => c.detailsUrl?.startsWith(`https://github.com/${repo}/actions/runs/`))) {
+      return { ...pr, timeoutRetry: { eligible: false, reason: 'missing-check-origin' } };
+    }
+    return { ...pr, timeoutRetry: read(pr, { repo }) };
+  });
 }

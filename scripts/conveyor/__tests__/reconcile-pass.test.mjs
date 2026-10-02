@@ -75,7 +75,7 @@ it('fetches the required set once per pass and threads it into planReconcile (ne
 it('maps repo slugs before binding and refuses unknown repos before IO', async () => {
   const { runReconcilePass } = await import('../reconcile-pass.mjs');
   const options = {
-    readPrs: () => [{ number: 49, headRefName: 'lane/1-x', labels: [{ name: 'review:pending' }], comments: [] }],
+    readPrs: () => [{ statusCheckRollup: ['test', 'smoke', 'daemon-soak', 'soak-replay-gate'].map(name => ({ name, status: 'COMPLETED', conclusion: 'SUCCESS' })), number: 49, headRefName: 'lane/1-x', labels: [{ name: 'review:pending' }], comments: [] }],
     readAgents: () => [{ name: 'review-fui-49', pidAlive: true, pid: 1 }], enrich: (agents) => agents,
   };
   expect(runReconcilePass({ ...options, repo: 'chalbert/frontierui' }).refusals.some((r) => r.kind === 'live-process')).toBe(true);
@@ -471,7 +471,7 @@ describe('enrichPrsWithBaseRefFacts (#4265)', () => {
 // caller back to the pre-#4265 ref-only comparison even with `enrichPrsWithBaseRefFacts` itself correct).
 it('runReconcilePass threads enrichBaseRef\'s output through to planReconcile (#4265)', async () => {
   const { runReconcilePass } = await import('../reconcile-pass.mjs');
-  const stackedPr = { number: 2578, baseRefName: 'lane/3681-ratify-daemon-lifecycle', comments: [] };
+  const stackedPr = { statusCheckRollup: ['test', 'smoke', 'daemon-soak', 'soak-replay-gate'].map(name => ({ name, status: 'COMPLETED', conclusion: 'SUCCESS' })), number: 2578, baseRefName: 'lane/3681-ratify-daemon-lifecycle', comments: [] };
   const enrichBaseRef = vi.fn((prs) => prs.map((pr) => ({ ...pr, baseRefSha: 'ddd4444' })));
   runReconcilePass({
     readPrs: () => [stackedPr], readAgents: () => [], enrich: (a) => a,
@@ -549,7 +549,7 @@ describe('enrichPrsWithSystemFixFacts (#4263)', () => {
 // `enrichBaseRef` wiring test above — a gap here would silently degrade every caller back to refusing forever.
 it('runReconcilePass threads enrichSystemFix\'s output through to planReconcile (#4263)', async () => {
   const { runReconcilePass } = await import('../reconcile-pass.mjs');
-  const escalatedPr = { number: 2783, headRefOid: 'aaa1111', comments: [] };
+  const escalatedPr = { statusCheckRollup: ['test', 'smoke', 'daemon-soak', 'soak-replay-gate'].map(name => ({ name, status: 'COMPLETED', conclusion: 'SUCCESS' })), number: 2783, headRefOid: 'aaa1111', comments: [] };
   const enrichSystemFix = vi.fn((prs) => prs.map((pr) => ({ ...pr, systemFixLanded: true })));
   runReconcilePass({
     readPrs: () => [escalatedPr], readAgents: () => [], enrich: (a) => a,
@@ -796,4 +796,239 @@ it('skips a deferred snapshot without enriching or planning from empty PR eviden
   });
   expect(result).toMatchObject({ outcome: 'deferred-low-budget', dispatch: [], refusals: [] });
   expect(readAgents).not.toHaveBeenCalled();
+});
+
+const XX_REQUIRED = ['test', 'smoke', 'daemon-soak', 'soak-replay-gate'];
+const XX_HEAD = '4ecb5deb362c81aa28de162db4616bb4c2009347';
+const xxRuns = () => XX_REQUIRED.map((name, i) => ({ id: 110460009383 + i, name, status: 'completed',
+  conclusion: name === 'smoke' ? 'cancelled' : 'success', completed_at: '2026-10-01T10:00:00Z' }));
+const xxPr = () => ({ number: 3336, headRefOid: XX_HEAD, headRefName: 'lane/3336-replay', isDraft: true,
+  labels: [], comments: [], statusCheckRollup: Array.from({ length: 100 }, (_, i) => ({
+    name: i ? 'review-gate' : 'soak-replay-gate', status: 'COMPLETED', conclusion: 'SUCCESS',
+  })) });
+const xxOptions = () => ({ repo: 'we', readPrs: () => [xxPr()], readAgents: () => [], enrich: a => a,
+  readRequiredChecks: () => ({ checks: XX_REQUIRED }), enrichMainRed: prs => ({ prs, mainRedWindows: [] }),
+  enrichAlreadyLanded: prs => prs, enrichBaseRef: prs => prs, enrichSystemFix: prs => prs,
+  enrichFixClaims: prs => prs, resolveMainSha: () => null });
+
+it('xxh4zw8 hydrates the crowded snapshot before planning same-tick recovery', async () => {
+  const { runReconcilePass } = await import('../reconcile-pass.mjs');
+  const readChecks = vi.fn(() => xxRuns());
+  const plan = runReconcilePass({ ...xxOptions(), readChecks });
+  expect(plan.dispatch.map(d => d.kind)).toEqual(['ci-heal']);
+  expect(readChecks).toHaveBeenCalledTimes(1);
+  expect(readChecks).toHaveBeenCalledWith({ repo: 'chalbert/web-everything', sha: XX_HEAD });
+});
+
+it('xxh4zw8 hydrates shared-file input and preserves attribution timestamps and numeric rerun IDs', async () => {
+  const { mkdtempSync, writeFileSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { readPrsFromFile } = await import('../open-pr-fetch.mjs');
+  const { runReconcilePass, defaultReadChecks, enrichPrsWithMainRedFacts } = await import('../reconcile-pass.mjs');
+  const dir = mkdtempSync(join(tmpdir(), 'xxh4zw8-'));
+  try {
+    const path = join(dir, 'prs.json');
+    writeFileSync(path, JSON.stringify([xxPr()]));
+    const exec = vi.fn(() => xxRuns().map(row => JSON.stringify(row)).join('\n'));
+    const plan = runReconcilePass({ ...xxOptions(), readPrs: () => readPrsFromFile(path),
+      readChecks: args => defaultReadChecks(args, { exec }),
+      enrichMainRed: (prs, opts) => {
+        expect(prs[0].statusCheckRollup[1]).toMatchObject({ id: 110460009384,
+          name: 'smoke', conclusion: 'CANCELLED', completedAt: '2026-10-01T10:00:00Z' });
+        const enriched = enrichPrsWithMainRedFacts(prs, { ...opts, readMainRuns: () => [],
+          readMainLatestCheckRuns: () => [], readAheadBy: () => 0 });
+        expect(enriched.prs[0].requiredCheckCompletedAt).toBe('2026-10-01T10:00:00Z');
+        return enriched;
+      } });
+    expect(plan.dispatch.map(d => d.kind)).toEqual(['ci-heal']);
+    expect(exec.mock.calls[0][1]).toContain('--paginate');
+    expect(exec.mock.calls[0][1]).toContain(`repos/chalbert/web-everything/commits/${XX_HEAD}/check-runs`);
+    expect(exec.mock.calls[0][1].at(-1)).toContain('completed_at');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+it.each(['source', 'docs', 'configuration', 'data'])('xxh4zw8 hydrates omitted names below 100 rows for %s changes and deduplicates same-head reads', async category => {
+  const { runReconcilePass } = await import('../reconcile-pass.mjs');
+  const pr = { ...xxPr(), files: [{ path: `${category}/example` }], statusCheckRollup: [xxPr().statusCheckRollup[0]] };
+  const readChecks = vi.fn(() => xxRuns());
+  const plan = runReconcilePass({ ...xxOptions(), readPrs: () => [pr, { ...pr, number: 3337 }], readChecks });
+  expect(readChecks).toHaveBeenCalledTimes(1);
+  expect(plan.dispatch.map(d => [d.prNumber, d.kind])).toEqual([[3336, 'ci-heal'], [3337, 'ci-heal']]);
+});
+
+it('xxh4zw8 the 100-row boundary hydrates even with all names present and targets each distinct head', async () => {
+  const { runReconcilePass } = await import('../reconcile-pass.mjs');
+  const pr = { ...xxPr(), statusCheckRollup: [...xxRuns(), ...xxPr().statusCheckRollup.slice(4)] };
+  const readChecks = vi.fn(() => xxRuns());
+  runReconcilePass({ ...xxOptions(), repo: 'frontierui', readChecks,
+    readPrs: () => [pr, { ...pr, number: 3337, headRefOid: 'b'.repeat(40) }] });
+  expect(readChecks.mock.calls).toEqual([
+    [{ repo: 'chalbert/frontierui', sha: XX_HEAD }], [{ repo: 'chalbert/frontierui', sha: 'b'.repeat(40) }],
+  ]);
+});
+
+it.each([
+  ['transport', () => { throw new Error('HTTP 502'); }],
+  ['malformed', () => ({ check_runs: [] })],
+  ['empty', () => []],
+  ['bad ID', () => xxRuns().map(row => ({ ...row, id: '123' }))],
+  ['unreadable', () => xxRuns().map(row => ({ ...row, conclusion: row.name === 'test' ? null : row.conclusion }))],
+])('xxh4zw8 %s hydration refuses visibly, never heals unknown evidence, and allows unrelated progress', async (_, readChecks) => {
+  const { runReconcilePass, formatReport } = await import('../reconcile-pass.mjs');
+  const good = { ...xxPr(), number: 3337, statusCheckRollup: xxRuns().map(row => ({ ...row, conclusion: 'SUCCESS', status: 'COMPLETED' })) };
+  const plan = runReconcilePass({ ...xxOptions(), readChecks, readPrs: () => [xxPr(), good] });
+  expect(plan.dispatch.map(d => [d.prNumber, d.kind])).toEqual([[3337, 'promote-draft']]);
+  expect(plan.refusals.filter(r => r.kind === 'check-read-failed'))
+    .toEqual([expect.objectContaining({ prNumber: 3336, why: expect.any(String) })]);
+  expect(formatReport(plan)).toContain('required-check hydration refused');
+  expect(plan.prs).toBe(2);
+});
+
+it('xxh4zw8 an authoritative cancelled check with absent required jobs still heals', async () => {
+  const { runReconcilePass } = await import('../reconcile-pass.mjs');
+  const readChecks = () => xxRuns().filter(row => row.name === 'smoke');
+  const plan = runReconcilePass({ ...xxOptions(), readChecks });
+  expect(plan.dispatch.map(d => [d.prNumber, d.kind])).toEqual([[3336, 'ci-heal']]);
+  expect(plan.refusals).toEqual([]);
+});
+
+it.each([
+  ['absent evidence', () => xxRuns().filter(row => row.name === 'soak-replay-gate')],
+  ['unreadable read', () => { throw new Error('HTTP 502'); }],
+])('xxh4zw8 %s withholds CI evidence but keeps the PR in non-CI planning', async (_, readChecks) => {
+  const { runReconcilePass } = await import('../reconcile-pass.mjs');
+  const pr = { ...xxPr(), isDraft: false, labels: [{ name: 'review:changes' }],
+    comments: [{ body: '🔁 review — changes requested\nPlease fix', author: { login: 'web-everything' }, createdAt: '2026-10-01T09:00:00Z' }] };
+  const plan = runReconcilePass({ ...xxOptions(), readChecks, readPrs: () => [pr] });
+  expect(plan.dispatch.map(d => [d.prNumber, d.kind])).toEqual([[3336, 'fix']]);
+  expect(plan.refusals.filter(r => r.kind === 'check-read-failed'))
+    .toEqual([expect.objectContaining({ prNumber: 3336 })]);
+});
+
+it('xxh4zw8 hydration collapses superseded cancellations and unreadable conclusions before classification', async () => {
+  const { runReconcilePass } = await import('../reconcile-pass.mjs');
+  const rows = [...xxRuns(), { ...xxRuns()[1], id: 110460009999, conclusion: 'success' },
+    { ...xxRuns()[0], id: 1, conclusion: null }];
+  for (const ordered of [rows, [...rows].reverse()]) {
+    expect(runReconcilePass({ ...xxOptions(), readChecks: () => ordered }).dispatch.map(d => d.kind)).toEqual(['promote-draft']);
+  }
+});
+
+it('xxh4zw8 malformed JSON-lines read is refused and failed identical-head reads are deduplicated', async () => {
+  const { runReconcilePass, defaultReadChecks } = await import('../reconcile-pass.mjs');
+  const exec = vi.fn(() => '{not-json');
+  const plan = runReconcilePass({ ...xxOptions(), readPrs: () => [xxPr(), { ...xxPr(), number: 3337 }],
+    readChecks: args => defaultReadChecks(args, { exec }) });
+  expect(exec).toHaveBeenCalledTimes(1);
+  expect(plan.dispatch).toEqual([]);
+  expect(plan.refusals.filter(r => r.kind === 'check-read-failed')).toHaveLength(2);
+});
+
+describe('xng7q1p conservative timeout evidence', () => {
+  const head = 'a'.repeat(40);
+  const repo = 'chalbert/web-everything';
+  const log = (path = 'unit.test.mjs', name = 'suite > times out') =>
+    ` FAIL ${path} > ${name}\nError: Test timed out in 5000ms.\n Test Files 1 failed | 1 passed\n Tests 1 failed | 2 passed\n Duration 10.0s\n`;
+  const fixture = () => ({ repo, pr: 3415, head, sourceHead: head, diffComplete: true, checksComplete: true,
+    changed: [{ filename: 'unrelated.mjs' }], failedChecks: [20], roots: ['vitest.config.ts'],
+    sources: { 'vitest.config.ts': 'export default { test: { setupFiles: ["./setup.ts"] } };',
+      'setup.ts': 'export const ready = true;', 'unit.test.mjs': 'import { it } from "vitest"; import { value } from "./subject.mjs";',
+      'subject.mjs': 'import { value } from "./leaf.mjs"; export {value};', 'leaf.mjs': 'export const value = 1;' },
+    jobs: [{ repo, head, run: 10, job: 20, attempt: 1, workflow: '.github/workflows/ci.yml', status: 'completed',
+      conclusion: 'failure', logJob: 20, logAttempt: 1, log: log() }],
+  });
+  const classify = (e) => classifyTimeoutEvidence(e, { repo, pr: 3415, head, ts: timeoutTs });
+
+  it('accepts only a complete timeout inventory and a disjoint source/setup closure', () => {
+    expect(classify(fixture())).toMatchObject({ eligible: true, failures: [{ path: 'unit.test.mjs', name: 'suite > times out' }] });
+  });
+  it.each(['unit.test.mjs', 'subject.mjs', 'leaf.mjs', 'setup.ts', 'vitest.config.ts', 'README.md', 'data.json',
+    'package-lock.json', '.github/workflows/ci.yml', 'fixtures/value.mjs'])('refuses changed input %s', (filename) => {
+    const e = fixture(); e.changed = [{ filename }]; expect(classify(e).eligible).toBe(false);
+  });
+  it('checks the old name of a renamed dependency', () => {
+    const e = fixture(); e.changed = [{ filename: 'renamed.mjs', previous_filename: 'leaf.mjs' }];
+    expect(classify(e).reason).toBe('changed-dependency:leaf.mjs');
+  });
+  it.each([
+    (e) => { e.diffComplete = false; }, (e) => { e.checksComplete = false; },
+    (e) => { e.head = 'b'.repeat(40); }, (e) => { e.repo = 'other/repo'; },
+    (e) => { e.jobs[0].head = 'b'.repeat(40); }, (e) => { e.jobs[0].logJob = 21; },
+    (e) => { e.jobs[0].logAttempt = 2; }, (e) => { e.jobs[0].run = null; },
+    (e) => { e.jobs[0].status = 'in_progress'; }, (e) => { e.failedChecks.push(21); },
+    (e) => { e.jobs[0].log = 'Test timed out in 5000ms.'; },
+    (e) => { e.jobs[0].log = log().replace('Tests 1 failed', 'Tests 2 failed'); },
+    (e) => { e.jobs[0].log = log().replace('Error: Test timed out in 5000ms.', 'AssertionError: mismatch'); },
+    (e) => { e.sources['leaf.mjs'] = 'export const value = import(name);'; },
+    (e) => { e.sources['leaf.mjs'] = 'import fs from "node:fs";'; },
+    (e) => { delete e.sources['leaf.mjs']; },
+  ])('fails closed on incomplete, mixed, stale or unknown evidence %#', (mutate) => {
+    const e = fixture(); mutate(e); expect(classify(e).eligible).toBe(false);
+  });
+  it('keeps duplicate full test names in different files distinct', () => {
+    const e = fixture();
+    e.sources['other.test.mjs'] = 'import {it} from "vitest";';
+    e.jobs[0].log = ' FAIL unit.test.mjs > duplicate\nError: Test timed out in 5000ms.\n'
+      + ' FAIL other.test.mjs > duplicate\nError: Test timed out in 5000ms.\n Test Files 2 failed\n Tests 2 failed\n Duration 10s\n';
+    expect(classify(e).failures.map((f) => f.path)).toEqual(['unit.test.mjs', 'other.test.mjs']);
+  });
+  it('enrichment carries classified evidence into the real planner', () => {
+    const e = fixture();
+    const pr = { number: 3415, headRefOid: head, state: 'OPEN', labels: [],
+      statusCheckRollup: [{ name: 'test', status: 'COMPLETED', conclusion: 'FAILURE',
+        detailsUrl: `https://github.com/${repo}/actions/runs/10/job/20` }] };
+    const prs = enrichPrsWithTimeoutEvidence([pr], { repo, enabled: true, read: () => classify(e) });
+    const out = timeoutPlanReconcile({ prs, requiredChecks: ['test'] });
+    expect(out.dispatch[0]).toMatchObject({ kind: 'ci-timeout-rerun', timeoutRetry: { signature: classify(e).signature } });
+  });
+  it('historical #3415 replay refuses the incomplete aggregate inventory and changed inputs', () => {
+    // Sanitized read-only capture: run 36944615955 attempt 1, historical job 110643729641.
+    const e = fixture();
+    e.head = e.sourceHead = '1df80664a3ec7f67cb7cb19ad1c5c35bf5c80966';
+    e.changed = [{ filename: 'scripts/lib/atomic-json-file.mjs' }, { filename: 'scripts/lib/gh-rest-read.mjs' },
+      { filename: 'backlog/4429-file-the-prevention-guard-s-owed-by-chalbert-web-everything.md' }];
+    e.jobs[0] = { ...e.jobs[0], head: e.head, run: 36944615955, job: 110643729641, logJob: 110643729641,
+      log: log('scripts/operations/__tests__/priority-sync.test.mjs',
+        'the declaration > is registered on the command line under its own name, with --help derived from the declaration') };
+    e.failedChecks = [110643729641, 110645262691]; // aggregate "test" failed as well
+    expect(classifyTimeoutEvidence(e, { repo, pr: 3415, head: e.head, ts: timeoutTs }))
+      .toEqual({ eligible: false, reason: 'unaccounted-failing-check' });
+    expect(parseTimeoutFailures(e.jobs[0].log)).toMatchObject({ complete: true, failures: [{ kind: 'test-timeout' }] });
+  });
+});
+import timeoutTs from 'typescript';
+import { classifyTimeoutEvidence, parseTimeoutFailures, enrichPrsWithTimeoutEvidence, readTimeoutEvidence } from '../reconcile-pass.mjs';
+import { planReconcile as timeoutPlanReconcile } from '../reconcile-core.mjs';
+
+it('xng7q1p immutable GitHub reads feed enrichment → planner without checkout-derived scope', () => {
+  const head = 'a'.repeat(40), repo = 'chalbert/web-everything';
+  const prefix = `repos/${repo}`;
+  const log = ' FAIL unit.test.mjs > suite > timeout\nError: Test timed out in 5000ms.\n Test Files 1 failed\n Tests 1 failed\n Duration 5.2s\n';
+  const sources = { 'vitest.config.ts': 'export default {test:{}};', 'unit.test.mjs': 'import {it} from "vitest";' };
+  const data = {
+    [`${prefix}/pulls/3415`]: { state: 'open', head: {sha: head}, base: {sha: 'b'.repeat(40)}, changed_files: 1 },
+    [`${prefix}/pulls/3415/files?per_page=100&page=1`]: [{filename:'other.mjs'}],
+    [`${prefix}/commits/${head}/check-runs?per_page=100&page=1&filter=latest`]: {
+      total_count: 1, check_runs: [{status:'completed',conclusion:'failure',details_url:`https://github.com/${repo}/actions/runs/10/job/20`}] },
+    [`${prefix}/commits/${head}/status`]: { total_count: 0 },
+    [`${prefix}/actions/jobs/20`]: {id:20,run_id:10,head_sha:head,run_attempt:1,status:'completed',conclusion:'failure'},
+    [`${prefix}/actions/runs/10`]: {id:10,head_sha:head,run_attempt:1,repository:{full_name:repo},path:'.github/workflows/ci.yml'},
+    [`${prefix}/actions/jobs/20/logs`]: log,
+    [`${prefix}/git/trees/${head}?recursive=1`]: {truncated:false,tree:Object.keys(sources).map((path,i)=>({type:'blob',path,sha:`blob${i}`}))},
+  };
+  Object.values(sources).forEach((source, i) => { data[`${prefix}/git/blobs/blob${i}`] = {encoding:'base64',content:Buffer.from(source).toString('base64')}; });
+  const calls = [];
+  const exec = (cmd, args) => {
+    expect(cmd).toBe('gh'); expect(args[0]).toBe('api'); calls.push(args[1]);
+    if (!(args[1] in data)) throw new Error(`unaccounted read ${args[1]}`);
+    return typeof data[args[1]] === 'string' ? data[args[1]] : JSON.stringify(data[args[1]]);
+  };
+  const pr = { number:3415,headRefOid:head,state:'OPEN',labels:[],statusCheckRollup:[{
+    name:'test',status:'COMPLETED',conclusion:'FAILURE',detailsUrl:`https://github.com/${repo}/actions/runs/10/job/20`}] };
+  const prs = enrichPrsWithTimeoutEvidence([pr], {repo,enabled:true,read:(p,o)=>readTimeoutEvidence(p,{...o,exec,ts:timeoutTs})});
+  expect(timeoutPlanReconcile({prs,requiredChecks:['test']}).dispatch[0].kind).toBe('ci-timeout-rerun');
+  expect(calls.filter((p)=>p===`${prefix}/pulls/3415`)).toHaveLength(2);
+  data[`${prefix}/pulls/3415`].changed_files = 101;
+  expect(readTimeoutEvidence(pr,{repo,exec,ts:timeoutTs})).toMatchObject({eligible:false,reason:'timeout-evidence:incomplete-diff'});
 });
