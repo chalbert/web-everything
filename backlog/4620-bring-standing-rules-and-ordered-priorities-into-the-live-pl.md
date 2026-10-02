@@ -4,17 +4,24 @@ kind: story
 locus: plateau-app
 size: 5
 tier: pinned
-status: open
-scope: ["we:contracts/plateau-progress-view.schema.json", "we:contracts/plateau-progress-view.examples.json", "plateau-app:src/wip/types.ts", "plateau-app:src/wip/wip-read.ts", "plateau-app:src/wip/wip-model.ts", "plateau-app:src/wip/wip-view.ts", "plateau-app:src/wip/wip-view.css", "plateau-app:src/wip/wip-source.ts", "plateau-app:src/wip/wip-live.ts", "plateau-app:src/wip/progress-read.ts", "plateau-app:src/wip/progress-read.test.ts", "plateau-app:src/wip/wip-model.test.ts", "plateau-app:src/wip/wip-view.test.ts", "plateau-app:src/wip/wip-source.test.ts", "plateau-app:src/wip/wip-publish.ts", "plateau-app:src/wip/wip-publish.test.ts", "plateau-app:src/wip/wip-api.ts", "plateau-app:src/wip/wip-read.test.ts", "plateau-app:src/wip/wip-view.hostile.test.ts", "plateau-app:tools/drain-daemon/cli.mjs", "plateau-app:src/wip/wip-relay-contract.test.ts", "plateau-app:scripts/wip-publish.ts", "plateau-app:wip-relay.js"]
+status: resolved
+scope: ["plateau-app:src/wip/types.ts", "plateau-app:src/wip/wip-read.ts", "plateau-app:src/wip/wip-model.ts", "plateau-app:src/wip/wip-view.ts", "plateau-app:src/wip/wip-view.css", "plateau-app:src/wip/wip-source.ts", "plateau-app:src/wip/wip-live.ts", "plateau-app:src/wip/progress-read.ts", "plateau-app:src/wip/progress-read.test.ts", "plateau-app:src/wip/wip-model.test.ts", "plateau-app:src/wip/wip-view.test.ts", "plateau-app:src/wip/wip-source.test.ts", "plateau-app:src/wip/wip-publish.ts", "plateau-app:src/wip/wip-publish.test.ts", "plateau-app:src/wip/wip-api.ts", "plateau-app:src/wip/wip-read.test.ts", "plateau-app:src/wip/wip-view.hostile.test.ts", "plateau-app:tools/drain-daemon/cli.mjs", "plateau-app:src/wip/wip-relay-contract.test.ts", "plateau-app:scripts/wip-publish.ts", "plateau-app:wip-relay.js"]
 dateOpened: "2026-09-30"
 preparedDate: "2026-09-30"
 preparedAgainstSha: "3762fa95fd94c655c8196cd047c820f3f09f4b67"
+blockedBy: ["x9jwbpi"]
+dateResolved: "2026-10-01"
+graduatedTo: "https://github.com/chalbert/plateau-app/pull/189"
 tags: []
 ---
 
 # Ship a progress-first Plateau overview that replaces the manual plan scoreboard
 
 Automatically show what is moving, observed landings today, a short trend and current priorities before machine-owned blockers. This is the smallest useful replacement for the hand-maintained plan scoreboard; full design: we:docs/agent/plateau-progress-view.md.
+
+## Split per ruling #4289 (2026-09-30)
+
+The WE contract half (schema 2, examples, validation test) moved to its own card, x9jwbpi, which lands first; this card keeps only its plateau-app scope and waits on it. Re-prepare against the landed contract revision before building; keep every existing consumer, relay and compatibility proof here.
 
 ## Premise check (2026-09-30, against WE `3762fa95f` and plateau-app `1888d29`)
 

@@ -166,6 +166,20 @@ describe('card x5s8b47 — `gracefulOnUnavailable`: an advisory seat degrades, i
     expect(value.summary).toMatch(/^skipped: /); // reduce's silent-juror refusal requires a non-empty summary
   });
 
+  it('a fallback request to antigravity never carries the factory\'s cwd (#4446)', async () => {
+    const calls = [];
+    const judgeFn = createDefaultJudge({
+      cwd: '/some/lane',
+      resolveProvider: (name) => async (request) => { calls.push({ name, request }); return { value: { summary: 's', findings: [] } }; },
+      checkProviderHold: async (name) => (name === 'codex' ? 'quota exhausted' : null),
+      now: () => 1_700_000_000_000,
+    });
+    await judgeFn(REQUEST);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].name).toBe('antigravity');
+    expect(calls[0].request.cwd).toBeUndefined();
+  });
+
   it('Codex quota-held, antigravity available → falls back to antigravity instead of skipping', async () => {
     const calls = [];
     const resolveProvider = (name) => async (request) => { calls.push({ name, request }); return { value: { summary: 'antigravity judged it', findings: [] } }; };

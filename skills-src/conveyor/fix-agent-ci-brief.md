@@ -1,10 +1,10 @@
-# Conveyor CI-heal fix-agent brief (template) — rebase + repair a green-at-open PR gone RED / BEHIND, NEVER touch the review gate (#2666)
+# Conveyor CI-heal fix-agent brief (template) — merge + repair a green-at-open PR gone RED / BEHIND, NEVER touch the review gate (#2666)
 
 > **This is a TEMPLATE, not a runnable skill.** The `/conveyor` skill (#2613) instantiates it when a
 > conveyor-launched PR that was **green at open** later goes **red on a required check** or **BEHIND + parked** —
 > a CI regression, NOT a `review:changes` bounce. It fills the `{{PLACEHOLDERS}}` below and passes the result as
 > the prompt for **one background CI-heal agent** spawned into that PR's lane. One agent = one red/BEHIND PR = one
-> rebase + repair = one re-push. The agent does the JUDGMENT work (diagnose the failing check, repair it); every
+> merge + repair = one re-push. The agent does the JUDGMENT work (diagnose the failing check, repair it); every
 > script-decidable step around it is a script it shells, per
 > [we:docs/agent/platform-decisions.md#deterministic-core-thin-judgment](../../../docs/agent/platform-decisions.md#deterministic-core-thin-judgment)
 > (#2607).
@@ -15,7 +15,7 @@
 > and its `test` job broke against the new main (a flake is the other cause) — silently stalls: the delivery agent
 > has long exited (one agent = one item = one PR), and the drain **skips a red-CI PR**. #2183 rebuilds a BEHIND but
 > **landable** PR, but a PR **parked** `review:human` / `review:pending` is NOT landable, so #2183 never fires for
-> it. This brief is the **auto CI-heal** path: reconstitute the PR's lane, rebase onto current `main`, repair the
+> it. This brief is the **auto CI-heal** path: reconstitute the PR's lane, merge the live PR base into the lane, repair the
 > failing check, re-push — **repairing ONLY CI, never the review label**. This is the CI-axis sibling of
 > [`fix-agent-brief.md`](fix-agent-brief.md) (the `review:changes` repair loop); the two share the reuse-the-ref,
 > repair-only, re-push shape — the ONE difference is that the review-changes agent RE-ARMS the review and this one
@@ -46,10 +46,10 @@
 
 ## Your job (one sentence)
 
-Reconstitute the PR's work in a lane clone reset to its pushed ref, **rebase onto current `main`**, **diagnose and
+Reconstitute the PR's work in a lane clone reset to its pushed ref, **merge the live PR base into the lane**, **diagnose and
 repair the failing required check** (repair only the CI break — do NOT touch the item's substance beyond what the
 check needs), get the gate green, **re-push HEAD to the same `lane/*` ref**, **post the durable CI-heal comment**,
-then **EXIT WITHOUT MERGING** — and **NEVER touch the review label** (`review:human` / `review:pending` /
+then **EXIT WITHOUT LANDING THE PR** — and **NEVER touch the review label** (`review:human` / `review:pending` /
 `review:changes` stay exactly as they were; only CI is repaired).
 
 ## If you escalate — WHY a second command beyond the completion record (read once, before you need it)
@@ -89,6 +89,7 @@ own step 0/step-per-exit shape already prevents for a `review:changes` repair:
 # in mid-session — a revision this session never actually examined — and permanently stamp the escalation
 # marker against it, silently suppressing healing on a head nobody ever diagnosed.
 EXAMINED_HEAD="$(gh pr view {{PR_NUM}} --repo {{REPO}} --json headRefOid --jq .headRefOid)"
+CI_AUTH_ARGS=() # populated only for a diagnosed CI authentication failure
 
 node "{{WE_ROOT}}/scripts/operations/completion-cli.mjs" report --repo={{REPO}} --session={{SESSION_SLUG}} --kind=ci-heal --pr={{PR_NUM}} --item={{ITEM_NUM}} --status=started
 ```
@@ -149,41 +150,50 @@ LANE=$(node "{{WE_ROOT}}/scripts/lane-pool.mjs" acquire --repo={{LANE_REPO}} --l
   relative path.
 - Do **NOT** re-`claim` the item — it is already `active` (or `resolved`) from the build; a re-claim would race.
 
-### 2. Rebase onto current `main` (the usual root cause — `main` advanced under the branch)
+### 2. Merge the live PR base (the usual root cause — `main` advanced under the branch)
 
 **This is the ONE sanctioned catch-up with `main` for this whole run (#4297), placed FIRST rather than
 immediately before step 4's gate** — unlike the generic build/fix briefs, diagnosing a "behind" CI failure
 needs a current base to diagnose against, so front-loading it is the deliberate, once-only equivalent of their
 right-before-the-gate placement, not an exception to it.
 
-**Do NOT rebase a second time in this same session**, even if `main` advances again while you are still
-diagnosing/repairing (step 3) or before you re-push (step 6) — a clean step-2 rebase leaves no working-tree
-conflict for a later `main` move to reopen, so nothing forces a second rebase; re-rebasing anyway would only
+**Do NOT merge a second time in this same session**, even if `main` advances again while you are still
+diagnosing/repairing (step 3) or before you re-push (step 6) — a clean step-2 merge leaves no working-tree
+conflict for a later `main` move to reopen, so nothing forces a second merge; merging again would only
 restart the "catch-up" this step already finished once. If `main` moving again genuinely matters, that is the
 next tick's fresh ci-heal dispatch's job, not this run's — finish this pass on the base you already have.
 
+Read the live base even for a stacked PR. Preserve its commit identities with a real merge; never replay
+`merge-base..main` via cherry-pick or rebuild upstream commits. After resolving a conflict, complete the merge
+and rerun the ancestry check against the saved `BASE_SHA` before proceeding. This proves the two-dot and
+three-dot diffs agree against that fetched base; a later base advance requires a fresh comparison.
+
 ```bash
-git fetch origin main
-git rebase origin/main
+BASE_REF=$(gh pr view {{PR_NUM}} --repo {{REPO}} --json baseRefName --jq .baseRefName)
+test -n "$BASE_REF" || exit 1
+git fetch origin "$BASE_REF" || exit 1
+BASE_SHA=$(git rev-parse FETCH_HEAD) || exit 1
+git merge --no-edit "$BASE_SHA" || exit 1
+git merge-base --is-ancestor "$BASE_SHA" HEAD || exit 1
 ```
 
 Resolve any conflict the `/finish` way: **regenerate derived / generated artifacts** rather than hand-merging them,
 and **take-main for coordination JSON** (`claims.json`, registries). If it is a genuine same-line CODE overlap you
-cannot safely resolve, `git rebase --abort` (leave the PR as it is — do NOT force-push a bad rebase), report the
-completion record, and stop and report `#{{ITEM_NUM}} → ci-heal escalated (conflict with main)`. A clean rebase
+cannot safely resolve, `git merge --abort` (leave the PR as it is — do NOT force-push a bad merge), report the
+completion record, and stop and report `#{{ITEM_NUM}} → ci-heal escalated (conflict with main)`. A clean merge
 alone often fixes a BEHIND `test` failure.
 
 ```bash
-git rebase --abort
+git merge --abort
 node "{{WE_ROOT}}/scripts/operations/completion-cli.mjs" report --repo={{REPO}} --session={{SESSION_SLUG}} --status=done --outcome=escalated-conflict
 node "{{WE_ROOT}}/scripts/conveyor/fix-procedure.mjs" fix-end {{PR_NUM}} --repo={{REPO}} --who={{SESSION_SLUG}}
 node "{{WE_ROOT}}/scripts/conveyor/ci-heal-escalation-mark.mjs" {{PR_NUM}} --repo={{REPO}} \
-  --head="$EXAMINED_HEAD" --outcome=needs-human --reason="conflict with main during rebase"
+  --head="$EXAMINED_HEAD" --outcome=needs-human --reason="conflict with main during merge"
 ```
 
-(`git rebase --abort` FIRST, so you never leave a half-rebased tree behind. `--head` is ALWAYS `$EXAMINED_HEAD`
+(`git merge --abort` FIRST, so you never leave a half-merged tree behind. `--head` is ALWAYS `$EXAMINED_HEAD`
 — the PR's PUBLISHED head, captured ONCE at step 0 before diagnosis began — never `git rev-parse HEAD` (after a
-clean rebase that you have not pushed, the local `HEAD` is a commit GitHub never saw, the marker would never
+clean merge that you have not pushed, the local `HEAD` is a commit GitHub never saw, the marker would never
 match `pr.headRefOid`, and the next tick would dispatch the same heal again) and never a FRESH `gh pr view` read
 taken here, at escalation time: a concurrent push between step 0 and this exit would hand you a head this
 session never actually diagnosed, and stamping the marker against it would silently suppress healing on a
@@ -198,7 +208,19 @@ gh pr checks {{PR_NUM}} --repo {{REPO}}          # which required check is red
 gh run view <run-id> --log-failed --repo {{REPO}} # the failing step's log (optional, for a non-obvious break)
 ```
 
-- If a clean rebase already fixes it (the failure was purely BEHIND against the new main), no code change is
+- For **CI authentication failures** (for example Bad credentials at Checkout FUI), capture the diagnosed
+  `AUTH_RUN` and `AUTH_ATTEMPT` from that run's metadata, keeping the original `$EXAMINED_HEAD`.
+  When operator credential replacement is required, prepare read-only enrichment for the existing
+  **needs-human** exit below:
+  ```bash
+  CI_AUTH_ARGS=(--run="$AUTH_RUN" --attempt="$AUTH_ATTEMPT")
+  ```
+  That exit passes this array to the marker alongside the captured head. The marker identifies the failed
+  step's reference and consuming repository; a 401 does not establish expiry. Unresolved ownership or
+  unavailable logs must stay unresolved; never guess a rotation target from the checkout destination.
+  The displayed repository-scoped rotation command prompts the operator for a replacement; the healer never executes it.
+
+- If a clean merge already fixes it (the failure was purely BEHIND against the new main), no code change is
   needed — proceed to the gate.
 - If a real break remains (a flake, or a genuine interaction with what landed on `main`), repair **only** that, in
   `$LANE`, on the lane's **current branch** (its local `main` — do **NOT** `git checkout -b`; the single-branch
@@ -216,7 +238,7 @@ gh run view <run-id> --log-failed --repo {{REPO}} # the failing step's log (opti
   node "{{WE_ROOT}}/scripts/pr-body-edit.mjs" --pr={{PR_NUM}} --repo={{REPO}} --body-file=<bodyfile>
   ```
   (never a raw `gh pr edit --body` — it drops the PR's own authorship stamp; see that script's own header.)
-- If the required check is red for a reason that is NOT a CI/rebase break and NOT a metadata fix — do **NOT**
+- If the required check is red for a reason that is NOT a CI/merge break and NOT a metadata fix — do **NOT**
   guess which of the three outcomes below applies without checking; picking the wrong one either hides a real
   defect from the operator, wastes their attention on tooling that already has a fix in flight, or (we:backlog/
   fix-review-ciheal-deadlock, LIVE DEADLOCK 2026-09-28/29, PR #2878) silently blocks the PR's own review forever:
@@ -237,13 +259,13 @@ gh run view <run-id> --log-failed --repo {{REPO}} # the failing step's log (opti
     STRUCTURED signal, not prose: `reconcile-core.mjs`'s escalation refusal reads this exact outcome as "dispatch
     the review this PR was always owed, in parallel" — unlike `needs-human` below, it never durably blocks
     review dispatch.
-  - **`needs-human`** — the diff itself is genuinely wrong and needs a design call, or you are simply unsure
+  - **`needs-human`** — operator credential replacement is required, the diff itself is genuinely wrong and needs a design call, or you are simply unsure
     (never for the review-gate-only case above — that is ALWAYS `not-a-ci-break`, never this). Report and stop:
     ```bash
     node "{{WE_ROOT}}/scripts/operations/completion-cli.mjs" report --repo={{REPO}} --session={{SESSION_SLUG}} --status=done --outcome=escalated-needs-human
     node "{{WE_ROOT}}/scripts/conveyor/fix-procedure.mjs" fix-end {{PR_NUM}} --repo={{REPO}} --who={{SESSION_SLUG}}
     node "{{WE_ROOT}}/scripts/conveyor/ci-heal-escalation-mark.mjs" {{PR_NUM}} --repo={{REPO}} \
-      --head="$EXAMINED_HEAD" --outcome=needs-human --reason="<name the actual finding>"
+      --head="$EXAMINED_HEAD" --outcome=needs-human "${CI_AUTH_ARGS[@]}" --reason="<name the actual finding>"
     ```
     Then report `#{{ITEM_NUM}} → ci-heal escalated (needs human)`. The review gate (if any) still
     owes a human verdict; a human handles it via `/finish`.
@@ -283,7 +305,7 @@ as "closes"/"fixes" the item itself — it heals CI on an already-open PR, it do
 
 ```bash
 node {{WE_ROOT}}/scripts/verify-lane.mjs request --repo=.                        # returns almost instantly — nothing has run yet
-node {{WE_ROOT}}/scripts/verify-lane.mjs check --wait=60000 --json --repo=.     # blocks (bounded) until the verify runner settles the marker
+node {{WE_ROOT}}/scripts/verify-lane.mjs check --wait=540000 --json --repo=.     # blocks (bounded, fits one foreground call) until the verify runner settles the marker
 ```
 
 A dispatched agent cannot run the gate itself: `we:scripts/guard-bash.mjs` denies any `verify-lane.mjs` invocation
@@ -292,11 +314,17 @@ except `request` / `check` / `reset` (#3105) — including a bare `run --repo=.`
 quoted path is denied). Do not run `verify-lane.mjs run` here; `request` stamps a marker the verify runner
 (`we:scripts/conveyor/verify-dispatch.mjs`) picks up and settles with the same diff-selected gate.
 
-Read the verdict from the **`check` output** (status / exit code), never from the `request` call (which always
-exits 0): `green` → proceed; `red` (exit 2) → the hard stop below; `running` (the `--wait` ceiling elapsed) →
-call `check --wait=60000` again, bounded — never `sleep`-poll; any other status follows the table in
-[delivery-agent-brief.md](delivery-agent-brief.md). Use the Bash tool's foreground `timeout: 600000`, never
-`run_in_background`, and never `sleep`-poll a `tasks/<id>.output` file (#x36vidg).
+Read the verdict from the **`check` output**, never the `request` acknowledgement:
+`green` → proceed; `red` (exit 2) → the hard stop below; `infrastructure-failure` → report the
+signal/ceiling evidence, without claiming a test failure or automatically resetting/re-requesting.
+`timeout` (the 9-minute wait elapsed with the request still `running`) → run the SAME `check --wait=540000`
+again. Every call is ONE blocking foreground call that fits the Bash tool's `timeout: 600000` ceiling, so a
+gate that legitimately takes 30+ minutes is waited out in chunks, never in a call the tool would kill. Stop after
+18 consecutive `timeout`s (~160 minutes: the admission + execution ceilings, after which the dispatcher itself
+kills a hung run and settles the marker as `infrastructure-failure`) and report the stalled request once.
+Never `sleep`, never `run_in_background`, never read output files in a loop (#x36vidg), and never `reset` or
+re-`request` automatically.
+Other statuses follow [we:skills-src/conveyor/delivery-agent-brief.md](delivery-agent-brief.md).
 
 After the re-push, do NOT wait for the new CI run to go green (no `gh pr checks --watch`, no `sleep` loop on
 `gh pr checks`/`statusCheckRollup`) — the ci-heal tally comment is your last write; report and exit.
@@ -309,8 +337,13 @@ a no-op today.
 
 **The gate is the diff-selected gate** (`verify-lane.mjs`, xpnhz4o): it runs **only the tests your
 diff reaches** (`vitest related` on the files changed vs `origin/main`, working tree included, plus the tests that
-name a changed file) and a check:standards scoped to those files. It falls back to the full suite **by itself**
-when a config / setup / dependency / shared-test-helper file changed. **Never run the full suite yourself**
+name a changed file) and a check:standards scoped to those files. Shared helpers use the graph and reference discovery. Unknown, unsafe or oversized selections
+return `selection-required`; inspect the scope and supply an explicit affected-test gate, or report the blocker. In that blocked case `request --gate=…` accepts only an
+affected-test shape — `&&`-joined `npx vitest related <files…> --run` / `vitest run <files…>` (only the `--run`/`--bail`
+flags: never `--passWithNoTests`, `--config`, `--reporter`, `-t`…) / `npm run test:unit` / `npm test` (no arguments) /
+`npm run check:standards` segments, no `||`, `;`, `|` or redirection — and refuses anything else (`gate-refused`; a refusal
+at run time leaves a red marker).
+A default local selection never expands into the full suite. **Never run the full suite yourself**
 (`npm run test:unit`, `npm test`, a bare `vitest run`): the verify runner runs the same gate for you, CI runs it
 anyway, and the Bash guard denies it.
 
@@ -324,29 +357,29 @@ node "{{WE_ROOT}}/scripts/conveyor/fix-procedure.mjs" fix-end {{PR_NUM}} --repo=
 
 ### 5. Converge before re-push — self-review the heal (proportionate to the change)
 
-For anything beyond a trivial rebase-only heal, spawn **one adversarial code-review subagent** on your heal diff
+For anything beyond a trivial merge-only heal, spawn **one adversarial code-review subagent** on your heal diff
 and **AWAIT its returned report as the verdict** — the same converge-before-handback discipline the delivery brief
 uses ([delivery-agent-brief.md](delivery-agent-brief.md) step 6). Confirm the repair addresses the failing check
 and introduces no new problem. Address every finding to convergence (fix it, or dismiss it with a one-line reason).
-A trivial, obviously-correct heal (a clean rebase with no code change) may skip the subagent.
+A trivial, obviously-correct heal (a clean merge with no code change) may skip the subagent.
 
 ### 6. Commit + re-push HEAD to the SAME lane ref (update the existing PR in place)
 
-Commit only the heal's files (explicit paths, never `git add -A`; one commit) on the lane's current branch. Because
-you rebased, push with `--force-with-lease` to update the existing PR's head — this **updates the PR**, it does not
+Commit only the heal's files (explicit paths, never `git add -A`; one commit) on the lane's current branch.
+Push normally to update the existing PR's head — this **updates the PR**, it does not
 open a new one (never `gh pr create`, never `pr-land` — the PR already exists):
 
 ```bash
 printf '%s\n' "{{ATTRIBUTION}}: ci-heal — <failing check and repair> (PR {{PR_NUM}})" "" \
   "Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>" > <msgfile>
-git commit -F <msgfile> <explicit-paths>   # omit if the rebase alone healed it and there is nothing new to commit
-git push --force-with-lease origin HEAD:refs/heads/{{LANE_REF}}
+git commit -F <msgfile> <explicit-paths>   # omit if the merge alone healed it and there is nothing new to commit
+git push origin HEAD:refs/heads/{{LANE_REF}}
 ```
 
 Write the commit message to a file and `commit -F` it — a heredoc runs backticks (e.g. `` `scope:` ``) as a
 subshell (`bad substitution`); a message file has no such footgun. Pushing to `lane/*` is allowed by the
-single-branch guard; pushing to `main` is not. `--force-with-lease` (not a bare `--force`) refuses if someone else
-advanced the ref since you fetched it — a safety net against clobbering a concurrent human `/finish`.
+single-branch guard; pushing to `main` is not. A non-fast-forward push refusal means the remote moved; reconcile with the current PR head before retrying.
+Never force-push over that refusal.
 
 ### 7. Post the durable CI-heal comment — the restart-surviving attempt tally (NEVER a label swap)
 
@@ -368,7 +401,7 @@ a `ready-to-merge` PR lands once its re-run CI is green (the drain), a parked PR
 
 **This completion record is the fix for the live incident that motivated this step** (#4075/xg7m2wq, PR #2724,
 2026-09-26): without it, a finished ci-heal session kept counting as a live holder of its own PR — nobody ever
-told the reconciler it was done. Use `--outcome=no-change` when step 2's clean rebase alone healed it (no
+told the reconciler it was done. Use `--outcome=no-change` when step 2's clean merge alone healed it (no
 commit at step 6); use `--outcome=healed` when step 3 made a real code repair.
 
 ### 8. Append a structured learnings entry to the session drop-box (#2614)
@@ -381,7 +414,7 @@ paths, or PII, so keep every field a short generalized lesson:
 node "{{WE_ROOT}}/scripts/conveyor/learnings-drop.mjs" \
   --kind=<friction|missing-convention|doc-gap|skill-gap|improvement> \
   --summary="<one sentence — the lesson>" \
-  --area="<coarse label, e.g. ci-heal / rebase-on-main>" \
+  --area="<coarse label, e.g. ci-heal / merge-on-main>" \
   --suggestion="<short recommendation>" \
   --session={{SESSION_SLUG}}
 ```
@@ -407,22 +440,22 @@ report it.
 ## Manual take-over — the human `/finish` path (SAME procedure)
 
 The auto path above and a human healing a red/BEHIND conveyor PR by hand are **one procedure**. When a human takes
-over: reconstitute on `{{LANE_REF}}` (don't rebuild), rebase onto `main`, repair only the failing check, get the
+over: reconstitute on `{{LANE_REF}}` (don't rebuild), merge the live PR base into the lane, repair only the failing check, get the
 locus gate green, re-push HEAD to the same `lane/*` ref, post the CI-heal comment — and **never touch the review
-label**. The only difference between auto and manual is **who** does the repair; the reuse-the-ref, rebase,
+label**. The only difference between auto and manual is **who** does the repair; the reuse-the-ref, merge,
 repair-only-CI, re-push, never-touch-the-review shape is identical.
 
 ## Guardrails (the non-negotiables)
 
 - **Never edit the primary checkout** — all work is in the acquired lane clone (#104/#2183).
-- **Never merge; never touch the review label** — you stop at a re-pushed, CI-repaired PR. `review:human` /
+- **Never land the PR; never touch the review label** — you stop at a re-pushed, CI-repaired PR. `review:human` /
   `review:pending` / `review:changes` / `ready-to-merge` are ALL left exactly as they were — only CI is repaired.
   The drain daemon is the sole writer to `main`; a human `/review` (or the drain AI-review) still owns any parked
   verdict.
 - **Reuse the ref, never rebuild** — reconstitute from `{{LANE_REF}}`; if the ref is gone, report it, don't redo.
 - **Repair only the CI break** — do not fold unrelated work in; do not weaken or delete a test to go green; if the
-  diff itself is genuinely wrong (not a CI/rebase break), escalate — don't paper over it.
-- **Work only through the normal verbs** — `acquire --base=<ref>` → rebase → repair → `git push … lane/*` →
+  diff itself is genuinely wrong (not a CI/merge break), escalate — don't paper over it.
+- **Work only through the normal verbs** — `acquire --base=<ref>` → merge → repair → `git push … lane/*` →
   `ci-heal-mark.mjs` → daemon/human. No parallel state store, no review-label swap (#2612 / #2666 rulings).
 - **If you stop, say so IN YOUR COMPLETION RECORD** (#4075/xg7m2wq) — every exit above runs
   `completion-cli.mjs report --status=done` before it returns, starting with `report --status=started` at step

@@ -2007,11 +2007,11 @@ describe('executor prediction and independent caps (#4531)', () => {
       expect(result.dispatched.map(d => d.num)).toEqual(['3827']);
       expect(result.plan.dispatch[0].executor).toBe(predicted.executor);
       expect(result.plan.hold.find(h => h.num === '2662')).toBeDefined();
-      expect((await cliPredictRoute(item.num, item.scope, { ...options, env: { WE_PROBATION_LAUNCH: 'off' } })).executor).toBe('claude');
+      expect((await cliPredictRoute(item.num, item.scope, { ...options, env: { WE_PROBATION_LAUNCH: 'off' } })).executor).toBe('codex');
       expect((await cliPredictRoute(item.num, item.scope, { ...options, loadItems: () => [{ ...item, scope: ['we:scripts/lib/provider-routing.mjs'] }] })).executor).toBe('claude');
       writeFileSync(join(root, 'backlog', '3827-docs.md'), '---\ndeliveryAgent: codex\ndeliveryAgentReason: operator selection\n---\n');
       expect((await cliPredictRoute(item.num, item.scope, options)).executor).toBe('codex');
-      expect((await cliPredictRoute(item.num, item.scope, { ...options, env: { WE_PROBATION_LAUNCH: 'off', WE_BUILD_DISPATCH_MODE: 'agent' } })).executor).toBe('claude');
+      expect((await cliPredictRoute(item.num, item.scope, { ...options, env: { WE_PROBATION_LAUNCH: 'off', WE_BUILD_DISPATCH_MODE: 'agent' } })).executor).toBe('codex');
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
   it('boots as a real Node CLI and rejects --bogus-flag with exit 2', () => {

@@ -527,7 +527,30 @@ export function backgroundedVerificationReason(command, runInBackground = false)
 // `verify-lane.mjs` invocation (its DEFAULT mode runs the suites) are the ones this rule must catch.
 const SANCTIONED_VERIFY_LANE_QUERY = /\bnode\s+\S*\bverify-lane\.mjs\b\s+(?:request|check|reset)\b/;
 
+/** A wrapped `vitest` / `vitest related` (no `run` subcommand) with no one-shot flag can drop into watch mode and
+ *  hang inside the admission wrapper (#4449). Returns a reason, else null. Pure. */
+export function admittedVitestWatchReason(command) {
+  const offending = parseSegments(heredocScan(String(command || '')).text).segments.some((seg) => {
+    if (!ADMISSION_WRAPPER_HEAD.test(canonicalCommand(seg))) return false;
+    const words = shellTokens(String(seg || '')).filter((t) => !t.op).map((t) => t.text);
+    const dash = words.indexOf('--');
+    if (dash < 0) return false;
+    const wrapped = words.slice(dash + 1);
+    const at = wrapped.findIndex((w) => w === 'vitest');
+    if (at < 0 || (at > 0 && !/^(?:npx|pnpx|bunx)$/.test(wrapped[0]))) return false;
+    const rest = wrapped.slice(at + 1);
+    if (rest[0] === 'run') return false;
+    return !rest.some((w) => w === '--run' || w === '--no-watch' || /^--watch=false$/.test(w));
+  });
+  if (!offending) return null;
+  return 'a `vitest` run inside the admission wrapper without `--run` (or `--watch=false`) can drop into watch mode and hang the agent — add `--run`, e.g. `… run -- npx vitest related <file> --run --passWithNoTests` (the delivery brief\'s "Keep `--run --passWithNoTests`" paragraph).';
+}
+
 export function dispatchedAgentVerificationReason(command, dispatchKind) {
+  if (dispatchKind) {
+    const watch = admittedVitestWatchReason(command);
+    if (watch) return watch;
+  }
   if (!dispatchKind || !isVerificationRun(command)) return null;
   if (SANCTIONED_VERIFY_LANE_QUERY.test(String(command || ''))) return null;
   return `a mechanically-dispatched ${dispatchKind} agent may not run the verification set (verify-lane / check:standards / test:unit / vitest / npm run verify / playwright test) directly — the gate legitimately takes 150–350s, well past this tool's ~120s foreground window, so a direct run gets silently auto-backgrounded and the agent stalls with no error (#3105), and a raw run also skips the host's heavy-command admission pool (xaipsbs). For the full gate, request it and poll for the result: \`node scripts/verify-lane.mjs request\` then \`node scripts/verify-lane.mjs check\` across your own turns — the runner's own process (unbound by this window) actually runs the gate. For one short, targeted run, use the admitted form: \`node scripts/readiness/heavy-admission.mjs run -- <cmd>\` (e.g. \`… run -- npx vitest run <one test file>\`). There is no override.`;
@@ -1748,8 +1771,18 @@ export function isFileWriteRedirect(segment) {
 
 /** A backlog|reports `.md` file as a WRITE TARGET — relative (`backlog/x.md`, `./reports/y.md`) or absolute
  *  (`/…/lane-3/backlog/x.md`). Anchored on a path boundary so `mybacklog/x.md` is not a card. */
-const CORPUS_FILE_TARGET = /(?:^|\/)(?:backlog|reports)\/[^\s'")]*\.md$/;
+const CORPUS_FILE_TARGET = /(?:^|\/)(?:backlog|reports)\/[^'")]*\.md$/;
 const COPY_PROGRAMS = new Set(['cp', 'gcp', 'install', 'ginstall', 'mv', 'gmv']);
+
+/** Lexical only: a trailing slash or the corpus directory itself identifies a directory.
+ * Bare nested directories need filesystem knowledge and remain outside this detector. */
+function copyDestinationTargets(sources, destination) {
+  const dest = unquote(destination);
+  const directory = /\/$/.test(dest) || /(?:^|\/)(?:backlog|reports)$/.test(dest);
+  return directory
+    ? sources.map((source) => `${dest.replace(/\/+$/, '')}/${unquote(source).replace(/^.*\//, '')}`)
+    : [dest];
+}
 
 /** #4070 — every backlog|reports `.md` path `segment` OVERWRITES from the shell, scratch excluded. Pure.
  *  The `>>`/`tee`/`sed -i`/`perl -pi` arm in `reason()` already covered appends and in-place edits; a
@@ -1773,9 +1806,12 @@ export function corpusOverwriteTargets(segment) {
       args.push(rest[i]);
     }
     const files = fileOperands(args, new Set(['-S', '--suffix', '-m', '--mode', '-o', '--owner', '-g', '--group']));
-    const dest = files.length >= 2 ? unquote(files[files.length - 1]) : '';
-    const fromOutside = files.slice(0, -1).some((f) => !CORPUS_FILE_TARGET.test(unquote(f)));
-    if (CORPUS_FILE_TARGET.test(dest) && !isScratch(dest) && (!prog.endsWith('mv') || fromOutside)) out.push(dest);
+    const sources = files.slice(0, -1);
+    const fromOutside = sources.some((f) => !CORPUS_FILE_TARGET.test(unquote(f)));
+    if (files.length >= 2 && (!prog.endsWith('mv') || fromOutside)) {
+      out.push(...copyDestinationTargets(sources, files[files.length - 1])
+        .filter((dest) => CORPUS_FILE_TARGET.test(dest) && !isScratch(dest)));
+    }
   }
   return [...new Set(out)];
 }

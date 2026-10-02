@@ -1,3 +1,4 @@
+import { foldJuryLedger } from './jury-ledger.mjs';
 /**
  * disposition-judge.mjs — the DISPOSITION LAYER over the jury ledger (#2652, core of epic #2636).
  *
@@ -340,6 +341,10 @@ export function redRefute({ ledger = [], config, proposal, signals = {}, mandato
     return { refuted: false, grounds };
   }
   const reduced = reduceLedger(ledger);
+  const referrals = foldJuryLedger(ledger, signals.referralContext).referralState;
+  if (referrals.pending.length || referrals.blocked.length) {
+    grounds.push(`mandatory-referral: ${[...referrals.pending, ...referrals.blocked].join(', ')} requires a current-head mandatory ruling.`);
+  }
 
   // gate-self must NEVER survive to auto-dispose — refute unconditionally (green already escalates it; this is the
   // adversary's independent enforcement of the hard invariant).

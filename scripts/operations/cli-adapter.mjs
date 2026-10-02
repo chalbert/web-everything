@@ -67,7 +67,7 @@ import { codexJudgeSpawn, requireAllProperties } from '../lib/codex-judge-spawn.
 // for this exact call site. Fixed minimally HERE (default only, an explicit `request.model` still wins)
 // rather than pulled in wholesale from that branch, since our need is narrowly "the identity this probation
 // registry keys on must be real", not the fuller multi-call-site consolidation #3635 owns.
-import { CODEX_MODEL } from '../codex-direct-task.mjs';
+import { CODEX_MODEL, CODEX_EFFORT_MAP } from '../codex-direct-task.mjs';
 // #3383 — THE FIFTH SEAT'S PROVIDER (Google's Antigravity CLI, `agy`), mirroring the Codex import immediately
 // above: a leaf constant with no jury/markdown-it edge, imported so `resolveJudgeProvider`'s `'antigravity'`
 // branch pins a REAL `{provider, model}` identity (`ANTIGRAVITY_MODEL`) rather than whatever `agy` resolves as
@@ -499,8 +499,9 @@ export function assertSafeJudgeRequest(request) {
       );
     }
   }
-  if (request?.effort !== undefined && !EFFORT_LEVELS.includes(request.effort)) {
-    throw new Error(`operations: \`effort\` must be one of ${EFFORT_LEVELS.join('|')}, got ${JSON.stringify(request.effort)}`);
+  const effortLevels = request?.providerName === 'codex' ? Object.keys(CODEX_EFFORT_MAP) : EFFORT_LEVELS;
+  if (request?.effort !== undefined && !effortLevels.includes(request.effort)) {
+    throw new Error(`operations: \`effort\` must be one of ${effortLevels.join('|')}, got ${JSON.stringify(request.effort)}`);
   }
   // `null` is the DECLARED "no ceiling", and it has to be spelled out HERE as well as in `judgeSpawn`. This
   // guard runs on the request BEFORE the spawn, in a file the budget change never touched, so a `budget: null`
@@ -711,9 +712,10 @@ function buildProviderRequest(effective, cwd, effectiveProviderName) {
     runId: effective.runId,
     lens: effective.lens,
     ...(effective.allowedTools ? { allowedTools: effective.allowedTools } : {}),
+    // #4446 - keyed on the tool-free capability (codex AND antigravity), not on a provider-name literal.
     // #xqa9ttq (PR #2117 review, CONFIRMED) - a codex request NEVER receives the factory's lane cwd: the seat
     // is tool-free and diff-only, and `-C <lane>` would load the untrusted PR checkout's AGENTS.md into it.
-    ...(cwd && effectiveProviderName !== 'codex' ? { cwd } : {}),
+    ...(cwd && !TOOL_FREE_JUDGE_PROVIDER_NAMES.includes(effectiveProviderName) ? { cwd } : {}),
   };
 }
 
@@ -817,7 +819,7 @@ export function createDefaultJudge({
     // the seat(s) they are steering with `--model`); a request whose effective provider is tool-free (via
     // `request.providerName` or this factory's own) would otherwise carry that Claude model name onto the
     // other CLI's own model flag verbatim.
-    const effective = configured ? { ...declared, providerName: configured.provider, model: configured.model } : (model && !TOOL_FREE_JUDGE_PROVIDER_NAMES.includes(effectiveProviderName)) ? { ...declared, model } : declared;
+    const effective = configured ? { ...declared, providerName: configured.provider, model: configured.model, effort: configured.effort } : (model && !TOOL_FREE_JUDGE_PROVIDER_NAMES.includes(effectiveProviderName)) ? { ...declared, model } : declared;
     assertSafeJudgeRequest(effective);
     // #xqa9ttq/#3383 — TOOL-FREE ONLY, ENFORCED HERE TOO, not only inside each provider's own spawn module. A
     // caller that injects its own `provider` function bypasses `resolveProvider` entirely, so this check is the
@@ -882,7 +884,7 @@ export function createDefaultJudge({
         ? (configured ? resolveProvider(effectiveProviderName) : request?.providerName !== undefined ? resolveProvider(request.providerName) : (provider ?? resolveProvider(providerName)))
         : resolveProvider(spawnProviderName);
       try {
-        const actual = configured && spawnProviderName !== effectiveProviderName ? { ...effective, model: configured.fallback.find(route => route.provider === spawnProviderName)?.model } : effective;
+        const actual = configured && spawnProviderName !== effectiveProviderName ? { ...effective, ...configured.fallback.find(route => route.provider === spawnProviderName), providerName: spawnProviderName } : effective;
         const outcome = await spawnProvider(buildProviderRequest(actual, cwd, spawnProviderName));
         // NOT a spread of `outcome` — see the ordinary path's own note just below.
         return judgeOutcome(outcome.value, judgeTelemetryFrom(outcome, actual));

@@ -110,7 +110,7 @@ describe('buildRestrictedProviderArgv', () => {
     expect(argv).toEqual([
       '--restricted', '--tools', RESTRICTED_PROVIDER_TOOLS, '--strict-mcp-config',
       '--disable-slash-commands', '--settings', '/repo/.operations/hooks.json',
-      '--model', 'sonnet', '-p', '--session-id', 'session-1', 'do the thing',
+      '--model', 'sonnet', '--effort', 'medium', '-p', '--session-id', 'session-1', 'do the thing',
     ]);
   });
 
@@ -134,7 +134,7 @@ describe('buildRestrictedProviderArgv', () => {
     const argv = buildRestrictedProviderArgv({ sessionId: 's', prompt: 'p', settingsFile: '/x.json', tools: 'Bash' });
     expect(argv).toEqual([
       '--restricted', '--tools', 'Bash', '--strict-mcp-config', '--disable-slash-commands', '--settings', '/x.json',
-      '--model', 'sonnet', '-p', '--session-id', 's', 'p',
+      '--model', 'sonnet', '--effort', 'medium', '-p', '--session-id', 's', 'p',
     ]);
   });
 });

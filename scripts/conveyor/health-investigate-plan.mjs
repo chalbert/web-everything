@@ -140,11 +140,15 @@ export function planWallClock(ledger, { now, config = {}, hasFindings = () => fa
   return out;
 }
 
-/** PURE: drop finished entries older than the longest budget window; never a running one. */
-export function pruneLedger(ledger, { now, config = {} }) {
+/**
+ * PURE: drop finished entries older than the longest budget window; never a running one, and never one whose
+ * episode is still open (`openEpisodeIds`) — its entry is the tombstone {@link planInvestigations}'
+ * `ONE_PER_EPISODE` rule reads, so dropping it would re-dispatch the same open episode.
+ */
+export function pruneLedger(ledger, { now, config = {}, openEpisodeIds = new Set() }) {
   const cfg = { ...DEFAULT_HEALTH_CONFIG, ...config };
   const keep = Math.max(cfg.investigateWindowMs, cfg.investigateSubjectWindowMs);
-  return (Array.isArray(ledger) ? ledger : []).filter((x) => x.status === 'running' || now - x.startedAt < keep);
+  return (Array.isArray(ledger) ? ledger : []).filter((x) => x.status === 'running' || openEpisodeIds.has(x.episodeId) || now - x.startedAt < keep);
 }
 
 // ── findings: validation + the privacy scrub ─────────────────────────────────────────────────────────────────

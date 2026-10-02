@@ -12,7 +12,7 @@ import {
   siblingLaneLeases,
   laneRootFromCwd, isDestructiveLaneGitOp, hasDestructiveLaneOp, canonicalGitOp,
   isVerificationRun, isBackgrounded, backgroundedVerificationReason, dispatchedAgentVerificationReason,
-  isHeavyRawRun, isAdmittedWrapperRun,
+  isHeavyRawRun, isAdmittedWrapperRun, admittedVitestWatchReason,
   isDirectTaskInvocation, backgroundedDirectTaskReason,
   usageReportSecretReadReason,
   isTruncatedOperationJson, truncatedOperationJsonReason,
@@ -3512,4 +3512,32 @@ describe('briefs document commands the guard does not deny (#4368)', () => {
       for (const c of cmds) for (const kind of KINDS) expect(dispatchedAgentVerificationReason(c, kind)).toBeNull();
     });
   }
+});
+
+describe('admitted vitest must be one-shot (#4449)', () => {
+  const W = 'node scripts/readiness/heavy-admission.mjs run --';
+  const KINDS = ['build', 'fix', 'ci-heal'];
+  const related = `${W} npx vitest related scripts/foo.mjs --passWithNoTests`;
+  it('related without --run is denied for every kind', () => {
+    for (const k of KINDS) expect(dispatchedAgentVerificationReason(related, k)).toMatch(/--run/);
+  });
+  it('--run, --watch=false or --no-watch allows it', () => {
+    for (const f of ['--run', '--watch=false', '--no-watch']) {
+      for (const k of KINDS) expect(dispatchedAgentVerificationReason(`${related} ${f}`, k)).toBeNull();
+    }
+  });
+  it('vitest run <file> stays allowed without extra flags', () => {
+    for (const k of KINDS) expect(dispatchedAgentVerificationReason(`${W} npx vitest run scripts/foo.test.mjs`, k)).toBeNull();
+  });
+  it('interactive session is unaffected', () => {
+    expect(dispatchedAgentVerificationReason(related, null)).toBeNull();
+    expect(admittedVitestWatchReason(related)).not.toBeNull();
+  });
+  it('stripping --run from the brief-extracted command is denied for every kind', () => {
+    const md = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'skills-src', 'conveyor', 'delivery-agent-brief.md'), 'utf8');
+    const line = md.split('\n').find((l) => l.startsWith('node scripts/readiness/heavy-admission.mjs run -- npx vitest related'));
+    expect(line).toBeTruthy();
+    const mutated = line.replace(' --run', '');
+    for (const k of KINDS) expect(dispatchedAgentVerificationReason(mutated, k)).not.toBeNull();
+  });
 });

@@ -13,6 +13,7 @@
  * feed (#095/#196/#197) and the human output are unchanged.
  */
 
+import { createRequire } from 'node:module';
 import { normalizeRelatedReport } from './lib/related-report.cjs';
 
 import { validateFidelityContract } from './lib/fidelity-contract.mjs';
@@ -22,6 +23,8 @@ import { scrubPublish } from './lib/secret-scrub.mjs';
 // #3637 — the POC-branch registry's own `deliveryTarget:` predicate, so the gate and the scoped per-item
 // lint validate that field with the ONE function the dispatcher also uses (never a second copy of the rule).
 import { validateDeliveryTarget } from './lib/poc-branches.mjs';
+
+const requireCjs = createRequire(import.meta.url);
 
 /** #2866: literal invisible characters are forbidden even in Markdown prose and fixtures.
  * Use visible Unicode escapes to document/test them. Offsets use zero-based UTF-16 code units.
@@ -941,6 +944,23 @@ export function findUnquotedColonScalars(content) {
   return findings;
 }
 
+// ── Unparseable frontmatter, any cause (#4451) ───────────────────────────────────────────────────────────
+// The colon scan above covers ONE cause of a loader-skipped item. An unclosed quote, a tab indent or a bad
+// flow collection also vanish the card (src/_data/backlog.js drops it and only warns), so the required-field
+// rule never sees it. This runs the SAME parser the loader uses (gray-matter) over the raw file, so "gate says
+// unparseable" and "loader skipped it" cannot disagree. Returns `{ colonHits, parseReason }`: `colonHits` is the
+// colon scan's findings (the gate prints those and skips the generic message to avoid a duplicate error);
+// `parseReason` is the parser's message, or null when it parses (or there is no frontmatter to parse).
+export function describeUnparseableFrontmatter(content) {
+  const colonHits = findUnquotedColonScalars(content);
+  let parseReason = null;
+  if (typeof content === 'string') {
+    try { requireCjs('gray-matter')(content); }
+    catch (e) { parseReason = String(e?.reason || e?.message || e).split('\n')[0]; }
+  }
+  return { colonHits, parseReason };
+}
+
 // ── Guard-relaxation gaps (#4409 — prevention guard from the #2892 independent review) ─────────────────
 // A card that loosens a refusal must say what happens on error (fail closed) and enumerate the non-code inputs
 // the loosening still treats cautiously. Prose heuristic → WARNING only. Scans only the card's top (before
@@ -1028,6 +1048,82 @@ export function findTestPlanGaps(body) {
     const re = new RegExp(`(?<![\\w-])${lit.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w-])`, 'i');
     if (!re.test(planText)) gaps.push({ kind: 'untested-condition', detail: lit });
   }
+  gaps.push(...findNegativeClaimGaps(design, planText));
+  return gaps;
+}
+
+// Negative-claim coverage (#4431): a Design sentence saying "never / cannot / fails closed" should have a
+// Test-plan case. Heuristic: the claim's backticked/quoted identifiers (minus short words and care-level words)
+// must appear in the Test plan. A claim with no extractable identifier is not reported (unfixable noise).
+const NEGATIVE_CLAIM_RE = /\bnever\b|\bcannot\b|\bfails? closed\b/i;
+const NEGATIVE_CLAIM_SKIP_TOKENS = /^(?:none|low|high|elevated)$/i;
+
+function findNegativeClaimGaps(design, planText) {
+  const paragraphs = [];
+  let current = [];
+  let inFence = false;
+  const flush = () => { if (current.length) paragraphs.push(current.join(' ')); current = []; };
+  for (const line of design) {
+    if (/^\s*```/.test(line)) { flush(); inFence = !inFence; continue; }
+    if (inFence) continue;
+    if (!line.trim()) flush(); else current.push(line.trim());
+  }
+  flush();
+  const gaps = [];
+  for (const para of paragraphs) {
+    for (const sentence of para.split(/(?<=[.?!])\s+/)) {
+      if (!NEGATIVE_CLAIM_RE.test(sentence)) continue;
+      const tokens = [...sentence.matchAll(/`([^`]+)`|"([^"]+)"/g)]
+        .flatMap((m) => (m[1] ?? m[2]).match(/[A-Za-z_][\w-]*/g) ?? [])
+        .filter((t) => t.length > 4 && !NEGATIVE_CLAIM_SKIP_TOKENS.test(t));
+      if (!tokens.length) continue;
+      const covered = tokens.some((t) => new RegExp(`(?<![\\w-])${t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w-])`, 'i').test(planText));
+      if (!covered) gaps.push({ kind: 'negative-claim-without-case', detail: sentence.slice(0, 60) });
+    }
+  }
+  return gaps;
+}
+
+// Must-without-Done-when (#4438) — every numbered MVP Must must be cited BY NUMBER in a `## Done when` clause
+// (`Must 2`, `Musts 1, 3`, `Musts 1-4`). Prose-only coverage is deliberately NOT a citation: substance matching is
+// unreliable, and adding the number is the cheap fix. Returns one `{ must, text }` per uncited Must.
+const MUST_CITE_RE = /\bMusts?\s+(\d+(?:\s*[-\u2013]\s*\d+)?(?:\s*(?:,|and|&)\s*\d+(?:\s*[-\u2013]\s*\d+)?)*)/gi;
+export function findMustWithoutDoneWhen(body) {
+  const lines = String(body ?? '').split(/\r?\n/);
+  const cut = sectionLines(lines, /^explicit mvp cut\b/i);
+  const musts = [];
+  let inMust = false;
+  for (const line of cut) {
+    if (/^\*\*\s*Must\b/i.test(line)) { inMust = true; continue; }
+    if (/^\*\*/.test(line)) { inMust = false; continue; }
+    if (!inMust) continue;
+    const m = /^(\d+)\.\s+(.*)$/.exec(line);
+    if (m) musts.push({ must: Number(m[1]), text: m[2].trim().slice(0, 60) });
+  }
+  if (!musts.length) return [];
+  const cited = new Set();
+  for (const m of sectionLines(lines, /^done when\b/i).join('\n').matchAll(MUST_CITE_RE)) {
+    for (const part of m[1].split(/\s*(?:,|and|&)\s*/i)) {
+      const r = /^(\d+)(?:\s*[-\u2013]\s*(\d+))?$/.exec(part.trim());
+      if (!r) continue;
+      const lo = Number(r[1]), hi = r[2] ? Number(r[2]) : lo;
+      for (let n = lo; n <= hi && n - lo < 100; n++) cited.add(n);
+    }
+  }
+  return musts.filter((x) => !cited.has(x.must));
+}
+
+// Dangling `we:backlog/<id>` prose refs (#4438) — an id in no file on main (landed num or `bornAs` hash, via
+// `buildBacklogResolvableIds`). A ref followed by `(pending-lane)` is exempt (a sibling still in flight).
+const BACKLOG_PROSE_REF_RE = /we:backlog\/([0-9]{1,5}|x[0-9a-z]{6,7})(?![0-9A-Za-z])(?:-[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.md)?(\s*\(pending-lane\))?/g;
+export function findDanglingBacklogRefs(body, knownIds) {
+  const seen = new Set();
+  const gaps = [];
+  for (const m of String(body ?? '').matchAll(BACKLOG_PROSE_REF_RE)) {
+    if (m[2] || knownIds.has(m[1]) || seen.has(m[1])) continue;
+    seen.add(m[1]);
+    gaps.push({ id: m[1] });
+  }
   return gaps;
 }
 
@@ -1044,7 +1140,7 @@ export function findTestPlanGaps(body) {
 // run file-driven (a malformed-YAML item is skipped by the loader, so it isn't in the item array at all),
 // so each caller runs `findUnquotedColonScalars(content)` over the raw file itself. Also excludes the
 // digest-length nudge (validateBacklogItem owns it) and the blockedBy cycle walk (a graph-level check).
-export function lintBacklogItemRendering({ item, body, pocRegistry = null }) {
+export function lintBacklogItemRendering({ item, body, pocRegistry = null, knownBacklogIds = null }) {
   const errors = [];
   const warnings = [];
   const id = item.id;
@@ -1103,11 +1199,29 @@ export function lintBacklogItemRendering({ item, body, pocRegistry = null }) {
     if (planGaps.length) {
       const detail = planGaps.map((g) => g.kind === 'untested-condition'
         ? `design condition '${g.detail}' has no Test-plan case`
-        : g.kind === 'preservation-without-mutation'
+        : g.kind === 'negative-claim-without-case'
+          ? `negative claim "${g.detail}" has no Test-plan case — name a Test-plan case that exercises the claim's identifiers`
+          : g.kind === 'preservation-without-mutation'
           ? `preservation case "${g.detail}" names no mutation proof`
           : `case "${g.detail}" is neither a capability (Red today) nor a preservation (GREEN today) case`).join('; ');
       warnings.push(`Backlog item "${id}" has Test-plan gaps — ${detail}. Classify each case as capability (fails on the base) ` +
         `or preservation (passes on both, naming its mutation proof), and give every design condition a case.`);
+    }
+  }
+
+  // Must-without-Done-when + dangling backlog refs (#4438) — WARNING only, open/active cards.
+  if (item.status !== 'resolved') {
+    const uncited = findMustWithoutDoneWhen(body);
+    if (uncited.length) {
+      warnings.push(`Backlog item "${id}" has MVP Must(s) no Done-when clause cites by number — ` +
+        `${uncited.map((g) => `Must ${g.must} ("${g.text}")`).join('; ')}. Cite each as \`Must N\`, \`Musts A, B\` or \`Musts A-B\` in ## Done when.`);
+    }
+    if (knownBacklogIds) {
+      const dangling = findDanglingBacklogRefs(body, knownBacklogIds);
+      if (dangling.length) {
+        warnings.push(`Backlog item "${id}" references \`we:backlog/<id>\` card(s) that resolve to no file — ` +
+          `${dangling.map((g) => g.id).join(', ')}. Fix the id, or mark a sibling still in flight with \`(pending-lane)\` right after the ref.`);
+      }
     }
   }
 
@@ -3695,6 +3809,94 @@ export function scopeBasenameMismatchMessage(id, finding) {
     `it alongside an item that writes the very same file. Fix the path — or, if this item genuinely CREATES the ` +
     `file at the path as written, leave it and add a short \`scopeRationale:\` note saying so, which clears ` +
     `this flag.`;
+}
+
+// ── scope-vs-body consistency guards + `deferredBlockedBy` (#4448) ─────────────────────────────
+// Pure rules over RAW frontmatter (+ body), same escapes as the siblings above: `status: resolved` skipped, a
+// non-empty `scopeRationale:` clears the finding. Warn-only at the call site — the false-positive budget is
+// the existing warning corpus, and an error would redden every historical card.
+
+const SOURCE_EXT_RE = /\.(mjs|ts)$/;
+const isTestPath = (p) => /(^|\/)__tests__\//.test(p) || /\.test\.[a-z]+$/.test(p);
+
+function scopeEscaped(item) {
+  if (item?.status === 'resolved') return true;
+  return typeof item?.scopeRationale === 'string' && item.scopeRationale.trim() !== '';
+}
+
+/** Guard 4. A scoped `we:` source file whose sibling test is TRACKED but unscoped, when the body mandates tests
+ * (`## Test plan`). Sibling convention only (`<dir>/__tests__/<base>.test.<ext>`, or top-level
+ * `scripts/__tests__/`) — low recall by design; greenfield (no tracked test) stays silent.
+ * @returns {{entry: string, testPath: string}[]} */
+export function scopeMissingTestFile(item, index, body) {
+  const scope = item?.scope;
+  if (!Array.isArray(scope) || scopeEscaped(item)) return [];
+  if (!/^##\s+Test plan\b/mi.test(typeof body === 'string' ? body : '')) return [];
+  const paths = index?.paths;
+  if (!(paths instanceof Set) || paths.size === 0) return [];
+  const findings = [];
+  for (const entry of scope) {
+    if (typeof entry !== 'string' || !entry.startsWith(SCOPE_LOCAL_REPO_PREFIX) || isSubtreeEntry(entry)) continue;
+    const path = entry.slice(SCOPE_LOCAL_REPO_PREFIX.length);
+    if (!SOURCE_EXT_RE.test(path) || isTestPath(path)) continue;
+    const slash = path.lastIndexOf('/');
+    const dir = path.slice(0, slash + 1), file = path.slice(slash + 1);
+    const dot = file.lastIndexOf('.');
+    const base = file.slice(0, dot), ext = file.slice(dot + 1);
+    const candidates = [`${dir}__tests__/${base}.test.${ext}`, `scripts/__tests__/${base}.test.mjs`];
+    const testPath = candidates.find((c) => paths.has(c));
+    if (!testPath) continue;
+    if (scope.some((s) => typeof s === 'string' && coversFile(s, `${SCOPE_LOCAL_REPO_PREFIX}${testPath}`))) continue;
+    findings.push({ entry, testPath });
+  }
+  return findings;
+}
+
+/** The body text of the `## MVP` / `## Done when` sections only (the sections that commit to deliverables). */
+function deliverableSections(body) {
+  const out = [];
+  let on = false;
+  for (const line of String(body || '').split('\n')) {
+    const h = /^##\s+(.*?)\s*$/.exec(line);
+    if (h) { on = /^(MVP|Done when)\b/i.test(h[1]); continue; }
+    if (on) out.push(line);
+  }
+  return out.join('\n');
+}
+
+/** Guard 5. Backtick-quoted `we:<file>` tokens under `## MVP` / `## Done when` that `scope:` does not cover.
+ * File-shaped tokens only (must carry an extension). @returns {string[]} */
+export function bodyDeliverablesMissingFromScope(item, body) {
+  const scope = item?.scope;
+  if (!Array.isArray(scope) || scopeEscaped(item)) return [];
+  const missing = new Set();
+  for (const m of deliverableSections(body).matchAll(/`(we:[^`\s]+)`/g)) {
+    const token = m[1];
+    if (!/\.[A-Za-z0-9]+$/.test(token) || /[*?]/.test(token)) continue;
+    if (scope.some((s) => typeof s === 'string' && coversFile(s, token))) continue;
+    missing.add(token);
+  }
+  return [...missing];
+}
+
+/** Guard 3. Validates the optional RAW `deferredBlockedBy` array: edges deliberately withheld from `blockedBy`
+ * (so the dispatcher does not hold the item) but kept machine-visible. Never gates readiness.
+ * @param {Set<string>|Iterable<string>} knownNums ids that resolve to a real item.
+ * @returns {string[]} one message per problem. */
+export function deferredBlockedByFindings(item, knownNums, selfId) {
+  const raw = item?.deferredBlockedBy;
+  if (raw === undefined) return [];
+  if (!Array.isArray(raw)) return ['deferredBlockedBy must be an array of NNN ids (e.g. ["079"])'];
+  const known = knownNums instanceof Set ? knownNums : new Set(knownNums || []);
+  const blocked = new Set(Array.isArray(item?.blockedBy) ? item.blockedBy.map(String) : []);
+  const out = [];
+  for (const v of raw) {
+    const id = String(v);
+    if (selfId !== undefined && id === String(selfId)) out.push(`deferredBlockedBy "${id}" is a self-edge`);
+    else if (!known.has(id)) out.push(`deferredBlockedBy "${id}" does not resolve to a backlog item`);
+    else if (blocked.has(id)) out.push(`deferredBlockedBy "${id}" is also in blockedBy — a withheld edge cannot be both`);
+  }
+  return out;
 }
 
 // ── `--all` inside a git hook (#3196) ──────────────────────────────────────────────────────────

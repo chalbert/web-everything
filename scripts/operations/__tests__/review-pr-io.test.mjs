@@ -1,3 +1,4 @@
+import { referralFindingKey } from '../../lib/jury-core.mjs';
 /**
  * @file review-pr-io.test.mjs — the `review-pr` io shell (#3035): the four sinks, with no `gh` and no network.
  *
@@ -1006,5 +1007,66 @@ describe('#xu2pp2m — `--cwd` decides which checkout the DIFF is read from', ()
     // ALWAYS in — for every invocation, `--cwd` or not. Revert the fix and the test above produces this.
     expect(driveRead({})).not.toContain(NAMED_ORIGIN);
     expect(driveRead({ cwd: null })).not.toContain(NAMED_ORIGIN);
+  });
+});
+
+describe('#4315 durable referral effects', () => {
+  function harness({ result = 'not-real', failure } = {}) {
+    const head = 'a'.repeat(40), trace = [];
+    const state = { headRefOid: head, body: '<!-- authored-by-actor: author -->', comments: [], labels: ['review:pending'] };
+    const payload = { read: { repo: 'o/r', pr: 7, title: 'review', body: state.body, netBasis: { rev: head },
+      netChangedFiles: ['x.mjs'], diffText: '+ change' },
+      referrals: [{ seat: 'judgeCorrectnessAdvisory', original: { summary: 'broken', file: 'x.mjs', verdict: 'CONFIRMED', impactIfUnfixed: 'broken' } }] };
+    const provider = {
+      readPrState: () => { trace.push('read'); return structuredClone(state); },
+      postComment: (repo, pr, body) => {
+        trace.push('post');
+        if (failure === 'post') throw new Error('post unavailable');
+        if (failure !== 'read-back') state.comments.push({ body });
+        if (failure === 'changed-head') state.headRefOid = 'b'.repeat(40);
+      },
+      setLabels: (repo, pr, plan) => { trace.push(`label:${plan.add}`); state.labels = [...state.labels.filter(l => !plan.remove.includes(l)), plan.add]; },
+    };
+    const judge = vi.fn(async request => {
+      trace.push('judge');
+      if (failure === 'judge') throw new Error('budget exhausted');
+      const key = payload.referrals[0];
+      return { sessionId: failure === 'identity' ? 'forged' : request.sessionId,
+        timedOut: failure === 'timeout', value: { rulings: failure === 'omitted' ? [] : [{
+          key: referralFindingKey(key.seat, key.original), result, rationale: 'Checked diff', evidence: ['diff:x'],
+          card: result === 'card' ? 'we:backlog/7-filed.md' : '',
+        }] } };
+    });
+    const make = () => createReviewPrSinks({ root, labelProvider: provider, referralJudge: judge,
+      mirrorReferral: record => trace.push(`mirror:${record.attempted}`), out: () => {}, cardReadable: () => failure !== 'card' });
+    return { state, trace, payload, judge, make };
+  }
+  it.each(['post', 'read-back', 'changed-head'])('%s cannot clear a hold or dispatch before persistence', async failure => {
+    const h = harness({ failure });
+    await expect(h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX)).rejects.toThrow();
+    expect(h.judge).not.toHaveBeenCalled();
+    expect(h.trace.some(x => x.startsWith('label:'))).toBe(false);
+  });
+  it.each(['judge', 'timeout', 'omitted', 'identity', 'card'])('%s is bounded and human-owned across fresh sink instances', async failure => {
+    const h = harness({ failure, result: failure === 'card' ? 'card' : 'not-real' });
+    for (let i = 0; i < 3; i++) {
+      const result = await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, { ...CTX, runId: `run-${i}` });
+      expect(result.pending).toHaveLength(1);
+    }
+    expect(h.judge).toHaveBeenCalledTimes(1);
+    expect(h.state.labels).toEqual(['review:human']);
+    expect(h.trace.indexOf('post')).toBeLessThan(h.trace.indexOf('judge'));
+    expect(h.trace.slice(0, h.trace.indexOf('judge'))).toContain('read');
+  });
+  it('posts and reads back rulings before returning clearance, then reuses them', async () => {
+    const h = harness();
+    const result = await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX);
+    expect(result.pending).toEqual([]);
+    expect(result.blocked).toEqual([]);
+    expect(h.trace.filter(x => x === 'post')).toHaveLength(3);
+    expect(h.trace.lastIndexOf('read')).toBeGreaterThan(h.trace.lastIndexOf('post'));
+    expect(h.trace.at(-1)).toBe('mirror:true');
+    await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, { ...CTX, runId: 'another-checkout' });
+    expect(h.judge).toHaveBeenCalledTimes(1);
   });
 });

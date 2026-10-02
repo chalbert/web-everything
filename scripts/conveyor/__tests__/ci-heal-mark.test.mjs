@@ -8,16 +8,18 @@
  *   that ONLY a trusted author (automation or the repo operator) counts at all.
  */
 import { describe, it, expect } from 'vitest';
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import {
-  countCiHealComments, buildCiHealComment, CI_HEAL_COMMENT_MARKER, spawnCiHealRearm, postOrOweCiHealComment, resolveHealHead,
+  countCiHealComments, buildCiHealComment, CI_HEAL_COMMENT_MARKER, spawnCiHealRearm, spawnCiHealRestamp, postOrOweCiHealComment, resolveHealHead,
 } from '../ci-heal-mark.mjs';
 import { readOwedWrites, owedWriteAlreadyLive } from '../ci-heal-owed.mjs';
 import { budgetBlockedMessage } from '../../lib/gh-throttle.mjs';
+
+import * as reviewLabel from '../../review-set-label.mjs';
 
 const AUTOMATION = { login: 'web-everything' };
 
@@ -62,10 +64,11 @@ describe('buildCiHealComment — the durable comment body (#2666)', () => {
     expect(countCiHealComments([{ body, author: AUTOMATION }])).toBe(1); // round-trips: what we post, we count
   });
 
-  it('states that only CI was repaired — the review gate was NOT touched', () => {
+  it('distinguishes the CI repair record from the subsequent acceptance re-arm', () => {
     const body = buildCiHealComment({ reason: 'behind' });
     expect(body).toContain('review:human');
-    expect(body.toLowerCase()).toContain('not touched');
+    expect(body).toContain('a live `review:accepted` may be re-armed separately');
+    expect(body).not.toContain('was NOT touched');
   });
 });
 
@@ -154,6 +157,12 @@ describe('#4352 — head-scoped heal comment + owed-on-budget-refusal', () => {
     expect(resolveHealHead({ headFlag: HEAD, exec: () => { throw new Error('unused'); } })).toBe(HEAD);
     expect(resolveHealHead({ exec: () => `${HEAD}\n` })).toBe(HEAD);
     expect(resolveHealHead({ exec: () => { throw new Error('not a repo'); } })).toBe('');
+    const calls = [];
+    expect(resolveHealHead({ headFlag: HEAD.slice(0, 9), cwd: '/repo', exec: (...args) => { calls.push(args); return HEAD; } })).toBe(HEAD);
+    expect(calls[0][1]).toEqual(['rev-parse', '--verify', `${HEAD.slice(0, 9)}^{commit}`]);
+    expect(calls[0][2].cwd).toBe('/repo');
+    expect(resolveHealHead({ headFlag: HEAD.slice(0, 9), exec: () => { throw new Error('unresolvable prefix'); } })).toBe('');
+    expect(resolveHealHead({ headFlag: 'bad-head', exec: () => HEAD })).toBe('');
   });
 
   it('REAL CLI PATH: a budget-blocked `gh` → owed record on disk (with head), exit 0, not a bare failure', () => {
@@ -175,5 +184,134 @@ describe('#4352 — head-scoped heal comment + owed-on-budget-refusal', () => {
       // The owed body IS the comment that will be posted — and it dedupes against itself once live.
       expect(owedWriteAlreadyLive([{ body: owed[0].body, author: AUTOMATION }], owed[0])).toBe(true);
     } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+});
+
+
+// #xan09na: real Git histories and real children; only the remote forge is simulated.
+describe('CI-heal acceptance replay through the actual CLI', () => {
+  it.each(['unchanged', 'changed', 'missing', 'prefix', 'human', 'head-race', 'verdict-race', 'soak'])('%s heal reaches the actual guarded restamp and fallback', (scenario) => {
+    const dir = mkdtempSync(join(tmpdir(), 'ci-heal-carry-'));
+    const git = (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    try {
+      git('init', '-b', 'main');
+      git('config', 'user.name', 'Replay');
+      git('config', 'user.email', 'replay@example.test');
+      writeFileSync(join(dir, 'source.js'), 'export const value = 1;\n');
+      git('add', '.'); git('commit', '-m', 'base');
+      const reviewedBase = git('rev-parse', 'HEAD');
+      git('checkout', '-b', 'lane');
+      writeFileSync(join(dir, 'source.js'), 'export const value = 2;\n');
+      git('commit', '-am', 'contribution');
+      const reviewedHead = git('rev-parse', 'HEAD');
+      const reviewedDiff = git('diff', reviewedBase, reviewedHead);
+      git('checkout', 'main');
+      writeFileSync(join(dir, 'upstream.txt'), 'upstream only\n');
+      git('add', '.'); git('commit', '-m', 'base movement');
+      const healedBase = git('rev-parse', 'HEAD');
+      git('checkout', 'lane'); git('rebase', 'main');
+      if (scenario === 'changed') {
+        writeFileSync(join(dir, 'source.js'), 'export const value = 3;\n');
+        git('commit', '-am', 'CI repair changes contribution');
+      }
+      const healedHead = git('rev-parse', 'HEAD');
+      git('remote', 'add', 'origin', dir);
+      const { buildVerdictComment } = reviewLabel;
+      const state = { state: 'OPEN', headRefOid: healedHead, headRefName: 'lane', labels: [{ name: 'review:accepted' }],
+        comments: [{ author: AUTOMATION, body: buildVerdictComment({ to: 'accepted', actor: 'reviewer', headSha: reviewedHead, reviewedDiff, ...(scenario === 'human' ? { to: 'clear-human', clearerId: 'operator' } : {}) }) }] };
+      if (scenario === 'missing') state.comments = [];
+      writeFileSync(join(dir, 'state.json'), JSON.stringify(state));
+      mkdirSync(join(dir, 'bin'));
+      writeFileSync(join(dir, 'bin', 'gh'), `#!${process.execPath}
+const fs = require('node:fs');
+const a = process.argv.slice(2);
+const s = JSON.parse(fs.readFileSync('state.json', 'utf8'));
+fs.appendFileSync('calls.jsonl', JSON.stringify(a) + '\\n');
+if (a[0] === 'pr' && a[1] === 'view') {
+ s.reads = (s.reads || 0) + 1;
+ if (s.reads === 3 && ${JSON.stringify(scenario)} === 'head-race') s.headRefOid = 'f'.repeat(40);
+ if (s.reads === 3 && ${JSON.stringify(scenario)} === 'verdict-race') s.labels = [{name:'review:changes'}];
+ console.log(JSON.stringify(s));
+}
+else if (a[0] === 'pr' && a[1] === 'comment') {
+ const body = a.includes('--body-file') ? fs.readFileSync(a[a.indexOf('--body-file') + 1], 'utf8') : a[a.indexOf('--body') + 1];
+ s.comments.push({author:{login:'web-everything'}, body});
+} else if (a[0] === 'pr' && a[1] === 'edit') {
+ for(let i=0;i<a.length;i++) { if(a[i]==='--remove-label') s.labels=s.labels.filter(l=>l.name!==a[i+1]);
+ if(a[i]==='--add-label' && !s.labels.some(l=>l.name===a[i+1])) s.labels.push({name:a[i+1]}); }
+} else { console.error('unexpected gh call', a); process.exit(1); }
+fs.writeFileSync('state.json', JSON.stringify(s));
+`);
+      chmodSync(join(dir, 'bin', 'gh'), 0o755);
+      const r = spawnSync(process.execPath, [join(dirname(fileURLToPath(import.meta.url)), '..', 'ci-heal-mark.mjs'), '42', '--repo=chalbert/web-everything', `--head=${scenario === 'prefix' ? healedHead.slice(0, 10) : healedHead}`],
+        { cwd: dir, encoding: 'utf8', env: { ...process.env, PATH: `${join(dir, 'bin')}:${process.env.PATH}`, WE_VERDICT_LEDGER_DIR: join(dir, 'ledger'), WE_GH_THROTTLE_LOCK_ROOT: join(dir, 'lock') } });
+      const final = JSON.parse(readFileSync(join(dir, 'state.json'), 'utf8'));
+      const proof = { reviewedBase, reviewedHead, healedBase, healedHead, result: r.stdout, labels: final.labels, comments: final.comments, calls: readFileSync(join(dir, 'calls.jsonl'), 'utf8') };
+      expect(r.status, r.stderr).toBe(0);
+      const carried = ['unchanged', 'prefix', 'human', 'soak'].includes(scenario);
+      const rearmed = !carried && scenario !== 'verdict-race';
+      const outcome = JSON.parse(r.stdout.trim().split('\n').pop());
+      expect(outcome, JSON.stringify(proof)).toMatchObject({ restamped: carried, rearmed });
+      if (!carried) expect(outcome.carryReason).toEqual(expect.any(String));
+      expect(final.labels).toEqual([{ name: carried ? 'review:accepted' : rearmed ? 'review:pending' : 'review:changes' }]);
+      const added = final.comments.slice(state.comments.length);
+      expect(added[0].body).toContain(CI_HEAL_COMMENT_MARKER);
+      expect(added[0].body).toContain(`head: ${healedHead}`);
+      expect(added.filter(c => c.body.includes('acceptance re-stamped'))).toHaveLength(carried ? 1 : 0);
+      expect(added.filter(c => c.body.includes('re-armed for re-review'))).toHaveLength(rearmed ? 1 : 0);
+      if (carried) {
+        expect(added[1].body).toContain(`reviewed-sha: ${healedHead}`);
+        expect(added[1].body).toContain(reviewedHead);
+        expect(added[1].body).toContain('ci-heal');
+        expect(added[1].body.includes('cleared-human:')).toBe(scenario === 'human');
+      } else expect(added.every(c => !c.body.includes('reviewed-sha:') && !c.body.includes('cleared-human:'))).toBe(true);
+      const calls = proof.calls.trim().split('\n').map(JSON.parse);
+      expect(calls[0].slice(0, 2)).toEqual(['pr', 'comment']);
+      expect(calls.filter(c => c[1] === 'edit')).toHaveLength(rearmed ? 1 : 0);
+      expect(calls.every(c => c.includes('chalbert/web-everything') || c.includes('--repo=chalbert/web-everything'))).toBe(true);
+      if (scenario === 'unchanged') console.info('CI-heal proven replay', JSON.stringify(proof));
+      if (scenario === 'soak') {
+        let previousHead = healedHead;
+        for (let round = 2; round <= 4; round++) {
+          git('checkout', 'main');
+          writeFileSync(join(dir, 'upstream.txt'), `base movement ${round}\n`);
+          git('commit', '-am', `base movement ${round}`);
+          git('checkout', 'lane'); git('rebase', 'main');
+          const nextHead = git('rev-parse', 'HEAD');
+          const live = JSON.parse(readFileSync(join(dir, 'state.json'), 'utf8'));
+          live.headRefOid = nextHead;
+          writeFileSync(join(dir, 'state.json'), JSON.stringify(live));
+          const next = spawnSync(process.execPath, [join(dirname(fileURLToPath(import.meta.url)), '..', 'ci-heal-mark.mjs'),
+            '42', '--repo=chalbert/web-everything', `--head=${nextHead}`],
+          { cwd: dir, encoding: 'utf8', env: { ...process.env, PATH: `${join(dir, 'bin')}:${process.env.PATH}`,
+            WE_VERDICT_LEDGER_DIR: join(dir, 'ledger'), WE_GH_THROTTLE_LOCK_ROOT: join(dir, 'lock') } });
+          expect(next.status, next.stderr).toBe(0);
+          expect(JSON.parse(next.stdout.trim().split('\n').pop())).toMatchObject({ restamped: true, rearmed: false });
+          const after = JSON.parse(readFileSync(join(dir, 'state.json'), 'utf8'));
+          expect(after.labels).toEqual([{ name: 'review:accepted' }]);
+          expect(after.comments).toHaveLength(1 + 2 * round);
+          expect(after.comments.at(-1).body).toContain(`reviewed-sha: ${nextHead}`);
+          expect(after.comments.at(-1).body).toContain(previousHead);
+          previousHead = nextHead;
+        }
+      }
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+});
+
+
+describe('CI-heal carry child arguments', () => {
+  it('binds the full head, provenance, repo and cwd without claiming equality', () => {
+    const calls = [];
+    const headSha = 'a'.repeat(40);
+    expect(spawnCiHealRestamp({ pr: 42, repo: 'o/r', cwd: '/repo', headSha,
+      spawn: (...args) => { calls.push(args); return { status: 0 }; } })).toEqual({ ok: true });
+    expect(calls).toHaveLength(1);
+    expect(calls[0][1]).toEqual(expect.arrayContaining(['42', '--repo=o/r', `--expect-head=${headSha}`, '--channel=ci-heal']));
+    expect(calls[0][1].join(' ')).not.toContain('content-preserving');
+    expect(calls[0][2].cwd).toBe('/repo');
+    expect(spawnCiHealRestamp({ headSha: headSha.slice(0, 10), spawn: () => { throw new Error('must not spawn'); } }).ok).toBe(false);
+    expect(spawnCiHealRestamp({ headSha, spawn: () => ({ status: 1, stdout: 'proof refused' }) })).toEqual({ ok: false, reason: 'proof refused' });
+    expect(spawnCiHealRestamp({ headSha, spawn: () => { throw new Error('spawn failed'); } })).toEqual({ ok: false, reason: 'spawn failed' });
   });
 });

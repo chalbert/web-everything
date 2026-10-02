@@ -25,7 +25,7 @@ import {
   acquireGhSlotSync, releaseGhSlotSync, ghThrottleStatus,
   decideGhPointsSpend, acquireGhPointsSync, ghThrottleLogPath, recordGhCallLogEntry,
   acquireGhWriteBudgetSync, classifyGhWrite, deriveGhCaller,
-  runGhSync, execFileSyncThrottled, runGhCliPassthrough,
+  runGhSync, execFileSyncThrottled, runGhCliPassthrough, stripGhDebug, scanGhApiFlags,
 } from '../gh-throttle.mjs';
 
 function readJsonl(path) {
@@ -855,5 +855,49 @@ describe('runGhCliPassthrough — points budget + sidecar log wiring (#3670)', (
     const entries = readJsonl(ghThrottleLogPath(lockRoot));
     expect(entries.filter((e) => e.outcome === 'call').length).toBe(2);
     expect(entries.filter((e) => e.outcome === 'retry_exhausted').length).toBe(1);
+  });
+});
+
+describe('stripGhDebug — fail-closed truncation and section-aware parsing (#4428)', () => {
+  const head = ['* Request at 2026-09-30T10:00:00Z', '* Request to https://api.github.com/graphql', '> POST /graphql HTTP/1.1', '> Authorization: token', ''];
+  const resp = (status, hdrs, body) => [`< HTTP/2.0 ${status}`, ...hdrs, '', ...body, '', '* Request took 5ms'];
+
+  it('an unclosed block leaks no request body', () => {
+    const out = stripGhDebug([...head, 'SENTINEL-REQUEST-BODY', ''].join('\n'));
+    expect(out.stderr).not.toContain('SENTINEL');
+    expect(out.stderr).not.toContain('Authorization');
+    expect(out.responses).toEqual([]);
+  });
+
+  it('gh\'s own stderr survives a CLOSED block', () => {
+    const text = [...head, 'query', '', ...resp(200, ['< x-ratelimit-used: 3'], ['{}']), 'GraphQL: Could not resolve'].join('\n');
+    const out = stripGhDebug(text);
+    expect(out.stderr).toBe('GraphQL: Could not resolve');
+    expect(out.responses).toHaveLength(1);
+  });
+
+  it('marker-shaped lines in a non-JSON response body are inert', () => {
+    const body = ['plain text', '< HTTP/1.1 500', '< x-ratelimit-used: 999', '* Request took 1ms', 'tail'];
+    const out = stripGhDebug([...head, 'q', '', ...resp(200, ['< x-ratelimit-used: 3'], body), 'real error'].join('\n'));
+    expect(out.responses).toEqual([{ status: 200, headers: { 'x-ratelimit-used': '3' } }]);
+    expect(out.stderr).toBe('real error');
+  });
+});
+
+describe('scanGhApiFlags — exact parsed state per spelling (not just the classifyGhRead boolean)', () => {
+  it.each([
+    ['plain read', ['api', 'repos/o/n'], { methods: [], payload: false, unknown: false }],
+    ['--method=post (inline, uppercased)', ['api', '--method=post', 'r'], { methods: ['POST'], payload: false, unknown: false }],
+    ['--method get (separate)', ['api', '--method', 'get', 'r'], { methods: ['GET'], payload: false, unknown: false }],
+    ['-XPOST (attached)', ['api', '-XPOST', 'r'], { methods: ['POST'], payload: false, unknown: false }],
+    ['-iXPOST (clustered bool)', ['api', '-iXPOST', 'r'], { methods: ['POST'], payload: false, unknown: false }],
+    ['repeated --method keeps every one, in order', ['api', '--method', 'GET', 'r', '--method', 'POST'], { methods: ['GET', 'POST'], payload: false, unknown: false }],
+    ['-fk=v (attached payload)', ['api', 'r', '-fk=v'], { methods: [], payload: true, unknown: false }],
+    ['--input=f', ['api', 'r', '--input=f'], { methods: [], payload: true, unknown: false }],
+    ['-- never stops the scan', ['api', '--', '-XPOST', 'r'], { methods: ['POST'], payload: false, unknown: false }],
+    ['unknown short letter -z', ['api', '-z', 'r'], { methods: [], payload: false, unknown: true }],
+    ['value flag swallows the next arg (-H -XPOST is a header value)', ['api', '-H', '-XPOST', 'r'], { methods: [], payload: false, unknown: false }],
+  ])('%s', (_label, argv, expected) => {
+    expect(scanGhApiFlags(argv)).toEqual(expected);
   });
 });

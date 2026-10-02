@@ -18,18 +18,10 @@
  * they did not run, but pointless (and actively fragile — a `claude agents` hiccup would throw) for a delivery
  * settling ITS OWN run: the wrapper does not need to ask whether it is still alive, it already knows.
  *
- * A KNOWN, NAMED, BOUNDED RACE (not fixed here — see below for why). `applyPendingEffects`'s own post-sink
- * write (`effect-executor.mjs` ~L380-383) patches the SAME in-memory run record it already holds from moments
- * earlier in the identical call, with the dispatch handle/`expectedBy` the sink just returned, and persists
- * it — all synchronously, within the SAME parent process, milliseconds after the detached child (this
- * wrapper's own eventual process) was spawned. In principle that write could race a settle this module performs
- * from inside the detached child and revert it back to `in-flight`. In practice the parent's write completes a
- * process-startup's worth of time before the child could possibly reach a settle call (loading this repo's own
- * multi-thousand-line module graph, acquiring a lane, claiming the item — all before `deliverItem` even begins
- * its first real step), so the window is not realistically reachable. Closing it for real would mean giving
- * every effect type's post-sink write in `effect-executor.mjs` compare-and-swap semantics against a fresh
- * on-disk read — a materially larger change to a file outside this item's own declared `scope:` frontmatter.
- * Named here rather than silently accepted; a hardening follow-up for that file is a separate, smaller slice.
+ * #4649: we:scripts/operations/effect-executor.mjs re-reads the run after a dispatch sink returns
+ * and attaches its handle only while the entry remains in-flight. A preflight refusal that already
+ * settled therefore survives the parent's post-spawn write. This narrows the race without sleeps;
+ * settlement between that fresh read and write still needs a generic compare-and-swap follow-up.
  */
 
 import { createFileRunStore } from './run-store.mjs';

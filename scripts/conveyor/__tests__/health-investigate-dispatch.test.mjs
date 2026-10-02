@@ -20,10 +20,11 @@ import {
 import {
   HEALTH_INVESTIGATE_READ_OPERATIONS, NON_READ_OPERATIONS, healthInvestigateToolArgs, createInvestigationSinks,
   dispatchInvestigation, runInvestigations, recordFindings, readLedger, ledgerPath, healthInvestigateBriefPath, main,
+  healthInvestigateDisallowedTools, HEALTH_INVESTIGATE_TOKEN_ENV, routeInvestigator,
 } from '../health-investigate-dispatch.mjs';
 import { MINUTE, HOUR, renderEpisodeReport } from '../health-watch-core.mjs';
 import {
-  BRIEF_REQUIRED_BY_KIND, HEALTH_INVESTIGATE_KIND, LAUNCH_KINDS, fillBrief, sessionSlugFor,
+  BRIEF_REQUIRED_BY_KIND, DISPATCH_EFFECT, HEALTH_INVESTIGATE_KIND, LAUNCH_KINDS, fillBrief, sessionSlugFor,
 } from '../../operations/dispatch-lane.mjs';
 import { REPO_ROOT } from '../../operations/dispatch-lane-io.mjs';
 import { CONVEYOR_STATE_ROOT_ENV } from '../../lib/daemon-last-good.mjs';
@@ -140,6 +141,18 @@ describe('planWallClock / pruneLedger', () => {
   it('stops it as soon as its findings are recorded', () => {
     expect(planWallClock([run(2)], { now: NOW, hasFindings: () => true })[0].why).toBe('findings-recorded');
   });
+  it('keeps a finished entry whose episode is still open past the window, so the episode is never re-dispatched', () => {
+    const e = ep('lane-starvation', 'we');
+    const old = entry(e, { startedAt: NOW - 2 * HOUR, endedAt: NOW - HOUR });
+    const later = NOW + 8 * 24 * HOUR;
+    expect(pruneLedger([old], { now: later })).toEqual([]);
+    expect(pruneLedger([old], { now: later, openEpisodeIds: new Set(['other']) })).toEqual([]);
+    const kept = pruneLedger([old], { now: later, openEpisodeIds: new Set([e.id]) });
+    expect(kept).toHaveLength(1);
+    const r = planInvestigations({ episodes: byKey(e), smellsById: SMELLS, ledger: kept, config: ON, now: later });
+    expect(r.dispatch).toEqual([]);
+    expect(r.held[0]).toMatchObject({ rule: HOLD_RULES.ONE_PER_EPISODE });
+  });
   it('prunes finished entries past the longest window, never a running one', () => {
     const kept = pruneLedger([run(8 * 24 * 60), { ...run(8 * 24 * 60), episodeId: 'old', status: 'finished' }, { ...run(60), episodeId: 'new', status: 'finished' }], { now: NOW });
     expect(kept.map((x) => x.episodeId)).toEqual(['e1', 'new']);
@@ -210,6 +223,7 @@ describe('health-investigate on the declared dispatch-lane operation', () => {
     const sinks = createInvestigationSinks({
       root, stateRoot: '/state', agentArgs: [],
       spawnAgent: (argv) => { spawned.push(argv); return 'backgrounded · abc123\n'; },
+      providerAvailable: p => p === 'claude',
       mintSessionId: () => 'sess-4078',
       now: () => new Date(NOW),
       sessionCwdFor: () => '/scratch/sess-4078',
@@ -243,6 +257,42 @@ describe('health-investigate on the declared dispatch-lane operation', () => {
     expect(prompt).toContain(`node ${root}/scripts/conveyor/health-investigate-dispatch.mjs show`);
   });
 
+  describe('permission mode and recording capability', () => {
+    const argvFor = (agentArgs, extra = {}) => {
+      const spawned = [];
+      const sinks = createInvestigationSinks({
+        root: '/w', stateRoot: '/state', agentArgs, ...extra,
+        spawnAgent: (argv) => { spawned.push(argv); return 'backgrounded · abc123\n'; },
+        providerAvailable: p => p === 'claude',
+        mintSessionId: () => 's', now: () => new Date(NOW), sessionCwdFor: () => '/scratch/s', ensureSessionCwd: (d) => d,
+        grantLanePermission: () => {}, ensureWorktreeIsolation: () => {}, resolveSettingsEnv: () => ({}),
+      });
+      return sinks[DISPATCH_EFFECT]({ launchKind: HEALTH_INVESTIGATE_KIND, prompt: 'p', sessionSlug: 'health-x', lane: null, scope: [], routing: routeInvestigator(), expectedWithinMinutes: 20 })
+        .then(() => spawned[0]);
+    };
+    it('defaults to --permission-mode=dontAsk when the caller supplies none', async () => {
+      const argv = await argvFor([]);
+      expect(argv.filter((a) => a.startsWith('--permission-mode'))).toEqual(['--permission-mode=dontAsk']);
+    });
+    it('respects a caller-supplied mode in either spelling, adding no second flag', async () => {
+      const spaced = await argvFor(['--permission-mode', 'plan']);
+      expect(spaced.filter((a) => a.startsWith('--permission-mode'))).toEqual(['--permission-mode']);
+      expect(spaced[spaced.indexOf('--permission-mode') + 1]).toBe('plan');
+      const joined = await argvFor(['--permission-mode=plan']);
+      expect(joined.filter((a) => a.startsWith('--permission-mode'))).toEqual(['--permission-mode=plan']);
+    });
+    it('delivers the recording token on the session env, next to the state-root pin', async () => {
+      const argv = await argvFor([], { token: 'tok-1' });
+      const settings = JSON.parse(argv[argv.indexOf('--settings') + 1]);
+      expect(settings.env[HEALTH_INVESTIGATE_TOKEN_ENV]).toBe('tok-1');
+      expect(settings.env[CONVEYOR_STATE_ROOT_ENV]).toBe('/state');
+    });
+    it('denies Read/Grep/Glob over the dispatch scratch root', () => {
+      const rules = healthInvestigateDisallowedTools('/w', '/ws/.operations/dispatch');
+      for (const tool of ['Read', 'Grep', 'Glob']) expect(rules).toContain(`${tool}(//ws/.operations/dispatch/**)`);
+    });
+  });
+
   it('the tool args survive a caller that passes its own agent args', () => {
     const args = healthInvestigateToolArgs('/w');
     expect(args).toHaveLength(2);
@@ -272,7 +322,8 @@ describe('runInvestigations — end to end over the ledger', () => {
     const e = ep('lane-starvation', 'we');
     const dispatched = [];
     const stopped = [];
-    const dispatch = async (t) => { dispatched.push(t); return { session: sessionSlugFor(t.episodeId, HEALTH_INVESTIGATE_KIND), handle: 'h-1' }; };
+    let token = null;
+    const dispatch = async (t, o) => { dispatched.push(t); token = o.token; return { session: sessionSlugFor(t.episodeId, HEALTH_INVESTIGATE_KIND), handle: 'h-1' }; };
     const stop = (h) => { stopped.push(h); return { stopped: true }; };
 
     // off (the default config): nothing happens, no ledger file
@@ -292,14 +343,15 @@ describe('runInvestigations — end to end over the ledger', () => {
     expect(dispatched).toHaveLength(1);
 
     // the agent records — wrong session refused, right one accepted once
-    expect(() => recordFindings({ dir, episodeId: e.id, session: 'health-other', input: findings })).toThrow(/belongs to session/);
+    expect(() => recordFindings({ dir, episodeId: e.id, session: 'health-other', input: findings, token })).toThrow(/belongs to session/);
     let out = '';
     const code = main(['record', `--episode=${e.id}`, `--session=${sessionSlugFor(e.id, HEALTH_INVESTIGATE_KIND)}`, `--state-root=${root}`], {
+      env: { [HEALTH_INVESTIGATE_TOKEN_ENV]: token },
       readStdin: () => JSON.stringify(findings), out: (s) => { out += s; }, err: () => {},
     });
     expect(code).toBe(0);
     expect(out).toMatch(/findings recorded/);
-    expect(() => recordFindings({ dir, episodeId: e.id, session: sessionSlugFor(e.id, HEALTH_INVESTIGATE_KIND), input: findings })).toThrow(/already recorded/);
+    expect(() => recordFindings({ dir, episodeId: e.id, session: sessionSlugFor(e.id, HEALTH_INVESTIGATE_KIND), input: findings, token })).toThrow(/already recorded/);
 
     // next tick: session stopped, episode carries the findings, the report renders them
     const state3 = { episodes: byKey({ ...e }) };
@@ -312,7 +364,7 @@ describe('runInvestigations — end to end over the ledger', () => {
     expect(md).toContain('reap leases whose session died');
     expect(md).toContain('3 leases held by dead sessions');
     // …and a recorded investigation refuses further writes
-    expect(() => recordFindings({ dir, episodeId: e.id, session: sessionSlugFor(e.id, HEALTH_INVESTIGATE_KIND), input: findings })).toThrow(/finished|already/);
+    expect(() => recordFindings({ dir, episodeId: e.id, session: sessionSlugFor(e.id, HEALTH_INVESTIGATE_KIND), input: findings, token })).toThrow(/finished|already/);
   });
 
   it('stops a silent agent at the wall clock (through the injected reaper stop) and never re-dispatches the episode', async () => {
@@ -343,7 +395,7 @@ describe('runInvestigations — end to end over the ledger', () => {
   it('a dispatch failure is recorded as the episode\'s one attempt, never retried every tick', async () => {
     const e = ep('lane-starvation', 'we');
     let calls = 0;
-    const dispatch = async () => { calls += 1; throw new Error('claude could not be started (ENOENT)'); };
+    const dispatch = async () => { calls += 1; throw Object.assign(new Error('claude could not be started (ENOENT)'), { notApplied: true }); };
     const t1 = await runInvestigations({ dir, state: { episodes: byKey({ ...e }) }, smells, config: ON, now: NOW, dispatch, stop: () => {} });
     expect(t1.failed[0].error).toMatch(/ENOENT/);
     await runInvestigations({ dir, state: { episodes: byKey({ ...e }) }, smells, config: ON, now: NOW + 5 * MINUTE, dispatch, stop: () => {} });
@@ -352,15 +404,126 @@ describe('runInvestigations — end to end over the ledger', () => {
 
   it('findings for an episode that closed before they landed are appended to its report once', async () => {
     const e = ep('lane-starvation', 'we');
-    const dispatch = async (t) => ({ session: sessionSlugFor(t.episodeId, HEALTH_INVESTIGATE_KIND), handle: 'h-4' });
+    let token = null;
+    const dispatch = async (t, o) => { token = o.token; return { session: sessionSlugFor(t.episodeId, HEALTH_INVESTIGATE_KIND), handle: 'h-4' }; };
     await runInvestigations({ dir, state: { episodes: byKey({ ...e }) }, smells, config: ON, now: NOW, dispatch, stop: () => {} });
     writeFileSync(join(dir, 'episodes', `${e.id}.md`), '# closed report\n');
-    recordFindings({ dir, episodeId: e.id, session: sessionSlugFor(e.id, HEALTH_INVESTIGATE_KIND), input: findings });
+    recordFindings({ dir, episodeId: e.id, session: sessionSlugFor(e.id, HEALTH_INVESTIGATE_KIND), input: findings, token });
     await runInvestigations({ dir, state: { episodes: {} }, smells, config: ON, now: NOW + 6 * MINUTE, dispatch, stop: () => {} });
     await runInvestigations({ dir, state: { episodes: {} }, smells, config: ON, now: NOW + 11 * MINUTE, dispatch, stop: () => {} });
     const md = readFileSync(join(dir, 'episodes', `${e.id}.md`), 'utf8');
     expect(md.match(/## Agent investigation/g)).toHaveLength(1);
     expect(md).toContain('leaked leases starve the pool');
+  });
+
+  it('an indeterminate dispatch failure holds the slot (running, indeterminate, with a token hash); notApplied frees it', async () => {
+    const e1 = ep('lane-starvation', 'we');
+    const e2 = ep('daemon-silent', 'we');
+    const dispatch = async () => { throw new Error('UNKNOWN'); };
+    const t = await runInvestigations({ dir, state: { episodes: byKey({ ...e1 }) }, smells, config: ON, now: NOW, dispatch, stop: () => {} });
+    expect(t.failed[0].error).toBe('UNKNOWN');
+    expect(readLedger(dir)[0]).toMatchObject({
+      status: 'running', indeterminate: true, handle: null, session: sessionSlugFor(e1.id, HEALTH_INVESTIGATE_KIND), deadlineAt: NOW + 20 * MINUTE,
+    });
+    expect(readLedger(dir)[0].tokenHash).toMatch(/^[0-9a-f]{64}$/);
+    const t2 = await runInvestigations({ dir, state: { episodes: byKey({ ...e1 }, { ...e2 }) }, smells, config: ON, now: NOW + MINUTE, dispatch: async () => ({}), stop: () => {} });
+    expect(t2.dispatched).toEqual([]);
+    expect(t2.held.some((h) => h.rule === HOLD_RULES.MAX_RUNNING)).toBe(true);
+  });
+
+  describe('reaping an indeterminate entry by session name', () => {
+    const e = ep('lane-starvation', 'we');
+    const session = sessionSlugFor(e.id, HEALTH_INVESTIGATE_KIND);
+    const seed = async (dir) => {
+      await runInvestigations({ dir, state: { episodes: byKey({ ...e }) }, smells, config: ON, now: NOW, dispatch: async () => { throw new Error('UNKNOWN'); }, stop: () => {} });
+    };
+    const reap = (dir, o) => runInvestigations({ dir, state: { episodes: byKey({ ...e }) }, smells, config: ON, now: NOW + 16 * MINUTE, dispatch: async () => ({}), ...o });
+    it('stops the handle the name resolves to', async () => {
+      await seed(dir);
+      const stopped = [];
+      await reap(dir, { listAgents: () => [{ name: session, id: 'abc', state: 'running' }], stop: (h) => { stopped.push(h); return {}; } });
+      expect(stopped).toEqual(['abc']);
+      expect(readLedger(dir)[0].status).toBe('stopped-wall-clock');
+    });
+    it('does not false-reap: stop says already-gone for a session the lookup still lists', async () => {
+      await seed(dir);
+      await reap(dir, { listAgents: () => [{ name: session, id: 'abc', state: 'running' }], stop: () => ({ alreadyGone: true }) });
+      expect(readLedger(dir)[0]).toMatchObject({ status: 'running' });
+      expect(readLedger(dir)[0].lastStopError).toMatch(/still listed/);
+    });
+    it('stays running with lastStopError when the lookup errors', async () => {
+      await seed(dir);
+      await reap(dir, { listAgents: () => null, stop: () => { throw new Error('must not stop'); } });
+      expect(readLedger(dir)[0]).toMatchObject({ status: 'running' });
+      expect(readLedger(dir)[0].lastStopError).toMatch(/could not list/);
+    });
+    it('finishes when no such session is listed (it provably is not running)', async () => {
+      await seed(dir);
+      await reap(dir, { listAgents: () => [{ name: 'other', id: 'x', state: 'running' }], stop: () => { throw new Error('nothing to stop'); } });
+      expect(readLedger(dir)[0].status).toBe('stopped-wall-clock');
+    });
+  });
+
+  it('a finished entry of a still-open episode blocks re-dispatch after the ledger window', async () => {
+    const e = ep('lane-starvation', 'we');
+    let calls = 0;
+    const dispatch = async (t) => { calls += 1; return { session: sessionSlugFor(t.episodeId, HEALTH_INVESTIGATE_KIND), handle: 'h-6' }; };
+    await runInvestigations({ dir, state: { episodes: byKey({ ...e }) }, smells, config: ON, now: NOW, dispatch, stop: () => {} });
+    await runInvestigations({ dir, state: { episodes: byKey({ ...e }) }, smells, config: ON, now: NOW + 16 * MINUTE, dispatch, stop: () => {} });
+    expect(readLedger(dir)[0].status).toBe('stopped-wall-clock');
+    await runInvestigations({ dir, state: { episodes: byKey({ ...e }) }, smells, config: ON, now: NOW + 9 * 24 * HOUR, dispatch, stop: () => {} });
+    expect(readLedger(dir)).toHaveLength(1);
+    expect(calls).toBe(1);
+  });
+
+  it('a closed-this-tick episode carries the findings on the object the caller re-renders, and is not appended later', async () => {
+    const e = ep('lane-starvation', 'we');
+    let token = null;
+    const dispatch = async (t, o) => { token = o.token; return { session: sessionSlugFor(t.episodeId, HEALTH_INVESTIGATE_KIND), handle: 'h-7' }; };
+    await runInvestigations({ dir, state: { episodes: byKey({ ...e }) }, smells, config: ON, now: NOW, dispatch, stop: () => {} });
+    recordFindings({ dir, episodeId: e.id, session: sessionSlugFor(e.id, HEALTH_INVESTIGATE_KIND), input: findings, token });
+    writeFileSync(join(dir, 'episodes', `${e.id}.md`), '# report\n');
+    const closed = { ...e, status: 'closed' };
+    await runInvestigations({ dir, state: { episodes: {} }, closedEpisodes: [closed], smells, config: ON, now: NOW + 5 * MINUTE, dispatch, stop: () => {} });
+    expect(closed.investigation.recommendation.nextStep).toBe('run the lease reaper now');
+    expect(readLedger(dir)[0].reportedAt).toBeTruthy();
+    expect(readFileSync(join(dir, 'episodes', `${e.id}.md`), 'utf8')).toBe('# report\n');
+    await runInvestigations({ dir, state: { episodes: {} }, smells, config: ON, now: NOW + 10 * MINUTE, dispatch, stop: () => {} });
+    expect(readFileSync(join(dir, 'episodes', `${e.id}.md`), 'utf8')).toBe('# report\n');
+  });
+
+  it('two sessions: only the dispatched session\'s own token records; legacy token-less entries keep the name check', async () => {
+    const eA = ep('lane-starvation', 'we');
+    const eB = ep('daemon-silent', 'we');
+    const tokens = {};
+    const dispatch = async (t, o) => { tokens[t.episodeId] = o.token; return { session: sessionSlugFor(t.episodeId, HEALTH_INVESTIGATE_KIND), handle: `h-${t.episodeId}` }; };
+    await runInvestigations({ dir, state: { episodes: byKey({ ...eA }, { ...eB }) }, smells, config: { ...ON, investigateMaxRunning: 2 }, now: NOW, dispatch, stop: () => {} });
+    const sA = sessionSlugFor(eA.id, HEALTH_INVESTIGATE_KIND);
+    const as = (token) => () => recordFindings({ dir, episodeId: eA.id, session: sA, input: findings, token });
+    expect(as(tokens[eB.episodeId ?? eB.id])).toThrow(/capability/);
+    expect(as(undefined)).toThrow(/capability/);
+    expect(as('wrong')).toThrow(/capability/);
+    expect(as(tokens[eA.id])).not.toThrow();
+    expect(as(tokens[eA.id])).toThrow(/already recorded/);
+    // legacy: strip the hash from B's entry
+    const ledger = readLedger(dir);
+    delete ledger.find((x) => x.episodeId === eB.id).tokenHash;
+    writeFileSync(ledgerPath(dir), JSON.stringify(ledger));
+    const sB = sessionSlugFor(eB.id, HEALTH_INVESTIGATE_KIND);
+    expect(() => recordFindings({ dir, episodeId: eB.id, session: sA, input: findings })).toThrow(/belongs to session/);
+    expect(() => recordFindings({ dir, episodeId: eB.id, session: sB, input: findings })).not.toThrow();
+  });
+
+  it('CLI: an env-pinned state root wins over --state-root', () => {
+    const e = ep('lane-starvation', 'we');
+    writeFileSync(join(dir, 'episodes', `${e.id}.md`), '# pinned report\n');
+    let out = '';
+    const elsewhere = mkdtempSync(join(tmpdir(), 'health-inv-else-'));
+    try {
+      const code = main(['show', `--episode=${e.id}`, `--state-root=${elsewhere}`], { env: { [CONVEYOR_STATE_ROOT_ENV]: root }, out: (x) => { out += x; }, err: () => {} });
+      expect(code).toBe(0);
+      expect(out).toContain('# pinned report');
+    } finally { rmSync(elsewhere, { recursive: true, force: true }); }
   });
 
   it('dry-run decides but performs nothing', async () => {

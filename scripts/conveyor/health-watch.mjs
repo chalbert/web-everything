@@ -45,6 +45,7 @@ import { fileURLToPath } from 'node:url';
 import {
   DEFAULT_HEALTH_CONFIG, emptyHealthState, runHealthTick, renderEpisodeReport, renderHealthSection, summarizeDiagnosisOutput, scrubText, scrubDeep, parsePsOutput, MINUTE, HOUR,
 } from './health-watch-core.mjs';
+import { daemonJobsRoot } from '../operations/run-store.mjs';
 import { SMELLS } from './health-smells/index.mjs';
 import { healthDir, healthSectionLines } from './health-watch-section.mjs';
 import { runInvestigations } from './health-investigate-dispatch.mjs';
@@ -54,12 +55,13 @@ import {
 
 export { healthDir, healthSectionLines };
 import { CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
-import { laneJournalPath, readLaneJournalTail } from '../lib/lane-history.mjs';
+import { laneJournalPath, readLaneJournalTail, reconcileLaneJournalEntry } from '../lib/lane-history.mjs';
 import { defaultPoolRoot } from '../lib/lane-pool-paths.mjs';
 // #4317 — the same "which paths are DAEMON clones" registry `guard-lane.mjs`/`guard-bash.mjs` already use, so
 // this probe's notion of "a daemon clone" can never drift from the guards'.
 import { daemonCloneRoots } from '../lib/daemon-clone-registry.mjs';
 import { workspaceOf } from '../lib/automation-home.mjs';
+import { collectCredentialInventory, normalizeInventory } from './credential-inventory.mjs';
 import { readGithubAppStatus, defaultCachePath } from '../lib/github-app-auth-env.mjs';
 import { resolvePrLimit, readLimitState, isGlobalOffNow } from '../lib/pr-limit.mjs';
 import { ghThrottleLockRoot, ghThrottleLogPath, budgetProbeArgs } from '../lib/gh-throttle.mjs';
@@ -149,6 +151,25 @@ export function probeDaemonLogs(logsDir, cursors = {}) {
     nextCursors[name] = { ino: st.ino, size: start + consumed };
   }
   return { samples: out, cursors: nextCursors };
+}
+
+/** Local run evidence only; fixture ticks never inspect host records. */
+export function probeOperationRuns({ roots = [REPO_ROOT, ...daemonCloneRoots(workspaceOf(REPO_ROOT))], jobsRoot = daemonJobsRoot() } = {}) {
+  const dirs = roots.map((root) => join(root, '.operations', 'runs'));
+  if (jobsRoot && existsSync(jobsRoot)) {
+    for (const entry of readdirSync(jobsRoot, { withFileTypes: true })) {
+      if (entry.isDirectory()) dirs.push(join(jobsRoot, entry.name));
+    }
+  }
+  const records = [];
+  for (const dir of new Set(dirs)) {
+    if (!existsSync(dir)) continue;
+    for (const name of readdirSync(dir).filter((n) => n.endsWith('.json'))) {
+      const rec = readJson(join(dir, name), null);
+      if (rec) records.push(rec);
+    }
+  }
+  return records;
 }
 
 function pidAlive(pid) {
@@ -378,7 +399,7 @@ export function probeLanePools(logsDir) {
 
 /**
  * #4370 — the `lane-destructive-unpushed` smell's input: the recent tail of every pool's lane lifecycle journal
- * (`<poolRoot>/<pool>/.lane-journal.jsonl`), entries newer than `windowMs` only. fs-only, cheap. `[]` when no
+ * (`<poolRoot>/<pool>/.lane-journal.jsonl`), entries newer than `windowMs` only. Rechecks candidate commits against local remote refs. `[]` when no
  * pool has a journal yet.
  * @returns {Array<{pool:string, entries:Array<object>}>}
  */
@@ -392,7 +413,8 @@ export function probeLaneJournal({ poolRoot, now = Date.now(), windowMs = 24 * 6
       const t = Date.parse(e?.ts);
       return Number.isFinite(t) && now - t <= windowMs;
     });
-    out.push({ pool, entries });
+    out.push({ pool, entries: entries.map((e) => Number.isInteger(e.lane)
+      ? reconcileLaneJournalEntry(join(poolDir, `lane-${e.lane}`), e) : e) });
   }
   return out;
 }
@@ -701,7 +723,7 @@ function acquireTickLock(dir) {
  * One tick: probe → pure core → diagnoses → write state, reports, stamp.
  * @returns {Promise<object>} a summary (also what `--json` prints)
  */
-export async function tick(flags = {}) {
+export async function tick(flags = {}, { collectInventory = collectCredentialInventory } = {}) {
   const started = Date.now();
   const now = flags.now ? Date.parse(flags.now) : started;
   const dir = healthDir(flags['state-root']);
@@ -726,6 +748,7 @@ export async function tick(flags = {}) {
   // #4370 — fs-only, every tick. A fixture tick (any of the fixture-dir flags) reads only an explicit
   // `--lane-pool-root`, never the host's real pool.
   const fixtureTick = flags['logs-dir'] || flags['lock-root'] || flags['state-root'];
+  probes.operationRuns = attempt('operationRuns', () => probeOperationRuns(fixtureTick ? { roots: [flags['state-root'] || logsDir], jobsRoot: null } : {}));
   probes.laneJournal = attempt('laneJournal', () => probeLaneJournal({
     poolRoot: flags['lane-pool-root'] || (fixtureTick ? null : defaultPoolRoot(REPO_ROOT)), now,
   }));
@@ -790,6 +813,18 @@ export async function tick(flags = {}) {
 
   const ghCache = prev.ghCache || {};
   const ghDue = !flags['no-gh'] && (flags['force-gh'] || !ghCache.at || now - ghCache.at >= GH_CADENCE_MS);
+  // Inventory has its own cadence stamp: unrelated GitHub failures cannot cause repeated log scans.
+  const inventoryDue = !flags['no-gh'] && (flags['force-gh'] || !prev.credentialInventoryAt || now - prev.credentialInventoryAt >= GH_CADENCE_MS);
+  if (flags['credential-inventory-fixture'] || inventoryDue) {
+    try {
+      probes.credentialInventory = normalizeInventory(flags['credential-inventory-fixture']
+        ? JSON.parse(readFileSync(flags['credential-inventory-fixture'], 'utf8'))
+        : collectInventory({ now, cache: prev.credentialInventoryCache || [], budgetMs: 20_000 }));
+      const errors = probes.credentialInventory.repositories.flatMap((r) => ['secrets', 'ci'].flatMap((kind) =>
+        r[kind].complete ? [] : [`${r.repo}:${kind}:${r[kind].errors.join(',') || 'incomplete'}`]));
+      if (errors.length) probeErrors.credentialInventory = errors.join('; ');
+    } catch { probeErrors.credentialInventory = 'unavailable'; }
+  }
   if (ghDue) {
     const prs = attempt('prs', () => probePrs());
     const agents = attempt('agents', () => probeAgents());
@@ -839,6 +874,10 @@ export async function tick(flags = {}) {
   delete state.silences;
   state.cursors = logs ? { ...(prev.cursors || {}), ...logs.cursors } : prev.cursors;
   state.ghCache = { at: ghCache.at ?? null };
+  if (probes.credentialInventory) {
+    state.credentialInventoryAt = now;
+    state.credentialInventoryCache = probes.credentialInventory.ciFindings;
+  }
 
   // Deterministic diagnoses (allowed in shadow mode) — hard timeout each.
   const diagnoses = [];
@@ -860,7 +899,10 @@ export async function tick(flags = {}) {
   let investigations = null;
   if (!flags['no-investigate']) {
     try {
-      investigations = await runInvestigations({ dir, state, smells: SMELLS, config, now, dryRun: !!flags['dry-run'] });
+      investigations = await runInvestigations({
+        dir, state, smells: SMELLS, config, now, dryRun: !!flags['dry-run'],
+        closedEpisodes: result.transitions.filter((t) => t.type === 'closed').map((t) => t.episode),
+      });
     } catch (e) { probeErrors.investigate = scrubText(String(e?.message || e).split('\n')[0]); }
   }
 

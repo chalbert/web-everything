@@ -56,16 +56,16 @@ describe('conveyor briefs state the at-most-once, right-before-the-gate main-cat
     expect(body).toMatch(/never fetch or merge it speculatively/i);
   });
 
-  it('fix-agent-ci-brief.md: the step-2 rebase is the one sanctioned catch-up for the whole run', () => {
+  it('fix-agent-ci-brief.md: the step-2 merge is the one sanctioned catch-up for the whole run', () => {
     const body = read('skills-src/conveyor/fix-agent-ci-brief.md');
     expect(body).toMatch(/#4297/);
     expect(body).toMatch(/ONE sanctioned catch-up with `main` for this whole run/);
-    expect(body).toMatch(/[Dd]o NOT rebase a second time in this same session/);
+    expect(body).toMatch(/[Dd]o NOT merge a second time in this same session/);
   });
 
   it('fix-agent-ci-brief.md: explains WHY its catch-up is front-loaded instead of gate-adjacent', () => {
     // Regression guard for the #4297 round-1 convergence finding: without this rationale, the ci-heal
-    // brief's front-loaded rebase (step 2, well before step 4's gate) reads as inconsistent with the other
+    // brief's front-loaded merge (step 2, well before step 4's gate) reads as inconsistent with the other
     // three briefs' right-before-the-gate placement rather than a deliberate, once-only equivalent of it.
     const body = read('skills-src/conveyor/fix-agent-ci-brief.md');
     expect(body).toMatch(/placed FIRST rather than\s+immediately before step 4's gate/);

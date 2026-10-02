@@ -21,8 +21,9 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { createRequire } from 'node:module';
 import {
-  lintBacklogItemRendering, findUnquotedColonScalars, DIGEST_MAX_WORDS, scanRepoLocusPrefixes,
+  lintBacklogItemRendering, findUnquotedColonScalars, describeUnparseableFrontmatter, DIGEST_MAX_WORDS, scanRepoLocusPrefixes,
 } from './check-standards-rules.mjs';
+import { buildBacklogResolvableIds } from './lib/citation-check.mjs';
 import { TIERS } from './lib/build-queue.mjs';
 // #3637 — the declared POC branches, so this scoped lint validates `deliveryTarget:` with the SAME predicate
 // the whole-repo gate uses (a green scoped run must never disagree with `check:standards`).
@@ -70,7 +71,8 @@ const body = content.replace(/^---\n[\s\S]*?\n---\n/, '');
 // frontmatter (so type/status/batchable-gated checks still run sensibly).
 if (!item) {
   const matter = require('gray-matter');
-  const fm = matter(content).data || {};
+  let fm = {};
+  try { fm = matter(content).data || {}; } catch { /* unparseable — reported by the frontmatter check below */ }
   const firstPara = body.split('\n').find((l) => l.trim() && !l.startsWith('#')) || '';
   item = { id, type: fm.type, status: fm.status, batchable: false, summary: firstPara.trim(), blockedBy: fm.blockedBy, deliveryTarget: fm.deliveryTarget };
 }
@@ -81,14 +83,20 @@ const warnings = [];
 
 // Frontmatter — file-driven (an unquoted `: ` makes YAML read a nested mapping → the loader drops the
 // whole item silently). ERROR.
-for (const h of findUnquotedColonScalars(content)) {
+const { colonHits, parseReason } = describeUnparseableFrontmatter(content);
+if (!colonHits.length && parseReason) {
+  errors.push(`Backlog item "${id}" has unparseable frontmatter — ${parseReason}. The loader silently SKIPS the whole item. Fix the YAML.`);
+}
+for (const h of colonHits) {
   errors.push(`Backlog item "${id}" has an unquoted colon in frontmatter — \`${h.key}: ${h.value}\` (line ${h.line}). ` +
     `YAML reads the embedded \`: \` as a nested mapping and the loader silently SKIPS the whole item. ` +
     `Quote the value: \`${h.key}: "${h.value}"\`.`);
 }
 
 // Body rendering checks (raw HTML, bad links, buried fork, mis-flagged batchable) — shared with the gate.
-const rendering = lintBacklogItemRendering({ item, body, pocRegistry: readPocRegistry() });
+const rendering = lintBacklogItemRendering({
+  item, body, pocRegistry: readPocRegistry(), knownBacklogIds: buildBacklogResolvableIds(backlog),
+});
 errors.push(...rendering.errors);
 warnings.push(...rendering.warnings);
 

@@ -460,6 +460,8 @@ export function classifyGhRead(argvRaw) {
     // EVERY method given must be GET/HEAD (not just the one pflag keeps), no payload, no unrecognized flag.
     const { methods, payload, unknown } = scanGhApiFlags(args);
     if (unknown || payload) return false;
+    // `every` is true for an EMPTY list ON PURPOSE: no method + no payload is gh's own GET, and requiring an
+    // explicit `--method GET` would push every plain `gh api repos/o/n` read onto the App budget.
     return methods.every((m) => m === 'GET' || m === 'HEAD');
   }
   return false;
@@ -766,8 +768,10 @@ const GH_DEBUG_GIT_LINE = /^\[(\S*\/)?git( [^\n]*)?\]$/;
  *   - a paginated or multi-request command prints several blocks back to back;
  *   - `[git …]` lines, one per git subprocess gh runs (repo resolution) — also debug-only, also stripped;
  *   - gh's own real stderr (e.g. `GraphQL: Could not resolve …`) comes after the last block and is kept.
- * An UNCLOSED block (gh died mid-request: a signal, a spawn-side buffer overflow) is stripped only through its
- * last `< `/`> ` header line plus one blank line; everything after that is kept, so a partial error is never lost.
+ * An UNCLOSED block (gh died mid-request: a signal, a spawn-side buffer overflow) fails closed: everything from its
+ * `* Request at` line to the next block's start (or end of input) is dropped, because its request body can hold
+ * sensitive text. gh's own error text after a cut trace is lost from the relayed stderr; the exit status carries it.
+ * Header/body parsing is section-aware: marker-shaped lines inside a response body never change status or headers.
  * @param {string|null|undefined} text
  * @returns {{stderr:string, responses:Array<{status:number, headers:Record<string,string>}>}}
  */
@@ -780,25 +784,36 @@ export function stripGhDebug(text) {
     const line = lines[i];
     if (GH_DEBUG_GIT_LINE.test(line)) { i += 1; continue; }
     if (!line.startsWith('* Request at ')) { kept.push(line); i += 1; continue; }
+    // Section-aware scan: request side → (`< HTTP/` status) → response headers until the first blank line →
+    // response body. Only the header section may set status/headers, and only a `* Request took` that follows a
+    // blank line closes a block once its body began, so marker-shaped lines in a body are inert.
     let end = -1;
-    for (let j = i + 1; j < lines.length; j++) {
-      if (lines[j].startsWith('* Request took ')) { end = j; break; }
-      if (lines[j].startsWith('* Request at ')) break;
-    }
-    const blockEnd = end === -1 ? lines.length - 1 : end;
+    let stop = lines.length; // exclusive end of an UNCLOSED block: the next block's start, else end of input
     let status = null;
     let headers = null;
     let lastHeaderLine = i;
-    for (let j = i + 1; j <= blockEnd; j++) {
+    let section = 'req';
+    for (let j = i + 1; j < lines.length; j++) {
       const l = lines[j];
-      const m = l.match(/^<\s*HTTP\/\S+\s+(\d+)/);
-      if (m) { status = Number(m[1]); headers = {}; lastHeaderLine = j; continue; }
-      if (l.startsWith('< ') || l.startsWith('> ')) {
-        lastHeaderLine = j;
-        const h = headers && l.startsWith('< ') ? l.match(/^<\s*([A-Za-z0-9-]+):\s*(.*)$/) : null;
-        if (h) headers[h[1].toLowerCase()] = h[2].trim();
+      if (section === 'body') {
+        if (l.startsWith('* Request took ') && lines[j - 1] === '') { end = j; break; }
+        continue;
       }
+      if (l.startsWith('* Request took ')) { end = j; break; }
+      if (l.startsWith('* Request at ')) { stop = j; break; }
+      if (section === 'req') {
+        const m = l.match(/^<\s*HTTP\/\S+\s+(\d+)/);
+        if (m) { status = Number(m[1]); headers = {}; lastHeaderLine = j; section = 'hdr'; }
+        continue;
+      }
+      if (l === '') { lastHeaderLine = j; section = 'body'; continue; }
+      if (!l.startsWith('< ')) { lastHeaderLine = j - 1; section = 'body'; continue; }
+      lastHeaderLine = j;
+      const h = l.match(/^<\s*([A-Za-z0-9-]+):\s*(.*)$/);
+      if (h) headers[h[1].toLowerCase()] = h[2].trim();
     }
+    // Fail closed: an unclosed block is dropped whole (its request body can hold sensitive text).
+    const blockEnd = end === -1 ? stop - 1 : end;
     if (status != null) {
       // Parse only the response JSON, never persist payloads, variables or credentials.
       let cost = null;
@@ -824,9 +839,7 @@ export function stripGhDebug(text) {
       }
       responses.push({ status, headers, ...(cost !== null ? { cost } : {}), ...(shape ? { shape } : {}) });
     }
-    if (end !== -1) { i = end + 1; continue; }
-    i = lastHeaderLine + 1;
-    if (i < lines.length && lines[i] === '' && i < lines.length - 1) i += 1;
+    i = blockEnd + 1;
   }
   return { stderr: kept.join('\n'), responses };
 }
@@ -1287,11 +1300,29 @@ export function looksLikeGhAuthFailure(text) {
 }
 
 /**
+ * Is `text` the personal identity being unable to SERVE a read — HTTP 404 (repo/resource invisible to the
+ * personal login) or an HTTP 403 that is NOT a rate limit (SSO/SAML, no access)? The personal identity is only
+ * a BONUS bucket, so such a read takes the same once-only App fallback as a rejected token (what the App path
+ * did before routing was enabled). A rate-limit 403 is excluded: it keeps its own budget path.
+ * @param {string|null|undefined} text
+ * @returns {boolean}
+ */
+export function looksLikePersonalAccessDenial(text) {
+  const s = String(text ?? '');
+  if (isRateLimitShaped(s)) return false;
+  return /HTTP 404/.test(s) || /HTTP 403/.test(s);
+}
+
+/**
  * Env kill-switch / opt-in for routing a classified read onto the operator's personal identity (see
  * {@link runGhCliPassthrough}) — OFF BY DEFAULT. Unlike this module's other `WE_GH_THROTTLE_*` tuning (which
  * only adjusts an already-active behavior), this changes WHICH GitHub account a call authenticates as, so it
  * stays inert until explicitly turned on (`WE_GH_THROTTLE_PERSONAL_ROUTE=1`) — every existing caller/test, and
  * every host that has not opted in, sees byte-identical behavior to before this card landed.
+ *
+ * SCOPE (TOLERATED, not endorsed): opting in routes reads of ANY repo/search the operator's personal login can
+ * reach onto that login — routing is not pinned to `-R/--repo` or the App's installation repos. The opt-in is
+ * the only guard; tightening it is a tracked follow-up (pinned by a test so the change is a visible diff).
  * @param {NodeJS.ProcessEnv} env
  * @returns {boolean}
  */
@@ -1739,7 +1770,7 @@ export function runGhCliPassthrough(argv, { throttle = {}, spawn = spawnSync, bi
     // to the original (App) identity ONCE, transparently — but check that identity's own budget block FIRST,
     // so a personal-token rejection can never turn into a second, doomed call against an App bucket already
     // known exhausted (review-2026-09-28 finding).
-    if (failed && usedPersonalToken && !appFallbackTried && looksLikeGhAuthFailure(stderrText)) {
+    if (failed && usedPersonalToken && !appFallbackTried && (looksLikeGhAuthFailure(stderrText) || looksLikePersonalAccessDenial(stderrText))) {
       appFallbackTried = true;
       recordGhCallLogEntry(logPath, { op: opLabel, attempt, points: 0, outcome: 'personal_token_rejected', caller, w: isWrite, resource, id: identity, auth: ghAuthProvenance(callEnv), inv, ...(outer ? { outer } : {}) });
       callEnv = env;

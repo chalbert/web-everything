@@ -30,6 +30,7 @@
  *      health watch's own last-tick-completed age.
  */
 
+import { foldPrAttempts } from './health-pr-attempts.mjs';
 import { isHighEntropyToken } from '../lib/secret-scrub.mjs';
 import { NOTIFY_EVEN_IN_SHADOW } from './health-smells-notify-list.mjs';
 
@@ -238,6 +239,7 @@ export function foldDaemonMemory(prev, sample, now) {
   mem.recentTicks = [...(mem.recentTicks || [])];
   mem.prRefusals = { ...(mem.prRefusals || {}) };
   mem.intervalMs = parsed.intervalMs ?? mem.intervalMs ?? sample.defaultIntervalMs ?? 120_000;
+  mem.prAttempts = foldPrAttempts(prev?.prAttempts, sample, now, mem.intervalMs);
   mem.restarts += parsed.restarts;
   if (sample.sizeBytes !== mem.lastSize || !prev) mem.lastGrowthAt = Math.min(sample.mtimeMs, now);
   mem.lastSize = sample.sizeBytes;
@@ -369,6 +371,8 @@ export function stepEpisodes(state, evaluations, now, { config = DEFAULT_HEALTH_
             openedAt: null, lastBreachAt: null, id: null, tracked: null, remindedAt: null, samples: 0,
           };
         }
+        // A clean observation breaks the duration clock even when close hysteresis keeps the episode.
+        if (ep.cleanStreak > 0 && ep.severity === 'medium' && smell.escalateAfterMs !== undefined) ep.firstBreachAt = now;
         ep.breachStreak += 1; ep.cleanStreak = 0; ep.lastBreachAt = now; ep.samples += 1;
         ep.measure = r.measure ?? {}; ep.summary = r.summary ?? ''; ep.recommendation = r.recommendation ?? smell.recommendationHint ?? '';
         if (ep.status === 'pending' && ep.breachStreak >= openAfter) {
@@ -380,13 +384,21 @@ export function stepEpisodes(state, evaluations, now, { config = DEFAULT_HEALTH_
           ep.status = opens.length > cfg.flapMax ? 'flapping' : 'open';
           emit(ep.status === 'flapping' ? 'flapping' : 'opened', key);
         }
+        if (ep.status !== 'pending' && ep.severity === 'medium'
+          && Number.isFinite(smell.escalateAfterMs) && smell.escalateAfterMs > 0
+          && Number.isFinite(ep.firstBreachAt) && ep.firstBreachAt <= now
+          && now - ep.firstBreachAt >= smell.escalateAfterMs) {
+          ep.severity = 'high';
+          ep.escalatedAt = now;
+          emit('escalated', key);
+        }
       } else if (ep) {
         applyClean(ep, key);
       }
     }
-    // A subject that disappeared from this smell's results is a clean sample for it.
+    // Disappeared subjects are clean unless the descriptor declares incomplete coverage unknown.
     for (const [key, ep] of Object.entries(next.episodes)) {
-      if (ep.smell === smell.id && !seen.has(key)) applyClean(ep, key);
+      if (ep.smell === smell.id && !seen.has(key) && !smell.missingSubjectsUnknown) applyClean(ep, key);
     }
 
     function applyClean(ep, key) {
@@ -466,11 +478,22 @@ export function planActions(transitions, smellsById, {
         const off = mode === 'shadow' ? 'shadow mode (filing dispatch is off — config `fileDispatch`)' : 'filing dispatch is off (config `fileDispatch`)';
         plan.push({ kind: 'file', key: t.key, suppressed: fileDispatch === true ? null : off });
       }
-    } else if (t.type === 'reminder' || t.type === 'silence-expired') {
+    } else if (t.type === 'escalated' || t.type === 'reminder' || t.type === 'silence-expired') {
+      // Duration-policy episodes stay quiet until high, including silence expiry.
+      if ((t.type === 'escalated' || smell.escalateAfterMs !== undefined) && (ep.severity !== 'high' || ep.tracked)) continue;
       plan.push({ kind: 'notify', key: t.key, reason: t.type, suppressed: shadowSuppressed ? 'shadow mode' : null });
     }
   }
-  return plan;
+  // A delayed confirmed breach can escalate on the same tick as expiry and the four-hour reminder.
+  // stepEpisodes has already consumed that reminder; retain only one delivery for this key.
+  const durationKeys = new Set(transitions.filter(t => smellsById[t.episode?.smell]?.escalateAfterMs !== undefined).map(t => t.key));
+  const notified = new Set();
+  return plan.filter((p) => {
+    if (p.kind !== 'notify' || !durationKeys.has(p.key)) return true;
+    if (notified.has(p.key)) return false;
+    notified.add(p.key);
+    return true;
+  });
 }
 
 // ── 5. Rendering ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -546,6 +569,19 @@ export function fmtAge(ms) {
   return h < 48 ? `${h}h${String(m % 60).padStart(2, '0')}m` : `${Math.floor(h / 24)}d`;
 }
 
+/** PURE: a backtick delimiter one longer than the longest backtick run in `text` (min `min`), so untrusted
+ *  text can never close the fence / inline span it sits in. */
+export function fenceFor(text, min = 3) {
+  const longest = Math.max(0, ...(String(text ?? '').match(/`+/g) || []).map((r) => r.length));
+  return '`'.repeat(Math.max(min, longest + 1));
+}
+
+/** PURE: `text` as a fenced block whose fence cannot be closed from inside. */
+function fenced(text, info = '') {
+  const fence = fenceFor(text);
+  return [`${fence}${info}`, text, fence];
+}
+
 /**
  * PURE (#4078): the "Agent investigation" section of an episode report — `[]` when no investigation was ever
  * considered. `ep.investigationStatus` is the dispatcher's own line (running / held / stopped); `ep.investigation`
@@ -571,7 +607,10 @@ export function renderInvestigationSection(ep) {
     '',
   );
   for (const ev of Array.isArray(inv.evidence) ? inv.evidence : []) {
-    lines.push(`Evidence — \`${scrubText(ev.command)}\``, '', '```', scrubText(ev.output), '```', '');
+    const cmd = scrubText(ev.command);
+    const out = scrubText(ev.output);
+    const span = fenceFor(cmd, 1);
+    lines.push(`Evidence — ${span}${cmd.startsWith('`') || cmd.endsWith('`') ? ` ${cmd} ` : cmd}${span}`, '', ...fenced(out), '');
   }
   return lines;
 }
@@ -583,6 +622,7 @@ export function renderEpisodeReport(ep, { now, smell, diagnosis = null, plan = [
     '',
     `- Status: **${ep.status}**${ep.tracked ? ` (tracked by card ${ep.tracked.card ?? '?'}, quiet)` : ''} · severity ${ep.severity} · mode ${mode}`,
     `- Opened: ${ep.openedAt ? new Date(ep.openedAt).toISOString() : '—'} (${fmtAge(now - (ep.openedAt ?? now))} ago) · last breach ${ep.lastBreachAt ? new Date(ep.lastBreachAt).toISOString() : '—'}`,
+    ...(Number.isFinite(ep.escalatedAt) ? [`- Duration escalated to high: ${new Date(ep.escalatedAt).toISOString()}`] : []),
     '',
     '## What is wrong',
     '',
@@ -590,13 +630,11 @@ export function renderEpisodeReport(ep, { now, smell, diagnosis = null, plan = [
     '',
     '## Measurements',
     '',
-    '```json',
-    scrubText(JSON.stringify(ep.measure ?? {}, null, 2)),
-    '```',
+    ...fenced(scrubText(JSON.stringify(ep.measure ?? {}, null, 2)), 'json'),
     '',
   ];
   if (diagnosis) {
-    lines.push('## Deterministic diagnosis', '', `\`${diagnosis.command}\` → exit ${diagnosis.code}${diagnosis.timedOut ? ' (timed out)' : ''}`, '', '```', scrubText(diagnosis.output || '').slice(0, 4000), '```', '');
+    lines.push('## Deterministic diagnosis', '', `\`${diagnosis.command}\` → exit ${diagnosis.code}${diagnosis.timedOut ? ' (timed out)' : ''}`, '', ...fenced(scrubText(diagnosis.output || '').slice(0, 4000)), '');
   }
   lines.push(...renderInvestigationSection(ep));
   const suppressed = plan.filter((p) => p.key === ep.key && p.suppressed);

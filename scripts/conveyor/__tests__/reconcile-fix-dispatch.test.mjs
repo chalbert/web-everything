@@ -39,7 +39,7 @@ describe('planFixesFromReconcile', () => {
     const { planned, refusals } = planFixesFromReconcile(entries, findItemStub, () => []);
     expect(refusals).toEqual([]);
     expect(planned).toEqual([{
-      itemNum: '3438', pr: 1764, laneRef: 'lane/3438-wire-reconcile-pass', scope: item3438.scope, scopeSource: 'item',
+      overlapScope: [], itemNum: '3438', pr: 1764, laneRef: 'lane/3438-wire-reconcile-pass', scope: item3438.scope, scopeSource: 'item',
       isConflict: false, body: null, headRefOid: null,
     }]);
   });
@@ -51,7 +51,7 @@ describe('planFixesFromReconcile', () => {
     }];
     const { planned } = planFixesFromReconcile(entries, findItemStub, () => []);
     expect(planned).toEqual([{
-      itemNum: '3438', pr: 1764, laneRef: 'lane/3438-wire-reconcile-pass', scope: item3438.scope, scopeSource: 'item',
+      overlapScope: [], itemNum: '3438', pr: 1764, laneRef: 'lane/3438-wire-reconcile-pass', scope: item3438.scope, scopeSource: 'item',
       isConflict: true, body: 'a PR body', headRefOid: 'deadbeef'.repeat(5),
     }]);
   });
@@ -66,7 +66,7 @@ describe('planFixesFromReconcile', () => {
     expect(diffCalls).toEqual([42]);
     expect(refusals).toEqual([]);
     expect(planned).toEqual([{
-      itemNum: null, pr: 42, laneRef: 'some-hand-opened-branch',
+      overlapScope: ['we:src/x.ts', 'we:src/y.ts'], itemNum: null, pr: 42, laneRef: 'some-hand-opened-branch',
       scope: ['we:src/x.ts', 'we:src/y.ts'], scopeSource: 'pr-diff',
       isConflict: false, body: null, headRefOid: null,
     }]);
@@ -119,7 +119,7 @@ describe('planFixesFromReconcile', () => {
       expect(refusals).toEqual([]);
       expect(calls).toEqual([{ pr: 2220, itemNum: '3383' }]);
       expect(planned).toEqual([{
-        itemNum: '3383', pr: 2220, laneRef: 'lane/3383-host-process-granularity',
+        overlapScope: [], itemNum: '3383', pr: 2220, laneRef: 'lane/3383-host-process-granularity',
         scope: ['we:scripts/operations/host-process-sample.mjs', 'we:scripts/operations/telemetry.mjs'],
         scopeSource: 'pr-diff', isConflict: true, body: null, headRefOid: null,
       }]);
@@ -200,7 +200,7 @@ describe('planFixesFromReconcile', () => {
       expect(findCalls).toEqual([]); // never looked up "2206" — no item-number extraction is attempted at all
       expect(refusals).toEqual([]);
       expect(planned).toEqual([{
-        itemNum: null, pr: 2210, laneRef: 'lane/file-2206-review-findings',
+        overlapScope: ['we:scripts/file-review-findings.mjs'], itemNum: null, pr: 2210, laneRef: 'lane/file-2206-review-findings',
         scope: ['we:scripts/file-review-findings.mjs'], scopeSource: 'pr-diff',
         isConflict: true, body: null, headRefOid: null,
       }]);
@@ -237,7 +237,7 @@ describe('planFixesFromReconcile', () => {
       }]);
       expect(refusals).toEqual([]);
       expect(planned).toEqual([{
-        itemNum: 'xzi292i', pr: 2553, laneRef: 'lane/xzi292i-stuck-pr-watch',
+        overlapScope: ['we:backlog/xzi292i-stuck-pr-watch-launch-a-diagnosis-only-inspection-agent-when.md', 'we:scripts/conveyor/stuck-pr-watch-core.mjs', 'we:scripts/conveyor/stuck-pr-watch.mjs'], itemNum: 'xzi292i', pr: 2553, laneRef: 'lane/xzi292i-stuck-pr-watch',
         scope: ['we:scripts/conveyor/stuck-pr-watch-core.mjs', 'we:scripts/conveyor/stuck-pr-watch.mjs'],
         scopeSource: 'item', isConflict: false, body: null, headRefOid: 'deadbeef'.repeat(5),
       }]);
@@ -253,7 +253,7 @@ describe('planFixesFromReconcile', () => {
       // the raw `we:x,we:scripts`-shaped hostile entry is dropped by `isSafeFallbackScopeEntry` here — the
       // SAME filtering the pre-existing item-with-empty-scope fallback already gets.
       expect(planned).toEqual([{
-        itemNum: 'xabc123', pr: 61, laneRef: 'lane/xabc123-new-thing',
+        overlapScope: ['we:backlog/xabc123-new-thing.md', 'we:src/Thing.tsx', 'we:we:x,we:scripts'], itemNum: 'xabc123', pr: 61, laneRef: 'lane/xabc123-new-thing',
         scope: ['we:backlog/xabc123-new-thing.md', 'we:src/Thing.tsx'],
         scopeSource: 'pr-diff', isConflict: false, body: null, headRefOid: 'cafe'.repeat(10),
       }]);
@@ -307,7 +307,7 @@ describe('planFixesFromReconcile', () => {
       expect(cardCalls).toEqual([]); // never even attempted — no candidate card path found
       expect(refusals).toEqual([]);
       expect(planned).toEqual([{
-        itemNum: null, pr: 99, laneRef: 'lane/9999-ghost', scope: ['we:scripts/unrelated.mjs'],
+        overlapScope: ['we:scripts/unrelated.mjs'], itemNum: null, pr: 99, laneRef: 'lane/9999-ghost', scope: ['we:scripts/unrelated.mjs'],
         scopeSource: 'pr-diff', isConflict: false, body: null, headRefOid: null,
       }]);
     });
@@ -486,7 +486,7 @@ describe('dispatchFix — the composition: plan → fill → mint → spawn', ()
       // #3606 — the standing-identity system prompt, without which a correctly-filled brief reads as an
       // unfilled template and the agent self-aborts (live 3/3: fix-2127/fix-2130/fix-2003).
       '--append-system-prompt-file', DISPATCHED_AGENT_SYSTEM_PROMPT_FILE,
-      '--model', 'sonnet',
+      '--effort', 'high', '--model', 'sonnet',
       '# fix brief for 1764 (item 3438)\n'
       + 'acquire: node scripts/lane-pool.mjs acquire --lane=9 --session=fix-1764 '
       + '--scope=we:scripts/conveyor/reconcile-fix-dispatch.mjs --base=lane/3438-wire-reconcile-pass\n'
@@ -828,10 +828,11 @@ describe('runReconcileFixDispatch — read reconcile-pass, plan, assign a lane, 
       pickFreeLanes: () => [2, 9],
       dispatch: (planned) => { dispatched.push(planned); return { sessionId: `s-${planned.pr}`, sessionSlug: `fix-${planned.pr}`, pr: planned.pr, itemNum: planned.itemNum, lane: planned.lane, unknownTokens: [] }; },
       checkStaleness: FRESH,
+      fetchItemlessDiffPaths: () => [],
     });
     expect(dispatched).toEqual([
-      { itemNum: '3438', pr: 1764, laneRef: 'lane/3438-wire-reconcile-pass', scope: item3438.scope, scopeSource: 'item', isConflict: false, body: null, headRefOid: null, lane: 2 },
-      { itemNum: '3439', pr: 1765, laneRef: 'lane/3439-other-thing', scope: item3439.scope, scopeSource: 'item', isConflict: false, body: null, headRefOid: null, lane: 9 },
+      { overlapScope: [], itemNum: '3438', pr: 1764, laneRef: 'lane/3438-wire-reconcile-pass', scope: item3438.scope, scopeSource: 'item', isConflict: false, body: null, headRefOid: null, lane: 2 },
+      { overlapScope: [], itemNum: '3439', pr: 1765, laneRef: 'lane/3439-other-thing', scope: item3439.scope, scopeSource: 'item', isConflict: false, body: null, headRefOid: null, lane: 9 },
     ]);
     expect(result.dispatched).toHaveLength(2);
     expect(result.refusals).toEqual([]);
@@ -851,6 +852,7 @@ describe('runReconcileFixDispatch — read reconcile-pass, plan, assign a lane, 
       pickFreeLanes: () => [2],
       dispatch: (planned) => { dispatched.push(planned); return { sessionId: 's', sessionSlug: 'fix', pr: planned.pr, itemNum: planned.itemNum, lane: planned.lane, unknownTokens: [] }; },
       checkStaleness: FRESH,
+      fetchItemlessDiffPaths: () => [],
     });
     expect(dispatched).toHaveLength(1);
     expect(result.refusals).toEqual([{ pr: 1765, kind: 'no-lane', why: expect.stringContaining('no free lane') }]);
@@ -866,6 +868,7 @@ describe('runReconcileFixDispatch — read reconcile-pass, plan, assign a lane, 
       pickFreeLanes: () => [2],
       dispatch: () => { throw new Error('lane-9 lost its race to a sibling'); },
       checkStaleness: FRESH,
+      fetchItemlessDiffPaths: () => [],
     });
     expect(result.dispatched).toEqual([]);
     expect(result.refusals).toEqual([{ pr: 1764, kind: 'dispatch-failed', why: 'lane-9 lost its race to a sibling' }]);
@@ -891,6 +894,7 @@ describe('runReconcileFixDispatch — read reconcile-pass, plan, assign a lane, 
       },
       dispatch: (planned) => { dispatchCalls.push(planned.pr); return { sessionId: `s-${planned.pr}`, sessionSlug: `fix-${planned.pr}`, pr: planned.pr, itemNum: planned.itemNum, lane: planned.lane, unknownTokens: [], resumed: false }; },
       checkStaleness: FRESH,
+      fetchItemlessDiffPaths: () => [],
     });
     // Entry 1 is refused individually; entry 2 still dispatches — the whole pass did NOT abort.
     expect(dispatchCalls).toEqual([1765]);
@@ -928,6 +932,7 @@ describe('runReconcileFixDispatch — read reconcile-pass, plan, assign a lane, 
       },
       dispatch: (planned) => { dispatchCalls.push(planned); return { sessionId: `s-${planned.pr}`, sessionSlug: `fix-${planned.pr}`, pr: planned.pr, itemNum: planned.itemNum, lane: planned.lane, unknownTokens: [], resumed: false }; },
       checkStaleness: FRESH,
+      fetchItemlessDiffPaths: () => [],
     });
 
     // tryResume was consulted for the conflict entry only (entry 2 carries no CONFLICT_LABEL, so isConflict is
@@ -957,6 +962,7 @@ describe('runReconcileFixDispatch — read reconcile-pass, plan, assign a lane, 
       tryResume: () => ({ resumed: false, resumeAttempt: { attempted: true, candidate: 'cand', forked: true } }),
       dispatch: (planned, opts) => { dispatchCalls.push({ planned, resumeAttempt: opts.resumeAttempt }); return { sessionId: 's', sessionSlug: 'fix', pr: planned.pr, itemNum: planned.itemNum, lane: planned.lane, unknownTokens: [], resumed: false }; },
       checkStaleness: FRESH,
+      fetchItemlessDiffPaths: () => [],
     });
     expect(dispatchCalls).toEqual([{
       planned: expect.objectContaining({ pr: 1764, lane: 7 }),
@@ -1003,9 +1009,10 @@ describe('runReconcileFixDispatch — read reconcile-pass, plan, assign a lane, 
         unsupportedPath,
         reconcile: () => ({ dispatch: [], refusals: [] }),
         checkStaleness: FRESH,
+      fetchItemlessDiffPaths: () => [],
       });
       expect(result).toEqual({
-        dispatched: [], refusals: [], reconcileRefusals: 0, reconcileRefusalDetails: [],
+        dispatched: [], refusals: [], scopeRanks: [], reconcileRefusals: 0, reconcileRefusalDetails: [],
       });
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
@@ -1024,6 +1031,7 @@ describe('runReconcileFixDispatch — read reconcile-pass, plan, assign a lane, 
       }),
       pickFreeLanes: () => [], // never shell the real lane pool — this test's `dispatch` list is empty anyway
       checkStaleness: FRESH,
+      fetchItemlessDiffPaths: () => [],
     });
     expect(result.reconcileRefusals).toBe(1);
     expect(result.reconcileRefusalDetails).toEqual([{ prNumber: 2635, kind: 'owed-ci-rerun', why: "main's own CI was red" }]);
@@ -1253,6 +1261,7 @@ describe('runReconcileFixDispatch — repo capability gate (#x33jgwt multi-repo 
         pickFreeLanes: () => [4],
         dispatch: (planned, opts) => { dispatchCalls.push({ planned, opts }); return { sessionId: 's', sessionSlug: `fix-pa-${planned.pr}`, pr: planned.pr, itemNum: planned.itemNum, lane: planned.lane, unknownTokens: [] }; },
         checkStaleness: FRESH,
+      fetchItemlessDiffPaths: () => [],
       });
       // The fix entry is dispatched — NOT refused `unsupported-repo` — with `repo: 'plateau-app'` threaded to
       // `dispatch`, which is what lets `dispatchFix` resolve the plateau-app lane pool + gate for it.
@@ -1398,4 +1407,103 @@ describe('fair overlap queue', () => {
       files: ['scripts/pr-land.mjs'], labels: ['review:human'], waitingSince: '2026-09-30T12:00:00Z' }], () => null, () => []);
     expect(planned[0]).toMatchObject({ waitingSince: '2026-09-30T12:00:00Z', reviewHuman: true });
   });
+});
+
+describe('actual PR ownership and unblock ranking (2026-10-01)', () => {
+  const testFile = 'scripts/operations/__tests__/review-dispatch.test.mjs';
+  const card = 'backlog/4474-prevention.md';
+  const now = Date.parse('2026-10-01T12:00:00Z');
+  const fix = (pr, scope, waitingSince = '2026-10-01T11:30:00Z') => ({ pr, scope, waitingSince });
+  const entries = [
+    { kind: 'fix', prNumber: 3336, headRefName: 'lane/4474-prepare-prevention', files: [card] },
+    { kind: 'fix', prNumber: 3311, headRefName: 'lane/4475-routing-policy', files: [testFile] },
+  ];
+  const find = (num) => ({ num, scope: [`we:${testFile}`] });
+
+  it('replays #3311 vs card-only #3336: both can proceed while edit fences remain intact', () => {
+    const { planned } = planFixesFromReconcile(entries, find, () => []);
+    expect(planned[0].scope).toEqual([`we:${testFile}`]);
+    expect(planned[0].overlapScope).toEqual([`we:${card}`]);
+    expect(filterFixesByInFlightScope(planned).planned.map((p) => p.pr)).toEqual([3311, 3336]);
+    const sameCard = { ...fix(3340, [`we:${card}`]), waitingSince: undefined };
+    expect(filterFixesByInFlightScope([planned[0], sameCard]).refusals[0].pr).toBe(3340);
+  });
+
+  it.each([true, false])('refreshes an old live claim from actual files (snapshot=%s)', (snapshot) => {
+    const reads = [];
+    const out = runReconcileFixDispatch({
+      root: '/repo', repo: 'we', checkStaleness: FRESH,
+      reconcile: () => ({ dispatch: [entries[1]], refusals: [],
+        openPrFiles: snapshot ? [{ pr: 3336, files: [card] }] : [] }),
+      findItemFn: find, loadItems: () => [], pickFreeLanes: () => [1],
+      listBuildClaims: () => [],
+      listFixClaims: () => [{ meta: { repo: 'we', pr: 3336, scope: [`we:${testFile}`] } }],
+      fetchItemlessDiffPaths: (pr) => { reads.push(pr); return [card]; },
+      dispatch: (entry) => ({ pr: entry.pr }), tryResume: () => ({ resumed: false }),
+    });
+    expect(out.refusals).toEqual([]);
+    expect(out.dispatched).toEqual([{ pr: 3311 }]);
+    expect(reads).toEqual(snapshot ? [] : [3336]);
+    expect(out.scopeRanks).toEqual([{ pr: 3311, rank: 1, blocks: 0, ageHours: 0, score: 0, aged: false }]);
+  });
+
+  it('refuses a planned fix if its actual diff cannot be observed', () => {
+    const { planned, refusals } = planFixesFromReconcile([{ ...entries[1], files: undefined }],
+      find, () => [], () => [], 'we', () => null);
+    expect(planned).toEqual([]);
+    expect(refusals[0].kind).toBe('scope-read-failed');
+  });
+
+  it('ranks the 63-file #3311 shape before small older waiters and counts each PR once', () => {
+    const scope = Array.from({ length: 63 }, (_, i) => `we:file-${i}`);
+    const queue = [fix(3329, [scope[0]], '2026-10-01T11:00:00Z'),
+      fix(3311, scope), ...[1, 2, 3, 4].map((n) => fix(3400 + n, [scope[n], scope[n + 5]]))];
+    const out = filterFixesByInFlightScope(queue, [], [], { now });
+    expect(out.planned.map((p) => p.pr)).toEqual([3311]);
+    expect(out.ranks[0]).toEqual({ pr: 3311, blocks: 5, ageHours: 0, score: 5, aged: false, rank: 1 });
+    expect(out.refusals.every((r) => r.why.includes('#3311'))).toBe(true);
+    expect(filterFixesByInFlightScope([...queue].reverse(), [], [], { now })).toEqual(out);
+  });
+
+  it('raises age hourly and guarantees oldest-first service after 24h despite fresh high fan-out', () => {
+    const old = fix(1, ['we:a'], '2026-09-30T12:00:00Z');
+    const scope = ['we:a', ...Array.from({ length: 30 }, (_, i) => `we:b${i}`)];
+    const fresh = [fix(2, scope), ...scope.slice(1).map((file, i) => fix(i + 3, [file]))];
+    const out = filterFixesByInFlightScope([old, ...fresh], [], [], { now });
+    expect(out.ranks[0]).toMatchObject({ pr: 1, ageHours: 24, aged: true, rank: 1 });
+    expect(out.planned[0].pr).toBe(1);
+    expect(filterFixesByInFlightScope([old, ...fresh], [], [], { now: now - 3_600_000 }).ranks[0].pr).toBe(2);
+  });
+
+  it('a live build or fixer still wins over the highest-ranked waiter', () => {
+    const queue = [fix(1, ['we:a', 'we:b']), fix(2, ['we:a']), fix(3, ['we:b'])];
+    for (const [builds, fixes] of [[[{ meta: { num: '9', scope: ['we:a'] } }], []],
+      [[], [{ meta: { pr: 9, scope: ['we:a'] } }]]]) {
+      expect(filterFixesByInFlightScope(queue, builds, fixes, { now }).planned).toEqual([]);
+    }
+  });
+});
+
+it('fetches the full diff when the shared GraphQL snapshot hits its 100-file cap', () => {
+  const files = Array.from({ length: 100 }, (_, i) => `file-${i}`);
+  const read = vi.fn(() => [...files, 'scripts/last.mjs']);
+  const { planned } = planFixesFromReconcile([{ kind: 'fix', prNumber: 3311,
+    headRefName: 'lane/3438-routing', files }], findItemStub, () => [], () => [], 'we', read);
+  expect(read).toHaveBeenCalledTimes(1);
+  expect(planned[0].overlapScope).toEqual([...files, 'scripts/last.mjs'].map((p) => `we:${p}`));
+});
+
+it('keeps the live claim conservative on a failed diff read and preserves foreign claims', () => {
+  const read = vi.fn(() => null);
+  const result = runReconcileFixDispatch({ root: '/repo', checkStaleness: FRESH, repo: 'we',
+    reconcile: () => ({ dispatch: [{ kind: 'fix', prNumber: 1, headRefName: 'lane/3438-fix', files: ['x'] }], refusals: [] }),
+    findItemFn: findItemStub, loadItems: () => [], listBuildClaims: () => [],
+    listFixClaims: () => [{ meta: { repo: 'we', pr: 2, scope: ['we:x'] } },
+      { meta: { repo: 'fui', pr: 3, scope: ['fui:x'] } }],
+    fetchItemlessDiffPaths: read, pickFreeLanes: () => [1],
+    dispatch: () => { throw new Error('must remain held'); },
+  });
+  expect(read.mock.calls).toEqual([[2]]);
+  expect(result.dispatched).toEqual([]);
+  expect(result.refusals[0]).toMatchObject({ kind: 'scope-overlap', pr: 1 });
 });

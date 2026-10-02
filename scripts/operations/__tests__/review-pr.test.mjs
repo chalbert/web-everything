@@ -1,3 +1,5 @@
+import { createReviewPrSinks } from '../review-pr-io.mjs';
+import { assertMandatoryReferralsCleared } from '../../review-set-label.mjs';
 /**
  * @file review-pr.test.mjs — the `review-pr` declaration and its derived command line (#3035).
  *
@@ -47,6 +49,7 @@ import {
   JUDGE_STEPS,
   SECURITY_LENS,
   DEFAULT_LENS,
+  ADVISORY_SEAT_STEPS,
   buildReviewJudgeRequest,
   // #3344 — the lens-floor guard and the seat roster it reads.
   CALLER_CHOSEN_LENS,
@@ -1013,7 +1016,7 @@ describe('#3063 a step refusal renders a stop instead of throwing out of `driveR
     // `reduce` and `confirm` — and this `humanRequired` run's `effects` array already carries the EARLIER
     // `advise` step's own advisory-note entry, which this invariant is not about.
     const record = store.read('run-refuse');
-    expect(record.cursor).toBe(6);
+    expect(record.cursor).toBe(8);
     expect(record.findings.confirm).toBe('accept');
     expect(record.effects.filter((e) => e.step === 'stageVerdict' || e.step === 'record')).toEqual([]);
     // `advise` declares its note AND (once the basis is pinned) its `advisory:*` label; neither is this invariant's.
@@ -1149,14 +1152,14 @@ describe('the record step', () => {
     expect(first.error).toBeTruthy();
     // `record`'s own effects are now [LABEL, LEDGER, NOTICE] at indices 0-2 (index 7 is `record`'s stepIndex —
     // `stageVerdict` sits at 6). Only LABEL (index 0) lands before LEDGER (index 1) fails.
-    expect(first.applied).toEqual(['run-replay#7#0']);
+    expect(first.applied).toEqual(['run-replay#9#0']);
 
     const second = await applyPendingEffects(first.run, { sinks, store });
     expect(second.error).toBeNull();
     // THE ASSERTION: the label/comment sink ran exactly ONCE across both passes.
     expect(calls.filter((c) => c.type === REVIEW_EFFECTS.LABEL)).toHaveLength(1);
     expect(calls.filter((c) => c.type === REVIEW_EFFECTS.WRITE_UP)).toHaveLength(1);
-    expect(second.skipped).toEqual(['run-replay#7#0']);
+    expect(second.skipped).toEqual(['run-replay#9#0']);
   });
 
   it('REFUSES to replay the label effect when its outcome is unknown', async () => {
@@ -1254,7 +1257,7 @@ describe('the derived command line', () => {
     // lens shows up in `--help` the moment it is declared, with no second list to remember.
     expect(spec.usage).toContain(`[--lens=${PANEL_LENSES.join('|')}, default correctness]`);
     expect(spec.usage).not.toContain('--lens=<string>');
-    expect(spec.usage).toContain('read(compute) → judge(judge) → judgeSecurity(judge) → reduce(compute) → advise(effect) → confirm(confirm) → stageVerdict(effect) → record(effect)');
+    expect(spec.usage).toContain('read(compute) → judge(judge) → judgeSecurity(judge) → reduce(compute) → mandatoryReferrals(effect) → referralVerdict(compute) → advise(effect) → confirm(confirm) → stageVerdict(effect) → record(effect)');
   });
 
   // #3094 — `--aim` IS DERIVED, NOT HAND-ADDED. It appears in `--help` because it is declared on the operation;
@@ -2850,7 +2853,7 @@ describe('#xqa9ttq — the opt-in Codex advisory seat (judgeAdvisory)', () => {
   it('when opted in, declares a THIRD judge step, in order, after judgeSecurity and before reduce', () => {
     const { declaration } = registryFor({}, { codexAdvisory: true });
     const names = declaration.steps.map((s) => s.name);
-    expect(names).toEqual(['read', 'judge', 'judgeSecurity', 'judgeAdvisory', 'reduce', 'advise', 'confirm', 'stageVerdict', 'record']);
+    expect(names).toEqual(['read', 'judge', 'judgeSecurity', 'judgeAdvisory', 'reduce', 'mandatoryReferrals', 'referralVerdict', 'advise', 'confirm', 'stageVerdict', 'record']);
     const advisoryStep = declaration.steps.find((s) => s.name === 'judgeAdvisory');
     expect(advisoryStep.step.kind).toBe('judge');
     // It is isolated exactly like `judgeSecurity`: it reads neither sibling juror's findings.
@@ -2998,6 +3001,38 @@ describe('#xqa9ttq — the opt-in Codex advisory seat (judgeAdvisory)', () => {
       expect(run.verdict.lensVerdicts[ADVISORY_JUDGE_LENS]).toBe('accept');
       expect(run.verdict.lenses).toEqual([DEFAULT_LENS, SECURITY_LENS, ADVISORY_JUDGE_LENS]);
     });
+
+    // #4446 guard 1 — characterization: a skipped seat is reported AS skipped (never silently an 'accept').
+    it('#4446 — the skipped reason is visible in the verdict summary and the posted write-up', () => {
+      const { registry } = registryFor({}, { codexAdvisory: true });
+      const reason = 'quota exhausted on its last seat call';
+      const { run } = atConfirm({
+        registry, input: BASE_INPUT, id: 'run-codex-advisory-skip-visible',
+        answers: {
+          [JUDGE_STEPS[0]]: CLEAN_ANSWER, [JUDGE_STEPS[1]]: CLEAN_ANSWER,
+          judgeAdvisory: { summary: `skipped: ${reason}`, findings: [], skipped: { provider: 'codex', reason } },
+        },
+      });
+      expect(run.verdict.verdict).toBe('accept');
+      expect(run.verdict.summary).toContain(`${ADVISORY_JUDGE_LENS}: skipped: ${reason}`);
+      const body = renderVerdictWriteUp({ read: run.findings.read, verdict: run.verdict, answer: 'accept', actor: 'op' });
+      expect(body).toContain('Skipped seats');
+      expect(body).toContain(reason);
+    });
+  });
+});
+
+// ── #4446 guard 4 — `gracefulOnUnavailable` is set ONLY on advisory seats ──────────────────────────────────────
+describe('#4446 — gracefulOnUnavailable implies an advisory seat; no mandatory seat ever carries it', () => {
+  it('over every seat step reachable at confirm time', () => {
+    const { registry } = registryFor({}, { codexAdvisory: true, correctnessAdvisory: true, antigravityReview: true });
+    const { requests } = atConfirm({ registry, input: BASE_INPUT, id: 'run-graceful-table' });
+    const steps = Object.keys(requests);
+    for (const step of [...JUDGE_STEPS, ...ADVISORY_SEAT_STEPS]) expect(steps).toContain(step);
+    for (const step of steps) {
+      if (requests[step].gracefulOnUnavailable) expect(ADVISORY_SEAT_STEPS).toContain(step);
+      if (JUDGE_STEPS.includes(step)) expect(requests[step].gracefulOnUnavailable).toBeFalsy();
+    }
   });
 });
 
@@ -3085,7 +3120,7 @@ describe('#x8n4crp — the opt-in Codex correctness-advisory seat (judgeCorrectn
   it('can be seated WITHOUT the third seat — the two opt-in seats are independent', () => {
     const { declaration } = registryFor({}, { correctnessAdvisory: true });
     const names = declaration.steps.map((s) => s.name);
-    expect(names).toEqual(['read', 'judge', 'judgeSecurity', 'judgeCorrectnessAdvisory', 'reduce', 'advise', 'confirm', 'stageVerdict', 'record']);
+    expect(names).toEqual(['read', 'judge', 'judgeSecurity', 'judgeCorrectnessAdvisory', 'reduce', 'mandatoryReferrals', 'referralVerdict', 'advise', 'confirm', 'stageVerdict', 'record']);
     expect(names).not.toContain('judgeAdvisory');
   });
 
@@ -3094,7 +3129,7 @@ describe('#x8n4crp — the opt-in Codex correctness-advisory seat (judgeCorrectn
     const names = declaration.steps.map((s) => s.name);
     expect(names).toEqual([
       'read', 'judge', 'judgeSecurity', 'judgeAdvisory', 'judgeCorrectnessAdvisory',
-      'reduce', 'advise', 'confirm', 'stageVerdict', 'record',
+      'reduce', 'mandatoryReferrals', 'referralVerdict', 'advise', 'confirm', 'stageVerdict', 'record',
     ]);
     const step = declaration.steps.find((s) => s.name === 'judgeCorrectnessAdvisory');
     expect(step.step.kind).toBe('judge');
@@ -3334,7 +3369,7 @@ describe('#3383 — the opt-in Antigravity review seat (judgeAntigravityReview)'
   it('can be seated WITHOUT either Codex seat — all three opt-in seats are independent', () => {
     const { declaration } = registryFor({}, { antigravityReview: true });
     const names = declaration.steps.map((s) => s.name);
-    expect(names).toEqual(['read', 'judge', 'judgeSecurity', 'judgeAntigravityReview', 'reduce', 'advise', 'confirm', 'stageVerdict', 'record']);
+    expect(names).toEqual(['read', 'judge', 'judgeSecurity', 'judgeAntigravityReview', 'reduce', 'mandatoryReferrals', 'referralVerdict', 'advise', 'confirm', 'stageVerdict', 'record']);
     expect(names).not.toContain('judgeAdvisory');
     expect(names).not.toContain('judgeCorrectnessAdvisory');
   });
@@ -3344,7 +3379,7 @@ describe('#3383 — the opt-in Antigravity review seat (judgeAntigravityReview)'
     const names = declaration.steps.map((s) => s.name);
     expect(names).toEqual([
       'read', 'judge', 'judgeSecurity', 'judgeAdvisory', 'judgeCorrectnessAdvisory', 'judgeAntigravityReview',
-      'reduce', 'advise', 'confirm', 'stageVerdict', 'record',
+      'reduce', 'mandatoryReferrals', 'referralVerdict', 'advise', 'confirm', 'stageVerdict', 'record',
     ]);
     const step = declaration.steps.find((s) => s.name === 'judgeAntigravityReview');
     expect(step.step.kind).toBe('judge');
@@ -3588,5 +3623,124 @@ describe('#xu2pp2m — a review can no longer clear a PR on material it could no
     const { run } = driveFixture({ correctness: CLEAN_ANSWER, security: CLEAN_ANSWER });
     expect(run.findings.read.degraded).toBe(false);
     expect(run.verdict.verdict).toBe(VERDICTS.ACCEPT);
+  });
+});
+
+// The accepted review comment fetched read-only from the incident URL below.
+const INCIDENT_4315_COMMENT = "\u2705 review \u2014 accepted\n\nRecorded by agent (unattended review-loop) via the declared `review-pr` operation (#3035).\n\n## Human review verdict \u2014 chalbert/web-everything#2835\n\n**Verdict:** \u2705 pass \u2014 no blocking findings\n\n### Panel verdicts\n\n| lens | weight | verdict |\n| --- | --- | --- |\n| correctness | mandatory | accept |\n| security | mandatory | accept |\n| simplicity (codex) | advisory | accept |\n| codex-correctness (codex, advisory) | advisory | changes |\n| antigravity-review (antigravity, advisory) | advisory | accept |\n\n### Findings (4)\n\n**codex-correctness/correctness** (2)\n- `scripts/conveyor/lease-reaper.mjs` \u2014 git cherry can report containment while ignoring unlanded changes introduced by a merge commit. \u2014 On the uncommon path where the lane contains a merge commit with unique conflict-resolution changes, but its non-merge commits are already present or patch-equivalent upstream, merge-base rejects ancestry while git cherry produces empty or all-minus output because it excludes merge commits. The fallback then corroborates the lease and permits reclamation despite unlanded work. Mutation probing was impossible with the read-only shell; a regression named 'retains a lease with unlanded merge-resolution changes' should defend this case. _[CONFIRMED]_ _[impact if unfixed: broken]_\n  - _Prevention (OWED \u2014 file it):_ Add a deterministic real-Git regression with unique merge-resolution content and require the containment check to reject it; conservatively reject unaccounted-for merge commits.\n- `scripts/conveyor/lease-reaper.mjs` \u2014 The squash fallback only handles individually patch-equivalent commits, not a typical squash of multiple commits. \u2014 For a merged PR containing two or more distinct commits squashed into one, git cherry compares each original commit's patch against the combined squash patch and ordinarily emits plus entries. The completed lease consequently remains until the existing TTL backstop. The added SQUASH-merged integration test uses only one feature commit and misses this common squash shape. Mutation probing was impossible with the read-only shell; a test named 'reclaims a multi-commit squash-merged lease' should exercise it. _[CONFIRMED]_ _[impact if unfixed: degraded]_\n  - _Prevention (OWED \u2014 file it):_ Add a deterministic real-Git test that squashes two distinct feature commits into one upstream commit and verifies safe reclamation using aggregate containment evidence.\n\n**antigravity-review/logic error** (1)\n- `scripts/conveyor/lease-reaper.mjs:392` \u2014 The `git cherry` patch-equivalence fallback fails for squash-merged PRs containing more than one commit. \u2014 A PR with multiple commits is squash-merged into the base branch. Because `git cherry` compares patch IDs on a strictly per-commit basis, none of the individual commits in the PR will match the single combined squash commit's patch ID. `git cherry` outputs `+` for all commits, the fallback evaluates to `false`, and the lease incorrectly rides the 4-hour TTL instead of reaping early. I have NO tools to verify this by mutation, but modifying the `a TTL-STALE lease whose PR was SQUASH-merged` integration test to author two distinct commits before squash-merging would prove it reddens. _[PLAUSIBLE]_ _[impact if unfixed: degraded]_\n  - _Prevention (OWED \u2014 file it):_ A `check:standards` rule requiring git-integration tests that verify branch-level equivalence to operate on N>1 commit cardinality, preventing trivial single-commit false proofs.\n\n**antigravity-review/coverage** (1)\n- `scripts/conveyor/lease-reaper.mjs:380` \u2014 The prose guarantees that a `-`-prefixed sha will not be misread as a flag, but no test exercises this malformed input. \u2014 A future refactor removes the `--` separator. If `gh` returns a malformed `-`-prefixed sha, `git merge-base` fails with an unrecognized option error. While safely caught as `null`, the specific prose guarantee (\"never misread as a flag\") is violated with no test to catch the regression. I have NO tools, but adding a test passing a `-malformed` sha to `defaultGitIsAncestor` SHOULD defend this. _[PLAUSIBLE]_ _[impact if unfixed: cosmetic]_\n  - _Prevention (OWED \u2014 file it):_ A review lens or lint ensuring every explicit defensive parsing claim in prose is paired with a negative test case exercising the malformed input.\n\n---\n\n**Decision:** `accept` \u2014 recorded by agent (unattended review-loop).\n**Lenses:** `correctness` + `security` + `simplicity` + `codex-correctness` + `antigravity-review` \u2014 5 juror(s), one per lens, each a separate `judge` step spawned with its own derived session id (#3028) and its own tools (#3319). They ran SEQUENTIALLY and neither saw the other's findings; this is not a `judgePanel` fan-out (#3050). The other 2 panel lens(es) (standards-conformance, claim-accuracy) did NOT run and are not reported as unjudged.\n**Earned vs seated:** this PR's code touch-set scores care `elevated` (blast-radius (scripts/__tests__/lane-pool-reap-branch-fallback.test.mjs, scripts/conveyor/__tests__/lease-reaper.test.mjs, scripts/conveyor/lease-reaper.mjs, \u2026)), for which the care dial asks for 5 lens(es) \u00d7 1 juror(s)/lens \u00d7 2 round(s). This run seated 5 lens(es) (correctness, security, simplicity, codex-correctness, antigravity-review), 1 juror each, in 1 round. SHORTFALL: 2 earned lens(es) (standards-conformance, claim-accuracy) did not sit. The caller declared no `--careLevel`, so nothing checked the shape this run was dialled for against the files it actually judged (#3335). The shortfall is structural \u2014 the step list is fixed at registration (#3319) \u2014 so it is RECORDED here rather than implied away: do not read the seats above as the whole review this PR earned.\nNet basis: `6881b3ae875f8e3f98ead7caaec48bd7c045e1b5..b0da85e383921e3024cb8711605df3a3d4f49535` (rev `origin/lane/xkk4lv7-branch-fallback-reap` at review time) \u2014 9 net changed file(s) vs current main (#2450), not `gh pr diff`'s three-dot list.\n\n_Recorded through the declared `review-pr` operation (#3035)._\n\n<!-- reviewed-sha: b0da85e383921e3024cb8711605df3a3d4f49535 -->\n<!-- reviewed-diff: e05c9357fb9cfdada3119145cf636badff8ea50523c8b93aa9fc7695f5db815b -->\n<!-- reviewed-contribution: f1f45866ebbde80a6981a55030b13e36c3ba1f2ba3f7b2a5da5db0de19fffb1c -->\n<!-- cleared-by-actor: 9c9608ba-e783-48f2-894e-c1d68cd0b77e -->";
+
+// #4315: reconstructed structured input, NOT a historical-ledger replay.
+// Provenance: https://github.com/chalbert/web-everything/pull/2835#issuecomment-5869333574
+// Reviewed SHA b0da85e383921e3024cb8711605df3a3d4f49535. Retain the reported
+// CONFIRMED/broken tags and source coordinates; represent the four nonblocking
+// seats from the published headings/tags below. The comment is evidence, not a raw jury ledger.
+describe('#4315 incident-shaped mandatory referral', () => {
+  it('persists a referral before confirmation despite both mandatory accepts', async () => {
+    const { registry } = registryFor({ netRev: 'b0da85e383921e3024cb8711605df3a3d4f49535' }, { codexAdvisory: true, correctnessAdvisory: true, antigravityReview: true });
+    // Recover file, normalized summary and literal tags from each published finding line.
+    const recovered = INCIDENT_4315_COMMENT.split('\n').filter(line => line.startsWith('- `scripts/conveyor/lease-reaper.mjs')).map(line => ({
+      file: line.match(/^- `([^`:]+)/)[1], summary: line.split(' — ')[1],
+      verdict: line.match(/_\[(CONFIRMED|PLAUSIBLE)\]_/)[1],
+      impactIfUnfixed: line.match(/impact if unfixed: ([a-z]+)/)[1],
+    }));
+    expect(recovered).toHaveLength(4);
+    let run = advanceWhileRunning(startRun({ op: REVIEW_PR_OP, id: 'run-4315', input: { pr: 2835, repo: 'chalbert/web-everything' }, registry }), { registry });
+    while (run.pending?.kind === 'judge') {
+      const answer = run.pending.step === 'judgeCorrectnessAdvisory'
+        ? { summary: 'Codex correctness findings transcribed from the accepted comment', findings: recovered.slice(0, 2) }
+        : run.pending.step === 'judgeAntigravityReview'
+          ? { summary: 'Antigravity nonblocking findings transcribed from the comment', findings: recovered.slice(2) } : CLEAN_ANSWER;
+      run = advanceWhileRunning(run, { registry, resume: { value: answer } });
+    }
+    expect(run.findings.reduce.verdict).toBe('accept');
+    expect(run.findings.reduce.findings).toHaveLength(4);
+    expect(run.pending?.kind).toBe('effect');
+    expect(run.effects.some(e => e.type === 'review.mandatory-referrals')).toBe(true);
+    expect(run.effects.some(e => e.type === REVIEW_EFFECTS.LABEL)).toBe(false);
+    const state = { headRefOid: run.findings.read.netBasis.rev, body: '<!-- authored-by-actor: incident-author -->',
+      labels: ['review:pending'], comments: [] };
+    const trace = [], judge = vi.fn(async () => { throw new Error('no mandatory ruling supplied'); });
+    const sinks = createReviewPrSinks({ out: () => {}, mirrorReferral: () => {}, referralJudge: judge,
+      labelProvider: {
+        readPrState: () => { trace.push('read'); return structuredClone(state); },
+        postComment: (repo, pr, body) => { trace.push('post'); state.comments.push({ body }); },
+        setLabels: (repo, pr, plan) => { trace.push(plan.add); state.labels = [...new Set([...state.labels.filter(l => !plan.remove.includes(l)), plan.add])]; },
+      } });
+    ({ run } = await applyPendingEffects(run, { sinks, store: createMemoryRunStore() }));
+    run = advanceWhileRunning(run, { registry });
+    expect(run.pending).toMatchObject({ kind: 'confirm', of: 'human' });
+    expect(run.verdict.pendingReferrals).toHaveLength(1);
+    expect(run.verdict.findings).toHaveLength(4);
+    expect(judge).toHaveBeenCalledTimes(1);
+    expect(trace.indexOf('post')).toBeLessThan(trace.indexOf('review:pending'));
+    expect(state.labels).toEqual(['review:human']);
+    expect(() => assertMandatoryReferralsCleared(state, { repo: 'chalbert/web-everything', pr: 2835 })).toThrow();
+  });
+});
+
+
+// Real declaration + real I/O bindings with an isolated forge and independent judge transport.
+// No filesystem authority is shared between restarts; only the PR comments survive.
+describe('#4315 operation / I/O restart soak', () => {
+  it.each(['judge', 'judgeSecurity', 'judgeAdvisory', 'judgeCorrectnessAdvisory', 'judgeAntigravityReview'])(
+    '%s cannot bypass a missing mandatory ruling (25 restarts)', async seat => {
+      const source = { summary: 'confirmed off-scope defect', file: 'outside-diff.mjs', verdict: 'CONFIRMED',
+        impactIfUnfixed: 'broken', outcome: 'fixed', prevention: 'captured #7', disposition: 'nit' };
+      const { registry } = registryFor({ netRev: PINNED_HEAD }, { codexAdvisory: true, correctnessAdvisory: true, antigravityReview: true });
+      const state = { headRefOid: PINNED_HEAD, body: '<!-- authored-by-actor: author -->', comments: [], labels: ['review:pending'] };
+      const trace = [], judge = vi.fn(async () => ({ value: { rulings: [] } }));
+      const provider = {
+        readPrState: () => { trace.push('read'); return structuredClone(state); },
+        postComment: (repo, pr, body) => { trace.push('post'); state.comments.push({ body }); },
+        setLabels: (repo, pr, plan) => { trace.push(`label:${plan.add}`); state.labels = [...state.labels.filter(l => !plan.remove.includes(l)), plan.add]; },
+      };
+      for (let restart = 0; restart < 25; restart++) {
+        const store = createMemoryRunStore();
+        const sinks = createReviewPrSinks({ labelProvider: provider, referralJudge: judge, mirrorReferral: () => {}, out: () => {} });
+        let run = advanceWhileRunning(startRun({ op: REVIEW_PR_OP, id: `run-referral-${restart}`, input: { pr: 7, repo: 'o/r' }, registry }), { registry });
+        while (run.pending?.kind === 'judge') {
+          run = advanceWhileRunning(run, { registry, resume: { value: run.pending.step === seat
+            ? { summary: 'confirmed defect', findings: [source] } : CLEAN_ANSWER } });
+        }
+        ({ run } = await applyPendingEffects(run, { sinks, store }));
+        expect(run.effects.map(e => e.error).filter(Boolean)).toEqual([]);
+        run = advanceWhileRunning(run, { registry });
+        expect(run.pending).toMatchObject({ kind: 'confirm', of: 'human' });
+        expect(run.verdict.pendingReferrals).toHaveLength(1);
+        expect(run.verdict.verdict).toBe('needs-human');
+        expect(() => assertMandatoryReferralsCleared(state, { repo: 'o/r', pr: 7 })).toThrow(/mandatory referral hold/);
+        expect(() => advanceWhileRunning(run, { registry, resume: { value: 'accept' } })).toThrow(/ruling required/);
+      }
+      expect(judge).toHaveBeenCalledTimes(1);
+      expect(state.labels).toEqual(['review:human']);
+      expect(trace.indexOf('post')).toBeLessThan(trace.findIndex(x => x.startsWith('label:')));
+      expect(trace).not.toContain('label:review:accepted');
+    });
+  it.each(['block', 'card', 'not-real'])('a durable %s ruling reaches the proper confirmation without hiding the finding', async result => {
+    const { registry } = registryFor({ netRev: PINNED_HEAD }, { correctnessAdvisory: true });
+    const state = { headRefOid: PINNED_HEAD, body: '<!-- authored-by-actor: author -->', comments: [], labels: ['review:pending'] };
+    const provider = { readPrState: () => structuredClone(state),
+      postComment: (repo, pr, body) => state.comments.push({ body }), setLabels: () => {} };
+    let run = advanceWhileRunning(startRun({ op: REVIEW_PR_OP, id: 'run-ruling', input: { pr: 7, repo: 'o/r' }, registry }), { registry });
+    while (run.pending?.kind === 'judge') {
+      run = advanceWhileRunning(run, { registry, resume: { value: run.pending.step === 'judgeCorrectnessAdvisory'
+        ? { summary: 'two defects', findings: ['one', 'two'].map(summary => ({ summary, verdict: 'CONFIRMED', impactIfUnfixed: 'unrecoverable', file: NET_PATHS[0] })) }
+        : CLEAN_ANSWER } });
+    }
+    const sinks = createReviewPrSinks({ labelProvider: provider, mirrorReferral: () => {}, out: () => {}, cardReadable: () => true,
+      referralJudge: async request => {
+        const sources = JSON.parse(request.input.split('Untrusted reported findings:\n')[1]);
+        return { sessionId: request.sessionId, value: { rulings: sources.map(f => ({ key: f.key, result,
+          rationale: 'Verified pinned diff', evidence: ['diff'], card: result === 'card' ? 'we:backlog/7-debt.md' : '' })) } };
+      } });
+    ({ run } = await applyPendingEffects(run, { sinks, store: createMemoryRunStore() }));
+    expect(run.effects.map(e => e.error).filter(Boolean)).toEqual([]);
+        run = advanceWhileRunning(run, { registry });
+    expect(run.pending).toMatchObject({ kind: 'confirm', of: 'agent' });
+    expect(run.verdict.pendingReferrals).toEqual([]);
+    expect(run.verdict.findings).toHaveLength(2);
+    expect(run.verdict.verdict).toBe(result === 'block' ? 'changes' : 'accept');
+    if (result === 'block') expect(() => assertMandatoryReferralsCleared(state, { repo: 'o/r', pr: 7, cardReadable: () => true })).toThrow();
+    else expect(assertMandatoryReferralsCleared(state, { repo: 'o/r', pr: 7, cardReadable: () => true }).pending).toEqual([]);
   });
 });

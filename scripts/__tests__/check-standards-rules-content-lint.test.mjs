@@ -16,7 +16,7 @@ import {
   findHarnessScaffoldingMarkers, scanHarnessScaffolding,
   findStaleRatifiedClaims,
   findDuplicateKeysPerScope, validateNoDuplicateManifestKeys,
-  findBuriedForkSections, findNonBatchableMarkers, findTestPlanGaps, findGuardRelaxationGaps, lintBacklogItemRendering,
+  findBuriedForkSections, findNonBatchableMarkers, findTestPlanGaps, findMustWithoutDoneWhen, findDanglingBacklogRefs, findGuardRelaxationGaps, lintBacklogItemRendering,
   deriveResearchFreshness, addIsoDuration, RESEARCH_REVIEW_HORIZON_DEFAULT,
   validateCapabilityPresence, validateRetirementShape,
   validatePlugDualMode, PLUG_UNPLUGGED_TEST_ENFORCED,
@@ -676,6 +676,48 @@ describe('findRelativeNodeScriptsAfterLaneCd (#3960)', () => {
   });
 });
 
+describe('findMustWithoutDoneWhen — #4438', () => {
+  const card = (done) => `## Explicit MVP cut\n\n**Must (MVP):**\n1. a\n2. b\n3. c\n4. d\n\n**Out:** x\n\n## Done when\n\n${done}\n`;
+  it('reports only the uncited Must', () => {
+    expect(findMustWithoutDoneWhen(card('1. Must 1 and Must 3 hold. Must 4 too.')).map((g) => g.must)).toEqual([2]);
+  });
+  it('parses single, list and range forms; prose-only is not a citation', () => {
+    expect(findMustWithoutDoneWhen(card('Musts 1, 3'))).toHaveLength(2);
+    expect(findMustWithoutDoneWhen(card('Musts 1-4'))).toEqual([]);
+    expect(findMustWithoutDoneWhen(card('everything in the MVP is delivered'))).toHaveLength(4);
+  });
+  it('no MVP section returns []', () => {
+    expect(findMustWithoutDoneWhen('## Done when\n\nx\n')).toEqual([]);
+  });
+  it('lintBacklogItemRendering warns for an open card, not a resolved one', () => {
+    const body = card('Must 1');
+    expect(lintBacklogItemRendering({ item: { id: 'x', status: 'open' }, body }).warnings.join()).toMatch(/Must 2/);
+    expect(lintBacklogItemRendering({ item: { id: 'x', status: 'resolved' }, body }).warnings.join()).not.toMatch(/Must 2/);
+  });
+});
+
+describe('findDanglingBacklogRefs — #4438', () => {
+  const known = new Set(['4377', 'xabc123']);
+  it('flags an unknown id, passes known/provisional ids', () => {
+    expect(findDanglingBacklogRefs('see we:backlog/9999-nope.md', known)).toEqual([{ id: '9999' }]);
+    expect(findDanglingBacklogRefs('see we:backlog/4377-x.md and we:backlog/xabc123 and we:backlog/4377', known)).toEqual([]);
+  });
+  it('resolves a graduated card via its bornAs hash', async () => {
+    const { buildBacklogResolvableIds } = await import('../lib/citation-check.mjs');
+    const ids = buildBacklogResolvableIds([{ num: '4400', bornAs: 'xzzz999' }]);
+    expect(findDanglingBacklogRefs('we:backlog/xzzz999-s.md', ids)).toEqual([]);
+  });
+  it('(pending-lane) exempts a ref', () => {
+    expect(findDanglingBacklogRefs('we:backlog/9999-nope.md (pending-lane)', known)).toEqual([]);
+  });
+  it('integration: warns when knownBacklogIds given, skipped when omitted, silent for resolved', () => {
+    const body = 'see we:backlog/9999-nope.md\n';
+    expect(lintBacklogItemRendering({ item: { id: 'x', status: 'open' }, body, knownBacklogIds: known }).warnings.join()).toMatch(/9999/);
+    expect(lintBacklogItemRendering({ item: { id: 'x', status: 'open' }, body }).warnings.join()).not.toMatch(/9999/);
+    expect(lintBacklogItemRendering({ item: { id: 'x', status: 'resolved' }, body, knownBacklogIds: known }).warnings.join()).not.toMatch(/9999/);
+  });
+});
+
 describe('findTestPlanGaps — #4332 Test-plan classification + condition coverage', () => {
   const plan = (cases, design = '') => `## Design\n${design}\n## Test plan\n\n${cases.map((c) => `- ${c}`).join('\n')}\n`;
   const fence = "```js\nif (pr.state === 'closed') skip();\n```";
@@ -702,6 +744,40 @@ describe('findTestPlanGaps — #4332 Test-plan classification + condition covera
     expect(open.warnings.some((w) => /Test-plan gaps/.test(w))).toBe(true);
     const done = lintBacklogItemRendering({ item: { id: '9', kind: 'story', status: 'resolved' }, body });
     expect(done.warnings.some((w) => /Test-plan gaps/.test(w))).toBe(false);
+  });
+});
+
+describe('findTestPlanGaps — #4431 negative-claim-without-case', () => {
+  const card = (design, cases) => `## Design\n\n${design}\n\n## Test plan\n\n${cases.map((c) => `- ${c}`).join('\n')}\n`;
+  const claim = 'A `changes` verdict must never flip the panel.';
+  const unrelated = ['routes normally. Red today: absent.'];
+
+  it('flags a claim whose identifiers the Test plan never names', () => {
+    expect(findTestPlanGaps(card(claim, unrelated))).toEqual([{ kind: 'negative-claim-without-case', detail: 'A `changes` verdict must never flip the panel.' }]);
+  });
+  it('does not flag a claim with no backticked/quoted token', () => {
+    expect(findTestPlanGaps(card('A verdict must never flip the panel.', unrelated))).toEqual([]);
+  });
+  it('detects a hard-wrapped claim', () => {
+    expect(findTestPlanGaps(card('A `changes` verdict\nmust never flip\nthe panel.', unrelated)).map((g) => g.kind)).toEqual(['negative-claim-without-case']);
+  });
+  it('is cleared when the Test plan names the identifier (mutation: drop the bullet → gap)', () => {
+    const covered = ['`changes` verdict keeps the panel. Red today: absent.'];
+    expect(findTestPlanGaps(card(claim, covered))).toEqual([]);
+    expect(findTestPlanGaps(card(claim, unrelated))).toHaveLength(1);
+  });
+  it('ignores claims inside a code fence', () => {
+    expect(findTestPlanGaps(card('```js\n// `changes` must never flip\n```', unrelated))).toEqual([]);
+  });
+  it('returns [] with no Test plan', () => {
+    expect(findTestPlanGaps(`## Design\n\n${claim}\n`)).toEqual([]);
+  });
+  it('lintBacklogItemRendering warns for open cards only', () => {
+    const body = card(claim, unrelated);
+    const open = lintBacklogItemRendering({ item: { id: '9', kind: 'story', status: 'open' }, body });
+    expect(open.warnings.some((w) => /negative claim/.test(w))).toBe(true);
+    const done = lintBacklogItemRendering({ item: { id: '9', kind: 'story', status: 'resolved' }, body });
+    expect(done.warnings.some((w) => /negative claim/.test(w))).toBe(false);
   });
 });
 

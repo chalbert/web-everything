@@ -138,7 +138,7 @@ describe('#xu2krte end-to-end — a REAL merge conflict, dispatched through the 
     const { planned, refusals } = planFixesFromReconcile(plan.dispatch, (key) => (key === '9099' ? item : null), () => []);
     expect(refusals).toEqual([]);
     expect(planned).toEqual([{
-      itemNum: '9099', pr: 8801, laneRef: 'lane/9099-conflict-fixture', scope: item.scope, scopeSource: 'item',
+      overlapScope: [], itemNum: '9099', pr: 8801, laneRef: 'lane/9099-conflict-fixture', scope: item.scope, scopeSource: 'item',
       isConflict: true, body: prBody, headRefOid: 'deadbeef'.repeat(5),
     }]);
   });
@@ -252,6 +252,8 @@ describe('#xu2krte end-to-end — a REAL merge conflict, dispatched through the 
           '--bg', '-n', 'fix-8802',
           '--settings', JSON.stringify({ env: { WE_CONVEYOR_WORKER: '1' }, worktree: { bgIsolation: 'none' } }),
           '--append-system-prompt-file', DISPATCHED_AGENT_SYSTEM_PROMPT_FILE,
+          // WE routing policy — every fresh launch also carries an explicit per-operation --effort (fix → high).
+          '--effort', 'high',
           // Operator rule 2026-09-29 — every fresh launch carries an explicit --model (fix → sonnet).
           '--model', 'sonnet',
           expect.stringContaining('fix brief for 8802'),

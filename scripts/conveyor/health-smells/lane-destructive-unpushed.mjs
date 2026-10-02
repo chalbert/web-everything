@@ -36,7 +36,8 @@ export default {
           measure: {
             pool, lane, action: e.action, at: e.ts, actor, pid: e.actor?.pid ?? null, ppid: e.actor?.ppid ?? null,
             headBefore: e.headBefore ?? null, headAfter: e.headAfter ?? null,
-            dirtyBefore: e.dirtyBefore ?? null, aheadBefore: e.aheadBefore ?? null, reason: e.reason ?? null,
+            dirtyBefore: e.dirtyBefore ?? null, workDirtyBefore: e.workDirtyBefore ?? null,
+            unpushedCommitsBefore: e.unpushedCommitsBefore ?? null, remoteReachableNow: e.remoteReachableNow ?? null, aheadBefore: e.aheadBefore ?? null, reason: e.reason ?? null,
           },
           summary: `${pool}/lane-${lane}: ${e.action} by ${actor} at ${e.ts} destroyed unpushed work `
             + `(dirty ${e.dirtyBefore ?? '?'}, ahead ${e.aheadBefore ?? '?'}, HEAD ${String(e.headBefore || '?').slice(0, 9)}) — ${e.reason || 'no reason recorded'}.`,

@@ -933,7 +933,7 @@ describe('what the sink actually runs', () => {
     // real dispatch argv. Passing it bought nothing and encoded a false premise the rest of the file read as
     // fact; the handle now comes from the id the CLI prints (`parseBackgroundedId`).
     const argv = buildAgentArgv({ sessionId: 'sess-c3', payload });
-    expect(argv).toEqual(['--bg', '-n', 'conveyor-3037', '--settings', JSON.stringify({ env: { WE_CONVEYOR_WORKER: '1' } }), '--model', 'sonnet', '# build #3037']);
+    expect(argv).toEqual(['--bg', '-n', 'conveyor-3037', '--settings', JSON.stringify({ env: { WE_CONVEYOR_WORKER: '1' } }), '--effort', 'high', '--model', 'sonnet', '# build #3037']);
     expect(argv).not.toContain('--session-id');
     expect(argv).not.toContain('sess-c3');
   });
@@ -945,7 +945,7 @@ describe('what the sink actually runs', () => {
       '--bg', '-n', 'conveyor-3037',
       '--settings', JSON.stringify({ env: { WE_CONVEYOR_WORKER: '1' } }),
       '--append-system-prompt-file', '/path/to/identity.md',
-      '--model', 'sonnet', '# build #3037',
+      '--effort', 'high', '--model', 'sonnet', '# build #3037',
     ]);
   });
 
@@ -958,7 +958,7 @@ describe('what the sink actually runs', () => {
       '--bg', '-n', 'conveyor-3037',
       '--settings', JSON.stringify({ env: { PATH: '/shim:/usr/bin', WE_CONVEYOR_WORKER: '1' } }),
       '--append-system-prompt-file', '/path/to/identity.md',
-      '--model', 'sonnet', '# build #3037',
+      '--effort', 'high', '--model', 'sonnet', '# build #3037',
     ]);
   });
 
@@ -969,7 +969,7 @@ describe('what the sink actually runs', () => {
     expect(argv).toEqual([
       '--bg', '-n', 'conveyor-3037',
       '--settings', JSON.stringify({ env: { PATH: '/shim:/usr/bin', WE_CONVEYOR_WORKER: '1' }, worktree: { bgIsolation: 'none' } }),
-      '--model', 'sonnet', '# build #3037',
+      '--effort', 'high', '--model', 'sonnet', '# build #3037',
     ]);
   });
 
@@ -2328,7 +2328,7 @@ describe('#3165: the planner\'s prepare lists reach the spawner', () => {
     expect(spawned[0].argv.filter((_, i) => i !== settingsAt && i !== settingsAt + 1)).toEqual([
       '--bg', '-n', 'conveyor-3037',
       '--append-system-prompt-file', DISPATCHED_AGENT_SYSTEM_PROMPT_FILE,
-      '--model', 'sonnet',
+      '--effort', 'high', '--model', 'sonnet',
       expectedPrompt('build', {
         ITEM_NUM: '3037', ITEM_SPEC_PATH: 'backlog/3037-declare-dispatch.md', LANE: 8,
         SESSION_SLUG: 'conveyor-3037', SCOPE: 'we:scripts/operations/', DELIVERY_BASE: 'main',
@@ -2776,7 +2776,7 @@ describe('#3960: the fix/ci-heal briefs fill repo-aware, and reproduce WE\'s pre
     expect(prompt).toContain('printf \'%s\\n\' "WE #2608: fix — <specific correction> (PR 701)"');
     // xpnhz4o — the gate is the diff-selected verify-lane run, never the bare full suite.
     expect(prompt).toContain(`node ${tokens.WE_ROOT}/scripts/verify-lane.mjs request --repo=.`); // #4369 — request/check, never the guard-denied `run`
-    expect(prompt).toContain(`node ${tokens.WE_ROOT}/scripts/verify-lane.mjs check --wait=60000 --json --repo=.`);
+    expect(prompt).toContain(`node ${tokens.WE_ROOT}/scripts/verify-lane.mjs check --wait=540000 --json --repo=.`);
     expect(prompt).not.toContain(`verify-lane.mjs run --repo=.          #`);
     expect(prompt).not.toContain('npm run test:unit && npm run check:standards');
     // Landing-freeze fix (lane-leftover-reclaim) — `--repo=` is now `{{LANE_REPO}}`, an absolute path equal to
@@ -2790,7 +2790,7 @@ describe('#3960: the fix/ci-heal briefs fill repo-aware, and reproduce WE\'s pre
     const { prompt } = fillBrief(CI_HEAL_BRIEF, { ...BASE_CI_HEAL_VALUES, ...tokens }, BRIEF_REQUIRED_BY_KIND['ci-heal'], undefined, REPO_AWARE_VALUE_PATTERNS);
     expect(prompt).toContain('printf \'%s\\n\' "WE #2638: ci-heal — <failing check and repair> (PR 743)"');
     expect(prompt).toContain(`node ${tokens.WE_ROOT}/scripts/verify-lane.mjs request --repo=.`); // #4369 — request/check, never the guard-denied `run`
-    expect(prompt).toContain(`node ${tokens.WE_ROOT}/scripts/verify-lane.mjs check --wait=60000 --json --repo=.`);
+    expect(prompt).toContain(`node ${tokens.WE_ROOT}/scripts/verify-lane.mjs check --wait=540000 --json --repo=.`);
     expect(prompt).not.toContain(`verify-lane.mjs run --repo=.          #`);
   });
 
@@ -2812,7 +2812,7 @@ describe('#3960: the fix/ci-heal briefs fill repo-aware, and reproduce WE\'s pre
     expect(prompt).not.toContain('node "/home/test/workspace/plateau-app/scripts');
     // The gate runs against the plateau lane (`--repo=.`), with WE's own verify-lane choosing plateau's scripts.
     expect(prompt).toContain(`node ${tokens.WE_ROOT}/scripts/verify-lane.mjs request --repo=.`);
-    expect(prompt).toContain(`node ${tokens.WE_ROOT}/scripts/verify-lane.mjs check --wait=60000 --json --repo=.`);
+    expect(prompt).toContain(`node ${tokens.WE_ROOT}/scripts/verify-lane.mjs check --wait=540000 --json --repo=.`);
     expect(prompt).toContain('printf \'%s\\n\' "PLATEAU #2608: fix — <specific correction> (PR 701)"');
   });
 });
@@ -3495,4 +3495,22 @@ describe('#3637 — deliveryTarget resolves to the brief\'s {{DELIVERY_BASE}}', 
 it('tags sibling PR dispatches', () => {
   expect(sessionSlugFor(3, 'fix', 49, '', 'frontierui')).toBe('fix-fui-49');
   expect(sessionSlugFor(3, 'ci-heal', 49, '', 'plateau-app')).toBe('ci-heal-pa-49');
+});
+
+// Native argv cases must never launch an installed external worker.
+vi.mock('../../lib/dispatch-provider-availability.mjs', () => ({ dispatchProviderAvailable: provider => provider === 'claude' }));
+
+
+describe('#4649 locus admission', () => {
+  it('refuses mixed repositories with a typed gate and no effects', () => {
+    const raw = tickRead({ locus: { multiRepo: true, keys: ['we', 'plateau-app'] } });
+    const verdict = shapeDispatchRead(raw, { num: '3037' });
+    expect(verdict.dispatching).toBe(false);
+    expect(verdict.holdReason).toContain('#4289');
+    expect(verdict.gates).toContainEqual({ name: 'locus', pass: false, observed: { kind: 'unsupported-locus', keys: ['we', 'plateau-app'] } });
+    expect(runTo(raw).run.effects).toEqual([]);
+  });
+  it.each([undefined, { multiRepo: false, keys: ['we'] }, { multiRepo: false, keys: ['plateau-app'] }])('preserves supported/legacy reads: %j', (locus) => {
+    expect(runTo(tickRead({ locus })).run.verdict.dispatching).toBe(true);
+  });
 });

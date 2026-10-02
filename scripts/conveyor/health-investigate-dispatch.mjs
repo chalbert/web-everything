@@ -34,6 +34,7 @@
  *   node scripts/conveyor/health-investigate-dispatch.mjs show   --episode=<id>
  *   node scripts/conveyor/health-investigate-dispatch.mjs record --episode=<id> --session=<slug>   < findings.json
  */
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync, appendFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -43,10 +44,11 @@ import {
   BRIEF_REQUIRED_BY_KIND, DISPATCH_EFFECT, HEALTH_INVESTIGATE_KIND, fillBrief, sessionSlugFor,
 } from '../operations/dispatch-lane.mjs';
 import {
-  REPO_ROOT, agentArgsFromEnv, createDispatchSinks, resolveDispatchSettingsEnv,
+  REPO_ROOT, agentArgsFromEnv, createDispatchSinks, dispatchSessionCwd, resolveDispatchSettingsEnv,
 } from '../operations/dispatch-lane-io.mjs';
 import { resolveDispatchRoute as decideDispatchRoute } from '../lib/dispatch-routing-policy-io.mjs';
 import { CONVEYOR_STATE_ROOT_ENV } from '../lib/daemon-last-good.mjs';
+import { readAgentsStrict } from '../lib/lane-salvage.mjs';
 import { stopSessionWithRetry } from './session-reaper.mjs';
 import { DEFAULT_HEALTH_CONFIG, renderInvestigationSection } from './health-watch-core.mjs';
 import { planInvestigations, planWallClock, pruneLedger, validateFindings } from './health-investigate-plan.mjs';
@@ -83,10 +85,13 @@ export function healthInvestigateReadCommands(root = REPO_ROOT) {
 }
 
 /** The deny list. Both the absolute (`node <root>/scripts/…`) and relative spellings of every script rule. */
-export function healthInvestigateDisallowedTools(root = REPO_ROOT) {
+export function healthInvestigateDisallowedTools(root = REPO_ROOT, scratchRoot = investigationScratchRoot(root)) {
   const script = (rel) => [`Bash(node ${root}/${rel}:*)`, `Bash(node ${rel}:*)`];
   return [
     'Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'WebFetch', 'WebSearch',
+    // Every session's cwd (and its `--settings` env, which carries the recording token) lives under the dispatch
+    // scratch root: one agent must not read another's. `//` is the absolute-path rule prefix.
+    ...['Read', 'Grep', 'Glob'].map((tool) => `${tool}(/${scratchRoot}/**)`),
     // gh wholesale — this agent needs none (its gh-backed reads run as child processes of the declared scripts,
     // where Bash rules never reach). `gh pr comment` is named on its own too: it is the one write the card
     // calls out, and it stays denied even if the wholesale rule is ever narrowed.
@@ -100,11 +105,16 @@ export function healthInvestigateDisallowedTools(root = REPO_ROOT) {
   ];
 }
 
+/** The parent of every dispatched session's cwd — what the read deny rules cover. */
+export function investigationScratchRoot(root = REPO_ROOT, sessionCwdFor = (id) => dispatchSessionCwd(id, { root })) {
+  return dirname(sessionCwdFor('x'));
+}
+
 /** ONE `=`-joined argv element per flag — never two (`--disallowedTools` is variadic and would swallow the
  *  prompt `buildAgentArgv` appends after it; `stuck-pr-inspect-dispatch.mjs#inspectDispatchDisallowedToolsArgs`). */
-export function healthInvestigateToolArgs(root = REPO_ROOT) {
+export function healthInvestigateToolArgs(root = REPO_ROOT, scratchRoot = investigationScratchRoot(root)) {
   return [
-    `--disallowedTools=${healthInvestigateDisallowedTools(root).join(',')}`,
+    `--disallowedTools=${healthInvestigateDisallowedTools(root, scratchRoot).join(',')}`,
     `--allowedTools=${healthInvestigateReadCommands(root).map((c) => `Bash(${c}:*)`).join(',')}`,
   ];
 }
@@ -142,16 +152,30 @@ export function routeInvestigator({ route = decideDispatchRoute } = {}) {
  * session's `--settings` env so the agent's `record`/`show` resolve the SAME `healthDir` as this tick (a `--bg`
  * session does not inherit the spawner's environment).
  */
-export function createInvestigationSinks({ root = REPO_ROOT, stateRoot = null, agentArgs = agentArgsFromEnv(), ...sinkOverrides } = {}) {
+export function createInvestigationSinks({ root = REPO_ROOT, stateRoot = null, token = null, agentArgs = agentArgsFromEnv(), ...sinkOverrides } = {}) {
   const baseSettings = sinkOverrides.resolveSettingsEnv ?? resolveDispatchSettingsEnv;
+  // The agent reads untrusted transcript text: unless the caller chose a mode, deny whatever `--allowedTools`
+  // does not pre-approve rather than leave an unattended session on the CLI's default prompting.
+  const hasMode = agentArgs.some((a) => a === '--permission-mode' || String(a).startsWith('--permission-mode='));
   return createDispatchSinks({
     root,
     ...sinkOverrides,
-    extraArgs: [...agentArgs, ...healthInvestigateToolArgs(root)],
+    extraArgs: [
+      ...agentArgs, ...(hasMode ? [] : ['--permission-mode=dontAsk']),
+      ...healthInvestigateToolArgs(root, investigationScratchRoot(root, sinkOverrides.sessionCwdFor)),
+    ],
     resolveLaneGrant: () => ({ additionalDirectories: [], allow: [] }),
-    resolveSettingsEnv: (cwd) => ({ ...(baseSettings(cwd) || {}), ...(stateRoot ? { [CONVEYOR_STATE_ROOT_ENV]: stateRoot } : {}) }),
+    resolveSettingsEnv: (cwd) => ({
+      ...(baseSettings(cwd) || {}),
+      ...(stateRoot ? { [CONVEYOR_STATE_ROOT_ENV]: stateRoot } : {}),
+      ...(token ? { [HEALTH_INVESTIGATE_TOKEN_ENV]: token } : {}),
+    }),
   });
 }
+
+/** The per-dispatch recording capability rides the session's `--settings` env under this name. */
+export const HEALTH_INVESTIGATE_TOKEN_ENV = 'WE_HEALTH_INVESTIGATE_TOKEN';
+const sha256 = (v) => createHash('sha256').update(String(v)).digest('hex');
 
 /** The brief template `we:skills-src/conveyor/health-investigate-brief.md`, read fresh per dispatch. */
 export function healthInvestigateBriefPath(root = REPO_ROOT) {
@@ -166,9 +190,9 @@ export function healthInvestigateBriefPath(root = REPO_ROOT) {
  * @returns {Promise<{handle:string|null, session:string, unknownTokens:string[], routing:object|null}>}
  */
 export async function dispatchInvestigation(target, {
-  root = REPO_ROOT, stateRoot = null, config = {},
+  root = REPO_ROOT, stateRoot = null, config = {}, token = null,
   readBrief = (r) => readFileSync(healthInvestigateBriefPath(r), 'utf8'),
-  sinks = createInvestigationSinks({ root, stateRoot }),
+  sinks = createInvestigationSinks({ root, stateRoot, token }),
   route = () => routeInvestigator(),
 } = {}) {
   const cfg = { ...DEFAULT_HEALTH_CONFIG, ...config };
@@ -190,7 +214,8 @@ export async function dispatchInvestigation(target, {
  * ONE PASS, called by the health tick after its diagnoses and before it writes reports. In order:
  *   1. stop every running investigation whose findings landed or whose wall clock is due;
  *   2. dispatch what {@link planInvestigations} clears (nothing unless `investigateDispatch` is on);
- *   3. annotate each episode in `state` with its investigation status and findings (the report renders them);
+ *   3. annotate each episode in `state` — and each episode that closed THIS tick (`closedEpisodes`, whose report
+ *      the caller still rewrites) — with its investigation status and findings (the report renders them);
  *   4. append the findings to the report of an episode that already CLOSED before they landed;
  *   5. write the ledger.
  * `dryRun` decides everything and performs nothing (no stop, no spawn, no write). Never throws for one
@@ -199,8 +224,10 @@ export async function dispatchInvestigation(target, {
  */
 export async function runInvestigations({
   dir, state, smells, config = {}, now, dryRun = false, root = REPO_ROOT,
-  dispatch = (target) => dispatchInvestigation(target, { root, stateRoot: resolve(dir, '..', '..'), config }),
+  closedEpisodes = [],
+  dispatch = (target, { token } = {}) => dispatchInvestigation(target, { root, stateRoot: resolve(dir, '..', '..'), config, token }),
   stop = (handle) => stopSessionWithRetry({ handle }),
+  listAgents = () => readAgentsStrict(),
   appendReport = (path, text) => appendFileSync(path, text),
 } = {}) {
   const cfg = { ...DEFAULT_HEALTH_CONFIG, ...config };
@@ -219,8 +246,26 @@ export async function runInvestigations({
     const entry = ledger.find((x) => x.episodeId === s.episodeId);
     if (dryRun) { summary.stopped.push({ ...s, dryRun: true }); continue; }
     let ok = true;
-    if (s.handle) {
-      try { stop(s.handle); } catch (e) { ok = false; entry.lastStopError = String(e?.message || e).split('\n')[0]; }
+    const fail = (msg) => { ok = false; entry.lastStopError = String(msg).split('\n')[0]; };
+    let handle = s.handle;
+    let byName = false;
+    if (!handle && s.session) {
+      // No handle (an indeterminate dispatch): `claude stop <name>` would report "already gone" for a session
+      // that is in fact still running, so resolve the live handle by name first.
+      try {
+        const agents = listAgents();
+        if (!Array.isArray(agents)) throw new Error('could not list claude agents to resolve the session by name');
+        const row = agents.find((a) => a?.name === s.session && !FINISHED_AGENT_STATES.has(a.state));
+        handle = row?.id ?? row?.sessionId ?? null;
+        byName = !!row;
+        if (row && !handle) fail('the session is listed but exposes no id to stop');
+      } catch (e) { fail(e?.message || e); }
+    }
+    if (ok && handle) {
+      try {
+        const res = stop(handle);
+        if (byName && res?.alreadyGone) fail('stop reported the session already gone, but it is still listed');
+      } catch (e) { fail(e?.message || e); }
     }
     if (ok) {
       entry.status = s.why === 'findings-recorded' ? 'finished' : 'stopped-wall-clock';
@@ -236,39 +281,52 @@ export async function runInvestigations({
   summary.held = planned.held;
   for (const target of planned.dispatch) {
     if (dryRun) { summary.dispatched.push({ ...target, dryRun: true }); continue; }
-    const base = { episodeId: target.episodeId, key: target.key, smell: target.smell, subject: target.subject, startedAt: now };
+    // The recording capability is minted BEFORE the dispatch so even an indeterminate entry carries its hash.
+    const token = randomBytes(24).toString('hex');
+    const base = { episodeId: target.episodeId, key: target.key, smell: target.smell, subject: target.subject, startedAt: now, tokenHash: sha256(token) };
     try {
       // eslint-disable-next-line no-await-in-loop -- one at a time: the running cap is counted per spawn.
-      const r = await dispatch(target);
+      const r = await dispatch(target, { token });
       ledger.push({ ...base, session: r.session, handle: r.handle, deadlineAt: now + cfg.investigateWallClockMs, status: 'running' });
       summary.dispatched.push({ ...target, session: r.session, handle: r.handle });
     } catch (e) {
       // Counts as this episode's one investigation (never retried every tick) and against the window budget.
       const error = String(e?.message || e).split('\n')[0];
-      ledger.push({ ...base, session: null, handle: null, status: 'dispatch-failed', endedAt: now, endReason: error });
+      if (e?.notApplied === true) {
+        ledger.push({ ...base, session: null, handle: null, status: 'dispatch-failed', endedAt: now, endReason: error });
+      } else {
+        // Nothing proves the agent did NOT start: hold the slot and let the wall clock reap it by session name.
+        ledger.push({ ...base, session: sessionSlugFor(target.episodeId, HEALTH_INVESTIGATE_KIND), handle: null, deadlineAt: now + cfg.investigateWallClockMs, status: 'running', indeterminate: true, endReason: error });
+      }
       summary.failed.push({ ...target, error });
     }
   }
 
+  const openIds = new Set(Object.values(state.episodes || {}).map((e) => e?.id).filter(Boolean));
+
   // 3. annotate open episodes
   const holdByEpisode = new Map(planned.held.filter((h) => h.rule !== 'one-per-episode').map((h) => [h.episodeId, h]));
-  for (const ep of Object.values(state.episodes || {})) {
+  const closedIds = new Set(closedEpisodes.map((e) => e?.id).filter(Boolean));
+  for (const ep of [...Object.values(state.episodes || {}), ...closedEpisodes]) {
     if (!ep?.id) continue;
     const entry = ledger.find((x) => x.episodeId === ep.id);
     const hold = holdByEpisode.get(ep.id);
     if (entry) {
       ep.investigationStatus = statusLine(entry);
       const f = findingsFor(ep.id);
-      if (f) ep.investigation = f;
+      if (f) {
+        ep.investigation = f;
+        // The report write that follows carries the section, so a later tick must never append it again.
+        if (!entry.reportedAt) entry.reportedAt = at;
+      }
     } else if (hold) {
       ep.investigationStatus = { status: 'held', reason: hold.reason, session: null };
     }
   }
 
   // 4. findings for an episode that closed before they landed: the tick no longer re-renders its report.
-  const openIds = new Set(Object.values(state.episodes || {}).map((e) => e?.id).filter(Boolean));
   for (const entry of ledger) {
-    if (entry.reportedAt || openIds.has(entry.episodeId)) continue;
+    if (entry.reportedAt || openIds.has(entry.episodeId) || closedIds.has(entry.episodeId)) continue;
     const f = findingsFor(entry.episodeId);
     const md = join(dir, 'episodes', `${entry.episodeId}.md`);
     if (!f || dryRun || !existsSync(md)) continue;
@@ -280,13 +338,16 @@ export async function runInvestigations({
   for (const entry of ledger) if (!entry.reportedAt && openIds.has(entry.episodeId) && findingsFor(entry.episodeId)) entry.reportedAt = at;
 
   // A tick with dispatch off and nothing ever dispatched leaves no ledger file behind.
-  if (!dryRun && (ledger.length || existsSync(ledgerPath(dir)))) writeJsonAtomic(ledgerPath(dir), pruneLedger(ledger, { now, config: cfg }));
+  if (!dryRun && (ledger.length || existsSync(ledgerPath(dir)))) writeJsonAtomic(ledgerPath(dir), pruneLedger(ledger, { now, config: cfg, openEpisodeIds: openIds }));
   return summary;
 }
 
+/** `claude agents` states that prove a session is no longer running (as `lane-salvage.mjs#agentsInLane`). */
+const FINISHED_AGENT_STATES = new Set(['done', 'failed', 'stopped', 'completed', 'killed']);
+
 function statusLine(entry) {
   const reason = {
-    running: `started ${new Date(entry.startedAt).toISOString()}, stopped by ${new Date(entry.deadlineAt ?? entry.startedAt).toISOString()} at the latest`,
+    running: entry.indeterminate ? `dispatch outcome unknown (${entry.endReason ?? 'error'}); holding the slot, reaped by session name by ${new Date(entry.deadlineAt ?? entry.startedAt).toISOString()} at the latest` : `started ${new Date(entry.startedAt).toISOString()}, stopped by ${new Date(entry.deadlineAt ?? entry.startedAt).toISOString()} at the latest`,
     finished: 'findings recorded; session stopped',
     'stopped-wall-clock': 'stopped at the wall clock before recording findings',
     'dispatch-failed': `the dispatch failed — ${entry.endReason ?? 'unknown'}`,
@@ -301,10 +362,16 @@ function statusLine(entry) {
  * prompt-injected agent cannot write another episode's report), and only once. Scrubbed before it is written.
  * @returns {{path:string, findings:object}}
  */
-export function recordFindings({ dir, episodeId, session, input, now = Date.now(), home = homedir() }) {
+export function recordFindings({ dir, episodeId, session, input, now = Date.now(), home = homedir(), token = process.env[HEALTH_INVESTIGATE_TOKEN_ENV] }) {
   const path = findingsPath(dir, episodeId);
   const entry = readLedger(dir).find((x) => x.episodeId === episodeId);
   if (!entry) throw new Error(`health-investigate: no investigation is on the ledger for episode ${episodeId}`);
+  if (entry.tokenHash) {
+    // Capability check: the slug is deterministic and printed in the brief, so the token is the real authority.
+    const given = Buffer.from(sha256(token ?? ''), 'hex');
+    const want = Buffer.from(entry.tokenHash, 'hex');
+    if (!token || given.length !== want.length || !timingSafeEqual(given, want)) throw new Error(`health-investigate: recording for ${episodeId} refused — missing or wrong session capability`);
+  } // else: dispatched before tokens shipped — the session-name check below stays until it finishes.
   if (entry.session !== session) throw new Error(`health-investigate: episode ${episodeId} belongs to session ${entry.session}, not ${session}`);
   if (entry.status !== 'running') throw new Error(`health-investigate: the investigation of ${episodeId} is ${entry.status} — nothing more can be recorded`);
   if (existsSync(path)) throw new Error(`health-investigate: findings for ${episodeId} are already recorded — one record per investigation`);
@@ -332,15 +399,17 @@ function parseFlags(argv) {
   return { flags, pos };
 }
 
-export function main(argv, { readStdin = () => readFileSync(0, 'utf8'), out = (s) => process.stdout.write(s), err = (s) => process.stderr.write(s) } = {}) {
+export function main(argv, { env = process.env, readStdin = () => readFileSync(0, 'utf8'), out = (s) => process.stdout.write(s), err = (s) => process.stderr.write(s) } = {}) {
   const { flags, pos } = parseFlags(argv);
-  const dir = healthDir(typeof flags['state-root'] === 'string' ? flags['state-root'] : undefined);
+  // A session whose env pins the state root cannot be redirected by a flag (a prompt-injected agent could).
+  const pinned = !!String(env[CONVEYOR_STATE_ROOT_ENV] ?? '').trim();
+  const dir = healthDir(!pinned && typeof flags['state-root'] === 'string' ? flags['state-root'] : undefined, env);
   try {
     if (pos[0] === 'show') { out(showEpisode({ dir, episodeId: flags.episode })); return 0; }
     if (pos[0] === 'record') {
       let input;
       try { input = JSON.parse(readStdin()); } catch (e) { throw new Error(`health-investigate: findings on stdin are not JSON — ${e.message}`); }
-      const { path } = recordFindings({ dir, episodeId: flags.episode, session: flags.session, input });
+      const { path } = recordFindings({ dir, episodeId: flags.episode, session: flags.session, input, token: env[HEALTH_INVESTIGATE_TOKEN_ENV] });
       out(`health-investigate: findings recorded → ${path}\n`);
       return 0;
     }

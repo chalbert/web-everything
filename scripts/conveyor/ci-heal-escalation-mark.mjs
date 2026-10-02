@@ -49,6 +49,7 @@
  * read by any decision: it only makes sure the PR-thread record eventually exists.
  */
 import { resolve } from 'node:path';
+import { collectCiAuthDiagnosis, renderCiAuthDiagnosis } from './ci-auth-diagnosis.mjs';
 import { isTrustedMarkerAuthor } from '../lib/marker-authorship.mjs';
 import { createGhProvider } from '../lib/review-label-provider.mjs';
 import { applyReviewStatus } from './review-status-tag.mjs';
@@ -69,10 +70,10 @@ export const CI_HEAL_ESCALATION_OUTCOMES = Object.freeze(['needs-human', 'waitin
  * we:scripts/conveyor/ci-heal-escalation-mark.mjs#buildCiHealEscalationComment — the durable comment body a
  * ci-heal escalation posts. Its FIRST line MUST be {@link CI_HEAL_ESCALATION_MARKER}; every field after it is a
  * `key: value` line so {@link parseCiHealEscalations} can read it back with no ambiguity. Pure.
- * @param {{headSha:string, outcome:'needs-human'|'waiting-on-system-fix'|'not-a-ci-break', reason?:string, systemFixRef?:(number|string|null)}} o
+ * @param {{headSha:string, outcome:'needs-human'|'waiting-on-system-fix'|'not-a-ci-break', reason?:string, systemFixRef?:(number|string|null), authDiagnosis?:object}} o
  * @returns {string}
  */
-export function buildCiHealEscalationComment({ headSha, outcome, reason = '', systemFixRef = null } = {}) {
+export function buildCiHealEscalationComment({ headSha, outcome, reason = '', systemFixRef = null, authDiagnosis = null } = {}) {
   if (!headSha || typeof headSha !== 'string') throw new TypeError('ci-heal-escalation-mark: headSha is required');
   if (!CI_HEAL_ESCALATION_OUTCOMES.includes(outcome)) {
     throw new TypeError(`ci-heal-escalation-mark: outcome must be one of ${CI_HEAL_ESCALATION_OUTCOMES.join('|')}, got ${JSON.stringify(outcome)}`);
@@ -101,6 +102,7 @@ export function buildCiHealEscalationComment({ headSha, outcome, reason = '', sy
         : 'A ci-heal agent stopped here rather than guess — this needs a human judgment call, not another repair ' +
           'attempt. A person clears this by pushing a new commit (which re-arms auto-heal) or taking the PR over.',
   );
+  if (authDiagnosis) lines.push('', renderCiAuthDiagnosis(authDiagnosis));
   return lines.join('\n');
 }
 
@@ -158,6 +160,27 @@ export function latestCiHealEscalationForHead(comments, headSha) {
   return matches.length ? matches[matches.length - 1] : null;
 }
 
+/** Recorded attribution is evidence only, never permission to ignore a required check.
+ * Legacy #3239 records the check and card-only diagnosis in prose. Match that narrow
+ * shape; arbitrary needs-human reasons (including conflicts) remain terminal.
+ * A successful refresh supersedes this through the existing head-scoped mechanism.
+ */
+export function mainBreakEscalationForHead(comments, headSha, failingCheckName) {
+  const escalation = latestCiHealEscalationForHead(comments, headSha);
+  if (!escalation || !failingCheckName || escalation.outcome !== 'needs-human') return null;
+  // #3241 records the main reproduction directly, rather than naming a shard.
+  // Only the test aggregate is attributed by this legacy test-file diagnosis.
+  if (failingCheckName === 'test' && /^red is main's own break: \S+\.test\.[cm]?[jt]s .+ fails on main [0-9a-f]{7,40} too; PR only edits one backlog card, already up to date with main$/.test(escalation.reason)) return escalation;
+  const recordedCheck = /^required (.+?) red on unrelated /.exec(escalation.reason)?.[1];
+  // CI's required `test` aggregate includes the matrix shards; the legacy reason
+  // spells `test-shard 4`, while GitHub calls the job `test-shard (4)`.
+  const shard = /^test-shard (\d+)$/.exec(recordedCheck || '')?.[1];
+  if (recordedCheck !== failingCheckName &&
+      !(shard && (failingCheckName === 'test' || failingCheckName === `test-shard (${shard})`))) return null;
+  if (!/; PR diff is (?:one backlog card|backlog-only|card-only); reproduces after rebase onto main(?:;|$)/.test(escalation.reason)) return null;
+  return escalation;
+}
+
 /**
  * we:scripts/conveyor/ci-heal-escalation-mark.mjs#postOrOweCiHealEscalation — post the escalation comment; on a
  * BUDGET refusal, record it owed for `ci-heal-pr-dispatch.mjs#runReconcileCiHealDispatch`'s next-tick flush
@@ -174,6 +197,22 @@ export function postOrOweCiHealEscalation({ pr, body, headSha, repo, post = post
     if (!isBudgetRefusal(e) || !headSha || !repo) throw e;
     const owed = owe({ repo: repo.key, slug: repo.slug, pr, kind: 'ci-heal-escalation', headSha, body });
     return { commented: false, owed };
+  }
+}
+
+/** Shared CLI composition seam: enrichment failure must never suppress an escalation. */
+export function composeCiHealEscalation(flags, { collect = collectCiAuthDiagnosis } = {}) {
+  const original = { headSha: flags.head, outcome: flags.outcome,
+    reason: typeof flags.reason === 'string' ? flags.reason : '', systemFixRef: flags['system-fix'] ?? null };
+  const body = buildCiHealEscalationComment(original);
+  if (flags.run === undefined && flags.attempt === undefined) return body;
+  try {
+    const authDiagnosis = collect({ repo: flags.repo, runId: flags.run, attempt: flags.attempt, headSha: flags.head });
+    if (!authDiagnosis || typeof authDiagnosis !== 'object') throw new TypeError('invalid diagnostic');
+    return buildCiHealEscalationComment({ ...original, authDiagnosis });
+  } catch {
+    return buildCiHealEscalationComment({ ...original,
+      authDiagnosis: { status: 'unavailable', detail: 'CI authentication enrichment unavailable.' } });
   }
 }
 
@@ -197,15 +236,12 @@ if (IS_CLI) {
   const pr = Number(positionals[0]);
   if (!Number.isInteger(pr) || pr <= 0) {
     fail('usage: ci-heal-escalation-mark.mjs <pr> --head=<sha> --outcome=needs-human|waiting-on-system-fix|not-a-ci-break '
-      + '[--reason="<text>"] [--system-fix=<n>] [--repo=<owner/name>]');
+      + '[--reason="<text>"] [--system-fix=<n>] [--repo=<owner/name>] [--run=<id> --attempt=<n>]');
   }
   if (typeof flags.head !== 'string' || !flags.head) fail('--head=<sha> is required');
   let body;
   try {
-    body = buildCiHealEscalationComment({
-      headSha: flags.head, outcome: flags.outcome, reason: typeof flags.reason === 'string' ? flags.reason : '',
-      systemFixRef: flags['system-fix'] ?? null,
-    });
+    body = composeCiHealEscalation(flags);
   } catch (e) {
     fail(String(e.message || e));
   }

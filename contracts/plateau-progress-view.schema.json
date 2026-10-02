@@ -1,0 +1,3048 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Plateau progress view \u2014 schema 2 with schema 1 compatibility",
+  "description": "Declarative slice-1 wire contract. Definitions and examples are independently consumable; no collector or UI is required. Cross-field arithmetic, source-key joins and temporal comparisons remain consumer conformance responsibilities.",
+  "oneOf": [
+    {
+      "$ref": "#/definitions/schema1"
+    },
+    {
+      "$ref": "#/definitions/schema2"
+    }
+  ],
+  "definitions": {
+    "freshness": {
+      "type": "object",
+      "properties": {
+        "observedAt": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z$",
+              "description": "UTC ISO instant; calendar buckets use America/Toronto."
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "lastSuccessAt": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z$",
+              "description": "UTC ISO instant; calendar buckets use America/Toronto."
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "expectedEveryMs": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "staleAfterMs": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "enum": [
+            "fresh",
+            "stale",
+            "unavailable",
+            "partial"
+          ]
+        },
+        "complete": {
+          "type": "boolean"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cursor": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "observedAt",
+        "lastSuccessAt",
+        "expectedEveryMs",
+        "staleAfterMs",
+        "status",
+        "complete",
+        "reason"
+      ],
+      "additionalProperties": true,
+      "description": "Source observation time is independent of publisher heartbeat. Preserve last good timestamps on failure; null is unknown, never observed zero."
+    },
+    "measure": {
+      "type": "object",
+      "properties": {
+        "value": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unit": {
+          "enum": [
+            "logical-work",
+            "jobs",
+            "cards",
+            "pull-requests",
+            "merged-prs",
+            "human-actions"
+          ]
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1
+        },
+        "complete": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "value",
+        "unit",
+        "source",
+        "complete"
+      ],
+      "additionalProperties": true,
+      "description": "source names an entry in sources. Null means unknown; a partial numeric tally counts only observed work. Units must not be summed."
+    },
+    "collection": {
+      "type": "object",
+      "properties": {
+        "total": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "included": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "complete": {
+          "type": "boolean"
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "total",
+        "included",
+        "complete",
+        "source"
+      ],
+      "additionalProperties": true,
+      "description": "Metadata for the corresponding row array; included is its length, total is unknown when the full population is unknown. Slice 1 does not silently truncate or advertise paging."
+    },
+    "run": {
+      "type": "object",
+      "properties": {
+        "runId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "logicalWorkId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "parentRunId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "repo": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cardRefs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "prRefs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "role": {
+          "type": "string",
+          "minLength": 1
+        },
+        "state": {
+          "type": "string",
+          "minLength": 1
+        },
+        "rawState": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "startedAt": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z$",
+              "description": "UTC ISO instant; calendar buckets use America/Toronto."
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "lastActivityAt": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z$",
+              "description": "UTC ISO instant; calendar buckets use America/Toronto."
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "observedAt": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z$",
+              "description": "UTC ISO instant; calendar buckets use America/Toronto."
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "nextStep": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "runId",
+        "logicalWorkId",
+        "parentRunId",
+        "repo",
+        "cardRefs",
+        "prRefs",
+        "description",
+        "role",
+        "state",
+        "rawState",
+        "startedAt",
+        "lastActivityAt",
+        "observedAt",
+        "nextStep"
+      ],
+      "additionalProperties": true,
+      "description": "Stable producer-qualified runId, repo-qualified card/PR refs. Preserve unknown role/state codes; no inference of executor/model in this slice. Idle, dead and waiting jobs are not moving."
+    },
+    "hold": {
+      "type": "object",
+      "properties": {
+        "workRef": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "owner": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rawReason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "normalizedReason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "since": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z$",
+              "description": "UTC ISO instant; calendar buckets use America/Toronto."
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "asOf": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z$",
+              "description": "UTC ISO instant; calendar buckets use America/Toronto."
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "nextStep": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "relatedRefs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "required": [
+        "workRef",
+        "description",
+        "owner",
+        "rawReason",
+        "normalizedReason",
+        "since",
+        "asOf",
+        "nextStep",
+        "relatedRefs"
+      ],
+      "additionalProperties": true
+    },
+    "action": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "enum": [
+            "human-review",
+            "ready-fork"
+          ]
+        },
+        "ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "operatorReason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "ready": {
+          "type": "boolean"
+        },
+        "blockingSystemPrerequisites": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "forkRef": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "ref",
+        "description",
+        "operatorReason",
+        "ready",
+        "blockingSystemPrerequisites",
+        "url",
+        "forkRef"
+      ],
+      "additionalProperties": true,
+      "anyOf": [
+        {
+          "properties": {
+            "url": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        {
+          "properties": {
+            "forkRef": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      ],
+      "description": "Only explicit human review or a ready decision fork in slice 1. Pending review, failed CI and absent handlers alone never create an action. A not-ready human review remains pending while the system prepares it."
+    },
+    "window": {
+      "type": "object",
+      "properties": {
+        "start": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z$",
+              "description": "UTC ISO instant; calendar buckets use America/Toronto."
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "end": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z$",
+              "description": "UTC ISO instant; calendar buckets use America/Toronto."
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "count": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "complete": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "start",
+        "end",
+        "count",
+        "complete"
+      ],
+      "additionalProperties": true
+    },
+    "trend": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "enum": [
+            "comparable",
+            "collecting-history"
+          ]
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "current": {
+          "$ref": "#/definitions/window"
+        },
+        "previous": {
+          "$ref": "#/definitions/window"
+        }
+      },
+      "required": [
+        "status",
+        "reason",
+        "current",
+        "previous"
+      ],
+      "additionalProperties": true,
+      "description": "Adjacent trailing 60-minute windows with identical scope and coverage. Missing baseline, gaps or changed scope mean collecting-history; do not fabricate zero or a percentage.",
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "comparable"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "current": {
+                "allOf": [
+                  {
+                    "$ref": "#/definitions/window"
+                  },
+                  {
+                    "properties": {
+                      "count": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "complete": {
+                        "const": true
+                      },
+                      "start": {
+                        "type": "string",
+                        "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z$",
+                        "description": "UTC ISO instant; calendar buckets use America/Toronto."
+                      },
+                      "end": {
+                        "type": "string",
+                        "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z$",
+                        "description": "UTC ISO instant; calendar buckets use America/Toronto."
+                      }
+                    }
+                  }
+                ]
+              },
+              "previous": {
+                "allOf": [
+                  {
+                    "$ref": "#/definitions/window"
+                  },
+                  {
+                    "properties": {
+                      "count": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "complete": {
+                        "const": true
+                      },
+                      "start": {
+                        "type": "string",
+                        "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z$",
+                        "description": "UTC ISO instant; calendar buckets use America/Toronto."
+                      },
+                      "end": {
+                        "type": "string",
+                        "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z$",
+                        "description": "UTC ISO instant; calendar buckets use America/Toronto."
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "deliveries": {
+      "type": "object",
+      "properties": {
+        "source": {
+          "type": "string",
+          "minLength": 1
+        },
+        "provenance": {
+          "const": "observed by local drain"
+        },
+        "complete": {
+          "const": false
+        },
+        "historyStart": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z$",
+              "description": "UTC ISO instant; calendar buckets use America/Toronto."
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "today": {
+          "$ref": "#/definitions/window"
+        },
+        "trend": {
+          "$ref": "#/definitions/trend"
+        }
+      },
+      "required": [
+        "source",
+        "provenance",
+        "complete",
+        "historyStart",
+        "today",
+        "trend"
+      ],
+      "additionalProperties": true,
+      "description": "Confirmed drain merge tally only. Drain history lacks repo identity: no fabricated repo/PR records or global completeness. Today starts at Toronto midnight (DST-aware) and ends at observedAt. Sessions and resolved cards are not merges."
+    },
+    "section": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sourceDate": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "text",
+        "sourceDate"
+      ],
+      "additionalProperties": true
+    },
+    "policy": {
+      "type": "object",
+      "properties": {
+        "sourceKind": {
+          "const": "external-plan"
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "observedAt": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z$",
+              "description": "UTC ISO instant; calendar buckets use America/Toronto."
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "effectiveAt": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z$",
+              "description": "UTC ISO instant; calendar buckets use America/Toronto."
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "readOnly": {
+          "const": true
+        },
+        "priorities": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "description": {
+                "type": "string",
+                "minLength": 1
+              },
+              "refs": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "required": [
+              "description",
+              "refs"
+            ],
+            "additionalProperties": true
+          }
+        },
+        "sections": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/section"
+          }
+        },
+        "conflicts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "sectionIds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "description": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "sectionIds",
+              "description"
+            ],
+            "additionalProperties": true
+          }
+        },
+        "status": {
+          "enum": [
+            "observed",
+            "conflict",
+            "unavailable"
+          ]
+        }
+      },
+      "required": [
+        "sourceKind",
+        "revision",
+        "observedAt",
+        "effectiveAt",
+        "readOnly",
+        "priorities",
+        "sections",
+        "conflicts",
+        "status"
+      ],
+      "additionalProperties": true,
+      "description": "Operator-designated text in source order, excluding chat history. Conflicting sections are retained without selecting a winner. Intended rules are not observed runtime settings."
+    },
+    "item": {
+      "type": "object",
+      "properties": {
+        "num": {
+          "type": "string",
+          "minLength": 1
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "type": "string",
+          "minLength": 1
+        },
+        "size": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "type": "string",
+          "minLength": 1
+        },
+        "group": {
+          "enum": [
+            "needs-you",
+            "doing",
+            "queued",
+            "backlog"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "order": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "pr": {
+          "type": "object",
+          "properties": {
+            "number": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "url": {
+              "type": "string",
+              "minLength": 1
+            },
+            "ci": {
+              "enum": [
+                "passing",
+                "failing",
+                "pending",
+                "none"
+              ]
+            },
+            "review": {
+              "enum": [
+                "pending",
+                "human",
+                "accepted",
+                "changes",
+                null
+              ]
+            }
+          },
+          "required": [
+            "number",
+            "url",
+            "ci",
+            "review"
+          ],
+          "additionalProperties": true
+        }
+      },
+      "required": [
+        "num",
+        "title",
+        "kind",
+        "size",
+        "status",
+        "group",
+        "reason",
+        "order"
+      ],
+      "additionalProperties": true,
+      "description": "Existing Flow row, retained for compatibility. Optional legacy fields remain readable. Schema-2 actions, not legacy group membership, define human work."
+    },
+    "schema1": {
+      "type": "object",
+      "properties": {
+        "schema": {
+          "const": 1
+        },
+        "observedAt": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z$",
+          "description": "UTC ISO instant; calendar buckets use America/Toronto."
+        },
+        "scope": {
+          "type": "object",
+          "properties": {
+            "epic": {
+              "type": "string",
+              "minLength": 1
+            },
+            "title": {
+              "type": "string",
+              "minLength": 1
+            },
+            "found": {
+              "type": "boolean"
+            },
+            "total": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "resolved": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "parked": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "epic",
+            "title",
+            "found",
+            "total",
+            "resolved",
+            "parked"
+          ],
+          "additionalProperties": true
+        },
+        "runners": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "enum": [
+                  "dispatcher",
+                  "fix-dispatch",
+                  "review",
+                  "drain"
+                ]
+              },
+              "state": {
+                "enum": [
+                  "running",
+                  "stale",
+                  "absent"
+                ]
+              },
+              "heartbeatAt": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z$",
+                    "description": "UTC ISO instant; calendar buckets use America/Toronto."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "lastTickAt": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z$",
+                    "description": "UTC ISO instant; calendar buckets use America/Toronto."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "tick": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "name",
+              "state",
+              "heartbeatAt",
+              "lastTickAt",
+              "tick"
+            ],
+            "additionalProperties": true
+          }
+        },
+        "counts": {
+          "type": "object",
+          "properties": {
+            "needs-you": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "doing": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "queued": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "backlog": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "needs-you",
+            "doing",
+            "queued",
+            "backlog"
+          ],
+          "additionalProperties": true
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/item"
+          }
+        },
+        "degraded": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "source": {
+                "type": "string",
+                "minLength": 1
+              },
+              "affects": {
+                "type": "array",
+                "items": {
+                  "enum": [
+                    "needs-you",
+                    "doing",
+                    "queued",
+                    "backlog"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "source",
+              "affects"
+            ],
+            "additionalProperties": true
+          }
+        }
+      },
+      "required": [
+        "schema",
+        "observedAt",
+        "scope",
+        "runners",
+        "counts",
+        "items",
+        "degraded"
+      ],
+      "additionalProperties": true,
+      "description": "Legacy WipSnapshot compatibility envelope, based on Plateau src/wip/types.ts. Additional legacy fields remain readable. Absent progress sections project as unknown, never zero. This branch does not replace the existing relay validator."
+    },
+    "schema2": {
+      "type": "object",
+      "properties": {
+        "schema": {
+          "const": 2
+        },
+        "snapshotId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "publisherId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "observedAt": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z$",
+          "description": "UTC ISO instant; calendar buckets use America/Toronto."
+        },
+        "timeZone": {
+          "const": "America/Toronto"
+        },
+        "coverage": {
+          "type": "object",
+          "properties": {
+            "repos": {
+              "type": "object",
+              "properties": {
+                "web-everything": {
+                  "type": "object",
+                  "properties": {
+                    "complete": {
+                      "type": "boolean"
+                    },
+                    "lastReconciledAt": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z$",
+                          "description": "UTC ISO instant; calendar buckets use America/Toronto."
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "reason": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "complete",
+                    "lastReconciledAt",
+                    "reason"
+                  ],
+                  "additionalProperties": true
+                },
+                "plateau-app": {
+                  "type": "object",
+                  "properties": {
+                    "complete": {
+                      "type": "boolean"
+                    },
+                    "lastReconciledAt": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z$",
+                          "description": "UTC ISO instant; calendar buckets use America/Toronto."
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "reason": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "complete",
+                    "lastReconciledAt",
+                    "reason"
+                  ],
+                  "additionalProperties": true
+                },
+                "frontierui": {
+                  "type": "object",
+                  "properties": {
+                    "complete": {
+                      "type": "boolean"
+                    },
+                    "lastReconciledAt": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z$",
+                          "description": "UTC ISO instant; calendar buckets use America/Toronto."
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "reason": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "complete",
+                    "lastReconciledAt",
+                    "reason"
+                  ],
+                  "additionalProperties": true
+                }
+              },
+              "required": [
+                "web-everything",
+                "plateau-app",
+                "frontierui"
+              ],
+              "additionalProperties": true
+            },
+            "collections": {
+              "type": "object",
+              "properties": {
+                "runs": {
+                  "$ref": "#/definitions/collection"
+                },
+                "holds": {
+                  "$ref": "#/definitions/collection"
+                },
+                "actions": {
+                  "$ref": "#/definitions/collection"
+                }
+              },
+              "required": [
+                "runs",
+                "holds",
+                "actions"
+              ],
+              "additionalProperties": true
+            }
+          },
+          "required": [
+            "repos",
+            "collections"
+          ],
+          "additionalProperties": true
+        },
+        "sources": {
+          "type": "object",
+          "required": [
+            "runs",
+            "holds",
+            "pullRequests",
+            "deliveries",
+            "actions",
+            "policy"
+          ],
+          "additionalProperties": {
+            "$ref": "#/definitions/freshness"
+          }
+        },
+        "summary": {
+          "type": "object",
+          "properties": {
+            "moving": {
+              "allOf": [
+                {
+                  "$ref": "#/definitions/measure"
+                },
+                {
+                  "properties": {
+                    "unit": {
+                      "const": "logical-work"
+                    }
+                  }
+                }
+              ]
+            },
+            "jobs": {
+              "allOf": [
+                {
+                  "$ref": "#/definitions/measure"
+                },
+                {
+                  "properties": {
+                    "unit": {
+                      "const": "jobs"
+                    }
+                  }
+                }
+              ]
+            },
+            "held": {
+              "allOf": [
+                {
+                  "$ref": "#/definitions/measure"
+                },
+                {
+                  "properties": {
+                    "unit": {
+                      "const": "cards"
+                    }
+                  }
+                }
+              ]
+            },
+            "openPullRequests": {
+              "allOf": [
+                {
+                  "$ref": "#/definitions/measure"
+                },
+                {
+                  "properties": {
+                    "unit": {
+                      "const": "pull-requests"
+                    }
+                  }
+                }
+              ]
+            },
+            "mergedToday": {
+              "allOf": [
+                {
+                  "$ref": "#/definitions/measure"
+                },
+                {
+                  "properties": {
+                    "unit": {
+                      "const": "merged-prs"
+                    }
+                  }
+                }
+              ]
+            },
+            "humanPending": {
+              "allOf": [
+                {
+                  "$ref": "#/definitions/measure"
+                },
+                {
+                  "properties": {
+                    "unit": {
+                      "const": "human-actions"
+                    }
+                  }
+                }
+              ]
+            },
+            "humanActionable": {
+              "allOf": [
+                {
+                  "$ref": "#/definitions/measure"
+                },
+                {
+                  "properties": {
+                    "unit": {
+                      "const": "human-actions"
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "required": [
+            "moving",
+            "jobs",
+            "held",
+            "openPullRequests",
+            "mergedToday",
+            "humanPending",
+            "humanActionable"
+          ],
+          "additionalProperties": true
+        },
+        "runs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/run"
+          }
+        },
+        "holds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/hold"
+          }
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/action"
+          }
+        },
+        "deliveries": {
+          "$ref": "#/definitions/deliveries"
+        },
+        "policy": {
+          "$ref": "#/definitions/policy"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/item"
+          }
+        },
+        "health": {
+          "$ref": "#/definitions/health"
+        }
+      },
+      "required": [
+        "schema",
+        "snapshotId",
+        "publisherId",
+        "sequence",
+        "observedAt",
+        "timeZone",
+        "coverage",
+        "sources",
+        "summary",
+        "runs",
+        "holds",
+        "actions",
+        "deliveries",
+        "policy",
+        "items"
+      ],
+      "additionalProperties": true,
+      "description": "Slice-1 overview contract. PublisherId identifies a boot; sequence increases within it. Deploy schema-1+2 readers before publishing 2. Retain unknown raw codes. Product owns aggregation, freshness assessment, ordering, action classification, payload bounds and relay enforcement. Future sections may be added without changing this major."
+    },
+    "healthInstant": {
+      "type": "string",
+      "pattern": "^(?:(?:\\d{4})-(?:(?:01|03|05|07|08|10|12)-(?:0[1-9]|[12]\\d|3[01])|(?:04|06|09|11)-(?:0[1-9]|[12]\\d|30)|02-(?:0[1-9]|1\\d|2[0-8]))|(?:\\d{2}(?:0[48]|[2468][048]|[13579][26])|(?:[02468][048]|[13579][26])00)-02-29)T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?Z$",
+      "description": "Calendar-valid UTC ISO instant; source evidence time, never publisher refresh time."
+    },
+    "healthFreshness": {
+      "type": "object",
+      "properties": {
+        "observedAt": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/healthInstant"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "lastSuccessAt": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/healthInstant"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "expectedEveryMs": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "staleAfterMs": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "enum": [
+            "fresh",
+            "stale",
+            "unavailable",
+            "partial"
+          ]
+        },
+        "complete": {
+          "type": "boolean"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cursor": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "observedAt",
+        "lastSuccessAt",
+        "expectedEveryMs",
+        "staleAfterMs",
+        "status",
+        "complete",
+        "reason"
+      ],
+      "additionalProperties": false,
+      "description": "Source observation time is independent of publisher heartbeat. Preserve last good timestamps on failure; null is unknown, never observed zero.",
+      "allOf": [
+        {
+          "if": {
+            "anyOf": [
+              {
+                "properties": {
+                  "status": {
+                    "not": {
+                      "const": "fresh"
+                    }
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "observedAt": {
+                    "type": "null"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "lastSuccessAt": {
+                    "type": "null"
+                  }
+                }
+              }
+            ]
+          },
+          "then": {
+            "properties": {
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    "healthRemediation": {
+      "type": "object",
+      "properties": {
+        "attemptedAt": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/healthInstant"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "result": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rawResult": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "enum": [
+            "observed",
+            "unknown",
+            "partial",
+            "stale",
+            "conflict",
+            "pending",
+            "paused"
+          ]
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "attemptedAt",
+        "description",
+        "result",
+        "rawResult",
+        "status",
+        "reason"
+      ],
+      "additionalProperties": false,
+      "description": "Last persisted remediation attempt and result; no refresh action is implied.",
+      "allOf": [
+        {
+          "if": {
+            "anyOf": [
+              {
+                "properties": {
+                  "status": {
+                    "not": {
+                      "const": "observed"
+                    }
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "attemptedAt": {
+                    "type": "null"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "description": {
+                    "type": "null"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "result": {
+                    "type": "null"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "rawResult": {
+                    "type": "null"
+                  }
+                }
+              }
+            ]
+          },
+          "then": {
+            "properties": {
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    "healthEscalation": {
+      "type": "object",
+      "properties": {
+        "humanOnly": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "actionRef": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "enum": [
+            "observed",
+            "unknown",
+            "partial",
+            "stale",
+            "conflict",
+            "pending",
+            "paused"
+          ]
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "humanOnly",
+        "actionRef",
+        "description",
+        "status",
+        "reason"
+      ],
+      "additionalProperties": false,
+      "description": "Only explicit humanOnly true may project to Needs you. actionRef links the existing action for deduplication.",
+      "allOf": [
+        {
+          "if": {
+            "anyOf": [
+              {
+                "properties": {
+                  "status": {
+                    "not": {
+                      "const": "observed"
+                    }
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "humanOnly": {
+                    "type": "null"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "actionRef": {
+                    "type": "null"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "description": {
+                    "type": "null"
+                  }
+                }
+              }
+            ]
+          },
+          "then": {
+            "properties": {
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    "healthEpisode": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "severity": {
+          "enum": [
+            "info",
+            "warning",
+            "error",
+            "critical",
+            "unknown"
+          ]
+        },
+        "rawSeverity": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "systemOwner": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "openedAt": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/healthInstant"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "lastRemediation": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/healthRemediation"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "escalation": {
+          "$ref": "#/definitions/healthEscalation"
+        },
+        "freshness": {
+          "$ref": "#/definitions/healthFreshness"
+        },
+        "status": {
+          "enum": [
+            "observed",
+            "unknown",
+            "partial",
+            "stale",
+            "conflict",
+            "pending",
+            "paused"
+          ]
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "severity",
+        "rawSeverity",
+        "description",
+        "systemOwner",
+        "openedAt",
+        "lastRemediation",
+        "escalation",
+        "freshness",
+        "status",
+        "reason"
+      ],
+      "additionalProperties": false,
+      "description": "Stable episode identity; unknown severity codes stay visible in rawSeverity. Missing remediation is unknown, not success.",
+      "allOf": [
+        {
+          "if": {
+            "anyOf": [
+              {
+                "properties": {
+                  "status": {
+                    "not": {
+                      "const": "observed"
+                    }
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "rawSeverity": {
+                    "type": "null"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "systemOwner": {
+                    "type": "null"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "openedAt": {
+                    "type": "null"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "lastRemediation": {
+                    "type": "null"
+                  }
+                }
+              }
+            ]
+          },
+          "then": {
+            "properties": {
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    "healthPause": {
+      "type": "object",
+      "properties": {
+        "paused": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "since": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/healthInstant"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rawState": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "enum": [
+            "observed",
+            "unknown",
+            "partial",
+            "stale",
+            "conflict",
+            "pending",
+            "paused"
+          ]
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "paused",
+        "since",
+        "rawState",
+        "status",
+        "reason"
+      ],
+      "additionalProperties": false,
+      "description": "Explicit intentional pause evidence, distinct from stalled work.",
+      "allOf": [
+        {
+          "if": {
+            "anyOf": [
+              {
+                "properties": {
+                  "status": {
+                    "not": {
+                      "const": "observed"
+                    }
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "paused": {
+                    "type": "null"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "since": {
+                    "type": "null"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "rawState": {
+                    "type": "null"
+                  }
+                }
+              }
+            ]
+          },
+          "then": {
+            "properties": {
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    "healthDaemon": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "heartbeatAt": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/healthInstant"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "completedTickAt": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/healthInstant"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "completedPassAt": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/healthInstant"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "expectedEveryMs": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "pause": {
+          "$ref": "#/definitions/healthPause"
+        },
+        "rawState": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "freshness": {
+          "$ref": "#/definitions/healthFreshness"
+        },
+        "status": {
+          "enum": [
+            "observed",
+            "unknown",
+            "partial",
+            "stale",
+            "conflict",
+            "pending",
+            "paused"
+          ]
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "heartbeatAt",
+        "completedTickAt",
+        "completedPassAt",
+        "expectedEveryMs",
+        "pause",
+        "rawState",
+        "freshness",
+        "status",
+        "reason"
+      ],
+      "additionalProperties": false,
+      "description": "Completion and heartbeat are separate evidence. Assess stalls only against evidenced cadence; null cadence is never inferred.",
+      "allOf": [
+        {
+          "if": {
+            "anyOf": [
+              {
+                "properties": {
+                  "status": {
+                    "not": {
+                      "const": "observed"
+                    }
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "heartbeatAt": {
+                    "type": "null"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "completedTickAt": {
+                    "type": "null"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "completedPassAt": {
+                    "type": "null"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "expectedEveryMs": {
+                    "type": "null"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "rawState": {
+                    "type": "null"
+                  }
+                }
+              }
+            ]
+          },
+          "then": {
+            "properties": {
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    "healthBudgetCoverage": {
+      "type": "object",
+      "properties": {
+        "measured": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "estimated": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unattributed": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unit": {
+          "const": "requests"
+        },
+        "status": {
+          "enum": [
+            "observed",
+            "unknown",
+            "partial",
+            "stale",
+            "conflict",
+            "pending",
+            "paused"
+          ]
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "measured",
+        "estimated",
+        "unattributed",
+        "unit",
+        "status",
+        "reason"
+      ],
+      "additionalProperties": false,
+      "description": "Request attribution coverage; null is unmeasured, not zero. Preserve torn/truncated source coverage in reason.",
+      "allOf": [
+        {
+          "if": {
+            "anyOf": [
+              {
+                "properties": {
+                  "status": {
+                    "not": {
+                      "const": "observed"
+                    }
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "measured": {
+                    "type": "null"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "estimated": {
+                    "type": "null"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "unattributed": {
+                    "type": "null"
+                  }
+                }
+              }
+            ]
+          },
+          "then": {
+            "properties": {
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    "healthBudgetWindow": {
+      "type": "object",
+      "properties": {
+        "identity": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "enum": [
+                "app",
+                "personal",
+                "unknown"
+              ]
+            },
+            "id": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "rawKind": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "id",
+            "rawKind"
+          ],
+          "additionalProperties": false
+        },
+        "resource": {
+          "type": "string",
+          "minLength": 1
+        },
+        "responseObservedAt": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/healthInstant"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "resetAt": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/healthInstant"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "limit": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "remaining": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "used": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "coverage": {
+          "$ref": "#/definitions/healthBudgetCoverage"
+        },
+        "freshness": {
+          "$ref": "#/definitions/healthFreshness"
+        },
+        "status": {
+          "enum": [
+            "observed",
+            "unknown",
+            "partial",
+            "stale",
+            "conflict",
+            "pending",
+            "paused"
+          ]
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "identity",
+        "resource",
+        "responseObservedAt",
+        "resetAt",
+        "limit",
+        "remaining",
+        "used",
+        "coverage",
+        "freshness",
+        "status",
+        "reason"
+      ],
+      "additionalProperties": false,
+      "description": "Keep identity/resource/reset windows separate. Counts are response headroom observations, not live balances; an expired reset stays stale until a new response. Never infer identity from caller labels.",
+      "allOf": [
+        {
+          "if": {
+            "anyOf": [
+              {
+                "properties": {
+                  "status": {
+                    "not": {
+                      "const": "observed"
+                    }
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "responseObservedAt": {
+                    "type": "null"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "resetAt": {
+                    "type": "null"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "limit": {
+                    "type": "null"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "remaining": {
+                    "type": "null"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "used": {
+                    "type": "null"
+                  }
+                }
+              }
+            ]
+          },
+          "then": {
+            "properties": {
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    "healthOvernight": {
+      "type": "object",
+      "properties": {
+        "desiredMode": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "policyRevision": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "observedState": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "affectedJobRefs": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "since": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/healthInstant"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "lastCheckAt": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/healthInstant"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "nextCheckAt": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/healthInstant"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "freshness": {
+          "$ref": "#/definitions/healthFreshness"
+        },
+        "status": {
+          "enum": [
+            "observed",
+            "unknown",
+            "partial",
+            "stale",
+            "conflict",
+            "pending",
+            "paused"
+          ]
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "desiredMode",
+        "policyRevision",
+        "observedState",
+        "affectedJobRefs",
+        "since",
+        "lastCheckAt",
+        "nextCheckAt",
+        "freshness",
+        "status",
+        "reason"
+      ],
+      "additionalProperties": false,
+      "description": "Read-only evidence, not a control API. Preserve raw mode/state codes. Null job scope/next check must not be invented. Requested stop with running jobs remains pending or conflicting; policy alone cannot prove stopped.",
+      "allOf": [
+        {
+          "if": {
+            "anyOf": [
+              {
+                "properties": {
+                  "status": {
+                    "not": {
+                      "const": "observed"
+                    }
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "desiredMode": {
+                    "type": "null"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "policyRevision": {
+                    "type": "null"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "observedState": {
+                    "type": "null"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "affectedJobRefs": {
+                    "type": "null"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "since": {
+                    "type": "null"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "lastCheckAt": {
+                    "type": "null"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "nextCheckAt": {
+                    "type": "null"
+                  }
+                }
+              }
+            ]
+          },
+          "then": {
+            "properties": {
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    "healthEpisodes": {
+      "type": "object",
+      "properties": {
+        "rows": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/healthEpisode"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "freshness": {
+          "$ref": "#/definitions/healthFreshness"
+        }
+      },
+      "required": [
+        "rows",
+        "freshness"
+      ],
+      "additionalProperties": false,
+      "description": "Null rows mean unavailable, never an empty healthy collection; freshness explains missing or partial evidence.",
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "rows": {
+                "type": "null"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "freshness": {
+                "properties": {
+                  "status": {
+                    "enum": [
+                      "unavailable",
+                      "partial",
+                      "stale"
+                    ]
+                  },
+                  "complete": {
+                    "const": false
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "healthDaemons": {
+      "type": "object",
+      "properties": {
+        "rows": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/healthDaemon"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "freshness": {
+          "$ref": "#/definitions/healthFreshness"
+        }
+      },
+      "required": [
+        "rows",
+        "freshness"
+      ],
+      "additionalProperties": false,
+      "description": "Null rows mean unavailable, never an empty healthy collection; freshness explains missing or partial evidence.",
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "rows": {
+                "type": "null"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "freshness": {
+                "properties": {
+                  "status": {
+                    "enum": [
+                      "unavailable",
+                      "partial",
+                      "stale"
+                    ]
+                  },
+                  "complete": {
+                    "const": false
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "healthBudgetWindows": {
+      "type": "object",
+      "properties": {
+        "rows": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/healthBudgetWindow"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "freshness": {
+          "$ref": "#/definitions/healthFreshness"
+        }
+      },
+      "required": [
+        "rows",
+        "freshness"
+      ],
+      "additionalProperties": false,
+      "description": "Null rows mean unavailable, never an empty healthy collection; freshness explains missing or partial evidence.",
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "rows": {
+                "type": "null"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "freshness": {
+                "properties": {
+                  "status": {
+                    "enum": [
+                      "unavailable",
+                      "partial",
+                      "stale"
+                    ]
+                  },
+                  "complete": {
+                    "const": false
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "health": {
+      "type": "object",
+      "properties": {
+        "episodes": {
+          "$ref": "#/definitions/healthEpisodes"
+        },
+        "daemons": {
+          "$ref": "#/definitions/healthDaemons"
+        },
+        "budgetWindows": {
+          "$ref": "#/definitions/healthBudgetWindows"
+        },
+        "overnight": {
+          "$ref": "#/definitions/healthOvernight"
+        }
+      },
+      "required": [
+        "episodes",
+        "daemons",
+        "budgetWindows",
+        "overnight"
+      ],
+      "additionalProperties": false,
+      "description": "Optional schema-2 health evidence. Omission in older snapshots means unavailable. Each source retains its own observation/success times, cadence, completeness and reason. All supplied fields are validated; unknown values are explicit nulls with explanatory status/reason. Temporal comparisons, reference joins and arithmetic remain consumer responsibilities."
+    }
+  }
+}

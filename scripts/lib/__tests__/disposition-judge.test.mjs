@@ -1,3 +1,4 @@
+import { normalizeFinding, referralFindingKey, mandatoryReferralReviewer } from '../jury-core.mjs';
 /**
  * @file disposition-judge.test.mjs — proof of the #2652 DISPOSITION LAYER (green judge + red judge over the jury
  *   ledger, core of epic #2636). Covers: the HARD gate-self invariant (never auto-dispose, regardless of verdict
@@ -455,5 +456,31 @@ describe('#2864 — reduceLedger carries the reviewed sha (the DECIDING reductio
     // Same fail-closed rule the fold holds: an unknown tree reads as unknown, not as the previously-known one.
     expect(reduceLedger([withSha('aaaaaaa'), withSha('bbbbbbb', 1)]).reviewedSha).toBe('bbbbbbb');
     expect(reduceLedger([withSha('aaaaaaa'), withSha(null, 1)]).reviewedSha).toBe(null);
+  });
+});
+
+describe('#4315 referral and disposition agreement', () => {
+  it.each(['card', 'not-real'])('%s discharges only the referral; ordinary red grounds survive', result => {
+    const original = { summary: 'unfixed advisory defect', verdict: 'CONFIRMED', impactIfUnfixed: 'broken' };
+    const record = { version: 1, repo: 'o/r', pr: 7, head: 'a'.repeat(40), runId: 'run-disposition',
+      reviewer: mandatoryReferralReviewer('run-disposition'), authorBody: '<!-- authored-by-actor: author -->', attempted: true,
+      referrals: [{ key: referralFindingKey('judgeAdvisory', original), seat: 'judgeAdvisory', original, finding: normalizeFinding(original) }], rulings: [] };
+    const ledger = cleanDiverseLedger(); ledger[0].reviewedSha = record.head;
+    ledger.push({ type: 'mandatory-referrals', round: 0, record: structuredClone(record) });
+    const args = { ledger, config: ACCEPT_BEST, proposal: { disposition: DISPOSITIONS.AUTO_DISPOSE },
+      signals: { referralContext: { cardReadable: () => true } } };
+    expect(redRefute(args).grounds.some(g => g.startsWith('mandatory-referral'))).toBe(true);
+    record.rulings = [{ id: 'r1', key: record.referrals[0].key, reviewerId: record.reviewer.id, lens: 'correctness', result,
+      rationale: 'Verified independently', evidence: ['diff'], ...(result === 'card' ? { card: 'we:backlog/7-debt.md' } : {}) }];
+    ledger.push({ type: 'mandatory-referrals', round: 0, record });
+    expect(redRefute(args).grounds.some(g => g.startsWith('mandatory-referral'))).toBe(false);
+    ledger.push(findingEvent('correctness#1', original), verdictEvent('security#2', 'changes', 1));
+    args.signals.gateSelf = true;
+    const grounds = redRefute(args).grounds.join('\n');
+    expect(grounds).toContain('outstanding-finding');
+    expect(grounds).toContain('tolerated-dissent');
+    expect(grounds).toContain('gate-self');
+    const thin = singleJurorLedger(MANDATORY_LENSES); thin[0].reviewedSha = record.head;
+    expect(redRefute({ ...args, ledger: [...thin, { type: 'mandatory-referrals', round: 0, record }] }).grounds.join('\n')).toContain('thin-jury');
   });
 });

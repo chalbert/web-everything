@@ -351,6 +351,14 @@ export function buildHistorySurgeryCommands(targetPaths) {
  * `:workspace` cwd. Live-verified on codex-cli 0.155.1 via `codex sandbox -P locked` (no model in the
  * loop): a write into the granted dir and into a nested subdir succeeded, a write into its sibling
  * came back `Operation not permitted`, and the deny entries alongside it still held. Chosen over
+ *
+ * #4443 — measured limit: an extra writable root does NOT open its Git metadata. Live on codex-cli
+ * 0.155.1 (`codex sandbox -P locked`, macOS Seatbelt, standalone repo root granted): creating and
+ * overwriting `<root>/.git/hooks/*`, `mv`-ing and `rm -rf`-ing `<root>/.git` all came back `Operation
+ * not permitted`, while `<root>/backlog/*` writes succeeded. The CLI protects `.git` under a write
+ * grant on its own, so this builder adds no `.git` exclusion; the opt-in live suite
+ * (`codex-delivery-provider-sandbox.test.mjs`, `WE_CODEX_SANDBOX_TEST=1`) fails if a CLI upgrade changes that.
+ * Not covered: linked-worktree `.git` files and symlink aliases.
  * `codex exec --add-dir` because `exec resume` accepts no `--add-dir`, while `-c` spans both.
  */
 export function buildNativeDenyCodexArgs(denyPaths, { writableRoots = [] } = {}) {
