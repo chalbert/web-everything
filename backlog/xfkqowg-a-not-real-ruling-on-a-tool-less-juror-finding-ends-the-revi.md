@@ -65,3 +65,9 @@ Decoded the 51 `mandatory-referrals-v1` records on #3432. Each round writes thre
 ## Operator ruling (2026-10-02, via claude-code-chat: "ok")
 
 Add a confirmation turn: when a juror without tools reports a finding as CONFIRMED broken, a tool-bearing verifier gets one turn to reproduce it on the PR head before it counts. Reproduced: it stays CONFIRMED and needs a ruling as today. Not reproduced: it is downgraded to an advisory note and never blocks the run. Cost is paid only when such a claim is made. Giving read-only tools to every reviewer stays a later option, not part of this card.
+
+## Reopened (2026-10-02 ~7:50 AM ET)
+
+The drain marked this card resolved when PR #3477 landed, because that PR's title began "WE xfkqowg:" — but #3477 only added the root cause to the card; nothing was built. Reopened.
+
+Also binding, found when the operator approved #3432 ("I approve 3432", 2026-10-02): the human ceremony itself (we:scripts/review-set-label.mjs --to=clear-human, assertMandatoryReferralsCleared) refuses while the tool-less juror's false referral is pending, and there is no path for the operator to rule on it. The fix must let an explicit operator instruction record the finding-specific ruling (not-real / card / block) on the PR, so a human approval is never deadlocked by a juror's unverifiable claim.
