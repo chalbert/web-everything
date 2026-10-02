@@ -125,6 +125,7 @@
  */
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { boundFailureDetails } from './verify-failures.mjs';
 
 /** The marker lives in the lane clone's `.git/` (like `.lane-lease`): never tracked, never `git clean`-ed,
  *  invisible to `git status`, one-per-lane. */
@@ -260,12 +261,13 @@ export function verifyStartBody({ sha, suites, startedAt, treeHash }) {
  *  green for a tree it never verified — the exact false-green this guard exists to kill. So `sha` is passed
  *  explicitly and wins. `prev` supplies only `startedAt`/`suites` (audit fields); `base.sha` is a fallback for
  *  legacy callers that pass their own start body as `prev`. */
-export function verifyFinishBody(prev, { finishedAt, exitCode, sha, treeHash, suites } = {}) {
+export function verifyFinishBody(prev, { finishedAt, exitCode, sha, treeHash, suites, failureDetails } = {}) {
   const base = prev && typeof prev === 'object' ? prev : {};
   const green = Number(exitCode) === 0;
   return {
     sha: sha ?? base.sha ?? null,
     status: green ? 'green' : 'red',
+    ...(!green && failureDetails ? { failureDetails: boundFailureDetails(failureDetails) } : {}),
     startedAt: base.startedAt ?? null,
     finishedAt: finishedAt || null,
     // #4473 — `suites` is part of the cache key too, so the gate THIS run executed wins (PR #2982 round-2 review):
@@ -523,12 +525,13 @@ export function verifyGateDecision({ record, headSha, nowMs = Date.now(), ttlMs 
     };
   }
   if (matches && rec.status === 'red') {
+    const diagnostic = exactShaMatch && rec.failureDetails ? { failureDetails: boundFailureDetails(rec.failureDetails) } : {};
     if (requireVerified) {
-      return { ok: false, status: 'red', reason: 'verify-red', detail: `verification for ${String(headSha).slice(0, 8)} recorded a RED result (exit ${rec.exitCode ?? '?'}) — fix the failure and re-run \`node scripts/verify-lane.mjs\`.` };
+      return { ok: false, status: 'red', ...diagnostic, reason: 'verify-red', detail: `verification for ${String(headSha).slice(0, 8)} recorded a RED result (exit ${rec.exitCode ?? '?'}) — fix the failure and re-run \`node scripts/verify-lane.mjs\`.` };
     }
     // Advisory mode: the required CI check (which a red tree also fails) gates the actual merge, so a local red
     // marker does not block here — matching "absent/red under --require-verified" (docs + #2833 resolution).
-    return { ok: true, status: 'red', reason: 'red-ci-gated', detail: `verification for ${String(headSha).slice(0, 8)} recorded RED (exit ${rec.exitCode ?? '?'}), but this caller opted out of mandatory verification (--no-require-verified / WE_REQUIRE_VERIFIED=0) — not blocking here; the PR's required CI check gates the merge.` };
+    return { ok: true, status: 'red', ...diagnostic, reason: 'red-ci-gated', detail: `verification for ${String(headSha).slice(0, 8)} recorded RED (exit ${rec.exitCode ?? '?'}), but this caller opted out of mandatory verification (--no-require-verified / WE_REQUIRE_VERIFIED=0) — not blocking here; the PR's required CI check gates the merge.` };
   }
 
   // No marker, or a marker for a different commit (the tree moved since it was written).

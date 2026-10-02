@@ -1095,3 +1095,21 @@ describe('resolveWaitCeilingMs — the SAME clamp verify-lane.mjs applies to a r
     expect(resolveWaitCeilingMs(10_000_000)).toBe(MAX_SAFE_WAIT_MS);
   });
 });
+
+describe('failure details belong to the finishing execution', () => {
+  const failureDetails = { tests: [{ file: 'one.test.ts', name: 'outer > fails' }], summary: 'assertion failed', truncated: false };
+  it('never inherits overlapping diagnostics and clears them for green', () => {
+    const prev = { sha: 'ours', failureDetails };
+    expect(verifyFinishBody(prev, { exitCode: 1 }).failureDetails).toBeUndefined();
+    expect(verifyFinishBody(prev, { exitCode: 0, failureDetails }).failureDetails).toBeUndefined();
+    expect(verifyFinishBody(prev, { exitCode: 1, failureDetails }).failureDetails).toEqual(failureDetails);
+  });
+  it('carries exact-SHA red diagnostics through wait, never foreign records', async () => {
+    const record = { sha: 'ours', status: 'red', failureDetails };
+    expect(verifyGateDecision({ record, headSha: 'other' }).failureDetails).toBeUndefined();
+    expect(verifyGateDecision({ record, headSha: 'other', laneRelevantChangeSince: [] }).failureDetails).toBeUndefined();
+    const waited = await waitForVerifySettle({ readRecord: () => record, readHead: () => 'ours', headSha: 'ours', ceilingMs: 10 });
+    expect(waited.failureDetails).toEqual(failureDetails);
+    expect(waited.ok).toBe(false);
+  });
+});

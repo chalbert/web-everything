@@ -879,3 +879,30 @@ describe('verify-lane reset (x4jcqm4) — clearing a stale marker without a leas
     }
   });
 });
+
+describe('red diagnostics transport', () => {
+  const gate = `printf ' FAIL  example.test.ts > outer > broken\n'; exit 1`;
+  function invoke(args) {
+    const result = spawnSync('node', [VERIFY_LANE, ...args, '--json'], { cwd: dir, encoding: 'utf8' });
+    return { code: result.status, json: JSON.parse(result.stdout.trim().split('\n').at(-1)), stdout: result.stdout };
+  }
+  it('streams the evidence and round trips marker, check and wait; green clears', () => {
+    const ran = invoke([`--gate=${gate}`]);
+    expect(ran.code).toBe(2);
+    expect(ran.stdout).toContain(' FAIL  example.test.ts');
+    const disk = JSON.parse(readFileSync(marker(), 'utf8'));
+    expect(ran.json.failureDetails).toEqual(disk.failureDetails);
+    expect(disk.failureDetails.tests).toEqual([{ file: 'example.test.ts', name: 'outer > broken' }]);
+    for (const args of [['check'], ['check', '--wait=100']]) {
+      expect(invoke(args).json.failureDetails).toEqual(disk.failureDetails);
+    }
+    expect(invoke([`--gate=printf ' FAIL  example.test.ts > fake\\n'`]).json.failureDetails).toBeUndefined();
+    expect(JSON.parse(readFileSync(marker(), 'utf8')).failureDetails).toBeUndefined();
+  });
+  it('marker-free run returns its own diagnostics without writing a marker', () => {
+    const result = invoke(['run', `--gate=${gate}`]);
+    expect(result.code).toBe(2);
+    expect(result.json.failureDetails.tests[0].name).toBe('outer > broken');
+    expect(existsSync(marker())).toBe(false);
+  });
+});
