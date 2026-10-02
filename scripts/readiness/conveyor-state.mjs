@@ -33,6 +33,7 @@
  *   failing the whole tick.
  */
 
+import { planningRead } from '../lib/planning-snapshot.mjs';
 import { existsSync, readFileSync, readdirSync, statSync, openSync, readSync, closeSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
@@ -668,8 +669,10 @@ const RUN_JSON_TIMEOUT_MS = 2 * 60_000;
 /** Run a node CLI and JSON-parse its stdout, or return `fallback` + push a message to `errors` on any failure. */
 async function runJson(node, args, { cwd = ROOT, errors, label } = {}) {
   try {
-    const out = await runBounded(node, args, { cwd, timeoutMs: RUN_JSON_TIMEOUT_MS, maxBytes: 64 * 1024 * 1024 });
-    return JSON.parse(out);
+    return await planningRead(args, async () => {
+      const out = await runBounded(node, args, { cwd, timeoutMs: RUN_JSON_TIMEOUT_MS, maxBytes: 64 * 1024 * 1024 });
+      return JSON.parse(out);
+    });
   } catch (e) {
     if (errors) errors.push(`${label}: ${String(e.message || e).split('\n')[0]}`);
     return undefined;

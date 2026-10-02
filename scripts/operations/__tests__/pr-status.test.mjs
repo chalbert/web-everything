@@ -91,7 +91,7 @@ describe('reduceCheckState — the empty list is the whole point', () => {
   // brand-new advisory check whose name nobody has added to `CI_TRUTH_EXCLUDED_CHECKS` yet.
   it('requiredChecks: only a required-set check counts — an unlisted advisory red (soak-replay-gate) is invisible', () => {
     const required = ['test', 'smoke', 'daemon-soak'];
-    expect(reduceCheckState([done('success', 'test'), done('failure', 'soak-replay-gate')], required).state).toBe('green');
+    expect(reduceCheckState([...required.map(name => done('success', name)), done('failure', 'soak-replay-gate')], required).state).toBe('green');
     expect(reduceCheckState([done('failure', 'soak-replay-gate')], required).state).toBe('unchecked');
     expect(reduceCheckState([done('success', 'test'), done('failure', 'test')], required).state).toBe('red');
     // Omitted/empty falls back to the exclusion-list default, unchanged.
@@ -441,4 +441,32 @@ describe('run.mjs pr-status --json — the real CLI, end to end (#3555, no gh ne
     expect(result.verdict.prs).toHaveLength(1);
     expect(result.verdict.prs[0].number).toBe(777);
   });
+});
+
+// we:backlog/xxh4zw8 — a partial success is not a complete required verdict.
+it('xxh4zw8 missing required checks cannot read green', () => {
+  const verdict = reduceCheckState([{ name: 'test', status: 'completed', conclusion: 'success' }], ['test', 'smoke']);
+  expect(verdict.state).toBe('unchecked');
+  expect(verdict.why).toContain('smoke');
+});
+
+it.each([
+  [[], 'unchecked'],
+  [[{ name: 'test', status: 'completed', conclusion: 'cancelled' }], 'red'],
+  [[{ name: 'test', status: 'completed', conclusion: 'failure' }], 'red'],
+  [[{ name: 'test', status: 'in_progress', conclusion: null }], 'pending'],
+  [[{ name: 'test', status: 'completed', conclusion: 'unknown' }], 'unchecked'],
+])('xxh4zw8 missing-required guard preserves observed pending/red precedence %#', (runs, state) => {
+  expect(reduceCheckState(runs, ['test', 'smoke']).state).toBe(state);
+});
+
+it('xxh4zw8 complete required evidence and latest numeric reruns restore green in either order', () => {
+  const runs = [
+    { id: 10, name: 'test', status: 'completed', conclusion: 'success' },
+    { id: 11, name: 'smoke', status: 'completed', conclusion: 'cancelled' },
+    { id: 12, name: 'smoke', status: 'completed', conclusion: 'success' },
+  ];
+  for (const ordered of [runs, [...runs].reverse()]) {
+    expect(reduceCheckState(ordered, ['test', 'smoke'])).toMatchObject({ state: 'green', counts: { total: 2, failed: 0 } });
+  }
 });

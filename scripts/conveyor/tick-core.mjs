@@ -147,6 +147,7 @@
  *   mechanism.
  */
 
+import { planningRead } from '../lib/planning-snapshot.mjs';
 import { childFailure } from '../lib/child-failure.mjs';
 import { mintSessionSlug } from './session-slug.mjs';
 import { normNum } from './queue-store.mjs';
@@ -1871,11 +1872,11 @@ async function main(argv) {
   // `main()` reads (state, plan, lane-pool list, admission status, the PR-comment-reads loop as one aggregate).
   const timings = {};
   const time = (label, fn) => {
-    const t0 = Date.now();
-    try { return fn(); } finally { timings[label] = (timings[label] || 0) + (Date.now() - t0); }
+    const t0 = performance.now();
+    try { return fn(); } finally { timings[label] = (timings[label] || 0) + Math.round(performance.now() - t0); }
   };
 
-  const runJson = (cmd, args, what) => {
+  const runJson = (cmd, args, what) => planningRead(args, () => {
     let out;
     try {
       // #x5n4zn3 — was bare (no timeout): this is the tick's read of `conveyor-state.mjs`/`dispatch-plan.mjs`/
@@ -1887,7 +1888,7 @@ async function main(argv) {
     }
     try { return JSON.parse(out); }
     catch (e) { fail(`could not parse ${what} JSON: ${String(e.message || e).split('\n')[0]}`); }
-  };
+  });
 
   // The SESSION-EPHEMERAL bookkeeping is piped in on STDIN (SKILL §5: no on-disk parallel state store). A first
   // tick with no prior bookkeeping pipes nothing / `{}` — every field then defaults to empty in the pure core.
@@ -1943,7 +1944,7 @@ async function main(argv) {
   let liveAgentSessions = [];
   try {
     const { defaultListAgents } = await import('../operations/dispatch-lane-io.mjs');
-    liveAgentSessions = defaultListAgents({});
+    liveAgentSessions = time('agentsReadMs', () => defaultListAgents({}));
     // #3383 FOLLOW-UP — resolve REAL pid liveness for this same listing, feeding `durableBuildNums`'s new
     // `pidAlive === false` exclusion (see its own doc): a live audit found `conveyor-*` rows still listed 6-13.5
     // DAYS after their process died, which the durable floor's original "the listing clears itself" assumption
@@ -2088,10 +2089,8 @@ async function main(argv) {
   // epic #3383 — dispatchPausedKinds carries the manual-pause marker's KIND SCOPE through verbatim (`null` =
   // blanket pause); dropping it here would silently re-widen a scoped pause back to holding all six kinds.
   const out = planTick({ state, plan, freeLanes, bookkeeping, signals, prRearmCounts, prCiHealCounts, admission, liveAgentSessions, config, now: Date.now(), lastOperatorTurn, dispatchPaused, dispatchPausedKinds, dispatchPausedReason, loadAdmission, queueAdmission, itemSizes });
-  // Verbose-mode timing breakdown (#3521 decision-trace v1 follow-up) — an IO-shell-observed fact, not something
-  // the pure core computes; attached only here, after the tick already ran, so a timing read can never affect
-  // the decision itself.
-  if (config.verbose) out.decisions.timings = timings;
+  // Always expose the observed phase costs, including in the builder log; the pure decision is unchanged.
+  out.decisions.timings = timings;
   writeAllSync(1, JSON.stringify(out, null, 2) + '\n');
   process.exit(0);
 }

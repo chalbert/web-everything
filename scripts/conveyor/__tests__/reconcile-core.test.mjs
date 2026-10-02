@@ -3152,6 +3152,13 @@ describe('draft-first PRs — reconcile-core.mjs (operator-approved 2026-09-27)'
 });
 
 describe('fix waiting episode', () => {
+  it('ages a PR without an episode marker from its creation, and refuses a capped file snapshot', () => {
+    const source = pr1563({ createdAt: '2026-09-29T12:00:00Z',
+      files: Array.from({ length: 100 }, (_, i) => ({ path: `file-${i}` })) });
+    const result = planReconcile({ prs: [source], agents: [], durableCounts: {}, now: NOW });
+    expect(result.dispatch[0]).toMatchObject({ kind: 'fix', waitingSince: source.createdAt, files: null });
+  });
+
   it('projects the review episode into an actual fix dispatch row', () => {
     const comments = [{ body: '🔁 review — changes requested', author: { login: 'web-everything' }, createdAt: '2026-09-30T12:00:00Z' }];
     const result = planReconcile({ prs: [pr1563({ comments })], agents: [], durableCounts: {}, now: NOW });
@@ -3169,5 +3176,131 @@ describe('fix waiting episode', () => {
     const comments = [note('12'), note('13', REARM_COMMENT_MARKER), note('14', 'untrusted', 'stranger'), note('16', 'queue-cap: waiting')];
     expect(fixWaitingSince(comments)).toBe('2026-09-30T12:00:00.000Z');
     expect(fixWaitingSince([...comments, note('15')])).toBe('2026-09-30T15:00:00.000Z');
+  });
+});
+
+it('xxh4zw8 complete hydrated cancellation heals while caps, claims and stand-downs retain refusal', () => {
+  const requiredChecks = ['test', 'smoke', 'daemon-soak', 'soak-replay-gate'];
+  const pr = { number: 3336, isDraft: true, headRefName: 'lane/3336-replay', headRefOid: '4ecb5deb362c81aa28de162db4616bb4c2009347',
+    labels: [], comments: [], statusCheckRollup: requiredChecks.map((name, i) => ({ id: 100 + i, name,
+      status: 'COMPLETED', conclusion: name === 'smoke' ? 'CANCELLED' : 'SUCCESS' })) };
+  const plan = override => planReconcile({ prs: [{ ...pr, ...override }], requiredChecks, agents: [], now: NOW });
+  expect(plan({}).dispatch.map(d => d.kind)).toEqual(['ci-heal']);
+  for (const [override, kind] of [
+    [{ comments: Array.from({ length: CI_HEAL_ROUND_CAP }, () => ({ body: buildCiHealComment({ reason: 'red-ci' }), author: AUTOMATION })) }, 'cap-exhausted'],
+    [{ comments: [{ body: STAND_DOWN_MARKER, author: AUTOMATION }] }, 'stood-down'],
+    [{ fixClaim: { who: 'another-fixer' } }, 'fix-claimed'],
+  ]) {
+    expect(plan(override).dispatch).toEqual([]);
+    expect(plan(override).refusals.map(r => r.kind)).toContain(kind);
+  }
+  const latest = { id: 200, name: 'smoke', status: 'COMPLETED', conclusion: 'SUCCESS' };
+  for (const statusCheckRollup of [[latest, ...pr.statusCheckRollup], [...pr.statusCheckRollup, latest]]) {
+    expect(plan({ statusCheckRollup }).dispatch.map(d => d.kind)).toEqual(['promote-draft']);
+  }
+});
+
+describe('operator send-back renews a bounded durable fix budget', () => {
+  const round = () => ({ body: ADVISORY_NOTE_MARKER, author: AUTOMATION });
+  const verdict = (over = {}) => ({
+    id: 'operator-send-back', createdAt: '2026-10-01T11:00:53Z',
+    author: { login: 'chalbert' },
+    body: '🔁 review — changes requested\n\nRecorded by chalbert via claude-code-chat.\n\nTwo required changes.',
+    ...over,
+  });
+  const plan = (comments, extra = {}) => planReconcile({
+    prs: [pr1563({ comments, labels: lbl('review:changes', 'review:human') })], now: NOW, ...extra,
+  });
+  const burned = () => Array.from({ length: 5 }, round);
+
+  it('dispatches after the operator sends a capped PR back, including after restart', () => {
+    const comments = [...burned(), verdict()];
+    for (let restart = 0; restart < 2; restart++) {
+      const result = plan(comments);
+      expect(result.dispatch).toEqual([expect.objectContaining({ kind: 'fix',
+        operatorFixBudget: { verdictId: 'operator-send-back', cap: 7, attempts: 5 } })]);
+    }
+    expect(plan([...comments, round()]).dispatch[0]).toMatchObject({ kind: 'fix', attempts: 6 });
+    const exhausted = plan([...comments, round(), round()]);
+    expect(exhausted.dispatch).toHaveLength(0);
+    expect(exhausted.refusals[0]).toMatchObject({ kind: 'cap-exhausted', attempts: 7, cap: 7 });
+    expect(exhausted.notes[0]).toMatchObject({ kind: 'round-cap-exhausted', cap: 7 });
+  });
+
+  it('cannot extend the grant by switching from advisory rounds to rearm rounds', () => {
+    const rearm = { body: REARM_COMMENT_MARKER, author: AUTOMATION };
+    expect(plan([...burned(), verdict(), rearm, rearm]).refusals[0])
+      .toMatchObject({ kind: 'cap-exhausted', attempts: 7, cap: 7 });
+  });
+
+  it.each([
+    { author: AUTOMATION, viewerDidAuthor: true },
+    { author: { login: 'outsider' } },
+    { author: undefined },
+    { id: undefined },
+    { createdAt: undefined },
+    { body: 'quoted: 🔁 review — changes requested\n\nRecorded by chalbert via claude-code-chat.' },
+    { body: '🔁 review — changes requested\n\nRecorded by agent (unattended review-loop).' },
+  ])('does not grant a budget to forged or agent-authored records: %j', (over) => {
+    const result = plan([...burned(), verdict(over)]);
+    expect(result.dispatch).toHaveLength(0);
+    expect(result.refusals[0]).toMatchObject({ kind: 'cap-exhausted', cap: 5 });
+  });
+
+  it('a later operator decision gets its own allowance without accumulating unused grants', () => {
+    const comments = [...burned(), verdict(), verdict({ id: 'second' }), round(), round()];
+    expect(plan(comments).refusals[0]).toMatchObject({ kind: 'cap-exhausted', cap: 7 });
+    expect(plan([...comments, verdict({ id: 'third' })]).dispatch[0])
+      .toMatchObject({ kind: 'fix', operatorFixBudget: { verdictId: 'third', cap: 9, attempts: 7 } });
+  });
+});
+
+describe('xng7q1p mechanical timeout precedence', () => {
+  const head = 'a'.repeat(40);
+  const pr = (extra = {}) => pr1563({ number: 3415, headRefOid: head, labels: [], comments: [], statusCheckRollup: redRollup,
+    timeoutRetryBudget: { confirmed: 0, pending: false },
+    timeoutRetry: { eligible: true, repo: 'chalbert/web-everything', pr: 3415, head, signature: 'timeout', jobs: [{ run: 10, job: 20, attempt: 1 }] }, ...extra });
+  it('does not authorize retries without an observed budget', () => {
+    const result = planReconcile({ prs: [pr({ timeoutRetryBudget: undefined })], now: NOW });
+    expect(result.dispatch.map((row) => row.kind)).toEqual(['ci-heal']);
+  });
+  it('exhausted per-head retries fall through to normal healing', () => {
+    const result = planReconcile({ prs: [pr({ timeoutRetryBudget: { confirmed: 2, pending: false } })], now: NOW });
+    expect(result.dispatch.map((row) => row.kind)).toEqual(['ci-heal']);
+  });
+  it('an unresolved request becomes a visible human escalation, never another rerun or heal', () => {
+    const result = planReconcile({ prs: [pr({ timeoutRetryBudget: { confirmed: 0, pending: true } })], now: NOW });
+    expect(result.dispatch).toEqual([]);
+    expect(result.refusals[0].kind).toBe('ci-heal-escalated');
+    expect(result.notes).toContainEqual(expect.objectContaining({ kind: 'timeout-retry-needs-human', text: expect.stringContaining('needs your decision') }));
+  });
+  it('keeps live fix ownership ahead of retries', () => {
+    const result = planReconcile({ prs: [pr({ fixClaim: { who: 'fixer' } })], now: NOW });
+    expect(result.dispatch).toEqual([]);
+    expect(result.refusals[0].kind).toBe('fix-claimed');
+  });
+  it('keeps a live agent ahead of retries', () => {
+    const result = planReconcile({ prs: [pr()], now: NOW,
+      agents: [{ sessionSlug: 'ci-heal-3415', name: 'ci-heal-3415', status: 'running', pid: 123, pidAlive: true, laneHeadOid: head }] });
+    expect(result.dispatch).toEqual([]);
+    expect(result.refusals[0].kind).toBe('live-process');
+  });
+  it('keeps same-head escalation ahead of retries', () => {
+    const comments = [{ author: AUTOMATION, body: buildCiHealEscalationComment({ headSha: head, outcome: 'needs-human', reason: 'operator decision required' }) }];
+    const result = planReconcile({ prs: [pr({ comments })], now: NOW });
+    expect(result.dispatch).toEqual([]);
+    expect(result.refusals[0].kind).toBe('ci-heal-escalated');
+  });
+  it('keeps new-tree main-red recovery ahead of same-head retries', () => {
+    const result = planReconcile({ prs: [pr({ requiredCheckCompletedAt: '2026-09-27T02:36:03Z', aheadByOnMain: 5,
+      requiredCheckName: 'test', prContainsMainGreenSha: false, mergeBaseCheckRuns: [], mergeBaseRunConclusion: 'success' })],
+    now: NOW, mainLatestCheckRuns: [{ name: 'test', conclusion: 'success', status: 'completed', completed_at: '2026-09-27T04:00:10Z' }] });
+    expect(result.dispatch).toEqual([]);
+    expect(result.refusals[0].kind).toBe('owed-ci-rerun');
+  });
+  it('ineligible evidence retains normal healing with a visible reason', () => {
+    const result = planReconcile({ prs: [pr({ timeoutRetry: { eligible: false, reason: 'changed-dependency:leaf.mjs' } })], now: NOW });
+    expect(result.dispatch[0].kind).toBe('ci-heal');
+    expect(result.notes).toContainEqual(expect.objectContaining({ kind: 'timeout-retry-ineligible' }));
   });
 });

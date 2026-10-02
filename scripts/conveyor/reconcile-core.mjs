@@ -116,7 +116,7 @@ import {
   CONCURRENT_AUTHOR_PAUSE_MARKER, concurrentAuthorPauses, isConcurrentAuthorStandDown,
 } from './stand-down.mjs';
 import { FIX_BEGIN_MARKER, FIX_END_MARKER } from './fix-procedure.mjs';
-import { isTrustedMarkerAuthor } from '../lib/marker-authorship.mjs';
+import { isOperatorAuthored, isTrustedMarkerAuthor } from '../lib/marker-authorship.mjs';
 import { reviewSessionSlug } from './review-session-slug.mjs';
 // Both dispatcher wrappers delegate to the pure session-slug module.
 import { sessionSlugFor } from '../operations/dispatch-lane.mjs';
@@ -189,7 +189,7 @@ import {
 // gate below), so the review this pass would otherwise dispatch the moment CI finishes is instead HELD until
 // this fires and un-drafts it — closing the "6 of 26 PRs got reviewed before their own first CI run even
 // finished" measurement (operator, 2026-09-27) that motivated this whole feature.
-export const DISPATCH_KINDS = Object.freeze(['fix', 'review', 'ci-heal', 'convert-advisory', 'promote-draft']);
+export const DISPATCH_KINDS = Object.freeze(['fix', 'review', 'ci-heal', 'ci-timeout-rerun', 'convert-advisory', 'promote-draft']);
 
 /**
  * we:scripts/conveyor/reconcile-core.mjs#REFUSAL_KINDS — every reason this pass declines to dispatch. Frozen and
@@ -1242,6 +1242,27 @@ function dispatchReviewRow({
   });
 }
 
+// A canonical operator verdict is itself the durable grant. Anchor the allowance to
+// the counters BEFORE that comment, never to the counters on the current tick.
+// GitHub author metadata is required: copied attribution in an agent comment grants nothing.
+function operatorFixBudget(comments, roundCap) {
+  const thread = Array.isArray(comments) ? comments : [];
+  for (let i = thread.length - 1; i >= 0; i--) {
+    const c = thread[i];
+    if (!isOperatorAuthored(c) || !c.id || typeof c.body !== 'string'
+      || !Number.isFinite(Date.parse(c.createdAt))) continue;
+    const login = c.author.login;
+    const prefix = `🔁 review — changes requested\n\nRecorded by ${login}`;
+    if (!c.body?.startsWith(prefix + '.') && !c.body?.startsWith(prefix + ' via ')) continue;
+    const before = thread.slice(0, i);
+    const baseline = Math.max(countRearmComments(before), countAdvisoryComments(before));
+    const after = thread.slice(i + 1);
+    const spent = Math.max(countRearmComments(after), countAdvisoryComments(after));
+    return { verdictId: c.id, cap: Math.max(roundCap, baseline + 2), attempts: baseline + spent };
+  }
+  return null;
+}
+
 /**
  * we:scripts/conveyor/reconcile-core.mjs#planReconcile — THE PASS. Given every open PR, every live session, and
  * the durable per-PR attempt counts, return what to dispatch and every refusal with the fact it turned on. Pure,
@@ -1357,7 +1378,10 @@ export function planReconcile({
 
     // The evidence every row carries, so a reader never has to go back to the listing to audit a verdict.
     const operatorAnswer = latestOperatorAnswer(pr?.comments);
+    const operatorBudget = operatorFixBudget(pr?.comments, roundCap);
+    const effectiveRoundCap = operatorBudget?.cap ?? roundCap;
     const base = {
+      ...(operatorBudget ? { operatorFixBudget: operatorBudget } : {}),
       ...(operatorAnswer ? { operatorAnswer } : {}),
       prNumber,
       headRefName: pr?.headRefName ?? null,
@@ -1414,7 +1438,8 @@ export function planReconcile({
       // `{path, additions, deletions}` objects for every consumer to re-derive. `null` (not `[]`) when the
       // shell's own read did not carry `files` at all (an older caller, or a `--prs-file` snapshot built before
       // this field existed) — a caller must tell "not fetched" apart from "genuinely no files changed".
-      files: Array.isArray(pr?.files)
+      // gh's GraphQL files connection stops at 100: force a full diff read at the cap.
+      files: Array.isArray(pr?.files) && pr.files.length < 100
         ? pr.files.map((f) => (typeof f?.path === 'string' ? f.path : String(f ?? ''))).filter(Boolean)
         : null,
     };
@@ -1436,6 +1461,7 @@ export function planReconcile({
     // The shared round count — see REFUSAL 3 below for why it is a `Math.max` over three durable sources.
     const roundAttempts = () => Math.max(
       Number(counts[prNumber]) || 0,
+      operatorBudget?.attempts ?? 0,
       countRearmComments(pr?.comments),
       countAdvisoryComments(pr?.comments),
     );
@@ -1713,7 +1739,7 @@ export function planReconcile({
         if (withPhase.labels.includes('review:pending')) {
           const foldRefusal = foldReviewRefusalInto(refusals[refusals.length - 1], withPhase, 'owedCiRerun');
           dispatchReviewRow({
-            pr, withPhase, base, attempts: roundAttempts(), roundCap, now,
+            pr, withPhase, base, attempts: roundAttempts(), roundCap: effectiveRoundCap, now,
             refuse: foldRefusal, refuseCapExhausted: capExhaustedVia(foldRefusal), dispatch,
             extra: { owedCiRerun: true },
           });
@@ -1800,7 +1826,7 @@ export function planReconcile({
           if (isNotCiBreak && withPhase.labels.includes('review:pending')) {
             const foldRefusal = foldReviewRefusalInto(refusals[refusals.length - 1], withPhase, 'ciHealNotCiBreak');
             dispatchReviewRow({
-              pr, withPhase, base, attempts: roundAttempts(), roundCap, now,
+              pr, withPhase, base, attempts: roundAttempts(), roundCap: effectiveRoundCap, now,
               refuse: foldRefusal, refuseCapExhausted: capExhaustedVia(foldRefusal), dispatch,
               extra: { ciHealNotCiBreak: true },
             });
@@ -1808,6 +1834,22 @@ export function planReconcile({
           continue;
         }
       }
+      const retryBudget = pr.timeoutRetryBudget;
+      if (retryBudget?.pending) {
+        const why = `PR #${prNumber}: timeout retry needs your decision — ${retryBudget.reason ?? 'request outcome remains unresolved'}; no further rerun or heal is safe`;
+        refuse('ci-heal-escalated', { ...withPhase, why });
+        notes.push({ kind: 'timeout-retry-needs-human', prNumber, text: why });
+        continue;
+      }
+      // xng7q1p: same-head mechanical retries never consume or rewrite heal markers.
+      // All main-red, escalation and live-owner guards above retain precedence.
+      if (retryBudget?.confirmed < 2 && pr.timeoutRetry?.eligible && pr.timeoutRetry.head === pr.headRefOid && pr.timeoutRetry.pr === prNumber) {
+        dispatch.push({ ...base, ...withPhase, kind: 'ci-timeout-rerun', timeoutRetry: pr.timeoutRetry,
+          why: 'complete timeout inventory and unchanged dependency closure; independent retry budget' });
+        continue;
+      }
+      if (pr.timeoutRetry && !pr.timeoutRetry.eligible) notes.push({ kind: 'timeout-retry-ineligible', prNumber,
+        text: `PR #${prNumber}: ${pr.timeoutRetry.reason}` });
       const ciHealAttempts = countCiHealComments(pr?.comments);
       if (ciHealAttempts >= ciHealCap) {
         refuse('cap-exhausted', {
@@ -2113,7 +2155,7 @@ export function planReconcile({
     // All three checks (the head guard, no-findings, the cap) live in {@link dispatchReviewRow} — the ONE copy,
     // shared with the ci-red-parallel review above (PR #2783 review: the review decision was duplicated here).
     if (OWED[phase] === 'review') {
-      dispatchReviewRow({ pr, withPhase, base, attempts: roundAttempts(), roundCap, refuse, refuseCapExhausted, dispatch, now });
+      dispatchReviewRow({ pr, withPhase, base, attempts: roundAttempts(), roundCap: effectiveRoundCap, refuse, refuseCapExhausted, dispatch, now });
       continue;
     }
 
@@ -2196,23 +2238,25 @@ export function planReconcile({
     // `attempts` itself is `roundAttempts()` — the SAME derivation the review population's cap reads (via
     // {@link dispatchReviewRow}), so the two can never disagree about how many attempts a PR has spent. Only the
     // `fix` population reaches this point: every `review`-owed phase returned through that helper above.
-    if (attempts >= roundCap) {
+    if (attempts >= effectiveRoundCap) {
       refuseCapExhausted({
-        ...withPhase, attempts, cap: roundCap, capKind: 'fix',
-        why: `the PR's own durable attempt count is ${attempts} against a cap of ${roundCap} — auto-repair is exhausted here and a person must take it`,
+        ...withPhase, attempts, cap: effectiveRoundCap, capKind: 'fix',
+        why: `the PR's own durable attempt count is ${attempts} against a cap of ${effectiveRoundCap} — auto-repair is exhausted here and a person must take it`,
       });
       continue;
     }
 
     dispatch.push({
       ...base, ...withPhase, kind: 'fix', findings, attempts,
-      why: `bounced with ${findings} finding(s), nothing live is working it, and ${attempts} of ${roundCap} attempts are spent`,
+      why: `bounced with ${findings} finding(s), nothing live is working it, and ${attempts} of ${effectiveRoundCap} attempts are spent`,
     });
   }
 
   for (const entry of dispatch) {
     if (entry.kind !== 'fix') continue;
-    const since = fixWaitingSince(prs.find((pr) => Number(pr?.number) === entry.prNumber)?.comments);
+    const sourcePr = prs.find((pr) => Number(pr?.number) === entry.prNumber);
+    // Older/hand-opened PRs may lack an episode marker; creation still bounds starvation.
+    const since = fixWaitingSince(sourcePr?.comments) || sourcePr?.createdAt;
     if (since) entry.waitingSince = since;
   }
   return { dispatch, refusals, notes };

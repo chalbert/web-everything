@@ -96,3 +96,11 @@ it('does not let comments, unrelated scopes or later shell commands hide a viola
   expect(scanMultiRepo("const r = run(['pr', 'list', '--state', 'open']);")).toHaveLength(1);
   expect(scanMultiRepo("const args = ['pr', 'view']; run(args);")).toHaveLength(1);
 });
+
+
+it('the timeout reservation soak uses a repository-neutral fixture and still exercises recovery', async () => {
+  const file = 'scripts/conveyor/soak/breaks/timeout-retry-reservation-wedged-on-failed-observation.mjs';
+  expect(scanMultiRepo(read(file))).toEqual([]);
+  const { default: scenario } = await import('../conveyor/soak/breaks/timeout-retry-reservation-wedged-on-failed-observation.mjs');
+  expect(scenario.judge(await scenario.run())).toEqual([]);
+});

@@ -37,6 +37,11 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { FALLBACK_REQUIRED_STATUS_CHECKS } from '../../../lib/required-status-checks.mjs';
+
+// The sim has no branch protection, so the planner judges against the fallback required set. "Green" here means
+// EVERY required check reported success — a lone `test` row is incomplete evidence (`unchecked`, never promoted).
+const GREEN_ALL = FALLBACK_REQUIRED_STATUS_CHECKS.map((name) => ({ name, status: 'COMPLETED', conclusion: 'SUCCESS' }));
 
 import { CONSTELLATION_REPOS } from '../../../lib/constellation-repos.mjs';
 import { readStoreSnapshot } from '../../../operations/__tests__/helpers/fake-claude-shim.mjs';
@@ -111,7 +116,7 @@ export default {
         }
         w.gh.addLabels('we', pr, ['review:changes']);
         w.gh.comment('we', pr, '🔁 review — changes requested\n\nthe soak finding: handle the empty case');
-        w.gh.setChecks('we', pr, [{ name: 'test', status: 'COMPLETED', conclusion: 'SUCCESS' }]);
+        w.gh.setChecks('we', pr, GREEN_ALL);
         const ctx = { pr, begun: false, workerRefused: null, finished: false, reviewedAt: null, reported: new Set() };
         if (existsSync(TOOL(w))) {
           const r = spawnSync(process.execPath, [TOOL(w), 'fix-begin', String(pr), `--repo=${WE_SLUG}`, `--who=${FIXER}`, '--why=soak: address review'], {
@@ -127,7 +132,7 @@ export default {
         w.git.createBranch('we', HEAD2, { from: 'main', files: { 'soak/fix-claim-2.txt': 'a PR needs a scope-change draft\n' } });
         const pr2 = w.gh.openPr({ repo: 'we', head: HEAD2, base: 'main', title: 'soak: fix claim scope-change draft', labels: [], body: 'No backlog item.' });
         w.gh.addLabels('we', pr2, ['review:changes']);
-        w.gh.setChecks('we', pr2, [{ name: 'test', status: 'COMPLETED', conclusion: 'SUCCESS' }]);
+        w.gh.setChecks('we', pr2, GREEN_ALL);
         const ctx2 = { pr: pr2, head: HEAD2, begun: false, finished: false, promotedAt: null, reviewedAt: null, reported: new Set() };
         if (existsSync(TOOL(w))) {
           const r2 = spawnSync(process.execPath, [
@@ -181,7 +186,7 @@ export default {
             cwd: work, env: toolEnv(w, { CLAUDE_CODE_SESSION_ID: FIXER_SESSION }), encoding: 'utf8',
           }));
           if (res.status !== 0) flag('holder-push', `the claim holder's own push was refused: ${(res.stderr ?? '').trim()}`);
-          w.gh.setChecks('we', ctx.pr, [{ name: 'test', status: 'COMPLETED', conclusion: 'SUCCESS' }]);
+          w.gh.setChecks('we', ctx.pr, GREEN_ALL);
           w.gh.removeLabels('we', ctx.pr, ['review:changes']);
           w.gh.addLabels('we', ctx.pr, ['review:pending']);
           const end = spawnSync(process.execPath, [TOOL(w), 'fix-end', String(ctx.pr), `--repo=${WE_SLUG}`, `--who=${FIXER}`], {
@@ -200,7 +205,7 @@ export default {
               cwd: work, env: toolEnv(w, { CLAUDE_CODE_SESSION_ID: `${FIXER_SESSION}-2` }), encoding: 'utf8',
             }));
             if (resSc.status !== 0) flag2('holder-push-2', `the scope-change claim holder's own push was refused: ${(resSc.stderr ?? '').trim()}`);
-            w.gh.setChecks('we', sc.pr, [{ name: 'test', status: 'COMPLETED', conclusion: 'SUCCESS' }]);
+            w.gh.setChecks('we', sc.pr, GREEN_ALL);
             const endSc = spawnSync(process.execPath, [TOOL(w), 'fix-end', String(sc.pr), `--repo=${WE_SLUG}`, `--who=${FIXER}-2`], {
               cwd: w.simCloneRoot, env: toolEnv(w, { CLAUDE_CODE_SESSION_ID: `${FIXER_SESSION}-2` }), encoding: 'utf8',
             });
