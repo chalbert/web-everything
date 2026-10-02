@@ -282,3 +282,20 @@ describe('runReconcilePromoteDraftDispatch — stale-green re-verification (#281
     expect(result.refusals).toEqual([]);
   });
 });
+
+it('xxh4zw8 fresh exact-head reader refuses complete cancelled evidence without a ready call', () => {
+  const sha = '4ecb5deb362c81aa28de162db4616bb4c2009347';
+  const required = ['test', 'smoke', 'daemon-soak', 'soak-replay-gate'];
+  const runs = required.map((name, i) => ({ id: 110460009383 + i, name, status: 'completed', conclusion: name === 'smoke' ? 'cancelled' : 'success' }));
+  const ready = vi.fn();
+  const runGh = vi.fn(() => runs.map(row => JSON.stringify(row)).join('\n'));
+  const readHeadCheckState = args => defaultReadHeadCheckState({ ...args, runGh, getRequiredChecks: () => ({ checks: required }) });
+  expect(readHeadCheckState({ repoSlug: 'chalbert/web-everything', sha })).toMatchObject({ state: 'red', counts: { total: 4, failed: 1 } });
+  const result = runReconcilePromoteDraftDispatch({ root: '/repo', checkStaleness: FRESH,
+    reconcile: () => ({ dispatch: [{ kind: 'promote-draft', prNumber: 3336, headRefOid: sha }], refusals: [] }),
+    provider: { ready }, readHeadCheckState, clearAwaitingCi: NOOP_STATUS });
+  expect(ready).not.toHaveBeenCalled();
+  expect(result.dispatched).toEqual([]);
+  expect(result.refusals).toHaveLength(1);
+  expect(runGh.mock.calls[0][0]).toContain(`repos/chalbert/web-everything/commits/${sha}/check-runs`);
+});
