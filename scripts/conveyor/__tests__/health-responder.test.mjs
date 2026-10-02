@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { it, expect, afterEach, vi } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, appendFileSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { shadowTick } from '../health-responder.mjs';
@@ -56,6 +56,24 @@ it('bounds foreground facts at ten seconds and cancels the reader', async () => 
   await vi.advanceTimersByTimeAsync(10_001);
   expect((await task)[0].rule).toBe('watch-invalid'); expect(signal.aborted).toBe(true);
 });
+it('a journal past the old 32 MiB limit rotates into a segment; the next tick still runs, records and keeps its receipts', async () => {
+  const { options, store } = setup();
+  const first = await shadowTick(options);
+  expect(first[0].decision).toBe('act-would-have');
+  const file = join(store, 'decisions.jsonl');
+  const pad = JSON.stringify({ ...first[0], decision: 'noop', rule: 'pad', pad: 'x'.repeat(60_000) }) + '\n';
+  appendFileSync(file, pad.repeat(560));
+  const big = readFileSync(file);
+  expect(big.length).toBeGreaterThan(32 * 1024 * 1024);
+  const second = await shadowTick(options);
+  expect(second[0].rule).toBe('family-receipt'); // the receipt from before the rotation still holds
+  const segments = readdirSync(store).filter((n) => /^decisions\..+\.jsonl$/.test(n));
+  expect(segments).toHaveLength(1);
+  expect(readFileSync(join(store, segments[0])).equals(big)).toBe(true); // complete, byte-identical
+  expect(readJournal(store)).toHaveLength(1); // the active segment restarts small
+  expect((await shadowTick(options))[0].rule).toBe('family-receipt');
+  expect(readJournal(store)).toHaveLength(2);
+}, 30_000);
 it('default production reader cannot invent a current-head owner plan', async () => {
   const { options } = setup(); delete options.readFacts;
   expect((await shadowTick(options))[0].rule).toBe('facts-unknown');

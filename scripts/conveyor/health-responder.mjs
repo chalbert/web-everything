@@ -9,19 +9,21 @@ import { runPassDaemonLoop, passDaemonLeaseKey, spawnPassOnce, realSleep } from 
 import { RUNNER_LOCK_ROOT, makeOwner, acquireRunnerLease, heartbeatRunnerLease, releaseRunnerLeaseIfOwned, runnerLeaseStatus } from '../../skills-src/conveyor/runner-lock.mjs';
 import { decide, SHADOW_ACTUATORS } from './health-responder-core.mjs';
 import { healthDir } from './health-watch-section.mjs';
-import { responderDir, readWatchGeneration, readResponderConfig, readJournal, receiptsFromJournal, appendDecisions, writeLastTick, boundedText } from './health-responder-state.mjs';
+import { responderDir, readWatchGeneration, readResponderConfig, readReceipts, rotateJournalIfNeeded, appendDecisions, writeLastTick, boundedText } from './health-responder-state.mjs';
 export const TICK_CEILING_MS = 30_000;
 export const CHILD_READ_CEILING_MS = 10_000;
 /** External adapters are deliberately absent. Injection is for read-only facts and test tripwires only. */
 export async function shadowTick({ stateRoot, env = process.env, now = Date.now(), clock = Date.now,
   readFacts = async () => ({}), actuators = SHADOW_ACTUATORS, leaseAlive = () => true,
   bootRevision = env.HEALTH_RESPONDER_BOOT_REVISION ?? 'unknown', bootInputs = env.HEALTH_RESPONDER_BOOT_INPUTS ?? null, leaseOwner = env.HEALTH_RESPONDER_LEASE_OWNER ?? 'pass-daemon',
+  rotateBytes,
 } = {}) {
   void actuators; // No dispatch path exists, even when supplied with live-capable test doubles.
   const start = clock(), dir = responderDir(stateRoot, env);
   const snapshot = readWatchGeneration(healthDir(stateRoot, env), { deadline: start + TICK_CEILING_MS, clock });
   const config = readResponderConfig(dir);
-  const rows = readJournal(dir); // Corruption freezes the tick; stderr is the fallback if the log is unwritable.
+  rotateJournalIfNeeded(dir, { rotateBytes }); // Size never stops a tick: the journal rotates into a complete segment instead.
+  const receipts = readReceipts(dir); // Corruption freezes the tick; stderr is the fallback if the log is unwritable.
   let facts = {}, timer;
   const abort = new AbortController();
   try {
@@ -36,9 +38,9 @@ export async function shadowTick({ stateRoot, env = process.env, now = Date.now(
   if (!leaseAlive() || clock() - start >= TICK_CEILING_MS)
     snapshot.watchGeneration = { valid: false, reason: 'lease lost or tick ceiling reached' };
   // Re-read the independent kill/config switch immediately before recording the proposal.
-  const decisions = decide({ ...snapshot, subjectFacts: facts, actionReceipts: receiptsFromJournal(rows),
+  const decisions = decide({ ...snapshot, subjectFacts: facts, actionReceipts: receipts,
     budgets: [], config: readResponderConfig(dir), now });
-  const written = appendDecisions(dir, decisions);
+  const written = appendDecisions(dir, decisions, { rotateBytes });
   writeLastTick(dir, { completedAt: clock(), durationMs: clock() - start, bootRevision, leaseOwner,
     bootInputs, mode: 'shadow', effectiveSettings: readResponderConfig(dir), decisions: written.length, externalEffects: 0 });
   return written;
