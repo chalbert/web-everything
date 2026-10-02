@@ -7,6 +7,8 @@ status: open
 blockedBy: ["x9jwbpi"]
 scope: ["we:contracts/plateau-progress-view.schema.json", "we:contracts/plateau-progress-view.examples.json", "we:contracts/plateau-progress-view.test.ts"]
 dateOpened: "2026-10-01"
+preparedDate: "2026-10-02"
+preparedAgainstSha: "19fed1922fd32ca0639b0950a14f493451049118"
 tags: []
 ---
 
@@ -18,22 +20,58 @@ Extend the WE progress contract with validated owner, supervisor, executor and r
 
 This story carries its assigned part of the prepared Design, Test plan and Proof plan in we:backlog/4624-show-actual-executors-and-standalone-jobs-in-plateau-running.md. Keep the all-configured-repos/all-authors goal, visible unmatched work, explicit unknowns, 120-second baseline and existing action/fork flows. No new dispatch policy, launcher registration, paid probe, or display-driven GitHub call. Parent grouping does not satisfy prerequisites: use the explicit blockedBy edges. Reconcile landed dependency revisions before building; the split itself claims no runtime proof.
 
+## Progress
+
+Premise checked 2026-10-02 against WE `19fed1922fd32ca0639b0950a14f493451049118` and the current Plateau checkout `ec375ab945e8794b10b0850c0f52bee3cac86507`, using the worker brief from local main. Preparation only; no implementation or product proof.
+
+- Original premise/scope: three WE contract files need additive provenance and structured holds. Confirmed: run properties end without executor/model evidence at we:contracts/plateau-progress-view.schema.json:308; additional properties pass at :326; holds begin at :329. A direct Ajv probe of the moving-and-held fixture accepted executor=42, requestedModel=[] and capacity with negative usage/limit and a non-date timestamp (valid=true, errors=null). The gap is not already delivered.
+- Corrected context: the contract now has 13 named examples and a strict calendar-valid timestamp definition at we:contracts/plateau-progress-view.schema.json:1505. Reuse that definition for new evidence rather than copying the older lexical timestamp pattern at :266. Existing strict evidence mutation tests at we:contracts/plateau-progress-view.test.ts:116 and :140 are the available pattern. Preserve the newer health examples as well as schema-1/2 compatibility.
+- Plateau is a consumer already: we:../plateau-app/src/wip/progress-read.ts:52 projects runs but :56 fixes parent to null and derives repo from a PR or the WE work-item fallback (otherwise null); :58-59 emits basic role/state/time without executor evidence. Holds remain explicitly unavailable at we:../plateau-app/src/wip/wip-model.ts:358 and empty at :377. Its count/unknown-state regressions exist at we:../plateau-app/src/wip/progress-read.test.ts:24. These are downstream work, not reasons to add runtime to this scope.
+- Corrected scope remains the same three explicit WE files, including the conformance test. The resolved predecessor is recorded at we:backlog/x9jwbpi-publish-the-plateau-progress-view-contract-schema-2-with-val.md:4; retain the existing dependency edge and reconcile landed revisions before implementation. No goal or ratified decision changes.
+
 ## Design
 
-Observed seam: we:contracts/plateau-progress-view.schema.json:185 defines run identity and linkage, but :327 explicitly excludes executor/model inference; :329 defines basic holds without typed capacity or overlap evidence. Unknown additional properties currently pass, which is not a validated contract for those fields. The existing declarative harness at we:contracts/plateau-progress-view.test.ts:10 and named examples at we:contracts/plateau-progress-view.examples.json are the reusable conformance demo.
+Add optional, validated provenance fields to schema-2 runs and structured evidence to holds. Missing extension fields mean unknown; an included evidence object must be complete in shape, with nullable values for unattested facts. Preserve all existing required fields and the open outer run/hold objects for additive compatibility (we:contracts/plateau-progress-view.schema.json:310 and :329). Close the new nested evidence objects to catch misspellings. Do not infer executor or served model from owner, launcher, requested configuration or a supervisor.
 
-Extend schema 2 additively: optional-but-validated owner, author, origin, supervisor and executor provenance; distinguish requested model from reported provider/model and evidence, with null for unattested values. Add structured overlap counterpart and safe repo-qualified file evidence, observed capacity usage/limit with timestamp/source, and hold source identity. Existing required run/hold fields and old examples remain valid. Describe missing new fields as unknown, never an inferred default. Keep source-local freshness, raw unknown states, parent/logical-work links and separate count units. No runtime computation belongs in WE; follow we:docs/agent/platform-decisions.md#surface-contract-not-computation and #constellation-placement, with per-repo lineage #4289.
+Proposed field shapes for implementation:
 
-## Done when
+- Run owner, author and origin: optional nullable non-empty strings, kept distinct. Supervisor and executor: optional nullable objects with identity and provider (nullable non-empty strings), plus source identity and observedAt. Source identity is a non-empty string; observedAt is a calendar-valid UTC instant or null. An unknown identity stays null even if its observation source is known.
+- Separate requestedModel and reportedModel objects: nullable provider/model strings plus source, observedAt and an evidenceKind discriminator fixed to requested or reported respectively. A null object means no evidence. Requested settings never populate reported evidence; a reported model requires its own source. Allow mismatches and unknown provider codes without enforcing a provider/model catalogue. Existing runId, logicalWorkId, parentRunId and rawState retain their meaning (we:contracts/plateau-progress-view.schema.json:188, :192, :203 and :251).
+- Hold source evidence: source identity plus observedAt, distinct from since/asOf. Optional overlap evidence contains counterpart work/run identity and an array of repo-qualified relative file references. Validate non-empty repo/path, reject absolute paths and traversal segments; do not include prompts, credentials or machine-local log paths. Unknown counterpart or file evidence is null, not a fabricated match.
+- Optional capacity evidence contains nullable nonnegative integer used/limit, a non-empty unit, source and observedAt. Zero is measured zero; null is unknown. Permit used greater than limit as an observation, not a schema error or dispatch decision. Preparation holds reuse owner and raw/normalized reason with source evidence; unassigned owner remains null. Preserve the existing hold fields at we:contracts/plateau-progress-view.schema.json:332-375.
 
-1. Populated examples validate for every producer family, standalone/cardless jobs, one parent and child, requested/served mismatch, explicit unknown attribution, overlap, preparation and capacity holds. Old schema-1 and schema-2 examples still validate.
-2. Invalid provenance shapes, negative capacity, malformed observation times, negative counts, absent source freshness and unknown majors fail specific assertions. Document temporal/count joins as consumer responsibilities, not schema promises.
-3. Run the focused contract suite and required WE gates; record commands/results on this story. No package, runtime or shared agent documentation changes are needed.
+Reuse the calendar-valid instant definition at we:contracts/plateau-progress-view.schema.json:1505 for new observations. Document source-key joins, provenance truth, time ordering, freshness assessment, count arithmetic and identity deduplication as consumer responsibilities; a declarative shape cannot prove them. This follows we:docs/agent/platform-decisions.md:1165 (#surface-contract-not-computation) and :143 (#constellation-placement). Keep source-local freshness, unknown raw codes and separate count units.
+
+## MVP
+
+Deliver exactly the schema, named examples and declarative tests in scope. Extend descriptions in the JSON schema itself. Named examples cover build, prepare, standalone Codex, Gemini/agy, fix, ci-heal and review; cardless and unmatched work; two repos/authors; parent-child linkage; requested/reported mismatch; explicit unknown attribution; overlap, preparation and capacity holds. These are synthetic conformance vectors, not evidence of live producer coverage. The family and hold acceptance baseline is we:backlog/4624-show-actual-executors-and-standalone-jobs-in-plateau-running.md:73-89.
+
+Keep the existing corpus unchanged and validate all old snapshots, including optional health evidence. The shared example loop at we:contracts/plateau-progress-view.test.ts:11 is this contract's conformance demonstration. No package, product runtime, shared agent documentation or rendered page changes.
+
+Per-repo delivery: retain the existing split in we:backlog/4624-show-actual-executors-and-standalone-jobs-in-plateau-running.md:25-42. This card supplies an independently usable WE contract. Plateau #xukxoy9 then adopts types/relay/browser acceptance before #xk7jz9n run discovery and #xv8d25t hold collection; #xowscy1 integrates counts, rendering and publisher proof. This applies the operator's contract-first per-repo ruling at we:backlog/4289-design-multi-repo-couple-locus-delivery-e-g-we-plateau-app-2.md:20, without claiming mixed-repo atomic delivery. Do not add Plateau paths to this card's machine scope.
+
+Scope budget: three implementation paths, one contract area; adding this card as bookkeeping yields four paths/two areas. Re-probe and re-slice if dependency drift expands that budget. The all-configured-repos/all-authors goal, visible unmatched work, 120-second baseline and existing action/fork flows stay assigned to the parent/consumer slices; no dispatch policy, launcher registration, paid probe or display-driven GitHub call enters this contract slice.
 
 ## Test plan
 
-Write declarative positive/negative cases first in we:contracts/plateau-progress-view.test.ts. Today malformed additional provenance fields pass unvalidated, so the new negative assertions must fail before the schema change. Mutate requested evidence into reported-only shape and remove required evidence members from a populated object; the corresponding case must reject it. The named fixture corpus is the independently usable artifact for subsequent consumers.
+In we:contracts/plateau-progress-view.test.ts:7 use the existing Ajv validator and named fixture loop. Write negative mutations before schema changes and observe their failure against today's permissive extension behavior. Then add the schema and fixtures until they pass.
 
-## Scope budget and Follow-ups
+1. Every populated example validates; all old schema-1/2 and health examples still validate. Missing new fields and explicit nulls both validate. Parent/child and cardless runs preserve existing required identity fields.
+2. Reject wrong primitive/object types, empty required strings, missing nested evidence members, unknown nested keys and a requested-only shape substituted for reported evidence. Assert the relevant instance path/keyword, not just rejection somewhere in the snapshot.
+3. Reject negative/fractional/string/boolean capacity counts and malformed timestamps, including invalid calendar days. Accept null, zero, used above limit, and valid leap days. Reuse the mutation approach at we:contracts/plateau-progress-view.test.ts:116-150.
+4. Reject bare/absolute/traversal file evidence and malformed counterpart/source shapes. Accept a safe repo-qualified relative reference and explicitly unknown overlap details. Preserve raw unknown reasons and an unassigned preparer.
+5. Retain negative-count, unsupported-major and source-freshness regressions at we:contracts/plateau-progress-view.test.ts:15-45. Assert new evidence remains distinct when requested and reported provider/model disagree; do not claim the schema proves the actual executing model.
 
-Predicted implementation: 3 explicit paths; one contract area. Even allowing this WE backlog card as one bookkeeping path/area stays below 20 paths and 4 areas. No broad directory scope. If prerequisite drift changes the touch-set, re-probe and re-slice before exceeding the gate. Record testing lessons here, never in shared agent docs. Arbitrary custom-log registration/heartbeat remains a separate producer follow-up; keep discovery coverage partial until proven.
+## Proof plan
+
+During implementation, capture the red-before/green-after targeted mutations and exact failing schema paths. Run `npx vitest run we:contracts/plateau-progress-view.test.ts` (remove the WE prefix to execute from this checkout), `npm run check:standards`, and `node we:scripts/verify-lane.mjs`. Record exit codes, fixture/test totals and any limitation here. Independently load both JSON artifacts with Ajv and validate the full named corpus without loading Plateau or a UI. This proves only the hand-off shapes and compatibility.
+
+The downstream split owns live discovery, liveness/dedup, source-time joins, relay/browser acceptance, 120-second observation and phone proof; its assigned test paths are in we:backlog/4624-show-actual-executors-and-standalone-jobs-in-plateau-running.md:27-31. Do not mark this contract's passing fixtures as deployed product proof.
+
+Preparation verification (2026-10-02): `node we:scripts/verify-lane.mjs` exited 0. For this card-only diff it selected related tests (none found, exit 0) and `npm run check:standards` (0 errors, 5,215 warnings). `git diff --check` passed. The Ajv premise probe above was observational; implementation test-first and runtime proof remain future work. Preparation stamp applied with `node we:scripts/backlog.mjs prepare-stamp x74eqth`.
+
+## Follow-ups
+
+- Reconcile prerequisite and consumer revisions before building; keep the independently useful contract deliverable separate from runtime rollout.
+- Arbitrary custom-log registration/heartbeat remains a producer follow-up; default-root discovery must retain partial coverage (we:backlog/4624-show-actual-executors-and-standalone-jobs-in-plateau-running.md:73).
+- Testing lesson: new evidence can reuse the strict timestamp and nested-object mutation coverage already present; legacy timestamp shapes need not be tightened as a side effect. Record further verification lessons here, never in shared agent documentation.
