@@ -1,9 +1,10 @@
 ---
 kind: story
 size: 3
-status: open
+status: resolved
 scope: ["we:scripts/lib/jury-core.mjs", "we:scripts/operations/review-pr.mjs", "we:scripts/lib/__tests__/jury-core.test.mjs"]
 dateOpened: "2026-10-02"
+dateResolved: "2026-10-02"
 tags: []
 ---
 
