@@ -2,9 +2,10 @@
 bornAs: xig4rre
 kind: story
 size: 2
-status: open
+status: resolved
 scope: ["we:scripts/lib/soak-replay-gate.mjs", "we:scripts/lib/__tests__/soak-replay-gate.test.mjs", "we:scripts/lib/__tests__/fixtures/soak-replay-gate-real-prs.mjs"]
 dateOpened: "2026-09-29"
+dateResolved: "2026-10-02"
 preparedDate: "2026-10-01"
 preparedAgainstSha: "f22092f6af156c6905c4fb29a859656f77b08bed"
 tags: []
