@@ -10,6 +10,8 @@
  * Both operations are best-effort and report their outcomes separately from the durable heal comment.
  * Without a live review or merge-path label, a fresh, head-bound read permits adding review:pending.
  * CI lifecycle labels alone are insufficient: the drain removes them when checks turn green.
+ * `--restore-routing-only` repairs historical routing loss on the freshly read PR head,
+ * posting only a restoration explanation, with no heal marker, restamp, or rearm.
  *
  * WHY A DURABLE COMMENT (the whole point — mirrors #2643). The conveyor bounds auto CI-heal at N attempts per PR so
  * a genuinely-broken diff can't flap forever. That cap must survive a conveyor RESTART, which wipes the in-session
@@ -27,6 +29,7 @@
 import { resolve } from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
+import { writeAllSync } from '../lib/write-all-sync.mjs';
 import { isTrustedMarkerAuthor } from '../lib/marker-authorship.mjs';
 import { REVIEW_LABELS, hasReviewLabel } from '../lib/review-escalation.mjs';
 import { isBudgetRefusal, postPrComment, recordOwedWrite, resolveOwedRepo } from './ci-heal-owed.mjs';
@@ -173,17 +176,22 @@ function missingHealRouting(labels) {
 }
 
 /** Add only the missing hold; never swap a verdict or manufacture merge clearance. */
-function restoreHealRouting({ pr, repo, headSha }) {
-  if (!/^[0-9a-f]{40}$/.test(headSha || '')) return {};
+function restoreHealRouting({ pr, repo, headSha, currentHead = false }) {
+  const skip = reason => ({ skipped: true, reason });
   const repoArgs = repo ? [`--repo=${repo}`] : [];
   const gh = args => execFileSync('gh', args, {
     stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8',
     timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL',
   });
   const read = () => JSON.parse(gh(['pr', 'view', String(pr), ...repoArgs, '--json', 'state,isDraft,headRefOid,labels']));
+  if (currentHead) headSha = read().headRefOid;
+  if (!/^[0-9a-f]{40}$/.test(headSha || '')) return skip('PR head is not a full commit SHA');
   // This read is at the mutation boundary, after the caller's label observation.
   const live = read();
-  if (live.state !== 'OPEN' || live.isDraft !== false || live.headRefOid !== headSha || !missingHealRouting(live.labels)) return {};
+  if (live.state !== 'OPEN') return skip('PR is not open');
+  if (live.isDraft !== false) return skip('PR is draft or draft status is unknown');
+  if (live.headRefOid !== headSha) return skip('PR head changed during restoration');
+  if (!missingHealRouting(live.labels)) return skip('PR has a review:* or ready-to-merge label, or labels are unreadable');
   gh(['pr', 'edit', String(pr), ...repoArgs, '--add-label', REVIEW_LABELS.pending]);
   const after = read();
   if (after.state !== 'OPEN' || after.isDraft !== false || after.headRefOid !== headSha
@@ -214,7 +222,20 @@ if (IS_CLI) {
   };
   const pr = Number(positionals[0]);
   if (!Number.isInteger(pr) || pr <= 0) {
-    fail('usage: ci-heal-mark.mjs <pr> [--repo=<owner/name>] [--reason=<red-ci|behind>] [--actor=<name>] [--head=<sha>]  (pr must be a positive integer)');
+    fail('usage: ci-heal-mark.mjs <pr> [--repo=<owner/name>] [--restore-routing-only] [--reason=<red-ci|behind>] [--actor=<name>] [--head=<sha>]  (pr must be a positive integer)');
+  }
+  if (flags['restore-routing-only']) {
+    const repo = typeof flags.repo === 'string' ? flags.repo : undefined;
+    try {
+      const result = restoreHealRouting({ pr, repo, currentHead: true });
+      if (result.restored) {
+        postPrComment({ pr, repo, body: 'Review routing restored: this PR had lost all routing labels after an earlier CI heal (fixed by #3475); added review:pending so review picks it up.' });
+      }
+      writeAllSync(1, JSON.stringify({ pr, ...result, reason: result.reason || 'Missing review routing restored' }) + '\n');
+    } catch (e) {
+      fail(`could not restore review routing on PR #${pr}: ${String(e.message || e).split('\n')[0]}`);
+    }
+    process.exit(0);
   }
   const headSha = resolveHealHead({ headFlag: typeof flags.head === 'string' ? flags.head : undefined });
   const body = buildCiHealComment({
