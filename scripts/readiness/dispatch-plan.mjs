@@ -76,6 +76,7 @@
  * codified in a sibling statute PR).
  */
 
+import { planningRead } from '../lib/planning-snapshot.mjs';
 import { childFailure } from '../lib/child-failure.mjs';
 import { getCachedVerdict, readAlreadyDoneCacheState, resolveAlreadyDoneCacheStorePath,
   ALREADY_DONE_NOT_DONE_COOLDOWN_MS, ALREADY_DONE_DONE_COOLDOWN_MS } from './already-done-cache.mjs';
@@ -267,6 +268,24 @@ export function capacityCapHint(activeCount, cap) {
  *  on this repo. Land or review the backlog, or override (`node scripts/operations/pr-limit.mjs allow
  *  --branch=<b>` / `off --reason=…`). */
 export const PR_LIMIT_HINT = 'open-PR backpressure limit reached — land/review the existing PRs, or override (pr-limit.mjs allow / off)';
+
+/**
+ * Is new-PR intake held by the open-PR backpressure limit (we:xniq7xs)? Taken every builder round, so it reads the
+ * count through `countOpenPrsForDispatch`: local/cached first (no gh), and only when that is incomplete a BOUNDED
+ * networked fallback (one list, git before GitHub, cached verdicts, a per-round cap on GraphQL reads) — an
+ * incomplete local count is UNKNOWN, not "under the limit", but resolving it must not cost GitHub calls every round.
+ * Deps are injectable for tests; `main()` passes none.
+ */
+export async function readPrLimitHeld({ countOpts = {}, isGlobalOff } = {}) {
+  const { countOpenPrsForDispatch, isGlobalOffLive, decideOpenPr } = await import('../lib/pr-limit.mjs');
+  const counted = countOpenPrsForDispatch('we', countOpts);
+  const globalOff = isGlobalOff ? isGlobalOff() : isGlobalOffLive();
+  // The cap can leave PRs unresolved; each is possibly AI-authored, so count it toward the limit (upper bound) until a
+  // later round resolves it from the cache — otherwise the bound would make the hold silently fail open.
+  const openCount = counted.count === null ? null : counted.count + (counted.unresolved ?? 0);
+  const held = !decideOpenPr({ repoKey: 'we', limit: counted.limit, openCount, globalOff }).allowed;
+  return { held, counted };
+}
 
 /**
  * How old (ms) an item's `open`/`active` age must be before the IO shell spends a `gh pr list --search` call
@@ -774,7 +793,7 @@ async function main(argv) {
   // which left test-spawned runs scanning the real lane pool for an hour after vitest had died.
   installChildReaper({ log });
   const childTimeoutMs = resolveChildTimeoutMs(process.env);
-  const runJson = async (cmd, args, what) => {
+  const runJson = async (cmd, args, what) => planningRead(args, async () => {
     let out;
     try {
       out = await runBounded(cmd, args, { timeoutMs: childTimeoutMs });
@@ -783,7 +802,7 @@ async function main(argv) {
     }
     try { return JSON.parse(out); }
     catch (e) { fail(`could not parse ${what} JSON: ${String(e.message || e).split('\n')[0]}`); }
-  };
+  });
 
   // #x7xv2xt — FIXTURE MODE never touches the real lane pool. `--backlog-dir` means "a synthetic corpus", so the
   // shared pool (`lane-pool.mjs list --acquirable`, `scope-lease-collect.mjs`) is off-limits: free lanes come
@@ -929,13 +948,13 @@ async function main(argv) {
       }
     }
     groundTruth.pending = pending.length;
-    groundTruth.refresh = startAlreadyDoneRefresh(pending, resolveAlreadyDoneCacheStorePath());
+    groundTruth.refresh = startAlreadyDoneRefresh(pending, resolveAlreadyDoneCacheStorePath(), { readOnly: Boolean(flags['no-already-done-cache']) });
     if (groundTruth.refresh.error) log(`already-done refresh unavailable: ${groundTruth.refresh.error}`);
   }
 
   // 2. THE ACTIVE LEASES — reuse the live scope-lease collector. Each lease's held scope = predicted ∪ observed.
   //    Fixture mode (#x7xv2xt) skips it: a synthetic corpus has no real leases.
-  const picture = fixtureMode ? { leases: [] } : await runJson('node', [SCOPE_COLLECT_CLI, '--json'], 'scope-lease-collect');
+  const picture = fixtureMode ? { leases: [] } : await runJson('node', [SCOPE_COLLECT_CLI, '--json', '--no-track-attempts'], 'scope-lease-collect');
   const leases = (Array.isArray(picture?.leases) ? picture.leases : []).map((l) => ({
     lane: l.lane,
     scope: toRepoRelative([...(l.predicted || []), ...(l.observed || [])]),
@@ -1046,9 +1065,7 @@ async function main(argv) {
   let prLimitHeld = false;
   if (!flags['no-pr-limit-check']) {
     try {
-      const { countOpenPrsForRepo, isGlobalOffLive, decideOpenPr } = await import('../lib/pr-limit.mjs');
-      const { count: openCount, limit } = countOpenPrsForRepo('we', { localOnly: true });
-      prLimitHeld = !decideOpenPr({ repoKey: 'we', limit, openCount, globalOff: isGlobalOffLive() }).allowed;
+      prLimitHeld = (await readPrLimitHeld()).held;
     } catch (e) {
       log(`  ⚠ pr-limit check skipped (${String(e.message || e).split('\n')[0]}) — dispatch proceeds unheld on this axis`);
     }

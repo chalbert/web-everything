@@ -63,6 +63,7 @@
  *   (the observer itself) are all IMPORTED. This module adds only the pool-walk + git-read IO and the pure glue.
  */
 
+import { planningRead } from '../lib/planning-snapshot.mjs';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -478,19 +479,21 @@ function readPoolStatus(flags) {
   const args = [LANE_POOL_CLI, 'status', '--leased-only', '--json'];
   if (typeof flags.repo === 'string') args.push(`--repo=${flags.repo}`);
   if (typeof flags.name === 'string') args.push(`--name=${flags.name}`);
-  let out;
-  try {
-    // #x5n4zn3 — generous (a full pool `status` walks every lane, itself now individually git-timeout-bounded
-    // by `we:scripts/lane-pool.mjs`'s own #x5n4zn3 fix), but never unbounded.
-    out = execFileSync('node', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: resolveChildTimeoutMs() * 4, killSignal: 'SIGKILL' });
-  } catch (e) {
-    fail(`lane-pool status failed: ${String(e.message || e).split('\n')[0]}`);
-  }
-  try {
-    return JSON.parse(out);
-  } catch (e) {
-    fail(`could not parse lane-pool status JSON: ${String(e.message || e).split('\n')[0]}`);
-  }
+  return planningRead(args, () => {
+    let out;
+    try {
+      // #x5n4zn3 — generous (a full pool `status` walks every lane, itself now individually git-timeout-bounded
+      // by `we:scripts/lane-pool.mjs`'s own #x5n4zn3 fix), but never unbounded.
+      out = execFileSync('node', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: resolveChildTimeoutMs() * 4, killSignal: 'SIGKILL' });
+    } catch (e) {
+      fail(`lane-pool status failed: ${String(e.message || e).split('\n')[0]}`);
+    }
+    try {
+      return JSON.parse(out);
+    } catch (e) {
+      fail(`could not parse lane-pool status JSON: ${String(e.message || e).split('\n')[0]}`);
+    }
+  });
 }
 
 /** The IO shell: collect the live snapshot, compose the observer, emit the picture. */

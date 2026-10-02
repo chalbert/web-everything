@@ -3221,5 +3221,4344 @@
         }
       }
     }
+  },
+  "executor-families-and-structured-holds": {
+    "description": "Synthetic build, prepare, standalone Codex, Gemini/agy, fix, ci-heal and review; two repos/authors, parent-child linkage, cardless/unmatched work, model mismatch and unknown attribution. Shape vectors only, not live coverage.",
+    "snapshot": {
+      "schema": 2,
+      "snapshotId": "publisher-boot-1:7",
+      "publisherId": "publisher-boot-1",
+      "sequence": 7,
+      "observedAt": "2026-09-30T16:00:00Z",
+      "timeZone": "America/Toronto",
+      "coverage": {
+        "repos": {
+          "web-everything": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          },
+          "plateau-app": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          },
+          "frontierui": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          }
+        },
+        "collections": {
+          "runs": {
+            "total": 7,
+            "included": 7,
+            "complete": true,
+            "source": "runs"
+          },
+          "holds": {
+            "total": 3,
+            "included": 3,
+            "complete": true,
+            "source": "holds"
+          },
+          "actions": {
+            "total": 0,
+            "included": 0,
+            "complete": true,
+            "source": "actions"
+          }
+        }
+      },
+      "sources": {
+        "runs": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "holds": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "pullRequests": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "deliveries": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "partial",
+          "complete": false,
+          "reason": "Rotated local drain history; repo identity unavailable.",
+          "cursor": null
+        },
+        "actions": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "policy": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        }
+      },
+      "summary": {
+        "moving": {
+          "value": null,
+          "unit": "logical-work",
+          "source": "runs",
+          "complete": false
+        },
+        "jobs": {
+          "value": 7,
+          "unit": "jobs",
+          "source": "runs",
+          "complete": true
+        },
+        "held": {
+          "value": 3,
+          "unit": "cards",
+          "source": "holds",
+          "complete": true
+        },
+        "openPullRequests": {
+          "value": 0,
+          "unit": "pull-requests",
+          "source": "pullRequests",
+          "complete": true
+        },
+        "mergedToday": {
+          "value": 3,
+          "unit": "merged-prs",
+          "source": "deliveries",
+          "complete": false
+        },
+        "humanPending": {
+          "value": 0,
+          "unit": "human-actions",
+          "source": "actions",
+          "complete": true
+        },
+        "humanActionable": {
+          "value": 0,
+          "unit": "human-actions",
+          "source": "actions",
+          "complete": true
+        }
+      },
+      "runs": [
+        {
+          "runId": "runner:session-0",
+          "logicalWorkId": "we:4620",
+          "parentRunId": null,
+          "repo": "chalbert/web-everything",
+          "cardRefs": [
+            "we:4620"
+          ],
+          "prRefs": [],
+          "description": "Synthetic build observation.",
+          "role": "build",
+          "state": "working",
+          "rawState": null,
+          "startedAt": "2026-09-30T15:45:00Z",
+          "lastActivityAt": "2026-09-30T16:00:00Z",
+          "observedAt": "2026-09-30T16:00:00Z",
+          "nextStep": "Publish the prepared contract.",
+          "owner": "alice",
+          "author": "alice",
+          "origin": "runner",
+          "supervisor": {
+            "identity": "runner:supervisor",
+            "provider": null,
+            "source": "runs",
+            "observedAt": "2026-09-30T16:00:00Z"
+          },
+          "executor": {
+            "identity": "runner:session-0",
+            "provider": "openai",
+            "source": "runs",
+            "observedAt": "2026-09-30T16:00:00Z"
+          },
+          "requestedModel": {
+            "provider": "openai",
+            "model": "configured-model",
+            "source": "runs",
+            "observedAt": "2026-09-30T16:00:00Z",
+            "evidenceKind": "requested"
+          },
+          "reportedModel": {
+            "provider": "provider-vNext",
+            "model": "served-model",
+            "source": "runs",
+            "observedAt": "2026-09-30T16:00:00Z",
+            "evidenceKind": "reported"
+          }
+        },
+        {
+          "runId": "runner:session-1",
+          "logicalWorkId": "plateau-app:sample",
+          "parentRunId": null,
+          "repo": "chalbert/plateau-app",
+          "cardRefs": [
+            "plateau-app:sample"
+          ],
+          "prRefs": [],
+          "description": "Synthetic prepare observation.",
+          "role": "prepare",
+          "state": "working",
+          "rawState": null,
+          "startedAt": "2026-09-30T15:45:00Z",
+          "lastActivityAt": "2026-09-30T16:00:00Z",
+          "observedAt": "2026-09-30T16:00:00Z",
+          "nextStep": "Publish the prepared contract.",
+          "owner": "bob",
+          "author": "bob",
+          "origin": "runner",
+          "supervisor": {
+            "identity": "runner:supervisor",
+            "provider": null,
+            "source": "runs",
+            "observedAt": "2026-09-30T16:00:00Z"
+          },
+          "executor": {
+            "identity": "runner:session-1",
+            "provider": "anthropic",
+            "source": "runs",
+            "observedAt": "2026-09-30T16:00:00Z"
+          },
+          "requestedModel": {
+            "provider": "anthropic",
+            "model": "configured-model",
+            "source": "runs",
+            "observedAt": "2026-09-30T16:00:00Z",
+            "evidenceKind": "requested"
+          },
+          "reportedModel": {
+            "provider": "provider-vNext",
+            "model": "served-model",
+            "source": "runs",
+            "observedAt": "2026-09-30T16:00:00Z",
+            "evidenceKind": "reported"
+          }
+        },
+        {
+          "runId": "codex:session-2",
+          "logicalWorkId": null,
+          "parentRunId": null,
+          "repo": "chalbert/web-everything",
+          "cardRefs": [],
+          "prRefs": [],
+          "description": "Synthetic standalone observation.",
+          "role": "standalone",
+          "state": "working",
+          "rawState": null,
+          "startedAt": "2026-09-30T15:45:00Z",
+          "lastActivityAt": "2026-09-30T16:00:00Z",
+          "observedAt": "2026-09-30T16:00:00Z",
+          "nextStep": "Publish the prepared contract.",
+          "owner": "alice",
+          "author": "alice",
+          "origin": "codex",
+          "supervisor": null,
+          "executor": {
+            "identity": "codex:session-2",
+            "provider": "openai",
+            "source": "runs",
+            "observedAt": "2026-09-30T16:00:00Z"
+          },
+          "requestedModel": {
+            "provider": "openai",
+            "model": "configured-model",
+            "source": "runs",
+            "observedAt": "2026-09-30T16:00:00Z",
+            "evidenceKind": "requested"
+          },
+          "reportedModel": {
+            "provider": "provider-vNext",
+            "model": "served-model",
+            "source": "runs",
+            "observedAt": "2026-09-30T16:00:00Z",
+            "evidenceKind": "reported"
+          }
+        },
+        {
+          "runId": "agy:session-3",
+          "logicalWorkId": null,
+          "parentRunId": null,
+          "repo": null,
+          "cardRefs": [],
+          "prRefs": [],
+          "description": "Synthetic standalone observation.",
+          "role": "standalone",
+          "state": "working",
+          "rawState": null,
+          "startedAt": "2026-09-30T15:45:00Z",
+          "lastActivityAt": "2026-09-30T16:00:00Z",
+          "observedAt": "2026-09-30T16:00:00Z",
+          "nextStep": "Publish the prepared contract.",
+          "owner": null,
+          "author": null,
+          "origin": "agy",
+          "supervisor": null,
+          "executor": {
+            "identity": null,
+            "provider": "google",
+            "source": "runs",
+            "observedAt": "2026-09-30T16:00:00Z"
+          },
+          "requestedModel": {
+            "provider": "google",
+            "model": "configured-model",
+            "source": "runs",
+            "observedAt": "2026-09-30T16:00:00Z",
+            "evidenceKind": "requested"
+          },
+          "reportedModel": null
+        },
+        {
+          "runId": "runner:session-4",
+          "logicalWorkId": "we:4620",
+          "parentRunId": null,
+          "repo": "chalbert/web-everything",
+          "cardRefs": [
+            "we:4620"
+          ],
+          "prRefs": [],
+          "description": "Synthetic fix observation.",
+          "role": "fix",
+          "state": "working",
+          "rawState": null,
+          "startedAt": "2026-09-30T15:45:00Z",
+          "lastActivityAt": "2026-09-30T16:00:00Z",
+          "observedAt": "2026-09-30T16:00:00Z",
+          "nextStep": "Publish the prepared contract.",
+          "owner": "alice",
+          "author": "alice",
+          "origin": "runner",
+          "supervisor": {
+            "identity": "runner:supervisor",
+            "provider": null,
+            "source": "runs",
+            "observedAt": "2026-09-30T16:00:00Z"
+          },
+          "executor": {
+            "identity": "runner:session-4",
+            "provider": "openai",
+            "source": "runs",
+            "observedAt": "2026-09-30T16:00:00Z"
+          },
+          "requestedModel": {
+            "provider": "openai",
+            "model": "configured-model",
+            "source": "runs",
+            "observedAt": "2026-09-30T16:00:00Z",
+            "evidenceKind": "requested"
+          },
+          "reportedModel": {
+            "provider": "provider-vNext",
+            "model": "served-model",
+            "source": "runs",
+            "observedAt": "2026-09-30T16:00:00Z",
+            "evidenceKind": "reported"
+          }
+        },
+        {
+          "runId": "runner:session-5",
+          "logicalWorkId": "plateau-app:sample",
+          "parentRunId": null,
+          "repo": "chalbert/plateau-app",
+          "cardRefs": [
+            "plateau-app:sample"
+          ],
+          "prRefs": [],
+          "description": "Synthetic ci-heal observation.",
+          "role": "ci-heal",
+          "state": "working",
+          "rawState": null,
+          "startedAt": "2026-09-30T15:45:00Z",
+          "lastActivityAt": "2026-09-30T16:00:00Z",
+          "observedAt": "2026-09-30T16:00:00Z",
+          "nextStep": "Publish the prepared contract.",
+          "owner": "bob",
+          "author": "bob",
+          "origin": "runner",
+          "supervisor": {
+            "identity": "runner:supervisor",
+            "provider": null,
+            "source": "runs",
+            "observedAt": "2026-09-30T16:00:00Z"
+          },
+          "executor": {
+            "identity": "runner:session-5",
+            "provider": "anthropic",
+            "source": "runs",
+            "observedAt": "2026-09-30T16:00:00Z"
+          },
+          "requestedModel": {
+            "provider": "anthropic",
+            "model": "configured-model",
+            "source": "runs",
+            "observedAt": "2026-09-30T16:00:00Z",
+            "evidenceKind": "requested"
+          },
+          "reportedModel": {
+            "provider": "provider-vNext",
+            "model": "served-model",
+            "source": "runs",
+            "observedAt": "2026-09-30T16:00:00Z",
+            "evidenceKind": "reported"
+          }
+        },
+        {
+          "runId": "runner:session-6",
+          "logicalWorkId": "we:4620",
+          "parentRunId": "runner:session-0",
+          "repo": "chalbert/web-everything",
+          "cardRefs": [
+            "we:4620"
+          ],
+          "prRefs": [],
+          "description": "Synthetic review observation.",
+          "role": "review",
+          "state": "working",
+          "rawState": null,
+          "startedAt": "2026-09-30T15:45:00Z",
+          "lastActivityAt": "2026-09-30T16:00:00Z",
+          "observedAt": "2026-09-30T16:00:00Z",
+          "nextStep": "Publish the prepared contract.",
+          "owner": "alice",
+          "author": "alice",
+          "origin": "runner",
+          "supervisor": {
+            "identity": "runner:supervisor",
+            "provider": null,
+            "source": "runs",
+            "observedAt": "2026-09-30T16:00:00Z"
+          },
+          "executor": {
+            "identity": "runner:session-6",
+            "provider": "provider-vNext",
+            "source": "runs",
+            "observedAt": "2026-09-30T16:00:00Z"
+          },
+          "requestedModel": {
+            "provider": "provider-vNext",
+            "model": "configured-model",
+            "source": "runs",
+            "observedAt": "2026-09-30T16:00:00Z",
+            "evidenceKind": "requested"
+          },
+          "reportedModel": {
+            "provider": "provider-vNext",
+            "model": "served-model",
+            "source": "runs",
+            "observedAt": "2026-09-30T16:00:00Z",
+            "evidenceKind": "reported"
+          }
+        }
+      ],
+      "holds": [
+        {
+          "workRef": "we:synthetic-overlap",
+          "description": "Waiting for the progress contract.",
+          "owner": null,
+          "rawReason": "scheduler-vNext:overlap",
+          "normalizedReason": "overlap",
+          "since": "2026-09-30T15:00:00Z",
+          "asOf": "2026-09-30T16:00:00Z",
+          "nextStep": "Recheck after the contract lands.",
+          "relatedRefs": [
+            "we:4620"
+          ],
+          "sourceEvidence": {
+            "source": "holds",
+            "observedAt": "2026-09-30T16:00:00Z"
+          },
+          "overlap": {
+            "counterpart": {
+              "workRef": "we:4620",
+              "runId": "runner:session-0"
+            },
+            "files": [
+              {
+                "repo": "we",
+                "path": "contracts/plateau-progress-view.schema.json"
+              }
+            ]
+          },
+          "capacity": null
+        },
+        {
+          "workRef": "we:synthetic-preparation",
+          "description": "Waiting for the progress contract.",
+          "owner": null,
+          "rawReason": "scheduler-vNext:preparation",
+          "normalizedReason": "preparation",
+          "since": "2026-09-30T15:00:00Z",
+          "asOf": "2026-09-30T16:00:00Z",
+          "nextStep": "Recheck after the contract lands.",
+          "relatedRefs": [
+            "we:4620"
+          ],
+          "sourceEvidence": {
+            "source": "holds",
+            "observedAt": "2026-09-30T16:00:00Z"
+          },
+          "overlap": null,
+          "capacity": null
+        },
+        {
+          "workRef": "we:synthetic-capacity",
+          "description": "Waiting for the progress contract.",
+          "owner": null,
+          "rawReason": "scheduler-vNext:capacity",
+          "normalizedReason": "capacity",
+          "since": "2026-09-30T15:00:00Z",
+          "asOf": "2026-09-30T16:00:00Z",
+          "nextStep": "Recheck after the contract lands.",
+          "relatedRefs": [
+            "we:4620"
+          ],
+          "sourceEvidence": {
+            "source": "holds",
+            "observedAt": "2026-09-30T16:00:00Z"
+          },
+          "overlap": null,
+          "capacity": {
+            "used": 3,
+            "limit": 2,
+            "unit": "jobs",
+            "source": "holds",
+            "observedAt": "2026-09-30T16:00:00Z"
+          }
+        }
+      ],
+      "actions": [],
+      "items": [],
+      "deliveries": {
+        "source": "deliveries",
+        "provenance": "observed by local drain",
+        "complete": false,
+        "historyStart": "2026-09-30T14:00:00Z",
+        "today": {
+          "start": "2026-09-30T04:00:00Z",
+          "end": "2026-09-30T16:00:00Z",
+          "count": 3,
+          "complete": false
+        },
+        "trend": {
+          "status": "comparable",
+          "reason": null,
+          "current": {
+            "start": "2026-09-30T15:00:00Z",
+            "end": "2026-09-30T16:00:00Z",
+            "count": 2,
+            "complete": true
+          },
+          "previous": {
+            "start": "2026-09-30T14:00:00Z",
+            "end": "2026-09-30T15:00:00Z",
+            "count": 1,
+            "complete": true
+          }
+        }
+      },
+      "policy": {
+        "sourceKind": "external-plan",
+        "revision": "sha256:example-plan",
+        "observedAt": "2026-09-30T16:00:00Z",
+        "effectiveAt": null,
+        "readOnly": true,
+        "priorities": [
+          {
+            "description": "Restore reliable review progress.",
+            "refs": [
+              "we:4620"
+            ]
+          }
+        ],
+        "sections": [
+          {
+            "id": "standing",
+            "title": "Standing rules",
+            "text": "Keep review work moving.",
+            "sourceDate": "2026-09-29"
+          }
+        ],
+        "conflicts": [],
+        "status": "observed"
+      }
+    }
+  },
+  "executor-and-hold-unknowns": {
+    "description": "Synthetic explicit unknown attribution, overlap and capacity; measured zero differs from null.",
+    "snapshot": {
+      "schema": 2,
+      "snapshotId": "publisher-boot-1:7",
+      "publisherId": "publisher-boot-1",
+      "sequence": 7,
+      "observedAt": "2026-09-30T16:00:00Z",
+      "timeZone": "America/Toronto",
+      "coverage": {
+        "repos": {
+          "web-everything": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          },
+          "plateau-app": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          },
+          "frontierui": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          }
+        },
+        "collections": {
+          "runs": {
+            "total": 1,
+            "included": 1,
+            "complete": true,
+            "source": "runs"
+          },
+          "holds": {
+            "total": 3,
+            "included": 3,
+            "complete": true,
+            "source": "holds"
+          },
+          "actions": {
+            "total": 0,
+            "included": 0,
+            "complete": true,
+            "source": "actions"
+          }
+        }
+      },
+      "sources": {
+        "runs": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "holds": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "pullRequests": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "deliveries": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "partial",
+          "complete": false,
+          "reason": "Rotated local drain history; repo identity unavailable.",
+          "cursor": null
+        },
+        "actions": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "policy": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        }
+      },
+      "summary": {
+        "moving": {
+          "value": null,
+          "unit": "logical-work",
+          "source": "runs",
+          "complete": false
+        },
+        "jobs": {
+          "value": 1,
+          "unit": "jobs",
+          "source": "runs",
+          "complete": true
+        },
+        "held": {
+          "value": 3,
+          "unit": "cards",
+          "source": "holds",
+          "complete": true
+        },
+        "openPullRequests": {
+          "value": 0,
+          "unit": "pull-requests",
+          "source": "pullRequests",
+          "complete": true
+        },
+        "mergedToday": {
+          "value": 3,
+          "unit": "merged-prs",
+          "source": "deliveries",
+          "complete": false
+        },
+        "humanPending": {
+          "value": 0,
+          "unit": "human-actions",
+          "source": "actions",
+          "complete": true
+        },
+        "humanActionable": {
+          "value": 0,
+          "unit": "human-actions",
+          "source": "actions",
+          "complete": true
+        }
+      },
+      "runs": [
+        {
+          "runId": "runner:session-0",
+          "logicalWorkId": "we:4620",
+          "parentRunId": null,
+          "repo": "chalbert/web-everything",
+          "cardRefs": [
+            "we:4620"
+          ],
+          "prRefs": [],
+          "description": "Synthetic build observation.",
+          "role": "build",
+          "state": "working",
+          "rawState": null,
+          "startedAt": "2026-09-30T15:45:00Z",
+          "lastActivityAt": "2026-09-30T16:00:00Z",
+          "observedAt": "2026-09-30T16:00:00Z",
+          "nextStep": "Publish the prepared contract.",
+          "owner": null,
+          "author": null,
+          "origin": null,
+          "supervisor": null,
+          "executor": {
+            "identity": null,
+            "provider": null,
+            "source": "runs",
+            "observedAt": null
+          },
+          "requestedModel": null,
+          "reportedModel": null
+        }
+      ],
+      "holds": [
+        {
+          "workRef": "we:synthetic-overlap",
+          "description": "Waiting for the progress contract.",
+          "owner": null,
+          "rawReason": "scheduler-vNext:overlap",
+          "normalizedReason": "overlap",
+          "since": "2026-09-30T15:00:00Z",
+          "asOf": "2026-09-30T16:00:00Z",
+          "nextStep": "Recheck after the contract lands.",
+          "relatedRefs": [
+            "we:4620"
+          ],
+          "sourceEvidence": null,
+          "overlap": {
+            "counterpart": null,
+            "files": null
+          },
+          "capacity": {
+            "used": null,
+            "limit": 0,
+            "unit": "jobs",
+            "source": "holds",
+            "observedAt": null
+          }
+        },
+        {
+          "workRef": "we:synthetic-preparation",
+          "description": "Waiting for the progress contract.",
+          "owner": null,
+          "rawReason": "scheduler-vNext:preparation",
+          "normalizedReason": "preparation",
+          "since": "2026-09-30T15:00:00Z",
+          "asOf": "2026-09-30T16:00:00Z",
+          "nextStep": "Recheck after the contract lands.",
+          "relatedRefs": [
+            "we:4620"
+          ],
+          "sourceEvidence": null,
+          "overlap": {
+            "counterpart": null,
+            "files": null
+          },
+          "capacity": {
+            "used": null,
+            "limit": 0,
+            "unit": "jobs",
+            "source": "holds",
+            "observedAt": null
+          }
+        },
+        {
+          "workRef": "we:synthetic-capacity",
+          "description": "Waiting for the progress contract.",
+          "owner": null,
+          "rawReason": "scheduler-vNext:capacity",
+          "normalizedReason": "capacity",
+          "since": "2026-09-30T15:00:00Z",
+          "asOf": "2026-09-30T16:00:00Z",
+          "nextStep": "Recheck after the contract lands.",
+          "relatedRefs": [
+            "we:4620"
+          ],
+          "sourceEvidence": null,
+          "overlap": {
+            "counterpart": null,
+            "files": null
+          },
+          "capacity": {
+            "used": null,
+            "limit": 0,
+            "unit": "jobs",
+            "source": "holds",
+            "observedAt": null
+          }
+        }
+      ],
+      "actions": [],
+      "items": [],
+      "deliveries": {
+        "source": "deliveries",
+        "provenance": "observed by local drain",
+        "complete": false,
+        "historyStart": "2026-09-30T14:00:00Z",
+        "today": {
+          "start": "2026-09-30T04:00:00Z",
+          "end": "2026-09-30T16:00:00Z",
+          "count": 3,
+          "complete": false
+        },
+        "trend": {
+          "status": "comparable",
+          "reason": null,
+          "current": {
+            "start": "2026-09-30T15:00:00Z",
+            "end": "2026-09-30T16:00:00Z",
+            "count": 2,
+            "complete": true
+          },
+          "previous": {
+            "start": "2026-09-30T14:00:00Z",
+            "end": "2026-09-30T15:00:00Z",
+            "count": 1,
+            "complete": true
+          }
+        }
+      },
+      "policy": {
+        "sourceKind": "external-plan",
+        "revision": "sha256:example-plan",
+        "observedAt": "2026-09-30T16:00:00Z",
+        "effectiveAt": null,
+        "readOnly": true,
+        "priorities": [
+          {
+            "description": "Restore reliable review progress.",
+            "refs": [
+              "we:4620"
+            ]
+          }
+        ],
+        "sections": [
+          {
+            "id": "standing",
+            "title": "Standing rules",
+            "text": "Keep review work moving.",
+            "sourceDate": "2026-09-29"
+          }
+        ],
+        "conflicts": [],
+        "status": "observed"
+      }
+    }
+  },
+  "pr-complete-cross-repo": {
+    "description": "pr-complete-cross-repo: synthetic author-independent membership and sanitized waiting evidence.",
+    "snapshot": {
+      "schema": 2,
+      "snapshotId": "pr-complete-cross-repo",
+      "publisherId": "publisher-boot-1",
+      "sequence": 7,
+      "observedAt": "2026-09-30T16:00:00Z",
+      "timeZone": "America/Toronto",
+      "coverage": {
+        "repos": {
+          "web-everything": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          },
+          "plateau-app": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          },
+          "frontierui": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          }
+        },
+        "collections": {
+          "runs": {
+            "total": 0,
+            "included": 0,
+            "complete": true,
+            "source": "runs"
+          },
+          "holds": {
+            "total": 0,
+            "included": 0,
+            "complete": true,
+            "source": "holds"
+          },
+          "actions": {
+            "total": 0,
+            "included": 0,
+            "complete": true,
+            "source": "actions"
+          },
+          "pullRequests": {
+            "total": 2,
+            "cached": 2,
+            "included": 2,
+            "complete": true,
+            "source": "pullRequests",
+            "freshness": {
+              "observedAt": "2026-09-30T15:55:00Z",
+              "lastSuccessAt": "2026-09-30T15:55:00Z",
+              "expectedEveryMs": 120000,
+              "staleAfterMs": 600000,
+              "status": "fresh",
+              "complete": true,
+              "reason": null,
+              "cursor": null
+            }
+          }
+        }
+      },
+      "sources": {
+        "runs": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "holds": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "pullRequests": {
+          "observedAt": "2026-09-30T15:55:00Z",
+          "lastSuccessAt": "2026-09-30T15:55:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "deliveries": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "partial",
+          "complete": false,
+          "reason": "Rotated local drain history; repo identity unavailable.",
+          "cursor": null
+        },
+        "actions": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "policy": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        }
+      },
+      "summary": {
+        "moving": {
+          "value": 0,
+          "unit": "logical-work",
+          "source": "runs",
+          "complete": true
+        },
+        "jobs": {
+          "value": 0,
+          "unit": "jobs",
+          "source": "runs",
+          "complete": true
+        },
+        "held": {
+          "value": 0,
+          "unit": "cards",
+          "source": "holds",
+          "complete": true
+        },
+        "openPullRequests": {
+          "value": 0,
+          "unit": "pull-requests",
+          "source": "pullRequests",
+          "complete": true
+        },
+        "mergedToday": {
+          "value": 3,
+          "unit": "merged-prs",
+          "source": "deliveries",
+          "complete": false
+        },
+        "humanPending": {
+          "value": 0,
+          "unit": "human-actions",
+          "source": "actions",
+          "complete": true
+        },
+        "humanActionable": {
+          "value": 0,
+          "unit": "human-actions",
+          "source": "actions",
+          "complete": true
+        }
+      },
+      "runs": [],
+      "holds": [],
+      "actions": [],
+      "items": [],
+      "deliveries": {
+        "source": "deliveries",
+        "provenance": "observed by local drain",
+        "complete": false,
+        "historyStart": "2026-09-30T14:00:00Z",
+        "today": {
+          "start": "2026-09-30T04:00:00Z",
+          "end": "2026-09-30T16:00:00Z",
+          "count": 3,
+          "complete": false
+        },
+        "trend": {
+          "status": "comparable",
+          "reason": null,
+          "current": {
+            "start": "2026-09-30T15:00:00Z",
+            "end": "2026-09-30T16:00:00Z",
+            "count": 2,
+            "complete": true
+          },
+          "previous": {
+            "start": "2026-09-30T14:00:00Z",
+            "end": "2026-09-30T15:00:00Z",
+            "count": 1,
+            "complete": true
+          }
+        }
+      },
+      "policy": {
+        "sourceKind": "external-plan",
+        "revision": "sha256:example-plan",
+        "observedAt": "2026-09-30T16:00:00Z",
+        "effectiveAt": null,
+        "readOnly": true,
+        "priorities": [
+          {
+            "description": "Restore reliable review progress.",
+            "refs": [
+              "we:4620"
+            ]
+          }
+        ],
+        "sections": [
+          {
+            "id": "standing",
+            "title": "Standing rules",
+            "text": "Keep review work moving.",
+            "sourceDate": "2026-09-29"
+          }
+        ],
+        "conflicts": [],
+        "status": "observed"
+      },
+      "pullRequests": [
+        {
+          "repo": "example/alpha",
+          "number": 7,
+          "url": "https://github.com/example/alpha/pull/7",
+          "description": "Preserve the complete synthetic progress description across cached page boundaries. This change exposes observed waiting evidence to the operator.",
+          "author": {
+            "value": null,
+            "reason": "Not available from the cached source."
+          },
+          "draft": false,
+          "headSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "cardRefs": [],
+          "ci": {
+            "state": {
+              "value": "success",
+              "reason": null
+            },
+            "observedHeadSha": {
+              "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "reason": null
+            },
+            "observedAt": {
+              "value": "2026-09-30T15:55:00Z",
+              "reason": null
+            },
+            "source": "pullRequests"
+          },
+          "review": {
+            "state": {
+              "value": null,
+              "reason": "Not available from the cached source."
+            },
+            "observedHeadSha": {
+              "value": null,
+              "reason": "Not available from the cached source."
+            },
+            "observedAt": {
+              "value": null,
+              "reason": "Not available from the cached source."
+            },
+            "source": "pullRequests"
+          },
+          "waitReasons": [
+            "unknown-ci",
+            "review"
+          ],
+          "primaryWait": "unknown-ci",
+          "handler": {
+            "value": "review-daemon",
+            "reason": null
+          },
+          "waitSince": {
+            "value": null,
+            "reason": "Not available from the cached source."
+          },
+          "sources": [
+            "pullRequests"
+          ],
+          "waitingChain": {
+            "owner": {
+              "value": "fix-daemon",
+              "reason": null
+            },
+            "reason": "Shared files serialize this PR behind a PR and a build.",
+            "queuePosition": {
+              "value": 2,
+              "reason": null
+            },
+            "blockers": [
+              {
+                "target": {
+                  "kind": "pr",
+                  "pr": {
+                    "repo": "example/beta",
+                    "number": 7
+                  }
+                },
+                "file": {
+                  "repo": "example/alpha",
+                  "path": "contracts/progress.json"
+                },
+                "observedAt": {
+                  "value": "2026-09-30T15:55:00Z",
+                  "reason": null
+                },
+                "source": "pullRequests"
+              },
+              {
+                "target": {
+                  "kind": "build",
+                  "repo": "example/alpha",
+                  "id": "build:42"
+                },
+                "file": {
+                  "repo": "example/alpha",
+                  "path": "contracts/progress.json"
+                },
+                "observedAt": {
+                  "value": "2026-09-30T15:55:00Z",
+                  "reason": null
+                },
+                "source": "pullRequests"
+              }
+            ],
+            "holder": {
+              "kind": {
+                "value": "fix",
+                "reason": null
+              },
+              "identity": {
+                "value": "daemon:boot-9:job-2",
+                "reason": null
+              },
+              "claimedAt": {
+                "value": "2026-09-30T15:00:00Z",
+                "reason": null
+              },
+              "liveness": "expired",
+              "leaseExpiresAt": {
+                "value": "2026-09-30T15:10:00Z",
+                "reason": null
+              },
+              "reason": "Lease expired; this is historical ownership, not an active worker."
+            },
+            "nextSteps": [
+              {
+                "order": 1,
+                "condition": "When both overlapping holders release their scopes",
+                "owner": {
+                  "value": "fix-daemon",
+                  "reason": null
+                },
+                "action": "Apply requested corrections."
+              },
+              {
+                "order": 2,
+                "condition": "If a human review is requested after the fix",
+                "owner": {
+                  "value": "operator",
+                  "reason": null
+                },
+                "action": "Review the updated head."
+              }
+            ],
+            "eta": {
+              "milliseconds": {
+                "value": null,
+                "reason": "Not available from the cached source."
+              },
+              "sampleCount": 0,
+              "sampleWindow": {
+                "value": null,
+                "reason": "Not available from the cached source."
+              },
+              "method": {
+                "value": null,
+                "reason": "Not available from the cached source."
+              },
+              "uncertainty": {
+                "value": null,
+                "reason": "Not available from the cached source."
+              }
+            }
+          }
+        },
+        {
+          "repo": "example/beta",
+          "number": 7,
+          "url": "https://github.com/example/beta/pull/7",
+          "description": "Preserve the complete synthetic progress description across cached page boundaries. This change exposes observed waiting evidence to the operator.",
+          "author": {
+            "value": "synthetic-author",
+            "reason": null
+          },
+          "draft": false,
+          "headSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "cardRefs": [],
+          "ci": {
+            "state": {
+              "value": "success",
+              "reason": null
+            },
+            "observedHeadSha": {
+              "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "reason": null
+            },
+            "observedAt": {
+              "value": "2026-09-30T15:55:00Z",
+              "reason": null
+            },
+            "source": "pullRequests"
+          },
+          "review": {
+            "state": {
+              "value": "approved",
+              "reason": null
+            },
+            "observedHeadSha": {
+              "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "reason": null
+            },
+            "observedAt": {
+              "value": "2026-09-30T15:55:00Z",
+              "reason": null
+            },
+            "source": "pullRequests"
+          },
+          "waitReasons": [
+            "ready"
+          ],
+          "primaryWait": "ready",
+          "handler": {
+            "value": "review-daemon",
+            "reason": null
+          },
+          "waitSince": {
+            "value": null,
+            "reason": "Not available from the cached source."
+          },
+          "sources": [
+            "pullRequests"
+          ],
+          "waitingChain": {
+            "owner": {
+              "value": "drain",
+              "reason": null
+            },
+            "reason": "Current-head evidence permits a ready display; merge checks remain independent.",
+            "queuePosition": {
+              "value": 2,
+              "reason": null
+            },
+            "blockers": [],
+            "holder": {
+              "kind": {
+                "value": "fix",
+                "reason": null
+              },
+              "identity": {
+                "value": "daemon:boot-9:job-2",
+                "reason": null
+              },
+              "claimedAt": {
+                "value": "2026-09-30T15:00:00Z",
+                "reason": null
+              },
+              "liveness": "expired",
+              "leaseExpiresAt": {
+                "value": "2026-09-30T15:10:00Z",
+                "reason": null
+              },
+              "reason": "Lease expired; this is historical ownership, not an active worker."
+            },
+            "nextSteps": [
+              {
+                "order": 1,
+                "condition": "When both overlapping holders release their scopes",
+                "owner": {
+                  "value": "fix-daemon",
+                  "reason": null
+                },
+                "action": "Apply requested corrections."
+              },
+              {
+                "order": 2,
+                "condition": "If a human review is requested after the fix",
+                "owner": {
+                  "value": "operator",
+                  "reason": null
+                },
+                "action": "Review the updated head."
+              }
+            ],
+            "eta": {
+              "milliseconds": {
+                "value": 60000,
+                "reason": null
+              },
+              "sampleCount": 12,
+              "sampleWindow": {
+                "value": {
+                  "start": "2026-09-30T14:00:00Z",
+                  "end": "2026-09-30T15:55:00Z"
+                },
+                "reason": null
+              },
+              "method": {
+                "value": "median of comparable observed steps",
+                "reason": null
+              },
+              "uncertainty": {
+                "value": 30000,
+                "reason": null
+              }
+            }
+          }
+        }
+      ]
+    }
+  },
+  "pr-empty": {
+    "description": "pr-empty: synthetic author-independent membership and sanitized waiting evidence.",
+    "snapshot": {
+      "schema": 2,
+      "snapshotId": "pr-empty",
+      "publisherId": "publisher-boot-1",
+      "sequence": 7,
+      "observedAt": "2026-09-30T16:00:00Z",
+      "timeZone": "America/Toronto",
+      "coverage": {
+        "repos": {
+          "web-everything": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          },
+          "plateau-app": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          },
+          "frontierui": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          }
+        },
+        "collections": {
+          "runs": {
+            "total": 0,
+            "included": 0,
+            "complete": true,
+            "source": "runs"
+          },
+          "holds": {
+            "total": 0,
+            "included": 0,
+            "complete": true,
+            "source": "holds"
+          },
+          "actions": {
+            "total": 0,
+            "included": 0,
+            "complete": true,
+            "source": "actions"
+          },
+          "pullRequests": {
+            "total": 0,
+            "cached": 0,
+            "included": 0,
+            "complete": true,
+            "source": "pullRequests",
+            "freshness": {
+              "observedAt": "2026-09-30T15:55:00Z",
+              "lastSuccessAt": "2026-09-30T15:55:00Z",
+              "expectedEveryMs": 120000,
+              "staleAfterMs": 600000,
+              "status": "fresh",
+              "complete": true,
+              "reason": null,
+              "cursor": null
+            }
+          }
+        }
+      },
+      "sources": {
+        "runs": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "holds": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "pullRequests": {
+          "observedAt": "2026-09-30T15:55:00Z",
+          "lastSuccessAt": "2026-09-30T15:55:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "deliveries": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "partial",
+          "complete": false,
+          "reason": "Rotated local drain history; repo identity unavailable.",
+          "cursor": null
+        },
+        "actions": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "policy": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        }
+      },
+      "summary": {
+        "moving": {
+          "value": 0,
+          "unit": "logical-work",
+          "source": "runs",
+          "complete": true
+        },
+        "jobs": {
+          "value": 0,
+          "unit": "jobs",
+          "source": "runs",
+          "complete": true
+        },
+        "held": {
+          "value": 0,
+          "unit": "cards",
+          "source": "holds",
+          "complete": true
+        },
+        "openPullRequests": {
+          "value": 0,
+          "unit": "pull-requests",
+          "source": "pullRequests",
+          "complete": true
+        },
+        "mergedToday": {
+          "value": 3,
+          "unit": "merged-prs",
+          "source": "deliveries",
+          "complete": false
+        },
+        "humanPending": {
+          "value": 0,
+          "unit": "human-actions",
+          "source": "actions",
+          "complete": true
+        },
+        "humanActionable": {
+          "value": 0,
+          "unit": "human-actions",
+          "source": "actions",
+          "complete": true
+        }
+      },
+      "runs": [],
+      "holds": [],
+      "actions": [],
+      "items": [],
+      "deliveries": {
+        "source": "deliveries",
+        "provenance": "observed by local drain",
+        "complete": false,
+        "historyStart": "2026-09-30T14:00:00Z",
+        "today": {
+          "start": "2026-09-30T04:00:00Z",
+          "end": "2026-09-30T16:00:00Z",
+          "count": 3,
+          "complete": false
+        },
+        "trend": {
+          "status": "comparable",
+          "reason": null,
+          "current": {
+            "start": "2026-09-30T15:00:00Z",
+            "end": "2026-09-30T16:00:00Z",
+            "count": 2,
+            "complete": true
+          },
+          "previous": {
+            "start": "2026-09-30T14:00:00Z",
+            "end": "2026-09-30T15:00:00Z",
+            "count": 1,
+            "complete": true
+          }
+        }
+      },
+      "policy": {
+        "sourceKind": "external-plan",
+        "revision": "sha256:example-plan",
+        "observedAt": "2026-09-30T16:00:00Z",
+        "effectiveAt": null,
+        "readOnly": true,
+        "priorities": [
+          {
+            "description": "Restore reliable review progress.",
+            "refs": [
+              "we:4620"
+            ]
+          }
+        ],
+        "sections": [
+          {
+            "id": "standing",
+            "title": "Standing rules",
+            "text": "Keep review work moving.",
+            "sourceDate": "2026-09-29"
+          }
+        ],
+        "conflicts": [],
+        "status": "observed"
+      },
+      "pullRequests": []
+    }
+  },
+  "pr-partial-known": {
+    "description": "pr-partial-known: synthetic author-independent membership and sanitized waiting evidence.",
+    "snapshot": {
+      "schema": 2,
+      "snapshotId": "pr-partial-known",
+      "publisherId": "publisher-boot-1",
+      "sequence": 7,
+      "observedAt": "2026-09-30T16:00:00Z",
+      "timeZone": "America/Toronto",
+      "coverage": {
+        "repos": {
+          "web-everything": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          },
+          "plateau-app": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          },
+          "frontierui": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          }
+        },
+        "collections": {
+          "runs": {
+            "total": 0,
+            "included": 0,
+            "complete": true,
+            "source": "runs"
+          },
+          "holds": {
+            "total": 0,
+            "included": 0,
+            "complete": true,
+            "source": "holds"
+          },
+          "actions": {
+            "total": 0,
+            "included": 0,
+            "complete": true,
+            "source": "actions"
+          },
+          "pullRequests": {
+            "total": 8,
+            "cached": 2,
+            "included": 1,
+            "complete": false,
+            "source": "pullRequests",
+            "freshness": {
+              "observedAt": "2026-09-30T15:55:00Z",
+              "lastSuccessAt": "2026-09-30T15:55:00Z",
+              "expectedEveryMs": 120000,
+              "staleAfterMs": 600000,
+              "status": "partial",
+              "complete": false,
+              "reason": "Cached membership does not establish the entire universe.",
+              "cursor": null
+            }
+          }
+        }
+      },
+      "sources": {
+        "runs": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "holds": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "pullRequests": {
+          "observedAt": "2026-09-30T15:55:00Z",
+          "lastSuccessAt": "2026-09-30T15:55:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "partial",
+          "complete": false,
+          "reason": "Cached membership does not establish the entire universe.",
+          "cursor": null
+        },
+        "deliveries": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "partial",
+          "complete": false,
+          "reason": "Rotated local drain history; repo identity unavailable.",
+          "cursor": null
+        },
+        "actions": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "policy": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        }
+      },
+      "summary": {
+        "moving": {
+          "value": 0,
+          "unit": "logical-work",
+          "source": "runs",
+          "complete": true
+        },
+        "jobs": {
+          "value": 0,
+          "unit": "jobs",
+          "source": "runs",
+          "complete": true
+        },
+        "held": {
+          "value": 0,
+          "unit": "cards",
+          "source": "holds",
+          "complete": true
+        },
+        "openPullRequests": {
+          "value": 0,
+          "unit": "pull-requests",
+          "source": "pullRequests",
+          "complete": true
+        },
+        "mergedToday": {
+          "value": 3,
+          "unit": "merged-prs",
+          "source": "deliveries",
+          "complete": false
+        },
+        "humanPending": {
+          "value": 0,
+          "unit": "human-actions",
+          "source": "actions",
+          "complete": true
+        },
+        "humanActionable": {
+          "value": 0,
+          "unit": "human-actions",
+          "source": "actions",
+          "complete": true
+        }
+      },
+      "runs": [],
+      "holds": [],
+      "actions": [],
+      "items": [],
+      "deliveries": {
+        "source": "deliveries",
+        "provenance": "observed by local drain",
+        "complete": false,
+        "historyStart": "2026-09-30T14:00:00Z",
+        "today": {
+          "start": "2026-09-30T04:00:00Z",
+          "end": "2026-09-30T16:00:00Z",
+          "count": 3,
+          "complete": false
+        },
+        "trend": {
+          "status": "comparable",
+          "reason": null,
+          "current": {
+            "start": "2026-09-30T15:00:00Z",
+            "end": "2026-09-30T16:00:00Z",
+            "count": 2,
+            "complete": true
+          },
+          "previous": {
+            "start": "2026-09-30T14:00:00Z",
+            "end": "2026-09-30T15:00:00Z",
+            "count": 1,
+            "complete": true
+          }
+        }
+      },
+      "policy": {
+        "sourceKind": "external-plan",
+        "revision": "sha256:example-plan",
+        "observedAt": "2026-09-30T16:00:00Z",
+        "effectiveAt": null,
+        "readOnly": true,
+        "priorities": [
+          {
+            "description": "Restore reliable review progress.",
+            "refs": [
+              "we:4620"
+            ]
+          }
+        ],
+        "sections": [
+          {
+            "id": "standing",
+            "title": "Standing rules",
+            "text": "Keep review work moving.",
+            "sourceDate": "2026-09-29"
+          }
+        ],
+        "conflicts": [],
+        "status": "observed"
+      },
+      "pullRequests": [
+        {
+          "repo": "example/alpha",
+          "number": 7,
+          "url": "https://github.com/example/alpha/pull/7",
+          "description": "Preserve the complete synthetic progress description across cached page boundaries. This change exposes observed waiting evidence to the operator.",
+          "author": {
+            "value": null,
+            "reason": "Not available from the cached source."
+          },
+          "draft": false,
+          "headSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "cardRefs": [],
+          "ci": {
+            "state": {
+              "value": "success",
+              "reason": null
+            },
+            "observedHeadSha": {
+              "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "reason": null
+            },
+            "observedAt": {
+              "value": "2026-09-30T15:55:00Z",
+              "reason": null
+            },
+            "source": "pullRequests"
+          },
+          "review": {
+            "state": {
+              "value": null,
+              "reason": "Not available from the cached source."
+            },
+            "observedHeadSha": {
+              "value": null,
+              "reason": "Not available from the cached source."
+            },
+            "observedAt": {
+              "value": null,
+              "reason": "Not available from the cached source."
+            },
+            "source": "pullRequests"
+          },
+          "waitReasons": [
+            "unknown-ci",
+            "review"
+          ],
+          "primaryWait": "unknown-ci",
+          "handler": {
+            "value": "review-daemon",
+            "reason": null
+          },
+          "waitSince": {
+            "value": null,
+            "reason": "Not available from the cached source."
+          },
+          "sources": [
+            "pullRequests"
+          ],
+          "waitingChain": {
+            "owner": {
+              "value": "fix-daemon",
+              "reason": null
+            },
+            "reason": "Shared files serialize this PR behind a PR and a build.",
+            "queuePosition": {
+              "value": 2,
+              "reason": null
+            },
+            "blockers": [
+              {
+                "target": {
+                  "kind": "pr",
+                  "pr": {
+                    "repo": "example/beta",
+                    "number": 7
+                  }
+                },
+                "file": {
+                  "repo": "example/alpha",
+                  "path": "contracts/progress.json"
+                },
+                "observedAt": {
+                  "value": "2026-09-30T15:55:00Z",
+                  "reason": null
+                },
+                "source": "pullRequests"
+              },
+              {
+                "target": {
+                  "kind": "build",
+                  "repo": "example/alpha",
+                  "id": "build:42"
+                },
+                "file": {
+                  "repo": "example/alpha",
+                  "path": "contracts/progress.json"
+                },
+                "observedAt": {
+                  "value": "2026-09-30T15:55:00Z",
+                  "reason": null
+                },
+                "source": "pullRequests"
+              }
+            ],
+            "holder": {
+              "kind": {
+                "value": "fix",
+                "reason": null
+              },
+              "identity": {
+                "value": "daemon:boot-9:job-2",
+                "reason": null
+              },
+              "claimedAt": {
+                "value": "2026-09-30T15:00:00Z",
+                "reason": null
+              },
+              "liveness": "expired",
+              "leaseExpiresAt": {
+                "value": "2026-09-30T15:10:00Z",
+                "reason": null
+              },
+              "reason": "Lease expired; this is historical ownership, not an active worker."
+            },
+            "nextSteps": [
+              {
+                "order": 1,
+                "condition": "When both overlapping holders release their scopes",
+                "owner": {
+                  "value": "fix-daemon",
+                  "reason": null
+                },
+                "action": "Apply requested corrections."
+              },
+              {
+                "order": 2,
+                "condition": "If a human review is requested after the fix",
+                "owner": {
+                  "value": "operator",
+                  "reason": null
+                },
+                "action": "Review the updated head."
+              }
+            ],
+            "eta": {
+              "milliseconds": {
+                "value": null,
+                "reason": "Not available from the cached source."
+              },
+              "sampleCount": 0,
+              "sampleWindow": {
+                "value": null,
+                "reason": "Not available from the cached source."
+              },
+              "method": {
+                "value": null,
+                "reason": "Not available from the cached source."
+              },
+              "uncertainty": {
+                "value": null,
+                "reason": "Not available from the cached source."
+              }
+            }
+          }
+        }
+      ]
+    }
+  },
+  "pr-unknown-total-pages": {
+    "description": "pr-unknown-total-pages: synthetic author-independent membership and sanitized waiting evidence.",
+    "snapshot": {
+      "schema": 2,
+      "snapshotId": "pr-unknown-total-pages",
+      "publisherId": "publisher-boot-1",
+      "sequence": 7,
+      "observedAt": "2026-09-30T16:00:00Z",
+      "timeZone": "America/Toronto",
+      "coverage": {
+        "repos": {
+          "web-everything": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          },
+          "plateau-app": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          },
+          "frontierui": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          }
+        },
+        "collections": {
+          "runs": {
+            "total": 0,
+            "included": 0,
+            "complete": true,
+            "source": "runs"
+          },
+          "holds": {
+            "total": 0,
+            "included": 0,
+            "complete": true,
+            "source": "holds"
+          },
+          "actions": {
+            "total": 0,
+            "included": 0,
+            "complete": true,
+            "source": "actions"
+          },
+          "pullRequests": {
+            "total": null,
+            "cached": 3,
+            "included": 1,
+            "complete": false,
+            "source": "pullRequests",
+            "freshness": {
+              "observedAt": "2026-09-30T15:55:00Z",
+              "lastSuccessAt": "2026-09-30T15:55:00Z",
+              "expectedEveryMs": 120000,
+              "staleAfterMs": 600000,
+              "status": "partial",
+              "complete": false,
+              "reason": "Cached membership does not establish the entire universe.",
+              "cursor": null
+            }
+          }
+        }
+      },
+      "sources": {
+        "runs": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "holds": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "pullRequests": {
+          "observedAt": "2026-09-30T15:55:00Z",
+          "lastSuccessAt": "2026-09-30T15:55:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "partial",
+          "complete": false,
+          "reason": "Cached membership does not establish the entire universe.",
+          "cursor": null
+        },
+        "deliveries": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "partial",
+          "complete": false,
+          "reason": "Rotated local drain history; repo identity unavailable.",
+          "cursor": null
+        },
+        "actions": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "policy": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        }
+      },
+      "summary": {
+        "moving": {
+          "value": 0,
+          "unit": "logical-work",
+          "source": "runs",
+          "complete": true
+        },
+        "jobs": {
+          "value": 0,
+          "unit": "jobs",
+          "source": "runs",
+          "complete": true
+        },
+        "held": {
+          "value": 0,
+          "unit": "cards",
+          "source": "holds",
+          "complete": true
+        },
+        "openPullRequests": {
+          "value": 0,
+          "unit": "pull-requests",
+          "source": "pullRequests",
+          "complete": true
+        },
+        "mergedToday": {
+          "value": 3,
+          "unit": "merged-prs",
+          "source": "deliveries",
+          "complete": false
+        },
+        "humanPending": {
+          "value": 0,
+          "unit": "human-actions",
+          "source": "actions",
+          "complete": true
+        },
+        "humanActionable": {
+          "value": 0,
+          "unit": "human-actions",
+          "source": "actions",
+          "complete": true
+        }
+      },
+      "runs": [],
+      "holds": [],
+      "actions": [],
+      "items": [],
+      "deliveries": {
+        "source": "deliveries",
+        "provenance": "observed by local drain",
+        "complete": false,
+        "historyStart": "2026-09-30T14:00:00Z",
+        "today": {
+          "start": "2026-09-30T04:00:00Z",
+          "end": "2026-09-30T16:00:00Z",
+          "count": 3,
+          "complete": false
+        },
+        "trend": {
+          "status": "comparable",
+          "reason": null,
+          "current": {
+            "start": "2026-09-30T15:00:00Z",
+            "end": "2026-09-30T16:00:00Z",
+            "count": 2,
+            "complete": true
+          },
+          "previous": {
+            "start": "2026-09-30T14:00:00Z",
+            "end": "2026-09-30T15:00:00Z",
+            "count": 1,
+            "complete": true
+          }
+        }
+      },
+      "policy": {
+        "sourceKind": "external-plan",
+        "revision": "sha256:example-plan",
+        "observedAt": "2026-09-30T16:00:00Z",
+        "effectiveAt": null,
+        "readOnly": true,
+        "priorities": [
+          {
+            "description": "Restore reliable review progress.",
+            "refs": [
+              "we:4620"
+            ]
+          }
+        ],
+        "sections": [
+          {
+            "id": "standing",
+            "title": "Standing rules",
+            "text": "Keep review work moving.",
+            "sourceDate": "2026-09-29"
+          }
+        ],
+        "conflicts": [],
+        "status": "observed"
+      },
+      "pullRequests": [
+        {
+          "repo": "example/alpha",
+          "number": 7,
+          "url": "https://github.com/example/alpha/pull/7",
+          "description": "Preserve the complete synthetic progress description across cached page boundaries. This change exposes observed waiting evidence to the operator.",
+          "author": {
+            "value": null,
+            "reason": "Not available from the cached source."
+          },
+          "draft": false,
+          "headSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "cardRefs": [],
+          "ci": {
+            "state": {
+              "value": "success",
+              "reason": null
+            },
+            "observedHeadSha": {
+              "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "reason": null
+            },
+            "observedAt": {
+              "value": "2026-09-30T15:55:00Z",
+              "reason": null
+            },
+            "source": "pullRequests"
+          },
+          "review": {
+            "state": {
+              "value": null,
+              "reason": "Not available from the cached source."
+            },
+            "observedHeadSha": {
+              "value": null,
+              "reason": "Not available from the cached source."
+            },
+            "observedAt": {
+              "value": null,
+              "reason": "Not available from the cached source."
+            },
+            "source": "pullRequests"
+          },
+          "waitReasons": [
+            "unknown-ci",
+            "review"
+          ],
+          "primaryWait": "unknown-ci",
+          "handler": {
+            "value": "review-daemon",
+            "reason": null
+          },
+          "waitSince": {
+            "value": null,
+            "reason": "Not available from the cached source."
+          },
+          "sources": [
+            "pullRequests"
+          ],
+          "waitingChain": {
+            "owner": {
+              "value": "fix-daemon",
+              "reason": null
+            },
+            "reason": "Shared files serialize this PR behind a PR and a build.",
+            "queuePosition": {
+              "value": 2,
+              "reason": null
+            },
+            "blockers": [
+              {
+                "target": {
+                  "kind": "pr",
+                  "pr": {
+                    "repo": "example/beta",
+                    "number": 7
+                  }
+                },
+                "file": {
+                  "repo": "example/alpha",
+                  "path": "contracts/progress.json"
+                },
+                "observedAt": {
+                  "value": "2026-09-30T15:55:00Z",
+                  "reason": null
+                },
+                "source": "pullRequests"
+              },
+              {
+                "target": {
+                  "kind": "build",
+                  "repo": "example/alpha",
+                  "id": "build:42"
+                },
+                "file": {
+                  "repo": "example/alpha",
+                  "path": "contracts/progress.json"
+                },
+                "observedAt": {
+                  "value": "2026-09-30T15:55:00Z",
+                  "reason": null
+                },
+                "source": "pullRequests"
+              }
+            ],
+            "holder": {
+              "kind": {
+                "value": "fix",
+                "reason": null
+              },
+              "identity": {
+                "value": "daemon:boot-9:job-2",
+                "reason": null
+              },
+              "claimedAt": {
+                "value": "2026-09-30T15:00:00Z",
+                "reason": null
+              },
+              "liveness": "expired",
+              "leaseExpiresAt": {
+                "value": "2026-09-30T15:10:00Z",
+                "reason": null
+              },
+              "reason": "Lease expired; this is historical ownership, not an active worker."
+            },
+            "nextSteps": [
+              {
+                "order": 1,
+                "condition": "When both overlapping holders release their scopes",
+                "owner": {
+                  "value": "fix-daemon",
+                  "reason": null
+                },
+                "action": "Apply requested corrections."
+              },
+              {
+                "order": 2,
+                "condition": "If a human review is requested after the fix",
+                "owner": {
+                  "value": "operator",
+                  "reason": null
+                },
+                "action": "Review the updated head."
+              }
+            ],
+            "eta": {
+              "milliseconds": {
+                "value": null,
+                "reason": "Not available from the cached source."
+              },
+              "sampleCount": 0,
+              "sampleWindow": {
+                "value": null,
+                "reason": "Not available from the cached source."
+              },
+              "method": {
+                "value": null,
+                "reason": "Not available from the cached source."
+              },
+              "uncertainty": {
+                "value": null,
+                "reason": "Not available from the cached source."
+              }
+            }
+          }
+        }
+      ]
+    },
+    "exchanges": [
+      {
+        "request": {
+          "kind": "pr-page-request",
+          "collection": "pullRequests",
+          "identity": {
+            "snapshotId": "pr-unknown-total-pages",
+            "publisherId": "publisher-boot-1",
+            "sequence": 7
+          },
+          "cursor": null
+        },
+        "result": {
+          "kind": "pr-page-response",
+          "collection": "pullRequests",
+          "identity": {
+            "snapshotId": "pr-unknown-total-pages",
+            "publisherId": "publisher-boot-1",
+            "sequence": 7
+          },
+          "cursor": null,
+          "rows": [
+            {
+              "repo": "example/alpha",
+              "number": 7,
+              "url": "https://github.com/example/alpha/pull/7",
+              "description": "Preserve the complete synthetic progress description across cached page boundaries. This change exposes observed waiting evidence to the operator.",
+              "author": {
+                "value": null,
+                "reason": "Not available from the cached source."
+              },
+              "draft": false,
+              "headSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "cardRefs": [],
+              "ci": {
+                "state": {
+                  "value": "success",
+                  "reason": null
+                },
+                "observedHeadSha": {
+                  "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                  "reason": null
+                },
+                "observedAt": {
+                  "value": "2026-09-30T15:55:00Z",
+                  "reason": null
+                },
+                "source": "pullRequests"
+              },
+              "review": {
+                "state": {
+                  "value": null,
+                  "reason": "Not available from the cached source."
+                },
+                "observedHeadSha": {
+                  "value": null,
+                  "reason": "Not available from the cached source."
+                },
+                "observedAt": {
+                  "value": null,
+                  "reason": "Not available from the cached source."
+                },
+                "source": "pullRequests"
+              },
+              "waitReasons": [
+                "unknown-ci",
+                "review"
+              ],
+              "primaryWait": "unknown-ci",
+              "handler": {
+                "value": "review-daemon",
+                "reason": null
+              },
+              "waitSince": {
+                "value": null,
+                "reason": "Not available from the cached source."
+              },
+              "sources": [
+                "pullRequests"
+              ],
+              "waitingChain": {
+                "owner": {
+                  "value": "fix-daemon",
+                  "reason": null
+                },
+                "reason": "Shared files serialize this PR behind a PR and a build.",
+                "queuePosition": {
+                  "value": 2,
+                  "reason": null
+                },
+                "blockers": [
+                  {
+                    "target": {
+                      "kind": "pr",
+                      "pr": {
+                        "repo": "example/beta",
+                        "number": 7
+                      }
+                    },
+                    "file": {
+                      "repo": "example/alpha",
+                      "path": "contracts/progress.json"
+                    },
+                    "observedAt": {
+                      "value": "2026-09-30T15:55:00Z",
+                      "reason": null
+                    },
+                    "source": "pullRequests"
+                  },
+                  {
+                    "target": {
+                      "kind": "build",
+                      "repo": "example/alpha",
+                      "id": "build:42"
+                    },
+                    "file": {
+                      "repo": "example/alpha",
+                      "path": "contracts/progress.json"
+                    },
+                    "observedAt": {
+                      "value": "2026-09-30T15:55:00Z",
+                      "reason": null
+                    },
+                    "source": "pullRequests"
+                  }
+                ],
+                "holder": {
+                  "kind": {
+                    "value": "fix",
+                    "reason": null
+                  },
+                  "identity": {
+                    "value": "daemon:boot-9:job-2",
+                    "reason": null
+                  },
+                  "claimedAt": {
+                    "value": "2026-09-30T15:00:00Z",
+                    "reason": null
+                  },
+                  "liveness": "expired",
+                  "leaseExpiresAt": {
+                    "value": "2026-09-30T15:10:00Z",
+                    "reason": null
+                  },
+                  "reason": "Lease expired; this is historical ownership, not an active worker."
+                },
+                "nextSteps": [
+                  {
+                    "order": 1,
+                    "condition": "When both overlapping holders release their scopes",
+                    "owner": {
+                      "value": "fix-daemon",
+                      "reason": null
+                    },
+                    "action": "Apply requested corrections."
+                  },
+                  {
+                    "order": 2,
+                    "condition": "If a human review is requested after the fix",
+                    "owner": {
+                      "value": "operator",
+                      "reason": null
+                    },
+                    "action": "Review the updated head."
+                  }
+                ],
+                "eta": {
+                  "milliseconds": {
+                    "value": null,
+                    "reason": "Not available from the cached source."
+                  },
+                  "sampleCount": 0,
+                  "sampleWindow": {
+                    "value": null,
+                    "reason": "Not available from the cached source."
+                  },
+                  "method": {
+                    "value": null,
+                    "reason": "Not available from the cached source."
+                  },
+                  "uncertainty": {
+                    "value": null,
+                    "reason": "Not available from the cached source."
+                  }
+                }
+              }
+            }
+          ],
+          "coverage": {
+            "total": null,
+            "cached": 3,
+            "included": 1,
+            "complete": false,
+            "source": "pullRequests",
+            "freshness": {
+              "observedAt": "2026-09-30T15:55:00Z",
+              "lastSuccessAt": "2026-09-30T15:55:00Z",
+              "expectedEveryMs": 120000,
+              "staleAfterMs": 600000,
+              "status": "partial",
+              "complete": false,
+              "reason": "Cached membership does not establish the entire universe.",
+              "cursor": null
+            }
+          },
+          "nextCursor": "opaque-1"
+        }
+      },
+      {
+        "request": {
+          "kind": "pr-page-request",
+          "collection": "pullRequests",
+          "identity": {
+            "snapshotId": "pr-unknown-total-pages",
+            "publisherId": "publisher-boot-1",
+            "sequence": 7
+          },
+          "cursor": "opaque-1"
+        },
+        "result": {
+          "kind": "pr-page-response",
+          "collection": "pullRequests",
+          "identity": {
+            "snapshotId": "pr-unknown-total-pages",
+            "publisherId": "publisher-boot-1",
+            "sequence": 7
+          },
+          "cursor": "opaque-1",
+          "rows": [
+            {
+              "repo": "example/beta",
+              "number": 7,
+              "url": "https://github.com/example/beta/pull/7",
+              "description": "Preserve the complete synthetic progress description across cached page boundaries. This change exposes observed waiting evidence to the operator.",
+              "author": {
+                "value": "synthetic-author",
+                "reason": null
+              },
+              "draft": false,
+              "headSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "cardRefs": [],
+              "ci": {
+                "state": {
+                  "value": "success",
+                  "reason": null
+                },
+                "observedHeadSha": {
+                  "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                  "reason": null
+                },
+                "observedAt": {
+                  "value": "2026-09-30T15:55:00Z",
+                  "reason": null
+                },
+                "source": "pullRequests"
+              },
+              "review": {
+                "state": {
+                  "value": "approved",
+                  "reason": null
+                },
+                "observedHeadSha": {
+                  "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                  "reason": null
+                },
+                "observedAt": {
+                  "value": "2026-09-30T15:55:00Z",
+                  "reason": null
+                },
+                "source": "pullRequests"
+              },
+              "waitReasons": [
+                "ready"
+              ],
+              "primaryWait": "ready",
+              "handler": {
+                "value": "review-daemon",
+                "reason": null
+              },
+              "waitSince": {
+                "value": null,
+                "reason": "Not available from the cached source."
+              },
+              "sources": [
+                "pullRequests"
+              ],
+              "waitingChain": {
+                "owner": {
+                  "value": "drain",
+                  "reason": null
+                },
+                "reason": "Current-head evidence permits a ready display; merge checks remain independent.",
+                "queuePosition": {
+                  "value": 2,
+                  "reason": null
+                },
+                "blockers": [],
+                "holder": {
+                  "kind": {
+                    "value": "fix",
+                    "reason": null
+                  },
+                  "identity": {
+                    "value": "daemon:boot-9:job-2",
+                    "reason": null
+                  },
+                  "claimedAt": {
+                    "value": "2026-09-30T15:00:00Z",
+                    "reason": null
+                  },
+                  "liveness": "expired",
+                  "leaseExpiresAt": {
+                    "value": "2026-09-30T15:10:00Z",
+                    "reason": null
+                  },
+                  "reason": "Lease expired; this is historical ownership, not an active worker."
+                },
+                "nextSteps": [
+                  {
+                    "order": 1,
+                    "condition": "When both overlapping holders release their scopes",
+                    "owner": {
+                      "value": "fix-daemon",
+                      "reason": null
+                    },
+                    "action": "Apply requested corrections."
+                  },
+                  {
+                    "order": 2,
+                    "condition": "If a human review is requested after the fix",
+                    "owner": {
+                      "value": "operator",
+                      "reason": null
+                    },
+                    "action": "Review the updated head."
+                  }
+                ],
+                "eta": {
+                  "milliseconds": {
+                    "value": 60000,
+                    "reason": null
+                  },
+                  "sampleCount": 12,
+                  "sampleWindow": {
+                    "value": {
+                      "start": "2026-09-30T14:00:00Z",
+                      "end": "2026-09-30T15:55:00Z"
+                    },
+                    "reason": null
+                  },
+                  "method": {
+                    "value": "median of comparable observed steps",
+                    "reason": null
+                  },
+                  "uncertainty": {
+                    "value": 30000,
+                    "reason": null
+                  }
+                }
+              }
+            }
+          ],
+          "coverage": {
+            "total": null,
+            "cached": 3,
+            "included": 1,
+            "complete": false,
+            "source": "pullRequests",
+            "freshness": {
+              "observedAt": "2026-09-30T15:55:00Z",
+              "lastSuccessAt": "2026-09-30T15:55:00Z",
+              "expectedEveryMs": 120000,
+              "staleAfterMs": 600000,
+              "status": "partial",
+              "complete": false,
+              "reason": "Cached membership does not establish the entire universe.",
+              "cursor": null
+            }
+          },
+          "nextCursor": "opaque-2"
+        }
+      },
+      {
+        "request": {
+          "kind": "pr-page-request",
+          "collection": "pullRequests",
+          "identity": {
+            "snapshotId": "pr-unknown-total-pages",
+            "publisherId": "publisher-boot-1",
+            "sequence": 7
+          },
+          "cursor": "opaque-2"
+        },
+        "result": {
+          "kind": "pr-page-response",
+          "collection": "pullRequests",
+          "identity": {
+            "snapshotId": "pr-unknown-total-pages",
+            "publisherId": "publisher-boot-1",
+            "sequence": 7
+          },
+          "cursor": "opaque-2",
+          "rows": [
+            {
+              "repo": "example/alpha",
+              "number": 8,
+              "url": "https://github.com/example/alpha/pull/8",
+              "description": "Preserve the complete synthetic progress description across cached page boundaries. This change exposes observed waiting evidence to the operator.",
+              "author": {
+                "value": null,
+                "reason": "Not available from the cached source."
+              },
+              "draft": false,
+              "headSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "cardRefs": [],
+              "ci": {
+                "state": {
+                  "value": "success",
+                  "reason": null
+                },
+                "observedHeadSha": {
+                  "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                  "reason": null
+                },
+                "observedAt": {
+                  "value": "2026-09-30T15:55:00Z",
+                  "reason": null
+                },
+                "source": "pullRequests"
+              },
+              "review": {
+                "state": {
+                  "value": null,
+                  "reason": "Not available from the cached source."
+                },
+                "observedHeadSha": {
+                  "value": null,
+                  "reason": "Not available from the cached source."
+                },
+                "observedAt": {
+                  "value": null,
+                  "reason": "Not available from the cached source."
+                },
+                "source": "pullRequests"
+              },
+              "waitReasons": [
+                "unknown-ci",
+                "review"
+              ],
+              "primaryWait": "unknown-ci",
+              "handler": {
+                "value": "review-daemon",
+                "reason": null
+              },
+              "waitSince": {
+                "value": null,
+                "reason": "Not available from the cached source."
+              },
+              "sources": [
+                "pullRequests"
+              ],
+              "waitingChain": {
+                "owner": {
+                  "value": "fix-daemon",
+                  "reason": null
+                },
+                "reason": "Shared files serialize this PR behind a PR and a build.",
+                "queuePosition": {
+                  "value": null,
+                  "reason": "Not available from the cached source."
+                },
+                "blockers": [
+                  {
+                    "target": {
+                      "kind": "pr",
+                      "pr": {
+                        "repo": "example/beta",
+                        "number": 7
+                      }
+                    },
+                    "file": {
+                      "repo": "example/alpha",
+                      "path": "contracts/progress.json"
+                    },
+                    "observedAt": {
+                      "value": "2026-09-30T15:55:00Z",
+                      "reason": null
+                    },
+                    "source": "pullRequests"
+                  },
+                  {
+                    "target": {
+                      "kind": "build",
+                      "repo": "example/alpha",
+                      "id": "build:42"
+                    },
+                    "file": {
+                      "repo": "example/alpha",
+                      "path": "contracts/progress.json"
+                    },
+                    "observedAt": {
+                      "value": "2026-09-30T15:55:00Z",
+                      "reason": null
+                    },
+                    "source": "pullRequests"
+                  }
+                ],
+                "holder": {
+                  "kind": {
+                    "value": "fix",
+                    "reason": null
+                  },
+                  "identity": {
+                    "value": "daemon:boot-9:job-2",
+                    "reason": null
+                  },
+                  "claimedAt": {
+                    "value": "2026-09-30T15:00:00Z",
+                    "reason": null
+                  },
+                  "liveness": "stale",
+                  "leaseExpiresAt": {
+                    "value": "2026-09-30T15:10:00Z",
+                    "reason": null
+                  },
+                  "reason": "Lease expired; this is historical ownership, not an active worker."
+                },
+                "nextSteps": [
+                  {
+                    "order": 1,
+                    "condition": "When both overlapping holders release their scopes",
+                    "owner": {
+                      "value": "fix-daemon",
+                      "reason": null
+                    },
+                    "action": "Apply requested corrections."
+                  },
+                  {
+                    "order": 2,
+                    "condition": "If a human review is requested after the fix",
+                    "owner": {
+                      "value": "operator",
+                      "reason": null
+                    },
+                    "action": "Review the updated head."
+                  }
+                ],
+                "eta": {
+                  "milliseconds": {
+                    "value": null,
+                    "reason": "Not available from the cached source."
+                  },
+                  "sampleCount": 0,
+                  "sampleWindow": {
+                    "value": null,
+                    "reason": "Not available from the cached source."
+                  },
+                  "method": {
+                    "value": null,
+                    "reason": "Not available from the cached source."
+                  },
+                  "uncertainty": {
+                    "value": null,
+                    "reason": "Not available from the cached source."
+                  }
+                }
+              }
+            }
+          ],
+          "coverage": {
+            "total": null,
+            "cached": 3,
+            "included": 1,
+            "complete": false,
+            "source": "pullRequests",
+            "freshness": {
+              "observedAt": "2026-09-30T15:55:00Z",
+              "lastSuccessAt": "2026-09-30T15:55:00Z",
+              "expectedEveryMs": 120000,
+              "staleAfterMs": 600000,
+              "status": "partial",
+              "complete": false,
+              "reason": "Cached membership does not establish the entire universe.",
+              "cursor": null
+            }
+          },
+          "nextCursor": null
+        }
+      }
+    ]
+  },
+  "pr-restart-old-snapshot": {
+    "description": "pr-restart-old-snapshot: synthetic author-independent membership and sanitized waiting evidence.",
+    "snapshot": {
+      "schema": 2,
+      "snapshotId": "pr-restart-old-snapshot",
+      "publisherId": "publisher-boot-1",
+      "sequence": 7,
+      "observedAt": "2026-09-30T16:00:00Z",
+      "timeZone": "America/Toronto",
+      "coverage": {
+        "repos": {
+          "web-everything": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          },
+          "plateau-app": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          },
+          "frontierui": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          }
+        },
+        "collections": {
+          "runs": {
+            "total": 0,
+            "included": 0,
+            "complete": true,
+            "source": "runs"
+          },
+          "holds": {
+            "total": 0,
+            "included": 0,
+            "complete": true,
+            "source": "holds"
+          },
+          "actions": {
+            "total": 0,
+            "included": 0,
+            "complete": true,
+            "source": "actions"
+          },
+          "pullRequests": {
+            "total": null,
+            "cached": 1,
+            "included": 1,
+            "complete": false,
+            "source": "pullRequests",
+            "freshness": {
+              "observedAt": "2026-09-30T15:55:00Z",
+              "lastSuccessAt": "2026-09-30T15:55:00Z",
+              "expectedEveryMs": 120000,
+              "staleAfterMs": 600000,
+              "status": "partial",
+              "complete": false,
+              "reason": "Cached membership does not establish the entire universe.",
+              "cursor": null
+            }
+          }
+        }
+      },
+      "sources": {
+        "runs": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "holds": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "pullRequests": {
+          "observedAt": "2026-09-30T15:55:00Z",
+          "lastSuccessAt": "2026-09-30T15:55:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "partial",
+          "complete": false,
+          "reason": "Cached membership does not establish the entire universe.",
+          "cursor": null
+        },
+        "deliveries": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "partial",
+          "complete": false,
+          "reason": "Rotated local drain history; repo identity unavailable.",
+          "cursor": null
+        },
+        "actions": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "policy": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        }
+      },
+      "summary": {
+        "moving": {
+          "value": 0,
+          "unit": "logical-work",
+          "source": "runs",
+          "complete": true
+        },
+        "jobs": {
+          "value": 0,
+          "unit": "jobs",
+          "source": "runs",
+          "complete": true
+        },
+        "held": {
+          "value": 0,
+          "unit": "cards",
+          "source": "holds",
+          "complete": true
+        },
+        "openPullRequests": {
+          "value": 0,
+          "unit": "pull-requests",
+          "source": "pullRequests",
+          "complete": true
+        },
+        "mergedToday": {
+          "value": 3,
+          "unit": "merged-prs",
+          "source": "deliveries",
+          "complete": false
+        },
+        "humanPending": {
+          "value": 0,
+          "unit": "human-actions",
+          "source": "actions",
+          "complete": true
+        },
+        "humanActionable": {
+          "value": 0,
+          "unit": "human-actions",
+          "source": "actions",
+          "complete": true
+        }
+      },
+      "runs": [],
+      "holds": [],
+      "actions": [],
+      "items": [],
+      "deliveries": {
+        "source": "deliveries",
+        "provenance": "observed by local drain",
+        "complete": false,
+        "historyStart": "2026-09-30T14:00:00Z",
+        "today": {
+          "start": "2026-09-30T04:00:00Z",
+          "end": "2026-09-30T16:00:00Z",
+          "count": 3,
+          "complete": false
+        },
+        "trend": {
+          "status": "comparable",
+          "reason": null,
+          "current": {
+            "start": "2026-09-30T15:00:00Z",
+            "end": "2026-09-30T16:00:00Z",
+            "count": 2,
+            "complete": true
+          },
+          "previous": {
+            "start": "2026-09-30T14:00:00Z",
+            "end": "2026-09-30T15:00:00Z",
+            "count": 1,
+            "complete": true
+          }
+        }
+      },
+      "policy": {
+        "sourceKind": "external-plan",
+        "revision": "sha256:example-plan",
+        "observedAt": "2026-09-30T16:00:00Z",
+        "effectiveAt": null,
+        "readOnly": true,
+        "priorities": [
+          {
+            "description": "Restore reliable review progress.",
+            "refs": [
+              "we:4620"
+            ]
+          }
+        ],
+        "sections": [
+          {
+            "id": "standing",
+            "title": "Standing rules",
+            "text": "Keep review work moving.",
+            "sourceDate": "2026-09-29"
+          }
+        ],
+        "conflicts": [],
+        "status": "observed"
+      },
+      "pullRequests": [
+        {
+          "repo": "example/alpha",
+          "number": 7,
+          "url": "https://github.com/example/alpha/pull/7",
+          "description": "Preserve the complete synthetic progress description across cached page boundaries. This change exposes observed waiting evidence to the operator.",
+          "author": {
+            "value": null,
+            "reason": "Not available from the cached source."
+          },
+          "draft": false,
+          "headSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "cardRefs": [],
+          "ci": {
+            "state": {
+              "value": "success",
+              "reason": null
+            },
+            "observedHeadSha": {
+              "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "reason": null
+            },
+            "observedAt": {
+              "value": "2026-09-30T15:55:00Z",
+              "reason": null
+            },
+            "source": "pullRequests"
+          },
+          "review": {
+            "state": {
+              "value": null,
+              "reason": "Not available from the cached source."
+            },
+            "observedHeadSha": {
+              "value": null,
+              "reason": "Not available from the cached source."
+            },
+            "observedAt": {
+              "value": null,
+              "reason": "Not available from the cached source."
+            },
+            "source": "pullRequests"
+          },
+          "waitReasons": [
+            "unknown-ci",
+            "review"
+          ],
+          "primaryWait": "unknown-ci",
+          "handler": {
+            "value": "review-daemon",
+            "reason": null
+          },
+          "waitSince": {
+            "value": null,
+            "reason": "Not available from the cached source."
+          },
+          "sources": [
+            "pullRequests"
+          ],
+          "waitingChain": {
+            "owner": {
+              "value": "fix-daemon",
+              "reason": null
+            },
+            "reason": "Shared files serialize this PR behind a PR and a build.",
+            "queuePosition": {
+              "value": 2,
+              "reason": null
+            },
+            "blockers": [
+              {
+                "target": {
+                  "kind": "pr",
+                  "pr": {
+                    "repo": "example/beta",
+                    "number": 7
+                  }
+                },
+                "file": {
+                  "repo": "example/alpha",
+                  "path": "contracts/progress.json"
+                },
+                "observedAt": {
+                  "value": "2026-09-30T15:55:00Z",
+                  "reason": null
+                },
+                "source": "pullRequests"
+              },
+              {
+                "target": {
+                  "kind": "build",
+                  "repo": "example/alpha",
+                  "id": "build:42"
+                },
+                "file": {
+                  "repo": "example/alpha",
+                  "path": "contracts/progress.json"
+                },
+                "observedAt": {
+                  "value": "2026-09-30T15:55:00Z",
+                  "reason": null
+                },
+                "source": "pullRequests"
+              }
+            ],
+            "holder": {
+              "kind": {
+                "value": "fix",
+                "reason": null
+              },
+              "identity": {
+                "value": "daemon:boot-9:job-2",
+                "reason": null
+              },
+              "claimedAt": {
+                "value": "2026-09-30T15:00:00Z",
+                "reason": null
+              },
+              "liveness": "expired",
+              "leaseExpiresAt": {
+                "value": "2026-09-30T15:10:00Z",
+                "reason": null
+              },
+              "reason": "Lease expired; this is historical ownership, not an active worker."
+            },
+            "nextSteps": [
+              {
+                "order": 1,
+                "condition": "When both overlapping holders release their scopes",
+                "owner": {
+                  "value": "fix-daemon",
+                  "reason": null
+                },
+                "action": "Apply requested corrections."
+              },
+              {
+                "order": 2,
+                "condition": "If a human review is requested after the fix",
+                "owner": {
+                  "value": "operator",
+                  "reason": null
+                },
+                "action": "Review the updated head."
+              }
+            ],
+            "eta": {
+              "milliseconds": {
+                "value": null,
+                "reason": "Not available from the cached source."
+              },
+              "sampleCount": 0,
+              "sampleWindow": {
+                "value": null,
+                "reason": "Not available from the cached source."
+              },
+              "method": {
+                "value": null,
+                "reason": "Not available from the cached source."
+              },
+              "uncertainty": {
+                "value": null,
+                "reason": "Not available from the cached source."
+              }
+            }
+          }
+        }
+      ]
+    },
+    "exchanges": [
+      {
+        "request": {
+          "kind": "pr-page-request",
+          "collection": "pullRequests",
+          "identity": {
+            "snapshotId": "pr-restart-old-snapshot",
+            "publisherId": "publisher-boot-1",
+            "sequence": 7
+          },
+          "cursor": "expired-opaque-cursor"
+        },
+        "result": {
+          "kind": "pr-page-restart",
+          "collection": "pullRequests",
+          "identity": {
+            "snapshotId": "pr-restart-old-snapshot",
+            "publisherId": "publisher-boot-1",
+            "sequence": 7
+          },
+          "cursor": "expired-opaque-cursor",
+          "reason": "old-snapshot",
+          "replacement": {
+            "snapshotId": "replacement-snapshot",
+            "publisherId": "publisher-boot-1",
+            "sequence": 8
+          }
+        }
+      }
+    ]
+  },
+  "pr-restart-publisher-restart": {
+    "description": "pr-restart-publisher-restart: synthetic author-independent membership and sanitized waiting evidence.",
+    "snapshot": {
+      "schema": 2,
+      "snapshotId": "pr-restart-publisher-restart",
+      "publisherId": "publisher-boot-1",
+      "sequence": 7,
+      "observedAt": "2026-09-30T16:00:00Z",
+      "timeZone": "America/Toronto",
+      "coverage": {
+        "repos": {
+          "web-everything": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          },
+          "plateau-app": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          },
+          "frontierui": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          }
+        },
+        "collections": {
+          "runs": {
+            "total": 0,
+            "included": 0,
+            "complete": true,
+            "source": "runs"
+          },
+          "holds": {
+            "total": 0,
+            "included": 0,
+            "complete": true,
+            "source": "holds"
+          },
+          "actions": {
+            "total": 0,
+            "included": 0,
+            "complete": true,
+            "source": "actions"
+          },
+          "pullRequests": {
+            "total": null,
+            "cached": 1,
+            "included": 1,
+            "complete": false,
+            "source": "pullRequests",
+            "freshness": {
+              "observedAt": "2026-09-30T15:55:00Z",
+              "lastSuccessAt": "2026-09-30T15:55:00Z",
+              "expectedEveryMs": 120000,
+              "staleAfterMs": 600000,
+              "status": "partial",
+              "complete": false,
+              "reason": "Cached membership does not establish the entire universe.",
+              "cursor": null
+            }
+          }
+        }
+      },
+      "sources": {
+        "runs": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "holds": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "pullRequests": {
+          "observedAt": "2026-09-30T15:55:00Z",
+          "lastSuccessAt": "2026-09-30T15:55:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "partial",
+          "complete": false,
+          "reason": "Cached membership does not establish the entire universe.",
+          "cursor": null
+        },
+        "deliveries": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "partial",
+          "complete": false,
+          "reason": "Rotated local drain history; repo identity unavailable.",
+          "cursor": null
+        },
+        "actions": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "policy": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        }
+      },
+      "summary": {
+        "moving": {
+          "value": 0,
+          "unit": "logical-work",
+          "source": "runs",
+          "complete": true
+        },
+        "jobs": {
+          "value": 0,
+          "unit": "jobs",
+          "source": "runs",
+          "complete": true
+        },
+        "held": {
+          "value": 0,
+          "unit": "cards",
+          "source": "holds",
+          "complete": true
+        },
+        "openPullRequests": {
+          "value": 0,
+          "unit": "pull-requests",
+          "source": "pullRequests",
+          "complete": true
+        },
+        "mergedToday": {
+          "value": 3,
+          "unit": "merged-prs",
+          "source": "deliveries",
+          "complete": false
+        },
+        "humanPending": {
+          "value": 0,
+          "unit": "human-actions",
+          "source": "actions",
+          "complete": true
+        },
+        "humanActionable": {
+          "value": 0,
+          "unit": "human-actions",
+          "source": "actions",
+          "complete": true
+        }
+      },
+      "runs": [],
+      "holds": [],
+      "actions": [],
+      "items": [],
+      "deliveries": {
+        "source": "deliveries",
+        "provenance": "observed by local drain",
+        "complete": false,
+        "historyStart": "2026-09-30T14:00:00Z",
+        "today": {
+          "start": "2026-09-30T04:00:00Z",
+          "end": "2026-09-30T16:00:00Z",
+          "count": 3,
+          "complete": false
+        },
+        "trend": {
+          "status": "comparable",
+          "reason": null,
+          "current": {
+            "start": "2026-09-30T15:00:00Z",
+            "end": "2026-09-30T16:00:00Z",
+            "count": 2,
+            "complete": true
+          },
+          "previous": {
+            "start": "2026-09-30T14:00:00Z",
+            "end": "2026-09-30T15:00:00Z",
+            "count": 1,
+            "complete": true
+          }
+        }
+      },
+      "policy": {
+        "sourceKind": "external-plan",
+        "revision": "sha256:example-plan",
+        "observedAt": "2026-09-30T16:00:00Z",
+        "effectiveAt": null,
+        "readOnly": true,
+        "priorities": [
+          {
+            "description": "Restore reliable review progress.",
+            "refs": [
+              "we:4620"
+            ]
+          }
+        ],
+        "sections": [
+          {
+            "id": "standing",
+            "title": "Standing rules",
+            "text": "Keep review work moving.",
+            "sourceDate": "2026-09-29"
+          }
+        ],
+        "conflicts": [],
+        "status": "observed"
+      },
+      "pullRequests": [
+        {
+          "repo": "example/alpha",
+          "number": 7,
+          "url": "https://github.com/example/alpha/pull/7",
+          "description": "Preserve the complete synthetic progress description across cached page boundaries. This change exposes observed waiting evidence to the operator.",
+          "author": {
+            "value": null,
+            "reason": "Not available from the cached source."
+          },
+          "draft": false,
+          "headSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "cardRefs": [],
+          "ci": {
+            "state": {
+              "value": "success",
+              "reason": null
+            },
+            "observedHeadSha": {
+              "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "reason": null
+            },
+            "observedAt": {
+              "value": "2026-09-30T15:55:00Z",
+              "reason": null
+            },
+            "source": "pullRequests"
+          },
+          "review": {
+            "state": {
+              "value": null,
+              "reason": "Not available from the cached source."
+            },
+            "observedHeadSha": {
+              "value": null,
+              "reason": "Not available from the cached source."
+            },
+            "observedAt": {
+              "value": null,
+              "reason": "Not available from the cached source."
+            },
+            "source": "pullRequests"
+          },
+          "waitReasons": [
+            "unknown-ci",
+            "review"
+          ],
+          "primaryWait": "unknown-ci",
+          "handler": {
+            "value": "review-daemon",
+            "reason": null
+          },
+          "waitSince": {
+            "value": null,
+            "reason": "Not available from the cached source."
+          },
+          "sources": [
+            "pullRequests"
+          ],
+          "waitingChain": {
+            "owner": {
+              "value": "fix-daemon",
+              "reason": null
+            },
+            "reason": "Shared files serialize this PR behind a PR and a build.",
+            "queuePosition": {
+              "value": 2,
+              "reason": null
+            },
+            "blockers": [
+              {
+                "target": {
+                  "kind": "pr",
+                  "pr": {
+                    "repo": "example/beta",
+                    "number": 7
+                  }
+                },
+                "file": {
+                  "repo": "example/alpha",
+                  "path": "contracts/progress.json"
+                },
+                "observedAt": {
+                  "value": "2026-09-30T15:55:00Z",
+                  "reason": null
+                },
+                "source": "pullRequests"
+              },
+              {
+                "target": {
+                  "kind": "build",
+                  "repo": "example/alpha",
+                  "id": "build:42"
+                },
+                "file": {
+                  "repo": "example/alpha",
+                  "path": "contracts/progress.json"
+                },
+                "observedAt": {
+                  "value": "2026-09-30T15:55:00Z",
+                  "reason": null
+                },
+                "source": "pullRequests"
+              }
+            ],
+            "holder": {
+              "kind": {
+                "value": "fix",
+                "reason": null
+              },
+              "identity": {
+                "value": "daemon:boot-9:job-2",
+                "reason": null
+              },
+              "claimedAt": {
+                "value": "2026-09-30T15:00:00Z",
+                "reason": null
+              },
+              "liveness": "expired",
+              "leaseExpiresAt": {
+                "value": "2026-09-30T15:10:00Z",
+                "reason": null
+              },
+              "reason": "Lease expired; this is historical ownership, not an active worker."
+            },
+            "nextSteps": [
+              {
+                "order": 1,
+                "condition": "When both overlapping holders release their scopes",
+                "owner": {
+                  "value": "fix-daemon",
+                  "reason": null
+                },
+                "action": "Apply requested corrections."
+              },
+              {
+                "order": 2,
+                "condition": "If a human review is requested after the fix",
+                "owner": {
+                  "value": "operator",
+                  "reason": null
+                },
+                "action": "Review the updated head."
+              }
+            ],
+            "eta": {
+              "milliseconds": {
+                "value": null,
+                "reason": "Not available from the cached source."
+              },
+              "sampleCount": 0,
+              "sampleWindow": {
+                "value": null,
+                "reason": "Not available from the cached source."
+              },
+              "method": {
+                "value": null,
+                "reason": "Not available from the cached source."
+              },
+              "uncertainty": {
+                "value": null,
+                "reason": "Not available from the cached source."
+              }
+            }
+          }
+        }
+      ]
+    },
+    "exchanges": [
+      {
+        "request": {
+          "kind": "pr-page-request",
+          "collection": "pullRequests",
+          "identity": {
+            "snapshotId": "pr-restart-publisher-restart",
+            "publisherId": "publisher-boot-1",
+            "sequence": 7
+          },
+          "cursor": "expired-opaque-cursor"
+        },
+        "result": {
+          "kind": "pr-page-restart",
+          "collection": "pullRequests",
+          "identity": {
+            "snapshotId": "pr-restart-publisher-restart",
+            "publisherId": "publisher-boot-1",
+            "sequence": 7
+          },
+          "cursor": "expired-opaque-cursor",
+          "reason": "publisher-restart",
+          "replacement": {
+            "snapshotId": "replacement-snapshot",
+            "publisherId": "replacement-publisher",
+            "sequence": 0
+          }
+        }
+      }
+    ]
+  },
+  "pr-restart-invalid-cursor": {
+    "description": "pr-restart-invalid-cursor: synthetic author-independent membership and sanitized waiting evidence.",
+    "snapshot": {
+      "schema": 2,
+      "snapshotId": "pr-restart-invalid-cursor",
+      "publisherId": "publisher-boot-1",
+      "sequence": 7,
+      "observedAt": "2026-09-30T16:00:00Z",
+      "timeZone": "America/Toronto",
+      "coverage": {
+        "repos": {
+          "web-everything": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          },
+          "plateau-app": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          },
+          "frontierui": {
+            "complete": false,
+            "lastReconciledAt": null,
+            "reason": "Passive cache coverage only."
+          }
+        },
+        "collections": {
+          "runs": {
+            "total": 0,
+            "included": 0,
+            "complete": true,
+            "source": "runs"
+          },
+          "holds": {
+            "total": 0,
+            "included": 0,
+            "complete": true,
+            "source": "holds"
+          },
+          "actions": {
+            "total": 0,
+            "included": 0,
+            "complete": true,
+            "source": "actions"
+          },
+          "pullRequests": {
+            "total": null,
+            "cached": 1,
+            "included": 1,
+            "complete": false,
+            "source": "pullRequests",
+            "freshness": {
+              "observedAt": "2026-09-30T15:55:00Z",
+              "lastSuccessAt": "2026-09-30T15:55:00Z",
+              "expectedEveryMs": 120000,
+              "staleAfterMs": 600000,
+              "status": "partial",
+              "complete": false,
+              "reason": "Cached membership does not establish the entire universe.",
+              "cursor": null
+            }
+          }
+        }
+      },
+      "sources": {
+        "runs": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "holds": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "pullRequests": {
+          "observedAt": "2026-09-30T15:55:00Z",
+          "lastSuccessAt": "2026-09-30T15:55:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "partial",
+          "complete": false,
+          "reason": "Cached membership does not establish the entire universe.",
+          "cursor": null
+        },
+        "deliveries": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "partial",
+          "complete": false,
+          "reason": "Rotated local drain history; repo identity unavailable.",
+          "cursor": null
+        },
+        "actions": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        },
+        "policy": {
+          "observedAt": "2026-09-30T16:00:00Z",
+          "lastSuccessAt": "2026-09-30T16:00:00Z",
+          "expectedEveryMs": 120000,
+          "staleAfterMs": 600000,
+          "status": "fresh",
+          "complete": true,
+          "reason": null,
+          "cursor": null
+        }
+      },
+      "summary": {
+        "moving": {
+          "value": 0,
+          "unit": "logical-work",
+          "source": "runs",
+          "complete": true
+        },
+        "jobs": {
+          "value": 0,
+          "unit": "jobs",
+          "source": "runs",
+          "complete": true
+        },
+        "held": {
+          "value": 0,
+          "unit": "cards",
+          "source": "holds",
+          "complete": true
+        },
+        "openPullRequests": {
+          "value": 0,
+          "unit": "pull-requests",
+          "source": "pullRequests",
+          "complete": true
+        },
+        "mergedToday": {
+          "value": 3,
+          "unit": "merged-prs",
+          "source": "deliveries",
+          "complete": false
+        },
+        "humanPending": {
+          "value": 0,
+          "unit": "human-actions",
+          "source": "actions",
+          "complete": true
+        },
+        "humanActionable": {
+          "value": 0,
+          "unit": "human-actions",
+          "source": "actions",
+          "complete": true
+        }
+      },
+      "runs": [],
+      "holds": [],
+      "actions": [],
+      "items": [],
+      "deliveries": {
+        "source": "deliveries",
+        "provenance": "observed by local drain",
+        "complete": false,
+        "historyStart": "2026-09-30T14:00:00Z",
+        "today": {
+          "start": "2026-09-30T04:00:00Z",
+          "end": "2026-09-30T16:00:00Z",
+          "count": 3,
+          "complete": false
+        },
+        "trend": {
+          "status": "comparable",
+          "reason": null,
+          "current": {
+            "start": "2026-09-30T15:00:00Z",
+            "end": "2026-09-30T16:00:00Z",
+            "count": 2,
+            "complete": true
+          },
+          "previous": {
+            "start": "2026-09-30T14:00:00Z",
+            "end": "2026-09-30T15:00:00Z",
+            "count": 1,
+            "complete": true
+          }
+        }
+      },
+      "policy": {
+        "sourceKind": "external-plan",
+        "revision": "sha256:example-plan",
+        "observedAt": "2026-09-30T16:00:00Z",
+        "effectiveAt": null,
+        "readOnly": true,
+        "priorities": [
+          {
+            "description": "Restore reliable review progress.",
+            "refs": [
+              "we:4620"
+            ]
+          }
+        ],
+        "sections": [
+          {
+            "id": "standing",
+            "title": "Standing rules",
+            "text": "Keep review work moving.",
+            "sourceDate": "2026-09-29"
+          }
+        ],
+        "conflicts": [],
+        "status": "observed"
+      },
+      "pullRequests": [
+        {
+          "repo": "example/alpha",
+          "number": 7,
+          "url": "https://github.com/example/alpha/pull/7",
+          "description": "Preserve the complete synthetic progress description across cached page boundaries. This change exposes observed waiting evidence to the operator.",
+          "author": {
+            "value": null,
+            "reason": "Not available from the cached source."
+          },
+          "draft": false,
+          "headSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "cardRefs": [],
+          "ci": {
+            "state": {
+              "value": "success",
+              "reason": null
+            },
+            "observedHeadSha": {
+              "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "reason": null
+            },
+            "observedAt": {
+              "value": "2026-09-30T15:55:00Z",
+              "reason": null
+            },
+            "source": "pullRequests"
+          },
+          "review": {
+            "state": {
+              "value": null,
+              "reason": "Not available from the cached source."
+            },
+            "observedHeadSha": {
+              "value": null,
+              "reason": "Not available from the cached source."
+            },
+            "observedAt": {
+              "value": null,
+              "reason": "Not available from the cached source."
+            },
+            "source": "pullRequests"
+          },
+          "waitReasons": [
+            "unknown-ci",
+            "review"
+          ],
+          "primaryWait": "unknown-ci",
+          "handler": {
+            "value": "review-daemon",
+            "reason": null
+          },
+          "waitSince": {
+            "value": null,
+            "reason": "Not available from the cached source."
+          },
+          "sources": [
+            "pullRequests"
+          ],
+          "waitingChain": {
+            "owner": {
+              "value": "fix-daemon",
+              "reason": null
+            },
+            "reason": "Shared files serialize this PR behind a PR and a build.",
+            "queuePosition": {
+              "value": 2,
+              "reason": null
+            },
+            "blockers": [
+              {
+                "target": {
+                  "kind": "pr",
+                  "pr": {
+                    "repo": "example/beta",
+                    "number": 7
+                  }
+                },
+                "file": {
+                  "repo": "example/alpha",
+                  "path": "contracts/progress.json"
+                },
+                "observedAt": {
+                  "value": "2026-09-30T15:55:00Z",
+                  "reason": null
+                },
+                "source": "pullRequests"
+              },
+              {
+                "target": {
+                  "kind": "build",
+                  "repo": "example/alpha",
+                  "id": "build:42"
+                },
+                "file": {
+                  "repo": "example/alpha",
+                  "path": "contracts/progress.json"
+                },
+                "observedAt": {
+                  "value": "2026-09-30T15:55:00Z",
+                  "reason": null
+                },
+                "source": "pullRequests"
+              }
+            ],
+            "holder": {
+              "kind": {
+                "value": "fix",
+                "reason": null
+              },
+              "identity": {
+                "value": "daemon:boot-9:job-2",
+                "reason": null
+              },
+              "claimedAt": {
+                "value": "2026-09-30T15:00:00Z",
+                "reason": null
+              },
+              "liveness": "expired",
+              "leaseExpiresAt": {
+                "value": "2026-09-30T15:10:00Z",
+                "reason": null
+              },
+              "reason": "Lease expired; this is historical ownership, not an active worker."
+            },
+            "nextSteps": [
+              {
+                "order": 1,
+                "condition": "When both overlapping holders release their scopes",
+                "owner": {
+                  "value": "fix-daemon",
+                  "reason": null
+                },
+                "action": "Apply requested corrections."
+              },
+              {
+                "order": 2,
+                "condition": "If a human review is requested after the fix",
+                "owner": {
+                  "value": "operator",
+                  "reason": null
+                },
+                "action": "Review the updated head."
+              }
+            ],
+            "eta": {
+              "milliseconds": {
+                "value": null,
+                "reason": "Not available from the cached source."
+              },
+              "sampleCount": 0,
+              "sampleWindow": {
+                "value": null,
+                "reason": "Not available from the cached source."
+              },
+              "method": {
+                "value": null,
+                "reason": "Not available from the cached source."
+              },
+              "uncertainty": {
+                "value": null,
+                "reason": "Not available from the cached source."
+              }
+            }
+          }
+        }
+      ]
+    },
+    "exchanges": [
+      {
+        "request": {
+          "kind": "pr-page-request",
+          "collection": "pullRequests",
+          "identity": {
+            "snapshotId": "pr-restart-invalid-cursor",
+            "publisherId": "publisher-boot-1",
+            "sequence": 7
+          },
+          "cursor": "expired-opaque-cursor"
+        },
+        "result": {
+          "kind": "pr-page-restart",
+          "collection": "pullRequests",
+          "identity": {
+            "snapshotId": "pr-restart-invalid-cursor",
+            "publisherId": "publisher-boot-1",
+            "sequence": 7
+          },
+          "cursor": "expired-opaque-cursor",
+          "reason": "invalid-cursor",
+          "replacement": null
+        }
+      }
+    ]
   }
 }

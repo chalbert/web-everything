@@ -1,10 +1,8 @@
 ---
 bornAs: xxw8hy0
-kind: story
-size: 5
+kind: epic
 parent: "2551"
 status: open
-scope: ["plateau:src/build-runner/events.ts", "plateau:src/build-runner/events.test.ts", "plateau:src/build-runner/build-action.ts", "plateau:src/build-runner/build-action.test.ts", "plateau:src/build-runner/build-stream.ts", "plateau:src/build-runner/build-stream.test.ts", "plateau:vite.config.mts", "plateau:src/main.ts", "plateau:src/backlog-view/build-tail.ts", "plateau:src/backlog-view/build-tail.test.ts", "plateau:src/backlog-view/build-tail.css", "plateau:src/backlog-view/lane-board.ts", "plateau:src/backlog-view/lane-board.test.ts", "plateau:tests/e2e/build-tail.spec.ts"]
 dateOpened: "2026-07-28"
 preparedDate: "2026-10-01"
 preparedAgainstSha: "b1065eee26c636be110ef9a934c5801ea9e445f1"
@@ -13,7 +11,7 @@ tags: []
 
 # Live output tail for a running build
 
-Show a running Plateau build's emitted agent commentary, tool calls and validation output as a live tail, with an updating done/running/pending plan checklist on the lane board. “Reasoning” here means commentary actually emitted by the runner, not inferred or hidden reasoning. Preserve the existing build controls and lifecycle.
+Umbrella for three ordered stories that show a running Plateau build's emitted agent commentary, tool calls and validation output as a live tail, with an updating done/running/pending plan checklist on the lane board. “Reasoning” here means commentary actually emitted by the runner, not inferred or hidden reasoning. Preserve the existing build controls and lifecycle.
 
 ## Progress
 
@@ -25,7 +23,7 @@ Preparation probe, 2026-10-01: inspected WE and the Plateau checkout at `1debc89
 - A late runner observer receives no completed-run history (we:../plateau-app/src/build-runner/runner.ts:185). Board refresh remounts the DOM (we:../plateau-app/src/main.ts:830). Both facts require retained run state outside the rendered board.
 - **Scope correction:** replace the two broad directories with file-level product implementation and test paths, adding the actual board integration owner. New proposed files are the stream helper, tail controller/styles and browser test. No WE runtime or new standard is needed: placement follows we:docs/agent/platform-decisions.md:143 (`#constellation-placement`); preserve the runner operations and stop behavior at we:docs/agent/platform-decisions.md:3181 (`#agent-runner-cli-backend`).
 
-Path convention: source citations above and below use WE-relative sibling paths to satisfy this job's `we:` prefix rule. Scope entries retain the canonical `plateau:` machine-readable repository identity; they all refer to plateau-app, not WE implementation.
+Path convention: source citations above and below use WE-relative sibling paths to satisfy this job's `we:` prefix rule. Child scope entries use the explicit `plateau-app:` machine-readable repository identity required for this split; all implementation remains in plateau-app. The epic itself has no build scope.
 
 ## Design
 
@@ -66,3 +64,38 @@ Implementation acceptance, not evidence collected during this card-only preparat
 - Durable archived logs, remote/conveyor producers, additional provider payload adapters and cross-process replay are separate work; this MVP is bounded in-memory observation of the existing local build seam.
 - Testing lesson: parser projections and the HTTP adapter can each pass while the real event-to-board connection is absent. Require the incremental end-to-end observation above; keep this lesson here rather than editing shared agent documentation.
 - If CLI examples lack structured plan events or validation results, report that concrete source gap before implementation; do not quietly replace the goal with synthetic steps or a note-only tail.
+
+
+## Split analysis — 2026-10-02
+
+Split authorized explicitly by the operator after admission refused the original 14 paths / 5 areas (limit: 20 paths / 4 areas). This backlog-only analysis lives on the card instead of creating a separate report. The original goal, prepared Design, Test plan and Proof plan above remain the umbrella acceptance. The preparation stamp records that earlier preparation, not execution or validation of these new capabilities.
+
+The operator explicitly requested conversion to an epic with children under #2778, overriding the split skill's normal already-parented-story exception. Keep its rollup to #2551; drop its story points and build scope. No implementation, build launch or runtime verification was performed during this split.
+
+### Could split
+
+| Slice | Size | Predicted touch-set | Paths / areas | Dependency and incremental value |
+| --- | --- | --- | --- | --- |
+| #xjlx8w2 — emitted event projection | 2 | we:../plateau-app/src/build-runner/events.ts; we:../plateau-app/src/build-runner/events.test.ts | 2 / 1 | First; existing runner observers receive tool results and valid plan snapshots, demonstrable through captured parser fixtures without HTTP or UI. |
+| #x7isr1k — replayable HTTP tail | 5 | we:../plateau-app/src/build-runner/build-action.ts; we:../plateau-app/src/build-runner/build-action.test.ts; proposed we:../plateau-app/src/build-runner/build-stream.ts; proposed we:../plateau-app/src/build-runner/build-stream.test.ts; we:../plateau-app/vite.config.mts | 5 / 2 | Blocked by #xjlx8w2; a real HTTP client can follow/replay a local build before any board changes. |
+| #xkj71ne — board tail and checklist | 5 | we:../plateau-app/src/main.ts; proposed we:../plateau-app/src/backlog-view/build-tail.ts; proposed we:../plateau-app/src/backlog-view/build-tail.test.ts; proposed we:../plateau-app/src/backlog-view/build-tail.css; we:../plateau-app/src/backlog-view/lane-board.ts; we:../plateau-app/src/backlog-view/lane-board.test.ts; proposed we:../plateau-app/tests/e2e/build-tail.spec.ts | 7 / 3 | Blocked by #x7isr1k; delivers the complete browser MVP against the landed stream. |
+
+Area accounting uses the same five natural groups in the original scope: runner, root Vite configuration, app entry, backlog view, browser E2E. Each slice stays below both limits even with one WE backlog completion carrier (respectively 3/2, 6/3, 8/4). These are predicted touch-sets, not measured implementation diffs; recheck admission against each actual diff. Do not broaden a scope to hide another repository or area.
+
+DAG: #xjlx8w2 → #x7isr1k → #xkj71ne. All three are bounded story candidates (size ≤5); only the first is unblocked by this split, successors become eligible after their predecessor lands. No child is blocked by its own epic. The chain satisfies incremental delivery: parser output, then usable HTTP observation, then browser presentation. All fourteen original implementation/test paths are covered exactly once; no quality or test-only tail is deferred to an untracked slice.
+
+### Could not split
+
+| Candidate | Failed condition | Unblocking action |
+| --- | --- | --- |
+| None | No additional unresolved design fork was found in the inspected seams. | None; each story retains the source-evidence check and must report any missing CLI payload capability before implementation. |
+
+### Investigation and placement
+
+Re-read the actual plateau-app checkout at `f1b2d3fe48632b13eb03e44fb59ccfe50b12fbb9`. The parser projection is self-contained (we:../plateau-app/src/build-runner/events.ts:16, :46, :74; existing fixtures at we:../plateau-app/src/build-runner/events.test.ts:4). The runner already forwards projected events without switching on the new event kinds (we:../plateau-app/src/build-runner/runner.ts:111), so the first slice need not edit the runner.
+
+The store/DTO and existing callback are the retention boundary (we:../plateau-app/src/build-runner/build-action.ts:67, :115, :333). DTO projection currently spreads the record after dropping only startedAt; retaining buffers on that record would leak internals without a deliberate projection or separate storage. Store update is also used by stop, so lifecycle publication must cover it, not only agent exit. Route order is real (we:../plateau-app/vite.config.mts:753, :760). The HTTP helper files are proposed additions at that existing seam, not files claimed to exist today.
+
+The UI is a separate consumer: board refresh remounts at we:../plateau-app/src/main.ts:830, binary substeps render at we:../plateau-app/src/backlog-view/lane-board.ts:399, and fixture preservation is exercised at we:../plateau-app/src/backlog-view/lane-board.test.ts:777. The new controller/styles belong alongside that board; browser coverage belongs to the existing collection at we:../plateau-app/playwright.config.ts:18.
+
+Applied #4289's per-repo check: no shared WE contract/data change is required by this local CLI-output projection. The existing WE backlog and admission tooling are read-only evidence, not implementation scope (we:scripts/operations/deliver-item-wrapper.mjs:378). Ownership follows we:docs/agent/platform-decisions.md#constellation-placement and the backend-neutral observation seam in we:docs/agent/platform-decisions.md#agent-runner-cli-backend. Thus no artificial WE predecessor is scaffolded. Any newly discovered shared contract must get a separately useful WE contract/conformance predecessor before a dependent product consumer; do not silently widen one of these slices.
