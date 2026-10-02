@@ -14,6 +14,8 @@ import {
 import daemonSilent from '../health-smells/daemon-silent.mjs';
 import daemonOwedNoDispatch from '../health-smells/daemon-owed-no-dispatch.mjs';
 import cloneStale from '../health-smells/clone-stale.mjs';
+import draftNotPromoted from '../health-smells/draft-not-promoted.mjs';
+import repeatedPrAttempts from '../health-smells/repeated-pr-attempts.mjs';
 import redPrUnattended from '../health-smells/red-pr-unattended.mjs';
 import badCredentials from '../health-smells/bad-credentials.mjs';
 import laneStarvation from '../health-smells/lane-starvation.mjs';
@@ -981,5 +983,169 @@ describe('report fences around untrusted text (#4437)', () => {
     const open = md.split('\n').find((l) => /^`{4,}$/.test(l));
     expect(open).toBe('````');
     expect(md.split('\n').filter((l) => l === open)).toHaveLength(2);
+  });
+});
+
+
+// Duration policy uses the real detectors and the production shadow allowlist.
+describe('xyx5mea stuck PR duration', () => {
+  const start = 1790882705935;
+  const targets = [draftNotPromoted, redPrUnattended, repeatedPrAttempts];
+  const subject = 'chalbert/web-everything#3336';
+  const key = (s) => `${s.id}::${subject}`;
+  const reload = (s) => JSON.parse(JSON.stringify(s));
+  const notify = (r) => r.plan.filter(p => p.kind === 'notify');
+  function probes(now) {
+    return {
+      prs: [{ repo: 'chalbert/web-everything', number: 3336, isDraft: true,
+        statusCheckRollup: [{ name: 'test', status: 'COMPLETED', conclusion: 'SUCCESS', completedAt: new Date(start - HOUR).toISOString() }] }],
+      agents: [], daemonLogs: [],
+      operationRuns: Array.from({ length: 5 }, (_, i) => ({ id: `run-${i}`, op: 'open-pr',
+        input: { repo: 'chalbert/web-everything', pr: 3336 }, effects: [{ key: 'submit', status: 'failed',
+          lastAttemptAt: new Date(now).toISOString(), error: 'submit failed' }] })),
+    };
+  }
+  function run(s, state, now, input = probes(now)) {
+    if (s.id === redPrUnattended.id && input.prs) {
+      input.prs[0].statusCheckRollup[0].conclusion = 'FAILURE';
+    }
+    return runHealthTick(state, input, [s], now);
+  }
+
+  it.each(targets)('$id escalates exactly once at 60 minutes and soaks across reloads', (s) => {
+    let r = run(s, emptyHealthState(), start);
+    const original = r.state.episodes[key(s)];
+    expect(original.severity).toBe('medium');
+    expect(notify(r)).toEqual([]);
+    expect(r.plan.filter(p => ['investigate', 'file'].includes(p.kind)).every(p => p.suppressed)).toBe(true);
+    r = run(s, r.state, start + HOUR - 1);
+    expect(r.state.episodes[key(s)].severity).toBe('medium');
+    expect(notify(r)).toEqual([]);
+    r = run(s, r.state, start + HOUR);
+    expect(r.state.episodes[key(s)]).toMatchObject({ severity: 'high', escalatedAt: start + HOUR,
+      id: original.id, openedAt: original.openedAt });
+    expect(r.transitions.filter(t => t.type === 'escalated')).toHaveLength(1);
+    expect(notify(r)).toEqual([{ kind: 'notify', key: key(s), reason: 'escalated', suppressed: null }]);
+    expect(r.plan).toHaveLength(1);
+    for (let offset = HOUR + 1; offset < 4 * HOUR; offset += MINUTE) {
+      r = run(s, reload(r.state), start + offset);
+      expect(r.transitions.filter(t => t.type === 'escalated')).toEqual([]);
+      expect(notify(r)).toEqual([]);
+    }
+  });
+
+  it.each(targets)('$id clears before escalation and reopens with a fresh clock', (s) => {
+    let r = run(s, emptyHealthState(), start);
+    for (let i = 1; i <= s.closeAfter; i++) {
+      r = runHealthTick(r.state, { prs: [], agents: [], daemonLogs: [], operationRuns: [] }, [s], start + i);
+      expect(notify(r)).toEqual([]);
+    }
+    expect(r.state.episodes[key(s)]).toBeUndefined();
+    r = run(s, r.state, start + HOUR);
+    expect(r.state.episodes[key(s)]).toMatchObject({ severity: 'medium', firstBreachAt: start + HOUR });
+    expect(notify(r)).toEqual([]);
+  });
+
+  it('clean hysteresis breaks continuity; expired attempts alone cannot escalate', () => {
+    const s = repeatedPrAttempts;
+    let r = run(s, emptyHealthState(), start);
+    r = runHealthTick(r.state, probes(start), [s], start + HOUR);
+    expect(r.state.episodes[key(s)].severity).toBe('medium');
+    expect(notify(r)).toEqual([]);
+    r = run(s, r.state, start + HOUR + 1);
+    expect(r.state.episodes[key(s)].firstBreachAt).toBe(start + HOUR + 1);
+    expect(notify(r)).toEqual([]);
+    r = run(s, r.state, start + 2 * HOUR);
+    expect(notify(r)).toEqual([]);
+    r = run(s, r.state, start + 2 * HOUR + 1);
+    expect(notify(r)).toHaveLength(1);
+  });
+
+  it.each(targets)('$id skips unknown probes and thrown evaluations until a confirmed breach', (s) => {
+    let r = run(s, emptyHealthState(), start);
+    r = runHealthTick(r.state, {}, [s], start + HOUR);
+    expect(notify(r)).toEqual([]);
+    expect(r.state.episodes[key(s)].severity).toBe('medium');
+    r = run({ ...s, evaluate() { throw new Error('probe failed'); } }, r.state, start + HOUR + 1);
+    expect(notify(r)).toEqual([]);
+    expect(r.state.probeErrors[`smell:${s.id}`].count).toBe(1);
+    r = run(s, reload(r.state), start + HOUR + 2);
+    expect(notify(r)).toHaveLength(1);
+  });
+
+  it('high survives a clean hysteresis sample, and an active tracking card suppresses overdue expiry', () => {
+    const s = repeatedPrAttempts;
+    let r = run(s, emptyHealthState(), start);
+    r = run(s, r.state, start + HOUR);
+    const id = r.state.episodes[key(s)].id;
+    r = runHealthTick(r.state, { daemonLogs: [], operationRuns: [] }, [s], start + HOUR + 1);
+    expect(r.state.episodes[key(s)]).toMatchObject({ severity: 'high', id });
+    r.state.silences = [{ smell: s.id, subject, expiresAt: start, card: 'active-card' }];
+    r = runHealthTick(r.state, probes(start + 5 * HOUR), [s], start + 5 * HOUR,
+      { activeCards: new Set(['active-card']) });
+    expect(r.state.episodes[key(s)].severity).toBe('high');
+    expect(notify(r)).toEqual([]);
+    expect(r.state.episodes[key(s)].remindedAt).toBeNull();
+  });
+
+  it('red detection floor is separate from episode duration', () => {
+    const input = probes(start);
+    input.prs[0].statusCheckRollup[0].completedAt = new Date(start - HOUR + 1).toISOString();
+    let r = run(redPrUnattended, emptyHealthState(), start, input);
+    expect(r.state.episodes).toEqual({});
+    r = run(redPrUnattended, r.state, start + 1, input);
+    expect(r.state.episodes[key(redPrUnattended)].severity).toBe('medium');
+    expect(notify(r)).toEqual([]);
+  });
+
+  it.each([undefined, null, NaN, Infinity, start + 2 * HOUR])('refuses invalid persisted start %s', (firstBreachAt) => {
+    let r = run(redPrUnattended, emptyHealthState(), start);
+    r.state.episodes[key(redPrUnattended)].firstBreachAt = firstBreachAt;
+    r = run(redPrUnattended, r.state, start + HOUR);
+    expect(notify(r)).toEqual([]);
+    expect(r.state.episodes[key(redPrUnattended)].severity).toBe('medium');
+  });
+
+  it.each([undefined, null, 0, -1, NaN, Infinity])('refuses invalid duration %s', (escalateAfterMs) => {
+    const s = { ...redPrUnattended, escalateAfterMs };
+    let r = run(s, emptyHealthState(), start);
+    r = run(s, r.state, start + HOUR);
+    expect(notify(r)).toEqual([]);
+  });
+
+  it.each(targets)('$id respects tracking, medium expiry, high expiry and coalesces overdue reminders', (s) => {
+    let r = run(s, emptyHealthState(), start);
+    r.state.silences = [{ smell: s.id, subject, expiresAt: start + 2 * HOUR }];
+    r = run(s, r.state, start + HOUR);
+    expect(r.state.episodes[key(s)].severity).toBe('high');
+    expect(notify(r)).toEqual([]);
+    r = run(s, r.state, start + 2 * HOUR);
+    expect(notify(r)).toHaveLength(1);
+    r = run(s, reload(r.state), start + 2 * HOUR + 1);
+    expect(notify(r)).toEqual([]);
+
+    r = run(s, emptyHealthState(), start);
+    r.state.silences = [{ smell: s.id, subject, expiresAt: start + MINUTE }];
+    r = run(s, r.state, start + MINUTE);
+    expect(notify(r)).toEqual([]);
+
+    r = run(s, emptyHealthState(), start);
+    r.state.silences = [{ smell: s.id, subject, expiresAt: start + 4 * HOUR }];
+    r = run(s, r.state, start + 1);
+    r = run(s, r.state, start + 4 * HOUR);
+    expect(r.transitions.map(t => t.type)).toEqual(['escalated', 'silence-expired', 'reminder']);
+    expect(notify(r)).toHaveLength(1);
+    expect(r.state.episodes[key(s)].remindedAt).toBe(start + 4 * HOUR);
+    r = run(s, reload(r.state), start + 4 * HOUR + 1);
+    expect(notify(r)).toEqual([]);
+  });
+
+  it.each([draftNotPromoted, repeatedPrAttempts])('grandfathers legacy high $id without replay', (s) => {
+    let r = run(s, emptyHealthState(), start);
+    r.state.episodes[key(s)].severity = 'high';
+    r = run(s, reload(r.state), start + HOUR);
+    expect(r.state.episodes[key(s)].severity).toBe('high');
+    expect(r.transitions).toEqual([]);
+    expect(notify(r)).toEqual([]);
   });
 });
