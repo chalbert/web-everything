@@ -64,3 +64,7 @@ Use isolated temporary roots, mocked GitHub/actuator IO and injected clocks. Ass
 ## Follow-ups
 
 Record replay limitations, observed product gaps and testing lessons here. Do not append to shared agent docs or silently add a new automatic action beyond the epic’s catalogue.
+
+## Boundary with story xhrmvts (orchestrator, 2026-10-02, from the #3481 review)
+
+A stranded lane that holds committed work not on main is NEVER released by this story: it belongs to xhrmvts, which re-verifies it and opens its PR (on 2026-10-01 seven such lanes held finished, green work). This story releases only lanes whose work is already on main or in an open PR, or that hold no commits of their own and no uncommitted changes. Any lane with uncommitted changes is escalated, never released.
