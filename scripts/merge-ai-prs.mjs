@@ -123,7 +123,7 @@ import { OPEN_PR_LIST_LIMIT, isDegradedOpenPrListing, filterOpenPrsByLabel } fro
 // #2925/#xkfv491 (we:backlog/fix-review-ciheal-deadlock) — see this file's own re-export note (further down,
 // beside `latestRequiredCheck`) for why `collapseRollupToLatestPerName`/`rollupRowKind` now live in their own
 // dependency-free `./lib/rollup-collapse.mjs` rather than here.
-import { collapseRollupToLatestPerName } from './lib/rollup-collapse.mjs';
+import { collapseRollupToLatestPerName, rollupRowKind } from './lib/rollup-collapse.mjs';
 export { isAiAuthor, isAiCommit, isMechanicalMergeCommit, isDrainBookkeepingCommit } from './lib/ai-pr-authorship.mjs';
 export { isAiGeneratedPr, hasLabel };
 import { execFileSync, execFile, spawnSync } from 'node:child_process';
@@ -400,9 +400,49 @@ export function syncPrimaryOnLand({ exec, primary, hinted = false, isCwd = () =>
  * @returns {object|null} the newest matching entry, or `null` when the check has not reported at all.
  */
 export function latestRequiredCheck(pr, requiredCheck = 'test') {
+  if (pr?.requiredCheckReadError) return null;
   const roll = Array.isArray(pr?.statusCheckRollup) ? pr.statusCheckRollup : [];
   const collapsed = collapseRollupToLatestPerName(roll);
   return collapsed.find((c) => (c?.name || c?.context) === requiredCheck) || null;
+}
+
+/** Resolve capped/missing rollup evidence against the listed head, never a moving branch.
+ * gh's PR listing caps contexts at 100 (#3432); even a visible check may have a newer run
+ * beyond that cap. Read all REST pages before replacing the required name's evidence.
+ * Read failures are unknown, not CI failures, and must be retried next pass.
+ */
+export async function resolveRequiredCheck(pr, { repo = null, requiredCheck = 'test', exec = execFileP, onDeferred = () => {} } = {}) {
+  const rollup = Array.isArray(pr?.statusCheckRollup) ? pr.statusCheckRollup : [];
+  if (!pr?.requiredCheckReadError && rollup.length < 100 && latestRequiredCheck(pr, requiredCheck)) return pr;
+  const resolved = { ...pr };
+  delete resolved.requiredCheckReadError;
+  try {
+    if (!pr?.headRefOid) throw new Error('PR head SHA is missing');
+    const endpoint = `repos/${repo || '{owner}/{repo}'}/commits/${encodeURIComponent(pr.headRefOid)}/check-runs?check_name=${encodeURIComponent(requiredCheck)}&filter=latest&per_page=100`;
+    const { stdout } = await exec('gh', ['api', endpoint, '--paginate', '--slurp'], {
+      encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
+    });
+    const pages = JSON.parse(stdout);
+    if (!Array.isArray(pages) || !pages.length || pages.some((page) => !Array.isArray(page?.check_runs))) {
+      throw new Error('invalid check-runs response');
+    }
+    const runs = pages.flatMap((page) => page.check_runs);
+    if (runs.some((run) => run?.name !== requiredCheck || run.head_sha !== pr.headRefOid
+      || !Number.isSafeInteger(run.id) || run.id <= 0 || typeof run.status !== 'string')) {
+      throw new Error('invalid check-run evidence for the requested head/name');
+    }
+    // The REST read replaces only CheckRun evidence. A legacy commit status of the same name is a different
+    // source the check-runs endpoint never returns, so dropping it would delete the only verdict when the head
+    // has no check-run; it stays listed and `latestRequiredCheck` ranks any CheckRun above it.
+    resolved.statusCheckRollup = [
+      ...rollup.filter((row) => (row?.name || row?.context) !== requiredCheck || rollupRowKind(row) === 'StatusContext'),
+      ...runs.map((run) => ({ ...run, __typename: 'CheckRun', conclusion: run.status === 'completed' ? run.conclusion : null })),
+    ];
+  } catch (error) {
+    resolved.requiredCheckReadError = `required check "${requiredCheck}" direct read failed; deferred this pass: ${String(error.message || error).split('\n')[0]}`;
+    onDeferred(resolved.requiredCheckReadError);
+  }
+  return resolved;
 }
 
 // #2925/#xkfv491 — `collapseRollupToLatestPerName`/`rollupRowKind` now live in their OWN dependency-free module,
@@ -695,7 +735,8 @@ export function classifyPr(pr, { requiredCheck = 'test', trustLabel = 'ready-to-
     : humanCleared
       ? 'human-cleared (review:accepted), required check green, cleanly mergeable'
       : 'AI-generated, required check green, cleanly mergeable';
-  if (!certified) { decision = 'skip'; reason = `not AI-generated (a commit lacks the Co-Authored-By: Claude trailer), no "${trustLabel}" label, and not human-cleared (review:accepted)`; }
+  if (pr?.requiredCheckReadError) { decision = 'skip'; reason = pr.requiredCheckReadError; }
+  else if (!certified) { decision = 'skip'; reason = `not AI-generated (a commit lacks the Co-Authored-By: Claude trailer), no "${trustLabel}" label, and not human-cleared (review:accepted)`; }
   // #3674 — ahead of the required-check arm, so a non-default base is held with its real reason (even when `test`
   // is green) instead of waiting on a check that never runs there.
   else if (offDefaultBase) { decision = 'skip'; reason = `base is not ${defaultBranch} (${base})`; }
@@ -712,7 +753,8 @@ export function classifyPr(pr, { requiredCheck = 'test', trustLabel = 'ready-to-
   // blocker does it flag `reviewHeld`, so the downstream passes see the hold in isolation. No review label ⇒ never
   // held ⇒ a no-op for the common case (#2820-review-fix finding 3 — "checked LAST so earlier reasons win").
   else if (reviewUncleared) { decision = 'skip'; reviewHeld = true; reason = `unsatisfied review hold ("${heldLabel}") present without review:accepted — refusing to merge regardless of "${trustLabel}" (#2820)`; }
-  return { num, title, decision, reason, aiGenerated, certifyLabel, humanCleared, reviewHeld, testGreen, state, mergeable, offDefaultBase };
+  return { num, title, decision, reason, aiGenerated, certifyLabel, humanCleared, reviewHeld, testGreen, state, mergeable, offDefaultBase,
+    ...(pr?.requiredCheckReadError ? { requiredCheckReadError: pr.requiredCheckReadError } : {}) };
 }
 
 /**
@@ -2080,6 +2122,11 @@ export function planLabelDrain(candidates, { landedThisPass = new Set(), provenO
   // one place with both sets in scope) and returned for the caller to name the holding PR.
   const staleLandedOpenItems = [...openItems].filter((id) => provenLanded(id));
   for (const c of list) {
+    if (c.requiredCheckReadError) {
+      deferred.push({ num: c.num, repo: c.repo, item: c.item, headSha: c.headSha ?? null,
+        waitOn: ['required-check-read'], reason: c.requiredCheckReadError });
+      continue;
+    }
     if (c.decision !== 'merge') continue; // @merge-gate-exempt builds the merge-ORDERING lists (ready/deferred); a held PR is `skip` and correctly not ordered for landing — it must not join the merge cascade
     const blockWait = (Array.isArray(c.blockedBy) ? c.blockedBy : []).map(asItemId).filter((b) => openItems.has(b) && !provenLanded(b));
     const stackWait = (Array.isArray(c.stackParents) ? c.stackParents : []).map(asItemId).filter((sp) => !stackProven(sp));
@@ -3793,13 +3840,18 @@ async function runCli() {
   // #2412 merge-trace comment alike (a separate best-effort head read used to feed both, and when it missed the
   // pin was silently dropped; xvzc4v4 advisory fix). `author` is deliberately absent, as in the pass-start
   // listing: `classifyPr`'s AI gate reads each commit's own `authors` (from `commits`), never the PR author.
-  const fetchFreshPrForRevalidation = (repo, num) => {
+  const resolveChecks = (repo, pr) => resolveRequiredCheck(pr, {
+    repo, requiredCheck: REQUIRED,
+    onDeferred: (reason) => process.stderr.write(`  ⚠ ${repoTag(repo)}${pr.number} ${reason}\n`),
+  });
+  const resolveListedChecks = (repo, prs) => mapWithConcurrency(prs, 6, (pr) => resolveChecks(repo, pr));
+  const fetchFreshPrForRevalidation = async (repo, num) => {
     try {
       const raw = execFileSync('gh', ['pr', 'view', String(num), ...repoFlag(repo), '--json',
         'number,title,body,headRefName,headRefOid,baseRefName,mergeable,mergeStateStatus,statusCheckRollup,labels,commits'],
         { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
       const data = JSON.parse(raw || '{}');
-      return data && data.number != null ? data : null;
+      return data && data.number != null ? await resolveChecks(repo, data) : null;
     } catch { return null; }
   };
 
@@ -3963,9 +4015,9 @@ async function runCli() {
       // #gh-graphql-budget — the host-shared open-PR snapshot (the same right-sized list every daemon reads,
       // at most one refresh per repo per TTL) — falls back to this pass's own listing when not applicable.
       const shared = readSharedOpenPrs({ repo, fields: CONTEXT_LIST_FIELDS, caller: 'merge-ai-prs.mjs' });
-      if (shared) return shared;
+      if (shared) return resolveListedChecks(repo, shared);
       const { stdout } = await execFileP('gh', ['pr', 'list', ...repoFlag(repo), '--state', 'open', '--limit', String(OPEN_PR_LIST_LIMIT), '--json', CONTEXT_LIST_FIELDS], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
-      return JSON.parse(stdout.trim() || '[]');
+      return resolveListedChecks(repo, JSON.parse(stdout.trim() || '[]'));
     },
     // #2417 — fan out the per-PR manifest + commits reads across ALL repos' open PRs at once (bounded pool), cached
     // across `--watch` passes on unchanged head SHA. Returns the reduced key→{manifest, commits, degraded} map.
@@ -4029,6 +4081,7 @@ async function runCli() {
     }
     const reconciled = [];
     for (const p of open) {
+      if (p.requiredCheckReadError) continue; // Unknown CI: leave every lifecycle label untouched.
       // #2417 — reuse the commits read `collectOpenPrContext` already fanned out + cached this pass (was a
       // serial per-PR `gh pr view --json commits` here — the #2421 double-read, now collapsed). A PR missing
       // from the map (its context read failed) is skipped, same as the old per-PR fetch-error `continue`.
@@ -4208,6 +4261,7 @@ async function runCli() {
       let rows = await run(sized);
       let limit = sized;
       if (rows.length >= sized) { limit = OPEN_PR_LIST_LIMIT; rows = await run(limit); }
+      rows = await resolveListedChecks(repo, rows);
       const { prs: labelMatched, truncated } = filterOpenPrsByLabel(rows, label, limit);
       const prs = filterOpenPrsByBase(labelMatched, base);
       if (truncated) process.stderr.write(`  ⚠️  DEGRADED drain listing for ${repoTag(repo) || 'cwd'}: the open-PR list hit the --limit ${limit} cap — it MAY be truncated, so a ${label || 'candidate'} PR past it can be missing this pass (#no-label-search)\n`);
@@ -4377,7 +4431,7 @@ async function runCli() {
       // lane/* ref (renumbers the NNN), moving the head out from under an active reviewer and invalidating any
       // #2409 acceptance stamped against the old SHA. The heal's premise ("a red required check is the symptom")
       // never held for a green-held PR: it has no collision to heal. Excluding `reviewHeld` restores that premise.
-      if (!certified || v.decision === 'merge' || v.reviewHeld) continue;
+      if (!certified || v.decision === 'merge' || v.reviewHeld || v.requiredCheckReadError) continue;
       if (!isLocalRepo(v.repo) || !v.headRef) continue;
       // #2276 — a rebase-drop candidate (stale-green + BEHIND/CONFLICTING) is healed INSIDE the rebase-drop
       // rebuild below (one rebuilt tip drops the manifest AND renumbers), so skip it here to avoid a double
@@ -5106,7 +5160,7 @@ async function runCli() {
     return planLabelDrain(cands, { landedThisPass, provenOnMain, coupleIncomplete, extraOpenItems: orderExtraOpenItems, contextComplete: !!openPrContext.contextComplete, isWeRepo: isLocalRepo, overlapContext: octx.waits, overlapLocalSlug: localSlug });
   };
   const toMerge = verdicts.filter((v) => v.decision === 'merge'); // @merge-gate-exempt the FINAL set actually merged; a held PR is `decision:'skip'` and MUST be excluded here — this is the hard AND that never lands a held PR
-  const skipped = verdicts.filter((v) => v.decision === 'skip');
+  const skipped = verdicts.filter((v) => v.decision === 'skip' && !v.requiredCheckReadError);
   // #xc7p3q9 (R6) — the held couple's members (its `skip` carrier + its deferred impl half — both carry
   // `coupleDeferReason:'held'`) so `decideBatchesIdleExit` can SUBTRACT them from `considered` rather than waive
   // the queue-empty check wholesale.
@@ -5244,7 +5298,7 @@ async function runCli() {
           const ck = `${c.coupleCarrier.repo || 'cwd'}::${c.coupleCarrier.num}`;
           const carrierMerged = merged.some((m) => candKey(m) === ck);
           const carrier = coupleStep.ordered.find((x) => candKey(x) === ck) || null;
-          const fresh = carrierMerged || !carrier ? null : revalidateForMerge(fetchFreshPrForRevalidation(carrier.repo, carrier.num), {
+          const fresh = carrierMerged || !carrier ? null : revalidateForMerge(await fetchFreshPrForRevalidation(carrier.repo, carrier.num), {
             requiredCheck: REQUIRED, allowPendingReview: (escalationRelief.prs || []).includes(Number(carrier.num)) || (!!escalationRelief.passWide && !!label),
             defaultBranch: defaultBranchOf(carrier.repo), expectedHeadSha: carrier.listedHeadSha || carrier.headSha || null,
           });
@@ -5308,7 +5362,7 @@ async function runCli() {
           // (review gate included) actually judged; a push since then refuses the merge instead of landing an
           // unjudged head under a still-present `review:accepted` label. `revalidated.headSha` is that pinned SHA.
           const reliefAllowsPendingNow = (escalationRelief.prs || []).includes(Number(c.num)) || (!!escalationRelief.passWide && !!label);
-          const revalidated = revalidateForMerge(fetchFreshPrForRevalidation(c.repo, c.num), {
+          const revalidated = revalidateForMerge(await fetchFreshPrForRevalidation(c.repo, c.num), {
             requiredCheck: REQUIRED, allowPendingReview: reliefAllowsPendingNow, defaultBranch: defaultBranchOf(c.repo),
             expectedHeadSha: c.listedHeadSha || c.headSha || null,
           });
