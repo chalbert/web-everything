@@ -63,7 +63,7 @@ export function checksArgv({ repo, sha }) {
     `repos/${repo}/commits/${sha}/check-runs`,
     // `id` — this feed is NEWEST-first (the rollup is oldest-first), so `collapseRollupToLatestPerName` ranks a
     // check's reruns by run id rather than by position (PR #2894 review).
-    '--jq', '.check_runs[] | {id,name,status,conclusion}',
+    '--jq', '.check_runs[] | {id,name,status,conclusion,completed_at}',
   ];
 }
 

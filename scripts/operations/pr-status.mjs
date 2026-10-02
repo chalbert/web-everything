@@ -176,10 +176,11 @@ export function reduceCheckState(runs = [], requiredChecks) {
   });
   const counts = { total: list.length, succeeded: 0, failed: 0, running: 0, nonBlocking: 0, unreadable: 0 };
 
+  const missing = required?.filter(name => !list.some(run => run.name === name)) ?? [];
   if (!list.length) {
     return {
       state: 'unchecked',
-      why: 'no check run exists for this head — nothing has been asked about this commit, which is not the '
+      why: (missing.length ? `missing required checks: ${missing.join(', ')}; ` : '') + 'no check run exists for this head — nothing has been asked about this commit, which is not the '
         + 'same as a check that is pending, and never satisfies a gate',
       counts,
     };
@@ -198,6 +199,7 @@ export function reduceCheckState(runs = [], requiredChecks) {
 
   if (counts.running) return { state: 'pending', why: `${counts.running} of ${counts.total} check(s) still running`, counts };
   if (counts.failed) return { state: 'red', why: `${counts.failed} of ${counts.total} check(s) concluded failing`, counts };
+  if (missing.length) return { state: 'unchecked', why: `missing required checks: ${missing.join(', ')}`, counts };
   if (counts.unreadable) {
     return {
       state: 'unchecked',
