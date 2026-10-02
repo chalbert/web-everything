@@ -1,9 +1,11 @@
 ---
 kind: story
 size: 1
-status: open
+status: resolved
 scope: ["we:scripts/operations/__tests__/review-extra-seats.test.mjs", "we:scripts/operations/review-extra-seats.mjs"]
 dateOpened: "2026-10-01"
+dateResolved: "2026-10-01"
+graduatedTo: f78705a502
 tags: []
 ---
 
