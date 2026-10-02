@@ -24,3 +24,11 @@ class_name = "PrEventLog"
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["PrEventLog"]
+
+# PR_EVENTS_BOOTSTRAP_TOKEN — separate write credential for POST /prs/bootstrap; never reuse the read token.
+# GET /prs uses PR_EVENTS_READ_TOKEN. Projection coverage excludes unavailable history and closed-before-seed PRs.
+# First deploy: node we:scripts/conveyor/pr-events-worker/bootstrap.mjs --url=https://<worker> \
+#   --repos=owner/repo,owner/other --import-id=<unique-attempt> --limit=1000
+# Export PR_EVENTS_READ_TOKEN and PR_EVENTS_BOOTSTRAP_TOKEN locally; gh uses operator credentials.
+# Exactly one gh list per repo. Saturation/failure stays incomplete; fresh retries need a new import ID.
+# Reposting an identical import payload is idempotent; changing it under an existing ID is rejected.

@@ -3,7 +3,7 @@ bornAs: x0lxgal
 kind: story
 size: 5
 parent: "4075"
-status: open
+status: resolved
 scope:
   - we:scripts/conveyor/pr-events-worker/core.mjs
   - we:scripts/conveyor/pr-events-worker/worker.mjs
@@ -14,6 +14,7 @@ scope:
   - we:scripts/conveyor/pr-events-worker/__tests__/worker.test.mjs
   - we:scripts/conveyor/pr-events-worker/__tests__/bootstrap.test.mjs
 dateOpened: "2026-09-27"
+dateResolved: "2026-10-01"
 preparedDate: "2026-10-01"
 preparedAgainstSha: "1e4425d3d9e32aa10a7168c775b3882833d0ee99"
 tags: []
@@ -35,6 +36,16 @@ Premise checked against checkout `1e4425d3d9e32aa10a7168c775b3882833d0ee99`; pre
 - **Old scope:** core, Worker shell, and core tests only. **Correction:** add bootstrap CLI and tests, SQL-shell persistence tests, replay assertions, and binding documentation. Those new CLI/test files are proposed. The existing SQL adapter owns only events/meta and the Object exposes append/touch/read, with one global object across repos (we:scripts/conveyor/pr-events-worker/worker.mjs:16–44). Existing replay tests exercise memory storage, not Durable Object persistence (we:scripts/conveyor/pr-events-worker/__tests__/replay.test.mjs:14–27).
 - **Retention constraint:** count/age pruning removes event rows, and delivery deduplication searches those same rows (we:scripts/conveyor/pr-events-worker/core.mjs:117–125; we:scripts/conveyor/pr-events-worker/worker.mjs:23–27). A retained event log alone cannot reconstruct durable state after pruning. Current cursor reset/gap/page semantics must remain compatible (we:scripts/conveyor/pr-events-worker/core.mjs:130–145).
 - **Downstream boundary:** #4621 already requires checking this producer and filing a separate follow-up if merge instants, kind evidence or historical coverage remain missing (we:backlog/4621-count-plateau-deliveries-today-by-explicit-merge-intent.md:24, :45). This card does not promise those fields or complete merge history.
+
+### Implementation proof — 2026-10-01
+
+- **Before:** added the signed lifecycle + authenticated snapshot regression in we:scripts/conveyor/pr-events-worker/__tests__/core.test.mjs, then ran `npx vitest run we:scripts/conveyor/pr-events-worker/__tests__/core.test.mjs` (strip `we:` when executing). Exit **1**: expected HTTP **200**, actual **404**; 18 existing tests passed and the new feature assertion failed.
+- **After:** implemented the pure observation fold, per-field bootstrap clocks, persistent projection/index/import rows, additive replay marker, atomic SQL mutation and snapshot read, explicit coverage and separate seed credential. The existing Object identity and migration remain unchanged. Partial legacy label evidence lives in `labelChanges`; `labels: null` remains unknown until a full snapshot arrives. Empty check/suite arrays mean no observed records, not proof that no checks exist. Suite and named-run observations remain separate; review evidence is not an aggregate verdict.
+- **Executable regression:** `npx vitest run we:scripts/conveyor/pr-events-worker/__tests__/ we:scripts/lib/__tests__/pr-events.test.mjs` passed **50 tests**, exit **0**, including the explicit-check-association regression (later empty PR arrays preserve earlier direct associations; null SHAs never act as a join key). The original `/prs` assertion now returns `{"cursor":1,"stateCursor":1,"prs":[{"number":4281,"sha":"head","draft":false,"labels":[],"state":"open"}]}` (selected fields). #2708 replay asserts merged state, partial label deltas and check association without changing the reconstructed fixture or its null SHAs; daemon wake/client assertions remain green.
+- **Actual SQLite/runtime proof:** `npx vitest run we:scripts/conveyor/pr-events-worker/__tests__/worker.test.mjs`, exit **0**, uses Miniflare/workerd and a temporary persistent SQLite directory. It starts the events/meta-only schema at head **8**, upgrades in place, injects an aborting SQL projection trigger and confirms head stays **8**, then sends **30** signed lifecycle deliveries plus signed check/review observations. Expected/actual paged response: `{"cursor":38,"stateCursor":40,"gap":true,"more":true}` with head `h29` and check/review SHA `h0`. Count pruning retains three events; age pruning leaves sequence **41** while the full PR snapshot survives. Disposing/recreating the runtime against the same directory yields an identical snapshot/envelope (excluding response `now`). Replay boundary stays **8**, proving the marker is durable.
+- **Bootstrap/runtime proof:** the operator function performs one injected `gh pr list` call and imports through the running local HTTP endpoint. A signed close/head/label delivery during listing wins: expected/actual `{"state":"closed","merged":true,"sha":"final","labels":["closed"]}`. Reposting an identical import returns `duplicate: true`; conflicting input under the same ID is rejected. The actual CLI also runs as a Node subprocess against that endpoint with a fake process-boundary executable (inline preload, no helper files), asserting exactly one repo-qualified list invocation, exit **0**, a seeded second PR, and `status: truncated` at limit **1**. Command failures record `failed`; deliberate fresh attempts use new IDs. No live credentials or deployment were involved.
+
+- **Wider gate:** `node we:scripts/verify-lane.mjs` completed **green**, exit **0**, with the selected wider suite and standards gate (**0 errors**, existing warnings retained). Final verification after the last proof assertions and card update also exited **0**: **7,468 tests across 132 files passed**, and the full standards check covered **4,748 backlog items** with **0 errors** (5,080 existing warnings). Parent #4075 retains other open work; its status is unchanged.
 
 ## Design
 
@@ -78,3 +89,5 @@ All MVP state transitions, SHA association, durable restart/pruning, bootstrap r
 - #3007's authority flip and #3038's shared jury store remain separate work; this observational projection does not settle their policy or storage decisions.
 - Track durable-state retention/compaction, unlimited delivery deduplication and upstream out-of-order reconciliation separately if needed. This slice preserves observed sequence order and makes no historical-completeness claim.
 - Testing lesson for implementation: the current replay harness proves the pure core and daemon client together, not SQL persistence (we:scripts/conveyor/pr-events-worker/__tests__/replay.test.mjs:14–27). Record local-runtime setup and actual evidence in this card/review; do not append shared agent documentation as part of this job.
+
+- Local-runtime testing lesson: bundle the production Worker in memory and subclass only inside the test to inject SQLite faults/retention controls. Keep the Object class identity constant across restart/upgrade. The CLI fake executable can be injected with a Node data-URL preload, avoiding helper files and real GitHub calls (we:scripts/conveyor/pr-events-worker/__tests__/worker.test.mjs).

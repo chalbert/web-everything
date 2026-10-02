@@ -1,11 +1,9 @@
 ---
 bornAs: xvmk4h4
-kind: story
+kind: epic
 locus: plateau-app
-size: 5
 status: open
 blockedBy: ["4620", "4340"]
-scope: ["plateau-app:src/wip/progress-runs.ts", "plateau-app:src/wip/progress-runs.test.ts", "plateau-app:src/wip/progress-read.ts", "plateau-app:src/wip/progress-read.test.ts", "plateau-app:src/wip/types.ts", "plateau-app:src/wip/wip-read.ts", "plateau-app:src/wip/wip-read.test.ts", "plateau-app:src/wip/wip-model.ts", "plateau-app:src/wip/wip-model.test.ts", "plateau-app:src/wip/wip-view.ts", "plateau-app:src/wip/wip-view.css", "plateau-app:src/wip/wip-view.test.ts", "plateau-app:src/wip/wip-view.hostile.test.ts", "plateau-app:src/wip/wip-source.ts", "plateau-app:src/wip/wip-source.test.ts", "plateau-app:src/wip/wip-relay-contract.test.ts", "plateau-app:src/wip/wip-publish.test.ts", "plateau-app:scripts/wip-publish.ts", "plateau-app:wip-relay.js"]
 dateOpened: "2026-09-30"
 preparedDate: "2026-10-01"
 preparedAgainstSha: "9454ab40a3f4ab18a679690a4273fe76736f69c8"
@@ -14,9 +12,37 @@ tags: []
 
 # Show every running job and builder hold with its actual owner and executor
 
-Join builder builds and preparation, standalone Codex and Gemini/agy workers, fix/ci-heal and review jobs into honest moving and held counts. Keep owner, supervisor, executor and model provenance distinct. Default to every configured constellation repo and author; unmapped work remains visible. Preserve the goal and both prerequisites; this preparation changes no runtime or policy.
+Umbrella for honest running jobs and builder holds across configured constellation repos and authors, with distinct owner, supervisor, executor and model evidence. Delivery is split into #x74eqth, #xukxoy9, #xk7jz9n, #xv8d25t and #xowscy1; the prepared goal, Design and Test plan below remain the acceptance baseline.
 
-## Progress
+## Split analysis and current delivery plan (2026-10-01)
+
+User-authorized backlog-only split after the build exceeded 20 paths or 4 areas. This section is the split report in the card, rather than a separate report artifact. The original prepared plan below is preserved as historical design evidence; this section supersedes its single-consumer-change build order and conditional contract follow-up. No runtime implementation or proof is claimed.
+
+Real-tree inspection used Plateau HEAD `2a38182`: we:../plateau-app/src/wip/progress-read.ts:52 already has readMoving; we:../plateau-app/src/wip/types.ts:202 already accepts schema 2; we:../plateau-app/src/wip/wip-read.ts:389 shares live-state and :417 collects dispatch observations; we:../plateau-app/src/wip/wip-model.ts:358 still marks holds unavailable. The contract predecessor x9jwbpi is resolved and its artifacts now exist, but we:contracts/plateau-progress-view.schema.json:185 and :329 have no validated executor/model or structured capacity/overlap extension. A WE-only contract slice is therefore required first, per we:docs/agent/platform-decisions.md#constellation-placement and the #4289 per-repo ruling. #4620 and #4340 remain open prerequisites despite code present in the inspected checkout: pin their landed interfaces before build.
+
+### Could split
+
+| Slice | Size | Predicted scope (exact paths in child frontmatter) | Paths / implementation areas | Blocked by |
+| --- | --- | --- | --- | --- |
+| #x74eqth — WE contract, populated examples and declarative validator | 2 | `we:contracts/plateau-progress-view.schema.json`; `we:contracts/plateau-progress-view.examples.json`; `we:contracts/plateau-progress-view.test.ts` | 3 / 1 | #x9jwbpi |
+| #xukxoy9 — Plateau types, relay and browser acceptance | 2 | `we:../plateau-app/src/wip/types.ts`; `we:../plateau-app/src/wip/wip-source.ts`; `we:../plateau-app/src/wip/wip-source.test.ts`; `we:../plateau-app/src/wip/wip-relay-contract.test.ts`; `we:../plateau-app/wip-relay.js` | 5 / 2 | #x74eqth, #4620 |
+| #xk7jz9n — Plateau standalone/delegated run adapter and tests | 3 | `we:../plateau-app/src/wip/progress-runs.ts`; `we:../plateau-app/src/wip/progress-runs.test.ts` | 2 / 1 | #xukxoy9 |
+| #xv8d25t — Plateau persisted/tick hold adapter and tests | 3 | `we:../plateau-app/src/wip/progress-holds.ts`; `we:../plateau-app/src/wip/progress-holds.test.ts` | 2 / 1 | #xukxoy9, #4340 |
+| #xowscy1 — Plateau shared collector, counts, view and publisher proof | 3 | `we:../plateau-app/src/wip/progress-read.ts`; `we:../plateau-app/src/wip/progress-read.test.ts`; `we:../plateau-app/src/wip/wip-read.ts`; `we:../plateau-app/src/wip/wip-read.test.ts`; `we:../plateau-app/src/wip/wip-model.ts`; `we:../plateau-app/src/wip/wip-model.test.ts`; `we:../plateau-app/src/wip/wip-view.ts`; `we:../plateau-app/src/wip/wip-view.css`; `we:../plateau-app/src/wip/wip-view.test.ts`; `we:../plateau-app/src/wip/wip-view.hostile.test.ts`; `we:../plateau-app/src/wip/wip-publish.test.ts`; `we:../plateau-app/scripts/wip-publish.ts` | 12 / 2 | #xk7jz9n, #xv8d25t |
+
+Scopes use native locus qualifiers in machine frontmatter; prose uses WE-relative repo paths. Budgets above exclude one bookkeeping card path/area, which still leaves every slice below both limits. Each child has a real digest, explicit scope, test-first acceptance and assigned parts of the prepared proof. Sizes are re-estimated from the read code, not inherited from the former size 5.
+
+### Could not split
+
+| Candidate remainder | Failed condition | Unblocking action |
+| --- | --- | --- |
+| None within the prepared MVP | None | No additional scope deferred by this split. Exhaustive custom-path launch registration was already outside the MVP and remains a producer follow-up. |
+
+DAG: x9jwbpi → #x74eqth; (#x74eqth, #4620) → #xukxoy9; #xukxoy9 → #xk7jz9n; (#xukxoy9, #4340) → #xv8d25t; (#xk7jz9n, #xv8d25t) → #xowscy1. Runs and holds can proceed independently once their own prerequisites clear. The contract is independently consumable; compatibility hardening deploys safely before publication; each adapter has contract-valid fixture replay without activating an incomplete publisher. The final story owns the integrated phone proof. None is dispatched merely because it was scaffolded.
+
+Net flow: +5 stories; #4624 remains open as a storied epic, without size or build scope. The original #4620/#4340 prerequisites remain on the epic and on the consuming branches.
+
+## Progress (original preparation)
 
 Premise checked 2026-10-01 against WE `9454ab40a`, local `main`'s preparation brief, and Plateau `1888d29`. The supplied old filename now resolves to this card. Only this card is edited.
 
