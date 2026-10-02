@@ -4,7 +4,7 @@ kind: story
 size: 3
 parent: "4075"
 status: open
-scope: ["we:backlog/4595-automatically-postmortem-every-builder-outcome-using-the-can.md", "we:reports/data/2026-09-30-builder-postmortem.json", "we:scripts/lib/report-snapshot.mjs", "we:scripts/lib/__tests__/report-snapshot.test.mjs", "we:scripts/check-standards.mjs", "we:scripts/__tests__/check-standards-scoped-file-scan.test.mjs", "we:scripts/__tests__/report-snapshot-gate.test.mjs"]
+scope: ["we:backlog/4595-automatically-postmortem-every-builder-outcome-using-the-can.md", "we:reports/data/2026-09-30-builder-postmortem.json", "we:scripts/lib/report-snapshot.mjs", "we:scripts/lib/__tests__/report-snapshot.test.mjs", "we:scripts/check-standards.mjs", "we:scripts/__tests__/check-standards.test.mjs", "we:scripts/__tests__/check-standards-scoped-file-scan.test.mjs", "we:scripts/__tests__/report-snapshot-gate.test.mjs"]
 dateOpened: "2026-09-30"
 preparedDate: "2026-10-02"
 preparedAgainstSha: "ac2e9dc86bcaf9c5f27bcc5a2091e11de598e967"
