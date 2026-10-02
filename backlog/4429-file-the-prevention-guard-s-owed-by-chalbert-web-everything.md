@@ -3,9 +3,10 @@ bornAs: xl69x5t
 kind: story
 size: 3
 parent: "4075"
-status: open
+status: resolved
 scope: ["we:scripts/lib/gh-rest-read.mjs", "we:scripts/lane-whois.mjs", "we:scripts/lib/__tests__/gh-rest-read.test.mjs", "we:scripts/__tests__/lane-whois.test.mjs", "we:scripts/lib/atomic-json-file.mjs", "we:scripts/lib/__tests__/atomic-json-file.test.mjs"]
 dateOpened: "2026-09-29"
+dateResolved: "2026-10-01"
 preparedDate: "2026-10-01"
 preparedAgainstSha: "083d206bd2195ed354172c5dda23872f5bd192e0"
 tags: []
@@ -18,6 +19,18 @@ Filed mechanically ON APPROVAL (operator rule, 2026-09-27 — "prevention outsta
 Idempotency key (do not edit): approval-prevention-key:chalbert/web-everything#2896@fed7b23ffd24f01c243d72e8c11a0c7b76ac6dc8
 
 ## Progress
+
+Implementation proof (2026-10-01):
+
+- Added the regressions before implementation. The focused `#4429` run across we:scripts/lib/__tests__/atomic-json-file.test.mjs, we:scripts/lib/__tests__/gh-rest-read.test.mjs, and we:scripts/__tests__/lane-whois.test.mjs reported **28 failed, 12 passed, 57 skipped**. Two initial child-probe imports used Vitest's HTTP-transformed module URL; corrected them to absolute filesystem imports and reran before changing production code. The permission evidence below comes from that corrected run.
+- **Private writes:** `#4429 private temporary and replacement files under permissive umask` observed 0666 at both temporary and final paths, including replacement. `private cache creation and replacements under permissive umask` observed 0777/0666 with umask 000. After explicit creation modes, the real writer probes pass with 0600 at every temporary/final observation and 0700/0600 across three cache writes, deliberately making the old file permissive before each replacement. Directory listings assert exactly the final file, with no temporary leftovers.
+- **JSON parity:** `fresh and cached JSON parity for ""` failed with `SyntaxError: Unexpected end of JSON input` on the cached 304. It now returns null for both the empty 200 and thrown 304. Literal null, array, and object pairs also agree; `nonempty invalid JSON throws fresh and cached for %j` preserves rejection of whitespace-only and malformed nonempty bodies using directly seeded cache envelopes.
+- **Repository boundaries:** all 13 `rejects invalid endpoint before execution or cache writes: %s` cases failed before validation (the executor returned normally). They now throw before execution and leave the disposable cache empty. All eight `rejects full invalid slug even with fresh outer cache: %s` cases failed because whois wrote a cache; they now assert zero executor calls, no new cache, and byte-for-byte preservation of a seeded fresh cache. Valid slugs, placeholders, non-repository endpoints and pagination remain covered.
+- **Null prevention:** `structural guard rejects mixed guards and requires dominating nullish rejection` rejected the real mixed-guard mapper before implementation and passes with an explicit first-statement nullish throw. Unsafe mixed and late-guard fixtures fail the checker; a safe early-rejection fixture passes. `rejects nullish mapper inputs and preserves nullable field defaults` already passed before implementation: rejection itself is preserved behavior, not a newly repaired acceptance bug.
+- **Executor seam discovered by proof:** the three `fetches valid or absent repository: %j` cases also failed before implementation. we:scripts/lane-whois.mjs passed its injected executor as an unused top-level throttle option. Routed custom executors through the existing throttle injection slot while retaining the default production path. `malformed pull list retains all-or-empty evidence` now asserts the injected executor actually ran once before the mapper discards the entire list; it cannot pass merely because an unrelated CLI failure returned no evidence. All 14 focused whois prevention cases pass.
+
+- **Focused suites after implementation:** `npx vitest run` over we:scripts/lib/__tests__/gh-rest-read.test.mjs, we:scripts/lib/__tests__/atomic-json-file.test.mjs and we:scripts/__tests__/lane-whois.test.mjs passed **3 files / 97 tests** in 115.88s. This repeats the real-writer permission/body probes and includes `returns the old shape, re-reads via a free 304, and spends only the core bucket` through the PATH-faked CLI and real throttle. The unchanged REST/GraphQL fixture, atomic default/symlink/cleanup tests, unconditional-304 rejection and original-error checks all pass.
+- **Implementation gate:** `npm run check:standards` passed with **0 errors** (5017 warnings). Required `node we:scripts/verify-lane.mjs` also completed: **210 files / 9349 tests passed; 3 files / 16 tests failed**, exit 2 from the verifier (underlying suites exit 1), recorded red. Failures are in we:scripts/lib/__tests__/daemon-jobs-runtime.test.mjs (9 explicit `spawnSync ps EPERM` failures and one detached-launch timeout), we:scripts/operations/__tests__/restart-runner-io-real.test.mjs (3 real-process-table assertions), and we:scripts/operations/__tests__/clear-stuck-session-io-real.test.mjs (3 real-process-table assertions). A direct `ps` probe independently returned `Operation not permitted` in this sandbox. These files are outside the declared scope; no tests or gate were skipped, weakened, or marked green. The scoped suites passed again within this wider run.
 
 Preparation research against checkout `083d206bd2195ed354172c5dda23872f5bd192e0`:
 
@@ -62,6 +75,10 @@ Repeat the disposable-cache probe through the real writer with injected response
 All four prevention obligations have executable regression guards; the focused suites and implementation standards gate pass; the before/after evidence demonstrates each actual fix. Every changed source has its matching test declared in scope. The broader lint ideas remain visible below rather than being silently treated as delivered.
 
 ## Follow-ups
+
+- Rerun `node we:scripts/verify-lane.mjs` in an environment permitting the real process-table probes before landing. This checkout's verifier remains red; process-table sandbox failures cannot be repaired by changing the scoped REST/cache helpers. The detached-launch timeout also needs confirmation on that unrestricted run.
+
+- Test-seam lesson from this card: assert executor invocation when proving all-or-empty fallback; a swallowed CLI error can otherwise make a malformed-list test pass without exercising the mapper. The scoped tests now pin both invocation and result. Keep structural checking bounded to the mapper's first-statement nullish rejection; extending its accepted syntax needs explicit new safe/unsafe fixtures.
 
 - Generalize explicit-mode linting for writes beneath the operator's Claude configuration directory only after defining its path-resolution coverage and exemptions; this card supplies concrete permission regressions first, as the original filing requested.
 - Consider wider HTTP-body parsing and null-guard linting after the focused guard has evidence of usefulness. This card uses the original test alternative for JSON parsing and the focused structural alternative for null handling.
