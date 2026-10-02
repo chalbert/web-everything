@@ -336,7 +336,13 @@ describe('CI-heal missing routing label incident replay', () => {
     { name: 'write is not observed', labels: [], writeIgnored: true, expected: [] },
     { name: 'post-write head changes', labels: [], afterWrite: { headRefOid: 'f'.repeat(40) }, expected: ['review:pending'] },
   ];
-  it.each(scenarios)('$name', async (scenario) => {
+  const restoreOnlyScenarios = [
+    { name: 'unlabelled open PR', pr: 42, labels: [], expected: ['review:pending'] },
+    { name: 'accepted', labels: ['review:accepted'], expected: ['review:accepted'] },
+    { name: 'merged', labels: [], state: 'MERGED', expected: [] },
+    ...scenarios,
+  ].map(scenario => ({ ...scenario, name: `restore-only: ${scenario.name}`, restoreOnly: true }));
+  it.each([...scenarios, ...restoreOnlyScenarios])('$name', async (scenario) => {
     const healHead = scenario.head || head;
     const dir = mkdtempSync(join(tmpdir(), 'ci-heal-routing-'));
     try {
@@ -369,9 +375,13 @@ fs.writeFileSync('state.json', JSON.stringify(s));
 `);
       chmodSync(join(dir, 'bin', 'gh'), 0o755);
       const result = spawnSync(process.execPath, [join(dirname(fileURLToPath(import.meta.url)), '..', 'ci-heal-mark.mjs'),
-        String(scenario.pr || 42), '--repo=chalbert/web-everything', `--head=${healHead}`],
+        String(scenario.pr || 42), '--repo=chalbert/web-everything',
+        // Restore-only must use the remote head, ignoring even a conflicting explicit heal head.
+        `--head=${scenario.restoreOnly ? 'b'.repeat(40) : healHead}`,
+        ...(scenario.restoreOnly ? ['--restore-routing-only'] : [])],
       { cwd: dir, encoding: 'utf8', env: { ...process.env, PATH: `${join(dir, 'bin')}:${process.env.PATH}`, WE_GH_THROTTLE_LOCK_ROOT: join(dir, 'lock') } });
-      expect(result.status, result.stderr).toBe(0);
+      const failed = scenario.readFails || scenario.writeFails || scenario.writeIgnored || scenario.afterWrite;
+      expect(result.status, result.stderr).toBe(scenario.restoreOnly && failed ? 1 : 0);
       const final = JSON.parse(readFileSync(join(dir, 'state.json'), 'utf8'));
       const { planCiLifecycleLabelUpdate } = await import('../../merge-ai-prs.mjs');
       const validLabels = (final.labels || []).filter(Boolean);
@@ -382,6 +392,21 @@ fs.writeFileSync('state.json', JSON.stringify(s));
       const calls = readFileSync(join(dir, 'calls.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
       expect(calls.every(c => c.includes('chalbert/web-everything') || c.includes('--repo=chalbert/web-everything'))).toBe(true);
       const edits = calls.filter(c => c[1] === 'edit');
+      if (scenario.restoreOnly) {
+        expect(final.comments.some(c => c.body.includes(CI_HEAL_COMMENT_MARKER))).toBe(false);
+        expect(final.comments).toEqual(scenario.pr ? [{ body: 'Review routing restored: this PR had lost all routing labels after an earlier CI heal (fixed by #3475); added review:pending so review picks it up.' }] : []);
+        expect(calls.map(c => c[1])).toEqual(scenario.pr ? ['view', 'view', 'edit', 'view', 'comment']
+          : scenario.readFails ? ['view']
+          : failed ? ['view', 'view', 'edit', ...(scenario.writeFails ? [] : ['view'])]
+          : ['view', 'view']);
+        if (failed) return;
+        const outcome = JSON.parse(result.stdout.trim());
+        expect(outcome).toEqual({ pr: scenario.pr || 42,
+          ...(scenario.pr ? { restored: 'review:pending' } : { skipped: true }), reason: expect.any(String) });
+        expect(outcome.reason.length).toBeGreaterThan(0);
+        if (!scenario.pr) expect(edits).toHaveLength(0);
+        return;
+      }
       const outcome = JSON.parse(result.stdout.trim().split('\n').pop());
       if (scenario.pr) {
         expect(edits).toHaveLength(1);
