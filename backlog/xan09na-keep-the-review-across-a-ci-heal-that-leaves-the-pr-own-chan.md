@@ -1,9 +1,10 @@
 ---
 kind: story
 size: 3
-status: open
+status: resolved
 scope: ["we:scripts/conveyor/ci-heal-mark.mjs", "we:scripts/review-set-label.mjs", "we:scripts/conveyor/__tests__/ci-heal-mark.test.mjs", "we:scripts/__tests__/review-set-label.test.mjs"]
 dateOpened: "2026-10-01"
+dateResolved: "2026-10-01"
 preparedDate: "2026-10-01"
 preparedAgainstSha: "a243696497bde756b580485d14caf77209650282"
 tags: []
