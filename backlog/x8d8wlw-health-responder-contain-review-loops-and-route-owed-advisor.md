@@ -64,3 +64,13 @@ Use isolated temporary roots, mocked GitHub/actuator IO and injected clocks. Ass
 ## Follow-ups
 
 Record replay limitations, observed product gaps and testing lessons here. Do not append to shared agent docs or silently add a new automatic action beyond the epic’s catalogue.
+
+## Operator requirement (2026-10-02): act on review loops, not only report them
+
+Live case the same morning: three PRs looped in the mandatory-referral review for hours (#3432 81 runs, #3490 33, #3481 30; about 74 runs since 9 AM ET at roughly $0.44 each) and the orchestrator stopped them by hand. Required:
+- **Detector:** count `mandatory-referrals-v1` records per PR and head over a rolling window; N runs on one head with no verdict (proposed N = 3 within 2 hours) is a review-loop episode, high severity, with the run count and an estimated cost.
+- **Classify the referral, then act (allowlisted):**
+  - ruling `block` (a real defect) → send the PR back for changes through `we:scripts/review-set-label.mjs --to=changes` with a body naming the finding and what to fix (the orchestrator did this for #3490);
+  - ruling `not-real` or `card` still re-asked, or a claim from a tool-less juror → pause review by moving the PR to draft with reason `withdrawn` through `we:scripts/conveyor/fix-procedure.mjs fix-begin --draft --reason=withdrawn` with a why naming the episode (the orchestrator did this for #3432), and escalate;
+  - a real contradiction inside backlog cards (#3481) → escalate with the finding; never edit cards itself.
+- Never records an approval, never clears review:human; resumes the PR (ready again) only when the episode's cause is marked fixed. Every action is a decision-log record and a PR comment.
