@@ -2370,9 +2370,9 @@ export function readReferralRecords(comments) {
     const trailer = body.trimEnd().split('\n').at(-1);
     const match = /^<!-- mandatory-referrals-v1: ([^\s]+) -->$/.exec(trailer);
     const matches = match ? [match] : [];
-    // Fail closed: a trusted comment carrying a marker-shaped line that is not the final line (an operator note
-    // appended by editing it) is flagged malformed so its hold cannot vanish silently.
-    if (!match && body.includes(`<!-- ${REFERRAL_RECORD_MARKER}:`)) malformed = true;
+    // Fail closed: a trusted comment that names the marker but does not end in a valid trailer (an operator note
+    // appended by editing it, a truncated write) is flagged malformed so its hold cannot vanish silently.
+    if (!match) malformed = true;
     for (const match of matches) {
       try {
         const r = JSON.parse(decodeURIComponent(match[1]));
