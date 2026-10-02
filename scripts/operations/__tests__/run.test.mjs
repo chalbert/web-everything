@@ -78,3 +78,56 @@ describe('run.mjs dispatch-lane CLI preflight (real child process, real git)', (
     });
   }, 120_000);
 });
+
+// Item activity uses the real registration/parser/envelope, with external reads injected.
+import { resolveOperation } from '../run.mjs';
+import { itemActivityOperation } from '../item-activity.mjs';
+import { createItemActivityReader } from '../item-activity-io.mjs';
+import { createRegistry, isReadOnlyOperation } from '../registry.mjs';
+import { createMemoryRunStore } from '../run-store.mjs';
+import { runOperationCli } from '../cli-adapter.mjs';
+
+describe('item-activity CLI', () => {
+  it('is registered without effect sinks', () => {
+    const { declaration, sinks } = resolveOperation('item-activity');
+    expect(declaration.name).toBe('item-activity');
+    expect(isReadOnlyOperation(declaration)).toBe(true);
+    expect(sinks).toEqual({});
+  });
+  it('the real CLI can query read-only evidence stores without writing a cursor', () => {
+    const result = spawnSync(process.execPath, [join(REPO, 'scripts/operations/run.mjs'), 'item-activity', '--pr=0', '--json'], {
+      cwd: REPO, encoding: 'utf8', timeout: 30_000,
+      env: { ...process.env, OPERATION_RUNS_DIR: '/dev/null/item-activity-forbidden', OPERATION_CALLS_DIR: '/dev/null/item-activity-forbidden' },
+    });
+    expect(result.status).not.toBe(0);
+    expect(result.stdout).toContain('pr must be a positive integer');
+    expect(result.stdout + result.stderr).not.toMatch(/ENOTDIR|EPERM|EACCES/);
+  });
+  async function query(argv, options = {}) {
+    const declaration = itemActivityOperation({ readActivity: createItemActivityReader({
+      readSources: () => ({ rows: [] }), listCompletions: () => [], prToCard: {}, ...options,
+    }) });
+    const registry = createRegistry();
+    registry.register(declaration);
+    return runOperationCli({ declaration, argv: [...argv, '--json'], registry,
+      store: createMemoryRunStore(), sinks: {}, newRunId: () => 'item-query-test' });
+  }
+  it('parses PR/card selectors and prints the actual JSON envelope', async () => {
+    for (const argv of [['--pr=42', '--repo=frontierui'], ['--card=xabc123']]) {
+      const result = await query(argv);
+      expect(result.code).toBe(0);
+      expect(JSON.parse(result.lines.join('\n')).verdict).toEqual({ runs: [], gaps: [] });
+    }
+  });
+  it('refuses invalid input before reading and distinguishes metadata failure from no match', async () => {
+    for (const argv of [[], ['--pr=0'], ['--pr=1', '--card=42'], ['--card=bad']]) {
+      const result = await query(argv, { readSources: () => { throw new Error('must not read'); } });
+      expect(result.code).not.toBe(0);
+      expect(result.lines.join('\n')).not.toContain('must not read');
+    }
+    const result = await query(['--pr=42'], { prToCard: undefined, viewPr: () => { throw new Error('offline'); } });
+    const verdict = JSON.parse(result.lines.join('\n')).verdict;
+    expect(verdict.runs).toEqual([]);
+    expect(verdict.gaps.join(' ')).toContain('metadata unavailable');
+  });
+});
