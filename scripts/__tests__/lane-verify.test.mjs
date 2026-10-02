@@ -1113,3 +1113,63 @@ describe('failure details belong to the finishing execution', () => {
     expect(waited.ok).toBe(false);
   });
 });
+
+describe('verifyFinishBody — an infrastructure failure carries no failing-test names', () => {
+  it('drops failureDetails when the run was killed (no test verdict)', () => {
+    const failureDetails = { tests: [{ file: 'one.test.ts', name: 'outer > fails' }], summary: 'x', truncated: false };
+    const body = verifyFinishBody({ sha: 'a' }, { exitCode: 137, sha: 'a', failureDetails });
+    expect(body.status).toBe('infrastructure-failure');
+    expect(body.failureDetails).toBeUndefined();
+  });
+});
+
+describe('verifyStartBody — optional runId (dispatcher run identity)', () => {
+  it('records runId only when given, leaving the existing shape untouched otherwise', () => {
+    expect(verifyStartBody({ sha: 'a', suites: 's', startedAt: 't' })).not.toHaveProperty('runId');
+    expect(verifyStartBody({ sha: 'a', suites: 's', startedAt: 't', runId: 'r1' })).toMatchObject({ runId: 'r1' });
+  });
+});
+
+describe('fix-3311: one wait for the entire verify budget', () => {
+  it('waits across a 30-minute run in one invocation then reports legacy exit 137 honestly', async () => {
+    let elapsed = 0;
+    const sha = 'fix3311';
+    const result = await waitForVerifySettle({ headSha: sha, readHead: () => sha,
+      readRecord: () => elapsed < 31 * 60_000
+        ? { sha, status: 'running', startedAt: new Date().toISOString() }
+        : { sha, status: 'red', exitCode: 137 },
+      ceilingMs: resolveWaitCeilingMs(160 * 60_000),
+      now: () => elapsed, sleep: async (ms) => { elapsed += ms; },
+    });
+    expect(result).toMatchObject({ status: 'infrastructure-failure', reason: 'verify-signal', ok: false, settled: true });
+    expect(result.waited.ms).toBe(31 * 60_000);
+    expect(result.detail).toContain('SIGKILL');
+    // Mandatory mode blocks; advisory mode (requireVerified:false) reports the same status without blocking.
+    expect(verifyGateDecision({ record: { sha, status: 'red', exitCode: 137 }, headSha: sha, requireVerified: true }).ok).toBe(false);
+    expect(verifyGateDecision({ record: { sha, status: 'red', exitCode: 137 }, headSha: sha, requireVerified: false }))
+      .toMatchObject({ ok: true, status: 'infrastructure-failure' });
+  });
+});
+
+describe('verifyGateDecision — infrastructure-failure decision matrix (requireVerified × record shape)', () => {
+  const sha = 'matrix1';
+  const longAgo = new Date(Date.now() - 24 * 60 * 60_000).toISOString();
+  const infra = { reason: 'verify-timeout', signal: 'SIGKILL', phase: 'gate', ceilingMs: 1, detail: 'killed' };
+  it.each([
+    ['terminal infrastructure-failure marker', { sha, status: 'infrastructure-failure', infrastructure: infra }],
+    ['same marker long past any TTL (terminal: no TTL escape)', { sha, status: 'infrastructure-failure', infrastructure: infra, startedAt: longAgo, finishedAt: longAgo }],
+    ['legacy red marker with a signal exit code', { sha, status: 'red', exitCode: 137 }],
+  ])('%s: blocks under requireVerified, reports without blocking under advisory mode', (_label, record) => {
+    const mandatory = verifyGateDecision({ record, headSha: sha, requireVerified: true });
+    expect(mandatory).toMatchObject({ ok: false, status: 'infrastructure-failure' });
+    const advisory = verifyGateDecision({ record, headSha: sha, requireVerified: false });
+    expect(advisory).toMatchObject({ ok: true, status: 'infrastructure-failure', reason: mandatory.reason });
+    expect(advisory.detail).toContain('opted out of mandatory verification');
+  });
+
+  it('a genuine red (non-signal exit) is unchanged: blocks under requireVerified, red-ci-gated under advisory', () => {
+    const record = { sha, status: 'red', exitCode: 1 };
+    expect(verifyGateDecision({ record, headSha: sha, requireVerified: true })).toMatchObject({ ok: false, status: 'red' });
+    expect(verifyGateDecision({ record, headSha: sha, requireVerified: false })).toMatchObject({ ok: true, reason: 'red-ci-gated' });
+  });
+});

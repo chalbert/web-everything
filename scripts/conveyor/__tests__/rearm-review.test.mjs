@@ -7,7 +7,7 @@
  *   no `review:changes` refuses) and the `presentRemoveLabels` narrowing.
  */
 import { describe, it, expect } from 'vitest';
-import { decideRearm, presentRemoveLabels, countRearmComments, REARM_COMMENT_MARKER } from '../rearm-review.mjs';
+import { decideRearm, buildRearmComment, presentRemoveLabels, countRearmComments, REARM_COMMENT_MARKER } from '../rearm-review.mjs';
 import { REVIEW_LABELS, READY_TO_MERGE_LABEL } from '../../lib/review-escalation.mjs';
 
 const lbl = (...names) => names.map((name) => ({ name }));
@@ -126,5 +126,21 @@ describe('presentRemoveLabels — narrow removals to labels the PR actually carr
     expect(presentRemoveLabels([REVIEW_LABELS.changes], lbl(REVIEW_LABELS.changes))).toEqual([REVIEW_LABELS.changes]);
     expect(presentRemoveLabels([REVIEW_LABELS.changes], lbl(REVIEW_LABELS.pending))).toEqual([]);
     expect(presentRemoveLabels([], lbl(REVIEW_LABELS.changes))).toEqual([]);
+  });
+});
+
+
+describe('re-arm comments name the observed verdict (#3253)', () => {
+  it.each([
+    [['review:accepted'], 'previously accepted PR', false],
+    [['review:changes'], '`review:changes` bounce was repaired', false],
+    [['review:human', 'review:changes'], '`review:changes` bounce was repaired', true],
+  ])('renders %j accurately', (currentLabels, expected, human) => {
+    const decision = decideRearm({ currentLabels });
+    const body = buildRearmComment({ actor: 'conveyor CI-heal agent', decision });
+    expect(body).toContain(expected);
+    expect(body).toContain(human ? 'KEPT as the sole hold' : 're-armed `review:pending`');
+    expect(body.split('\n')[0]).toBe(REARM_COMMENT_MARKER);
+    if (currentLabels.includes('review:accepted')) expect(body).not.toContain('bounce was repaired');
   });
 });

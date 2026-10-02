@@ -44,7 +44,7 @@
  *       at once — rather than one at a time the way the old serial loop gave each lane a fresh, uncontended
  *       queue budget. A lane queued behind the cap now spends real time waiting on siblings' admission before
  *       its own gate starts, counted against ITS OWN ceiling from the moment this loop offered it; if that wait
- *       outlasts the ceiling, the lane is killed with `timedOutPhase:'queue'` and retried next tick — new
+ *       outlasts the ceiling, the lane is killed with `timedOutPhase:'queue'` and recorded as an infrastructure failure — new
  *       contention the serial loop never created for itself, though `QUEUE_PHASE_CEILING_MS` is set well above
  *       `heavy-admission.mjs`'s own hard give-up ceiling specifically so a lane that is merely queued, not
  *       stuck, is not expected to trip it in the ordinary case.
@@ -79,10 +79,9 @@
  * not just the immediate child: `verify-lane.mjs` itself `execSync`s the gate command through a shell, so the
  * actual test runner is a grandchild that would never see a signal sent only to its parent — spawning the
  * dispatch with `detached: true` puts that whole tree in one process group up front, so the timeout handler
- * can kill the group as a unit. The tick then moves on, counting the lane as a dispatch failure. NO NEW
- * RECOVERY PATH WAS NEEDED: a killed run leaves the marker `running`/stranded, which is already the exact
- * shape `verify-lane.mjs`'s own marker-guard recovers from — the next tick just re-runs it, same as a
- * human-killed run always has.
+ * can kill the group as a unit. The tick then moves on, counting the lane as a dispatch failure. The dispatcher records a terminal
+ * infrastructure failure for the still-owned marker. A killed run requires diagnosis and an explicit retry;
+ * it must never silently cycle through full execution budgets on successive ticks.
  *
  * TWO SEPARATE CEILINGS, NOT ONE (Skeptic-review fix, 2026-09-14, same epic). The FIRST cut of the ceiling
  * above measured wall-clock time from the moment this file SPAWNS `verify-lane.mjs` — which is BEFORE that
@@ -115,12 +114,13 @@
  * lets #3878's standalone `we:skills-src/conveyor/verify-daemon.mjs` tick it directly. `main()` below is now a
  * thin CLI shell over it.
  */
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, writeFileSync, renameSync } from 'node:fs';
 import { execFileSync, spawn } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
-import { readVerifyMarker } from '../lib/lane-verify.mjs';
+import { randomUUID } from 'node:crypto';
+import { readVerifyMarker, VERIFY_FILENAME, verifyFinishBody, verificationInfrastructureFailure } from '../lib/lane-verify.mjs';
 import { writeAllSync } from '../lib/write-all-sync.mjs';
 import { resolveCeilingMs as resolveAdmissionCeilingMs } from '../readiness/heavy-admission.mjs';
 import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
@@ -250,6 +250,42 @@ function tryGit(args, cwd) {
 function markerFor(laneDir) {
   const gitDir = tryGit(['rev-parse', '--absolute-git-dir'], laneDir) || join(laneDir, '.git');
   return readVerifyMarker(gitDir);
+}
+
+/** Is the on-disk `running` marker still the request THIS dispatch owns? With a `runId` (the dispatcher always
+ *  passes one) ownership is exact even before the gate started — when `startedAt` is still unknown, which is the
+ *  queue-phase kill: the marker is ours only if our child stamped it (`runId` matches) or the child never got to
+ *  restamp and it is still byte-for-byte the request we observed (`requestStartedAt`). A newer same-sha/suites/
+ *  tree request has neither, so it is left alone. Without a `runId` (a caller that predates it) the old
+ *  `startedAt` comparison applies. */
+function ownsMarker(current, expected) {
+  if (expected.runId) {
+    if (current.runId === expected.runId) return true;
+    return !current.runId && !!expected.requestStartedAt && current.startedAt === expected.requestStartedAt;
+  }
+  return !expected.startedAt || current.startedAt === expected.startedAt;
+}
+
+/** A killed child cannot write its result. Settle only the still-owned request; never requeue it silently. */
+export function recordKilledVerification(dir, expected, error, ceilingMs) {
+  const infrastructure = verificationInfrastructureFailure({ exitCode: error?.status, signal: error?.signal,
+    timedOutPhase: error?.timedOutPhase, ceilingMs });
+  if (!infrastructure) return;
+  const gitDir = tryGit(['rev-parse', '--absolute-git-dir'], dir) || join(dir, '.git');
+  const current = readVerifyMarker(gitDir);
+  if (!current || current.status !== 'running') return;
+  // A marker bearing OUR runId was stamped by our own child, so it is ours whatever tree/sha that child captured at
+  // its start (the agent may have edited the tree after `request`). Anything else must still match, field for
+  // field, the request we observed — and settle under that request's sha.
+  const ours = !!expected.runId && current.runId === expected.runId;
+  if (!ours && (current.sha !== expected.sha || current.suites !== expected.suites
+      || current.treeHash !== expected.treeHash || !ownsMarker(current, expected))) return;
+  const finished = verifyFinishBody(current, { sha: ours ? current.sha : expected.sha, exitCode: error?.status,
+    infrastructure, finishedAt: new Date().toISOString(), treeHash: null });
+  const path = join(gitDir, VERIFY_FILENAME);
+  const tmp = `${path}.${process.pid}.tmp`;
+  writeFileSync(tmp, JSON.stringify(finished, null, 2) + '\n');
+  renameSync(tmp, path);
 }
 
 function parseFlags(argv) {
@@ -406,7 +442,7 @@ export async function runVerifyDispatch({ dryRun = false, spawnGate = spawnGateB
         continue;
       }
 
-      pending.push({ pool, lane, dir, headSha, suites: marker.suites });
+      pending.push({ pool, lane, dir, headSha, suites: marker.suites, marker });
     }
   }
 
@@ -418,9 +454,13 @@ export async function runVerifyDispatch({ dryRun = false, spawnGate = spawnGateB
   //    call site), so offering several candidates at once here is sufficient to bound real concurrent gate
   //    execution at the cap.
   const results = await Promise.allSettled(
-    pending.map(({ pool, lane, dir, headSha, suites }) => {
+    pending.map(({ pool, lane, dir, headSha, suites, marker }) => {
+      // `runId` rides into the marker via the child's own start stamp (`--run-id`), so a queue-phase kill — before
+      // `onGateStarted` could capture a `startedAt` — can still tell this run's marker from a newer request's.
+      const runId = randomUUID();
+      let owned = { ...marker, startedAt: null, requestStartedAt: marker.startedAt ?? null, runId };
       log(`  dispatching verify for ${pool}/lane-${lane} @ ${String(headSha).slice(0, 8)} (suites: ${suites || 'default'})…`);
-      const args = [VERIFY_LANE_CLI, `--repo=${dir}`, '--json'];
+      const args = [VERIFY_LANE_CLI, `--repo=${dir}`, '--json', `--run-id=${runId}`];
       if (suites) args.push(`--gate=${suites}`);
       return spawnGate(args, {
         queueCeilingMs: QUEUE_PHASE_CEILING_MS,
@@ -428,13 +468,22 @@ export async function runVerifyDispatch({ dryRun = false, spawnGate = spawnGateB
         // #4360 — the live proof this card's Proof plan needs: a real per-lane timestamp for when the gate
         // actually started (as opposed to when it was merely offered to the semaphore), so two lanes' overlap
         // can be shown from real evidence rather than assumed from the code shape.
-        onGateStarted: () => log(`  ▶ gate started for ${pool}/lane-${lane} @ ${String(headSha).slice(0, 8)} — ${new Date().toISOString()}`),
+        onGateStarted: () => {
+          const started = markerFor(dir);
+          if (started?.runId === runId) owned = started;
+          log(`  ▶ gate started for ${pool}/lane-${lane} @ ${String(headSha).slice(0, 8)} — ${new Date().toISOString()}`);
+        },
+      }).catch((error) => {
+        const ceilingMs = error?.timedOutPhase === 'queue' ? QUEUE_PHASE_CEILING_MS : VERIFY_DISPATCH_TIMEOUT_MS;
+        try { recordKilledVerification(dir, owned, error, ceilingMs); }
+        catch (writeError) { log(`  ⚠ ${pool}/lane-${lane}: could not record infrastructure failure: ${writeError.message}`); }
+        throw error;
       });
     }),
   );
 
   results.forEach((result, i) => {
-    const { pool, lane, headSha } = pending[i];
+    const { pool, lane, dir, headSha } = pending[i];
     if (result.status === 'fulfilled') {
       dispatched.push({ pool, lane, sha: headSha });
       return;
@@ -458,13 +507,13 @@ export async function runVerifyDispatch({ dryRun = false, spawnGate = spawnGateB
     if (timedOut) {
       const phase = e.timedOutPhase || 'gate';
       const ceilingMs = phase === 'queue' ? QUEUE_PHASE_CEILING_MS : VERIFY_DISPATCH_TIMEOUT_MS;
-      log(`  ⚠ ${pool}/lane-${lane}: verify-lane exceeded the ${ceilingMs}ms ${phase}-phase ceiling — killed (tree included). Marker is left running/stranded; the next tick re-runs it, same as any other killed-mid-run recovery.`);
-      failures.push({ pool, lane, sha: headSha, timedOut: true, timedOutPhase: phase });
+      log(`  ⚠ ${pool}/lane-${lane}: verify-lane exceeded the ${ceilingMs}ms ${phase}-phase ceiling — killed (tree included). Recorded infrastructure failure for the still-owned request; inspect the cause before an explicit retry.`);
+      failures.push({ pool, lane, sha: headSha, timedOut: true, timedOutPhase: phase, infrastructure: markerFor(dir)?.infrastructure });
     } else if (status === 2) {
       dispatched.push({ pool, lane, sha: headSha, red: true });
     } else {
       log(`  ⚠ ${pool}/lane-${lane}: verify-lane dispatch failed (non-fatal): ${String(e?.message || e).split('\n')[0]}`);
-      failures.push({ pool, lane, sha: headSha });
+      failures.push({ pool, lane, sha: headSha, infrastructure: markerFor(dir)?.infrastructure });
     }
   });
 

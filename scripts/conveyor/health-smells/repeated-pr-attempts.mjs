@@ -2,11 +2,13 @@
  * A single smell aggregates actions; no extra GitHub reads. Existing gated self-sync
  * owns clone recovery; the watch's alert path escalates persistent failures.
  */
+import { MINUTE } from '../health-watch-core.mjs';
 import { ATTEMPT_WINDOW_MS, MIN_PR_ATTEMPTS, recordPrAttempts, isExpectedPrWait } from '../health-pr-attempts.mjs';
 
 export default {
   id: 'repeated-pr-attempts', scope: 'repo', cadence: 'every-tick',
-  probes: ['daemonLogs'], openAfter: 1, closeAfter: 2, severity: 'high', action: 'alert',
+  probes: ['daemonLogs'], openAfter: 1, closeAfter: 2, severity: 'medium', action: 'alert',
+  escalateAfterMs: 60 * MINUTE,
   recommendationHint: 'Investigate the latest failed action before retrying this PR again.',
   evaluate({ operationRuns }, { now, daemons }) {
     const groups = new Map();

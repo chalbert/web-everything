@@ -1102,3 +1102,10 @@ describe('runTickAllRepos — source contract: really calls runMissingRunRecover
     expect(src).toMatch(/for \(const a of \(missingRun\?\.dispatched \?\? \[\]\)\) log\.error\(formatMissingRunActionLine\(a\)\);/);
   });
 });
+
+ it('logs computed scope ranks from the real per-repo tick result shape', () => {
+  const log = { error: vi.fn() };
+  buildCliDaemonEffects({ owner: 'x', log }).onTick({ repos: [{ repo: 'chalbert/web-everything',
+    result: { scopeRanks: [{ pr: 3311, rank: 1, blocks: 5, ageHours: 2, score: 7, aged: false }] } }] });
+  expect(log.error).toHaveBeenCalledWith('reconcile-fix-dispatch-daemon: scope-rank chalbert/web-everything PR #3311 — rank 1, blocks 5, age 2h, score 7, aged-FIFO false');
+});

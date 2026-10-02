@@ -23,6 +23,7 @@
     "guard-git-push": {
       "kind": "hook",
       "ref": "scripts/guard-git-push.mjs",
+      "registeredIn": ".githooks/pre-push",
       "test": "scripts/__tests__/guard-git-push.test.mjs",
       "summary": "git pre-push: rejects any push to refs/heads/main."
     },
@@ -60,7 +61,7 @@
       "kind": "hook",
       "ref": "scripts/guard-bash.mjs#corpusOverwriteTargets",
       "test": "scripts/__tests__/guard-bash-card-overwrite.test.mjs",
-      "summary": "PreToolUse(Bash): denies any shell write to backlog|reports/*.md — append/in-place (>>, tee -a, sed -i, perl -pi) and, since #4070, overwrite (> / heredoc, cp, mv onto it)."
+      "summary": "PreToolUse(Bash): denies recognized Markdown corpus writes — append/in-place (>>, tee -a, sed -i, perl -pi), redirects/heredocs, and cp/install/mv to explicit files or lexically unambiguous directories. See card-edit-via-tools gap for unsupported shell forms."
     },
     "guard-bash-git-add-enumeration": {
       "kind": "hook",
@@ -138,7 +139,7 @@
         "session-reaper-backstop",
         "deliver-item-wrapper-no-report"
       ],
-      "gap": "A session that never wrote `started` is caught only after the fact, by the reaper backstop.",
+      "gap": "A session that never wrote `started` is caught only after the fact, by the reaper backstop. The completion Stop hook has delivery-only registration in DELIVERY_HOOKS_SETTINGS, not project settings; registration existence across their union does not prove all dispatch kinds/providers are protected.",
       "lines": [
         {
           "brief": "skills-src/conveyor/delivery-agent-brief-v2.md",
@@ -199,7 +200,7 @@
       "enforcers": [
         "guard-bash-card-shell-write"
       ],
-      "gap": "Non-card tracked files, and interpreter writes (python -c / node -e file APIs), are still prose-only. Proposed: extend corpusOverwriteTargets to any tracked path for a dispatched session.",
+      "gap": "Non-card tracked files and interpreter writes (python -c / node -e file APIs) remain prose-only. Unsupported shell forms include target-directory options (-t, --target-directory and --target-directory=), dd of=, rsync, and ln -sf. Directory resolution is lexical only: bare nested directories without a trailing slash, aliases and dynamically assembled paths remain unresolved. These limits are documented, not blocked; further parser coverage belongs in separate work.",
       "lines": [
         {
           "brief": "skills-src/conveyor/canary-agent-brief.md",

@@ -2,14 +2,108 @@
 // judgment / prose-only / descriptive. Fixture briefs pin the audit; the real ledger pins the three rules the
 // 2026-09-24 incident broke to code enforcers whose own tests exist.
 import { describe, expect, it } from 'vitest';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { DELIVERY_HOOKS_SETTINGS } from '../../operations/deliver-item-wrapper.mjs';
 import {
   REPO_ROOT, auditLedger, extractImperatives, lineKey, listBriefs, loadLedger, missingEnforcerFiles,
   readBriefs, validateLedger, weakestStatus,
 } from '../brief-rule-ledger.mjs';
 
 const BRIEF = 'skills-src/conveyor/x-agent-brief.md';
+
+// Bounded to the registrations used here: an actual node invocation, with its script argument.
+// Comments, echo/prose and similarly named scripts cannot supply registration evidence.
+function invokes(command, script) {
+  return String(command).split('\n').some((line) => {
+    if (line.trimStart().startsWith('#')) return false;
+    const groups = [[]];
+    for (const token of line.match(/"[^"\n]*"|'[^'\n]*'|&&|\|\||[;|]|[^\s;|&]+/g) || []) {
+      if (token.startsWith('#')) break;
+      if (/^(?:&&|\|\||[;|])$/.test(token)) groups.push([]);
+      else groups.at(-1).push(token);
+    }
+    return groups.some((words) => {
+      const unquote = (s) => s?.replace(/^(['"])(.*)\1$/, '$2');
+      return /^(?:.*\/)?node$/.test(unquote(words[0]) || '')
+        && unquote(words[1])?.replace(/^\.\//, '') === script;
+    });
+  });
+}
+
+function missingRegistrations(ledger, settings, readRegistration) {
+  const commands = settings.flatMap((setting) => Object.values(setting.hooks || {}).flatMap((groups) =>
+    groups.flatMap((group) => (group.hooks || []).filter((hook) => hook.type === 'command').map((hook) => hook.command))));
+  return Object.entries(ledger.enforcers).flatMap(([id, enforcer]) => {
+    if (enforcer.kind !== 'hook') return [];
+    const script = enforcer.ref.split('#')[0];
+    if (commands.some((command) => invokes(command, script))) return [];
+    if (id === 'guard-git-push' && script === 'scripts/guard-git-push.mjs'
+      && enforcer.registeredIn === '.githooks/pre-push') {
+      try {
+        if (invokes(readRegistration(enforcer.registeredIn), script)) return [];
+      } catch { /* A missing registration file must fail with the enforcer diagnostic. */ }
+    }
+    return [`${id}: no command registration for ${script}`];
+  });
+}
+
+describe('hook registration evidence (#4416)', () => {
+  const registration = (command) => ({ hooks: { Stop: [{ hooks: [{ type: 'command', command }] }] } });
+  const fixture = { enforcers: {
+    project: { kind: 'hook', ref: 'scripts/project.mjs#symbol' },
+    wrapper: { kind: 'hook', ref: 'scripts/wrapper.mjs' },
+    'guard-git-push': { kind: 'hook', ref: 'scripts/guard-git-push.mjs', registeredIn: '.githooks/pre-push' },
+    other: { kind: 'gate', ref: 'scripts/no-registration.mjs' },
+  } };
+  const settings = [registration('node "scripts/project.mjs" --pre'), registration('node scripts/wrapper.mjs')];
+  const read = (path) => {
+    if (path !== '.githooks/pre-push') throw new Error('missing');
+    return '#!/bin/sh\nprintf x | node scripts/guard-git-push.mjs "$@" || exit $?';
+  };
+  it('accepts project-only, wrapper-only, fragment refs and verified Git; ignores non-hooks', () => {
+    expect(missingRegistrations(fixture, settings, read)).toEqual([]);
+  });
+  it.each([0, 1])('detects removal of sole settings registration %i', (index) => {
+    const mutated = structuredClone(settings);
+    mutated[index].hooks.Stop[0].hooks = [];
+    const id = index ? 'wrapper' : 'project';
+    expect(missingRegistrations(fixture, mutated, read)).toEqual([`${id}: no command registration for scripts/${id}.mjs`]);
+  });
+  it.each([
+    registration('node scripts/not-project.mjs'),
+    registration('echo scripts/project.mjs'),
+    registration('echo "example | node scripts/project.mjs"'),
+    registration('echo example # node scripts/project.mjs'),
+    registration('# node scripts/project.mjs'),
+    { description: 'node scripts/project.mjs', hooks: {} },
+    { hooks: { Stop: [{ hooks: [{ type: 'prompt', command: 'node scripts/project.mjs' }] }] } },
+  ])('rejects wrong basename, prose, comments and non-command entries: %j', (bad) => {
+    expect(missingRegistrations(fixture, [bad, settings[1]], read)).toEqual(['project: no command registration for scripts/project.mjs']);
+  });
+  it.each([undefined, '.githooks/missing', 'arbitrary-file'])('rejects missing or unapproved Git metadata %s', (registeredIn) => {
+    const mutated = structuredClone(fixture);
+    mutated.enforcers['guard-git-push'].registeredIn = registeredIn;
+    expect(missingRegistrations(mutated, settings, read)).toEqual(['guard-git-push: no command registration for scripts/guard-git-push.mjs']);
+  });
+  it.each(['# node scripts/guard-git-push.mjs', 'echo scripts/guard-git-push.mjs', 'node scripts/not-guard-git-push.mjs', ''])('rejects absent Git invocation: %s', (text) => {
+    expect(missingRegistrations(fixture, settings, () => text)).toEqual(['guard-git-push: no command registration for scripts/guard-git-push.mjs']);
+  });
+  it('rejects a nonexistent registration file', () => {
+    expect(missingRegistrations(fixture, settings, () => { throw new Error('ENOENT'); })).toEqual(['guard-git-push: no command registration for scripts/guard-git-push.mjs']);
+  });
+  it('does not permit arbitrary hook enforcers to use the Git exception', () => {
+    const mutated = structuredClone(fixture);
+    mutated.enforcers.project.registeredIn = '.githooks/pre-push';
+    expect(missingRegistrations(mutated, [settings[1]], () => 'node scripts/project.mjs\nnode scripts/guard-git-push.mjs'))
+      .toEqual(['project: no command registration for scripts/project.mjs']);
+  });
+  it('verifies every committed hook against real project, delivery and Git registrations', () => {
+    expect(missingRegistrations(loadLedger(), [
+      JSON.parse(readFileSync(join(REPO_ROOT, '.claude/settings.json'), 'utf8')), DELIVERY_HOOKS_SETTINGS,
+    ], (path) => readFileSync(join(REPO_ROOT, path), 'utf8'))).toEqual([]);
+  });
+});
 const TEXT = [
   '# Fixture brief',
   'Never merge the PR.',
