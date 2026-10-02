@@ -127,6 +127,7 @@ const MERGE_ORPHAN_SWEEP_INTERVAL_MS = 15 * 60 * 1000;
 const HEALTH_WATCH_INTERVAL_MS = 5 * 60 * 1000;
 
 export const DAEMON_MANIFEST = {
+  'health-responder': { script: 'scripts/conveyor/health-responder.mjs', args: ['tick'], intervalMs: 60_000 },
   'orphan-claim-release': { script: 'scripts/conveyor/orphan-claim-release.mjs', args: ['--apply'], intervalMs: ORPHAN_CLAIM_INTERVAL_MS },
   'merge-orphan-sweep': { script: 'scripts/merge-ai-prs.mjs', args: [], intervalMs: MERGE_ORPHAN_SWEEP_INTERVAL_MS },
   'branch-drift': { script: 'scripts/conveyor/branch-drift.mjs', args: ['sweep'], intervalMs: DEFAULT_PASS_INTERVAL_MS },
