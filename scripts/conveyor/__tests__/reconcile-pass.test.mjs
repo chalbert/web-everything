@@ -797,3 +797,111 @@ it('skips a deferred snapshot without enriching or planning from empty PR eviden
   expect(result).toMatchObject({ outcome: 'deferred-low-budget', dispatch: [], refusals: [] });
   expect(readAgents).not.toHaveBeenCalled();
 });
+
+describe('xng7q1p conservative timeout evidence', () => {
+  const head = 'a'.repeat(40);
+  const repo = 'chalbert/web-everything';
+  const log = (path = 'unit.test.mjs', name = 'suite > times out') =>
+    ` FAIL ${path} > ${name}\nError: Test timed out in 5000ms.\n Test Files 1 failed | 1 passed\n Tests 1 failed | 2 passed\n Duration 10.0s\n`;
+  const fixture = () => ({ repo, pr: 3415, head, sourceHead: head, diffComplete: true, checksComplete: true,
+    changed: [{ filename: 'unrelated.mjs' }], failedChecks: [20], roots: ['vitest.config.ts'],
+    sources: { 'vitest.config.ts': 'export default { test: { setupFiles: ["./setup.ts"] } };',
+      'setup.ts': 'export const ready = true;', 'unit.test.mjs': 'import { it } from "vitest"; import { value } from "./subject.mjs";',
+      'subject.mjs': 'import { value } from "./leaf.mjs"; export {value};', 'leaf.mjs': 'export const value = 1;' },
+    jobs: [{ repo, head, run: 10, job: 20, attempt: 1, workflow: '.github/workflows/ci.yml', status: 'completed',
+      conclusion: 'failure', logJob: 20, logAttempt: 1, log: log() }],
+  });
+  const classify = (e) => classifyTimeoutEvidence(e, { repo, pr: 3415, head, ts: timeoutTs });
+
+  it('accepts only a complete timeout inventory and a disjoint source/setup closure', () => {
+    expect(classify(fixture())).toMatchObject({ eligible: true, failures: [{ path: 'unit.test.mjs', name: 'suite > times out' }] });
+  });
+  it.each(['unit.test.mjs', 'subject.mjs', 'leaf.mjs', 'setup.ts', 'vitest.config.ts', 'README.md', 'data.json',
+    'package-lock.json', '.github/workflows/ci.yml', 'fixtures/value.mjs'])('refuses changed input %s', (filename) => {
+    const e = fixture(); e.changed = [{ filename }]; expect(classify(e).eligible).toBe(false);
+  });
+  it('checks the old name of a renamed dependency', () => {
+    const e = fixture(); e.changed = [{ filename: 'renamed.mjs', previous_filename: 'leaf.mjs' }];
+    expect(classify(e).reason).toBe('changed-dependency:leaf.mjs');
+  });
+  it.each([
+    (e) => { e.diffComplete = false; }, (e) => { e.checksComplete = false; },
+    (e) => { e.head = 'b'.repeat(40); }, (e) => { e.repo = 'other/repo'; },
+    (e) => { e.jobs[0].head = 'b'.repeat(40); }, (e) => { e.jobs[0].logJob = 21; },
+    (e) => { e.jobs[0].logAttempt = 2; }, (e) => { e.jobs[0].run = null; },
+    (e) => { e.jobs[0].status = 'in_progress'; }, (e) => { e.failedChecks.push(21); },
+    (e) => { e.jobs[0].log = 'Test timed out in 5000ms.'; },
+    (e) => { e.jobs[0].log = log().replace('Tests 1 failed', 'Tests 2 failed'); },
+    (e) => { e.jobs[0].log = log().replace('Error: Test timed out in 5000ms.', 'AssertionError: mismatch'); },
+    (e) => { e.sources['leaf.mjs'] = 'export const value = import(name);'; },
+    (e) => { e.sources['leaf.mjs'] = 'import fs from "node:fs";'; },
+    (e) => { delete e.sources['leaf.mjs']; },
+  ])('fails closed on incomplete, mixed, stale or unknown evidence %#', (mutate) => {
+    const e = fixture(); mutate(e); expect(classify(e).eligible).toBe(false);
+  });
+  it('keeps duplicate full test names in different files distinct', () => {
+    const e = fixture();
+    e.sources['other.test.mjs'] = 'import {it} from "vitest";';
+    e.jobs[0].log = ' FAIL unit.test.mjs > duplicate\nError: Test timed out in 5000ms.\n'
+      + ' FAIL other.test.mjs > duplicate\nError: Test timed out in 5000ms.\n Test Files 2 failed\n Tests 2 failed\n Duration 10s\n';
+    expect(classify(e).failures.map((f) => f.path)).toEqual(['unit.test.mjs', 'other.test.mjs']);
+  });
+  it('enrichment carries classified evidence into the real planner', () => {
+    const e = fixture();
+    const pr = { number: 3415, headRefOid: head, state: 'OPEN', labels: [],
+      statusCheckRollup: [{ name: 'test', status: 'COMPLETED', conclusion: 'FAILURE',
+        detailsUrl: `https://github.com/${repo}/actions/runs/10/job/20` }] };
+    const prs = enrichPrsWithTimeoutEvidence([pr], { repo, enabled: true, read: () => classify(e) });
+    const out = timeoutPlanReconcile({ prs, requiredChecks: ['test'] });
+    expect(out.dispatch[0]).toMatchObject({ kind: 'ci-timeout-rerun', timeoutRetry: { signature: classify(e).signature } });
+  });
+  it('historical #3415 replay refuses the incomplete aggregate inventory and changed inputs', () => {
+    // Sanitized read-only capture: run 36944615955 attempt 1, historical job 110643729641.
+    const e = fixture();
+    e.head = e.sourceHead = '1df80664a3ec7f67cb7cb19ad1c5c35bf5c80966';
+    e.changed = [{ filename: 'scripts/lib/atomic-json-file.mjs' }, { filename: 'scripts/lib/gh-rest-read.mjs' },
+      { filename: 'backlog/4429-file-the-prevention-guard-s-owed-by-chalbert-web-everything.md' }];
+    e.jobs[0] = { ...e.jobs[0], head: e.head, run: 36944615955, job: 110643729641, logJob: 110643729641,
+      log: log('scripts/operations/__tests__/priority-sync.test.mjs',
+        'the declaration > is registered on the command line under its own name, with --help derived from the declaration') };
+    e.failedChecks = [110643729641, 110645262691]; // aggregate "test" failed as well
+    expect(classifyTimeoutEvidence(e, { repo, pr: 3415, head: e.head, ts: timeoutTs }))
+      .toEqual({ eligible: false, reason: 'unaccounted-failing-check' });
+    expect(parseTimeoutFailures(e.jobs[0].log)).toMatchObject({ complete: true, failures: [{ kind: 'test-timeout' }] });
+  });
+});
+import timeoutTs from 'typescript';
+import { classifyTimeoutEvidence, parseTimeoutFailures, enrichPrsWithTimeoutEvidence, readTimeoutEvidence } from '../reconcile-pass.mjs';
+import { planReconcile as timeoutPlanReconcile } from '../reconcile-core.mjs';
+
+it('xng7q1p immutable GitHub reads feed enrichment → planner without checkout-derived scope', () => {
+  const head = 'a'.repeat(40), repo = 'chalbert/web-everything';
+  const prefix = `repos/${repo}`;
+  const log = ' FAIL unit.test.mjs > suite > timeout\nError: Test timed out in 5000ms.\n Test Files 1 failed\n Tests 1 failed\n Duration 5.2s\n';
+  const sources = { 'vitest.config.ts': 'export default {test:{}};', 'unit.test.mjs': 'import {it} from "vitest";' };
+  const data = {
+    [`${prefix}/pulls/3415`]: { state: 'open', head: {sha: head}, base: {sha: 'b'.repeat(40)}, changed_files: 1 },
+    [`${prefix}/pulls/3415/files?per_page=100&page=1`]: [{filename:'other.mjs'}],
+    [`${prefix}/commits/${head}/check-runs?per_page=100&page=1&filter=latest`]: {
+      total_count: 1, check_runs: [{status:'completed',conclusion:'failure',details_url:`https://github.com/${repo}/actions/runs/10/job/20`}] },
+    [`${prefix}/commits/${head}/status`]: { total_count: 0 },
+    [`${prefix}/actions/jobs/20`]: {id:20,run_id:10,head_sha:head,run_attempt:1,status:'completed',conclusion:'failure'},
+    [`${prefix}/actions/runs/10`]: {id:10,head_sha:head,run_attempt:1,repository:{full_name:repo},path:'.github/workflows/ci.yml'},
+    [`${prefix}/actions/jobs/20/logs`]: log,
+    [`${prefix}/git/trees/${head}?recursive=1`]: {truncated:false,tree:Object.keys(sources).map((path,i)=>({type:'blob',path,sha:`blob${i}`}))},
+  };
+  Object.values(sources).forEach((source, i) => { data[`${prefix}/git/blobs/blob${i}`] = {encoding:'base64',content:Buffer.from(source).toString('base64')}; });
+  const calls = [];
+  const exec = (cmd, args) => {
+    expect(cmd).toBe('gh'); expect(args[0]).toBe('api'); calls.push(args[1]);
+    if (!(args[1] in data)) throw new Error(`unaccounted read ${args[1]}`);
+    return typeof data[args[1]] === 'string' ? data[args[1]] : JSON.stringify(data[args[1]]);
+  };
+  const pr = { number:3415,headRefOid:head,state:'OPEN',labels:[],statusCheckRollup:[{
+    name:'test',status:'COMPLETED',conclusion:'FAILURE',detailsUrl:`https://github.com/${repo}/actions/runs/10/job/20`}] };
+  const prs = enrichPrsWithTimeoutEvidence([pr], {repo,enabled:true,read:(p,o)=>readTimeoutEvidence(p,{...o,exec,ts:timeoutTs})});
+  expect(timeoutPlanReconcile({prs,requiredChecks:['test']}).dispatch[0].kind).toBe('ci-timeout-rerun');
+  expect(calls.filter((p)=>p===`${prefix}/pulls/3415`)).toHaveLength(2);
+  data[`${prefix}/pulls/3415`].changed_files = 101;
+  expect(readTimeoutEvidence(pr,{repo,exec,ts:timeoutTs})).toMatchObject({eligible:false,reason:'timeout-evidence:incomplete-diff'});
+});
