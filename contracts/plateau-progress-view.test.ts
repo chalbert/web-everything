@@ -181,3 +181,107 @@ describe('optional, strictly validated health evidence', () => {
     expect(examples['health-conflict'].snapshot.health.overnight.observedState).toBe('controller-vNext:active');
   });
 });
+
+const provenanceSnapshot = () => {
+  const value = structuredClone(examples['moving-and-held'].snapshot);
+  const observation = { source: 'runs', observedAt: '2024-02-29T00:00:00Z' };
+  Object.assign(value.runs[0], {
+    owner: 'alice', author: 'bob', origin: 'standalone',
+    supervisor: { identity: 'runner:supervisor', provider: null, ...observation },
+    executor: { identity: 'codex:session-1', provider: 'openai', ...observation },
+    requestedModel: { provider: 'openai', model: 'requested-model', ...observation, evidenceKind: 'requested' },
+    reportedModel: { provider: 'provider-vNext', model: 'reported-model', ...observation, evidenceKind: 'reported' },
+  });
+  Object.assign(value.holds[0], {
+    sourceEvidence: { source: 'holds', observedAt: null },
+    overlap: { counterpart: { workRef: 'we:4620', runId: null }, files: [{ repo: 'we', path: 'contracts/example.json' }] },
+    capacity: { used: 3, limit: 2, unit: 'jobs', source: 'holds', observedAt: null },
+  });
+  return value;
+};
+const extensionPaths: Path[] = [
+  ...['owner', 'author', 'origin', 'supervisor', 'executor', 'requestedModel', 'reportedModel'].map(key => ['runs', 0, key]),
+  ...['sourceEvidence', 'overlap', 'capacity'].map(key => ['holds', 0, key]),
+];
+const provenanceEntries = extensionPaths.flatMap(path => {
+  const value = path.reduce((node, key) => Reflect.get(node, key), provenanceSnapshot() as object);
+  return [{ path, value }, ...entries(value, path)];
+});
+function rejectsAt(path: Path, invalid: unknown, keyword: string) {
+  const value = provenanceSnapshot();
+  replace(value, path, invalid);
+  expect(validate(value)).toBe(false);
+  expect(validate.errors).toEqual(expect.arrayContaining([
+    expect.objectContaining({ instancePath: '/' + path.join('/'), keyword }),
+  ]));
+}
+
+describe('executor provenance and hold evidence', () => {
+  it('accepts mismatched requested/reported evidence without inferring truth', () => {
+    const value = provenanceSnapshot();
+    expect(validate(value), JSON.stringify(validate.errors)).toBe(true);
+    const run = value.runs[0] as unknown as Record<string, unknown>;
+    expect(run.requestedModel).not.toEqual(run.reportedModel);
+  });
+  it('accepts absent extensions, null extensions and unknown nested facts', () => {
+    expect(validate(examples['moving-and-held'].snapshot)).toBe(true);
+    const value = provenanceSnapshot();
+    for (const path of extensionPaths) replace(value, path, null);
+    expect(validate(value), JSON.stringify(validate.errors)).toBe(true);
+    const unknown = provenanceSnapshot();
+    for (const { path } of provenanceEntries) {
+      if (['identity', 'provider', 'model', 'observedAt', 'counterpart', 'files', 'used', 'limit'].includes(String(path.at(-1)))) replace(unknown, path, null);
+    }
+    expect(validate(unknown), JSON.stringify(validate.errors)).toBe(true);
+  });
+  for (const { path, value } of provenanceEntries) {
+    if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+      it.each([42, [], true])(`rejects wrong object type ${path.join('.')}: %j`, invalid => rejectsAt(path, invalid, 'type'));
+      it(`closes ${path.join('.')}`, () => rejectsAt(path, { ...value, typo: true }, 'additionalProperties'));
+      it.each(Object.keys(value))(`requires ${path.join('.')}.%s`, key => {
+        const replacement = { ...value };
+        Reflect.deleteProperty(replacement, key);
+        rejectsAt(path, replacement, 'required');
+      });
+    }
+    if (typeof value === 'string' && !['observedAt', 'evidenceKind'].includes(String(path.at(-1)))) {
+      it(`rejects empty ${path.join('.')}`, () => rejectsAt(path, '', 'minLength'));
+      it(`rejects wrong string type ${path.join('.')}`, () => rejectsAt(path, [], 'type'));
+    }
+    if (path.at(-1) === 'observedAt') {
+      it.each(['yesterday', '2026-02-29T00:00:00Z', '2100-02-29T00:00:00Z', '2026-04-31T00:00:00Z', '2026-10-01T24:00:00Z', '2026-10-01T00:00:00+00:00'])(
+        `rejects invalid instant ${path.join('.')}: %s`, invalid => rejectsAt(path, invalid, 'pattern'));
+      it(`accepts leap instant ${path.join('.')}`, () => {
+        const value = provenanceSnapshot();
+        replace(value, path, '2000-02-29T23:59:59.123Z');
+        expect(validate(value)).toBe(true);
+      });
+    }
+  }
+  it.each(['used', 'limit'])('validates capacity %s', key => {
+    for (const invalid of [-1, 1.5, '1', true]) rejectsAt(['holds', 0, 'capacity', key], invalid, invalid === -1 ? 'minimum' : 'type');
+    for (const valid of [null, 0, 5]) {
+      const value = provenanceSnapshot();
+      replace(value, ['holds', 0, 'capacity', key], valid);
+      expect(validate(value)).toBe(true);
+    }
+  });
+  it('does not accept requested-only evidence as reported', () => {
+    rejectsAt(['runs', 0, 'reportedModel', 'evidenceKind'], 'requested', 'const');
+    rejectsAt(['runs', 0, 'requestedModel', 'evidenceKind'], 'reported', 'const');
+  });
+  it.each(['/tmp/log', '../secret', 'a/../secret', './file', 'a/./file', 'C:/logs', '\\server\\log', 'a\\..\\secret', 'a//b', 'a/'])(
+    'rejects unsafe file path %s', path => rejectsAt(['holds', 0, 'overlap', 'files', 0, 'path'], path, 'pattern'));
+  it('rejects bare file references and malformed file collections', () => {
+    rejectsAt(['holds', 0, 'overlap', 'files', 0], 'contracts/example.json', 'type');
+    rejectsAt(['holds', 0, 'overlap', 'files'], {}, 'type');
+  });
+  it('preserves unassigned preparation and unknown raw codes', () => {
+    const value = provenanceSnapshot();
+    value.holds[0].owner = null;
+    value.holds[0].rawReason = 'scheduler-vNext:pending';
+    value.holds[0].normalizedReason = 'preparation';
+    value.runs[0].rawState = 'executor-vNext:active';
+    expect(validate(value)).toBe(true);
+  });
+});

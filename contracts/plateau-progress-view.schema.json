@@ -305,6 +305,82 @@
               "type": "null"
             }
           ]
+        },
+        "owner": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Distinct owner attribution; missing or null means unknown."
+        },
+        "author": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Distinct author attribution; missing or null means unknown."
+        },
+        "origin": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Distinct origin attribution; missing or null means unknown."
+        },
+        "supervisor": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/progressActorEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "executor": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/progressActorEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "requestedModel": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/progressRequestedModelEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reportedModel": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/progressReportedModelEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -324,7 +400,7 @@
         "nextStep"
       ],
       "additionalProperties": true,
-      "description": "Stable producer-qualified runId, repo-qualified card/PR refs. Preserve unknown role/state codes; no inference of executor/model in this slice. Idle, dead and waiting jobs are not moving."
+      "description": "Stable producer-qualified runId, repo-qualified card/PR refs. Preserve unknown role/state codes. Owner, author, origin, supervisor, executor and requested/reported models remain distinct; never infer one from another. Idle, dead and waiting jobs are not moving. Missing or null extensions mean unknown; included evidence objects require complete shape. Source-key joins, provenance truth, time ordering, freshness assessment, count arithmetic and identity deduplication are consumer responsibilities, not proven by shape validation."
     },
     "hold": {
       "type": "object",
@@ -397,6 +473,36 @@
             "type": "string",
             "minLength": 1
           }
+        },
+        "sourceEvidence": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/progressSourceEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "overlap": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/progressOverlapEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "capacity": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/progressCapacityEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -410,7 +516,8 @@
         "nextStep",
         "relatedRefs"
       ],
-      "additionalProperties": true
+      "additionalProperties": true,
+      "description": "Preparation holds retain owner (null when unassigned) and raw/normalized reasons. Missing or null extensions mean unknown; included evidence objects require complete shape. Source-key joins, provenance truth, time ordering, freshness assessment, count arithmetic and identity deduplication are consumer responsibilities, not proven by shape validation."
     },
     "action": {
       "type": "object",
@@ -3043,6 +3150,323 @@
       ],
       "additionalProperties": false,
       "description": "Optional schema-2 health evidence. Omission in older snapshots means unavailable. Each source retains its own observation/success times, cadence, completeness and reason. All supplied fields are validated; unknown values are explicit nulls with explanatory status/reason. Temporal comparisons, reference joins and arithmetic remain consumer responsibilities."
+    },
+    "progressSourceEvidence": {
+      "type": "object",
+      "properties": {
+        "source": {
+          "type": "string",
+          "minLength": 1
+        },
+        "observedAt": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/healthInstant"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "source",
+        "observedAt"
+      ],
+      "additionalProperties": false,
+      "description": "Source identity and source-local observation time, distinct from since/asOf and publisher refresh."
+    },
+    "progressActorEvidence": {
+      "type": "object",
+      "properties": {
+        "identity": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "provider": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1
+        },
+        "observedAt": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/healthInstant"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "identity",
+        "provider",
+        "source",
+        "observedAt"
+      ],
+      "additionalProperties": false,
+      "description": "Attested actor identity and provider; unknown identity stays null even with known source. Never infer executor from owner, launcher or supervisor."
+    },
+    "progressRequestedModelEvidence": {
+      "type": "object",
+      "properties": {
+        "provider": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "model": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1
+        },
+        "observedAt": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/healthInstant"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "evidenceKind": {
+          "const": "requested"
+        }
+      },
+      "required": [
+        "provider",
+        "model",
+        "source",
+        "observedAt",
+        "evidenceKind"
+      ],
+      "additionalProperties": false,
+      "description": "requested model evidence with its own source. Requested configuration never attests served model. Unknown provider codes and model mismatches are valid."
+    },
+    "progressReportedModelEvidence": {
+      "type": "object",
+      "properties": {
+        "provider": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "model": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1
+        },
+        "observedAt": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/healthInstant"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "evidenceKind": {
+          "const": "reported"
+        }
+      },
+      "required": [
+        "provider",
+        "model",
+        "source",
+        "observedAt",
+        "evidenceKind"
+      ],
+      "additionalProperties": false,
+      "description": "reported model evidence with its own source. Requested configuration never attests served model. Unknown provider codes and model mismatches are valid."
+    },
+    "progressFileReference": {
+      "type": "object",
+      "properties": {
+        "repo": {
+          "type": "string",
+          "minLength": 1
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))[^/\\\\:\\u0000-\\u001f]+(?:/[^/\\\\:\\u0000-\\u001f]+)*$"
+        }
+      },
+      "required": [
+        "repo",
+        "path"
+      ],
+      "additionalProperties": false,
+      "description": "Repo-qualified relative file reference, without absolute paths or traversal. Producers must exclude prompts, credentials and machine-local log paths."
+    },
+    "progressOverlapEvidence": {
+      "type": "object",
+      "properties": {
+        "counterpart": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "workRef": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "runId": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "workRef",
+                "runId"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "files": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/progressFileReference"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "counterpart",
+        "files"
+      ],
+      "additionalProperties": false,
+      "description": "Observed counterpart and files; null means unknown; empty files means observed empty. Never fabricate a match."
+    },
+    "progressCapacityEvidence": {
+      "type": "object",
+      "properties": {
+        "used": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "limit": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unit": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1
+        },
+        "observedAt": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/healthInstant"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "used",
+        "limit",
+        "unit",
+        "source",
+        "observedAt"
+      ],
+      "additionalProperties": false,
+      "description": "Zero is measured zero; null is unknown. Used may exceed limit; observations impose no dispatch policy."
     }
   }
 }
