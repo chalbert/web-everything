@@ -9,7 +9,7 @@
  * that the verification was BACKGROUNDABLE and yielding mid-run LOOKED complete.
  *
  * This is the sanctioned "run your checks" step for the build flow, and it removes that footgun two ways:
- *   1. It runs the suites in the FOREGROUND (`stdio:'inherit'`), blocking until they exit — "background then
+ *   1. It runs the suites in the FOREGROUND (streaming stdout/stderr), waiting until they exit — "background then
  *      yield" is no longer the path of least resistance, because the tool itself is a blocking call.
  *   2. It writes a lifecycle MARKER (`.git/.lane-verify`, keyed to HEAD): `running` at start, rewritten to
  *      `green`/`red` at finish. If the process is killed mid-run, the marker is stranded at `running` — so the
@@ -59,7 +59,8 @@
  * accepted; 2 = red (suites failed — marker recorded red) / `check` verdict not-ok; 3 = usage / git error (no
  * marker written) / `reset` refused because a FOREIGN lease is live (own live lease no longer refuses, #3378).
  */
-import { execSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
+import { createFailureCollector } from './lib/verify-failures.mjs';
 import { writeFileSync, renameSync, existsSync, readFileSync, readdirSync, unlinkSync, lstatSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { homedir } from 'node:os';
@@ -164,7 +165,7 @@ if (MODE === 'check') {
     record: bareCheckRecord, headSha, breakGlass: VERIFY_BREAK_GLASS, requireVerified: REQUIRE_VERIFIED,
     laneRelevantChangeSince: laneRelevantChangeSinceForRecord({ record: bareCheckRecord, headSha, base: 'origin/main', runGit: git }),
   });
-  emit({ sha: headSha, status: v.status, reason: v.reason, ok: v.ok, detail: v.detail }, v.ok ? 0 : 2);
+  emit({ sha: headSha, ...v }, v.ok ? 0 : 2);
 }
 
 // #3378 review (rounds 2-4) — `isConfirmedOwnLease` itself now refuses an `ownerSession` match that is either
@@ -382,7 +383,7 @@ if (admission.timedOut) {
   process.stderr.write(`heavy-command admission: acquired slot-${admission.slot} after waiting ${admission.waitedMs}ms (cap=${ADMISSION_CAP}).\n`);
 }
 
-// 3. Run the gate in the FOREGROUND, blocking until it exits (inherited stdio — the agent sees the output live).
+// 3. Run the gate in the FOREGROUND, waiting until it exits (forwarded stdio — the agent sees the output live).
 // #3383 (Skeptic review, 2026-09-14) — an UNCONDITIONAL marker, unlike the two admission log lines above
 // (which only print when there is something to report: a real wait, or a fail-open). This one always fires,
 // the instant before the gate itself starts, so a caller watching this process's stderr in real time
@@ -396,10 +397,22 @@ const preGateTreeHash = MODE === 'run' ? null : treeHashNow();
 process.stderr.write(`⏱ gate execution starting (suites: ${GATE})\n`);
 let exitCode = 0;
 let signal = null;
+const collector = createFailureCollector({ cwd: REPO });
 try {
   // xaipsbs — the gate's own `npm run test:unit` / `check:standards` are wrapped in `heavy-admission.mjs run`;
   // this flag makes those nested wrappers pass through instead of asking for a second slot for the same work.
-  execSync(GATE, { cwd: REPO, stdio: 'inherit', env: { ...process.env, [ADMISSION_HELD_ENV]: '1' } });
+  ({ exitCode, signal } = await new Promise((resolveGate, reject) => {
+    const child = spawn(GATE, { shell: true, cwd: REPO, stdio: ['inherit', 'pipe', 'pipe'], env: { ...process.env, [ADMISSION_HELD_ENV]: '1' } });
+    for (const [name, fd] of [['stdout', 1], ['stderr', 2]]) {
+      child[name].on('data', chunk => {
+        collector.push(chunk, name);
+        // Flush each chunk before the terminal JSON; no pending writable queue can overtake it.
+        writeAllSync(fd, chunk);
+      });
+    }
+    child.on('error', reject);
+    child.on('close', (code, closeSignal) => resolveGate({ exitCode: Number.isFinite(code) ? code : 2, signal: closeSignal || null }));
+  }));
 } catch (e) {
   signal = e?.signal || null;
   exitCode = Number.isFinite(e && e.status) ? e.status : 2;
@@ -407,10 +420,12 @@ try {
   if (admission.ok) releaseOwnedSlot({ lockRoot: ADMISSION_LOCK_ROOT, cap: ADMISSION_CAP, owner: REPO });
 }
 
+const diagnostic = exitCode === 0 ? {} : { failureDetails: collector.finish() };
+
 const infrastructure = verificationInfrastructureFailure({ exitCode, signal });
 if (MODE === 'run' && infrastructure) emit({ sha: headSha, status: 'infrastructure-failure', reason: infrastructure.reason, exitCode, infrastructure, detail: infrastructure.detail }, 3);
 if (MODE === 'run') {
-  emit({ sha: headSha, status: exitCode === 0 ? 'green' : 'red', reason: 'run', exitCode, detail: exitCode === 0 ? 'gate passed (run mode — no marker recorded).' : `gate FAILED (exit ${exitCode}) — run mode, no marker recorded.` }, exitCode === 0 ? 0 : 2);
+  emit({ sha: headSha, status: exitCode === 0 ? 'green' : 'red', reason: 'run', exitCode, ...diagnostic, detail: exitCode === 0 ? 'gate passed (run mode — no marker recorded).' : `gate FAILED (exit ${exitCode}) — run mode, no marker recorded.` }, exitCode === 0 ? 0 : 2);
 }
 
 // 4. Rewrite the marker to its terminal green/red form — for the sha THIS run actually verified.
@@ -440,6 +455,7 @@ const startBody = onDisk && !onDisk.corrupt && onDisk.sha === headSha
 // The tree hash is recorded only if the tree held still from start, through the admission wait, to gate exit.
 const finished = verifyFinishBody(startBody, {
   finishedAt: new Date().toISOString(),
+  ...diagnostic,
   exitCode, signal, infrastructure,
   sha: headSha,
   suites: GATE,
@@ -449,6 +465,6 @@ writeMarker(finished);
 if (infrastructure) emit({ sha: headSha, status: finished.status, reason: infrastructure.reason, exitCode, infrastructure, detail: infrastructure.detail }, 3);
 
 emit(
-  { sha: headSha, status: finished.status, reason: finished.status, exitCode, detail: finished.status === 'green' ? `suites passed — recorded green for ${headSha.slice(0, 8)} (delivery may proceed).` : `suites FAILED (exit ${exitCode}) — recorded red for ${headSha.slice(0, 8)}; the finish-guard will refuse to land until this is green.` },
+  { sha: headSha, status: finished.status, reason: finished.status, exitCode, ...diagnostic, detail: finished.status === 'green' ? `suites passed — recorded green for ${headSha.slice(0, 8)} (delivery may proceed).` : `suites FAILED (exit ${exitCode}) — recorded red for ${headSha.slice(0, 8)}; the finish-guard will refuse to land until this is green.` },
   finished.status === 'green' ? 0 : 2,
 );

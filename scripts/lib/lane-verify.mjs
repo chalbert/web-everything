@@ -126,6 +126,7 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { constants } from 'node:os';
+import { boundFailureDetails } from './verify-failures.mjs';
 
 /** The marker lives in the lane clone's `.git/` (like `.lane-lease`): never tracked, never `git clean`-ed,
  *  invisible to `git status`, one-per-lane. */
@@ -280,7 +281,7 @@ export function verificationInfrastructureFailure({ exitCode, signal, timedOutPh
   };
 }
 
-export function verifyFinishBody(prev, { finishedAt, exitCode, sha, treeHash, suites, signal, infrastructure } = {}) {
+export function verifyFinishBody(prev, { finishedAt, exitCode, sha, treeHash, suites, signal, infrastructure, failureDetails } = {}) {
   const base = prev && typeof prev === 'object' ? prev : {};
   const failure = infrastructure || verificationInfrastructureFailure({ exitCode, signal });
   const green = exitCode != null && Number(exitCode) === 0 && !failure;
@@ -288,6 +289,8 @@ export function verifyFinishBody(prev, { finishedAt, exitCode, sha, treeHash, su
     sha: sha ?? base.sha ?? null,
     status: failure ? 'infrastructure-failure' : green ? 'green' : 'red',
     ...(failure ? { infrastructure: failure } : {}),
+    // A test verdict only: an infrastructure failure produced no verdict, so it carries no failing-test names.
+    ...(!green && !failure && failureDetails ? { failureDetails: boundFailureDetails(failureDetails) } : {}),
     startedAt: base.startedAt ?? null,
     finishedAt: finishedAt || null,
     // #4473 — `suites` is part of the cache key too, so the gate THIS run executed wins (PR #2982 round-2 review):
@@ -558,12 +561,13 @@ export function verifyGateDecision({ record, headSha, nowMs = Date.now(), ttlMs 
       detail: `${detail} This caller opted out of mandatory verification (--no-require-verified / WE_REQUIRE_VERIFIED=0) — not blocking here; the PR's required CI check gates the merge.` };
   }
   if (matches && rec.status === 'red') {
+    const diagnostic = exactShaMatch && rec.failureDetails ? { failureDetails: boundFailureDetails(rec.failureDetails) } : {};
     if (requireVerified) {
-      return { ok: false, status: 'red', reason: 'verify-red', detail: `verification for ${String(headSha).slice(0, 8)} recorded a RED result (exit ${rec.exitCode ?? '?'}) — fix the failure and re-run \`node scripts/verify-lane.mjs\`.` };
+      return { ok: false, status: 'red', ...diagnostic, reason: 'verify-red', detail: `verification for ${String(headSha).slice(0, 8)} recorded a RED result (exit ${rec.exitCode ?? '?'}) — fix the failure and re-run \`node scripts/verify-lane.mjs\`.` };
     }
     // Advisory mode: the required CI check (which a red tree also fails) gates the actual merge, so a local red
     // marker does not block here — matching "absent/red under --require-verified" (docs + #2833 resolution).
-    return { ok: true, status: 'red', reason: 'red-ci-gated', detail: `verification for ${String(headSha).slice(0, 8)} recorded RED (exit ${rec.exitCode ?? '?'}), but this caller opted out of mandatory verification (--no-require-verified / WE_REQUIRE_VERIFIED=0) — not blocking here; the PR's required CI check gates the merge.` };
+    return { ok: true, status: 'red', ...diagnostic, reason: 'red-ci-gated', detail: `verification for ${String(headSha).slice(0, 8)} recorded RED (exit ${rec.exitCode ?? '?'}), but this caller opted out of mandatory verification (--no-require-verified / WE_REQUIRE_VERIFIED=0) — not blocking here; the PR's required CI check gates the merge.` };
   }
 
   // No marker, or a marker for a different commit (the tree moved since it was written).

@@ -19,13 +19,14 @@
  * `join(REPO, '.git', …)` threw `ENOTDIR` in a worktree. A real `git worktree` is the only witness for that,
  * and `withRealRepo` can make one.
  *
- * COST. Each test spawns one or two real `node` processes with a trivial `--gate` (`true` / `false`), never a
- * suite runner. The file measures around a second in total; see the note on `VERIFY_TIMEOUT_MS` below for the
- * one thing that would change that.
+ * COST. Most cases use trivial gates. The named-failure regression runs the installed Vitest runner
+ * against one temporary test, first failing and then corrected, to prove recognition and transport together.
  */
 import { describe, expect, it } from 'vitest';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
+import { assessChecks, shapeRunFinding } from '../verify.mjs';
+import { VERIFY_FILENAME } from '../../lib/lane-verify.mjs';
 
 import { createChecksRunner } from '../verify-io.mjs';
 import { DEFAULT_BRANCH, withRealRepo } from './helpers/real-repo.mjs';
@@ -143,3 +144,30 @@ describe('verify — the real home, against a real checkout', () => {
     });
   });
 });
+
+it('records a real Vitest named failure through the marker and operation verdict, then clears green', async () => {
+  await withRealRepo(async (ctx) => {
+    const modules = join(process.cwd(), 'node_modules');
+    symlinkSync(modules, join(ctx.root, 'node_modules'), 'dir');
+    const fixture = join(ctx.root, 'named.test.mjs');
+    const source = (expected) => `import { describe, it, expect } from 'vitest';\ndescribe('outer', () => describe('inner', () => it('names the failure', () => expect(1).toBe(${expected}))));\n`;
+    writeFileSync(fixture, source(2));
+    const gate = `node '${modules}/vitest/vitest.mjs' run named.test.mjs --maxWorkers=1 --no-file-parallelism`;
+    const ran = verify(ctx.root, gate);
+    const marker = JSON.parse(readFileSync(join(ctx.root, '.git', VERIFY_FILENAME), 'utf8'));
+    expect(ran.outcome).toBe('fail');
+    expect(marker.exitCode).toBe(1);
+    const identity = { file: 'named.test.mjs', name: 'outer > inner > names the failure' };
+    expect(marker.failureDetails?.tests).toContainEqual(identity);
+    const verdict = assessChecks(shapeRunFinding({ checks: [ran] }));
+    expect(verdict.ok).toBe(false);
+    expect(verdict.checks[0].failureDetails).toEqual(marker.failureDetails);
+    expect(verdict.blocking[0].detail).toContain(identity.name);
+    expect(verdict.blocking[0].detail).toContain(identity.file);
+    expect(check(ctx.root).failureDetails).toEqual(marker.failureDetails);
+    writeFileSync(fixture, source(1));
+    expect(verify(ctx.root, gate).outcome).toBe('pass');
+    expect(check(ctx.root).failureDetails).toBeUndefined();
+    expect(JSON.parse(readFileSync(join(ctx.root, '.git', VERIFY_FILENAME), 'utf8')).failureDetails).toBeUndefined();
+  });
+}, 30000);

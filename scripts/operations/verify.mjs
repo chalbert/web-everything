@@ -75,6 +75,7 @@ export function shapeRunFinding(raw) {
     return {
       name,
       outcome: c.outcome,
+      ...(c.outcome === 'fail' && c.failureDetails ? { failureDetails: c.failureDetails } : {}),
       // The counts are REPORTED, never used to derive the outcome — the runner already decided, and deriving
       // it twice from different data is how the two answers drift apart.
       errors: Number.isFinite(Number(c.errors)) ? Number(c.errors) : null,
@@ -117,7 +118,7 @@ export function assessChecks(finding) {
     // failed, because the failure is at least known.
     blocking: [
       ...unrun.map((c) => ({ check: c.name, why: 'did-not-run', detail: c.reason || 'no reason reported' })),
-      ...failed.map((c) => ({ check: c.name, why: 'failed', detail: c.summary || `${c.errors ?? '?'} error(s)` })),
+      ...failed.map((c) => ({ check: c.name, why: 'failed', detail: [c.summary || `${c.errors ?? '?'} error(s)`, ...(c.failureDetails?.tests ?? []).map(t => t.name ? `${t.file} > ${t.name}` : t.file), c.failureDetails?.summary].filter(Boolean).join('\n') })),
     ],
     // Stated rather than implied: an empty suite is NOT a pass. A caller asking for a suite that produced no
     // checks has been told nothing, and silence must not read as green.

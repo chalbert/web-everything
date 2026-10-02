@@ -32,6 +32,7 @@
  * `mode: 'check'` is the home's own read-only subcommand: read the marker, run nothing. It is what a board
  * polls; `run` is what a delivery agent calls once.
  */
+import { boundFailureDetails } from '../lib/verify-failures.mjs';
 import { spawnSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -115,7 +116,7 @@ export function classifyVerifyResult({ status, signal, stdout = '', stderr = '',
   const markerStatus = String(parsed.status ?? '');
   if (markerStatus === 'green') return { outcome: 'pass', summary: `verified green for ${String(parsed.sha ?? '').slice(0, 8)}`, sha: parsed.sha };
   if (markerStatus === 'red') {
-    return { outcome: 'fail', errors: Number.isFinite(Number(parsed.exitCode)) ? Number(parsed.exitCode) : null, summary: `suites failed for ${String(parsed.sha ?? '').slice(0, 8)}`, sha: parsed.sha };
+    return { outcome: 'fail', ...(parsed.failureDetails ? { failureDetails: boundFailureDetails(parsed.failureDetails) } : {}), errors: Number.isFinite(Number(parsed.exitCode)) ? Number(parsed.exitCode) : null, summary: `suites failed for ${String(parsed.sha ?? '').slice(0, 8)}`, sha: parsed.sha };
   }
   // `running` (stranded), `corrupt`, `absent`, `stale`, `untracked`, `break-glass` — none is a completed
   // verdict for this commit, and each carries its own reason from the home rather than being flattened here.
