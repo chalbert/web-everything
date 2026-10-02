@@ -8,6 +8,10 @@
  *   with free lanes, for the /conveyor skill to auto-prepare its scope) — plus the precedence between them.
  */
 import { describe, it, expect } from 'vitest';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createAuthorshipCache, DISPATCH_PR_COUNT_API_CAP } from '../../lib/pr-limit.mjs';
 import {
   queueFileRows,
   dispatchPlan, selectClearedRows, clearedNotReady,
@@ -18,7 +22,7 @@ import {
   // epic #3383 — the kind-scoped dispatch-pause and its narrowed operator gloss.
   dispatchPausedHint, DISPATCH_PAUSED_HINT,
   // we:xniq7xs — the open-PR backpressure limit's intake hold.
-  PR_LIMIT_HINT,
+  PR_LIMIT_HINT, readPrLimitHeld,
   // #4347 — the capacity-cap operator gloss, naming the real active count and room.
   capacityCapHint,
 } from '../dispatch-plan.mjs';
@@ -1312,6 +1316,62 @@ describe('dispatchPlan — open-PR backpressure limit (we:xniq7xs): a deliberate
 
   it('PR_LIMIT_HINT names the override commands', () => {
     expect(PR_LIMIT_HINT).toMatch(/pr-limit\.mjs/);
+  });
+});
+
+// The dispatcher's own read of the backpressure count (`readPrLimitHeld` is what `main()` calls). It runs EVERY
+// builder round, so it must stay local in the common case and bound any GitHub fallback — spending GitHub calls
+// here would work against the change that shortened the round.
+describe('readPrLimitHeld — the per-round PR count stays local and bounded (xbrndtm)', () => {
+  const aiCommit = { authors: [{ name: 'Claude', email: 'noreply@anthropic.com' }], messageBody: '' };
+  const commitsPage = (c) => JSON.stringify([{ data: { repository: { pullRequest: { commits: { nodes: c.map((commit) => ({ commit: { ...commit, authors: { nodes: commit.authors } } })) } } } } }]);
+  // Lane PRs stacked on another lane (base ≠ main) are the case local git cannot resolve.
+  const open = Array.from({ length: 8 }, (_, i) => ({ number: i + 1, labels: [], headRefName: `lane/p${i + 1}`, headRefOid: `oid${i + 1}`, baseRefName: 'lane/base' }));
+  const setup = () => {
+    const calls = [];
+    const exec = (args) => {
+      calls.push(args);
+      if (args[1] === 'list') return JSON.stringify(open);
+      if (args[0] === 'api' && args[1] === 'graphql') return commitsPage([aiCommit]);
+      throw new Error(`unexpected call: ${JSON.stringify(args)}`);
+    };
+    const dir = mkdtempSync(join(tmpdir(), 'dispatch-plan-prlimit-'));
+    const countOpts = {
+      exec, env: { WE_PR_LIMIT_WE: '50' }, readShared: ({ cacheOnly }) => (cacheOnly ? open : open),
+      authorshipCache: createAuthorshipCache({ path: join(dir, 'cache.json') }),
+    };
+    return { calls, countOpts, api: () => calls.filter((a) => a[0] === 'api').length };
+  };
+
+  it('a fully-resolved local count makes NO GitHub call at all (the common case)', async () => {
+    const { calls, countOpts } = setup();
+    for (let i = 0; i < 3; i++) await readPrLimitHeld({ countOpts, isGlobalOff: () => false });
+    calls.length = 0; // rounds above warmed the verdict cache
+    const r = await readPrLimitHeld({ countOpts, isGlobalOff: () => false });
+    expect(calls).toEqual([]);
+    expect(r.counted).toMatchObject({ fallback: false, unresolved: 0, count: 8 });
+    expect(r.held).toBe(false);
+  });
+
+  it('a cold verdict cache falls back, but never spends more than the per-round cap of GitHub reads', async () => {
+    const { countOpts, api } = setup();
+    const r = await readPrLimitHeld({ countOpts, isGlobalOff: () => false });
+    expect(r.counted.fallback).toBe(true);
+    expect(api()).toBeLessThanOrEqual(DISPATCH_PR_COUNT_API_CAP);
+    expect(api()).toBeLessThan(open.length); // not one-per-PR
+  });
+
+  it('still holds when the (bounded) count is already at the limit', async () => {
+    const { countOpts } = setup();
+    countOpts.env = { WE_PR_LIMIT_WE: String(DISPATCH_PR_COUNT_API_CAP) };
+    const r = await readPrLimitHeld({ countOpts, isGlobalOff: () => false });
+    expect(r.held).toBe(true);
+  });
+
+  it('global-off lifts the hold regardless of the count', async () => {
+    const { countOpts } = setup();
+    countOpts.env = { WE_PR_LIMIT_WE: '0' };
+    expect((await readPrLimitHeld({ countOpts, isGlobalOff: () => true })).held).toBe(false);
   });
 });
 

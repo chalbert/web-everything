@@ -6,6 +6,9 @@
  *   pure helpers (limit resolution, exemption matching, AI/label counting, override-state parse/expiry).
  */
 import { describe, it, expect } from 'vitest';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   PR_LIMIT_DEFAULTS, PR_LIMIT_ENV, resolvePrLimit,
   EXEMPT_PATH_PREFIXES, isExemptPath, isExemptChangeset,
@@ -14,6 +17,7 @@ import {
   setGlobalOff, clearGlobalOff, allowBranch, normalizeBranchName,
   isGlobalOffNow, isBranchAllowedNow,
   fetchOpenPrs, fetchPrCommits, countOpenPrsForRepo,
+  createAuthorshipCache, countOpenPrsForDispatch, DISPATCH_PR_COUNT_API_CAP,
 } from '../pr-limit.mjs';
 
 describe('resolvePrLimit', () => {
@@ -177,7 +181,7 @@ describe('fetchOpenPrs / fetchPrCommits / countOpenPrsForRepo — the IO shell',
       throw new Error(`unexpected call: ${JSON.stringify(args)}`);
     };
     const result = countOpenPrsForRepo('we', { exec, env: {} });
-    expect(result).toEqual({ repoKey: 'we', slug: 'chalbert/web-everything', count: 1, prNumbers: [1], limit: 15, unavailable: false, unresolved: 0 });
+    expect(result).toEqual({ repoKey: 'we', slug: 'chalbert/web-everything', count: 1, prNumbers: [1], limit: 15, unavailable: false, unresolved: 0, apiFetches: 2 });
     // Exactly one list call + one commits call per NOT-accepted PR (#2 is skipped — already accepted).
     expect(calls.filter((a) => a[1] === 'list')).toHaveLength(1);
     expect(calls.filter((a) => a[0] === 'api' && a[1] === 'graphql')).toHaveLength(2);
@@ -267,5 +271,112 @@ describe('branch allow-list matching', () => {
     const s = allowBranch(emptyLimitState(), '4080-foo', { reason: 'x', untilMs: 1000 }, 0);
     expect(isBranchAllowedNow(s, '4080-foo', 500)).toBe(true);
     expect(isBranchAllowedNow(s, '4080-foo', 1001)).toBe(false);
+  });
+});
+
+describe('bounded networked count (dispatch round) — the GitHub-call budget the fallback may spend', () => {
+  const aiCommit = { authors: [{ name: 'Claude', email: 'noreply@anthropic.com' }], messageBody: '' };
+  const commitsPage = (c) => JSON.stringify([{ data: { repository: { pullRequest: { commits: { nodes: c.map((commit) => ({ commit: { ...commit, authors: { nodes: commit.authors } } })) } } } } }]);
+  // Stacked PRs (base is not `main`) are never resolvable from local git, so each needs a GraphQL read the first time.
+  const rows = (n) => Array.from({ length: n }, (_, i) => ({ number: i + 1, labels: [], headRefName: `lane/p${i + 1}`, headRefOid: `oid${i + 1}`, baseRefName: 'lane/base' }));
+  const harness = (open) => {
+    const calls = [];
+    const exec = (args) => {
+      calls.push(args);
+      if (args[1] === 'list') return JSON.stringify(open);
+      if (args[0] === 'api' && args[1] === 'graphql') return commitsPage([aiCommit]);
+      throw new Error(`unexpected call: ${JSON.stringify(args)}`);
+    };
+    // The host-shared snapshot: warm (served from cache, no gh) vs cold (null → localOnly reports unavailable).
+    let warm = true;
+    const readShared = ({ cacheOnly }) => (warm || !cacheOnly ? open : null);
+    return { calls, exec, readShared, setWarm: (v) => { warm = v; }, graphql: () => calls.filter((a) => a[0] === 'api').length, lists: () => calls.filter((a) => a[1] === 'list').length };
+  };
+  const tmpCache = () => createAuthorshipCache({ path: join(mkdtempSync(join(tmpdir(), 'pr-authorship-')), 'cache.json') });
+
+  it('maxApiFetches caps the per-PR GraphQL reads and reports the rest as unresolved', () => {
+    const h = harness(rows(6));
+    const r = countOpenPrsForRepo('we', { exec: h.exec, readShared: h.readShared, env: {}, maxApiFetches: 2 });
+    expect(h.graphql()).toBe(2);
+    expect(r).toMatchObject({ count: 2, unresolved: 4, apiFetches: 2 });
+  });
+
+  it('an authorship verdict is cached per (PR, head oid): the next read spends nothing, even local-only', () => {
+    const h = harness(rows(3));
+    const cache = tmpCache();
+    countOpenPrsForRepo('we', { exec: h.exec, readShared: h.readShared, env: {}, authorshipCache: cache });
+    expect(h.graphql()).toBe(3);
+    h.calls.length = 0;
+    const again = countOpenPrsForRepo('we', { exec: h.exec, readShared: h.readShared, env: {}, authorshipCache: cache, localOnly: true });
+    expect(h.calls).toEqual([]);
+    expect(again).toMatchObject({ count: 3, unresolved: 0 });
+  });
+
+  it('a new head oid invalidates the cached verdict (authorship is re-read for the new commits)', () => {
+    const open = rows(1);
+    const h = harness(open);
+    const cache = tmpCache();
+    countOpenPrsForRepo('we', { exec: h.exec, readShared: h.readShared, env: {}, authorshipCache: cache });
+    open[0] = { ...open[0], headRefOid: 'moved' };
+    h.calls.length = 0;
+    countOpenPrsForRepo('we', { exec: h.exec, readShared: h.readShared, env: {}, authorshipCache: cache });
+    expect(h.graphql()).toBe(1);
+  });
+
+  it('the authorship cache file survives a reload and is pruned to the live open PRs', () => {
+    const path = join(mkdtempSync(join(tmpdir(), 'pr-authorship-')), 'cache.json');
+    const first = createAuthorshipCache({ path });
+    first.set('o/n#1@a', true); first.set('o/n#2@b', false);
+    first.flush(new Set(['o/n#1@a', 'o/n#2@b']));
+    const reread = createAuthorshipCache({ path });
+    expect(reread.get('o/n#1@a')).toBe(true);
+    expect(reread.get('o/n#2@b')).toBe(false);
+    reread.flush(new Set(['o/n#1@a']));
+    expect(createAuthorshipCache({ path }).get('o/n#2@b')).toBeUndefined();
+  });
+
+  it('an unreadable or corrupt cache file degrades to a miss, never a throw', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pr-authorship-'));
+    const path = join(dir, 'cache.json');
+    writeFileSync(path, '{not json');
+    const cache = createAuthorshipCache({ path });
+    expect(cache.get('o/n#1@a')).toBeUndefined();
+    cache.set('o/n#1@a', true);
+    expect(() => cache.flush(new Set(['o/n#1@a']))).not.toThrow();
+  });
+
+  it('countOpenPrsForDispatch: warm snapshot + warm cache stays entirely local (zero gh calls)', () => {
+    const h = harness(rows(DISPATCH_PR_COUNT_API_CAP));
+    const cache = tmpCache();
+    countOpenPrsForDispatch('we', { exec: h.exec, readShared: h.readShared, env: {}, authorshipCache: cache }); // cold cache → bounded fallback
+    h.calls.length = 0;
+    const r = countOpenPrsForDispatch('we', { exec: h.exec, readShared: h.readShared, env: {}, authorshipCache: cache });
+    expect(h.calls).toEqual([]);
+    expect(r).toMatchObject({ fallback: false, count: DISPATCH_PR_COUNT_API_CAP, unresolved: 0 });
+  });
+
+  it('countOpenPrsForDispatch: the fallback spends at most DISPATCH_PR_COUNT_API_CAP GraphQL reads per round, and converges across rounds', () => {
+    const n = DISPATCH_PR_COUNT_API_CAP * 2 + 1;
+    const h = harness(rows(n));
+    const cache = tmpCache();
+    const spent = [];
+    for (let round = 0; round < 4; round++) {
+      h.calls.length = 0;
+      countOpenPrsForDispatch('we', { exec: h.exec, readShared: h.readShared, env: {}, authorshipCache: cache });
+      spent.push(h.graphql());
+    }
+    expect(Math.max(...spent)).toBeLessThanOrEqual(DISPATCH_PR_COUNT_API_CAP);
+    expect(spent).toEqual([DISPATCH_PR_COUNT_API_CAP, DISPATCH_PR_COUNT_API_CAP, 1, 0]);
+  });
+
+  it('countOpenPrsForDispatch: a cold snapshot costs one list call (not one per PR) when every verdict is already cached', () => {
+    const h = harness(rows(DISPATCH_PR_COUNT_API_CAP));
+    const cache = tmpCache();
+    countOpenPrsForDispatch('we', { exec: h.exec, readShared: h.readShared, env: {}, authorshipCache: cache });
+    h.setWarm(false);
+    h.calls.length = 0;
+    const r = countOpenPrsForDispatch('we', { exec: h.exec, readShared: h.readShared, env: {}, authorshipCache: cache });
+    expect(h.graphql()).toBe(0);
+    expect(r).toMatchObject({ fallback: true, count: DISPATCH_PR_COUNT_API_CAP, unresolved: 0 });
   });
 });

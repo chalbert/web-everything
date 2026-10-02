@@ -52,6 +52,40 @@ import { BUILD_DISPATCH_POLICY } from '../../../scripts/conveyor/build-dispatch-
 import { createFileRunStore, newRunRecord } from '../../../scripts/operations/run-store.mjs';
 import { DISPATCH_EFFECT } from '../../../scripts/operations/dispatch-lane.mjs';
 
+// xbrndtm — `fixedCadence: true` in `live()` is the one-line opt-in that turns the builder's loop from
+// sleep-after-work (180s tick + 120s sleep = a 300s start interval) into a fixed start-to-start cadence. The loop
+// is tested with the flag passed explicitly and the soak only runs `--dry-run` (never the loop), so without this a
+// refactor that drops the opt-in leaves every other test green. Source-level on purpose: `live()` acquires a real
+// lease and heartbeat, so it is not callable from a unit test.
+describe('live() keeps the builder on a fixed cadence (xbrndtm)', () => {
+  const source = readFileSync(resolve(fileURLToPath(import.meta.url), '..', '..', 'build-dispatch-daemon.mjs'), 'utf8');
+  /** The text of the `{ … }` options object of the first `runDaemonLoop(` call inside `async function live(`. */
+  function liveLoopOptions(src = source) {
+    const start = src.indexOf('async function live(');
+    expect(start).toBeGreaterThan(-1);
+    const next = src.indexOf('\nasync function ', start + 1);
+    const body = src.slice(start, next === -1 ? undefined : next);
+    const call = body.indexOf('runDaemonLoop(');
+    expect(call, 'live() must drive runDaemonLoop').toBeGreaterThan(-1);
+    const open = body.indexOf('{', call);
+    let depth = 0;
+    for (let i = open; i < body.length; i++) {
+      if (body[i] === '{') depth++;
+      else if (body[i] === '}' && --depth === 0) return body.slice(open, i + 1);
+    }
+    throw new Error('unbalanced runDaemonLoop options');
+  }
+
+  it('passes fixedCadence: true to runDaemonLoop', () => {
+    expect(liveLoopOptions()).toMatch(/\bfixedCadence\s*:\s*true\b/);
+  });
+
+  it('the extractor reads only the call options (a mention elsewhere in live() does not satisfy the guard)', () => {
+    const decoy = source.replace('fixedCadence: true, ', '').replace('async function live(flags) {', 'async function live(flags) {\n  // fixedCadence: true (decoy)');
+    expect(liveLoopOptions(decoy)).not.toMatch(/\bfixedCadence\s*:\s*true\b/);
+  });
+});
+
 /** A tick-core answer: both items cleared + queued, both launchable, both on the SAME file. */
 function sameFileTick(prev = {}) {
   const tick = prev.tick ?? 0;

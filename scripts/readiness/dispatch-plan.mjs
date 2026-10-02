@@ -270,6 +270,21 @@ export function capacityCapHint(activeCount, cap) {
 export const PR_LIMIT_HINT = 'open-PR backpressure limit reached — land/review the existing PRs, or override (pr-limit.mjs allow / off)';
 
 /**
+ * Is new-PR intake held by the open-PR backpressure limit (we:xniq7xs)? Taken every builder round, so it reads the
+ * count through `countOpenPrsForDispatch`: local/cached first (no gh), and only when that is incomplete a BOUNDED
+ * networked fallback (one list, git before GitHub, cached verdicts, a per-round cap on GraphQL reads) — an
+ * incomplete local count is UNKNOWN, not "under the limit", but resolving it must not cost GitHub calls every round.
+ * Deps are injectable for tests; `main()` passes none.
+ */
+export async function readPrLimitHeld({ countOpts = {}, isGlobalOff } = {}) {
+  const { countOpenPrsForDispatch, isGlobalOffLive, decideOpenPr } = await import('../lib/pr-limit.mjs');
+  const counted = countOpenPrsForDispatch('we', countOpts);
+  const globalOff = isGlobalOff ? isGlobalOff() : isGlobalOffLive();
+  const held = !decideOpenPr({ repoKey: 'we', limit: counted.limit, openCount: counted.count, globalOff }).allowed;
+  return { held, counted };
+}
+
+/**
  * How old (ms) an item's `open`/`active` age must be before the IO shell spends a `gh pr list --search` call
  * checking whether a real merged PR already closes it out (#3457/#3460, Fork 2(b)'s age-gated enrichment).
  *
@@ -1047,14 +1062,7 @@ async function main(argv) {
   let prLimitHeld = false;
   if (!flags['no-pr-limit-check']) {
     try {
-      const { countOpenPrsForRepo, isGlobalOffLive, decideOpenPr } = await import('../lib/pr-limit.mjs');
-      // Cache/local-only read first (no gh). An unavailable or incomplete local count (cold snapshot, PR head not
-      // fetched locally) is UNKNOWN, not "under the limit": fall back to the one networked count so the
-      // backpressure hold never silently fails open on a stale cache.
-      let counted = countOpenPrsForRepo('we', { localOnly: true });
-      if (counted.unavailable || counted.unresolved > 0) counted = countOpenPrsForRepo('we');
-      const { count: openCount, limit } = counted;
-      prLimitHeld = !decideOpenPr({ repoKey: 'we', limit, openCount, globalOff: isGlobalOffLive() }).allowed;
+      prLimitHeld = (await readPrLimitHeld()).held;
     } catch (e) {
       log(`  ⚠ pr-limit check skipped (${String(e.message || e).split('\n')[0]}) — dispatch proceeds unheld on this axis`);
     }

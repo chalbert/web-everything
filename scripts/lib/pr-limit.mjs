@@ -127,10 +127,11 @@ export function countBackpressurePrs(prs) {
  *  @param {string} repoSlug - the gh `owner/repo` slug
  *  @param {{exec?: Function}} [o] - `exec` mirrors `runGhSync`'s own signature (tests inject a fake)
  *  @returns {Array|null} */
-export function fetchOpenPrs(repoSlug, { exec = runGhSync, localOnly = false } = {}) {
+export function fetchOpenPrs(repoSlug, { exec = runGhSync, localOnly = false, readShared } = {}) {
   try {
     // #gh-graphql-budget — the host-shared open-PR snapshot first (null = not applicable → the direct read).
-    if (exec === runGhSync) { const shared = readSharedOpenPrs({ repo: repoSlug, fields: 'number,labels,headRefName,headRefOid,baseRefName', cacheOnly: localOnly }); if (shared) return shared; }
+    // `readShared` is the test seam for that snapshot (a fake `exec` alone never reaches it).
+    if (readShared || exec === runGhSync) { const shared = (readShared ?? readSharedOpenPrs)({ repo: repoSlug, fields: 'number,labels,headRefName,headRefOid,baseRefName', cacheOnly: localOnly }); if (shared) return shared; }
     if (localOnly) return null;
     const out = exec(
       ['pr', 'list', '--repo', repoSlug, '--state', 'open', '--json', 'number,labels,headRefName,headRefOid,baseRefName', '--limit', '100'],
@@ -152,10 +153,12 @@ export function fetchOpenPrs(repoSlug, { exec = runGhSync, localOnly = false } =
  *  re-discovering the limit the hard way twice. Fail-SOFT: returns `null` (never `[]`, which would read as
  *  "zero commits" / mechanical-only) on any failure, so the caller can tell "unknown" apart from "empty".
  *  @returns {Array|null} */
-export function fetchPrCommits(repoSlug, number, { exec = runGhSync, headRefName, headRefOid, baseRefName, cwd, git, localOnly = false } = {}) {
+export function fetchPrCommits(repoSlug, number, { exec = runGhSync, headRefName, headRefOid, baseRefName, cwd, git, localOnly = false, allowApi = true, onApi } = {}) {
   const local = readGitPrCommits(repoSlug, headRefName, { cwd, git, headRefOid, baseRefName, localOnly });
   if (local !== null) return local;
-  if (localOnly) return null;
+  // `allowApi:false` is a caller's spent GitHub budget: git was still tried, the metered read is not.
+  if (localOnly || !allowApi) return null;
+  onApi?.();
   try {
     const commits = meteredPrCommits(repoSlug, number, { exec });
     return Array.isArray(commits) ? commits : null;
@@ -172,20 +175,97 @@ export function fetchPrCommits(repoSlug, number, { exec = runGhSync, headRefName
  *  `review:accepted` (an already-accepted PR is excluded from the count regardless of authorship, so its
  *  commits are never worth fetching) — see {@link fetchPrCommits} for why a bulk commits fetch is unsafe. A
  *  PR whose commits lookup fails is DROPPED from the count (unknown authorship is never assumed AI). */
-export function countOpenPrsForRepo(repoKey, { exec, env = process.env, reposTable = CONSTELLATION_REPOS, git, cwd, localOnly = false } = {}) {
+export function countOpenPrsForRepo(repoKey, { exec, env = process.env, reposTable = CONSTELLATION_REPOS, git, cwd, localOnly = false, readShared, authorshipCache = null, maxApiFetches = Infinity } = {}) {
   const meta = reposTable[repoKey];
   const limit = resolvePrLimit(repoKey, env);
   if (!meta) return { repoKey, slug: null, count: null, prNumbers: [], limit, unavailable: true, unresolved: 0 };
-  const prs = fetchOpenPrs(meta.slug, { exec, localOnly });
+  const prs = fetchOpenPrs(meta.slug, { exec, localOnly, readShared });
   if (prs === null) return { repoKey, slug: meta.slug, count: null, prNumbers: [], limit, unavailable: true, unresolved: 0 };
-  const enriched = prs
+  // GitHub-call budget for the per-PR commits reads (git is tried first and is not counted); an exhausted budget
+  // leaves the PR UNRESOLVED rather than spending past it.
+  let apiFetches = 0;
+  const repoCwd = cwd ?? (meta.path ? meta.path.replace('$HOME', homedir()) : process.cwd());
+  const liveKeys = new Set();
+  const verdicts = prs
     .filter((pr) => !hasLabel(pr, REVIEW_LABELS.accepted))
-    .map((pr) => ({ ...pr, commits: fetchPrCommits(meta.slug, pr.number, { exec, headRefName: pr.headRefName, headRefOid: pr.headRefOid, baseRefName: pr.baseRefName, git, localOnly, cwd: cwd ?? (meta.path ? meta.path.replace('$HOME', homedir()) : process.cwd()) }) }));
-  // A PR whose commits could not be read (local-only mode with its head not fetched) is unknown, not absent:
-  // `unresolved` lets a caller tell an undercount from a true count instead of silently failing open.
-  const unresolved = enriched.filter((pr) => !Array.isArray(pr.commits)).length;
-  const counted = countBackpressurePrs(enriched.filter((pr) => Array.isArray(pr.commits)));
-  return { repoKey, slug: meta.slug, count: counted.length, prNumbers: counted.map((p) => p.number), limit, unavailable: false, unresolved };
+    .map((pr) => {
+      // A verdict is immutable for a given head oid, so it is cached by (repo, PR, oid) — a head that moved is a miss.
+      const key = pr.headRefOid ? `${meta.slug}#${pr.number}@${pr.headRefOid}` : null;
+      if (key) liveKeys.add(key);
+      const hit = key && authorshipCache ? authorshipCache.get(key) : undefined;
+      if (typeof hit === 'boolean') return { pr, ai: hit };
+      const commits = fetchPrCommits(meta.slug, pr.number, {
+        exec, headRefName: pr.headRefName, headRefOid: pr.headRefOid, baseRefName: pr.baseRefName, git, localOnly, cwd: repoCwd,
+        allowApi: apiFetches < maxApiFetches, onApi: () => { apiFetches++; },
+      });
+      if (!Array.isArray(commits)) return { pr, ai: null };
+      const ai = isAiGeneratedPr({ ...pr, commits });
+      if (key && authorshipCache) authorshipCache.set(key, ai);
+      return { pr, ai };
+    });
+  authorshipCache?.flush(liveKeys);
+  // A PR whose commits could not be read (local-only mode with its head not fetched, or the budget spent) is unknown,
+  // not absent: `unresolved` lets a caller tell an undercount from a true count instead of silently failing open.
+  const unresolved = verdicts.filter((v) => v.ai === null).length;
+  const counted = verdicts.filter((v) => v.ai === true).map((v) => v.pr);
+  return { repoKey, slug: meta.slug, count: counted.length, prNumbers: counted.map((p) => p.number), limit, unavailable: false, unresolved, apiFetches };
+}
+
+// ── THE DISPATCHER'S PER-ROUND COUNT — local first, a cached + bounded networked fallback ───────────────────
+
+/** Most GitHub per-PR commits reads the dispatcher's fallback may spend in ONE builder round. Verdicts are cached, so
+ *  a larger cold backlog converges across rounds instead of costing one call per PR every round. */
+export const DISPATCH_PR_COUNT_API_CAP = 3;
+
+/** Where the authorship verdicts live — machine-wide like the override state, so every lane's round shares one cache. */
+export function resolveAuthorshipCachePath(env = process.env) {
+  return env?.WE_PR_AUTHORSHIP_CACHE_FILE || join(homedir(), '.claude', 'conveyor', 'pr-authorship-cache.json');
+}
+
+/** A tiny file-backed `{get, set, flush}` of `{[repo#number@oid]: boolean}`. Fail-SOFT everywhere: an unreadable or
+ *  corrupt file is an empty cache and a failed write is dropped — the cache only ever saves calls, it can't block. */
+export function createAuthorshipCache({ path = resolveAuthorshipCachePath() } = {}) {
+  let data = null;
+  let dirty = false;
+  const load = () => {
+    if (data) return data;
+    try {
+      const parsed = JSON.parse(readFileSync(path, 'utf8'));
+      data = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    } catch { data = {}; }
+    return data;
+  };
+  return {
+    get: (key) => load()[key],
+    set(key, ai) { if (load()[key] !== ai) { data[key] = ai; dirty = true; } },
+    /** Persist, dropping every entry not in `liveKeys` (a closed PR / moved head), so the file stays as small as the open set. */
+    flush(liveKeys) {
+      const d = load();
+      for (const k of Object.keys(d)) if (!liveKeys.has(k)) { delete d[k]; dirty = true; }
+      if (!dirty) return;
+      try {
+        mkdirSync(dirname(path), { recursive: true });
+        const tmp = `${path}.${process.pid}.tmp`;
+        writeFileSync(tmp, JSON.stringify(d));
+        renameSync(tmp, path);
+        dirty = false;
+      } catch { /* a dropped write only costs a re-read next round */ }
+    },
+  };
+}
+
+/**
+ * The backpressure count the dispatcher takes EVERY builder round. Order of cost: (1) the cache/local-only read — no
+ * gh — which is the whole answer in the common case; only when that is unavailable (cold snapshot) or has unresolved
+ * PRs does it (2) fall back to the networked count, and even then it is BOUNDED: one list call at most, git before
+ * GitHub, verdicts cached by head oid, and no more than {@link DISPATCH_PR_COUNT_API_CAP} GraphQL commits reads.
+ * Whatever the cap leaves unresolved is reported (`unresolved`) and resolved on a later round from the cache.
+ */
+export function countOpenPrsForDispatch(repoKey, o = {}) {
+  const authorshipCache = o.authorshipCache ?? createAuthorshipCache();
+  const local = countOpenPrsForRepo(repoKey, { ...o, authorshipCache, localOnly: true });
+  if (!local.unavailable && local.unresolved === 0) return { ...local, fallback: false };
+  return { ...countOpenPrsForRepo(repoKey, { ...o, authorshipCache, localOnly: false, maxApiFetches: DISPATCH_PR_COUNT_API_CAP }), fallback: true };
 }
 
 /** Every constellation repo's live count, in one call (the shape both the CLI `status`/`dry-run` and the
