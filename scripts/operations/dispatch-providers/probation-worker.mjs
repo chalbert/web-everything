@@ -25,6 +25,7 @@
  * or `codex` — the vendor the run script will actually spawn, never a guess.
  */
 
+import { beginHealAttempt, bindHealAttempt } from '../probation-heal-run.mjs';
 import { join } from 'node:path';
 import { normNum } from '../../conveyor/queue-store.mjs';
 import { notApplied } from '../effect-executor.mjs';
@@ -112,6 +113,8 @@ export function probationWorkerDetachedProvider(request, {
   spawnDetached = defaultSpawnDetached,
   logPathFor = deliveryDispatchLogPath,
   runScript,
+  beginAttempt = beginHealAttempt,
+  bindAttempt = bindHealAttempt,
 } = {}) {
   const worker = request?.probationWorker;
   const kind = String(request?.launchKind ?? '');
@@ -153,12 +156,19 @@ export function probationWorkerDetachedProvider(request, {
   const scope = Array.isArray(request?.scope) ? request.scope.map(String).filter(Boolean) : [];
   if (scope.length) argv.push(`--scope=${scope.join(',')}`);
 
-  const child = spawnDetached(argv, { cwd: request?.cwd ?? REPO_ROOT, logPath: logPathFor(sessionSlug), settingsEnv: request?.settingsEnv });
+  let attempt = null;
+  if (kind === 'ci-heal') {
+    attempt = beginAttempt(request, { logPathFor });
+    argv.push(`--heal-attempt=${attempt.attemptId}`);
+    request.reportAttempt?.(attempt.attemptId);
+  }
+  const child = spawnDetached(argv, { cwd: request?.cwd ?? REPO_ROOT, logPath: attempt?.logPath ?? logPathFor(sessionSlug), settingsEnv: request?.settingsEnv });
   const pid = Number(child?.pid);
   if (!Number.isInteger(pid) || pid <= 0) {
     const subject = kind === 'build' ? `#${num}` : `PR #${normNum(request?.pr)}`;
     throw new Error(`dispatch-lane: started the probation '${kind}' launch for ${subject} but node reported no pid — whether it is running cannot be told from here`);
   }
+  if (attempt) bindAttempt(attempt.attemptId, `${DETACHED_HANDLE_PREFIX}${pid}`);
   // #2815's one `executor` field — the vendor the run script spawns. A no-op until that field lands.
   request?.reportExecutor?.(worker.executor);
   request?.reportModel?.(worker.model);

@@ -176,3 +176,20 @@ describe('readOwedWrites — repo/slug consistency guard', () => {
     });
   });
 });
+
+
+it('xp0lsdi: distinct attempt writes survive repeated failures and never age out uncounted', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'owed-attempts-'));
+  try {
+    for (const attemptId of ['one', 'two']) recordOwedWrite({ repo: 'we', slug: 'chalbert/web-everything', pr: 3373, kind: 'ci-heal', headSha: HEAD,
+      attemptId, body: `🩹 conveyor CI-heal — failed attempt\nhead: ${HEAD}\nattempt: ${attemptId}` }, { dir, now: 1 });
+    expect(readOwedWrites({ dir })).toHaveLength(2);
+    const records = readOwedWrites({ dir });
+    expect(owedWriteAlreadyLive([{ body: records[0].body, author: { login: 'web-everything' } }], records[1])).toBe(false);
+    const out = flushOwedWrites({ dir, repo: 'we', now: 99_999_999, maxAgeMs: 1, maxAttempts: 0,
+      exec: () => { throw new Error('unreachable'); } });
+    expect(out.kept).toHaveLength(2);
+    expect(out.dropped).toHaveLength(0);
+    expect(readOwedWrites({ dir })).toHaveLength(2);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

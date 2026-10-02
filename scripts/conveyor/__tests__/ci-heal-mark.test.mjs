@@ -422,3 +422,31 @@ fs.writeFileSync('state.json', JSON.stringify(s));
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 });
+
+
+describe('xp0lsdi failed-attempt markers', () => {
+  it('counts trusted failure identities once, alongside legacy successes, without claiming a push', () => {
+    const failed = buildCiHealComment({ attemptId: 'one', failed: true, headSha: 'a'.repeat(40), detail: 'exit unknown' });
+    const second = buildCiHealComment({ attemptId: 'two', failed: true });
+    expect(failed).not.toContain('rebased & re-pushed');
+    const comments = [failed, failed, second, buildCiHealComment()].map(body => ({ body, author: AUTOMATION }));
+    comments.push({ body: buildCiHealComment({ attemptId: 'forged', failed: true }), author: { login: 'stranger' } });
+    expect(countCiHealComments(comments)).toBe(3);
+    expect(countCiHealComments([{ body: failed }])).toBe(0);
+  });
+});
+
+
+import { handBackCiHealReview } from '../ci-heal-mark.mjs';
+it('xp0lsdi: attempt-accounted success retains the guarded review hand-back without posting a second marker', () => {
+  const calls = [];
+  const result = handBackCiHealReview({ pr: 3373, headSha: 'a'.repeat(40), repo: 'chalbert/web-everything',
+    exec: (_bin, argv) => { calls.push(argv); return JSON.stringify({ labels: [{ name: 'review:accepted' }] }); },
+    restamp: () => ({ ok: false, reason: 'new repair contribution needs review' }),
+    rearm: args => { calls.push(args); return { ok: true }; },
+  });
+  expect(result).toMatchObject({ restamped: false, rearmed: true });
+  expect(calls).toHaveLength(2);
+  expect(calls[0]).toEqual(['pr', 'view', '3373', '--json', 'labels', '--repo=chalbert/web-everything']);
+  expect(calls[1]).toMatchObject({ pr: 3373, repo: 'chalbert/web-everything' });
+});

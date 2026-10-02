@@ -1355,6 +1355,15 @@ export function decideDispatchRoute(dispatch = {}, options = {}) {
   const record = decideDispatchRouteLegacy(dispatch, { ...options, criticalWorkGate });
   if (record.outcome === 'refused' || record.refusal || record.override) return record;
   // PR #3311 split: repair dispatch retains the main evidence/tier path.
+  if (dispatch.kind === 'ci-heal' && options.ciHealAvailability && record.probationWorker) {
+    const picked = selectProbationWorker({ taskType: record.taskType, tier: record.tier,
+      simple: dispatch.reason === 'behind', filesTouched: dispatch.scopePaths ?? [],
+      scorecards: routingRecords(options.scorecards), vetoes: criticalMissesFor(options.scorecards ?? [], record.taskType),
+      availability: options.ciHealAvailability });
+    record.auditTrail.push(...picked.auditTrail);
+    if (!picked.worker) return { ...record, probationWorker: null, outcome: 'refused', refusal: picked.reason };
+    record.probationWorker = picked.worker;
+  }
   if (['fix', 'ci-heal'].includes(dispatch.kind)) return record;
   // Every policy-routed kind needs a verdict, including roles and future operation names.
   // Keep the inherited evidence router unchanged when no explicit policy route exists.
