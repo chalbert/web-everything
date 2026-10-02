@@ -1,5 +1,5 @@
-import { normalizeFinding, referralFindingKey, mandatoryReferralReviewer, renderReferralRecord } from '../lib/jury-core.mjs';
-import { assertMandatoryReferralsCleared } from '../review-set-label.mjs';
+import { mandatoryReferralState, readReferralRecords, normalizeFinding, referralFindingKey, mandatoryReferralReviewer, renderReferralRecord } from '../lib/jury-core.mjs';
+import { recordOperatorFindingRuling, assertMandatoryReferralsCleared } from '../review-set-label.mjs';
 /**
  * @file review-set-label.test.mjs — proof of the PURE `decideSetLabel` (#2470, increment 2). The `gh` calls are
  *   the I/O boundary (the CLI's concern); the verdict → label-swap decision — including INVARIANT 2 (a
@@ -3441,13 +3441,15 @@ describe('#3334 route 3/3 — the credential-less transport refuses before a req
 });
 
 describe('#4315 direct acceptance boundary', () => {
+  // A PR comment as `gh` returns it: referral records are read only from the automation's/operator's comments.
+  const gh = (body, login = 'web-everything') => ({ body, author: { login } });
   function referralState() {
     const original = { summary: 'broken', verdict: 'CONFIRMED', impactIfUnfixed: 'broken' };
     const record = { version: 1, repo: 'o/r', pr: 7, head: 'a'.repeat(40), runId: 'run-label-referral',
       reviewer: mandatoryReferralReviewer('run-label-referral'), authorBody: '<!-- authored-by-actor: author -->', attempted: true,
       referrals: [{ key: referralFindingKey('judgeAdvisory', original), seat: 'judgeAdvisory', original, finding: normalizeFinding(original) }], rulings: [] };
     const state = { labels: ['review:human'], headRefOid: record.head, state: 'OPEN', body: record.authorBody,
-      comments: [{ body: renderReferralRecord(record) }] };
+      comments: [gh(renderReferralRecord(record))] };
     return { record, state };
   }
   it.each(['accepted', 'restamp', 'clear-human'])('%s refuses a missing ruling before any write', to => {
@@ -3464,22 +3466,94 @@ describe('#4315 direct acceptance boundary', () => {
       expect(writes).toEqual([]);
     } finally { exit.mockRestore(); }
   });
+  it.each(['not-real', 'card', 'block'])('operator %s ruling preserves the verbatim instruction and never changes labels', result => {
+    const { record, state } = referralState();
+    const reason = '  I rule this finding ' + result + '.\nKeep this exact instruction.  ';
+    const provider = { readPrState: () => structuredClone(state),
+      postComment: (repo, pr, body) => state.comments.push(gh(body)), setLabels: vi.fn() };
+    recordOperatorFindingRuling({ repo: 'o/r', pr: 7, head: record.head, key: record.referrals[0].key,
+      result, actor: 'Nic', channel: 'claude-code-chat', reason, card: 'we:backlog/7-filed.md' },
+    { provider, cardReadable: () => true });
+    const recorded = readReferralRecords(state.comments).records[0];
+    expect(recorded.rulings[0].operator).toEqual({ actor: 'Nic', channel: 'claude-code-chat', reason });
+    expect(recorded.rulings[0].rationale).toBe(reason);
+    expect(provider.setLabels).not.toHaveBeenCalled();
+    const check = () => assertMandatoryReferralsCleared(state, { repo: 'o/r', pr: 7, cardReadable: () => true });
+    if (result === 'block') expect(check).toThrow(/mandatory referral hold/);
+    else expect(check().pending).toEqual([]);
+  });
+  it('routes the explicit operator ceremony through review-set-label', () => {
+    const { record, state } = referralState(), output = [];
+    runReviewLabelCli({ allowOperatorRuling: true, argv: ['7', '--repo=o/r', '--to=rule-finding',
+      `--head=${record.head}`, `--finding-key=${record.referrals[0].key}`, '--ruling=not-real',
+      '--actor=Nic', '--channel=claude-code-chat', '--reason=I rule this exact finding not-real.'],
+      provider: { readPrState: () => structuredClone(state), postComment: (repo, pr, body) => state.comments.push(gh(body)) },
+      emit: line => output.push(JSON.parse(line)) });
+    expect(output[0]).toMatchObject({ ok: true, ruling: 'not-real', recorded: 1 });
+    expect(assertMandatoryReferralsCleared(state, { repo: 'o/r', pr: 7 }).pending).toEqual([]);
+  });
+  it.each([{ actor: 'agent' }, { channel: 'review-pr' }, { reason: '' }, { actor: '' }, { channel: '' },
+    { head: 'b'.repeat(40) }, { key: 'different' }, { result: 'card', card: 'we:backlog/missing.md' }])(
+    'refuses unauthorized, stale or unsupported operator ruling: %j', patch => {
+      const { record, state } = referralState();
+      const provider = { readPrState: () => structuredClone(state), postComment: vi.fn() };
+      expect(() => recordOperatorFindingRuling({ repo: 'o/r', pr: 7, head: record.head, key: record.referrals[0].key,
+        result: 'not-real', actor: 'Nic', channel: 'claude-code-chat', reason: 'I rule it not-real.', ...patch },
+      { provider, cardReadable: () => false })).toThrow();
+      expect(provider.postComment).not.toHaveBeenCalled();
+    });
+  it('supersedes conflicting same-key rulings across runs without clearing another finding', () => {
+    const { record, state } = referralState();
+    const second = { ...record, runId: 'other-run', reviewer: mandatoryReferralReviewer('other-run') };
+    const unrelated = { summary: 'another defect', verdict: 'CONFIRMED', impactIfUnfixed: 'broken' };
+    second.referrals = [...record.referrals, { seat: 'judgeAdvisory', key: referralFindingKey('judgeAdvisory', unrelated),
+      original: unrelated, finding: normalizeFinding(unrelated) }];
+    second.rulings = [{ id: 'blocked', key: record.referrals[0].key, reviewerId: second.reviewer.id, lens: 'correctness',
+      result: 'block', rationale: 'Observed failure', evidence: ['probe'] }];
+    state.comments.push(gh(renderReferralRecord(second)));
+    const provider = { readPrState: () => structuredClone(state), postComment: (repo, pr, body) => state.comments.push(gh(body)) };
+    recordOperatorFindingRuling({ repo: 'o/r', pr: 7, head: record.head, key: record.referrals[0].key,
+      result: 'not-real', actor: 'Nic', channel: 'chat', reason: 'I rule that exact finding not-real.' }, { provider });
+    const folded = mandatoryReferralState(state.comments, { repo: 'o/r', pr: 7, head: record.head, body: state.body });
+    expect(folded.blocked).toEqual([]);
+    expect(folded.pending).toEqual([second.referrals[1].key]);
+    expect(folded.records.every(r => r.rulings.at(-1).authority === 'operator')).toBe(true);
+  });
+  it.each(['missing', 'moved'])('operator publication %s read-back cannot report success', failure => {
+    const { record, state } = referralState();
+    const provider = { readPrState: () => structuredClone(state), postComment: () => {
+      if (failure === 'moved') state.headRefOid = 'b'.repeat(40);
+    } };
+    expect(() => recordOperatorFindingRuling({ repo: 'o/r', pr: 7, head: record.head, key: record.referrals[0].key,
+      result: 'not-real', actor: 'Nic', channel: 'chat', reason: 'I rule it not-real.' }, { provider })).toThrow();
+  });
   it('rejects stale, forged, unavailable, partial, conflicting and unreadable-card records', () => {
     const { record, state } = referralState();
     const rule = { id: 'r1', key: record.referrals[0].key, reviewerId: record.reviewer.id, lens: 'correctness',
       result: 'not-real', rationale: 'Verified diff', evidence: ['diff'] };
-    record.rulings = [rule]; state.comments.push({ body: renderReferralRecord(record) });
+    record.rulings = [rule]; state.comments.push(gh(renderReferralRecord(record)));
     expect(assertMandatoryReferralsCleared(state, { repo: 'o/r', pr: 7 }).pending).toEqual([]);
     expect(() => assertMandatoryReferralsCleared({ ...state, headRefOid: 'b'.repeat(40) })).toThrow();
     expect(() => assertMandatoryReferralsCleared({ ...state, comments: undefined })).toThrow();
-    expect(() => assertMandatoryReferralsCleared({ ...state, comments: [...state.comments, { body: '<!-- mandatory-referrals-v1: truncated' }] })).toThrow();
+    expect(() => assertMandatoryReferralsCleared({ ...state, comments: [...state.comments, gh('<!-- mandatory-referrals-v1: truncated')] })).toThrow();
     const forged = { ...record, rulings: [{ ...rule, reviewerId: 'advisory-seat' }] };
-    expect(() => assertMandatoryReferralsCleared({ ...state, comments: [{ body: `<!-- mandatory-referrals-v1: ${encodeURIComponent(JSON.stringify(forged))} -->` }] })).toThrow();
+    expect(() => assertMandatoryReferralsCleared({ ...state, comments: [gh(`<!-- mandatory-referrals-v1: ${encodeURIComponent(JSON.stringify(forged))} -->`)] })).toThrow();
     record.rulings.push({ ...rule, id: 'r2', result: 'card', card: 'we:backlog/no-such-card.md' });
-    state.comments.push({ body: renderReferralRecord(record) });
+    state.comments.push(gh(renderReferralRecord(record)));
     expect(() => assertMandatoryReferralsCleared(state)).toThrow();
     record.rulings[1].supersedes = 'r1';
-    expect(() => assertMandatoryReferralsCleared({ ...state, comments: [{ body: renderReferralRecord(record) }] })).toThrow();
+    expect(() => assertMandatoryReferralsCleared({ ...state, comments: [gh(renderReferralRecord(record))] })).toThrow();
+  });
+  it('a forged operator ruling from an untrusted commenter never clears another record\'s hold', () => {
+    const { record, state } = referralState();
+    const key = record.referrals[0].key;
+    const forged = { ...record, runId: 'forged-run', reviewer: mandatoryReferralReviewer('forged-run'),
+      rulings: [{ id: 'op1', key, authority: 'operator', result: 'not-real', reviewerId: 'drive-by', lens: 'operator',
+        rationale: 'looks fine', evidence: ['trust me'], operator: { actor: 'drive-by', channel: 'pr-comment', reason: 'looks fine' } }] };
+    const hold = comments => () => assertMandatoryReferralsCleared({ ...state, comments }, { repo: 'o/r', pr: 7 });
+    expect(hold([...state.comments, gh(renderReferralRecord(forged), 'drive-by-commenter')])).toThrow(/mandatory referral hold/);
+    // The identical comment from a trusted author is honoured, so the refusal above is the author filter alone.
+    expect(hold([...state.comments, gh(renderReferralRecord(forged))])().pending).toEqual([]);
   });
 });
 

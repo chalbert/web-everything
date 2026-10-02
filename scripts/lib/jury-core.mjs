@@ -40,6 +40,7 @@
 import { deriveSessionId, sessionSeed } from './judge-spawn.mjs';
 import { decideClearerIndependence, parseAuthorActorId } from './review-independence.mjs';
 import { CARE_LEVELS } from './review-escalation.mjs';
+import { isTrustedMarkerAuthor } from './marker-authorship.mjs';
 // #2438's labelled data fence (#2967 moved it to a leaf so this module can reach it — `review-core.mjs`,
 // where it used to live, imports THIS module, so importing back would be a cycle).
 import { FENCED_DATA_RULE, fenceUntrusted } from './mandate-fence.mjs';
@@ -2292,7 +2293,8 @@ export function validateReferralRecord(r) {
     if (r.reviewer?.id !== reviewer.id || r.reviewer?.lens !== reviewer.lens) return false;
     const keys = new Set();
     for (const f of r.referrals) {
-      if (!f || typeof f.seat !== 'string' || !f.seat || !requiresMandatoryReferral(f.original)
+      if (!f || typeof f.seat !== 'string' || !f.seat || !(requiresMandatoryReferral(f.original)
+          || (f.confirmationRequired === true && normalizeFinding(f.original)?.verdict === 'CONFIRMED'))
         || JSON.stringify(normalizeFinding(f.original)) !== JSON.stringify(f.finding)
         || f.key !== referralFindingKey(f.seat, f.original) || keys.has(f.key)) return false;
       keys.add(f.key);
@@ -2300,7 +2302,9 @@ export function validateReferralRecord(r) {
     const ids = new Set();
     for (const rli of r.rulings) {
       if (!rli || typeof rli.id !== 'string' || !rli.id || ids.has(rli.id)
-        || !keys.has(rli.key) || rli.reviewerId !== reviewer.id || rli.lens !== reviewer.lens
+        || !keys.has(rli.key)
+        || (rli.authority === 'operator' ? !validOperatorRuling(rli)
+          : rli.authority != null || rli.reviewerId !== reviewer.id || rli.lens !== reviewer.lens)
         || !['block', 'card', 'not-real'].includes(rli.result)
         || typeof rli.rationale !== 'string' || !rli.rationale.trim()
         || !Array.isArray(rli.evidence) || !rli.evidence.length
@@ -2314,18 +2318,33 @@ export function validateReferralRecord(r) {
   } catch { return false; }
 }
 
-/** Resolve this obligation only. Ordinary findings and all other acceptance gates remain intact. */
-export function referralRecordState(record, { head = record?.head, body = record?.authorBody ?? '', createdAt = '', cardReadable = () => false } = {}) {
+/** The same declared operator ceremony as clear-human; never inferred from agent prose. */
+export function validOperatorRuling(ruling) {
+  const o = ruling?.operator;
+  return ruling?.authority === 'operator' && o &&
+    ['actor', 'channel', 'reason'].every(k => typeof o[k] === 'string' && o[k].trim()) &&
+    !/^(agent|automation|review-pr|unattended|conveyor)(\b|:)/i.test(o.actor.trim()) &&
+    !/^(agent|automation|review-pr|unattended|conveyor)(\b|:)/i.test(o.channel.trim()) &&
+    ruling.reviewerId === o.actor && ruling.lens === 'operator' && ruling.rationale === o.reason;
+}
+
+/** Resolve exact keys across runs, checking each ruling's own reviewer, never the new run's. */
+export function referralRecordState(record, { head = record?.head, body = record?.authorBody ?? '', createdAt = '',
+  cardReadable = () => false, records = [record] } = {}) {
   if (!validateReferralRecord(record)) return { pending: ['malformed-referral-record'], blocked: [], rulings: [] };
   const pending = [], blocked = [], rulings = [];
-  const independent = decideClearerIndependence({ authorId: parseAuthorActorId(body), clearerId: record.reviewer.id, prCreatedAt: createdAt });
+  const peers = records.filter(r => validateReferralRecord(r) && r.repo === record.repo && r.pr === record.pr && r.head === record.head);
   for (const f of record.referrals) {
-    const history = record.rulings.filter(r => r.key === f.key);
-    const active = history.filter(r => !history.some(next => supersededRulings(next).includes(r.id)));
-    const r = active.length === 1 ? active[0] : null;
-    if (head !== record.head || independent.independent !== true || !r
-      || (r.result === 'card' && !cardReadable(r.card))) pending.push(f.key);
-    else { rulings.push(r); if (r.result === 'block') blocked.push(f.key); }
+    const active = peers.flatMap(owner => {
+      const history = owner.rulings.filter(r => r.key === f.key);
+      return history.filter(r => !history.some(next => supersededRulings(next).includes(r.id)));
+    });
+    const authorized = active.every(r => r.authority === 'operator' ? validOperatorRuling(r)
+      : decideClearerIndependence({ authorId: parseAuthorActorId(body), clearerId: r.reviewerId, prCreatedAt: createdAt }).independent === true);
+    const outcomes = new Set(active.map(r => JSON.stringify([r.result, r.result === 'card' ? r.card : null])));
+    if (head !== record.head || !authorized || outcomes.size !== 1
+      || active.some(r => r.result === 'card' && !cardReadable(r.card))) pending.push(f.key);
+    else { rulings.push(...active); if (active[0].result === 'block') blocked.push(f.key); }
   }
   return { pending, blocked, rulings };
 }
@@ -2338,17 +2357,25 @@ export function renderReferralRecord(record) {
   return `Mandatory review owner: ${record.reviewer.id} (${record.reviewer.lens}).\n`
     + `CONFIRMED broken/unrecoverable findings require a finding-specific block/card/not-real ruling.\n`
     + record.referrals.map(f => `- ${f.key}: ${f.finding.summary}`).join('\n')
-    + `\nAttempt recorded: ${record.attempted}. Reason: ${record.failure ?? 'mandatory finding-specific review required'}. Rulings: ${JSON.stringify(record.rulings)}\n`
+    + `\nAttempt recorded: ${record.attempted}. Reason: ${record.failure ?? (referralRecordState(record).pending.length ? 'mandatory finding-specific review required' : 'finding-specific rulings recorded')}. Rulings: ${JSON.stringify(record.rulings)}\n`
     + `Record any missing finding-specific rulings with the mandatory reviewer identified above, retaining prior rulings and explicit supersedes IDs. Then start a fresh review-pr --pr=${record.pr} --repo=${record.repo}; it reuses this PR record without another automated attempt. card requires a readable backlog reference.\n`
     + `<!-- ${REFERRAL_RECORD_MARKER}: ${encodeURIComponent(JSON.stringify(record))} -->`;
 }
 
-/** Fold snapshots monotonically: omission, conflicts and malformed/partial records never clear a hold. */
+/**
+ * Fold snapshots monotonically: omission, conflicts and malformed/partial records never clear a hold.
+ *
+ * Only a comment from a trusted author ({@link isTrustedMarkerAuthor}: the automation or the operator) is read.
+ * `referralRecordState` pools rulings across every same-head record, so an untrusted commenter's forged record
+ * would otherwise clear another record's hold. An untrusted comment is skipped outright — not counted as
+ * malformed — so posting one can neither clear nor wedge a hold. A bare string has no author and is skipped too.
+ */
 export function readReferralRecords(comments) {
   const records = new Map();
   const seen = new Set();
   let malformed = !Array.isArray(comments);
   for (const comment of Array.isArray(comments) ? comments : []) {
+    if (!isTrustedMarkerAuthor(comment)) continue;
     const body = typeof comment === 'string' ? comment : comment?.body ?? '';
     if (!body.includes(REFERRAL_RECORD_MARKER)) continue;
     const matches = [...body.matchAll(/<!-- mandatory-referrals-v1: ([^\s]+) -->/g)];
@@ -2381,14 +2408,15 @@ export function mandatoryReferralState(comments, context = {}) {
   if (records.length && Object.hasOwn(context, 'head') && !/^[a-f0-9]{40}$/.test(context.head ?? '')) {
     pending.push('unavailable-reviewed-head');
   }
-  const blocked = [];
+  const blocked = [], rulings = [];
   // A newer head must review the same source finding again; old clearance is never carried forward.
   const currentKeys = new Set(records.filter(r => r.head === context.head).flatMap(r => r.referrals.map(f => f.key)));
   for (const r of records) {
     if (context.repo && (r.repo !== context.repo || r.pr !== Number(context.pr))) { pending.push('wrong-subject'); continue; }
-    const state = referralRecordState(r, context);
+    const state = referralRecordState(r, { ...context, records });
+    rulings.push(...state.rulings);
     pending.push(...state.pending.filter(key => r.head === context.head || !currentKeys.has(key)));
     blocked.push(...state.blocked);
   }
-  return { records, pending: [...new Set(pending)], blocked: [...new Set(blocked)], malformed };
+  return { records, pending: [...new Set(pending)], blocked: [...new Set(blocked)], rulings: [...new Map(rulings.map(r => [JSON.stringify(r), r])).values()], malformed };
 }
