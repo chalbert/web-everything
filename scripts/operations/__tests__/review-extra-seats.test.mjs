@@ -356,9 +356,11 @@ describe('#4194 the direct-task scripts in --review mode', () => {
       return child;
     };
     const dir = mkdtempSync(join(tmpdir(), 'we-agy-review-'));
+    // Hermetic: never read or write the host's real agy quota-hold evidence (a live hold returns before spawnFn).
+    const hold = { readHold: () => null, saveHold: () => {} };
     try {
-      await runAgyDirectExec({ dir, task: 'Review it', review: true, timeoutMs: 60_000, logFile: join(dir, 'log.jsonl'), stream: false, spawnFn, readHold: () => null, saveHold: () => {} });
-      await runAgyDirectExec({ dir, task: 'Review it', review: true, timeoutMs: 60_000, logFile: join(dir, 'log.jsonl'), stream: false, spawnFn, readHold: () => null, saveHold: () => {}, resumeConversationId: 'c-1' });
+      await runAgyDirectExec({ dir, task: 'Review it', review: true, timeoutMs: 60_000, logFile: join(dir, 'log.jsonl'), stream: false, spawnFn, ...hold });
+      await runAgyDirectExec({ dir, task: 'Review it', review: true, timeoutMs: 60_000, logFile: join(dir, 'log.jsonl'), stream: false, spawnFn, resumeConversationId: 'c-1', ...hold });
     } finally { rmSync(dir, { recursive: true, force: true }); }
     expect(argvs).toHaveLength(2);
     for (const a of argvs) expect(a).not.toContain('--dangerously-skip-permissions');

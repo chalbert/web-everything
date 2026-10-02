@@ -29,6 +29,8 @@
  *   and are unit-tested in we:skills-src/conveyor/__tests__/build-dispatch-daemon.test.mjs.
  */
 
+import { PLANNING_SNAPSHOT_ENV } from '../../scripts/lib/planning-snapshot.mjs';
+import { createPhaseTimer } from '../../scripts/lib/phase-timer.mjs';
 import { resolveOperationRoute, routingPolicyEnv } from '../../scripts/lib/dispatch-routing-policy-io.mjs';
 import { childFailure } from '../../scripts/lib/child-failure.mjs';
 import { execFileSync } from 'node:child_process';
@@ -216,7 +218,14 @@ export function deriveDispatchedByBuilder(runStoreRows = [], settledRows = []) {
  * a claim whose recorded dispatch died with none of `doneWhy`'s three retirement signals ever becoming true.
  * Optional-chained so an older test stub (every fixture that predates this) behaves exactly as before.
  */
-export async function runBuildDispatchTick({ bookkeeping = {}, live = false, policy = BUILD_DISPATCH_POLICY, prepareEnabled = true, routingPolicy, effects }) {
+export async function runBuildDispatchTick(options) {
+  const timer = options.timer ?? createPhaseTimer();
+  try { return await runTimedBuildDispatchTick({ ...options, timer }); }
+  catch (error) { error.timings = timer.snapshot(); throw error; }
+}
+
+async function runTimedBuildDispatchTick({ bookkeeping = {}, live = false, policy = BUILD_DISPATCH_POLICY, prepareEnabled = true, routingPolicy, effects, timer = createPhaseTimer() }) {
+  effects = timer.wrap(effects);
   let holds = effects.listHolds?.() ?? [];
   const prepareRows = effects.listPrepareInFlight?.() ?? [];
   const prepareClaims = effects.listPrepareClaims?.() ?? [];
@@ -629,6 +638,7 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
   }
   return {
     live,
+    timings: { ...timer.snapshot(), tickCore: d.timings ?? {} },
     statusLine: d.statusLine || '',
     tickCore: { building: externalBuilding, spawnBuilds: spawn, held: admission.held || [], planned: admission.planned || [], queue: admission.queue || [], suppressedBuilds: d.suppressedBuilds || [] },
     plan,
@@ -703,11 +713,14 @@ export const BUILD_DAEMON_LANE_CAP_EXEMPT_VALUE = '1000000';
 // EXPORTED (#4464) so a test can assert the env override directly, against an injected `exec` — mirrors this
 // file's own established `{ exec = execFileSync }` seam (`cliRetryInfraBlocked`, below).
 export function cliPlanTick(payload, { exec = execFileSync } = {}) {
-  const text = exec('node', [join(SCRIPTS, 'conveyor', 'tick-core.mjs')], {
-    input: JSON.stringify({ bookkeeping: payload || {} }), encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024,
-    env: { ...process.env, [MAX_CONCURRENT_LANES_ENV]: BUILD_DAEMON_LANE_CAP_EXEMPT_VALUE },
-  });
-  return JSON.parse(text);
+  const snapshotDir = mkdtempSync(join(tmpdir(), 'builder-plan-'));
+  try {
+    const text = exec('node', [join(SCRIPTS, 'conveyor', 'tick-core.mjs')], {
+      input: JSON.stringify({ bookkeeping: payload || {} }), encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024,
+      env: { ...process.env, [MAX_CONCURRENT_LANES_ENV]: BUILD_DAEMON_LANE_CAP_EXEMPT_VALUE, [PLANNING_SNAPSHOT_ENV]: snapshotDir },
+    });
+    return JSON.parse(text);
+  } finally { rmSync(snapshotDir, { recursive: true, force: true }); }
 }
 
 // #4351's own build-dispatch follow-up (guided by #4309 spend accounting) — this was the top GraphQL spender in the fleet (121
@@ -1331,15 +1344,16 @@ export function policyFrom(flags, env = process.env) {
  */
 async function dryRun(flags) {
   const policy = policyFrom(flags);
+  const timer = createPhaseTimer();
   const effects = cliEffects();
   const prepareEnabled = !flags['no-prepare'];
-  const runStoreRows = await cliListRunStoreInFlight();
+  const runStoreRows = await timer.measure('readBuildRuns', () => cliListRunStoreInFlight());
   effects.listRunStoreInFlight = () => runStoreRows;
-  const settledRows = await cliListSettledBuilds(); // #4349
+  const settledRows = await timer.measure('readSettledBuilds', () => cliListSettledBuilds()); // #4349
   effects.listSettledBuilds = () => settledRows;
-  const prepareRows = await cliListRunStoreInFlight({ launchKind: 'prepare-item' });
+  const prepareRows = await timer.measure('readPrepareRuns', () => cliListRunStoreInFlight({ launchKind: 'prepare-item' }));
   effects.listPrepareInFlight = () => prepareRows;
-  const tick = await runBuildDispatchTick({ bookkeeping: {}, live: false, policy, prepareEnabled, effects });
+  const tick = await runBuildDispatchTick({ bookkeeping: {}, live: false, policy, prepareEnabled, effects, timer });
   const core = tick.tickCore;
   const scopeByNum = new Map((core.queue || []).map((r) => [normNum(r.num), r.scope || []]));
   const heldByCore = new Map((core.held || []).map((h) => [normNum(h.num), h.reason]));
@@ -1384,6 +1398,7 @@ async function dryRun(flags) {
   const report = {
     mode: 'dry-run',
     at: new Date().toISOString(),
+    timings: { ...timer.snapshot(), tickCore: tick.timings.tickCore },
     statusLine: tick.statusLine,
     policy: {
       maxConcurrentBuilds: policy.maxConcurrentBuilds, maxConcurrentExternalBuilds: policy.maxConcurrentExternalBuilds, maxOpenPrs: policy.maxOpenPrs, maxOpenItems: policy.maxOpenItems,
@@ -1449,13 +1464,14 @@ async function live(flags) {
   const prepareEnabled = !flags['no-prepare'];
   let bookkeeping = {};
   let tickOnce = async () => {
-    const rows = await cliListRunStoreInFlight();
+    const timer = createPhaseTimer();
+    const rows = await timer.measure('readBuildRuns', () => cliListRunStoreInFlight());
     effects.listRunStoreInFlight = () => rows;
-    const settledRows = await cliListSettledBuilds(); // #4349
+    const settledRows = await timer.measure('readSettledBuilds', () => cliListSettledBuilds()); // #4349
     effects.listSettledBuilds = () => settledRows;
-    const prepareRows = await cliListRunStoreInFlight({ launchKind: 'prepare-item' });
+    const prepareRows = await timer.measure('readPrepareRuns', () => cliListRunStoreInFlight({ launchKind: 'prepare-item' }));
     effects.listPrepareInFlight = () => prepareRows;
-    const r = await runBuildDispatchTick({ bookkeeping, live: true, policy, prepareEnabled, effects });
+    const r = await runBuildDispatchTick({ bookkeeping, live: true, policy, prepareEnabled, effects, timer });
     bookkeeping = r.nextBookkeeping;
     return r;
   };
@@ -1466,17 +1482,21 @@ async function live(flags) {
   const intervalMs = Number(flags['interval-ms']) > 0 ? Number(flags['interval-ms']) : DEFAULT_INTERVAL_MS;
   console.error(`build-dispatch-daemon: live on ${hostname()}:${process.pid}, caps Claude ${policy.maxConcurrentBuilds} / external ${policy.maxConcurrentExternalBuilds}, tick every ${intervalMs}ms${flags['self-sync'] ? ', self-sync ON' : ''}.`);
   const { stoppedReason } = await runDaemonLoop({
-    tickOnce, sleep: realSleep, isAlive, intervalMs, maxTicks: flags.once ? 1 : Infinity,
-    onTick: (r) => {
+    tickOnce, sleep: realSleep, isAlive, intervalMs, fixedCadence: true, maxTicks: flags.once ? 1 : Infinity,
+    onTick: (r, _tick, loop) => {
       if (!r || !r.plan) { console.error(`build-dispatch-daemon: tick skipped (${r?.reason ?? 'self-sync'})`); return; }
       // card xao7080/#4518 — `{num, executor}` per in-flight build, not a bare num: `executor` is the durable
       // dispatch-record field (`claude`/`antigravity`/`codex`, `null` before the run goes `in-flight` on disk
       // or for an older record with none) so the operator's tick line names WHO is running each build without
       // reading scorecards. Additive over the previous bare-num array — nothing on `main` parses this stdout
       // JSON as a strict array-of-strings today (grepped 2026-09-29).
-      process.stdout.write(`${JSON.stringify({ at: new Date().toISOString(), status: r.statusLine, freeze: r.plan.freeze, inFlight: r.plan.inFlight.map((f) => ({ num: f.num, executor: f.executor ?? null })), openItems: reportOpenItems(r.plan.openItems), dispatched: r.dispatched, prepare: r.prepare, hold: r.plan.hold, dispatchHolds: r.dispatchHolds, failures: r.failures, retired: r.retired, infraRetry: r.infraRetry, orphanAdoption: r.orphanAdoption, draftRecovery: r.draftRecovery, holdRouting: r.holdRouting, holdRoutingResult: r.holdRoutingResult })}\n`);
+      process.stdout.write(`${JSON.stringify({ at: new Date().toISOString(), timings: { ...r.timings, loop }, status: r.statusLine, freeze: r.plan.freeze, inFlight: r.plan.inFlight.map((f) => ({ num: f.num, executor: f.executor ?? null })), openItems: reportOpenItems(r.plan.openItems), dispatched: r.dispatched, prepare: r.prepare, hold: r.plan.hold, dispatchHolds: r.dispatchHolds, failures: r.failures, retired: r.retired, infraRetry: r.infraRetry, orphanAdoption: r.orphanAdoption, draftRecovery: r.draftRecovery, holdRouting: r.holdRouting, holdRoutingResult: r.holdRoutingResult })}\n`);
     },
-    onTickError: (e) => console.error(`build-dispatch-daemon: tick failed (non-fatal): ${childFailure(e, { singleLine: true })}`),
+    onTickError: (e, _tick, loop) => {
+      // Keep the health watcher's existing failure-line contract; timings are an additive JSON line.
+      console.error(`build-dispatch-daemon: tick failed (non-fatal): ${childFailure(e, { singleLine: true })}`);
+      console.error(JSON.stringify({ at: new Date().toISOString(), event: 'tick-failed', timings: { ...e.timings, loop } }));
+    },
   });
   console.error(`build-dispatch-daemon: stopped (${stoppedReason}).`);
   release();
@@ -1496,5 +1516,5 @@ async function main(argv) {
 
 const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
 if (IS_CLI) {
-  main(process.argv.slice(2)).catch((e) => { console.error(`build-dispatch-daemon: fatal: ${String(e?.stack || e)}`); process.exit(1); });
+  main(process.argv.slice(2)).catch((e) => { console.error(`build-dispatch-daemon: fatal: ${String(e?.stack || e)}`); if (e.timings) console.error(JSON.stringify({ timings: e.timings })); process.exit(1); });
 }
