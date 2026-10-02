@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { renderReferralRecord, mandatoryReferralReviewer } from '../../lib/jury-core.mjs';
+import { referralFindingKey, normalizeFinding, renderReferralRecord, mandatoryReferralReviewer } from '../../lib/jury-core.mjs';
 import { createReviewPrSinks } from '../review-pr-io.mjs';
 import { assertMandatoryReferralsCleared } from '../../review-set-label.mjs';
 /**
@@ -112,7 +112,7 @@ function stubReader({
   netRev = 'def456',
   // #xwp8ioh — a reviewable PR is OPEN. Defaulted so every OTHER test keeps describing the case it was
   // written for; overridden only by the liveness tests.
-  state = 'OPEN',
+  state = 'OPEN', comments = [],
   // #xwk0tzu — the three fields the independence refusal reads. Defaulted to the SHAPE EVERY OTHER TEST WAS
   // ALREADY WRITTEN AGAINST — an unstamped body and no harness session, i.e. `unknown-clearer`, which
   // proceeds — so adding the guard changes nothing for a suite that is about something else. The
@@ -128,6 +128,7 @@ function stubReader({
 } = {}) {
   return ({ pr, repo }) => ({
     state,
+    comments,
     clearerId,
     createdAt,
     detail: {
@@ -3688,8 +3689,18 @@ describe('#4315 operation / I/O restart soak', () => {
     '%s cannot bypass a missing mandatory ruling (25 restarts)', async seat => {
       const source = { summary: 'confirmed off-scope defect', file: 'outside-diff.mjs', verdict: 'CONFIRMED',
         impactIfUnfixed: 'broken', outcome: 'fixed', prevention: 'captured #7', disposition: 'nit' };
-      const { registry } = registryFor({ netRev: PINNED_HEAD }, { codexAdvisory: true, correctnessAdvisory: true, antigravityReview: true });
-      const state = { headRefOid: PINNED_HEAD, body: '<!-- authored-by-actor: author -->', comments: [], labels: ['review:pending'] };
+      const comments = [];
+      if (seat === 'judgeAntigravityReview') {
+        // A fresh tool-less claim is now advisory. A durable legacy obligation still
+        // cannot be bypassed, including through 25 restarts of that same seat.
+        const record = { version: 1, repo: 'o/r', pr: 7, head: PINNED_HEAD, runId: 'legacy-tool-less',
+          reviewer: mandatoryReferralReviewer('legacy-tool-less'), authorBody: '<!-- authored-by-actor: author -->',
+          attempted: false, referrals: [{ key: referralFindingKey(seat, source), seat, original: source,
+            finding: normalizeFinding(source) }], rulings: [] };
+        comments.push({ body: renderReferralRecord(record), author: { login: 'web-everything' } });
+      }
+      const { registry } = registryFor({ netRev: PINNED_HEAD, comments }, { codexAdvisory: true, correctnessAdvisory: true, antigravityReview: true });
+      const state = { headRefOid: PINNED_HEAD, body: '<!-- authored-by-actor: author -->', comments, labels: ['review:pending'] };
       const trace = [], judge = vi.fn(async () => ({ value: { rulings: [] } }));
       const provider = {
         readPrState: () => { trace.push('read'); return structuredClone(state); },
@@ -3747,13 +3758,14 @@ describe('#4315 operation / I/O restart soak', () => {
   });
 });
 
-describe('xfkqowg confirmation and historical ruling replay', () => {
+describe('xfkqowg tool-less advisory and historical ruling replay', () => {
   async function drive({ records = [], source, result = 'not-real', human = true, runId = 'confirmation', body = '<!-- authored-by-actor: author -->', head = PINNED_HEAD } = {}) {
-    const { registry } = registryFor({ labels: [human ? 'review:human' : 'review:pending'], netRev: head, body }, { antigravityReview: true });
+    const { registry } = registryFor({ labels: [human ? 'review:human' : 'review:pending'], netRev: head, body,
+      comments: records.map(r => ({ body: renderReferralRecord(r), author: { login: 'web-everything' } })) }, { antigravityReview: true });
     const state = { headRefOid: head, body, labels: [human ? 'review:human' : 'review:pending'], comments: records.map(r => ({ body: renderReferralRecord(r), author: { login: 'web-everything' } })) };
     const trace = [];
     const judge = vi.fn(async request => {
-      expect(request.allowedTools).toContain('Bash');
+      expect(request.allowedTools).toBeNull();
       const sources = JSON.parse(request.input.split('Untrusted reported findings:\n')[1]);
       return { sessionId: request.sessionId, value: { rulings: sources.map(f => ({ key: f.key, result,
         rationale: result === 'not-real' ? 'Executed the probe; no failure reproduced.' : 'Executed the probe; failure reproduced.',
@@ -3779,30 +3791,23 @@ describe('xfkqowg confirmation and historical ruling replay', () => {
     }
     return { run, state, trace, judge };
   }
-  it.each([NET_PATHS[0], 'guide.md', 'config.json', 'data.csv'])('unreproduced tool-less claim on %s becomes a nonblocking advisory', async file => {
+  it.each([NET_PATHS[0], 'guide.md', 'config.json', 'data.csv'])('tool-less CONFIRMED claim on %s becomes a nonblocking advisory without a confirmation turn', async file => {
     const source = { summary: 'claim', file, verdict: 'CONFIRMED', impactIfUnfixed: 'broken', prevention: 'Unfiled guard', preventionCaptured: false };
     const { run, state, trace, judge } = await drive({ source });
-    expect(run.verdict.pendingReferrals).toEqual([]);
-    expect(run.verdict.blockedReferrals).toEqual([]);
+    expect(run.verdict).not.toHaveProperty('pendingReferrals');
+    expect(run.verdict).not.toHaveProperty('blockedReferrals');
     expect(run.verdict.findings[0]).toMatchObject({ verdict: 'PLAUSIBLE', summary: source.summary });
-    expect(run.verdict.findings[0].failure_scenario).toContain('Verification: not-real');
+    expect(run.verdict.findings[0].failure_scenario).toContain('Tool-less assertion: CONFIRMED; advisory only.');
     expect(run.verdict.admittedFindings).toEqual([]);
     expect(state.labels).toEqual(['review:human', 'advisory:accepted']);
     expect(trace.slice(-2)).toEqual(['advisory', 'advisory:accepted']);
-    expect(judge).toHaveBeenCalledTimes(1);
+    expect(judge).not.toHaveBeenCalled();
+    expect(run.findings.reduce.referrals).toEqual([]);
   });
   it('does not spend a confirmation turn on a PLAUSIBLE tool-less claim', async () => {
     const { run, judge } = await drive({ source: { summary: 'tentative', file: 'outside.md', verdict: 'PLAUSIBLE', impactIfUnfixed: 'broken' } });
     expect(run.findings.reduce.referrals).toEqual([]);
     expect(judge).not.toHaveBeenCalled();
-  });
-  it.each(['block', 'card'])('reproduced claim stays CONFIRMED with its %s ruling', async result => {
-    const { run, state, judge } = await drive({ result, source: { summary: 'real defect', file: NET_PATHS[0], verdict: 'CONFIRMED', impactIfUnfixed: 'broken' } });
-    expect(run.verdict.findings[0].verdict).toBe('CONFIRMED');
-    expect(run.verdict.pendingReferrals).toEqual([]);
-    expect(run.verdict.blockedReferrals).toHaveLength(result === 'block' ? 1 : 0);
-    expect(state.labels).toContain(result === 'block' ? 'advisory:changes' : 'advisory:accepted');
-    expect(judge).toHaveBeenCalledTimes(1);
   });
   it('replays the 51 actual #3432 snapshots and carries their rulings into a fresh same-head record', async () => {
     const { records } = JSON.parse(readFileSync('scripts/operations/__tests__/fixtures/3432-referrals.json', 'utf8'));

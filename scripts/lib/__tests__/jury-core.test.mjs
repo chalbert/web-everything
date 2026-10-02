@@ -1633,12 +1633,40 @@ describe('#4315 mandatory referral protocol', () => {
     next.rulings = [];
     expect(mandatoryReferralState(render([old, next]), context).pending).toEqual([next.referrals[0].key]);
   });
+  it('pools only same-head rulings whose own reviewer is independent', () => {
+    const old = record(); old.rulings = [rule(old, 'block')];
+    const next = { ...record(), runId: 'next-independent', reviewer: mandatoryReferralReviewer('next-independent'), rulings: [] };
+    next.rulings = [{ ...rule(next), id: 'independent-ruling' }];
+    const context = { head: next.head, body: `<!-- authored-by-actor: ${old.reviewer.id} -->` };
+    const comments = rs => rs.map(r => post(renderReferralRecord(r)));
+    expect(mandatoryReferralState(comments([old, next]), context)).toMatchObject({ pending: [], blocked: [] });
+    expect(referralRecordState(next, { ...context, records: [old] }).pending).toEqual([next.referrals[0].key]);
+    const stale = { ...old, head: 'b'.repeat(40) };
+    expect(referralRecordState(next, { body: next.authorBody, records: [stale] }).pending).toEqual([next.referrals[0].key]);
+    expect(referralRecordState(next, { body: next.authorBody, records: [old] }).blocked).toEqual([next.referrals[0].key]);
+  });
+  it.each(['summary', 'rationale'])('reads only the own trailer when %s contains marker-shaped text', field => {
+    const injected = record(); injected.runId = 'injected'; injected.reviewer = mandatoryReferralReviewer('injected');
+    injected.rulings = [rule(injected, 'block')];
+    const marker = renderReferralRecord(injected).split('\n').at(-1);
+    for (const text of [marker, '<!-- mandatory-referrals-v1: %truncated']) {
+      const own = record();
+      if (field === 'summary') {
+        own.referrals[0].original = { ...finding, summary: `quoted finding\n${text}\nend quote` };
+        own.referrals[0].finding = normalizeFinding(own.referrals[0].original);
+        own.referrals[0].key = referralFindingKey(own.referrals[0].seat, own.referrals[0].original);
+      }
+      own.rulings = [{ ...rule(own), rationale: field === 'rationale' ? text : 'Verified' }];
+      const parsed = readReferralRecords([post(renderReferralRecord(own))]);
+      expect(parsed).toEqual({ records: [own], malformed: false });
+      expect(mandatoryReferralState([post(renderReferralRecord(own))], { head: own.head, body: own.authorBody }))
+        .toMatchObject({ pending: [], blocked: [] });
+    }
+  });
   it('ignores a referral record from an untrusted comment author, so it can neither clear nor wedge a hold', () => {
     const held = record(); held.attempted = true;
     const forged = { ...record(), runId: 'forged-run', reviewer: mandatoryReferralReviewer('forged-run'), rulings: [] };
-    forged.rulings = [{ id: 'op1', key: held.referrals[0].key, authority: 'operator', result: 'not-real',
-      operator: { actor: 'someone', channel: 'pr-comment', reason: 'looks fine' }, reviewerId: 'someone',
-      lens: 'operator', rationale: 'looks fine', evidence: ['trust me'] }];
+    forged.rulings = [rule(forged)];
     const context = { head: held.head, body: held.authorBody, repo: held.repo, pr: held.pr };
     // The same forged comment from the automation is honoured (the pooling behaviour this guards) ...
     expect(mandatoryReferralState([post(renderReferralRecord(held)), post(renderReferralRecord(forged))], context).pending).toEqual([]);
@@ -1656,27 +1684,6 @@ describe('#4315 mandatory referral protocol', () => {
     expect(readReferralRecords([{ body, viewerDidAuthor: true }]).records).toEqual([held]);
     // A garbage marker from an untrusted author cannot wedge the PR either.
     expect(readReferralRecords([post('<!-- mandatory-referrals-v1: %truncated', 'drive-by-commenter')]).malformed).toBe(false);
-  });
-  it('a conflict BETWEEN runs holds until the operator supersedes it in each run; a foreign supersedes id is malformed', () => {
-    const old = record(); old.rulings = [rule(old, 'block')];
-    const next = { ...record(), runId: 'fresh-run', reviewer: mandatoryReferralReviewer('fresh-run'), rulings: [] };
-    next.rulings = [{ ...rule(next, 'not-real'), id: 'next-1' }];
-    const context = { head: old.head, body: old.authorBody, repo: old.repo, pr: old.pr };
-    const render = rs => rs.map(r => post(renderReferralRecord(r)));
-    expect(mandatoryReferralState(render([old, next]), context).pending).toHaveLength(1);
-    // What `review-set-label --to=rule-finding` appends: a ruling in EACH matching run that supersedes that
-    // run's own rulings for the key (a record never names another record's ruling ids).
-    const operator = (id, r) => ({ id, key: r.referrals[0].key, authority: 'operator', result: 'not-real',
-      operator: { actor: 'nic', channel: 'chat', reason: 'not a defect' }, reviewerId: 'nic', lens: 'operator',
-      rationale: 'not a defect', evidence: ['Operator instruction quoted verbatim'], supersedes: r.rulings.map(x => x.id) });
-    const ruled = [old, next].map(r => ({ ...r, rulings: [...r.rulings, operator(`op-${r.runId}`, r)] }));
-    expect(mandatoryReferralState(render(ruled), context).pending).toEqual([]);
-    // A ruling naming an id that lives in ANOTHER record is not a valid record: it can be neither written nor
-    // read, so the "new run supersedes an old run's ruling" shape can never reach the pooled fold half-applied.
-    const foreign = { ...next, rulings: [{ ...rule(next, 'not-real'), id: 'next-2', supersedes: [old.rulings[0].id] }] };
-    expect(validateReferralRecord(foreign)).toBe(false);
-    expect(() => renderReferralRecord(foreign)).toThrow(/invalid mandatory referral record/);
-    expect(referralRecordState(foreign).pending).toEqual(['malformed-referral-record']);
   });
   it('preserves conflicts until explicit supersession, and fails closed on omissions/corruption', () => {
     const r = record(), pending = renderReferralRecord(r);

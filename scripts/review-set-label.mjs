@@ -1,5 +1,4 @@
-import { randomUUID } from 'node:crypto';
-import { mandatoryReferralState, readReferralRecords, renderReferralRecord, validOperatorRuling } from './lib/jury-core.mjs';
+import { mandatoryReferralState } from './lib/jury-core.mjs';
 /**
  * review-set-label.mjs — swap a PR's review label, INVARIANT-2 guarded (#2470, increment 2 of 2). Also the
  * SINGLE HOME of the shared review-label CLI harness (#2644): a PURE `decideSetLabel` decides the swap for a
@@ -862,7 +861,6 @@ export function runReviewLabelCli({
   successResult,
   refusalResult,
   allowClearHuman = false,
-  allowOperatorRuling = false,
   // The findings write-up, so this function can REFUSE an empty bounce (see the `--to=changes` guard below).
   // The rendered comment still gets its body from the caller's `buildComment` closure — this is the same text,
   // handed over separately so the refusal lives with the other pre-flight validation instead of in one CLI
@@ -981,7 +979,7 @@ export function runReviewLabelCli({
     );
   }
   const targets = allowClearHuman ? "'accepted', 'changes', or 'clear-human'" : "'accepted' or 'changes'";
-  const targetOk = to === 'rule-finding' || to === 'accepted' || to === 'changes' || to === 'clear-human' || to === 'restamp';
+  const targetOk = to === 'accepted' || to === 'changes' || to === 'clear-human' || to === 'restamp';
   if (!fixedTo && !targetOk) {
     fail(`invalid --to — expected ${targets}`);
   }
@@ -1008,21 +1006,6 @@ export function runReviewLabelCli({
     if (!REPO_RE.test(repo)) {
       fail('invalid --repo — expected <owner/name>');
     }
-  }
-
-  // A separate ceremony: records one exact finding ruling, never an approval or label swap.
-  // Like clear-human, --reason MUST quote the operator's in-conversation instruction verbatim.
-  // Agent-authored rationale, a generic approval, and finding prose are never authorization.
-  if (to === 'rule-finding') {
-    try {
-      if (!allowOperatorRuling) throw new Error('operator finding ruling is not enabled for this caller');
-      const flag = name => (argv.find(a => a.startsWith(`--${name}=`)) ?? '').slice(name.length + 3);
-      const result = recordOperatorFindingRuling({ repo, pr: Number(pr), head: flag('head'),
-        key: flag('finding-key'), result: flag('ruling'), card: flag('card'),
-        actor: actorArg, channel: channelArg, reason: flag('reason') }, { provider });
-      emit(`${JSON.stringify({ ok: true, pr: Number(pr), to, ...result })}\n`);
-      return;
-    } catch (error) { fail(error.message); }
   }
 
   // we:scripts/review-set-label.mjs#runReviewLabelCli — observe the PR's current labels + head SHA (the I/O
@@ -1934,7 +1917,7 @@ if (IS_CLI) {
     // Handed over so the harness can refuse an empty `--to=changes` alongside its other pre-flight checks
     // (#xd6moh1). The rendered body still comes from the `buildComment` closure below — same text, one read.
     verdictBody,
-    usage: 'usage: review-set-label.mjs <pr> --repo=<owner/name> --to=accepted|changes|clear-human|rule-finding [--actor=<name>] [--channel=<surface>] [--body-file=<path>]  (pr must be a positive integer; changes REQUIRES --body-file=<the findings>; clear-human additionally requires --actor and --reason=<stated reason>; rule-finding requires --head=<full SHA> --finding-key=<exact key> --ruling=not-real|card|block --actor --channel --reason=<verbatim operator instruction>, plus --card=we:backlog/<item>.md for card)',
+    usage: 'usage: review-set-label.mjs <pr> --repo=<owner/name> --to=accepted|changes|clear-human [--actor=<name>] [--channel=<surface>] [--body-file=<path>]  (pr must be a positive integer; changes REQUIRES --body-file=<the findings>; clear-human additionally requires --actor and --reason=<stated reason>)',
     buildComment: ({ to, actor, headSha, reason, reviewedDiff, clearerId, independence, humanClearance }) => buildVerdictComment({
       to, actor, headSha, reason, reviewedDiff, clearerId, independence, body: verdictBody, channel: verdictChannel,
       humanClearance,
@@ -1946,7 +1929,6 @@ if (IS_CLI) {
     // `runReviewLabelCli` has to name the capability in its own source. See `allowClearHuman` on that function
     // for exactly how far that goes (not far — it is not a barrier).
     allowClearHuman: true,
-    allowOperatorRuling: true,
   });
 }
 
@@ -1977,41 +1959,4 @@ export function assertMandatoryReferralsCleared(state, { repo, pr, cardReadable 
     throw new Error(`mandatory referral hold: ${[...result.pending, ...result.blocked].join(', ')}; record finding-specific mandatory rulings before acceptance`);
   }
   return result;
-}
-
-/** Explicit operator instruction only; caller attribution is declared, as in clear-human, not authenticated. */
-export function recordOperatorFindingRuling({ repo, pr, head, key, result, card, actor, channel, reason },
-  { provider = createGhProvider(), cardReadable = referralCardReadable } = {}) {
-  const ruling = { authority: 'operator', operator: { actor, channel, reason }, reviewerId: actor,
-    lens: 'operator', rationale: reason, evidence: ['Operator instruction quoted verbatim'], result, key,
-    ...(result === 'card' ? { card } : {}) };
-  if (!validOperatorRuling(ruling) || !['not-real', 'card', 'block'].includes(result)
-    || !/^[a-f0-9]{40}$/.test(head ?? '') || typeof key !== 'string' || !key) {
-    throw new Error('rule-finding requires --head=<40-hex>, --finding-key, --ruling=not-real|card|block, '
-      + 'explicit operator --actor, --channel and --reason quoted verbatim; agent-authored text cannot authorize it');
-  }
-  if (result === 'card' && !cardReadable(card)) throw new Error('operator card ruling requires a readable we:backlog/*.md card');
-  const fresh = () => {
-    const state = provider.readPrState(repo, pr);
-    if (state.state !== 'OPEN' || state.headRefOid !== head) throw new Error('operator ruling requires the current open PR head');
-    const parsed = readReferralRecords(state.comments);
-    if (parsed.malformed || parsed.records.some(r => r.repo !== repo || r.pr !== pr)) {
-      throw new Error('malformed or wrong-subject referral history; ruling refused');
-    }
-    return parsed.records;
-  };
-  const records = fresh().filter(r => r.head === head && r.referrals.some(f => f.key === key));
-  if (!records.length) throw new Error('finding key not recorded on the current PR head');
-  // Supersede explicitly in every matching run; append-only history and unrelated keys remain intact.
-  for (const initial of records) {
-    const current = fresh().find(r => r.runId === initial.runId && r.head === head);
-    if (!current) throw new Error('referral record disappeared');
-    const record = { ...current, rulings: [...current.rulings, { ...ruling, id: `operator:${randomUUID()}`,
-      supersedes: current.rulings.filter(r => r.key === key).map(r => r.id) }] };
-    const body = renderReferralRecord(record);
-    if (body.length > GH_COMMENT_MAX) throw new Error('operator ruling exceeds the comment size limit');
-    provider.postComment(repo, pr, body);
-    if (!fresh().some(r => JSON.stringify(r) === JSON.stringify(record))) throw new Error('operator ruling read-back failed');
-  }
-  return { head, key, ruling: result, recorded: records.length };
 }

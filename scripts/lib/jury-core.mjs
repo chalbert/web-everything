@@ -2293,8 +2293,7 @@ export function validateReferralRecord(r) {
     if (r.reviewer?.id !== reviewer.id || r.reviewer?.lens !== reviewer.lens) return false;
     const keys = new Set();
     for (const f of r.referrals) {
-      if (!f || typeof f.seat !== 'string' || !f.seat || !(requiresMandatoryReferral(f.original)
-          || (f.confirmationRequired === true && normalizeFinding(f.original)?.verdict === 'CONFIRMED'))
+      if (!f || typeof f.seat !== 'string' || !f.seat || !requiresMandatoryReferral(f.original)
         || JSON.stringify(normalizeFinding(f.original)) !== JSON.stringify(f.finding)
         || f.key !== referralFindingKey(f.seat, f.original) || keys.has(f.key)) return false;
       keys.add(f.key);
@@ -2302,9 +2301,7 @@ export function validateReferralRecord(r) {
     const ids = new Set();
     for (const rli of r.rulings) {
       if (!rli || typeof rli.id !== 'string' || !rli.id || ids.has(rli.id)
-        || !keys.has(rli.key)
-        || (rli.authority === 'operator' ? !validOperatorRuling(rli)
-          : rli.authority != null || rli.reviewerId !== reviewer.id || rli.lens !== reviewer.lens)
+        || !keys.has(rli.key) || rli.reviewerId !== reviewer.id || rli.lens !== reviewer.lens
         || !['block', 'card', 'not-real'].includes(rli.result)
         || typeof rli.rationale !== 'string' || !rli.rationale.trim()
         || !Array.isArray(rli.evidence) || !rli.evidence.length
@@ -2318,31 +2315,21 @@ export function validateReferralRecord(r) {
   } catch { return false; }
 }
 
-/** The same declared operator ceremony as clear-human; never inferred from agent prose. */
-export function validOperatorRuling(ruling) {
-  const o = ruling?.operator;
-  return ruling?.authority === 'operator' && o &&
-    ['actor', 'channel', 'reason'].every(k => typeof o[k] === 'string' && o[k].trim()) &&
-    !/^(agent|automation|review-pr|unattended|conveyor)(\b|:)/i.test(o.actor.trim()) &&
-    !/^(agent|automation|review-pr|unattended|conveyor)(\b|:)/i.test(o.channel.trim()) &&
-    ruling.reviewerId === o.actor && ruling.lens === 'operator' && ruling.rationale === o.reason;
-}
-
 /** Resolve exact keys across runs, checking each ruling's own reviewer, never the new run's. */
 export function referralRecordState(record, { head = record?.head, body = record?.authorBody ?? '', createdAt = '',
   cardReadable = () => false, records = [record] } = {}) {
   if (!validateReferralRecord(record)) return { pending: ['malformed-referral-record'], blocked: [], rulings: [] };
   const pending = [], blocked = [], rulings = [];
-  const peers = records.filter(r => validateReferralRecord(r) && r.repo === record.repo && r.pr === record.pr && r.head === record.head);
+  const peers = records.filter(r => validateReferralRecord(r) && r.repo === record.repo && r.pr === record.pr && r.head === record.head
+    && decideClearerIndependence({ authorId: parseAuthorActorId(body), clearerId: r.reviewer.id,
+      prCreatedAt: createdAt }).independent === true);
   for (const f of record.referrals) {
     const active = peers.flatMap(owner => {
       const history = owner.rulings.filter(r => r.key === f.key);
       return history.filter(r => !history.some(next => supersededRulings(next).includes(r.id)));
     });
-    const authorized = active.every(r => r.authority === 'operator' ? validOperatorRuling(r)
-      : decideClearerIndependence({ authorId: parseAuthorActorId(body), clearerId: r.reviewerId, prCreatedAt: createdAt }).independent === true);
     const outcomes = new Set(active.map(r => JSON.stringify([r.result, r.result === 'card' ? r.card : null])));
-    if (head !== record.head || !authorized || outcomes.size !== 1
+    if (head !== record.head || outcomes.size !== 1
       || active.some(r => r.result === 'card' && !cardReadable(r.card))) pending.push(f.key);
     else { rulings.push(...active); if (active[0].result === 'block') blocked.push(f.key); }
   }
@@ -2378,8 +2365,12 @@ export function readReferralRecords(comments) {
     if (!isTrustedMarkerAuthor(comment)) continue;
     const body = typeof comment === 'string' ? comment : comment?.body ?? '';
     if (!body.includes(REFERRAL_RECORD_MARKER)) continue;
-    const matches = [...body.matchAll(/<!-- mandatory-referrals-v1: ([^\s]+) -->/g)];
-    if (!matches.length || body.split('<!-- mandatory-referrals-v1:').length - 1 !== matches.length) malformed = true;
+    // Only the comment's own final line is structured data. Summaries and rationales
+    // may quote arbitrary marker-shaped text; they cannot inject a second record.
+    const trailer = body.trimEnd().split('\n').at(-1);
+    const match = /^<!-- mandatory-referrals-v1: ([^\s]+) -->$/.exec(trailer);
+    const matches = match ? [match] : [];
+    if (!match && trailer.includes(REFERRAL_RECORD_MARKER)) malformed = true;
     for (const match of matches) {
       try {
         const r = JSON.parse(decodeURIComponent(match[1]));
@@ -2408,15 +2399,14 @@ export function mandatoryReferralState(comments, context = {}) {
   if (records.length && Object.hasOwn(context, 'head') && !/^[a-f0-9]{40}$/.test(context.head ?? '')) {
     pending.push('unavailable-reviewed-head');
   }
-  const blocked = [], rulings = [];
+  const blocked = [];
   // A newer head must review the same source finding again; old clearance is never carried forward.
   const currentKeys = new Set(records.filter(r => r.head === context.head).flatMap(r => r.referrals.map(f => f.key)));
   for (const r of records) {
     if (context.repo && (r.repo !== context.repo || r.pr !== Number(context.pr))) { pending.push('wrong-subject'); continue; }
     const state = referralRecordState(r, { ...context, records });
-    rulings.push(...state.rulings);
     pending.push(...state.pending.filter(key => r.head === context.head || !currentKeys.has(key)));
     blocked.push(...state.blocked);
   }
-  return { records, pending: [...new Set(pending)], blocked: [...new Set(blocked)], rulings: [...new Map(rulings.map(r => [JSON.stringify(r), r])).values()], malformed };
+  return { records, pending: [...new Set(pending)], blocked: [...new Set(blocked)], malformed };
 }
