@@ -5,6 +5,7 @@ size: 3
 parent: "4075"
 status: open
 scope: ["we:scripts/operations/machine-pr-title.mjs", "we:scripts/operations/__tests__/machine-pr-title.test.mjs", "we:scripts/check-standards-rules.mjs", "we:scripts/__tests__/check-standards-rules-execfile-encoding.test.mjs", "we:scripts/check-standards.mjs", "we:scripts/__tests__/check-standards-execfile-encoding.test.mjs"]
+scopeRationale: "The wrapper, minimal-context-provider and open-pr-items are read-only dependencies (the new rule only inspects the first two; none changes). we:scripts/check-standards.mjs is a one-line wiring change covered by the new check-standards-execfile-encoding test, so the broad we:scripts/__tests__/check-standards.test.mjs stays out of scope."
 dateOpened: "2026-09-30"
 preparedDate: "2026-10-02"
 preparedAgainstSha: "a770bdad0ced4c8304349bd4476eeea4befd0f97"
