@@ -4,7 +4,7 @@ kind: story
 size: 3
 parent: "4075"
 status: open
-scope: ["we:scripts/lib/probation-launcher.mjs", "we:skills-src/conveyor/__tests__/prepare-brief-contract.test.mjs", "we:scripts/lib/__tests__/probation-launcher.test.mjs"]
+
 dateOpened: "2026-09-30"
 tags: []
 ---
@@ -22,3 +22,12 @@ Idempotency key (do not edit): approval-prevention-key:chalbert/web-everything#3
 ## Done when
 
 1. **Executable** — TODO: a command that fails before this item lands and passes after.
+
+## Findings (standalone worker, 2026-10-02)
+
+The build-dispatch daemon held #4667 with:
+
+> worker-declined: could-not-prepare: The proposed lease guard conflicts with supported scope correction. 'we:scripts/operations/__tests__/probation-build-run.test.mjs:905' explicitly accepts implementation paths outside a card-only prepare lease. The unresolved choice is whether to widen prepare leasing or introduce a separate boundary for future implementation scope. Preparing the guard would require choosing that policy. No files changed or stamped. Permission-contract tests passed; the runner suite was interrupted before completion.
+
+`scope:` was cleared above so this card is picked up by the existing unshaped-item auto-prepare path;
+a prepare pass re-scopes it against the finding.
