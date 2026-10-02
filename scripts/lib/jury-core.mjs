@@ -2344,19 +2344,23 @@ export function renderReferralRecord(record) {
 }
 
 /** Fold snapshots monotonically: omission, conflicts and malformed/partial records never clear a hold. */
-export function readReferralRecords(comments) {
+export function readReferralRecords(comments, { head } = {}) {
   const records = new Map();
   const seen = new Set();
   let malformed = !Array.isArray(comments);
+  // Only a decoded, full SHA can prove corruption belongs to a different head.
+  // Without a current head, retain the historical fail-closed reader behavior.
+  const holdsHead = (r) => !/^[a-f0-9]{40}$/.test(head ?? '')
+    || !/^[a-f0-9]{40}$/.test(r?.head ?? '') || r.head === head;
   for (const comment of Array.isArray(comments) ? comments : []) {
     const body = typeof comment === 'string' ? comment : comment?.body ?? '';
     if (!body.includes(REFERRAL_RECORD_MARKER)) continue;
-    const matches = [...body.matchAll(/<!-- mandatory-referrals-v1: ([^\s]+) -->/g)];
+    const matches = [...body.matchAll(/<!-- mandatory-referrals-v1: ([^\s]+)( -->)?/g)];
     if (!matches.length || body.split('<!-- mandatory-referrals-v1:').length - 1 !== matches.length) malformed = true;
     for (const match of matches) {
       try {
         const r = JSON.parse(decodeURIComponent(match[1]));
-        if (!validateReferralRecord(r)) { malformed = true; continue; }
+        if (!match[2] || !validateReferralRecord(r)) { malformed ||= holdsHead(r); continue; }
         const snapshot = JSON.stringify(r);
         if (seen.has(snapshot)) continue;
         seen.add(snapshot);
@@ -2365,7 +2369,7 @@ export function readReferralRecords(comments) {
         if (previous && (previous.authorBody !== r.authorBody || JSON.stringify(previous.referrals) !== JSON.stringify(r.referrals)
           || (previous.attempted && !r.attempted)
           || JSON.stringify(r.rulings.slice(0, previous.rulings.length)) !== JSON.stringify(previous.rulings))) {
-          malformed = true; continue;
+          malformed ||= holdsHead(r); continue;
         }
         records.set(id, r);
       } catch { malformed = true; }
@@ -2376,7 +2380,7 @@ export function readReferralRecords(comments) {
 
 /** Shared fresh-read acceptance boundary and replay state. */
 export function mandatoryReferralState(comments, context = {}) {
-  const { records, malformed } = readReferralRecords(comments);
+  const { records, malformed } = readReferralRecords(comments, context);
   const pending = malformed ? ['malformed-referral-record'] : [];
   if (records.length && Object.hasOwn(context, 'head') && !/^[a-f0-9]{40}$/.test(context.head ?? '')) {
     pending.push('unavailable-reviewed-head');

@@ -498,6 +498,7 @@ export function createReviewPrSinks({
   return {
     [REVIEW_EFFECTS.MANDATORY_REFERRALS]: async (payload, ctx) => {
       const { read } = payload;
+      const commentBudget = 60_000;
       const fresh = () => {
         const state = labelProvider.readPrState(read.repo, read.pr);
         if (state.headRefOid !== read.netBasis.rev) throw new Error('mandatory referral: reviewed head changed; hold retained');
@@ -514,82 +515,126 @@ export function createReviewPrSinks({
         }
       };
       const persist = (record) => {
+        const body = renderReferralRecord(record);
+        if (body.length > commentBudget) throw new Error(`mandatory referral record exceeds ${commentBudget} characters`);
         fresh();
-        labelProvider.postComment(read.repo, read.pr, renderReferralRecord(record));
+        labelProvider.postComment(read.repo, read.pr, body);
         const state = fresh();
-        const parsed = readReferralRecords(state.comments);
+        const parsed = readReferralRecords(state.comments, context(state));
         if (parsed.malformed || !parsed.records.some(r => JSON.stringify(r) === JSON.stringify(record))) {
           throw new Error('mandatory referral: post read-back failed; hold retained');
         }
         mirrorReferral(record);
         return state;
       };
-      let state = fresh();
-      const prior = readReferralRecords(state.comments);
-      if (prior.malformed) { park(state); return mandatoryReferralState(state.comments, context(state)); }
-      const existing = prior.records.filter(r => r.head === read.netBasis.rev && r.repo === read.repo && r.pr === read.pr);
-      const covered = new Set(existing.flatMap(r => r.referrals.map(f => f.key)));
-      const sources = [...payload.referrals, ...prior.records.flatMap(r => r.referrals)];
-      const additions = new Map();
-      for (const f of sources) {
-        const key = referralFindingKey(f.seat, f.original);
-        if (!covered.has(key)) additions.set(key, { key, seat: f.seat, original: f.original, finding: normalizeFinding(f.original) });
-      }
-      if (additions.size) {
-        const record = { version: 1, repo: read.repo, pr: read.pr, head: read.netBasis.rev,
-          runId: ctx.runId, reviewer: mandatoryReferralReviewer(ctx.runId), authorBody: state.body ?? '',
-          attempted: false, referrals: [...additions.values()], rulings: [] };
-        if (!validateReferralRecord(record)) throw new Error('mandatory referral: invalid pending record');
-        state = persist(record);
-        existing.push(record);
-      }
-      // Persist the attempt before dispatch. A crash or timeout spends this set's single automated attempt.
-      for (const initial of existing) {
-        if (initial.attempted) continue;
-        let record = { ...initial, attempted: true };
-        state = persist(record);
-        // Hold before dispatch too: an exhausted or interrupted worker must leave a visible owner.
-        if (!labelNames(state.labels).includes('review:human')) {
-          labelProvider.setLabels(read.repo, read.pr, { add: 'review:pending',
-            remove: ['review:accepted', 'review:changes'].filter(l => labelNames(state.labels).includes(l)) });
+      let state;
+      try {
+        state = fresh();
+        const prior = readReferralRecords(state.comments, context(state));
+        if (prior.malformed) { park(state); return mandatoryReferralState(state.comments, context(state)); }
+        const existing = prior.records.filter(r => r.head === read.netBasis.rev && r.repo === read.repo && r.pr === read.pr);
+        const covered = new Set(existing.flatMap(r => r.referrals.map(f => f.key)));
+        const sources = [...payload.referrals, ...prior.records.flatMap(r => r.referrals)];
+        const additions = new Map();
+        for (const f of sources) {
+          const key = referralFindingKey(f.seat, f.original);
+          if (!covered.has(key)) additions.set(key, { key, seat: f.seat, original: f.original, finding: normalizeFinding(f.original) });
         }
-        try {
-          const request = buildReviewJudgeRequest({ read, lens: 'correctness' });
-          const answer = await referralJudge({ ...request, runId: record.runId,
-            lens: 'mandatory-referral-correctness', sessionId: record.reviewer.id,
-            // This bounded evidence pass reads the same pinned diff. It cannot edit or file a promised card.
-            allowedTools: null,
-            mandate: request.mandate + '\nIndependently verify every referral in the input. Return exactly one '
-              + 'block, card, or not-real ruling per key, with rationale and evidence references. A general accept '
-              + 'is not a ruling. card requires an existing durable we:backlog/*.md reference. Do not recursively refer findings.',
-            input: request.input + '\nUntrusted reported findings:\n' + JSON.stringify(record.referrals),
-            shape: { type: 'object', additionalProperties: false, required: ['rulings'], properties: {
-              rulings: { type: 'array', items: { type: 'object', additionalProperties: false,
-                required: ['key', 'result', 'rationale', 'evidence', 'card'], properties: {
-                  key: { type: 'string' }, result: { type: 'string', enum: ['block', 'card', 'not-real'] },
-                  rationale: { type: 'string' }, evidence: { type: 'array', items: { type: 'string' } },
-                  card: { type: 'string' },
-                } } },
-            } },
-          });
-          if (answer.sessionId !== record.reviewer.id || answer.timedOut) throw new Error('mandatory reviewer authority or budget unavailable');
-          const rulings = (answer.value?.rulings ?? []).map((r, i) => ({ ...r, id: `${record.runId}:${i}`,
-            reviewerId: record.reviewer.id, lens: record.reviewer.lens }));
-          const completed = { ...record, rulings };
-          if (!validateReferralRecord(completed)) throw new Error('incomplete or malformed mandatory rulings');
-          state = persist(completed);
-          record = completed;
-        } catch (error) {
-          // The attempted record is already durable; no second automatic dispatch on resume.
-          state = persist({ ...record, failure: String(error.message) });
-          out(`Mandatory referral review parked: ${error.message}`);
+        if (additions.size) {
+          const chunks = [];
+          const usedRunIds = new Set(existing.map(r => r.runId));
+          let chunkIndex = 0;
+          const newRecord = () => {
+            let runId;
+            do {
+              runId = chunkIndex++ ? `${ctx.runId}:referral-chunk:${chunkIndex}` : ctx.runId;
+            } while (usedRunIds.has(runId));
+            usedRunIds.add(runId);
+            return { version: 1, repo: read.repo, pr: read.pr, head: read.netBasis.rev,
+              runId, reviewer: mandatoryReferralReviewer(runId), authorBody: state.body ?? '',
+              attempted: false, referrals: [], rulings: [] };
+          };
+          let record = newRecord();
+          for (const referral of additions.values()) {
+            const candidate = { ...record, referrals: [...record.referrals, referral] };
+            // Leave room for ordinary rulings; persist still checks every completed/failure snapshot.
+            if (record.referrals.length && renderReferralRecord(candidate).length > commentBudget / 2) {
+              chunks.push(record);
+              record = newRecord();
+            }
+            record.referrals.push(referral);
+            if (renderReferralRecord(record).length > commentBudget) {
+              throw new Error(`mandatory referral record exceeds ${commentBudget} characters for one finding`);
+            }
+          }
+          chunks.push(record);
+          for (const chunk of chunks) {
+            state = persist(chunk);
+            existing.push(chunk);
+          }
         }
+        // Persist the attempt before dispatch. A crash or timeout spends this set's single automated attempt.
+        for (const initial of existing) {
+          if (initial.attempted) continue;
+          let record = { ...initial, attempted: true };
+          state = persist(record);
+          // Hold before dispatch too: an exhausted or interrupted worker must leave a visible owner.
+          if (!labelNames(state.labels).includes('review:human')) {
+            labelProvider.setLabels(read.repo, read.pr, { add: 'review:pending',
+              remove: ['review:accepted', 'review:changes'].filter(l => labelNames(state.labels).includes(l)) });
+          }
+          try {
+            const request = buildReviewJudgeRequest({ read, lens: 'correctness' });
+            const answer = await referralJudge({ ...request, runId: record.runId,
+              lens: 'mandatory-referral-correctness', sessionId: record.reviewer.id,
+              // This bounded evidence pass reads the same pinned diff. It cannot edit or file a promised card.
+              allowedTools: null,
+              mandate: request.mandate + '\nIndependently verify every referral in the input. Return exactly one '
+                + 'block, card, or not-real ruling per key, with rationale and evidence references. A general accept '
+                + 'is not a ruling. card requires an existing durable we:backlog/*.md reference. Do not recursively refer findings.',
+              input: request.input + '\nUntrusted reported findings:\n' + JSON.stringify(record.referrals),
+              shape: { type: 'object', additionalProperties: false, required: ['rulings'], properties: {
+                rulings: { type: 'array', items: { type: 'object', additionalProperties: false,
+                  required: ['key', 'result', 'rationale', 'evidence', 'card'], properties: {
+                    key: { type: 'string' }, result: { type: 'string', enum: ['block', 'card', 'not-real'] },
+                    rationale: { type: 'string' }, evidence: { type: 'array', items: { type: 'string' } },
+                    card: { type: 'string' },
+                  } } },
+              } },
+            });
+            if (answer.sessionId !== record.reviewer.id || answer.timedOut) throw new Error('mandatory reviewer authority or budget unavailable');
+            const rulings = (answer.value?.rulings ?? []).map((r, i) => ({ ...r, id: `${record.runId}:${i}`,
+              reviewerId: record.reviewer.id, lens: record.reviewer.lens }));
+            const completed = { ...record, rulings };
+            if (!validateReferralRecord(completed)) throw new Error('incomplete or malformed mandatory rulings');
+            record = completed;
+          } catch (error) {
+            // The attempted record is already durable; no second automatic dispatch on resume.
+            record = { ...record, failure: String(error.message) };
+            out(`Mandatory referral review parked: ${error.message}`);
+          }
+          state = persist(record);
+        }
+        state = fresh();
+        const result = mandatoryReferralState(state.comments, context(state));
+        if (result.pending.length) park(state);
+        for (const record of result.records) mirrorReferral(record);
+        return result;
+      } catch (error) {
+        // A persistence refusal is terminal for automation, including a failed failure snapshot.
+        // Re-read labels without the head guard: a moved head must still get a visible owner.
+        let live = state;
+        try { live = labelProvider.readPrState(read.repo, read.pr); }
+        catch (readError) { out(`Could not refresh referral park labels: ${readError.message}`); }
+        if (!live) live = { labels: read.labels ?? [] };
+        park(live);
+        const reason = String(error.message ?? error).replace(/\s+/g, ' ').slice(0, 400);
+        const message = `Mandatory referral review parked to review:human: ${reason}.`;
+        try { labelProvider.postComment(read.repo, read.pr, message); }
+        catch (commentError) { out(`Could not post referral park reason: ${commentError.message}`); }
+        out(message);
+        return { records: [], pending: ['referral-persistence-failed'], blocked: [], malformed: false, reason };
       }
-      state = fresh();
-      const result = mandatoryReferralState(state.comments, context(state));
-      if (result.pending.length) park(state);
-      for (const record of result.records) mirrorReferral(record);
-      return result;
     },
     // ── 0. THE COMMENT BODY, staged locally. Deterministic path, deterministic bytes → safe to redo. ────────
     // The path is RUN-SCOPED (`reviewBodyPath`) so two runs on the same PR in one checkout cannot cross-stage.

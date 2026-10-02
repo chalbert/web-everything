@@ -1,4 +1,6 @@
-import { referralFindingKey } from '../../lib/jury-core.mjs';
+import { referralFindingKey, mandatoryReferralReviewer, normalizeFinding, renderReferralRecord,
+  readReferralRecords, validateReferralRecord } from '../../lib/jury-core.mjs';
+import { assertMandatoryReferralsCleared } from '../../review-set-label.mjs';
 /**
  * @file review-pr-io.test.mjs — the `review-pr` io shell (#3035): the four sinks, with no `gh` and no network.
  *
@@ -24,7 +26,11 @@ import {
   prViewFileName, readPr, resolveViewReader, revParseCommit, reviewBodyPath, reviewSidecarDir,
   resolveSubjectCheckout,
 } from '../review-pr-io.mjs';
-import { REVIEW_EFFECTS, REVIEW_PR_CHANNEL, REVIEW_PR_OP } from '../review-pr.mjs';
+import { REVIEW_EFFECTS, REVIEW_PR_CHANNEL, REVIEW_PR_OP, reviewPrOperation } from '../review-pr.mjs';
+import { createRegistry } from '../registry.mjs';
+import { applyPendingEffects } from '../effect-executor.mjs';
+import { createMemoryRunStore } from '../run-store.mjs';
+import { classifyReviewLoopOutcome } from '../review-job.mjs';
 import { VERDICTS, appendVerdict, buildVerdictRecord, readVerdictLedger } from '../../lib/verdict-ledger.mjs';
 // #xu2pp2m — the `--cwd`-reaches-the-reader wiring, asserted through the REAL operation table rather than a
 // re-created copy of it (the same reason `createCliJudgeFactory` is exported and driven directly, #3151).
@@ -1013,6 +1019,7 @@ describe('#xu2pp2m — `--cwd` decides which checkout the DIFF is read from', ()
 describe('#4315 durable referral effects', () => {
   function harness({ result = 'not-real', failure } = {}) {
     const head = 'a'.repeat(40), trace = [];
+    let posts = 0;
     const state = { headRefOid: head, body: '<!-- authored-by-actor: author -->', comments: [], labels: ['review:pending'] };
     const payload = { read: { repo: 'o/r', pr: 7, title: 'review', body: state.body, netBasis: { rev: head },
       netChangedFiles: ['x.mjs'], diffText: '+ change' },
@@ -1021,7 +1028,10 @@ describe('#4315 durable referral effects', () => {
       readPrState: () => { trace.push('read'); return structuredClone(state); },
       postComment: (repo, pr, body) => {
         trace.push('post');
-        if (failure === 'post') throw new Error('post unavailable');
+        if (!body.includes('<!-- mandatory-referrals-v1:')) { state.comments.push({ body }); return; }
+        posts++;
+        if (failure === 'post' || (failure === 'attempt' && posts === 2)
+          || (['completion', 'failure-snapshot'].includes(failure) && posts === 3)) throw new Error('post unavailable');
         if (failure !== 'read-back') state.comments.push({ body });
         if (failure === 'changed-head') state.headRefOid = 'b'.repeat(40);
       },
@@ -1029,23 +1039,142 @@ describe('#4315 durable referral effects', () => {
     };
     const judge = vi.fn(async request => {
       trace.push('judge');
-      if (failure === 'judge') throw new Error('budget exhausted');
-      const key = payload.referrals[0];
+      if (['judge', 'failure-snapshot'].includes(failure)) throw new Error('budget exhausted');
+      const referrals = JSON.parse(request.input.split('\nUntrusted reported findings:\n')[1]);
       return { sessionId: failure === 'identity' ? 'forged' : request.sessionId,
-        timedOut: failure === 'timeout', value: { rulings: failure === 'omitted' ? [] : [{
-          key: referralFindingKey(key.seat, key.original), result, rationale: 'Checked diff', evidence: ['diff:x'],
+        timedOut: failure === 'timeout', value: { rulings: failure === 'omitted' ? [] : referrals.map(f => ({
+          key: f.key, result, rationale: 'Checked diff', evidence: ['diff:x'],
           card: result === 'card' ? 'we:backlog/7-filed.md' : '',
-        }] } };
+        })) } };
     });
     const make = () => createReviewPrSinks({ root, labelProvider: provider, referralJudge: judge,
       mirrorReferral: record => trace.push(`mirror:${record.attempted}`), out: () => {}, cardReadable: () => failure !== 'card' });
-    return { state, trace, payload, judge, make };
+    return { state, trace, payload, judge, make, provider };
   }
   it.each(['post', 'read-back', 'changed-head'])('%s cannot clear a hold or dispatch before persistence', async failure => {
     const h = harness({ failure });
-    await expect(h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX)).rejects.toThrow();
+    const result = await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX);
+    expect(result.pending).toEqual(['referral-persistence-failed']);
     expect(h.judge).not.toHaveBeenCalled();
-    expect(h.trace.some(x => x.startsWith('label:'))).toBe(false);
+    expect(h.state.labels).toEqual(['review:human']);
+    expect(h.state.comments.at(-1).body).toContain(`parked to review:human: ${result.reason}`);
+  });
+  it.each(['attempt', 'completion', 'failure-snapshot'])('%s persistence failure parks with its reason', async failure => {
+    const h = harness({ failure });
+    const result = await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX);
+    expect(result.pending).toEqual(['referral-persistence-failed']);
+    expect(h.judge).toHaveBeenCalledTimes(failure === 'attempt' ? 0 : 1);
+    expect(h.state.labels).toEqual(['review:human']);
+    expect(h.state.comments.at(-1).body).toContain('parked to review:human: post unavailable');
+  });
+  it('a persistence failure finishes the operation at human confirmation and classifies as parked', async () => {
+    const h = harness({ failure: 'post' });
+    const registry = createRegistry();
+    registry.register(reviewPrOperation({ codexAdvisory: false, correctnessAdvisory: false, antigravityReview: false,
+      readPr: () => ({ state: 'OPEN', body: h.state.body,
+        detail: { repo: 'o/r', pr: 7, title: 'referral persistence', labels: ['review:pending'], humanRequired: false,
+          reviewClass: 'pending', disposition: { mode: 'converge', autoLand: false }, diffStat: [] },
+        net: { paths: ['x.mjs'], base: 'b'.repeat(40), rev: h.state.headRefOid, scored: true },
+        diff: { text: '--- a/x.mjs\n+++ b/x.mjs\n+change\n', scored: true },
+      }),
+    }));
+    let run = advanceWhileRunning(startRun({ op: REVIEW_PR_OP, id: CTX.runId, input: { repo: 'o/r', pr: 7 }, registry }), { registry });
+    while (run.pending?.kind === 'judge') {
+      run = advanceWhileRunning(run, { registry, resume: { value: { summary: 'reported finding',
+        findings: run.pending.step === 'judge' ? [h.payload.referrals[0].original] : [] } } });
+    }
+    expect(run.pending?.kind).toBe('effect');
+    ({ run } = await applyPendingEffects(run, { sinks: h.make(), store: createMemoryRunStore() }));
+    run = advanceWhileRunning(run, { registry });
+    expect(run.pending).toMatchObject({ kind: 'confirm', of: 'human' });
+    expect(run.verdict.verdict).toBe('needs-human');
+    expect(classifyReviewLoopOutcome({ stopped: run.pending.kind, verdict: run.verdict }).outcome).toBe('parked');
+    expect(h.state.labels).toEqual(['review:human']);
+  });
+  it('replays #3481: 42 earlier heads, duplicates, and a carried set over the comment budget', async () => {
+    const h = harness();
+    const seat = h.payload.referrals[0].seat;
+    const referrals = Array.from({ length: 42 }, (_, i) => {
+      const original = { ...h.payload.referrals[0].original, summary: `earlier finding ${i}`, detail: 'evidence '.repeat(500) };
+      return { seat, key: referralFindingKey(seat, original), original, finding: normalizeFinding(original) };
+    });
+    const oldRecord = (i, findings) => ({ version: 1, repo: 'o/r', pr: 7,
+      head: (i + 1).toString(16).padStart(40, '0'), runId: `earlier-${i}`, reviewer: mandatoryReferralReviewer(`earlier-${i}`),
+      authorBody: h.state.body, attempted: true, referrals: findings, rulings: [] });
+    h.state.comments = referrals.map((f, i) => ({ body: renderReferralRecord(oldRecord(i, i ? [referrals[0], f] : [f])) }));
+    expect(renderReferralRecord(oldRecord(0, referrals)).length).toBeGreaterThan(60_000);
+    const result = await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX);
+    const posted = h.state.comments.slice(42);
+    expect(posted.length).toBeGreaterThan(3);
+    for (const { body } of posted) expect(body.length).toBeLessThanOrEqual(60_000);
+    const parsed = readReferralRecords(h.state.comments);
+    expect(parsed.malformed).toBe(false);
+    const current = parsed.records.filter(r => r.head === h.state.headRefOid);
+    expect(current.length).toBeGreaterThan(1);
+    expect(new Set(current.map(r => r.runId)).size).toBe(current.length);
+    expect(current.every(validateReferralRecord)).toBe(true);
+    const keys = current.flatMap(r => r.referrals.map(f => f.key));
+    const expected = [...referrals.map(f => f.key), referralFindingKey(seat, h.payload.referrals[0].original)];
+    expect(keys.sort()).toEqual(expected.sort());
+    expect(result.pending).toEqual([]);
+    expect(h.judge).toHaveBeenCalledTimes(current.length);
+    await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, { ...CTX, runId: 'resume' });
+    expect(h.judge).toHaveBeenCalledTimes(current.length);
+  });
+  it('parks an indivisible oversized finding without posting it or dispatching', async () => {
+    const h = harness();
+    h.payload.referrals[0].original.summary = 'large '.repeat(20_000);
+    const result = await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX);
+    expect(result.reason).toContain('exceeds 60000 characters for one finding');
+    expect(h.state.labels).toEqual(['review:human']);
+    expect(h.state.comments).toHaveLength(1);
+    expect(h.state.comments[0].body.length).toBeLessThan(60_000);
+    expect(h.judge).not.toHaveBeenCalled();
+  });
+  it('also bounds completed records whose rulings exceed the budget', async () => {
+    const h = harness();
+    h.judge.mockImplementation(async request => ({ sessionId: request.sessionId, value: { rulings: [{
+      key: referralFindingKey(h.payload.referrals[0].seat, h.payload.referrals[0].original), result: 'not-real',
+      rationale: 'long evidence '.repeat(10_000), evidence: ['diff:x'], card: '',
+    }] } }));
+    const result = await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX);
+    expect(result.reason).toContain('exceeds 60000 characters');
+    expect(h.state.labels).toEqual(['review:human']);
+    expect(h.state.comments.every(c => c.body.length <= 60_000)).toBe(true);
+    expect(readReferralRecords(h.state.comments).records[0]).toMatchObject({ attempted: true, rulings: [] });
+  });
+  it('still parks if posting the short explanation also fails', async () => {
+    const h = harness();
+    h.provider.postComment = () => { throw new Error('all comments unavailable'); };
+    const result = await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX);
+    expect(result.pending).toEqual(['referral-persistence-failed']);
+    expect(result.reason).toBe('all comments unavailable');
+    expect(h.state.labels).toEqual(['review:human']);
+  });
+  it('parks using observed labels when persistence read-back and the refresh both fail', async () => {
+    const h = harness();
+    const read = h.provider.readPrState;
+    h.provider.readPrState = () => {
+      if (h.state.comments.length) throw new Error('read unavailable');
+      return read();
+    };
+    const result = await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX);
+    expect(result.reason).toBe('read unavailable');
+    expect(h.state.labels).toEqual(['review:human']);
+    expect(h.state.comments.at(-1).body).toContain('read unavailable');
+    expect(h.judge).not.toHaveBeenCalled();
+  });
+  it('ignores stale malformed records through persistence and retains the current-head clear-human guard', async () => {
+    const h = harness();
+    h.state.comments.push({ body: `<!-- mandatory-referrals-v1: ${encodeURIComponent(JSON.stringify({ head: 'b'.repeat(40) }))} -->` });
+    const result = await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX);
+    expect(result.pending).toEqual([]);
+    expect(() => assertMandatoryReferralsCleared(h.state, { repo: 'o/r', pr: 7 })).not.toThrow();
+    h.state.comments.push({ body: '<!-- mandatory-referrals-v1: %truncated' });
+    expect(() => assertMandatoryReferralsCleared(h.state, { repo: 'o/r', pr: 7 })).toThrow(/mandatory referral hold/);
+    const pending = harness({ failure: 'judge' });
+    await pending.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](pending.payload, CTX);
+    expect(() => assertMandatoryReferralsCleared(pending.state, { repo: 'o/r', pr: 7 })).toThrow(/mandatory referral hold/);
   });
   it.each(['judge', 'timeout', 'omitted', 'identity', 'card'])('%s is bounded and human-owned across fresh sink instances', async failure => {
     const h = harness({ failure, result: failure === 'card' ? 'card' : 'not-real' });
