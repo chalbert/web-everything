@@ -1,4 +1,6 @@
 /** Shadow-only decision contract. No detector evaluators or external IO belong here. */
+import { createHash } from 'node:crypto';
+
 export const ACTION_ALLOWLIST = Object.freeze({
   promote: 'runReconcilePromoteDraftDispatch',
   'restore-hold': 'restore-hold',
@@ -103,16 +105,28 @@ function predicate(e, f, a) {
     && f.signalsComplete === true && f.hasLease === false && f.openPr === false && f.liveSession === false && f.mergedDelivery === false;
   return false;
 }
+/**
+ * A journal row names the ledger it was decided against by count and content hash, never by value: the row is
+ * written per open episode every tick, so embedding the whole receipt/budget history grew every row with it.
+ * `read` (filled in `decide` once the rule has actually consulted entries) holds only the entries it read.
+ */
+function ledgerSummary(ledger) {
+  let sha256 = null;
+  try { sha256 = createHash('sha256').update(JSON.stringify(ledger) ?? 'undefined').digest('hex'); } catch { /* unhashable input: count stays null */ }
+  return { count: Array.isArray(ledger) ? ledger.length : null, sha256 };
+}
 /** Every episode gets one record, even on invalid input. Facts are structured owner results, never prose. */
 export function decide({ episodes = [], watchGeneration, subjectFacts = {}, actionReceipts = [], budgets = [], config = DEFAULT_CONFIG, now } = {}) {
   let admitted = false;
+  const receiptsSummary = ledgerSummary(actionReceipts), budgetsSummary = ledgerSummary(budgets);
   const list = Array.isArray(episodes) && episodes.length ? episodes : [{ smell: null, subject: 'watch' }];
   return list.map((raw) => {
     const e = raw ?? {}, f = subjectFacts?.[e.key], identity = subjectIdentity(f);
     const record = { mode: 'shadow', at: now, configVersion: config?.version ?? null,
       episodeIdentity: episodeIdentity(e), episodeId: e.id ?? null, smell: e.smell ?? null, subject: e.subject ?? 'watch',
       expectedHeadOrLease: identity, actionFamily: null, actuator: null,
-      inputs: { watchGeneration, episode: e, facts: f ?? null, config, actionReceipts, budgets },
+      inputs: { watchGeneration, episode: e, facts: f ?? null, config,
+        actionReceipts: { ...receiptsSummary, read: [] }, budgets: { ...budgetsSummary, read: [] } },
       evidenceRefs: f?.evidenceRefs ?? [], result: 'not-submitted', applied: false };
     const out = (decision, rule, reason) => ({ ...record, decision, rule, reason,
       escalationIntent: ['escalate', 'cap-reached'].includes(decision)
@@ -152,12 +166,15 @@ export function decide({ episodes = [], watchGeneration, subjectFacts = {}, acti
       || actionReceipts.some((r) => !r || !RECEIPT_STATES.includes(r.state) || !['live', 'shadow'].includes(r.mode) || typeof r.familyKey !== 'string')
       || budgets.some((r) => !r || !Number.isFinite(r.at) || r.at > now || !['live', 'shadow'].includes(r.mode) || !own(ACTION_ALLOWLIST, r.family) || !r.identity))
       return out('hold', 'ledger-invalid', 'Malformed receipt/budget data cannot authorize a proposal');
+    record.inputs.actionReceipts.read = actionReceipts.filter((r) => r.familyKey === key)
+      .map(({ familyKey: k, state, mode }) => ({ familyKey: k, state, mode }));
     if (actionReceipts.some((r) => r.familyKey === key && r.mode === 'live' && ['submitted', 'unknown'].includes(r.state)))
       return out('escalate', 'ambiguous-receipt', 'Reconcile durable owner receipt and postcondition; never retry an ambiguous write');
     if (actionReceipts.some((r) => r.familyKey === key)) return out('hold', 'family-receipt', 'Family already proposed/attempted for this head or lease; no repeat');
     const live = budgets.filter((r) => r.mode === 'live' && Number.isFinite(r.at) && now >= r.at && now - r.at < 86_400_000);
     const same = live.filter((r) => identity.repo ? r.identity?.repo === identity.repo && r.identity?.pr === identity.pr
       : identity.item ? r.identity?.item === identity.item : r.identity?.pool === identity.pool && r.identity?.lane === identity.lane);
+    record.inputs.budgets.read = same.map(({ family, at, mode }) => ({ family, at, mode }));
     const hour = (r) => now - r.at < 3_600_000;
     if (f.durableCapReached === true || f.plan.capRemaining <= 0 || live.filter(hour).length >= 12
       || (identity.pr && (same.filter(hour).length >= 2 || same.length >= 4 || (ci(a) && same.filter((r) => ci(r.family)).length >= 2)))

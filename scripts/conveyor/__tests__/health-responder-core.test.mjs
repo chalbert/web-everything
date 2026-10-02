@@ -123,3 +123,40 @@ it('a second smell cannot bypass an active same-PR repeated-attempt inhibitor', 
   expect(decide(i)[0].rule).toBe('repeated-attempt-inhibitor');
   expect(decide(i).every((r) => r.decision !== 'act-would-have')).toBe(true);
 });
+
+describe('decision rows stay bounded as the receipt ledger grows', () => {
+  const receipts = (n) => Array.from({ length: n }, (_, k) => ({ mode: 'shadow', state: 'prepared',
+    familyKey: familyKey({ repo: 'o/r', pr: k + 1, head: String(k % 10).repeat(40) }, 'promote') }));
+  const rowBytes = (i) => JSON.stringify(decide(i)[0]).length;
+  const ROW_CAP_BYTES = 16 * 1024;
+  it('does not embed the receipt or budget arrays; row size is flat in ledger size', () => {
+    const empty = rowBytes(input());
+    for (const n of [10, 500, 5000]) {
+      const i = input(); i.actionReceipts = receipts(n);
+      i.budgets = Array.from({ length: n }, (_, k) => ({ mode: 'shadow', at: i.now - 1, family: 'promote', identity: { repo: 'o/r', pr: k + 1 } }));
+      const bytes = rowBytes(i);
+      expect(bytes, `${n} receipts`).toBeLessThan(ROW_CAP_BYTES);
+      expect(bytes - empty, `${n} receipts`).toBeLessThan(1024);
+      const { inputs } = decide(i)[0];
+      expect(Array.isArray(inputs.actionReceipts)).toBe(false);
+      expect(Array.isArray(inputs.budgets)).toBe(false);
+    }
+  });
+  it('records a count, a content hash and only the receipts the rule actually read', () => {
+    const base = input(), [first] = decide(base);
+    const i = input(); i.actionReceipts = [...receipts(50), { mode: 'shadow', state: 'prepared', familyKey: first.familyKey }];
+    const [r] = decide(i);
+    expect(r.rule).toBe('family-receipt');
+    expect(r.inputs.actionReceipts).toMatchObject({ count: 51, read: [{ familyKey: first.familyKey, state: 'prepared', mode: 'shadow' }] });
+    expect(r.inputs.actionReceipts.sha256).toMatch(/^[a-f0-9]{64}$/);
+    const j = input(); j.actionReceipts = receipts(51);
+    expect(decide(j)[0].inputs.actionReceipts.sha256).not.toBe(r.inputs.actionReceipts.sha256);
+    expect(decide(base)[0].inputs.actionReceipts).toMatchObject({ count: 0, read: [] });
+  });
+  it('still summarises an invalid ledger without throwing, so the ledger-invalid hold is recorded', () => {
+    const i = input(); i.actionReceipts = null;
+    const [r] = decide(i);
+    expect(r.rule).toBe('ledger-invalid');
+    expect(r.inputs.actionReceipts).toMatchObject({ count: null, read: [] });
+  });
+});

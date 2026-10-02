@@ -10,6 +10,7 @@ import { describe, it, expect } from 'vitest';
 import {
   DAEMON_MANIFEST, isSafeManifestScriptPath, assertValidManifestEntry, resolveManifestEntry,
 } from '../daemon-manifest.mjs';
+import { defaultLaunchNames } from '../supervisor-launcher.mjs';
 import { CONSTELLATION_REPOS } from '../../../scripts/lib/constellation-repos.mjs';
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -200,4 +201,21 @@ describe('resolveManifestEntry — the closed-allowlist lookup itself', () => {
 
 it('health-responder is a host singleton shadow tick at 60 seconds', () => {
   expect(resolveManifestEntry('health-responder')).toMatchObject({ script: 'scripts/conveyor/health-responder.mjs', args: ['tick'], intervalMs: 60_000 });
+});
+
+it('health-responder is resident-only: it never joins the supervisor launcher default launch set', () => {
+  expect(DAEMON_MANIFEST['health-responder'].defaultLaunch).toBe(false);
+  expect(defaultLaunchNames()).not.toContain('health-responder');
+  expect(defaultLaunchNames()).toContain('health-watch');
+  // Still resolvable by name: the resident `pass-daemon`/launchd path is the one sanctioned start.
+  expect(resolveManifestEntry('health-responder').script).toBe('scripts/conveyor/health-responder.mjs');
+});
+
+it('defaultLaunch must be a boolean when present, and false excludes only from the default set', () => {
+  const ok = { script: 'scripts/x.mjs', intervalMs: 1000 };
+  expect(() => assertValidManifestEntry('x', { ...ok, defaultLaunch: 'no' })).toThrow(/defaultLaunch must be a boolean/);
+  expect(assertValidManifestEntry('x', { ...ok, defaultLaunch: false }).defaultLaunch).toBe(false);
+  const manifest = { a: ok, b: { ...ok, defaultLaunch: false }, c: { ...ok, defaultLaunch: true } };
+  expect(defaultLaunchNames(manifest)).toEqual(['a', 'c']);
+  expect(resolveManifestEntry('b', manifest)).toBe(manifest.b);
 });
