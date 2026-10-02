@@ -21,15 +21,15 @@ const noopHungCiTick = () => ({ dispatch: [], refusals: [], applied: [] });
 const noopMainRedRebaseTick = () => ({ dispatch: [], refusals: [], applied: [] });
 const noopMissingRunTick = () => ({ dispatch: [], refusals: [], applied: [] }); // xi4od2p (#4075/#3383) — sixth half
 
-describe('defaultNoteCommentDryRun — landed OFF by default (#4191)', () => {
-  it('true with no env override — a brand-new PR-write action defaults to dry-run', () => {
-    expect(defaultNoteCommentDryRun({})).toBe(true);
+describe('defaultNoteCommentDryRun — posts by default', () => {
+  it('posts with no env override', () => {
+    expect(defaultNoteCommentDryRun({})).toBe(false);
   });
-  it('false only when the operator explicitly opts in', () => {
+  it('explicit enable also posts', () => {
     expect(defaultNoteCommentDryRun({ WE_CONVEYOR_POST_NOTE_COMMENTS: '1' })).toBe(false);
   });
-  it('true for any other value — never a partial match', () => {
-    expect(defaultNoteCommentDryRun({ WE_CONVEYOR_POST_NOTE_COMMENTS: 'true' })).toBe(true);
+  it('only an explicit zero disables posting', () => {
+    expect(defaultNoteCommentDryRun({ WE_CONVEYOR_POST_NOTE_COMMENTS: 'true' })).toBe(false);
     expect(defaultNoteCommentDryRun({ WE_CONVEYOR_POST_NOTE_COMMENTS: '0' })).toBe(true);
   });
 });
@@ -78,13 +78,13 @@ describe('runReconcileNotesAllRepos — one defaultReadNotesForRepo call per wat
     }]);
   });
 
-  it('NOT dry-run: actually calls postComment for a new episode, and records success', () => {
+  it('default: actually posts a round-cap-exhausted note and records success', () => {
     const tick = () => ({
-      notes: [{ kind: 'awaiting-permission', prNumber: 20, sessionId: 'sess-1', text: 'blocked' }],
+      notes: [{ kind: 'round-cap-exhausted', prNumber: 20, attempts: 5, cap: 5, capKind: 'fix', text: 'exhausted' }],
       prsByNumber: new Map([[20, { number: 20, comments: [] }]]),
     });
     const postComment = vi.fn(() => ({ ok: true }));
-    const out = runReconcileNotesAllRepos({ repos: ['repo-a'], tick, postComment, dryRun: false });
+    const out = runReconcileNotesAllRepos({ repos: ['repo-a'], tick, postComment });
     expect(postComment).toHaveBeenCalledTimes(1);
     expect(postComment.mock.calls[0][0]).toMatchObject({ repo: 'repo-a', pr: 20 });
     expect(out.comments[0]).toMatchObject({ posted: true, dryRun: false, alreadyPosted: false });
