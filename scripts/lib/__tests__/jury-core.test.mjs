@@ -1657,6 +1657,27 @@ describe('#4315 mandatory referral protocol', () => {
     // A garbage marker from an untrusted author cannot wedge the PR either.
     expect(readReferralRecords([post('<!-- mandatory-referrals-v1: %truncated', 'drive-by-commenter')]).malformed).toBe(false);
   });
+  it('a conflict BETWEEN runs holds until the operator supersedes it in each run; a foreign supersedes id is malformed', () => {
+    const old = record(); old.rulings = [rule(old, 'block')];
+    const next = { ...record(), runId: 'fresh-run', reviewer: mandatoryReferralReviewer('fresh-run'), rulings: [] };
+    next.rulings = [{ ...rule(next, 'not-real'), id: 'next-1' }];
+    const context = { head: old.head, body: old.authorBody, repo: old.repo, pr: old.pr };
+    const render = rs => rs.map(r => post(renderReferralRecord(r)));
+    expect(mandatoryReferralState(render([old, next]), context).pending).toHaveLength(1);
+    // What `review-set-label --to=rule-finding` appends: a ruling in EACH matching run that supersedes that
+    // run's own rulings for the key (a record never names another record's ruling ids).
+    const operator = (id, r) => ({ id, key: r.referrals[0].key, authority: 'operator', result: 'not-real',
+      operator: { actor: 'nic', channel: 'chat', reason: 'not a defect' }, reviewerId: 'nic', lens: 'operator',
+      rationale: 'not a defect', evidence: ['Operator instruction quoted verbatim'], supersedes: r.rulings.map(x => x.id) });
+    const ruled = [old, next].map(r => ({ ...r, rulings: [...r.rulings, operator(`op-${r.runId}`, r)] }));
+    expect(mandatoryReferralState(render(ruled), context).pending).toEqual([]);
+    // A ruling naming an id that lives in ANOTHER record is not a valid record: it can be neither written nor
+    // read, so the "new run supersedes an old run's ruling" shape can never reach the pooled fold half-applied.
+    const foreign = { ...next, rulings: [{ ...rule(next, 'not-real'), id: 'next-2', supersedes: [old.rulings[0].id] }] };
+    expect(validateReferralRecord(foreign)).toBe(false);
+    expect(() => renderReferralRecord(foreign)).toThrow(/invalid mandatory referral record/);
+    expect(referralRecordState(foreign).pending).toEqual(['malformed-referral-record']);
+  });
   it('preserves conflicts until explicit supersession, and fails closed on omissions/corruption', () => {
     const r = record(), pending = renderReferralRecord(r);
     r.rulings = [rule(r), { ...rule(r, 'block'), id: 'r2' }];
