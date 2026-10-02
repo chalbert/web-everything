@@ -3,7 +3,7 @@ bornAs: xizojf8
 kind: story
 size: 3
 status: open
-scope: ["we:skills-src/conveyor/build-dispatch-daemon.mjs", "we:scripts/pr-land.mjs", "we:scripts/operations/__tests__/build-pr-authorship.test.mjs", "we:scripts/operations/deliver-item-wrapper.mjs", "we:skills-src/conveyor/__tests__/build-dispatch-daemon.test.mjs", "we:scripts/__tests__/pr-land.test.mjs", "we:scripts/operations/__tests__/deliver-item-wrapper.test.mjs"]
+scope: ["we:skills-src/conveyor/build-dispatch-daemon.mjs", "we:scripts/pr-land.mjs", "we:scripts/operations/__tests__/build-pr-authorship.test.mjs", "we:scripts/operations/deliver-item-wrapper.mjs", "we:skills-src/conveyor/__tests__/build-dispatch-daemon.test.mjs", "we:scripts/__tests__/pr-land.test.mjs", "we:scripts/operations/__tests__/deliver-item-wrapper.test.mjs", "we:skills-src/conveyor/__tests__/build-red-draft-recovery.test.mjs"]
 dateOpened: "2026-09-30"
 preparedDate: "2026-10-02"
 preparedAgainstSha: "9c7c11b5d2591989598af099594d500aa24ffbc6"
