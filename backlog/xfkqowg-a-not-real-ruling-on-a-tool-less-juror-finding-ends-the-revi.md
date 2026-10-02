@@ -16,3 +16,7 @@ Live case 2026-10-02: PR #3432 (review:human) was re-reviewed about 17 times bet
 1. **Executable** — TODO: a command that fails before this item lands and passes after.
 
 Hint: a card that loosens a refusal needs two Must lines — what happens on error (refuse), and every input kind besides source code (docs, config, data) that the loosening must still treat cautiously.
+
+## Root cause found (orchestrator, 2026-10-02 ~7:30 AM ET)
+
+Decoded the 51 `mandatory-referrals-v1` records on #3432. Each round writes three records under ONE fresh mandatory reviewer id (e.g. a30c21ad at 10:10Z, f6d233a7 at 09:33Z): opened, attempted, then a `not-real` ruling on the same head (495e86acb). The record then says "start a fresh review-pr"; the fresh run opens a NEW record with a NEW reviewer id and EMPTY rulings, and the referral check in we:scripts/lib/jury-core.mjs (around line 2320) reads only the current record's rulings, so the finding is pending again and the tool-less juror re-raises it. Rulings never carry across runs, so the run never reduces to a verdict and the advisory step never posts. Fix: a ruling on the same finding key for the same head carries into later runs (with the independence check still applied to the ruling's own reviewer), and a tool-less juror's finding cannot be CONFIRMED.
