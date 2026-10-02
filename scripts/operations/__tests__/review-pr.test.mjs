@@ -3804,6 +3804,21 @@ describe('xfkqowg tool-less advisory and historical ruling replay', () => {
     expect(judge).not.toHaveBeenCalled();
     expect(run.findings.reduce.referrals).toEqual([]);
   });
+  it.each([
+    ['no summary', { file: NET_PATHS[0], verdict: 'CONFIRMED' }],
+    ['empty summary', { summary: '  ', file: NET_PATHS[0], verdict: 'CONFIRMED' }],
+    ['non-object entry', 'CONFIRMED'],
+  ])('a tool-less CONFIRMED finding with %s does not crash the reduce step', async (_name, malformed) => {
+    const { registry } = registryFor({ labels: ['review:human'], netRev: PINNED_HEAD, body: '<!-- authored-by-actor: author -->', comments: [] },
+      { antigravityReview: true });
+    let run = advanceWhileRunning(startRun({ op: REVIEW_PR_OP, id: 'malformed-toolless', input: { pr: 7, repo: 'o/r' }, registry }), { registry });
+    while (run.pending?.kind === 'judge') {
+      run = advanceWhileRunning(run, { registry, resume: { value: run.pending.step === 'judgeAntigravityReview'
+        ? { summary: 'reported claim', findings: [malformed] } : CLEAN_ANSWER } });
+    }
+    expect(run.status).not.toBe('failed');
+    expect(run.findings.reduce.referrals).toEqual([]);
+  });
   it('does not spend a confirmation turn on a PLAUSIBLE tool-less claim', async () => {
     const { run, judge } = await drive({ source: { summary: 'tentative', file: 'outside.md', verdict: 'PLAUSIBLE', impactIfUnfixed: 'broken' } });
     expect(run.findings.reduce.referrals).toEqual([]);

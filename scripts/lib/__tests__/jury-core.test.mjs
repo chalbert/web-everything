@@ -1703,4 +1703,14 @@ describe('#4315 mandatory referral protocol', () => {
     expect(read([pending, '<!-- mandatory-referrals-v1: %truncated']).malformed).toBe(true);
     expect(validateJuryEvent({ type: 'mandatory-referrals', round: 0, record: r }).event.record).toEqual(r);
   });
+
+  it('fails closed on a trusted record whose marker is followed by ordinary text (an appended operator note)', () => {
+    const r = record(), pending = renderReferralRecord(r);
+    for (const tail of ['\nOperator note: looking at this.', '\n\nnote', ' trailing words']) {
+      const read = readReferralRecords([post(pending + tail)]);
+      // The hold must survive (record parsed) or the input must be flagged malformed — never silently dropped.
+      expect(read.malformed || read.records.length === 1).toBe(true);
+      expect(mandatoryReferralState([post(pending + tail)], { head: r.head }).pending.length).toBeGreaterThan(0);
+    }
+  });
 });
