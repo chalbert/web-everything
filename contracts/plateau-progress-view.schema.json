@@ -1412,6 +1412,9 @@
                 },
                 "actions": {
                   "$ref": "#/definitions/collection"
+                },
+                "pullRequests": {
+                  "$ref": "#/definitions/prCollection"
                 }
               },
               "required": [
@@ -1587,6 +1590,12 @@
         },
         "health": {
           "$ref": "#/definitions/health"
+        },
+        "pullRequests": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/prRow"
+          }
         }
       },
       "required": [
@@ -1607,7 +1616,49 @@
         "items"
       ],
       "additionalProperties": true,
-      "description": "Slice-1 overview contract. PublisherId identifies a boot; sequence increases within it. Deploy schema-1+2 readers before publishing 2. Retain unknown raw codes. Product owns aggregation, freshness assessment, ordering, action classification, payload bounds and relay enforcement. Future sections may be added without changing this major."
+      "description": "Slice-1 overview contract. PublisherId identifies a boot; sequence increases within it. Deploy schema-1+2 readers before publishing 2. Retain unknown raw codes. Product owns aggregation, freshness assessment, ordering, action classification, payload bounds and relay enforcement. Future sections may be added without changing this major.",
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "pullRequests"
+            ]
+          },
+          "then": {
+            "properties": {
+              "coverage": {
+                "properties": {
+                  "collections": {
+                    "required": [
+                      "pullRequests"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "coverage": {
+                "properties": {
+                  "collections": {
+                    "required": [
+                      "pullRequests"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "pullRequests"
+            ]
+          }
+        }
+      ]
     },
     "healthInstant": {
       "type": "string",
@@ -3467,6 +3518,1499 @@
       ],
       "additionalProperties": false,
       "description": "Zero is measured zero; null is unknown. Used may exceed limit; observations impose no dispatch policy."
+    },
+    "prRepo": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*$"
+    },
+    "prIdentity": {
+      "type": "object",
+      "properties": {
+        "repo": {
+          "$ref": "#/definitions/prRepo"
+        },
+        "number": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "repo",
+        "number"
+      ],
+      "additionalProperties": false
+    },
+    "prSha": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{40}$"
+    },
+    "prFile": {
+      "type": "object",
+      "properties": {
+        "repo": {
+          "$ref": "#/definitions/prRepo"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?![~/])(?!.*(?:^|/)\\.{1,2}(?:/|$))[^/\\\\:\\u0000-\\u001f]+(?:/[^/\\\\:\\u0000-\\u001f]+)*$"
+        }
+      },
+      "required": [
+        "repo",
+        "path"
+      ],
+      "additionalProperties": false
+    },
+    "prEvidence": {
+      "type": "object",
+      "properties": {
+        "state": {
+          "type": "object",
+          "properties": {
+            "value": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "reason": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "value",
+            "reason"
+          ],
+          "additionalProperties": false,
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "value": {
+                    "type": "null"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "observedHeadSha": {
+          "type": "object",
+          "properties": {
+            "value": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/prSha"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "reason": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "value",
+            "reason"
+          ],
+          "additionalProperties": false,
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "value": {
+                    "type": "null"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "observedAt": {
+          "type": "object",
+          "properties": {
+            "value": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/healthInstant"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "reason": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "value",
+            "reason"
+          ],
+          "additionalProperties": false,
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "value": {
+                    "type": "null"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "state",
+        "observedHeadSha",
+        "observedAt",
+        "source"
+      ],
+      "additionalProperties": false
+    },
+    "prHolder": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "object",
+          "properties": {
+            "value": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "fix",
+                    "review",
+                    "build",
+                    "operator"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "reason": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "value",
+            "reason"
+          ],
+          "additionalProperties": false,
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "value": {
+                    "type": "null"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "identity": {
+          "type": "object",
+          "properties": {
+            "value": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "reason": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "value",
+            "reason"
+          ],
+          "additionalProperties": false,
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "value": {
+                    "type": "null"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "claimedAt": {
+          "type": "object",
+          "properties": {
+            "value": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/healthInstant"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "reason": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "value",
+            "reason"
+          ],
+          "additionalProperties": false,
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "value": {
+                    "type": "null"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "liveness": {
+          "enum": [
+            "active",
+            "stale",
+            "expired",
+            "unknown"
+          ]
+        },
+        "leaseExpiresAt": {
+          "type": "object",
+          "properties": {
+            "value": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/healthInstant"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "reason": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "value",
+            "reason"
+          ],
+          "additionalProperties": false,
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "value": {
+                    "type": "null"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "identity",
+        "claimedAt",
+        "liveness",
+        "leaseExpiresAt",
+        "reason"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "liveness": {
+                "const": "unknown"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    "prBlocker": {
+      "type": "object",
+      "properties": {
+        "target": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "const": "pr"
+                },
+                "pr": {
+                  "$ref": "#/definitions/prIdentity"
+                }
+              },
+              "required": [
+                "kind",
+                "pr"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "enum": [
+                    "build",
+                    "card"
+                  ]
+                },
+                "repo": {
+                  "$ref": "#/definitions/prRepo"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "kind",
+                "repo",
+                "id"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "file": {
+          "$ref": "#/definitions/prFile"
+        },
+        "observedAt": {
+          "type": "object",
+          "properties": {
+            "value": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/healthInstant"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "reason": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "value",
+            "reason"
+          ],
+          "additionalProperties": false,
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "value": {
+                    "type": "null"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "target",
+        "file",
+        "observedAt",
+        "source"
+      ],
+      "additionalProperties": false
+    },
+    "prEta": {
+      "type": "object",
+      "properties": {
+        "milliseconds": {
+          "type": "object",
+          "properties": {
+            "value": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "reason": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "value",
+            "reason"
+          ],
+          "additionalProperties": false,
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "value": {
+                    "type": "null"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "sampleCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sampleWindow": {
+          "type": "object",
+          "properties": {
+            "value": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "start": {
+                      "$ref": "#/definitions/healthInstant"
+                    },
+                    "end": {
+                      "$ref": "#/definitions/healthInstant"
+                    }
+                  },
+                  "required": [
+                    "start",
+                    "end"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "reason": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "value",
+            "reason"
+          ],
+          "additionalProperties": false,
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "value": {
+                    "type": "null"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "method": {
+          "type": "object",
+          "properties": {
+            "value": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "reason": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "value",
+            "reason"
+          ],
+          "additionalProperties": false,
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "value": {
+                    "type": "null"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "uncertainty": {
+          "type": "object",
+          "properties": {
+            "value": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "reason": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "value",
+            "reason"
+          ],
+          "additionalProperties": false,
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "value": {
+                    "type": "null"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "required": [
+        "milliseconds",
+        "sampleCount",
+        "sampleWindow",
+        "method",
+        "uncertainty"
+      ],
+      "additionalProperties": false
+    },
+    "prWaitingChain": {
+      "type": "object",
+      "properties": {
+        "owner": {
+          "type": "object",
+          "properties": {
+            "value": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "reason": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "value",
+            "reason"
+          ],
+          "additionalProperties": false,
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "value": {
+                    "type": "null"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "queuePosition": {
+          "type": "object",
+          "properties": {
+            "value": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "reason": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "value",
+            "reason"
+          ],
+          "additionalProperties": false,
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "value": {
+                    "type": "null"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "blockers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/prBlocker"
+          }
+        },
+        "holder": {
+          "$ref": "#/definitions/prHolder"
+        },
+        "nextSteps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "order": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "condition": {
+                "type": "string",
+                "minLength": 1
+              },
+              "owner": {
+                "type": "object",
+                "properties": {
+                  "value": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "reason": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "value",
+                  "reason"
+                ],
+                "additionalProperties": false,
+                "allOf": [
+                  {
+                    "if": {
+                      "properties": {
+                        "value": {
+                          "type": "null"
+                        }
+                      }
+                    },
+                    "then": {
+                      "properties": {
+                        "reason": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              "action": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "order",
+              "condition",
+              "owner",
+              "action"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "eta": {
+          "$ref": "#/definitions/prEta"
+        }
+      },
+      "required": [
+        "owner",
+        "reason",
+        "queuePosition",
+        "blockers",
+        "holder",
+        "nextSteps",
+        "eta"
+      ],
+      "additionalProperties": false,
+      "description": "Observed queue and conditional next-step order, not a scheduler. Observation time is not wait-start or claim-start. Active holders require unexpired leases; ETA is producer evidence, never computed here."
+    },
+    "prRow": {
+      "type": "object",
+      "properties": {
+        "repo": {
+          "$ref": "#/definitions/prRepo"
+        },
+        "number": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "url": {
+          "type": "string",
+          "pattern": "^https://github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/[1-9][0-9]*$"
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "author": {
+          "type": "object",
+          "properties": {
+            "value": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "reason": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "value",
+            "reason"
+          ],
+          "additionalProperties": false,
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "value": {
+                    "type": "null"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "draft": {
+          "type": "boolean"
+        },
+        "headSha": {
+          "$ref": "#/definitions/prSha"
+        },
+        "cardRefs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "repo": {
+                "$ref": "#/definitions/prRepo"
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "repo",
+              "id"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "ci": {
+          "$ref": "#/definitions/prEvidence"
+        },
+        "review": {
+          "$ref": "#/definitions/prEvidence"
+        },
+        "waitReasons": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "primaryWait": {
+          "type": "string",
+          "minLength": 1
+        },
+        "handler": {
+          "type": "object",
+          "properties": {
+            "value": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "reason": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "value",
+            "reason"
+          ],
+          "additionalProperties": false,
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "value": {
+                    "type": "null"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "waitSince": {
+          "type": "object",
+          "properties": {
+            "value": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/healthInstant"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "reason": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "value",
+            "reason"
+          ],
+          "additionalProperties": false,
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "value": {
+                    "type": "null"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "waitingChain": {
+          "$ref": "#/definitions/prWaitingChain"
+        }
+      },
+      "required": [
+        "repo",
+        "number",
+        "url",
+        "description",
+        "author",
+        "draft",
+        "headSha",
+        "cardRefs",
+        "ci",
+        "review",
+        "waitReasons",
+        "primaryWait",
+        "handler",
+        "waitSince",
+        "sources",
+        "waitingChain"
+      ],
+      "additionalProperties": false,
+      "description": "Author-independent rows, including cardless PRs. Identity is repo plus number. Full synthetic descriptions illustrate content; schema cannot prove arbitrary free text has no secrets. Producers redact. Preserve old-head evidence but never use it or missing CI to certify current readiness. primaryWait is display policy, never merge authorization. Fixture conformance checks identity, source joins, head matching and temporal relationships."
+    },
+    "prCollection": {
+      "type": "object",
+      "properties": {
+        "total": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cached": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "included": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "complete": {
+          "type": "boolean"
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1
+        },
+        "freshness": {
+          "$ref": "#/definitions/prFreshness"
+        }
+      },
+      "required": [
+        "total",
+        "cached",
+        "included",
+        "complete",
+        "source",
+        "freshness"
+      ],
+      "additionalProperties": false,
+      "description": "Separate paged semantics: total is the universe (null means unknown), cached is fixed snapshot membership, included is rows in this payload; complete describes universe coverage, not page exhaustion. Consumer conformance requires included <= cached <= known total, complete only for a known fully cached universe with complete source evidence. Legacy collection semantics are unchanged."
+    },
+    "prSnapshotIdentity": {
+      "type": "object",
+      "properties": {
+        "snapshotId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "publisherId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "snapshotId",
+        "publisherId",
+        "sequence"
+      ],
+      "additionalProperties": false
+    },
+    "prPageRequest": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "const": "pr-page-request"
+        },
+        "collection": {
+          "const": "pullRequests"
+        },
+        "identity": {
+          "$ref": "#/definitions/prSnapshotIdentity"
+        },
+        "cursor": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "collection",
+        "identity",
+        "cursor"
+      ],
+      "additionalProperties": false,
+      "description": "Standalone cached-page message, not a root snapshot. Null request cursor starts traversal. Echo collection, identity and cursor exactly; opaque cursors bind to one snapshot and publisher boot. Restart never mixes replacement rows into the old snapshot. Fixture checks enforce fixed membership, counts, cursor continuity and exhaustion; this harness is not a shipped product validator."
+    },
+    "prPageResponse": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "const": "pr-page-response"
+        },
+        "collection": {
+          "const": "pullRequests"
+        },
+        "identity": {
+          "$ref": "#/definitions/prSnapshotIdentity"
+        },
+        "cursor": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rows": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/prRow"
+          }
+        },
+        "coverage": {
+          "$ref": "#/definitions/prCollection"
+        },
+        "nextCursor": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "collection",
+        "identity",
+        "cursor",
+        "rows",
+        "coverage",
+        "nextCursor"
+      ],
+      "additionalProperties": false,
+      "description": "Standalone cached-page message, not a root snapshot. Null request cursor starts traversal. Echo collection, identity and cursor exactly; opaque cursors bind to one snapshot and publisher boot. Restart never mixes replacement rows into the old snapshot. Fixture checks enforce fixed membership, counts, cursor continuity and exhaustion; this harness is not a shipped product validator."
+    },
+    "prPageRestart": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "const": "pr-page-restart"
+        },
+        "collection": {
+          "const": "pullRequests"
+        },
+        "identity": {
+          "$ref": "#/definitions/prSnapshotIdentity"
+        },
+        "cursor": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason": {
+          "enum": [
+            "old-snapshot",
+            "publisher-restart",
+            "invalid-cursor"
+          ]
+        },
+        "replacement": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/prSnapshotIdentity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "collection",
+        "identity",
+        "cursor",
+        "reason",
+        "replacement"
+      ],
+      "additionalProperties": false,
+      "description": "Standalone cached-page message, not a root snapshot. Null request cursor starts traversal. Echo collection, identity and cursor exactly; opaque cursors bind to one snapshot and publisher boot. Restart never mixes replacement rows into the old snapshot. Fixture checks enforce fixed membership, counts, cursor continuity and exhaustion; this harness is not a shipped product validator."
+    },
+    "prFreshness": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/healthFreshness"
+        },
+        {
+          "required": [
+            "cursor"
+          ]
+        }
+      ]
     }
   }
 }
