@@ -14,7 +14,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync, spawnSync } from 'node:child_process';
 import {
-  countCiHealComments, buildCiHealComment, CI_HEAL_COMMENT_MARKER, spawnCiHealRearm, sanitizeForPublicComment, spawnCiHealRestamp, postOrOweCiHealComment, resolveHealHead,
+  countCiHealComments, buildCiHealComment, CI_HEAL_COMMENT_MARKER, spawnCiHealRearm, sanitizeForPublicComment, redactSecrets, spawnCiHealRestamp, postOrOweCiHealComment, resolveHealHead,
 } from '../ci-heal-mark.mjs';
 import { readOwedWrites, owedWriteAlreadyLive } from '../ci-heal-owed.mjs';
 import { budgetBlockedMessage } from '../../lib/gh-throttle.mjs';
@@ -472,6 +472,15 @@ describe('PR #3577 review: failure detail is neutralised before it reaches a pub
   it('redacts a secret even when truncation would cut its recognisable prefix off', () => {
     const out = sanitizeForPublicComment('ghp_' + 'Q'.repeat(36) + ' ' + 'k'.repeat(995));
     expect(out).not.toMatch(/Q{4}/);
+  });
+  it('redactSecrets redacts without truncating or indenting, so callers can redact first and cut after', () => {
+    const secret = 'ghp_' + 'Q'.repeat(36);
+    const redacted = redactSecrets(`${secret} ${'k'.repeat(5000)}`);
+    expect(redacted).not.toMatch(/Q{4}/);
+    expect(redacted.length).toBeGreaterThan(5000);
+    expect(redacted.startsWith(' ')).toBe(false);
+    // cutting the REDACTED text anywhere can never resurrect a credential fragment
+    expect(redacted.slice(-4000)).not.toMatch(/Q{4}/);
   });
   it.each([
     ['JSON-quoted key', '{"token": "abc123def456"}', 'abc123def456'],

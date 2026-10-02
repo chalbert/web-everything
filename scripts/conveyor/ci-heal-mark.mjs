@@ -90,18 +90,32 @@ const CONTROL_AND_LINE_SEPARATORS = new RegExp(`[\\r\\u0000-\\u0008\\u000b\\u000
  */
 export function sanitizeForPublicComment(text, { max = 1000 } = {}) {
   // Redact BEFORE truncating: a cut that slices a secret's prefix off would otherwise leave its tail unrecognisable.
-  const redacted = String(text ?? '')
+  return redactSecrets(text).slice(-max).split('\n').map((line) => `    ${line}`).join('\n');
+}
+
+/**
+ * we:scripts/conveyor/ci-heal-mark.mjs#redactSecrets — the redaction half of {@link sanitizeForPublicComment}, with
+ * NO truncation or indentation. Every caller that must shorten untrusted text (worker output, a log tail) calls
+ * this FIRST and cuts the result: a cut taken before redaction can slice a credential's recognisable prefix off and
+ * leave its tail unredactable (#3577 round 2). A denylist, so it is hygiene for local records, never the only thing
+ * standing between untrusted text and a public comment. Pure.
+ * @param {unknown} text
+ * @returns {string}
+ */
+export function redactSecrets(text) {
+  return String(text ?? '')
     .replace(CONTROL_AND_LINE_SEPARATORS, '')
     .replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g, '[redacted private key]')
     .replace(/(\/\/)[^/\s@]+@/g, '$1[redacted]@')
     .replace(/\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|glpat-[A-Za-z0-9_-]{16,}|npm_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9_-]{16,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_-]{20,}|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]*)/g, '[redacted]')
     .replace(/\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{8,}/gi, '$1 [redacted]')
     // key=value, key: value, "key": "value", --key value — quoted values may hold spaces.
-    .replace(/(["']?)(--?)?([A-Za-z0-9_]*(?:token|secret|password|passwd|api[_-]?key|auth|credential)[A-Za-z0-9_-]*)\1(\s*[=:]\s*|\s+)("[^"]*"|'[^']*'|\S+)/gi, (m, _q, dashes, key, sep) => (dashes || /[=:]/.test(sep) ? `${dashes ?? ''}${key}=[redacted]` : m))
+    // The leading run is BOUNDED: an unbounded `[A-Za-z0-9_]*` re-scans a long alphanumeric run from every start
+    // position (quadratic — 80k chars took ~17s), and callers now redact before they cut.
+    .replace(/(["']?)(--?)?([A-Za-z0-9_]{0,48}(?:token|secret|password|passwd|api[_-]?key|auth|credential)[A-Za-z0-9_-]*)\1(\s*[=:]\s*|\s+)("[^"]*"|'[^']*'|\S+)/gi, (m, _q, dashes, key, sep) => (dashes || /[=:]/.test(sep) ? `${dashes ?? ''}${key}=[redacted]` : m))
     .replace(/(?:\/Users|\/home)\/[^/\s]+|[A-Za-z]:\\Users\\[^\\\s]+/g, '~')
     .replace(/<!--|-->/g, '[comment]')
     .replace(/@(?=[A-Za-z0-9])/g, `@${ZERO_WIDTH_SPACE}`);
-  return redacted.slice(-max).split('\n').map((line) => `    ${line}`).join('\n');
 }
 
 /**

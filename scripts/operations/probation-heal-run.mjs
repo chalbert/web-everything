@@ -31,7 +31,7 @@
 
 import { parseAgyReportEvidence, pickAgyEvidence } from '../lib/antigravity-run-evidence.mjs';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, writeFileSync, readFileSync, readdirSync, renameSync, openSync, closeSync, fstatSync, readSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, openSync, closeSync, fstatSync, readSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { appendScorecard as appendScorecardRow } from '../conveyor/run-scorecard-store.mjs';
@@ -52,10 +52,28 @@ import { hostname } from 'node:os';
 import { resolveCoordinationRoot } from './coordination-root.mjs';
 import { withCompletionLock, newCompletionRecord, applyCompletionUpdate, writeCompletion } from './completion-store.mjs';
 import { releaseFixDispatchClaim } from '../conveyor/fix-dispatch-claim.mjs';
-import { buildCiHealComment, handBackCiHealReview } from '../conveyor/ci-heal-mark.mjs';
+import { buildCiHealComment, handBackCiHealReview, redactSecrets } from '../conveyor/ci-heal-mark.mjs';
 import { recordOwedWrite, clearOwedWrite, owedWriteAlreadyLive, postPrComment } from '../conveyor/ci-heal-owed.mjs';
 
 const LISTING_GRACE_MS = DISPATCH_LISTING_GRACE_MINUTES * 60_000;
+/** The slowest honest attempt: lane acquire (15m) + gate (20m) + worker (70m) + a margin. Past it no liveness probe is trusted. */
+export const HEAL_ATTEMPT_MAX_AGE_MS = 3 * 60 * 60_000;
+/** Settled rows are pure history (the attempt cap is counted off PR comments), so the poll drops them after this. */
+export const SETTLED_ROW_RETENTION_MS = 7 * 24 * 60 * 60_000;
+
+/** Redact BEFORE cutting: a cut first can slice a credential's recognisable prefix off and leave its tail unredactable. */
+const redactedTail = (text, max) => redactSecrets(String(text ?? '').slice(-(max + REDACT_MARGIN))).slice(-max);
+/** Redaction scans at most `max + margin` chars (worker output can be 64 MB); a credential cut by the margin leaves its
+ *  fragment inside the margin, which the final cut discards — so redact-before-cut still holds for credentials < margin. */
+const REDACT_MARGIN = 4096;
+
+/** The only failure facts a public comment may carry: enum/number/ISO-shaped fields, never free text. */
+export function publicFailureEvidence(terminal = {}) {
+  const pick = (value, shape) => (typeof value === 'string' && shape.test(value) ? value : 'unknown');
+  return `outcome: ${pick(terminal.outcome, /^[a-z][a-z-]{0,40}$/)}; exit: ${Number.isInteger(terminal.exitCode) ? terminal.exitCode : 'unknown'}; `
+    + `signal: ${pick(terminal.signal, /^SIG[A-Z0-9]{1,12}$/)}; quota: ${pick(terminal.quotaState, /^[a-z][a-z-]{0,20}$/)}; `
+    + `reset: ${pick(terminal.quotaResetsAt, /^\d{4}-\d{2}-\d{2}T[\d:.]{1,20}Z$/)}`;
+}
 function probeHealPid(pid) {
   try { process.kill(pid, 0); return true; }
   catch (error) { return error.code === 'ESRCH' ? false : null; }
@@ -100,7 +118,9 @@ export function bindHealAttempt(id, handle, { dir = healAttemptsDir() } = {}) {
 export function publishHealAttempt(row, { readComments = r => JSON.parse(execFileSyncThrottled('gh', ['pr', 'view', String(r.pr), '--repo', REPO_SLUG, '--json', 'comments'], { encoding: 'utf8', timeout: 30_000, stdio: ['ignore', 'pipe', 'pipe'] })).comments,
   post = args => postPrComment({ ...args, exec: execFileSyncThrottled }), owe = recordOwedWrite, clear = clearOwedWrite } = {}) {
   const body = buildCiHealComment({ attemptId: row.attemptId, headSha: row.headSha,
-    failed: !row.terminal.pushed, detail: `${row.terminal.detail}\nexit: ${row.terminal.exitCode ?? 'unknown'}; signal: ${row.terminal.signal ?? 'unknown'}; quota: ${row.terminal.quotaState ?? 'unknown'}; reset: ${row.terminal.quotaResetsAt ?? 'unknown'}`, reason: 'red-ci' });
+    // Structured fields only: the raw worker/log tail stays in the local attempt row (a denylist redactor cannot
+    // vouch for arbitrary text under the trusted bot login, #3577 round 2).
+    failed: !row.terminal.pushed, detail: publicFailureEvidence(row.terminal), reason: 'red-ci' });
   const rec = { repo: row.repo, slug: REPO_SLUG, pr: row.pr, kind: 'ci-heal', headSha: row.headSha, attemptId: row.attemptId, body };
   owe(rec); // Write BEFORE the external operation, including reads that can fail.
   const comments = readComments(row);
@@ -120,7 +140,8 @@ export function finishHealAttempt(id, terminal, { dir = healAttemptsDir(), publi
   return withCompletionLock(id, () => {
     let row = readHealAttempt(id, { dir });
     if (row.settled === true) return row;
-    if (!row.terminal) row = saveAttempt({ ...row, terminal: { ...terminal, detail: String(terminal.detail ?? 'unknown').slice(-4000) } }, dir);
+    if (!row.terminal) row = saveAttempt({ ...row, terminal: { ...terminal, detail: redactedTail(terminal.detail ?? 'unknown', 4000),
+      ...(terminal.diagnostics == null ? {} : { diagnostics: redactedTail(terminal.diagnostics, 4000) }) } }, dir);
     if (!row.published) {
       publish(row);
       row = saveAttempt({ ...row, published: true }, dir);
@@ -141,9 +162,12 @@ function attemptLogTail(path) {
   let fd;
   try {
     fd = openSync(path, 'r');
-    const size = fstatSync(fd).size, buffer = Buffer.alloc(Math.min(size, 2000));
+    // Read a wider window than we keep, drop the line the window cut through (its credential prefix may be gone),
+    // and redact BEFORE taking the final tail — so no boundary can strand a credential's tail (#3577 round 2).
+    const size = fstatSync(fd).size, buffer = Buffer.alloc(Math.min(size, 64 * 1024));
     readSync(fd, buffer, 0, buffer.length, Math.max(0, size - buffer.length));
-    return buffer.toString('utf8') || 'unknown (empty attempt log)';
+    const text = buffer.toString('utf8'), whole = buffer.length === size;
+    return redactedTail(whole ? text : text.slice(text.indexOf('\n') + 1), 2000) || 'unknown (empty attempt log)';
   } catch (error) { return `unknown (attempt log unavailable: ${error.code ?? 'read error'})`; }
   finally { if (fd !== undefined) closeSync(fd); }
 }
@@ -156,11 +180,18 @@ export function observeHealAttempt(id, { dir = healAttemptsDir(), handle, pr, re
     // The host only matters to the pid liveness probe below; a row that already has a terminal outcome (or never
     // had a process) is settled from its own record, so a renamed host can never strand an old row (#3577 review).
     if ((handle && row.handle !== handle) || (pr != null && row.pr !== pr) || row.repo !== repo) throw new Error('ambiguous CI-heal wrapper ownership');
+    // A settled row is history: answer from it without taking the completion lock or re-running settlement, so a
+    // poll over every row ever written costs reads only (#3577 round 2).
+    if (row.settled === true && row.terminal) return { status: 'resolved', result: { attemptId: id, ...row.terminal }, error: row.terminal.pushed ? undefined : row.terminal.detail };
     let detail = null;
     if (!row.terminal) {
       const age = now().getTime() - Date.parse(row.startedAt);
       if (!Number.isFinite(age)) throw new Error('unknown CI-heal start time');
-      if (!/^pid:[1-9][0-9]*$/.test(row.handle ?? '')) {
+      if (age > HEAL_ATTEMPT_MAX_AGE_MS) {
+        // No honest attempt runs this long. A foreign host, a renamed host or a recycled pid would otherwise hold
+        // the PR forever, so past the ceiling the row settles as a failure whatever the liveness probe says.
+        detail = `attempt exceeded the ${HEAL_ATTEMPT_MAX_AGE_MS / 60_000}-minute ceiling without a terminal outcome (handle ${row.handle ?? 'none'}, host ${row.host ?? 'unknown'}); diagnostics: ${attemptLogTail(row.logPath)}`;
+      } else if (!/^pid:[1-9][0-9]*$/.test(row.handle ?? '')) {
         // The launch never bound a wrapper: inside the grace window it may still be binding (fail closed), past it
         // no process can be waited for, so it settles as a failure instead of holding the PR forever (#3577 review).
         if (age < LISTING_GRACE_MS) throw new Error('unknown CI-heal wrapper handle');
@@ -181,11 +212,30 @@ export function observeHealAttempt(id, { dir = healAttemptsDir(), handle, pr, re
 }
 
 /** The reconcile poll uses exactly the observer boundary, including its fail-closed persistence checks. */
-export function pollHealAttempts({ repo = 'we', pr, dir = healAttemptsDir(), observe = observeHealAttempt } = {}) {
+export function pollHealAttempts({ repo = 'we', pr, dir = healAttemptsDir(), observe = observeHealAttempt, now = () => new Date(),
+  warn = message => console.error(message) } = {}) {
   let names;
   try { names = readdirSync(dir); } catch (e) { if (e.code === 'ENOENT') return []; throw e; }
   return names.filter(n => n.endsWith('.json')).flatMap(name => {
-    const row = readHealAttempt(name.slice(0, -5), { dir });
+    const id = name.slice(0, -5);
+    let row;
+    try { row = readHealAttempt(id, { dir }); }
+    catch (error) {
+      if (error.code === 'ENOENT') return []; // pruned between the listing and the read
+      // One bad row must not abort the repo-wide pass: hold only the PR it provably belongs to, and say so loudly.
+      let owner = null, idleMs = 0;
+      try { owner = JSON.parse(readFileSync(attemptPath(id, dir), 'utf8')); idleMs = now().getTime() - statSync(attemptPath(id, dir)).mtimeMs; } catch { /* owner stays unknown */ }
+      // Past the age ceiling an unreadable row can no longer be a live attempt: stop holding the PR (the file stays as evidence).
+      if (idleMs > HEAL_ATTEMPT_MAX_AGE_MS) owner = null;
+      const ownerPr = Number.isInteger(owner?.pr) && owner.pr > 0 && owner.repo === repo ? owner.pr : null;
+      warn(`CI-heal attempt row ${id} is unreadable (${error.message}); ${ownerPr ? `holding PR #${ownerPr} only` : 'its PR is unknown, so it holds none'}`);
+      if (pr != null && ownerPr !== pr) return [];
+      return [{ pr: ownerPr, attemptId: id, status: 'unresolved', error: `unreadable CI-heal attempt row: ${error.message}` }];
+    }
+    if (row.settled === true && now().getTime() - Date.parse(row.startedAt) > SETTLED_ROW_RETENTION_MS) {
+      try { unlinkSync(attemptPath(id, dir)); } catch { /* a racing poll already pruned it */ }
+      return [];
+    }
     if (row.repo !== repo || (pr != null && row.pr !== pr)) return [];
     return [{ pr: row.pr, attemptId: row.attemptId, ...observe(row.attemptId, { dir, repo, pr: row.pr, handle: row.handle }) }];
   });
@@ -241,7 +291,7 @@ export async function runProbationHeal(args, io) {
       exitCode: error.status ?? null, signal: error.signal ?? null, quotaState: evidence.quotaState ?? 'unknown',
       ...pickAgyEvidence(evidence),
       ...parseAgyReportEvidence(error.stdout ?? ''), ...pickAgyEvidence(error.telemetry),
-      detail: String(error.stderr || error.message || error).slice(-4000) };
+      detail: redactedTail(error.stderr || error.message || error, 4000) };
     io.settleAttempt?.(args.attemptId, terminal);
     io.completion({ pr: args.pr, session: args.session, item: args.num, status: 'done', outcome: terminal.outcome });
     io.log(`CI-heal executor failed: ${terminal.detail}`);
@@ -322,7 +372,7 @@ async function runHealArc(args, io, evidence) {
     const run = io.runWorker(buildWorkerArgv({ worker, weRoot: WE_ROOT, dir: lanePath, taskFile }));
     modelEvidence = run.modelEvidence ?? {};
     Object.assign(evidence, modelEvidence);
-    workerEvidence = { exitCode: run.status ?? null, signal: run.signal ?? null, diagnostics: String(run.out ?? 'unknown').slice(-4000), quotaState: 'unknown' };
+    workerEvidence = { exitCode: run.status ?? null, signal: run.signal ?? null, diagnostics: redactedTail(run.out ?? 'unknown', 4000), quotaState: 'unknown' };
     executor = worker.executor;
     // x55dojc — checked BEFORE anything else the worker's run unlocks (the diff read, the gate, a commit):
     // any change to the lane's git-hook surface refuses outright, regardless of whether the worker also
@@ -341,7 +391,7 @@ async function runHealArc(args, io, evidence) {
     }
     const summary = summarizeNumstat(io.diffNumstat(lanePath, baseSha, preexisting), { exclude: preexisting });
     diffRow = { files: summary.files, loc: summary.loc };
-    if (!summary.files) return finish('escalated-needs-human', executor, `the worker changed nothing (${run.ok ? 'it finished' : 'it failed'}); ${String(run.out || 'exit cause unknown').slice(-4000)}`, { diff: diffRow });
+    if (!summary.files) return finish('escalated-needs-human', executor, `the worker changed nothing (${run.ok ? 'it finished' : 'it failed'}); ${redactedTail(run.out || 'exit cause unknown', 4000)}`, { diff: diffRow });
     const fits = healDiffWithinEnvelope(summary, PROVEN_TASK_ENVELOPES[worker.taskType ?? 'ci-heal']);
     if (!fits.ok) {
       io.discardChanges(lanePath, baseSha, preexisting);
@@ -469,7 +519,7 @@ export function realIo({ session, env = process.env, run = trySh } = {}) {
       // SYNCHRONOUS on purpose: both launchers block until the model's turn ends (see their headers).
       // `workerEnv`, never `laneEnv`: the worker's own git use keeps the repo's guard hooks (see `realIo`).
       const r = trySh(process.execPath, argv, { env: workerEnv, timeout: 70 * 60 * 1000 });
-      return { modelEvidence: parseAgyReportEvidence(r.stdout ?? r.out), ok: r.ok, status: r.status ?? null, signal: r.signal ?? null, out: r.out.slice(-4000) };
+      return { modelEvidence: parseAgyReportEvidence(r.stdout ?? r.out), ok: r.ok, status: r.status ?? null, signal: r.signal ?? null, out: redactedTail(r.out, 4000) };
     },
     runChecker: (argv) => {
       const r = trySh(process.execPath, argv, { env: workerEnv, timeout: 20 * 60 * 1000 });

@@ -427,7 +427,7 @@ describe('xp0lsdi dead CI-heal regression', () => {
 
 
 import { once } from 'node:events';
-import { countCiHealComments, buildCiHealComment } from '../../conveyor/ci-heal-mark.mjs';
+import { countCiHealComments, buildCiHealComment, redactSecrets } from '../../conveyor/ci-heal-mark.mjs';
 import { recordOwedWrite, readOwedWrites, clearOwedWrite } from '../../conveyor/ci-heal-owed.mjs';
 import { acquireFixDispatchClaim, releaseFixDispatchClaim, listFixDispatchClaims } from '../../conveyor/fix-dispatch-claim.mjs';
 import { routeAvailableCiHeal } from '../ci-heal-pr-dispatch.mjs';
@@ -459,7 +459,8 @@ function attemptHarness() {
     publish: row => publishHealAttempt(row, publication),
     complete: row => completions.push(row.terminal),
   });
-  const observe = (id, extra = {}) => observeHealAttempt(id, { dir, now: () => new Date('2026-10-02T12:00:00Z'), isPidAlive: () => false, settle, ...extra });
+  // One hour after `start()`: past the startup grace, inside HEAL_ATTEMPT_MAX_AGE_MS (the age-ceiling tests pass their own `now`).
+  const observe = (id, extra = {}) => observeHealAttempt(id, { dir, now: () => new Date('2026-10-02T01:00:00Z'), isPidAlive: () => false, settle, ...extra });
   return { dir, owed, lockRoot, comments, published, completions, start, publication, settle, observe };
 }
 
@@ -557,7 +558,8 @@ describe('xp0lsdi durable crash recovery and restart soak', () => {
     const h = attemptHarness(), row = h.start();
     writeFileSync(join(h.dir, `${row.attemptId}.json`), '{broken');
     expect(h.observe(row.attemptId).status).toBe('unresolved');
-    expect(() => pollHealAttempts({ dir: h.dir })).toThrow();
+    // the round-2 review narrowed the blast radius: the poll reports the corrupt row instead of aborting the repo pass
+    expect(pollHealAttempts({ dir: h.dir, warn: () => {} })).toEqual([expect.objectContaining({ pr: null, status: 'unresolved' })]);
   });
 });
 
@@ -663,5 +665,110 @@ describe('PR #3577 review: attempt rows never become a permanent CI-heal barrier
     const p2 = join(h.dir, `${second}.json`);
     writeFileSync(p2, JSON.stringify({ ...JSON.parse(readFileSync(p2, 'utf8')), host: 'old-name.local' }) + '\n');
     expect(h.observe(second, { repo: 'we', pr: 3373 }).status).toBe('unresolved');
+  });
+});
+
+describe('PR #3577 round 2 review: CI-heal attempt bookkeeping stays bounded, isolated and non-leaking', () => {
+  const failed = (detail, extra = {}) => ({ outcome: 'executor-failed', pushed: false, exitCode: 1, signal: null, quotaState: 'unknown', detail, ...extra });
+  const rowPath = (h, id) => join(h.dir, `${id}.json`);
+
+  it('does no lock or settle work for rows that are already settled', () => {
+    const h = attemptHarness();
+    for (let i = 0; i < 100; i++) h.settle(h.start().attemptId, failed('x'));
+    const settle = vi.fn(() => { throw new Error('a settled row must not be settled again'); });
+    const rows = pollHealAttempts({ dir: h.dir, observe: (id, o) => h.observe(id, { ...o, settle }) });
+    expect(rows).toHaveLength(100);
+    expect(rows.every(r => r.status === 'resolved')).toBe(true);
+    expect(settle).not.toHaveBeenCalled();
+  });
+
+  it('prunes long-settled rows but keeps recent settled and every unsettled row', () => {
+    const h = attemptHarness();
+    const old = h.start().attemptId, recent = h.start().attemptId, open = h.start().attemptId;
+    h.settle(old, failed('x')); h.settle(recent, failed('x'));
+    const age = (id, startedAt) => writeFileSync(rowPath(h, id), JSON.stringify({ ...JSON.parse(readFileSync(rowPath(h, id), 'utf8')), startedAt }) + '\n');
+    age(old, '2026-09-01T00:00:00Z'); age(recent, '2026-10-01T00:00:00Z'); age(open, '2026-09-01T00:00:00Z');
+    pollHealAttempts({ dir: h.dir, now: () => new Date('2026-10-02T12:00:00Z'), observe: () => ({ status: 'running', result: null }) });
+    expect(existsSync(rowPath(h, old))).toBe(false);
+    expect(existsSync(rowPath(h, recent))).toBe(true);
+    expect(existsSync(rowPath(h, open))).toBe(true);
+  });
+
+  it('one unreadable row neither aborts the poll nor holds an unrelated PR', () => {
+    const h = attemptHarness();
+    const good = h.start().attemptId, broken = h.start({ headRefOid: captured3373.headRefOid }).attemptId, garbage = h.start().attemptId;
+    const strip = JSON.parse(readFileSync(rowPath(h, broken), 'utf8')); delete strip.headSha;
+    writeFileSync(rowPath(h, broken), JSON.stringify({ ...strip, pr: 4000 }) + '\n');
+    writeFileSync(rowPath(h, garbage), '{broken');
+    const warn = vi.fn();
+    const all = pollHealAttempts({ dir: h.dir, observe: h.observe, warn });
+    expect(all.find(r => r.attemptId === good).status).toBe('resolved');
+    expect(all.find(r => r.attemptId === broken)).toMatchObject({ pr: 4000, status: 'unresolved' });
+    expect(warn).toHaveBeenCalledTimes(2);
+    // the PR-scoped read used by dispatchCiHeal holds only the PR whose row is readable
+    expect(pollHealAttempts({ dir: h.dir, observe: h.observe, pr: 3373, warn }).filter(r => r.status !== 'resolved')).toEqual([]);
+    expect(pollHealAttempts({ dir: h.dir, observe: h.observe, pr: 4000, warn }).filter(r => r.status !== 'resolved')).toHaveLength(1);
+  });
+
+  it.each([
+    ['a foreign-host row', row => ({ ...row, host: 'old-name.local', handle: 'pid:51' }), () => false],
+    ['a recycled pid that looks alive', row => ({ ...row, handle: 'pid:51' }), () => true],
+  ])('settles %s older than the age ceiling as a failed attempt instead of holding the PR forever', (_name, mutate, isPidAlive) => {
+    const h = attemptHarness();
+    const { attemptId } = h.start();
+    writeFileSync(rowPath(h, attemptId), JSON.stringify(mutate(JSON.parse(readFileSync(rowPath(h, attemptId), 'utf8')))) + '\n');
+    const young = h.observe(attemptId, { isPidAlive, now: () => new Date('2026-10-02T00:30:00Z') });
+    expect(young.status).not.toBe('resolved');
+    const aged = h.observe(attemptId, { isPidAlive, now: () => new Date('2026-10-02T12:00:00Z') });
+    expect(aged.status).toBe('resolved');
+    expect(aged.result).toMatchObject({ outcome: 'executor-failed', pushed: false });
+    expect(aged.result.detail).toMatch(/exceeded/);
+  });
+
+  it('redacts a long unbroken alphanumeric run in linear time (no quadratic regex backtracking)', () => {
+    const started = Date.now();
+    redactSecrets('a'.repeat(200_000));
+    expect(Date.now() - started).toBeLessThan(2000);
+  });
+
+  it('stops holding a PR for an unreadable row once it is older than the age ceiling', () => {
+    const h = attemptHarness(), { attemptId } = h.start();
+    const strip = JSON.parse(readFileSync(rowPath(h, attemptId), 'utf8')); delete strip.headSha;
+    writeFileSync(rowPath(h, attemptId), JSON.stringify(strip) + '\n');
+    const warn = () => {};
+    const fresh = pollHealAttempts({ dir: h.dir, pr: 3373, warn });
+    expect(fresh).toHaveLength(1);
+    const aged = pollHealAttempts({ dir: h.dir, pr: 3373, warn, now: () => new Date(Date.now() + 4 * 60 * 60_000) });
+    expect(aged).toEqual([]);
+  });
+
+  it('never publishes raw worker or log text: unlisted secret shapes cannot reach the public comment', () => {
+    const h = attemptHarness();
+    const leaks = ['wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY', 'https://hooks.slack.com/services/T000/B000/XXXXXXXXXXXX', 'Cookie: sessionid=abcdef0123456789', 'internal-db-7.corp.example'];
+    h.settle(h.start().attemptId, failed(leaks.join('\n'), { exitCode: 7, signal: 'SIGTERM', quotaState: 'exhausted', quotaResetsAt: '2026-10-04T17:31:18.942Z' }));
+    const [body] = h.published;
+    for (const leak of leaks) expect(body).not.toContain(leak);
+    expect(body).toMatch(/exit: 7; signal: SIGTERM; quota: exhausted; reset: 2026-10-04T17:31:18.942Z/);
+  });
+
+  it('never publishes a credential an upstream truncation cut the prefix off of (4000-char and 2000-byte boundaries)', async () => {
+    const h = attemptHarness();
+    const secret = 'ghp_' + 'Q'.repeat(36);
+    // (a) the worker output / settle detail boundary
+    const { io } = fakeIo(); let workerRow;
+    io.settleAttempt = (id, terminal) => { workerRow = h.settle(h.start().attemptId, terminal); };
+    io.runWorker = () => ({ ok: false, status: 1, out: `${secret} ${'k'.repeat(3980)}`, modelEvidence: {} });
+    await runProbationHeal(args(), io);
+    // the persisted worker diagnostics were redacted before the 4000-char cut, not cut into a bare fragment
+    expect(workerRow.terminal.diagnostics).not.toMatch(/Q{4}/);
+    expect(workerRow.terminal.diagnostics).toMatch(/k{100}/);
+    // (b) the crashed-wrapper log tail boundary
+    const logPath = join(h.dir, 'wrapper.log'); writeFileSync(logPath, secret + 'k'.repeat(1990));
+    const { attemptId } = h.start({}); writeFileSync(rowPath(h, attemptId), JSON.stringify({ ...JSON.parse(readFileSync(rowPath(h, attemptId), 'utf8')), logPath }) + '\n');
+    expect(h.observe(attemptId).status).toBe('resolved');
+    expect(h.published.length).toBeGreaterThan(0);
+    for (const body of h.published) expect(body).not.toMatch(/Q{4}/);
+    // the local row keeps its diagnostics, with the credential redacted before the cut
+    expect(readHealAttempt(attemptId, { dir: h.dir }).terminal.detail).not.toMatch(/Q{4}/);
   });
 });
