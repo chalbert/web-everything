@@ -906,6 +906,33 @@ it.each([
     .toEqual([expect.objectContaining({ prNumber: 3336 })]);
 });
 
+// Known failing/pending evidence already in the snapshot must survive a refused hydration: a cancelled required
+// check seen in the truncated snapshot still schedules recovery on this tick, while the refusal stays visible.
+it.each([
+  ['unreadable read', () => { throw new Error('HTTP 502'); }],
+  ['absent evidence', () => xxRuns().filter(row => row.name === 'soak-replay-gate')],
+])('xxh4zw8 %s keeps the known cancelled snapshot so recovery is still scheduled', async (_, readChecks) => {
+  const { runReconcilePass } = await import('../reconcile-pass.mjs');
+  const pr = { ...xxPr(), statusCheckRollup: [{ name: 'smoke', status: 'COMPLETED', conclusion: 'CANCELLED',
+    completedAt: '2026-10-01T10:00:00Z' }] };
+  const plan = runReconcilePass({ ...xxOptions(), readChecks, readPrs: () => [pr] });
+  expect(plan.dispatch.map(d => [d.prNumber, d.kind])).toEqual([[3336, 'ci-heal']]);
+  expect(plan.refusals.filter(r => r.kind === 'check-read-failed'))
+    .toEqual([expect.objectContaining({ prNumber: 3336 })]);
+});
+
+it('xxh4zw8 a refused hydration keeps known pending evidence but never promotes on a truncated green snapshot', async () => {
+  const { runReconcilePass } = await import('../reconcile-pass.mjs');
+  const green = XX_REQUIRED.map(name => ({ name, status: 'COMPLETED', conclusion: 'SUCCESS' }));
+  const fail = () => { throw new Error('HTTP 502'); };
+  const truncated = { ...xxPr(), statusCheckRollup: [...green, ...xxPr().statusCheckRollup.slice(4)] };
+  expect(runReconcilePass({ ...xxOptions(), readChecks: fail, readPrs: () => [truncated] }).dispatch).toEqual([]);
+  const pending = { ...xxPr(), statusCheckRollup: [{ name: 'smoke', status: 'IN_PROGRESS', conclusion: null }] };
+  const plan = runReconcilePass({ ...xxOptions(), readChecks: fail, readPrs: () => [pending] });
+  expect(plan.dispatch).toEqual([]);
+  expect(plan.refusals.filter(r => r.kind === 'check-read-failed')).toHaveLength(1);
+});
+
 it('xxh4zw8 hydration collapses superseded cancellations and unreadable conclusions before classification', async () => {
   const { runReconcilePass } = await import('../reconcile-pass.mjs');
   const rows = [...xxRuns(), { ...xxRuns()[1], id: 110460009999, conclusion: 'success' },

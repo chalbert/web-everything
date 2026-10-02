@@ -49,7 +49,7 @@
  * is killed.
  */
 import { collapseRollupToLatestPerName } from '../lib/rollup-collapse.mjs';
-import { FAILING_CONCLUSIONS, NON_BLOCKING_CONCLUSIONS } from '../operations/pr-status.mjs';
+import { FAILING_CONCLUSIONS, NON_BLOCKING_CONCLUSIONS, reduceCheckState } from '../operations/pr-status.mjs';
 import { checksArgv, parseJsonLines, GH_TIMEOUT_MS } from '../operations/pr-status-io.mjs';
 import { isGhDeferred } from '../lib/gh-deferred.mjs';
 import { repoKeyForSlug, CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
@@ -1026,8 +1026,13 @@ function hydrateChecks(prs, { repo, requiredChecks, readChecks }) {
     }
     // The refusal withholds CI evidence only. The PR stays in planning for every branch that does not consume
     // it (conflict-fix, review dispatch, stand-down, label reconciliation): an unreadable read swaps the
-    // truncated snapshot for an empty rollup (`unchecked`, never green or red), never drops the PR.
-    ready.push({ ...pr, statusCheckRollup: result.error ? [] : result.rows });
+    // truncated snapshot for an empty rollup (`unchecked`, never green or red), never drops the PR. The one thing
+    // a refused hydration must NOT discard is evidence already in hand that says red or pending: that is a
+    // positive observation, so a cancelled or still-running required check seen in the known snapshot keeps
+    // scheduling recovery on this tick. A truncated snapshot that merely looks green is NOT kept — a later,
+    // unread rerun could contradict it, so it stays `unchecked`.
+    const known = runs.length && ['red', 'pending'].includes(reduceCheckState(runs, requiredChecks).state) ? runs : null;
+    ready.push({ ...pr, statusCheckRollup: refused && known ? known : result.error ? [] : result.rows });
   }
   return { prs: ready, refusals };
 }
