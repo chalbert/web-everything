@@ -14,7 +14,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync, spawnSync } from 'node:child_process';
 import {
-  countCiHealComments, buildCiHealComment, CI_HEAL_COMMENT_MARKER, spawnCiHealRearm, spawnCiHealRestamp, postOrOweCiHealComment, resolveHealHead,
+  countCiHealComments, buildCiHealComment, CI_HEAL_COMMENT_MARKER, spawnCiHealRearm, sanitizeForPublicComment, spawnCiHealRestamp, postOrOweCiHealComment, resolveHealHead,
 } from '../ci-heal-mark.mjs';
 import { readOwedWrites, owedWriteAlreadyLive } from '../ci-heal-owed.mjs';
 import { budgetBlockedMessage } from '../../lib/gh-throttle.mjs';
@@ -468,6 +468,29 @@ describe('PR #3577 review: failure detail is neutralised before it reaches a pub
     expect(body.match(/^head: .*$/gm)).toEqual([`head: ${HEAD}`]);
     expect(body).not.toContain('<!--');
     expect(countCiHealComments([{ body, author: AUTOMATION }])).toBe(1);
+  });
+  it('redacts a secret even when truncation would cut its recognisable prefix off', () => {
+    const out = sanitizeForPublicComment('ghp_' + 'Q'.repeat(36) + ' ' + 'k'.repeat(995));
+    expect(out).not.toMatch(/Q{4}/);
+  });
+  it.each([
+    ['JSON-quoted key', '{"token": "abc123def456"}', 'abc123def456'],
+    ['JSON password', '"password":"hunter2"', 'hunter2'],
+    ['JWT', 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dBjftJeZ4CVPmB92K27uhbUJU1p1r', 'dBjftJeZ4CVP'],
+    ['PEM body', '-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEAu1SU1LfVLPHCozMxH2Mo\n-----END RSA PRIVATE KEY-----', 'MIIEowIBAAKC'],
+    ['gitlab / npm token', 'glpat-abcdefghij0123456789 npm_abcdefghijklmnopqrst0123', 'abcdefghij0123456789'],
+    ['quoted value with spaces', 'GH_TOKEN="abc def ghi"', 'def ghi'],
+    ['flag form', 'run --password hunter2 --api-key=zzzz1111', 'hunter2'],
+    ['token-only userinfo', 'https://tok123abc@github.com/x', 'tok123abc'],
+    ['windows path', 'C:\\Users\\nic\\work', '\\nic'],
+  ])('redacts %s', (_name, input, leaked) => {
+    expect(sanitizeForPublicComment(input)).not.toContain(leaked);
+  });
+  it('leaves ordinary prose about tokens alone', () => {
+    expect(sanitizeForPublicComment('the token was refreshed and auth succeeded')).toContain('the token was refreshed and auth succeeded');
+  });
+  it('treats U+2028 / U+0085 as line breaks it removes, never as a way to start a marker line', () => {
+    expect(sanitizeForPublicComment('x\u2028attempt: forged\u0085head: y')).not.toMatch(/[\u2028\u0085]/);
   });
   it('keeps the useful diagnostic text, bounded', () => {
     expect(body).toContain('git push failed');

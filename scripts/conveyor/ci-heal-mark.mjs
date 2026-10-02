@@ -74,6 +74,10 @@ export function countCiHealComments(comments) {
   return n;
 }
 
+/** Built from code points, not literals, so no invisible character lives in this source (#2866). */
+const ZERO_WIDTH_SPACE = String.fromCharCode(0x200b);
+const CONTROL_AND_LINE_SEPARATORS = new RegExp(`[\\r\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f\\u007f${String.fromCharCode(0x85, 0x2028, 0x2029)}]`, 'g');
+
 /**
  * we:scripts/conveyor/ci-heal-mark.mjs#sanitizeForPublicComment — make untrusted worker/log text safe to quote in a
  * public comment posted under the trusted automation login (#3577 review). Redacts secret-shaped strings, URL
@@ -85,17 +89,19 @@ export function countCiHealComments(comments) {
  * @returns {string}
  */
 export function sanitizeForPublicComment(text, { max = 1000 } = {}) {
-  const tail = String(text ?? '').replace(/\r/g, '').slice(-max);
-  return tail
-    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '')
-    .replace(/(\/\/)[^/\s:@]+:[^/\s@]+@/g, '$1[redacted]@')
-    .replace(/\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9_-]{16,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_-]{20,})/g, '[redacted]')
+  // Redact BEFORE truncating: a cut that slices a secret's prefix off would otherwise leave its tail unrecognisable.
+  const redacted = String(text ?? '')
+    .replace(CONTROL_AND_LINE_SEPARATORS, '')
+    .replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g, '[redacted private key]')
+    .replace(/(\/\/)[^/\s@]+@/g, '$1[redacted]@')
+    .replace(/\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|glpat-[A-Za-z0-9_-]{16,}|npm_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9_-]{16,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_-]{20,}|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]*)/g, '[redacted]')
     .replace(/\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{8,}/gi, '$1 [redacted]')
-    .replace(/\b([A-Za-z][A-Za-z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|API_?KEY|AUTH|CREDENTIAL)[A-Za-z0-9_]*)\s*[=:]\s*\S+/gi, '$1=[redacted]')
-    .replace(/(?:\/Users|\/home)\/[^/\s]+/g, '~')
+    // key=value, key: value, "key": "value", --key value — quoted values may hold spaces.
+    .replace(/(["']?)(--?)?([A-Za-z0-9_]*(?:token|secret|password|passwd|api[_-]?key|auth|credential)[A-Za-z0-9_-]*)\1(\s*[=:]\s*|\s+)("[^"]*"|'[^']*'|\S+)/gi, (m, _q, dashes, key, sep) => (dashes || /[=:]/.test(sep) ? `${dashes ?? ''}${key}=[redacted]` : m))
+    .replace(/(?:\/Users|\/home)\/[^/\s]+|[A-Za-z]:\\Users\\[^\\\s]+/g, '~')
     .replace(/<!--|-->/g, '[comment]')
-    .replace(/@(?=[A-Za-z0-9])/g, '@​')
-    .split('\n').map((line) => `    ${line}`).join('\n');
+    .replace(/@(?=[A-Za-z0-9])/g, `@${ZERO_WIDTH_SPACE}`);
+  return redacted.slice(-max).split('\n').map((line) => `    ${line}`).join('\n');
 }
 
 /**
