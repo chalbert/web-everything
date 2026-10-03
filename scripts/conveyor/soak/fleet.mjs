@@ -9,7 +9,10 @@
 
 /** @typedef {{key:string, owes:(null|'review'|'fix'|'ci-heal'), pr:number, note:string}} FleetPr */
 
-const GREEN = [{ name: 'test', conclusion: 'SUCCESS' }];
+// The branch-protection required set the fake GitHub serves (the live set, `required-status-checks.mjs`'s
+// fallback). A PR owes a review only once EVERY required check succeeded on its head, so GREEN covers them all.
+const REQUIRED = ['test', 'smoke', 'daemon-soak'];
+const GREEN = REQUIRED.map((name) => ({ name, conclusion: 'SUCCESS' }));
 const RED = [{ name: 'test', conclusion: 'FAILURE' }];
 
 /**
@@ -18,7 +21,8 @@ const RED = [{ name: 'test', conclusion: 'FAILURE' }];
  */
 export function seedDefaultFleet(w) {
   const out = [];
-  const add = (key, owes, note, { files, labels = [], checks = GREEN, body, isDraft = false, comments = [] }) => {
+  w.gh.setRequiredChecks('we', REQUIRED);
+  const add =(key, owes, note, { files, labels = [], checks = GREEN, body, isDraft = false, comments = [] }) => {
     const head = `lane/soak-${key}`;
     w.git.createBranch('we', head, { from: 'main', files });
     const pr = w.gh.openPr({ repo: 'we', head, base: 'main', title: `soak: ${note}`, labels, body, isDraft });

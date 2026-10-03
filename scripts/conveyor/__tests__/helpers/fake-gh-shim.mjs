@@ -510,7 +510,17 @@ function handleApi(store, rest) {
         id, name: c.name, status: String(c.status).toLowerCase(), conclusion: c.conclusion ? String(c.conclusion).toLowerCase() : null,
         started_at: c.startedAt, completed_at: c.completedAt, head_sha: sha,
       }));
-      return jsonResult({ total_count: runs.length, check_runs: runs }, jq, { compact: true });
+      const page = { total_count: runs.length, check_runs: runs };
+      // `--paginate --slurp` wraps every page in one array (this fixture answers a single page).
+      return jsonResult(hasFlag(rest, '--slurp') ? [page] : page, jq, { compact: true });
+    }
+    // Branch protection's required status checks — only when a scenario declared them (`setRequiredChecks`);
+    // otherwise unsupported, exactly as before, so readers keep their documented fallback.
+    if ((m = path.match(/^repos\/([^/]+)\/([^/]+)\/branches\/([^/]+)\/protection$/))) {
+      const repoState = requireRepo(store, `${m[1]}/${m[2]}`);
+      if (Array.isArray(repoState.requiredChecks)) {
+        return jsonResult({ required_status_checks: { contexts: repoState.requiredChecks } }, jq);
+      }
     }
     if ((m = path.match(/^repos\/([^/]+)\/([^/]+)\/compare\/(.+)\.\.\.(.+)$/))) {
       const slug = `${m[1]}/${m[2]}`; const a = m[3]; const b = m[4];

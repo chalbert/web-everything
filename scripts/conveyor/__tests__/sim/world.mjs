@@ -375,6 +375,7 @@ export function createWorld({ repos = ['we'], lanes = 3, clockStartOffsetMs = 0 
     removeLabels: (repo, n, names) => rawGh.removeLabels(slugFor(repo), n, names),
     comment: (repo, n, body, opts) => rawGh.comment(slugFor(repo), n, body, opts),
     setChecks: (repo, n, checks) => rawGh.setChecks(slugFor(repo), n, checks),
+    setRequiredChecks: (repo, names) => rawGh.setRequiredChecks(slugFor(repo), names),
     closePr: (repo, n) => rawGh.closePr(slugFor(repo), n),
     reopenPr: (repo, n) => rawGh.reopenPr(slugFor(repo), n),
     mergePr: (repo, n, opts) => rawGh.mergePr(slugFor(repo), n, opts),
