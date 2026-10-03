@@ -1,4 +1,4 @@
-import { requiresMandatoryReferral } from '../lib/jury-core.mjs';
+import { requiresMandatoryReferral, referralFindingKey } from '../lib/jury-core.mjs';
 /**
  * @file scripts/operations/review-pr.mjs
  * @description THE `review-pr` DECLARATION — the first real operation on the engine (#3035, under epic #3029).
@@ -1060,6 +1060,7 @@ export function shapeReadFinding(raw, { pr, repo, careLevel } = {}) {
   const earnedShape = assertDeclaredShapeHolds({ careLevel, netChangedFiles, pr, repo });
 
   return {
+    referralCwd: raw.referralCwd ?? null,
     hasReferralRecord: JSON.stringify(raw.comments ?? []).includes('mandatory-referrals-v1'),
     priorRounds: Number(raw?.priorRounds) || 0,
     pr: Number(detail.pr) || Number(pr) || 0,
@@ -1747,6 +1748,7 @@ function renderRevProvenance(netBasis) {
  */
 export function deriveAdvisoryOutcome(verdict) {
   const v = verdict && typeof verdict === 'object' ? verdict : {};
+  if (v.blockedReferrals?.length) return ADVISORY_OUTCOMES.CHANGES;
   const lensVerdicts = v.lensVerdicts && typeof v.lensVerdicts === 'object' ? v.lensVerdicts : {};
   const lenses = Array.isArray(v.lenses) && v.lenses.length ? v.lenses : Object.keys(lensVerdicts);
   try {
@@ -1798,6 +1800,7 @@ export function advisoryLabelOutcome({ read, verdict } = {}) {
 export function renderAdvisoryNote({ read, verdict } = {}) {
   const v = verdict && typeof verdict === 'object' ? verdict : {};
   const outcome = advisoryLabelOutcome({ read, verdict });
+  if (v.blockedReferrals?.length) return ADVISORY_OUTCOMES.CHANGES;
   const lensVerdicts = v.lensVerdicts && typeof v.lensVerdicts === 'object' ? v.lensVerdicts : {};
   const lensProviders = v.lensProviders && typeof v.lensProviders === 'object' ? v.lensProviders : {};
   const lenses = Array.isArray(v.lenses) && v.lenses.length ? v.lenses : Object.keys(lensVerdicts);
@@ -2299,6 +2302,7 @@ export function reviewPrOperation({
               lens: ANTIGRAVITY_REVIEW_LENS,
               answer: view.findings.judgeAntigravityReview,
               provider: 'antigravity, advisory',
+              toolCapability: 'none',
             }]
             : []),
         ];
@@ -2347,10 +2351,22 @@ export function reviewPrOperation({
               + 'juror that may have reported blockers. Re-run the review; do not record a verdict on this run.',
             );
           }
-          for (const original of answer.findings ?? []) {
-            if (requiresMandatoryReferral(original)) referrals.push({ seat: seat.step, original });
+          const effective = (answer.findings ?? []).map(original => {
+            const unsupported = seat.toolCapability === 'none' && original?.verdict === 'CONFIRMED';
+            if (requiresMandatoryReferral(original)) referrals.push({ seat: seat.step, original,
+              ...(unsupported ? { confirmationRequired: true } : {}) });
+            return unsupported ? { ...original, verdict: 'PLAUSIBLE',
+              failure_scenario: `${original.failure_scenario ?? ''} [Tool-less assertion: CONFIRMED; awaiting confirmation or ruling.]` } : original;
+          });
+          const scoped = scopeFindingsToCitedFiles(effective, { scope: citationScope });
+          if (seat.toolCapability === 'none') {
+            // Unsupported assertions remain visible advice; serious claims hold through mandatory referrals.
+            // A juror's malformed finding (no usable summary, not an object) has no key: it cannot be admitted, so skip it.
+            const keyOf = f => { try { return referralFindingKey(seat.step, f); } catch { return null; } };
+            const unsupported = new Set((answer.findings ?? []).flatMap((f, i) => f?.verdict === 'CONFIRMED' ? [keyOf(effective[i])] : []));
+            unsupported.delete(null);
+            scoped.admitted = scoped.admitted.filter(f => !unsupported.has(keyOf(f)));
           }
-          const scoped = scopeFindingsToCitedFiles(answer.findings, { scope: citationScope });
           const raw = scoped.findings;
           citationScopeEnforced = citationScopeEnforced || scoped.enforced;
           unverifiableCitations.push(...scoped.unverifiable);
