@@ -6,6 +6,7 @@ parent: "3383"
 status: open
 scope: ["we:.github/workflows/ci.yml", "we:scripts/conveyor/main-red-recovery.mjs", "we:scripts/conveyor/main-ci-coverage.mjs"]
 dateOpened: "2026-10-03"
+dateStarted: "2026-10-03"
 tags: []
 ---
 
