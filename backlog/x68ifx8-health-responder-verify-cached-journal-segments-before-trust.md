@@ -6,6 +6,7 @@ scope: ["we:scripts/conveyor/health-responder-state.mjs", "we:scripts/conveyor/_
 dateOpened: "2026-10-02"
 preparedDate: "2026-10-03"
 preparedAgainstSha: "4cd29d605b95337785a59fb5463807f3317f8cda"
+scopeRationale: "we:scripts/conveyor/health-responder.mjs is named only as the existing shadowTick entry point the regression test imports; it needs no source edit, so it stays out of scope."
 tags: []
 ---
 
