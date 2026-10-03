@@ -1,0 +1,21 @@
+{
+  "id": "github-org-move",
+  "title": "Moving web-everything, frontierui and plateau-app from a user account into a GitHub organization: plans, rate limits, what a transfer keeps and breaks, and the owner as one config value",
+  "status": "open",
+  "summary": "Grounds the org-move decision card (xvgqv8h). Measured 2026-10-03: WE is public; frontierui and plateau-app are private and, on a Free personal account, cannot have branch protection or rulesets at all. Verified from GitHub docs: the merge queue is available on any public org repo (so a Free org gives WE its queue) and on private org repos only with Enterprise Cloud (Team does not add it). Concurrent standard-runner jobs: Free 20, Team 60, Enterprise 500, shared across the org. REST limits: user 5,000/h; App installation 5,000/h scaling to 12,500/h per installation (15,000/h on Enterprise Cloud); GITHUB_TOKEN 1,000/h per repo. CI uses GITHUB_TOKEN today, not the web-everything App, so the CI 'rate limit exceeded for installation' is most likely its own per-repo bucket, which Team does not raise and a CI-owned App does. A transfer keeps issues, PRs, stars, webhooks, secrets and deploy keys and redirects web and git URLs; the API redirect is undocumented, busy repos have their old name retired (rollback not guaranteed), new orgs block Actions from opening PRs (release-please), a user-owned fine-grained PAT cannot see an org repo, and npm provenance rejects a package whose repository url does not match exactly. Coupling: 234 live chalbert/<repo> literals in 96 WE files, 4 in FUI, 95 in plateau-app, plus one App installation id copied into 14 daemon plists. A single-source table already exists (constellation-repos.mjs). Enterprise Cloud raises concurrency to 500 and both App-installation and per-repo GITHUB_TOKEN limits to 15,000/h; Enterprise Managed Users cannot hold public repos, so personal accounts. GitHub's API terms forbid sharing tokens to exceed rate limits, so one App per distinct role is fine and clones of one role are not. Defaults prepared: one org now (working name plateauapp) under an Enterprise Cloud enterprise with personal accounts, a second open-source org later as a config change plus a transfer; one org-owned App per role, the drain App not yet a bypass actor; the owner single-sourced and the App installation looked up per repo; cut-over one repo per step plateau-app, frontierui, WE, with the merge queue and Rung 2 left to their own decisions.",
+  "dateOpened": "2026-10-03",
+  "lastReviewed": "2026-10-03",
+  "reviewHorizon": "P3M",
+  "tags": [
+    "github",
+    "organization",
+    "merge-queue",
+    "rate-limits",
+    "github-app",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "conveyor",
+  "relatedReport": "reports/2026-10-03-github-org-move-prior-art.md"
+}
