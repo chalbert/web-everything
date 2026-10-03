@@ -180,7 +180,7 @@ With `auto`, the decider only logs what it would pick, with its reasons, and act
 reviewed about a week of logs and explicitly promotes the field. Promotion is a configurable setting, default
 shadow. Pre-ratify staleness checks (`check:item`, `check:health` flags, statutes ratified since the stamp) found
 no change to any default. Codified at `we:docs/agent/platform-decisions.md#delivery-decider-under-fixed-settings`.
-Build stories filed: `xhbe7xa` (auto value, tighten-only, promotion setting, one settings home) and `xdvt2tk`
+Build stories filed: `5008` (auto value, tighten-only, promotion setting, one settings home) and `5009`
 (decider core with shadow mode).
 
 ## Done when

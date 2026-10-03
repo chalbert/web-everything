@@ -1,9 +1,10 @@
 ---
+bornAs: xdvt2tk
 kind: story
 size: 8
 parent: "3383"
 status: open
-blockedBy: ["xhbe7xa", "5002"]
+blockedBy: ["5008", "5002"]
 scope: ["we:scripts/lib/delivery-decider.mjs", "we:scripts/lib/delivery-decider.test.mjs"]
 dateOpened: "2026-10-03"
 tags: []

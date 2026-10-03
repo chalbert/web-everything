@@ -5963,7 +5963,7 @@ and `we:reports/2026-09-21-backlog-id-assignment-prior-art.md`. Full reasoning a
 ### A delivery-strategy decider picks only for fields set to auto; fixed settings and invariants always win; it starts in shadow mode {#delivery-decider-under-fixed-settings}
 
 **Ratified 2026-10-03 by the operator (Nicolas Gilbert), in conversation, Fork 1 (a) at the card's default, with
-the shadow-mode ruling below (`#4998`, `bornAs` `x1hhjnb`).** The operator's words: *"Ok for all"*, in answer to
+the shadow-mode ruling below (`#4998`, `bornAs` `4998`).** The operator's words: *"Ok for all"*, in answer to
 the orchestrator's recommendation. Context: the same day the operator made several delivery strategies
 configurable settings (verify mode, overlap strategy, the main-protection policy keys, backlog ids numbered
 before publish). This rule says how a decider picks between strategies at run time without taking authority from
@@ -6007,7 +6007,7 @@ merge re-check, not by the decider. The heavy-slot cap stays with
 [heavy-command-admission-queue](#heavy-command-admission-queue); the decider only orders priority.
 
 **What this ruling does not do.** It builds nothing. Build stories: the `auto` value and promotion setting in the
-delivery-policy loader (`xhbe7xa`) and the decider core with shadow mode (`xdvt2tk`).
+delivery-policy loader (`5008`) and the decider core with shadow mode (`5009`).
 
 **Lineage:** ratified via `#4998` (prepared 2026-10-03), grounded in `/research/delivery-strategy-decider/` and
 `we:reports/2026-10-03-delivery-strategy-survey-and-decider.md`. Full reasoning and the rejected options:
