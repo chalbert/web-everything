@@ -52,7 +52,9 @@ function scenario(fn) {
   return withRealRepo(async (ctx) => {
     const { root, tmp, commit } = ctx;
     const sh = ctx.git;
-    const env = { ...process.env, OPERATION_RUNS_DIR: join(tmp, 'runs'), OPERATION_CALLS_DIR: join(tmp, 'calls'), GIT_CONFIG_GLOBAL: '/dev/null' };
+    // This suite proves priority-sync, not runner freshness: a CI checkout is shallow, so the runner-freshness
+    // guard (a mutating operation refuses from a non-lane checkout behind origin/main) would refuse every run.
+    const env = { ...process.env, OPERATION_RUNS_DIR: join(tmp, 'runs'), OPERATION_CALLS_DIR: join(tmp, 'calls'), GIT_CONFIG_GLOBAL: '/dev/null', WE_DAEMON_MANAGED_CLONE: '1' };
 
     // The older state: the prototype branch's own cards.
     commit({
