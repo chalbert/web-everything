@@ -14,6 +14,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readdirSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { numberPendingHashes, landedNumberFor, cardPathInTree, hasPendingHashFiles, numberPendingHashesIfAny, finalizeLand } from '../lane-drain.mjs';
 import { tryAcquireNumberingLock } from '../readiness/drain-lock.mjs';
 import { checkFlow } from '../conveyor/flows/flow-model.mjs';
@@ -83,6 +84,76 @@ describe('numberPendingHashes — drain JIT numbering wire (#2288)', () => {
     expect(readFileSync(join(repo, untracked), 'utf8')).toContain('xhash01');
     expect(strandedHashesOnMain(paths())).toEqual({ errors: [], warnings: [] });
     expect(git('status', '--porcelain').trim()).toBe(`?? ${untracked}`);
+  });
+
+  it.each(['ledger', 'bornAs'])('preserves executable soak data while rewriting only card metadata via %s', (source) => {
+    write('backlog/2200-legacy.md', '---\nbornAs: xold001\nkind: story\n---\n# Legacy\n');
+    write('backlog/xhash01-alpha.md', '---\nkind: story\n---\n# Alpha\n');
+    const definition = 'scripts/conveyor/soak/breaks/regression.mjs';
+    const original = [
+      '// Historical birth hashes: xhash01, xold001; #xold001 stays historical here.',
+      "const HASH = 'xhash01';",
+      "const fixture = { card: '#xhash01', bornAs: 'xold001' };",
+      "const text = `card: 'xhash01'; bornAs: xold001; #xold001`;",
+      "const pattern = /xhash01|xold001/;",
+      "const report = 'reports/xhash01-evidence.md';",
+      'export default {',
+      '  "card":',
+      '    `we:backlog/xhash01-alpha.md; #xold001; xold001`,',
+      "  fixedBy: { where: 'lane/xhash01-fix', sha: 'xold001' },",
+      "  run() { return { card: '#xhash01', HASH, fixture, text, pattern, report }; },",
+      '};',
+      '',
+    ].join('\n');
+    write(definition, original);
+    write('reports/xhash01-evidence.md', 'Historical fixture xhash01\n');
+    write(QUEUED_REL, JSON.stringify({ queued: [] }));
+    git('add', '.'); git('commit', '-qm', 'seed executable soak');
+    git('update-ref', 'refs/remotes/origin/main', 'HEAD');
+    if (source === 'ledger') write(LEDGER_REL, JSON.stringify({ xold001: '2200' }));
+
+    const result = numberPendingHashes(repo);
+    expect(result.error).toBeUndefined();
+    expect(result.committed).toBe(true);
+    expect(result.unresolvedReferences ?? []).toEqual([]);
+    expect(git('show', `HEAD:${definition}`)).toBe(original.replace(
+      '`we:backlog/xhash01-alpha.md; #xold001; xold001`',
+      '`we:backlog/2201-alpha.md; #2200; 2200`',
+    ));
+    expect(git('show', 'HEAD:reports/xhash01-evidence.md')).toBe('Historical fixture xhash01\n');
+    expect(git('status', '--porcelain').trim()).toBe('');
+  });
+
+  it('keeps the real stale-hash queue scenario executable after a numbering pass with its historical ledger entry', () => {
+    const definition = 'scripts/conveyor/soak/breaks/queue-cleared-hash-never-resolves-after-jit-number.mjs';
+    const original = readFileSync(join(process.cwd(), definition), 'utf8');
+    write(definition, original);
+    write('backlog/4290-legacy.md', '---\nbornAs: x34h6a2\nkind: story\n---\n# Legacy\n');
+    write('backlog/xhash01-alpha.md', '---\nkind: story\n---\n# Alpha\n');
+    write(LEDGER_REL, JSON.stringify({ x34h6a2: '4290' }));
+    git('add', '.'); git('commit', '-qm', 'seed real queue soak');
+
+    expect(numberPendingHashes(repo).committed).toBe(true);
+    expect(readFileSync(join(repo, definition), 'utf8')).toBe(original);
+    const probe = `import scenario from ${JSON.stringify(pathToFileURL(join(repo, definition)).href)};
+      console.log(JSON.stringify(scenario.judge(await scenario.run({ sourceRoot: ${JSON.stringify(process.cwd())} }))));`;
+    expect(JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', probe], { encoding: 'utf8' }))).toEqual([]);
+  });
+
+  it('refuses a pending path left outside card metadata in an otherwise rewritten soak definition', () => {
+    write('backlog/2200-legacy.md', '---\nkind: story\n---\n');
+    write('backlog/xhash01-alpha.md', '---\nkind: story\n---\n');
+    const definition = 'scripts/conveyor/soak/breaks/regression.mjs';
+    write(definition, "export default { card: 'we:backlog/xhash01-alpha.md', run() { return 'we:backlog/xhash01-alpha.md'; } };\n");
+    write(QUEUED_REL, JSON.stringify({ queued: [] }));
+    git('add', '.'); git('commit', '-qm', 'seed unswept executable path');
+
+    const result = numberPendingHashes(repo);
+    expect(result.committed).toBe(false);
+    expect(result.error).toContain('hash-path citation outside the rewrite scope');
+    expect(result.error).toContain(definition);
+    expect(backlogNames()).toContain('xhash01-alpha.md');
+    expect(git('status', '--porcelain').trim()).toBe('');
   });
 
   it('assigns max+1, renames the hash file, rewrites a referrer, and commits', () => {

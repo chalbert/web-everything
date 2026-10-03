@@ -71,10 +71,11 @@ import { readFileSync, writeFileSync, readdirSync, mkdtempSync, rmSync, existsSy
 import { resolve, join, isAbsolute, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir, tmpdir } from 'node:os';
+import { createRequire } from 'node:module';
 import { parseQueued, isQueued, queuedNums } from './readiness/queued-state.mjs';
 import { parseManifest, validateManifest, orderedRepos, extractManifestFromBody, MANIFEST_FILENAME } from './readiness/lane-manifest.mjs';
 import { isHash, isNum, idFromName, applyLedger, swapHashes, mapHashReferences } from './backlog/id.mjs';
-import { HASH_PATH_CITE_SOURCE, findHashPathCitesInGrepLines } from './lib/citation-check.mjs'; // #4075 follow-up (xmd4pfa) — the pre-push hash-path-citation backstop, one pattern shared with check:standards' own gate
+import { HASH_PATH_CITE_SOURCE, findHashPathCitesInGrepLines, findHashPathCiteOutsideBacklog } from './lib/citation-check.mjs'; // #4075 follow-up (xmd4pfa) — the pre-push hash-path-citation backstop, one pattern shared with check:standards' own gate
 // #2603 — the drain's resolve-reachable check reads `status:` FRONTMATTER-strict (see `resolveReachableFromBody`),
 // never loose over the whole body. `readField` parses only the first `---`…`---` block.
 import { readField } from './backlog/frontmatter.mjs';
@@ -618,6 +619,36 @@ export function normalizeFlowAckCardRefs(content) {
 }
 
 /**
+ * Executable soak definitions mix live citations with historical hashes and fixture data. Only the
+ * default export's literal `card` metadata is a numbering target. Parse without executing the module,
+ * then edit that source span only: comments, nested `card` fields, templates in run(), fixedBy.where,
+ * and fixture paths must survive byte-for-byte. Unsupported forms remain subject to the citation
+ * backstop. Load the existing TS parser only when a definition actually contains a hash.
+ */
+function rewriteSoakCardCitation(content, visit) {
+  if (!/\bx[0-9a-z]{6}\b/.test(content)) return content;
+  const ts = createRequire(import.meta.url)('typescript');
+  const source = ts.createSourceFile('break.mjs', content, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  if (source.parseDiagnostics.length) return content;
+  const spans = [];
+  for (const statement of source.statements) {
+    if (!ts.isExportAssignment(statement) || statement.isExportEquals || !ts.isObjectLiteralExpression(statement.expression)) continue;
+    for (const property of statement.expression.properties) {
+      if (!ts.isPropertyAssignment(property) ||
+          !(ts.isIdentifier(property.name) || ts.isStringLiteral(property.name)) || property.name.text !== 'card') continue;
+      const value = property.initializer;
+      if (ts.isStringLiteral(value) || ts.isNoSubstitutionTemplateLiteral(value)) {
+        spans.push({ start: value.getStart(source) + 1, end: value.end - 1 });
+      }
+    }
+  }
+  for (const { start, end } of spans.reverse()) {
+    content = content.slice(0, start) + content.slice(start, end).replace(/\bx[0-9a-z]{6}\b/g, visit) + content.slice(end);
+  }
+  return content;
+}
+
+/**
  * JIT numbering (#2288) — the one place a backlog id is minted. Numbers EVERY provisional (hash-keyed)
  * backlog file now present on main, not just the couple's own id: a landed lane can carry LEFTOVER items
  * scaffolded during close-out (born hash-keyed), and those need numbering too. A hash file only reaches
@@ -636,8 +667,8 @@ export function normalizeFlowAckCardRefs(content) {
  * flow's own `cite`s name a backlog file by its pre-numbering hash the same way a docs page does; without
  * this sweep the cite dangles the moment the card lands numbered, which is exactly how main's CI went red
  * — build-dispatch.flow.json's `backlog/xr05jjl-…` cite outlived the card's own rename to #4220), AND
- * `scripts/conveyor/soak/breaks/*.mjs` (the executable definitions' `card` citations likewise name landed
- * hash paths). Only tracked top-level definitions are swept, never nested fixtures or test files —
+ * `scripts/conveyor/soak/breaks/*.mjs` (ONLY the default export's literal `card` metadata, never executable
+ * fixture data or historical hashes). Only tracked top-level definitions are swept, never nested fixtures or test files —
  * numbering each item AND repairing any cross-lane `blockedBy`/`parent`/`#ref` that still points at an
  * already-numbered blocker by its old hash.
  * Missing local mappings for explicit references fall back to bornAs on origin/main (#2903).
@@ -714,7 +745,7 @@ export function numberPendingHashes(CWD, { dryRun = false } = {}) {
   // Soak definitions carry live `card` citations too. Leaving these outside the rewrite set made the
   // unswept-citation backstop refuse EVERY numbering pass (2026-10-03 main CI incident). Keep that
   // backstop: teach the numberer this citation home, with the same tracked-only, non-recursive boundary
-  // as flows. Nested fixtures and test files may contain synthetic hashes and are not rewrite targets.
+  // as flows. These are executable modules: rewrite only their citation metadata below, not their code.
   let breakNames;
   try { breakNames = readdirSync(BREAKS).filter((f) => f.endsWith('.mjs') && !f.endsWith('.test.mjs')); }
   catch { breakNames = []; }
@@ -724,7 +755,7 @@ export function numberPendingHashes(CWD, { dryRun = false } = {}) {
     .filter((rel) => trackedBreaks.has(rel))
     .map((rel) => ({ name: rel, content: readFileSync(join(CWD, rel), 'utf8') }));
 
-  const files = [...stems.map((name) => ({ name, content: readFileSync(join(BL, `${name}.md`), 'utf8') })), ...docsFiles, ...memoryFiles, ...flowsFiles, ...breakFiles];
+  const files = [...stems.map((name) => ({ name, content: readFileSync(join(BL, `${name}.md`), 'utf8') })), ...docsFiles, ...memoryFiles, ...flowsFiles];
   const contentByName = new Map(files.map((f) => [f.name, f.content]));
   // Resolve a `files` entry's `name` to its on-disk absolute + commit-relative path — a backlog stem (bare,
   // no `/`) lives under `backlog/`; a docs entry (`name` already a full repo-relative path) lives as-is.
@@ -848,6 +879,15 @@ export function numberPendingHashes(CWD, { dryRun = false } = {}) {
   for (const r of rewrites) {
     if (r.name.endsWith('.flow.json')) r.content = normalizeFlowAckCardRefs(r.content);
   }
+  // Keep soak modules out of BOTH generic passes (fallback reference resolution and applyLedger,
+  // including its path-renaming side effects). Old ledger entries are just as dangerous as new IDs:
+  // 952011907 replaced the queue soak's historical HASH with its LANDED_NUM via an old ledger mapping.
+  const remainingBreakCites = new Map();
+  for (const { name, content } of breakFiles) {
+    const rewritten = rewriteSoakCardCitation(content, (hash) => ledger[hash] ?? resolveReference(hash, name));
+    if (rewritten !== content) rewrites.push({ name, content: rewritten });
+    remainingBreakCites.set(name, new Set(findHashPathCiteOutsideBacklog(rewritten, name).map((c) => c.hash)));
+  }
 
   // #4075 follow-up (xmd4pfa, hardening after the build-dispatch.flow.json incident) — NEVER COMMIT A
   // RENAME THIS PASS CAN PROVE LEAVES A DANGLING CITATION. The dirs swept above (backlog/, docs/agent/,
@@ -878,8 +918,11 @@ export function numberPendingHashes(CWD, { dryRun = false } = {}) {
       { cwd: CWD, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 16 * 1024 * 1024 },
     ).split('\n').filter(Boolean);
     unsweptHashPathCites = findHashPathCitesInGrepLines(hits)
-      // sweptRelPaths: this pass already rewrites that exact file's content below
-      .filter((c) => !sweptRelPaths.has(c.file) && renamingNow.has(c.hash))
+      // Soak modules are only partially swept: a repaired card field cannot hide a remaining
+      // hash-path citation in code/comments (even the same hash on the same line).
+      .filter((c) => renamingNow.has(c.hash) && (remainingBreakCites.has(c.file)
+        ? remainingBreakCites.get(c.file).has(c.hash)
+        : !sweptRelPaths.has(c.file)))
       .map((c) => ({ path: c.file, hash: c.hash }));
   } catch { /* git grep exits 1 on no match, or git unavailable — no findings either way, never abort on that alone */ }
   if (unsweptHashPathCites.length) {
