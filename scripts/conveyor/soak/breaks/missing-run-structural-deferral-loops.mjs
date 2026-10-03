@@ -22,7 +22,7 @@ const CAP = 2;
 export default {
   id: 'missing-run-structural-deferral-loops',
   title: 'missing-run recovery re-deferred stacked/fork/marked-tip PRs every tick forever — deferrals post no marker, so the retry cap never tripped',
-  card: 'we:backlog/xmrun09',
+  card: 'we:backlog/4855',
   fixedBy: { sha: 'ad1f47ac0', where: 'lane/missing-run', paths: ['scripts/conveyor/missing-run-push.mjs'] },
   fixPresent(root) {
     const p = join(root, 'scripts/conveyor/missing-run-push.mjs');

@@ -8,7 +8,7 @@
  *
  * Live incident: 2026-09-28, we#2852 — the build queue stalled behind one PR none of the queued items touched.
  *
- * Fix (card xm40bs2, we PR #2857): `BUILD_DISPATCH_POLICY.globalFreezeLabels` (just `blocked:daemon-bug`) is the only set that
+ * Fix (card 4367, we PR #2857): `BUILD_DISPATCH_POLICY.globalFreezeLabels` (just `blocked:daemon-bug`) is the only set that
  * freezes every candidate; a `*-stalled` PR is an ordinary open PR, so `scope-vs-open-prs` still holds a build
  * that overlaps ITS files. (The same PR also stops a finished session reading as `-stalled` in
  * we:scripts/conveyor/review-status-tag.mjs — covered by its own incident unit test.)
@@ -50,7 +50,7 @@ function fakeTick() {
 export default {
   id: 'stalled-label-freezes-whole-build-queue',
   title: 'one PR labelled review-status:*-stalled froze every queued build, even ones that never touch its files',
-  card: 'we:backlog/xm40bs2 (we PR #2857, epic #4075)',
+  card: 'we:backlog/4367 (we PR #2857, epic #4075)',
   fixedBy: { sha: 'ba6409266', where: 'lane/unfreeze-builder-stalled-label', paths: ['scripts/conveyor/build-dispatch-policy.mjs', 'scripts/conveyor/review-status-tag.mjs'] },
   fixPresent(root) {
     const p = join(root, 'scripts/conveyor/build-dispatch-policy.mjs');

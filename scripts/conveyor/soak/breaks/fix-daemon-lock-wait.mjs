@@ -1,5 +1,5 @@
 /**
- * @file breaks/fix-daemon-lock-wait.mjs — live break 5, 2026-09-25 10:28-10:40 ET (#4075, epic card x0zg44l). The
+ * @file breaks/fix-daemon-lock-wait.mjs — live break 5, 2026-09-25 10:28-10:40 ET (#4075, epic card 4169). The
  * fix daemon's tick-start rebuild (`we:scripts/lib/daemon-rebuild.mjs#rebuildClone`) takes the clone's WRITE lock
  * on EVERY tick (opportunistic — nothing has to have changed). While the review daemon's own 10-minute tick held
  * a READ slot on the same clone, the fix daemon's rebuild sat SILENTLY waiting for the lock's 600s default, no

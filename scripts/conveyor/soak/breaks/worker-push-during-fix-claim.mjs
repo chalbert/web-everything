@@ -196,7 +196,7 @@ export default {
           });
           ctx.finished = end.status === 0;
           if (!ctx.finished) flag('fix-end', `fix-end failed: ${`${end.stdout ?? ''}${end.stderr ?? ''}`.trim()}`);
-          // fix-end never relies on the draft-first promotion when the claim was never drafted (backlog xyfvtfz):
+          // fix-end never relies on the draft-first promotion when the claim was never drafted (backlog 4302):
           // the PR must stay exactly as it was — ready — with `review-status:fixing` gone.
           else if (w.gh.pr('we', ctx.pr)?.isDraft !== false) flag('end-drafted', 'fix-end must NOT leave a never-drafted PR as draft');
           else if (labelNames(w, ctx.pr).includes('review-status:fixing')) flag('end-label-lingers', 'fix-end must drop review-status:fixing');

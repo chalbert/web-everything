@@ -357,3 +357,18 @@ export function extractSubmitResult(payload) {
     url: null,
   };
 }
+
+/** Human submit summary; the effect completing does not mean the home opened a PR. */
+export function describeSubmit(result) {
+  if (result.outcome === 'opened') {
+    return { line: `submit: opened #${result.pr} ${result.url}`, failed: false };
+  }
+  if (result.outcome === 'refused') {
+    return { line: `submit: REFUSED (${result.reason})${result.pr != null ? ` — PR #${result.pr}` : ''}`
+      + (result.detail ? ` — ${result.detail}` : ''), failed: true };
+  }
+  if (result.outcome === 'unrun' && result.reason === 'dry-run') {
+    return { line: 'submit: dry run — nothing opened', failed: false };
+  }
+  return { line: `submit: NOT RUN — ${result.reason}`, failed: true };
+}

@@ -585,6 +585,31 @@ export async function deliverItem(launch, provider = CLAUDE_RESTRICTED_PROVIDER,
         + 'resume-opens it, never a rebuild)', { status: 'error', outcome: 'open-pending', reason: infra.reason });
     }
 
+    if (prResult.outcome !== 'opened') {
+      // A learning or recovery-ref failure must never turn a refused submit into lane cleanup.
+      try { if (report.learning) dropLearning({ sessionSlug, learning: report.learning }); } catch { /* best-effort */ }
+      const { reason, detail, pr = null } = prResult;
+      const result = { reason, detail, pr };
+      if (pr == null) {
+        let sha = null;
+        let keepRef = null;
+        try { sha = run('git', ['rev-parse', 'HEAD'], { cwd: gate.lanePath }).trim() || null; } catch { /* best-effort */ }
+        if (sha) {
+          const ref = `refs/keep/${item}-${sha.slice(0, 8)}`;
+          try {
+            run('git', ['update-ref', ref, sha], { cwd: gate.lanePath });
+            keepRef = ref;
+          } catch { /* best-effort; retain the lane even when recovery metadata cannot be written */ }
+        }
+        Object.assign(result, { lane: gate.lanePath, sha, keepRef });
+        settleTerminal('open-refused', { result, releaseClaim: true, hold: `open-refused: ${reason}` });
+      } else {
+        // A live PR retains the existing PR-observed claim retirement policy.
+        settleTerminal('open-refused', { result });
+      }
+      return finish(describeOpenPrRefusal(prResult), { status: 'error', outcome: 'open-refused', ...result });
+    }
+
     // ---- 7. Forward the optional learning, if the agent supplied one (REAL CLI surface). --------------------
     if (report.learning) dropLearning({ sessionSlug, learning: report.learning });
 
@@ -2404,6 +2429,11 @@ export function writePrBody({ item, lane, report, delegation = null }, { writeFi
   const bodyFile = `${lane}/.pr-body.md`;
   writeFile(bodyFile, buildPrBody({ item, report, delegation }));
   return bodyFile;
+}
+
+/** Format the classifier's refusal without inventing a PR when no PR exists. */
+export function describeOpenPrRefusal({ reason, detail, pr }) {
+  return `${pr == null ? '' : `PR #${pr} `}open-refused (${reason})${detail ? `: ${detail}` : ''}`;
 }
 
 /** REAL (was PLACEHOLDER — `<slug>` was dead, never-substituted text that would have produced an invalid ref

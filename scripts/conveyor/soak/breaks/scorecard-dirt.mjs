@@ -1,5 +1,5 @@
 /**
- * @file breaks/scorecard-dirt.mjs — live break 1b, 2026-09-25 13:36 ET (#4075, card x0zg44l). A dispatched review
+ * @file breaks/scorecard-dirt.mjs — live break 1b, 2026-09-25 13:36 ET (#4075, card 4169). A dispatched review
  * session appended a scorecard row (`we:scripts/conveyor/run-scorecard-store.mjs#appendScorecard`, default path
  * `scripts/conveyor/run-scorecards.json`, TRACKED) FROM INSIDE the daemon's own clone — the session carried no
  * `CONVEYOR_STATE_ROOT` (real dispatched sessions never do; see `behaviours.mjs#writeScorecard`). The clone went

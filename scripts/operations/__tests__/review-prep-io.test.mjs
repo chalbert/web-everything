@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
@@ -557,5 +557,30 @@ describe('review-prep-io.mjs — the docs describe the credential downgrade, not
   it('`recordPrepVerdict`\'s own JSDoc no longer contains the stale "LANDS OR PARKS" string', () => {
     expect(SOURCE).not.toContain('LANDS OR PARKS');
     expect(SOURCE).toMatch(/downgrad/i);
+  });
+});
+
+// Real guarded writer, temporary cards, and stubbed publication transports.
+describe('#3238 guarded review writes', () => {
+  it.each([
+    ['locus', 'Inspect scripts/operations/review-prep.mjs'],
+    ['secret', 'Credential: ' + 'ghp_' + 'a'.repeat(36)],
+    ['lane-guard', 'A clean review in a primary checkout'],
+  ])('%s refusal leaves the card unchanged and performs no publication', async (reason, note) => {
+    const cwd = reason === 'lane-guard' ? join(realpathSync(root), 'web-everything') : root;
+    mkdirSync(join(cwd, 'backlog'), { recursive: true });
+    const path = join(cwd, 'backlog', '9999-a-fake-card.md');
+    writeFileSync(path, CARD_RAW);
+    const calls = [];
+    const result = await recordPrepVerdict({
+      item: '9999', repo: 'chalbert/web-everything', cwd, confidence: 'High', note,
+      hasCredential: () => true,
+      exec: (...args) => { calls.push(args); return 'deadbeefcafe'; },
+      runNode: (...args) => { calls.push(args); return '{}'; },
+      readStagedContent: () => readFileSync(path, 'utf8'),
+    });
+    expect(result).toMatchObject({ recorded: false, verified: false, reason, path });
+    expect(readFileSync(path, 'utf8')).toBe(CARD_RAW);
+    expect(calls).toEqual([]);
   });
 });

@@ -1,5 +1,5 @@
 /**
- * @file breaks/claude-auth-expired.mjs — LIVE INCIDENT, night of 2026-09-25/26 ET (card we:backlog/xbsmmwu,
+ * @file breaks/claude-auth-expired.mjs — LIVE INCIDENT, night of 2026-09-25/26 ET (card we:backlog/4205,
  * epic #4075). The operator's own Claude login expired; every daemon-dispatched session (`ci-heal-2711`/
  * `ci-heal-2712`, re-dispatched repeatedly until 06:53) ended IMMEDIATELY on the CLI's own auth failure and sat
  * `blocked`/`idle` for hours, pid still alive, never producing anything further. `reconcile-core.mjs
@@ -65,9 +65,9 @@ const SABOTAGE_AT_ROUND = 2;
 export default {
   id: 'claude-auth-expired',
   title: "a ci-heal session that hit the Claude CLI's own auth failure sits blocked forever; reconcile refuses live-process and the PR is never re-healed",
-  card: 'we:backlog/xbsmmwu-claude-auth-expired-session-detection-reaper-reconcile-liven.md (epic #4075)',
+  card: 'we:backlog/4205-claude-auth-expired-session-detection-reaper-reconcile-liven.md (epic #4075)',
   fixedBy: {
-    sha: 'this same PR', where: 'this same PR (card we:backlog/xbsmmwu)',
+    sha: 'this same PR', where: 'this same PR (card we:backlog/4205)',
     paths: ['scripts/conveyor/reconcile-core.mjs', 'scripts/conveyor/reconcile-pass.mjs', 'scripts/conveyor/hung-session.mjs'],
   },
   fixPresent(root) {

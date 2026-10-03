@@ -9,7 +9,7 @@ const TOOLS = fileURLToPath(new URL('./fixtures/builder-round-tools.cjs', import
 export default {
   id: 'builder-round-bound',
   title: 'slow lane collectors are shared once per builder round and refreshed on the next round',
-  card: 'we:backlog/xbrndtm-restore-builder-round-cadence.md',
+  card: 'we:backlog/4780-restore-builder-round-cadence.md',
   fixedBy: { sha: 'working-tree', where: 'lane-58', paths: ['scripts/lib/planning-snapshot.mjs'] },
   fixPresent: root => existsSync(join(root, 'scripts/lib/planning-snapshot.mjs')),
   async run({ root = ROOT, log } = {}) {

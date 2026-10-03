@@ -1,7 +1,7 @@
 /**
  * @file breaks/rebuild-finalize-starved.mjs — live break, 2026-09-26 on `wev-review-daemon` (#4044 follow-up,
  * lane fix-rebuild-finalize). The review daemon and the fix daemon share one clone. A rebuild smokes its candidate
- * OFF the lock (xa4qo7n, 1-4 min live), so the sibling daemon starts a tick (takes a read slot) meanwhile; the
+ * OFF the lock (4218, 1-4 min live), so the sibling daemon starts a tick (takes a read slot) meanwhile; the
  * finalize then waits 60s for that tick, gives up — "could not take the write lock to finalize <sha> after a
  * passing smoke (reader Mac:<pid> still ticking) — retrying next tick" — and THROWS THE PASS AWAY. The next tick
  * re-plans (main moved: a new candidate sha), re-smokes, and the sibling starts another tick during that smoke.

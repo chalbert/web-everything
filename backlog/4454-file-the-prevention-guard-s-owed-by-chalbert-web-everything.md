@@ -23,7 +23,7 @@ Idempotency key (do not edit): approval-prevention-key:chalbert/web-everything#2
 
 ## Progress
 
-- Prepare pass 2026-09-30. Premise: not delivered. `git log --grep` for `4454` / `xxnf8w5` shows only the JIT-numbering commit; no cite-content gate exists.
+- Prepare pass 2026-09-30. Premise: not delivered. `git log --grep` for `4454` / `4454` shows only the JIT-numbering commit; no cite-content gate exists.
 - Scope corrected. Old `scope:` named the cited card (`we:backlog/4349-…md`), which is evidence, not the work. New scope is the three files the guard lives in (citation gate lib, its wiring, its test). Evidence: `we:scripts/lib/citation-check.mjs` (`findDanglingLoci`, gate 5) and `we:scripts/check-standards.mjs` (gate 6f-ii, 6f-ii-b…d).
 - Cited line is itself an example: `we:backlog/4349-a-finished-delivery-wrapper-never-settles-its-run-record-or.md:19` is a blank line on current `main`. Gate 5 passes it today (file exists, 19 <= EOF).
 
