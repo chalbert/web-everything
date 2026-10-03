@@ -1,4 +1,4 @@
-/** PR #3432 (card xxh4zw8): incomplete required-check evidence must not drop a PR from planning. */
+/** PR #3432 (card 4958): incomplete required-check evidence must not drop a PR from planning. */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { runReconcilePass } from '../../reconcile-pass.mjs';
@@ -15,8 +15,8 @@ const options = (pr, readChecks) => ({ repo: 'we', readPrs: () => [pr], readAgen
 export default {
   id: 'incomplete-check-evidence-drops-pr-from-planning',
   title: 'PR #3432: a cancelled required check with absent jobs, or an unreadable check read, drops the PR from every planner branch',
-  card: 'we:backlog/xxh4zw8-a-cancelled-required-check-still-strands-a-pr-in-awaiting-ci.md',
-  fixedBy: { sha: '54903364cac41bcb889899e41d61eec4f1efe0c0', where: 'lane/card-xxh4zw8', paths: ['scripts/conveyor/reconcile-pass.mjs'] },
+  card: 'we:backlog/4958-a-cancelled-required-check-still-strands-a-pr-in-awaiting-ci.md',
+  fixedBy: { sha: '54903364cac41bcb889899e41d61eec4f1efe0c0', where: 'lane/card-4958', paths: ['scripts/conveyor/reconcile-pass.mjs'] },
   fixPresent(root) { return readFileSync(join(root, 'scripts/conveyor/reconcile-pass.mjs'), 'utf8').includes('result.incomplete'); },
   async run() {
     const violations = [];

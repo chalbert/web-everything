@@ -15,7 +15,7 @@ import {
   runHungCiRecoveryAllRepos, formatHungActionLine,
   runMainRedRebaseAllRepos, formatMainRedRebaseActionLine,
   runMissingRunRecoveryAllRepos, formatMissingRunActionLine,
-  runPromoteDraftDispatchAllRepos,
+  runPromoteDraftDispatchAllRepos, formatPromoteActionLine,
   defaultTagDispatchStatus, withFixDispatchClaimRefresh,
 } from '../reconcile-fix-dispatch-daemon.mjs';
 import { CONSTELLATION_REPOS } from '../../../scripts/lib/constellation-repos.mjs';
@@ -1007,13 +1007,49 @@ describe('runPromoteDraftDispatchAllRepos (draft-first PRs)', () => {
   it('a per-repo tick failure isolates to that repo, as `tick-failed`, never aborting the rest', () => {
     const tick = vi.fn(({ repo }) => { if (repo === 'repo-a') throw new Error('promote broke'); return { dispatched: [], refusals: [] }; });
     const out = runPromoteDraftDispatchAllRepos({ repos: ['repo-a', 'repo-b'], tick });
-    expect(out.refusals).toEqual([{ repo: 'repo-a', prNumber: null, kind: 'tick-failed', why: 'promote broke' }]);
+    expect(out.refusals).toEqual([{ repo: 'repo-a', prNumber: null, kind: 'tick-failed', why: 'promote-draft half: promote broke' }]);
   });
 
   it('defaults repos to FIX_DISPATCH_DAEMON_REPOS — every watched repo', () => {
     const tick = vi.fn(() => ({ dispatched: [], refusals: [] }));
     runPromoteDraftDispatchAllRepos({ tick });
     expect(tick).toHaveBeenCalledTimes(FIX_DISPATCH_DAEMON_REPOS.length);
+  });
+});
+
+// LIVE INCIDENT 2026-10-03 (PR #3806, the fix for main's red CI, sat green-but-draft 15+ min): the promote half
+// threw the stale-main guard every tick and the daemon logged NOTHING for it — a `tick-failed` refusal from any
+// half but the fix half was skipped as "already printed". Every promote outcome must reach the log.
+describe('onTick — every promote-draft outcome is logged (#3806 incident)', () => {
+  const REPO = 'chalbert/web-everything';
+  const tickOf = (over) => {
+    const log = { error: vi.fn() };
+    buildCliDaemonEffects({ owner: 'x', log }).onTick({ repos: [{ repo: REPO, result: {} }], dispatched: [], refusals: [], reconcileRefusals: [], ...over });
+    return log.error.mock.calls.map((c) => c[0]);
+  };
+
+  it('logs a promote-half tick failure (stale-main) that the fix half\'s per-repo error line does not cover', () => {
+    const lines = tickOf({ refusals: [{ repo: REPO, prNumber: null, kind: 'tick-failed', why: 'promote-draft half: promote-draft: the dispatching checkout is 2 commit(s) behind origin/main' }] });
+    expect(lines).toContain(`reconcile-fix-dispatch-daemon: refused tick-failed ${REPO} (no PR) — promote-draft half: promote-draft: the dispatching checkout is 2 commit(s) behind origin/main`);
+  });
+
+  it('does not print the same tick failure twice when the fix half already printed it per repo', () => {
+    const lines = tickOf({
+      repos: [{ repo: REPO, error: 'boom' }],
+      refusals: [{ repo: REPO, prNumber: null, kind: 'tick-failed', why: 'boom' }],
+    });
+    expect(lines.filter((l) => l.includes('boom'))).toHaveLength(1);
+  });
+
+  it('logs one line per promoted draft', () => {
+    const lines = tickOf({ promoteDraft: { dispatched: [{ pr: 3806, kind: 'promote-draft', repo: REPO }] }, dispatched: [{ pr: 3806, kind: 'promote-draft', repo: REPO }] });
+    expect(lines).toContain(formatPromoteActionLine({ pr: 3806, repo: REPO }));
+    expect(formatPromoteActionLine({ pr: 3806, repo: REPO })).toMatch(/promoted chalbert\/web-everything PR #3806 to ready for review/);
+  });
+
+  it('logs a draft the promote half did not promote, with its reason', () => {
+    const lines = tickOf({ refusals: [{ repo: REPO, pr: 3805, kind: 'draft-not-promoted', why: 'draft left as is: its required checks read pending, not green' }] });
+    expect(lines.some((l) => l.includes('refused draft-not-promoted') && l.includes('PR #3805') && l.includes('pending'))).toBe(true);
   });
 });
 
@@ -1047,7 +1083,7 @@ describe('runTickAllRepos — draft-first PRs: the promote-draft half rides THIS
     });
     expect(fixTick).toHaveBeenCalledWith({ repo: 'repo-a' });
     expect(out.dispatched).toEqual(expect.arrayContaining([{ pr: 1, repo: 'repo-a' }]));
-    expect(out.refusals).toEqual(expect.arrayContaining([{ repo: 'repo-a', prNumber: null, kind: 'tick-failed', why: 'promote broke' }]));
+    expect(out.refusals).toEqual(expect.arrayContaining([{ repo: 'repo-a', prNumber: null, kind: 'tick-failed', why: 'promote-draft half: promote broke' }]));
   });
 
   it('is UNPAUSED by the Claude-auth-broken gate — no Claude session is ever spawned by this half', async () => {

@@ -4,10 +4,10 @@
  * `cleared-but-not-ready` out of 156 not-ready rows.
  *
  * ROOT CAUSE: the operator clears an item for the conveyor to build under whatever id the tooling shows AT THAT
- * MOMENT — often a not-yet-numbered JIT hash (`x34h6a2`). `.conveyor/queue.json` stores exactly that id. The
+ * MOMENT — often a not-yet-numbered JIT hash (`4290`). `.conveyor/queue.json` stores exactly that id. The
  * drain later JIT-numbers the card the instant its WE half lands (#2288), renaming it to `backlog/4290-….md` and
- * stamping `bornAs: x34h6a2` into the numbered card's frontmatter (#2392) — but the sidecar still says
- * `x34h6a2`. Every membership test the dispatcher/daemon used was an EXACT `normNum` match against the
+ * stamping `bornAs: 4290` into the numbered card's frontmatter (#2392) — but the sidecar still says
+ * `4290`. Every membership test the dispatcher/daemon used was an EXACT `normNum` match against the
  * build-queue's rows, which are keyed by the LANDED number — so a stale hash row could never again match, and
  * read as "cleared, but not ready" FOREVER, even once the card was numbered and ready. At the 150-card scale
  * this reproduces, that is most of the queue silently invisible to the builder.
@@ -32,7 +32,9 @@ import { fileURLToPath } from 'node:url';
 
 const REPO_ROOT = resolve(fileURLToPath(import.meta.url), '..', '..', '..', '..', '..');
 
-const HASH = 'x34h6a2';
+// An invented JIT-shaped hash that no real card carries — the drain rewrites a REAL card's hash to its number
+// everywhere it appears (it once turned the original hash here into its number, collapsing HASH into LANDED_NUM).
+const HASH = 'xsk0a2z';
 const LANDED_NUM = '4290';
 
 export default {

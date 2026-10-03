@@ -56,7 +56,10 @@
  * — `undefined` for the WE-default path (byte-identical to before), the real slug otherwise.
  */
 import { repoKeyForSlug, CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
-import { armSelfReexecOnFastForward, assertMainNotStale } from '../lib/main-staleness.mjs';
+import { armSelfReexecOnFastForward, assertMainNotStale, isCodePath } from '../lib/main-staleness.mjs';
+import { closureHits, collectImportClosure } from '../lib/import-closure.mjs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createDraftPromoteProvider } from '../lib/draft-promote-provider.mjs';
 import { runReconcilePass } from '../conveyor/reconcile-pass.mjs';
 import { readPrsFromFile } from '../conveyor/open-pr-fetch.mjs';
@@ -65,6 +68,28 @@ import { checksArgv, parseJsonLines } from './pr-status-io.mjs';
 import { reduceCheckState } from './pr-status.mjs';
 import { getRequiredStatusChecks } from '../lib/required-status-checks.mjs';
 import { applyReviewStatus } from '../conveyor/review-status-tag.mjs';
+
+const THIS_CODE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+let promoteClosureMemo;
+
+/** The static import closure of THIS file in the running tree (memoized), or `null` if unreadable. This is the
+ *  complete set of code a promote pass can run; a managed clone that is behind `origin/main` only in files
+ *  outside it is not stale FOR PROMOTION. */
+export function promoteCodeClosure() {
+  if (promoteClosureMemo === undefined) {
+    promoteClosureMemo = collectImportClosure({ root: THIS_CODE_ROOT, entries: ['scripts/operations/promote-draft-pr-dispatch.mjs'] });
+  }
+  return promoteClosureMemo;
+}
+
+/** Is `path` (repo-relative) on the promote code path? `closure` is injectable; an unknown or incomplete
+ *  closure fails closed — every code file counts as on the path (the plain #4044 rule). */
+export function isPromoteCodePath(path, { closure = promoteCodeClosure() } = {}) {
+  const p = String(path || '');
+  if (!p) return false;
+  if (!closure || !closure.complete) return isCodePath(p);
+  return closureHits({ closure, changedFiles: [p] }).length > 0;
+}
 
 /**
  * THE FRESH RE-READ (#2811). Asks GitHub's own commit-statuses endpoint for `sha`'s check runs RIGHT NOW —
@@ -142,7 +167,12 @@ export function runReconcilePromoteDraftDispatch({
   if (repoKey === null) throw new Error(`promote-draft-pr-dispatch: --repo ${repo} is not a constellation repo`);
   // #x1rr9rh (multi-repo slice 2) — guards THIS dispatching checkout's own import path, same as every sibling
   // mechanical pass (`ci-heal-pr-dispatch.mjs`, `reconcile-fix-dispatch.mjs`) — never the target repo.
-  assertMainNotStale(root, checkStaleness);
+  // LIVE INCIDENT 2026-10-03: PR #3806 (the fix for main's red CI) sat green-but-draft for 15+ minutes because
+  // the daemon clone was 2 commits behind (held off `origin/main` by a slow smoke, tree dirty so no last-good
+  // fallback) and this guard threw for the WHOLE pass. The two commits touched no file this pass imports, so a
+  // managed clone behind only in files off `isPromoteCodePath` is fresh enough to promote (#4387's rule; the
+  // write is `gh pr ready` after a fresh per-sha re-check, never agent code).
+  assertMainNotStale(root, checkStaleness, { label: 'promote-draft', dispatchPath: isPromoteCodePath });
   const repoSlug = CONSTELLATION_REPOS[repoKey].slug;
   // #4285-cwd-repo (we:backlog/x4ua3v8) — explicit `--repo` for every non-WE dispatch; `undefined` for WE
   // keeps the WE-default path byte-identical to before this fix (still relies on `cwd` inference there, same
@@ -154,6 +184,15 @@ export function runReconcilePromoteDraftDispatch({
   const entries = (reconciled.dispatch ?? []).filter((entry) => entry.kind === 'promote-draft');
   const dispatched = [];
   const refusals = [];
+  // Every open draft the plan did NOT promote says why, once per tick (the log used to carry nothing for a draft
+  // the promote half skipped). The reconcile `draft` refusal carries the check state it read.
+  for (const r of (reconciled.refusals ?? [])) {
+    if (r?.kind !== 'draft' || r.check === 'green') continue;
+    refusals.push({
+      pr: r.prNumber, kind: 'draft-not-promoted',
+      why: `draft left as is: its required checks read ${r.check ?? 'unknown'}, not green, in this tick's plan — nothing to promote yet`,
+    });
+  }
   for (const entry of entries) {
     const sha = entry.headRefOid;
     // #2811 — re-verify EVERY required check for the EXACT head sha immediately before the one write this file

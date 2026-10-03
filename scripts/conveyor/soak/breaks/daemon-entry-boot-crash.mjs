@@ -1,5 +1,5 @@
 /**
- * @file breaks/daemon-entry-boot-crash.mjs — live break, 2026-09-29 ~10:45 ET (#4468, card xzdo6ux). Overlay PR
+ * @file breaks/daemon-entry-boot-crash.mjs — live break, 2026-09-29 ~10:45 ET (#4468, card 4468). Overlay PR
  * #2921 introduced an ESM circular-import TDZ (`ReferenceError: Cannot access 'DELIVER_ITEM_RUN_SCRIPT' before
  * initialization` in `scripts/operations/dispatch-provider-registry.mjs`). The rebuild's live smoke PASSED and
  * adopted the tree — none of `daemon-live-smoke.mjs#SMOKE_CHECKS` at the time ever actually BOOTED a daemon
@@ -21,7 +21,7 @@
  * runs, so `tdz-b.mjs`'s `a + 1` reads `a` before `tdz-a.mjs` ever reaches its `export const a = 1` line —
  * `ReferenceError: Cannot access 'a' before initialization`, the same class of error #2921 hit live.
  *
- * FIX (xzdo6ux / #4468): `scripts/lib/daemon-boot-smoke.mjs#checkDaemonEntriesBoot`, appended to
+ * FIX (4468 / #4468): `scripts/lib/daemon-boot-smoke.mjs#checkDaemonEntriesBoot`, appended to
  * `daemon-live-smoke.mjs#SMOKE_CHECKS` as the `daemon-entries-boot` row — spawns a child that dynamically
  * `import()`s every real daemon entry module (or, here, the fixture's own entry) and fails the whole smoke if
  * any entry throws at import time.
@@ -46,10 +46,10 @@ const FIXTURES = {
 export default {
   id: 'daemon-entry-boot-crash',
   title: 'a candidate whose daemon entry throws an ESM circular-import TDZ at boot passes the live smoke (nothing ever imports the entry) and crash-loops every daemon that restarts onto it, with no way to self-roll-back',
-  card: 'we:backlog/xzdo6ux (#4468)',
+  card: 'we:backlog/4468 (#4468)',
   // `sha` is a symbolic placeholder, not a real git sha — the fix and this break land in the SAME commit, so
   // the real merge sha is not knowable at authoring time. Same precedent as
-  // `breaks/broken-smoke-harness-holds-last-good.mjs`'s own `fixedBy.sha: 'x5wbsbc-daemon-last-good-fallback'`
+  // `breaks/broken-smoke-harness-holds-last-good.mjs`'s own `fixedBy.sha: '4217-daemon-last-good-fallback'`
   // (#4468 review flagged this as unresolvable provenance; it is an accepted, already-established repo pattern,
   // not an oversight here).
   fixedBy: { sha: 'x4468-daemon-boot-smoke', where: 'lane/4468-daemon-rebuild-smoke-boots-the-daemon-entry-and-a-boot-crash', paths: ['scripts/lib/daemon-boot-smoke.mjs', 'scripts/lib/daemon-live-smoke.mjs'] },

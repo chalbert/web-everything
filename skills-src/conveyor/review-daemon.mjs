@@ -342,7 +342,8 @@ export function runReviewTick({
   // whole block): every review stays owed exactly like a lane-starved tick already does (`reviewsOwed` and
   // `statusCandidates` below are unaffected), so nothing here re-derives a second "was anything dispatched"
   // path — it is the SAME deferred-not-lost shape `deferredForLanes` already models, just for a different cause.
-  const acquirable = paused ? 0 : Math.max(0, Number(acquirableLanes({ repo })) || 0);
+  const lanes = paused ? 0 : acquirableLanes({ repo });
+  const acquirable = Math.max(0, (Array.isArray(lanes) ? lanes.length : Number(lanes)) || 0);
   const dispatchable = reviews.slice(0, Math.min(reviews.length, acquirable));
   const deferredForLanes = paused ? 0 : reviews.length - dispatchable.length;
   const deferredForAuth = paused ? reviews.length - dispatchable.length : 0;
@@ -367,10 +368,11 @@ export function runReviewTick({
   // x26lw6u — NOT named `skipped`: `withSelfSync` already returns `{skipped: true}` for a whole skipped tick,
   // and `onTick` reads both shapes.
   const notStarted = [];
-  for (const d of dispatchable) {
+  for (const [i, d] of dispatchable.entries()) {
     try {
       const subject = (Array.isArray(rawPrs) ? rawPrs : []).find(p => Number(p?.number) === Number(d.prNumber));
       const result = dispatch({ pr: d.prNumber, repo,
+        ...(Array.isArray(lanes) ? { preferLane: lanes[i] } : {}),
         escalationReason: parseEscalationReason(subject?.body ?? ''),
         scopePaths: (subject?.files ?? []).map(f => typeof f === 'string' ? f : f.path),
       });
@@ -663,7 +665,12 @@ export function hasStaleMainRefusal(tickResult) {
  * @returns {number}
  */
 export function defaultAcquirableLaneCount({ repo }) {
-  return freeLaneNumbers({ lanePoolRepo: repoProfile(repo).lanePoolRepo }).length;
+  return defaultAcquirableLaneNumbers({ repo }).length;
+}
+
+/** Preserve the tick's fresh scan so sibling jobs acquire distinct lanes without scanning again. */
+export function defaultAcquirableLaneNumbers({ repo }) {
+  return freeLaneNumbers({ lanePoolRepo: repoProfile(repo).lanePoolRepo });
 }
 
 /** The lane-pool repo path for `repo` (the same derivation {@link defaultAcquirableLaneCount} uses). */
@@ -757,7 +764,7 @@ export function buildCliDaemonEffects({
   // `defaultReadPrs`/`defaultReadAgents` through; `runReviewTick`'s own default stays `null` (see that
   // function's own doc for why) so every pre-existing test of it is unaffected here too.
   runReview = (opts) => runReviewTickAllRepos({
-    acquirableLanes: defaultAcquirableLaneCount, readPrs: defaultReadPrs, readAgents: defaultReadAgents,
+    acquirableLanes: defaultAcquirableLaneNumbers, readPrs: defaultReadPrs, readAgents: defaultReadAgents,
     poolExhaustion: DAEMON_POOL_EXHAUSTION, ...opts,
   }),
   // #xconv1 — the SAME shared-reads optimization `runReview` above opts into, wired the same way for its own

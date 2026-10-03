@@ -5,7 +5,7 @@
  *   shelled — `reconcile` and `provider` are injected, mirroring `ci-heal-pr-dispatch.test.mjs`'s own shape.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { runReconcilePromoteDraftDispatch, defaultReadHeadCheckState, defaultReadPrLabels } from '../promote-draft-pr-dispatch.mjs';
+import { runReconcilePromoteDraftDispatch, defaultReadHeadCheckState, defaultReadPrLabels, isPromoteCodePath, promoteCodeClosure } from '../promote-draft-pr-dispatch.mjs';
 
 const FRESH = () => ({ fresh: true, behind: 0 });
 // Every pre-existing test in this file promotes cleanly, so it pins a fresh re-read that always says green —
@@ -373,5 +373,47 @@ describe('xul2kwr fresh withdrawal guard', () => {
   it.each(['bad json', '{}', 'null', '[]', '{"labels":null}', '{"labels":{}}',
     '{"labels":[null]}', '{"labels":[{}]}', '{"labels":[{"name":2}]}'])('rejects malformed envelope %s', raw => {
     expect(() => defaultReadPrLabels({ repoSlug: 'chalbert/plateau-app', prNumber: 3432, runGh: () => raw })).toThrow();
+  });
+});
+
+// LIVE INCIDENT 2026-10-03 (PR #3806): a managed daemon clone 2 commits behind origin/main made the stale-main
+// guard throw for the WHOLE promote pass, though neither commit touched a file the pass imports. Promotion's only
+// write is `gh pr ready` after a fresh per-sha re-check, so lag outside its own import closure must not block it.
+describe('isPromoteCodePath — the declared promote code path (#3806 incident)', () => {
+  it('real closure: a file the promote pass imports is on the path', () => {
+    expect(promoteCodeClosure()?.complete).toBe(true);
+    expect(isPromoteCodePath('scripts/operations/promote-draft-pr-dispatch.mjs')).toBe(true);
+    expect(isPromoteCodePath('scripts/conveyor/reconcile-core.mjs')).toBe(true);
+    expect(isPromoteCodePath('scripts/lib/draft-promote-provider.mjs')).toBe(true);
+  });
+  it('real closure: the CLI adapter (the two commits behind in the incident) is NOT on the path', () => {
+    expect(isPromoteCodePath('scripts/operations/cli-adapter.mjs')).toBe(false);
+    expect(isPromoteCodePath('scripts/operations/__tests__/render-outcome-effect-refusal.test.mjs')).toBe(false);
+  });
+  it('an unreadable closure fails closed: every code file counts', () => {
+    expect(isPromoteCodePath('scripts/operations/cli-adapter.mjs', { closure: null })).toBe(true);
+    expect(isPromoteCodePath('backlog/123-x.md', { closure: null })).toBe(false);
+  });
+});
+
+describe('runReconcilePromoteDraftDispatch — a draft that is not promoted says why (#3806 incident)', () => {
+  it('reports every non-green draft the plan refused, naming its check state; green and withdrawn are not double-reported', () => {
+    const result = runReconcilePromoteDraftDispatch({
+      root: '/repo',
+      reconcile: () => ({
+        dispatch: [],
+        refusals: [
+          { kind: 'draft', prNumber: 7, check: 'pending' },
+          { kind: 'draft', prNumber: 8, check: 'unchecked' },
+          { kind: 'draft', prNumber: 9, check: 'green' }, // withdrawn: already logged as reconcile-refused
+          { kind: 'fix-claimed', prNumber: 10 },
+        ],
+      }),
+      provider: { ready: () => { throw new Error('must not be called'); } },
+      checkStaleness: FRESH, readPrLabels: () => [], readHeadCheckState: ALWAYS_GREEN, clearAwaitingCi: NOOP_STATUS,
+    });
+    expect(result.refusals.map((r) => [r.pr, r.kind])).toEqual([[7, 'draft-not-promoted'], [8, 'draft-not-promoted']]);
+    expect(result.refusals[0].why).toMatch(/pending/);
+    expect(result.refusals[1].why).toMatch(/unchecked/);
   });
 });

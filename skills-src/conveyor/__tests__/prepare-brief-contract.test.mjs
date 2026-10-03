@@ -52,4 +52,14 @@ describe('prepare-item-worker-brief frontmatter allow-list', () => {
       .filter((w) => PREPARE_OWNED_FRONTMATTER_KEYS.includes(w));
     expect([...new Set(named)].sort()).toEqual([...PREPARE_OWNED_FRONTMATTER_KEYS].sort());
   });
+
+  it('lets the worker change size directly but only PROPOSE blockedBy edges (ruling #4670)', () => {
+    for (const name of ['worker', 'agent']) {
+      const t = flat(read(name));
+      expect(t).toMatch(/size:/);
+      expect(t).toMatch(/## Proposed blockedBy changes/);
+      expect(t).toMatch(/Never edit `blockedBy:`/);
+      expect(PREPARE_OWNED_FRONTMATTER_KEYS).not.toContain('blockedBy');
+    }
+  });
 });
