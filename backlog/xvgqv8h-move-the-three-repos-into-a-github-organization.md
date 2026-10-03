@@ -224,8 +224,12 @@ bypass covers every daemon, so "one shared App" and "a drain-only identity" cann
 other workflows where `GITHUB_TOKEN` deliberately does not (`we:.github/workflows/release-please.yml:15`). (3)
 No second App for the same role.
 
+**Composes with #3866** (prepared, open: a dedicated credential so fleet `gh` calls stop spending the operator's
+personal 5,000/h). This fork does not re-decide #3866; it supplies the org-owned Apps #3866's credential would
+be. If #3866 is ratified first, its credential becomes the daemons App here.
+
 ```yaml
-# Fork 3 (c) — CI App, read-only on FUI, replacing the user-owned FUI_READ_TOKEN PAT
+# option (c) of the bot-identity fork: CI App, read-only on FUI, replacing the user-owned FUI_READ_TOKEN PAT
 - id: ci-app
   uses: actions/create-github-app-token@v1
   with:
