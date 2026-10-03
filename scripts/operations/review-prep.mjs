@@ -92,7 +92,7 @@ export const PREP_RISK_SET = Object.freeze(Object.values(PREP_RISKS));
  *  risk in the mandate and in the recorded verdict, because "a risk without its remedy is an anxiety" (the
  *  source card's own words). */
 export const PREP_RISK_STRATEGY = Object.freeze({
-  [PREP_RISKS.PREMISE]: 'verify by mutation or reversion BEFORE building',
+  [PREP_RISKS.PREMISE]: 'test the premise by mutation or reversion prior to implementation',
   [PREP_RISKS.BLAST_RADIUS]: 'measure against the real corpus before wiring',
   [PREP_RISKS.CONSUMER]: 'find consumers TWO ways: ES imports AND subprocess/hook callers',
   [PREP_RISKS.INTERFACE]: 'round-trip test at the seam, written by whoever owns neither half',
