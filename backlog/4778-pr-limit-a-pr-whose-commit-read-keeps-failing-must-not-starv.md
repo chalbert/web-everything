@@ -2,10 +2,12 @@
 bornAs: xbo3nzu
 kind: story
 size: 2
-status: open
+status: resolved
+graduatedTo: "we:scripts/lib/pr-limit.mjs"
 scope: ["we:scripts/lib/pr-limit.mjs", "we:scripts/lib/__tests__/pr-limit.test.mjs"]
 scopeRationale: "we:scripts/readiness/dispatch-plan.mjs is cited only as evidence of the harm and named as an explicit no-change file."
 dateOpened: "2026-10-02"
+dateResolved: "2026-10-03"
 preparedDate: "2026-10-03"
 preparedAgainstSha: "e1f0523e0881357fc863f3e88da72e0164eb7091"
 tags: []
@@ -21,6 +23,28 @@ Follow-up from the #3215 advisory (2026-10-02, accepted by the operator). we:scr
 - Corrected: the lines moved. `:232` is now inside `createAuthorshipCache`'s `load`. The real spots are `we:scripts/lib/pr-limit.mjs:199` (`allowApi: apiFetches < maxApiFetches, onApi: ...` in `countOpenPrsForRepo`) and `we:scripts/lib/pr-limit.mjs:201` (`if (!Array.isArray(commits)) return { pr, ai: null };` — a failed read is never cached).
 - Premise still holds. `onApi` fires before the metered read (`we:scripts/lib/pr-limit.mjs:161`, `fetchPrCommits`), so a read that then throws still spends one unit of `DISPATCH_PR_COUNT_API_CAP` = 3 (`we:scripts/lib/pr-limit.mjs:218`). PRs are walked in list order every round, so three leading failures eat the whole budget each round.
 - The harm is real: `we:scripts/readiness/dispatch-plan.mjs:285` adds `counted.unresolved` to the open count, so starved PRs count toward the limit forever.
+
+### Implementation and observed proof (2026-10-03)
+
+- Implemented the fifteen-minute failure cooldown in `we:scripts/lib/pr-limit.mjs`, keyed by repo/PR/head. Only attempted API failures write markers; local git can replace them with a verdict during cooldown. Unknown authorship remains unresolved.
+- Added the four specified regressions plus explicit local-only and local-git-recovery coverage in `we:scripts/lib/__tests__/pr-limit.test.mjs`; the starvation case reloads the disk cache each round to prove persistence across dispatcher processes.
+- **Before:** HEAD and local main were both `4f694db7a9867bb4ee946ce1450f0c7e62132aca`. With production code unchanged, `npx vitest run pr-limit.test -t 'persistently failing leading PRs'` failed on the substantive assertion: round 3 received `{ count: 0, unresolved: 7 }`, expected `{ count: 4, unresolved: 3 }`.
+- **Live-list replay:** captured `gh pr list --repo chalbert/web-everything --state open --json number,labels,headRefName,headRefOid,baseRefName --limit 100`; preserved that exact 13-row snapshot for both runs. Injected unavailable local git, persistent GraphQL failures for leading PRs 3802/3801/3800, and successful AI commit responses for trailing PRs. Each run used its own temporary `WE_PR_AUTHORSHIP_CACHE_FILE` and fixed `now=1000000`; reloaded cache through the real dispatch entry point on every round. These are fault-injection results against live PR metadata, not claims about those PRs' actual authorship or GitHub failures. No helper files were created; temporary replay cache directories were removed.
+
+| Version / round | API reads | Count | Unresolved | PR commit reads |
+| --- | ---: | ---: | ---: | --- |
+| Before 1–6 (each) | 3 | 0 | 13 | 3802, 3801, 3800 |
+| After 1 | 3 | 0 | 13 | 3802, 3801, 3800 |
+| After 2 | 3 | 3 | 10 | 3798, 3797, 3794 |
+| After 3 | 3 | 6 | 7 | 3790, 3789, 3787 |
+| After 4 | 3 | 9 | 4 | 3785, 3782, 3771 |
+| After 5 | 1 | 10 | 3 | 3767 |
+| After 6 | 0 | 10 | 3 | none |
+
+- Before, no cache file was written. After, the parsed file held `{ "failedAt": 1000000 }` under each of `chalbert/web-everything#3802@f5e632c110fe30ed23763cd4656fbd6c63ca5b2e`, `chalbert/web-everything#3801@279fb33ecea6618ba82aafe1b5422cae7d57cbec`, and `chalbert/web-everything#3800@a52162694c7b6da90212a63a0b9c67cf9f301c69`; the remaining ten values were `true`. Each failing PR was read exactly once across six rounds.
+- **Real machine call:** unmodified `countOpenPrsForDispatch('we')` returned `{ count: 6, unresolved: 0, apiFetches: 0, fallback: false, unavailable: false }`. The default machine cache returned by `resolveAuthorshipCachePath()` parsed successfully (14 entries). This probe used the real warm cache, independently of replay fixtures.
+- **Validation:** `npx vitest run pr-limit.test` passed (50 tests before adding the local-git recovery case); `node we:scripts/verify-lane.mjs` then passed all 3,877 tests in 82 files, including all 51 PR-limit tests, and `npm run check:standards` reported zero errors. `git diff --check` passed. The resolve operation (`node we:scripts/operations/run.mjs resolve --ref=4778`) completed successfully.
+- Proof is recorded here for human review; no PR was opened, as instructed.
 
 ## Design
 
