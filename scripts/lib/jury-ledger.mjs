@@ -491,7 +491,7 @@ export function foldJuryLedger(events, referralContext = {}) {
   // (`viewerDidAuthor`) — `readReferralRecords` skips any comment without a trusted author.
   const referralComments = referralEvents.map(e => {
     try { return { body: renderReferralRecord(e.record), viewerDidAuthor: true }; }
-    catch { return { body: 'mandatory-referrals-v1: malformed', viewerDidAuthor: true }; }
+    catch { return { body: '<!-- mandatory-referrals-v1: malformed', viewerDidAuthor: true }; }
   });
   const referralState = mandatoryReferralState(referralComments, { head: rosterKnown ? reviewedSha : referralEvents.at(-1)?.record?.head, ...referralContext });
   return { referralState, rosterKnown, round, jurors: jurorList, lensVerdicts, panelVerdict, counts, findingCount, reviewedSha };

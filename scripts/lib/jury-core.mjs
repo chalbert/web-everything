@@ -2364,10 +2364,11 @@ export function renderReferralRecord(record) {
  *
  * Only a comment from a trusted author ({@link isTrustedMarkerAuthor}: the automation or the operator) is read.
  * `referralRecordState` pools rulings across every same-head record, so an untrusted commenter's forged record
- * would otherwise clear another record's hold. An untrusted comment that names the marker is therefore never read
- * as a record, but it IS flagged `malformed` (a hold), not skipped — operator decision on PR #3507: anything that
- * looks like a referral record and cannot be read cleanly is a flagged hold. A bare string has no author, so it is
- * untrusted too. A comment that never names the marker is ignored.
+ * would otherwise clear another record's hold. An untrusted comment that opens a record (the marker opener at the
+ * start of a line) is therefore never read as a record, but it IS flagged `malformed` (a hold), not skipped —
+ * operator decision on PR #3507: anything that looks like a referral record and cannot be read cleanly is a flagged
+ * hold. A bare string has no author, so it is untrusted too. A comment that only DISCUSSES the marker in prose
+ * (no line-start opener) is ignored (#3643).
  */
 export function readReferralRecords(comments, { head } = {}) {
   const records = new Map();
@@ -2380,7 +2381,9 @@ export function readReferralRecords(comments, { head } = {}) {
     || typeof r?.head !== 'string' || !/^[a-f0-9]{40}$/.test(r.head) || r.head === head;
   for (const comment of Array.isArray(comments) ? comments : []) {
     const body = typeof comment === 'string' ? comment : comment?.body ?? '';
-    if (!body.includes(REFERRAL_RECORD_MARKER)) continue;
+    // Only a literal opener at the start of a line attempts a record; prose may discuss the marker (#3643). Indentation
+    // is `[ \t]*`, never `\s*`: `\s` also matches newlines, so under `m` a whitespace-heavy untrusted body is O(n²).
+    if (!/^[ \t]*<!-- mandatory-referrals-v1:/m.test(body)) continue;
     // Fail closed: a record-shaped comment from an author outside the trusted principals is never read as a record
     // (it cannot clear another record's hold), but it is flagged malformed so it stays a visible hold a person
     // clears — it must not vanish. Cost: any commenter can park a PR; the failure mode is "needs a human", never "clear".
@@ -2391,9 +2394,9 @@ export function readReferralRecords(comments, { head } = {}) {
     // The closing ` -->` is optional here (#3643): a trailer cut off before it, or part-way through it (` --`, ` -`),
     // still decodes, and the read below holds it only when it belongs to the current head (or cannot be attributed
     // to another one). Only the whole ` -->` is captured, so a part-way cut still counts as unclosed.
-    const match = /^<!-- mandatory-referrals-v1: ([^\s]+)(?:( -->)| -{0,2}>?)?$/.exec(trailer);
+    const match = /^[ \t]*<!-- mandatory-referrals-v1: ([^\s]+)(?:( -->)| -{0,2}>?)?$/.exec(trailer);
     const matches = match ? [match] : [];
-    // Fail closed: a trusted comment that names the marker but does not end in a valid trailer (an operator note
+    // Fail closed: a trusted comment that opens a record but does not end in a valid trailer (an operator note
     // appended by editing it, a truncated write) is flagged malformed so its hold cannot vanish silently.
     if (!match) malformed = true;
     for (const match of matches) {

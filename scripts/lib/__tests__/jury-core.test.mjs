@@ -1746,9 +1746,72 @@ describe('#4315 mandatory referral protocol', () => {
       const read = readReferralRecords([login ? post(body, login) : body]);
       const trusted = login === 'web-everything' || login === 'chalbert';
       const parsed = trusted && read.records.length > 0;
-      // Contains the marker => either its record was read, or the read is flagged malformed. Never neither.
+      // A body that merely DISCUSSES the marker (no line-start opener) is ignored (#3643): never a record, never a hold.
+      if (!/^[ \t]*<!-- mandatory-referrals-v1:/m.test(body)) { expect(read, `${login} / ${JSON.stringify(body.slice(0, 60))}`).toEqual({ records: [], malformed: false }); continue; }
+      // Opens a record => either its record was read, or the read is flagged malformed. Never neither.
       expect(parsed || read.malformed, `${login} / ${JSON.stringify(body.slice(0, 60))}`).toBe(true);
     }
+  });
+  it.each([
+    'The mandatory-referrals-v1 marker is discussed here.',
+    '`<!-- mandatory-referrals-v1: %invalid -->`',
+    '&lt;!-- mandatory-referrals-v1: %invalid --&gt;',
+    'Example: <!-- mandatory-referrals-v1: %invalid -->',
+    '```js\nconst marker = "<!-- mandatory-referrals-v1: %invalid -->";\n```',
+    JSON.stringify({ evidence: String.raw`/^<!-- mandatory-referrals-v1: ([^\s]+) -->$/` }),
+  ])('ignores marker discussion: %s', body => {
+    expect(readReferralRecords([{ body }])).toEqual({ records: [], malformed: false });
+    expect(mandatoryReferralState([{ body }], { head: 'a'.repeat(40) }).pending).toEqual([]);
+  });
+  it.each([
+    '<!-- mandatory-referrals-v1:',
+    '<!-- mandatory-referrals-v1: %invalid -->',
+    'Ordinary text\n \t<!-- mandatory-referrals-v1: %truncated',
+    '<!-- mandatory-referrals-v1: {} -->',
+  ])('fails closed on a real record attempt: %s', body => {
+    expect(readReferralRecords([{ body }]).malformed).toBe(true);
+  });
+  it('parses an indented record that ends the comment, next to prose mentions before it', () => {
+    const r = record();
+    const body = 'Example: <!-- mandatory-referrals-v1: %invalid -->\n'
+      + renderReferralRecord(r).replace('\n<!--', '\n \t<!--');
+    expect(readReferralRecords([post(body)])).toEqual({ records: [r], malformed: false });
+    // Text AFTER the trailer is a flagged hold, not a parsed record: only the final line is structured data (#3507
+    // finding 2), so a prose mention after the record fails closed rather than being read around.
+    expect(readReferralRecords([post(body + '\nDiscuss `mandatory-referrals-v1` after the record too.')]))
+      .toEqual({ records: [], malformed: true });
+    expect(readReferralRecords([post(body + '\n<!-- mandatory-referrals-v1:')]).malformed).toBe(true);
+  });
+  it('treats record lines from untrusted authors as a flagged hold, never a read record (#3507 finding 1)', () => {
+    const r = record();
+    const author = { login: 'drive-by-commenter' };
+    expect(readReferralRecords([{ author, body: renderReferralRecord(r) }])).toEqual({ records: [], malformed: true });
+    expect(readReferralRecords([{ author, body: '<!-- mandatory-referrals-v1: %invalid -->' }]).malformed).toBe(true);
+    // Marker discussion from an untrusted author is still ignored: only an opener at the start of a line counts (#3643).
+    expect(readReferralRecords([{ author, body: 'The mandatory-referrals-v1 marker is discussed here.' }]))
+      .toEqual({ records: [], malformed: false });
+  });
+  it.each([
+    ['newlines', '\n'.repeat(65000)],
+    ['space-newline pairs', ' \n'.repeat(32000)],
+    ['tab-newline pairs', '\t\n'.repeat(32000)],
+  ])('reads an untrusted whitespace-heavy body in bounded time: %s', (_, filler) => {
+    const r = record();
+    const started = performance.now();
+    expect(readReferralRecords([{ body: filler }])).toEqual({ records: [], malformed: false });
+    expect(readReferralRecords([post(filler + renderReferralRecord(r))])).toEqual({ records: [r], malformed: false });
+    expect(performance.now() - started).toBeLessThan(1000);
+  });
+  it('replays the four #3507 marker-discussion excerpts without a malformed hold', () => {
+    const fixture = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'referral-marker-discussion-3507.json');
+    const { comments } = JSON.parse(readFileSync(fixture, 'utf8'));
+    expect(comments.map(comment => comment.createdAt)).toEqual([
+      '2026-10-02T16:50:22Z', '2026-10-02T17:56:55Z', '2026-10-02T17:56:59Z', '2026-10-02T19:02:27Z',
+    ]);
+    for (const comment of comments) {
+      expect(readReferralRecords([comment]), comment.url).toEqual({ records: [], malformed: false });
+    }
+    expect(mandatoryReferralState(comments, { head: 'a'.repeat(40) }).pending).toEqual([]);
   });
   it('ignores decoded malformed records only on a different full head', () => {
     const r = record();

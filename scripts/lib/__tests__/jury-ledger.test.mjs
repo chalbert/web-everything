@@ -464,4 +464,10 @@ describe('#4315 durable referral replay', () => {
       expect(read().referralState.pending).toContain('malformed-referral-record');
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
+  it('holds the head when a logged referral record cannot be rendered (the foldJuryLedger catch fallback)', () => {
+    // validateJuryEvent rejects such a record before it reaches a real log, so fold it from a hand-built event.
+    const unrenderable = { type: 'mandatory-referrals', round: 0, record: { version: 1 } };
+    expect(foldJuryLedger([unrenderable]).referralState.pending).toContain('malformed-referral-record');
+    expect(foldJuryLedger([unrenderable], { head: 'a'.repeat(40) }).referralState.malformed).toBe(true);
+  });
 });
