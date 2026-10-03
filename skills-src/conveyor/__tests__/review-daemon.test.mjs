@@ -1452,3 +1452,20 @@ it('xux0rs9: an unreadable notice receipt does not prevent another PR from being
   expect(dispatch).toHaveBeenCalledTimes(1);
   expect(result.failed).toContainEqual({ prNumber: 3481, error: 'pause notice: unreadable receipt' });
 });
+
+
+describe('#4154 shared scan lane assignments', () => {
+  it.each([[[4, 9]], [2]])('acquirableLanes caps by count and preserves numeric dispatch shape: %j', lanes => {
+    const dispatch = vi.fn(() => ({}));
+    const out = runReviewTick({
+      reconcile: () => ({ dispatch: [100, 101, 102].map(prNumber => ({ kind: 'review', prNumber })), refusals: [] }),
+      acquirableLanes: () => lanes, dispatch, tagRound: () => {}, tagStatus: () => {},
+      holdReconcile: () => [], statusCandidates: () => [],
+    });
+    expect(out.deferredForLanes).toBe(1);
+    expect(dispatch.mock.calls.map(([call]) => call)).toEqual([100, 101].map((pr, i) => ({
+      pr, repo: expect.any(String), escalationReason: [], scopePaths: [],
+      ...(Array.isArray(lanes) ? { preferLane: lanes[i] } : {}),
+    })));
+  });
+});
