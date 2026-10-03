@@ -3,10 +3,11 @@ bornAs: x2zl9ow
 kind: story
 size: 2
 parent: "3383"
-status: open
+status: resolved
 scope: ["we:scripts/operations/cli-adapter.mjs", "we:scripts/operations/__tests__/render-outcome-effect-refusal.test.mjs"]
 scopeRationale: "we:scripts/operations/run.mjs is named only as an explicit no-change file (the message and exit code come from cli-adapter renderOutcome); the effect-executor and open-pr test files are run unchanged as regression checks, not edited."
 dateOpened: "2026-09-25"
+dateResolved: "2026-10-03"
 preparedDate: "2026-10-03"
 preparedAgainstSha: "e1f0523e0881357fc863f3e88da72e0164eb7091"
 tags: []
@@ -17,6 +18,13 @@ tags: []
 Live 2026-09-25: node we:scripts/operations/run.mjs open-pr printed 'complete. 1 effect(s) applied.' while the open-pr.submit effect's recorded result was outcome refused, reason verify-unfinished, pr null — the refusal was only visible by reading the run record under .operations/runs/. The default render must surface an effect-level refused/failed outcome (reason plus detail) and exit non-zero, so a caller never mistakes a refusal for success. Prove on the live open-pr verify-unfinished case, before and after.
 
 ## Progress
+
+- **Final verification (2026-10-03).** `node we:scripts/verify-lane.mjs` completed green: **89 test files / 4,858 tests passed**, followed by `npm run check:standards` with **0 errors** (5,277 warnings). `git diff --check` passed. Parent #3383 remains active with other unresolved children; no parent edit is needed.
+
+- **Implementation and baseline reconciliation (2026-10-03, checkout `54a42d3e6`).** Since preparation, #4386 (`b6b3bdec7`) added an open-pr-specific summary in `we:scripts/operations/cli-adapter.mjs`. The actual before replay of the untouched lane-15 record, copied into an isolated temporary runs directory and driven through `we:scripts/operations/run.mjs`, already printed `submit: REFUSED (verify-unfinished)` with the UNFINISHED detail and exited **1**. The historical exit-0 baseline below therefore no longer describes this checkout. The remaining defect was generic recorded-effect detection: synthetic complete runs still returned exit 0 for refused/failed results.
+- **Change.** Added pure exported `refusedEffects(run)` and the record-based complete-branch refusal render in `we:scripts/operations/cli-adapter.mjs`. The required headline, effect type/step/outcome/reason, optional detail and PR URL precede spend and owner lines. Compatibility adjustment for #4386: retain its failing operation summary after the effect lines, preserving the unchanged regression assertion in `we:scripts/operations/__tests__/effect-executor.test.mjs`. With no recorded refusal, the existing generic/open-pr rendering remains byte-identical. `we:scripts/operations/run.mjs`, `outcomePayload`, engine and HTTP adapter are unchanged.
+- **Red → green regression proof.** Before implementation, `npx vitest run we:scripts/operations/__tests__/render-outcome-effect-refusal.test.mjs` had **6 failures / 3 passes**: four exit-0 defects, the missing per-effect CLI rendering, and the absent helper. Opened, dry-run and JSON guards passed. After implementation, that file plus unchanged `we:scripts/operations/__tests__/effect-executor.test.mjs` and `we:scripts/operations/__tests__/open-pr.test.mjs` passed **147/147 tests**. The new tests cover all eight planned cases plus mixed-status filtering, multiple refusals, non-mutation and owner guidance. Its CLI soak runs one initial submit followed by 19 finished-run resumes: every render exits 1 and names the recorded effect; the sink runs exactly once.
+- **After live-record replay.** The same isolated copy of `open-pr-bc9f6fe8-d36f-4a91-ab4e-b3293f63b850` now prints `complete, but 1 effect(s) were REFUSED/FAILED`, `open-pr.submit (step submit): refused — verify-unfinished`, and the original UNFINISHED detail; exit **1**. Both before and after `--json` replay exit **0**, with byte-identical stdout SHA-256 `e65784a070a765c0bb465c5087538b4ddf9da87a30d1f11426f2ff6b171ee8b9`. No live run was changed and no PR was opened.
 
 - **Old scope:** `we:scripts/operations/run.mjs`. **Corrected scope:** `we:scripts/operations/cli-adapter.mjs` plus one new test file.
   Evidence: `we:scripts/operations/run.mjs:627-631` only prints the lines it is handed and exits with the code it is handed. The line `complete. N effect(s) applied.` and its exit 0 come from `we:scripts/operations/cli-adapter.mjs:1331-1333 (renderOutcome)`. `we:scripts/operations/run.mjs` needs no edit.
