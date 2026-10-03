@@ -3709,7 +3709,8 @@ describe('#4315 operation / I/O restart soak', () => {
       };
       for (let restart = 0; restart < 25; restart++) {
         const store = createMemoryRunStore();
-        const sinks = createReviewPrSinks({ labelProvider: provider, referralJudge: judge, mirrorReferral: () => {}, out: () => {} });
+        const sinks = createReviewPrSinks({ labelProvider: provider, referralJudge: judge, mirrorReferral: () => {}, out: () => {},
+          env: { REVIEW_PR_ANTIGRAVITY_REVIEW: '1', WE_REVIEW_SEAT_CAP_AGY_GEMINI: '40' } });
         let run = advanceWhileRunning(startRun({ op: REVIEW_PR_OP, id: `run-referral-${restart}`, input: { pr: 7, repo: 'o/r' }, registry }), { registry });
         while (run.pending?.kind === 'judge') {
           run = advanceWhileRunning(run, { registry, resume: { value: run.pending.step === seat

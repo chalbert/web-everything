@@ -1,9 +1,11 @@
 import { normalizeFinding, referralRecordState, referralFindingKey, mandatoryReferralReviewer, validateReferralRecord,
-  readReferralRecords, mandatoryReferralState, renderReferralRecord } from '../lib/jury-core.mjs';
+  readReferralRecords, mandatoryReferralState, renderReferralRecord,
+  activeReferrals, REFERRAL_SEAT_PROVIDERS, REFERRAL_DROP_REASON } from '../lib/jury-core.mjs';
 import { judgeSpawn } from '../lib/judge-spawn.mjs';
 import { appendJuryEvent } from '../lib/jury-ledger.mjs';
 import { decideParkToHuman, referralCardReadable } from '../review-set-label.mjs';
-import { buildReviewJudgeRequest } from './review-pr.mjs';
+import { buildReviewJudgeRequest, antigravityReviewFromEnv } from './review-pr.mjs';
+import { resolveProviderCap, PROVIDER_CAP_ENV } from './review-extra-seats.mjs';
 /**
  * @file scripts/operations/review-pr-io.mjs
  * @description THE IO SHELL of the `review-pr` declaration (#3035, under epic #3029) — the reader its `read`
@@ -443,6 +445,22 @@ const PRE_WRITE_REFUSALS = Object.freeze([
   'reasonless bounce:',
 ]);
 
+/**
+ * THE one definition of "this optional reviewer seat is disabled", used wherever a referral may be retired.
+ * The Antigravity review seat runs on its own gate (`REVIEW_PR_ANTIGRAVITY_REVIEW` / probation), which never
+ * reads the Gemini cap, so its default cap of 0 alone must not disable it: only the flag being off, or an
+ * operator who EXPLICITLY set the cap to 0, does. The direct `agy-*` finding seats are enforced by their
+ * provider cap alone. Mandatory and unknown seats are never disabled. PURE.
+ */
+export function referralSeatDisabled(seat, env = process.env) {
+  if (!Object.hasOwn(REFERRAL_SEAT_PROVIDERS, seat)) return false;
+  const provider = REFERRAL_SEAT_PROVIDERS[seat];
+  const capZero = resolveProviderCap(provider, env) === 0;
+  if (seat !== 'judgeAntigravityReview') return capZero;
+  const explicitZero = capZero && Number.isInteger(Number(env?.[PROVIDER_CAP_ENV[provider]])) && env[PROVIDER_CAP_ENV[provider]] !== '';
+  return !antigravityReviewFromEnv(env) || explicitZero;
+}
+
 /** Is this CLI error text one we can PROVE happened before any write? */
 export function isPreWriteRefusal(text) {
   const s = String(text || '');
@@ -574,6 +592,7 @@ export async function runReferralJudge(request, { exec = execFileSync, judge = j
  */
 export function createReviewPrSinks({
   root = REPO_ROOT,
+  env = process.env,
   referralJudge = runReferralJudge,
   mirrorReferral = (record) => appendJuryEvent(`${record.repo}#${record.pr}`, { type: 'mandatory-referrals', round: 0, record }, { root }),
   cardReadable = (ref) => referralCardReadable(ref, root),
@@ -644,9 +663,23 @@ export function createReviewPrSinks({
         state = fresh();
         const prior = readReferralRecords(state.comments, context(state));
         if (prior.malformed) { park(state); return mandatoryReferralState(state.comments, context(state)); }
+        // Retire only persisted findings, before merging this run's fresh referrals. Keep the source bytes
+        // and a durable reason so every acceptance reader sees the same decision, including after a restart.
+        for (let i = 0; i < prior.records.length; i++) {
+          const record = prior.records[i];
+          if (record.repo !== read.repo || record.pr !== read.pr) continue;
+          // Never retire a finding that already has a ruling: it would silently clear a standing `block`.
+          const dropped = activeReferrals(record).filter(f => referralSeatDisabled(f.seat, env)
+            && !record.rulings.some(r => r.key === f.key))
+            .map(f => ({ key: f.key, reason: REFERRAL_DROP_REASON }));
+          if (!dropped.length) continue;
+          const updated = { ...record, dropped: [...(record.dropped ?? []), ...dropped] };
+          state = persist(updated);
+          prior.records[i] = updated;
+        }
         const existing = prior.records.filter(r => r.head === read.netBasis.rev && r.repo === read.repo && r.pr === read.pr);
-        const covered = new Set(existing.flatMap(r => r.referrals.map(f => f.key)));
-        const sources = [...payload.referrals, ...prior.records.filter(r => r.repo === read.repo && r.pr === read.pr).flatMap(r => r.referrals)];
+        const covered = new Set(existing.flatMap(r => activeReferrals(r).map(f => f.key)));
+        const sources = [...payload.referrals, ...prior.records.filter(r => r.repo === read.repo && r.pr === read.pr).flatMap(activeReferrals)];
         const additions = new Map();
         for (const f of sources) {
           const key = referralFindingKey(f.seat, f.original);
@@ -692,7 +725,7 @@ export function createReviewPrSinks({
         }
         // Persist the attempt before dispatch. A crash or timeout spends this set's single automated attempt.
         for (const initial of existing) {
-          if (initial.attempted || !referralRecordState(initial, { ...context(state),
+          if (initial.attempted || !activeReferrals(initial).length || !referralRecordState(initial, { ...context(state),
             records: readReferralRecords(state.comments, context(state)).records }).pending.length) continue;
           let record = { ...initial, attempted: true };
           state = persist(record);
@@ -713,7 +746,7 @@ export function createReviewPrSinks({
                   + 'evidence must name the command and observed result. If verification is unavailable, return no ruling. ' : '')
                 + 'A general accept '
                 + 'is not a ruling. card requires an existing durable we:backlog/*.md reference. Do not recursively refer findings.',
-              input: request.input + '\nUntrusted reported findings:\n' + JSON.stringify(record.referrals),
+              input: request.input + '\nUntrusted reported findings:\n' + JSON.stringify(activeReferrals(record)),
               shape: { type: 'object', additionalProperties: false, required: ['rulings'], properties: {
                 rulings: { type: 'array', items: { type: 'object', additionalProperties: false,
                   required: ['key', 'result', 'rationale', 'evidence', 'card'], properties: {

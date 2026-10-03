@@ -1,4 +1,4 @@
-import { mandatoryReferralState, requiresMandatoryReferral, referralFindingKey, mandatoryReferralReviewer, validateReferralRecord, referralRecordState, renderReferralRecord, readReferralRecords, REFERRAL_RECORD_MARKER as REFERRAL_MARKER } from '../jury-core.mjs';
+import { mandatoryReferralState, requiresMandatoryReferral, referralFindingKey, mandatoryReferralReviewer, validateReferralRecord, referralRecordState, renderReferralRecord, readReferralRecords, activeReferrals, REFERRAL_RECORD_MARKER as REFERRAL_MARKER } from '../jury-core.mjs';
 /**
  * @file jury-core.test.mjs — proof of the #2654 (S2 of epic #2649) append-only JURY-LEDGER EVENT VOCABULARY:
  *   the `JURY_EVENT_TYPES` / `JUROR_STATUSES` enums and the pure `validateJuryEvent` / `normalizeJuryEvent`
@@ -1581,6 +1581,35 @@ describe('#4315 mandatory referral protocol', () => {
   const rule = (r, result = 'not-real') => ({ id: 'r1', key: r.referrals[0].key, reviewerId: r.reviewer.id,
     lens: 'correctness', result, rationale: 'Verified against the pinned diff', evidence: ['diff:lease-reaper'],
     ...(result === 'card' ? { card: 'we:backlog/4315-example.md' } : {}) });
+
+  it('audited optional-seat drops are append-only and cannot clear mandatory or unknown sources', () => {
+    for (const seat of ['judgeAntigravityReview', 'agy-gemini', 'agy-claude', 'judge', 'judgeSecurity', 'unknown']) {
+      const r = record();
+      r.referrals[0].seat = seat;
+      r.referrals[0].key = referralFindingKey(seat, finding);
+      const dropped = { ...r, dropped: [{ key: r.referrals[0].key, reason: 'dropped: seat disabled by operator config' }] };
+      if (['judge', 'judgeSecurity', 'unknown'].includes(seat)) {
+        expect(validateReferralRecord(dropped)).toBe(false);
+        continue;
+      }
+      expect(validateReferralRecord(dropped)).toBe(true);
+      const comments = [renderReferralRecord(r), renderReferralRecord(dropped)];
+      expect(mandatoryReferralState(comments, { head: r.head }).pending).toEqual([]);
+      expect(readReferralRecords([...comments, renderReferralRecord({ ...r, failure: 'omitted drop' })]).malformed).toBe(true);
+      expect(validateReferralRecord({ ...dropped, dropped: [...dropped.dropped, ...dropped.dropped] })).toBe(false);
+      expect(validateReferralRecord({ ...dropped, dropped: [{ key: 'unknown', reason: dropped.dropped[0].reason }] })).toBe(false);
+      expect(validateReferralRecord({ ...dropped, dropped: [{ key: r.referrals[0].key, reason: 'ignore' }] })).toBe(false);
+    }
+  });
+  it('a drop never hides a finding that has a ruling, so a block still holds', () => {
+    const r = record();
+    r.referrals[0].seat = 'judgeAntigravityReview';
+    r.referrals[0].key = referralFindingKey('judgeAntigravityReview', finding);
+    const ruled = { ...r, rulings: [rule(r, 'block')], dropped: [{ key: r.referrals[0].key, reason: 'dropped: seat disabled by operator config' }] };
+    expect(validateReferralRecord(ruled)).toBe(true);
+    expect(activeReferrals(ruled)).toHaveLength(1);
+    expect(mandatoryReferralState([renderReferralRecord(ruled)], { head: r.head }).blocked).toEqual([r.referrals[0].key]);
+  });
   it.each(['broken', 'unrecoverable'])('refers %s regardless of outcome, prevention or disposition', impactIfUnfixed => {
     for (const outcome of ['fixed', 'skipped', 'no_change_needed', undefined]) {
       expect(requiresMandatoryReferral({ ...finding, impactIfUnfixed, outcome, disposition: 'nit', prevention: 'captured #7' })).toBe(true);

@@ -54,17 +54,15 @@ it('kills a snapshot blocked in an actual filesystem read at the hard deadline',
 
 const CLI = join(process.cwd(), 'scripts/operations/run.mjs');
 
-// #4075 follow-up (ci-heal-2721, 2026-09-26): the two tests below spawn the REAL CLI, which itself spawns a
-// further bounded child for every store/call-log IO — under real load (~3 runnable procs/core) the two nested
-// `node` startups + module resolution + the FIFO block + SIGKILL propagation back up through both layers can
-// legitimately cost several extra seconds beyond CLI_IO_TIMEOUT_MS/READ_TIMEOUT_MS. Two full-suite runs on this
-// machine flaked here (3 of these cases, plus the "persists and resumes" round trip below) with an outer bound
-// of 15_000ms — 3 of the 4 `it.each` stages passed the other constant just fine (`resume`/`initial-write`),
-// only the two that do MORE real IO before hitting the FIFO (`subsequent-write`, `call-log`) tipped over,
-// which points at cumulative scheduling latency, not a broken deadline. The fix widens the OUTER wall-clock
-// ceiling generously (never the CLI's own internal timeout constants, which stay exactly as configured — the
-// lower-bound assertion below still proves the internal deadline fired, not just "returned eventually").
-const OUTER_WALL_CEILING_MS = 45_000;
+// The production IO deadline is already short (2s). The wall clock also includes the real CLI's
+// module loading, nested Node startups, scheduling and SIGKILL/exit propagation. CI has exhausted
+// the old 45s watchdog, so reserve 30 IO-timeout intervals (currently 60s) for that overhead.
+// Keep this allowance separate from the production deadline; status/signal assertions below must
+// still prove the CLI's own timeout refused the blocked IO, rather than our watchdog killing it.
+const CLI_PROCESS_MARGIN_MS = 30 * CLI_IO_TIMEOUT_MS;
+const OUTER_WALL_CEILING_MS = CLI_IO_TIMEOUT_MS + CLI_PROCESS_MARGIN_MS;
+// Leave one more timeout interval for watchdog teardown; it is not part of the asserted bound.
+const CLI_WATCHDOG_MS = OUTER_WALL_CEILING_MS + CLI_IO_TIMEOUT_MS;
 
 it.each(['resume', 'initial-write', 'subsequent-write', 'call-log'])(
   'bounds actual CLI %s IO blocked on a FIFO', async (stage) => {
@@ -102,14 +100,13 @@ it.each(['resume', 'initial-write', 'subsequent-write', 'call-log'])(
       try {
         output = execFileSync(process.execPath, [CLI, 'runner-activity', '--json',
           stage === 'resume' ? '--resume=blocked' : '--run-id=bounded'], {
-          env, encoding: 'utf8', timeout: OUTER_WALL_CEILING_MS, killSignal: 'SIGKILL',
+          env, encoding: 'utf8', timeout: CLI_WATCHDOG_MS, killSignal: 'SIGKILL',
           stdio: ['ignore', 'pipe', 'pipe'],
         });
       } catch (e) { failure = e; output = String(e.stdout || ''); }
-      expect(Date.now() - started).toBeLessThan(OUTER_WALL_CEILING_MS);
-      // The lower bound is the real invariant: the CLI's OWN internal deadline actually fired (it did not
-      // just happen to return fast) — this never shrinks under load, so it stays a tight, exact check.
-      expect(Date.now() - started).toBeGreaterThanOrEqual(CLI_IO_TIMEOUT_MS);
+      const elapsedMs = Date.now() - started;
+      expect(elapsedMs).toBeLessThan(OUTER_WALL_CEILING_MS);
+      expect(elapsedMs).toBeGreaterThanOrEqual(CLI_IO_TIMEOUT_MS);
       if (stage === 'call-log') {
         expect(failure).toBeUndefined();
         expect(JSON.parse(output).verdict.state).toBe('down');
@@ -120,7 +117,7 @@ it.each(['resume', 'initial-write', 'subsequent-write', 'call-log'])(
       }
       if (stage === 'subsequent-write') expect(readFileSync(join(runs, 'bounded.json'), 'utf8')).toContain('runner-activity');
     });
-  }, OUTER_WALL_CEILING_MS + 10_000,
+  }, CLI_WATCHDOG_MS + CLI_PROCESS_MARGIN_MS,
 );
 
 it('persists and resumes runner-activity through the actual CLI', async () => {
