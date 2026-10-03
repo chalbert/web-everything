@@ -376,7 +376,7 @@ export const PROBATION_ROSTER = Object.freeze({
  * @returns {{worker: object|null, auditTrail: Array<object>, reason: string}}
  */
 // @test-only-export-ok: Shared library exported for the probation launcher (agy-launcher-probation) and its own test
-export function selectProbationWorker({ taskType, tier = CLAUDE_TIERS.SONNET, simple = false, filesTouched = [], estimatedSize = 0, scorecards = [], vetoes = [] } = {}) {
+export function selectProbationWorker({ taskType, tier = CLAUDE_TIERS.SONNET, simple = false, filesTouched = [], estimatedSize = 0, scorecards = [], vetoes = [], availability = {} } = {}) {
   const auditTrail = [];
   const none = (reason) => ({ worker: null, auditTrail, reason });
   const roster = PROBATION_ROSTER[taskType];
@@ -393,6 +393,11 @@ export function selectProbationWorker({ taskType, tier = CLAUDE_TIERS.SONNET, si
   const candidates = [];
   roster.forEach((id, order) => {
     const def = PROBATION_WORKERS[id];
+    const held = availability[id] || (def.checker && availability[def.checker]);
+    if (held) {
+      auditTrail.push({ criterion: `probation-candidate:${id}`, result: 'quota-held', dataConsulted: String(held), reasoning: 'active backend or checker hold; availability otherwise unknown' });
+      return;
+    }
     const model = def.model ?? AGY_CLAUDE_MODEL_BY_TIER[tier] ?? AGY_CLAUDE_MODEL_BY_TIER.sonnet;
     if (def.simpleOnly && simple !== true && taskType !== 'test-fix') {
       auditTrail.push({ criterion: `probation-candidate:${id}`, result: 'skipped', dataConsulted: `simple=${simple === true}`, reasoning: 'offered only for a simple task' });
