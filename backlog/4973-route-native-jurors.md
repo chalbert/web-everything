@@ -1,12 +1,13 @@
 ---
 bornAs: xzaqgfu
 kind: story
-status: open
+status: resolved
 size: 3
 parent: "4936"
 blockedBy: ["4874"]
 scope: ["we:skills-src/jury/panel-fanout.mjs", "we:skills-src/jury/__tests__/panel-fanout.test.mjs", "we:scripts/lib/judge-panel.mjs", "we:scripts/lib/__tests__/judge-panel.test.mjs"]
 dateOpened: "2026-09-30"
+dateResolved: "2026-10-03"
 preparedDate: "2026-10-03"
 preparedAgainstSha: "4a2606bc2f711efd86849e250db36b1b100a0fa4"
 tags: [routing, dispatch, review]
