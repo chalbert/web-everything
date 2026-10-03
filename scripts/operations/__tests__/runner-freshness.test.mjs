@@ -1,4 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { withBareOrigin } from './helpers/real-repo.mjs';
+import { checkMainStaleness, gitRun } from '../../lib/main-staleness.mjs';
 import { assertRunnerFreshness, requiresFreshRunner, FRESHNESS_TTL } from '../runner-freshness.mjs';
 import { OPERATIONS, resolveOperation, cliPreflight } from '../run.mjs';
 import { isReadOnlyOperation } from '../registry.mjs';
@@ -31,6 +36,27 @@ function fixture(options = {}) {
 }
 
 describe('runner freshness policy', () => {
+  it.each(['runner', 'dispatch'])('%s freshness cannot launch automatic maintenance even when the checkout enables it', async kind => {
+    await withBareOrigin(async ctx => {
+      ctx.git(['config', 'maintenance.auto', 'true']);
+      ctx.git(['config', 'gc.auto', '1']);
+      const trace = join(ctx.tmp, 'freshness-git.jsonl');
+      const env = { ...process.env, WE_OPERATION_ALLOW_STALE: '', WE_DAEMON_MANAGED_CLONE: '',
+        LANE_POOL_ROOT: join(ctx.tmp, 'pool'), GIT_TRACE2_EVENT: trace };
+      if (kind === 'runner') {
+        const result = assertRunnerFreshness({ declaration: resolveOperation('verify').declaration,
+          moduleUrl: pathToFileURL(join(ctx.clone, 'run.mjs')).href }, { env });
+        expect(result).toEqual({ behind: 0, uncertainty: '' });
+      } else {
+        expect(checkMainStaleness({ run: args => gitRun(args, { cwd: ctx.clone, env }) }))
+          .toMatchObject({ fresh: true, behind: 0 });
+      }
+      const events = readFileSync(trace, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+      expect(events.some(e => e.event === 'start' && e.argv.includes('fetch'))).toBe(true);
+      const children = events.filter(e => e.event === 'child_start');
+      expect(children.some(e => e.argv.some(arg => ['maintenance', 'gc', 'repack'].includes(arg)))).toBe(false);
+    });
+  });
   it('classifies every registered declaration with the explicit verify exception', () => {
     const names = Object.keys(OPERATIONS).sort();
     expect(names).toMatchInlineSnapshot(`

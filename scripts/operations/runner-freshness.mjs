@@ -15,7 +15,8 @@ export const requiresFreshRunner = (declaration) => declaration.name === 'verify
 /** All IO is injectable. Resolve the loaded module, never the operation's target or caller cwd. */
 export function assertRunnerFreshness({ declaration, moduleUrl, zeroWrites = false }, {
   env = process.env, now = Date.now, filesystem = fs,
-  git = (args, cwd) => execFileSync('git', args, {
+  // Waiting for Git alone does not wait for maintenance it detaches after a fetch.
+  git = (args, cwd) => execFileSync('git', ['-c', 'gc.auto=0', '-c', 'maintenance.auto=false', ...args], {
     cwd, encoding: 'utf8', timeout: 15_000, stdio: ['ignore', 'pipe', 'pipe'],
     env: { ...env, GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0' },
   }),
