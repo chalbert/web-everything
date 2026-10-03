@@ -4,8 +4,8 @@
  * around its mutation. Two earlier cuts only tightened HOW that wait behaved:
  *   1. The very first cut called `withWriteLock(root, fn, {})` — an unbounded (raw 600s `acquireWrite` default)
  *      wait. A live operator `add --pinned` run against `wev-review-daemon` sat silently for 8+ minutes waiting
- *      for a live reader to drain, refusing every daemon sharing that clone on every tick (xa4qo7n).
- *   2. xa4qo7n bounded that wait (`WE_DAEMON_OVERLAY_LOCK_WAIT_MS`, default 30s) and logged it. That shortened
+ *      for a live reader to drain, refusing every daemon sharing that clone on every tick (4218).
+ *   2. 4218 bounded that wait (`WE_DAEMON_OVERLAY_LOCK_WAIT_MS`, default 30s) and logged it. That shortened
  *      the freeze but did not remove the real blocker: whenever the daemon's OWN rebuild — which runs on
  *      every tick, often — already held the writer slot, `add` failed OUTRIGHT with `concurrent-mover` and no
  *      wait at all (`acquireWrite` refuses immediately when another live writer holds the key). Live

@@ -13,6 +13,8 @@
  *    dispatched session's cwd is a scratch dir (PR #2701, `~/workspace/.operations/dispatch/<uuid>`) rather
  *    than the daemon's own clone: the project slug is DERIVED from whatever `cwd` really is.
  *  - `.operations/codex-delivery-threads/<slug>.json` records (Codex runs have no `claude agents` entry).
+ *  - `we:.operations/completions/<slug>.json` supplies timestamped Codex terminal evidence.
+ *  - Codex home sessions rollouts supply transcript paths and last-write activity.
  *  - Lane leases via `lane-pool.mjs status --json` (the same CLI `./stale-state-io.mjs` already shells out
  *    to) — indexed by `ownerSession`/`workerSession`, NOT by a `lane/<num>-…` branch name: live-checked
  *    2026-09-26, every lane in this pool sits on `branch: 'main'` (guard-lane's single-branch-workflow rule),
@@ -37,6 +39,10 @@ import { REPO_ROOT, defaultListAgents } from './dispatch-lane-io.mjs';
 import { listAgentsWithReviewJobs, REVIEW_JOB_KIND, jobLogPath } from './review-job-store.mjs';
 import { CODEX_THREAD_DIR_NAME } from './codex-delivery-provider.mjs';
 import { BACKLOG_VERB_RE } from '../dev/active-progress-watch.mjs';
+
+import { STALE_ROW_MS, codexRowIsTerminal, isAgedOut } from './agent-activity.mjs';
+import { resolveCompletionsDir, tryReadCompletion } from './completion-store.mjs';
+import { resolveCodexHome } from '../codex-direct-task.mjs';
 
 export { REPO_ROOT };
 
@@ -186,8 +192,33 @@ export function subagentRowsFor(parentSessionId, cwd, projectsDir = claudeProjec
   return rows;
 }
 
+function activityMtime(path) {
+  if (!path) return null;
+  try { return statSync(path).mtimeMs; } catch { return null; }
+}
+
+/** One directory walk per read; index suffixes so thread ids need no filename-format assumption. */
+function rolloutIndex(codexHome, threadIds) {
+  const index = new Map();
+  function walk(dir) {
+    let entries;
+    try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const entry of entries) {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) walk(path);
+      else if (entry.isFile() && entry.name.endsWith('.jsonl')) {
+        for (const id of threadIds) {
+          if (!index.has(id) && entry.name.endsWith(`-${id}.jsonl`)) index.set(id, path);
+        }
+      }
+    }
+  }
+  walk(join(codexHome, 'sessions'));
+  return index;
+}
+
 /** Every recorded Codex delivery thread — `{sessionSlug, threadId, at}` records, one row each. */
-export function codexThreadRows(root = REPO_ROOT) {
+export function codexThreadRows(root = REPO_ROOT, { codexHome = resolveCodexHome() } = {}) {
   const dir = join(root, '.operations', CODEX_THREAD_DIR_NAME);
   let files;
   try { files = readdirSync(dir).filter((f) => f.endsWith('.json')); } catch { return []; }
@@ -202,10 +233,15 @@ export function codexThreadRows(root = REPO_ROOT) {
       startedAt: rec.at ? Date.parse(rec.at) || null : null, lastEventAt: null,
     });
   }
+  const rollouts = rolloutIndex(codexHome, new Set(rows.map(row => row.id.slice('codex-'.length))));
+  for (const row of rows) {
+    row.transcriptPath = rollouts.get(row.id.slice('codex-'.length)) ?? null;
+    row.lastActivityMs = activityMtime(row.transcriptPath);
+  }
   return rows;
 }
 
-const RECENT_MS = 6 * 3600_000; // matches active-progress-watch.mjs's own staleness cutoff
+const RECENT_MS = STALE_ROW_MS; // matches active-progress-watch.mjs's own staleness cutoff
 
 /** Top-level session transcripts NOT already accounted for by `claude agents` — the operator's own
  *  interactive chats, or an agent whose harness process has already exited. Recency-bounded (6h) so a full
@@ -251,6 +287,8 @@ export function createAgentActivityReader({
   listJobs,
   root = REPO_ROOT,
   projectsDir = claudeProjectsDir(),
+  completionsDir = resolveCompletionsDir(),
+  codexHome = resolveCodexHome(),
   run = execFileSync,
   now = Date.now,
 } = {}) {
@@ -274,19 +312,27 @@ export function createAgentActivityReader({
       const transcriptPath = kind === REVIEW_JOB_KIND
         ? jobLogPath(a.name)
         : (sessionId && a.cwd ? join(projectsDir, projectSlugFor(a.cwd), `${sessionId}.jsonl`) : null);
-      rows.push({
+      const row = {
         id: a.id ?? sessionId ?? a.name, sessionId, name: a.name ?? null, runtime: 'claude', kind,
         cwd: a.cwd ?? null, state: a.state ?? null, startedAt: a.startedAt ?? null, lastEventAt: null,
         // `pid`/`status`/`waitingFor` ride straight off the `claude agents --json` row (or the job record's own
         // `pid`, `./review-job-store.mjs#jobRecordToAgentRow`) — the SAME three fields `session-verdicts.mjs`'s
         // `isPermissionWait` and this repo's other liveness readers already key off, never re-derived here.
         pid: Number.isInteger(a.pid) ? a.pid : null, status: a.status ?? null, waitingFor: a.waitingFor ?? null,
-        transcriptPath,
-        lease, claimedNums: transcriptPath ? claimedNumsFromTranscript(transcriptPath) : [],
-      });
+        transcriptPath, lastActivityMs: activityMtime(transcriptPath),
+        lease,
+      };
+      if (isAgedOut(row, { now: now() })) continue;
+      row.claimedNums = transcriptPath ? claimedNumsFromTranscript(transcriptPath) : [];
+      rows.push(row);
       if (sessionId && a.cwd) rows.push(...subagentRowsFor(sessionId, a.cwd, projectsDir));
     }
-    rows.push(...codexThreadRows(root));
+    for (const row of codexThreadRows(root, { codexHome })) {
+      let completion = null;
+      try { completion = tryReadCompletion(row.codexSlug, completionsDir); } catch { /* Unknown completion keeps the row. */ }
+      if (codexRowIsTerminal(row, completion) || isAgedOut(row, { now: now() })) continue;
+      rows.push(row);
+    }
     if (input.all) {
       for (const row of interactiveRows(known, projectsDir, now())) {
         row.lease = leaseIndex.get(row.sessionId) ?? null;

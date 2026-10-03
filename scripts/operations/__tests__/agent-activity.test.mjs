@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { resolveAgentActivity, extractMention, extractLaneHint, agentActivityOperation } from '../agent-activity.mjs';
+import { STALE_ROW_MS, isAgedOut, codexRowIsTerminal, resolveAgentActivity, extractMention, extractLaneHint, agentActivityOperation } from '../agent-activity.mjs';
 import { createRegistry, isReadOnlyOperation } from '../registry.mjs';
 import { createMemoryRunStore } from '../run-store.mjs';
 import { runOperationCli } from '../cli-adapter.mjs';
@@ -208,5 +208,43 @@ describe('agentActivityOperation — the declared operation (#3032 shape)', () =
   it('refuses a reader that does not return { rows: [...] }', () => {
     const declaration = agentActivityOperation({ readActivity: () => null });
     expect(() => declaration.steps[0].step.fn({ input: { all: false, prToCard: {} } })).toThrow(/rows/);
+  });
+});
+
+describe('stale and terminal rows', () => {
+  const now = Date.parse('2026-10-03T12:00:00Z');
+  it('a done completion newer than an older running thread wins, including equality; re-dispatch stays live', () => {
+    const completion = { status: 'done', updatedAt: new Date(now).toISOString() };
+    expect(codexRowIsTerminal({ startedAt: now - 1 }, completion)).toBe(true);
+    expect(codexRowIsTerminal({ startedAt: now }, completion)).toBe(true);
+    expect(codexRowIsTerminal({ startedAt: now + 1 }, completion)).toBe(false);
+  });
+  it('started, missing and unparseable completions are never terminal', () => {
+    for (const completion of [null, { status: 'started', updatedAt: new Date(now).toISOString() }, { status: 'done', updatedAt: 'invalid' }]) {
+      expect(codexRowIsTerminal({ startedAt: now - 1 }, completion)).toBe(false);
+    }
+    expect(codexRowIsTerminal({ startedAt: null }, { status: 'done', updatedAt: new Date(now).toISOString() })).toBe(false);
+  });
+  it('ages out a no-pid background row quiet for 17 days', () => {
+    expect(isAgedOut({ kind: 'background', startedAt: now - 17 * 86400_000 }, { now })).toBe(true);
+  });
+  it('uses the newest finite numeric or string activity time', () => {
+    expect(isAgedOut({ kind: 'codex', startedAt: now - 17 * 86400_000, lastActivityMs: now }, { now })).toBe(false);
+    expect(isAgedOut({ kind: 'background', startedAt: new Date(now).toISOString(), lastActivityMs: now - 17 * 86400_000 }, { now })).toBe(false);
+    expect(isAgedOut({ kind: 'codex', startedAt: 'invalid', lastActivityMs: now - STALE_ROW_MS - 1 }, { now })).toBe(true);
+  });
+  it('keeps pid rows, other kinds, and unknown activity', () => {
+    for (const row of [
+      { kind: 'background', pid: 123, startedAt: 0 }, { kind: 'codex', pid: 123, startedAt: 0 },
+      ...['review-job', 'subagent', 'interactive'].map(kind => ({ kind, startedAt: 0 })),
+      { kind: 'background' }, { kind: 'codex', startedAt: null, lastActivityMs: NaN },
+      { kind: 'background', startedAt: 'invalid', lastActivityMs: Infinity },
+    ]) expect(isAgedOut(row, { now })).toBe(false);
+  });
+  it('uses a strict six-hour boundary and supports an injected cutoff', () => {
+    expect(STALE_ROW_MS).toBe(6 * 3600_000);
+    expect(isAgedOut({ kind: 'codex', startedAt: now - STALE_ROW_MS }, { now })).toBe(false);
+    expect(isAgedOut({ kind: 'codex', startedAt: now - STALE_ROW_MS - 1 }, { now })).toBe(true);
+    expect(isAgedOut({ kind: 'codex', startedAt: now - 2 }, { now, staleMs: 1 })).toBe(true);
   });
 });

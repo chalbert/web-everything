@@ -3441,13 +3441,15 @@ describe('#3334 route 3/3 — the credential-less transport refuses before a req
 });
 
 describe('#4315 direct acceptance boundary', () => {
+  // A PR comment as `gh` returns it: referral records are read only from the automation's/operator's comments.
+  const gh = (body, login = 'web-everything') => ({ body, author: { login } });
   function referralState() {
     const original = { summary: 'broken', verdict: 'CONFIRMED', impactIfUnfixed: 'broken' };
     const record = { version: 1, repo: 'o/r', pr: 7, head: 'a'.repeat(40), runId: 'run-label-referral',
       reviewer: mandatoryReferralReviewer('run-label-referral'), authorBody: '<!-- authored-by-actor: author -->', attempted: true,
       referrals: [{ key: referralFindingKey('judgeAdvisory', original), seat: 'judgeAdvisory', original, finding: normalizeFinding(original) }], rulings: [] };
     const state = { labels: ['review:human'], headRefOid: record.head, state: 'OPEN', body: record.authorBody,
-      comments: [{ body: renderReferralRecord(record) }] };
+      comments: [gh(renderReferralRecord(record))] };
     return { record, state };
   }
   it.each(['accepted', 'restamp', 'clear-human'])('%s refuses a missing ruling before any write', to => {
@@ -3468,19 +3470,20 @@ describe('#4315 direct acceptance boundary', () => {
     const { record, state } = referralState();
     const rule = { id: 'r1', key: record.referrals[0].key, reviewerId: record.reviewer.id, lens: 'correctness',
       result: 'not-real', rationale: 'Verified diff', evidence: ['diff'] };
-    record.rulings = [rule]; state.comments.push({ body: renderReferralRecord(record) });
+    record.rulings = [rule]; state.comments.push(gh(renderReferralRecord(record)));
     expect(assertMandatoryReferralsCleared(state, { repo: 'o/r', pr: 7 }).pending).toEqual([]);
     expect(() => assertMandatoryReferralsCleared({ ...state, headRefOid: 'b'.repeat(40) })).toThrow();
     expect(() => assertMandatoryReferralsCleared({ ...state, comments: undefined })).toThrow();
-    expect(() => assertMandatoryReferralsCleared({ ...state, comments: [...state.comments, { body: '<!-- mandatory-referrals-v1: truncated' }] })).toThrow();
+    expect(() => assertMandatoryReferralsCleared({ ...state, comments: [...state.comments, gh('<!-- mandatory-referrals-v1: truncated')] })).toThrow();
     const forged = { ...record, rulings: [{ ...rule, reviewerId: 'advisory-seat' }] };
-    expect(() => assertMandatoryReferralsCleared({ ...state, comments: [{ body: `<!-- mandatory-referrals-v1: ${encodeURIComponent(JSON.stringify(forged))} -->` }] })).toThrow();
+    expect(() => assertMandatoryReferralsCleared({ ...state, comments: [gh(`<!-- mandatory-referrals-v1: ${encodeURIComponent(JSON.stringify(forged))} -->`)] })).toThrow();
     record.rulings.push({ ...rule, id: 'r2', result: 'card', card: 'we:backlog/no-such-card.md' });
-    state.comments.push({ body: renderReferralRecord(record) });
+    state.comments.push(gh(renderReferralRecord(record)));
     expect(() => assertMandatoryReferralsCleared(state)).toThrow();
     record.rulings[1].supersedes = 'r1';
-    expect(() => assertMandatoryReferralsCleared({ ...state, comments: [{ body: renderReferralRecord(record) }] })).toThrow();
+    expect(() => assertMandatoryReferralsCleared({ ...state, comments: [gh(renderReferralRecord(record))] })).toThrow();
   });
+
 });
 
 // #xan09na — exercise the shared write boundary with real immutable Git objects and a local forge.

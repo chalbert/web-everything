@@ -1028,11 +1028,11 @@ describe('#4315 durable referral effects', () => {
       readPrState: () => { trace.push('read'); return structuredClone(state); },
       postComment: (repo, pr, body) => {
         trace.push('post');
-        if (!body.includes('<!-- mandatory-referrals-v1:')) { state.comments.push({ body }); return; }
+        if (!body.includes('<!-- mandatory-referrals-v1:')) { state.comments.push({ body, author: { login: 'web-everything' } }); return; }
         posts++;
         if (failure === 'post' || (failure === 'attempt' && posts === 2)
           || (['completion', 'failure-snapshot'].includes(failure) && posts === 3)) throw new Error('post unavailable');
-        if (failure !== 'read-back') state.comments.push({ body });
+        if (failure !== 'read-back') state.comments.push({ body, author: { login: 'web-everything' } });
         if (failure === 'changed-head') state.headRefOid = 'b'.repeat(40);
       },
       setLabels: (repo, pr, plan) => { trace.push(`label:${plan.add}`); state.labels = [...state.labels.filter(l => !plan.remove.includes(l)), plan.add]; },
@@ -1061,7 +1061,7 @@ describe('#4315 durable referral effects', () => {
       reviewer: mandatoryReferralReviewer('earlier-run'), authorBody: h.state.body,
       attempted: true, referrals, rulings: [] };
     record.rulings = rule(record);
-    h.state.comments.push({ body: renderReferralRecord(record) });
+    h.state.comments.push({ body: renderReferralRecord(record), author: { login: 'web-everything' } });
     h.payload.referrals = [];
     return record;
   }
@@ -1204,7 +1204,7 @@ describe('#4315 durable referral effects', () => {
   it('resuming after a partial chunk post keeps every chunk runId unique and reads back non-malformed', async () => {
     const h = harness();
     const seat = h.payload.referrals[0].seat;
-    h.payload.referrals = Array.from({ length: 20 }, (_, i) => ({ seat,
+    h.payload.referrals = Array.from({ length: 40 }, (_, i) => ({ seat,
       original: { ...h.payload.referrals[0].original, summary: `finding ${i}`, detail: 'evidence '.repeat(500) } }));
     const record = (b) => b.includes('<!-- mandatory-referrals-v1:');
     const post = h.provider.postComment;
@@ -1227,8 +1227,8 @@ describe('#4315 durable referral effects', () => {
     expect(current.length).toBeGreaterThan(1);
     expect(new Set(current.map(r => r.runId)).size).toBe(current.length);
     const keys = current.flatMap(r => r.referrals.map(f => f.key));
-    expect(new Set(keys).size).toBe(20);
-    expect(keys).toHaveLength(20);
+    expect(new Set(keys).size).toBe(40);
+    expect(keys).toHaveLength(40);
   });
   it.each(['post', 'read-back'])('%s cannot clear a hold or dispatch before persistence', async failure => {
     const h = harness({ failure });
@@ -1280,7 +1280,8 @@ describe('#4315 durable referral effects', () => {
     const oldRecord = (i, findings) => ({ version: 1, repo: 'o/r', pr: 7,
       head: (i + 1).toString(16).padStart(40, '0'), runId: `earlier-${i}`, reviewer: mandatoryReferralReviewer(`earlier-${i}`),
       authorBody: h.state.body, attempted: true, referrals: findings, rulings: [] });
-    h.state.comments = referrals.map((f, i) => ({ body: renderReferralRecord(oldRecord(i, i ? [referrals[0], f] : [f])) }));
+    h.state.comments = referrals.map((f, i) => ({ body: renderReferralRecord(oldRecord(i, i ? [referrals[0], f] : [f])),
+      author: { login: 'web-everything' } }));
     expect(renderReferralRecord(oldRecord(0, referrals)).length).toBeGreaterThan(60_000);
     const result = await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX);
     const posted = h.state.comments.slice(42);
@@ -1300,11 +1301,110 @@ describe('#4315 durable referral effects', () => {
     await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, { ...CTX, runId: 'resume' });
     expect(h.judge).toHaveBeenCalledTimes(current.length);
   });
+  it.each(['1', '0'])('replays the 14:08Z run shape with optional seat=%s: all 55 keys read back', async enabled => {
+    const h = harness({ env: { REVIEW_PR_ANTIGRAVITY_REVIEW: enabled } });
+    const fixture = JSON.parse(readFileSync('scripts/operations/__tests__/fixtures/referral-3481-shape.json', 'utf8'));
+    h.payload = { read: fixture.read, referrals: fixture.referrals };
+    h.state.headRefOid = fixture.read.netBasis.rev;
+    const referrals = fixture.carried.map(({ seat, fields }, i) => {
+      const original = Object.fromEntries(Object.entries(fields).map(([field, value]) => [field,
+        typeof value === 'object' && value?.length ? `${i}:`.padEnd(value.length, 'x') : value]));
+      return { seat, original, key: referralFindingKey(seat, original), finding: normalizeFinding(original) };
+    });
+    const old = { version: 1, repo: 'o/r', pr: 7, head: 'b'.repeat(40), runId: 'historical',
+      reviewer: mandatoryReferralReviewer('historical'), authorBody: h.state.body,
+      attempted: true, referrals: fixture.historical.indexes.map(i => referrals[i]), rulings: [] };
+    expect(renderReferralRecord(old).length).toBeGreaterThan(60_000);
+    h.state.comments = [{ url: 'https://github.com/o/r/pull/7#issuecomment-123', body: renderReferralRecord(old), author: { login: 'web-everything' } },
+      ...referrals.filter((_, i) => !fixture.historical.indexes.includes(i)).map((f, i) => ({
+        body: renderReferralRecord({ ...old, runId: `other-${i}`, reviewer: mandatoryReferralReviewer(`other-${i}`), referrals: [f] }),
+        author: { login: 'web-everything' },
+      }))];
+    const priorCount = h.state.comments.length;
+    const result = await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX);
+    expect(result.pending).toEqual(enabled === '1' ? [] : ['referral-overflow']);
+    if (enabled === '0') expect(result.reason).toContain('historical run historical retirement');
+    expect(h.state.comments.slice(priorCount).every(c => c.body.length < 60_000)).toBe(true);
+    const parsed = readReferralRecords(h.state.comments);
+    expect(parsed.malformed).toBe(false);
+    const current = parsed.records.filter(r => r.head === h.state.headRefOid);
+    expect(current.length).toBeGreaterThan(1);
+    expect(current.every(validateReferralRecord)).toBe(true);
+    expect(current.flatMap(r => r.referrals.map(f => f.key)).sort()).toEqual(referrals.map(f => f.key).sort());
+  });
+  it('bounds an oversized entry with a hash and original-comment pointer, retaining ruling identity', async () => {
+    const h = harness();
+    h.payload.referrals[0].original.quote = '🧪 long source '.repeat(20_000);
+    h.payload.referrals[0].original.detail = { text: 'nested evidence '.repeat(20_000) };
+    const original = h.payload.referrals[0].original;
+    const key = referralFindingKey(h.payload.referrals[0].seat, original);
+    const old = { version: 1, repo: 'o/r', pr: 7, head: 'b'.repeat(40), runId: 'oversized',
+      reviewer: mandatoryReferralReviewer('oversized'), authorBody: h.state.body, attempted: true,
+      referrals: [{ key, seat: h.payload.referrals[0].seat, original, finding: normalizeFinding(original) }], rulings: [] };
+    const url = 'https://github.com/o/r/pull/7#issuecomment-456';
+    // Identical identity can have different evidence across records: link the actual source bytes.
+    const earlier = structuredClone(old);
+    earlier.runId = 'earlier-evidence';
+    earlier.reviewer = mandatoryReferralReviewer(earlier.runId);
+    earlier.referrals[0].original.quote = 'different evidence '.repeat(20_000);
+    earlier.referrals[0].finding = normalizeFinding(earlier.referrals[0].original);
+    h.state.comments = [{ url: 'https://github.com/o/r/pull/7#issuecomment-123', body: renderReferralRecord(earlier), author: { login: 'web-everything' } },
+      { url, body: renderReferralRecord(old), author: { login: 'web-everything' } }];
+    h.payload.referrals = [];
+    const result = await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX);
+    expect(result.pending).toEqual([]);
+    const record = result.records.find(r => r.head === h.state.headRefOid);
+    expect(record.referrals[0].key).toBe(key);
+    expect(record.rulings[0].key).toBe(key);
+    expect(record.referrals[0].original.quote).toContain(`source:${url}`);
+    expect(record.referrals[0].original.quote).toMatch(/sha256:[a-f0-9]{64}/);
+    expect(record.referrals[0].original.detail.length).toBeLessThan(1024);
+    expect(readReferralRecords(h.state.comments).malformed).toBe(false);
+    expect(h.state.comments.slice(2).every(c => c.body.length < 60_000)).toBe(true);
+  });
+  it('does not repeat a large author body across chunks and retains author independence', async () => {
+    const h = harness();
+    h.state.body += ' large PR description'.repeat(20_000);
+    h.payload.referrals = Array.from({ length: 30 }, (_, i) => ({ ...h.payload.referrals[0],
+      original: { ...h.payload.referrals[0].original, summary: `finding ${i}`, quote: 'evidence '.repeat(100) } }));
+    const result = await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX);
+    expect(result.pending).toEqual([]);
+    expect(result.records.length).toBeGreaterThan(1);
+    for (const r of result.records) {
+      expect(r.authorBody.length).toBeLessThan(1024);
+      expect(r.authorBody).toContain('<!-- authored-by-actor: author -->');
+      expect(r.authorBody).toContain('sha256:');
+    }
+    expect(h.state.comments.every(c => c.body.length < 60_000)).toBe(true);
+  });
+  it('persists fitting findings beside an unrepresentable key and visibly holds the overflow', async () => {
+    const h = harness();
+    h.payload.referrals.unshift({ ...h.payload.referrals[0], original: {
+      ...h.payload.referrals[0].original, summary: 'oversized key '.repeat(20_000) } });
+    const result = await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX);
+    expect(result.pending).toContain('referral-overflow');
+    expect(result.records.flatMap(r => r.referrals)).toHaveLength(1);
+    expect(result.reason).toContain('key sha256:');
+    expect(h.state.comments.at(-1).body).toContain('referral-overflow');
+    expect(h.state.labels).toContain('review:human');
+  });
+  it('retains an oversized immutable historical snapshot while persisting new chunks', async () => {
+    const h = harness({ env: { REVIEW_PR_ANTIGRAVITY_REVIEW: '0' } });
+    const old = seedReferrals(h, ['judgeAntigravityReview']);
+    old.authorBody += 'historical body '.repeat(10_000);
+    h.state.comments = [{ body: renderReferralRecord(old), author: { login: 'web-everything' } }];
+    const result = await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX);
+    expect(result.reason).toContain('historical run earlier-run retirement');
+    expect(result.pending).toContain('referral-overflow');
+    expect(result.records.some(r => r.head === h.state.headRefOid)).toBe(true);
+    expect(h.state.comments.slice(1).every(c => c.body.length < 60_000)).toBe(true);
+    expect(readReferralRecords(h.state.comments).malformed).toBe(false);
+  });
   it('parks an indivisible oversized finding without posting it or dispatching', async () => {
     const h = harness();
     h.payload.referrals[0].original.summary = 'large '.repeat(20_000);
     const result = await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX);
-    expect(result.reason).toContain('exceeds 60000 characters for one finding');
+    expect(result.reason).toContain('exceeds 60000 characters with its v1 identity intact');
     expect(h.state.labels).toEqual(['review:human']);
     expect(h.state.comments).toHaveLength(1);
     expect(h.state.comments[0].body.length).toBeLessThan(60_000);
@@ -1318,9 +1418,27 @@ describe('#4315 durable referral effects', () => {
     }] } }));
     const result = await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX);
     expect(result.reason).toContain('exceeds 60000 characters');
+    expect(result.pending).toContain('referral-overflow');
     expect(h.state.labels).toEqual(['review:human']);
     expect(h.state.comments.every(c => c.body.length <= 60_000)).toBe(true);
     expect(readReferralRecords(h.state.comments).records[0]).toMatchObject({ attempted: true, rulings: [] });
+  });
+  it('persists a fitting ruling when a sibling ruling overflows', async () => {
+    const h = harness();
+    h.payload.referrals.push({ ...h.payload.referrals[0], original: { ...h.payload.referrals[0].original, summary: 'second' } });
+    const judge = h.judge.getMockImplementation();
+    h.judge.mockImplementation(async request => {
+      const answer = await judge(request);
+      answer.value.rulings[0].rationale = 'verbose '.repeat(20_000);
+      return answer;
+    });
+    const result = await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX);
+    expect(result.pending).toContain('referral-overflow');
+    expect(result.records[0].rulings).toHaveLength(1);
+    expect(result.records[0].rulings[0].key).toBe(referralFindingKey(h.payload.referrals[1].seat, h.payload.referrals[1].original));
+    expect(result.records[0].failure).toContain('withheld, key remains pending');
+    expect(readReferralRecords(h.state.comments).malformed).toBe(false);
+    expect(h.state.comments.every(c => c.body.length < 60_000)).toBe(true);
   });
   it('still parks if posting the short explanation also fails', async () => {
     const h = harness();
@@ -1345,11 +1463,11 @@ describe('#4315 durable referral effects', () => {
   });
   it('ignores stale malformed records through persistence and retains the current-head clear-human guard', async () => {
     const h = harness();
-    h.state.comments.push({ body: `<!-- mandatory-referrals-v1: ${encodeURIComponent(JSON.stringify({ head: 'b'.repeat(40) }))} -->` });
+    h.state.comments.push({ body: `<!-- mandatory-referrals-v1: ${encodeURIComponent(JSON.stringify({ head: 'b'.repeat(40) }))} -->`, author: { login: 'web-everything' } });
     const result = await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX);
     expect(result.pending).toEqual([]);
     expect(() => assertMandatoryReferralsCleared(h.state, { repo: 'o/r', pr: 7 })).not.toThrow();
-    h.state.comments.push({ body: '<!-- mandatory-referrals-v1: %truncated' });
+    h.state.comments.push({ body: '<!-- mandatory-referrals-v1: %truncated', author: { login: 'web-everything' } });
     expect(() => assertMandatoryReferralsCleared(h.state, { repo: 'o/r', pr: 7 })).toThrow(/mandatory referral hold/);
     const pending = harness({ failure: 'judge' });
     await pending.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](pending.payload, CTX);
@@ -1365,6 +1483,26 @@ describe('#4315 durable referral effects', () => {
     expect(h.state.labels).toEqual(['review:human']);
     expect(h.trace.indexOf('post')).toBeLessThan(h.trace.indexOf('judge'));
     expect(h.trace.slice(0, h.trace.indexOf('judge'))).toContain('read');
+  });
+  it('requires an unattempted new record to obtain its own ruling', async () => {
+    const h = harness();
+    await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX);
+    const old = readReferralRecords(h.state.comments).records[0];
+    const next = { ...old, runId: 'new-record', reviewer: mandatoryReferralReviewer('new-record'), attempted: false, rulings: [] };
+    h.state.comments.push({ body: renderReferralRecord(next), author: { login: 'web-everything' } });
+    const result = await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, { ...CTX, runId: 'next' });
+    expect(result.pending).toEqual([]);
+    expect(h.judge).toHaveBeenCalledTimes(2);
+    expect(h.state.comments).toHaveLength(6);
+  });
+  it('keeps referrals tool-free without a checkout', async () => {
+    const h = harness();
+    const result = await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX);
+    expect(result.pending).toEqual([]);
+    const request = h.judge.mock.calls[0][0];
+    expect(request.allowedTools).toBeNull();
+    expect(request).not.toHaveProperty('cwd');
+    expect(request.mandate).not.toContain('using tools');
   });
   it('posts and reads back rulings before returning clearance, then reuses them', async () => {
     const h = harness();

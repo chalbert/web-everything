@@ -2,10 +2,13 @@
 bornAs: x2len1z
 kind: decision
 parent: "2288"
-status: open
+status: resolved
 relatedTo: ["2288", "2319", "2548", "3443", "3423", "3532", "3735", "2198", "3605", "1937"]
 scope: ["we:scripts/merge-ai-prs.mjs", "we:scripts/lane-drain.mjs", "we:scripts/backlog.mjs", "we:scripts/check-standards-rules.mjs", "we:scripts/pr-land.mjs"]
 dateOpened: "2026-09-19"
+dateStarted: "2026-10-03"
+dateResolved: "2026-10-03"
+codifiedIn: "docs/agent/platform-decisions.md#backlog-ids-numbered-before-publish"
 preparedDate: "2026-09-21"
 preparedAgainstSha: "a8f0eb9681bd23f4ad2d6e58aa5db9cfa8cd311a"
 relatedReport: reports/2026-09-21-backlog-id-assignment-prior-art.md
@@ -13,6 +16,8 @@ tags: []
 ---
 
 # Decision: where backlog ids are assigned so a temporary hash id is structurally unable to reach main
+
+> **RULED 2026-10-03 (operator, in conversation): both forks at the defaults, plus one amendment.** Fork 1 (a): the producer numbers at PR open and the drain refuses a clashing NNN where main is written. Fork 2 (a): the tip tree, through a required diff-scoped `backlog-ids` check; merge method unchanged. The operator's words: *"Ok for default, ist should be configurable settings"*. So each fork is a configurable setting with the default as its platform default (`producer-at-pr-open` or `integration-branch`; `tip-tree` or `full-history-squash`); an unbuilt value refuses and never falls back. Statute: `we:docs/agent/platform-decisions.md#backlog-ids-numbered-before-publish`. Fresh evidence: the drain's bulk numbering commit `952011907` renamed 289 stranded cards at once, broke main CI (PR #3806) and conflicted open PRs such as #3771. Build stories: 4985 (settings), 4987 (numbering operation), 4988 (producer numbering and write-point verify), 4989 (`backlog-ids` check), 4990 (push refusal), 4986 (legacy repair).
 
 Operator requirement 2026-09-19: a backlog file with a temporary hash id must be STRUCTURALLY UNABLE to reach main — not caught after the fact, not repaired by a follow-up PR. Today's #2319 rule (we:scripts/check-standards-rules.mjs strandedHashesOnMain) is a post-land detector because numbering is deferred to land (#2288, we:scripts/merge-ai-prs.mjs numberPendingHashes tail); any land route or failed tail strands a hash and turns main red — twice on 2026-09-19 (3707 via PR #2335, then 9 cards via PRs #2032/#2318/#2210/#2338, all merged by the drain). Decide where numbering belongs and what makes it unskippable.
 
