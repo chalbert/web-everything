@@ -28,13 +28,16 @@
  * DEGRADATION, on the same "never lose the read" principle `we:scripts/progress-board.mjs` documents: a fresh
  * live fetch wins when available; a live fetch that fails falls back to the last cache written (even stale —
  * a branch-protection change is rare, so a day-old required set is still far more accurate than guessing);
- * with no cache at all, {@link FALLBACK_REQUIRED_STATUS_CHECKS} is the last resort — the required set as
- * confirmed live on 2026-09-26 (`test`, `smoke`, `daemon-soak`). A caller can always tell which happened via
- * the returned `source` (`'live'` / `'cache'` / `'stale-cache'` / `'fallback'`).
+ * with no cache at all, only that repo's declared set is eligible as a fallback. A plan-feature 403 is
+ * cached for the normal TTL as `declared`, avoiding a doomed request on every call. Other failures still
+ * retry. An undeclared repo returns `unavailable` with []; the shared check reducer then evaluates observed
+ * CI checks, retaining red/pending/unchecked evidence rather than treating an empty required set as green.
+ * Cache entries coexist by repo@branch; legacy single-entry sidecars are migrated on the next write.
  */
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { CONSTELLATION_REPOS } from './constellation-repos.mjs';
 
 /**
  * The required set as confirmed live on 2026-09-26 (`gh api repos/chalbert/web-everything/branches/main/
@@ -44,7 +47,25 @@ import { dirname, join } from 'node:path';
  */
 export const FALLBACK_REQUIRED_STATUS_CHECKS = Object.freeze(['test', 'smoke', 'daemon-soak']);
 
+/**
+ * PR requirements when protection cannot be read. Sibling CI workflows inspected 2026-10-02:
+ * Plateau runs test + e2e on every PR (e2e skips only pushes); Frontier UI runs test. Plateau's older
+ * workflow commentary calls e2e advisory; the declared PR policy here intentionally requires both.
+ * Deployment admission/build/deploy jobs are event/label-gated and are not PR requirements.
+ */
+export const DECLARED_REQUIRED_STATUS_CHECKS = Object.freeze({
+  [CONSTELLATION_REPOS.we.slug]: FALLBACK_REQUIRED_STATUS_CHECKS,
+  [CONSTELLATION_REPOS['plateau-app'].slug]: Object.freeze(['test', 'e2e']),
+  [CONSTELLATION_REPOS.frontierui.slug]: Object.freeze(['test']),
+});
+
 const DEFAULT_CACHE_TTL_MS = 15 * 60_000;
+
+function protectionUnavailableOnPlan(error) {
+  const message = `${error?.message ?? ''}\n${error?.stderr ?? ''}`;
+  return /\b403\b/.test(message)
+    && /Upgrade to GitHub Pro or make this repository public to enable this feature/i.test(message);
+}
 
 /** Where the cache sidecar lives — mirrors `we:scripts/progress-board.mjs#cachePathFor`'s own convention. */
 export function defaultCachePath() {
@@ -87,7 +108,7 @@ export function defaultReadRequiredStatusChecks({ repo, branch = 'main' } = {}) 
  *   defaults to 15 minutes. A stale-but-only-option cache is still preferred over the hardcoded fallback (see
  *   header), so this bounds re-FETCH frequency, not cache USABILITY.
  * @param {Function} [o.readChecks] - defaults to {@link defaultReadRequiredStatusChecks}.
- * @returns {{checks: string[], source: 'live'|'cache'|'stale-cache'|'fallback'}}
+ * @returns {{checks: string[], source: 'live'|'cache'|'stale-cache'|'fallback'|'declared'|'unavailable'}}
  */
 export function getRequiredStatusChecks({
   repo,
@@ -98,35 +119,56 @@ export function getRequiredStatusChecks({
   readChecks = defaultReadRequiredStatusChecks,
 } = {}) {
   const key = `${repo || ''}@${branch}`;
+  const declared = DECLARED_REQUIRED_STATUS_CHECKS[repo];
+  let entries = {};
   let cache = null;
   try {
     const parsed = JSON.parse(readFileSync(cachePath, 'utf8'));
-    if (parsed && parsed.key === key && Array.isArray(parsed.checks) && Number.isFinite(parsed.fetchedAtMs)) {
-      cache = parsed;
+    if (parsed?.entries && typeof parsed.entries === 'object' && !Array.isArray(parsed.entries)) {
+      entries = parsed.entries;
+    } else if (typeof parsed?.key === 'string') {
+      entries = { [parsed.key]: parsed };
+    }
+    // A cwd-inferred slug is unknown here: never share an anonymous cache across repositories.
+    const candidate = repo ? entries[key] : null;
+    if (candidate && Array.isArray(candidate.checks) && Number.isFinite(candidate.fetchedAtMs)) {
+      cache = candidate;
     }
   } catch {
     /* no cache, or unreadable — a fresh live fetch (or the hardcoded fallback) is next */
   }
 
   if (cache && (now - cache.fetchedAtMs) < ttlMs) {
-    return { checks: cache.checks, source: 'cache' };
+    return { checks: cache.checks, source: cache.source === 'declared' || cache.source === 'unavailable'
+      ? cache.source : 'cache' };
   }
+
+  const save = (checks, source) => {
+    if (repo) {
+      try {
+        mkdirSync(dirname(cachePath), { recursive: true });
+        entries[key] = { checks, source, fetchedAtMs: now };
+        writeFileSync(cachePath, JSON.stringify({ entries }, null, 2) + '\n');
+      } catch {
+        /* the cache is an optimisation — never fail a read over a write */
+      }
+    }
+    return { checks, source };
+  };
 
   try {
     const checks = readChecks({ repo, branch });
     if (Array.isArray(checks) && checks.length) {
-      try {
-        mkdirSync(dirname(cachePath), { recursive: true });
-        writeFileSync(cachePath, JSON.stringify({ key, checks, fetchedAtMs: now }, null, 2) + '\n');
-      } catch {
-        /* the cache is an optimisation — never fail this read over a write it doesn't need to succeed */
-      }
-      return { checks, source: 'live' };
+      return save(checks, 'live');
     }
-  } catch {
+  } catch (error) {
+    if (protectionUnavailableOnPlan(error)) {
+      if (declared) return save([...declared], 'declared');
+      if (!cache) return save([], 'unavailable');
+    }
     /* gh missing, unauthenticated, offline, rate-limited, or an unexpected response shape — degrade below */
   }
 
-  if (cache) return { checks: cache.checks, source: 'stale-cache' };
-  return { checks: FALLBACK_REQUIRED_STATUS_CHECKS.slice(), source: 'fallback' };
+  if (cache) return { checks: cache.checks, source: cache.source === 'unavailable' ? 'unavailable' : 'stale-cache' };
+  return declared ? { checks: [...declared], source: 'fallback' } : { checks: [], source: 'unavailable' };
 }
