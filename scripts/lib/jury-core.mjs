@@ -2355,10 +2355,11 @@ export function readReferralRecords(comments, { head } = {}) {
     || typeof r?.head !== 'string' || !/^[a-f0-9]{40}$/.test(r.head) || r.head === head;
   for (const comment of Array.isArray(comments) ? comments : []) {
     const body = typeof comment === 'string' ? comment : comment?.body ?? '';
-    // Only a literal opener at the start of a line attempts a record; prose may discuss the marker.
-    const attempts = [...body.matchAll(/^\s*<!-- mandatory-referrals-v1:/gm)];
+    // Only a literal opener at the start of a line attempts a record; prose may discuss the marker. Indentation is
+    // `[ \t]*`, never `\s*`: `\s` also matches newlines, so under `m` a whitespace-heavy untrusted body is O(n²).
+    const attempts = [...body.matchAll(/^[ \t]*<!-- mandatory-referrals-v1:/gm)];
     if (!attempts.length) continue;
-    const matches = [...body.matchAll(/^\s*<!-- mandatory-referrals-v1: ([^\s]+)( -->)?/gm)];
+    const matches = [...body.matchAll(/^[ \t]*<!-- mandatory-referrals-v1: ([^\s]+)( -->)?/gm)];
     if (attempts.length !== matches.length) malformed = true;
     for (const match of matches) {
       try {

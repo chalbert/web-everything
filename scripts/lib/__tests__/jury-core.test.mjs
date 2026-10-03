@@ -1643,6 +1643,17 @@ describe('#4315 mandatory referral protocol', () => {
     expect(readReferralRecords([{ author, body: renderReferralRecord(r) }])).toEqual({ records: [r], malformed: false });
     expect(readReferralRecords([{ author, body: '<!-- mandatory-referrals-v1: %invalid -->' }]).malformed).toBe(true);
   });
+  it.each([
+    ['newlines', '\n'.repeat(65000)],
+    ['space-newline pairs', ' \n'.repeat(32000)],
+    ['tab-newline pairs', '\t\n'.repeat(32000)],
+  ])('reads an untrusted whitespace-heavy body in bounded time: %s', (_, filler) => {
+    const r = record();
+    const started = performance.now();
+    expect(readReferralRecords([{ body: filler }])).toEqual({ records: [], malformed: false });
+    expect(readReferralRecords([{ body: filler + renderReferralRecord(r) }])).toEqual({ records: [r], malformed: false });
+    expect(performance.now() - started).toBeLessThan(1000);
+  });
   it('replays the four #3507 marker-discussion excerpts without a malformed hold', () => {
     const fixture = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'referral-marker-discussion-3507.json');
     const { comments } = JSON.parse(readFileSync(fixture, 'utf8'));
