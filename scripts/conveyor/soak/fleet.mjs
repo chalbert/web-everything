@@ -22,7 +22,7 @@ const RED = [{ name: 'test', conclusion: 'FAILURE' }];
 export function seedDefaultFleet(w) {
   const out = [];
   w.gh.setRequiredChecks('we', REQUIRED);
-  const add =(key, owes, note, { files, labels = [], checks = GREEN, body, isDraft = false, comments = [] }) => {
+  const add = (key, owes, note, { files, labels = [], checks = GREEN, body, isDraft = false, comments = [] }) => {
     const head = `lane/soak-${key}`;
     w.git.createBranch('we', head, { from: 'main', files });
     const pr = w.gh.openPr({ repo: 'we', head, base: 'main', title: `soak: ${note}`, labels, body, isDraft });
