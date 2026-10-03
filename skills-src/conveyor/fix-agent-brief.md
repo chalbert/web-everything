@@ -162,7 +162,7 @@ judgment you cannot safely make, do **NOT** guess. **Record the stand-down on th
 `review:changes` (do **not** re-arm) and RETURN `#{{ITEM_NUM}} → fix escalated (finding needs human judgment)`:
 
 ```bash
-node "{{WE_ROOT}}/scripts/conveyor/stand-down.mjs" {{PR_NUM}} --repo={{REPO}} --reason=needs-judgment \
+node "{{WE_ROOT}}/scripts/conveyor/stand-down.mjs" {{PR_NUM}} --repo={{REPO}} --who={{SESSION_SLUG}} --reason=needs-judgment \
   --detail="<one line — what you could not decide>"
 node "{{WE_ROOT}}/scripts/operations/completion-cli.mjs" report --repo={{REPO}} --session={{SESSION_SLUG}} --status=done --outcome=escalated-needs-judgment
 node "{{WE_ROOT}}/scripts/conveyor/fix-procedure.mjs" fix-end {{PR_NUM}} --repo={{REPO}} --who={{SESSION_SLUG}}
@@ -280,7 +280,7 @@ base is something else; the same reproduce/resolve/escalate discipline applies e
 different ref.)
 
 ```bash
-node "{{WE_ROOT}}/scripts/conveyor/stand-down.mjs" {{PR_NUM}} --repo={{REPO}} --reason=conflict \
+node "{{WE_ROOT}}/scripts/conveyor/stand-down.mjs" {{PR_NUM}} --repo={{REPO}} --who={{SESSION_SLUG}} --reason=conflict \
   --detail="<one line — what made the overlap unsafe to resolve automatically>"
 node "{{WE_ROOT}}/scripts/operations/completion-cli.mjs" report --repo={{REPO}} --session={{SESSION_SLUG}} --status=done --outcome=escalated-conflict
 node "{{WE_ROOT}}/scripts/conveyor/fix-procedure.mjs" fix-end {{PR_NUM}} --repo={{REPO}} --who={{SESSION_SLUG}}
@@ -397,7 +397,7 @@ A red gate is a hard stop. Record the stand-down on the PR, leave it `review:cha
 RETURN `#{{ITEM_NUM}} → fix gate-red`. Do not re-push a red diff.
 
 ```bash
-node "{{WE_ROOT}}/scripts/conveyor/stand-down.mjs" {{PR_NUM}} --repo={{REPO}} --reason=gate-red \
+node "{{WE_ROOT}}/scripts/conveyor/stand-down.mjs" {{PR_NUM}} --repo={{REPO}} --who={{SESSION_SLUG}} --reason=gate-red \
   --detail="<one line — which check stayed red>"
 node "{{WE_ROOT}}/scripts/operations/completion-cli.mjs" report --repo={{REPO}} --session={{SESSION_SLUG}} --status=done --outcome=gate-red
 node "{{WE_ROOT}}/scripts/conveyor/fix-procedure.mjs" fix-end {{PR_NUM}} --repo={{REPO}} --who={{SESSION_SLUG}}
@@ -435,7 +435,7 @@ terminal and needs no person), release the claim, and return:
 
 ```bash
 git push origin HEAD:refs/heads/{{LANE_REF}}-fix-{{PR_NUM}}-alt
-node "{{WE_ROOT}}/scripts/conveyor/stand-down.mjs" {{PR_NUM}} --repo={{REPO}} --reason=concurrent-author \
+node "{{WE_ROOT}}/scripts/conveyor/stand-down.mjs" {{PR_NUM}} --repo={{REPO}} --who={{SESSION_SLUG}} --reason=concurrent-author \
   --head="$(git ls-remote origin refs/heads/{{LANE_REF}} | cut -f1)" --alt={{LANE_REF}}-fix-{{PR_NUM}}-alt \
   --alt-sha="$(git rev-parse HEAD)" --detail="<one line — what the other author changed>"
 node "{{WE_ROOT}}/scripts/operations/completion-cli.mjs" report --repo={{REPO}} --session={{SESSION_SLUG}} --status=done --outcome=not-applicable
