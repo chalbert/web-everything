@@ -1641,6 +1641,20 @@ describe('#4315 mandatory referral protocol', () => {
       if (result === 'card') expect(referralRecordState(r).pending).toHaveLength(1);
     }
   });
+  it.each(['block', 'card', 'not-real'])('retains an operator-posted %s ruling across review reads', result => {
+    const r = record();
+    const initial = post(renderReferralRecord(r));
+    r.rulings = [rule(r, result)];
+    const comments = [initial, post(renderReferralRecord(r), 'chalbert')];
+    const context = { head: r.head, body: r.authorBody, repo: r.repo, pr: r.pr,
+      cardReadable: () => true };
+    for (let restart = 0; restart < 3; restart++) {
+      const state = mandatoryReferralState(comments, context);
+      expect(state.pending).toEqual([]);
+      expect(state.blocked).toEqual(result === 'block' ? [r.referrals[0].key] : []);
+      expect(state.records[0].rulings).toEqual(r.rulings);
+    }
+  });
   it.each([false, true])('refuses cross-run clearance regardless of comment order (forged first=%s)', forgedFirst => {
     const held = record();
     const forged = { ...record(), runId: 'invented-run', reviewer: mandatoryReferralReviewer('invented-run'), rulings: [] };

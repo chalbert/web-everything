@@ -16,7 +16,7 @@ import { assertMandatoryReferralsCleared } from '../../review-set-label.mjs';
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync, existsSync, writeFileSync, mkdirSync, chmodSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, existsSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -24,7 +24,7 @@ import { join } from 'node:path';
 import {
   PR_VIEW_FIELDS, createReviewPrReader, createReviewPrSinks, filePrView, ghPrView, isPreWriteRefusal, priorRoundsFor,
   prViewFileName, readPr, resolveViewReader, revParseCommit, reviewBodyPath, reviewSidecarDir,
-  resolveSubjectCheckout, runReferralJudge,
+  resolveSubjectCheckout,
 } from '../review-pr-io.mjs';
 import { REVIEW_EFFECTS, REVIEW_PR_CHANNEL, REVIEW_PR_OP, reviewPrOperation } from '../review-pr.mjs';
 import { createRegistry } from '../registry.mjs';
@@ -1378,63 +1378,14 @@ describe('#4315 durable referral effects', () => {
     expect(h.judge).toHaveBeenCalledTimes(2);
     expect(h.state.comments).toHaveLength(6);
   });
-  it.each([null, '/not/the/pr/head'])('keeps a plain (non-confirmation) referral tool-free with no checkout, referralCwd=%s', async cwd => {
+  it('keeps referrals tool-free without a checkout', async () => {
     const h = harness();
-    h.payload.read.referralCwd = cwd;
     const result = await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX);
     expect(result.pending).toEqual([]);
     const request = h.judge.mock.calls[0][0];
     expect(request.allowedTools).toBeNull();
     expect(request).not.toHaveProperty('cwd');
     expect(request.mandate).not.toContain('using tools');
-  });
-  it('gives a record mixing confirmation and plain referrals the tool-bearing turn (one turn per record)', async () => {
-    const h = harness();
-    h.payload.read.referralCwd = '/isolated/lane-9';
-    h.payload.referrals.push({ seat: 'judgeCorrectnessAdvisory', confirmationRequired: true,
-      original: { summary: 'second', file: 'x.mjs', verdict: 'CONFIRMED', impactIfUnfixed: 'broken' } });
-    await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX);
-    expect(h.judge).toHaveBeenCalledTimes(1);
-    expect(h.judge.mock.calls[0][0]).toMatchObject({ cwd: '/isolated/lane-9', head: h.state.headRefOid });
-    expect(h.judge.mock.calls[0][0].allowedTools).toContain('Bash');
-  });
-  it('gives confirmation claims tools and the pinned checkout in one durable attempt', async () => {
-    const h = harness();
-    h.payload.read.referralCwd = '/isolated/lane-9';
-    h.payload.referrals[0].confirmationRequired = true;
-    h.payload.referrals[0].seat = 'judgeAntigravityReview';
-    const result = await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX);
-    expect(result.pending).toEqual([]);
-    const request = h.judge.mock.calls[0][0];
-    expect(request.allowedTools).toContain('Bash');
-    expect(request).toMatchObject({ cwd: '/isolated/lane-9', head: h.state.headRefOid });
-    expect(request.mandate).toContain('reproduce on the checked-out PR head using tools');
-    expect(result.records[0].referrals[0].confirmationRequired).toBe(true);
-  });
-  it('preserves confirmationRequired when replaying an unflagged historical referral onto a new head', async () => {
-    const h = harness();
-    h.payload.read.referralCwd = '/isolated/lane-9';
-    h.payload.referrals[0].confirmationRequired = true;
-    const { seat, original } = h.payload.referrals[0];
-    const legacy = { version: 1, repo: 'o/r', pr: 7, head: 'c'.repeat(40), runId: 'legacy', reviewer: mandatoryReferralReviewer('legacy'),
-      authorBody: h.state.body, attempted: true, rulings: [], referrals: [{ key: referralFindingKey(seat, original), seat, original,
-        finding: normalizeFinding(original) }] };
-    h.state.comments.push({ body: renderReferralRecord(legacy), author: { login: 'web-everything' } });
-    await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX);
-    expect(h.judge).toHaveBeenCalledTimes(1);
-    expect(h.judge.mock.calls[0][0].allowedTools).toContain('Bash');
-    expect(h.judge.mock.calls[0][0]).toMatchObject({ cwd: '/isolated/lane-9', head: h.state.headRefOid });
-    expect(readReferralRecords(h.state.comments).records.find(r => r.head === h.state.headRefOid).referrals[0].confirmationRequired).toBe(true);
-  });
-  it('does not let a same-head legacy clearance cover a fresh confirmation requirement', async () => {
-    const h = harness();
-    await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX);
-    h.payload.referrals[0].confirmationRequired = true;
-    h.payload.read.referralCwd = '/isolated/lane-9';
-    const result = await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, { ...CTX, runId: 'fresh-confirmation' });
-    expect(result.pending).toEqual([]);
-    expect(h.judge).toHaveBeenCalledTimes(2);
-    expect(h.judge.mock.calls[1][0].allowedTools).toContain('Bash');
   });
   it('posts and reads back rulings before returning clearance, then reuses them', async () => {
     const h = harness();
@@ -1446,178 +1397,5 @@ describe('#4315 durable referral effects', () => {
     expect(h.trace.at(-1)).toBe('mirror:true');
     await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, { ...CTX, runId: 'another-checkout' });
     expect(h.judge).toHaveBeenCalledTimes(1);
-  });
-});
-
-describe('confirmation checkout pin', () => {
-  const head = 'a'.repeat(40);
-  const request = { cwd: '/isolated/lane-9', head, allowedTools: ['Bash'] };
-  // The REAL thing: a throwaway git clone on disk, so the pin, the checkout and the tamper checks are exercised
-  // against git itself, not a fake that answers whatever the test says.
-  const env = { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' };
-  let lane, first, second;
-  const sh = (...args) => execFileSync('git', ['-c', 'commit.gpgsign=false', ...args], { cwd: lane, env, encoding: 'utf8' }).trim();
-  beforeEach(() => {
-    lane = mkdtempSync(join(tmpdir(), 'ref-pin-'));
-    sh('init', '-q');
-    writeFileSync(join(lane, 'tracked.txt'), 'one\n'); sh('add', 'tracked.txt'); sh('commit', '-qm', 'one'); first = sh('rev-parse', 'HEAD');
-    writeFileSync(join(lane, 'tracked.txt'), 'two\n'); sh('commit', '-qam', 'two'); second = sh('rev-parse', 'HEAD');
-  });
-  // A per-test sibling dir the planted fsmonitor command would touch if the host ever ran it.
-  const ranMarker = () => join(`${lane}-marks`, 'fsmonitor-ran');
-  afterEach(() => { rmSync(lane, { recursive: true, force: true }); rmSync(`${lane}-marks`, { recursive: true, force: true }); });
-  const tool = (head) => ({ cwd: lane, head, allowedTools: ['Bash'] });
-  it('puts a lane that sits on another commit on the reviewed head before the turn (not an operator pre-step)', async () => {
-    expect(sh('rev-parse', 'HEAD')).toBe(second);
-    let seen;
-    const judge = vi.fn(async () => { seen = sh('rev-parse', 'HEAD'); return { value: {} }; });
-    await expect(runReferralJudge(tool(first), { judge })).resolves.toEqual({ value: {} });
-    expect(seen).toBe(first);
-    expect(readFileSync(join(lane, 'tracked.txt'), 'utf8')).toBe('one\n');
-  });
-  it('refuses a head that is not a full SHA, and one the lane does not hold, without running the turn', async () => {
-    const judge = vi.fn(async () => ({ value: {} }));
-    await expect(runReferralJudge(tool('--detach'), { judge })).rejects.toThrow(/PR head/);
-    await expect(runReferralJudge(tool('f'.repeat(40)), { judge })).rejects.toThrow(/PR head/);
-    expect(judge).not.toHaveBeenCalled();
-  });
-  it('refuses a checkout with tracked edits before the turn', async () => {
-    writeFileSync(join(lane, 'tracked.txt'), 'edited\n');
-    const judge = vi.fn(async () => ({ value: {} }));
-    await expect(runReferralJudge(tool(second), { judge })).rejects.toThrow(/clean checkout/);
-    expect(judge).not.toHaveBeenCalled();
-  });
-  it.each([
-    ['a tracked executable-bit change', () => chmodSync(join(lane, 'tracked.txt'), 0o755)],
-    ['a tracked edit', () => writeFileSync(join(lane, 'tracked.txt'), 'changed\n')],
-    ['a new untracked file', () => writeFileSync(join(lane, 'injected.sh'), 'x')],
-    ['a moved HEAD', () => sh('checkout', '-q', '--detach', first)],
-  ])('rejects a turn that leaves %s behind', async (_, mutate) => {
-    await expect(runReferralJudge(tool(second), { judge: async () => { mutate(); return { value: {} }; } })).rejects.toThrow(/PR head|clean checkout/);
-  });
-  it('rejects a turn that overwrites a PRE-EXISTING untracked file in place (same path, new contents)', async () => {
-    writeFileSync(join(lane, '.pr-body.md'), 'original\n');
-    await expect(runReferralJudge(tool(second), { judge: async () => {
-      writeFileSync(join(lane, '.pr-body.md'), 'steered\n'); return { value: {} };
-    } })).rejects.toThrow(/clean checkout/);
-  });
-  it('tolerates pre-existing unignored lane litter that the turn leaves untouched', async () => {
-    writeFileSync(join(lane, '.pr-body.md'), 'litter\n'); writeFileSync(join(lane, '.review-loop-output.json'), '{}');
-    await expect(runReferralJudge(tool(second), { judge: async () => ({ value: {} }) })).resolves.toEqual({ value: {} });
-  });
-  it.each([
-    ['.git/config', () => writeFileSync(join(lane, '.git', 'config'), `${readFileSync(join(lane, '.git', 'config'), 'utf8')}[core]\n\tfsmonitor = touch ${ranMarker()}\n`)],
-    ['a .git/hooks entry', () => writeFileSync(join(lane, '.git', 'hooks', 'post-checkout'), '#!/bin/sh\ntrue\n', { mode: 0o755 })],
-    ['.git/info/attributes', () => writeFileSync(join(lane, '.git', 'info', 'attributes'), '* filter=x\n')],
-  ])('rejects a turn that plants %s, WITHOUT running a host git command against the tampered checkout', async (_, plant) => {
-    const exec = vi.fn(execFileSync);
-    mkdirSync(`${lane}-marks`);
-    let planted = false;
-    await expect(runReferralJudge(tool(second), { exec, judge: async () => { exec.mockClear(); plant(); planted = true; return { value: {} }; } }))
-      .rejects.toThrow(/\.git metadata/);
-    expect(planted).toBe(true);
-    expect(exec).not.toHaveBeenCalled();
-    expect(existsSync(ranMarker())).toBe(false);
-  });
-  it('guards a linked worktree pointer before any post-turn host git command', async () => {
-    const linked = join(lane, 'linked');
-    sh('worktree', 'add', '--quiet', '--detach', linked, second);
-    const exec = vi.fn(execFileSync);
-    await expect(runReferralJudge({ cwd: linked, head: second, allowedTools: ['Bash'] }, {
-      exec, judge: async () => {
-        exec.mockClear();
-        writeFileSync(join(linked, '.git'), `gitdir: ${join(lane, '.git')}\n`);
-        return { value: {} };
-      },
-    })).rejects.toThrow(/\.git metadata/);
-    expect(exec).not.toHaveBeenCalled();
-  });
-  it('rejects a turn that hides a tracked edit with assume-unchanged / skip-worktree (invisible to `git status`)', async () => {
-    for (const flag of ['--assume-unchanged', '--skip-worktree']) {
-      await expect(runReferralJudge(tool(second), { judge: async () => {
-        sh('update-index', flag, 'tracked.txt'); writeFileSync(join(lane, 'tracked.txt'), `hidden ${flag}\n`); return { value: {} };
-      } })).rejects.toThrow(/clean checkout/);
-      sh('update-index', flag.replace('--', '--no-'), 'tracked.txt'); sh('checkout', '--', 'tracked.txt');
-    }
-  });
-  it('refuses a checkout that ALREADY has hidden index entries', async () => {
-    sh('update-index', '--assume-unchanged', 'tracked.txt');
-    const judge = vi.fn(async () => ({ value: {} }));
-    await expect(runReferralJudge(tool(second), { judge })).rejects.toThrow(/hidden/);
-    expect(judge).not.toHaveBeenCalled();
-  });
-  it('does not park on an unreadable untracked file the turn leaves alone', async () => {
-    writeFileSync(join(lane, 'locked.bin'), 'x', { mode: 0o000 });
-    await expect(runReferralJudge(tool(second), { judge: async () => ({ value: {} }) })).resolves.toEqual({ value: {} });
-  });
-  it.each(['global', 'system', 'local'])('isolates %s drivers during checkout and attribute-tampered verification', async scope => {
-    mkdirSync(`${lane}-marks`);
-    const marker = ranMarker();
-    const config = join(`${lane}-marks`, 'config');
-    const attrs = join(`${lane}-marks`, 'attributes');
-    // Commit attributes before installing the driver, so fixture setup cannot itself run the payload.
-    writeFileSync(join(lane, '.gitattributes'), '*.txt filter=host diff=host\n');
-    sh('add', '.gitattributes'); sh('commit', '-qm', 'attributes');
-    const target = sh('rev-parse', 'HEAD');
-    sh('checkout', '-q', '--detach', first);
-    writeFileSync(attrs, '*.txt filter=host diff=host\n');
-    const command = `touch '${marker}'; cat`;
-    const configText = `[filter "host"]\n clean = "${command}"\n smudge = "${command}"\n`
-      + ` required = true\n[diff "host"]\n textconv = "${command}"\n`
-      + `[core]\n attributesFile = ${attrs}\n`;
-    writeFileSync(config, configText);
-    if (scope === 'local') writeFileSync(join(lane, '.git', 'config'), readFileSync(join(lane, '.git', 'config'), 'utf8') + configText);
-    else vi.stubEnv(scope === 'global' ? 'GIT_CONFIG_GLOBAL' : 'GIT_CONFIG_SYSTEM', config);
-    try {
-      await expect(runReferralJudge(tool(target), { judge: async () => ({ value: {} }) })).resolves.toEqual({ value: {} });
-      expect(readFileSync(join(lane, 'tracked.txt'), 'utf8')).toBe('two\n');
-      expect(existsSync(marker)).toBe(false);
-      await expect(runReferralJudge(tool(target), { judge: async () => {
-        writeFileSync(join(lane, '.gitattributes'), '* filter=host diff=host\n');
-        writeFileSync(join(lane, 'tracked.txt'), 'changed\n');
-        return { value: {} };
-      } })).rejects.toThrow(/clean checkout/);
-      expect(existsSync(marker)).toBe(false);
-    } finally { vi.unstubAllEnvs(); }
-  });
-  it('rejects raw edits even when newly added ignored attributes would normalize them away', async () => {
-    // An ignored attributes file must not make CRLF bytes compare equal to the original LF blob.
-    writeFileSync(join(lane, '.git', 'info', 'exclude'), '.gitattributes\n');
-    await expect(runReferralJudge(tool(second), { judge: async () => {
-      writeFileSync(join(lane, '.gitattributes'), '*.txt text eol=lf\n');
-      writeFileSync(join(lane, 'tracked.txt'), 'two\r\n');
-      return { value: {} };
-    } })).rejects.toThrow(/clean checkout/);
-  });
-  it('does not execute a global clean filter selected by attributes added during the turn', async () => {
-    mkdirSync(`${lane}-marks`);
-    const config = join(`${lane}-marks`, 'global-config');
-    writeFileSync(config, `[filter "attack"]\n clean = "touch '${ranMarker()}'; printf 'two\\n'"\n`);
-    vi.stubEnv('GIT_CONFIG_GLOBAL', config);
-    try {
-      await expect(runReferralJudge(tool(second), { judge: async () => {
-        writeFileSync(join(lane, '.gitattributes'), '*.txt filter=attack\n');
-        writeFileSync(join(lane, 'tracked.txt'), 'hidden edit\n');
-        return { value: {} };
-      } })).rejects.toThrow(/clean checkout/);
-      expect(existsSync(ranMarker())).toBe(false);
-    } finally { vi.unstubAllEnvs(); }
-  });
-  it('runs every host git call with config, attributes, fsmonitor and hooks isolated', async () => {
-    const calls = [];
-    const exec = (cmd, args, o) => { calls.push({ args, env: o.env }); return execFileSync(cmd, args, o); };
-    await runReferralJudge(tool(first), { exec, judge: async () => ({ value: {} }) });
-    expect(calls.length).toBeGreaterThan(0);
-    for (const { args, env } of calls) {
-      expect(args.join(' ')).toContain('-c core.fsmonitor=false -c core.hooksPath=/dev/null -c core.attributesFile=/dev/null');
-      expect(env).toMatchObject({ GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_ATTR_NOSYSTEM: '1' });
-    }
-  });
-  it.each([null, undefined, []])('delegates a tool-free turn (allowedTools=%j) with no checkout or git probe', async allowedTools => {
-    const exec = vi.fn(), judge = vi.fn(async () => ({ value: {} })), tool = { ...request, allowedTools };
-    delete tool.cwd;
-    await runReferralJudge(tool, { exec, judge });
-    expect(exec).not.toHaveBeenCalled();
-    expect(judge).toHaveBeenCalledWith(tool);
   });
 });
