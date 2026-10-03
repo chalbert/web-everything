@@ -10,11 +10,12 @@
  * tightening can't silently start erroring on legitimate free-form data.
  */
 import { describe, it, expect } from 'vitest';
-import { readFileSync, existsSync, readdirSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
+import { readFileSync, existsSync, readdirSync, mkdtempSync, writeFileSync, copyFileSync, symlinkSync, rmSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
 import { loadBlocks } from '../lib/blocks-loader.cjs';
 import { loadIntents } from '../lib/intents-loader.cjs';
 import { loadProtocols } from '../lib/protocols-loader.cjs';
@@ -594,6 +595,102 @@ describe('#4448 scope-vs-body guards + deferredBlockedBy', () => {
     expect(deferredBlockedByFindings({}, new Set(), '5')).toEqual([]);
   });
 
+  it('the standards CLI rejects scope debt on untracked, staged and edited cards, but keeps untouched legacy as warnings', () => {
+    const temp = mkdtempSync(join(tmpdir(), 'we-scope-guards-'));
+    const repo = join(temp, 'repo');
+    const card = 'backlog/xscope1-scope-guard-fixture.md';
+    const legacy = 'xscope0-scope-legacy-fixture.md';
+    const test = 'we:scripts/conveyor/__tests__/rearm-review.test.mjs';
+    const content = (fixed) => `---
+kind: story
+status: open
+size: 1
+dateOpened: "2026-10-03"
+scope: ["we:scripts/conveyor/rearm-review.mjs"${fixed ? `, "${test}"` : ''}]
+---
+# Exercise scope validation
+
+The re-arm regression must accompany the source change.
+
+## MVP
+
+Extend the regression in \`${test}\`.
+
+## Test plan
+
+Exercise the missing-label case in the tracked re-arm test.
+
+## Done when
+
+Run \`npx vitest run\` with \`${test}\` (strip the locus prefix).
+`;
+    try {
+      // A private checkout gives the CLI real Git/index/untracked state without touching
+      // the developer's backlog, refs or index. Only the shipped runner is overlaid.
+      execFileSync('git', ['clone', '--quiet', '--shared', ROOT, repo], { stdio: 'pipe' });
+      // Seed legacy debt in this fixture's baseline, so paying down the real corpus
+      // never breaks this regression. Plumbing creates no commit in the source checkout.
+      const git = (args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' }).trim();
+      writeFileSync(join(repo, 'backlog', legacy), content(false));
+      git(['add', '--', `backlog/${legacy}`]);
+      const tree = git(['write-tree']);
+      const baseline = git(['-c', 'user.name=Scope fixture', '-c', 'user.email=scope@example.invalid',
+        'commit-tree', tree, '-p', 'HEAD', '-m', 'Scope guard fixture baseline']);
+      git(['update-ref', 'HEAD', baseline]);
+      git(['update-ref', 'refs/remotes/origin/main', baseline]);
+      symlinkSync(join(ROOT, 'node_modules'), join(repo, 'node_modules'), 'dir');
+      copyFileSync(join(ROOT, 'scripts/check-standards.mjs'), join(repo, 'scripts/check-standards.mjs'));
+      const runGate = (args) => {
+        const result = spawnSync(process.execPath, ['scripts/check-standards.mjs', '--json', ...args], {
+          cwd: repo, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, timeout: 90_000,
+        });
+        expect(result.error, result.stderr).toBeUndefined();
+        const report = JSON.parse(result.stdout);
+        return { ...report, status: result.status };
+      };
+      const scopeErrors = (report, file) => report.errors.filter((e) =>
+        e.descriptor?.kind === 'backlog-scope-body' && e.descriptor.file === file);
+      const local = ['--local', `--files=${card}`];
+      writeFileSync(join(repo, card), content(false));
+      const untracked = runGate(local);
+      expect(untracked.status).toBe(1);
+      expect(scopeErrors(untracked, card)).toHaveLength(2); // both guards
+      expect(scopeErrors(untracked, `backlog/${legacy}`)).toEqual([]);
+      expect(untracked.warnings.some((e) => e.descriptor?.kind === 'backlog-scope-body'
+        && e.descriptor.file === `backlog/${legacy}`)).toBe(true);
+
+      execFileSync('git', ['add', '--', card], { cwd: repo });
+      const staged = runGate([]); // default npm check:standards path, with no explicit list
+      expect(staged.status).toBe(1);
+      expect(scopeErrors(staged, card)).toHaveLength(2);
+      expect(scopeErrors(staged, `backlog/${legacy}`)).toEqual([]);
+
+      writeFileSync(join(repo, card), content(true));
+      const fixed = runGate(local);
+      expect(fixed.errors).toEqual([]);
+      expect(fixed.status).toBe(0);
+
+      // Editing a legacy card opts it into enforcement too. A linked/selected but
+      // unchanged card must never be promoted merely because it is in --files.
+      const legacyPath = `backlog/${legacy}`;
+      const selected = runGate(['--local', `--files=${card},${legacyPath}`]);
+      expect(scopeErrors(selected, legacyPath)).toEqual([]);
+      writeFileSync(join(repo, legacyPath), readFileSync(join(repo, legacyPath), 'utf8') + '\n');
+      const edited = runGate(['--local', `--files=${legacyPath}`]);
+      expect(edited.status).toBe(1);
+      expect(scopeErrors(edited, legacyPath).length).toBeGreaterThan(0);
+
+      git(['update-ref', '-d', 'refs/remotes/origin/main']);
+      const noBase = spawnSync(process.execPath, ['scripts/check-standards.mjs', '--json', ...local], {
+        cwd: repo, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, timeout: 90_000,
+      });
+      expect(noBase.status).toBe(1);
+      expect(noBase.stderr).toContain('Cannot enforce backlog scope guards');
+    } finally {
+      rmSync(temp, { recursive: true, force: true });
+    }
+  }, 180_000);
+
   it('corpus ratchet: guards 4 + 5 over the real backlog stay within the measured ceiling', () => {
     const matter = require('gray-matter');
     const tracked = buildTrackedPathIndex(execFileSync('git', ['ls-files', '-z'], { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }).split('\0').filter(Boolean));
@@ -602,6 +699,6 @@ describe('#4448 scope-vs-body guards + deferredBlockedBy', () => {
       let fm; try { fm = matter(readFileSync(join(ROOT, 'backlog', f), 'utf8')); } catch { continue; }
       n += scopeMissingTestFile(fm.data, tracked, fm.content).length + bodyDeliverablesMissingFromScope(fm.data, fm.content).length;
     }
-    expect(n).toBeLessThanOrEqual(190); // measured at build (2026-10-01); lower as the corpus is backfilled
+    expect(n).toBeLessThanOrEqual(187); // measured after scope backfill (2026-10-03); lower as the corpus is backfilled
   });
 });
