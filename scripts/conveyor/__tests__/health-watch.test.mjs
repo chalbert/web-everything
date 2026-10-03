@@ -1075,3 +1075,14 @@ describe('xyx5mea isolated shell replay', () => {
     expect(episodeReplay.send).toHaveBeenCalledTimes(1);
   });
 });
+
+it('xe8y12n probe preserves fresh raw evidence independently of cached/normalised labels', () => {
+  const commits = [{ authors: [{ name: 'Claude' }] }];
+  const exec = (_bin, args) => JSON.stringify(args[1] === 'list'
+    ? [{ number: 3239, labels: null }]
+    : { state: 'OPEN', labels: [], headRefOid: 'a'.repeat(40) });
+  const rows = probePrs({ exec, readCommits: () => commits, now: 123 });
+  expect(rows[0]).toMatchObject({ labelsValid: false, reviewObservation: { state: 'OPEN', labels: [], commits, observedAt: 123 } });
+  const failed = probePrs({ exec: (_bin, args) => { if (args[1] === 'view') throw new Error('unavailable'); return JSON.stringify([{ number: 3239, labels: [] }]); }, readCommits: () => commits });
+  expect(failed[0].reviewObservation).toBeNull();
+});

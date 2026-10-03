@@ -1081,3 +1081,16 @@ it('xxh4zw8 malformed JSON-lines read is refused and failed identical-head reads
   expect(plan.dispatch).toEqual([]);
   expect(plan.refusals.filter(r => r.kind === 'check-read-failed')).toHaveLength(2);
 });
+
+it('xe8y12n real PR read shell enriches the reported missing-family shape from commit evidence', async () => {
+  const { defaultReadPrs } = await import('../reconcile-pass.mjs');
+  const { planReconcile } = await import('../reconcile-core.mjs');
+  const calls = [];
+  const prs = defaultReadPrs({ repo: 'o/r', exec: (_bin, args) => {
+    calls.push(args);
+    return JSON.stringify(args[1] === 'list' ? [{ number: 3239, labels: [], comments: [], statusCheckRollup: [] }]
+      : { data: { repository: { pullRequest: { commits: { nodes: [{ commit: { messageHeadline: 'repair', authors: { nodes: [{ name: 'Claude' }] } } }] } } } } });
+  } });
+  expect(calls.some(args => args.some(arg => arg.includes('commits(first:')))).toBe(true);
+  expect(planReconcile({ prs }).notes).toContainEqual(expect.objectContaining({ kind: 'review-label-missing' }));
+});
