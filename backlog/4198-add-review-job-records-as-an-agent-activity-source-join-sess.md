@@ -3,10 +3,11 @@ bornAs: x0uad06
 kind: story
 size: 3
 parent: "3931"
-status: open
+status: resolved
 blockedBy: ["3932"]
 scope: ["we:scripts/operations/item-activity.mjs", "we:scripts/operations/item-activity-io.mjs", "we:scripts/operations/run.mjs", "we:scripts/operations/__tests__/item-activity.test.mjs", "we:scripts/operations/__tests__/item-activity-io-real.test.mjs", "we:scripts/operations/__tests__/run.test.mjs"]
 dateOpened: "2026-09-25"
+dateResolved: "2026-10-02"
 preparedDate: "2026-10-02"
 preparedAgainstSha: "ec42b8635de1191cc9778a6a5aa59485ac5cef36"
 tags: []
