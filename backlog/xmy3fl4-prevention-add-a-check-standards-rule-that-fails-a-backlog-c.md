@@ -3,7 +3,7 @@ kind: story
 size: 3
 parent: "4075"
 status: open
-scope: ["we:scripts/check-standards-rules.mjs", "we:scripts/backlog/scaffold.mjs", "we:scripts/__tests__/check-standards-rules-content-lint.test.mjs"]
+scope: ["we:scripts/check-standards-rules.mjs", "we:scripts/backlog/scaffold.mjs", "we:scripts/__tests__/check-standards-rules-content-lint.test.mjs", "we:scripts/backlog/__tests__/scaffold.test.mjs"]
 dateOpened: "2026-10-01"
 preparedDate: "2026-10-03"
 preparedAgainstSha: "0f7d4f1b50b82c6845e8008a312e3e3caab780fc"
@@ -42,7 +42,7 @@ Musts:
 1. `findUnfilledDoneWhen` pure detector, exported from we:scripts/check-standards-rules.mjs.
 2. Fires only at `status: active`; silent for `open`, `preparing`, `resolved`.
 3. Placeholder phrase shared as one constant between scaffold and rule.
-4. Wired into `lintBacklogItemRendering` as a WARNING (shared by the whole-repo gate and `we:scripts/check-backlog-item.mjs`, which both call it). Severity is WARNING by deliberate choice, not the card's literal "fails": 9 active cards hold the placeholder today and every sibling prose rule warns.
+4. Wired into `lintBacklogItemRendering` as a WARNING (shared by the whole-repo gate and the single-item `check-backlog-item` script, which both call it; that script is not edited). Severity is WARNING by deliberate choice, not the card's literal "fails": 9 active cards hold the placeholder today and every sibling prose rule warns.
 
 Out of scope: hard-error severity, part 2 (gate-type "refuse on error" line), cleaning the 9 existing active cards. See Follow-ups.
 
