@@ -3,7 +3,7 @@ kind: story
 size: 3
 parent: "4075"
 status: open
-scope: ["we:scripts/check-standards-rules.mjs", "we:scripts/__tests__/check-standards-rules-content-lint.test.mjs", "we:scripts/check-standards.mjs", "we:scripts/__tests__/check-standards-scoped-file-scan.test.mjs", "we:backlog/4199-wip-page-per-card-activity-panel-listing-sessions-and-jobs-r.md"]
+scope: ["we:scripts/check-standards-rules.mjs", "we:scripts/__tests__/check-standards-rules-content-lint.test.mjs", "we:scripts/check-standards.mjs", "we:scripts/__tests__/check-standards-scoped-file-scan.test.mjs", "we:scripts/__tests__/check-standards.test.mjs", "we:backlog/4199-wip-page-per-card-activity-panel-listing-sessions-and-jobs-r.md"]
 dateOpened: "2026-10-01"
 preparedDate: "2026-10-02"
 preparedAgainstSha: "9022027b3338d274e023296ea23aeebb908f5f36"
