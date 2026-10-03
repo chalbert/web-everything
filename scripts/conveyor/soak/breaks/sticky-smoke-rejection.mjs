@@ -1,5 +1,5 @@
 /**
- * @file breaks/sticky-smoke-rejection.mjs — live break 7, 2026-09-25 08:14 ET (#4075, card x0zg44l). Both `gh`
+ * @file breaks/sticky-smoke-rejection.mjs — live break 7, 2026-09-25 08:14 ET (#4075, card 4169). Both `gh`
  * smoke checks (`gh api --method GET repos/...`, `gh pr list --limit 1 ...` — `daemon-live-smoke.mjs#SMOKE_CHECKS`)
  * failed together with Go-style network errors (`gh` is a Go binary: "error connecting to api.github.com",
  * "dial tcp ...: i/o timeout"), not matched by the OLD `TRANSIENT_FAILURE_PATTERNS`, so

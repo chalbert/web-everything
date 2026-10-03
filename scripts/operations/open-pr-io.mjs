@@ -79,7 +79,7 @@ export function createOpenPrSinks({ run = createPrLandRunner() } = {}) {
       // masking a real infrastructure failure. Found by independent review of this very fix (PR #1715).
       if (out.outcome === 'unrun' && out.reason !== 'dry-run') {
         throw new Error(
-          `open-pr: pr-land did not report a result — ${out.reason}. The PR was NOT opened, and this is not a `
+          `open-pr: pr-land did not report a result — ${out.reason}${out.detail ? ` — ${out.detail}` : ''}. The PR was NOT opened, and this is not a `
           + 'refusal you can fix by editing the request. On a host with no `gh` credential this is expected: '
           + `submit the planned argv through a channel that has one — ${JSON.stringify(payload.argv)}`,
         );

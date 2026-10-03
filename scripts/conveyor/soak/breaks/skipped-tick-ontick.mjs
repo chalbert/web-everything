@@ -1,5 +1,5 @@
 /**
- * @file breaks/skipped-tick-ontick.mjs — live break 6, 2026-09-25 13:20Z-13:33Z (#4075, epic card x0zg44l). When
+ * @file breaks/skipped-tick-ontick.mjs — live break 6, 2026-09-25 13:20Z-13:33Z (#4075, epic card 4169). When
  * `withSelfSync`'s default path could not take the clone's READ lock (a writer active, e.g. a sibling daemon's
  * rebuild in flight, or the clone quarantined), it returned a bare `{skipped:true, reason}`. BOTH daemons' own
  * `onTick` read `result.repos.map(...)` unconditionally — `Cannot read properties of undefined (reading 'map')`

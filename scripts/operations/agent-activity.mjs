@@ -48,6 +48,25 @@ import { parseSessionSlug } from '../conveyor/session-slug.mjs';
 
 export const AGENT_ACTIVITY_OP = 'agent-activity';
 
+/** Shared six-hour activity window for background, Codex and interactive readers. */
+export const STALE_ROW_MS = 6 * 3600_000;
+
+/** A completion only terminates the dispatch it postdates, never a newer re-dispatch. */
+export function codexRowIsTerminal(row, completion) {
+  return completion?.status === 'done' && Number.isFinite(row.startedAt)
+    && Date.parse(completion.updatedAt) >= row.startedAt;
+}
+
+/** Unknown activity is not stale; pid-bearing rows belong to the process liveness probe. */
+export function isAgedOut(row, { now, staleMs = STALE_ROW_MS }) {
+  if (!['background', 'codex'].includes(row.kind) || Number.isInteger(row.pid)) return false;
+  const times = [row.lastActivityMs, row.startedAt]
+    .map(value => typeof value === 'string' ? Date.parse(value) : value)
+    .filter(Number.isFinite);
+  return times.length > 0 && now - Math.max(...times) > staleMs;
+}
+
+
 /** kind (from `parseSessionSlug`) → the design's role vocabulary (§1.2). */
 const ROLE_BY_KIND = Object.freeze({
   conveyor: 'build', prepare: 'prepare', 'prepare-decision': 'prepare',

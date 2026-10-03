@@ -1,11 +1,11 @@
 /**
  * @file breaks/broken-smoke-harness-holds-last-good.mjs — live incident, 2026-09-26 12:11-12:40 ET on
- * `wev-review-daemon` (#4075/#3383, card x5wbsbc): every rebuild that window was `smoke-rejected`, STICKY, and
+ * `wev-review-daemon` (#4075/#3383, card 4217): every rebuild that window was `smoke-rejected`, STICKY, and
  * every dispatch chokepoint then refused as stale — a single bad main commit, a bad overlay, or (this scenario)
  * a broken smoke HARNESS ITSELF stopped all review/fix delivery until a human stepped in. The operator's ruling:
  * "fallback on last working version rather than block delivery".
  *
- * THE FIX (x5wbsbc): `daemon-rebuild.mjs#smokeAndAdopt`'s branch (c) tells a broken CANDIDATE apart from a broken
+ * THE FIX (4217): `daemon-rebuild.mjs#smokeAndAdopt`'s branch (c) tells a broken CANDIDATE apart from a broken
  * HARNESS by smoking the clone's own last-good build (`prevHead`) as a control. When the control fails the exact
  * same checks the candidate failed (`failsSameChecks`), the failure is the smoke's own environment, not the new
  * code — `smoke-harness-broken`, recorded with a backoff (never sticky, never re-smoked every tick), and
@@ -30,7 +30,7 @@
  * `daemon-rebuild.mjs#prepareRebuild`'s `plan.upToDate` short-circuit never runs a live smoke at all (see that
  * file's own header) — the broken budget only bites once a real rebuild-and-smoke actually happens, at the
  * CODE-path main move below (a plain main move, so a managed clone behind on it would otherwise refuse as stale
- * — proving x5wbsbc's fallback dispatches from the held last-good build instead).
+ * — proving 4217's fallback dispatches from the held last-good build instead).
  */
 
 import { existsSync, readFileSync } from 'node:fs';
@@ -45,10 +45,10 @@ const HELD_FOR_HEALTH_SMELL_MS = 16 * 60_000; // > the smell's own 15-minute `he
 export default {
   id: 'broken-smoke-harness-holds-last-good',
   title: 'the live smoke harness itself is broken (fails every tree identically, the last-good build included); the rebuild tells that apart from a real regression, holds the clone on its last-good build, keeps dispatching, and the health smell names it',
-  card: 'we:backlog/x5wbsbc (epic #4075)',
+  card: 'we:backlog/4217 (epic #4075)',
   fixedBy: {
-    sha: 'x5wbsbc-daemon-last-good-fallback',
-    where: 'lane/x5wbsbc-daemon-last-good-fallback',
+    sha: '4217-daemon-last-good-fallback',
+    where: 'lane/4217-daemon-last-good-fallback',
     paths: [
       'scripts/lib/daemon-rebuild.mjs',
       'scripts/lib/daemon-last-good.mjs',
@@ -56,7 +56,7 @@ export default {
       'scripts/conveyor/health-smells/daemon-held-on-last-good.mjs',
     ],
   },
-  // fixPresent probe (per the brief): `smokeAndAdopt` in daemon-rebuild.mjs — the x5wbsbc fallback/hold body.
+  // fixPresent probe (per the brief): `smokeAndAdopt` in daemon-rebuild.mjs — the 4217 fallback/hold body.
   fixPresent(root) {
     try {
       return /smokeAndAdopt/.test(readFileSync(join(root, 'scripts/lib/daemon-rebuild.mjs'), 'utf8'));
@@ -71,7 +71,7 @@ export default {
       log,
       setup(w) {
         if (!existsSync(join(w.simCloneRoot, 'scripts/lib/daemon-rebuild.mjs'))) {
-          throw new Error('broken-smoke-harness-holds-last-good: requires scripts/lib/daemon-rebuild.mjs (lands with xa4qo7n/x5wbsbc) — not present on this tree');
+          throw new Error('broken-smoke-harness-holds-last-good: requires scripts/lib/daemon-rebuild.mjs (lands with 4218/4217) — not present on this tree');
         }
         // See file header: baked in BEFORE any daemon host forks, so both the eventual candidate smoke and the
         // control (last-good) smoke inherit the SAME broken budget — the whole point of "the harness is broken,
@@ -83,7 +83,7 @@ export default {
         if (round === FAULT_ROUND) {
           // A CODE-path move (matches `main-staleness.mjs#isCodePath` — extension-based, never tied to an
           // import graph) — a managed clone behind on it would otherwise refuse dispatch as stale; this proves
-          // x5wbsbc's fallback dispatches from the held last-good build instead. The fixture file is not
+          // 4217's fallback dispatches from the held last-good build instead. The fixture file is not
           // imported by anything, so it cannot itself trip the daemons' own restart-on-import-changed gate.
           api.moveMain(w, {
             'scripts/conveyor/soak/fixtures/main-move-broken-harness.mjs': 'export const MAIN_MOVE = 1;\n',

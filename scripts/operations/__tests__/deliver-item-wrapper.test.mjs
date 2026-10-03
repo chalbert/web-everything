@@ -56,7 +56,7 @@ vi.mock('node:fs', async (importOriginal) => {
 // #4349 finding #7 — a way to inject a throw AFTER the root span's own `ok()` close, i.e. after a terminal
 // branch already called `settleTerminal` and is on its way out through `finish()`. Everything else about
 // telemetry stays real; only the root `dispatch` span's `ok()` is wrapped, and only fires once per flag set.
-const telemetryFaults = vi.hoisted(() => ({ throwOnNextRootOk: false }));
+const telemetryFaults = vi.hoisted(() => ({ throwOnNextRootOk: false, failures: [] }));
 vi.mock('../telemetry-store.mjs', async (importOriginal) => {
   const actual = await importOriginal();
   return {
@@ -70,6 +70,10 @@ vi.mock('../telemetry-store.mjs', async (importOriginal) => {
           if (name !== 'dispatch') return span;
           return {
             ...span,
+            fail: (error, attrs) => {
+              telemetryFaults.failures.push({ error, attrs });
+              return span.fail(error, attrs);
+            },
             ok: (extra) => {
               if (telemetryFaults.throwOnNextRootOk) {
                 telemetryFaults.throwOnNextRootOk = false;
@@ -93,7 +97,7 @@ import {
   DELIVERY_AGENT_PROVIDERS, DELIVERY_AGENT_SPAWN_TIMEOUT_MS, buildRestrictedProviderArgv,
   DELIVERY_AGENT_PROVIDER_NAMES, DEFAULT_DELIVERY_AGENT_PROVIDER_NAME, resolveDeliveryAgentProvider,
   resolveItemSpecPathBasename, fillMinimalBrief,
-  buildPrBody, writePrBody, openPr, delegationForBuild,
+  buildPrBody, writePrBody, openPr, describeOpenPrRefusal, delegationForBuild,
   runConverge, parseConvergeEditResult, buildConvergeEditorArgv, runConvergeEdit,
   convergeRoundTouchedFiles, commitConvergeRound, commitBuildTurn, coAuthorTrailerFor, convergeScratchDir,
   resetConvergeScratchDir,
@@ -108,6 +112,7 @@ import {
   // #4348-open-pr-retry
   classifyOpenPrFailure,
 } from '../deliver-item-wrapper.mjs';
+import { runDeliverItemCli } from '../deliver-item-run.mjs';
 import { REPO_ROOT } from '../minimal-context-provider.mjs';
 import { repoProfile } from '../../lib/repo-profile.mjs';
 // #4349 — real (never mocked) run-store + build-dispatch-claim reads, driven through a temp `OPERATION_RUNS_DIR`
@@ -2458,6 +2463,10 @@ describe('DELIVERY_AGENT_PROVIDERS (#3850 Fork 2 — each provider names its own
  * (`cli-adapter.mjs#outcomePayload`); the submit result lives nested at `findings.submit.effects[0].result`
  * (`engine.mjs#effectFinding`), never at the top level. Transcribed from an actual CLI run, not guessed.
  */
+it('#4357 formats a refusal without detail or PR', () => {
+  expect(describeOpenPrRefusal({ outcome: 'unrun', reason: 'no report' })).toBe('open-refused (no report)');
+});
+
 function openPrEnvelope(result) {
   return JSON.stringify({
     runId: 'open-pr-test', op: 'open-pr', stopped: 'complete', applied: ['open-pr-test#1#0'],
@@ -3717,6 +3726,95 @@ describe('deliverItem (#4349 — settles its run-store effect + releases/holds t
     expect(listBuildDispatchClaims()).toEqual([]);
     expect(listBuildDispatchHolds().map((h) => h.meta.num)).toEqual(['9002']);
     expect(listBuildDispatchHolds()[0].meta.reason).toBe('no free plateau-app lane');
+  });
+
+  it.each([
+    ['refused', null, 'unverified', null],
+    ['unrun', null, 'exit 3 with no parseable report', null],
+    ['refused', 777, 'check-red', null],
+    ['unrun', 777, 'check-timeout', null],
+    ['refused', null, 'unverified', 'sha'],
+    ['refused', null, 'unverified', 'ref'],
+  ])('#4357 %s pr=%s reason=%s fault=%s preserves the real refusal', async (outcome, pr, reason, fault) => {
+    telemetryFaults.failures = [];
+    const real = await vi.importActual('node:child_process');
+    const git = (args) => real.execFileSync('git', args, { cwd: lane, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    git(['clone', '--shared', '--no-checkout', process.cwd(), '.']);
+    const sha = git(['rev-parse', 'HEAD']);
+    const store = seedInFlightRun('refusal-4357');
+    acquireBuildDispatchClaim({ num: '9001', scope: [] });
+    const detail = 'refusing to land: recorded verification is for 5348fd58, not the HEAD being landed (d7350a37)';
+    const submit = { outcome, pr, reason, detail };
+    tryReadDeliveryReport.mockReturnValue({ status: 'done', outcome: 'done', filesTouched: ['a.mjs'],
+      learning: fault === 'ref' ? { kind: 'lesson', summary: 'test' } : null });
+    execFileSync.mockImplementation((cmd, args = [], opts = {}) => {
+      const a = args || [];
+      if (cmd === 'node' && a[0] === 'scripts/lane-pool.mjs' && a[1] === 'acquire') return '';
+      if (cmd === 'node' && a[0] === 'scripts/lane-pool.mjs' && a[1] === 'status') {
+        return JSON.stringify({ repo: 'web-everything', root: '/pool', lanes: [{ lane: 7, path: lane, exists: true }] });
+      }
+      if (cmd === 'node' && a[0] === 'scripts/verify-lane.mjs') return '{}';
+      if (cmd === 'node' && a[0] === 'scripts/operations/run.mjs' && a[1] === 'claim') return '{}';
+      if (cmd === 'node' && a[0] === 'scripts/operations/run.mjs' && a[1] === 'verify') {
+        return JSON.stringify({
+          runId: 'run-1', op: 'verify', stopped: 'complete', applied: [],
+          verdict: { ok: true, cwd: lane, suite: 'run', passed: 2, failed: 0, unrun: 0, checks: [], blocking: [] },
+        });
+      }
+      if (cmd === 'node' && a[0] === 'scripts/converge-cli.mjs' && a[1] === 'init') {
+        return JSON.stringify({ action: 'land', round: 1, roundCap: 5, verdict: 'land', dismissed: [] });
+      }
+      if (cmd === 'git') {
+        if (a[0] === 'rev-parse' && a[1] === 'HEAD') {
+          if (fault === 'sha') throw new Error('sha unavailable');
+          return git(a);
+        }
+        if (a[0] === 'update-ref') {
+          if (fault === 'ref') throw new Error('ref unavailable');
+          expect(opts.cwd).toBe(lane);
+          return git(a);
+        }
+        return '';
+      }
+      if (cmd === 'node' && a[0] === 'scripts/conveyor/learnings-drop.mjs') throw new Error('learning unavailable');
+      if (cmd === 'node' && String(a[0]).endsWith('scripts/operations/run.mjs') && a[1] === 'open-pr') {
+        return openPrEnvelope(submit);
+      }
+      throw new Error(`unexpected execFileSync(${cmd}, ${JSON.stringify(a)})`);
+    });
+    const lines = [];
+    const { code, result } = await runDeliverItemCli([
+      '--num=9001', '--lane=7', '--session=conveyor-9001', '--provider=claude-restricted',
+      '--run-id=refusal-4357', '--effect-key=dispatch:0:0',
+    ], { deliver: (launch) => deliverItem(launch, { spawn: vi.fn(), vendor: 'claude' }, { newSessionId: () => 'uuid-fixed' }),
+      write: line => lines.push(line), writeErr: line => lines.push(line) });
+    console.log(lines.at(-1));
+    expect(code).toBe(0);
+    expect(result.result).toBe(`${pr ? `PR #${pr} ` : ''}open-refused (${reason}): ${detail}`);
+    expect(lines.at(-1)).toContain(`finished — ${result.result}`);
+    expect(lines.join('')).not.toContain('PR #null');
+    const settled = store.read('refusal-4357').effects[0].result;
+    expect(settled).toMatchObject({ outcome: 'open-refused', reason, detail });
+    expect(telemetryFaults.failures).toEqual([{ error: 'open-refused', attrs: settled }]);
+    expect(execFileSync.mock.calls.some(([cmd, a]) => cmd === 'node' && a[1] === 'release')).toBe(false);
+    expect(git(['rev-parse', 'HEAD'])).toBe(sha);
+    if (pr) {
+      expect(settled.pr).toBe(pr);
+      expect(listBuildDispatchClaims()).toHaveLength(1);
+      expect(listBuildDispatchHolds()).toEqual([]);
+      expect(execFileSync.mock.calls.some(([cmd, a]) => cmd === 'git' && a[0] === 'update-ref')).toBe(false);
+    } else {
+      expect(listBuildDispatchClaims()).toEqual([]);
+      expect(listBuildDispatchHolds()[0].meta.reason).toBe(`open-refused: ${reason}`);
+      expect(settled).toMatchObject({ lane, sha: fault === 'sha' ? null : sha,
+        keepRef: fault ? null : `refs/keep/9001-${sha.slice(0, 8)}` });
+      if (!fault) {
+        git(['reset', '--soft', 'HEAD~1']);
+        expect(git(['rev-parse', settled.keepRef])).toBe(sha);
+        expect(git(['cat-file', '-t', sha])).toBe('commit');
+        console.log(`retained ${settled.keepRef} = ${sha}; reset HEAD = ${git(['rev-parse', 'HEAD'])}`);
+      }
+    }
   });
 
   it('a `pr-opened` finish settles the effect but leaves the claim HELD and places NO hold — an opened PR is '

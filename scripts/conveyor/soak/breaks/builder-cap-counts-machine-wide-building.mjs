@@ -1,5 +1,5 @@
 /**
- * @file breaks/builder-cap-counts-machine-wide-building.mjs — card x3vs6tu. The build-dispatch daemon's own
+ * @file breaks/builder-cap-counts-machine-wide-building.mjs — card 4464. The build-dispatch daemon's own
  * concurrency cap (`planBuildDispatch`'s `busy`) folded in `externalBuilding` — the conveyor's MACHINE-WIDE
  * "building" count (hand-dispatched workers, fix workers, ci-heal workers, stranded claims) — via
  * `Math.max(durable in-flight, externalBuilding)`. That count has nothing to do with THIS builder's own
@@ -13,7 +13,7 @@
  * Operator decision (2026-09-29): the builder cap bounds ONLY the builder's own concurrent builds. Machine-wide
  * load stays the separate load guard's job (#4076) and the heavy-admission slots', never this cap's.
  *
- * Fix (card x3vs6tu): `busy` is now `running.length` alone — `externalBuilding` never feeds the cap, though it
+ * Fix (card 4464): `busy` is now `running.length` alone — `externalBuilding` never feeds the cap, though it
  * still rides through on the return value (`plan.externalBuilding`) purely as a logged signal.
  *
  * SCENARIO: mirrors the live incident's own numbers — cap 6, `externalBuilding` 6 (2 stranded + 4 workers),
@@ -31,7 +31,7 @@ const EXTERNAL_BUILDING = 6; // 2 stranded claims + 4 hand-dispatched workers, l
 export default {
   id: 'builder-cap-counts-machine-wide-building',
   title: "the builder's own cap folded in the machine-wide \"building\" count (hand/fix/ci-heal workers, stranded claims), so it dispatched nothing while making zero progress of its own",
-  card: 'we:backlog/x3vs6tu',
+  card: 'we:backlog/4464',
   fixedBy: { sha: '1e7a47fe7', where: 'lane/builder-cap-own-builds', paths: ['scripts/conveyor/build-dispatch-policy.mjs'] },
   fixPresent(root) {
     const p = join(root, 'scripts/conveyor/build-dispatch-policy.mjs');

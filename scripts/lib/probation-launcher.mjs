@@ -203,11 +203,72 @@ export const CLAIM_OWNED_FRONTMATTER_KEYS = Object.freeze([
 
 /**
  * Frontmatter keys a standalone PREPARE worker run may change: the card's own `scope:` (factual drift
- * correction, #4658) plus the two stamps `prepare-stamp` writes. The prepare worker brief
- * (`skills-src/conveyor/prepare-item-worker-brief.md`) names exactly these, and a contract test asserts it —
- * one constant so the brief and the runner's tamper check cannot drift apart.
+ * correction, #4658), `size:` (operator ruling on #4670, 2026-10-03: a prepare worker may change it directly,
+ * grounded in file:line evidence and stated in `## Progress`) plus the two stamps `prepare-stamp` writes. The
+ * prepare worker brief (`skills-src/conveyor/prepare-item-worker-brief.md`) names exactly these, and a contract
+ * test asserts it — one constant so the brief and the runner's tamper check cannot drift apart.
+ *
+ * `blockedBy` is deliberately NOT here (same ruling): a worker may only PROPOSE edge changes, in the card's
+ * `## Proposed blockedBy changes` section ({@link parseProposedBlockedBy}); the frontmatter stays untouched
+ * until an independent reviewer confirms (the parked PR's review), so a direct `blockedBy:` edit is still tamper.
  */
-export const PREPARE_OWNED_FRONTMATTER_KEYS = Object.freeze(['scope', 'preparedDate', 'preparedAgainstSha']);
+export const PREPARE_OWNED_FRONTMATTER_KEYS = Object.freeze(['scope', 'size', 'preparedDate', 'preparedAgainstSha']);
+
+/**
+ * The edges a prepare worker PROPOSED in the card's `## Proposed blockedBy changes` section. PURE.
+ * One bullet per edge: `- add NNN — reason (file:line)` or `- remove NNN — reason (file:line)`.
+ * @param {string} raw - the card's whole text.
+ * @returns {{op: 'add'|'remove', target: string, line: string}[]}
+ */
+export function parseProposedBlockedBy(raw) {
+  const m = /^## Proposed blockedBy changes[^\n]*\r?\n([\s\S]*?)(?=^## |(?![\s\S]))/m.exec(String(raw ?? ''));
+  if (!m) return [];
+  const out = [];
+  for (const line of m[1].split(/\r?\n/)) {
+    const b = /^\s*[-*]\s+(add|remove)\s+#?(\d+)\b/i.exec(line);
+    if (b) out.push({ op: b[1].toLowerCase(), target: b[2], line: line.trim() });
+  }
+  return out;
+}
+
+/**
+ * Validate proposed `blockedBy` edges against the backlog graph, mirroring the `check:standards` DAG rules
+ * (scripts/check-standards.mjs, "6d-ter"): no self edge, the target must exist, an ADDED edge may never point
+ * at a resolved card, and the resulting graph must stay acyclic. PURE. An empty result means valid.
+ * @param {string} self - the card's number.
+ * @param {{op: string, target: string}[]} proposals
+ * @param {Map<string, {status: string, blockedBy: string[]}>} graph - num -> card state (this card included).
+ * @returns {string[]} violations.
+ */
+export function validateProposedBlockedBy(self, proposals, graph) {
+  const bad = [];
+  const edges = new Map([...graph].map(([n, c]) => [n, [...(c.blockedBy ?? []).map(String)]]));
+  const mine = edges.get(self) ?? [];
+  edges.set(self, mine);
+  for (const { op, target } of proposals) {
+    if (op === 'add') {
+      if (target === self) { bad.push(`#${target}: an item cannot block itself`); continue; }
+      if (!graph.has(target)) { bad.push(`#${target}: does not resolve to an existing item`); continue; }
+      if (graph.get(target).status === 'resolved') { bad.push(`#${target}: is resolved — a blockedBy edge may never point at a resolved card`); continue; }
+      if (!mine.includes(target)) mine.push(target);
+    } else {
+      const i = mine.indexOf(target);
+      if (i < 0) bad.push(`#${target}: cannot remove an edge the card does not have`); else mine.splice(i, 1);
+    }
+  }
+  const state = new Map();
+  const walk = (n, stack) => {
+    if (state.get(n) === 2) return null;
+    if (state.get(n) === 1) return [...stack.slice(stack.indexOf(n)), n];
+    state.set(n, 1);
+    for (const t of edges.get(n) ?? []) { const c = walk(t, [...stack, n]); if (c) return c; }
+    state.set(n, 2);
+    return null;
+  };
+  const cycle = walk(self, []);
+  if (cycle) bad.push(`blockedBy cycle: #${cycle.join(' → #')}`);
+  return bad;
+}
 
 /**
  * The `---\n...\n---\n` frontmatter block's own text (no delimiters), or `''` if the file has none. PURE.

@@ -1,16 +1,17 @@
+import * as reviewDispatch from '../review-dispatch.mjs';
 import { runReviewTick } from '../../../skills-src/conveyor/review-daemon.mjs';
 import { readReviewCiGate } from '../../lib/review-ci-gate-io.mjs';
 /**
  * x26lw6u — the review arc as a deterministic job (we:scripts/operations/review-job.mjs) and its job-record
  * store (we:scripts/operations/review-job-store.mjs). Every effect is faked: no lane pool, no `claude`, no `gh`.
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync, existsSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import {
-  BLOCKED_ON_INFRA, DEFERRED_NO_LANE, MAX_LANE_DEFERRALS, REVIEW_JOB_KIND,
+  BLOCKED_ON_INFRA, DEFERRED_NO_LANE, MAX_LANE_DEFERRALS, REVIEW_JOB_KIND, REVIEW_JOB_LANE_WAIT_MS,
   classifyReviewLoopOutcome, crashLabelFromLoop, decideJobClaim, dispatchReviewByMode, dispatchReviewJob,
   jobRecordToAgentRow, laneCooloffActive, listAgentsWithReviewJobs, listReviewJobAgents, nextLaneDeferral,
   parseReviewLoopStdout, readJobRecord, resolveReviewDispatchMode, runReviewJob, writeJobRecord,
@@ -378,4 +379,95 @@ it('x6n7c2p required checks before review — default job four-tick soak spends 
   expect(dispatched).toEqual([0, 0, 0, 1]);
   expect(spawns).toBe(1);
   expect(rounds).toEqual([3]);
+});
+
+// #4154 — the daemon's scan is reused by the job, with a bounded stale-hint fallback.
+describe('preferred review lanes', () => {
+  it('preferLane: the job acquires the daemon-assigned lane first and never auto-picks when it wins', () => {
+    const { io, calls } = fakeIo();
+    const out = runReviewJob({ pr: 10, repo: REPO, preferLane: 7 }, io);
+    expect(calls.filter(c => c[0] === 'acquire').map(c => c[1])).toEqual([
+      { laneRepo: WE_LANE_REPO, slug: 'review-10', actorId: 'actor-fresh-uuid', lane: 7, waitMs: 0 },
+    ]);
+    expect(calls.find(c => c[0] === 'loop')[1].lanePath).toBe('/lanes/lane-7');
+    expect(out.outcome).toBe('auto-cleared');
+  });
+
+  it.each([false, true])('preferLane: a lost preferred lane falls back to the bounded auto-pick (both fail: %s)', bothFail => {
+    const acquireLane = vi.fn()
+      .mockReturnValueOnce({ lanePath: null, error: 'lane-7 is held' })
+      .mockReturnValueOnce({ lanePath: bothFail ? null : '/lanes/lane-9', error: 'pool full' });
+    const log = vi.fn();
+    const { io, calls } = fakeIo({ acquireLane, log });
+    const out = runReviewJob({ pr: 10, repo: REPO, preferLane: 7 }, io);
+    expect(acquireLane.mock.calls.map(([c]) => c)).toEqual([
+      { laneRepo: WE_LANE_REPO, slug: 'review-10', actorId: 'actor-fresh-uuid', lane: 7, waitMs: 0 },
+      { laneRepo: WE_LANE_REPO, slug: 'review-10', actorId: 'actor-fresh-uuid', waitMs: REVIEW_JOB_LANE_WAIT_MS },
+    ]);
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('preferred lane-7 not taken (lane-7 is held) — falling back to auto-pick'));
+    expect(out.outcome).toBe(bothFail ? DEFERRED_NO_LANE : 'auto-cleared');
+    const done = calls.filter(c => c[0] === 'report' && c[1] === 'done');
+    expect(done).toHaveLength(1);
+    if (bothFail) expect(done[0][2].label).toBe('lane-deferrals:1');
+  });
+
+  it('no preferLane: a single auto-pick acquire, unchanged', () => {
+    const { io, calls } = fakeIo();
+    runReviewJob({ pr: 10, repo: REPO }, io);
+    expect(calls.filter(c => c[0] === 'acquire').map(c => c[1])).toEqual([
+      { laneRepo: WE_LANE_REPO, slug: 'review-10', actorId: 'actor-fresh-uuid', waitMs: REVIEW_JOB_LANE_WAIT_MS },
+    ]);
+  });
+
+  it.each([5, null, 0, 'x', -1, 1.5, '5'])('dispatchReviewJob passes --prefer-lane=<n> only for a positive integer: %s', preferLane => {
+    const spawnJob = vi.fn(() => null);
+    dispatchReviewJob({ pr: 10, repo: REPO, preferLane, root: '/daemon', dir,
+      ciGate: () => ({ allowed: true }), checkStaleness: FRESH, readCompletion: () => null,
+      resolveSettingsEnv: () => null, spawnJob });
+    expect(spawnJob.mock.calls[0][0].argv.slice(1)).toEqual([
+      'run', '--pr=10', `--repo=${REPO}`, ...(preferLane === 5 ? ['--prefer-lane=5'] : []),
+    ]);
+  });
+
+  it('dispatchReviewByMode session mode never forwards preferLane to dispatchReview', () => {
+    const dispatch = vi.spyOn(reviewDispatch, 'dispatchReview').mockReturnValue({ agentId: 'session' });
+    try {
+      dispatchReviewByMode({ mode: 'session', pr: 10, repo: REPO, preferLane: 7 });
+      expect(dispatch).toHaveBeenCalledTimes(1);
+      expect(dispatch).toHaveBeenCalledWith({ pr: 10, repo: REPO });
+    } finally { dispatch.mockRestore(); }
+  });
+});
+
+
+it('#4154 soak: 100 seven-review ticks reuse distinct assignments without auto-pick', () => {
+  let loops = 0;
+  for (let tick = 0; tick < 100; tick += 1) {
+    const lanes = [4, 9, 12, 15, 19, 22, 25];
+    const acquired = new Set();
+    const scan = vi.fn(() => lanes);
+    const out = runReviewTick({
+      reconcile: () => ({ dispatch: lanes.map((_, i) => ({ kind: 'review', prNumber: 100 + i })), refusals: [] }),
+      acquirableLanes: scan, holdReconcile: () => [], statusCandidates: () => [], tagRound: () => {}, tagStatus: () => {},
+      dispatch: options => {
+        const { io } = fakeIo({ acquireLane: ({ lane, waitMs }) => {
+          expect(lanes).toContain(lane);
+          expect(waitMs).toBe(0);
+          expect(acquired.has(lane)).toBe(false);
+          acquired.add(lane);
+          return { lanePath: `/lanes/lane-${lane}` };
+        } });
+        const result = runReviewJob(options, io);
+        expect(result.outcome).toBe('auto-cleared');
+        expect(result.lanePath).toBe(`/lanes/lane-${options.preferLane}`);
+        loops += 1;
+        return result;
+      },
+    });
+    expect(scan).toHaveBeenCalledTimes(1);
+    expect(out.failed).toEqual([]);
+    expect(out.dispatched).toHaveLength(7);
+    expect(acquired.size).toBe(7);
+  }
+  expect(loops).toBe(700);
 });

@@ -87,7 +87,7 @@ we:scripts/conveyor/__tests__/ci-heal-mark.test.mjs (vitest, extend):
 - `parkHealRevert adds review:human and strips review:accepted, review:pending and ready-to-merge, then comments` — fake `exec`/`post` record the calls in that order.
 - `a clean revert check keeps the existing restamp path` (`revertCheck: 'clean'`).
 - `unreadable revert evidence never carries the acceptance` — `checkRevert` throws; `restamp` is not called; `rearm` is; `revertCheck: 'unavailable'`.
-- The existing `xp0lsdi` test stays as is and now also sees `revertCheck: 'not-run'`.
+- The existing `4878` test stays as is and now also sees `revertCheck: 'not-run'`.
 
 we:scripts/operations/__tests__/probation-heal-run.test.mjs (extend):
 
