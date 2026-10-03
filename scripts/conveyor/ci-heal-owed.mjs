@@ -20,7 +20,9 @@
  *   · DEDUPE — the HEAD-SCOPED marker the comment itself carries. Before posting, the flush re-reads the PR's
  *     comments and clears the record if a trusted marker comment for THIS kind and THIS head is already live
  *     (the "gh saw a failure but the write actually landed" race included). No op-id, no exactly-once machinery.
- *   · BOUNDED — a record past {@link OWED_MAX_AGE_MS} or {@link OWED_MAX_ATTEMPTS} flush tries is dropped and
+ *   · ATTEMPTS — probation heal writes add an attemptId to the key and dedupe, persist before publication,
+ *     and remain owed until a trusted read confirms publication. They cannot expire into an uncounted retry.
+ *   · BOUNDED — a legacy record past {@link OWED_MAX_AGE_MS} or {@link OWED_MAX_ATTEMPTS} flush tries is dropped and
  *     reported, never retried forever; a merged/closed PR's record is dropped as moot without posting.
  *
  * `advisory-fix-mark.mjs` is NOT a kind here, on purpose: its marker is not a pure counter (a later marker can
@@ -51,7 +53,10 @@ export function owedDir(env = process.env) {
   return join(ghThrottleLockRoot(null, env), OWED_DIRNAME);
 }
 
-const keyFile = (dir, { repo, pr, kind }) => join(dir, `${repo}__${pr}__${kind}.json`);
+const keyFile = (dir, { repo, pr, kind, attemptId }) => {
+  if (attemptId != null && !/^[a-zA-Z0-9_-]+$/.test(attemptId)) throw new TypeError('invalid heal attempt identity');
+  return join(dir, `${repo}__${pr}__${kind}${attemptId ? `__${attemptId}` : ''}.json`);
+};
 
 /**
  * Was this `gh` failure a budget refusal (`budget_blocked` / `budget_exhausted` from `gh-throttle.mjs`, or a raw
@@ -90,13 +95,13 @@ export function resolveOwedRepo({ repoFlag, cwd, exec = execFileSync } = {}) {
  * @param {{repo:string, slug:string, pr:number, kind:string, headSha:string, body:string}} rec
  * @param {{dir?:string, now?:number}} [o]
  */
-export function recordOwedWrite({ repo, slug, pr, kind, headSha, body }, { dir = owedDir(), now = Date.now() } = {}) {
+export function recordOwedWrite({ repo, slug, pr, kind, headSha, body, attemptId }, { dir = owedDir(), now = Date.now() } = {}) {
   if (!OWED_KINDS.includes(kind)) throw new TypeError(`ci-heal-owed: kind must be one of ${OWED_KINDS.join('|')}, got ${JSON.stringify(kind)}`);
   if (!repo || !slug || !Number.isInteger(pr) || pr <= 0) throw new TypeError('ci-heal-owed: repo, slug and a positive pr are required');
   if (typeof headSha !== 'string' || !headSha.trim()) throw new TypeError('ci-heal-owed: headSha is required (it is the dedupe key)');
   if (typeof body !== 'string' || !body) throw new TypeError('ci-heal-owed: body is required');
   const record = {
-    v: 1, repo, slug, pr, kind, headSha: headSha.trim().toLowerCase(), body,
+    v: 1, repo, slug, pr, kind, ...(attemptId ? { attemptId } : {}), headSha: headSha.trim().toLowerCase(), body,
     recordedAt: new Date(now).toISOString(), attempts: 0,
   };
   mkdirSync(dir, { recursive: true });
@@ -158,7 +163,8 @@ export function owedWriteAlreadyLive(comments, rec) {
     const body = typeof c === 'string' ? c : c?.body;
     if (typeof body !== 'string' || !body.trimStart().startsWith(marker) || !isTrustedMarkerAuthor(c)) continue;
     const head = (/^head:\s*(\S+)/m.exec(body) || [])[1];
-    if (head && head.toLowerCase() === sha) return true;
+    const attempt = /^attempt: ([a-zA-Z0-9_-]+)$/m.exec(body)?.[1];
+    if (head && head.toLowerCase() === sha && (!rec.attemptId || attempt === rec.attemptId)) return true;
   }
   return false;
 }
@@ -196,7 +202,7 @@ export function flushOwedWrites({
   for (const rec of readOwedWrites({ dir, repo })) {
     try {
       const age = now - Date.parse(rec.recordedAt);
-      if (!(age <= maxAgeMs) || (Number(rec.attempts) || 0) >= maxAttempts) {
+      if (!rec.attemptId && (!(age <= maxAgeMs) || (Number(rec.attempts) || 0) >= maxAttempts)) {
         clearOwedWrite(rec, { dir });
         out.dropped.push(tag(rec, { why: Number.isFinite(age) && age > maxAgeMs ? 'expired' : 'attempts-exhausted', attempts: rec.attempts }));
         continue;
@@ -225,6 +231,10 @@ export function flushOwedWrites({
       } catch (e) {
         bumpAttempts(rec, dir);
         out.kept.push(tag(rec, { why: `post failed: ${String(e?.message || e).split('\n')[0]}` }));
+        continue;
+      }
+      if (rec.attemptId && !owedWriteAlreadyLive(readPrState({ pr: rec.pr, slug: rec.slug, exec })?.comments, rec)) {
+        out.kept.push(tag(rec, { why: 'attempt publication not yet confirmed' }));
         continue;
       }
       clearOwedWrite(rec, { dir });
