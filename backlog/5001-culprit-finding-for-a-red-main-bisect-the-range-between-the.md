@@ -1,9 +1,10 @@
 ---
+bornAs: xmje9g6
 kind: story
 size: 5
 parent: "3383"
 status: open
-blockedBy: ["xbdefjb"]
+blockedBy: ["5000"]
 scope: ["we:scripts/conveyor/main-red-recovery.mjs", "we:scripts/conveyor/main-red-culprit.mjs", "we:scripts/conveyor/__tests__/"]
 dateOpened: "2026-10-03"
 tags: []

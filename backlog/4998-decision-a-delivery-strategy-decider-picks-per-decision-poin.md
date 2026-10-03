@@ -1,4 +1,5 @@
 ---
+bornAs: x1hhjnb
 kind: decision
 parent: "3383"
 status: open
@@ -14,7 +15,7 @@ tags: [policy, config, drain, conveyor]
 
 Operator ask 2026-10-03 (verbatim): "surely there must be many other such strategy that exist in the world and a
 decider could pick between? Opus+codex research as very important". The same day the operator made several
-delivery strategies configurable settings: verify mode (card xg2fljy, PR #3811), overlap strategy (card xtzr35y,
+delivery strategies configurable settings: verify mode (card 4991, PR #3811), overlap strategy (card 4992,
 PR #3813), the main-protection policy keys (cards xcs4nce, xi8vgqq, xkpbs7b, PR #3794) and backlog ids numbered
 before publish (PR #3809). This card decides how a **decider** picks between strategies at run time, and how it
 sits under those settings.
@@ -29,7 +30,7 @@ compared there; about 50 strategies with sources).
 - **Main is mostly unobserved.** Of the last 100 `we:.github/workflows/ci.yml` runs on main (09:25Z–17:55Z), 85
   were cancelled, 11 failed, 3 passed. Every completed main run from 12:00Z to 17:24Z failed. Cause:
   `we:.github/workflows/ci.yml:50-52` (per-ref concurrency group, `cancel-in-progress: true`, also on pushes to
-  main). Fix filed as card xbdefjb.
+  main). Fix filed as card 5000.
 - **Serial testing cannot serve the merge rate.** About 312 merges in 12 h is 26/h; one 14-minute CI run at a
   time serves about 4/h. PRs today merge on their own green, about 6 merges stale at merge time.
 - **That already breaks a statute.** `#gate-on-merged-tree-lane-fast-fail` puts the binding gate on the merged
@@ -39,7 +40,7 @@ compared there; about 50 strategies with sources).
   `we:scripts/readiness/conveyor-instrument.mjs`; clause 4 surfaces and routes, never auto-builds. GitHub's native
   queue is unavailable (user-owned repo) and kept off by `#pr-flow-rollout-mechanism`.
 - **PR CI failure rate is about 16%** (16 of 97 completed `pull_request` runs), mixing real failures, flakes and
-  red-main fallout. No per-test flake signal exists (card xb7necp).
+  red-main fallout. No per-test flake signal exists (card 4999).
 - **Overlap:** 5 of 23 open PRs share a non-backlog file with another open PR.
 - **Auto-revert is built but dormant.** #3361 (deferred 2026-08-26, "recover manually until it hurts").
 - **The config surface exists in design.** Card xcs4nce adds `we:scripts/lib/delivery-policy.mjs`
@@ -55,7 +56,7 @@ compared there; about 50 strategies with sources).
 ## What the decider is
 
 One pure function in `we:scripts`, `decide(signals, policy) → { choice, source, ruleId, signals, alternatives }`,
-called by each daemon at its own decision point with a fresh snapshot. Signals come from card xv18rog
+called by each daemon at its own decision point with a fresh snapshot. Signals come from card 5002
 (`we:scripts/lib/delivery-signals.mjs`). Decision points: D1 verify order, D2 overlap (queue/stack/hold), D3
 integration check, D5 main-red response, D6 heavy-slot priority, D7 test scope, D8 dispatch admission, D9
 wide-change handling; D4 (speculation depth, batch size) only with the deferred batched-queue build. The full rule
@@ -80,7 +81,7 @@ table and the mapping of every setting ruled today are sections 5.4 and 5.7 of t
   never a way to start that build early.
 - **Correctness of what lands is enforced, not un-gated.** Merging on a stale own-green is closed by enforcing
   `#gate-on-merged-tree-lane-fast-fail` through xi8vgqq. A second, correctness-based input to tripwire #2740 may be
-  proposed only after xbdefjb and xmje9g6 land and culprit-finding data shows integration-attributed red windows
+  proposed only after 5000 and 5001 land and culprit-finding data shows integration-attributed red windows
   while `recheckWhenMainMoved` is `always`. Until then clause 3 is unchanged.
 - **Shadow mode first.** A field set to `auto` starts in shadow: the decider computes and journals its choice next
   to the applied value (the platform default) until the operator flips that field live.
@@ -152,11 +153,11 @@ are now "supported by default" entries.
 
 Already filed with this card (each useful without the decider):
 
-- xv18rog — delivery signals snapshot (read-only).
-- xbdefjb — main CI finishes every run it starts; main-CI coverage signal.
-- xmje9g6 — culprit finding for a red main (feeds #3361).
-- xb7necp — per-test flake score and time-boxed quarantine.
-- xxpai0d — wide mechanical changes as a barrier with codemod replay.
+- 5002 — delivery signals snapshot (read-only).
+- 5000 — main CI finishes every run it starts; main-CI coverage signal.
+- 5001 — culprit finding for a red main (feeds #3361).
+- 4999 — per-test flake score and time-boxed quarantine.
+- 5003 — wide mechanical changes as a barrier with codemod replay.
 
 On ratification, file:
 
@@ -165,7 +166,7 @@ On ratification, file:
    `we:config/defineConfig.ts`, `we:config/platformDefaults.ts`, `we:scripts/lib/delivery-policy.mjs`.
 2. The decider core: rule table for D1, D2, D3, D5, D6, D7, D8, D9, hold times, journal, `--explain`, shadow
    mode. Scope `we:scripts/lib/delivery-decider.mjs` and its tests.
-3. Wiring per consumer, inside the stories that own each point (xg2fljy, xtzr35y, xi8vgqq, xca0u65, xkpbs7b).
+3. Wiring per consumer, inside the stories that own each point (4991, 4992, xi8vgqq, xca0u65, xkpbs7b).
 
 ## Done when
 
