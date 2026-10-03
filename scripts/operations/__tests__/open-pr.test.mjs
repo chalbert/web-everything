@@ -15,7 +15,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { importGraph } from './import-graph.mjs';
 import {
-  openPrOperation, planOpen, classifySubmit, defaultParkLabel, extractSubmitResult,
+  openPrOperation, planOpen, classifySubmit, defaultParkLabel, extractSubmitResult, describeSubmit,
   OPEN_PR_OP, SUBMIT_PR_EFFECT, OPEN_MODES, SUBMIT_OUTCOMES, HOME_REASONS,
 } from '../open-pr.mjs';
 import { createPrLandRunner, createOpenPrSinks, PR_LAND_CLI } from '../open-pr-io.mjs';
@@ -586,5 +586,17 @@ describe('extractSubmitResult — reads the REAL submit outcome out of the full 
       expect(r.outcome).toBe('unrun');
       expect(r.pr).toBeNull();
     }
+  });
+});
+
+describe('#4386 submit summaries', () => {
+  it.each([
+    [{ outcome: 'refused', reason: 'empty-body' }, true, /REFUSED.*empty-body/],
+    [{ outcome: 'opened', pr: 123, url: 'https://example.test/123' }, false, /opened #123 https:\/\/example.test\/123/],
+    [{ outcome: 'unrun', reason: 'push-failed' }, true, /NOT RUN.*push-failed/],
+    [{ outcome: 'unrun', reason: 'dry-run' }, false, /dry run.*nothing opened/],
+    [{ outcome: 'refused', reason: 'check-red', pr: 9, detail: 'checks failed' }, true, /REFUSED.*check-red.*#9.*checks failed/],
+  ])('describes %j', (result, failed, line) => {
+    expect(describeSubmit(result)).toEqual({ failed, line: expect.stringMatching(line) });
   });
 });
