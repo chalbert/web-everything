@@ -2,7 +2,7 @@
  * @file required-status-checks.test.mjs — unit tests for `we:scripts/lib/required-status-checks.mjs` (#2748
  * false-red follow-up, soak-replay-gate PR #2775). Covers the full degradation chain the module's own header
  * documents: live fetch → cache write → cache hit within TTL → live failure falls back to a stale cache →
- * live failure with no cache at all falls back to the hardcoded {@link FALLBACK_REQUIRED_STATUS_CHECKS}. The
+ * live failure with no cache uses only the repo's declared set, or reports unavailable. The
  * `gh` reader is injected throughout, so every branch is reachable with no network and no credential.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -32,8 +32,9 @@ describe('getRequiredStatusChecks', () => {
     const result = getRequiredStatusChecks({ repo: 'chalbert/web-everything', cachePath, now: 1000, readChecks });
     expect(result).toEqual({ checks: ['test', 'smoke', 'daemon-soak'], source: 'live' });
     const cached = JSON.parse(readFileSync(cachePath, 'utf8'));
-    expect(cached.checks).toEqual(['test', 'smoke', 'daemon-soak']);
-    expect(cached.key).toBe('chalbert/web-everything@main');
+    expect(cached.entries['chalbert/web-everything@main']).toEqual({
+      checks: ['test', 'smoke', 'daemon-soak'], source: 'live', fetchedAtMs: 1000,
+    });
   });
 
   it('serves the cache within the TTL without calling the reader again', () => {
@@ -90,6 +91,70 @@ describe('getRequiredStatusChecks', () => {
     const result = getRequiredStatusChecks({ repo: 'chalbert/other-repo', branch: 'main', cachePath, now: 1000, readChecks: otherRead });
     expect(result).toEqual({ checks: ['test'], source: 'live' });
     expect(otherCalls).toBe(1);
+  });
+
+  const plan403 = () => { throw Object.assign(new Error('gh api failed'), {
+    stderr: Buffer.from('gh: Upgrade to GitHub Pro or make this repository public to enable this feature. (HTTP 403)'),
+  }); };
+
+  it.each([
+    ['chalbert/plateau-app', ['test', 'e2e']],
+    ['chalbert/frontierui', ['test']],
+    ['chalbert/web-everything', ['test', 'smoke', 'daemon-soak']],
+  ])('caches the declared set for %s on a plan-feature 403, then retries after TTL', (repo, checks) => {
+    const readChecks = vi.fn(plan403);
+    expect(getRequiredStatusChecks({ repo, cachePath, now: 1000, ttlMs: 1000, readChecks }))
+      .toEqual({ checks, source: 'declared' });
+    expect(getRequiredStatusChecks({ repo, cachePath, now: 1500, ttlMs: 1000, readChecks }))
+      .toEqual({ checks, source: 'declared' });
+    expect(readChecks).toHaveBeenCalledTimes(1);
+    readChecks.mockReturnValue(['new-protection-check']);
+    expect(getRequiredStatusChecks({ repo, cachePath, now: 2000, ttlMs: 1000, readChecks }))
+      .toEqual({ checks: ['new-protection-check'], source: 'live' });
+    expect(readChecks).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not cache unrelated 403s as a plan restriction', () => {
+    const readChecks = vi.fn(() => { throw new Error('HTTP 403: API rate limit exceeded'); });
+    for (let now = 1000; now <= 1001; now++) {
+      expect(getRequiredStatusChecks({ repo: 'chalbert/plateau-app', cachePath, now, readChecks }))
+        .toEqual({ checks: ['test', 'e2e'], source: 'fallback' });
+    }
+    expect(readChecks).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(['chalbert/unknown', undefined])('returns unavailable for undeclared repo %s, never WE defaults', repo => {
+    expect(getRequiredStatusChecks({ repo, cachePath, readChecks: plan403 }))
+      .toEqual({ checks: [], source: 'unavailable' });
+    expect(getRequiredStatusChecks({ repo, cachePath, readChecks: () => { throw new Error('offline'); } }))
+      .toEqual({ checks: [], source: 'unavailable' });
+  });
+
+  it('alternates repositories and branches without evicting live or declared entries', () => {
+    const liveRead = vi.fn(() => ['test', 'smoke', 'daemon-soak', 'new-check']);
+    const declaredRead = vi.fn(plan403);
+    const releaseRead = vi.fn(() => ['release-check']);
+    for (const now of [1000, 1500]) {
+      expect(getRequiredStatusChecks({ repo: 'chalbert/web-everything', cachePath, now, readChecks: liveRead }))
+        .toEqual({ checks: ['test', 'smoke', 'daemon-soak', 'new-check'], source: now === 1000 ? 'live' : 'cache' });
+      expect(getRequiredStatusChecks({ repo: 'chalbert/plateau-app', cachePath, now, readChecks: declaredRead }))
+        .toEqual({ checks: ['test', 'e2e'], source: 'declared' });
+      expect(getRequiredStatusChecks({ repo: 'chalbert/web-everything', branch: 'release', cachePath, now, readChecks: releaseRead }))
+        .toEqual({ checks: ['release-check'], source: now === 1000 ? 'live' : 'cache' });
+    }
+    for (const reader of [liveRead, declaredRead, releaseRead]) expect(reader).toHaveBeenCalledTimes(1);
+    expect(Object.keys(JSON.parse(readFileSync(cachePath, 'utf8')).entries)).toHaveLength(3);
+  });
+
+  it('preserves a legacy entry when another repo writes its first cache entry', () => {
+    writeFileSync(cachePath, JSON.stringify({
+      key: 'chalbert/web-everything@main', checks: ['test', 'legacy-required'], fetchedAtMs: 1000,
+    }));
+    getRequiredStatusChecks({ repo: 'chalbert/plateau-app', cachePath, now: 1500, readChecks: plan403 });
+    const readChecks = vi.fn();
+    expect(getRequiredStatusChecks({ repo: 'chalbert/web-everything', cachePath, now: 1500, readChecks }))
+      .toEqual({ checks: ['test', 'legacy-required'], source: 'cache' });
+    expect(readChecks).not.toHaveBeenCalled();
   });
 });
 

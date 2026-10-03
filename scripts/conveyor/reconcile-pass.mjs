@@ -1082,14 +1082,13 @@ export function runReconcilePass({
   const rawPrs = readPrs({ repo: resolvedRepo });
   if (isGhDeferred(rawPrs)) return { ...rawPrs, dispatch: [], refusals: [], notes: [rawPrs.message], prs: 0, agents: 0 };
   // #4501 — read the live required-check set (branch protection, cached; degrades to
-  // FALLBACK_REQUIRED_STATUS_CHECKS if the live fetch fails) BEFORE enriching main-red facts, so BOTH
+  // the repo's declared fallback if the live fetch fails) BEFORE enriching main-red facts, so BOTH
   // `enrichMainRed` below and `planReconcile` further down judge the SAME set. Moved up from just before
   // `planReconcile` — previously `enrichMainRed` ran on the OLD hardcoded `DEFAULT_MAIN_RED_ATTRIBUTED_CHECKS`
   // default while `planReconcile` (two calls later) already got the live-fetched value: two different sets in
   // one pass over the same PRs. A repo this constellation does not know the gh slug for (`resolvedRepo` stays
-  // `null`, `gh` infers from cwd) still gets a required set: `getRequiredStatusChecks` degrades to its own
-  // cache/fallback chain rather than ever throwing, so this call is safe unconditionally (see that module's
-  // own header).
+  // `null`, `gh` infers from cwd) can return an unavailable empty set. The shared reducer then evaluates
+  // observed CI checks, retaining red/pending/unchecked evidence; [] never means an automatic pass.
   const { checks: requiredChecks } = readRequiredChecks({ repo: resolvedRepo, branch: defaultBranch });
   // we:backlog/x5uqim1-*.md — attach `requiredCheckCompletedAt`/`aheadByOnMain` to any currently-failing
   // PR and read `main`'s own red windows, so `planReconcile` can tell a `ci-red` PR caused by a red `main` apart
