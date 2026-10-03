@@ -87,6 +87,7 @@ import { AGY_CLAUDE_MODEL_BY_TIER, PROBATION_WORKERS, PROVEN_TASK_ENVELOPES, isS
 import { isDocScopePath } from '../lib/dispatch-task-type.mjs';
 import {
   buildCheckerArgv, parseCheckerVerdict, buildDocFixCommitMessage, buildDocFixTask, buildWorkerArgv, frontmatterTamperedBeyondClaim, PREPARE_OWNED_FRONTMATTER_KEYS,
+  parseProposedBlockedBy, validateProposedBlockedBy,
   healDiffWithinEnvelope, launchScorecardRow, newUntrackedPaths, summarizeNumstat,
 } from '../lib/probation-launcher.mjs';
 import { defaultPoolRoot, workspaceFor } from '../lib/lane-pool-paths.mjs';
@@ -262,6 +263,7 @@ export async function runProbationBuild(args, io) {
   let declinedReason = null;
   let modelEvidence = {};
   let couldNotPrepare = false;
+  let proposedEdges = [];
   const finish = (outcome, executor, detail, row = {}) => {
     const evidence = preparing && !['opened-pr', 'could-not-prepare'].includes(outcome) ? {
       error: detail, sessionAbsent: !workerRan,
@@ -566,6 +568,14 @@ export async function runProbationBuild(args, io) {
         || summarizeNumstat(io.diffNumstat(lanePath, baseSha, [])).paths.some(p => p !== item.path)) {
         return abandon('gate-red', 'prepare changed fields or files outside its envelope', { diff: diffRow });
       }
+      // Ruling #4670 (2026-10-03): blockedBy edges are PROPOSED in the card body, never applied. Hold them to the
+      // same DAG rules check:standards enforces (no resolved/missing/self target, no cycle) before the PR opens.
+      proposedEdges = parseProposedBlockedBy(stamped.raw);
+      if (proposedEdges.length) {
+        const graph = io.blockedByGraph?.(lanePath);
+        const bad = graph ? validateProposedBlockedBy(String(num), proposedEdges, graph) : ['the backlog graph could not be read'];
+        if (bad.length) return abandon('gate-red', `prepare proposed invalid blockedBy changes: ${bad.join('; ')}`, { diff: diffRow });
+      }
     }
 
     // x55dojc — re-checked immediately before the ONE commit this arc ever makes: `resolveItem` is its own
@@ -604,7 +614,7 @@ export async function runProbationBuild(args, io) {
     // `submitted.ok === false` case already handled explicitly. `writePrBody`/`openPr` therefore never reach
     // `abandon` — a throw here reports `escalated-needs-human` and stops, exactly like a `!submitted.ok` result.
     try {
-      const bodyFile = io.writePrBody(lanePath, { num, worker, diff: diffRow, taskType, declinedReason });
+      const bodyFile = io.writePrBody(lanePath, { num, worker, diff: diffRow, taskType, declinedReason, proposedEdges });
       const submitted = io.openPr({ lanePath, num, slug: item.slug, attemptTag: args.attemptTag, bodyFile, taskType });
       if (!submitted.ok) {
         // The build is committed and gate-green in the lane either way — never discarded here. A
@@ -733,6 +743,20 @@ export function realIo({ session, env = process.env, repoRoot = WE_ROOT } = {}) 
     // of `src/_data/backlog.js` (that loader's own consumer, `dispatch-lane-io.mjs#findItem`, is what handed
     // THIS dispatch its `num` in the first place; re-deriving the same fact a second way risks disagreeing
     // with it). The title is the file's own `# ` heading; the spec is the whole file body below the frontmatter.
+    // num -> {status, blockedBy} for every card: the graph the proposed-edge DAG check (ruling #4670) walks.
+    blockedByGraph: (dir) => {
+      const graph = new Map();
+      try {
+        for (const f of readdirSync(join(dir, 'backlog'))) {
+          const m = /^(\d+)-.*\.md$/.exec(f);
+          if (!m) continue;
+          let fm = {};
+          try { fm = parseYamlFrontmatter(readFileSync(join(dir, 'backlog', f), 'utf8')) ?? {}; } catch { /* unreadable card: no edges, unknown status */ }
+          graph.set(m[1], { status: String(fm.status ?? ''), blockedBy: Array.isArray(fm.blockedBy) ? fm.blockedBy.map(String) : [] });
+        }
+      } catch { return null; }
+      return graph;
+    },
     findItem: (n, dir) => {
       let names;
       try { names = readdirSync(join(dir, 'backlog')); } catch { return null; }
@@ -850,7 +874,7 @@ export function realIo({ session, env = process.env, repoRoot = WE_ROOT } = {}) 
       const r = node('scripts/verify-lane.mjs', ['--json'], { cwd: dir, env: laneEnv, timeout: GATE_TIMEOUT_MS });
       return { pass: r.ok, output: r.out.slice(-12000), failureDetail: r.ok ? null : gateFailureDetail(r.out) };
     },
-    writePrBody: (dir, { num: n, worker: w, diff, taskType = 'doc-fix', declinedReason }) => {
+    writePrBody: (dir, { num: n, worker: w, diff, taskType = 'doc-fix', declinedReason, proposedEdges = [] }) => {
       const bodyFile = join(dir, '.pr-body.md');
       writeFileSync(bodyFile, declinedReason ? [
         `Standalone worker declined #${n}; no implementation change.`, '',
@@ -869,6 +893,15 @@ export function realIo({ session, env = process.env, repoRoot = WE_ROOT } = {}) 
         'Full review and a run rating are owed on this change; promotion out of probation stays an explicit',
         'human decision.',
         '',
+        ...(proposedEdges.length ? [
+          '## Proposed blockedBy changes — independent confirmation required (ruling #4670)',
+          '',
+          'The preparer proposed these edges in the card body; the card frontmatter is unchanged. The reviewer of this',
+          'PR is the independent second actor: apply an edge to `blockedBy:` only if its file:line grounds hold.',
+          '',
+          ...proposedEdges.map((e) => e.line.startsWith('-') ? e.line : `- ${e.line}`),
+          '',
+        ] : []),
       ].join('\n'));
       return bodyFile;
     },
