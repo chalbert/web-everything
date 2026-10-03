@@ -14,13 +14,13 @@
  *   assertions) — the regression pin for the rest of the suite.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   classifyGhRead, personalGhToken, resetPersonalGhTokenCacheForTest, looksLikeGhAuthFailure,
   resolvePersonalRouteEnabled, runGhCliPassthrough, ghAuthIdentity, writeBudgetBlock, readBudgetBlock,
-  ghThrottleLogPath, looksLikePersonalAccessDenial,
+  ghThrottleLogPath, looksLikePersonalAccessDenial, runGhSync, execFileSyncThrottled,
 } from '../gh-throttle.mjs';
 import { expectSecretAbsent, snapshotEnv } from './helpers/secret-absence.mjs';
 
@@ -383,5 +383,153 @@ describe('runGhCliPassthrough — the gh read/App-write identity split (we:backl
     const spawn = vi.fn(() => ({ status: 0, stdout: Buffer.from('ok'), stderr: Buffer.alloc(0) }));
     runGhCliPassthrough(['-R', 'other/repo', 'pr', 'list'], { throttle: { lockRoot, env: APP_ENV, personalRoute: true, personalToken: PERSONAL_TOKEN }, spawn });
     expect(spawn.mock.calls[0][2].env.GH_TOKEN).toBe(PERSONAL_TOKEN);
+  });
+});
+
+
+describe.each([
+  ['runGhSync', (args, opts) => runGhSync(args, opts)],
+  ['execFileSyncThrottled', (args, opts) => execFileSyncThrottled('gh', args, opts)],
+])('%s — imported read routing', (_name, run) => {
+  function fixture(overrides = {}, childEnv = APP_ENV) {
+    const lockRoot = tmp();
+    const exec = vi.fn(() => 'ok');
+    const env = { ...APP_ENV, WE_GH_THROTTLE_PERSONAL_ROUTE: '1' };
+    const opts = { env: childEnv, encoding: 'utf8', throttle: { lockRoot, env, exec, personalToken: PERSONAL_TOKEN, ...overrides } };
+    const logs = () => readFileSync(ghThrottleLogPath(lockRoot), 'utf8').trim().split('\n').map(JSON.parse);
+    return { lockRoot, exec, opts, logs };
+  }
+
+  it.each([
+    ['pr', 'list'], ['pr', 'view', '1'], ['pr', 'checks', '1'],
+  ])('routes %s %s to the personal bucket even when the App is blocked', (...args) => {
+    const { lockRoot, exec, opts, logs } = fixture();
+    const envBefore = snapshotEnv();
+    writeBudgetBlock(lockRoot, 'app', 'graphql', { untilMs: Date.now() + 3600_000 });
+    expect(run(args, opts)).toBe('ok');
+    const child = exec.mock.calls[0][1];
+    expect(child.env.GH_TOKEN === PERSONAL_TOKEN).toBe(true);
+    expect(child.env.GITHUB_TOKEN).toBeUndefined();
+    expect(logs()).toContainEqual(expect.objectContaining({ outcome: 'call', id: personalIdentity, auth: { kind: 'personal-token' } }));
+    expect(opts.env === APP_ENV).toBe(true);
+    expectSecretAbsent(PERSONAL_TOKEN, { logPath: ghThrottleLogPath(lockRoot), envBefore });
+  });
+
+  it.each([
+    ['pr', 'edit', '1', '--title', 'test'], ['pr', 'comment', '1', '--body', 'test'],
+    ['pr', 'merge', '1'], ['api', '-X', 'POST', 'repos/o/r/issues'],
+  ])('keeps %s %s on the bot and records its identity', (...args) => {
+    const { exec, opts, logs, lockRoot } = fixture();
+    run(args, opts);
+    expect(exec.mock.calls[0][1].env === APP_ENV).toBe(true);
+    expect(logs()).toContainEqual(expect.objectContaining({ outcome: 'call', id: 'app', auth: { kind: 'installation', installationId: null, source: 'unknown' } }));
+    expectSecretAbsent(APP_ENV.GH_TOKEN, { logPath: ghThrottleLogPath(lockRoot) });
+  });
+
+  it.each(['0', undefined])('switch %s preserves the original execution options', (value) => {
+    const env = { ...APP_ENV, WE_GH_THROTTLE_PERSONAL_ROUTE: value };
+    const { exec, opts } = fixture({ env });
+    run(['pr', 'list'], opts);
+    expect(exec.mock.calls[0][1]).toEqual({ env: APP_ENV, encoding: 'utf8' });
+  });
+
+  it('missing personal token preserves the original execution options', () => {
+    const { exec, opts } = fixture({ personalToken: null });
+    run(['pr', 'list'], opts);
+    expect(exec.mock.calls[0][1]).toEqual({ env: APP_ENV, encoding: 'utf8' });
+  });
+
+  it('does not replace an explicit caller credential even when throttle.env is App-authenticated', () => {
+    const childEnv = { GH_TOKEN: 'gho_explicitCaller' };
+    const { exec, opts, logs } = fixture({}, childEnv);
+    run(['pr', 'list'], opts);
+    expect(exec.mock.calls[0][1].env === childEnv).toBe(true);
+    expect(logs()[0].id).toBe(ghAuthIdentity(childEnv));
+  });
+
+  it('routes an inherited default login and records it separately from default', () => {
+    const { exec, opts, logs } = fixture({}, {});
+    delete opts.env;
+    opts.throttle.env = { WE_GH_THROTTLE_PERSONAL_ROUTE: '1' };
+    run(['pr', 'list'], opts);
+    expect(exec.mock.calls[0][1].env.GH_TOKEN === PERSONAL_TOKEN).toBe(true);
+    expect(logs()[0].id).toBe(personalIdentity);
+  });
+
+  it('uses the same route in the captured spawn path', () => {
+    const { opts, logs } = fixture();
+    delete opts.throttle.exec;
+    opts.throttle.env.WE_GH_THROTTLE_COST_HEADERS = '1';
+    const spawn = vi.fn(() => ({ status: 0, stdout: 'ok', stderr: '' }));
+    opts.throttle.spawn = spawn;
+    expect(run(['pr', 'list'], opts)).toBe('ok');
+    expect(spawn.mock.calls[0][2].env.GH_TOKEN === PERSONAL_TOKEN).toBe(true);
+    expect(logs()[0].id).toBe(personalIdentity);
+  });
+
+  it('passes the selected credential to a real child and resolves the stored login without logging it', () => {
+    const { lockRoot, opts, logs } = fixture();
+    const bin = join(lockRoot, 'gh');
+    // Offline executable fixture: auth token is captured privately; normal calls emit only a bucket label.
+    writeFileSync(bin, `#!${process.execPath}
+const args = process.argv.slice(2);
+if (args[0] === 'auth') {
+  if (process.env.GH_TOKEN || process.env.GITHUB_TOKEN) process.exitCode = 2;
+  else process.stdout.write(${JSON.stringify(PERSONAL_TOKEN)});
+} else {
+  process.stdout.write(process.env.GH_TOKEN === ${JSON.stringify(PERSONAL_TOKEN)} ? 'personal' : 'bot');
+}
+`);
+    chmodSync(bin, 0o755);
+    resetPersonalGhTokenCacheForTest();
+    delete opts.throttle.exec;
+    delete opts.throttle.personalToken;
+    opts.throttle.bin = bin;
+    try {
+      expect(run(['pr', 'list'], opts)).toBe('personal');
+      expect(run(['pr', 'edit', '1', '--title', 'test'], opts)).toBe('bot');
+      expect(logs().filter(row => row.outcome === 'call').map(row => row.id)).toEqual([personalIdentity, 'app']);
+      expectSecretAbsent(PERSONAL_TOKEN, { logPath: ghThrottleLogPath(lockRoot) });
+    } finally {
+      resetPersonalGhTokenCacheForTest();
+    }
+  });
+
+  it('falls back to the bot when the personal bucket is already blocked', () => {
+    const { lockRoot, exec, opts, logs } = fixture();
+    writeBudgetBlock(lockRoot, personalIdentity, 'graphql', { untilMs: Date.now() + 3600_000 });
+    run(['pr', 'list'], opts);
+    expect(exec.mock.calls[0][1].env === APP_ENV).toBe(true);
+    expect(logs().map(row => row.id)).toEqual([personalIdentity, 'app']);
+  });
+
+  it.each(['HTTP 401: Bad credentials', 'HTTP 404: Not Found', 'HTTP 403: SSO required'])('falls back once after %s', (stderr) => {
+    const { exec, opts, logs } = fixture();
+    exec.mockImplementationOnce(() => { throw Object.assign(new Error('gh failed'), { stderr }); });
+    expect(run(['pr', 'list'], opts)).toBe('ok');
+    expect(exec).toHaveBeenCalledTimes(2);
+    expect(exec.mock.calls[1][1].env === APP_ENV).toBe(true);
+    expect(logs().filter(row => row.outcome === 'call').map(row => row.id)).toEqual([personalIdentity, 'app']);
+  });
+
+  it('does not retry a rejected personal token against a blocked bot', () => {
+    const { lockRoot, exec, opts, logs } = fixture();
+    writeBudgetBlock(lockRoot, 'app', 'graphql', { untilMs: Date.now() + 3600_000 });
+    exec.mockImplementation(() => { throw Object.assign(new Error('gh failed'), { stderr: 'HTTP 401: Bad credentials' }); });
+    expect(() => run(['pr', 'list'], opts)).toThrow(/shared backoff/);
+    expect(exec).toHaveBeenCalledTimes(1);
+    expect(logs().at(-1)).toMatchObject({ outcome: 'budget_blocked', id: 'app' });
+  });
+
+  it('probes an exhausted personal bucket with that credential, then falls back to the bot', () => {
+    const { lockRoot, exec, opts, logs } = fixture();
+    exec.mockImplementationOnce(() => { throw Object.assign(new Error('gh failed'), { stderr: 'GraphQL: API rate limit already exceeded' }); });
+    exec.mockImplementationOnce(() => JSON.stringify({ resources: { graphql: { remaining: 0, reset: Math.floor(Date.now() / 1000) + 3600 } } }));
+    expect(run(['pr', 'list'], opts)).toBe('ok');
+    expect(exec).toHaveBeenCalledTimes(3);
+    expect(exec.mock.calls[1][1].env.GH_TOKEN === PERSONAL_TOKEN).toBe(true);
+    expect(exec.mock.calls[2][1].env === APP_ENV).toBe(true);
+    expect(readBudgetBlock(lockRoot, personalIdentity, 'graphql')).not.toBeNull();
+    expect(logs().filter(row => row.outcome === 'call').map(row => row.id)).toEqual([personalIdentity, 'app']);
   });
 });
