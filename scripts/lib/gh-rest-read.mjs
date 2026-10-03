@@ -75,6 +75,10 @@ export function parseGhApiIncludeOutput(text) {
   return { status, headers, body };
 }
 
+function parseJsonBody(body) {
+  return JSON.parse(body || 'null');
+}
+
 function readCache(file) {
   try {
     const c = JSON.parse(readFileSync(file, 'utf8'));
@@ -103,6 +107,16 @@ export function ghRestGetJson(path, {
   exec = execFileSyncThrottled, env = process.env, dir = null, context = '', op = null, caller = null,
   execOpts = {}, now = () => Date.now(),
 } = {}) {
+  if (String(path).startsWith('repos/')) {
+    const [, owner, rawRepo, ...suffix] = String(path).split('/');
+    // A query on the repository itself is valid; delimiters inside a segment are not.
+    const repo = suffix.length === 0 ? rawRepo?.split('?')[0] : rawRepo;
+    const valid = (segment, placeholder) => segment === placeholder
+      || (typeof segment === 'string' && /^[\w.-]+$/.test(segment) && segment !== '.' && segment !== '..');
+    if (!valid(owner, '{owner}') || !valid(repo, '{repo}')) {
+      throw new TypeError('Invalid REST repository endpoint');
+    }
+  }
   const enabled = !!dir || ghEtagCacheEnabled(env);
   const root = dir || ghEtagCacheDir(env);
   const identity = ghAuthIdentity(execOpts.env || env);
@@ -126,14 +140,14 @@ export function ghRestGetJson(path, {
   let res = run(cached ? cached.etag : null);
   if (res.status === 304) {
     logNotModified(env, { op: opLabel, caller: caller || deriveGhCaller({}, env), id: identity });
-    return { status: 304, json: JSON.parse(cached.body), etag: cached.etag, notModified: true };
+    return { status: 304, json: parseJsonBody(cached.body), etag: cached.etag, notModified: true };
   }
-  const json = JSON.parse(res.body || 'null');
+  const json = parseJsonBody(res.body);
   const etag = res.headers.etag || null;
   if (file && etag) {
     try {
-      mkdirSync(root, { recursive: true });
-      writeJsonAtomic(file, { v: CACHE_VERSION, path, identity, context, etag, fetchedAtMs: now(), body: res.body });
+      mkdirSync(root, { recursive: true, mode: 0o700 });
+      writeJsonAtomic(file, { v: CACHE_VERSION, path, identity, context, etag, fetchedAtMs: now(), body: res.body }, { mode: 0o600 });
     } catch { /* best-effort — a cache write failure only costs the next call a full 200 */ }
   }
   return { status: res.status, json, etag, notModified: false };

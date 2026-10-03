@@ -5,11 +5,14 @@
  * preservation, card/PR lookup, and the four-way verdict. Real child process, private `LANE_POOL_ROOT`, no
  * network (`gh`/`claude` are faked on PATH) — same tier-1 geometry as the other `lane-pool-*` suites.
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { spawnSync, execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, chmodSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, chmodSync, readFileSync, existsSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { tmpdir } from 'node:os';
+
+import ts from 'typescript';
+import { fetchAllPrs, restPullToListShape } from '../lane-whois.mjs';
 
 const POOL_SCRIPT = resolve(process.cwd(), 'scripts/lane-pool.mjs');
 const WHOIS_SCRIPT = resolve(process.cwd(), 'scripts/lane-whois.mjs');
@@ -42,6 +45,7 @@ function pushCard(num, status) {
   git(['push', '--quiet', 'origin', 'main'], referenceDir);
 }
 
+describe('disposable lane integration', () => {
 beforeEach(() => {
   base = mkdtempSync(join(tmpdir(), 'lane-whois-'));
   originDir = join(base, 'origin.git');
@@ -492,5 +496,79 @@ describe('lane-whois — AFTER', () => {
     const r = runWhois(['--json', `--repo=${referenceDir}`, '--name=whoispool', `--pool-root=${poolRoot}`]);
     const report = JSON.parse(r.out);
     expect(report.lanes.map((l) => l.lane)).toEqual([1, 2, 3]);
+  });
+});
+
+});
+
+// Bounded syntactic contract: this mapper starts with an unconditional nullish rejection.
+// Requiring the first statement avoids pretending to implement general control-flow analysis.
+function hasDominatingNullishRejection(source) {
+  const ast = ts.createSourceFile('mapper.mjs', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  const fn = ast.statements.find(n => ts.isFunctionDeclaration(n) && n.name?.text === 'restPullToListShape');
+  const parameter = fn?.parameters[0]?.name;
+  if (!parameter || !ts.isIdentifier(parameter)) return false;
+  const first = fn.body?.statements[0];
+  if (!first || !ts.isIfStatement(first) || first.elseStatement) return false;
+  const condition = first.expression;
+  if (!ts.isBinaryExpression(condition) || condition.operatorToken.kind !== ts.SyntaxKind.EqualsEqualsToken
+    || !ts.isIdentifier(condition.left) || condition.left.text !== parameter.text
+    || condition.right.kind !== ts.SyntaxKind.NullKeyword) return false;
+  const rejection = ts.isBlock(first.thenStatement) ? first.thenStatement.statements : [first.thenStatement];
+  return rejection.length === 1 && ts.isThrowStatement(rejection[0]);
+}
+
+describe('#4429 whois prevention boundaries', () => {
+  beforeEach(() => { base = mkdtempSync(join(tmpdir(), 'whois-boundary-')); });
+  afterEach(() => { rmSync(base, { recursive: true, force: true }); });
+  afterEach(() => { vi.unstubAllEnvs(); });
+
+  it('structural guard rejects mixed guards and requires dominating nullish rejection', () => {
+    expect(hasDominatingNullishRejection('function restPullToListShape(p) { const s = p && p.state; return p.number; }')).toBe(false);
+    expect(hasDominatingNullishRejection('function restPullToListShape(p) { p.number; if (p == null) throw new TypeError(); }')).toBe(false);
+    expect(hasDominatingNullishRejection('function restPullToListShape(p) { if (p == null) throw new TypeError(); return p.number; }')).toBe(true);
+    expect(hasDominatingNullishRejection(readFileSync(WHOIS_SCRIPT, 'utf8'))).toBe(true);
+  });
+
+  it('rejects nullish mapper inputs and preserves nullable field defaults', () => {
+    expect(() => restPullToListShape(null)).toThrow(TypeError);
+    expect(() => restPullToListShape(undefined)).toThrow(TypeError);
+    expect(restPullToListShape({ number: 1, state: 'open', head: null, title: null, body: null }))
+      .toEqual({ number: 1, state: 'OPEN', headRefName: '', title: '', body: '' });
+  });
+
+  it.each(['a/b/c', 'a/b/', './b', 'a/..', 'a/b?x', 'a/b#x', 'a/b%2fx', 'a/ b'])
+  ('rejects full invalid slug even with fresh outer cache: %s', ghRepo => {
+    const poolDir = join(base, 'pr-cache');
+    mkdirSync(poolDir);
+    const cache = join(poolDir, '.whois-pr-cache.json');
+    const text = JSON.stringify({ ghRepo, fetchedAtMs: 100, prs: [{ number: 1 }] });
+    let calls = 0;
+    const exec = () => { calls++; return '[]'; };
+    vi.stubEnv('WE_GH_ETAG_CACHE', '0');
+    vi.stubEnv('WE_GH_THROTTLE_LOCK_ROOT', join(base, 'throttle'));
+    expect(fetchAllPrs({ ghRepo, poolDir, exec, nowMs: 100 })).toEqual([]);
+    expect(existsSync(cache)).toBe(false);
+    writeFileSync(cache, text);
+    expect(fetchAllPrs({ ghRepo, poolDir, exec, nowMs: 100 })).toEqual([]);
+    expect(readFileSync(cache, 'utf8')).toBe(text);
+    expect(calls).toBe(0);
+  });
+
+  it.each([undefined, '', 'a.b-c_d/e.f-g_h'])('fetches valid or absent repository: %j', ghRepo => {
+    vi.stubEnv('WE_GH_ETAG_CACHE', '0');
+    vi.stubEnv('WE_GH_THROTTLE_LOCK_ROOT', join(base, 'throttle'));
+    const seen = [];
+    const exec = (f, args) => { seen.push(args.at(-1)); return '[{"number":1,"state":"open"}]'; };
+    expect(fetchAllPrs({ ghRepo, exec })).toHaveLength(1);
+    expect(seen).toEqual([`repos/${ghRepo || '{owner}/{repo}'}/pulls?state=all&per_page=100&page=1`]);
+  });
+
+  it('malformed pull list retains all-or-empty evidence', () => {
+    vi.stubEnv('WE_GH_ETAG_CACHE', '0');
+    vi.stubEnv('WE_GH_THROTTLE_LOCK_ROOT', join(base, 'throttle'));
+    let calls = 0;
+    expect(fetchAllPrs({ ghRepo: 'o/r', exec: () => { calls++; return '[{"number":1},null]'; } })).toEqual([]);
+    expect(calls).toBe(1);
   });
 });

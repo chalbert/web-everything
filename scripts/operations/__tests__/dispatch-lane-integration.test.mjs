@@ -21,10 +21,10 @@
  * the store is the REAL one, the directory is a REAL directory, and the corrupt record is a REAL torn file.
  */
 import { describe, expect, it, vi } from 'vitest';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { inFlightDispatchesFor, readTick } from '../dispatch-lane-io.mjs';
+import { inFlightDispatchesFor, readTick, createDispatchObservers } from '../dispatch-lane-io.mjs';
 import { DISPATCH_EFFECT, shapeDispatchRead } from '../dispatch-lane.mjs';
 import { settleDispatchEffect } from '../deliver-item-settle.mjs';
 import { createFileRunStore } from '../run-store.mjs';
@@ -164,5 +164,42 @@ describe('prepare terminal handoff on disk', () => {
       expect(runNode).toHaveBeenCalledTimes(1);
       expect(store.read(run.id).effects[0]).toMatchObject({ key: terminal.key, status: 'applied', result: terminal.result });
     });
+  });
+});
+
+
+import { beginHealAttempt, bindHealAttempt, finishHealAttempt, observeHealAttempt, publishHealAttempt } from '../probation-heal-run.mjs';
+import { observeRun } from '../effect-observer.mjs';
+import { recordOwedWrite, clearOwedWrite } from '../../conveyor/ci-heal-owed.mjs';
+import { countCiHealComments } from '../../conveyor/ci-heal-mark.mjs';
+
+it('xp0lsdi: recovered heal failure persists a resolved finding, never an executor failure eligible for blind replay', async () => {
+  await withRunsDir(async ctx => {
+    const dir = join(ctx.root, '.operations', 'heal-attempts'), owedDir = join(ctx.root, '.operations', 'owed');
+    const comments = [];
+    const attempt = beginHealAttempt({ pr: 3373, headRefOid: 'b98e62d179c5326e64af41809e8b3c1f5ab6d432', sessionSlug: 'ci-heal-3373',
+      runId: 'heal-run', effectKey: 'heal-run#2#0' }, { dir, now: () => '2026-10-01T00:00:00Z' });
+    bindHealAttempt(attempt.attemptId, 'pid:43273', { dir });
+    const run = record('heal-run', 4453);
+    Object.assign(run.effects[0], { handle: 'pid:43273', payload: { launchKind: 'ci-heal', pr: 3373, repo: 'we' }, dispatch: { attemptId: attempt.attemptId } });
+    ctx.store.write(run);
+    const makeObservers = () => createDispatchObservers({ observeHeal: (id, options) => observeHealAttempt(id, { ...options, dir,
+      isPidAlive: () => false, settle: (key, terminal) => finishHealAttempt(key, terminal, { dir,
+        publish: row => publishHealAttempt(row, {
+          readComments: () => comments, post: ({ body }) => comments.push({ body, author: { login: 'web-everything' } }),
+          owe: rec => recordOwedWrite(rec, { dir: owedDir }), clear: rec => clearOwedWrite(rec, { dir: owedDir }),
+        }),
+      }),
+    }) });
+    const result = await observeRun(ctx.store.read('heal-run'), { observers: makeObservers() });
+    expect(result.errors).toEqual([]);
+    expect(result.resolved).toEqual([expect.objectContaining({ status: 'resolved', recordedAs: 'applied' })]);
+    ctx.store.write(result.run);
+    const saved = ctx.store.read('heal-run');
+    expect(saved.effects[0]).toMatchObject({ status: 'applied', result: { outcome: 'executor-failed' }, error: expect.stringContaining('unknown') });
+    expect((await observeRun(saved, { observers: makeObservers() })).resolved).toEqual([]);
+    expect(countCiHealComments(comments)).toBe(1);
+    const completion = JSON.parse(readFileSync(join(dir, 'completions', `ci-heal-${attempt.attemptId}.json`), 'utf8'));
+    expect(completion).toMatchObject({ status: 'done', outcome: 'executor-failed', sessionId: attempt.attemptId });
   });
 });

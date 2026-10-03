@@ -1,3 +1,4 @@
+import { observeHealAttempt } from './probation-heal-run.mjs';
 import { dispatchProviderAvailable } from '../lib/dispatch-provider-availability.mjs';
 import { claudeSpawnAlias, resolvePolicyEffort } from '../lib/dispatch-routing-policy.mjs';
 import { resolvePolicyModel, resolveOperationEffort, resolveOperationRoute, readRoutingPolicy, resolveDispatchRoute as decideDispatchRoute } from '../lib/dispatch-routing-policy-io.mjs';
@@ -1478,9 +1479,14 @@ export function createDispatchSinks({
       let reportedExecutor = null;
       let reportedModel = null;
       let reportedEffort = null;
+      let attemptId = null;
       let handle;
       try {
         handle = await provider({
+          reportAttempt: (id) => { attemptId = id; },
+          headRefOid: payload?.headRefOid,
+          claimOwner: payload?.claimOwner,
+          claimRoot: payload?.claimRoot,
           reportExecutor: (v) => { reportedExecutor = v == null ? null : String(v); },
           reportModel: (v) => { reportedModel = v; },
           reportEffort: (v) => { reportedEffort = v; },
@@ -1574,6 +1580,7 @@ export function createDispatchSinks({
         // (live: the build-daemon dry run printed `routed=claude executed=codex` for #3604, and the operator
         // could not tell which one ran). The recommendation survives as `criteriaRecommendation`, named as one.
         dispatch: {
+          ...(attemptId ? { attemptId } : {}),
           launchKind: payload?.launchKind ?? 'build',
           route,
           executor,
@@ -2544,6 +2551,7 @@ export function resumeSucceeded({ printedId, requestedSessionId, agentsAfter }) 
  */
 export function createDispatchObservers({
   exec = execFileSyncThrottled,
+  observeHeal = observeHealAttempt,
   listAgents = () => defaultListAgents({ exec }),
   listPrs = () => defaultListPrs({ exec }),
   isPidAlive = defaultIsPidAlive,
@@ -2557,6 +2565,9 @@ export function createDispatchObservers({
   return {
     [DISPATCH_EFFECT]: async (entry, ctx) => {
       const handle = String(ctx?.handle ?? entry?.handle ?? '');
+      if (entry?.payload?.launchKind === 'ci-heal' && entry?.dispatch?.attemptId) {
+        return observeHeal(entry.dispatch.attemptId, { handle, pr: entry.payload.pr, repo: entry.payload.repo ?? 'we', ...(isPidAlive === defaultIsPidAlive ? {} : { isPidAlive }), now });
+      }
 
       // ── AXIS 1: THE PR. The only axis that can ever say `succeeded`. ─────────────────────────────────────
       //
