@@ -190,9 +190,15 @@ describe('#4649 real process preflight boundaries', () => {
       // every unexpected subprocess fails, and every async spawn is fatal (no detached child can exist).
       const preload = `import cp from 'node:child_process';
         import { syncBuiltinESMExports } from 'node:module';
+        const gitSubcommandArgs = (args) => {
+          let offset = 0;
+          while (args[offset] === '-c' && typeof args[offset + 1] === 'string' && args[offset + 1].includes('=')) offset += 2;
+          return args.slice(offset);
+        };
         cp.execFileSync = (cmd, args = []) => {
           if (String(args[0]).endsWith('/conveyor/tick-core.mjs')) return JSON.stringify({ decisions: { spawnBuilds: [{ num: '4620', lane: 15 }] }, nextState: {} });
           if (cmd === 'git') {
+            args = gitSubcommandArgs(args);
             if (args.join(' ') === 'rev-parse --show-toplevel') return ${JSON.stringify(f.dir)};
             if (args.join(' ') === 'rev-parse --absolute-git-dir') return ${JSON.stringify(join(f.dir, '.git'))};
             if (args.join(' ') === 'remote get-url origin') return 'fixture-origin';
@@ -202,7 +208,7 @@ describe('#4649 real process preflight boundaries', () => {
           }
           throw new Error('unexpected subprocess: ' + cmd + ' ' + args.join(' '));
         };
-        cp.spawnSync = (cmd, args, opts) => { if (cmd === 'git') return { status: 0, stdout: args[0] === 'symbolic-ref' ? 'main' : args[0] === 'rev-list' ? '0' : '', stderr: '' }; if (cmd === 'gh') return { status: 0, stdout: '[]', stderr: '' }; throw new Error('unexpected sync spawn: ' + cmd); };
+        cp.spawnSync = (cmd, args, opts) => { if (cmd === 'git') { args = gitSubcommandArgs(args); return { status: 0, stdout: args[0] === 'symbolic-ref' ? 'main' : args[0] === 'rev-list' ? '0' : '', stderr: '' }; } if (cmd === 'gh') return { status: 0, stdout: '[]', stderr: '' }; throw new Error('unexpected sync spawn: ' + cmd); };
         cp.spawn = () => { process.stderr.write('UNEXPECTED_DETACHED_SPAWN'); process.exit(91); };
         syncBuiltinESMExports();`;
       const cli = spawnSync(process.execPath, ['--import', `data:text/javascript,${encodeURIComponent(preload)}`,
