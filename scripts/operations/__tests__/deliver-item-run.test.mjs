@@ -183,14 +183,23 @@ describe('#4649 real process preflight boundaries', () => {
     const f = isolated();
     try {
       mkdirSync(f.env.WE_BACKLOG_DIR, { recursive: true });
+      mkdirSync(join(f.dir, '.git'));
       writeFileSync(join(f.env.WE_BACKLOG_DIR, '4620-mixed-locus.md'), `---\nkind: story\nsize: 5\nstatus: open\nscope: ${JSON.stringify(scope)}\n---\n# Mixed locus\n`);
-      // The operation/reader/loader/store are real. Only external planner/GitHub reads are supplied;
+      // The operation/reader/loader/store are real. External planner/GitHub/Git reads are supplied;
+      // freshness observes a current checkout and writes its cache only in the temporary Git directory.
       // every unexpected subprocess fails, and every async spawn is fatal (no detached child can exist).
       const preload = `import cp from 'node:child_process';
         import { syncBuiltinESMExports } from 'node:module';
         cp.execFileSync = (cmd, args = []) => {
           if (String(args[0]).endsWith('/conveyor/tick-core.mjs')) return JSON.stringify({ decisions: { spawnBuilds: [{ num: '4620', lane: 15 }] }, nextState: {} });
-          if (cmd === 'git') return '';
+          if (cmd === 'git') {
+            if (args.join(' ') === 'rev-parse --show-toplevel') return ${JSON.stringify(f.dir)};
+            if (args.join(' ') === 'rev-parse --absolute-git-dir') return ${JSON.stringify(join(f.dir, '.git'))};
+            if (args.join(' ') === 'remote get-url origin') return 'fixture-origin';
+            if (args[0] === 'rev-parse' && args[1] === '--verify') return 'a'.repeat(40);
+            if (args[0] === 'rev-list') return '0';
+            if (args[0] === 'fetch') return '';
+          }
           throw new Error('unexpected subprocess: ' + cmd + ' ' + args.join(' '));
         };
         cp.spawnSync = (cmd, args, opts) => { if (cmd === 'git') return { status: 0, stdout: args[0] === 'symbolic-ref' ? 'main' : args[0] === 'rev-list' ? '0' : '', stderr: '' }; if (cmd === 'gh') return { status: 0, stdout: '[]', stderr: '' }; throw new Error('unexpected sync spawn: ' + cmd); };
@@ -198,10 +207,10 @@ describe('#4649 real process preflight boundaries', () => {
         syncBuiltinESMExports();`;
       const cli = spawnSync(process.execPath, ['--import', `data:text/javascript,${encodeURIComponent(preload)}`,
         'scripts/operations/run.mjs', 'dispatch-lane', '--num=4620', '--json'],
-      { env: f.env, encoding: 'utf8', timeout: 20000 });
+      { env: { ...f.env, WE_OPERATION_ALLOW_STALE: '', WE_DAEMON_MANAGED_CLONE: '' }, encoding: 'utf8', timeout: 20000 });
+      expect(cli.status, cli.stderr).toBe(0);
       const observed = JSON.parse(cli.stdout);
       console.log(JSON.stringify({ probe: '4649-cli-state', exit: cli.status, dispatching: observed.verdict?.dispatching, inFlight: observed.inFlight, stopped: observed.stopped }));
-      expect(cli.status, cli.stderr).toBe(0);
       const output = JSON.parse(cli.stdout);
       expect(output.verdict.dispatching).toBe(false);
       expect(output.findings.read.gates).toContainEqual({ name: 'locus', pass: false, observed: { kind: 'unsupported-locus', keys: ['we', 'plateau-app'] } });
