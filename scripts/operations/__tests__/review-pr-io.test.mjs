@@ -1315,9 +1315,10 @@ describe('#4315 durable referral effects', () => {
       reviewer: mandatoryReferralReviewer('historical'), authorBody: h.state.body,
       attempted: true, referrals: fixture.historical.indexes.map(i => referrals[i]), rulings: [] };
     expect(renderReferralRecord(old).length).toBeGreaterThan(60_000);
-    h.state.comments = [{ url: 'https://github.com/o/r/pull/7#issuecomment-123', body: renderReferralRecord(old) },
+    h.state.comments = [{ url: 'https://github.com/o/r/pull/7#issuecomment-123', body: renderReferralRecord(old), author: { login: 'web-everything' } },
       ...referrals.filter((_, i) => !fixture.historical.indexes.includes(i)).map((f, i) => ({
         body: renderReferralRecord({ ...old, runId: `other-${i}`, reviewer: mandatoryReferralReviewer(`other-${i}`), referrals: [f] }),
+        author: { login: 'web-everything' },
       }))];
     const priorCount = h.state.comments.length;
     const result = await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX);
@@ -1347,8 +1348,8 @@ describe('#4315 durable referral effects', () => {
     earlier.reviewer = mandatoryReferralReviewer(earlier.runId);
     earlier.referrals[0].original.quote = 'different evidence '.repeat(20_000);
     earlier.referrals[0].finding = normalizeFinding(earlier.referrals[0].original);
-    h.state.comments = [{ url: 'https://github.com/o/r/pull/7#issuecomment-123', body: renderReferralRecord(earlier) },
-      { url, body: renderReferralRecord(old) }];
+    h.state.comments = [{ url: 'https://github.com/o/r/pull/7#issuecomment-123', body: renderReferralRecord(earlier), author: { login: 'web-everything' } },
+      { url, body: renderReferralRecord(old), author: { login: 'web-everything' } }];
     h.payload.referrals = [];
     const result = await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX);
     expect(result.pending).toEqual([]);
@@ -1391,7 +1392,7 @@ describe('#4315 durable referral effects', () => {
     const h = harness({ env: { REVIEW_PR_ANTIGRAVITY_REVIEW: '0' } });
     const old = seedReferrals(h, ['judgeAntigravityReview']);
     old.authorBody += 'historical body '.repeat(10_000);
-    h.state.comments = [{ body: renderReferralRecord(old) }];
+    h.state.comments = [{ body: renderReferralRecord(old), author: { login: 'web-everything' } }];
     const result = await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX);
     expect(result.reason).toContain('historical run earlier-run retirement');
     expect(result.pending).toContain('referral-overflow');
