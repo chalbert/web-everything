@@ -1,5 +1,5 @@
 /**
- * @file breaks/ci-heal-spawn-failure-attempt-barrier.mjs — PR #3577 review finding (card xp0lsdi). A CI-heal launch
+ * @file breaks/ci-heal-spawn-failure-attempt-barrier.mjs — PR #3577 review finding (card 4878). A CI-heal launch
  * persists its attempt row (`handle: null`) BEFORE it spawns the wrapper. When the spawn itself threw (EAGAIN,
  * ENOENT, …), nothing settled the row, so every later reconcile tick polled it, got `unresolved` ("unknown
  * CI-heal wrapper handle") and `dispatchCiHeal` held that PR forever — a silently stuck PR with no cap-counted
@@ -25,8 +25,8 @@ const worker = { id: 'soak-worker', provider: 'antigravity', model: 'soak-model'
 export default {
   id: 'ci-heal-spawn-failure-attempt-barrier',
   title: 'a CI-heal launch whose spawn throws leaves a handle-less attempt row that blocks that PR\'s CI-heal forever',
-  card: 'we:backlog/xp0lsdi-ci-heals-routed-to-antigravity-die-without-an-outcome-so-a-r.md (PR #3577 review)',
-  fixedBy: { sha: '5f3be06c0', where: 'lane/card-xp0lsdi', paths: ['scripts/operations/dispatch-providers/probation-worker.mjs', 'scripts/operations/probation-heal-run.mjs'] },
+  card: 'we:backlog/4878-ci-heals-routed-to-antigravity-die-without-an-outcome-so-a-r.md (PR #3577 review)',
+  fixedBy: { sha: '5f3be06c0', where: 'lane/card-4878', paths: ['scripts/operations/dispatch-providers/probation-worker.mjs', 'scripts/operations/probation-heal-run.mjs'] },
   fixPresent(root) {
     try { return /failAttempt/.test(readFileSync(join(root, 'scripts/operations/dispatch-providers/probation-worker.mjs'), 'utf8')); } catch { return false; }
   },

@@ -10,7 +10,7 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 export default {
   id: 'large-queue-slow-already-done',
   title: 'large queue and slow/rate-limited GitHub do not block the planner or multiply calls',
-  card: 'we:backlog/xbkrtik-bound-builder-planning-and-preserve-child-errors.md',
+  card: 'we:backlog/4776-bound-builder-planning-and-preserve-child-errors.md',
   fixedBy: { sha: 'working-tree', where: 'lane-8', paths: ['scripts/readiness/already-done-refresh.mjs'] },
   fixPresent(root) { return existsSync(join(root, 'scripts/readiness/already-done-refresh.mjs')); },
   async run({ log, root = ROOT } = {}) {

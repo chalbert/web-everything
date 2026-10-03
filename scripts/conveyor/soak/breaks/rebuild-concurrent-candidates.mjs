@@ -1,5 +1,5 @@
 /**
- * @file breaks/rebuild-concurrent-candidates.mjs — review finding on PR #2731 (card xa4qo7n, epic #4075/#3383).
+ * @file breaks/rebuild-concurrent-candidates.mjs — review finding on PR #2731 (card 4218, epic #4075/#3383).
  * Once the rebuild's live smoke moved OFF the write lock (`rebuild-smoke-off-lock.mjs`), nothing stopped two
  * sibling daemons sharing ONE clone (the review daemon and the fix-dispatch daemon both call `rebuildClone` at
  * the top of every tick) from running phase 2 — build + smoke a candidate — at the SAME time. Both used one fixed
@@ -31,10 +31,10 @@ const SMOKE_MS = 2_500;
 export default {
   id: 'rebuild-concurrent-candidates',
   title: 'two sibling daemons rebuilding one clone at once deleted each other\'s candidate worktree mid-smoke, so a good build was rejected',
-  card: 'we:backlog/xa4qo7n (epic #4075/#3383) — PR #2731 review finding',
+  card: 'we:backlog/4218 (epic #4075/#3383) — PR #2731 review finding',
   fixedBy: {
-    sha: 'xa4qo7n-daemon-rebuild-offlock-smoke',
-    where: 'lane/xa4qo7n-daemon-rebuild-offlock-smoke',
+    sha: '4218-daemon-rebuild-offlock-smoke',
+    where: 'lane/4218-daemon-rebuild-offlock-smoke',
     paths: ['scripts/lib/daemon-rebuild.mjs'],
   },
   fixPresent(root) {

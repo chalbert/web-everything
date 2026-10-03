@@ -21,7 +21,7 @@ Live on 2026-09-25 (4152 overlay): the review daemon dispatched 7 review jobs in
 Premise re-checked on 2026-10-03 against current main. Two mitigations landed after this card was filed (12:59 ET on 2026-09-25):
 
 - `5a023b396` (#4122, 13:32 ET): `acquire` tries the health-watch free-lane list first (`we:scripts/lane-pool.mjs:2034` (freeList), `we:scripts/lib/free-lane-list.mjs:165` (resolveFreeLaneListPath)).
-- `ab05eb311` (xj2k2pp, 19:09 ET): a waiter on another caller's scan lock now gives up at its own `--wait-ms` with a "lock contention" message (`we:scripts/lane-pool.mjs:2974` (acquirableListCached callerDeadlineMs)), not after 120s+grace.
+- `ab05eb311` (4172, 19:09 ET): a waiter on another caller's scan lock now gives up at its own `--wait-ms` with a "lock contention" message (`we:scripts/lane-pool.mjs:2974` (acquirableListCached callerDeadlineMs)), not after 120s+grace.
 
 **The contention is still live.** The review-job logs in the review daemon clone (`.operations/review-jobs/*.log` under `~/workspace/wev-review-daemon`) hold 94 "lock contention" deferrals and 6 "scan did not finish" deferrals: 5 on 09-25, 28 on 09-28, 64 on 09-29, 1 on 10-01, 2 on 10-02. Latest: `review-3481` at 2026-10-02T13:56:54Z, `acquireMs: 63651`, "no lane within 60000ms … lock contention … NOT necessarily because all 90 lane(s) are held/dirty". The free list was fresh then (published 13:51:51Z, 23 lanes). So the free-list fast path ran out (its entries were up to ~5 min old and taken), and the job fell back to the shared scan.
 

@@ -1,5 +1,5 @@
 /**
- * @file breaks/gh-shim-mid-rebuild.mjs — live break 2, 2026-09-25 08:14 + 09:30 ET (#4075, epic card x0zg44l). The
+ * @file breaks/gh-shim-mid-rebuild.mjs — live break 2, 2026-09-25 08:14 + 09:30 ET (#4075, epic card 4169). The
  * shared GitHub App gh shim (`scripts/lib/gh-app-shim.mjs#buildGhShimSettingsEnv`) wrote ONE machine-wide file
  * (`~/.claude/github-app-token/gh-shim/gh`), baking in the WRITER's own checkout's absolute path to
  * `gh-throttle.mjs`. A dispatched session ("dispatcher B") resolves its gh shim PATH override once, at dispatch

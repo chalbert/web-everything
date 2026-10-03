@@ -1,5 +1,5 @@
 /**
- * @file breaks/short-job-behind-full-suite.mjs — card xkyw1x4 (epic #4075, under #3383). Live 2026-09-25: a fixer's
+ * @file breaks/short-job-behind-full-suite.mjs — card 4200 (epic #4075, under #3383). Live 2026-09-25: a fixer's
  * ~1-minute selected check waited behind 25-minute full suites on the heavy-admission slots, because every heavy
  * job shared ONE first-come-first-served queue (#2692) and any job could take any slot. With two slots, a second
  * full suite took the last free slot and a short check arriving a moment later waited for a whole suite.
@@ -38,8 +38,8 @@ function runJob(cli, pool, kind, cmd, env) {
 export default {
   id: 'short-job-behind-full-suite',
   title: 'a short heavy job (a fixer\'s selected check) waited behind full-suite runs on the heavy-admission slots',
-  card: 'we:backlog/xkyw1x4 (epic #4075)',
-  fixedBy: { sha: 'xkyw1x4', where: 'lane/xkyw1x4-queue-cap-fast-lane', paths: ['scripts/readiness/heavy-admission.mjs', 'scripts/readiness/heavy-queue-projection.mjs'] },
+  card: 'we:backlog/4200 (epic #4075)',
+  fixedBy: { sha: '4200', where: 'lane/4200-queue-cap-fast-lane', paths: ['scripts/readiness/heavy-admission.mjs', 'scripts/readiness/heavy-queue-projection.mjs'] },
   fixPresent(root) {
     try { return /slotOrderFor/.test(readFileSync(join(root, 'scripts/readiness/heavy-admission.mjs'), 'utf8')); } catch { return false; }
   },

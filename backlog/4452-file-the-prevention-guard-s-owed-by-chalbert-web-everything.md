@@ -21,7 +21,7 @@ Idempotency key (do not edit): approval-prevention-key:chalbert/web-everything#2
 
 ## Progress
 
-- Premise check (2026-09-30, against `origin/main` bc9db934c): not delivered. `git log` shows no commit for #4452 / `xwohax9` beyond the JIT-numbering one; the test file's last change is 82e5d7ec5 (#4272), and it still asserts only `action` (`we:scripts/lib/__tests__/pool-leftovers.test.mjs:51`, `:71`) and never `reason`, and never stubs `readLiveCwds`.
+- Premise check (2026-09-30, against `origin/main` bc9db934c): not delivered. `git log` shows no commit for #4452 / `4452` beyond the JIT-numbering one; the test file's last change is 82e5d7ec5 (#4272), and it still asserts only `action` (`we:scripts/lib/__tests__/pool-leftovers.test.mjs:51`, `:71`) and never `reason`, and never stubs `readLiveCwds`.
 - Citation drift: the card cites `:45`, which is now the "age the directory" comment inside the first test (`:44-46`); the actual defect sites are the two assertions at `:51` and `:71`. Scope (`we:scripts/lib/__tests__/pool-leftovers.test.mjs`) is correct as-is.
 
 ## Design

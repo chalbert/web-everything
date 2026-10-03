@@ -78,4 +78,4 @@ No live dirty clone exists now (the 3809 file was hand-restored; 3809 is `resolv
 ## Follow-ups
 
 - A claim that also RENAMES the card file (porcelain `R`/`D` + untracked) is out of scope; it still refuses. File only if seen live.
-- The root cause (a worker writing into its run checkout) is its own card, filed with this one in `a684ab19d` (xak56ki).
+- The root cause (a worker writing into its run checkout) is its own card, filed with this one in `a684ab19d` (4560).
