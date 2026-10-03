@@ -193,6 +193,25 @@ describe('runReconcilePromoteDraftDispatch — stale-green re-verification (#281
   });
 
   describe('defaultReadHeadCheckState — the real per-sha re-read (gh/getRequiredStatusChecks injected)', () => {
+    it.each([
+      ['red', [{ name: 'test', status: 'completed', conclusion: 'failure' }]],
+      ['pending', [{ name: 'test', status: 'in_progress', conclusion: null }]],
+      ['unchecked', []],
+    ])('an unavailable required set refuses fresh %s checks before calling ready', (state, rows) => {
+      const ready = vi.fn();
+      const readHeadCheckState = args => defaultReadHeadCheckState({ ...args,
+        runGh: () => rows.map(row => JSON.stringify(row)).join('\n'),
+        getRequiredChecks: () => ({ checks: [], source: 'unavailable' }) });
+      const result = runReconcilePromoteDraftDispatch({
+        root: '/repo', repo: 'chalbert/plateau-app',
+        reconcile: () => ({ dispatch: [{ kind: 'promote-draft', prNumber: 198, headRefOid: HEAD }], refusals: [] }),
+        provider: { ready }, checkStaleness: FRESH, readHeadCheckState, clearAwaitingCi: NOOP_STATUS,
+      });
+      expect(ready).not.toHaveBeenCalled();
+      expect(result.dispatched).toEqual([]);
+      expect(result.refusals).toEqual([expect.objectContaining({ kind: 'stale-check-refused', checkState: state })]);
+    });
+
     it('asks the commit-statuses endpoint for the exact sha and reduces it against the required set', () => {
       const seenArgv = [];
       const runGh = (argv) => { seenArgv.push(argv); return '{"name":"test","status":"COMPLETED","conclusion":"SUCCESS"}\n'; };
