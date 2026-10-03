@@ -43,3 +43,12 @@ describe('bounded failure diagnostics', () => {
     expect(Buffer.byteLength(JSON.stringify(result))).toBeLessThanOrEqual(16384);
   });
 });
+
+it('normal progress rolling out of the summary does not truncate the failure inventory', () => {
+  const collector = createFailureCollector();
+  collector.push('passed file\n'.repeat(148));
+  collector.push(' FAIL  untouched.test.mjs > times out\nError: Test timed out in 5000ms.\n');
+  expect(collector.finish()).toMatchObject({
+    tests: [{ file: 'untouched.test.mjs', name: 'times out' }], truncated: false,
+  });
+});
