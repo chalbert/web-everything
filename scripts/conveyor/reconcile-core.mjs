@@ -1636,6 +1636,10 @@ export function planReconcile({
     // of those are the existing branches below, unmodified. Only {@link dispatchReviewRow}'s own gate (not this
     // one) keeps a review from firing for either of those two cases.
     if (pr?.isDraft && withPhase.check === 'green') {
+      if (labelNames(pr.labels).includes('review-status:draft-withdrawn')) {
+        refuse('draft', { ...withPhase, why: 'draft PR is withdrawn — explicit release is required before promotion' });
+        continue;
+      }
       dispatch.push({
         ...base, ...withPhase, kind: 'promote-draft',
         why: 'draft PR — every required check is green; promote it to ready for review (draft-first PRs, '
