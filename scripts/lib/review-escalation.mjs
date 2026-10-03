@@ -1961,8 +1961,9 @@ export function shouldReparkForTestTampering({ tampered, netDiffScored, humanCle
  * independence check, unlike `review-set-label.mjs`'s `accepted`/`changes` targets), so nothing stops it from
  * ALSO clearing every stale verdict it supersedes — the same way `review-set-label.mjs#decideSetLabel`'s own
  * targets already clear a stale `changes` on `accepted`, a stale `accepted`/`changes` on `clear-human`, etc.
- * (see that file's docs for the pattern this mirrors). `review:pending` and `review:changes` are ALWAYS
- * replaced — a park is a STRONGER hold than either. `redteam:accepted` goes too, same reasoning as
+ * (see that file's docs for the pattern this mirrors). `review:pending` is replaced, but `review:changes`
+ * is preserved: a send-back is an explicit decision that a fix is owed, even beside a human hold (#3507).
+ * `redteam:accepted` goes too, same reasoning as
  * `review-set-label.mjs`'s `changes`/`rearm` branches: an independent validator's sign-off on a diff a park
  * just declared untrustworthy must not survive to cover a later plain re-accept.
  *
@@ -1986,26 +1987,27 @@ export function shouldReparkForTestTampering({ tampered, netDiffScored, humanCle
  * @returns {{allowed: true, addLabel: string, removeLabels: string[], keepsHuman: true, reason: string}}
  */
 export function decideParkToHuman({ currentLabels = [], keepHumanClearance = false } = {}) {
-  const removeLabels = [REVIEW_LABELS.pending, REVIEW_LABELS.changes, REVIEW_LABELS.redteamAccepted];
+  const removeLabels = [REVIEW_LABELS.pending, REVIEW_LABELS.redteamAccepted];
   if (!keepHumanClearance) removeLabels.push(REVIEW_LABELS.accepted);
   return {
     allowed: true,
     addLabel: REVIEW_LABELS.human,
     removeLabels,
     keepsHuman: true,
-    reason: keepHumanClearance
+    reason: (keepHumanClearance
       ? 'parked to review:human — a live human clearance of this exact head is preserved (#x9xqexm); the '
         + 'hold sits alongside it rather than over it'
-      : 'parked to review:human — every other review:* verdict label replaced (mutual exclusivity; a park is '
-        + 'a hold, not a verdict, so it carries none of its own)',
+      : 'parked to review:human — pending and acceptance labels replaced; a park adds a human hold')
+      + (hasReviewLabel(currentLabels, REVIEW_LABELS.changes)
+        ? '; review:changes preserved — explicit send-back still requires a fix' : ''),
   };
 }
 
 /**
  * we:scripts/lib/review-escalation.mjs#findContradictoryReviewVerdicts — THE CHECK: does this PR carry more
  * than one of the four review:* VERDICT/HOLD labels at once (`pending`, `accepted`, `changes`, `human`)? A
- * healthy PR carries AT MOST ONE — `decideParkToHuman` above and every `review-set-label.mjs#decideSetLabel`
- * target already enforce that going forward; this is the pure DETECTOR a reader (a test, a sweep, a status
+ * send-back may deliberately coexist with a human hold; this detector reports co-presence, not whether
+ * cleanup is safe. This is the pure DETECTOR a reader (a test, a sweep, a status
  * board) uses to flag a PR that predates the fix, or reached a contradictory state some other way. Pure,
  * read-only — it does not say which label is wrong or decide a fix, only that the pair exists (#2766/#2767).
  * @param {Array} labels - the PR's OBSERVED labels (string or `{name}` shape, per `hasReviewLabel`)

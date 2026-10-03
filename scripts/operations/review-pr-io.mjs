@@ -516,6 +516,7 @@ export function createReviewPrSinks({
         if (remove.length || !labelNames(state.labels).includes(plan.addLabel)) {
           labelProvider.setLabels(read.repo, read.pr, { add: plan.addLabel, remove });
         }
+        if (labelNames(state.labels).includes('review:changes')) out(plan.reason);
       };
       const persist = (record) => {
         const body = renderReferralRecord(record);

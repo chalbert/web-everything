@@ -2352,12 +2352,12 @@ describe('#xmnl36p — an automated re-score never revokes an operator clearance
         .toEqual([REVIEW_LABELS.accepted, REVIEW_LABELS.changes].sort());
     });
 
-    it('AFTER — decideParkToHuman replaces every other review:* verdict when it parks to human', () => {
+    it('AFTER — decideParkToHuman clears pending and acceptance when it parks to human', () => {
       const decision = decideParkToHuman({ currentLabels: LIVE_2767_LABELS, keepHumanClearance: false });
       expect(decision.allowed).toBe(true);
       expect(decision.addLabel).toBe(REVIEW_LABELS.human);
       expect(decision.removeLabels).toEqual(expect.arrayContaining([
-        REVIEW_LABELS.accepted, REVIEW_LABELS.pending, REVIEW_LABELS.changes, REVIEW_LABELS.redteamAccepted,
+        REVIEW_LABELS.accepted, REVIEW_LABELS.pending, REVIEW_LABELS.redteamAccepted,
       ]));
       // Simulate applying the decision (add + remove) the same way the caller does, then re-check: the
       // resulting label set is no longer contradictory — this is the live proof the fix actually closes #2767's
@@ -2377,8 +2377,23 @@ describe('#xmnl36p — an automated re-score never revokes an operator clearance
       expect(decision.removeLabels).not.toContain(REVIEW_LABELS.accepted);
       // …but still replaces the labels no sanctioned writer ever leaves standing beside a human hold.
       expect(decision.removeLabels).toEqual(expect.arrayContaining([
-        REVIEW_LABELS.pending, REVIEW_LABELS.changes, REVIEW_LABELS.redteamAccepted,
+        REVIEW_LABELS.pending, REVIEW_LABELS.redteamAccepted,
       ]));
+    });
+
+    it.each([false, true])('preserves a send-back beside review:human (keepHumanClearance:%s)', keepHumanClearance => {
+      const labels = [REVIEW_LABELS.human, REVIEW_LABELS.changes];
+      const decision = decideParkToHuman({ currentLabels: labels, keepHumanClearance });
+      expect(decision.removeLabels).not.toContain(REVIEW_LABELS.changes);
+      expect(labels.filter(l => !decision.removeLabels.includes(l))).toEqual(labels);
+      expect(decision.reason).toContain('review:changes preserved');
+    });
+
+    it('replaces review:pending with review:human', () => {
+      const labels = [REVIEW_LABELS.pending];
+      const decision = decideParkToHuman({ currentLabels: labels });
+      expect([...labels.filter(l => !decision.removeLabels.includes(l)), decision.addLabel])
+        .toEqual([REVIEW_LABELS.human]);
     });
 
     it('is ALWAYS allowed — a park is the drain protecting itself, never a refusable verdict', () => {
@@ -2424,6 +2439,14 @@ describe('#xmnl36p — an automated re-score never revokes an operator clearance
         currentLabels: LIVE_2767_LABELS, humanClearedSha: 'aaa1111', headSha: 'aaa1111', fetchOk: true,
       });
       expect(r).toEqual({ heal: false, reason: 'genuine-clearance' });
+    });
+
+    it('healing stale acceptance preserves a co-present send-back', () => {
+      const labels = [...LIVE_2767_LABELS, REVIEW_LABELS.changes];
+      const result = decideContradictoryVerdictHeal({ currentLabels: labels, headSha: LIVE_2767_HEAD, fetchOk: true });
+      expect(result.heal).toBe(true);
+      expect(result.decision.removeLabels).toContain(REVIEW_LABELS.accepted);
+      expect(result.decision.removeLabels).not.toContain(REVIEW_LABELS.changes);
     });
 
     it('a STALE clearance (older head) is NOT genuine — heals', () => {

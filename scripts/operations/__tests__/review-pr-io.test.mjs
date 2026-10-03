@@ -1018,7 +1018,7 @@ describe('#xu2pp2m — `--cwd` decides which checkout the DIFF is read from', ()
 
 describe('#4315 durable referral effects', () => {
   function harness({ result = 'not-real', failure } = {}) {
-    const head = 'a'.repeat(40), trace = [];
+    const head = 'a'.repeat(40), trace = [], lines = [];
     let posts = 0;
     const state = { headRefOid: head, body: '<!-- authored-by-actor: author -->', comments: [], labels: ['review:pending'] };
     const payload = { read: { repo: 'o/r', pr: 7, title: 'review', body: state.body, netBasis: { rev: head },
@@ -1048,9 +1048,37 @@ describe('#4315 durable referral effects', () => {
         })) } };
     });
     const make = () => createReviewPrSinks({ root, labelProvider: provider, referralJudge: judge,
-      mirrorReferral: record => trace.push(`mirror:${record.attempted}`), out: () => {}, cardReadable: () => failure !== 'card' });
-    return { state, trace, payload, judge, make, provider };
+      mirrorReferral: record => trace.push(`mirror:${record.attempted}`), out: line => lines.push(line), cardReadable: () => failure !== 'card' });
+    return { state, trace, lines, payload, judge, make, provider };
   }
+  it.each(['pending', 'human-and-changes'])('parks with live %s labels without consuming a send-back', async initial => {
+    const h = harness({ failure: 'judge' });
+    if (initial === 'human-and-changes') h.state.labels = ['review:human', 'review:changes'];
+    const result = await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX);
+    expect(result.pending).toHaveLength(1);
+    expect(h.state.labels).toEqual(initial === 'pending' ? ['review:human'] : ['review:human', 'review:changes']);
+    expect(h.lines.filter(line => line.includes('review:changes preserved'))).toHaveLength(initial === 'pending' ? 0 : 1);
+  });
+
+  it('replays #3507: a send-back during the in-flight review survives its pending-referral park', async () => {
+    const h = harness();
+    h.state.labels = ['review:human']; // 02:02:37Z: the run starts before the send-back.
+    h.payload.read.labels = [...h.state.labels];
+    let finishJudge;
+    h.judge.mockImplementationOnce(() => new Promise(resolve => { finishJudge = resolve; }));
+    const running = h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX);
+    expect(h.judge).toHaveBeenCalledTimes(1);
+    // 02:02:39Z: --to=changes lands while the referral judge is still running.
+    h.provider.setLabels('o/r', 7, { add: 'review:changes', remove: [] });
+    h.state.comments.push({ body: '🔁 review — changes requested' });
+    finishJudge({ timedOut: true }); // 02:08:37Z: pending referrals park the run.
+    const result = await running;
+    expect(result.pending).toHaveLength(1);
+    expect(h.state.labels).toEqual(['review:human', 'review:changes']);
+    expect(h.trace.slice(h.trace.indexOf('label:review:changes') + 1)).toContain('read');
+    expect(h.lines.filter(line => line.includes('review:changes preserved'))).toHaveLength(1);
+  });
+
   it('a head that moves mid-run leaves labels and comments untouched and is retried against the new head', async () => {
     const h = harness({ failure: 'changed-head' });
     await expect(h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX)).rejects.toThrow(/reviewed head changed/);
