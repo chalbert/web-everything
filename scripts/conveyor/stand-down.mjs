@@ -262,7 +262,7 @@ const bodyOf = (c) => (typeof c === 'string' ? c : c?.body);
 
 /**
  * we:scripts/conveyor/stand-down.mjs#AUTOMATION_LOGINS — the GitHub login(s) this repo's own conveyor
- * automation posts durable marker comments under. CONFIRMED LIVE (xaer296 follow-up, `chalbert/web-everything
+ * automation posts durable marker comments under. CONFIRMED LIVE (xaer296 follow-up, `web-everything/web-everything
  * #2549`, 2026-09-24): every durable marker this repo's own tooling posts (`stand-down.mjs`,
  * `advisory-fix-mark.mjs`, `rearm-review.mjs`, `conflict-fix-mark.mjs`, the parked-PR conflict watch, …) is
  * authored by `web-everything` — but GitHub's own `viewerDidAuthor` flag ("did the CURRENT caller write this")

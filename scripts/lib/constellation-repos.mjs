@@ -4,7 +4,7 @@
  * A parked PR can live in any of the constellation repos. Two vocabularies name a repo and they are NOT the same:
  *   • the internal repo KEY — `we` / `frontierui` / `plateau-app` — used everywhere in-process (the ledger subject
  *     `${key}#${pr}`, the discovered-PR `repo` field, the review reporting).
- *   • the gh SLUG — `chalbert/web-everything` / `chalbert/frontierui` / `chalbert/plateau-app` — passed to `gh --repo`.
+ *   • the gh SLUG — `web-everything/web-everything` / `frontier-ui/frontierui` / `plateauapp/plateau-app` — passed to `gh --repo`.
  * A tool that parses a `--repo=<slug>` flag but hard-codes the key (the #2830 review's M3 defect: `--repo=…frontierui`
  * read FrontierUI but emitted `repo: 'we'`, so the ledger subject pointed at an unrelated WE PR) crosses the two
  * silently. This module is the ONE mapping between them, so no consumer keeps its own key literal.
@@ -30,9 +30,9 @@
  *  caller must never derive a key from a basename by hand. Frozen — the single source both the convergence
  *  workflow and the scheduled runner read (never a second copy). */
 export const CONSTELLATION_REPOS = Object.freeze({
-  we: { slug: 'chalbert/web-everything', slugTag: '', path: '', dirs: ['web-everything', 'webeverything'] },
-  frontierui: { slug: 'chalbert/frontierui', slugTag: 'fui', path: '$HOME/workspace/frontierui', dirs: ['frontierui'] },
-  'plateau-app': { slug: 'chalbert/plateau-app', slugTag: 'pa', path: '$HOME/workspace/plateau-app', dirs: ['plateau-app'] },
+  we: { slug: 'web-everything/web-everything', slugTag: '', path: '', dirs: ['web-everything', 'webeverything'] },
+  frontierui: { slug: 'frontier-ui/frontierui', slugTag: 'fui', path: '$HOME/workspace/frontierui', dirs: ['frontierui'] },
+  'plateau-app': { slug: 'plateauapp/plateau-app', slugTag: 'pa', path: '$HOME/workspace/plateau-app', dirs: ['plateau-app'] },
 });
 
 /**

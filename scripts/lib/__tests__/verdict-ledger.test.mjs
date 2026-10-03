@@ -30,7 +30,7 @@ import { lockDirFor, makeLockEntry } from '../../readiness/file-locks.mjs';
 import { buildRows } from '../../review-ledger-check.mjs';
 import { ROUND_VERDICTS, reviewRoundsFromVerdictLedger, owedFromLedgerVerdict } from '../../pr-status.mjs';
 
-const REPO = 'chalbert/web-everything';
+const REPO = 'web-everything/web-everything';
 const AT = '2026-08-10T12:00:00.000Z';
 
 /** #3329 — the BEARING subset, DERIVED from the module's own two exports rather than listed here. A local

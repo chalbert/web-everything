@@ -198,7 +198,7 @@ export function parseInfraStore(text) {
       ref: e.ref != null ? String(e.ref) : null,
       sha: e.sha != null ? String(e.sha) : null,
       base: e.base != null ? String(e.base) : 'main',
-      // repo slug (e.g. "chalbert/plateau-app") — which repo the pushed ref lives in. Absent → the WE repo (the
+      // repo slug (e.g. "plateauapp/plateau-app") — which repo the pushed ref lives in. Absent → the WE repo (the
       // single-locus common case). Carried so a cross-locus couple's impl-half block is never resumed against the
       // WRONG repo (the resume guards on it) and the shape is couple-ready (#2659 review, finding 2).
       repo: e.repo != null ? String(e.repo) : null,

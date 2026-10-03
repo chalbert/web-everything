@@ -17,7 +17,7 @@ import {
 } from '../pr-snapshot.mjs';
 import { prSnapshotEnabled, markPrSnapshotDirty, repoFromGhArgs, snapshotPath, PR_SNAPSHOT_VERSION } from '../pr-snapshot-store.mjs';
 
-const REPO = 'chalbert/web-everything';
+const REPO = 'web-everything/web-everything';
 const PRS = Array.from({ length: 14 }, (_, i) => ({
   number: 100 + i, title: `t${i}`, body: `b${i}`, url: `u${i}`, isDraft: false, createdAt: 'c', updatedAt: 'u',
   headRefName: `lane/x${i}`, headRefOid: `abc${i}`, baseRefName: 'main', mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN',

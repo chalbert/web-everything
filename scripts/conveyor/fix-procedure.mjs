@@ -4,7 +4,7 @@
  * @description THE FIX PROCEDURE every fixer follows (operator-approved 2026-09-27): a durable per-PR FIX CLAIM
  *   taken with `fix-begin` and released with `fix-end`, so exactly one author repairs a PR at a time.
  *
- * LIVE INCIDENT (chalbert/web-everything PR #2811). The daemon fixer `fix-2811` was repairing the PR while an
+ * LIVE INCIDENT (web-everything/web-everything PR #2811). The daemon fixer `fix-2811` was repairing the PR while an
  * orchestrator worker (not a daemon session) pushed two commits to the SAME lane ref. Nothing told either author
  * the other existed. The fixer saw a "concurrent author", saved its repair on a side branch, and posted a
  * TERMINAL stand-down ("a human clears the marker") whose reason text even named the wrong cause ("a genuine

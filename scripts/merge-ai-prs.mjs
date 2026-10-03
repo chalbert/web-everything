@@ -91,7 +91,7 @@
  *   node scripts/merge-ai-prs.mjs --label=ready-to-merge --no-drain-lease  # escape hatch: skip the whole-process lease entirely (tests / break-glass)
  *   node scripts/merge-ai-prs.mjs --label=ready-to-merge # #2257/#2287 — the ONE /drain sweeps ALL 3 constellation repos BY DEFAULT (WE+frontierui+plateau-app), one global blockedBy cascade
  *   node scripts/merge-ai-prs.mjs --label=ready-to-merge --this-repo # #2287 — opt OUT: scope to the cwd repo only (a deliberately single-repo drain)
- *   node scripts/merge-ai-prs.mjs --repos=chalbert/frontierui,chalbert/plateau-app # sweep an explicit repo set (comma-separated owner/name slugs)
+ *   node scripts/merge-ai-prs.mjs --repos=frontier-ui/frontierui,plateauapp/plateau-app # sweep an explicit repo set (comma-separated owner/name slugs)
  *
  * MULTI-REPO (#2257/#2287 — the single /drain lander sweeps all 3 constellation repos BY DEFAULT). Neither
  * `--repos` nor `--this-repo` → the constellation (self's owner × web-everything/frontierui/plateau-app, self
@@ -487,7 +487,7 @@ export function isRequiredCheckFailed(pr, requiredCheck = 'test') {
  * running yet is neither, and a caller that folds "not green" into "must still be failed" misreads a check
  * still in flight on the CURRENT head as a concluded failure.
  *
- * LIVE INCIDENT this closes, 2026-09-26/27 (chalbert/web-everything): `main` went red then green, the
+ * LIVE INCIDENT this closes, 2026-09-26/27 (web-everything/web-everything): `main` went red then green, the
  * mechanical rebase (`we:scripts/conveyor/ci-red-recovery-watch.mjs`) rebased each stuck PR onto the new tip
  * and re-triggered CI, and every one of them still carried a STALE `ci:failed` label from before the rebase.
  * `we:scripts/progress-board.mjs#classifyPr`'s own `ci:failed`-label fallback branch read
@@ -2638,7 +2638,7 @@ export function buildMergeTraceReason({ headSha = null, caller = 'drain', sessio
  * #4138 — the `drainReasonMarker` kind for a PR `retargetStackedPrs` (`we:scripts/lib/pr-merge-gate.mjs`,
  * #3383) could NOT retarget before its base branch is deleted by the merge that is about to happen. GitHub's
  * own base-branch-delete cascade closes such a PR moments later with NO comment of its own (confirmed live:
- * chalbert/web-everything#2578, closed 2026-09-24 21:44:43Z by `web-everything[bot]`, zero comment on either
+ * web-everything/web-everything#2578, closed 2026-09-24 21:44:43Z by `web-everything[bot]`, zero comment on either
  * of its two closes) — a silent close is exactly the #4138 gap. `retargetStackedPrs` already retargets the
  * common case before the delete; this covers its residual best-effort failure (the listing/edit itself
  * errored), where the close is about to happen anyway and the PR would otherwise carry no explanation at all.
@@ -2653,7 +2653,7 @@ export const STACKED_BASE_CLOSE_KIND = 'stacked-base-close';
  * @returns {string}
  */
 export function buildStackedBaseCloseReason({ headRef = 'its base branch' } = {}) {
-  return `this PR's base branch (\`${headRef}\`) is about to be deleted by another PR landing, and an attempt to retarget this PR onto the default branch first did NOT succeed. GitHub will likely close this PR automatically as a result — that closure is NOT a merge/content decision about this PR. Once the delete has happened, GitHub permits neither a retarget nor a reopen on it (verified live recovering chalbert/web-everything#2578), so recovery is: re-target this PR's branch onto the default branch on a fresh PR, or ask an operator to run the #3383 recovery path (#3383/#4138).`;
+  return `this PR's base branch (\`${headRef}\`) is about to be deleted by another PR landing, and an attempt to retarget this PR onto the default branch first did NOT succeed. GitHub will likely close this PR automatically as a result — that closure is NOT a merge/content decision about this PR. Once the delete has happened, GitHub permits neither a retarget nor a reopen on it (verified live recovering web-everything/web-everything#2578), so recovery is: re-target this PR's branch onto the default branch on a fresh PR, or ask an operator to run the #3383 recovery path (#3383/#4138).`;
 }
 
 /**
@@ -2848,7 +2848,7 @@ const CONSTELLATION_REPO_NAMES = ['web-everything', 'frontierui', 'plateau-app']
 export function resolveRepos({ repos, singleRepo, self } = {}) {
   if (typeof repos === 'string' && repos.trim()) {
     // #xc7p3q9 (R10) — NORMALIZE every `--repos` entry to `owner/name`. A short-name `--repos=frontierui` otherwise
-    // yields a bogus `frontierui` alongside the canonical `chalbert/frontierui`: its listing throws, and (pre-R3)
+    // yields a bogus `frontierui` alongside the canonical `frontier-ui/frontierui`: its listing throws, and (pre-R3)
     // latched `contextComplete:false` permanently. Prefix the local owner when an entry carries no `/`.
     const owner = self && self.includes('/') ? self.split('/')[0] : null;
     const norm = (s) => (s.includes('/') || !owner) ? s : `${owner}/${s}`;
@@ -2885,7 +2885,7 @@ export function resolveContextRepos(repos, self) {
 }
 
 /**
- * #2263 — the sibling-clone DIRECTORY NAME for a constellation repo slug (e.g. `chalbert/frontierui` →
+ * #2263 — the sibling-clone DIRECTORY NAME for a constellation repo slug (e.g. `frontier-ui/frontierui` →
  * `frontierui`), so the local-only rebase-drop plumbing (#2198) can be routed through THAT repo's own clone
  * instead of being left as a `skipped-remote` skip. Pure. `null` for a repo outside the known constellation
  * (nothing to route to — unchanged legacy skip). Whether that sibling clone actually EXISTS is a runtime
@@ -4156,7 +4156,7 @@ async function runCli() {
           }
         }
       } else {
-        // #xg790dh-follow-up (epic #3383/#4075) — LIVE INCIDENT 2026-09-26, PR #2748 (chalbert/web-everything):
+        // #xg790dh-follow-up (epic #3383/#4075) — LIVE INCIDENT 2026-09-26, PR #2748 (web-everything/web-everything):
         // an otherwise fully-AI PR whose long-lived branch had absorbed the drain's OWN bookkeeping commits
         // (`drain: resolve #NNNN on land …` / `drain: JIT-number …` / `drain: rebase … onto …`) reads
         // `ciLifecycleCertified: false` here — `isAiGeneratedPr` does not (yet — see `we:scripts/lib/
@@ -5442,7 +5442,7 @@ async function runCli() {
           // (`postMergeTrace()`, called only from a success path below): this used to post the comment
           // right here, UNCONDITIONALLY, before the merge write even ran — so a PR whose merge attempt then
           // failed (a real conflict, `gh pr merge` refusing) permanently carried a false "landed head ... —
-          // merged by drain" claim while the PR sat OPEN. Confirmed live on chalbert/web-everything#2596,
+          // merged by drain" claim while the PR sat OPEN. Confirmed live on web-everything/web-everything#2596,
           // 2026-09-24: the trace posted at 23:53Z while the PR stayed OPEN/CONFLICTING. The READ stays eager
           // (it still names the exact commit this pass is about to attempt); only the write moved.
           // xvzc4v4 advisory fix — the SHA is the one revalidation just pinned (fresh `headRefOid` == the head the
@@ -5548,7 +5548,7 @@ async function runCli() {
           // PR never carries a "landed head ... — merged by drain" claim it did not earn. The failure is
           // still fully reported: `failedMerges` below drives both the per-pass stderr line and the sweep's
           // own JSON `failed` array (exit 2 only when nothing landed), which is what a false-positive trace
-          // comment used to silently paper over (confirmed live on chalbert/web-everything#2596, 2026-09-24).
+          // comment used to silently paper over (confirmed live on web-everything/web-everything#2596, 2026-09-24).
           const cc = remaining.find((x) => sameCand(x, c)); if (cc) cc.decision = 'skip'; // stays blocking its dependents; not retried this pass
           noteSplit(`merge failed: ${detail}`);
           // #2198 — a PR we JUST rebuilt (rebase-drop) has a new head, so CI (`test`) is re-running; an immediate

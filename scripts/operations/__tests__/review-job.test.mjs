@@ -21,7 +21,7 @@ import { deriveReviewStatus, tagReviewStatus } from '../../conveyor/review-statu
 import { defaultReadAgents } from '../../conveyor/reconcile-pass.mjs';
 import { repoProfile } from '../../lib/repo-profile.mjs';
 
-const REPO = 'chalbert/web-everything';
+const REPO = 'web-everything/web-everything';
 // Landing-freeze fix (lane-leftover-reclaim) — `we`'s lane-pool `--repo=` value is now ALWAYS an absolute path
 // (see `repo-profile.mjs`'s own docblock: the literal `.` broke for a dispatched session, whose cwd is a
 // scratch directory outside the checkout, not the checkout itself).
@@ -344,9 +344,9 @@ describe('x6n7c2p required checks before review — fresh dispatch boundary', ()
     expect(readJobRecord('review-3432', dir) !== null).toBe(state === 'green');
     expect(spawns).toBe(state === 'green' ? 1 : 0);
     expect(Boolean(out.skipped)).toBe(state !== 'green');
-    expect(reads[0]).toEqual(['head', { repo: 'chalbert/web-everything', pr: 3432 }]);
-    expect(reads[1]).toEqual(['required', { repo: 'chalbert/web-everything', ttlMs: 0 }]);
-    if (!['stale-cache', 'fallback'].includes(state)) expect(reads[2]).toEqual(['checks', { repo: 'chalbert/web-everything', headSha }]);
+    expect(reads[0]).toEqual(['head', { repo: 'web-everything/web-everything', pr: 3432 }]);
+    expect(reads[1]).toEqual(['required', { repo: 'web-everything/web-everything', ttlMs: 0 }]);
+    if (!['stale-cache', 'fallback'].includes(state)) expect(reads[2]).toEqual(['checks', { repo: 'web-everything/web-everything', headSha }]);
     if (state !== 'green') expect(out.headSha).toBe(headSha);
   });
 });

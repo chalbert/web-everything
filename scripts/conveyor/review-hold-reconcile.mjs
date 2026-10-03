@@ -8,7 +8,7 @@
  *   opportunity to improve our product, never as a problem that needs manual intervention"), the cleanup is a
  *   mechanical pass, not a hand-run `gh pr edit`.
  *
- * TWO INDEPENDENT INVARIANTS, ONE SWEEP (they were both live on chalbert/web-everything on 2026-09-24, and both
+ * TWO INDEPENDENT INVARIANTS, ONE SWEEP (they were both live on web-everything/web-everything on 2026-09-24, and both
  * are "a review:* label describing a state that no longer holds"):
  *
  *   1. AT MOST ONE review:* HOLD LABEL. `review:human` is itself a hold — a gate-self PR needs no `review:pending`

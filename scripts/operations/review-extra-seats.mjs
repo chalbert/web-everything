@@ -4,7 +4,7 @@ import { providerQuotaHold, QUOTA_COOLOFF_MS, CODEX_QUOTA_FULL_PERCENT } from '.
  * @file scripts/operations/review-extra-seats.mjs
  * @description #4194 (epic #3383, delivery-plan track A2) — RUN THE ADDED NON-CLAUDE REVIEW SEATS FOR ONE PR.
  *
- *   node scripts/operations/review-extra-seats.mjs run --pr=1234 --repo=chalbert/web-everything \
+ *   node scripts/operations/review-extra-seats.mjs run --pr=1234 --repo=web-everything/web-everything \
  *     --lane=<the review job's lane> --loop-json=<review-loop-cli --json output file>
  *
  * WHAT IT ADDS. The review job (`we:scripts/operations/review-job.mjs`) runs Claude's mandatory seats through
