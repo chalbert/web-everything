@@ -22,8 +22,20 @@ describe('fresh review CI IO', () => {
     expect(readReviewCiGate(fixture({ readRequired: () => ({ source, checks: ['custom'] }) })))
       .toMatchObject({ allowed: true, source });
   });
-  it.each(['stale-cache', 'fallback', 'unavailable', undefined])('refuses untrusted source %s', source => {
+  it.each(['fallback', 'unavailable', undefined])('refuses untrusted source %s', source => {
     expect(readReviewCiGate(fixture({ readRequired: () => ({ source, checks: ['custom'] }) }))).toMatchObject({ allowed: false, reason: 'untrusted-required-set' });
+  });
+  it.each([0, 60_000, 24 * 60 * 60_000])('allows stale cache aged %s ms and reports its age', cacheAgeMs => {
+    const result = readReviewCiGate(fixture({ readRequired: () => ({ source: 'stale-cache', checks: ['custom'], cacheAgeMs }) }));
+    expect(result).toMatchObject({ allowed: true, source: 'stale-cache', cacheAgeMs });
+    expect(result.reason).toContain(`cache-age-ms=${cacheAgeMs}`);
+  });
+  it.each([undefined, NaN, Infinity, -1, '1000', 24 * 60 * 60_000 + 1, 2 * 24 * 60 * 60_000])('refuses stale cache with invalid or expired age %s', cacheAgeMs => {
+    const io = fixture({ readRequired: () => ({ source: 'stale-cache', checks: ['custom'], cacheAgeMs }) });
+    const result = readReviewCiGate(io);
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toContain('untrusted-required-set');
+    expect(io.readChecks).not.toHaveBeenCalled();
   });
   it.each(['readHead', 'readRequired', 'readChecks'])('fails closed on %s errors', key => {
     expect(readReviewCiGate(fixture({ [key]: () => { throw new Error('offline'); } }))).toMatchObject({ allowed: false, reason: 'unreadable-ci' });
@@ -40,7 +52,7 @@ it.each([198, 199])('replays Plateau PR #%s with protection unavailable and test
   const dir = mkdtempSync(join(tmpdir(), 'we-review-ci-declared-'));
   try {
     const readRequired = args => getRequiredStatusChecks({ ...args, cachePath: join(dir, 'cache.json'),
-      readChecks: () => { throw new Error('Upgrade to GitHub Pro or make this repository public to enable this feature. (HTTP 403)'); } });
+      readChecks: () => { throw new Error('Resource not accessible by integration (HTTP 403)'); } });
     const checks = ['test', 'e2e'].map(name => ({ name, status: 'completed', conclusion: 'success' }));
     const io = fixture({ repo: 'chalbert/plateau-app', pr, readRequired, readChecks: () => checks });
     expect(readReviewCiGate(io)).toMatchObject({ allowed: true, source: 'declared', headSha });
@@ -86,4 +98,28 @@ it.each([
     expect(out.allowed).toBe(false);
     expect(out.affected).toContainEqual({ name: 'daemon-soak', reason: at < soakStarted ? 'missing' : 'failure' });
   }
+});
+
+it.each([
+  ['Resource not accessible by integration (HTTP 403)', 60_000, true, 'declared'],
+  ['offline', 60_000, true, 'stale-cache'],
+  ['offline', 24 * 60 * 60_000, true, 'stale-cache'],
+  ['offline', 2 * 24 * 60 * 60_000, false, 'stale-cache'],
+])('replays WE protection failure %s with cache age %s', (message, age, allowed, source) => {
+  const dir = mkdtempSync(join(tmpdir(), 'we-review-ci-cache-'));
+  try {
+    const cachePath = join(dir, 'cache.json');
+    const repo = 'chalbert/web-everything';
+    const names = ['test', 'smoke', 'daemon-soak'];
+    getRequiredStatusChecks({ repo, cachePath, now: 1000, readChecks: () => names });
+    const io = fixture({ repo,
+      readRequired: args => getRequiredStatusChecks({ ...args, cachePath, now: 1000 + age,
+        readChecks: () => { throw new Error(message); } }),
+      readChecks: () => names.map(name => ({ name, status: 'completed', conclusion: 'success' })),
+    });
+    expect(readReviewCiGate(io)).toMatchObject({ allowed, source });
+    if (allowed) {
+      expect(readReviewCiGate({ ...io, readChecks: () => [] }).allowed).toBe(false);
+    }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });

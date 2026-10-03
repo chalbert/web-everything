@@ -28,22 +28,24 @@
  * DEGRADATION, on the same "never lose the read" principle `we:scripts/progress-board.mjs` documents: a fresh
  * live fetch wins when available; a live fetch that fails falls back to the last cache written (even stale —
  * a branch-protection change is rare, so a day-old required set is still far more accurate than guessing);
- * with no cache at all, only that repo's declared set is eligible as a fallback. A plan-feature 403 is
- * cached for the normal TTL as `declared`, avoiding a doomed request on every call. Other failures still
- * retry. An undeclared repo returns `unavailable` with []; the shared check reducer then evaluates observed
+ * a protection 403/404 instead selects the repo's declared policy, cached for the normal TTL as `declared`.
+ * Other failures still retry and prefer the cache, with its original age exposed to admission gates.
+ * With no cache, failures return `fallback` for a declared repo; undeclared repos return [] with `fallback`
+ * on 403/404 or `unavailable` otherwise. The shared check reducer then evaluates observed
  * CI checks, retaining red/pending/unchecked evidence rather than treating an empty required set as green.
  * Cache entries coexist by repo@branch; legacy single-entry sidecars are migrated on the next write.
  */
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { resolvePersonalRouteEnabled, runGhCliPassthrough } from './gh-throttle.mjs';
 import { CONSTELLATION_REPOS } from './constellation-repos.mjs';
 
 /**
  * The required set as confirmed live on 2026-09-26 (`gh api repos/chalbert/web-everything/branches/main/
- * protection --jq .required_status_checks.contexts`). Used ONLY when a live fetch fails AND no cache (even a
- * stale one) exists — see this file's header. Deliberately NOT frozen-and-forgotten as the source of truth:
- * a real branch-protection change is picked up on the next successful live fetch regardless of this constant.
+ * protection --jq .required_status_checks.contexts`). Used as WE's declared policy on protection 403/404,
+ * or as an untrusted fallback for other failures when no cache exists. A successful live fetch always wins,
+ * so a real branch-protection change is picked up on the next successful read regardless of this constant.
  */
 export const FALLBACK_REQUIRED_STATUS_CHECKS = Object.freeze(['test', 'smoke', 'daemon-soak']);
 
@@ -61,10 +63,9 @@ export const DECLARED_REQUIRED_STATUS_CHECKS = Object.freeze({
 
 const DEFAULT_CACHE_TTL_MS = 15 * 60_000;
 
-function protectionUnavailableOnPlan(error) {
+function protectionAccessDenied(error) {
   const message = `${error?.message ?? ''}\n${error?.stderr ?? ''}`;
-  return /\b403\b/.test(message)
-    && /Upgrade to GitHub Pro or make this repository public to enable this feature/i.test(message);
+  return /\b(?:403|404)\b/.test(message);
 }
 
 /** Where the cache sidecar lives — mirrors `we:scripts/progress-board.mjs#cachePathFor`'s own convention. */
@@ -85,11 +86,21 @@ export function defaultCachePath() {
  * @returns {string[]}
  */
 export function defaultReadRequiredStatusChecks({ repo, branch = 'main' } = {}) {
-  const out = execFileSync(
-    'gh',
-    ['api', `repos/${repo || '{owner}/{repo}'}/branches/${branch}/protection`, '--jq', '.required_status_checks.contexts'],
-    { encoding: 'utf8', timeout: 15_000, stdio: ['ignore', 'pipe', 'pipe'] },
-  );
+  const args = ['api', `repos/${repo || '{owner}/{repo}'}/branches/${branch}/protection`, '--jq', '.required_status_checks.contexts'];
+  const opts = { encoding: 'utf8', timeout: 15_000, stdio: ['ignore', 'pipe', 'pipe'] };
+  let out;
+  if (resolvePersonalRouteEnabled()) {
+    // Personal routing lives in the CLI read path, not runGhSync. Keep the reader's timeout and piped IO.
+    const result = runGhCliPassthrough(args, {
+      spawn: (bin, argv, spawnOpts) => spawnSync(bin, argv, { ...spawnOpts, ...opts }),
+    });
+    if (result.status !== 0 || result.deferred) {
+      throw Object.assign(new Error('required-status-checks: protection read failed'), { stderr: result.stderr });
+    }
+    out = String(result.stdout ?? '');
+  } else {
+    out = execFileSync('gh', args, opts);
+  }
   const parsed = JSON.parse(out.trim() || '[]');
   if (!Array.isArray(parsed)) throw new Error('required-status-checks: unexpected shape from branch protection');
   return parsed.map(String);
@@ -108,7 +119,7 @@ export function defaultReadRequiredStatusChecks({ repo, branch = 'main' } = {}) 
  *   defaults to 15 minutes. A stale-but-only-option cache is still preferred over the hardcoded fallback (see
  *   header), so this bounds re-FETCH frequency, not cache USABILITY.
  * @param {Function} [o.readChecks] - defaults to {@link defaultReadRequiredStatusChecks}.
- * @returns {{checks: string[], source: 'live'|'cache'|'stale-cache'|'fallback'|'declared'|'unavailable'}}
+ * @returns {{checks: string[], source: 'live'|'cache'|'stale-cache'|'fallback'|'declared'|'unavailable', cacheAgeMs?: number}}
  */
 export function getRequiredStatusChecks({
   repo,
@@ -162,13 +173,14 @@ export function getRequiredStatusChecks({
       return save(checks, 'live');
     }
   } catch (error) {
-    if (protectionUnavailableOnPlan(error)) {
+    if (protectionAccessDenied(error)) {
       if (declared) return save([...declared], 'declared');
-      if (!cache) return save([], 'unavailable');
+      if (!cache) return { checks: [], source: 'fallback' };
     }
     /* gh missing, unauthenticated, offline, rate-limited, or an unexpected response shape — degrade below */
   }
 
-  if (cache) return { checks: cache.checks, source: cache.source === 'unavailable' ? 'unavailable' : 'stale-cache' };
+  if (cache) return { checks: cache.checks, source: cache.source === 'unavailable' ? 'unavailable' : 'stale-cache',
+    cacheAgeMs: now - cache.fetchedAtMs };
   return declared ? { checks: [...declared], source: 'fallback' } : { checks: [], source: 'unavailable' };
 }

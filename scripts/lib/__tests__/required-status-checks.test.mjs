@@ -12,9 +12,10 @@ import { join } from 'node:path';
 vi.mock('node:child_process', async (importOriginal) => {
   const actual = await importOriginal();
   const execFileSync = vi.fn(() => '["test","smoke","daemon-soak"]');
-  return { ...actual, execFileSync, default: { ...actual.default, execFileSync } };
+  const spawnSync = vi.fn();
+  return { ...actual, spawnSync, execFileSync, default: { ...actual.default, spawnSync, execFileSync } };
 });
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { getRequiredStatusChecks, defaultReadRequiredStatusChecks, FALLBACK_REQUIRED_STATUS_CHECKS } from '../required-status-checks.mjs';
 
 describe('getRequiredStatusChecks', () => {
@@ -67,7 +68,7 @@ describe('getRequiredStatusChecks', () => {
     const result = getRequiredStatusChecks({
       repo: 'chalbert/web-everything', cachePath, now: 999_999_999, ttlMs: 1000, readChecks: flakyRead,
     });
-    expect(result).toEqual({ checks: ['test', 'smoke', 'daemon-soak'], source: 'stale-cache' });
+    expect(result).toEqual({ checks: ['test', 'smoke', 'daemon-soak'], source: 'stale-cache', cacheAgeMs: 999_999_999 });
   });
 
   it('falls back to the hardcoded FALLBACK_REQUIRED_STATUS_CHECKS when there is no cache at all and the ' +
@@ -114,18 +115,22 @@ describe('getRequiredStatusChecks', () => {
     expect(readChecks).toHaveBeenCalledTimes(2);
   });
 
-  it('does not cache unrelated 403s as a plan restriction', () => {
-    const readChecks = vi.fn(() => { throw new Error('HTTP 403: API rate limit exceeded'); });
-    for (let now = 1000; now <= 1001; now++) {
-      expect(getRequiredStatusChecks({ repo: 'chalbert/plateau-app', cachePath, now, readChecks }))
-        .toEqual({ checks: ['test', 'e2e'], source: 'fallback' });
-    }
-    expect(readChecks).toHaveBeenCalledTimes(2);
+  it.each([
+    'Resource not accessible by integration (HTTP 403)',
+    'Not Found (HTTP 404)',
+    'HTTP 403: API rate limit exceeded',
+  ])('uses declared policy on protection denial: %s', message => {
+    const readChecks = vi.fn(() => { throw Object.assign(new Error('gh api failed'), { stderr: Buffer.from(message) }); });
+    expect(getRequiredStatusChecks({ repo: 'chalbert/plateau-app', cachePath, now: 1000, readChecks }))
+      .toEqual({ checks: ['test', 'e2e'], source: 'declared' });
+    expect(getRequiredStatusChecks({ repo: 'chalbert/plateau-app', cachePath, now: 1001, readChecks }))
+      .toEqual({ checks: ['test', 'e2e'], source: 'declared' });
+    expect(readChecks).toHaveBeenCalledTimes(1);
   });
 
-  it.each(['chalbert/unknown', undefined])('returns unavailable for undeclared repo %s, never WE defaults', repo => {
+  it.each(['chalbert/unknown', undefined])('never gives undeclared repo %s WE defaults', repo => {
     expect(getRequiredStatusChecks({ repo, cachePath, readChecks: plan403 }))
-      .toEqual({ checks: [], source: 'unavailable' });
+      .toEqual({ checks: [], source: 'fallback' });
     expect(getRequiredStatusChecks({ repo, cachePath, readChecks: () => { throw new Error('offline'); } }))
       .toEqual({ checks: [], source: 'unavailable' });
   });
@@ -159,7 +164,36 @@ describe('getRequiredStatusChecks', () => {
 });
 
 describe('defaultReadRequiredStatusChecks', () => {
-  afterEach(() => { vi.clearAllMocks(); });
+  let dir;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'we-required-route-'));
+    vi.stubEnv('WE_GH_THROTTLE_LOCK_ROOT', dir);
+    vi.stubEnv('WE_GH_THROTTLE_PERSONAL_ROUTE', '0');
+    vi.stubEnv('WE_GH_THROTTLE_COST_HEADERS', '0');
+  });
+  afterEach(() => { vi.clearAllMocks(); vi.unstubAllEnvs(); rmSync(dir, { recursive: true, force: true }); });
+
+  it('routes the protection read through the real throttle personal read path when enabled', () => {
+    vi.stubEnv('WE_GH_THROTTLE_PERSONAL_ROUTE', '1');
+    vi.stubEnv('GH_TOKEN', 'ghs_test_fixture');
+    execFileSync.mockReturnValueOnce('ghp_test_fixture');
+    spawnSync.mockImplementationOnce((_bin, _args, opts) => {
+      expect(opts.env.GH_TOKEN === 'ghp_test_fixture').toBe(true);
+      expect(opts.timeout).toBe(15_000);
+      return { status: 0, stdout: Buffer.from('["personal-check"]'), stderr: Buffer.alloc(0) };
+    });
+    expect(defaultReadRequiredStatusChecks({ repo: 'chalbert/web-everything' })).toEqual(['personal-check']);
+    expect(execFileSync).toHaveBeenCalledWith('gh', ['auth', 'token'], expect.any(Object));
+    expect(spawnSync.mock.calls[0][1]).toEqual(['api', 'repos/chalbert/web-everything/branches/main/protection', '--jq', '.required_status_checks.contexts']);
+    expect(process.env.GH_TOKEN === 'ghs_test_fixture').toBe(true);
+  });
+
+  it('preserves routed HTTP failures for declared-policy classification', () => {
+    vi.stubEnv('WE_GH_THROTTLE_PERSONAL_ROUTE', '1');
+    spawnSync.mockReturnValue({ status: 1, stdout: Buffer.alloc(0), stderr: Buffer.from('Resource not accessible by integration (HTTP 403)') });
+    expect(getRequiredStatusChecks({ repo: 'chalbert/plateau-app', cachePath: join(dir, 'cache.json') }))
+      .toEqual({ source: 'declared', checks: ['test', 'e2e'] });
+  });
 
   it('shells `gh api repos/<repo>/branches/<branch>/protection --jq .required_status_checks.contexts`', () => {
     const result = defaultReadRequiredStatusChecks({ repo: 'chalbert/web-everything', branch: 'main' });
