@@ -4,7 +4,7 @@
  * into `.conveyor/unsupported-repo.json` resolved by script location — i.e. inside the daemon's own clone. The
  * path was not gitignored (unlike every sibling `.conveyor/*.json`), so the clone read dirty from its first tick,
  * self-sync refused to merge main ("dirty"), and every dispatch after that was refused as stale.
- * Fix: `14b2e4096` (card x4cteem) gitignores the path. On main.
+ * Fix: `14b2e4096` (card 4109) gitignores the path. On main.
  *
  * Scenario: the plain soak world for a few rounds with main moving — nothing special is needed, the daemon writes
  * the file on its own. RED = the clone goes dirty and then falls behind main.
@@ -17,7 +17,7 @@ import { runSoak } from '../soak.mjs';
 export default {
   id: 'unsupported-repo-dirt',
   title: 'fix daemon writes .conveyor/unsupported-repo.json into its own clone; the dirty clone freezes self-sync',
-  card: 'we:backlog/x4cteem (epic #4075)',
+  card: 'we:backlog/4109 (epic #4075)',
   fixedBy: { sha: '14b2e4096', where: 'main', paths: ['.gitignore'] },
   fixPresent(root) {
     try { return /^\.conveyor\/unsupported-repo\.json$/m.test(readFileSync(join(root, '.gitignore'), 'utf8')); } catch { return false; }

@@ -17,7 +17,7 @@ tags: []
 
 ## Operator ruling (2026-09-30 ~9:10 PM ET)
 
-**Option (a) for #4620, (b) kept as a future feature** — operator: "Ok, make sure you file b for future feature". Authored now: the WE contract predecessor x9jwbpi (schema 2 + validated examples + test); #4620 trimmed to its plateau-app scope and blocked by x9jwbpi; the prepare-time mixed-repo diagnosis story x8brxr6; and the coupled-delivery future-feature epic x4ank3f (unqueued). Coupled delivery is a supported future approach, not a ban.
+**Option (a) for #4620, (b) kept as a future feature** — operator: "Ok, make sure you file b for future feature". Authored now: the WE contract predecessor 4756 (schema 2 + validated examples + test); #4620 trimmed to its plateau-app scope and blocked by 4756; the prepare-time mixed-repo diagnosis story 4750; and the coupled-delivery future-feature epic 4720 (unqueued). Coupled delivery is a supported future approach, not a ban.
 
 ## Supported approaches and recommendation
 

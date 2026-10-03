@@ -9,7 +9,7 @@ scope: ["plateau-app:src/wip/types.ts", "plateau-app:src/wip/wip-read.ts", "plat
 dateOpened: "2026-09-30"
 preparedDate: "2026-09-30"
 preparedAgainstSha: "3762fa95fd94c655c8196cd047c820f3f09f4b67"
-blockedBy: ["x9jwbpi"]
+blockedBy: ["4756"]
 dateResolved: "2026-10-01"
 graduatedTo: "https://github.com/chalbert/plateau-app/pull/189"
 tags: []
@@ -21,7 +21,7 @@ Automatically show what is moving, observed landings today, a short trend and cu
 
 ## Split per ruling #4289 (2026-09-30)
 
-The WE contract half (schema 2, examples, validation test) moved to its own card, x9jwbpi, which lands first; this card keeps only its plateau-app scope and waits on it. Re-prepare against the landed contract revision before building; keep every existing consumer, relay and compatibility proof here.
+The WE contract half (schema 2, examples, validation test) moved to its own card, 4756, which lands first; this card keeps only its plateau-app scope and waits on it. Re-prepare against the landed contract revision before building; keep every existing consumer, relay and compatibility proof here.
 
 ## Premise check (2026-09-30, against WE `3762fa95f` and plateau-app `1888d29`)
 

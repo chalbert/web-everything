@@ -1,12 +1,12 @@
 /**
- * @file breaks/wip-cap-counts-worker-prs.mjs — card xovjhwh. The build-dispatch daemon's open-item WIP cap
+ * @file breaks/wip-cap-counts-worker-prs.mjs — card 4494. The build-dispatch daemon's open-item WIP cap
  * (`wip-cap`, #4353, `maxOpenItems`) built its "delivered-by-open-PR" side from EVERY open PR whose branch names
  * a card (`prDeliveredNum`) — with no check for WHO dispatched that build. A hand-dispatched worker (fix worker,
  * ci-heal worker, stranded-claim resume) opens a PR with the exact same `lane/<num>-...` shape as one of THIS
  * builder's own dispatches, so its num filled the union too.
  *
  * Live incident, 2026-09-29 ~1:40 PM ET: `openItems` read 7/7 filled by 4293, 4304, 4312, 4314, 4318, 4321,
- * x4mfp16 — every one a worker-delivered PR, none of them this builder's own dispatch — so `wip-cap` held the
+ * 4484 — every one a worker-delivered PR, none of them this builder's own dispatch — so `wip-cap` held the
  * builder's own cleared items (4382, 4131, 4319) and it built nothing, even with free build slots
  * (`maxConcurrentBuilds` far from its cap).
  *
@@ -15,13 +15,13 @@
  * `hot-file` scope-overlap hold are UNCHANGED (a worker's PR still counts toward the former and still blocks a
  * scope-overlapping build via the latter) — only the `wip-cap` arithmetic narrows.
  *
- * Fix (card xovjhwh): `planBuildDispatch` takes an optional `dispatchedByBuilder` set; when given, an open PR
+ * Fix (card 4494): `planBuildDispatch` takes an optional `dispatchedByBuilder` set; when given, an open PR
  * only feeds the wip-cap union when its delivered num is IN that set. `build-dispatch-daemon.mjs` derives the
  * set from its own `listRunStoreInFlight`/`listSettledBuilds` reads (no new IO — only this daemon's own
  * `dispatch-lane` calls ever write those records) and threads it through.
  *
  * SCENARIO: mirrors the live incident's own numbers — cap 7 (the declared default), 7 open PRs delivering
- * 4293/4304/4312/4314/4318/4321/x4mfp16, NONE of them this builder's own (`dispatchedByBuilder: []`), and 3
+ * 4293/4304/4312/4314/4318/4321/4484, NONE of them this builder's own (`dispatchedByBuilder: []`), and 3
  * disjointly-scoped launchable candidates (4382/4131/4319, the builder's own cleared items) with one free build
  * slot per candidate. Pre-fix (or `dispatchedByBuilder` simply ignored by an older `planBuildDispatch`): the union reads
  * 7/7 from the worker PRs alone, and every candidate holds `wip-cap`. Post-fix: the union reads 0/7 (no PR is
@@ -32,7 +32,7 @@ import { join } from 'node:path';
 import { planBuildDispatch, BUILD_DISPATCH_POLICY } from '../../build-dispatch-policy.mjs';
 
 // The exact worker-delivered nums from the live incident (2026-09-29 ~1:40 PM ET).
-const WORKER_NUMS = ['4293', '4304', '4312', '4314', '4318', '4321', 'x4mfp16'];
+const WORKER_NUMS = ['4293', '4304', '4312', '4314', '4318', '4321', '4484'];
 // The builder's own held cleared items from the same incident.
 const BUILDER_NUMS = ['4382', '4131', '4319'];
 
@@ -54,7 +54,7 @@ function scenario() {
 export default {
   id: 'wip-cap-counts-worker-prs',
   title: 'the open-item wip-cap counted every open PR naming a card, including hand-dispatched workers\' — the builder held its own cleared items and built nothing',
-  card: 'we:backlog/4494-builder-open-items-limit-counts-only-the-builder-s-own-items.md', // bornAs xovjhwh
+  card: 'we:backlog/4494-builder-open-items-limit-counts-only-the-builder-s-own-items.md', // bornAs 4494
   fixedBy: { sha: 'HEAD', where: 'lane/4494-wip-cap-own-items', paths: ['scripts/conveyor/build-dispatch-policy.mjs', 'skills-src/conveyor/build-dispatch-daemon.mjs'] },
   fixPresent(root) {
     const p = join(root, 'scripts/conveyor/build-dispatch-policy.mjs');

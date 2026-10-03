@@ -635,7 +635,9 @@ export function normalizeFlowAckCardRefs(content) {
  * discoverable like a stale backlog cross-ref), AND `scripts/conveyor/flows/*.flow.json` (#4075/xmd4pfa — a
  * flow's own `cite`s name a backlog file by its pre-numbering hash the same way a docs page does; without
  * this sweep the cite dangles the moment the card lands numbered, which is exactly how main's CI went red
- * — build-dispatch.flow.json's `backlog/xr05jjl-…` cite outlived the card's own rename to #4220) —
+ * — build-dispatch.flow.json's `backlog/xr05jjl-…` cite outlived the card's own rename to #4220), AND
+ * `scripts/conveyor/soak/breaks/*.mjs` (the executable definitions' `card` citations likewise name landed
+ * hash paths). Only tracked top-level definitions are swept, never nested fixtures or test files —
  * numbering each item AND repairing any cross-lane `blockedBy`/`parent`/`#ref` that still points at an
  * already-numbered blocker by its old hash.
  * Missing local mappings for explicit references fall back to bornAs on origin/main (#2903).
@@ -649,6 +651,7 @@ export function numberPendingHashes(CWD, { dryRun = false } = {}) {
   const DOCS = join(CWD, 'docs', 'agent');
   const MEMORY = join(CWD, 'agent-memory-src');
   const FLOWS = join(CWD, 'scripts', 'conveyor', 'flows');
+  const BREAKS = join(CWD, 'scripts', 'conveyor', 'soak', 'breaks');
   let stems;
   try { stems = readdirSync(BL).filter((f) => f.endsWith('.md')).map((f) => f.replace(/\.md$/, '')); }
   catch { return { assigned: [], committed: false, error: 'cannot read backlog/' }; }
@@ -708,7 +711,20 @@ export function numberPendingHashes(CWD, { dryRun = false } = {}) {
     .filter((rel) => trackedFlows.has(rel))
     .map((rel) => ({ name: rel, content: readFileSync(join(CWD, rel), 'utf8') }));
 
-  const files = [...stems.map((name) => ({ name, content: readFileSync(join(BL, `${name}.md`), 'utf8') })), ...docsFiles, ...memoryFiles, ...flowsFiles];
+  // Soak definitions carry live `card` citations too. Leaving these outside the rewrite set made the
+  // unswept-citation backstop refuse EVERY numbering pass (2026-10-03 main CI incident). Keep that
+  // backstop: teach the numberer this citation home, with the same tracked-only, non-recursive boundary
+  // as flows. Nested fixtures and test files may contain synthetic hashes and are not rewrite targets.
+  let breakNames;
+  try { breakNames = readdirSync(BREAKS).filter((f) => f.endsWith('.mjs') && !f.endsWith('.test.mjs')); }
+  catch { breakNames = []; }
+  const trackedBreaks = new Set((quietGit(CWD, ['ls-files', 'scripts/conveyor/soak/breaks/*.mjs']) || '').split('\n').filter(Boolean));
+  const breakFiles = breakNames
+    .map((f) => `scripts/conveyor/soak/breaks/${f}`)
+    .filter((rel) => trackedBreaks.has(rel))
+    .map((rel) => ({ name: rel, content: readFileSync(join(CWD, rel), 'utf8') }));
+
+  const files = [...stems.map((name) => ({ name, content: readFileSync(join(BL, `${name}.md`), 'utf8') })), ...docsFiles, ...memoryFiles, ...flowsFiles, ...breakFiles];
   const contentByName = new Map(files.map((f) => [f.name, f.content]));
   // Resolve a `files` entry's `name` to its on-disk absolute + commit-relative path — a backlog stem (bare,
   // no `/`) lives under `backlog/`; a docs entry (`name` already a full repo-relative path) lives as-is.
@@ -834,8 +850,8 @@ export function numberPendingHashes(CWD, { dryRun = false } = {}) {
   }
 
   // #4075 follow-up (xmd4pfa, hardening after the build-dispatch.flow.json incident) — NEVER COMMIT A
-  // RENAME THIS PASS CAN PROVE LEAVES A DANGLING CITATION. The four dirs swept above (backlog/, docs/agent/,
-  // agent-memory-src/, scripts/conveyor/flows/) are a FIXED, MAINTAINED list — and a maintained list can lag
+  // RENAME THIS PASS CAN PROVE LEAVES A DANGLING CITATION. The dirs swept above (backlog/, docs/agent/,
+  // agent-memory-src/, scripts/conveyor/flows/, scripts/conveyor/soak/breaks/) are a maintained list that can lag
   // a new citing file TYPE, exactly how `scripts/conveyor/flows/` itself lagged before this same incident
   // added it (a flow file cited `backlog/xr05jjl-….md`; the card landed as #4220; every PR's CI went red on
   // the 404'd path). Before writing or committing anything, re-check the REAL, WHOLE tracked tree — not just

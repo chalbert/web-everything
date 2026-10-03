@@ -4,7 +4,7 @@ kind: story
 size: 5
 parent: "3383"
 status: open
-blockedBy: ["4044", "4043", "xfkqowg"]
+blockedBy: ["4044", "4043", "4815"]
 dateOpened: "2026-09-24"
 preparedDate: "2026-10-03"
 preparedAgainstSha: "4a2606bc2f711efd86849e250db36b1b100a0fa4"
@@ -20,11 +20,11 @@ Build the #4043 ruling: when the review daemon runs a live overlay, any PR whose
 
 Preparation (2026-10-03). The goal is unchanged (ruling #4043, Fork 1 (b)). Both blockers are resolved: #4044 (fresh rebuild plus overlays each tick) and #4043 (the ruling). The premise was corrected against current code:
 
-- **Old premise:** review runs as a `claude --bg` session whose cwd is the daemon clone (we:scripts/operations/review-dispatch.mjs `dispatchReview`). **Corrected:** the default is now a deterministic job (x26lw6u). `we:skills-src/conveyor/review-daemon.mjs:84` imports `dispatchReviewByMode` from `we:scripts/operations/review-job.mjs`. The job's IO spawns every step with `cwd: root`, where `root = REPO_ROOT` is the daemon clone (`we:scripts/operations/review-job.mjs:226-233`). That includes `we:scripts/operations/review-loop-cli.mjs` (line 256-259), which runs the review operation, reduction and label writes. Jurors judge in their own pool lane (`--cwd=${lanePath}`), but the code that drives and records them is the clone's. So the routing seam is the job's `root` for `runLoop` and the extra-seat steps, not `dispatchReview`.
+- **Old premise:** review runs as a `claude --bg` session whose cwd is the daemon clone (we:scripts/operations/review-dispatch.mjs `dispatchReview`). **Corrected:** the default is now a deterministic job (4152). `we:skills-src/conveyor/review-daemon.mjs:84` imports `dispatchReviewByMode` from `we:scripts/operations/review-job.mjs`. The job's IO spawns every step with `cwd: root`, where `root = REPO_ROOT` is the daemon clone (`we:scripts/operations/review-job.mjs:226-233`). That includes `we:scripts/operations/review-loop-cli.mjs` (line 256-259), which runs the review operation, reduction and label writes. Jurors judge in their own pool lane (`--cwd=${lanePath}`), but the code that drives and records them is the clone's. So the routing seam is the job's `root` for `runLoop` and the extra-seat steps, not `dispatchReview`.
 - **Overlays are live.** The overlay state for the `wev-review-daemon` clone (key `206df80ef82e6401` in the home overlay-state directory) exists, and its event log was last written 2026-10-03 09:20 (36 KB). The list is read through `we:scripts/lib/daemon-overlays.mjs#readOverlayState` (line 99), which never throws and flags `corrupt: true`.
 - **No main-only clone exists yet.** `DAEMON_CLONE_SEED` (`we:scripts/lib/daemon-clone-registry.mjs:57`) lists `wev-review-daemon` but no main-only review clone. `selfSyncCheckout({ root, base: 'main' })` (`we:scripts/lib/daemon-self-sync.mjs:152`) is the existing sync primitive.
 - **Old scope:** `we:scripts/operations/review-dispatch.mjs`, `we:scripts/review-set-label.mjs`, `we:skills-src/conveyor/review-daemon.mjs`, `we:scripts/lib/` (a directory). **Corrected scope:** the eight concrete files in frontmatter. `we:scripts/operations/review-dispatch.mjs` (the opt-in session mode) and `we:skills-src/conveyor/review-daemon.mjs` need no change, because the job owns `root`.
-- **Overlap with open PR #3507:** `we:scripts/review-set-label.mjs` is in #3507's scope, so this card is now also blocked by xfkqowg.
+- **Overlap with open PR #3507:** `we:scripts/review-set-label.mjs` is in #3507's scope, so this card is now also blocked by 4815.
 - **Heartbeat:** the old Done-when 2 asked for clone freshness "in the heartbeat (#4051)". #4051 is still open, so this card writes freshness into the job record. Showing it in the heartbeat is #4051's job (see Follow-ups).
 
 ## Design
@@ -47,7 +47,7 @@ Preparation (2026-10-03). The goal is unchanged (ruling #4043, Fork 1 (b)). Both
 
 ## MVP
 
-Steps 1-4 in one PR touching the eight scoped files. Incremental and fail-closed. With no overlays loaded, behaviour is byte-identical (`route: 'clone'`). Blocked on xfkqowg (open PR #3507 edits `we:scripts/review-set-label.mjs`); otherwise ready.
+Steps 1-4 in one PR touching the eight scoped files. Incremental and fail-closed. With no overlays loaded, behaviour is byte-identical (`route: 'clone'`). Blocked on 4815 (open PR #3507 edits `we:scripts/review-set-label.mjs`); otherwise ready.
 
 ## Test plan
 

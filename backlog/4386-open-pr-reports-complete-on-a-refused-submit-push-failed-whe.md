@@ -2,9 +2,11 @@
 bornAs: x33k64v
 kind: story
 size: 2
-status: open
+status: resolved
 scope: ["we:scripts/operations/open-pr.mjs", "we:scripts/operations/cli-adapter.mjs", "we:scripts/operations/open-pr-io.mjs", "we:scripts/pr-land.mjs", "we:scripts/operations/__tests__/open-pr.test.mjs", "we:scripts/operations/__tests__/effect-executor.test.mjs", "we:scripts/__tests__/pr-land.test.mjs"]
 dateOpened: "2026-09-28"
+dateStarted: "2026-10-03"
+dateResolved: "2026-10-03"
 preparedDate: "2026-09-30"
 preparedAgainstSha: "9d4c0045905a4bc77486ee97da1ea9c796a51f39"
 tags: []
@@ -53,6 +55,8 @@ Out of scope (Follow-ups below): a general per-op summary hook on the declaratio
 
 ## Follow-ups
 
+- Verification dependency discovered during implementation: a new direct import from we:scripts/operations/cli-adapter.mjs must also be included in `REVIEW_CODE_PATH_FILES` in we:scripts/operations/review-dispatch.mjs. The existing we:scripts/operations/__tests__/review-dispatch.test.mjs correctly guards that boundary. This companion edit is outside this card's declared scope; scope approval was requested before changing it.
+
 - Replace the `RUN_SUMMARIES` table in `we:cli-adapter.mjs` with a declared per-operation `summarize` field (needs a `RESERVED_DECLARATION_KEYS` change in `we:registry.mjs`) so other ops with refusal-shaped effect results get the same treatment.
 - Audit other operations whose sinks return `refused`/`fail` classifications for the same "complete" misreport.
 - Have `open-pr`/`pr-land` detect a stale lane base up front (before the push) and fail with the same remedy.
@@ -60,3 +64,14 @@ Out of scope (Follow-ups below): a general per-op summary hook on the declaratio
 ## Done when
 
 1. **Executable** — `npx vitest run we:scripts/operations/__tests__/open-pr.test.mjs we:scripts/operations/__tests__/effect-executor.test.mjs we:scripts/__tests__/pr-land.test.mjs` — the new refused-render and push-failed-hint cases fail before this item lands and pass after.
+
+
+## Progress
+
+- 2026-10-03: Implemented the scoped submit summary, default-render exit status, sink detail propagation and full-stderr push classification. JSON callers retain their existing payload and exit semantics; other operations retain their generic completion headline.
+- Before proof: added the card's regressions to we:scripts/operations/__tests__/open-pr.test.mjs, we:scripts/operations/__tests__/effect-executor.test.mjs and we:scripts/__tests__/pr-land.test.mjs, then ran all three against unchanged production code: **14 failed, 228 passed**. The real declaration/driver refused case rendered `run proof-4386 — complete. 1 effect(s) applied.`; the push-failed case halted but omitted `not the tip` and `acquire --base=<tip>`. The two missing pure helpers also failed as expected.
+- After proof: the same three files pass **242/242 tests**. The real declaration, memory store and injected runner now yield `submit: REFUSED (empty-body)` with code 1; opened PR 123 and dry runs return code 0; the push-failed HALTED line includes the recovery detail with code 1. JSON remains code 0 with its unchanged payload, and the non-open-pr completion headline remains unchanged. This uses the card's explicitly permitted injected-runner fallback; no live push or PR creation was performed.
+- Recovery verification: we:scripts/lane-pool.mjs `resolveBaseRef` first resolves `origin/<ref>`, then the supplied ref itself, so a pushed `lane/` branch or its origin-qualified ref is accepted as `--base`. The hint names a fresh lane and the fetch/rebase alternative; unrelated push errors keep the prior detail exactly.
+- Repeat proof: an inline, file-free driver ran 25 refused submissions and 25 push-failed submissions through the real declaration and sink (**50/50 passed**). Push failures used the actual `pushFailedDetail` output as the injected home detail and asserted that the final HALTED headline retained both the tip diagnosis and acquisition command; every default render returned code 1.
+- Baseline exit-code probe: loaded the unchanged HEAD versions of we:scripts/operations/cli-adapter.mjs and we:scripts/operations/open-pr-io.mjs directly into memory (no checkout mutation or helper files), then drove the real declaration with the same injected outcomes. Observed refused text `run before-4386 — complete. 1 effect(s) applied.` with **code 0**, and push-failed HALTED with **code 1** but no tip/acquisition hint. The baseline JSON refused render also returned code 0.
+- Gates: `npm run check:standards` passed with **0 errors, 5565 warnings**. `node we:scripts/verify-lane.mjs` completed with **7941 passed, 1 failed** across 132 test files. The sole failure is the review import-coverage guard: `we:scripts/operations/cli-adapter.mjs → we:scripts/operations/open-pr.mjs` is not yet in the dispatcher dependency list. No test or gate was weakened. Resolution remains pending scope approval for the companion dependency-list entry and a green re-run.

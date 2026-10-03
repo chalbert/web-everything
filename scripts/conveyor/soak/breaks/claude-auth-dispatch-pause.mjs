@@ -1,5 +1,5 @@
 /**
- * @file breaks/claude-auth-dispatch-pause.mjs — card x5kagse (epic #4075/#3383), the FOLLOW-UP to #2717
+ * @file breaks/claude-auth-dispatch-pause.mjs — card 4212 (epic #4075/#3383), the FOLLOW-UP to #2717
  * (`claude-auth-expired.mjs`, this same directory). #2717 made a dead-from-auth-failure session stop reading
  * as `live-process`, so a fresh one gets redispatched — but overnight 2026-09-25/26 that redispatch itself kept
  * happening every single tick while the operator's login stayed broken, burning a fresh `ci-heal-<pr>` session
@@ -52,9 +52,9 @@ const RECOVER_ROUND = 5; // fault clears here; nothing sabotaged from here on.
 export default {
   id: 'claude-auth-dispatch-pause',
   title: 'while the operator\'s Claude login is broken, the fix-dispatch daemon keeps redispatching a fresh ci-heal session every tick, burning attempts all night, instead of pausing until login is confirmed back',
-  card: 'we:backlog/x5kagse-fix-dispatch-and-review-daemons-pause-dispatch-while-the-cla.md (epic #4075)',
+  card: 'we:backlog/4212-fix-dispatch-and-review-daemons-pause-dispatch-while-the-cla.md (epic #4075)',
   fixedBy: {
-    sha: 'this same PR', where: 'this same PR (card x5kagse)',
+    sha: 'this same PR', where: 'this same PR (card 4212)',
     paths: ['scripts/conveyor/claude-auth-health.mjs', 'skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs', 'skills-src/conveyor/review-daemon.mjs'],
   },
   fixPresent(root) {

@@ -35,7 +35,7 @@ There is no separate skill for this yet (unlike decision-prepare, which delegate
    is false or delivered.
 2. **Correct factual drift** in the card itself: moved code, stale `file:line` citations, missing test
    paths, and narrower or wider `scope:` supported by the current code. Preserve the original goal
-   and all other frontmatter except the preparation stamps. Record the old premise/scope, corrected
+   and all other frontmatter except `size:` and the preparation stamps. You may change `size:` when file:line evidence grounds it (state old/new/evidence in `## Progress`). Never edit `blockedBy:`; propose edge changes in a `## Proposed blockedBy changes` section (`- add NNN — reason (we:path:line)` / `- remove NNN — …`), which an independent second actor (the PR reviewer, never you) must confirm; an add may never target a resolved card or create a cycle (ruling #4670). Record the old premise/scope, corrected
    premise/scope, and source evidence in `## Progress`, then continue the prepare pass. Scope breadth
    alone is not a stop reason. If a genuine unresolved judgment call / design fork remains after
    research (including changing the goal), report `could-not-prepare` with the specific choice;

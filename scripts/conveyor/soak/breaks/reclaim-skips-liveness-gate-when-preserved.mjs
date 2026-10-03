@@ -1,13 +1,13 @@
 /**
  * @file breaks/reclaim-skips-liveness-gate-when-preserved.mjs — live break, confirmed 2026-09-28 (lane-18,
- * lane-21; #4294), fixed by we:backlog/4372-health-watch-reclaim-resets-live-pushed-lane.md (bornAs: xl5xhmj).
+ * lane-21; #4294), fixed by we:backlog/4372-health-watch-reclaim-resets-live-pushed-lane.md (bornAs: 4372).
  *
  * LIVE INCIDENT. `scripts/lane-pool.mjs#cmdReclaim` only ever ran its liveness gate (live owner session, live
  * process cwd, quiet period) inside `cmdReclaimSalvage`, and only entered that path when a lane's content was
  * NOT provably preserved. Once every uncommitted/ahead change is already on a remote ref (the lane pushed its
  * work, e.g. to its own `lane/*` ref mid-PR), `cmdReclaim` fell straight through to `git reset --hard
  * origin/main` + `git clean -fd` with only a live-LEASE check — so an unleased lane whose lease had just been
- * dropped (see we:backlog/4371, `bornAs: xbk2is9`) was reset the moment its work was pushed, even while its
+ * dropped (see we:backlog/4371, `bornAs: 4371`) was reset the moment its work was pushed, even while its
  * worker was still live and mid-verify or mid-PR. Measured live: lane-18 reflog `16:38:53 commit b01a9b50c` →
  * `16:49:34 reset: moving to origin/main`; health-watch log `lane-18: reset — content already on a remote
  * ref, nothing to salvage` with the SAME owner session live one tick earlier. Recurred on lane-21.
@@ -79,7 +79,7 @@ function buildPushedThenReleasedLane({ poolDir, laneNum, laneScript, poolArgsCom
 export default {
   id: 'reclaim-skips-liveness-gate-when-preserved',
   title: "cmdReclaim's direct-reset path (git reset --hard) never ran the liveness gate once a lane's content read as provably preserved — an unleased lane whose lease had just dropped, but whose worker was still live and had just pushed, was reset mid-verify or mid-PR",
-  card: 'we:backlog/4372-health-watch-reclaim-resets-live-pushed-lane.md (bornAs: xl5xhmj)',
+  card: 'we:backlog/4372-health-watch-reclaim-resets-live-pushed-lane.md (bornAs: 4372)',
   fixedBy: {
     sha: 'PENDING-FILL-AT-LAND',
     where: 'main',
