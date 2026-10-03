@@ -1204,7 +1204,7 @@ describe('#4315 durable referral effects', () => {
   it('resuming after a partial chunk post keeps every chunk runId unique and reads back non-malformed', async () => {
     const h = harness();
     const seat = h.payload.referrals[0].seat;
-    h.payload.referrals = Array.from({ length: 20 }, (_, i) => ({ seat,
+    h.payload.referrals = Array.from({ length: 40 }, (_, i) => ({ seat,
       original: { ...h.payload.referrals[0].original, summary: `finding ${i}`, detail: 'evidence '.repeat(500) } }));
     const record = (b) => b.includes('<!-- mandatory-referrals-v1:');
     const post = h.provider.postComment;
@@ -1227,8 +1227,8 @@ describe('#4315 durable referral effects', () => {
     expect(current.length).toBeGreaterThan(1);
     expect(new Set(current.map(r => r.runId)).size).toBe(current.length);
     const keys = current.flatMap(r => r.referrals.map(f => f.key));
-    expect(new Set(keys).size).toBe(20);
-    expect(keys).toHaveLength(20);
+    expect(new Set(keys).size).toBe(40);
+    expect(keys).toHaveLength(40);
   });
   it.each(['post', 'read-back'])('%s cannot clear a hold or dispatch before persistence', async failure => {
     const h = harness({ failure });
@@ -1301,11 +1301,109 @@ describe('#4315 durable referral effects', () => {
     await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, { ...CTX, runId: 'resume' });
     expect(h.judge).toHaveBeenCalledTimes(current.length);
   });
+  it.each(['1', '0'])('replays the 14:08Z run shape with optional seat=%s: all 55 keys read back', async enabled => {
+    const h = harness({ env: { REVIEW_PR_ANTIGRAVITY_REVIEW: enabled } });
+    const fixture = JSON.parse(readFileSync('scripts/operations/__tests__/fixtures/referral-3481-shape.json', 'utf8'));
+    h.payload = { read: fixture.read, referrals: fixture.referrals };
+    h.state.headRefOid = fixture.read.netBasis.rev;
+    const referrals = fixture.carried.map(({ seat, fields }, i) => {
+      const original = Object.fromEntries(Object.entries(fields).map(([field, value]) => [field,
+        typeof value === 'object' && value?.length ? `${i}:`.padEnd(value.length, 'x') : value]));
+      return { seat, original, key: referralFindingKey(seat, original), finding: normalizeFinding(original) };
+    });
+    const old = { version: 1, repo: 'o/r', pr: 7, head: 'b'.repeat(40), runId: 'historical',
+      reviewer: mandatoryReferralReviewer('historical'), authorBody: h.state.body,
+      attempted: true, referrals: fixture.historical.indexes.map(i => referrals[i]), rulings: [] };
+    expect(renderReferralRecord(old).length).toBeGreaterThan(60_000);
+    h.state.comments = [{ url: 'https://github.com/o/r/pull/7#issuecomment-123', body: renderReferralRecord(old) },
+      ...referrals.filter((_, i) => !fixture.historical.indexes.includes(i)).map((f, i) => ({
+        body: renderReferralRecord({ ...old, runId: `other-${i}`, reviewer: mandatoryReferralReviewer(`other-${i}`), referrals: [f] }),
+      }))];
+    const priorCount = h.state.comments.length;
+    const result = await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX);
+    expect(result.pending).toEqual(enabled === '1' ? [] : ['referral-overflow']);
+    if (enabled === '0') expect(result.reason).toContain('historical run historical retirement');
+    expect(h.state.comments.slice(priorCount).every(c => c.body.length < 60_000)).toBe(true);
+    const parsed = readReferralRecords(h.state.comments);
+    expect(parsed.malformed).toBe(false);
+    const current = parsed.records.filter(r => r.head === h.state.headRefOid);
+    expect(current.length).toBeGreaterThan(1);
+    expect(current.every(validateReferralRecord)).toBe(true);
+    expect(current.flatMap(r => r.referrals.map(f => f.key)).sort()).toEqual(referrals.map(f => f.key).sort());
+  });
+  it('bounds an oversized entry with a hash and original-comment pointer, retaining ruling identity', async () => {
+    const h = harness();
+    h.payload.referrals[0].original.quote = '🧪 long source '.repeat(20_000);
+    h.payload.referrals[0].original.detail = { text: 'nested evidence '.repeat(20_000) };
+    const original = h.payload.referrals[0].original;
+    const key = referralFindingKey(h.payload.referrals[0].seat, original);
+    const old = { version: 1, repo: 'o/r', pr: 7, head: 'b'.repeat(40), runId: 'oversized',
+      reviewer: mandatoryReferralReviewer('oversized'), authorBody: h.state.body, attempted: true,
+      referrals: [{ key, seat: h.payload.referrals[0].seat, original, finding: normalizeFinding(original) }], rulings: [] };
+    const url = 'https://github.com/o/r/pull/7#issuecomment-456';
+    // Identical identity can have different evidence across records: link the actual source bytes.
+    const earlier = structuredClone(old);
+    earlier.runId = 'earlier-evidence';
+    earlier.reviewer = mandatoryReferralReviewer(earlier.runId);
+    earlier.referrals[0].original.quote = 'different evidence '.repeat(20_000);
+    earlier.referrals[0].finding = normalizeFinding(earlier.referrals[0].original);
+    h.state.comments = [{ url: 'https://github.com/o/r/pull/7#issuecomment-123', body: renderReferralRecord(earlier) },
+      { url, body: renderReferralRecord(old) }];
+    h.payload.referrals = [];
+    const result = await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX);
+    expect(result.pending).toEqual([]);
+    const record = result.records.find(r => r.head === h.state.headRefOid);
+    expect(record.referrals[0].key).toBe(key);
+    expect(record.rulings[0].key).toBe(key);
+    expect(record.referrals[0].original.quote).toContain(`source:${url}`);
+    expect(record.referrals[0].original.quote).toMatch(/sha256:[a-f0-9]{64}/);
+    expect(record.referrals[0].original.detail.length).toBeLessThan(1024);
+    expect(readReferralRecords(h.state.comments).malformed).toBe(false);
+    expect(h.state.comments.slice(2).every(c => c.body.length < 60_000)).toBe(true);
+  });
+  it('does not repeat a large author body across chunks and retains author independence', async () => {
+    const h = harness();
+    h.state.body += ' large PR description'.repeat(20_000);
+    h.payload.referrals = Array.from({ length: 30 }, (_, i) => ({ ...h.payload.referrals[0],
+      original: { ...h.payload.referrals[0].original, summary: `finding ${i}`, quote: 'evidence '.repeat(100) } }));
+    const result = await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX);
+    expect(result.pending).toEqual([]);
+    expect(result.records.length).toBeGreaterThan(1);
+    for (const r of result.records) {
+      expect(r.authorBody.length).toBeLessThan(1024);
+      expect(r.authorBody).toContain('<!-- authored-by-actor: author -->');
+      expect(r.authorBody).toContain('sha256:');
+    }
+    expect(h.state.comments.every(c => c.body.length < 60_000)).toBe(true);
+  });
+  it('persists fitting findings beside an unrepresentable key and visibly holds the overflow', async () => {
+    const h = harness();
+    h.payload.referrals.unshift({ ...h.payload.referrals[0], original: {
+      ...h.payload.referrals[0].original, summary: 'oversized key '.repeat(20_000) } });
+    const result = await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX);
+    expect(result.pending).toContain('referral-overflow');
+    expect(result.records.flatMap(r => r.referrals)).toHaveLength(1);
+    expect(result.reason).toContain('key sha256:');
+    expect(h.state.comments.at(-1).body).toContain('referral-overflow');
+    expect(h.state.labels).toContain('review:human');
+  });
+  it('retains an oversized immutable historical snapshot while persisting new chunks', async () => {
+    const h = harness({ env: { REVIEW_PR_ANTIGRAVITY_REVIEW: '0' } });
+    const old = seedReferrals(h, ['judgeAntigravityReview']);
+    old.authorBody += 'historical body '.repeat(10_000);
+    h.state.comments = [{ body: renderReferralRecord(old) }];
+    const result = await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX);
+    expect(result.reason).toContain('historical run earlier-run retirement');
+    expect(result.pending).toContain('referral-overflow');
+    expect(result.records.some(r => r.head === h.state.headRefOid)).toBe(true);
+    expect(h.state.comments.slice(1).every(c => c.body.length < 60_000)).toBe(true);
+    expect(readReferralRecords(h.state.comments).malformed).toBe(false);
+  });
   it('parks an indivisible oversized finding without posting it or dispatching', async () => {
     const h = harness();
     h.payload.referrals[0].original.summary = 'large '.repeat(20_000);
     const result = await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX);
-    expect(result.reason).toContain('exceeds 60000 characters for one finding');
+    expect(result.reason).toContain('exceeds 60000 characters with its v1 identity intact');
     expect(h.state.labels).toEqual(['review:human']);
     expect(h.state.comments).toHaveLength(1);
     expect(h.state.comments[0].body.length).toBeLessThan(60_000);
@@ -1319,9 +1417,27 @@ describe('#4315 durable referral effects', () => {
     }] } }));
     const result = await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX);
     expect(result.reason).toContain('exceeds 60000 characters');
+    expect(result.pending).toContain('referral-overflow');
     expect(h.state.labels).toEqual(['review:human']);
     expect(h.state.comments.every(c => c.body.length <= 60_000)).toBe(true);
     expect(readReferralRecords(h.state.comments).records[0]).toMatchObject({ attempted: true, rulings: [] });
+  });
+  it('persists a fitting ruling when a sibling ruling overflows', async () => {
+    const h = harness();
+    h.payload.referrals.push({ ...h.payload.referrals[0], original: { ...h.payload.referrals[0].original, summary: 'second' } });
+    const judge = h.judge.getMockImplementation();
+    h.judge.mockImplementation(async request => {
+      const answer = await judge(request);
+      answer.value.rulings[0].rationale = 'verbose '.repeat(20_000);
+      return answer;
+    });
+    const result = await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX);
+    expect(result.pending).toContain('referral-overflow');
+    expect(result.records[0].rulings).toHaveLength(1);
+    expect(result.records[0].rulings[0].key).toBe(referralFindingKey(h.payload.referrals[1].seat, h.payload.referrals[1].original));
+    expect(result.records[0].failure).toContain('withheld, key remains pending');
+    expect(readReferralRecords(h.state.comments).malformed).toBe(false);
+    expect(h.state.comments.every(c => c.body.length < 60_000)).toBe(true);
   });
   it('still parks if posting the short explanation also fails', async () => {
     const h = harness();
