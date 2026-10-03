@@ -21,7 +21,7 @@ function ruled(record, result = 'not-real') {
   return { ...record, rulings: [{ id: 'r1', key: record.referrals[0].key, reviewerId: record.reviewer.id,
     lens: 'correctness', result, rationale: 'Checked the current diff', evidence: ['diff'] }] };
 }
-const comment = record => ({ body: renderReferralRecord(record) });
+const comment = record => ({ body: renderReferralRecord(record), author: { login: 'web-everything' } });
 const stateFor = comments => ({ state: 'OPEN', labels: ['review:human'], headRefOid: head, body: authorBody, comments });
 
 describe('current-head mandatory referral acceptance', () => {
