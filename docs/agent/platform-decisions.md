@@ -6057,13 +6057,13 @@ choose the session's tier. The existing review care classifier interprets reason
 
 ### When the cross-provider review seat cannot sit, wait then park; the stand-in is a configurable dimension {#cross-provider-seat-fallback}
 
-Operator ruling, 2026-10-03 (decision xb1e9nj): "Ok to wait, make it a configurable dimension". The
+Operator ruling, 2026-10-03 (decision 4772): "Ok to wait, make it a configurable dimension". The
 fallback when the Codex cross-provider review seat is unavailable is the `crossProviderFallback`
 [config dimension](#config-extends-platform-default): `park-now` | `wait-then-park` (platform default) |
 `same-provider-other-model`, plus a `waitTimeoutMs` parameter. The default waits for the provider seat for a
 bounded time, then parks the PR for a human. `same-provider-other-model` is an explicit opt-in and is never
 the default. The judge seat follows the same rule (decision xud2hha: Claude-authored PRs get a Codex judge,
 Codex-authored PRs get an Opus judge, same fallback dimension). Declared in `we:config/defineConfig.ts` and
-`we:config/platformDefaults.ts`; the daemon that consumes it is card xp33bdf.
+`we:config/platformDefaults.ts`; the daemon that consumes it is card 4880.
 
-**Lineage:** xb1e9nj (ruled 2026-10-03). Instance of [config-extends-platform-default](#config-extends-platform-default).
+**Lineage:** 4772 (ruled 2026-10-03). Instance of [config-extends-platform-default](#config-extends-platform-default).
