@@ -51,7 +51,9 @@ import {
   isWatcherMarkerAlreadySuperseded,
   CONFLICT_FIX_ROUND_CAP,
   latestConflictFixMarkerCreatedAtMs,
+  isWatcherStandDownOperatorAnswered,
 } from '../parked-pr-conflict-watch.mjs';
+import { buildOperatorAnswer } from '../stand-down-answer-core.mjs';
 import { CONFLICT_FIX_COMMENT_MARKER } from '../conflict-fix-round-count.mjs';
 import {
   STAND_DOWN_MARKER, WATCHER_STAND_DOWN_ACTOR, SUPERSEDE_STAND_DOWN_MARKER, buildStandDownComment,
@@ -1426,7 +1428,7 @@ describe('defaultListPrComments — argv shape + @tsv round-trip incl. author.lo
     let capturedArgv;
     defaultListPrComments({ number: 42, repo: 'o/n', exec: (cmd, argv) => { capturedArgv = argv; return ''; } });
     expect(capturedArgv).toEqual(['api', '--paginate', '--method', 'GET', '-F', 'per_page=100', 'repos/o/n/issues/42/comments',
-      '--jq', '.[] | [.body, .created_at, .user.login] | @tsv']);
+      '--jq', '.[] | [.body, .created_at, .user.login, .node_id] | @tsv']);
   });
 
   it("falls back to gh's own {owner}/{repo} template when repo is omitted", () => {
@@ -1850,12 +1852,114 @@ describe('watchParkedPrConflicts — #xu2krte Fork 2 recheck of an ALREADY stood
       listPrFiles: () => ['docs/agent/platform-decisions.md'],
       listPrPatches: () => ({ 'docs/agent/platform-decisions.md': PR_HUNK_10_13 }),
       listMainStatutePatches: () => ({ 'docs/agent/platform-decisions.md': MAIN_HUNK_OVERLAPPING }),
+      computeConflictDisposition: () => 'real',
       postFinding: (o) => routed.push(['finding', o]),
       postStandDown: (o) => routed.push(['stand-down', o]),
     });
     expect(results[0].routedTo).toBe('stand-down (unchanged)');
     expect(routed).toEqual([]);
     expect(provider.calls).toEqual([]);
+  });
+
+  // ── #3771 (live 2026-10-03): the recheck kept `stand-down (unchanged)` forever ─────────────────────────────
+  // Cause 1: `git merge-tree` is CLEAN (main's rename/modify resolves) while GitHub says CONFLICTING, so the
+  // conflict-path list is `[]`, narrowing falls back to the whole diff, and a statute file merely sitting in the
+  // diff read as a judgment call. Cause 2: the operator's stand-down answer was never read by the recheck.
+  describe('#3771 — GitHub-only conflict and operator answer lift the watcher stand-down', () => {
+    const STAND_DOWN_ID = 'IC_kwDORBt1-c8AAAABY-kEBg';
+    const stoodDown = { ...watcherMarkerComment, id: STAND_DOWN_ID };
+    const answerBody = buildOperatorAnswer({ standDownId: STAND_DOWN_ID, reason: 'Resume and re-sync with main', actor: 'chalbert', channel: 'claude-code-chat' });
+    const operatorAnswer = (over = {}) => ({ body: answerBody, author: { login: 'chalbert' }, ...over });
+    // whole-diff statute-tier + a hunk overlap that, alone, keeps the stand-down (the pre-fix behaviour)
+    const stuckInputs = (over = {}) => ({
+      repo: 'o/n', listPrs: () => [alreadyLabelledPr({ number: 3771 })],
+      listPrFiles: () => ['docs/agent/platform-decisions.md', 'backlog/xne1udi-decision.md'],
+      listPrPatches: () => ({ 'docs/agent/platform-decisions.md': PR_HUNK_10_13 }),
+      listMainStatutePatches: () => ({ 'docs/agent/platform-decisions.md': MAIN_HUNK_OVERLAPPING }),
+      computeConflictingPaths: () => [], // git sees no conflict path
+      ...over,
+    });
+
+    it('BEFORE: git-clean + GitHub-conflicting with no answer and a real-looking diff but a conflicting probe still stands down', () => {
+      const routed = [];
+      const results = watchParkedPrConflicts(stuckInputs({
+        provider: fakeProvider(), listPrComments: () => [stoodDown], computeConflictDisposition: () => 'real',
+        postFinding: (o) => routed.push(['finding', o]), postStandDown: (o) => routed.push(['stand-down', o]),
+      }));
+      expect(results[0].routedTo).toBe('stand-down (unchanged)');
+      expect(routed).toEqual([]);
+    });
+
+    it('git merge-tree clean while GitHub says CONFLICTING: dispatches a plain re-sync finding and supersedes the marker', () => {
+      const routed = [];
+      const provider = fakeProvider();
+      const results = watchParkedPrConflicts(stuckInputs({
+        provider, listPrComments: () => [stoodDown], computeConflictDisposition: () => 'clean',
+        postFinding: (o) => routed.push(['finding', o]), postStandDown: (o) => routed.push(['stand-down', o]),
+      }));
+      expect(results[0].routedTo).toMatch(/plain re-sync with main/);
+      expect(results[0].supersededStandDown).toBe(true);
+      expect(routed.map(([k]) => k)).toEqual(['finding']);
+      expect(routed[0][1]).toMatchObject({ resync: true, reviewHumanFixable: false, appendOnlyStatute: false });
+      expect(provider.calls.length).toBe(1); // the supersede comment
+    });
+
+    it('a failed disposition probe fails closed: the stand-down stays', () => {
+      const routed = [];
+      const results = watchParkedPrConflicts(stuckInputs({
+        provider: fakeProvider(), listPrComments: () => [stoodDown],
+        computeConflictDisposition: () => { throw new Error('git blew up'); },
+        postFinding: (o) => routed.push(o),
+      }));
+      expect(results[0].routedTo).toBe('stand-down (unchanged)');
+      expect(routed).toEqual([]);
+    });
+
+    it('a later operator answer naming the stand-down lifts it for that episode, even on a real conflict', () => {
+      const routed = [];
+      const provider = fakeProvider();
+      const results = watchParkedPrConflicts(stuckInputs({
+        provider, listPrComments: () => [stoodDown, operatorAnswer()], computeConflictDisposition: () => 'real',
+        postFinding: (o) => routed.push(['finding', o]), postStandDown: (o) => routed.push(['stand-down', o]),
+      }));
+      expect(results[0].routedTo).toMatch(/operator answer lifted the stand-down/);
+      expect(results[0].supersededStandDown).toBe(true);
+      expect(routed.map(([k]) => k)).toEqual(['finding']);
+      expect(routed[0][1].reviewHumanFixable).toBe(false);
+    });
+
+    it('an answer naming a DIFFERENT comment id, or from a stranger, does not lift it', () => {
+      const other = buildOperatorAnswer({ standDownId: 'IC_other', reason: 'go', actor: 'chalbert', channel: 'chat' });
+      for (const answer of [{ body: other, author: { login: 'chalbert' } }, operatorAnswer({ author: { login: 'mallory' } })]) {
+        const routed = [];
+        const results = watchParkedPrConflicts(stuckInputs({
+          provider: fakeProvider(), listPrComments: () => [stoodDown, answer], computeConflictDisposition: () => 'real',
+          postFinding: (o) => routed.push(o),
+        }));
+        expect(results[0].routedTo).toBe('stand-down (unchanged)');
+        expect(routed).toEqual([]);
+      }
+    });
+
+    it('isWatcherStandDownOperatorAnswered: only the LATEST watcher stand-down counts, and an answer must come after it', () => {
+      expect(isWatcherStandDownOperatorAnswered([stoodDown, operatorAnswer()])).toBe(true);
+      expect(isWatcherStandDownOperatorAnswered([operatorAnswer(), stoodDown])).toBe(false);
+      expect(isWatcherStandDownOperatorAnswered([stoodDown, operatorAnswer(), { ...watcherMarkerComment, id: 'IC_newer' }])).toBe(false);
+      expect(isWatcherStandDownOperatorAnswered([stoodDown])).toBe(false);
+      expect(isWatcherStandDownOperatorAnswered(null)).toBe(false);
+    });
+
+    it('buildConflictFindingBody({resync}) asks for a plain merge of main, not conflict resolution', () => {
+      const body = buildConflictFindingBody({ number: 3771, headRefName: 'lane/x' }, { resync: true });
+      expect(body).toMatch(/Re-sync with `main` — nothing to resolve/);
+      expect(body).toMatch(/no rebase, no force-push/);
+    });
+
+    it('defaultListPrComments projects the comment node id so an answer can be matched', () => {
+      const line = ['body', '2026-10-03T16:40:37Z', 'web-everything', STAND_DOWN_ID].join('\t');
+      const out = defaultListPrComments({ number: 3771, repo: 'o/n', exec: () => `${line}\n` });
+      expect(out[0]).toMatchObject({ createdAt: '2026-10-03T16:40:37Z', author: { login: 'web-everything' }, id: STAND_DOWN_ID });
+    });
   });
 
   it('an already-labelled PR with NO watcher marker (e.g. already dispatched, or a fix agent\'s OWN stand-down) is left alone', () => {

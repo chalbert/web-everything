@@ -103,8 +103,12 @@ export function planReviewHoldCleanup({ currentLabels = [] } = {}) {
   // Checked on the label set AFTER point (1)'s own removal (never the raw observed set) — the `human` +
   // `pending` pair point (1) already resolves is NOT this bug (it is the #2549 stray a sanctioned `rearm` could
   // produce), and re-flagging it here would be this same sweep contradicting its own point (1) fix one line up.
+  // #3657 preserves review:changes under a live human hold: exclude that designed send-back from the flag
+  // input only. Accepted+human still needs the same history check; no additional label is removed.
   const afterHoldCleanup = [...names].filter((n) => !remove.includes(n));
-  const flagged = findContradictoryReviewVerdicts(afterHoldCleanup);
+  const flagInput = names.has(REVIEW_LABELS.human)
+    ? afterHoldCleanup.filter((n) => n !== REVIEW_LABELS.changes) : afterHoldCleanup;
+  const flagged = findContradictoryReviewVerdicts(flagInput);
   return flagged.length ? { remove, flagged } : { remove };
 }
 

@@ -352,3 +352,61 @@ describe('countStandDownComments — a forged marker from a random commenter mus
     expect(countStandDownComments([real])).toBe(1);
   });
 });
+
+
+it('every fixer stand-down call in the brief passes --who={{SESSION_SLUG}}', () => {
+  const calls = readFileSync(BRIEF, 'utf8').replace(/\\\n\s*/g, ' ').split('\n')
+    .filter((line) => line.startsWith('node "{{WE_ROOT}}/scripts/conveyor/stand-down.mjs"'));
+  expect(calls).toHaveLength(4);
+  for (const call of calls) expect(call).toContain('--who={{SESSION_SLUG}}');
+});
+
+
+describe('stand-down CLI releases only after a successful comment (#4897)', () => {
+  it.each([
+    ['needs-judgment', 'chalbert/web-everything', 'fix-3311', false, true],
+    ['concurrent-author', 'we', 'fix-3311', false, true],
+    ['needs-judgment', 'we', null, false, false],
+    ['needs-judgment', 'unknown/repo', 'fix-3311', false, false],
+    ['needs-judgment', null, 'fix-3311', false, false],
+    ['needs-judgment', 'we', 'fix-3311', true, false],
+  ])('%s repo=%s who=%s postFails=%s', async (reason, repo, who, postFails, released) => {
+    const fs = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { spawnSync } = await import('node:child_process');
+    const root = fs.mkdtempSync(resolve(tmpdir(), 'stand-down-4897-'));
+    const script = `
+      import child from 'node:child_process';
+      import { syncBuiltinESMExports } from 'node:module';
+      import assert from 'node:assert/strict';
+      const claims = await import(${JSON.stringify(resolve(HERE, '../fix-dispatch-claim.mjs'))});
+      claims.acquireFixDispatchClaim({ repo: 'we', pr: 3311, owner: 'daemon:1' });
+      child.execFileSync = (_cmd, args) => {
+        if (args[0] === 'pr' && args[1] === 'comment') {
+          assert.ok(claims.readFixDispatchClaim({ repo: 'we', pr: 3311 }));
+          if (${postFails}) throw new Error('post failed');
+        } else assert.equal(claims.readFixDispatchClaim({ repo: 'we', pr: 3311 }) === null, ${released});
+        return '';
+      };
+      syncBuiltinESMExports();
+      process.argv = ${JSON.stringify([process.execPath, resolve(HERE, '../stand-down.mjs'), '3311', `--reason=${reason}`,
+        ...(repo ? [`--repo=${repo}`] : []), ...(who ? [`--who=${who}`] : [])])};
+      // The dispatch graph has already imported the pure exports: select a fresh CLI module instance.
+      await import(${JSON.stringify(resolve(HERE, '../stand-down.mjs') + '?cli-proof')});
+    `;
+    try {
+      const result = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+        encoding: 'utf8', env: { ...process.env, WE_COORDINATION_ROOT: root }, timeout: 30_000,
+      });
+      expect(result.status, result.stderr).toBe(postFails ? 1 : 0);
+      if (!postFails) {
+        expect(JSON.parse(result.stdout).dispatchClaimReleased).toEqual(released ? [{ kind: 'fix', owner: 'daemon:1' }] : []);
+        if (!released) expect(result.stderr).toContain('⚠');
+      } else expect(result.stderr).toContain('post failed');
+      const { readFixDispatchClaim } = await import('../fix-dispatch-claim.mjs');
+      expect(readFixDispatchClaim({ repo: 'we', pr: 3311, lockRoot: resolve(root, 'fix-dispatch-claims') }) === null).toBe(released);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
