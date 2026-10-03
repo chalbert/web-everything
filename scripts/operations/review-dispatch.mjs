@@ -10,7 +10,7 @@ import { readReviewCiGate } from '../lib/review-ci-gate-io.mjs';
  * still holds for both: the judging happens in the fresh jurors `review-loop-cli.mjs` spawns, and the job mints
  * its own fresh actor id per round where this path relies on the `--bg` session's.
  *
- *   node scripts/operations/review-dispatch.mjs --pr=1234 --repo=chalbert/web-everything
+ *   node scripts/operations/review-dispatch.mjs --pr=1234 --repo=web-everything/web-everything
  *
  * THE GAP THIS CLOSES, PRECISELY. `review-pr` (via `we:scripts/operations/review-loop-cli.mjs`, #3072) already
  * runs a review UNATTENDED end to end — spawn two independent jurors, reduce their verdicts, bounce a `changes`

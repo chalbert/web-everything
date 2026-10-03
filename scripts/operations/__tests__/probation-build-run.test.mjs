@@ -656,7 +656,7 @@ describe('standalone task types and workers', () => {
         const code = `import { appendScorecard } from ${JSON.stringify(storeUrl)};
           import { launchScorecardRow } from ${JSON.stringify(launcherUrl)};
           appendScorecard(launchScorecardRow({ worker: ${JSON.stringify({ ...codex, taskType: 'bugfix' })},
-            pr: null, repo: 'chalbert/web-everything', handle: 'parallel-${item}', item: '${item}', launchOutcome: 'gate-red' }),
+            pr: null, repo: 'web-everything/web-everything', handle: 'parallel-${item}', item: '${item}', launchOutcome: 'gate-red' }),
             { path: ${JSON.stringify(path)}, requireLock: true });`;
         const child = spawn(process.execPath, ['--input-type=module', '-e', code], { env: { ...process.env, LANE_POOL_ROOT: dir } });
         let stderr = '';

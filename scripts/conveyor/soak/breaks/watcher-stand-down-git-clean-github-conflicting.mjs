@@ -1,5 +1,5 @@
 /**
- * @file breaks/watcher-stand-down-git-clean-github-conflicting.mjs — live case chalbert/web-everything#3771
+ * @file breaks/watcher-stand-down-git-clean-github-conflicting.mjs — live case web-everything/web-everything#3771
  * (2026-10-03): a parked `review:human` PR that GitHub reports CONFLICTING while `git merge-tree` finds NO
  * conflict (main resolved a card rename cleanly) sat on `stand-down (unchanged)` forever.
  *

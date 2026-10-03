@@ -25,7 +25,7 @@
  * yet evidenced it, is the opposite failure: a session whose real-world work is genuinely finished — its own
  * backlog item `status: resolved`, a real PR merged — while `claude agents` itself never advances that
  * session's `state` past `working`/`blocked` at all. Confirmed live: `conveyor-3451`'s target,
- * `we:backlog/3451-*.md`, carries `status: resolved` with a merged PR (`chalbert/web-everything#1862`, "WE
+ * `we:backlog/3451-*.md`, carries `status: resolved` with a merged PR (`web-everything/web-everything#1862`, "WE
  * #3451: resolve — active → resolved"), yet the SAME live `claude agents --json --all` listing that landed
  * that PR still reported `conveyor-3451` as `state: "blocked"` — a session the original state-only axis would
  * never touch. A same-night survey of the other 22 non-`done`/`failed` background rows found 17 in the
@@ -284,7 +284,7 @@ const BACKSTOP_COMPLETION_KINDS = new Set(['review', 'fix', 'inspect', 'ci-heal'
  * `completion-cli.mjs report --status=done` stayed `status: 'started'` in its completion record FOREVER, even
  * after this reaper correctly stopped it. `reconcile-core.mjs#markSelfReportedDone` (and any other future
  * reader of a completion record) then has no way to tell "still genuinely in flight" apart from "finished,
- * just never wrote it down" — the exact gap that froze `chalbert/web-everything#2599` and its five siblings for
+ * just never wrote it down" — the exact gap that froze `web-everything/web-everything#2599` and its five siblings for
  * this incident, and the exact one that would freeze the NEXT crash-before-self-report the same way.
  *
  * This function decides whether a session the reaper is ABOUT TO REAP needs a completion record written on its
@@ -551,7 +551,7 @@ export function resolveLastActivityMs(session, {
  * `we:scripts/conveyor/hung-session.mjs`), independent of anything the listing or the agent chooses to report.
  * Letting `neverReapWorking` veto THIS axis would mean the one daemon mode built to distrust a stale listing
  * is precisely the mode where a session the listing is WRONG about can never be reaped — the exact live
- * failure (chalbert/web-everything `review-2582`, state `working`, dead) this axis exists to close. Injected
+ * failure (web-everything/web-everything `review-2582`, state `working`, dead) this axis exists to close. Injected
  * as `hungFor(session)`, mirroring `completionFor`/`groundTruthFor`'s own try/catch-to-null discipline in the
  * caller — never called for a session missing `cwd`/`sessionId`, and any read failure answers "not hung",
  * never a guess.

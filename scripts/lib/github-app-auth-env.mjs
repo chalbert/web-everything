@@ -36,6 +36,7 @@ import { dirname } from 'node:path';
 import { homedir } from 'node:os';
 import { mintInstallationToken, getInstallationInfo } from './github-app-token.mjs';
 import { CONSTELLATION_REPOS } from './constellation-repos.mjs';
+import { installationMap, installationForOwner, ownerOfSlug, remapLegacyInstallationId, installationCachePath } from './github-app-installations.mjs';
 
 /**
  * What the fleet's `gh` calls actually need, as GitHub App permission levels. Live-caught 2026-09-23: the
@@ -141,7 +142,9 @@ export function resolveGithubAppEnvConfig(env = process.env) {
   const installationId = env.WE_GITHUB_APP_INSTALLATION_ID;
   const privateKeyPath = env.WE_GITHUB_APP_PRIVATE_KEY_PATH;
   if (!appId || !installationId || !privateKeyPath) return null;
-  return { appId, installationId, privateKeyPath };
+  // The retired personal-account installation id is remapped to the web-everything org's installation, so a
+  // launchd plist that still carries the old id keeps minting a token that covers the moved repos.
+  return { appId, installationId: remapLegacyInstallationId(installationId, env), privateKeyPath };
 }
 
 /**
@@ -256,6 +259,7 @@ export async function ensureFreshGithubAppEnv({
   log = console,
   statusPath = defaultStatusPath(),
   writeStatus = writeStatusFile,
+  extraInstallations = true,
 } = {}) {
   const record = (result) => {
     // `not-configured` is skipped, deliberately (#x8mpubm follow-up): this shared file reports the FLEET's
@@ -324,7 +328,10 @@ export async function ensureFreshGithubAppEnv({
       return record({ applied: false, reason: 'access-check-failed' });
     }
 
-    const { missingPermissions, missingRepos } = findInstallationGaps({ permissions: minted.permissions, repos, repositorySelection }, required);
+    // An installation covers ONE owner, so it is only required to cover the constellation repos that owner holds.
+    const ownRepos = REQUIRED_APP_REPOS.filter((r) => installationForOwner(ownerOfSlug(r), env) === String(config.installationId));
+    const requiredForThis = required?.repos ? required : { ...(required ?? {}), repos: ownRepos.length ? ownRepos : REQUIRED_APP_REPOS };
+    const { missingPermissions, missingRepos } = findInstallationGaps({ permissions: minted.permissions, repos, repositorySelection }, requiredForThis);
     if (missingPermissions.length || missingRepos.length) {
       log.error?.(
         'github-app-auth-env: App installation is missing access the fleet needs — NOT applying it, staying on personal auth. '
@@ -335,6 +342,13 @@ export async function ensureFreshGithubAppEnv({
     }
     cached = { v: CACHE_VERSION, appId: config.appId, installationId: config.installationId, token: minted.token, expiresAt: minted.expiresAt };
     writeCache(cachePath, cached);
+  }
+
+  // Per-installation caches: the daemon's own GH_TOKEN covers ONE owner, so also keep a fresh token for EVERY
+  // mapped installation in its own cache file, which the gh shim picks by the target repo's owner.
+  // Best-effort: a failure here never affects the primary token applied below.
+  if (extraInstallations && Object.values(installationMap(env)).includes(String(config.installationId))) {
+    await ensurePerInstallationCaches({ config, primary: cached, env, cachePath, now, readCache, writeCache, mint, log });
   }
 
   setEnv(cached.token);
@@ -360,6 +374,32 @@ export async function ensureFreshGithubAppEnv({
  * @param {Parameters<typeof ensureFreshGithubAppEnv>[0]} [opts] - forwarded to every refresh
  * @returns {typeof effects} the same effects, `tickOnce` wrapped
  */
+/**
+ * Keep one fresh token cache per mapped installation (`web-everything.<installationId>.json` beside the legacy
+ * cache). The primary installation's already-fresh token is reused, not re-minted. Never throws.
+ */
+export async function ensurePerInstallationCaches({ config, primary, env, cachePath, now, readCache, writeCache, mint, log }) {
+  const done = {};
+  const entries = Object.entries(installationMap(env));
+  for (const [owner, installationId] of entries) {
+    if (done[installationId]) continue;
+    done[installationId] = true;
+    const path = installationCachePath(cachePath, installationId);
+    try {
+      if (String(installationId) === String(config.installationId) && primary?.token) {
+        writeCache(path, primary);
+        continue;
+      }
+      const have = readCache(path);
+      if (isCacheFresh(have, now) && have.token && String(have.installationId) === String(installationId) && have.appId === config.appId) continue;
+      const minted = await mint({ appId: config.appId, installationId, privateKeyPath: config.privateKeyPath, now });
+      writeCache(path, { v: CACHE_VERSION, appId: config.appId, installationId: String(installationId), token: minted.token, expiresAt: minted.expiresAt });
+    } catch (e) {
+      log.error?.(`github-app-auth-env: could not refresh the token cache for owner ${owner} (installation ${installationId}); that owner falls back to personal auth: ${String((e && e.message) || e)}`);
+    }
+  }
+}
+
 export function withGithubAppAuth(effects, opts = { log: console }) {
   const tick = effects.tickOnce;
   return {

@@ -108,8 +108,8 @@ describe('the gh adapter', () => {
   });
 
   it('trims the repo slug it derives for a caller that omitted --repo', () => {
-    const p = createGhProvider({ exec: () => 'chalbert/web-everything\n' });
-    expect(p.currentRepo()).toBe('chalbert/web-everything');
+    const p = createGhProvider({ exec: () => 'web-everything/web-everything\n' });
+    expect(p.currentRepo()).toBe('web-everything/web-everything');
   });
 
   it('ensureLabel shells the exact argv GH_ARGV builds', () => {

@@ -446,13 +446,13 @@ describe('repo-aware ground truth', () => {
     const calls = [];
     const groundTruthFor = makeGroundTruthResolver({ exec: (file, args) => {
       calls.push([file, args]);
-      return JSON.stringify({ state: args.includes('chalbert/frontierui') ? 'OPEN' : 'MERGED' });
+      return JSON.stringify({ state: args.includes('frontier-ui/frontierui') ? 'OPEN' : 'MERGED' });
     } });
     const listing = ['review-49', 'review-fui-49', 'fix-fui-49'].map((name) => bg({ name, sessionId: name, state: 'working' }));
     const { reap, keep } = sessionReapPlan(listing, { groundTruthFor });
     expect(reap.map((r) => r.session.name)).toEqual(['review-49']);
     expect(keep.map((r) => r.session.name)).toEqual(['review-fui-49', 'fix-fui-49']);
-    expect(calls).toEqual(['chalbert/web-everything', 'chalbert/frontierui'].map((repo) => ['gh', ['pr', 'view', '49', '--repo', repo, '--json', 'state,mergedAt']]));
+    expect(calls).toEqual(['web-everything/web-everything', 'frontier-ui/frontierui'].map((repo) => ['gh', ['pr', 'view', '49', '--repo', repo, '--json', 'state,mergedAt']]));
   });
   it('keeps sessions on unknown repo or gh failure', () => {
     const listing = [bg({ name: 'review-fui-49', state: 'working' })];

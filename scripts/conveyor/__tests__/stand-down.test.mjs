@@ -31,7 +31,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const BRIEF = resolve(HERE, '../../../skills-src/conveyor/fix-agent-brief.md');
 
 // #3383 — every counter now also requires a TRUSTED author (`we:scripts/lib/marker-authorship.mjs`). This is the
-// real automation login, confirmed live (`chalbert/web-everything#2578`/`#2602`/`#2607`); fixtures below that
+// real automation login, confirmed live (`web-everything/web-everything#2578`/`#2602`/`#2607`); fixtures below that
 // exercise "a legitimate marker counts" attach it explicitly rather than relying on an implicit default.
 const AUTOMATION = { login: 'web-everything' };
 
@@ -290,7 +290,7 @@ describe('countTerminalStandDowns — excludes ONLY a SUPERSEDED, SELF-AUTHORED 
   });
 });
 
-// xaer296 follow-up (epic #3383) — CONFIRMED LIVE, `chalbert/web-everything#2549`, 2026-09-24: `viewerDidAuthor`
+// xaer296 follow-up (epic #3383) — CONFIRMED LIVE, `web-everything/web-everything#2549`, 2026-09-24: `viewerDidAuthor`
 // read `false` on EVERY marker comment this repo's own automation posted, from BOTH a personal-token read AND
 // the resident daemon's own real production read (loading a candidate fix into the daemon clone and running
 // `runReconcilePass` for real) — `reconcile-pass.mjs`'s discovery read never actually authenticates as the
