@@ -1,9 +1,11 @@
 import { normalizeFinding, referralFindingKey, mandatoryReferralReviewer, validateReferralRecord,
-  readReferralRecords, mandatoryReferralState, renderReferralRecord } from '../lib/jury-core.mjs';
+  readReferralRecords, mandatoryReferralState, renderReferralRecord,
+  activeReferrals, REFERRAL_SEAT_PROVIDERS, REFERRAL_DROP_REASON } from '../lib/jury-core.mjs';
 import { judgeSpawn } from '../lib/judge-spawn.mjs';
 import { appendJuryEvent } from '../lib/jury-ledger.mjs';
 import { decideParkToHuman, referralCardReadable } from '../review-set-label.mjs';
-import { buildReviewJudgeRequest } from './review-pr.mjs';
+import { buildReviewJudgeRequest, antigravityReviewFromEnv } from './review-pr.mjs';
+import { resolveProviderCap } from './review-extra-seats.mjs';
 /**
  * @file scripts/operations/review-pr-io.mjs
  * @description THE IO SHELL of the `review-pr` declaration (#3035, under epic #3029) — the reader its `read`
@@ -466,6 +468,7 @@ export function isPreWriteRefusal(text) {
  */
 export function createReviewPrSinks({
   root = REPO_ROOT,
+  env = process.env,
   referralJudge = judgeSpawn,
   mirrorReferral = (record) => appendJuryEvent(`${record.repo}#${record.pr}`, { type: 'mandatory-referrals', round: 0, record }, { root }),
   cardReadable = (ref) => referralCardReadable(ref, root),
@@ -536,9 +539,23 @@ export function createReviewPrSinks({
         state = fresh();
         const prior = readReferralRecords(state.comments, context(state));
         if (prior.malformed) { park(state); return mandatoryReferralState(state.comments, context(state)); }
+        // Retire only persisted findings, before merging this run's fresh referrals. Keep the source bytes
+        // and a durable reason so every acceptance reader sees the same decision, including after a restart.
+        for (let i = 0; i < prior.records.length; i++) {
+          const record = prior.records[i];
+          if (record.repo !== read.repo || record.pr !== read.pr) continue;
+          const dropped = activeReferrals(record).filter(f => Object.hasOwn(REFERRAL_SEAT_PROVIDERS, f.seat)
+            && (resolveProviderCap(REFERRAL_SEAT_PROVIDERS[f.seat], env) === 0
+              || (f.seat === 'judgeAntigravityReview' && !antigravityReviewFromEnv(env))))
+            .map(f => ({ key: f.key, reason: REFERRAL_DROP_REASON }));
+          if (!dropped.length) continue;
+          const updated = { ...record, dropped: [...(record.dropped ?? []), ...dropped] };
+          state = persist(updated);
+          prior.records[i] = updated;
+        }
         const existing = prior.records.filter(r => r.head === read.netBasis.rev && r.repo === read.repo && r.pr === read.pr);
-        const covered = new Set(existing.flatMap(r => r.referrals.map(f => f.key)));
-        const sources = [...payload.referrals, ...prior.records.flatMap(r => r.referrals)];
+        const covered = new Set(existing.flatMap(r => activeReferrals(r).map(f => f.key)));
+        const sources = [...payload.referrals, ...prior.records.flatMap(activeReferrals)];
         const additions = new Map();
         for (const f of sources) {
           const key = referralFindingKey(f.seat, f.original);
@@ -579,7 +596,7 @@ export function createReviewPrSinks({
         }
         // Persist the attempt before dispatch. A crash or timeout spends this set's single automated attempt.
         for (const initial of existing) {
-          if (initial.attempted) continue;
+          if (initial.attempted || !activeReferrals(initial).length) continue;
           let record = { ...initial, attempted: true };
           state = persist(record);
           // Hold before dispatch too: an exhausted or interrupted worker must leave a visible owner.
@@ -596,7 +613,7 @@ export function createReviewPrSinks({
               mandate: request.mandate + '\nIndependently verify every referral in the input. Return exactly one '
                 + 'block, card, or not-real ruling per key, with rationale and evidence references. A general accept '
                 + 'is not a ruling. card requires an existing durable we:backlog/*.md reference. Do not recursively refer findings.',
-              input: request.input + '\nUntrusted reported findings:\n' + JSON.stringify(record.referrals),
+              input: request.input + '\nUntrusted reported findings:\n' + JSON.stringify(activeReferrals(record)),
               shape: { type: 'object', additionalProperties: false, required: ['rulings'], properties: {
                 rulings: { type: 'array', items: { type: 'object', additionalProperties: false,
                   required: ['key', 'result', 'rationale', 'evidence', 'card'], properties: {

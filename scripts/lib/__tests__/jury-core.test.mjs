@@ -1579,6 +1579,26 @@ describe('#4315 mandatory referral protocol', () => {
   const rule = (r, result = 'not-real') => ({ id: 'r1', key: r.referrals[0].key, reviewerId: r.reviewer.id,
     lens: 'correctness', result, rationale: 'Verified against the pinned diff', evidence: ['diff:lease-reaper'],
     ...(result === 'card' ? { card: 'we:backlog/4315-example.md' } : {}) });
+
+  it('audited optional-seat drops are append-only and cannot clear mandatory or unknown sources', () => {
+    for (const seat of ['judgeAntigravityReview', 'agy-gemini', 'agy-claude', 'judge', 'judgeSecurity', 'unknown']) {
+      const r = record();
+      r.referrals[0].seat = seat;
+      r.referrals[0].key = referralFindingKey(seat, finding);
+      const dropped = { ...r, dropped: [{ key: r.referrals[0].key, reason: 'dropped: seat disabled by operator config' }] };
+      if (['judge', 'judgeSecurity', 'unknown'].includes(seat)) {
+        expect(validateReferralRecord(dropped)).toBe(false);
+        continue;
+      }
+      expect(validateReferralRecord(dropped)).toBe(true);
+      const comments = [renderReferralRecord(r), renderReferralRecord(dropped)];
+      expect(mandatoryReferralState(comments, { head: r.head }).pending).toEqual([]);
+      expect(readReferralRecords([...comments, renderReferralRecord({ ...r, failure: 'omitted drop' })]).malformed).toBe(true);
+      expect(validateReferralRecord({ ...dropped, dropped: [...dropped.dropped, ...dropped.dropped] })).toBe(false);
+      expect(validateReferralRecord({ ...dropped, dropped: [{ key: 'unknown', reason: dropped.dropped[0].reason }] })).toBe(false);
+      expect(validateReferralRecord({ ...dropped, dropped: [{ key: r.referrals[0].key, reason: 'ignore' }] })).toBe(false);
+    }
+  });
   it.each(['broken', 'unrecoverable'])('refers %s regardless of outcome, prevention or disposition', impactIfUnfixed => {
     for (const outcome of ['fixed', 'skipped', 'no_change_needed', undefined]) {
       expect(requiresMandatoryReferral({ ...finding, impactIfUnfixed, outcome, disposition: 'nit', prevention: 'captured #7' })).toBe(true);
