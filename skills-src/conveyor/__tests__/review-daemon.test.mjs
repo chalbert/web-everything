@@ -1413,3 +1413,42 @@ it('x6n7c2p required checks before review — synthetic #3432 four-tick soak spe
   expect(tagRound).toHaveBeenCalledTimes(1);
   expect(tagRound).toHaveBeenCalledWith(expect.objectContaining({ pr: 3432, round: 3 }));
 });
+
+it.each([false, true])('xux0rs9: a referral pause is announced once (parallel CI refusal: %s)', async parallel => {
+  const { mkdtempSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { notifyReferralHold } = await import('../../../scripts/conveyor/review-referral-hold.mjs');
+  const dir = mkdtempSync(join(tmpdir(), 'review-tick-hold-'));
+  const post = vi.fn(), log = vi.fn(), dispatch = vi.fn();
+  const hold = { head: 'a'.repeat(40), episode: 'hold-3481', count: 4,
+    why: 'review paused: 4 referrals need a ruling; it resumes on a new push, a ruling, or a send-back' };
+  const subject = { number: 3481, labels: [{ name: 'review:human' }, { name: 'review:pending' }], comments: [] };
+  const refusal = { kind: 'review-referrals-pending', prNumber: 3481, referralHold: hold, why: hold.why };
+  const plan = { dispatch: [], refusals: [parallel ? { kind: 'owed-ci-rerun', prNumber: 3481, reviewRefusal: refusal } : refusal] };
+  try {
+    for (let tick = 0; tick < 3; tick++) {
+      runReviewTick({ repo: 'chalbert/web-everything', reconcile: () => plan, dispatch,
+        readPrs: () => [subject], readAgents: () => [], holdReconcile: () => [],
+        tagRound: vi.fn(), tagStatus: vi.fn(),
+        notifyReferral: args => notifyReferralHold({ ...args, dir, post, log }),
+      });
+    }
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(log).toHaveBeenCalledTimes(1);
+    expect(explainPendingNotDispatched({ prs: [subject], plan })).toEqual([]);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+it('xux0rs9: an unreadable notice receipt does not prevent another PR from being reviewed', () => {
+  const dispatch = vi.fn(() => ({ agentId: 'new-review' }));
+  const result = runReviewTick({ repo: 'chalbert/web-everything',
+    reconcile: () => ({ dispatch: [{ kind: 'review', prNumber: 3508 }], refusals: [
+      { kind: 'review-referrals-pending', prNumber: 3481, referralHold: { episode: 'broken-receipt' } },
+    ] }), dispatch, holdReconcile: () => [], tagRound: vi.fn(), tagStatus: vi.fn(),
+    notifyReferral: () => { throw Error('unreadable receipt'); },
+  });
+  expect(dispatch).toHaveBeenCalledTimes(1);
+  expect(result.failed).toContainEqual({ prNumber: 3481, error: 'pause notice: unreadable receipt' });
+});
