@@ -2349,9 +2349,10 @@ export function readReferralRecords(comments, { head } = {}) {
   const seen = new Set();
   let malformed = !Array.isArray(comments);
   // Only a decoded, full SHA can prove corruption belongs to a different head.
-  // Without a current head, retain the historical fail-closed reader behavior.
+  // Without a current head, retain the historical fail-closed reader behavior. The typeof check matters:
+  // RegExp.test coerces its argument, so a decoded `head: [sha]` would pass the regex yet fail `===`.
   const holdsHead = (r) => !/^[a-f0-9]{40}$/.test(head ?? '')
-    || !/^[a-f0-9]{40}$/.test(r?.head ?? '') || r.head === head;
+    || typeof r?.head !== 'string' || !/^[a-f0-9]{40}$/.test(r.head) || r.head === head;
   for (const comment of Array.isArray(comments) ? comments : []) {
     const body = typeof comment === 'string' ? comment : comment?.body ?? '';
     if (!body.includes(REFERRAL_RECORD_MARKER)) continue;

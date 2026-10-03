@@ -1051,7 +1051,44 @@ describe('#4315 durable referral effects', () => {
       mirrorReferral: record => trace.push(`mirror:${record.attempted}`), out: () => {}, cardReadable: () => failure !== 'card' });
     return { state, trace, payload, judge, make, provider };
   }
-  it.each(['post', 'read-back', 'changed-head'])('%s cannot clear a hold or dispatch before persistence', async failure => {
+  it('a head that moves mid-run leaves labels and comments untouched and is retried against the new head', async () => {
+    const h = harness({ failure: 'changed-head' });
+    await expect(h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX)).rejects.toThrow(/reviewed head changed/);
+    expect(h.judge).not.toHaveBeenCalled();
+    // The hold the earlier pass left stays exactly as it was: not parked to review:human, no park comment.
+    expect(h.state.labels).toEqual(['review:pending']);
+    expect(h.state.comments.some(c => c.body.includes('parked to review:human'))).toBe(false);
+  });
+  it('resuming after a partial chunk post keeps every chunk runId unique and reads back non-malformed', async () => {
+    const h = harness();
+    const seat = h.payload.referrals[0].seat;
+    h.payload.referrals = Array.from({ length: 20 }, (_, i) => ({ seat,
+      original: { ...h.payload.referrals[0].original, summary: `finding ${i}`, detail: 'evidence '.repeat(500) } }));
+    const record = (b) => b.includes('<!-- mandatory-referrals-v1:');
+    const post = h.provider.postComment;
+    let recordPosts = 0;
+    h.provider.postComment = (repo, pr, body) => {
+      if (record(body) && ++recordPosts === 2) throw new Error('post unavailable'); // chunk 1 lands, chunk 2 fails
+      post(repo, pr, body);
+    };
+    const first = await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX);
+    expect(first.pending).toEqual(['referral-persistence-failed']);
+    expect(readReferralRecords(h.state.comments).records).toHaveLength(1);
+    h.provider.postComment = post;
+    h.state.labels = ['review:pending'];
+    // Same ctx.runId: chunk 1's runId is already taken by the record that landed.
+    const second = await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX);
+    expect(second.pending).toEqual([]);
+    const parsed = readReferralRecords(h.state.comments, { head: h.state.headRefOid });
+    expect(parsed.malformed).toBe(false);
+    const current = parsed.records.filter(r => r.head === h.state.headRefOid);
+    expect(current.length).toBeGreaterThan(1);
+    expect(new Set(current.map(r => r.runId)).size).toBe(current.length);
+    const keys = current.flatMap(r => r.referrals.map(f => f.key));
+    expect(new Set(keys).size).toBe(20);
+    expect(keys).toHaveLength(20);
+  });
+  it.each(['post', 'read-back'])('%s cannot clear a hold or dispatch before persistence', async failure => {
     const h = harness({ failure });
     const result = await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX);
     expect(result.pending).toEqual(['referral-persistence-failed']);

@@ -1622,6 +1622,12 @@ describe('#4315 mandatory referral protocol', () => {
     for (const head of [current, undefined, '4489a34', 'invalid']) {
       expect(mandatoryReferralState([malformed(head)], { head: current }).pending).toContain('malformed-referral-record');
     }
+    // A non-string head never proves the record belongs to an older head — RegExp.test coerces `[sha]` to `sha`,
+    // so only a typed string may release the hold. Arrays naming the current OR an older sha, objects and
+    // numbers all keep the hold.
+    for (const head of [[current], [r.head], { toString: () => current }, 123, true, null]) {
+      expect(mandatoryReferralState([malformed(head)], { head: current }).pending).toContain('malformed-referral-record');
+    }
     for (const marker of ['<!-- mandatory-referrals-v1: %truncated', '<!-- mandatory-referrals-v1: %invalid -->']) {
       expect(mandatoryReferralState([...comments, marker], { head: current }).pending).toContain('malformed-referral-record');
     }

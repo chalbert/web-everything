@@ -64,6 +64,9 @@ import { REVIEW_LABELS, hasReviewLabel } from '../lib/review-escalation.mjs';
 
 export { PR_VIEW_FIELDS, prViewFileName };
 
+/** The PR head moved while a referral pass was mid-run — a routine push race, never a reason to park for a human. */
+class HeadChangedError extends Error {}
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 /** The repo root, resolved by SCRIPT LOCATION and never by cwd — same reason `run-store.mjs` does it. */
 export const REPO_ROOT = resolve(HERE, '..', '..');
@@ -501,7 +504,7 @@ export function createReviewPrSinks({
       const commentBudget = 60_000;
       const fresh = () => {
         const state = labelProvider.readPrState(read.repo, read.pr);
-        if (state.headRefOid !== read.netBasis.rev) throw new Error('mandatory referral: reviewed head changed; hold retained');
+        if (state.headRefOid !== read.netBasis.rev) throw new HeadChangedError('mandatory referral: reviewed head changed; hold retained');
         if (!Array.isArray(state.comments)) throw new Error('mandatory referral: comments unavailable; hold retained');
         return state;
       };
@@ -621,8 +624,11 @@ export function createReviewPrSinks({
         for (const record of result.records) mirrorReferral(record);
         return result;
       } catch (error) {
+        // A push that lands mid-run is a routine race, not a persistence refusal: rethrow so the hold the earlier
+        // pass left stays as-is and the effect is retried against the new head, never parked for a human.
+        if (error instanceof HeadChangedError) throw error;
         // A persistence refusal is terminal for automation, including a failed failure snapshot.
-        // Re-read labels without the head guard: a moved head must still get a visible owner.
+        // Re-read labels without the head guard so the park lands on the PR's live labels.
         let live = state;
         try { live = labelProvider.readPrState(read.repo, read.pr); }
         catch (readError) { out(`Could not refresh referral park labels: ${readError.message}`); }
