@@ -43,6 +43,8 @@ import { ADVISORY_NOTE_MARKER } from './advisory-round-count.mjs';
 // on which notes exist again.
 import { CONVERTED_ADVISORY_NOTE_MARKER } from '../lib/review-escalation.mjs';
 import { STAND_DOWN_MARKER, isSelfAuthored } from './stand-down.mjs';
+import { FIX_BEGIN_MARKER, FIX_END_MARKER } from './fix-procedure.mjs';
+import { REARM_COMMENT_MARKER } from './rearm-review.mjs';
 
 /** #xconv1-evidence — pure: is comment `c` a TRUSTED advisory note — its leading line EITHER shape of note (a
  *  fresh `advise`-step one, or a converted #xconv1 one) AND its author passes `isTrustedMarkerAuthor`?
@@ -277,7 +279,9 @@ export function isLatestAdvisoryFindingAddressed(comments) {
  *      `viewerDidAuthor` as an additional accepted path; a forged body can never satisfy either, the same
  *      fail-closed direction `isStandDownSuperseded` uses);
  *   2. among every comment BEFORE it, the latest advisory note already has a SELF-AUTHORED advisory-fix mark
- *      after it — i.e. {@link isLatestAdvisoryFindingAddressed} was already true at the moment this fixer ran.
+ *      after it — i.e. {@link isLatestAdvisoryFindingAddressed} was already true at the moment this fixer ran;
+ *   3. no trusted fix-begin, fix-end, re-arm or review verdict separates that mark from the stand-down.
+ *      These boundaries end its cycle; an old fix must never answer a later cycle's escalation (#3507).
  * A stand-down with no advisory-note history before it (unrelated to this population), or one posted before
  * any fix-mark existed (a genuine, still-current judgment call), is NEVER superseded by this check.
  * @param {Array<{body?:string, viewerDidAuthor?:boolean}|string>|null|undefined} comments
@@ -296,14 +300,23 @@ export function isAdvisoryMechanismStandDownSuperseded(comments, index) {
     if (isTrustedAdvisoryNote(before[i])) lastNoteIndex = i;
   }
   if (lastNoteIndex === -1) return false;
+  let fixedInCycle = false;
   for (let j = lastNoteIndex + 1; j < before.length; j += 1) {
     const b = before[j];
     const bBody = typeof b === 'string' ? b : b?.body;
-    if (typeof bBody === 'string' && bBody.trimStart().startsWith(ADVISORY_FIX_COMMENT_MARKER) && isSelfAuthored(b)) {
-      return true;
+    if (typeof bBody !== 'string') continue;
+    const head = bBody.trimStart();
+    // Verdict headings come from we:scripts/review-set-label.mjs#buildVerdictComment.
+    // Leading markers and trusted authors keep quoted/forged bookkeeping from changing the cycle.
+    if (isTrustedMarkerAuthor(b) && (
+      [FIX_BEGIN_MARKER, FIX_END_MARKER, REARM_COMMENT_MARKER].some((marker) => head.startsWith(marker))
+      || /^(?:✅|🔁|📌) review — /.test(head)
+    )) fixedInCycle = false;
+    if (head.startsWith(ADVISORY_FIX_COMMENT_MARKER) && isSelfAuthored(b)) {
+      fixedInCycle = true;
     }
   }
-  return false;
+  return fixedInCycle;
 }
 
 // ── IO SHELL (runs only as a CLI — the pure exports above stay side-effect-free on import) ────────────────────────

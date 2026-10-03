@@ -6,6 +6,10 @@
  *   (automation or the repo operator) counts at all; no test file existed for this counter before this item.
  */
 import { describe, it, expect } from 'vitest';
+import standDown3507 from './fixtures/stand-down-3507.json';
+import { FIX_BEGIN_MARKER, FIX_END_MARKER } from '../fix-procedure.mjs';
+import { REARM_COMMENT_MARKER } from '../rearm-review.mjs';
+import { buildVerdictComment } from '../../review-set-label.mjs';
 import {
   countAdvisoryFixComments, buildAdvisoryFixComment, ADVISORY_FIX_COMMENT_MARKER,
   isLatestAdvisoryFindingAddressed, isAdvisoryMechanismStandDownSuperseded,
@@ -17,6 +21,41 @@ import { STAND_DOWN_MARKER } from '../stand-down.mjs';
 
 const AUTOMATION = { login: 'web-everything' };
 const FRESH_NOTE = `${ADVISORY_NOTE_MARKER}\n\nan ordinary advise-step advisory note`;
+
+describe('#3507 — advisory supersede stays inside the fix cycle', () => {
+  const note = { body: FRESH_NOTE, author: AUTOMATION };
+  const fix = { body: buildAdvisoryFixComment(), author: AUTOMATION };
+  const stop = { body: STAND_DOWN_MARKER, author: AUTOMATION };
+  const boundaries = [FIX_BEGIN_MARKER, FIX_END_MARKER, REARM_COMMENT_MARKER,
+    ADVISORY_NOTE_MARKER, CONVERTED_ADVISORY_NOTE_MARKER,
+    ...['changes', 'accepted', 'clear-human', 'restamp'].map((to) => buildVerdictComment({ to })),
+  ];
+  it.each(boundaries)('an intervening %s ends the old fix cycle', (body) => {
+    for (const login of ['web-everything', 'chalbert']) {
+      const boundary = { body, author: { login } };
+      expect(isAdvisoryMechanismStandDownSuperseded([note, fix, boundary, stop], 3)).toBe(false);
+      expect(isAdvisoryMechanismStandDownSuperseded([note, boundary, fix, stop], 3)).toBe(true);
+      expect(isAdvisoryMechanismStandDownSuperseded([note, fix, boundary, fix, stop], 4)).toBe(true);
+      const forgedFix = { ...fix, author: { login: 'mallory' } };
+      expect(isAdvisoryMechanismStandDownSuperseded([note, fix, boundary, forgedFix, stop], 4)).toBe(false);
+    }
+    expect(isAdvisoryMechanismStandDownSuperseded([note, fix, { body, author: { login: 'mallory' } }, stop], 3)).toBe(true);
+    expect(isAdvisoryMechanismStandDownSuperseded([note, fix, { body: `> ${body}`, author: AUTOMATION }, stop], 3)).toBe(true);
+    expect(isAdvisoryMechanismStandDownSuperseded([note, fix, stop, { body, author: AUTOMATION }], 2)).toBe(true);
+  });
+  it('replays #3507’s observed comment order without superseding the 23:09 stand-down', () => {
+    const { comments } = standDown3507;
+    expect(comments.at(-1).createdAt).toBe('2026-10-02T23:09:03Z');
+    expect(isAdvisoryMechanismStandDownSuperseded(comments, comments.length - 1)).toBe(false);
+  });
+  it('ordinary discussion and elapsed time alone do not end a cycle', () => {
+    expect(isAdvisoryMechanismStandDownSuperseded([
+      note, { ...fix, createdAt: '2026-10-02T18:34:49Z' },
+      { body: 'Thanks for the fix.', author: AUTOMATION },
+      { ...stop, createdAt: '2026-10-02T23:09:03Z' },
+    ], 3)).toBe(true);
+  });
+});
 
 describe('countAdvisoryFixComments — the durable, restart-surviving advisory-fix attempt count (#xkmu3gv)', () => {
   it('counts one per comment whose LEADING line is the marker', () => {
