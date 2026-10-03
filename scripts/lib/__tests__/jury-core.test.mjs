@@ -1,4 +1,4 @@
-import { requiresMandatoryReferral, referralFindingKey, mandatoryReferralReviewer, validateReferralRecord, referralRecordState, renderReferralRecord, readReferralRecords } from '../jury-core.mjs';
+import { requiresMandatoryReferral, referralFindingKey, mandatoryReferralReviewer, validateReferralRecord, referralRecordState, renderReferralRecord, readReferralRecords, mandatoryReferralState } from '../jury-core.mjs';
 /**
  * @file jury-core.test.mjs — proof of the #2654 (S2 of epic #2649) append-only JURY-LEDGER EVENT VOCABULARY:
  *   the `JURY_EVENT_TYPES` / `JUROR_STATUSES` enums and the pure `validateJuryEvent` / `normalizeJuryEvent`
@@ -1609,6 +1609,38 @@ describe('#4315 mandatory referral protocol', () => {
       expect(state.blocked).toHaveLength(result === 'block' ? 1 : 0);
       if (result === 'card') expect(referralRecordState(r).pending).toHaveLength(1);
     }
+  });
+  it('ignores decoded malformed records only on a different full head', () => {
+    const r = record();
+    const malformed = (head) => `<!-- mandatory-referrals-v1: ${encodeURIComponent(JSON.stringify({ ...r, head, reviewer: {} }))} -->`;
+    const current = 'b'.repeat(40);
+    const comments = [malformed(r.head)];
+    expect(readReferralRecords(comments).malformed).toBe(true);
+    expect(mandatoryReferralState(comments, { head: current }).pending).toEqual([]);
+    expect(mandatoryReferralState([malformed(r.head).replace(' -->', '')], { head: current }).pending).toEqual([]);
+    expect(mandatoryReferralState([malformed(current).replace(' -->', '')], { head: current }).pending).toContain('malformed-referral-record');
+    for (const head of [current, undefined, '4489a34', 'invalid']) {
+      expect(mandatoryReferralState([malformed(head)], { head: current }).pending).toContain('malformed-referral-record');
+    }
+    // A non-string head never proves the record belongs to an older head — RegExp.test coerces `[sha]` to `sha`,
+    // so only a typed string may release the hold. Arrays naming the current OR an older sha, objects and
+    // numbers all keep the hold.
+    for (const head of [[current], [r.head], { toString: () => current }, 123, true, null]) {
+      expect(mandatoryReferralState([malformed(head)], { head: current }).pending).toContain('malformed-referral-record');
+    }
+    for (const marker of ['<!-- mandatory-referrals-v1: %truncated', '<!-- mandatory-referrals-v1: %invalid -->']) {
+      expect(mandatoryReferralState([...comments, marker], { head: current }).pending).toContain('malformed-referral-record');
+    }
+  });
+  it('scopes conflicting snapshots to their head without carrying old clearance forward', () => {
+    const r = record();
+    r.rulings = [rule(r)];
+    const comments = [renderReferralRecord(r), renderReferralRecord({ ...r, rulings: [] })];
+    expect(mandatoryReferralState(comments, { head: r.head }).pending).toContain('malformed-referral-record');
+    const next = mandatoryReferralState(comments, { head: 'b'.repeat(40) });
+    expect(next.malformed).toBe(false);
+    expect(next.pending).toEqual([r.referrals[0].key]);
+    expect(readReferralRecords(comments).malformed).toBe(true);
   });
   it('preserves conflicts until explicit supersession, and fails closed on omissions/corruption', () => {
     const r = record(), pending = renderReferralRecord(r);

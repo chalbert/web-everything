@@ -40,6 +40,8 @@ import { isBudgetRefusal, postPrComment, recordOwedWrite, resolveOwedRepo } from
  * {@link countCiHealComments} MATCHES it to recover the attempt count from the PR (#2666). Distinct from the fix
  * loop's re-arm marker so the two durable floors never cross-count.
  */
+export const CI_HEAL_FAILURE_MARKER = '🩹 conveyor CI-heal — failed attempt';
+
 export const CI_HEAL_COMMENT_MARKER = '🩹 conveyor CI-heal — rebased & re-pushed';
 
 /**
@@ -56,12 +58,64 @@ export const CI_HEAL_COMMENT_MARKER = '🩹 conveyor CI-heal — rebased & re-pu
 export function countCiHealComments(comments) {
   if (!Array.isArray(comments)) return 0;
   let n = 0;
+  const attempts = new Set();
   for (const c of comments) {
     const body = typeof c === 'string' ? c : c?.body;
     // #3383 — a forged CI-heal marker from an untrusted login must not inflate this PR's CI-heal round cap.
-    if (typeof body === 'string' && body.trimStart().startsWith(CI_HEAL_COMMENT_MARKER) && isTrustedMarkerAuthor(c)) n += 1;
+    if (typeof body !== 'string' || !isTrustedMarkerAuthor(c)) continue;
+    const first = body.trimStart().split('\n')[0];
+    if (!first.startsWith(CI_HEAL_COMMENT_MARKER) && first !== CI_HEAL_FAILURE_MARKER) continue;
+    const attempt = /^attempt: ([a-zA-Z0-9_-]+)$/m.exec(body)?.[1];
+    if (first === CI_HEAL_FAILURE_MARKER && !attempt) continue;
+    if (attempt && attempts.has(attempt)) continue;
+    if (attempt) attempts.add(attempt);
+    n += 1;
   }
   return n;
+}
+
+/** Built from code points, not literals, so no invisible character lives in this source (#2866). */
+const ZERO_WIDTH_SPACE = String.fromCharCode(0x200b);
+const CONTROL_AND_LINE_SEPARATORS = new RegExp(`[\\r\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f\\u007f${String.fromCharCode(0x85, 0x2028, 0x2029)}]`, 'g');
+
+/**
+ * we:scripts/conveyor/ci-heal-mark.mjs#sanitizeForPublicComment — make untrusted worker/log text safe to quote in a
+ * public comment posted under the trusted automation login (#3577 review). Redacts secret-shaped strings, URL
+ * credentials and home paths, defuses HTML-comment markers and @mentions, drops control characters, keeps only the
+ * last `max` characters, and indents every line so none can start with a line-anchored marker (`attempt:`/`head:`)
+ * that a trusted-marker reader would take as authoritative. Pure.
+ * @param {unknown} text
+ * @param {{max?:number}} [o]
+ * @returns {string}
+ */
+export function sanitizeForPublicComment(text, { max = 1000 } = {}) {
+  // Redact BEFORE truncating: a cut that slices a secret's prefix off would otherwise leave its tail unrecognisable.
+  return redactSecrets(text).slice(-max).split('\n').map((line) => `    ${line}`).join('\n');
+}
+
+/**
+ * we:scripts/conveyor/ci-heal-mark.mjs#redactSecrets — the redaction half of {@link sanitizeForPublicComment}, with
+ * NO truncation or indentation. Every caller that must shorten untrusted text (worker output, a log tail) calls
+ * this FIRST and cuts the result: a cut taken before redaction can slice a credential's recognisable prefix off and
+ * leave its tail unredactable (#3577 round 2). A denylist, so it is hygiene for local records, never the only thing
+ * standing between untrusted text and a public comment. Pure.
+ * @param {unknown} text
+ * @returns {string}
+ */
+export function redactSecrets(text) {
+  return String(text ?? '')
+    .replace(CONTROL_AND_LINE_SEPARATORS, '')
+    .replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g, '[redacted private key]')
+    .replace(/(\/\/)[^/\s@]+@/g, '$1[redacted]@')
+    .replace(/\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|glpat-[A-Za-z0-9_-]{16,}|npm_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9_-]{16,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_-]{20,}|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]*)/g, '[redacted]')
+    .replace(/\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{8,}/gi, '$1 [redacted]')
+    // key=value, key: value, "key": "value", --key value — quoted values may hold spaces.
+    // The leading run is BOUNDED: an unbounded `[A-Za-z0-9_]*` re-scans a long alphanumeric run from every start
+    // position (quadratic — 80k chars took ~17s), and callers now redact before they cut.
+    .replace(/(["']?)(--?)?([A-Za-z0-9_]{0,48}(?:token|secret|password|passwd|api[_-]?key|auth|credential)[A-Za-z0-9_-]*)\1(\s*[=:]\s*|\s+)("[^"]*"|'[^']*'|\S+)/gi, (m, _q, dashes, key, sep) => (dashes || /[=:]/.test(sep) ? `${dashes ?? ''}${key}=[redacted]` : m))
+    .replace(/(?:\/Users|\/home)\/[^/\s]+|[A-Za-z]:\\Users\\[^\\\s]+/g, '~')
+    .replace(/<!--|-->/g, '[comment]')
+    .replace(/@(?=[A-Za-z0-9])/g, `@${ZERO_WIDTH_SPACE}`);
 }
 
 /**
@@ -75,16 +129,17 @@ export function countCiHealComments(comments) {
  * @param {{ actor?:string, reason?:string, headSha?:string }} o
  * @returns {string}
  */
-export function buildCiHealComment({ actor = 'conveyor CI-heal agent', reason = '', headSha = '' } = {}) {
+export function buildCiHealComment({ actor = 'conveyor CI-heal agent', reason = '', headSha = '', attemptId = null, failed = false, detail = '' } = {}) {
   const why = reason === 'behind' ? 'the branch had fallen BEHIND `main`'
     : reason === 'red-ci' ? 'a required check had gone red after open'
     : 'a required check regressed after open';
   const head = typeof headSha === 'string' ? headSha.trim().toLowerCase() : '';
   return [
-    CI_HEAL_COMMENT_MARKER,
+    failed ? CI_HEAL_FAILURE_MARKER : CI_HEAL_COMMENT_MARKER,
+    ...(attemptId ? [`attempt: ${attemptId}`] : []),
     ...(head ? [`head: ${head}`] : []),
     '',
-    `${why}; ${actor} rebased onto current \`main\`, repaired the failing check, and re-pushed HEAD.`,
+    failed ? `The executor did not complete a repair. Diagnostics (untrusted, redacted, truncated):\n\n${sanitizeForPublicComment(detail)}\n\nExit/quota evidence is unknown unless explicitly recorded. CI remains unproven.` : `${why}; ${actor} rebased onto current \`main\`, repaired the failing check, and re-pushed HEAD.`,
     'This records the CI repair, not a review verdict. Existing `review:human` / `review:pending` holds stay in place; ' +
       'a live `review:accepted` may be re-armed separately for review. The drain lands it once green and reviewed.',
   ].join('\n');
@@ -204,6 +259,39 @@ function restoreHealRouting({ pr, repo, headSha, currentHead = false }) {
 }
 
 // ── IO SHELL (runs only as a CLI — the pure exports above stay side-effect-free on import) ────────────────────────
+/** Existing successful-heal review hand-back, shared with attempt-accounted probation heals. */
+export function handBackCiHealReview({ pr, repo, headSha, cwd = process.cwd(), actor,
+  exec = execFileSync, restamp = spawnCiHealRestamp, rearm = spawnCiHealRearm, restore = restoreHealRouting } = {}) {
+  let rearmed = false;
+  let restamped = false;
+  let restored;
+  let carryReason;
+  try {
+    const viewArgs = ['pr', 'view', String(pr), '--json', 'labels'];
+    if (repo) viewArgs.push(`--repo=${repo}`);
+    const raw = exec('gh', viewArgs, { stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8', timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL' });
+    const labels = JSON.parse(raw || '{}').labels;
+    if (hasReviewLabel(labels, REVIEW_LABELS.accepted)) {
+      const handback = {
+        pr, repo, cwd, actor,
+      };
+      const carry = restamp({ ...handback, headSha });
+      restamped = carry.ok;
+      if (!restamped) {
+        carryReason = carry.reason;
+        rearmed = rearm(handback).ok;
+      }
+    } else if (missingHealRouting(labels)) {
+      ({ restored } = restore({ pr, repo, headSha }));
+    }
+  } catch (e) {
+    carryReason = String(e.message || e);
+    // Best-effort (see the header) — an unreadable label state or a failed rearm never fails this CLI's own
+    // exit code; the stale acceptance (if any) is caught by the next push through this same path, or by a human.
+  }
+  return { restamped, rearmed, ...(restored ? { restored } : {}), ...(carryReason ? { carryReason } : {}) };
+}
+
 const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(new URL(import.meta.url).pathname);
 if (IS_CLI) {
   const argv = process.argv.slice(2);
@@ -259,35 +347,6 @@ if (IS_CLI) {
   if (!posted.commented) {
     process.stderr.write(`⚠ CI-heal comment on PR #${pr} refused by the GitHub budget — recorded owed (head ${headSha}); the next ci-heal-pr-dispatch tick posts it\n`);
   }
-  let rearmed = false;
-  let restamped = false;
-  let restored;
-  let carryReason;
-  try {
-    const viewArgs = ['pr', 'view', String(pr), '--json', 'labels'];
-    if (typeof flags.repo === 'string') viewArgs.push(`--repo=${flags.repo}`);
-    const raw = execFileSync('gh', viewArgs, { stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8', timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL' });
-    const labels = JSON.parse(raw || '{}').labels;
-    if (hasReviewLabel(labels, REVIEW_LABELS.accepted)) {
-      const handback = {
-        pr, repo: typeof flags.repo === 'string' ? flags.repo : owedRepo?.slug,
-        cwd: process.cwd(), actor: typeof flags.actor === 'string' ? flags.actor : undefined,
-      };
-      const carry = spawnCiHealRestamp({ ...handback, headSha });
-      restamped = carry.ok;
-      if (!restamped) {
-        carryReason = carry.reason;
-        rearmed = spawnCiHealRearm(handback).ok;
-      }
-    } else if (missingHealRouting(labels)) {
-      ({ restored } = restoreHealRouting({
-        pr, repo: typeof flags.repo === 'string' ? flags.repo : owedRepo?.slug, headSha,
-      }));
-    }
-  } catch (e) {
-    carryReason = String(e.message || e);
-    // Best-effort (see the header) — an unreadable label state or a failed rearm never fails this CLI's own
-    // exit code; the stale acceptance (if any) is caught by the next push through this same path, or by a human.
-  }
-  process.stdout.write(JSON.stringify({ ok: true, pr, commented: posted.commented, ...(posted.owed ? { owed: true } : {}), restamped, rearmed, ...(restored ? { restored } : {}), ...(carryReason ? { carryReason } : {}) }) + '\n');
+  const handback = handBackCiHealReview({ pr, repo: typeof flags.repo === 'string' ? flags.repo : owedRepo?.slug, headSha, actor: typeof flags.actor === 'string' ? flags.actor : undefined });
+  process.stdout.write(JSON.stringify({ ok: true, pr, commented: posted.commented, ...(posted.owed ? { owed: true } : {}), ...handback }) + '\n');
 }
