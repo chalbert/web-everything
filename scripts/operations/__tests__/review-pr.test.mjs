@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { referralFindingKey, normalizeFinding, renderReferralRecord, mandatoryReferralReviewer } from '../../lib/jury-core.mjs';
 import { createReviewPrSinks } from '../review-pr-io.mjs';
 import { assertMandatoryReferralsCleared } from '../../review-set-label.mjs';
 /**
@@ -110,7 +112,7 @@ function stubReader({
   netRev = 'def456',
   // #xwp8ioh — a reviewable PR is OPEN. Defaulted so every OTHER test keeps describing the case it was
   // written for; overridden only by the liveness tests.
-  state = 'OPEN',
+  state = 'OPEN', comments = [],
   // #xwk0tzu — the three fields the independence refusal reads. Defaulted to the SHAPE EVERY OTHER TEST WAS
   // ALREADY WRITTEN AGAINST — an unstamped body and no harness session, i.e. `unknown-clearer`, which
   // proceeds — so adding the guard changes nothing for a suite that is about something else. The
@@ -126,6 +128,7 @@ function stubReader({
 } = {}) {
   return ({ pr, repo }) => ({
     state,
+    comments,
     clearerId,
     createdAt,
     detail: {
@@ -3663,7 +3666,7 @@ describe('#4315 incident-shaped mandatory referral', () => {
     const sinks = createReviewPrSinks({ out: () => {}, mirrorReferral: () => {}, referralJudge: judge,
       labelProvider: {
         readPrState: () => { trace.push('read'); return structuredClone(state); },
-        postComment: (repo, pr, body) => { trace.push('post'); state.comments.push({ body }); },
+        postComment: (repo, pr, body) => { trace.push('post'); state.comments.push({ body, author: { login: 'web-everything' } }); },
         setLabels: (repo, pr, plan) => { trace.push(plan.add); state.labels = [...new Set([...state.labels.filter(l => !plan.remove.includes(l)), plan.add])]; },
       } });
     ({ run } = await applyPendingEffects(run, { sinks, store: createMemoryRunStore() }));
@@ -3686,12 +3689,22 @@ describe('#4315 operation / I/O restart soak', () => {
     '%s cannot bypass a missing mandatory ruling (25 restarts)', async seat => {
       const source = { summary: 'confirmed off-scope defect', file: 'outside-diff.mjs', verdict: 'CONFIRMED',
         impactIfUnfixed: 'broken', outcome: 'fixed', prevention: 'captured #7', disposition: 'nit' };
-      const { registry } = registryFor({ netRev: PINNED_HEAD }, { codexAdvisory: true, correctnessAdvisory: true, antigravityReview: true });
-      const state = { headRefOid: PINNED_HEAD, body: '<!-- authored-by-actor: author -->', comments: [], labels: ['review:pending'] };
+      const comments = [];
+      if (seat === 'judgeAntigravityReview') {
+        // A legacy obligation and the stronger fresh confirmation requirement each get
+        // one attempt; neither can be bypassed through subsequent restarts.
+        const record = { version: 1, repo: 'o/r', pr: 7, head: PINNED_HEAD, runId: 'legacy-tool-less',
+          reviewer: mandatoryReferralReviewer('legacy-tool-less'), authorBody: '<!-- authored-by-actor: author -->',
+          attempted: false, referrals: [{ key: referralFindingKey(seat, source), seat, original: source,
+            finding: normalizeFinding(source) }], rulings: [] };
+        comments.push({ body: renderReferralRecord(record), author: { login: 'web-everything' } });
+      }
+      const { registry } = registryFor({ netRev: PINNED_HEAD, comments }, { codexAdvisory: true, correctnessAdvisory: true, antigravityReview: true });
+      const state = { headRefOid: PINNED_HEAD, body: '<!-- authored-by-actor: author -->', comments, labels: ['review:pending'] };
       const trace = [], judge = vi.fn(async () => ({ value: { rulings: [] } }));
       const provider = {
         readPrState: () => { trace.push('read'); return structuredClone(state); },
-        postComment: (repo, pr, body) => { trace.push('post'); state.comments.push({ body }); },
+        postComment: (repo, pr, body) => { trace.push('post'); state.comments.push({ body, author: { login: 'web-everything' } }); },
         setLabels: (repo, pr, plan) => { trace.push(`label:${plan.add}`); state.labels = [...state.labels.filter(l => !plan.remove.includes(l)), plan.add]; },
       };
       for (let restart = 0; restart < 25; restart++) {
@@ -3712,7 +3725,7 @@ describe('#4315 operation / I/O restart soak', () => {
         expect(() => assertMandatoryReferralsCleared(state, { repo: 'o/r', pr: 7 })).toThrow(/mandatory referral hold/);
         expect(() => advanceWhileRunning(run, { registry, resume: { value: 'accept' } })).toThrow(/ruling required/);
       }
-      expect(judge).toHaveBeenCalledTimes(1);
+      expect(judge).toHaveBeenCalledTimes(seat === 'judgeAntigravityReview' ? 2 : 1);
       expect(state.labels).toEqual(['review:human']);
       expect(trace.indexOf('post')).toBeLessThan(trace.findIndex(x => x.startsWith('label:')));
       expect(trace).not.toContain('label:review:accepted');
@@ -3721,7 +3734,7 @@ describe('#4315 operation / I/O restart soak', () => {
     const { registry } = registryFor({ netRev: PINNED_HEAD }, { correctnessAdvisory: true });
     const state = { headRefOid: PINNED_HEAD, body: '<!-- authored-by-actor: author -->', comments: [], labels: ['review:pending'] };
     const provider = { readPrState: () => structuredClone(state),
-      postComment: (repo, pr, body) => state.comments.push({ body }), setLabels: () => {} };
+      postComment: (repo, pr, body) => state.comments.push({ body, author: { login: 'web-everything' } }), setLabels: () => {} };
     let run = advanceWhileRunning(startRun({ op: REVIEW_PR_OP, id: 'run-ruling', input: { pr: 7, repo: 'o/r' }, registry }), { registry });
     while (run.pending?.kind === 'judge') {
       run = advanceWhileRunning(run, { registry, resume: { value: run.pending.step === 'judgeCorrectnessAdvisory'
@@ -3743,5 +3756,116 @@ describe('#4315 operation / I/O restart soak', () => {
     expect(run.verdict.verdict).toBe(result === 'block' ? 'changes' : 'accept');
     if (result === 'block') expect(() => assertMandatoryReferralsCleared(state, { repo: 'o/r', pr: 7, cardReadable: () => true })).toThrow();
     else expect(assertMandatoryReferralsCleared(state, { repo: 'o/r', pr: 7, cardReadable: () => true }).pending).toEqual([]);
+  });
+});
+
+describe('xfkqowg tool-less advisory and historical ruling replay', () => {
+  async function drive({ records = [], source, result = 'not-real', human = true, runId = 'confirmation', body = '<!-- authored-by-actor: author -->', head = PINNED_HEAD } = {}) {
+    const { registry } = registryFor({ labels: [human ? 'review:human' : 'review:pending'], netRev: head, body,
+      comments: records.map(r => ({ body: renderReferralRecord(r), author: { login: 'web-everything' } })) }, { antigravityReview: true });
+    const state = { headRefOid: head, body, labels: [human ? 'review:human' : 'review:pending'], comments: records.map(r => ({ body: renderReferralRecord(r), author: { login: 'web-everything' } })) };
+    const trace = [];
+    const judge = vi.fn(async request => {
+      if (result === 'unavailable') throw new Error('confirmation unavailable');
+      const sources = JSON.parse(request.input.split('Untrusted reported findings:\n')[1]);
+      return { sessionId: request.sessionId, value: { rulings: sources.map(f => ({ key: f.key, result,
+        rationale: result === 'not-real' ? 'Executed the probe; no failure reproduced.' : 'Executed the probe; failure reproduced.',
+        evidence: ['node repro.mjs: observed result'], card: result === 'card' ? 'we:backlog/7-filed.md' : '' })) } };
+    });
+    const provider = { readPrState: () => structuredClone(state), ensureLabel: () => {},
+      postComment: (repo, pr, body) => { trace.push(body.includes('mandatory-referrals-v1') ? 'referral' : 'advisory'); state.comments.push({ body, author: { login: 'web-everything' } }); },
+      setLabels: (repo, pr, plan) => { trace.push(plan.add); state.labels = [...state.labels.filter(l => !plan.remove.includes(l)), plan.add]; } };
+    const sinks = createReviewPrSinks({ labelProvider: provider, postComment: provider.postComment, referralJudge: judge,
+      mirrorReferral: () => {}, cardReadable: () => true, out: () => {} });
+    const first = records[0];
+    let run = advanceWhileRunning(startRun({ op: REVIEW_PR_OP, id: runId,
+      input: { pr: first?.pr ?? 7, repo: first?.repo ?? 'o/r' }, registry }), { registry });
+    while (run.pending?.kind === 'judge') {
+      run = advanceWhileRunning(run, { registry, resume: { value: run.pending.step === 'judgeAntigravityReview'
+        ? { summary: 'reported claim', findings: [source] } : CLEAN_ANSWER } });
+    }
+    expect(run.findings.reduce.findings[0].verdict).toBe('PLAUSIBLE');
+    while (run.pending?.kind === 'effect') {
+      ({ run } = await applyPendingEffects(run, { sinks, store: createMemoryRunStore() }));
+      expect(run.effects.map(e => e.error).filter(Boolean)).toEqual([]);
+      run = advanceWhileRunning(run, { registry });
+    }
+    return { run, state, trace, judge };
+  }
+  it.each([NET_PATHS[0], 'guide.md', 'config.json', 'data.csv'])('tool-less CONFIRMED claim on %s needs a tool-bearing ruling before acceptance', async file => {
+    const source = { summary: 'claim', file, verdict: 'CONFIRMED', impactIfUnfixed: 'broken', prevention: 'Unfiled guard', preventionCaptured: false };
+    const { run, state, trace, judge } = await drive({ source });
+    expect(run.verdict.pendingReferrals).toEqual([]);
+    expect(run.verdict.blockedReferrals).toEqual([]);
+    expect(run.verdict.findings[0]).toMatchObject({ verdict: 'PLAUSIBLE', summary: source.summary });
+    expect(run.verdict.findings[0].failure_scenario).toContain('Tool-less assertion: CONFIRMED; awaiting confirmation or ruling.');
+    expect(run.verdict.admittedFindings).toEqual([]);
+    expect(state.labels).toEqual(['review:human', 'advisory:accepted']);
+    expect(trace.slice(-2)).toEqual(['advisory', 'advisory:accepted']);
+    expect(judge).toHaveBeenCalledTimes(1);
+    expect(judge.mock.calls[0][0].allowedTools).toContain('Bash');
+    expect(run.findings.reduce.referrals[0]).toMatchObject({ confirmationRequired: true, original: source });
+  });
+  it.each(['unavailable', 'block'])('keeps a serious tool-less claim from acceptance when confirmation is %s', async result => {
+    const { run, state, judge } = await drive({ result,
+      source: { summary: 'claim', file: NET_PATHS[0], verdict: 'CONFIRMED', impactIfUnfixed: 'unrecoverable' } });
+    expect(judge).toHaveBeenCalledTimes(1);
+    expect(state.labels).not.toContain('advisory:accepted');
+    expect(result === 'block' ? run.verdict.blockedReferrals : run.verdict.pendingReferrals).toHaveLength(1);
+  });
+  it.each([
+    ['no summary', { file: NET_PATHS[0], verdict: 'CONFIRMED' }],
+    ['empty summary', { summary: '  ', file: NET_PATHS[0], verdict: 'CONFIRMED' }],
+    ['non-object entry', 'CONFIRMED'],
+  ])('a tool-less CONFIRMED finding with %s does not crash the reduce step', async (_name, malformed) => {
+    const { registry } = registryFor({ labels: ['review:human'], netRev: PINNED_HEAD, body: '<!-- authored-by-actor: author -->', comments: [] },
+      { antigravityReview: true });
+    let run = advanceWhileRunning(startRun({ op: REVIEW_PR_OP, id: 'malformed-toolless', input: { pr: 7, repo: 'o/r' }, registry }), { registry });
+    while (run.pending?.kind === 'judge') {
+      run = advanceWhileRunning(run, { registry, resume: { value: run.pending.step === 'judgeAntigravityReview'
+        ? { summary: 'reported claim', findings: [malformed] } : CLEAN_ANSWER } });
+    }
+    expect(run.status).not.toBe('failed');
+    expect(run.findings.reduce.referrals).toEqual([]);
+  });
+  it.each([
+    ['no summary', { file: NET_PATHS[0], verdict: 'CONFIRMED' }],
+    ['empty summary', { summary: '  ', file: NET_PATHS[0], verdict: 'CONFIRMED' }],
+    ['non-object entry', 'CONFIRMED'],
+    ['null entry', null],
+    ['no verdict', { summary: 'claim', file: NET_PATHS[0] }],
+  ])('a malformed finding (%s) from ANY seat never throws in the reduce step and is never read as a clean bill', async (_name, malformed) => {
+    const { registry } = registryFor({ labels: ['review:human'], netRev: PINNED_HEAD, body: '<!-- authored-by-actor: author -->', comments: [] },
+      { antigravityReview: true, codexAdvisory: true, correctnessAdvisory: true });
+    let run = advanceWhileRunning(startRun({ op: REVIEW_PR_OP, id: 'malformed-every-seat', input: { pr: 7, repo: 'o/r' }, registry }), { registry });
+    const seats = [];
+    while (run.pending?.kind === 'judge') {
+      seats.push(run.pending.step);
+      run = advanceWhileRunning(run, { registry, resume: { value: { summary: 'reported claim', findings: [malformed] } } });
+    }
+    expect(seats.length).toBeGreaterThan(2);
+    expect(run.status).not.toBe('failed');
+    expect(run.findings.reduce.referrals.every(r => r.original && typeof r.original.summary === 'string' && r.original.summary.trim())).toBe(true);
+  });
+  it('does not spend a confirmation turn on a PLAUSIBLE tool-less claim', async () => {
+    const { run, judge } = await drive({ source: { summary: 'tentative', file: 'outside.md', verdict: 'PLAUSIBLE', impactIfUnfixed: 'broken' } });
+    expect(run.findings.reduce.referrals).toEqual([]);
+    expect(judge).not.toHaveBeenCalled();
+  });
+  it('replays historical snapshots without using their rulings to clear a fresh record', async () => {
+    const { records } = JSON.parse(readFileSync('scripts/operations/__tests__/fixtures/3432-referrals.json', 'utf8'));
+    expect(records).toHaveLength(51);
+    const head = '495e86acb5a3331fea1b014411a9c5d849406262';
+    expect(new Set(records.map(r => r.head))).toEqual(new Set([head]));
+    expect(records.filter(r => r.rulings.length)).toHaveLength(17);
+    const last = records.at(-1);
+    const fresh = { ...last, runId: '3432-next-run', reviewer: mandatoryReferralReviewer('3432-next-run'), attempted: false, rulings: [] };
+    const { run, trace, judge, state } = await drive({ records: [...records, fresh], source: last.referrals[0].original,
+      head, body: last.authorBody, runId: '3432-next-run' });
+    expect(judge).toHaveBeenCalled();
+    expect(trace).toContain('referral');
+    expect(judge.mock.calls.some(([request]) => request.sessionId === fresh.reviewer.id)).toBe(true);
+    expect(run.verdict.pendingReferrals).toEqual([]);
+    expect(assertMandatoryReferralsCleared(state, { repo: last.repo, pr: last.pr }).pending).toEqual([]);
   });
 });
