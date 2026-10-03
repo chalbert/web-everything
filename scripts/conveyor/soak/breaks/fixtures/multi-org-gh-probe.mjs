@@ -13,6 +13,7 @@ import { mkdirSync, writeFileSync, chmodSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { CONSTELLATION_REPOS } from '../../../../lib/constellation-repos.mjs';
 
 const [, , authEnvPath, shimModPath, work] = process.argv;
 const OWNERS = { 'web-everything': '167640002', 'frontier-ui': '167639957', plateauapp: '167639975' };
@@ -55,7 +56,7 @@ async function main() {
     },
   });
   const out = [];
-  for (const slug of ['web-everything/web-everything', 'frontier-ui/frontierui', 'plateauapp/plateau-app']) {
+  for (const { slug } of Object.values(CONSTELLATION_REPOS)) {
     const r = spawnSync('gh', ['pr', 'list', '--repo', slug], { env, encoding: 'utf8', cwd: work });
     out.push({ slug, status: r.status, stderr: (r.stderr || '').trim().split('\n')[0] });
   }
