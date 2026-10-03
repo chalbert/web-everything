@@ -1,4 +1,5 @@
 ---
+bornAs: x6x41sc
 kind: story
 size: 3
 status: open
