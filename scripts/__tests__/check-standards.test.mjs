@@ -642,7 +642,7 @@ Run \`npx vitest run\` with \`${test}\` (strip the locus prefix).
       copyFileSync(join(ROOT, 'scripts/check-standards.mjs'), join(repo, 'scripts/check-standards.mjs'));
       const runGate = (args) => {
         const result = spawnSync(process.execPath, ['scripts/check-standards.mjs', '--json', ...args], {
-          cwd: repo, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, timeout: 90_000,
+          cwd: repo, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, timeout: 180_000,
         });
         expect(result.error, result.stderr).toBeUndefined();
         const report = JSON.parse(result.stdout);
@@ -682,14 +682,14 @@ Run \`npx vitest run\` with \`${test}\` (strip the locus prefix).
 
       git(['update-ref', '-d', 'refs/remotes/origin/main']);
       const noBase = spawnSync(process.execPath, ['scripts/check-standards.mjs', '--json', ...local], {
-        cwd: repo, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, timeout: 90_000,
+        cwd: repo, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, timeout: 180_000,
       });
       expect(noBase.status).toBe(1);
       expect(noBase.stderr).toContain('Cannot enforce backlog scope guards');
     } finally {
       rmSync(temp, { recursive: true, force: true });
     }
-  }, 180_000);
+  }, 480_000); // ~150s alone across the several full-gate spawns; a loaded machine needs headroom
 
   it('corpus ratchet: guards 4 + 5 over the real backlog stay within the measured ceiling', () => {
     const matter = require('gray-matter');
