@@ -28,7 +28,7 @@ The existing consumers require no source changes: enrichment in `we:scripts/conv
 
 1. Separate canonical validation from per-candidate fallback parsing in `we:scripts/conveyor/timeout-retry-state.mjs`, retaining the exported API and budget result shape.
 2. Add the planned `we:scripts/conveyor/__tests__/timeout-retry-state.test.mjs` with real temporary-directory fixtures for isolation, matching corruption, canonical precedence, and legacy aggregation.
-3. Run that focused suite and the existing dispatch regression suite in `we:scripts/operations/__tests__/ci-heal-pr-dispatch.test.mjs`. No consumer edits or new persistence infrastructure are required.
+3. Run that focused suite and the existing dispatch regression suite named in the Test plan below. No consumer edits or new persistence infrastructure are required.
 
 ## Done when
 
