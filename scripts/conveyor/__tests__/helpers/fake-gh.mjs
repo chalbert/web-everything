@@ -796,6 +796,12 @@ export function createFakeGithub({ root, repos, actor = 'we-daemon-bot' }) {
       return withRepo(repo, (repoState) => setChecksPure(repoState, number, checks));
     },
 
+    /** Declare the repo's branch-protection required status checks, served by the shim's
+     *  `branches/{b}/protection` route. Unset (the default) keeps that route unsupported, so readers fall back. */
+    setRequiredChecks(repo, names) {
+      return withRepo(repo, (repoState) => { repoState.requiredChecks = names.map(String); });
+    },
+
     /** #4075 — seed `gh run list` rows (`{databaseId, headBranch, conclusion, status, createdAt, updatedAt,
      *  workflowName}`) for a repo; replaces any previous set. */
     setRuns(repo, runs) {

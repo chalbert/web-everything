@@ -98,6 +98,17 @@ describe('apply uses injected effects only', () => {
     expect(p.dispatchReview).toHaveBeenCalledTimes(2); expect(p.writeLedger).toHaveBeenCalledTimes(1); expect(result.errors[0].message).toBe('spawn failed');
     expect(p.writeLedger.mock.calls[0][0]).toMatchObject({ target: 'we#1', permissionsGranted: ALLOWED_TOOLS_BY_KIND.review });
   });
+  it('a review refused by the fresh CI gate is deferred: no ledger entry, no capacity spent, no error', async () => {
+    const p = ports(); p.dispatchReview = vi.fn(async ({ pr }) => (pr === 1
+      ? { pr, repo: 'we', headSha: 'a'.repeat(40), skipped: 'review-ci: required-checks-not-successful', ci: { allowed: false } }
+      : { agentId: `s-${pr}`, sessionSlug: `review-${pr}` }));
+    const result = await createLandAdvanceApplier(p)(plan());
+    expect(p.dispatchReview).toHaveBeenCalledTimes(3);
+    expect(result.errors).toEqual([]);
+    expect(result.deferred).toContainEqual({ target: 'we#1', reason: 'review-ci: required-checks-not-successful' });
+    expect(p.writeLedger.mock.calls.map(([e]) => e.target)).toEqual(['we#2', 'we#3']);
+    expect(result.dispatched).toHaveLength(2);
+  });
   it('rechecks capacity at each step', async () => {
     const p = ports(); p.readCapacity.mockReturnValueOnce({ freeLanes: 1 }).mockReturnValue({ freeLanes: 0 });
     const result = await createLandAdvanceApplier(p)(plan()); expect(result.dispatched).toHaveLength(1); expect(p.dispatchReview).toHaveBeenCalledTimes(1);

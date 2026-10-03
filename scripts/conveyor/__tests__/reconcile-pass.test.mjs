@@ -74,8 +74,10 @@ it('fetches the required set once per pass and threads it into planReconcile (ne
 
 it('maps repo slugs before binding and refuses unknown repos before IO', async () => {
   const { runReconcilePass } = await import('../reconcile-pass.mjs');
+  const requiredChecks = ['test', 'smoke', 'daemon-soak', 'soak-replay-gate'];
   const options = {
-    readPrs: () => [{ statusCheckRollup: ['test', 'smoke', 'daemon-soak', 'soak-replay-gate'].map(name => ({ name, status: 'COMPLETED', conclusion: 'SUCCESS' })), number: 49, headRefName: 'lane/1-x', labels: [{ name: 'review:pending' }], comments: [] }],
+    readRequiredChecks: () => ({ checks: requiredChecks, source: 'live' }),
+    readPrs: () => [{ statusCheckRollup: requiredChecks.map(name => ({ name, status: 'COMPLETED', conclusion: 'SUCCESS' })), number: 49, headRefName: 'lane/1-x', headRefOid: 'a'.repeat(40), labels: [{ name: 'review:pending' }], comments: [] }],
     readAgents: () => [{ name: 'review-fui-49', pidAlive: true, pid: 1 }], enrich: (agents) => agents,
   };
   expect(runReconcilePass({ ...options, repo: 'chalbert/frontierui' }).refusals.some((r) => r.kind === 'live-process')).toBe(true);

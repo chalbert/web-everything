@@ -17,11 +17,11 @@ import { tmpdir } from 'node:os';
 import { spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { join } from 'node:path';
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 
 import { DISPATCH_EFFECT } from '../dispatch-lane.mjs';
 import { briefPath, REPO_ROOT } from '../dispatch-lane-io.mjs';
-import { dispatchCiHeal, runReconcileCiHealDispatch, dispatchTimeoutRetry, flushTimeoutFollowups, timeoutGithubEffects } from '../ci-heal-pr-dispatch.mjs';
+import { dispatchCiHeal, runReconcileCiHealDispatch, routeAvailableCiHeal, dispatchTimeoutRetry, flushTimeoutFollowups, timeoutGithubEffects } from '../ci-heal-pr-dispatch.mjs';
 import { readUnsupported } from '../../conveyor/unsupported-repo.mjs';
 import { flushOwedWrites, readOwedWrites, recordOwedWrite, OWED_MAX_AGE_MS } from '../../conveyor/ci-heal-owed.mjs';
 import { buildCiHealComment } from '../../conveyor/ci-heal-mark.mjs';
@@ -52,6 +52,9 @@ it.each([0, 3])('xng7q1p: eligible PR with %i heals retries without a lane or he
   expect(out.dispatched).toEqual([expect.objectContaining({ kind: 'ci-timeout-rerun' })]);
   expect(comments).toHaveLength(count);
 });
+
+// Routing fixtures must never consult the operator's live quota pool.
+vi.mock('../../lib/antigravity-run-evidence.mjs', async importOriginal => ({ ...await importOriginal(), readAgyHold: () => null }));
 
 // #4352 — `runReconcileCiHealDispatch` now flushes owed CI-heal writes from the host-shared gh-throttle lock root
 // by default. Point that root at a throwaway dir for this whole file so no test ever reads (or posts) a real
@@ -123,8 +126,9 @@ describe('dispatchCiHeal (#3852)', () => {
         return { handle: 'agent-1' };
       },
     };
-    const first = await dispatchCiHeal(PLANNED, { readBrief: () => TEMPLATE, sinks });
-    const second = await dispatchCiHeal(PLANNED, { readBrief: () => TEMPLATE, sinks });
+    // Explicitly reuse the claim in this sink-guard fixture so the second call reaches the sink.
+    const first = await dispatchCiHeal(PLANNED, { claimOwner: 'sink-guard-fixture', readBrief: () => TEMPLATE, sinks });
+    const second = await dispatchCiHeal(PLANNED, { claimOwner: 'sink-guard-fixture', readBrief: () => TEMPLATE, sinks });
     expect(first.agentId).toBe('agent-1');
     expect(second).toEqual({ held: true, reason: 'pr 743 already has a ci-heal in flight' });
   });
@@ -485,6 +489,49 @@ describe('#4352 — runReconcileCiHealDispatch flushes owed CI-heal writes first
       expect(out.owedFlush).toEqual({ posted: [], cleared: [], dropped: [], kept: [] });
       expect(readOwedWrites({ dir })).toHaveLength(1);
     } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+});
+
+describe('xp0lsdi quota routing boundary', () => {
+  const held = { quotaState: 'exhausted', quotaResetsAt: '2026-10-04T17:31:18.942Z' };
+  const quota = { now: Date.parse('2026-10-02T12:00:00Z'), readScores: () => [], readHolds: model => model.startsWith('claude-') ? held : null };
+  it.each([
+    ['source', ['we:src/feature.ts']], ['docs', ['we:docs/example.md']], ['config', ['we:config/example.json']],
+    ['data', ['we:src/_data/example.json']], ['mixed', ['we:src/feature.ts', 'we:docs/example.md']],
+  ])('excludes the held backend for %s scope while retaining full supervision', (_kind, scope) => {
+    const route = routeAvailableCiHeal({ scope }, quota);
+    expect(route.probationWorker.id).toBe('codex');
+    expect(route.probationWorker.supervision).toBe('full');
+    expect(route.probationWorker.review).toBe('full');
+  });
+  it('retains the native empty-scope path and refuses a held native pool', () => {
+    expect(routeAvailableCiHeal({ scope: [] }, quota)).toMatchObject({ outcome: 'degraded', probationWorker: null });
+    expect(routeAvailableCiHeal({ scope: [] }, { ...quota, readScores: () => [{ provider: 'claude', status: 'quota-exhausted', quotaResetsAt: held.quotaResetsAt }] }).outcome).toBe('refused');
+  });
+  it('refuses all held candidates, including a Gemini worker whose required Codex checker is held', () => {
+    const readScores = () => [{ provider: 'codex', status: 'quota-exhausted', quotaResetsAt: held.quotaResetsAt }];
+    for (const reason of ['red-ci', 'behind']) expect(routeAvailableCiHeal({ scope: ['we:src/a.ts'], reason }, { ...quota, readScores }).outcome).toBe('refused');
+  });
+  it('refuses unreadable hold or score evidence visibly', () => {
+    expect(routeAvailableCiHeal({ scope: ['we:src/a.ts'] }, { ...quota, readHolds: () => { throw new Error('EACCES'); } })).toMatchObject({ outcome: 'refused', refusal: expect.stringContaining('EACCES') });
+    expect(routeAvailableCiHeal({ scope: ['we:src/a.ts'] }, { ...quota, readScores: () => null }).outcome).toBe('refused');
+  });
+  it('never substitutes a probation worker for critical scope', () => {
+    expect(routeAvailableCiHeal({ scope: ['we:docs/agent/platform-decisions.md'] }, quota).probationWorker).toBeNull();
+  });
+  it('does not dispatch after a routing refusal, and releases only its acquired claim', async () => {
+    const { calls, sinks } = recordingSink(); const releases = [];
+    const result = await dispatchCiHeal(PLANNED, { readBrief: () => TEMPLATE, sinks, claimOwner: 'own-attempt',
+      acquireClaim: () => ({ ok: true }), releaseClaim: args => releases.push(args),
+      routeHeal: () => ({ outcome: 'refused', refusal: 'all eligible backends held' }) });
+    expect(result).toEqual({ held: true, reason: 'all eligible backends held' });
+    expect(calls).toEqual([]);
+    expect(releases).toEqual([expect.objectContaining({ owner: 'own-attempt', kind: 'ci-heal' })]);
+  });
+  it('blocks direct retry while an earlier attempt has unpublished accounting', async () => {
+    const { calls, sinks } = recordingSink();
+    expect(await dispatchCiHeal(PLANNED, { sinks, pollAttempts: () => [{ status: 'unresolved', error: 'publication failed' }] })).toEqual({ held: true, reason: 'publication failed' });
+    expect(calls).toEqual([]);
   });
 });
 

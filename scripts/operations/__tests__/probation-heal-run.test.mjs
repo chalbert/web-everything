@@ -2,18 +2,19 @@
  * agy-launcher-probation — the launch half: the env switch, the provider, the router branch, and the whole heal
  * arc of `probation-heal-run.mjs` over a fake `io` (no git, no gh, no model).
  */
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, afterEach } from 'vitest';
 import {
   PROBATION_BUILD_RUN_SCRIPT, PROBATION_HEAL_RUN_SCRIPT, probationLaunchDecision, probationLaunchFromEnv,
   probationWorkerDetachedProvider,
 } from '../dispatch-providers/probation-worker.mjs';
-import { routeDispatchProvider } from '../dispatch-lane-io.mjs';
+import { createDispatchObservers, routeDispatchProvider } from '../dispatch-lane-io.mjs';
+import { DISPATCH_EFFECT } from '../dispatch-lane.mjs';
 import { pendingProbationLaunches } from '../../lib/model-probation.mjs';
-import { parseArgs, realIo, runProbationHeal } from '../probation-heal-run.mjs';
+import { beginHealAttempt, bindHealAttempt, failHealAttempt, readHealAttempt, finishHealAttempt, observeHealAttempt, pollHealAttempts, publishHealAttempt, parseArgs, realIo, runProbationHeal } from '../probation-heal-run.mjs';
 
 const agyClaude = { id: 'antigravity-claude', provider: 'antigravity', model: 'claude-sonnet-4-6', executor: 'antigravity', launcher: 'scripts/gemini-direct-task.mjs', checker: null, taskType: 'ci-heal' };
 const agyGemini = { ...agyClaude, id: 'antigravity-gemini', model: 'gemini-3.8-flash-high', checker: 'codex' };
@@ -61,7 +62,7 @@ describe('probationWorkerDetachedProvider', () => {
     const spawned = [];
     const reportExecutor = vi.fn();
     const handle = probationWorkerDetachedProvider(
-      { launchKind: 'ci-heal', pr: 2811, sessionSlug: 'ci-heal-2811', reason: 'behind', num: '4075', lane: 9, scope: ['we:a.mjs'], probationWorker: agyClaude, reportExecutor, cwd: '/scratch' },
+      { launchKind: 'ci-heal', headRefOid: 'a'.repeat(40), pr: 2811, sessionSlug: 'ci-heal-2811', reason: 'behind', num: '4075', lane: 9, scope: ['we:a.mjs'], probationWorker: agyClaude, reportExecutor, cwd: '/scratch' },
       { spawnDetached: (argv, o) => { spawned.push({ argv, o }); return { pid: 777 }; }, logPathFor: () => '/dev/null' },
     );
     expect(handle).toBe('pid:777');
@@ -294,7 +295,7 @@ describe('runProbationHeal — the arc', () => {
 describe('test-fix launches (#4551)', () => {
   const worker = { ...agyGemini, taskType: 'test-fix' };
   it.each(['build', 'ci-heal'])('launches %s with test-fix preserved in argv', (launchKind) => {
-    const request = { launchKind, repo: 'we', probationWorker: worker, num: '4551', pr: 2811, sessionSlug: 'test-fix' };
+    const request = { headRefOid: 'a'.repeat(40), launchKind, repo: 'we', probationWorker: worker, num: '4551', pr: 2811, sessionSlug: 'test-fix' };
     expect(probationLaunchDecision(request, 'on').launch).toBe(true);
     const spawnDetached = vi.fn(() => ({ pid: 777 }));
     probationWorkerDetachedProvider(request, { spawnDetached, logPathFor: () => '/dev/null' });
@@ -410,5 +411,364 @@ describe('PR #3154 lane acquisition classification', () => {
       expect(run.mock.calls.at(-1)[1]).toEqual(expect.arrayContaining(['ls-remote', '--exit-code', '--refs', 'origin', 'refs/heads/lane/4409']));
       expect(run.mock.calls.at(-1)[2].timeout).toBe(30_000);
     }
+  });
+});
+
+
+describe('xp0lsdi dead CI-heal regression', () => {
+  it('hands a confirmed dead owned CI heal to durable settlement instead of leaving it unresolved', async () => {
+    const settle = vi.fn(() => ({ status: 'resolved', result: { outcome: 'executor-failed', attemptId: 'attempt-3373' } }));
+    const observer = createDispatchObservers({ isPidAlive: () => false, now: () => new Date('2026-10-02T12:00:00Z'), observeHeal: settle });
+    const result = await observer[DISPATCH_EFFECT]({ payload: { launchKind: 'ci-heal', pr: 3373 }, dispatch: { attemptId: 'attempt-3373' }, handle: 'pid:43273', startedAt: '2026-10-01T22:00:00Z' });
+    expect(result.status).toBe('resolved');
+    expect(settle).toHaveBeenCalledOnce();
+  });
+});
+
+
+import { once } from 'node:events';
+import { countCiHealComments, buildCiHealComment, redactSecrets } from '../../conveyor/ci-heal-mark.mjs';
+import { recordOwedWrite, readOwedWrites, clearOwedWrite } from '../../conveyor/ci-heal-owed.mjs';
+import { acquireFixDispatchClaim, releaseFixDispatchClaim, listFixDispatchClaims } from '../../conveyor/fix-dispatch-claim.mjs';
+import { routeAvailableCiHeal } from '../ci-heal-pr-dispatch.mjs';
+import { planReconcile } from '../../conveyor/reconcile-core.mjs';
+
+// Captured GitHub fields from #3373 on 2026-10-02. Historical process/exit evidence was unavailable;
+// PID ownership and the crash below are deliberately injected, never claimed to be the old process.
+const captured3373 = {
+  number: 3373, state: 'OPEN', headRefOid: 'b98e62d179c5326e64af41809e8b3c1f5ab6d432',
+  headRefName: 'lane/4453-file-the-prevention-guard-s-owed-by-chalbert-web-everything',
+  labels: [], mergeStateStatus: 'CLEAN', comments: [],
+  statusCheckRollup: [{ name: 'soak-replay-gate', status: 'COMPLETED', conclusion: 'FAILURE' },
+    ...['test', 'smoke', 'daemon-soak'].map(name => ({ name, status: 'COMPLETED', conclusion: 'SUCCESS' }))],
+};
+const proofDirs = [];
+afterEach(() => { for (const dir of proofDirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
+function attemptHarness() {
+  const dir = mkdtempSync(join(tmpdir(), 'heal-attempt-proof-')); proofDirs.push(dir);
+  const owed = join(dir, 'owed'), lockRoot = join(dir, 'claims');
+  const comments = [], published = [], completions = [];
+  const start = (extra = {}) => beginHealAttempt({ pr: 3373, sessionSlug: 'ci-heal-3373', headRefOid: captured3373.headRefOid,
+    probationWorker: agyClaude, ...extra }, { dir, now: () => '2026-10-02T00:00:00Z' });
+  const publication = {
+    readComments: () => comments,
+    post: ({ body }) => { comments.push({ body, author: { login: 'web-everything' } }); published.push(body); },
+    owe: rec => recordOwedWrite(rec, { dir: owed }), clear: rec => clearOwedWrite(rec, { dir: owed }),
+  };
+  const settle = (id, terminal) => finishHealAttempt(id, terminal, { dir,
+    publish: row => publishHealAttempt(row, publication),
+    complete: row => completions.push(row.terminal),
+  });
+  // One hour after `start()`: past the startup grace, inside HEAL_ATTEMPT_MAX_AGE_MS (the age-ceiling tests pass their own `now`).
+  const observe = (id, extra = {}) => observeHealAttempt(id, { dir, now: () => new Date('2026-10-02T01:00:00Z'), isPidAlive: () => false, settle, ...extra });
+  return { dir, owed, lockRoot, comments, published, completions, start, publication, settle, observe };
+}
+
+describe('xp0lsdi durable crash recovery and restart soak', () => {
+  it('replays #3373 observer → publication → reconciliation → held-backend exclusion for two launched identities', async () => {
+    const h = attemptHarness();
+    expect(countCiHealComments(h.comments)).toBe(0);
+    for (const pid of [43273, 94262]) {
+      const row = h.start(); bindHealAttempt(row.attemptId, `pid:${pid}`, { dir: h.dir });
+      const entry = { handle: `pid:${pid}`, dispatch: { attemptId: row.attemptId }, payload: { launchKind: 'ci-heal', pr: 3373, repo: 'we' } };
+      for (let tick = 0; tick < 40; tick++) {
+        const observer = createDispatchObservers({ observeHeal: (id, opts) => h.observe(id, opts), isPidAlive: () => false,
+          now: () => new Date('2026-10-02T12:00:00Z') });
+        const result = await observer[DISPATCH_EFFECT](entry);
+        expect(result).toMatchObject({ status: 'resolved', result: { outcome: 'executor-failed', quotaState: 'unknown' } });
+        expect(result.error).toMatch(/unknown/);
+      }
+    }
+    expect(h.published).toHaveLength(2);
+    expect(h.completions).toHaveLength(2);
+    expect(countCiHealComments(h.comments)).toBe(2);
+    expect(readOwedWrites({ dir: h.owed })).toEqual([]);
+    const pr = { ...captured3373, comments: h.comments };
+    // The default classifier excludes this check, but captured branch protection explicitly requires it.
+    expect(planReconcile({ prs: [pr], agents: [], now: Date.parse('2026-10-02T12:00:00Z') }).dispatch).toEqual([]);
+    // Captured from the live main required_status_checks endpoint on 2026-10-02.
+    const plan = planReconcile({ requiredChecks: ['test', 'smoke', 'daemon-soak', 'soak-replay-gate'], prs: [pr], agents: [], now: Date.parse('2026-10-02T12:00:00Z') });
+    expect(plan.dispatch).toContainEqual(expect.objectContaining({ kind: 'ci-heal', prNumber: 3373, attempts: 2 }));
+    const route = routeAvailableCiHeal({ scope: ['we:src/example.ts'] }, { readScores: () => [],
+      readHolds: model => model.startsWith('claude-') ? { quotaState: 'exhausted', quotaResetsAt: '2026-10-04T17:31:18.942Z' } : null });
+    expect(route.probationWorker.id).toBe('codex');
+    expect(pr.statusCheckRollup[0].conclusion).toBe('FAILURE');
+    const third = h.start(); bindHealAttempt(third.attemptId, 'pid:12345', { dir: h.dir }); h.observe(third.attemptId);
+    const capped = planReconcile({ requiredChecks: ['test', 'smoke', 'daemon-soak', 'soak-replay-gate'], prs: [{ ...pr, comments: h.comments }], agents: [], now: Date.parse('2026-10-02T12:00:00Z') });
+    expect(capped.dispatch).toEqual([]);
+    expect(capped.refusals).toContainEqual(expect.objectContaining({ kind: 'cap-exhausted', attempts: 3 }));
+  });
+
+  it('launches a real CI-heal-shaped child, forces exit before publication, then recovers through normal polling', async () => {
+    const h = attemptHarness(); let child, attempt;
+    const handle = probationWorkerDetachedProvider({ launchKind: 'ci-heal', pr: 3373, sessionSlug: 'ci-heal-3373', probationWorker: agyClaude,
+      headRefOid: captured3373.headRefOid }, {
+      beginAttempt: request => { attempt = h.start(request); return attempt; },
+      bindAttempt: (id, pid) => bindHealAttempt(id, pid, { dir: h.dir }), logPathFor: () => '/dev/null',
+      spawnDetached: argv => {
+        expect(readHealAttempt(attempt.attemptId, { dir: h.dir }).handle).toBeNull();
+        expect(argv).toContain(`--heal-attempt=${attempt.attemptId}`);
+        child = spawn(process.execPath, ['-e', 'process.exitCode = 23', '--', ...argv.slice(1)], { stdio: 'ignore' });
+        return child;
+      },
+    });
+    expect(await once(child, 'exit')).toEqual([23, null]);
+    const rows = pollHealAttempts({ dir: h.dir, observe: (id, options) => observeHealAttempt(id, { ...options, settle: h.settle }) });
+    expect(rows[0]).toMatchObject({ status: 'resolved', result: { outcome: 'executor-failed', exitCode: null } });
+    expect(readHealAttempt(attempt.attemptId, { dir: h.dir }).handle).toBe(handle);
+    expect(countCiHealComments(h.comments)).toBe(1);
+  });
+
+  it.each([true, null, 'unknown'])('preserves live or unreadable liveness (%s), and startup grace', live => {
+    const h = attemptHarness(), row = h.start(); bindHealAttempt(row.attemptId, 'pid:77', { dir: h.dir });
+    expect(h.observe(row.attemptId, { isPidAlive: () => live }).status).toBe(live === true ? 'running' : 'unresolved');
+    expect(h.observe(row.attemptId, { now: () => new Date(row.startedAt) }).status).toBe('running');
+    expect(h.published).toEqual([]);
+    expect(h.observe(row.attemptId, { handle: 'pid:78' }).status).toBe('unresolved');
+    expect(h.observe(row.attemptId, { isPidAlive: () => { throw new Error('permission denied'); } }).status).toBe('unresolved');
+    expect(readHealAttempt(row.attemptId, { dir: h.dir }).terminal).toBeNull();
+  });
+
+  it('keeps an unsuccessful publication owed and the claim held, then counts once after an ambiguous post', () => {
+    const h = attemptHarness(); acquireFixDispatchClaim({ repo: 'we', pr: 3373, kind: 'ci-heal', owner: 'attempt-owner', lockRoot: h.lockRoot });
+    const row = h.start({ claimOwner: 'attempt-owner', claimRoot: h.lockRoot }); bindHealAttempt(row.attemptId, 'pid:77', { dir: h.dir });
+    h.publication.post = ({ body }) => { h.comments.push({ body, author: { login: 'web-everything' } }); throw new Error('connection reset after write'); };
+    expect(h.observe(row.attemptId)).toMatchObject({ status: 'unresolved', error: 'connection reset after write' });
+    expect(readOwedWrites({ dir: h.owed })).toHaveLength(1);
+    expect(listFixDispatchClaims(h.lockRoot)).toHaveLength(1);
+    expect(h.observe(row.attemptId).status).toBe('resolved');
+    expect(countCiHealComments(h.comments)).toBe(1);
+    expect(listFixDispatchClaims(h.lockRoot)).toHaveLength(0);
+    expect(readOwedWrites({ dir: h.owed })).toHaveLength(0);
+  });
+
+  it('retains terminal success, refuses ambiguous ownership, and cannot release another repair claim', () => {
+    const h = attemptHarness();
+    acquireFixDispatchClaim({ repo: 'we', pr: 3373, kind: 'ci-heal', owner: 'new-attempt', lockRoot: h.lockRoot });
+    const row = h.start({ claimOwner: 'old-attempt', claimRoot: h.lockRoot }); bindHealAttempt(row.attemptId, 'pid:77', { dir: h.dir });
+    h.settle(row.attemptId, { outcome: 'healed', pushed: true, detail: 'repair pushed' });
+    expect(h.observe(row.attemptId).result.outcome).toBe('healed');
+    expect(listFixDispatchClaims(h.lockRoot)[0].owner).toBe('new-attempt');
+    expect(h.observe(row.attemptId, { pr: 1 }).status).toBe('unresolved');
+    expect(h.observe(row.attemptId, { handle: 'pid:999' }).status).toBe('unresolved');
+    expect(countCiHealComments(h.comments)).toBe(1);
+  });
+
+  it('refuses recovery when attempt ownership cannot be read', () => {
+    const h = attemptHarness(), row = h.start();
+    writeFileSync(join(h.dir, `${row.attemptId}.json`), '{broken');
+    expect(h.observe(row.attemptId).status).toBe('unresolved');
+    // the round-2 review narrowed the blast radius: the poll reports the corrupt row instead of aborting the repo pass
+    expect(pollHealAttempts({ dir: h.dir, warn: () => {} })).toEqual([expect.objectContaining({ pr: null, status: 'unresolved' })]);
+  });
+});
+
+describe('xp0lsdi wrapper terminal boundary', () => {
+  it.each(['acquireLane', 'runWorker', 'diffNumstat'])('records thrown %s failure without losing terminal completion', async method => {
+    const { io, calls } = fakeIo(); io.settleAttempt = vi.fn();
+    io[method] = () => { throw Object.assign(new Error('wrapper exception'), { status: 23, signal: null }); };
+    expect(await runProbationHeal(args(), io)).toMatchObject({ outcome: 'executor-failed', exitCode: 23, quotaState: 'unknown' });
+    expect(calls).toContainEqual(['completion', 'done', 'executor-failed']);
+    expect(io.settleAttempt).toHaveBeenCalledOnce();
+  });
+  it('records graceful quota failure with no diff and keeps unknown cause distinct', async () => {
+    const { io } = fakeIo({ numstat: '' }); io.settleAttempt = vi.fn();
+    io.runWorker = () => ({ ok: false, status: 1, out: 'Individual quota reached', modelEvidence: { quotaState: 'exhausted', quotaResetsAt: '2026-10-04T17:31:18.942Z' } });
+    expect((await runProbationHeal(args(), io)).outcome).toBe('escalated-needs-human');
+    expect(io.settleAttempt.mock.calls[0][1]).toMatchObject({ pushed: false, exitCode: 1, quotaState: 'exhausted' });
+  });
+  it('propagates accounting persistence failure instead of completing an uncounted retry', async () => {
+    const { io } = fakeIo(); io.settleAttempt = () => { throw new Error('disk full'); }; io.completion = vi.fn();
+    await expect(runProbationHeal(args(), io)).rejects.toThrow('disk full');
+    expect(io.completion.mock.calls.some(([row]) => row.status === 'done')).toBe(false);
+  });
+});
+
+
+import { selectProbationWorker } from '../../lib/provider-routing.mjs';
+import { readAgyHold, saveAgyHold } from '../../lib/antigravity-run-evidence.mjs';
+
+it('xp0lsdi: real backend holds expire independently, and selection preserves veto and simple-only rules', () => {
+  const h = attemptHarness(), now = Date.parse('2026-10-02T12:00:00Z');
+  saveAgyHold({ requestedModel: 'claude-sonnet-4-6', servedBackend: 'anthropic', quotaState: 'exhausted', quotaResetsAt: new Date(now + 1000).toISOString() }, { dir: h.dir });
+  expect(readAgyHold('claude-sonnet-4-6', { dir: h.dir, now })).not.toBeNull();
+  expect(readAgyHold('gemini-3.1-pro', { dir: h.dir, now })).toBeNull();
+  expect(readAgyHold('claude-sonnet-4-6', { dir: h.dir, now: now + 1000 })).toBeNull();
+  const quota = { readScores: () => [], now, readHolds: (model, options) => readAgyHold(model, { ...options, dir: h.dir }) };
+  expect(routeAvailableCiHeal({ scope: ['we:src/a.ts'] }, quota).probationWorker.id).toBe('codex');
+  expect(routeAvailableCiHeal({ scope: ['we:src/a.ts'] }, { ...quota, now: now + 1000 }).probationWorker.id).toBe('antigravity-claude');
+  const common = { taskType: 'ci-heal', availability: { 'antigravity-claude': 'held' } };
+  const codex = selectProbationWorker(common).worker;
+  expect(selectProbationWorker({ ...common, vetoes: [{ provider: codex.provider, model: codex.model, taskType: 'ci-heal' }] }).worker).toBeNull();
+  const gemini = selectProbationWorker({ ...common, simple: true, vetoes: [{ provider: codex.provider, model: codex.model, taskType: 'ci-heal' }] }).worker;
+  expect(gemini).toMatchObject({ id: 'antigravity-gemini', checker: 'codex', supervision: 'full' });
+});
+
+
+it('xp0lsdi: an ownership refusal cannot be caught as permission to settle someone else’s attempt', async () => {
+  const { io } = fakeIo(); io.settleAttempt = vi.fn(); io.bindAttempt = () => { throw new Error('ambiguous ownership'); };
+  await expect(runProbationHeal({ ...args(), attemptId: 'foreign-attempt' }, io)).rejects.toThrow('ambiguous ownership');
+  expect(io.settleAttempt).not.toHaveBeenCalled();
+});
+
+describe('PR #3577 review: attempt rows never become a permanent CI-heal barrier', () => {
+  const request = () => ({ launchKind: 'ci-heal', headRefOid: captured3373.headRefOid, pr: 3373, sessionSlug: 'ci-heal-3373', probationWorker: agyClaude, cwd: '/scratch' });
+  const unresolved = (h) => pollHealAttempts({ dir: h.dir, observe: h.observe }).filter(r => r.status !== 'resolved');
+
+  it('a spawn that throws before any process exists settles the attempt as failed, so nothing stays pending', () => {
+    const h = attemptHarness();
+    const boom = Object.assign(new Error('spawn EAGAIN'), { code: 'EAGAIN' });
+    expect(() => probationWorkerDetachedProvider(request(), {
+      spawnDetached: () => { throw boom; }, logPathFor: () => '/dev/null',
+      beginAttempt: (r, o) => beginHealAttempt(r, { ...o, dir: h.dir, now: () => '2026-10-02T00:00:00Z' }),
+      failAttempt: (id, detail) => failHealAttempt(id, detail, { dir: h.dir, publish: row => publishHealAttempt(row, h.publication), complete: () => {} }),
+    })).toThrow(boom);
+    const [row] = pollHealAttempts({ dir: h.dir, observe: h.observe });
+    expect(row.status).toBe('resolved');
+    expect(readHealAttempt(row.attemptId, { dir: h.dir })).toMatchObject({ settled: true, terminal: { outcome: 'executor-failed', pushed: false } });
+    expect(unresolved(h)).toEqual([]);
+    expect(h.published).toHaveLength(1); // one cap-counted failure marker
+    // a failed settlement must never mask the original launch error
+    expect(() => probationWorkerDetachedProvider(request(), {
+      spawnDetached: () => { throw boom; }, logPathFor: () => '/dev/null',
+      beginAttempt: (r, o) => beginHealAttempt(r, { ...o, dir: h.dir, now: () => '2026-10-02T00:00:00Z' }),
+      failAttempt: () => { throw new Error('settle failed'); },
+    })).toThrow(boom);
+  });
+
+  it('a spawn that reports no pid stays fail-closed inside the grace window, then ages out to a settled failure', () => {
+    const h = attemptHarness();
+    expect(() => probationWorkerDetachedProvider(request(), {
+      spawnDetached: () => ({}), logPathFor: () => '/dev/null',
+      beginAttempt: (r, o) => beginHealAttempt(r, { ...o, dir: h.dir, now: () => '2026-10-02T00:00:00Z' }),
+      failAttempt: () => { throw new Error('ambiguous launches must not be settled eagerly'); },
+    })).toThrow(/no pid/);
+    const early = () => pollHealAttempts({ dir: h.dir, observe: (id, o) => h.observe(id, { ...o, now: () => new Date('2026-10-02T00:00:30Z') }) });
+    expect(early()[0].status).toBe('unresolved');
+    const late = pollHealAttempts({ dir: h.dir, observe: h.observe });
+    expect(late[0].status).toBe('resolved');
+    expect(late[0].result.outcome).toBe('executor-failed');
+    expect(unresolved(h)).toEqual([]);
+  });
+
+  it('a settled row written by another host is resolved; only the liveness probe depends on the host', () => {
+    const h = attemptHarness();
+    const { attemptId } = h.start();
+    bindHealAttempt(attemptId, 'pid:43273', { dir: h.dir });
+    h.settle(attemptId, { outcome: 'executor-failed', pushed: false, exitCode: 1, signal: null, quotaState: 'unknown', detail: 'x' });
+    const path = join(h.dir, `${attemptId}.json`);
+    writeFileSync(path, JSON.stringify({ ...JSON.parse(readFileSync(path, 'utf8')), host: 'old-name.local' }) + '\n');
+    expect(h.observe(attemptId, { repo: 'we', pr: 3373, handle: 'pid:43273' }).status).toBe('resolved');
+    // a live-looking row with no terminal on a foreign host is still refused — its pid means nothing here
+    const second = h.start().attemptId;
+    bindHealAttempt(second, 'pid:51', { dir: h.dir });
+    const p2 = join(h.dir, `${second}.json`);
+    writeFileSync(p2, JSON.stringify({ ...JSON.parse(readFileSync(p2, 'utf8')), host: 'old-name.local' }) + '\n');
+    expect(h.observe(second, { repo: 'we', pr: 3373 }).status).toBe('unresolved');
+  });
+});
+
+describe('PR #3577 round 2 review: CI-heal attempt bookkeeping stays bounded, isolated and non-leaking', () => {
+  const failed = (detail, extra = {}) => ({ outcome: 'executor-failed', pushed: false, exitCode: 1, signal: null, quotaState: 'unknown', detail, ...extra });
+  const rowPath = (h, id) => join(h.dir, `${id}.json`);
+
+  it('does no lock or settle work for rows that are already settled', () => {
+    const h = attemptHarness();
+    for (let i = 0; i < 100; i++) h.settle(h.start().attemptId, failed('x'));
+    const settle = vi.fn(() => { throw new Error('a settled row must not be settled again'); });
+    const rows = pollHealAttempts({ dir: h.dir, observe: (id, o) => h.observe(id, { ...o, settle }) });
+    expect(rows).toHaveLength(100);
+    expect(rows.every(r => r.status === 'resolved')).toBe(true);
+    expect(settle).not.toHaveBeenCalled();
+  });
+
+  it('prunes long-settled rows but keeps recent settled and every unsettled row', () => {
+    const h = attemptHarness();
+    const old = h.start().attemptId, recent = h.start().attemptId, open = h.start().attemptId;
+    h.settle(old, failed('x')); h.settle(recent, failed('x'));
+    const age = (id, startedAt) => writeFileSync(rowPath(h, id), JSON.stringify({ ...JSON.parse(readFileSync(rowPath(h, id), 'utf8')), startedAt }) + '\n');
+    age(old, '2026-09-01T00:00:00Z'); age(recent, '2026-10-01T00:00:00Z'); age(open, '2026-09-01T00:00:00Z');
+    pollHealAttempts({ dir: h.dir, now: () => new Date('2026-10-02T12:00:00Z'), observe: () => ({ status: 'running', result: null }) });
+    expect(existsSync(rowPath(h, old))).toBe(false);
+    expect(existsSync(rowPath(h, recent))).toBe(true);
+    expect(existsSync(rowPath(h, open))).toBe(true);
+  });
+
+  it('one unreadable row neither aborts the poll nor holds an unrelated PR', () => {
+    const h = attemptHarness();
+    const good = h.start().attemptId, broken = h.start({ headRefOid: captured3373.headRefOid }).attemptId, garbage = h.start().attemptId;
+    const strip = JSON.parse(readFileSync(rowPath(h, broken), 'utf8')); delete strip.headSha;
+    writeFileSync(rowPath(h, broken), JSON.stringify({ ...strip, pr: 4000 }) + '\n');
+    writeFileSync(rowPath(h, garbage), '{broken');
+    const warn = vi.fn();
+    const all = pollHealAttempts({ dir: h.dir, observe: h.observe, warn });
+    expect(all.find(r => r.attemptId === good).status).toBe('resolved');
+    expect(all.find(r => r.attemptId === broken)).toMatchObject({ pr: 4000, status: 'unresolved' });
+    expect(warn).toHaveBeenCalledTimes(2);
+    // the PR-scoped read used by dispatchCiHeal holds only the PR whose row is readable
+    expect(pollHealAttempts({ dir: h.dir, observe: h.observe, pr: 3373, warn }).filter(r => r.status !== 'resolved')).toEqual([]);
+    expect(pollHealAttempts({ dir: h.dir, observe: h.observe, pr: 4000, warn }).filter(r => r.status !== 'resolved')).toHaveLength(1);
+  });
+
+  it.each([
+    ['a foreign-host row', row => ({ ...row, host: 'old-name.local', handle: 'pid:51' }), () => false],
+    ['a recycled pid that looks alive', row => ({ ...row, handle: 'pid:51' }), () => true],
+  ])('settles %s older than the age ceiling as a failed attempt instead of holding the PR forever', (_name, mutate, isPidAlive) => {
+    const h = attemptHarness();
+    const { attemptId } = h.start();
+    writeFileSync(rowPath(h, attemptId), JSON.stringify(mutate(JSON.parse(readFileSync(rowPath(h, attemptId), 'utf8')))) + '\n');
+    const young = h.observe(attemptId, { isPidAlive, now: () => new Date('2026-10-02T00:30:00Z') });
+    expect(young.status).not.toBe('resolved');
+    const aged = h.observe(attemptId, { isPidAlive, now: () => new Date('2026-10-02T12:00:00Z') });
+    expect(aged.status).toBe('resolved');
+    expect(aged.result).toMatchObject({ outcome: 'executor-failed', pushed: false });
+    expect(aged.result.detail).toMatch(/exceeded/);
+  });
+
+  it('redacts a long unbroken alphanumeric run in linear time (no quadratic regex backtracking)', () => {
+    const started = Date.now();
+    redactSecrets('a'.repeat(200_000));
+    expect(Date.now() - started).toBeLessThan(2000);
+  });
+
+  it('stops holding a PR for an unreadable row once it is older than the age ceiling', () => {
+    const h = attemptHarness(), { attemptId } = h.start();
+    const strip = JSON.parse(readFileSync(rowPath(h, attemptId), 'utf8')); delete strip.headSha;
+    writeFileSync(rowPath(h, attemptId), JSON.stringify(strip) + '\n');
+    const warn = () => {};
+    const fresh = pollHealAttempts({ dir: h.dir, pr: 3373, warn });
+    expect(fresh).toHaveLength(1);
+    const aged = pollHealAttempts({ dir: h.dir, pr: 3373, warn, now: () => new Date(Date.now() + 4 * 60 * 60_000) });
+    expect(aged).toEqual([]);
+  });
+
+  it('never publishes raw worker or log text: unlisted secret shapes cannot reach the public comment', () => {
+    const h = attemptHarness();
+    const leaks = ['wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY', 'https://hooks.slack.com/services/T000/B000/XXXXXXXXXXXX', 'Cookie: sessionid=abcdef0123456789', 'internal-db-7.corp.example'];
+    h.settle(h.start().attemptId, failed(leaks.join('\n'), { exitCode: 7, signal: 'SIGTERM', quotaState: 'exhausted', quotaResetsAt: '2026-10-04T17:31:18.942Z' }));
+    const [body] = h.published;
+    for (const leak of leaks) expect(body).not.toContain(leak);
+    expect(body).toMatch(/exit: 7; signal: SIGTERM; quota: exhausted; reset: 2026-10-04T17:31:18.942Z/);
+  });
+
+  it('never publishes a credential an upstream truncation cut the prefix off of (4000-char and 2000-byte boundaries)', async () => {
+    const h = attemptHarness();
+    const secret = 'ghp_' + 'Q'.repeat(36);
+    // (a) the worker output / settle detail boundary
+    const { io } = fakeIo(); let workerRow;
+    io.settleAttempt = (id, terminal) => { workerRow = h.settle(h.start().attemptId, terminal); };
+    io.runWorker = () => ({ ok: false, status: 1, out: `${secret} ${'k'.repeat(3980)}`, modelEvidence: {} });
+    await runProbationHeal(args(), io);
+    // the persisted worker diagnostics were redacted before the 4000-char cut, not cut into a bare fragment
+    expect(workerRow.terminal.diagnostics).not.toMatch(/Q{4}/);
+    expect(workerRow.terminal.diagnostics).toMatch(/k{100}/);
+    // (b) the crashed-wrapper log tail boundary
+    const logPath = join(h.dir, 'wrapper.log'); writeFileSync(logPath, secret + 'k'.repeat(1990));
+    const { attemptId } = h.start({}); writeFileSync(rowPath(h, attemptId), JSON.stringify({ ...JSON.parse(readFileSync(rowPath(h, attemptId), 'utf8')), logPath }) + '\n');
+    expect(h.observe(attemptId).status).toBe('resolved');
+    expect(h.published.length).toBeGreaterThan(0);
+    for (const body of h.published) expect(body).not.toMatch(/Q{4}/);
+    // the local row keeps its diagnostics, with the credential redacted before the cut
+    expect(readHealAttempt(attemptId, { dir: h.dir }).terminal.detail).not.toMatch(/Q{4}/);
   });
 });

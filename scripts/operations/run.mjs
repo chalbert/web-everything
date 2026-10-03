@@ -123,6 +123,8 @@ import { canonicalRoot as landAdvanceCanonicalRoot } from './land-advance-gate.m
 // `runner-activity`/`pr-status`: every step is `compute`.
 import { agentActivityOperation, AGENT_ACTIVITY_OP } from './agent-activity.mjs';
 import { createAgentActivityReader } from './agent-activity-io.mjs';
+import { itemActivityOperation, ITEM_ACTIVITY_OP } from './item-activity.mjs';
+import { createItemActivityReader } from './item-activity-io.mjs';
 import { writeAllSync } from '../lib/write-all-sync.mjs';
 
 /**
@@ -271,6 +273,10 @@ export const OPERATIONS = Object.freeze({
   // plans without dispatching.
   [PR_OWNERSHIP_OP]: () => ({
     declaration: prOwnershipOperation({ readOwnership: createPrOwnershipReader() }),
+    sinks: {},
+  }),
+  [ITEM_ACTIVITY_OP]: () => ({
+    declaration: itemActivityOperation({ readActivity: createItemActivityReader() }),
     sinks: {},
   }),
   [AGENT_ACTIVITY_OP]: () => ({
@@ -575,9 +581,9 @@ if (IS_CLI) {
     process.exit(1);
   }
   // Only runner-activity promises bounded CLI persistence, including --resume and call logging.
-  // stale-state promises zero filesystem writes, including engine bookkeeping.
+  // These queries need no persisted cursor or call log, including when their evidence stores are read-only.
   const cliStores = name === RUNNER_ACTIVITY_OP ? createRunnerActivityCliStores()
-    : [STALE_STATE_OP, HEALTH_RESPOND_OP].includes(name) ? { store: createMemoryRunStore(), callLog: undefined }
+    : [STALE_STATE_OP, HEALTH_RESPOND_OP, ITEM_ACTIVITY_OP].includes(name) ? { store: createMemoryRunStore(), callLog: undefined }
     : { store: createFileRunStore(), callLog: createFileCallLogStore() };
   runOperationCli({
     declaration,

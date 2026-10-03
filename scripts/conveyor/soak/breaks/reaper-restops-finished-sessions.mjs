@@ -43,6 +43,7 @@
 import { mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { runSoak } from '../soak.mjs';
+import { FALLBACK_REQUIRED_STATUS_CHECKS } from '../../../lib/required-status-checks.mjs';
 import { sessionMatches } from '../invariants.mjs';
 import {
   fullSessionId, readCalls, shortId, spawnSleeper, withStoreLock,
@@ -75,7 +76,9 @@ export default {
         const head = 'lane/soak-reaper-pending';
         w.git.createBranch('we', head, { from: 'main', files: { 'soak/reaper-pending.txt': 'waiting for review\n' } });
         const pr = w.gh.openPr({ repo: 'we', head, base: 'main', title: 'soak: review:pending, stale fix session bound', labels: ['review:pending'] });
-        w.gh.setChecks('we', pr, [{ name: 'test', conclusion: 'SUCCESS' }]);
+        // The review CI gate needs a declared required set AND every required check green on the head.
+        w.gh.setRequiredChecks('we', FALLBACK_REQUIRED_STATUS_CHECKS);
+        w.gh.setChecks('we', pr, FALLBACK_REQUIRED_STATUS_CHECKS.map((name) => ({ name, conclusion: 'SUCCESS' })));
 
         const now = w.clock.now();
         const scratch = (id) => { const d = join(w.root, '.operations', 'dispatch', id); mkdirSync(d, { recursive: true }); return d; };

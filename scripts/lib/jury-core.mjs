@@ -2315,12 +2315,22 @@ export function validateReferralRecord(r) {
   } catch { return false; }
 }
 
-/** Resolve exact keys across runs, checking each ruling's own reviewer, never the new run's. */
+const referralRecordId = (r) => JSON.stringify([r.repo, r.pr, r.head, r.runId]);
+
+/**
+ * Resolve exact keys across runs, checking each ruling's own reviewer, never the new run's.
+ *
+ * A ruling carries FORWARD only: a record is cleared by its own rulings and by those of records posted BEFORE it
+ * (`records` is in comment order). A reviewer id is derived from the run id, so any record with an invented run id
+ * is "independent" by construction; letting a record posted AFTER a hold clear it would let one forged record
+ * (#3507 finding 1) clear another's mandatory hold. When `record` is not in `records`, every listed record counts as earlier.
+ */
 export function referralRecordState(record, { head = record?.head, body = record?.authorBody ?? '', createdAt = '',
   cardReadable = () => false, records = [record] } = {}) {
   if (!validateReferralRecord(record)) return { pending: ['malformed-referral-record'], blocked: [], rulings: [] };
   const pending = [], blocked = [], rulings = [];
-  const peers = records.filter(r => validateReferralRecord(r) && r.repo === record.repo && r.pr === record.pr && r.head === record.head
+  const at = records.findIndex(r => r === record || (r && validateReferralRecord(r) && referralRecordId(r) === referralRecordId(record)));
+  const peers = (at < 0 ? records : records.slice(0, at + 1)).filter(r => validateReferralRecord(r) && r.repo === record.repo && r.pr === record.pr && r.head === record.head
     && decideClearerIndependence({ authorId: parseAuthorActorId(body), clearerId: r.reviewer.id,
       prCreatedAt: createdAt }).independent === true);
   for (const f of record.referrals) {
@@ -2359,10 +2369,15 @@ export function renderReferralRecord(record) {
  * looks like a referral record and cannot be read cleanly is a flagged hold. A bare string has no author, so it is
  * untrusted too. A comment that never names the marker is ignored.
  */
-export function readReferralRecords(comments) {
+export function readReferralRecords(comments, { head } = {}) {
   const records = new Map();
   const seen = new Set();
   let malformed = !Array.isArray(comments);
+  // Only a decoded, full SHA can prove corruption belongs to a different head.
+  // Without a current head, retain the historical fail-closed reader behavior. The typeof check matters:
+  // RegExp.test coerces its argument, so a decoded `head: [sha]` would pass the regex yet fail `===`.
+  const holdsHead = (r) => !/^[a-f0-9]{40}$/.test(head ?? '')
+    || typeof r?.head !== 'string' || !/^[a-f0-9]{40}$/.test(r.head) || r.head === head;
   for (const comment of Array.isArray(comments) ? comments : []) {
     const body = typeof comment === 'string' ? comment : comment?.body ?? '';
     if (!body.includes(REFERRAL_RECORD_MARKER)) continue;
@@ -2373,7 +2388,9 @@ export function readReferralRecords(comments) {
     // Only the comment's own final line is structured data. Summaries and rationales
     // may quote arbitrary marker-shaped text; they cannot inject a second record.
     const trailer = body.trimEnd().split('\n').at(-1);
-    const match = /^<!-- mandatory-referrals-v1: ([^\s]+) -->$/.exec(trailer);
+    // The closing ` -->` is optional here (#3643): a trailer cut off before it still decodes, and the read below
+    // holds it only when it belongs to the current head (or cannot be attributed to another one).
+    const match = /^<!-- mandatory-referrals-v1: ([^\s]+)( -->)?$/.exec(trailer);
     const matches = match ? [match] : [];
     // Fail closed: a trusted comment that names the marker but does not end in a valid trailer (an operator note
     // appended by editing it, a truncated write) is flagged malformed so its hold cannot vanish silently.
@@ -2381,7 +2398,7 @@ export function readReferralRecords(comments) {
     for (const match of matches) {
       try {
         const r = JSON.parse(decodeURIComponent(match[1]));
-        if (!validateReferralRecord(r)) { malformed = true; continue; }
+        if (!match[2] || !validateReferralRecord(r)) { malformed ||= holdsHead(r); continue; }
         const snapshot = JSON.stringify(r);
         if (seen.has(snapshot)) continue;
         seen.add(snapshot);
@@ -2390,7 +2407,7 @@ export function readReferralRecords(comments) {
         if (previous && (previous.authorBody !== r.authorBody || JSON.stringify(previous.referrals) !== JSON.stringify(r.referrals)
           || (previous.attempted && !r.attempted)
           || JSON.stringify(r.rulings.slice(0, previous.rulings.length)) !== JSON.stringify(previous.rulings))) {
-          malformed = true; continue;
+          malformed ||= holdsHead(r); continue;
         }
         records.set(id, r);
       } catch { malformed = true; }
@@ -2401,7 +2418,7 @@ export function readReferralRecords(comments) {
 
 /** Shared fresh-read acceptance boundary and replay state. */
 export function mandatoryReferralState(comments, context = {}) {
-  const { records, malformed } = readReferralRecords(comments);
+  const { records, malformed } = readReferralRecords(comments, context);
   const pending = malformed ? ['malformed-referral-record'] : [];
   if (records.length && Object.hasOwn(context, 'head') && !/^[a-f0-9]{40}$/.test(context.head ?? '')) {
     pending.push('unavailable-reviewed-head');

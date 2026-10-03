@@ -1639,11 +1639,52 @@ describe('#4315 mandatory referral protocol', () => {
     next.rulings = [{ ...rule(next), id: 'independent-ruling' }];
     const context = { head: next.head, body: `<!-- authored-by-actor: ${old.reviewer.id} -->` };
     const comments = rs => rs.map(r => post(renderReferralRecord(r)));
-    expect(mandatoryReferralState(comments([old, next]), context)).toMatchObject({ pending: [], blocked: [] });
+    // Only forward: the later independent ruling does not clear the hold that was already standing.
+    expect(mandatoryReferralState(comments([old, next]), context)).toMatchObject({ pending: [old.referrals[0].key], blocked: [] });
+    expect(mandatoryReferralState(comments([next, old]), context)).toMatchObject({ pending: [], blocked: [] });
     expect(referralRecordState(next, { ...context, records: [old] }).pending).toEqual([next.referrals[0].key]);
     const stale = { ...old, head: 'b'.repeat(40) };
     expect(referralRecordState(next, { body: next.authorBody, records: [stale] }).pending).toEqual([next.referrals[0].key]);
     expect(referralRecordState(next, { body: next.authorBody, records: [old] }).blocked).toEqual([next.referrals[0].key]);
+  });
+  it('refuses to let a LATER record clear an earlier hold: a forged runId buys no independence (#3507 finding 1)', () => {
+    const held = record();
+    const forged = { ...record(), runId: 'invented-run', reviewer: mandatoryReferralReviewer('invented-run'), rulings: [] };
+    forged.rulings = [rule(forged)];
+    const context = { head: held.head, body: held.authorBody, repo: held.repo, pr: held.pr };
+    const render = rs => rs.map(r => post(renderReferralRecord(r)));
+    // The forged record clears ITSELF (a self-consistent record from a trusted login is the baseline) ...
+    expect(referralRecordState(forged, { ...context, records: [held, forged] }).pending).toEqual([]);
+    // ... but not the hold that was already standing when it was posted.
+    expect(referralRecordState(held, { ...context, records: [held, forged] }).pending).toEqual([held.referrals[0].key]);
+    expect(mandatoryReferralState(render([held, forged]), context).pending).toEqual([held.referrals[0].key]);
+    // A ruling still carries FORWARD: an earlier record's ruling clears a later record for the same exact key.
+    const ruled = { ...record(), runId: 'earlier-run', reviewer: mandatoryReferralReviewer('earlier-run'), rulings: [] };
+    ruled.rulings = [rule(ruled)];
+    expect(mandatoryReferralState(render([ruled, held]), context).pending).toEqual([]);
+  });
+  it('a trusted record comment with trailing ordinary text keeps its hold, never silently dropped (#3507 finding 2)', () => {
+    const r = record(), body = renderReferralRecord(r);
+    const context = { head: r.head, body: r.authorBody, repo: r.repo, pr: r.pr };
+    for (const tail of ['\nOperator note: looking at this.', '\n\nnote', ' trailing words']) {
+      expect(readReferralRecords([post(body + tail)])).toEqual({ records: [], malformed: true });
+      expect(mandatoryReferralState([post(body + tail)], context).pending).toEqual(['malformed-referral-record']);
+    }
+  });
+  it('a ruling in a later run cannot supersede an earlier run\'s: conflicts hold, same-record supersession clears (#3507 finding 3)', () => {
+    const first = record(); first.rulings = [rule(first, 'block')];
+    const later = { ...record(), runId: 'later-run', reviewer: mandatoryReferralReviewer('later-run'), rulings: [] };
+    later.rulings = [{ ...rule(later), id: 'l1', supersedes: ['r1'] }];
+    // Supersession is per record by design (a ruling may only name an id in its own record): this record is invalid ...
+    expect(validateReferralRecord(later)).toBe(false);
+    // ... and the cross-run disagreement fails closed instead of letting the later run win.
+    later.rulings = [{ ...rule(later), id: 'l1' }];
+    const context = { head: first.head, body: first.authorBody, repo: first.repo, pr: first.pr };
+    const render = rs => rs.map(r => post(renderReferralRecord(r)));
+    expect(mandatoryReferralState(render([first, later]), context).pending).toEqual([first.referrals[0].key]);
+    // The way to supersede is a snapshot of the SAME record that names the ruling it replaces.
+    const resolved = { ...first, rulings: [...first.rulings, { ...rule(first), id: 'r2', supersedes: ['r1'] }] };
+    expect(mandatoryReferralState(render([first, resolved]), context).pending).toEqual([]);
   });
   it.each(['summary', 'rationale'])('reads only the own trailer when %s contains marker-shaped text', field => {
     const injected = record(); injected.runId = 'injected'; injected.reviewer = mandatoryReferralReviewer('injected');
@@ -1668,8 +1709,9 @@ describe('#4315 mandatory referral protocol', () => {
     const forged = { ...record(), runId: 'forged-run', reviewer: mandatoryReferralReviewer('forged-run'), rulings: [] };
     forged.rulings = [rule(forged)];
     const context = { head: held.head, body: held.authorBody, repo: held.repo, pr: held.pr };
-    // The same forged comment from the automation is honoured (the pooling behaviour this guards) ...
-    expect(mandatoryReferralState([post(renderReferralRecord(held)), post(renderReferralRecord(forged))], context).pending).toEqual([]);
+    // The same forged comment, even from the automation, cannot clear a hold that was already standing (#3507 finding 1) ...
+    expect(mandatoryReferralState([post(renderReferralRecord(held)), post(renderReferralRecord(forged))], context).pending)
+      .toEqual([held.referrals[0].key]);
     // ... but from any other login — or with no author at all — it is never read as a record (it cannot clear the
     // hold) and is flagged malformed, so it stays a visible hold instead of vanishing.
     for (const intruder of [post(renderReferralRecord(forged), 'drive-by-commenter'), renderReferralRecord(forged),
@@ -1707,6 +1749,39 @@ describe('#4315 mandatory referral protocol', () => {
       // Contains the marker => either its record was read, or the read is flagged malformed. Never neither.
       expect(parsed || read.malformed, `${login} / ${JSON.stringify(body.slice(0, 60))}`).toBe(true);
     }
+  });
+  it('ignores decoded malformed records only on a different full head', () => {
+    const r = record();
+    const raw = (head) => `<!-- mandatory-referrals-v1: ${encodeURIComponent(JSON.stringify({ ...r, head, reviewer: {} }))} -->`;
+    const malformed = (head) => post(raw(head));
+    const current = 'b'.repeat(40);
+    const comments = [malformed(r.head)];
+    expect(readReferralRecords(comments).malformed).toBe(true);
+    expect(mandatoryReferralState(comments, { head: current }).pending).toEqual([]);
+    expect(mandatoryReferralState([post(raw(r.head).replace(' -->', ''))], { head: current }).pending).toEqual([]);
+    expect(mandatoryReferralState([post(raw(current).replace(' -->', ''))], { head: current }).pending).toContain('malformed-referral-record');
+    for (const head of [current, undefined, '4489a34', 'invalid']) {
+      expect(mandatoryReferralState([malformed(head)], { head: current }).pending).toContain('malformed-referral-record');
+    }
+    // A non-string head never proves the record belongs to an older head — RegExp.test coerces `[sha]` to `sha`,
+    // so only a typed string may release the hold. Arrays naming the current OR an older sha, objects and
+    // numbers all keep the hold.
+    for (const head of [[current], [r.head], { toString: () => current }, 123, true, null]) {
+      expect(mandatoryReferralState([malformed(head)], { head: current }).pending).toContain('malformed-referral-record');
+    }
+    for (const marker of ['<!-- mandatory-referrals-v1: %truncated', '<!-- mandatory-referrals-v1: %invalid -->']) {
+      expect(mandatoryReferralState([...comments, post(marker)], { head: current }).pending).toContain('malformed-referral-record');
+    }
+  });
+  it('scopes conflicting snapshots to their head without carrying old clearance forward', () => {
+    const r = record();
+    r.rulings = [rule(r)];
+    const comments = [post(renderReferralRecord(r)), post(renderReferralRecord({ ...r, rulings: [] }))];
+    expect(mandatoryReferralState(comments, { head: r.head }).pending).toContain('malformed-referral-record');
+    const next = mandatoryReferralState(comments, { head: 'b'.repeat(40) });
+    expect(next.malformed).toBe(false);
+    expect(next.pending).toEqual([r.referrals[0].key]);
+    expect(readReferralRecords(comments).malformed).toBe(true);
   });
   it('preserves conflicts until explicit supersession, and fails closed on omissions/corruption', () => {
     const r = record(), pending = renderReferralRecord(r);
