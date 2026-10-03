@@ -119,7 +119,7 @@ describe('readSharedOpenPrs — one fetch serves the fleet', () => {
   it('a write (dirty marker) forces a refresh once past the floor, not before', () => {
     const { exec, calls } = fakeExec();
     readSharedOpenPrs(opts({ fields: 'number', exec }));
-    const dirty = join(dir, 'chalbert__web-everything.dirty');
+    const dirty = join(dir, 'web-everything__web-everything.dirty');
     writeFileSync(dirty, '');
     const t = new Date(clock + 1_000); utimesSync(dirty, t, t);
     clock += 2_000;
@@ -133,7 +133,7 @@ describe('readSharedOpenPrs — one fetch serves the fleet', () => {
   it('markPrSnapshotDirty writes the per-repo marker (and the all-repos one for a cwd write)', () => {
     readSharedOpenPrs(opts({ fields: 'number', exec: fakeExec().exec }));
     expect(markPrSnapshotDirty({ repo: REPO, env: { WE_PR_SNAPSHOT_DIR: dir } })).toBe(true);
-    expect(existsSync(join(dir, 'chalbert__web-everything.dirty'))).toBe(true);
+    expect(existsSync(join(dir, 'web-everything__web-everything.dirty'))).toBe(true);
     expect(markPrSnapshotDirty({ repo: null, env: { WE_PR_SNAPSHOT_DIR: dir } })).toBe(true);
     expect(existsSync(join(dir, '_all.dirty'))).toBe(true);
     expect(markPrSnapshotDirty({ repo: REPO, env: { VITEST: '1' } })).toBe(false); // never the real dir from a test

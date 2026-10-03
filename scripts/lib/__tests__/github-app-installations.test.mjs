@@ -112,3 +112,24 @@ describe('legacy chalbert slugs resolve to the new owner', () => {
     expect(ownerFromRemoteUrl('https://github.com/chalbert/webeverything.git')).toBe('web-everything');
   });
 });
+
+describe('legacy slugs from old origin remotes are canonicalized before reaching gh --repo', () => {
+  it('canonicalizeSlug maps chalbert/<known repo> and leaves everything else alone', async () => {
+    const { canonicalizeSlug, repoKeyForSlug } = await import('../constellation-repos.mjs');
+    expect(canonicalizeSlug('chalbert/web-everything')).toBe('web-everything/web-everything');
+    expect(canonicalizeSlug('chalbert/webeverything')).toBe('web-everything/web-everything');
+    expect(canonicalizeSlug('chalbert/frontierui')).toBe('frontier-ui/frontierui');
+    expect(canonicalizeSlug('chalbert/plateau-app')).toBe('plateauapp/plateau-app');
+    expect(canonicalizeSlug('chalbert/other-repo')).toBe('chalbert/other-repo');
+    expect(canonicalizeSlug('acme/frontierui')).toBe('acme/frontierui');
+    expect(repoKeyForSlug('chalbert/frontierui')).toBe('frontierui');
+  });
+  it('the drain sweeps the declared per-org slugs even when self comes from a legacy origin', async () => {
+    const { resolveRepos } = await import('../../merge-ai-prs.mjs');
+    expect(resolveRepos({ self: 'chalbert/web-everything' }))
+      .toEqual(['web-everything/web-everything', 'frontier-ui/frontierui', 'plateauapp/plateau-app']);
+    expect(resolveRepos({ self: 'frontier-ui/frontierui' })[0]).toBe('frontier-ui/frontierui');
+    expect(resolveRepos({ repos: 'frontierui,chalbert/plateau-app', self: 'web-everything/web-everything' }))
+      .toEqual(['frontier-ui/frontierui', 'plateauapp/plateau-app']);
+  });
+});

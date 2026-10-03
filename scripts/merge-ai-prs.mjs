@@ -180,6 +180,7 @@ import { ensureFreshGithubAppEnv } from './lib/github-app-auth-env.mjs';
 // pass's TOTAL ms, no breakdown). See pass-timings.mjs's own header for the full shape/rationale.
 import { createStepTimer, formatTimingsSummary, PASS_STEP_ORDER } from './lib/pass-timings.mjs';
 import { computeOverlapContext, parseOverlapYieldOverrides, isExemptItem, overlapRowKey } from './conveyor/land-overlap-yield.mjs'; // #4308 — the land-time overlap-yield planner (see planLabelDrain's own `overlapContext` param)
+import { CONSTELLATION_REPOS, canonicalizeSlug } from './lib/constellation-repos.mjs';
 export { remoteManifestApiArgs };
 
 // #2414 — the local, machine-scoped FIRST-DRAIN-SIGHTING manifest baseline the land-time tamper gate diffs a
@@ -2845,19 +2846,26 @@ const CONSTELLATION_REPO_NAMES = ['web-everything', 'frontierui', 'plateau-app']
  * @param {{repos?:string|null, singleRepo?:boolean, self?:string|null}} o
  * @returns {Array<string|null>}
  */
-export function resolveRepos({ repos, singleRepo, self } = {}) {
+export function resolveRepos({ repos, singleRepo, self: rawSelf } = {}) {
+  const self = typeof rawSelf === 'string' ? canonicalizeSlug(rawSelf) : rawSelf;
   if (typeof repos === 'string' && repos.trim()) {
     // #xc7p3q9 (R10) — NORMALIZE every `--repos` entry to `owner/name`. A short-name `--repos=frontierui` otherwise
     // yields a bogus `frontierui` alongside the canonical `frontier-ui/frontierui`: its listing throws, and (pre-R3)
     // latched `contextComplete:false` permanently. Prefix the local owner when an entry carries no `/`.
     const owner = self && self.includes('/') ? self.split('/')[0] : null;
-    const norm = (s) => (s.includes('/') || !owner) ? s : `${owner}/${s}`;
+    const declaredByDir = (n) => Object.values(CONSTELLATION_REPOS).find((r) => r.dirs.includes(n))?.slug ?? null;
+    const norm = (s) => s.includes('/') ? canonicalizeSlug(s) : (declaredByDir(s) ?? (owner ? `${owner}/${s}` : s));
     const list = [...new Set(repos.split(',').map((s) => s.trim()).filter(Boolean).map(norm))];
     if (list.length) return list;
   }
   // #2287 — the constellation is the DEFAULT (the backlog is WE-global, so cross-repo blockedBy needs one
   // global cascade). Opt OUT with `--this-repo` for a deliberately scoped single-repo drain.
   if (singleRepo) return [null];
+  // The constellation spans ONE ORG PER REPO since the 2026-10-03 move, so when self IS a constellation repo the
+  // default set is the declared slugs themselves — never "self's owner x names", which would invent
+  // `web-everything/frontierui`. A non-constellation self (a fork) keeps the owner-times-names derivation.
+  const declared = Object.values(CONSTELLATION_REPOS).map((r) => r.slug);
+  if (self && declared.includes(self)) return [self, ...declared.filter((s) => s !== self)];
   const owner = self && self.includes('/') ? self.split('/')[0] : null;
   if (!owner) return [null]; // can't derive the constellation without an owner → stay single-repo (safe)
   const slugs = CONSTELLATION_REPO_NAMES.map((n) => `${owner}/${n}`);

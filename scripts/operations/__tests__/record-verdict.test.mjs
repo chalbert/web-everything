@@ -293,7 +293,7 @@ describe('the sink — a worktree, never a branch switch in the caller\'s lane',
 
 describe('the write-up name matches what review-pr stages', () => {
   it('is repo-and-pr keyed, with the slash flattened', () => {
-    expect(writeUpName('web-everything/web-everything', 1496)).toBe('chalbert-web-everything-1496-verdict.md');
+    expect(writeUpName('web-everything/web-everything', 1496)).toBe('web-everything-web-everything-1496-verdict.md');
   });
 });
 

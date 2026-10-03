@@ -56,6 +56,7 @@ import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 import { HOME_REASONS } from '../operations/pr-land-reasons.mjs';
 
 // ── TUNING (exported so a caller/test can override; the conveyor tick uses the defaults) ──────────────────────
+import { canonicalizeSlug } from '../lib/constellation-repos.mjs';
 
 /** Backoff base: the wait after the FIRST failure before the first retry (30s). */
 export const DEFAULT_BASE_MS = 30_000;
@@ -529,7 +530,7 @@ export function originSlugOf(cwd = INFRA_ROOT) {
     // #x5n4zn3 — was bare (no timeout); a local config read, short budget.
     const url = execFileSync('git', ['remote', 'get-url', 'origin'], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 15_000, killSignal: 'SIGKILL' }).trim();
     const m = url.match(/[:/]([^/]+\/[^/]+?)(?:\.git)?$/);
-    return m ? m[1] : null;
+    return m ? canonicalizeSlug(m[1]) : null;
   } catch {
     return null;
   }

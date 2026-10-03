@@ -550,7 +550,7 @@ describe('the PR-view transport', () => {
   });
 
   it('names a staged view by encoded slug and number', () => {
-    expect(prViewFileName('web-everything/web-everything', 1465)).toBe('chalbert%2Fweb-everything-1465.json');
+    expect(prViewFileName('web-everything/web-everything', 1465)).toBe('web-everything%2Fweb-everything-1465.json');
   });
 
   // The `-` flattening was NOT injective: a repo name may contain `-`, so two different repos landed on one

@@ -782,9 +782,9 @@ describe('round 2: tick output, silences, partial lines', () => {
     const f = join(logsDir, 'fix-dispatch-daemon.log');
     writeFileSync(f, 'reconcile-fix-dispatch-daemon: started on Mac:1, tick every 120000ms.\n');
     const a = probeDaemonLogs(logsDir, {});
-    appendFileSync(f, 'reconcile-fix-dispatch-daemon: tick (a) — dispatched 0, refused 1\nreconcile-fix-dispatch-daemon: refused no-lane chalbert/fronti');
+    appendFileSync(f, 'reconcile-fix-dispatch-daemon: tick (a) — dispatched 0, refused 1\nreconcile-fix-dispatch-daemon: refused no-lane frontier-ui/fronti');
     const b = probeDaemonLogs(logsDir, a.cursors);
-    expect(b.samples[0].text).not.toContain('chalbert/fronti');
+    expect(b.samples[0].text).not.toContain('frontier-ui/fronti');
     appendFileSync(f, 'erui PR #7 — no free lane\n');
     const c = probeDaemonLogs(logsDir, b.cursors);
     expect(c.samples[0].text).toBe('reconcile-fix-dispatch-daemon: refused no-lane frontier-ui/frontierui PR #7 — no free lane\n');

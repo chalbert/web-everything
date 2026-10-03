@@ -54,6 +54,7 @@ import { resolveNetDiffBasis } from '../merge-ai-prs.mjs';
 import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
 
+import { canonicalizeSlug } from '../lib/constellation-repos.mjs';
 /** The forced JSON shape the targeted-check judge's answer must satisfy (#xconv1). One verdict, one citing
  *  note — never a re-derivation of `review-core.mjs`'s own multi-finding panel shape, because this is
  *  deliberately NOT a panel: one question, one answer.
@@ -251,7 +252,7 @@ export function fetchTestGamingDiffEvidence({
 /** `owner/name` from a GitHub remote URL (ssh or https, with or without `.git`), lowercased; `null` otherwise. */
 export function slugFromRemoteUrl(url) {
   const m = /github\.com[:/]+([^/\s]+\/[^/\s]+?)(?:\.git)?\/?\s*$/i.exec(String(url || '').trim());
-  return m ? m[1].toLowerCase() : null;
+  return m ? canonicalizeSlug(m[1].toLowerCase()) : null;
 }
 
 /** IO (injected `exec`): is `repo` this checkout's own `remote`? Unreadable remote → `false` (never assume). */
