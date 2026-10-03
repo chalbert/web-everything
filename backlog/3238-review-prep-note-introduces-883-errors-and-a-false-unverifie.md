@@ -2,11 +2,13 @@
 bornAs: xyg1k8p
 kind: task
 parent: "3029"
-status: open
+status: resolved
 dateOpened: "2026-08-21"
+dateResolved: "2026-10-03"
 preparedDate: "2026-08-25"
 relatedTo: ["3233", "3230"]
 tags: [operations, epic-3029, review-prep, preparation, gate]
+scopeRationale: "we:scripts/check-standards-rules.mjs is an existing read-only detector imported by the regression tests, not an edited deliverable. Frozen card-body fixtures live inline in the scoped test file."
 scope:
   - we:scripts/operations/review-prep.mjs
   - we:scripts/operations/review-prep-io.mjs
@@ -201,3 +203,70 @@ renderer, so if it lands separately it should land **after** #3233 to avoid a te
    warn. (#1637 and #3183 carry the line but do not warn, so rewording them changes no count; #3238 and
    #3103 keep warning because they discuss the phrase; #2717 is out of scope.) Stated as a count delta, not
    as pass/fail — the gate is green either way.
+
+## Progress
+
+2026-10-03 — implemented in the checkout based on `8385e39a454fd3b580e9a991217bfa660d35294a`.
+
+- First probe: exact emitted-phrase grep found the renderer and #3100, #1637, #3183,
+  plus the intentional discussions in #3103 and this card. Direct marker scans of the three
+  affected cards each returned one unverified-prerequisite marker.
+- Before: `npm run check:standards` against the original HEAD contents returned **0 errors,
+  5511 warnings**. This is the measured build-time baseline, not the historical count above.
+- Routed the card write in we:scripts/operations/review-prep-io.mjs through
+  we:scripts/backlog/guarded-write.mjs. Guard errors retain their messages and identify the
+  refusal through `Error.cause`; the sink returns `recorded: false`, `verified: false`, and
+  the distinct `lane-guard`, `secret`, or `locus` reason before staging or publication.
+  Unexpected filesystem failures still propagate.
+- Reworded the PREMISE strategy in we:scripts/operations/review-prep.mjs and only the three
+  emitted notes named in scope. Added frozen full-body copies inline in
+  we:scripts/operations/__tests__/review-prep.test.mjs, avoiding helper files and live-card reads.
+- Mutation proof: temporarily restoring the bare write failed the three named cases
+  `locus refusal leaves the card unchanged and performs no publication`,
+  `secret refusal leaves the card unchanged and performs no publication`, and
+  `lane-guard refusal leaves the card unchanged and performs no publication`.
+  Restoring the original strategy failed
+  `unaddressed PREMISE strategy does not assert an unverified prerequisite` with a marker at
+  rendered line 7. Both mutations were restored immediately afterward.
+
+- Current attribution differs from the historical acceptance note: #3100 is now resolved,
+  #1637 remains parked, and #3183 now warns (its blocker #3194 is resolved). The first
+  changed-tree scan reduced unverified-prerequisite warnings from **4 to 3**, removing #3183.
+  It also exposed a newly displaced line citation to we:scripts/operations/__tests__/review-prep.test.mjs
+  from #4684; placing the added import in the existing import separator preserves the cited lines.
+
+- Focused verification: **81 tests passed** across
+  we:scripts/operations/__tests__/review-prep.test.mjs,
+  we:scripts/operations/__tests__/review-prep-io.test.mjs, and
+  we:scripts/backlog/__tests__/primary-write-guard.test.mjs. Existing clean-note recording,
+  staged-byte verification, and guarded-writer contracts remain green.
+- Required wider run: `node we:scripts/verify-lane.mjs` selected 18 targets and completed
+  **7238 passing / 6 failing tests**. All six failures are the real process-table cases in
+  we:scripts/operations/__tests__/restart-runner-io-real.test.mjs and
+  we:scripts/operations/__tests__/clear-stuck-session-io-real.test.mjs. Directly spawning
+  `/bin/ps` returned `EPERM`. Re-running those two suites with all three changed production
+  modules temporarily restored to HEAD reproduced the **same six failures** (11 other tests
+  passed). The changed modules were restored afterward. This run recorded a red lane marker;
+  no tests, exclusions, or gates were weakened to hide the sandbox limitation.
+
+- Final `npm run check:standards`: **0 errors, 5524 warnings** after resolution. Compared
+  warning identities against the measured 5511-warning baseline: **no new warnings from this
+  change**; 16 additional remote-main nonnumeric-ID diagnostics appeared during the run,
+  while three card warnings disappeared (the #3183 premise marker, this card's marker after
+  resolution, and this card's legacy scope warning). Those external diagnostics account for
+  the raw count increase. Before resolution the premise-marker count was **4 → 3**;
+  resolving this quoting card then made it **3 → 2**. The scope rationale documents that
+  we:scripts/check-standards-rules.mjs is a read-only test dependency, not an edited deliverable.
+- `node we:scripts/operations/run.mjs resolve --ref=3238` completed with one effect applied;
+  the card is resolved. `git diff --check` passed. No helper files, commits, pushes, or PRs
+  were created for this change.
+
+## Follow-ups
+
+- Re-run `node we:scripts/verify-lane.mjs` in an environment permitted to read the process
+  table. This sandbox cannot grant that permission; the six baseline failures above are
+  outside the card's declared implementation scope.
+
+- Temporary primary-checkout fixtures must use a realpath-normalized root on macOS, where
+  the temporary directory can be reached through a symlink. Otherwise the lane test compares
+  different root spellings and does not exercise the intended refusal.
