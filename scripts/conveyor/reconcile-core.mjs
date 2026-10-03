@@ -101,6 +101,7 @@
  * branch below is reachable in a test with no network and no credential.
  */
 import { reviewCiGate } from '../lib/review-ci-gate.mjs';
+import { REFERRAL_HOLD_MARKER } from './review-referral-hold.mjs';
 import { OPERATOR_ANSWER_MARKER, isOperatorAnswerStandDownSuperseded, latestOperatorAnswer } from './stand-down-answer-core.mjs';
 import { classifyPr } from '../progress-board.mjs';
 import { reduceCheckState } from '../operations/pr-status.mjs';
@@ -259,7 +260,7 @@ export const DISPATCH_KINDS = Object.freeze(['fix', 'review', 'ci-heal', 'ci-tim
  *                          `we:scripts/conveyor/already-landed-watch.mjs` for the pass that acts on it.
  */
 export const REFUSAL_KINDS = Object.freeze([
-  'review-ci',
+  'review-ci', 'review-referrals-pending',
   'stood-down', 'no-findings', 'cap-exhausted',
   'live-process', 'awaiting-permission', 'liveness-unknown',
   'owed-elsewhere', 'owed-ci-rerun', 'nothing-owed', 'already-reviewed-head', 'already-landed',
@@ -319,6 +320,7 @@ export function concurrentAuthorPauseState({ comments, headRefOid = null, now = 
  * it raises no finding.
  */
 export const BOOKKEEPING_MARKERS = Object.freeze([
+  REFERRAL_HOLD_MARKER,
   REARM_COMMENT_MARKER, CI_HEAL_COMMENT_MARKER, STAND_DOWN_MARKER, SUPERSEDE_STAND_DOWN_MARKER, OPERATOR_ANSWER_MARKER,
   // #xkmu3gv — the two new completed-round markers. Neither is a reviewer speaking, so neither may ever count as
   // a finding (`countFindings`) or the pass would read its OWN handback comment as fresh work to fix.
@@ -1122,6 +1124,12 @@ function reviewChecksAllow({ pr, requiredChecks, refuse, withPhase, extra = {} }
 function dispatchReviewRow({
   pr, requiredChecks, withPhase, base, attempts, roundCap, refuse, refuseCapExhausted, dispatch, extra = {}, now = 0,
 }) {
+  if (pr.referralHold) {
+    refuse('review-referrals-pending', {
+      ...withPhase, ...extra, referralHold: pr.referralHold, why: pr.referralHold.why,
+    });
+    return;
+  }
   // ── `draft` (draft-first PRs, operator-approved 2026-09-27) — checked FIRST, ahead of every other refusal
   // in this function, including `already-reviewed-head`: a draft PR is never owed a review no matter what its
   // `review:*` label or its comment thread says, because GitHub itself will not surface it for review and
