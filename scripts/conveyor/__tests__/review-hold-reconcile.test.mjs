@@ -22,6 +22,27 @@ function provider({ readPrState } = {}) {
 }
 
 describe('planReviewHoldCleanup', () => {
+  it('does NOT flag review:changes beside review:human — a send-back under a human hold is designed (#3657)', () => {
+    expect(planReviewHoldCleanup({ currentLabels: ['review:human', 'review:changes'] }))
+      .toEqual({ remove: [] });
+    expect(needsReviewHoldCleanup(pr(1, ['review:human', 'review:changes']))).toBe(false);
+  });
+
+  it('still flags accepted+human when review:changes also rides along', () => {
+    expect(planReviewHoldCleanup({ currentLabels: ['review:accepted', 'review:human', 'review:changes'] }))
+      .toEqual({ remove: [], flagged: ['review:accepted', 'review:human'] });
+  });
+
+  it('cleans pending beside human+changes without flagging or removing the send-back', () => {
+    expect(planReviewHoldCleanup({ currentLabels: ['review:human', 'review:changes', 'review:pending'] }))
+      .toEqual({ remove: ['review:pending'] });
+  });
+
+  it('still flags accepted+changes without a human hold', () => {
+    expect(planReviewHoldCleanup({ currentLabels: ['review:accepted', 'review:changes'] }))
+      .toEqual({ remove: [], flagged: ['review:accepted', 'review:changes'] });
+  });
+
   // #x01u7az — LIVE, PR #2549 (2026-09-24): review:pending added by a mechanical rearm on top of a still-live
   // review:human, never cleared. At most one review:* hold at a time.
   it('drops a stray review:pending that coexists with review:human', () => {
@@ -107,6 +128,37 @@ describe('needsReviewHoldCleanup', () => {
 });
 
 describe('sweepReviewHoldLabels', () => {
+  it('skips a PR carrying review:human + review:changes — no entry, no readPrState call', () => {
+    const p = provider();
+    const results = sweepReviewHoldLabels({
+      repo: 'o/n', provider: p,
+      listPrs: () => [pr(3657, ['review:human', 'review:changes'])],
+    });
+    expect(results).toEqual([]);
+    expect(p.calls.readPrState).toEqual([]);
+    expect(p.calls.set).toEqual([]);
+    expect(p.calls.postComment).toEqual([]);
+  });
+
+  it('keeps the send-back quiet over 100 sweeps while accepted+human still fails closed on fetch errors', () => {
+    const p = provider(); // readPrState throws: no flagged label may be removed on this error path
+    for (let tick = 0; tick < 100; tick += 1) {
+      expect(sweepReviewHoldLabels({
+        repo: 'o/n', provider: p,
+        listPrs: () => [
+          pr(3657, ['review:human', 'review:changes']),
+          pr(2767, ['review:accepted', 'review:human', 'review:changes']),
+        ],
+      })).toEqual([{
+        num: 2767, flagged: ['review:accepted', 'review:human'], flagReason: 'fetch-unavailable',
+        fetchError: 'readPrState not stubbed for this test',
+      }]);
+    }
+    expect(p.calls.readPrState).toEqual(Array.from({ length: 100 }, () => ({ repo: 'o/n', number: 2767 })));
+    expect(p.calls.set).toEqual([]);
+    expect(p.calls.postComment).toEqual([]);
+  });
+
   it('drops the stray review:pending from a PR that also carries review:human (PR #2549 shape)', () => {
     const p = provider();
     const results = sweepReviewHoldLabels({
