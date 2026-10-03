@@ -3,7 +3,7 @@ kind: story
 size: 3
 parent: "4075"
 status: open
-scope: ["we:scripts/check-standards.mjs", "we:scripts/__tests__/check-standards-frontmatter-parse.test.mjs", "we:scripts/__tests__/check-backlog-item.test.mjs", "we:scripts/check-standards-rules.mjs"]
+scope: ["we:scripts/check-standards.mjs", "we:scripts/__tests__/check-standards-frontmatter-parse.test.mjs", "we:scripts/__tests__/check-backlog-item.test.mjs", "we:scripts/check-standards-rules.mjs", "we:scripts/__tests__/check-standards.test.mjs"]
 dateOpened: "2026-10-01"
 preparedDate: "2026-10-03"
 preparedAgainstSha: "a4687bea96bcde71038823a9ffeee3ff774c04f2"
