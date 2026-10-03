@@ -1,4 +1,6 @@
 import { mandatoryReferralState } from './lib/jury-core.mjs';
+import { referralSeatDisabled } from './operations/review-seat-policy.mjs';
+import { readReviewRunEvidence } from './conveyor/review-referral-hold.mjs';
 /**
  * review-set-label.mjs — swap a PR's review label, INVARIANT-2 guarded (#2470, increment 2 of 2). Also the
  * SINGLE HOME of the shared review-label CLI harness (#2644): a PURE `decideSetLabel` decides the swap for a
@@ -1952,9 +1954,18 @@ export function referralCardReadable(ref, root = process.cwd()) {
 }
 
 /** Fail closed at every acceptance entry point using the fresh durable PR record. */
-export function assertMandatoryReferralsCleared(state, { repo, pr, cardReadable = referralCardReadable } = {}) {
+export function assertMandatoryReferralsCleared(state, { repo, pr, cardReadable = referralCardReadable,
+  env = process.env, readRuns = readReviewRunEvidence } = {}) {
   const result = mandatoryReferralState(state.comments, { repo, pr, head: state.headRefOid,
-    body: typeof state.body === 'string' ? state.body : '', createdAt: state.createdAt, cardReadable });
+    body: typeof state.body === 'string' ? state.body : '', createdAt: state.createdAt, cardReadable,
+    seatDisabled: seat => referralSeatDisabled(seat, env) });
+  if (repo && pr && !result.records.some(r => r.repo === repo && r.pr === Number(pr) && r.head === state.headRefOid)) {
+    const last = readRuns().filter(r => r.repo === repo && r.pr === Number(pr) && r.head === state.headRefOid)
+      .sort((a, b) => b.completedAt - a.completedAt)[0];
+    if (last?.persistenceFailed) {
+      throw new Error(`mandatory referral hold: referral-persistence-failed; no readable referral record for current head ${state.headRefOid}; persist the mandatory review before acceptance`);
+    }
+  }
   if (result.pending.length || result.blocked.length) {
     throw new Error(`mandatory referral hold: ${[...result.pending, ...result.blocked].join(', ')}; record finding-specific mandatory rulings before acceptance`);
   }
