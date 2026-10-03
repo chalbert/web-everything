@@ -20,6 +20,7 @@ import { spawnSync, spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 
 import {
+  isClaimStampOnlyEdit, restoreStrayClaimStamps,
   planRebuild, findUnsafeLocalState, rebuildClone, dryRunRebuild, readRebuildState, rebuildStatePath,
   isDaemonManagedClone, daemonConveyorStateRoot, materializeCandidate, removeCandidate, previewOverlayConflict,
 } from '../daemon-rebuild.mjs';
@@ -1704,6 +1705,143 @@ describe('rebuildClone — an external-only (gh) smoke rejection retries with ba
     const later = await rebuildClone({ root: cloneDir, env, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS, now: () => t0 + 24 * 3600_000 });
     expect(later.reason).toBe('still-rejected');
     expect(runSmoke).not.toHaveBeenCalled();
+  });
+});
+
+describe('rebuildClone — a stray backlog claim stamp is restored, never a freeze (#4561)', () => {
+  const card = 'backlog/9001-stray-claim.md';
+  const original = '---\nstatus: open\nscope: []\n---\nBody stays byte-identical.\n';
+  const stamp = (text, status = 'active') => text.replace('status: open', `status: ${status}\ndateStarted: "2026-09-29"`);
+  const scorecard = 'scripts/conveyor/run-scorecards.json';
+
+  it.each(['\n', '\r\n'])('recognizes claim stamps with line ending %j', (eol) => {
+    const head = original.replaceAll('\n', eol);
+    const work = stamp(original).replaceAll('\n', eol);
+    expect(isClaimStampOnlyEdit(head, work)).toBe(true);
+    expect(isClaimStampOnlyEdit(head, work + 'body edit')).toBe(false);
+    expect(isClaimStampOnlyEdit(head, work.replace('scope: []', 'scope: [x]'))).toBe(false);
+    expect(isClaimStampOnlyEdit(head, work.replace('status: active', 'status: resolved'))).toBe(false);
+    expect(isClaimStampOnlyEdit(head, work.replace('status: active', 'status: active' + eol + 'status: open'))).toBe(false);
+    expect(isClaimStampOnlyEdit('no frontmatter', work)).toBe(false);
+    expect(isClaimStampOnlyEdit(head, 'no frontmatter')).toBe(false);
+  });
+
+  it.each([
+    ['unreadable HEAD', 'head-unreadable'],
+    ['unreadable file', 'file-busy'],
+    ['concurrent write', 'file-busy'],
+    ['failed diff', 'restore-failed'],
+    ['failed checkout', 'restore-failed'],
+  ])('retains the claim on %s', (fault, reason) => {
+    const run = vi.fn((args) => {
+      if (args[0] === 'show') return { status: fault === 'unreadable HEAD' ? 1 : 0, stdout: original };
+      if (args[0] === 'diff') return { status: fault === 'failed diff' ? 1 : 0, stdout: 'diff' };
+      return { status: 1 };
+    });
+    let reads = 0;
+    const fs = { read: () => {
+      if (fault === 'unreadable file') throw new Error('read failed');
+      reads += 1;
+      return stamp(original) + (fault === 'concurrent write' && reads > 1 ? 'new body' : '');
+    } };
+    expect(restoreStrayClaimStamps({ git: run, root: '/fixture', dirty: [`M ${card}`], fs }))
+      .toEqual({ ok: false, reason, restored: [] });
+    expect(run.mock.calls.some(([args]) => args[0] === 'checkout')).toBe(fault === 'failed checkout');
+  });
+
+  it.each([[], ['R backlog/old.md -> backlog/new.md'], [`D ${card}`], [`UU ${card}`]].map((dirty) => ({ dirty })))
+    ('rejects non-modification porcelain without reading or restoring: $dirty', ({ dirty }) => {
+      const run = vi.fn();
+      expect(restoreStrayClaimStamps({ git: run, root: '/fixture', dirty }))
+        .toEqual({ ok: false, reason: 'not-claim-stamps', restored: [] });
+      expect(run).not.toHaveBeenCalled();
+    });
+
+  it('validates every backlog card before restoring any of them', () => {
+    const run = vi.fn(() => ({ status: 0, stdout: original }));
+    const fs = { read: (path) => stamp(original) + (path.endsWith('9002.md') ? 'body edit' : '') };
+    expect(restoreStrayClaimStamps({
+      git: run, root: '/fixture', dirty: [`M ${card}`, 'M backlog/9002.md'], fs,
+    })).toEqual({ ok: false, reason: 'not-claim-stamps', restored: [] });
+    expect(run.mock.calls.every(([args]) => args[0] === 'show')).toBe(true);
+  });
+
+  function fixture(head = original) {
+    const fx = makeFixture();
+    delete fx.env.CONVEYOR_STATE_ROOT;
+    writeFile(fx.cloneDir, card, head);
+    writeFile(fx.cloneDir, scorecard, '{"version":1,"records":[]}\n');
+    gitOk(fx.cloneDir, ['add', '-A']);
+    gitOk(fx.cloneDir, ['commit', '-qm', 'seed card']);
+    gitOk(fx.cloneDir, ['push', '-q', 'origin', 'main']);
+    gitOk(fx.cloneDir, ['fetch', '-q', 'origin']);
+    advanceMain(fx.originDir, (dir) => writeFile(dir, 'new-on-main.txt', 'new\n'));
+    return fx;
+  }
+  const rebuild = (fx, log) => rebuildClone({
+    root: fx.cloneDir, env: fx.env, runSmoke: passSmoke(), prState: async () => null,
+    lockOpts: LOCK_OPTS, log,
+  });
+
+  it.each(['active', 'preparing'])('restores a status: %s claim stamp, alerts with the diff, and moves the clone', async (status) => {
+    const fx = fixture();
+    writeFile(fx.cloneDir, card, stamp(original, status));
+    expect(findUnsafeLocalState({ git: (args) => git(fx.cloneDir, args) }).reason).toBe('dirty');
+    const log = { error: vi.fn() };
+    const result = await rebuild(fx, log);
+    expect(result.moved).toBe(true);
+    expect(gitOk(fx.cloneDir, ['status', '--porcelain'])).toBe('');
+    expect(gitOk(fx.cloneDir, ['rev-parse', 'HEAD'])).toBe(gitOk(fx.cloneDir, ['rev-parse', 'origin/main']));
+    expect(result.alerts).toContainEqual(expect.objectContaining({
+      kind: 'backlog-claim-stamp-restored',
+      detail: { path: card, diff: expect.stringContaining(`+status: ${status}`) },
+    }));
+    expect(JSON.stringify(log.error.mock.calls)).toContain('backlog-claim-stamp-restored');
+    const alerts = readdirSync(fx.stateDir).filter((name) => name.endsWith('.alerts.jsonl'));
+    expect(alerts.some((name) => readFileSync(join(fx.stateDir, name), 'utf8').includes('backlog-claim-stamp-restored'))).toBe(true);
+    // Repeated ticks after recovery neither restore again nor move an already current clone.
+    for (let tick = 0; tick < 3; tick += 1) {
+      const again = await rebuild(fx);
+      expect(again.reason).toBe('up-to-date');
+      expect(again.alerts.some((a) => a.kind === 'backlog-claim-stamp-restored')).toBe(false);
+      expect(gitOk(fx.cloneDir, ['status', '--porcelain'])).toBe('');
+    }
+  });
+
+  it.each([
+    ['body change', original, stamp(original).replace('Body stays', 'Edited body stays')],
+    ['other frontmatter key', original, stamp(original).replace('scope: []', 'scope: ["we:other"]')],
+    ['non-claim status move', original.replace('open', 'active'), original.replace('open', 'resolved')],
+  ])('refuses a %s as dirty without restoring', async (_label, head, work) => {
+    const fx = fixture(head);
+    writeFile(fx.cloneDir, card, work);
+    const result = await rebuild(fx);
+    expect(result.reason).toBe('dirty');
+    expect(readFileSync(join(fx.cloneDir, card), 'utf8')).toBe(work);
+    expect(result.alerts.some((a) => a.kind === 'backlog-claim-stamp-restored')).toBe(false);
+  });
+
+  it('refuses when a non-backlog file is also dirty, restoring nothing', async () => {
+    const fx = fixture();
+    writeFile(fx.cloneDir, card, stamp(original));
+    writeFile(fx.cloneDir, 'README.md', 'unrelated change\n');
+    const result = await rebuild(fx);
+    expect(result.reason).toBe('dirty');
+    expect(readFileSync(join(fx.cloneDir, card), 'utf8')).toBe(stamp(original));
+    expect(readFileSync(join(fx.cloneDir, 'README.md'), 'utf8')).toBe('unrelated change\n');
+    expect(result.alerts.some((a) => a.kind === 'backlog-claim-stamp-restored')).toBe(false);
+  });
+
+  it('recovers mixed dirt: a claim stamp plus a scorecard row', async () => {
+    const fx = fixture();
+    writeFile(fx.cloneDir, card, stamp(original));
+    writeFile(fx.cloneDir, scorecard, '{"version":1,"records":[{"id":"row"}]}\n');
+    const result = await rebuild(fx);
+    expect(result.moved).toBe(true);
+    expect(gitOk(fx.cloneDir, ['status', '--porcelain'])).toBe('');
+    expect(result.alerts.map((a) => a.kind)).toContain('backlog-claim-stamp-restored');
+    expect(result.alerts.map((a) => a.kind)).toContain('state-file-migrated');
+    expect(JSON.parse(readFileSync(join(daemonConveyorStateRoot(fx.env), '.conveyor/run-scorecards.json'), 'utf8')).records).toEqual([{ id: 'row' }]);
   });
 });
 

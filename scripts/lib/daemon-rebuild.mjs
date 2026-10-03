@@ -609,6 +609,58 @@ function modifiedPathsOf(lines) {
   return paths;
 }
 
+/** PURE: only the two claim-owned top-level keys may differ; the body is byte-preserved. */
+export function isClaimStampOnlyEdit(headText, workText) {
+  const parse = (text) => {
+    const fm = text.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
+    if (!fm) return null;
+    const lines = fm[1].split(/\r?\n/);
+    const statuses = lines.filter((line) => /^status:/.test(line));
+    if (statuses.length !== 1) return null;
+    const status = /^status:[ \t]*(open|active|preparing)[ \t]*$/.exec(statuses[0])?.[1];
+    return {
+      status,
+      rest: lines.filter((line) => !/^(status|dateStarted):/.test(line)).join('\n'),
+      body: text.slice(fm[0].length),
+    };
+  };
+  const head = parse(headText);
+  const work = parse(workText);
+  return !!head && !!work && head.status === 'open'
+    && ['active', 'preparing'].includes(work.status)
+    && head.rest === work.rest && head.body === work.body;
+}
+
+/** Validate every non-state path before restoring any claim stamp. A concurrent write fails closed. */
+export function restoreStrayClaimStamps({ git, root, dirty, fs = { read: (p) => readFileSync(p, 'utf8') } }) {
+  const restored = [];
+  const fail = (reason) => ({ ok: false, reason, restored });
+  const paths = modifiedPathsOf(dirty || []);
+  if (!paths?.length) return fail('not-claim-stamps');
+  const known = new Set(DAEMON_STATE_FILES.map((entry) => entry.path));
+  const backlog = paths.filter((path) => !known.has(path));
+  if (!backlog.every((path) => /^backlog\/[^/]+\.md$/.test(path))) return fail('not-claim-stamps');
+  const checked = [];
+  for (const path of backlog) {
+    const head = git(['show', `HEAD:${path}`]);
+    if (head.status !== 0) return fail('head-unreadable');
+    let text;
+    try { text = fs.read(join(root, path)); } catch { return fail('file-busy'); }
+    if (!isClaimStampOnlyEdit(String(head.stdout ?? ''), text)) return fail('not-claim-stamps');
+    checked.push({ path, text });
+  }
+  for (const { path, text } of checked) {
+    const diff = git(['diff', 'HEAD', '--', path]);
+    if (diff.status !== 0) return fail('restore-failed');
+    try {
+      if (fs.read(join(root, path)) !== text) return fail('file-busy');
+    } catch { return fail('file-busy'); }
+    if (git(['checkout', 'HEAD', '--', path]).status !== 0) return fail('restore-failed');
+    restored.push({ path, diff: String(diff.stdout ?? '') });
+  }
+  return { ok: true, restored };
+}
+
 /**
  * PURE over `git` + injected fs: when EVERY dirty path is a known {@link DAEMON_STATE_FILES} entry, union each
  * one's rows into its pinned file, then restore the tracked copy (`checkout HEAD -- <path>`). Any other dirt,
@@ -1211,6 +1263,14 @@ function ensureSafeToMove({
   git, root, env, stEnv, alert, knownInputs,
 }) {
   let unsafe = findUnsafeLocalState({ git, knownInputs });
+  if (!unsafe.safe && unsafe.reason === 'dirty') {
+    const recovery = restoreStrayClaimStamps({ git, root, dirty: unsafe.detail });
+    for (const entry of recovery.restored) alert('backlog-claim-stamp-restored', entry);
+    if (recovery.ok) unsafe = findUnsafeLocalState({ git, knownInputs });
+    else if (recovery.reason !== 'not-claim-stamps') {
+      alert('backlog-claim-stamp-restore-failed', { reason: recovery.reason });
+    }
+  }
   if (!unsafe.safe && unsafe.reason === 'dirty') {
     const mig = migrateDaemonStateFiles({
       git, root, dirty: unsafe.detail, env: stEnv,
