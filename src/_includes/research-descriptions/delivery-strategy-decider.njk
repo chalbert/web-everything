@@ -1,0 +1,66 @@
+{% raw %}
+<h2>The question</h2>
+
+<p>The operator asked, on 2026-10-03, whether the world has many more delivery strategies than the few made
+configurable that day, and whether a <em>decider</em> could pick between them from live signals instead of one fixed
+default. This topic holds the survey and the design; the decision is card x1hhjnb. The full working, both surveys
+and the comparison are in <a href="/reports/2026-10-03-delivery-strategy-survey-and-decider.md">the session report</a>.</p>
+
+<h2>Measured on 2026-10-03</h2>
+
+<ul>
+  <li>About 312 merges to <code>main</code> in 12 hours (26 an hour). PR CI p50 14 min, p90 16 min. One CI run at a
+    time serves about 4 merges an hour.</li>
+  <li>Of the last 100 CI runs on <code>main</code>, 85 were cancelled, 11 failed and 3 passed. The CI workflow
+    cancels in-progress runs per ref, and that applies to pushes to <code>main</code> too, so each landed PR cancels
+    the run for the previous head. Every completed run from 12:00Z to 17:24Z failed.</li>
+  <li>PR CI failed about 16% of the time (16 of 97), mixing real failures, flakes and red-main fallout.</li>
+  <li>5 of 23 open PRs shared a non-backlog file with another open PR.</li>
+  <li>GitHub's native merge queue needs an organization-owned repo; this one is user-owned. The statute
+    <code>#pr-flow-rollout-mechanism</code> keeps it off anyway.</li>
+</ul>
+
+<h2>What the world does</h2>
+
+<ul>
+  <li><strong>Test changes together on the current trunk.</strong> bors, Zuul, GitLab merge trains, GitHub's merge
+    queue, Uber SubmitQueue, Shopify (batch of 8 at about 400 commits a day), Prow Tide.</li>
+  <li><strong>Split a failed batch to find the bad change.</strong> The best batch size falls as failures and
+    flakes rise: Ericsson data puts it at 9 with few flakes and 4 with more. Zuul grows its window by one on each
+    success and halves it on each failure.</li>
+  <li><strong>Run only what a change can affect.</strong> Build-graph selection (Bazel, Nx, Turborepo) and
+    predictive selection (Meta, Launchable, Google).</li>
+  <li><strong>Handle flakes and a red trunk automatically.</strong> Flake scores and quarantine (Meta, Google,
+    Slack, GitHub); revert first with culprit finding (Chromium, Google); about 40% of Google breakages were flakes
+    with no culprit.</li>
+  <li><strong>Avoid conflicts before they exist.</strong> Rosie-style sharding of large changes, barriers around
+    global changes, concurrent-edit warnings (ConE), conflict-minimizing task order (Cassandra). Studies of agent
+    PRs in 2026 found 28% to 42% conflict rates.</li>
+</ul>
+
+<h2>The decider</h2>
+
+<p>One deterministic rule table per decision point (verify order, overlap, integration check, main-red response,
+heavy-slot priority, test scope, dispatch admission, wide changes). Each strategy setting gains an opt-in
+<code>auto</code> value. Precedence: invariants, then a per-item operator override, then a fixed value, then the
+decider, then the platform default. Safety fields may only be tightened. A field starts in shadow mode, and every
+decision is journaled with its signals and rule id.</p>
+
+<h2>Where the two surveys disagreed</h2>
+
+<p>Codex argued against building the batched queue early; the Opus draft wanted to un-gate it on red-main
+evidence. The skeptic pass sided with Codex: the merged-tree statute already requires testing against the main a
+PR lands on, so the fix is to enforce it with a re-check before merge, and the batched queue stays behind its
+saturation tripwire. Codex also set a smaller starting batch size, because agent PRs fail in correlated ways.</p>
+
+<h2>Cards filed</h2>
+
+<ul>
+  <li>x1hhjnb: the decision (prepared).</li>
+  <li>xbdefjb: main CI finishes every run it starts.</li>
+  <li>xmje9g6: culprit finding for a red main.</li>
+  <li>xxpai0d: wide mechanical changes as a barrier with codemod replay.</li>
+  <li>xb7necp: per-test flake score and quarantine.</li>
+  <li>xv18rog: delivery signals snapshot.</li>
+</ul>
+{% endraw %}

@@ -254,7 +254,9 @@ export function runPromoteDraftDispatchAllRepos({ repos = FIX_DISPATCH_DAEMON_RE
   const reconcileRefusals = [];
   for (const entry of perRepo) {
     if (entry.error) {
-      refusals.push({ repo: entry.repo, prNumber: null, kind: 'tick-failed', why: entry.error });
+      // Prefixed so the whole-pass tick-failed line names THIS half (the fix half's own per-repo error line
+      // would otherwise read identically and hide that the promote half failed too).
+      refusals.push({ repo: entry.repo, prNumber: null, kind: 'tick-failed', why: `promote-draft half: ${entry.error}` });
       continue;
     }
     const { repo, result } = entry;
@@ -673,6 +675,12 @@ export function formatRefusalLine(label, r) {
   return `reconcile-fix-dispatch-daemon: ${label} ${r?.kind ?? 'unknown'} ${r?.repo ?? '?'} ${prLabel} — ${r?.why ?? '(no reason given)'}`;
 }
 
+/** ONE printable line per draft the promote half un-drafted (`gh pr ready`), the success half of "log every
+ *  promote outcome" (live incident 2026-10-03, PR #3806). Mirrors {@link formatRefusalLine}'s shape. */
+export function formatPromoteActionLine(d) {
+  return `reconcile-fix-dispatch-daemon: promoted ${d?.repo ?? '?'} PR #${d?.pr ?? '?'} to ready for review — every required check is green (promote-draft)`;
+}
+
 /**
  * we:skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs#formatHungActionLine — xd1sfms (#4075/#3383): ONE
  * printable line per hung-run cancel+rerun ACTION this tick attempted (never just a count) — this card's own
@@ -758,7 +766,7 @@ export function buildCliDaemonEffects({ owner, intervalMs = DEFAULT_INTERVAL_MS,
     heartbeat: () => heartbeatRunnerLease(RUNNER_LOCK_ROOT, owner, { key: RECONCILE_FIX_DISPATCH_LEASE_KEY }),
     onTick: (result) => {
       const {
-        repos = [], dispatched = [], refusals = [], reconcileRefusals = [], hungCi, mainRedRebase, missingRun, notes = [], noteComments = [],
+        repos = [], dispatched = [], refusals = [], reconcileRefusals = [], hungCi, mainRedRebase, missingRun, promoteDraft, notes = [], noteComments = [],
         authPaused = false, authPauseReason = null, statusTags = [],
       } = result || {};
       log.error(`reconcile-fix-dispatch-daemon: tick (${repos.map((r) => r.repo).join(', ')}) — dispatched ${dispatched.length}, refused ${refusals.length}`);
@@ -775,6 +783,19 @@ export function buildCliDaemonEffects({ owner, intervalMs = DEFAULT_INTERVAL_MS,
       // no-scope). A `tick-failed` entry is already printed via the per-repo loop above — skip it here so it
       // is never printed twice.
       for (const r of refusals) if (r?.kind !== 'tick-failed') log.error(formatRefusalLine('refused', r));
+      // LIVE INCIDENT 2026-10-03 (PR #3806): a `tick-failed` refusal from ANY half other than the fix half was
+      // dropped here on the false premise that the per-repo loop above already printed it — that loop reads only
+      // the fix half's `repos`. The promote half threw the stale-main guard every tick for ~15 min and logged
+      // nothing at all. Print every tick-failed the per-repo loop did not (matched on repo + message).
+      const printedTickErrors = new Set(repos.filter((r) => r.error).map((r) => `${r.repo}\u0000${r.error}`));
+      for (const r of refusals) {
+        if (r?.kind !== 'tick-failed' || printedTickErrors.has(`${r.repo}\u0000${r.why}`)) continue;
+        printedTickErrors.add(`${r.repo}\u0000${r.why}`);
+        log.error(formatRefusalLine('refused', r));
+      }
+      // ONE LINE PER PROMOTE OUTCOME — promoted (here), refused or not-planned (the `refused` loop above:
+      // `draft-not-promoted`, `stale-check-*`, `ready-failed`, ...), tick-failed (just above).
+      for (const d of (promoteDraft?.dispatched ?? [])) log.error(formatPromoteActionLine(d));
       // `reconcileRefusals` = a PR `reconcile-core.mjs#planReconcile` refused OUTRIGHT, never even offered to
       // `fix`/`ci-heal` (owed-ci-rerun, no-findings, live-process, cap-exhausted, stood-down, owed-elsewhere,
       // nothing-owed, ...) — previously invisible everywhere (collapsed to a bare count and dropped before it
