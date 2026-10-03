@@ -3374,3 +3374,28 @@ describe('required review-gate conflict still refuses a superseded-verdict conve
     expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'review-ci', ci: expect.objectContaining({ reason: 'required-review-gate-conflict' }) })]);
   });
 });
+
+
+describe('xul2kwr withdrawn green drafts', () => {
+  it.each([
+    [['review-status:draft-withdrawn'], undefined],
+    [[{ name: 'review-status:draft-withdrawn' }], null],
+    [['review-status:draft-withdrawn'], { who: 'fix-3432' }],
+  ])('holds labels %j and claim %j', (labels, fixClaim) => {
+    const plan = planReconcile({ prs: [pr1563({ isDraft: true, labels, fixClaim, comments: [] })], agents: [], now: NOW });
+    expect(plan.dispatch).toEqual([]);
+    expect(plan.refusals).toEqual([expect.objectContaining({
+      kind: fixClaim ? 'fix-claimed' : 'draft',
+      why: expect.stringMatching(fixClaim ? /fix claim/ : /withdrawn/),
+    })]);
+  });
+  it('preserves scope-change promotion and withdrawn red CI healing', () => {
+    for (const [label, checks, kind] of [
+      ['review-status:draft-scope-change', greenRollup, 'promote-draft'],
+      ['review-status:draft-withdrawn', redRollup, 'ci-heal'],
+    ]) {
+      const plan = planReconcile({ prs: [pr1563({ isDraft: true, labels: [label], comments: [], statusCheckRollup: checks })], agents: [], now: NOW });
+      expect(plan.dispatch).toEqual([expect.objectContaining({ kind })]);
+    }
+  });
+});
