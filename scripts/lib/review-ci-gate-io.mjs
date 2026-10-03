@@ -33,7 +33,8 @@ export function readReviewCiGate({ repo, pr, readHead = readReviewHead,
     headSha = readHead({ repo, pr });
     if (typeof headSha !== 'string' || !headSha.trim()) return reviewCiGate({ headSha });
     const required = readRequired({ repo, ttlMs: 0 });
-    if (!['live', 'cache'].includes(required?.source)) {
+    // Repo-declared requirements are code-reviewed policy, not the last-resort fallback.
+    if (!['live', 'cache', 'declared'].includes(required?.source)) {
       return { allowed: false, headSha, reason: 'untrusted-required-set', source: required?.source };
     }
     const checks = readChecks({ repo, headSha });

@@ -1,4 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { getRequiredStatusChecks } from '../required-status-checks.mjs';
 import { readReviewCiGate, readReviewHead, readReviewChecks } from '../review-ci-gate-io.mjs';
 const headSha = 'a'.repeat(40);
 function fixture(over = {}) {
@@ -14,7 +18,11 @@ describe('fresh review CI IO', () => {
     expect(io.readChecks).toHaveBeenCalledWith({ repo: io.repo, headSha });
     expect(io.readRequired).toHaveBeenCalledWith({ repo: io.repo, ttlMs: 0 });
   });
-  it.each(['stale-cache', 'fallback', undefined])('refuses untrusted source %s', source => {
+  it.each(['live', 'cache', 'declared'])('allows trusted source %s with green required checks', source => {
+    expect(readReviewCiGate(fixture({ readRequired: () => ({ source, checks: ['custom'] }) })))
+      .toMatchObject({ allowed: true, source });
+  });
+  it.each(['stale-cache', 'fallback', 'unavailable', undefined])('refuses untrusted source %s', source => {
     expect(readReviewCiGate(fixture({ readRequired: () => ({ source, checks: ['custom'] }) }))).toMatchObject({ allowed: false, reason: 'untrusted-required-set' });
   });
   it.each(['readHead', 'readRequired', 'readChecks'])('fails closed on %s errors', key => {
@@ -26,6 +34,20 @@ describe('fresh review CI IO', () => {
   it.each([[], [{ name: 'custom', status: 'in_progress' }], [{ name: 'custom', status: 'completed', conclusion: 'failure' }]])('refuses fresh missing/pending/red despite an earlier green plan', checks => {
     expect(readReviewCiGate(fixture({ readChecks: () => checks })).allowed).toBe(false);
   });
+});
+
+it.each([198, 199])('replays Plateau PR #%s with protection unavailable and test/e2e green', pr => {
+  const dir = mkdtempSync(join(tmpdir(), 'we-review-ci-declared-'));
+  try {
+    const readRequired = args => getRequiredStatusChecks({ ...args, cachePath: join(dir, 'cache.json'),
+      readChecks: () => { throw new Error('Upgrade to GitHub Pro or make this repository public to enable this feature. (HTTP 403)'); } });
+    const checks = ['test', 'e2e'].map(name => ({ name, status: 'completed', conclusion: 'success' }));
+    const io = fixture({ repo: 'chalbert/plateau-app', pr, readRequired, readChecks: () => checks });
+    expect(readReviewCiGate(io)).toMatchObject({ allowed: true, source: 'declared', headSha });
+    expect(readReviewCiGate({ ...io, readChecks: () => checks.slice(0, 1) })).toMatchObject({ allowed: false, source: 'declared' });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 it('production read argv is repo/SHA-explicit and fetches every page and rerun', () => {
