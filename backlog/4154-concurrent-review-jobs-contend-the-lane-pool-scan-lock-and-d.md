@@ -3,10 +3,11 @@ bornAs: xs4ok3k
 kind: story
 size: 2
 parent: "3383"
-status: open
+status: resolved
 scope: ["we:scripts/operations/review-job.mjs", "we:skills-src/conveyor/review-daemon.mjs", "we:scripts/operations/__tests__/review-job.test.mjs", "we:skills-src/conveyor/__tests__/review-daemon.test.mjs"]
 scopeRationale: "we:scripts/lane-pool.mjs is cited only as evidence and as an explicit no-change file; the fix uses its existing acquire --lane=N branch."
 dateOpened: "2026-09-25"
+dateResolved: "2026-10-03"
 preparedDate: "2026-10-03"
 preparedAgainstSha: "e1f0523e0881357fc863f3e88da72e0164eb7091"
 tags: []
