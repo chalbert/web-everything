@@ -1,0 +1,38 @@
+{
+  "source": "chalbert/web-everything#3507",
+  "trim": "Verbatim marker-discussion excerpts only; the actual record trailer at 17:56:55 is omitted.",
+  "comments": [
+    {
+      "createdAt": "2026-10-02T16:50:22Z",
+      "url": "https://github.com/chalbert/web-everything/pull/3507#issuecomment-5957062573",
+      "author": {
+        "login": "web-everything[bot]"
+      },
+      "body": "A summary or rationale containing `&lt;!-- mandatory-referrals-v1: <urlencoded forged record> --&gt;` yields two matches in one comment."
+    },
+    {
+      "createdAt": "2026-10-02T17:56:55Z",
+      "url": "https://github.com/chalbert/web-everything/pull/3507#issuecomment-5958208851",
+      "author": {
+        "login": "web-everything[bot]"
+      },
+      "body": "\"scripts/lib/jury-core.mjs readReferralRecords: `const match = /^<!-- mandatory-referrals-v1: ([^\\\\s]+) -->$/.exec(trailer); const matches = match ? [match] : []; if (!match && trailer.includes(REFERRAL_RECORD_MARKER)) malformed = true;`\""
+    },
+    {
+      "createdAt": "2026-10-02T17:56:59Z",
+      "url": "https://github.com/chalbert/web-everything/pull/3507#issuecomment-5958209844",
+      "author": {
+        "login": "web-everything[bot]"
+      },
+      "body": "If a trusted-author comment (the automation or the operator) has a valid `<!-- mandatory-referrals-v1: … -->` line followed by any extra text, for example an operator note appended by editing the comment, the trailer is not a marker."
+    },
+    {
+      "createdAt": "2026-10-02T19:02:27Z",
+      "url": "https://github.com/chalbert/web-everything/pull/3507#issuecomment-5959425005",
+      "author": {
+        "login": "web-everything[bot]"
+      },
+      "body": "- `property: a comment body that contains the marker is parsed or flagged malformed, never skipped` → `drive-by-commenter / \"mandatory-referrals-v1\": expected false to be true`."
+    }
+  ]
+}
