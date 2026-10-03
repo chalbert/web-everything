@@ -29,6 +29,17 @@ Why the scan path stays slow under a burst: every lease claim changes the pool's
 
 Corrected scope: the fix lives in the review job and the daemon only. `we:scripts/lane-pool.mjs` needs no change and is dropped from scope. The two test files are added.
 
+### Implementation and checkout proof — 2026-10-03
+
+Implemented all seven MVP wiring changes in the four declared files. The daemon preserves its scan's lane numbers and assigns one per dispatch; jobs try the explicit lane at zero wait, log success or the stale-hint fallback, and retain the existing bounded auto-pick and deferral behavior. Numeric capacity callers and session dispatch retain their prior call shapes. No change to the lane pool, wait constant, or session brief.
+
+- **Before, executable regression:** ran the new tests against the original two implementation files from checkout HEAD, restoring the edits afterward. `npx vitest run review-job.test review-daemon.test`: **7 failed, 152 passed**. The failures cover preferred acquisition, fallback, single deferral, dispatch argv, session stripping, array capacity, and the seven-review soak.
+- **After, executable regression:** the identical command with the implementation restored: **159 passed across 2 files**. The deterministic soak in `we:scripts/operations/__tests__/review-job.test.mjs` runs **100 seven-review ticks / 700 jobs**, requiring one scan per tick, seven distinct explicit acquisitions, zero auto-picks, and successful review outcomes. Effects are fake: this is dispatch/arc regression proof, not concurrent real-pool or latency proof.
+- **Wider verification:** `node we:scripts/verify-lane.mjs` ran **94 test files: 93 passed, 1 failed; 4,779 tests passed, 2 failed**. The two failures are existing parent-process identity cases in `we:scripts/lib/__tests__/gh-app-shim.test.mjs`: expected the parent script basename, received `session:must-not`; expected `sh`, received null. Running that suite alone reproduces both (**70 passed, 2 failed**). Its generated shim reads identity with `/bin/ps`; a direct `/bin/ps -p $$ -o command=` probe here returns **Operation not permitted**. The sandbox does not permit escalation. No test or gate was weakened; the out-of-scope shim files were not edited. Verification remains red.
+- **Standards:** `npm run check:standards` completed with **0 errors** (5,572 warnings). `git diff --check` also passes.
+- **Live baseline re-observed:** the daemon clone has **752 job logs containing 94 lines with "lock contention"**, matching the recorded baseline. Its current review-job source has **no `--prefer-lane` support**; its latest daemon log reports a dispatch refusal because the clone is eight commits behind main.
+- **Live after-proof pending:** this uncommitted checkout is not deployed to the daemon, and this job explicitly prohibits commit/push/PR publication. The daemon clone is outside the writable roots. Thus neither a changed live multi-review tick nor the changed-code replay from that clone can be run here. No live after-count, low-second acquisition claim, or job timings JSON is asserted. Done-when 5 remains unproven; the simulated soak is not a substitute.
+
 ## Design
 
 Tactic chosen: **share one scan** (the daemon hands each job a lane number). Reasons:
@@ -85,6 +96,8 @@ Live case: the review daemon clone at `~/workspace/wev-review-daemon`.
 5. The live proof above is recorded in this card: a multi-review tick with no "lock contention" deferrals.
 
 ## Follow-ups
+
+- Before closing, rerun `node we:scripts/verify-lane.mjs` where parent-process inspection is permitted, then capture the specified live multi-review tick after deployment. Keep the card open while these proof requirements remain outstanding; the requested resolve command is conditional on being done.
 
 - The scan-path weakness remains for other auto-pick callers: each claim invalidates the shared list cache, so a burst of auto-pick acquires runs serial full scans. A fix inside `we:scripts/lane-pool.mjs` (e.g. drop only the claimed lane from the cached list instead of invalidating it all) would help every caller. File it only if non-review callers show the same deferrals.
 - 6 deferrals were "scan did not finish" (the scan itself overran 120s). That is a scan-speed issue, separate from this card.
