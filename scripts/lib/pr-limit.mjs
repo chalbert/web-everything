@@ -175,7 +175,7 @@ export function fetchPrCommits(repoSlug, number, { exec = runGhSync, headRefName
  *  `review:accepted` (an already-accepted PR is excluded from the count regardless of authorship, so its
  *  commits are never worth fetching) — see {@link fetchPrCommits} for why a bulk commits fetch is unsafe. A
  *  PR whose commits lookup fails is DROPPED from the count (unknown authorship is never assumed AI). */
-export function countOpenPrsForRepo(repoKey, { exec, env = process.env, reposTable = CONSTELLATION_REPOS, git, cwd, localOnly = false, readShared, authorshipCache = null, maxApiFetches = Infinity } = {}) {
+export function countOpenPrsForRepo(repoKey, { exec, env = process.env, reposTable = CONSTELLATION_REPOS, git, cwd, localOnly = false, readShared, authorshipCache = null, maxApiFetches = Infinity, now = Date.now() } = {}) {
   const meta = reposTable[repoKey];
   const limit = resolvePrLimit(repoKey, env);
   if (!meta) return { repoKey, slug: null, count: null, prNumbers: [], limit, unavailable: true, unresolved: 0 };
@@ -194,11 +194,17 @@ export function countOpenPrsForRepo(repoKey, { exec, env = process.env, reposTab
       if (key) liveKeys.add(key);
       const hit = key && authorshipCache ? authorshipCache.get(key) : undefined;
       if (typeof hit === 'boolean') return { pr, ai: hit };
+      const coolingDown = Number.isFinite(hit?.failedAt) && now - hit.failedAt < AUTHORSHIP_FAILURE_COOLDOWN_MS;
+      let spent = false;
       const commits = fetchPrCommits(meta.slug, pr.number, {
         exec, headRefName: pr.headRefName, headRefOid: pr.headRefOid, baseRefName: pr.baseRefName, git, localOnly, cwd: repoCwd,
-        allowApi: apiFetches < maxApiFetches, onApi: () => { apiFetches++; },
+        allowApi: !coolingDown && apiFetches < maxApiFetches, onApi: () => { apiFetches++; spent = true; },
       });
-      if (!Array.isArray(commits)) return { pr, ai: null };
+      if (!Array.isArray(commits)) {
+        // Only an attempted API read earns a cooldown; budget/local-only misses must stay eligible.
+        if (spent && key && authorshipCache) authorshipCache.set(key, { failedAt: now });
+        return { pr, ai: null };
+      }
       const ai = isAiGeneratedPr({ ...pr, commits });
       if (key && authorshipCache) authorshipCache.set(key, ai);
       return { pr, ai };
@@ -217,12 +223,15 @@ export function countOpenPrsForRepo(repoKey, { exec, env = process.env, reposTab
  *  a larger cold backlog converges across rounds instead of costing one call per PR every round. */
 export const DISPATCH_PR_COUNT_API_CAP = 3;
 
+/** Retry failed API reads after fifteen minutes; local git remains eligible during the cooldown. */
+export const AUTHORSHIP_FAILURE_COOLDOWN_MS = 15 * 60 * 1000;
+
 /** Where the authorship verdicts live — machine-wide like the override state, so every lane's round shares one cache. */
 export function resolveAuthorshipCachePath(env = process.env) {
   return env?.WE_PR_AUTHORSHIP_CACHE_FILE || join(homedir(), '.claude', 'conveyor', 'pr-authorship-cache.json');
 }
 
-/** A tiny file-backed `{get, set, flush}` of `{[repo#number@oid]: boolean}`. Fail-SOFT everywhere: an unreadable or
+/** A tiny file-backed `{get, set, flush}` of `{[repo#number@oid]: boolean | {failedAt: number}}`. Fail-SOFT everywhere: an unreadable or
  *  corrupt file is an empty cache and a failed write is dropped — the cache only ever saves calls, it can't block. */
 export function createAuthorshipCache({ path = resolveAuthorshipCachePath() } = {}) {
   let data = null;
