@@ -324,6 +324,8 @@ function prListCachePath(poolDir) {
 export function fetchAllPrs({
   ghRepo, exec = execFileSync, poolDir = null, nowMs = Date.now(), cacheTtlMs = PR_CACHE_TTL_MS,
 } = {}) {
+  if (ghRepo && (typeof ghRepo !== 'string' || !/^[\w.-]+\/[\w.-]+$/.test(ghRepo)
+    || ghRepo.split('/').some(segment => segment === '.' || segment === '..'))) return [];
   const cachePath = poolDir ? prListCachePath(poolDir) : null;
   if (cachePath) {
     try {
@@ -347,7 +349,10 @@ export function fetchAllPrs({
     // answer). 32MB matches this file's other large batched reads (`batchPatchIds`-shaped calls elsewhere).
     const pulls = ghRestGetPaged(`${repoPath}/pulls?state=all`, {
       maxItems: PR_LIST_LIMIT, context: ghRepo ? '' : process.cwd(), op: 'rest pulls (whois)',
-      exec: (file, args, opts) => execFileSyncThrottled(file, args, { ...opts, timeout: GH_TIMEOUT_MS, maxBuffer: 32 * 1024 * 1024, exec }),
+      exec: (file, args, opts) => execFileSyncThrottled(file, args, {
+        ...opts, timeout: GH_TIMEOUT_MS, maxBuffer: 32 * 1024 * 1024,
+        throttle: { ...opts.throttle, ...(exec !== execFileSync ? { exec: (argv, options) => exec(file, argv, options) } : {}) },
+      }),
     });
     prs = pulls.map(restPullToListShape);
   } catch {
@@ -368,7 +373,8 @@ export function fetchAllPrs({
  * `headRefName`; a `null` body is `""` (gh's own rendering). PURE.
  */
 export function restPullToListShape(p) {
-  const state = p && p.merged_at ? 'MERGED' : String((p && p.state) || '').toUpperCase();
+  if (p == null) throw new TypeError('REST pull must not be null or undefined');
+  const state = p.merged_at ? 'MERGED' : String(p.state || '').toUpperCase();
   return { number: p.number, state, title: p.title ?? '', headRefName: p.head?.ref ?? '', body: p.body ?? '' };
 }
 

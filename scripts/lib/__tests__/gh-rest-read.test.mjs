@@ -10,6 +10,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, writeFileSync, chmodSync, readFileSync, existsSync, readdirSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -190,5 +191,66 @@ describe('lane-whois#fetchAllPrs through the real throttle (PATH-faked gh)', () 
     expect(sections.map((s) => s.resource)).toEqual(['core']);
     const row = sections[0].dims.find((d) => d.name.endsWith(' rest pulls (whois)'));
     expect(row.requests).toBe(2);
+  });
+});
+
+describe('#4429 REST prevention boundaries', () => {
+  it('private cache creation and replacements under permissive umask', () => {
+    const result = JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', `
+      import { ghRestGetJson } from ${JSON.stringify(join(process.cwd(), 'scripts/lib/gh-rest-read.mjs'))};
+      import { statSync, readdirSync, chmodSync, rmSync } from 'node:fs';
+      import { join } from 'node:path';
+      process.umask(0);
+      const dir = ${JSON.stringify(join(dir, 'private'))};
+      const modes = [];
+      try {
+        for (let i = 0; i < 3; i++) {
+          ghRestGetJson('repos/o/r/pulls', { dir, env: { VITEST: '1' },
+            exec: () => 'HTTP/2.0 200 OK\\r\\nEtag: "e"\\r\\n\\r\\n[]' });
+          const files = readdirSync(dir);
+          modes.push([statSync(dir).mode & 0o777, ...files.map(f => statSync(join(dir, f)).mode & 0o777)]);
+          chmodSync(join(dir, files[0]), 0o666);
+        }
+        console.log(JSON.stringify({ modes, count: readdirSync(dir).length }));
+      } finally { rmSync(dir, { recursive: true, force: true }); }
+    `], { encoding: 'utf8' }));
+    expect(result).toEqual({ modes: Array(3).fill([0o700, 0o600]), count: 1 });
+  });
+
+  it.each(['', 'null', '[1]', '{"a":1}'])('fresh and cached JSON parity for %j', body => {
+    const options = { dir, env: { VITEST: '1' } };
+    const fresh = ghRestGetJson('p', { ...options, exec: () => ok(body) });
+    const cached = ghRestGetJson('p', { ...options, exec: () => { throw notModified(); } });
+    expect(cached.json).toEqual(fresh.json);
+  });
+
+  it.each(['   ', '{bad'])('nonempty invalid JSON throws fresh and cached for %j', body => {
+    const options = { dir, env: { VITEST: '1' } };
+    expect(() => ghRestGetJson('p', { ...options, exec: () => ok(body) })).toThrow(SyntaxError);
+    ghRestGetJson('p', { ...options, exec: () => ok('null') });
+    const file = join(dir, readdirSync(dir)[0]);
+    const envelope = JSON.parse(readFileSync(file, 'utf8'));
+    writeFileSync(file, JSON.stringify({ ...envelope, body }));
+    expect(() => ghRestGetJson('p', { ...options, exec: () => { throw notModified(); } })).toThrow(SyntaxError);
+  });
+
+  it.each(['repos/', 'repos/o', 'repos//r/pulls', 'repos/o//pulls', 'repos/./r/pulls',
+    'repos/o/../pulls', 'repos/o/r%2fx/pulls', 'repos/a%2fb/r/pulls', 'repos/o/r x/pulls',
+    'repos/o/r?x/pulls', 'repos/o/r#x/pulls', 'repos/o?x/r/pulls', 'repos/{repo}/{owner}/pulls'])
+  ('rejects invalid endpoint before execution or cache writes: %s', path => {
+    let calls = 0;
+    expect(() => ghRestGetJson(path, { dir, env: { VITEST: '1' }, exec: () => { calls++; return ok('[]'); } })).toThrow();
+    expect(calls).toBe(0);
+    expect(readdirSync(dir)).toEqual([]);
+  });
+
+  it.each(['repos/o/r/pulls', 'repos/a.b-c_d/e.f-g_h/pulls?page=2', 'repos/{owner}/{repo}/pulls',
+    'repos/o/r?per_page=2', 'user/repos?page=2'])
+  ('preserves valid endpoint: %s', path => {
+    let seen;
+    expect(ghRestGetJson(path, { dir, env: { VITEST: '1' }, exec: (f, args) => {
+      seen = args.at(-1); return ok('[]');
+    } }).json).toEqual([]);
+    expect(seen).toBe(path);
   });
 });

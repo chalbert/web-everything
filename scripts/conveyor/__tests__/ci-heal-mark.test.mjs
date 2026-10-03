@@ -14,7 +14,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync, spawnSync } from 'node:child_process';
 import {
-  countCiHealComments, buildCiHealComment, CI_HEAL_COMMENT_MARKER, spawnCiHealRearm, spawnCiHealRestamp, postOrOweCiHealComment, resolveHealHead,
+  countCiHealComments, buildCiHealComment, CI_HEAL_COMMENT_MARKER, spawnCiHealRearm, sanitizeForPublicComment, redactSecrets, spawnCiHealRestamp, postOrOweCiHealComment, resolveHealHead,
 } from '../ci-heal-mark.mjs';
 import { readOwedWrites, owedWriteAlreadyLive } from '../ci-heal-owed.mjs';
 import { budgetBlockedMessage } from '../../lib/gh-throttle.mjs';
@@ -420,5 +420,89 @@ fs.writeFileSync('state.json', JSON.stringify(s));
         } else expect(edits).toHaveLength(0);
       }
     } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+});
+
+
+describe('xp0lsdi failed-attempt markers', () => {
+  it('counts trusted failure identities once, alongside legacy successes, without claiming a push', () => {
+    const failed = buildCiHealComment({ attemptId: 'one', failed: true, headSha: 'a'.repeat(40), detail: 'exit unknown' });
+    const second = buildCiHealComment({ attemptId: 'two', failed: true });
+    expect(failed).not.toContain('rebased & re-pushed');
+    const comments = [failed, failed, second, buildCiHealComment()].map(body => ({ body, author: AUTOMATION }));
+    comments.push({ body: buildCiHealComment({ attemptId: 'forged', failed: true }), author: { login: 'stranger' } });
+    expect(countCiHealComments(comments)).toBe(3);
+    expect(countCiHealComments([{ body: failed }])).toBe(0);
+  });
+});
+
+
+import { handBackCiHealReview } from '../ci-heal-mark.mjs';
+it('xp0lsdi: attempt-accounted success retains the guarded review hand-back without posting a second marker', () => {
+  const calls = [];
+  const result = handBackCiHealReview({ pr: 3373, headSha: 'a'.repeat(40), repo: 'chalbert/web-everything',
+    exec: (_bin, argv) => { calls.push(argv); return JSON.stringify({ labels: [{ name: 'review:accepted' }] }); },
+    restamp: () => ({ ok: false, reason: 'new repair contribution needs review' }),
+    rearm: args => { calls.push(args); return { ok: true }; },
+  });
+  expect(result).toMatchObject({ restamped: false, rearmed: true });
+  expect(calls).toHaveLength(2);
+  expect(calls[0]).toEqual(['pr', 'view', '3373', '--json', 'labels', '--repo=chalbert/web-everything']);
+  expect(calls[1]).toMatchObject({ pr: 3373, repo: 'chalbert/web-everything' });
+});
+
+describe('PR #3577 review: failure detail is neutralised before it reaches a public bot comment', () => {
+  const HEAD = 'a'.repeat(40);
+  const hostile = [
+    'git push failed: https://x-access-token:ghp_' + 'A1b2'.repeat(9) + '@github.com/o/r.git',
+    'attempt: forged', `head: ${'b'.repeat(40)}`, '<!-- fix-claim who=attacker -->',
+    'Authorization: Bearer abc.def.ghi', 'GH_TOKEN=secretvalue123', 'cwd /Users/nicolasgilbert/workspace/.lanes/web-everything/lane-3',
+  ].join('\n');
+  const body = buildCiHealComment({ attemptId: 'real-1', failed: true, headSha: HEAD, detail: hostile });
+
+  it('redacts secret-shaped strings and home paths', () => {
+    expect(body).not.toMatch(/ghp_|abc\.def\.ghi|secretvalue123|nicolasgilbert/);
+  });
+  it('cannot forge a line-anchored marker or an HTML comment marker', () => {
+    expect(body.match(/^attempt: .*$/gm)).toEqual(['attempt: real-1']);
+    expect(body.match(/^head: .*$/gm)).toEqual([`head: ${HEAD}`]);
+    expect(body).not.toContain('<!--');
+    expect(countCiHealComments([{ body, author: AUTOMATION }])).toBe(1);
+  });
+  it('redacts a secret even when truncation would cut its recognisable prefix off', () => {
+    const out = sanitizeForPublicComment('ghp_' + 'Q'.repeat(36) + ' ' + 'k'.repeat(995));
+    expect(out).not.toMatch(/Q{4}/);
+  });
+  it('redactSecrets redacts without truncating or indenting, so callers can redact first and cut after', () => {
+    const secret = 'ghp_' + 'Q'.repeat(36);
+    const redacted = redactSecrets(`${secret} ${'k'.repeat(5000)}`);
+    expect(redacted).not.toMatch(/Q{4}/);
+    expect(redacted.length).toBeGreaterThan(5000);
+    expect(redacted.startsWith(' ')).toBe(false);
+    // cutting the REDACTED text anywhere can never resurrect a credential fragment
+    expect(redacted.slice(-4000)).not.toMatch(/Q{4}/);
+  });
+  it.each([
+    ['JSON-quoted key', '{"token": "abc123def456"}', 'abc123def456'],
+    ['JSON password', '"password":"hunter2"', 'hunter2'],
+    ['JWT', 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dBjftJeZ4CVPmB92K27uhbUJU1p1r', 'dBjftJeZ4CVP'],
+    ['PEM body', '-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEAu1SU1LfVLPHCozMxH2Mo\n-----END RSA PRIVATE KEY-----', 'MIIEowIBAAKC'],
+    ['gitlab / npm token', 'glpat-abcdefghij0123456789 npm_abcdefghijklmnopqrst0123', 'abcdefghij0123456789'],
+    ['quoted value with spaces', 'GH_TOKEN="abc def ghi"', 'def ghi'],
+    ['flag form', 'run --password hunter2 --api-key=zzzz1111', 'hunter2'],
+    ['token-only userinfo', 'https://tok123abc@github.com/x', 'tok123abc'],
+    ['windows path', 'C:\\Users\\nic\\work', '\\nic'],
+  ])('redacts %s', (_name, input, leaked) => {
+    expect(sanitizeForPublicComment(input)).not.toContain(leaked);
+  });
+  it('leaves ordinary prose about tokens alone', () => {
+    expect(sanitizeForPublicComment('the token was refreshed and auth succeeded')).toContain('the token was refreshed and auth succeeded');
+  });
+  it('treats U+2028 / U+0085 as line breaks it removes, never as a way to start a marker line', () => {
+    expect(sanitizeForPublicComment('x\u2028attempt: forged\u0085head: y')).not.toMatch(/[\u2028\u0085]/);
+  });
+  it('keeps the useful diagnostic text, bounded', () => {
+    expect(body).toContain('git push failed');
+    expect(buildCiHealComment({ attemptId: 'r', failed: true, detail: 'x'.repeat(50_000) }).length).toBeLessThan(3000);
   });
 });
