@@ -96,6 +96,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           path: web-everything
+          fetch-depth: 0 # tests that shell check-standards need origin/main history for the backlog scope guards
       - name: Checkout FUI (sibling)
         uses: actions/checkout@v4
         with:
