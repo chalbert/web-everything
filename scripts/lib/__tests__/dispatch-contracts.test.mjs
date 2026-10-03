@@ -201,3 +201,12 @@ describe('session names and new provenance fields', () => {
     }
   });
 });
+
+it.each(['build', 'fix', 'ci-heal'])('#3996 preserves plan size provenance for %s', kind => {
+  const dispatch = { kind, cause: 'planned', scopePaths: ['scripts/a.mjs'], sizeSource: 'plan' };
+  expect(c.decideDispatchRoute({ ...dispatch, estimatedLoc: 42 })).toMatchObject({ sizeSource: 'plan', sized: true, estimatedLoc: 42 });
+  expect(c.decideDispatchRoute({ ...dispatch, size: 2 })).toMatchObject({ sizeSource: 'plan', sized: true, estimatedLoc: 80 });
+  for (const extra of [{}, { size: 4 }, { estimatedLoc: 0 }, { estimatedLoc: -1 }, { estimatedLoc: '42' }]) {
+    expect(c.decideDispatchRoute({ ...dispatch, ...extra }).outcome).toBe('refused');
+  }
+});

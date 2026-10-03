@@ -163,17 +163,17 @@ describe('the role path is a third outcome, not a taskType and not a refusal', (
 
 describe('the all-docs rule', () => {
   it('a `build` is a doc-fix only when EVERY declared scope path is documentation', () => {
-    const doc = taskTypeFor({ kind: 'build', cause: null, scopePaths: ['we:docs/agent/a.md', 'README.md'] });
+    const doc = taskTypeFor({ kind: 'build', cause: null, scopePaths: ['we:docs/agent/a.md', 'docs/README.md'] });
     expect(doc.taskType).toBe('doc-fix');
     const mixed = taskTypeFor({ kind: 'build', cause: null, scopePaths: ['we:docs/agent/a.md', 'we:scripts/a.mjs'] });
     expect(mixed.taskType).toBe('build-new-feature');
   });
 
-  it('classifies paths by suffix and by the `docs/` home, after stripping the repo qualifier', () => {
-    for (const p of ['we:docs/agent/x.md', 'docs/anything.json', './notes.txt', 'frontierui:README.md', 'a/b.mdx']) {
+  it('classifies paths by reader-facing allowlisted homes, after stripping the repo qualifier', () => {
+    for (const p of ['we:docs/agent/x.md', 'docs/anything.json', 'README.md', 'we:README.md', 'we:src/_data/blocks.json', './src/_includes/block-descriptions/a.njk']) {
       expect(isDocScopePath(p), p).toBe(true);
     }
-    for (const p of ['we:scripts/a.mjs', 'src/x.ts', 'documentation/x.ts', '', '   ']) {
+    for (const p of ['we:scripts/a.mjs', 'src/x.ts', 'documentation/x.ts', './notes.txt', 'frontierui:README.md', 'a/b.mdx', 'scripts/prompt.md', 'docs/../scripts/a.md', '/docs/a.md', 'src/_data-other/a.json', '', '   ']) {
       expect(isDocScopePath(p), p).toBe(false);
     }
   });
@@ -197,4 +197,11 @@ describe('test-only failure classification (#4551)', () => {
   it.each(['src/__tests__/helper.ts', 'src/a.test.ts', 'e2e/a.spec.ts', 'test/fixtures/input.json', 'src/__fixtures__/a.json'])('recognizes test path %s', (path) => {
     expect(taskTypeFor({ kind: 'build', scopePaths: [path] }).taskType).toBe('test-fix');
   });
+});
+
+it.each(['build', 'fix', 'ci-heal'])('#3996 derives planned %s from scope before repair defaults', kind => {
+  for (const [scopePaths, taskType] of [[['docs/a.md'], 'doc-fix'], [['scripts/a.test.mjs'], 'test-fix'], [['scripts/a.mjs'], 'build-new-feature'], [['docs/a.md', 'scripts/a.mjs'], 'build-new-feature']]) {
+    expect(taskTypeFor({ kind, cause: 'planned', scopePaths }).taskType).toBe(taskType);
+  }
+  expect(taskTypeFor({ kind, cause: 'planned', scopePaths: [] }).outcome).toBe('refused');
 });
