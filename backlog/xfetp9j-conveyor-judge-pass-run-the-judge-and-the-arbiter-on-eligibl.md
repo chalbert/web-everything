@@ -21,7 +21,7 @@ Makes the ruling at `we:docs/agent/platform-decisions.md#independent-judge-clear
 
 **Pass** `we:scripts/conveyor/judge-pass.mjs sweep [--repo=…] [--dry-run]`:
 
-1. Read the switches first. Judge OFF → log "judge off" and exit 0 with no `gh` calls.
+1. Read the switches first. Judge OFF → log "judge off", **skip steps 2–3 (no `gh` calls, no judge or arbiter spawn), but still run step 4**: the daily digest is sent while the judge is off, and says so. A switched-off day must not look like a broken pass, and a clearance made earlier in the day before the switch was turned off still needs its line. The digest is told the switch state (`judgeEnabled`, plus `by`, `at` and `reason` from the store, and `parseError` when the store was unreadable) and prints a line such as "judge OFF since <time> (<reason>)" at the top; with no clearances in the window it still prints the "no judge clearances today" line. Exit 0.
 2. List open PRs (`gh pr list --json number,labels,headRefOid`). Candidates:
    - **clear candidates** — `review:human` plus `advisory:accepted` (the cheap label pre-filter; the runner re-checks everything);
    - **arbitrate candidates** — PRs carrying the stood-down label `review-status:stood-down` (`STAND_DOWN_LABEL` in `we:scripts/conveyor/stand-down.mjs`), and PRs whose same finding was bounced twice (two `review:changes` verdicts on one finding id in the verdict ledger).
@@ -33,7 +33,7 @@ Makes the ruling at `we:docs/agent/platform-decisions.md#independent-judge-clear
 
 ## MVP
 
-1. Must run no judge call at all while the kill switch is off.
+1. Must run no judge or arbiter call at all while the kill switch is off, yet must still send the daily digest, which states that the judge was off.
 2. Must cap judge spawns per tick and not re-judge a refused PR until its head or labels change.
 3. Must send the digest at most once per local day.
 4. Must be skippable by name like the other mechanical passes, and an unknown skip name still refuses the runner start.
@@ -50,6 +50,7 @@ Makes the ruling at `we:docs/agent/platform-decisions.md#independent-judge-clear
 New `we:scripts/conveyor/__tests__/judge-pass.test.mjs` (matching source: `we:scripts/conveyor/judge-pass.mjs`), with injected `gh`, runners, switches and clock:
 
 - **The kill switch blocks:** switches OFF → zero `gh` calls, zero runner calls. Red today: the judge pass does not exist.
+- **The digest still runs while the judge is off:** switches OFF, first tick of the day → the digest is called once, with the switch state `judgeEnabled: false` and its `reason`, and its text carries the "judge OFF" line; the second tick of the same day does not call it again. An unreadable switch store (which reads as OFF) → the digest is still called and the text names the parse error. Red today: the judge pass does not exist.
 - **The wait switch off → immediate:** with `waitHours: 0`, a PR that became a clear candidate this tick is handed to the runner this tick. Red today: the judge pass does not exist.
 - Five clear candidates, cap 2 → the two oldest are run. Red today: the judge pass does not exist.
 - A PR refused on head A is skipped on the next tick; after its head moves to B it is run again. Red today: the judge pass does not exist.
@@ -62,7 +63,7 @@ Extend `we:skills-src/conveyor/__tests__/runner.test.mjs`: `judge-pass` is in `M
 
 ## Proof plan
 
-Tests first, red. After the build: both files green. Live: a `sweep --dry-run` on the real repo, then one real tick with the judge on, pasting each candidate's runner outcome (cleared, or the refusal reason); then turn the judge off with the switch CLI and run a second tick showing zero judge calls. `npm run check:standards` last. `we:skills-src/conveyor/runner.mjs` is a trust-chain member, so this PR is on the protected list and the human clears it.
+Tests first, red. After the build: both files green. Live: a `sweep --dry-run` on the real repo, then one real tick with the judge on, pasting each candidate's runner outcome (cleared, or the refusal reason); then turn the judge off with the switch CLI and run a second tick showing zero judge calls and a digest that says the judge is off. `npm run check:standards` last. `we:skills-src/conveyor/runner.mjs` is a trust-chain member, so this PR is on the protected list and the human clears it.
 
 ## Follow-ups
 

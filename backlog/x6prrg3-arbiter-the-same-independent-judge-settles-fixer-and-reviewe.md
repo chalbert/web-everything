@@ -21,7 +21,7 @@ Builds rule 7 of `we:docs/agent/platform-decisions.md#independent-judge-clears-r
 
 **Runner** `we:scripts/operations/judge-arbitrate.mjs --pr=<n> [--dry-run]`:
 
-1. Read the PR and find the unresolved stand-down with `latestUnresolvedStandDown` (`we:scripts/conveyor/stand-down-answer-core.mjs`). Only reasons `needs-judgment` and `conflict` from `STAND_DOWN_REASONS` (`we:scripts/conveyor/stand-down.mjs`) are eligible; `gate-red` and `lane-ref-gone` are mechanical, not disagreements, and are skipped. No stand-down → exit with "nothing to arbitrate".
+1. Read the PR and find the unresolved stand-down with `latestUnresolvedStandDown` (`we:scripts/conveyor/stand-down-answer-core.mjs`). Only the reason `needs-judgment` from `STAND_DOWN_REASONS` (`we:scripts/conveyor/stand-down.mjs`) is eligible: it is the one stand-down that records a real disagreement or an ambiguous finding. `conflict` is a mechanical same-line merge conflict with `main` — no reviewer and fixer disagree about anything, so a judge ruling cannot resolve it — and `gate-red`, `lane-ref-gone` and the `concurrent-author` pause are likewise mechanical; all of these are skipped, left for the existing conflict-fix and human paths. No stand-down → exit with "nothing to arbitrate".
 2. Read the switches; the kill switch also stops the arbiter.
 3. Seat the judge exactly as `xq3kn88` does (same seat function, same independence rule): different provider and actor from the PR author, the fixer, and the reviewer whose finding is disputed. Unknown or equal → no ruling; the stand-down stays for the human.
 4. Spawn the judge, tool-free, with the disputed finding, the fixer's stand-down text, the diff, and the ratified rules the finding cites. Schema: `{ outcome: "fixer-right" | "reviewer-right" | "real-conflict", restatedDemand?: string, recommendation?: string, reasoning: string, touchesSecurityOrMandatoryBlock: boolean }`.
@@ -36,7 +36,7 @@ Builds rule 7 of `we:docs/agent/platform-decisions.md#independent-judge-clears-r
 
 ## MVP
 
-1. Must rule only on `needs-judgment` / `conflict` stand-downs, with an independent seat; must refuse on unknown or shared provider/actor.
+1. Must rule only on `needs-judgment` stand-downs (never `conflict`, `gate-red`, `lane-ref-gone` or a concurrent-author pause), with an independent seat; must refuse on unknown or shared provider/actor.
 2. Must never supersede a stand-down when the finding is a security finding or a mandatory reviewer block — recommendation only.
 3. Must never move a review label or clear `review:human`; its only writes are a comment and, for `real-conflict`, a decision card.
 4. Must refuse a second ruling on the same finding and escalate it as a conflict.
@@ -47,7 +47,7 @@ Builds rule 7 of `we:docs/agent/platform-decisions.md#independent-judge-clears-r
 
 1. **Executable — Musts 1–5:** a Vitest run of `we:scripts/operations/__tests__/judge-arbitrate.test.mjs` passes (new file).
 2. **Executable — Must 6:** a Vitest run of `we:scripts/conveyor/__tests__/stand-down-answer.test.mjs` passes with new arbiter-answer cases, existing operator-answer cases unchanged.
-3. **Observable — live:** `--dry-run` on one real stood-down PR prints the judge's ruling and the comment it would post; the PR records it.
+3. **Observable — live:** `--dry-run` on one real `needs-judgment` stood-down PR prints the judge's ruling and the comment it would post; the PR records it. Known limit: the seat uses the same independence rule as the clear runner, and most PRs are Claude-authored, so an Opus judge is refused there (`same-provider`). Until the cross-provider Codex seat exists (the ruled direction, tracked by `xud2hha` and `xb1e9nj`, with its fallback per the configurable independence dimension), the live proof on a Claude-authored PR is the printed refusal reason, and a real ruling needs a non-Claude-authored stood-down PR; the PR states which case it shows.
 
 ## Test plan
 
@@ -61,6 +61,7 @@ New `we:scripts/operations/__tests__/judge-arbitrate.test.mjs` (matching source:
 - **The kill switch blocks:** switches OFF → no spawn. Red today: the arbiter runner does not exist.
 - Second ruling on the same stand-down lineage → refused, escalated as conflict. Red today: the arbiter runner does not exist.
 - `gate-red` stand-down → skipped. Red today: the arbiter runner does not exist.
+- **A `conflict` stand-down is not arbitrated:** a stand-down whose reason is `conflict` (a mechanical merge conflict with `main`) → skipped, no spawn, no comment; the same for `lane-ref-gone` and a concurrent-author pause. Red today: the arbiter runner does not exist.
 - Judge throws or returns bad JSON → nothing posted. Red today: the arbiter runner does not exist.
 
 Extend `we:scripts/conveyor/__tests__/stand-down-answer.test.mjs` (matching source: `we:scripts/conveyor/stand-down-answer-core.mjs`):

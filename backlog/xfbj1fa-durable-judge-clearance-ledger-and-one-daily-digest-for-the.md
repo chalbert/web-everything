@@ -27,7 +27,7 @@ Builds rule 4 of `we:docs/agent/platform-decisions.md#independent-judge-clears-r
 **Digest** `we:scripts/conveyor/judge-digest.mjs [--since=<ISO>] [--dry-run]`:
 
 - Reads the ledger (`verdictLedgerPath(repo)`) for records with a `judge` block in the last 24 hours (America/New_York day boundary by default, the operator's timezone).
-- Renders one short message: count of clears and declines; one line per PR (number, title, author provider, judge model, one-sentence reasoning, link); and a line if the kill switch was off or a wait was set during the window (read from the switch store's `at`).
+- Renders one short message: count of clears and declines; one line per PR (number, title, author provider, judge model, one-sentence reasoning, link); and a line if the kill switch was off or a wait was set during the window (read from the switch store's `at`). The digest must work while the judge is switched off (the conveyor pass sends it on those days too, see `xfetp9j`): it reads the switch state itself, and when the judge is OFF it puts "judge OFF since <time> (<reason>)" first, or "judge OFF: switch store unreadable (<parse error>)" when the store failed to parse. It reads only the ledger and the switch store, never the judge or a PR, so an off judge cannot stop it.
 - Delivers through the existing operator notification path (`notifyDesktopChecked` in `we:scripts/operations/operator-notify-io.mjs`, the same channel the NEEDS-YOU pass in `we:scripts/operations/operator-notify-cli.mjs` uses), as one notification whose body points at the full digest text written beside the ledger; a delivery failure is printed, never swallowed. `--dry-run` prints only. Idempotent per day: a marker records the last digest day, so a second run on the same day sends nothing.
 - Zero judge records in the window → still one line ("no judge clearances today"), so silence never looks like breakage.
 
@@ -60,6 +60,7 @@ New `we:scripts/conveyor/__tests__/judge-digest.test.mjs` (matching source: `we:
 - A malformed JSONL line is skipped and reported as "1 unreadable record". Red today: the digest does not exist.
 - A record whose reasoning contains markdown or a fake instruction is rendered as quoted text. Red today: the digest does not exist.
 - The kill switch was turned off during the window → the digest says so. Red today: the digest does not exist.
+- The judge is OFF now (store reads `judgeEnabled: false`), with two clears recorded earlier in the window → the digest still lists both and leads with the "judge OFF since" line; an unreadable store → the line names the parse error. Red today: the digest does not exist.
 
 `we:scripts/operations/judge-clear.mjs` gains one assertion in its existing test file (`we:scripts/operations/__tests__/judge-clear.test.mjs`, from `xq3kn88`) that the `judge` block reaches the ledger writer.
 
