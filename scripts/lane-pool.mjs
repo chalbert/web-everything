@@ -3713,7 +3713,7 @@ function cmdReclaim(repo) {
   // this claim. Skipped only under `--override`, matching the initial gate above.
   let relive = null;
   if (!override) {
-    relive = laneLivenessGate({ dir }); // fresh ledger read too — catches a NEW entry since the first gate
+    relive = laneLivenessGate({ dir, ignoreLeaseSession: session }); // ignore only our temporary hold
     if (reportKept(relive, reproof, { underHold: true, ownSession: session })) return;
   }
   // #4370 fork 3 — the ONE statement of "never destroy unpushed work unless the owner is provably gone (or a
@@ -3754,9 +3754,9 @@ function cmdReclaimSalvage(repo, { n, dir, dryRun, lease, proof }) {
   // #xl5xhmj — the SAME shared gate `cmdReclaim`'s own direct-reset path now also runs
   // (`lib/lane-salvage.mjs#laneLivenessGate`), never a second hand-rolled read — the two had drifted apart
   // before this fix (only this salvage path checked liveness at all).
-  const gate = () => {
+  const gate = (ignoreLeaseSession) => {
     const last = lastLaneHistoryEntry(readLaneHistory(dir)) || {};
-    return { ...laneLivenessGate({ dir, lastHolder: last }), last };
+    return { ...laneLivenessGate({ dir, ignoreLeaseSession }), last };
   };
   const g = gate();
   if (!g.eligible) {
@@ -3783,7 +3783,7 @@ function cmdReclaimSalvage(repo, { n, dir, dryRun, lease, proof }) {
     fail(`lane-${n}: a lease appeared between the read above and the claim attempt — not reclaimed, safe to retry`);
   }
   const giveBack = () => takeMarkerIf(dir, (moved) => moved?.session === session, n);
-  const g2 = gate();
+  const g2 = gate(session);
   if (!g2.eligible) {
     giveBack();
     log(`  lane-${n}: KEPT (not salvaged) — ${g2.reason} (re-checked under the hold)`);

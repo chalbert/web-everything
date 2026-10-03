@@ -50,7 +50,7 @@ import { guardedPoolRoot } from './lib/lane-pool-paths.mjs';
 import { LEASE_FILENAME, isLeaseStale, describeLease, laneHolderSlug, DEFAULT_LEASE_TTL_MINUTES } from './lib/lane-lease.mjs';
 import { readLaneHistory, lastLaneHistoryEntry, readLaneJournal } from './lib/lane-history.mjs';
 import { claudeProjectsRoot, scanLaneTranscripts, summarizeLaneTouches } from './lib/lane-transcript-attribution.mjs';
-import { liveAgentInLane, agentsInLane } from './lib/lane-salvage.mjs';
+import { liveAgentInLane, agentsInLane, leaseSessionIds } from './lib/lane-salvage.mjs';
 
 // #4544 — the `claude agents --json` vocabulary for "actually running", observed on a live host: background
 // sessions carry `state: "working"`; interactive ones carry `status: "busy"` (an idle one is `status: "idle"`,
@@ -275,7 +275,7 @@ export function liveAgentSessions({ exec = execFileSync } = {}) {
 export function isSessionAlive(sessionId, laneDir, agents) {
   const DONE_STATES = new Set(['done', 'failed', 'stopped']);
   return agents.some((a) => (
-    (a.sessionId === sessionId || (laneDir && a.cwd === laneDir)) && !DONE_STATES.has(a.state)
+    ((typeof sessionId === 'string' && sessionId.length > 0 && a.sessionId === sessionId) || (laneDir && a.cwd === laneDir)) && !DONE_STATES.has(a.state)
   ));
 }
 
@@ -416,18 +416,12 @@ export function whoisForLane({
 
   const history = readLaneHistory(dir);
   const last = lastLaneHistoryEntry(history);
-  // #xl5xhmj fork 3 — the SAME `liveAgentInLane` read `we:scripts/lane-pool.mjs`'s own reclaim liveness gate
-  // uses, NOT gated on a live LEASE existing: an unleased lane (its lease already dropped — #xbk2is9) can
-  // still have a live worker sitting in it, by cwd or by the last ledger entry's ownerSession/workerSession/
-  // session. The old `!!lease && isSessionAlive(...)` read always answered `false` for an unleased lane no
-  // matter how live it actually was — exactly the disagreement that let `planSalvageCandidates`
-  // (`lane-pool-health-watch.mjs`) select a live lane as a salvage candidate while the reclaim gate itself
-  // correctly saw it as live (2026-09-28 evidence, lane-18).
-  const liveOwner = liveAgentInLane(agents, dir, [lease?.ownerSession, last?.ownerSession, last?.workerSession, last?.session]);
+  // A released holder is attribution only. Match current lease identities or an exact lane cwd.
+  const liveOwner = liveAgentInLane(agents, dir, leaseSessionIds(lease));
   const holderAlive = leaseTtlAlive || liveOwner;
   // #4544 — STRICTER than `liveOwner` (alert polarity: a false positive is noise): the matched session must be
   // actually running, not merely listed. `liveOwner`/`holderAlive` stay fail-safe for the reclaim gates.
-  const liveWorker = agentsInLane(agents, dir, [lease?.ownerSession, last?.ownerSession, last?.workerSession, last?.session])
+  const liveWorker = agentsInLane(agents, dir, leaseSessionIds(lease))
     .some((a) => isRunningAgent(a, nowMs));
 
   const { trackedModifiedPaths, untrackedPaths } = gitStatusSummary(dir);
@@ -459,7 +453,8 @@ export function whoisForLane({
   // lane's ACTUAL dirty paths, per #3383's own coordination note.
   const attribution = summarizeLaneTouches(transcriptTouches || [], dir, dirtyPaths);
   const bestAttribution = attribution[0] || null;
-  const attributionLiveOwner = bestAttribution ? isSessionAlive(bestAttribution.sessionId, null, agents) : false;
+  const attributionLiveOwner = !!bestAttribution && liveOwner
+    && agentsInLane(agents, dir, leaseSessionIds(lease)).some((a) => a.sessionId === bestAttribution.sessionId);
 
   const cardIds = guessCardIds({ paths: dirtyPaths, commitSubject: headSubject, branch: branch || '' });
   const cardStatusById = backlogStatusesForCards(dir, branchRef, cardIds, listingCache);

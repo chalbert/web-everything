@@ -336,7 +336,7 @@ export function defaultIsLeasedNow(dir) {
  */
 export function defaultIsLiveNow(dir) {
   try {
-    return !laneLivenessGate({ dir }).eligible; // omitting lastHolder lets the gate derive its own ledger read
+    return !laneLivenessGate({ dir }).eligible; // current lease identities and exact lane cwd
   } catch {
     return true;
   }
@@ -475,9 +475,9 @@ export function workersWithoutLease(whois) {
  * #3383 gap 2 — for every lane `lane-whois.mjs` verdicted `finished-reclaimable`, call the reclaim command
  * ({@link defaultReclaimLane}) — real when `!dryRun`, a full preservation re-check with no mutation when
  * `dryRun` (mirrors `trim`'s own `--dry-run` contract exactly). A lane whose verdict is `finished-needs-review`
- * or `unknown-work` is NEVER touched here — that is exactly what `we:scripts/operations/operator-queue.mjs`'s
- * existing `--with-lanes` "needs your decision" feed already surfaces (#3383's own original spec; unchanged by
- * this file). PURE-ish shell: takes the already-computed whois report in, calls `reclaimLane` once per
+ * or `unknown-work` is normally left for review. Below the low-water threshold, `reclaimPreserved` also
+ * selects unleased, unowned, non-kept lanes whose content is proven preserved, regardless of card/PR state.
+ * That shortage pass uses plain reclaim only; unpreserved lanes are left alone. PURE-ish shell: takes the already-computed whois report in, calls `reclaimLane` once per
  * candidate, returns the outcomes — no fs/git of its own beyond what `reclaimLane` does.
  *
  * #4344 — a `finished-reclaimable` verdict also covers a lane with NO uncommitted/ahead content at all, which
@@ -492,9 +492,11 @@ export function workersWithoutLease(whois) {
  * @param {{whois:{lanes:Array<object>, branch?:string}|null, reclaimLane:Function, dryRun:boolean}} o
  * @returns {Array<{lane:number, reclaimed:boolean, wouldReclaim?:boolean, alreadyClean?:boolean, reason?:string}>}
  */
-export function reclaimFinishedLanes({ whois, reclaimLane, dryRun, salvageEnabled = false, salvageMax = DEFAULT_SALVAGE_MAX_PER_TICK }) {
+export function reclaimFinishedLanes({ whois, reclaimLane, dryRun, reclaimPreserved = false, salvageEnabled = false, salvageMax = DEFAULT_SALVAGE_MAX_PER_TICK }) {
   if (!whois || !Array.isArray(whois.lanes)) return [];
-  const candidates = whois.lanes.filter((row) => row && row.exists && row.verdict === 'finished-reclaimable');
+  const candidates = whois.lanes.filter((row) => row && row.exists && !row.lease && !row.liveOwner
+    && !row.holderAlive && !row.kept && (row.verdict === 'finished-reclaimable'
+      || (reclaimPreserved && row.preserved === true && row.verdict !== 'in-use')));
   // #4344 — the pool's own branch name (short form). Deliberately fails CLOSED here (unlike
   // `isLaneAlreadyClean`'s own optional `expectedBranch`, whose omission is a caller's on-purpose opt-out): THIS
   // call site always means to enforce the branch-name guard, so a missing/malformed `whois.branch` must never
@@ -532,7 +534,8 @@ export function reclaimFinishedLanes({ whois, reclaimLane, dryRun, salvageEnable
   // `finished-needs-review` / `unknown-work` lane with no lease, no live owner and no operator `keep` is
   // handed to `reclaim --salvage`, which re-checks liveness itself (live agent/process in the lane, quiet
   // period), saves every unpreserved change durably (verified bundle + patch + index) and only then resets.
-  if (salvageEnabled) {
+  // Low-water recovery must never fall back to salvage for unpreserved content.
+  if (salvageEnabled && !reclaimPreserved) {
     const salvageCandidates = planSalvageCandidates(whois.lanes).slice(0, Math.max(0, salvageMax));
     for (const row of salvageCandidates) {
       const result = reclaimLane({ lane: row.lane, dryRun, salvage: true });
@@ -646,15 +649,16 @@ export function watchLanePoolHealth({
   // dirty content — litter-only or already-clean lanes are `lane-whois.mjs`'s own trivial "nothing to lose"
   // case, harmlessly reclaimed too), so ordering here is not load-bearing for correctness, only for keeping
   // this tick's own read of pool state as fresh as possible before the heaviest scan runs.
+  const health = summarizeHealth(lanes, plan, reaped, acquirableLaneNumbers);
+  const reclaimPreserved = health.acquirable < lowWater;
   let reclaim = null;
   let workerWithoutLease = null;
   if (reclaimEnabled) {
     const whois = listWhois({ repo, root });
-    const outcomes = reclaimFinishedLanes({ whois, reclaimLane: (o) => reclaimLane({ repo, root, dryRun, ...o }), dryRun, salvageEnabled, salvageMax });
+    const outcomes = reclaimFinishedLanes({ whois, reclaimLane: (o) => reclaimLane({ repo, root, dryRun, ...o }), dryRun, reclaimPreserved, salvageEnabled, salvageMax });
     reclaim = { verdicts: whois, outcomes };
     workerWithoutLease = whois ? workersWithoutLease(whois) : null;
   }
-  const health = summarizeHealth(lanes, plan, reaped, acquirableLaneNumbers);
   const retained = typeof retention === 'function' && status.root
     ? retention({ poolDir: status.root, pool: basename(status.root), dryRun })
     : null;
@@ -784,12 +788,15 @@ if (IS_CLI) {
         const would = plain.filter((o) => o.wouldReclaim);
         const refused = plain.filter((o) => !o.reclaimed && !o.wouldReclaim);
         timestampedStderr(
-          `  lane reclaim: ${plain.length} finished-reclaimable candidate(s) → ` +
+          `  lane reclaim: ${plain.length} reclaim candidate(s) → ` +
             `${dryRun ? `${would.length} would reclaim` : `${done.length} reclaimed`}` +
             `${refused.length ? `, ${refused.length} refused (preservation re-check failed)` : ''}\n`,
         );
         for (const o of plain) {
-          if (o.reclaimed || o.wouldReclaim) continue;
+          if (o.reclaimed || o.wouldReclaim) {
+            timestampedStderr(`    lane-${o.lane}: ${o.reclaimed ? 'reclaimed' : 'would reclaim'} — ${o.reason || 'content provably preserved'}\n`);
+            continue;
+          }
           timestampedStderr(`    lane-${o.lane}: NOT reclaimed — ${o.reason}\n`);
         }
         const salv = reclaim.outcomes.filter((o) => o.salvageCandidate);

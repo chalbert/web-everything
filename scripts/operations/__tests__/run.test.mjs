@@ -19,6 +19,10 @@ const TREES = ['scripts', 'skills-src'];
 
 /** Copy the parts of this repo the CLI imports into the fixture clone, commit on main and push. */
 function seedCheckout(ctx) {
+  // Copying the scripts tree can trigger Git's background housekeeping while teardown removes .git.
+  // Keep this fixture synchronous; the preflight assertions still exercise the real CLI and real Git.
+  ctx.git(['config', 'gc.auto', '0']);
+  ctx.git(['config', 'maintenance.auto', 'false']);
   for (const tree of TREES) {
     if (!existsSync(join(REPO, tree))) continue;
     cpSync(join(REPO, tree), join(ctx.clone, tree), {
