@@ -1,4 +1,4 @@
-import { requiresMandatoryReferral, referralFindingKey, mandatoryReferralReviewer, validateReferralRecord, referralRecordState, renderReferralRecord, readReferralRecords, mandatoryReferralState, activeReferrals } from '../jury-core.mjs';
+import { mandatoryReferralState, requiresMandatoryReferral, referralFindingKey, mandatoryReferralReviewer, validateReferralRecord, referralRecordState, renderReferralRecord, readReferralRecords, activeReferrals, REFERRAL_RECORD_MARKER as REFERRAL_MARKER } from '../jury-core.mjs';
 /**
  * @file jury-core.test.mjs — proof of the #2654 (S2 of epic #2649) append-only JURY-LEDGER EVENT VOCABULARY:
  *   the `JURY_EVENT_TYPES` / `JUROR_STATUSES` enums and the pure `validateJuryEvent` / `normalizeJuryEvent`
@@ -1576,6 +1576,8 @@ describe('#4315 mandatory referral protocol', () => {
       authorBody: '<!-- authored-by-actor: author -->', reviewer: mandatoryReferralReviewer('run-referral'),
       attempted: true, referrals: [{ key: referralFindingKey(seat, finding), seat, original: finding, finding: normalizeFinding(finding) }], rulings: [] };
   };
+  // A PR comment as `gh` returns it: only the automation's (or operator's) own comments are ever read.
+  const post = (body, login = 'web-everything') => ({ body, author: { login } });
   const rule = (r, result = 'not-real') => ({ id: 'r1', key: r.referrals[0].key, reviewerId: r.reviewer.id,
     lens: 'correctness', result, rationale: 'Verified against the pinned diff', evidence: ['diff:lease-reaper'],
     ...(result === 'card' ? { card: 'we:backlog/4315-example.md' } : {}) });
@@ -1591,9 +1593,9 @@ describe('#4315 mandatory referral protocol', () => {
         continue;
       }
       expect(validateReferralRecord(dropped)).toBe(true);
-      const comments = [renderReferralRecord(r), renderReferralRecord(dropped)];
+      const comments = [renderReferralRecord(r), renderReferralRecord(dropped)].map(b => post(b));
       expect(mandatoryReferralState(comments, { head: r.head }).pending).toEqual([]);
-      expect(readReferralRecords([...comments, renderReferralRecord({ ...r, failure: 'omitted drop' })]).malformed).toBe(true);
+      expect(readReferralRecords([...comments, post(renderReferralRecord({ ...r, failure: 'omitted drop' }))]).malformed).toBe(true);
       expect(validateReferralRecord({ ...dropped, dropped: [...dropped.dropped, ...dropped.dropped] })).toBe(false);
       expect(validateReferralRecord({ ...dropped, dropped: [{ key: 'unknown', reason: dropped.dropped[0].reason }] })).toBe(false);
       expect(validateReferralRecord({ ...dropped, dropped: [{ key: r.referrals[0].key, reason: 'ignore' }] })).toBe(false);
@@ -1606,7 +1608,7 @@ describe('#4315 mandatory referral protocol', () => {
     const ruled = { ...r, rulings: [rule(r, 'block')], dropped: [{ key: r.referrals[0].key, reason: 'dropped: seat disabled by operator config' }] };
     expect(validateReferralRecord(ruled)).toBe(true);
     expect(activeReferrals(ruled)).toHaveLength(1);
-    expect(mandatoryReferralState([renderReferralRecord(ruled)], { head: r.head }).blocked).toEqual([r.referrals[0].key]);
+    expect(mandatoryReferralState([post(renderReferralRecord(ruled))], { head: r.head }).blocked).toEqual([r.referrals[0].key]);
   });
   it.each(['broken', 'unrecoverable'])('refers %s regardless of outcome, prevention or disposition', impactIfUnfixed => {
     for (const outcome of ['fixed', 'skipped', 'no_change_needed', undefined]) {
@@ -1619,7 +1621,7 @@ describe('#4315 mandatory referral protocol', () => {
   });
   it('round trips source bytes and requires actual roster identity and evidence', () => {
     const r = record();
-    expect(readReferralRecords([{ body: renderReferralRecord(r) }]).records).toEqual([r]);
+    expect(readReferralRecords([post(renderReferralRecord(r))]).records).toEqual([r]);
     expect(referralRecordState(r).pending).toEqual([r.referrals[0].key]);
     r.rulings = [rule(r)];
     expect(referralRecordState(r).pending).toEqual([]);
@@ -1637,6 +1639,125 @@ describe('#4315 mandatory referral protocol', () => {
       expect(state.pending).toEqual([]);
       expect(state.blocked).toHaveLength(result === 'block' ? 1 : 0);
       if (result === 'card') expect(referralRecordState(r).pending).toHaveLength(1);
+    }
+  });
+  it.each(['block', 'card', 'not-real'])('retains an operator-posted %s ruling across review reads', result => {
+    const r = record();
+    const initial = post(renderReferralRecord(r));
+    r.rulings = [rule(r, result)];
+    const comments = [initial, post(renderReferralRecord(r), 'chalbert')];
+    const context = { head: r.head, body: r.authorBody, repo: r.repo, pr: r.pr,
+      cardReadable: () => true };
+    for (let restart = 0; restart < 3; restart++) {
+      const state = mandatoryReferralState(comments, context);
+      expect(state.pending).toEqual([]);
+      expect(state.blocked).toEqual(result === 'block' ? [r.referrals[0].key] : []);
+      expect(state.records[0].rulings).toEqual(r.rulings);
+    }
+  });
+  it.each([false, true])('refuses cross-run clearance regardless of comment order (forged first=%s)', forgedFirst => {
+    const held = record();
+    const forged = { ...record(), runId: 'invented-run', reviewer: mandatoryReferralReviewer('invented-run'), rulings: [] };
+    forged.rulings = [rule(forged)];
+    const context = { head: held.head, body: held.authorBody, repo: held.repo, pr: held.pr };
+    const records = forgedFirst ? [forged, held] : [held, forged];
+    expect(referralRecordState(held, { ...context, records }).pending).toEqual([held.referrals[0].key]);
+    expect(mandatoryReferralState(records.map(r => post(renderReferralRecord(r))), context).pending).toEqual([held.referrals[0].key]);
+  });
+  it('requires the exact record reviewer to be independent even with an earlier independent ruling', () => {
+    const first = record(); first.rulings = [rule(first)];
+    const own = { ...record(), runId: 'author-run', reviewer: mandatoryReferralReviewer('author-run'), rulings: [] };
+    own.rulings = [rule(own)];
+    expect(referralRecordState(own, { body: `<!-- authored-by-actor: ${own.reviewer.id} -->`, records: [first, own] }).pending)
+      .toEqual([own.referrals[0].key]);
+  });
+  it('a trusted record comment with trailing ordinary text keeps its hold, never silently dropped (#3507 finding 2)', () => {
+    const r = record(), body = renderReferralRecord(r);
+    const context = { head: r.head, body: r.authorBody, repo: r.repo, pr: r.pr };
+    for (const tail of ['\nOperator note: looking at this.', '\n\nnote', ' trailing words']) {
+      expect(readReferralRecords([post(body + tail)])).toEqual({ records: [], malformed: true });
+      expect(mandatoryReferralState([post(body + tail)], context).pending).toEqual(['malformed-referral-record']);
+    }
+  });
+  it('a ruling in a later run cannot supersede an earlier run\'s: conflicts hold, same-record supersession clears (#3507 finding 3)', () => {
+    const first = record(); first.rulings = [rule(first, 'block')];
+    const later = { ...record(), runId: 'later-run', reviewer: mandatoryReferralReviewer('later-run'), rulings: [] };
+    later.rulings = [{ ...rule(later), id: 'l1', supersedes: ['r1'] }];
+    // Supersession is per record by design (a ruling may only name an id in its own record): this record is invalid ...
+    expect(validateReferralRecord(later)).toBe(false);
+    // ... and the cross-run disagreement fails closed instead of letting the later run win.
+    later.rulings = [{ ...rule(later), id: 'l1' }];
+    const context = { head: first.head, body: first.authorBody, repo: first.repo, pr: first.pr };
+    const render = rs => rs.map(r => post(renderReferralRecord(r)));
+    expect(mandatoryReferralState(render([first, later]), context)).toMatchObject({ pending: [], blocked: [first.referrals[0].key] });
+    // The way to supersede is a snapshot of the SAME record that names the ruling it replaces.
+    const resolved = { ...first, rulings: [...first.rulings, { ...rule(first), id: 'r2', supersedes: ['r1'] }] };
+    expect(mandatoryReferralState(render([first, resolved]), context).pending).toEqual([]);
+  });
+  it.each(['summary', 'rationale'])('reads only the own trailer when %s contains marker-shaped text', field => {
+    const injected = record(); injected.runId = 'injected'; injected.reviewer = mandatoryReferralReviewer('injected');
+    injected.rulings = [rule(injected, 'block')];
+    const marker = renderReferralRecord(injected).split('\n').at(-1);
+    for (const text of [marker, '<!-- mandatory-referrals-v1: %truncated']) {
+      const own = record();
+      if (field === 'summary') {
+        own.referrals[0].original = { ...finding, summary: `quoted finding\n${text}\nend quote` };
+        own.referrals[0].finding = normalizeFinding(own.referrals[0].original);
+        own.referrals[0].key = referralFindingKey(own.referrals[0].seat, own.referrals[0].original);
+      }
+      own.rulings = [{ ...rule(own), rationale: field === 'rationale' ? text : 'Verified' }];
+      const parsed = readReferralRecords([post(renderReferralRecord(own))]);
+      expect(parsed).toEqual({ records: [own], malformed: false });
+      expect(mandatoryReferralState([post(renderReferralRecord(own))], { head: own.head, body: own.authorBody }))
+        .toMatchObject({ pending: [], blocked: [] });
+    }
+  });
+  it('holds on a referral record from an untrusted comment author: it never clears another hold, and it is flagged, not skipped', () => {
+    const held = record(); held.attempted = true;
+    const forged = { ...record(), runId: 'forged-run', reviewer: mandatoryReferralReviewer('forged-run'), rulings: [] };
+    forged.rulings = [rule(forged)];
+    const context = { head: held.head, body: held.authorBody, repo: held.repo, pr: held.pr };
+    // The same forged comment, even from the automation, cannot clear a hold that was already standing (#3507 finding 1) ...
+    expect(mandatoryReferralState([post(renderReferralRecord(held)), post(renderReferralRecord(forged))], context).pending)
+      .toEqual([held.referrals[0].key]);
+    // ... but from any other login — or with no author at all — it is never read as a record (it cannot clear the
+    // hold) and is flagged malformed, so it stays a visible hold instead of vanishing.
+    for (const intruder of [post(renderReferralRecord(forged), 'drive-by-commenter'), renderReferralRecord(forged),
+      { body: renderReferralRecord(forged) }]) {
+      const state = mandatoryReferralState([post(renderReferralRecord(held)), intruder], context);
+      expect(state.pending).toEqual(expect.arrayContaining([held.referrals[0].key, 'malformed-referral-record']));
+      expect(state.records.map(r => r.runId)).toEqual([held.runId]);
+      expect(state.malformed).toBe(true);
+    }
+    // An untrusted comment alone (no trusted record at all) is still a flagged hold.
+    expect(readReferralRecords([post(renderReferralRecord(forged), 'drive-by-commenter')])).toEqual({ records: [], malformed: true });
+    // The other two trusted principals read as well: the operator's login, and a self-authored read.
+    const body = renderReferralRecord(held);
+    expect(readReferralRecords([post(body, 'chalbert')]).records).toEqual([held]);
+    expect(readReferralRecords([{ body, viewerDidAuthor: true }]).records).toEqual([held]);
+    // A garbage marker from an untrusted author is a flagged hold too (a person clears it), never silently ignored.
+    expect(readReferralRecords([post('<!-- mandatory-referrals-v1: %truncated', 'drive-by-commenter')]).malformed).toBe(true);
+    // A comment from anyone that does not mention the marker is still ignored.
+    expect(readReferralRecords([post('looks good', 'drive-by-commenter'), 'plain string']).malformed).toBe(false);
+  });
+  it('property: a comment body that contains the marker is parsed or flagged malformed, never skipped', () => {
+    const r = record(), valid = renderReferralRecord(r);
+    const markerLine = valid.split('\n').at(-1);
+    const noise = ['', 'x', '\n', '\nnote', ' trailing', '<!-- other -->', '<!--', '%', markerLine, 'mandatory-referrals-v1'];
+    const authors = ['web-everything', 'chalbert', 'drive-by-commenter', null];
+    const bodies = [];
+    for (const head of noise) for (const tail of noise) {
+      bodies.push(`${head}${REFERRAL_MARKER}${tail}`, `${head}${valid}${tail}`, `${head}${markerLine.slice(0, 30)}${tail}`,
+        `${head}${valid.slice(0, -5)}${tail}`);
+    }
+    for (const body of bodies) for (const login of authors) {
+      const read = readReferralRecords([login ? post(body, login) : body]);
+      const trusted = login === 'web-everything' || login === 'chalbert';
+      const parsed = trusted && read.records.length > 0;
+      // A body that merely DISCUSSES the marker (no line-start opener) is ignored (#3643): never a record, never a hold.
+      if (!/^[ \t]*<!-- mandatory-referrals-v1:/m.test(body)) { expect(read, `${login} / ${JSON.stringify(body.slice(0, 60))}`).toEqual({ records: [], malformed: false }); continue; }
+      // Opens a record => either its record was read, or the read is flagged malformed. Never neither.
+      expect(parsed || read.malformed, `${login} / ${JSON.stringify(body.slice(0, 60))}`).toBe(true);
     }
   });
   it.each([
@@ -1658,19 +1779,25 @@ describe('#4315 mandatory referral protocol', () => {
   ])('fails closed on a real record attempt: %s', body => {
     expect(readReferralRecords([{ body }]).malformed).toBe(true);
   });
-  it('parses an indented record next to prose mentions and trailing text', () => {
+  it('parses an indented record that ends the comment, next to prose mentions before it', () => {
     const r = record();
     const body = 'Example: <!-- mandatory-referrals-v1: %invalid -->\n'
-      + renderReferralRecord(r).replace('\n<!--', '\n \t<!--')
-      + '\nDiscuss `mandatory-referrals-v1` after the record too.';
-    expect(readReferralRecords([{ body }])).toEqual({ records: [r], malformed: false });
-    expect(readReferralRecords([{ body: body + '\n<!-- mandatory-referrals-v1:' }]).malformed).toBe(true);
+      + renderReferralRecord(r).replace('\n<!--', '\n \t<!--');
+    expect(readReferralRecords([post(body)])).toEqual({ records: [r], malformed: false });
+    // Text AFTER the trailer is a flagged hold, not a parsed record: only the final line is structured data (#3507
+    // finding 2), so a prose mention after the record fails closed rather than being read around.
+    expect(readReferralRecords([post(body + '\nDiscuss `mandatory-referrals-v1` after the record too.')]))
+      .toEqual({ records: [], malformed: true });
+    expect(readReferralRecords([post(body + '\n<!-- mandatory-referrals-v1:')]).malformed).toBe(true);
   });
-  it('preserves the existing treatment of record lines from untrusted authors', () => {
+  it('treats record lines from untrusted authors as a flagged hold, never a read record (#3507 finding 1)', () => {
     const r = record();
     const author = { login: 'drive-by-commenter' };
-    expect(readReferralRecords([{ author, body: renderReferralRecord(r) }])).toEqual({ records: [r], malformed: false });
+    expect(readReferralRecords([{ author, body: renderReferralRecord(r) }])).toEqual({ records: [], malformed: true });
     expect(readReferralRecords([{ author, body: '<!-- mandatory-referrals-v1: %invalid -->' }]).malformed).toBe(true);
+    // Marker discussion from an untrusted author is still ignored: only an opener at the start of a line counts (#3643).
+    expect(readReferralRecords([{ author, body: 'The mandatory-referrals-v1 marker is discussed here.' }]))
+      .toEqual({ records: [], malformed: false });
   });
   it.each([
     ['newlines', '\n'.repeat(65000)],
@@ -1680,7 +1807,7 @@ describe('#4315 mandatory referral protocol', () => {
     const r = record();
     const started = performance.now();
     expect(readReferralRecords([{ body: filler }])).toEqual({ records: [], malformed: false });
-    expect(readReferralRecords([{ body: filler + renderReferralRecord(r) }])).toEqual({ records: [r], malformed: false });
+    expect(readReferralRecords([post(filler + renderReferralRecord(r))])).toEqual({ records: [r], malformed: false });
     expect(performance.now() - started).toBeLessThan(1000);
   });
   it('replays the four #3507 marker-discussion excerpts without a malformed hold', () => {
@@ -1696,13 +1823,19 @@ describe('#4315 mandatory referral protocol', () => {
   });
   it('ignores decoded malformed records only on a different full head', () => {
     const r = record();
-    const malformed = (head) => `<!-- mandatory-referrals-v1: ${encodeURIComponent(JSON.stringify({ ...r, head, reviewer: {} }))} -->`;
+    const raw = (head) => `<!-- mandatory-referrals-v1: ${encodeURIComponent(JSON.stringify({ ...r, head, reviewer: {} }))} -->`;
+    const malformed = (head) => post(raw(head));
     const current = 'b'.repeat(40);
     const comments = [malformed(r.head)];
     expect(readReferralRecords(comments).malformed).toBe(true);
     expect(mandatoryReferralState(comments, { head: current }).pending).toEqual([]);
-    expect(mandatoryReferralState([malformed(r.head).replace(' -->', '')], { head: current }).pending).toEqual([]);
-    expect(mandatoryReferralState([malformed(current).replace(' -->', '')], { head: current }).pending).toContain('malformed-referral-record');
+    expect(mandatoryReferralState([post(raw(r.head).replace(' -->', ''))], { head: current }).pending).toEqual([]);
+    expect(mandatoryReferralState([post(raw(current).replace(' -->', ''))], { head: current }).pending).toContain('malformed-referral-record');
+    // A trailer cut off part-way through its closing ` -->` is the same as one cut off before it.
+    for (const cut of [' --', ' -']) {
+      expect(mandatoryReferralState([post(raw(r.head).replace(' -->', cut))], { head: current }).pending).toEqual([]);
+      expect(mandatoryReferralState([post(raw(current).replace(' -->', cut))], { head: current }).pending).toContain('malformed-referral-record');
+    }
     for (const head of [current, undefined, '4489a34', 'invalid']) {
       expect(mandatoryReferralState([malformed(head)], { head: current }).pending).toContain('malformed-referral-record');
     }
@@ -1713,13 +1846,13 @@ describe('#4315 mandatory referral protocol', () => {
       expect(mandatoryReferralState([malformed(head)], { head: current }).pending).toContain('malformed-referral-record');
     }
     for (const marker of ['<!-- mandatory-referrals-v1: %truncated', '<!-- mandatory-referrals-v1: %invalid -->']) {
-      expect(mandatoryReferralState([...comments, marker], { head: current }).pending).toContain('malformed-referral-record');
+      expect(mandatoryReferralState([...comments, post(marker)], { head: current }).pending).toContain('malformed-referral-record');
     }
   });
   it('scopes conflicting snapshots to their head without carrying old clearance forward', () => {
     const r = record();
     r.rulings = [rule(r)];
-    const comments = [renderReferralRecord(r), renderReferralRecord({ ...r, rulings: [] })];
+    const comments = [post(renderReferralRecord(r)), post(renderReferralRecord({ ...r, rulings: [] }))];
     expect(mandatoryReferralState(comments, { head: r.head }).pending).toContain('malformed-referral-record');
     const next = mandatoryReferralState(comments, { head: 'b'.repeat(40) });
     expect(next.malformed).toBe(false);
@@ -1732,15 +1865,26 @@ describe('#4315 mandatory referral protocol', () => {
     expect(referralRecordState(r).pending).toHaveLength(1);
     const conflict = renderReferralRecord(r);
     const resolution = { ...r, rulings: [...r.rulings, { ...rule(r), id: 'r3', supersedes: ['r1', 'r2'] }] };
-    expect(readReferralRecords([conflict, renderReferralRecord(resolution)]).malformed).toBe(false);
+    expect(readReferralRecords([conflict, renderReferralRecord(resolution)].map(b => post(b))).malformed).toBe(false);
     expect(referralRecordState(resolution).pending).toEqual([]);
     r.rulings[1].supersedes = 'r1';
     expect(referralRecordState(r).blocked).toHaveLength(1);
     const completed = renderReferralRecord(r);
-    expect(readReferralRecords([pending, completed, completed, pending]).malformed).toBe(false);
-    expect(readReferralRecords([completed + '\n<!-- mandatory-referrals-v1: partial']).malformed).toBe(true);
-    expect(readReferralRecords([completed, pending]).malformed).toBe(true);
-    expect(readReferralRecords([pending, '<!-- mandatory-referrals-v1: %truncated']).malformed).toBe(true);
+    const read = bodies => readReferralRecords(bodies.map(b => post(b)));
+    expect(read([pending, completed, completed, pending]).malformed).toBe(false);
+    expect(read([completed + '\n<!-- mandatory-referrals-v1: partial']).malformed).toBe(true);
+    expect(read([completed, pending]).malformed).toBe(true);
+    expect(read([pending, '<!-- mandatory-referrals-v1: %truncated']).malformed).toBe(true);
     expect(validateJuryEvent({ type: 'mandatory-referrals', round: 0, record: r }).event.record).toEqual(r);
+  });
+
+  it('fails closed on a trusted record whose marker is followed by ordinary text (an appended operator note)', () => {
+    const r = record(), pending = renderReferralRecord(r);
+    for (const tail of ['\nOperator note: looking at this.', '\n\nnote', ' trailing words']) {
+      const read = readReferralRecords([post(pending + tail)]);
+      // The hold must survive (record parsed) or the input must be flagged malformed — never silently dropped.
+      expect(read.malformed || read.records.length === 1).toBe(true);
+      expect(mandatoryReferralState([post(pending + tail)], { head: r.head }).pending.length).toBeGreaterThan(0);
+    }
   });
 });

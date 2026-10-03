@@ -1747,6 +1747,7 @@ function renderRevProvenance(netBasis) {
  */
 export function deriveAdvisoryOutcome(verdict) {
   const v = verdict && typeof verdict === 'object' ? verdict : {};
+  if (v.blockedReferrals?.length) return ADVISORY_OUTCOMES.CHANGES;
   const lensVerdicts = v.lensVerdicts && typeof v.lensVerdicts === 'object' ? v.lensVerdicts : {};
   const lenses = Array.isArray(v.lenses) && v.lenses.length ? v.lenses : Object.keys(lensVerdicts);
   try {
