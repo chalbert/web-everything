@@ -3,6 +3,8 @@ import { execFileSync } from 'node:child_process';
 import { getRequiredStatusChecks } from './required-status-checks.mjs';
 import { reviewCiGate } from './review-ci-gate.mjs';
 
+const MAX_STALE_CACHE_AGE_MS = 24 * 60 * 60_000;
+
 const gh = argv => execFileSync('gh', argv, { encoding: 'utf8', timeout: 15_000, stdio: ['ignore', 'pipe', 'pipe'] });
 export const readReviewHead = ({ repo, pr, run = gh }) => JSON.parse(run(['pr', 'view', String(pr), '--repo', repo, '--json', 'headRefOid'])).headRefOid;
 /**
@@ -33,14 +35,20 @@ export function readReviewCiGate({ repo, pr, readHead = readReviewHead,
     headSha = readHead({ repo, pr });
     if (typeof headSha !== 'string' || !headSha.trim()) return reviewCiGate({ headSha });
     const required = readRequired({ repo, ttlMs: 0 });
+    const stale = required?.source === 'stale-cache';
+    const cacheAgeMs = required?.cacheAgeMs;
+    const trustedStale = stale && Number.isFinite(cacheAgeMs) && cacheAgeMs >= 0 && cacheAgeMs <= MAX_STALE_CACHE_AGE_MS;
+    const withSource = result => ({ ...result, source: required?.source,
+      ...(stale ? { cacheAgeMs, reason: `${result.reason} (stale-cache cache-age-ms=${cacheAgeMs ?? 'unknown'})` } : {}),
+    });
     // Repo-declared requirements are code-reviewed policy, not the last-resort fallback.
-    if (!['live', 'cache', 'declared'].includes(required?.source)) {
-      return { allowed: false, headSha, reason: 'untrusted-required-set', source: required?.source };
+    if (!['live', 'cache', 'declared'].includes(required?.source) && !trustedStale) {
+      return withSource({ allowed: false, headSha, reason: 'untrusted-required-set' });
     }
     const checks = readChecks({ repo, headSha });
     const currentHead = readHead({ repo, pr });
-    if (currentHead !== headSha) return { allowed: false, headSha, currentHead, reason: 'head-changed' };
-    return { ...reviewCiGate({ headSha, requiredChecks: required.checks, checks }), source: required.source };
+    if (currentHead !== headSha) return withSource({ allowed: false, headSha, currentHead, reason: 'head-changed' });
+    return withSource(reviewCiGate({ headSha, requiredChecks: required.checks, checks }));
   } catch (error) {
     return { allowed: false, headSha, reason: 'unreadable-ci', error: String(error?.message ?? error) };
   }
