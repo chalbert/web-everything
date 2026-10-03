@@ -1,9 +1,10 @@
 ---
 kind: story
 size: 3
-status: open
+status: resolved
 scope: ["we:scripts/conveyor/reconcile-core.mjs", "we:scripts/operations/review-dispatch.mjs", "we:scripts/operations/review-job.mjs", "we:scripts/lib/review-ci-gate.mjs", "we:scripts/lib/review-ci-gate-io.mjs", "we:scripts/conveyor/__tests__/reconcile-core.test.mjs", "we:scripts/operations/__tests__/review-dispatch.test.mjs", "we:scripts/operations/__tests__/review-job.test.mjs", "we:scripts/lib/__tests__/review-ci-gate.test.mjs", "we:scripts/lib/__tests__/review-ci-gate-io.test.mjs", "we:skills-src/conveyor/__tests__/review-daemon.test.mjs"]
 dateOpened: "2026-10-01"
+dateResolved: "2026-10-02"
 preparedDate: "2026-10-01"
 preparedAgainstSha: "a243696497bde756b580485d14caf77209650282"
 tags: []
