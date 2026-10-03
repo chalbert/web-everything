@@ -1240,6 +1240,9 @@ export function resolveChatSpawnGuardCeilingMs(env = process.env) {
   return (Number.isFinite(n) && n > 0 ? n : 24) * 60 * 60 * 1000;
 }
 
+/** Same-host clock-skew allowance; later timestamps cannot grant reap immunity (#4184). */
+export const CHAT_SPAWN_LINK_FUTURE_SKEW_MS = 5 * 60 * 1000;
+
 /** Filename-safe session ids only — both stores are keyed by a CLI-minted UUID, never free text. */
 function isSafeSessionId(id) {
   return typeof id === 'string' && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(id);
@@ -1337,6 +1340,7 @@ export function isChatEnded(chatSessionId, dir = resolveChatEndedDir(), { readFi
  *   - `link === null` (no stamp at all — daemon-dispatched, or this feature simply hasn't stamped it, e.g. a
  *     session started before this axis shipped) → NOT blocked. This is the "unchanged from today" default.
  *   - `link.ok === true` and `ended === true` → NOT blocked, `chat-ended`.
+ *   - With the clamp enabled, a timestamp beyond the clock-skew allowance is invalid: NOT blocked, `chat-spawn-link-future-dated`.
  *   - Otherwise (an `{ok:false}` ambiguous/corrupt link, OR a real link that is not yet ended) → BLOCKED, UNLESS
  *     `nowMs - link.recordedAtMs >= ceilingMs`, in which case → NOT blocked, `chat-spawn-guard-ceiling` — a
  *     forged, corrupted, or simply never-ended link cannot grant reap immunity FOREVER, mirroring
@@ -1350,7 +1354,7 @@ export function isChatEnded(chatSessionId, dir = resolveChatEndedDir(), { readFi
  *     When blocked and NOT saved by the ceiling: `chat-not-ended` for a real link, `ambiguous-chat-link` for a
  *     corrupt one — the reason always reflects which case it actually was.
  * @param {{link:null|{ok:false, recordedAtMs?:number|null}|{ok:true, spawnedByChatSessionId:string, recordedAtMs?:number|null}, ended?:boolean, nowMs?:number, ceilingMs?:number|null}} o
- * @returns {{blocked:boolean, reason:('no-link'|'ambiguous-chat-link'|'chat-ended'|'chat-not-ended'|'chat-spawn-guard-ceiling')}}
+ * @returns {{blocked:boolean, reason:('no-link'|'ambiguous-chat-link'|'chat-ended'|'chat-not-ended'|'chat-spawn-guard-ceiling'|'chat-spawn-link-future-dated')}}
  */
 export function classifyChatSpawnGuard({ link, ended = false, nowMs = Date.now(), ceilingMs = null } = {}) {
   if (link === null || link === undefined) return { blocked: false, reason: 'no-link' };
@@ -1365,6 +1369,7 @@ export function classifyChatSpawnGuard({ link, ended = false, nowMs = Date.now()
   // clock, or a link whose age is somehow still unknowable even via mtime) disables the clamp for THAT check
   // only — the surrounding block still applies — never silently widening a block into a permanent one.
   if (typeof ceilingMs === 'number' && ceilingMs > 0 && typeof link.recordedAtMs === 'number' && Number.isFinite(link.recordedAtMs)) {
+    if (link.recordedAtMs - nowMs > CHAT_SPAWN_LINK_FUTURE_SKEW_MS) return { blocked: false, reason: 'chat-spawn-link-future-dated' };
     if (nowMs - link.recordedAtMs >= ceilingMs) return { blocked: false, reason: 'chat-spawn-guard-ceiling' };
   }
   return link.ok === true ? { blocked: true, reason: 'chat-not-ended' } : { blocked: true, reason: 'ambiguous-chat-link' };

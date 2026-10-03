@@ -49,7 +49,7 @@
 # check out BOTH repos as siblings and build FUI's tools first. Single-repo CI cannot build this site.
 #
 # Secrets (repo → Settings → Secrets and variables → Actions):
-#   FUI_READ_TOKEN        — fine-grained PAT, Contents:Read on chalbert/frontierui (checkout the sibling)
+#   FUI_READ_TOKEN        — fine-grained PAT, Contents:Read on frontier-ui/frontierui (checkout the sibling)
 #   CLOUDFLARE_API_TOKEN  — scoped token, Workers Scripts · Edit (deploy)
 #   CLOUDFLARE_ACCOUNT_ID — the account id
 name: Deploy WE site (Cloudflare Worker)
@@ -160,7 +160,7 @@ jobs:
       - name: Checkout FUI (sibling)
         uses: actions/checkout@v4
         with:
-          repository: chalbert/frontierui
+          repository: frontier-ui/frontierui
           token: ${{ secrets.FUI_READ_TOKEN }}
           path: frontierui
 
