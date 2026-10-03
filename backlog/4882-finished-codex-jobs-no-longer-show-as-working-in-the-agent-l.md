@@ -16,6 +16,20 @@ Live 2026-10-03: the WIP feed returned 622 job rows of which about 8 were live; 
 
 ## Progress
 
+### Implementation and observed proof — 2026-10-03
+
+- Implemented the two pure rules, shared six-hour constant, one-pass rollout lookup, completion read with fail-soft handling, and background/subagent filtering within the four declared files. No session or thread records were deleted.
+- **Regression before:** on the unchanged checkout implementation (HEAD `e3bd114d639301b792532cca44a03a74d349cadc`), the two scoped Vitest files reported **9 failed / 46 passed**. All nine new cases failed: missing pure helpers, absent rollout fields, finished Codex emitted, and stale background emitted.
+- **Regression after:** the same command, `npx vitest run we:scripts/operations/__tests__/agent-activity.test.mjs we:scripts/operations/__tests__/agent-activity-io-real.test.mjs` (checkout-relative paths), passed **55/55**. The terminal-state session regression is unchanged. Coverage includes equality, newer re-dispatch, fresh rollout versus old start, invalid/missing completion, unknown timestamps, pid exemptions, and the strict six-hour boundary.
+- **Repeated-read proof:** both real reader regression fixtures repeat 20 times. Completed jobs never reappear; a newer re-dispatch and missing/corrupt/invalid completion cases remain; stale parents and their subagents stay absent while fresh and pid-bearing parents retain their children.
+- **Live before**, primary checkout reader at approximately 17:32–17:36 UTC: **31 Codex / 10 background** rows. The live-work collector/assessor reported **31 Codex working / 10 background running / 0 background working** (the old background rows were already classified idle-too-long downstream). This differs from the preparation snapshot's 12 background rows; no fresh pid-bearing background session was listed during this probe.
+- **Live after**, lane code reading the same primary root and host transcript state: **0 Codex / 0 background** rows; live-work reported **0 Codex working / 0 background running**. Explicitly supplying the primary root avoids falsely proving the fix against the lane's empty thread directory. The stale background names were conveyor-3436, conveyor-3464z, prepare-2768, conveyor-3484, conveyor-3481b, conveyor-3554b, conveyor-2416b, fix-2003, fix-2115, and fix-2267.
+- **CLI proof:** primary output was `{"codexWorking":31,"staleBackground":10}`; lane output was `{"codexWorking":0,"staleBackground":0}`, matching the ten observed background run IDs. Ran `node we:scripts/operations/run.mjs live-work --json` in the lane. Primary CLI invocation required the canonical checkout path (the alias bypasses its main-module guard) and a lane-local `OPERATION_RUNS_DIR`, because this sandbox cannot write operation receipts in the primary checkout. Collector proof above reads primary state without mutating it.
+- **Standards:** `npm run check:standards` passed with **0 errors** (5,275 repository warnings). `git diff --check` passed.
+- **Lane gate:** `node we:scripts/verify-lane.mjs` ran 71 test files: **3,097 passed / 1 failed**. The sole failure is the out-of-scope missing-transcript fixture described in Follow-ups; the gate remains red pending scope approval and fixture clock correction.
+- Proof is recorded here instead of a PR body because this job explicitly prohibits opening a PR.
+
+
 Premise checked against main on 2026-10-03.
 
 - **Old premise:** an ordering bug in how job rows are merged lets an older running row beat a newer terminal one.
@@ -100,6 +114,8 @@ Live case: the 31 Codex thread records and the 11 stale `claude agents` rows on 
 5. The live before/after counts from the Proof plan are in the PR body.
 
 ## Follow-ups
+
+- Verification exposed a clock-dependent fixture in `we:scripts/operations/__tests__/item-activity-io-real.test.mjs`: its missing-transcript case uses an October 2 start with the real clock. Under the specified age rule it expires once six hours pass. Its intended missing-evidence assertions require an injected clock near the fixture start; permission to extend scope for that fixture was requested rather than weakening the age rule or its assertions.
 
 - Codex delivery runs almost never write a completion record (1 of 31 today). Rule 1 will rarely fire until they do; Rule 2 carries the live case. Making the Codex delivery wrapper write a `done` completion is a separate card.
 - The Codex thread-record directory is never pruned. A sweep that removes records past a retention window could follow; it is not needed for the listing to be correct.

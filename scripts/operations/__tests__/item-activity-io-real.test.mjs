@@ -60,12 +60,15 @@ describe('real stores, shared ingestion, and filesystem evidence', () => {
     expect(after.gaps.join(' ')).toMatch(/security: transcript unavailable/);
   });
   it('reads real Claude session transcripts and reports deleted/non-file evidence truthfully', () => {
+    // Keep the session recent after deletion, when age falls back to startedAt.
+    const now = () => Date.parse(start) + 60_000;
     const project = join(projectsDir, projectSlugFor(root)); mkdirSync(project);
     const transcript = join(project, 'session.jsonl'); writeFileSync(transcript, '{}\n');
-    const readSources = createAgentActivityReader({ root, projectsDir, listAgents: () => [
+    utimesSync(transcript, new Date(start), new Date(start));
+    const readSources = createAgentActivityReader({ root, projectsDir, now, listAgents: () => [
       { sessionId: 'session', name: 'fix-42', cwd: root, state: 'working', startedAt: start }],
     listJobs: () => [], run: () => '{"lanes":[]}' });
-    const read = reader({ readSources });
+    const read = reader({ readSources, now });
     expect(read({ pr: 42 }).runs[0].transcriptPath).toBe(transcript);
     rmSync(transcript);
     expect(read({ pr: 42 }).runs[0]).toMatchObject({ transcriptPath: null, lastEventAt: null, transcriptAgeMs: null });
