@@ -3,10 +3,11 @@ bornAs: xbdefjb
 kind: story
 size: 2
 parent: "3383"
-status: open
+status: resolved
 scope: ["we:.github/workflows/ci.yml", "we:scripts/conveyor/main-red-recovery.mjs", "we:scripts/conveyor/main-ci-coverage.mjs"]
 dateOpened: "2026-10-03"
 dateStarted: "2026-10-03"
+dateResolved: "2026-10-03"
 tags: []
 ---
 
