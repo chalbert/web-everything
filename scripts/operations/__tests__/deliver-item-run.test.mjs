@@ -84,6 +84,15 @@ describe('selectDeliveryAgentProvider', () => {
 describe('runDeliverItemCli (injected `deliver` fake — no real process spawn)', () => {
   const baseArgv = ['--num=42', '--lane=3', '--session=conveyor-42'];
 
+  it('#4357 prints the refusal reason supplied by delivery', async () => {
+    const write = vi.fn();
+    await runDeliverItemCli(baseArgv, {
+      deliver: async () => ({ result: 'open-refused (unverified): stale verification' }), write,
+    });
+    expect(write).toHaveBeenCalledWith('deliver-item-run: #42 finished — open-refused (unverified): stale verification\n');
+    expect(write.mock.calls.flat().join('')).not.toContain('PR #null');
+  });
+
   it('exits 0 and returns the result on success', async () => {
     const deliver = vi.fn(async () => ({ item: '42', result: 'PR #99 (soft)' }));
     const write = vi.fn();
