@@ -2388,9 +2388,10 @@ export function readReferralRecords(comments, { head } = {}) {
     // Only the comment's own final line is structured data. Summaries and rationales
     // may quote arbitrary marker-shaped text; they cannot inject a second record.
     const trailer = body.trimEnd().split('\n').at(-1);
-    // The closing ` -->` is optional here (#3643): a trailer cut off before it still decodes, and the read below
-    // holds it only when it belongs to the current head (or cannot be attributed to another one).
-    const match = /^<!-- mandatory-referrals-v1: ([^\s]+)( -->)?$/.exec(trailer);
+    // The closing ` -->` is optional here (#3643): a trailer cut off before it, or part-way through it (` --`, ` -`),
+    // still decodes, and the read below holds it only when it belongs to the current head (or cannot be attributed
+    // to another one). Only the whole ` -->` is captured, so a part-way cut still counts as unclosed.
+    const match = /^<!-- mandatory-referrals-v1: ([^\s]+)(?:( -->)| -{0,2}>?)?$/.exec(trailer);
     const matches = match ? [match] : [];
     // Fail closed: a trusted comment that names the marker but does not end in a valid trailer (an operator note
     // appended by editing it, a truncated write) is flagged malformed so its hold cannot vanish silently.

@@ -1760,6 +1760,11 @@ describe('#4315 mandatory referral protocol', () => {
     expect(mandatoryReferralState(comments, { head: current }).pending).toEqual([]);
     expect(mandatoryReferralState([post(raw(r.head).replace(' -->', ''))], { head: current }).pending).toEqual([]);
     expect(mandatoryReferralState([post(raw(current).replace(' -->', ''))], { head: current }).pending).toContain('malformed-referral-record');
+    // A trailer cut off part-way through its closing ` -->` is the same as one cut off before it.
+    for (const cut of [' --', ' -']) {
+      expect(mandatoryReferralState([post(raw(r.head).replace(' -->', cut))], { head: current }).pending).toEqual([]);
+      expect(mandatoryReferralState([post(raw(current).replace(' -->', cut))], { head: current }).pending).toContain('malformed-referral-record');
+    }
     for (const head of [current, undefined, '4489a34', 'invalid']) {
       expect(mandatoryReferralState([malformed(head)], { head: current }).pending).toContain('malformed-referral-record');
     }
