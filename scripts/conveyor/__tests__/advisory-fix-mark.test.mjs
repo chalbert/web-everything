@@ -26,7 +26,7 @@ describe('#3507 — advisory supersede stays inside the fix cycle', () => {
   const note = { body: FRESH_NOTE, author: AUTOMATION };
   const fix = { body: buildAdvisoryFixComment(), author: AUTOMATION };
   const stop = { body: STAND_DOWN_MARKER, author: AUTOMATION };
-  const boundaries = [FIX_BEGIN_MARKER, FIX_END_MARKER, REARM_COMMENT_MARKER,
+  const boundaries = [REARM_COMMENT_MARKER,
     ADVISORY_NOTE_MARKER, CONVERTED_ADVISORY_NOTE_MARKER,
     ...['changes', 'accepted', 'clear-human', 'restamp'].map((to) => buildVerdictComment({ to })),
   ];
@@ -42,6 +42,20 @@ describe('#3507 — advisory supersede stays inside the fix cycle', () => {
     expect(isAdvisoryMechanismStandDownSuperseded([note, fix, { body, author: { login: 'mallory' } }, stop], 3)).toBe(true);
     expect(isAdvisoryMechanismStandDownSuperseded([note, fix, { body: `> ${body}`, author: AUTOMATION }, stop], 3)).toBe(true);
     expect(isAdvisoryMechanismStandDownSuperseded([note, fix, stop, { body, author: AUTOMATION }], 2)).toBe(true);
+  });
+  // The fix-agent brief posts fix-begin first, the hand-back mark (or a stand-down) next, fix-end last — so
+  // neither fix-begin nor fix-end can be a cycle boundary, or the #2549 supersede never fires.
+  const begin = { body: FIX_BEGIN_MARKER, author: AUTOMATION };
+  const end = { body: FIX_END_MARKER, author: AUTOMATION };
+  const rearm = { body: REARM_COMMENT_MARKER, author: AUTOMATION };
+  it('the documented fixer order still supersedes: a later fixer’s fix-begin precedes its wrong stand-down (#2549 shape)', () => {
+    expect(isAdvisoryMechanismStandDownSuperseded([note, fix, end, begin, stop], 4)).toBe(true);
+  });
+  it('the documented fixer order still supersedes: the fixer’s own mark is followed by its fix-end before the stand-down', () => {
+    expect(isAdvisoryMechanismStandDownSuperseded([note, begin, fix, end, stop], 4)).toBe(true);
+  });
+  it('a re-arm after the fix bracket still ends the cycle', () => {
+    expect(isAdvisoryMechanismStandDownSuperseded([note, begin, fix, end, rearm, begin, stop], 6)).toBe(false);
   });
   it('replays #3507’s observed comment order without superseding the 23:09 stand-down', () => {
     const { comments } = standDown3507;
