@@ -48,7 +48,7 @@ try {
 } catch (e) { out.threw = String(e.message).split('\\n')[0]; }
 const empty = () => ({ dispatched: [], refusals: [] });
 const tick = await daemon.runTickAllRepos({
-  repos: ['chalbert/web-everything'], fixTick: empty, ciHealTick: empty,
+  repos: ['soak-owner/soak-repo'], fixTick: empty, ciHealTick: empty,
   hungCiTick: () => ({ dispatch: [], refusals: [], applied: [] }),
   mainRedRebaseTick: () => ({ dispatch: [], refusals: [], applied: [] }),
   missingRunTick: () => ({ dispatch: [], refusals: [], applied: [] }),
