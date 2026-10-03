@@ -49,7 +49,9 @@ on:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # #5000: never cancel a run on main. A merge every few minutes cancelled 85 of 100 main runs (2026-10-03),
+  # hiding main's red/green for hours. PR branches still cancel superseded runs.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 permissions:
   contents: read
@@ -100,7 +102,7 @@ jobs:
       - name: Checkout FUI (sibling)
         uses: actions/checkout@v4
         with:
-          repository: chalbert/frontierui
+          repository: frontier-ui/frontierui
           token: ${{ secrets.FUI_READ_TOKEN }}
           path: frontierui
 
@@ -173,7 +175,7 @@ jobs:
       - name: Checkout FUI (sibling)
         uses: actions/checkout@v4
         with:
-          repository: chalbert/frontierui
+          repository: frontier-ui/frontierui
           token: ${{ secrets.FUI_READ_TOKEN }}
           path: frontierui
 
@@ -373,7 +375,7 @@ jobs:
       - name: Checkout FUI (sibling)
         uses: actions/checkout@v4
         with:
-          repository: chalbert/frontierui
+          repository: frontier-ui/frontierui
           token: ${{ secrets.FUI_READ_TOKEN }}
           path: frontierui
 
@@ -465,7 +467,7 @@ jobs:
       - name: Checkout FUI (sibling)
         uses: actions/checkout@v4
         with:
-          repository: chalbert/frontierui
+          repository: frontier-ui/frontierui
           token: ${{ secrets.FUI_READ_TOKEN }}
           path: frontierui
 
@@ -579,7 +581,7 @@ jobs:
       - name: Checkout FUI (sibling)
         uses: actions/checkout@v4
         with:
-          repository: chalbert/frontierui
+          repository: frontier-ui/frontierui
           token: ${{ secrets.FUI_READ_TOKEN }}
           path: frontierui
 

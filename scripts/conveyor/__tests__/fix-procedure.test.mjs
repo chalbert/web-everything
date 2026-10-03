@@ -22,9 +22,9 @@ import {
   acquireFixClaim, releaseFixClaim, heartbeatFixClaim, readLiveFixClaim, pushRefusal, isClaimHolder,
   fixBegin, fixEnd, withAltBranchHint, repoKeyFromRemoteUrl, repoKeyForCheckout, DEFAULT_FIX_CLAIM_TTL_MINUTES,
   FIX_BEGIN_MARKER, FIX_END_MARKER, FIXING_LABEL, STOOD_DOWN_LABEL, parseGitPush, resolvePushDestination,
-  refuseHeldPush, parseGitPushes, resolvePushDestinations, pushTargetUnreliable,
+  fixBeginRefusalMessage, refuseHeldPush, parseGitPushes, resolvePushDestinations, pushTargetUnreliable,
 } from '../fix-procedure.mjs';
-import { acquireFixDispatchClaim, refreshLiveFixDispatchClaims } from '../fix-dispatch-claim.mjs';
+import { acquireFixDispatchClaim, refreshLiveFixDispatchClaims, releaseSessionFixDispatchClaims, readFixDispatchClaim } from '../fix-dispatch-claim.mjs';
 import { fixDispatchClaimRoot } from '../fix-claim-store.mjs';
 import {
   STAND_DOWN_MARKER, CONCURRENT_AUTHOR_PAUSE_MARKER, buildConcurrentAuthorPauseComment, concurrentAuthorPauses,
@@ -893,4 +893,56 @@ it('xul2kwr synthetic #3432 soak: withdrawal survives expiry and stale plans unt
   expect(pr.isDraft).toBe(false);
   expect(pr.labels).toEqual([]);
   console.info('xul2kwr synthetic replay', JSON.stringify({ ticks: trace.length, first: trace[0], last: trace.at(-1), effectsAfterRelease: effects }));
+});
+
+
+describe('a stood-down fixer frees its dispatch claim at once (#3311)', () => {
+  const seed = (lockRoot, extra = {}) => acquireFixDispatchClaim({ repo: 'we', pr: 3311, owner: 'daemon:1', nowMs: T0, lockRoot, ...extra });
+  it('replays #3311: daemon claim blocks split; stand-down frees it inside the TTL', () => {
+    seed(root);
+    expect(acquireFixClaim({ repo: 'we', pr: 3311, who: 'split-3311', lockRoot: root, nowMs: T0 + MIN }))
+      .toMatchObject({ ok: false, reason: 'dispatched-fixer', dispatchKind: 'fix' });
+    expect(releaseSessionFixDispatchClaims({ repo: 'we', pr: 3311, who: 'fix-3311', lockRoot: root }).released)
+      .toEqual([{ kind: 'fix', owner: 'daemon:1' }]);
+    expect(acquireFixClaim({ repo: 'we', pr: 3311, who: 'split-3311', lockRoot: root, nowMs: T0 + 2 * MIN }).ok).toBe(true);
+  });
+  it.each(['fix-9999', 'split-3311', undefined])('leaves mismatched who %s alone', (who) => {
+    seed(root);
+    expect(releaseSessionFixDispatchClaims({ repo: 'we', pr: 3311, who, lockRoot: root }).released).toEqual([]);
+    expect(readFixDispatchClaim({ repo: 'we', pr: 3311, lockRoot: root })).not.toBeNull();
+  });
+  it('releases only its own kind and never the fixing claim', () => {
+    seed(root); seed(root, { kind: 'ci-heal' }); seed(root, { kind: 'fixing' });
+    expect(releaseSessionFixDispatchClaims({ repo: 'we', pr: 3311, who: 'ci-heal-3311', lockRoot: root }).released)
+      .toEqual([{ kind: 'ci-heal', owner: 'daemon:1' }]);
+    for (const kind of ['fix', 'fixing']) expect(readFixDispatchClaim({ repo: 'we', pr: 3311, kind, lockRoot: root })).not.toBeNull();
+    seed(root, { kind: 'ci-heal' });
+    releaseSessionFixDispatchClaims({ repo: 'we', pr: 3311, who: 'fix-3311', lockRoot: root });
+    expect(readFixDispatchClaim({ repo: 'we', pr: 3311, kind: 'ci-heal', lockRoot: root })).not.toBeNull();
+  });
+  it('scopes by repo', () => {
+    seed(root, { repo: 'frontierui' });
+    expect(releaseSessionFixDispatchClaims({ repo: 'we', pr: 3311, who: 'fix-3311', lockRoot: root }).released).toEqual([]);
+    expect(readFixDispatchClaim({ repo: 'frontierui', pr: 3311, lockRoot: root })).not.toBeNull();
+  });
+  it('soaks 20 refresh ticks with the stood-down session still listed live', () => {
+    seed(root);
+    releaseSessionFixDispatchClaims({ repo: 'we', pr: 3311, who: 'fix-3311', lockRoot: root });
+    for (let tick = 1; tick <= 20; tick += 1) {
+      const nowMs = T0 + tick * 15_000;
+      const sweep = refreshLiveFixDispatchClaims({ lockRoot: root,
+        listAgentsAll: () => [{ name: 'fix-3311', state: 'working' }], hungInfoFor: () => null,
+        nowIso: () => new Date(nowMs).toISOString() });
+      expect(sweep.refreshed).toEqual([]);
+      expect(readFixDispatchClaim({ repo: 'we', pr: 3311, lockRoot: root })).toBeNull();
+      const next = acquireFixClaim({ repo: 'we', pr: 3311, who: 'split-3311', lockRoot: root, nowMs });
+      expect(next.ok).toBe(true);
+      expect(releaseFixClaim({ repo: 'we', pr: 3311, who: 'split-3311', token: next.token, lockRoot: root }).released).toBe(true);
+    }
+  });
+  it('fixBeginRefusalMessage names the reason and the holder', () => {
+    const message = fixBeginRefusalMessage({ pr: 3311, reason: 'dispatched-fixer', heldBy: 'fix-3311', dispatchKind: 'fix' });
+    for (const part of ['dispatched-fixer', 'fix-3311', 'TTL', 'daemon fix']) expect(message).toContain(part);
+    expect(fixBeginRefusalMessage({ pr: 3311, reason: 'held', heldBy: 'other' })).toContain('held — held by other');
+  });
 });
