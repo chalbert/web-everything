@@ -4,7 +4,7 @@ size: 2
 parent: "xdmqryh"
 status: open
 blockedBy: ["xuznx3v"]
-scope: ["we:scripts/conveyor/health-responder-capacity.mjs", "we:scripts/conveyor/__tests__/health-responder-capacity.test.mjs", "we:scripts/conveyor/health-smells/capacity-hold.mjs", "we:scripts/conveyor/health-smells/__tests__/capacity-hold.test.mjs", "we:scripts/conveyor/health-watch.mjs"]
+scope: ["we:scripts/conveyor/health-responder-capacity.mjs", "we:scripts/conveyor/__tests__/health-responder-capacity.test.mjs", "we:scripts/conveyor/health-smells/capacity-hold.mjs", "we:scripts/conveyor/health-smells/__tests__/capacity-hold.test.mjs", "we:scripts/conveyor/health-watch.mjs", "we:scripts/conveyor/__tests__/health-watch.test.mjs"]
 dateOpened: "2026-10-02"
 tags: []
 ---

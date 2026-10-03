@@ -4,7 +4,7 @@ size: 5
 parent: "xdmqryh"
 status: open
 blockedBy: ["xuznx3v"]
-scope: ["we:scripts/conveyor/health-responder-rootcause.mjs", "we:scripts/conveyor/__tests__/health-responder-rootcause.test.mjs", "we:scripts/conveyor/health-investigate-dispatch.mjs"]
+scope: ["we:scripts/conveyor/health-responder-rootcause.mjs", "we:scripts/conveyor/__tests__/health-responder-rootcause.test.mjs", "we:scripts/conveyor/health-investigate-dispatch.mjs", "we:scripts/conveyor/__tests__/health-investigate-dispatch.test.mjs"]
 dateOpened: "2026-10-02"
 tags: []
 ---

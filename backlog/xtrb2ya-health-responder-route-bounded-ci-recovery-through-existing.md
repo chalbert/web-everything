@@ -4,7 +4,7 @@ size: 8
 parent: "xdmqryh"
 status: open
 blockedBy: ["xuznx3v"]
-scope: ["we:scripts/operations/health-responder-ci.mjs", "we:scripts/operations/__tests__/health-responder-ci.test.mjs", "we:scripts/conveyor/health-responder.mjs", "we:scripts/operations/ci-heal-pr-dispatch.mjs", "we:scripts/operations/__tests__/ci-heal-pr-dispatch.test.mjs", "we:scripts/conveyor/ci-red-recovery-watch.mjs", "we:scripts/conveyor/__tests__/ci-red-recovery-watch.test.mjs", "we:scripts/conveyor/__tests__/fixtures/health-responder/ci-routing.json", "we:scripts/conveyor/__tests__/ci-heal-mark.test.mjs"]
+scope: ["we:scripts/operations/health-responder-ci.mjs", "we:scripts/operations/__tests__/health-responder-ci.test.mjs", "we:scripts/conveyor/health-responder.mjs", "we:scripts/conveyor/__tests__/health-responder.test.mjs", "we:scripts/operations/ci-heal-pr-dispatch.mjs", "we:scripts/operations/__tests__/ci-heal-pr-dispatch.test.mjs", "we:scripts/conveyor/ci-red-recovery-watch.mjs", "we:scripts/conveyor/__tests__/ci-red-recovery-watch.test.mjs", "we:scripts/conveyor/__tests__/fixtures/health-responder/ci-routing.json", "we:scripts/conveyor/__tests__/ci-heal-mark.test.mjs"]
 dateOpened: "2026-10-02"
 preparedDate: "2026-10-02"
 tags: [conveyor, health]

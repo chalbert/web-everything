@@ -4,7 +4,7 @@ size: 8
 parent: "xdmqryh"
 status: open
 blockedBy: ["xuznx3v"]
-scope: ["we:scripts/operations/health-responder-lanes.mjs", "we:scripts/operations/__tests__/health-responder-lanes.test.mjs", "we:scripts/conveyor/health-responder.mjs", "we:scripts/conveyor/health-smells/stranded-lane.mjs", "we:scripts/conveyor/health-smells/__tests__/stranded-lane.test.mjs", "we:scripts/conveyor/health-watch.mjs", "we:scripts/conveyor/__tests__/health-watch.test.mjs", "we:scripts/conveyor/lease-reaper.mjs", "we:scripts/conveyor/__tests__/lease-reaper.test.mjs", "we:scripts/lane-pool.mjs", "we:scripts/__tests__/lane-pool-release-reap-race.test.mjs", "we:scripts/conveyor/orphan-claim-release.mjs", "we:scripts/conveyor/__tests__/orphan-claim-release.test.mjs", "we:scripts/conveyor/__tests__/fixtures/health-responder/lane-claims.json"]
+scope: ["we:scripts/operations/health-responder-lanes.mjs", "we:scripts/operations/__tests__/health-responder-lanes.test.mjs", "we:scripts/conveyor/health-responder.mjs", "we:scripts/conveyor/__tests__/health-responder.test.mjs", "we:scripts/conveyor/health-smells/stranded-lane.mjs", "we:scripts/conveyor/health-smells/__tests__/stranded-lane.test.mjs", "we:scripts/conveyor/health-watch.mjs", "we:scripts/conveyor/__tests__/health-watch.test.mjs", "we:scripts/conveyor/lease-reaper.mjs", "we:scripts/conveyor/__tests__/lease-reaper.test.mjs", "we:scripts/lane-pool.mjs", "we:scripts/__tests__/lane-pool-release-reap-race.test.mjs", "we:scripts/conveyor/orphan-claim-release.mjs", "we:scripts/conveyor/__tests__/orphan-claim-release.test.mjs", "we:scripts/conveyor/__tests__/fixtures/health-responder/lane-claims.json"]
 dateOpened: "2026-10-02"
 preparedDate: "2026-10-02"
 tags: [conveyor, health]

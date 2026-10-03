@@ -4,7 +4,7 @@ size: 8
 parent: "xdmqryh"
 status: open
 blockedBy: ["xuznx3v"]
-scope: ["we:scripts/operations/health-responder-pr.mjs", "we:scripts/operations/__tests__/health-responder-pr.test.mjs", "we:scripts/conveyor/health-responder.mjs", "we:scripts/conveyor/health-watch.mjs", "we:scripts/conveyor/__tests__/health-watch.test.mjs", "we:scripts/conveyor/health-smells/pr-no-owner.mjs", "we:scripts/conveyor/health-smells/__tests__/pr-no-owner.test.mjs", "we:scripts/review-set-label.mjs", "we:scripts/__tests__/review-set-label.test.mjs", "we:scripts/operations/promote-draft-pr-dispatch.mjs", "we:scripts/operations/__tests__/promote-draft-pr-dispatch.test.mjs", "we:scripts/conveyor/__tests__/rearm-review.test.mjs", "we:scripts/conveyor/__tests__/fixtures/health-responder/pr-routing.json"]
+scope: ["we:scripts/operations/health-responder-pr.mjs", "we:scripts/operations/__tests__/health-responder-pr.test.mjs", "we:scripts/conveyor/health-responder.mjs", "we:scripts/conveyor/__tests__/health-responder.test.mjs", "we:scripts/conveyor/health-watch.mjs", "we:scripts/conveyor/__tests__/health-watch.test.mjs", "we:scripts/conveyor/health-smells/pr-no-owner.mjs", "we:scripts/conveyor/health-smells/__tests__/pr-no-owner.test.mjs", "we:scripts/review-set-label.mjs", "we:scripts/__tests__/review-set-label.test.mjs", "we:scripts/operations/promote-draft-pr-dispatch.mjs", "we:scripts/operations/__tests__/promote-draft-pr-dispatch.test.mjs", "we:scripts/conveyor/__tests__/rearm-review.test.mjs", "we:scripts/conveyor/__tests__/fixtures/health-responder/pr-routing.json"]
 dateOpened: "2026-10-02"
 preparedDate: "2026-10-02"
 tags: [conveyor, health]
