@@ -1,5 +1,5 @@
 /**
- * @file breaks/ci-heal-empty-scope.mjs — live break 3, 2026-09-25 (#4075, card x9gnyt9). The fix-dispatch
+ * @file breaks/ci-heal-empty-scope.mjs — live break 3, 2026-09-25 (#4075, card 4146). The fix-dispatch
  * daemon's ci-heal pass (`we:scripts/operations/ci-heal-pr-dispatch.mjs#dispatchCiHeal`) required its brief's
  * `SCOPE` placeholder to be non-blank. `runReconcileCiHealDispatch` builds `planned.scope` straight from
  * `resolvePrWorkUnit` (`we:scripts/conveyor/pr-work-unit.mjs`) with NO pre-dispatch gate (unlike the sibling
@@ -11,7 +11,7 @@
  * `dispatch-failed` refusal, reported every tick, and the PR's ci-heal never dispatched — CI stayed red
  * forever, once per tick, until a human noticed. Live incident: PRs #2653/#2636/#2635.
  *
- * Fix: a6cbfced4 (card x9gnyt9, merged via PR #2666) — `scripts/operations/ci-heal-pr-dispatch.mjs`'s
+ * Fix: a6cbfced4 (card 4146, merged via PR #2666) — `scripts/operations/ci-heal-pr-dispatch.mjs`'s
  * `dispatchCiHeal` moves `SCOPE` from `BRIEF_REQUIRED_BY_KIND['ci-heal']`'s implicit required set into the
  * `fillBrief` call's OPTIONAL placeholder list, so a blank scope degrades to an honestly UNFENCED heal
  * (`SCOPE: ''`) instead of throwing — the diff-derived scope upstream still supplies a real fence whenever
@@ -51,7 +51,7 @@ const FAULT_TIMES = 400;
 export default {
   id: 'ci-heal-empty-scope',
   title: "ci-heal dispatch throws (and never dispatches) on an item-less PR whose diff-derived scope also comes back empty",
-  card: 'we:backlog/x9gnyt9-ci-heal-dispatch-throws-on-empty-scope-instead-of-degrading.md (epic #4075)',
+  card: 'we:backlog/4146-ci-heal-dispatch-throws-on-empty-scope-instead-of-degrading.md (epic #4075)',
   fixedBy: { sha: 'a6cbfced4', where: 'main', paths: ['scripts/operations/ci-heal-pr-dispatch.mjs'] },
   fixPresent(root) {
     try {

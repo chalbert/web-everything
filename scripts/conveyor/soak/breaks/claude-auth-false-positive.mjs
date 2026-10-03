@@ -1,6 +1,6 @@
 /**
  * @file breaks/claude-auth-false-positive.mjs — the false-positive twin of `claude-auth-expired.mjs` (PR #2717
- * review, card we:backlog/xbsmmwu). The first cut of `we:scripts/conveyor/hung-session.mjs
+ * review, card we:backlog/4205). The first cut of `we:scripts/conveyor/hung-session.mjs
  * #classifyClaudeAuthExpired` matched free text (`401 … Unauthorized`, `authentication_failed`, the CLI's own
  * login phrase) in ANY newest assistant turn. A healthy session working this repo's own GitHub-auth code writes
  * exactly that prose — and the axis fires instantly, so `reconcile-core.mjs#assessLiveness` dropped the live
@@ -31,9 +31,9 @@ const STEADY_STATE_SESSIONS = 2;
 export default {
   id: 'claude-auth-false-positive',
   title: 'a healthy ci-heal session narrating a 401 / quoting the login-expired phrase is read as auth-expired; the daemon dispatches a duplicate',
-  card: 'we:backlog/xbsmmwu-claude-auth-expired-session-detection-reaper-reconcile-liven.md (PR #2717 review)',
+  card: 'we:backlog/4205-claude-auth-expired-session-detection-reaper-reconcile-liven.md (PR #2717 review)',
   fixedBy: {
-    sha: 'this same PR', where: 'this same PR (card we:backlog/xbsmmwu)',
+    sha: 'this same PR', where: 'this same PR (card we:backlog/4205)',
     paths: ['scripts/conveyor/hung-session.mjs'],
   },
   fixPresent(root) {

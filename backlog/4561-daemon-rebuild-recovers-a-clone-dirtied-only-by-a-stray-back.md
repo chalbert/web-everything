@@ -3,9 +3,11 @@ bornAs: xnxjxq6
 kind: story
 size: 2
 tier: pinned
-status: open
+status: resolved
 scope: ["we:scripts/lib/daemon-rebuild.mjs", "we:scripts/lib/__tests__/daemon-rebuild.test.mjs"]
 dateOpened: "2026-09-29"
+dateStarted: "2026-10-03"
+dateResolved: "2026-10-03"
 preparedDate: "2026-10-03"
 preparedAgainstSha: "e1f0523e0881357fc863f3e88da72e0164eb7091"
 tags: []
@@ -16,6 +18,17 @@ tags: []
 2026-09-29: the build daemon clone was dirtied by a stray backlog frontmatter edit (status: open→active + dateStarted on we:backlog/3809-*.md, written by a misdirected worker run). we:scripts/lib/daemon-rebuild.mjs refuses a dirty clone unless every dirty path is a known DAEMON_STATE_FILES entry, so every overlay and rebuild stopped until a human restored the file (the guard correctly blocks agents from writing to the clone). MVP: treat a dirty path under we:backlog/ whose diff is ONLY claim-stamp frontmatter keys (status, dateStarted, claimedBy-style fields) as recoverable: log it loudly (alert + the diff), restore the tracked copy, and continue; anything else stays a hard refuse. Test: claim-stamp-only diff → restored + alert; any body/other-key change → refused. Proof: replay the 2026-09-29 diff.
 
 ## Progress
+
+- After regression proof: `npx vitest run daemon-rebuild.test -t "stray backlog claim stamp"` passed all 19 selected cases (8.14 seconds).
+
+- Final wider validation: `npm run check:standards` passed (0 errors). `node we:scripts/verify-lane.mjs` selected 18 targets plus transitive tests: 220 files / 10,261 tests passed, 8 skipped; six tests failed in we:scripts/operations/__tests__/clear-stuck-session-io-real.test.mjs and we:scripts/operations/__tests__/restart-runner-io-real.test.mjs. These tests require the real process table; a direct `/bin/ps -p $$ -o pid=,ppid=,command=` probe returned exit 126, “Operation not permitted”, under this session's sandbox. The gate remains red; no tests, gate, or sandbox controls were weakened. Both full runs of the scoped rebuild suite passed.
+
+- Validation: full we:scripts/lib/__tests__/daemon-rebuild.test.mjs passed, 120/120 tests (including all 19 new cases), in 200.16 seconds.
+
+- 2026-10-03 implementation: added the import-light claim comparator and all-path preflight/restoration in we:scripts/lib/daemon-rebuild.mjs, before the existing state carry. Recovery emits the original diff through the existing log/JSONL alert path. Non-claim dirt still refuses; read/race/diff/checkout failures fail closed with specific reasons.
+- Before regression proof: the requested targeted Vitest command against we:scripts/lib/__tests__/daemon-rebuild.test.mjs produced 3 failures (active, preparing, mixed scorecard recovery) and 4 passing refusal cases before the runtime change.
+- Before/after replay: used disposable local shared clones of this checkout's main snapshot as origin, isolated state/lock/overlay directories, and the real rebuild entry point with injected passing smoke. On we:backlog/089-monetization-product-ideas.md, replayed exactly `status: open` → `status: active` plus `dateStarted: "2026-09-29"`. Before: safety and rebuild both returned `dirty`, no restore alert, card remained modified. After: safety initially returned `dirty`, rebuild emitted `backlog-claim-stamp-restored` with both added lines in its diff, returned `up-to-date`, and porcelain status was empty. Both scratch clones were deleted; no live daemon clone was touched. The advancing-origin fixture separately proves movement to origin/main.
+- Regression/soak coverage in we:scripts/lib/__tests__/daemon-rebuild.test.mjs includes LF/CRLF comparison, body/other-key/non-claim/extra-file refusals, mixed scorecard carry, all-card preflight, unreadable HEAD/file, concurrent writes, failed diff/checkout, and rename/delete/conflict refusals. Each successful claim target gets three additional rebuild ticks checking clean status and no duplicate restoration alert.
 
 - Old scope: claim-stamp keys = "status, dateStarted, claimedBy-style fields". Corrected: `claim` writes ONLY `status` + `dateStarted` (`we:scripts/backlog/frontmatter.mjs:225` (applyTransition, claim branch)); no `claimedBy` field exists. The same two-key fact is already relied on at `we:scripts/operations/probation-build-run.mjs:113` (BUILD_OWNED_FRONTMATTER_KEYS). So the allowed keys are exactly `status` and `dateStarted`.
 - Old scope: only `we:scripts/lib/daemon-rebuild.mjs`. Corrected: add the test file `we:scripts/lib/__tests__/daemon-rebuild.test.mjs`.
@@ -77,5 +90,8 @@ No live dirty clone exists now (the 3809 file was hand-restored; 3809 is `resolv
 
 ## Follow-ups
 
+- Rerun `node we:scripts/verify-lane.mjs` where the OS permits process-table reads; the six real-process failures above cannot be repaired by this scoped daemon-recovery change.
+- Test-harness lesson: the daemon logger is an object with an `error` method, not a callable function; restoration tests assert both this method and the persisted JSONL alert.
+
 - A claim that also RENAMES the card file (porcelain `R`/`D` + untracked) is out of scope; it still refuses. File only if seen live.
-- The root cause (a worker writing into its run checkout) is its own card, filed with this one in `a684ab19d` (xak56ki).
+- The root cause (a worker writing into its run checkout) is its own card, filed with this one in `a684ab19d` (4560).

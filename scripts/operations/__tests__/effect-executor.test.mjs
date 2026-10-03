@@ -27,6 +27,8 @@ import { pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { createRegistry, op } from '../registry.mjs';
 import { driveRun, outcomePayload, renderOutcome, runOperationCli } from '../cli-adapter.mjs';
+import { openPrOperation } from '../open-pr.mjs';
+import { createOpenPrSinks } from '../open-pr-io.mjs';
 import { effect } from '../step-kinds.mjs';
 import { FIXTURE_JUDGE_ANSWER, FIXTURE_OP, fixtureRegistry } from '../__fixtures__/fixture-operation.mjs';
 
@@ -1127,5 +1129,63 @@ describe('#4649 cross-process settlement ordering', () => {
       expect(outcome.inFlight).toEqual([]);
       if (status === 'failed') expect(outcome.error?.message).toBe('child preflight refusal');
     } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+});
+
+describe('#4386 real open-pr outcome rendering', () => {
+  async function submit(result) {
+    const declaration = openPrOperation({ parkLabels: ['review:pending'] });
+    const registry = createRegistry();
+    registry.register(declaration);
+    const store = createMemoryRunStore();
+    const run = startRun({ op: 'open-pr', id: 'proof-4386', registry,
+      input: { ref: 'lane/proof-4386', bodyFile: '/unused/body', mode: 'no-wait' } });
+    store.write(run);
+    return driveRun({ run, registry, store, sinks: createOpenPrSinks({ run: () => result }) });
+  }
+
+  it('reports refused with exit 1 through the real declaration; JSON retains its payload and exit 0', async () => {
+    const result = { outcome: 'refused', reason: 'empty-body' };
+    const outcome = await submit(result);
+    expect(outcome.stopped).toBe('complete');
+    expect(outcome.run.findings.submit.effects[0].result).toEqual(result);
+    const rendered = renderOutcome({ outcome });
+    expect(rendered.lines.join('\n')).toContain('REFUSED (empty-body)');
+    expect(rendered.lines.join('\n')).not.toContain('complete. 1 effect(s) applied');
+    expect(rendered.code).toBe(1);
+    const json = renderOutcome({ outcome, json: true });
+    expect(json.code).toBe(0);
+    expect(JSON.parse(json.lines[0])).toEqual(outcomePayload(outcome));
+  });
+
+  it('reports opened and dry runs successfully', async () => {
+    for (const [result, line] of [
+      [{ outcome: 'opened', pr: 123, url: 'https://example.test/123' }, 'opened #123'],
+      [{ outcome: 'unrun', reason: 'dry-run' }, 'dry run — nothing opened'],
+    ]) {
+      const rendered = renderOutcome({ outcome: await submit(result) });
+      expect(rendered.code).toBe(0);
+      expect(rendered.lines.join('\n')).toContain(line);
+    }
+  });
+
+  it('retains the generic headline for other operations', async () => {
+    const store = createMemoryRunStore();
+    const run = atEffectStep();
+    store.write(run);
+    const outcome = await driveRun({ run, registry, store, sinks: recordingSinks().sinks });
+    expect(outcome.stopped).toBe('complete');
+    expect(renderOutcome({ outcome })).toMatchObject({ code: 0,
+      lines: expect.arrayContaining([`run ${run.id} — complete. 2 effect(s) applied.`]) });
+  });
+
+  it('carries push-failed detail through the sink and HALTED renderer', async () => {
+    const detail = 'the lane HEAD is not the tip of lane/proof-4386 — acquire --base=<tip>';
+    const outcome = await submit({ outcome: 'unrun', reason: 'push-failed', detail });
+    expect(outcome.stopped).toBe('effect-halted');
+    const rendered = renderOutcome({ outcome });
+    expect(rendered.code).toBe(1);
+    expect(rendered.lines.join('\n')).toMatch(/HALTED/);
+    expect(rendered.lines.join('\n')).toContain(detail);
   });
 });

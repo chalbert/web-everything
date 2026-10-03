@@ -17,7 +17,7 @@
  * `fix-<pr>` session is trusted directly off the PR list with NO corroboration at all — this bug cannot
  * manifest there. So this scenario deliberately mirrors its soak sibling
  * `unrecognized-session-lease-outlives-merged-pr.mjs`'s session shape (an unrecognized, ad-hoc label), the
- * SAME real population #4311/#xkk4lv7 introduced this corroboration path for — this card's fix hardens that
+ * SAME real population #4311/#4311 introduced this corroboration path for — this card's fix hardens that
  * SAME path's containment check, not a new one.
  *
  * FIX (#4337): after `cherry` reads "contained", veto on any merge commit reachable from HEAD but not from
@@ -30,7 +30,7 @@
  * pool named `web-everything`, a fake `gh` answering `pr list`, a fake `claude` that exits 1 (session axis OFF
  * — this break needs only the PR-terminal / branch-fallback axis):
  *   - **lane-1 (the incident)**: session `build-9301` (an ad-hoc mechanical-pass label matching NEITHER
- *     dispatcher namespace — the same shape #4311/#xkk4lv7's own live incident used), branch
+ *     dispatcher namespace — the same shape #4311/#4311's own live incident used), branch
  *     `lane/9301-lease-merge-blindspot`. HEAD is a real `--no-ff` merge commit carrying unique
  *     conflict-resolution content (an extra file committed alongside the merge, beyond the trivial union of
  *     its two parents — the same fixture shape as the unit-level regression in this PR's own

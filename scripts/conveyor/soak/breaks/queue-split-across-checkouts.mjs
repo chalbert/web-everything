@@ -44,7 +44,7 @@ function makeCheckout(sourceRoot, dir) {
 export default {
   id: 'queue-split-across-checkouts',
   title: 'work cleared from the operator\'s checkout is invisible to a daemon running from its own clone (the queue lived inside each checkout)',
-  card: 'we:backlog/xyu6qhc (decouple-primary-checkout, epic #4075)',
+  card: 'we:backlog/4288 (decouple-primary-checkout, epic #4075)',
   fixedBy: { sha: '1ae879a7e', where: 'lane/decouple-primary-checkout', paths: ['scripts/conveyor/queue-store.mjs', 'scripts/lib/automation-home.mjs'] },
   fixPresent(root) {
     const p = join(root, 'scripts/conveyor/queue-store.mjs');

@@ -1,5 +1,5 @@
 /**
- * @file breaks/build-daemon-self-count-inflation.mjs — card x0jgunh (epic #4075). The build-dispatch daemon read
+ * @file breaks/build-daemon-self-count-inflation.mjs — card 4342 (epic #4075). The build-dispatch daemon read
  * tick-core's `counts.building` as "builds already in flight" — but that count also includes the guards
  * tick-core just created for THIS SAME TICK's own proposed spawns (`newBuildGuards`, folded into
  * `liveBuildGuards` before `counts` is derived). So whenever tick-core proposed N builds at or above the
@@ -12,7 +12,7 @@
  * nothing", each of the 7 launchable candidates held `[cap] 7 builds in flight (cap 3)` — the tick's own 7
  * proposals, double-counted as both the candidates AND the reason there was no room for them.
  *
- * Fix (card x0jgunh): tick-core also emits `counts.buildingInFlight` — the SAME tally, but derived from build
+ * Fix (card 4342): tick-core also emits `counts.buildingInFlight` — the SAME tally, but derived from build
  * guards live BEFORE this tick's own spawns (plus leased build lanes), never this tick's own candidates. The
  * daemon reads `counts.buildingInFlight ?? counts.building` for its cap math, so it counts real in-flight work,
  * not its own proposals.
@@ -58,8 +58,8 @@ function fakeTick() {
 export default {
   id: 'build-daemon-self-count-inflation',
   title: 'the build-dispatch daemon counted its own just-proposed spawns as already-in-flight builds, so its cap held every candidate forever',
-  card: 'we:backlog/x0jgunh (epic #4075)',
-  fixedBy: { sha: 'e32c19ac2', where: 'lane/x0jgunh-build-dispatch-inflight-count', paths: ['scripts/conveyor/tick-core.mjs', 'skills-src/conveyor/build-dispatch-daemon.mjs'] },
+  card: 'we:backlog/4342 (epic #4075)',
+  fixedBy: { sha: 'e32c19ac2', where: 'lane/4342-build-dispatch-inflight-count', paths: ['scripts/conveyor/tick-core.mjs', 'skills-src/conveyor/build-dispatch-daemon.mjs'] },
   fixPresent(root) {
     const p = join(root, 'skills-src/conveyor/build-dispatch-daemon.mjs');
     return existsSync(p) && /buildingInFlight/.test(readFileSync(p, 'utf8'));

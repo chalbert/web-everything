@@ -1,4 +1,4 @@
-import { normalizeFinding, referralFindingKey, mandatoryReferralReviewer, validateReferralRecord,
+import { normalizeFinding, referralRecordState, referralFindingKey, mandatoryReferralReviewer, validateReferralRecord,
   readReferralRecords, mandatoryReferralState, renderReferralRecord,
   activeReferrals, REFERRAL_SEAT_PROVIDERS, REFERRAL_DROP_REASON } from '../lib/jury-core.mjs';
 import { judgeSpawn } from '../lib/judge-spawn.mjs';
@@ -613,7 +613,7 @@ export function createReviewPrSinks({
             }
           }
         }
-        const sources = [...payload.referrals, ...prior.records.flatMap(activeReferrals)];
+        const sources = [...payload.referrals, ...prior.records.filter(r => r.repo === read.repo && r.pr === read.pr).flatMap(activeReferrals)];
         const additions = new Map();
         for (const f of sources) {
           const key = referralFindingKey(f.seat, f.original);
@@ -665,7 +665,8 @@ export function createReviewPrSinks({
         }
         // Persist the attempt before dispatch. A crash or timeout spends this set's single automated attempt.
         for (const initial of existing) {
-          if (initial.attempted || !activeReferrals(initial).length) continue;
+          if (initial.attempted || !activeReferrals(initial).length || !referralRecordState(initial, { ...context(state),
+            records: readReferralRecords(state.comments, context(state)).records }).pending.length) continue;
           let record = { ...initial, attempted: true };
           state = persist(record);
           // Hold before dispatch too: an exhausted or interrupted worker must leave a visible owner.

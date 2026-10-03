@@ -20,7 +20,7 @@ A review-seat provider whose recent calls keep erroring still gets dispatched ev
 
 ## Progress
 
-- Premise check (2026-10-02, `main` @ 007f69ee0): not delivered. `git log` shows only the JIT-number commit for `x0tjpbx`; `selectReviewSeatProvider` (`we:scripts/lib/provider-routing.mjs:1221`) still only sorts by `recentFailure` (last row not `ok`, `:1242`) and never excludes a provider. Citations in the card hold; scope (`we:scripts/lib/provider-routing.mjs`, `we:scripts/operations/review-extra-seats.mjs`) is right, plus the sibling caller `we:scripts/operations/review-dispatch.mjs:247` which must pass `now`. Sibling #4516 (agy-claude `--effort` argv bug) is the concrete trigger, tracked separately.
+- Premise check (2026-10-02, `main` @ 007f69ee0): not delivered. `git log` shows only the JIT-number commit for `4515`; `selectReviewSeatProvider` (`we:scripts/lib/provider-routing.mjs:1221`) still only sorts by `recentFailure` (last row not `ok`, `:1242`) and never excludes a provider. Citations in the card hold; scope (`we:scripts/lib/provider-routing.mjs`, `we:scripts/operations/review-extra-seats.mjs`) is right, plus the sibling caller `we:scripts/operations/review-dispatch.mjs:247` which must pass `now`. Sibling #4516 (agy-claude `--effort` argv bug) is the concrete trigger, tracked separately.
 
 ## Design
 
