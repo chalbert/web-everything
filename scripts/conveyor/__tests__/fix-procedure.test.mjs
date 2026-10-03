@@ -33,9 +33,10 @@ import {
 } from '../stand-down.mjs';
 import { planReconcile, countUnresolvedStandDowns, CONCURRENT_AUTHOR_QUIET_MS } from '../reconcile-core.mjs';
 import { enrichPrsWithFixClaims } from '../reconcile-pass.mjs';
-import { deriveReviewStatus } from '../review-status-tag.mjs';
+import { deriveReviewStatus, tagReviewStatus, applyReviewStatus } from '../review-status-tag.mjs';
 import { dispatchFix } from '../reconcile-fix-dispatch.mjs';
 import { dispatchCiHeal } from '../../operations/ci-heal-pr-dispatch.mjs';
+import { runReconcilePromoteDraftDispatch } from '../../operations/promote-draft-pr-dispatch.mjs';
 import { DISPATCH_EFFECT } from '../../operations/dispatch-lane.mjs';
 import { reason as guardReason, decide as guardDecide, computeFixClaimCtx } from '../../guard-bash.mjs';
 import { execFileSync } from 'node:child_process';
@@ -824,4 +825,72 @@ describe('the CLI and its documented invocations name the repo', () => {
     walk(join(WE, 'skills-src'));
     expect(offenders).toEqual([]);
   });
+});
+
+
+it('xul2kwr synthetic #3432 soak: withdrawal survives expiry and stale plans until fix-end', async () => {
+  const repo = 'chalbert/web-everything';
+  const held = 'review-status:draft-withdrawn';
+  let nowMs = T0;
+  const pr = { number: 3432, state: 'OPEN', isDraft: true, headRefName: BRANCH,
+    headRefOid: 'a'.repeat(40), labels: [], comments: [], mergeStateStatus: 'CLEAN',
+    statusCheckRollup: [{ name: 'gate', status: 'completed', conclusion: 'success' }] };
+  const effects = [];
+  const labels = {
+    readLabels: () => pr.labels,
+    ensureLabel: () => {}, postComment: () => {},
+    setLabels: (_repo, _pr, { add, remove = [] }) => {
+      pr.labels = pr.labels.filter(l => !remove.includes(l));
+      if (add && !pr.labels.includes(add)) pr.labels.push(add);
+    },
+  };
+  const gh = async args => {
+    if (args[1] === 'view') return JSON.stringify(pr);
+    throw new Error('unexpected gh write');
+  };
+  const readClaim = o => readLiveFixClaim({ ...o, lockRoot: root, nowMs });
+  const plan = () => planReconcile({
+    prs: enrichPrsWithFixClaims([pr], { repo: 'we', readClaim }), agents: [], now: nowMs,
+  });
+  const stale = plan();
+  expect(stale.dispatch.map(d => d.kind)).toEqual(['promote-draft']);
+  const begin = await fixBegin({ repo: 'we', pr: 3432, who: 'fix-3432', sessionId: 'synthetic',
+    draft: true, reason: 'withdrawn', gh, labels, lockRoot: root, nowMs });
+  expect(begin.ok).toBe(true);
+  expect(pr.labels).toContain(held);
+  expect(plan().refusals[0].kind).toBe('fix-claimed');
+  const execute = snapshot => runReconcilePromoteDraftDispatch({
+    root: '/repo', checkStaleness: () => ({ fresh: true, behind: 0 }),
+    reconcile: () => snapshot,
+    readHeadCheckState: () => ({ state: 'green' }), readPrLabels: () => pr.labels,
+    provider: { ready: n => { effects.push(['ready', n]); pr.isDraft = false; } },
+    clearAwaitingCi: args => { effects.push(['clear', args.pr]); applyReviewStatus({ ...args, provider: labels }); },
+  });
+  expect(execute(stale).refusals[0].kind).toBe('draft-withdrawn');
+  const trace = [];
+  for (let tick = 0; tick < 20; tick++) {
+    nowMs = T0 + (DEFAULT_FIX_CLAIM_TTL_MINUTES + 1 + tick) * MIN;
+    expect(readClaim({ repo: 'we', pr: 3432 })).toBeNull();
+    tagReviewStatus({ pr: 3432, repo, provider: labels, agents: [], isDraft: pr.isDraft, readFixClaim: readClaim });
+    applyReviewStatus({ pr: 3432, repo, provider: labels, state: tick % 2 ? null : 'reviewing' });
+    const planned = plan();
+    expect(planned.dispatch).toEqual([]);
+    expect(planned.refusals[0]).toMatchObject({ kind: 'draft', why: expect.stringContaining('withdrawn') });
+    expect(execute(planned).dispatched).toEqual([]);
+    expect(execute(stale).refusals[0].kind).toBe('draft-withdrawn');
+    expect(pr.labels).toEqual([held]);
+    expect(pr.isDraft).toBe(true);
+    expect(effects).toEqual([]);
+    trace.push({ tick, draft: pr.isDraft, labels: [...pr.labels], planned: [], refusal: 'draft', executor: 'draft-withdrawn' });
+  }
+  expect(await fixEnd({ repo: 'we', pr: 3432, who: 'fix-3432', sessionId: 'synthetic', gh, labels, lockRoot: root }))
+    .toMatchObject({ ok: true, reason: 'withdrawn' });
+  expect(pr.labels).not.toContain(held);
+  tagReviewStatus({ pr: 3432, repo, provider: labels, agents: [], isDraft: true, readFixClaim: readClaim });
+  expect(pr.labels).toEqual(['review-status:awaiting-ci']);
+  expect(execute(plan()).dispatched).toEqual([{ pr: 3432, kind: 'promote-draft' }]);
+  expect(effects).toEqual([['ready', 3432], ['clear', 3432]]);
+  expect(pr.isDraft).toBe(false);
+  expect(pr.labels).toEqual([]);
+  console.info('xul2kwr synthetic replay', JSON.stringify({ ticks: trace.length, first: trace[0], last: trace.at(-1), effectsAfterRelease: effects }));
 });

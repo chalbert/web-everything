@@ -3,9 +3,8 @@
  * @file scripts/conveyor/review-status-tag.mjs
  * @description Tag a PR with an INFORMATIVE `review-status:<state>` label — "is a reviewer or a fixer
  *   currently working this PR right now, and is it actually making progress or stuck" — derived from live
- *   `claude agents --json` truth, never a second source of truth. Purely cosmetic, same contract as its
- *   sibling `we:scripts/conveyor/review-round-tag.mjs`: nothing reads this label back to decide anything, so a
- *   missed or failed tag write never breaks the mechanism — only the human-visible hint goes briefly stale.
+ *   `claude agents --json` truth. Exception: an existing `review-status:draft-withdrawn` is a durable
+ *   operator hold, read by promotion guards. Automatic writers preserve that label until explicit release.
  *
  * WHY THIS EXISTS (the operator, 2026-09-01): "expose if a reviewing is currently reviewing and if a fixer is
  * currently fixing... an understand if the agent crash it might hang, but better visibility on what is
@@ -157,13 +156,15 @@ export function deriveReviewStatus({ pr, agents = [], repo = 'we', isDraft = fal
 
 /**
  * PURE: what to add/remove so `currentLabels` shows EXACTLY the derived status label, or NO `review-status:*`
- * label at all when nothing is live (never a fabricated "idle" label spammed onto every quiet PR).
+ * label at all when nothing is live, except an existing withdrawal hold, which takes precedence.
  * @param {{status:{state:string}|null, currentLabels?:Array<{name?:string}|string>}} o
  * @returns {{add:string|null, remove:string[]}}
  */
 export function planStatusLabelChange({ status, currentLabels = [] } = {}) {
   const names = currentLabels.map((l) => (typeof l === 'string' ? l : l?.name)).filter(Boolean);
-  const desired = status ? `review-status:${status.state}` : null;
+  // Withdrawal is an explicit hold; expiry and automatic status changes cannot release it.
+  const desired = names.includes('review-status:draft-withdrawn')
+    ? 'review-status:draft-withdrawn' : status ? `review-status:${status.state}` : null;
   const stale = names.filter((n) => STATUS_LABEL_RE.test(n) && n !== desired);
   const alreadyCorrect = (desired ? names.includes(desired) : true) && stale.length === 0;
   return { add: alreadyCorrect ? null : desired, remove: stale };
@@ -212,7 +213,8 @@ export function tagReviewStatus({
   const currentLabels = suppliedLabels ?? provider.readLabels(repo, pr);
   const plan = planStatusLabelChange({ status, currentLabels });
   if (!plan.add && plan.remove.length === 0) {
-    return { changed: false, label: status ? `review-status:${status.state}` : null, removed: [] };
+    return { changed: false, label: currentLabels.some(l => (typeof l === 'string' ? l : l?.name) === 'review-status:draft-withdrawn')
+      ? 'review-status:draft-withdrawn' : status ? `review-status:${status.state}` : null, removed: [] };
   }
   // `review-status:*` is a small fixed enum, but a repo that has never carried one yet still needs it created
   // before `gh pr edit --add-label` will accept it — same reasoning as `review-round-tag.mjs`'s own ensure.
@@ -253,7 +255,8 @@ export function applyReviewStatus({ pr, repo, state, provider = createGhProvider
   const currentLabels = suppliedLabels ?? provider.readLabels(repo, pr);
   const plan = planStatusLabelChange({ status: state ? { state } : null, currentLabels });
   if (!plan.add && plan.remove.length === 0) {
-    return { changed: false, label: state ? `review-status:${state}` : null, removed: [] };
+    return { changed: false, label: currentLabels.some(l => (typeof l === 'string' ? l : l?.name) === 'review-status:draft-withdrawn')
+      ? 'review-status:draft-withdrawn' : state ? `review-status:${state}` : null, removed: [] };
   }
   if (plan.add) provider.ensureLabel(repo, plan.add, { color: 'c5def5', description: 'informative: a reviewer/fixer is currently working this PR, or stuck (auto-managed)' });
   provider.setLabels(repo, pr, { add: plan.add ?? undefined, remove: plan.remove });
