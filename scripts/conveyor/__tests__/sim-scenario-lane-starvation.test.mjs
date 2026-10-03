@@ -30,6 +30,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { scenario, runScenario } from './sim/scenario.mjs';
+import { FALLBACK_REQUIRED_STATUS_CHECKS } from '../../lib/required-status-checks.mjs';
 
 const PR_COUNT = 5;
 const LANE_COUNT = 2;
@@ -56,6 +57,9 @@ function def() {
         const pr = w.gh.openPr({
           repo: 'we', head: branch, base: 'main', title: `lane starvation fixture ${i}`, labels: ['review:pending'],
         });
+        // A PR owes a review only once every required check succeeded on its head (review CI gate).
+        w.gh.setRequiredChecks('we', FALLBACK_REQUIRED_STATUS_CHECKS);
+        w.gh.setChecks('we', pr, FALLBACK_REQUIRED_STATUS_CHECKS.map((name) => ({ name, conclusion: 'SUCCESS' })));
         prNumbers.push(pr);
       }
 
