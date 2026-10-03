@@ -33,4 +33,14 @@ describe('strict review CI prerequisite', () => {
   it('never exempts an explicitly required review-gate', () => {
     expect(reviewCiGate({ headSha, requiredChecks: ['review-gate'], checks: [{ name: 'review-gate', status: 'completed', conclusion: 'failure' }] })).toMatchObject({ allowed: false, reason: 'required-review-gate-conflict' });
   });
+  it('admits successful required commit statuses', () => {
+    for (const row of [{ context: 'legacy', state: 'success' }, { __typename: 'StatusContext', context: 'legacy', state: 'SUCCESS' }]) {
+      expect(reviewCiGate({ headSha, requiredChecks: ['legacy'], checks: [row] }).allowed).toBe(true);
+    }
+  });
+  it.each([['pending', 'pending'], ['expected', 'pending'], ['failure', 'failure'], ['error', 'error'], ['weird', 'malformed']])(
+    'refuses a required commit status in state %s', (state, reason) => {
+      expect(reviewCiGate({ headSha, requiredChecks: ['legacy'], checks: [{ context: 'legacy', state }] }))
+        .toMatchObject({ allowed: false, affected: [{ name: 'legacy', reason }] });
+    });
 });

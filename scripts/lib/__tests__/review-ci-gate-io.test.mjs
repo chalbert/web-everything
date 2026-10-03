@@ -32,10 +32,21 @@ it('production read argv is repo/SHA-explicit and fetches every page and rerun',
   const runHead = vi.fn(() => JSON.stringify({ headRefOid: headSha }));
   expect(readReviewHead({ repo: 'other/product', pr: 3432, run: runHead })).toBe(headSha);
   expect(runHead).toHaveBeenCalledWith(['pr', 'view', '3432', '--repo', 'other/product', '--json', 'headRefOid']);
-  const runChecks = vi.fn(() => JSON.stringify([{ check_runs: [{ id: 2 }] }, { check_runs: [{ id: 1 }] }]));
-  expect(readReviewChecks({ repo: 'other/product', headSha, run: runChecks })).toEqual([{ id: 2 }, { id: 1 }]);
+  const runChecks = vi.fn(argv => JSON.stringify(argv[3].includes('/status?')
+    ? [{ statuses: [{ context: 'legacy', state: 'success', id: 9 }] }, { statuses: [] }]
+    : [{ check_runs: [{ id: 2 }] }, { check_runs: [{ id: 1 }] }]));
+  expect(readReviewChecks({ repo: 'other/product', headSha, run: runChecks })).toEqual([{ id: 2 }, { id: 1 }, { context: 'legacy', state: 'success' }]);
   expect(runChecks).toHaveBeenCalledWith(['api', '--paginate', '--slurp', `repos/other/product/commits/${headSha}/check-runs?per_page=100&filter=all`]);
+  expect(runChecks).toHaveBeenCalledWith(['api', '--paginate', '--slurp', `repos/other/product/commits/${headSha}/status?per_page=100`]);
   expect(() => readReviewChecks({ repo: 'other/product', headSha, run: () => '[{}]' })).toThrow('unreadable check runs');
+  expect(() => readReviewChecks({ repo: 'other/product', headSha, run: argv => JSON.stringify(argv[3].includes('/status?') ? [{}] : []) })).toThrow('unreadable commit statuses');
+});
+
+it('admits successful required commit statuses', () => {
+  const run = argv => JSON.stringify(argv[3].includes('/status?')
+    ? [{ statuses: [{ context: 'legacy', state: 'success' }] }] : [{ check_runs: [{ name: 'custom', status: 'completed', conclusion: 'success' }] }]);
+  expect(readReviewCiGate(fixture({ readRequired: () => ({ source: 'live', checks: ['custom', 'legacy'] }),
+    readChecks: ({ repo, headSha }) => readReviewChecks({ repo, headSha, run }) }))).toMatchObject({ allowed: true });
 });
 
 // Recovered read-only from GitHub on 2026-10-02. Times are UTC. We reconstruct

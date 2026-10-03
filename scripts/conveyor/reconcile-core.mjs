@@ -1171,6 +1171,17 @@ function dispatchReviewRow({
       ? planConvertSupersededVerdict({ headSha, reviewedSha, comments: pr?.comments })
       : { convert: false };
     if (conversion.convert) {
+      // A targeted-check agent is a review emission too, so a required `review-gate` conflict still refuses it
+      // (the early planner refusal no longer reaches a `needs-human` PR). Other required-check states are
+      // deliberately NOT applied here: converting a superseded verdict never waited on CI (#xconv1).
+      const convertCi = reviewCiGate({ headSha: pr?.headRefOid, requiredChecks, checks: pr?.statusCheckRollup });
+      if (convertCi.reason === 'required-review-gate-conflict') {
+        refuse('review-ci', {
+          ...withPhase, ...extra, ci: convertCi,
+          why: `${convertCi.reason}: ${convertCi.affected.map(row => `${row.name}=${row.reason}`).join(', ')}`,
+        });
+        return;
+      }
       dispatch.push({
         ...base, ...withPhase, kind: 'convert-advisory', headSha, reviewedSha, ...extra,
         acceptComment: conversion.acceptComment, escalation: conversion.escalation,
@@ -1583,7 +1594,6 @@ export function planReconcile({
     const check = reduceCheckState(pr?.statusCheckRollup, requiredChecks);
     const withPhase = { phase, check: check.state, labels: labelNames(pr?.labels) };
 
-
     // ── ALREADY-LANDED — its OWN branch, AHEAD OF EVERY OTHER CHECK IN THIS LOOP (`ci-red`, the advisory-fix
     // branch, STACKED-BASE, the generic `OWED` table — every one of them would otherwise dispatch a fixer or a
     // reviewer at a PR with nothing left to change). Live incident, chalbert/web-everything PR #2752: bounced
@@ -1634,8 +1644,15 @@ export function planReconcile({
       continue;
     }
 
+    // A required `review-gate` is red by design while a review label is held, so a `ci-red` PR whose ONLY
+    // failing required check is `review-gate` must not be healed (ci-heal cannot clear it; it would re-run
+    // every tick). Deliberately narrow: only the `ci-red` phase, and only when `review-gate` is the sole
+    // affected check. Any other failing required check, and every non-`ci-red` phase (a bounced PR owed a
+    // fixer, an advisory-fix PR), falls through so its repair ownership is intact; review emission is
+    // already gated separately by {@link reviewChecksAllow}.
     const reviewCi = reviewCiGate({ headSha: pr?.headRefOid, requiredChecks, checks: pr?.statusCheckRollup });
-    if (reviewCi.reason === 'required-review-gate-conflict') {
+    if (phase === 'ci-red' && reviewCi.reason === 'required-review-gate-conflict'
+        && reviewCi.affected.every(row => row.name === 'review-gate')) {
       refuse('review-ci', { ...withPhase, ci: reviewCi, why: 'required review-gate must succeed before review; resolve the review-dependent required-check configuration' });
       continue;
     }

@@ -18,7 +18,7 @@ import { afterEach, describe, it, expect, vi } from 'vitest';
 
 import { runReconcileFixDispatch } from '../../conveyor/reconcile-fix-dispatch.mjs';
 import {
-  assertMainNotStale, canonicalReviewPlaceholder, dispatchReview, fillReviewBrief, isReviewCodePath, planReviewDispatch,
+  assertMainNotStale, canonicalReviewPlaceholder, dispatchReview, fillReviewBrief, formatSessionDispatchResult, isReviewCodePath, planReviewDispatch,
   reviewDispatchDisallowedToolsArgs, reviewSessionSlug, REVIEW_BRIEF_PLACEHOLDERS,
   REVIEW_DISPATCH_DISALLOWED_TOOLS, REVIEW_DISPATCH_SYSTEM_PROMPT_FILE,
   REVIEW_SANDBOX_ROOTS, TOOL_FREE_ONLY_JUDGE_PROVIDERS,
@@ -824,5 +824,17 @@ describe('x6n7c2p required checks before review — fresh dispatch boundary', ()
     expect(reads[1]).toEqual(['required', { repo: 'chalbert/web-everything', ttlMs: 0 }]);
     if (!['stale-cache', 'fallback'].includes(state)) expect(reads[2]).toEqual(['checks', { repo: 'chalbert/web-everything', headSha }]);
     if (state !== 'green') expect(out.headSha).toBe(headSha);
+  });
+});
+
+describe('x6n7c2p session-mode CLI report for a skipped dispatch', () => {
+  it('reports a CI-refused (skipped) result as not started instead of reading launch fields off it', () => {
+    const skipped = { pr: 3432, repo: 'chalbert/web-everything', headSha: 'a'.repeat(40), skipped: 'review-ci: required-checks-not-successful', ci: { allowed: false } };
+    expect(formatSessionDispatchResult(skipped)).toBe('dispatch-review: chalbert/web-everything#3432 not started — review-ci: required-checks-not-successful\n');
+  });
+  it('still reports a launched session with its id and unknown tokens', () => {
+    const out = formatSessionDispatchResult({ agentId: 'ag1', sessionSlug: 'review-1', pr: 7, repo: 'o/r', judgeProvider: 'claude', unknownTokens: ['X'] });
+    expect(out).toContain('started agent ag1 (slug review-1) reviewing o/r#7');
+    expect(out).toContain('unrecognized brief tokens (reported, not fatal): X');
   });
 });

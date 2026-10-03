@@ -3342,3 +3342,35 @@ it('required review-gate conflict refuses without repeatedly healing review comp
   expect(plan.dispatch).toEqual([]);
   expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'review-ci', ci: expect.objectContaining({ reason: 'required-review-gate-conflict' }) })]);
 });
+describe('required review-gate conflict is scoped to the review it gates', () => {
+  const failed = name => ({ name, status: 'completed', conclusion: 'failure' });
+  it('required review-gate conflict preserves repair of other failed checks', () => {
+    const plan = planReconcile({ requiredChecks: ['test', 'review-gate'], agents: [], now: NOW,
+      prs: [pr1563({ labels: lbl('review:pending'), comments: [], statusCheckRollup: [failed('test'), failed('review-gate')] })] });
+    expect(plan.dispatch.filter(row => row.kind === 'review')).toEqual([]);
+    expect(plan.dispatch).toContainEqual(expect.objectContaining({ kind: 'ci-heal', prNumber: 1563 }));
+  });
+  it('required review-gate conflict does not suppress the fixer for a bounced PR', () => {
+    const plan = planReconcile({ requiredChecks: ['review-gate'], agents: [], now: NOW,
+      prs: [pr1563({ labels: lbl('review:changes'), statusCheckRollup: [failed('review-gate')] })] });
+    expect(plan.dispatch).toContainEqual(expect.objectContaining({ kind: 'fix', prNumber: 1563 }));
+    expect(plan.refusals.filter(row => row.kind === 'review-ci')).toEqual([]);
+  });
+});
+describe('required review-gate conflict still refuses a superseded-verdict conversion', () => {
+  const HEAD = 'abbe08beacae462f98d6caf654d3ce7867c92801';
+  const comments = [
+    { author: { login: 'web-everything' }, createdAt: '2026-09-26T21:47:43Z',
+      body: `✅ review — accepted\n\nRecorded by agent (unattended review-loop) via the declared \`review-pr\` operation (#3035).\n\n**Verdict:** ✅ pass\n\n${buildReviewedShaMarker(HEAD)}` },
+    { author: { login: 'web-everything' }, createdAt: '2026-09-26T23:15:40Z',
+      body: '**`review:accepted` removed — mutual exclusivity (#2766/#2767).**\n\nThis PR carried both `review:accepted` and `review:human` at once.' },
+  ];
+  it.each(['failure', 'in_progress'])('needs-human PR with a %s required review-gate gets review-ci, not convert-advisory', state => {
+    const pr = { number: 2777, state: 'OPEN', headRefName: 'lane/2777', headRefOid: HEAD, labels: lbl('review:human'), mergeStateStatus: 'CLEAN', comments,
+      statusCheckRollup: [{ name: 'test', status: 'completed', conclusion: 'success' },
+        state === 'failure' ? { name: 'review-gate', status: 'completed', conclusion: 'failure' } : { name: 'review-gate', status: 'in_progress', conclusion: null }] };
+    const plan = planReconcile({ requiredChecks: ['test', 'review-gate'], prs: [pr], agents: [], durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toEqual([]);
+    expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'review-ci', ci: expect.objectContaining({ reason: 'required-review-gate-conflict' }) })]);
+  });
+});

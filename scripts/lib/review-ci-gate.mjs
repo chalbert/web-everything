@@ -1,12 +1,26 @@
 /** Strict review prerequisite; independent of the general merge/CI reducer. */
 import { collapseRollupToLatestPerName } from './rollup-collapse.mjs';
 
+/**
+ * A legacy commit status / rollup `StatusContext` (`{context, state}`, no check-run `status`/`conclusion`) read as
+ * the equivalent completed check row, so a required context published through commit statuses can satisfy the
+ * gate. Check-run rows pass through untouched; an unknown `state` stays malformed (fail closed).
+ */
+function statusAsCheckRow(row) {
+  if (!row || typeof row !== 'object' || row.status !== undefined || typeof row.state !== 'string') return row;
+  const state = row.state.toLowerCase();
+  if (state === 'success') return { ...row, status: 'completed', conclusion: 'success' };
+  if (state === 'failure' || state === 'error') return { ...row, status: 'completed', conclusion: state };
+  if (state === 'pending' || state === 'expected') return { ...row, status: 'pending' };
+  return row;
+}
+
 export function reviewCiGate({ headSha, requiredChecks, checks } = {}) {
   const refuse = (reason, affected = []) => ({ allowed: false, headSha: headSha ?? null, reason, affected });
   if (typeof headSha !== 'string' || !headSha.trim()) return refuse('missing-head');
   if (!Array.isArray(requiredChecks) || !requiredChecks.length
       || requiredChecks.some(name => typeof name !== 'string' || !name.trim())) return refuse('unknown-required-set');
-  const latest = new Map(collapseRollupToLatestPerName(checks).map(row => [row?.name ?? row?.context, row]));
+  const latest = new Map(collapseRollupToLatestPerName(checks).map(row => [row?.name ?? row?.context, statusAsCheckRow(row)]));
   const affected = [...new Set(requiredChecks)].flatMap(name => {
     const row = latest.get(name);
     let reason;
