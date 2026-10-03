@@ -2,7 +2,7 @@ import { stripVTControlCharacters } from 'node:util';
 import { StringDecoder } from 'node:string_decoder';
 import { isAbsolute, relative } from 'node:path';
 
-/** Bounded, additive diagnostic data. Never used to determine a gate's outcome. */
+/** Bounded failure identities and a diagnostic tail; truncated evidence cannot authorize a retry. */
 export function boundFailureDetails(value) {
   if (!value || !Array.isArray(value.tests) || typeof value.summary !== 'string') return undefined;
   let truncated = !!value.truncated;
@@ -35,7 +35,9 @@ export function createFailureCollector({ cwd = process.cwd() } = {}) {
     const clean = stripVTControlCharacters(text).trim();
     if (!clean) return;
     summary += `${clean}\n`;
-    if (summary.length > 2048) { summary = Array.from(summary).slice(-1024).join(''); truncated = true; }
+    // Summary is always a rolling tail. Normal progress scrolling out does not lose failure identities;
+    // reserve `truncated` for dropped/clipped evidence, so a long successful prefix cannot mask completeness.
+    if (summary.length > 2048) summary = Array.from(summary).slice(-1024).join('');
     if (dropped) { truncated = true; return; }
     const match = /^FAIL\s+(?:\[[^\]]+\]\s+)?(.+?\.(?:[cm]?[jt]sx?))(?:\s+>\s+(.+))?$/.exec(clean);
     if (!match) return;

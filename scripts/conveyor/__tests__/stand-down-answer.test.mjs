@@ -1,4 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
+import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import standDown3507 from './fixtures/stand-down-3507.json';
 import { buildOperatorAnswer, isOperatorAnswerStandDownSuperseded, latestUnresolvedStandDown, latestOperatorAnswer, parseOperatorAnswer } from '../stand-down-answer-core.mjs';
 import { runStandDownAnswer } from '../stand-down-answer.mjs';
 import { buildStandDownComment } from '../stand-down.mjs';
@@ -55,6 +59,54 @@ describe('operator answer trust and targeting', () => {
 });
 
 describe('operator ceremony CLI', () => {
+  it('reads more than 1 MiB of comments and buffers the comment write through the real subprocess path', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'stand-down-answer-'));
+    const oldPath = process.env.PATH;
+    try {
+      const payload = JSON.stringify({ comments: [trusted('x'.repeat(2 * 1024 * 1024)), stop] });
+      expect(Buffer.byteLength(payload)).toBeGreaterThan(1024 * 1024);
+      writeFileSync(join(dir, 'comments.json'), payload);
+      writeFileSync(join(dir, 'gh'), `#!${process.execPath}
+const fs = require('node:fs');
+const path = require('node:path');
+if (process.argv[3] === 'view') process.stdout.write(fs.readFileSync(path.join(__dirname, 'comments.json')));
+else {
+  fs.writeFileSync(path.join(__dirname, 'answer.txt'), process.argv[process.argv.indexOf('--body') + 1]);
+  process.stdout.write('x'.repeat(2 * 1024 * 1024));
+}
+`, { mode: 0o755 });
+      process.env.PATH = `${dir}:${oldPath}`;
+      expect(runStandDownAnswer(argv)).toHaveLength(2 * 1024 * 1024);
+      expect(parseOperatorAnswer(trusted(readFileSync(join(dir, 'answer.txt'), 'utf8')))).toEqual(record);
+    } finally {
+      if (oldPath === undefined) delete process.env.PATH;
+      else process.env.PATH = oldPath;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  it('names a failed comments read in one line and performs no write', () => {
+    const gh = vi.fn(() => { throw new Error('spawnSync gh ENOBUFS\nlarge subprocess diagnostics'); });
+    expect(() => runStandDownAnswer(argv, { gh })).toThrow(
+      /^Could not read comments for chalbert\/web-everything PR #3181: spawnSync gh ENOBUFS$/,
+    );
+    expect(gh).toHaveBeenCalledTimes(1);
+  });
+  it('keeps #3507’s later-cycle stand-down unresolved and posts an answer to that exact comment', () => {
+    const { comments } = structuredClone(standDown3507);
+    const target = comments.at(-1);
+    expect(latestUnresolvedStandDown(comments)).toEqual(target);
+    expect(countUnresolvedStandDowns(comments)).toBe(1);
+    const gh = vi.fn((args) => {
+      if (args[1] === 'view') return JSON.stringify({ comments });
+      comments.push(trusted(args[args.indexOf('--body') + 1]));
+      return 'posted';
+    });
+    expect(runStandDownAnswer(['3507', ...argv.slice(1)], { gh })).toBe('posted');
+    expect(parseOperatorAnswer(comments.at(-1))).toEqual({ ...record, standDownId: target.id });
+    expect(countUnresolvedStandDowns(comments)).toBe(0);
+    expect(latestUnresolvedStandDown(comments)).toBeNull();
+    expect(gh).toHaveBeenCalledTimes(2);
+  });
   it.each(['reason', 'actor', 'channel', 'repo'])('refuses missing/blank --%s before IO', (key) => {
     for (const replacement of [null, `--${key}=   `]) {
       const args = argv.filter((a) => !a.startsWith(`--${key}=`));
