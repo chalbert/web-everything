@@ -21,12 +21,12 @@ import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 
 import { DISPATCH_EFFECT } from '../dispatch-lane.mjs';
 import { briefPath, REPO_ROOT } from '../dispatch-lane-io.mjs';
-import { dispatchCiHeal, runReconcileCiHealDispatch, routeAvailableCiHeal, dispatchTimeoutRetry, flushTimeoutFollowups, timeoutGithubEffects } from '../ci-heal-pr-dispatch.mjs';
+import { dispatchCiHeal, runReconcileCiHealDispatch, routeAvailableCiHeal, dispatchTimeoutRetry, flushTimeoutFollowups, timeoutGithubEffects, readTimeoutHold, TIMEOUT_PENDING_MAX_AGE_MS } from '../ci-heal-pr-dispatch.mjs';
 import { readUnsupported } from '../../conveyor/unsupported-repo.mjs';
 import { flushOwedWrites, readOwedWrites, recordOwedWrite, OWED_MAX_AGE_MS } from '../../conveyor/ci-heal-owed.mjs';
 import { buildCiHealComment } from '../../conveyor/ci-heal-mark.mjs';
 import { enrichPrsWithTimeoutEvidence } from '../../conveyor/reconcile-pass.mjs';
-import { readTimeoutBudget } from '../../conveyor/timeout-retry-state.mjs';
+import { readTimeoutBudget, timeoutKey } from '../../conveyor/timeout-retry-state.mjs';
 import { planReconcile } from '../../conveyor/reconcile-core.mjs';
 
 it.each([0, 3])('xng7q1p: eligible PR with %i heals retries without a lane or heal', async (count) => {
@@ -545,6 +545,78 @@ describe('xng7q1p retry reservation and restart soak', () => {
     const dir = mkdtempSync(join(tmpdir(), 'timeout-retry-'));
     try { await fn(dir); } finally { rmSync(dir, { recursive: true, force: true }); }
   }
+  const t0 = Date.parse('2026-10-01T00:00:00.000Z');
+  const readState = (dir, e) => JSON.parse(readFileSync(join(dir, `${timeoutKey(e)}.json`), 'utf8'));
+  async function reservePending(dir, e) {
+    await dispatchTimeoutRetry(e, { dir, repo: e.repo, now: () => t0,
+      effects: { observe, request: () => ({ status: 'ambiguous' }) } });
+  }
+  it('a closed-PR pending reservation stops being polled after one observation', async () => harness(async (dir) => {
+    const e = evidence(); await reservePending(dir, e);
+    const poll = vi.fn((...args) => ({ ...observe(...args), open: false }));
+    for (let tick = 0; tick < 3; tick++) {
+      expect(await flushTimeoutFollowups({ dir, repo: e.repo, effects: { observe: poll }, now: () => t0 }))
+        .toEqual([expect.objectContaining({ retired: 'pr-closed' })]);
+    }
+    expect(poll).toHaveBeenCalledTimes(1);
+    expect(readState(dir, e)).toMatchObject({ retired: { reason: 'pr-closed', at: new Date(t0).toISOString() },
+      requests: [{ status: 'pending', reservedAt: new Date(t0).toISOString() }] });
+  }));
+  it('a pending reservation older than the cap is retired without a GitHub read', async () => harness(async (dir) => {
+    const e = evidence(); await reservePending(dir, e);
+    const poll = vi.fn(observe);
+    const now = t0 + TIMEOUT_PENDING_MAX_AGE_MS + 1;
+    await flushTimeoutFollowups({ dir, repo: e.repo, effects: { observe: poll }, now: () => now });
+    expect(poll).not.toHaveBeenCalled();
+    expect(readState(dir, e)).toMatchObject({ retired: { reason: 'aged-out', at: new Date(now).toISOString() },
+      requests: [{ status: 'pending' }] });
+  }));
+  it('an open, young pending reservation is still polled every tick', async () => harness(async (dir) => {
+    const e = evidence(); await reservePending(dir, e);
+    const poll = vi.fn(observe);
+    for (const age of [0, 1, TIMEOUT_PENDING_MAX_AGE_MS]) {
+      await flushTimeoutFollowups({ dir, repo: e.repo, effects: { observe: poll }, now: () => t0 + age });
+    }
+    expect(poll).toHaveBeenCalledTimes(3);
+    expect(readState(dir, e).retired).toBeUndefined();
+  }));
+  it('a legacy pending entry without reservedAt gets stamped, then ages out', async () => harness(async (dir) => {
+    const e = evidence();
+    writeFileSync(join(dir, `${timeoutKey(e)}.json`), JSON.stringify({ version: 1, evidence: e,
+      requests: [{ id: 0, target: e.jobs[0], status: 'pending' }] }));
+    const poll = vi.fn(observe);
+    const opts = { dir, repo: e.repo, effects: { observe: poll } };
+    await flushTimeoutFollowups({ ...opts, now: () => t0 });
+    expect(poll).toHaveBeenCalledTimes(1);
+    expect(readState(dir, e).requests[0].reservedAt).toBe(new Date(t0).toISOString());
+    await flushTimeoutFollowups({ ...opts, now: () => t0 + TIMEOUT_PENDING_MAX_AGE_MS + 1 });
+    expect(poll).toHaveBeenCalledTimes(1);
+    expect(readState(dir, e)).toMatchObject({ retired: { reason: 'aged-out' }, requests: [{ status: 'pending' }] });
+  }));
+  it('a retired state still keeps the heal hold', async () => harness(async (dir) => {
+    const e = evidence(); await reservePending(dir, e);
+    await flushTimeoutFollowups({ dir, repo: e.repo, now: () => t0,
+      effects: { observe: (...args) => ({ ...observe(...args), open: false }) } });
+    expect(readTimeoutHold({ ...e, dir })).toEqual({ status: 'refused', reason: 'retry-outcome-pending' });
+    expect(readTimeoutBudget({ ...e, dir })).toEqual({ confirmed: 0, pending: true });
+  }));
+  it('confirms the last closed-PR observation and still retries owed filing after retirement', async () => harness(async (dir) => {
+    const e = evidence(); await reservePending(dir, e);
+    const path = join(dir, `${timeoutKey(e)}.json`);
+    const state = readState(dir, e);
+    state.requests.push({ id: 1, target: e.jobs[0], status: 'confirmed' });
+    state.card = { payload: { num: '4714' }, filed: false };
+    writeFileSync(path, JSON.stringify(state));
+    const poll = vi.fn((...args) => ({ ...observe(...args), open: false, attempt: 2 }));
+    const fileFollowup = vi.fn().mockRejectedValueOnce(new Error('try again')).mockResolvedValue(undefined);
+    for (let tick = 0; tick < 100; tick++) {
+      await flushTimeoutFollowups({ dir, repo: e.repo, effects: { observe: poll }, fileFollowup, now: () => t0 });
+    }
+    expect(poll).toHaveBeenCalledTimes(1);
+    expect(fileFollowup).toHaveBeenCalledTimes(2);
+    expect(readState(dir, e)).toMatchObject({ retired: { reason: 'pr-closed' },
+      requests: [{ status: 'confirmed' }, { status: 'confirmed' }], card: { filed: true } });
+  }));
   it('100 concurrent ticks/restarts spend exactly two requests, one card, and no third request', async () => harness(async (dir) => {
     const e = evidence(); let requests = 0; let cards = 0;
     const opts = { dir, repo: e.repo, effects: { observe, request: async () => { requests++; return { status: 'confirmed' }; } },
