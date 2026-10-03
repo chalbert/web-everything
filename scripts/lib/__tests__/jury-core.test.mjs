@@ -1612,56 +1612,21 @@ describe('#4315 mandatory referral protocol', () => {
       if (result === 'card') expect(referralRecordState(r).pending).toHaveLength(1);
     }
   });
-  it('carries exact-key same-head rulings across runs using the ruling reviewer independence', () => {
-    const old = record(); old.rulings = [rule(old)];
-    const next = { ...record(), runId: 'fresh-run', reviewer: mandatoryReferralReviewer('fresh-run'), rulings: [] };
-    const comments = [old, next].map(r => post(renderReferralRecord(r)));
-    const context = { head: old.head, body: old.authorBody, repo: old.repo, pr: old.pr };
-    expect(mandatoryReferralState(comments, context).pending).toEqual([]);
-    // The new reviewer being the author cannot invalidate an independent OLD ruling.
-    expect(mandatoryReferralState(comments, { ...context, body: `<!-- authored-by-actor: ${next.reviewer.id} -->` }).pending).toEqual([]);
-    expect(mandatoryReferralState(comments, { ...context, body: `<!-- authored-by-actor: ${old.reviewer.id} -->` }).pending).toHaveLength(1);
-    expect(mandatoryReferralState(comments, { ...context, head: 'b'.repeat(40) }).pending).toHaveLength(1);
-    const render = rs => rs.map(r => post(renderReferralRecord(r)));
-    next.rulings = [{ ...rule(next, 'block'), id: 'other-ruling' }];
-    expect(mandatoryReferralState(render([old, next]), context).pending).toHaveLength(1);
-    next.rulings = [{ ...rule(next), id: 'other-ruling' }];
-    expect(mandatoryReferralState(render([old, next]), context).pending).toEqual([]);
-    next.referrals[0] = { ...next.referrals[0], original: { ...finding, summary: 'different finding' } };
-    next.referrals[0].finding = normalizeFinding(next.referrals[0].original);
-    next.referrals[0].key = referralFindingKey(next.referrals[0].seat, next.referrals[0].original);
-    next.rulings = [];
-    expect(mandatoryReferralState(render([old, next]), context).pending).toEqual([next.referrals[0].key]);
-  });
-  it('pools only same-head rulings whose own reviewer is independent', () => {
-    const old = record(); old.rulings = [rule(old, 'block')];
-    const next = { ...record(), runId: 'next-independent', reviewer: mandatoryReferralReviewer('next-independent'), rulings: [] };
-    next.rulings = [{ ...rule(next), id: 'independent-ruling' }];
-    const context = { head: next.head, body: `<!-- authored-by-actor: ${old.reviewer.id} -->` };
-    const comments = rs => rs.map(r => post(renderReferralRecord(r)));
-    // Only forward: the later independent ruling does not clear the hold that was already standing.
-    expect(mandatoryReferralState(comments([old, next]), context)).toMatchObject({ pending: [old.referrals[0].key], blocked: [] });
-    expect(mandatoryReferralState(comments([next, old]), context)).toMatchObject({ pending: [], blocked: [] });
-    expect(referralRecordState(next, { ...context, records: [old] }).pending).toEqual([next.referrals[0].key]);
-    const stale = { ...old, head: 'b'.repeat(40) };
-    expect(referralRecordState(next, { body: next.authorBody, records: [stale] }).pending).toEqual([next.referrals[0].key]);
-    expect(referralRecordState(next, { body: next.authorBody, records: [old] }).blocked).toEqual([next.referrals[0].key]);
-  });
-  it('refuses to let a LATER record clear an earlier hold: a forged runId buys no independence (#3507 finding 1)', () => {
+  it.each([false, true])('refuses cross-run clearance regardless of comment order (forged first=%s)', forgedFirst => {
     const held = record();
     const forged = { ...record(), runId: 'invented-run', reviewer: mandatoryReferralReviewer('invented-run'), rulings: [] };
     forged.rulings = [rule(forged)];
     const context = { head: held.head, body: held.authorBody, repo: held.repo, pr: held.pr };
-    const render = rs => rs.map(r => post(renderReferralRecord(r)));
-    // The forged record clears ITSELF (a self-consistent record from a trusted login is the baseline) ...
-    expect(referralRecordState(forged, { ...context, records: [held, forged] }).pending).toEqual([]);
-    // ... but not the hold that was already standing when it was posted.
-    expect(referralRecordState(held, { ...context, records: [held, forged] }).pending).toEqual([held.referrals[0].key]);
-    expect(mandatoryReferralState(render([held, forged]), context).pending).toEqual([held.referrals[0].key]);
-    // A ruling still carries FORWARD: an earlier record's ruling clears a later record for the same exact key.
-    const ruled = { ...record(), runId: 'earlier-run', reviewer: mandatoryReferralReviewer('earlier-run'), rulings: [] };
-    ruled.rulings = [rule(ruled)];
-    expect(mandatoryReferralState(render([ruled, held]), context).pending).toEqual([]);
+    const records = forgedFirst ? [forged, held] : [held, forged];
+    expect(referralRecordState(held, { ...context, records }).pending).toEqual([held.referrals[0].key]);
+    expect(mandatoryReferralState(records.map(r => post(renderReferralRecord(r))), context).pending).toEqual([held.referrals[0].key]);
+  });
+  it('requires the exact record reviewer to be independent even with an earlier independent ruling', () => {
+    const first = record(); first.rulings = [rule(first)];
+    const own = { ...record(), runId: 'author-run', reviewer: mandatoryReferralReviewer('author-run'), rulings: [] };
+    own.rulings = [rule(own)];
+    expect(referralRecordState(own, { body: `<!-- authored-by-actor: ${own.reviewer.id} -->`, records: [first, own] }).pending)
+      .toEqual([own.referrals[0].key]);
   });
   it('a trusted record comment with trailing ordinary text keeps its hold, never silently dropped (#3507 finding 2)', () => {
     const r = record(), body = renderReferralRecord(r);
@@ -1681,7 +1646,7 @@ describe('#4315 mandatory referral protocol', () => {
     later.rulings = [{ ...rule(later), id: 'l1' }];
     const context = { head: first.head, body: first.authorBody, repo: first.repo, pr: first.pr };
     const render = rs => rs.map(r => post(renderReferralRecord(r)));
-    expect(mandatoryReferralState(render([first, later]), context).pending).toEqual([first.referrals[0].key]);
+    expect(mandatoryReferralState(render([first, later]), context)).toMatchObject({ pending: [], blocked: [first.referrals[0].key] });
     // The way to supersede is a snapshot of the SAME record that names the ruling it replaces.
     const resolved = { ...first, rulings: [...first.rulings, { ...rule(first), id: 'r2', supersedes: ['r1'] }] };
     expect(mandatoryReferralState(render([first, resolved]), context).pending).toEqual([]);

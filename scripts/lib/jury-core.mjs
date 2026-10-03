@@ -2315,29 +2315,18 @@ export function validateReferralRecord(r) {
   } catch { return false; }
 }
 
-const referralRecordId = (r) => JSON.stringify([r.repo, r.pr, r.head, r.runId]);
-
-/**
- * Resolve exact keys across runs, checking each ruling's own reviewer, never the new run's.
- *
- * A ruling carries FORWARD only: a record is cleared by its own rulings and by those of records posted BEFORE it
- * (`records` is in comment order). A reviewer id is derived from the run id, so any record with an invented run id
- * is "independent" by construction; letting a record posted AFTER a hold clear it would let one forged record
- * (#3507 finding 1) clear another's mandatory hold. When `record` is not in `records`, every listed record counts as earlier.
+/** Resolve only the exact record's rulings, from its independent assigned reviewer.
+ * Run-derived identities on other records confer no authority over this obligation.
  */
 export function referralRecordState(record, { head = record?.head, body = record?.authorBody ?? '', createdAt = '',
-  cardReadable = () => false, records = [record] } = {}) {
+  cardReadable = () => false } = {}) {
   if (!validateReferralRecord(record)) return { pending: ['malformed-referral-record'], blocked: [], rulings: [] };
   const pending = [], blocked = [], rulings = [];
-  const at = records.findIndex(r => r === record || (r && validateReferralRecord(r) && referralRecordId(r) === referralRecordId(record)));
-  const peers = (at < 0 ? records : records.slice(0, at + 1)).filter(r => validateReferralRecord(r) && r.repo === record.repo && r.pr === record.pr && r.head === record.head
-    && decideClearerIndependence({ authorId: parseAuthorActorId(body), clearerId: r.reviewer.id,
-      prCreatedAt: createdAt }).independent === true);
+  const independent = decideClearerIndependence({ authorId: parseAuthorActorId(body),
+    clearerId: record.reviewer.id, prCreatedAt: createdAt }).independent === true;
   for (const f of record.referrals) {
-    const active = peers.flatMap(owner => {
-      const history = owner.rulings.filter(r => r.key === f.key);
-      return history.filter(r => !history.some(next => supersededRulings(next).includes(r.id)));
-    });
+    const history = independent ? record.rulings.filter(r => r.key === f.key) : [];
+    const active = history.filter(r => !history.some(next => supersededRulings(next).includes(r.id)));
     const outcomes = new Set(active.map(r => JSON.stringify([r.result, r.result === 'card' ? r.card : null])));
     if (head !== record.head || outcomes.size !== 1
       || active.some(r => r.result === 'card' && !cardReadable(r.card))) pending.push(f.key);
@@ -2363,8 +2352,7 @@ export function renderReferralRecord(record) {
  * Fold snapshots monotonically: omission, conflicts and malformed/partial records never clear a hold.
  *
  * Only a comment from a trusted author ({@link isTrustedMarkerAuthor}: the automation or the operator) is read.
- * `referralRecordState` pools rulings across every same-head record, so an untrusted commenter's forged record
- * would otherwise clear another record's hold. An untrusted comment that opens a record (the marker opener at the
+ * Records are scoped to their own reviewer; comment authors must also be trusted. An untrusted comment that opens a record (the marker opener at the
  * start of a line) is therefore never read as a record, but it IS flagged `malformed` (a hold), not skipped —
  * operator decision on PR #3507: anything that looks like a referral record and cannot be read cleanly is a flagged
  * hold. A bare string has no author, so it is untrusted too. A comment that only DISCUSSES the marker in prose

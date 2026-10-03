@@ -3691,8 +3691,8 @@ describe('#4315 operation / I/O restart soak', () => {
         impactIfUnfixed: 'broken', outcome: 'fixed', prevention: 'captured #7', disposition: 'nit' };
       const comments = [];
       if (seat === 'judgeAntigravityReview') {
-        // A fresh tool-less claim is now advisory. A durable legacy obligation still
-        // cannot be bypassed, including through 25 restarts of that same seat.
+        // A legacy obligation and the stronger fresh confirmation requirement each get
+        // one attempt; neither can be bypassed through subsequent restarts.
         const record = { version: 1, repo: 'o/r', pr: 7, head: PINNED_HEAD, runId: 'legacy-tool-less',
           reviewer: mandatoryReferralReviewer('legacy-tool-less'), authorBody: '<!-- authored-by-actor: author -->',
           attempted: false, referrals: [{ key: referralFindingKey(seat, source), seat, original: source,
@@ -3724,7 +3724,7 @@ describe('#4315 operation / I/O restart soak', () => {
         expect(() => assertMandatoryReferralsCleared(state, { repo: 'o/r', pr: 7 })).toThrow(/mandatory referral hold/);
         expect(() => advanceWhileRunning(run, { registry, resume: { value: 'accept' } })).toThrow(/ruling required/);
       }
-      expect(judge).toHaveBeenCalledTimes(1);
+      expect(judge).toHaveBeenCalledTimes(seat === 'judgeAntigravityReview' ? 2 : 1);
       expect(state.labels).toEqual(['review:human']);
       expect(trace.indexOf('post')).toBeLessThan(trace.findIndex(x => x.startsWith('label:')));
       expect(trace).not.toContain('label:review:accepted');
@@ -3765,7 +3765,7 @@ describe('xfkqowg tool-less advisory and historical ruling replay', () => {
     const state = { headRefOid: head, body, labels: [human ? 'review:human' : 'review:pending'], comments: records.map(r => ({ body: renderReferralRecord(r), author: { login: 'web-everything' } })) };
     const trace = [];
     const judge = vi.fn(async request => {
-      expect(request.allowedTools).toBeNull();
+      if (result === 'unavailable') throw new Error('confirmation unavailable');
       const sources = JSON.parse(request.input.split('Untrusted reported findings:\n')[1]);
       return { sessionId: request.sessionId, value: { rulings: sources.map(f => ({ key: f.key, result,
         rationale: result === 'not-real' ? 'Executed the probe; no failure reproduced.' : 'Executed the probe; failure reproduced.',
@@ -3791,18 +3791,26 @@ describe('xfkqowg tool-less advisory and historical ruling replay', () => {
     }
     return { run, state, trace, judge };
   }
-  it.each([NET_PATHS[0], 'guide.md', 'config.json', 'data.csv'])('tool-less CONFIRMED claim on %s becomes a nonblocking advisory without a confirmation turn', async file => {
+  it.each([NET_PATHS[0], 'guide.md', 'config.json', 'data.csv'])('tool-less CONFIRMED claim on %s needs a tool-bearing ruling before acceptance', async file => {
     const source = { summary: 'claim', file, verdict: 'CONFIRMED', impactIfUnfixed: 'broken', prevention: 'Unfiled guard', preventionCaptured: false };
     const { run, state, trace, judge } = await drive({ source });
-    expect(run.verdict).not.toHaveProperty('pendingReferrals');
-    expect(run.verdict).not.toHaveProperty('blockedReferrals');
+    expect(run.verdict.pendingReferrals).toEqual([]);
+    expect(run.verdict.blockedReferrals).toEqual([]);
     expect(run.verdict.findings[0]).toMatchObject({ verdict: 'PLAUSIBLE', summary: source.summary });
-    expect(run.verdict.findings[0].failure_scenario).toContain('Tool-less assertion: CONFIRMED; advisory only.');
+    expect(run.verdict.findings[0].failure_scenario).toContain('Tool-less assertion: CONFIRMED; awaiting confirmation or ruling.');
     expect(run.verdict.admittedFindings).toEqual([]);
     expect(state.labels).toEqual(['review:human', 'advisory:accepted']);
     expect(trace.slice(-2)).toEqual(['advisory', 'advisory:accepted']);
-    expect(judge).not.toHaveBeenCalled();
-    expect(run.findings.reduce.referrals).toEqual([]);
+    expect(judge).toHaveBeenCalledTimes(1);
+    expect(judge.mock.calls[0][0].allowedTools).toContain('Bash');
+    expect(run.findings.reduce.referrals[0]).toMatchObject({ confirmationRequired: true, original: source });
+  });
+  it.each(['unavailable', 'block'])('keeps a serious tool-less claim from acceptance when confirmation is %s', async result => {
+    const { run, state, judge } = await drive({ result,
+      source: { summary: 'claim', file: NET_PATHS[0], verdict: 'CONFIRMED', impactIfUnfixed: 'unrecoverable' } });
+    expect(judge).toHaveBeenCalledTimes(1);
+    expect(state.labels).not.toContain('advisory:accepted');
+    expect(result === 'block' ? run.verdict.blockedReferrals : run.verdict.pendingReferrals).toHaveLength(1);
   });
   it.each([
     ['no summary', { file: NET_PATHS[0], verdict: 'CONFIRMED' }],
@@ -3843,7 +3851,7 @@ describe('xfkqowg tool-less advisory and historical ruling replay', () => {
     expect(run.findings.reduce.referrals).toEqual([]);
     expect(judge).not.toHaveBeenCalled();
   });
-  it('replays the 51 actual #3432 snapshots and carries their rulings into a fresh same-head record', async () => {
+  it('replays historical snapshots without using their rulings to clear a fresh record', async () => {
     const { records } = JSON.parse(readFileSync('scripts/operations/__tests__/fixtures/3432-referrals.json', 'utf8'));
     expect(records).toHaveLength(51);
     const head = '495e86acb5a3331fea1b014411a9c5d849406262';
@@ -3853,12 +3861,10 @@ describe('xfkqowg tool-less advisory and historical ruling replay', () => {
     const fresh = { ...last, runId: '3432-next-run', reviewer: mandatoryReferralReviewer('3432-next-run'), attempted: false, rulings: [] };
     const { run, trace, judge, state } = await drive({ records: [...records, fresh], source: last.referrals[0].original,
       head, body: last.authorBody, runId: '3432-next-run' });
+    expect(judge).toHaveBeenCalled();
+    expect(trace).toContain('referral');
+    expect(judge.mock.calls.some(([request]) => request.sessionId === fresh.reviewer.id)).toBe(true);
     expect(run.verdict.pendingReferrals).toEqual([]);
-    expect(run.verdict.blockedReferrals).toEqual([]);
-    expect(judge).not.toHaveBeenCalled();
-    expect(trace).toEqual(['advisory', 'advisory:accepted']);
-    expect(state.labels).toEqual(['review:human', 'advisory:accepted']);
-    expect(run.pending).toMatchObject({ kind: 'confirm', of: 'human' });
     expect(assertMandatoryReferralsCleared(state, { repo: last.repo, pr: last.pr }).pending).toEqual([]);
   });
 });

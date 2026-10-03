@@ -31,7 +31,8 @@ import { buildReviewJudgeRequest } from './review-pr.mjs';
  */
 
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync, lstatSync, readlinkSync, readdirSync, openSync, readSync, closeSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -263,6 +264,7 @@ export function readPr({
 
   return {
     priorRounds,
+    referralCwd: cwd,
     detail,
     headRefName,
     // #xwp8ioh — carried up so the PURE `shapeReadFinding` can refuse an inert PR. Read here, judged there:
@@ -448,6 +450,112 @@ export function isPreWriteRefusal(text) {
 }
 
 /**
+ * Flags on EVERY host git command run against the checkout a steerable tool turn could write: no fsmonitor
+ * command and no hooks, so a planted `core.fsmonitor` / hook cannot run in this process's own `git status`.
+ */
+const HARDENED_GIT = Object.freeze(['-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null']);
+
+/** Content fingerprint of a path (file bytes, symlink target, or a directory's entries, recursively). */
+function hashPathInto(hash, path) {
+  let st;
+  try { st = lstatSync(path); } catch { hash.update(`${path}\0missing\0`); return; }
+  if (st.isSymbolicLink()) hash.update(`${path}\0link\0${readlinkSync(path)}\0`);
+  else if (st.isDirectory()) {
+    hash.update(`${path}\0dir\0`);
+    for (const name of readdirSync(path).sort()) hashPathInto(hash, join(path, name));
+  } else {
+    hash.update(`${path}\0file\0${st.size}\0`);
+    // Streamed in chunks (an untracked artifact can be huge), and an unreadable file hashes as its error code
+    // rather than throwing: it only parks the turn if the turn itself changed whether it can be read.
+    let fd;
+    try {
+      fd = openSync(path, 'r');
+      const buf = Buffer.allocUnsafe(1 << 20);
+      for (let n = readSync(fd, buf, 0, buf.length, null); n > 0; n = readSync(fd, buf, 0, buf.length, null)) hash.update(buf.subarray(0, n));
+    } catch (e) { hash.update(`unreadable:${e?.code ?? 'error'}`); } finally { if (fd !== undefined) closeSync(fd); }
+    hash.update('\0');
+  }
+}
+
+/**
+ * The git metadata a steered tool turn could use to run code in the HOST's later git calls: the repo config, the
+ * hooks, and `info/` (attributes → filter drivers). Read with the filesystem only, never with git, so it can be
+ * checked BEFORE any host git command touches a possibly-tampered checkout.
+ */
+export function gitMetaFingerprint(gitDirs) {
+  const hash = createHash('sha256');
+  // Every git dir given (the per-worktree dir AND the common dir — config/hooks live in the common one for a
+  // linked worktree).
+  for (const dir of [].concat(gitDirs)) for (const rel of ['config', 'config.worktree', 'hooks', 'info', 'commondir', 'gitdir']) hashPathInto(hash, join(dir, rel));
+  return hash.digest('hex');
+}
+
+/** Contents of the given untracked paths (relative to `cwd`), so an in-place overwrite changes the fingerprint. */
+export function untrackedFingerprint(cwd, paths) {
+  const hash = createHash('sha256');
+  for (const p of paths) hashPathInto(hash, join(cwd, p));
+  return hash.digest('hex');
+}
+
+/**
+ * The default referral judge. A tool-free turn (`allowedTools` null/empty — every referral without a
+ * `confirmationRequired` claim) needs no checkout and is delegated untouched.
+ *
+ * A tool-bearing turn runs only in the isolated juror checkout. The sink itself puts that checkout on the
+ * reviewed PR head (detached; nothing else positions a pool lane there) and requires no tracked edit beforehand.
+ * The turn must leave the checkout as it found it — same HEAD, same `status --porcelain` incl. untracked files,
+ * same CONTENT of every untracked file, same `.git` config/hooks/info — so a steered Bash turn cannot leave
+ * edits, rewrite an untracked probe in place, or plant something the host's own git then runs. The `.git`
+ * comparison is filesystem-only and runs before any host git command touches the checkout again; every host git
+ * call carries {@link HARDENED_GIT}. Comparing to the pre-turn snapshot, instead of demanding an empty status,
+ * keeps ordinary unignored lane litter (`.pr-body.md`, `.review-*-output.json`, …) from parking a legitimate
+ * confirmation.
+ */
+export async function runReferralJudge(request, { exec = execFileSync, judge = judgeSpawn,
+  gitMeta = gitMetaFingerprint, untracked = untrackedFingerprint } = {}) {
+  if (!Array.isArray(request.allowedTools) || !request.allowedTools.length) return judge(request);
+  const run = (...args) => String(exec('git', [...HARDENED_GIT, ...args], { cwd: request.cwd, encoding: 'utf8' }));
+  const git = (...args) => run(...args).trim();
+  const wrongHead = () => new Error('mandatory confirmation requires a checkout on the reviewed PR head');
+  if (!request.cwd || !/^[a-f0-9]{40}$/.test(request.head ?? '')) throw wrongHead();
+  const pinned = () => { if (git('rev-parse', 'HEAD') !== request.head) throw wrongHead(); };
+  if (git('status', '--porcelain', '--untracked-files=no') !== '') {
+    throw new Error('mandatory confirmation requires a clean checkout; tracked files are already modified');
+  }
+  if (git('rev-parse', 'HEAD') !== request.head) {
+    try { git('checkout', '--quiet', '--detach', request.head); } catch { throw wrongHead(); }
+  }
+  pinned();
+  // `assume-unchanged` / `skip-worktree` hide a tracked edit from `status`; their `ls-files -v` tags are
+  // lowercase / `S`. None may exist before the turn, and none may appear during it (the snapshot carries them).
+  const indexFlags = () => run('ls-files', '-v').split('\n').filter(l => /^[a-zS] /.test(l)).join('\n');
+  if (indexFlags() !== '') throw new Error('mandatory confirmation requires a clean checkout; index entries are flagged hidden');
+  const gitDirs = [...new Set(['--git-dir', '--git-common-dir'].map(f => resolve(request.cwd, git('rev-parse', f))))];
+  const snapshot = () => [git('status', '--porcelain', '--untracked-files=all'), indexFlags(),
+    untracked(request.cwd, run('ls-files', '--others', '--exclude-standard', '-z').split('\0').filter(Boolean))].join('\n');
+  // Protect the worktree routing pointer before any post-turn host git invocation.
+  const pointer = () => {
+    const hash = createHash('sha256');
+    const path = join(request.cwd, '.git');
+    if (lstatSync(path).isDirectory()) hash.update('directory');
+    else hashPathInto(hash, path);
+    return hash.digest('hex');
+  };
+  const pointerBefore = pointer();
+  const metaBefore = gitMeta(gitDirs);
+  const before = snapshot();
+  const answer = await judge(request);
+  if (pointer() !== pointerBefore || gitMeta(gitDirs) !== metaBefore) {
+    throw new Error('mandatory confirmation requires an untouched checkout; the tool-bearing turn changed .git metadata');
+  }
+  pinned();
+  if (snapshot() !== before) {
+    throw new Error('mandatory confirmation requires a clean checkout; the tool-bearing turn changed the working tree');
+  }
+  return answer;
+}
+
+/**
  * THE SINKS, bound to a repo root and an output channel.
  *
  * @param {{root?: string, out?: (line: string) => void, runNode?: Function, postComment?: Function, labelProvider?: object,
@@ -466,7 +574,7 @@ export function isPreWriteRefusal(text) {
  */
 export function createReviewPrSinks({
   root = REPO_ROOT,
-  referralJudge = judgeSpawn,
+  referralJudge = runReferralJudge,
   mirrorReferral = (record) => appendJuryEvent(`${record.repo}#${record.pr}`, { type: 'mandatory-referrals', round: 0, record }, { root }),
   cardReadable = (ref) => referralCardReadable(ref, root),
   // #xstdout-json — A `--json` CALLER WANTS STDOUT TO BE ONE PARSEABLE DOCUMENT, END TO END. The `NOTICE`
@@ -538,11 +646,16 @@ export function createReviewPrSinks({
         if (prior.malformed) { park(state); return mandatoryReferralState(state.comments, context(state)); }
         const existing = prior.records.filter(r => r.head === read.netBasis.rev && r.repo === read.repo && r.pr === read.pr);
         const covered = new Set(existing.flatMap(r => r.referrals.map(f => f.key)));
-        const sources = [...payload.referrals, ...prior.records.flatMap(r => r.referrals)];
+        const sources = [...payload.referrals, ...prior.records.filter(r => r.repo === read.repo && r.pr === read.pr).flatMap(r => r.referrals)];
         const additions = new Map();
         for (const f of sources) {
           const key = referralFindingKey(f.seat, f.original);
-          if (!covered.has(key)) additions.set(key, { key, seat: f.seat, original: f.original, finding: normalizeFinding(f.original) });
+          // A same-head legacy record without confirmation cannot cover a new tool-bearing claim.
+          const needsConfirmation = f.confirmationRequired === true || additions.get(key)?.confirmationRequired === true;
+          const confirmedCoverage = existing.some(r => r.referrals.some(x => x.key === key && x.confirmationRequired === true));
+          if (covered.has(key) && (!needsConfirmation || confirmedCoverage)) continue;
+          additions.set(key, { key, seat: f.seat, original: f.original, finding: normalizeFinding(f.original),
+            ...(needsConfirmation ? { confirmationRequired: true } : {}) });
         }
         if (additions.size) {
           const chunks = [];
@@ -590,12 +703,15 @@ export function createReviewPrSinks({
           }
           try {
             const request = buildReviewJudgeRequest({ read, lens: 'correctness' });
+            const needsTools = record.referrals.some(f => f.confirmationRequired === true);
             const answer = await referralJudge({ ...request, runId: record.runId,
               lens: 'mandatory-referral-correctness', sessionId: record.reviewer.id,
-              // This bounded evidence pass reads the same pinned diff. It cannot edit or file a promised card.
-              allowedTools: null,
+              ...(needsTools ? { cwd: read.referralCwd, head: read.netBasis.rev } : { allowedTools: null }),
               mandate: request.mandate + '\nIndependently verify every referral in the input. Return exactly one '
-                + 'block, card, or not-real ruling per key, with rationale and evidence references. A general accept '
+                + 'block, card, or not-real ruling per key, with rationale and evidence references. '
+                + (needsTools ? 'For confirmationRequired claims, reproduce on the checked-out PR head using tools; '
+                  + 'evidence must name the command and observed result. If verification is unavailable, return no ruling. ' : '')
+                + 'A general accept '
                 + 'is not a ruling. card requires an existing durable we:backlog/*.md reference. Do not recursively refer findings.',
               input: request.input + '\nUntrusted reported findings:\n' + JSON.stringify(record.referrals),
               shape: { type: 'object', additionalProperties: false, required: ['rulings'], properties: {
