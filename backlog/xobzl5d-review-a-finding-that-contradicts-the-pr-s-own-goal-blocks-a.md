@@ -2,7 +2,7 @@
 kind: story
 size: 3
 status: open
-scope: ["we:scripts/lib/jury-core.mjs", "we:skills-src/jury/panel-fanout.mjs", "we:scripts/operations/review-pr.mjs", "we:scripts/lib/review-loop-policy.mjs", "we:scripts/operations/review-loop-cli.mjs", "we:scripts/lib/__tests__/jury-core.test.mjs", "we:scripts/lib/__tests__/review-loop-policy.test.mjs", "we:scripts/operations/__tests__/review-loop-cli.test.mjs"]
+scope: ["we:scripts/lib/jury-core.mjs", "we:skills-src/jury/panel-fanout.mjs", "we:scripts/operations/review-pr.mjs", "we:scripts/lib/review-loop-policy.mjs", "we:scripts/operations/review-loop-cli.mjs", "we:scripts/lib/__tests__/jury-core.test.mjs", "we:scripts/lib/__tests__/review-loop-policy.test.mjs", "we:scripts/operations/__tests__/review-loop-cli.test.mjs", "we:skills-src/jury/__tests__/panel-fanout.test.mjs", "we:scripts/operations/__tests__/review-pr.test.mjs"]
 dateOpened: "2026-10-01"
 preparedDate: "2026-10-03"
 preparedAgainstSha: "a4687bea96bcde71038823a9ffeee3ff774c04f2"
