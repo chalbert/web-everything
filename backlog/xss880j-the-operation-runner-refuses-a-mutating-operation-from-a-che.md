@@ -1,9 +1,10 @@
 ---
 kind: story
 size: 3
-status: open
+status: resolved
 scope: ["we:scripts/operations/run.mjs", "we:scripts/operations/__tests__/run.test.mjs", "we:scripts/operations/runner-freshness.mjs", "we:scripts/operations/__tests__/runner-freshness.test.mjs"]
 dateOpened: "2026-10-02"
+dateResolved: "2026-10-03"
 preparedDate: "2026-10-02"
 preparedAgainstSha: "fff15e8125add8c05a28a86a32f914cc0bb15ed5"
 tags: []
