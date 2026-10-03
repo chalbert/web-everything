@@ -84,6 +84,23 @@ export function defaultReadHeadCheckState({
   return reduceCheckState(parseJsonLines(raw), requiredChecks);
 }
 
+function validatePrLabels(labels) {
+  if (!Array.isArray(labels) || labels.some(label => {
+    const name = typeof label === 'string' ? label : label?.name;
+    return typeof name !== 'string' || name.trim().length === 0;
+  })) throw new Error('PR labels must be an array of label names or {name} records');
+  return labels;
+}
+
+/** Fresh withdrawal state, scoped to the target PR and repository; fail closed on unreadable data. */
+export function defaultReadPrLabels({ repoSlug, prNumber, runGh = runGhSync } = {}) {
+  const raw = runGh(['pr', 'view', String(prNumber), '--repo', repoSlug, '--json', 'labels'], {
+    encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], throttle: { op: 'pr-labels', repo: repoSlug },
+  });
+  const envelope = JSON.parse(raw);
+  return validatePrLabels(envelope?.labels);
+}
+
 /**
  * Run ONE pass: reconcile, filter `kind:'promote-draft'`, call `gh pr ready` on each. Repo-agnostic, same
  * `--repo`/`--prs-file` contract as `ci-heal-pr-dispatch.mjs`'s own `runReconcileCiHealDispatch`.
@@ -94,6 +111,7 @@ export function defaultReadHeadCheckState({
  * @param {object} [o.provider] - injectable `gh` seam (`createDraftPromoteProvider`'s shape); a test passes a
  *   fake. Omitted, the real default is constructed AFTER `repoSlug` resolves (see the file header's
  *   CWD-INFERRED-REPO FIX note) so it is threaded an explicit `--repo` for every non-WE dispatch.
+ * @param {Function} [o.readPrLabels] - fresh target PR labels; accepts string names or {name} records.
  * @param {Function} [o.checkStaleness] - threaded straight to `assertMainNotStale`, mirroring every sibling dispatcher's own seam.
  * @returns {{dispatched:Array<{pr:number, kind:'promote-draft'}>, refusals:Array<{pr:number, kind:string, why:string}>, reconcileRefusals:number, reconcileRefusalDetails:Array<object>}}
  *   `dispatched` (not `promoted` — RENAMED, epic #4075/#3383 follow-up) so this shape matches every sibling
@@ -112,6 +130,7 @@ export function runReconcilePromoteDraftDispatch({
   // #2811 — the fresh per-sha re-read, injectable so a test can pin the exact race (plan says green, a fresh
   // read says red/pending) with no `gh` on PATH. Defaults to the real `gh api commits/<sha>/check-runs` read.
   readHeadCheckState = defaultReadHeadCheckState,
+  readPrLabels = defaultReadPrLabels,
   // #2811/#2821 follow-up — clear the now-stale `review-status:awaiting-ci` label the INSTANT a draft promotes,
   // never waiting on a different daemon's tick to notice `isDraft` flipped (mirrors `applyReviewStatus`'s own
   // "the daemon that changes the state applies its own tag right at the moment" convention, `review-status-
@@ -157,6 +176,24 @@ export function runReconcilePromoteDraftDispatch({
         why: `the reconcile plan read this draft's required checks as green, but a fresh re-read of head ${sha} `
           + `immediately before promoting shows ${fresh.state} (${fresh.why}) — refusing to promote on a `
           + 'stale-green read (#2811); the same entry is re-planned next tick once the checks genuinely settle',
+      });
+      continue;
+    }
+    // Final read closes the stale-plan gap; GitHub does not offer an atomic label-check/ready write.
+    let labels;
+    try {
+      labels = validatePrLabels(readPrLabels({ repoSlug, prNumber: entry.prNumber }));
+    } catch (e) {
+      refusals.push({
+        pr: entry.prNumber, kind: 'draft-state-unreadable', headSha: sha,
+        why: `could not read withdrawal state before promoting: ${String(e?.message ?? e).split('\n')[0]}`,
+      });
+      continue;
+    }
+    if (labels.some(label => (typeof label === 'string' ? label : label.name) === 'review-status:draft-withdrawn')) {
+      refusals.push({
+        pr: entry.prNumber, kind: 'draft-withdrawn', headSha: sha,
+        why: 'draft PR is withdrawn — explicit release is required before promotion',
       });
       continue;
     }

@@ -334,7 +334,7 @@ export function classifyGhWrite(args) {
 // GraphQL budget — exhausted fleet-wide 3+ times in one day. The operator's own `gh` CLI login is a SEPARATE
 // GitHub identity with its own separate 5,000/hour allowance. {@link classifyGhRead} below is a CONSERVATIVE
 // allowlist (unknown/ambiguous always resolves to `false` — a write, staying on the App) used by
-// {@link runGhCliPassthrough} to route a classified read onto that personal identity instead, while every
+// both execution paths to route a classified read onto that personal identity instead, while every
 // write stays on the App exactly as before. See the card for the full design/MVP-cut/sunset.
 
 /**
@@ -1331,6 +1331,25 @@ export function resolvePersonalRouteEnabled(env = process.env) {
   return v === '1' || v === 'true' || v === 'on' || v === 'yes';
 }
 
+/** Shared read routing for both execution paths (including execFileSyncThrottled via runGhSync).
+ * Eligibility uses the child's original credential; the switch uses the throttle configuration.
+ * Never mutate the caller's env or log a credential. Explicit personal credentials stay untouched.
+ */
+function resolveGhPersonalRoute(args, { env, throttle, bin, configEnv = env, layerProcessEnv = true }) {
+  const enabled = throttle.personalRoute != null ? !!throttle.personalRoute : resolvePersonalRouteEnabled(configEnv);
+  const originalIdentity = ghAuthIdentity(env);
+  if (!enabled || !classifyGhRead(args) || !(originalIdentity === 'app' || originalIdentity.startsWith('app-installation-') || originalIdentity === 'default')) {
+    return { callEnv: env, usedPersonalToken: false };
+  }
+  const personal = throttle.personalToken !== undefined ? throttle.personalToken : personalGhToken({ bin, exec: throttle.personalTokenExec });
+  if (!personal) return { callEnv: env, usedPersonalToken: false };
+  // Preserve PATH/HOME when a passthrough caller supplied a partial throttle.env. An explicit child env
+  // (`layerProcessEnv: false`) stays exactly as narrow as the caller made it — only the token is swapped.
+  const callEnv = { ...(layerProcessEnv ? process.env : {}), ...env, GH_TOKEN: personal };
+  delete callEnv.GITHUB_TOKEN;
+  return { callEnv, usedPersonalToken: true };
+}
+
 export function budgetBlockPath(lockRoot, identity, resource) {
   return join(lockRoot, `budget-block-${String(identity).replace(/[^A-Za-z0-9_-]/g, '_')}-${resource}.json`);
 }
@@ -1500,16 +1519,36 @@ export function runGhSync(args, opts = {}) {
   const caller = deriveGhCaller(throttle, env);
   // #gh-graphql-budget — the shared primary-budget backoff (see that section above).
   const resource = classifyGhResource(args);
-  const identity = ghAuthIdentity((execOpts && execOpts.env) || env);
-  const deferred = deferGhCall({ lockRoot, identity, resource, caller, args, nowMs: now(), logPath, op: opLabel, deferrable: !!throttle.deferrable }, throttle.warn);
-  if (deferred) return execOpts?.encoding && execOpts.encoding !== 'buffer' ? JSON.stringify(deferred) : Buffer.from(JSON.stringify(deferred));
-  const blocked = readBudgetBlock(lockRoot, identity, resource, now());
-  if (blocked) {
-    recordGhCallLogEntry(logPath, { op: opLabel, attempt: 0, points: 0, outcome: 'budget_blocked', resource, caller, w: isWrite });
+  // The credential the child really uses: the caller's explicit env, else — a config-only `throttle.env` carries
+  // no credential and never reaches the child — what it inherits from process.env.
+  const hasCredential = (e) => !!(e && (e.GH_TOKEN || e.GITHUB_TOKEN));
+  const originalEnv = execOpts.env || (hasCredential(env) ? env : process.env);
+  let { callEnv, usedPersonalToken } = resolveGhPersonalRoute(args, { env: originalEnv, configEnv: env, throttle, bin: throttle.bin || env.WE_GH_THROTTLE_GH_BIN || bin, layerProcessEnv: !execOpts.env });
+  if (!usedPersonalToken) callEnv = originalEnv;
+  let identity = ghAuthIdentity(callEnv);
+  if (usedPersonalToken && readBudgetBlock(lockRoot, identity, resource, now())) {
+    recordGhCallLogEntry(logPath, { op: opLabel, attempt: 0, points: 0, outcome: 'personal_budget_blocked', resource, caller, w: isWrite, id: identity });
+    callEnv = originalEnv;
+    usedPersonalToken = false;
+    identity = ghAuthIdentity(callEnv);
+  }
+  const effectiveExecOpts = () => callEnv === originalEnv ? execOpts : { ...execOpts, env: callEnv };
+  const throwIfBlocked = (blocked, attempt = 0) => {
+    if (!blocked) return;
+    recordGhCallLogEntry(logPath, { op: opLabel, attempt, points: 0, outcome: 'budget_blocked', resource, caller, w: isWrite, id: identity });
     const e = new Error(budgetBlockedMessage(blocked).trim());
     e.status = 1; e.stderr = budgetBlockedMessage(blocked); e.stdout = ''; e.budgetBlocked = blocked;
     throw e;
-  }
+  };
+  const fallbackToOriginal = (attempt, exhausted = resource) => {
+    callEnv = originalEnv;
+    usedPersonalToken = false;
+    identity = ghAuthIdentity(callEnv);
+    throwIfBlocked(readBudgetBlock(lockRoot, identity, resource, now()) || readBudgetBlock(lockRoot, identity, exhausted, now()), attempt);
+  };
+  const deferred = deferGhCall({ lockRoot, identity, resource, caller, args, nowMs: now(), logPath, op: opLabel, deferrable: !!throttle.deferrable }, throttle.warn);
+  if (deferred) return execOpts?.encoding && execOpts.encoding !== 'buffer' ? JSON.stringify(deferred) : Buffer.from(JSON.stringify(deferred));
+  throwIfBlocked(readBudgetBlock(lockRoot, identity, resource, now()));
 
   // FAIL OPEN (see `failOpenGate`): an unusable lock root means this call runs ungated, never not at all.
   const gated = failOpenGate('lock-root setup', () => { mkdirSync(lockRoot, { recursive: true }); return true; }, { ...gateOpts, fallback: false, logPath: null });
@@ -1537,7 +1576,8 @@ export function runGhSync(args, opts = {}) {
       // did not already ask for a specific debug mode of its own — never silently overridden. It changes
       // nothing about a SUCCESSFUL call's stdout (see the module header). The #4375 capture, when on, lives
       // inside the real `exec` itself and records what it read in `lastCapture`.
-      const callExecOpts = calibrateHeaders ? withDebugEnv(execOpts) : execOpts;
+      const routedOpts = effectiveExecOpts();
+      const callExecOpts = calibrateHeaders ? withDebugEnv(routedOpts) : routedOpts;
       lastCapture = null;
       result = exec(args, callExecOpts);
     } catch (e) {
@@ -1549,7 +1589,7 @@ export function runGhSync(args, opts = {}) {
     const captured = lastCapture;
     if (captured) recordGhHeadroom(lockRoot, identity, rateLimitRecords(captured.responses));
     recordGhCallLogEntry(logPath, {
-      op: opLabel, attempt, points, outcome: 'call', ok: !failure, caller, priority: ghCallerPriority(caller, args), w: isWrite, resource, id: identity, auth: ghAuthProvenance(execOpts.env || env), inv,
+      op: opLabel, attempt, points, outcome: 'call', ok: !failure, caller, priority: ghCallerPriority(caller, args), w: isWrite, resource, id: identity, auth: ghAuthProvenance(callEnv), inv,
       ...(captured ? { rl: rateLimitRecords(captured.responses) } : {}),
     });
     if (!failure) {
@@ -1559,6 +1599,11 @@ export function runGhSync(args, opts = {}) {
     }
 
     const text = `${failure && failure.stderr ? String(failure.stderr) : ''}\n${failure && failure.message ? String(failure.message) : ''}`;
+    if (usedPersonalToken && (looksLikeGhAuthFailure(text) || looksLikePersonalAccessDenial(text))) {
+      recordGhCallLogEntry(logPath, { op: opLabel, attempt, points: 0, outcome: 'personal_token_rejected', caller, w: isWrite, resource, id: identity, auth: ghAuthProvenance(callEnv), inv });
+      fallbackToOriginal(attempt);
+      continue;
+    }
     if (!isRateLimitShaped(text)) throw failure;
 
     // A REAL signal (the #4375 capture's pre-strip trace, else a `calibrateHeaders` trace left in this failure's
@@ -1570,19 +1615,23 @@ export function runGhSync(args, opts = {}) {
     // and give up NOW instead of spending the retry ladder on calls GitHub will refuse.
     const exhausted = primaryExhaustedResource(text);
     if (exhausted) {
-      const probe = throttle.probeBudget || ((probeArgs) => exec(probeArgs, { ...execOpts, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }));
+      const probe = throttle.probeBudget || ((probeArgs) => exec(probeArgs, { ...effectiveExecOpts(), encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }));
       // Strict-budget background readers cannot spend an extra diagnostic request; use headers/fallback.
       const until = resolveBudgetBlockUntil({ headers, resource: exhausted, probe: env.WE_GH_THROTTLE_NO_BUDGET_PROBE === '1' ? () => '' : probe });
       if (until) {
         const rec = writeBudgetBlock(lockRoot, identity, exhausted, { untilMs: until.untilMs, nowMs: now(), source: until.source, op: opLabel, caller });
-        recordGhCallLogEntry(logPath, { op: opLabel, attempt, points, outcome: 'budget_exhausted', resource: exhausted, until: rec.until, caller, w: isWrite });
+        recordGhCallLogEntry(logPath, { op: opLabel, attempt, points, outcome: 'budget_exhausted', resource: exhausted, until: rec.until, caller, w: isWrite, id: identity });
         recordGhThrottleMetric('gh.throttle.exhausted', 1, { op: opLabel, attempt, source: `primary-${exhausted}` });
+        if (usedPersonalToken) {
+          fallbackToOriginal(attempt, exhausted);
+          continue;
+        }
         throw failure;
       }
     }
 
     if (attempt >= maxAttempts) {
-      recordGhCallLogEntry(logPath, { op: opLabel, attempt, points, outcome: 'retry_exhausted', caller, w: isWrite });
+      recordGhCallLogEntry(logPath, { op: opLabel, attempt, points, outcome: 'retry_exhausted', caller, w: isWrite, id: identity });
       recordGhThrottleMetric('gh.throttle.rate_limited', 1, { op: opLabel, attempt, source: classifyRateLimitSignal(headers).kind, outcome: 'exhausted' });
       recordGhThrottleMetric('gh.throttle.exhausted', 1, { op: opLabel, attempt });
       throw failure;
@@ -1669,29 +1718,7 @@ export function runGhCliPassthrough(argv, { throttle = {}, spawn = spawnSync, bi
   // #gh-graphql-budget — the shared primary-budget backoff (see runGhSync's identical wiring).
   const resource = classifyGhResource(argv);
 
-  // we:backlog/xhcgdce — route a CLASSIFIED READ onto the operator's personal GitHub identity instead of the
-  // shared App installation, so it spends a SEPARATE 5,000/hr budget. OFF BY DEFAULT (see
-  // {@link resolvePersonalRouteEnabled}) — an explicit `throttle.personalRoute` always wins (tests), else the
-  // env kill-switch decides. ELIGIBILITY is checked against the ORIGINAL env's identity, never the personal
-  // one: a caller that already passed its own explicit non-App, non-default token (identity is neither `app`
-  // nor `default`) is left completely alone (review-2026-09-28 finding). `callEnv` is a FRESH object built
-  // only for this one child process; `process.env` itself is never mutated, and the token is never logged.
-  const personalRouteEnabled = throttle.personalRoute != null ? !!throttle.personalRoute : resolvePersonalRouteEnabled(env);
-  const originalIdentity = ghAuthIdentity(env);
-  const isRead = classifyGhRead(argv);
-  const eligibleForPersonalRoute = personalRouteEnabled && isRead && (originalIdentity === 'app' || originalIdentity.startsWith('app-installation-') || originalIdentity === 'default');
-  let callEnv = env;
-  let usedPersonalToken = false;
-  if (eligibleForPersonalRoute) {
-    const personal = throttle.personalToken !== undefined ? throttle.personalToken : personalGhToken({ bin, exec: throttle.personalTokenExec });
-    if (personal) {
-      // Layered over `process.env` (what an unrouted child inherits), so a caller's PARTIAL `throttle.env`
-      // never strips PATH/HOME from the routed child (PR #2885 review).
-      callEnv = { ...process.env, ...env, GH_TOKEN: personal };
-      delete callEnv.GITHUB_TOKEN;
-      usedPersonalToken = true;
-    }
-  }
+  let { callEnv, usedPersonalToken } = resolveGhPersonalRoute(argv, { env, throttle, bin });
   let identity = ghAuthIdentity(callEnv);
   // The personal identity is only ever a BONUS bucket: when it is already blocked, the read falls back to the
   // App bucket (checked below exactly as an unrouted call would be), never fails fast while the App may still

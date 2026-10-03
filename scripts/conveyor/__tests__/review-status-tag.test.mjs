@@ -429,3 +429,32 @@ it('shows head-scoped needs-human after the worker exits and clears it on a new 
   expect(tagReviewStatus({ ...opts, currentLabels: ['review-status:needs-human'], prState: { comments, headRefOid: 'def' } }).label).toBeNull();
   expect(writes.at(-1).remove).toContain('review-status:needs-human');
 });
+
+
+describe('xul2kwr automatic writers preserve withdrawal until explicit removal', () => {
+  it.each([null, 'reviewing', 'awaiting-ci', 'draft-scope-change'])('preserves withdrawal over %s', state => {
+    expect(planStatusLabelChange({ status: state ? { state } : null,
+      currentLabels: [{ name: 'review-status:draft-withdrawn' }, 'review-status:fixing', 'unrelated'] }))
+      .toEqual({ add: 'review-status:draft-withdrawn', remove: ['review-status:fixing'] });
+  });
+  it('both callers retain the hold over repeated claimless ticks and resume after removal', () => {
+    let labels = ['review-status:draft-withdrawn'];
+    const provider = {
+      readLabels: () => labels, ensureLabel: () => {},
+      setLabels: (_repo, _pr, { add, remove }) => { labels = labels.filter(l => !remove.includes(l)); if (add && !labels.includes(add)) labels.push(add); },
+    };
+    for (let tick = 0; tick < 5; tick++) {
+      const tagged = tagReviewStatus({ pr: 3432, repo: 'chalbert/web-everything', provider, agents: [], isDraft: true, readFixClaim: () => null });
+      expect(tagged.label).toBe('review-status:draft-withdrawn');
+      for (const state of ['reviewing', null]) {
+        expect(applyReviewStatus({ pr: 3432, repo: 'chalbert/web-everything', provider, state }).label).toBe('review-status:draft-withdrawn');
+        expect(labels).toEqual(['review-status:draft-withdrawn']);
+      }
+    }
+    labels = [];
+    tagReviewStatus({ pr: 3432, repo: 'chalbert/web-everything', provider, agents: [], isDraft: true, readFixClaim: () => null });
+    expect(labels).toEqual(['review-status:awaiting-ci']);
+    applyReviewStatus({ pr: 3432, repo: 'chalbert/web-everything', provider, state: null });
+    expect(labels).toEqual([]);
+  });
+});

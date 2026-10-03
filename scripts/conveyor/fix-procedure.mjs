@@ -34,9 +34,9 @@
  *      once required CI is green on the new head, and review re-runs from there.
  *   The claim is heartbeat-refreshed while the fixer lives (`fix-heartbeat`, and the fix daemon's own
  *   `refreshLiveFixDispatchClaims` sweep for a claim whose `who` names a live session). A crashed fixer's claim
- *   expires on its TTL; a claim that HAD drafted the PR then leaves a plain draft, which the planner promotes
- *   (green) or heals (red), and the `draft-not-promoted` health smell covers anything stuck past that. A claim
- *   that never drafted leaves a plain ready PR, unaffected by that promotion path at all.
+ *   expires on its TTL. A withdrawn draft keeps its reason label and stays held until explicit release;
+ *   expiry is not release. Scope-change drafts remain eligible for green-CI promotion, and red drafts
+ *   remain eligible for CI healing. A claim that never drafted leaves a plain ready PR.
  *
  * THE CLAIM STORE IS REUSED, NOT REINVENTED. This is `fix-dispatch-claim.mjs`'s own `(repo, kind, pr)` store
  * (#2789) with `kind: 'fixing'`. The owner string is `fixer:<who>` — stable across the several short CLI calls
@@ -619,7 +619,8 @@ export async function fixBegin({
  * further: this does NOT rely on the draft-first promotion, because there was never a draft to promote out of.
  * A claim that DID draft the PR (`--draft --reason=scope-change|withdrawn`) is deliberately LEFT DRAFT — that
  * half still relies on the draft-first promotion (`reconcile-core.mjs` `promote-draft`) to mark it ready once
- * required CI is green.
+ * required CI is green. Unlike TTL expiry, this explicit action removes the withdrawal reason label,
+ * lifting the promotion hold.
  */
 export async function fixEnd({
   repo, pr, who, sessionId = callerIdentity().sessionId, token = callerIdentity().token, gh = ghDefault, labels = null, lockRoot = fixDispatchClaimRoot(),
