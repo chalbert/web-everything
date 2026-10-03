@@ -44,7 +44,8 @@
  *       `repos/{o}/{r}/issues/{n}/events`, `repos/{o}/{r}/issues/{n}/timeline`,
  *       `repos/{o}/{r}/issues/{n}/comments`, `repos/{o}/{r}/compare/{a}...{b}`,
  *       `repos/{o}/{r}/contents/{path}?ref={sha}`,
- *       `repos/{o}/{r}/commits/{sha}/check-runs` (only for an open PR's current head sha)
+ *       `repos/{o}/{r}/commits/{sha}/check-runs` and `…/status` (only for an open PR's current head sha;
+ *       `…/status` always lists no legacy statuses)
  *   - Fields produced with GitHub's real shape (camelCase for `--json`, snake_case for `api`'s REST JSON) —
  *     see `fake-gh.mjs`'s `buildPrGraphqlView` / `restEvent` / `listChangedFilesRest`.
  *
@@ -510,7 +511,33 @@ function handleApi(store, rest) {
         id, name: c.name, status: String(c.status).toLowerCase(), conclusion: c.conclusion ? String(c.conclusion).toLowerCase() : null,
         started_at: c.startedAt, completed_at: c.completedAt, head_sha: sha,
       }));
-      return jsonResult({ total_count: runs.length, check_runs: runs }, jq, { compact: true });
+      const page = { total_count: runs.length, check_runs: runs };
+      // `--paginate --slurp` wraps every page in one array (this fixture answers a single page).
+      return jsonResult(hasFlag(rest, '--slurp') ? [page] : page, jq, { compact: true });
+    }
+    // Legacy commit statuses for a sha — `review-ci-gate-io.mjs#readReviewChecks` reads the combined-status
+    // endpoint right after check-runs, and an unsupported answer made every review gate read `unreadable-ci` in
+    // the simulator. The fake publishes checks only as check runs, so an open PR's current head answers an empty
+    // status list (the same open-PR-head-only scope as the check-runs route above); any other sha stays unsupported.
+    if ((m = path.match(/^repos\/([^/]+)\/([^/]+)\/commits\/([0-9a-f]{7,40})\/status(?:\?(.*))?$/))) {
+      const slug = `${m[1]}/${m[2]}`; const sha = m[3];
+      const repoState = requireRepo(store, slug);
+      const pr = Object.values(repoState.prs ?? {}).find((p) => {
+        if (p.state !== 'OPEN') return false;
+        const oid = resolveDiffOids(repoState, p).headOid;
+        return oid && oid.startsWith(sha);
+      });
+      if (!pr) return { stderr: `fake-gh: unsupported api path ${path} (no open PR has head ${sha})\n`, exitCode: 1 };
+      const page = { state: 'pending', sha, total_count: 0, statuses: [] };
+      return jsonResult(hasFlag(rest, '--slurp') ? [page] : page, jq, { compact: true });
+    }
+    // Branch protection's required status checks — only when a scenario declared them (`setRequiredChecks`);
+    // otherwise unsupported, exactly as before, so readers keep their documented fallback.
+    if ((m = path.match(/^repos\/([^/]+)\/([^/]+)\/branches\/([^/]+)\/protection$/))) {
+      const repoState = requireRepo(store, `${m[1]}/${m[2]}`);
+      if (Array.isArray(repoState.requiredChecks)) {
+        return jsonResult({ required_status_checks: { contexts: repoState.requiredChecks } }, jq);
+      }
     }
     if ((m = path.match(/^repos\/([^/]+)\/([^/]+)\/compare\/(.+)\.\.\.(.+)$/))) {
       const slug = `${m[1]}/${m[2]}`; const a = m[3]; const b = m[4];

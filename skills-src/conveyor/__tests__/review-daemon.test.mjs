@@ -1,3 +1,5 @@
+import { dispatchReview } from '../../../scripts/operations/review-dispatch.mjs';
+import { readReviewCiGate } from '../../../scripts/lib/review-ci-gate-io.mjs';
 /**
  * @file skills-src/conveyor/__tests__/review-daemon.test.mjs
  * @description Unit proof of #3876's standalone Review daemon — the pure loop (mirrors #3870's own tests)
@@ -1377,4 +1379,37 @@ describe('review:pending PRs the tick did not dispatch — the daemon prints why
     await fx.tickOnce();
     expect(order).toEqual(['reap', 'review']);
   });
+});
+
+it('x6n7c2p required checks before review — synthetic #3432 four-tick soak spends one round', () => {
+  const tagRound = vi.fn();
+  const spawnAgent = vi.fn(() => '');
+  const sequence = [['a', 'in_progress', null], ['a', 'completed', 'failure'],
+    ['b', 'in_progress', null], ['b', 'completed', 'success']];
+  const dispatched = [];
+  for (const [head, status, conclusion] of sequence) {
+    const out = runReviewTick({ repo: 'chalbert/web-everything',
+      reconcile: () => ({ dispatch: [{ kind: 'review', prNumber: 3432, attempts: 2 }], refusals: [] }),
+      readPrs: () => [{ number: 3432, labels: [{ name: 'review:pending' }] }], readAgents: () => [],
+      acquirableLanes: () => 1, tagRound, tagStatus: () => {}, statusCandidates: () => [], holdReconcile: () => [],
+      dispatch: options => dispatchReview({ ...options, root: '/repo', checkStaleness: () => ({ fresh: true, behind: 0 }),
+        ciGate: args => readReviewCiGate({ ...args, readHead: () => head.repeat(40),
+          readRequired: () => ({ source: 'live', checks: ['test', 'daemon-soak'] }),
+          readChecks: () => [{ name: 'test', status: 'completed', conclusion: 'success' }, { name: 'daemon-soak', status, conclusion }],
+        }),
+        readBrief: () => 'review {{PR}}', mintSessionId: () => 'ci-soak', ensureSessionCwd: path => path,
+        resolveSettingsEnv: () => ({}), isolateSession: () => ({ worktreeSettings: {} }), spawnAgent,
+      }),
+    });
+    dispatched.push(out.dispatched.length);
+    if (conclusion !== 'success') {
+      expect(out.notStarted).toEqual([{ prNumber: 3432, reason: 'review-ci: required-checks-not-successful' }]);
+      expect(tagRound).not.toHaveBeenCalled();
+      expect(spawnAgent).not.toHaveBeenCalled();
+    }
+  }
+  expect(dispatched).toEqual([0, 0, 0, 1]);
+  expect(spawnAgent).toHaveBeenCalledTimes(1);
+  expect(tagRound).toHaveBeenCalledTimes(1);
+  expect(tagRound).toHaveBeenCalledWith(expect.objectContaining({ pr: 3432, round: 3 }));
 });

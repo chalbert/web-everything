@@ -1,3 +1,5 @@
+import { runReviewTick } from '../../../skills-src/conveyor/review-daemon.mjs';
+import { readReviewCiGate } from '../../lib/review-ci-gate-io.mjs';
 /**
  * x26lw6u — the review arc as a deterministic job (we:scripts/operations/review-job.mjs) and its job-record
  * store (we:scripts/operations/review-job-store.mjs). Every effect is faked: no lane pool, no `claude`, no `gh`.
@@ -246,7 +248,7 @@ describe('runReviewJob — the arc, no Claude wrapper session', () => {
 });
 
 describe('dispatchReviewJob — what the daemon calls', () => {
-  const base = { pr: 10, repo: REPO, root: '/daemon', checkStaleness: FRESH, readCompletion: () => null };
+  const base = { ciGate: () => ({ allowed: true, headSha: 'a'.repeat(40) }), pr: 10, repo: REPO, root: '/daemon', checkStaleness: FRESH, readCompletion: () => null };
 
   it('spawns the job detached with the gh shim on PATH and WITHOUT the dispatcher\'s own actor id, and claims the slot', () => {
     const spawned = [];
@@ -311,9 +313,69 @@ describe('dispatch mode', () => {
 
   it('dispatchReviewByMode routes job mode to the job dispatch', () => {
     const out = dispatchReviewByMode({
-      mode: 'job', pr: 10, repo: REPO, root: '/daemon', dir, checkStaleness: FRESH, readCompletion: () => null,
+      mode: 'job', ciGate: () => ({ allowed: true }), pr: 10, repo: REPO, root: '/daemon', dir, checkStaleness: FRESH, readCompletion: () => null,
       resolveSettingsEnv: () => null, spawnJob: () => 31,
     });
     expect(out).toMatchObject({ mode: 'job', jobPid: 31 });
   });
+});
+
+describe('x6n7c2p required checks before review — fresh dispatch boundary', () => {
+  it.each(['pending', 'red', 'missing', 'head-moved', 'stale-cache', 'fallback', 'error', 'green'])('stale green plan, fresh %s', state => {
+    const reads = [];
+    const headSha = 'a'.repeat(40);
+    let headReads = 0;
+    let spawns = 0;
+    let sessionWrites = 0;
+    const ciGate = ({ repo, pr }) => readReviewCiGate({ repo, pr,
+      readHead: args => { reads.push(['head', args]); return state === 'head-moved' && headReads++ ? 'b'.repeat(40) : headSha; },
+      readRequired: args => { reads.push(['required', args]); return { source: ['stale-cache', 'fallback'].includes(state) ? state : 'live', checks: ['test', 'daemon-soak'] }; },
+      readChecks: args => {
+        reads.push(['checks', args]);
+        if (state === 'error') throw new Error('offline');
+        return [{ name: 'test', status: 'completed', conclusion: 'success' },
+          ...(state === 'missing' ? [] : [{ name: 'daemon-soak', status: state === 'pending' ? 'in_progress' : 'completed', conclusion: state === 'red' ? 'failure' : 'success' }])];
+      },
+    });
+    const out = dispatchReviewJob({ pr: 3432, repo: REPO, root: '/daemon', dir, ciGate,
+      checkStaleness: FRESH, readCompletion: () => null, resolveSettingsEnv: () => ({}),
+      spawnJob: () => { spawns++; return 4242; } });
+    expect(readJobRecord('review-3432', dir) !== null).toBe(state === 'green');
+    expect(spawns).toBe(state === 'green' ? 1 : 0);
+    expect(Boolean(out.skipped)).toBe(state !== 'green');
+    expect(reads[0]).toEqual(['head', { repo: 'chalbert/web-everything', pr: 3432 }]);
+    expect(reads[1]).toEqual(['required', { repo: 'chalbert/web-everything', ttlMs: 0 }]);
+    if (!['stale-cache', 'fallback'].includes(state)) expect(reads[2]).toEqual(['checks', { repo: 'chalbert/web-everything', headSha }]);
+    if (state !== 'green') expect(out.headSha).toBe(headSha);
+  });
+});
+
+it('x6n7c2p required checks before review — default job four-tick soak spends one round', () => {
+  let spawns = 0;
+  const rounds = [];
+  const dispatched = [];
+  for (const [head, status, conclusion] of [['a', 'in_progress', null], ['a', 'completed', 'failure'], ['b', 'in_progress', null], ['b', 'completed', 'success']]) {
+    const out = runReviewTick({ repo: REPO,
+      reconcile: () => ({ dispatch: [{ kind: 'review', prNumber: 3432, attempts: 2 }], refusals: [] }),
+      readPrs: () => [{ number: 3432, labels: [{ name: 'review:pending' }] }], readAgents: () => [],
+      acquirableLanes: () => 1, tagRound: row => rounds.push(row.round), tagStatus: () => {}, statusCandidates: () => [], holdReconcile: () => [],
+      dispatch: options => dispatchReviewByMode({ ...options, mode: 'job', root: '/daemon', dir,
+        checkStaleness: FRESH, readCompletion: () => null, resolveSettingsEnv: () => ({}),
+        ciGate: args => readReviewCiGate({ ...args, readHead: () => head.repeat(40),
+          readRequired: () => ({ source: 'live', checks: ['test', 'daemon-soak'] }),
+          readChecks: () => [{ name: 'test', status: 'completed', conclusion: 'success' }, { name: 'daemon-soak', status, conclusion }],
+        }), spawnJob: () => { spawns++; return 4242; },
+      }),
+    });
+    dispatched.push(out.dispatched.length);
+    if (conclusion !== 'success') {
+      expect(out.notStarted).toEqual([{ prNumber: 3432, reason: 'review-ci: required-checks-not-successful' }]);
+      expect(rounds).toEqual([]);
+      expect(spawns).toBe(0);
+      expect(readJobRecord('review-3432', dir)).toBeNull();
+    }
+  }
+  expect(dispatched).toEqual([0, 0, 0, 1]);
+  expect(spawns).toBe(1);
+  expect(rounds).toEqual([3]);
 });

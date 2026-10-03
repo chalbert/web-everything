@@ -142,7 +142,9 @@ async function within(tmp, ctx, fn) {
   try {
     return await fn(ctx);
   } finally {
-    rmSync(tmp, { recursive: true, force: true });
+    // Git's background housekeeping can briefly race recursive removal of .git/objects.
+    // Retry transient cleanup failures, but still throw if the directory cannot be removed.
+    rmSync(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 }
 

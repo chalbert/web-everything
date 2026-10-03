@@ -702,3 +702,10 @@ describe('explicitGateRefusal — an agent-supplied gate must be an affected-tes
     ['npx vitest related --run --passWithNoTests && npm run check:standards', /not an allowed flag/],
   ])('refuses %j', (gate, why) => expect(explicitGateRefusal(gate)).toMatch(why));
 });
+
+it('exposes the gate halves without splitting shell-quoted changed paths', () => {
+  const gate = resolveDefaultGate({ runGit: fakeGit(['scripts/a && b.mjs']), env: {} });
+  expect(gate.testCommand).toContain("'scripts/a && b.mjs'");
+  expect(gate.standardsCommand).toMatch(/^npm run check:standards/);
+  expect(gate.command).toBe(`${gate.testCommand} && ${gate.standardsCommand}`);
+});

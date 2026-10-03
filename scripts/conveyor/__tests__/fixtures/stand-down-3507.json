@@ -1,0 +1,95 @@
+{
+  "description": "PR #3507, 2026-10-02: selected live comments in posting order; bodies reduced to their first lines.",
+  "comments": [
+    {
+      "id": "IC_kwDORBt1-c8AAAABYyMRNA",
+      "createdAt": "2026-10-02T17:56:59Z",
+      "author": {
+        "login": "web-everything"
+      },
+      "viewerDidAuthor": false,
+      "body": "**⚠️ THIS IS AN ADVISORY REVIEW, NOT A RECORDED VERDICT.** This PR carries `review:human`. The independent"
+    },
+    {
+      "id": "IC_kwDORBt1-c8AAAABYyPu6g",
+      "createdAt": "2026-10-02T18:00:30Z",
+      "author": {
+        "login": "web-everything"
+      },
+      "viewerDidAuthor": false,
+      "body": "🔒 conveyor fix-begin — fix claim held"
+    },
+    {
+      "id": "IC_kwDORBt1-c8AAAABYyR_4g",
+      "createdAt": "2026-10-02T18:02:50Z",
+      "author": {
+        "login": "chalbert"
+      },
+      "viewerDidAuthor": true,
+      "body": "🔁 review — changes requested"
+    },
+    {
+      "id": "IC_kwDORBt1-c8AAAABYyzEIg",
+      "createdAt": "2026-10-02T18:34:49Z",
+      "author": {
+        "login": "web-everything"
+      },
+      "viewerDidAuthor": false,
+      "body": "🔧 conveyor fix — advisory finding addressed (#xkmu3gv)"
+    },
+    {
+      "id": "IC_kwDORBt1-c8AAAABYyzHyQ",
+      "createdAt": "2026-10-02T18:34:52Z",
+      "author": {
+        "login": "web-everything"
+      },
+      "viewerDidAuthor": false,
+      "body": "🔓 conveyor fix-end — fix claim released"
+    },
+    {
+      "id": "IC_kwDORBt1-c8AAAABYzFxGg",
+      "createdAt": "2026-10-02T18:49:33Z",
+      "author": {
+        "login": "web-everything"
+      },
+      "viewerDidAuthor": false,
+      "body": "🔒 conveyor fix-begin — fix claim held"
+    },
+    {
+      "id": "IC_kwDORBt1-c8AAAABYzWfPQ",
+      "createdAt": "2026-10-02T19:02:29Z",
+      "author": {
+        "login": "web-everything"
+      },
+      "viewerDidAuthor": false,
+      "body": "🔧 conveyor fix — re-armed for re-review"
+    },
+    {
+      "id": "IC_kwDORBt1-c8AAAABYzWpfA",
+      "createdAt": "2026-10-02T19:02:36Z",
+      "author": {
+        "login": "web-everything"
+      },
+      "viewerDidAuthor": false,
+      "body": "🔓 conveyor fix-end — fix claim released"
+    },
+    {
+      "id": "IC_kwDORBt1-c8AAAABY2Kzkw",
+      "createdAt": "2026-10-02T22:20:46Z",
+      "author": {
+        "login": "chalbert"
+      },
+      "viewerDidAuthor": true,
+      "body": "🔄 Updated this branch with main to give it a fresh head. Every review of head `b779ea8e4` ended parked with no advisory: its referral records include ones written by an in-progress parser (this PR's own code, briefly run on the review daemon as an overlay, since removed) that main's parser reads as malformed, so the hold could never clear on that head. A new head starts with no referral records. — orchestrator, 2026-10-02."
+    },
+    {
+      "id": "IC_kwDORBt1-c8AAAABY2p4BA",
+      "createdAt": "2026-10-02T23:09:03Z",
+      "author": {
+        "login": "chalbert"
+      },
+      "viewerDidAuthor": true,
+      "body": "🛑 conveyor fix — stood down, human judgment needed"
+    }
+  ]
+}
