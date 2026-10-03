@@ -2,9 +2,10 @@
 bornAs: xp7yr8z
 kind: story
 size: 2
-status: open
+status: resolved
 scope: ["we:scripts/operations/agent-activity.mjs", "we:scripts/operations/agent-activity-io.mjs", "we:scripts/operations/__tests__/agent-activity.test.mjs", "we:scripts/operations/__tests__/agent-activity-io-real.test.mjs"]
 dateOpened: "2026-10-03"
+dateResolved: "2026-10-03"
 preparedDate: "2026-10-03"
 preparedAgainstSha: "e1f0523e0881357fc863f3e88da72e0164eb7091"
 tags: []
