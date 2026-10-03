@@ -25,7 +25,7 @@ afterEach(() => { while (cleanups.length) { try { cleanups.pop()(); } catch { /*
 /** One bare origin + one work clone, both git-identity-safe (real-repo.mjs conventions). */
 function makeOrigin(prefix) {
   const tmp = mkdtempSync(join(tmpdir(), prefix));
-  cleanups.push(() => rmSync(tmp, { recursive: true, force: true }));
+  cleanups.push(() => rmSync(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }));
   const originPath = join(tmp, 'origin.git');
   git(['init', '--quiet', '--bare', '-b', DEFAULT_BRANCH, originPath], { cwd: tmp });
   writeLocalIdentity(originPath);
@@ -58,7 +58,7 @@ function seedBranchAt(originPath, branch, atRef = DEFAULT_BRANCH) {
 
 function makeGithub(originPath, opts = {}) {
   const root = mkdtempSync(join(tmpdir(), 'fake-gh-store-'));
-  cleanups.push(() => rmSync(root, { recursive: true, force: true }));
+  cleanups.push(() => rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }));
   const gh = createFakeGithub({ root, repos: [{ slug: 'chalbert/web-everything', originPath, defaultBranch: DEFAULT_BRANCH, ...opts }] });
   cleanups.push(gh.cleanup);
   return gh;
@@ -296,7 +296,11 @@ describe('fake-gh generation 2 — stateful fake GitHub (#3383)', () => {
       numbers.push(gh.openPr({ repo: SLUG, head: `lane/c-${i}`, title: `c${i}` }));
     }
 
-    await Promise.all(numbers.map((n) => ghExecAsync(gh, ['pr', 'edit', String(n), '--repo', SLUG, '--add-label', 'review:accepted'], clonePath)));
+    // Drain every child before teardown, including when one command fails early.
+    const results = await Promise.allSettled(numbers.map((n) => ghExecAsync(gh, ['pr', 'edit', String(n), '--repo', SLUG, '--add-label', 'review:accepted'], clonePath)));
+    for (const result of results) {
+      if (result.status === 'rejected') throw result.reason;
+    }
 
     const prs = gh.prs(SLUG);
     for (const n of numbers) {
