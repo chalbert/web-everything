@@ -1,0 +1,21 @@
+{
+  "id": "delivery-strategy-decider",
+  "title": "Delivery strategies in the wild and a decider that picks between them: merge queues, batching, stacking, test selection, flake handling, conflict avoidance and main-red response, surveyed twice (Opus and Codex) against the conveyor's measured state",
+  "status": "open",
+  "summary": "Grounds decision x1hhjnb (a delivery-strategy decider picks per decision point from live signals, and fixed settings always win). Two independent surveys, one by Claude Opus with fetched sources and one by Codex, cover about 50 strategies: merge queues (GitHub, GitLab trains, Zuul, Uber SubmitQueue, Mergify, Aviator, Graphite, Trunk, Shopify, Prow Tide, Chromium CQ, Google TAP), batch sizing with bisection (Ericsson, Beheshtian, Kamath), stacked diffs, affected and predictive test selection, flake scoring and quarantine, culprit finding and auto-revert, Rosie-style sharding of large changes, conflict detection (Palantir, Crystal, ConE, Cassandra) and agent-specific dispatch. MEASURED 2026-10-03: of the last 100 main CI runs, 85 were cancelled because the CI workflow cancels in-progress runs per ref on pushes to main too; every completed main run from 12:00Z to 17:24Z failed; at 26 merges an hour a PR's own green is about six merges stale, which the merged-tree statute already forbids; 5 of 23 open PRs overlap. FINDINGS: every large shop combines testing several changes on the current trunk, bisection of a failed batch, affected-test selection and automatic flake and red-trunk handling; the best batch size falls as failure and flake rates rise, which is the case for a decider; GitHub's native merge queue is unavailable to a user-owned repo and ruled off; the batched queue is already ruled and deferred behind a saturation tripwire. DECIDER: a deterministic rule table per decision point, an opt-in auto value per setting, precedence invariant then per-item override then fixed value then decider then platform default, safety fields tighten-only, shadow mode first, every decision journaled. The skeptic pass refuted the draft's correctness un-gate for the batched queue (enforce the merged-tree statute instead), where Codex had disagreed with Opus.",
+  "dateOpened": "2026-10-03",
+  "lastReviewed": "2026-10-03",
+  "reviewHorizon": "P3M",
+  "tags": [
+    "conveyor",
+    "merge-policy",
+    "merge-queue",
+    "drain",
+    "ci",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "conveyor",
+  "relatedReport": "reports/2026-10-03-delivery-strategy-survey-and-decider.md"
+}
