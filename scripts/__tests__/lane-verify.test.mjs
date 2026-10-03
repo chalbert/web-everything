@@ -1173,3 +1173,15 @@ describe('verifyGateDecision — infrastructure-failure decision matrix (require
     expect(verifyGateDecision({ record, headSha: sha, requireVerified: false })).toMatchObject({ ok: true, reason: 'red-ci-gated' });
   });
 });
+
+it('timeout retry audit is bound to the finishing run and visible on red/green reads', () => {
+  const retriedTimeouts = ['untouched.test.mjs'];
+  for (const exitCode of [0, 1]) {
+    const record = verifyFinishBody({ sha: 'ours' }, { exitCode, retriedTimeouts });
+    expect(record.retriedTimeouts).toEqual(retriedTimeouts);
+    const verdict = verifyGateDecision({ record, headSha: 'ours' });
+    expect(verdict.retriedTimeouts).toEqual(retriedTimeouts);
+    expect(verdict.detail).toContain('untouched.test.mjs');
+    expect(verifyFinishBody(record, { exitCode }).retriedTimeouts).toBeUndefined();
+  }
+});

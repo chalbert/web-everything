@@ -95,7 +95,7 @@ export function composeGate({ vitestCmd, checkStandardsCmd, scripts }) {
   if (halves.length === 0) {
     return { command: `echo ${shellQuote('verify-lane: no test:unit/test/check:standards npm script in this checkout — nothing to run')}`, gateReasons };
   }
-  return { command: halves.join(' && '), gateReasons };
+  return { command: halves.join(' && '), gateReasons, testCommand: testHalf, standardsCommand: standardsHalf };
 }
 
 /** Single-quote a string for safe inclusion in a shell command (handles an embedded `'`). */
