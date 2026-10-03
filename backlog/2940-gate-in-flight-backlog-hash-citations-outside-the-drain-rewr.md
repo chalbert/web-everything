@@ -1,48 +1,128 @@
 ---
 bornAs: xabqoah
-kind: task
+kind: story
+size: 3
+parent: "x0hvbwx"
 status: open
+blockedBy: ["xcs4nce"]
+scope: ["we:scripts/check-standards.mjs", "we:scripts/check-standards-rules.mjs", "we:scripts/__tests__/check-standards.test.mjs", "we:scripts/__tests__/check-standards-main-state-parity.test.mjs", "we:scripts/lane-drain.mjs", "we:scripts/__tests__/lane-drain.test.mjs", "we:scripts/__tests__/lane-drain-numbering.test.mjs"]
 dateOpened: "2026-08-05"
-tags: [backlog, gate, hygiene]
+preparedDate: "2026-10-03"
+preparedAgainstSha: "838e849ab8b35fa4b94216b7d474b3138d979ba5"
+tags: [backlog, gate, hygiene, policy, ci]
 ---
 
 # Gate in-flight backlog hash citations outside the drain's rewrite scope
 
+**Re-aimed 2026-10-03** under epic #x0hvbwx as the `prCi.mainStateParity` story. A PR's check now runs the
+drain's post-land numbering as a dry run on the PR merged with current main, so a PR that would make the
+drain refuse fails on the PR, not on main. Governed by `prCi.mainStateParity` (default `on`).
+
+## Original premise (kept for lineage)
+
 JIT numbering (#2288) gives a new item a temporary hash id (`x` + six chars) that the drain rewrites to its
-real `NNN` at land. `numberPendingHashes` (`we:scripts/lane-drain.mjs`) rewrites only `backlog/*.md` and
-`docs/agent/*.md`. Every hash citation planted anywhere ELSE — `scripts/**`, `skills-src/**`, tests — is
-never rewritten and dangles permanently once the item lands.
-
-## Why it is owed
-
-The class is already proven to rot in this repo: `we:scripts/lane-drain.mjs` cites `2411`, which resolves
-to nothing. PR #1046 (`#2942`) planted roughly 60 more across `scripts/**` and `skills-src/**` in a single
-change; three of them were RUNTIME-emitted text handed to a live reviewing model (a mandate line and two
-JSON-schema `description` fields), which is strictly worse than a stale comment — a reviewer cannot look up
-a backlog hash and should never be shown one. Those three were stripped by hand; the rest were left, because
-renumbering 60 sites by hand is its own error source.
-
-Nothing today tells an author that a hash they type outside `backlog/` + `docs/agent/` will never be
-rewritten. The rewrite scope is a constant inside one script, invisible at the point of authorship.
-
-## The guard
-
-A `check:standards` rule: error on any IN-FLIGHT hash token matching `x[0-9a-z]{6}` that appears outside the
-drain's rewrite scope.
-
-- **Derive both sets from the same constant.** The scan set and the exemption set must come from the SAME
-  exported constant `numberPendingHashes` uses to decide what it rewrites — if the drain widens or narrows
-  its scope, the gate follows automatically. Two independently maintained path lists is the same drift the
-  rule exists to catch.
-- **In-flight only.** A hash for an item that has already landed (no `backlog/<hash>-*.md` on disk) is a
-  different, worse problem — a dangling citation — and should read as such in the message. A hash matching a
-  live item is a warning that it is about to dangle.
-- **Runtime text is a hard error, comments are the ordinary case.** A hash inside a string literal that is
-  emitted to a model or a user (prompt text, a schema `description`) must never be allowed; a source comment
-  is the class this gate is nudging.
-- The remedy the message should suggest: cite the durable thing (the symbol, the invariant, the landed
-  parent item) rather than the temporary id, or wait for the item's `NNN`.
+real `NNN` at land. Every hash citation planted outside the rewrite scope dangles once the item lands. PR
+#1046 (`#2942`) planted about 60 across `we:scripts/` and `we:skills-src/`; three were runtime text shown to a
+reviewing model. The original ask: a `check:standards` rule that errors on in-flight hash citations outside
+the drain's rewrite scope, derived from the same code the drain uses, so the gate follows any change to the
+scope.
 
 **Prevention for:** PR #1046 review, round 2 finding 8 (`#2942`).
 
-**Locus:** `we:scripts/check-standards.mjs`, `we:scripts/lane-drain.mjs`
+## Progress
+
+Prepared 2026-10-03 against `838e849ab`.
+
+| Old premise or scope | Corrected, with evidence |
+| --- | --- |
+| The drain rewrites only `backlog/` and `docs/agent/`. | Wider now: `backlog/`, `docs/agent/`, `agent-memory-src/` and the conveyor flows (`we:scripts/lane-drain.mjs:647-652`). Open PR #3788 adds the top-level soak break definitions. |
+| An out-of-scope citation silently dangles after land. | Since the #4075 hardening, a hash-**path** citation outside the scope makes the drain **refuse the whole numbering pass** (`we:scripts/lane-drain.mjs:840-875`). That is worse: every pending card stays un-numbered. On 2026-10-03, the merge of PR #3176 (`bc9db934c`) put a soak citation outside the scope, the numbering refused, 282 cards stayed hash-named on main, and main's CI went red with 270 errors. |
+| The fix is a new scan over a path constant. | The drain's own refusal logic can run as a dry run: `numberPendingHashes(cwd, { dryRun: true })` reaches the refusal check before its dry-run return (`we:scripts/lane-drain.mjs:840-875`, then `:889`). Calling it **is** "derive from the same code". No second path list. |
+| PR CI and main judge the same thing. | **No.** `strandedHashesOnMain` hard-errors on main but only warns in a lane or in PR CI (`we:scripts/check-standards.mjs:774`, through `isPullRequestCiRun` at `we:scripts/check-standards-rules.mjs:2865-2868`, rule at `:2870-2899`). So PR #3176 was green while its land turned main red: failure mode (1). |
+
+Scope widened from "a citation rule" to "PR-side parity for main-only rules", with the dry run as the first
+parity rule. The original goal, catching the dangling citation before land, is kept and delivered by the dry
+run.
+
+## Design
+
+1. **Dry-run parity rule** `drainPostLandDryRun(root, { baseRef })` in `we:scripts/check-standards-rules.mjs`.
+   It calls `numberPendingHashes(root, { dryRun: true })`. The refusal result today carries only an `error`
+   string; the builder adds a structured `refusals: [{ file, hash }]` field beside it in
+   `we:scripts/lane-drain.mjs` (the list `unsweptHashPathCites` already holds), with a test in
+   `we:scripts/__tests__/lane-drain-numbering.test.mjs`. Start after PR #3788, which changes the same refusal path.
+2. **Caused vs inherited: only a refusal this PR causes is an error.** The strand rule was deliberately
+   relaxed in PR CI and in lanes because erroring on a condition already on main wedged `verify-lane` for
+   every lane and turned each pre-existing strand into a red test for an unrelated PR (see the comment at
+   `we:scripts/check-standards-rules.mjs:2860-2868`). This rule keeps that lesson. Each refusal `{ file, hash }`
+   is **caused** by the PR when `file` is among the PR's changed files (`git diff --name-only <baseRef>...HEAD`)
+   or `hash` names a pending card the PR adds or edits. Otherwise it is **inherited**.
+   - Caused, under `on`, in PR CI or a lane: a hard error: "after this lands, the drain's JIT numbering will
+     refuse: <detail>. Cite the durable thing, or widen the sweep."
+   - Inherited, in PR CI or a lane: a **warning** naming the refusal and saying it comes from main, never an
+     error. An unrelated PR stays green on a main that already holds a refusing citation, and a CI heal is not
+     asked to fix what it cannot.
+   - No `baseRef` available (a bare lane with no origin ref): everything is inherited, so a warning only. The
+     rule fails open to today's relaxed behaviour rather than wedging a lane.
+   - On main (push-to-main CI): any refusal is an error, because a strand is about to happen or has.
+   - In PR CI, the checkout is the PR merged with current main (`we:.github/workflows/ci.yml:168-172`,
+     check-standards at `:215`), and `baseRef` is the PR's base (`origin/<base>`).
+3. **Main-state rule registry.** Export `MAIN_STATE_RULES` from `we:scripts/check-standards-rules.mjs`. It
+   lists each rule whose severity depends on the locus (today `strandedHashesOnMain`) next to its PR-side
+   twin (`drainPostLandDryRun`). A test fails if `we:scripts/check-standards.mjs` branches on
+   `isPullRequestCiRun` or `inLane` for a rule that is not in the registry. So a new main-only difference
+   cannot land without a PR-side twin.
+4. **Policy.** `on`: the dry-run rule runs. `off`: it is skipped (today's behaviour). Read through the loader
+   from story #xcs4nce. In PR CI and lanes, the policy is read from the **base** copy of the config
+   (`ref` = `baseRef`), so a PR cannot switch this rule off for itself.
+
+This also covers failure mode (3), a CI heal turning a PR green without fixing the cause. Under `on`, a heal
+is judged by the same post-land rule, so it cannot green a PR whose land would stop the numbering.
+
+## MVP
+
+Steps 1 to 4.
+
+## Test plan
+
+- **Capability (RED today, fails before this lands):** `we:scripts/__tests__/check-standards-main-state-parity.test.mjs`:
+  - **Replay of the PR #3176 merge (`bc9db934c`):** a temp repo with a pending card `xhash01-alpha` and a file
+    outside the rewrite scope citing that card by its hash-named backlog path. Use the nested fixture path from PR #3788's
+    refusal cases, so the case stays valid after #3788 widens the sweep. Run with
+    `GITHUB_EVENT_NAME=pull_request` and `GITHUB_ACTIONS=true`.
+    - Before this story: no error on the PR.
+    - After, under `on`: one error naming the file and the hash.
+    - Under `off`: no error.
+  - Default (no config): behaves as `on`.
+  - **Inherited, not caused (an unrelated PR on a main that already refuses):** main already holds the PR
+    #3176 citation (the 2026-10-03 state). A PR that changes only an unrelated file gets a **warning** naming
+    the inherited refusal and **no error**, in PR CI and in a lane. The same tree on push-to-main is an error.
+  - **Caused:** a PR that adds a new out-of-scope citation of a pending hash, and a PR that adds a pending
+    card whose hash main already cites out of scope, each get an error. A PR that touches the file that
+    already holds the citation (without introducing it) is judged by `file` in the diff: error.
+  - No `baseRef`: the refusal is a warning only.
+  - The policy file is read from the base: a PR whose head sets `prCi.mainStateParity` to `off` is still
+    judged under the base's `on`.
+  - A clean tree (citations only in scope): no error under either value.
+  - The registry test: a locus branch with no registered twin fails.
+
+## Proof plan
+
+1. In a scratch clone, check out the PR #3176 merge state (`bc9db934c`) and run `npm run check:standards`
+   with the pull-request environment set. **Before** (current main's rules): passes, with only the
+   stranded-hash warning path. **After:** fails with the dry-run error naming the soak citation.
+2. Run the same on current origin/main (which already holds the inherited refusal) with an unrelated one-file
+   PR on top. It must show a warning and **no error**, so the rule adds no false red.
+3. Paste both outputs in the PR.
+
+## Follow-ups
+
+- Bare hash tokens (an `x` plus six characters, without a backlog path) outside the scope do not make the
+  drain refuse. They only dangle. A warning for them was part of the original ask. It is left as a follow-up,
+  because it never turns main red.
+
+## Done when
+
+1. **Executable:** the replay case in `we:scripts/__tests__/check-standards-main-state-parity.test.mjs` fails
+   before this lands and passes after.
+2. Proof steps 1 and 2 are pasted in the PR.
