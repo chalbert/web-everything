@@ -1028,11 +1028,11 @@ describe('#4315 durable referral effects', () => {
       readPrState: () => { trace.push('read'); return structuredClone(state); },
       postComment: (repo, pr, body) => {
         trace.push('post');
-        if (!body.includes('<!-- mandatory-referrals-v1:')) { state.comments.push({ body }); return; }
+        if (!body.includes('<!-- mandatory-referrals-v1:')) { state.comments.push({ body, author: { login: 'web-everything' } }); return; }
         posts++;
         if (failure === 'post' || (failure === 'attempt' && posts === 2)
           || (['completion', 'failure-snapshot'].includes(failure) && posts === 3)) throw new Error('post unavailable');
-        if (failure !== 'read-back') state.comments.push({ body });
+        if (failure !== 'read-back') state.comments.push({ body, author: { login: 'web-everything' } });
         if (failure === 'changed-head') state.headRefOid = 'b'.repeat(40);
       },
       setLabels: (repo, pr, plan) => { trace.push(`label:${plan.add}`); state.labels = [...state.labels.filter(l => !plan.remove.includes(l)), plan.add]; },
@@ -1166,7 +1166,8 @@ describe('#4315 durable referral effects', () => {
     const oldRecord = (i, findings) => ({ version: 1, repo: 'o/r', pr: 7,
       head: (i + 1).toString(16).padStart(40, '0'), runId: `earlier-${i}`, reviewer: mandatoryReferralReviewer(`earlier-${i}`),
       authorBody: h.state.body, attempted: true, referrals: findings, rulings: [] });
-    h.state.comments = referrals.map((f, i) => ({ body: renderReferralRecord(oldRecord(i, i ? [referrals[0], f] : [f])) }));
+    h.state.comments = referrals.map((f, i) => ({ body: renderReferralRecord(oldRecord(i, i ? [referrals[0], f] : [f])),
+      author: { login: 'web-everything' } }));
     expect(renderReferralRecord(oldRecord(0, referrals)).length).toBeGreaterThan(60_000);
     const result = await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX);
     const posted = h.state.comments.slice(42);
@@ -1231,11 +1232,11 @@ describe('#4315 durable referral effects', () => {
   });
   it('ignores stale malformed records through persistence and retains the current-head clear-human guard', async () => {
     const h = harness();
-    h.state.comments.push({ body: `<!-- mandatory-referrals-v1: ${encodeURIComponent(JSON.stringify({ head: 'b'.repeat(40) }))} -->` });
+    h.state.comments.push({ body: `<!-- mandatory-referrals-v1: ${encodeURIComponent(JSON.stringify({ head: 'b'.repeat(40) }))} -->`, author: { login: 'web-everything' } });
     const result = await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX);
     expect(result.pending).toEqual([]);
     expect(() => assertMandatoryReferralsCleared(h.state, { repo: 'o/r', pr: 7 })).not.toThrow();
-    h.state.comments.push({ body: '<!-- mandatory-referrals-v1: %truncated' });
+    h.state.comments.push({ body: '<!-- mandatory-referrals-v1: %truncated', author: { login: 'web-everything' } });
     expect(() => assertMandatoryReferralsCleared(h.state, { repo: 'o/r', pr: 7 })).toThrow(/mandatory referral hold/);
     const pending = harness({ failure: 'judge' });
     await pending.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](pending.payload, CTX);
@@ -1251,6 +1252,17 @@ describe('#4315 durable referral effects', () => {
     expect(h.state.labels).toEqual(['review:human']);
     expect(h.trace.indexOf('post')).toBeLessThan(h.trace.indexOf('judge'));
     expect(h.trace.slice(0, h.trace.indexOf('judge'))).toContain('read');
+  });
+  it('skips an unattempted new record already covered by another run ruling', async () => {
+    const h = harness();
+    await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX);
+    const old = readReferralRecords(h.state.comments).records[0];
+    const next = { ...old, runId: 'new-record', reviewer: mandatoryReferralReviewer('new-record'), attempted: false, rulings: [] };
+    h.state.comments.push({ body: renderReferralRecord(next), author: { login: 'web-everything' } });
+    const result = await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, { ...CTX, runId: 'next' });
+    expect(result.pending).toEqual([]);
+    expect(h.judge).toHaveBeenCalledTimes(1);
+    expect(h.state.comments).toHaveLength(4);
   });
   it('posts and reads back rulings before returning clearance, then reuses them', async () => {
     const h = harness();

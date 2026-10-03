@@ -1,4 +1,4 @@
-import { normalizeFinding, referralFindingKey, mandatoryReferralReviewer, validateReferralRecord,
+import { normalizeFinding, referralRecordState, referralFindingKey, mandatoryReferralReviewer, validateReferralRecord,
   readReferralRecords, mandatoryReferralState, renderReferralRecord } from '../lib/jury-core.mjs';
 import { judgeSpawn } from '../lib/judge-spawn.mjs';
 import { appendJuryEvent } from '../lib/jury-ledger.mjs';
@@ -579,7 +579,8 @@ export function createReviewPrSinks({
         }
         // Persist the attempt before dispatch. A crash or timeout spends this set's single automated attempt.
         for (const initial of existing) {
-          if (initial.attempted) continue;
+          if (initial.attempted || !referralRecordState(initial, { ...context(state),
+            records: readReferralRecords(state.comments, context(state)).records }).pending.length) continue;
           let record = { ...initial, attempted: true };
           state = persist(record);
           // Hold before dispatch too: an exhausted or interrupted worker must leave a visible owner.
