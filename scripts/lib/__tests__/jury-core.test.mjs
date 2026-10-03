@@ -1593,9 +1593,9 @@ describe('#4315 mandatory referral protocol', () => {
         continue;
       }
       expect(validateReferralRecord(dropped)).toBe(true);
-      const comments = [renderReferralRecord(r), renderReferralRecord(dropped)];
+      const comments = [renderReferralRecord(r), renderReferralRecord(dropped)].map(b => post(b));
       expect(mandatoryReferralState(comments, { head: r.head }).pending).toEqual([]);
-      expect(readReferralRecords([...comments, renderReferralRecord({ ...r, failure: 'omitted drop' })]).malformed).toBe(true);
+      expect(readReferralRecords([...comments, post(renderReferralRecord({ ...r, failure: 'omitted drop' }))]).malformed).toBe(true);
       expect(validateReferralRecord({ ...dropped, dropped: [...dropped.dropped, ...dropped.dropped] })).toBe(false);
       expect(validateReferralRecord({ ...dropped, dropped: [{ key: 'unknown', reason: dropped.dropped[0].reason }] })).toBe(false);
       expect(validateReferralRecord({ ...dropped, dropped: [{ key: r.referrals[0].key, reason: 'ignore' }] })).toBe(false);
@@ -1608,7 +1608,7 @@ describe('#4315 mandatory referral protocol', () => {
     const ruled = { ...r, rulings: [rule(r, 'block')], dropped: [{ key: r.referrals[0].key, reason: 'dropped: seat disabled by operator config' }] };
     expect(validateReferralRecord(ruled)).toBe(true);
     expect(activeReferrals(ruled)).toHaveLength(1);
-    expect(mandatoryReferralState([renderReferralRecord(ruled)], { head: r.head }).blocked).toEqual([r.referrals[0].key]);
+    expect(mandatoryReferralState([post(renderReferralRecord(ruled))], { head: r.head }).blocked).toEqual([r.referrals[0].key]);
   });
   it.each(['broken', 'unrecoverable'])('refers %s regardless of outcome, prevention or disposition', impactIfUnfixed => {
     for (const outcome of ['fixed', 'skipped', 'no_change_needed', undefined]) {

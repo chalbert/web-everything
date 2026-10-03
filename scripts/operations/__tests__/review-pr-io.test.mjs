@@ -1061,7 +1061,7 @@ describe('#4315 durable referral effects', () => {
       reviewer: mandatoryReferralReviewer('earlier-run'), authorBody: h.state.body,
       attempted: true, referrals, rulings: [] };
     record.rulings = rule(record);
-    h.state.comments.push({ body: renderReferralRecord(record) });
+    h.state.comments.push({ body: renderReferralRecord(record), author: { login: 'web-everything' } });
     h.payload.referrals = [];
     return record;
   }
