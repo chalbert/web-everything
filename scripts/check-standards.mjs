@@ -69,7 +69,7 @@ import {
   validateUntrackedDerivedArtifacts, DERIVED_ARTIFACT_DIRS,
   duplicateBacklogNums,
   duplicateBornAs,
-  strandedHashesOnMain,
+  strandedHashesOnMain, isPullRequestCiRun,
   handNumberedNewItems,
   validatePlaywrightContainerPin, extractPlaywrightContainerTags, PLAYWRIGHT_CONTAINER_PIN_REQUIRED_FILES,
   validateDeclaredModuleContract,
@@ -114,6 +114,7 @@ import {
 import { TRUST_CHAIN, POLICY_SPEC_BASENAMES } from './lib/gate-config.mjs';
 // #2892 — the leash-pin rule asserts against the REAL rubric, not a copy of its predicate.
 import { scoreEscalation } from './lib/review-escalation.mjs';
+import { localChangedSet } from './lib/verify-lane-gate.mjs';
 import { scanDiffBranchCoverage } from './lib/diff-branch-coverage.mjs';
 import { isHash } from './backlog/id.mjs';
 
@@ -770,7 +771,7 @@ if (!LOCAL_MODE) {
         return Number.isFinite(epoch) ? epoch : null;
       } catch { return null; } // unknown → strandedHashesOnMain treats as NOT in-flight (fails toward erroring)
     };
-    const stranded = strandedHashesOnMain(mainBacklog, { commitTimeFor, inLane: isLaneLocus(resolveReal(ROOT), sep) });
+    const stranded = strandedHashesOnMain(mainBacklog, { commitTimeFor, inLane: isLaneLocus(resolveReal(ROOT), sep) || isPullRequestCiRun() });
     for (const msg of stranded.errors) err(msg);
     for (const msg of stranded.warnings) warn(msg);
     // #2548 — hand-numbered-new-item gate: a working-tree item with a hand-picked NNN not yet on origin/main.
@@ -987,6 +988,15 @@ mark("6d-quinquies. Unquoted-colon scalar in frontmatter (#453)");
       execFileSync('git', ['ls-files', '-z'], { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
         .split('\0').filter(Boolean));
   } catch { /* non-git environment — the scope-path WARN below is simply not emitted */ }
+  // Use the lane gate's merge-base + staged/unstaged + untracked selection. Linked
+  // cards are not edits: only the literal diff can promote legacy scope debt to errors.
+  const scopeChanges = localChangedSet({ runGit: (args) => execFileSync('git', args, {
+    cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'],
+  }) });
+  if (!scopeChanges) throw new Error('Cannot enforce backlog scope guards: unable to read the diff against origin/main. Fetch the base history and retry.');
+  const changedScopeCards = new Set(scopeChanges.changedFiles.filter((f) =>
+    f.startsWith('backlog/') && f.endsWith('.md') && !scopeChanges.deletedFiles.includes(f)
+    && (!LOCAL_FILES || LOCAL_FILES.has(f))));
   for (const file of readdirSync(join(ROOT, 'backlog')).filter((f) => f.endsWith('.md'))) {
     let raw, body = '';
     try { const fm = matterFm(readFileSync(join(ROOT, 'backlog', file), 'utf8')); raw = fm.data; body = fm.content; }
@@ -1054,12 +1064,14 @@ mark("6d-quinquies. Unquoted-colon scalar in frontmatter (#453)");
     for (const finding of scopeBasenameMismatches(raw, trackedIndex))
       warn(scopeBasenameMismatchMessage(id, finding));
 
-    // ── #4448 guards 4 + 5 — scope vs. what the card commits to. WARN only; `scopeRationale:` clears both. ──
+    // ── #4448 guards 4 + 5 — errors on edited cards; legacy warnings stay ratcheted. ──
+    const scopeReport = changedScopeCards.has(`backlog/${file}`) ? err : warn;
+    const scopeDescriptor = { kind: 'backlog-scope-body', file: `backlog/${file}`, fix: 'model' };
     for (const f of scopeMissingTestFile(raw, trackedIndex, body))
-      warn(`Backlog item "${id}" scopes "${f.entry}" and mandates a test plan, but its tracked test "we:${f.testPath}" is not in scope: — the lease will not cover the test the build must edit (#4448). Add it, or add a \`scopeRationale:\` note.`);
+      scopeReport(`Backlog item "${id}" scopes "${f.entry}" and mandates a test plan, but its tracked test "we:${f.testPath}" is not in scope: — the lease will not cover the test the build must edit (#4448). Add it, or add a \`scopeRationale:\` note.`, scopeDescriptor);
     const undeclared = bodyDeliverablesMissingFromScope(raw, body);
     if (undeclared.length)
-      warn(`Backlog item "${id}" names deliverable${undeclared.length > 1 ? 's' : ''} ${JSON.stringify(undeclared)} under ## MVP / ## Done when that ${undeclared.length > 1 ? 'are' : 'is'} missing from scope: (#4448). Add ${undeclared.length > 1 ? 'them' : 'it'}, or add a \`scopeRationale:\` note.`);
+      scopeReport(`Backlog item "${id}" names deliverable${undeclared.length > 1 ? 's' : ''} ${JSON.stringify(undeclared)} under ## MVP / ## Done when that ${undeclared.length > 1 ? 'are' : 'is'} missing from scope: (#4448). Add ${undeclared.length > 1 ? 'them' : 'it'}, or add a \`scopeRationale:\` note.`, scopeDescriptor);
   }
 }
 

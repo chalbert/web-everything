@@ -13,7 +13,7 @@ import {
   validateUntrackedDerivedArtifacts, DERIVED_ARTIFACT_DIRS,
   duplicateBornAs,
   duplicateBacklogNums,
-  strandedHashesOnMain, STRANDED_HASH_GRACE_SECONDS,
+  strandedHashesOnMain, STRANDED_HASH_GRACE_SECONDS, isPullRequestCiRun,
   handNumberedNewItems,
   extractPlaywrightContainerTags,
   validatePlaywrightContainerPin, PLAYWRIGHT_CONTAINER_PIN_REQUIRED_FILES,
@@ -222,6 +222,13 @@ describe('strandedHashesOnMain — the #2319 hash-on-main invariant (pure detect
   });
   it('inLane false (the default) keeps the hard error for a genuine strand', () => {
     expect(strandedHashesOnMain(['backlog/xbvktb4-stranded.md'], { inLane: false }).errors).toHaveLength(1);
+  });
+  it('isPullRequestCiRun: true only for a GitHub Actions pull_request run — push/schedule/local keep the hard error', () => {
+    expect(isPullRequestCiRun({ GITHUB_ACTIONS: 'true', GITHUB_EVENT_NAME: 'pull_request' })).toBe(true);
+    expect(isPullRequestCiRun({ GITHUB_ACTIONS: 'true', GITHUB_EVENT_NAME: 'pull_request_target' })).toBe(true);
+    expect(isPullRequestCiRun({ GITHUB_ACTIONS: 'true', GITHUB_EVENT_NAME: 'push' })).toBe(false);
+    expect(isPullRequestCiRun({ GITHUB_EVENT_NAME: 'pull_request' })).toBe(false);
+    expect(isPullRequestCiRun({})).toBe(false);
   });
 
   // #2956 — the drain's own in-flight numbering window (merge commit pushed, JIT-numbering commit not yet
