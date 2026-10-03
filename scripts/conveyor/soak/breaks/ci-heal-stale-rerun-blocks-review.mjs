@@ -14,7 +14,7 @@
  * rollup: 7 stale `review-gate` FAILUREs beside 11 SUCCESSes, all on head `cf59b9d10`). `we:scripts/progress-
  * board.mjs#ciFailed` and `we:scripts/operations/pr-status.mjs#reduceCheckState` both scanned the RAW rollup
  * array with a flat `.some()`/`.filter()` — never collapsing to the LATEST run per check name first, unlike the
- * established `collapseRollupToLatestPerName` reader (`we:scripts/merge-ai-prs.mjs`, #2925/#xkfv491) their own
+ * established `collapseRollupToLatestPerName` reader (`we:scripts/merge-ai-prs.mjs`, #2925/#2932) their own
  * SIBLING single-check readers (`isRequiredCheckGreen`/`isRequiredCheckFailed`) already use. `review-gate`
  * itself is excluded from CI truth either way (`CI_TRUTH_EXCLUDED_CHECKS`) — but ANY required check that
  * reruns more than once on one head (this soak uses `test`, already in the FALLBACK required set so no branch-

@@ -136,3 +136,36 @@ Care level: `high`. This jury binds against the item's predicted scope and is re
 3. **Executable** — a listing of the backlog folder on the branch has each of the ids 3663, 3664, 3665 and 3666 exactly once. (Passes today.)
 4. **Human verify** — `git log -5 --format=%an` on the branch shows the operator's real name on new commits, not the placeholder `test`.
 5. **Executable — kept: #3822's ruling adopts the recurrence guard (Fork 3(a))** — a test of the push guard fails when a push adds one `check:standards` error in its own files, and a test of the probe raises an alert when the tip has one error the push did not cause.
+
+## Progress
+
+- 2026-10-03 — Checkout audit before implementation: this checkout is on `main` at
+  `fe1d5f0649b3d3ff54579f94d48d14a9171eddeb`, not the prototype branch. The working tree was clean.
+  `npm run check:standards` reports **0 errors, 5547 warnings** here. This is local baseline
+  evidence, not the fresh prototype-branch clone proof required by Done-when 1.
+- The reported Artifact URLs are absent from
+  `we:backlog/3383-a-background-mechanical-dispatcher-replaces-the-interactive.md` in this checkout.
+  Each of IDs 3663–3666 occurs exactly once in `we:backlog/`. The real-mechanism tests already exist
+  at `we:scripts/operations/__tests__/land-advance-io-real.test.mjs`.
+  The scoped file `we:scripts/operations/wip-report-io.mjs` is absent here (it exists on the
+  locally available remote-tracking prototype ref).
+- Done-when 2 is also unmet locally: the baseline emits one warning for
+  `we:backlog/3475-automated-transcript-based-introspection-at-session-close-re.md`, whose cite to
+  line 217 of `we:scripts/conveyor/session-reaper.mjs` points at a blank line.
+- Implementation is blocked by the declared scope: Done-when 5 requires a push guard and a runner
+  probe, but neither `we:.githooks/pre-push` nor `we:skills-src/conveyor/runner.mjs` is in scope,
+  and `we:scripts/guard-poc-branch-health.mjs` does not exist here. The required citation repair in
+  `we:backlog/3475-automated-transcript-based-introspection-at-session-close-re.md` is also outside
+  scope. No gate or test has been weakened, and no implementation or recurrence proof is claimed.
+- Initial `node we:scripts/verify-lane.mjs` exited 3 with `selection-required` because the clean
+  checkout had an empty diff against the merge base. After this evidence update, the same command
+  exited 0 and recorded green: no related tests, standards 0 errors and 5548 warnings (including a
+  repeated blank-line citation in this note, subsequently reworded). Resolution remains pending
+  the implementation and its required proof; this documentation-only verification does not prove
+  the recurrence guard, a soak, or prototype-branch health.
+
+## Follow-ups
+
+- Reconcile the declared scope with the ratified recurrence guard and identify how the prototype
+  branch proof is to be exercised from this checkout. The card has no separate MVP, Test plan,
+  Proof plan or soak section; its executable acceptance requirements are under Done when.

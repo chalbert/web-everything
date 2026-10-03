@@ -1,6 +1,6 @@
 /**
  * @file breaks/lease-reaper-hand-briefed-owner-invisible.mjs — live break, confirmed 2026-09-28 (still unfixed on
- * `main`), fixed by we:backlog/xbk2is9-lease-reaper-session-gone-axis-reaps-hand-briefed.md (PR body carries the
+ * `main`), fixed by we:backlog/4371-lease-reaper-session-gone-axis-reaps-hand-briefed.md (PR body carries the
  * item number; the card itself is filed on PR #2863, not yet on `main` at the time this break was written).
  *
  * LIVE INCIDENT. A delivery agent started BY HAND — an in-process Agent-tool subagent following
@@ -16,7 +16,7 @@
  * the exact same moment by the reclaim `--salvage` gate's own `liveAgentInLane` check ("owning session is still
  * live (claude agents)") — the reaper and the reclaim gate disagreed about the SAME lease's liveness.
  *
- * FIX (#xbk2is9): in the ABSENCE branch only — never overriding a direct death signal about the lease's own
+ * FIX (#4371): in the ABSENCE branch only — never overriding a direct death signal about the lease's own
  * tracked session (a listed terminal state, or a real `pidAlive === false` read) — check the lease's declared
  * occupant, `workerSession` (never `ownerSession`, the dispatcher's own long-lived id — see
  * `ownerSessionAliveForLease`'s own doc for why that would be a DIFFERENT, worse bug), against the SAME listing
@@ -74,7 +74,7 @@ function fakeClaudeBin(root, agentsListing) {
 export default {
   id: 'lease-reaper-hand-briefed-owner-invisible',
   title: "the resident lease-reaper's session-gone axis only ever looks up a lease's OWN dispatcher-grammar session name — a hand-briefed (in-process Agent-tool) delivery agent's owning interactive session is never listed under that name, so its still-live lease gets force-released once the 10-minute listing-visibility grace window passes",
-  card: 'we:backlog/xbk2is9 (PR #2863 files the card; not yet on main)',
+  card: 'we:backlog/4371 (PR #2863 files the card; not yet on main)',
   fixedBy: {
     sha: 'PENDING-FILL-AT-LAND',
     where: 'main',

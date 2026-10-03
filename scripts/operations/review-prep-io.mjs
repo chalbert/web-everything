@@ -43,6 +43,7 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 
 import { REVIEW_PREP_EFFECTS, isCleanPrepReview, renderPrepReviewSection } from './review-prep.mjs';
+import { writeBacklogMd } from '../backlog/guarded-write.mjs';
 import { notApplied } from './effect-executor.mjs';
 import { pushRefusal, callerIdentity } from '../conveyor/fix-procedure.mjs';
 
@@ -301,9 +302,14 @@ export async function recordPrepVerdict({
   const date = todayIso();
   const section = renderPrepReviewSection({ date, confidence, risks, corrections, fixApplied, note });
   const updated = `${raw.replace(/\s+$/, '')}\n\n${section}\n`;
-  writeFileSync(path, updated, 'utf8');
-
   const relPath = path.startsWith(cwd) ? path.slice(cwd.length + 1) : path;
+  try {
+    writeBacklogMd(path, relPath, updated, { root: cwd });
+  } catch (error) {
+    // Known pre-write refusals are determinate; unexpected IO failures still propagate.
+    if (!['lane-guard', 'secret', 'locus'].includes(error?.cause)) throw error;
+    return { recorded: false, verified: false, path, reason: error.cause, message: error.message };
+  }
 
   try {
     exec('git', ['add', '--', relPath], { cwd });

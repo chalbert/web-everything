@@ -14,9 +14,11 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readdirSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { numberPendingHashes, landedNumberFor, cardPathInTree, hasPendingHashFiles, numberPendingHashesIfAny, finalizeLand } from '../lane-drain.mjs';
 import { tryAcquireNumberingLock } from '../readiness/drain-lock.mjs';
 import { checkFlow } from '../conveyor/flows/flow-model.mjs';
+import { strandedHashesOnMain } from '../check-standards-rules.mjs';
 
 const DRAIN_CLI = join(process.cwd(), 'scripts/lane-drain.mjs');
 
@@ -40,6 +42,120 @@ beforeEach(() => {
 afterEach(() => { try { rmSync(repo, { recursive: true, force: true }); } catch { /* best-effort */ } });
 
 describe('numberPendingHashes — drain JIT numbering wire (#2288)', () => {
+  it('numbers pending cards on main with soak-definition citations and repairs those citations atomically', () => {
+    write('backlog/2200-legacy.md', '---\nkind: story\n---\n# Legacy\n');
+    write('backlog/xhash01-alpha.md', '---\nkind: story\nstatus: open\n---\n# Alpha\n');
+    const definition = 'scripts/conveyor/soak/breaks/regression.mjs';
+    write(definition, "export default { card: 'we:backlog/xhash01-alpha.md (epic #2288)' };\n");
+    const fixture = 'scripts/conveyor/soak/breaks/fixtures/input.mjs';
+    write(fixture, "export const syntheticId = 'xhash01';\n");
+    const testFile = 'scripts/conveyor/soak/breaks/regression.test.mjs';
+    write(testFile, "// Synthetic fixture: we:backlog/xhash01-alpha.md\n");
+    const untracked = 'scripts/conveyor/soak/breaks/local.mjs';
+    write(QUEUED_REL, JSON.stringify({ queued: [] }));
+    git('add', 'backlog', 'scripts', '.claude', '.gitignore'); git('commit', '-qm', 'land pending card');
+    write(untracked, "export const localId = 'xhash01';\n");
+
+    const paths = () => git('ls-tree', '-r', '--name-only', 'HEAD', '--', 'backlog/').trim().split('\n');
+    const committedAt = Number(git('show', '-s', '--format=%ct', 'HEAD').trim());
+    const pending = strandedHashesOnMain(paths(), {
+      commitTimeFor: () => committedAt, now: () => committedAt + 40,
+    });
+    expect(pending.errors).toEqual([]); // legitimately pending on main within the JIT window
+    expect(pending.warnings).toHaveLength(1);
+    // Full history must still expose a real strand after the window; card status is irrelevant.
+    expect(strandedHashesOnMain(paths(), {
+      commitTimeFor: () => committedAt, now: () => committedAt + 3600,
+    }).errors).toHaveLength(1);
+
+    const before = git('rev-parse', 'HEAD').trim();
+    const planned = numberPendingHashes(repo, { dryRun: true });
+    expect(planned.assigned).toEqual([{ hash: 'xhash01', nnn: '2201' }]);
+    expect(git('rev-parse', 'HEAD').trim()).toBe(before);
+    expect(readFileSync(join(repo, definition), 'utf8')).toContain('xhash01-alpha');
+    const res = numberPendingHashes(repo);
+    expect(res.error).toBeUndefined();
+    expect(res.committed).toBe(true);
+    expect(git('rev-list', '--count', `${before}..HEAD`).trim()).toBe('1');
+    expect(git('show', `HEAD:${definition}`)).toContain('we:backlog/2201-alpha.md (epic #2288)');
+    expect(git('show', 'HEAD:backlog/2201-alpha.md')).toContain('status: open');
+    expect(readFileSync(join(repo, fixture), 'utf8')).toContain('xhash01');
+    expect(readFileSync(join(repo, testFile), 'utf8')).toContain('xhash01-alpha.md');
+    expect(readFileSync(join(repo, untracked), 'utf8')).toContain('xhash01');
+    expect(strandedHashesOnMain(paths())).toEqual({ errors: [], warnings: [] });
+    expect(git('status', '--porcelain').trim()).toBe(`?? ${untracked}`);
+  });
+
+  it.each(['ledger', 'bornAs'])('preserves executable soak data while rewriting only card metadata via %s', (source) => {
+    write('backlog/2200-legacy.md', '---\nbornAs: xold001\nkind: story\n---\n# Legacy\n');
+    write('backlog/xhash01-alpha.md', '---\nkind: story\n---\n# Alpha\n');
+    const definition = 'scripts/conveyor/soak/breaks/regression.mjs';
+    const original = [
+      '// Historical birth hashes: xhash01, xold001; #xold001 stays historical here.',
+      "const HASH = 'xhash01';",
+      "const fixture = { card: '#xhash01', bornAs: 'xold001' };",
+      "const text = `card: 'xhash01'; bornAs: xold001; #xold001`;",
+      "const pattern = /xhash01|xold001/;",
+      "const report = 'reports/xhash01-evidence.md';",
+      'export default {',
+      '  "card":',
+      '    `we:backlog/xhash01-alpha.md; #xold001; xold001`,',
+      "  fixedBy: { where: 'lane/xhash01-fix', sha: 'xold001' },",
+      "  run() { return { card: '#xhash01', HASH, fixture, text, pattern, report }; },",
+      '};',
+      '',
+    ].join('\n');
+    write(definition, original);
+    write('reports/xhash01-evidence.md', 'Historical fixture xhash01\n');
+    write(QUEUED_REL, JSON.stringify({ queued: [] }));
+    git('add', '.'); git('commit', '-qm', 'seed executable soak');
+    git('update-ref', 'refs/remotes/origin/main', 'HEAD');
+    if (source === 'ledger') write(LEDGER_REL, JSON.stringify({ xold001: '2200' }));
+
+    const result = numberPendingHashes(repo);
+    expect(result.error).toBeUndefined();
+    expect(result.committed).toBe(true);
+    expect(result.unresolvedReferences ?? []).toEqual([]);
+    expect(git('show', `HEAD:${definition}`)).toBe(original.replace(
+      '`we:backlog/xhash01-alpha.md; #xold001; xold001`',
+      '`we:backlog/2201-alpha.md; #2200; 2200`',
+    ));
+    expect(git('show', 'HEAD:reports/xhash01-evidence.md')).toBe('Historical fixture xhash01\n');
+    expect(git('status', '--porcelain').trim()).toBe('');
+  });
+
+  it('keeps the real stale-hash queue scenario executable after a numbering pass with its historical ledger entry', () => {
+    const definition = 'scripts/conveyor/soak/breaks/queue-cleared-hash-never-resolves-after-jit-number.mjs';
+    const original = readFileSync(join(process.cwd(), definition), 'utf8');
+    write(definition, original);
+    write('backlog/4290-legacy.md', '---\nbornAs: x34h6a2\nkind: story\n---\n# Legacy\n');
+    write('backlog/xhash01-alpha.md', '---\nkind: story\n---\n# Alpha\n');
+    write(LEDGER_REL, JSON.stringify({ x34h6a2: '4290' }));
+    git('add', '.'); git('commit', '-qm', 'seed real queue soak');
+
+    expect(numberPendingHashes(repo).committed).toBe(true);
+    expect(readFileSync(join(repo, definition), 'utf8')).toBe(original);
+    const probe = `import scenario from ${JSON.stringify(pathToFileURL(join(repo, definition)).href)};
+      console.log(JSON.stringify(scenario.judge(await scenario.run({ sourceRoot: ${JSON.stringify(process.cwd())} }))));`;
+    expect(JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', probe], { encoding: 'utf8' }))).toEqual([]);
+  });
+
+  it('refuses a pending path left outside card metadata in an otherwise rewritten soak definition', () => {
+    write('backlog/2200-legacy.md', '---\nkind: story\n---\n');
+    write('backlog/xhash01-alpha.md', '---\nkind: story\n---\n');
+    const definition = 'scripts/conveyor/soak/breaks/regression.mjs';
+    write(definition, "export default { card: 'we:backlog/xhash01-alpha.md', run() { return 'we:backlog/xhash01-alpha.md'; } };\n");
+    write(QUEUED_REL, JSON.stringify({ queued: [] }));
+    git('add', '.'); git('commit', '-qm', 'seed unswept executable path');
+
+    const result = numberPendingHashes(repo);
+    expect(result.committed).toBe(false);
+    expect(result.error).toContain('hash-path citation outside the rewrite scope');
+    expect(result.error).toContain(definition);
+    expect(backlogNames()).toContain('xhash01-alpha.md');
+    expect(git('status', '--porcelain').trim()).toBe('');
+  });
+
   it('assigns max+1, renames the hash file, rewrites a referrer, and commits', () => {
     write('backlog/2200-legacy.md', '---\nkind: story\nstatus: resolved\n---\n# Legacy\n');
     write('backlog/xhash01-alpha.md', '---\nkind: story\nstatus: resolved\n---\n# Alpha\n\nBody mentions xhash01.\n');
@@ -505,14 +621,17 @@ describe('numberPendingHashes — drain JIT numbering wire (#2288)', () => {
     expect(res.committed).toBe(true);
   });
 
-  it('REFUSES to number — never pushes a red main — when a citation OUTSIDE the swept dirs would dangle (#4075 hardening)', () => {
+  it.each([
+    'scripts/some-new-thing.mjs',
+    'scripts/conveyor/soak/breaks/fixtures/input.mjs',
+  ])('REFUSES to number when an unswept citation in %s would dangle (#4075 hardening)', (citationPath) => {
     // Replays today's incident for a DIFFERENT, still-unswept file type — proving the sweep-scope list
     // falling behind again can never again silently push a broken citation. A real recurrence would be a
     // NEW citing file kind nobody has taught the sweep about yet; this fixture stands in for that (a plain
-    // script, not one of the four swept dirs) citing a card by its pre-numbering hash FILE PATH.
+    // script or a nested fixture) citing a card by its pre-numbering hash FILE PATH.
     write('backlog/2200-legacy.md', '---\nkind: story\n---\n# Legacy\n');
     write('backlog/xhash01-alpha.md', '---\nkind: story\nstatus: resolved\n---\n# Alpha\n');
-    write('scripts/some-new-thing.mjs', '// see backlog/xhash01-alpha.md:1 for context\n');
+    write(citationPath, '// see backlog/xhash01-alpha.md:1 for context\n');
     write(QUEUED_REL, JSON.stringify({ queued: [] }));
     git('add', 'backlog', 'scripts', '.claude', '.gitignore'); git('commit', '-qm', 'seed');
 
@@ -521,7 +640,7 @@ describe('numberPendingHashes — drain JIT numbering wire (#2288)', () => {
     expect(res.assigned).toEqual([]);
     expect(res.committed).toBe(false);
     expect(res.error).toMatch(/hash-path citation outside the rewrite scope/);
-    expect(res.error).toContain('scripts/some-new-thing.mjs');
+    expect(res.error).toContain(citationPath);
     // The tree is untouched — no partial rename, no rewrite, nothing staged.
     expect(git('status', '--porcelain').trim()).toBe('');
     expect(backlogNames()).toContain('xhash01-alpha.md');

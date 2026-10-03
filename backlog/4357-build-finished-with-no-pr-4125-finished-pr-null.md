@@ -3,9 +3,11 @@ bornAs: xtl3b09
 kind: story
 size: 3
 priority: high
-status: open
+status: resolved
 scope: ["we:scripts/operations/deliver-item-wrapper.mjs", "we:scripts/operations/__tests__/deliver-item-wrapper.test.mjs", "we:scripts/operations/__tests__/deliver-item-run.test.mjs"]
 dateOpened: "2026-09-28"
+dateStarted: "2026-10-03"
+dateResolved: "2026-10-03"
 preparedDate: "2026-09-30"
 preparedAgainstSha: "75d78f50e9b0e1f5c9daeccca8aa902db1cae9f2"
 tags: ["build-dispatch", "converge", "open-pr"]
@@ -96,3 +98,20 @@ Each is a future backlog item for the BUILDER to file, none is needed for the MV
 2. Auto-recover an `unverified` refusal: re-run `verify-lane` on the current HEAD and retry `open-pr` once (a stale verify after a converge revision commit is a mechanical, script-decidable case).
 3. Publish the built branch to a `lane/…` ref before any refusal so the work is never reflog-only (may already fall under #4349's "route to a hold with the reason").
 4. #4349 (finished wrapper never settles its run record) stays separate.
+
+
+Testing follow-up: keep recovery probes against real temporary Git repositories and coordination stores; stub only the provider and external operation boundary. The existing lifecycle/retry/publish follow-ups above remain outside this scoped change.
+
+## Progress
+
+2026-10-03 — Implemented the returned-refusal branch in we:scripts/operations/deliver-item-wrapper.mjs, with the pure message helper. Only `opened` reaches success. No-PR refusals preserve the lane, record lane/SHA/keep-ref in settlement and error telemetry, hold before releasing the dispatch claim, and tolerate learning/SHA/ref failures. Refusals with an existing PR retain the claim without placing a hold.
+
+Before/after executable proof uses the real `runDeliverItemCli` → `deliverItem` → `openPr` call chain in we:scripts/operations/__tests__/deliver-item-wrapper.test.mjs. Only external commands/provider/report lookup are stubbed; Git recovery commands, dispatch run store, claims and holds are real in isolated temporary storage. The historical run `open-pr-355ee9ac-6599-4583-9d73-f6ce5db935d8` is absent from the current run store (`tryReadRun` returned null), so the test reconstructs the documented submit envelope. Fixture item #9001 substitutes for incident #4125; no live delivery or PR was attempted.
+
+- BEFORE, unchanged wrapper: `deliver-item-run: #9001 finished — PR #null (ready-to-merge)`. Six regression cases failed: no-PR refused/unrun, existing-PR refused/unrun, SHA failure, and learning/ref failure.
+- AFTER: `deliver-item-run: #9001 finished — open-refused (unverified): refusing to land: recorded verification is for 5348fd58, not the HEAD being landed (d7350a37)`.
+- Real dispatch effect result asserted `outcome: open-refused`, `reason: unverified`, the full detail, lane, SHA and keep-ref. Error telemetry carries the same result. Dispatch claim absent; hold reason `open-refused: unverified`; no backlog/lane release command issued. Existing-PR cases retain their claim and have no hold.
+- Git proof: lane HEAD remained `9058b677f1ec7e7bc3d749168aa7771b6d6db585` after delivery. `refs/keep/9001-9058b677` resolved to that SHA even after a soft reset moved HEAD to `ddef9d81a7884369d004fb9d5ee344aa488f8314`; `git cat-file -t` still returned `commit`. This tests ref survival across HEAD reset, not a live lease-reaper run. Temporary clones are removed by test cleanup.
+- Targeted wrapper/CLI suites passed 254 tests before the additional helper/telemetry assertions; the final focused refusal run passed all seven cases. we:scripts/operations/__tests__/deliver-item-run.test.mjs additionally pins the generic finished-line echo contract.
+- Wider lane verification: `node we:scripts/verify-lane.mjs` passed: 13 test files, 1,883 tests; scoped standards gate reported 0 errors (766 existing warnings). The verifier recorded green for `9058b677`.
+- `node we:scripts/operations/run.mjs resolve --ref=4357` completed successfully (one effect applied). No commit, push or PR was created.

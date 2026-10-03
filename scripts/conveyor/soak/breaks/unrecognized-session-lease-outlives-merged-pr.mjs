@@ -1,6 +1,6 @@
 /**
  * @file breaks/unrecognized-session-lease-outlives-merged-pr.mjs — LIVE INCIDENT, 2026-09-27 ~6:55pm ET
- * (`we:backlog/4311-lane-concurrency-ceiling-counts-stale-unreleased-leases-as-a.md`, card `xkk4lv7`, PR #2835).
+ * (`we:backlog/4311-lane-concurrency-ceiling-counts-stale-unreleased-leases-as-a.md`, card `4311`, PR #2835).
  * `node we:scripts/operations/run.mjs dispatch-lane --num=4306` refused with `capacity-cap` while every dispatch
  * kind (building/preparing/fixing/healing) read ZERO live work — the lane-concurrency ceiling
  * (`we:scripts/lib/lane-concurrency.mjs`) still counted a lane as leased that had, in fact, finished hours ago.
@@ -20,7 +20,7 @@
  * manifestation" section), since both counters ultimately read "is this lane still leased," not "is real work
  * still running in it."
  *
- * FIX (#xkk4lv7, PR #2835): `laneBranchItemNum` resolves the lease's item from the lane's OWN checked-out branch
+ * FIX (#4311, PR #2835): `laneBranchItemNum` resolves the lease's item from the lane's OWN checked-out branch
  * (the same `lane/<num>-*` grammar already trusted for a PR's `headRefName`), consulted ONLY when BOTH
  * `itemNumFromSession` and `prNumFromSession` return `null` (Fork 1 — never overrides a correctly-resolved
  * PR-kind lookup). A branch-derived terminal verdict is trusted only once `laneQuietSincePr` corroborates it
@@ -128,7 +128,7 @@ function fakeBin(root, prs) {
 export default {
   id: 'unrecognized-session-lease-outlives-merged-pr',
   title: "the resident lease-reaper's PR-terminal axis never resolves a lane leased via a bare `acquire --purpose=` (no dispatcher-recognizable session) — a merged-PR lease rides the 4-hour TTL backstop instead of freeing within the ~30-minute quiet window, inflating the lane-concurrency ceiling",
-  card: 'we:backlog/4311-lane-concurrency-ceiling-counts-stale-unreleased-leases-as-a.md (#xkk4lv7, PR #2835)',
+  card: 'we:backlog/4311-lane-concurrency-ceiling-counts-stale-unreleased-leases-as-a.md (#4311, PR #2835)',
   fixedBy: {
     // Filled at land time with the fix commit's own sha (never the baseline) — see this file's own header
     // convention, matched by `reaper-backstop-clobbers-live-fixer.mjs` for an in-flight PR's own break.
@@ -209,7 +209,7 @@ export default {
             api.violation('fresh-holder-wrongly-reaped', "lane-2 (session Mac:24601, a FRESH 5-minute-old holder of a branch whose PR merged 24h ago) WAS reaped — Fork 2/Option C's safety gate (anchor the quiet window to the LATER of mergedAt/acquiredAt) did not hold");
           }
         } finally {
-          // #xkk4lv7 soak review finding: every sibling `mkdtempSync`-using break in this directory cleans up its
+          // #4311 soak review finding: every sibling `mkdtempSync`-using break in this directory cleans up its
           // own scratch dir (e.g. `worker-push-during-fix-claim.mjs`) — leaving this one behind would silently
           // accumulate two real throwaway git repos under the host's tmpdir per run.
           rmSync(ctx.base, { recursive: true, force: true });

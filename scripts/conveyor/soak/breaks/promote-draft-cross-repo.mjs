@@ -1,5 +1,5 @@
 /**
- * @file breaks/promote-draft-cross-repo.mjs — live break, 2026-09-28 (backlog card x4ua3v8, epic #4075,
+ * @file breaks/promote-draft-cross-repo.mjs — live break, 2026-09-28 (backlog card 4379, epic #4075,
  * PR #2880 author-continuation). The `promote-draft` pass's default `gh` provider let a cross-repo PR number
  * silently resolve against the WRONG repo.
  *
@@ -13,7 +13,7 @@
  * ("ready-failed … Command failed: gh pr ready 187") until promoted by hand, because `gh` resolved PR 187
  * against `chalbert/web-everything` instead.
  *
- * FIX: `467349c87` (`we:backlog/x4ua3v8`) threads `runReconcilePromoteDraftDispatch`'s own already-resolved
+ * FIX: `467349c87` (`we:backlog/4379`) threads `runReconcilePromoteDraftDispatch`'s own already-resolved
  * `repoSlug` through to the provider as an explicit `--repo` — `undefined` (byte-identical) for the WE-default
  * path, the real slug otherwise (`we:scripts/lib/draft-promote-provider.mjs#buildReadyArgs`'s second `repo`
  * argument).
@@ -118,7 +118,7 @@ function withEnv(patch, fn) {
 export default {
   id: 'promote-draft-cross-repo',
   title: 'the promote-draft dispatcher\'s default provider omits an explicit --repo, so a cross-repo PR number silently resolves against the wrong constellation repo',
-  card: 'we:backlog/x4ua3v8, live incident plateau-app#187, PR #2880 (lane/promote-draft-cross-repo)',
+  card: 'we:backlog/4379, live incident plateau-app#187, PR #2880 (lane/promote-draft-cross-repo)',
   fixedBy: {
     sha: '467349c87',
     where: 'lane/promote-draft-cross-repo',
@@ -187,7 +187,7 @@ export default {
         } else if (!readyCall.argv.includes('--repo')) {
           violations.push({
             invariant: 'cwd-inferred-repo',
-            detail: `the promote-draft "ready" call for PR #${pr} carried no explicit repo flag — it ran from the WE checkout's own cwd (${readyCall.cwd}) while the PR lives in the plateau-app repo — the live we:backlog/x4ua3v8 defect`,
+            detail: `the promote-draft "ready" call for PR #${pr} carried no explicit repo flag — it ran from the WE checkout's own cwd (${readyCall.cwd}) while the PR lives in the plateau-app repo — the live we:backlog/4379 defect`,
           });
         } else {
           const repoIdx = readyCall.argv.indexOf('--repo');

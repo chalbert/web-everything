@@ -1,5 +1,5 @@
 /**
- * @file breaks/rebuild-smoke-off-lock.mjs — live break, 2026-09-26 09:32 ET (#4075, epic #3383, card xa4qo7n). The
+ * @file breaks/rebuild-smoke-off-lock.mjs — live break, 2026-09-26 09:32 ET (#4075, epic #3383, card 4218). The
  * daemon rebuild's live smoke (`scripts/lib/daemon-live-smoke.mjs`) grew slow once #2691's two extra checks
  * (`reconcile-dry-run`, `dispatch-dry-run`) landed — live: `smoke-slow {"ms":64720, reconcile-dry-run:17234ms,
  * dispatch-dry-run:44701ms}`. `daemon-rebuild.mjs#doRebuild` ran that whole smoke (Step 6) INSIDE the same
@@ -10,7 +10,7 @@
  * A rebuild happens on every `main` move (frequent while the drain lands PRs), so this starved a large share of
  * every daemon's ticks.
  *
- * Fix (xa4qo7n): `rebuildClone` now runs the WHOLE live smoke against a DISPOSABLE candidate `git worktree`
+ * Fix (4218): `rebuildClone` now runs the WHOLE live smoke against a DISPOSABLE candidate `git worktree`
  * (`materializeCandidate`), never against the clone itself, and holds NO lock at all while it runs — the write
  * lock is only ever taken (briefly) for the fast, final `git reset --hard` AFTER a passing smoke
  * (`finalizeRebuild`). See `scripts/lib/daemon-rebuild.mjs`'s own file header for the full three-phase design.
@@ -34,10 +34,10 @@ const SMOKE_MS = 3_000; // stands in for the live ~65s smoke — long enough to 
 export default {
   id: 'rebuild-smoke-off-lock',
   title: "the daemon rebuild's live smoke held the clone's WRITE lock for its whole duration, so every sibling daemon's tick was refused (writer-active) and dispatched nothing",
-  card: 'we:backlog/xa4qo7n (epic #4075/#3383)',
+  card: 'we:backlog/4218 (epic #4075/#3383)',
   fixedBy: {
-    sha: 'xa4qo7n-daemon-rebuild-offlock-smoke',
-    where: 'lane/xa4qo7n-daemon-rebuild-offlock-smoke',
+    sha: '4218-daemon-rebuild-offlock-smoke',
+    where: 'lane/4218-daemon-rebuild-offlock-smoke',
     paths: ['scripts/lib/daemon-rebuild.mjs', 'scripts/lib/daemon-live-smoke.mjs', 'scripts/lib/daemon-self-sync.mjs'],
   },
   fixPresent(root) {
@@ -66,7 +66,7 @@ export default {
         const rebuildModulePath = join(w.simCloneRoot, 'scripts/lib/daemon-rebuild.mjs');
         const lockModulePath = join(w.simCloneRoot, 'scripts/lib/daemon-clone-lock.mjs');
         if (!existsSync(rebuildModulePath)) {
-          throw new Error('rebuild-smoke-off-lock: requires scripts/lib/daemon-rebuild.mjs (lands with xa4qo7n) — not present on this tree');
+          throw new Error('rebuild-smoke-off-lock: requires scripts/lib/daemon-rebuild.mjs (lands with 4218) — not present on this tree');
         }
         const { rebuildClone } = await import(pathToFileURL(rebuildModulePath).href);
         const { acquireRead, releaseRead } = await import(pathToFileURL(lockModulePath).href);

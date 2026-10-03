@@ -1,6 +1,6 @@
 /**
  * @file breaks/timeout-retry-reservation-wedged-on-failed-observation.mjs — review finding on PR #3559 (card
- * xng7q1p, #4075). `ci-heal-pr-dispatch.mjs#dispatchTimeoutRetry` writes a durable `pending` reservation BEFORE
+ * 4863, #4075). `ci-heal-pr-dispatch.mjs#dispatchTimeoutRetry` writes a durable `pending` reservation BEFORE
  * it observes the failed job, so a restart can never double-spend the retry budget. When that observation then
  * failed (a transient GitHub 5xx/network error, or the job already closed/stale) the reservation was left
  * `pending` even though NO rerun request had been sent. Every later tick read it as an in-flight, ambiguous
@@ -27,8 +27,8 @@ const HEAD = 'c'.repeat(40);
 export default {
   id: 'timeout-retry-reservation-wedged-on-failed-observation',
   title: 'a timeout-retry reservation left pending after a failed observation (no request sent) wedges every later tick on retry-outcome-pending',
-  card: 'we:backlog/xng7q1p-a-ci-failure-in-a-test-the-pr-does-not-touch-is-re-run-not-h.md (epic #4075)',
-  fixedBy: { sha: 'HEAD', where: 'lane/card-xng7q1p', paths: ['scripts/operations/ci-heal-pr-dispatch.mjs'] },
+  card: 'we:backlog/4863-a-ci-failure-in-a-test-the-pr-does-not-touch-is-re-run-not-h.md (epic #4075)',
+  fixedBy: { sha: 'HEAD', where: 'lane/card-4863', paths: ['scripts/operations/ci-heal-pr-dispatch.mjs'] },
   fixPresent(root) {
     try {
       return /releaseFresh/.test(readFileSync(join(root, 'scripts/operations/ci-heal-pr-dispatch.mjs'), 'utf8'));
