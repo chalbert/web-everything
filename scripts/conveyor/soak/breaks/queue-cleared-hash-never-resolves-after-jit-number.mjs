@@ -32,7 +32,9 @@ import { fileURLToPath } from 'node:url';
 
 const REPO_ROOT = resolve(fileURLToPath(import.meta.url), '..', '..', '..', '..', '..');
 
-const HASH = '4290';
+// An invented JIT-shaped hash that no real card carries — the drain rewrites a REAL card's hash to its number
+// everywhere it appears (it once turned the original hash here into its number, collapsing HASH into LANDED_NUM).
+const HASH = 'xsk0a2z';
 const LANDED_NUM = '4290';
 
 export default {

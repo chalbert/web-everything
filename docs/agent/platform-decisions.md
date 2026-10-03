@@ -5885,6 +5885,81 @@ engine's own automatic fallback is untouched).
 read-only Codex plan review (`node scripts/codex-direct-task.mjs --review`) that found the initial wording
 conflated the engine's sound automatic fallback with a caller's deliberate override.
 
+### Backlog ids are numbered by the producer at PR open and verified where main is written; a hash-named card is refused by a required check on the tip tree; both choices are configurable settings {#backlog-ids-numbered-before-publish}
+
+**Ratified 2026-10-03 by the operator (Nicolas Gilbert), in conversation, both forks at the card's defaults, with
+one amendment (`#3732`).** The operator's words: *"Ok for default, ist should be configurable settings"*. The
+requirement the card carries (2026-09-19): a backlog file with a temporary hash id must be structurally unable to
+reach main, not caught after the fact and not repaired by a follow-up PR. Fresh evidence for the ruling: on
+2026-10-03 the drain's bulk numbering commit `952011907` renamed 289 stranded hash cards at once (#4688 to
+#4976), broke main CI (fix in PR #3806) and put open PRs such as #3771 into conflict. Numbering at land is the
+cause: every failure between the merge and the numbering tail leaves hashes on main, and a late bulk rename
+then hits every open PR together.
+
+**The rule:**
+1. **Where numbering happens (Fork 1, default `producer-at-pr-open`).** The producer numbers every hash card on a
+   lane tip before that tip's first push for review, so CI and reviewers see final ids once. Numbering is a
+   standalone declared operation callable on any lane ref, not a step inside `we:scripts/pr-land.mjs` alone; a
+   route that bypasses `pr-land` (the conveyor fix and ci-heal agents, `pr-land --sha`, a human's
+   `gh pr create`) calls it before its push. It fails closed: if it cannot number, no PR is opened.
+   Allocation is best-effort and **uniqueness is guaranteed where main is written**: under the land mutex, on a
+   fresh fetch, immediately before the merge, the drain compares each of the PR's NNNs with main (an identical
+   path is the same card; a different path with the same NNN is a clash). A clash on a PR that holds an
+   acceptance re-parks it; otherwise the existing heal renumbers it. The guarantee holds for drain-serialised
+   merges. A `blockedBy` on a sibling's hash resolves at the reader through `bornAs` (#3605 clause 1); the
+   drain makes no commit on a sibling PR.
+2. **How far "reach main" reaches (Fork 2, default `tip-tree`).** A required, diff-scoped `backlog-ids` check
+   fails a PR whose merge ref adds or renames to a hash-named backlog path, checked as a diff against the base
+   and switched on only after `number-stranded` has cleared the hash files already on main. The merge method
+   is unchanged. Ancestor commits that once added a hash file stay in history.
+3. **Both choices are configurable settings (the operator's amendment).** Following
+   [config-extends-platform-default](#config-extends-platform-default) and the enforcement-rung precedent
+   (#3423, knob #3532), each fork is a dimension with a platform default that a project config extends:
+
+   | setting | platform default | other declared value |
+   | --- | --- | --- |
+   | where numbering happens | `producer-at-pr-open` | `integration-branch` |
+   | how far "reach main" reaches | `tip-tree` | `full-history-squash` |
+
+   A non-default value may be declared before it is built. A declared-but-unbuilt value says so honestly and
+   **refuses** when selected, naming the unbuilt value; it never silently falls back to the default. The two
+   defaults are the only values this ruling asks to be built. The platform defaults are declared as data in
+   `we:config/platformDefaults.ts`, with the value types beside `we:config/defineConfig.ts`; WE holds
+   definitions only (#1282), and the resolver and enforcement code live in the repo tooling and, where it
+   is an implementation, in Frontier UI.
+4. **Supported by default, not forks.** Scope is every hash-id backlog file, whatever its kind or carrier. The
+   numbering tail after merge is removed for the PR route once the check exists, and stays in
+   `we:scripts/push-if-green.mjs` for the direct-filing route. Every scripted push of main refuses a
+   hash-bearing tree, including the `--sha` publish path. `number-stranded` and `strandedHashesOnMain` stay as
+   the catch net and for legacy hashes; history is not rewritten. `strict` (require up to date) stays off.
+
+**Composition.**
+- **[pr-flow-rollout-mechanism](#pr-flow-rollout-mechanism) and its #3423 amendment.** The raw admin push and the
+  admin-bypass merge stay Rung 1, an accepted residual; closing them is the rung knob #3532 once the
+  trigger holds (a distinct bot principal for the drain, or a second human). The operator's absolute wording
+  is not met for that route until then; that is stated, not hidden. The sentence that a merge write and the
+  numbering step are mutually exclusive on one key is restated: producer numbering takes the same key, waits
+  behind a drain merge write, and fails closed on contention instead of running unlocked.
+- **[gate-on-merged-tree-lane-fast-fail](#gate-on-merged-tree-lane-fast-fail).** The `backlog-ids` check is a
+  central check on the merged tree; the lane-local fast-fail stays a fast-fail.
+- **[merge-only-push-approval-carry](#merge-only-push-approval-carry).** Producer numbering before first review
+  never voids an acceptance. A numbering commit or a clash heal added to a tip that already holds an
+  acceptance is a non-merge commit and re-parks the PR (clause 2); only a hash card filed after review pays.
+- **[repo-drain-check-contract](#repo-drain-check-contract).** The drain still reads only `test`. The
+  `backlog-ids` check is a second required context on main, set by an operator-run step.
+- **Supersedes #2288's at-land timing.** Numbering moves from "at land" to "at PR open, verified at land". #2288
+  has no statute anchor of its own.
+- **Amends #2548.** An NNN not on origin/main stays a lane-local fast-fail (#1937) but exempts the numbering
+  operation's own commit; central uniqueness at the write point is the authority, so #2548 no longer has to be
+  unforgeable. #2319, #3443 and #3735 are reconciled as above.
+
+**What this ruling does not do.** It builds nothing and edits no repo settings. Changing main's required
+contexts is an operator-run `setup` step, never an agent action. It does not close the raw admin push.
+
+**Lineage:** ratified via `#3732` (prepared 2026-09-21), grounded in `/research/backlog-id-assignment-before-publish/`
+and `we:reports/2026-09-21-backlog-id-assignment-prior-art.md`. Full reasoning and the rejected options:
+[#3732](/backlog/3732-decision-where-backlog-ids-are-assigned-so-a-temporary-hash/).
+
 ---
 
 ## Standing process & method rules (codified in the topical docs — pointers)

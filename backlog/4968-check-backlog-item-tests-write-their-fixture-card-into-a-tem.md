@@ -2,9 +2,10 @@
 bornAs: xywsm3b
 kind: story
 size: 2
-status: open
+status: resolved
 scope: ["we:scripts/check-backlog-item.mjs", "we:scripts/__tests__/check-backlog-item.test.mjs"]
 dateOpened: "2026-10-01"
+dateResolved: "2026-10-03"
 preparedDate: "2026-10-03"
 preparedAgainstSha: "e1f0523e0881357fc863f3e88da72e0164eb7091"
 tags: []
@@ -68,3 +69,12 @@ Paste both outputs in the PR.
 ## Follow-ups
 
 - Other tests that write into the real backlog would have the same leak. A grep for `join(ROOT, 'backlog'` next to `writeFileSync` under `we:scripts/__tests__/` would find them. Not in this card's scope.
+
+## Progress
+
+- 2026-10-03: Implemented the directory override in we:scripts/check-backlog-item.mjs with flag → environment → repository precedence, setting the loader environment before require. Positional and `--item` forms accept the directory flag in either order. Moved fixtures in we:scripts/__tests__/check-backlog-item.test.mjs to per-test temporary directories, preserved the original three assertions, and added six isolation/override cases including flag precedence. No helper files added.
+- Before: ran the original test in this lane clone, polled for the fixture, then sent SIGKILL to its process group. Status output was `?? we:backlog/x0zzzz9-per-item-checker-wiring-fixture.md` (repository prefix added here for documentation). Removed the observed stray fixture after recording it.
+- RED: against the original CLI, seven of nine tests failed. The flag-only and flag-before-id capabilities exited 2. The environment-only case actually exited 1, rather than the design's predicted 2: the loader found the temporary card but the CLI tried to read its filename from the real backlog. Default-directory and untouched-backlog cases passed.
+- GREEN: the updated CLI passed all nine tests (6.64 seconds total). After replay: polled 129 times until a temporary fixture was present, then SIGKILLed the process group. Real fixture observations: 0. Backlog status output: empty. Removed the interrupted temporary directory afterward.
+- Mutation proof: removing the locus scan failed the original rejection case (0 instead of 1); removing the repository fallback failed the default case (1 instead of 2); redirecting fixture writes to the real backlog failed the no-fixture assertions. Restored every mutation and removed its fixture.
+- Final verification: `node we:scripts/verify-lane.mjs` exited 0 and recorded green: 166 tests passed across three files, including all nine scoped tests; `npm run check:standards` reported 0 errors (5277 warnings). `git diff --check` passed. Before/after interruption evidence and all requested mutation checks are recorded above.
