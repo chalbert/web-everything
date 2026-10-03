@@ -1,0 +1,40 @@
+{% raw %}
+<h2>The question</h2>
+
+<p>The operator plans to create a GitHub organization for the company and move all three repos into it
+(web-everything, frontierui, plateau-app), with the open-source repos possibly moving to their own org later.
+The decision card asks which org shape, which plan, which cut-over order and which bot identities, and how to
+make the owner one config value so the later split is a config change. The full working is in
+<a href="/reports/2026-10-03-github-org-move-prior-art.md">the session report</a>.</p>
+
+<h2>What an org unlocks, by plan (verified 2026-10-03)</h2>
+
+<ul>
+  <li><strong>Merge queue:</strong> any public org repo, so a Free org gives web-everything its queue. Private org
+    repos need Enterprise Cloud; Team does not add it.</li>
+  <li><strong>Concurrent Actions jobs:</strong> Free 20, Team 60, Enterprise 500, shared across the org.</li>
+  <li><strong>Rulesets and branch protection on private repos:</strong> Team or higher. Today the two private repos
+    cannot have either.</li>
+  <li><strong>Bypass actors:</strong> a GitHub App can be a ruleset bypass actor, which gives the drain its own
+    identity.</li>
+  <li><strong>Rate limits:</strong> an App installation gets 5,000 to 12,500 requests an hour of its own;
+    <code>GITHUB_TOKEN</code> gets 1,000 an hour per repo. One App per role gives each role its own bucket.</li>
+</ul>
+
+<h2>What a transfer keeps and breaks</h2>
+
+<ul>
+  <li>Kept: issues, PRs, stars, webhooks, secrets, deploy keys. Web and git URLs redirect.</li>
+  <li>Not documented: the API redirect. The dry run must prove it.</li>
+  <li>Breaks: a user-owned fine-grained token cannot see an org repo; npm provenance rejects a mismatched
+    repository url; new orgs stop Actions from opening PRs until allowed; a busy repo's old name is retired, so
+    moving back is not guaranteed.</li>
+</ul>
+
+<h2>Our own coupling</h2>
+
+<p>234 live <code>chalbert/&lt;repo&gt;</code> literals in 96 web-everything files, 4 in frontierui, 95 in
+plateau-app, and one App installation id copied into 14 daemon plists. A single table already names the repos;
+the prepared default routes every literal through it, with the owner as one value and the installation id looked
+up from the owner.</p>
+{% endraw %}
