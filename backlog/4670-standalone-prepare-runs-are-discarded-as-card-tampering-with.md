@@ -15,3 +15,17 @@ Live 2026-09-30: Codex prepare runs of #3996 and #4003 through we:scripts/operat
 ## Done when
 
 1. **Executable** — TODO: a command that fails before this item lands and passes after.
+
+## Operator ruling — 2026-10-03 (ratified, verbatim)
+
+No ruling operation exists for a non-decision card (checked `we:scripts/operations/` and the `we:scripts/backlog.mjs` verbs), so the ruling is recorded here in the body; no lifecycle field was touched.
+
+Question: may a prepare worker change a card's `size` and `blockedBy`?
+
+1. Operator answer: "Seems that it would need to be"
+2. Operator refinement: "Blocked by, maybe with a confirmation from another agent?"
+
+Resulting rule:
+- `size`: the prepare worker may change it directly, grounded in file:line evidence and stated in `## Progress`. Implemented by adding `size` to `PREPARE_OWNED_FRONTMATTER_KEYS` (we:scripts/lib/probation-launcher.mjs).
+- `blockedBy`: the worker may only PROPOSE edge changes in a `## Proposed blockedBy changes` section (add/remove, with file:line grounds); the frontmatter stays unchanged, and a direct `blockedBy:` edit is still refused as tamper. Confirmation mechanism: the parked prepare PR's independent review is the second actor (a different session from the preparer); the runner lists the proposed edges in the PR body. No existing juror pattern was reused because the review already is an independent actor. An add may never target a resolved or missing card or create a cycle (`validateProposedBlockedBy`, the same rules as check:standards "6d-ter"); the runner refuses the run otherwise.
+
