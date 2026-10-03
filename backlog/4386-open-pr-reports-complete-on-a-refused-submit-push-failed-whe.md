@@ -2,10 +2,11 @@
 bornAs: x33k64v
 kind: story
 size: 2
-status: active
+status: resolved
 scope: ["we:scripts/operations/open-pr.mjs", "we:scripts/operations/cli-adapter.mjs", "we:scripts/operations/open-pr-io.mjs", "we:scripts/pr-land.mjs", "we:scripts/operations/__tests__/open-pr.test.mjs", "we:scripts/operations/__tests__/effect-executor.test.mjs", "we:scripts/__tests__/pr-land.test.mjs"]
 dateOpened: "2026-09-28"
 dateStarted: "2026-10-03"
+dateResolved: "2026-10-03"
 preparedDate: "2026-09-30"
 preparedAgainstSha: "9d4c0045905a4bc77486ee97da1ea9c796a51f39"
 tags: []
