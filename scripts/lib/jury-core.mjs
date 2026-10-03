@@ -2286,7 +2286,9 @@ export const REFERRAL_SEAT_PROVIDERS = Object.freeze({
   judgeAntigravityReview: 'agy-gemini', 'agy-gemini': 'agy-gemini', 'agy-claude': 'agy-claude',
 });
 export const REFERRAL_DROP_REASON = 'dropped: seat disabled by operator config';
-export const activeReferrals = (record) => record.referrals.filter(f => !(record.dropped ?? []).some(d => d.key === f.key));
+// A drop only retires a finding nobody has ruled on: a finding with a ruling (a `block` above all) keeps counting.
+export const activeReferrals = (record) => record.referrals.filter(f => !(record.dropped ?? []).some(d => d.key === f.key)
+  || record.rulings.some(r => r.key === f.key));
 
 /** Versioned snapshot of the append-only referral history, mirrored into the jury ledger. */
 export function validateReferralRecord(r) {

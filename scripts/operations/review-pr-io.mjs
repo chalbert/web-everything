@@ -5,7 +5,7 @@ import { judgeSpawn } from '../lib/judge-spawn.mjs';
 import { appendJuryEvent } from '../lib/jury-ledger.mjs';
 import { decideParkToHuman, referralCardReadable } from '../review-set-label.mjs';
 import { buildReviewJudgeRequest, antigravityReviewFromEnv } from './review-pr.mjs';
-import { resolveProviderCap } from './review-extra-seats.mjs';
+import { resolveProviderCap, PROVIDER_CAP_ENV } from './review-extra-seats.mjs';
 /**
  * @file scripts/operations/review-pr-io.mjs
  * @description THE IO SHELL of the `review-pr` declaration (#3035, under epic #3029) — the reader its `read`
@@ -443,6 +443,22 @@ const PRE_WRITE_REFUSALS = Object.freeze([
   'reasonless bounce:',
 ]);
 
+/**
+ * THE one definition of "this optional reviewer seat is disabled", used wherever a referral may be retired.
+ * The Antigravity review seat runs on its own gate (`REVIEW_PR_ANTIGRAVITY_REVIEW` / probation), which never
+ * reads the Gemini cap, so its default cap of 0 alone must not disable it: only the flag being off, or an
+ * operator who EXPLICITLY set the cap to 0, does. The direct `agy-*` finding seats are enforced by their
+ * provider cap alone. Mandatory and unknown seats are never disabled. PURE.
+ */
+export function referralSeatDisabled(seat, env = process.env) {
+  if (!Object.hasOwn(REFERRAL_SEAT_PROVIDERS, seat)) return false;
+  const provider = REFERRAL_SEAT_PROVIDERS[seat];
+  const capZero = resolveProviderCap(provider, env) === 0;
+  if (seat !== 'judgeAntigravityReview') return capZero;
+  const explicitZero = capZero && Number.isInteger(Number(env?.[PROVIDER_CAP_ENV[provider]])) && env[PROVIDER_CAP_ENV[provider]] !== '';
+  return !antigravityReviewFromEnv(env) || explicitZero;
+}
+
 /** Is this CLI error text one we can PROVE happened before any write? */
 export function isPreWriteRefusal(text) {
   const s = String(text || '');
@@ -544,9 +560,9 @@ export function createReviewPrSinks({
         for (let i = 0; i < prior.records.length; i++) {
           const record = prior.records[i];
           if (record.repo !== read.repo || record.pr !== read.pr) continue;
-          const dropped = activeReferrals(record).filter(f => Object.hasOwn(REFERRAL_SEAT_PROVIDERS, f.seat)
-            && (resolveProviderCap(REFERRAL_SEAT_PROVIDERS[f.seat], env) === 0
-              || (f.seat === 'judgeAntigravityReview' && !antigravityReviewFromEnv(env))))
+          // Never retire a finding that already has a ruling: it would silently clear a standing `block`.
+          const dropped = activeReferrals(record).filter(f => referralSeatDisabled(f.seat, env)
+            && !record.rulings.some(r => r.key === f.key))
             .map(f => ({ key: f.key, reason: REFERRAL_DROP_REASON }));
           if (!dropped.length) continue;
           const updated = { ...record, dropped: [...(record.dropped ?? []), ...dropped] };

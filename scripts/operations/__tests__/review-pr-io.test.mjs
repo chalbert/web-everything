@@ -1052,7 +1052,7 @@ describe('#4315 durable referral effects', () => {
     return { state, trace, lines, payload, judge, make, provider };
   }
 
-  function seedReferrals(h, seats, head = 'b'.repeat(40)) {
+  function seedReferrals(h, seats, head = 'b'.repeat(40), rule = () => []) {
     const referrals = seats.map((seat, i) => {
       const original = { ...h.payload.referrals[0].original, summary: `pending finding ${i}` };
       return { seat, original, finding: normalizeFinding(original), key: referralFindingKey(seat, original) };
@@ -1060,10 +1060,43 @@ describe('#4315 durable referral effects', () => {
     const record = { version: 1, repo: 'o/r', pr: 7, head, runId: 'earlier-run',
       reviewer: mandatoryReferralReviewer('earlier-run'), authorBody: h.state.body,
       attempted: true, referrals, rulings: [] };
+    record.rulings = rule(record);
     h.state.comments.push({ body: renderReferralRecord(record) });
     h.payload.referrals = [];
     return record;
   }
+
+  it.each(['block', 'not-real'])('a disabled seat never retires a finding that already has a %s ruling', async result => {
+    const h = harness({ failure: 'judge', env: { REVIEW_PR_ANTIGRAVITY_REVIEW: '0', WE_REVIEW_SEAT_CAP_AGY_GEMINI: '0' } });
+    const old = seedReferrals(h, ['judgeAntigravityReview', 'judgeAntigravityReview'], 'b'.repeat(40), r => [{
+      id: 'r1', key: r.referrals[0].key, reviewerId: r.reviewer.id, lens: r.reviewer.lens, result,
+      rationale: 'Verified against the pinned diff', evidence: ['diff:x'] }]);
+    const result_ = await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX);
+    const historical = result_.records.find(r => r.runId === old.runId);
+    // Only the unruled finding is retired; the ruled one keeps counting, so a `block` still holds the PR.
+    expect(historical.dropped).toEqual([{ key: old.referrals[1].key, reason: 'dropped: seat disabled by operator config' }]);
+    expect(mandatoryReferralState(h.state.comments, { head: 'b'.repeat(40) }).blocked).toEqual(result === 'block' ? [old.referrals[0].key] : []);
+  });
+
+  it('flag on with the Gemini cap left unset keeps the seat\'s referrals pending', async () => {
+    const h = harness({ failure: 'judge', env: { REVIEW_PR_ANTIGRAVITY_REVIEW: '1' } });
+    seedReferrals(h, Array(2).fill('judgeAntigravityReview'));
+    const result = await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX);
+    expect(result.pending).toHaveLength(2);
+    expect(result.records.every(r => !r.dropped)).toBe(true);
+  });
+
+  it.each([
+    ['agy-gemini', { WE_REVIEW_SEAT_CAP_AGY_GEMINI: '0', WE_REVIEW_SEAT_CAP_AGY_CLAUDE: '40' }, 'agy-claude'],
+    ['agy-claude', { WE_REVIEW_SEAT_CAP_AGY_GEMINI: '40', WE_REVIEW_SEAT_CAP_AGY_CLAUDE: '0' }, 'agy-gemini'],
+  ])('disabling only %s drops only its referrals and keeps %s pending', async (disabled, env, enabled) => {
+    const h = harness({ failure: 'judge', env });
+    const old = seedReferrals(h, [disabled, enabled]);
+    const result = await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX);
+    expect(result.pending).toEqual([old.referrals[1].key]);
+    expect(result.records.find(r => r.runId === old.runId).dropped).toEqual([
+      { key: old.referrals[0].key, reason: 'dropped: seat disabled by operator config' }]);
+  });
 
   it.each([
     [{ REVIEW_PR_ANTIGRAVITY_REVIEW: '0', WE_REVIEW_SEAT_CAP_AGY_GEMINI: '40' }, 1],

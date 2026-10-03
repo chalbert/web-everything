@@ -1,4 +1,4 @@
-import { requiresMandatoryReferral, referralFindingKey, mandatoryReferralReviewer, validateReferralRecord, referralRecordState, renderReferralRecord, readReferralRecords, mandatoryReferralState } from '../jury-core.mjs';
+import { requiresMandatoryReferral, referralFindingKey, mandatoryReferralReviewer, validateReferralRecord, referralRecordState, renderReferralRecord, readReferralRecords, mandatoryReferralState, activeReferrals } from '../jury-core.mjs';
 /**
  * @file jury-core.test.mjs — proof of the #2654 (S2 of epic #2649) append-only JURY-LEDGER EVENT VOCABULARY:
  *   the `JURY_EVENT_TYPES` / `JUROR_STATUSES` enums and the pure `validateJuryEvent` / `normalizeJuryEvent`
@@ -1598,6 +1598,15 @@ describe('#4315 mandatory referral protocol', () => {
       expect(validateReferralRecord({ ...dropped, dropped: [{ key: 'unknown', reason: dropped.dropped[0].reason }] })).toBe(false);
       expect(validateReferralRecord({ ...dropped, dropped: [{ key: r.referrals[0].key, reason: 'ignore' }] })).toBe(false);
     }
+  });
+  it('a drop never hides a finding that has a ruling, so a block still holds', () => {
+    const r = record();
+    r.referrals[0].seat = 'judgeAntigravityReview';
+    r.referrals[0].key = referralFindingKey('judgeAntigravityReview', finding);
+    const ruled = { ...r, rulings: [rule(r, 'block')], dropped: [{ key: r.referrals[0].key, reason: 'dropped: seat disabled by operator config' }] };
+    expect(validateReferralRecord(ruled)).toBe(true);
+    expect(activeReferrals(ruled)).toHaveLength(1);
+    expect(mandatoryReferralState([renderReferralRecord(ruled)], { head: r.head }).blocked).toEqual([r.referrals[0].key]);
   });
   it.each(['broken', 'unrecoverable'])('refers %s regardless of outcome, prevention or disposition', impactIfUnfixed => {
     for (const outcome of ['fixed', 'skipped', 'no_change_needed', undefined]) {
