@@ -133,10 +133,12 @@ describe('dispatcher fixture-root harness — conveyor-state → dispatch-plan �
       //    leases, so nothing overlaps and the concurrency cap is not reached. `--no-drift-check` and
       //    `--no-pause-check` keep the two remaining real-state reads (the drift branch, the operator's pause
       //    marker) out of a fixture run.
+      // Ground-truth refresh runs detached and can outlive the CLI, writing into fakeGh during cleanup.
+      // This fixture tests dispatch decisions; disable that unrelated background enrichment.
       const spyMark = nodeSpy.scripts().length;
       const plan = JSON.parse(execFileSync(
         process.execPath,
-        [PLAN_CLI, '--json', `--backlog-dir=${backlogDir}`, '--free-lanes=901', '--no-drift-check', '--no-pause-check'],
+        [PLAN_CLI, '--json', `--backlog-dir=${backlogDir}`, '--free-lanes=901', '--no-drift-check', '--no-pause-check', '--no-ground-truth'],
         { encoding: 'utf8', env, maxBuffer: 32 * 1024 * 1024 },
       ));
       const allNums = [...plan.launch.map((l) => String(l.num)), ...plan.held.map((h) => String(h.num))];
@@ -169,7 +171,7 @@ describe('dispatcher fixture-root harness — conveyor-state → dispatch-plan �
     } finally {
       fakeGh.cleanup();
       nodeSpy.cleanup();
-      rmSync(fixtureRoot, { recursive: true, force: true });
+      rmSync(fixtureRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   }, 60_000); // several `node` subprocess shells — generous timeout, not a perf assertion
 
@@ -202,7 +204,7 @@ describe('dispatcher fixture-root harness — conveyor-state → dispatch-plan �
       // already-covered concern — without it a sized fixture item's `launch` entry also carries `sized: true`).
       const held = JSON.parse(execFileSync(
         process.execPath,
-        [PLAN_CLI, '--json', `--backlog-dir=${backlogDir}`, '--free-lanes=911', '--no-drift-check', '--no-pause-check', '--no-size-check'],
+        [PLAN_CLI, '--json', `--backlog-dir=${backlogDir}`, '--free-lanes=911', '--no-drift-check', '--no-pause-check', '--no-ground-truth', '--no-size-check'],
         { encoding: 'utf8', env, maxBuffer: 32 * 1024 * 1024 },
       ));
       expect(held.launch).toEqual([]);
@@ -212,13 +214,13 @@ describe('dispatcher fixture-root harness — conveyor-state → dispatch-plan �
       // now launches, proving the flag genuinely disables the axis rather than being dead wiring.
       const skipped = JSON.parse(execFileSync(
         process.execPath,
-        [PLAN_CLI, '--json', `--backlog-dir=${backlogDir}`, '--free-lanes=912', '--no-drift-check', '--no-pause-check', '--no-size-check', '--no-prepare-check'],
+        [PLAN_CLI, '--json', `--backlog-dir=${backlogDir}`, '--free-lanes=912', '--no-drift-check', '--no-pause-check', '--no-ground-truth', '--no-size-check', '--no-prepare-check'],
         { encoding: 'utf8', env, maxBuffer: 32 * 1024 * 1024 },
       ));
       expect(skipped.launch).toEqual([{ num: '9101', lane: 912 }]);
       expect(skipped.held).toEqual([]);
     } finally {
-      rmSync(fixtureRoot, { recursive: true, force: true });
+      rmSync(fixtureRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   }, 30_000);
 });
