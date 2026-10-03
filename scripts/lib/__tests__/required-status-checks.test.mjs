@@ -2,7 +2,7 @@
  * @file required-status-checks.test.mjs — unit tests for `we:scripts/lib/required-status-checks.mjs` (#2748
  * false-red follow-up, soak-replay-gate PR #2775). Covers the full degradation chain the module's own header
  * documents: live fetch → cache write → cache hit within TTL → live failure falls back to a stale cache →
- * live failure with no cache at all falls back to the hardcoded {@link FALLBACK_REQUIRED_STATUS_CHECKS}. The
+ * live failure with no cache uses only the repo's declared set, or reports unavailable. The
  * `gh` reader is injected throughout, so every branch is reachable with no network and no credential.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -12,9 +12,10 @@ import { join } from 'node:path';
 vi.mock('node:child_process', async (importOriginal) => {
   const actual = await importOriginal();
   const execFileSync = vi.fn(() => '["test","smoke","daemon-soak"]');
-  return { ...actual, execFileSync, default: { ...actual.default, execFileSync } };
+  const spawnSync = vi.fn();
+  return { ...actual, spawnSync, execFileSync, default: { ...actual.default, spawnSync, execFileSync } };
 });
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { getRequiredStatusChecks, defaultReadRequiredStatusChecks, FALLBACK_REQUIRED_STATUS_CHECKS } from '../required-status-checks.mjs';
 
 describe('getRequiredStatusChecks', () => {
@@ -32,8 +33,9 @@ describe('getRequiredStatusChecks', () => {
     const result = getRequiredStatusChecks({ repo: 'chalbert/web-everything', cachePath, now: 1000, readChecks });
     expect(result).toEqual({ checks: ['test', 'smoke', 'daemon-soak'], source: 'live' });
     const cached = JSON.parse(readFileSync(cachePath, 'utf8'));
-    expect(cached.checks).toEqual(['test', 'smoke', 'daemon-soak']);
-    expect(cached.key).toBe('chalbert/web-everything@main');
+    expect(cached.entries['chalbert/web-everything@main']).toEqual({
+      checks: ['test', 'smoke', 'daemon-soak'], source: 'live', fetchedAtMs: 1000,
+    });
   });
 
   it('serves the cache within the TTL without calling the reader again', () => {
@@ -66,7 +68,7 @@ describe('getRequiredStatusChecks', () => {
     const result = getRequiredStatusChecks({
       repo: 'chalbert/web-everything', cachePath, now: 999_999_999, ttlMs: 1000, readChecks: flakyRead,
     });
-    expect(result).toEqual({ checks: ['test', 'smoke', 'daemon-soak'], source: 'stale-cache' });
+    expect(result).toEqual({ checks: ['test', 'smoke', 'daemon-soak'], source: 'stale-cache', cacheAgeMs: 999_999_999 });
   });
 
   it('falls back to the hardcoded FALLBACK_REQUIRED_STATUS_CHECKS when there is no cache at all and the ' +
@@ -91,10 +93,107 @@ describe('getRequiredStatusChecks', () => {
     expect(result).toEqual({ checks: ['test'], source: 'live' });
     expect(otherCalls).toBe(1);
   });
+
+  const plan403 = () => { throw Object.assign(new Error('gh api failed'), {
+    stderr: Buffer.from('gh: Upgrade to GitHub Pro or make this repository public to enable this feature. (HTTP 403)'),
+  }); };
+
+  it.each([
+    ['chalbert/plateau-app', ['test', 'e2e']],
+    ['chalbert/frontierui', ['test']],
+    ['chalbert/web-everything', ['test', 'smoke', 'daemon-soak']],
+  ])('caches the declared set for %s on a plan-feature 403, then retries after TTL', (repo, checks) => {
+    const readChecks = vi.fn(plan403);
+    expect(getRequiredStatusChecks({ repo, cachePath, now: 1000, ttlMs: 1000, readChecks }))
+      .toEqual({ checks, source: 'declared' });
+    expect(getRequiredStatusChecks({ repo, cachePath, now: 1500, ttlMs: 1000, readChecks }))
+      .toEqual({ checks, source: 'declared' });
+    expect(readChecks).toHaveBeenCalledTimes(1);
+    readChecks.mockReturnValue(['new-protection-check']);
+    expect(getRequiredStatusChecks({ repo, cachePath, now: 2000, ttlMs: 1000, readChecks }))
+      .toEqual({ checks: ['new-protection-check'], source: 'live' });
+    expect(readChecks).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    'Resource not accessible by integration (HTTP 403)',
+    'Not Found (HTTP 404)',
+    'HTTP 403: API rate limit exceeded',
+  ])('uses declared policy on protection denial: %s', message => {
+    const readChecks = vi.fn(() => { throw Object.assign(new Error('gh api failed'), { stderr: Buffer.from(message) }); });
+    expect(getRequiredStatusChecks({ repo: 'chalbert/plateau-app', cachePath, now: 1000, readChecks }))
+      .toEqual({ checks: ['test', 'e2e'], source: 'declared' });
+    expect(getRequiredStatusChecks({ repo: 'chalbert/plateau-app', cachePath, now: 1001, readChecks }))
+      .toEqual({ checks: ['test', 'e2e'], source: 'declared' });
+    expect(readChecks).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['chalbert/unknown', undefined])('never gives undeclared repo %s WE defaults', repo => {
+    expect(getRequiredStatusChecks({ repo, cachePath, readChecks: plan403 }))
+      .toEqual({ checks: [], source: 'fallback' });
+    expect(getRequiredStatusChecks({ repo, cachePath, readChecks: () => { throw new Error('offline'); } }))
+      .toEqual({ checks: [], source: 'unavailable' });
+  });
+
+  it('alternates repositories and branches without evicting live or declared entries', () => {
+    const liveRead = vi.fn(() => ['test', 'smoke', 'daemon-soak', 'new-check']);
+    const declaredRead = vi.fn(plan403);
+    const releaseRead = vi.fn(() => ['release-check']);
+    for (const now of [1000, 1500]) {
+      expect(getRequiredStatusChecks({ repo: 'chalbert/web-everything', cachePath, now, readChecks: liveRead }))
+        .toEqual({ checks: ['test', 'smoke', 'daemon-soak', 'new-check'], source: now === 1000 ? 'live' : 'cache' });
+      expect(getRequiredStatusChecks({ repo: 'chalbert/plateau-app', cachePath, now, readChecks: declaredRead }))
+        .toEqual({ checks: ['test', 'e2e'], source: 'declared' });
+      expect(getRequiredStatusChecks({ repo: 'chalbert/web-everything', branch: 'release', cachePath, now, readChecks: releaseRead }))
+        .toEqual({ checks: ['release-check'], source: now === 1000 ? 'live' : 'cache' });
+    }
+    for (const reader of [liveRead, declaredRead, releaseRead]) expect(reader).toHaveBeenCalledTimes(1);
+    expect(Object.keys(JSON.parse(readFileSync(cachePath, 'utf8')).entries)).toHaveLength(3);
+  });
+
+  it('preserves a legacy entry when another repo writes its first cache entry', () => {
+    writeFileSync(cachePath, JSON.stringify({
+      key: 'chalbert/web-everything@main', checks: ['test', 'legacy-required'], fetchedAtMs: 1000,
+    }));
+    getRequiredStatusChecks({ repo: 'chalbert/plateau-app', cachePath, now: 1500, readChecks: plan403 });
+    const readChecks = vi.fn();
+    expect(getRequiredStatusChecks({ repo: 'chalbert/web-everything', cachePath, now: 1500, readChecks }))
+      .toEqual({ checks: ['test', 'legacy-required'], source: 'cache' });
+    expect(readChecks).not.toHaveBeenCalled();
+  });
 });
 
 describe('defaultReadRequiredStatusChecks', () => {
-  afterEach(() => { vi.clearAllMocks(); });
+  let dir;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'we-required-route-'));
+    vi.stubEnv('WE_GH_THROTTLE_LOCK_ROOT', dir);
+    vi.stubEnv('WE_GH_THROTTLE_PERSONAL_ROUTE', '0');
+    vi.stubEnv('WE_GH_THROTTLE_COST_HEADERS', '0');
+  });
+  afterEach(() => { vi.clearAllMocks(); vi.unstubAllEnvs(); rmSync(dir, { recursive: true, force: true }); });
+
+  it('routes the protection read through the real throttle personal read path when enabled', () => {
+    vi.stubEnv('WE_GH_THROTTLE_PERSONAL_ROUTE', '1');
+    vi.stubEnv('GH_TOKEN', 'ghs_test_fixture');
+    execFileSync.mockReturnValueOnce('ghp_test_fixture');
+    spawnSync.mockImplementationOnce((_bin, _args, opts) => {
+      expect(opts.env.GH_TOKEN === 'ghp_test_fixture').toBe(true);
+      expect(opts.timeout).toBe(15_000);
+      return { status: 0, stdout: Buffer.from('["personal-check"]'), stderr: Buffer.alloc(0) };
+    });
+    expect(defaultReadRequiredStatusChecks({ repo: 'chalbert/web-everything' })).toEqual(['personal-check']);
+    expect(execFileSync).toHaveBeenCalledWith('gh', ['auth', 'token'], expect.any(Object));
+    expect(spawnSync.mock.calls[0][1]).toEqual(['api', 'repos/chalbert/web-everything/branches/main/protection', '--jq', '.required_status_checks.contexts']);
+    expect(process.env.GH_TOKEN === 'ghs_test_fixture').toBe(true);
+  });
+
+  it('preserves routed HTTP failures for declared-policy classification', () => {
+    vi.stubEnv('WE_GH_THROTTLE_PERSONAL_ROUTE', '1');
+    spawnSync.mockReturnValue({ status: 1, stdout: Buffer.alloc(0), stderr: Buffer.from('Resource not accessible by integration (HTTP 403)') });
+    expect(getRequiredStatusChecks({ repo: 'chalbert/plateau-app', cachePath: join(dir, 'cache.json') }))
+      .toEqual({ source: 'declared', checks: ['test', 'e2e'] });
+  });
 
   it('shells `gh api repos/<repo>/branches/<branch>/protection --jq .required_status_checks.contexts`', () => {
     const result = defaultReadRequiredStatusChecks({ repo: 'chalbert/web-everything', branch: 'main' });

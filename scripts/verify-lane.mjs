@@ -61,6 +61,7 @@
  */
 import { spawn } from 'node:child_process';
 import { createFailureCollector } from './lib/verify-failures.mjs';
+import { timeoutRetryFiles, describeTimeoutRetry, MAX_TIMEOUT_LOG_BYTES } from './lib/gate-timeout-retry.mjs';
 import { writeFileSync, renameSync, existsSync, readFileSync, readdirSync, unlinkSync, lstatSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { homedir } from 'node:os';
@@ -69,7 +70,7 @@ import { VERIFY_FILENAME, VERIFY_PREVIOUS_FILENAME, verifyStartBody, verifyFinis
 import { LEASE_FILENAME, isLeaseStale, isConfirmedOwnLease } from './lib/lane-lease.mjs';
 import { defaultPoolRoot } from './lib/lane-pool-paths.mjs';
 import { writeAllSync } from './lib/write-all-sync.mjs';
-import { resolveDefaultGate, explicitGateRefusal, describeGate, laneRelevantChangeSinceForRecord, computeWorkingTreeHash, stableTreeHash } from './lib/verify-lane-gate.mjs';
+import { resolveDefaultGate, explicitGateRefusal, describeGate, laneRelevantChangeSinceForRecord, computeWorkingTreeHash, stableTreeHash, localChangedSet } from './lib/verify-lane-gate.mjs';
 import { admissionLockRoot, resolveCap, resolveTimeoutMs, acquireSlotBlocking, releaseOwnedSlot, ADMISSION_HELD_ENV, classifyCommandKind } from './readiness/heavy-admission.mjs';
 
 // ── tiny arg parsing (matches push-if-green.mjs / lane-pool.mjs) ─────────────────────────────────────
@@ -246,6 +247,7 @@ function readCheckoutScripts() {
   try { return Object.keys(JSON.parse(readFileSync(join(REPO, 'package.json'), 'utf8')).scripts || {}); } catch { return undefined; }
 }
 let GATE;
+let resolvedGate;
 if (typeof flags.gate === 'string') {
   GATE = flags.gate;
   // A `request` (the only path a dispatched agent has) whose DEFAULT selection is blocked is the high-risk case —
@@ -276,9 +278,19 @@ if (typeof flags.gate === 'string') {
   const resolved = resolveDefaultGate({ runGit: git, env: process.env, scripts: readCheckoutScripts() });
   if (resolved.decision.mode === 'blocked') emit({ sha: headSha, status: 'selection-required', reason: 'local-selection-bound', ok: false, detail: describeGate(resolved) }, 3);
   GATE = resolved.command;
+  resolvedGate = resolved;
   // xpnhz4o — always SAY whether this is a selected run or a full-suite fallback, and why (stderr, so `--json`
   // stdout stays one parseable document).
   process.stderr.write(describeGate(resolved) + '\n');
+}
+
+// The dispatcher passes the requested default command back via --gate. Recognize that exact command,
+// without interpreting arbitrary shell overrides or accidentally skipping their remaining steps.
+if (!resolvedGate && typeof flags.gate === 'string') {
+  try {
+    const resolved = resolveDefaultGate({ runGit: git, env: process.env, scripts: readCheckoutScripts() });
+    if (resolved.command === GATE) resolvedGate = resolved;
+  } catch { /* Unknown selection cannot authorize a retry. */ }
 }
 
 // 1. Stamp the `running` marker BEFORE the suites start, so a kill mid-run leaves a stranded (detectably
@@ -329,15 +341,16 @@ const cacheHit = MODE !== 'run' && preStart && !preStart.corrupt
   && preStart.suites === GATE;
 
 if (cacheHit) {
-  const cachedDetail = `green for ${headSha.slice(0, 8)} — working tree unchanged since that verification (content hash + gate match); no new run needed.`;
+  const cachedDetail = `green for ${headSha.slice(0, 8)} — working tree unchanged since that verification (content hash + gate match); no new run needed.${describeTimeoutRetry(preStart.retriedTimeouts)}`;
+  const cachedRetry = preStart.retriedTimeouts?.length ? { retriedTimeouts: preStart.retriedTimeouts } : {};
   if (MODE === 'request') {
     // Leave the marker exactly as it is: never overwrite a still-accurate terminal record with a fresh
     // `running` one — that overwrite is the ONLY thing that made `verify-dispatch.mjs` see `running` and
     // re-dispatch. A caller polling `check`/`check --wait=` next reads the SAME terminal record this emits.
-    emit({ sha: headSha, status: 'cached', reason: 'cached', exitCode: preStart.exitCode ?? null, detail: `verification already ${cachedDetail}` }, 0);
+    emit({ sha: headSha, status: 'cached', reason: 'cached', exitCode: preStart.exitCode ?? null, ...cachedRetry, detail: `verification already ${cachedDetail}` }, 0);
   }
   // Bare `verify`: report the cached terminal result directly — never touch the marker, never exec the gate.
-  emit({ sha: headSha, status: 'green', reason: 'cached', exitCode: preStart.exitCode ?? null, detail: cachedDetail }, 0);
+  emit({ sha: headSha, status: 'green', reason: 'cached', exitCode: preStart.exitCode ?? null, ...cachedRetry, detail: cachedDetail }, 0);
 }
 
 if (MODE !== 'run') writeMarker(verifyStartBody({ sha: headSha, suites: GATE, startedAt: new Date().toISOString(), treeHash: currentTreeHash, runId: typeof flags['run-id'] === 'string' ? flags['run-id'] : undefined }));
@@ -397,22 +410,50 @@ const preGateTreeHash = MODE === 'run' ? null : treeHashNow();
 process.stderr.write(`⏱ gate execution starting (suites: ${GATE})\n`);
 let exitCode = 0;
 let signal = null;
-const collector = createFailureCollector({ cwd: REPO });
-try {
+let failureDetails;
+let retriedTimeouts = [];
+async function runGate(command, args) {
+  const collector = createFailureCollector({ cwd: REPO });
+  const output = { stdout: '', stderr: '' };
+  let bytes = 0;
   // xaipsbs — the gate's own `npm run test:unit` / `check:standards` are wrapped in `heavy-admission.mjs run`;
   // this flag makes those nested wrappers pass through instead of asking for a second slot for the same work.
-  ({ exitCode, signal } = await new Promise((resolveGate, reject) => {
-    const child = spawn(GATE, { shell: true, cwd: REPO, stdio: ['inherit', 'pipe', 'pipe'], env: { ...process.env, [ADMISSION_HELD_ENV]: '1' } });
+  const result = await new Promise((resolveGate, reject) => {
+    const child = spawn(command, args ?? [], { shell: !args, cwd: REPO, stdio: ['inherit', 'pipe', 'pipe'], env: { ...process.env, [ADMISSION_HELD_ENV]: '1' } });
     for (const [name, fd] of [['stdout', 1], ['stderr', 2]]) {
+      child[name].setEncoding('utf8');
       child[name].on('data', chunk => {
         collector.push(chunk, name);
+        bytes += Buffer.byteLength(chunk);
+        if (bytes <= MAX_TIMEOUT_LOG_BYTES) output[name] += chunk;
         // Flush each chunk before the terminal JSON; no pending writable queue can overtake it.
         writeAllSync(fd, chunk);
       });
     }
     child.on('error', reject);
     child.on('close', (code, closeSignal) => resolveGate({ exitCode: Number.isFinite(code) ? code : 2, signal: closeSignal || null }));
-  }));
+  });
+  return { ...result, failureDetails: collector.finish(), output: bytes <= MAX_TIMEOUT_LOG_BYTES ? output : null };
+}
+try {
+  const retryableGate = resolvedGate?.testCommand?.startsWith('npx vitest related ');
+  let result = await runGate(retryableGate ? resolvedGate.testCommand : GATE);
+  if (retryableGate && admission.ok && result.exitCode !== 0 && !verificationInfrastructureFailure(result) && result.output) {
+    // Edits during admission or test execution must also count as the change's own files.
+    const changedNow = localChangedSet({ runGit: git });
+    retriedTimeouts = timeoutRetryFiles({ ...result.output, failureDetails: result.failureDetails,
+      changedFiles: changedNow ? [...resolvedGate.decision.changedFiles, ...changedNow.changedFiles] : null, cwd: REPO });
+    if (retriedTimeouts.length) {
+      process.stderr.write(describeTimeoutRetry(retriedTimeouts).trim() + '\n');
+      // Exact file filters, one worker, no related traversal, no passWithNoTests, and no second attempt.
+      result = await runGate('npx', ['vitest', 'run', '--maxWorkers=1', '--minWorkers=1', '--no-file-parallelism',
+        ...retriedTimeouts.map(file => `./${file}`)]);
+    }
+  }
+  if (retryableGate && result.exitCode === 0 && resolvedGate.standardsCommand) {
+    result = await runGate(resolvedGate.standardsCommand);
+  }
+  ({ exitCode, signal, failureDetails } = result);
 } catch (e) {
   signal = e?.signal || null;
   exitCode = Number.isFinite(e && e.status) ? e.status : 2;
@@ -420,12 +461,14 @@ try {
   if (admission.ok) releaseOwnedSlot({ lockRoot: ADMISSION_LOCK_ROOT, cap: ADMISSION_CAP, owner: REPO });
 }
 
-const diagnostic = exitCode === 0 ? {} : { failureDetails: collector.finish() };
+const diagnostic = { ...(exitCode === 0 ? {} : { failureDetails }),
+  ...(retriedTimeouts.length ? { retriedTimeouts } : {}) };
+const retryDetail = describeTimeoutRetry(retriedTimeouts);
 
 const infrastructure = verificationInfrastructureFailure({ exitCode, signal });
 if (MODE === 'run' && infrastructure) emit({ sha: headSha, status: 'infrastructure-failure', reason: infrastructure.reason, exitCode, infrastructure, detail: infrastructure.detail }, 3);
 if (MODE === 'run') {
-  emit({ sha: headSha, status: exitCode === 0 ? 'green' : 'red', reason: 'run', exitCode, ...diagnostic, detail: exitCode === 0 ? 'gate passed (run mode — no marker recorded).' : `gate FAILED (exit ${exitCode}) — run mode, no marker recorded.` }, exitCode === 0 ? 0 : 2);
+  emit({ sha: headSha, status: exitCode === 0 ? 'green' : 'red', reason: 'run', exitCode, ...diagnostic, detail: exitCode === 0 ? 'gate passed (run mode — no marker recorded).' + retryDetail : `gate FAILED (exit ${exitCode}) — run mode, no marker recorded.${retryDetail}` }, exitCode === 0 ? 0 : 2);
 }
 
 // 4. Rewrite the marker to its terminal green/red form — for the sha THIS run actually verified.
@@ -465,6 +508,6 @@ writeMarker(finished);
 if (infrastructure) emit({ sha: headSha, status: finished.status, reason: infrastructure.reason, exitCode, infrastructure, detail: infrastructure.detail }, 3);
 
 emit(
-  { sha: headSha, status: finished.status, reason: finished.status, exitCode, ...diagnostic, detail: finished.status === 'green' ? `suites passed — recorded green for ${headSha.slice(0, 8)} (delivery may proceed).` : `suites FAILED (exit ${exitCode}) — recorded red for ${headSha.slice(0, 8)}; the finish-guard will refuse to land until this is green.` },
+  { sha: headSha, status: finished.status, reason: finished.status, exitCode, ...diagnostic, detail: (finished.status === 'green' ? `suites passed — recorded green for ${headSha.slice(0, 8)} (delivery may proceed).` : `suites FAILED (exit ${exitCode}) — recorded red for ${headSha.slice(0, 8)}; the finish-guard will refuse to land until this is green.`) + retryDetail },
   finished.status === 'green' ? 0 : 2,
 );

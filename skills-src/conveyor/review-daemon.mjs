@@ -76,6 +76,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { hostname } from 'node:os';
 import { runReconcilePass, defaultReadPrs, defaultReadAgents } from '../../scripts/conveyor/reconcile-pass.mjs';
+import { notifyReferralHold } from '../../scripts/conveyor/review-referral-hold.mjs';
 // x26lw6u — the review is dispatched as a deterministic JOB (`review-job.mjs`: acquire → review-loop-cli →
 // report → release, no Claude wrapper session); `WE_REVIEW_DISPATCH_MODE=session` keeps the old `claude --bg`
 // path reachable. The jurors review-loop-cli spawns are the fresh, independent reviewers either way.
@@ -175,6 +176,9 @@ export function explainPendingNotDispatched({ prs, plan, dispatchable = [], defe
   for (const pr of prs) {
     const n = Number(pr?.number);
     if (!Number.isInteger(n) || sent.has(n)) continue;
+    // Referral holds have one durable notice/log, never one explanation per tick.
+    if (plan?.refusals?.some(r => r.prNumber === n
+      && (r.kind === 'review-referrals-pending' || r.reviewRefusal?.kind === 'review-referrals-pending'))) continue;
     const held = (pr?.labels ?? []).map(labelName).filter((l) => EXPLAINED_HOLD_LABELS.includes(l));
     if (held.length === 0) continue;
     const reasons = [];
@@ -218,6 +222,7 @@ export function runReviewTick({
   tagStatus = tagReviewStatus,
   statusCandidates = selectStatusCandidates,
   holdReconcile = sweepReviewHoldLabels,
+  notifyReferral = notifyReferralHold,
   acquirableLanes = () => Infinity,
   // Pool-exhaustion reporting: `{exhausted({repo, deferred}), recovered(repo)}` (see
   // `we:scripts/conveyor/pool-exhaustion.mjs`). `null` (the default) keeps every existing test byte-identical;
@@ -349,6 +354,16 @@ export function runReviewTick({
   }
   const dispatched = [];
   const failed = [];
+  for (const row of plan.refusals ?? []) {
+    const hold = row.referralHold ?? row.reviewRefusal?.referralHold;
+    if (!hold) continue;
+    try {
+      notifyReferral({ repo, prNumber: row.prNumber, hold,
+        comments: (rawPrs ?? []).find(p => Number(p.number) === row.prNumber)?.comments ?? [] });
+    } catch (e) {
+      failed.push({ prNumber: row.prNumber, error: `pause notice: ${String(e.message ?? e).split('\n')[0]}` });
+    }
+  }
   // x26lw6u — NOT named `skipped`: `withSelfSync` already returns `{skipped: true}` for a whole skipped tick,
   // and `onTick` reads both shapes.
   const notStarted = [];

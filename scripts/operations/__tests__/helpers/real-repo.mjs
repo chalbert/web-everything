@@ -64,6 +64,10 @@ export const DEFAULT_BRANCH = 'main';
  * exist during `init` and `clone` — there is no repo yet to hold a local config.
  */
 const IDENTITY_FLAGS = [
+  // A large seed commit can detach a repack even though execFileSync waits for the commit.
+  // Fixture Git must finish all writes before snapshots or finally cleanup can run.
+  '-c', 'gc.auto=0',
+  '-c', 'maintenance.auto=false',
   '-c', 'user.email=harness@example.invalid',
   '-c', 'user.name=Ops Harness',
   '-c', 'commit.gpgsign=false',
@@ -138,7 +142,9 @@ async function within(tmp, ctx, fn) {
   try {
     return await fn(ctx);
   } finally {
-    rmSync(tmp, { recursive: true, force: true });
+    // Git's background housekeeping can briefly race recursive removal of .git/objects.
+    // Retry transient cleanup failures, but still throw if the directory cannot be removed.
+    rmSync(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 }
 

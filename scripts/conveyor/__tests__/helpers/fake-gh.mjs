@@ -148,7 +148,7 @@ export function withFakeGh({ prs = [], comments = {} } = {}) {
         return readFileSync(logPath, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line));
       } catch { return []; }
     },
-    cleanup: () => rmSync(dir, { recursive: true, force: true }),
+    cleanup: () => rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }),
   };
 }
 
@@ -204,7 +204,7 @@ export function acquireStoreLock(storePath) {
       try {
         const holder = JSON.parse(readFileSync(holderPath, 'utf8'));
         if (Date.now() - holder.at > LOCK_STALE_MS) {
-          rmSync(lockPath, { recursive: true, force: true });
+          rmSync(lockPath, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
           continue; // retry the mkdir immediately — no need to sleep first, the slot is free now
         }
       } catch {
@@ -219,7 +219,7 @@ export function acquireStoreLock(storePath) {
 
 /** Release a lock acquired by {@link acquireStoreLock}. Best-effort: a missing lock dir is not an error. */
 export function releaseStoreLock(lockPath) {
-  try { rmSync(lockPath, { recursive: true, force: true }); } catch { /* best effort */ }
+  try { rmSync(lockPath, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch { /* best effort */ }
 }
 
 /** The empty store shape — every field a caller might read is present so nothing has to null-check it. */
@@ -567,7 +567,7 @@ export function pushCommitToRef(originPath, branch, files = {}, message = 'sim: 
     ], { cwd: work, stdio: ['ignore', 'pipe', 'pipe'] });
     execFileSync('git', ['push', 'origin', `HEAD:${branch}`], { cwd: work, stdio: ['ignore', 'pipe', 'pipe'] });
   } finally {
-    rmSync(work, { recursive: true, force: true });
+    rmSync(work, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 }
 
@@ -796,6 +796,12 @@ export function createFakeGithub({ root, repos, actor = 'we-daemon-bot' }) {
       return withRepo(repo, (repoState) => setChecksPure(repoState, number, checks));
     },
 
+    /** Declare the repo's branch-protection required status checks, served by the shim's
+     *  `branches/{b}/protection` route. Unset (the default) keeps that route unsupported, so readers fall back. */
+    setRequiredChecks(repo, names) {
+      return withRepo(repo, (repoState) => { repoState.requiredChecks = names.map(String); });
+    },
+
     /** #4075 — seed `gh run list` rows (`{databaseId, headBranch, conclusion, status, createdAt, updatedAt,
      *  workflowName}`) for a repo; replaces any previous set. */
     setRuns(repo, runs) {
@@ -868,7 +874,7 @@ export function createFakeGithub({ root, repos, actor = 'we-daemon-bot' }) {
     },
 
     cleanup() {
-      try { rmSync(root, { recursive: true, force: true }); } catch { /* best effort */ }
+      try { rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch { /* best effort */ }
     },
   };
 }

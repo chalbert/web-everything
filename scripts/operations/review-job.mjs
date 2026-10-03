@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { readReviewCiGate } from '../lib/review-ci-gate-io.mjs';
 /**
  * @file scripts/operations/review-job.mjs
  * @description x26lw6u (epic #3383) — RUN THE INDEPENDENT-REVIEW ARC AS A DETERMINISTIC JOB, NOT A CLAUDE
@@ -514,6 +515,7 @@ function runReviewArc({
  *   logPath:string, skipped?:string}}
  */
 export function dispatchReviewJob({
+  ciGate = readReviewCiGate,
   pr, repo, root = REPO_ROOT, env = process.env, now = Date.now(), checkStaleness,
   dir = reviewJobsDir(env, root),
   spawnJob = defaultSpawnJob,
@@ -537,6 +539,8 @@ export function dispatchReviewJob({
     return { ...base, jobPid: null, skipped: 'lane-cooloff' };
   }
 
+  const ci = ciGate({ repo: planned.repo, pr: planned.pr });
+  if (!ci?.allowed) return { pr: planned.pr, repo: planned.repo, headSha: ci?.headSha ?? null, skipped: `review-ci: ${ci?.reason ?? 'unreadable-ci'}`, ci };
   const settingsEnv = resolveSettingsEnv() || {};
   const childEnv = { ...env, ...settingsEnv };
   // The dispatcher's own actor id (if it happens to run inside a session) must never leak into the job — the

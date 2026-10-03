@@ -207,6 +207,28 @@ describe('lane-pool reclaim — AFTER', () => {
 // lost its lease (see #xbk2is9) was reset the moment its work was pushed, mid-verify or mid-PR. This is the
 // Done-when #1 executable proof: same gate now runs on the direct-reset path too.
 describe('lane-pool reclaim — liveness gate (#xl5xhmj)', () => {
+  it.each(['dead', 'reused-pid', 'old-working'])('reclaims preserved work after release with a %s historical holder', (kind) => {
+    const session = kind === 'reused-pid' ? 'Mac:31893' : 'released-session';
+    expect(runPool(['acquire', '--lane=1', `--session=${session}`, ...poolArgs()]).code).toBe(0);
+    const dir = lanePath(1);
+    writeFileSync(join(dir, 'work.txt'), 'preserved work\n');
+    git(['add', 'work.txt'], dir);
+    git(['-c', 'user.email=t@t.com', '-c', 'user.name=t', 'commit', '--quiet', '-m', 'work'], dir);
+    git(['push', '--quiet', 'origin', 'HEAD:refs/heads/lane/preserved'], dir);
+    expect(runPool(['release', '--lane=1', `--session=${session}`, ...poolArgs()]).code).toBe(0);
+    const agents = kind === 'dead' ? [] : [{ sessionId: session, pid: 31893, processStartTime: '2026-10-03T05:00:00Z', state: 'working', cwd: lanePath(2), lastActivityAt: 1 }];
+    writeFileSync(join(binDir, 'claude'), `#!/bin/sh\necho '${JSON.stringify(agents)}'\n`);
+    writeFileSync(join(binDir, 'lsof'), `#!/bin/sh\nprintf 'p31893\\nn${lanePath(2)}\\n'\n`);
+    const dry = runPool(['reclaim', '--lane=1', '--dry-run', '--json', ...poolArgs()]);
+    expect(dry.code, dry.err).toBe(0);
+    expect(JSON.parse(dry.out)).toMatchObject({ preserved: true, wouldReclaim: true });
+    const real = runPool(['reclaim', '--lane=1', '--json', ...poolArgs()]);
+    expect(real.code, real.err).toBe(0);
+    expect(JSON.parse(real.out)).toMatchObject({ preserved: true, reclaimed: true });
+    expect(existsSync(join(dir, 'work.txt'))).toBe(false);
+    expect(git(['rev-parse', 'HEAD'], dir)).toBe(git(['rev-parse', 'origin/main'], dir));
+  });
+
   it('an unleased lane with a pushed-only commit and a LIVE owner session is KEPT, never reset', () => {
     expect(runPool(['acquire', '--lane=1', '--session=s', ...poolArgs()]).code).toBe(0);
     const dir = lanePath(1);

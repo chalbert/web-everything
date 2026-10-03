@@ -5,7 +5,7 @@ import { pathToFileURL } from 'node:url';
 import { buildOperatorAnswer, latestUnresolvedStandDown } from './stand-down-answer-core.mjs';
 
 export function runStandDownAnswer(argv, { gh = (args) => execFileSync('gh', args, {
-  encoding: 'utf8', timeout: 60_000, stdio: ['ignore', 'pipe', 'pipe'],
+  encoding: 'utf8', timeout: 60_000, maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'],
 }) } = {}) {
   const [pr, ...args] = argv;
   if (!/^[1-9]\d*$/.test(pr ?? '')) throw new Error('PR must be a positive integer');
@@ -21,7 +21,12 @@ export function runStandDownAnswer(argv, { gh = (args) => execFileSync('gh', arg
   if (!/^[\w.-]+\/[\w.-]+$/.test(flags.repo)) throw new Error('--repo must be owner/name');
   // Validate the ceremony before any IO. --reason is deliberately never trimmed or paraphrased.
   buildOperatorAnswer({ standDownId: 'validation', ...flags });
-  const snapshot = JSON.parse(gh(['pr', 'view', pr, `--repo=${flags.repo}`, '--json', 'comments']));
+  let snapshot;
+  try {
+    snapshot = JSON.parse(gh(['pr', 'view', pr, `--repo=${flags.repo}`, '--json', 'comments']));
+  } catch (error) {
+    throw new Error(`Could not read comments for ${flags.repo} PR #${pr}: ${String(error.message || error).split(/[\r\n]/)[0]}`);
+  }
   const target = latestUnresolvedStandDown(snapshot.comments);
   if (!target) throw new Error('no unresolved stand-down on this PR');
   if (!target.id) throw new Error('unresolved stand-down has no durable comment id');

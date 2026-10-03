@@ -51,6 +51,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { runSoak } from '../soak.mjs';
+import { FALLBACK_REQUIRED_STATUS_CHECKS } from '../../../lib/required-status-checks.mjs';
 import { sessionMatches } from '../invariants.mjs';
 
 const ROUNDS = 4;
@@ -79,6 +80,8 @@ export default {
       scorecards: false,
       fleet: false,
       setup(w) {
+        // The review CI gate only trusts a declared (live) required set — serve the fallback set as branch protection.
+        w.gh.setRequiredChecks('we', FALLBACK_REQUIRED_STATUS_CHECKS);
         const head = 'lane/soak-stale-rerun-review-pending';
         w.git.createBranch('we', head, { from: 'main', files: { 'soak/stale-rerun-review-pending.txt': 'a change awaiting review, whose CI reran once on this same head\n' } });
         const pr = w.gh.openPr({

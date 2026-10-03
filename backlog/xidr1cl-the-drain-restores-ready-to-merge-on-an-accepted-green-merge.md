@@ -1,9 +1,11 @@
 ---
 kind: story
 size: 2
-status: open
+status: resolved
 scope: ["we:scripts/merge-ai-prs.mjs", "we:scripts/__tests__/merge-ai-prs.test.mjs"]
 dateOpened: "2026-10-02"
+dateResolved: "2026-10-03"
+graduatedTo: f9e1ac7de
 tags: []
 ---
 

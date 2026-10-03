@@ -1,5 +1,5 @@
 import { referralFindingKey, mandatoryReferralReviewer, normalizeFinding, renderReferralRecord,
-  readReferralRecords, validateReferralRecord } from '../../lib/jury-core.mjs';
+  readReferralRecords, validateReferralRecord, mandatoryReferralState, activeReferrals } from '../../lib/jury-core.mjs';
 import { assertMandatoryReferralsCleared } from '../../review-set-label.mjs';
 /**
  * @file review-pr-io.test.mjs — the `review-pr` io shell (#3035): the four sinks, with no `gh` and no network.
@@ -1017,8 +1017,8 @@ describe('#xu2pp2m — `--cwd` decides which checkout the DIFF is read from', ()
 });
 
 describe('#4315 durable referral effects', () => {
-  function harness({ result = 'not-real', failure } = {}) {
-    const head = 'a'.repeat(40), trace = [];
+  function harness({ result = 'not-real', failure, env = {} } = {}) {
+    const head = 'a'.repeat(40), trace = [], lines = [];
     let posts = 0;
     const state = { headRefOid: head, body: '<!-- authored-by-actor: author -->', comments: [], labels: ['review:pending'] };
     const payload = { read: { repo: 'o/r', pr: 7, title: 'review', body: state.body, netBasis: { rev: head },
@@ -1047,10 +1047,152 @@ describe('#4315 durable referral effects', () => {
           card: result === 'card' ? 'we:backlog/7-filed.md' : '',
         })) } };
     });
-    const make = () => createReviewPrSinks({ root, labelProvider: provider, referralJudge: judge,
-      mirrorReferral: record => trace.push(`mirror:${record.attempted}`), out: () => {}, cardReadable: () => failure !== 'card' });
-    return { state, trace, payload, judge, make, provider };
+    const make = () => createReviewPrSinks({ root, env, labelProvider: provider, referralJudge: judge,
+      mirrorReferral: record => trace.push(`mirror:${record.attempted}`), out: line => lines.push(line), cardReadable: () => failure !== 'card' });
+    return { state, trace, lines, payload, judge, make, provider };
   }
+
+  function seedReferrals(h, seats, head = 'b'.repeat(40), rule = () => []) {
+    const referrals = seats.map((seat, i) => {
+      const original = { ...h.payload.referrals[0].original, summary: `pending finding ${i}` };
+      return { seat, original, finding: normalizeFinding(original), key: referralFindingKey(seat, original) };
+    });
+    const record = { version: 1, repo: 'o/r', pr: 7, head, runId: 'earlier-run',
+      reviewer: mandatoryReferralReviewer('earlier-run'), authorBody: h.state.body,
+      attempted: true, referrals, rulings: [] };
+    record.rulings = rule(record);
+    h.state.comments.push({ body: renderReferralRecord(record) });
+    h.payload.referrals = [];
+    return record;
+  }
+
+  it.each(['block', 'not-real'])('a disabled seat never retires a finding that already has a %s ruling', async result => {
+    const h = harness({ failure: 'judge', env: { REVIEW_PR_ANTIGRAVITY_REVIEW: '0', WE_REVIEW_SEAT_CAP_AGY_GEMINI: '0' } });
+    const old = seedReferrals(h, ['judgeAntigravityReview', 'judgeAntigravityReview'], 'b'.repeat(40), r => [{
+      id: 'r1', key: r.referrals[0].key, reviewerId: r.reviewer.id, lens: r.reviewer.lens, result,
+      rationale: 'Verified against the pinned diff', evidence: ['diff:x'] }]);
+    const result_ = await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX);
+    const historical = result_.records.find(r => r.runId === old.runId);
+    // Only the unruled finding is retired; the ruled one keeps counting, so a `block` still holds the PR.
+    expect(historical.dropped).toEqual([{ key: old.referrals[1].key, reason: 'dropped: seat disabled by operator config' }]);
+    expect(mandatoryReferralState(h.state.comments, { head: 'b'.repeat(40) }).blocked).toEqual(result === 'block' ? [old.referrals[0].key] : []);
+  });
+
+  it('flag on with the Gemini cap left unset keeps the seat\'s referrals pending', async () => {
+    const h = harness({ failure: 'judge', env: { REVIEW_PR_ANTIGRAVITY_REVIEW: '1' } });
+    seedReferrals(h, Array(2).fill('judgeAntigravityReview'));
+    const result = await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX);
+    expect(result.pending).toHaveLength(2);
+    expect(result.records.every(r => !r.dropped)).toBe(true);
+  });
+
+  it.each([
+    ['agy-gemini', { WE_REVIEW_SEAT_CAP_AGY_GEMINI: '0', WE_REVIEW_SEAT_CAP_AGY_CLAUDE: '40' }, 'agy-claude'],
+    ['agy-claude', { WE_REVIEW_SEAT_CAP_AGY_GEMINI: '40', WE_REVIEW_SEAT_CAP_AGY_CLAUDE: '0' }, 'agy-gemini'],
+  ])('disabling only %s drops only its referrals and keeps %s pending', async (disabled, env, enabled) => {
+    const h = harness({ failure: 'judge', env });
+    const old = seedReferrals(h, [disabled, enabled]);
+    const result = await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX);
+    expect(result.pending).toEqual([old.referrals[1].key]);
+    expect(result.records.find(r => r.runId === old.runId).dropped).toEqual([
+      { key: old.referrals[0].key, reason: 'dropped: seat disabled by operator config' }]);
+  });
+
+  it.each([
+    [{ REVIEW_PR_ANTIGRAVITY_REVIEW: '0', WE_REVIEW_SEAT_CAP_AGY_GEMINI: '40' }, 1],
+    [{ REVIEW_PR_ANTIGRAVITY_REVIEW: '1', WE_REVIEW_SEAT_CAP_AGY_GEMINI: '0' }, 1],
+    [{ REVIEW_PR_ANTIGRAVITY_REVIEW: '0', WE_REVIEW_SEAT_CAP_AGY_GEMINI: '0' }, 1],
+    [{ REVIEW_PR_ANTIGRAVITY_REVIEW: '1', WE_REVIEW_SEAT_CAP_AGY_GEMINI: '40' }, 5],
+  ])('replays #3481: config %j leaves %i pending', async (env, count) => {
+    const h = harness({ failure: 'judge', env });
+    const old = seedReferrals(h, ['judge', ...Array(4).fill('judgeAntigravityReview')]);
+    const result = await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX);
+    expect(result.malformed).toBe(false);
+    expect(result.pending).toHaveLength(count);
+    expect(result.pending).toContain(old.referrals[0].key);
+    expect(result.records.filter(r => r.head === h.state.headRefOid).flatMap(activeReferrals)).toHaveLength(count);
+    const historical = result.records.find(r => r.runId === old.runId);
+    expect(historical.referrals).toEqual(old.referrals);
+    expect(historical.dropped ?? []).toEqual(count === 5 ? [] : old.referrals.slice(1).map(f => ({
+      key: f.key, reason: 'dropped: seat disabled by operator config',
+    })));
+    // Fresh durable reads and replay agree, without an injected filter at the acceptance boundary.
+    expect(mandatoryReferralState(h.state.comments, { head: h.state.headRefOid }).pending).toHaveLength(count);
+    const posts = h.state.comments.length;
+    expect((await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX)).pending).toHaveLength(count);
+    expect(h.state.comments).toHaveLength(posts);
+  });
+
+  it.each(['judge', 'judgeSecurity', 'judgeCorrectnessAdvisory', 'unknown-seat'])('%s still fails closed with all Antigravity switches off', async seat => {
+    const h = harness({ failure: 'judge', env: { REVIEW_PR_ANTIGRAVITY_REVIEW: '0',
+      WE_REVIEW_SEAT_CAP_AGY_GEMINI: '0', WE_REVIEW_SEAT_CAP_AGY_CLAUDE: '0' } });
+    const old = seedReferrals(h, [seat]);
+    const result = await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX);
+    expect(result.pending).toEqual([old.referrals[0].key]);
+    expect(result.records.every(r => !r.dropped)).toBe(true);
+    expect(() => assertMandatoryReferralsCleared(h.state, { repo: 'o/r', pr: 7 })).toThrow(/mandatory referral hold/);
+  });
+
+  it.each(['agy-gemini', 'agy-claude'])('uses the %s cap and allows acceptance after audited drops', async seat => {
+    const env = { WE_REVIEW_SEAT_CAP_AGY_GEMINI: '0', WE_REVIEW_SEAT_CAP_AGY_CLAUDE: '0' };
+    const h = harness({ env });
+    seedReferrals(h, [seat], h.state.headRefOid);
+    const result = await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX);
+    expect(result.pending).toEqual([]);
+    expect(h.judge).not.toHaveBeenCalled();
+    expect(h.state.comments.at(-1).body).toContain('dropped: seat disabled by operator config');
+    expect(() => assertMandatoryReferralsCleared(h.state, { repo: 'o/r', pr: 7 })).not.toThrow();
+  });
+
+  it('re-enabling the seat keeps old drops and holds new findings, including a repeated finding', async () => {
+    const env = { REVIEW_PR_ANTIGRAVITY_REVIEW: '0', WE_REVIEW_SEAT_CAP_AGY_GEMINI: '0' };
+    const h = harness({ env, failure: 'judge' });
+    const old = seedReferrals(h, ['judgeAntigravityReview']);
+    expect((await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX)).pending).toEqual([]);
+    env.REVIEW_PR_ANTIGRAVITY_REVIEW = '1';
+    env.WE_REVIEW_SEAT_CAP_AGY_GEMINI = '40';
+    expect((await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX)).pending).toEqual([]);
+    h.payload.referrals = old.referrals;
+    const result = await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX);
+    expect(result.pending).toEqual([old.referrals[0].key]);
+    expect(result.records.find(r => r.runId === old.runId).dropped).toHaveLength(1);
+    expect(h.judge).toHaveBeenCalledTimes(1);
+  });
+
+  it('a drop that cannot be persisted retains the hold', async () => {
+    const h = harness({ failure: 'post', env: { REVIEW_PR_ANTIGRAVITY_REVIEW: '0' } });
+    seedReferrals(h, ['judgeAntigravityReview']);
+    expect((await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX)).pending).toEqual(['referral-persistence-failed']);
+    expect(() => assertMandatoryReferralsCleared(h.state, { repo: 'o/r', pr: 7 })).toThrow(/mandatory referral hold/);
+  });
+  it.each(['pending', 'human-and-changes'])('parks with live %s labels without consuming a send-back', async initial => {
+    const h = harness({ failure: 'judge' });
+    if (initial === 'human-and-changes') h.state.labels = ['review:human', 'review:changes'];
+    const result = await h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX);
+    expect(result.pending).toHaveLength(1);
+    expect(h.state.labels).toEqual(initial === 'pending' ? ['review:human'] : ['review:human', 'review:changes']);
+    expect(h.lines.filter(line => line.includes('review:changes preserved'))).toHaveLength(initial === 'pending' ? 0 : 1);
+  });
+
+  it('replays #3507: a send-back during the in-flight review survives its pending-referral park', async () => {
+    const h = harness();
+    h.state.labels = ['review:human']; // 02:02:37Z: the run starts before the send-back.
+    h.payload.read.labels = [...h.state.labels];
+    let finishJudge;
+    h.judge.mockImplementationOnce(() => new Promise(resolve => { finishJudge = resolve; }));
+    const running = h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX);
+    expect(h.judge).toHaveBeenCalledTimes(1);
+    // 02:02:39Z: --to=changes lands while the referral judge is still running.
+    h.provider.setLabels('o/r', 7, { add: 'review:changes', remove: [] });
+    h.state.comments.push({ body: '🔁 review — changes requested' });
+    finishJudge({ timedOut: true }); // 02:08:37Z: pending referrals park the run.
+    const result = await running;
+    expect(result.pending).toHaveLength(1);
+    expect(h.state.labels).toEqual(['review:human', 'review:changes']);
+    expect(h.trace.slice(h.trace.indexOf('label:review:changes') + 1)).toContain('read');
+    expect(h.lines.filter(line => line.includes('review:changes preserved'))).toHaveLength(1);
+  });
+
   it('a head that moves mid-run leaves labels and comments untouched and is retried against the new head', async () => {
     const h = harness({ failure: 'changed-head' });
     await expect(h.make()[REVIEW_EFFECTS.MANDATORY_REFERRALS](h.payload, CTX)).rejects.toThrow(/reviewed head changed/);

@@ -237,6 +237,8 @@ export function createLandAdvanceApplier(ports = {}) {
           : await dispatchFix({ ...row.fixPlan, lane: await pickFixLane() }, { extraArgs, actions, repo: row.repo });
         if (result?.held) { deferred.push({ target: row.subject, reason: result.reason === 'unavailable' ? 'coordination-unavailable' : 'held-by-action-record' }); continue; }
         if (result?.ok === false || result?.error) throw new Error(result.error ?? 'dispatch failed');
+        // A review refused by the fresh CI gate never started: no ledger entry, no capacity spent.
+        if (result?.skipped) { deferred.push({ target: row.subject, reason: String(result.skipped) }); continue; }
         const session = result?.agentId ?? null;
         const launchedAt = new Date(launchTime).toISOString();
         const entry = { session: session ?? null, kind, target: row.subject, launchedAt, deadline: new Date(now() + 7200000).toISOString(),

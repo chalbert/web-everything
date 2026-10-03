@@ -310,6 +310,11 @@ plugs/__tests__/e2e/sw-fixtures/          # static fixture server + SW/page + re
 | Demo feature | No | No | Yes |
 
 ## Quality guidelines
+Real Git fixtures must pass `-c gc.auto=0 -c maintenance.auto=false` on their Git invocations.
+A large seed commit can launch detached maintenance/repack that outlives `execFileSync`, racing
+recursive snapshots and cleanup. Apply the same flags to bounded production freshness fetches;
+do not hide the race with sleeps, cleanup retries, or exclusions from the snapshot.
+
 1. Test behavior, not implementation.
 2. One concept per test; descriptive names (`should notify listeners on setItem`).
 3. Arrange-Act-Assert. Reset state in `beforeEach`/`afterEach`.

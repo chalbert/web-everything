@@ -1,9 +1,10 @@
 ---
 kind: story
 size: 2
-status: open
+status: resolved
 scope: ["we:scripts/operations/promote-draft-pr-dispatch.mjs", "we:scripts/operations/__tests__/promote-draft-pr-dispatch.test.mjs", "we:scripts/conveyor/reconcile-core.mjs", "we:scripts/conveyor/__tests__/reconcile-core.test.mjs", "we:scripts/conveyor/review-status-tag.mjs", "we:scripts/conveyor/__tests__/review-status-tag.test.mjs", "we:scripts/conveyor/fix-procedure.mjs", "we:scripts/conveyor/__tests__/fix-procedure.test.mjs"]
 dateOpened: "2026-10-02"
+dateResolved: "2026-10-03"
 preparedDate: "2026-10-02"
 preparedAgainstSha: "e2a67de93595b433533b3e52a6b3fbd5fb61c7df"
 tags: []
@@ -14,6 +15,11 @@ tags: []
 A PR carrying `review-status:draft-withdrawn` must stay out of automatic promotion after its fix claim expires, until the withdrawal is explicitly lifted. Green CI does not lift a withdrawal. Preserve ordinary draft-first promotion and the existing scope-change behavior.
 
 ## Progress
+
+- Implementation proof (2026-10-02 local): the focused four-file command in Done when failed against the unchanged implementation with **23 failed / 489 passed**, then passed with **512 passed across 4 files** after the scoped changes. Existing success fixtures now supply fresh empty labels. Added cases cover both label representations, malformed/unavailable fresh state, explicit target-repository reads, scope-change promotion, and retained red/pending CI protections.
+- Synthetic #3432 replay in we:scripts/conveyor/__tests__/fix-procedure.test.mjs uses the real claim store in a temporary directory, fake clock, and fake providers: ordinary green draft first plans `promote-draft`; withdrawal then gives `fix-claimed`, and executing the pre-withdrawal plan gives `draft-withdrawn`. Across **20 post-TTL ticks**, periodic tagging and dispatch-time replacement/clearing retain exactly `review-status:draft-withdrawn`; the PR stays draft, plans no dispatch, refuses `draft`, and stale executor plans refuse `draft-withdrawn`. **Zero ready and zero status-clear calls before release.** Explicit `fix-end` removes the held label after expiry; normal tagging resumes `awaiting-ci`, then promotion records exactly `ready(3432)` and `clear(3432)`, leaving a ready PR with no status label. No historical PR or GitHub state was read or mutated.
+- Independent mutation proof: temporarily disabling only the planner withdrawal guard caused **2 regression failures**; disabling only shared label preservation caused **5 failures**; disabling only the executor withdrawal guard caused **2 failures**. Each mutation was restored immediately; no expectations or gates were weakened.
+- Gates: `npm run check:standards` passed with **0 errors / 5418 warnings**. `node we:scripts/verify-lane.mjs` selected 43 targets and completed **270 test files: 268 passed, 2 failed; 13,108 tests passed, 6 failed**. The six failures are real-process-table assertions in we:scripts/operations/__tests__/clear-stuck-session-io-real.test.mjs and we:scripts/operations/__tests__/restart-runner-io-real.test.mjs. Directly probing `ps -p $$ -o ppid=,command=` returned **exit 126: Operation not permitted**; the production readers catch that failure and return null, matching the failing observations. This sandbox cannot run the required process-table probes. The lane marker remains red; no tests were skipped, gates weakened, or out-of-scope files edited. The four scoped suites passed within this broader run as well.
 
 - Original report: on 2026-10-02 PR #3432 was reportedly withdrawn at 11:26 AM ET with `fix-begin --draft --reason=withdrawn`, then promoted after claim expiry, followed by about five review runs. Those timings and run counts are filing context, not independently verified incident evidence; use a synthetic #3432 replay below rather than claiming a live replay occurred.
 - Premise confirmed in current code: a live fix claim suppresses dispatch at we:scripts/conveyor/reconcile-core.mjs:1505; absent that claim, any green draft reaches promotion at we:scripts/conveyor/reconcile-core.mjs:1639. Expired claims read as null at we:scripts/conveyor/fix-procedure.mjs:121. The executor checks fresh CI but no withdrawal state before `ready` at we:scripts/operations/promote-draft-pr-dispatch.mjs:138-164.
@@ -57,6 +63,7 @@ Capture the focused command's before/after output and the synthetic sequence's l
 
 ## Follow-ups
 
+- Re-run `node we:scripts/verify-lane.mjs` in an environment that permits real process-table reads before delivery; this checkout's sandbox denied `ps`, so a green lane verification is still owed.
 - Independent review of the prepared card remains the human handoff before implementation; no independent-review verdict is claimed here.
 - Testing lesson: expiry tests must include the automatic label writer before the promotion reader; a durable-hold test that injects a label forever misses the existing stripping path at we:scripts/conveyor/review-status-tag.mjs:164-169.
 - Failed initial withdrawal-label writes are a separate limitation: `fix-begin` currently reports them as best-effort steps at we:scripts/conveyor/fix-procedure.mjs:590-601. This card protects a PR carrying the label; guaranteeing hold installation when GitHub rejects that write needs separate work.

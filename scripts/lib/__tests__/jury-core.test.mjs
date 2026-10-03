@@ -1,4 +1,4 @@
-import { requiresMandatoryReferral, referralFindingKey, mandatoryReferralReviewer, validateReferralRecord, referralRecordState, renderReferralRecord, readReferralRecords, mandatoryReferralState } from '../jury-core.mjs';
+import { requiresMandatoryReferral, referralFindingKey, mandatoryReferralReviewer, validateReferralRecord, referralRecordState, renderReferralRecord, readReferralRecords, mandatoryReferralState, activeReferrals } from '../jury-core.mjs';
 /**
  * @file jury-core.test.mjs — proof of the #2654 (S2 of epic #2649) append-only JURY-LEDGER EVENT VOCABULARY:
  *   the `JURY_EVENT_TYPES` / `JUROR_STATUSES` enums and the pure `validateJuryEvent` / `normalizeJuryEvent`
@@ -1579,6 +1579,35 @@ describe('#4315 mandatory referral protocol', () => {
   const rule = (r, result = 'not-real') => ({ id: 'r1', key: r.referrals[0].key, reviewerId: r.reviewer.id,
     lens: 'correctness', result, rationale: 'Verified against the pinned diff', evidence: ['diff:lease-reaper'],
     ...(result === 'card' ? { card: 'we:backlog/4315-example.md' } : {}) });
+
+  it('audited optional-seat drops are append-only and cannot clear mandatory or unknown sources', () => {
+    for (const seat of ['judgeAntigravityReview', 'agy-gemini', 'agy-claude', 'judge', 'judgeSecurity', 'unknown']) {
+      const r = record();
+      r.referrals[0].seat = seat;
+      r.referrals[0].key = referralFindingKey(seat, finding);
+      const dropped = { ...r, dropped: [{ key: r.referrals[0].key, reason: 'dropped: seat disabled by operator config' }] };
+      if (['judge', 'judgeSecurity', 'unknown'].includes(seat)) {
+        expect(validateReferralRecord(dropped)).toBe(false);
+        continue;
+      }
+      expect(validateReferralRecord(dropped)).toBe(true);
+      const comments = [renderReferralRecord(r), renderReferralRecord(dropped)];
+      expect(mandatoryReferralState(comments, { head: r.head }).pending).toEqual([]);
+      expect(readReferralRecords([...comments, renderReferralRecord({ ...r, failure: 'omitted drop' })]).malformed).toBe(true);
+      expect(validateReferralRecord({ ...dropped, dropped: [...dropped.dropped, ...dropped.dropped] })).toBe(false);
+      expect(validateReferralRecord({ ...dropped, dropped: [{ key: 'unknown', reason: dropped.dropped[0].reason }] })).toBe(false);
+      expect(validateReferralRecord({ ...dropped, dropped: [{ key: r.referrals[0].key, reason: 'ignore' }] })).toBe(false);
+    }
+  });
+  it('a drop never hides a finding that has a ruling, so a block still holds', () => {
+    const r = record();
+    r.referrals[0].seat = 'judgeAntigravityReview';
+    r.referrals[0].key = referralFindingKey('judgeAntigravityReview', finding);
+    const ruled = { ...r, rulings: [rule(r, 'block')], dropped: [{ key: r.referrals[0].key, reason: 'dropped: seat disabled by operator config' }] };
+    expect(validateReferralRecord(ruled)).toBe(true);
+    expect(activeReferrals(ruled)).toHaveLength(1);
+    expect(mandatoryReferralState([renderReferralRecord(ruled)], { head: r.head }).blocked).toEqual([r.referrals[0].key]);
+  });
   it.each(['broken', 'unrecoverable'])('refers %s regardless of outcome, prevention or disposition', impactIfUnfixed => {
     for (const outcome of ['fixed', 'skipped', 'no_change_needed', undefined]) {
       expect(requiresMandatoryReferral({ ...finding, impactIfUnfixed, outcome, disposition: 'nit', prevention: 'captured #7' })).toBe(true);
@@ -1609,6 +1638,61 @@ describe('#4315 mandatory referral protocol', () => {
       expect(state.blocked).toHaveLength(result === 'block' ? 1 : 0);
       if (result === 'card') expect(referralRecordState(r).pending).toHaveLength(1);
     }
+  });
+  it.each([
+    'The mandatory-referrals-v1 marker is discussed here.',
+    '`<!-- mandatory-referrals-v1: %invalid -->`',
+    '&lt;!-- mandatory-referrals-v1: %invalid --&gt;',
+    'Example: <!-- mandatory-referrals-v1: %invalid -->',
+    '```js\nconst marker = "<!-- mandatory-referrals-v1: %invalid -->";\n```',
+    JSON.stringify({ evidence: String.raw`/^<!-- mandatory-referrals-v1: ([^\s]+) -->$/` }),
+  ])('ignores marker discussion: %s', body => {
+    expect(readReferralRecords([{ body }])).toEqual({ records: [], malformed: false });
+    expect(mandatoryReferralState([{ body }], { head: 'a'.repeat(40) }).pending).toEqual([]);
+  });
+  it.each([
+    '<!-- mandatory-referrals-v1:',
+    '<!-- mandatory-referrals-v1: %invalid -->',
+    'Ordinary text\n \t<!-- mandatory-referrals-v1: %truncated',
+    '<!-- mandatory-referrals-v1: {} -->',
+  ])('fails closed on a real record attempt: %s', body => {
+    expect(readReferralRecords([{ body }]).malformed).toBe(true);
+  });
+  it('parses an indented record next to prose mentions and trailing text', () => {
+    const r = record();
+    const body = 'Example: <!-- mandatory-referrals-v1: %invalid -->\n'
+      + renderReferralRecord(r).replace('\n<!--', '\n \t<!--')
+      + '\nDiscuss `mandatory-referrals-v1` after the record too.';
+    expect(readReferralRecords([{ body }])).toEqual({ records: [r], malformed: false });
+    expect(readReferralRecords([{ body: body + '\n<!-- mandatory-referrals-v1:' }]).malformed).toBe(true);
+  });
+  it('preserves the existing treatment of record lines from untrusted authors', () => {
+    const r = record();
+    const author = { login: 'drive-by-commenter' };
+    expect(readReferralRecords([{ author, body: renderReferralRecord(r) }])).toEqual({ records: [r], malformed: false });
+    expect(readReferralRecords([{ author, body: '<!-- mandatory-referrals-v1: %invalid -->' }]).malformed).toBe(true);
+  });
+  it.each([
+    ['newlines', '\n'.repeat(65000)],
+    ['space-newline pairs', ' \n'.repeat(32000)],
+    ['tab-newline pairs', '\t\n'.repeat(32000)],
+  ])('reads an untrusted whitespace-heavy body in bounded time: %s', (_, filler) => {
+    const r = record();
+    const started = performance.now();
+    expect(readReferralRecords([{ body: filler }])).toEqual({ records: [], malformed: false });
+    expect(readReferralRecords([{ body: filler + renderReferralRecord(r) }])).toEqual({ records: [r], malformed: false });
+    expect(performance.now() - started).toBeLessThan(1000);
+  });
+  it('replays the four #3507 marker-discussion excerpts without a malformed hold', () => {
+    const fixture = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'referral-marker-discussion-3507.json');
+    const { comments } = JSON.parse(readFileSync(fixture, 'utf8'));
+    expect(comments.map(comment => comment.createdAt)).toEqual([
+      '2026-10-02T16:50:22Z', '2026-10-02T17:56:55Z', '2026-10-02T17:56:59Z', '2026-10-02T19:02:27Z',
+    ]);
+    for (const comment of comments) {
+      expect(readReferralRecords([comment]), comment.url).toEqual({ records: [], malformed: false });
+    }
+    expect(mandatoryReferralState(comments, { head: 'a'.repeat(40) }).pending).toEqual([]);
   });
   it('ignores decoded malformed records only on a different full head', () => {
     const r = record();

@@ -2281,6 +2281,15 @@ export function mandatoryReferralReviewer(runId) {
 const supersededRulings = (ruling) => ruling.supersedes == null ? []
   : Array.isArray(ruling.supersedes) ? ruling.supersedes : [ruling.supersedes];
 
+// Only these optional sources may be retired by operator configuration. Unknown and mandatory seats hold.
+export const REFERRAL_SEAT_PROVIDERS = Object.freeze({
+  judgeAntigravityReview: 'agy-gemini', 'agy-gemini': 'agy-gemini', 'agy-claude': 'agy-claude',
+});
+export const REFERRAL_DROP_REASON = 'dropped: seat disabled by operator config';
+// A drop only retires a finding nobody has ruled on: a finding with a ruling (a `block` above all) keeps counting.
+export const activeReferrals = (record) => record.referrals.filter(f => !(record.dropped ?? []).some(d => d.key === f.key)
+  || record.rulings.some(r => r.key === f.key));
+
 /** Versioned snapshot of the append-only referral history, mirrored into the jury ledger. */
 export function validateReferralRecord(r) {
   try {
@@ -2297,6 +2306,10 @@ export function validateReferralRecord(r) {
         || f.key !== referralFindingKey(f.seat, f.original) || keys.has(f.key)) return false;
       keys.add(f.key);
     }
+    if (r.dropped !== undefined && (!Array.isArray(r.dropped)
+      || new Set(r.dropped.map(d => d.key)).size !== r.dropped.length
+      || r.dropped.some(d => d.reason !== REFERRAL_DROP_REASON
+        || !Object.hasOwn(REFERRAL_SEAT_PROVIDERS, r.referrals.find(f => f.key === d.key)?.seat)))) return false;
     const ids = new Set();
     for (const rli of r.rulings) {
       if (!rli || typeof rli.id !== 'string' || !rli.id || ids.has(rli.id)
@@ -2319,7 +2332,7 @@ export function referralRecordState(record, { head = record?.head, body = record
   if (!validateReferralRecord(record)) return { pending: ['malformed-referral-record'], blocked: [], rulings: [] };
   const pending = [], blocked = [], rulings = [];
   const independent = decideClearerIndependence({ authorId: parseAuthorActorId(body), clearerId: record.reviewer.id, prCreatedAt: createdAt });
-  for (const f of record.referrals) {
+  for (const f of activeReferrals(record)) {
     const history = record.rulings.filter(r => r.key === f.key);
     const active = history.filter(r => !history.some(next => supersededRulings(next).includes(r.id)));
     const r = active.length === 1 ? active[0] : null;
@@ -2338,6 +2351,7 @@ export function renderReferralRecord(record) {
   return `Mandatory review owner: ${record.reviewer.id} (${record.reviewer.lens}).\n`
     + `CONFIRMED broken/unrecoverable findings require a finding-specific block/card/not-real ruling.\n`
     + record.referrals.map(f => `- ${f.key}: ${f.finding.summary}`).join('\n')
+    + (record.dropped ?? []).map(d => `\n- ${d.key}: ${d.reason}`).join('')
     + `\nAttempt recorded: ${record.attempted}. Reason: ${record.failure ?? 'mandatory finding-specific review required'}. Rulings: ${JSON.stringify(record.rulings)}\n`
     + `Record any missing finding-specific rulings with the mandatory reviewer identified above, retaining prior rulings and explicit supersedes IDs. Then start a fresh review-pr --pr=${record.pr} --repo=${record.repo}; it reuses this PR record without another automated attempt. card requires a readable backlog reference.\n`
     + `<!-- ${REFERRAL_RECORD_MARKER}: ${encodeURIComponent(JSON.stringify(record))} -->`;
@@ -2355,9 +2369,12 @@ export function readReferralRecords(comments, { head } = {}) {
     || typeof r?.head !== 'string' || !/^[a-f0-9]{40}$/.test(r.head) || r.head === head;
   for (const comment of Array.isArray(comments) ? comments : []) {
     const body = typeof comment === 'string' ? comment : comment?.body ?? '';
-    if (!body.includes(REFERRAL_RECORD_MARKER)) continue;
-    const matches = [...body.matchAll(/<!-- mandatory-referrals-v1: ([^\s]+)( -->)?/g)];
-    if (!matches.length || body.split('<!-- mandatory-referrals-v1:').length - 1 !== matches.length) malformed = true;
+    // Only a literal opener at the start of a line attempts a record; prose may discuss the marker. Indentation is
+    // `[ \t]*`, never `\s*`: `\s` also matches newlines, so under `m` a whitespace-heavy untrusted body is O(n²).
+    const attempts = [...body.matchAll(/^[ \t]*<!-- mandatory-referrals-v1:/gm)];
+    if (!attempts.length) continue;
+    const matches = [...body.matchAll(/^[ \t]*<!-- mandatory-referrals-v1: ([^\s]+)( -->)?/gm)];
+    if (attempts.length !== matches.length) malformed = true;
     for (const match of matches) {
       try {
         const r = JSON.parse(decodeURIComponent(match[1]));
@@ -2369,6 +2386,7 @@ export function readReferralRecords(comments, { head } = {}) {
         const previous = records.get(id);
         if (previous && (previous.authorBody !== r.authorBody || JSON.stringify(previous.referrals) !== JSON.stringify(r.referrals)
           || (previous.attempted && !r.attempted)
+          || JSON.stringify((r.dropped ?? []).slice(0, (previous.dropped ?? []).length)) !== JSON.stringify(previous.dropped ?? [])
           || JSON.stringify(r.rulings.slice(0, previous.rulings.length)) !== JSON.stringify(previous.rulings))) {
           malformed ||= holdsHead(r); continue;
         }
@@ -2388,7 +2406,7 @@ export function mandatoryReferralState(comments, context = {}) {
   }
   const blocked = [];
   // A newer head must review the same source finding again; old clearance is never carried forward.
-  const currentKeys = new Set(records.filter(r => r.head === context.head).flatMap(r => r.referrals.map(f => f.key)));
+  const currentKeys = new Set(records.filter(r => r.head === context.head).flatMap(r => activeReferrals(r).map(f => f.key)));
   for (const r of records) {
     if (context.repo && (r.repo !== context.repo || r.pr !== Number(context.pr))) { pending.push('wrong-subject'); continue; }
     const state = referralRecordState(r, context);

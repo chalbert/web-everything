@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { readReviewCiGate } from '../lib/review-ci-gate-io.mjs';
 /**
  * @file scripts/operations/review-dispatch.mjs
  * @description `#3279` — DISPATCH AN INDEPENDENT REVIEW OF A PR TO A FRESH SESSION.
@@ -532,6 +533,7 @@ export function planReviewDispatch({ pr, repo, checkoutExists = existsSync, home
  * @returns {{sessionId: string, sessionSlug: string, pr: number, repo: string, prompt: string, unknownTokens: string[]}}
  */
 export function dispatchReview({
+  ciGate = readReviewCiGate,
   pr, repo, root = REPO_ROOT,
   readBrief = (r) => readFileSync(reviewBriefPath(r), 'utf8'),
   mintSessionId = () => randomUUID(),
@@ -578,6 +580,8 @@ export function dispatchReview({
       + 'Opt in with REVIEW_PR_CODEX_ADVISORY=1 in the environment instead.',
     );
   }
+  const ci = ciGate({ repo: planned.repo, pr: planned.pr });
+  if (!ci?.allowed) return { pr: planned.pr, repo: planned.repo, headSha: ci?.headSha ?? null, skipped: `review-ci: ${ci?.reason ?? 'unreadable-ci'}`, ci };
   const { prompt, unknownTokens } = fillReviewBrief(readBrief(root), {
     PR: planned.pr, REPO: planned.repo, LANE_REPO: planned.laneRepo, SESSION_SLUG: planned.sessionSlug, JUDGE_PROVIDER: judgeProvider,
     // #4174 — the checkout this dispatch is FROM, same as `root` always was; needed now that the session's
@@ -625,6 +629,30 @@ export function dispatchReview({
   };
 }
 
+/**
+ * The session-mode CLI's report for a {@link dispatchReview} result. A `skipped` result (the fresh
+ * required-checks gate refused before any spawn) carries no `unknownTokens`/`sessionSlug`/`judgeProvider`, so
+ * it is reported as "not started" rather than read like a launched session.
+ *
+ * #3331 — otherwise PRINT THE ID THAT ACTUALLY ADDRESSES THE SESSION (`agentId`, off `claude --bg`'s stdout),
+ * never the minted uuid: that grep can never match. When stdout could not be parsed we say so; the session
+ * slug is still a real handle (`claude agents --json` carries `-n` verbatim).
+ * @param {object} result
+ * @returns {string}
+ */
+export function formatSessionDispatchResult(result) {
+  if (result.skipped) return `dispatch-review: ${result.repo}#${result.pr} not started — ${result.skipped}\n`;
+  return (result.agentId
+    ? `dispatch-review: started agent ${result.agentId} (slug ${result.sessionSlug}) reviewing `
+      + `${result.repo}#${result.pr} (judge provider: ${result.judgeProvider})\n`
+      + `watch it: claude agents --json | grep ${result.agentId}   # or: claude logs ${result.agentId}\n`
+    : `dispatch-review: started a session (slug ${result.sessionSlug}) reviewing ${result.repo}#${result.pr} `
+      + `(judge provider: ${result.judgeProvider}), `
+      + 'but could NOT read its id off `claude --bg`\'s output\n'
+      + `watch it by name: claude agents --json | grep ${result.sessionSlug}\n`)
+    + (result.unknownTokens.length ? `note: unrecognized brief tokens (reported, not fatal): ${result.unknownTokens.join(', ')}\n` : '');
+}
+
 const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
 if (IS_CLI) {
   // xgqz204 — this CLI may fast-forward its own checkout (#3474); re-execute rather than dispatch on old code.
@@ -666,23 +694,7 @@ if (IS_CLI) {
       const result = dispatchReview({
         pr: flag('pr'), repo: flag('repo'), extraArgs: agentArgsFromEnv(), judgeProvider: flag('judge-provider'), careLevel: flag('care-level'),
       });
-      // #3331 — PRINT THE ID THAT ACTUALLY ADDRESSES THE SESSION. This used to print the minted uuid and tell the
-      // operator to grep for it; that grep can never match (see `dispatchReview`), which is how a working
-      // dispatch read as a silent failure. When stdout could not be parsed we say so rather than printing an id
-      // that will not be found — the session slug is still a real handle in that case (`claude agents --json`
-      // carries `-n` verbatim).
-      writeAllSync(
-        1,
-        (result.agentId
-          ? `dispatch-review: started agent ${result.agentId} (slug ${result.sessionSlug}) reviewing `
-            + `${result.repo}#${result.pr} (judge provider: ${result.judgeProvider})\n`
-            + `watch it: claude agents --json | grep ${result.agentId}   # or: claude logs ${result.agentId}\n`
-          : `dispatch-review: started a session (slug ${result.sessionSlug}) reviewing ${result.repo}#${result.pr} `
-            + `(judge provider: ${result.judgeProvider}), `
-            + 'but could NOT read its id off `claude --bg`\'s output\n'
-            + `watch it by name: claude agents --json | grep ${result.sessionSlug}\n`)
-        + (result.unknownTokens.length ? `note: unrecognized brief tokens (reported, not fatal): ${result.unknownTokens.join(', ')}\n` : ''),
-      );
+      writeAllSync(1, formatSessionDispatchResult(result));
     } catch (e) {
       writeLineSync(2, `error: ${String(e?.message ?? e)}`);
       process.exitCode = 1;

@@ -123,6 +123,7 @@
  * caller that FORGETS to pass the resolved option gets the strict gate, never the permissive one. The whole
  * defect class this item closes is a default that reads as "allow" when the answer is unknown.
  */
+import { describeTimeoutRetry } from './gate-timeout-retry.mjs';
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { constants } from 'node:os';
@@ -281,7 +282,7 @@ export function verificationInfrastructureFailure({ exitCode, signal, timedOutPh
   };
 }
 
-export function verifyFinishBody(prev, { finishedAt, exitCode, sha, treeHash, suites, signal, infrastructure, failureDetails } = {}) {
+export function verifyFinishBody(prev, { finishedAt, exitCode, sha, treeHash, suites, signal, infrastructure, failureDetails, retriedTimeouts } = {}) {
   const base = prev && typeof prev === 'object' ? prev : {};
   const failure = infrastructure || verificationInfrastructureFailure({ exitCode, signal });
   const green = exitCode != null && Number(exitCode) === 0 && !failure;
@@ -289,6 +290,7 @@ export function verifyFinishBody(prev, { finishedAt, exitCode, sha, treeHash, su
     sha: sha ?? base.sha ?? null,
     status: failure ? 'infrastructure-failure' : green ? 'green' : 'red',
     ...(failure ? { infrastructure: failure } : {}),
+    ...(retriedTimeouts?.length ? { retriedTimeouts } : {}),
     // A test verdict only: an infrastructure failure produced no verdict, so it carries no failing-test names.
     ...(!green && !failure && failureDetails ? { failureDetails: boundFailureDetails(failureDetails) } : {}),
     startedAt: base.startedAt ?? null,
@@ -527,7 +529,9 @@ export function verifyGateDecision({ record, headSha, nowMs = Date.now(), ttlMs 
     : '';
 
   if (matches && rec.status === 'green') {
-    return { ok: true, status: 'green', reason: 'verified', detail: `lane verified green for ${String(headSha).slice(0, 8)}${carriedForwardNote} (suites: ${rec.suites || 'recorded'}).` };
+    return { ok: true, status: 'green', reason: 'verified',
+      ...(rec.retriedTimeouts?.length ? { retriedTimeouts: rec.retriedTimeouts } : {}),
+      detail: `lane verified green for ${String(headSha).slice(0, 8)}${carriedForwardNote} (suites: ${rec.suites || 'recorded'}).${describeTimeoutRetry(rec.retriedTimeouts)}` };
   }
   if (matches && rec.status === 'running') {
     const abandoned = isVerifyAbandoned(rec, nowMs, ttlMs);
@@ -561,13 +565,17 @@ export function verifyGateDecision({ record, headSha, nowMs = Date.now(), ttlMs 
       detail: `${detail} This caller opted out of mandatory verification (--no-require-verified / WE_REQUIRE_VERIFIED=0) — not blocking here; the PR's required CI check gates the merge.` };
   }
   if (matches && rec.status === 'red') {
-    const diagnostic = exactShaMatch && rec.failureDetails ? { failureDetails: boundFailureDetails(rec.failureDetails) } : {};
+    const diagnostic = exactShaMatch ? {
+      ...(rec.failureDetails ? { failureDetails: boundFailureDetails(rec.failureDetails) } : {}),
+      ...(rec.retriedTimeouts?.length ? { retriedTimeouts: rec.retriedTimeouts } : {}),
+    } : {};
+    const retryDetail = describeTimeoutRetry(diagnostic.retriedTimeouts);
     if (requireVerified) {
-      return { ok: false, status: 'red', ...diagnostic, reason: 'verify-red', detail: `verification for ${String(headSha).slice(0, 8)} recorded a RED result (exit ${rec.exitCode ?? '?'}) — fix the failure and re-run \`node scripts/verify-lane.mjs\`.` };
+      return { ok: false, status: 'red', ...diagnostic, reason: 'verify-red', detail: `verification for ${String(headSha).slice(0, 8)} recorded a RED result (exit ${rec.exitCode ?? '?'}) — fix the failure and re-run \`node scripts/verify-lane.mjs\`.${retryDetail}` };
     }
     // Advisory mode: the required CI check (which a red tree also fails) gates the actual merge, so a local red
     // marker does not block here — matching "absent/red under --require-verified" (docs + #2833 resolution).
-    return { ok: true, status: 'red', ...diagnostic, reason: 'red-ci-gated', detail: `verification for ${String(headSha).slice(0, 8)} recorded RED (exit ${rec.exitCode ?? '?'}), but this caller opted out of mandatory verification (--no-require-verified / WE_REQUIRE_VERIFIED=0) — not blocking here; the PR's required CI check gates the merge.` };
+    return { ok: true, status: 'red', ...diagnostic, reason: 'red-ci-gated', detail: `verification for ${String(headSha).slice(0, 8)} recorded RED (exit ${rec.exitCode ?? '?'}), but this caller opted out of mandatory verification (--no-require-verified / WE_REQUIRE_VERIFIED=0) — not blocking here; the PR's required CI check gates the merge.${retryDetail}` };
   }
 
   // No marker, or a marker for a different commit (the tree moved since it was written).

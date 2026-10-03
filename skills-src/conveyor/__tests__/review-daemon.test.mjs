@@ -1,3 +1,5 @@
+import { dispatchReview } from '../../../scripts/operations/review-dispatch.mjs';
+import { readReviewCiGate } from '../../../scripts/lib/review-ci-gate-io.mjs';
 /**
  * @file skills-src/conveyor/__tests__/review-daemon.test.mjs
  * @description Unit proof of #3876's standalone Review daemon — the pure loop (mirrors #3870's own tests)
@@ -1377,4 +1379,76 @@ describe('review:pending PRs the tick did not dispatch — the daemon prints why
     await fx.tickOnce();
     expect(order).toEqual(['reap', 'review']);
   });
+});
+
+it('x6n7c2p required checks before review — synthetic #3432 four-tick soak spends one round', () => {
+  const tagRound = vi.fn();
+  const spawnAgent = vi.fn(() => '');
+  const sequence = [['a', 'in_progress', null], ['a', 'completed', 'failure'],
+    ['b', 'in_progress', null], ['b', 'completed', 'success']];
+  const dispatched = [];
+  for (const [head, status, conclusion] of sequence) {
+    const out = runReviewTick({ repo: 'chalbert/web-everything',
+      reconcile: () => ({ dispatch: [{ kind: 'review', prNumber: 3432, attempts: 2 }], refusals: [] }),
+      readPrs: () => [{ number: 3432, labels: [{ name: 'review:pending' }] }], readAgents: () => [],
+      acquirableLanes: () => 1, tagRound, tagStatus: () => {}, statusCandidates: () => [], holdReconcile: () => [],
+      dispatch: options => dispatchReview({ ...options, root: '/repo', checkStaleness: () => ({ fresh: true, behind: 0 }),
+        ciGate: args => readReviewCiGate({ ...args, readHead: () => head.repeat(40),
+          readRequired: () => ({ source: 'live', checks: ['test', 'daemon-soak'] }),
+          readChecks: () => [{ name: 'test', status: 'completed', conclusion: 'success' }, { name: 'daemon-soak', status, conclusion }],
+        }),
+        readBrief: () => 'review {{PR}}', mintSessionId: () => 'ci-soak', ensureSessionCwd: path => path,
+        resolveSettingsEnv: () => ({}), isolateSession: () => ({ worktreeSettings: {} }), spawnAgent,
+      }),
+    });
+    dispatched.push(out.dispatched.length);
+    if (conclusion !== 'success') {
+      expect(out.notStarted).toEqual([{ prNumber: 3432, reason: 'review-ci: required-checks-not-successful' }]);
+      expect(tagRound).not.toHaveBeenCalled();
+      expect(spawnAgent).not.toHaveBeenCalled();
+    }
+  }
+  expect(dispatched).toEqual([0, 0, 0, 1]);
+  expect(spawnAgent).toHaveBeenCalledTimes(1);
+  expect(tagRound).toHaveBeenCalledTimes(1);
+  expect(tagRound).toHaveBeenCalledWith(expect.objectContaining({ pr: 3432, round: 3 }));
+});
+
+it.each([false, true])('xux0rs9: a referral pause is announced once (parallel CI refusal: %s)', async parallel => {
+  const { mkdtempSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { notifyReferralHold } = await import('../../../scripts/conveyor/review-referral-hold.mjs');
+  const dir = mkdtempSync(join(tmpdir(), 'review-tick-hold-'));
+  const post = vi.fn(), log = vi.fn(), dispatch = vi.fn();
+  const hold = { head: 'a'.repeat(40), episode: 'hold-3481', count: 4,
+    why: 'review paused: 4 referrals need a ruling; it resumes on a new push, a ruling, or a send-back' };
+  const subject = { number: 3481, labels: [{ name: 'review:human' }, { name: 'review:pending' }], comments: [] };
+  const refusal = { kind: 'review-referrals-pending', prNumber: 3481, referralHold: hold, why: hold.why };
+  const plan = { dispatch: [], refusals: [parallel ? { kind: 'owed-ci-rerun', prNumber: 3481, reviewRefusal: refusal } : refusal] };
+  try {
+    for (let tick = 0; tick < 3; tick++) {
+      runReviewTick({ repo: 'chalbert/web-everything', reconcile: () => plan, dispatch,
+        readPrs: () => [subject], readAgents: () => [], holdReconcile: () => [],
+        tagRound: vi.fn(), tagStatus: vi.fn(),
+        notifyReferral: args => notifyReferralHold({ ...args, dir, post, log }),
+      });
+    }
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(log).toHaveBeenCalledTimes(1);
+    expect(explainPendingNotDispatched({ prs: [subject], plan })).toEqual([]);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+it('xux0rs9: an unreadable notice receipt does not prevent another PR from being reviewed', () => {
+  const dispatch = vi.fn(() => ({ agentId: 'new-review' }));
+  const result = runReviewTick({ repo: 'chalbert/web-everything',
+    reconcile: () => ({ dispatch: [{ kind: 'review', prNumber: 3508 }], refusals: [
+      { kind: 'review-referrals-pending', prNumber: 3481, referralHold: { episode: 'broken-receipt' } },
+    ] }), dispatch, holdReconcile: () => [], tagRound: vi.fn(), tagStatus: vi.fn(),
+    notifyReferral: () => { throw Error('unreadable receipt'); },
+  });
+  expect(dispatch).toHaveBeenCalledTimes(1);
+  expect(result.failed).toContainEqual({ prNumber: 3481, error: 'pause notice: unreadable receipt' });
 });

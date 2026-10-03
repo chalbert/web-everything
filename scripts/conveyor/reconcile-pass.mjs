@@ -96,6 +96,7 @@ import { readBgIsolationStallInfo } from './bg-isolation-stall.mjs';
 // `systemFixRef` PRs reconcile-core.mjs's own escalation branch will independently re-derive from the same data.
 import { latestCiHealEscalationForHead } from './ci-heal-escalation-mark.mjs';
 import { readLiveFixClaim } from './fix-procedure.mjs';
+import { enrichPrsWithReferralHolds } from './review-referral-hold.mjs';
 // #4263 — the SAME terminal-state classifier `pr-watch.mjs`'s own drain-lane watcher uses (merged/closed/
 // parked/pending), reused rather than re-invented so "has this PR landed" can never drift between the two
 // call sites. Aliased: this file never reconciles a PR's PHASE (that word means something else here — see
@@ -1061,6 +1062,7 @@ export function runReconcilePass({
   // fix procedure — attaches each PR's live fix claim (see {@link enrichPrsWithFixClaims}). Injectable like the rest.
   enrichFixClaims = enrichPrsWithFixClaims,
   enrichTimeouts = enrichPrsWithTimeoutEvidence,
+  enrichReferralHolds = enrichPrsWithReferralHolds,
   now = Date.now(), repo = null, defaultBranch = 'main',
   // #2748 false-red follow-up — injectable so a test can supply a fixture with no network, matching every
   // other reader in this file. Defaults to the live, cached branch-protection read.
@@ -1082,14 +1084,13 @@ export function runReconcilePass({
   const rawPrs = readPrs({ repo: resolvedRepo });
   if (isGhDeferred(rawPrs)) return { ...rawPrs, dispatch: [], refusals: [], notes: [rawPrs.message], prs: 0, agents: 0 };
   // #4501 — read the live required-check set (branch protection, cached; degrades to
-  // FALLBACK_REQUIRED_STATUS_CHECKS if the live fetch fails) BEFORE enriching main-red facts, so BOTH
+  // the repo's declared fallback if the live fetch fails) BEFORE enriching main-red facts, so BOTH
   // `enrichMainRed` below and `planReconcile` further down judge the SAME set. Moved up from just before
   // `planReconcile` — previously `enrichMainRed` ran on the OLD hardcoded `DEFAULT_MAIN_RED_ATTRIBUTED_CHECKS`
   // default while `planReconcile` (two calls later) already got the live-fetched value: two different sets in
   // one pass over the same PRs. A repo this constellation does not know the gh slug for (`resolvedRepo` stays
-  // `null`, `gh` infers from cwd) still gets a required set: `getRequiredStatusChecks` degrades to its own
-  // cache/fallback chain rather than ever throwing, so this call is safe unconditionally (see that module's
-  // own header).
+  // `null`, `gh` infers from cwd) can return an unavailable empty set. The shared reducer then evaluates
+  // observed CI checks, retaining red/pending/unchecked evidence; [] never means an automatic pass.
   const { checks: requiredChecks } = readRequiredChecks({ repo: resolvedRepo, branch: defaultBranch });
   // we:backlog/x5uqim1-*.md — attach `requiredCheckCompletedAt`/`aheadByOnMain` to any currently-failing
   // PR and read `main`'s own red windows, so `planReconcile` can tell a `ci-red` PR caused by a red `main` apart
@@ -1107,8 +1108,8 @@ export function runReconcilePass({
   // #4265 — attach each stacked PR's own base ref's current tip, purely locally, no `gh` cost.
   const baseRefPrs = enrichBaseRef(alreadyLandedPrs, { defaultBranch });
   // #4263 — re-check any `waiting-on-system-fix` escalation's named fix PR for having since landed.
-  const prs = enrichTimeouts(enrichFixClaims(enrichSystemFix(baseRefPrs, { repo: resolvedRepo }), { repo: repoKey }),
-    { repo: CONSTELLATION_REPOS[repoKey].slug });
+  const prs = enrichReferralHolds(enrichTimeouts(enrichFixClaims(enrichSystemFix(baseRefPrs, { repo: resolvedRepo }), { repo: repoKey }),
+    { repo: CONSTELLATION_REPOS[repoKey].slug }), { repo: CONSTELLATION_REPOS[repoKey].slug, now });
   const agents = enrich(readAgents({}));
   const mainSha = resolveMainSha(defaultBranch);
   const plan = planReconcile({

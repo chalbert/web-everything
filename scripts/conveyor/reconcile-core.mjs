@@ -100,6 +100,8 @@
  * transcript's mtime) is INJECTED on the input records by `we:scripts/conveyor/reconcile-pass.mjs`, so every
  * branch below is reachable in a test with no network and no credential.
  */
+import { reviewCiGate } from '../lib/review-ci-gate.mjs';
+import { REFERRAL_HOLD_MARKER } from './review-referral-hold.mjs';
 import { OPERATOR_ANSWER_MARKER, isOperatorAnswerStandDownSuperseded, latestOperatorAnswer } from './stand-down-answer-core.mjs';
 import { classifyPr } from '../progress-board.mjs';
 import { reduceCheckState } from '../operations/pr-status.mjs';
@@ -258,6 +260,7 @@ export const DISPATCH_KINDS = Object.freeze(['fix', 'review', 'ci-heal', 'ci-tim
  *                          `we:scripts/conveyor/already-landed-watch.mjs` for the pass that acts on it.
  */
 export const REFUSAL_KINDS = Object.freeze([
+  'review-ci', 'review-referrals-pending',
   'stood-down', 'no-findings', 'cap-exhausted',
   'live-process', 'awaiting-permission', 'liveness-unknown',
   'owed-elsewhere', 'owed-ci-rerun', 'nothing-owed', 'already-reviewed-head', 'already-landed',
@@ -317,6 +320,7 @@ export function concurrentAuthorPauseState({ comments, headRefOid = null, now = 
  * it raises no finding.
  */
 export const BOOKKEEPING_MARKERS = Object.freeze([
+  REFERRAL_HOLD_MARKER,
   REARM_COMMENT_MARKER, CI_HEAL_COMMENT_MARKER, STAND_DOWN_MARKER, SUPERSEDE_STAND_DOWN_MARKER, OPERATOR_ANSWER_MARKER,
   // #xkmu3gv — the two new completed-round markers. Neither is a reviewer speaking, so neither may ever count as
   // a finding (`countFindings`) or the pass would read its OWN handback comment as fresh work to fix.
@@ -1102,40 +1106,30 @@ export function acceptLabelDropped({ labels, comments, headSha, now, graceMs = A
   return Number.isFinite(at) && now - at >= graceMs;
 }
 
+/** A shared prerequisite for every review emission, including advisory review branches. */
+function reviewChecksAllow({ pr, requiredChecks, refuse, withPhase, extra = {} }) {
+  const ci = reviewCiGate({ headSha: pr?.headRefOid, requiredChecks, checks: pr?.statusCheckRollup });
+  if (!ci.allowed) refuse('review-ci', {
+    ...withPhase, ...extra, ci,
+    why: `${ci.reason}: ${ci.affected.map(row => `${row.name}=${row.reason}`).join(', ')}`,
+  });
+  return ci.allowed;
+}
+
 /**
- * we:scripts/conveyor/reconcile-core.mjs#dispatchReviewRow — the REVIEW decision, single-sourced: the ONE copy of
- * the three checks (`already-reviewed-head` #2588, then `no-findings`, then the shared attempt cap). BOTH callers
- * run through it — the ordinary `needs-review`/`needs-human` OWED-table path, and a SECOND population —
- * we:backlog/review-while-main-red (#4075/#3383): a `review:pending` PR whose ONLY CI blocker is
- * `owed-ci-rerun` (main's own red, never this PR's code) — can ask for the identical decision without a second,
- * divergent copy of it. LIVE INCIDENT this closes, 2026-09-26: PRs #2769/#2770/#2772/#2778/#2779 sat
- * `review:pending` + `ci:failed(owed-ci-rerun)` with review capacity idle, because the `ci-red` branch below
- * refused-and-`continue`d before ever reaching the OWED table that would have owed them a review —
- * `classifyPr`'s own precedence puts `ci-red` ahead of `needs-review` (see that function's header), so a PR
- * with BOTH labels never even got a look. The two facts — "is main's own CI red" and "has this PR been
- * reviewed" — are independent; nothing requires resolving them in series, and serializing them cost every one
- * of those five PRs ~20+ minutes once main recovered, for no reason: review capacity was idle throughout.
- *
- * Mutates via the injected `refuse`/`refuseCapExhausted`/`dispatch` exactly like the rest of {@link
- * planReconcile}'s loop body (same row shapes) — a caller extends every row this pushes with `extra` (the
- * ci-red-parallel caller passes `{ owedCiRerun: true }` so a reader can tell the two populations apart in the
- * report without a different kind name). The ci-red-parallel caller injects a `refuse` that FOLDS the refusal
- * into its existing `owed-ci-rerun` row rather than pushing a second row for the same PR (PR #2783 review).
- * @param {object} o
- * @param {object} o.pr
- * @param {object} o.withPhase
- * @param {object} o.base
- * @param {number} o.attempts
- * @param {number} o.roundCap
- * @param {(kind:string, extra:object)=>void} o.refuse
- * @param {(extra:object)=>void} o.refuseCapExhausted
- * @param {Array<object>} o.dispatch
- * @param {object} [o.extra] - extra fields carried on every row this produces.
- * @param {number} [o.now] - epoch ms; only {@link acceptLabelDropped} reads it (0 = never treat a label as dropped).
+ * Common review decision. Preserve draft, reviewed-head, advisory conversion and cap semantics;
+ * require complete successful CI immediately before emitting a review. CI-rerun and escalation
+ * callers fold this refusal into their existing row so their repair ownership remains visible.
  */
 function dispatchReviewRow({
-  pr, withPhase, base, attempts, roundCap, refuse, refuseCapExhausted, dispatch, extra = {}, now = 0,
+  pr, requiredChecks, withPhase, base, attempts, roundCap, refuse, refuseCapExhausted, dispatch, extra = {}, now = 0,
 }) {
+  if (pr.referralHold) {
+    refuse('review-referrals-pending', {
+      ...withPhase, ...extra, referralHold: pr.referralHold, why: pr.referralHold.why,
+    });
+    return;
+  }
   // ── `draft` (draft-first PRs, operator-approved 2026-09-27) — checked FIRST, ahead of every other refusal
   // in this function, including `already-reviewed-head`: a draft PR is never owed a review no matter what its
   // `review:*` label or its comment thread says, because GitHub itself will not surface it for review and
@@ -1185,6 +1179,17 @@ function dispatchReviewRow({
       ? planConvertSupersededVerdict({ headSha, reviewedSha, comments: pr?.comments })
       : { convert: false };
     if (conversion.convert) {
+      // A targeted-check agent is a review emission too, so a required `review-gate` conflict still refuses it
+      // (the early planner refusal no longer reaches a `needs-human` PR). Other required-check states are
+      // deliberately NOT applied here: converting a superseded verdict never waited on CI (#xconv1).
+      const convertCi = reviewCiGate({ headSha: pr?.headRefOid, requiredChecks, checks: pr?.statusCheckRollup });
+      if (convertCi.reason === 'required-review-gate-conflict') {
+        refuse('review-ci', {
+          ...withPhase, ...extra, ci: convertCi,
+          why: `${convertCi.reason}: ${convertCi.affected.map(row => `${row.name}=${row.reason}`).join(', ')}`,
+        });
+        return;
+      }
       dispatch.push({
         ...base, ...withPhase, kind: 'convert-advisory', headSha, reviewedSha, ...extra,
         acceptComment: conversion.acceptComment, escalation: conversion.escalation,
@@ -1220,6 +1225,7 @@ function dispatchReviewRow({
           ' person must take it',
       });
     } else {
+      if (!reviewChecksAllow({ pr, requiredChecks, refuse, withPhase, extra })) return;
       dispatch.push({
         ...base, ...withPhase, kind: 'review', findings: 0, attempts, ...extra,
         why: `parked for an independent review and no finding has been raised yet — a review is owed` +
@@ -1236,6 +1242,7 @@ function dispatchReviewRow({
     });
     return;
   }
+  if (!reviewChecksAllow({ pr, requiredChecks, refuse, withPhase, extra })) return;
   dispatch.push({
     ...base, ...withPhase, kind: 'review', findings, attempts, ...extra,
     why: `parked for an independent review with ${findings} finding(s) on the thread and nothing live working it`,
@@ -1637,11 +1644,28 @@ export function planReconcile({
     // of those are the existing branches below, unmodified. Only {@link dispatchReviewRow}'s own gate (not this
     // one) keeps a review from firing for either of those two cases.
     if (pr?.isDraft && withPhase.check === 'green') {
+      if (labelNames(pr.labels).includes('review-status:draft-withdrawn')) {
+        refuse('draft', { ...withPhase, why: 'draft PR is withdrawn — explicit release is required before promotion' });
+        continue;
+      }
       dispatch.push({
         ...base, ...withPhase, kind: 'promote-draft',
         why: 'draft PR — every required check is green; promote it to ready for review (draft-first PRs, '
           + 'operator-approved 2026-09-27) — nothing else is owed this PR until that happens',
       });
+      continue;
+    }
+
+    // A required `review-gate` is red by design while a review label is held, so a `ci-red` PR whose ONLY
+    // failing required check is `review-gate` must not be healed (ci-heal cannot clear it; it would re-run
+    // every tick). Deliberately narrow: only the `ci-red` phase, and only when `review-gate` is the sole
+    // affected check. Any other failing required check, and every non-`ci-red` phase (a bounced PR owed a
+    // fixer, an advisory-fix PR), falls through so its repair ownership is intact; review emission is
+    // already gated separately by {@link reviewChecksAllow}.
+    const reviewCi = reviewCiGate({ headSha: pr?.headRefOid, requiredChecks, checks: pr?.statusCheckRollup });
+    if (phase === 'ci-red' && reviewCi.reason === 'required-review-gate-conflict'
+        && reviewCi.affected.every(row => row.name === 'review-gate')) {
+      refuse('review-ci', { ...withPhase, ci: reviewCi, why: 'required review-gate must succeed before review; resolve the review-dependent required-check configuration' });
       continue;
     }
 
@@ -1716,30 +1740,12 @@ export function planReconcile({
             ? `the required check \`${base.requiredCheckName}\` failed at ${base.requiredCheckCompletedAt}, but is passing on main's own latest completed run — main has since fixed this, this PR's own code is not implicated. It is owed a mechanical rebase onto main (scripts/conveyor/ci-red-recovery-watch.mjs), never a ci-heal, which would misdiagnose main's own (now-fixed) breakage as a defect here`
             : `the required check failed at ${base.requiredCheckCompletedAt}, while main's own CI was red — this PR's own code is not implicated. It is owed a mechanical rebase onto main (scripts/conveyor/ci-red-recovery-watch.mjs) once main has recovered, never a ci-heal, which would misdiagnose main's own breakage as a defect here`,
         });
-        // we:backlog/review-while-main-red (#4075/#3383) — LIVE INCIDENT 2026-09-26: PRs #2769/#2770/#2772/
-        // #2778/#2779 sat `review:pending` behind exactly this refusal with review capacity idle (2 review jobs
-        // running against 5 held PRs), serializing "wait for main → rerun CI → THEN review" for no reason — the
-        // two facts (main's own CI is red; has this PR been reviewed) are independent. A `review:pending` PR
-        // whose ONLY blocker is `owed-ci-rerun` is still OWED a review right now, dispatched IN PARALLEL with the
-        // wait: `ci-red-recovery-watch.mjs`'s own mechanical rebase reads the open-PR listing itself and does not
-        // consult this pass's plan at all (see that file's `main()`), so it is completely unaffected by whatever
-        // this pushes. Gated on `review:pending` specifically because `classifyPr`'s own precedence (its header,
-        // and the ordering in this very function) means a PR reaching THIS branch with a review label at all can
-        // only ever carry `review:pending` or `review:accepted` — `review:changes`/`review:human`-without-
-        // `review:accepted` are intercepted into `bounced`/`needs-human` before `ci-red` is ever tested, so they
-        // never reach here, and an already-`review:accepted` PR owes no fresh review. NEVER for the sibling
-        // population one branch below (a PR's OWN code red, `ci-heal` owed) — that population does not reach
-        // this `if`, by construction of the `isPrCiFailureOwedRerun` condition guarding it.
-        //
-        // ONE refusal row per PR (PR #2783 review, CONFIRMED): the review decision's own refusal (`no-findings`,
-        // `cap-exhausted`, `already-reviewed-head`) is FOLDED into the `owed-ci-rerun` row above as
-        // `reviewRefusal`, never pushed as a second row. `land-advance-items-io.mjs#reconcileHolds` keys refusals
-        // by PR and keeps the last one, so a trailing `no-findings` row (holds `['fix']`) silently erased this
-        // row's `['review','fix']` hold and let land-advance dispatch its own, uncoordinated review.
+        // Preserve rerun ownership while folding the independent review prerequisite into this
+        // same refusal row. Required checks must succeed even when their failure belongs to main.
         if (withPhase.labels.includes('review:pending')) {
           const foldRefusal = foldReviewRefusalInto(refusals[refusals.length - 1], withPhase, 'owedCiRerun');
           dispatchReviewRow({
-            pr, withPhase, base, attempts: roundAttempts(), roundCap: effectiveRoundCap, now,
+            pr, requiredChecks, withPhase, base, attempts: roundAttempts(), roundCap: effectiveRoundCap, now,
             refuse: foldRefusal, refuseCapExhausted: capExhaustedVia(foldRefusal), dispatch,
             extra: { owedCiRerun: true },
           });
@@ -1798,7 +1804,7 @@ export function planReconcile({
             why: isSystemFix
               ? `ci-heal already escalated this exact head (\`${escalation.headSha}\`) as waiting on system fix #${escalation.systemFixRef} — the red is the tooling/gate's own fault, not this PR's; nothing further is owed until that fix lands or a new push changes this head`
               : isNotCiBreak
-                ? `ci-heal already confirmed this exact head (\`${escalation.headSha}\`) is NOT a CI break — the red is the review gate itself, held by the review label. No further heal is owed; the PR is owed its ordinary review instead (dispatched in parallel below when \`review:pending\`)`
+                ? `ci-heal already confirmed this exact head (\`${escalation.headSha}\`) is NOT a CI break — the red is the review gate itself, held by the review label. No further heal is owed; review waits for complete successful required checks`
                 : `ci-heal already escalated this exact head (\`${escalation.headSha}\`) to a human — re-dispatching would re-ask the identical already-answered question every tick until a new push changes this head`,
           });
           // A capped/exhausted ci-red PR is already promoted from a bare refusal to a surfaced `note`
@@ -1807,26 +1813,22 @@ export function planReconcile({
           // (nothing live, nothing auto-heal can do about it right now) and gets the identical treatment, once
           // per tick, until a new push or a person clears it. `not-a-ci-break` is deliberately NOT a dead end
           // (see above) — it still gets this same informational note (an operator reading the report should
-          // see why no MORE ci-heal is coming), but never blocks the review this PR is actually owed.
+          // see why no MORE ci-heal is coming), but cannot override the required-check prerequisite for review.
           notes.push({
             kind: 'ci-heal-escalated', prNumber, headSha: escalation.headSha, outcome: escalation.outcome,
             ...(escalation.systemFixRef ? { systemFixRef: escalation.systemFixRef } : {}),
             text: isSystemFix
               ? `PR #${prNumber}: ci-heal escalated on head \`${escalation.headSha}\` — waiting on system fix #${escalation.systemFixRef}; will not re-dispatch until it lands or a new push changes this head`
               : isNotCiBreak
-                ? `PR #${prNumber}: ci-heal confirmed head \`${escalation.headSha}\` is not a CI break (review gate only) — no further heal owed; review is dispatched normally`
+                ? `PR #${prNumber}: ci-heal confirmed head \`${escalation.headSha}\` is not a CI break (review gate only) — no further heal owed; review waits for complete successful required checks`
                 : `PR #${prNumber}: ci-heal escalated on head \`${escalation.headSha}\` — ${escalation.reason || 'needs a human judgment call'}; will not re-dispatch until a new push changes this head`,
           });
-          // `not-a-ci-break` is this file's OWN structured confirmation that the PR's true owed action is a
-          // review — dispatch it IN PARALLEL with the ci-side refusal above, the SAME `dispatchReviewRow`/fold
-          // shape `owed-ci-rerun` already uses a few lines above this whole `ci-red` branch, gated the same way
-          // on `review:pending` (an already-`review:accepted` PR owes no fresh review; `review:changes`/
-          // `review:human`-without-`review:accepted` never reach this branch at all — see `owed-ci-rerun`'s own
-          // note on this for the full precedence argument, unchanged here).
+          // Retain the escalation and fold the review prerequisite into the same row.
+          // A comment claiming CI is irrelevant cannot override a required check's actual result.
           if (isNotCiBreak && withPhase.labels.includes('review:pending')) {
             const foldRefusal = foldReviewRefusalInto(refusals[refusals.length - 1], withPhase, 'ciHealNotCiBreak');
             dispatchReviewRow({
-              pr, withPhase, base, attempts: roundAttempts(), roundCap: effectiveRoundCap, now,
+              pr, requiredChecks, withPhase, base, attempts: roundAttempts(), roundCap: effectiveRoundCap, now,
               refuse: foldRefusal, refuseCapExhausted: capExhaustedVia(foldRefusal), dispatch,
               extra: { ciHealNotCiBreak: true },
             });
@@ -1977,6 +1979,7 @@ export function planReconcile({
           const latest = headSha ? latestAdvisory(trustedComments) : undefined;
           const advisoryIsStale = Boolean(latest) && !advisoryCoversHead(latest, headSha);
           if (advisoryIsStale) {
+            if (!reviewChecksAllow({ pr, requiredChecks, refuse, withPhase })) continue;
             dispatch.push({
               ...base, ...withPhase, kind: 'review', findings: advisoryFindingsHere,
               attempts: advisoryFixes, cap: advisoryFixCap,
@@ -2032,6 +2035,7 @@ export function planReconcile({
       // stops it and hands it to a person. A normal PR that has never addressed its advisory finding (the
       // ordinary `!addressed` branch above) is completely unaffected — it never reaches this line at all.
       const advisoryFindingsHere = countFindings(pr?.comments);
+      if (!reviewChecksAllow({ pr, requiredChecks, refuse, withPhase })) continue;
       dispatch.push({
         ...base, ...withPhase, kind: 'review', findings: advisoryFindingsHere,
         why: 'the admitted advisory:changes finding was already addressed by a fix postdating it (order, not' +
@@ -2155,7 +2159,7 @@ export function planReconcile({
     // All three checks (the head guard, no-findings, the cap) live in {@link dispatchReviewRow} — the ONE copy,
     // shared with the ci-red-parallel review above (PR #2783 review: the review decision was duplicated here).
     if (OWED[phase] === 'review') {
-      dispatchReviewRow({ pr, withPhase, base, attempts: roundAttempts(), roundCap: effectiveRoundCap, refuse, refuseCapExhausted, dispatch, now });
+      dispatchReviewRow({ pr, requiredChecks, withPhase, base, attempts: roundAttempts(), roundCap: effectiveRoundCap, refuse, refuseCapExhausted, dispatch, now });
       continue;
     }
 

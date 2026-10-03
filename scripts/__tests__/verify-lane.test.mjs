@@ -982,3 +982,113 @@ it('an unscopable default request refuses before stamping a runnable marker', ()
   expect(JSON.parse(r.stdout)).toMatchObject({ status: 'selection-required', reason: 'local-selection-bound' });
   expect(existsSync(marker())).toBe(false);
 });
+
+describe('local timeout-only retry under admission', () => {
+  function fixture({ edited = false, mixed = false, retryExit = 0, standardsExit = 0, truncated = false, live = false } = {}) {
+    const files = truncated ? Array.from({ length: 21 }, (_, i) => `untouched-${i}.test.mjs`) : ['untouched-a.test.mjs', 'untouched-b.test.mjs'];
+    const stderr = files.map((f, i) => ` FAIL  ${f} > case ${i}\n${mixed && i === 1 ? 'AssertionError: wrong value' : 'Error: Test timed out in 5000ms.'}\n`).join('');
+    const stdout = ` Test Files  ${files.length} failed\n Tests  ${files.length} failed\n Duration  5.1s\n`;
+    mkdirSync(join(dir, 'bin'));
+    writeFileSync(join(dir, 'source.mjs'), 'export const x = 1;\n');
+    for (const file of files) writeFileSync(join(dir, file), live ? `
+import './source.mjs';
+import { it } from ${JSON.stringify(resolve(process.cwd(), 'node_modules/vitest/dist/index.js'))};
+import { existsSync, writeFileSync } from 'node:fs';
+it('first attempt times out', async () => {
+  const attempt = ${JSON.stringify(file + '.attempt')};
+  if (existsSync(attempt)) return;
+  writeFileSync(attempt, 'attempted');
+  await new Promise(() => {});
+}, 40);
+` : '// baseline\n');
+    if (live) writeFileSync(join(dir, 'vitest.config.mjs'), 'export default { test: { environment: "node", include: ["*.test.mjs"] } };\n');
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ type: 'module', scripts: { 'test:unit': 'vitest run', 'check:standards': 'true' } }));
+    const admissionModule = resolve(process.cwd(), 'scripts/readiness/heavy-admission.mjs');
+    const fake = `#!/usr/bin/env node
+import { appendFileSync } from 'node:fs';
+import { admissionLockRoot, heldSlots } from ${JSON.stringify(admissionModule)};
+const args = process.argv.slice(2);
+const held = heldSlots({ lockRoot: admissionLockRoot(process.cwd()), cap: 1, fastSlots: 1 });
+appendFileSync('calls.jsonl', JSON.stringify({ args, held, inherited: process.env.WE_HEAVY_ADMISSION_HELD }) + '\\n');
+if (${live} && args[0] === 'vitest') {
+  const { spawnSync } = await import('node:child_process');
+  const result = spawnSync(process.execPath, [${JSON.stringify(resolve(process.cwd(), 'node_modules/vitest/vitest.mjs'))}, ...args.slice(1), ...(args[1] === 'related' ? ['--maxWorkers=1', '--minWorkers=1'] : [])], { stdio: 'inherit' });
+  process.exit(result.status ?? 2);
+}
+if (args[0] === 'vitest' && args[1] === 'related') {
+  process.stdout.write('passed file\\n'.repeat(148));
+  process.stderr.write(${JSON.stringify(stderr)});
+  process.stdout.write(${JSON.stringify(stdout)});
+  process.exit(1);
+}
+if (args[0] === 'vitest') process.exit(${retryExit});
+process.exit(${standardsExit});
+`;
+    for (const name of ['npx', 'npm']) {
+      writeFileSync(join(dir, 'bin', name), fake); chmodSync(join(dir, 'bin', name), 0o755);
+    }
+    // Keep fixture infrastructure out of the change's own edited set.
+    writeFileSync(join(dir, '.gitignore'), 'calls.jsonl\npool/\n*.attempt\n');
+    execFileSync('git', ['add', '.'], { cwd: dir });
+    execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'baseline'], { cwd: dir });
+    execFileSync('git', ['branch', 'origin/main'], { cwd: dir });
+    writeFileSync(join(dir, edited ? files[0] : 'source.mjs'), '// changed\n');
+    const env = { ...process.env, PATH: `${join(dir, 'bin')}:${process.env.PATH}`, LANE_POOL_ROOT: join(dir, 'pool'), WE_HEAVY_ADMISSION_CAP: '1' };
+    function invoke(args = []) {
+      const result = spawnSync('node', [VERIFY_LANE, ...args, '--json'], { cwd: dir, env, encoding: 'utf8' });
+      return { code: result.status, json: JSON.parse(result.stdout.trim().split('\n').at(-1)), stdout: result.stdout, stderr: result.stderr };
+    }
+    return { files, invoke, calls: () => readFileSync(join(dir, 'calls.jsonl'), 'utf8').trim().split('\n').map(JSON.parse) };
+  }
+
+  it('retries only failed files once with one worker, then runs standards and records why', () => {
+    const f = fixture();
+    // Exercise request → dispatcher --gate replay, the production path.
+    expect(f.invoke(['request']).code).toBe(0);
+    const gate = JSON.parse(readFileSync(marker(), 'utf8')).suites;
+    const result = f.invoke([`--gate=${gate}`, '--run-id=retry-proof']);
+    expect(result.code).toBe(0);
+    expect(result.json, result.stdout + result.stderr).toMatchObject({ status: 'green', retriedTimeouts: f.files });
+    expect(result.json.detail).toContain('timeout-only failures in untouched files');
+    expect(JSON.parse(readFileSync(marker(), 'utf8'))).toMatchObject({ status: 'green', retriedTimeouts: f.files });
+    const calls = f.calls();
+    expect(calls).toHaveLength(3);
+    expect(calls[1].args).toEqual(['vitest', 'run', '--maxWorkers=1', '--minWorkers=1', '--no-file-parallelism', ...f.files.map(f => `./${f}`)]);
+    expect(calls[2].args.slice(0, 2)).toEqual(['run', 'check:standards']);
+    for (const call of calls) {
+      expect(call.held).toHaveLength(1);
+      expect(call.inherited).toBe('1');
+      expect(call.held[0].pid).toBe(calls[0].held[0].pid);
+    }
+    for (const args of [['check'], ['check', '--wait=100'], []]) {
+      const read = f.invoke(args);
+      expect(read.json.retriedTimeouts).toEqual(f.files);
+      expect(read.json.detail).toContain('Retried once serially');
+    }
+    expect(f.calls()).toHaveLength(3);
+  });
+
+  it('recovers actual Vitest timeouts using the installed reporter and single-worker flags', () => {
+    const f = fixture({ live: true });
+    const result = f.invoke();
+    expect(result.json, result.stdout + result.stderr).toMatchObject({ status: 'green', retriedTimeouts: f.files });
+    expect(f.calls()).toHaveLength(3);
+  }, 15000);
+
+  it.each([
+    ['an edited failing file', { edited: true }, 1],
+    ['mixed failures', { mixed: true }, 1],
+    ['a second timeout', { retryExit: 1 }, 2],
+    ['truncated failure identities', { truncated: true }, 1],
+    ['standards failing after recovery', { standardsExit: 1 }, 3],
+  ])('keeps red for %s', (_, options, count) => {
+    const f = fixture(options);
+    const result = f.invoke();
+    expect(result.code).toBe(2);
+    expect(result.json.status).toBe('red');
+    expect(JSON.parse(readFileSync(marker(), 'utf8')).status).toBe('red');
+    expect(f.calls()).toHaveLength(count);
+    if (count === 1) expect(result.json.retriedTimeouts).toBeUndefined();
+    else expect(result.json.retriedTimeouts).toEqual(f.files);
+  });
+});

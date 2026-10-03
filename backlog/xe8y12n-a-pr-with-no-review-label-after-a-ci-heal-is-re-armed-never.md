@@ -2,7 +2,7 @@
 kind: story
 size: 2
 status: open
-scope: ["we:scripts/conveyor/ci-heal-mark.mjs", "we:scripts/conveyor/rearm-review.mjs", "we:scripts/review-set-label.mjs", "we:skills-src/conveyor/fix-agent-ci-brief.md", "we:scripts/conveyor/reconcile-core.mjs", "we:scripts/conveyor/reconcile-pass.mjs", "we:scripts/conveyor/health-watch.mjs", "we:scripts/conveyor/health-smells/review-label-missing.mjs", "we:scripts/conveyor/__tests__/ci-heal-mark.test.mjs", "we:scripts/__tests__/review-set-label.test.mjs", "we:scripts/conveyor/__tests__/reconcile-core.test.mjs", "we:scripts/conveyor/__tests__/health-watch.test.mjs", "we:scripts/conveyor/health-smells/__tests__/review-label-missing.test.mjs"]
+scope: ["we:scripts/conveyor/ci-heal-mark.mjs", "we:scripts/conveyor/rearm-review.mjs", "we:scripts/review-set-label.mjs", "we:skills-src/conveyor/fix-agent-ci-brief.md", "we:scripts/conveyor/reconcile-core.mjs", "we:scripts/conveyor/reconcile-pass.mjs", "we:scripts/conveyor/health-watch.mjs", "we:scripts/conveyor/health-smells/review-label-missing.mjs", "we:scripts/conveyor/__tests__/ci-heal-mark.test.mjs", "we:scripts/__tests__/review-set-label.test.mjs", "we:scripts/conveyor/__tests__/reconcile-core.test.mjs", "we:scripts/conveyor/__tests__/health-watch.test.mjs", "we:scripts/conveyor/health-smells/__tests__/review-label-missing.test.mjs", "we:scripts/conveyor/__tests__/rearm-review.test.mjs", "we:scripts/conveyor/__tests__/reconcile-pass.test.mjs"]
 dateOpened: "2026-10-01"
 preparedDate: "2026-10-01"
 preparedAgainstSha: "026425e9e4a9c067851692c796ec0620879dabcb"

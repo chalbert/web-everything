@@ -125,6 +125,7 @@ import { agentActivityOperation, AGENT_ACTIVITY_OP } from './agent-activity.mjs'
 import { createAgentActivityReader } from './agent-activity-io.mjs';
 import { itemActivityOperation, ITEM_ACTIVITY_OP } from './item-activity.mjs';
 import { createItemActivityReader } from './item-activity-io.mjs';
+import { assertRunnerFreshness } from './runner-freshness.mjs';
 import { writeAllSync } from '../lib/write-all-sync.mjs';
 
 /**
@@ -576,6 +577,8 @@ if (IS_CLI) {
   // review/fix/ci-heal dispatchers already run, BEFORE any run record exists (see `assertDispatcherFresh`).
   try {
     cliPreflight(name);
+    assertRunnerFreshness({ declaration, moduleUrl: import.meta.url,
+      zeroWrites: [STALE_STATE_OP, HEALTH_RESPOND_OP, ITEM_ACTIVITY_OP].includes(name) });
   } catch (e) {
     writeAllSync(2, `${String(e?.message ?? e)}\n`);
     process.exit(1);

@@ -1,9 +1,10 @@
 ---
 kind: story
 size: 3
-status: open
+status: resolved
 scope: ["we:scripts/operations/run.mjs", "we:scripts/operations/__tests__/run.test.mjs", "we:scripts/operations/runner-freshness.mjs", "we:scripts/operations/__tests__/runner-freshness.test.mjs"]
 dateOpened: "2026-10-02"
+dateResolved: "2026-10-03"
 preparedDate: "2026-10-02"
 preparedAgainstSha: "fff15e8125add8c05a28a86a32f914cc0bb15ed5"
 tags: []
@@ -22,6 +23,20 @@ Preparation checked the current checkout at fff15e8125add8c05a28a86a32f914cc0bb1
 - **Classification drift:** `verify` is compute-only (we:scripts/operations/verify.mjs:27-30), but its injected runner launches the verification home (we:scripts/operations/verify-io.mjs:134-148), whose normal mode writes a HEAD-keyed marker (we:scripts/verify-lane.mjs:14-16). The generic predicate only checks step kinds (we:scripts/operations/registry.mjs:463-467). Preserve the card's explicit requirement to refuse `verify`; do not silently exclude it because it has no effect step. `open-pr` has a submit effect (we:scripts/operations/open-pr.mjs:254-259).
 - **Existing guard is not the requested policy:** the shared dispatcher helper fetches on every check and compares local main, potentially fast-forwarding it (we:scripts/lib/main-staleness.mjs:68-95); dispatch-lane additionally checks off-main HEAD code drift (we:scripts/operations/dispatch-lane-io.mjs:1233-1259). This card instead needs cached fetching, HEAD-based counting, and refusal without changing the working tree. Keep existing dispatch synchronization and daemon last-good behavior intact (we:scripts/lib/main-staleness.mjs:197-205, :229-240).
 - **Scope corrected:** retain the runner and its real-process test; add a proposed runner-specific freshness helper and unit suite for cache/error/classification branches. No shared staleness helper, operation schema, HTTP adapter, or agent-document changes are required. Existing CLI fixtures already copy the runner's import trees and isolate run/call stores (we:scripts/operations/__tests__/run.test.mjs:20-51). Its fresh-case test uses help, which bypasses preflight (we:scripts/operations/__tests__/run.test.mjs:55-64; we:scripts/operations/run.mjs:562-565); that is not proof a fresh execution passes.
+
+
+### Implementation and observed proof (2026-10-02)
+
+- Implemented the runner-only policy in we:scripts/operations/runner-freshness.mjs and wired it before stores/resume execution in we:scripts/operations/run.mjs. The existing dispatch preflight still runs independently first. The loaded module determines the checkout; canonical pool slots and managed daemon clones are exempt. Guarded declarations include the explicit `verify` exception. Unknown freshness fails closed.
+- Successful explicit main fetches have an atomic five-minute cache keyed by origin identity and fetched ref. HEAD comparison counts all commits. Zero-write queries inspect without fetching or caching; diagnostics stay on stderr. Only `WE_OPERATION_ALLOW_STALE=1` enables an audited override.
+- **Before:** `npx vitest run we:scripts/operations/__tests__/run.test.mjs -t 'refuses stale'` (strip the `we:` documentation prefix when executing) exited 1: both `refuses stale verify before persistence or execution` and `refuses stale open-pr before persistence or execution` failed, receiving CLI exit 2 instead of the required exit 1. Input validation was reached; this is evidence of the missing freshness refusal, not successful operation execution.
+- **After:** the same real-process regressions pass. Each fixture origin is advanced by two commits; the CLI exits 1 with stderr containing the operation name, `2 commits behind`, and `run from a lane`, with empty stdout, no run/call records and no verification marker. Missing required operation inputs prevent any real PR sink from being reachable even if the guard regresses.
+- **Real-repository proof:** fresh `verify --mode=check` executes and returns a JSON verdict. Ten further invocations reuse the identical cache while origin advances; expiring it observes four documentation/config/template/data commits, including with a fetch mapping that excludes main. Ahead-only passes; divergent and detached HEAD refuse. Stale `stale-state --json` returns its parsed empty inventory, one freshness warning, and an unchanged recursive file inventory (including Git files). Real lane-slot and daemon cases reach harmless validation; override logs the operation/root/HEAD/count. A stale resumed call refuses before lookup. Override cannot suppress the real dispatch guard.
+- **Mutation proof:** removing the new CLI call made both real stale regressions fail (test command exit 1; CLI exit 2). Removing only the `verify` exception made its real regression fail (test exit 1; CLI exit 2). Bypassing the cache-age condition made `fresh execution, cache-hit soak, and expiry update a narrow origin ref` fail (test exit 1; expired CLI incorrectly exited 0). Every mutation was restored before final validation.
+- **Lane verifier, first run:** `node we:scripts/verify-lane.mjs` exited 2: 103 suites passed, two failed. One was the new dispatch fixture using main, which the existing guard can fast-forward/re-exec; the corrected detached-HEAD witness retains the no-record assertion and passes in isolation. The other is we:scripts/operations/__tests__/deliver-item-run.test.mjs: its subprocess preload returns an empty string for every synchronous Git call, so the new fail-closed guard refuses before its unrelated mixed-locus assertion. Requested a fixture-only scope extension; accepting empty Git evidence in production would violate this card.
+- **Scoped suites:** both scoped suites passed together (33 tests, exit 0) after correcting the detached dispatch fixture. A subsequent empty-Git regression rejects empty metadata before any filesystem write: the out-of-scope fixture exposed that resolving an empty Git-directory response could otherwise create a cache at the checkout root. That generated cache was removed.
+- **Final lane rerun:** `node we:scripts/verify-lane.mjs` exited 2: 104 suites / 6,161 tests passed; only the existing empty-Git fixture in we:scripts/operations/__tests__/deliver-item-run.test.mjs failed. Both scoped suites passed in that run (13 real-process tests plus 21 helper tests). No tests or gates were weakened. Resolution remains pending permission for that fixture-only scope extension and a green lane verification.
+- **Standards:** `npm run check:standards` exited 0, with 0 errors and 5,393 warnings on the initial run; the repeat also exited 0 with 0 errors and 5,392 warnings. These fixture results establish the new CLI boundary; they do not reproduce or establish the historical incident's cause.
 
 ## Design
 
@@ -63,6 +78,9 @@ All behavior below is proposed, not a claim that it exists.
 4. **Executable:** the added real-process cases in we:scripts/operations/__tests__/run.test.mjs fail before implementation and pass after it; the helper suite and lane verification pass.
 
 ## Follow-ups
+
+- Dispatch freshness witnesses must use detached/off-main stale code when asserting refusal: main can legitimately fast-forward and re-execute through the existing independent guard.
+- Count freshness warnings by their line prefix: Node also emits `DeprecationWarning`, which is not a second freshness diagnostic. Preserve stderr JSON separation and assert the specific diagnostic rather than matching the substring in unrelated runtime warnings.
 
 - Separately audit compute-only readers for side effects and consider finer input-sensitive freshness policy, including `verify` check mode. Do not change step kinds, HTTP semantics or ratified operation architecture as part of this card (we:scripts/operations/registry.mjs:450-458).
 - Preserve the testing lesson here: a `--help` witness bypasses the boundary, and a helper test alone cannot prove the CLI invokes it (we:scripts/operations/run.mjs:562-569; we:scripts/operations/__tests__/run.test.mjs:4-7). No shared agent-document edit.

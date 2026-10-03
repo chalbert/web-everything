@@ -109,6 +109,8 @@ export default {
       scorecards: false,
       fleet: false,
       setup(w) {
+        // The review CI gate only trusts a declared (live) required set — serve the fallback set as branch protection.
+        w.gh.setRequiredChecks('we', FALLBACK_REQUIRED_STATUS_CHECKS);
         w.git.createBranch('we', HEAD, { from: 'main', files: { 'soak/fix-claim.txt': 'a PR bounced for changes\n' } });
         const pr = w.gh.openPr({ repo: 'we', head: HEAD, base: 'main', title: 'soak: fix claim vs a concurrent worker push', labels: [], body: 'No backlog item.' });
         for (const name of ['review:changes', 'review:pending']) {

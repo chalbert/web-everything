@@ -489,7 +489,7 @@ export function foldJuryLedger(events, referralContext = {}) {
   const referralEvents = (events ?? []).filter(e => e?.type === 'mandatory-referrals');
   const referralComments = referralEvents.map(e => {
     try { return { body: renderReferralRecord(e.record) }; }
-    catch { return { body: 'mandatory-referrals-v1: malformed' }; }
+    catch { return { body: '<!-- mandatory-referrals-v1: malformed' }; }
   });
   const referralState = mandatoryReferralState(referralComments, { head: rosterKnown ? reviewedSha : referralEvents.at(-1)?.record?.head, ...referralContext });
   return { referralState, rosterKnown, round, jurors: jurorList, lensVerdicts, panelVerdict, counts, findingCount, reviewedSha };
