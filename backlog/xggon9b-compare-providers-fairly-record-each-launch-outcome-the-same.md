@@ -90,6 +90,6 @@ After implementation, use temporary fixtures first, then observe a bounded real 
 ## Follow-ups
 
 - Establish the exact Plateau implementation/test scope in its delivery slice; use the existing publisher/relay ownership rather than adding product runtime to WE. Record its inspected revision before choosing files.
-- Coordinate with the repair-routing follow-on: actual model/effort and launch certainty must agree, not introduce a second routing decision (acceptance intent at `we:backlog/xa7tqgw-route-review-fixes-and-ci-heals-to-codex-split-from-3311.md:13`).
+- Coordinate with the repair-routing follow-on: actual model/effort and launch certainty must agree, not introduce a second routing decision (acceptance intent at `we:backlog/xa7tqgw-route-review-fixes-and-ci-heals-to-codex-split-from-3311.md:47`).
 - Add historical backfill only where evidence supports the join; publish unresolved coverage gaps. Broader sampling and any routing-policy change need their own evidence and scope.
 - Testing lesson for this delivery: distinguish a writer finishing, a reviewer accepting and a change merging. Preserve unknown and partial data in tests; a constant process score cannot stand in for a delivered outcome. Keep this lesson here rather than editing shared agent documentation.
