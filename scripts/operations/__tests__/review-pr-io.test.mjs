@@ -16,7 +16,7 @@ import { assertMandatoryReferralsCleared } from '../../review-set-label.mjs';
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync, existsSync, writeFileSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, existsSync, writeFileSync, mkdirSync, chmodSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -1488,6 +1488,7 @@ describe('confirmation checkout pin', () => {
     expect(judge).not.toHaveBeenCalled();
   });
   it.each([
+    ['a tracked executable-bit change', () => chmodSync(join(lane, 'tracked.txt'), 0o755)],
     ['a tracked edit', () => writeFileSync(join(lane, 'tracked.txt'), 'changed\n')],
     ['a new untracked file', () => writeFileSync(join(lane, 'injected.sh'), 'x')],
     ['a moved HEAD', () => sh('checkout', '-q', '--detach', first)],
@@ -1549,12 +1550,68 @@ describe('confirmation checkout pin', () => {
     writeFileSync(join(lane, 'locked.bin'), 'x', { mode: 0o000 });
     await expect(runReferralJudge(tool(second), { judge: async () => ({ value: {} }) })).resolves.toEqual({ value: {} });
   });
-  it('runs every host git probe with fsmonitor and hooks disabled', async () => {
+  it.each(['global', 'system', 'local'])('isolates %s drivers during checkout and attribute-tampered verification', async scope => {
+    mkdirSync(`${lane}-marks`);
+    const marker = ranMarker();
+    const config = join(`${lane}-marks`, 'config');
+    const attrs = join(`${lane}-marks`, 'attributes');
+    // Commit attributes before installing the driver, so fixture setup cannot itself run the payload.
+    writeFileSync(join(lane, '.gitattributes'), '*.txt filter=host diff=host\n');
+    sh('add', '.gitattributes'); sh('commit', '-qm', 'attributes');
+    const target = sh('rev-parse', 'HEAD');
+    sh('checkout', '-q', '--detach', first);
+    writeFileSync(attrs, '*.txt filter=host diff=host\n');
+    const command = `touch '${marker}'; cat`;
+    const configText = `[filter "host"]\n clean = "${command}"\n smudge = "${command}"\n`
+      + ` required = true\n[diff "host"]\n textconv = "${command}"\n`
+      + `[core]\n attributesFile = ${attrs}\n`;
+    writeFileSync(config, configText);
+    if (scope === 'local') writeFileSync(join(lane, '.git', 'config'), readFileSync(join(lane, '.git', 'config'), 'utf8') + configText);
+    else vi.stubEnv(scope === 'global' ? 'GIT_CONFIG_GLOBAL' : 'GIT_CONFIG_SYSTEM', config);
+    try {
+      await expect(runReferralJudge(tool(target), { judge: async () => ({ value: {} }) })).resolves.toEqual({ value: {} });
+      expect(readFileSync(join(lane, 'tracked.txt'), 'utf8')).toBe('two\n');
+      expect(existsSync(marker)).toBe(false);
+      await expect(runReferralJudge(tool(target), { judge: async () => {
+        writeFileSync(join(lane, '.gitattributes'), '* filter=host diff=host\n');
+        writeFileSync(join(lane, 'tracked.txt'), 'changed\n');
+        return { value: {} };
+      } })).rejects.toThrow(/clean checkout/);
+      expect(existsSync(marker)).toBe(false);
+    } finally { vi.unstubAllEnvs(); }
+  });
+  it('rejects raw edits even when newly added ignored attributes would normalize them away', async () => {
+    // An ignored attributes file must not make CRLF bytes compare equal to the original LF blob.
+    writeFileSync(join(lane, '.git', 'info', 'exclude'), '.gitattributes\n');
+    await expect(runReferralJudge(tool(second), { judge: async () => {
+      writeFileSync(join(lane, '.gitattributes'), '*.txt text eol=lf\n');
+      writeFileSync(join(lane, 'tracked.txt'), 'two\r\n');
+      return { value: {} };
+    } })).rejects.toThrow(/clean checkout/);
+  });
+  it('does not execute a global clean filter selected by attributes added during the turn', async () => {
+    mkdirSync(`${lane}-marks`);
+    const config = join(`${lane}-marks`, 'global-config');
+    writeFileSync(config, `[filter "attack"]\n clean = "touch '${ranMarker()}'; printf 'two\\n'"\n`);
+    vi.stubEnv('GIT_CONFIG_GLOBAL', config);
+    try {
+      await expect(runReferralJudge(tool(second), { judge: async () => {
+        writeFileSync(join(lane, '.gitattributes'), '*.txt filter=attack\n');
+        writeFileSync(join(lane, 'tracked.txt'), 'hidden edit\n');
+        return { value: {} };
+      } })).rejects.toThrow(/clean checkout/);
+      expect(existsSync(ranMarker())).toBe(false);
+    } finally { vi.unstubAllEnvs(); }
+  });
+  it('runs every host git call with config, attributes, fsmonitor and hooks isolated', async () => {
     const calls = [];
-    const exec = (cmd, args, o) => { calls.push(args); return execFileSync(cmd, args, o); };
+    const exec = (cmd, args, o) => { calls.push({ args, env: o.env }); return execFileSync(cmd, args, o); };
     await runReferralJudge(tool(first), { exec, judge: async () => ({ value: {} }) });
     expect(calls.length).toBeGreaterThan(0);
-    for (const args of calls) expect(args.join(' ')).toContain('-c core.fsmonitor=false -c core.hooksPath=/dev/null');
+    for (const { args, env } of calls) {
+      expect(args.join(' ')).toContain('-c core.fsmonitor=false -c core.hooksPath=/dev/null -c core.attributesFile=/dev/null');
+      expect(env).toMatchObject({ GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_ATTR_NOSYSTEM: '1' });
+    }
   });
   it.each([null, undefined, []])('delegates a tool-free turn (allowedTools=%j) with no checkout or git probe', async allowedTools => {
     const exec = vi.fn(), judge = vi.fn(async () => ({ value: {} })), tool = { ...request, allowedTools };

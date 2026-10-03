@@ -468,10 +468,25 @@ export function isPreWriteRefusal(text) {
 }
 
 /**
- * Flags on EVERY host git command run against the checkout a steerable tool turn could write: no fsmonitor
- * command and no hooks, so a planted `core.fsmonitor` / hook cannot run in this process's own `git status`.
+ * One boundary for ALL confirmation host-git calls, including config discovery and checkout. Do not inherit
+ * GIT_* routing/config injection from the host. Config discovery cannot run drivers; disable every locally
+ * configured driver before any command can inspect attributes (there is no wildcard filter.* override).
  */
-const HARDENED_GIT = Object.freeze(['-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null']);
+function confirmationGit(exec, cwd) {
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')));
+  Object.assign(env, { GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_ATTR_NOSYSTEM: '1' });
+  const flags = ['-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null',
+    '-c', 'core.attributesFile=/dev/null'];
+  const invoke = args => String(exec('git', [...flags, ...args], { cwd, env, encoding: 'utf8' }));
+  const keys = invoke(['config', '--null', '--name-only', '--list']).split('\0');
+  const filters = new Set(keys.map(k => /^filter\.(.*)\.[^.]+$/i.exec(k)?.[1]).filter(Boolean));
+  for (const name of filters) {
+    for (const key of ['clean', 'smudge', 'process']) flags.push('-c', `filter.${name}.${key}=`);
+    flags.push('-c', `filter.${name}.required=false`);
+  }
+  for (const key of keys) if (/^diff\..*\.(textconv|command)$/i.test(key)) flags.push('-c', `${key}=`);
+  return (...args) => invoke(args);
+}
 
 /** Content fingerprint of a path (file bytes, symlink target, or a directory's entries, recursively). */
 function hashPathInto(hash, path) {
@@ -482,7 +497,7 @@ function hashPathInto(hash, path) {
     hash.update(`${path}\0dir\0`);
     for (const name of readdirSync(path).sort()) hashPathInto(hash, join(path, name));
   } else {
-    hash.update(`${path}\0file\0${st.size}\0`);
+    hash.update(`${path}\0file\0${st.size}\0${st.mode & 0o111}\0`);
     // Streamed in chunks (an untracked artifact can be huge), and an unreadable file hashes as its error code
     // rather than throwing: it only parks the turn if the turn itself changed whether it can be read.
     let fd;
@@ -521,21 +536,21 @@ export function untrackedFingerprint(cwd, paths) {
  *
  * A tool-bearing turn runs only in the isolated juror checkout. The sink itself puts that checkout on the
  * reviewed PR head (detached; nothing else positions a pool lane there) and requires no tracked edit beforehand.
- * The turn must leave the checkout as it found it — same HEAD, same `status --porcelain` incl. untracked files,
+ * The turn must leave the checkout as it found it — same HEAD, same index and raw tracked file contents,
  * same CONTENT of every untracked file, same `.git` config/hooks/info — so a steered Bash turn cannot leave
  * edits, rewrite an untracked probe in place, or plant something the host's own git then runs. The `.git`
  * comparison is filesystem-only and runs before any host git command touches the checkout again; every host git
- * call carries {@link HARDENED_GIT}. Comparing to the pre-turn snapshot, instead of demanding an empty status,
+ * call uses confirmationGit. Comparing to the pre-turn snapshot, instead of demanding no untracked files,
  * keeps ordinary unignored lane litter (`.pr-body.md`, `.review-*-output.json`, …) from parking a legitimate
  * confirmation.
  */
 export async function runReferralJudge(request, { exec = execFileSync, judge = judgeSpawn,
   gitMeta = gitMetaFingerprint, untracked = untrackedFingerprint } = {}) {
   if (!Array.isArray(request.allowedTools) || !request.allowedTools.length) return judge(request);
-  const run = (...args) => String(exec('git', [...HARDENED_GIT, ...args], { cwd: request.cwd, encoding: 'utf8' }));
-  const git = (...args) => run(...args).trim();
   const wrongHead = () => new Error('mandatory confirmation requires a checkout on the reviewed PR head');
   if (!request.cwd || !/^[a-f0-9]{40}$/.test(request.head ?? '')) throw wrongHead();
+  const run = confirmationGit(exec, request.cwd);
+  const git = (...args) => run(...args).trim();
   const pinned = () => { if (git('rev-parse', 'HEAD') !== request.head) throw wrongHead(); };
   if (git('status', '--porcelain', '--untracked-files=no') !== '') {
     throw new Error('mandatory confirmation requires a clean checkout; tracked files are already modified');
@@ -549,7 +564,10 @@ export async function runReferralJudge(request, { exec = execFileSync, judge = j
   const indexFlags = () => run('ls-files', '-v').split('\n').filter(l => /^[a-zS] /.test(l)).join('\n');
   if (indexFlags() !== '') throw new Error('mandatory confirmation requires a clean checkout; index entries are flagged hidden');
   const gitDirs = [...new Set(['--git-dir', '--git-common-dir'].map(f => resolve(request.cwd, git('rev-parse', f))))];
-  const snapshot = () => [git('status', '--porcelain', '--untracked-files=all'), indexFlags(),
+  // Never ask git to convert working-tree bytes after the turn: attributes can conceal edits or select
+  // executable drivers. ls-files reads the index; the filesystem fingerprint reads bytes without filters.
+  const snapshot = () => [run('ls-files', '--stage', '-z'), indexFlags(),
+    untrackedFingerprint(request.cwd, run('ls-files', '-z').split('\0').filter(Boolean)),
     untracked(request.cwd, run('ls-files', '--others', '--exclude-standard', '-z').split('\0').filter(Boolean))].join('\n');
   // Protect the worktree routing pointer before any post-turn host git invocation.
   const pointer = () => {
