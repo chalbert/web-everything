@@ -1,7 +1,7 @@
 ---
 kind: story
 size: 5
-parent: "2289"
+parent: "3383"
 status: open
 blockedBy: ["x2rabof", "x4qfbpf"]
 scope: ["we:.github/workflows/ci.yml", "we:scripts/check-standards-rules.mjs", "we:scripts/__tests__/"]

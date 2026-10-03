@@ -1,7 +1,7 @@
 ---
 kind: story
 size: 3
-parent: "2289"
+parent: "3383"
 status: open
 scope: ["we:config/platformDefaults.ts", "we:config/defineConfig.ts", "we:config/__tests__/", "we:scripts/lib/gate-config.mjs"]
 dateOpened: "2026-10-03"

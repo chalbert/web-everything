@@ -1,7 +1,7 @@
 ---
 kind: story
 size: 3
-parent: "2289"
+parent: "3383"
 status: open
 blockedBy: ["x2rabof"]
 scope: ["we:scripts/push-if-green.mjs", "we:scripts/guard-git-push.mjs", "we:scripts/__tests__/"]

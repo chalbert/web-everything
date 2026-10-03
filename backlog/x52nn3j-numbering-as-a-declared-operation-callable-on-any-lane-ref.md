@@ -1,7 +1,7 @@
 ---
 kind: story
 size: 5
-parent: "2289"
+parent: "3383"
 status: open
 blockedBy: ["x2rabof"]
 scope: ["we:scripts/operations/", "we:scripts/lib/number-pending-hashes-before-push.mjs", "we:scripts/readiness/drain-lock.mjs", "we:scripts/check-standards-rules.mjs", "we:scripts/__tests__/"]

@@ -1,7 +1,7 @@
 ---
 kind: story
 size: 3
-parent: "2289"
+parent: "3383"
 status: open
 scope: ["we:scripts/backlog.mjs", "we:scripts/check-standards-rules.mjs", "we:scripts/__tests__/"]
 dateOpened: "2026-10-03"
