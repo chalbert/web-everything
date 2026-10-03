@@ -1294,6 +1294,12 @@ const RUN_SUMMARIES = {
   'open-pr': (payload) => describeSubmit(extractSubmitResult(payload)),
 };
 
+/** Applied effects whose recorded result refused or failed, including on a finished-run resume. PURE. */
+export function refusedEffects(run) {
+  return run.effects.filter((e) => e.status === 'applied'
+    && (e.result?.outcome === 'refused' || e.result?.outcome === 'failed'));
+}
+
 /** Turn a `driveRun` outcome into exit code + lines. PURE. */
 export function renderOutcome({ outcome, json = false, declaration = null }) {
   const { run, stopped, error, applied } = outcome;
@@ -1336,6 +1342,24 @@ export function renderOutcome({ outcome, json = false, declaration = null }) {
   if (stopped === 'complete') {
     const summary = Object.hasOwn(RUN_SUMMARIES, run.op)
       ? RUN_SUMMARIES[run.op]({ findings: run.findings, stopped }) : null;
+    const refused = refusedEffects(run);
+    if (refused.length) {
+      return {
+        code: 1,
+        lines: [
+          `run ${run.id} — complete, but ${refused.length} effect(s) were REFUSED/FAILED — nothing they asked for happened.`,
+          ...refused.flatMap(({ type, step, result }) => [
+            `  ${type} (step ${step}): ${result.outcome} — ${result.reason}`,
+            ...(result.detail != null ? [`    detail: ${result.detail}`] : []),
+            ...(result.pr != null ? [`    pr: ${result.pr}${result.url ? ` ${result.url}` : ''}`] : []),
+          ]),
+          // Keep the existing operation-specific refusal summary (#4386) for its consumers.
+          ...(summary?.failed ? [summary.line] : []),
+          ...spend,
+          ...ownerLines,
+        ],
+      };
+    }
     if (summary) return { code: summary.failed ? 1 : 0, lines: [`run ${run.id} — ${summary.line}`, ...spend] };
     return { code: 0, lines: [`run ${run.id} — complete. ${applied.length} effect(s) applied.`, ...spend] };
   }
