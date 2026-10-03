@@ -294,8 +294,11 @@ it('filters stale plain and workflow transcripts before opening their heads; def
       fs.openSync = (path, ...args) => { opened.push(path); return original(path, ...args); };
       syncBuiltinESMExports();
       const { subagentRowsFor } = await import(${JSON.stringify(pathToFileURL(join(process.cwd(), 'scripts/operations/agent-activity-io.mjs')).href)});
+      // The loader may open its own module files through the patched binding (Node-version dependent), so
+      // drop everything recorded during import and keep only transcript heads opened by the reader call.
+      opened.length = 0;
       const rows = subagentRowsFor('parent', ${JSON.stringify(cwd)}, ${JSON.stringify(projects)}, { recentMs: ${RECENT_MS}, now: ${now} });
-      const heads = [...opened];
+      const heads = opened.filter((path) => /agent-[^/]*\\.jsonl$/.test(String(path)));
       opened.length = 0;
       const unreadable = subagentRowsFor('parent', ${JSON.stringify(cwd)}, ${JSON.stringify(projects)}, {
         recentMs: ${RECENT_MS}, now: ${now}, stat: () => { throw new Error('gone'); },
