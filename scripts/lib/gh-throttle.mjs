@@ -1335,7 +1335,7 @@ export function resolvePersonalRouteEnabled(env = process.env) {
  * Eligibility uses the child's original credential; the switch uses the throttle configuration.
  * Never mutate the caller's env or log a credential. Explicit personal credentials stay untouched.
  */
-function resolveGhPersonalRoute(args, { env, throttle, bin, configEnv = env }) {
+function resolveGhPersonalRoute(args, { env, throttle, bin, configEnv = env, layerProcessEnv = true }) {
   const enabled = throttle.personalRoute != null ? !!throttle.personalRoute : resolvePersonalRouteEnabled(configEnv);
   const originalIdentity = ghAuthIdentity(env);
   if (!enabled || !classifyGhRead(args) || !(originalIdentity === 'app' || originalIdentity.startsWith('app-installation-') || originalIdentity === 'default')) {
@@ -1343,8 +1343,9 @@ function resolveGhPersonalRoute(args, { env, throttle, bin, configEnv = env }) {
   }
   const personal = throttle.personalToken !== undefined ? throttle.personalToken : personalGhToken({ bin, exec: throttle.personalTokenExec });
   if (!personal) return { callEnv: env, usedPersonalToken: false };
-  // Preserve PATH/HOME when a passthrough caller supplied a partial throttle.env.
-  const callEnv = { ...process.env, ...env, GH_TOKEN: personal };
+  // Preserve PATH/HOME when a passthrough caller supplied a partial throttle.env. An explicit child env
+  // (`layerProcessEnv: false`) stays exactly as narrow as the caller made it — only the token is swapped.
+  const callEnv = { ...(layerProcessEnv ? process.env : {}), ...env, GH_TOKEN: personal };
   delete callEnv.GITHUB_TOKEN;
   return { callEnv, usedPersonalToken: true };
 }
@@ -1518,8 +1519,12 @@ export function runGhSync(args, opts = {}) {
   const caller = deriveGhCaller(throttle, env);
   // #gh-graphql-budget — the shared primary-budget backoff (see that section above).
   const resource = classifyGhResource(args);
-  const originalEnv = execOpts.env || env;
-  let { callEnv, usedPersonalToken } = resolveGhPersonalRoute(args, { env: originalEnv, configEnv: env, throttle, bin: throttle.bin || env.WE_GH_THROTTLE_GH_BIN || bin });
+  // The credential the child really uses: the caller's explicit env, else — a config-only `throttle.env` carries
+  // no credential and never reaches the child — what it inherits from process.env.
+  const hasCredential = (e) => !!(e && (e.GH_TOKEN || e.GITHUB_TOKEN));
+  const originalEnv = execOpts.env || (hasCredential(env) ? env : process.env);
+  let { callEnv, usedPersonalToken } = resolveGhPersonalRoute(args, { env: originalEnv, configEnv: env, throttle, bin: throttle.bin || env.WE_GH_THROTTLE_GH_BIN || bin, layerProcessEnv: !execOpts.env });
+  if (!usedPersonalToken) callEnv = originalEnv;
   let identity = ghAuthIdentity(callEnv);
   if (usedPersonalToken && readBudgetBlock(lockRoot, identity, resource, now())) {
     recordGhCallLogEntry(logPath, { op: opLabel, attempt: 0, points: 0, outcome: 'personal_budget_blocked', resource, caller, w: isWrite, id: identity });

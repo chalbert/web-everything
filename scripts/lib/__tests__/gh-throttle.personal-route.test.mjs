@@ -456,6 +456,43 @@ describe.each([
     expect(logs()[0].id).toBe(personalIdentity);
   });
 
+  describe('inherited process.env credential (no execOpts.env)', () => {
+    afterEach(() => { vi.unstubAllEnvs(); });
+
+    it('preserves inherited explicit credentials with configuration-only throttle.env', () => {
+      vi.stubEnv('GH_TOKEN', 'gho_explicitInherited');
+      const { exec, opts, logs } = fixture({}, {});
+      delete opts.env;
+      opts.throttle.env = { WE_GH_THROTTLE_PERSONAL_ROUTE: '1' };
+      run(['pr', 'list'], opts);
+      expect(exec.mock.calls[0][1]).toEqual({ encoding: 'utf8' });
+      expect(logs()[0].id).toBe(ghAuthIdentity({ GH_TOKEN: 'gho_explicitInherited' }));
+    });
+
+    it('still routes an inherited App credential with configuration-only throttle.env', () => {
+      vi.stubEnv('GH_TOKEN', 'ghs_inheritedApp');
+      const { exec, opts, logs } = fixture({}, {});
+      delete opts.env;
+      opts.throttle.env = { WE_GH_THROTTLE_PERSONAL_ROUTE: '1' };
+      run(['pr', 'list'], opts);
+      expect(exec.mock.calls[0][1].env.GH_TOKEN === PERSONAL_TOKEN).toBe(true);
+      expect(logs()[0].id).toBe(personalIdentity);
+    });
+  });
+
+  it('keeps a narrowed caller env narrowed: only GH_TOKEN is swapped, process.env does not leak in', () => {
+    vi.stubEnv('WE_SENTINEL_SECRET', 'sentinel-value');
+    try {
+      const childEnv = { PATH: '/usr/bin', GH_TOKEN: 'ghs_appToken', GITHUB_TOKEN: 'ghs_appToken' };
+      const { exec, opts } = fixture({}, childEnv);
+      run(['pr', 'list'], opts);
+      expect(exec.mock.calls[0][1].env).toEqual({ PATH: '/usr/bin', GH_TOKEN: PERSONAL_TOKEN });
+      expect(opts.env).toEqual({ PATH: '/usr/bin', GH_TOKEN: 'ghs_appToken', GITHUB_TOKEN: 'ghs_appToken' });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it('uses the same route in the captured spawn path', () => {
     const { opts, logs } = fixture();
     delete opts.throttle.exec;
