@@ -1,9 +1,10 @@
 ---
+bornAs: x52nn3j
 kind: story
 size: 5
 parent: "3383"
 status: open
-blockedBy: ["x2rabof"]
+blockedBy: ["4985"]
 scope: ["we:scripts/operations/", "we:scripts/lib/number-pending-hashes-before-push.mjs", "we:scripts/readiness/drain-lock.mjs", "we:scripts/check-standards-rules.mjs", "we:scripts/__tests__/"]
 dateOpened: "2026-10-03"
 tags: []

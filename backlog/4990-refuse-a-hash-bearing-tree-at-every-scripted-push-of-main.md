@@ -1,9 +1,10 @@
 ---
+bornAs: xk8rem0
 kind: story
 size: 3
 parent: "3383"
 status: open
-blockedBy: ["x2rabof"]
+blockedBy: ["4985"]
 scope: ["we:scripts/push-if-green.mjs", "we:scripts/guard-git-push.mjs", "we:scripts/__tests__/"]
 dateOpened: "2026-10-03"
 tags: []

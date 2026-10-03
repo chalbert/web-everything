@@ -1,4 +1,5 @@
 ---
+bornAs: x2rabof
 kind: story
 size: 3
 parent: "3383"

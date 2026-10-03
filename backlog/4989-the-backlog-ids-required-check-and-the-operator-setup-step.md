@@ -1,9 +1,10 @@
 ---
+bornAs: x61tff4
 kind: story
 size: 5
 parent: "3383"
 status: open
-blockedBy: ["x2rabof", "x4qfbpf"]
+blockedBy: ["4985", "4986"]
 scope: ["we:.github/workflows/ci.yml", "we:scripts/check-standards-rules.mjs", "we:scripts/__tests__/"]
 dateOpened: "2026-10-03"
 tags: []

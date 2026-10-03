@@ -1,9 +1,10 @@
 ---
+bornAs: x0f7apa
 kind: story
 size: 8
 parent: "3383"
 status: open
-blockedBy: ["x2rabof", "x52nn3j"]
+blockedBy: ["4985", "4987"]
 scope: ["we:scripts/pr-land.mjs", "we:scripts/merge-ai-prs.mjs", "we:scripts/lib/nnn-collision-heal.mjs", "we:scripts/check-standards-rules.mjs", "we:skills-src/conveyor/fix-agent-brief.md", "we:skills-src/conveyor/fix-agent-ci-brief.md", "we:scripts/push-if-green.mjs"]
 dateOpened: "2026-10-03"
 tags: []
