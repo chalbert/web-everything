@@ -47,6 +47,14 @@ describe('lane-salvage pure core', () => {
     expect(liveAgentInLane([{ state: 'working', cwd: '/elsewhere' }], '/pool/lane-1', [undefined, null])).toBe(false);
   });
 
+  it('matches exact session ids and lane boundaries, never PID slugs or sibling prefixes', () => {
+    const agent = { state: 'working', sessionId: 'Mac:31893', pid: 31893, cwd: '/pool/lane-14-other' };
+    expect(liveAgentInLane([agent], '/pool/lane-14', ['Mac:31893'])).toBe(false);
+    expect(liveAgentInLane([{ ...agent, sessionId: 'session-123-more' }], '/pool/lane-14', ['session-123'])).toBe(false);
+    expect(liveAgentInLane([{ ...agent, cwd: '/pool/lane-14/work' }], '/pool/lane-14')).toBe(true);
+    expect(liveAgentInLane([{ state: 'working', cwd: '' }], process.cwd())).toBe(false);
+  });
+
   it('nearest ancestor lookup stops at the lane even when every stat throws', () => {
     const seen = [];
     expect(nearestAncestorMtimeMs('/pool/lane-1/gone/a.txt', '/pool/lane-1', (p) => {
@@ -109,11 +117,23 @@ describe('laneLivenessGate (#xl5xhmj)', () => {
     expect(g.reason).toMatch(/live/i);
   });
 
-  it('a live owner by lastHolder sessionId (agent cwd elsewhere) also refuses', () => {
+  it('a released lastHolder sessionId with an agent elsewhere does not own the lane', () => {
     const readAgents = () => [{ state: 'working', cwd: '/elsewhere', sessionId: 's1' }];
     const readCwds = () => [];
-    const g = laneLivenessGate({ dir: '/pool/lane-9', lastHolder: { workerSession: 's1' }, readAgents, readCwds, quietMs: 0 });
-    expect(g.eligible).toBe(false);
+    const g = laneLivenessGate({ dir: '/pool/lane-9', lastHolder: { event: 'release', workerSession: 's1' }, readAgents, readCwds, quietMs: 0 });
+    expect(g.eligible).toBe(true);
+  });
+
+  it('only the current lease matches a session elsewhere; the reclaim hold can exclude itself', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'lane-owner-'));
+    try {
+      mkdirSync(join(dir, '.git'));
+      writeFileSync(join(dir, '.git', '.lane-lease'), JSON.stringify({ session: 'current', ownerSession: 's1' }));
+      const opts = { dir, readAgents: () => [{ sessionId: 's1', state: 'working', cwd: '/elsewhere' }], readCwds: () => [], quietMs: 0 };
+      expect(laneLivenessGate(opts).eligible).toBe(false);
+      expect(laneLivenessGate({ ...opts, ignoreLeaseSession: 'different' }).eligible).toBe(false);
+      expect(laneLivenessGate({ ...opts, ignoreLeaseSession: 'current' }).eligible).toBe(true);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 
   it('a live process cwd (no matching agent) also refuses', () => {
