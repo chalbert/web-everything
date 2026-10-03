@@ -2,9 +2,10 @@
 bornAs: xuqixrd
 kind: story
 size: 2
-status: open
+status: resolved
 scope: ["we:scripts/lib/git-hook-surface.mjs", "we:scripts/lib/__tests__/git-hook-surface*.test.mjs"]
 dateOpened: "2026-09-29"
+dateResolved: "2026-10-03"
 preparedDate: "2026-09-30"
 preparedAgainstSha: "a71991b2be161a3d53ddce8d10af6d9154c601bd"
 tags: []
