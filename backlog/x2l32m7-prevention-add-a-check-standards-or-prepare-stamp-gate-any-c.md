@@ -3,7 +3,7 @@ kind: story
 size: 3
 parent: "4075"
 status: open
-scope: ["we:scripts/check-standards-rules.mjs", "we:scripts/backlog.mjs", "we:scripts/__tests__/check-standards-rules-content-lint.test.mjs", "we:scripts/__tests__/backlog-prepare-stamp-status.test.mjs", "we:scripts/operations/probation-build-run.mjs", "we:scripts/operations/prepare-stamp-land.mjs"]
+scope: ["we:scripts/check-standards-rules.mjs", "we:scripts/backlog.mjs", "we:scripts/__tests__/check-standards-rules-content-lint.test.mjs", "we:scripts/__tests__/backlog-prepare-stamp-status.test.mjs", "we:scripts/operations/probation-build-run.mjs", "we:scripts/operations/__tests__/probation-build-run.test.mjs", "we:scripts/operations/prepare-stamp-land.mjs", "we:scripts/operations/__tests__/prepare-stamp-land.test.mjs"]
 dateOpened: "2026-09-30"
 preparedDate: "2026-10-02"
 preparedAgainstSha: "d8680b7e58e12912c899b2911e000b9e0daa5e0d"
