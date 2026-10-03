@@ -18,6 +18,7 @@ import {
   summarizeHealth,
   defaultListLaneStatus,
   defaultListAcquirable,
+  defaultReclaimLane,
   defaultReadPorcelain,
   defaultIsLeasedNow,
   defaultIsLiveNow,
@@ -843,5 +844,49 @@ describe('watchLanePoolHealth — real git integration (proves the SAME shared c
     expect(result.reaped).toEqual([]); // but the actual mutation was cancelled by the fresh re-read
     expect(existsSync(join(dir, '.commit-msg.txt'))).toBe(true); // litter left in place too — never partial
     expect(existsSync(join(dir, 'raced-in.txt'))).toBe(true);
+  });
+});
+
+
+describe('low-pool preserved recovery', () => {
+  it.each([false, true])('uses plain reclaim for preserved unleased lanes, leaving unpreserved and owned lanes (dryRun=%s)', (dryRun) => {
+    const rows = [
+      { lane: 1, preserved: true },
+      { lane: 2, preserved: false },
+      { lane: 3, preserved: true, lease: { session: 'current' } },
+      { lane: 4, preserved: true, liveOwner: true },
+      { lane: 5, preserved: true, kept: true },
+    ].map((r) => ({ exists: true, verdict: 'unknown-work', ...r }));
+    const calls = [];
+    const result = runLanePoolHealthWatch({
+      env: {}, dryRun, lowWater: 2,
+      listStatus: () => ({ lanes: rows.map((r) => ({ lane: r.lane, path: `/pool/lane-${r.lane}`, exists: true, leased: !!r.lease })) }),
+      readPorcelain: () => ' M work.txt\n', trimPool: () => null,
+      listAcquirable: () => new Set(), writeFreeLaneList: () => null,
+      listWhois: () => ({ lanes: rows }),
+      reclaimLane: (o) => { calls.push(o); return dryRun ? { wouldReclaim: true } : { reclaimed: true }; },
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ lane: 1, dryRun });
+    expect(calls[0]).not.toHaveProperty('salvage');
+    expect(calls[0]).not.toHaveProperty('override');
+    expect(result.reclaim.outcomes).toEqual([{ lane: 1, ...(dryRun ? { wouldReclaim: true } : { reclaimed: true }) }]);
+    expect(result.alert).toMatch(/ALERT/);
+  });
+
+  it('does not broaden selection when the pool is above the low-water threshold', () => {
+    const calls = [];
+    reclaimFinishedLanes({ whois: { lanes: [{ lane: 1, exists: true, preserved: true, verdict: 'unknown-work' }] },
+      reclaimLane: (o) => calls.push(o), dryRun: false, reclaimPreserved: false });
+    expect(calls).toEqual([]);
+  });
+
+  it('the recovery child uses the safe reclaim command', () => {
+    let argv;
+    defaultReclaimLane({ lane: 14, exec: (_cmd, args) => { argv = args; return '{"reclaimed":true}'; } });
+    expect(argv).toContain('reclaim');
+    expect(argv).toContain('--lane=14');
+    expect(argv).not.toContain('--override');
+    expect(argv).not.toContain('--salvage');
   });
 });

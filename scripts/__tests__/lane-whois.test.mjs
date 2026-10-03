@@ -215,12 +215,7 @@ describe('lane-whois — AFTER', () => {
     expect(report.lanes[0].holderAlive).toBe(true);
   });
 
-  // Red-team finding — the ONLY existing test above pins the cwd-match half of the multi-signal read this
-  // comment promises ("by cwd or by the last ledger entry's ownerSession/workerSession/session"); the
-  // session-id-via-ledger half (an agent whose OWN cwd is elsewhere, matched only by session id) had no test of
-  // its own, so dropping `last?.session` (etc.) from the array passed to `liveAgentInLane` would leave every
-  // other whois test green.
-  it('an UNLEASED lane with a live agent whose cwd is ELSEWHERE, matched only via the ledger session id, still reports liveOwner:true (#xl5xhmj)', () => {
+  it('a released lane has no owner even when its historical session is working elsewhere', () => {
     expect(runPool(['acquire', '--lane=1', '--session=sess-d', ...poolArgs()]).code).toBe(0);
     expect(runPool(['release', '--lane=1', '--session=sess-d', ...poolArgs()]).code).toBe(0);
     // The agent's cwd is a DIFFERENT lane entirely — only its session id matches this lane's last ledger entry.
@@ -231,8 +226,9 @@ describe('lane-whois — AFTER', () => {
     expect(r.code).toBe(0);
     const report = JSON.parse(r.out);
     expect(report.lanes[0].lastHolder.session).toBe('sess-d');
-    expect(report.lanes[0].liveOwner).toBe(true);
-    expect(report.lanes[0].holderAlive).toBe(true);
+    expect(report.lanes[0].liveOwner).toBe(false);
+    expect(report.lanes[0].holderAlive).toBe(false);
+    expect(report.lanes[0].verdict).toBe('finished-reclaimable');
   });
 
   it('ledger entry without a session and session-less foreign agent reports liveOwner:false', () => {

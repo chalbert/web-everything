@@ -43,11 +43,11 @@
 import { execFileSync } from 'node:child_process';
 import {
   mkdtempSync, rmSync, mkdirSync, writeFileSync, appendFileSync, statSync, existsSync, realpathSync,
-  readdirSync, lstatSync, copyFileSync, symlinkSync, readlinkSync, constants as fsConstants,
+  readFileSync, readdirSync, lstatSync, copyFileSync, symlinkSync, readlinkSync, constants as fsConstants,
 } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { join, resolve, sep, dirname } from 'node:path';
-import { readLaneHistory, lastLaneHistoryEntry } from './lane-history.mjs';
+import { LEASE_FILENAME } from './lane-lease.mjs';
 
 /** Env override for where salvage lands; default `~/.claude/lane-salvage` (the operator's manual location). */
 export const SALVAGE_DIR_ENV = 'WE_LANE_SALVAGE_DIR';
@@ -98,18 +98,24 @@ export function parseLsofCwds(text) {
 }
 
 /** PURE: the not-finished `claude agents` entries that belong to this lane — the session is one of `sessionIds`,
- *  or its cwd is the lane or anywhere inside it (a `.claude/worktrees/<x>` agent counts). An entry with no
+ *  (supplied only from the current lease), or its cwd is the lane or anywhere inside it (a `.claude/worktrees/<x>` agent counts). An entry with no
  *  state at all is kept: only an explicit terminal state proves a session finished. The ONE match rule shared by
  *  {@link liveAgentInLane} (fail-safe) and whois's stricter `liveWorker` (#4544). */
 export function agentsInLane(agents, dir, sessionIds = []) {
   const DONE = new Set(['done', 'failed', 'stopped', 'completed', 'killed']);
   const root = resolve(dir);
-  const ids = new Set(sessionIds.filter(Boolean));
+  const ids = new Set(sessionIds.filter((id) => typeof id === 'string' && id.trim() && !/^.+:\d+$/.test(id)));
   return (Array.isArray(agents) ? agents : []).filter((a) => {
     if (!a || DONE.has(a.state)) return false;
-    const cwd = typeof a.cwd === 'string' ? resolve(a.cwd) : '';
+    const cwd = typeof a.cwd === 'string' && a.cwd.trim() ? resolve(a.cwd) : '';
     return ids.has(a.sessionId) || cwd === root || cwd.startsWith(root + sep);
   });
+}
+
+/** Only a CURRENT lease supplies owner identities. Ledger entries are attribution, never ownership.
+ * Host:pid fallback slugs are excluded by agentsInLane: a reused pid is not a session identity. */
+export function leaseSessionIds(lease) {
+  return [lease?.ownerSession, lease?.workerSession, lease?.session];
 }
 
 /** PURE: does any not-finished `claude agents` entry belong to this lane? Fail-safe: a merely-listed entry counts. */
@@ -351,30 +357,24 @@ export function newestContentMtimeMs(dir) {
  * the SALVAGE path called it).
  *
  * Fails CLOSED like every read it composes: an unreadable `claude agents` or `lsof` never reads as "safe" —
- * see {@link salvageEligibility}'s own contract (itself hardened by this same item — see its own docblock for
- * the mtime-skew clamp, and {@link newestContentMtimeMs}'s for the `.git/index` racy-read fix). `lastHolder` is
- * the lane's own history-ledger entry; its `ownerSession`/`workerSession`/`session` are checked ALONGSIDE a live
- * process cwd inside `dir` — the same two-signal read (`liveAgentInLane` + `pidsWithCwdIn`) `cmdReclaimSalvage`
- * always used, now shared here (that COMPOSITION is unchanged; the primitives it calls were separately
- * hardened, above). `lastHolder` is OPTIONAL — omit it and the gate derives it itself
- * (`lastLaneHistoryEntry(readLaneHistory(dir))`) rather than making every caller repeat that read; pass it
- * explicitly only when the caller ALSO needs the entry for something else (`cmdReclaimSalvage`'s `gate()` does,
- * to build its own salvage metadata). The unreadable-gate message text below is reworded from "never salvaging
- * blind" to name what THIS gate is used for beyond salvage — nothing else in the tree matches the old string.
- * @param {{dir:string, lastHolder?:object, readAgents?:Function, readCwds?:Function, quietMs?:number, nowMs?:number}} o
+ * see {@link salvageEligibility}. Only the current lease can match a session outside the lane.
+ * Released/historical holders never establish ownership. A current cwd inside the lane remains an
+ * independent protection. Under the reclaim hold, ignore only that call's exact temporary session.
+ * @param {{dir:string, ignoreLeaseSession?:string, readAgents?:Function, readCwds?:Function, quietMs?:number, nowMs?:number}} o
  * @returns {{eligible:boolean, reason:string}}
  */
 export function laneLivenessGate({
-  dir, lastHolder, readAgents = readAgentsStrict, readCwds = readLiveCwds,
+  dir, ignoreLeaseSession, readAgents = readAgentsStrict, readCwds = readLiveCwds,
   quietMs = resolveSalvageQuietMs(), nowMs = Date.now(),
 } = {}) {
-  // #xl5xhmj (simplicity round) — `lastHolder` is OPTIONAL: every caller that has no extra use for the ledger
-  // entry beyond feeding it here (`cmdReclaim`'s two call sites, `defaultIsLiveNow`) now simply omits it and
-  // lets the gate derive it itself, rather than each one repeating
-  // `lastLaneHistoryEntry(readLaneHistory(dir)) || {}`. A caller that DOES need the entry for something else too
-  // (`cmdReclaimSalvage`'s `gate()`, which also returns it as `last` for its own salvage metadata) still passes
-  // it explicitly — that explicit value always wins, `undefined` is the only trigger for self-derivation.
-  const holder = lastHolder !== undefined ? lastHolder : (lastLaneHistoryEntry(readLaneHistory(dir)) || {});
+  let lease = null;
+  try {
+    lease = JSON.parse(readFileSync(join(dir, '.git', LEASE_FILENAME), 'utf8'));
+    if (!lease || typeof lease !== 'object' || Array.isArray(lease)) throw new Error('invalid lease');
+  } catch (error) {
+    if (error.code !== 'ENOENT') return { eligible: false, reason: 'cannot read current lease — never treating a lane as safe to act on blind' };
+  }
+  if (ignoreLeaseSession && lease?.session === ignoreLeaseSession) lease = null;
   const agents = readAgents();
   const cwds = readCwds();
   if (agents === null || cwds === null) {
@@ -383,7 +383,7 @@ export function laneLivenessGate({
       reason: `cannot read ${agents === null ? '\`claude agents\`' : 'live process cwds (lsof)'} — never treating a lane as safe to act on blind`,
     };
   }
-  const liveOwner = liveAgentInLane(agents, dir, [holder?.ownerSession, holder?.workerSession, holder?.session]);
+  const liveOwner = liveAgentInLane(agents, dir, leaseSessionIds(lease));
   const livePids = pidsWithCwdIn(cwds, dir);
   let newestMtimeMs = null;
   try { newestMtimeMs = newestContentMtimeMs(dir); } catch { newestMtimeMs = nowMs; }
