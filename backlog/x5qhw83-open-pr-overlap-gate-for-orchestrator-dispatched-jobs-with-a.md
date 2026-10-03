@@ -46,6 +46,15 @@ same gate (follow-up).
    gate, and exit non-zero on a refusal. A refused run costs nothing.
 3. **Record.** When `record` is true, call `recordPolicyEvent`: key `dispatchGate.overlapOverride`, event
    `overlap-override`, subject `<repo>#<pr>`, the reason, and detail `{ files, dispatcher, mode }`.
+   - **Untrusted text.** The reason is free text typed by a dispatching agent, and file names come from
+     other PRs. `recordPolicyEvent` truncates and strips them on write (story #xcs4nce), and the smell and the
+     WIP page treat them as plain text. The gate also rejects, before the length check, a reason containing a
+     control character, and caps it at 500 characters (a longer one is refused, not truncated, so the
+     recorded reason is the one the dispatcher meant).
+   - **What the 15-character floor is, and is not.** It stops an empty or one-word reason by accident. It
+     does not make a reason *good*: any filler passes. The audit value comes from the visible record (the
+     medium health episode that quotes the reason for 24 hours), not from the length check. The card does not
+     claim more.
 4. **WIP.** Add `we:scripts/conveyor/health-smells/overlap-override-used.mjs` on the `policyEvents` probe from
    story #xq4p21a: severity `medium`, action `alert`, one row per overlapped PR. It breaches when an override
    for that PR was recorded in the last 24 hours, and the summary quotes the reason. A medium episode turns the
@@ -63,6 +72,7 @@ Steps 1 to 4 for the two direct-job entry points.
   - `off`: a scope with `we:scripts/lib/jury-core.mjs` is refused and names #3507, even with a reason.
   - `logged`: no reason is refused; a too-short reason is refused; a real reason is allowed with `record`.
   - `free`: allowed with `record`.
+  - `logged`: a 501-character reason and a reason containing a control character are each refused.
   - `selfPr` 3507: allowed under every mode, with no record.
   - A disjoint scope: allowed, no record.
   - Default (no config): behaves as `off`.
@@ -72,7 +82,8 @@ Steps 1 to 4 for the two direct-job entry points.
   refusal exits non-zero before the spawn function is called (spawn injected and asserted unused); an allowed
   override writes one journal line.
 - **Capability (RED today, fails before this lands):** `we:scripts/conveyor/health-smells/__tests__/overlap-override-used.test.mjs`: the shape is valid; an event in
-  the last 24 hours breaches; an older one does not.
+  the last 24 hours breaches; an older one does not. A journaled reason carrying markup stays inert in the
+  summary (plain text), and the summary stays within a fixed length.
 
 ## Proof plan
 
@@ -84,6 +95,8 @@ Steps 1 to 4 for the two direct-job entry points.
 
 ## Follow-ups
 
+- plateau-app: the WIP band must render journal text (override reasons, file names) as plain text, never as
+  markup.
 - The detached codex-job runner (not on main) calls `openPrOverlapGate` when it lands.
 - Conveyor fix dispatch (`we:scripts/conveyor/reconcile-fix-dispatch.mjs:1484`): check other open PRs' files.
   This needs its own design, because a fix's scope is its own PR's files.

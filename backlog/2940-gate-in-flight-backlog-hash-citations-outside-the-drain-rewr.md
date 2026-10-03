@@ -5,7 +5,7 @@ size: 3
 parent: "x0hvbwx"
 status: open
 blockedBy: ["xcs4nce"]
-scope: ["we:scripts/check-standards.mjs", "we:scripts/check-standards-rules.mjs", "we:scripts/__tests__/check-standards.test.mjs", "we:scripts/__tests__/check-standards-main-state-parity.test.mjs"]
+scope: ["we:scripts/check-standards.mjs", "we:scripts/check-standards-rules.mjs", "we:scripts/__tests__/check-standards.test.mjs", "we:scripts/__tests__/check-standards-main-state-parity.test.mjs", "we:scripts/lane-drain.mjs", "we:scripts/__tests__/lane-drain.test.mjs", "we:scripts/__tests__/lane-drain-numbering.test.mjs"]
 dateOpened: "2026-08-05"
 preparedDate: "2026-10-03"
 preparedAgainstSha: "838e849ab8b35fa4b94216b7d474b3138d979ba5"
@@ -46,28 +46,42 @@ run.
 
 ## Design
 
-1. **Dry-run parity rule** `drainPostLandDryRun(root)` in `we:scripts/check-standards-rules.mjs`. It calls
-   `numberPendingHashes(root, { dryRun: true })`. If the result has `error`, under `on` it is a hard error:
-   "after this lands, the drain's JIT numbering will refuse: <detail>. Cite the durable thing, or widen the
-   sweep." It runs in every locus:
+1. **Dry-run parity rule** `drainPostLandDryRun(root, { baseRef })` in `we:scripts/check-standards-rules.mjs`.
+   It calls `numberPendingHashes(root, { dryRun: true })`. The refusal result today carries only an `error`
+   string; the builder adds a structured `refusals: [{ file, hash }]` field beside it in
+   `we:scripts/lane-drain.mjs` (the list `unsweptHashPathCites` already holds), with a test in
+   `we:scripts/__tests__/lane-drain-numbering.test.mjs`. Start after PR #3788, which changes the same refusal path.
+2. **Caused vs inherited: only a refusal this PR causes is an error.** The strand rule was deliberately
+   relaxed in PR CI and in lanes because erroring on a condition already on main wedged `verify-lane` for
+   every lane and turned each pre-existing strand into a red test for an unrelated PR (see the comment at
+   `we:scripts/check-standards-rules.mjs:2860-2868`). This rule keeps that lesson. Each refusal `{ file, hash }`
+   is **caused** by the PR when `file` is among the PR's changed files (`git diff --name-only <baseRef>...HEAD`)
+   or `hash` names a pending card the PR adds or edits. Otherwise it is **inherited**.
+   - Caused, under `on`, in PR CI or a lane: a hard error: "after this lands, the drain's JIT numbering will
+     refuse: <detail>. Cite the durable thing, or widen the sweep."
+   - Inherited, in PR CI or a lane: a **warning** naming the refusal and saying it comes from main, never an
+     error. An unrelated PR stays green on a main that already holds a refusing citation, and a CI heal is not
+     asked to fix what it cannot.
+   - No `baseRef` available (a bare lane with no origin ref): everything is inherited, so a warning only. The
+     rule fails open to today's relaxed behaviour rather than wedging a lane.
+   - On main (push-to-main CI): any refusal is an error, because a strand is about to happen or has.
    - In PR CI, the checkout is the PR merged with current main (`we:.github/workflows/ci.yml:168-172`,
-     check-standards at `:215`).
-   - In a lane, it runs on the lane's tree.
-   - On main, an error means a strand is about to happen.
-2. **Main-state rule registry.** Export `MAIN_STATE_RULES` from `we:scripts/check-standards-rules.mjs`. It
+     check-standards at `:215`), and `baseRef` is the PR's base (`origin/<base>`).
+3. **Main-state rule registry.** Export `MAIN_STATE_RULES` from `we:scripts/check-standards-rules.mjs`. It
    lists each rule whose severity depends on the locus (today `strandedHashesOnMain`) next to its PR-side
    twin (`drainPostLandDryRun`). A test fails if `we:scripts/check-standards.mjs` branches on
    `isPullRequestCiRun` or `inLane` for a rule that is not in the registry. So a new main-only difference
    cannot land without a PR-side twin.
-3. **Policy.** `on`: the dry-run rule runs. `off`: it is skipped (today's behaviour). Read through the loader
-   from story #xcs4nce.
+4. **Policy.** `on`: the dry-run rule runs. `off`: it is skipped (today's behaviour). Read through the loader
+   from story #xcs4nce. In PR CI and lanes, the policy is read from the **base** copy of the config
+   (`ref` = `baseRef`), so a PR cannot switch this rule off for itself.
 
 This also covers failure mode (3), a CI heal turning a PR green without fixing the cause. Under `on`, a heal
 is judged by the same post-land rule, so it cannot green a PR whose land would stop the numbering.
 
 ## MVP
 
-Steps 1 to 3.
+Steps 1 to 4.
 
 ## Test plan
 
@@ -80,6 +94,15 @@ Steps 1 to 3.
     - After, under `on`: one error naming the file and the hash.
     - Under `off`: no error.
   - Default (no config): behaves as `on`.
+  - **Inherited, not caused (an unrelated PR on a main that already refuses):** main already holds the PR
+    #3176 citation (the 2026-10-03 state). A PR that changes only an unrelated file gets a **warning** naming
+    the inherited refusal and **no error**, in PR CI and in a lane. The same tree on push-to-main is an error.
+  - **Caused:** a PR that adds a new out-of-scope citation of a pending hash, and a PR that adds a pending
+    card whose hash main already cites out of scope, each get an error. A PR that touches the file that
+    already holds the citation (without introducing it) is judged by `file` in the diff: error.
+  - No `baseRef`: the refusal is a warning only.
+  - The policy file is read from the base: a PR whose head sets `prCi.mainStateParity` to `off` is still
+    judged under the base's `on`.
   - A clean tree (citations only in scope): no error under either value.
   - The registry test: a locus branch with no registered twin fails.
 
@@ -88,7 +111,8 @@ Steps 1 to 3.
 1. In a scratch clone, check out the PR #3176 merge state (`bc9db934c`) and run `npm run check:standards`
    with the pull-request environment set. **Before** (current main's rules): passes, with only the
    stranded-hash warning path. **After:** fails with the dry-run error naming the soak citation.
-2. Run the same on current origin/main. It must show no new error, so the rule adds no false red.
+2. Run the same on current origin/main (which already holds the inherited refusal) with an unrelated one-file
+   PR on top. It must show a warning and **no error**, so the rule adds no false red.
 3. Paste both outputs in the PR.
 
 ## Follow-ups

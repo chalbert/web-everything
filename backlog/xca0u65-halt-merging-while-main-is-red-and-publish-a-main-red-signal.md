@@ -3,7 +3,7 @@ kind: story
 size: 5
 parent: "x0hvbwx"
 status: open
-blockedBy: ["xcs4nce"]
+blockedBy: ["xcs4nce", "xi8vgqq"]
 scope: ["we:scripts/merge-ai-prs.mjs", "we:scripts/__tests__/merge-ai-prs.test.mjs", "we:scripts/__tests__/merge-ai-prs-main-red-halt.test.mjs", "we:scripts/operations/live-state.mjs", "we:scripts/operations/live-state-io.mjs", "we:scripts/operations/__tests__/live-state-io.test.mjs", "we:scripts/operations/__tests__/live-state.test.mjs"]
 dateOpened: "2026-10-03"
 preparedDate: "2026-10-03"
@@ -34,10 +34,16 @@ Prepared 2026-10-03 against `838e849ab`.
    freeze check.
 2. **Pure gate** `decideMainRedGate({ policy, mainRed, pr })` returns `land` or `skip` with a reason.
    - `halt` (default): while main is red, skip every PR with reason `main-red-halt`, **except** a PR whose
-     latest required `test` run started after `redSince` and succeeded. That PR was tested against the red
-     main and passed. PR CI checks out the merge ref by default (`we:.github/workflows/ci.yml:168-172`), so
-     that PR fixes main or at least does not depend on the break. Without this exemption, the PR that fixes
-     main could never land.
+     latest required `test` run succeeded **and tested a main that already contains the red commit**. That PR
+     was tested against the red main and passed. PR CI checks out the merge ref by default
+     (`we:.github/workflows/ci.yml:168-172`), so that PR fixes main or at least does not depend on the break.
+     Without this exemption, the PR that fixes main could never land.
+   - **Commit identity, not start time.** A run's start time does not prove which main it tested: an old
+     green run rerun after main turned red gets a new start time but still tests the old merge commit, and a
+     queued run can start after the main it merged against went stale. So the exemption uses the run's tested
+     main SHA (`readTestedMainSha`, `we:scripts/lib/tested-main-base.mjs`, built by story #xi8vgqq, which also
+     records it in `we:.github/workflows/ci.yml`): the PR is exempt only when `redSha` is an ancestor of, or
+     equal to, that tested SHA. A run with no recorded tested SHA is not exempt.
    - `warn`: land as today, but record the signal.
    - `off`: today's behaviour.
 3. **Bypass kept.** `--no-red-main-freeze` and `WE_MERGE_BREAK_GLASS` (`we:scripts/merge-ai-prs.mjs:5868`)
@@ -57,7 +63,7 @@ from `sections.mainState` in `we:scripts/operations/run.mjs live-state --json`. 
 
 Interaction with `prCi.mainStateParity` (card #2940): with parity `on`, a PR that does not fix main goes red
 too, so the exemption admits exactly the fix. With parity `off`, the exemption is weaker. It still admits only
-PRs tested after main went red.
+PRs whose run tested a main that already contains the red commit.
 
 ## MVP
 
@@ -67,8 +73,11 @@ Steps 1 to 5 in WE. The band itself is a plateau-app follow-up.
 
 - **Capability (RED today, fails before this lands):** `we:scripts/__tests__/merge-ai-prs-main-red-halt.test.mjs` (pure gate plus the pass wiring with injected
   reads):
-  - `halt`: with main red, a PR green on a run that started before `redSince` is skipped with
-    `main-red-halt`. A PR green on a run that started after `redSince` lands.
+  - `halt`: with main red, a PR green on a run whose tested main SHA predates `redSha` is skipped with
+    `main-red-halt`. A PR green on a run whose tested main SHA contains `redSha` lands.
+  - **Reruns and late starts (commit identity):** an old green run rerun after main turned red (new
+    `startedAt`, tested SHA before `redSha`) is skipped. A run queued and started late, but whose tested SHA
+    predates `redSha`, is skipped. A run with no recorded tested SHA is skipped.
   - `warn`: both land, and one `main-red` event is recorded.
   - `off`: both land; no event.
   - Default (no config): behaves as `halt`.
@@ -93,7 +102,9 @@ Steps 1 to 5 in WE. The band itself is a plateau-app follow-up.
 ## Follow-ups
 
 - plateau-app: add `mainState` to `WipHealthSectionKey` and render the high-alert band from
-  `machineHealth.sections.mainState`.
+  `machineHealth.sections.mainState`. The band, and every health smell that quotes policy-journal text, must
+  render that text as **plain text** (never as markup): journal fields are length-capped and stripped of
+  control characters on write (story #xcs4nce), but they can still contain markup characters.
 - Card #4236 (an owed CI rerun waiting on a red main is bounded and surfaced) is related. It stays separate:
   it is about the CI-heal side, and this story is about landing.
 

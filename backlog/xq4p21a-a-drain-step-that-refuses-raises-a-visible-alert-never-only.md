@@ -51,7 +51,12 @@ story does not edit that file, but its replay test reuses the refusal fixture sh
    - scope `host`, cadence `every-tick`, probes `policyEvents`, `openAfter: 1`, `closeAfter: 2`,
      severity `high`, action `alert`;
    - one row per subject; it breaches when the newest event for that subject is `drain-step-refused`;
-   - its recommendation quotes the refusal reason, for example the file and hash that block numbering.
+   - its recommendation quotes the refusal reason, for example the file and hash that block numbering. The
+     reason is text derived from repository content (a filename a PR chose), so it goes through the journal's
+     write-time cap and control-character strip (story #xcs4nce), and the WIP page renders it as plain text.
+     Add a case to `we:scripts/conveyor/health-smells/__tests__/drain-step-refused.test.mjs`: a refusal reason
+     carrying a control character, markup and a 5 000-character filename comes back truncated, stripped, and
+     with the markup inert in the summary.
 
 ## MVP
 

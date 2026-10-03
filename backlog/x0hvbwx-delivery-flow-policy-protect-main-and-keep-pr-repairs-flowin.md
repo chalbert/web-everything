@@ -37,12 +37,12 @@ overlap-override and heavy-queue items.
 | Way main breaks | Story | Key, default |
 | --- | --- | --- |
 | (1) A check behaves differently on main than on a PR | #2940 (re-aimed) | `prCi.mainStateParity`, `on` |
-| (2) The drain merges PRs one after another without re-testing against the newest main | #xi8vgqq | `mergeGate.recheckWhenMainMoved`, `always` (plus `recheckMaxAgeMin`, 30) |
+| (2) The drain merges PRs one after another without re-testing against the newest main | #xi8vgqq | `mergeGate.recheckWhenMainMoved`, `if-older-than-N-min` (plus `recheckMaxAgeMin`, 30) |
 | (3) A CI heal turns a PR green without fixing the cause | #2940 (a heal is judged by the same post-land rule) and #xca0u65 (no landing on a red main) | as above |
 | (4) A drain step stops silently, with no alert | #xq4p21a | `drain.onStepRefusal`, `alert` |
 
 Also: #xca0u65 for `mergeGate.onMainRed` (`halt`); #x5qhw83 for `dispatchGate.overlapOverride` (`off`); and
-#xkpbs7b for `heavyQueue.priority` (`repairs-first`) and `heavyQueue.reservedForRepairs` (1).
+#xkpbs7b for `heavyQueue.priority` (`repairs-first`) and `heavyQueue.reservedForRepairs` (1, borrowable after `heavyQueue.reservedBorrowAfterMin`, 10).
 
 ## Stories and order
 
@@ -50,12 +50,14 @@ Also: #xca0u65 for `mergeGate.onMainRed` (`halt`); #x5qhw83 for `dispatchGate.ov
    Start after PR #3789 lands, because it edits the same config files.
 2. #xq4p21a: the silent-drain-step alert, plus the health probe for the journal. Start after PR #3788 lands.
 3. #2940: PR-side parity, with a dry run of the post-land numbering.
-4. #xca0u65: halt on red main, and the `mainState` snapshot section.
-5. #xi8vgqq: re-check before merge when main moved.
+4. #xi8vgqq: re-check before merge when main moved. It also adds the tested-main-SHA helper and the one-line
+   CI step that records it.
+5. #xca0u65: halt on red main, and the `mainState` snapshot section. Blocked by #xi8vgqq too, because its
+   exemption uses that helper (a run's tested main SHA, not its start time).
 6. #x5qhw83: the open-PR overlap gate with a logged override. Also blocked by #xq4p21a, for the probe.
 7. #xkpbs7b: repairs-first heavy queue.
 
-Stories 2, 4 and 5 all edit `we:scripts/merge-ai-prs.mjs`. The conveyor's `scope-vs-open-prs` hold
+Stories 2, 4 and 5 (#xq4p21a, #xi8vgqq, #xca0u65) all edit `we:scripts/merge-ai-prs.mjs`. The conveyor's `scope-vs-open-prs` hold
 (`we:scripts/conveyor/build-dispatch-policy.mjs:271-274`) runs them one at a time automatically, so they carry
 no artificial blocker edges.
 
