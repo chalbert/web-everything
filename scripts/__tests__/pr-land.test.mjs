@@ -7,7 +7,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { mergeMethodFlag, buildCreateArgs, prCreateBodyGuard, buildMergeArgs, buildRenumberHealArgs, buildRegenArgs, buildAddLabelArgs, classifyChecks, planPrLand, pollVerdict, isPostLandTreeDirty, postLandSkips, postLandReport, scopeHealChangedPaths, resolveProducerReviewLabel, resolveRosterReconcile, resolveParkLabel, withAuthorStamp, composePrBody, PARK_LABELS, decideHoldReadyStrip, resolveDraft } from '../pr-land.mjs';
+import { pushFailedDetail, mergeMethodFlag, buildCreateArgs, prCreateBodyGuard, buildMergeArgs, buildRenumberHealArgs, buildRegenArgs, buildAddLabelArgs, classifyChecks, planPrLand, pollVerdict, isPostLandTreeDirty, postLandSkips, postLandReport, scopeHealChangedPaths, resolveProducerReviewLabel, resolveRosterReconcile, resolveParkLabel, withAuthorStamp, composePrBody, PARK_LABELS, decideHoldReadyStrip, resolveDraft } from '../pr-land.mjs';
 import { REVIEW_LABELS, REVIEW_LABEL_META, READY_TO_MERGE_LABEL, scoreEscalation } from '../lib/review-escalation.mjs';
 import { buildAuthorActorMarker, parseAuthorActorId } from '../lib/review-independence.mjs';
 import { PANEL_LENSES } from '../lib/review-core.mjs';
@@ -821,5 +821,21 @@ describe('resolveProducerReviewLabel — the basis trust question (#3343)', () =
     expect(resolveProducerReviewLabel({ changedFiles: statute, humanBasisFiles: statute, diffLines: 12 }))
       .toEqual(resolveProducerReviewLabel({ changedFiles: statute, humanBasisFiles: statute, diffLines: 12, basisNarrowed: true }));
     expect(resolveProducerReviewLabel({ changedFiles: statute, humanBasisFiles: statute, diffLines: 12 }).basisUntrusted).toBe(false);
+  });
+});
+
+describe('#4386 push rejection guidance', () => {
+  const refs = { SRC: 'HEAD', REF: 'lane/proof-4386', REMOTE: 'origin' };
+  it.each(['! [rejected] HEAD -> lane/proof-4386 (non-fast-forward)',
+    '! [rejected] HEAD -> lane/proof-4386 (fetch first)', 'fetch first', 'non-fast-forward', '[rejected]'])
+    ('classifies full stderr before truncating: %s', (stderr) => {
+      const detail = pushFailedDetail(`Command failed: git push origin HEAD\n${stderr}`, refs);
+      expect(detail).toContain('not the tip of lane/proof-4386');
+      expect(detail).toContain('acquire --base=<tip>');
+      expect(detail).toContain('origin/lane/proof-4386');
+    });
+  it('preserves unrelated failure detail', () => {
+    expect(pushFailedDetail('Command failed: git push origin HEAD\nPermission denied', refs))
+      .toBe('git push origin HEAD:refs/heads/lane/proof-4386 failed (Command failed: git push origin HEAD)');
   });
 });
