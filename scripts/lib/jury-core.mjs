@@ -2328,12 +2328,14 @@ export function validateReferralRecord(r) {
 }
 
 /** Resolve this obligation only. Ordinary findings and all other acceptance gates remain intact. */
-export function referralRecordState(record, { head = record?.head, body = record?.authorBody ?? '', createdAt = '', cardReadable = () => false } = {}) {
+export function referralRecordState(record, { head = record?.head, body = record?.authorBody ?? '', createdAt = '', cardReadable = () => false, seatDisabled = () => false } = {}) {
   if (!validateReferralRecord(record)) return { pending: ['malformed-referral-record'], blocked: [], rulings: [] };
   const pending = [], blocked = [], rulings = [];
   const independent = decideClearerIndependence({ authorId: parseAuthorActorId(body), clearerId: record.reviewer.id, prCreatedAt: createdAt });
   for (const f of activeReferrals(record)) {
     const history = record.rulings.filter(r => r.key === f.key);
+    // Match audited drops: disabling an optional seat cannot erase an existing ruling (especially a block).
+    if (!history.length && seatDisabled(f.seat)) continue;
     const active = history.filter(r => !history.some(next => supersededRulings(next).includes(r.id)));
     const r = active.length === 1 ? active[0] : null;
     if (head !== record.head || independent.independent !== true || !r
@@ -2405,12 +2407,13 @@ export function mandatoryReferralState(comments, context = {}) {
     pending.push('unavailable-reviewed-head');
   }
   const blocked = [];
-  // A newer head must review the same source finding again; old clearance is never carried forward.
-  const currentKeys = new Set(records.filter(r => r.head === context.head).flatMap(r => activeReferrals(r).map(f => f.key)));
+  // The review carries source findings into the new head's own records. Neither old holds nor old
+  // clearance carry forward here; a finding repeated on the current head still needs its own ruling.
   for (const r of records) {
+    if (/^[a-f0-9]{40}$/.test(context.head ?? '') && r.head !== context.head) continue;
     if (context.repo && (r.repo !== context.repo || r.pr !== Number(context.pr))) { pending.push('wrong-subject'); continue; }
     const state = referralRecordState(r, context);
-    pending.push(...state.pending.filter(key => r.head === context.head || !currentKeys.has(key)));
+    pending.push(...state.pending);
     blocked.push(...state.blocked);
   }
   return { records, pending: [...new Set(pending)], blocked: [...new Set(blocked)], malformed };
