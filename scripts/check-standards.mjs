@@ -69,7 +69,7 @@ import {
   validateUntrackedDerivedArtifacts, DERIVED_ARTIFACT_DIRS,
   duplicateBacklogNums,
   duplicateBornAs,
-  strandedHashesOnMain,
+  strandedHashesOnMain, isPullRequestCiRun,
   handNumberedNewItems,
   validatePlaywrightContainerPin, extractPlaywrightContainerTags, PLAYWRIGHT_CONTAINER_PIN_REQUIRED_FILES,
   validateDeclaredModuleContract,
@@ -771,7 +771,7 @@ if (!LOCAL_MODE) {
         return Number.isFinite(epoch) ? epoch : null;
       } catch { return null; } // unknown → strandedHashesOnMain treats as NOT in-flight (fails toward erroring)
     };
-    const stranded = strandedHashesOnMain(mainBacklog, { commitTimeFor, inLane: isLaneLocus(resolveReal(ROOT), sep) });
+    const stranded = strandedHashesOnMain(mainBacklog, { commitTimeFor, inLane: isLaneLocus(resolveReal(ROOT), sep) || isPullRequestCiRun() });
     for (const msg of stranded.errors) err(msg);
     for (const msg of stranded.warnings) warn(msg);
     // #2548 — hand-numbered-new-item gate: a working-tree item with a hand-picked NNN not yet on origin/main.
