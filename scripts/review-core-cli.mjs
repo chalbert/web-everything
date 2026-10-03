@@ -581,7 +581,9 @@ function runShape(flags, asJson) {
   let commits = null;
   if (typeof flags['commits-file'] === 'string') {
     try {
-      const input = JSON.parse(readFileSync(flags['commits-file'], 'utf8'));
+      // fd 0 rather than the `/dev/stdin` path: on Linux a piped stdin is a socket, and opening it by path fails (ENXIO).
+      const source = flags['commits-file'] === '/dev/stdin' ? 0 : flags['commits-file'];
+      const input = JSON.parse(readFileSync(source, 'utf8'));
       commits = Array.isArray(input) ? input : input?.commits;
     } catch { commits = null; }
   }
