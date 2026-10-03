@@ -946,6 +946,10 @@ describe('Findings publication regressions', () => {
     const dir = mkdtempSync(join(tmpdir(), 'findings-standards-'));
     try {
       execFileSync('git', ['clone', '--shared', '--quiet', resolve('.'), dir]);
+      // A CI checkout has no local `main` for the shared clone to track, so `origin/main` is missing and the
+      // backlog scope guards refuse to run; pin it to HEAD so the changed set is just this test's edit.
+      try { execFileSync('git', ['-C', dir, 'rev-parse', '--verify', '-q', 'origin/main'], { stdio: 'ignore' }); }
+      catch { execFileSync('git', ['-C', dir, 'update-ref', 'refs/remotes/origin/main', 'HEAD']); }
       symlinkSync(resolve('node_modules'), join(dir, 'node_modules'));
       const file = 'backlog/' + readdirSync(join(dir, 'backlog')).find(f => f.startsWith('4331-'));
       const original = readFileSync(join(dir, file), 'utf8');

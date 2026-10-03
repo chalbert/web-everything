@@ -2858,6 +2858,15 @@ export function duplicateBornAs(items = []) {
 // after ANY hash-card merge went red on a hash the drain was about to number. 1800 is ~1.75x the slowest measured lag.
 export const STRANDED_HASH_GRACE_SECONDS = 1800;
 
+// A pull-request CI run is the same locus as a lane for this rule: it can neither cause a strand already on
+// main nor repair it (`number-stranded` needs a serialized primary checkout). It only reads main's history
+// once the workflow fetches full depth (the scope guards need it), which would otherwise turn every
+// pre-existing strand on main into a red `test` for an unrelated PR.
+export function isPullRequestCiRun(env = process.env) {
+  return env.GITHUB_ACTIONS === 'true'
+    && (env.GITHUB_EVENT_NAME === 'pull_request' || env.GITHUB_EVENT_NAME === 'pull_request_target');
+}
+
 export function strandedHashesOnMain(mainBacklogPaths = [], {
   commitTimeFor = () => null,
   now = () => Date.now() / 1000,
