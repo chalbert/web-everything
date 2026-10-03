@@ -64,7 +64,7 @@ jobs:
       - name: Checkout FUI (sibling)
         uses: actions/checkout@v4
         with:
-          repository: chalbert/frontierui
+          repository: frontier-ui/frontierui
           token: ${{ secrets.FUI_READ_TOKEN }}
           path: frontierui
 
