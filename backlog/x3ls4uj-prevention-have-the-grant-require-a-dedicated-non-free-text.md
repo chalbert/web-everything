@@ -3,7 +3,7 @@ kind: story
 size: 3
 parent: "4075"
 status: open
-scope: ["we:scripts/conveyor/reconcile-core.mjs", "we:scripts/conveyor/__tests__/reconcile-core.test.mjs", "we:scripts/review-set-label.mjs", "we:scripts/__tests__/review-set-label.test.mjs", "we:scripts/lib/operator-fix-budget.mjs", "we:scripts/lib/__tests__/operator-fix-budget.test.mjs", "we:skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs", "we:skills-src/conveyor/__tests__/reconcile-fix-dispatch-daemon-notes.test.mjs", "we:scripts/lib/env-boolean.mjs", "we:scripts/lib/__tests__/env-boolean.test.mjs", "we:scripts/check-standards-rules.mjs", "we:scripts/__tests__/check-standards-rules-content-lint.test.mjs", "we:scripts/check-standards.mjs", "we:scripts/__tests__/check-standards.test.mjs"]
+scope: ["we:scripts/conveyor/reconcile-core.mjs", "we:scripts/conveyor/__tests__/reconcile-core.test.mjs", "we:scripts/review-set-label.mjs", "we:scripts/__tests__/review-set-label.test.mjs", "we:scripts/lib/operator-fix-budget.mjs", "we:scripts/lib/__tests__/operator-fix-budget.test.mjs", "we:skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs", "we:skills-src/conveyor/__tests__/reconcile-fix-dispatch-daemon.test.mjs", "we:skills-src/conveyor/__tests__/reconcile-fix-dispatch-daemon-notes.test.mjs", "we:scripts/lib/env-boolean.mjs", "we:scripts/lib/__tests__/env-boolean.test.mjs", "we:scripts/check-standards-rules.mjs", "we:scripts/__tests__/check-standards-rules-content-lint.test.mjs", "we:scripts/check-standards.mjs", "we:scripts/__tests__/check-standards.test.mjs"]
 dateOpened: "2026-10-01"
 preparedDate: "2026-10-02"
 preparedAgainstSha: "7a4e24b3fc03d79cc8d974a934ef98c8d79df256"
