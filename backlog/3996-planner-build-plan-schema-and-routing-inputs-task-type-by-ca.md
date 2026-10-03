@@ -3,8 +3,9 @@ bornAs: xdk2nt2
 kind: story
 size: 3
 parent: "3383"
-status: open
+status: resolved
 dateOpened: "2026-09-23"
+dateResolved: "2026-10-03"
 preparedDate: "2026-09-30"
 preparedAgainstSha: "57b54c601b0518cbf3ede27d2e403a489d8d67cf"
 scope: ["we:scripts/lib/dispatch-supervisor-contract.mjs", "we:scripts/lib/dispatch-task-type.mjs", "we:scripts/lib/dispatch-contracts.mjs", "we:scripts/conveyor/run-scorecard-store.mjs", "we:scripts/conveyor/__tests__/run-scorecard-store.test.mjs", "we:scripts/lib/__tests__/dispatch-supervisor-contract.test.mjs", "we:scripts/lib/__tests__/dispatch-task-type.test.mjs", "we:scripts/lib/__tests__/dispatch-contracts.test.mjs"]
