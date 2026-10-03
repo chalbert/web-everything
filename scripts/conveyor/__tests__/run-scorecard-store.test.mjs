@@ -439,8 +439,10 @@ it('#3996 validates nullable footprint counts and preserves them on each trial',
       appendScorecard(row, io);
       expect(readStore(io).records.at(-1)[field]).toBe(value);
     }
-    for (const value of [-1, 1.5, '2', true, {}, Infinity, NaN]) {
+    for (const value of [-1, 1.5, '2', true, {}, Infinity, NaN, Number.MAX_SAFE_INTEGER + 1]) {
       expect(validateScorecard({ ...baseRow(), [field]: value }).ok).toBe(false);
     }
+    // the stated bound is a SAFE integer: the largest one is accepted, the next is not
+    expect(validateScorecard({ ...baseRow(), [field]: Number.MAX_SAFE_INTEGER }).ok).toBe(true);
   }
 });

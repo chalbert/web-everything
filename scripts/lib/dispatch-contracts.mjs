@@ -1182,6 +1182,9 @@ function decideDispatchRouteLegacy(dispatch = {}, { scorecards = [], enforceSupe
     // silently stop a conflict-caused fix (this card's own reasoning, on the checked-in default policy).
     let estimatedLoc; let sized; let sizeSource;
     if (dispatch?.sizeSource === 'plan') {
+      // The planner only emits planned `build` tasks. `sizeSource` is caller-supplied, so a repair (or any other
+      // cause) naming it would skip `resolveFixSize` / the card size policy and pick a smaller, more autonomous envelope.
+      if (kind !== 'build' || dispatch.cause !== 'planned') return routeRefused(kind, derivation, 'plan size is only valid for a planned build');
       const bySize = estimatedLocForSize(dispatch.size);
       estimatedLoc = dispatch.estimatedLoc ?? (bySize.sized ? bySize.estimatedLoc : null);
       if (!integer(estimatedLoc)) return routeRefused(kind, derivation, 'plan size requires a positive estimatedLoc or a supported size');

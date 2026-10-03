@@ -96,6 +96,16 @@ export const TASK_TYPES_WITHOUT_PRODUCING_KIND = Object.freeze({
 export const DOC_PATH_PREFIXES = Object.freeze(['docs/', 'src/_data/', 'src/_includes/']);
 
 /**
+ * Homes that mix reader-facing content with EXECUTABLE build-time code (`src/_data/` holds Eleventy loaders such
+ * as `backlog.js` and `rules.js`), so a prefix alone is not enough: only these (non-executable) extensions count.
+ * `docs/` is deliberately absent — it stays prefix-wide, exactly as before.
+ */
+const DOC_HOME_EXTENSIONS =Object.freeze({
+  'src/_data/': Object.freeze(['.json']),
+  'src/_includes/': Object.freeze(['.njk']),
+});
+
+/**
  * Strip the repo qualifier a declared `scope:` path carries (`we:scripts/x.mjs`, `frontierui:src/y.ts`) and
  * the `./` a hand-written one sometimes does, leaving the repo-relative path. Mirrors
  * `dispatch-contracts.mjs#deriveDispatchProfile`'s own normalisation so the two never disagree about what a
@@ -121,7 +131,12 @@ export function isDocScopePath(entry) {
   if (typeof entry !== 'string') return false;
   const path = normalizeScopePath(entry);
   if (!path || path.startsWith('/') || path.includes('\\') || path.split('/').includes('..')) return false;
-  return path === 'README.md' || DOC_PATH_PREFIXES.some(p => path === p.slice(0, -1) || path.startsWith(p));
+  if (path === 'README.md') return true;
+  return DOC_PATH_PREFIXES.some((p) => {
+    const extensions = DOC_HOME_EXTENSIONS[p];
+    if (!extensions) return path === p.slice(0, -1) || path.startsWith(p);
+    return path.startsWith(p) && extensions.some((ext) => path.length > p.length + ext.length && path.endsWith(ext));
+  });
 }
 
 /** Shared test-file boundary for classification and the post-worker diff envelope. */

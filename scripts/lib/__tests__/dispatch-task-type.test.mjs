@@ -178,6 +178,16 @@ describe('the all-docs rule', () => {
     }
   });
 
+  it('#3996 only non-executable files under the data/template homes count as documentation', () => {
+    for (const p of ['src/_data/blocks.json', 'we:src/_includes/a/b.njk']) expect(isDocScopePath(p), p).toBe(true);
+    // `src/_data/` holds Eleventy build-time JS/TS (backlog.js, rules.js, ...): executable code is never documentation.
+    for (const p of ['src/_data/backlog.js', 'we:src/_data/rules.js', 'src/_data/x.ts', 'src/_data/x.mjs', 'src/_data/x.cjs',
+      'src/_includes/x.js', 'src/_includes/x.ts', 'src/_includes/x.mjs', 'src/_data', 'src/_includes/x']) {
+      expect(isDocScopePath(p), p).toBe(false);
+    }
+    expect(taskTypeFor({ kind: 'build', cause: null, scopePaths: ['we:src/_data/backlog.js'] }).taskType).toBe('build-new-feature');
+  });
+
   it('normalises a repo-qualified scope path the same way the contract does', () => {
     expect(normalizeScopePath('we:scripts/a.mjs')).toBe('scripts/a.mjs');
     expect(normalizeScopePath('frontierui:src/a.ts')).toBe('frontierui/src/a.ts');
