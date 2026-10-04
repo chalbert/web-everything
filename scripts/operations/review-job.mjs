@@ -5,7 +5,7 @@ import { readReviewCiGate } from '../lib/review-ci-gate-io.mjs';
  * @description x26lw6u (epic #3383) — RUN THE INDEPENDENT-REVIEW ARC AS A DETERMINISTIC JOB, NOT A CLAUDE
  * WRAPPER SESSION.
  *
- *   node scripts/operations/review-job.mjs run --pr=1234 --repo=chalbert/web-everything   # the arc, foreground
+ *   node scripts/operations/review-job.mjs run --pr=1234 --repo=web-everything/web-everything   # the arc, foreground
  *
  * THE WASTE THIS REMOVES (measured 2026-09-24 → 25, the review daemon's own transcripts). The review daemon
  * (`we:skills-src/conveyor/review-daemon.mjs`) used to start one `claude --bg` session per owed review

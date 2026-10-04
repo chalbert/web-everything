@@ -83,41 +83,41 @@ describe('spawnCiHealRearm — hand a stale review:accepted back through rearm-r
 
   it('shells THIS checkout\'s rearm-review.mjs with the pr, actor, and repo', () => {
     const { calls, spawn } = spy();
-    const out = spawnCiHealRearm({ pr: 2811, repo: 'chalbert/web-everything', cwd: '/ws/we', spawn });
+    const out = spawnCiHealRearm({ pr: 2811, repo: 'web-everything/web-everything', cwd: '/ws/we', spawn });
     expect(out).toEqual({ ok: true });
     expect(calls).toHaveLength(1);
     expect(calls[0].argv[0]).toMatch(/scripts\/conveyor\/rearm-review\.mjs$/);
     expect(calls[0].argv).toContain('2811');
     expect(calls[0].argv).toContain('--actor=conveyor CI-heal agent');
-    expect(calls[0].argv).toContain('--repo=chalbert/web-everything');
+    expect(calls[0].argv).toContain('--repo=web-everything/web-everything');
     expect(calls[0].opts.cwd).toBe('/ws/we');
   });
 
   it('spawnCiHealRearm passes --only-if=accepted by default and omits it when onlyIfAccepted:false', () => {
     const a = spy();
-    spawnCiHealRearm({ pr: 2811, repo: 'chalbert/web-everything', spawn: a.spawn });
+    spawnCiHealRearm({ pr: 2811, repo: 'web-everything/web-everything', spawn: a.spawn });
     expect(a.calls[0].argv).toContain('--only-if=accepted');
     const b = spy();
-    spawnCiHealRearm({ pr: 2811, repo: 'chalbert/web-everything', onlyIfAccepted: false, spawn: b.spawn });
+    spawnCiHealRearm({ pr: 2811, repo: 'web-everything/web-everything', onlyIfAccepted: false, spawn: b.spawn });
     expect(b.calls[0].argv).not.toContain('--only-if=accepted');
   });
 
   it('a refused re-arm (nothing to re-arm — the common, no-accepted-label case) is reported, not thrown', () => {
     const { spawn } = spy(1, JSON.stringify({ ok: false, pr: 2811, reason: 'neither review:changes nor review:accepted is live' }));
-    const out = spawnCiHealRearm({ pr: 2811, repo: 'chalbert/web-everything', spawn });
+    const out = spawnCiHealRearm({ pr: 2811, repo: 'web-everything/web-everything', spawn });
     expect(out.ok).toBe(false);
   });
 
   it('a spawn failure never throws — reported as {ok:false, reason}', () => {
     const thrower = () => { throw new Error('spawn ENOENT'); };
-    expect(spawnCiHealRearm({ pr: 2811, repo: 'chalbert/web-everything', spawn: thrower })).toEqual({ ok: false, reason: 'spawn ENOENT' });
+    expect(spawnCiHealRearm({ pr: 2811, repo: 'web-everything/web-everything', spawn: thrower })).toEqual({ ok: false, reason: 'spawn ENOENT' });
   });
 });
 
 // we:backlog/4352 — a budget-refused heal comment is recorded OWED (head-scoped), never silently dropped.
 describe('#4352 — head-scoped heal comment + owed-on-budget-refusal', () => {
   const HEAD = 'abcdef0123456789abcdef0123456789abcdef01';
-  const REPO = { key: 'we', slug: 'chalbert/web-everything' };
+  const REPO = { key: 'we', slug: 'web-everything/web-everything' };
   const budgetError = () => {
     const stderr = budgetBlockedMessage({ resource: 'graphql', until: '2026-09-27T23:00:00Z' });
     return Object.assign(new Error(`Command failed: gh pr comment\n${stderr}`), { status: 1, stderr });
@@ -137,7 +137,7 @@ describe('#4352 — head-scoped heal comment + owed-on-budget-refusal', () => {
       post: () => { throw budgetError(); }, owe: (r) => { owed.push(r); return r; },
     });
     expect(out.commented).toBe(false);
-    expect(owed).toEqual([{ repo: 'we', slug: 'chalbert/web-everything', pr: 2821, kind: 'ci-heal', headSha: HEAD, body: 'b' }]);
+    expect(owed).toEqual([{ repo: 'we', slug: 'web-everything/web-everything', pr: 2821, kind: 'ci-heal', headSha: HEAD, body: 'b' }]);
   });
 
   it('a NON-budget failure still throws (nothing owed) — a retry would not fix it', () => {
@@ -175,12 +175,12 @@ describe('#4352 — head-scoped heal comment + owed-on-budget-refusal', () => {
       chmodSync(join(bin, 'gh'), 0o755);
       const lockRoot = join(dir, 'lock');
       const r = spawnSync(process.execPath, [
-        join(dirname(fileURLToPath(import.meta.url)), '..', 'ci-heal-mark.mjs'), '2821', '--repo=chalbert/web-everything', '--reason=red-ci', `--head=${HEAD}`,
+        join(dirname(fileURLToPath(import.meta.url)), '..', 'ci-heal-mark.mjs'), '2821', '--repo=web-everything/web-everything', '--reason=red-ci', `--head=${HEAD}`,
       ], { encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, WE_GH_THROTTLE_LOCK_ROOT: lockRoot } });
       expect(r.status, r.stderr).toBe(0);
       expect(JSON.parse(r.stdout.trim().split('\n').pop())).toMatchObject({ ok: true, pr: 2821, commented: false, owed: true });
       const owed = readOwedWrites({ dir: join(lockRoot, 'ci-heal-owed') });
-      expect(owed).toEqual([expect.objectContaining({ repo: 'we', slug: 'chalbert/web-everything', pr: 2821, kind: 'ci-heal', headSha: HEAD })]);
+      expect(owed).toEqual([expect.objectContaining({ repo: 'we', slug: 'web-everything/web-everything', pr: 2821, kind: 'ci-heal', headSha: HEAD })]);
       // The owed body IS the comment that will be posted — and it dedupes against itself once live.
       expect(owedWriteAlreadyLive([{ body: owed[0].body, author: AUTOMATION }], owed[0])).toBe(true);
     } finally { rmSync(dir, { recursive: true, force: true }); }
@@ -243,7 +243,7 @@ else if (a[0] === 'pr' && a[1] === 'comment') {
 fs.writeFileSync('state.json', JSON.stringify(s));
 `);
       chmodSync(join(dir, 'bin', 'gh'), 0o755);
-      const r = spawnSync(process.execPath, [join(dirname(fileURLToPath(import.meta.url)), '..', 'ci-heal-mark.mjs'), '42', '--repo=chalbert/web-everything', `--head=${scenario === 'prefix' ? healedHead.slice(0, 10) : healedHead}`],
+      const r = spawnSync(process.execPath, [join(dirname(fileURLToPath(import.meta.url)), '..', 'ci-heal-mark.mjs'), '42', '--repo=web-everything/web-everything', `--head=${scenario === 'prefix' ? healedHead.slice(0, 10) : healedHead}`],
         { cwd: dir, encoding: 'utf8', env: { ...process.env, PATH: `${join(dir, 'bin')}:${process.env.PATH}`, WE_VERDICT_LEDGER_DIR: join(dir, 'ledger'), WE_GH_THROTTLE_LOCK_ROOT: join(dir, 'lock') } });
       const final = JSON.parse(readFileSync(join(dir, 'state.json'), 'utf8'));
       const proof = { reviewedBase, reviewedHead, healedBase, healedHead, result: r.stdout, labels: final.labels, comments: final.comments, calls: readFileSync(join(dir, 'calls.jsonl'), 'utf8') };
@@ -268,7 +268,7 @@ fs.writeFileSync('state.json', JSON.stringify(s));
       const calls = proof.calls.trim().split('\n').map(JSON.parse);
       expect(calls[0].slice(0, 2)).toEqual(['pr', 'comment']);
       expect(calls.filter(c => c[1] === 'edit')).toHaveLength(rearmed ? 1 : 0);
-      expect(calls.every(c => c.includes('chalbert/web-everything') || c.includes('--repo=chalbert/web-everything'))).toBe(true);
+      expect(calls.every(c => c.includes('web-everything/web-everything') || c.includes('--repo=web-everything/web-everything'))).toBe(true);
       if (scenario === 'unchanged') console.info('CI-heal proven replay', JSON.stringify(proof));
       if (scenario === 'soak') {
         let previousHead = healedHead;
@@ -282,7 +282,7 @@ fs.writeFileSync('state.json', JSON.stringify(s));
           live.headRefOid = nextHead;
           writeFileSync(join(dir, 'state.json'), JSON.stringify(live));
           const next = spawnSync(process.execPath, [join(dirname(fileURLToPath(import.meta.url)), '..', 'ci-heal-mark.mjs'),
-            '42', '--repo=chalbert/web-everything', `--head=${nextHead}`],
+            '42', '--repo=web-everything/web-everything', `--head=${nextHead}`],
           { cwd: dir, encoding: 'utf8', env: { ...process.env, PATH: `${join(dir, 'bin')}:${process.env.PATH}`,
             WE_VERDICT_LEDGER_DIR: join(dir, 'ledger'), WE_GH_THROTTLE_LOCK_ROOT: join(dir, 'lock') } });
           expect(next.status, next.stderr).toBe(0);
@@ -375,7 +375,7 @@ fs.writeFileSync('state.json', JSON.stringify(s));
 `);
       chmodSync(join(dir, 'bin', 'gh'), 0o755);
       const result = spawnSync(process.execPath, [join(dirname(fileURLToPath(import.meta.url)), '..', 'ci-heal-mark.mjs'),
-        String(scenario.pr || 42), '--repo=chalbert/web-everything',
+        String(scenario.pr || 42), '--repo=web-everything/web-everything',
         // Restore-only must use the remote head, ignoring even a conflicting explicit heal head.
         `--head=${scenario.restoreOnly ? 'b'.repeat(40) : healHead}`,
         ...(scenario.restoreOnly ? ['--restore-routing-only'] : [])],
@@ -390,7 +390,7 @@ fs.writeFileSync('state.json', JSON.stringify(s));
       const afterGreen = validLabels.map(l => l.name).filter(l => l !== 'review-status:fixing' && !cleanup.toRemove.includes(l));
       expect(afterGreen, result.stdout).toEqual(scenario.expected);
       const calls = readFileSync(join(dir, 'calls.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
-      expect(calls.every(c => c.includes('chalbert/web-everything') || c.includes('--repo=chalbert/web-everything'))).toBe(true);
+      expect(calls.every(c => c.includes('web-everything/web-everything') || c.includes('--repo=web-everything/web-everything'))).toBe(true);
       const edits = calls.filter(c => c[1] === 'edit');
       if (scenario.restoreOnly) {
         expect(final.comments.some(c => c.body.includes(CI_HEAL_COMMENT_MARKER))).toBe(false);
@@ -440,15 +440,15 @@ describe('xp0lsdi failed-attempt markers', () => {
 import { handBackCiHealReview } from '../ci-heal-mark.mjs';
 it('xp0lsdi: attempt-accounted success retains the guarded review hand-back without posting a second marker', () => {
   const calls = [];
-  const result = handBackCiHealReview({ pr: 3373, headSha: 'a'.repeat(40), repo: 'chalbert/web-everything',
+  const result = handBackCiHealReview({ pr: 3373, headSha: 'a'.repeat(40), repo: 'web-everything/web-everything',
     exec: (_bin, argv) => { calls.push(argv); return JSON.stringify({ labels: [{ name: 'review:accepted' }] }); },
     restamp: () => ({ ok: false, reason: 'new repair contribution needs review' }),
     rearm: args => { calls.push(args); return { ok: true }; },
   });
   expect(result).toMatchObject({ restamped: false, rearmed: true });
   expect(calls).toHaveLength(2);
-  expect(calls[0]).toEqual(['pr', 'view', '3373', '--json', 'labels', '--repo=chalbert/web-everything']);
-  expect(calls[1]).toMatchObject({ pr: 3373, repo: 'chalbert/web-everything' });
+  expect(calls[0]).toEqual(['pr', 'view', '3373', '--json', 'labels', '--repo=web-everything/web-everything']);
+  expect(calls[1]).toMatchObject({ pr: 3373, repo: 'web-everything/web-everything' });
 });
 
 describe('PR #3577 review: failure detail is neutralised before it reaches a public bot comment', () => {

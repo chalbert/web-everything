@@ -478,7 +478,7 @@ export function runMainRedRebaseAllRepos({ repos = FIX_DISPATCH_DAEMON_REPOS, ti
 
 /**
  * we:skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs#runMissingRunRecoveryAllRepos — xi4od2p (epic
- * #4075/#3383), LIVE INCIDENT 2026-09-26: PR chalbert/web-everything#2729 sat `review:accepted` + `MERGEABLE`
+ * #4075/#3383), LIVE INCIDENT 2026-09-26: PR web-everything/web-everything#2729 sat `review:accepted` + `MERGEABLE`
  * but `BLOCKED`, labelled `checking`, because its head never got a required-check run queued AT ALL — a THIRD,
  * disjoint population from the `hungCi`/`mainRedRebase` halves below (see
  * `we:scripts/conveyor/main-red-recovery.mjs`'s own "MISSING-CI-RUN RECOVERY" section for the full incident and
