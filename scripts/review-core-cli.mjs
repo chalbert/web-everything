@@ -569,7 +569,10 @@ function runShape(flags, asJson) {
       files = json.files.map((f) => (typeof f === 'string' ? f : f && f.path));
     }
   }
-  if (!files.length) {
+  // The refusal tests for at least one READABLE path, but the list handed on stays unfiltered: an entry that
+  // yielded no path is kept as-is so `buildShapePlan` sees the touch-set was partly unreadable (fail-closed `need`),
+  // while a list with NO readable entry (`{files:[{}]}`, `[null]`, `['']`) is still refused rather than scored `none`.
+  if (!files.some((f) => typeof f === 'string' && f.trim().length > 0)) {
     return fail(
       'shape: no changed files — pass --files=a,b,c, or pipe `gh pr view <pr> --json files --jq \'[.files[].path]\'` '
       + 'on stdin. An EMPTY touch-set is refused rather than scored, because it scores `none` (no panel at all) and '

@@ -482,6 +482,23 @@ describe('#4874 shape need', () => {
       expect(JSON.parse(String(error.stdout)).error).toContain('no changed files');
     }
   });
+  it.each([
+    '{"files":[{}]}',
+    '{"files":[{"path":""}]}',
+    '{"files":[null]}',
+    '{"files":[""]}',
+    '[{"path":""}]',
+    '[null]',
+    '[""]',
+  ])('refuses a wholly unreadable non-empty file list with exit 2: %s', (input) => {
+    try {
+      execFileSync(process.execPath, [cli, 'shape', '--json'], { input, stdio: ['pipe', 'pipe', 'pipe'] });
+      expect.fail('must refuse');
+    } catch (error) {
+      expect(error.status).toBe(2);
+      expect(JSON.parse(String(error.stdout)).error).toContain('no changed files');
+    }
+  });
   it('prints the human-readable routing line', () => {
     const output = execFileSync(process.execPath, [cli, 'shape', `--files=${cardFiles[0]}`], { encoding: 'utf8' });
     expect(output).toContain('tier: haiku (inert-prose)  tools: correctness=false,security=false  cross-provider seat: codex');
