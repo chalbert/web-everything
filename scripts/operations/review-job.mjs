@@ -5,7 +5,7 @@ import { readReviewCiGate } from '../lib/review-ci-gate-io.mjs';
  * @description x26lw6u (epic #3383) — RUN THE INDEPENDENT-REVIEW ARC AS A DETERMINISTIC JOB, NOT A CLAUDE
  * WRAPPER SESSION.
  *
- *   node scripts/operations/review-job.mjs run --pr=1234 --repo=chalbert/web-everything   # the arc, foreground
+ *   node scripts/operations/review-job.mjs run --pr=1234 --repo=web-everything/web-everything   # the arc, foreground
  *
  * THE WASTE THIS REMOVES (measured 2026-09-24 → 25, the review daemon's own transcripts). The review daemon
  * (`we:skills-src/conveyor/review-daemon.mjs`) used to start one `claude --bg` session per owed review
@@ -244,10 +244,11 @@ export function createReviewJobIo({ root = REPO_ROOT, env = process.env, dir = r
     },
     updateRecord: (record) => writeJobRecord(record, dir),
     unclaim: (slug, pid) => removeJobRecord(slug, pid, dir),
-    acquireLane: ({ laneRepo, slug, actorId, waitMs }) => {
+    acquireLane: ({ laneRepo, slug, actorId, waitMs, lane }) => {
       const r = node([
         'scripts/lane-pool.mjs', 'acquire', `--repo=${laneRepo}`, `--purpose=${REVIEW_LOOP_LANE_PURPOSE}`,
         `--session=${slug}`, `--wait-ms=${waitMs}`, '--adopt',
+        ...(Number.isInteger(lane) && lane > 0 ? [`--lane=${lane}`] : []),
       ], { actorId, timeoutMs: waitMs + 10 * 60 * 1000 });
       const path = String(r.stdout ?? '').trim().split('\n').filter(Boolean).pop() ?? '';
       if (r.status === 0 && path.startsWith('/') && existsSync(path)) return { lanePath: path };
@@ -402,7 +403,7 @@ export function runReviewJob(opts = {}, io = createReviewJobIo()) {
 }
 
 function runReviewArc({
-  pr, repo, laneWaitMs = REVIEW_JOB_LANE_WAIT_MS, loopTimeoutMs = resolveLoopTimeoutMs(), pid = process.pid,
+  pr, repo, preferLane = null, laneWaitMs = REVIEW_JOB_LANE_WAIT_MS, loopTimeoutMs = resolveLoopTimeoutMs(), pid = process.pid,
 } = {}, io, seatsBox = {}) {
   const planned = planReviewDispatch({ pr, repo });
   const slug = planned.sessionSlug;
@@ -443,7 +444,13 @@ function runReviewArc({
     io.log(`review-job ${slug}: actor ${actorId}; acquiring a lane (wait ≤ ${laneWaitMs}ms)`);
     const acquireSpan = span('lane.acquire');
     const tA = io.now();
-    const acq = io.acquireLane({ laneRepo: planned.laneRepo, slug, actorId, waitMs: laneWaitMs });
+    let acq;
+    if (Number.isInteger(preferLane) && preferLane > 0) {
+      acq = io.acquireLane({ laneRepo: planned.laneRepo, slug, actorId, lane: preferLane, waitMs: 0 });
+      if (!acq.lanePath) io.log(`review-job ${slug}: preferred lane-${preferLane} not taken (${acq.error || 'unavailable'}) — falling back to auto-pick`);
+      else io.log(`review-job ${slug}: preferred lane-${preferLane} acquired at ${acq.lanePath}`);
+    }
+    if (!acq?.lanePath) acq = io.acquireLane({ laneRepo: planned.laneRepo, slug, actorId, waitMs: laneWaitMs });
     timings.acquireMs = io.now() - tA;
     if (!acq.lanePath) {
       const d = nextLaneDeferral(prev);
@@ -516,7 +523,7 @@ function runReviewArc({
  */
 export function dispatchReviewJob({
   ciGate = readReviewCiGate,
-  pr, repo, root = REPO_ROOT, env = process.env, now = Date.now(), checkStaleness,
+  pr, repo, preferLane = null, root = REPO_ROOT, env = process.env, now = Date.now(), checkStaleness,
   dir = reviewJobsDir(env, root),
   spawnJob = defaultSpawnJob,
   readCompletion = (slug) => { try { return tryReadCompletion(slug); } catch { return null; } },
@@ -548,7 +555,8 @@ export function dispatchReviewJob({
   delete childEnv[ACTOR_ENV];
   mkdirSync(dir, { recursive: true });
   const jobPid = spawnJob({
-    argv: [THIS_FILE, 'run', `--pr=${planned.pr}`, `--repo=${planned.repo}`], cwd: root, env: childEnv, logPath,
+    argv: [THIS_FILE, 'run', `--pr=${planned.pr}`, `--repo=${planned.repo}`,
+      ...(Number.isInteger(preferLane) && preferLane > 0 ? [`--prefer-lane=${preferLane}`] : [])], cwd: root, env: childEnv, logPath,
   });
   // Claim the slot for the child NOW, so the very next reader (a tick 120s later, or a status tag this same
   // tick) sees it — the child's own claim then finds its own pid already recorded and proceeds.
@@ -576,7 +584,10 @@ export function defaultSpawnJob({ argv, cwd, env, logPath }) {
  * {@link REVIEW_DISPATCH_MODE_ENV}`=session` asks for it.
  */
 export function dispatchReviewByMode({ mode = resolveReviewDispatchMode(), ...opts } = {}) {
-  if (mode === 'session') return { mode: 'session', ...dispatchReview(opts) };
+  if (mode === 'session') {
+    const { preferLane, ...sessionOpts } = opts;
+    return { mode: 'session', ...dispatchReview(sessionOpts) };
+  }
   return dispatchReviewJob(opts);
 }
 
@@ -597,7 +608,9 @@ if (IS_CLI) {
     // anyway. A killed job leaves a record with a dead pid (pruned on the next read) and, at worst, a lease under
     // its slug, which the lane pool's ghost-lease reaper reclaims (#2748).
     try {
-      const out = runReviewJob({ pr: flag('pr'), repo: flag('repo') });
+      const lane = Number(flag('prefer-lane'));
+      const out = runReviewJob({ pr: flag('pr'), repo: flag('repo'),
+        preferLane: Number.isInteger(lane) && lane > 0 ? lane : null });
       writeAllSync(1, `${JSON.stringify(out)}\n`);
       // #4075/run-rating slice 1 — mechanical grading for this now-finished job-mode review, read back from
       // THIS job's own log file (stdout/stderr above were redirected there by `dispatchReviewJob`'s spawn — see

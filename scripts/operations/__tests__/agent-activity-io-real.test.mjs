@@ -51,10 +51,11 @@ it('codexThreadRows reads REAL `.operations/codex-delivery-threads/*.json` files
     writeFileSync(join(dir, 'conveyor-3445.json'), JSON.stringify({ sessionSlug: 'conveyor-3445', threadId: 'th_real1', at: '2026-09-26T10:00:00.000Z' }));
     // A corrupt/partial record must be skipped, not thrown on — real disk state includes half-written files.
     writeFileSync(join(dir, 'broken.json'), '{ not json');
-    const rows = codexThreadRows(root);
+    const rows = codexThreadRows(root, { codexHome: join(root, 'codex') });
     expect(rows).toEqual([{
       id: 'codex-th_real1', sessionId: null, runtime: 'codex', kind: 'codex', codexSlug: 'conveyor-3445',
       cwd: null, state: null, startedAt: Date.parse('2026-09-26T10:00:00.000Z'), lastEventAt: null,
+      transcriptPath: null, lastActivityMs: null,
     }]);
   });
 });
@@ -183,5 +184,87 @@ it('interactiveRows sweeps REAL project directories, skipping known session ids 
     const rows = interactiveRows(new Set([knownId]), projectsDir, now);
     expect(rows.map((r) => r.sessionId)).toEqual([freshId]);
     expect(rows[0]).toMatchObject({ kind: 'interactive', firstMessageText: 'hello' });
+  });
+});
+
+it('codexThreadRows stamps activity from a REAL nested rollout, leaving missing rollouts unknown', async () => {
+  await withRealRepo(async ({ root }) => {
+    const dir = join(root, '.operations', 'codex-delivery-threads');
+    const codexHome = join(root, 'codex');
+    const sessions = join(codexHome, 'sessions', '2026', '10', '03');
+    mkdirSync(dir, { recursive: true });
+    mkdirSync(sessions, { recursive: true });
+    const path = join(sessions, 'rollout-2026-10-03T12-00-00-thread-one.jsonl');
+    writeFileSync(path, '');
+    utimesSync(path, 1791028800, 1791028800);
+    for (const threadId of ['thread-one', 'thread-two']) {
+      writeFileSync(join(dir, `${threadId}.json`), JSON.stringify({ sessionSlug: threadId, threadId }));
+    }
+    expect(codexThreadRows(root, { codexHome })).toMatchObject([
+      { transcriptPath: path, lastActivityMs: 1791028800000 },
+      { transcriptPath: null, lastActivityMs: null },
+    ]);
+  });
+});
+
+it('reader drops a finished Codex job, keeps re-dispatch and tolerates missing/corrupt/invalid completions across repeated reads', async () => {
+  await withRealRepo(async ({ root }) => {
+    const now = Date.parse('2026-10-03T12:00:00Z');
+    const dir = join(root, '.operations', 'codex-delivery-threads');
+    const completionsDir = join(root, 'completions');
+    const codexHome = join(root, 'codex');
+    const sessions = join(codexHome, 'sessions', '2026');
+    for (const path of [dir, completionsDir, sessions]) mkdirSync(path, { recursive: true });
+    const slugs = ['conveyor-9101', 'conveyor-9102', 'conveyor-9103', 'conveyor-9104', '../invalid'];
+    for (const [i, sessionSlug] of slugs.entries()) {
+      // Both runs are recent: the finished row must be dropped by completion, not age.
+      const at = new Date(now - (i === 0 ? 2000 : 500)).toISOString();
+      writeFileSync(join(dir, `${i}.json`), JSON.stringify({ sessionSlug, threadId: `thread-${i}`, at }));
+      const path = join(sessions, `rollout-date-thread-${i}.jsonl`);
+      writeFileSync(path, '');
+      utimesSync(path, now / 1000, now / 1000);
+      if (i < 2) writeFileSync(join(completionsDir, `${sessionSlug}.json`), JSON.stringify({
+        v: 1, session: sessionSlug, kind: 'fix', status: 'done', startedAt: at,
+        updatedAt: new Date(now - 1000).toISOString(),
+      }));
+      if (i === 2) writeFileSync(join(completionsDir, `${sessionSlug}.json`), '{broken');
+    }
+    const read = createAgentActivityReader({ root, codexHome, completionsDir, projectsDir: join(root, 'projects'),
+      listAgents: () => [], listJobs: () => [], run: () => '{"lanes":[]}', now: () => now });
+    for (let pass = 0; pass < 20; pass++) {
+      expect(read({}).rows.map(r => r.codexSlug)).toEqual(slugs.slice(1));
+    }
+  });
+});
+
+it('reader ages out a 17-day-old no-pid background session and its children, keeps fresh and pid-carrying sessions', async () => {
+  await withRealRepo(async ({ root }) => {
+    const now = Date.parse('2026-10-03T12:00:00Z');
+    const old = now - 17 * 86400_000;
+    const projectsDir = join(root, 'projects');
+    const cwd = '/fixture';
+    const project = join(projectsDir, projectSlugFor(cwd));
+    mkdirSync(project, { recursive: true });
+    const agents = ['stale', 'fresh', 'pid'].map(sessionId => ({
+      sessionId, name: sessionId, cwd, state: 'working', startedAt: old,
+      ...(sessionId === 'pid' ? { pid: 123 } : {}),
+    }));
+    for (const { sessionId } of agents) {
+      const path = join(project, `${sessionId}.jsonl`);
+      writeFileSync(path, userLine('hello'));
+      const at = sessionId === 'fresh' ? now : old;
+      utimesSync(path, at / 1000, at / 1000);
+      const children = join(project, sessionId, 'subagents');
+      mkdirSync(children, { recursive: true });
+      writeFileSync(join(children, 'agent-child.jsonl'), userLine('check #9101'));
+    }
+    const read = createAgentActivityReader({ root, projectsDir, codexHome: join(root, 'codex'), completionsDir: join(root, 'completions'),
+      listAgents: () => agents, listJobs: () => [], run: () => '{"lanes":[]}', now: () => now });
+    for (let pass = 0; pass < 20; pass++) {
+      const rows = read({ all: true }).rows;
+      expect(rows.filter(r => r.kind === 'background').map(r => r.name)).toEqual(['fresh', 'pid']);
+      expect(rows.filter(r => r.kind === 'subagent').map(r => r.parentSessionId)).toEqual(['fresh', 'pid']);
+      expect(rows.find(r => r.name === 'fresh').lastActivityMs).toBe(now);
+    }
   });
 });

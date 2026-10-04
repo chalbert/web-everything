@@ -1,5 +1,5 @@
 /**
- * @file breaks/review-gate-conflict-suppresses-ci-heal.mjs — x6n7c2p review finding on PR #3633 (CONFIRMED by
+ * @file breaks/review-gate-conflict-suppresses-ci-heal.mjs — 4737 review finding on PR #3633 (CONFIRMED by
  * the correctness reviewer and the codex advisory). `planReconcile` gained an early check: when the review CI
  * gate reports `required-review-gate-conflict` (a REQUIRED `review-gate` that is not green), it refused the PR
  * with `review-ci` and `continue`d — ahead of the `ci-red`, fix and advisory branches. `review-gate` is red BY
@@ -30,9 +30,9 @@ const INVARIANT = 'ci-heal-suppressed-by-review-gate-conflict';
 export default {
   id: 'review-gate-conflict-suppresses-ci-heal',
   title: 'a required review-gate that is red by design suppresses the ci-heal owed to an independently failing required check',
-  card: 'we:backlog/x6n7c2p — review finding on PR #3633 (reconcile-core.mjs required-review-gate-conflict early continue)',
+  card: 'we:backlog/4737 — review finding on PR #3633 (reconcile-core.mjs required-review-gate-conflict early continue)',
   fixedBy: {
-    sha: 'this same PR', where: 'this same PR (we:backlog/x6n7c2p)',
+    sha: 'this same PR', where: 'this same PR (we:backlog/4737)',
     paths: ['scripts/conveyor/reconcile-core.mjs'],
   },
   fixPresent(root) {

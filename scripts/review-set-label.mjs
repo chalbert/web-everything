@@ -157,7 +157,7 @@ import { spawnPreventionLandingJob } from './lib/prevention-landing-job.mjs';
 // already owns end to end); `buildApprovalPreventionFilingInput` builds the `file-item` input from them — a
 // SELF-CONTAINED builder, deliberately not a shared import of `review-loop-policy.mjs`'s own #2749 one (that
 // file's header explains why: a real import cycle back through `operations/review-pr.mjs`, and — the more
-// pressing reason today — chalbert/web-everything#2766 is an open, active PR reshaping that exact function).
+// pressing reason today — web-everything/web-everything#2766 is an open, active PR reshaping that exact function).
 // See `runApprovalPreventionFiling` below for the wiring and why THIS seam, not the drain's land step.
 import {
   selectApprovalPreventionFindings, hasApprovalPreventionMarkerForHead, buildApprovalPreventionMarker,
@@ -322,7 +322,7 @@ export function decideSetLabel({ to, currentLabels = [], findingCount = null, re
   // review:accepted, and NEVER removes review:human — the #2630 invariant, enforced HERE so the CLI cannot
   // route around it.
   //
-  // #2811 (chalbert/web-everything PR #2811) — WHY `review:accepted` IS ALSO RE-ARMABLE NOW. A `review:accepted`
+  // #2811 (web-everything/web-everything PR #2811) — WHY `review:accepted` IS ALSO RE-ARMABLE NOW. A `review:accepted`
   // verdict is a claim about a SPECIFIC head; it stops being true the moment a ci-heal or a mechanical rebase
   // moves the head without anyone re-reviewing it. Before this, nothing ever un-accepted a PR whose head moved
   // that way (`ci-heal-mark.mjs`'s own header used to say, correctly for the OTHER cases: "a CI-heal repairs

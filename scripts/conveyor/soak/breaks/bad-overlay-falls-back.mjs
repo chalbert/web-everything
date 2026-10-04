@@ -1,11 +1,11 @@
 /**
  * @file breaks/bad-overlay-falls-back.mjs — live incident, 2026-09-26 12:11-12:40 ET on `wev-review-daemon`
- * (#4075/#3383, card x5wbsbc). Every rebuild that tick was `smoke-rejected`, STICKY — the clone never adopted a
+ * (#4075/#3383, card 4217). Every rebuild that tick was `smoke-rejected`, STICKY — the clone never adopted a
  * single new build for the whole window, because the daemon-rebuild mechanism (`scripts/lib/daemon-rebuild.mjs`)
  * had no notion of "the OVERLAY is the thing that's broken, not main itself". The operator's ruling: "fallback on
  * last working version rather than block delivery" — a failed update must never freeze delivery.
  *
- * THE FIX (x5wbsbc, `smokeAndAdopt`'s branch (a)): when candidate A (`main` + every registered overlay) fails
+ * THE FIX (4217, `smokeAndAdopt`'s branch (a)): when candidate A (`main` + every registered overlay) fails
  * the live smoke with a genuine `'code'` verdict, and A actually carries at least one NON-pinned overlay, the
  * rebuild builds candidate B = `main` + PINNED overlays only and smokes THAT. B passing means the non-pinned
  * overlay(s) are exactly what broke it: adopt B, drop every suspect overlay from the list (never bisected when
@@ -30,7 +30,7 @@ import { pathToFileURL } from 'node:url';
 import { runSoak } from '../soak.mjs';
 import { cloneFacts } from '../invariants.mjs';
 
-const OVERLAY_REF = 'lane/x5wbsbc-bad-overlay-fixture';
+const OVERLAY_REF = 'lane/4217-bad-overlay-fixture';
 const FAULT_ROUND = 3;
 const FINAL_ROUND = 9;
 
@@ -38,19 +38,19 @@ const FINAL_ROUND = 9;
 // merely returns a bad value. Deliberately does NOT touch `daemon-rebuild.mjs#REBUILD_MECHANISM_PATHS` (it isn't
 // even in the same directory), so `pinnedStatus()` reads this overlay as NOT pinned — the fallback path this
 // break exercises only ever runs for a non-pinned overlay.
-const POISONED_RECONCILE_PASS = `// x5wbsbc soak fixture (bad-overlay-falls-back, #4075) — this overlay intentionally poisons
+const POISONED_RECONCILE_PASS = `// 4217 soak fixture (bad-overlay-falls-back, #4075) — this overlay intentionally poisons
 // reconcile-pass.mjs so the live smoke's 'reconcile-dry-run' check fails with a genuine code-shaped error.
 // Never touches daemon-rebuild.mjs's REBUILD_MECHANISM_PATHS, so this overlay is never auto-pinned.
-throw new Error('x5wbsbc-bad-overlay-falls-back: reconcile-pass.mjs poisoned by a bad overlay (soak fixture)');
+throw new Error('4217-bad-overlay-falls-back: reconcile-pass.mjs poisoned by a bad overlay (soak fixture)');
 `;
 
 export default {
   id: 'bad-overlay-falls-back',
   title: "a bad (non-pinned) overlay breaks the daemon rebuild's live smoke; the rebuild falls back to plain main, drops the overlay, and both daemons keep dispatching the whole time",
-  card: 'we:backlog/x5wbsbc (epic #4075)',
+  card: 'we:backlog/4217 (epic #4075)',
   fixedBy: {
-    sha: 'x5wbsbc-daemon-last-good-fallback',
-    where: 'lane/x5wbsbc-daemon-last-good-fallback',
+    sha: '4217-daemon-last-good-fallback',
+    where: 'lane/4217-daemon-last-good-fallback',
     paths: [
       'scripts/lib/daemon-rebuild.mjs',
       'scripts/lib/daemon-last-good.mjs',
@@ -58,7 +58,7 @@ export default {
       'scripts/conveyor/health-smells/daemon-held-on-last-good.mjs',
     ],
   },
-  // fixPresent probe (per the brief): `smokeAndAdopt` in daemon-rebuild.mjs — the x5wbsbc fallback/hold body.
+  // fixPresent probe (per the brief): `smokeAndAdopt` in daemon-rebuild.mjs — the 4217 fallback/hold body.
   fixPresent(root) {
     try {
       return /smokeAndAdopt/.test(readFileSync(join(root, 'scripts/lib/daemon-rebuild.mjs'), 'utf8'));
@@ -73,7 +73,7 @@ export default {
       log,
       setup(w) {
         if (!existsSync(join(w.simCloneRoot, 'scripts/lib/daemon-rebuild.mjs'))) {
-          throw new Error('bad-overlay-falls-back: requires scripts/lib/daemon-rebuild.mjs (lands with xa4qo7n/x5wbsbc) — not present on this tree');
+          throw new Error('bad-overlay-falls-back: requires scripts/lib/daemon-rebuild.mjs (lands with 4218/4217) — not present on this tree');
         }
         // ISOLATE THE OVERLAY LIST. Unlike WE_DAEMON_STATE_DIR/WE_DAEMON_SMOKE_STATE_DIR (world.mjs scopes both
         // already), world.mjs never sets WE_DAEMON_OVERLAY_DIR — left unset, `daemon-overlays.mjs#overlayDir`

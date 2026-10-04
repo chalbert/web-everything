@@ -1,4 +1,4 @@
-import { normalizeFinding, referralFindingKey, mandatoryReferralReviewer, validateReferralRecord,
+import { normalizeFinding, referralRecordState, referralFindingKey, mandatoryReferralReviewer, validateReferralRecord,
   readReferralRecords, mandatoryReferralState, renderReferralRecord,
   activeReferrals, REFERRAL_SEAT_PROVIDERS, REFERRAL_DROP_REASON } from '../lib/jury-core.mjs';
 import { judgeSpawn } from '../lib/judge-spawn.mjs';
@@ -33,13 +33,14 @@ import { resolveProviderCap, PROVIDER_CAP_ENV } from './review-extra-seats.mjs';
  */
 
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { assembleReviewDetail } from '../review-detail.mjs';
 import { computeNetDiffPaths, computeNetDiffText, resolveNetDiffBasis } from '../merge-ai-prs.mjs';
-import { currentActorId } from '../lib/review-independence.mjs';
+import { currentActorId, parseAuthorActorId } from '../lib/review-independence.mjs';
 // #xlw02hw — the `advise` step's sink posts a BARE comment (never `we:scripts/review-set-label.mjs`, which
 // always couples a comment with a label swap — #2644 — and this step swaps no label). `createGhProvider`'s
 // `postComment` is the SAME primitive that single home already uses, imported rather than re-implemented.
@@ -459,6 +460,22 @@ export function referralSeatDisabled(seat, env = process.env) {
   return !antigravityReviewFromEnv(env) || explicitZero;
 }
 
+// Keep v1's identity-bearing fields intact: old readers recompute the key from them.
+// In particular, a huge summary/key cannot be hashed away without breaking those readers.
+const referralHash = (text) => createHash('sha256').update(text).digest('hex');
+function boundedReferral(original, source) {
+  const bounded = { ...original };
+  for (const [field, value] of Object.entries(original)) {
+    if (['summary', 'finding', 'file', 'line', 'verdict', 'impactIfUnfixed'].includes(field)) continue;
+    const text = typeof value === 'string' ? value : JSON.stringify(value);
+    if (text?.length > 1024) {
+      // Array/object-valued extension fields are audit data too; keep a bounded serialized excerpt.
+      bounded[field] = `${Array.from(text).slice(0, 512).join('')}\n[excerpt; sha256:${referralHash(text)}; source:${source}]`;
+    }
+  }
+  return bounded;
+}
+
 /** Is this CLI error text one we can PROVE happened before any write? */
 export function isPreWriteRefusal(text) {
   const s = String(text || '');
@@ -550,6 +567,13 @@ export function createReviewPrSinks({
         mirrorReferral(record);
         return state;
       };
+      const overflows = [];
+      const overflow = (detail) => {
+        const reason = `referral-overflow: ${detail}`;
+        overflows.push(reason);
+        out(reason);
+        return reason;
+      };
       let state;
       try {
         state = fresh();
@@ -566,19 +590,46 @@ export function createReviewPrSinks({
             .map(f => ({ key: f.key, reason: REFERRAL_DROP_REASON }));
           if (!dropped.length) continue;
           const updated = { ...record, dropped: [...(record.dropped ?? []), ...dropped] };
+          // Existing snapshots are immutable under v1: rewriting their findings/body or splitting
+          // their runId would invalidate history. Retain the hold and carry their keys forward.
+          if (renderReferralRecord(updated).length > commentBudget) {
+            overflow(`historical run ${record.runId} retirement exceeds ${commentBudget} characters; original record retained`);
+            continue;
+          }
           state = persist(updated);
           prior.records[i] = updated;
         }
         const existing = prior.records.filter(r => r.head === read.netBasis.rev && r.repo === read.repo && r.pr === read.pr);
         const covered = new Set(existing.flatMap(r => activeReferrals(r).map(f => f.key)));
-        const sources = [...payload.referrals, ...prior.records.flatMap(activeReferrals)];
+        const prUrl = `https://github.com/${read.repo}/pull/${read.pr}`;
+        const sourceByKey = new Map();
+        const sourceByOriginal = new Map();
+        for (const comment of state.comments) {
+          const source = comment.url ?? comment.html_url ?? (comment.id ? `${prUrl}#issuecomment-${comment.id}` : prUrl);
+          for (const record of readReferralRecords([comment]).records) {
+            for (const referral of record.referrals) {
+              if (!sourceByKey.has(referral.key)) sourceByKey.set(referral.key, source);
+              sourceByOriginal.set(JSON.stringify(referral.original), source);
+            }
+          }
+        }
+        const sources = [...payload.referrals, ...prior.records.filter(r => r.repo === read.repo && r.pr === read.pr).flatMap(activeReferrals)];
         const additions = new Map();
         for (const f of sources) {
           const key = referralFindingKey(f.seat, f.original);
-          if (!covered.has(key)) additions.set(key, { key, seat: f.seat, original: f.original, finding: normalizeFinding(f.original) });
+          if (!covered.has(key)) {
+            const original = boundedReferral(f.original, sourceByOriginal.get(JSON.stringify(f.original)) ?? prUrl);
+            additions.set(key, { key, seat: f.seat, original, finding: normalizeFinding(original) });
+          }
         }
         if (additions.size) {
           const chunks = [];
+          const body = state.body ?? '';
+          // Only the author identity is consumed by v1 readers. Do not duplicate a large PR
+          // description in every chunk; retain its digest and the canonical body location.
+          const actor = parseAuthorActorId(body);
+          const authorBody = body.length <= 1024 ? body
+            : `${actor ? `<!-- authored-by-actor: ${actor} -->` : ''}\n[sha256:${referralHash(body)}; source:${prUrl}]`;
           const usedRunIds = new Set(existing.map(r => r.runId));
           let chunkIndex = 0;
           const newRecord = () => {
@@ -588,7 +639,7 @@ export function createReviewPrSinks({
             } while (usedRunIds.has(runId));
             usedRunIds.add(runId);
             return { version: 1, repo: read.repo, pr: read.pr, head: read.netBasis.rev,
-              runId, reviewer: mandatoryReferralReviewer(runId), authorBody: state.body ?? '',
+              runId, reviewer: mandatoryReferralReviewer(runId), authorBody,
               attempted: false, referrals: [], rulings: [] };
           };
           let record = newRecord();
@@ -599,12 +650,14 @@ export function createReviewPrSinks({
               chunks.push(record);
               record = newRecord();
             }
-            record.referrals.push(referral);
-            if (renderReferralRecord(record).length > commentBudget) {
-              throw new Error(`mandatory referral record exceeds ${commentBudget} characters for one finding`);
+            const single = { ...record, referrals: [...record.referrals, referral] };
+            if (renderReferralRecord(single).length > commentBudget - 2000) {
+              overflow(`finding key sha256:${referralHash(referral.key)} from ${sourceByKey.get(referral.key) ?? prUrl} exceeds ${commentBudget} characters with its v1 identity intact; requires manual review`);
+              continue;
             }
+            record = single;
           }
-          chunks.push(record);
+          if (record.referrals.length) chunks.push(record);
           for (const chunk of chunks) {
             state = persist(chunk);
             existing.push(chunk);
@@ -612,7 +665,8 @@ export function createReviewPrSinks({
         }
         // Persist the attempt before dispatch. A crash or timeout spends this set's single automated attempt.
         for (const initial of existing) {
-          if (initial.attempted || !activeReferrals(initial).length) continue;
+          if (initial.attempted || !activeReferrals(initial).length || !referralRecordState(initial, { ...context(state),
+            records: readReferralRecords(state.comments, context(state)).records }).pending.length) continue;
           let record = { ...initial, attempted: true };
           state = persist(record);
           // Hold before dispatch too: an exhausted or interrupted worker must leave a visible owner.
@@ -644,16 +698,33 @@ export function createReviewPrSinks({
               reviewerId: record.reviewer.id, lens: record.reviewer.lens }));
             const completed = { ...record, rulings };
             if (!validateReferralRecord(completed)) throw new Error('incomplete or malformed mandatory rulings');
-            record = completed;
+            // Preserve every ruling that fits; omitted rulings leave their keys pending in all
+            // existing readers. Never lose an otherwise durable batch to one verbose answer.
+            for (const ruling of rulings) {
+              const candidate = { ...record, rulings: [...record.rulings, ruling] };
+              if (renderReferralRecord(candidate).length <= commentBudget - 2000) record = candidate;
+              else {
+                const reason = overflow(`ruling ${ruling.id} for key sha256:${referralHash(ruling.key)} exceeds ${commentBudget} characters; ruling sha256:${referralHash(JSON.stringify(ruling))} withheld, key remains pending`);
+                record = { ...record, failure: reason };
+              }
+            }
           } catch (error) {
             // The attempted record is already durable; no second automatic dispatch on resume.
-            record = { ...record, failure: String(error.message) };
+            record = { ...record, failure: String(error.message).slice(0, 400) };
             out(`Mandatory referral review parked: ${error.message}`);
           }
           state = persist(record);
         }
         state = fresh();
         const result = mandatoryReferralState(state.comments, context(state));
+        if (overflows.length) {
+          const reason = `${overflows.length} overflow hold(s). ${overflows[0]}`;
+          for (const detail of overflows) {
+            labelProvider.postComment(read.repo, read.pr, `Mandatory referral review parked to review:human: ${detail}`);
+          }
+          result.pending.push('referral-overflow');
+          result.reason = reason;
+        }
         if (result.pending.length) park(state);
         for (const record of result.records) mirrorReferral(record);
         return result;

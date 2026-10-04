@@ -11,6 +11,7 @@ import {
   buildCheckerArgv, buildCiHealTask, buildDocFixCommitMessage, buildDocFixTask, buildHealCommitMessage,
   buildWorkerArgv, coAuthorTrailerForWorker, frontmatterTamperedBeyondClaim, healDiffPathsAllowed, healDiffWithinEnvelope,
   launchScorecardRow, newUntrackedPaths, parseCheckerVerdict, summarizeNumstat, workerNeeded,
+  PREPARE_OWNED_FRONTMATTER_KEYS, parseProposedBlockedBy, validateProposedBlockedBy,
 } from '../probation-launcher.mjs';
 import { PROVEN_TASK_ENVELOPES } from '../provider-routing.mjs';
 import { validateScorecard } from '../../conveyor/run-scorecard-store.mjs';
@@ -138,12 +139,12 @@ describe('attribution', () => {
 
 describe('launchScorecardRow', () => {
   it('is a valid store row with no outcome and no verifier — a launch is not a judged trial', () => {
-    const r = launchScorecardRow({ worker: agyClaude, pr: 7, repo: 'chalbert/web-everything', handle: 'ci-heal-7', launchOutcome: 'healed' });
+    const r = launchScorecardRow({ worker: agyClaude, pr: 7, repo: 'web-everything/web-everything', handle: 'ci-heal-7', launchOutcome: 'healed' });
     expect(validateScorecard(r)).toEqual({ ok: true, errors: [] });
     expect(r).toMatchObject({ dispatchKind: 'probation-launch', taskType: 'ci-heal', outcome: null, verifiedBy: null, executor: 'antigravity' });
   });
   it('a doc-fix build row is valid too, with no PR at launch time (#4291)', () => {
-    const r = launchScorecardRow({ worker: docFixCodex, pr: null, repo: 'chalbert/web-everything', handle: 'probation-4291', item: '4291', launchOutcome: 'opened-pr' });
+    const r = launchScorecardRow({ worker: docFixCodex, pr: null, repo: 'web-everything/web-everything', handle: 'probation-4291', item: '4291', launchOutcome: 'opened-pr' });
     expect(validateScorecard(r)).toEqual({ ok: true, errors: [] });
     expect(r).toMatchObject({ dispatchKind: 'probation-launch', taskType: 'doc-fix', outcome: null, verifiedBy: null, executor: 'codex', item: '4291' });
   });
@@ -243,5 +244,36 @@ describe('the real diff listing, in a temp repository (#4338)', () => {
       expect(summary.paths.some((p) => p.includes('"') || p.includes('\\'))).toBe(false);
       expect(() => git('add', '--', ...summary.paths)).not.toThrow();
     } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+});
+
+describe('prepare-owned keys and proposed blockedBy edges (ruling #4670)', () => {
+  const card = (fm) => `---\n${fm}\n---\n\n# t\n`;
+  const K = PREPARE_OWNED_FRONTMATTER_KEYS;
+  it('a size edit is allowed, a blockedBy or status edit is still tamper', () => {
+    const before = card('status: open\nsize: 3\nblockedBy: ["1"]');
+    expect(frontmatterTamperedBeyondClaim(before, card('status: open\nsize: 5\nblockedBy: ["1"]'), K)).toBe(false);
+    expect(frontmatterTamperedBeyondClaim(before, card('status: open\nsize: 3\nblockedBy: ["1","2"]'), K)).toBe(true);
+    expect(frontmatterTamperedBeyondClaim(before, card('status: active\nsize: 3\nblockedBy: ["1"]'), K)).toBe(true);
+  });
+  it('parses add/remove bullets from the proposal section only', () => {
+    const raw = card('status: open') + '## Proposed blockedBy changes\n\n- add 12 — needs X (we:a.mjs:3)\n- remove #7 — stale (we:b.mjs:9)\nprose\n\n## Other\n- add 99 — ignored\n';
+    expect(parseProposedBlockedBy(raw).map((e) => [e.op, e.target])).toEqual([['add', '12'], ['remove', '7']]);
+    expect(parseProposedBlockedBy(card('status: open'))).toEqual([]);
+  });
+  const graph = new Map([
+    ['1', { status: 'open', blockedBy: ['2'] }], ['2', { status: 'open', blockedBy: [] }],
+    ['3', { status: 'resolved', blockedBy: [] }], ['4', { status: 'open', blockedBy: ['1'] }],
+  ]);
+  it('accepts a valid add and a valid remove', () => {
+    expect(validateProposedBlockedBy('4', [{ op: 'add', target: '2' }], graph)).toEqual([]);
+    expect(validateProposedBlockedBy('1', [{ op: 'remove', target: '2' }], graph)).toEqual([]);
+  });
+  it('refuses resolved, missing, self, and cyclic adds and absent removes', () => {
+    expect(validateProposedBlockedBy('1', [{ op: 'add', target: '3' }], graph)[0]).toMatch(/resolved/);
+    expect(validateProposedBlockedBy('1', [{ op: 'add', target: '99' }], graph)[0]).toMatch(/does not resolve/);
+    expect(validateProposedBlockedBy('1', [{ op: 'add', target: '1' }], graph)[0]).toMatch(/itself/);
+    expect(validateProposedBlockedBy('2', [{ op: 'add', target: '4' }], graph).join()).toMatch(/cycle/);
+    expect(validateProposedBlockedBy('1', [{ op: 'remove', target: '9' }], graph)[0]).toMatch(/does not have/);
   });
 });

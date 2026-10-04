@@ -12,7 +12,7 @@
  * cross-entity checks (graduatedTo/relatedProject resolution, the blockedBy cycle walk, dup ids) this
  * single-file pass can't see; run it before resolve as before.
  *
- * Usage:  node scripts/check-backlog-item.mjs <NNN | NNN-slug>      (or  --item <NNN>)
+ * Usage:  node scripts/check-backlog-item.mjs <NNN | NNN-slug> [--backlog-dir=<path>] (or --item <NNN>)
  *         npm run check:item -- 845
  * Exit 1 on any error finding (warnings never fail), so a hook can block a bad edit.
  */
@@ -31,14 +31,17 @@ import { readRegistry as readPocRegistry } from './lib/poc-branches.mjs';
 
 const require = createRequire(import.meta.url);
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const BACKLOG = join(ROOT, 'backlog');
+const rawArgv = process.argv.slice(2);
+const backlogDir = rawArgv.find((arg) => arg.startsWith('--backlog-dir='))?.slice('--backlog-dir='.length);
+if (backlogDir !== undefined) process.env.WE_BACKLOG_DIR = backlogDir;
+const BACKLOG = backlogDir || process.env.WE_BACKLOG_DIR || join(ROOT, 'backlog');
 
 // ── Resolve the target item ────────────────────────────────────────────────────
-const argv = process.argv.slice(2);
+const argv = rawArgv.filter((arg) => !arg.startsWith('--backlog-dir='));
 const itemFlag = argv.indexOf('--item');
 const target = (itemFlag >= 0 ? argv[itemFlag + 1] : argv[0] || '').replace(/^#/, '').trim();
 if (!target) {
-  console.error('usage: check-backlog-item <NNN | NNN-slug>   (the backlog item to lint)');
+  console.error('usage: check-backlog-item <NNN | NNN-slug> [--backlog-dir=<path>]   (the backlog item to lint)');
   process.exit(2);
 }
 // A ref is a numeric NNN (landed) or an `xNNNNNN` hash (provisional, #2288) — accept either.

@@ -1,6 +1,6 @@
 /**
  * @file breaks/session-junk-in-daemon-clone.mjs — found BY THIS HARNESS on 2026-09-25 (its first 50-tick soak with
- * sessions that leave junk). Card: we:backlog/xm5i1xm → #4174 (epic #4075).
+ * sessions that leave junk). Card: we:backlog/4173 → #4174 (epic #4075).
  *
  * `dispatch-lane-io.mjs#createDispatchSinks` USED TO spawn every dispatched `claude --bg` session with cwd = the
  * dispatching daemon's OWN clone ("the cwd the agent starts in"; the agent acquires its own lane later). A session
@@ -33,10 +33,10 @@ import { leaveJunk } from '../behaviours.mjs';
 export default {
   id: 'session-junk-in-daemon-clone',
   title: 'a dispatched session starts in the daemon clone; its scratch file dirties the clone and freezes self-sync',
-  card: 'we:backlog/xm5i1xm (epic #4075)',
+  card: 'we:backlog/4173 (epic #4075)',
   fixedBy: {
     sha: '70f0cd842',
-    where: 'lane/xm5i1xm-dispatched-session-scratch-cwd',
+    where: 'lane/4173-dispatched-session-scratch-cwd',
     paths: [
       'scripts/operations/dispatch-lane-io.mjs', 'scripts/operations/dispatch-lane.mjs',
       'scripts/conveyor/reconcile-fix-dispatch.mjs', 'scripts/operations/review-dispatch.mjs',

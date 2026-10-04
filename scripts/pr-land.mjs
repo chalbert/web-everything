@@ -641,6 +641,16 @@ export function resolveFinishGuardVerdict({ gitDir, headSha, remote, base, runGi
   return verifyGateDecision({ record: verifyRecord, headSha, breakGlass, requireVerified, laneRelevantChangeSince: laneRelevantChangeSinceRecord });
 }
 
+/** Preserve the original push error while explaining a rejected lane tip. */
+export function pushFailedDetail(message, { SRC, REF, REMOTE }) {
+  const full = String(message);
+  const detail = `git push ${REMOTE} ${SRC}:refs/heads/${REF} failed (${full.split('\n')[0]})`;
+  if (!/non-fast-forward|\[rejected\]|fetch first/i.test(full)) return detail;
+  return detail + ` — the lane HEAD is not the tip of ${REF} — re-acquire a fresh lane with `
+    + '`node we:scripts/lane-pool.mjs acquire --base=<tip>`'
+    + ` (use --base=${REF} for the pushed tip), or fetch and rebase onto ${REMOTE}/${REF}, then re-run`;
+}
+
 // Allow importing the pure helpers without running the CLI (the test file imports this module).
 const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(new URL(import.meta.url).pathname);
 if (IS_CLI) runCli();
@@ -880,7 +890,7 @@ function runCli() {
 
   // 2. Publish the source commit to the lane ref on origin (guard-safe: lane/*). Never force, no local branch.
   try { gitC(['push', REMOTE, `${SRC}:refs/heads/${REF}`]); }
-  catch (e) { emit({ repo: REPO, merged: false, reason: 'push-failed', detail: `git push ${REMOTE} ${SRC}:refs/heads/${REF} failed (${String(e.message || e).split('\n')[0]})` }, 3); }
+  catch (e) { emit({ repo: REPO, merged: false, reason: 'push-failed', detail: pushFailedDetail(e.message || e, { SRC, REF, REMOTE }) }, 3); }
 
   // 2b. (#2291 — pruned) The PRE-CHECK id-collision self-heal (#2222) that used to run here is now DEAD wiring:
   //     under JIT numbering (#2288) a NEW backlog item is born with a collision-free hash id, never an `NNN`,

@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
@@ -84,7 +84,7 @@ describe('resolveCardPath', () => {
 describe('readPrep', () => {
   it('reads frontmatter, body and scope — and hashes the raw bytes', () => {
     writeCard('9999-a-fake-card.md');
-    const result = readPrep({ item: '9999', repo: 'chalbert/web-everything', cwd: root });
+    const result = readPrep({ item: '9999', repo: 'web-everything/web-everything', cwd: root });
     expect(result.card.frontmatter).toMatchObject({ kind: 'story', size: 3, status: 'open', tags: ['x', 'y'] });
     expect(result.card.body).toContain('# A fake card for tests');
     expect(result.card.body).toContain('the sky is blue');
@@ -100,7 +100,7 @@ describe('readPrep', () => {
   it('`createReviewPrepReader` binds cwd, giving the declaration\'s injected `{item, repo}` shape', () => {
     writeCard('9999-a-fake-card.md');
     const reader = createReviewPrepReader({ cwd: root });
-    const result = reader({ item: '9999', repo: 'chalbert/web-everything' });
+    const result = reader({ item: '9999', repo: 'web-everything/web-everything' });
     expect(result.scopeFiles).toEqual(['we:scripts/foo.mjs', 'we:scripts/bar.mjs']);
   });
 });
@@ -124,7 +124,7 @@ describe('recordPrepVerdict — the race guard', () => {
     const calls = [];
     const result = await recordPrepVerdict({
       item: '9999',
-      repo: 'chalbert/web-everything',
+      repo: 'web-everything/web-everything',
       cwd: root,
       confidence: 'High',
       risks: [],
@@ -146,7 +146,7 @@ describe('recordPrepVerdict — the race guard', () => {
     const calls = [];
     const result = await recordPrepVerdict({
       item: '9999',
-      repo: 'chalbert/web-everything',
+      repo: 'web-everything/web-everything',
       cwd: root,
       confidence: 'High',
       risks: [{ risk: 'premise', addressed: true, note: 'checked against live code' }],
@@ -195,7 +195,7 @@ describe('recordPrepVerdict — the race guard', () => {
 describe('recordPrepVerdict — `land` (#3233): always pushes, `pr-land` only when landing', () => {
   const baseArgs = (overrides = {}) => ({
     item: '9999',
-    repo: 'chalbert/web-everything',
+    repo: 'web-everything/web-everything',
     cwd: root,
     confidence: 'High',
     risks: [{ risk: 'premise', addressed: true }],
@@ -239,7 +239,7 @@ describe('recordPrepVerdict — `land` (#3233): always pushes, `pr-land` only wh
     process.env.WE_COORDINATION_ROOT = claimRoot;
     try {
       // sha is pinned to 'deadbeefcafe' by the `rev-parse` stub below → ref = lane/review-prep-9999-deadbeef.
-      acquireFixClaim({ repo: 'chalbert/web-everything', pr: 4293, who: 'fixer-4293', branch: 'lane/review-prep-9999-deadbeef', lockRoot: fixDispatchClaimRoot() });
+      acquireFixClaim({ repo: 'web-everything/web-everything', pr: 4293, who: 'fixer-4293', branch: 'lane/review-prep-9999-deadbeef', lockRoot: fixDispatchClaimRoot() });
       const gitCalls = [];
       const result = await recordPrepVerdict(baseArgs({
         land: false,
@@ -327,7 +327,7 @@ describe('recordPrepVerdict — the post-write verify (#3230)', () => {
     const landCalls = [];
     const result = await recordPrepVerdict({
       item: '9999',
-      repo: 'chalbert/web-everything',
+      repo: 'web-everything/web-everything',
       cwd: root,
       confidence: 'High',
       risks: [],
@@ -356,7 +356,7 @@ describe('recordPrepVerdict — the post-write verify (#3230)', () => {
     let stagedSnapshot = null;
     const result = await recordPrepVerdict({
       item: '9999',
-      repo: 'chalbert/web-everything',
+      repo: 'web-everything/web-everything',
       cwd: root,
       confidence: 'High',
       risks: [{ risk: 'premise', addressed: true }],
@@ -402,7 +402,7 @@ describe('recordPrepVerdict — real git, no mocked `exec`: the actual commit ca
     const clobberText = 'a concurrent writer clobbered the working tree\n';
     const result = await recordPrepVerdict({
       item: '9999',
-      repo: 'chalbert/web-everything',
+      repo: 'web-everything/web-everything',
       cwd: root,
       confidence: 'High',
       risks: [{ risk: 'premise', addressed: true }],
@@ -432,7 +432,7 @@ describe('recordPrepVerdict — real git, no mocked `exec`: the actual commit ca
 describe('recordPrepVerdict — land vs park', () => {
   const baseArgs = (overrides = {}) => ({
     item: '9999',
-    repo: 'chalbert/web-everything',
+    repo: 'web-everything/web-everything',
     cwd: root,
     expectedContentHash: contentHashOf(CARD_RAW),
     exec: (cmd, args) => (args[0] === 'rev-parse' ? 'deadbeefcafe\n' : ''),
@@ -496,7 +496,7 @@ describe('recordPrepVerdict — failure classification', () => {
   it('a git commit failure is `notApplied` — nothing pushed, safe to retry', async () => {
     writeCard('9999-a-fake-card.md');
     await expect(recordPrepVerdict({
-      item: '9999', repo: 'chalbert/web-everything', cwd: root, confidence: 'High', risks: [],
+      item: '9999', repo: 'web-everything/web-everything', cwd: root, confidence: 'High', risks: [],
       expectedContentHash: contentHashOf(CARD_RAW),
       exec: () => { throw new Error('nothing to commit'); },
       runNode: () => { throw new Error('must not be reached'); },
@@ -506,7 +506,7 @@ describe('recordPrepVerdict — failure classification', () => {
   it('a pr-land failure AFTER a local commit is INDETERMINATE, not notApplied — the commit already happened', async () => {
     const path = writeCard('9999-a-fake-card.md');
     const err = await recordPrepVerdict({
-      item: '9999', repo: 'chalbert/web-everything', cwd: root, confidence: 'High', risks: [],
+      item: '9999', repo: 'web-everything/web-everything', cwd: root, confidence: 'High', risks: [],
       expectedContentHash: contentHashOf(CARD_RAW),
       exec: (cmd, args) => (args[0] === 'rev-parse' ? 'deadbeefcafe\n' : ''),
       runNode: () => { throw new Error('gh: network unreachable'); },
@@ -557,5 +557,30 @@ describe('review-prep-io.mjs — the docs describe the credential downgrade, not
   it('`recordPrepVerdict`\'s own JSDoc no longer contains the stale "LANDS OR PARKS" string', () => {
     expect(SOURCE).not.toContain('LANDS OR PARKS');
     expect(SOURCE).toMatch(/downgrad/i);
+  });
+});
+
+// Real guarded writer, temporary cards, and stubbed publication transports.
+describe('#3238 guarded review writes', () => {
+  it.each([
+    ['locus', 'Inspect scripts/operations/review-prep.mjs'],
+    ['secret', 'Credential: ' + 'ghp_' + 'a'.repeat(36)],
+    ['lane-guard', 'A clean review in a primary checkout'],
+  ])('%s refusal leaves the card unchanged and performs no publication', async (reason, note) => {
+    const cwd = reason === 'lane-guard' ? join(realpathSync(root), 'web-everything') : root;
+    mkdirSync(join(cwd, 'backlog'), { recursive: true });
+    const path = join(cwd, 'backlog', '9999-a-fake-card.md');
+    writeFileSync(path, CARD_RAW);
+    const calls = [];
+    const result = await recordPrepVerdict({
+      item: '9999', repo: 'web-everything/web-everything', cwd, confidence: 'High', note,
+      hasCredential: () => true,
+      exec: (...args) => { calls.push(args); return 'deadbeefcafe'; },
+      runNode: (...args) => { calls.push(args); return '{}'; },
+      readStagedContent: () => readFileSync(path, 'utf8'),
+    });
+    expect(result).toMatchObject({ recorded: false, verified: false, reason, path });
+    expect(readFileSync(path, 'utf8')).toBe(CARD_RAW);
+    expect(calls).toEqual([]);
   });
 });

@@ -32,7 +32,7 @@
 | `{{SESSION_SLUG}}` | a stable per-heal session slug, e.g. `ci-heal-{{PR_NUM}}` (ties `acquire`↔`release`) |
 | `{{SCOPE}}` | the item's `scope:` frontmatter, repo-qualified & comma-joined (same as the build's scope) |
 | `{{REASON}}` | why it fired — `red-ci` (a required check went red) or `behind` (BEHIND + parked) — for the durable comment |
-| `{{REPO}}` | the target repo's gh slug (e.g. `chalbert/web-everything`) — every `--repo=` flag below |
+| `{{REPO}}` | the target repo's gh slug (e.g. `web-everything/web-everything`) — every `--repo=` flag below |
 | `{{LANE_REPO}}` | what `lane-pool.mjs --repo=` itself expects — an absolute checkout path always (equal to `{{WE_ROOT}}` for WE, a sibling's own checkout otherwise; landing-freeze fix — was `.` for WE, which broke from this dispatch's own scratch cwd) |
 | `{{GATE_COMMAND}}` | informational only — the sibling-repo-aware synchronous `run` form (`gateFor(...)`, `we:scripts/lib/repo-profile.mjs`); a dispatched agent does NOT run it (the guard denies it) and uses `verify-lane.mjs request` / `check` in step 4 |
 | `{{WE_ROOT}}` | the absolute WE checkout that owns every tool this brief runs (`ci-heal-mark.mjs`, `lane-pool.mjs`, …) |
@@ -54,7 +54,7 @@ then **EXIT WITHOUT LANDING THE PR** — and **NEVER touch the review label** (`
 
 ## If you escalate — WHY a second command beyond the completion record (read once, before you need it)
 
-we:backlog/heal-wait-for-rerun (landing-freeze fix, 2026-09-27) — LIVE INCIDENT, PR #2783 (chalbert/web-everything):
+we:backlog/heal-wait-for-rerun (landing-freeze fix, 2026-09-27) — LIVE INCIDENT, PR #2783 (web-everything/web-everything):
 three ci-heal sessions in one evening each escalated for the IDENTICAL reason on the IDENTICAL head. The
 `completion-cli.mjs report --outcome=escalated-*` calls throughout this arc are session bookkeeping (they key off
 `{{SESSION_SLUG}}`, which is the SAME `ci-heal-{{PR_NUM}}` slug every future dispatch for this PR reuses — a NEW

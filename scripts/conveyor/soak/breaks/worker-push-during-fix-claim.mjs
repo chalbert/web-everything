@@ -2,7 +2,7 @@
  * @file breaks/worker-push-during-fix-claim.mjs — live break, 2026-09-27 (the fix procedure, operator-approved).
  * A second author pushed to a PR's lane while the daemon fixer was mid-repair, and the PR ended up buried.
  *
- * LIVE INCIDENT: chalbert/web-everything PR #2811. The daemon fixer `fix-2811` was repairing the PR; an
+ * LIVE INCIDENT: web-everything/web-everything PR #2811. The daemon fixer `fix-2811` was repairing the PR; an
  * orchestrator worker (not a daemon session) pushed two commits (`efaae6300`, `60f0f3d57`) to the SAME branch
  * `lane/run-rating-slice1-mechanical-grade`. Nothing refused the push. The fixer saved its repair on
  * `lane/run-rating-slice1-fix-2811-alt` and posted a TERMINAL stand-down with no label and the wrong reason, and
@@ -196,7 +196,7 @@ export default {
           });
           ctx.finished = end.status === 0;
           if (!ctx.finished) flag('fix-end', `fix-end failed: ${`${end.stdout ?? ''}${end.stderr ?? ''}`.trim()}`);
-          // fix-end never relies on the draft-first promotion when the claim was never drafted (backlog xyfvtfz):
+          // fix-end never relies on the draft-first promotion when the claim was never drafted (backlog 4302):
           // the PR must stay exactly as it was — ready — with `review-status:fixing` gone.
           else if (w.gh.pr('we', ctx.pr)?.isDraft !== false) flag('end-drafted', 'fix-end must NOT leave a never-drafted PR as draft');
           else if (labelNames(w, ctx.pr).includes('review-status:fixing')) flag('end-label-lingers', 'fix-end must drop review-status:fixing');

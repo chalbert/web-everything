@@ -15,7 +15,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { importGraph } from './import-graph.mjs';
 import {
-  openPrOperation, planOpen, classifySubmit, defaultParkLabel, extractSubmitResult,
+  openPrOperation, planOpen, classifySubmit, defaultParkLabel, extractSubmitResult, describeSubmit,
   OPEN_PR_OP, SUBMIT_PR_EFFECT, OPEN_MODES, SUBMIT_OUTCOMES, HOME_REASONS,
 } from '../open-pr.mjs';
 import { createPrLandRunner, createOpenPrSinks, PR_LAND_CLI } from '../open-pr-io.mjs';
@@ -377,7 +377,7 @@ describe('classifySubmit — refused and could-not-run are different facts', () 
 
   it('never reports a POST-OPEN refusal as opened, even though it carries a pr number', () => {
     for (const { want, ...payload } of POST_OPEN_REFUSALS) {
-      const r = classifySubmit({ status: 3, stdout: JSON.stringify({ repo: 'chalbert/web-everything', merged: false, ...payload }) });
+      const r = classifySubmit({ status: 3, stdout: JSON.stringify({ repo: 'web-everything/web-everything', merged: false, ...payload }) });
       expect({ reason: payload.reason, outcome: r.outcome }).toEqual({ reason: payload.reason, outcome: want });
       // …and the PR number still reaches the caller, who needs it to go look at what was opened-then-refused.
       expect(r.pr).toBe(1501);
@@ -586,5 +586,17 @@ describe('extractSubmitResult — reads the REAL submit outcome out of the full 
       expect(r.outcome).toBe('unrun');
       expect(r.pr).toBeNull();
     }
+  });
+});
+
+describe('#4386 submit summaries', () => {
+  it.each([
+    [{ outcome: 'refused', reason: 'empty-body' }, true, /REFUSED.*empty-body/],
+    [{ outcome: 'opened', pr: 123, url: 'https://example.test/123' }, false, /opened #123 https:\/\/example.test\/123/],
+    [{ outcome: 'unrun', reason: 'push-failed' }, true, /NOT RUN.*push-failed/],
+    [{ outcome: 'unrun', reason: 'dry-run' }, false, /dry run.*nothing opened/],
+    [{ outcome: 'refused', reason: 'check-red', pr: 9, detail: 'checks failed' }, true, /REFUSED.*check-red.*#9.*checks failed/],
+  ])('describes %j', (result, failed, line) => {
+    expect(describeSubmit(result)).toEqual({ failed, line: expect.stringMatching(line) });
   });
 });

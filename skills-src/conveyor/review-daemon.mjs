@@ -94,7 +94,7 @@ import { tagReviewStatus } from '../../scripts/conveyor/review-status-tag.mjs';
 // exact gap this wiring closes.
 import { sweepReviewHoldLabels } from '../../scripts/conveyor/review-hold-reconcile.mjs';
 import { selectStatusCandidates } from '../../scripts/conveyor/reconcile-core.mjs';
-// #xconv1 (chalbert/web-everything#2766/#2767 unblock) — the mechanical, no-session executor for a
+// #xconv1 (web-everything/web-everything#2766/#2767 unblock) — the mechanical, no-session executor for a
 // `kind:'convert-advisory'` dispatch entry. Wired as its OWN additive pipeline stage below
 // (`runConvertAdvisoryTick`/`runConvertAdvisoryTickAllRepos`), never folded into `runReviewTick`'s existing
 // `reviews`/`fixes` dispatch loop: that loop is gated on `acquirableLanes` (a convert-advisory entry needs no
@@ -342,7 +342,8 @@ export function runReviewTick({
   // whole block): every review stays owed exactly like a lane-starved tick already does (`reviewsOwed` and
   // `statusCandidates` below are unaffected), so nothing here re-derives a second "was anything dispatched"
   // path — it is the SAME deferred-not-lost shape `deferredForLanes` already models, just for a different cause.
-  const acquirable = paused ? 0 : Math.max(0, Number(acquirableLanes({ repo })) || 0);
+  const lanes = paused ? 0 : acquirableLanes({ repo });
+  const acquirable = Math.max(0, (Array.isArray(lanes) ? lanes.length : Number(lanes)) || 0);
   const dispatchable = reviews.slice(0, Math.min(reviews.length, acquirable));
   const deferredForLanes = paused ? 0 : reviews.length - dispatchable.length;
   const deferredForAuth = paused ? reviews.length - dispatchable.length : 0;
@@ -367,10 +368,11 @@ export function runReviewTick({
   // x26lw6u — NOT named `skipped`: `withSelfSync` already returns `{skipped: true}` for a whole skipped tick,
   // and `onTick` reads both shapes.
   const notStarted = [];
-  for (const d of dispatchable) {
+  for (const [i, d] of dispatchable.entries()) {
     try {
       const subject = (Array.isArray(rawPrs) ? rawPrs : []).find(p => Number(p?.number) === Number(d.prNumber));
       const result = dispatch({ pr: d.prNumber, repo,
+        ...(Array.isArray(lanes) ? { preferLane: lanes[i] } : {}),
         escalationReason: parseEscalationReason(subject?.body ?? ''),
         scopePaths: (subject?.files ?? []).map(f => typeof f === 'string' ? f : f.path),
       });
@@ -511,7 +513,7 @@ export function runReviewTickAllRepos({ repos = REVIEW_DAEMON_REPOS, tick = runR
 }
 
 /**
- * #xconv1 (chalbert/web-everything#2766/#2767 unblock) — ONE repo's worth of `kind:'convert-advisory'`
+ * #xconv1 (web-everything/web-everything#2766/#2767 unblock) — ONE repo's worth of `kind:'convert-advisory'`
  * dispatch entries, posted mechanically. A SEPARATE, ADDITIVE stage from {@link runReviewTick}: a
  * convert-advisory entry needs no lane and no session (see `convert-advisory-dispatch.mjs`'s own header for
  * why the targeted-check judge seat needs neither either), so gating it behind `acquirableLanes` — the cap
@@ -663,7 +665,12 @@ export function hasStaleMainRefusal(tickResult) {
  * @returns {number}
  */
 export function defaultAcquirableLaneCount({ repo }) {
-  return freeLaneNumbers({ lanePoolRepo: repoProfile(repo).lanePoolRepo }).length;
+  return defaultAcquirableLaneNumbers({ repo }).length;
+}
+
+/** Preserve the tick's fresh scan so sibling jobs acquire distinct lanes without scanning again. */
+export function defaultAcquirableLaneNumbers({ repo }) {
+  return freeLaneNumbers({ lanePoolRepo: repoProfile(repo).lanePoolRepo });
 }
 
 /** The lane-pool repo path for `repo` (the same derivation {@link defaultAcquirableLaneCount} uses). */
@@ -757,7 +764,7 @@ export function buildCliDaemonEffects({
   // `defaultReadPrs`/`defaultReadAgents` through; `runReviewTick`'s own default stays `null` (see that
   // function's own doc for why) so every pre-existing test of it is unaffected here too.
   runReview = (opts) => runReviewTickAllRepos({
-    acquirableLanes: defaultAcquirableLaneCount, readPrs: defaultReadPrs, readAgents: defaultReadAgents,
+    acquirableLanes: defaultAcquirableLaneNumbers, readPrs: defaultReadPrs, readAgents: defaultReadAgents,
     poolExhaustion: DAEMON_POOL_EXHAUSTION, ...opts,
   }),
   // #xconv1 — the SAME shared-reads optimization `runReview` above opts into, wired the same way for its own
@@ -857,7 +864,7 @@ export function buildCliDaemonEffects({
         const sr = result.sessionReap;
         log.error(`review-daemon: session-reap — ${sr.scanned} scanned, ${sr.stopped} stopped${sr.alreadyGone ? `, ${sr.alreadyGone} already gone` : ''}${sr.failures ? `, ${sr.failures} failed` : ''}${sr.anomalies ? `, ${sr.anomalies} anomalies` : ''}${sr.previouslyReaped ? `, ${sr.previouslyReaped} already reaped earlier (skipped)` : ''}, ${sr.kept} kept${sr.deferred ? `, ${sr.deferred} deferred to next tick (reap budget: ${sr.reapBudget?.maxStops} stops / ${sr.reapBudget?.maxDurationMs}ms, #3383)` : ''}`);
       }
-      // #xconv1 (chalbert/web-everything#2766/#2767 unblock) — the mechanical, no-session convert-advisory
+      // #xconv1 (web-everything/web-everything#2766/#2767 unblock) — the mechanical, no-session convert-advisory
       // stage's own report: `posted` names the targeted check's own verdict, `skipped` is the idempotency
       // no-op (a head already carrying the converted note), `failed`/`reconcileFailed` mirror the review
       // stage's own non-fatal reporting one level up.

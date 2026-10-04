@@ -44,8 +44,9 @@ export const DEFAULT_ROOT = join(HERE, '..', '..');
  * fires only for Bash-*tool* calls in a session that loads `.claude/settings.json`.
  *
  * THROWS rather than exiting — the caller (a CLI verb, or an operation's effect sink) decides how to surface
- * the refusal. `laneGuardDecision`'s own message text is unchanged, so a caller that reproduces it verbatim in
- * its own `die()` matches today's output exactly.
+ * the refusal. Known refusals carry a stable `cause`: `lane-guard`, `secret`, or `locus`.
+ * Unexpected filesystem errors retain their original shape. Refusal messages remain unchanged,
+ * so a CLI reproducing the message through its own `die()` matches today's output exactly.
  *
  * @param {string} abs - absolute path of the file about to be written.
  * @param {string} rel - the repo-relative path (for the message + the locus-prefix scan's `file` key).
@@ -61,6 +62,7 @@ export function writeBacklogMd(abs, rel, content, { root = DEFAULT_ROOT } = {}) 
       `isolation (#2302/#104/#2219/#2339). Enforced at the source so non-Bash-tool channels ` +
       `(workflow/subagent/cron/headless) are covered too, not just the PreToolUse(Bash) hook. cd into a ` +
       `lane clone (~/workspace/.lanes/<repo>/lane-N) and run it there. There is no override.`,
+      { cause: 'lane-guard' },
     );
   }
   writeBacklogMdUnguarded(abs, rel, content, { root });
@@ -116,11 +118,12 @@ export function assertPublishableContent(rel, content) {
       `secret-scrub: refusing to write ${rel} — the content carries ${leaks.join('; ')} (#3015). A backlog ` +
       `card is COMMITTED and PUSHED, so a credential in it is a published credential. Remove the value (and ` +
       `rotate it if it was ever real); describe it in words instead of pasting it.`,
+      { cause: 'secret' },
     );
   }
   const findings = scanRepoLocusPrefixes([{ file: rel, content }]);
   if (findings.length) {
     const { count, sample } = findings[0];
-    throw new Error(`locus-prefix: ${count} bare code-path ref(s) in ${rel} lack a <repo>: prefix (#883; e.g. "${sample}" → "we:${sample}"). Prefix them now — don't leave it for the gate.`);
+    throw new Error(`locus-prefix: ${count} bare code-path ref(s) in ${rel} lack a <repo>: prefix (#883; e.g. "${sample}" → "we:${sample}"). Prefix them now — don't leave it for the gate.`, { cause: 'locus' });
   }
 }

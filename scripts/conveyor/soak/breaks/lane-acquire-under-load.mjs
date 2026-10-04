@@ -1,5 +1,5 @@
 /**
- * @file breaks/lane-acquire-under-load.mjs — live break 4, 2026-09-24 incident (#3383, card xf36gol -> #4069).
+ * @file breaks/lane-acquire-under-load.mjs — live break 4, 2026-09-24 incident (#3383, card 4069 -> #4069).
  * `scripts/lane-pool.mjs`'s `cmdAcquire` auto-pick loop (no explicit `--lane=N`) used to recompute the FULL
  * dirty/ahead probe pipeline (`git status --porcelain` + `rev-list` + patch-equivalence, via
  * `effectiveDirtyOrAhead`) for EVERY unleased lane, FROM SCRATCH, on EVERY `ACQUIRE_POLL_MS` (1s) poll tick, IN
@@ -7,9 +7,9 @@
  * itself. Live: one real `acquire --wait-ms=30000` took ~6 minutes and still failed while the pool actually had
  * spare capacity (`lane-pool-health-watch.mjs --dry-run` read 14-15 acquirable at the same moment).
  *
- * Fix: b6c6dee34 (card xf36gol -> #4069, epic #3383) — auto-pick now consumes `acquirableListCached`, the SAME
+ * Fix: b6c6dee34 (card 4069 -> #4069, epic #3383) — auto-pick now consumes `acquirableListCached`, the SAME
  * single-flight, cached, `--scan-timeout-ms`-bounded scan `list --acquirable` already shares across concurrent
- * callers (#xn432dz), instead of an independent uncached rescan per caller per poll tick. Live proof in that
+ * callers (#4012), instead of an independent uncached rescan per caller per poll tick. Live proof in that
  * commit: 3 concurrent `--wait-ms=8000` callers on a saturated pool went from 27.60s to 9.09s. Pinned unit
  * proof: `scripts/__tests__/lane-pool-acquire-shares-scan-cache.test.mjs`.
  *
@@ -27,14 +27,14 @@
  * ...)` fires when any call takes longer than `WAIT_MS + BOUND_MARGIN_MS`, or fails with a scan-timeout message
  * while a lane was, at some point, genuinely free (the OTHER shape the pinned unit test's third case pins).
  *
- * STATUS (2026-09-25, measured by this harness): STILL BROKEN ON MAIN AT LIVE SCALE — card we:backlog/xj2k2pp.
+ * STATUS (2026-09-25, measured by this harness): STILL BROKEN ON MAIN AT LIVE SCALE — card we:backlog/4172.
  * At the 6-lane/3-caller shape every run was green on main AND on the pre-fix code (`red-green.mjs --at-parent`
  * restores lane-pool.mjs to b6c6dee34^: all callers inside the bound) — too small to tell the two apart. At
  * 14 lanes / 5 callers (now the default) current main returns 33s, 34s, 45s, 56s, 68s for `--wait-ms=20000` —
  * waiters give up one after another ~11s apart, the last at 3.4x its wait — while the pre-fix code returned all
  * five at ~34s in the same world. So b6c6dee34 fixed the 6-minute rescan storm but the wait is still no bound
  * under concurrency. `fixPresent` therefore probes for the NEXT fix (none yet → expected-fail); whoever fixes
- * xj2k2pp replaces the probe with a marker their fix adds. `SOAK_LOAD_LANES` / `SOAK_LOAD_CALLERS` override the
+ * 4172 replaces the probe with a marker their fix adds. `SOAK_LOAD_LANES` / `SOAK_LOAD_CALLERS` override the
  * scale.
  *
  * RED-GREEN CAVEAT — READ BEFORE RE-RUNNING `red-green.mjs` ON THIS BREAK (use `--at-parent`). Reverse-applying b6c6dee34's own
@@ -198,9 +198,9 @@ async function perRound(w, round, ctx, api) {
 export default {
   id: 'lane-acquire-under-load',
   title: 'lane acquire --wait-ms is no bound under concurrent load (live: 6-minute acquires; main today: last of 5 waiters at 3.4x its wait)',
-  card: 'we:backlog/xj2k2pp (first fix b6c6dee34 / #4069 was partial; epic #4075)',
+  card: 'we:backlog/4172 (first fix b6c6dee34 / #4069 was partial; epic #4075)',
   fixedBy: { sha: '(this worker\'s PR) + soak-main-red', where: 'cmdAcquire / acquirableListCached; verdict memo dirtSignature', paths: ['scripts/lane-pool.mjs'] },
-  // xj2k2pp fix: `acquirableListCached`'s "wait for a DIFFERENT caller's in-flight shared-scan lock" branch now
+  // 4172 fix: `acquirableListCached`'s "wait for a DIFFERENT caller's in-flight shared-scan lock" branch now
   // takes a `callerDeadlineMs` (this acquire call's own --wait-ms deadline) and gives up with a distinguishable
   // `{ lockContention: true }` once it elapses, instead of sitting out the lock/scan's own (far larger, and
   // rightly still shared/unbounded-per-caller) budget regardless of how small THIS caller's own wait was. That

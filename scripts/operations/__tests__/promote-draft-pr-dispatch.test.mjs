@@ -5,7 +5,7 @@
  *   shelled — `reconcile` and `provider` are injected, mirroring `ci-heal-pr-dispatch.test.mjs`'s own shape.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { runReconcilePromoteDraftDispatch, defaultReadHeadCheckState, defaultReadPrLabels } from '../promote-draft-pr-dispatch.mjs';
+import { runReconcilePromoteDraftDispatch, defaultReadHeadCheckState, defaultReadPrLabels, isPromoteCodePath, promoteCodeClosure } from '../promote-draft-pr-dispatch.mjs';
 
 const FRESH = () => ({ fresh: true, behind: 0 });
 // Every pre-existing test in this file promotes cleanly, so it pins a fresh re-read that always says green —
@@ -134,7 +134,7 @@ describe('runReconcilePromoteDraftDispatch — stale-green re-verification (#281
       why: expect.stringContaining('stale-green read'),
     }]);
     // Re-verified for the EXACT head sha the plan carried, never re-derived from the PR number.
-    expect(seenArgs).toEqual([{ repoSlug: 'chalbert/web-everything', sha: HEAD }]);
+    expect(seenArgs).toEqual([{ repoSlug: 'web-everything/web-everything', sha: HEAD }]);
   });
 
   it('still refuses on a fresh `pending` read — only a completed, all-succeeded read promotes', () => {
@@ -189,7 +189,7 @@ describe('runReconcilePromoteDraftDispatch — stale-green re-verification (#281
       clearAwaitingCi: (o) => statusCalls.push(o),
     });
     expect(result.dispatched).toEqual([{ pr: 2821, kind: 'promote-draft' }]);
-    expect(statusCalls).toEqual([{ pr: 2821, repo: 'chalbert/web-everything', state: null }]);
+    expect(statusCalls).toEqual([{ pr: 2821, repo: 'web-everything/web-everything', state: null }]);
   });
 
   describe('defaultReadHeadCheckState — the real per-sha re-read (gh/getRequiredStatusChecks injected)', () => {
@@ -203,7 +203,7 @@ describe('runReconcilePromoteDraftDispatch — stale-green re-verification (#281
         runGh: () => rows.map(row => JSON.stringify(row)).join('\n'),
         getRequiredChecks: () => ({ checks: [], source: 'unavailable' }) });
       const result = runReconcilePromoteDraftDispatch({
-        root: '/repo', repo: 'chalbert/plateau-app',
+        root: '/repo', repo: 'plateauapp/plateau-app',
         reconcile: () => ({ dispatch: [{ kind: 'promote-draft', prNumber: 198, headRefOid: HEAD }], refusals: [] }),
         provider: { ready }, checkStaleness: FRESH, readPrLabels: () => [], readHeadCheckState, clearAwaitingCi: NOOP_STATUS,
       });
@@ -216,36 +216,36 @@ describe('runReconcilePromoteDraftDispatch — stale-green re-verification (#281
       const seenArgv = [];
       const runGh = (argv) => { seenArgv.push(argv); return '{"name":"test","status":"COMPLETED","conclusion":"SUCCESS"}\n'; };
       const getRequiredChecks = () => ({ checks: ['test'], source: 'live' });
-      const out = defaultReadHeadCheckState({ repoSlug: 'chalbert/web-everything', sha: HEAD, runGh, getRequiredChecks });
+      const out = defaultReadHeadCheckState({ repoSlug: 'web-everything/web-everything', sha: HEAD, runGh, getRequiredChecks });
       expect(out.state).toBe('green');
-      expect(seenArgv[0]).toEqual(expect.arrayContaining(['api', `repos/chalbert/web-everything/commits/${HEAD}/check-runs`]));
+      expect(seenArgv[0]).toEqual(expect.arrayContaining(['api', `repos/web-everything/web-everything/commits/${HEAD}/check-runs`]));
     });
 
     it('reads red off a completed-failure run', () => {
       const runGh = () => '{"name":"test","status":"COMPLETED","conclusion":"FAILURE"}\n';
       const out = defaultReadHeadCheckState({
-        repoSlug: 'chalbert/web-everything', sha: HEAD, runGh, getRequiredChecks: () => ({ checks: ['test'], source: 'live' }),
+        repoSlug: 'web-everything/web-everything', sha: HEAD, runGh, getRequiredChecks: () => ({ checks: ['test'], source: 'live' }),
       });
       expect(out.state).toBe('red');
     });
   });
 
   describe('cwd-inferred-repo fix (we:backlog/x4ua3v8) — the DEFAULT (un-injected) provider', () => {
-    // Modeled on the real live incident: chalbert/plateau-app PR #187, headRefOid c4b00de8… — the daemon runs
+    // Modeled on the real live incident: plateauapp/plateau-app PR #187, headRefOid c4b00de8… — the daemon runs
     // from the WE checkout (`root`), so before this fix `gh pr ready 187` resolved against
-    // `chalbert/web-everything` instead of `chalbert/plateau-app` and refused
+    // `web-everything/web-everything` instead of `plateauapp/plateau-app` and refused
     // ("Command failed: gh pr ready 187"). This test does NOT inject `provider` — it exercises the REAL
     // default construction (`createDraftPromoteProvider`), mocking only the underlying `runGhSync` transport
     // so no real `gh` is ever shelled.
     const PLATEAU_HEAD = 'c4b00de87f80f3b459211191d2a619b2026c87cd';
 
-    it('FAILS before the fix / PASSES after: the real default provider calls gh with --repo chalbert/plateau-app for a non-WE entry', async () => {
+    it('FAILS before the fix / PASSES after: the real default provider calls gh with --repo plateauapp/plateau-app for a non-WE entry', async () => {
       const ghThrottle = await import('../../lib/gh-throttle.mjs');
       const runGhSyncSpy = vi.spyOn(ghThrottle, 'runGhSync').mockReturnValue('');
       try {
         const result = runReconcilePromoteDraftDispatch({
           root: '/repo',
-          repo: 'chalbert/plateau-app',
+          repo: 'plateauapp/plateau-app',
           reconcile: () => ({
             dispatch: [{ kind: 'promote-draft', prNumber: 187, headRefOid: PLATEAU_HEAD }],
             refusals: [],
@@ -256,11 +256,11 @@ describe('runReconcilePromoteDraftDispatch — stale-green re-verification (#281
         });
         expect(result.dispatched).toEqual([{ pr: 187, kind: 'promote-draft' }]);
         expect(result.refusals).toEqual([]);
-        // THE FIX: the real `gh` transport was called with an explicit `--repo chalbert/plateau-app` — before
+        // THE FIX: the real `gh` transport was called with an explicit `--repo plateauapp/plateau-app` — before
         // this fix it was called as `['pr', 'ready', '187']` with no `--repo`, relying on `cwd` inference,
-        // which (run from the WE checkout `root`) silently targeted `chalbert/web-everything` instead.
+        // which (run from the WE checkout `root`) silently targeted `web-everything/web-everything` instead.
         const readyCall = runGhSyncSpy.mock.calls.find((c) => c[0][0] === 'pr' && c[0][1] === 'ready');
-        expect(readyCall[0]).toEqual(['pr', 'ready', '187', '--repo', 'chalbert/plateau-app']);
+        expect(readyCall[0]).toEqual(['pr', 'ready', '187', '--repo', 'plateauapp/plateau-app']);
       } finally {
         runGhSyncSpy.mockRestore();
       }
@@ -309,14 +309,14 @@ it('xxh4zw8 fresh exact-head reader refuses complete cancelled evidence without 
   const ready = vi.fn();
   const runGh = vi.fn(() => runs.map(row => JSON.stringify(row)).join('\n'));
   const readHeadCheckState = args => defaultReadHeadCheckState({ ...args, runGh, getRequiredChecks: () => ({ checks: required }) });
-  expect(readHeadCheckState({ repoSlug: 'chalbert/web-everything', sha })).toMatchObject({ state: 'red', counts: { total: 4, failed: 1 } });
+  expect(readHeadCheckState({ repoSlug: 'web-everything/web-everything', sha })).toMatchObject({ state: 'red', counts: { total: 4, failed: 1 } });
   const result = runReconcilePromoteDraftDispatch({ root: '/repo', checkStaleness: FRESH, readPrLabels: () => [],
     reconcile: () => ({ dispatch: [{ kind: 'promote-draft', prNumber: 3336, headRefOid: sha }], refusals: [] }),
     provider: { ready }, readHeadCheckState, clearAwaitingCi: NOOP_STATUS });
   expect(ready).not.toHaveBeenCalled();
   expect(result.dispatched).toEqual([]);
   expect(result.refusals).toHaveLength(1);
-  expect(runGh.mock.calls[0][0]).toContain(`repos/chalbert/web-everything/commits/${sha}/check-runs`);
+  expect(runGh.mock.calls[0][0]).toContain(`repos/web-everything/web-everything/commits/${sha}/check-runs`);
 });
 
 
@@ -336,11 +336,11 @@ describe('xul2kwr fresh withdrawal guard', () => {
     const ready = vi.fn(() => calls.push('ready'));
     const clear = vi.fn();
     const result = runReconcilePromoteDraftDispatch({
-      root: '/repo', repo: 'chalbert/plateau-app', checkStaleness: FRESH,
+      root: '/repo', repo: 'plateauapp/plateau-app', checkStaleness: FRESH,
       reconcile: () => ({ dispatch: [entry], refusals: [] }),
       readHeadCheckState: () => { calls.push('checks'); return ALWAYS_GREEN(); },
       readPrLabels: args => {
-        expect(args).toEqual({ repoSlug: 'chalbert/plateau-app', prNumber: 3432 });
+        expect(args).toEqual({ repoSlug: 'plateauapp/plateau-app', prNumber: 3432 });
         calls.push('labels');
         if (labels instanceof Error) throw labels;
         return labels;
@@ -362,16 +362,58 @@ describe('xul2kwr fresh withdrawal guard', () => {
 
   it('reads labels with explicit repository and throttling', () => {
     const runGh = vi.fn(() => JSON.stringify({ labels: [{ name: 'unrelated' }] }));
-    expect(defaultReadPrLabels({ repoSlug: 'chalbert/plateau-app', prNumber: 3432, runGh }))
+    expect(defaultReadPrLabels({ repoSlug: 'plateauapp/plateau-app', prNumber: 3432, runGh }))
       .toEqual([{ name: 'unrelated' }]);
     expect(runGh).toHaveBeenCalledWith(
-      ['pr', 'view', '3432', '--repo', 'chalbert/plateau-app', '--json', 'labels'],
-      expect.objectContaining({ throttle: expect.objectContaining({ repo: 'chalbert/plateau-app' }) }),
+      ['pr', 'view', '3432', '--repo', 'plateauapp/plateau-app', '--json', 'labels'],
+      expect.objectContaining({ throttle: expect.objectContaining({ repo: 'plateauapp/plateau-app' }) }),
     );
   });
 
   it.each(['bad json', '{}', 'null', '[]', '{"labels":null}', '{"labels":{}}',
     '{"labels":[null]}', '{"labels":[{}]}', '{"labels":[{"name":2}]}'])('rejects malformed envelope %s', raw => {
-    expect(() => defaultReadPrLabels({ repoSlug: 'chalbert/plateau-app', prNumber: 3432, runGh: () => raw })).toThrow();
+    expect(() => defaultReadPrLabels({ repoSlug: 'plateauapp/plateau-app', prNumber: 3432, runGh: () => raw })).toThrow();
+  });
+});
+
+// LIVE INCIDENT 2026-10-03 (PR #3806): a managed daemon clone 2 commits behind origin/main made the stale-main
+// guard throw for the WHOLE promote pass, though neither commit touched a file the pass imports. Promotion's only
+// write is `gh pr ready` after a fresh per-sha re-check, so lag outside its own import closure must not block it.
+describe('isPromoteCodePath — the declared promote code path (#3806 incident)', () => {
+  it('real closure: a file the promote pass imports is on the path', () => {
+    expect(promoteCodeClosure()?.complete).toBe(true);
+    expect(isPromoteCodePath('scripts/operations/promote-draft-pr-dispatch.mjs')).toBe(true);
+    expect(isPromoteCodePath('scripts/conveyor/reconcile-core.mjs')).toBe(true);
+    expect(isPromoteCodePath('scripts/lib/draft-promote-provider.mjs')).toBe(true);
+  });
+  it('real closure: the CLI adapter (the two commits behind in the incident) is NOT on the path', () => {
+    expect(isPromoteCodePath('scripts/operations/cli-adapter.mjs')).toBe(false);
+    expect(isPromoteCodePath('scripts/operations/__tests__/render-outcome-effect-refusal.test.mjs')).toBe(false);
+  });
+  it('an unreadable closure fails closed: every code file counts', () => {
+    expect(isPromoteCodePath('scripts/operations/cli-adapter.mjs', { closure: null })).toBe(true);
+    expect(isPromoteCodePath('backlog/123-x.md', { closure: null })).toBe(false);
+  });
+});
+
+describe('runReconcilePromoteDraftDispatch — a draft that is not promoted says why (#3806 incident)', () => {
+  it('reports every non-green draft the plan refused, naming its check state; green and withdrawn are not double-reported', () => {
+    const result = runReconcilePromoteDraftDispatch({
+      root: '/repo',
+      reconcile: () => ({
+        dispatch: [],
+        refusals: [
+          { kind: 'draft', prNumber: 7, check: 'pending' },
+          { kind: 'draft', prNumber: 8, check: 'unchecked' },
+          { kind: 'draft', prNumber: 9, check: 'green' }, // withdrawn: already logged as reconcile-refused
+          { kind: 'fix-claimed', prNumber: 10 },
+        ],
+      }),
+      provider: { ready: () => { throw new Error('must not be called'); } },
+      checkStaleness: FRESH, readPrLabels: () => [], readHeadCheckState: ALWAYS_GREEN, clearAwaitingCi: NOOP_STATUS,
+    });
+    expect(result.refusals.map((r) => [r.pr, r.kind])).toEqual([[7, 'draft-not-promoted'], [8, 'draft-not-promoted']]);
+    expect(result.refusals[0].why).toMatch(/pending/);
+    expect(result.refusals[1].why).toMatch(/unchecked/);
   });
 });

@@ -24,7 +24,7 @@ export default {
   title: 'the build-dispatch daemon\'s infra-blocked retry call has no bound, so a slow `pr-land --label-on-green` '
     + 'CI wait nested inside it can stall the WHOLE tick (dispatch, liveness, claims) for as long as it runs '
     + '(live #4517, com.we.build-dispatch-daemon pid 77087, stalled 2:22-2:56pm ET 2026-09-29)',
-  card: 'we:backlog/4517 (xvq0ejq)',
+  card: 'we:backlog/4517 (4517)',
   // `sha` is filled once this fix lands (the fix and this break land in the SAME commit, so the real sha is
   // not knowable at authoring time) — established repo pattern, see e.g.
   // `breaks/lease-reaper-hand-briefed-owner-invisible.mjs`'s own `fixedBy.sha: 'PENDING-FILL-AT-LAND'`.

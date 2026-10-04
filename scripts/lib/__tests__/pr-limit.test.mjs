@@ -17,7 +17,7 @@ import {
   setGlobalOff, clearGlobalOff, allowBranch, normalizeBranchName,
   isGlobalOffNow, isBranchAllowedNow,
   fetchOpenPrs, fetchPrCommits, countOpenPrsForRepo,
-  createAuthorshipCache, countOpenPrsForDispatch, DISPATCH_PR_COUNT_API_CAP,
+  createAuthorshipCache, countOpenPrsForDispatch, DISPATCH_PR_COUNT_API_CAP, AUTHORSHIP_FAILURE_COOLDOWN_MS,
 } from '../pr-limit.mjs';
 
 describe('resolvePrLimit', () => {
@@ -181,7 +181,7 @@ describe('fetchOpenPrs / fetchPrCommits / countOpenPrsForRepo — the IO shell',
       throw new Error(`unexpected call: ${JSON.stringify(args)}`);
     };
     const result = countOpenPrsForRepo('we', { exec, env: {} });
-    expect(result).toEqual({ repoKey: 'we', slug: 'chalbert/web-everything', count: 1, prNumbers: [1], limit: 15, unavailable: false, unresolved: 0, apiFetches: 2 });
+    expect(result).toEqual({ repoKey: 'we', slug: 'web-everything/web-everything', count: 1, prNumbers: [1], limit: 15, unavailable: false, unresolved: 0, apiFetches: 2 });
     // Exactly one list call + one commits call per NOT-accepted PR (#2 is skipped — already accepted).
     expect(calls.filter((a) => a[1] === 'list')).toHaveLength(1);
     expect(calls.filter((a) => a[0] === 'api' && a[1] === 'graphql')).toHaveLength(2);
@@ -279,12 +279,16 @@ describe('bounded networked count (dispatch round) — the GitHub-call budget th
   const commitsPage = (c) => JSON.stringify([{ data: { repository: { pullRequest: { commits: { nodes: c.map((commit) => ({ commit: { ...commit, authors: { nodes: commit.authors } } })) } } } } }]);
   // Stacked PRs (base is not `main`) are never resolvable from local git, so each needs a GraphQL read the first time.
   const rows = (n) => Array.from({ length: n }, (_, i) => ({ number: i + 1, labels: [], headRefName: `lane/p${i + 1}`, headRefOid: `oid${i + 1}`, baseRefName: 'lane/base' }));
-  const harness = (open) => {
+  const harness = (open, failing = new Set()) => {
     const calls = [];
     const exec = (args) => {
       calls.push(args);
       if (args[1] === 'list') return JSON.stringify(open);
-      if (args[0] === 'api' && args[1] === 'graphql') return commitsPage([aiCommit]);
+      if (args[0] === 'api' && args[1] === 'graphql') {
+        const number = Number(args.find((a) => a.startsWith('number=')).slice(7));
+        if (failing.has(number)) throw new Error('commits unreadable');
+        return commitsPage([aiCommit]);
+      }
       throw new Error(`unexpected call: ${JSON.stringify(args)}`);
     };
     // The host-shared snapshot: warm (served from cache, no gh) vs cold (null → localOnly reports unavailable).
@@ -293,6 +297,92 @@ describe('bounded networked count (dispatch round) — the GitHub-call budget th
     return { calls, exec, readShared, setWarm: (v) => { warm = v; }, graphql: () => calls.filter((a) => a[0] === 'api').length, lists: () => calls.filter((a) => a[1] === 'list').length };
   };
   const tmpCache = () => createAuthorshipCache({ path: join(mkdtempSync(join(tmpdir(), 'pr-authorship-')), 'cache.json') });
+
+  it('countOpenPrsForDispatch: persistently failing leading PRs do not starve trailing PRs', () => {
+    const h = harness(rows(7), new Set([1, 2, 3]));
+    const path = join(mkdtempSync(join(tmpdir(), 'pr-authorship-')), 'cache.json');
+    const now = 1_000_000;
+    const spent = [];
+    for (let round = 0; round < 4; round++) {
+      const before = h.graphql();
+      // Reload each round: failure markers must survive separate dispatcher processes.
+      const r = countOpenPrsForDispatch('we', { ...h, authorshipCache: createAuthorshipCache({ path }), now });
+      spent.push(h.graphql() - before);
+      expect(spent.at(-1)).toBeLessThanOrEqual(DISPATCH_PR_COUNT_API_CAP);
+      if (round >= 2) expect(r).toMatchObject({ count: 4, unresolved: 3 });
+    }
+    expect(spent).toEqual([3, 3, 1, 0]);
+    for (const number of [1, 2, 3]) {
+      expect(h.calls.filter((args) => args.includes(`number=${number}`))).toHaveLength(1);
+      expect(createAuthorshipCache({ path }).get(`web-everything/web-everything#${number}@oid${number}`)).toEqual({ failedAt: now });
+    }
+  });
+
+  it('a failed read is retried after the cooldown expires', () => {
+    const h = harness(rows(1), new Set([1]));
+    const authorshipCache = tmpCache();
+    const now = 1_000_000;
+    expect(AUTHORSHIP_FAILURE_COOLDOWN_MS).toBe(15 * 60 * 1000);
+    for (const [offset, expected] of [[0, 1], [1000, 0], [AUTHORSHIP_FAILURE_COOLDOWN_MS, 1]]) {
+      h.calls.length = 0;
+      const r = countOpenPrsForDispatch('we', { ...h, authorshipCache, now: now + offset });
+      expect(h.graphql()).toBe(expected);
+      expect(r).toMatchObject({ count: 0, unresolved: 1, apiFetches: expected });
+      expect(authorshipCache.get('web-everything/web-everything#1@oid1')).toEqual({ failedAt: now + (expected ? offset : 0) });
+    }
+  });
+
+  it('a PR left unresolved by the spent budget is not negative-cached', () => {
+    const h = harness(rows(6));
+    const authorshipCache = tmpCache();
+    const o = { ...h, authorshipCache, now: 1_000_000 };
+    expect(countOpenPrsForRepo('we', { ...o, maxApiFetches: 2 })).toMatchObject({ count: 2, unresolved: 4 });
+    for (const number of [3, 4, 5, 6]) expect(authorshipCache.get(`web-everything/web-everything#${number}@oid${number}`)).toBeUndefined();
+    h.calls.length = 0;
+    expect(countOpenPrsForRepo('we', { ...o, maxApiFetches: Infinity })).toMatchObject({ count: 6, unresolved: 0 });
+    expect(h.graphql()).toBe(4);
+  });
+
+  it('a new head oid clears a failure marker', () => {
+    const open = rows(1);
+    const h = harness(open, new Set([1]));
+    const authorshipCache = tmpCache();
+    countOpenPrsForDispatch('we', { ...h, authorshipCache, now: 1_000_000 });
+    open[0].headRefOid = 'moved';
+    h.calls.length = 0;
+    countOpenPrsForDispatch('we', { ...h, authorshipCache, now: 1_001_000 });
+    expect(h.graphql()).toBe(1);
+    expect(authorshipCache.get('web-everything/web-everything#1@oid1')).toBeUndefined();
+    expect(authorshipCache.get('web-everything/web-everything#1@moved')).toEqual({ failedAt: 1_001_000 });
+  });
+
+  it('local git can resolve a PR during its failure cooldown', () => {
+    const open = rows(1);
+    const h = harness(open, new Set([1]));
+    const authorshipCache = tmpCache();
+    countOpenPrsForDispatch('we', { ...h, authorshipCache, now: 1_000_000 });
+    open[0].baseRefName = 'main';
+    h.calls.length = 0;
+    const git = (_command, args) => {
+      if (args[0] === 'remote') return 'https://github.com/web-everything/web-everything.git';
+      if (args[0] === 'check-ref-format') return '';
+      if (args[0] === 'rev-parse') return args[1] === '--is-shallow-repository' ? 'false' : 'oid1';
+      if (args[0] === 'log') return ['oid1', 'Claude', 'noreply@anthropic.com', 'Implement feature', '', ''].join('\0');
+      throw new Error(`unexpected git call: ${args}`);
+    };
+    expect(countOpenPrsForDispatch('we', { ...h, git, authorshipCache, now: 1_001_000 })).toMatchObject({ count: 1, unresolved: 0, apiFetches: 0, fallback: false });
+    expect(h.graphql()).toBe(0);
+    expect(authorshipCache.get('web-everything/web-everything#1@oid1')).toBe(true);
+  });
+
+  it('local-only unresolved PRs are not negative-cached', () => {
+    const h = harness(rows(1));
+    const authorshipCache = tmpCache();
+    expect(countOpenPrsForRepo('we', { ...h, authorshipCache, localOnly: true, now: 1_000_000 })).toMatchObject({ unresolved: 1, apiFetches: 0 });
+    expect(authorshipCache.get('web-everything/web-everything#1@oid1')).toBeUndefined();
+    expect(h.graphql()).toBe(0);
+    expect(countOpenPrsForRepo('we', { ...h, authorshipCache, now: 1_001_000 })).toMatchObject({ count: 1, unresolved: 0, apiFetches: 1 });
+  });
 
   it('maxApiFetches caps the per-PR GraphQL reads and reports the rest as unresolved', () => {
     const h = harness(rows(6));

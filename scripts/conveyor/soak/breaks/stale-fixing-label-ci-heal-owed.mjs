@@ -1,8 +1,8 @@
 /**
- * @file breaks/stale-fixing-label-ci-heal-owed.mjs — live break, 2026-09-26 (card xg790dh, epic #4075/#3383).
+ * @file breaks/stale-fixing-label-ci-heal-owed.mjs — live break, 2026-09-26 (card 4249, epic #4075/#3383).
  * A PR that moved from being owed a FIX to being owed a CI-HEAL kept a stale `review-status:fixing` label forever.
  *
- * LIVE INCIDENT: chalbert/web-everything PR #2742. Its `fix-2742` session finished (`state: 'done'`) and the
+ * LIVE INCIDENT: web-everything/web-everything PR #2742. Its `fix-2742` session finished (`state: 'done'`) and the
  * re-push went CI-red (`ci:failed`), so every review-daemon tick's plan carried a `kind:'ci-heal'` dispatch entry
  * for it. `we:skills-src/conveyor/review-daemon.mjs#runReviewTick` only fed `kind:'review'` / `kind:'fix'`
  * entries plus refusals to `we:scripts/conveyor/reconcile-core.mjs#selectStatusCandidates` — a ci-heal entry is
@@ -10,7 +10,7 @@
  * `review-status:fixing` (added while the fix really was live) was never re-derived. The operator read "fixing"
  * on a PR nothing was touching.
  *
- * FIX — PR #2748 (`lane/xg790dh-ci-lifecycle-drain-bookkeeping-commits`, not merged when this was written):
+ * FIX — PR #2748 (`lane/4249-ci-lifecycle-drain-bookkeeping-commits`, not merged when this was written):
  * `runReviewTick` filters `kind:'ci-heal'` entries and passes them as `selectStatusCandidates`' fourth source
  * (`ciHealsOwed`); `we:scripts/conveyor/review-status-tag.mjs` also learned the `healing-ci`/`ci-heal-stalled`
  * states for a live `ci-heal-<pr>` session.
@@ -43,10 +43,10 @@ function labelNames(w, pr) {
 export default {
   id: 'stale-fixing-label-ci-heal-owed',
   title: 'a PR that went from fix-owed to ci-heal-owed keeps a stale review-status:fixing because ci-heal entries never reach the review-status sweep',
-  card: 'card xg790dh / PR #2748 (epic #4075/#3383) — live incident PR #2742',
+  card: 'card 4249 / PR #2748 (epic #4075/#3383) — live incident PR #2742',
   fixedBy: {
     sha: '2daaf2239',
-    where: 'lane/xg790dh-ci-lifecycle-drain-bookkeeping-commits',
+    where: 'lane/4249-ci-lifecycle-drain-bookkeeping-commits',
     paths: ['skills-src/conveyor/review-daemon.mjs', 'scripts/conveyor/reconcile-core.mjs', 'skills-src/conveyor/runner.mjs'],
   },
   fixPresent(root) {

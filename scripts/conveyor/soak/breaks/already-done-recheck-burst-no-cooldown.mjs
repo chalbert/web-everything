@@ -1,5 +1,5 @@
 /**
- * @file breaks/already-done-recheck-burst-no-cooldown.mjs — #xp12dod. The planner searched every stale id
+ * @file breaks/already-done-recheck-burst-no-cooldown.mjs — #4512. The planner searched every stale id
  * on every tick, exhausting the shared GitHub budget even after burst attribution/concurrency was fixed.
  * Run its real CLI twice with ten stale items and a shared cache: each run checks at most two ids and never repeats a cached id. A fake gh logs argv and returns successful empty results; no live GitHub calls occur.
  */
@@ -16,8 +16,8 @@ const COUNT = 10;
 export default {
   id: 'already-done-recheck-burst-no-cooldown',
   title: 'dispatch-plan rechecks every stale item on consecutive ticks without a per-item cooldown',
-  card: 'we:backlog/xp12dod',
-  fixedBy: { sha: '8378e1bdadea64e2c593c7d0593d35fc15ab2469', where: 'lane/xp12dod-already-done-cooldown', paths: ['scripts/readiness/dispatch-plan.mjs', 'scripts/readiness/already-done-cache.mjs'] },
+  card: 'we:backlog/4512',
+  fixedBy: { sha: '8378e1bdadea64e2c593c7d0593d35fc15ab2469', where: 'lane/4512-already-done-cooldown', paths: ['scripts/readiness/dispatch-plan.mjs', 'scripts/readiness/already-done-cache.mjs'] },
   fixPresent(root) {
     return existsSync(join(root, 'scripts/readiness/already-done-cache.mjs'));
   },

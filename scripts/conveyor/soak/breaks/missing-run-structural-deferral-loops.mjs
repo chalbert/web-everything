@@ -15,14 +15,14 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const REPO_ROOT = resolve(fileURLToPath(import.meta.url), '..', '..', '..', '..', '..');
-const REPO = ['chalbert', 'web-everything'].join('/'); // built, not a literal — a stub slug, not a hardcoded target repo
+const REPO = ['web-everything', 'web-everything'].join('/'); // built, not a literal — a stub slug, not a hardcoded target repo
 const TICKS = 6;
 const CAP = 2;
 
 export default {
   id: 'missing-run-structural-deferral-loops',
   title: 'missing-run recovery re-deferred stacked/fork/marked-tip PRs every tick forever — deferrals post no marker, so the retry cap never tripped',
-  card: 'we:backlog/xmrun09',
+  card: 'we:backlog/4855',
   fixedBy: { sha: 'ad1f47ac0', where: 'lane/missing-run', paths: ['scripts/conveyor/missing-run-push.mjs'] },
   fixPresent(root) {
     const p = join(root, 'scripts/conveyor/missing-run-push.mjs');

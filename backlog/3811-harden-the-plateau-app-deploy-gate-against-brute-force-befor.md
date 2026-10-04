@@ -14,7 +14,7 @@ tags: []
 
 ## Ruling
 
-**RULED — option B.** Operator, 2026-10-01, decision **xvitgv8**: “Let’s keep code gate for now”. Keep the custom Plateau gate, throttle POST /__gate, and issue sessions that can be revoked individually. Cloudflare Access is a later option, outside this item. This records the supplied operator ruling, not a new unresolved choice or a claim that the hardening has shipped.
+**RULED — option B.** Operator, 2026-10-01, decision **4941**: “Let’s keep code gate for now”. Keep the custom Plateau gate, throttle POST /__gate, and issue sessions that can be revoked individually. Cloudflare Access is a later option, outside this item. This records the supplied operator ruling, not a new unresolved choice or a claim that the hardening has shipped.
 
 Delivery follows the operator ruling in we:backlog/4289-design-multi-repo-couple-locus-delivery-e-g-we-plateau-app-2.md:18–20: use independently valuable per-repo slices; coupled delivery remains future capability. The standing per-repo gate/profile rule is we:docs/agent/platform-decisions.md:5511 (`#conveyor-multi-repo-model`). This preparation changes only this card; it neither creates another card nor implements either slice.
 
