@@ -3,10 +3,11 @@ bornAs: xh701hj
 kind: story
 size: 3
 parent: "4936"
-status: open
+status: resolved
 blockedBy: ["4874", "4815"]
 scope: ["we:scripts/operations/review-pr.mjs", "we:scripts/operations/__tests__/review-pr.test.mjs"]
 dateOpened: "2026-09-28"
+dateResolved: "2026-10-03"
 preparedDate: "2026-10-03"
 preparedAgainstSha: "4a2606bc2f711efd86849e250db36b1b100a0fa4"
 tags: [review, routing]
