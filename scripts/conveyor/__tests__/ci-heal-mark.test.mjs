@@ -446,7 +446,7 @@ fs.writeFileSync('state.json', JSON.stringify(s));
         const transitions = [], samples = [];
         for (let n = 0; n < 10; n++) {
           const time = Date.parse('2026-10-03T12:00:00Z') + n * 900000;
-          const results = smell.evaluate({ prs: [{ repo: 'chalbert/web-everything', number: 3239,
+          const results = smell.evaluate({ prs: [{ repo: 'web-everything/web-everything', number: 3239,
             reviewObservation: { ...final, commits: [{ authors: [{ name: 'Claude' }] }], observedAt: time } }] },
             { now: time, lastTick: memory.lastTick });
           const next = stepEpisodes(memory, [{ smell, results }], time);
@@ -466,7 +466,7 @@ fs.writeFileSync('state.json', JSON.stringify(s));
         expect(plan.dispatch).toContainEqual(expect.objectContaining({ kind: 'review' }));
         console.info('xe8y12n synthetic completion proof', JSON.stringify({ pushedSha: healHead, content: scenario.file,
           result: outcome, calls, labels: final.labels, plan }));
-        const repeated = spawnSync(process.execPath, [fileURLToPath(entry), '3239', '--repo=chalbert/web-everything', `--head=${healHead}`],
+        const repeated = spawnSync(process.execPath, [fileURLToPath(entry), '3239', '--repo=web-everything/web-everything', `--head=${healHead}`],
           { cwd: dir, encoding: 'utf8', env: { ...process.env, PATH: `${join(dir, 'bin')}:${process.env.PATH}`, WE_GH_THROTTLE_LOCK_ROOT: join(dir, 'lock') } });
         expect(repeated.status, repeated.stderr).toBe(0);
         expect(JSON.parse(repeated.stdout.trim().split('\n').pop()).restored).toBeUndefined();
