@@ -249,7 +249,7 @@ export function resolveVerdictedRoot({ repo, root = process.cwd(), repoRoot = ''
   if (!want) throw new Error('apply-review-request: no `repo` on the request — cannot decide which checkout to run from');
   const candidate = String(repoRoot ?? '').trim() || root;
   const have = originRepo(candidate);
-  if (have === want) return candidate;
+  if (canonicalizeSlug(have) === canonicalizeSlug(want)) return candidate;
   throw new Error(
     `apply-review-request: refusing to record a verdict for ${want} from ${have || '(not a checkout)'}'s tree (#3263). `
     + '`review-set-label.mjs` fingerprints the reviewed diff from the PROCESS\'s own cwd — its header states that '

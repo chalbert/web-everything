@@ -115,7 +115,7 @@ export function resolveTransportRoot({
   if (!want) throw new Error(`${who}: no \`repo\` on the request — cannot decide which board it belongs on`);
   const candidate = String(repoRoot ?? '').trim() || root;
   const have = originRepo(candidate);
-  if (have === want) return candidate;
+  if (canonicalizeSlug(have) === canonicalizeSlug(want)) return candidate;
   throw new Error(
     `${who}: refusing to stage ${what} for ${want} on ${have || '(unknown)'}'s transport branch (#3261). `
     + `Each repo owns its own notes: the request must be pushed to that repo's own \`${branch}\`, where `
