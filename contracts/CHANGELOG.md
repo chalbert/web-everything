@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.1](https://github.com/web-everything/web-everything/compare/contracts-v0.1.0...contracts-v0.1.1) (2026-10-04)
+
+
+### Bug Fixes
+
+* org-move slugs in live code, per-installation App tokens, drain… ([bdff790](https://github.com/web-everything/web-everything/commit/bdff790aa11756226885f6039364e58ede0ee0ac))
+* route live code and config to the org-moved repo slugs; mint App tokens per installation by repo owner ([91e3014](https://github.com/web-everything/web-everything/commit/91e301499468471b442339ede5c4b9a8f34402f2))
+
 ## 0.1.0 (2026-07-02)
 
 
