@@ -36,6 +36,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { writeLineSync } from './lib/write-all-sync.mjs';
+import { canonicalizeSlug } from './lib/constellation-repos.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 /**
@@ -207,7 +208,7 @@ export function defaultOriginRepo(cwd) {
       encoding: 'utf8', cwd, stdio: ['ignore', 'pipe', 'ignore'],
     })).trim();
     const m = url.match(/[:/]([^/:]+\/[^/]+?)(?:\.git)?$/);
-    return m ? m[1] : '';
+    return m ? canonicalizeSlug(m[1]) : '';
   } catch { return ''; }
 }
 
