@@ -119,11 +119,41 @@ describe('current-head mandatory referral acceptance', () => {
     expect(result.output).toContain(`no readable referral record for current head ${head}`);
     expect(result.writes).toEqual([]);
   });
-  it('a later clean review or a readable ruled record resolves the persistence hold', () => {
+  it('a later clean review or a record written by the failed review resolves the persistence hold', () => {
     review({ failure: true });
-    expect(() => assertMandatoryReferralsCleared(stateFor([comment(ruled(referral(head)))]), { repo, pr })).not.toThrow();
+    const written = { ...comment(ruled(referral(head))), createdAt: new Date(1791037741000).toISOString() };
+    expect(() => assertMandatoryReferralsCleared(stateFor([written]), { repo, pr })).not.toThrow();
     review({ time: 10000 });
     expect(() => assertMandatoryReferralsCleared(stateFor([]), { repo, pr })).not.toThrow();
+  });
+  it('an earlier ruled record does not clear a later persistence failure on the same head', () => {
+    const earlier = { ...comment(ruled(referral(head))), createdAt: new Date(1791037740000).toISOString() };
+    review({ failure: true, time: 10000 });
+    expect(() => assertMandatoryReferralsCleared(stateFor([earlier]), { repo, pr })).toThrow(/referral-persistence-failed/);
+    const undated = comment(ruled(referral(head)));
+    expect(() => assertMandatoryReferralsCleared(stateFor([undated]), { repo, pr })).toThrow(/referral-persistence-failed/);
+    const state = stateFor([earlier]);
+    const result = clear(state);
+    expect(result.code).not.toBe(0);
+    expect(result.output).toContain('referral-persistence-failed');
+    expect(result.writes).toEqual([]);
+  });
+  it.each(['pending', 'block'])('an old-head %s hold with no current-head record and no run evidence fails closed', kind => {
+    const old = kind === 'block' ? ruled(referral('b'.repeat(40)), 'block') : referral('b'.repeat(40));
+    const state = stateFor([comment(old)]);
+    expect(() => assertMandatoryReferralsCleared(state, { repo, pr, readRuns: () => [] }))
+      .toThrow(/mandatory referral hold: no-current-head-review-evidence/);
+    expect(() => assertMandatoryReferralsCleared(state, { readRuns: () => [] })).toThrow(/no-current-head-review-evidence/);
+    const result = clear(stateFor([comment(old)]));
+    expect(result.code).not.toBe(0);
+    expect(result.output).toContain('no-current-head-review-evidence');
+    expect(result.writes).toEqual([]);
+  });
+  it('an old-head hold passes once a completed clean review of the current head exists', () => {
+    const state = stateFor([comment(ruled(referral('b'.repeat(40)), 'block'))]);
+    expect(() => assertMandatoryReferralsCleared(state, { repo, pr, readRuns: () => [] })).toThrow();
+    review();
+    expect(() => assertMandatoryReferralsCleared(state, { repo, pr })).not.toThrow();
   });
   it('persistence failures from other heads and repositories do not hold this head', () => {
     review({ failure: true, reviewedHead: 'b'.repeat(40) });
