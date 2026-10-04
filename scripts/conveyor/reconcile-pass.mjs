@@ -551,7 +551,7 @@ export function enrichPrsWithMainRedFacts(prs, {
   return { prs: enriched, mainRedWindows, mainLatestCheckRuns };
 }
 
-// live incident, chalbert/web-everything PR #2752 (#4034/#2748) — see `we:scripts/lib/already-landed-content.mjs`'s
+// live incident, web-everything/web-everything PR #2752 (#4034/#2748) — see `we:scripts/lib/already-landed-content.mjs`'s
 // own header for the incident and why per-file BLOB IDENTITY against `main`'s own history is the signal, not a
 // plain merge-tree/current-content diff.
 import { CONFLICT_LABEL } from './conflict-label.mjs';
@@ -793,7 +793,7 @@ export function defaultReadPullsForCommit(sha, { exec = execFileSyncThrottled, r
 }
 
 /**
- * we:scripts/conveyor/reconcile-pass.mjs#enrichPrsWithAlreadyLandedFacts — live incident, chalbert/web-everything
+ * we:scripts/conveyor/reconcile-pass.mjs#enrichPrsWithAlreadyLandedFacts — live incident, web-everything/web-everything
  * PR #2752 (#4034/#2748): attach `alreadyLandedInMain: {carrierPr}` to any open PR whose own content is already,
  * file-by-file, present on `main` — see `we:scripts/lib/already-landed-content.mjs`'s own header for the full
  * incident and why this needs blob identity rather than a plain diff.

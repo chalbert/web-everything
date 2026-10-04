@@ -428,7 +428,7 @@ describe('which board a verdict belongs on, read off a REAL remote (#3261)', () 
    * that decides whether a verdict is refused, so a wrong answer here is a verdict pushed to the wrong
    * repo's board where the right applier will never see it (plateau-app#144's failure).
    *
-   * The fixture origin is a DIRECTORY named `<tmp>/chalbert/web-everything.git` precisely so this can be
+   * The fixture origin is a DIRECTORY named `<tmp>/web-everything/web-everything.git` precisely so this can be
    * exercised without a URL that resolves off the machine — see `helpers/real-repo.mjs`, detail (2).
    */
   it('reads owner/name off a real origin remote', async () => {
@@ -458,7 +458,7 @@ describe('which board a verdict belongs on, read off a REAL remote (#3261)', () 
       ctx.seedOriginBranch(TRANSPORT_BRANCH);
       const tipBefore = ctx.git(['rev-parse', TRANSPORT_BRANCH], { cwd: ctx.origin }).trim();
 
-      await expect(stage(ctx, { repo: 'chalbert/plateau-app' })).rejects.toThrow(/refusing to stage a verdict for chalbert\/plateau-app on chalbert\/web-everything's transport branch/);
+      await expect(stage(ctx, { repo: 'plateauapp/plateau-app' })).rejects.toThrow(/refusing to stage a verdict for plateauapp\/plateau-app on web-everything\/web-everything's transport branch/);
 
       expect(ctx.git(['rev-parse', TRANSPORT_BRANCH], { cwd: ctx.origin }).trim()).toBe(tipBefore);
     });

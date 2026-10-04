@@ -209,7 +209,7 @@ describe('planFixesFromReconcile', () => {
 
   // #xcla4iv — the standard file-item-in-PR workflow: the card and the code that delivers it land in the SAME
   // PR, so `findItemFn` (which reads only `main`) misses it, but the PR's own diff carries the card. Live case:
-  // `chalbert/web-everything` PR #2553 (branch `lane/xzi292i-stuck-pr-watch`) — the daemon refused it `no-scope`
+  // `web-everything/web-everything` PR #2553 (branch `lane/xzi292i-stuck-pr-watch`) — the daemon refused it `no-scope`
   // on every tick despite the card's own real `scope:` frontmatter sitting right there in the diff.
   describe('#xcla4iv — an item whose card is filed IN this PR, not yet on `main`', () => {
     it('is dispatched with the card\'s own scope (read at the PR head), never refused `no-scope`', () => {
@@ -219,7 +219,7 @@ describe('planFixesFromReconcile', () => {
       const fetchItemlessDiffPaths = (pr) => {
         diffCalls.push(pr);
         // the real PR #2553's full diff carries both files; this fixture lists both so the containment guard
-        // (review findings, chalbert/web-everything#2573) doesn't spuriously drop a real, legitimately-in-diff
+        // (review findings, web-everything/web-everything#2573) doesn't spuriously drop a real, legitimately-in-diff
         // card-scope entry.
         return ['backlog/xzi292i-stuck-pr-watch-launch-a-diagnosis-only-inspection-agent-when.md', 'scripts/conveyor/stuck-pr-watch-core.mjs', 'scripts/conveyor/stuck-pr-watch.mjs'];
       };
@@ -259,7 +259,7 @@ describe('planFixesFromReconcile', () => {
       }]);
     });
 
-    // Review findings (correctness + security, chalbert/web-everything#2573, at this file's own
+    // Review findings (correctness + security, web-everything/web-everything#2573, at this file's own
     // `planFixesFromReconcile`:226/229) — the malicious-shaped repro from the security finding: a PR author
     // opens `lane/xevil01-innocuous-thing` and files a card in that SAME PR's diff whose OWN `scope:`
     // frontmatter declares a path-traversal entry. Before the fix, `item.scopeSource === 'card'` skipped
@@ -294,7 +294,7 @@ describe('planFixesFromReconcile', () => {
     });
 
     it('#x9fbg1x-live-incident — a GENUINE ghost item number, no matching card anywhere in the diff, now fences off the PR\'s OWN real diff (never stamping the unresolvable id) instead of refusing outright', () => {
-      // Converged with the item-less/#xcla4iv precedent (chalbert/web-everything#2779): an item number that
+      // Converged with the item-less/#xcla4iv precedent (web-everything/web-everything#2779): an item number that
       // resolves nowhere AND has no card in the diff is exactly as fence-able as a PR with no item name at all —
       // this used to discard `resolvePrWorkUnit`'s own `attribution:'pr'` scope and refuse `no-scope` outright.
       const entries = [{ kind: 'fix', prNumber: 99, headRefName: 'lane/9999-ghost' }];
@@ -412,8 +412,8 @@ describe('fetchCardScopeAtRef — #xcla4iv\'s real card-scope reader', () => {
   it('embeds an explicit `owner/name` repo slug directly (no `--repo` flag exists for `gh api`)', () => {
     const calls = [];
     const exec = (file, argv) => { calls.push(argv); return toBase64('---\nscope: ["plateau:x.tsx"]\n---\n'); };
-    fetchCardScopeAtRef('backlog/xabc-x.md', 'sha1', { exec, root: '/repo', repo: 'chalbert/plateau-app' });
-    expect(calls).toEqual([['api', '--method', 'GET', 'repos/chalbert/plateau-app/contents/backlog/xabc-x.md?ref=sha1', '--jq', '.content']]);
+    fetchCardScopeAtRef('backlog/xabc-x.md', 'sha1', { exec, root: '/repo', repo: 'plateauapp/plateau-app' });
+    expect(calls).toEqual([['api', '--method', 'GET', 'repos/plateauapp/plateau-app/contents/backlog/xabc-x.md?ref=sha1', '--jq', '.content']]);
   });
 
   it('returns `[]` when the card declares no `scope:` at all (falls back to the diff, one level up)', () => {
@@ -989,7 +989,7 @@ describe('runReconcileFixDispatch — read reconcile-pass, plan, assign a lane, 
     let reconcileCalls = 0;
     expect(() => runReconcileFixDispatch({
       root: '/repo',
-      repo: 'chalbert/plateau-app',
+      repo: 'plateauapp/plateau-app',
       reconcile: () => { reconcileCalls += 1; return { dispatch: [], refusals: [], notes: [] }; },
       checkStaleness: () => ({ action: 'warn', behind: 5 }),
     })).toThrow(/behind origin\/main/);
@@ -1005,7 +1005,7 @@ describe('runReconcileFixDispatch — read reconcile-pass, plan, assign a lane, 
     try {
       const result = runReconcileFixDispatch({
         root: '/repo',
-        repo: 'chalbert/frontierui',
+        repo: 'frontier-ui/frontierui',
         unsupportedPath,
         reconcile: () => ({ dispatch: [], refusals: [] }),
         checkStaleness: FRESH,
@@ -1024,7 +1024,7 @@ describe('runReconcileFixDispatch — read reconcile-pass, plan, assign a lane, 
   it('reconcileRefusalDetails carries the real reconcile-layer refusal objects, additively alongside the existing count', () => {
     const result = runReconcileFixDispatch({
       root: '/repo',
-      repo: 'chalbert/web-everything',
+      repo: 'web-everything/web-everything',
       reconcile: () => ({
         dispatch: [],
         refusals: [{ prNumber: 2635, kind: 'owed-ci-rerun', why: "main's own CI was red" }],
@@ -1225,7 +1225,7 @@ describe('runReconcileFixDispatch — repo capability gate (#x33jgwt multi-repo 
     try {
       recordUnsupported({ repo: 'plateau-app', rows: [{ action: 'review', prNumber: 9 }], path: unsupportedPath });
       const options = {
-        root: '/repo', repo: 'chalbert/plateau-app', unsupportedPath,
+        root: '/repo', repo: 'plateauapp/plateau-app', unsupportedPath,
         reconcile: () => ({ dispatch: [{ kind: 'fix', prNumber: 49, headRefName: 'lane/3438-wire-reconcile-pass', labels: ['review:changes'] }, { kind: 'ci-heal', prNumber: 50 }], refusals: [] }),
         findItemFn: findItemStub, loadItems: () => [], pickFreeLanes: () => { calls.push('pool'); return [2]; },
         tryResume: () => calls.push('resume'), dispatch: () => calls.push('dispatch'),
@@ -1255,7 +1255,7 @@ describe('runReconcileFixDispatch — repo capability gate (#x33jgwt multi-repo 
     try {
       // Real `resolveProfile` (the default) — plateau-app's own profile now has `capabilities.fix: true`.
       const result = runReconcileFixDispatch({
-        root: '/repo', repo: 'chalbert/plateau-app', unsupportedPath,
+        root: '/repo', repo: 'plateauapp/plateau-app', unsupportedPath,
         reconcile: () => ({ dispatch: [{ kind: 'fix', prNumber: 177, headRefName: 'lane/3438-wire-reconcile-pass' }, { kind: 'ci-heal', prNumber: 50 }], refusals: [] }),
         findItemFn: findItemStub, loadItems: () => [],
         pickFreeLanes: () => [4],
@@ -1315,7 +1315,7 @@ describe('runReconcileFixDispatch — item-less PRs (#xmtbdgs multi-repo slice 6
   it('an item-less plateau-app PR (branch like `lane/wip-fix`) is dispatched with a `plateau:`-prefixed scope', () => {
     const dispatchCalls = [];
     const result = runReconcileFixDispatch({
-      root: '/repo', repo: 'chalbert/plateau-app',
+      root: '/repo', repo: 'plateauapp/plateau-app',
       reconcile: () => ({ dispatch: [{ kind: 'fix', prNumber: 171, headRefName: 'lane/wip-fix' }], refusals: [] }),
       findItemFn: findItemStub, loadItems: () => [],
       pickFreeLanes: () => [6],

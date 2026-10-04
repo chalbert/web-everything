@@ -201,7 +201,7 @@ describe('sweepReviewHoldLabels', () => {
   it('FLAGS (never heals) when the readPrState fetch itself fails — fail closed toward NOT deleting', () => {
     const p = provider(); // no readPrState stub → throws
     const results = sweepReviewHoldLabels({
-      repo: 'chalbert/web-everything', provider: p,
+      repo: 'web-everything/web-everything', provider: p,
       listPrs: () => [pr(2767, LIVE_LABELS)],
     });
     expect(results).toEqual([{
@@ -215,7 +215,7 @@ describe('sweepReviewHoldLabels', () => {
   it('FLAGS (never heals) when the PR\'s own comments prove a GENUINE current human clearance', () => {
     const p = provider({ readPrState: () => ({ headRefOid: 'aaa1111', comments: [{ body: '<!-- reviewed-sha: aaa1111 -->\n<!-- cleared-human: Ada -->', author: bot }] }) });
     const results = sweepReviewHoldLabels({
-      repo: 'chalbert/web-everything', provider: p,
+      repo: 'web-everything/web-everything', provider: p,
       listPrs: () => [pr(2767, LIVE_LABELS)],
     });
     expect(results).toEqual([{ num: 2767, flagged: ['review:accepted', 'review:human'], flagReason: 'genuine-clearance' }]);
@@ -226,11 +226,11 @@ describe('sweepReviewHoldLabels', () => {
   it('HEALS #2767\'s real (pre-fix) label + comment state — removes review:accepted, posts a comment, never touches review:human', () => {
     const p = provider({ readPrState: () => ({ headRefOid: LIVE_2767_HEAD, comments: LIVE_2767_COMMENTS }) });
     const results = sweepReviewHoldLabels({
-      repo: 'chalbert/web-everything', provider: p,
+      repo: 'web-everything/web-everything', provider: p,
       listPrs: () => [pr(2767, LIVE_LABELS)],
     });
     expect(results).toEqual([{ num: 2767, healed: ['review:accepted'], commentPosted: true }]);
-    expect(p.calls.set).toEqual([{ repo: 'chalbert/web-everything', number: 2767, spec: { remove: ['review:accepted'] } }]);
+    expect(p.calls.set).toEqual([{ repo: 'web-everything/web-everything', number: 2767, spec: { remove: ['review:accepted'] } }]);
     expect(p.calls.postComment).toHaveLength(1);
     expect(p.calls.postComment[0].body).toContain('review:accepted` removed');
     expect(p.calls.postComment[0].body).toContain('review:human` remains');
@@ -241,7 +241,7 @@ describe('sweepReviewHoldLabels', () => {
   it('HEALS #2766 too — the identical real shape, a different PR', () => {
     const p = provider({ readPrState: () => ({ headRefOid: 'abbe08beacae462f98d6caf654d3ce7867c92801', comments: LIVE_2767_COMMENTS }) });
     const results = sweepReviewHoldLabels({
-      repo: 'chalbert/web-everything', provider: p,
+      repo: 'web-everything/web-everything', provider: p,
       listPrs: () => [pr(2766, LIVE_LABELS)],
     });
     expect(results).toEqual([{ num: 2766, healed: ['review:accepted'], commentPosted: true }]);
@@ -250,7 +250,7 @@ describe('sweepReviewHoldLabels', () => {
   it('dry-run computes the heal but never posts the comment or calls setLabels', () => {
     const p = provider({ readPrState: () => ({ headRefOid: LIVE_2767_HEAD, comments: LIVE_2767_COMMENTS }) });
     const results = sweepReviewHoldLabels({
-      repo: 'chalbert/web-everything', provider: p, dryRun: true,
+      repo: 'web-everything/web-everything', provider: p, dryRun: true,
       listPrs: () => [pr(2767, LIVE_LABELS)],
     });
     expect(results).toEqual([{ num: 2767, healed: ['review:accepted'] }]); // no commentPosted — nothing was posted
@@ -262,12 +262,12 @@ describe('sweepReviewHoldLabels', () => {
     const p = provider({ readPrState: () => ({ headRefOid: LIVE_2767_HEAD, comments: LIVE_2767_COMMENTS }) });
     p.postComment = () => { throw new Error('gh comment boom'); };
     const results = sweepReviewHoldLabels({
-      repo: 'chalbert/web-everything', provider: p,
+      repo: 'web-everything/web-everything', provider: p,
       listPrs: () => [pr(2767, LIVE_LABELS)],
     });
     expect(results).toEqual([{ num: 2767, healed: ['review:accepted'], error: 'gh comment boom' }]);
     // The removal still happened despite the comment failing — losing the explanation is bad, losing the fix is worse.
-    expect(p.calls.set).toEqual([{ repo: 'chalbert/web-everything', number: 2767, spec: { remove: ['review:accepted'] } }]);
+    expect(p.calls.set).toEqual([{ repo: 'web-everything/web-everything', number: 2767, spec: { remove: ['review:accepted'] } }]);
   });
 
   it('dry-run reports the plan and never calls setLabels', () => {

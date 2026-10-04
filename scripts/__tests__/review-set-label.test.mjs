@@ -273,7 +273,7 @@ describe('decideSetLabel — rearm (#2644, folded in from the conveyor decideRea
     expect(d.removeLabels).toContain(REVIEW_LABELS.redteamAccepted);
   });
 
-  // #2811 (chalbert/web-everything PR #2811 live incident) — a `review:accepted` PR whose head then moved
+  // #2811 (web-everything/web-everything PR #2811 live incident) — a `review:accepted` PR whose head then moved
   // (a ci-heal push, a non-content-preserving rebase) is re-armable too: the acceptance is a claim about a
   // SPECIFIC head, and it stops being true once that head is gone. Before this widening, `decideSetLabel`
   // refused a rearm on an accepted-only PR, and nothing else in this file ever reverted a stale acceptance.
@@ -2528,7 +2528,7 @@ describe('buildVerdictComment — a re-stamp says what it is', () => {
  * #x9krtkb — THE LOOP: a human clears `review:human`, the drain rebases (content-preserving), the restamp
  * carries `reviewed-sha`/`reviewed-diff`/`reviewed-contribution` forward but not `cleared-human`, and the next
  * drain pass's anti-test-gaming gate sees no human coverage for the new head and re-parks `review:human` — on a
- * PR a human had JUST cleared. Measured live on PR #2572 (chalbert/web-everything), 2026-09-24.
+ * PR a human had JUST cleared. Measured live on PR #2572 (web-everything/web-everything), 2026-09-24.
  *
  * `buildVerdictComment`'s half of the fix: given the caller's own proof (`humanClearance`, computed by
  * `decideRestampHumanClearance` below), does the RENDERED restamp comment actually carry the marker forward,
@@ -3384,7 +3384,7 @@ describe('#3334 route 2/3 — review-pr\'s record step, whose argv carries the r
  */
 describe('#3334 route 3/3 — the credential-less transport refuses before a request file exists', () => {
   const facts = (over = {}) => ({
-    pr: 1593, repo: 'chalbert/web-everything', sessionId: 'sess-1', reduced: 'accept', findingCount: 0, ...over,
+    pr: 1593, repo: 'web-everything/web-everything', sessionId: 'sess-1', reduced: 'accept', findingCount: 0, ...over,
   });
 
   it('REFUSES staging a reasonless `changes` request', () => {
@@ -3541,7 +3541,7 @@ fs.writeFileSync('state.json', JSON.stringify(s));
     if (mode === 'older-digest') comments.push({ author: comment.author, body: buildReviewedShaMarker(reviewedHead) });
     const original = { state, headRefOid: healedHead, headRefName: 'lane', labels: labels.map(name => ({ name })), comments, race };
     writeFileSync(join(dir, 'state.json'), JSON.stringify(original));
-    const r = spawnSync(process.execPath, [script, '42', '--repo=chalbert/web-everything', '--to=restamp', '--actor=CI healer', '--channel=ci-heal',
+    const r = spawnSync(process.execPath, [script, '42', '--repo=web-everything/web-everything', '--to=restamp', '--actor=CI healer', '--channel=ci-heal',
       ...(expected === null ? [] : [`--expect-head=${expected}`]), ...extra], {
       cwd: dir, encoding: 'utf8', env: { ...process.env, PATH: `${join(dir, 'bin')}:${process.env.PATH}`,
         WE_VERDICT_LEDGER_DIR: join(dir, 'ledger'), WE_GH_THROTTLE_LOCK_ROOT: join(dir, 'lock') },

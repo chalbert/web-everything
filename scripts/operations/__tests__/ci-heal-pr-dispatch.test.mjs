@@ -34,7 +34,7 @@ it.each([0, 3])('xng7q1p: eligible PR with %i heals retries without a lane or he
   const comments = Array.from({ length: count }, () => ({
     body: buildCiHealComment({ headSha: head }), author: { login: 'web-everything' },
   }));
-  const evidence = { eligible: true, repo: 'chalbert/web-everything', pr: 3415, head,
+  const evidence = { eligible: true, repo: 'web-everything/web-everything', pr: 3415, head,
     signature: 'timeout-fixture', jobs: [{ run: 10, job: 20, attempt: 1 }] };
   const plan = planReconcile({ prs: [{ number: 3415, state: 'OPEN', headRefOid: head,
     headRefName: 'lane/example', labels: [{ name: 'ci:failed' }], comments,
@@ -228,7 +228,7 @@ describe('runReconcileCiHealDispatch — repo capability gate (#3967 multi-repo 
     const calls = [];
     try {
       const options = {
-        root: '/repo', repo: 'chalbert/plateau-app', unsupportedPath,
+        root: '/repo', repo: 'plateauapp/plateau-app', unsupportedPath,
         reconcile: () => ({ dispatch: [{ kind: 'ci-heal', prNumber: 50, headRefName: 'lane/x' }, { kind: 'fix', prNumber: 51 }], refusals: [] }),
         pickFreeLanes: () => { calls.push('pool'); return [2]; },
         dispatch: () => { calls.push('dispatch'); },
@@ -254,7 +254,7 @@ describe('runReconcileCiHealDispatch — repo capability gate (#3967 multi-repo 
     try {
       recordUnsupported({ repo: 'plateau-app', rows: [{ action: 'fix', prNumber: 9 }], path: unsupportedPath });
       await runReconcileCiHealDispatch({
-        root: '/repo', repo: 'chalbert/plateau-app', unsupportedPath,
+        root: '/repo', repo: 'plateauapp/plateau-app', unsupportedPath,
         reconcile: () => ({ dispatch: [{ kind: 'ci-heal', prNumber: 50, headRefName: 'lane/x' }], refusals: [] }),
         resolveProfile: () => ({ capabilities: { fix: true, ciHeal: false }, lanePoolRepo: '/nonexistent' }),
         checkStaleness: FRESH,
@@ -266,7 +266,7 @@ describe('runReconcileCiHealDispatch — repo capability gate (#3967 multi-repo 
       ]));
       // Now flip the SAME repo's capability on — its `ci-heal` row clears, the `fix` row survives untouched.
       await runReconcileCiHealDispatch({
-        root: '/repo', repo: 'chalbert/plateau-app', unsupportedPath,
+        root: '/repo', repo: 'plateauapp/plateau-app', unsupportedPath,
         reconcile: () => ({ dispatch: [], refusals: [] }),
         resolveProfile: () => ({ capabilities: { fix: true, ciHeal: true }, lanePoolRepo: '/nonexistent' }),
         pickFreeLanes: () => [],
@@ -281,7 +281,7 @@ describe('runReconcileCiHealDispatch — repo capability gate (#3967 multi-repo 
   // is `repo-profile.mjs`'s own `repoProfile`, which this slice flipped `ciHeal` to `true` for both), with an
   // injected no-op `dispatch` and a synthetic red-CI reconcile reading. Before this slice, EITHER repo hit the
   // wholesale `unsupported-repo` refusal every time; after it, the SAME entry is planned and dispatched.
-  for (const [slug, key, tag] of [['chalbert/plateau-app', 'plateau-app', 'pa'], ['chalbert/frontierui', 'frontierui', 'fui']]) {
+  for (const [slug, key, tag] of [['plateauapp/plateau-app', 'plateau-app', 'pa'], ['frontier-ui/frontierui', 'frontierui', 'fui']]) {
     it(`#3967 — REAL profile, ${key}: a red-CI PR is dispatched \`ci-heal\` into ${key}'s OWN lane pool, never refused unsupported-repo`, async () => {
       const dispatchCalls = [];
       const result = await runReconcileCiHealDispatch({
@@ -313,7 +313,7 @@ describe('runReconcileCiHealDispatch — repo capability gate (#3967 multi-repo 
 
   it('a `held` dispatch answer is reported as a `held` refusal, not thrown or silently dropped', async () => {
     const result = await runReconcileCiHealDispatch({
-      root: '/repo', repo: 'chalbert/plateau-app',
+      root: '/repo', repo: 'plateauapp/plateau-app',
       reconcile: () => ({ dispatch: [{ kind: 'ci-heal', prNumber: 50, headRefName: 'lane/x' }], refusals: [] }),
       resolveWorkUnit: () => ({ itemNum: null, scope: [] }),
       pickFreeLanes: () => [3],
@@ -326,7 +326,7 @@ describe('runReconcileCiHealDispatch — repo capability gate (#3967 multi-repo 
 
   it('a thrown dispatch is caught per-entry as `dispatch-failed`, never aborting the whole pass', async () => {
     const result = await runReconcileCiHealDispatch({
-      root: '/repo', repo: 'chalbert/plateau-app',
+      root: '/repo', repo: 'plateauapp/plateau-app',
       reconcile: () => ({
         dispatch: [
           { kind: 'ci-heal', prNumber: 50, headRefName: 'lane/x' },
@@ -349,7 +349,7 @@ describe('runReconcileCiHealDispatch — repo capability gate (#3967 multi-repo 
   it('no free lane refuses `no-lane` for the entries beyond the pool, never a partial dispatch attempt', async () => {
     const dispatchCalls = [];
     const result = await runReconcileCiHealDispatch({
-      root: '/repo', repo: 'chalbert/plateau-app',
+      root: '/repo', repo: 'plateauapp/plateau-app',
       reconcile: () => ({
         dispatch: [{ kind: 'ci-heal', prNumber: 50, headRefName: 'lane/x' }],
         refusals: [],
@@ -370,7 +370,7 @@ describe('runReconcileCiHealDispatch — repo capability gate (#3967 multi-repo 
   // pre-existing `reconcileRefusals` count stays exactly as it was — asserted below too).
   it('reconcileRefusalDetails carries the real reconcile-layer refusal objects, additively alongside the existing count', async () => {
     const result = await runReconcileCiHealDispatch({
-      root: '/repo', repo: 'chalbert/plateau-app',
+      root: '/repo', repo: 'plateauapp/plateau-app',
       reconcile: () => ({
         dispatch: [],
         refusals: [{ prNumber: 2635, kind: 'owed-ci-rerun', why: "main's own CI was red" }],
@@ -404,11 +404,11 @@ describe('#4352 — runReconcileCiHealDispatch flushes owed CI-heal writes first
     return { calls, exec };
   };
   const owe = (dir, pr, extra = {}, now = Date.now()) => recordOwedWrite({
-    repo: 'we', slug: 'chalbert/web-everything', pr, kind: 'ci-heal', headSha: HEAD,
+    repo: 'we', slug: 'web-everything/web-everything', pr, kind: 'ci-heal', headSha: HEAD,
     body: buildCiHealComment({ reason: 'red-ci', headSha: HEAD }), ...extra,
   }, { dir, now });
   const run = (dir, exec, order = [], now = Date.now()) => runReconcileCiHealDispatch({
-    root: '/repo', repo: 'chalbert/web-everything', checkStaleness: FRESH,
+    root: '/repo', repo: 'web-everything/web-everything', checkStaleness: FRESH,
     flushOwed: (key) => { order.push('flush'); return flushOwedWrites({ repo: key, dir, exec, now }); },
     reconcile: () => { order.push('reconcile'); return { dispatch: [], refusals: [] }; },
     dispatch: async () => { order.push('dispatch'); return {}; },
@@ -483,7 +483,7 @@ describe('#4352 — runReconcileCiHealDispatch flushes owed CI-heal writes first
     const dir = mkdtempSync(join(tmpdir(), 'owed-flush-'));
     try {
       const { calls, exec } = fakeGh({});
-      recordOwedWrite({ repo: 'plateau-app', slug: 'chalbert/plateau-app', pr: 3, kind: 'ci-heal', headSha: HEAD, body: 'x' }, { dir });
+      recordOwedWrite({ repo: 'plateau-app', slug: 'plateauapp/plateau-app', pr: 3, kind: 'ci-heal', headSha: HEAD, body: 'x' }, { dir });
       const out = await run(dir, exec);
       expect(calls).toEqual([]);
       expect(out.owedFlush).toEqual({ posted: [], cleared: [], dropped: [], kept: [] });
@@ -536,9 +536,9 @@ describe('xp0lsdi quota routing boundary', () => {
 });
 
 describe('xng7q1p retry reservation and restart soak', () => {
-  const evidence = () => ({ eligible: true, repo: 'chalbert/web-everything', pr: 3415, head: 'a'.repeat(40), signature: 'unit-timeout',
+  const evidence = () => ({ eligible: true, repo: 'web-everything/web-everything', pr: 3415, head: 'a'.repeat(40), signature: 'unit-timeout',
     failures: [{ path: 'scripts/operations/__tests__/priority-sync.test.mjs', name: 'registration', kind: 'test-timeout' }],
-    jobs: [{ run: 10, job: 20, attempt: 1, url: 'https://github.com/chalbert/web-everything/actions/runs/10/job/20' }] });
+    jobs: [{ run: 10, job: 20, attempt: 1, url: 'https://github.com/web-everything/web-everything/actions/runs/10/job/20' }] });
   const observe = (e, j) => ({ repo: e.repo, head: e.head, runHead: e.head, open: true, run: j.run,
     job: j.job, jobRun: j.run, attempt: j.attempt, jobAttempt: j.attempt, status: 'completed', conclusion: 'failure' });
   async function harness(fn) {
@@ -783,7 +783,7 @@ describe('xng7q1p retry reservation and restart soak', () => {
     const e = evidence();
     const effects = timeoutGithubEffects({ exec: (_cmd, args) => { calls.push(args); return 'HTTP/2.0 201 Created\n\n'; } });
     expect(effects.request(e, e.jobs[0])).toEqual({ status: 'confirmed' });
-    expect(calls[0]).toContain('repos/chalbert/web-everything/actions/jobs/20/rerun');
+    expect(calls[0]).toContain('repos/web-everything/web-everything/actions/jobs/20/rerun');
     expect(timeoutGithubEffects({ exec: () => '' }).request(e, e.jobs[0])).toEqual({ status: 'ambiguous' });
   });
 });
