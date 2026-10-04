@@ -38,7 +38,7 @@ export default {
     const real = JSON.parse(readFileSync(join(root, 'scripts/conveyor/__tests__/fixtures/pr-3771-conflicting-no-ci.json'), 'utf8'));
     const violations = [];
     const pass = (pr, readChecks) => runReconcilePass({
-      repo: 'web-everything/web-everything', readPrs: () => [pr], readAgents: () => [], enrich: (a) => a,
+      repo: 'we', readPrs: () => [pr], readAgents: () => [], enrich: (a) => a,
       readRequiredChecks: () => ({ checks: REQUIRED }), readChecks,
       enrichMainRed: (prs) => ({ prs, mainRedWindows: [] }), enrichAlreadyLanded: (p) => p, enrichBaseRef: (p) => p,
       enrichSystemFix: (p) => p, enrichFixClaims: (p) => p, enrichTimeouts: (p) => p, enrichReferralHolds: (p) => p,
